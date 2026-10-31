@@ -77,6 +77,7 @@ Second spec in the same file.
 | `model` | no | Model name passed to the agent (`--model` / `-m`). Omitted or `default`: the agent's own default, no flag. |
 | `effort` | no | `low`, `medium`, `high`, `xhigh` or `max` (default `high`; Codex has no `max`). See [Effort](#effort). |
 | `repos[]` | yes | At least one `{path, worktree, base, branch}`. `path` is the existing checkout. `worktree` is where the new worktree goes (default: `<worktree_root>/<repo-name>-<task>`). `base` is the start point. `branch`, if given, is created (or reused if it exists); without it the worktree is detached. The agent starts in the **first** worktree. |
+| `setup` | no | List of shell commands run in the first worktree after `git worktree add` and **before** the links (an install wipes `node_modules`), see [Setup](#setup). |
 | `links[]` | no | `{from, to}` symlinks created in the first worktree, see [Links](#links). |
 | `env` | no | Environment variables set in the tmux window (so the agent and everything it runs inherit them). |
 | `review_of` | no | Task ID of the work being reviewed. The reviewer must use a different agent **or** a different model than the author, otherwise `new` refuses. |
@@ -96,12 +97,33 @@ error: Spec #1 (nc-3) is invalid:
 hint: Run "agentctl spec example" to see the format.
 ```
 
+### Setup
+
+`setup` is a list of shell commands (spec > project `.agentctl.yaml` > global config; the first layer that sets it wins, `setup: []` switches it off).
+`new` runs them in the first worktree, one `sh -c` each, in this order: `git worktree add` → **setup** → links → TASK.md → window → agent.
+
+- Output goes to `<cache>/<task>/setup.log`.
+- A failing command stops `new` with its exit code and the last 15 lines of output. The worktree stays, no window is created; fix the cause and run `agentctl new --reuse` (setup runs again).
+- `--dry-run` prints the commands as `(cd <worktree> && sh -c '…')`.
+- `new --no-agent` stops after setup and links: no TASK.md, window or agent. Handy to check a project's setup.
+
+Recommended for Neon City (checked live on 2026-10-31: `npm ci` works in a fresh worktree; `package.json` declares `@neon-city/*` as `file:../neon-city-backend/packages/*`, which does not resolve from `~/Projects/wt`, so the links point them at the backend worktree under test). Add to `~/Projects/neon-city/.agentctl.yaml`:
+
+```yaml
+setup:
+  - npm ci --prefer-offline --no-audit --no-fund
+```
+
+The existing `links:` of that file (`node_modules/@neon-city/protocol` and `…/sim` -> `~/Projects/wt/neon-city-backend-merge3/packages/*`) then do the rest; they are literal paths, so they no longer depend on `node_modules` existing.
+
 ### Links
 
 Links are the glue that lets a worktree use *another* worktree's code (for example a client against a backend under test).
 
 - `from` is relative to the first worktree, `to` is what it should point at.
-- `to` without `*`: every match of the glob `from` becomes a symlink to `to`. A `from` without glob characters is a single link.
+- `to` must exist (checked before anything is created), otherwise `new` stops with the list of missing targets.
+- `to` without `*`: every match of the glob `from` becomes a symlink to `to`. A `from` without glob characters is a **literal path**: it is linked even if nothing exists there yet, and its parent directories are created (`mkdir -p`), so `from: node_modules/@neon-city/protocol` works in a worktree without `node_modules`.
+- A glob that matches nothing only warns, and the warning points to literal paths.
 - `to` ending in `/*` (and `from` ending in `/*`): one link per entry of that directory, named after the entry.
   `from: node_modules/@scope/*`, `to: ~/backend/packages/*` links `node_modules/@scope/foo` to `~/backend/packages/foo`, and so on.
 - Existing **symlinks** are replaced. Anything that is not a symlink is never touched: `new` stops and tells you which path is in the way.
@@ -149,6 +171,7 @@ env:
   NEON_CITY_TASK: "{TASK}"
 report: "{cache}/{task}/{TASK}.md"
 links: []
+setup: []                              # shell commands run in the first worktree before the links, see "Setup"
 defaults: {agent: claude}
 ```
 
@@ -174,7 +197,7 @@ mechanism it detects.
 
 | Command | What it does |
 |---|---|
-| `agentctl new [file\|-] [--dry-run] [--reuse] [--agent claude\|codex] [--no-switch] [--no-wait-trust]` | For each spec: `git worktree add` (error if the worktree exists, unless `--reuse`), symlinks, `<cache>/<task>/TASK.md`, a tmux window named after the task in session `agentctl` (created if missing), starts the agent in the first worktree with the env, waits for the agent's prompt (polling `tmux capture-pane`; a folder-trust dialog is waited out, see [Folder trust](#folder-trust)), pastes the prompt as one bracketed paste (`tmux load-buffer -` + `paste-buffer -p`), then sends Enter separately. Everything is validated before anything starts. `--agent` runs the specs on that provider (see [Model equivalents](#model-equivalents)). |
+| `agentctl new [file\|-] [--dry-run] [--reuse] [--agent claude\|codex] [--no-switch] [--no-wait-trust] [--no-agent]` | For each spec: `git worktree add` (error if the worktree exists, unless `--reuse`), the [setup](#setup) commands, symlinks, `<cache>/<task>/TASK.md`, a tmux window named after the task in session `agentctl` (created if missing), starts the agent in the first worktree with the env, waits for the agent's prompt (polling `tmux capture-pane`; a folder-trust dialog is waited out, see [Folder trust](#folder-trust)), pastes the prompt as one bracketed paste (`tmux load-buffer -` + `paste-buffer -p`), then sends Enter separately. Everything is validated before anything starts. `--agent` runs the specs on that provider (see [Model equivalents](#model-equivalents)). `--no-agent` stops after setup and links. |
 | `agentctl send [file\|-] [--dry-run]` | Paste a follow-up prompt into the existing window (`task` from the header; the rest of the header is ignored). Errors if the window does not exist. The prompt is appended to `TASK.md` with a timestamp. |
 | `agentctl status [--json]` | Table: task, agent/model/effort (as ordered too, if switched), [state](#task-states), window alive?, start, duration, report present?, last non-empty line of the window. Refreshes the [mirror](#mirror) if configured. |
 | `agentctl pull <task>` | Copies the report to the clipboard (`pbcopy` on macOS, `wl-copy` or `xclip` on Linux) and prints its path. No report yet: prints the last 40 lines of the window. Refreshes the [mirror](#mirror) if configured. |
