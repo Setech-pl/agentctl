@@ -11,7 +11,12 @@ import type { ResolvedSpec } from './spec.ts';
 import { recordFromSpec, renderTaskMd, taskDir, taskFile } from './taskstore.ts';
 import { AgentctlError } from './util.ts';
 
-export type NewOptions = PlanOptions;
+export interface NewOptions extends PlanOptions {
+  /** Wait for a human to answer the folder-trust dialog (default). `false` (--no-wait-trust): stop at the dialog. */
+  waitTrust?: boolean;
+  /** Ctrl-C: ends the wait for the agent without closing its window. */
+  signal?: AbortSignal;
+}
 
 export interface NewResult {
   task: string;
@@ -44,7 +49,7 @@ export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: Ne
 
   const results: NewResult[] = [];
   let sessionUp = await tmux.hasSession();
-  for (const spec of specs) {
+  for (const [index, spec] of specs.entries()) {
     const primary = spec.repos[0]!.worktree;
 
     // 1. worktrees
@@ -77,16 +82,42 @@ export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: Ne
     await tmux.typeCommand(spec.window, commandLine);
     ctx.info(`${spec.task}: window ${config.session}:${spec.window} running ${commandLine}`);
 
-    // 5. wait for the agent; never answer a trust dialog; then paste the prompt and press Enter
+    // 5. wait for the agent; never answer a trust dialog (wait for the human to do it); then paste the prompt and press Enter
+    const waitTrust = opts.waitTrust !== false;
+    const sendHint = `agentctl send ${taskFile(config, spec.window)}`;
     const ready = await waitForReady(runner, tmux, spec.window, {
       pattern: settings.readyPattern,
       trustPattern: settings.trustPattern,
       timeoutMs: settings.readyTimeout * 1000,
+      ...(opts.signal ? { signal: opts.signal } : {}),
+      ...(waitTrust
+        ? {
+            waitTrust: {
+              timeoutMs: settings.trustTimeout * 1000,
+              onWaiting: () => ctx.info(`${spec.task}: agent waits for folder trust – attach: tmux attach -t ${config.session}, confirm in window ${spec.window}`),
+            },
+          }
+        : {}),
     });
+    if (ready.aborted) {
+      const notStarted = specs.slice(index + 1).map((s) => s.task);
+      throw new AgentctlError(
+        `${spec.task}: interrupted while waiting for the agent; window ${config.session}:${spec.window} stays open, the prompt was not sent` +
+          (notStarted.length > 0 ? `, not started: ${notStarted.join(', ')}` : ''),
+        `Once the agent shows its input, deliver the prompt with: ${sendHint}`,
+      );
+    }
+    if (ready.trust && waitTrust) {
+      throw new AgentctlError(
+        `${spec.task}: agent still waits for folder trust after ${settings.trustTimeout}s – attach: tmux attach -t ${config.session}, confirm in window ${spec.window}`,
+        `agentctl never answers that dialog. The window stays open and the prompt was not sent; once the agent shows its input, deliver it with: ${sendHint}. ` +
+          `To wait longer, raise agents.${spec.agent}.trust_timeout in ${config.path}.`,
+      );
+    }
     if (ready.trust) {
       throw new AgentctlError(
         `${spec.task}: agent waits for folder trust – attach: tmux attach -t ${config.session}, confirm, then agentctl status`,
-        `agentctl never answers that dialog. The prompt was not sent; once the agent shows its input, deliver it with: agentctl send ${taskFile(config, spec.window)}`,
+        `agentctl never answers that dialog. The prompt was not sent; once the agent shows its input, deliver it with: ${sendHint}`,
       );
     }
     if (!ready.ready) {

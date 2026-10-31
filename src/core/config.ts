@@ -41,6 +41,8 @@ export interface AgentSettings {
   readyPattern: string;
   /** Seconds to wait for readyPattern. */
   readyTimeout: number;
+  /** Seconds `new` waits for a human to answer the folder-trust dialog. */
+  trustTimeout: number;
   /** Regex: the agent shows its "trust this folder?" dialog. agentctl never answers it. */
   trustPattern: string;
   /** Regex: the agent is busy with a turn. */
@@ -72,6 +74,7 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
     // Claude Code 2.1.309 idle screen: the input box line "❯ Try ...". The trust dialog also uses "❯", but with "1. Yes".
     readyPattern: '^\\s*❯\\s(?!\\d+\\.)',
     readyTimeout: 60,
+    trustTimeout: 600,
     trustPattern: 'Quick safety check|Yes, I trust this folder',
     workingPattern: 'esc to interrupt',
     interruptKey: 'Escape',
@@ -82,6 +85,7 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
     // Codex 0.166.0 idle screen: "› Ask Codex to do anything" and the footer "? for shortcuts".
     readyPattern: '^›\\s(?!\\d+\\.)|\\? for shortcuts',
     readyTimeout: 60,
+    trustTimeout: 600,
     trustPattern: 'Trust this folder\\?|Folder settings can run code automatically',
     workingPattern: 'esc to interrupt',
     interruptKey: 'Escape',
@@ -197,7 +201,7 @@ function parseAgentSettings(name: AgentName, v: unknown, where: string, p: Probl
     p.add(`${where} must be a mapping`);
     return settings;
   }
-  checkKeys(v, ['flags', 'effort_args', 'ready_pattern', 'ready_timeout', 'trust_pattern', 'working_pattern', 'interrupt_key'], where, p);
+  checkKeys(v, ['flags', 'effort_args', 'ready_pattern', 'ready_timeout', 'trust_timeout', 'trust_pattern', 'working_pattern', 'interrupt_key'], where, p);
   if (v.flags !== undefined) settings.flags = parseStringList(v.flags, `${where}.flags`, p);
   if (v.effort_args !== undefined) settings.effortArgs = parseStringList(v.effort_args, `${where}.effort_args`, p);
   for (const [key, list] of [['flags', settings.flags], ['effort_args', settings.effortArgs]] as const) {
@@ -219,6 +223,10 @@ function parseAgentSettings(name: AgentName, v: unknown, where: string, p: Probl
   if (v.ready_timeout !== undefined) {
     if (typeof v.ready_timeout === 'number' && v.ready_timeout > 0) settings.readyTimeout = v.ready_timeout;
     else p.add(`${where}.ready_timeout must be a positive number of seconds`);
+  }
+  if (v.trust_timeout !== undefined) {
+    if (typeof v.trust_timeout === 'number' && v.trust_timeout > 0) settings.trustTimeout = v.trust_timeout;
+    else p.add(`${where}.trust_timeout must be a positive number of seconds`);
   }
   return settings;
 }

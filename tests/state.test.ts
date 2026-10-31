@@ -147,7 +147,7 @@ describe('status states from mocked capture-pane', () => {
   });
 });
 
-describe('new: folder-trust dialog', () => {
+describe('new --no-wait-trust: folder-trust dialog', () => {
   it('stops with the attach instructions instead of timing out, and never answers the dialog', async () => {
     const root = scratch.sub('trust');
     const repo = scratch.sub('trust/app');
@@ -164,7 +164,7 @@ describe('new: folder-trust dialog', () => {
         },
       });
       const t0 = runner.now();
-      await assert.rejects(newTasks(ctx, [spec!]), (e: Error & { hint?: string }) => {
+      await assert.rejects(newTasks(ctx, [spec!], { waitTrust: false }), (e: Error & { hint?: string }) => {
         assert.equal(e.message, `${spec!.task}: agent waits for folder trust – attach: tmux attach -t agentctl, confirm, then agentctl status`);
         assert.match(e.hint ?? '', /never answers that dialog.*agentctl send .*TASK\.md/);
         return true;
