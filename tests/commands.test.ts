@@ -6,6 +6,7 @@ import { closeTask } from '../src/core/close.ts';
 import { newTasks } from '../src/core/new.ts';
 import { pullTask } from '../src/core/pull.ts';
 import { sendPrompts } from '../src/core/send.ts';
+import { interruptTask } from '../src/core/interrupt.ts';
 import { collectStatus, renderStatusTable } from '../src/core/status.ts';
 import { resolveSendSpec, resolveSpec, splitSpecs } from '../src/core/spec.ts';
 import type { ResolvedSpec } from '../src/core/spec.ts';
@@ -347,5 +348,44 @@ describe('pull', () => {
   it('rejects an unknown task', async () => {
     const { ctx } = makeContext(config);
     await assert.rejects(pullTask(ctx, 'NC-404', 'darwin'), /unknown task NC-404/);
+  });
+});
+
+describe('interrupt', () => {
+  const root = scratch.sub('interrupt');
+  const repo = scratch.sub('interrupt/app');
+  const config = makeConfig(root, 'agents:\n  codex:\n    interrupt_key: C-c\n');
+  const [claude, codex] = resolveAll(
+    config,
+    `---\ntask: NC-1\nagent: claude\nrepos:\n  - {path: ${repo}, worktree: ${repo}-1}\n---\nA\n---\ntask: NC-2\nagent: codex\nrepos:\n  - {path: ${repo}, worktree: ${repo}-2}\n---\nB\n`,
+  );
+  seedTask(config, claude!, 0);
+  seedTask(config, codex!, 0);
+  const alive = (cmd: string, args: string[]) => (cmd === 'tmux' && args[0] === 'list-windows' ? { stdout: 'nc-1\nnc-2\n' } : undefined);
+
+  it('sends one Escape to a Claude window by default and does not close anything', async () => {
+    const { ctx, runner } = makeContext(config, { respond: alive });
+    const result = await interruptTask(ctx, 'NC-1');
+    assert.deepEqual(runner.commands, ['tmux send-keys -t =agentctl:nc-1 Escape']);
+    assert.deepEqual(result, { task: 'NC-1', window: 'nc-1', key: 'Escape' });
+  });
+
+  it('uses the interrupt key configured for the agent', async () => {
+    const { ctx, runner } = makeContext(config, { respond: alive });
+    await interruptTask(ctx, 'nc-2');
+    assert.deepEqual(runner.commands, ['tmux send-keys -t =agentctl:nc-2 C-c']);
+  });
+
+  it('--dry-run only records the command', async () => {
+    const { ctx, runner } = makeContext(config, { dryRun: true });
+    await interruptTask(ctx, 'NC-1');
+    assert.deepEqual(runner.commands, ['tmux send-keys -t =agentctl:nc-1 Escape']);
+  });
+
+  it('fails clearly for a dead window and for an unknown task', async () => {
+    const { ctx, runner } = makeContext(config, { respond: (cmd, args) => (cmd === 'tmux' && args[0] === 'list-windows' ? { stdout: 'other\n' } : undefined) });
+    await assert.rejects(interruptTask(ctx, 'NC-1'), /no tmux window "nc-1"/);
+    await assert.rejects(interruptTask(ctx, 'NC-404'), /unknown task NC-404/);
+    assert.deepEqual(runner.commands, []);
   });
 });

@@ -60,6 +60,11 @@ export class Tmux {
     await this.pressEnter(window);
   }
 
+  /** Send one named key (e.g. Escape) to the window. */
+  sendKey(window: string, key: string): Promise<ExecResult> {
+    return this.runner.exec('tmux', ['send-keys', '-t', this.target(window), key]);
+  }
+
   pressEnter(window: string): Promise<ExecResult> {
     return this.runner.exec('tmux', ['send-keys', '-t', this.target(window), 'Enter']);
   }

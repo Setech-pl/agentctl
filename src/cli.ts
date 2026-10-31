@@ -8,6 +8,7 @@ import type { NewOptions } from './core/new.ts';
 import { pullTask } from './core/pull.ts';
 import { sendPrompts } from './core/send.ts';
 import { collectStatus, renderStatusTable } from './core/status.ts';
+import { interruptTask } from './core/interrupt.ts';
 import { loadGlobalConfig } from './core/config.ts';
 import type { GlobalConfig } from './core/config.ts';
 import { Context } from './core/context.ts';
@@ -164,6 +165,17 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .action(
       guarded(async (task: string, opts: { rmWorktree?: boolean; dryRun?: boolean }) => {
         await closeTask(contextFor(Boolean(opts.dryRun)), task, { rmWorktree: Boolean(opts.rmWorktree) });
+      }),
+    );
+
+  program
+    .command('interrupt')
+    .description("Interrupt the task's current turn (sends the agent's interrupt key, default Escape); the window stays open.")
+    .argument('<task>', 'task ID')
+    .option('--dry-run', 'print the command that would run, execute nothing')
+    .action(
+      guarded(async (task: string, opts: { dryRun?: boolean }) => {
+        await interruptTask(contextFor(Boolean(opts.dryRun)), task);
       }),
     );
 
