@@ -128,12 +128,46 @@ describe('spec example', () => {
     assert.ok(readme.includes(EXAMPLE_SPEC), 'README must contain the example spec verbatim (see src/example.ts)');
   });
 
+  it('the example on codex: new --dry-run --agent codex translates opus/high to gpt-6-astra/medium', () => {
+    const f = path.join(scratch.dir, 'example-codex.md');
+    fs.writeFileSync(f, EXAMPLE_SPEC);
+    const none = path.join(scratch.dir, 'none');
+    const r = agentctl(['new', '--dry-run', '--agent', 'codex', f], { AGENTCTL_HOME: none });
+    assert.equal(r.code, 0, r.stderr);
+    const commands = r.stdout.split('\n').filter((l) => l && !l.startsWith('#')).map((l) => l.replace(/^(write \S+) \(\d+ bytes\)$/, '$1'));
+    assert.ok(commands.includes("tmux send-keys -t =agentctl:nc-42 -l -- 'codex --sandbox danger-full-access -m gpt-6-astra -c model_reasoning_effort=medium'"));
+    assert.ok(!commands.some((c) => c.includes('claude')));
+    assert.ok(r.stdout.includes('#   Model: gpt-6-astra · effort medium'));
+    assert.ok(commands.some((c) => c.startsWith('git -C ') && c.includes('worktree add -b nc-42-tram-bell')));
+
+    const bad = agentctl(['new', '--dry-run', '--agent', 'gemini', f], { AGENTCTL_HOME: none });
+    assert.equal(bad.code, 1);
+    assert.match(bad.stderr, /Allowed choices are claude, codex/);
+  });
+
   it('the example runs through new --dry-run', () => {
     const f = path.join(scratch.dir, 'example.md');
     fs.writeFileSync(f, EXAMPLE_SPEC);
     const r = agentctl(['new', '--dry-run', f], { AGENTCTL_HOME: path.join(scratch.dir, 'none') });
     assert.equal(r.code, 0, r.stderr);
     assert.match(r.stdout, /git -C \S+neon-city worktree add -b nc-42-tram-bell \S+neon-city-nc-42 master/);
+  });
+});
+
+describe('interrupt --dry-run (the real binary)', () => {
+  it('prints the one key it would send', () => {
+    const root = scratch.sub('e2e-interrupt');
+    const config = makeConfig(root);
+    const repo = scratch.sub('e2e-interrupt/app');
+    fs.mkdirSync(path.join(config.cache, 'nc-1'), { recursive: true });
+    fs.writeFileSync(
+      path.join(config.cache, 'nc-1', 'TASK.md'),
+      `---\nagentctl: 1\ntask: NC-1\nwindow: nc-1\nsession: agentctl\nagent: codex\nmodel: default\neffort: high\nrepos: []\nstarted: 2026-10-31T10:00:00.000Z\n---\nGo\n`,
+    );
+    const r = agentctl(['interrupt', 'NC-1', '--dry-run'], { AGENTCTL_HOME: path.join(root, 'home') });
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, /^tmux send-keys -t =agentctl:nc-1 Escape$/m);
+    void repo;
   });
 });
 
