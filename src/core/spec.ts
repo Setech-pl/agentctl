@@ -37,6 +37,8 @@ export interface ResolvedSpec {
   effort: Effort;
   repos: ResolvedRepo[];
   links: Link[];
+  /** Shell commands for the first worktree: after `git worktree add`, before the links. */
+  setup: string[];
   env: Record<string, string>;
   reviewOf?: string;
   report: string;
@@ -126,7 +128,7 @@ export interface ResolveContext {
   loadProject?: (repoPath: string) => Layer | undefined;
 }
 
-const SPEC_KEYS = ['task', 'agent', 'model', 'effort', 'repos', 'links', 'env', 'review_of', 'report', 'pin'];
+const SPEC_KEYS = ['task', 'agent', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'report', 'pin'];
 
 function label(raw: RawSpec): string {
   const task = raw.header.task;
@@ -197,6 +199,11 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   }
   const specLinks = parseLinks(h.links, 'links', p);
   const specEnv = parseEnv(h.env, 'env', p);
+  let specSetup: string[] | undefined;
+  if (h.setup !== undefined && h.setup !== null) {
+    if (Array.isArray(h.setup) && h.setup.every((c: unknown) => typeof c === 'string' && c.trim() !== '')) specSetup = h.setup as string[];
+    else p.add('setup must be a list of non-empty shell commands');
+  }
   let reviewOf: string | undefined;
   if (h.review_of !== undefined && h.review_of !== null) {
     if (typeof h.review_of === 'string' && TASK_ID.test(h.review_of)) reviewOf = h.review_of;
@@ -299,6 +306,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     effort,
     repos,
     links: [...linkByFrom.values()],
+    setup: (specSetup ?? project?.setup ?? config.setup ?? []).map(fill),
     env,
     report: pathOf(reportTemplate),
     prompt: raw.prompt,

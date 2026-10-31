@@ -122,13 +122,15 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('--reuse', 'use worktrees that already exist instead of failing')
     .addOption(new Option('--agent <agent>', 'run every spec on this provider, translated through the equivalents table').choices(['claude', 'codex']))
     .option('--no-switch', 'never offer to move a task to the other provider when its limit is full')
+    .option('--no-agent', 'only create the worktree, run setup and links; no TASK.md, window or agent')
     .option('--no-wait-trust', 'stop at the folder-trust dialog instead of waiting for you to confirm it (the old behaviour)')
     .action(
-      guarded(async (file: string | undefined, opts: { dryRun?: boolean; reuse?: boolean; agent?: 'claude' | 'codex'; switch?: boolean; waitTrust?: boolean }) => {
+      guarded(async (file: string | undefined, opts: { dryRun?: boolean; reuse?: boolean; agent?: 'claude' | 'codex' | false; switch?: boolean; waitTrust?: boolean }) => {
         const ctx = contextFor(Boolean(opts.dryRun));
         const specs = splitSpecs(readSpecText(file), file ?? 'stdin').map((raw) => resolveSpec(raw, { config: ctx.config }));
         const options: NewOptions = { reuse: Boolean(opts.reuse), noSwitch: opts.switch === false, waitTrust: opts.waitTrust !== false };
         if (opts.agent) options.agent = opts.agent;
+        if (opts.agent === false) options.noAgent = true; // commander reads --no-agent as the negation of --agent
         const interrupt = opts.dryRun ? undefined : deps.interruptSignal?.();
         if (interrupt) options.signal = interrupt.signal;
         try {

@@ -150,7 +150,7 @@ export class RecordingRunner implements Runner {
   }
 
   async exec(cmd: string, args: string[], opts: ExecOptions = {}): Promise<ExecResult> {
-    const line = shellLine(cmd, args);
+    const line = opts.cwd ? `(cd ${shellLine(opts.cwd, [])} && ${shellLine(cmd, args)})` : shellLine(cmd, args);
     const scripted = this.respond?.(cmd, args, opts);
     if (opts.readOnly) {
       this.queries.push(line);
