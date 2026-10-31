@@ -29,6 +29,8 @@ export interface Layer {
   links: Link[];
   env: Record<string, string>;
   report?: string;
+  /** Shell commands run in the first worktree after `git worktree add`, before the links. Unset: inherit from the layer below. */
+  setup?: string[];
   defaults: Defaults;
 }
 
@@ -92,7 +94,7 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
   },
 };
 
-const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'defaults'];
+const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'setup', 'defaults'];
 const GLOBAL_KEYS = [...LAYER_KEYS, 'cache', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir'];
 
 /** Screen patterns are case-insensitive and match per line. */
@@ -181,6 +183,14 @@ function parseDefaults(v: unknown, where: string, p: Problems): Defaults {
   return defaults;
 }
 
+function parseSetup(v: unknown, where: string, p: Problems): string[] {
+  const commands = parseStringList(v, where, p);
+  commands.forEach((c, i) => {
+    if (c.trim() === '') p.add(`${where}[${i}] is an empty command`);
+  });
+  return commands;
+}
+
 function parseLayer(obj: Record<string, unknown>, where: string, p: Problems): Layer {
   const layer: Layer = {
     links: parseLinks(obj.links, `${where}.links`, p),
@@ -191,6 +201,7 @@ function parseLayer(obj: Record<string, unknown>, where: string, p: Problems): L
   const report = parseString(obj.report, `${where}.report`, p);
   if (worktreeRoot) layer.worktreeRoot = worktreeRoot;
   if (report) layer.report = report;
+  if (obj.setup !== undefined && obj.setup !== null) layer.setup = parseSetup(obj.setup, `${where}.setup`, p);
   return layer;
 }
 

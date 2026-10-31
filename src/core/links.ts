@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Link } from './config.ts';
 import type { Runner } from './runner.ts';
-import { AgentctlError } from './util.ts';
+import { AgentctlError, Problems } from './util.ts';
 
 export interface LinkOp {
   /** Absolute path of the symlink to create inside the worktree. */
@@ -67,13 +67,31 @@ export function planLinks(links: Link[], worktree: string): { ops: LinkOp[]; war
       continue;
     }
     const matches = fs.existsSync(worktree) ? fs.globSync(from, { cwd: worktree }).sort() : [];
-    if (matches.length === 0) warnings.push(`link ${from} -> ${to}: no match for "${from}" in ${worktree}`);
+    if (matches.length === 0) {
+      warnings.push(
+        `link ${from} -> ${to}: no match for "${from}" in ${worktree}. ` +
+          `A "from" without glob characters is a literal path and is linked even if it does not exist yet (parent directories are created), e.g. from: node_modules/@scope/name`,
+      );
+    }
     for (const match of matches) {
       const link = path.join(worktree, match);
       ops.push({ link, target: to, existing: lstatKind(link) });
     }
   }
   return { ops, warnings };
+}
+
+/**
+ * `to` is always something that exists outside the worktree (another checkout): check it before anything is created,
+ * so a typo does not leave a half-built worktree. For `dir/*` the directory must exist (an empty one only warns later).
+ */
+export function checkLinkTargets(links: Link[], task: string): void {
+  const p = new Problems();
+  for (const { from, to } of links) {
+    const target = to.endsWith('/*') ? path.dirname(to) : to;
+    if (!fs.existsSync(target)) p.add(`link ${from} -> ${to}: ${target} does not exist`);
+  }
+  p.throwIfAny(`${task}: link targets are missing:`, 'Create/check out the target first (for example the backend worktree), or fix the "to" path. Nothing was started.');
 }
 
 /** Create the symlinks; refuses to replace anything that is not already a symlink. */
