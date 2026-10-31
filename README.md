@@ -265,7 +265,7 @@ These are heuristics on screen text; if a CLI update changes its wording, adjust
 
 ### Folder trust
 
-A fresh worktree can make Claude Code or Codex ask "do you trust this folder?". agentctl **never answers that dialog**:
+A fresh git worktree is a new project root, so Claude Code (checked live, 2.1.309) and Codex can ask "do you trust this folder?" for it, even when the main checkout is trusted. agentctl **never answers that dialog**:
 when `new` sees it while waiting for the agent, it stops with
 
 ```

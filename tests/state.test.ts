@@ -4,6 +4,9 @@ import path from 'node:path';
 import { describe, it } from 'node:test';
 import { DEFAULT_AGENT_SETTINGS, PATTERN_FLAGS } from '../src/core/config.ts';
 import { newTasks } from '../src/core/new.ts';
+import { waitForReady } from '../src/core/ready.ts';
+import { RecordingRunner } from '../src/core/runner.ts';
+import { Tmux } from '../src/core/tmux.ts';
 import { resolveSpec, splitSpecs } from '../src/core/spec.ts';
 import type { ResolvedSpec } from '../src/core/spec.ts';
 import { classifyScreen, taskState } from '../src/core/state.ts';
@@ -28,12 +31,19 @@ const CODEX_IDLE = `  >_ OpenAI Codex (v0.166.0)
 › Ask Codex to do anything
   GPT-6.1-Sol low · ~/Projects/cache/agentctl-1/trust-test
   ? for shortcuts                                       ⚠ 1 warning · f2 to view`;
-// Trust dialogs: texts taken from the agent binaries (the live checks ran in an already trusted tree).
-const CLAUDE_TRUST = `Accessing workspace:
- /tmp/x
- Quick safety check: Is this a project you created or one you trust?
- ❯ 1. Yes, I trust this folder
-   2. No, exit`;
+// Claude trust dialog: captured live (2.1.309) in a fresh git worktree, which Claude treats as a new, untrusted project.
+// The Codex dialog text comes from the binary strings (the live checks ran in an already trusted tree); lines are approximate.
+const CLAUDE_TRUST = `────────────────────────────────────────────────────────────────────────────────
+ Accessing workspace:
+ /Users/me/wt/sm-1
+ Quick safety check: Is this a project you created or one you trust? (Like your
+ own code, a well-known open source project, or work from your team). If not,
+ take a moment to review what's in this folder first.
+ Claude Code'll be able to read, edit, and execute files here.
+ Security guide
+ ❯ No, exit
+   Yes, I trust this folder
+ Enter to confirm · Esc to cancel`;
 const CODEX_TRUST = `Trust this folder? Codex can read, edit, and run files here, subject to your permission settings.
 Folder settings can run code automatically, even without a model request.
 › 1. Yes, continue
@@ -51,13 +61,24 @@ describe('screen patterns (against real and recorded screens)', () => {
   it('trust dialogs are recognised in both TUIs and never look "ready"', () => {
     assert.equal(classifyScreen(CLAUDE_TRUST, claude), 'needs-trust');
     assert.equal(classifyScreen(CODEX_TRUST, codex), 'needs-trust');
-    assert.equal(ready(claude, CLAUDE_TRUST), false, 'the "❯ 1." cursor line is not the input prompt');
+    // The dialog's "❯ No, exit" cursor line looks like an input prompt, so trust must be checked before ready.
     assert.equal(ready(codex, CODEX_TRUST), false, 'the "› 1." cursor line is not the input prompt');
   });
 
   it('a running turn is "working"; trust wins over working', () => {
     assert.equal(classifyScreen(WORKING, claude), 'working');
     assert.equal(classifyScreen(`${WORKING}\n${CLAUDE_TRUST}`, claude), 'needs-trust');
+  });
+});
+
+describe('waiting for readiness on a trust dialog', () => {
+  it('reports trust, not ready, even though the cursor line resembles a prompt', async () => {
+    const runner = new RecordingRunner({ dryRun: false, respond: (cmd, a) => (cmd === 'tmux' && a[0] === 'capture-pane' ? { stdout: CLAUDE_TRUST } : undefined) });
+    const start = runner.now();
+    const result = await waitForReady(runner, new Tmux(runner, 'agentctl'), 'nc-1', { pattern: claude.readyPattern, trustPattern: claude.trustPattern, timeoutMs: 5000 });
+    assert.equal(result.trust, true);
+    assert.equal(result.ready, false);
+    assert.equal(runner.now(), start, 'returns at once instead of waiting for a timeout');
   });
 });
 
