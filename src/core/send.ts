@@ -1,7 +1,7 @@
 import fs from 'node:fs';
-import type { Context } from '../context.ts';
-import { renderFollowUp, taskFile } from '../taskstore.ts';
-import { AgentctlError, Problems } from '../util.ts';
+import type { Context } from './context.ts';
+import { renderFollowUp, taskFile } from './taskstore.ts';
+import { AgentctlError, Problems } from './util.ts';
 
 export interface SendItem {
   task: string;

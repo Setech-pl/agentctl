@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
-import { checkReviewer, checkWindowLimit, findAuthor } from '../src/checks.ts';
-import { newTasks, validateBatch } from '../src/commands/new.ts';
-import { resolveSpec, splitSpecs } from '../src/spec.ts';
-import type { ResolvedSpec } from '../src/spec.ts';
-import { recordFromSpec, renderTaskMd, taskFile } from '../src/taskstore.ts';
+import { checkReviewer, checkWindowLimit, findAuthor } from '../src/core/checks.ts';
+import { newTasks, validateBatch } from '../src/core/new.ts';
+import { resolveSpec, splitSpecs } from '../src/core/spec.ts';
+import type { ResolvedSpec } from '../src/core/spec.ts';
+import { recordFromSpec, renderTaskMd, taskFile } from '../src/core/taskstore.ts';
 import { makeConfig, makeContext, specText, useScratch } from './helpers.ts';
 
 const scratch = useScratch();

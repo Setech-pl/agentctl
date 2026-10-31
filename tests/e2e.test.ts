@@ -5,9 +5,9 @@ import path from 'node:path';
 import { describe, it } from 'node:test';
 import { main } from '../src/cli.ts';
 import type { CliDeps } from '../src/cli.ts';
-import { EXAMPLE_SPEC } from '../src/example.ts';
-import { RecordingRunner } from '../src/runner.ts';
-import { splitSpecs } from '../src/spec.ts';
+import { EXAMPLE_SPEC } from '../src/core/example.ts';
+import { RecordingRunner } from '../src/core/runner.ts';
+import { splitSpecs } from '../src/core/spec.ts';
 import { REPO_ROOT, makeConfig, useScratch } from './helpers.ts';
 
 const scratch = useScratch();

@@ -1,15 +1,15 @@
 import fs from 'node:fs';
-import { agentCommandLine, buildAgentArgv, INSTALL_HINTS, promptWithHeader } from '../agents.ts';
-import { checkReviewer, checkWindowLimit, findAuthor } from '../checks.ts';
-import type { LiveWindow } from '../checks.ts';
-import type { AgentName } from '../config.ts';
-import type { Context } from '../context.ts';
-import { addWorktree } from '../git.ts';
-import { applyLinks, planLinks } from '../links.ts';
-import { waitForReady } from '../ready.ts';
-import type { ResolvedSpec } from '../spec.ts';
-import { listTaskRecords, recordFromSpec, renderTaskMd, taskDir, taskFile } from '../taskstore.ts';
-import { AgentctlError, Problems } from '../util.ts';
+import { agentCommandLine, buildAgentArgv, INSTALL_HINTS, promptWithHeader } from './agents.ts';
+import { checkReviewer, checkWindowLimit, findAuthor } from './checks.ts';
+import type { LiveWindow } from './checks.ts';
+import type { AgentName } from './config.ts';
+import type { Context } from './context.ts';
+import { addWorktree } from './git.ts';
+import { applyLinks, planLinks } from './links.ts';
+import { waitForReady } from './ready.ts';
+import type { ResolvedSpec } from './spec.ts';
+import { listTaskRecords, recordFromSpec, renderTaskMd, taskDir, taskFile } from './taskstore.ts';
+import { AgentctlError, Problems } from './util.ts';
 
 export interface NewOptions {
   reuse?: boolean;

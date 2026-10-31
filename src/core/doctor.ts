@@ -1,11 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { INSTALL_HINTS } from '../agents.ts';
-import { PROJECT_CONFIG_NAME, loadGlobalConfig, loadProjectConfig } from '../config.ts';
-import type { GlobalConfig } from '../config.ts';
-import type { Runner } from '../runner.ts';
-import { Tmux } from '../tmux.ts';
-import { errorMessage } from '../util.ts';
+import { INSTALL_HINTS } from './agents.ts';
+import { PROJECT_CONFIG_NAME, loadGlobalConfig, loadProjectConfig } from './config.ts';
+import type { GlobalConfig } from './config.ts';
+import type { Runner } from './runner.ts';
+import { Tmux } from './tmux.ts';
+import { errorMessage } from './util.ts';
 
 export interface Check {
   name: string;

@@ -1,9 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { Context } from '../context.ts';
-import { gitFailure } from '../git.ts';
-import { readTaskRecord } from '../taskstore.ts';
-import { AgentctlError, windowName } from '../util.ts';
+import type { Context } from './context.ts';
+import { gitFailure } from './git.ts';
+import { readTaskRecord } from './taskstore.ts';
+import { AgentctlError, windowName } from './util.ts';
 
 export interface CloseOptions {
   rmWorktree?: boolean;

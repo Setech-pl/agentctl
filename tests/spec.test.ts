@@ -3,9 +3,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
-import { loadGlobalConfig } from '../src/config.ts';
-import type { Layer } from '../src/config.ts';
-import { resolveSendSpec, resolveSpec, splitSpecs } from '../src/spec.ts';
+import { loadGlobalConfig } from '../src/core/config.ts';
+import type { Layer } from '../src/core/config.ts';
+import { resolveSendSpec, resolveSpec, splitSpecs } from '../src/core/spec.ts';
 import { makeConfig, useScratch } from './helpers.ts';
 
 const scratch = useScratch();

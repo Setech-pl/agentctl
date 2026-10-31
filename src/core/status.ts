@@ -1,8 +1,8 @@
 import fs from 'node:fs';
-import type { Context } from '../context.ts';
-import { lastNonEmptyLine } from '../tmux.ts';
-import { listTaskRecords } from '../taskstore.ts';
-import { formatDuration } from '../util.ts';
+import type { Context } from './context.ts';
+import { lastNonEmptyLine } from './tmux.ts';
+import { listTaskRecords } from './taskstore.ts';
+import { formatDuration } from './util.ts';
 
 export interface StatusRow {
   task: string;

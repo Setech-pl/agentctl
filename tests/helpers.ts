@@ -1,11 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { after } from 'node:test';
-import { loadGlobalConfig } from '../src/config.ts';
-import type { GlobalConfig } from '../src/config.ts';
-import { Context } from '../src/context.ts';
-import { RecordingRunner } from '../src/runner.ts';
-import type { RecordingOptions } from '../src/runner.ts';
+import { loadGlobalConfig } from '../src/core/config.ts';
+import type { GlobalConfig } from '../src/core/config.ts';
+import { Context } from '../src/core/context.ts';
+import { RecordingRunner } from '../src/core/runner.ts';
+import type { RecordingOptions } from '../src/core/runner.ts';
 
 export const REPO_ROOT = path.resolve(import.meta.dirname, '..');
 const SCRATCH = path.join(REPO_ROOT, '.cache');

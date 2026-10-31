@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { buildAgentArgv, agentCommandLine, promptWithHeader } from '../src/agents.ts';
-import { DEFAULT_AGENT_SETTINGS } from '../src/config.ts';
-import { waitForReady } from '../src/ready.ts';
-import { RecordingRunner } from '../src/runner.ts';
-import { findAutoAcceptFlag } from '../src/safety.ts';
-import { Tmux } from '../src/tmux.ts';
+import { buildAgentArgv, agentCommandLine, promptWithHeader } from '../src/core/agents.ts';
+import { DEFAULT_AGENT_SETTINGS } from '../src/core/config.ts';
+import { waitForReady } from '../src/core/ready.ts';
+import { RecordingRunner } from '../src/core/runner.ts';
+import { findAutoAcceptFlag } from '../src/core/safety.ts';
+import { Tmux } from '../src/core/tmux.ts';
 
 function setup(screens: string[]) {
   let i = 0;

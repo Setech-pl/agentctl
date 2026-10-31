@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
-import type { Context } from '../context.ts';
-import { readTaskRecord } from '../taskstore.ts';
-import { AgentctlError, windowName } from '../util.ts';
+import type { Context } from './context.ts';
+import { readTaskRecord } from './taskstore.ts';
+import { AgentctlError, windowName } from './util.ts';
 
 export const PULL_FALLBACK_LINES = 40;
 

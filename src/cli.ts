@@ -1,19 +1,19 @@
 import fs from 'node:fs';
 import { Command, CommanderError } from 'commander';
-import { closeTask } from './commands/close.ts';
-import { renderChecks, runDoctor } from './commands/doctor.ts';
-import { newTasks } from './commands/new.ts';
-import { pullTask } from './commands/pull.ts';
-import { sendPrompts } from './commands/send.ts';
-import { collectStatus, renderStatusTable } from './commands/status.ts';
-import { loadGlobalConfig } from './config.ts';
-import type { GlobalConfig } from './config.ts';
-import { Context } from './context.ts';
-import { EXAMPLE_SPEC } from './example.ts';
-import { RealRunner, RecordingRunner } from './runner.ts';
-import type { Runner } from './runner.ts';
-import { resolveSendSpec, resolveSpec, splitSpecs } from './spec.ts';
-import { AgentctlError, errorMessage, resolvePath } from './util.ts';
+import { closeTask } from './core/close.ts';
+import { renderChecks, runDoctor } from './core/doctor.ts';
+import { newTasks } from './core/new.ts';
+import { pullTask } from './core/pull.ts';
+import { sendPrompts } from './core/send.ts';
+import { collectStatus, renderStatusTable } from './core/status.ts';
+import { loadGlobalConfig } from './core/config.ts';
+import type { GlobalConfig } from './core/config.ts';
+import { Context } from './core/context.ts';
+import { EXAMPLE_SPEC } from './core/example.ts';
+import { RealRunner, RecordingRunner } from './core/runner.ts';
+import type { Runner } from './core/runner.ts';
+import { resolveSendSpec, resolveSpec, splitSpecs } from './core/spec.ts';
+import { AgentctlError, errorMessage, resolvePath } from './core/util.ts';
 
 export interface CliDeps {
   stdout: (text: string) => void;
