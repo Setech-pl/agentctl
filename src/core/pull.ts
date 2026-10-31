@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import type { Context } from './context.ts';
+import { syncMirror } from './mirror.ts';
+import { collectStatus } from './status.ts';
 import { readTaskRecord } from './taskstore.ts';
 import { AgentctlError, windowName } from './util.ts';
 
@@ -25,6 +27,9 @@ export async function pullTask(ctx: Context, taskArg: string, platform?: string)
   if (!record) {
     throw new AgentctlError(`unknown task ${taskArg}: no TASK.md in ${config.cache}/${window}`, 'List known tasks with "agentctl status".');
   }
+
+  // With mirror_dir set, pull also refreshes the mirror (this report and status.json).
+  if (config.mirrorDir) await syncMirror(ctx, await collectStatus(ctx));
 
   if (record.report && fs.existsSync(record.report)) {
     const text = fs.readFileSync(record.report, 'utf8');

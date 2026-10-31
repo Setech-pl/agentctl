@@ -7,7 +7,8 @@ import { newTasks } from '../src/core/new.ts';
 import { pullTask } from '../src/core/pull.ts';
 import { sendPrompts } from '../src/core/send.ts';
 import { interruptTask } from '../src/core/interrupt.ts';
-import { collectStatus, renderStatusTable } from '../src/core/status.ts';
+import { collectStatus } from '../src/core/status.ts';
+import { renderStatusTable } from '../src/render.ts';
 import { resolveSendSpec, resolveSpec, splitSpecs } from '../src/core/spec.ts';
 import type { ResolvedSpec } from '../src/core/spec.ts';
 import { recordFromSpec, renderTaskMd, taskFile } from '../src/core/taskstore.ts';
@@ -293,15 +294,15 @@ describe('status', () => {
     });
     const rows = await collectStatus(ctx);
     assert.deepEqual(
-      rows.map((r) => [r.task, r.window, r.duration, r.report, r.lastLine]),
+      rows.map((r) => [r.task, r.state, r.window, r.duration, r.report, r.lastLine]),
       [
-        ['NC-1', 'alive', '2h 05m', 'missing', 'Reading src/a.ts'],
-        ['NC-2', 'gone', '1h 30m', 'yes', ''],
+        ['NC-1', 'waiting', 'alive', '2h 05m', 'missing', 'Reading src/a.ts'],
+        ['NC-2', 'report-ready', 'gone', '1h 30m', 'yes', ''],
       ],
     );
     const table = renderStatusTable(rows);
-    assert.match(table[0] as string, /^TASK\s+AGENT\/MODEL\/EFFORT\s+WINDOW\s+STARTED\s+DURATION\s+REPORT\s+LAST LINE$/);
-    assert.match(table[1] as string, /^NC-1\s+claude\/opus\/high\s+alive\s+2026-10-31 10:00\s+2h 05m\s+missing\s+Reading src\/a\.ts$/);
+    assert.match(table[0] as string, /^TASK\s+AGENT\/MODEL\/EFFORT\s+STATE\s+WINDOW\s+STARTED\s+DURATION\s+REPORT\s+LAST LINE$/);
+    assert.match(table[1] as string, /^NC-1\s+claude\/opus\/high\s+waiting\s+alive\s+2026-10-31 10:00\s+2h 05m\s+missing\s+Reading src\/a\.ts$/);
     assert.equal(table.length, 3);
   });
 });

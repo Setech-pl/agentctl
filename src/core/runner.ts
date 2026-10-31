@@ -31,6 +31,7 @@ export interface Runner {
   mkdir(dir: string): Promise<void>;
   writeFile(file: string, content: string): Promise<void>;
   appendFile(file: string, content: string): Promise<void>;
+  copyFile(src: string, dest: string): Promise<void>;
   /** Create `linkPath` pointing at `target`, replacing an existing symlink. */
   symlink(target: string, linkPath: string): Promise<void>;
   sleep(ms: number): Promise<void>;
@@ -69,6 +70,11 @@ export class RealRunner implements Runner {
   async appendFile(file: string, content: string): Promise<void> {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.appendFileSync(file, content);
+  }
+
+  async copyFile(src: string, dest: string): Promise<void> {
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(src, dest);
   }
 
   async symlink(target: string, linkPath: string): Promise<void> {
@@ -115,6 +121,8 @@ export class RecordingRunner implements Runner {
   readonly calls: RecordedCall[] = [];
   readonly queries: string[] = [];
   readonly notes: string[] = [];
+  /** Content of every file the run would have written, by path. */
+  readonly written = new Map<string, string>();
   private clock: number;
   private respond: RecordingOptions['respond'];
   private emit: RecordingOptions['emit'];
@@ -158,11 +166,16 @@ export class RecordingRunner implements Runner {
   }
 
   async writeFile(file: string, content: string): Promise<void> {
+    this.written.set(file, content);
     this.record(`write ${shellLine(file, [])} (${Buffer.byteLength(content)} bytes)`);
   }
 
   async appendFile(file: string, content: string): Promise<void> {
     this.record(`append ${shellLine(file, [])} (${Buffer.byteLength(content)} bytes)`);
+  }
+
+  async copyFile(src: string, dest: string): Promise<void> {
+    this.record(`cp ${shellLine(src, [])} ${shellLine(dest, [])}`);
   }
 
   async symlink(target: string, linkPath: string): Promise<void> {

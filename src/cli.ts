@@ -2,12 +2,13 @@ import fs from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 import { Command, CommanderError, Option } from 'commander';
 import { closeTask } from './core/close.ts';
-import { renderChecks, runDoctor } from './core/doctor.ts';
+import { runDoctor } from './core/doctor.ts';
+import { renderChecks, renderStatusTable } from './render.ts';
 import { newTasks } from './core/new.ts';
 import type { NewOptions } from './core/new.ts';
 import { pullTask } from './core/pull.ts';
 import { sendPrompts } from './core/send.ts';
-import { collectStatus, renderStatusTable } from './core/status.ts';
+import { reportStatus } from './core/status.ts';
 import { interruptTask } from './core/interrupt.ts';
 import { loadGlobalConfig } from './core/config.ts';
 import type { GlobalConfig } from './core/config.ts';
@@ -143,7 +144,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .action(
       guarded(async (opts: { json?: boolean }) => {
         const ctx = contextFor(false);
-        const rows = await collectStatus(ctx);
+        const { rows } = await reportStatus(ctx);
         if (opts.json) return line(JSON.stringify(rows, null, 2));
         if (rows.length === 0) return line(`No tasks yet in ${ctx.config.cache}. Start one with "agentctl new <spec>".`);
         for (const l of renderStatusTable(rows)) line(l);

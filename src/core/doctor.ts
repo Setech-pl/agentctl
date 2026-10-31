@@ -95,6 +95,15 @@ export async function runDoctor(
       }
     }
     add('config', 'ok', config.loaded ? `${config.path}` : `${config.path} not found, using defaults`);
+    if (config.mirrorDir) {
+      const dir = config.mirrorDir;
+      try {
+        fs.accessSync(fs.existsSync(dir) ? dir : path.dirname(dir), fs.constants.W_OK);
+        add('mirror', 'ok', `${dir}${fs.existsSync(dir) ? '' : ' (created on first status/pull)'}`);
+      } catch {
+        add('mirror', 'fail', `${dir} is not writable`);
+      }
+    } else add('mirror', 'ok', 'off (set mirror_dir in the config to enable)');
     try {
       const project = loadProjectConfig(cwd);
       add('project config', 'ok', project ? project.path : `no ${PROJECT_CONFIG_NAME} in ${path.resolve(cwd)} (optional)`);
@@ -108,10 +117,4 @@ export async function runDoctor(
     }
   }
   return checks;
-}
-
-const MARK = { ok: '✓', warn: '!', fail: '✗' } as const;
-
-export function renderChecks(checks: Check[]): string[] {
-  return checks.map((c) => `${MARK[c.status]} ${c.name.padEnd(15)} ${c.detail}`);
 }
