@@ -127,6 +127,7 @@ agents:
   claude:
     flags: []                  # extra flags appended to the claude command line
     ready_timeout: 60          # seconds to wait for the input prompt
+    trust_timeout: 600         # seconds `new` waits for you to answer the folder-trust dialog
     interrupt_key: Escape      # tmux key name sent by `agentctl interrupt`
     # Regexes matched (case-insensitive, per line) against the tmux screen. Defaults shown for claude:
     # ready_pattern:   '^\s*❯\s(?!\d+\.)'                              # the input box, not a "❯ 1." menu line
@@ -173,7 +174,7 @@ mechanism it detects.
 
 | Command | What it does |
 |---|---|
-| `agentctl new [file\|-] [--dry-run] [--reuse] [--agent claude\|codex] [--no-switch]` | For each spec: `git worktree add` (error if the worktree exists, unless `--reuse`), symlinks, `<cache>/<task>/TASK.md`, a tmux window named after the task in session `agentctl` (created if missing), starts the agent in the first worktree with the env, waits for the agent's prompt (polling `tmux capture-pane`), pastes the prompt as one bracketed paste (`tmux load-buffer -` + `paste-buffer -p`), then sends Enter separately. Everything is validated before anything starts. `--agent` runs the specs on that provider (see [Model equivalents](#model-equivalents)). |
+| `agentctl new [file\|-] [--dry-run] [--reuse] [--agent claude\|codex] [--no-switch] [--no-wait-trust]` | For each spec: `git worktree add` (error if the worktree exists, unless `--reuse`), symlinks, `<cache>/<task>/TASK.md`, a tmux window named after the task in session `agentctl` (created if missing), starts the agent in the first worktree with the env, waits for the agent's prompt (polling `tmux capture-pane`; a folder-trust dialog is waited out, see [Folder trust](#folder-trust)), pastes the prompt as one bracketed paste (`tmux load-buffer -` + `paste-buffer -p`), then sends Enter separately. Everything is validated before anything starts. `--agent` runs the specs on that provider (see [Model equivalents](#model-equivalents)). |
 | `agentctl send [file\|-] [--dry-run]` | Paste a follow-up prompt into the existing window (`task` from the header; the rest of the header is ignored). Errors if the window does not exist. The prompt is appended to `TASK.md` with a timestamp. |
 | `agentctl status [--json]` | Table: task, agent/model/effort (as ordered too, if switched), [state](#task-states), window alive?, start, duration, report present?, last non-empty line of the window. Refreshes the [mirror](#mirror) if configured. |
 | `agentctl pull <task>` | Copies the report to the clipboard (`pbcopy` on macOS, `wl-copy` or `xclip` on Linux) and prints its path. No report yet: prints the last 40 lines of the window. Refreshes the [mirror](#mirror) if configured. |
@@ -265,15 +266,29 @@ These are heuristics on screen text; if a CLI update changes its wording, adjust
 
 ### Folder trust
 
-A fresh git worktree is a new project root, so Claude Code (checked live, 2.1.309) and Codex can ask "do you trust this folder?" for it, even when the main checkout is trusted. agentctl **never answers that dialog**:
-when `new` sees it while waiting for the agent, it stops with
+A fresh git worktree is a new project root, so Claude Code (checked live, 2.1.309) and Codex (0.166.0) ask "do you trust this folder?" for it, even when the main checkout or a parent directory is trusted. agentctl **never answers that dialog**, but `new` waits for you to:
 
 ```
-error: NC-42: agent waits for folder trust – attach: tmux attach -t agentctl, confirm, then agentctl status
+NC-42: agent waits for folder trust – attach: tmux attach -t agentctl, confirm in window nc-42
 ```
 
-and leaves the window open. The prompt has not been sent; once the agent shows its input, deliver it with
-`agentctl send <cache>/nc-42/TASK.md`.
+`new` keeps polling the window (`tmux capture-pane`). When the dialog is gone and the agent shows its input, it pastes the prompt as usual; the agent then gets `ready_timeout` again to start. Specs in one file are handled one after another, so each dialog is waited for in turn.
+
+- **Timeout:** `agents.<name>.trust_timeout` (seconds, default 600). On expiry `new` stops, leaves the window open and prints `agentctl send <cache>/<task>/TASK.md`.
+- **Ctrl-C** ends the wait without closing the window, lists the specs that were not started and prints the same `agentctl send` command.
+- **`--no-wait-trust`** keeps the iteration-1 behaviour: stop at the dialog at once, with the attach instructions.
+
+In every case the prompt is only sent after the dialog is gone; deliver it by hand with `agentctl send <cache>/<task>/TASK.md`.
+
+**Does trusting a parent directory help?** Checked live on 2026-10-31 (Claude Code 2.1.309 with `~/Projects` trusted, Codex 0.166.0 with `~` trusted), in new directories below the trusted one:
+
+| New directory | Claude Code | Codex |
+|---|---|---|
+| plain folder (no git) | no dialog (inherits) | no dialog (inherits) |
+| new git repository | **dialog** | **dialog** |
+| `git worktree add` of that repository | **dialog** | **dialog**; says "trusting will apply to the repository root" |
+
+So trusting `worktree_root` (for example `~/Projects/wt`) does **not** cover git worktrees, and `doctor` has nothing to check there. Codex keys a worktree's trust to the repository root, so a trusted main checkout probably covers its worktrees (not tested live: that needs a trusted repository and a new worktree on it, which would change your Codex config); Claude Code asked for a worktree of a trusted checkout too (iteration 1). Hence the wait.
 
 ### Mirror
 
@@ -380,6 +395,7 @@ layer on top, so a TUI can reuse the same core. All side effects go through the 
 ## Roadmap
 
 1. **Iteration 1 (this one):** spec → worktree/links/env/window/agent/prompt; send, status, pull, close, interrupt, doctor; model equivalents with `--agent` and limit switching; task states and folder-trust detection; optional mirror.
+   Follow-up: `new` waits for the folder-trust dialog (`trust_timeout`, `--no-wait-trust`).
 2. **Iteration 2:** a TUI on the same core, and `agentctl serve` with a read-only web UI, published through Cloudflare Tunnel and protected by Cloudflare Access.
 3. **Iteration 3:** actions in the UI (send, close) and notifications; a `.agentctl-done` marker file an agent can write to say it has finished.
 

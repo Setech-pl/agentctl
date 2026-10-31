@@ -29,6 +29,8 @@ export interface CliDeps {
   confirm: ((question: string) => Promise<boolean>) | undefined;
   /** Build the runner: the real one, or a recording one for --dry-run. */
   makeRunner: (dryRun: boolean, emit: (line: string) => void) => Runner;
+  /** A signal that fires on Ctrl-C while a long wait runs; `dispose` restores the default Ctrl-C. Absent: no interrupt handling. */
+  interruptSignal?: () => { signal: AbortSignal; dispose: () => void };
 }
 
 export function defaultDeps(): CliDeps {
@@ -40,6 +42,12 @@ export function defaultDeps(): CliDeps {
     loadConfig: () => loadGlobalConfig(),
     confirm: process.stdin.isTTY ? askOnTerminal : undefined,
     makeRunner: (dryRun, emit) => (dryRun ? new RecordingRunner({ emit }) : new RealRunner()),
+    interruptSignal: () => {
+      const controller = new AbortController();
+      const onSigint = (): void => controller.abort();
+      process.once('SIGINT', onSigint);
+      return { signal: controller.signal, dispose: () => void process.off('SIGINT', onSigint) };
+    },
   };
 }
 
@@ -114,13 +122,20 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('--reuse', 'use worktrees that already exist instead of failing')
     .addOption(new Option('--agent <agent>', 'run every spec on this provider, translated through the equivalents table').choices(['claude', 'codex']))
     .option('--no-switch', 'never offer to move a task to the other provider when its limit is full')
+    .option('--no-wait-trust', 'stop at the folder-trust dialog instead of waiting for you to confirm it (the old behaviour)')
     .action(
-      guarded(async (file: string | undefined, opts: { dryRun?: boolean; reuse?: boolean; agent?: 'claude' | 'codex'; switch?: boolean }) => {
+      guarded(async (file: string | undefined, opts: { dryRun?: boolean; reuse?: boolean; agent?: 'claude' | 'codex'; switch?: boolean; waitTrust?: boolean }) => {
         const ctx = contextFor(Boolean(opts.dryRun));
         const specs = splitSpecs(readSpecText(file), file ?? 'stdin').map((raw) => resolveSpec(raw, { config: ctx.config }));
-        const options: NewOptions = { reuse: Boolean(opts.reuse), noSwitch: opts.switch === false };
+        const options: NewOptions = { reuse: Boolean(opts.reuse), noSwitch: opts.switch === false, waitTrust: opts.waitTrust !== false };
         if (opts.agent) options.agent = opts.agent;
-        await newTasks(ctx, specs, options);
+        const interrupt = opts.dryRun ? undefined : deps.interruptSignal?.();
+        if (interrupt) options.signal = interrupt.signal;
+        try {
+          await newTasks(ctx, specs, options);
+        } finally {
+          interrupt?.dispose();
+        }
       }),
     );
 
