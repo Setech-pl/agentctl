@@ -33,10 +33,14 @@ export function makeConfig(root: string, extraYaml = ''): GlobalConfig {
   return loadGlobalConfig(home);
 }
 
-export function makeContext(config: GlobalConfig, options: RecordingOptions = {}): { ctx: Context; runner: RecordingRunner; out: string[] } {
+export function makeContext(
+  config: GlobalConfig,
+  options: RecordingOptions = {},
+  confirm?: (question: string) => Promise<boolean>,
+): { ctx: Context; runner: RecordingRunner; out: string[] } {
   const out: string[] = [];
   const runner = new RecordingRunner({ dryRun: false, ...options });
-  return { ctx: new Context(runner, config, (l) => out.push(l)), runner, out };
+  return { ctx: new Context(runner, config, (l) => out.push(l), confirm), runner, out };
 }
 
 /** A spec file text for tests. */

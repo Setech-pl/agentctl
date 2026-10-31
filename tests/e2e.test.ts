@@ -147,6 +147,7 @@ describe('main() with injected dependencies', () => {
       readStdin: () => '',
       stdinIsTTY: true,
       loadConfig: () => config,
+      confirm: undefined,
       makeRunner: () => new RecordingRunner({ dryRun: false }),
     };
     assert.equal(await main(['status', '--json'], deps), 0);

@@ -69,7 +69,7 @@ env: {NEON_CITY_TASK: NC-1}
 First line.
 Second line.
 `;
-    const { ctx, runner } = makeContext(config, { respond: freshMachine('loading...', 'Welcome\n? for shortcuts') });
+    const { ctx, runner } = makeContext(config, { respond: freshMachine('loading...', 'Welcome\n❯ Try "x"') });
     await newTasks(ctx, resolveAll(config, text));
 
     const cache = path.join(config.cache, 'nc-1');
@@ -121,7 +121,7 @@ Go too.
         if (cmd === 'tmux' && args[0] === 'has-session') return { code: 0 };
         if (cmd === 'tmux' && args[0] === 'list-windows') return { stdout: 'other\n' };
         if (cmd === 'git' && args.includes('--verify')) return { code: 0 }; // nc-2 branch already exists
-        return screens('context left')(cmd, args, opts);
+        return screens('› Ask Codex to do anything')(cmd, args, opts);
       },
     });
     await newTasks(ctx, resolveAll(config, text));
@@ -136,7 +136,7 @@ Go too.
 
   it('fails when a worktree exists unless --reuse is given', async () => {
     const text = `---\ntask: NC-4\nagent: claude\nrepos:\n  - {path: ${repoA}, worktree: ${repoB}}\n---\nGo.\n`;
-    const { ctx, runner } = makeContext(config, { respond: freshMachine('? for shortcuts') });
+    const { ctx, runner } = makeContext(config, { respond: freshMachine('❯ Try "x"') });
     await assert.rejects(newTasks(ctx, resolveAll(config, text)), /worktree .* already exists \(pass --reuse/);
     assert.equal(runner.commands.length, 0);
 
@@ -149,7 +149,7 @@ Go too.
     const wtDir = scratch.sub('new/real-wt');
     scratch.sub('new/real-wt/node_modules/@nc/protocol'); // a real directory, not a symlink
     const text = `---\ntask: NC-5\nagent: claude\nrepos:\n  - {path: ${repoA}, worktree: ${wtDir}}\nlinks:\n  - {from: "node_modules/@nc/*", to: "${pkgs}/*"}\n---\nGo.\n`;
-    const { ctx } = makeContext(config, { respond: freshMachine('? for shortcuts') });
+    const { ctx } = makeContext(config, { respond: freshMachine('❯ Try "x"') });
     await assert.rejects(newTasks(ctx, resolveAll(config, text), { reuse: true }), /is not a symlink/);
   });
 

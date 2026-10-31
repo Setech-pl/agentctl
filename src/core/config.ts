@@ -2,12 +2,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import YAML from 'yaml';
+import { DEFAULT_EQUIVALENTS, parseEquivalents } from './equivalents.ts';
+import type { Equivalent } from './equivalents.ts';
 import { findAutoAcceptFlag } from './safety.ts';
 import { AgentctlError, Problems, errorMessage, expandHome, isObject, resolvePath } from './util.ts';
 
 export const AGENT_NAMES = ['claude', 'codex'] as const;
 export type AgentName = (typeof AGENT_NAMES)[number];
-export const EFFORTS = ['low', 'medium', 'high'] as const;
+export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type Effort = (typeof EFFORTS)[number];
 
 export interface Link {
@@ -39,6 +41,12 @@ export interface AgentSettings {
   readyPattern: string;
   /** Seconds to wait for readyPattern. */
   readyTimeout: number;
+  /** Regex: the agent shows its "trust this folder?" dialog. agentctl never answers it. */
+  trustPattern: string;
+  /** Regex: the agent is busy with a turn. */
+  workingPattern: string;
+  /** tmux key name that interrupts the current turn. */
+  interruptKey: string;
 }
 
 export interface GlobalConfig extends Layer {
@@ -48,6 +56,10 @@ export interface GlobalConfig extends Layer {
   /** Max simultaneous windows per provider (agent). Missing = unlimited. */
   limits: Partial<Record<AgentName, number>>;
   agents: Record<AgentName, AgentSettings>;
+  /** Claude<->Codex pairs: your `equivalents` first, then the built-in table. */
+  equivalents: Equivalent[];
+  /** When set, reports and status.json are copied here by status/pull. */
+  mirrorDir?: string;
   /** Where the config was (or would be) read from. */
   path: string;
   loaded: boolean;
@@ -57,19 +69,30 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
   claude: {
     flags: [],
     effortArgs: ['--effort', '{effort}'],
-    readyPattern: '\\? for shortcuts',
+    // Claude Code 2.1.309 idle screen: the input box line "❯ Try ...". The trust dialog also uses "❯", but with "1. Yes".
+    readyPattern: '^\\s*❯\\s(?!\\d+\\.)',
     readyTimeout: 60,
+    trustPattern: 'Quick safety check|Yes, I trust this folder',
+    workingPattern: 'esc to interrupt',
+    interruptKey: 'Escape',
   },
   codex: {
     flags: [],
     effortArgs: ['-c', 'model_reasoning_effort={effort}'],
-    readyPattern: 'context left|\\? for shortcuts',
+    // Codex 0.166.0 idle screen: "› Ask Codex to do anything" and the footer "? for shortcuts".
+    readyPattern: '^›\\s(?!\\d+\\.)|\\? for shortcuts',
     readyTimeout: 60,
+    trustPattern: 'Trust this folder\\?|Folder settings can run code automatically',
+    workingPattern: 'esc to interrupt',
+    interruptKey: 'Escape',
   },
 };
 
 const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'defaults'];
-const GLOBAL_KEYS = [...LAYER_KEYS, 'cache', 'session', 'limits', 'agents'];
+const GLOBAL_KEYS = [...LAYER_KEYS, 'cache', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir'];
+
+/** Screen patterns are case-insensitive and match per line. */
+export const PATTERN_FLAGS = 'im';
 
 export function checkKeys(obj: Record<string, unknown>, allowed: string[], where: string, p: Problems): void {
   for (const key of Object.keys(obj)) {
@@ -174,22 +197,25 @@ function parseAgentSettings(name: AgentName, v: unknown, where: string, p: Probl
     p.add(`${where} must be a mapping`);
     return settings;
   }
-  checkKeys(v, ['flags', 'effort_args', 'ready_pattern', 'ready_timeout'], where, p);
+  checkKeys(v, ['flags', 'effort_args', 'ready_pattern', 'ready_timeout', 'trust_pattern', 'working_pattern', 'interrupt_key'], where, p);
   if (v.flags !== undefined) settings.flags = parseStringList(v.flags, `${where}.flags`, p);
   if (v.effort_args !== undefined) settings.effortArgs = parseStringList(v.effort_args, `${where}.effort_args`, p);
   for (const [key, list] of [['flags', settings.flags], ['effort_args', settings.effortArgs]] as const) {
     const bad = findAutoAcceptFlag(list);
     if (bad) p.add(`${where}.${key}: "${bad}" enables auto-accept, which agentctl never allows`);
   }
-  const pattern = parseString(v.ready_pattern, `${where}.ready_pattern`, p);
-  if (pattern) {
+  for (const [key, field] of [['ready_pattern', 'readyPattern'], ['trust_pattern', 'trustPattern'], ['working_pattern', 'workingPattern']] as const) {
+    const pattern = parseString(v[key], `${where}.${key}`, p);
+    if (!pattern) continue;
     try {
-      new RegExp(pattern);
-      settings.readyPattern = pattern;
+      new RegExp(pattern, PATTERN_FLAGS);
+      settings[field] = pattern;
     } catch (e) {
-      p.add(`${where}.ready_pattern is not a valid regular expression: ${errorMessage(e)}`);
+      p.add(`${where}.${key} is not a valid regular expression: ${errorMessage(e)}`);
     }
   }
+  const key = parseString(v.interrupt_key, `${where}.interrupt_key`, p);
+  if (key) settings.interruptKey = key;
   if (v.ready_timeout !== undefined) {
     if (typeof v.ready_timeout === 'number' && v.ready_timeout > 0) settings.readyTimeout = v.ready_timeout;
     else p.add(`${where}.ready_timeout must be a positive number of seconds`);
@@ -250,8 +276,13 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   checkKeys(agentMap, [...AGENT_NAMES], 'config.agents', p);
   for (const name of AGENT_NAMES) agents[name] = parseAgentSettings(name, agentMap[name], `config.agents.${name}`, p);
 
+  const equivalents = [...parseEquivalents(raw.equivalents, 'config.equivalents', p), ...parseEquivalents(DEFAULT_EQUIVALENTS, 'defaults', p)];
+  const mirror = parseString(raw.mirror_dir, 'config.mirror_dir', p);
+
   p.throwIfAny(`Invalid config ${file}:`, 'Fix the listed keys; see the README section "Configuration".');
-  return { ...layer, cache: resolvePath(cache), session, limits, agents, path: file, loaded: exists };
+  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), session, limits, agents, equivalents, path: file, loaded: exists };
+  if (mirror) config.mirrorDir = resolvePath(mirror);
+  return config;
 }
 
 export const PROJECT_CONFIG_NAME = '.agentctl.yaml';

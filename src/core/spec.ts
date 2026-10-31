@@ -10,6 +10,7 @@ import {
   parseLinks,
 } from './config.ts';
 import type { AgentName, Effort, GlobalConfig, Layer, Link } from './config.ts';
+import type { Order } from './equivalents.ts';
 import { AgentctlError, Problems, TASK_ID, errorMessage, fillPlaceholders, isObject, resolvePath, windowName } from './util.ts';
 
 /** A spec as written in the file: untouched YAML header plus the prompt below it. */
@@ -40,6 +41,12 @@ export interface ResolvedSpec {
   reviewOf?: string;
   report: string;
   prompt: string;
+  /** `pin: true`: never switch this task to the other provider. */
+  pin: boolean;
+  /** The order as written in the spec; agent/model/effort above are the effective values. */
+  requested: Order;
+  /** Why the effective order differs from the requested one. */
+  switchedBy?: 'flag' | 'limit';
 }
 
 const FENCE = '---';
@@ -119,7 +126,7 @@ export interface ResolveContext {
   loadProject?: (repoPath: string) => Layer | undefined;
 }
 
-const SPEC_KEYS = ['task', 'agent', 'model', 'effort', 'repos', 'links', 'env', 'review_of', 'report'];
+const SPEC_KEYS = ['task', 'agent', 'model', 'effort', 'repos', 'links', 'env', 'review_of', 'report', 'pin'];
 
 function label(raw: RawSpec): string {
   const task = raw.header.task;
@@ -199,6 +206,11 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   if (h.report !== undefined && h.report !== null) {
     if (typeof h.report === 'string' && h.report.trim() !== '') specReport = h.report;
     else p.add('report must be a path');
+  }
+  let pin = false;
+  if (h.pin !== undefined && h.pin !== null) {
+    if (typeof h.pin === 'boolean') pin = h.pin;
+    else p.add('pin must be true or false');
   }
   if (raw.prompt === '') p.add('the prompt is empty (write it below the closing "---" of the header)');
 
@@ -290,6 +302,8 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     env,
     report: pathOf(reportTemplate),
     prompt: raw.prompt,
+    pin,
+    requested: { agent: agent as AgentName, model, effort },
   };
   if (reviewOf) spec.reviewOf = reviewOf;
   return spec;

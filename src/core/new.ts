@@ -1,18 +1,26 @@
 import fs from 'node:fs';
 import { agentCommandLine, buildAgentArgv, INSTALL_HINTS, promptWithHeader } from './agents.ts';
-import { checkReviewer, checkWindowLimit, findAuthor } from './checks.ts';
-import type { LiveWindow } from './checks.ts';
-import type { AgentName } from './config.ts';
 import type { Context } from './context.ts';
+import type { Order } from './equivalents.ts';
 import { addWorktree } from './git.ts';
 import { applyLinks, planLinks } from './links.ts';
+import { planBatch } from './plan.ts';
+import type { PlanOptions } from './plan.ts';
 import { waitForReady } from './ready.ts';
 import type { ResolvedSpec } from './spec.ts';
-import { listTaskRecords, recordFromSpec, renderTaskMd, taskDir, taskFile } from './taskstore.ts';
-import { AgentctlError, Problems } from './util.ts';
+import { recordFromSpec, renderTaskMd, taskDir, taskFile } from './taskstore.ts';
+import { AgentctlError } from './util.ts';
 
-export interface NewOptions {
-  reuse?: boolean;
+export type NewOptions = PlanOptions;
+
+export interface NewResult {
+  task: string;
+  window: string;
+  agentCommand: string;
+  worktrees: string[];
+  requested: Order;
+  effective: Order;
+  switchedBy?: 'flag' | 'limit';
 }
 
 async function requireTool(ctx: Context, tool: string, args: string[]): Promise<void> {
@@ -20,63 +28,21 @@ async function requireTool(ctx: Context, tool: string, args: string[]): Promise<
   if (r.code !== 0) throw new AgentctlError(`${tool} not found or not working`, INSTALL_HINTS[tool]);
 }
 
-/** Windows currently in the session, each tagged with the agent that agentctl started in it. */
-async function liveWindows(ctx: Context): Promise<LiveWindow[]> {
-  const names = await ctx.tmux.listWindows();
-  const agentByWindow = new Map<string, AgentName>();
-  for (const record of listTaskRecords(ctx.config)) agentByWindow.set(record.window, record.agent);
-  return names.map((window) => {
-    const agent = agentByWindow.get(window);
-    return agent ? { window, agent } : { window };
-  });
-}
-
-/** Everything that can be checked before touching anything. All problems are reported together. */
-export async function validateBatch(ctx: Context, specs: ResolvedSpec[], opts: NewOptions): Promise<void> {
-  const { config } = ctx;
-  const p = new Problems();
-  const live = ctx.runner.dryRun ? [] : await liveWindows(ctx);
-  const planned: LiveWindow[] = [];
-  const seen = new Set<string>();
-
-  for (const spec of specs) {
-    const at = `${spec.task}:`;
-    if (seen.has(spec.window)) p.add(`${at} the task appears twice in this file`);
-    seen.add(spec.window);
-
-    const reviewProblem = checkReviewer(spec, spec.reviewOf ? findAuthor(spec.reviewOf, specs, config) : undefined);
-    if (reviewProblem) p.add(`${at} ${reviewProblem}`);
-
-    if (live.some((w) => w.window === spec.window)) {
-      p.add(`${at} tmux window "${spec.window}" already exists in session "${config.session}" (use "agentctl send" for a follow-up, or "agentctl close ${spec.task}" first)`);
-    }
-
-    const limitProblem = checkWindowLimit(spec.agent, config.limits[spec.agent], [...live, ...planned], config.session);
-    if (limitProblem) p.add(`${at} ${limitProblem} Close one with "agentctl close <task>" or raise limits.${spec.agent} in ${config.path}.`);
-    planned.push({ window: spec.window, agent: spec.agent });
-
-    for (const repo of spec.repos) {
-      // A dry run may be rehearsed on a machine without the repositories, so only real runs require them.
-      if (!ctx.runner.dryRun && !fs.existsSync(repo.path)) p.add(`${at} repository ${repo.path} does not exist`);
-      if (fs.existsSync(repo.worktree) && !opts.reuse) {
-        p.add(`${at} worktree ${repo.worktree} already exists (pass --reuse to use it as is)`);
-      }
-    }
-  }
-  p.throwIfAny('Cannot start the tasks:');
-}
-
-/** Start every spec: worktree, links, TASK.md, tmux window, agent, prompt. Validates everything first. */
-export async function newTasks(ctx: Context, specs: ResolvedSpec[], opts: NewOptions = {}): Promise<void> {
+/** Start every spec: worktree, links, TASK.md, tmux window, agent, prompt. Plans and validates everything first. */
+export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOptions = {}): Promise<NewResult[]> {
   const { runner, tmux, config } = ctx;
 
+  // Tools needed by the orders as written; the provider may change below, so check both agents the batch could end on.
   if (!runner.dryRun) {
     await requireTool(ctx, 'tmux', ['-V']);
     await requireTool(ctx, 'git', ['--version']);
+  }
+  const specs = await planBatch(ctx, requested, opts);
+  if (!runner.dryRun) {
     for (const agent of new Set(specs.map((s) => s.agent))) await requireTool(ctx, agent, ['--version']);
   }
-  await validateBatch(ctx, specs, opts);
 
+  const results: NewResult[] = [];
   let sessionUp = await tmux.hasSession();
   for (const spec of specs) {
     const primary = spec.repos[0]!.worktree;
@@ -107,15 +73,22 @@ export async function newTasks(ctx: Context, specs: ResolvedSpec[], opts: NewOpt
       sessionUp = true;
     }
     const settings = config.agents[spec.agent];
-    const argv = buildAgentArgv(spec, settings);
-    await tmux.typeCommand(spec.window, agentCommandLine(argv));
-    ctx.info(`${spec.task}: window ${config.session}:${spec.window} running ${agentCommandLine(argv)}`);
+    const commandLine = agentCommandLine(buildAgentArgv(spec, settings));
+    await tmux.typeCommand(spec.window, commandLine);
+    ctx.info(`${spec.task}: window ${config.session}:${spec.window} running ${commandLine}`);
 
-    // 5. wait for the agent, then paste the prompt and press Enter
+    // 5. wait for the agent; never answer a trust dialog; then paste the prompt and press Enter
     const ready = await waitForReady(runner, tmux, spec.window, {
       pattern: settings.readyPattern,
+      trustPattern: settings.trustPattern,
       timeoutMs: settings.readyTimeout * 1000,
     });
+    if (ready.trust) {
+      throw new AgentctlError(
+        `${spec.task}: agent waits for folder trust – attach: tmux attach -t ${config.session}, confirm, then agentctl status`,
+        `agentctl never answers that dialog. The prompt was not sent; once the agent shows its input, deliver it with: agentctl send ${taskFile(config, spec.window)}`,
+      );
+    }
     if (!ready.ready) {
       throw new AgentctlError(
         `${spec.task}: ${spec.agent} did not show its input prompt within ${settings.readyTimeout}s (pattern /${settings.readyPattern}/)`,
@@ -125,6 +98,18 @@ export async function newTasks(ctx: Context, specs: ResolvedSpec[], opts: NewOpt
     }
     await tmux.submitPrompt(spec.window, promptWithHeader(spec));
     ctx.info(`${spec.task}: prompt sent`);
+
+    const result: NewResult = {
+      task: spec.task,
+      window: spec.window,
+      agentCommand: commandLine,
+      worktrees: spec.repos.map((r) => r.worktree),
+      requested: spec.requested,
+      effective: { agent: spec.agent, model: spec.model, effort: spec.effort },
+    };
+    if (spec.switchedBy) result.switchedBy = spec.switchedBy;
+    results.push(result);
   }
   ctx.info(`attach with: tmux attach -t ${config.session}`);
+  return results;
 }

@@ -1,8 +1,10 @@
 import fs from 'node:fs';
-import { Command, CommanderError } from 'commander';
+import { createInterface } from 'node:readline/promises';
+import { Command, CommanderError, Option } from 'commander';
 import { closeTask } from './core/close.ts';
 import { renderChecks, runDoctor } from './core/doctor.ts';
 import { newTasks } from './core/new.ts';
+import type { NewOptions } from './core/new.ts';
 import { pullTask } from './core/pull.ts';
 import { sendPrompts } from './core/send.ts';
 import { collectStatus, renderStatusTable } from './core/status.ts';
@@ -21,6 +23,8 @@ export interface CliDeps {
   readStdin: () => string;
   stdinIsTTY: boolean;
   loadConfig: () => GlobalConfig;
+  /** Ask a yes/no question; undefined when there is no terminal to ask on. */
+  confirm: ((question: string) => Promise<boolean>) | undefined;
   /** Build the runner: the real one, or a recording one for --dry-run. */
   makeRunner: (dryRun: boolean, emit: (line: string) => void) => Runner;
 }
@@ -32,8 +36,18 @@ export function defaultDeps(): CliDeps {
     readStdin: () => fs.readFileSync(0, 'utf8'),
     stdinIsTTY: Boolean(process.stdin.isTTY),
     loadConfig: () => loadGlobalConfig(),
+    confirm: process.stdin.isTTY ? askOnTerminal : undefined,
     makeRunner: (dryRun, emit) => (dryRun ? new RecordingRunner({ emit }) : new RealRunner()),
   };
+}
+
+async function askOnTerminal(question: string): Promise<boolean> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return /^y(es)?$/i.test((await rl.question(question)).trim());
+  } finally {
+    rl.close();
+  }
 }
 
 function packageVersion(): string {
@@ -65,7 +79,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     }
   };
 
-  const contextFor = (dryRun: boolean): Context => new Context(deps.makeRunner(dryRun, line), deps.loadConfig(), line);
+  const contextFor = (dryRun: boolean): Context => new Context(deps.makeRunner(dryRun, line), deps.loadConfig(), line, deps.confirm);
 
   const program = new Command();
   program
@@ -96,11 +110,15 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .argument('[file]', 'spec file, or "-" for stdin')
     .option('--dry-run', 'print the commands that would run, execute nothing')
     .option('--reuse', 'use worktrees that already exist instead of failing')
+    .addOption(new Option('--agent <agent>', 'run every spec on this provider, translated through the equivalents table').choices(['claude', 'codex']))
+    .option('--no-switch', 'never offer to move a task to the other provider when its limit is full')
     .action(
-      guarded(async (file: string | undefined, opts: { dryRun?: boolean; reuse?: boolean }) => {
+      guarded(async (file: string | undefined, opts: { dryRun?: boolean; reuse?: boolean; agent?: 'claude' | 'codex'; switch?: boolean }) => {
         const ctx = contextFor(Boolean(opts.dryRun));
         const specs = splitSpecs(readSpecText(file), file ?? 'stdin').map((raw) => resolveSpec(raw, { config: ctx.config }));
-        await newTasks(ctx, specs, { reuse: Boolean(opts.reuse) });
+        const options: NewOptions = { reuse: Boolean(opts.reuse), noSwitch: opts.switch === false };
+        if (opts.agent) options.agent = opts.agent;
+        await newTasks(ctx, specs, options);
       }),
     );
 

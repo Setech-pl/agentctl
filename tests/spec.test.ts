@@ -105,7 +105,7 @@ describe('resolveSpec', () => {
         assert.match(e.message, /Spec #1 \(nc-3\) is invalid/);
         assert.match(e.message, /invalid task ID "nc-3": use UPPERCASE/);
         assert.match(e.message, /agent must be one of claude, codex \(got "gemini"\)/);
-        assert.match(e.message, /effort must be one of low, medium, high \(got "extreme"\)/);
+        assert.match(e.message, /effort must be one of low, medium, high, xhigh, max \(got "extreme"\)/);
         assert.match(e.message, /unknown key "efort"/);
         assert.match(e.message, /"repos" must list at least one repository/);
         assert.match(e.message, /the prompt is empty/);

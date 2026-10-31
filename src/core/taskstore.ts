@@ -4,6 +4,7 @@ import YAML from 'yaml';
 import { AGENT_NAMES, EFFORTS } from './config.ts';
 import type { AgentName, Effort, GlobalConfig, Link } from './config.ts';
 import type { ResolvedRepo, ResolvedSpec } from './spec.ts';
+import type { Order } from './equivalents.ts';
 import { isObject } from './util.ts';
 
 /** What agentctl remembers about a task: the YAML header of `<cache>/<task>/TASK.md`. */
@@ -21,6 +22,9 @@ export interface TaskRecord {
   report: string;
   /** ISO timestamp of `agentctl new`. */
   started: string;
+  /** The order as written in the spec; agent/model/effort above are what actually runs. */
+  requested: Order;
+  switchedBy?: 'flag' | 'limit';
 }
 
 export function taskDir(config: GlobalConfig, window: string): string {
@@ -44,7 +48,9 @@ export function recordFromSpec(spec: ResolvedSpec, config: GlobalConfig, started
     env: spec.env,
     report: spec.report,
     started: new Date(startedMs).toISOString(),
+    requested: spec.requested,
   };
+  if (spec.switchedBy) record.switchedBy = spec.switchedBy;
   if (spec.reviewOf) record.reviewOf = spec.reviewOf;
   return record;
 }
@@ -59,11 +65,13 @@ export function renderTaskMd(record: TaskRecord, prompt: string): string {
     agent: record.agent,
     model: record.model,
     effort: record.effort,
+    requested: record.requested,
     repos: record.repos,
     links: record.links,
     env: record.env,
   };
   if (record.reviewOf) header.review_of = record.reviewOf;
+  if (record.switchedBy) header.switched_by = record.switchedBy;
   header.report = record.report;
   header.started = record.started;
   return `---\n${YAML.stringify(header)}---\n\n${prompt.trim()}\n`;
@@ -108,9 +116,20 @@ export function parseTaskRecord(text: string): TaskRecord | undefined {
     env: isObject(data.env) ? (data.env as Record<string, string>) : {},
     report: typeof data.report === 'string' ? data.report : '',
     started: typeof data.started === 'string' ? data.started : '',
+    requested: { agent: agent as AgentName, model: 'default', effort: 'high' },
   };
+  record.requested = parseOrder(data.requested) ?? { agent: record.agent, model: record.model, effort: record.effort };
+  if (data.switched_by === 'flag' || data.switched_by === 'limit') record.switchedBy = data.switched_by;
   if (typeof data.review_of === 'string') record.reviewOf = data.review_of;
   return record;
+}
+
+function parseOrder(v: unknown): Order | undefined {
+  if (!isObject(v)) return undefined;
+  const { agent, model, effort } = v;
+  if (!(AGENT_NAMES as readonly unknown[]).includes(agent) || typeof model !== 'string') return undefined;
+  if (!(EFFORTS as readonly unknown[]).includes(effort)) return undefined;
+  return { agent: agent as AgentName, model, effort: effort as Effort };
 }
 
 /** All tasks agentctl knows about (cache folders holding an agentctl-written TASK.md). */

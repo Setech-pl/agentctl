@@ -31,7 +31,7 @@ describe('waitForReady', () => {
     const { runner, tmux, captures } = setup(['loading', 'still loading']);
     const t0 = runner.now();
     const result = await waitForReady(runner, tmux, 'nc-1', { pattern: 'ready', timeoutMs: 2000, intervalMs: 500 });
-    assert.deepEqual(result, { ready: false, screen: 'still loading' });
+    assert.deepEqual(result, { ready: false, trust: false, screen: 'still loading' });
     assert.equal(captures(), 5);
     assert.equal(runner.now() - t0, 2000);
   });

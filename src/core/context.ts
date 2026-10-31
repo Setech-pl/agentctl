@@ -7,9 +7,12 @@ export class Context {
   readonly runner: Runner;
   readonly config: GlobalConfig;
   readonly tmux: Tmux;
+  /** Asks a yes/no question on the terminal; undefined when there is no TTY. */
+  readonly confirm: ((question: string) => Promise<boolean>) | undefined;
   private sink: (line: string) => void;
 
-  constructor(runner: Runner, config: GlobalConfig, out: (line: string) => void) {
+  constructor(runner: Runner, config: GlobalConfig, out: (line: string) => void, confirm?: (question: string) => Promise<boolean>) {
+    this.confirm = confirm;
     this.runner = runner;
     this.config = config;
     this.tmux = new Tmux(runner, config.session);

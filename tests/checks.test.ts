@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { checkReviewer, checkWindowLimit, findAuthor } from '../src/core/checks.ts';
-import { newTasks, validateBatch } from '../src/core/new.ts';
+import { newTasks } from '../src/core/new.ts';
+import { planBatch } from '../src/core/plan.ts';
 import { resolveSpec, splitSpecs } from '../src/core/spec.ts';
 import type { ResolvedSpec } from '../src/core/spec.ts';
 import { recordFromSpec, renderTaskMd, taskFile } from '../src/core/taskstore.ts';
@@ -61,13 +62,13 @@ describe('review_of: the reviewer must differ from the author', () => {
 
     const same = resolveAll(config, specText({ task: 'NC-2', agent: 'claude', model: 'opus', review_of: 'NC-1' }, repo + '2'));
     const { ctx } = makeContext(config);
-    await assert.rejects(validateBatch(ctx, same, {}), /same agent and model/);
+    await assert.rejects(planBatch(ctx, same, {}), /same agent and model/);
 
     const other = resolveAll(config, specText({ task: 'NC-2', agent: 'codex', model: 'gpt-x', review_of: 'NC-1' }, repo + '2'));
-    await validateBatch(ctx, other, {});
+    await planBatch(ctx, other, {});
 
     const inFile = [...resolveAll(config, specText({ task: 'NC-8', agent: 'codex', model: 'gpt-x' }, repo + '8')), ...resolveAll(config, specText({ task: 'NC-9', agent: 'codex', model: 'gpt-x', review_of: 'NC-8' }, repo + '9'))];
-    await assert.rejects(validateBatch(ctx, inFile, {}), /NC-9 reviews NC-8 but uses the same agent and model/);
+    await assert.rejects(planBatch(ctx, inFile, {}), /NC-9 reviews NC-8 but uses the same agent and model/);
   });
 });
 
@@ -97,15 +98,15 @@ describe('window limit per provider', () => {
       resolveAll(config, specText({ task, agent: 'claude' }, scratch.sub(`limit-e2e/repo${i}`))),
     );
     const { ctx } = makeContext(config);
-    await assert.rejects(validateBatch(ctx, specs, {}), /NC-3: window limit for claude reached: 2 of 2/);
+    await assert.rejects(planBatch(ctx, specs, {}), /NC-3: window limit for claude reached: 2 of 2/);
 
     // one claude window is already live (known through its TASK.md): only one more fits
     seedTask(config, specs[0]!);
     const { ctx: ctx2 } = makeContext(config, {
       respond: (cmd, args) => (cmd === 'tmux' && args[0] === 'list-windows' ? { stdout: 'nc-1\n' } : undefined),
     });
-    await assert.rejects(validateBatch(ctx2, specs.slice(1), {}), /NC-3: window limit for claude reached: 2 of 2 in session "agentctl" \(nc-1, nc-2\)/);
-    await validateBatch(ctx2, specs.slice(1, 2), {});
+    await assert.rejects(planBatch(ctx2, specs.slice(1), {}), /NC-3: window limit for claude reached: 2 of 2 in session "agentctl" \(nc-1, nc-2\)/);
+    await planBatch(ctx2, specs.slice(1, 2), {});
   });
 
   it('newTasks stops before creating anything when the limit is exceeded', async () => {
