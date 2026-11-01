@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { Context } from './context.ts';
 import { gitFailure } from './git.ts';
 import { collectStatus } from './status.ts';
-import { readTaskRecord } from './taskstore.ts';
+import { readTaskRecord, setHeaderFields, taskFile } from './taskstore.ts';
 import { AgentctlError, Problems, windowName } from './util.ts';
 
 export interface CloseOptions {
@@ -33,6 +33,11 @@ export async function closeTask(ctx: Context, taskArg: string, opts: CloseOption
     ctx.info(`${taskArg}: window ${config.session}:${window} closed`);
   } else {
     ctx.info(`${taskArg}: no window "${window}" in session "${config.session}" (already closed)`);
+  }
+
+  // The window is gone: the task is closed, whether or not the worktree can be removed below. The state and the report stay.
+  if (record) {
+    await setHeaderFields(runner, taskFile(config, window), { closed: true, closed_at: new Date(runner.now()).toISOString() });
   }
 
   if (!opts.rmWorktree || !record) return;

@@ -5,6 +5,7 @@ import {
   applySnapshot,
   boardColumns,
   boardLayout,
+  closedTitle,
   finishedTitle,
   BOARD_REFRESH_MS,
   clearNotice,
@@ -63,7 +64,9 @@ function TaskList(props: { state: BoardState; width: number; capacity: number; i
       : visible.items.map((item) =>
           item.kind === 'finished'
             ? h(Text, { key: 'finished', dimColor: true, wrap: 'truncate-end' }, `${item.expanded ? '▾' : '▸'} ${finishedTitle(item.count, item.expanded)}`)
-            : h(Cells, { key: item.row.task, cells: rowCells(item.row, item.row.task === state.selected, cols, props.icons) }),
+            : item.kind === 'closed'
+              ? h(Text, { key: 'closed', dimColor: true, wrap: 'truncate-end' }, `▾ ${closedTitle(item.count)}`)
+              : h(Cells, { key: item.row.task, cells: rowCells(item.row, item.row.task === state.selected, cols, props.icons) }),
         );
   return h(Box, { flexDirection: 'column', width: props.width }, h(Cells, { cells: headerCells(cols) }), ...body);
 }
@@ -177,7 +180,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
   });
 
   const layout = boardLayout(state.width);
-  const active = state.rows.filter((r) => !r.finished && !r.hidden).length;
+  const active = state.rows.filter((r) => !r.closed && !r.finished && !r.hidden).length;
   const hiddenCount = state.showHidden ? 0 : state.rows.filter((r) => r.hidden).length;
   const rowsForBody = Math.max(3, state.height - 4);
   const header = h(

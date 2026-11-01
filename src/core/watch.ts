@@ -134,7 +134,8 @@ export interface TickOptions {
  * announced a moment ago (see `agentctl event`) is logged but not notified again.
  */
 export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Notifier, options: TickOptions = {}): Promise<WatchEvent[]> {
-  const rows = await collectStatus(ctx, { progress: false });
+  // A closed task is off the list: no transitions, no notifications (closing a task with no report is not a vanished window).
+  const rows = (await collectStatus(ctx, { progress: false })).filter((r) => !r.closed);
   await decorateWindows(ctx, memory, rows);
   const now = ctx.runner.now();
   const events = detectTransitions(memory, rows, now, ctx.config.watch.waitingAfter * 1000);

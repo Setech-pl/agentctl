@@ -33,6 +33,8 @@ export async function listTargets(ctx: Context): Promise<TaskTarget[]> {
   const known = new Set<string>();
   for (const record of listTaskRecords(ctx.config)) {
     known.add(record.window);
+    // A closed task without a window is history: it must not make "ZOMBIE" ambiguous.
+    if (record.closed && !live.has(record.window)) continue;
     targets.push({ task: record.task, window: record.window, alive: live.has(record.window) });
   }
   for (const window of [...live].sort()) {

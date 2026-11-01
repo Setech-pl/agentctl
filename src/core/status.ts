@@ -10,7 +10,7 @@ import type { TaskState } from './state.ts';
 import { taskProgress } from './progress.ts';
 import type { Progress } from './progress.ts';
 import { lastContentLine } from './tmux.ts';
-import { listTaskRecords } from './taskstore.ts';
+import { listArchivedRecords, listTaskRecords } from './taskstore.ts';
 import { BOARD_WINDOW } from './windows.ts';
 import { WATCH_WINDOW } from './watch.ts';
 import { formatDuration, formatLocalTime, shellQuote } from './util.ts';
@@ -55,7 +55,14 @@ export interface StatusRow {
   finished: boolean;
   /** Hidden from board and status: by `agentctl hide`, or by itself (`auto`: no window and the report was pulled). The task and its worktree are untouched. */
   hidden: boolean;
-  hiddenBy: 'user' | 'auto' | null;
+  /** `closed`: `agentctl close` ran and the window is gone, or the state folder is in the archive. */
+  hiddenBy: 'user' | 'auto' | 'closed' | null;
+  /** The task was closed (`agentctl close`) and has no window: state `closed`, listed only by `status --all`. */
+  closed: boolean;
+  /** ISO time of the `close`; null when not closed (or an archived folder that does not say). */
+  closedAt: string | null;
+  /** The state folder sits in the archive (`agentctl archive`, or moved there by hand). */
+  archived: boolean;
 }
 
 /** The rows `status` and the board show: without the hidden ones unless `all`. */
@@ -71,6 +78,8 @@ export function guessAgent(screen: string): AgentName {
 export interface CollectOptions {
   /** Ask git for the progress of each worktree (default). The watcher and the close plan have no use for it. */
   progress?: boolean;
+  /** Also the tasks whose state folder was moved to the archive (`status --all`, the board). */
+  archived?: boolean;
 }
 
 export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Promise<StatusRow[]> {
@@ -79,8 +88,14 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
   const live = new Set(infos.map((w) => w.plain));
   const rows: StatusRow[] = [];
   const knownWindows = new Set<string>();
-  for (const record of listTaskRecords(config)) {
-    knownWindows.add(record.window);
+  const records = listTaskRecords(config).map((record) => ({ record, archived: false }));
+  if (opts.archived) {
+    // A folder in the archive counts as closed. A live window or a current state folder of the same name wins over it.
+    const current = new Set(records.map((r) => r.record.window));
+    for (const record of listArchivedRecords(config)) if (!current.has(record.window) && !live.has(record.window)) records.push({ record, archived: true });
+  }
+  for (const { record, archived } of records) {
+    if (!archived) knownWindows.add(record.window);
     const alive = live.has(record.window);
     const startedMs = Date.parse(record.started);
     let reportMtime: number | undefined;
@@ -105,8 +120,9 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     const settings = config.agents[screenAgent];
     const stored = alive ? readStoredEvent(config, record) : undefined;
     const pulled = record.pulled && reportMtime !== undefined && Date.parse(record.pulled) >= reportMtime ? record.pulled : null;
-    const hiddenBy: StatusRow['hiddenBy'] = record.hidden === true ? 'user' : record.hidden === undefined && config.board.autoHidePulledDead && !alive && pulled !== null ? 'auto' : null;
-    const state: TaskState = record.supersededBy ? 'superseded' : taskState({ alive, screen: screenText, settings, reportReady, event: stored?.outcome });
+    const closed = archived || (record.closed === true && !alive);
+    const hiddenBy: StatusRow['hiddenBy'] = closed ? 'closed' : record.hidden === true ? 'user' : record.hidden === undefined && config.board.autoHidePulledDead && !alive && pulled !== null ? 'auto' : null;
+    const state: TaskState = closed ? 'closed' : record.supersededBy ? 'superseded' : taskState({ alive, screen: screenText, settings, reportReady, event: stored?.outcome });
     rows.push({
       task: record.task,
       agent: record.agent,
@@ -133,6 +149,9 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       finished: !alive || state === 'superseded',
       hidden: hiddenBy !== null,
       hiddenBy,
+      closed,
+      closedAt: closed ? (record.closedAt ?? null) : null,
+      archived,
     });
   }
   // Windows of the session that agentctl has no state file for: never skipped silently.
@@ -168,15 +187,18 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       finished: false,
       hidden: false,
       hiddenBy: null,
+      closed: false,
+      closedAt: null,
+      archived: false,
     });
   }
   return rows;
 }
 
 /** `status`: collect the rows and, when `mirror_dir` is configured, copy new reports and status.json there. */
-export async function reportStatus(ctx: Context): Promise<{ rows: StatusRow[]; mirror: MirrorResult | undefined }> {
-  const rows = await collectStatus(ctx);
-  return { rows, mirror: await syncMirror(ctx, rows) };
+export async function reportStatus(ctx: Context, opts: { archived?: boolean } = {}): Promise<{ rows: StatusRow[]; mirror: MirrorResult | undefined }> {
+  const rows = await collectStatus(ctx, { archived: Boolean(opts.archived) });
+  return { rows, mirror: await syncMirror(ctx, rows.filter((r) => !r.archived)) };
 }
 
 /** Compact Markdown table of all tasks, to paste at the start of a planning chat. */

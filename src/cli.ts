@@ -8,6 +8,7 @@ import { renderChecks, renderStatusHints, renderStatusTable } from './render.ts'
 import { adoptTask } from './core/adopt.ts';
 import { attachTask, switchAttachedClient } from './core/attach.ts';
 import { Alerts } from './core/alert.ts';
+import { archiveClosed, parseAge } from './core/archive.ts';
 import { setHidden } from './core/hide.ts';
 import { handleEvent } from './core/event-command.ts';
 import { CLAUDE_KINDS, parseJson } from './core/events.ts';
@@ -297,13 +298,13 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('--json', 'machine-readable output')
     .option('--clip', 'copy a compact Markdown table to the clipboard (to paste at the start of a chat session)')
     .option('--tmux-line', 'one short line for the tmux status bar, like "2⚙ 1✓ 1?" (tasks per state)')
-    .option('--all', 'also the hidden tasks (see "agentctl hide")')
+    .option('--all', 'also the hidden and the closed tasks (see "agentctl hide", "agentctl close"), archived ones included')
     .action(
       guarded(async (opts: { json?: boolean; clip?: boolean; tmuxLine?: boolean; all?: boolean }) => {
         if ([opts.json, opts.clip, opts.tmuxLine].filter(Boolean).length > 1) throw new AgentctlError('--json, --clip and --tmux-line exclude each other');
         if (opts.tmuxLine) return line(await statusTmuxLine(contextFor(false, { migrate: false })));
         const ctx = contextFor(false);
-        const { rows: allRows } = await reportStatus(ctx);
+        const { rows: allRows } = await reportStatus(ctx, { archived: Boolean(opts.all) });
         const rows = shownRows(allRows, Boolean(opts.all));
         const hiddenCount = allRows.length - rows.length;
         if (opts.clip) {
@@ -318,6 +319,22 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         for (const l of renderStatusTable(rows)) line(l);
         for (const l of renderStatusHints(rows)) line(`hint: ${l}`);
         if (hiddenCount > 0) line(`${hiddenCount} hidden task${hiddenCount === 1 ? '' : 's'} not shown: agentctl status --all`);
+      }),
+    );
+
+  program
+    .command('archive')
+    .description('Move the state of closed tasks (agentctl close) to the archive folder next to the state folder. Reports and worktrees are not touched.')
+    .option('--older-than <age>', 'only tasks closed at least this long ago: 30m, 12h, 7d, 2w')
+    .option('--dry-run', 'print the moves, do nothing')
+    .action(
+      guarded(async (opts: { olderThan?: string; dryRun?: boolean }) => {
+        const olderThanMs = opts.olderThan === undefined ? undefined : parseAge(opts.olderThan);
+        const ctx = contextFor(Boolean(opts.dryRun), { migrate: false });
+        const result = await archiveClosed(ctx, { olderThanMs });
+        for (const m of result.moved) line(`${m.task}: state moved to ${m.to}`);
+        for (const k of result.kept) line(`${k.task}: kept (${k.reason})`);
+        if (result.moved.length === 0 && result.kept.length === 0) line('No closed tasks to archive.');
       }),
     );
 

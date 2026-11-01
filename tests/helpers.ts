@@ -1,11 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { after } from 'node:test';
+import { main } from '../src/cli.ts';
+import type { CliDeps } from '../src/cli.ts';
 import { loadGlobalConfig } from '../src/core/config.ts';
 import type { GlobalConfig } from '../src/core/config.ts';
 import { Context } from '../src/core/context.ts';
 import { RecordingRunner } from '../src/core/runner.ts';
-import type { ExecOptions, ExecResult, RecordingOptions } from '../src/core/runner.ts';
+import type { ExecOptions, ExecResult, RecordingOptions, Runner } from '../src/core/runner.ts';
 import { renderTaskMd, taskDir, taskFile } from '../src/core/taskstore.ts';
 import type { TaskRecord } from '../src/core/taskstore.ts';
 
@@ -179,4 +181,22 @@ export class DiskRunner extends RecordingRunner {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.appendFileSync(file, content);
   }
+
+  override async rename(from: string, to: string): Promise<void> {
+    await super.rename(from, to);
+    fs.mkdirSync(path.dirname(to), { recursive: true });
+    fs.renameSync(from, to);
+  }
+}
+
+/** Run the CLI with `runner` for every command; returns the exit code and what was printed. */
+export async function runCli(config: GlobalConfig, runner: Runner, argv: string[], extra: Partial<CliDeps> = {}): Promise<{ code: number; stdout: string; stderr: string }> {
+  const out: string[] = [];
+  const err: string[] = [];
+  const deps: CliDeps = {
+    stdout: (t) => out.push(t), stderr: (t) => err.push(t), readStdin: () => '', stdinIsTTY: false, loadConfig: () => config,
+    confirm: undefined, readClipboard: async () => '', watchCommand: () => 'agentctl watch', boardCommand: () => 'agentctl board', makeRunner: () => runner, ...extra,
+  };
+  const code = await main(argv, deps);
+  return { code, stdout: out.join(''), stderr: err.join('') };
 }

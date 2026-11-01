@@ -34,6 +34,8 @@ export interface Runner {
   writeFile(file: string, content: string): Promise<void>;
   appendFile(file: string, content: string): Promise<void>;
   copyFile(src: string, dest: string): Promise<void>;
+  /** Move a file or directory (same file system). */
+  rename(from: string, to: string): Promise<void>;
   /** Create `linkPath` pointing at `target`, replacing an existing symlink. */
   symlink(target: string, linkPath: string): Promise<void>;
   /** Wait `ms`; aborting `signal` ends the wait early. */
@@ -94,6 +96,11 @@ export class RealRunner implements Runner {
   async copyFile(src: string, dest: string): Promise<void> {
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.copyFileSync(src, dest);
+  }
+
+  async rename(from: string, to: string): Promise<void> {
+    fs.mkdirSync(path.dirname(to), { recursive: true });
+    fs.renameSync(from, to);
   }
 
   async symlink(target: string, linkPath: string): Promise<void> {
@@ -207,6 +214,10 @@ export class RecordingRunner implements Runner {
 
   async copyFile(src: string, dest: string): Promise<void> {
     this.record(`cp ${shellLine(src, [])} ${shellLine(dest, [])}`);
+  }
+
+  async rename(from: string, to: string): Promise<void> {
+    this.record(`mv ${shellLine(from, [])} ${shellLine(to, [])}`);
   }
 
   async symlink(target: string, linkPath: string): Promise<void> {
