@@ -282,6 +282,26 @@ describe('agentctl event and watch: one transition, one notification', () => {
     assert.equal(t.notifier.messages[1], 'NC-1: claude wyczerpał limit użycia – agentctl move NC-1 przeniesie zadanie na codex');
   });
 
+  it('an orphan window is notified without a state folder being made for it', async () => {
+    const t = setup('dup7');
+    t.fake.add('stray', IDLE);
+    const memory = new WatchMemory();
+    await watchTick(t.ctx, memory, t.notifier);
+    t.fake.windows[1]!.screen = IDLE;
+    const second = setup('dup7b');
+    second.fake.add('stray', IDLE);
+    await watchTick(second.ctx, new WatchMemory(), second.notifier);
+    assert.equal(fs.existsSync(path.join(second.config.stateDir, 'stray')), false);
+    // a stray window that appears later is announced
+    const late = setup('dup7c');
+    const m = new WatchMemory();
+    await watchTick(late.ctx, m, late.notifier);
+    late.fake.add('stray', IDLE);
+    await watchTick(late.ctx, m, late.notifier);
+    assert.match(late.notifier.messages[0] as string, /^STRAY: okno bez pliku stanu \(orphan\)/);
+    assert.equal(fs.existsSync(path.join(late.config.stateDir, 'stray')), false);
+  });
+
   it('the ledger lives next to the task state', () => {
     const t = setup('dup6');
     assert.equal(ledgerPath(t.ctx, 'nc-1'), path.join(t.config.stateDir, 'nc-1', 'notified.json'));

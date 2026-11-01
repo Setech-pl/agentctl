@@ -4,7 +4,7 @@ import type { Context } from './context.ts';
 import { terminalAppFor } from './notify.ts';
 import type { Notifier, NotifyClick } from './notify.ts';
 import type { SelfArgv } from './events.ts';
-import { taskDir } from './taskstore.ts';
+import { taskDir, taskFile } from './taskstore.ts';
 import { isObject, shellLine } from './util.ts';
 
 /** Title of every notification. */
@@ -99,8 +99,11 @@ export class Alerts {
     if (this.isDuplicate(target, state, source)) return 'duplicate';
     const { click, text: message } = await this.clickFor(target, text);
     await this.notifier.notify(ALERT_TITLE, message, click);
-    const ledger: Ledger = { state, source, at: this.ctx.runner.now() };
-    await this.ctx.runner.writeFile(ledgerPath(this.ctx, target.window), `${JSON.stringify(ledger)}\n`);
+    // An orphan window has no state folder, and one is not made for it.
+    if (fs.existsSync(taskFile(this.ctx.config, target.window))) {
+      const ledger: Ledger = { state, source, at: this.ctx.runner.now() };
+      await this.ctx.runner.writeFile(ledgerPath(this.ctx, target.window), `${JSON.stringify(ledger)}\n`);
+    }
     return 'sent';
   }
 }
