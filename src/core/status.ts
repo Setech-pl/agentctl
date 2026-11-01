@@ -119,7 +119,8 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     const screenAgent = record.agent === 'unknown' ? guessAgent(screenText) : record.agent;
     const settings = config.agents[screenAgent];
     const stored = alive ? readStoredEvent(config, record) : undefined;
-    const pulled = record.pulled && reportMtime !== undefined && Date.parse(record.pulled) >= reportMtime ? record.pulled : null;
+    // mtimeMs has a fraction, the stored time only whole milliseconds: a pull in the same millisecond as the report still counts.
+    const pulled = record.pulled && reportMtime !== undefined && Date.parse(record.pulled) >= Math.floor(reportMtime) ? record.pulled : null;
     const closed = archived || (record.closed === true && !alive);
     const hiddenBy: StatusRow['hiddenBy'] = closed ? 'closed' : record.hidden === true ? 'user' : record.hidden === undefined && config.board.autoHidePulledDead && !alive && pulled !== null ? 'auto' : null;
     const state: TaskState = closed ? 'closed' : record.supersededBy ? 'superseded' : taskState({ alive, screen: screenText, settings, reportReady, event: stored?.outcome });
