@@ -5,7 +5,7 @@ You write a **spec** (a Markdown file: YAML header + prompt). `agentctl new` tur
 environment variables, a tmux window with the agent already running, and your prompt pasted in.
 
 ```
-spec.md ──► git worktree ──► symlinks ──► TASK.md in the cache ──► tmux window ──► agent ──► prompt pasted
+spec.md ──► git worktree ──► symlinks ──► TASK.md in the state dir ──► tmux window ──► agent ──► prompt pasted
 ```
 
 It is deliberately small: Node core plus two dependencies (`commander`, `yaml`), no build step, no daemon.
@@ -22,6 +22,9 @@ npm install
 npm link            # puts `agentctl` on your PATH
 agentctl doctor     # checks tmux, node, claude, codex, gh, the cache directory and configs
 ```
+
+That is fine to try it out. For daily use install a **stable copy** instead, so that a half-finished branch of the repo is never what
+your global `agentctl` runs: see [Stable install and updates](#stable-install-and-updates).
 
 Without `npm link` you can run `npx agentctl …` or `node bin/agentctl.ts …` from the checkout.
 
@@ -56,16 +59,16 @@ chat gives a spec ─► agentctl new --clip ─► agentctl watch notifies ─�
 1. **The chat gives a spec.** Copy the one code block.
 2. **`agentctl new --clip`** reads it from the clipboard (`pbpaste`; `wl-paste` or `xclip` on Linux), prints a summary
    (task, agent/model/effort, worktree, branch, setup, links) and asks `Start? [y/N]`. `-y` skips the question.
-   An empty clipboard or text without a `---` YAML header is a plain error. The spec is stored in `<cache>/<task>/TASK.md` as usual.
+   An empty clipboard or text without a `---` YAML header is a plain error. The spec is stored in `<state_dir>/<task>/TASK.md` as usual.
    `agentctl send --clip` does the same for a follow-up prompt.
 3. **`agentctl watch`** runs in its own tmux window called `watch` (`agentctl watch --tmux` creates it if it does not exist and
    never starts a second one). Every `watch.interval` seconds (default 15) it computes the [state](#task-states) of all tasks and sends **one**
    desktop notification per transition (macOS notification with a sound via `osascript`; `notify-send` on Linux):
-   `NC-42: raport gotowy`, `NC-42 czeka na Ciebie` (waiting longer than `watch.waiting_after`, default 120 s), `needs-trust`, and `dead`
+   `NC-42: raport gotowy`, `NC-42 czeka na Ciebie` (waiting longer than `watch.waiting_after`, default 120 s), `needs-trust`, `needs-input` (the agent asked you a question), `orphan` (a window without a state file, see [Lost state](#lost-state-orphans-and-adopt)) and `dead`
    (window gone without a report). The first poll only records the current states, so starting the watcher does not replay old news.
    Transitions are logged to `<cache>/agentctl-watch.log`.
 4. **`agentctl pull --ready`** joins every report in state `report-ready` that you have not pulled yet into one text, each under
-   `=== NC-42 (claude opus/high) ===`, copies it to the clipboard and marks those tasks as pulled (`pulled:` in the `TASK.md` header;
+   `=== NC-42 (claude opus/high) ===`, copies it to the clipboard and marks those tasks as pulled (`pulled:` in the `TASK.md` header in the state dir;
    a report the agent rewrites later counts as new again). It lists what it took and the total size, and warns above 100 KB.
    `--all` ignores the mark. Nothing is marked if the copy fails.
 5. **Paste into the chat.** The chat judges the reports; agentctl never gives verdicts.
@@ -126,7 +129,7 @@ Second spec in the same file.
 
 | Key | Required | Meaning |
 |---|---|---|
-| `task` | yes | Task ID, UPPERCASE letters/digits/`-`/`_`, starting with a letter (`NC-42`). The tmux window is the lowercase ID (`nc-42`); the cache folder is `<cache>/nc-42/`. |
+| `task` | yes | Task ID, UPPERCASE letters/digits/`-`/`_`, starting with a letter (`NC-42`). The tmux window is the lowercase ID (`nc-42`); the report folder is `<cache>/nc-42/`, agentctl's own state `<state_dir>/nc-42/`. |
 | `agent` | yes* | `claude` or `codex`. (*or `defaults.agent` in a config) |
 | `model` | no | Model name passed to the agent (`--model` / `-m`). Omitted or `default`: the agent's own default, no flag. |
 | `effort` | no | `low`, `medium`, `high`, `xhigh` or `max` (default `high`; Codex has no `max`). See [Effort](#effort). |
@@ -156,7 +159,7 @@ hint: Run "agentctl spec example" to see the format.
 `setup` is a list of shell commands (spec > project `.agentctl.yaml` > global config; the first layer that sets it wins, `setup: []` switches it off).
 `new` runs them in the first worktree, one `sh -c` each, in this order: `git worktree add` → **setup** → links → TASK.md → window → agent.
 
-- Output goes to `<cache>/<task>/setup.log`.
+- Output goes to `<state_dir>/<task>/setup.log`.
 - A failing command stops `new` with its exit code and the last 15 lines of output. The worktree stays, no window is created; fix the cause and run `agentctl new --reuse` (setup runs again).
 - `--dry-run` prints the commands as `(cd <worktree> && sh -c '…')`.
 - `new --no-agent` stops after setup and links: no TASK.md, window or agent. Handy to check a project's setup.
@@ -191,7 +194,8 @@ Set `AGENTCTL_HOME` to use another directory than `~/.agentctl`.
 
 ```yaml
 # ~/.agentctl/config.yaml
-cache: ~/Projects/cache        # task folders live here (default)
+cache: ~/Projects/cache        # report folders live here, <cache>/<task>/ (default); this is the only place agents write to
+state_dir: ~/.agentctl/tasks   # agentctl's own state per task: TASK.md, setup.log, markers (default; out of the agents' reach)
 session: agentctl              # tmux session name (default)
 limits:                        # max simultaneous windows per provider
   claude: 3
@@ -212,12 +216,16 @@ agents:
     # ready_pattern:   '^\s*❯\s(?!\d+\.)'                              # the input box, not a "❯ 1." menu line
     # trust_pattern:   'Quick safety check|Yes, I trust this folder'      # folder-trust dialog
     # working_pattern: 'esc to interrupt'                                 # a turn is running
+    # question_pattern: 'Enter to select\b.*Esc to cancel'                # the agent asks you something -> needs-input
+    # footer_patterns: ['\? for shortcuts', '^\s*(⏵⏵|⏸)', ...]            # TUI chrome that `status` skips for LAST LINE
   codex:
     flags: []
     interrupt_key: Escape
     # ready_pattern:   '^›\s(?!\d+\.)|\? for shortcuts'
     # trust_pattern:   'Trust this folder\?|Folder settings can run code automatically'
     # working_pattern: 'esc to interrupt'
+    # question_pattern: 'Waiting for your answer|^\s*\?\s+\d+ questions?\b|to answer\s*$'
+    # footer_patterns: ['\? for shortcuts', '⚠ \d+ warnings?', 'f2 to view', ...]
     # effort_args: ['-c', 'model_reasoning_effort={effort}']   # override if your version differs
 ```
 
@@ -254,10 +262,11 @@ mechanism it detects.
 
 | Command | What it does |
 |---|---|
-| `agentctl new [file\|-] [--clip [-y]] [--dry-run] [--reuse] [--agent claude\|codex] [--no-switch] [--no-wait-trust] [--no-agent]` | For each spec: `git worktree add` (error if the worktree exists, unless `--reuse`), the [setup](#setup) commands, symlinks, `<cache>/<task>/TASK.md`, a tmux window named after the task in session `agentctl` (created if missing), starts the agent in the first worktree with the env, waits for the agent's prompt (polling `tmux capture-pane`; a folder-trust dialog is waited out, see [Folder trust](#folder-trust)), pastes the prompt as one bracketed paste (`tmux load-buffer -` + `paste-buffer -p`), then sends Enter separately. Everything is validated before anything starts. `--agent` runs the specs on that provider (see [Model equivalents](#model-equivalents)). `--no-agent` stops after setup and links. `--clip` reads the spec from the clipboard, shows a summary and asks y/N (`-y` skips). |
+| `agentctl new [file\|-] [--clip [-y]] [--dry-run] [--reuse] [--agent claude\|codex] [--no-switch] [--no-wait-trust] [--no-agent]` | For each spec: `git worktree add` (error if the worktree exists, unless `--reuse`), the [setup](#setup) commands, symlinks, `<state_dir>/<task>/TASK.md`, a tmux window named after the task in session `agentctl` (created if missing), starts the agent in the first worktree with the env, waits for the agent's prompt (polling `tmux capture-pane`; a folder-trust dialog is waited out, see [Folder trust](#folder-trust)), pastes the prompt as one bracketed paste (`tmux load-buffer -` + `paste-buffer -p`), then sends Enter separately. Everything is validated before anything starts. `--agent` runs the specs on that provider (see [Model equivalents](#model-equivalents)). `--no-agent` stops after setup and links. `--clip` reads the spec from the clipboard, shows a summary and asks y/N (`-y` skips). |
 | `agentctl send [file\|-] [--clip [-y]] [--dry-run]` | Paste a follow-up prompt into the existing window (`task` from the header; the rest of the header is ignored). Errors if the window does not exist. The prompt is appended to `TASK.md` with a timestamp. |
-| `agentctl status [--json] [--clip]` | Table: task, agent/model/effort (as ordered too, if switched), [state](#task-states), window alive?, start, duration, report present?, last non-empty line of the window. Refreshes the [mirror](#mirror) if configured. `--clip` copies a compact Markdown table (task, agent/model/effort, state, time, report, pulled?) to the clipboard. |
+| `agentctl status [--json] [--clip]` | Table: task, agent/model/effort (as ordered too, if switched), [state](#task-states), window alive?, start, duration, report present?, last line of real content in the window (the agent's footer lines such as `? for shortcuts`, mode and warning lines, and empty input prompts are skipped, see `footer_patterns`); start time in local time (`--json` keeps ISO UTC). A window of the session with no state file is listed as [`orphan`](#lost-state-orphans-and-adopt), never skipped. Refreshes the [mirror](#mirror) if configured. `--clip` copies a compact Markdown table (task, agent/model/effort, state, time, report, pulled?) to the clipboard. |
 | `agentctl pull <task>\|--ready [--all]` | Copies the report to the clipboard (`pbcopy` on macOS, `wl-copy` or `xclip` on Linux) and prints its path. No report yet: prints the last 40 lines of the window. Refreshes the [mirror](#mirror) if configured. `--ready` joins all not yet pulled `report-ready` reports into one text, copies it and marks them pulled; `--all` takes pulled ones too. See [Daily loop](#daily-loop). |
+| `agentctl adopt <task> --report <path> [--window <name>] [--worktree <path>] [--agent claude\|codex] [--model <m>] [--effort <e>] [--dry-run]` | Restores the state file of a task whose own got lost. Agent, model and effort default to `unknown`. See [Lost state](#lost-state-orphans-and-adopt). |
 | `agentctl watch [--tmux]` | Foreground loop that sends desktop notifications on state transitions, see [Daily loop](#daily-loop). `--tmux` runs it in window `watch` of the agentctl session. |
 | `agentctl interrupt <task> [--dry-run]` | Interrupts the current turn by sending the agent's interrupt key (default one `Escape`). The window stays open. See [Interrupt](#interrupt). |
 | `agentctl close <task...> [--rm-worktree] [-y] [--dry-run]` | Lists the tasks (flagging those without a report), asks y/N (`-y` skips), then `tmux kill-window` for each; one failure does not stop the others. With `--rm-worktree` also `git worktree remove` (no `--force`; branches are never deleted; a worktree with `main`/`master` checked out is refused). |
@@ -271,8 +280,9 @@ Lines starting with `#` are comments, `write`/`append` stand for file writes:
 $ agentctl new --dry-run nc-42.md
 git -C ~/Projects/neon-city worktree add -b nc-42-tram-bell ~/Projects/wt/neon-city-nc-42 master
 ln -sfn ~/Projects/wt/neon-city-backend-merge3/packages/protocol ~/Projects/wt/neon-city-nc-42/node_modules/@neon-city/protocol
+mkdir -p ~/.agentctl/tasks/nc-42
+write ~/.agentctl/tasks/nc-42/TASK.md (805 bytes)
 mkdir -p ~/Projects/cache/nc-42
-write ~/Projects/cache/nc-42/TASK.md (805 bytes)
 tmux new-session -d -s agentctl -n nc-42 -c ~/Projects/wt/neon-city-nc-42 -e NEON_CITY_TASK=NC-42
 tmux send-keys -t =agentctl:nc-42 -l -- 'claude --model opus --effort high'
 tmux send-keys -t =agentctl:nc-42 Enter
@@ -323,6 +333,20 @@ equivalents:
 - `TASK.md` and `status` keep both the **requested** and the **effective** agent/model/effort. `review_of` is checked on the
   effective values, after mapping: a reviewer pushed onto the author's agent and model is refused.
 
+### Lost state: orphans and adopt
+
+agentctl keeps its own files (`TASK.md`, `setup.log`, the `pulled` mark) in `state_dir` (default `~/.agentctl/tasks/<task>/`) and
+leaves `<cache>/<task>/` to the agent, which gets only the report path. Older versions kept everything in the cache folder, and a Codex
+agent that tidied up its folder deleted the `TASK.md`: the task vanished from `status`, `watch` and `pull`.
+
+- **Migration.** Every command (except `--dry-run`) first looks for `TASK.md` files that agentctl wrote in `<cache>/<task>/` and moves them,
+  with `setup.log`, to `<state_dir>/<task>/`, printing one `migration: moved …` line per task. Existing state is never overwritten.
+- **Orphans.** A tmux window in the agentctl session (other than `watch`) without a state file shows up in `status` as state `orphan`
+  with a hint line, and `watch` notifies about it once.
+- **Adopt.** `agentctl adopt NC-42 --report ~/Projects/cache/nc-42/NC-42.md` writes a new state file. The prompt is lost, and so are
+  agent, model and effort unless you pass `--agent`, `--model`, `--effort` (they show as `unknown`). Add `--worktree <path>` so that
+  `close --rm-worktree` knows the worktree. `--window <name>` if the window is not the lowercase task ID. It refuses when a state file exists.
+
 ### Interrupt
 
 `agentctl interrupt NC-42` sends the agent's interrupt key (`agents.<name>.interrupt_key`, default `Escape` for both) to the
@@ -339,10 +363,12 @@ opens "edit previous message". `--dry-run` prints the `tmux send-keys` it would 
 | `working` | a turn is running (`working_pattern`, default `esc to interrupt`) |
 | `waiting` | the agent is idle at its prompt and there is no report yet |
 | `needs-trust` | the agent shows its folder-trust dialog; a human must answer it |
+| `needs-input` | the agent asked **you** a question and waits (`question_pattern`; Codex: `? <question>` with options and `• Waiting for your answer.`, Claude Code: the `Enter to select · Esc to cancel` dialog) |
 | `report-ready` | the report file exists and is newer than the start (the agent is idle, or the window is gone) |
 | `dead` | the window is gone and there is no report |
+| `orphan` | a window of the agentctl session has no state file (lost or never created) |
 
-Precedence for a live window: `needs-trust`, then `working`, then `report-ready`, then `waiting`.
+Precedence for a live window: `needs-trust`, then `needs-input`, then `working`, then `report-ready`, then `waiting`.
 These are heuristics on screen text; if a CLI update changes its wording, adjust the patterns in the config.
 
 ### Folder trust
@@ -382,13 +408,14 @@ when you call `status` or `pull`.
 
 - `git` is only ever called with `worktree add`, `worktree remove`, and read-only queries (`rev-parse`). No merge, rebase, push, `--force` or branch deletion.
 - No auto-accept mode: agentctl adds no such flag and rejects configs that try to. Your own agent settings still apply (for example a default permission mode in `~/.claude/settings.json`); agentctl does not override them.
-- Working files go to the cache directory only (`TASK.md`, reports). Nothing is written to `~/.claude` or `/tmp`.
+- Files go to `state_dir` (agentctl's own state) and the cache directory (reports) only. Nothing is written to `~/.claude` or `/tmp`.
+- Messages that name a tmux target quote it (`-t '=agentctl:nc-42'`): zsh expands a word starting with `=` to a program path.
 - Error messages are short and say what to do next.
 
 ### Window limits and cross-review
 
 - `limits.<agent>` caps simultaneous tmux windows per provider; the error lists the live windows. Windows are attributed to a provider through their `TASK.md`.
-- `review_of: NC-6` looks up the author in `<cache>/nc-6/TASK.md` (or in the same file) and requires a different agent **or** a different model. `default` counts as a model name of its own.
+- `review_of: NC-6` looks up the author in `<state_dir>/nc-6/TASK.md` (or in the same file) and requires a different agent **or** a different model. `default` counts as a model name of its own.
 
 ## Example: Neon City
 
@@ -452,12 +479,40 @@ things a window manager does not know about:
 - **Agent flags**: model, effort, sandbox and your default flags per agent, with a guard against auto-accept.
 - **A cross-review rule**: `review_of` refuses to let the same agent *and* model grade its own homework.
 - **Per-provider window limits**: at most N Claude and M Codex windows at once, with a clear error that lists who holds them.
-- **A paper trail**: `TASK.md` in the cache records the spec, start time, and every follow-up prompt.
+- **A paper trail**: `TASK.md` in the state dir records the spec, start time, and every follow-up prompt.
+
+## Stable install and updates
+
+Use a **stable copy** for daily work and keep `~/Projects/agentctl` for development only. (`npm link` from the repo made the global
+`agentctl` run whatever branch was checked out there, finished or not.) The stable copy is a detached git worktree of the repo,
+by default `~/Projects/agentctl-stable`; `bin/agentctl-update` creates and updates it.
+
+```sh
+~/Projects/agentctl/bin/agentctl-update     # first installation
+agentctl-update                             # later, after a PR is merged
+```
+
+It does, in this order: `git fetch origin` in the repo; `git worktree add --detach <stable> <ref>` (or, when the copy exists, a refusal
+if it has local changes, else `git checkout --detach <ref>`); `npm ci` and `npm link` in the stable copy, so the global `agentctl` and
+`agentctl-update` point at it; `agentctl doctor` (a failure makes the script exit non-zero); if window `watch` exists in the tmux session
+`agentctl`, it kills that window and starts `agentctl watch --tmux` from the new version (no other window is touched); finally it prints the
+previous and new commit and whether watch was restarted.
+
+| Option / variable | Meaning |
+|---|---|
+| `--ref <ref>` | what to install, default `origin/main` |
+| `--dry-run` | print the commands, run none |
+| `--no-watch` | do not restart the watch window |
+| `--no-link` | skip `npm link` (for testing the script without re-pointing the global commands) |
+| `AGENTCTL_REPO` | the repo; default: the directory above the script's `bin/` (symlinks resolved) |
+| `AGENTCTL_STABLE_DIR` | the stable copy, default `~/Projects/agentctl-stable` |
+| `AGENTCTL_SESSION` | tmux session of the watch window, default `agentctl` |
 
 ## Development
 
 ```sh
 npm test            # node:test, no real tmux/git/agents involved
+npm run typecheck   # tsc --noEmit
 ```
 
 The engine lives in `src/core/` and returns data (status rows, plans, results); `src/cli.ts` and `src/render.ts` are the thin
