@@ -64,6 +64,8 @@ export interface GlobalConfig extends Layer {
   equivalents: Equivalent[];
   /** When set, reports and status.json are copied here by status/pull. */
   mirrorDir?: string;
+  /** `agentctl watch`: poll interval and how long an idle task may wait before it is worth a notification. */
+  watch: { interval: number; waitingAfter: number };
   /** Where the config was (or would be) read from. */
   path: string;
   loaded: boolean;
@@ -95,7 +97,7 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
 };
 
 const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'setup', 'defaults'];
-const GLOBAL_KEYS = [...LAYER_KEYS, 'cache', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir'];
+const GLOBAL_KEYS = [...LAYER_KEYS, 'cache', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch'];
 
 /** Screen patterns are case-insensitive and match per line. */
 export const PATTERN_FLAGS = 'im';
@@ -242,6 +244,24 @@ function parseAgentSettings(name: AgentName, v: unknown, where: string, p: Probl
   return settings;
 }
 
+export const DEFAULT_WATCH = { interval: 15, waitingAfter: 120 };
+
+function parseWatch(v: unknown, p: Problems): GlobalConfig['watch'] {
+  const watch = { ...DEFAULT_WATCH };
+  if (v === undefined || v === null) return watch;
+  if (!isObject(v)) {
+    p.add('config.watch must be a mapping like {interval: 15, waiting_after: 120}');
+    return watch;
+  }
+  checkKeys(v, ['interval', 'waiting_after'], 'config.watch', p);
+  for (const [key, field] of [['interval', 'interval'], ['waiting_after', 'waitingAfter']] as const) {
+    if (v[key] === undefined) continue;
+    if (typeof v[key] === 'number' && v[key] > 0) watch[field] = v[key];
+    else p.add(`config.watch.${key} must be a positive number of seconds`);
+  }
+  return watch;
+}
+
 function readYamlFile(file: string): unknown {
   let text: string;
   try {
@@ -297,9 +317,10 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
 
   const equivalents = [...parseEquivalents(raw.equivalents, 'config.equivalents', p), ...parseEquivalents(DEFAULT_EQUIVALENTS, 'defaults', p)];
   const mirror = parseString(raw.mirror_dir, 'config.mirror_dir', p);
+  const watch = parseWatch(raw.watch, p);
 
   p.throwIfAny(`Invalid config ${file}:`, 'Fix the listed keys; see the README section "Configuration".');
-  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), session, limits, agents, equivalents, path: file, loaded: exists };
+  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), session, limits, agents, equivalents, watch, path: file, loaded: exists };
   if (mirror) config.mirrorDir = resolvePath(mirror);
   return config;
 }
