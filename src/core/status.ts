@@ -5,6 +5,8 @@ import { syncMirror } from './mirror.ts';
 import type { MirrorResult } from './mirror.ts';
 import { taskState } from './state.ts';
 import type { TaskState } from './state.ts';
+import { taskProgress } from './progress.ts';
+import type { Progress } from './progress.ts';
 import { lastContentLine } from './tmux.ts';
 import { listTaskRecords } from './taskstore.ts';
 import { BOARD_WINDOW } from './board-window.ts';
@@ -36,6 +38,8 @@ export interface StatusRow {
   /** ISO time of the last pull that took the current report; null when never pulled or the report changed since. */
   pulled: string | null;
   lastLine: string;
+  /** Commits over the base and changed files per worktree ("2c 7f"); null when the task has no readable worktree. */
+  progress: Progress | null;
   /** What to do about this row (orphans: the adopt command); null otherwise. */
   hint: string | null;
 }
@@ -45,7 +49,12 @@ export function guessAgent(screen: string): AgentName {
   return /OpenAI Codex|^\s*›/m.test(screen) ? 'codex' : 'claude';
 }
 
-export async function collectStatus(ctx: Context): Promise<StatusRow[]> {
+export interface CollectOptions {
+  /** Ask git for the progress of each worktree (default). The watcher and the close plan have no use for it. */
+  progress?: boolean;
+}
+
+export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Promise<StatusRow[]> {
   const { runner, tmux, config } = ctx;
   const live = new Set(await tmux.listWindows());
   const rows: StatusRow[] = [];
@@ -91,6 +100,7 @@ export async function collectStatus(ctx: Context): Promise<StatusRow[]> {
       reportPath: record.report,
       pulled: record.pulled && reportMtime !== undefined && Date.parse(record.pulled) >= reportMtime ? record.pulled : null,
       lastLine: lastContentLine(screenText, settings.footerPatterns),
+      progress: opts.progress === false || record.repos.length === 0 ? null : await taskProgress(runner, record.repos),
       hint: null,
     });
   }
@@ -118,6 +128,7 @@ export async function collectStatus(ctx: Context): Promise<StatusRow[]> {
       reportPath: '',
       pulled: null,
       lastLine: lastContentLine(screenText, config.agents[agent].footerPatterns),
+      progress: null,
       hint: orphanHint(ctx, window),
     });
   }
@@ -135,9 +146,9 @@ export function statusMarkdown(rows: StatusRow[]): string {
   const cell = (s: string): string => s.replace(/\|/g, '\\|');
   const pulled = (r: StatusRow): string => (r.report === 'missing' ? '-' : r.pulled ? `yes (${formatLocalTime(r.pulled)})` : 'no');
   const lines = [
-    '| task | agent/model/effort | state | time | report | pulled? |',
-    '|---|---|---|---|---|---|',
-    ...rows.map((r) => `| ${cell(r.task)} | ${cell(`${r.agent}/${r.model}/${r.effort}`)} | ${r.state} | ${r.duration} | ${r.report} | ${pulled(r)} |`),
+    '| task | agent/model/effort | state | time | progress | report | pulled? |',
+    '|---|---|---|---|---|---|---|',
+    ...rows.map((r) => `| ${cell(r.task)} | ${cell(`${r.agent}/${r.model}/${r.effort}`)} | ${r.state} | ${r.duration} | ${r.progress?.text ?? '-'} | ${r.report} | ${pulled(r)} |`),
   ];
   return `${lines.join('\n')}\n`;
 }

@@ -3,7 +3,7 @@ import type { StatusRow } from './core/status.ts';
 
 /** Plain-text status table. The core returns rows (data); this is only presentation. */
 export function renderStatusTable(rows: StatusRow[], maxLast = 60): string[] {
-  const header = ['TASK', 'AGENT/MODEL/EFFORT', 'STATE', 'WINDOW', 'STARTED', 'DURATION', 'REPORT', 'LAST LINE'];
+  const header = ['TASK', 'AGENT/MODEL/EFFORT', 'STATE', 'WINDOW', 'STARTED', 'DURATION', 'PROGRESS', 'REPORT', 'LAST LINE'];
   const body = rows.map((r) => [
     r.task,
     r.switchedBy ? `${r.agent}/${r.model}/${r.effort} (ordered ${r.requested})` : `${r.agent}/${r.model}/${r.effort}`,
@@ -11,6 +11,7 @@ export function renderStatusTable(rows: StatusRow[], maxLast = 60): string[] {
     r.window,
     r.startedLocal,
     r.duration,
+    r.progress?.text ?? '-',
     r.report,
     r.lastLine.length > maxLast ? `${r.lastLine.slice(0, maxLast - 1)}…` : r.lastLine,
   ]);

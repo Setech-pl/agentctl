@@ -81,7 +81,7 @@ export async function planClose(ctx: Context, tasks: string[], opts: CloseOption
   const { tmux, config, runner } = ctx;
   const unique = [...new Set(tasks.map((t) => t.toUpperCase()))];
   const live = new Set(runner.dryRun ? [] : await tmux.listWindows());
-  const rows = new Map((await collectStatus(ctx)).map((r) => [r.task.toUpperCase(), r]));
+  const rows = new Map((await collectStatus(ctx, { progress: false })).map((r) => [r.task.toUpperCase(), r]));
   const p = new Problems();
   const items = unique.map((task): ClosePlanItem => {
     const window = windowName(task);
