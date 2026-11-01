@@ -172,7 +172,8 @@ export class Tmux {
 
   /** A tmux option of this session only (no `-g`: other sessions keep theirs). */
   setSessionOption(option: string, value: string): Promise<ExecResult> {
-    return this.runner.exec('tmux', ['set-option', '-t', `=${this.session}`, option, value]);
+    // set-option takes a pane target: "=session:" is that session's current pane, so the option lands on the session.
+    return this.runner.exec('tmux', ['set-option', '-t', `=${this.session}:`, option, value]);
   }
 
   /** Give a window a new name (the state icon in front of it, or the plain name again). `target` comes from `targetFor`. */

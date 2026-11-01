@@ -58,10 +58,18 @@ describe('applyStatusLine', () => {
     const { ctx, runner } = makeContext(config, { respond: tmux.respond });
     assert.equal(await applyStatusLine(ctx, 'agentctl status --tmux-line'), 'set');
     assert.deepEqual(runner.commands.map((c) => c.replaceAll("'", '')), [
-      'tmux set-option -t =agentctl status-right #(agentctl status --tmux-line)',
-      'tmux set-option -t =agentctl status-interval 10',
+      'tmux set-option -t =agentctl: status-right #(agentctl status --tmux-line)',
+      'tmux set-option -t =agentctl: status-interval 10',
     ]);
     assert.ok(!runner.commands.some((c) => /\s-g\b/.test(c)), 'never global');
+  });
+
+  it('reports a set-option that tmux refuses instead of claiming success', async () => {
+    const config = makeConfig(scratch.sub('sl3'));
+    const tmux = new FakeTmux();
+    tmux.add('watch');
+    const { ctx } = makeContext(config, { respond: (cmd, args, opts) => (args[0] === 'set-option' ? { code: 1, stderr: 'no such session: =agentctl' } : tmux.respond(cmd, args, opts)) });
+    assert.deepEqual(await applyStatusLine(ctx, 'agentctl status --tmux-line'), { failed: 'tmux set-option status-right: no such session: =agentctl' });
   });
 
   it('does nothing without a session, and for a command that cannot go into #( )', async () => {
@@ -120,8 +128,8 @@ describe('through the CLI', () => {
     const r = await cli(on.config, on.runner, ['watch', '--tmux']);
     assert.equal(r.code, 0, r.stderr);
     const cmds = on.runner.commands.map((c) => c.replaceAll("'", ''));
-    assert.ok(cmds.includes('tmux set-option -t =agentctl status-right #(agentctl status --tmux-line)'), cmds.join('\n'));
-    assert.ok(cmds.includes('tmux set-option -t =agentctl status-interval 10'));
+    assert.ok(cmds.includes('tmux set-option -t =agentctl: status-right #(agentctl status --tmux-line)'), cmds.join('\n'));
+    assert.ok(cmds.includes('tmux set-option -t =agentctl: status-interval 10'));
     assert.match(r.stdout, /this session only/);
 
     const flag = setup('cl4');
