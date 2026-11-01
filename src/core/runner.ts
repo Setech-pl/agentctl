@@ -123,6 +123,8 @@ export class RecordingRunner implements Runner {
   readonly notes: string[] = [];
   /** Content of every file the run would have written, by path. */
   readonly written = new Map<string, string>();
+  /** Everything the run would have appended to files, by path. */
+  readonly appended = new Map<string, string>();
   private clock: number;
   private respond: RecordingOptions['respond'];
   private emit: RecordingOptions['emit'];
@@ -171,6 +173,7 @@ export class RecordingRunner implements Runner {
   }
 
   async appendFile(file: string, content: string): Promise<void> {
+    this.appended.set(file, (this.appended.get(file) ?? '') + content);
     this.record(`append ${shellLine(file, [])} (${Buffer.byteLength(content)} bytes)`);
   }
 

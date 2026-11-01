@@ -190,6 +190,8 @@ describe('agentctl new: --no-wait-trust and Ctrl-C through the CLI', () => {
       loadConfig: () => config,
       confirm: undefined,
       makeRunner: () => runner,
+      readClipboard: async () => '',
+      watchCommand: () => 'agentctl watch',
       ...deps,
     };
     return main(argv, full).then((code) => ({ code, stdout: stdout.join(''), stderr: stderr.join('') }));
