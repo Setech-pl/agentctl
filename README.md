@@ -63,9 +63,10 @@ chat gives a spec ─► agentctl new --clip ─► agentctl watch notifies ─�
    `agentctl send --clip` does the same for a follow-up prompt.
 3. **`agentctl watch`** runs in its own tmux window called `watch` (`agentctl watch --tmux` creates it if it does not exist and
    never starts a second one). Every `watch.interval` seconds (default 15) it computes the [state](#task-states) of all tasks and sends **one**
-   desktop notification per transition (macOS notification with a sound via `osascript`; `notify-send` on Linux):
-   `NC-42: raport gotowy`, `NC-42 czeka na Ciebie` (waiting longer than `watch.waiting_after`, default 120 s), `needs-trust`, `needs-input` (the agent asked you a question), `orphan` (a window without a state file, see [Lost state](#lost-state-orphans-and-adopt)) and `dead`
-   (window gone without a report). The first poll only records the current states, so starting the watcher does not replay old news.
+   desktop notification per transition, see [Notifications](#notifications): `NC-42: raport gotowy – Werdykt: PASS`, `NC-42 czeka na Ciebie` (waiting longer than `watch.waiting_after`, default 120 s),
+   `needs-trust`, `needs-input` (with the question), `limited` (usage limit used up, see [Limits and move](#limits-and-move)), `orphan` (a window without a state file, see [Lost state](#lost-state-orphans-and-adopt)) and `dead`
+   (window gone without a report). The agents also report a question or the end of a turn themselves, see [Events](#events); the watcher is the fallback that reads the screen, and one transition is announced once.
+   The first poll only records the current states, so starting the watcher does not replay old news.
    Transitions are logged to `<cache>/agentctl-watch.log`.
 4. **`agentctl pull --ready`** joins every report in state `report-ready` that you have not pulled yet into one text, each under
    `=== NC-42 (claude opus/high) ===`, copies it to the clipboard and marks those tasks as pulled (`pulled:` in the `TASK.md` header in the state dir;
@@ -208,6 +209,11 @@ watch:                         # `agentctl watch`, see "Daily loop"
   waiting_after: 120           # seconds a task may wait before it is worth a notification (default)
   window_icons: true           # state icon in front of the tmux window names; false = off, or a mapping: {working: "▶", needs-input: "❓"}
   status_line: true            # `watch --tmux` shows the task counts in the status bar of the agentctl session; false = leave it alone
+notify:                        # see "Events" and "Notifications"
+  events: true                 # the agents report questions, end of turn and limits to `agentctl event` (hooks / -c notify); false = screen reading only
+  turn_end: true               # a notification when a turn ends and the agent waits (false: only questions, reports and limits)
+  # terminal_app: com.apple.Terminal   # app a click on a notification brings forward; default: detected (Apple_Terminal, iTerm.app), else none
+  # verdict_pattern: '^Verdict: (.*)'  # regex for the report line in the "report ready" notification, see "Notifications"
 agents:
   claude:
     flags: []                  # extra flags appended to the claude command line
@@ -218,7 +224,8 @@ agents:
     # ready_pattern:   '^\s*❯\s(?!\d+\.)'                              # the input box, not a "❯ 1." menu line
     # trust_pattern:   'Quick safety check|Yes, I trust this folder'      # folder-trust dialog
     # working_pattern: 'esc to interrupt'                                 # a turn is running
-    # question_pattern: 'Enter to select\b.*Esc to cancel'                # the agent asks you something -> needs-input
+    # question_pattern: 'Enter to select\b.*Esc to cancel|Esc to cancel · Tab to amend'   # the agent asks you something -> needs-input
+    # limit_patterns: ["^[\\s⎿●•■⚠!*>-]*You.ve hit your .{0,60}limit", ...]            # usage limit used up -> limited, see "Limits and move"
     # footer_patterns: ['\? for shortcuts', '^\s*(⏵⏵|⏸)', ...]            # TUI chrome that `status` skips for LAST LINE
   codex:
     flags: []
@@ -226,7 +233,8 @@ agents:
     # ready_pattern:   '^›\s(?!\d+\.)|\? for shortcuts'
     # trust_pattern:   'Trust this folder\?|Folder settings can run code automatically'
     # working_pattern: 'esc to interrupt'
-    # question_pattern: 'Waiting for your answer|^\s*\?\s+\d+ questions?\b|to answer\s*$'
+    # question_pattern: 'Waiting for your answer|^\s*\?\s+\d+ questions?\b|to answer\s*$|Press enter to confirm or esc to cancel'
+    # limit_patterns: ["^[\\s⎿●•■⚠!*>-]*You.ve hit your usage limit", ...]
     # footer_patterns: ['\? for shortcuts', '⚠ \d+ warnings?', 'f2 to view', ...]
     # effort_args: ['-c', 'model_reasoning_effort={effort}']   # override if your version differs
 ```
@@ -269,13 +277,15 @@ mechanism it detects.
 | `agentctl status [--json] [--clip] [--tmux-line]` | Table: task, agent/model/effort (as ordered too, if switched), [state](#task-states), window alive?, start, duration, `PROGRESS` (`2c 7f`: 2 commits over the base, 7 changed files, see [Progress](#progress)), report present?, last line of real content in the window (the agent's footer lines such as `? for shortcuts`, mode and warning lines, and empty input prompts are skipped, see `footer_patterns`); start time in local time (`--json` keeps the UTC `started` and adds `startedLocal`). A window of the session with no state file is listed as [`orphan`](#lost-state-orphans-and-adopt), never skipped. Refreshes the [mirror](#mirror) if configured. `--clip` copies a compact Markdown table (task, agent/model/effort, state, time, progress, report, pulled?) to the clipboard. `--tmux-line` prints one short line for the tmux status bar, see [Window icons and the status bar](#window-icons-and-the-tmux-status-bar). |
 | `agentctl pull <task>\|--ready [--all]` | Copies the report to the clipboard (`pbcopy` on macOS, `wl-copy` or `xclip` on Linux) and prints its path. No report yet: prints the last 40 lines of the window. Refreshes the [mirror](#mirror) if configured. `--ready` joins all not yet pulled `report-ready` reports into one text, copies it and marks them pulled; `--all` takes pulled ones too. See [Daily loop](#daily-loop). |
 | `agentctl adopt <task> --report <path> [--window <name>] [--worktree <path>] [--agent claude\|codex] [--model <m>] [--effort <e>] [--dry-run]` | Restores the state file of a task whose own got lost. Agent, model and effort default to `unknown`. See [Lost state](#lost-state-orphans-and-adopt). |
-| `agentctl attach [task]` | Goes to the task's window: `attach-session` outside tmux, `switch-client` inside. See [Attach and peek](#attach-and-peek). |
+| `agentctl attach [task] [--switch-client]` | Goes to the task's window: `attach-session` outside tmux, `switch-client` inside. See [Attach and peek](#attach-and-peek). `--switch-client` is what a click on a notification runs: it switches the tmux client that is attached to the session and never attaches a terminal. |
+| `agentctl move <task> [--agent claude\|codex] [-y]` | Hands a task that hit its usage limit to the other provider: new window `<task>-2` in the same worktree, the original prompt plus a note to continue. Asks y/N. See [Limits and move](#limits-and-move). |
+| `agentctl event --task <task> --agent claude\|codex [--kind notification\|stop\|stop-failure] [--forward <json>] [payload]` | Not for you to type: the hooks and `notify` command that `new` sets up call it. Records the event, updates the task state and notifies at once. Always exits 0. See [Events](#events). |
 | `agentctl peek <task> [-n 40]` | Prints the last lines of the task's window without the agent's footer. See [Attach and peek](#attach-and-peek). |
-| `agentctl board [--tmux]` | Full-screen overview of all tasks with a live preview and keys to switch, message, interrupt, pull and close. See [Board](#board). |
-| `agentctl watch [--tmux] [--no-status-line]` | Foreground loop that sends desktop notifications on state transitions and puts a state icon in front of the tmux window names, see [Daily loop](#daily-loop) and [Window icons](#window-icons-and-the-tmux-status-bar). `--tmux` runs it in window `watch` of the agentctl session and shows the task counts in that session's status bar. |
+| `agentctl board [--tmux]` | Full-screen overview of all tasks with a live preview and keys to switch, message, move, interrupt, pull and close. See [Board](#board). |
+| `agentctl watch [--tmux] [--no-status-line]` | Foreground loop that sends desktop notifications on state transitions ([Notifications](#notifications)) and puts a state icon in front of the tmux window names, see [Daily loop](#daily-loop) and [Window icons](#window-icons-and-the-tmux-status-bar). `--tmux` runs it in window `watch` of the agentctl session and shows the task counts in that session's status bar. |
 | `agentctl interrupt <task> [--dry-run]` | Interrupts the current turn by sending the agent's interrupt key (default one `Escape`). The window stays open. See [Interrupt](#interrupt). |
 | `agentctl close <task...> [--rm-worktree] [-y] [--dry-run]` | Lists the tasks (flagging those without a report), asks y/N (`-y` skips), then `tmux kill-window` for each; one failure does not stop the others. With `--rm-worktree` also `git worktree remove` (no `--force`; branches are never deleted; a worktree with `main`/`master` checked out is refused). |
-| `agentctl doctor` | Versions of tmux, node, git, claude, codex, gh; effort mechanism detected for each agent; cache dir; mirror dir; configs; tmux session. |
+| `agentctl doctor` | Versions of tmux, node, git, claude, codex, gh; effort mechanism detected for each agent; the notifier (terminal-notifier or osascript); cache dir; mirror dir; configs; tmux session. |
 | `agentctl spec example` | Prints the example spec below. |
 
 `--dry-run` swaps the execution layer for a recorder: no command is run and no file is written, and it prints what would happen.
@@ -386,6 +396,85 @@ Commits are `git rev-list --count <base>..HEAD`. Files are the union of `git dif
 so changes the base got meanwhile do not count) and `git status --porcelain` (uncommitted and untracked files, collapsed to the directory for a fully untracked directory),
 each file counted once. Without a base the commits are `?` (`?c 3f`); a worktree that is gone is `-`. `--json` carries the per-worktree numbers.
 
+### Events
+
+Reading a screen every 15 seconds is a guess about what the agent is doing. `agentctl new` therefore also asks each agent to tell agentctl itself, and `agentctl event` (a command you never type) takes the message:
+it appends a line to `<state_dir>/events.log`, writes `<state_dir>/<task>/event.json` (so `status` and the [board](#board) show the new state at once, the board even reloads when the file changes), and sends the notification right away.
+It always exits 0 and prints nothing, so a broken hook can never disturb the agent. A task started without events (older tasks, `notify.events: false`) keeps working with the screen reading alone.
+
+| Agent | Event | agentctl |
+|---|---|---|
+| Claude | `Notification` `permission_prompt` / `elicitation_dialog` (any permission dialog; an `AskUserQuestion` sends the same type) | `needs-input`, notification with the question |
+| Claude | `Notification` `idle_prompt` ("Claude is waiting for your input", a minute after a Stop) | logged only |
+| Claude | `Stop` (end of turn; not sent when you interrupt with Esc) | turn ends: `report-ready` if the report is there, else `waiting` |
+| Claude | `StopFailure` with `rate_limit` or `billing_error` | `limited` (other errors are logged) |
+| Codex | `agent-turn-complete` (end of turn; also fired once for the turn that writes the session title, which is ignored) | as `Stop` |
+| Codex | approval request, `request_user_input` | **no event in 0.166.0**: the screen reading catches them (`question_pattern`) |
+
+**Claude Code 2.1.309.** `new` writes `<state_dir>/<task>/claude-settings.json` with hooks `Notification`, `Stop` and `StopFailure`, each running
+`<this agentctl> event --task <TASK> --agent claude --kind <notification|stop|stop-failure>` (the hook JSON arrives on stdin), and starts `claude … --settings <that file>`.
+*Checked live:* `--settings` **merges** with the other sources. With a user hook set in `~/.claude/settings.json` (Neon City kit: SessionStart, UserPromptSubmit, PreToolUse, Stop), a project `.claude/settings.json` with a Stop hook, and `--settings` with its own Stop and Notification hooks,
+one `claude -p` run executed all of them (`--debug-file` lists every `Hooks: Stop [...] finished with status 0`; markers from the project and the injected hook were both written). No existing hook is disabled or replaced, and the file holds only the three event hooks.
+
+**Codex 0.166.0.** `new` adds `-c notify=["…agentctl", "event", "--task", "<TASK>", "--agent", "codex", "--forward", "<json>"]`; Codex appends the event as JSON to that argv. *Checked live:* `-c notify=` **replaces** the `notify` of `config.toml`
+(the Computer Use app's `turn-ended` hook stopped running), so agentctl reads the top-level `notify` of `$CODEX_HOME/config.toml` (`~/.codex` unless the spec's `env` sets `CODEX_HOME`) and passes it as `--forward`:
+`event` runs it afterwards with the same JSON, as Codex would have. `~/.codex/config.toml` is never changed.
+Codex 0.166.0 also has hooks (`PermissionRequest`, `Stop`, …) that would report approvals, but they must be trusted first: Codex shows a "Hooks need review" dialog and stores the trust in `config.toml`. agentctl does not answer dialogs
+or write your config, so it does not use them. The `request_user_input` tool is behind the feature flag `default_mode_request_user_input` ("under development", off), so it could not be exercised; its screen (`? <question>` … `Waiting for your answer`) stays covered by `question_pattern`.
+
+**Needs-input text.** The question is taken from the screen when a dialog with numbered options is open: the last line ending in `?` above the options, plus what it is about for a generic one
+(`Do you want to proceed? touch approved.txt`, `Would you like to run the following command? $ printf 'yes' > approved.txt`), at most 120 characters. The Claude hook JSON only says "Claude needs your permission".
+An event decides the state only where the screen cannot: a permission dialog that no pattern knows counts as `needs-input` while the input box is hidden, and goes stale when the box is back. A running turn always wins.
+
+### Notifications
+
+Each notification has the title `agentctl` and a sound. Text per transition: `NC-42: <question>` (needs-input), `NC-42: raport gotowy – <verdict>` (report-ready), `NC-42: skończył turę i czeka na Ciebie – <last words>` (end of a turn without a report; off with `notify.turn_end: false`),
+`NC-42: claude wyczerpał limit użycia – agentctl move NC-42 przeniesie zadanie na codex` (limited), plus `needs-trust`, `dead`, `orphan` and the reminder after `watch.waiting_after`.
+
+**One transition, one notification.** An event and the watcher can both see the same transition. The notified state is kept in `<state_dir>/<task>/notified.json` with its source: when the other source announced the same state less than `max(90 s, 3 × watch.interval)` ago, the second one only writes to its log
+(`already announced by the agent's event`). Two events of the agent are never merged (a second permission prompt is a new question).
+
+**Click to the window.** With [`terminal-notifier`](https://github.com/julienXX/terminal-notifier) (`brew install terminal-notifier`; `doctor` tells you when it is missing) a click runs
+
+```
+<this agentctl> attach NC-42 --switch-client      # select the window, switch the tmux client attached to the agentctl session
+```
+
+and brings your terminal to the front (`-activate`): `notify.terminal_app`, else detected from `TERM_PROGRAM` (`Apple_Terminal` → `com.apple.Terminal`, `iTerm.app` → `com.googlecode.iterm2`), else from the environment the tmux server was started in; for any other terminal no app is activated.
+When **no client is attached** to the agentctl session there is nothing to switch: the click only brings the terminal forward and the text ends with `· agentctl attach NC-42`. The click command carries absolute paths and its own `PATH`, `AGENTCTL_HOME` and `TMUX_TMPDIR`,
+because a click runs with a bare environment (live: without `PATH` tmux was not found, and without `LANG` tmux printed the tab of its `-F` formats as `_`, so agentctl now gives tmux a UTF-8 locale itself).
+Without terminal-notifier the notification is the old `osascript` one (`notify-send` on Linux), without an action. terminal-notifier 3.x shows nothing until macOS has given it permission (the first notification asks) and its alert style is not `None`
+(System Settings > Notifications > terminal-notifier); `doctor` runs `terminal-notifier -diagnose` and warns about exactly that.
+
+**Verdict.** The `report-ready` notification quotes the first meaningful line of the report, markdown removed, at most 100 characters, in this order: the first line `notify.verdict_pattern` matches (a regex; its first group, else the whole line),
+a line that starts with `Werdykt`, `Verdict` or `Status` (`**Werdykt:** PASS`; as a heading on its own the line under it follows), else the first line of text after the heading (front matter, rules and table rows skipped).
+
+### Limits and move
+
+When a provider's plan or rate limit runs out, the task shows state `limited` (icon `⛔`, board, `status --tmux-line`), you get a notification with the proposal, and `agentctl move` carries the task over. A limit comes from two sources: the Claude `StopFailure` event (`rate_limit`, `billing_error`)
+and the screen, with `agents.<name>.limit_patterns` (regexes, case-insensitive, matched per line; a message has to **open** its line, after bullet marks such as `⎿ ● ■`, so a diff or a quoted sentence is not mistaken for one; a running turn is never `limited`).
+The defaults are the strings found in the installed binaries; I did not trigger a real limit (that would use up the plan), so how they look in the TUI is **inferred, not observed**:
+
+| Agent | Text (version) | Pattern | Confidence |
+|---|---|---|---|
+| Claude | `You've hit your session limit · resets 3pm`, `… weekly limit`, `… <model> limit`, `… monthly spend limit` (2.1.309) | `You.ve hit your .{0,60}limit` | high that the strings exist (template `You've hit your ${window}${reset}` in the binary); the placement in the TUI is not observed |
+| Claude | `Usage limit reached`, `You're out of extra usage` | as written | medium: seen as strings, context not verified |
+| Claude | `Request rejected (429)` (rate limit; also printed for a passing capacity problem) | `Request rejected \(429\)` | low: it can be transient, the state then clears by itself |
+| Claude | `StopFailure` hook with `error: rate_limit` or `billing_error` | event | schema from the binary; the sample in the tests is synthetic |
+| Codex | `You've hit your usage limit. …` (with U+2019; variants: `… for <model>. Switch to another model now`, `Upgrade to Plus …`, `… purchase more credits`) (0.166.0) | `You.ve hit your usage limit` | high that the strings exist; TUI placement not observed |
+| Codex | `Usage limit reached`, `You're out of credits`, `Your workspace is out of credits`, `You hit your spend cap …` | as written | medium |
+
+**`agentctl move <task> [--agent claude|codex] [-y]`** moves the task to the other provider (or the one in `--agent`):
+
+- the model and effort come from the [equivalents table](#model-equivalents) (`claude opus/high` → `codex gpt-6-astra/medium`); no pair (Fable, `max`) is an error with a hint;
+- `pin: true` in the spec (kept in `TASK.md` since this version; older tasks count as not pinned) is an error: pinned tasks never change provider;
+- a new window `<task>-2` (`-3`, … if taken) starts in the **same worktree** with the same env and report path; its prompt is the original one from `TASK.md` plus
+  `Poprzedni agent (<agent> <model>) przerwał przez limit. Kontynuuj od bieżącego stanu worktree: przeczytaj git log i git diff względem bazy, nie powtarzaj zrobionej pracy. Raport zapisz do <report>.`;
+- it always asks y/N; without a terminal and without `-y` it is an error. The `limits` of the target provider still apply;
+- the old window **stays**: `status` and the board show it as `superseded` (`↪`, no notifications) and you close it yourself, `agentctl close <task>`.
+
+On the board, `M` does the same after a `[y/N]` question.
+
 ### Window icons and the tmux status bar
 
 While `agentctl watch` runs it puts the state of each live window in front of its name, so `Ctrl-b w` and the status bar show what is going on:
@@ -396,7 +485,9 @@ While `agentctl watch` runs it puts the state of each live window in front of it
 | `⏸` | `waiting` |
 | `?` | `needs-input` |
 | `🔒` | `needs-trust` |
+| `⛔` | `limited` |
 | `✓` | `report-ready` |
+| `↪` | `superseded` |
 | `✗` | `orphan` (and `dead`, which has no window to name) |
 
 A window then reads `⚙ nc-42`. It is renamed only when the state changes, and when the watcher stops (Ctrl-C, or the window being killed) the plain names are restored.
@@ -442,7 +533,7 @@ agentctl board  agentctl-test · 3 tasks · 09:41:03
                                                                        │   Enter to select · Esc to cancel
                                                                        │ ● you chose: tea please
 
-↑↓ move  ⏎ open  m msg  i interrupt  c pull  r pull-new  x close  ? help  q quit
+↑↓ ⏎ open  m msg  M move  i interrupt  c pull  r pull-new  x close  ? help  q
 ```
 
 Below 110 columns the preview is hidden and the list takes the whole width (this is 80 columns):
@@ -454,7 +545,7 @@ agentctl board  agentctl-test · 3 tasks · 09:40:39
   AC5-B      codex gpt-6.1-sol… ✓ report-ready 13s     1c 1f    ready
   AC5-C      claude sonnet/med… ? needs-input  12s     2c 2f    -
 
-↑↓ move  ⏎ open  m msg  i interrupt  c pull  r pull-new  x close  ? help  q quit
+↑↓ ⏎ open  m msg  M move  i interrupt  c pull  r pull-new  x close  ? help  q
 ```
 
 The list shows task, agent/model/effort, state icon, time, `PROGRESS` and the report (`-` none, `ready` not pulled yet, `pulled`). From 110 columns the right column
@@ -465,13 +556,14 @@ shows the last 30 lines of the selected window (as `peek`, without the footer); 
 | `↑` `↓` (`k` `j`) | select a task |
 | `Enter` | go to the task's window (`select-window` + `switch-client`); `Ctrl-b l` comes back to the board |
 | `m` | type a message and send it to the agent as `send` does (`Enter` sends, `Esc` cancels) |
+| `M` | move the task to the other provider after a usage limit (`agentctl move`), after a `[y/N]` question; refused for pinned and already moved tasks |
 | `i` | interrupt the current turn, after a `[y/N]` question |
 | `c` | copy the selected task's report (`pull`) |
 | `r` | copy all new reports (`pull --ready`) |
 | `x` | close the window, after a `[y/N]` question; if the task has a worktree, a second question asks whether to remove it too (`git worktree remove`, never `--force`, the branch stays; `Esc` cancels) |
 | `?` / `q` | help / leave (the agents keep running) |
 
-Nothing destructive runs on a single key. The board reuses the core functions of the commands (`sendPrompts`, `interruptTask`, `pullTask`, `pullReady`, `closeTask`); git is asked for
+Nothing destructive runs on a single key. The board reuses the core functions of the commands (`sendPrompts`, `interruptTask`, `pullTask`, `pullReady`, `closeTask`, `moveTask`); git is asked for
 the progress at most every 10 seconds. It needs a terminal; without tmux `Enter` tells you to use `agentctl attach`.
 
 > **Why Ink, and why `React.createElement` instead of JSX or `htm`?** The project runs on Node's type stripping with no build step, and JSX is not
@@ -488,12 +580,14 @@ the progress at most every 10 seconds. It needs a terminal; without tmux `Enter`
 | `working` | a turn is running (`working_pattern`, default `esc to interrupt`) |
 | `waiting` | the agent is idle at its prompt and there is no report yet |
 | `needs-trust` | the agent shows its folder-trust dialog; a human must answer it |
-| `needs-input` | the agent asked **you** a question and waits (`question_pattern`; Codex: `? <question>` with options and `• Waiting for your answer.`, Claude Code: the `Enter to select · Esc to cancel` dialog) |
+| `needs-input` | the agent asked **you** a question or for a permission and waits (`question_pattern`; Codex: `? <question>` with options and `• Waiting for your answer.`, or the approval dialog; Claude Code: the `Enter to select · Esc to cancel` dialog or a permission dialog; or Claude's `Notification` [event](#events)) |
+| `limited` | the agent says its usage limit is used up (`limit_patterns`, or Claude's `StopFailure` event); see [Limits and move](#limits-and-move) |
 | `report-ready` | the report file exists and is newer than the start (the agent is idle, or the window is gone) |
+| `superseded` | the task was moved to the other provider with `agentctl move`; this is the old window, which you close yourself |
 | `dead` | the window is gone and there is no report |
 | `orphan` | a window of the agentctl session has no state file (lost or never created) |
 
-Precedence for a live window: `needs-trust`, then `needs-input`, then `working`, then `report-ready`, then `waiting`.
+Precedence for a live window: `needs-trust`, then `needs-input`, then `working`, then `limited`, then `report-ready`, then `waiting` (`superseded` overrides all of them).
 These are heuristics on screen text; if a CLI update changes its wording, adjust the patterns in the config.
 
 ### Folder trust
@@ -650,6 +744,9 @@ layer on top, and so is the board: `src/core/board.ts` holds its state, key hand
   windows you opened by hand are listed in limit errors but not counted.
 - **Install from a clone only** (`npm link`). Node does not strip types inside `node_modules`, so a registry install would
   not run. Plan: a build step (emit plain JavaScript) at the first npm release.
+- Codex 0.166.0 reports no event for an approval request or `request_user_input` (only the end of a turn), so those are found by the screen reader within `watch.interval` seconds, and only while `watch` runs. Its hooks need a human to trust them, which agentctl does not do.
+- The limit texts are taken from the binaries, not from a real limit; see [Limits and move](#limits-and-move) for how sure each one is.
+- `move` does not carry the symlinks over (they are in the worktree already) and starts a new conversation: the new agent learns the state from `git log` and `git diff`, not from the old agent's context.
 - Screen patterns (ready, trust, working) are heuristics tied to the wording of the current Claude Code and Codex TUIs.
 - Links replace symlinks only, never real files or directories.
 - The board draws state icons with characters whose width differs between terminals (`⚙`, `⏸` are one or two cells wide); if columns look shifted, set `watch.window_icons` to plain symbols.
@@ -660,7 +757,7 @@ layer on top, and so is the board: `src/core/board.ts` holds its state, key hand
 1. **Iteration 1 (this one):** spec → worktree/links/env/window/agent/prompt; send, status, pull, close, interrupt, doctor; model equivalents with `--agent` and limit switching; task states and folder-trust detection; optional mirror.
    Follow-up: `new` waits for the folder-trust dialog (`trust_timeout`, `--no-wait-trust`).
 2. **Iteration 2:** a TUI on the same core (done: [`agentctl board`](#board)), and `agentctl serve` with a read-only web UI, published through Cloudflare Tunnel and protected by Cloudflare Access.
-3. **Iteration 3:** actions in the UI (send, close) and notifications; a `.agentctl-done` marker file an agent can write to say it has finished.
+3. **Iteration 3:** actions in the UI (send, close); a `.agentctl-done` marker file an agent can write to say it has finished. (Event-based notifications, click-to-window and `move` are done, see [Events](#events).)
 
 ## License
 

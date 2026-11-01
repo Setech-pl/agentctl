@@ -7,7 +7,8 @@ import type { CliDeps } from '../src/cli.ts';
 import { applySnapshot, handleKey, initialBoardState, promptText, runBoardEffect } from '../src/core/board.ts';
 import type { BoardRow, BoardState } from '../src/core/board.ts';
 import { DEFAULT_AGENT_SETTINGS } from '../src/core/config.ts';
-import type { AgentName } from '../src/core/config.ts';
+import { notifierProblems, runDoctor } from '../src/core/doctor.ts';
+import { RecordingRunner } from '../src/core/runner.ts';
 import { Context } from '../src/core/context.ts';
 import { DEFAULT_WINDOW_ICONS } from '../src/core/icons.ts';
 import { continuationNote, describeMove, moveTask, nextTaskId, planMove } from '../src/core/move.ts';
@@ -326,9 +327,33 @@ describe('board: M moves a task', () => {
 
 const SELF_FOR_BOARD: string[] = ['/opt/node/bin/node', '/opt/agentctl/bin/agentctl.ts'];
 
-describe('doctor and agents', () => {
-  it('the agent type names stay the two providers', () => {
-    const agents: AgentName[] = ['claude', 'codex'];
-    assert.deepEqual(Object.keys(DEFAULT_AGENT_SETTINGS), agents);
+describe('doctor: notifications', () => {
+  const run = async (platform: string, respond: (cmd: string, args: string[]) => { code?: number; stdout?: string } | undefined) => {
+    const config = makeConfig(scratch.sub(`doc-${platform}-${Math.random().toString(36).slice(2, 6)}`));
+    const checks = await runDoctor(new RecordingRunner({ dryRun: false, respond }), () => config, scratch.dir, '26.0.0', platform);
+    return checks.find((c) => c.name === 'notifications');
+  };
+  const found = (diagnose: string) => (cmd: string, args: string[]) => {
+    if (cmd === 'sh' && String(args[1]).includes('terminal-notifier')) return { stdout: '/opt/homebrew/bin/terminal-notifier\n' };
+    if (cmd === '/opt/homebrew/bin/terminal-notifier') return { stdout: diagnose };
+    return undefined;
+  };
+
+  it('terminal-notifier that works: ok', async () => {
+    assert.equal((await run('darwin', found('terminal-notifier 3.1.0\n  authorization       granted\n')))?.status, 'ok');
+  });
+
+  it('terminal-notifier with problems (no permission yet, alert style None): a warning that names them, never a failure', async () => {
+    const c = await run('darwin', found('terminal-notifier 3.1.0\n\nProblems found:\n  - Permission has never been requested. Send one notification and approve the prompt.\n  - Alert style is None. Set it to Banners or Alerts in System Settings > Notifications.\n'));
+    assert.equal(c?.status, 'warn');
+    assert.match(c?.detail as string, /will not show notifications yet: Permission has never been requested\..*Alert style is None\./);
+  });
+
+  it('without terminal-notifier: a warning with the brew command; on Linux notify-send is fine', async () => {
+    const c = await run('darwin', (cmd) => (cmd === 'sh' ? { code: 1 } : undefined));
+    assert.equal(c?.status, 'warn');
+    assert.match(c?.detail as string, /brew install terminal-notifier/);
+    assert.equal((await run('linux', () => undefined))?.status, 'ok');
+    assert.deepEqual(notifierProblems('terminal-notifier 2.0.0\nUsage: ...'), []);
   });
 });
