@@ -41,9 +41,63 @@ agentctl new --dry-run nc-42.md      # prints every command it would run, execut
 agentctl new nc-42.md                # for real
 tmux attach -t agentctl              # watch the agent work (window "nc-42")
 agentctl status                      # the whole fleet at a glance
-agentctl pull NC-42                  # report to the clipboard
+agentctl pull NC-42                  # report to the clipboard (faster in bulk: see "Daily loop")
 agentctl close NC-42 --rm-worktree   # window and worktree gone, the branch stays
 ```
+
+## Daily loop
+
+With a planning chat on one side and agentctl on the other, the loop needs no file juggling:
+
+```
+chat gives a spec ─► agentctl new --clip ─► agentctl watch notifies ─► agentctl pull --ready ─► paste into the chat ─► chat gives a close line
+```
+
+1. **The chat gives a spec.** Copy the one code block.
+2. **`agentctl new --clip`** reads it from the clipboard (`pbpaste`; `wl-paste` or `xclip` on Linux), prints a summary
+   (task, agent/model/effort, worktree, branch, setup, links) and asks `Start? [y/N]`. `-y` skips the question.
+   An empty clipboard or text without a `---` YAML header is a plain error. The spec is stored in `<cache>/<task>/TASK.md` as usual.
+   `agentctl send --clip` does the same for a follow-up prompt.
+3. **`agentctl watch`** runs in its own tmux window called `watch` (`agentctl watch --tmux` creates it if it does not exist and
+   never starts a second one). Every `watch.interval` seconds (default 15) it computes the [state](#task-states) of all tasks and sends **one**
+   desktop notification per transition (macOS notification with a sound via `osascript`; `notify-send` on Linux):
+   `NC-42: raport gotowy`, `NC-42 czeka na Ciebie` (waiting longer than `watch.waiting_after`, default 120 s), `needs-trust`, and `dead`
+   (window gone without a report). The first poll only records the current states, so starting the watcher does not replay old news.
+   Transitions are logged to `<cache>/agentctl-watch.log`.
+4. **`agentctl pull --ready`** joins every report in state `report-ready` that you have not pulled yet into one text, each under
+   `=== NC-42 (claude opus/high) ===`, copies it to the clipboard and marks those tasks as pulled (`pulled:` in the `TASK.md` header;
+   a report the agent rewrites later counts as new again). It lists what it took and the total size, and warns above 100 KB.
+   `--all` ignores the mark. Nothing is marked if the copy fails.
+5. **Paste into the chat.** The chat judges the reports; agentctl never gives verdicts.
+6. **The chat gives the closing line**, for example `agentctl close NC-41 NC-42 --rm-worktree`. `close` accepts several tasks, shows
+   the list (tasks without a report are flagged) and asks `y/N`; `-y` skips the question. Branches are kept, nothing is merged.
+
+At the start of a fresh chat session, `agentctl status --clip` copies a compact Markdown table of all tasks
+(task, agent/model/effort, state, time, report, pulled?) for you to paste.
+
+### How the planning chat should format specs
+
+Ask the chat to give **each spec as exactly one code block** that starts with the `---` line, so the copy button copies the whole spec and nothing else:
+
+````
+```markdown
+---
+task: NC-42
+agent: claude
+model: opus
+effort: high
+repos:
+  - {path: ~/Projects/neon-city, branch: nc-42-tram-bell, base: master}
+---
+Prompt for the agent, in the language you work in. End with where the report goes.
+```
+````
+
+- One spec per block. Several specs in one block also work (`new --clip` starts them all), but the summary then lists them together.
+- Nothing inside the block that is not part of the spec: no commentary, no second block for the same task.
+- A surrounding code fence that ends up on the clipboard is stripped.
+- Follow-ups for `send --clip` have the same shape, with only `task:` in the header.
+- The closing line is one plain line, `agentctl close A B C [--rm-worktree]`, in a separate block from the specs.
 
 ## Spec format
 
@@ -145,6 +199,9 @@ limits:                        # max simultaneous windows per provider
 defaults: {effort: high}       # agent, model, effort
 equivalents: []                # extra Claude<->Codex pairs, see "Model equivalents"
 mirror_dir: ~/Dropbox/agentctl # optional, off by default, see "Mirror"
+watch:                         # `agentctl watch`, see "Daily loop"
+  interval: 15                 # seconds between polls (default)
+  waiting_after: 120           # seconds a task may wait before it is worth a notification (default)
 agents:
   claude:
     flags: []                  # extra flags appended to the claude command line
@@ -197,12 +254,13 @@ mechanism it detects.
 
 | Command | What it does |
 |---|---|
-| `agentctl new [file\|-] [--dry-run] [--reuse] [--agent claude\|codex] [--no-switch] [--no-wait-trust] [--no-agent]` | For each spec: `git worktree add` (error if the worktree exists, unless `--reuse`), the [setup](#setup) commands, symlinks, `<cache>/<task>/TASK.md`, a tmux window named after the task in session `agentctl` (created if missing), starts the agent in the first worktree with the env, waits for the agent's prompt (polling `tmux capture-pane`; a folder-trust dialog is waited out, see [Folder trust](#folder-trust)), pastes the prompt as one bracketed paste (`tmux load-buffer -` + `paste-buffer -p`), then sends Enter separately. Everything is validated before anything starts. `--agent` runs the specs on that provider (see [Model equivalents](#model-equivalents)). `--no-agent` stops after setup and links. |
-| `agentctl send [file\|-] [--dry-run]` | Paste a follow-up prompt into the existing window (`task` from the header; the rest of the header is ignored). Errors if the window does not exist. The prompt is appended to `TASK.md` with a timestamp. |
-| `agentctl status [--json]` | Table: task, agent/model/effort (as ordered too, if switched), [state](#task-states), window alive?, start, duration, report present?, last non-empty line of the window. Refreshes the [mirror](#mirror) if configured. |
-| `agentctl pull <task>` | Copies the report to the clipboard (`pbcopy` on macOS, `wl-copy` or `xclip` on Linux) and prints its path. No report yet: prints the last 40 lines of the window. Refreshes the [mirror](#mirror) if configured. |
+| `agentctl new [file\|-] [--clip [-y]] [--dry-run] [--reuse] [--agent claude\|codex] [--no-switch] [--no-wait-trust] [--no-agent]` | For each spec: `git worktree add` (error if the worktree exists, unless `--reuse`), the [setup](#setup) commands, symlinks, `<cache>/<task>/TASK.md`, a tmux window named after the task in session `agentctl` (created if missing), starts the agent in the first worktree with the env, waits for the agent's prompt (polling `tmux capture-pane`; a folder-trust dialog is waited out, see [Folder trust](#folder-trust)), pastes the prompt as one bracketed paste (`tmux load-buffer -` + `paste-buffer -p`), then sends Enter separately. Everything is validated before anything starts. `--agent` runs the specs on that provider (see [Model equivalents](#model-equivalents)). `--no-agent` stops after setup and links. `--clip` reads the spec from the clipboard, shows a summary and asks y/N (`-y` skips). |
+| `agentctl send [file\|-] [--clip [-y]] [--dry-run]` | Paste a follow-up prompt into the existing window (`task` from the header; the rest of the header is ignored). Errors if the window does not exist. The prompt is appended to `TASK.md` with a timestamp. |
+| `agentctl status [--json] [--clip]` | Table: task, agent/model/effort (as ordered too, if switched), [state](#task-states), window alive?, start, duration, report present?, last non-empty line of the window. Refreshes the [mirror](#mirror) if configured. `--clip` copies a compact Markdown table (task, agent/model/effort, state, time, report, pulled?) to the clipboard. |
+| `agentctl pull <task>\|--ready [--all]` | Copies the report to the clipboard (`pbcopy` on macOS, `wl-copy` or `xclip` on Linux) and prints its path. No report yet: prints the last 40 lines of the window. Refreshes the [mirror](#mirror) if configured. `--ready` joins all not yet pulled `report-ready` reports into one text, copies it and marks them pulled; `--all` takes pulled ones too. See [Daily loop](#daily-loop). |
+| `agentctl watch [--tmux]` | Foreground loop that sends desktop notifications on state transitions, see [Daily loop](#daily-loop). `--tmux` runs it in window `watch` of the agentctl session. |
 | `agentctl interrupt <task> [--dry-run]` | Interrupts the current turn by sending the agent's interrupt key (default one `Escape`). The window stays open. See [Interrupt](#interrupt). |
-| `agentctl close <task> [--rm-worktree] [--dry-run]` | `tmux kill-window`. With `--rm-worktree` also `git worktree remove` (no `--force`; branches are never deleted; a worktree with `main`/`master` checked out is refused). |
+| `agentctl close <task...> [--rm-worktree] [-y] [--dry-run]` | Lists the tasks (flagging those without a report), asks y/N (`-y` skips), then `tmux kill-window` for each; one failure does not stop the others. With `--rm-worktree` also `git worktree remove` (no `--force`; branches are never deleted; a worktree with `main`/`master` checked out is refused). |
 | `agentctl doctor` | Versions of tmux, node, git, claude, codex, gh; effort mechanism detected for each agent; cache dir; mirror dir; configs; tmux session. |
 | `agentctl spec example` | Prints the example spec below. |
 
