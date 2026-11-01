@@ -175,10 +175,15 @@ export async function installDesktop(ctx: Context, entry: McpEntry, opts: Instal
   const { runner } = ctx;
   let backup: string | undefined;
   if (existed) {
-    backup = backupPath(opts.file, runner.now());
+    // A dry run has a pretend clock; the name it prints should be the one a real run would use.
+    backup = backupPath(opts.file, runner.dryRun ? Date.now() : runner.now());
     await runner.copyFile(opts.file, backup);
   }
   await runner.writeFile(opts.file, after);
+  if (runner.dryRun) {
+    ctx.out(`Dry run: nothing was written. A real run writes ${opts.file}${backup ? ` and keeps the old file as ${backup}` : ''}.`);
+    return { outcome: 'dry-run', ...(backup ? { backup } : {}) };
+  }
   ctx.out(`Written ${opts.file}${backup ? `; the old file is kept as ${backup}` : ''}.`);
   ctx.out('Quit the Claude app completely (Cmd+Q, not just the window) and open it again; the tools show under Settings > Developer / the "+" menu of a chat.');
   return { outcome: runner.dryRun ? 'dry-run' : 'written', ...(backup ? { backup } : {}) };
@@ -196,10 +201,10 @@ export async function uninstallDesktop(ctx: Context, opts: InstallOptions): Prom
   const next: DesktopConfig = { ...config, mcpServers: servers };
   const summary = [`Claude desktop config: ${opts.file}`, 'Change:', ...lineDiff(pretty(config), pretty(next)).map((l) => `  ${l}`)];
   if (!(await confirmAction(ctx, summary, 'Write it?', opts.yes))) return { outcome: 'declined' };
-  const backup = backupPath(opts.file, ctx.runner.now());
+  const backup = backupPath(opts.file, ctx.runner.dryRun ? Date.now() : ctx.runner.now());
   await ctx.runner.copyFile(opts.file, backup);
   await ctx.runner.writeFile(opts.file, pretty(next));
-  ctx.out(`Written ${opts.file}; the old file is kept as ${backup}. Quit the Claude app completely and open it again.`);
+  ctx.out(ctx.runner.dryRun ? `Dry run: nothing was written. A real run writes ${opts.file} and keeps the old file as ${backup}.` : `Written ${opts.file}; the old file is kept as ${backup}. Quit the Claude app completely and open it again.`);
   return { outcome: ctx.runner.dryRun ? 'dry-run' : 'written', backup };
 }
 
