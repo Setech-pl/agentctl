@@ -94,6 +94,16 @@ export async function runDoctor(
         add('cache', 'fail', `${cache} is not writable`);
       }
     }
+    const stateDir = config.stateDir;
+    if (!fs.existsSync(stateDir)) add('state', 'warn', `${stateDir} does not exist yet (created on first "agentctl new")`);
+    else {
+      try {
+        fs.accessSync(stateDir, fs.constants.W_OK);
+        add('state', 'ok', stateDir);
+      } catch {
+        add('state', 'fail', `${stateDir} is not writable`);
+      }
+    }
     add('config', 'ok', config.loaded ? `${config.path}` : `${config.path} not found, using defaults`);
     if (config.mirrorDir) {
       const dir = config.mirrorDir;
