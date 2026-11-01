@@ -1,23 +1,12 @@
 import fs from 'node:fs';
-import os from 'node:os';
+import { findClipboardTool, writeClipboard } from './clipboard.ts';
 import type { Context } from './context.ts';
 import { syncMirror } from './mirror.ts';
 import { collectStatus } from './status.ts';
-import { readTaskRecord } from './taskstore.ts';
+import { readTaskRecord, setHeaderField, taskFile } from './taskstore.ts';
 import { AgentctlError, windowName } from './util.ts';
 
 export const PULL_FALLBACK_LINES = 40;
-
-/** First available clipboard command for this platform, as [command, ...args]. */
-export async function findClipboardCommand(ctx: Context, platform: string = os.platform()): Promise<string[] | undefined> {
-  const candidates: string[][] =
-    platform === 'darwin' ? [['pbcopy']] : [['wl-copy'], ['xclip', '-selection', 'clipboard']];
-  for (const candidate of candidates) {
-    const r = await ctx.runner.exec('sh', ['-c', 'command -v "$1"', 'sh', candidate[0] as string], { readOnly: true });
-    if (r.code === 0) return candidate;
-  }
-  return undefined;
-}
 
 /** Copy the task's report to the clipboard and print its path; without a report, print the window's last lines. */
 export async function pullTask(ctx: Context, taskArg: string, platform?: string): Promise<void> {
@@ -33,7 +22,7 @@ export async function pullTask(ctx: Context, taskArg: string, platform?: string)
 
   if (record.report && fs.existsSync(record.report)) {
     const text = fs.readFileSync(record.report, 'utf8');
-    const clip = await findClipboardCommand(ctx, platform);
+    const clip = await findClipboardTool(runner, 'write', platform);
     if (clip) {
       const [cmd, ...args] = clip as [string, ...string[]];
       const r = await runner.exec(cmd, args, { input: text });
@@ -53,4 +42,69 @@ export async function pullTask(ctx: Context, taskArg: string, platform?: string)
   }
   const lines = screen.stdout.replace(/\s+$/, '').split('\n');
   for (const line of lines.slice(-PULL_FALLBACK_LINES)) ctx.out(line);
+}
+
+/** Above this the combined text is probably too much for one chat message. */
+export const PULL_WARN_BYTES = 100 * 1024;
+
+export interface PulledReport {
+  task: string;
+  /** "claude opus/high" */
+  who: string;
+  bytes: number;
+}
+
+export interface PullReadyResult {
+  pulled: PulledReport[];
+  totalBytes: number;
+  /** The combined text; empty when nothing was pulled. */
+  text: string;
+  copied: boolean;
+  warnedLarge: boolean;
+}
+
+/**
+ * `pull --ready`: join the reports of all tasks in state report-ready that were not pulled yet
+ * (`all`: pulled ones too) into one text, copy it to the clipboard and mark each task as pulled
+ * in its TASK.md. Nothing is marked when the copy fails.
+ */
+export async function pullReady(ctx: Context, opts: { all?: boolean } = {}, platform?: string): Promise<PullReadyResult> {
+  const { config, runner } = ctx;
+  const rows = await collectStatus(ctx);
+  if (config.mirrorDir) await syncMirror(ctx, rows);
+  const chosen = rows.filter((r) => r.state === 'report-ready' && r.report === 'yes' && (opts.all || r.pulled === null));
+  const empty: PullReadyResult = { pulled: [], totalBytes: 0, text: '', copied: false, warnedLarge: false };
+  if (chosen.length === 0) {
+    const already = rows.filter((r) => r.state === 'report-ready' && r.pulled !== null).length;
+    ctx.out(already > 0 ? `No new reports (${already} already pulled; --all takes them again).` : 'No reports ready.');
+    return empty;
+  }
+
+  const sections: string[] = [];
+  const pulled: PulledReport[] = [];
+  for (const row of chosen) {
+    const body = fs.readFileSync(row.reportPath, 'utf8').trimEnd();
+    sections.push(`=== ${row.task} (${row.agent} ${row.model}/${row.effort}) ===\n${body}\n`);
+    pulled.push({ task: row.task, who: `${row.agent} ${row.model}/${row.effort}`, bytes: Buffer.byteLength(body) });
+  }
+  const text = sections.join('\n');
+  const totalBytes = Buffer.byteLength(text);
+
+  const copy = await writeClipboard(runner, text, platform);
+  if (!copy.ok) {
+    ctx.out(`${copy.error}; nothing was marked as pulled. Reports: ${chosen.map((r) => r.reportPath).join(', ')}`);
+    return { pulled: [], totalBytes, text, copied: false, warnedLarge: false };
+  }
+  const when = new Date(runner.now()).toISOString();
+  for (const row of chosen) await setHeaderField(runner, taskFile(config, row.task.toLowerCase()), 'pulled', when);
+
+  ctx.out(`Copied ${pulled.length} report${pulled.length === 1 ? '' : 's'} to the clipboard (${copy.tool}), ${formatBytes(totalBytes)}:`);
+  for (const p of pulled) ctx.out(`  ${p.task}  ${p.who}  ${formatBytes(p.bytes)}`);
+  const warnedLarge = totalBytes > PULL_WARN_BYTES;
+  if (warnedLarge) ctx.out(`warning: ${formatBytes(totalBytes)} is more than ${PULL_WARN_BYTES / 1024} KB; the chat may not take it in one paste. Pull fewer reports or trim them.`);
+  return { pulled, totalBytes, text, copied: true, warnedLarge };
+}
+
+export function formatBytes(n: number): string {
+  return n >= 1024 ? `${(n / 1024).toFixed(1)} KB` : `${n} B`;
 }

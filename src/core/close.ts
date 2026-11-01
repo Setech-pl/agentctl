@@ -2,8 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Context } from './context.ts';
 import { gitFailure } from './git.ts';
+import { collectStatus } from './status.ts';
 import { readTaskRecord } from './taskstore.ts';
-import { AgentctlError, windowName } from './util.ts';
+import { AgentctlError, Problems, windowName } from './util.ts';
 
 export interface CloseOptions {
   rmWorktree?: boolean;
@@ -61,5 +62,53 @@ export async function closeTask(ctx: Context, taskArg: string, opts: CloseOption
       );
     }
     ctx.info(`${taskArg}: worktree ${repo.worktree} removed (branch ${branch || 'detached HEAD'} kept)`);
+  }
+}
+
+export interface ClosePlanItem {
+  task: string;
+  /** TASK.md exists for it. */
+  known: boolean;
+  windowAlive: boolean;
+  /** The report file is there and was written after the task started. */
+  hasReport: boolean;
+  /** Printable line for the confirmation list. */
+  line: string;
+}
+
+/** What `close A B C` is about to do, per task. Reads only; fails for all tasks at once if a request cannot work. */
+export async function planClose(ctx: Context, tasks: string[], opts: CloseOptions = {}): Promise<ClosePlanItem[]> {
+  const { tmux, config, runner } = ctx;
+  const unique = [...new Set(tasks.map((t) => t.toUpperCase()))];
+  const live = new Set(runner.dryRun ? [] : await tmux.listWindows());
+  const rows = new Map((await collectStatus(ctx)).map((r) => [r.task.toUpperCase(), r]));
+  const p = new Problems();
+  const items = unique.map((task): ClosePlanItem => {
+    const window = windowName(task);
+    const known = readTaskRecord(config, window) !== undefined;
+    const hasReport = rows.get(task)?.report === 'yes';
+    if (opts.rmWorktree && !known) p.add(`${task}: no TASK.md in ${config.cache}/${window} lists its worktrees`);
+    const notes: string[] = [];
+    if (!known) notes.push('unknown task (no TASK.md)');
+    else if (!hasReport) notes.push('WARNING: no report yet');
+    if (known && !live.has(window) && !runner.dryRun) notes.push('window already gone');
+    return { task, known, windowAlive: live.has(window), hasReport, line: `${task}${notes.length ? `  (${notes.join('; ')})` : ''}` };
+  });
+  p.throwIfAny('Cannot close:', 'Remove those tasks from the list, or remove their worktrees yourself with "git worktree remove <path>".');
+  return items;
+}
+
+/** Close several tasks one after another; a failure does not stop the others, it is reported at the end. */
+export async function closeTasks(ctx: Context, tasks: string[], opts: CloseOptions = {}): Promise<void> {
+  const failures: string[] = [];
+  for (const task of tasks) {
+    try {
+      await closeTask(ctx, task, opts);
+    } catch (e) {
+      failures.push(`${task}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  if (failures.length > 0) {
+    throw new AgentctlError(`${failures.length} of ${tasks.length} tasks could not be closed completely:\n${failures.map((f) => `  - ${f}`).join('\n')}`, 'The others were closed. Fix the cause and run close again for the failed ones.');
   }
 }
