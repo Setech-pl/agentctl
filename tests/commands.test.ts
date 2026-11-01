@@ -86,11 +86,11 @@ Second line.
         `ln -sfn ${pkgs}/sim ${wt('1')}/node_modules/@nc/sim`,
         `mkdir -p ${cache}`,
         `tmux new-session -d -s agentctl -n nc-1 -c ${wt('1')} -e NEON_CITY_TASK=NC-1`,
-        `tmux send-keys -t =agentctl:nc-1 -l -- 'claude --model opus --effort medium --verbose'`,
-        'tmux send-keys -t =agentctl:nc-1 Enter',
+        `tmux send-keys -t '=agentctl:nc-1' -l -- 'claude --model opus --effort medium --verbose'`,
+        'tmux send-keys -t \'=agentctl:nc-1\' Enter',
         'tmux load-buffer -b agentctl-nc-1 -',
-        'tmux paste-buffer -p -d -b agentctl-nc-1 -t =agentctl:nc-1',
-        'tmux send-keys -t =agentctl:nc-1 Enter',
+        'tmux paste-buffer -p -d -b agentctl-nc-1 -t \'=agentctl:nc-1\'',
+        'tmux send-keys -t \'=agentctl:nc-1\' Enter',
       ],
     );
     const paste = runner.calls.find((c) => c.line.startsWith('tmux load-buffer'));
@@ -129,10 +129,10 @@ Go too.
     await newTasks(ctx, resolveAll(config, text));
     const c = runner.commands.filter((l) => !l.startsWith('write ') && !l.startsWith('mkdir'));
     assert.equal(c[0], `git -C ${repoA} worktree add ${wt('2')} nc-2`);
-    assert.ok(c.includes(`tmux new-window -d -t =agentctl: -n nc-2 -c ${wt('2')}`));
-    assert.ok(c.includes(`tmux send-keys -t =agentctl:nc-2 -l -- 'codex --sandbox danger-full-access -m gpt-6.1-sol -c model_reasoning_effort=high'`));
+    assert.ok(c.includes(`tmux new-window -d -t '=agentctl:' -n nc-2 -c ${wt('2')}`));
+    assert.ok(c.includes(`tmux send-keys -t '=agentctl:nc-2' -l -- 'codex --sandbox danger-full-access -m gpt-6.1-sol -c model_reasoning_effort=high'`));
     // default model: no -m
-    assert.ok(c.includes(`tmux send-keys -t =agentctl:nc-3 -l -- 'codex --sandbox danger-full-access -c model_reasoning_effort=high'`));
+    assert.ok(c.includes(`tmux send-keys -t '=agentctl:nc-3' -l -- 'codex --sandbox danger-full-access -c model_reasoning_effort=high'`));
     assert.ok(!c.some((l) => l.includes('new-session')));
   });
 
@@ -193,8 +193,8 @@ describe('send', () => {
     await sendPrompts(ctx, [item]);
     assert.deepEqual(runner.commands, [
       'tmux load-buffer -b agentctl-nc-1 -',
-      'tmux paste-buffer -p -d -b agentctl-nc-1 -t =agentctl:nc-1',
-      'tmux send-keys -t =agentctl:nc-1 Enter',
+      'tmux paste-buffer -p -d -b agentctl-nc-1 -t \'=agentctl:nc-1\'',
+      'tmux send-keys -t \'=agentctl:nc-1\' Enter',
       `append ${taskFile(config, 'nc-1')} (${Buffer.byteLength(`\n\n## Follow-up sent 2026-10-31T12:00:00.300Z\n\nPlease also add a test.\n`)} bytes)`,
     ]);
     assert.equal(runner.calls[0]?.input, 'Please also add a test.');
@@ -219,7 +219,7 @@ describe('close', () => {
   it('kills the window and nothing else by default', async () => {
     const { ctx, runner } = makeContext(config, { respond: windows('nc-1\n') });
     await closeTask(ctx, 'nc-1');
-    assert.deepEqual(runner.commands, ['tmux kill-window -t =agentctl:nc-1']);
+    assert.deepEqual(runner.commands, ['tmux kill-window -t \'=agentctl:nc-1\'']);
   });
 
   it('removes the worktree with --rm-worktree, never touching branches', async () => {
@@ -227,7 +227,7 @@ describe('close', () => {
       respond: (cmd, args, opts) => (cmd === 'git' && args.includes('--abbrev-ref') ? { stdout: 'nc-1\n' } : windows('nc-1\n')(cmd, args, opts)),
     });
     await closeTask(ctx, 'NC-1', { rmWorktree: true });
-    assert.deepEqual(runner.commands, ['tmux kill-window -t =agentctl:nc-1', `git -C ${repo} worktree remove ${wtDir}`]);
+    assert.deepEqual(runner.commands, ['tmux kill-window -t \'=agentctl:nc-1\'', `git -C ${repo} worktree remove ${wtDir}`]);
     for (const line of runner.commands) assert.doesNotMatch(line, /--force|branch|merge|rebase|push|reset/);
   });
 
@@ -343,7 +343,7 @@ describe('pull', () => {
     assert.equal(out.length, 41);
     assert.equal(out[1], 'line 61');
     assert.equal(out.at(-1), 'line 100');
-    assert.ok(runner.queries.some((q) => q === 'tmux capture-pane -p -t =agentctl:nc-1 -S -40'));
+    assert.ok(runner.queries.some((q) => q === 'tmux capture-pane -p -t \'=agentctl:nc-1\' -S -40'));
   });
 
   it('rejects an unknown task', async () => {
@@ -367,20 +367,20 @@ describe('interrupt', () => {
   it('sends one Escape to a Claude window by default and does not close anything', async () => {
     const { ctx, runner } = makeContext(config, { respond: alive });
     const result = await interruptTask(ctx, 'NC-1');
-    assert.deepEqual(runner.commands, ['tmux send-keys -t =agentctl:nc-1 Escape']);
+    assert.deepEqual(runner.commands, ['tmux send-keys -t \'=agentctl:nc-1\' Escape']);
     assert.deepEqual(result, { task: 'NC-1', window: 'nc-1', key: 'Escape' });
   });
 
   it('uses the interrupt key configured for the agent', async () => {
     const { ctx, runner } = makeContext(config, { respond: alive });
     await interruptTask(ctx, 'nc-2');
-    assert.deepEqual(runner.commands, ['tmux send-keys -t =agentctl:nc-2 C-c']);
+    assert.deepEqual(runner.commands, ['tmux send-keys -t \'=agentctl:nc-2\' C-c']);
   });
 
   it('--dry-run only records the command', async () => {
     const { ctx, runner } = makeContext(config, { dryRun: true });
     await interruptTask(ctx, 'NC-1');
-    assert.deepEqual(runner.commands, ['tmux send-keys -t =agentctl:nc-1 Escape']);
+    assert.deepEqual(runner.commands, ['tmux send-keys -t \'=agentctl:nc-1\' Escape']);
   });
 
   it('fails clearly for a dead window and for an unknown task', async () => {
