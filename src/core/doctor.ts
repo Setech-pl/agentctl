@@ -22,6 +22,13 @@ function firstLine(s: string): string {
   return s.split('\n').map((l) => l.trim()).find(Boolean) ?? '';
 }
 
+/** The "Problems found" of `terminal-notifier -diagnose` (3.x): no permission yet, alert style None … Empty for an older version or when all is fine. */
+export function notifierProblems(diagnose: string): string[] {
+  const after = diagnose.split(/^Problems found:\s*$/m)[1];
+  if (after === undefined) return [];
+  return after.split('\n').map((l) => /^\s*-\s+(.*\S)\s*$/.exec(l)?.[1] ?? '').filter(Boolean);
+}
+
 function atLeast(version: string, min: number[]): boolean {
   const nums = (/(\d+)\.(\d+)/.exec(version) ?? []).slice(1).map(Number);
   const [major = 0, minor = 0] = nums;
@@ -34,6 +41,7 @@ export async function runDoctor(
   loadConfig: () => GlobalConfig = loadGlobalConfig,
   cwd: string = process.cwd(),
   nodeVersion: string = process.versions.node,
+  platform: string = os.platform(),
 ): Promise<Check[]> {
   const checks: Check[] = [];
   const add = (name: string, status: Check['status'], detail: string): void => {
@@ -85,10 +93,13 @@ export async function runDoctor(
   if (gh.code === 0) add('gh', 'ok', firstLine(gh.stdout));
   else add('gh', 'warn', 'not found (optional; used by humans for PRs, never by agentctl)');
 
-  const notifier = await findTerminalNotifier(runner);
-  if (os.platform() === 'darwin') {
-    if (notifier) add('notifications', 'ok', `terminal-notifier (${notifier}): a click on a notification switches to the task window`);
-    else add('notifications', 'warn', 'osascript, no click action. For click-to-window: brew install terminal-notifier');
+  const notifier = await findTerminalNotifier(runner, platform);
+  if (platform === 'darwin') {
+    if (notifier) {
+      const problems = notifierProblems((await runner.exec(notifier, ['-diagnose'], { readOnly: true, timeoutMs: 10_000 })).stdout);
+      if (problems.length === 0) add('notifications', 'ok', `terminal-notifier (${notifier}): a click on a notification switches to the task window`);
+      else add('notifications', 'warn', `terminal-notifier (${notifier}) will not show notifications yet: ${problems.join(' ')}`);
+    } else add('notifications', 'warn', 'osascript, no click action. For click-to-window: brew install terminal-notifier');
   } else add('notifications', 'ok', 'notify-send (no click action)');
 
   if (config) {
