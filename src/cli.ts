@@ -1,14 +1,18 @@
 import fs from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 import { Command, CommanderError, Option } from 'commander';
-import { closeTask } from './core/close.ts';
+import { closeTasks, planClose } from './core/close.ts';
+import { confirmAction, readClipboard, specFromClipboard, writeClipboard } from './core/clipboard.ts';
 import { runDoctor } from './core/doctor.ts';
 import { renderChecks, renderStatusTable } from './render.ts';
 import { newTasks } from './core/new.ts';
 import type { NewOptions } from './core/new.ts';
-import { pullTask } from './core/pull.ts';
+import { pullReady, pullTask } from './core/pull.ts';
 import { sendPrompts } from './core/send.ts';
-import { reportStatus } from './core/status.ts';
+import { reportStatus, statusMarkdown } from './core/status.ts';
+import { summarizeSpecs } from './core/summary.ts';
+import { DesktopNotifier } from './core/notify.ts';
+import { ensureWatchWindow, runWatch, WATCH_WINDOW } from './core/watch.ts';
 import { interruptTask } from './core/interrupt.ts';
 import { loadGlobalConfig } from './core/config.ts';
 import type { GlobalConfig } from './core/config.ts';
@@ -17,7 +21,7 @@ import { EXAMPLE_SPEC } from './core/example.ts';
 import { RealRunner, RecordingRunner } from './core/runner.ts';
 import type { Runner } from './core/runner.ts';
 import { resolveSendSpec, resolveSpec, splitSpecs } from './core/spec.ts';
-import { AgentctlError, errorMessage, resolvePath } from './core/util.ts';
+import { AgentctlError, errorMessage, resolvePath, shellQuote } from './core/util.ts';
 
 export interface CliDeps {
   stdout: (text: string) => void;
@@ -27,6 +31,10 @@ export interface CliDeps {
   loadConfig: () => GlobalConfig;
   /** Ask a yes/no question; undefined when there is no terminal to ask on. */
   confirm: ((question: string) => Promise<boolean>) | undefined;
+  /** Text on the clipboard (pbpaste, wl-paste or xclip). Always the real clipboard, also in a dry run. */
+  readClipboard: () => Promise<string>;
+  /** Command line that starts `agentctl watch` in a tmux window. */
+  watchCommand: () => string;
   /** Build the runner: the real one, or a recording one for --dry-run. */
   makeRunner: (dryRun: boolean, emit: (line: string) => void) => Runner;
   /** A signal that fires on Ctrl-C while a long wait runs; `dispose` restores the default Ctrl-C. Absent: no interrupt handling. */
@@ -41,6 +49,12 @@ export function defaultDeps(): CliDeps {
     stdinIsTTY: Boolean(process.stdin.isTTY),
     loadConfig: () => loadGlobalConfig(),
     confirm: process.stdin.isTTY ? askOnTerminal : undefined,
+    readClipboard: () => readClipboard(new RealRunner()),
+    watchCommand: () => {
+      const env = process.env.AGENTCTL_HOME ? `AGENTCTL_HOME=${shellQuote(process.env.AGENTCTL_HOME)} ` : '';
+      const script = fs.realpathSync(process.argv[1] ?? 'bin/agentctl.ts');
+      return `${env}${shellQuote(process.execPath)} --experimental-strip-types --no-warnings ${shellQuote(script)} watch`;
+    },
     makeRunner: (dryRun, emit) => (dryRun ? new RecordingRunner({ emit }) : new RealRunner()),
     interruptSignal: () => {
       const controller = new AbortController();
@@ -73,6 +87,13 @@ function packageVersion(): string {
 export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promise<number> {
   const line = (text: string): void => deps.stdout(`${text}\n`);
   let exitCode = 0;
+
+  /** Spec text from the clipboard (`--clip`), a file, or stdin. */
+  const readSpecSource = async (file: string | undefined, clip: boolean | undefined): Promise<string> => {
+    if (!clip) return readSpecText(file);
+    if (file !== undefined) throw new AgentctlError('--clip and a file argument exclude each other', 'Use one: "agentctl new --clip" or "agentctl new <file>".');
+    return specFromClipboard(await deps.readClipboard());
+  };
 
   const readSpecText = (file: string | undefined): string => {
     if (file === undefined || file === '-') {
@@ -124,10 +145,14 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('--no-switch', 'never offer to move a task to the other provider when its limit is full')
     .option('--no-agent', 'only create the worktree, run setup and links; no TASK.md, window or agent')
     .option('--no-wait-trust', 'stop at the folder-trust dialog instead of waiting for you to confirm it (the old behaviour)')
+    .option('--clip', 'read the spec from the clipboard; shows a summary and asks y/N first')
+    .option('-y, --yes', 'with --clip: do not ask')
     .action(
-      guarded(async (file: string | undefined, opts: { dryRun?: boolean; reuse?: boolean; agent?: 'claude' | 'codex' | false; switch?: boolean; waitTrust?: boolean }) => {
+      guarded(async (file: string | undefined, opts: { clip?: boolean; yes?: boolean; dryRun?: boolean; reuse?: boolean; agent?: 'claude' | 'codex' | false; switch?: boolean; waitTrust?: boolean }) => {
         const ctx = contextFor(Boolean(opts.dryRun));
-        const specs = splitSpecs(readSpecText(file), file ?? 'stdin').map((raw) => resolveSpec(raw, { config: ctx.config }));
+        const source = opts.clip ? 'clipboard' : (file ?? 'stdin');
+        const specs = splitSpecs(await readSpecSource(file, opts.clip), source).map((raw) => resolveSpec(raw, { config: ctx.config }));
+        if (opts.clip && !(await confirmAction(ctx, summarizeSpecs(specs), 'Start?', Boolean(opts.yes) || Boolean(opts.dryRun)))) return;
         const options: NewOptions = { reuse: Boolean(opts.reuse), noSwitch: opts.switch === false, waitTrust: opts.waitTrust !== false };
         if (opts.agent) options.agent = opts.agent;
         if (opts.agent === false) options.noAgent = true; // commander reads --no-agent as the negation of --agent
@@ -146,10 +171,14 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .description('Paste a follow-up prompt into the existing window of each task in the file.')
     .argument('[file]', 'spec file (only "task" and the prompt are used), or "-" for stdin')
     .option('--dry-run', 'print the commands that would run, execute nothing')
+    .option('--clip', 'read the prompt from the clipboard; shows a summary and asks y/N first')
+    .option('-y, --yes', 'with --clip: do not ask')
     .action(
-      guarded(async (file: string | undefined, opts: { dryRun?: boolean }) => {
+      guarded(async (file: string | undefined, opts: { clip?: boolean; yes?: boolean; dryRun?: boolean }) => {
         const ctx = contextFor(Boolean(opts.dryRun));
-        const items = splitSpecs(readSpecText(file), file ?? 'stdin').map(resolveSendSpec);
+        const items = splitSpecs(await readSpecSource(file, opts.clip), opts.clip ? 'clipboard' : (file ?? 'stdin')).map(resolveSendSpec);
+        const summary = items.map((i) => `${i.task}  ->  window ${ctx.config.session}:${i.window}, ${i.prompt.length} characters: ${i.prompt.split('\n')[0]!.slice(0, 80)}`);
+        if (opts.clip && !(await confirmAction(ctx, summary, 'Send?', Boolean(opts.yes) || Boolean(opts.dryRun)))) return;
         await sendPrompts(ctx, items);
       }),
     );
@@ -158,10 +187,18 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .command('status')
     .description('Table of tasks: window state, running time, report, last output line.')
     .option('--json', 'machine-readable output')
+    .option('--clip', 'copy a compact Markdown table to the clipboard (to paste at the start of a chat session)')
     .action(
-      guarded(async (opts: { json?: boolean }) => {
+      guarded(async (opts: { json?: boolean; clip?: boolean }) => {
         const ctx = contextFor(false);
         const { rows } = await reportStatus(ctx);
+        if (opts.clip) {
+          const md = statusMarkdown(rows);
+          const copy = await writeClipboard(ctx.runner, md);
+          if (copy.ok) return line(`Copied the status of ${rows.length} task${rows.length === 1 ? '' : 's'} to the clipboard (${copy.tool}), ${md.length} characters.`);
+          line(`${copy.error}; here is the table:`);
+          return deps.stdout(md);
+        }
         if (opts.json) return line(JSON.stringify(rows, null, 2));
         if (rows.length === 0) return line(`No tasks yet in ${ctx.config.cache}. Start one with "agentctl new <spec>".`);
         for (const l of renderStatusTable(rows)) line(l);
@@ -170,19 +207,60 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
 
   program
     .command('pull')
-    .description('Copy the task report to the clipboard and print its path (without a report: last 40 lines of the window).')
-    .argument('<task>', 'task ID')
-    .action(guarded(async (task: string) => pullTask(contextFor(false), task)));
+    .description('Copy the task report to the clipboard and print its path (without a report: last 40 lines of the window). --ready: all new reports at once.')
+    .argument('[task]', 'task ID')
+    .option('--ready', 'join every report in state report-ready that was not pulled yet, copy it and mark the tasks as pulled')
+    .option('--all', 'with --ready: also the reports that were pulled before')
+    .action(
+      guarded(async (task: string | undefined, opts: { ready?: boolean; all?: boolean }) => {
+        if (opts.all && !opts.ready) throw new AgentctlError('--all only works together with --ready');
+        if (opts.ready) {
+          if (task) throw new AgentctlError('--ready takes no task ID', 'Use "agentctl pull --ready" or "agentctl pull <task>".');
+          await pullReady(contextFor(false), { all: Boolean(opts.all) });
+          return;
+        }
+        if (!task) throw new AgentctlError('give a task ID, or --ready', 'Example: "agentctl pull NC-42" or "agentctl pull --ready".');
+        await pullTask(contextFor(false), task);
+      }),
+    );
 
   program
     .command('close')
-    .description('Kill the task window; --rm-worktree also removes its git worktree (branches are kept).')
-    .argument('<task>', 'task ID')
+    .description('Kill the task windows; --rm-worktree also removes their git worktrees (branches are kept). Shows the list and asks y/N first.')
+    .argument('<tasks...>', 'task IDs')
     .option('--rm-worktree', 'run "git worktree remove" for the task worktrees (never --force)')
+    .option('-y, --yes', 'do not ask')
     .option('--dry-run', 'print the commands that would run, execute nothing')
     .action(
-      guarded(async (task: string, opts: { rmWorktree?: boolean; dryRun?: boolean }) => {
-        await closeTask(contextFor(Boolean(opts.dryRun)), task, { rmWorktree: Boolean(opts.rmWorktree) });
+      guarded(async (tasks: string[], opts: { rmWorktree?: boolean; yes?: boolean; dryRun?: boolean }) => {
+        const ctx = contextFor(Boolean(opts.dryRun));
+        const closeOpts = { rmWorktree: Boolean(opts.rmWorktree) };
+        const plan = await planClose(ctx, tasks, closeOpts);
+        const summary = [`Close ${plan.length} task${plan.length === 1 ? '' : 's'}${closeOpts.rmWorktree ? ' and remove their worktrees (branches stay)' : ''}:`, ...plan.map((i) => `  ${i.line}`)];
+        if (!(await confirmAction(ctx, summary, 'Go ahead?', Boolean(opts.yes) || Boolean(opts.dryRun)))) return;
+        await closeTasks(ctx, plan.map((i) => i.task), closeOpts);
+      }),
+    );
+
+  program
+    .command('watch')
+    .description('Foreground loop: notifies (macOS notification / notify-send) when a task has a report ready, waits too long, needs folder trust or died.')
+    .option('--tmux', `run it in window "${WATCH_WINDOW}" of the agentctl session (created if missing) instead of here`)
+    .action(
+      guarded(async (opts: { tmux?: boolean }) => {
+        const ctx = contextFor(false);
+        if (opts.tmux) {
+          const result = await ensureWatchWindow(ctx, deps.watchCommand(), process.cwd());
+          if (result === 'exists') line(`Window ${ctx.config.session}:${WATCH_WINDOW} already exists, left alone.`);
+          else line(`Started the watcher in window ${ctx.config.session}:${WATCH_WINDOW}${result === 'session-created' ? ' (session created)' : ''}. Attach: tmux attach -t ${ctx.config.session}`);
+          return;
+        }
+        const interrupt = deps.interruptSignal?.();
+        try {
+          await runWatch(ctx, new DesktopNotifier(ctx.runner), interrupt ? { signal: interrupt.signal } : {});
+        } finally {
+          interrupt?.dispose();
+        }
       }),
     );
 
