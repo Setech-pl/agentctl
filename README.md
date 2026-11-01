@@ -212,8 +212,16 @@ watch:                         # `agentctl watch`, see "Daily loop"
 notify:                        # see "Events" and "Notifications"
   events: true                 # the agents report questions, end of turn and limits to `agentctl event` (hooks / -c notify); false = screen reading only
   turn_end: true               # a notification when a turn ends and the agent waits (false: only questions, reports and limits)
+  backend: auto                # auto: terminal-notifier (click to the window), osascript when it fails; or terminal-notifier / osascript only
   # terminal_app: com.apple.Terminal   # app a click on a notification brings forward; default: detected (Apple_Terminal, iTerm.app), else none
   # verdict_pattern: '^Verdict: (.*)'  # regex for the report line in the "report ready" notification, see "Notifications"
+board:                         # see "Closing and hiding tasks" and "Navigation"
+  auto_hide_pulled_dead: true  # a task without a window whose report was pulled hides by itself
+  mouse: true                  # `mouse on` in the agentctl tmux session (this session only)
+  return_key: F12              # tmux key (no prefix) that goes back to the board; false = none
+mcp:                           # see "Chat integration (MCP)"; the default is read-only
+  allow: []                    # write tools the chat may use: send, new, interrupt, close, move
+  allow_rm_worktree: false     # close may also remove the git worktree
 agents:
   claude:
     flags: []                  # extra flags appended to the claude command line
@@ -226,6 +234,7 @@ agents:
     # working_pattern: 'esc to interrupt'                                 # a turn is running
     # question_pattern: 'Enter to select\b.*Esc to cancel|Esc to cancel · Tab to amend'   # the agent asks you something -> needs-input
     # limit_patterns: ["^[\\s⎿●•■⚠!*>-]*You.ve hit your .{0,60}limit", ...]            # usage limit used up -> limited, see "Limits and move"
+    # background_patterns: ['[·⏵].*\b\d+ (?:shells?|monitors?)\b(?: still running)?', ...]   # the agent waits for its own shells/monitors -> background
     # footer_patterns: ['\? for shortcuts', '^\s*(⏵⏵|⏸)', ...]            # TUI chrome that `status` skips for LAST LINE
   codex:
     flags: []
@@ -274,18 +283,22 @@ mechanism it detects.
 |---|---|
 | `agentctl new [file\|-] [--clip [-y]] [--dry-run] [--reuse] [--agent claude\|codex] [--no-switch] [--no-wait-trust] [--no-agent]` | For each spec: `git worktree add` (error if the worktree exists, unless `--reuse`), the [setup](#setup) commands, symlinks, `<state_dir>/<task>/TASK.md`, a tmux window named after the task in session `agentctl` (created if missing), starts the agent in the first worktree with the env, waits for the agent's prompt (polling `tmux capture-pane`; a folder-trust dialog is waited out, see [Folder trust](#folder-trust)), pastes the prompt as one bracketed paste (`tmux load-buffer -` + `paste-buffer -p`), then sends Enter separately. Everything is validated before anything starts. `--agent` runs the specs on that provider (see [Model equivalents](#model-equivalents)). `--no-agent` stops after setup and links. `--clip` reads the spec from the clipboard, shows a summary and asks y/N (`-y` skips). |
 | `agentctl send [file\|-] [--clip [-y]] [--dry-run]` | Paste a follow-up prompt into the existing window (`task` from the header; the rest of the header is ignored). Errors if the window does not exist. The prompt is appended to `TASK.md` with a timestamp. |
-| `agentctl status [--json] [--clip] [--tmux-line]` | Table: task, agent/model/effort (as ordered too, if switched), [state](#task-states), window alive?, start, duration, `PROGRESS` (`2c 7f`: 2 commits over the base, 7 changed files, see [Progress](#progress)), report present?, last line of real content in the window (the agent's footer lines such as `? for shortcuts`, mode and warning lines, and empty input prompts are skipped, see `footer_patterns`); start time in local time (`--json` keeps the UTC `started` and adds `startedLocal`). A window of the session with no state file is listed as [`orphan`](#lost-state-orphans-and-adopt), never skipped. Refreshes the [mirror](#mirror) if configured. `--clip` copies a compact Markdown table (task, agent/model/effort, state, time, progress, report, pulled?) to the clipboard. `--tmux-line` prints one short line for the tmux status bar, see [Window icons and the status bar](#window-icons-and-the-tmux-status-bar). |
+| `agentctl status [--json] [--clip] [--tmux-line] [--all]` | Table: task, agent/model/effort (as ordered too, if switched), [state](#task-states), window alive?, start, duration, `PROGRESS` (`2c 7f`: 2 commits over the base, 7 changed files, see [Progress](#progress)), report present?, last line of real content in the window (the agent's footer lines such as `? for shortcuts`, mode and warning lines, and empty input prompts are skipped, see `footer_patterns`); start time in local time (`--json` keeps the UTC `started` and adds `startedLocal`). A window of the session with no state file is listed as [`orphan`](#lost-state-orphans-and-adopt), never skipped. Hidden and closed tasks are left out (a line says how many); `--all` lists them too, see [Closing and hiding tasks](#closing-and-hiding-tasks). Refreshes the [mirror](#mirror) if configured. `--clip` copies a compact Markdown table (task, agent/model/effort, state, time, progress, report, pulled?) to the clipboard. `--tmux-line` prints one short line for the tmux status bar, see [Window icons and the status bar](#window-icons-and-the-tmux-status-bar). |
 | `agentctl pull <task>\|--ready [--all]` | Copies the report to the clipboard (`pbcopy` on macOS, `wl-copy` or `xclip` on Linux) and prints its path. No report yet: prints the last 40 lines of the window. Refreshes the [mirror](#mirror) if configured. `--ready` joins all not yet pulled `report-ready` reports into one text, copies it and marks them pulled; `--all` takes pulled ones too. See [Daily loop](#daily-loop). |
 | `agentctl adopt <task> --report <path> [--window <name>] [--worktree <path>] [--agent claude\|codex] [--model <m>] [--effort <e>] [--dry-run]` | Restores the state file of a task whose own got lost. Agent, model and effort default to `unknown`. See [Lost state](#lost-state-orphans-and-adopt). |
 | `agentctl attach [task] [--switch-client]` | Goes to the task's window: `attach-session` outside tmux, `switch-client` inside. See [Attach and peek](#attach-and-peek). `--switch-client` is what a click on a notification runs: it switches the tmux client that is attached to the session and never attaches a terminal. |
 | `agentctl move <task> [--agent claude\|codex] [-y]` | Hands a task that hit its usage limit to the other provider: new window `<task>-2` in the same worktree, the original prompt plus a note to continue. Asks y/N. See [Limits and move](#limits-and-move). |
 | `agentctl event --task <task> --agent claude\|codex [--kind notification\|stop\|stop-failure] [--forward <json>] [payload]` | Not for you to type: the hooks and `notify` command that `new` sets up call it. Records the event, updates the task state and notifies at once. Always exits 0. See [Events](#events). |
 | `agentctl peek <task> [-n 40]` | Prints the last lines of the task's window without the agent's footer. See [Attach and peek](#attach-and-peek). |
-| `agentctl board [--tmux]` | Full-screen overview of all tasks with a live preview and keys to switch, message, move, interrupt, pull and close. See [Board](#board). |
+| `agentctl board [--tmux]` | Full-screen overview of all tasks with a live preview and keys to switch, message, move, interrupt, pull, close and hide. See [Board](#board). `--tmux` starts it as the process of window `board`, see [Navigation](#navigation). |
 | `agentctl watch [--tmux] [--no-status-line]` | Foreground loop that sends desktop notifications on state transitions ([Notifications](#notifications)) and puts a state icon in front of the tmux window names, see [Daily loop](#daily-loop) and [Window icons](#window-icons-and-the-tmux-status-bar). `--tmux` runs it in window `watch` of the agentctl session and shows the task counts in that session's status bar. |
 | `agentctl interrupt <task> [--dry-run]` | Interrupts the current turn by sending the agent's interrupt key (default one `Escape`). The window stays open. See [Interrupt](#interrupt). |
-| `agentctl close <task...> [--rm-worktree] [-y] [--dry-run]` | Lists the tasks (flagging those without a report), asks y/N (`-y` skips), then `tmux kill-window` for each; one failure does not stop the others. With `--rm-worktree` also `git worktree remove` (no `--force`; branches are never deleted; a worktree with `main`/`master` checked out is refused). |
-| `agentctl doctor` | Versions of tmux, node, git, claude, codex, gh; effort mechanism detected for each agent; the notifier (terminal-notifier or osascript); cache dir; mirror dir; configs; tmux session. |
+| `agentctl close <task...> [--rm-worktree] [-y] [--dry-run]` | Lists the tasks (flagging those without a report), asks y/N (`-y` skips), then `tmux kill-window` for each and marks the task **closed** (it leaves `status`, the board, `pull --ready`, `watch` and the window limits; state and report stay); one failure does not stop the others. With `--rm-worktree` also `git worktree remove` (no `--force`; branches are never deleted; a worktree with `main`/`master` checked out is refused). See [Closing and hiding tasks](#closing-and-hiding-tasks). |
+| `agentctl archive [--older-than 7d] [--dry-run]` | Moves the state folder of closed tasks to `<state_dir>/../archive/<task>/` (`~/.agentctl/archive/`). Reports and worktrees are not touched. |
+| `agentctl hide <task...>` / `agentctl unhide <task...>` | Takes tasks off `status` and the board (or brings them back) without closing them. See [Closing and hiding tasks](#closing-and-hiding-tasks). |
+| `agentctl notify-test` | Sends one test notification and says which channel carried it, see [Notifications](#notifications). |
+| `agentctl mcp` / `mcp install [--desktop\|--claude-code] [--dry-run] [-y]` / `mcp uninstall` | The local MCP server for chats, and its (un)registration in the Claude app and in Claude Code. See [Chat integration (MCP)](#chat-integration-mcp). |
+| `agentctl doctor` | Versions of tmux, node, git, claude, codex, gh; effort mechanism detected for each agent; the notifier (terminal-notifier or osascript, and whether macOS lets terminal-notifier show anything); whether the MCP server is registered and runs the stable copy, and what the chat may write; cache dir; mirror dir; configs; tmux session. |
 | `agentctl spec example` | Prints the example spec below. |
 
 `--dry-run` swaps the execution layer for a recorder: no command is run and no file is written, and it prints what would happen.
@@ -446,6 +459,9 @@ because a click runs with a bare environment (live: without `PATH` tmux was not 
 Without terminal-notifier the notification is the old `osascript` one (`notify-send` on Linux), without an action. terminal-notifier 3.x shows nothing until macOS has given it permission (the first notification asks) and its alert style is not `None`
 (System Settings > Notifications > terminal-notifier); `doctor` runs `terminal-notifier -diagnose` and warns about exactly that.
 
+**Backend and fallback (`notify.backend`).** `auto` (the default) tries terminal-notifier first. terminal-notifier 3.x can exit with `Could not request notification permission: Notifications are not allowed for this application`, and that permission cannot be granted from the command line: when it exits non-zero or prints that message, the same notification goes out through `osascript` (no click action), and terminal-notifier is left alone for an hour (`<config dir>/notifier.json`, so that the watcher and the hooks all see it); the one-line warning is in `<config dir>/notifier.log`. `terminal-notifier` or `osascript` use only that channel (no fallback, nothing remembered).
+`agentctl notify-test` sends one notification and tells you which channel carried it, tries terminal-notifier again even if it is remembered as broken, and exits 1 when no channel worked. To get click-to-window back: System Settings > Notifications > terminal-notifier > Allow Notifications, alert style Banners; if terminal-notifier is not on that list, set `notify: {backend: osascript}`. `doctor` shows this state and the steps.
+
 **Verdict.** The `report-ready` notification quotes the first meaningful line of the report, markdown removed, at most 100 characters, in this order: the first line `notify.verdict_pattern` matches (a regex; its first group, else the whole line),
 a line that starts with `Werdykt`, `Verdict` or `Status` (`**Werdykt:** PASS`; as a heading on its own the line under it follows), else the first line of text after the heading (front matter, rules and table rows skipped).
 
@@ -511,6 +527,26 @@ status-interval 10
 `<this agentctl>` is the absolute path of node and of this checkout's script with the current `AGENTCTL_HOME`, not a bare `agentctl`, because the tmux server's `PATH` often does not
 contain it. This replaces the session's `status-right`; undo with `tmux set-option -u -t agentctl: status-right`. Leave the bar alone with `watch --tmux --no-status-line` or `watch.status_line: false`.
 
+### Closing and hiding tasks
+
+Three different things, from the lightest:
+
+- **Finished.** A task whose window is gone (you closed the agent inside the window, it crashed, or it was moved to the other provider) but that nobody closed with `agentctl close`. It stays in `status`, and on the board it sits under the closed **Finished (N)** title, dimmed. `Enter` there opens a menu (`c` copy the report, `x` close, `h` hide, `Esc`), because there is no window to go to.
+- **Hidden.** `agentctl hide <task…>` (board: `h`) sets `hidden: true` in `TASK.md`. The task is off `status` and the board (`status --all` and the board key `a` bring it back, `agentctl unhide` / `h` shows it again). Nothing is closed and no worktree is touched. With `board.auto_hide_pulled_dead: true` (the default) a task **without a window whose report was pulled** (`pull`, `pull --ready`, `c` or `r` on the board, the MCP `pull_ready`) hides by itself; without a report it stays under Finished. `unhide` writes `hidden: false`, which keeps that task visible. agentctl never closes a task or removes a worktree by itself.
+- **Closed.** `agentctl close` (board: `x`) kills the window and writes `closed: true` and `closed_at` into `TASK.md`. A closed task is gone from `status`, the board, `pull --ready`, `watch` (closing a task that has no report is not a "window vanished" alarm) and the [window limits](#window-limits-and-cross-review); `status --all` and the board key `a` list it as `closed`. State and report stay.
+  `agentctl archive [--older-than 7d]` moves the state folder of closed tasks to `~/.agentctl/archive/<task>/` (next to the state folder). A folder that is in the archive, moved there by `archive` or by hand, is a closed task, never an orphan or an error; a live window with the same name wins over it.
+
+### Navigation
+
+`agentctl board --tmux` and `agentctl watch --tmux` start their command **as the process of the window** (`tmux new-window … <command>`), not by typing it into a shell, and set `remain-on-exit failed` for the window in the same tmux call: when the command fails, the window stays with its error on the screen, and `~/.agentctl/board.log` / `watch.log` have the start (terminal size, `CI`, tty flags) and the end or the stack of the failure. Running `board --tmux` again starts a window whose process has ended in place. The board waits for a terminal size (a window without a client can report 0x0 for a moment) and draws even when a `CI` variable is in the environment (Ink would otherwise draw nothing).
+
+In the agentctl session (session options, never `-g`) agentctl sets:
+
+- **`mouse on`** (`board.mouse`): click a window name in the status bar to switch to it. With the mouse on, selecting text in Terminal.app takes the **fn** key held down (iTerm2: Option).
+- **`F12` goes back to the board** from any window of the session, without the tmux prefix (`board.return_key`, a tmux key name; `false` for none). The binding is server-wide in tmux, so it is conditional on the session: in every other session F12 reaches the program in the pane as before. Why F12: `⌥b` is "word back" in the input boxes of Claude Code and Codex and needs "Use Option as Meta" in Terminal.app; Ctrl and Cmd are what is mixed up; neither agent uses F12. On a MacBook it takes `fn`+F12 unless "Use F1, F2, etc. keys as standard function keys" is on. If the key is already bound to something else in tmux it is left alone and `board --tmux` says so. `Ctrl-b l` (last window) still works.
+
+The board's footer says `Enter – open the agent · F12 – back to the list`.
+
 ### Board
 
 `agentctl board` is a full-screen overview of all tasks, refreshed every 2 seconds. `agentctl board --tmux` opens it in window `board` of the agentctl session
@@ -533,7 +569,8 @@ agentctl board  agentctl-test · 3 tasks · 09:41:03
                                                                        │   Enter to select · Esc to cancel
                                                                        │ ● you chose: tea please
 
-↑↓ ⏎ open  m msg  M move  i interrupt  c pull  r pull-new  x close  ? help  q
+Enter – open the agent · F12 – back to the list
+↑↓ ⏎ go  m msg  M move  i int  c pull  r new  x close  h hide  z done  a all  ?
 ```
 
 Below 110 columns the preview is hidden and the list takes the whole width (this is 80 columns):
@@ -545,7 +582,8 @@ agentctl board  agentctl-test · 3 tasks · 09:40:39
   AC5-B      codex gpt-6.1-sol… ✓ report-ready 13s     1c 1f    ready
   AC5-C      claude sonnet/med… ? needs-input  12s     2c 2f    -
 
-↑↓ ⏎ open  m msg  M move  i interrupt  c pull  r pull-new  x close  ? help  q
+Enter – open the agent · F12 – back to the list
+↑↓ ⏎ go  m msg  M move  i int  c pull  r new  x close  h hide  z done  a all  ?
 ```
 
 The list shows task, agent/model/effort, state icon, time, `PROGRESS` and the report (`-` none, `ready` not pulled yet, `pulled`). From 110 columns the right column
@@ -554,14 +592,19 @@ shows the last 30 lines of the selected window (as `peek`, without the footer); 
 | Key | Action |
 |---|---|
 | `↑` `↓` (`k` `j`) | select a task |
-| `Enter` | go to the task's window (`select-window` + `switch-client`); `Ctrl-b l` comes back to the board |
+| `Enter` | go to the task's window (`select-window` + `switch-client`); `F12` (or `Ctrl-b l`) comes back to the board. On a task without a window it opens a menu instead: `c` copy the report, `x` close, `h` hide, `Esc` |
 | `m` | type a message and send it to the agent as `send` does (`Enter` sends, `Esc` cancels) |
 | `M` | move the task to the other provider after a usage limit (`agentctl move`), after a `[y/N]` question; refused for pinned and already moved tasks |
 | `i` | interrupt the current turn, after a `[y/N]` question |
 | `c` | copy the selected task's report (`pull`) |
 | `r` | copy all new reports (`pull --ready`) |
 | `x` | close the window, after a `[y/N]` question; if the task has a worktree, a second question asks whether to remove it too (`git worktree remove`, never `--force`, the branch stays; `Esc` cancels) |
+| `h` | hide the selected task (or show a hidden one); nothing is closed or removed |
+| `z` | open or close the **Finished (N)** section |
+| `a` | list hidden tasks too (dimmed, marked `·`) and the closed ones, in their own **Closed (N)** section |
 | `?` / `q` | help / leave (the agents keep running) |
+
+The tasks that still have a window come first. Tasks without a window (and without `close`: `dead`, `report-ready` after you closed the agent in its window, `superseded`) wait dimmed under a closed **Finished (N)** title; `z` opens it. Enter on one of them does not try to switch to a window that is not there. See [Closing and hiding tasks](#closing-and-hiding-tasks).
 
 Nothing destructive runs on a single key. The board reuses the core functions of the commands (`sendPrompts`, `interruptTask`, `pullTask`, `pullReady`, `closeTask`, `moveTask`); git is asked for
 the progress at most every 10 seconds. It needs a terminal; without tmux `Enter` tells you to use `agentctl attach`.
@@ -578,6 +621,7 @@ the progress at most every 10 seconds. It needs a terminal; without tmux `Enter`
 | State | Meaning |
 |---|---|
 | `working` | a turn is running (`working_pattern`, default `esc to interrupt`) |
+| `background` | the agent is idle at its prompt but its own background work runs (`background_patterns`; Claude Code shows `· 1 shell, 6 monitors` in its footer). It ends a turn every few minutes meanwhile, so the end of turn is not announced and `watch` does not call it waiting; the tmux status bar counts it with `working`; icon ⏳. The notification comes when the background work is gone. Codex has "background terminals" (`/ps`); its pattern is a best guess, the footer text with a count was not seen on a screen |
 | `waiting` | the agent is idle at its prompt and there is no report yet |
 | `needs-trust` | the agent shows its folder-trust dialog; a human must answer it |
 | `needs-input` | the agent asked **you** a question or for a permission and waits (`question_pattern`; Codex: `? <question>` with options and `• Waiting for your answer.`, or the approval dialog; Claude Code: the `Enter to select · Esc to cancel` dialog or a permission dialog; or Claude's `Notification` [event](#events)) |
@@ -585,9 +629,10 @@ the progress at most every 10 seconds. It needs a terminal; without tmux `Enter`
 | `report-ready` | the report file exists and is newer than the start (the agent is idle, or the window is gone) |
 | `superseded` | the task was moved to the other provider with `agentctl move`; this is the old window, which you close yourself |
 | `dead` | the window is gone and there is no report |
+| `closed` | `agentctl close` was run (or the state folder is in the archive): listed only by `status --all` and the board key `a`, see [Closing and hiding tasks](#closing-and-hiding-tasks) |
 | `orphan` | a window of the agentctl session has no state file (lost or never created) |
 
-Precedence for a live window: `needs-trust`, then `needs-input`, then `working`, then `limited`, then `report-ready`, then `waiting` (`superseded` overrides all of them).
+Precedence for a live window: `needs-trust`, then `needs-input`, then `working`, then `limited`, then `background`, then `report-ready`, then `waiting` (`superseded` overrides all of them; `closed` applies only to a task without a window).
 These are heuristics on screen text; if a CLI update changes its wording, adjust the patterns in the config.
 
 ### Folder trust
@@ -635,6 +680,62 @@ when you call `status` or `pull`.
 
 - `limits.<agent>` caps simultaneous tmux windows per provider; the error lists the live windows. Windows are attributed to a provider through their `TASK.md`.
 - `review_of: NC-6` looks up the author in `<state_dir>/nc-6/TASK.md` (or in the same file) and requires a different agent **or** a different model. `default` counts as a model name of its own.
+
+## Chat integration (MCP)
+
+`agentctl mcp` is a local [MCP](https://modelcontextprotocol.io) server on stdio (the official `@modelcontextprotocol/sdk`). The Claude app, Claude Code and the VS Code extension start it themselves; nothing listens on a port. A chat can then read the status, look into a window and read the reports of your agents by itself, without the clipboard.
+
+**Tools.** Read tools always work:
+
+| Tool | Use |
+|---|---|
+| `status` | state of all tasks (`status --json` plus a one-line summary); hidden and closed tasks only with `all: true`. The chat should call it first. |
+| `peek` | last lines (1 to 200) of a running task's window, without the agent's footer |
+| `list_reports` | which tasks have a report, its size, time, whether pulled |
+| `get_report` | one report, up to 200 KB; only the file `TASK.md` names, never a path from the chat; a report that is a symbolic link is refused |
+| `pull_ready` | all new reports under headers, marked as pulled (like `pull --ready`, without the clipboard); the chat should call it at the start of discussing finished work |
+| `task_spec` | the header and the prompt from `TASK.md` (environment values are not shown) |
+
+Write tools are **off** until you list them in `~/.agentctl/config.yaml`; the list is read again on every call, so a change works at once and removing a name revokes it at once:
+
+```yaml
+mcp:
+  allow: [send, interrupt]     # any of: send, new, interrupt, close, move
+  allow_rm_worktree: false     # close may also remove the git worktree
+```
+
+| Tool | What it does |
+|---|---|
+| `send` | pastes a prompt (up to 20,000 characters) into the window of a running task |
+| `new` | starts tasks from a spec text, validated like the CLI. **The first call only returns the summary**; it starts only when called again with `confirm: true`. A spec with `setup` (shell commands) is refused. |
+| `interrupt` | sends the agent its interrupt key; the window stays |
+| `close` | closes the window and marks the task closed; the worktree stays unless `remove_worktree: true` **and** `mcp.allow_rm_worktree` |
+| `move` | hands a task that hit its limit to the other provider; the first call only describes it, `confirm: true` does it |
+
+**Security model.** There is no tool for merge, push, rebase, deleting a branch or running a shell command, and none that reads a file other than a report named by `TASK.md` or `TASK.md` itself; no argument is a path. Every write is refused unless allowed, recorded in `~/.agentctl/mcp-audit.log` (JSON lines: time, tool, task, `requested`, then `done` / `error` / `denied` / `preview`; it is written **before** the action, and a write that cannot be recorded is not done) and announced with a desktop notification `czat zlecił: <action> <TASK>`. The app asks you as well: tools are annotated (`readOnlyHint`, `destructiveHint`), and the app's documentation describes a per-tool choice of Always allow, Needs approval or Blocked, with read-only and write tools grouped (documented for connectors; I could not confirm that a local server gets the same screen, see the report). The tools that change something (`pull_ready` marks reports as pulled) are not marked read-only, so expect approval prompts for them until you choose "Always allow". Stdout carries only protocol messages. The process runs as you and sees what you see: this is a trust decision about the chat, not a sandbox; start with `allow: []` and read-only questions.
+
+**Install in the Claude app (macOS).**
+
+```
+agentctl mcp install --desktop --dry-run    # the exact entry and the diff, nothing written
+agentctl mcp install --desktop              # shows both, asks y/N, keeps a dated .bak copy, keeps your other servers
+```
+
+This edits `~/Library/Application Support/Claude/claude_desktop_config.json` (`mcpServers.agentctl`: the absolute `node`, `--experimental-strip-types --no-warnings`, the absolute script of this agentctl, `mcp`, and `PATH`, `AGENTCTL_HOME`, `TMUX_TMPDIR` of the run, because the app starts servers with a bare environment). Run it from the **stable copy** (the `agentctl` on your PATH), so that the entry does not point at the development checkout; it warns when it does. Then quit the app completely (Cmd+Q, the window is not enough) and open it again. If the app does not list the tools, `~/Library/Logs/Claude/mcp-server-agentctl.log` (and `mcp.log`) say why. `agentctl mcp install --desktop --config <copy>` works on another file, to try it first.
+A [Desktop Extension](https://github.com/modelcontextprotocol/mcpb) (`.mcpb`) is the route the app's own documentation pushes for ready-made servers, but it needs a repack and a reinstall on every change; the config file is still documented and is what this uses. Whether the tools are available inside the chats of a **Project** is not documented anywhere I could find: try a question in a Project chat after installing, and the "+" menu of the chat lists the connected tools.
+
+**Install in Claude Code and the VS Code extension.**
+
+```
+agentctl mcp install --claude-code --dry-run
+agentctl mcp install --claude-code          # claude mcp add --scope user --env … --transport stdio agentctl -- <node> … mcp
+```
+
+User scope makes it available in every project, and the VS Code extension reads the same configuration (`/mcp` in the chat panel shows it). `agentctl mcp uninstall [--desktop|--claude-code]` removes it again. `agentctl doctor` shows whether it is registered, whether it runs the stable copy, and what the chat may write.
+
+**Questions to try.** "What is running, and who is waiting for me?" – "Pull the new reports and give me a verdict on each." – "What is NC-42 doing right now? Look into its window." – "Show me the prompt of NC-40 and its report side by side." – with `send` allowed: "Tell NC-42 to add a test for the empty case." – with `new` allowed: "Draft a spec for the next task and show me the summary before you start it."
+
+**Remote variant (later).** A server that is reachable from claude.ai on the web or the phone would need a tunnel (for example a Cloudflare Tunnel to a local HTTP transport) plus authentication, and it would make everything above reachable from outside this machine. That is a different threat model and is deliberately not part of this; nothing here opens a port.
 
 ## Example: Neon City
 
@@ -750,6 +851,8 @@ layer on top, and so is the board: `src/core/board.ts` holds its state, key hand
 - Screen patterns (ready, trust, working) are heuristics tied to the wording of the current Claude Code and Codex TUIs.
 - Links replace symlinks only, never real files or directories.
 - The board draws state icons with characters whose width differs between terminals (`⚙`, `⏸` are one or two cells wide); if columns look shifted, set `watch.window_icons` to plain symbols.
+- The `background` state of Codex rests on a guess: the binary has "background terminals" (`/ps`, `/stop`) but the footer text with a count was not seen on a screen, so `agents.codex.background_patterns` may need adjusting. Claude Code's `· 1 shell, 6 monitors` is taken from a description of its footer, not from a captured screen.
+- The MCP server is local (stdio) and runs as you. Whether the Claude app offers local servers inside Project chats, and which approval screen it shows for them, is not documented; see [Chat integration (MCP)](#chat-integration-mcp).
 - `close` kills the window before it tries `git worktree remove`; a worktree with uncommitted or untracked files is refused (no `--force`), so the window is already gone when that error appears.
 
 ## Roadmap
