@@ -23,7 +23,10 @@ export interface StatusRow {
   switchedBy: 'flag' | 'limit' | null;
   state: TaskState;
   window: 'alive' | 'gone';
+  /** UTC, `YYYY-MM-DD HH:MM` (unchanged; this is what `status --json` and the mirror carry). */
   started: string;
+  /** The same moment in local time, for the table. */
+  startedLocal: string;
   /** Running time for live windows; for closed ones, time until the report was last written; "-" if unknown. */
   duration: string;
   /** The report file exists. */
@@ -80,7 +83,8 @@ export async function collectStatus(ctx: Context): Promise<StatusRow[]> {
       switchedBy: record.switchedBy ?? null,
       state: taskState({ alive, screen: screenText, settings, reportReady }),
       window: alive ? 'alive' : 'gone',
-      started: formatLocalTime(record.started),
+      started: record.started ? record.started.replace('T', ' ').slice(0, 16) : '-',
+      startedLocal: formatLocalTime(record.started),
       duration,
       report: reportMtime !== undefined ? 'yes' : 'missing',
       reportPath: record.report,
@@ -107,6 +111,7 @@ export async function collectStatus(ctx: Context): Promise<StatusRow[]> {
       state: 'orphan',
       window: 'alive',
       started: '-',
+      startedLocal: '-',
       duration: '-',
       report: 'missing',
       reportPath: '',

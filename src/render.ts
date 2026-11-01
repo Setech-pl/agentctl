@@ -9,7 +9,7 @@ export function renderStatusTable(rows: StatusRow[], maxLast = 60): string[] {
     r.switchedBy ? `${r.agent}/${r.model}/${r.effort} (ordered ${r.requested})` : `${r.agent}/${r.model}/${r.effort}`,
     r.state,
     r.window,
-    r.started,
+    r.startedLocal,
     r.duration,
     r.report,
     r.lastLine.length > maxLast ? `${r.lastLine.slice(0, maxLast - 1)}…` : r.lastLine,

@@ -354,12 +354,16 @@ describe('local time', () => {
       const { config, ctx } = setup('lt1');
       seed(config, specFor(config, 'NC-1'), Date.UTC(2026, 9, 31, 23, 30));
       process.env.TZ = 'Pacific/Auckland'; // UTC+13 in November: the next day, 12:30
-      assert.equal((await collectStatus(ctx))[0]?.started, '2026-11-01 12:30');
+      let row = (await collectStatus(ctx))[0]!;
+      assert.equal(row.startedLocal, '2026-11-01 12:30');
+      assert.match(renderStatusTable([row])[1] as string, /2026-11-01 12:30/);
       process.env.TZ = 'America/Los_Angeles'; // UTC-7 on 31 October
-      assert.equal((await collectStatus(ctx))[0]?.started, '2026-10-31 16:30');
+      row = (await collectStatus(ctx))[0]!;
+      assert.equal(row.startedLocal, '2026-10-31 16:30');
+      assert.match(renderStatusTable([row])[1] as string, /2026-10-31 16:30/);
       const r = await cli(config, new RecordingRunner({ dryRun: false, respond: new Machine().respond }), ['status', '--json']);
       assert.equal(r.code, 0, r.stderr);
-      assert.match(r.stdout, /"started": "2026-10-31 16:30"/);
+      assert.match(r.stdout, /"started": "2026-10-31 23:30"/, 'JSON stays UTC');
       assert.equal(readTaskRecord(config, 'nc-1')?.started, '2026-10-31T23:30:00.000Z', 'the file keeps UTC');
     } finally {
       if (before === undefined) delete process.env.TZ;
