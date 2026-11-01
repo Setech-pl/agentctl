@@ -8,7 +8,7 @@ environment variables, a tmux window with the agent already running, and your pr
 spec.md ──► git worktree ──► symlinks ──► TASK.md in the state dir ──► tmux window ──► agent ──► prompt pasted
 ```
 
-It is deliberately small: Node core plus two dependencies (`commander`, `yaml`), no build step, no daemon.
+It is deliberately small: Node core plus a few dependencies (`commander`, `yaml`, and `ink` with `react` for the [board](#board)), no build step, no daemon.
 It never runs `git merge`, `rebase` or `push`, and it has no auto-accept mode: the agent keeps asking you for permission.
 
 ## Install
@@ -206,6 +206,8 @@ mirror_dir: ~/Dropbox/agentctl # optional, off by default, see "Mirror"
 watch:                         # `agentctl watch`, see "Daily loop"
   interval: 15                 # seconds between polls (default)
   waiting_after: 120           # seconds a task may wait before it is worth a notification (default)
+  window_icons: true           # state icon in front of the tmux window names; false = off, or a mapping: {working: "▶", needs-input: "❓"}
+  status_line: true            # `watch --tmux` shows the task counts in the status bar of the agentctl session; false = leave it alone
 agents:
   claude:
     flags: []                  # extra flags appended to the claude command line
@@ -264,10 +266,13 @@ mechanism it detects.
 |---|---|
 | `agentctl new [file\|-] [--clip [-y]] [--dry-run] [--reuse] [--agent claude\|codex] [--no-switch] [--no-wait-trust] [--no-agent]` | For each spec: `git worktree add` (error if the worktree exists, unless `--reuse`), the [setup](#setup) commands, symlinks, `<state_dir>/<task>/TASK.md`, a tmux window named after the task in session `agentctl` (created if missing), starts the agent in the first worktree with the env, waits for the agent's prompt (polling `tmux capture-pane`; a folder-trust dialog is waited out, see [Folder trust](#folder-trust)), pastes the prompt as one bracketed paste (`tmux load-buffer -` + `paste-buffer -p`), then sends Enter separately. Everything is validated before anything starts. `--agent` runs the specs on that provider (see [Model equivalents](#model-equivalents)). `--no-agent` stops after setup and links. `--clip` reads the spec from the clipboard, shows a summary and asks y/N (`-y` skips). |
 | `agentctl send [file\|-] [--clip [-y]] [--dry-run]` | Paste a follow-up prompt into the existing window (`task` from the header; the rest of the header is ignored). Errors if the window does not exist. The prompt is appended to `TASK.md` with a timestamp. |
-| `agentctl status [--json] [--clip]` | Table: task, agent/model/effort (as ordered too, if switched), [state](#task-states), window alive?, start, duration, report present?, last line of real content in the window (the agent's footer lines such as `? for shortcuts`, mode and warning lines, and empty input prompts are skipped, see `footer_patterns`); start time in local time (`--json` keeps the UTC `started` and adds `startedLocal`). A window of the session with no state file is listed as [`orphan`](#lost-state-orphans-and-adopt), never skipped. Refreshes the [mirror](#mirror) if configured. `--clip` copies a compact Markdown table (task, agent/model/effort, state, time, report, pulled?) to the clipboard. |
+| `agentctl status [--json] [--clip] [--tmux-line]` | Table: task, agent/model/effort (as ordered too, if switched), [state](#task-states), window alive?, start, duration, `PROGRESS` (`2c 7f`: 2 commits over the base, 7 changed files, see [Progress](#progress)), report present?, last line of real content in the window (the agent's footer lines such as `? for shortcuts`, mode and warning lines, and empty input prompts are skipped, see `footer_patterns`); start time in local time (`--json` keeps the UTC `started` and adds `startedLocal`). A window of the session with no state file is listed as [`orphan`](#lost-state-orphans-and-adopt), never skipped. Refreshes the [mirror](#mirror) if configured. `--clip` copies a compact Markdown table (task, agent/model/effort, state, time, progress, report, pulled?) to the clipboard. `--tmux-line` prints one short line for the tmux status bar, see [Window icons and the status bar](#window-icons-and-the-tmux-status-bar). |
 | `agentctl pull <task>\|--ready [--all]` | Copies the report to the clipboard (`pbcopy` on macOS, `wl-copy` or `xclip` on Linux) and prints its path. No report yet: prints the last 40 lines of the window. Refreshes the [mirror](#mirror) if configured. `--ready` joins all not yet pulled `report-ready` reports into one text, copies it and marks them pulled; `--all` takes pulled ones too. See [Daily loop](#daily-loop). |
 | `agentctl adopt <task> --report <path> [--window <name>] [--worktree <path>] [--agent claude\|codex] [--model <m>] [--effort <e>] [--dry-run]` | Restores the state file of a task whose own got lost. Agent, model and effort default to `unknown`. See [Lost state](#lost-state-orphans-and-adopt). |
-| `agentctl watch [--tmux]` | Foreground loop that sends desktop notifications on state transitions, see [Daily loop](#daily-loop). `--tmux` runs it in window `watch` of the agentctl session. |
+| `agentctl attach [task]` | Goes to the task's window: `attach-session` outside tmux, `switch-client` inside. See [Attach and peek](#attach-and-peek). |
+| `agentctl peek <task> [-n 40]` | Prints the last lines of the task's window without the agent's footer. See [Attach and peek](#attach-and-peek). |
+| `agentctl board [--tmux]` | Full-screen overview of all tasks with a live preview and keys to switch, message, interrupt, pull and close. See [Board](#board). |
+| `agentctl watch [--tmux] [--no-status-line]` | Foreground loop that sends desktop notifications on state transitions and puts a state icon in front of the tmux window names, see [Daily loop](#daily-loop) and [Window icons](#window-icons-and-the-tmux-status-bar). `--tmux` runs it in window `watch` of the agentctl session and shows the task counts in that session's status bar. |
 | `agentctl interrupt <task> [--dry-run]` | Interrupts the current turn by sending the agent's interrupt key (default one `Escape`). The window stays open. See [Interrupt](#interrupt). |
 | `agentctl close <task...> [--rm-worktree] [-y] [--dry-run]` | Lists the tasks (flagging those without a report), asks y/N (`-y` skips), then `tmux kill-window` for each; one failure does not stop the others. With `--rm-worktree` also `git worktree remove` (no `--force`; branches are never deleted; a worktree with `main`/`master` checked out is refused). |
 | `agentctl doctor` | Versions of tmux, node, git, claude, codex, gh; effort mechanism detected for each agent; cache dir; mirror dir; configs; tmux session. |
@@ -353,6 +358,126 @@ agent that tidied up its folder deleted the `TASK.md`: the task vanished from `s
 task's window. It types nothing else and does not close the window. Only a single key is sent on purpose: checked live,
 one `Escape` at an idle prompt does nothing in Claude Code 2.1.309 and Codex 0.166.0, while a double `Escape` in Codex
 opens "edit previous message". `--dry-run` prints the `tmux send-keys` it would run.
+
+### Attach and peek
+
+`agentctl attach [TASK]` takes you to the task's window. Outside tmux it selects the window and runs `tmux attach-session`;
+inside tmux (`$TMUX` is set) it selects the window and runs `tmux switch-client`. Before it hands over the terminal it prints one line:
+
+```
+Ctrl-b d – wyjście bez przerywania agenta; nie wciskaj Esc ani Ctrl-c
+```
+
+Detaching with `Ctrl-b d` leaves the agent running; `Esc` and `Ctrl-c` would reach the agent itself. Without an argument `attach` goes to the
+only running task; with several it shows a numbered list to choose from (without a terminal: the list and an error).
+
+`agentctl peek TASK [-n 40]` prints the last N lines of the window's content (screen and scrollback) without attaching. The agent's footer lines
+(`footer_patterns`), the borders around the input field and empty input prompts are left out, the same filter `status` uses for `LAST LINE`.
+
+`TASK` is case-insensitive in both, and a unique prefix is enough (`agentctl peek nc-4` finds `NC-42`). An exact ID always wins over a longer one it prefixes
+(`NC-4` over `NC-42`). An ambiguous prefix is an error that lists the candidates; a task whose window is gone says so.
+The other commands (`send`, `pull`, `close`, `interrupt`, …) still take the full ID.
+
+### Progress
+
+`PROGRESS` in `status` (table, `--json` as `progress`, `--clip`, the mirror's `status.json`) shows what each task has to show for itself:
+`2c 7f` is 2 commits over the base and 7 changed files, summed over the task's worktrees. The base is the repo's `base` from the spec, else `main`, else `master`.
+Commits are `git rev-list --count <base>..HEAD`. Files are the union of `git diff --name-only <base>...HEAD` (what this branch changed since it left the base; three dots,
+so changes the base got meanwhile do not count) and `git status --porcelain` (uncommitted and untracked files, collapsed to the directory for a fully untracked directory),
+each file counted once. Without a base the commits are `?` (`?c 3f`); a worktree that is gone is `-`. `--json` carries the per-worktree numbers.
+
+### Window icons and the tmux status bar
+
+While `agentctl watch` runs it puts the state of each live window in front of its name, so `Ctrl-b w` and the status bar show what is going on:
+
+| Icon | State |
+|---|---|
+| `⚙` | `working` |
+| `⏸` | `waiting` |
+| `?` | `needs-input` |
+| `🔒` | `needs-trust` |
+| `✓` | `report-ready` |
+| `✗` | `orphan` (and `dead`, which has no window to name) |
+
+A window then reads `⚙ nc-42`. It is renamed only when the state changes, and when the watcher stops (Ctrl-C, or the window being killed) the plain names are restored.
+Turn it off with `watch.window_icons: false`, or replace single icons (`watch.window_icons: {working: "▶", needs-input: "❓"}`; quote `"?"` in YAML).
+The `watch` and `board` windows are never renamed.
+
+Every agentctl command finds a window by the task name, whatever stands in front of it. `new` and `adopt` also record tmux's own window ID (`@12`) as `window_id`
+in `TASK.md`, and commands target that ID while the window still carries the task's name (tmux reuses IDs after a restart, so a stale ID is never trusted).
+Tasks started before this version have no ID and are matched by name. If `watch` is killed hard (`kill -9`), the icons stay on the windows until the next `watch` run;
+everything keeps working meanwhile. Change the icons while the watcher is stopped (it recognises its old icons only if they are symbols or in the config).
+
+`agentctl status --tmux-line` prints the number of tasks per state as one line, `2⚙ 1✓ 1?` (zero counts left out; reports you already pulled do not count as `✓`;
+`orphan` and `dead` share `✗`). It makes no git calls and prints nothing else, so tmux can run it. `agentctl watch --tmux` sets, **for the agentctl session only**
+(`set-option -t =agentctl:`, never `-g`):
+
+```
+status-right    #(<this agentctl> status --tmux-line)
+status-interval 10
+```
+
+`<this agentctl>` is the absolute path of node and of this checkout's script with the current `AGENTCTL_HOME`, not a bare `agentctl`, because the tmux server's `PATH` often does not
+contain it. This replaces the session's `status-right`; undo with `tmux set-option -u -t agentctl: status-right`. Leave the bar alone with `watch --tmux --no-status-line` or `watch.status_line: false`.
+
+### Board
+
+`agentctl board` is a full-screen overview of all tasks, refreshed every 2 seconds. `agentctl board --tmux` opens it in window `board` of the agentctl session
+(created if missing, never twice); the board and watch windows are not tasks.
+
+```
+agentctl board  agentctl-test · 3 tasks · 09:41:03
+  TASK       AGENT              STATE          TIME    PROGRESS REPORT │ AC5-C · last 13 lines
+  AC5-A      claude opus/high   ⏸ waiting      37s     2c 3f    -      │ bash-3.2$ claude --model sonnet --effort medium
+  AC5-B      codex gpt-6.1-sol… ✓ report-ready 37s     1c 1f    ready  │ Claude Code (fake) --model sonnet --effort medium
+▸ AC5-C      claude sonnet/med… ? needs-input  36s     2c 2f    -      │
+                                                                       │ ● got: Model: sonnet · effort medium
+                                                                       │
+                                                                       │ ● working on: Third fake task that asks you something. W…
+                                                                       │ ● Edited file-1.txt
+                                                                       │ ● Edited file-0.txt
+                                                                       │ ? Tea or coffee?
+                                                                       │   1. Tea
+                                                                       │   2. Coffee
+                                                                       │   Enter to select · Esc to cancel
+                                                                       │ ● you chose: tea please
+
+↑↓ move  ⏎ open  m msg  i interrupt  c pull  r pull-new  x close  ? help  q quit
+```
+
+Below 110 columns the preview is hidden and the list takes the whole width (this is 80 columns):
+
+```
+agentctl board  agentctl-test · 3 tasks · 09:40:39
+  TASK       AGENT              STATE          TIME    PROGRESS REPORT
+▸ AC5-A      claude opus/high   ⚙ working      13s     2c 3f    -
+  AC5-B      codex gpt-6.1-sol… ✓ report-ready 13s     1c 1f    ready
+  AC5-C      claude sonnet/med… ? needs-input  12s     2c 2f    -
+
+↑↓ move  ⏎ open  m msg  i interrupt  c pull  r pull-new  x close  ? help  q quit
+```
+
+The list shows task, agent/model/effort, state icon, time, `PROGRESS` and the report (`-` none, `ready` not pulled yet, `pulled`). From 110 columns the right column
+shows the last 30 lines of the selected window (as `peek`, without the footer); below that the list takes the whole width and works down to 80 columns.
+
+| Key | Action |
+|---|---|
+| `↑` `↓` (`k` `j`) | select a task |
+| `Enter` | go to the task's window (`select-window` + `switch-client`); `Ctrl-b l` comes back to the board |
+| `m` | type a message and send it to the agent as `send` does (`Enter` sends, `Esc` cancels) |
+| `i` | interrupt the current turn, after a `[y/N]` question |
+| `c` | copy the selected task's report (`pull`) |
+| `r` | copy all new reports (`pull --ready`) |
+| `x` | close the window, after a `[y/N]` question; if the task has a worktree, a second question asks whether to remove it too (`git worktree remove`, never `--force`, the branch stays; `Esc` cancels) |
+| `?` / `q` | help / leave (the agents keep running) |
+
+Nothing destructive runs on a single key. The board reuses the core functions of the commands (`sendPrompts`, `interruptTask`, `pullTask`, `pullReady`, `closeTask`); git is asked for
+the progress at most every 10 seconds. It needs a terminal; without tmux `Enter` tells you to use `agentctl attach`.
+
+> **Why Ink, and why `React.createElement` instead of JSX or `htm`?** The project runs on Node's type stripping with no build step, and JSX is not
+> erasable syntax, so it cannot run unprocessed. `htm` (tagged templates) would avoid the build, but it adds a dependency to write what is a few dozen lines of `createElement` calls,
+> and its templates are plain strings that `tsc --noEmit` cannot check; with `createElement` the component props are type-checked like the rest of the code.
+> Ink is only loaded when the board starts, so the other commands do not pay for React.
 
 ### Task states
 
@@ -516,7 +641,7 @@ npm run typecheck   # tsc --noEmit
 ```
 
 The engine lives in `src/core/` and returns data (status rows, plans, results); `src/cli.ts` and `src/render.ts` are the thin
-layer on top, so a TUI can reuse the same core. All side effects go through the `Runner` interface (`src/core/runner.ts`):
+layer on top, and so is the board: `src/core/board.ts` holds its state, key handling and actions without a terminal, `src/board/app.ts` only draws it with Ink. All side effects go through the `Runner` interface (`src/core/runner.ts`):
 `RealRunner` for production, `RecordingRunner` for `--dry-run` and the tests, which feed it scripted `tmux capture-pane` screens and compare the commands it recorded.
 
 ## Limitations
@@ -527,12 +652,14 @@ layer on top, so a TUI can reuse the same core. All side effects go through the 
   not run. Plan: a build step (emit plain JavaScript) at the first npm release.
 - Screen patterns (ready, trust, working) are heuristics tied to the wording of the current Claude Code and Codex TUIs.
 - Links replace symlinks only, never real files or directories.
+- The board draws state icons with characters whose width differs between terminals (`⚙`, `⏸` are one or two cells wide); if columns look shifted, set `watch.window_icons` to plain symbols.
+- `close` kills the window before it tries `git worktree remove`; a worktree with uncommitted or untracked files is refused (no `--force`), so the window is already gone when that error appears.
 
 ## Roadmap
 
 1. **Iteration 1 (this one):** spec → worktree/links/env/window/agent/prompt; send, status, pull, close, interrupt, doctor; model equivalents with `--agent` and limit switching; task states and folder-trust detection; optional mirror.
    Follow-up: `new` waits for the folder-trust dialog (`trust_timeout`, `--no-wait-trust`).
-2. **Iteration 2:** a TUI on the same core, and `agentctl serve` with a read-only web UI, published through Cloudflare Tunnel and protected by Cloudflare Access.
+2. **Iteration 2:** a TUI on the same core (done: [`agentctl board`](#board)), and `agentctl serve` with a read-only web UI, published through Cloudflare Tunnel and protected by Cloudflare Access.
 3. **Iteration 3:** actions in the UI (send, close) and notifications; a `.agentctl-done` marker file an agent can write to say it has finished.
 
 ## License

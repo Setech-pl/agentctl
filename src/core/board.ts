@@ -399,7 +399,7 @@ export function visibleRows(state: BoardState, capacity: number): { rows: BoardR
 
 // ---- texts
 
-export const KEY_HINTS = '↑↓ select  ⏎ open  m msg  i interrupt  c pull  r pull-new  x close  ? q';
+export const KEY_HINTS = '↑↓ move  ⏎ open  m msg  i interrupt  c pull  r pull-new  x close  ? help  q quit';
 
 export const HELP_LINES: string[] = [
   'agentctl board',
