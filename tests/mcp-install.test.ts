@@ -119,9 +119,11 @@ describe('mcp install --desktop (on copies)', () => {
     const result = await installDesktop(ctx, ENTRY, { file, yes: true });
     assert.equal(result.outcome, 'dry-run');
     assert.equal(fs.readFileSync(file, 'utf8'), original);
-    assert.match(runner.commands[0] ?? '', /^cp '.*claude_desktop_config\.json' '.*claude_desktop_config\.json\.bak-20261101-123456'$/);
+    assert.match(runner.commands[0] ?? '', /^cp '.*claude_desktop_config\.json' '.*claude_desktop_config\.json\.bak-\d{8}-\d{6}'$/);
     assert.match(runner.commands[1] ?? '', /^write '.*claude_desktop_config\.json' \(\d+ bytes\)$/);
     assert.match(out.join('\n'), /Change:/);
+    assert.match(out.at(-1) ?? '', /^Dry run: nothing was written\. A real run writes /);
+    assert.ok(!out.some((l) => l.startsWith('Written')));
   });
 
   it('running it again changes nothing; a changed entry is replaced (diff shows both)', async () => {
