@@ -7,6 +7,7 @@ import type { AgentSettings } from './config.ts';
  * - needs-input: the agent asked the user a question and waits for the answer
  * - working:     a turn is running
  * - waiting:     the agent is idle and waits for input
+ * - background:  the agent is idle but its own background work is running ("1 shell, 6 monitors"); counts as working, no "waiting" notice
  * - report-ready: the report file is there (and the agent is not mid-turn, or the window is gone)
  * - limited:     the agent says its usage limit is used up (or it is rate limited); `agentctl move` hands the task to the other provider
  * - superseded:  the task was moved to the other provider (`agentctl move`); this window is the old one and is closed by hand
@@ -14,9 +15,9 @@ import type { AgentSettings } from './config.ts';
  * - closed:      `agentctl close` was run (or the state folder was moved to the archive): off every list except `status --all`
  * - orphan:      a window of the agentctl session has no state file (lost or never created); see `agentctl adopt`
  */
-export type TaskState = 'working' | 'waiting' | 'needs-trust' | 'needs-input' | 'limited' | 'report-ready' | 'superseded' | 'dead' | 'orphan' | 'closed';
+export type TaskState = 'working' | 'background' | 'waiting' | 'needs-trust' | 'needs-input' | 'limited' | 'report-ready' | 'superseded' | 'dead' | 'orphan' | 'closed';
 
-export type ScreenState = 'needs-trust' | 'needs-input' | 'limited' | 'working' | 'idle';
+export type ScreenState = 'needs-trust' | 'needs-input' | 'limited' | 'working' | 'background' | 'idle';
 
 const matches = (pattern: string, screen: string): boolean => new RegExp(pattern, PATTERN_FLAGS).test(screen);
 
@@ -26,12 +27,13 @@ const matches = (pattern: string, screen: string): boolean => new RegExp(pattern
  */
 export function classifyScreen(
   screen: string,
-  settings: Pick<AgentSettings, 'trustPattern' | 'workingPattern' | 'questionPattern' | 'limitPatterns'>,
+  settings: Pick<AgentSettings, 'trustPattern' | 'workingPattern' | 'questionPattern' | 'limitPatterns'> & Partial<Pick<AgentSettings, 'backgroundPatterns'>>,
 ): ScreenState {
   if (matches(settings.trustPattern, screen)) return 'needs-trust';
   if (matches(settings.questionPattern, screen)) return 'needs-input';
   if (matches(settings.workingPattern, screen)) return 'working';
   if (settings.limitPatterns.some((p) => matches(p, screen))) return 'limited';
+  if ((settings.backgroundPatterns ?? []).some((p) => matches(p, screen))) return 'background';
   return 'idle';
 }
 
@@ -47,7 +49,7 @@ export interface StateInput {
   alive: boolean;
   /** Screen of the window; ignored when the window is gone. */
   screen: string;
-  settings: Pick<AgentSettings, 'trustPattern' | 'workingPattern' | 'questionPattern' | 'limitPatterns' | 'readyPattern'>;
+  settings: Pick<AgentSettings, 'trustPattern' | 'workingPattern' | 'questionPattern' | 'limitPatterns' | 'readyPattern'> & Partial<Pick<AgentSettings, 'backgroundPatterns'>>;
   /** The report file exists and was written after the task started. */
   reportReady: boolean;
   /** The last event the agent sent, if any. */
@@ -63,6 +65,8 @@ export function taskState(input: StateInput): TaskState {
   const screen = classifyScreen(input.screen, input.settings);
   if (screen === 'needs-trust' || screen === 'needs-input' || screen === 'limited') return screen;
   if (screen === 'working') return 'working';
+  // Idle, but its own shells and monitors run: the turn ends every few minutes and a new one starts by itself.
+  if (screen === 'background') return 'background';
   if (input.event === 'needs-input' && !inputVisible(input.screen, input.settings)) return 'needs-input';
   if (input.event === 'limited') return 'limited';
   return input.reportReady ? 'report-ready' : 'waiting';

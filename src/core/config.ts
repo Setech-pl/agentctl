@@ -59,6 +59,11 @@ export interface AgentSettings {
   questionPattern: string;
   /** Regexes (any one matches a line of the screen): the agent says its usage limit is used up or it is rate limited (state limited). */
   limitPatterns: string[];
+  /**
+   * Regexes (any one matches a line of the screen): the agent waits for its own background work ("1 shell, 6 monitors still running").
+   * It ends its turn every few minutes meanwhile; that is state `background`, not `waiting`, and the end of turn is not announced.
+   */
+  backgroundPatterns: string[];
 }
 
 export interface GlobalConfig extends Layer {
@@ -126,6 +131,8 @@ export interface NotifySettings {
 /** The mark that opens the line an agent prints for an error: bullets, tree corners, warning signs. */
 const LINE_MARK = '^[\\s⎿●•■⚠!*>-]*';
 
+const BACKGROUND_CLAUDE = '[·⏵].*\\b\\d+ (?:shells?|monitors?)\\b(?: still running)?';
+
 export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
   claude: {
     flags: [],
@@ -153,6 +160,9 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
       `${LINE_MARK}You.re out of extra usage`,
       `${LINE_MARK}(?:API Error: )?Request rejected \\(429\\)`,
     ],
+    // Claude Code 2.1.309 footer "⏵⏵ auto mode on · 1 shell, 6 monitors" and the lines "… · 1 shell, 6 monitors still running". A "·" or "⏵⏵" on the same
+    // line keeps a sentence of the conversation ("ran 2 shells") from counting.
+    backgroundPatterns: [BACKGROUND_CLAUDE, '[·⏵].*\\b\\d+ background\\b'],
   },
   codex: {
     flags: [],
@@ -185,6 +195,9 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
       `${LINE_MARK}Your workspace is out of credits`,
       `${LINE_MARK}You hit your spend cap`,
     ],
+    // Codex 0.166.0 has "background terminals" (/ps lists them, /stop ends them, "Waiting for background terminal"). The exact footer text with a
+    // count was not seen on a screen: this pattern is a best guess, see the README.
+    backgroundPatterns: ['\\b\\d+ background terminals?\\b'],
   },
 };
 
@@ -306,7 +319,7 @@ function parseAgentSettings(name: AgentName, v: unknown, where: string, p: Probl
     p.add(`${where} must be a mapping`);
     return settings;
   }
-  checkKeys(v, ['flags', 'effort_args', 'ready_pattern', 'ready_timeout', 'trust_timeout', 'trust_pattern', 'working_pattern', 'interrupt_key', 'footer_patterns', 'question_pattern', 'limit_patterns'], where, p);
+  checkKeys(v, ['flags', 'effort_args', 'ready_pattern', 'ready_timeout', 'trust_timeout', 'trust_pattern', 'working_pattern', 'interrupt_key', 'footer_patterns', 'question_pattern', 'limit_patterns', 'background_patterns'], where, p);
   if (v.flags !== undefined) settings.flags = parseStringList(v.flags, `${where}.flags`, p);
   if (v.effort_args !== undefined) settings.effortArgs = parseStringList(v.effort_args, `${where}.effort_args`, p);
   for (const [key, list] of [['flags', settings.flags], ['effort_args', settings.effortArgs]] as const) {
@@ -344,6 +357,17 @@ function parseAgentSettings(name: AgentName, v: unknown, where: string, p: Probl
       }
     }
     settings.limitPatterns = list;
+  }
+  if (v.background_patterns !== undefined) {
+    const list = parseStringList(v.background_patterns, `${where}.background_patterns`, p);
+    for (const [i, pattern] of list.entries()) {
+      try {
+        new RegExp(pattern, PATTERN_FLAGS);
+      } catch (e) {
+        p.add(`${where}.background_patterns[${i}] is not a valid regular expression: ${errorMessage(e)}`);
+      }
+    }
+    settings.backgroundPatterns = list;
   }
   const key = parseString(v.interrupt_key, `${where}.interrupt_key`, p);
   if (key) settings.interruptKey = key;

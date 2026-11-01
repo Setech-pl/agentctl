@@ -1,0 +1,6 @@
+● Waiting for the monitors to report.
+
+────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · 1 shell, 6 monitors still running
