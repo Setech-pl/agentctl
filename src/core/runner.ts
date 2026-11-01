@@ -18,6 +18,8 @@ export interface ExecOptions {
   /** What a dry run pretends a read-only query returned. */
   dryResult?: Partial<ExecResult>;
   timeoutMs?: number;
+  /** Hand the terminal to the command (stdin, stdout and stderr are inherited, no timeout): `tmux attach-session`. */
+  interactive?: boolean;
 }
 
 /**
@@ -44,6 +46,11 @@ export class RealRunner implements Runner {
   readonly dryRun = false;
 
   async exec(cmd: string, args: string[], opts: ExecOptions = {}): Promise<ExecResult> {
+    if (opts.interactive) {
+      const r = spawnSync(cmd, args, { cwd: opts.cwd, stdio: 'inherit' });
+      if (r.error) return { code: (r.error as NodeJS.ErrnoException).code === 'ENOENT' ? 127 : 1, stdout: '', stderr: r.error.message };
+      return { code: r.status ?? 1, stdout: '', stderr: '' };
+    }
     const r = spawnSync(cmd, args, {
       cwd: opts.cwd,
       input: opts.input,

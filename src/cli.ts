@@ -6,6 +6,10 @@ import { confirmAction, readClipboard, specFromClipboard, writeClipboard } from 
 import { runDoctor } from './core/doctor.ts';
 import { renderChecks, renderStatusHints, renderStatusTable } from './render.ts';
 import { adoptTask } from './core/adopt.ts';
+import { attachTask } from './core/attach.ts';
+import { peekTask, PEEK_LINES } from './core/peek.ts';
+import { matchTask } from './core/resolve.ts';
+import type { TaskTarget } from './core/resolve.ts';
 import { migrateLegacyState } from './core/taskstore.ts';
 import { newTasks } from './core/new.ts';
 import type { NewOptions } from './core/new.ts';
@@ -39,6 +43,10 @@ export interface CliDeps {
   watchCommand: () => string;
   /** Build the runner: the real one, or a recording one for --dry-run. */
   makeRunner: (dryRun: boolean, emit: (line: string) => void) => Runner;
+  /** `$TMUX` is set: attach switches this tmux client instead of attaching a new one. */
+  insideTmux?: boolean;
+  /** Pick one of several tasks on the terminal; absent when there is no terminal to ask on. */
+  choose?: (targets: TaskTarget[]) => Promise<TaskTarget | undefined>;
   /** A signal that fires on Ctrl-C while a long wait runs; `dispose` restores the default Ctrl-C. Absent: no interrupt handling. */
   interruptSignal?: () => { signal: AbortSignal; dispose: () => void };
 }
@@ -57,6 +65,8 @@ export function defaultDeps(): CliDeps {
       const script = fs.realpathSync(process.argv[1] ?? 'bin/agentctl.ts');
       return `${env}${shellQuote(process.execPath)} --experimental-strip-types --no-warnings ${shellQuote(script)} watch`;
     },
+    insideTmux: Boolean(process.env.TMUX),
+    choose: process.stdin.isTTY ? chooseOnTerminal : undefined,
     makeRunner: (dryRun, emit) => (dryRun ? new RecordingRunner({ emit }) : new RealRunner()),
     interruptSignal: () => {
       const controller = new AbortController();
@@ -71,6 +81,20 @@ async function askOnTerminal(question: string): Promise<boolean> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     return /^y(es)?$/i.test((await rl.question(question)).trim());
+  } finally {
+    rl.close();
+  }
+}
+
+/** Numbered list; the answer is a number or a (unique) start of a task ID. */
+async function chooseOnTerminal(targets: TaskTarget[]): Promise<TaskTarget | undefined> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    targets.forEach((t, i) => process.stdout.write(`  ${i + 1}) ${t.task}\n`));
+    const answer = (await rl.question('Which task? number or ID: ')).trim();
+    if (/^\d+$/.test(answer)) return targets[Number(answer) - 1];
+    const match = matchTask(answer, targets);
+    return match.kind === 'one' ? match.target : undefined;
   } finally {
     rl.close();
   }
@@ -297,6 +321,31 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .action(
       guarded(async (task: string, opts: { dryRun?: boolean }) => {
         await interruptTask(contextFor(Boolean(opts.dryRun)), task);
+      }),
+    );
+
+  program
+    .command('attach')
+    .description('Go to the task window: attach-session outside tmux, switch-client inside. Without a task: the only running one, or a list to choose from.')
+    .argument('[task]', 'task ID; case does not matter and a unique prefix is enough')
+    .action(
+      guarded(async (task: string | undefined) => {
+        const ctx = contextFor(false);
+        await attachTask(ctx, task, { insideTmux: deps.insideTmux ?? false, ...(deps.choose ? { choose: deps.choose } : {}) });
+      }),
+    );
+
+  program
+    .command('peek')
+    .description('Print the last lines of the task window (without the agent footer), to read along without attaching.')
+    .argument('<task>', 'task ID; case does not matter and a unique prefix is enough')
+    .option('-n, --lines <n>', 'number of lines', String(PEEK_LINES))
+    .action(
+      guarded(async (task: string, opts: { lines: string }) => {
+        const count = /^\d+$/.test(opts.lines) ? Number(opts.lines) : Number.NaN;
+        if (!Number.isInteger(count) || count < 1) throw new AgentctlError(`-n must be a positive whole number (got "${opts.lines}")`);
+        const result = await peekTask(contextFor(false), task, count);
+        for (const l of result.lines) line(l);
       }),
     );
 

@@ -95,6 +95,21 @@ export class Tmux {
     return this.runner.exec('tmux', args, { readOnly: true });
   }
 
+  /** Make `window` the current window of the session (what a client attached to the session then shows). */
+  selectWindow(window: string): Promise<ExecResult> {
+    return this.runner.exec('tmux', ['select-window', '-t', this.target(window)]);
+  }
+
+  /** Inside tmux: move the current client to the agentctl session. */
+  switchClient(): Promise<ExecResult> {
+    return this.runner.exec('tmux', ['switch-client', '-t', `=${this.session}`]);
+  }
+
+  /** Outside tmux: attach this terminal to the session; returns when the user detaches. */
+  attachSession(): Promise<ExecResult> {
+    return this.runner.exec('tmux', ['attach-session', '-t', `=${this.session}`], { interactive: true });
+  }
+
   killWindow(window: string): Promise<ExecResult> {
     return this.runner.exec('tmux', ['kill-window', '-t', this.target(window)]);
   }
@@ -121,4 +136,19 @@ export function lastContentLine(screen: string, footerPatterns: string[]): strin
     return l.trim();
   }
   return '';
+}
+
+/**
+ * The last `count` lines of real content of a captured screen: no footer lines (`footerPatterns`), no borders and no
+ * empty input fields (the same filter as `lastContentLine`), no blank lines at the end. Blank lines inside stay.
+ */
+export function contentLines(screen: string, footerPatterns: string[], count: number): string[] {
+  const footers = footerPatterns.map((p) => new RegExp(p, PATTERN_FLAGS));
+  const kept = screen
+    .split('\n')
+    .map((l) => l.trimEnd())
+    .filter((l) => (l === '' || !BORDER_LINE.test(l)) && !footers.some((f) => f.test(l)));
+  while (kept.length > 0 && kept[kept.length - 1] === '') kept.pop();
+  while (kept.length > 0 && kept[0] === '') kept.shift();
+  return kept.slice(-count);
 }
