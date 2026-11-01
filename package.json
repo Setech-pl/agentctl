@@ -10,7 +10,8 @@
     "url": "git+https://github.com/Setech-pl/agentctl.git"
   },
   "bin": {
-    "agentctl": "bin/agentctl.ts"
+    "agentctl": "bin/agentctl.ts",
+    "agentctl-update": "bin/agentctl-update"
   },
   "files": [
     "bin",
