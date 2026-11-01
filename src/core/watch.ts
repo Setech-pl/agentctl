@@ -10,6 +10,7 @@ import type { StatusRow } from './status.ts';
 import type { TaskState } from './state.ts';
 import { decorateName } from './icons.ts';
 import { ensureWindow } from './windows.ts';
+import type { EnsureResult } from './windows.ts';
 
 export const WATCH_WINDOW = 'watch';
 
@@ -184,6 +185,6 @@ export async function runWatch(ctx: Context, notifier: Notifier, opts: WatchOpti
  * `watch --tmux`: make sure window "watch" exists in the agentctl session, running `commandLine`.
  * Returns what happened; never starts a second watcher.
  */
-export function ensureWatchWindow(ctx: Context, commandLine: string, cwd: string): Promise<'created' | 'session-created' | 'exists'> {
+export function ensureWatchWindow(ctx: Context, commandLine: string, cwd: string): Promise<EnsureResult> {
   return ensureWindow(ctx, WATCH_WINDOW, commandLine, cwd);
 }
