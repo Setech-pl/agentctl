@@ -16,6 +16,11 @@ export type RecordEffort = Effort | 'unknown';
 export interface TaskRecord {
   task: string;
   window: string;
+  /**
+   * tmux's own ID of the window ("@12"): stays the same when the name changes (state icons) and is used as the target
+   * while it still belongs to this task's window. Absent for tasks started before it was recorded.
+   */
+  windowId?: string;
   session: string;
   agent: RecordAgent;
   model: string;
@@ -71,6 +76,7 @@ export function renderTaskMd(record: TaskRecord, prompt: string): string {
     agentctl: 1,
     task: record.task,
     window: record.window,
+    ...(record.windowId ? { window_id: record.windowId } : {}),
     session: record.session,
     agent: record.agent,
     model: record.model,
@@ -135,6 +141,7 @@ export function parseTaskRecord(text: string): TaskRecord | undefined {
     model: record.model,
     effort: record.effort === 'unknown' ? 'high' : record.effort,
   };
+  if (typeof data.window_id === 'string' && /^@\d+$/.test(data.window_id)) record.windowId = data.window_id;
   if (data.switched_by === 'flag' || data.switched_by === 'limit') record.switchedBy = data.switched_by;
   if (typeof data.review_of === 'string') record.reviewOf = data.review_of;
   if (typeof data.pulled === 'string') record.pulled = data.pulled;

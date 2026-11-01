@@ -4,7 +4,9 @@ import path from 'node:path';
 import YAML from 'yaml';
 import { DEFAULT_EQUIVALENTS, parseEquivalents } from './equivalents.ts';
 import type { Equivalent } from './equivalents.ts';
+import { DEFAULT_WINDOW_ICONS, TASK_STATES } from './icons.ts';
 import { findAutoAcceptFlag } from './safety.ts';
+import type { TaskState } from './state.ts';
 import { AgentctlError, Problems, errorMessage, expandHome, isObject, resolvePath } from './util.ts';
 
 export const AGENT_NAMES = ['claude', 'codex'] as const;
@@ -70,8 +72,11 @@ export interface GlobalConfig extends Layer {
   equivalents: Equivalent[];
   /** When set, reports and status.json are copied here by status/pull. */
   mirrorDir?: string;
-  /** `agentctl watch`: poll interval and how long an idle task may wait before it is worth a notification. */
-  watch: { interval: number; waitingAfter: number };
+  /**
+   * `agentctl watch`: poll interval, how long an idle task may wait before it is worth a notification, and the state icons
+   * in front of the tmux window names (`null`: the windows keep their plain names).
+   */
+  watch: { interval: number; waitingAfter: number; windowIcons: Record<TaskState, string> | null };
   /** Where the config was (or would be) read from. */
   path: string;
   loaded: boolean;
@@ -282,14 +287,35 @@ function parseAgentSettings(name: AgentName, v: unknown, where: string, p: Probl
 
 export const DEFAULT_WATCH = { interval: 15, waitingAfter: 120 };
 
+/** `true` or absent: the default icons; `false`: none; a mapping: the default icons with those states replaced. */
+function parseWindowIcons(v: unknown, p: Problems): GlobalConfig['watch']['windowIcons'] {
+  const icons = { ...DEFAULT_WINDOW_ICONS };
+  if (v === undefined || v === null || v === true) return icons;
+  if (v === false) return null;
+  const where = 'config.watch.window_icons';
+  if (!isObject(v)) {
+    p.add(`${where} must be true, false or a mapping like {working: "⚙", report-ready: "✓"}`);
+    return icons;
+  }
+  checkKeys(v, [...TASK_STATES], where, p);
+  for (const state of TASK_STATES) {
+    const icon = v[state];
+    if (icon === undefined) continue;
+    if (typeof icon === 'string' && icon.trim() !== '' && !/[\p{Cc}]/u.test(icon)) icons[state] = icon.trim();
+    else p.add(`${where}.${state} must be a short text without control characters`);
+  }
+  return icons;
+}
+
 function parseWatch(v: unknown, p: Problems): GlobalConfig['watch'] {
-  const watch = { ...DEFAULT_WATCH };
+  const watch: GlobalConfig['watch'] = { ...DEFAULT_WATCH, windowIcons: { ...DEFAULT_WINDOW_ICONS } };
   if (v === undefined || v === null) return watch;
   if (!isObject(v)) {
     p.add('config.watch must be a mapping like {interval: 15, waiting_after: 120}');
     return watch;
   }
-  checkKeys(v, ['interval', 'waiting_after'], 'config.watch', p);
+  checkKeys(v, ['interval', 'waiting_after', 'window_icons'], 'config.watch', p);
+  watch.windowIcons = parseWindowIcons(v.window_icons, p);
   for (const [key, field] of [['interval', 'interval'], ['waiting_after', 'waitingAfter']] as const) {
     if (v[key] === undefined) continue;
     if (typeof v[key] === 'number' && v[key] > 0) watch[field] = v[key];

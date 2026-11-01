@@ -31,11 +31,13 @@ export async function adoptTask(ctx: Context, taskArg: string, opts: AdoptOption
   if (worktree && !runner.dryRun && !fs.existsSync(worktree)) throw new AgentctlError(`worktree ${worktree} does not exist`);
   const input = { task, window, report, session: config.session, ...(opts.agent ? { agent: opts.agent } : {}), ...(opts.model ? { model: opts.model } : {}), ...(opts.effort ? { effort: opts.effort } : {}), ...(worktree ? { worktree } : {}) };
   const record = recordForAdopt(input, runner.now());
+  const windowId = (await ctx.tmux.windows()).find((w) => w.plain === window)?.id;
+  if (windowId) record.windowId = windowId;
   const body = `Restored by "agentctl adopt" on ${record.adopted}: the original prompt of this task is lost.`;
   await runner.mkdir(taskDir(config, windowName(task)));
   await runner.writeFile(file, renderTaskMd(record, body));
   ctx.info(`${task}: state restored in ${file} (window ${config.session}:${window}, report ${report}${fs.existsSync(report) ? '' : ' – does not exist yet'})`);
   const unknown = [!opts.agent && 'agent', !opts.model && 'model', !opts.effort && 'effort'].filter(Boolean);
   if (unknown.length) ctx.info(`${task}: ${unknown.join(', ')} unknown; pass --agent/--model/--effort to record them`);
-  ctx.info(`Check: agentctl status. Window contents: tmux capture-pane -p -t ${shellQuote(`=${config.session}:${window}`)}`);
+  ctx.info(`Check: agentctl status. Window contents: agentctl peek ${shellQuote(task)}, or tmux capture-pane -p -t ${shellQuote(`=${config.session}:${window}`)}`);
 }

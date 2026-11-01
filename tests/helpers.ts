@@ -87,6 +87,8 @@ export class FakeTmux {
   windows: FakeWindow[] = [];
   readonly session: string;
   private nextId = 1;
+  /** The screen of windows created by new-window and new-session: an idle Claude prompt. */
+  newWindowScreen = '❯ \n';
   /** Every tmux command seen, as "subcommand target". */
   readonly seen: string[] = [];
 
@@ -135,6 +137,12 @@ export class FakeTmux {
         this.windows = this.windows.filter((x) => x !== w);
         return {};
       }
+      case 'new-window':
+      case 'new-session': {
+        const name = args[args.indexOf('-n') + 1] as string;
+        this.add(name, this.newWindowScreen);
+        return {};
+      }
       case 'select-window':
       case 'send-keys':
       case 'paste-buffer':
@@ -143,4 +151,13 @@ export class FakeTmux {
         return undefined;
     }
   };
+}
+
+/** Records like RecordingRunner and also really writes files, for code that reads back what it wrote (TASK.md). */
+export class DiskRunner extends RecordingRunner {
+  override async writeFile(file: string, content: string): Promise<void> {
+    await super.writeFile(file, content);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, content);
+  }
 }

@@ -13,7 +13,7 @@ function setup(screens: string[]) {
     dryRun: false,
     respond: (cmd, args) => (cmd === 'tmux' && args[0] === 'capture-pane' ? { stdout: screens[Math.min(i++, screens.length - 1)] as string } : undefined),
   });
-  return { runner, tmux: new Tmux(runner, 'agentctl'), captures: () => runner.queries.length };
+  return { runner, tmux: new Tmux(runner, 'agentctl'), captures: () => runner.queries.filter((q) => q.includes('capture-pane')).length };
 }
 
 describe('waitForReady', () => {

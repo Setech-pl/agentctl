@@ -96,20 +96,20 @@ describe('attach', () => {
     assert.equal(done.task, 'NC-2');
     assert.deepEqual(out, [ATTACH_HINT]);
     assert.equal(ATTACH_HINT, 'Ctrl-b d – wyjście bez przerywania agenta; nie wciskaj Esc ani Ctrl-c');
-    assert.deepEqual(plain(runner), ['tmux select-window -t =agentctl:nc-2', 'tmux attach-session -t =agentctl']);
+    assert.deepEqual(plain(runner), ['tmux select-window -t @2', 'tmux attach-session -t =agentctl']);
   });
 
   it('inside tmux ($TMUX): switch-client instead of attach-session', async () => {
     const { ctx, runner } = setup('at2', ['NC-1']);
     await attachTask(ctx, 'NC', { insideTmux: true });
-    assert.deepEqual(plain(runner), ['tmux select-window -t =agentctl:nc-1', 'tmux switch-client -t =agentctl']);
+    assert.deepEqual(plain(runner), ['tmux select-window -t @1', 'tmux switch-client -t =agentctl']);
   });
 
   it('without a task: the only running one is used', async () => {
     const { ctx, runner } = setup('at3', ['NC-1']);
     seedTask(ctx.config, 'NC-9'); // closed
     await attachTask(ctx, undefined, { insideTmux: false });
-    assert.ok(plain(runner).includes('tmux select-window -t =agentctl:nc-1'));
+    assert.ok(plain(runner).includes('tmux select-window -t @1'));
   });
 
   it('without a task and several running: the chooser decides; without a terminal it is a list and an error', async () => {
@@ -123,7 +123,7 @@ describe('attach', () => {
       },
     });
     assert.deepEqual(offered, ['NC-1', 'NC-2']);
-    assert.ok(plain(runner).includes('tmux select-window -t =agentctl:nc-2'));
+    assert.ok(plain(runner).includes('tmux select-window -t @2'));
 
     const before = runner.commands.length;
     await assert.rejects(attachTask(ctx, undefined, { insideTmux: true }), (e: Error) => /more than one running task/.test(e.message) && /- NC-1/.test(e.message) && /- NC-2/.test(e.message));

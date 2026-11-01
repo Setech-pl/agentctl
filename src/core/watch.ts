@@ -4,6 +4,7 @@ import type { Notifier } from './notify.ts';
 import { collectStatus } from './status.ts';
 import type { StatusRow } from './status.ts';
 import type { TaskState } from './state.ts';
+import { decorateName } from './icons.ts';
 
 export const WATCH_WINDOW = 'watch';
 
@@ -28,6 +29,8 @@ export interface WatchEvent {
 export class WatchMemory {
   readonly tasks = new Map<string, Seen>();
   started = false;
+  /** Windows that got a state icon from this watcher (plain name -> tmux window ID, if known): they get their plain names back. */
+  readonly decorated = new Map<string, string>();
 }
 
 const NOTIFY_ON: Partial<Record<TaskState, (task: string) => string>> = {
@@ -74,9 +77,49 @@ const logLine = (nowMs: number, e: WatchEvent): string => {
   return `${new Date(nowMs).toISOString()}  ${e.task}  ${what}${e.notification ? `  [notified: ${e.notification}]` : ''}\n`;
 };
 
+/**
+ * Put the state icon of each live window in front of its name ("⚙ nc-42"). Only windows whose name is not already right are renamed.
+ * Does nothing when `watch.window_icons` is off. Returns the tasks that were renamed.
+ */
+export async function decorateWindows(ctx: Context, memory: WatchMemory, rows: StatusRow[]): Promise<string[]> {
+  const icons = ctx.config.watch.windowIcons;
+  if (!icons) return [];
+  const { tmux } = ctx;
+  const infos = await tmux.windows();
+  const renamed: string[] = [];
+  for (const row of rows) {
+    if (row.window !== 'alive') continue;
+    const info = tmux.resolve(row.windowName, infos, row.windowId ?? undefined);
+    if (!info) continue;
+    const wanted = decorateName(row.windowName, icons[row.state]);
+    if (info.name === wanted) continue;
+    const r = await tmux.renameWindow(info.id !== '' ? info.id : tmux.target(info.name), wanted);
+    if (r.code !== 0) continue;
+    memory.decorated.set(row.windowName, info.id);
+    renamed.push(row.task);
+  }
+  return renamed;
+}
+
+/** Give the windows this watcher decorated their plain names back. Returns how many were renamed. */
+export async function restoreWindowNames(ctx: Context, memory: WatchMemory): Promise<number> {
+  if (memory.decorated.size === 0) return 0;
+  const { tmux } = ctx;
+  const infos = await tmux.windows();
+  let restored = 0;
+  for (const [plain, id] of memory.decorated) {
+    const info = tmux.resolve(plain, infos, id || undefined);
+    if (!info || info.name === plain) continue;
+    if ((await tmux.renameWindow(info.id !== '' ? info.id : tmux.target(info.name), plain)).code === 0) restored++;
+  }
+  memory.decorated.clear();
+  return restored;
+}
+
 /** One poll: collect states, detect transitions, notify and log. Returns the events. */
 export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Notifier): Promise<WatchEvent[]> {
   const rows = await collectStatus(ctx, { progress: false });
+  await decorateWindows(ctx, memory, rows);
   const now = ctx.runner.now();
   const events = detectTransitions(memory, rows, now, ctx.config.watch.waitingAfter * 1000);
   for (const e of events) {
@@ -99,10 +142,15 @@ export async function runWatch(ctx: Context, notifier: Notifier, opts: WatchOpti
   const memory = new WatchMemory();
   const { interval, waitingAfter } = ctx.config.watch;
   ctx.out(`Watching every ${interval}s (waiting notice after ${waitingAfter}s), log: ${watchLogPath(ctx)}. Ctrl-C stops.`);
-  for (let tick = 0; !opts.signal?.aborted && (opts.maxTicks === undefined || tick < opts.maxTicks); tick++) {
-    if (tick > 0) await ctx.runner.sleep(interval * 1000);
-    if (opts.signal?.aborted) break;
-    await watchTick(ctx, memory, notifier);
+  try {
+    for (let tick = 0; !opts.signal?.aborted && (opts.maxTicks === undefined || tick < opts.maxTicks); tick++) {
+      if (tick > 0) await ctx.runner.sleep(interval * 1000, opts.signal);
+      if (opts.signal?.aborted) break;
+      await watchTick(ctx, memory, notifier);
+    }
+  } finally {
+    const restored = await restoreWindowNames(ctx, memory);
+    if (restored > 0) ctx.out(`Window names restored (${restored}).`);
   }
 }
 
