@@ -51,11 +51,17 @@ export interface AgentSettings {
   workingPattern: string;
   /** tmux key name that interrupts the current turn. */
   interruptKey: string;
+  /** Regexes for TUI chrome (shortcut hints, mode and warning lines, empty input prompts). `status` skips these lines when it shows the last line. */
+  footerPatterns: string[];
+  /** Regex: the agent asks the user a question and waits for the answer (state needs-input). */
+  questionPattern: string;
 }
 
 export interface GlobalConfig extends Layer {
-  /** Absolute path of the directory that holds per-task cache folders. */
+  /** Absolute path of the directory that holds per-task cache folders: only the reports the agents write. */
   cache: string;
+  /** Where agentctl keeps its own state per task (`<stateDir>/<window>/TASK.md`, setup.log, markers), out of reach of the agents. */
+  stateDir: string;
   session: string;
   /** Max simultaneous windows per provider (agent). Missing = unlimited. */
   limits: Partial<Record<AgentName, number>>;
@@ -82,6 +88,14 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
     trustPattern: 'Quick safety check|Yes, I trust this folder',
     workingPattern: 'esc to interrupt',
     interruptKey: 'Escape',
+    footerPatterns: [
+      '\\? for shortcuts',
+      '^\\s*(⏵⏵|⏸)',
+      'shift\\+tab to cycle',
+      '^\\s*[❯>]\\s*(Try ".*")?$',
+    ],
+    // AskUserQuestion dialog footer.
+    questionPattern: 'Enter to select\\b.*Esc to cancel',
   },
   codex: {
     flags: [],
@@ -93,11 +107,22 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
     trustPattern: 'Trust this folder\\?|Folder settings can run code automatically',
     workingPattern: 'esc to interrupt',
     interruptKey: 'Escape',
+    // Codex 0.166.0 footer: "GPT-6.1-Sol low · <dir> · <title>" and "? for shortcuts … ⚠ 1 warning · f2 to view".
+    footerPatterns: [
+      '\\? for shortcuts',
+      '⚠ \\d+ warnings?',
+      'f2 to view',
+      '^\\s*[\\w.-]+ (low|medium|high|xhigh|minimal|none) · ',
+      '^\\s*›\\s*(Ask Codex to do anything)?\\s*$',
+      'Queued follow-up inputs|⇧.? (edit last queued message|to answer)',
+    ],
+    // A pending request_user_input question: "? Which color…" with options, then "• Waiting for your answer.".
+    questionPattern: 'Waiting for your answer|^\\s*\\?\\s+\\d+ questions?\\b|to answer\\s*$',
   },
 };
 
 const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'setup', 'defaults'];
-const GLOBAL_KEYS = [...LAYER_KEYS, 'cache', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch'];
+const GLOBAL_KEYS = [...LAYER_KEYS, 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch'];
 
 /** Screen patterns are case-insensitive and match per line. */
 export const PATTERN_FLAGS = 'im';
@@ -214,14 +239,14 @@ function parseAgentSettings(name: AgentName, v: unknown, where: string, p: Probl
     p.add(`${where} must be a mapping`);
     return settings;
   }
-  checkKeys(v, ['flags', 'effort_args', 'ready_pattern', 'ready_timeout', 'trust_timeout', 'trust_pattern', 'working_pattern', 'interrupt_key'], where, p);
+  checkKeys(v, ['flags', 'effort_args', 'ready_pattern', 'ready_timeout', 'trust_timeout', 'trust_pattern', 'working_pattern', 'interrupt_key', 'footer_patterns', 'question_pattern'], where, p);
   if (v.flags !== undefined) settings.flags = parseStringList(v.flags, `${where}.flags`, p);
   if (v.effort_args !== undefined) settings.effortArgs = parseStringList(v.effort_args, `${where}.effort_args`, p);
   for (const [key, list] of [['flags', settings.flags], ['effort_args', settings.effortArgs]] as const) {
     const bad = findAutoAcceptFlag(list);
     if (bad) p.add(`${where}.${key}: "${bad}" enables auto-accept, which agentctl never allows`);
   }
-  for (const [key, field] of [['ready_pattern', 'readyPattern'], ['trust_pattern', 'trustPattern'], ['working_pattern', 'workingPattern']] as const) {
+  for (const [key, field] of [['ready_pattern', 'readyPattern'], ['trust_pattern', 'trustPattern'], ['working_pattern', 'workingPattern'], ['question_pattern', 'questionPattern']] as const) {
     const pattern = parseString(v[key], `${where}.${key}`, p);
     if (!pattern) continue;
     try {
@@ -230,6 +255,17 @@ function parseAgentSettings(name: AgentName, v: unknown, where: string, p: Probl
     } catch (e) {
       p.add(`${where}.${key} is not a valid regular expression: ${errorMessage(e)}`);
     }
+  }
+  if (v.footer_patterns !== undefined) {
+    const list = parseStringList(v.footer_patterns, `${where}.footer_patterns`, p);
+    for (const [i, pattern] of list.entries()) {
+      try {
+        new RegExp(pattern, PATTERN_FLAGS);
+      } catch (e) {
+        p.add(`${where}.footer_patterns[${i}] is not a valid regular expression: ${errorMessage(e)}`);
+      }
+    }
+    settings.footerPatterns = list;
   }
   const key = parseString(v.interrupt_key, `${where}.interrupt_key`, p);
   if (key) settings.interruptKey = key;
@@ -291,6 +327,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   const layer = parseLayer(raw, 'config', p);
 
   const cache = parseString(raw.cache, 'config.cache', p) ?? '~/Projects/cache';
+  const stateDir = parseString(raw.state_dir, 'config.state_dir', p) ?? path.join(dir, 'tasks');
   const session = parseString(raw.session, 'config.session', p) ?? 'agentctl';
   if (!/^[A-Za-z0-9_-]+$/.test(session)) p.add('config.session may only contain letters, digits, "_" and "-"');
 
@@ -320,7 +357,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   const watch = parseWatch(raw.watch, p);
 
   p.throwIfAny(`Invalid config ${file}:`, 'Fix the listed keys; see the README section "Configuration".');
-  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), session, limits, agents, equivalents, watch, path: file, loaded: exists };
+  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, limits, agents, equivalents, watch, path: file, loaded: exists };
   if (mirror) config.mirrorDir = resolvePath(mirror);
   return config;
 }

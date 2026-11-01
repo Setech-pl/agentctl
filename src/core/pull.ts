@@ -14,7 +14,7 @@ export async function pullTask(ctx: Context, taskArg: string, platform?: string)
   const window = windowName(taskArg);
   const record = readTaskRecord(config, window);
   if (!record) {
-    throw new AgentctlError(`unknown task ${taskArg}: no TASK.md in ${config.cache}/${window}`, 'List known tasks with "agentctl status".');
+    throw new AgentctlError(`unknown task ${taskArg}: no TASK.md in ${config.stateDir}/${window}`, `List known tasks with "agentctl status"; a task whose state file is lost can be restored with "agentctl adopt ${taskArg.toUpperCase()} --report <path>".`);
   }
 
   // With mirror_dir set, pull also refreshes the mirror (this report and status.json).

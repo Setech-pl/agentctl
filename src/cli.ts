@@ -4,7 +4,9 @@ import { Command, CommanderError, Option } from 'commander';
 import { closeTasks, planClose } from './core/close.ts';
 import { confirmAction, readClipboard, specFromClipboard, writeClipboard } from './core/clipboard.ts';
 import { runDoctor } from './core/doctor.ts';
-import { renderChecks, renderStatusTable } from './render.ts';
+import { renderChecks, renderStatusHints, renderStatusTable } from './render.ts';
+import { adoptTask } from './core/adopt.ts';
+import { migrateLegacyState } from './core/taskstore.ts';
 import { newTasks } from './core/new.ts';
 import type { NewOptions } from './core/new.ts';
 import { pullReady, pullTask } from './core/pull.ts';
@@ -15,7 +17,7 @@ import { DesktopNotifier } from './core/notify.ts';
 import { ensureWatchWindow, runWatch, WATCH_WINDOW } from './core/watch.ts';
 import { interruptTask } from './core/interrupt.ts';
 import { loadGlobalConfig } from './core/config.ts';
-import type { GlobalConfig } from './core/config.ts';
+import type { Effort, GlobalConfig } from './core/config.ts';
 import { Context } from './core/context.ts';
 import { EXAMPLE_SPEC } from './core/example.ts';
 import { RealRunner, RecordingRunner } from './core/runner.ts';
@@ -110,7 +112,12 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     }
   };
 
-  const contextFor = (dryRun: boolean): Context => new Context(deps.makeRunner(dryRun, line), deps.loadConfig(), line, deps.confirm);
+  const contextFor = (dryRun: boolean): Context => {
+    const config = deps.loadConfig();
+    // TASK.md and setup.log used to live in the cache folder, where agents could delete them: move them to state_dir.
+    if (!dryRun) for (const message of migrateLegacyState(config)) line(message);
+    return new Context(deps.makeRunner(dryRun, line), config, line, deps.confirm);
+  };
 
   const program = new Command();
   program
@@ -200,8 +207,9 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
           return deps.stdout(md);
         }
         if (opts.json) return line(JSON.stringify(rows, null, 2));
-        if (rows.length === 0) return line(`No tasks yet in ${ctx.config.cache}. Start one with "agentctl new <spec>".`);
+        if (rows.length === 0) return line(`No tasks yet in ${ctx.config.stateDir}. Start one with "agentctl new <spec>".`);
         for (const l of renderStatusTable(rows)) line(l);
+        for (const l of renderStatusHints(rows)) line(`hint: ${l}`);
       }),
     );
 
@@ -261,6 +269,23 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         } finally {
           interrupt?.dispose();
         }
+      }),
+    );
+
+  program
+    .command('adopt')
+    .description('Restore the state file of a task whose TASK.md is lost (the report and the window are still there). Agent, model and effort default to "unknown".')
+    .argument('<task>', 'task ID')
+    .requiredOption('--report <path>', 'path of the task report')
+    .option('--window <name>', 'tmux window of the task (default: the lowercase task ID)')
+    .option('--worktree <path>', 'worktree of the task, so "close --rm-worktree" knows it')
+    .addOption(new Option('--agent <agent>', 'agent running in the window').choices(['claude', 'codex']))
+    .option('--model <model>', 'model of the task')
+    .addOption(new Option('--effort <effort>', 'effort of the task').choices(['low', 'medium', 'high', 'xhigh', 'max']))
+    .option('--dry-run', 'print what would be written, write nothing')
+    .action(
+      guarded(async (task: string, opts: { report: string; window?: string; worktree?: string; agent?: 'claude' | 'codex'; model?: string; effort?: Effort; dryRun?: boolean }) => {
+        await adoptTask(contextFor(Boolean(opts.dryRun)), task, opts);
       }),
     );
 

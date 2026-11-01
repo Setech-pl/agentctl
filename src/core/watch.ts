@@ -33,12 +33,14 @@ export class WatchMemory {
 const NOTIFY_ON: Partial<Record<TaskState, (task: string) => string>> = {
   'report-ready': (t) => `${t}: raport gotowy`,
   'needs-trust': (t) => `${t} czeka na zaufanie folderu (trust)`,
+  'needs-input': (t) => `${t} zadaje pytanie i czeka na odpowiedź`,
   dead: (t) => `${t}: okno zniknęło bez raportu`,
+  orphan: (t) => `${t}: okno bez pliku stanu (orphan) – agentctl adopt ${t} --report <ścieżka>`,
 };
 
 /**
  * Compare the current rows with what was seen on the previous tick and return the events.
- * One event per transition: entering report-ready, needs-trust or dead, and staying in `waiting`
+ * One event per transition: entering report-ready, needs-trust, needs-input, orphan or dead, and staying in `waiting`
  * for longer than `waitingAfterMs` (once per stay). The first tick only records the baseline.
  */
 export function detectTransitions(memory: WatchMemory, rows: StatusRow[], nowMs: number, waitingAfterMs: number): WatchEvent[] {

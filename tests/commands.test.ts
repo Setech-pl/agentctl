@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { formatLocalTime } from '../src/core/util.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
@@ -75,8 +76,9 @@ Second line.
     await newTasks(ctx, resolveAll(config, text));
 
     const cache = path.join(config.cache, 'nc-1');
+    const state = path.join(config.stateDir, 'nc-1');
     const taskMd = runner.commands.find((c) => c.startsWith('write '));
-    assert.match(taskMd ?? '', new RegExp(`^write ${cache}/TASK.md \\(\\d+ bytes\\)$`));
+    assert.match(taskMd ?? '', new RegExp(`^write ${state}/TASK.md \\(\\d+ bytes\\)$`));
     assert.deepEqual(
       runner.commands.filter((c) => !c.startsWith('write ')),
       [
@@ -84,6 +86,7 @@ Second line.
         `git -C ${repoB} worktree add --detach ${repoB}-wt1`,
         `ln -sfn ${pkgs}/protocol ${wt('1')}/node_modules/@nc/protocol`,
         `ln -sfn ${pkgs}/sim ${wt('1')}/node_modules/@nc/sim`,
+        `mkdir -p ${state}`,
         `mkdir -p ${cache}`,
         `tmux new-session -d -s agentctl -n nc-1 -c ${wt('1')} -e NEON_CITY_TASK=NC-1`,
         `tmux send-keys -t '=agentctl:nc-1' -l -- 'claude --model opus --effort medium --verbose'`,
@@ -96,7 +99,7 @@ Second line.
     const paste = runner.calls.find((c) => c.line.startsWith('tmux load-buffer'));
     assert.equal(paste?.input, 'Model: opus · effort medium\n\nFirst line.\nSecond line.');
 
-    const record = fs.existsSync(path.join(cache, 'TASK.md'));
+    const record = fs.existsSync(path.join(state, 'TASK.md'));
     assert.equal(record, false, 'a recording runner must not write files');
   });
 
@@ -302,7 +305,7 @@ describe('status', () => {
     );
     const table = renderStatusTable(rows);
     assert.match(table[0] as string, /^TASK\s+AGENT\/MODEL\/EFFORT\s+STATE\s+WINDOW\s+STARTED\s+DURATION\s+REPORT\s+LAST LINE$/);
-    assert.match(table[1] as string, /^NC-1\s+claude\/opus\/high\s+waiting\s+alive\s+2026-10-31 10:00\s+2h 05m\s+missing\s+Reading src\/a\.ts$/);
+    assert.match(table[1] as string, new RegExp(`^NC-1\\s+claude/opus/high\\s+waiting\\s+alive\\s+${formatLocalTime('2026-10-31T10:00:00.000Z')}\\s+2h 05m\\s+missing\\s+Reading src/a\\.ts$`));
     assert.equal(table.length, 3);
   });
 });

@@ -66,6 +66,14 @@ export function shellLine(cmd: string, args: string[]): string {
   return [cmd, ...args].map(shellQuote).join(' ');
 }
 
+/** "YYYY-MM-DD HH:MM" in the local time zone of an ISO timestamp; "-" when it is missing or not a date. */
+export function formatLocalTime(iso: string): string {
+  const d = new Date(iso);
+  if (!iso || Number.isNaN(d.getTime())) return '-';
+  const two = (n: number): string => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}`;
+}
+
 export function formatDuration(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
   const h = Math.floor(total / 3600);

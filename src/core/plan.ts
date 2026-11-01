@@ -27,7 +27,7 @@ const label = (o: Order): string => `${o.agent} ${formatModelEffort(o)}`;
 export async function liveWindows(ctx: Context): Promise<LiveWindow[]> {
   const names = await ctx.tmux.listWindows();
   const agentByWindow = new Map<string, AgentName>();
-  for (const record of listTaskRecords(ctx.config)) agentByWindow.set(record.window, record.agent);
+  for (const record of listTaskRecords(ctx.config)) if (record.agent !== 'unknown') agentByWindow.set(record.window, record.agent);
   return names.map((window) => {
     const agent = agentByWindow.get(window);
     return agent ? { window, agent } : { window };

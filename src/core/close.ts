@@ -22,7 +22,7 @@ export async function closeTask(ctx: Context, taskArg: string, opts: CloseOption
   const record = readTaskRecord(config, window);
   if (opts.rmWorktree && !record) {
     throw new AgentctlError(
-      `cannot remove worktrees of ${taskArg}: no TASK.md in ${config.cache}/${window} lists them`,
+      `cannot remove worktrees of ${taskArg}: no TASK.md in ${config.stateDir}/${window} lists them`,
       'Remove the worktree yourself with "git worktree remove <path>".',
     );
   }
@@ -87,7 +87,7 @@ export async function planClose(ctx: Context, tasks: string[], opts: CloseOption
     const window = windowName(task);
     const known = readTaskRecord(config, window) !== undefined;
     const hasReport = rows.get(task)?.report === 'yes';
-    if (opts.rmWorktree && !known) p.add(`${task}: no TASK.md in ${config.cache}/${window} lists its worktrees`);
+    if (opts.rmWorktree && !known) p.add(`${task}: no TASK.md in ${config.stateDir}/${window} lists its worktrees`);
     const notes: string[] = [];
     if (!known) notes.push('unknown task (no TASK.md)');
     else if (!hasReport) notes.push('WARNING: no report yet');
