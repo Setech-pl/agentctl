@@ -77,12 +77,12 @@ describe('board: the Ink front renders the model', () => {
     assert.match(screen, /TASK\s+AGENT\s+STATE\s+TIME\s+PROGRESS\s+REPORT/);
     assert.match(screen, /NC-1\s+claude opus\/high\s+⚙ working/);
     assert.ok(!screen.includes('NC-2'), 'NC-2 has no window: it waits under the closed "Finished" title');
-    assert.match(screen, /▸ Finished \(1\) – z opens/);
+    assert.match(screen, /\+ Finished \(1\) – z opens/);
     assert.match(screen, /Enter – open the agent · F12 – back to the list/);
     keys.write('z');
     await until(() => term.screen().includes('NC-2'));
     screen = term.screen();
-    assert.match(screen, /▾ Finished \(1\) – z closes/);
+    assert.match(screen, /- Finished \(1\) – z closes/);
     assert.match(screen, /NC-2\s+codex gpt-6\.1-sol/);
     assert.ok(!screen.includes('last 1 lines'), 'no preview below 110 columns');
     for (const l of screen.split('\n')) assert.ok([...l].length <= 80, `too wide (${[...l].length}): ${l}`);
