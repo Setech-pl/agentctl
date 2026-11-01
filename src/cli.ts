@@ -9,6 +9,7 @@ import { adoptTask } from './core/adopt.ts';
 import { attachTask, switchAttachedClient } from './core/attach.ts';
 import { Alerts } from './core/alert.ts';
 import { archiveClosed, parseAge } from './core/archive.ts';
+import { appendStartLog, describeTerminal, loggedRun, startLogPath, waitForSize } from './core/boardstart.ts';
 import { setHidden } from './core/hide.ts';
 import { handleEvent } from './core/event-command.ts';
 import { CLAUDE_KINDS, parseJson } from './core/events.ts';
@@ -55,6 +56,8 @@ export interface CliDeps {
   boardCommand?: () => string;
   /** Run the full-screen board in this terminal until the user quits. */
   runBoard?: (ctx: Context, insideTmux: boolean, self?: SelfArgv) => Promise<void>;
+  /** A board that ends sooner than this after its start (ms) is reported as a failure; default MIN_BOARD_LIFETIME_MS. */
+  minBoardLifetimeMs?: number;
   /** This very agentctl as a command line (absolute node and script, config directory of this run): what the agents and notifications call back. */
   selfArgv?: () => SelfArgv;
   /** The notifier for this machine; default: terminal-notifier when installed, else osascript / notify-send. */
@@ -87,6 +90,9 @@ export function defaultDeps(): CliDeps {
     makeNotifier: (runner, config, opts) => DesktopNotifier.detect(runner, undefined, notifierOptionsFor(config, opts)),
     runBoard: async (ctx, insideTmux, self) => {
       if (!process.stdin.isTTY || !process.stdout.isTTY) throw new AgentctlError('the board needs a terminal', 'Run it in a terminal, or in tmux with "agentctl board --tmux".');
+      // A window made without a client attached may have no size yet: wait for it instead of drawing into nothing.
+      const size = await waitForSize(process.stdout);
+      if (size.waitedMs > 0) appendStartLog(startLogPath(ctx.config, 'board'), `waited ${size.waitedMs} ms for a terminal size, got ${size.columns}x${size.rows}`);
       // Ink and React load only here: the other commands do not pay for them.
       const { runBoardApp } = await import('./board/app.ts');
       await runBoardApp(ctx, insideTmux, {}, self);
@@ -405,7 +411,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         if (opts.tmux) {
           const result = await ensureWatchWindow(ctx, deps.watchCommand(), process.cwd());
           if (result === 'exists') line(`Window ${ctx.config.session}:${WATCH_WINDOW} already exists, left alone.`);
-          else line(`Started the watcher in window ${ctx.config.session}:${WATCH_WINDOW}${result === 'session-created' ? ' (session created)' : ''}. Attach: tmux attach -t ${ctx.config.session}`);
+          else line(`${result === 'restarted' ? 'Started again (its process had ended)' : 'Started'} the watcher in window ${ctx.config.session}:${WATCH_WINDOW}${result === 'session-created' ? ' (session created)' : ''}. Attach: tmux attach -t ${ctx.config.session}. If it fails to start, the window stays with the error; ${startLogPath(ctx.config, 'watch')} has it too.`);
           if (opts.statusLine !== false && ctx.config.watch.statusLine) {
             const shown = await applyStatusLine(ctx, deps.statusLineCommand?.() ?? 'agentctl status --tmux-line');
             if (shown === 'set') line(`Status bar of session ${ctx.config.session}: task counts, refreshed every 10 s (this session only; undo: tmux set-option -u -t ${ctx.config.session}: status-right).`);
@@ -416,9 +422,11 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         }
         const interrupt = deps.interruptSignal?.();
         try {
-          const notifier = await makeNotifier(ctx);
-          const self = deps.selfArgv?.();
-          await runWatch(ctx, notifier, { ...(interrupt ? { signal: interrupt.signal } : {}), ...(self ? { self } : {}) });
+          await loggedRun(startLogPath(ctx.config, 'watch'), 'watch', async () => {
+            const notifier = await makeNotifier(ctx);
+            const self = deps.selfArgv?.();
+            await runWatch(ctx, notifier, { ...(interrupt ? { signal: interrupt.signal } : {}), ...(self ? { self } : {}) });
+          }, { minLifetimeMs: 0 });
         } finally {
           interrupt?.dispose();
         }
@@ -435,12 +443,15 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         if (opts.tmux) {
           const result = await ensureWindow(ctx, BOARD_WINDOW, deps.boardCommand?.() ?? 'agentctl board', process.cwd());
           if (result === 'exists') line(`Window ${ctx.config.session}:${BOARD_WINDOW} already exists, left alone.`);
-          else line(`Started the board in window ${ctx.config.session}:${BOARD_WINDOW}${result === 'session-created' ? ' (session created)' : ''}.`);
+          else line(`${result === 'restarted' ? 'Started again (its process had ended)' : 'Started'} the board in window ${ctx.config.session}:${BOARD_WINDOW}${result === 'session-created' ? ' (session created)' : ''}. If it fails to start, the window stays with the error; ${startLogPath(ctx.config, 'board')} has it too.`);
           line(`Open it: tmux attach -t ${ctx.config.session} \\; select-window -t ${BOARD_WINDOW}   (inside tmux: tmux select-window -t ${ctx.config.session}:${BOARD_WINDOW})`);
           return;
         }
-        if (!deps.runBoard) throw new AgentctlError('the board is not available here');
-        await deps.runBoard(ctx, deps.insideTmux ?? false, deps.selfArgv?.());
+        const runBoard = deps.runBoard;
+        if (!runBoard) throw new AgentctlError('the board is not available here');
+        const note = await loggedRun(startLogPath(ctx.config, 'board'), 'board', () => runBoard(ctx, deps.insideTmux ?? false, deps.selfArgv?.()), { startNote: describeTerminal(process.env, process.stdout, process.stdin), ...(deps.minBoardLifetimeMs !== undefined ? { minLifetimeMs: deps.minBoardLifetimeMs } : {}) });
+        // A board that ends at once without an error says so: in a window kept with remain-on-exit this is what stays on the screen.
+        if (note) throw new AgentctlError(note);
       }),
     );
 

@@ -203,6 +203,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
 
 /** Show the board until the user quits; resolves when it is gone. Needs a terminal. */
 export async function runBoardApp(ctx: Context, insideTmux: boolean, streams: { stdout?: NodeJS.WriteStream; stdin?: NodeJS.ReadStream } = {}, self?: SelfArgv): Promise<void> {
-  const app = render(h(Board, { ctx, insideTmux, self }), { alternateScreen: true, exitOnCtrlC: false, ...streams });
+  // interactive: true - Ink draws nothing in a "CI" environment (a CI or BUILD_* variable in the tmux server's environment), but the board only runs in a terminal.
+  const app = render(h(Board, { ctx, insideTmux, self }), { alternateScreen: true, exitOnCtrlC: false, interactive: true, ...streams });
   await app.waitUntilExit();
 }

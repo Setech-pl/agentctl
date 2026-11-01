@@ -442,6 +442,7 @@ describe('agentctl board (CLI)', () => {
     assert.equal(r.code, 0, r.stderr);
     assert.deepEqual(runner.commands.map((c) => c.replaceAll("'", '')).slice(0, 1).map((c) => c.split(' -c ')[0]), ['tmux new-window -d -t =agentctl: -n board']);
     assert.ok(runner.commands.some((c) => c.includes('agentctl board')));
+    assert.ok(!runner.commands.some((c) => c.includes('send-keys')), 'the board is the window process, not typed into a shell');
     assert.match(r.stdout, /Started the board in window agentctl:board/);
     const again = await cli(config, runner, ['board', '--tmux']);
     assert.match(again.stdout, /already exists, left alone/);
@@ -459,7 +460,7 @@ describe('agentctl board (CLI)', () => {
     const config = makeConfig(scratch.sub('cli3'));
     const runner = new RecordingRunner({ dryRun: false, respond: new FakeTmux().respond });
     const seen: boolean[] = [];
-    const r = await cli(config, runner, ['board'], { insideTmux: true, runBoard: async (_ctx, inside) => void seen.push(inside) });
+    const r = await cli(config, runner, ['board'], { insideTmux: true, runBoard: async (_ctx, inside) => void seen.push(inside), minBoardLifetimeMs: 0 });
     assert.equal(r.code, 0, r.stderr);
     assert.deepEqual(seen, [true]);
     const none = await cli(config, runner, ['board']);

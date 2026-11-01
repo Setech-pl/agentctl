@@ -111,6 +111,32 @@ export class Tmux {
     return this.runner.exec('tmux', ['new-window', '-d', '-t', `=${this.session}:`, '-n', window, '-c', cwd, ...this.envArgs(env)]);
   }
 
+  /**
+   * Create a window (or, without the session, the session with it) that RUNS `commandLine` as its process, instead of typing the command into a
+   * shell: the window does not depend on the shell being ready, and what the command prints when it fails is not lost. `remain-on-exit failed`
+   * (set in the same tmux invocation, before the process can end) keeps the window with its output when the command fails.
+   */
+  async startWindow(window: string, cwd: string, commandLine: string, sessionUp: boolean): Promise<ExecResult> {
+    const create = sessionUp
+      ? ['new-window', '-d', '-t', `=${this.session}:`, '-n', window, '-c', cwd, commandLine]
+      : ['new-session', '-d', '-s', this.session, '-n', window, '-c', cwd, commandLine];
+    const r = await this.runner.exec('tmux', [...create, ';', 'set-option', '-w', '-t', this.target(window), 'remain-on-exit', 'failed']);
+    if (r.code === 0 || !/remain-on-exit|invalid|unknown/i.test(r.stderr)) return r;
+    // tmux before 3.3 has no "failed": keep every ended window (a quit board then stays as a dead pane, which is better than a lost error).
+    return this.runner.exec('tmux', ['set-option', '-w', '-t', this.target(window), 'remain-on-exit', 'on']);
+  }
+
+  /** The process of the window has ended and the window was kept (remain-on-exit). */
+  async paneDead(window: string): Promise<boolean> {
+    const r = await this.runner.exec('tmux', ['display-message', '-p', '-t', await this.targetFor(window), '#{pane_dead}'], { readOnly: true, dryResult: { code: 1 } });
+    return r.code === 0 && r.stdout.trim() === '1';
+  }
+
+  /** Run `commandLine` again in a window whose process has ended. */
+  async respawn(window: string, cwd: string, commandLine: string): Promise<ExecResult> {
+    return this.runner.exec('tmux', ['respawn-pane', '-k', '-t', await this.targetFor(window), '-c', cwd, commandLine]);
+  }
+
   /** Type a command line into the window's shell and press Enter. */
   async typeCommand(window: string, commandLine: string): Promise<void> {
     await this.runner.exec('tmux', ['send-keys', '-t', await this.targetFor(window), '-l', '--', commandLine]);

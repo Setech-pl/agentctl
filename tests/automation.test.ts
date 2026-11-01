@@ -360,8 +360,9 @@ describe('watch', () => {
   it('--tmux creates window "watch" (and the session if needed) and never a second one', async () => {
     const { ctx, runner, m } = setup('watchtmux');
     assert.equal(await ensureWatchWindow(ctx, 'agentctl watch', '/work'), 'session-created');
-    assert.deepEqual(runner.commands.slice(0, 1), ['tmux new-session -d -s agentctl -n watch -c /work']);
-    assert.ok(runner.commands.includes('tmux send-keys -t \'=agentctl:watch\' -l -- \'agentctl watch\''));
+    // The window runs the watcher as its own process (not typed into a shell) and is kept with its error if the process fails.
+    assert.deepEqual(runner.commands.slice(0, 1), ["tmux new-session -d -s agentctl -n watch -c /work 'agentctl watch' ';' set-option -w -t '=agentctl:watch' remain-on-exit failed"]);
+    assert.ok(!runner.commands.some((c) => c.includes('send-keys')));
     m.windows.set('other', '');
     assert.equal(await ensureWatchWindow(ctx, 'agentctl watch', '/work'), 'created');
     assert.ok(runner.commands.some((c) => c.startsWith(`tmux new-window -d -t '=agentctl:' -n watch`)));
