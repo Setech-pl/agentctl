@@ -137,14 +137,14 @@ export function extractQuestion(screen: string, max: number = MAX_QUESTION): str
     else if (first >= 0 && l.trim() !== '' && !/^\s{3,}\S/.test(l) && !BORDER.test(l)) break; // a line that is not an option, its wrapped text or a gap
   }
   if (first < 0) return undefined;
-  let q = -1;
+  // Lines above the options that end with "?": the generic frame ("Would you like to run…?") wins over a "?" in the reason that
+  // follows it, otherwise the one nearest to the options.
+  const candidates: number[] = [];
   for (let i = first - 1; i >= Math.max(0, first - 12); i--) {
     const l = (lines[i] as string).trim();
-    if (l !== '' && !BORDER.test(l) && /\?\s*$/.test(l)) {
-      q = i;
-      break;
-    }
+    if (l !== '' && !BORDER.test(l) && /\?\s*$/.test(l)) candidates.push(i);
   }
+  const q = candidates.find((i) => GENERIC_QUESTION.test(stripMarkdown(lines[i] as string))) ?? candidates[0] ?? -1;
   if (q < 0) return undefined;
   const question = stripMarkdown(lines[q] as string);
   if (!GENERIC_QUESTION.test(question)) return clip(question, max);

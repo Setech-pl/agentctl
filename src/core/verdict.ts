@@ -25,7 +25,7 @@ export function reportVerdict(report: string, pattern?: string): string | undefi
     const re = new RegExp(pattern, PATTERN_FLAGS);
     for (const line of clean) {
       const m = re.exec(line);
-      const hit = m ? (m[1] ?? m[0]).trim() : '';
+      const hit = m ? (m[1] ?? line).trim() : '';
       if (hit !== '') return clip(hit, MAX_VERDICT);
     }
   }
@@ -40,7 +40,7 @@ export function reportVerdict(report: string, pattern?: string): string | undefi
   }
 
   for (const [i, line] of raw.entries()) {
-    if (HEADING.test(line) || !hasWords(clean[i] as string) || /^\s*\|?[\s:|-]+\|?\s*$/.test(line)) continue;
+    if (HEADING.test(line) || !hasWords(clean[i] as string) || line.trimStart().startsWith('|')) continue;
     return clip(clean[i] as string, MAX_VERDICT);
   }
   return undefined;

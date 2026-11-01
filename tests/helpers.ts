@@ -91,6 +91,12 @@ export class FakeTmux {
   newWindowScreen = '❯ \n';
   /** Every tmux command seen, as "subcommand target". */
   readonly seen: string[] = [];
+  /** Clients attached to the session (`list-clients`): name and last activity. */
+  clients: { name: string; activity: number }[] = [];
+  /** `TERM_PROGRAM` of the tmux server's global environment; undefined: not set. */
+  termProgram: string | undefined;
+  /** `switch-client -c <client>` calls: the client names. */
+  readonly switched: string[] = [];
 
   constructor(session = 'agentctl') {
     this.session = session;
@@ -121,6 +127,13 @@ export class FakeTmux {
       }
       case 'has-session':
         return { code: this.windows.length ? 0 : 1 };
+      case 'list-clients':
+        return this.windows.length ? { stdout: this.clients.map((c) => `${c.activity}\t${c.name}`).join('\n') } : { code: 1 };
+      case 'show-environment':
+        return this.termProgram ? { stdout: `TERM_PROGRAM=${this.termProgram}\n` } : { code: 1 };
+      case 'switch-client':
+        this.switched.push(args[args.indexOf('-c') + 1] ?? '');
+        return {};
       case 'capture-pane': {
         const w = this.find(target);
         return w ? { stdout: w.screen } : { code: 1, stderr: `can't find window: ${target}` };
@@ -153,11 +166,17 @@ export class FakeTmux {
   };
 }
 
-/** Records like RecordingRunner and also really writes files, for code that reads back what it wrote (TASK.md). */
+/** Records like RecordingRunner and also really writes files, for code that reads back what it wrote (TASK.md, logs). */
 export class DiskRunner extends RecordingRunner {
   override async writeFile(file: string, content: string): Promise<void> {
     await super.writeFile(file, content);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, content);
+  }
+
+  override async appendFile(file: string, content: string): Promise<void> {
+    await super.appendFile(file, content);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.appendFileSync(file, content);
   }
 }
