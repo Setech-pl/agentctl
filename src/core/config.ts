@@ -81,12 +81,38 @@ export interface GlobalConfig extends Layer {
   watch: { interval: number; waitingAfter: number; windowIcons: Record<TaskState, string> | null; statusLine: boolean };
   /** Notifications: events from the agents themselves, what a click on a notification does, the verdict line of a report. */
   notify: NotifySettings;
+  /** The board: what finishes up in the "Finished" section and what hides by itself. */
+  board: BoardSettings;
+  /** The local MCP server (`agentctl mcp`): which write tools the chat may call. Read tools are always there. */
+  mcp: McpSettings;
   /** Where the config was (or would be) read from. */
   path: string;
   loaded: boolean;
 }
 
+/** Channels of a desktop notification: `auto` tries terminal-notifier (clickable) and falls back to osascript when it fails. */
+export const NOTIFY_BACKENDS = ['auto', 'terminal-notifier', 'osascript'] as const;
+export type NotifyBackend = (typeof NOTIFY_BACKENDS)[number];
+
+/** Write tools of the MCP server; each one must be listed in `mcp.allow` to work. */
+export const MCP_WRITE_TOOLS = ['send', 'new', 'interrupt', 'close', 'move'] as const;
+export type McpWriteTool = (typeof MCP_WRITE_TOOLS)[number];
+
+export interface BoardSettings {
+  /** A task without a window whose report was pulled hides by itself (a task without a report stays in "Finished"). */
+  autoHidePulledDead: boolean;
+}
+
+export interface McpSettings {
+  /** Write tools the chat may call; empty (the default): the server only reads. */
+  allow: McpWriteTool[];
+  /** `close` may also remove the git worktree (never with --force, never the main checkout). */
+  allowRmWorktree: boolean;
+}
+
 export interface NotifySettings {
+  /** Which channel sends notifications; default `auto`. */
+  backend: NotifyBackend;
   /** Hooks (Claude) and `-c notify=…` (Codex) report the agents' own events to `agentctl event`. `false`: screen reading only. */
   events: boolean;
   /** A notification when a turn ends and the agent waits (not only for questions, reports and limits). */
@@ -163,7 +189,7 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
 };
 
 const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'setup', 'defaults'];
-const GLOBAL_KEYS = [...LAYER_KEYS, 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify'];
+const GLOBAL_KEYS = [...LAYER_KEYS, 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp'];
 
 /** Screen patterns are case-insensitive and match per line. */
 export const PATTERN_FLAGS = 'im';
@@ -376,13 +402,14 @@ function parseWatch(v: unknown, p: Problems): GlobalConfig['watch'] {
 }
 
 function parseNotify(v: unknown, p: Problems): NotifySettings {
-  const notify: NotifySettings = { events: true, turnEnd: true };
+  const notify: NotifySettings = { backend: 'auto', events: true, turnEnd: true };
   if (v === undefined || v === null) return notify;
   if (!isObject(v)) {
     p.add('config.notify must be a mapping like {terminal_app: com.apple.Terminal, verdict_pattern: "^Verdict:"}');
     return notify;
   }
-  checkKeys(v, ['events', 'turn_end', 'terminal_app', 'verdict_pattern'], 'config.notify', p);
+  checkKeys(v, ['backend', 'events', 'turn_end', 'terminal_app', 'verdict_pattern'], 'config.notify', p);
+  notify.backend = parseEnumValue(v.backend, NOTIFY_BACKENDS, 'config.notify.backend', p) ?? 'auto';
   for (const [key, field] of [['events', 'events'], ['turn_end', 'turnEnd']] as const) {
     if (v[key] === undefined) continue;
     if (typeof v[key] === 'boolean') notify[field] = v[key];
@@ -400,6 +427,41 @@ function parseNotify(v: unknown, p: Problems): NotifySettings {
     }
   }
   return notify;
+}
+
+function parseBoard(v: unknown, p: Problems): BoardSettings {
+  const board: BoardSettings = { autoHidePulledDead: true };
+  if (v === undefined || v === null) return board;
+  if (!isObject(v)) {
+    p.add('config.board must be a mapping like {auto_hide_pulled_dead: true}');
+    return board;
+  }
+  checkKeys(v, ['auto_hide_pulled_dead'], 'config.board', p);
+  if (v.auto_hide_pulled_dead !== undefined) {
+    if (typeof v.auto_hide_pulled_dead === 'boolean') board.autoHidePulledDead = v.auto_hide_pulled_dead;
+    else p.add('config.board.auto_hide_pulled_dead must be true or false');
+  }
+  return board;
+}
+
+function parseMcp(v: unknown, p: Problems): McpSettings {
+  const mcp: McpSettings = { allow: [], allowRmWorktree: false };
+  if (v === undefined || v === null) return mcp;
+  if (!isObject(v)) {
+    p.add(`config.mcp must be a mapping like {allow: [${MCP_WRITE_TOOLS.join(', ')}]}`);
+    return mcp;
+  }
+  checkKeys(v, ['allow', 'allow_rm_worktree'], 'config.mcp', p);
+  const allow = parseStringList(v.allow, 'config.mcp.allow', p);
+  for (const name of allow) {
+    if (!(MCP_WRITE_TOOLS as readonly string[]).includes(name)) p.add(`config.mcp.allow: "${name}" is not a write tool (allowed: ${MCP_WRITE_TOOLS.join(', ')})`);
+    else if (!mcp.allow.includes(name as McpWriteTool)) mcp.allow.push(name as McpWriteTool);
+  }
+  if (v.allow_rm_worktree !== undefined) {
+    if (typeof v.allow_rm_worktree === 'boolean') mcp.allowRmWorktree = v.allow_rm_worktree;
+    else p.add('config.mcp.allow_rm_worktree must be true or false');
+  }
+  return mcp;
 }
 
 function readYamlFile(file: string): unknown {
@@ -460,9 +522,11 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   const mirror = parseString(raw.mirror_dir, 'config.mirror_dir', p);
   const watch = parseWatch(raw.watch, p);
   const notify = parseNotify(raw.notify, p);
+  const board = parseBoard(raw.board, p);
+  const mcp = parseMcp(raw.mcp, p);
 
   p.throwIfAny(`Invalid config ${file}:`, 'Fix the listed keys; see the README section "Configuration".');
-  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, limits, agents, equivalents, watch, notify, path: file, loaded: exists };
+  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, limits, agents, equivalents, watch, notify, board, mcp, path: file, loaded: exists };
   if (mirror) config.mirrorDir = resolvePath(mirror);
   return config;
 }

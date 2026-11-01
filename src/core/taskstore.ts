@@ -45,6 +45,11 @@ export interface TaskRecord {
   supersededBy?: string;
   /** The task this one continues (`agentctl move`). */
   continues?: string;
+  /**
+   * `hide` / `unhide`. true: hidden from board and status (the task itself and its worktree are untouched). false: shown on purpose,
+   * so `board.auto_hide_pulled_dead` leaves it alone. Absent: the auto-hide rule decides.
+   */
+  hidden?: boolean;
 }
 
 /** agentctl's own state for a task. Agents get the report directory (`<cache>/<task>/`), never this one. */
@@ -102,6 +107,7 @@ export function renderTaskMd(record: TaskRecord, prompt: string): string {
   if (record.pin) header.pin = true;
   if (record.supersededBy) header.superseded_by = record.supersededBy;
   if (record.continues) header.continues = record.continues;
+  if (record.hidden !== undefined) header.hidden = record.hidden;
   return `---\n${YAML.stringify(header)}---\n\n${prompt.trim()}\n`;
 }
 
@@ -173,6 +179,7 @@ export function parseTaskRecord(text: string): TaskRecord | undefined {
   if (data.pin === true) record.pin = true;
   if (typeof data.superseded_by === 'string') record.supersededBy = data.superseded_by;
   if (typeof data.continues === 'string') record.continues = data.continues;
+  if (typeof data.hidden === 'boolean') record.hidden = data.hidden;
   return record;
 }
 
@@ -201,7 +208,7 @@ export function listTaskRecords(config: GlobalConfig): TaskRecord[] {
 }
 
 /** Set one key in the YAML header of an existing TASK.md; the body (prompt, follow-ups) and the other keys stay as they are. */
-export async function setHeaderField(runner: Runner, file: string, key: string, value: string): Promise<boolean> {
+export async function setHeaderField(runner: Runner, file: string, key: string, value: string | boolean): Promise<boolean> {
   let text: string;
   try {
     text = fs.readFileSync(file, 'utf8');

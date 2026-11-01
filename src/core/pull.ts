@@ -26,8 +26,11 @@ export async function pullTask(ctx: Context, taskArg: string, platform?: string)
     if (clip) {
       const [cmd, ...args] = clip as [string, ...string[]];
       const r = await runner.exec(cmd, args, { input: text });
-      if (r.code === 0) ctx.out(`Copied ${text.length} characters to the clipboard (${cmd}).`);
-      else ctx.out(`Clipboard command ${cmd} failed: ${r.stderr.trim()}`);
+      if (r.code === 0) {
+        ctx.out(`Copied ${text.length} characters to the clipboard (${cmd}).`);
+        // Copied means pulled: `pull --ready` does not hand this report over again, and a finished task hides by itself.
+        await setHeaderField(runner, taskFile(config, window), 'pulled', new Date(runner.now()).toISOString());
+      } else ctx.out(`Clipboard command ${cmd} failed: ${r.stderr.trim()}`);
     } else {
       ctx.out('No clipboard tool found (pbcopy, wl-copy or xclip); read the report from the path below.');
     }

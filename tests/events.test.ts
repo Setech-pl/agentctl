@@ -250,12 +250,12 @@ describe('new: starts the agents with the event wiring', () => {
 
 describe('config: notify and limit_patterns', () => {
   it('defaults: events and turn_end on, no terminal app, no verdict pattern', () => {
-    assert.deepEqual(makeConfig(scratch.sub('cfg-n1')).notify, { events: true, turnEnd: true });
+    assert.deepEqual(makeConfig(scratch.sub('cfg-n1')).notify, { backend: 'auto', events: true, turnEnd: true });
   });
 
   it('reads terminal_app, verdict_pattern, events and turn_end; rejects what is wrong', () => {
     const c = makeConfig(scratch.sub('cfg-n2'), 'notify:\n  terminal_app: com.googlecode.iterm2\n  verdict_pattern: "^Result: (.*)"\n  events: false\n  turn_end: false\n');
-    assert.deepEqual(c.notify, { events: false, turnEnd: false, terminalApp: 'com.googlecode.iterm2', verdictPattern: '^Result: (.*)' });
+    assert.deepEqual(c.notify, { backend: 'auto', events: false, turnEnd: false, terminalApp: 'com.googlecode.iterm2', verdictPattern: '^Result: (.*)' });
     assert.throws(() => makeConfig(scratch.sub('cfg-n3'), 'notify: {verdict_pattern: "("}\n'), /verdict_pattern is not a valid regular expression/);
     assert.throws(() => makeConfig(scratch.sub('cfg-n4'), 'notify: {events: yes please}\n'), /notify.events must be true or false/);
     assert.throws(() => makeConfig(scratch.sub('cfg-n5'), 'notify: {sound: x}\n'), /unknown key "sound"/);

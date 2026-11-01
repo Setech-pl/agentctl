@@ -72,10 +72,16 @@ describe('board: the Ink front renders the model', () => {
 
   it('at 80 columns it shows the list without the preview, each line within 80 columns, and q leaves', async () => {
     const { term, keys, done } = setup('rd1', 80);
-    await until(() => term.screen().includes('NC-2'));
-    const screen = term.screen();
+    await until(() => term.screen().includes('Finished (1)'));
+    let screen = term.screen();
     assert.match(screen, /TASK\s+AGENT\s+STATE\s+TIME\s+PROGRESS\s+REPORT/);
     assert.match(screen, /NC-1\s+claude opus\/high\s+⚙ working/);
+    assert.ok(!screen.includes('NC-2'), 'NC-2 has no window: it waits under the closed "Finished" title');
+    assert.match(screen, /▸ Finished \(1\) – z opens/);
+    keys.write('z');
+    await until(() => term.screen().includes('NC-2'));
+    screen = term.screen();
+    assert.match(screen, /▾ Finished \(1\) – z closes/);
     assert.match(screen, /NC-2\s+codex gpt-6\.1-sol/);
     assert.ok(!screen.includes('last 1 lines'), 'no preview below 110 columns');
     for (const l of screen.split('\n')) assert.ok([...l].length <= 80, `too wide (${[...l].length}): ${l}`);
@@ -95,6 +101,7 @@ describe('board: the Ink front renders the model', () => {
   it('keys reach the model: ? opens the help, m opens the message field', async () => {
     const { term, keys, done } = setup('rd3', 100);
     await until(() => term.screen().includes('NC-1'));
+    await wait(100);
     keys.write('?');
     await until(() => term.frames.some((f) => f.includes('leave the board')));
     keys.write('x'); // any key closes the help

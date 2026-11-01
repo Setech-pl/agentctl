@@ -51,6 +51,16 @@ export interface StatusRow {
   question: string | null;
   /** `pin: true` in the spec: the task is never moved to the other provider. */
   pin: boolean;
+  /** The task has no tmux window any more (or was moved to the other provider): it is done, whatever it left behind. Shown under "Finished" on the board. */
+  finished: boolean;
+  /** Hidden from board and status: by `agentctl hide`, or by itself (`auto`: no window and the report was pulled). The task and its worktree are untouched. */
+  hidden: boolean;
+  hiddenBy: 'user' | 'auto' | null;
+}
+
+/** The rows `status` and the board show: without the hidden ones unless `all`. */
+export function shownRows<T extends Pick<StatusRow, 'hidden'>>(rows: T[], all: boolean): T[] {
+  return all ? rows : rows.filter((r) => !r.hidden);
 }
 
 /** For a task whose agent is unknown: guess it from the screen (Codex draws "›" prompts and "OpenAI Codex"). */
@@ -94,6 +104,8 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     const screenAgent = record.agent === 'unknown' ? guessAgent(screenText) : record.agent;
     const settings = config.agents[screenAgent];
     const stored = alive ? readStoredEvent(config, record) : undefined;
+    const pulled = record.pulled && reportMtime !== undefined && Date.parse(record.pulled) >= reportMtime ? record.pulled : null;
+    const hiddenBy: StatusRow['hiddenBy'] = record.hidden === true ? 'user' : record.hidden === undefined && config.board.autoHidePulledDead && !alive && pulled !== null ? 'auto' : null;
     const state: TaskState = record.supersededBy ? 'superseded' : taskState({ alive, screen: screenText, settings, reportReady, event: stored?.outcome });
     rows.push({
       task: record.task,
@@ -112,12 +124,15 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       duration,
       report: reportMtime !== undefined ? 'yes' : 'missing',
       reportPath: record.report,
-      pulled: record.pulled && reportMtime !== undefined && Date.parse(record.pulled) >= reportMtime ? record.pulled : null,
+      pulled,
       lastLine: lastContentLine(screenText, settings.footerPatterns),
       progress: opts.progress === false || record.repos.length === 0 ? null : await taskProgress(runner, record.repos),
       hint: stateHint(record.task, state, record.pin === true, record.supersededBy),
       question: state === 'needs-input' ? (extractQuestion(screenText) ?? (stored?.outcome === 'needs-input' && stored.text !== '' ? stored.text : null)) : null,
       pin: record.pin === true,
+      finished: !alive || state === 'superseded',
+      hidden: hiddenBy !== null,
+      hiddenBy,
     });
   }
   // Windows of the session that agentctl has no state file for: never skipped silently.
@@ -150,6 +165,9 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       hint: orphanHint(ctx, window),
       question: null,
       pin: false,
+      finished: false,
+      hidden: false,
+      hiddenBy: null,
     });
   }
   return rows;
