@@ -1,0 +1,6 @@
+● Tests started in the background; I will check on them when they finish.
+
+────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · 1 shell, 6 monitors

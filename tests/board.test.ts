@@ -249,7 +249,7 @@ describe('board: layout and cells', () => {
     assert.equal(reportLabel(row('NC-1', { report: 'yes', pulled: '2026-11-01T08:00:00Z' })), 'pulled');
     assert.equal(rowCells(row('NC-1'), true, cols)[0]?.text, '▸');
     assert.equal(rowCells(row('NC-1'), false, cols)[0]?.text, '');
-    assert.equal(rowCells(row('NC-1', { state: 'report-ready' }), false, cols, { working: '>', waiting: 'w', 'needs-input': '?', 'needs-trust': 't', limited: 'L', 'report-ready': 'OK', superseded: 's', orphan: 'x', dead: 'x', closed: 'c' })[3]?.text, 'OK report-ready');
+    assert.equal(rowCells(row('NC-1', { state: 'report-ready' }), false, cols, { working: '>', waiting: 'w', 'needs-input': '?', 'needs-trust': 't', limited: 'L', 'report-ready': 'OK', superseded: 's', orphan: 'x', dead: 'x', closed: 'c', background: 'b' })[3]?.text, 'OK report-ready');
   });
 
   it('a long list scrolls so that the selected row stays visible', () => {

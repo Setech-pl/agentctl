@@ -5,6 +5,7 @@ import type { AgentName } from './config.ts';
 import type { Context } from './context.ts';
 import { extractQuestion, parseClaudeEvent, parseCodexEvent } from './events.ts';
 import type { AgentEvent, ClaudeKind } from './events.ts';
+import { classifyScreen } from './state.ts';
 import type { EventKind } from './state.ts';
 import { listTaskRecords, taskDir } from './taskstore.ts';
 import type { TaskRecord } from './taskstore.ts';
@@ -99,6 +100,13 @@ async function questionOnScreen(ctx: Context, record: TaskRecord): Promise<strin
   return undefined;
 }
 
+/** The agent's own background work (shells, monitors) is running: the screen says so while the turn that just ended left it behind. */
+async function backgroundOnScreen(ctx: Context, record: TaskRecord): Promise<boolean> {
+  const screen = await ctx.tmux.capture(record.window, undefined, undefined, record.windowId);
+  if (screen.code !== 0) return false;
+  return classifyScreen(screen.stdout, ctx.config.agents[record.agent === 'unknown' ? 'claude' : record.agent]) === 'background';
+}
+
 function reportReady(ctx: Context, record: TaskRecord): boolean {
   if (!record.report) return false;
   try {
@@ -142,7 +150,11 @@ export async function handleEvent(ctx: Context, alerts: Alerts, input: EventInpu
       state = 'needs-input';
       text = question ? `${record.task}: ${question}` : event.text ? `${record.task}: ${event.text}` : `${record.task} zadaje pytanie i czeka na odpowiedź`;
     } else if (event.outcome === 'turn-complete') {
-      if (reportReady(ctx, record)) {
+      if (await backgroundOnScreen(ctx, record)) {
+        // The agent ends its turn every few minutes while its shells and monitors run: that is not "waiting for you". The
+        // watcher announces the report or the wait once the background work is gone.
+        detail = '[not announced: background work is still running]';
+      } else if (reportReady(ctx, record)) {
         state = 'report-ready';
         text = reportReadyText(record.task, readVerdict(record.report, ctx.config.notify.verdictPattern));
       } else if (ctx.config.notify.turnEnd) {

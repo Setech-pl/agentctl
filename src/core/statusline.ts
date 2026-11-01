@@ -8,7 +8,7 @@ import type { TaskState } from './state.ts';
 export const STATUS_INTERVAL = 10;
 
 /** Left to right in the tmux status line: running work first, then what waits for you. */
-const LINE_ORDER: TaskState[][] = [['working'], ['waiting'], ['report-ready'], ['needs-input'], ['needs-trust'], ['limited'], ['orphan', 'dead']];
+const LINE_ORDER: TaskState[][] = [['working', 'background'], ['waiting'], ['report-ready'], ['needs-input'], ['needs-trust'], ['limited'], ['orphan', 'dead']];
 
 /**
  * One short line for the tmux status bar: "2⚙ 1✓ 1?". The count of tasks per state, zero counts left out; reports that were

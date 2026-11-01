@@ -437,6 +437,7 @@ export interface BoardCell {
 
 const STATE_COLOR: Record<TaskState, string> = {
   working: 'cyan',
+  background: 'cyan',
   waiting: 'yellow',
   'needs-input': 'magenta',
   'needs-trust': 'magenta',
