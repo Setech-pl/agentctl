@@ -64,9 +64,9 @@ function TaskList(props: { state: BoardState; width: number; capacity: number; i
       ? [h(Text, { key: 'empty', dimColor: true }, state.refreshedAt === null ? 'Loading…' : state.rows.length === 0 ? 'No tasks. Start one with "agentctl new <spec>".' : 'No active tasks. z opens the finished ones.')]
       : visible.items.map((item) =>
           item.kind === 'finished'
-            ? h(Text, { key: 'finished', dimColor: true, wrap: 'truncate-end' }, `${item.expanded ? '▾' : '▸'} ${finishedTitle(item.count, item.expanded)}`)
+            ? h(Text, { key: 'finished', dimColor: true, wrap: 'truncate-end' }, `${item.expanded ? '-' : '+'} ${finishedTitle(item.count, item.expanded)}`)
             : item.kind === 'closed'
-              ? h(Text, { key: 'closed', dimColor: true, wrap: 'truncate-end' }, `▾ ${closedTitle(item.count)}`)
+              ? h(Text, { key: 'closed', dimColor: true, wrap: 'truncate-end' }, `- ${closedTitle(item.count)}`)
               : h(Cells, { key: item.row.task, cells: rowCells(item.row, item.row.task === state.selected, cols, props.icons) }),
         );
   return h(Box, { flexDirection: 'column', width: props.width }, h(Cells, { cells: headerCells(cols) }), ...body);
