@@ -109,7 +109,7 @@ describe('new: worktree -> setup -> links -> window', () => {
     fs.writeFileSync(file, text);
     const runner = new RecordingRunner({ dryRun: false, respond: machine() });
     const err: string[] = [];
-    const deps: CliDeps = { stdout: () => {}, stderr: (t) => err.push(t), readStdin: () => '', stdinIsTTY: false, loadConfig: () => config, confirm: undefined, makeRunner: () => runner };
+    const deps: CliDeps = { stdout: () => {}, stderr: (t) => err.push(t), readStdin: () => '', stdinIsTTY: false, loadConfig: () => config, confirm: undefined, readClipboard: async () => '', watchCommand: () => 'agentctl watch', makeRunner: () => runner };
     assert.equal(await main(['new', '--no-agent', file], deps), 0, err.join(''));
     assert.ok(runner.commands.some((c) => c.includes('worktree add')));
     assert.ok(!runner.commands.some((c) => c.startsWith('tmux')));
