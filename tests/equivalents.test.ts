@@ -141,7 +141,7 @@ describe('ordering a provider: --agent, limits, pin, review_of', () => {
       },
     });
     const [res] = await newTasks(ctx, specs, { agent: 'codex' });
-    assert.ok(runner.commands.includes(`tmux send-keys -t =agentctl:nc-2 -l -- 'codex --sandbox danger-full-access -m gpt-6.1-sol -c model_reasoning_effort=high'`));
+    assert.ok(runner.commands.includes(`tmux send-keys -t '=agentctl:nc-2' -l -- 'codex --sandbox danger-full-access -m gpt-6.1-sol -c model_reasoning_effort=high'`));
     assert.deepEqual(res?.requested, { agent: 'claude', model: 'sonnet', effort: 'high' });
     assert.deepEqual(res?.effective, { agent: 'codex', model: 'gpt-6.1-sol', effort: 'high' });
     assert.equal(res?.switchedBy, 'flag');

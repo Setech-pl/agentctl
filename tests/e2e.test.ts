@@ -64,20 +64,20 @@ Review NC-1.
       `mkdir -p ${config.cache}/nc-1`,
       `write ${config.cache}/nc-1/TASK.md`,
       `tmux new-session -d -s agentctl -n nc-1 -c ${wtDir} -e NEON_CITY_TASK=NC-1`,
-      `tmux send-keys -t =agentctl:nc-1 -l -- 'claude --model opus --effort high'`,
-      'tmux send-keys -t =agentctl:nc-1 Enter',
+      `tmux send-keys -t '=agentctl:nc-1' -l -- 'claude --model opus --effort high'`,
+      'tmux send-keys -t \'=agentctl:nc-1\' Enter',
       'tmux load-buffer -b agentctl-nc-1 -',
-      'tmux paste-buffer -p -d -b agentctl-nc-1 -t =agentctl:nc-1',
-      'tmux send-keys -t =agentctl:nc-1 Enter',
+      'tmux paste-buffer -p -d -b agentctl-nc-1 -t \'=agentctl:nc-1\'',
+      'tmux send-keys -t \'=agentctl:nc-1\' Enter',
       `git -C ${repo} worktree add --detach ${path.join(root, 'wt', 'app-nc-2')}`,
       `mkdir -p ${config.cache}/nc-2`,
       `write ${config.cache}/nc-2/TASK.md`,
-      `tmux new-window -d -t =agentctl: -n nc-2 -c ${path.join(root, 'wt', 'app-nc-2')}`,
-      `tmux send-keys -t =agentctl:nc-2 -l -- 'codex --sandbox danger-full-access -m gpt-6.1-sol -c model_reasoning_effort=high'`,
-      'tmux send-keys -t =agentctl:nc-2 Enter',
+      `tmux new-window -d -t '=agentctl:' -n nc-2 -c ${path.join(root, 'wt', 'app-nc-2')}`,
+      `tmux send-keys -t '=agentctl:nc-2' -l -- 'codex --sandbox danger-full-access -m gpt-6.1-sol -c model_reasoning_effort=high'`,
+      'tmux send-keys -t \'=agentctl:nc-2\' Enter',
       'tmux load-buffer -b agentctl-nc-2 -',
-      'tmux paste-buffer -p -d -b agentctl-nc-2 -t =agentctl:nc-2',
-      'tmux send-keys -t =agentctl:nc-2 Enter',
+      'tmux paste-buffer -p -d -b agentctl-nc-2 -t \'=agentctl:nc-2\'',
+      'tmux send-keys -t \'=agentctl:nc-2\' Enter',
     ]);
     assert.ok(lines.includes('#   Model: opus · effort high'), 'the prompt is shown with its header line');
 
@@ -135,7 +135,7 @@ describe('spec example', () => {
     const r = agentctl(['new', '--dry-run', '--agent', 'codex', f], { AGENTCTL_HOME: none });
     assert.equal(r.code, 0, r.stderr);
     const commands = r.stdout.split('\n').filter((l) => l && !l.startsWith('#')).map((l) => l.replace(/^(write \S+) \(\d+ bytes\)$/, '$1'));
-    assert.ok(commands.includes("tmux send-keys -t =agentctl:nc-42 -l -- 'codex --sandbox danger-full-access -m gpt-6-astra -c model_reasoning_effort=medium'"));
+    assert.ok(commands.includes("tmux send-keys -t '=agentctl:nc-42' -l -- 'codex --sandbox danger-full-access -m gpt-6-astra -c model_reasoning_effort=medium'"));
     assert.ok(!commands.some((c) => c.includes('claude')));
     assert.ok(r.stdout.includes('#   Model: gpt-6-astra · effort medium'));
     assert.ok(commands.some((c) => c.startsWith('git -C ') && c.includes('worktree add -b nc-42-tram-bell')));
@@ -166,7 +166,7 @@ describe('interrupt --dry-run (the real binary)', () => {
     );
     const r = agentctl(['interrupt', 'NC-1', '--dry-run'], { AGENTCTL_HOME: path.join(root, 'home') });
     assert.equal(r.code, 0, r.stderr);
-    assert.match(r.stdout, /^tmux send-keys -t =agentctl:nc-1 Escape$/m);
+    assert.match(r.stdout, /^tmux send-keys -t '=agentctl:nc-1' Escape$/m);
     void repo;
   });
 });

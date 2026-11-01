@@ -1,6 +1,7 @@
 import { PATTERN_FLAGS } from './config.ts';
 import type { Runner } from './runner.ts';
 import type { Tmux } from './tmux.ts';
+import { shellLine } from './util.ts';
 
 export interface TrustWait {
   /** How long to wait for a human to answer the dialog. */
@@ -42,7 +43,7 @@ export interface ReadyResult {
  */
 export async function waitForReady(runner: Runner, tmux: Tmux, window: string, opts: ReadyOptions): Promise<ReadyResult> {
   if (runner.dryRun) {
-    runner.note(`poll "tmux capture-pane -p -t ${tmux.target(window)}" every ${opts.intervalMs ?? 500}ms until /${opts.pattern}/ matches (timeout ${opts.timeoutMs / 1000}s)`);
+    runner.note(`poll "${shellLine('tmux', ['capture-pane', '-p', '-t', tmux.target(window)])}" every ${opts.intervalMs ?? 500}ms until /${opts.pattern}/ matches (timeout ${opts.timeoutMs / 1000}s)`);
     if (opts.waitTrust) runner.note(`if the agent shows its folder-trust dialog, keep polling (up to ${opts.waitTrust.timeoutMs / 1000}s) until it is answered by a human`);
     return { ready: true, trust: false, screen: '' };
   }

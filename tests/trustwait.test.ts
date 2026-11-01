@@ -64,7 +64,7 @@ describe('new: waiting for folder trust', () => {
     assert.ok(out.includes('NC-1: prompt sent'));
     // Only the agent start command (+ its Enter) and the prompt paste (+ its Enter) were typed: the dialog was never answered.
     const keys = runner.commands.filter((c) => c.startsWith('tmux send-keys'));
-    assert.deepEqual(keys, ["tmux send-keys -t =agentctl:nc-1 -l -- 'claude --effort high'", 'tmux send-keys -t =agentctl:nc-1 Enter', 'tmux send-keys -t =agentctl:nc-1 Enter']);
+    assert.deepEqual(keys, ["tmux send-keys -t '=agentctl:nc-1' -l -- 'claude --effort high'", 'tmux send-keys -t \'=agentctl:nc-1\' Enter', 'tmux send-keys -t \'=agentctl:nc-1\' Enter']);
     assert.ok(runner.commands.indexOf(pastes(runner.commands)[0]!) > runner.commands.findIndex((c) => c.includes("'claude")));
   });
 
@@ -144,7 +144,7 @@ describe('new: waiting for folder trust', () => {
       'NC-3: agent waits for folder trust – attach: tmux attach -t agentctl, confirm in window nc-3',
     ]);
     assert.deepEqual(order, ['nc-1#1', 'nc-1#2', 'nc-1#3', 'nc-2#1', 'nc-3#1', 'nc-3#2', 'nc-3#3']);
-    assert.deepEqual(pastes(runner.commands), ['nc-1', 'nc-2', 'nc-3'].map((w) => `tmux paste-buffer -p -d -b agentctl-${w} -t =agentctl:${w}`));
+    assert.deepEqual(pastes(runner.commands), ['nc-1', 'nc-2', 'nc-3'].map((w) => `tmux paste-buffer -p -d -b agentctl-${w} -t '=agentctl:${w}'`));
     const sent = out.filter((l) => l.endsWith('prompt sent'));
     assert.deepEqual(sent, ['NC-1: prompt sent', 'NC-2: prompt sent', 'NC-3: prompt sent']);
   });

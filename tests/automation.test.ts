@@ -359,10 +359,10 @@ describe('watch', () => {
     const { ctx, runner, m } = setup('watchtmux');
     assert.equal(await ensureWatchWindow(ctx, 'agentctl watch', '/work'), 'session-created');
     assert.deepEqual(runner.commands.slice(0, 1), ['tmux new-session -d -s agentctl -n watch -c /work']);
-    assert.ok(runner.commands.includes('tmux send-keys -t =agentctl:watch -l -- \'agentctl watch\''));
+    assert.ok(runner.commands.includes('tmux send-keys -t \'=agentctl:watch\' -l -- \'agentctl watch\''));
     m.windows.set('other', '');
     assert.equal(await ensureWatchWindow(ctx, 'agentctl watch', '/work'), 'created');
-    assert.ok(runner.commands.some((c) => c.startsWith('tmux new-window -d -t =agentctl: -n watch')));
+    assert.ok(runner.commands.some((c) => c.startsWith(`tmux new-window -d -t '=agentctl:' -n watch`)));
     m.windows.set('watch', '');
     const before = runner.commands.length;
     assert.equal(await ensureWatchWindow(ctx, 'agentctl watch', '/work'), 'exists');
@@ -495,7 +495,7 @@ describe('close with several tasks', () => {
     assert.deepEqual(plan.map((p) => p.line), ['NC-1', 'NC-2  (WARNING: no report yet)', 'NC-3']);
     assert.deepEqual(runner.commands, []);
     await closeTasks(ctx, plan.map((p) => p.task));
-    assert.deepEqual(runner.commands, ['tmux kill-window -t =agentctl:nc-1', 'tmux kill-window -t =agentctl:nc-2', 'tmux kill-window -t =agentctl:nc-3']);
+    assert.deepEqual(runner.commands, ['tmux kill-window -t \'=agentctl:nc-1\'', 'tmux kill-window -t \'=agentctl:nc-2\'', 'tmux kill-window -t \'=agentctl:nc-3\'']);
   });
 
   it('marks unknown tasks, and with --rm-worktree refuses the whole list before closing anything', async () => {
@@ -543,7 +543,7 @@ describe('close with several tasks', () => {
     assert.equal(yes.runner.commands.length, 2);
     const forced = await run(['close', '-y', 'NC-3'], undefined);
     assert.equal(forced.code, 0);
-    assert.deepEqual(forced.runner.commands, ['tmux kill-window -t =agentctl:nc-3']);
+    assert.deepEqual(forced.runner.commands, ['tmux kill-window -t \'=agentctl:nc-3\'']);
     const noTerm = await run(['close', 'NC-3'], undefined);
     assert.equal(noTerm.code, 1);
     assert.match(noTerm.err, /no terminal to ask on/);

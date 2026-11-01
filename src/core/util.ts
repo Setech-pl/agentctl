@@ -56,8 +56,9 @@ export function windowName(task: string): string {
 
 const SAFE_SHELL_WORD = /^[A-Za-z0-9_@%+=:,./-]+$/;
 
+/** Quote for a POSIX/zsh shell. A word starting with "=" is quoted too: zsh expands "=name" to a program path (tmux targets are "=session:window"). */
 export function shellQuote(word: string): string {
-  if (word !== '' && SAFE_SHELL_WORD.test(word)) return word;
+  if (word !== '' && !word.startsWith('=') && SAFE_SHELL_WORD.test(word)) return word;
   return `'${word.replace(/'/g, `'\\''`)}'`;
 }
 
