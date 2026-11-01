@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import YAML from 'yaml';
+import type { Runner } from './runner.ts';
 import { AGENT_NAMES, EFFORTS } from './config.ts';
 import type { AgentName, Effort, GlobalConfig, Link } from './config.ts';
 import type { ResolvedRepo, ResolvedSpec } from './spec.ts';
@@ -25,6 +26,8 @@ export interface TaskRecord {
   /** The order as written in the spec; agent/model/effort above are what actually runs. */
   requested: Order;
   switchedBy?: 'flag' | 'limit';
+  /** ISO timestamp of the last `pull --ready` that took the report. */
+  pulled?: string;
 }
 
 export function taskDir(config: GlobalConfig, window: string): string {
@@ -74,6 +77,7 @@ export function renderTaskMd(record: TaskRecord, prompt: string): string {
   if (record.switchedBy) header.switched_by = record.switchedBy;
   header.report = record.report;
   header.started = record.started;
+  if (record.pulled) header.pulled = record.pulled;
   return `---\n${YAML.stringify(header)}---\n\n${prompt.trim()}\n`;
 }
 
@@ -121,6 +125,7 @@ export function parseTaskRecord(text: string): TaskRecord | undefined {
   record.requested = parseOrder(data.requested) ?? { agent: record.agent, model: record.model, effort: record.effort };
   if (data.switched_by === 'flag' || data.switched_by === 'limit') record.switchedBy = data.switched_by;
   if (typeof data.review_of === 'string') record.reviewOf = data.review_of;
+  if (typeof data.pulled === 'string') record.pulled = data.pulled;
   return record;
 }
 
@@ -146,4 +151,21 @@ export function listTaskRecords(config: GlobalConfig): TaskRecord[] {
     if (record) records.push(record);
   }
   return records;
+}
+
+/** Set one key in the YAML header of an existing TASK.md; the body (prompt, follow-ups) and the other keys stay as they are. */
+export async function setHeaderField(runner: Runner, file: string, key: string, value: string): Promise<boolean> {
+  let text: string;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch {
+    return false;
+  }
+  const match = /^---\n([\s\S]*?)\n---(?=\n|$)/.exec(text.replace(/\r\n/g, '\n'));
+  if (!match) return false;
+  const doc = YAML.parseDocument(match[1] as string);
+  doc.set(key, value);
+  const rest = text.replace(/\r\n/g, '\n').slice(match[0].length);
+  await runner.writeFile(file, `---\n${doc.toString().trimEnd()}\n---${rest}`);
+  return true;
 }

@@ -27,6 +27,8 @@ export interface StatusRow {
   /** The report file exists. */
   report: 'yes' | 'missing';
   reportPath: string;
+  /** ISO time of the last pull that took the current report; null when never pulled or the report changed since. */
+  pulled: string | null;
   lastLine: string;
 }
 
@@ -69,6 +71,7 @@ export async function collectStatus(ctx: Context): Promise<StatusRow[]> {
       duration,
       report: reportMtime !== undefined ? 'yes' : 'missing',
       reportPath: record.report,
+      pulled: record.pulled && reportMtime !== undefined && Date.parse(record.pulled) >= reportMtime ? record.pulled : null,
       lastLine: lastNonEmptyLine(screenText),
     });
   }
@@ -79,4 +82,16 @@ export async function collectStatus(ctx: Context): Promise<StatusRow[]> {
 export async function reportStatus(ctx: Context): Promise<{ rows: StatusRow[]; mirror: MirrorResult | undefined }> {
   const rows = await collectStatus(ctx);
   return { rows, mirror: await syncMirror(ctx, rows) };
+}
+
+/** Compact Markdown table of all tasks, to paste at the start of a planning chat. */
+export function statusMarkdown(rows: StatusRow[]): string {
+  const cell = (s: string): string => s.replace(/\|/g, '\\|');
+  const pulled = (r: StatusRow): string => (r.report === 'missing' ? '-' : r.pulled ? `yes (${r.pulled.replace('T', ' ').slice(0, 16)})` : 'no');
+  const lines = [
+    '| task | agent/model/effort | state | time | report | pulled? |',
+    '|---|---|---|---|---|---|',
+    ...rows.map((r) => `| ${cell(r.task)} | ${cell(`${r.agent}/${r.model}/${r.effort}`)} | ${r.state} | ${r.duration} | ${r.report} | ${pulled(r)} |`),
+  ];
+  return `${lines.join('\n')}\n`;
 }
