@@ -7,6 +7,7 @@ import { taskState } from './state.ts';
 import type { TaskState } from './state.ts';
 import { lastContentLine } from './tmux.ts';
 import { listTaskRecords } from './taskstore.ts';
+import { BOARD_WINDOW } from './board-window.ts';
 import { WATCH_WINDOW } from './watch.ts';
 import { formatDuration, formatLocalTime, shellQuote } from './util.ts';
 import type { AgentName } from './config.ts';
@@ -95,7 +96,7 @@ export async function collectStatus(ctx: Context): Promise<StatusRow[]> {
   }
   // Windows of the session that agentctl has no state file for: never skipped silently.
   for (const window of [...live].sort()) {
-    if (window === WATCH_WINDOW || knownWindows.has(window)) continue;
+    if (window === WATCH_WINDOW || window === BOARD_WINDOW || knownWindows.has(window)) continue;
     const screen = await tmux.capture(window);
     const screenText = screen.code === 0 ? screen.stdout : '';
     const agent = guessAgent(screenText);

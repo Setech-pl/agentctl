@@ -5,7 +5,9 @@ import { loadGlobalConfig } from '../src/core/config.ts';
 import type { GlobalConfig } from '../src/core/config.ts';
 import { Context } from '../src/core/context.ts';
 import { RecordingRunner } from '../src/core/runner.ts';
-import type { RecordingOptions } from '../src/core/runner.ts';
+import type { ExecOptions, ExecResult, RecordingOptions } from '../src/core/runner.ts';
+import { renderTaskMd, taskDir, taskFile } from '../src/core/taskstore.ts';
+import type { TaskRecord } from '../src/core/taskstore.ts';
 
 export const REPO_ROOT = path.resolve(import.meta.dirname, '..');
 const SCRATCH = path.join(REPO_ROOT, '.cache');
@@ -47,4 +49,98 @@ export function makeContext(
 export function specText(header: Record<string, string>, repoPath: string, prompt = 'Do the thing.'): string {
   const lines = Object.entries(header).map(([k, v]) => `${k}: ${v}`);
   return `---\n${lines.join('\n')}\nrepos:\n  - path: ${repoPath}\n    worktree: ${repoPath}-wt\n---\n${prompt}\n`;
+}
+
+/** Write a minimal TASK.md for a task and return its record. */
+export function seedTask(config: GlobalConfig, task: string, extra: Partial<TaskRecord> = {}): TaskRecord {
+  const record: TaskRecord = {
+    task,
+    window: task.toLowerCase(),
+    session: config.session,
+    agent: 'claude',
+    model: 'opus',
+    effort: 'high',
+    repos: [],
+    links: [],
+    env: {},
+    report: path.join(config.cache, task.toLowerCase(), `${task}.md`),
+    started: new Date(Date.UTC(2026, 9, 31, 11, 0, 0)).toISOString(),
+    requested: { agent: 'claude', model: 'opus', effort: 'high' },
+    ...extra,
+  };
+  fs.mkdirSync(taskDir(config, record.window), { recursive: true });
+  fs.writeFileSync(taskFile(config, record.window), renderTaskMd(record, `Do ${task}.`));
+  return record;
+}
+
+export interface FakeWindow {
+  id: string;
+  name: string;
+  screen: string;
+}
+
+/**
+ * A scripted tmux server for RecordingRunner's `respond`: windows with ids, names (which may carry an icon prefix) and
+ * screens. Targets resolve like tmux does: "@id", or "=session:name" with an exact name match.
+ */
+export class FakeTmux {
+  windows: FakeWindow[] = [];
+  readonly session: string;
+  private nextId = 1;
+  /** Every tmux command seen, as "subcommand target". */
+  readonly seen: string[] = [];
+
+  constructor(session = 'agentctl') {
+    this.session = session;
+  }
+
+  add(name: string, screen = '', id?: string): FakeWindow {
+    const w = { id: id ?? `@${this.nextId++}`, name, screen };
+    this.windows.push(w);
+    return w;
+  }
+
+  find(target: string): FakeWindow | undefined {
+    if (target.startsWith('@')) return this.windows.find((w) => w.id === target);
+    const prefix = `=${this.session}:`;
+    return target.startsWith(prefix) ? this.windows.find((w) => w.name === target.slice(prefix.length)) : undefined;
+  }
+
+  respond = (cmd: string, args: string[], _opts?: ExecOptions): Partial<ExecResult> | undefined => {
+    if (cmd !== 'tmux') return undefined;
+    const sub = args[0] as string;
+    const target = args.includes('-t') ? (args[args.indexOf('-t') + 1] as string) : '';
+    this.seen.push(`${sub} ${target}`.trim());
+    switch (sub) {
+      case 'list-windows': {
+        if (this.windows.length === 0) return { code: 1 };
+        const format = args[args.indexOf('-F') + 1] ?? '#{window_name}';
+        return { stdout: this.windows.map((w) => format.replace('#{window_id}', w.id).replace('#{window_name}', w.name)).join('\n') };
+      }
+      case 'has-session':
+        return { code: this.windows.length ? 0 : 1 };
+      case 'capture-pane': {
+        const w = this.find(target);
+        return w ? { stdout: w.screen } : { code: 1, stderr: `can't find window: ${target}` };
+      }
+      case 'rename-window': {
+        const w = this.find(target);
+        if (!w) return { code: 1, stderr: `can't find window: ${target}` };
+        w.name = args[args.length - 1] as string;
+        return {};
+      }
+      case 'kill-window': {
+        const w = this.find(target);
+        if (!w) return { code: 1, stderr: `can't find window: ${target}` };
+        this.windows = this.windows.filter((x) => x !== w);
+        return {};
+      }
+      case 'select-window':
+      case 'send-keys':
+      case 'paste-buffer':
+        return this.find(target) ? {} : { code: 1, stderr: `can't find window: ${target}` };
+      default:
+        return undefined;
+    }
+  };
 }
