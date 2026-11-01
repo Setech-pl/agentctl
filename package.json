@@ -23,10 +23,15 @@
   },
   "scripts": {
     "test": "node --experimental-strip-types --no-warnings --test \"tests/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit",
     "agentctl": "node --experimental-strip-types --no-warnings bin/agentctl.ts"
   },
   "dependencies": {
     "commander": "^15.0.0",
     "yaml": "^2.9.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2"
   }
 }

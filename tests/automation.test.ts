@@ -260,7 +260,7 @@ describe('watch', () => {
     await watchTick(ctx, memory, n);
     m.windows.set('nc-2', TRUST);
     await watchTick(ctx, memory, n);
-    assert.equal(n.sent.filter((s) => s.startsWith('NC-2')).length, 2);
+    assert.equal((n.sent as string[]).filter((s) => s.startsWith('NC-2')).length, 2);
   });
 
   it('"waits for you" fires once after waiting_after, not before, and again only after a new stay', async () => {
