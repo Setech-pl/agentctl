@@ -223,6 +223,17 @@ export class Tmux {
     return this.runner.exec('tmux', ['kill-window', '-t', await this.targetFor(window)]);
   }
 
+  /** What `key` is bound to in the root key table (no prefix); empty when nothing is. */
+  async rootBinding(key: string): Promise<string> {
+    const r = await this.runner.exec('tmux', ['list-keys', '-T', 'root', key], { readOnly: true, dryResult: { code: 1 } });
+    return r.code === 0 ? r.stdout.trim() : '';
+  }
+
+  /** Bind `key` (no prefix, every session of the server): `thenCommand` when the format is true, else `elseCommand`. */
+  bindRootKey(key: string, condition: string, thenCommand: string, elseCommand: string): Promise<ExecResult> {
+    return this.runner.exec('tmux', ['bind-key', '-n', key, 'if-shell', '-F', condition, thenCommand, elseCommand]);
+  }
+
   /** A tmux option of this session only (no `-g`: other sessions keep theirs). */
   setSessionOption(option: string, value: string): Promise<ExecResult> {
     // set-option takes a pane target: "=session:" is that session's current pane, so the option lands on the session.

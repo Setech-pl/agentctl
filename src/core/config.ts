@@ -106,6 +106,10 @@ export type McpWriteTool = (typeof MCP_WRITE_TOOLS)[number];
 export interface BoardSettings {
   /** A task without a window whose report was pulled hides by itself (a task without a report stays in "Finished"). */
   autoHidePulledDead: boolean;
+  /** `mouse on` in the agentctl tmux session (this session only): click a window name in the status bar. Selecting text then takes the fn key in Terminal.app. */
+  mouse: boolean;
+  /** tmux key (no prefix) that goes back to the board from any window of the agentctl session; null: no key is bound. Default F12. */
+  returnKey: string | null;
 }
 
 export interface McpSettings {
@@ -454,13 +458,22 @@ function parseNotify(v: unknown, p: Problems): NotifySettings {
 }
 
 function parseBoard(v: unknown, p: Problems): BoardSettings {
-  const board: BoardSettings = { autoHidePulledDead: true };
+  const board: BoardSettings = { autoHidePulledDead: true, mouse: true, returnKey: 'F12' };
   if (v === undefined || v === null) return board;
   if (!isObject(v)) {
-    p.add('config.board must be a mapping like {auto_hide_pulled_dead: true}');
+    p.add('config.board must be a mapping like {auto_hide_pulled_dead: true, mouse: true, return_key: F12}');
     return board;
   }
-  checkKeys(v, ['auto_hide_pulled_dead'], 'config.board', p);
+  checkKeys(v, ['auto_hide_pulled_dead', 'mouse', 'return_key'], 'config.board', p);
+  if (v.mouse !== undefined) {
+    if (typeof v.mouse === 'boolean') board.mouse = v.mouse;
+    else p.add('config.board.mouse must be true or false');
+  }
+  if (v.return_key !== undefined) {
+    if (v.return_key === false || v.return_key === null) board.returnKey = null;
+    else if (typeof v.return_key === 'string' && /^[A-Za-z0-9][A-Za-z0-9-]{0,19}$/.test(v.return_key)) board.returnKey = v.return_key;
+    else p.add('config.board.return_key must be a tmux key name without a prefix like F12, M-b or C-Space, or false for none');
+  }
   if (v.auto_hide_pulled_dead !== undefined) {
     if (typeof v.auto_hide_pulled_dead === 'boolean') board.autoHidePulledDead = v.auto_hide_pulled_dead;
     else p.add('config.board.auto_hide_pulled_dead must be true or false');

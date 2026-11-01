@@ -78,6 +78,7 @@ describe('board: the Ink front renders the model', () => {
     assert.match(screen, /NC-1\s+claude opus\/high\s+⚙ working/);
     assert.ok(!screen.includes('NC-2'), 'NC-2 has no window: it waits under the closed "Finished" title');
     assert.match(screen, /▸ Finished \(1\) – z opens/);
+    assert.match(screen, /Enter – open the agent · F12 – back to the list/);
     keys.write('z');
     await until(() => term.screen().includes('NC-2'));
     screen = term.screen();

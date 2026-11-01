@@ -134,11 +134,11 @@ describe('through the CLI', () => {
 
     const flag = setup('cl4');
     await cli(flag.config, flag.runner, ['watch', '--tmux', '--no-status-line']);
-    assert.ok(!flag.runner.commands.some((c) => c.includes('set-option')));
+    assert.ok(!flag.runner.commands.some((c) => c.includes('set-option') && c.includes('status-')));
 
     const off = setup('cl5', 'watch: {status_line: false}\n');
     await cli(off.config, off.runner, ['watch', '--tmux']);
-    assert.ok(!off.runner.commands.some((c) => c.includes('set-option')));
+    assert.ok(!off.runner.commands.some((c) => c.includes('set-option') && c.includes('status-')));
   });
 
   it('watch --tmux creates the session first when needed, then sets the status bar', async () => {

@@ -11,6 +11,7 @@ import { Alerts } from './core/alert.ts';
 import { archiveClosed, parseAge } from './core/archive.ts';
 import { appendStartLog, describeTerminal, loggedRun, startLogPath, waitForSize } from './core/boardstart.ts';
 import { setHidden } from './core/hide.ts';
+import { applyNavigation, describeNavigation } from './core/navigation.ts';
 import { handleEvent } from './core/event-command.ts';
 import { CLAUDE_KINDS, parseJson } from './core/events.ts';
 import type { ClaudeKind, SelfArgv } from './core/events.ts';
@@ -278,6 +279,8 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         } finally {
           interrupt?.dispose();
         }
+        // The session exists now (it may have been created by this very command): mouse and the key back to the board.
+        if (!opts.dryRun && !options.noAgent) for (const l of describeNavigation(await applyNavigation(ctx), ctx.config.session, true)) line(l);
       }),
     );
 
@@ -412,6 +415,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
           const result = await ensureWatchWindow(ctx, deps.watchCommand(), process.cwd());
           if (result === 'exists') line(`Window ${ctx.config.session}:${WATCH_WINDOW} already exists, left alone.`);
           else line(`${result === 'restarted' ? 'Started again (its process had ended)' : 'Started'} the watcher in window ${ctx.config.session}:${WATCH_WINDOW}${result === 'session-created' ? ' (session created)' : ''}. Attach: tmux attach -t ${ctx.config.session}. If it fails to start, the window stays with the error; ${startLogPath(ctx.config, 'watch')} has it too.`);
+          for (const l of describeNavigation(await applyNavigation(ctx), ctx.config.session)) line(l);
           if (opts.statusLine !== false && ctx.config.watch.statusLine) {
             const shown = await applyStatusLine(ctx, deps.statusLineCommand?.() ?? 'agentctl status --tmux-line');
             if (shown === 'set') line(`Status bar of session ${ctx.config.session}: task counts, refreshed every 10 s (this session only; undo: tmux set-option -u -t ${ctx.config.session}: status-right).`);
@@ -444,6 +448,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
           const result = await ensureWindow(ctx, BOARD_WINDOW, deps.boardCommand?.() ?? 'agentctl board', process.cwd());
           if (result === 'exists') line(`Window ${ctx.config.session}:${BOARD_WINDOW} already exists, left alone.`);
           else line(`${result === 'restarted' ? 'Started again (its process had ended)' : 'Started'} the board in window ${ctx.config.session}:${BOARD_WINDOW}${result === 'session-created' ? ' (session created)' : ''}. If it fails to start, the window stays with the error; ${startLogPath(ctx.config, 'board')} has it too.`);
+          for (const l of describeNavigation(await applyNavigation(ctx), ctx.config.session)) line(l);
           line(`Open it: tmux attach -t ${ctx.config.session} \\; select-window -t ${BOARD_WINDOW}   (inside tmux: tmux select-window -t ${ctx.config.session}:${BOARD_WINDOW})`);
           return;
         }

@@ -28,6 +28,7 @@ import {
 import type { BoardCell, BoardEffect, BoardState } from '../core/board.ts';
 import type { Context } from '../core/context.ts';
 import type { SelfArgv } from '../core/events.ts';
+import { navigationHint } from '../core/navigation.ts';
 import { errorMessage } from '../core/util.ts';
 
 /*
@@ -83,10 +84,10 @@ function Preview(props: { state: BoardState; width: number; height: number }): R
   );
 }
 
-function Footer(props: { state: BoardState }): React.ReactElement {
+function Footer(props: { state: BoardState; hint: string }): React.ReactElement {
   const { state } = props;
   const prompt = promptText(state);
-  const status = state.busy ?? (state.loadError ? `refresh failed: ${state.loadError}` : null);
+  const status = state.busy ?? (state.loadError ? `refresh failed: ${state.loadError}` : null) ?? props.hint;
   return h(
     Box,
     { flexDirection: 'column' },
@@ -198,7 +199,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
           h(TaskList, { state, width: layout.listWidth, capacity: rowsForBody - 1, icons: ctx.config.watch.windowIcons }),
           layout.showPreview ? h(Preview, { state, width: layout.previewWidth, height: rowsForBody }) : null,
         );
-  return h(Box, { flexDirection: 'column', width: state.width, height: state.height }, header, h(Box, { flexGrow: 1, flexDirection: 'column' }, body), h(Footer, { state }));
+  return h(Box, { flexDirection: 'column', width: state.width, height: state.height }, header, h(Box, { flexGrow: 1, flexDirection: 'column' }, body), h(Footer, { state, hint: navigationHint(ctx.config.board.returnKey) }));
 }
 
 /** Show the board until the user quits; resolves when it is gone. Needs a terminal. */

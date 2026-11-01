@@ -361,7 +361,7 @@ export async function runBoardEffect(runner: Runner, config: GlobalConfig, effec
       case 'switch':
         if (!env.insideTmux) return { level: 'error', text: `Not inside tmux: run "agentctl attach ${effect.task}".` };
         await showWindow(ctx, effect.window, true);
-        return { level: 'info', text: `Switched to ${effect.task}. Back to the board: Ctrl-b l` };
+        return { level: 'info', text: `Switched to ${effect.task}. Back to the board: ${config.board.returnKey ?? 'Ctrl-b l'}` };
       case 'send':
         await sendPrompts(ctx, [{ task: effect.task, window: effect.window, prompt: effect.text }]);
         return { level: 'info', text: `${effect.task}: prompt sent` };
@@ -535,7 +535,7 @@ export const HELP_LINES: string[] = [
   'agentctl board',
   '',
   '  ↑ ↓ (j k)   select a task',
-  '  Enter       go to the task window (tmux switch-client); back: Ctrl-b l',
+  '  Enter       go to the task window (tmux switch-client); back: F12 or Ctrl-b l',
   '              on a finished task (no window): a menu (c copy, x close, h hide)',
   '  m           type a message and send it to the agent (Enter sends, Esc cancels)',
   '  M           move the task to the other provider after a limit (asks first)',
