@@ -340,8 +340,8 @@ describe('watch', () => {
 
   it('config: defaults 15 s / 120 s, overridable, validated', () => {
     const root = scratch.sub('watchcfg');
-    assert.deepEqual(makeConfig(root).watch, { interval: 15, waitingAfter: 120, windowIcons: DEFAULT_WINDOW_ICONS });
-    assert.deepEqual(makeConfig(root, 'watch: {interval: 5, waiting_after: 30}\n').watch, { interval: 5, waitingAfter: 30, windowIcons: DEFAULT_WINDOW_ICONS });
+    assert.deepEqual(makeConfig(root).watch, { interval: 15, waitingAfter: 120, windowIcons: DEFAULT_WINDOW_ICONS, statusLine: true });
+    assert.deepEqual(makeConfig(root, 'watch: {interval: 5, waiting_after: 30}\n').watch, { interval: 5, waitingAfter: 30, windowIcons: DEFAULT_WINDOW_ICONS, statusLine: true });
     assert.throws(() => makeConfig(root, 'watch: {interval: 0}\n'), /watch.interval must be a positive number/);
     assert.throws(() => makeConfig(root, 'watch: {every: 3}\n'), /unknown key "every"/);
   });
