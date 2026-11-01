@@ -76,7 +76,7 @@ export interface GlobalConfig extends Layer {
    * `agentctl watch`: poll interval, how long an idle task may wait before it is worth a notification, and the state icons
    * in front of the tmux window names (`null`: the windows keep their plain names).
    */
-  watch: { interval: number; waitingAfter: number; windowIcons: Record<TaskState, string> | null };
+  watch: { interval: number; waitingAfter: number; windowIcons: Record<TaskState, string> | null; statusLine: boolean };
   /** Where the config was (or would be) read from. */
   path: string;
   loaded: boolean;
@@ -308,14 +308,18 @@ function parseWindowIcons(v: unknown, p: Problems): GlobalConfig['watch']['windo
 }
 
 function parseWatch(v: unknown, p: Problems): GlobalConfig['watch'] {
-  const watch: GlobalConfig['watch'] = { ...DEFAULT_WATCH, windowIcons: { ...DEFAULT_WINDOW_ICONS } };
+  const watch: GlobalConfig['watch'] = { ...DEFAULT_WATCH, windowIcons: { ...DEFAULT_WINDOW_ICONS }, statusLine: true };
   if (v === undefined || v === null) return watch;
   if (!isObject(v)) {
     p.add('config.watch must be a mapping like {interval: 15, waiting_after: 120}');
     return watch;
   }
-  checkKeys(v, ['interval', 'waiting_after', 'window_icons'], 'config.watch', p);
+  checkKeys(v, ['interval', 'waiting_after', 'window_icons', 'status_line'], 'config.watch', p);
   watch.windowIcons = parseWindowIcons(v.window_icons, p);
+  if (v.status_line !== undefined) {
+    if (typeof v.status_line === 'boolean') watch.statusLine = v.status_line;
+    else p.add('config.watch.status_line must be true or false');
+  }
   for (const [key, field] of [['interval', 'interval'], ['waiting_after', 'waitingAfter']] as const) {
     if (v[key] === undefined) continue;
     if (typeof v[key] === 'number' && v[key] > 0) watch[field] = v[key];

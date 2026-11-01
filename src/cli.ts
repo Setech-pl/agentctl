@@ -19,6 +19,7 @@ import { reportStatus, statusMarkdown } from './core/status.ts';
 import { summarizeSpecs } from './core/summary.ts';
 import { DesktopNotifier } from './core/notify.ts';
 import { ensureWatchWindow, runWatch, WATCH_WINDOW } from './core/watch.ts';
+import { applyStatusLine, statusTmuxLine } from './core/statusline.ts';
 import { interruptTask } from './core/interrupt.ts';
 import { loadGlobalConfig } from './core/config.ts';
 import type { Effort, GlobalConfig } from './core/config.ts';
@@ -41,6 +42,8 @@ export interface CliDeps {
   readClipboard: () => Promise<string>;
   /** Command line that starts `agentctl watch` in a tmux window. */
   watchCommand: () => string;
+  /** Command line that prints the tmux status line (`agentctl status --tmux-line`), for tmux's status-right. */
+  statusLineCommand?: () => string;
   /** Build the runner: the real one, or a recording one for --dry-run. */
   makeRunner: (dryRun: boolean, emit: (line: string) => void) => Runner;
   /** `$TMUX` is set: attach switches this tmux client instead of attaching a new one. */
@@ -60,11 +63,8 @@ export function defaultDeps(): CliDeps {
     loadConfig: () => loadGlobalConfig(),
     confirm: process.stdin.isTTY ? askOnTerminal : undefined,
     readClipboard: () => readClipboard(new RealRunner()),
-    watchCommand: () => {
-      const env = process.env.AGENTCTL_HOME ? `AGENTCTL_HOME=${shellQuote(process.env.AGENTCTL_HOME)} ` : '';
-      const script = fs.realpathSync(process.argv[1] ?? 'bin/agentctl.ts');
-      return `${env}${shellQuote(process.execPath)} --experimental-strip-types --no-warnings ${shellQuote(script)} watch`;
-    },
+    watchCommand: () => selfCommand('watch'),
+    statusLineCommand: () => selfCommand('status --tmux-line'),
     insideTmux: Boolean(process.env.TMUX),
     choose: process.stdin.isTTY ? chooseOnTerminal : undefined,
     makeRunner: (dryRun, emit) => (dryRun ? new RecordingRunner({ emit }) : new RealRunner()),
@@ -77,6 +77,16 @@ export function defaultDeps(): CliDeps {
       return { signal: controller.signal, dispose: () => void signals.forEach((signal) => process.off(signal, onStop)) };
     },
   };
+}
+
+/**
+ * This very agentctl as a command line for a tmux window or status bar: absolute node and script paths (the tmux server's
+ * PATH may not have agentctl) and the config directory of this run.
+ */
+function selfCommand(args: string): string {
+  const env = process.env.AGENTCTL_HOME ? `AGENTCTL_HOME=${shellQuote(process.env.AGENTCTL_HOME)} ` : '';
+  const script = fs.realpathSync(process.argv[1] ?? 'bin/agentctl.ts');
+  return `${env}${shellQuote(process.execPath)} --experimental-strip-types --no-warnings ${shellQuote(script)} ${args}`;
 }
 
 async function askOnTerminal(question: string): Promise<boolean> {
@@ -138,10 +148,10 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     }
   };
 
-  const contextFor = (dryRun: boolean): Context => {
+  const contextFor = (dryRun: boolean, { migrate = true } = {}): Context => {
     const config = deps.loadConfig();
     // TASK.md and setup.log used to live in the cache folder, where agents could delete them: move them to state_dir.
-    if (!dryRun) for (const message of migrateLegacyState(config)) line(message);
+    if (!dryRun && migrate) for (const message of migrateLegacyState(config)) line(message);
     return new Context(deps.makeRunner(dryRun, line), config, line, deps.confirm);
   };
 
@@ -221,8 +231,11 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .description('Table of tasks: window state, running time, report, last output line.')
     .option('--json', 'machine-readable output')
     .option('--clip', 'copy a compact Markdown table to the clipboard (to paste at the start of a chat session)')
+    .option('--tmux-line', 'one short line for the tmux status bar, like "2⚙ 1✓ 1?" (tasks per state)')
     .action(
-      guarded(async (opts: { json?: boolean; clip?: boolean }) => {
+      guarded(async (opts: { json?: boolean; clip?: boolean; tmuxLine?: boolean }) => {
+        if ([opts.json, opts.clip, opts.tmuxLine].filter(Boolean).length > 1) throw new AgentctlError('--json, --clip and --tmux-line exclude each other');
+        if (opts.tmuxLine) return line(await statusTmuxLine(contextFor(false, { migrate: false })));
         const ctx = contextFor(false);
         const { rows } = await reportStatus(ctx);
         if (opts.clip) {
@@ -279,14 +292,20 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
   program
     .command('watch')
     .description('Foreground loop: notifies (macOS notification / notify-send) when a task has a report ready, waits too long, needs folder trust or died.')
-    .option('--tmux', `run it in window "${WATCH_WINDOW}" of the agentctl session (created if missing) instead of here`)
+    .option('--tmux', `run it in window "${WATCH_WINDOW}" of the agentctl session (created if missing) instead of here; also shows the task counts in the status bar of that session`)
+    .option('--no-status-line', 'with --tmux: leave the status bar of the session alone')
     .action(
-      guarded(async (opts: { tmux?: boolean }) => {
+      guarded(async (opts: { tmux?: boolean; statusLine?: boolean }) => {
         const ctx = contextFor(false);
         if (opts.tmux) {
           const result = await ensureWatchWindow(ctx, deps.watchCommand(), process.cwd());
           if (result === 'exists') line(`Window ${ctx.config.session}:${WATCH_WINDOW} already exists, left alone.`);
           else line(`Started the watcher in window ${ctx.config.session}:${WATCH_WINDOW}${result === 'session-created' ? ' (session created)' : ''}. Attach: tmux attach -t ${ctx.config.session}`);
+          if (opts.statusLine !== false && ctx.config.watch.statusLine) {
+            const shown = await applyStatusLine(ctx, deps.statusLineCommand?.() ?? 'agentctl status --tmux-line');
+            if (shown === 'set') line(`Status bar of session ${ctx.config.session}: task counts, refreshed every 10 s (this session only; undo: tmux set-option -u -t ${ctx.config.session} status-right).`);
+            else line(`Status bar left alone (${shown === 'no-session' ? 'the session is not running' : 'the command contains unbalanced parentheses'}).`);
+          }
           return;
         }
         const interrupt = deps.interruptSignal?.();

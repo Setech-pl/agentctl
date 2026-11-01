@@ -170,6 +170,11 @@ export class Tmux {
     return this.runner.exec('tmux', ['kill-window', '-t', await this.targetFor(window)]);
   }
 
+  /** A tmux option of this session only (no `-g`: other sessions keep theirs). */
+  setSessionOption(option: string, value: string): Promise<ExecResult> {
+    return this.runner.exec('tmux', ['set-option', '-t', `=${this.session}`, option, value]);
+  }
+
   /** Give a window a new name (the state icon in front of it, or the plain name again). `target` comes from `targetFor`. */
   renameWindow(target: string, name: string): Promise<ExecResult> {
     return this.runner.exec('tmux', ['rename-window', '-t', target, name]);
