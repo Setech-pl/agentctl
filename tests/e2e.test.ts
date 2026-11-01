@@ -183,6 +183,8 @@ describe('main() with injected dependencies', () => {
       loadConfig: () => config,
       confirm: undefined,
       makeRunner: () => new RecordingRunner({ dryRun: false }),
+      readClipboard: async () => '',
+      watchCommand: () => 'agentctl watch',
     };
     assert.equal(await main(['status', '--json'], deps), 0);
     assert.equal(out.join('').trim(), '[]');
