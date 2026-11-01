@@ -5,7 +5,7 @@ import type { StatusRow } from './core/status.ts';
 export function renderStatusTable(rows: StatusRow[], maxLast = 60): string[] {
   const header = ['TASK', 'AGENT/MODEL/EFFORT', 'STATE', 'WINDOW', 'STARTED', 'DURATION', 'PROGRESS', 'REPORT', 'LAST LINE'];
   const body = rows.map((r) => [
-    r.task,
+    r.hidden ? `${r.task} (hidden)` : r.task,
     r.switchedBy ? `${r.agent}/${r.model}/${r.effort} (ordered ${r.requested})` : `${r.agent}/${r.model}/${r.effort}`,
     r.state,
     r.window,

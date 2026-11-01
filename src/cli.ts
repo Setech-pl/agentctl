@@ -8,6 +8,7 @@ import { renderChecks, renderStatusHints, renderStatusTable } from './render.ts'
 import { adoptTask } from './core/adopt.ts';
 import { attachTask, switchAttachedClient } from './core/attach.ts';
 import { Alerts } from './core/alert.ts';
+import { setHidden } from './core/hide.ts';
 import { handleEvent } from './core/event-command.ts';
 import { CLAUDE_KINDS, parseJson } from './core/events.ts';
 import type { ClaudeKind, SelfArgv } from './core/events.ts';
@@ -20,10 +21,10 @@ import { newTasks } from './core/new.ts';
 import type { NewOptions } from './core/new.ts';
 import { pullReady, pullTask } from './core/pull.ts';
 import { sendPrompts } from './core/send.ts';
-import { reportStatus, statusMarkdown } from './core/status.ts';
+import { reportStatus, shownRows, statusMarkdown } from './core/status.ts';
 import { summarizeSpecs } from './core/summary.ts';
-import { DesktopNotifier } from './core/notify.ts';
-import type { Notifier } from './core/notify.ts';
+import { DesktopNotifier, NOTIFIER_MEMORY_MS, notifierOptionsFor } from './core/notify.ts';
+import type { Notifier, NotifyResult } from './core/notify.ts';
 import { ensureWatchWindow, runWatch, WATCH_WINDOW } from './core/watch.ts';
 import { applyStatusLine, statusTmuxLine } from './core/statusline.ts';
 import { BOARD_WINDOW, ensureWindow } from './core/windows.ts';
@@ -56,7 +57,7 @@ export interface CliDeps {
   /** This very agentctl as a command line (absolute node and script, config directory of this run): what the agents and notifications call back. */
   selfArgv?: () => SelfArgv;
   /** The notifier for this machine; default: terminal-notifier when installed, else osascript / notify-send. */
-  makeNotifier?: (runner: Runner) => Promise<Notifier>;
+  makeNotifier?: (runner: Runner, config: GlobalConfig, opts?: { retryBroken?: boolean }) => Promise<Notifier>;
   /** Command line that prints the tmux status line (`agentctl status --tmux-line`), for tmux's status-right. */
   statusLineCommand?: () => string;
   /** Build the runner: the real one, or a recording one for --dry-run. */
@@ -82,7 +83,7 @@ export function defaultDeps(): CliDeps {
     statusLineCommand: () => selfCommand('status --tmux-line'),
     boardCommand: () => selfCommand('board'),
     selfArgv,
-    makeNotifier: (runner) => DesktopNotifier.detect(runner),
+    makeNotifier: (runner, config, opts) => DesktopNotifier.detect(runner, undefined, notifierOptionsFor(config, opts)),
     runBoard: async (ctx, insideTmux, self) => {
       if (!process.stdin.isTTY || !process.stdout.isTTY) throw new AgentctlError('the board needs a terminal', 'Run it in a terminal, or in tmux with "agentctl board --tmux".');
       // Ink and React load only here: the other commands do not pay for them.
@@ -147,6 +148,30 @@ async function chooseOnTerminal(targets: TaskTarget[]): Promise<TaskTarget | und
   }
 }
 
+/** What `notify-test` tells the user about the channel that carried the notification. */
+export function describeNotifyResult(result: NotifyResult | undefined, backend: string): string[] {
+  if (!result) return ['Sent the test notification (this notifier does not say which channel carried it).'];
+  const hours = NOTIFIER_MEMORY_MS / 3_600_000;
+  if (!result.ok) {
+    return [
+      `No channel worked: ${result.channel} failed${result.error ? ` (${result.error})` : ''}.`,
+      ...(result.fallbackFrom ? [`terminal-notifier failed first, then osascript.`] : []),
+      'macOS may have notifications switched off for the app that sent it: System Settings > Notifications, and check Focus / Do Not Disturb.',
+    ];
+  }
+  if (result.channel === 'terminal-notifier') return ['Sent through terminal-notifier: a click on the notification switches to the task window.'];
+  if (result.channel === 'notify-send') return ['Sent through notify-send (no click action).'];
+  const lines = ['Sent through osascript (no click action).'];
+  if (result.fallbackFrom) {
+    lines.push(`terminal-notifier failed: ${result.error ?? 'unknown error'}`);
+    lines.push(`It is left alone for ${hours} h and notifications use osascript meanwhile; notify-test tries it again each time.`);
+    lines.push('To get click-to-window: System Settings > Notifications > terminal-notifier > Allow Notifications, alert style Banners.');
+    lines.push('If terminal-notifier is not on that list, set "notify: {backend: osascript}" in config.yaml and the attempts stop.');
+  } else if (backend === 'osascript') lines.push('notify.backend is osascript.');
+  lines.push('Did the notification appear? If not, allow notifications for "Script Editor" (osascript) in System Settings > Notifications.');
+  return lines;
+}
+
 function packageVersion(): string {
   try {
     const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string };
@@ -189,6 +214,9 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     if (!dryRun && migrate) for (const message of migrateLegacyState(config)) line(message);
     return new Context(deps.makeRunner(dryRun, line), config, line, deps.confirm);
   };
+
+  const makeNotifier = (ctx: Context, opts?: { retryBroken?: boolean }): Promise<Notifier> =>
+    deps.makeNotifier?.(ctx.runner, ctx.config, opts) ?? DesktopNotifier.detect(ctx.runner, undefined, notifierOptionsFor(ctx.config, opts));
 
   const program = new Command();
   program
@@ -269,12 +297,15 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('--json', 'machine-readable output')
     .option('--clip', 'copy a compact Markdown table to the clipboard (to paste at the start of a chat session)')
     .option('--tmux-line', 'one short line for the tmux status bar, like "2⚙ 1✓ 1?" (tasks per state)')
+    .option('--all', 'also the hidden tasks (see "agentctl hide")')
     .action(
-      guarded(async (opts: { json?: boolean; clip?: boolean; tmuxLine?: boolean }) => {
+      guarded(async (opts: { json?: boolean; clip?: boolean; tmuxLine?: boolean; all?: boolean }) => {
         if ([opts.json, opts.clip, opts.tmuxLine].filter(Boolean).length > 1) throw new AgentctlError('--json, --clip and --tmux-line exclude each other');
         if (opts.tmuxLine) return line(await statusTmuxLine(contextFor(false, { migrate: false })));
         const ctx = contextFor(false);
-        const { rows } = await reportStatus(ctx);
+        const { rows: allRows } = await reportStatus(ctx);
+        const rows = shownRows(allRows, Boolean(opts.all));
+        const hiddenCount = allRows.length - rows.length;
         if (opts.clip) {
           const md = statusMarkdown(rows);
           const copy = await writeClipboard(ctx.runner, md);
@@ -283,11 +314,31 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
           return deps.stdout(md);
         }
         if (opts.json) return line(JSON.stringify(rows, null, 2));
-        if (rows.length === 0) return line(`No tasks yet in ${ctx.config.stateDir}. Start one with "agentctl new <spec>".`);
+        if (rows.length === 0) return line(hiddenCount > 0 ? `No visible tasks; ${hiddenCount} hidden (see "agentctl status --all").` : `No tasks yet in ${ctx.config.stateDir}. Start one with "agentctl new <spec>".`);
         for (const l of renderStatusTable(rows)) line(l);
         for (const l of renderStatusHints(rows)) line(`hint: ${l}`);
+        if (hiddenCount > 0) line(`${hiddenCount} hidden task${hiddenCount === 1 ? '' : 's'} not shown: agentctl status --all`);
       }),
     );
+
+  for (const hide of [true, false]) {
+    program
+      .command(hide ? 'hide' : 'unhide')
+      .description(
+        hide
+          ? 'Take tasks off the board and "status" (they stay in "status --all" and on the board under "a"). Does not close the task or touch its worktree.'
+          : 'Show hidden tasks again on the board and in "status". A task shown on purpose is not hidden again by board.auto_hide_pulled_dead.',
+      )
+      .argument('<tasks...>', 'task IDs; case does not matter and a unique prefix is enough')
+      .action(
+        guarded(async (tasks: string[]) => {
+          for (const r of await setHidden(contextFor(false, { migrate: false }), tasks, hide)) {
+            if (r.unchanged) line(`${r.task}: already ${hide ? 'hidden' : 'shown'}`);
+            else line(`${r.task}: ${hide ? 'hidden' : 'shown again'}${hide && r.windowAlive ? ' (its window is still running; "agentctl status --all" lists it)' : ''}`);
+          }
+        }),
+      );
+  }
 
   program
     .command('pull')
@@ -348,7 +399,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         }
         const interrupt = deps.interruptSignal?.();
         try {
-          const notifier = await (deps.makeNotifier?.(ctx.runner) ?? DesktopNotifier.detect(ctx.runner));
+          const notifier = await makeNotifier(ctx);
           const self = deps.selfArgv?.();
           await runWatch(ctx, notifier, { ...(interrupt ? { signal: interrupt.signal } : {}), ...(self ? { self } : {}) });
         } finally {
@@ -373,6 +424,19 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         }
         if (!deps.runBoard) throw new AgentctlError('the board is not available here');
         await deps.runBoard(ctx, deps.insideTmux ?? false, deps.selfArgv?.());
+      }),
+    );
+
+  program
+    .command('notify-test')
+    .description('Send one test notification and say which channel carried it (terminal-notifier with a click action, or the osascript fallback).')
+    .action(
+      guarded(async () => {
+        const ctx = contextFor(false, { migrate: false });
+        const notifier = await makeNotifier(ctx, { retryBroken: true });
+        const result = (await notifier.notify('agentctl', 'Test powiadomienia agentctl – jeśli to widzisz, kanał działa.', { group: 'agentctl-test' })) as NotifyResult | undefined;
+        for (const l of describeNotifyResult(result, ctx.config.notify.backend)) line(l);
+        if (result && !result.ok) exitCode = 1;
       }),
     );
 
@@ -436,7 +500,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         const ctx = new Context(deps.makeRunner(false, line), config, () => {}, deps.confirm);
         const raw = payload ?? (opts.agent === 'claude' && !deps.stdinIsTTY ? deps.readStdin() : '');
         const forward = opts.forward ? parseJson(opts.forward) : undefined;
-        const notifier = await (deps.makeNotifier?.(ctx.runner) ?? DesktopNotifier.detect(ctx.runner));
+        const notifier = await makeNotifier(ctx);
         const self = deps.selfArgv?.();
         await handleEvent(ctx, new Alerts(ctx, notifier, { self }), {
           task: opts.task,

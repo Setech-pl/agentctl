@@ -323,15 +323,17 @@ describe('pull', () => {
     fs.writeFileSync(report, '# Report\nAll good.\n');
     const { ctx, runner, out } = makeContext(config, { respond: hasClipboard('pbcopy') });
     await pullTask(ctx, 'nc-1', 'darwin');
-    assert.deepEqual(runner.commands, ['pbcopy']);
+    assert.equal(runner.commands[0], 'pbcopy');
     assert.equal(runner.calls[0]?.input, '# Report\nAll good.\n');
+    assert.match(runner.commands[1] ?? '', /^write .*TASK\.md/, 'copying marks the task as pulled');
+    assert.match(runner.written.get(taskFile(config, 'nc-1')) ?? '', /^pulled: /m);
     assert.equal(out.at(-1), report);
   });
 
   it('uses wl-copy or xclip on Linux', async () => {
     const { ctx, runner } = makeContext(config, { respond: hasClipboard('xclip') });
     await pullTask(ctx, 'NC-1', 'linux');
-    assert.deepEqual(runner.commands, ['xclip -selection clipboard']);
+    assert.equal(runner.commands[0], 'xclip -selection clipboard');
   });
 
   it('without a report prints the last 40 lines of the window', async () => {

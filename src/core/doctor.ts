@@ -5,7 +5,7 @@ import { INSTALL_HINTS } from './agents.ts';
 import { PROJECT_CONFIG_NAME, loadGlobalConfig, loadProjectConfig } from './config.ts';
 import type { GlobalConfig } from './config.ts';
 import type { Runner } from './runner.ts';
-import { findTerminalNotifier } from './notify.ts';
+import { findTerminalNotifier, notifierMemoryPath, readNotifierMemory } from './notify.ts';
 import { Tmux } from './tmux.ts';
 import { errorMessage } from './util.ts';
 
@@ -28,6 +28,10 @@ export function notifierProblems(diagnose: string): string[] {
   if (after === undefined) return [];
   return after.split('\n').map((l) => /^\s*-\s+(.*\S)\s*$/.exec(l)?.[1] ?? '').filter(Boolean);
 }
+
+/** What to do when terminal-notifier cannot show notifications (macOS does not let it ask from the command line). */
+const NOTIFIER_STEPS =
+  'Fix: System Settings > Notifications > terminal-notifier > Allow Notifications, alert style Banners; if terminal-notifier is not on that list, set "notify: {backend: osascript}" in config.yaml. Check with: agentctl notify-test';
 
 function atLeast(version: string, min: number[]): boolean {
   const nums = (/(\d+)\.(\d+)/.exec(version) ?? []).slice(1).map(Number);
@@ -95,11 +99,18 @@ export async function runDoctor(
 
   const notifier = await findTerminalNotifier(runner, platform);
   if (platform === 'darwin') {
-    if (notifier) {
+    const backend = config?.notify.backend ?? 'auto';
+    const remembered = config ? readNotifierMemory(notifierMemoryPath(path.dirname(config.path)), runner.now()) : undefined;
+    if (backend === 'osascript') add('notifications', 'ok', 'osascript, no click action (notify.backend: osascript)');
+    else if (!notifier) add('notifications', 'warn', 'osascript, no click action. For click-to-window: brew install terminal-notifier');
+    else {
       const problems = notifierProblems((await runner.exec(notifier, ['-diagnose'], { readOnly: true, timeoutMs: 10_000 })).stdout);
-      if (problems.length === 0) add('notifications', 'ok', `terminal-notifier (${notifier}): a click on a notification switches to the task window`);
-      else add('notifications', 'warn', `terminal-notifier (${notifier}) will not show notifications yet: ${problems.join(' ')}`);
-    } else add('notifications', 'warn', 'osascript, no click action. For click-to-window: brew install terminal-notifier');
+      if (remembered) {
+        add('notifications', 'warn', `terminal-notifier (${notifier}) failed (${remembered.reason || 'no reason given'}); notifications go through osascript (no click action) until ${new Date(remembered.until).toLocaleTimeString()}. ${NOTIFIER_STEPS}`);
+      } else if (problems.length > 0) {
+        add('notifications', 'warn', `terminal-notifier (${notifier}) will not show notifications yet: ${problems.join(' ')} agentctl then falls back to osascript (no click action). ${NOTIFIER_STEPS}`);
+      } else add('notifications', 'ok', `terminal-notifier (${notifier}): a click on a notification switches to the task window`);
+    }
   } else add('notifications', 'ok', 'notify-send (no click action)');
 
   if (config) {

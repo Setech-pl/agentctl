@@ -1,7 +1,7 @@
 import type { Context } from './context.ts';
 import { DEFAULT_WINDOW_ICONS } from './icons.ts';
 import type { StatusRow } from './status.ts';
-import { collectStatus } from './status.ts';
+import { collectStatus, shownRows } from './status.ts';
 import type { TaskState } from './state.ts';
 
 /** Seconds between two runs of the status command in tmux. */
@@ -25,7 +25,7 @@ export function tmuxLine(rows: StatusRow[], icons: Record<TaskState, string> | n
 }
 
 export async function statusTmuxLine(ctx: Context): Promise<string> {
-  return tmuxLine(await collectStatus(ctx, { progress: false }), ctx.config.watch.windowIcons);
+  return tmuxLine(shownRows(await collectStatus(ctx, { progress: false }), false), ctx.config.watch.windowIcons);
 }
 
 /**

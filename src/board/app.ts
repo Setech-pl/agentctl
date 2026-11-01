@@ -5,6 +5,7 @@ import {
   applySnapshot,
   boardColumns,
   boardLayout,
+  finishedTitle,
   BOARD_REFRESH_MS,
   clearNotice,
   handleKey,
@@ -18,7 +19,7 @@ import {
   rowCells,
   runBoardEffect,
   showNotice,
-  visibleRows,
+  visibleItems,
   withBusy,
   withLoadError,
   withSize,
@@ -55,11 +56,15 @@ function Cells(props: { cells: BoardCell[]; inverse?: boolean }): React.ReactEle
 function TaskList(props: { state: BoardState; width: number; capacity: number; icons: Parameters<typeof rowCells>[3] }): React.ReactElement {
   const { state } = props;
   const cols = boardColumns(props.width);
-  const visible = visibleRows(state, props.capacity);
+  const visible = visibleItems(state, props.capacity);
   const body =
-    state.rows.length === 0
-      ? [h(Text, { key: 'empty', dimColor: true }, state.refreshedAt === null ? 'Loading…' : 'No tasks. Start one with "agentctl new <spec>".')]
-      : visible.rows.map((row) => h(Cells, { key: row.task, cells: rowCells(row, row.task === state.selected, cols, props.icons) }));
+    visible.items.length === 0
+      ? [h(Text, { key: 'empty', dimColor: true }, state.refreshedAt === null ? 'Loading…' : state.rows.length === 0 ? 'No tasks. Start one with "agentctl new <spec>".' : 'No active tasks. z opens the finished ones.')]
+      : visible.items.map((item) =>
+          item.kind === 'finished'
+            ? h(Text, { key: 'finished', dimColor: true, wrap: 'truncate-end' }, `${item.expanded ? '▾' : '▸'} ${finishedTitle(item.count, item.expanded)}`)
+            : h(Cells, { key: item.row.task, cells: rowCells(item.row, item.row.task === state.selected, cols, props.icons) }),
+        );
   return h(Box, { flexDirection: 'column', width: props.width }, h(Cells, { cells: headerCells(cols) }), ...body);
 }
 
@@ -172,12 +177,14 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
   });
 
   const layout = boardLayout(state.width);
+  const active = state.rows.filter((r) => !r.finished && !r.hidden).length;
+  const hiddenCount = state.showHidden ? 0 : state.rows.filter((r) => r.hidden).length;
   const rowsForBody = Math.max(3, state.height - 4);
   const header = h(
     Box,
     { width: state.width },
     h(Text, { bold: true, wrap: 'truncate-end' }, 'agentctl board'),
-    h(Text, { dimColor: true, wrap: 'truncate-end' }, `  ${ctx.config.session} · ${state.rows.length} task${state.rows.length === 1 ? '' : 's'}${state.refreshedAt ? ` · ${state.refreshedAt}` : ''}`),
+    h(Text, { dimColor: true, wrap: 'truncate-end' }, `  ${ctx.config.session} · ${active} task${active === 1 ? '' : 's'}${hiddenCount > 0 ? ` · ${hiddenCount} hidden (a)` : ''}${state.refreshedAt ? ` · ${state.refreshedAt}` : ''}`),
   );
   const body =
     state.mode.kind === 'help'
