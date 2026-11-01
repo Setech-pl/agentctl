@@ -5,6 +5,8 @@ import { INSTALL_HINTS } from './agents.ts';
 import { PROJECT_CONFIG_NAME, loadGlobalConfig, loadProjectConfig } from './config.ts';
 import type { GlobalConfig } from './config.ts';
 import type { Runner } from './runner.ts';
+import { describeAllow, desktopConfigPath, readClaudeCodeRegistration, readDesktopRegistration, stableScript } from './mcp-install.ts';
+import type { McpRegistration } from './mcp-install.ts';
 import { findTerminalNotifier, notifierMemoryPath, readNotifierMemory } from './notify.ts';
 import { Tmux } from './tmux.ts';
 import { errorMessage } from './util.ts';
@@ -46,6 +48,8 @@ export async function runDoctor(
   cwd: string = process.cwd(),
   nodeVersion: string = process.versions.node,
   platform: string = os.platform(),
+  home: string = os.homedir(),
+  env: NodeJS.ProcessEnv = process.env,
 ): Promise<Check[]> {
   const checks: Check[] = [];
   const add = (name: string, status: Check['status'], detail: string): void => {
@@ -112,6 +116,19 @@ export async function runDoctor(
       } else add('notifications', 'ok', `terminal-notifier (${notifier}): a click on a notification switches to the task window`);
     }
   } else add('notifications', 'ok', 'notify-send (no click action)');
+
+  // The chat integration is optional: every line here is ok or a warning, never a failure.
+  const registrations: McpRegistration[] = [];
+  if (platform === 'darwin') registrations.push(readDesktopRegistration(desktopConfigPath(home), env, home));
+  const code = await readClaudeCodeRegistration(runner, env, home);
+  if (code) registrations.push(code);
+  for (const r of registrations) {
+    if (!r.registered) add(`mcp (${r.where})`, 'warn', `agentctl is not registered: ${r.detail}`);
+    else if (r.scriptExists === false) add(`mcp (${r.where})`, 'warn', `registered, but the script ${r.script} does not exist; run "agentctl mcp install" again`);
+    else if (r.stable === false) add(`mcp (${r.where})`, 'warn', `registered, but it runs ${r.script ?? 'an unknown script'}, not the stable copy ${stableScript(env, home)}; run "agentctl mcp install" from the stable copy`);
+    else add(`mcp (${r.where})`, 'ok', `registered${r.script ? `, runs ${r.script}` : ''}`);
+  }
+  if (config) add('mcp access', 'ok', describeAllow(config.mcp));
 
   if (config) {
     const cache = config.cache;

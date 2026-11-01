@@ -3,6 +3,7 @@ import { findClipboardTool, writeClipboard } from './clipboard.ts';
 import type { Context } from './context.ts';
 import { syncMirror } from './mirror.ts';
 import { collectStatus } from './status.ts';
+import type { StatusRow } from './status.ts';
 import { readTaskRecord, setHeaderField, taskFile } from './taskstore.ts';
 import { AgentctlError, windowName } from './util.ts';
 
@@ -75,22 +76,14 @@ export async function pullReady(ctx: Context, opts: { all?: boolean } = {}, plat
   const { config, runner } = ctx;
   const rows = await collectStatus(ctx);
   if (config.mirrorDir) await syncMirror(ctx, rows);
-  const chosen = rows.filter((r) => r.state === 'report-ready' && r.report === 'yes' && (opts.all || r.pulled === null));
+  const chosen = selectReady(rows, Boolean(opts.all));
   const empty: PullReadyResult = { pulled: [], totalBytes: 0, text: '', copied: false, warnedLarge: false };
   if (chosen.length === 0) {
-    const already = rows.filter((r) => r.state === 'report-ready' && r.pulled !== null).length;
-    ctx.out(already > 0 ? `No new reports (${already} already pulled; --all takes them again).` : 'No reports ready.');
+    ctx.out(noReadyMessage(rows));
     return empty;
   }
 
-  const sections: string[] = [];
-  const pulled: PulledReport[] = [];
-  for (const row of chosen) {
-    const body = fs.readFileSync(row.reportPath, 'utf8').trimEnd();
-    sections.push(`=== ${row.task} (${row.agent} ${row.model}/${row.effort}) ===\n${body}\n`);
-    pulled.push({ task: row.task, who: `${row.agent} ${row.model}/${row.effort}`, bytes: Buffer.byteLength(body) });
-  }
-  const text = sections.join('\n');
+  const { text, pulled } = joinReports(chosen);
   const totalBytes = Buffer.byteLength(text);
 
   const copy = await writeClipboard(runner, text, platform);
@@ -98,14 +91,42 @@ export async function pullReady(ctx: Context, opts: { all?: boolean } = {}, plat
     ctx.out(`${copy.error}; nothing was marked as pulled. Reports: ${chosen.map((r) => r.reportPath).join(', ')}`);
     return { pulled: [], totalBytes, text, copied: false, warnedLarge: false };
   }
-  const when = new Date(runner.now()).toISOString();
-  for (const row of chosen) await setHeaderField(runner, taskFile(config, row.task.toLowerCase()), 'pulled', when);
+  await markPulled(ctx, chosen);
 
   ctx.out(`Copied ${pulled.length} report${pulled.length === 1 ? '' : 's'} to the clipboard (${copy.tool}), ${formatBytes(totalBytes)}:`);
   for (const p of pulled) ctx.out(`  ${p.task}  ${p.who}  ${formatBytes(p.bytes)}`);
   const warnedLarge = totalBytes > PULL_WARN_BYTES;
   if (warnedLarge) ctx.out(`warning: ${formatBytes(totalBytes)} is more than ${PULL_WARN_BYTES / 1024} KB; the chat may not take it in one paste. Pull fewer reports or trim them.`);
   return { pulled, totalBytes, text, copied: true, warnedLarge };
+}
+
+/** The rows `pull --ready` takes: report-ready with a report file, not pulled yet (`all`: pulled ones too). A closed task is never in state report-ready. */
+export function selectReady(rows: StatusRow[], all: boolean): StatusRow[] {
+  return rows.filter((r) => r.state === 'report-ready' && r.report === 'yes' && (all || r.pulled === null));
+}
+
+/** "No new reports (2 already pulled; --all takes them again)." or "No reports ready." */
+export function noReadyMessage(rows: StatusRow[]): string {
+  const already = rows.filter((r) => r.state === 'report-ready' && r.pulled !== null).length;
+  return already > 0 ? `No new reports (${already} already pulled; --all takes them again).` : 'No reports ready.';
+}
+
+/** The reports one after another, each under "=== NC-1 (claude opus/high) ===". */
+export function joinReports(rows: StatusRow[]): { text: string; pulled: PulledReport[] } {
+  const sections: string[] = [];
+  const pulled: PulledReport[] = [];
+  for (const row of rows) {
+    const body = fs.readFileSync(row.reportPath, 'utf8').trimEnd();
+    sections.push(`=== ${row.task} (${row.agent} ${row.model}/${row.effort}) ===\n${body}\n`);
+    pulled.push({ task: row.task, who: `${row.agent} ${row.model}/${row.effort}`, bytes: Buffer.byteLength(body) });
+  }
+  return { text: sections.join('\n'), pulled };
+}
+
+/** Write the pull time into TASK.md of each task: `pull --ready` does not hand the report over again. */
+export async function markPulled(ctx: Context, rows: StatusRow[]): Promise<void> {
+  const when = new Date(ctx.runner.now()).toISOString();
+  for (const row of rows) await setHeaderField(ctx.runner, taskFile(ctx.config, row.task.toLowerCase()), 'pulled', when);
 }
 
 export function formatBytes(n: number): string {
