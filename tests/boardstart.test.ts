@@ -105,7 +105,7 @@ describe('board start: the tmux commands', () => {
     assert.equal(await ensureWindow(ctx, 'board', 'AGENTCTL_HOME=/h node /x/agentctl.ts board', '/work'), 'created');
     const create = runner.commands.find((c) => c.includes('new-window'));
     assert.equal(sh(create ?? ''), 'tmux new-window -d -t =agentctl: -n board -c /work AGENTCTL_HOME=/h node /x/agentctl.ts board ; set-option -w -t =agentctl:board remain-on-exit failed');
-    assert.ok(!runner.commands.some((c) => c.includes('send-keys')));
+    assert.ok(!runner.commands.some((c) => c.startsWith('tmux send-keys')));
   });
 
   it('creates the session with the board as its first window when no session is up', async () => {

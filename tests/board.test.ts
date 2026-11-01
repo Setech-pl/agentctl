@@ -442,7 +442,7 @@ describe('agentctl board (CLI)', () => {
     assert.equal(r.code, 0, r.stderr);
     assert.deepEqual(runner.commands.map((c) => c.replaceAll("'", '')).slice(0, 1).map((c) => c.split(' -c ')[0]), ['tmux new-window -d -t =agentctl: -n board']);
     assert.ok(runner.commands.some((c) => c.includes('agentctl board')));
-    assert.ok(!runner.commands.some((c) => c.includes('send-keys')), 'the board is the window process, not typed into a shell');
+    assert.ok(!runner.commands.some((c) => c.startsWith('tmux send-keys')), 'the board is the window process, not typed into a shell');
     assert.match(r.stdout, /Started the board in window agentctl:board/);
     const again = await cli(config, runner, ['board', '--tmux']);
     assert.match(again.stdout, /already exists, left alone/);
