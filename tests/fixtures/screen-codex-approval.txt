@@ -1,0 +1,12 @@
+• I’ll create the file with the requested text.
+• Running printf 'yes' > approved-by-codex3.txt
+  Would you like to run the following command?
+  Environment: local
+  Reason: Allow creating approved-by-codex3.txt containing yes in this
+  read-only workspace?
+  $ printf 'yes' > approved-by-codex3.txt
+› 1. Yes, proceed (y)
+  2. Yes, and don't ask again for commands that start with `printf 'yes' >
+     approved-by-codex3.txt` (p)
+  3. No, and tell Codex what to do differently (esc)
+  Press enter to confirm or esc to cancel

@@ -43,17 +43,28 @@ export interface Runner {
   note(message: string): void;
 }
 
+/**
+ * The environment for a tmux command. tmux prints control characters (the tab in `-F '#{window_id}\t#{window_name}'`) and
+ * non-ASCII window names as "_" unless a locale variable says UTF-8, and a notification click or a hook runs without any.
+ */
+export function tmuxEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const locale = env.LC_ALL || env.LC_CTYPE || env.LANG || '';
+  return /utf-?8/i.test(locale) ? env : { ...env, LC_ALL: 'en_US.UTF-8' };
+}
+
 export class RealRunner implements Runner {
   readonly dryRun = false;
 
   async exec(cmd: string, args: string[], opts: ExecOptions = {}): Promise<ExecResult> {
+    const env = cmd === 'tmux' ? tmuxEnv(process.env) : process.env;
     if (opts.interactive) {
-      const r = spawnSync(cmd, args, { cwd: opts.cwd, stdio: 'inherit' });
+      const r = spawnSync(cmd, args, { cwd: opts.cwd, stdio: 'inherit', env });
       if (r.error) return { code: (r.error as NodeJS.ErrnoException).code === 'ENOENT' ? 127 : 1, stdout: '', stderr: r.error.message };
       return { code: r.status ?? 1, stdout: '', stderr: '' };
     }
     const r = spawnSync(cmd, args, {
       cwd: opts.cwd,
+      env,
       input: opts.input,
       encoding: 'utf8',
       timeout: opts.timeoutMs ?? 30_000,

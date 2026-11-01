@@ -114,12 +114,13 @@ function selfCommand(args: string): string {
 }
 
 /**
- * This very agentctl as an argv: absolute node and script paths (a hook or a notification click has no useful PATH) and the
- * settings of this run that the callback needs (config directory, tmux socket directory), set through env(1).
+ * This very agentctl as an argv: absolute node and script paths and the settings of this run that the callback needs (config
+ * directory, tmux socket directory, PATH), set through env(1). A click on a notification runs with a bare PATH (/usr/bin:/bin),
+ * where tmux, installed by Homebrew, is not found.
  */
 export function selfArgv(): SelfArgv {
   const script = fs.realpathSync(process.argv[1] ?? 'bin/agentctl.ts');
-  const env = (['AGENTCTL_HOME', 'TMUX_TMPDIR'] as const).filter((k) => process.env[k]).map((k) => `${k}=${process.env[k]}`);
+  const env = (['AGENTCTL_HOME', 'TMUX_TMPDIR', 'PATH'] as const).filter((k) => process.env[k]).map((k) => `${k}=${process.env[k]}`);
   return [...(env.length > 0 ? ['/usr/bin/env', ...env] : []), process.execPath, '--experimental-strip-types', '--no-warnings', script];
 }
 

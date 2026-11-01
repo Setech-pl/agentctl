@@ -107,7 +107,8 @@ export async function moveTask(ctx: Context, taskArg: string, opts: MoveOptions 
     model: plan.to.model,
     effort: plan.to.effort,
     repos: from.repos,
-    links: from.links,
+    // The symlinks are in the worktree already (and their targets may be gone by now): nothing is linked again.
+    links: [],
     setup: [],
     env: from.env,
     ...(from.reviewOf ? { reviewOf: from.reviewOf } : {}),
