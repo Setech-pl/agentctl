@@ -9,7 +9,7 @@ import { planBatch } from './plan.ts';
 import type { PlanOptions } from './plan.ts';
 import { waitForReady } from './ready.ts';
 import type { ResolvedSpec } from './spec.ts';
-import { recordFromSpec, renderTaskMd, taskDir, taskFile } from './taskstore.ts';
+import { recordFromSpec, renderTaskMd, setHeaderField, taskDir, taskFile } from './taskstore.ts';
 import { AgentctlError } from './util.ts';
 
 export interface NewOptions extends PlanOptions {
@@ -130,6 +130,9 @@ export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: Ne
     }
     const settings = config.agents[spec.agent];
     const commandLine = agentCommandLine(buildAgentArgv(spec, settings));
+    // tmux's own ID of the window: operations keep finding it when `watch` puts a state icon in front of its name.
+    const windowId = (await tmux.windows()).find((w) => w.plain === spec.window)?.id;
+    if (windowId) await setHeaderField(runner, taskFile(config, spec.window), 'window_id', windowId);
     await tmux.typeCommand(spec.window, commandLine);
     ctx.info(`${spec.task}: window ${config.session}:${spec.window} running ${commandLine}`);
 

@@ -16,6 +16,7 @@ import type { RecordingOptions } from '../src/core/runner.ts';
 import type { ExecOptions, ExecResult } from '../src/core/runner.ts';
 import { resolveSpec, splitSpecs } from '../src/core/spec.ts';
 import type { ResolvedSpec } from '../src/core/spec.ts';
+import { DEFAULT_WINDOW_ICONS } from '../src/core/icons.ts';
 import { collectStatus, statusMarkdown } from '../src/core/status.ts';
 import { readTaskRecord, recordFromSpec, renderTaskMd, taskFile } from '../src/core/taskstore.ts';
 import { ensureWatchWindow, runWatch, WatchMemory, watchLogPath, watchTick } from '../src/core/watch.ts';
@@ -339,8 +340,8 @@ describe('watch', () => {
 
   it('config: defaults 15 s / 120 s, overridable, validated', () => {
     const root = scratch.sub('watchcfg');
-    assert.deepEqual(makeConfig(root).watch, { interval: 15, waitingAfter: 120 });
-    assert.deepEqual(makeConfig(root, 'watch: {interval: 5, waiting_after: 30}\n').watch, { interval: 5, waitingAfter: 30 });
+    assert.deepEqual(makeConfig(root).watch, { interval: 15, waitingAfter: 120, windowIcons: DEFAULT_WINDOW_ICONS });
+    assert.deepEqual(makeConfig(root, 'watch: {interval: 5, waiting_after: 30}\n').watch, { interval: 5, waitingAfter: 30, windowIcons: DEFAULT_WINDOW_ICONS });
     assert.throws(() => makeConfig(root, 'watch: {interval: 0}\n'), /watch.interval must be a positive number/);
     assert.throws(() => makeConfig(root, 'watch: {every: 3}\n'), /unknown key "every"/);
   });

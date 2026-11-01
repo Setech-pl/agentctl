@@ -47,7 +47,7 @@ export interface CliDeps {
   insideTmux?: boolean;
   /** Pick one of several tasks on the terminal; absent when there is no terminal to ask on. */
   choose?: (targets: TaskTarget[]) => Promise<TaskTarget | undefined>;
-  /** A signal that fires on Ctrl-C while a long wait runs; `dispose` restores the default Ctrl-C. Absent: no interrupt handling. */
+  /** A signal that fires on Ctrl-C (or SIGTERM/SIGHUP) while a long wait runs; `dispose` restores the default Ctrl-C. Absent: no interrupt handling. */
   interruptSignal?: () => { signal: AbortSignal; dispose: () => void };
 }
 
@@ -70,9 +70,11 @@ export function defaultDeps(): CliDeps {
     makeRunner: (dryRun, emit) => (dryRun ? new RecordingRunner({ emit }) : new RealRunner()),
     interruptSignal: () => {
       const controller = new AbortController();
-      const onSigint = (): void => controller.abort();
-      process.once('SIGINT', onSigint);
-      return { signal: controller.signal, dispose: () => void process.off('SIGINT', onSigint) };
+      const onStop = (): void => controller.abort();
+      // SIGTERM and SIGHUP: tmux kills the window, or the terminal goes away; the watcher still puts the window names back.
+      const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const;
+      for (const signal of signals) process.once(signal, onStop);
+      return { signal: controller.signal, dispose: () => void signals.forEach((signal) => process.off(signal, onStop)) };
     },
   };
 }

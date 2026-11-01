@@ -26,6 +26,9 @@ export interface StatusRow {
   switchedBy: 'flag' | 'limit' | null;
   state: TaskState;
   window: 'alive' | 'gone';
+  /** The tmux window name of the task without any state icon, and tmux's ID of the window while it exists. */
+  windowName: string;
+  windowId: string | null;
   /** UTC, `YYYY-MM-DD HH:MM` (unchanged; this is what `status --json` and the mirror carry). */
   started: string;
   /** The same moment in local time, for the table. */
@@ -56,7 +59,8 @@ export interface CollectOptions {
 
 export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Promise<StatusRow[]> {
   const { runner, tmux, config } = ctx;
-  const live = new Set(await tmux.listWindows());
+  const infos = await tmux.windows();
+  const live = new Set(infos.map((w) => w.plain));
   const rows: StatusRow[] = [];
   const knownWindows = new Set<string>();
   for (const record of listTaskRecords(config)) {
@@ -78,7 +82,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     }
     let screenText = '';
     if (alive) {
-      const screen = await tmux.capture(record.window);
+      const screen = await tmux.capture(record.window, undefined, infos, record.windowId);
       if (screen.code === 0) screenText = screen.stdout;
     }
     const screenAgent = record.agent === 'unknown' ? guessAgent(screenText) : record.agent;
@@ -93,6 +97,8 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       switchedBy: record.switchedBy ?? null,
       state: taskState({ alive, screen: screenText, settings, reportReady }),
       window: alive ? 'alive' : 'gone',
+      windowName: record.window,
+      windowId: alive ? (tmux.resolve(record.window, infos, record.windowId)?.id || null) : null,
       started: record.started ? record.started.replace('T', ' ').slice(0, 16) : '-',
       startedLocal: formatLocalTime(record.started),
       duration,
@@ -107,7 +113,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
   // Windows of the session that agentctl has no state file for: never skipped silently.
   for (const window of [...live].sort()) {
     if (window === WATCH_WINDOW || window === BOARD_WINDOW || knownWindows.has(window)) continue;
-    const screen = await tmux.capture(window);
+    const screen = await tmux.capture(window, undefined, infos);
     const screenText = screen.code === 0 ? screen.stdout : '';
     const agent = guessAgent(screenText);
     const task = window.toUpperCase();
@@ -121,6 +127,8 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       switchedBy: null,
       state: 'orphan',
       window: 'alive',
+      windowName: window,
+      windowId: tmux.resolve(window, infos)?.id || null,
       started: '-',
       startedLocal: '-',
       duration: '-',

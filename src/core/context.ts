@@ -1,5 +1,7 @@
 import type { GlobalConfig } from './config.ts';
 import type { Runner } from './runner.ts';
+import { knownIcons } from './icons.ts';
+import { readTaskRecord } from './taskstore.ts';
 import { Tmux } from './tmux.ts';
 
 /** Everything a command needs: where side effects go, the config, and where to print. */
@@ -15,7 +17,10 @@ export class Context {
     this.confirm = confirm;
     this.runner = runner;
     this.config = config;
-    this.tmux = new Tmux(runner, config.session);
+    this.tmux = new Tmux(runner, config.session, {
+      icons: knownIcons(config.watch.windowIcons),
+      idFor: (window) => readTaskRecord(config, window)?.windowId,
+    });
     this.sink = out;
   }
 

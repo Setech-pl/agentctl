@@ -36,7 +36,8 @@ export interface Runner {
   copyFile(src: string, dest: string): Promise<void>;
   /** Create `linkPath` pointing at `target`, replacing an existing symlink. */
   symlink(target: string, linkPath: string): Promise<void>;
-  sleep(ms: number): Promise<void>;
+  /** Wait `ms`; aborting `signal` ends the wait early. */
+  sleep(ms: number, signal?: AbortSignal): Promise<void>;
   now(): number;
   /** Explanatory line for dry-run output; ignored by the real runner. */
   note(message: string): void;
@@ -94,8 +95,17 @@ export class RealRunner implements Runner {
     fs.symlinkSync(target, linkPath);
   }
 
-  sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+  sleep(ms: number, signal?: AbortSignal): Promise<void> {
+    return new Promise((resolve) => {
+      if (signal?.aborted) return resolve();
+      const done = (): void => {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', done);
+        resolve();
+      };
+      const timer = setTimeout(done, ms);
+      signal?.addEventListener('abort', done, { once: true });
+    });
   }
 
   now(): number {
