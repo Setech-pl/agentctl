@@ -42,14 +42,16 @@ export function statusRightFormat(command: string): string | undefined {
   return `#(${command.replace(/#/g, '##').replace(/%/g, '%%')})`;
 }
 
-export type StatusLineResult = 'set' | 'no-session' | 'unsupported-command';
+export type StatusLineResult = 'set' | 'no-session' | 'unsupported-command' | { failed: string };
 
 /** Show the line in the status bar of the agentctl session only (session options, never `-g`). */
 export async function applyStatusLine(ctx: Context, command: string): Promise<StatusLineResult> {
   const format = statusRightFormat(command);
   if (!format) return 'unsupported-command';
   if (!(await ctx.tmux.hasSession())) return 'no-session';
-  await ctx.tmux.setSessionOption('status-right', format);
-  await ctx.tmux.setSessionOption('status-interval', String(STATUS_INTERVAL));
+  for (const [option, value] of [['status-right', format], ['status-interval', String(STATUS_INTERVAL)]] as const) {
+    const r = await ctx.tmux.setSessionOption(option, value);
+    if (r.code !== 0) return { failed: `tmux set-option ${option}: ${r.stderr.trim() || `exit ${r.code}`}` };
+  }
   return 'set';
 }

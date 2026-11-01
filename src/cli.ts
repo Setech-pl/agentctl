@@ -303,7 +303,8 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
           else line(`Started the watcher in window ${ctx.config.session}:${WATCH_WINDOW}${result === 'session-created' ? ' (session created)' : ''}. Attach: tmux attach -t ${ctx.config.session}`);
           if (opts.statusLine !== false && ctx.config.watch.statusLine) {
             const shown = await applyStatusLine(ctx, deps.statusLineCommand?.() ?? 'agentctl status --tmux-line');
-            if (shown === 'set') line(`Status bar of session ${ctx.config.session}: task counts, refreshed every 10 s (this session only; undo: tmux set-option -u -t ${ctx.config.session} status-right).`);
+            if (shown === 'set') line(`Status bar of session ${ctx.config.session}: task counts, refreshed every 10 s (this session only; undo: tmux set-option -u -t ${ctx.config.session}: status-right).`);
+            else if (typeof shown === 'object') line(`Status bar not set – ${shown.failed}`);
             else line(`Status bar left alone (${shown === 'no-session' ? 'the session is not running' : 'the command contains unbalanced parentheses'}).`);
           }
           return;
