@@ -11,6 +11,8 @@ import { Alerts } from './core/alert.ts';
 import { archiveClosed, parseAge } from './core/archive.ts';
 import { appendStartLog, describeTerminal, loggedRun, startLogPath, waitForSize } from './core/boardstart.ts';
 import { setHidden } from './core/hide.ts';
+import { installClaudeCode, installDesktop, desktopConfigPath, mcpEntryFrom, pointsAtStable, stableScript, uninstallClaudeCode, uninstallDesktop } from './core/mcp-install.ts';
+import type { McpDeps } from './core/mcp-tools.ts';
 import { applyNavigation, describeNavigation } from './core/navigation.ts';
 import { handleEvent } from './core/event-command.ts';
 import { CLAUDE_KINDS, parseJson } from './core/events.ts';
@@ -57,6 +59,8 @@ export interface CliDeps {
   boardCommand?: () => string;
   /** Run the full-screen board in this terminal until the user quits. */
   runBoard?: (ctx: Context, insideTmux: boolean, self?: SelfArgv) => Promise<void>;
+  /** Serve the MCP tools on stdio until the client goes away; the default loads the SDK. */
+  runMcp?: (tools: McpDeps, version: string) => Promise<void>;
   /** A board that ends sooner than this after its start (ms) is reported as a failure; default MIN_BOARD_LIFETIME_MS. */
   minBoardLifetimeMs?: number;
   /** This very agentctl as a command line (absolute node and script, config directory of this run): what the agents and notifications call back. */
@@ -580,6 +584,80 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         for (const l of result.lines) line(l);
       }),
     );
+
+  const mcp = program
+    .command('mcp')
+    .description('Local MCP server on stdio: lets a chat (the Claude app, Claude Code, VS Code) read status, window previews and reports. "mcp install" registers it; writing is off until mcp.allow says otherwise.');
+
+  mcp
+    .command('serve', { isDefault: true })
+    .description('Serve the tools on stdin/stdout (this is what the app or Claude Code starts). Nothing else is ever printed to stdout.')
+    .action(
+      guarded(async () => {
+        // stdout belongs to the protocol: messages go to stderr, and the state is not migrated (that prints).
+        const contextAt = (out: (line: string) => void): Context => new Context(deps.makeRunner(false, () => {}), deps.loadConfig(), out);
+        const tools: McpDeps = {
+          context: contextAt,
+          notify: async (message) => {
+            const ctx = contextAt(() => {});
+            await (await makeNotifier(ctx)).notify('agentctl', message);
+          },
+          self: deps.selfArgv?.(),
+        };
+        const run =
+          deps.runMcp ??
+          (async (t: McpDeps, version: string): Promise<void> => {
+            const { runMcpServer } = await import('./mcp/server.ts');
+            await runMcpServer(t, version);
+          });
+        await run(tools, packageVersion());
+      }),
+    );
+
+  for (const install of [true, false]) {
+    mcp
+      .command(install ? 'install' : 'uninstall')
+      .description(
+        install
+          ? 'Register this agentctl as an MCP server: --desktop edits claude_desktop_config.json (diff, y/N, dated .bak copy, other servers kept), --claude-code runs "claude mcp add --scope user".'
+          : 'Remove the agentctl MCP server from the Claude desktop config and/or Claude Code (without a flag: both).',
+      )
+      .option('--desktop', 'the Claude desktop app')
+      .option('--claude-code', 'Claude Code (user scope; the VS Code extension reads the same configuration)')
+      .option('--config <file>', 'with --desktop: use this file instead of ~/Library/Application Support/Claude/claude_desktop_config.json (to try it on a copy)')
+      .option('--dry-run', 'show the entry, the diff and the commands; change nothing')
+      .option('-y, --yes', 'do not ask')
+      .action(
+        guarded(async (opts: { desktop?: boolean; claudeCode?: boolean; config?: string; dryRun?: boolean; yes?: boolean }) => {
+          if (install && !opts.desktop && !opts.claudeCode) throw new AgentctlError('say where: --desktop and/or --claude-code', 'Example: agentctl mcp install --desktop --dry-run');
+          const ctx = contextFor(Boolean(opts.dryRun), { migrate: false });
+          const yes = Boolean(opts.yes) || Boolean(opts.dryRun);
+          const file = opts.config ? resolvePath(opts.config) : desktopConfigPath();
+          const both = !opts.desktop && !opts.claudeCode;
+          const warnings: string[] = [];
+          let entry: ReturnType<typeof mcpEntryFrom> | undefined;
+          if (install) {
+            const self = deps.selfArgv?.();
+            if (!self) throw new AgentctlError('cannot tell which agentctl this is');
+            entry = mcpEntryFrom(self);
+            if (!pointsAtStable(entry)) warnings.push(`this agentctl runs ${entry.args.find((a) => /\.ts$/.test(a)) ?? 'from somewhere else'}, not the stable copy ${stableScript()}; run the installed command ("agentctl mcp install …") if the registration should survive development`);
+          }
+          if (opts.desktop || (!install && both)) {
+            const result = entry ? await installDesktop(ctx, entry, { file, yes, warnings }) : await uninstallDesktop(ctx, { file, yes });
+            if (result.outcome === 'declined') return;
+          }
+          if (opts.claudeCode || (!install && both)) {
+            try {
+              if (entry) await installClaudeCode(ctx, entry, { yes, warnings });
+              else await uninstallClaudeCode(ctx, { yes });
+            } catch (e) {
+              if (install || opts.claudeCode) throw e;
+              line(`Claude Code: ${errorMessage(e)}`);
+            }
+          }
+        }),
+      );
+  }
 
   program
     .command('doctor')
