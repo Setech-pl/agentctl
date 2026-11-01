@@ -568,11 +568,11 @@ describe('status --clip', () => {
     await pullReady(ctx, {}, 'darwin'); // marks NC-1
     const rows = await collectStatus(ctx);
     assert.equal(statusMarkdown(rows), [
-      '| task | agent/model/effort | state | time | report | pulled? |',
-      '|---|---|---|---|---|---|',
-      `| NC-1 | claude/opus/high | report-ready | 1h 02m | yes | yes (${formatLocalTime(new Date(runner.now()).toISOString())}) |`,
-      '| NC-2 | codex/gpt-6/high | working | 1m 10s | missing | - |',
-      '| NC-3 | claude/opus/high | dead | - | missing | - |',
+      '| task | agent/model/effort | state | time | progress | report | pulled? |',
+      '|---|---|---|---|---|---|---|',
+      `| NC-1 | claude/opus/high | report-ready | 1h 02m | ?c 0f | yes | yes (${formatLocalTime(new Date(runner.now()).toISOString())}) |`,
+      '| NC-2 | codex/gpt-6/high | working | 1m 10s | ?c 0f | missing | - |',
+      '| NC-3 | claude/opus/high | dead | - | ?c 0f | missing | - |',
       '',
     ].join('\n'));
 
@@ -583,7 +583,7 @@ describe('status --clip', () => {
     };
     m.copied.length = 0;
     assert.equal(await main(['status', '--clip'], deps), 0);
-    assert.match(m.copied[0] as string, /^\| task \| agent\/model\/effort \| state \| time \| report \| pulled\? \|\n/);
+    assert.match(m.copied[0] as string, /^\| task \| agent\/model\/effort \| state \| time \| progress \| report \| pulled\? \|\n/);
     assert.match(out.join(''), /Copied the status of 3 tasks to the clipboard \(pbcopy\)/);
   });
 });

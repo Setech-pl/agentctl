@@ -304,8 +304,8 @@ describe('status', () => {
       ],
     );
     const table = renderStatusTable(rows);
-    assert.match(table[0] as string, /^TASK\s+AGENT\/MODEL\/EFFORT\s+STATE\s+WINDOW\s+STARTED\s+DURATION\s+REPORT\s+LAST LINE$/);
-    assert.match(table[1] as string, new RegExp(`^NC-1\\s+claude/opus/high\\s+waiting\\s+alive\\s+${formatLocalTime('2026-10-31T10:00:00.000Z')}\\s+2h 05m\\s+missing\\s+Reading src/a\\.ts$`));
+    assert.match(table[0] as string, /^TASK\s+AGENT\/MODEL\/EFFORT\s+STATE\s+WINDOW\s+STARTED\s+DURATION\s+PROGRESS\s+REPORT\s+LAST LINE$/);
+    assert.match(table[1] as string, new RegExp(`^NC-1\\s+claude/opus/high\\s+waiting\\s+alive\\s+${formatLocalTime('2026-10-31T10:00:00.000Z')}\\s+2h 05m\\s+\\?c 0f\\s+missing\\s+Reading src/a\\.ts$`));
     assert.equal(table.length, 3);
   });
 });

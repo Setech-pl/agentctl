@@ -76,7 +76,7 @@ const logLine = (nowMs: number, e: WatchEvent): string => {
 
 /** One poll: collect states, detect transitions, notify and log. Returns the events. */
 export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Notifier): Promise<WatchEvent[]> {
-  const rows = await collectStatus(ctx);
+  const rows = await collectStatus(ctx, { progress: false });
   const now = ctx.runner.now();
   const events = detectTransitions(memory, rows, now, ctx.config.watch.waitingAfter * 1000);
   for (const e of events) {
