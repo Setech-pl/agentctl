@@ -16,7 +16,7 @@ import { sendPrompts } from './send.ts';
 import type { TaskState } from './state.ts';
 import { collectStatus } from './status.ts';
 import type { StatusRow } from './status.ts';
-import { listTaskRecords } from './taskstore.ts';
+import { listArchivedRecords, listTaskRecords } from './taskstore.ts';
 import { errorMessage } from './util.ts';
 
 /*
@@ -90,8 +90,7 @@ export type BoardEffect =
   | { type: 'interrupt'; task: string }
   | { type: 'pull'; task: string }
   | { type: 'pull-ready' }
-  /** `hide`: a finished task is also taken off the list afterwards (the user closed it on purpose). */
-  | { type: 'close'; task: string; rmWorktree: boolean; hide?: boolean }
+  | { type: 'close'; task: string; rmWorktree: boolean }
   | { type: 'hide'; task: string; hidden: boolean }
   | { type: 'move'; task: string }
   /** The selection moved: load the preview of the new one now instead of at the next refresh. */
@@ -118,17 +117,22 @@ export interface KeyResult {
 
 /** Tasks that still have a window, in the order of the status table; hidden ones only with the `a` key. */
 export function activeRows(state: BoardState): BoardRow[] {
-  return state.rows.filter((r) => !r.finished && (state.showHidden || !r.hidden));
+  return state.rows.filter((r) => !r.closed && !r.finished && (state.showHidden || !r.hidden));
 }
 
-/** Tasks without a window (or moved to the other provider): the "Finished" section. */
+/** Tasks without a window (or moved to the other provider) that were not closed: the "Finished" section. */
 export function finishedRows(state: BoardState): BoardRow[] {
-  return state.rows.filter((r) => r.finished && (state.showHidden || !r.hidden));
+  return state.rows.filter((r) => !r.closed && r.finished && (state.showHidden || !r.hidden));
 }
 
-/** The rows the cursor can stand on: the active ones, then the finished ones while that section is open. */
+/** Tasks closed with `agentctl close` (or archived): their own section, only while the `a` key lists hidden tasks. */
+export function closedRows(state: BoardState): BoardRow[] {
+  return state.showHidden ? state.rows.filter((r) => r.closed) : [];
+}
+
+/** The rows the cursor can stand on: the active ones, the finished ones while that section is open, then the closed ones. */
 export function displayRows(state: BoardState): BoardRow[] {
-  return state.showFinished ? [...activeRows(state), ...finishedRows(state)] : activeRows(state);
+  return [...activeRows(state), ...(state.showFinished ? finishedRows(state) : []), ...closedRows(state)];
 }
 
 export function selectedIndex(state: BoardState): number {
@@ -186,10 +190,11 @@ function listKey(state: BoardState, input: string, key: KeyPress): KeyResult {
   if (!row) return stay(withNotice(state, 'error', 'No task selected.'));
 
   if (input === 'c') return stay(withNotice(state, 'info', `${row.task}: copying the report…`), [{ type: 'pull', task: row.task }]);
+  if (row.closed && (input === 'x' || input === 'h' || input === 'm' || input === 'M' || input === 'i')) return stay(withNotice(state, 'error', `${row.task} is closed${row.archived ? ' and archived' : ''}; only c (copy the report) works on it.`));
   if (input === 'x') return stay({ ...state, notice: null, mode: { kind: 'confirm', action: 'close', task: row.task } });
   if (input === 'h') return stay(withNotice(state, 'info', row.hidden ? `${row.task}: showing it again…` : `${row.task}: hiding it (a lists hidden tasks)…`), [{ type: 'hide', task: row.task, hidden: !row.hidden }]);
   // A task without a window cannot be switched to: Enter offers what still makes sense.
-  if (key.return && row.finished) return stay({ ...state, notice: null, mode: { kind: 'finished', task: row.task } });
+  if (key.return && (row.finished || row.closed)) return stay({ ...state, notice: null, mode: { kind: 'finished', task: row.task } });
   if (input === 'M') {
     if (row.state === 'superseded') return stay(withNotice(state, 'error', `${row.task} was already moved.`));
     if (row.pin) return stay(withNotice(state, 'error', `${row.task} is pinned (pin: true): it is never moved to the other provider.`));
@@ -207,6 +212,7 @@ function finishedKey(state: BoardState, mode: Extract<BoardMode, { kind: 'finish
   if (key.escape || (key.ctrl && input === 'c')) return { state: toList(state), effects: [] };
   if (!row) return { state: withNotice(toList(state), 'error', `${mode.task} is gone.`), effects: [] };
   if (input === 'c') return { state: withNotice(toList(state), 'info', `${row.task}: copying the report…`), effects: [{ type: 'pull', task: row.task }] };
+  if (row.closed && input !== 'c') return { state, effects: [] };
   if (input === 'x') return { state: { ...state, mode: { kind: 'confirm', action: 'close', task: row.task } }, effects: [] };
   if (input === 'h') return { state: withNotice(toList(state), 'info', `${row.task}: hiding it (a lists hidden tasks)…`), effects: [{ type: 'hide', task: row.task, hidden: true }] };
   if (input === 'o' && isAlive(row)) return { state: toList(state), effects: [{ type: 'switch', task: row.task, window: row.windowName }] };
@@ -241,12 +247,11 @@ function confirmKey(state: BoardState, mode: Extract<BoardMode, { kind: 'confirm
     if (!yes) return cancel();
     const row = state.rows.find((r) => r.task === mode.task);
     if (row && row.worktrees.length > 0) return { state: { ...state, mode: { kind: 'confirm', action: 'close-worktree', task: mode.task } }, effects: [] };
-    return { state: withNotice(toList(state), 'info', `${mode.task}: closing…`), effects: [{ type: 'close', task: mode.task, rmWorktree: false, ...(row?.finished ? { hide: true } : {}) }] };
+    return { state: withNotice(toList(state), 'info', `${mode.task}: closing…`), effects: [{ type: 'close', task: mode.task, rmWorktree: false }] };
   }
   // close-worktree: y removes the worktrees, n (or Enter) only closes the window, Esc cancels it all.
   if (key.escape) return cancel();
-  const finished = state.rows.find((r) => r.task === mode.task)?.finished === true;
-  return { state: withNotice(toList(state), 'info', `${mode.task}: closing…`), effects: [{ type: 'close', task: mode.task, rmWorktree: yes, ...(finished ? { hide: true } : {}) }] };
+  return { state: withNotice(toList(state), 'info', `${mode.task}: closing…`), effects: [{ type: 'close', task: mode.task, rmWorktree: yes }] };
 }
 
 /** What a key press does: the new state and the effects for the front to run. Pure. */
@@ -309,8 +314,8 @@ const clock = (ms: number): string => {
 /** One refresh from the core: the rows (with cached progress) and the preview of the selected task. */
 export async function loadBoard(ctx: Context, selected: string | null, cache: ProgressCache, previewLines: number = PREVIEW_LINES): Promise<BoardSnapshot> {
   const { runner, config } = ctx;
-  const statusRows = await collectStatus(ctx, { progress: false });
-  const records = new Map(listTaskRecords(config).map((r) => [r.task, r]));
+  const statusRows = await collectStatus(ctx, { progress: false, archived: true });
+  const records = new Map([...listArchivedRecords(config), ...listTaskRecords(config)].map((r) => [r.task, r]));
   const now = runner.now();
   const rows: BoardRow[] = [];
   for (const row of statusRows) {
@@ -319,11 +324,13 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
     const worktrees = (record?.repos ?? []).filter((r) => path.resolve(r.worktree) !== path.resolve(r.path)).map((r) => r.worktree);
     rows.push({ ...row, progress, worktrees });
   }
-  const target = rows.find((r) => r.task === selected) ?? rows[0];
+  // The selected task; else the first one the list shows (not a hidden, closed or finished one).
+  const target = rows.find((r) => r.task === selected) ?? rows.find((r) => !r.hidden && !r.finished) ?? rows.find((r) => !r.hidden) ?? rows[0];
   let preview: Preview | null = null;
   if (target) {
     let lines: string[];
-    if (!isAlive(target)) lines = [`(finished: no tmux window${target.report === 'yes' ? `; the report is ${target.pulled ? 'pulled' : 'ready: c copies it'}` : '; no report was written'})`];
+    if (target.closed) lines = [`(closed${target.closedAt ? ` ${target.closedAt.slice(0, 16).replace('T', ' ')} UTC` : ''}${target.archived ? ', archived' : ''}; the report ${target.report === 'yes' ? 'is still there: c copies it' : 'was never written'})`];
+    else if (!isAlive(target)) lines = [`(finished: no tmux window${target.report === 'yes' ? `; the report is ${target.pulled ? 'pulled' : 'ready: c copies it'}` : '; no report was written'})`];
     else {
       try {
         lines = await peekWindow(ctx, target.windowName, previewLines);
@@ -374,10 +381,6 @@ export async function runBoardEffect(runner: Runner, config: GlobalConfig, effec
       }
       case 'close':
         await closeTask(ctx, effect.task, { rmWorktree: effect.rmWorktree });
-        if (effect.hide) {
-          await setHidden(ctx, [effect.task], true);
-          lines.push('taken off the list (a shows hidden tasks)');
-        }
         return { level: 'info', text: lines.length > 0 ? lines.join('; ') : `${effect.task}: closed` };
       case 'hide':
         await setHidden(ctx, [effect.task], effect.hidden);
@@ -442,6 +445,7 @@ const STATE_COLOR: Record<TaskState, string> = {
   superseded: 'gray',
   orphan: 'red',
   dead: 'red',
+  closed: 'gray',
 };
 
 export function headerCells(cols: BoardColumns): BoardCell[] {
@@ -477,27 +481,39 @@ export function rowCells(row: StatusRow, selected: boolean, cols: BoardColumns, 
   return quiet ? cells.map((c) => (c.key === 'marker' ? c : { ...c, dim: true, ...(c.color ? { color: 'gray' } : {}) })) : cells;
 }
 
-export type ListItem = { kind: 'row'; row: BoardRow } | { kind: 'finished'; count: number; expanded: boolean };
+export type ListItem = { kind: 'row'; row: BoardRow } | { kind: 'finished'; count: number; expanded: boolean } | { kind: 'closed'; count: number };
 
 /** `Finished (3)` title that stands between the active and the finished rows (or under the active ones while the section is closed). */
 export function finishedTitle(count: number, expanded: boolean): string {
   return expanded ? `Finished (${count}) – z closes` : `Finished (${count}) – z opens`;
 }
 
-/** What the list shows in `capacity` lines: the rows that fit (scrolled to the selection) with the "Finished" title in its place. */
+/** Title of the section of tasks closed with `agentctl close` (shown while `a` lists hidden tasks). */
+export function closedTitle(count: number): string {
+  return `Closed (${count}) – off the list; \`agentctl archive\` moves their state away`;
+}
+
+/** Everything the list shows, top to bottom: active rows, the "Finished" title and rows, the "Closed" title and rows. */
+export function listItems(state: BoardState): ListItem[] {
+  const finished = finishedRows(state);
+  const closed = closedRows(state);
+  return [
+    ...activeRows(state).map((row): ListItem => ({ kind: 'row', row })),
+    ...(finished.length > 0 ? [{ kind: 'finished', count: finished.length, expanded: state.showFinished } as ListItem] : []),
+    ...(state.showFinished ? finished.map((row): ListItem => ({ kind: 'row', row })) : []),
+    ...(closed.length > 0 ? [{ kind: 'closed', count: closed.length } as ListItem] : []),
+    ...closed.map((row): ListItem => ({ kind: 'row', row })),
+  ];
+}
+
+/** The items that fit in `capacity` lines, scrolled so that the selected row is visible. */
 export function visibleItems(state: BoardState, capacity: number): { items: ListItem[]; offset: number } {
-  const count = finishedRows(state).length;
-  const v = visibleRows(state, count > 0 ? Math.max(1, capacity - 1) : capacity);
-  if (count === 0) return { items: v.rows.map((row) => ({ kind: 'row', row })), offset: v.offset };
-  const boundary = activeRows(state).length;
-  const title: ListItem = { kind: 'finished', count, expanded: state.showFinished };
-  const items: ListItem[] = [];
-  v.rows.forEach((row, i) => {
-    if (v.offset + i === boundary) items.push(title);
-    items.push({ kind: 'row', row });
-  });
-  if (v.offset + v.rows.length <= boundary) items.push(title);
-  return { items, offset: v.offset };
+  const cap = Math.max(1, capacity);
+  const all = listItems(state);
+  if (all.length <= cap) return { items: all, offset: 0 };
+  const index = Math.max(0, all.findIndex((i) => i.kind === 'row' && i.row.task === state.selected));
+  const offset = Math.min(all.length - cap, Math.max(0, index - Math.floor(cap / 2)));
+  return { items: all.slice(offset, offset + cap), offset };
 }
 
 /** The rows that fit in `capacity` lines, scrolled so that the selected one is visible. */
@@ -545,7 +561,7 @@ export function promptText(state: BoardState): string | null {
   const row = state.rows.find((r) => r.task === mode.task);
   if (mode.action === 'move') return `Move ${mode.task} to the other provider? A new window starts in the same worktree; this one stays. [y/N]`;
   if (mode.action === 'interrupt') return `Interrupt ${mode.task}? Sends Escape to the agent; the window stays open. [y/N]`;
-  if (mode.action === 'close' && row?.finished) return `Close ${mode.task}? It has no window; it comes off the list${row.report === 'missing' ? ' – WARNING: no report was written' : ''}. [y/N]`;
+  if (mode.action === 'close' && row?.finished) return `Close ${mode.task}? It has no window; it is marked closed and leaves the list${row.report === 'missing' ? ' – WARNING: no report was written' : ''}. [y/N]`;
   if (mode.action === 'close') return `Close ${mode.task}? Kills its tmux window${row && row.report === 'missing' ? ' – WARNING: no report yet' : ''}. [y/N]`;
   return `Also remove the git worktree of ${mode.task} (git worktree remove, the branch stays)? [y/N, Esc cancels]`;
 }

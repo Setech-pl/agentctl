@@ -50,6 +50,10 @@ export interface TaskRecord {
    * so `board.auto_hide_pulled_dead` leaves it alone. Absent: the auto-hide rule decides.
    */
   hidden?: boolean;
+  /** `agentctl close` ran: the task is off `status`, the board, `pull --ready` and `watch` (`status --all` lists it). State and report stay. */
+  closed?: boolean;
+  /** ISO timestamp of the `close`. */
+  closedAt?: string;
 }
 
 /** agentctl's own state for a task. Agents get the report directory (`<cache>/<task>/`), never this one. */
@@ -108,6 +112,8 @@ export function renderTaskMd(record: TaskRecord, prompt: string): string {
   if (record.supersededBy) header.superseded_by = record.supersededBy;
   if (record.continues) header.continues = record.continues;
   if (record.hidden !== undefined) header.hidden = record.hidden;
+  if (record.closed) header.closed = true;
+  if (record.closedAt) header.closed_at = record.closedAt;
   return `---\n${YAML.stringify(header)}---\n\n${prompt.trim()}\n`;
 }
 
@@ -180,6 +186,8 @@ export function parseTaskRecord(text: string): TaskRecord | undefined {
   if (typeof data.superseded_by === 'string') record.supersededBy = data.superseded_by;
   if (typeof data.continues === 'string') record.continues = data.continues;
   if (typeof data.hidden === 'boolean') record.hidden = data.hidden;
+  if (data.closed === true) record.closed = true;
+  if (typeof data.closed_at === 'string') record.closedAt = data.closed_at;
   return record;
 }
 
@@ -191,24 +199,49 @@ function parseOrder(v: unknown): Order | undefined {
   return { agent: agent as AgentName, model, effort: effort as Effort };
 }
 
-/** All tasks agentctl knows about (state folders holding an agentctl-written TASK.md). */
-export function listTaskRecords(config: GlobalConfig): TaskRecord[] {
+/** Where `agentctl archive` moves the state of closed tasks: next to the state folder (`~/.agentctl/archive`). */
+export function archiveDir(config: GlobalConfig): string {
+  return path.join(path.dirname(config.stateDir), 'archive');
+}
+
+function recordsIn(dir: string): TaskRecord[] {
   let entries: string[];
   try {
-    entries = fs.readdirSync(config.stateDir);
+    entries = fs.readdirSync(dir);
   } catch {
     return [];
   }
   const records: TaskRecord[] = [];
   for (const name of entries.sort()) {
-    const record = readTaskRecord(config, name);
+    let text: string;
+    try {
+      text = fs.readFileSync(path.join(dir, name, 'TASK.md'), 'utf8');
+    } catch {
+      continue;
+    }
+    const record = parseTaskRecord(text);
     if (record) records.push(record);
   }
   return records;
 }
 
+/** All tasks agentctl knows about (state folders holding an agentctl-written TASK.md), closed ones included. */
+export function listTaskRecords(config: GlobalConfig): TaskRecord[] {
+  return recordsIn(config.stateDir);
+}
+
+/** Tasks whose state folder sits in the archive (moved there by `agentctl archive`, or by hand). They are closed, whatever their TASK.md says. */
+export function listArchivedRecords(config: GlobalConfig): TaskRecord[] {
+  return recordsIn(archiveDir(config));
+}
+
 /** Set one key in the YAML header of an existing TASK.md; the body (prompt, follow-ups) and the other keys stay as they are. */
 export async function setHeaderField(runner: Runner, file: string, key: string, value: string | boolean): Promise<boolean> {
+  return setHeaderFields(runner, file, { [key]: value });
+}
+
+/** Set several keys of the header in one write. */
+export async function setHeaderFields(runner: Runner, file: string, fields: Record<string, string | boolean>): Promise<boolean> {
   let text: string;
   try {
     text = fs.readFileSync(file, 'utf8');
@@ -218,7 +251,7 @@ export async function setHeaderField(runner: Runner, file: string, key: string, 
   const match = /^---\n([\s\S]*?)\n---(?=\n|$)/.exec(text.replace(/\r\n/g, '\n'));
   if (!match) return false;
   const doc = YAML.parseDocument(match[1] as string);
-  doc.set(key, value);
+  for (const [key, value] of Object.entries(fields)) doc.set(key, value);
   const rest = text.replace(/\r\n/g, '\n').slice(match[0].length);
   await runner.writeFile(file, `---\n${doc.toString().trimEnd()}\n---${rest}`);
   return true;

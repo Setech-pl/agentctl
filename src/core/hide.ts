@@ -20,7 +20,8 @@ export interface HideResult {
  */
 export async function setHidden(ctx: Context, taskArgs: string[], hidden: boolean): Promise<HideResult[]> {
   const live = new Set(await ctx.tmux.listWindows());
-  const records = listTaskRecords(ctx.config);
+  // A closed task is off every list already; it cannot be hidden or shown again (`status --all` lists it).
+  const records = listTaskRecords(ctx.config).filter((r) => !(r.closed && !live.has(r.window)));
   const targets: TaskTarget[] = records.map((r) => ({ task: r.task, window: r.window, alive: live.has(r.window) }));
   const chosen: typeof records = [];
   for (const arg of taskArgs) {

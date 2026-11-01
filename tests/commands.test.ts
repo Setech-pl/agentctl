@@ -222,7 +222,9 @@ describe('close', () => {
   it('kills the window and nothing else by default', async () => {
     const { ctx, runner } = makeContext(config, { respond: windows('nc-1\n') });
     await closeTask(ctx, 'nc-1');
-    assert.deepEqual(runner.commands, ['tmux kill-window -t \'=agentctl:nc-1\'']);
+    assert.deepEqual(runner.commands.filter((l) => !l.startsWith('write ')), ['tmux kill-window -t \'=agentctl:nc-1\'']);
+    assert.match([...runner.written.values()][0] ?? '', /^closed: true$/m, 'the only write is the closed marker in TASK.md');
+    assert.equal(runner.commands.filter((l) => l.startsWith('write ')).length, 1);
   });
 
   it('removes the worktree with --rm-worktree, never touching branches', async () => {
@@ -230,7 +232,7 @@ describe('close', () => {
       respond: (cmd, args, opts) => (cmd === 'git' && args.includes('--abbrev-ref') ? { stdout: 'nc-1\n' } : windows('nc-1\n')(cmd, args, opts)),
     });
     await closeTask(ctx, 'NC-1', { rmWorktree: true });
-    assert.deepEqual(runner.commands, ['tmux kill-window -t \'=agentctl:nc-1\'', `git -C ${repo} worktree remove ${wtDir}`]);
+    assert.deepEqual(runner.commands.filter((l) => !l.startsWith('write ')), ['tmux kill-window -t \'=agentctl:nc-1\'', `git -C ${repo} worktree remove ${wtDir}`]);
     for (const line of runner.commands) assert.doesNotMatch(line, /--force|branch|merge|rebase|push|reset/);
   });
 
@@ -262,7 +264,7 @@ describe('close', () => {
   it('copes with a window that is already gone; --rm-worktree needs a TASK.md', async () => {
     const { ctx, runner, out } = makeContext(config, { respond: windows('other\n') });
     await closeTask(ctx, 'NC-1');
-    assert.deepEqual(runner.commands, []);
+    assert.deepEqual(runner.commands.filter((l) => !l.startsWith('write ')), []);
     assert.match(out.join('\n'), /already closed/);
     await assert.rejects(closeTask(ctx, 'NC-99', { rmWorktree: true }), /no TASK.md/);
   });
