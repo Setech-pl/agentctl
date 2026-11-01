@@ -9,7 +9,7 @@ import { taskProgress } from './progress.ts';
 import type { Progress } from './progress.ts';
 import { lastContentLine } from './tmux.ts';
 import { listTaskRecords } from './taskstore.ts';
-import { BOARD_WINDOW } from './board-window.ts';
+import { BOARD_WINDOW } from './windows.ts';
 import { WATCH_WINDOW } from './watch.ts';
 import { formatDuration, formatLocalTime, shellQuote } from './util.ts';
 import type { AgentName } from './config.ts';

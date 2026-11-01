@@ -20,6 +20,7 @@ import { summarizeSpecs } from './core/summary.ts';
 import { DesktopNotifier } from './core/notify.ts';
 import { ensureWatchWindow, runWatch, WATCH_WINDOW } from './core/watch.ts';
 import { applyStatusLine, statusTmuxLine } from './core/statusline.ts';
+import { BOARD_WINDOW, ensureWindow } from './core/windows.ts';
 import { interruptTask } from './core/interrupt.ts';
 import { loadGlobalConfig } from './core/config.ts';
 import type { Effort, GlobalConfig } from './core/config.ts';
@@ -42,6 +43,10 @@ export interface CliDeps {
   readClipboard: () => Promise<string>;
   /** Command line that starts `agentctl watch` in a tmux window. */
   watchCommand: () => string;
+  /** Command line that starts `agentctl board` in a tmux window. */
+  boardCommand?: () => string;
+  /** Run the full-screen board in this terminal until the user quits. */
+  runBoard?: (ctx: Context, insideTmux: boolean) => Promise<void>;
   /** Command line that prints the tmux status line (`agentctl status --tmux-line`), for tmux's status-right. */
   statusLineCommand?: () => string;
   /** Build the runner: the real one, or a recording one for --dry-run. */
@@ -65,6 +70,13 @@ export function defaultDeps(): CliDeps {
     readClipboard: () => readClipboard(new RealRunner()),
     watchCommand: () => selfCommand('watch'),
     statusLineCommand: () => selfCommand('status --tmux-line'),
+    boardCommand: () => selfCommand('board'),
+    runBoard: async (ctx, insideTmux) => {
+      if (!process.stdin.isTTY || !process.stdout.isTTY) throw new AgentctlError('the board needs a terminal', 'Run it in a terminal, or in tmux with "agentctl board --tmux".');
+      // Ink and React load only here: the other commands do not pay for them.
+      const { runBoardApp } = await import('./board/app.ts');
+      await runBoardApp(ctx, insideTmux);
+    },
     insideTmux: Boolean(process.env.TMUX),
     choose: process.stdin.isTTY ? chooseOnTerminal : undefined,
     makeRunner: (dryRun, emit) => (dryRun ? new RecordingRunner({ emit }) : new RealRunner()),
@@ -315,6 +327,25 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         } finally {
           interrupt?.dispose();
         }
+      }),
+    );
+
+  program
+    .command('board')
+    .description(`Full-screen overview of the tasks: state, progress, a live preview of the selected window, and keys to switch to it, message, interrupt, pull and close.`)
+    .option('--tmux', `open it in window "${BOARD_WINDOW}" of the agentctl session (created if missing) instead of here`)
+    .action(
+      guarded(async (opts: { tmux?: boolean }) => {
+        const ctx = contextFor(false);
+        if (opts.tmux) {
+          const result = await ensureWindow(ctx, BOARD_WINDOW, deps.boardCommand?.() ?? 'agentctl board', process.cwd());
+          if (result === 'exists') line(`Window ${ctx.config.session}:${BOARD_WINDOW} already exists, left alone.`);
+          else line(`Started the board in window ${ctx.config.session}:${BOARD_WINDOW}${result === 'session-created' ? ' (session created)' : ''}.`);
+          line(`Open it: tmux attach -t ${ctx.config.session} \\; select-window -t ${BOARD_WINDOW}   (inside tmux: tmux select-window -t ${ctx.config.session}:${BOARD_WINDOW})`);
+          return;
+        }
+        if (!deps.runBoard) throw new AgentctlError('the board is not available here');
+        await deps.runBoard(ctx, deps.insideTmux ?? false);
       }),
     );
 

@@ -2,7 +2,7 @@ import type { Context } from './context.ts';
 import { listTaskRecords } from './taskstore.ts';
 import { AgentctlError } from './util.ts';
 import { WATCH_WINDOW } from './watch.ts';
-import { BOARD_WINDOW } from './board-window.ts';
+import { BOARD_WINDOW } from './windows.ts';
 
 /** A task agentctl can point at: it has a state file, a tmux window, or both. */
 export interface TaskTarget {
