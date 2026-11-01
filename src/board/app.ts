@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import React, { useEffect, useRef, useState } from 'react';
 import { Box, Text, render, useApp, useInput, useWindowSize } from 'ink';
 import {
@@ -24,6 +25,7 @@ import {
 } from '../core/board.ts';
 import type { BoardCell, BoardEffect, BoardState } from '../core/board.ts';
 import type { Context } from '../core/context.ts';
+import type { SelfArgv } from '../core/events.ts';
 import { errorMessage } from '../core/util.ts';
 
 /*
@@ -89,8 +91,8 @@ function Footer(props: { state: BoardState }): React.ReactElement {
   );
 }
 
-export function Board(props: { ctx: Context; insideTmux: boolean }): React.ReactElement {
-  const { ctx, insideTmux } = props;
+export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArgv | undefined }): React.ReactElement {
+  const { ctx, insideTmux, self } = props;
   const { exit } = useApp();
   const size = useWindowSize();
   const [state, setState] = useState<BoardState>(() => initialBoardState(size.columns, size.rows));
@@ -133,9 +135,20 @@ export function Board(props: { ctx: Context; insideTmux: boolean }): React.React
     refreshNow.current = () => void tick();
     void tick();
     const timer = setInterval(() => void tick(), BOARD_REFRESH_MS);
+    // An agent's own event (agentctl event writes <state_dir>/<task>/event.json) shows at once, not at the next refresh.
+    let watcher: fs.FSWatcher | undefined;
+    try {
+      watcher = fs.watch(ctx.config.stateDir, { recursive: true }, (_type, name) => {
+        if (name && /event\.json$/.test(name)) void tick();
+      });
+      watcher.on('error', () => watcher?.close());
+    } catch {
+      // no state folder yet, or no recursive watching here: the 2 s refresh still shows it
+    }
     return () => {
       stopped = true;
       clearInterval(timer);
+      watcher?.close();
     };
   }, []);
 
@@ -144,7 +157,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean }): React.React
     if (effect.type === 'refresh') return refreshNow.current();
     queue.current = queue.current.then(async () => {
       update((s) => withBusy(s, 'working…'));
-      const notice = await runBoardEffect(ctx.runner, ctx.config, effect, { insideTmux });
+      const notice = await runBoardEffect(ctx.runner, ctx.config, effect, { insideTmux, self });
       update((s) => withBusy(showNotice(s, notice), null));
       clearTimeout(noticeTimer.current);
       noticeTimer.current = setTimeout(() => update(clearNotice), NOTICE_MS);
@@ -179,7 +192,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean }): React.React
 }
 
 /** Show the board until the user quits; resolves when it is gone. Needs a terminal. */
-export async function runBoardApp(ctx: Context, insideTmux: boolean, streams: { stdout?: NodeJS.WriteStream; stdin?: NodeJS.ReadStream } = {}): Promise<void> {
-  const app = render(h(Board, { ctx, insideTmux }), { alternateScreen: true, exitOnCtrlC: false, ...streams });
+export async function runBoardApp(ctx: Context, insideTmux: boolean, streams: { stdout?: NodeJS.WriteStream; stdin?: NodeJS.ReadStream } = {}, self?: SelfArgv): Promise<void> {
+  const app = render(h(Board, { ctx, insideTmux, self }), { alternateScreen: true, exitOnCtrlC: false, ...streams });
   await app.waitUntilExit();
 }

@@ -4,6 +4,8 @@ import { formatModelEffort } from './equivalents.ts';
 import { syncMirror } from './mirror.ts';
 import type { MirrorResult } from './mirror.ts';
 import { taskState } from './state.ts';
+import { readStoredEvent } from './event-command.ts';
+import { extractQuestion } from './events.ts';
 import type { TaskState } from './state.ts';
 import { taskProgress } from './progress.ts';
 import type { Progress } from './progress.ts';
@@ -43,8 +45,12 @@ export interface StatusRow {
   lastLine: string;
   /** Commits over the base and changed files per worktree ("2c 7f"); null when the task has no readable worktree. */
   progress: Progress | null;
-  /** What to do about this row (orphans: the adopt command); null otherwise. */
+  /** What to do about this row (orphans: the adopt command, limited tasks: the move command); null otherwise. */
   hint: string | null;
+  /** The question the agent waits on (state needs-input), from the screen or from its event; null otherwise. */
+  question: string | null;
+  /** `pin: true` in the spec: the task is never moved to the other provider. */
+  pin: boolean;
 }
 
 /** For a task whose agent is unknown: guess it from the screen (Codex draws "›" prompts and "OpenAI Codex"). */
@@ -87,6 +93,8 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     }
     const screenAgent = record.agent === 'unknown' ? guessAgent(screenText) : record.agent;
     const settings = config.agents[screenAgent];
+    const stored = alive ? readStoredEvent(config, record) : undefined;
+    const state: TaskState = record.supersededBy ? 'superseded' : taskState({ alive, screen: screenText, settings, reportReady, event: stored?.outcome });
     rows.push({
       task: record.task,
       agent: record.agent,
@@ -95,7 +103,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       requested: `${record.requested.agent} ${formatModelEffort(record.requested)}`,
       effective: `${record.agent} ${record.model}/${record.effort}`,
       switchedBy: record.switchedBy ?? null,
-      state: taskState({ alive, screen: screenText, settings, reportReady }),
+      state,
       window: alive ? 'alive' : 'gone',
       windowName: record.window,
       windowId: alive ? (tmux.resolve(record.window, infos, record.windowId)?.id || null) : null,
@@ -107,7 +115,9 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       pulled: record.pulled && reportMtime !== undefined && Date.parse(record.pulled) >= reportMtime ? record.pulled : null,
       lastLine: lastContentLine(screenText, settings.footerPatterns),
       progress: opts.progress === false || record.repos.length === 0 ? null : await taskProgress(runner, record.repos),
-      hint: null,
+      hint: stateHint(record.task, state, record.pin === true, record.supersededBy),
+      question: state === 'needs-input' ? (extractQuestion(screenText) ?? (stored?.outcome === 'needs-input' && stored.text !== '' ? stored.text : null)) : null,
+      pin: record.pin === true,
     });
   }
   // Windows of the session that agentctl has no state file for: never skipped silently.
@@ -138,6 +148,8 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       lastLine: lastContentLine(screenText, config.agents[agent].footerPatterns),
       progress: null,
       hint: orphanHint(ctx, window),
+      question: null,
+      pin: false,
     });
   }
   return rows;
@@ -159,6 +171,13 @@ export function statusMarkdown(rows: StatusRow[]): string {
     ...rows.map((r) => `| ${cell(r.task)} | ${cell(`${r.agent}/${r.model}/${r.effort}`)} | ${r.state} | ${r.duration} | ${r.progress?.text ?? '-'} | ${r.report} | ${pulled(r)} |`),
   ];
   return `${lines.join('\n')}\n`;
+}
+
+/** What to do about a task in this state, if anything. */
+export function stateHint(task: string, state: TaskState, pinned: boolean, supersededBy?: string): string | null {
+  if (state === 'limited') return pinned ? `${task} hit its usage limit and is pinned (pin: true): wait for the reset` : `usage limit reached: agentctl move ${task}`;
+  if (state === 'superseded') return `moved to ${supersededBy ?? 'another task'}; close this window when you are done: agentctl close ${task}`;
+  return null;
 }
 
 /** Command that restores the state file of an orphan window. */

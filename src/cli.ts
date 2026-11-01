@@ -6,7 +6,12 @@ import { confirmAction, readClipboard, specFromClipboard, writeClipboard } from 
 import { runDoctor } from './core/doctor.ts';
 import { renderChecks, renderStatusHints, renderStatusTable } from './render.ts';
 import { adoptTask } from './core/adopt.ts';
-import { attachTask } from './core/attach.ts';
+import { attachTask, switchAttachedClient } from './core/attach.ts';
+import { Alerts } from './core/alert.ts';
+import { handleEvent } from './core/event-command.ts';
+import { CLAUDE_KINDS, parseJson } from './core/events.ts';
+import type { ClaudeKind, SelfArgv } from './core/events.ts';
+import { moveTask } from './core/move.ts';
 import { peekTask, PEEK_LINES } from './core/peek.ts';
 import { matchTask } from './core/resolve.ts';
 import type { TaskTarget } from './core/resolve.ts';
@@ -18,6 +23,7 @@ import { sendPrompts } from './core/send.ts';
 import { reportStatus, statusMarkdown } from './core/status.ts';
 import { summarizeSpecs } from './core/summary.ts';
 import { DesktopNotifier } from './core/notify.ts';
+import type { Notifier } from './core/notify.ts';
 import { ensureWatchWindow, runWatch, WATCH_WINDOW } from './core/watch.ts';
 import { applyStatusLine, statusTmuxLine } from './core/statusline.ts';
 import { BOARD_WINDOW, ensureWindow } from './core/windows.ts';
@@ -46,7 +52,11 @@ export interface CliDeps {
   /** Command line that starts `agentctl board` in a tmux window. */
   boardCommand?: () => string;
   /** Run the full-screen board in this terminal until the user quits. */
-  runBoard?: (ctx: Context, insideTmux: boolean) => Promise<void>;
+  runBoard?: (ctx: Context, insideTmux: boolean, self?: SelfArgv) => Promise<void>;
+  /** This very agentctl as a command line (absolute node and script, config directory of this run): what the agents and notifications call back. */
+  selfArgv?: () => SelfArgv;
+  /** The notifier for this machine; default: terminal-notifier when installed, else osascript / notify-send. */
+  makeNotifier?: (runner: Runner) => Promise<Notifier>;
   /** Command line that prints the tmux status line (`agentctl status --tmux-line`), for tmux's status-right. */
   statusLineCommand?: () => string;
   /** Build the runner: the real one, or a recording one for --dry-run. */
@@ -71,11 +81,13 @@ export function defaultDeps(): CliDeps {
     watchCommand: () => selfCommand('watch'),
     statusLineCommand: () => selfCommand('status --tmux-line'),
     boardCommand: () => selfCommand('board'),
-    runBoard: async (ctx, insideTmux) => {
+    selfArgv,
+    makeNotifier: (runner) => DesktopNotifier.detect(runner),
+    runBoard: async (ctx, insideTmux, self) => {
       if (!process.stdin.isTTY || !process.stdout.isTTY) throw new AgentctlError('the board needs a terminal', 'Run it in a terminal, or in tmux with "agentctl board --tmux".');
       // Ink and React load only here: the other commands do not pay for them.
       const { runBoardApp } = await import('./board/app.ts');
-      await runBoardApp(ctx, insideTmux);
+      await runBoardApp(ctx, insideTmux, {}, self);
     },
     insideTmux: Boolean(process.env.TMUX),
     choose: process.stdin.isTTY ? chooseOnTerminal : undefined,
@@ -99,6 +111,16 @@ function selfCommand(args: string): string {
   const env = process.env.AGENTCTL_HOME ? `AGENTCTL_HOME=${shellQuote(process.env.AGENTCTL_HOME)} ` : '';
   const script = fs.realpathSync(process.argv[1] ?? 'bin/agentctl.ts');
   return `${env}${shellQuote(process.execPath)} --experimental-strip-types --no-warnings ${shellQuote(script)} ${args}`;
+}
+
+/**
+ * This very agentctl as an argv: absolute node and script paths (a hook or a notification click has no useful PATH) and the
+ * settings of this run that the callback needs (config directory, tmux socket directory), set through env(1).
+ */
+export function selfArgv(): SelfArgv {
+  const script = fs.realpathSync(process.argv[1] ?? 'bin/agentctl.ts');
+  const env = (['AGENTCTL_HOME', 'TMUX_TMPDIR'] as const).filter((k) => process.env[k]).map((k) => `${k}=${process.env[k]}`);
+  return [...(env.length > 0 ? ['/usr/bin/env', ...env] : []), process.execPath, '--experimental-strip-types', '--no-warnings', script];
 }
 
 async function askOnTerminal(question: string): Promise<boolean> {
@@ -209,6 +231,8 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         const specs = splitSpecs(await readSpecSource(file, opts.clip), source).map((raw) => resolveSpec(raw, { config: ctx.config }));
         if (opts.clip && !(await confirmAction(ctx, summarizeSpecs(specs), 'Start?', Boolean(opts.yes) || Boolean(opts.dryRun)))) return;
         const options: NewOptions = { reuse: Boolean(opts.reuse), noSwitch: opts.switch === false, waitTrust: opts.waitTrust !== false };
+        const self = deps.selfArgv?.();
+        if (self) options.self = self;
         if (opts.agent) options.agent = opts.agent;
         if (opts.agent === false) options.noAgent = true; // commander reads --no-agent as the negation of --agent
         const interrupt = opts.dryRun ? undefined : deps.interruptSignal?.();
@@ -303,7 +327,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
 
   program
     .command('watch')
-    .description('Foreground loop: notifies (macOS notification / notify-send) when a task has a report ready, waits too long, needs folder trust or died.')
+    .description('Foreground loop: notifies (macOS notification / notify-send) when a task has a report ready, asks something, hit its usage limit, waits too long, needs folder trust or died.')
     .option('--tmux', `run it in window "${WATCH_WINDOW}" of the agentctl session (created if missing) instead of here; also shows the task counts in the status bar of that session`)
     .option('--no-status-line', 'with --tmux: leave the status bar of the session alone')
     .action(
@@ -323,7 +347,9 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         }
         const interrupt = deps.interruptSignal?.();
         try {
-          await runWatch(ctx, new DesktopNotifier(ctx.runner), interrupt ? { signal: interrupt.signal } : {});
+          const notifier = await (deps.makeNotifier?.(ctx.runner) ?? DesktopNotifier.detect(ctx.runner));
+          const self = deps.selfArgv?.();
+          await runWatch(ctx, notifier, { ...(interrupt ? { signal: interrupt.signal } : {}), ...(self ? { self } : {}) });
         } finally {
           interrupt?.dispose();
         }
@@ -345,7 +371,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
           return;
         }
         if (!deps.runBoard) throw new AgentctlError('the board is not available here');
-        await deps.runBoard(ctx, deps.insideTmux ?? false);
+        await deps.runBoard(ctx, deps.insideTmux ?? false, deps.selfArgv?.());
       }),
     );
 
@@ -381,10 +407,65 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .command('attach')
     .description('Go to the task window: attach-session outside tmux, switch-client inside. Without a task: the only running one, or a list to choose from.')
     .argument('[task]', 'task ID; case does not matter and a unique prefix is enough')
+    .option('--switch-client', 'for the click on a notification: select the window and switch the tmux client that is attached to the session; never attaches a terminal')
     .action(
-      guarded(async (task: string | undefined) => {
+      guarded(async (task: string | undefined, opts: { switchClient?: boolean }) => {
         const ctx = contextFor(false);
+        if (opts.switchClient) {
+          if (!task) throw new AgentctlError('--switch-client needs a task ID');
+          await switchAttachedClient(ctx, task);
+          return;
+        }
         await attachTask(ctx, task, { insideTmux: deps.insideTmux ?? false, ...(deps.choose ? { choose: deps.choose } : {}) });
+      }),
+    );
+
+  program
+    .command('event')
+    .description('Called by the agents themselves (hooks that "new" sets up): records the event, updates the task state and notifies at once. Always exits 0.')
+    .requiredOption('--task <task>', 'task ID')
+    .addOption(new Option('--agent <agent>', 'the agent that reports').choices(['claude', 'codex']).makeOptionMandatory())
+    .addOption(new Option('--kind <kind>', 'claude: which hook called').choices([...CLAUDE_KINDS]))
+    .option('--forward <json>', 'codex: JSON list, the notify command the user had; run with the same JSON after this one')
+    .argument('[payload]', 'the event as JSON (codex puts it here; claude sends it on stdin)')
+    .action(async (payload: string | undefined, opts: { task: string; agent: 'claude' | 'codex'; kind?: ClaudeKind; forward?: string }) => {
+      // A hook must never break the agent: whatever happens, the exit code stays 0.
+      try {
+        const config = deps.loadConfig();
+        const ctx = new Context(deps.makeRunner(false, line), config, () => {}, deps.confirm);
+        const raw = payload ?? (opts.agent === 'claude' && !deps.stdinIsTTY ? deps.readStdin() : '');
+        const forward = opts.forward ? parseJson(opts.forward) : undefined;
+        const notifier = await (deps.makeNotifier?.(ctx.runner) ?? DesktopNotifier.detect(ctx.runner));
+        const self = deps.selfArgv?.();
+        await handleEvent(ctx, new Alerts(ctx, notifier, { self }), {
+          task: opts.task,
+          agent: opts.agent,
+          kind: opts.kind,
+          payload: parseJson(raw),
+          rawPayload: opts.agent === 'codex' ? raw : undefined,
+          forward: Array.isArray(forward) && forward.every((x) => typeof x === 'string') ? (forward as string[]) : undefined,
+        });
+      } catch (e) {
+        deps.stderr(`agentctl event: ${errorMessage(e)}\n`);
+      }
+    });
+
+  program
+    .command('move')
+    .description('Hand a task that hit its usage limit to the other provider: new window <task>-2 in the same worktree, the original prompt plus a note to continue. Asks y/N.')
+    .argument('<task>', 'task ID')
+    .addOption(new Option('--agent <agent>', 'move to this provider (default: the other one)').choices(['claude', 'codex']))
+    .option('-y, --yes', 'do not ask')
+    .action(
+      guarded(async (task: string, opts: { agent?: 'claude' | 'codex'; yes?: boolean }) => {
+        const ctx = contextFor(false);
+        const self = deps.selfArgv?.();
+        const interrupt = deps.interruptSignal?.();
+        try {
+          await moveTask(ctx, task, { agent: opts.agent, yes: Boolean(opts.yes), self, signal: interrupt?.signal });
+        } finally {
+          interrupt?.dispose();
+        }
       }),
     );
 

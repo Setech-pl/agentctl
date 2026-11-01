@@ -1,6 +1,10 @@
 import path from 'node:path';
 import type { Context } from './context.ts';
+import { Alerts } from './alert.ts';
 import type { Notifier } from './notify.ts';
+import { limitText, reportReadyText } from './event-command.ts';
+import type { SelfArgv } from './events.ts';
+import { readVerdict } from './verdict.ts';
 import { collectStatus } from './status.ts';
 import type { StatusRow } from './status.ts';
 import type { TaskState } from './state.ts';
@@ -24,6 +28,8 @@ export interface WatchEvent {
   /** Text of the notification; undefined when this transition is only logged. */
   notification?: string;
   reason: 'transition' | 'waiting-too-long' | 'baseline';
+  /** The agent's own event announced this transition already: logged, not notified again. */
+  duplicate?: boolean;
 }
 
 /** What the watcher remembers between ticks. */
@@ -34,12 +40,13 @@ export class WatchMemory {
   readonly decorated = new Map<string, string>();
 }
 
-const NOTIFY_ON: Partial<Record<TaskState, (task: string) => string>> = {
-  'report-ready': (t) => `${t}: raport gotowy`,
-  'needs-trust': (t) => `${t} czeka na zaufanie folderu (trust)`,
-  'needs-input': (t) => `${t} zadaje pytanie i czeka na odpowiedź`,
-  dead: (t) => `${t}: okno zniknęło bez raportu`,
-  orphan: (t) => `${t}: okno bez pliku stanu (orphan) – agentctl adopt ${t} --report <ścieżka>`,
+const NOTIFY_ON: Partial<Record<TaskState, (row: StatusRow) => string>> = {
+  'report-ready': (r) => reportReadyText(r.task, undefined),
+  'needs-trust': (r) => `${r.task} czeka na zaufanie folderu (trust)`,
+  'needs-input': (r) => (r.question ? `${r.task}: ${r.question}` : `${r.task} zadaje pytanie i czeka na odpowiedź`),
+  limited: (r) => limitText(r),
+  dead: (r) => `${r.task}: okno zniknęło bez raportu`,
+  orphan: (r) => `${r.task}: okno bez pliku stanu (orphan) – agentctl adopt ${r.task} --report <ścieżka>`,
 };
 
 /**
@@ -55,7 +62,7 @@ export function detectTransitions(memory: WatchMemory, rows: StatusRow[], nowMs:
     const prev = memory.tasks.get(row.task);
     if (!prev || prev.state !== row.state) {
       memory.tasks.set(row.task, { state: row.state, since: nowMs, waitingNotified: false });
-      const text = NOTIFY_ON[row.state]?.(row.task);
+      const text = NOTIFY_ON[row.state]?.(row);
       if (baseline) events.push({ task: row.task, from: null, to: row.state, reason: 'baseline' });
       else events.push({ task: row.task, from: prev?.state ?? null, to: row.state, reason: 'transition', ...(text ? { notification: text } : {}) });
       continue;
@@ -75,7 +82,7 @@ export function watchLogPath(ctx: Context): string {
 const logLine = (nowMs: number, e: WatchEvent): string => {
   const what =
     e.reason === 'waiting-too-long' ? 'waiting too long' : e.reason === 'baseline' ? `baseline ${e.to}` : `${e.from ?? 'new'} -> ${e.to}`;
-  return `${new Date(nowMs).toISOString()}  ${e.task}  ${what}${e.notification ? `  [notified: ${e.notification}]` : ''}\n`;
+  return `${new Date(nowMs).toISOString()}  ${e.task}  ${what}${e.notification ? `  [${e.duplicate ? 'already announced by the agent\'s event' : 'notified'}: ${e.notification}]` : ''}\n`;
 };
 
 /**
@@ -117,14 +124,29 @@ export async function restoreWindowNames(ctx: Context, memory: WatchMemory): Pro
   return restored;
 }
 
-/** One poll: collect states, detect transitions, notify and log. Returns the events. */
-export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Notifier): Promise<WatchEvent[]> {
+export interface TickOptions {
+  /** This very agentctl as a command line: the click action of a notification runs `attach` with it. */
+  self?: SelfArgv | undefined;
+}
+
+/**
+ * One poll: collect states, detect transitions, notify and log. Returns the events. A transition that the agent's own event
+ * announced a moment ago (see `agentctl event`) is logged but not notified again.
+ */
+export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Notifier, options: TickOptions = {}): Promise<WatchEvent[]> {
   const rows = await collectStatus(ctx, { progress: false });
   await decorateWindows(ctx, memory, rows);
   const now = ctx.runner.now();
   const events = detectTransitions(memory, rows, now, ctx.config.watch.waitingAfter * 1000);
+  const alerts = new Alerts(ctx, notifier, { self: options.self });
   for (const e of events) {
-    if (e.notification) await notifier.notify('agentctl', e.notification);
+    const row = rows.find((r) => r.task === e.task);
+    if (e.notification && row) {
+      if (e.to === 'report-ready' && e.reason === 'transition') e.notification = reportReadyText(e.task, readVerdict(row.reportPath, ctx.config.notify.verdictPattern));
+      // The ledger key of a reminder differs from the state names, so it is never taken for the end-of-turn event.
+      const key = e.reason === 'waiting-too-long' ? 'waiting-too-long' : e.to;
+      if ((await alerts.send({ task: row.task, window: row.windowName }, key, e.notification, 'watch')) === 'duplicate') e.duplicate = true;
+    }
     await ctx.runner.appendFile(watchLogPath(ctx), logLine(now, e));
     if (e.reason !== 'baseline') ctx.out(logLine(now, e).trimEnd());
   }
@@ -136,6 +158,8 @@ export interface WatchOptions {
   signal?: AbortSignal;
   /** Stop after this many ticks (tests). */
   maxTicks?: number;
+  /** This very agentctl as a command line, for the click action of notifications. */
+  self?: SelfArgv | undefined;
 }
 
 /** Foreground loop: tick every `watch.interval` seconds until aborted. */
@@ -147,7 +171,7 @@ export async function runWatch(ctx: Context, notifier: Notifier, opts: WatchOpti
     for (let tick = 0; !opts.signal?.aborted && (opts.maxTicks === undefined || tick < opts.maxTicks); tick++) {
       if (tick > 0) await ctx.runner.sleep(interval * 1000, opts.signal);
       if (opts.signal?.aborted) break;
-      await watchTick(ctx, memory, notifier);
+      await watchTick(ctx, memory, notifier, { self: opts.self });
     }
   } finally {
     const restored = await restoreWindowNames(ctx, memory);
