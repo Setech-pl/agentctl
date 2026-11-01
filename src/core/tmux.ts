@@ -161,6 +161,33 @@ export class Tmux {
     return this.runner.exec('tmux', ['switch-client', '-t', `=${this.session}`]);
   }
 
+  /** Clients attached to the session, the most recently active first. */
+  async clients(): Promise<string[]> {
+    const r = await this.runner.exec('tmux', ['list-clients', '-t', `=${this.session}`, '-F', '#{client_activity}\t#{client_name}'], {
+      readOnly: true,
+      dryResult: { code: 1 },
+    });
+    if (r.code !== 0) return [];
+    return r.stdout
+      .split('\n')
+      .map((l) => l.split('\t'))
+      .filter((p): p is [string, string] => p.length === 2 && p[1]!.trim() !== '')
+      .sort((a, b) => Number(b[0]) - Number(a[0]))
+      .map((p) => p[1].trim());
+  }
+
+  /** Move one attached client to the session (its current window is the one `selectWindow` chose). */
+  switchClientTo(client: string): Promise<ExecResult> {
+    return this.runner.exec('tmux', ['switch-client', '-c', client, '-t', `=${this.session}`]);
+  }
+
+  /** `TERM_PROGRAM` of the environment the tmux server was started from ("Apple_Terminal", "iTerm.app"); undefined if unset. */
+  async serverTermProgram(): Promise<string | undefined> {
+    const r = await this.runner.exec('tmux', ['show-environment', '-g', 'TERM_PROGRAM'], { readOnly: true, dryResult: { code: 1 } });
+    const m = r.code === 0 ? /^TERM_PROGRAM=(.+)$/m.exec(r.stdout) : null;
+    return m?.[1]?.trim();
+  }
+
   /** Outside tmux: attach this terminal to the session; returns when the user detaches. */
   attachSession(): Promise<ExecResult> {
     return this.runner.exec('tmux', ['attach-session', '-t', `=${this.session}`], { interactive: true });

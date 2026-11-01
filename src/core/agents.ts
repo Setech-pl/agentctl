@@ -11,14 +11,15 @@ export const DEFAULT_MODEL = 'default';
  * - codex:  `codex --sandbox danger-full-access [-m <model>] -c model_reasoning_effort=<effort>`.
  *
  * `--model`/`-m` is omitted when the model is "default". No auto-accept flag is ever added.
+ * `extra` (event wiring: `--settings <file>` for Claude, `-c notify=[…]` for Codex) goes last.
  */
-export function buildAgentArgv(spec: Pick<ResolvedSpec, 'agent' | 'model' | 'effort'>, settings: AgentSettings): string[] {
+export function buildAgentArgv(spec: Pick<ResolvedSpec, 'agent' | 'model' | 'effort'>, settings: AgentSettings, extra: string[] = []): string[] {
   const hasModel = spec.model !== DEFAULT_MODEL;
   const effortArgs = settings.effortArgs.map((a) => a.replaceAll('{effort}', spec.effort));
   if (spec.agent === 'claude') {
-    return ['claude', ...(hasModel ? ['--model', spec.model] : []), ...effortArgs, ...settings.flags];
+    return ['claude', ...(hasModel ? ['--model', spec.model] : []), ...effortArgs, ...settings.flags, ...extra];
   }
-  return ['codex', '--sandbox', 'danger-full-access', ...(hasModel ? ['-m', spec.model] : []), ...effortArgs, ...settings.flags];
+  return ['codex', '--sandbox', 'danger-full-access', ...(hasModel ? ['-m', spec.model] : []), ...effortArgs, ...settings.flags, ...extra];
 }
 
 export function agentCommandLine(argv: string[]): string {

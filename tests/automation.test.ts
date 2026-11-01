@@ -250,7 +250,7 @@ describe('watch', () => {
     m.windows.set('nc-2', TRUST);
     m.windows.delete('nc-3');
     await watchTick(ctx, memory, n);
-    assert.deepEqual(n.sent.sort(), ['NC-1: raport gotowy', 'NC-2 czeka na zaufanie folderu (trust)', 'NC-3: okno zniknęło bez raportu'].sort());
+    assert.deepEqual(n.sent.sort(), ['NC-1: raport gotowy – done', 'NC-2 czeka na zaufanie folderu (trust)', 'NC-3: okno zniknęło bez raportu'].sort());
 
     // nothing changed: no new notifications
     await watchTick(ctx, memory, n);
@@ -331,11 +331,11 @@ describe('watch', () => {
     };
     await runWatch(ctx, n, { maxTicks: 4 });
     assert.equal(runner.now() - start, 3 * 20_000);
-    assert.deepEqual(n.sent, ['NC-1: raport gotowy']);
+    assert.deepEqual(n.sent, ['NC-1: raport gotowy – done']);
     const log = runner.appended.get(watchLogPath(ctx)) ?? '';
     assert.equal(watchLogPath(ctx), path.join(config.cache, 'agentctl-watch.log'));
     assert.match(log, /NC-1 {2}baseline working\n/);
-    assert.match(log, /NC-1 {2}\w+ -> report-ready {2}\[notified: NC-1: raport gotowy\]\n/);
+    assert.match(log, /NC-1 {2}\w+ -> report-ready {2}\[notified: NC-1: raport gotowy – done\]\n/);
   });
 
   it('config: defaults 15 s / 120 s, overridable, validated', () => {

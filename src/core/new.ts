@@ -3,6 +3,8 @@ import path from 'node:path';
 import { agentCommandLine, buildAgentArgv, INSTALL_HINTS, promptWithHeader } from './agents.ts';
 import type { Context } from './context.ts';
 import type { Order } from './equivalents.ts';
+import { planEventWiring } from './events.ts';
+import type { SelfArgv } from './events.ts';
 import { addWorktree } from './git.ts';
 import { applyLinks, checkLinkTargets, planLinks } from './links.ts';
 import { planBatch } from './plan.ts';
@@ -19,6 +21,8 @@ export interface NewOptions extends PlanOptions {
   noAgent?: boolean;
   /** Ctrl-C: ends the wait for the agent without closing its window. */
   signal?: AbortSignal;
+  /** This very agentctl as a command line (absolute node and script): the agents report their events to it. Absent: no event wiring. */
+  self?: SelfArgv | undefined;
 }
 
 export interface NewResult {
@@ -122,6 +126,10 @@ export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: Ne
     // The agent's own folder: only the report goes there (agentctl's state is in state_dir).
     await runner.mkdir(path.dirname(spec.report));
 
+    // 4b. the agent reports its own events (question, end of turn, limit) to `agentctl event`
+    const wiring = config.notify.events && opts.self ? planEventWiring({ agent: spec.agent, task: spec.task, window: spec.window, config, self: opts.self, env: spec.env }) : undefined;
+    for (const file of wiring?.files ?? []) await runner.writeFile(file.path, file.content);
+
     // 5. window + agent
     if (sessionUp) await tmux.newWindow(spec.window, primary, spec.env);
     else {
@@ -129,7 +137,8 @@ export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: Ne
       sessionUp = true;
     }
     const settings = config.agents[spec.agent];
-    const commandLine = agentCommandLine(buildAgentArgv(spec, settings));
+    const commandLine = agentCommandLine(buildAgentArgv(spec, settings, wiring?.args));
+    if (wiring) ctx.info(`${spec.task}: ${wiring.note}`);
     // tmux's own ID of the window: operations keep finding it when `watch` puts a state icon in front of its name.
     const windowId = (await tmux.windows()).find((w) => w.plain === spec.window)?.id;
     if (windowId) await setHeaderField(runner, taskFile(config, spec.window), 'window_id', windowId);

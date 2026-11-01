@@ -1,9 +1,11 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { INSTALL_HINTS } from './agents.ts';
 import { PROJECT_CONFIG_NAME, loadGlobalConfig, loadProjectConfig } from './config.ts';
 import type { GlobalConfig } from './config.ts';
 import type { Runner } from './runner.ts';
+import { findTerminalNotifier } from './notify.ts';
 import { Tmux } from './tmux.ts';
 import { errorMessage } from './util.ts';
 
@@ -82,6 +84,12 @@ export async function runDoctor(
   const gh = await runner.exec('gh', ['--version'], { readOnly: true });
   if (gh.code === 0) add('gh', 'ok', firstLine(gh.stdout));
   else add('gh', 'warn', 'not found (optional; used by humans for PRs, never by agentctl)');
+
+  const notifier = await findTerminalNotifier(runner);
+  if (os.platform() === 'darwin') {
+    if (notifier) add('notifications', 'ok', `terminal-notifier (${notifier}): a click on a notification switches to the task window`);
+    else add('notifications', 'warn', 'osascript, no click action. For click-to-window: brew install terminal-notifier');
+  } else add('notifications', 'ok', 'notify-send (no click action)');
 
   if (config) {
     const cache = config.cache;

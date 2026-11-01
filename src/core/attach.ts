@@ -48,3 +48,21 @@ export async function attachTask(ctx: Context, taskArg: string | undefined, opts
   await showWindow(ctx, target.window, opts.insideTmux);
   return target;
 }
+
+/**
+ * `agentctl attach TASK --switch-client`: what a click on a notification runs. No terminal is involved: the task's window is
+ * selected and the most recently active client attached to the agentctl session is switched to it.
+ */
+export async function switchAttachedClient(ctx: Context, taskArg: string): Promise<TaskTarget> {
+  const { tmux, config } = ctx;
+  const target = await resolveRunningTask(ctx, taskArg);
+  const clients = await tmux.clients();
+  if (clients.length === 0) {
+    throw new AgentctlError(`no tmux client is attached to session "${config.session}"`, `Attach one: tmux attach -t ${config.session}, or run "agentctl attach ${target.task}" in a terminal.`);
+  }
+  const select = await tmux.selectWindow(target.window);
+  if (select.code !== 0) throw new AgentctlError(`cannot select window "${target.window}": ${select.stderr.trim() || `tmux exit ${select.code}`}`);
+  const r = await tmux.switchClientTo(clients[0] as string);
+  if (r.code !== 0) throw new AgentctlError(`tmux switch-client failed: ${r.stderr.trim() || `exit ${r.code}`}`);
+  return target;
+}

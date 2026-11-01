@@ -3,7 +3,9 @@ import { closeTask } from './close.ts';
 import { Context } from './context.ts';
 import type { GlobalConfig } from './config.ts';
 import { DEFAULT_WINDOW_ICONS } from './icons.ts';
+import type { SelfArgv } from './events.ts';
 import { interruptTask } from './interrupt.ts';
+import { moveTask } from './move.ts';
 import { peekWindow } from './peek.ts';
 import { pullReady, pullTask } from './pull.ts';
 import { showWindow } from './attach.ts';
@@ -50,7 +52,7 @@ export interface Notice {
 export type BoardMode =
   | { kind: 'list' }
   | { kind: 'input'; task: string; text: string }
-  | { kind: 'confirm'; action: 'interrupt' | 'close' | 'close-worktree'; task: string }
+  | { kind: 'confirm'; action: 'interrupt' | 'close' | 'close-worktree' | 'move'; task: string }
   | { kind: 'help' };
 
 export interface BoardState {
@@ -82,6 +84,7 @@ export type BoardEffect =
   | { type: 'pull'; task: string }
   | { type: 'pull-ready' }
   | { type: 'close'; task: string; rmWorktree: boolean }
+  | { type: 'move'; task: string }
   /** The selection moved: load the preview of the new one now instead of at the next refresh. */
   | { type: 'refresh' }
   | { type: 'quit' };
@@ -137,12 +140,17 @@ function listKey(state: BoardState, input: string, key: KeyPress): KeyResult {
   if (input === 'r') return stay(withNotice(state, 'info', 'Collecting the new reports…'), [{ type: 'pull-ready' }]);
 
   const row = selectedRow(state);
-  const needsTask = key.return || input === 'm' || input === 'i' || input === 'c' || input === 'x';
+  const needsTask = key.return || input === 'm' || input === 'M' || input === 'i' || input === 'c' || input === 'x';
   if (!needsTask) return stay();
   if (!row) return stay(withNotice(state, 'error', 'No task selected.'));
 
   if (input === 'c') return stay(withNotice(state, 'info', `${row.task}: copying the report…`), [{ type: 'pull', task: row.task }]);
   if (input === 'x') return stay({ ...state, notice: null, mode: { kind: 'confirm', action: 'close', task: row.task } });
+  if (input === 'M') {
+    if (row.state === 'superseded') return stay(withNotice(state, 'error', `${row.task} was already moved.`));
+    if (row.pin) return stay(withNotice(state, 'error', `${row.task} is pinned (pin: true): it is never moved to the other provider.`));
+    return stay({ ...state, notice: null, mode: { kind: 'confirm', action: 'move', task: row.task } });
+  }
   // The rest talk to the window.
   if (!isAlive(row)) return stay(withNotice(state, 'error', `${row.task} has no tmux window (closed or dead).`));
   if (key.return) return stay(state, [{ type: 'switch', task: row.task, window: row.windowName }]);
@@ -170,6 +178,9 @@ function confirmKey(state: BoardState, mode: Extract<BoardMode, { kind: 'confirm
   const cancel = (): KeyResult => ({ state: withNotice(toList(state), 'info', 'Cancelled.'), effects: [] });
   if (mode.action === 'interrupt') {
     return yes ? { state: withNotice(toList(state), 'info', `${mode.task}: interrupting…`), effects: [{ type: 'interrupt', task: mode.task }] } : cancel();
+  }
+  if (mode.action === 'move') {
+    return yes ? { state: withNotice(toList(state), 'info', `${mode.task}: moving to the other provider…`), effects: [{ type: 'move', task: mode.task }] } : cancel();
   }
   if (mode.action === 'close') {
     if (!yes) return cancel();
@@ -270,6 +281,8 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
 export interface EffectEnv {
   /** `$TMUX` is set: Enter can switch this client to the task window. */
   insideTmux: boolean;
+  /** This very agentctl as a command line: the event hooks of a task started by `move` call it. */
+  self?: SelfArgv | undefined;
 }
 
 /** Run one effect with the core functions the CLI commands use; the result is what the footer says. */
@@ -295,6 +308,10 @@ export async function runBoardEffect(runner: Runner, config: GlobalConfig, effec
       case 'pull-ready':
         await pullReady(ctx);
         return { level: 'info', text: lines[0] ?? 'No reports ready.' };
+      case 'move': {
+        const moved = await moveTask(ctx, effect.task, { yes: true, self: env.self });
+        return { level: 'info', text: moved ? `${effect.task} -> ${moved.plan.task} (${moved.plan.to.agent}); the old window stays open` : `${effect.task}: not moved` };
+      }
       case 'close':
         await closeTask(ctx, effect.task, { rmWorktree: effect.rmWorktree });
         return { level: 'info', text: lines.length > 0 ? lines.join('; ') : `${effect.task}: closed` };
@@ -353,7 +370,9 @@ const STATE_COLOR: Record<TaskState, string> = {
   waiting: 'yellow',
   'needs-input': 'magenta',
   'needs-trust': 'magenta',
+  limited: 'red',
   'report-ready': 'green',
+  superseded: 'gray',
   orphan: 'red',
   dead: 'red',
 };
@@ -399,7 +418,7 @@ export function visibleRows(state: BoardState, capacity: number): { rows: BoardR
 
 // ---- texts
 
-export const KEY_HINTS = '↑↓ move  ⏎ open  m msg  i interrupt  c pull  r pull-new  x close  ? help  q quit';
+export const KEY_HINTS = '↑↓ ⏎ open  m msg  M move  i interrupt  c pull  r pull-new  x close  ? help  q';
 
 export const HELP_LINES: string[] = [
   'agentctl board',
@@ -407,6 +426,7 @@ export const HELP_LINES: string[] = [
   '  ↑ ↓ (j k)   select a task',
   '  Enter       go to the task window (tmux switch-client); back: Ctrl-b l',
   '  m           type a message and send it to the agent (Enter sends, Esc cancels)',
+  '  M           move the task to the other provider after a limit (asks first)',
   '  i           interrupt the current turn (asks first; the window stays open)',
   '  c           copy the report of the task to the clipboard',
   '  r           copy all new reports to the clipboard (pull --ready)',
@@ -424,6 +444,7 @@ export function promptText(state: BoardState): string | null {
   if (mode.kind === 'input') return `Message to ${mode.task} (Enter sends, Esc cancels): ${mode.text}`;
   if (mode.kind !== 'confirm') return null;
   const row = state.rows.find((r) => r.task === mode.task);
+  if (mode.action === 'move') return `Move ${mode.task} to the other provider? A new window starts in the same worktree; this one stays. [y/N]`;
   if (mode.action === 'interrupt') return `Interrupt ${mode.task}? Sends Escape to the agent; the window stays open. [y/N]`;
   if (mode.action === 'close') return `Close ${mode.task}? Kills its tmux window${row && row.report === 'missing' ? ' – WARNING: no report yet' : ''}. [y/N]`;
   return `Also remove the git worktree of ${mode.task} (git worktree remove, the branch stays)? [y/N, Esc cancels]`;

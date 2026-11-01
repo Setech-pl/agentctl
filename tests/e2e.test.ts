@@ -16,7 +16,8 @@ const BIN = path.join(REPO_ROOT, 'bin', 'agentctl.ts');
 function agentctl(args: string[], env: Record<string, string>) {
   const r = spawnSync(process.execPath, ['--experimental-strip-types', '--no-warnings', BIN, ...args], {
     encoding: 'utf8',
-    env: { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', ...env },
+    // CODEX_HOME: never read the real ~/.codex/config.toml (its notify would end up in the output)
+    env: { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', CODEX_HOME: path.join(scratch.dir, 'codex-home'), ...env },
     cwd: REPO_ROOT,
   });
   return { code: r.status, stdout: r.stdout, stderr: r.stderr };
@@ -24,7 +25,7 @@ function agentctl(args: string[], env: Record<string, string>) {
 
 describe('agentctl new --dry-run (the real binary)', () => {
   const root = scratch.sub('e2e');
-  const config = makeConfig(root, 'limits: {claude: 5}\n');
+  const config = makeConfig(root, 'limits: {claude: 5}\nnotify: {events: false}\n');
   const home = path.join(root, 'home');
   const repo = path.join(root, 'no-such-repo');
   const wtDir = path.join(root, 'wt', 'app-nc-1');
@@ -137,7 +138,8 @@ describe('spec example', () => {
     const r = agentctl(['new', '--dry-run', '--agent', 'codex', f], { AGENTCTL_HOME: none });
     assert.equal(r.code, 0, r.stderr);
     const commands = r.stdout.split('\n').filter((l) => l && !l.startsWith('#')).map((l) => l.replace(/^(write \S+) \(\d+ bytes\)$/, '$1'));
-    assert.ok(commands.includes("tmux send-keys -t '=agentctl:nc-42' -l -- 'codex --sandbox danger-full-access -m gpt-6-astra -c model_reasoning_effort=medium'"));
+    // with the events on (the default) the agent line ends with -c notify=[…agentctl event…]
+    assert.ok(commands.some((c) => c.startsWith("tmux send-keys -t '=agentctl:nc-42' -l -- 'codex --sandbox danger-full-access -m gpt-6-astra -c model_reasoning_effort=medium -c ") && c.includes('notify=[') && c.includes('event')));
     assert.ok(!commands.some((c) => c.includes('claude')));
     assert.ok(r.stdout.includes('#   Model: gpt-6-astra · effort medium'));
     assert.ok(commands.some((c) => c.startsWith('git -C ') && c.includes('worktree add -b nc-42-tram-bell')));

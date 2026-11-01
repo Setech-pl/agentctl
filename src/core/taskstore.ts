@@ -39,6 +39,12 @@ export interface TaskRecord {
   pulled?: string;
   /** ISO timestamp of `agentctl adopt`: the record was rebuilt, the original prompt is lost. */
   adopted?: string;
+  /** `pin: true` in the spec: `agentctl move` never hands this task to the other provider. Absent in records from before it was kept. */
+  pin?: boolean;
+  /** The task that took over after `agentctl move`; this one is then `superseded`. */
+  supersededBy?: string;
+  /** The task this one continues (`agentctl move`). */
+  continues?: string;
 }
 
 /** agentctl's own state for a task. Agents get the report directory (`<cache>/<task>/`), never this one. */
@@ -67,6 +73,7 @@ export function recordFromSpec(spec: ResolvedSpec, config: GlobalConfig, started
   };
   if (spec.switchedBy) record.switchedBy = spec.switchedBy;
   if (spec.reviewOf) record.reviewOf = spec.reviewOf;
+  if (spec.pin) record.pin = true;
   return record;
 }
 
@@ -92,6 +99,9 @@ export function renderTaskMd(record: TaskRecord, prompt: string): string {
   header.started = record.started;
   if (record.pulled) header.pulled = record.pulled;
   if (record.adopted) header.adopted = record.adopted;
+  if (record.pin) header.pin = true;
+  if (record.supersededBy) header.superseded_by = record.supersededBy;
+  if (record.continues) header.continues = record.continues;
   return `---\n${YAML.stringify(header)}---\n\n${prompt.trim()}\n`;
 }
 
@@ -108,6 +118,20 @@ export function readTaskRecord(config: GlobalConfig, window: string): TaskRecord
     return undefined;
   }
   return parseTaskRecord(text);
+}
+
+/** The prompt the task started with: the text after the header, up to the first follow-up that `send` appended. */
+export function readTaskPrompt(config: GlobalConfig, window: string): string | undefined {
+  let text: string;
+  try {
+    text = fs.readFileSync(taskFile(config, window), 'utf8');
+  } catch {
+    return undefined;
+  }
+  const match = /^---\n[\s\S]*?\n---(?:\n|$)/.exec(text.replace(/\r\n/g, '\n'));
+  if (!match) return undefined;
+  const body = text.replace(/\r\n/g, '\n').slice(match[0].length);
+  return body.split(/\n\n## Follow-up sent /)[0]?.trim();
 }
 
 export function parseTaskRecord(text: string): TaskRecord | undefined {
@@ -146,6 +170,9 @@ export function parseTaskRecord(text: string): TaskRecord | undefined {
   if (typeof data.review_of === 'string') record.reviewOf = data.review_of;
   if (typeof data.pulled === 'string') record.pulled = data.pulled;
   if (typeof data.adopted === 'string') record.adopted = data.adopted;
+  if (data.pin === true) record.pin = true;
+  if (typeof data.superseded_by === 'string') record.supersededBy = data.superseded_by;
+  if (typeof data.continues === 'string') record.continues = data.continues;
   return record;
 }
 

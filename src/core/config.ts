@@ -57,6 +57,8 @@ export interface AgentSettings {
   footerPatterns: string[];
   /** Regex: the agent asks the user a question and waits for the answer (state needs-input). */
   questionPattern: string;
+  /** Regexes (any one matches a line of the screen): the agent says its usage limit is used up or it is rate limited (state limited). */
+  limitPatterns: string[];
 }
 
 export interface GlobalConfig extends Layer {
@@ -77,10 +79,26 @@ export interface GlobalConfig extends Layer {
    * in front of the tmux window names (`null`: the windows keep their plain names).
    */
   watch: { interval: number; waitingAfter: number; windowIcons: Record<TaskState, string> | null; statusLine: boolean };
+  /** Notifications: events from the agents themselves, what a click on a notification does, the verdict line of a report. */
+  notify: NotifySettings;
   /** Where the config was (or would be) read from. */
   path: string;
   loaded: boolean;
 }
+
+export interface NotifySettings {
+  /** Hooks (Claude) and `-c notify=…` (Codex) report the agents' own events to `agentctl event`. `false`: screen reading only. */
+  events: boolean;
+  /** A notification when a turn ends and the agent waits (not only for questions, reports and limits). */
+  turnEnd: boolean;
+  /** Bundle ID of the terminal app that a click on a notification brings to the front; unset: detected from the environment. */
+  terminalApp?: string;
+  /** Regex for the report line that goes into the "report ready" notification; unset: a "Werdykt/Verdict/Status" line, else the first line of the text. */
+  verdictPattern?: string;
+}
+
+/** The mark that opens the line an agent prints for an error: bullets, tree corners, warning signs. */
+const LINE_MARK = '^[\\s⎿●•■⚠!*>-]*';
 
 export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
   claude: {
@@ -99,8 +117,16 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
       'shift\\+tab to cycle',
       '^\\s*[❯>]\\s*(Try ".*")?$',
     ],
-    // AskUserQuestion dialog footer.
-    questionPattern: 'Enter to select\\b.*Esc to cancel',
+    // AskUserQuestion dialog footer, and the footer of a permission dialog ("Esc to cancel · Tab to amend").
+    questionPattern: 'Enter to select\\b.*Esc to cancel|Esc to cancel · Tab to amend',
+    // Strings of the 2.1.309 binary: "You've hit your session limit" / "weekly limit" / "<model> limit" / "monthly spend limit" (+ " · resets …"),
+    // "Usage limit reached", "You're out of extra usage". The 429 line is also printed for a passing capacity problem (lower confidence).
+    limitPatterns: [
+      `${LINE_MARK}You.ve hit your .{0,60}limit`,
+      `${LINE_MARK}Usage limit reached`,
+      `${LINE_MARK}You.re out of extra usage`,
+      `${LINE_MARK}(?:API Error: )?Request rejected \\(429\\)`,
+    ],
   },
   codex: {
     flags: [],
@@ -121,13 +147,23 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
       '^\\s*›\\s*(Ask Codex to do anything)?\\s*$',
       'Queued follow-up inputs|⇧.? (edit last queued message|to answer)',
     ],
-    // A pending request_user_input question: "? Which color…" with options, then "• Waiting for your answer.".
-    questionPattern: 'Waiting for your answer|^\\s*\\?\\s+\\d+ questions?\\b|to answer\\s*$',
+    // A pending request_user_input question: "? Which color…" with options, then "• Waiting for your answer."; and the footer of an
+    // approval dialog ("Would you like to run the following command?" … "Press enter to confirm or esc to cancel").
+    questionPattern: 'Waiting for your answer|^\\s*\\?\\s+\\d+ questions?\\b|to answer\\s*$|Press enter to confirm or esc to cancel',
+    // Strings of the 0.166.0 binary (the apostrophe there is U+2019): "You've hit your usage limit. …", "Usage limit reached",
+    // "You're out of credits", "Your workspace is out of credits", "You hit your spend cap …".
+    limitPatterns: [
+      `${LINE_MARK}You.ve hit your usage limit`,
+      `${LINE_MARK}Usage limit reached`,
+      `${LINE_MARK}You.re out of credits`,
+      `${LINE_MARK}Your workspace is out of credits`,
+      `${LINE_MARK}You hit your spend cap`,
+    ],
   },
 };
 
 const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'setup', 'defaults'];
-const GLOBAL_KEYS = [...LAYER_KEYS, 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch'];
+const GLOBAL_KEYS = [...LAYER_KEYS, 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify'];
 
 /** Screen patterns are case-insensitive and match per line. */
 export const PATTERN_FLAGS = 'im';
@@ -244,7 +280,7 @@ function parseAgentSettings(name: AgentName, v: unknown, where: string, p: Probl
     p.add(`${where} must be a mapping`);
     return settings;
   }
-  checkKeys(v, ['flags', 'effort_args', 'ready_pattern', 'ready_timeout', 'trust_timeout', 'trust_pattern', 'working_pattern', 'interrupt_key', 'footer_patterns', 'question_pattern'], where, p);
+  checkKeys(v, ['flags', 'effort_args', 'ready_pattern', 'ready_timeout', 'trust_timeout', 'trust_pattern', 'working_pattern', 'interrupt_key', 'footer_patterns', 'question_pattern', 'limit_patterns'], where, p);
   if (v.flags !== undefined) settings.flags = parseStringList(v.flags, `${where}.flags`, p);
   if (v.effort_args !== undefined) settings.effortArgs = parseStringList(v.effort_args, `${where}.effort_args`, p);
   for (const [key, list] of [['flags', settings.flags], ['effort_args', settings.effortArgs]] as const) {
@@ -271,6 +307,17 @@ function parseAgentSettings(name: AgentName, v: unknown, where: string, p: Probl
       }
     }
     settings.footerPatterns = list;
+  }
+  if (v.limit_patterns !== undefined) {
+    const list = parseStringList(v.limit_patterns, `${where}.limit_patterns`, p);
+    for (const [i, pattern] of list.entries()) {
+      try {
+        new RegExp(pattern, PATTERN_FLAGS);
+      } catch (e) {
+        p.add(`${where}.limit_patterns[${i}] is not a valid regular expression: ${errorMessage(e)}`);
+      }
+    }
+    settings.limitPatterns = list;
   }
   const key = parseString(v.interrupt_key, `${where}.interrupt_key`, p);
   if (key) settings.interruptKey = key;
@@ -326,6 +373,33 @@ function parseWatch(v: unknown, p: Problems): GlobalConfig['watch'] {
     else p.add(`config.watch.${key} must be a positive number of seconds`);
   }
   return watch;
+}
+
+function parseNotify(v: unknown, p: Problems): NotifySettings {
+  const notify: NotifySettings = { events: true, turnEnd: true };
+  if (v === undefined || v === null) return notify;
+  if (!isObject(v)) {
+    p.add('config.notify must be a mapping like {terminal_app: com.apple.Terminal, verdict_pattern: "^Verdict:"}');
+    return notify;
+  }
+  checkKeys(v, ['events', 'turn_end', 'terminal_app', 'verdict_pattern'], 'config.notify', p);
+  for (const [key, field] of [['events', 'events'], ['turn_end', 'turnEnd']] as const) {
+    if (v[key] === undefined) continue;
+    if (typeof v[key] === 'boolean') notify[field] = v[key];
+    else p.add(`config.notify.${key} must be true or false`);
+  }
+  const app = parseString(v.terminal_app, 'config.notify.terminal_app', p);
+  if (app) notify.terminalApp = app;
+  const pattern = parseString(v.verdict_pattern, 'config.notify.verdict_pattern', p);
+  if (pattern) {
+    try {
+      new RegExp(pattern, PATTERN_FLAGS);
+      notify.verdictPattern = pattern;
+    } catch (e) {
+      p.add(`config.notify.verdict_pattern is not a valid regular expression: ${errorMessage(e)}`);
+    }
+  }
+  return notify;
 }
 
 function readYamlFile(file: string): unknown {
@@ -385,9 +459,10 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   const equivalents = [...parseEquivalents(raw.equivalents, 'config.equivalents', p), ...parseEquivalents(DEFAULT_EQUIVALENTS, 'defaults', p)];
   const mirror = parseString(raw.mirror_dir, 'config.mirror_dir', p);
   const watch = parseWatch(raw.watch, p);
+  const notify = parseNotify(raw.notify, p);
 
   p.throwIfAny(`Invalid config ${file}:`, 'Fix the listed keys; see the README section "Configuration".');
-  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, limits, agents, equivalents, watch, path: file, loaded: exists };
+  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, limits, agents, equivalents, watch, notify, path: file, loaded: exists };
   if (mirror) config.mirrorDir = resolvePath(mirror);
   return config;
 }
