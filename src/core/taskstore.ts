@@ -8,14 +8,18 @@ import type { ResolvedRepo, ResolvedSpec } from './spec.ts';
 import type { Order } from './equivalents.ts';
 import { isObject } from './util.ts';
 
-/** What agentctl remembers about a task: the YAML header of `<cache>/<task>/TASK.md`. */
+/** Agent, model and effort are "unknown" for a task restored with `agentctl adopt` without those flags. */
+export type RecordAgent = AgentName | 'unknown';
+export type RecordEffort = Effort | 'unknown';
+
+/** What agentctl remembers about a task: the YAML header of `<state_dir>/<task>/TASK.md`. */
 export interface TaskRecord {
   task: string;
   window: string;
   session: string;
-  agent: AgentName;
+  agent: RecordAgent;
   model: string;
-  effort: Effort;
+  effort: RecordEffort;
   repos: ResolvedRepo[];
   links: Link[];
   env: Record<string, string>;
@@ -28,10 +32,13 @@ export interface TaskRecord {
   switchedBy?: 'flag' | 'limit';
   /** ISO timestamp of the last `pull --ready` that took the report. */
   pulled?: string;
+  /** ISO timestamp of `agentctl adopt`: the record was rebuilt, the original prompt is lost. */
+  adopted?: string;
 }
 
+/** agentctl's own state for a task. Agents get the report directory (`<cache>/<task>/`), never this one. */
 export function taskDir(config: GlobalConfig, window: string): string {
-  return path.join(config.cache, window);
+  return path.join(config.stateDir, window);
 }
 
 export function taskFile(config: GlobalConfig, window: string): string {
@@ -78,6 +85,7 @@ export function renderTaskMd(record: TaskRecord, prompt: string): string {
   header.report = record.report;
   header.started = record.started;
   if (record.pulled) header.pulled = record.pulled;
+  if (record.adopted) header.adopted = record.adopted;
   return `---\n${YAML.stringify(header)}---\n\n${prompt.trim()}\n`;
 }
 
@@ -107,25 +115,30 @@ export function parseTaskRecord(text: string): TaskRecord | undefined {
   }
   if (!isObject(data) || data.agentctl !== 1) return undefined;
   const { task, agent, effort } = data;
-  if (typeof task !== 'string' || !(AGENT_NAMES as readonly unknown[]).includes(agent)) return undefined;
+  if (typeof task !== 'string' || !(agent === 'unknown' || (AGENT_NAMES as readonly unknown[]).includes(agent))) return undefined;
   const record: TaskRecord = {
     task,
     window: typeof data.window === 'string' ? data.window : task.toLowerCase(),
     session: typeof data.session === 'string' ? data.session : 'agentctl',
-    agent: agent as AgentName,
+    agent: agent as RecordAgent,
     model: typeof data.model === 'string' ? data.model : 'default',
-    effort: (EFFORTS as readonly unknown[]).includes(effort) ? (effort as Effort) : 'high',
+    effort: effort === 'unknown' || (EFFORTS as readonly unknown[]).includes(effort) ? (effort as RecordEffort) : 'high',
     repos: Array.isArray(data.repos) ? (data.repos as ResolvedRepo[]) : [],
     links: Array.isArray(data.links) ? (data.links as Link[]) : [],
     env: isObject(data.env) ? (data.env as Record<string, string>) : {},
     report: typeof data.report === 'string' ? data.report : '',
     started: typeof data.started === 'string' ? data.started : '',
-    requested: { agent: agent as AgentName, model: 'default', effort: 'high' },
+    requested: { agent: 'claude', model: 'default', effort: 'high' },
   };
-  record.requested = parseOrder(data.requested) ?? { agent: record.agent, model: record.model, effort: record.effort };
+  record.requested = parseOrder(data.requested) ?? {
+    agent: record.agent === 'unknown' ? 'claude' : record.agent,
+    model: record.model,
+    effort: record.effort === 'unknown' ? 'high' : record.effort,
+  };
   if (data.switched_by === 'flag' || data.switched_by === 'limit') record.switchedBy = data.switched_by;
   if (typeof data.review_of === 'string') record.reviewOf = data.review_of;
   if (typeof data.pulled === 'string') record.pulled = data.pulled;
+  if (typeof data.adopted === 'string') record.adopted = data.adopted;
   return record;
 }
 
@@ -137,11 +150,11 @@ function parseOrder(v: unknown): Order | undefined {
   return { agent: agent as AgentName, model, effort: effort as Effort };
 }
 
-/** All tasks agentctl knows about (cache folders holding an agentctl-written TASK.md). */
+/** All tasks agentctl knows about (state folders holding an agentctl-written TASK.md). */
 export function listTaskRecords(config: GlobalConfig): TaskRecord[] {
   let entries: string[];
   try {
-    entries = fs.readdirSync(config.cache);
+    entries = fs.readdirSync(config.stateDir);
   } catch {
     return [];
   }
@@ -168,4 +181,87 @@ export async function setHeaderField(runner: Runner, file: string, key: string, 
   const rest = text.replace(/\r\n/g, '\n').slice(match[0].length);
   await runner.writeFile(file, `---\n${doc.toString().trimEnd()}\n---${rest}`);
   return true;
+}
+
+/** Names of the files that are agentctl state, not agent output: moved out of the cache by the migration. */
+const LEGACY_STATE_FILES = ['TASK.md', 'setup.log'];
+
+/**
+ * Older versions kept TASK.md and setup.log in `<cache>/<task>/`, where an agent tidying its directory could delete them.
+ * Move them to `<state_dir>/<task>/`. A folder is only touched when its TASK.md was written by agentctl.
+ * Returns one message per migrated task; never overwrites existing state.
+ */
+export function migrateLegacyState(config: GlobalConfig): string[] {
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(config.cache);
+  } catch {
+    return [];
+  }
+  const messages: string[] = [];
+  for (const name of entries.sort()) {
+    const legacyDir = path.join(config.cache, name);
+    let text: string;
+    try {
+      text = fs.readFileSync(path.join(legacyDir, 'TASK.md'), 'utf8');
+    } catch {
+      continue;
+    }
+    if (!parseTaskRecord(text)) continue;
+    const target = path.join(config.stateDir, name);
+    if (fs.existsSync(path.join(target, 'TASK.md'))) {
+      messages.push(`migration: ${name}: ${path.join(target, 'TASK.md')} already exists, left ${path.join(legacyDir, 'TASK.md')} in place (remove it by hand if it is stale)`);
+      continue;
+    }
+    fs.mkdirSync(target, { recursive: true });
+    const moved: string[] = [];
+    for (const file of LEGACY_STATE_FILES) {
+      const from = path.join(legacyDir, file);
+      const to = path.join(target, file);
+      if (!fs.existsSync(from) || fs.existsSync(to)) continue;
+      try {
+        fs.renameSync(from, to);
+      } catch {
+        fs.copyFileSync(from, to);
+        fs.rmSync(from);
+      }
+      moved.push(file);
+    }
+    messages.push(`migration: moved ${moved.join(' and ')} of ${name} from ${legacyDir} to ${target} (agentctl state now lives outside the agents' directories)`);
+  }
+  return messages;
+}
+
+export interface AdoptInput {
+  task: string;
+  window: string;
+  report: string;
+  agent?: AgentName;
+  model?: string;
+  effort?: Effort;
+  worktree?: string;
+  session: string;
+}
+
+/** Rebuild a task record from what is still known: the report path, window and optionally worktree, agent, model, effort. */
+export function recordForAdopt(input: AdoptInput, nowMs: number): TaskRecord {
+  const agent: RecordAgent = input.agent ?? 'unknown';
+  const effort: RecordEffort = input.effort ?? 'unknown';
+  const model = input.model ?? 'unknown';
+  return {
+    task: input.task,
+    window: input.window,
+    session: input.session,
+    agent,
+    model,
+    effort,
+    repos: input.worktree ? [{ path: input.worktree, worktree: input.worktree }] : [],
+    links: [],
+    env: {},
+    report: input.report,
+    // Unknown: status then counts any existing report as ready.
+    started: '',
+    requested: { agent: input.agent ?? 'claude', model: input.model ?? 'default', effort: input.effort ?? 'high' },
+    adopted: new Date(nowMs).toISOString(),
+  };
 }

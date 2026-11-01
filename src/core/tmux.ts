@@ -1,3 +1,4 @@
+import { PATTERN_FLAGS } from './config.ts';
 import type { ExecResult, Runner } from './runner.ts';
 
 /** Pause between pasting a prompt and pressing Enter, so the TUI has consumed the bracketed paste. */
@@ -102,4 +103,22 @@ export class Tmux {
 export function lastNonEmptyLine(screen: string): string {
   const lines = screen.split('\n').map((l) => l.trimEnd()).filter((l) => l.trim() !== '');
   return lines.length ? (lines[lines.length - 1] as string).trim() : '';
+}
+
+/** A line made only of box-drawing characters and spaces: borders and separators around the input field. */
+const BORDER_LINE = /^[\s─━═│┃║╭╮╰╯┌┐└┘├┤┬┴┼╌╍┄┅┈┉-]*$/u;
+
+/**
+ * The last line of real content: skips blank lines, borders, the agent's footer lines (`footerPatterns`,
+ * regexes matched per line, case-insensitive) and empty input fields. Empty when nothing else is on screen.
+ */
+export function lastContentLine(screen: string, footerPatterns: string[]): string {
+  const footers = footerPatterns.map((p) => new RegExp(p, PATTERN_FLAGS));
+  const lines = screen.split('\n').map((l) => l.trimEnd());
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const l = lines[i] as string;
+    if (BORDER_LINE.test(l) || footers.some((f) => f.test(l))) continue;
+    return l.trim();
+  }
+  return '';
 }

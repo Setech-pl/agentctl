@@ -5,9 +5,11 @@ import { syncMirror } from './mirror.ts';
 import type { MirrorResult } from './mirror.ts';
 import { taskState } from './state.ts';
 import type { TaskState } from './state.ts';
-import { lastNonEmptyLine } from './tmux.ts';
+import { lastContentLine } from './tmux.ts';
 import { listTaskRecords } from './taskstore.ts';
-import { formatDuration } from './util.ts';
+import { WATCH_WINDOW } from './watch.ts';
+import { formatDuration, formatLocalTime, shellQuote } from './util.ts';
+import type { AgentName } from './config.ts';
 
 export interface StatusRow {
   task: string;
@@ -30,13 +32,22 @@ export interface StatusRow {
   /** ISO time of the last pull that took the current report; null when never pulled or the report changed since. */
   pulled: string | null;
   lastLine: string;
+  /** What to do about this row (orphans: the adopt command); null otherwise. */
+  hint: string | null;
+}
+
+/** For a task whose agent is unknown: guess it from the screen (Codex draws "›" prompts and "OpenAI Codex"). */
+export function guessAgent(screen: string): AgentName {
+  return /OpenAI Codex|^\s*›/m.test(screen) ? 'codex' : 'claude';
 }
 
 export async function collectStatus(ctx: Context): Promise<StatusRow[]> {
   const { runner, tmux, config } = ctx;
   const live = new Set(await tmux.listWindows());
   const rows: StatusRow[] = [];
+  const knownWindows = new Set<string>();
   for (const record of listTaskRecords(config)) {
+    knownWindows.add(record.window);
     const alive = live.has(record.window);
     const startedMs = Date.parse(record.started);
     let reportMtime: number | undefined;
@@ -57,6 +68,8 @@ export async function collectStatus(ctx: Context): Promise<StatusRow[]> {
       const screen = await tmux.capture(record.window);
       if (screen.code === 0) screenText = screen.stdout;
     }
+    const screenAgent = record.agent === 'unknown' ? guessAgent(screenText) : record.agent;
+    const settings = config.agents[screenAgent];
     rows.push({
       task: record.task,
       agent: record.agent,
@@ -65,14 +78,41 @@ export async function collectStatus(ctx: Context): Promise<StatusRow[]> {
       requested: `${record.requested.agent} ${formatModelEffort(record.requested)}`,
       effective: `${record.agent} ${record.model}/${record.effort}`,
       switchedBy: record.switchedBy ?? null,
-      state: taskState({ alive, screen: screenText, settings: config.agents[record.agent], reportReady }),
+      state: taskState({ alive, screen: screenText, settings, reportReady }),
       window: alive ? 'alive' : 'gone',
-      started: record.started ? record.started.replace('T', ' ').slice(0, 16) : '-',
+      started: formatLocalTime(record.started),
       duration,
       report: reportMtime !== undefined ? 'yes' : 'missing',
       reportPath: record.report,
       pulled: record.pulled && reportMtime !== undefined && Date.parse(record.pulled) >= reportMtime ? record.pulled : null,
-      lastLine: lastNonEmptyLine(screenText),
+      lastLine: lastContentLine(screenText, settings.footerPatterns),
+      hint: null,
+    });
+  }
+  // Windows of the session that agentctl has no state file for: never skipped silently.
+  for (const window of [...live].sort()) {
+    if (window === WATCH_WINDOW || knownWindows.has(window)) continue;
+    const screen = await tmux.capture(window);
+    const screenText = screen.code === 0 ? screen.stdout : '';
+    const agent = guessAgent(screenText);
+    const task = window.toUpperCase();
+    rows.push({
+      task,
+      agent: 'unknown',
+      model: 'unknown',
+      effort: 'unknown',
+      requested: '-',
+      effective: 'unknown',
+      switchedBy: null,
+      state: 'orphan',
+      window: 'alive',
+      started: '-',
+      duration: '-',
+      report: 'missing',
+      reportPath: '',
+      pulled: null,
+      lastLine: lastContentLine(screenText, config.agents[agent].footerPatterns),
+      hint: orphanHint(ctx, window),
     });
   }
   return rows;
@@ -87,11 +127,18 @@ export async function reportStatus(ctx: Context): Promise<{ rows: StatusRow[]; m
 /** Compact Markdown table of all tasks, to paste at the start of a planning chat. */
 export function statusMarkdown(rows: StatusRow[]): string {
   const cell = (s: string): string => s.replace(/\|/g, '\\|');
-  const pulled = (r: StatusRow): string => (r.report === 'missing' ? '-' : r.pulled ? `yes (${r.pulled.replace('T', ' ').slice(0, 16)})` : 'no');
+  const pulled = (r: StatusRow): string => (r.report === 'missing' ? '-' : r.pulled ? `yes (${formatLocalTime(r.pulled)})` : 'no');
   const lines = [
     '| task | agent/model/effort | state | time | report | pulled? |',
     '|---|---|---|---|---|---|',
     ...rows.map((r) => `| ${cell(r.task)} | ${cell(`${r.agent}/${r.model}/${r.effort}`)} | ${r.state} | ${r.duration} | ${r.report} | ${pulled(r)} |`),
   ];
   return `${lines.join('\n')}\n`;
+}
+
+/** Command that restores the state file of an orphan window. */
+export function orphanHint(ctx: Context, window: string): string {
+  const task = window.toUpperCase();
+  const report = `${ctx.config.cache}/${window}/${task}.md`;
+  return `no state file in ${ctx.config.stateDir}/${window}: agentctl adopt ${task} --report ${shellQuote(report)}`;
 }

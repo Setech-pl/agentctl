@@ -19,6 +19,11 @@ export function renderStatusTable(rows: StatusRow[], maxLast = 60): string[] {
   return [fmt(header), ...body.map(fmt)];
 }
 
+/** Lines under the status table: what to do about rows that need an action (orphans). */
+export function renderStatusHints(rows: StatusRow[]): string[] {
+  return rows.filter((r) => r.hint).map((r) => `${r.task}: ${r.hint}`);
+}
+
 const MARK = { ok: '✓', warn: '!', fail: '✗' } as const;
 
 export function renderChecks(checks: Check[]): string[] {

@@ -92,7 +92,7 @@ describe('new: waiting for folder trust', () => {
     await assert.rejects(newTasks(ctx, specsFor(config, repo, ['NC-1'])), (e: Error & { hint?: string }) => {
       assert.equal(e.message, 'NC-1: agent still waits for folder trust after 3s – attach: tmux attach -t agentctl, confirm in window nc-1');
       assert.match(e.hint ?? '', /never answers that dialog/);
-      assert.match(e.hint ?? '', new RegExp(`agentctl send ${path.join(config.cache, 'nc-1', 'TASK.md')}`));
+      assert.match(e.hint ?? '', new RegExp(`agentctl send ${path.join(config.stateDir, 'nc-1', 'TASK.md')}`));
       assert.match(e.hint ?? '', /raise agents\.claude\.trust_timeout/);
       return true;
     });
@@ -122,7 +122,7 @@ describe('new: waiting for folder trust', () => {
     const options: NewOptions = { signal: controller.signal };
     await assert.rejects(newTasks(ctx, specsFor(config, repo, ['NC-1', 'NC-2', 'NC-3']), options), (e: Error & { hint?: string }) => {
       assert.equal(e.message, 'NC-1: interrupted while waiting for the agent; window agentctl:nc-1 stays open, the prompt was not sent, not started: NC-2, NC-3');
-      assert.equal(e.hint, `Once the agent shows its input, deliver the prompt with: agentctl send ${path.join(config.cache, 'nc-1', 'TASK.md')}`);
+      assert.equal(e.hint, `Once the agent shows its input, deliver the prompt with: agentctl send ${path.join(config.stateDir, 'nc-1', 'TASK.md')}`);
       return true;
     });
     assert.equal(pastes(runner.commands).length, 0);
@@ -229,7 +229,7 @@ describe('agentctl new: --no-wait-trust and Ctrl-C through the CLI', () => {
     const r = await run(['new', spec], { interruptSignal: () => ({ signal: controller.signal, dispose: () => void disposed++ }) }, runner, config);
     assert.equal(r.code, 1);
     assert.match(r.stderr, /^error: NC-1: interrupted while waiting for the agent; window agentctl:nc-1 stays open/);
-    assert.match(r.stderr, new RegExp(`hint: Once the agent shows its input, deliver the prompt with: agentctl send ${path.join(config.cache, 'nc-1', 'TASK.md')}`));
+    assert.match(r.stderr, new RegExp(`hint: Once the agent shows its input, deliver the prompt with: agentctl send ${path.join(config.stateDir, 'nc-1', 'TASK.md')}`));
     assert.equal(disposed, 1);
     assert.equal(pastes(runner.commands).length, 0);
   });

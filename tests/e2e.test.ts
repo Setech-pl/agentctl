@@ -61,8 +61,9 @@ Review NC-1.
     const commands = lines.filter((l) => l && !l.startsWith('#')).map((l) => l.replace(/^(write \S+) \(\d+ bytes\)$/, '$1'));
     assert.deepEqual(commands, [
       `git -C ${repo} worktree add -b nc-1 ${wtDir} main`,
+      `mkdir -p ${config.stateDir}/nc-1`,
+      `write ${config.stateDir}/nc-1/TASK.md`,
       `mkdir -p ${config.cache}/nc-1`,
-      `write ${config.cache}/nc-1/TASK.md`,
       `tmux new-session -d -s agentctl -n nc-1 -c ${wtDir} -e NEON_CITY_TASK=NC-1`,
       `tmux send-keys -t '=agentctl:nc-1' -l -- 'claude --model opus --effort high'`,
       'tmux send-keys -t \'=agentctl:nc-1\' Enter',
@@ -70,8 +71,9 @@ Review NC-1.
       'tmux paste-buffer -p -d -b agentctl-nc-1 -t \'=agentctl:nc-1\'',
       'tmux send-keys -t \'=agentctl:nc-1\' Enter',
       `git -C ${repo} worktree add --detach ${path.join(root, 'wt', 'app-nc-2')}`,
+      `mkdir -p ${config.stateDir}/nc-2`,
+      `write ${config.stateDir}/nc-2/TASK.md`,
       `mkdir -p ${config.cache}/nc-2`,
-      `write ${config.cache}/nc-2/TASK.md`,
       `tmux new-window -d -t '=agentctl:' -n nc-2 -c ${path.join(root, 'wt', 'app-nc-2')}`,
       `tmux send-keys -t '=agentctl:nc-2' -l -- 'codex --sandbox danger-full-access -m gpt-6.1-sol -c model_reasoning_effort=high'`,
       'tmux send-keys -t \'=agentctl:nc-2\' Enter',
@@ -159,9 +161,9 @@ describe('interrupt --dry-run (the real binary)', () => {
     const root = scratch.sub('e2e-interrupt');
     const config = makeConfig(root);
     const repo = scratch.sub('e2e-interrupt/app');
-    fs.mkdirSync(path.join(config.cache, 'nc-1'), { recursive: true });
+    fs.mkdirSync(path.join(config.stateDir, 'nc-1'), { recursive: true });
     fs.writeFileSync(
-      path.join(config.cache, 'nc-1', 'TASK.md'),
+      path.join(config.stateDir, 'nc-1', 'TASK.md'),
       `---\nagentctl: 1\ntask: NC-1\nwindow: nc-1\nsession: agentctl\nagent: codex\nmodel: default\neffort: high\nrepos: []\nstarted: 2026-10-31T10:00:00.000Z\n---\nGo\n`,
     );
     const r = agentctl(['interrupt', 'NC-1', '--dry-run'], { AGENTCTL_HOME: path.join(root, 'home') });

@@ -19,7 +19,7 @@ export async function interruptTask(ctx: Context, taskArg: string): Promise<Inte
   const record = readTaskRecord(config, window);
   if (!record) {
     throw new AgentctlError(
-      `unknown task ${taskArg}: no TASK.md in ${config.cache}/${window}, so the agent (and its interrupt key) is unknown`,
+      `unknown task ${taskArg}: no TASK.md in ${config.stateDir}/${window}, so the agent (and its interrupt key) is unknown`,
       'List known tasks with "agentctl status".',
     );
   }
@@ -29,7 +29,7 @@ export async function interruptTask(ctx: Context, taskArg: string): Promise<Inte
       throw new AgentctlError(`no tmux window "${window}" in session "${config.session}"`, 'The task is dead; see "agentctl status". Nothing to interrupt.');
     }
   }
-  const key = config.agents[record.agent].interruptKey;
+  const key = config.agents[record.agent === 'unknown' ? 'claude' : record.agent].interruptKey;
   await tmux.sendKey(window, key);
   ctx.info(`${record.task}: sent ${key} to ${config.session}:${window}; the window stays open`);
   return { task: record.task, window, key };

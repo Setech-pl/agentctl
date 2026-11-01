@@ -27,7 +27,7 @@ export function findAuthor(task: string, batch: ResolvedSpec[], config: GlobalCo
   const inBatch = batch.find((s) => s.task === task);
   if (inBatch) return { agent: inBatch.agent, model: inBatch.model };
   const record = readTaskRecord(config, task.toLowerCase());
-  return record ? { agent: record.agent, model: record.model } : undefined;
+  return record && record.agent !== 'unknown' ? { agent: record.agent, model: record.model } : undefined;
 }
 
 export interface LiveWindow {

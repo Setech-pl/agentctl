@@ -41,7 +41,7 @@ async function requireTool(ctx: Context, tool: string, args: string[]): Promise<
 const SETUP_TIMEOUT_MS = 20 * 60_000;
 const SETUP_TAIL_LINES = 15;
 
-/** Run the spec's `setup` commands in the primary worktree, logging to `<cache>/<task>/setup.log`. A failure stops `new`. */
+/** Run the spec's `setup` commands in the primary worktree, logging to `<state_dir>/<task>/setup.log`. A failure stops `new`. */
 async function runSetup(ctx: Context, spec: ResolvedSpec, worktree: string): Promise<void> {
   if (spec.setup.length === 0) return;
   const { runner, config } = ctx;
@@ -119,6 +119,8 @@ export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: Ne
     const record = recordFromSpec(spec, config, runner.now());
     await runner.mkdir(taskDir(config, spec.window));
     await runner.writeFile(taskFile(config, spec.window), renderTaskMd(record, spec.prompt));
+    // The agent's own folder: only the report goes there (agentctl's state is in state_dir).
+    await runner.mkdir(path.dirname(spec.report));
 
     // 5. window + agent
     if (sessionUp) await tmux.newWindow(spec.window, primary, spec.env);

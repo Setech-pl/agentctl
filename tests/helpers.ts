@@ -25,11 +25,11 @@ export function useScratch(): { dir: string; sub: (name: string) => string } {
   };
 }
 
-/** Write `<root>/home/config.yaml` (cache = <root>/cache) and load it. */
+/** Write `<root>/home/config.yaml` (cache = <root>/cache, state_dir = <root>/state) and load it. */
 export function makeConfig(root: string, extraYaml = ''): GlobalConfig {
   const home = path.join(root, 'home');
   fs.mkdirSync(home, { recursive: true });
-  fs.writeFileSync(path.join(home, 'config.yaml'), `cache: ${path.join(root, 'cache')}\n${extraYaml}`);
+  fs.writeFileSync(path.join(home, 'config.yaml'), `cache: ${path.join(root, 'cache')}\nstate_dir: ${path.join(root, 'state')}\n${extraYaml}`);
   return loadGlobalConfig(home);
 }
 

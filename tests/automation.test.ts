@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { formatLocalTime } from '../src/core/util.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
@@ -183,7 +184,7 @@ describe('new --clip / send --clip through the CLI', () => {
     const r = await run(['new', '--clip', '-y'], specText, undefined, runner);
     assert.equal(r.code, 0, r.stderr);
     assert.deepEqual(r.asked, []);
-    const taskMd = runner.written.get(path.join(config.cache, 'nc-1', 'TASK.md'));
+    const taskMd = runner.written.get(path.join(config.stateDir, 'nc-1', 'TASK.md'));
     assert.match(taskMd ?? '', /task: NC-1[\s\S]*---\n\nBody\./);
     assert.ok(runner.commands.some((c) => c.startsWith('git -C')));
   });
@@ -569,7 +570,7 @@ describe('status --clip', () => {
     assert.equal(statusMarkdown(rows), [
       '| task | agent/model/effort | state | time | report | pulled? |',
       '|---|---|---|---|---|---|',
-      `| NC-1 | claude/opus/high | report-ready | 1h 02m | yes | yes (${new Date(runner.now()).toISOString().replace('T', ' ').slice(0, 16)}) |`,
+      `| NC-1 | claude/opus/high | report-ready | 1h 02m | yes | yes (${formatLocalTime(new Date(runner.now()).toISOString())}) |`,
       '| NC-2 | codex/gpt-6/high | working | 1m 10s | missing | - |',
       '| NC-3 | claude/opus/high | dead | - | missing | - |',
       '',

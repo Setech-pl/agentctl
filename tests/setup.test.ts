@@ -51,7 +51,7 @@ describe('new: worktree -> setup -> links -> window', () => {
     assert.deepEqual([at('worktree add'), at('npm ci'), at('echo done'), at('ln -sfn'), at('tmux new-session')].every((i) => i >= 0), true);
     assert.ok(at('worktree add') < at('npm ci') && at('npm ci') < at('echo done') && at('echo done') < at('ln -sfn') && at('ln -sfn') < at('tmux new-session'));
     assert.ok(cmds.includes(`(cd ${wt} && sh -c 'npm ci --prefer-offline')`), 'runs in the first worktree');
-    assert.ok(cmds.some((c) => c.startsWith(`append ${path.join(config.cache, 'nc-1', 'setup.log')}`)), 'output goes to setup.log');
+    assert.ok(cmds.some((c) => c.startsWith(`append ${path.join(config.stateDir, 'nc-1', 'setup.log')}`)), 'output goes to setup.log');
   });
 
   it('a failing setup command stops new with the output tail; worktree stays, no window', async () => {
@@ -63,7 +63,7 @@ describe('new: worktree -> setup -> links -> window', () => {
       assert.match(e.message, /npm ERR! boom/);
       assert.match(e.message, /line 30/);
       assert.doesNotMatch(e.message, /line 1\n/, 'only the tail is shown');
-      assert.match(e.hint ?? '', new RegExp(`${path.join(config.cache, 'nc-2', 'setup.log')}.*kept.*no window`));
+      assert.match(e.hint ?? '', new RegExp(`${path.join(config.stateDir, 'nc-2', 'setup.log')}.*kept.*no window`));
       return true;
     });
     assert.ok(runner.commands.some((c) => c.includes('worktree add')));
