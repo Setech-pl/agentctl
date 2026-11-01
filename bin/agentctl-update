@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+# agentctl-update: install or update the stable copy of agentctl and point the global commands at it.
+# The repo (where you develop) is never what runs day to day; see README, "Stable install and updates".
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: agentctl-update [--ref <ref>] [--dry-run] [--no-watch] [--no-link] [--help]
+
+Updates the stable copy of agentctl (a detached git worktree of the repo) and makes the global
+`agentctl` and `agentctl-update` commands run from it:
+
+  1. git fetch origin (in the repo)
+  2. no stable copy yet: git worktree add --detach <stable> <ref>
+     stable copy exists: refuse if it has local changes, else git checkout --detach <ref>
+  3. npm ci, then npm link, in the stable copy
+  4. agentctl doctor (a failure makes this script exit non-zero)
+  5. if window "watch" exists in tmux session "agentctl": kill it and start `agentctl watch --tmux` from the new version
+     (no other window or task is touched)
+  6. print the previous and the new commit, and whether watch was restarted
+
+Options:
+  --ref <ref>   what to install (default: origin/main)
+  --dry-run     print the commands without running any of them
+  --no-watch    do not restart the watch window
+  --no-link     do not run npm link (for tests: the global commands stay where they are)
+  --help        this text
+
+Environment:
+  AGENTCTL_REPO        the repo (default: the directory above this script's bin/, symlinks resolved)
+  AGENTCTL_STABLE_DIR  the stable copy (default: ~/Projects/agentctl-stable)
+  AGENTCTL_SESSION     tmux session of the watch window (default: agentctl)
+EOF
+}
+
+# One word as a shell needs it typed. A word starting with "=" is quoted too: zsh expands =word to a program path.
+q() { case "$1" in =*) printf "'%s'" "$1" ;; *) printf '%q' "$1" ;; esac; }
+
+# Print a command the way a shell would need it typed.
+show() { printf '+'; local a; for a in "$@"; do printf ' '; q "$a"; done; printf '\n'; }
+
+# Run a command, or only print it in a dry run.
+DRY_RUN=0
+run() {
+  show "$@"
+  if [ "$DRY_RUN" -eq 0 ]; then "$@"; fi
+}
+
+# Run a command inside a directory (or only print it in a dry run).
+run_in() {
+  local dir="$1"; shift
+  printf '+ (cd %s &&' "$(q "$dir")"; local a; for a in "$@"; do printf ' '; q "$a"; done; printf ')\n'
+  if [ "$DRY_RUN" -eq 0 ]; then (cd "$dir" && "$@"); fi
+}
+
+# Directory of this script with symlinks resolved (npm link makes a symlink; macOS has no readlink -f everywhere).
+script_dir() {
+  local src="${BASH_SOURCE[0]}" dir
+  while [ -L "$src" ]; do
+    dir="$(cd -P "$(dirname "$src")" && pwd)"
+    src="$(readlink "$src")"
+    case "$src" in /*) ;; *) src="$dir/$src" ;; esac
+  done
+  cd -P "$(dirname "$src")" && pwd
+}
+
+commit_of() { git -C "$1" log -1 --format='%h %s' "${2:-HEAD}" 2>/dev/null || echo '(none)'; }
+
+main() {
+  local ref='origin/main' watch=1 link=1
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --ref) [ $# -ge 2 ] || { echo "agentctl-update: --ref needs a value" >&2; return 2; }; ref="$2"; shift 2 ;;
+      --ref=*) ref="${1#--ref=}"; shift ;;
+      --dry-run) DRY_RUN=1; shift ;;
+      --no-watch) watch=0; shift ;;
+      --no-link) link=0; shift ;;
+      -h|--help) usage; return 0 ;;
+      *) echo "agentctl-update: unknown argument: $1 (see --help)" >&2; return 2 ;;
+    esac
+  done
+
+  local repo stable session
+  repo="${AGENTCTL_REPO:-$(cd "$(script_dir)/.." && pwd)}"
+  stable="${AGENTCTL_STABLE_DIR:-$HOME/Projects/agentctl-stable}"
+  session="${AGENTCTL_SESSION:-agentctl}"
+  [ "$DRY_RUN" -eq 1 ] && echo "agentctl-update --dry-run: nothing below is executed"
+  echo "repo:   $repo"
+  echo "stable: $stable"
+  echo "ref:    $ref"
+
+  run git -C "$repo" fetch origin
+
+  local before='(none)'
+  if [ -e "$stable" ]; then
+    before="$(commit_of "$stable")"
+    if [ -n "$(git -C "$stable" status --porcelain)" ]; then
+      echo "agentctl-update: $stable has local changes; refusing to touch it (commit, stash or discard them first):" >&2
+      git -C "$stable" status --short >&2
+      return 1
+    fi
+    run git -C "$stable" checkout --detach "$ref"
+  else
+    run git -C "$repo" worktree add --detach "$stable" "$ref"
+  fi
+
+  run_in "$stable" npm ci
+  if [ "$link" -eq 1 ]; then
+    run_in "$stable" npm link
+  else
+    echo "(--no-link: npm link skipped, the global commands are unchanged)"
+  fi
+
+  local doctor_rc=0
+  show "$stable/bin/agentctl.ts" doctor
+  if [ "$DRY_RUN" -eq 0 ]; then "$stable/bin/agentctl.ts" doctor || doctor_rc=$?; fi
+
+  local watch_result='no (--no-watch)'
+  if [ "$watch" -eq 1 ]; then
+    watch_result='no (no window "watch" in session "'"$session"'")'
+    if tmux has-session -t "=$session" 2>/dev/null && tmux list-windows -t "=$session" -F '#{window_name}' 2>/dev/null | grep -qx 'watch'; then
+      if [ "$doctor_rc" -ne 0 ]; then
+        watch_result='no (doctor failed, the old watcher keeps running)'
+      else
+        run tmux kill-window -t "=$session:watch"
+        run "$stable/bin/agentctl.ts" watch --tmux
+        watch_result='yes'
+        [ "$DRY_RUN" -eq 1 ] && watch_result='yes (dry run: would be)'
+      fi
+    fi
+  fi
+
+  echo
+  echo "previous: $before"
+  if [ "$DRY_RUN" -eq 1 ]; then echo "new:      (dry run) $ref"; else echo "new:      $(commit_of "$stable")"; fi
+  echo "watch restarted: $watch_result"
+  if [ "$doctor_rc" -ne 0 ]; then echo "agentctl doctor failed (exit $doctor_rc)" >&2; fi
+  return "$doctor_rc"
+}
+
+main "$@"; exit $?
