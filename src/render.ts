@@ -1,13 +1,16 @@
 import type { Check } from './core/doctor.ts';
 import { collideText } from './core/collisions.ts';
 import type { StatusRow } from './core/status.ts';
+import { formatTokens } from './core/usage-parse.ts';
 
 /** Plain-text status table. The core returns rows (data); this is only presentation. */
 export function renderStatusTable(rows: StatusRow[], maxLast = 60, opts: { cohort?: boolean } = {}): string[] {
   // The COLLIDE column is there only while some task collides with another one, COHORT only while some task has a cohort.
   const collide = rows.some((r) => r.collide.length > 0);
   const cohort = opts.cohort !== false && rows.some((r) => r.cohort !== null);
-  const header = ['TASK', ...(cohort ? ['COHORT'] : []), 'AGENT/MODEL/EFFORT', 'STATE', 'WINDOW', 'STARTED', 'DURATION', 'PROGRESS', ...(collide ? ['COLLIDE'] : []), 'REPORT', 'LAST LINE'];
+  // TOKENS is there when some task has a session log to count (a task without one says n/d).
+  const tokens = rows.some((r) => Boolean(r.tokens));
+  const header = ['TASK', ...(cohort ? ['COHORT'] : []), 'AGENT/MODEL/EFFORT', 'STATE', 'WINDOW', 'STARTED', 'DURATION', ...(tokens ? ['TOKENS'] : []), 'PROGRESS', ...(collide ? ['COLLIDE'] : []), 'REPORT', 'LAST LINE'];
   const body = rows.map((r) => [
     r.archived ? `${r.task} (archived)` : r.cancelled ? `${r.task} (cancelled)` : r.closed ? `${r.task} (closed)` : r.hidden ? `${r.task} (hidden)` : r.task,
     ...(cohort ? [r.cohort ?? '-'] : []),
@@ -16,6 +19,7 @@ export function renderStatusTable(rows: StatusRow[], maxLast = 60, opts: { cohor
     r.window,
     r.startedLocal,
     r.duration,
+    ...(tokens ? [r.tokens ? formatTokens(r.tokens.fresh) : 'n/d'] : []),
     r.progress?.text ?? '-',
     ...(collide ? [collideText(r.collide) || '-'] : []),
     r.report,

@@ -42,6 +42,7 @@ import { applyStatusLine, statusTmuxLine } from './core/statusline.ts';
 import { BOARD_WINDOW, ensureWindow } from './core/windows.ts';
 import { interruptTask } from './core/interrupt.ts';
 import { handleTap } from './core/usage-tap.ts';
+import { collectUsage, renderUsage, usageMarkdown } from './core/usage-report.ts';
 import { loadGlobalConfig } from './core/config.ts';
 import { applyExamples } from './examples.ts';
 import type { Effort, GlobalConfig } from './core/config.ts';
@@ -586,6 +587,31 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         for (const l of renderStatusHints(rows)) line(`hint: ${l}`);
         for (const l of await queueStatusLines(ctx, cohort)) line(l);
         if (hiddenCount > 0) line(`${hiddenCount} hidden task${hiddenCount === 1 ? '' : 's'} not shown: agentctl status --all`);
+      }),
+    );
+
+  program
+    .command('usage')
+    .description('Token usage of the tasks and the state of the plans: per provider the limit used (5 h and weekly window, with the reset) and the tokens today and in the period, the active tasks with their tokens, the cohorts. What a provider does not tell is n/d.')
+    .option('--cohort <name>', 'only the tasks of this cohort')
+    .option('--since <age>', 'period of the token columns, whole days back: 12h, 7d, 2w (default 7d)')
+    .option('--json', 'machine-readable output')
+    .option('--clip', 'copy a compact Markdown table to the clipboard (to paste at the start of a chat session)')
+    .action(
+      guarded(async (opts: { cohort?: string; since?: string; json?: boolean; clip?: boolean }) => {
+        if (opts.json && opts.clip) throw new AgentctlError('--json and --clip exclude each other');
+        const ctx = contextFor(false, { migrate: false });
+        const cohort = opts.cohort === undefined ? undefined : findCohort(ctx.config, opts.cohort).name;
+        const report = await collectUsage(ctx, { cohort, since: opts.since });
+        if (opts.json) return line(JSON.stringify(report, null, 2));
+        if (opts.clip) {
+          const md = usageMarkdown(report);
+          const copy = await writeClipboard(ctx.runner, md);
+          if (copy.ok) return line(`Copied the usage to the clipboard (${copy.tool}), ${md.length} characters.`);
+          line(`${copy.error}; here is the table:`);
+          return deps.stdout(md);
+        }
+        for (const l of renderUsage(report)) line(l);
       }),
     );
 

@@ -27,6 +27,7 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`overlap`](#agentctl-overlap) | Which active tasks of one repository changed the same files (git diff of each worktree against its base, plus uncommitted files). Without a task: every pair. |
 | [`send`](#agentctl-send) | Paste a follow-up prompt into the existing window of each task in the file. |
 | [`status`](#agentctl-status) | Table of tasks: window state, running time, report, last output line. |
+| [`usage`](#agentctl-usage) | Token usage of the tasks and the state of the plans: per provider the limit used (5 h and weekly window, with the reset) and the tokens today and in the period, the active tasks with their tokens, the cohorts. What a provider does not tell is n/d. |
 | [`archive`](#agentctl-archive) | Move the state of closed tasks (agentctl close) to the archive folder next to the state folder. Reports and worktrees are not touched. |
 | [`hide`](#agentctl-hide) | Take tasks off the board and "status" (they stay in "status --all" and on the board under "a"). Does not close the task or touch its worktree. |
 | [`unhide`](#agentctl-unhide) | Show hidden tasks again on the board and in "status". A task shown on purpose is not hidden again by board.auto_hide_pulled_dead. |
@@ -428,6 +429,31 @@ agentctl status --json                 # rows with started (UTC) and startedLoca
 agentctl status --clip                 # Markdown table to paste into a chat
 agentctl status --all                  # hidden, closed, cancelled and archived tasks too
 agentctl status --cohort sprint-1      # only the tasks of one cohort (also with --json, --clip)
+```
+
+## agentctl usage
+
+Token usage of the tasks and the state of the plans: per provider the limit used (5 h and weekly window, with the reset) and the tokens today and in the period, the active tasks with their tokens, the cohorts. What a provider does not tell is n/d.
+
+```
+agentctl usage [options]
+```
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--cohort <name>` | only the tasks of this cohort |  |
+| `--since <age>` | period of the token columns, whole days back: 12h, 7d, 2w (default 7d) |  |
+| `--json` | machine-readable output |  |
+| `--clip` | copy a compact Markdown table to the clipboard (to paste at the start of a chat session) |  |
+
+Examples:
+
+```sh
+agentctl usage                         # plans, tokens today and in 7 days, active tasks, cohorts
+agentctl usage --since 30d             # the token columns over 30 days
+agentctl usage --cohort sprint-1       # only the tasks of one cohort
+agentctl usage --json
+agentctl usage --clip                  # Markdown table to the clipboard
 ```
 
 ## agentctl archive
