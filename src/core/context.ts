@@ -7,8 +7,8 @@ import { Tmux } from './tmux.ts';
 /** Everything a command needs: where side effects go, the config, and where to print. */
 export class Context {
   readonly runner: Runner;
-  readonly config: GlobalConfig;
-  readonly tmux: Tmux;
+  private current: GlobalConfig;
+  private tmuxClient: Tmux;
   /** Asks a yes/no question on the terminal; undefined when there is no TTY. */
   readonly confirm: ((question: string) => Promise<boolean>) | undefined;
   private sink: (line: string) => void;
@@ -16,12 +16,31 @@ export class Context {
   constructor(runner: Runner, config: GlobalConfig, out: (line: string) => void, confirm?: (question: string) => Promise<boolean>) {
     this.confirm = confirm;
     this.runner = runner;
-    this.config = config;
-    this.tmux = new Tmux(runner, config.session, {
+    this.current = config;
+    this.tmuxClient = Context.tmuxFor(runner, config);
+    this.sink = out;
+  }
+
+  private static tmuxFor(runner: Runner, config: GlobalConfig): Tmux {
+    return new Tmux(runner, config.session, {
       icons: knownIcons(config.watch.windowIcons),
       idFor: (window) => readTaskRecord(config, window)?.windowId,
     });
-    this.sink = out;
+  }
+
+  /** The configuration in force. `watch` replaces it when the file changes (`setConfig`), so read it at the moment you need it. */
+  get config(): GlobalConfig {
+    return this.current;
+  }
+
+  get tmux(): Tmux {
+    return this.tmuxClient;
+  }
+
+  /** Put a reloaded configuration in force (the tmux client follows the new session name and icons). */
+  setConfig(config: GlobalConfig): void {
+    this.current = config;
+    this.tmuxClient = Context.tmuxFor(this.runner, config);
   }
 
   /** Normal output. */

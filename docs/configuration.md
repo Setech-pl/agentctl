@@ -39,6 +39,7 @@ Column "Layers": **g** global config, **p** project config, **s** spec.
 | `limits` | mapping | none | g | Most simultaneous windows per provider. |
 | `limits.claude` | positive integer | unlimited | g | Cap for Claude windows. |
 | `limits.codex` | positive integer | unlimited | g | Cap for Codex windows. |
+| `limits.count_external` | boolean | `false` | g | Terminal sessions of `claude` / `codex` outside the windows of agentctl (found with `ps`, not MCP servers, headless runs or agentctl itself) count against the limit and show as "external" in `agentctl limits`. Places for agents you start by hand can also be held with `agentctl limits reserve`. |
 | `agents` | mapping | see below | g | Settings per agent: `agents.claude`, `agents.codex`. |
 | `equivalents` | list | `[]` | g | Extra Claude and Codex pairs, `{claude: "opus/medium", codex: "gpt-6-astra/low"}`, consulted before the built-in table. Both sides are `model/effort`. |
 | `mirror_dir` | path | none (off) | g | `status` and `pull` copy reports and `status.json` there. |

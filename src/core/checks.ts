@@ -34,6 +34,10 @@ export interface LiveWindow {
   window: string;
   /** Unknown when the window was not created through agentctl. */
   agent?: AgentName;
+  /** Absent: a window of agentctl. `reserved`: a place held with `limits reserve`; `external`: a session found outside (limits.count_external). */
+  kind?: 'reserved' | 'external';
+  pid?: number;
+  cwd?: string;
 }
 
 /** Provider limit: counts windows already running for the agent and refuses one more past the limit. */

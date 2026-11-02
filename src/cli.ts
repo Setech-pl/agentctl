@@ -29,6 +29,7 @@ import { migrateLegacyState } from './core/taskstore.ts';
 import { newTasks } from './core/new.ts';
 import { commitQueueAdd, describeQueue, isPaused, moveToFront, planQueueAdd, readQueue, queueStatusLines, removeFromQueue, renderQueueList, retryEntry, setPaused, unblockEntry, waiting } from './core/queue.ts';
 import { liveWindows } from './core/plan.ts';
+import { applySetLimits, collectLimits, parseAssignments, parseCounts, planSetLimits, releasePlaces, renderLimits, reservePlaces } from './core/limits.ts';
 import { collectOverlaps, renderOverlaps, touchWarnings } from './core/collisions.ts';
 import type { NewOptions } from './core/new.ts';
 import { pullReady, pullTask } from './core/pull.ts';
@@ -594,6 +595,65 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         for (const l of renderStatusHints(rows)) line(`hint: ${l}`);
         for (const l of await queueStatusLines(ctx, cohort)) line(l);
         if (hiddenCount > 0) line(`${hiddenCount} hidden task${hiddenCount === 1 ? '' : 's'} not shown: agentctl status --all`);
+      }),
+    );
+
+  const limits = program
+    .command('limits')
+    .description('The limits of simultaneous agents per provider and what uses them up: agentctl windows, places reserved for agents you started by hand, and (limits.count_external) claude/codex sessions found in other terminals. Without a subcommand: show.');
+
+  limits
+    .command('show', { isDefault: true })
+    .description('Per provider: limit, places used, free places, the windows of agentctl, the reserved and the external ones, and the tasks waiting in the queue.')
+    .option('--json', 'machine-readable output')
+    .action(
+      guarded(async (opts: { json?: boolean }) => {
+        const ctx = contextFor(false, { migrate: false });
+        const report = collectLimits(ctx.config, await liveWindows(ctx));
+        if (opts.json) return line(JSON.stringify(report, null, 2));
+        for (const l of renderLimits(report)) line(l);
+      }),
+    );
+
+  limits
+    .command('set')
+    .description('Change the limits in config.yaml (comments and the order of the keys stay; the old file is kept as config.yaml.bak). A running watch and the MCP server pick it up at once; waiting tasks of the queue start at the next tick.')
+    .argument('<limits...>', 'claude=3 codex=5; off removes a limit (codex=off)')
+    .option('-y, --yes', 'do not ask')
+    .option('--dry-run', 'print what would be written, change nothing')
+    .action(
+      guarded(async (assignments: string[], opts: { yes?: boolean; dryRun?: boolean }) => {
+        const ctx = contextFor(Boolean(opts.dryRun), { migrate: false });
+        const plan = planSetLimits(ctx.config, parseAssignments(assignments));
+        if (!(await confirmAction(ctx, plan.summary, 'Write it?', Boolean(opts.yes) || Boolean(opts.dryRun)))) return;
+        await applySetLimits(ctx, plan);
+        if (!opts.dryRun) line('Done. The limits are in force now.');
+      }),
+    );
+
+  limits
+    .command('reserve')
+    .description('Hold places for agents you start by hand (they count against the limit, so the queue leaves room for them). Several reservations add up; "limits release" gives them back.')
+    .argument('<places...>', 'claude=1 codex=2 (a bare provider name means 1)')
+    .option('--note <text>', 'what the place is for (shown by "limits")')
+    .action(
+      guarded(async (places: string[], opts: { note?: string }) => {
+        const ctx = contextFor(false, { migrate: false });
+        const reservations = await reservePlaces(ctx, parseCounts(places, 1), opts.note);
+        line(`Reserved: ${Object.entries(reservations).map(([a, r]) => `${a} ${r.count}${r.note ? ` (${r.note})` : ''}`).join(', ')}`);
+      }),
+    );
+
+  limits
+    .command('release')
+    .description('Give reserved places back: claude=1 releases one, a bare provider name releases all of its places.')
+    .argument('<places...>', 'claude=1 or claude (all of its places)')
+    .action(
+      guarded(async (places: string[]) => {
+        const ctx = contextFor(false, { migrate: false });
+        const reservations = await releasePlaces(ctx, parseCounts(places, undefined));
+        const left = Object.entries(reservations).map(([a, r]) => `${a} ${r.count}`).join(', ');
+        line(left === '' ? 'Nothing is reserved now.' : `Still reserved: ${left}`);
       }),
     );
 
