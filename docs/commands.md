@@ -32,6 +32,7 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`limits set`](#agentctl-limits-set) | Change the limits in config.yaml (comments and the order of the keys stay; the old file is kept as config.yaml.bak). A running watch and the MCP server pick it up at once; waiting tasks of the queue start at the next tick. |
 | [`limits reserve`](#agentctl-limits-reserve) | Hold places for agents you start by hand (they count against the limit, so the queue leaves room for them). Several reservations add up; "limits release" gives them back. |
 | [`limits release`](#agentctl-limits-release) | Give reserved places back: claude=1 releases one, a bare provider name releases all of its places. |
+| [`events`](#agentctl-events) | What changed since the last time: reports that became ready (with the verdict), starts from the queue, questions, folder trust, blocked, cancelled and limited tasks, finished cohorts, plan thresholds, changed limits - then a line with the state now. Needs "agentctl watch" for what it sees (the journal is written by watch and by the commands). Each client (cli, mcp) has its own "last" marker. |
 | [`usage`](#agentctl-usage) | Token usage of the tasks and the state of the plans: per provider the limit used (5 h and weekly window, with the reset) and the tokens today and in the period, the active tasks with their tokens, the cohorts. What a provider does not tell is n/d. |
 | [`mark`](#agentctl-mark) | Say how a task turned out: ok, partial or fail (the result you judge, with an optional note). It goes to the history that "log" and "stats" read; the last mark of a task wins. |
 | [`log`](#agentctl-log) | The history of the tasks: when, agent/model/effort, how long, tokens, progress, the result you marked and the verdict of the report. One line per task, newest first. |
@@ -537,6 +538,30 @@ Examples:
 ```sh
 agentctl limits release claude=1
 agentctl limits release claude        # all reserved places of Claude
+```
+
+## agentctl events
+
+What changed since the last time: reports that became ready (with the verdict), starts from the queue, questions, folder trust, blocked, cancelled and limited tasks, finished cohorts, plan thresholds, changed limits - then a line with the state now. Needs "agentctl watch" for what it sees (the journal is written by watch and by the commands). Each client (cli, mcp) has its own "last" marker.
+
+```
+agentctl events [options]
+```
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--since <time>` | last (default: since this client looked), an age (30m, 2h, 1d), HH:MM or an ISO time |  |
+| `--cohort <name>` | only the events and tasks of this cohort |  |
+| `--keep` | do not move the "last" marker of the cli client |  |
+| `--json` | machine-readable output |  |
+| `--clip` | copy a compact Markdown text to the clipboard (to paste at the start of a chat) |  |
+
+Examples:
+
+```sh
+agentctl events                           # since the last call of the cli
+agentctl events --since 2h --cohort sprint-1
+agentctl events --clip                    # to paste at the start of a chat (does not move the marker)
 ```
 
 ## agentctl usage

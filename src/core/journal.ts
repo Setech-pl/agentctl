@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { GlobalConfig } from './config.ts';
 import type { Context } from './context.ts';
-import { isObject } from './util.ts';
+import { readTaskRecord } from './taskstore.ts';
+import { isObject, windowName } from './util.ts';
 
 /*
  * The journal of what happened to the tasks, one JSON line per event in `<AGENTCTL_HOME>/journal.jsonl`. `watch`, the queue, cancel and
@@ -28,7 +29,8 @@ export const journalPath = (config: Pick<GlobalConfig, 'path'>): string => path.
 
 /** Append an event. A journal that cannot be written never stops the work it describes. */
 export async function recordJournal(ctx: Context, entry: Omit<JournalEntry, 'at'>): Promise<void> {
-  const full: JournalEntry = { at: new Date(ctx.runner.now()).toISOString(), ...entry };
+  const cohort = entry.cohort ?? (entry.task ? readTaskRecord(ctx.config, windowName(entry.task))?.cohort : undefined);
+  const full: JournalEntry = { at: new Date(ctx.runner.now()).toISOString(), ...entry, ...(cohort ? { cohort } : {}) };
   try {
     await ctx.runner.appendFile(journalPath(ctx.config), `${JSON.stringify(full)}\n`);
   } catch {

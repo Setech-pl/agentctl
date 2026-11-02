@@ -3,6 +3,7 @@ import path from 'node:path';
 import YAML from 'yaml';
 import type { AgentModel } from './checks.ts';
 import { Alerts } from './alert.ts';
+import { recordJournal } from './journal.ts';
 import { cancelledTasks, checkAfter, findBlocked, blockedText, hasReport, unmetAfter, waitingText } from './depends.ts';
 import type { Blockers } from './depends.ts';
 import { touchWarnings } from './collisions.ts';
@@ -338,6 +339,7 @@ export async function announceBlocked(ctx: Context, notifier: Notifier, rows: re
       const text = `${entry.task} zablokowane – ${author} anulowane`;
       await opts.log?.(`queue: ${text}`);
       await notifyPlain(ctx, notifier, entry.task, text, opts.self);
+      await recordJournal(ctx, { kind: 'blocked', task: entry.task, text, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
       said.push(text);
     }
   }
@@ -571,6 +573,7 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
       fs.rmSync(queueLogFile(config, starting), { force: true });
       await opts.log?.(`queue: ${entry.task} started`);
       await notifyPlain(ctx, notifier, entry.task, `Uruchomiono ${entry.task} z kolejki`, opts.self);
+      await recordJournal(ctx, { kind: 'queue-start', task: entry.task, text: `Uruchomiono ${entry.task} z kolejki (${entry.agent})`, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
     } catch (e) {
       await failEntry(ctx, starting, errorMessage(e), notifier, opts, !opts.signal?.aborted, log).catch(() => undefined);
     } finally {
@@ -589,6 +592,7 @@ async function failEntry(ctx: Context, entry: QueueEntry, error: string, notifie
   await writeEntry(ctx, failed);
   await ctx.runner.writeFile(queueLogFile(config, failed), `${log.join('\n')}${log.length > 0 ? '\n' : ''}error: ${error}\n`);
   await opts.log?.(`queue: ${entry.task} failed: ${firstLine(error)}`);
+  await recordJournal(ctx, { kind: 'queue-failed', task: entry.task, text: `${entry.task}: start z kolejki nie powiódł się – ${firstLine(error)}`, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
   if (notify) await notifyPlain(ctx, notifier, entry.task, `${entry.task}: start z kolejki nie powiódł się – ${firstLine(error)} (agentctl queue retry ${entry.task})`, opts.self);
 }
 

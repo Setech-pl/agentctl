@@ -11,7 +11,7 @@ import type { McpDeps } from '../core/mcp-tools.ts';
 
 /** What the chat is told about the server as a whole, next to the descriptions of the tools. */
 export const SERVER_INSTRUCTIONS =
-  'agentctl dispatches coding agents (Claude Code, Codex) into tmux windows. Start with status to see the tasks; call pull_ready at the start of discussing finished work; ' +
+  'agentctl dispatches coding agents (Claude Code, Codex) into tmux windows. Call events_since at the start of every answer about the agents\' work: it tells what changed since your last call (you get no notifications). Then status to see the tasks; call pull_ready at the start of discussing finished work; ' +
   'peek shows a running window, get_report and task_spec show one task. Tasks may belong to cohorts (named groups): status, pull_ready take a cohort, cohort_list and cohort_show show them. The tools send, new, interrupt, close, move, queue, queue_rm and cancel change things and only work if the user allowed them; ' +
   'say what you are about to do and ask before you use one.';
 

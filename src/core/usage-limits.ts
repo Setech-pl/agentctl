@@ -5,6 +5,7 @@ import type { AgentName, GlobalConfig } from './config.ts';
 import type { Context } from './context.ts';
 import type { Notifier } from './notify.ts';
 import type { ResolvedSpec } from './spec.ts';
+import { recordJournal } from './journal.ts';
 import { formatReset, openReader, readPlans } from './usage.ts';
 import type { PlanState, PlanWindowView } from './usage.ts';
 import { planLine } from './usage-report.ts';
@@ -117,6 +118,7 @@ export async function usageTick(ctx: Context, notifier: Notifier, log?: (line: s
     ledger[alert.key] = alert.level;
     changed = true;
     await notifier.notify('agentctl', text).catch(() => undefined);
+    await recordJournal(ctx, { kind: 'usage', text });
     await log?.(`usage: ${text}`);
     sent.push(text);
   }

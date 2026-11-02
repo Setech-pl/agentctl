@@ -11,6 +11,7 @@ import { listTaskRecords, taskDir } from './taskstore.ts';
 import type { TaskRecord } from './taskstore.ts';
 import { recordEvent } from './history.ts';
 import { rememberSession, sessionOfStatusLine } from './usage-tap.ts';
+import { recordJournal } from './journal.ts';
 import { readVerdict } from './verdict.ts';
 import { isObject } from './util.ts';
 
@@ -187,6 +188,11 @@ export async function handleEvent(ctx: Context, alerts: Alerts, input: EventInpu
     if (state && text) {
       const result = await alerts.send(target, state, text, 'event');
       announced = { state, text, result };
+      if (result === 'sent') {
+        const kind = state === 'report-ready' ? 'report-ready' : state === 'needs-input' ? 'needs-input' : state === 'limited' ? 'limited' : undefined;
+        const verdict = state === 'report-ready' ? readVerdict(record.report, ctx.config.notify.verdictPattern) : undefined;
+        if (kind) await recordJournal(ctx, { kind, task: record.task, text, ...(verdict ? { verdict } : {}) });
+      }
       detail = `[${result === 'sent' ? 'notified' : 'duplicate, not notified'}: ${text}]`;
     }
     await runner.appendFile(eventsLogPath(ctx), logLine(now, record.task, input.agent, event.type, detail || (event.text ? `"${event.text}"` : '')));

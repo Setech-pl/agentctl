@@ -1,3 +1,4 @@
+import { recordJournal } from './journal.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Context } from './context.ts';
@@ -273,6 +274,7 @@ export async function cohortTick(ctx: Context, notifier: Notifier, rows: readonl
     if (done.every((t) => announced.has(t))) continue;
     const text = cohortDoneText(meta.name, done.length);
     await saveCohort(ctx, { ...meta, announced: [...done].sort() });
+    await recordJournal(ctx, { kind: 'cohort-done', cohort: meta.name, text });
     await log?.(`cohort: ${text}`);
     await notifier.notify('agentctl', text, { group: `agentctl-cohort-${cohortKey(meta.name)}` }).catch(() => undefined);
     said.push(text);
