@@ -312,7 +312,8 @@ describe('board: loading data', () => {
     assert.ok(snap.preview?.lines.every((l) => !/shortcuts|──|^❯/.test(l)));
     assert.ok(runner.queries.some((q) => /capture-pane -p -t @1 -S -70$/.test(q)), runner.queries.filter((q) => q.includes('capture')).join('\n'));
     const second = await loadBoard(ctx, 'NC-2', new ProgressCache());
-    assert.deepEqual(second.preview, { task: 'NC-2', lines: ['● idle'] });
+    // the git mock gives every worktree the same files, so the two tasks collide
+    assert.deepEqual(second.preview, { task: 'NC-2', lines: ['● idle'], note: '⚠ NC-1: 2' });
   });
 
   it('a task without a window gets a one-line preview; an unknown selection falls back to the first row', async () => {

@@ -308,7 +308,7 @@ agentctl board  agentctl-test · 3 tasks · 09:41:03
                                                                        │ ● you chose: tea please
 
 Enter – open the agent · F12 – back to the list
-↑↓ ⏎ go  m msg  M move  i int  c pull  r new  x close  h hide  z done  a all  ?
+↑↓ ⏎  m msg  M move  i int  c/r pull  x close  h hide  z done  a all  u/d/p  ?
 ```
 
 | Klawisz | Działanie |

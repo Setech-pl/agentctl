@@ -17,6 +17,8 @@ import {
   loadBoard,
   ProgressCache,
   promptText,
+  queueCells,
+  queueTitle,
   rowCells,
   runBoardEffect,
   showNotice,
@@ -63,7 +65,11 @@ function TaskList(props: { state: BoardState; width: number; capacity: number; i
     visible.items.length === 0
       ? [h(Text, { key: 'empty', dimColor: true }, state.refreshedAt === null ? 'Loading…' : state.rows.length === 0 ? 'No tasks. Start one with "agentctl new <spec>".' : 'No active tasks. z opens the finished ones.')]
       : visible.items.map((item) =>
-          item.kind === 'finished'
+          item.kind === 'queue-title'
+            ? h(Text, { key: 'queue-title', dimColor: true, wrap: 'truncate-end' }, `- ${queueTitle(item.count, item.paused)}`)
+            : item.kind === 'queue'
+              ? h(Cells, { key: `q-${item.view.entry.task}`, cells: queueCells(item.view, item.view.entry.task === state.selected, cols) })
+              : item.kind === 'finished'
             ? h(Text, { key: 'finished', dimColor: true, wrap: 'truncate-end' }, `${item.expanded ? '-' : '+'} ${finishedTitle(item.count, item.expanded)}`)
             : item.kind === 'closed'
               ? h(Text, { key: 'closed', dimColor: true, wrap: 'truncate-end' }, `- ${closedTitle(item.count)}`)
@@ -79,7 +85,7 @@ function Preview(props: { state: BoardState; width: number; height: number }): R
   return h(
     Box,
     { flexDirection: 'column', width: props.width, borderStyle: 'single', borderTop: false, borderRight: false, borderBottom: false, paddingLeft: 1 },
-    h(Text, { dimColor: true, wrap: 'truncate-end' }, preview ? `${preview.task} · last ${preview.lines.length} lines` : ''),
+    h(Text, { dimColor: true, wrap: 'truncate-end' }, preview ? (preview.note ? `${preview.task} · ${preview.note}` : `${preview.task} · last ${preview.lines.length} lines`) : ''),
     ...lines.map((l, i) => h(Text, { key: i, wrap: 'truncate-end' }, l === '' ? ' ' : l)),
   );
 }
@@ -188,7 +194,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
     Box,
     { width: state.width },
     h(Text, { bold: true, wrap: 'truncate-end' }, 'agentctl board'),
-    h(Text, { dimColor: true, wrap: 'truncate-end' }, `  ${ctx.config.session} · ${active} task${active === 1 ? '' : 's'}${hiddenCount > 0 ? ` · ${hiddenCount} hidden (a)` : ''}${state.refreshedAt ? ` · ${state.refreshedAt}` : ''}`),
+    h(Text, { dimColor: true, wrap: 'truncate-end' }, `  ${ctx.config.session} · ${active} task${active === 1 ? '' : 's'}${state.queue.length > 0 ? ` · ${state.queue.length} queued` : ''}${hiddenCount > 0 ? ` · ${hiddenCount} hidden (a)` : ''}${state.refreshedAt ? ` · ${state.refreshedAt}` : ''}`),
   );
   const body =
     state.mode.kind === 'help'
