@@ -144,6 +144,9 @@ export interface ResolveContext {
 }
 
 /** Keys of a spec header, and of one entry of its `repos`; docs/configuration.md describes each one. */
+/** Task IDs whose window name is one agentctl uses for itself (`watch`, `board`, `manager`). */
+export const RESERVED_TASK_IDS = ['WATCH', 'BOARD', 'MANAGER'];
+
 export const SPEC_KEYS = ['task', 'agent', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'report', 'pin', 'remote_control', 'priority', 'after', 'touches', 'cohort'];
 export const REPO_KEYS = ['path', 'worktree', 'base', 'branch'];
 
@@ -162,6 +165,11 @@ function checkTask(raw: RawSpec, p: Problems): string | undefined {
     p.add(
       `invalid task ID ${JSON.stringify(task)}: use UPPERCASE letters, digits, "-" or "_", starting with a letter (e.g. NC-12)`,
     );
+    return undefined;
+  }
+  // The windows of the watcher, the board and the manager are not tasks: a task of that name would be invisible in status.
+  if (RESERVED_TASK_IDS.includes(task)) {
+    p.add(`"${task}" cannot be a task ID: the window "${windowName(task)}" of the agentctl session is used by agentctl itself (${RESERVED_TASK_IDS.join(', ')})`);
     return undefined;
   }
   return task;
