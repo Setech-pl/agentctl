@@ -21,6 +21,7 @@ import { resolveSpec, splitSpecs } from './spec.ts';
 import type { RawSpec, ResolvedSpec } from './spec.ts';
 import { listArchivedRecords, listTaskRecords, recordFromSpec, renderTaskMd, taskDir, taskFile } from './taskstore.ts';
 import type { CancelSource, TaskRecord } from './taskstore.ts';
+import { queueHolds, usageSummaryLines } from './usage-limits.ts';
 import { AgentctlError, cohortKey, errorMessage, formatLocalTime, windowName } from './util.ts';
 
 /*
@@ -176,7 +177,7 @@ export async function planQueueAdd(ctx: Context, raws: RawSpec[], opts: { agent?
   const items = specs.map((spec, i) => ({ raw: raws[i] as RawSpec, spec }));
   const rows = await collectStatus(ctx, { progress: false, archived: true });
   const warnings = await touchWarnings(ctx, specs);
-  return { items, warnings, summary: [...describeQueueAdd(ctx, specs, entries, await liveWindows(ctx), rows), ...warnings.map((w) => `⚠ ${w}`)] };
+  return { items, warnings, summary: [...describeQueueAdd(ctx, specs, entries, await liveWindows(ctx), rows), ...usageSummaryLines(config, specs, ctx.runner.now()), ...warnings.map((w) => `⚠ ${w}`)] };
 }
 
 /** Per spec: the order and where it will stand ("starts at once" or "waits: claude 2/2, 1 ahead"). */
@@ -379,6 +380,7 @@ export type Condition =
   | { kind: 'after'; text: string }
   | { kind: 'blocked'; text: string; blockers: Blockers }
   | { kind: 'slot'; text: string }
+  | { kind: 'hold'; text: string }
   | { kind: 'paused'; text: string }
   | { kind: 'starting'; text: string }
   | { kind: 'failed'; text: string };
@@ -396,7 +398,7 @@ export interface QueueView {
  * For every entry: what it waits for. Entries are walked in turn order, each one that will start in the next tick uses up a window of its
  * provider, so the answer matches what `watch` does. `inflight` are the tasks this very process is starting.
  */
-export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live: { agent?: AgentName }[], rows: StatusRow[] = []): QueueView[] {
+export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live: { agent?: AgentName }[], rows: StatusRow[] = [], nowMs: number = Date.now()): QueueView[] {
   const failed = new Set(entries.filter((e) => e.status === 'failed').map((e) => e.task));
   const used: Record<AgentName, number> = { claude: 0, codex: 0 };
   for (const w of live) if (w.agent) used[w.agent]++;
@@ -404,6 +406,8 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
   const reason = !config.queue.enabled ? 'queue.enabled is false' : 'queue paused (agentctl queue resume)';
   const blocked = findBlocked(entries, rows);
   const cancelled = cancelledTasks(rows);
+  // `usage.queue_hold`: a provider whose plan is above the limit starts nothing (off by default).
+  const holds = queueHolds(config, nowMs);
   let position = 0;
   return entries.map((entry): QueueView => {
     if (entry.status === 'failed') return { position: null, entry, condition: { kind: 'failed', text: `failed: ${(entry.error ?? '').split('\n')[0] ?? ''}` }, since: entry.failedAt ?? entry.queuedAt };
@@ -414,6 +418,8 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
     if (stuck) return { position, entry, condition: { kind: 'blocked', text: blockedText(stuck), blockers: stuck }, since: entry.queuedAt };
     const unmet = unmetAfter(entry.after, rows);
     if (unmet.length > 0) return { position, entry, condition: { kind: 'after', text: waitingText(unmet, failed, cancelled) }, since: entry.queuedAt };
+    const held = holds[entry.agent];
+    if (held) return { position, entry, condition: { kind: 'hold', text: held }, since: entry.queuedAt };
     const limit = config.limits[entry.agent];
     if (limit !== undefined && used[entry.agent] >= limit) {
       return { position, entry, condition: { kind: 'slot', text: `czeka na miejsce: ${entry.agent} ${used[entry.agent]}/${limit}` }, since: entry.queuedAt };
@@ -468,6 +474,8 @@ export function renderQueueList(views: QueueView[], nowMs: number): string[] {
 export class QueueMemory {
   /** Tasks being started by this process: their agent counts against the provider limit before the window exists. */
   readonly inflight = new Map<string, { agent: AgentName; promise: Promise<void> }>();
+  /** Tasks the plan holds back (`usage.queue_hold`) and the reason last said, so that the log says it once. */
+  readonly held = new Map<string, string>();
 
   /** Resolves when every start that was begun has finished (tests, and a clean stop of `watch`). */
   async idle(): Promise<void> {
@@ -515,15 +523,27 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   for (const [task, i] of memory.inflight) if (!live.some((w) => w.window === task.toLowerCase())) used[i.agent]++;
 
   const began: string[] = [];
+  const holds = queueHolds(config, ctx.runner.now());
+  const stillHeld = new Set<string>();
   for (const entry of waiting(entries)) {
     if (memory.inflight.size >= config.queue.parallelStarts) break;
     if (unmetAfter(entry.after, rows).length > 0) continue;
+    const held = holds[entry.agent];
+    if (held) {
+      stillHeld.add(entry.task);
+      if (memory.held.get(entry.task) !== held) {
+        memory.held.set(entry.task, held);
+        await opts.log?.(`queue: ${entry.task} ${held}`);
+      }
+      continue;
+    }
     const limit = config.limits[entry.agent];
     if (limit !== undefined && used[entry.agent] >= limit) continue;
     used[entry.agent]++;
     began.push(entry.task);
     await beginStart(ctx, memory, notifier, entry, opts);
   }
+  for (const task of [...memory.held.keys()]) if (!stillHeld.has(task)) memory.held.delete(task);
   return began;
 }
 

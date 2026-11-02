@@ -42,6 +42,7 @@ import { applyStatusLine, statusTmuxLine } from './core/statusline.ts';
 import { BOARD_WINDOW, ensureWindow } from './core/windows.ts';
 import { interruptTask } from './core/interrupt.ts';
 import { handleTap } from './core/usage-tap.ts';
+import { usageSummaryLines } from './core/usage-limits.ts';
 import { collectUsage, renderUsage, usageMarkdown } from './core/usage-report.ts';
 import { loadGlobalConfig } from './core/config.ts';
 import { applyExamples } from './examples.ts';
@@ -332,7 +333,11 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         const raws = splitSpecs(await readSpecSource(file, opts.clip), source);
         applyCohortFlag(raws, opts.cohort);
         const specs = raws.map((raw) => resolveSpec(raw, { config: ctx.config }));
-        if (opts.clip && !(await confirmAction(ctx, summarizeSpecs(specs), 'Start?', Boolean(opts.yes) || Boolean(opts.dryRun)))) return;
+        // The state of the plan of each provider the tasks run on, and the hint when the other one has room (it only says so: nothing is switched).
+        const planLines = opts.dryRun || opts.agent === false ? [] : usageSummaryLines(ctx.config, specs.map((s) => (opts.agent && !s.pin ? { ...s, agent: opts.agent } : s)), ctx.runner.now());
+        if (opts.clip && !(await confirmAction(ctx, summarizeSpecs(specs, planLines), 'Start?', Boolean(opts.yes) || Boolean(opts.dryRun)))) return;
+        // Without the summary of --clip: only what there is to say (a plan that is n/d is not worth a line before every start).
+        if (!opts.clip) for (const l of planLines.filter((x) => !/ n\/d/.test(x))) line(l);
         // `touches`: an active task already changes files the new one says it will touch. Printed always; asked y/N with a terminal.
         if (!opts.dryRun && opts.agent !== false) {
           const warnings = await touchWarnings(ctx, specs);

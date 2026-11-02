@@ -1,7 +1,7 @@
 import type { ResolvedSpec } from './spec.ts';
 
 /** Human-readable summary of what `new` is about to start (shown before the y/N question). */
-export function summarizeSpecs(specs: ResolvedSpec[]): string[] {
+export function summarizeSpecs(specs: ResolvedSpec[], extra: string[] = []): string[] {
   const lines: string[] = [];
   for (const spec of specs) {
     const primary = spec.repos[0];
@@ -14,5 +14,5 @@ export function summarizeSpecs(specs: ResolvedSpec[]): string[] {
     lines.push(`  links:    ${spec.links.length ? spec.links.map((l) => `${l.from} -> ${l.to}`).join(', ') : '-'}`);
     lines.push(`  prompt:   ${spec.prompt.length} characters`);
   }
-  return lines;
+  return [...lines, ...extra];
 }
