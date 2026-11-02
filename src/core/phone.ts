@@ -1,3 +1,4 @@
+import type { Context } from './context.ts';
 import type { NtfyPriority, NtfySettings, PhoneEvent } from './config.ts';
 import { clip } from './events.ts';
 
@@ -171,4 +172,24 @@ export async function sendNtfy(fetchFn: FetchLike, ntfy: Pick<NtfySettings, 'ser
     const cause = err.cause instanceof Error ? `: ${err.cause.message}` : '';
     return { ok: false, status: 0, ms: now() - started, error: `${err.name === 'TimeoutError' ? 'timeout' : err.message}${cause}` };
   }
+}
+
+export interface PhoneTestResult extends PhoneSendResult {
+  /** `notify.ntfy.topic` is set. */
+  configured: boolean;
+  /** Where the test went: the server and the beginning of the topic (the whole topic is a secret on a public server). */
+  target: string;
+}
+
+/** The topic, shortened for output. */
+export const shortTopic = (topic: string): string => (topic.length > 14 ? `${topic.slice(0, 13)}…` : topic);
+
+/** `notify-test --phone`: one test notification, whatever away says. */
+export async function sendPhoneTest(ctx: Context): Promise<PhoneTestResult> {
+  const ntfy = ctx.config.notify.ntfy;
+  if (!ntfy?.topic) return { configured: false, ok: false, status: 0, ms: 0, target: '', error: 'notify.ntfy.topic is not set (agentctl ntfy-setup)' };
+  const message: PhoneMessage = { event: 'report-ready', title: 'agentctl · test', body: 'Test powiadomienia agentctl – jeśli to widzisz, telefon działa.', priority: 'default', tags: ['bell'] };
+  if (ntfy.clickUrl) message.click = ntfy.clickUrl;
+  const r = await sendNtfy(ctx.fetch, ntfy, message, () => ctx.runner.now());
+  return { ...r, configured: true, target: `${ntfy.server}, topic ${shortTopic(ntfy.topic)}` };
 }

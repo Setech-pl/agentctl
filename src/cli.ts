@@ -35,7 +35,9 @@ import { applyGc, planGc, renderGc } from './core/gc.ts';
 import { collectEvents, eventsMarkdown, renderEvents } from './core/chat-events.ts';
 import { planNtfySetup, renderQr, setupInstructions, subscriptionLink } from './core/ntfy-setup.ts';
 import { writeConfigText } from './core/config-edit.ts';
-import { awayReport, renderAway, setAway } from './core/away.ts';
+import { sendPhoneTest } from './core/phone.ts';
+import type { FetchLike } from './core/phone.ts';
+import { awayReport, phoneActive, renderAway, setAway } from './core/away.ts';
 import { applySetLimits, collectLimits, parseAssignments, parseCounts, planSetLimits, releasePlaces, renderLimits, reservePlaces } from './core/limits.ts';
 import { collectOverlaps, renderOverlaps, touchWarnings } from './core/collisions.ts';
 import type { NewOptions } from './core/new.ts';
@@ -89,6 +91,8 @@ export interface CliDeps {
   /** This very agentctl as a command line (absolute node and script, config directory of this run): what the agents and notifications call back. */
   selfArgv?: () => SelfArgv;
   /** The notifier for this machine; default: terminal-notifier when installed, else osascript / notify-send. */
+  /** HTTP for the phone notifications (tests give a mock). */
+  fetch?: FetchLike;
   makeNotifier?: (runner: Runner, config: GlobalConfig, opts?: { retryBroken?: boolean }) => Promise<Notifier>;
   /** Command line that prints the tmux status line (`agentctl status --tmux-line`), for tmux's status-right. */
   statusLineCommand?: () => string;
@@ -1077,14 +1081,32 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
 
   program
     .command('notify-test')
-    .description('Send one test notification and say which channel carried it (terminal-notifier with a click action, or the osascript fallback).')
+    .description('Send one test notification and say which channels carried it, with the result and the time of each: the Mac (terminal-notifier with a click action, or the osascript fallback) and the phone (ntfy, whatever away says). Default: --local.')
+    .option('--local', 'the notification on the Mac (the default)')
+    .option('--phone', 'the phone through ntfy')
+    .option('--all', 'both')
     .action(
-      guarded(async () => {
+      guarded(async (opts: { local?: boolean; phone?: boolean; all?: boolean }) => {
         const ctx = contextFor(false, { migrate: false });
-        const notifier = await makeNotifier(ctx, { retryBroken: true });
-        const result = (await notifier.notify('agentctl', 'Test powiadomienia agentctl – jeśli to widzisz, kanał działa.', { group: 'agentctl-test' })) as NotifyResult | undefined;
-        for (const l of describeNotifyResult(result, ctx.config.notify.backend)) line(l);
-        if (result && !result.ok) exitCode = 1;
+        if (deps.fetch) ctx.fetch = deps.fetch;
+        const phone = Boolean(opts.phone || opts.all);
+        const local = Boolean(opts.local || opts.all || !phone);
+        if (local) {
+          const notifier = await makeNotifier(ctx, { retryBroken: true });
+          const started = ctx.runner.now();
+          const result = (await notifier.notify('agentctl', 'Test powiadomienia agentctl – jeśli to widzisz, kanał działa.', { group: 'agentctl-test' })) as NotifyResult | undefined;
+          const ms = ctx.runner.now() - started;
+          if (phone) line(`Mac:    ${result ? `${result.channel}  ${result.ok ? 'ok' : 'FAILED'}` : 'sent'}  ${ms} ms`);
+          for (const l of describeNotifyResult(result, ctx.config.notify.backend)) line(l);
+          if (result && !result.ok) exitCode = 1;
+        }
+        if (phone) {
+          const r = await sendPhoneTest(ctx);
+          if (!r.configured) line(`Phone:  not set up - ${r.error}`);
+          else line(`Phone:  ntfy  ${r.ok ? `ok  HTTP ${r.status}` : `FAILED  ${r.status > 0 ? `HTTP ${r.status}` : 'no answer'}${r.error && r.status === 0 ? ` (${r.error})` : ''}`}  ${r.ms} ms  (${r.target})`);
+          if (!r.ok) exitCode = 1;
+          else if (!phoneActive(ctx.config)) line('Note: away is off, so real notifications stay on the Mac (agentctl away on, or notify.ntfy.always: true).');
+        }
       }),
     );
 
