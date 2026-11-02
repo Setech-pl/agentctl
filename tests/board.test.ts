@@ -62,7 +62,7 @@ function run(state: BoardState, keys: [string, KeyPress?][]): { state: BoardStat
 describe('board: selection and snapshots', () => {
   const rows = [row('NC-1'), row('NC-2'), row('NC-3')];
 
-  it('arrows and j/k move the selection, clamped, and ask for a fresh preview', () => {
+  it('arrows and j move the selection, clamped, and ask for a fresh preview', () => {
     let s = boardOf(rows);
     let r = press(s, '', { downArrow: true });
     assert.equal(r.state.selected, 'NC-2');
@@ -72,8 +72,10 @@ describe('board: selection and snapshots', () => {
     r = press(r.state, '', { downArrow: true });
     assert.equal(r.state.selected, 'NC-3', 'no wrap at the end');
     assert.deepEqual(r.effects, []);
-    s = press(r.state, 'k').state;
+    s = press(r.state, '', { upArrow: true }).state;
     assert.equal(s.selected, 'NC-2');
+    assert.equal(press(s, 'k').state.mode.kind, 'list', 'k is the cohort filter now, not up');
+    assert.equal(press(s, 'k').state.selected, 'NC-2');
     s = press(boardOf(rows), '', { upArrow: true }).state;
     assert.equal(s.selected, 'NC-1', 'no wrap at the top');
   });

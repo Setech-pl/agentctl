@@ -1,5 +1,7 @@
 import path from 'node:path';
 import { attachCollisions, collideText } from './collisions.ts';
+import { cancelTasks, planCancel } from './cancel.ts';
+import { countsLine } from './cohort.ts';
 import { closeTask } from './close.ts';
 import { Context } from './context.ts';
 import type { GlobalConfig } from './config.ts';
@@ -21,7 +23,7 @@ import type { TaskState } from './state.ts';
 import { collectStatus } from './status.ts';
 import type { StatusRow } from './status.ts';
 import { listArchivedRecords, listTaskRecords } from './taskstore.ts';
-import { errorMessage } from './util.ts';
+import { cohortKey, errorMessage } from './util.ts';
 
 /*
  * The model of `agentctl board`: what is on the screen as plain data, and what a key press does to it. The Ink front
@@ -61,8 +63,17 @@ export type BoardMode =
   | { kind: 'input'; task: string; text: string }
   /** Enter on a finished task (no window): it cannot be switched to, so the choices are the ones that still make sense. */
   | { kind: 'finished'; task: string }
-  | { kind: 'confirm'; action: 'interrupt' | 'close' | 'close-worktree' | 'move' | 'queue-rm'; task: string }
+  | { kind: 'confirm'; action: 'interrupt' | 'close' | 'close-worktree' | 'move' | 'queue-rm' | 'cancel'; task: string; reason?: string }
+  /** `X`: the reason for the cancellation (optional: Enter on an empty line goes on without one). */
+  | { kind: 'cancel-reason'; task: string; text: string }
+  /** `k`: pick the cohort to show; `value` null is every task, '' the tasks without a cohort. */
+  | { kind: 'cohort-pick'; options: CohortOption[]; index: number }
   | { kind: 'help' };
+
+export interface CohortOption {
+  label: string;
+  value: string | null;
+}
 
 export interface BoardState {
   rows: BoardRow[];
@@ -87,10 +98,14 @@ export interface BoardState {
   queue: QueueView[];
   /** The queue is paused (`p`) or switched off in the config: nothing starts. */
   queuePaused: boolean;
+  /** `k`: only this cohort is listed (its key); '' is "bez kohorty"; null every task. */
+  cohortFilter: string | null;
+  /** `g`: the groups (cohort keys, '' for "bez kohorty") whose tasks are folded away under their header. */
+  folded: string[];
 }
 
 export function initialBoardState(width: number, height: number): BoardState {
-  return { rows: [], selected: null, mode: { kind: 'list' }, notice: null, preview: null, width, height, refreshedAt: null, busy: null, loadError: null, quit: false, showFinished: false, showHidden: false, queue: [], queuePaused: false };
+  return { rows: [], selected: null, mode: { kind: 'list' }, notice: null, preview: null, width, height, refreshedAt: null, busy: null, loadError: null, quit: false, showFinished: false, showHidden: false, queue: [], queuePaused: false, cohortFilter: null, folded: [] };
 }
 
 /** What the front has to do after a key press. */
@@ -105,6 +120,7 @@ export type BoardEffect =
   | { type: 'move'; task: string }
   | { type: 'queue-up'; task: string }
   | { type: 'queue-rm'; task: string }
+  | { type: 'cancel'; task: string; reason?: string }
   | { type: 'queue-pause'; paused: boolean }
   /** The selection moved: load the preview of the new one now instead of at the next refresh. */
   | { type: 'refresh' }
@@ -128,36 +144,72 @@ export interface KeyResult {
   effects: BoardEffect[];
 }
 
-/** Tasks that still have a window, in the order of the status table; hidden ones only with the `a` key. */
+/** The cohort key of a row or a queue entry: '' for "bez kohorty". */
+const groupOf = (cohort: string | null | undefined): string => (cohort ? cohortKey(cohort) : '');
+
+/** `k` filter: the row passes when no cohort is picked, or it is in the picked one ('' picks the tasks without a cohort). */
+const passes = (state: BoardState, cohort: string | null | undefined): boolean => state.cohortFilter === null || groupOf(cohort) === state.cohortFilter;
+
+/** Some task has a cohort: the list is grouped under cohort headers. Without any cohort the list is the flat one it always was. */
+export function isGrouped(state: BoardState): boolean {
+  return state.rows.some((r) => r.cohort !== null) || state.queue.some((v) => v.entry.cohort !== undefined);
+}
+
+/** The groups in the order they are listed: cohorts by name, "bez kohorty" ('') last. */
+function groupOrder(state: BoardState): { key: string; name: string | null }[] {
+  const names = new Map<string, string>();
+  for (const name of [...state.rows.map((r) => r.cohort), ...state.queue.map((v) => v.entry.cohort)]) if (name) names.set(cohortKey(name), names.get(cohortKey(name)) ?? name);
+  const cohorts = [...names].sort((a, b) => a[0].localeCompare(b[0])).map(([key, name]) => ({ key, name: name as string | null }));
+  return [...cohorts, { key: '', name: null }];
+}
+
+/** The rows of the active section, in list order (grouped by cohort when there are cohorts), including the ones of folded groups. */
+function activeAll(state: BoardState): BoardRow[] {
+  const rows = state.rows.filter((r) => !r.closed && !r.cancelled && !r.finished && (state.showHidden || !r.hidden) && passes(state, r.cohort));
+  if (!isGrouped(state)) return rows;
+  return groupOrder(state).flatMap((g) => rows.filter((r) => groupOf(r.cohort) === g.key));
+}
+
+/** Tasks that still have a window, in the order of the status table (cohort by cohort when there are cohorts); hidden ones only with the `a` key. */
 export function activeRows(state: BoardState): BoardRow[] {
-  return state.rows.filter((r) => !r.closed && !r.cancelled && !r.finished && (state.showHidden || !r.hidden));
+  return activeAll(state);
+}
+
+/** The active rows the cursor can reach: the ones in a folded group are not among them. */
+export function reachableRows(state: BoardState): BoardRow[] {
+  return activeAll(state).filter((r) => !state.folded.includes(groupOf(r.cohort)));
+}
+
+/** The queue as the board lists it: the cohort filter applies. */
+export function queueViews(state: BoardState): QueueView[] {
+  return state.queue.filter((v) => passes(state, v.entry.cohort));
 }
 
 /** Tasks without a window (or moved to the other provider) that were not closed: the "Finished" section. */
 export function finishedRows(state: BoardState): BoardRow[] {
-  return state.rows.filter((r) => !r.closed && !r.cancelled && r.finished && (state.showHidden || !r.hidden));
+  return state.rows.filter((r) => !r.closed && !r.cancelled && r.finished && (state.showHidden || !r.hidden) && passes(state, r.cohort));
 }
 
 /** Tasks closed with `agentctl close` (or archived): their own section, only while the `a` key lists hidden tasks. */
 export function closedRows(state: BoardState): BoardRow[] {
-  return state.showHidden ? state.rows.filter((r) => r.closed) : [];
+  return state.showHidden ? state.rows.filter((r) => r.closed && passes(state, r.cohort)) : [];
 }
 
 /** Tasks cancelled with `agentctl cancel`: their own section, like the closed ones only while `a` lists hidden tasks. */
 export function cancelledRows(state: BoardState): BoardRow[] {
-  return state.showHidden ? state.rows.filter((r) => r.cancelled) : [];
+  return state.showHidden ? state.rows.filter((r) => r.cancelled && passes(state, r.cohort)) : [];
 }
 
 /** The rows the cursor can stand on: the active ones, the finished ones while that section is open, then the closed and the cancelled ones. */
 export function displayRows(state: BoardState): BoardRow[] {
-  return [...activeRows(state), ...(state.showFinished ? finishedRows(state) : []), ...closedRows(state), ...cancelledRows(state)];
+  return [...reachableRows(state), ...(state.showFinished ? finishedRows(state) : []), ...closedRows(state), ...cancelledRows(state)];
 }
 
 /** Every task the cursor can stand on, top to bottom: the active rows, the queue, the finished rows (while open), the closed ones. */
 export function navTasks(state: BoardState): string[] {
-  const active = activeRows(state).map((r) => r.task);
+  const active = reachableRows(state).map((r) => r.task);
   const rest = displayRows(state).slice(active.length).map((r) => r.task);
-  return [...active, ...state.queue.map((v) => v.entry.task), ...rest];
+  return [...active, ...queueViews(state).map((v) => v.entry.task), ...rest];
 }
 
 export function selectedIndex(state: BoardState): number {
@@ -193,7 +245,8 @@ function listKey(state: BoardState, input: string, key: KeyPress): KeyResult {
   const stay = (s: BoardState = state, effects: BoardEffect[] = []): KeyResult => ({ state: s, effects });
   if ((input === 'q' && !key.ctrl && !key.meta) || (key.ctrl && input === 'c')) return stay({ ...state, quit: true }, [{ type: 'quit' }]);
 
-  const move = key.upArrow || input === 'k' ? -1 : key.downArrow || input === 'j' ? 1 : 0;
+  // k is the cohort filter now; the arrow up moves up (j still moves down).
+  const move = key.upArrow ? -1 : key.downArrow || input === 'j' ? 1 : 0;
   if (move !== 0) {
     const listed = navTasks(state);
     if (listed.length === 0) return stay();
@@ -213,13 +266,39 @@ function listKey(state: BoardState, input: string, key: KeyPress): KeyResult {
     return stay(withNotice(next, 'info', next.showHidden ? 'Hidden tasks are listed too (dimmed). a hides them again.' : 'Hidden tasks are not listed.'), next.selected !== state.selected ? [{ type: 'refresh' }] : []);
   }
   if (input === 'r') return stay(withNotice(state, 'info', 'Collecting the new reports…'), [{ type: 'pull-ready' }]);
+  if (input === 'k') {
+    const options = cohortOptions(state);
+    if (options.length <= 2 && state.cohortFilter === null) return stay(withNotice(state, 'error', 'No cohorts yet: a task joins one with "cohort: <name>" in its spec, or agentctl cohort add.'));
+    return stay({ ...state, notice: null, mode: { kind: 'cohort-pick', options, index: Math.max(0, options.findIndex((o) => o.value === state.cohortFilter)) } });
+  }
+  if (input === 'G') return stay(withNotice({ ...state, folded: [] }, 'info', 'All groups are open.'));
   if (input === 'p') {
     const pause = !state.queuePaused;
     return stay(withNotice(state, 'info', pause ? 'Pausing the queue…' : 'Resuming the queue…'), [{ type: 'queue-pause', paused: pause }]);
   }
 
-  // A queued task has no window: only u (front) and d (remove) apply to it.
+  // A queued task has no window: only u (front), d (remove) and X (cancel) apply to it.
   const queued = selectedQueueView(state);
+  if (input === 'g') {
+    if (!isGrouped(state)) return stay(withNotice(state, 'error', 'No cohorts: nothing to fold.'));
+    const cohort = queued ? queued.entry.cohort : selectedRow(state)?.cohort;
+    if (queued === undefined && selectedRow(state) === undefined) return stay(withNotice(state, 'error', 'No task selected.'));
+    const group = groupOf(cohort);
+    const folded = state.folded.includes(group) ? state.folded.filter((g) => g !== group) : [...state.folded, group];
+    const next = keepSelection({ ...state, notice: null, folded });
+    return stay(withNotice(next, 'info', folded.includes(group) ? `${cohort ?? 'bez kohorty'}: folded (G opens all groups).` : `${cohort ?? 'bez kohorty'}: open.`), next.selected !== state.selected ? [{ type: 'refresh' }] : []);
+  }
+  if (input === 'X') {
+    const target = queued ?? selectedRow(state);
+    if (!target) return stay(withNotice(state, 'error', 'No task selected.'));
+    if (queued) {
+      if (queued.entry.status === 'starting') return stay(withNotice(state, 'error', `${queued.entry.task} is being started right now.`));
+      return stay({ ...state, notice: null, mode: { kind: 'cancel-reason', task: queued.entry.task, text: '' } });
+    }
+    const r = target as BoardRow;
+    if (r.cancelled || r.closed) return stay(withNotice(state, 'error', `${r.task} is ${r.cancelled ? 'cancelled' : 'closed'} already; nothing to cancel.`));
+    return stay({ ...state, notice: null, mode: { kind: 'cancel-reason', task: r.task, text: '' } });
+  }
   if (input === 'u' || input === 'd') {
     if (!queued) return stay(withNotice(state, 'error', 'Select a task of the Queue section first.'));
     if (input === 'u') {
@@ -260,6 +339,7 @@ function finishedKey(state: BoardState, mode: Extract<BoardMode, { kind: 'finish
   if (input === 'c') return { state: withNotice(toList(state), 'info', `${row.task}: copying the report…`), effects: [{ type: 'pull', task: row.task }] };
   if ((row.closed || row.cancelled) && input !== 'c') return { state, effects: [] };
   if (input === 'x') return { state: { ...state, mode: { kind: 'confirm', action: 'close', task: row.task } }, effects: [] };
+  if (input === 'X') return { state: { ...state, mode: { kind: 'cancel-reason', task: row.task, text: '' } }, effects: [] };
   if (input === 'h') return { state: withNotice(toList(state), 'info', `${row.task}: hiding it (a lists hidden tasks)…`), effects: [{ type: 'hide', task: row.task, hidden: true }] };
   if (input === 'o' && isAlive(row)) return { state: toList(state), effects: [{ type: 'switch', task: row.task, window: row.windowName }] };
   return { state, effects: [] };
@@ -280,11 +360,48 @@ function inputKey(state: BoardState, mode: Extract<BoardMode, { kind: 'input' }>
   return { state: { ...state, mode: { ...mode, text: mode.text + printable(input) } }, effects: [] };
 }
 
+function cancelReasonKey(state: BoardState, mode: Extract<BoardMode, { kind: 'cancel-reason' }>, input: string, key: KeyPress): KeyResult {
+  if (key.escape || (key.ctrl && input === 'c')) return { state: withNotice(toList(state), 'info', 'Cancelled.'), effects: [] };
+  if (key.return) {
+    const reason = mode.text.trim();
+    return { state: { ...state, mode: { kind: 'confirm', action: 'cancel', task: mode.task, ...(reason !== '' ? { reason } : {}) } }, effects: [] };
+  }
+  if (key.backspace || key.delete) return { state: { ...state, mode: { ...mode, text: [...mode.text].slice(0, -1).join('') } }, effects: [] };
+  if (key.ctrl && input === 'u') return { state: { ...state, mode: { ...mode, text: '' } }, effects: [] };
+  if (key.ctrl || key.meta || key.tab || key.upArrow || key.downArrow) return { state, effects: [] };
+  return { state: { ...state, mode: { ...mode, text: mode.text + printable(input) } }, effects: [] };
+}
+
+/** The choices of the `k` list: every task, each cohort that is in use, and the tasks without one (when there are any). */
+export function cohortOptions(state: BoardState): CohortOption[] {
+  const groups = groupOrder(state).filter((g) => g.key !== '');
+  const anyPlain = state.rows.some((r) => r.cohort === null) || state.queue.some((v) => v.entry.cohort === undefined);
+  return [{ label: 'wszystkie', value: null }, ...groups.map((g) => ({ label: g.name as string, value: g.key })), ...(anyPlain ? [{ label: 'bez kohorty', value: '' }] : [])];
+}
+
+function cohortPickKey(state: BoardState, mode: Extract<BoardMode, { kind: 'cohort-pick' }>, input: string, key: KeyPress): KeyResult {
+  if (key.escape || (key.ctrl && input === 'c')) return { state: toList(state), effects: [] };
+  const last = mode.options.length - 1;
+  const choose = (index: number): KeyResult => {
+    const option = mode.options[index] as CohortOption;
+    const next = keepSelection({ ...toList(state), cohortFilter: option.value, notice: null });
+    return { state: withNotice(next, 'info', option.value === null ? 'All tasks are listed.' : `Only ${option.label} is listed (k picks another).`), effects: next.selected !== state.selected ? [{ type: 'refresh' }] : [] };
+  };
+  if (key.return) return choose(mode.index);
+  if (/^[1-9]$/.test(input) && Number(input) - 1 <= last) return choose(Number(input) - 1);
+  const move = key.upArrow ? -1 : key.downArrow || input === 'j' ? 1 : 0;
+  if (move !== 0) return { state: { ...state, mode: { ...mode, index: Math.min(last, Math.max(0, mode.index + move)) } }, effects: [] };
+  return { state, effects: [] };
+}
+
 function confirmKey(state: BoardState, mode: Extract<BoardMode, { kind: 'confirm' }>, input: string, key: KeyPress): KeyResult {
   const yes = input === 'y' || input === 'Y';
   const cancel = (): KeyResult => ({ state: withNotice(toList(state), 'info', 'Cancelled.'), effects: [] });
   if (mode.action === 'interrupt') {
     return yes ? { state: withNotice(toList(state), 'info', `${mode.task}: interrupting…`), effects: [{ type: 'interrupt', task: mode.task }] } : cancel();
+  }
+  if (mode.action === 'cancel') {
+    return yes ? { state: withNotice(toList(state), 'info', `${mode.task}: cancelling…`), effects: [{ type: 'cancel', task: mode.task, ...(mode.reason ? { reason: mode.reason } : {}) }] } : cancel();
   }
   if (mode.action === 'queue-rm') {
     return yes ? { state: withNotice(toList(state), 'info', `${mode.task}: removing from the queue…`), effects: [{ type: 'queue-rm', task: mode.task }] } : cancel();
@@ -314,6 +431,10 @@ export function handleKey(state: BoardState, input: string, key: KeyPress): KeyR
       return finishedKey(state, state.mode, input, key);
     case 'confirm':
       return confirmKey(state, state.mode, input, key);
+    case 'cancel-reason':
+      return cancelReasonKey(state, state.mode, input, key);
+    case 'cohort-pick':
+      return cohortPickKey(state, state.mode, input, key);
     case 'help':
       return { state: toList(state), effects: [] };
   }
@@ -462,6 +583,14 @@ export async function runBoardEffect(runner: Runner, config: GlobalConfig, effec
       case 'queue-rm':
         await removeFromQueue(ctx, effect.task);
         return { level: 'info', text: `${effect.task}: removed from the queue` };
+      case 'cancel': {
+        const opts = { reason: effect.reason, source: 'board' as const };
+        const plan = await planCancel(ctx, [effect.task], opts);
+        await cancelTasks(ctx, plan, opts);
+        const tasks = plan.items.map((i) => i.task).join(', ');
+        const blocked = [...new Set(plan.items.flatMap((i) => i.blocks))];
+        return { level: 'info', text: `${tasks}: cancelled${blocked.length > 0 ? `; ⛓ blocked: ${blocked.join(', ')}` : ''}` };
+      }
       case 'queue-pause':
         await setPaused(ctx, effect.paused);
         return { level: 'info', text: effect.paused ? 'Queue paused: nothing new starts (p resumes).' : 'Queue resumed.' };
@@ -568,11 +697,25 @@ export function rowCells(row: StatusRow, selected: boolean, cols: BoardColumns, 
 
 export type ListItem =
   | { kind: 'row'; row: BoardRow }
+  | { kind: 'group'; key: string; name: string | null; folded: boolean; rows: BoardRow[]; queued: number }
   | { kind: 'queue-title'; count: number; paused: boolean }
   | { kind: 'queue'; view: QueueView }
   | { kind: 'finished'; count: number; expanded: boolean }
   | { kind: 'closed'; count: number }
   | { kind: 'cancelled'; count: number };
+
+/** The name of the cohort the `k` filter shows, for the header of the board. */
+export function cohortLabel(state: BoardState): string {
+  if (state.cohortFilter === null) return 'wszystkie';
+  if (state.cohortFilter === '') return 'bez kohorty';
+  return cohortOptions(state).find((o) => o.value === state.cohortFilter)?.label ?? state.cohortFilter;
+}
+
+/** Header of a cohort group: `- sprint-1 (4) 2⚙ 1✓ 1⧗`; `+` while it is folded. The last group is "bez kohorty". */
+export function groupTitle(item: Extract<ListItem, { kind: 'group' }>, icons: Record<TaskState, string> | null = null): string {
+  const counts = countsLine(item.rows, item.queued, icons ?? DEFAULT_WINDOW_ICONS);
+  return `${item.folded ? '+' : '-'} ${item.name ?? 'bez kohorty'} (${item.rows.length + item.queued})${counts ? ` ${counts}` : ''}${item.folded ? ' – g opens, G opens all' : ''}`;
+}
 
 /** `Queue (3)` title under the active tasks. */
 export function queueTitle(count: number, paused: boolean): string {
@@ -588,7 +731,7 @@ export function queueCells(view: QueueView, selected: boolean, cols: BoardColumn
     { key: 'marker', text: selected ? '▸' : '', width: cols.marker, bold: true },
     { key: 'task', text: e.task, width: cols.task, bold: selected },
     { key: 'who', text: `${e.agent} ${e.model}/${e.effort}`, width: cols.who },
-    { key: 'report', text, width: wide, ...(e.status === 'failed' ? { color: 'red' } : { dim: true }) },
+    { key: 'report', text, width: wide, ...(e.status === 'failed' ? { color: 'red' } : view.condition.kind === 'blocked' ? { color: 'yellow' } : { dim: true }) },
   ];
 }
 
@@ -612,9 +755,20 @@ export function listItems(state: BoardState): ListItem[] {
   const finished = finishedRows(state);
   const closed = closedRows(state);
   const cancelled = cancelledRows(state);
+  const queue = queueViews(state);
+  const active = activeRows(state);
+  const activeItems: ListItem[] = isGrouped(state)
+    ? groupOrder(state).flatMap((g): ListItem[] => {
+        const rows = active.filter((r) => groupOf(r.cohort) === g.key);
+        const queued = queue.filter((v) => groupOf(v.entry.cohort) === g.key).length;
+        if (rows.length + queued === 0) return [];
+        const folded = state.folded.includes(g.key);
+        return [{ kind: 'group', key: g.key, name: g.name, folded, rows, queued }, ...(folded ? [] : rows.map((row): ListItem => ({ kind: 'row', row })))];
+      })
+    : active.map((row): ListItem => ({ kind: 'row', row }));
   return [
-    ...activeRows(state).map((row): ListItem => ({ kind: 'row', row })),
-    ...(state.queue.length > 0 ? [{ kind: 'queue-title', count: state.queue.length, paused: state.queuePaused } as ListItem, ...state.queue.map((view): ListItem => ({ kind: 'queue', view }))] : []),
+    ...activeItems,
+    ...(queue.length > 0 ? [{ kind: 'queue-title', count: queue.length, paused: state.queuePaused } as ListItem, ...queue.map((view): ListItem => ({ kind: 'queue', view }))] : []),
     ...(finished.length > 0 ? [{ kind: 'finished', count: finished.length, expanded: state.showFinished } as ListItem] : []),
     ...(state.showFinished ? finished.map((row): ListItem => ({ kind: 'row', row })) : []),
     ...(closed.length > 0 ? [{ kind: 'closed', count: closed.length } as ListItem] : []),
@@ -646,12 +800,12 @@ export function visibleRows(state: BoardState, capacity: number): { rows: BoardR
 
 // ---- texts
 
-export const KEY_HINTS = '↑↓ ⏎  m msg  M move  i int  c/r pull  x close  h hide  z done  a all  u/d/p  ?';
+export const KEY_HINTS = '↑↓ ⏎ m msg M move i int c/r pull x close X cancel k cohort h hide z/a u/d/p ?';
 
 export const HELP_LINES: string[] = [
   'agentctl board',
   '',
-  '  ↑ ↓ (j k)   select a task',
+  '  ↑ ↓ (j)     select a task (↑ up, ↓ or j down)',
   '  Enter       go to the task window (tmux switch-client); back: F12 or Ctrl-b l',
   '              on a finished task (no window): a menu (c copy, x close, h hide)',
   '  m           type a message and send it to the agent (Enter sends, Esc cancels)',
@@ -660,6 +814,13 @@ export const HELP_LINES: string[] = [
   '  c           copy the report of the task to the clipboard',
   '  r           copy all new reports to the clipboard (pull --ready)',
   '  x           close the window (asks first; then asks about the git worktree)',
+  '  X           cancel the task: a reason (optional), then y/N. The agent is',
+  '              interrupted, its window closed (a queued task leaves the queue);',
+  '              worktree and branch stay. A move is cancelled with its other half.',
+  '              Cancelled tasks are listed under "a", in their own section.',
+  '  k           pick a cohort to show (↑↓ ⏎ or its number); "wszystkie" = all,',
+  '              "bez kohorty" = the tasks that are in no cohort',
+  '  g / G       fold the cohort group of the selected task / open all groups',
   '  h           hide the task (or show a hidden one); nothing is closed or removed',
   '  z           open or close the "Finished" section (tasks without a window)',
   '  a           list hidden tasks too (dimmed, marked ·)',
@@ -678,10 +839,17 @@ export const HELP_LINES: string[] = [
 export function promptText(state: BoardState): string | null {
   const mode = state.mode;
   if (mode.kind === 'input') return `Message to ${mode.task} (Enter sends, Esc cancels): ${mode.text}`;
-  if (mode.kind === 'finished') return `${mode.task} is finished (no window): c copy report · x close · h hide${state.rows.find((r) => r.task === mode.task && isAlive(r)) ? ' · o open window' : ''} · Esc`;
+  if (mode.kind === 'cancel-reason') return `Cancel ${mode.task} – reason, optional (Enter goes on, Esc stops): ${mode.text}`;
+  if (mode.kind === 'cohort-pick') return `Cohort: ${mode.options.map((o, i) => (i === mode.index ? `[${i + 1} ${o.label}]` : `${i + 1} ${o.label}`)).join('  ')}  (↑↓ ⏎ or a number, Esc)`;
+  if (mode.kind === 'finished') return `${mode.task} is finished (no window): c copy report · x close · X cancel · h hide${state.rows.find((r) => r.task === mode.task && isAlive(r)) ? ' · o open window' : ''} · Esc`;
   if (mode.kind !== 'confirm') return null;
   const row = state.rows.find((r) => r.task === mode.task);
   if (mode.action === 'queue-rm') return `Remove ${mode.task} from the queue? [y/N]`;
+  if (mode.action === 'cancel') {
+    const partner = row?.supersededBy ?? row?.continues;
+    const queued = state.queue.some((v) => v.entry.task === mode.task);
+    return `Cancel ${mode.task}${partner ? ` and ${partner} (the other half of a move)` : ''}${mode.reason ? ` – ${mode.reason}` : ''}? ${queued ? 'It is taken out of the queue.' : 'Interrupts the agent, closes the window; worktree and branch stay.'} [y/N]`;
+  }
   if (mode.action === 'move') return `Move ${mode.task} to the other provider? A new window starts in the same worktree; this one stays. [y/N]`;
   if (mode.action === 'interrupt') return `Interrupt ${mode.task}? Sends Escape to the agent; the window stays open. [y/N]`;
   if (mode.action === 'close' && row?.finished) return `Close ${mode.task}? It has no window; it is marked closed and leaves the list${row.report === 'missing' ? ' – WARNING: no report was written' : ''}. [y/N]`;
