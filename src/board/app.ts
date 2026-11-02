@@ -18,6 +18,7 @@ import {
   initialBoardState,
   KEY_HINTS,
   loadBoard,
+  loadLogLines,
   ProgressCache,
   promptText,
   queueCells,
@@ -178,6 +179,15 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
   const runEffect = (effect: BoardEffect): void => {
     if (effect.type === 'quit') return exit();
     if (effect.type === 'refresh') return refreshNow.current();
+    if (effect.type === 'log') {
+      let lines: string[];
+      try {
+        lines = loadLogLines(ctx);
+      } catch (e) {
+        lines = [`cannot read the history: ${errorMessage(e)}`];
+      }
+      return update((s) => (s.mode.kind === 'log' ? { ...s, mode: { kind: 'log', lines, offset: 0 } } : s));
+    }
     queue.current = queue.current.then(async () => {
       update((s) => withBusy(s, 'working…'));
       const notice = await runBoardEffect(ctx.runner, ctx.config, effect, { insideTmux, self });
@@ -206,8 +216,11 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
     h(Text, { dimColor: true, wrap: 'truncate-end' }, `  ${ctx.config.session} · ${active} task${active === 1 ? '' : 's'}${state.queue.length > 0 ? ` · ${state.queue.length} queued` : ''}${state.cohortFilter !== null ? ` · cohort: ${cohortLabel(state)}` : ''}${hiddenCount > 0 ? ` · ${hiddenCount} hidden (a)` : ''}${state.refreshedAt ? ` · ${state.refreshedAt}` : ''}`),
   );
   const panelBox = panel.length === 0 ? null : h(Box, { flexDirection: 'column', width: state.width }, ...panel.map((l) => h(Text, { key: l.provider, wrap: 'truncate-end', ...(l.color ? { color: l.color } : { dimColor: true }) }, l.text)));
+  const logMode = state.mode.kind === 'log' ? state.mode : null;
   const body =
-    state.mode.kind === 'help'
+    logMode
+      ? h(Box, { flexDirection: 'column' }, h(Text, { bold: true }, `Log – ${logMode.lines.length > 1 ? logMode.lines.length - 1 : 0} task${logMode.lines.length === 2 ? '' : 's'} (↑↓ scroll, Esc back)`), ...logMode.lines.slice(logMode.offset, logMode.offset + Math.max(1, state.height - 4)).map((l, i) => h(Text, { key: i, wrap: 'truncate-end', ...(i === 0 && logMode.offset === 0 ? { dimColor: true } : {}) }, l === '' ? ' ' : l)))
+      : state.mode.kind === 'help'
       ? h(Box, { flexDirection: 'column' }, ...HELP_LINES.map((l, i) => h(Text, { key: i }, l === '' ? ' ' : l)))
       : h(
           Box,
@@ -215,7 +228,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
           h(TaskList, { state, width: layout.listWidth, capacity: rowsForBody - 1, icons: ctx.config.watch.windowIcons }),
           layout.showPreview ? h(Preview, { state, width: layout.previewWidth, height: rowsForBody }) : null,
         );
-  return h(Box, { flexDirection: 'column', width: state.width, height: state.height }, header, state.mode.kind === 'help' ? null : panelBox, h(Box, { flexGrow: 1, flexDirection: 'column' }, body), h(Footer, { state, hint: navigationHint(ctx.config.board.returnKey) }));
+  return h(Box, { flexDirection: 'column', width: state.width, height: state.height }, header, state.mode.kind === 'help' || logMode ? null : panelBox, h(Box, { flexGrow: 1, flexDirection: 'column' }, body), h(Footer, { state, hint: navigationHint(ctx.config.board.returnKey) }));
 }
 
 /** Show the board until the user quits; resolves when it is gone. Needs a terminal. */

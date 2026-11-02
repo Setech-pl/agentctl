@@ -1,5 +1,6 @@
 import type { Context } from './context.ts';
 import { removeWorktrees } from './close.ts';
+import { recordEvent } from './history.ts';
 import { cancelFields, dropEntry, readQueue, writeCancelledRecord } from './queue.ts';
 import type { QueueEntry } from './queue.ts';
 import { matchTask } from './resolve.ts';
@@ -183,6 +184,8 @@ export async function cancelTasks(ctx: Context, plan: CancelPlan, opts: CancelOp
       } else if (item.entry) {
         await writeCancelledRecord(ctx, item.entry, { ...opts, at });
       }
+      const cancelled = readTaskRecord(config, item.record?.window ?? item.task.toLowerCase());
+      if (cancelled) await recordEvent(ctx, cancelled, 'cancelled');
       const worktree = item.record?.repos[0]?.worktree;
       ctx.out(`${item.task}: cancelled${worktree && !opts.rmWorktree ? ` (worktree ${worktree} and its branch stay)` : ''}`);
       if (opts.rmWorktree && item.record) await removeWorktrees(ctx, item.task, item.record.repos);

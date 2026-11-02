@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import { createInterface } from 'node:readline/promises';
-import { Command, CommanderError, Option } from 'commander';
+import { Argument, Command, CommanderError, Option } from 'commander';
 import { cancelTasks, planCancel } from './core/cancel.ts';
 import { touchCohort } from './core/cohort.ts';
 import { cohortEntries, cohortRows, findCohort, listCohorts, openCohortTasks, renderCohortList, setCohortOf, setNote, summarizeCohorts } from './core/cohort.ts';
@@ -42,6 +42,8 @@ import { applyStatusLine, statusTmuxLine } from './core/statusline.ts';
 import { BOARD_WINDOW, ensureWindow } from './core/windows.ts';
 import { interruptTask } from './core/interrupt.ts';
 import { handleTap } from './core/usage-tap.ts';
+import { computeStats, logMarkdown, markTask, RESULTS, renderLog, renderStats, selectHistory, statsMarkdown } from './core/history.ts';
+import type { Result } from './core/history.ts';
 import { usageSummaryLines } from './core/usage-limits.ts';
 import { collectUsage, renderUsage, usageMarkdown } from './core/usage-report.ts';
 import { loadGlobalConfig } from './core/config.ts';
@@ -617,6 +619,69 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
           return deps.stdout(md);
         }
         for (const l of renderUsage(report)) line(l);
+      }),
+    );
+
+  program
+    .command('mark')
+    .description('Say how a task turned out: ok, partial or fail (the result you judge, with an optional note). It goes to the history that "log" and "stats" read; the last mark of a task wins.')
+    .argument('<task>', 'task ID; case does not matter and a unique prefix is enough')
+    .addArgument(new Argument('<result>', 'how it turned out').choices([...RESULTS]))
+    .option('--note <text>', 'why (optional)')
+    .action(
+      guarded(async (task: string, result: Result, opts: { note?: string }) => {
+        const marked = await markTask(contextFor(false, { migrate: false }), task, result, opts.note);
+        line(`${marked.task}: ${marked.result}${marked.previous && marked.previous !== marked.result ? ` (was ${marked.previous})` : ''}`);
+      }),
+    );
+
+  program
+    .command('log')
+    .description('The history of the tasks: when, agent/model/effort, how long, tokens, progress, the result you marked and the verdict of the report. One line per task, newest first.')
+    .option('--since <age>', 'only tasks with something new within this age: 12h, 7d, 2w')
+    .option('--cohort <name>', 'only the tasks of this cohort')
+    .option('--json', 'machine-readable output')
+    .option('--clip', 'copy a compact Markdown table to the clipboard')
+    .action(
+      guarded(async (opts: { since?: string; cohort?: string; json?: boolean; clip?: boolean }) => {
+        if (opts.json && opts.clip) throw new AgentctlError('--json and --clip exclude each other');
+        const ctx = contextFor(false, { migrate: false });
+        const cohort = opts.cohort === undefined ? undefined : findCohort(ctx.config, opts.cohort).name;
+        const rows = selectHistory(ctx, { since: opts.since, cohort });
+        if (opts.json) return line(JSON.stringify(rows, null, 2));
+        if (opts.clip) {
+          const md = logMarkdown(rows);
+          const copy = await writeClipboard(ctx.runner, md);
+          if (copy.ok) return line(`Copied the log of ${rows.length} task${rows.length === 1 ? '' : 's'} to the clipboard (${copy.tool}), ${md.length} characters.`);
+          line(`${copy.error}; here is the table:`);
+          return deps.stdout(md);
+        }
+        for (const l of renderLog(rows)) line(l);
+      }),
+    );
+
+  program
+    .command('stats')
+    .description('Which model and effort work: the tasks of the history grouped by agent/model/effort - how many, median time and tokens, the share of ok, partial and fail (agentctl mark), cancelled ones and tasks moved to the other provider after a limit.')
+    .option('--since <age>', 'only tasks with something new within this age: 30d, 2w (default: all)')
+    .option('--cohort <name>', 'only the tasks of this cohort')
+    .option('--json', 'machine-readable output')
+    .option('--clip', 'copy a compact Markdown table to the clipboard')
+    .action(
+      guarded(async (opts: { since?: string; cohort?: string; json?: boolean; clip?: boolean }) => {
+        if (opts.json && opts.clip) throw new AgentctlError('--json and --clip exclude each other');
+        const ctx = contextFor(false, { migrate: false });
+        const cohort = opts.cohort === undefined ? undefined : findCohort(ctx.config, opts.cohort).name;
+        const groups = computeStats(selectHistory(ctx, { since: opts.since, cohort }));
+        if (opts.json) return line(JSON.stringify(groups, null, 2));
+        if (opts.clip) {
+          const md = statsMarkdown(groups);
+          const copy = await writeClipboard(ctx.runner, md);
+          if (copy.ok) return line(`Copied the stats to the clipboard (${copy.tool}), ${md.length} characters.`);
+          line(`${copy.error}; here is the table:`);
+          return deps.stdout(md);
+        }
+        for (const l of renderStats(groups)) line(l);
       }),
     );
 

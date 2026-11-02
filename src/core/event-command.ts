@@ -9,6 +9,7 @@ import { classifyScreen } from './state.ts';
 import type { EventKind } from './state.ts';
 import { listTaskRecords, taskDir } from './taskstore.ts';
 import type { TaskRecord } from './taskstore.ts';
+import { recordEvent } from './history.ts';
 import { rememberSession, sessionOfStatusLine } from './usage-tap.ts';
 import { readVerdict } from './verdict.ts';
 import { isObject } from './util.ts';
@@ -174,6 +175,7 @@ export async function handleEvent(ctx: Context, alerts: Alerts, input: EventInpu
       } else if (reportReady(ctx, record)) {
         state = 'report-ready';
         text = reportReadyText(record.task, readVerdict(record.report, ctx.config.notify.verdictPattern));
+        await recordEvent(ctx, record, 'report');
       } else if (ctx.config.notify.turnEnd) {
         state = 'waiting';
         text = `${record.task}: skończył turę i czeka na Ciebie${event.text ? ` – ${event.text}` : ''}`;

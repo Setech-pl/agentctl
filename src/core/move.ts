@@ -2,6 +2,7 @@ import { confirmAction } from './clipboard.ts';
 import type { AgentName } from './config.ts';
 import type { Context } from './context.ts';
 import { formatModelEffort, translate } from './equivalents.ts';
+import { recordEvent } from './history.ts';
 import type { Order } from './equivalents.ts';
 import type { SelfArgv } from './events.ts';
 import { newTasks } from './new.ts';
@@ -124,6 +125,8 @@ export async function moveTask(ctx: Context, taskArg: string, opts: MoveOptions 
   const [result] = await newTasks(ctx, [spec], { reuse: true, noSwitch: true, ...(opts.self ? { self: opts.self } : {}), ...(opts.signal ? { signal: opts.signal } : {}) });
   await setHeaderField(ctx.runner, taskFile(ctx.config, plan.window), 'continues', from.task);
   await setHeaderField(ctx.runner, taskFile(ctx.config, from.window), 'superseded_by', plan.task);
+  const moved = readTaskRecord(ctx.config, from.window);
+  if (moved) await recordEvent(ctx, moved, 'moved');
   ctx.out(`${from.task} -> ${plan.task}: running on ${label(plan.to)}. The old window ${from.window} stays open (superseded).`);
   return { plan, result: result as NewResult };
 }

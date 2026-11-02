@@ -71,3 +71,10 @@ export async function resolveRunningTask(ctx: Context, input: string): Promise<T
     'See "agentctl status".',
   );
 }
+
+/** The ID of any task agentctl knows, from what the user typed (case does not matter, a unique prefix is enough). */
+export async function resolveTask(ctx: Context, input: string): Promise<string> {
+  const match = matchTask(input, await listTargets(ctx));
+  if (match.kind === 'one') return match.target.task;
+  throw new AgentctlError(match.kind === 'many' ? `"${input}" fits more than one task: ${match.matches.map((m) => m.task).join(', ')}` : `no task "${input}"`, 'See "agentctl status".');
+}

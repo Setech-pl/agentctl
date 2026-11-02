@@ -13,6 +13,8 @@ import { CollisionMemory, collisionTick } from './collisions.ts';
 import { cohortTick } from './cohort.ts';
 import { announceBlocked, QueueMemory, queueTick } from './queue.ts';
 import { usageTick } from './usage-limits.ts';
+import { listTaskRecords } from './taskstore.ts';
+import { recordEvent } from './history.ts';
 import { errorMessage } from './util.ts';
 import { ensureWindow } from './windows.ts';
 import type { EnsureResult } from './windows.ts';
@@ -83,6 +85,12 @@ export function detectTransitions(memory: WatchMemory, rows: StatusRow[], nowMs:
     }
   }
   return events;
+}
+
+/** The history gets a record when a report is ready (`history.jsonl`); the same report is recorded once. */
+async function recordReport(ctx: Context, task: string): Promise<void> {
+  const record = listTaskRecords(ctx.config).find((r) => r.task === task);
+  if (record) await recordEvent(ctx, record, 'report');
 }
 
 export function watchLogPath(ctx: Context): string {
@@ -167,6 +175,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
     const row = rows.find((r) => r.task === e.task);
     if (e.notification && row) {
       if (e.to === 'report-ready' && e.reason === 'transition') e.notification = reportReadyText(e.task, readVerdict(row.reportPath, ctx.config.notify.verdictPattern));
+      if (e.to === 'report-ready' && e.reason === 'transition') await recordReport(ctx, row.task);
       // The ledger key of a reminder differs from the state names, so it is never taken for the end-of-turn event.
       const key = e.reason === 'waiting-too-long' ? 'waiting-too-long' : e.to;
       if ((await alerts.send({ task: row.task, window: row.windowName }, key, e.notification, 'watch')) === 'duplicate') e.duplicate = true;
