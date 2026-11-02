@@ -110,9 +110,10 @@ const FAKE_AGENT = (name: 'claude' | 'codex'): string => `#!/bin/bash
 echo "${name} $*" >> "\${HARNESS_AGENT_LOG:-/dev/null}"
 case "$1" in
   --version) echo "${name === 'claude' ? '2.1.309 (Claude Code, fake)' : 'codex-cli 0.166.0 (fake)'}"; exit 0;;
-  --help) echo "  ${name === 'claude' ? '--effort <level>' : '-c, --config <key=value>'}"; exit 0;;
+  --help) ${name === 'claude' ? `echo "  --effort <level>"; echo "  --remote-control [name]               Start an interactive session with Remote Control enabled"; echo "  --append-system-prompt <prompt>       Append a system prompt (--bare: --append-system-prompt[-file])"` : `echo "  -c, --config <key=value>"`}; exit 0;;
 esac
 ${name === 'claude' ? `printf '❯ Try "fake"\\n'` : `printf '› Ask Codex to do anything\\n'`}
+${name === 'claude' ? `case " $* " in *" --remote-control "*) printf '  /rc active\\n';; esac` : ''}
 while IFS= read -r line; do
   printf '● got: %s\\n' "$line"
   ${name === 'claude' ? `printf '❯ Try "fake"\\n'` : `printf '› Ask Codex to do anything\\n'`}
