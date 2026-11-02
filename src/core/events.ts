@@ -137,7 +137,10 @@ export function extractQuestion(screen: string, max: number = MAX_QUESTION): str
     if (OPTION.test(l)) first = i;
     else if (first >= 0 && l.trim() !== '' && !/^\s{3,}\S/.test(l) && !BORDER.test(l)) break; // a line that is not an option, its wrapped text or a gap
   }
-  if (first < 0) return undefined;
+  if (first < 0) {
+    const collapsed = collapsedQuestion(screen);
+    return collapsed ? clip(`Codex ma pytanie (zwinięte, ${collapsed.count}) – Enter → okno agenta, potem ${collapsed.shortcut ?? 'skrót przy „to answer” na ekranie'}`, max) : undefined;
+  }
   // Lines above the options that end with "?": the generic frame ("Would you like to run…?") wins over a "?" in the reason that
   // follows it, otherwise the one nearest to the options.
   const candidates: number[] = [];
@@ -305,4 +308,13 @@ export function planEventWiring(input: WiringInput): EventWiring {
     files: [],
     note: `events: Codex notify -> agentctl event${forward ? ` (then ${forward[0]}, your own notify)` : ''}`,
   };
+}
+
+/** Read the live queue marker; a queued message alone is not a question. */
+export function collapsedQuestion(screen: string): { count: number; shortcut: string | null } | undefined {
+  const marker = /^\s*\?\s+(\d+) questions?\b/im.exec(screen);
+  if (!marker) return undefined;
+  const tail = screen.slice(marker.index + marker[0].length).split('\n').slice(0, 5).join('\n');
+  const shortcut = /^\s*(.+?)\s+to answer\s*$/im.exec(tail)?.[1]?.trim() ?? null;
+  return { count: Number(marker[1]), shortcut };
 }

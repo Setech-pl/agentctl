@@ -88,12 +88,12 @@ describe('phone: the hint where to answer', () => {
     assert.match((await phoneHint(plain.ctx, 'needs-input', 'NC-1')) ?? '', /Otwórz sesję/);
   });
 
-  it('the question itself still does not reach the phone, with or without the hint', async () => {
+  it('the phone includes the question and the answer hint', async () => {
     const t = setup('h6', { remoteControl: true });
     await setAway(t.ctx, true, 'cli');
     (t.fake.windows[0] as { screen: string }).screen = fs.readFileSync(path.join(import.meta.dirname, 'fixtures', 'screen-claude-permission.txt'), 'utf8');
     await t.event('notification', JSON.parse(fs.readFileSync(path.join(import.meta.dirname, 'fixtures', 'claude-notification-permission.json'), 'utf8')));
-    assert.deepEqual(t.bodies, ['NC-1 zadaje pytanie i czeka na odpowiedź\nOdpowiesz w aplikacji Claude: NC-1']);
+    assert.deepEqual(t.bodies, ['NC-1: Do you want to proceed? touch approved-by-claude.txt\nOdpowiesz w aplikacji Claude: NC-1']);
     assert.equal(safeVerdict('PASS /Users/x/y.ts').includes('/Users'), false);
   });
 });

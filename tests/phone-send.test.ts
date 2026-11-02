@@ -100,16 +100,16 @@ describe('phone: sending from the events', () => {
     assert.equal(t.requests[0]?.body, 'NC-1: raport gotowy');
   });
 
-  it('a question on the screen: the phone gets "asks a question", not the question', async () => {
+  it('a question on the screen reaches the phone', async () => {
     const t = setup('s5');
     await t.ready();
     (t.fake.windows[0] as { screen: string }).screen = fs.readFileSync(path.join(import.meta.dirname, 'fixtures', 'screen-claude-permission.txt'), 'utf8');
     await handleEvent(t.ctx, t.alerts, { task: 'NC-1', agent: 'claude', kind: 'notification', payload: JSON.parse(fs.readFileSync(path.join(import.meta.dirname, 'fixtures', 'claude-notification-permission.json'), 'utf8')) });
     assert.match(t.notifier.sent[0] ?? '', /Do you want to proceed/);
     assert.equal(t.requests.length, 1);
-    assert.equal(t.requests[0]?.body, 'NC-1 zadaje pytanie i czeka na odpowiedź');
+    assert.equal(t.requests[0]?.body, 'NC-1: Do you want to proceed? touch approved-by-claude.txt');
     assert.equal(t.requests[0]?.headers.Priority, 'high');
-    assert.doesNotMatch(JSON.stringify(t.requests), /touch approved|proceed/);
+    assert.match(JSON.stringify(t.requests), /touch approved|proceed/);
   });
 
   it('only the chosen events go; notify.ntfy.always sends without away', async () => {

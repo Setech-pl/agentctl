@@ -274,3 +274,8 @@ describe('config: notify and limit_patterns', () => {
     assert.equal(loadGlobalConfig(scratch.sub('cfg-none')).notify.events, true);
   });
 });
+
+it('describes a collapsed Codex question with the screen shortcut, without inventing its text', () => {
+  assert.match(extractQuestion('Working (esc to interrupt)\nQueued follow-up inputs\n? 2 questions\n  ⇧↑ to answer') ?? '', /zwinięte, 2.*⇧↑/);
+  assert.equal(extractQuestion('Queued follow-up inputs\nmessage queued'), undefined);
+});

@@ -1,3 +1,5 @@
+import { sessionQuestion } from './codex-question.ts';
+import { collapsedQuestion } from './events.ts';
 import { shortPath } from './report-detect.ts';
 import fs from 'node:fs';
 import type { Context } from './context.ts';
@@ -173,7 +175,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       progress: opts.progress === false || record.repos.length === 0 ? null : await taskProgress(runner, record.repos),
       collide: [],
       hint: stateHint(record.task, state, record.pin === true, record.supersededBy),
-      question: state === 'needs-input' ? (extractQuestion(screenText) ?? (stored?.outcome === 'needs-input' && stored.text !== '' ? stored.text : null)) : null,
+      question: state === 'needs-input' ? ((collapsedQuestion(screenText) ? sessionQuestion(config, record) : undefined) ?? extractQuestion(screenText) ?? (stored?.outcome === 'needs-input' && stored.text !== '' ? stored.text : null)) : null,
       pin: record.pin === true,
       finished: !alive || state === 'superseded',
       hidden: hiddenBy !== null,

@@ -123,7 +123,7 @@ export async function notifyPhone(ctx: Context, entry: Pick<JournalEntry, 'kind'
   const ntfy = ctx.config.notify.ntfy;
   const event = phoneEventOf(entry);
   if (!ntfy || !event || !phoneActive(ctx.config) || !ntfy.events.includes(event)) return undefined;
-  const message = phoneMessage(event, { task: entry.task, cohort: entry.cohort, verdict: entry.verdict, usage: entry.text, hint: await phoneHint(ctx, event, entry.task) }, ntfy);
+  const message = phoneMessage(event, { task: entry.task, cohort: entry.cohort, verdict: entry.verdict, usage: entry.text, text: entry.text, hint: await phoneHint(ctx, event, entry.task) }, ntfy);
   if (!message) return undefined;
   const r = await sendNtfy(ctx.fetch, ntfy, message, () => ctx.runner.now());
   if (r.ok) return 'sent';
