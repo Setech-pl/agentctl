@@ -28,6 +28,9 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`send`](#agentctl-send) | Paste a follow-up prompt into the existing window of each task in the file. |
 | [`status`](#agentctl-status) | Table of tasks: window state, running time, report, last output line. |
 | [`usage`](#agentctl-usage) | Token usage of the tasks and the state of the plans: per provider the limit used (5 h and weekly window, with the reset) and the tokens today and in the period, the active tasks with their tokens, the cohorts. What a provider does not tell is n/d. |
+| [`mark`](#agentctl-mark) | Say how a task turned out: ok, partial or fail (the result you judge, with an optional note). It goes to the history that "log" and "stats" read; the last mark of a task wins. |
+| [`log`](#agentctl-log) | The history of the tasks: when, agent/model/effort, how long, tokens, progress, the result you marked and the verdict of the report. One line per task, newest first. |
+| [`stats`](#agentctl-stats) | Which model and effort work: the tasks of the history grouped by agent/model/effort - how many, median time and tokens, the share of ok, partial and fail (agentctl mark), cancelled ones and tasks moved to the other provider after a limit. |
 | [`archive`](#agentctl-archive) | Move the state of closed tasks (agentctl close) to the archive folder next to the state folder. Reports and worktrees are not touched. |
 | [`hide`](#agentctl-hide) | Take tasks off the board and "status" (they stay in "status --all" and on the board under "a"). Does not close the task or touch its worktree. |
 | [`unhide`](#agentctl-unhide) | Show hidden tasks again on the board and in "status". A task shown on purpose is not hidden again by board.auto_hide_pulled_dead. |
@@ -454,6 +457,79 @@ agentctl usage --since 30d             # the token columns over 30 days
 agentctl usage --cohort sprint-1       # only the tasks of one cohort
 agentctl usage --json
 agentctl usage --clip                  # Markdown table to the clipboard
+```
+
+## agentctl mark
+
+Say how a task turned out: ok, partial or fail (the result you judge, with an optional note). It goes to the history that "log" and "stats" read; the last mark of a task wins.
+
+```
+agentctl mark [options] <task> <result>
+```
+
+| Argument | Meaning |
+|---|---|
+| `<task>` | task ID; case does not matter and a unique prefix is enough |
+| `<result>` | how it turned out |
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--note <text>` | why (optional) |  |
+
+Examples:
+
+```sh
+agentctl mark NC-42 ok
+agentctl mark NC-42 partial --note "missed the edge case"
+agentctl mark NC-42 fail
+```
+
+## agentctl log
+
+The history of the tasks: when, agent/model/effort, how long, tokens, progress, the result you marked and the verdict of the report. One line per task, newest first.
+
+```
+agentctl log [options]
+```
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--since <age>` | only tasks with something new within this age: 12h, 7d, 2w |  |
+| `--cohort <name>` | only the tasks of this cohort |  |
+| `--json` | machine-readable output |  |
+| `--clip` | copy a compact Markdown table to the clipboard |  |
+
+Examples:
+
+```sh
+agentctl log                            # every task of the history, newest first
+agentctl log --since 7d --cohort sprint-1
+agentctl log --json
+agentctl log --clip
+```
+
+## agentctl stats
+
+Which model and effort work: the tasks of the history grouped by agent/model/effort - how many, median time and tokens, the share of ok, partial and fail (agentctl mark), cancelled ones and tasks moved to the other provider after a limit.
+
+```
+agentctl stats [options]
+```
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--since <age>` | only tasks with something new within this age: 30d, 2w (default: all) |  |
+| `--cohort <name>` | only the tasks of this cohort |  |
+| `--json` | machine-readable output |  |
+| `--clip` | copy a compact Markdown table to the clipboard |  |
+
+Examples:
+
+```sh
+agentctl stats                          # per agent/model/effort
+agentctl stats --since 30d
+agentctl stats --cohort sprint-1 --json
+agentctl stats --clip
 ```
 
 ## agentctl archive

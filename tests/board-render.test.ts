@@ -116,4 +116,17 @@ describe('board: the Ink front renders the model', () => {
     keys.write('q');
     await done;
   });
+
+  it('l shows the log of the tasks (the history), Esc comes back to the list', async () => {
+    const { term, keys, done } = setup('rd4', 100);
+    await until(() => term.screen().includes('NC-1'));
+    await wait(100);
+    keys.write('l');
+    await until(() => term.frames.some((f) => f.includes('Log –')));
+    assert.ok(term.frames.some((f) => f.includes('No history yet')));
+    keys.write('\u001b');
+    await wait(150);
+    keys.write('q');
+    await done;
+  });
 });

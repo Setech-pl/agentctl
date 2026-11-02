@@ -23,6 +23,8 @@ import type { TaskState } from './state.ts';
 import { collectStatus } from './status.ts';
 import type { StatusRow } from './status.ts';
 import { listArchivedRecords, listTaskRecords } from './taskstore.ts';
+import { logLines, markTask } from './history.ts';
+import type { Result } from './history.ts';
 import { openReader, readPlans } from './usage.ts';
 import type { PlanState } from './usage.ts';
 import { formatTokens } from './usage-parse.ts';
@@ -74,7 +76,9 @@ export type BoardMode =
   | { kind: 'cancel-reason'; task: string; text: string }
   /** `k`: pick the cohort to show; `value` null is every task, '' the tasks without a cohort. */
   | { kind: 'cohort-pick'; options: CohortOption[]; index: number }
-  | { kind: 'help' };
+  | { kind: 'help' }
+  /** `l`: the history of the tasks (`agentctl log`), scrolled with the arrows. */
+  | { kind: 'log'; lines: string[]; offset: number };
 
 export interface CohortOption {
   label: string;
@@ -130,6 +134,10 @@ export type BoardEffect =
   | { type: 'queue-rm'; task: string }
   | { type: 'cancel'; task: string; reason?: string }
   | { type: 'queue-pause'; paused: boolean }
+  /** `o`, `p`, `f`: the result of a finished task, for the history (`agentctl mark`). */
+  | { type: 'mark'; task: string; result: Result }
+  /** `l`: load the history into the log view. */
+  | { type: 'log' }
   /** The selection moved: load the preview of the new one now instead of at the next refresh. */
   | { type: 'refresh' }
   | { type: 'quit' };
@@ -265,6 +273,15 @@ function listKey(state: BoardState, input: string, key: KeyPress): KeyResult {
   }
 
   if (input === '?') return stay({ ...state, mode: { kind: 'help' } });
+  if (input === 'l') return stay({ ...state, notice: null, mode: { kind: 'log', lines: ['Loading…'], offset: 0 } }, [{ type: 'log' }]);
+  // o / p / f: how a finished task turned out. `p` is also the queue's pause: it marks only while a finished task is selected.
+  const result = input === 'o' ? 'ok' : input === 'p' ? 'partial' : input === 'f' ? 'fail' : null;
+  if (result) {
+    const picked = selectedRow(state);
+    const markable = picked !== undefined && selectedQueueView(state) === undefined && (picked.finished || picked.closed || picked.cancelled || picked.state === 'report-ready');
+    if (markable) return stay(withNotice(state, 'info', `${picked.task}: marking it ${result}…`), [{ type: 'mark', task: picked.task, result }]);
+    if (input !== 'p') return stay(withNotice(state, 'error', 'o / p / f mark the result of a finished task (one with a report, or without a window): select one first.'));
+  }
   if (input === 'z') {
     const next = keepSelection({ ...state, notice: null, showFinished: !state.showFinished });
     return stay(next, next.selected !== state.selected ? [{ type: 'refresh' }] : []);
@@ -345,6 +362,8 @@ function finishedKey(state: BoardState, mode: Extract<BoardMode, { kind: 'finish
   if (key.escape || (key.ctrl && input === 'c')) return { state: toList(state), effects: [] };
   if (!row) return { state: withNotice(toList(state), 'error', `${mode.task} is gone.`), effects: [] };
   if (input === 'c') return { state: withNotice(toList(state), 'info', `${row.task}: copying the report…`), effects: [{ type: 'pull', task: row.task }] };
+  const result = input === 'p' ? 'partial' : input === 'f' ? 'fail' : input === 'o' && !isAlive(row) ? 'ok' : null;
+  if (result) return { state: withNotice(toList(state), 'info', `${row.task}: marking it ${result}…`), effects: [{ type: 'mark', task: row.task, result }] };
   if ((row.closed || row.cancelled) && input !== 'c') return { state, effects: [] };
   if (input === 'x') return { state: { ...state, mode: { kind: 'confirm', action: 'close', task: row.task } }, effects: [] };
   if (input === 'X') return { state: { ...state, mode: { kind: 'cancel-reason', task: row.task, text: '' } }, effects: [] };
@@ -445,7 +464,16 @@ export function handleKey(state: BoardState, input: string, key: KeyPress): KeyR
       return cohortPickKey(state, state.mode, input, key);
     case 'help':
       return { state: toList(state), effects: [] };
+    case 'log':
+      return logKey(state, state.mode, input, key);
   }
+}
+
+function logKey(state: BoardState, mode: Extract<BoardMode, { kind: 'log' }>, input: string, key: KeyPress): KeyResult {
+  if (key.escape || input === 'q' || input === 'l' || (key.ctrl && input === 'c')) return { state: toList(state), effects: [] };
+  const step = key.upArrow || input === 'k' ? -1 : key.downArrow || input === 'j' ? 1 : 0;
+  if (step === 0) return { state, effects: [] };
+  return { state: { ...state, mode: { ...mode, offset: Math.max(0, Math.min(Math.max(0, mode.lines.length - 1), mode.offset + step)) } }, effects: [] };
 }
 
 // ---- data in
@@ -604,6 +632,10 @@ export async function runBoardEffect(runner: Runner, config: GlobalConfig, effec
         const blocked = [...new Set(plan.items.flatMap((i) => i.blocks))];
         return { level: 'info', text: `${tasks}: cancelled${blocked.length > 0 ? `; ⛓ blocked: ${blocked.join(', ')}` : ''}` };
       }
+      case 'mark': {
+        const marked = await markTask(ctx, effect.task, effect.result);
+        return { level: 'info', text: `${marked.task}: marked ${marked.result}${marked.previous && marked.previous !== marked.result ? ` (was ${marked.previous})` : ''}` };
+      }
       case 'queue-pause':
         await setPaused(ctx, effect.paused);
         return { level: 'info', text: effect.paused ? 'Queue paused: nothing new starts (p resumes).' : 'Queue resumed.' };
@@ -611,6 +643,7 @@ export async function runBoardEffect(runner: Runner, config: GlobalConfig, effec
         await setHidden(ctx, [effect.task], effect.hidden);
         return { level: 'info', text: effect.hidden ? `${effect.task}: hidden (a lists hidden tasks, h shows it again)` : `${effect.task}: shown again` };
       case 'refresh':
+      case 'log':
       case 'quit':
         return { level: 'info', text: '' };
     }
@@ -717,6 +750,9 @@ export function rowCells(row: StatusRow, selected: boolean, cols: BoardColumns, 
 }
 
 // ---- the usage panel
+
+/** The lines of the log view: the history of the tasks, newest first. */
+export const loadLogLines = (ctx: Context): string[] => logLines(ctx);
 
 export const BAR_WIDTH = 10;
 
@@ -851,7 +887,7 @@ export function visibleRows(state: BoardState, capacity: number): { rows: BoardR
 
 // ---- texts
 
-export const KEY_HINTS = '↑↓ ⏎ m msg M move i int c/r pull x close X cancel k cohort h hide z/a u/d/p ?';
+export const KEY_HINTS = 'm msg M move i int c/r pull x close X cancel k cohort h hide l log o/f u/d/p ?';
 
 export const HELP_LINES: string[] = [
   'agentctl board',
@@ -869,6 +905,9 @@ export const HELP_LINES: string[] = [
   '              interrupted, its window closed (a queued task leaves the queue);',
   '              worktree and branch stay. A move is cancelled with its other half.',
   '              Cancelled tasks are listed under "a", in their own section.',
+  '  l           the history of the tasks (agentctl log): ↑↓ scroll, Esc back',
+  '  o / p / f   mark a finished task ok / partial / fail (agentctl mark);',
+  '              p marks only on a finished task, else it pauses the queue',
   '  k           pick a cohort to show (↑↓ ⏎ or its number); "wszystkie" = all,',
   '              "bez kohorty" = the tasks that are in no cohort',
   '  g / G       fold the cohort group of the selected task / open all groups',
@@ -892,7 +931,7 @@ export function promptText(state: BoardState): string | null {
   if (mode.kind === 'input') return `Message to ${mode.task} (Enter sends, Esc cancels): ${mode.text}`;
   if (mode.kind === 'cancel-reason') return `Cancel ${mode.task} – reason, optional (Enter goes on, Esc stops): ${mode.text}`;
   if (mode.kind === 'cohort-pick') return `Cohort: ${mode.options.map((o, i) => (i === mode.index ? `[${i + 1} ${o.label}]` : `${i + 1} ${o.label}`)).join('  ')}  (↑↓ ⏎ or a number, Esc)`;
-  if (mode.kind === 'finished') return `${mode.task} is finished (no window): c copy report · x close · X cancel · h hide${state.rows.find((r) => r.task === mode.task && isAlive(r)) ? ' · o open window' : ''} · Esc`;
+  if (mode.kind === 'finished') return `${mode.task} is finished (no window): c copy report · x close · X cancel · h hide · ${state.rows.find((r) => r.task === mode.task && isAlive(r)) ? 'o open window · ' : 'o ok · '}p partial · f fail · Esc`;
   if (mode.kind !== 'confirm') return null;
   const row = state.rows.find((r) => r.task === mode.task);
   if (mode.action === 'queue-rm') return `Remove ${mode.task} from the queue? [y/N]`;

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Context } from './context.ts';
 import { gitFailure } from './git.ts';
+import { recordEvent } from './history.ts';
 import { collectStatus } from './status.ts';
 import { readTaskRecord, setHeaderFields, taskFile } from './taskstore.ts';
 import type { TaskRecord } from './taskstore.ts';
@@ -39,6 +40,9 @@ export async function closeTask(ctx: Context, taskArg: string, opts: CloseOption
   // The window is gone: the task is closed, whether or not the worktree can be removed below. The state and the report stay.
   if (record) {
     await setHeaderFields(runner, taskFile(config, window), { closed: true, closed_at: new Date(runner.now()).toISOString() });
+    // Before the worktree goes: the progress is read from it.
+    const closed = readTaskRecord(config, window);
+    if (closed) await recordEvent(ctx, closed, 'closed');
   }
 
   if (!opts.rmWorktree || !record) return;
