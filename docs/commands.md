@@ -27,6 +27,11 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`overlap`](#agentctl-overlap) | Which active tasks of one repository changed the same files (git diff of each worktree against its base, plus uncommitted files). Without a task: every pair. |
 | [`send`](#agentctl-send) | Paste a follow-up prompt into the existing window of each task in the file. |
 | [`status`](#agentctl-status) | Table of tasks: window state, running time, report, last output line. |
+| [`limits`](#agentctl-limits) | The limits of simultaneous agents per provider and what uses them up: agentctl windows, places reserved for agents you started by hand, and (limits.count_external) claude/codex sessions found in other terminals. Without a subcommand: show. |
+| [`limits show`](#agentctl-limits-show) | Per provider: limit, places used, free places, the windows of agentctl, the reserved and the external ones, and the tasks waiting in the queue. |
+| [`limits set`](#agentctl-limits-set) | Change the limits in config.yaml (comments and the order of the keys stay; the old file is kept as config.yaml.bak). A running watch and the MCP server pick it up at once; waiting tasks of the queue start at the next tick. |
+| [`limits reserve`](#agentctl-limits-reserve) | Hold places for agents you start by hand (they count against the limit, so the queue leaves room for them). Several reservations add up; "limits release" gives them back. |
+| [`limits release`](#agentctl-limits-release) | Give reserved places back: claude=1 releases one, a bare provider name releases all of its places. |
 | [`usage`](#agentctl-usage) | Token usage of the tasks and the state of the plans: per provider the limit used (5 h and weekly window, with the reset) and the tokens today and in the period, the active tasks with their tokens, the cohorts. What a provider does not tell is n/d. |
 | [`mark`](#agentctl-mark) | Say how a task turned out: ok, partial or fail (the result you judge, with an optional note). It goes to the history that "log" and "stats" read; the last mark of a task wins. |
 | [`log`](#agentctl-log) | The history of the tasks: when, agent/model/effort, how long, tokens, progress, the result you marked and the verdict of the report. One line per task, newest first. |
@@ -432,6 +437,106 @@ agentctl status --json                 # rows with started (UTC) and startedLoca
 agentctl status --clip                 # Markdown table to paste into a chat
 agentctl status --all                  # hidden, closed, cancelled and archived tasks too
 agentctl status --cohort sprint-1      # only the tasks of one cohort (also with --json, --clip)
+```
+
+## agentctl limits
+
+The limits of simultaneous agents per provider and what uses them up: agentctl windows, places reserved for agents you started by hand, and (limits.count_external) claude/codex sessions found in other terminals. Without a subcommand: show.
+
+Subcommands: `limits show`, `limits set`, `limits reserve`, `limits release`. Without a subcommand: `show`.
+
+```
+agentctl limits [options] [command]
+```
+
+Examples:
+
+```sh
+agentctl limits                           # the same as limits show
+```
+
+## agentctl limits show
+
+Per provider: limit, places used, free places, the windows of agentctl, the reserved and the external ones, and the tasks waiting in the queue.
+
+```
+agentctl limits show [options]
+```
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--json` | machine-readable output |  |
+
+Examples:
+
+```sh
+agentctl limits show
+agentctl limits show --json
+```
+
+## agentctl limits set
+
+Change the limits in config.yaml (comments and the order of the keys stay; the old file is kept as config.yaml.bak). A running watch and the MCP server pick it up at once; waiting tasks of the queue start at the next tick.
+
+```
+agentctl limits set [options] <limits...>
+```
+
+| Argument | Meaning |
+|---|---|
+| `<limits...>` | claude=3 codex=5; off removes a limit (codex=off) |
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `-y, --yes` | do not ask |  |
+| `--dry-run` | print what would be written, change nothing |  |
+
+Examples:
+
+```sh
+agentctl limits set claude=3 codex=5     # summary, y/N, takes effect at once
+agentctl limits set codex=off -y         # no limit for Codex, no question
+```
+
+## agentctl limits reserve
+
+Hold places for agents you start by hand (they count against the limit, so the queue leaves room for them). Several reservations add up; "limits release" gives them back.
+
+```
+agentctl limits reserve [options] <places...>
+```
+
+| Argument | Meaning |
+|---|---|
+| `<places...>` | claude=1 codex=2 (a bare provider name means 1) |
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--note <text>` | what the place is for (shown by "limits") |  |
+
+Examples:
+
+```sh
+agentctl limits reserve claude=1 --note "my own session"   # a place for an agent you start by hand
+```
+
+## agentctl limits release
+
+Give reserved places back: claude=1 releases one, a bare provider name releases all of its places.
+
+```
+agentctl limits release [options] <places...>
+```
+
+| Argument | Meaning |
+|---|---|
+| `<places...>` | claude=1 or claude (all of its places) |
+
+Examples:
+
+```sh
+agentctl limits release claude=1
+agentctl limits release claude        # all reserved places of Claude
 ```
 
 ## agentctl usage

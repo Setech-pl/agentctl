@@ -74,6 +74,8 @@ export interface GlobalConfig extends Layer {
   session: string;
   /** Max simultaneous windows per provider (agent). Missing = unlimited. */
   limits: Partial<Record<AgentName, number>>;
+  /** `limits.count_external`: claude/codex terminal sessions outside agentctl's windows count against the limit (detected with ps). */
+  countExternal: boolean;
   agents: Record<AgentName, AgentSettings>;
   /** Claude<->Codex pairs: your `equivalents` first, then the built-in table. */
   equivalents: Equivalent[];
@@ -261,6 +263,7 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
 /** The keys accepted in every layer: the global config, `.agentctl.yaml` and (with a few of its own) a spec. docs/configuration.md describes each one. */
 export const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'setup', 'defaults'];
 export const GLOBAL_KEYS = [...LAYER_KEYS, 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage'];
+export const LIMITS_KEYS = [...AGENT_NAMES, 'count_external'];
 export const DEFAULTS_KEYS = ['agent', 'model', 'effort'];
 export const LINK_KEYS = ['from', 'to'];
 export const AGENT_KEYS = ['flags', 'effort_args', 'ready_pattern', 'ready_timeout', 'trust_timeout', 'trust_pattern', 'working_pattern', 'interrupt_key', 'footer_patterns', 'question_pattern', 'limit_patterns', 'background_patterns'];
@@ -703,10 +706,15 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   if (!/^[A-Za-z0-9_-]+$/.test(session)) p.add('config.session may only contain letters, digits, "_" and "-"');
 
   const limits: GlobalConfig['limits'] = {};
+  let countExternal = false;
   if (raw.limits !== undefined && raw.limits !== null) {
     if (!isObject(raw.limits)) p.add('config.limits must be a mapping like {claude: 3, codex: 3}');
     else {
-      checkKeys(raw.limits, [...AGENT_NAMES], 'config.limits', p);
+      checkKeys(raw.limits, [...LIMITS_KEYS], 'config.limits', p);
+      if (raw.limits.count_external !== undefined) {
+        if (typeof raw.limits.count_external === 'boolean') countExternal = raw.limits.count_external;
+        else p.add('config.limits.count_external must be true or false');
+      }
       for (const name of AGENT_NAMES) {
         const value = raw.limits[name];
         if (value === undefined) continue;
@@ -735,7 +743,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   const usage = parseUsage(raw.usage, p);
 
   p.throwIfAny(`Invalid config ${file}:`, 'Fix the listed keys; see the README section "Configuration".');
-  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, limits, agents, equivalents, watch, notify, board, mcp, queue, collisions, cancel, usage, path: file, loaded: exists };
+  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, limits, countExternal, agents, equivalents, watch, notify, board, mcp, queue, collisions, cancel, usage, path: file, loaded: exists };
   if (mirror) config.mirrorDir = resolvePath(mirror);
   return config;
 }

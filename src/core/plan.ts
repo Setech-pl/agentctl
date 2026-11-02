@@ -7,6 +7,7 @@ import { formatModelEffort, translate } from './equivalents.ts';
 import type { Order } from './equivalents.ts';
 import type { ResolvedSpec } from './spec.ts';
 import { cancelledTasks, unmetAfter, waitingText } from './depends.ts';
+import { slotHolders } from './limits.ts';
 import { collectStatus } from './status.ts';
 import { listTaskRecords } from './taskstore.ts';
 import { Problems } from './util.ts';
@@ -36,15 +37,17 @@ const CODEX_EFFORTS = ['low', 'medium', 'high', 'xhigh'];
 const otherAgent = (a: AgentName): AgentName => (a === 'claude' ? 'codex' : 'claude');
 const label = (o: Order): string => `${o.agent} ${formatModelEffort(o)}`;
 
-/** Windows currently in the session, each tagged with the agent that agentctl started in it. */
+/** Windows currently in the session, each tagged with the agent that agentctl started in it, then the places held by reservations and external sessions. */
 export async function liveWindows(ctx: Context): Promise<LiveWindow[]> {
   const names = await ctx.tmux.listWindows();
   const agentByWindow = new Map<string, AgentName>();
   for (const record of listTaskRecords(ctx.config)) if (record.agent !== 'unknown') agentByWindow.set(record.window, record.agent);
-  return names.map((window) => {
+  const windows = names.map((window): LiveWindow => {
     const agent = agentByWindow.get(window);
     return agent ? { window, agent } : { window };
   });
+  // Places held by the user (`limits reserve`) and sessions outside agentctl count against the limit like its own windows.
+  return [...windows, ...(await slotHolders(ctx))];
 }
 
 function switchTo(spec: ResolvedSpec, to: Order, by: 'flag' | 'limit'): ResolvedSpec {
