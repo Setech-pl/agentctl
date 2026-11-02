@@ -54,4 +54,4 @@ await withHarness({ name: 'my-try' }, (h) => {
 
 ## Style
 
-Match the surrounding code. agentctl never merges, pushes, rebases, deletes branches or turns on an auto-accept mode; a change that would do any of these is out of scope. Messages to the user are short and say what to do next.
+Match the surrounding code. agentctl never merges, pushes, rebases or turns on an auto-accept mode, and deletes a branch only in `gc --branches`, with `git branch -d` for a merged one; a change that would do any of these is out of scope. Messages to the user are short and say what to do next.

@@ -47,8 +47,20 @@ sequenceDiagram
         A->>G: close the window (worktree and branch stay)
         W-->>H: queued tasks that waited for it: ⛓ blocked
     end
+    opt the parity of the limits changes
+        H->>A: agentctl limits set claude=3 codex=5
+        A->>W: config.yaml is read again (no restart)
+        W->>A: the queue starts the waiting tasks
+    end
+    opt the Mac was restarted
+        H->>A: agentctl up
+        W-->>H: N zadań do wznowienia
+        H->>A: agentctl resume
+        A->>X: window again, agent --resume / --continue (no prompt)
+    end
     X->>G: writes the report file
     W-->>H: notification (report ready, question, limit)
+    C->>A: events_since (MCP): what changed since the last call
     W-->>H: kohorta sprint-1: all reports ready (once per cohort)
     H->>A: agentctl pull --ready (or MCP pull_ready)
     A-->>C: reports (clipboard or MCP answer)
@@ -58,6 +70,10 @@ sequenceDiagram
     end
     H->>A: agentctl close NC-42 --rm-worktree
     A->>G: kill window, remove worktree (branch stays)
+    opt later
+        H->>A: agentctl gc --apply
+        A->>G: worktrees, old files, merged branches (branch -d)
+    end
 ```
 
 ## Architecture
@@ -71,7 +87,7 @@ flowchart TB
         BOARD["board (Ink, src/board)"]
         MCP["MCP server (src/mcp, stdio)"]
     end
-    CORE["src/core: spec, plan, new, queue, cancel, cohort, collisions, status, pull, close, move, watch, events, notify, usage, history"]
+    CORE["src/core: spec, plan, new, queue, cancel, cohort, collisions, status, pull, close, move, watch, events, notify, usage, history, limits, chat-events, journal, gc, resume"]
     RUN["Runner: RealRunner / RecordingRunner"]
     subgraph world [Outside]
         TMUX[tmux session agentctl]
@@ -79,6 +95,7 @@ flowchart TB
         AG[Claude Code and Codex]
         NOTE[terminal-notifier / osascript]
         LOGS["agent logs: ~/.claude/projects/…/*.jsonl, ~/.codex/sessions/…/*.jsonl"]
+        PS["ps, lsof: claude/codex sessions outside agentctl"]
     end
     subgraph disk [Files]
         CFG["config: ~/.agentctl/config.yaml, .agentctl.yaml"]
@@ -89,6 +106,7 @@ flowchart TB
         REP["cache: reports per task"]
         AUDIT["mcp-audit.log"]
         HIST["history.jsonl, usage-cache.json, usage-alerts.json, usage/claude-plan.json"]
+        JOURNAL["journal.jsonl, events-seen.json, reservations.json, config-state.json"]
     end
     CLI --> CORE
     BOARD --> CORE
@@ -102,15 +120,19 @@ flowchart TB
     AG --> LOGS
     CORE -- "usage readers (incremental)" --> LOGS
     CORE <--> HIST
+    CORE <--> JOURNAL
+    CORE -- "limits.count_external" --> PS
     CORE --> NOTE
     CORE <--> STATE
     CORE <--> QUEUE
     CORE <--> COH
     CORE --> ARCH
     CORE --> CFG
+    CFG -. "reloaded when the file changes (watch, MCP)" .-> CORE
     AG --> REP
     CORE --> REP
     MCP --> AUDIT
+    MCP -- "events_since" --> JOURNAL
 ```
 
 ## Task states

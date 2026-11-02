@@ -21,6 +21,9 @@ agentctl zarządza **zleceniami, nie oknami**. Jednostką jest spec: plik Markdo
 - **Anulowanie i kohorty.** Praca porzucona w trakcie tury? `agentctl cancel` przerywa, zamyka okno i zostawia worktree; zadania, które na nią czekały, są zablokowane, a nie zapomniane. Zadania z nadaną nazwą kohorty są grupowane na boardzie, filtrowane przez `--cohort` i ogłaszane razem, gdy wszystkie ich raporty są gotowe.
 - **Zmiana dostawcy.** Tabela odpowiedników Claude i Codexa; `agentctl move` przekazuje zadanie, które trafiło na limit użycia, drugiemu dostawcy w tym samym worktree.
 - **Zużycie i limity.** `agentctl usage` pokazuje tokeny zadań i jak blisko limitów są plany Claude i Codexa (n/d, gdy dostawca nie mówi); `watch` ostrzega przy 80 % i 95 %, `new` podpowiada dostawcę z zapasem, kolejka może wstrzymać dostawcę bliskiego wyczerpania. `agentctl log` i `stats` prowadzą historię zadań, żeby dobierać model i effort.
+- **Limity na żywo.** `agentctl limits set claude=3 codex=5` zmienia parytet, gdy działa `watch`; miejsca dla agentów uruchomionych ręcznie można zarezerwować albo liczyć.
+- **Zdarzenia dla czatu.** `agentctl events` i MCP `events_since` mówią czatowi, co zmieniło się od jego ostatniego wywołania.
+- **Sprzątanie i wznawianie.** `agentctl gc` odbiera worktree, stare pliki i scalone gałęzie zakończonych zadań; `agentctl resume` przywraca okna po restarcie, a `agentctl up` zaczyna dzień.
 - **Integracja z czatem.** Lokalny serwer MCP pozwala czatowi w aplikacji Claude lub w Claude Code czytać status i raporty oraz, jeśli na to pozwolisz, wysyłać prompty i uruchamiać zadania.
 - **Mały i przejrzysty.** TypeScript na Node bez kroku budowania, bez demona; `--dry-run` wypisuje każde polecenie zamiast je wykonać.
 
@@ -67,8 +70,20 @@ sequenceDiagram
         A->>G: zamyka okno (worktree i gałąź zostają)
         W-->>H: zadania z kolejki, które na nie czekały: ⛓ zablokowane
     end
+    opt parytet limitów się zmienia
+        H->>A: agentctl limits set claude=3 codex=5
+        A->>W: config.yaml czytany ponownie (bez restartu)
+        W->>A: kolejka startuje oczekujące zadania
+    end
+    opt Mac został zrestartowany
+        H->>A: agentctl up
+        W-->>H: N zadań do wznowienia
+        H->>A: agentctl resume
+        A->>X: znowu okno, agent --resume / --continue (bez promptu)
+    end
     X->>G: zapisuje plik raportu
     W-->>H: powiadomienie (raport gotowy, pytanie, limit)
+    C->>A: events_since (MCP): co się zmieniło od ostatniego wywołania
     W-->>H: kohorta sprint-1: wszystkie raporty gotowe (raz na kohortę)
     H->>A: agentctl pull --ready (albo MCP pull_ready)
     A-->>C: raporty (schowek albo odpowiedź MCP)
@@ -78,6 +93,10 @@ sequenceDiagram
     end
     H->>A: agentctl close NC-42 --rm-worktree
     A->>G: zamyka okno, usuwa worktree (gałąź zostaje)
+    opt później
+        H->>A: agentctl gc --apply
+        A->>G: worktree, stare pliki, scalone gałęzie (branch -d)
+    end
 ```
 
 Żółte ramki to decyzje, które zostają przy człowieku: agentctl nigdy nie odpowiada na dialog zaufania, nie wydaje werdyktu i nie scala.
@@ -93,7 +112,7 @@ flowchart TB
         BOARD["board (Ink, src/board)"]
         MCP["serwer MCP (src/mcp, stdio)"]
     end
-    CORE["src/core: spec, plan, new, queue, cancel, cohort, collisions, status, pull, close, move, watch, events, notify, usage, history"]
+    CORE["src/core: spec, plan, new, queue, cancel, cohort, collisions, status, pull, close, move, watch, events, notify, usage, history, limits, chat-events, journal, gc, resume"]
     RUN["Runner: RealRunner / RecordingRunner"]
     subgraph world [Na zewnątrz]
         TMUX[sesja tmux agentctl]
@@ -111,6 +130,7 @@ flowchart TB
         REP["cache: raporty zadań"]
         AUDIT["mcp-audit.log"]
         HIST["history.jsonl, usage-cache.json, usage-alerts.json, usage/claude-plan.json"]
+        JOURNAL["journal.jsonl, events-seen.json, reservations.json, config-state.json"]
     end
     CLI --> CORE
     BOARD --> CORE
@@ -124,15 +144,19 @@ flowchart TB
     AG --> LOGS
     CORE -- "czytniki usage (przyrostowo)" --> LOGS
     CORE <--> HIST
+    CORE <--> JOURNAL
+    CORE -- "limits.count_external" --> PS
     CORE --> NOTE
     CORE <--> STATE
     CORE <--> QUEUE
     CORE <--> COH
     CORE --> ARCH
     CORE --> CFG
+    CFG -. "reloaded when the file changes (watch, MCP)" .-> CORE
     AG --> REP
     CORE --> REP
     MCP --> AUDIT
+    MCP -- "events_since" --> JOURNAL
 ```
 
 ### Stany zadań
@@ -261,7 +285,7 @@ czat daje spec -> agentctl new --clip -> agentctl watch powiadamia -> agentctl p
 5. **Wklejasz go do czatu.** Czat ocenia raporty; agentctl nigdy nie wydaje werdyktów.
 6. **Czat daje linię zamykającą**, na przykład `agentctl close NC-41 NC-42 --rm-worktree`. `close` wypisuje zadania (zaznaczając te bez raportu) i pyta y/N. Gałęzie zostają, nic nie jest scalane.
 
-`agentctl status --clip` kopiuje zwartą tabelę Markdown wszystkich zadań, do wklejenia na początku nowego czatu. Z [serwerem MCP](#integracja-z-czatem-mcp) czat potrafi to wszystko przeczytać sam, bez schowka.
+Rano **`agentctl up`** uruchamia watcher i board, jeśli nie działają, mówi, które zadania [wznowić](#wznawianie) po restarcie, i otwiera board. `agentctl status --clip` kopiuje zwartą tabelę Markdown wszystkich zadań, do wklejenia na początku nowego czatu. Z [serwerem MCP](#integracja-z-czatem-mcp) czat potrafi to wszystko przeczytać sam, bez schowka.
 
 ## Format specu
 
@@ -366,7 +390,7 @@ agentctl board  agentctl-test · 3 tasks · 09:41:03
                                                                        │ ● you chose: tea please
 
 Enter – open the agent · F12 – back to the list
-m msg M move i int c/r pull x close X cancel k cohort h hide l log o/f u/d/p ?
+m msg M move i int c/r pull x close X cancel k cohort h hide l log L G R u/d/p ?
 ```
 
 | Klawisz | Działanie |
@@ -379,7 +403,10 @@ m msg M move i int c/r pull x close X cancel k cohort h hide l log o/f u/d/p ?
 | `x` | zamknij okno (po y/N; drugie pytanie o worktree) |
 | `X` | anuluj zadanie: opcjonalny powód, potem y/N; zadanie z kolejki wychodzi z kolejki, `move` jest anulowany razem z drugą połową |
 | `k` | wybierz kohortę do pokazania (`wszystkie`, kohorta, `bez kohorty`) |
-| `g` / `G` | zwiń grupę kohorty wybranego zadania / rozwiń wszystkie grupy |
+| `g` / `E` | zwiń grupę kohorty wybranego zadania / rozwiń wszystkie grupy |
+| `L` | limity per dostawca i co je zajmuje (`agentctl limits`) |
+| `G` | podgląd sprzątania (`agentctl gc`; board niczego nie usuwa) |
+| `R` | wznów zadania z sekcji „Do wznowienia” (po y/N) |
 | `l` | log zadań (historia; `↑↓` przewijanie, `Esc` powrót) |
 | `o` / `p` / `f` | oznacz zaznaczone zakończone zadanie jako ok / partial / fail (`p` wstrzymuje kolejkę, gdy nie zaznaczono zakończonego zadania) |
 | `h` / `z` / `a` | ukryj zadanie / otwórz sekcję Finished / pokaż ukryte, zamknięte i anulowane |
@@ -540,13 +567,69 @@ agentctl stats --since 30d             # per agent/model/effort: zadania, median
 
 Szczegóły: [docs/details.md](docs/details.md#history-and-stats).
 
+## Limity
+
+Parytet zmienia się w ciągu dnia (dziś 3 Claude, 5 Codex)? Zmień go bez restartowania czegokolwiek.
+
+```sh
+agentctl limits                              # per dostawca: limit, zajęte, wolne; okna, rezerwacje i zewnętrzne; kolejka
+agentctl limits set claude=3 codex=5         # podsumowanie, y/N (-y pomija pytanie); codex=off zdejmuje limit
+agentctl limits reserve claude=1 --note "moja sesja"   # miejsce dla agenta uruchomionego ręcznie
+agentctl limits release claude               # oddaj miejsca
+```
+
+- `limits set` edytuje `~/.agentctl/config.yaml` parserem YAML, który zachowuje komentarze i kolejność kluczy, zostawia stary plik jako `config.yaml.bak` i sprawdza, czy wynik się wczytuje (jeśli nie, stary tekst wraca).
+- **Bez restartu.** `watch` i serwer MCP wczytują config ponownie, gdy plik się zmieni (`fs.watch` oraz sprawdzenie przy każdym ticku), dla wszystkich kluczy: `limits`, `mcp.allow`, `usage.*`, `notify.*`, `watch.*`. Po podniesieniu limitu kolejka startuje oczekujące zadania przy najbliższym ticku. Plik, który się nie wczytuje, nic nie zmienia: obowiązują poprzednie ustawienia, log watcha ostrzega raz, a `status` (MCP) i `doctor` o tym mówią.
+- **Agenci uruchomieni ręcznie** nie są w oknach agentctl. `limits reserve` trzyma dla nich miejsca; z `limits.count_external: true` liczą się też sesje terminalowe claude/codex znalezione przez `ps` (i `lsof` dla ich katalogu) poza sesją agentctl, pokazywane jako „external”. Serwery MCP, uruchomienia bez TUI (`-p`, `exec`), `usage-tap` i sam agentctl nie są liczone.
+- MCP: `limits` (odczyt), `set_limits` i `reserve` (zapis, za `mcp.allow`, najpierw podsumowanie i `confirm: true`). Board: **`L`**.
+
+## Zdarzenia dla czatu
+
+Czat nie dostaje powiadomień. Jedno wywołanie mówi mu, co się zmieniło.
+
+```sh
+agentctl events                    # od ostatniego wywołania klienta cli
+agentctl events --since 2h --cohort sprint-1
+agentctl events --clip             # Markdown na początek czatu (nie przesuwa znacznika)
+```
+
+- Dziennik (`~/.agentctl/journal.jsonl`) zapisują `watch`, zdarzenia agentów, kolejka, `cancel` i polecenia limitów: gotowe raporty (z linią werdyktu), starty z kolejki, pytania, zaufanie do folderu, zablokowane, anulowane i zatrzymane limitem zadania, skończone kohorty, progi planów, zmienione limity. Potem jedna linia ze stanem teraz: aktywne, w kolejce, raporty do pobrania.
+- Każdy klient ma własny znacznik „ostatnio” (`cli`, `mcp`); pierwsze wywołanie patrzy 24 godziny wstecz; `--since` przyjmuje `last`, wiek (`30m`, `2h`, `1d`), `HH:MM` albo czas ISO.
+- MCP `events_since` (odczyt) w opisie mówi, że czat ma wywołać go na początku każdej odpowiedzi o pracy agentów. Zdarzenia są zapisywane, gdy działa `agentctl watch`.
+
+## Sprzątanie
+
+```sh
+agentctl gc                                # próba na sucho z rozmiarami
+agentctl gc --apply                        # lista, potem y/N
+agentctl gc --branches --older-than 3d --cohort sprint-1 --apply -y
+```
+
+- Kandydaci: worktree zadań zamkniętych, anulowanych i zarchiwizowanych **bez niezacommitowanych zmian** (`git worktree remove`, nigdy z force); pliki obok raportów starsze niż `--older-than` (domyślnie 7d; raporty `*.md` zostają); foldery stanu zamkniętych zadań (przenoszone do archiwum); z `--branches` ich gałęzie scalone do bazy (`git branch -d`, nigdy `-D`, nigdy `main`/`master`, bieżąca ani zdalna).
+- Niezacommitowana praca, worktree nie z agentctl, niescalone gałęzie i zbyt świeże pliki są wypisane jako **pominięte (powód)**. Folder cache, który nie należy do żadnego zadania agentctl, nie jest ruszany. Historia i raporty zostają.
+- Board: **`G`** pokazuje podgląd. MCP: `gc_preview` (tylko odczyt: żadne narzędzie nie sprząta).
+
+## Wznawianie
+
+Po restarcie Maca zadania, które były w pracy, mają worktree i nie mają okna.
+
+```sh
+agentctl resume                            # lista, y/N, potem okna wracają
+agentctl resume NC-42 -y                   # jedno zadanie; --all bierze też zadania z raportem
+agentctl up                                # start dnia
+```
+
+- `resume` tworzy okno od nowa i uruchamia agenta **w trybie wznowienia**, z tym samym modelem, effortem, flagami, hookami zdarzeń i usage-tap: Claude z `--resume <sesja>` (sesja zapisana przez hooki lub usage-tap) albo `--continue`, Codex z `resume <sesja>` albo `resume --last`. Prompt nie jest wklejany ponownie. Limit dostawcy jest respektowany; zadanie, które się nie mieści, jest pomijane.
+- Gdy startuje `watch`, wysyła jedno powiadomienie „N zadań do wznowienia”. Board wypisuje je w sekcji **„Do wznowienia”**; **`R`** je wznawia (po y/N). MCP: `resume` (zapis, za `mcp.allow`, najpierw podsumowanie i `confirm: true`).
+- `agentctl up` dba, żeby watcher i board działały w sesji agentctl (nigdy drugi egzemplarz), mówi, które zadania można wznowić, i przechodzi do boardu; bez terminala tylko wypisuje polecenie.
+
 ## Integracja z czatem (MCP)
 
 `agentctl mcp` to lokalny serwer MCP na stdio. Aplikacja Claude, Claude Code i VS Code uruchamiają go same; nic nie nasłuchuje na porcie.
 
-- **Narzędzia odczytu** (zawsze włączone): `status`, `peek`, `list_reports`, `get_report`, `pull_ready`, `task_spec`, `queue_list`, `cohort_list`, `cohort_show`, `overlap`, `usage`, `log`, `stats`, `version`.
-- **Narzędzia zapisu** (wyłączone, dopóki nie wpiszesz ich w `mcp.allow`): `send`, `new`, `queue`, `queue_rm`, `cancel`, `interrupt`, `close`, `move`, `mark`. `new`, `queue`, `cancel` i `move` nic nie zmieniają, dopóki nie zostaną wywołane ponownie z `confirm: true`; `mark` tylko zapisuje w historii wynik, który podałeś, więc nie ma kroku confirm. Każdy zapis trafia do audytu w `~/.agentctl/mcp-audit.log` i jest ogłaszany na pulpicie.
-- Żadne narzędzie nie scala, nie pushuje, nie robi rebase, nie usuwa gałęzi, nie uruchamia komend shell i nie przyjmuje ścieżki.
+- **Narzędzia odczytu** (zawsze włączone): `status`, `events_since`, `peek`, `list_reports`, `get_report`, `pull_ready`, `task_spec`, `queue_list`, `cohort_list`, `cohort_show`, `overlap`, `usage`, `log`, `stats`, `limits`, `gc_preview`, `version`.
+- **Narzędzia zapisu** (wyłączone, dopóki nie wpiszesz ich w `mcp.allow`): `send`, `new`, `queue`, `queue_rm`, `cancel`, `interrupt`, `close`, `move`, `mark`, `set_limits`, `reserve`, `resume`. `new`, `queue`, `cancel`, `move`, `set_limits`, `reserve` i `resume` nic nie zmieniają, dopóki nie zostaną wywołane ponownie z `confirm: true`; `mark` tylko zapisuje w historii wynik, który podałeś, więc nie ma kroku confirm. Każdy zapis trafia do audytu w `~/.agentctl/mcp-audit.log` i jest ogłaszany na pulpicie.
+- Żadne narzędzie nie scala, nie pushuje, nie robi rebase, nie usuwa gałęzi, nie sprząta (`gc_preview` tylko patrzy), nie uruchamia komend shell i nie przyjmuje ścieżki.
 
 ```sh
 agentctl mcp install --desktop --dry-run   # aplikacja Claude: wpis i diff, nic nie jest zapisywane
@@ -570,7 +653,7 @@ Orca, Claude Squad i Conductor dobrze *zarządzają oknami agentów*: otwierają
 
 Czego agentctl nigdy nie robi:
 
-- **Żadnego merge, rebase ani push.** `git` jest wołany tylko z `worktree add`, `worktree remove` i zapytaniami tylko do odczytu. Bez `--force`, bez usuwania gałęzi; worktree z wyciągniętym `main` lub `master` nigdy nie jest usuwany.
+- **Żadnego merge, rebase ani push.** `git` jest wołany tylko z `worktree add`, `worktree remove`, zapytaniami tylko do odczytu i, dla `gc --branches`, `branch -d` (tylko scalone gałęzie, nigdy `-D`). Bez `--force`; worktree z wyciągniętym `main` lub `master` nigdy nie jest usuwany.
 - **Żadnego auto-accept.** Nie dodaje takiej flagi, a config, który próbuje (`--dangerously-skip-permissions`, `--yolo`, `--full-auto`, `-a never`, …), jest nieprawidłowy. Agent dalej pyta Cię o zgodę. Codex działa z `--sandbox danger-full-access`, jak zlecono, ale z nietkniętą polityką zatwierdzeń.
 - **Nigdy nie odpowiada na dialog za Ciebie.** Dialog zaufania do folderu w świeżym worktree potwierdza człowiek; `new` na to czeka.
 - **Żadnych werdyktów.** Ocena raportu należy do Ciebie (albo Twojego czatu).
@@ -582,8 +665,8 @@ Czego agentctl nigdy nie robi:
 - **Wzorce ekranu to heurystyki** związane z brzmieniem obecnych TUI Claude Code (2.1.309) i Codexa (0.166.0); są konfigurowalne.
 - **Niezaobserwowane na prawdziwym ekranie:** tekst komunikatu o limicie użycia w którymkolwiek TUI (wzorce pochodzą z napisów w plikach binarnych, żeby nie spalać planu) oraz tekst stopki Codexa przy oczekiwaniu na terminale w tle (`agents.codex.background_patterns` to najlepsze przypuszczenie).
 - Codex 0.166.0 nie wysyła zdarzenia przy prośbie o zatwierdzenie, więc takie sytuacje wykrywa czytnik ekranu, i tylko gdy działa `watch`.
-- Limity okien liczą tylko okna utworzone przez agentctl.
-- Kolejka rusza tylko, gdy działa `agentctl watch`, a `watch` czyta konfigurację przy starcie (po zmianie limitów uruchom go ponownie).
+- Limity okien liczą okna utworzone przez agentctl, zarezerwowane miejsca (`limits reserve`) i, z `limits.count_external`, sesje terminalowe claude/codex znalezione przez `ps`; sesja w terminalu, którego agentctl nie widzi, liczy się tylko wtedy, gdy zarezerwujesz dla niej miejsce.
+- Kolejka rusza tylko, gdy działa `agentctl watch`. `watch` wczytuje config ponownie, gdy plik się zmieni, więc zmiana limitu nie wymaga restartu; po zmianie `session` albo `state_dir` w działającym watchu lepiej go zrestartować.
 - Kolizje porównują nazwy plików z gita, nie fragmenty; zadanie z niezacommitowanymi zmianami w innym checkoucie repozytorium nie jest widoczne.
 - `move` zaczyna nową rozmowę: nowy agent poznaje stan z `git log` i `git diff`, nie z kontekstu starego agenta.
 - Anulowanie zatrzymuje agenta jego klawiszem przerwania i zamyka okno; to, co agent już zrobił, zostaje w worktree (`cancel` tego nie cofa). `cancel --rm-worktree` odrzuca worktree z niezatwierdzonymi plikami, tak jak `close`.
@@ -596,11 +679,10 @@ Czego agentctl nigdy nie robi:
 
 Pomysły, nie obietnice:
 
-1. **`gc` i `resume`:** sprzątanie starych worktree i stanu, wznawianie zadania.
-2. **Powiadomienia na telefon.**
-3. **Zdalny MCP:** serwer dostępny dla czatu w przeglądarce lub na telefonie, z uwierzytelnianiem.
-4. **Modele lokalne** jako trzeci rodzaj agenta.
-5. **Wydanie npm** z krokiem budowania.
+1. **Powiadomienia na telefon.**
+2. **Zdalny MCP:** serwer dostępny dla czatu w przeglądarce lub na telefonie, z uwierzytelnianiem.
+3. **Modele lokalne** jako trzeci rodzaj agenta.
+4. **Wydanie npm** z krokiem budowania.
 
 ## Więcej
 

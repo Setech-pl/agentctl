@@ -6,6 +6,8 @@ agentctl reads three layers. The later one wins:
 2. **Project config**: `.agentctl.yaml` in the first repository of a spec.
 3. **Spec**: the YAML header of the spec file (see [Spec keys](#spec-keys)).
 
+**Changes take effect without a restart.** A running `agentctl watch` and the MCP server read the global config again when the file changes (every key: `limits`, `mcp.allow`, `usage.*`, `notify.*`, `watch.*`, …). A file that does not load is not applied: the previous settings stay in force, the watch log warns once, and `agentctl doctor` and the MCP `status` say so ([details](details.md#live-limits-and-the-config-reload)). `agentctl limits set` edits the `limits` keys for you and keeps comments and the order of the keys.
+
 Unknown keys are errors everywhere, so a typo is reported instead of ignored. All problems of a file are listed at once.
 
 Merging: `env` merges key by key; `links` merge, and for the same `from` the later layer wins; `setup` is taken whole from the first layer that sets it (`setup: []` switches it off); `report`, `worktree_root` and `defaults` are overridden by a later layer. Paths accept `~`.
@@ -37,7 +39,7 @@ Column "Layers": **g** global config, **p** project config, **s** spec.
 | `state_dir` | path | `<config dir>/tasks` | g | agentctl's own state per task (`TASK.md`, `setup.log`, `event.json`, `notified.json`), out of the agents' reach. Closed tasks are archived next to it, in `archive/`. |
 | `session` | string | `agentctl` | g | Name of the tmux session. Letters, digits, `_` and `-`. |
 | `limits` | mapping | none | g | Most simultaneous windows per provider. |
-| `limits.claude` | positive integer | unlimited | g | Cap for Claude windows. |
+| `limits.claude` | positive integer | unlimited | g | Cap for Claude windows (agentctl windows + reserved places + external sessions when counted). `agentctl limits set claude=3` changes it. |
 | `limits.codex` | positive integer | unlimited | g | Cap for Codex windows. |
 | `limits.count_external` | boolean | `false` | g | Terminal sessions of `claude` / `codex` outside the windows of agentctl (found with `ps`, not MCP servers, headless runs or agentctl itself) count against the limit and show as "external" in `agentctl limits`. Places for agents you start by hand can also be held with `agentctl limits reserve`. |
 | `agents` | mapping | see below | g | Settings per agent: `agents.claude`, `agents.codex`. |
@@ -85,7 +87,7 @@ Default icons: `working` ⚙, `background` ⏳, `waiting` ⏸, `needs-input` ?, 
 
 | Key | Type | Default | Layers | Meaning |
 |---|---|---|---|---|
-| `mcp.allow` | list | `[]` | g | Write tools the chat may call: any of `send`, `new`, `interrupt`, `close`, `move`, `queue`, `queue_rm`, `cancel`, `mark`. Read again on every call. |
+| `mcp.allow` | list | `[]` | g | Write tools the chat may call: any of `send`, `new`, `interrupt`, `close`, `move`, `queue`, `queue_rm`, `cancel`, `mark`, `set_limits`, `reserve`, `resume`. Read again on every call. |
 | `mcp.allow_rm_worktree` | boolean | `false` | g | `close` and `cancel` from the chat may also remove the git worktree (never forced). |
 
 ### `queue`
