@@ -2,7 +2,7 @@
 
 How the pieces work, and what was checked on the real tools (Claude Code 2.1.309, Codex 0.166.0). The overview is in the [README](../README.md); the options of each command are in [commands.md](commands.md) and every key in [configuration.md](configuration.md). Status-bar and notification texts quoted below are those of the code and are in Polish in places.
 
-Why TypeScript with no build step? The code is TypeScript run directly by Node's built-in type stripping (`node --experimental-strip-types`, set in the shebang of `bin/agentctl.ts`). That was chosen over `tsx` because it adds no dependency and no build or loader layer, and it behaves the same under `npx`, `npm link` and in tests. The price: only *erasable* TypeScript (no `enum` or `namespace`), imports spell out `.ts`, and Node refuses to strip types inside `node_modules`, so install from a clone, not from a registry tarball. From Node 22.18 and 23.6 the flag is a no-op; it stays in the shebang so 22.6 to 22.17 keep working.
+`npm run build` compiles TypeScript into `dist/` and rewrites imports to JavaScript. The installed command runs `dist/bin/agentctl.js` without a TypeScript loader. Development still uses `node --experimental-strip-types bin/agentctl.ts`. Run `npm ci`, `npm run build`, then `npm pack` to prepare a package.
 
 ## Setup
 
@@ -546,10 +546,7 @@ The tasks that still have a window come first. Tasks without a window (and witho
 Nothing destructive runs on a single key. The board reuses the core functions of the commands (`sendPrompts`, `interruptTask`, `pullTask`, `pullReady`, `closeTask`, `moveTask`); git is asked for
 the progress at most every 10 seconds. It needs a terminal; without tmux `Enter` tells you to use `agentctl attach`.
 
-> **Why Ink, and why `React.createElement` instead of JSX or `htm`?** The project runs on Node's type stripping with no build step, and JSX is not
-> erasable syntax, so it cannot run unprocessed. `htm` (tagged templates) would avoid the build, but it adds a dependency to write what is a few dozen lines of `createElement` calls,
-> and its templates are plain strings that `tsc --noEmit` cannot check; with `createElement` the component props are type-checked like the rest of the code.
-> Ink is only loaded when the board starts, so the other commands do not pay for React.
+> Ink uses `React.createElement` so development can run with Node type stripping. The npm build compiles the same source to JavaScript. Ink loads only when the board starts.
 
 ## Task states
 
@@ -649,3 +646,7 @@ previous and new commit and whether watch was restarted.
 ## Development
 
 See [CONTRIBUTING.md](../CONTRIBUTING.md): tests, typecheck, `npm run docs`, how the code is organised and how a milestone is closed.
+
+Codex: collapsed questions show their count and the shortcut read from “to answer”. `needs-input` takes priority while Codex keeps working; after answering, the screen determines the state again. Board preview, peek, status/MCP `question`, macOS and ntfy show the question or opening instructions.
+
+Session fallback: a pending `request_user_input` function call can supply its first question when a Codex event has already attributed the session ID to the task. Reads are bounded to 256 KiB per matching session; missing, unowned, completed or code-mode-only calls fall back to the screen instructions. No personal sessions were inspected for this milestone.

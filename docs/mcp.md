@@ -138,3 +138,5 @@ agentctl doctor                            # registered? runs the stable copy? w
 - Local only. A server that claude.ai on the web or a phone could reach would need a tunnel and authentication, and would make everything above reachable from outside the machine. That is a different threat model and is not part of agentctl today.
 - The chat cannot answer a folder-trust dialog; a task it starts waits for you in its window.
 - The report limit is 200 KB per answer; larger reports are cut with a note, and `pull_ready` leaves what does not fit as new.
+
+In 0.15.0, installed runtime commands use `dist/bin/agentctl.js`. Status `question` includes collapsed Codex question count and the shortcut read from the screen. A visible pending question takes precedence over working. No configuration migration is required.

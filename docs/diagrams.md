@@ -192,7 +192,7 @@ stateDiagram-v2
     trust --> working: you confirm the dialog
     working --> waiting: end of turn, no report
     working --> ready: end of turn, report written
-    working --> input: question or permission dialog
+    working --> input: question (including collapsed) or permission dialog
     input --> working: you answer
     working --> limited: usage limit message
     limited --> working: limit reset, retry
