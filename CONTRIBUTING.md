@@ -2,10 +2,13 @@
 
 `npm run build` compiles TypeScript into `dist/` and rewrites imports to JavaScript. The installed command runs `dist/bin/agentctl.js` without a TypeScript loader. Development still uses `node --experimental-strip-types bin/agentctl.ts`. Run `npm ci`, `npm run build`, then `npm pack` to prepare a package.
 
+agentctl is a small TypeScript project. Sources and tests use Node's type stripping; npm packages use JavaScript compiled to dist/. Node 22.14 or newer, git and tmux are enough to work on it.
+
 ```sh
 npm ci
 npm test            # node:test; no real tmux, git or agent is involved
 npm run typecheck   # tsc --noEmit
+npm run build       # clean dist/, compile runtime, make executable
 npm run docs        # regenerates docs/commands.md from the command definitions
 node bin/agentctl.ts doctor
 ```
@@ -57,3 +60,66 @@ await withHarness({ name: 'my-try' }, (h) => {
 Match the surrounding code. agentctl never merges, pushes, rebases or turns on an auto-accept mode, and deletes a branch only in `gc --branches`, with `git branch -d` for a merged one; a change that would do any of these is out of scope. Messages to the user are short and say what to do next.
 
 Codex: collapsed questions show their count and the shortcut read from “to answer”. `needs-input` takes priority while Codex keeps working; after answering, the screen determines the state again. Board preview, peek, status/MCP `question` and macOS show the question or opening instructions. ntfy sends only opening instructions by default; `notify.ntfy.include_question: true` opts into question text.
+
+## npm releases and first publication (Marcin)
+
+Normal releases: change the version in package.json and package-lock.json, update CHANGELOG, open a PR,
+merge after CI, then create a GitHub release whose tag equals `v` plus the package version on the merge commit.
+The `release: published` event runs `.github/workflows/publish.yml`: install, test, typecheck, build, then
+`npm publish --provenance --access public` using OIDC. There is no NPM_TOKEN. A release whose version already exists
+in the registry is logged and skipped (the bootstrap case); it does not gain provenance retroactively.
+CI validates macOS with minimum Node 22.14.0 and latest Node. Ubuntu was not enabled because no Ubuntu runner or
+working Docker daemon was available for validation. Linux runtime paths and notify-send are implemented, but remain unverified here.
+
+The following are instructions for the maintainer to execute later, not steps run by the preparation task.
+
+1. On [npmjs.com](https://www.npmjs.com/signup), create/verify your account and email. Enable 2FA in Account Settings
+   (security key/passkey or the method currently offered by npm). Create the free public-package organization `setech-pl`
+   or obtain owner/publish permissions from its existing owner. GitHub membership does not grant npm permissions.
+2. Merge the 0.16.0 PR first. On the clean merge commit, prepare and inspect the package using zsh:
+
+```zsh
+cd ~/Projects/agentctl
+[[ -z $(git status --porcelain) ]] || return 1
+[[ $(node -p 'require("./package.json").version') == 0.16.0 ]] || return 1
+mkdir -p ~/Projects/cache/agentctl-16
+export npm_config_cache=~/Projects/cache/agentctl-16/npm-cache
+export TMPDIR=~/Projects/cache/agentctl-16/tmp
+export AGENTCTL_TEST_CACHE=~/Projects/cache/agentctl-16/tests
+mkdir -p "$TMPDIR"
+npm ci
+npm test
+npm run typecheck
+npm run build
+npm pack --dry-run
+npm publish --dry-run
+```
+
+3. Trusted publisher configuration requires an existing package. For this new package the first publication is manual.
+   Login interactively, complete browser authentication and 2FA, then publish 0.16.0 from that reviewed commit.
+   Local publication explicitly disables provenance: attestations need a supported CI identity.
+   These commands change npm authentication and publish publicly; execute them only when ready:
+
+```zsh
+cd ~/Projects/agentctl
+npm login --registry=https://registry.npmjs.org/
+npm whoami
+npm publish --access public --provenance=false
+npm view @setech-pl/agentctl@0.16.0 version dist --json
+```
+
+4. Create the GitHub release `v0.16.0` from the reviewed merge commit. The workflow sees the manual bootstrap and skips
+   republishing that immutable npm version. The first OIDC/provenance publication must use a new version, for example 0.16.1.
+5. When that next release is ready, open the package's Settings → Trusted publishing on npmjs.com. Choose GitHub Actions:
+   owner **Setech-pl**, repository **agentctl**, workflow filename **publish.yml** (only the filename), environment blank.
+   Enable direct **npm publish** permission; stage-only permission does not authorize this workflow.
+   Publish the next GitHub release within **2 days** of adding the publisher, otherwise delete/recreate the expired configuration.
+   The repository and package must be public for provenance. After the successful OIDC publication, set Publishing access to
+   require 2FA and disallow tokens. No npm token or GitHub secret is required for public dependencies.
+6. Future releases follow version → PR → merge → GitHub release → workflow publication. Verify the run and the provenance badge.
+
+Requirements verified against [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/):
+Node ≥22.14.0, npm ≥11.5.1, GitHub-hosted runner and `id-token: write`. The workflow uses Node 24 and checks the npm floor,
+with setup-node caching disabled. [npm trust prerequisites](https://docs.npmjs.com/cli/v11/commands/npm-trust/)
+explicitly require the package to exist (the CLI trust-management command itself needs npm ≥11.15; the UI avoids that requirement).
+See also [provenance requirements](https://docs.npmjs.com/generating-provenance-statements/).

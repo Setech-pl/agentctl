@@ -2,7 +2,7 @@
 
 Jak działają poszczególne elementy i co sprawdzono na prawdziwych narzędziach (Claude Code 2.1.309, Codex 0.166.0). Przegląd jest w [README](../README.pl.md); opcje każdego polecenia w [commands.md](commands.md) (po angielsku), a każdy klucz w [configuration.md](configuration.md) (po angielsku). Teksty paska stanu i powiadomień cytowane poniżej pochodzą dosłownie z kodu i miejscami są po polsku.
 
-`npm run build` kompiluje TypeScript do `dist/` i zmienia importy na JavaScript. Zainstalowane polecenie uruchamia `dist/bin/agentctl.js` bez loadera TS. W development nadal działa `node --experimental-strip-types bin/agentctl.ts`. Przygotowanie paczki: `npm ci`, `npm run build`, `npm pack`.
+Paczka npm zawiera JavaScript kompilowany przez `npm run build` do `dist/` (importy `.ts` stają się `.js`). Źródła i testy uruchamiamy bezpośrednio przez wycinanie typów w Node 22.14+. Publikacja nie wymaga wycinania typów wewnątrz `node_modules`.
 
 ## Setup
 
@@ -546,7 +546,7 @@ Zadania, które nadal mają okno, są na początku. Zadania bez okna (i bez `clo
 Nic destrukcyjnego nie działa na pojedynczy klawisz. Board używa tych samych funkcji rdzenia co polecenia (`sendPrompts`, `interruptTask`, `pullTask`, `pullReady`, `closeTask`, `moveTask`); git jest pytany
 o postęp najwyżej co 10 sekund. Board wymaga terminala; bez tmux `Enter` mówi, żeby użyć `agentctl attach`.
 
-`npm run build` kompiluje TypeScript do `dist/` i zmienia importy na JavaScript. Zainstalowane polecenie uruchamia `dist/bin/agentctl.js` bez loadera TS. W development nadal działa `node --experimental-strip-types bin/agentctl.ts`. Przygotowanie paczki: `npm ci`, `npm run build`, `npm pack`.
+> **Dlaczego Ink i dlaczego `React.createElement` zamiast JSX lub `htm`?** Projekt działa na wycinaniu typów przez Node, bez kompilacji w trybie rozwoju, a JSX nie jest
 > składnią, którą da się po prostu wymazać, więc nie uruchomi się bez przetworzenia. `htm` (szablony tagowane) pozwoliłby uniknąć budowania, ale dodaje zależność, żeby napisać to, co jest kilkudziesięcioma liniami wywołań `createElement`,
 > a jego szablony to zwykłe napisy, których `tsc --noEmit` nie sprawdzi; z `createElement` propsy komponentów są sprawdzane typami jak reszta kodu.
 > Ink jest ładowany dopiero przy starcie boardu, więc pozostałe polecenia nie płacą za React.
@@ -621,6 +621,8 @@ gdy wywołasz `status` lub `pull`.
 
 ## Stabilna instalacja i aktualizacje
 
+Zalecane: `npm i -g @setech-pl/agentctl`. `agentctl-update` z paczki wykonuje `npm install -g @setech-pl/agentctl@latest`, bez git i bez restartu tmux. Opcje klonu `--ref`, `--no-watch`, `--no-link` są w tym trybie odrzucane. `doctor` pokazuje źródło instalacji i ostrzega o konflikcie PATH. MCP używa absolutnej ścieżki do zainstalowanego JS. Poniższy tryb klonu pozostaje dla rozwoju.
+
 Do codziennej pracy używaj **stabilnej kopii**, a `~/Projects/agentctl` zostaw wyłącznie do rozwoju. (`npm link` z repo sprawiał, że globalne
 `agentctl` uruchamiało dowolną gałąź, która była tam wyciągnięta, skończoną lub nie.) Stabilna kopia to odłączony worktree gita tego repo,
 domyślnie `~/Projects/agentctl-stable`; tworzy go i aktualizuje `bin/agentctl-update`.
@@ -631,7 +633,7 @@ agentctl-update                             # później, po scaleniu PR
 ```
 
 Robi to w tej kolejności: `git fetch origin` w repo; `git worktree add --detach <stable> <ref>` (a gdy kopia istnieje, odmowa,
-jeśli ma lokalne zmiany, w przeciwnym razie `git checkout --detach <ref>`); `npm ci` i `npm link` w stabilnej kopii, żeby globalne `agentctl` i
+jeśli ma lokalne zmiany, w przeciwnym razie `git checkout --detach <ref>`); `npm ci`, `npm run build` i `npm link` w stabilnej kopii, żeby globalne `agentctl` i
 `agentctl-update` wskazywały na nią; `agentctl doctor` (porażka kończy skrypt kodem niezerowym); jeśli w sesji tmux
 `agentctl` istnieje okno `watch`, zabija je i uruchamia `agentctl watch --tmux` z nowej wersji (żadne inne okno nie jest ruszane); na koniec wypisuje
 poprzedni i nowy commit oraz to, czy watch został zrestartowany.

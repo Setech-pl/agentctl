@@ -1,0 +1,36 @@
+name: Publish npm
+on:
+  release:
+    types: [published]
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  publish:
+    if: github.repository == 'Setech-pl/agentctl'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Require a matching stable release and compatible npm
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          node --input-type=module -e 'import fs from "node:fs"; const p = JSON.parse(fs.readFileSync("package.json")); if (process.env.RELEASE_TAG !== `v${p.version}` || !/^\d+\.\d+\.\d+$/.test(p.version)) process.exit(1)'
+          npm --version
+          node --input-type=module -e 'import {execFileSync} from "node:child_process"; const [a,b,c] = execFileSync("npm", ["--version"], {encoding:"utf8"}).trim().split(".").map(Number); if (a < 11 || (a === 11 && (b < 5 || (b === 5 && c < 1)))) process.exit(1)'
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm run build
+      - name: Check whether bootstrap already published this version
+        id: registry
+        run: node scripts/release-version.mjs
+      - if: steps.registry.outputs.publish == 'true'
+        run: npm publish --provenance --access public
