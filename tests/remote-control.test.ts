@@ -139,3 +139,15 @@ describe('remote control: starting a task', () => {
     assert.equal(plain.runner.commands.filter((c) => c.includes('paste-buffer')).length, 1);
   });
 });
+
+describe('reserved task IDs', () => {
+  it('WATCH, BOARD and MANAGER are the windows of agentctl itself: a task of that name would be invisible in status', () => {
+    const root = scratch.sub('reserved');
+    const config = makeConfig(root);
+    for (const id of ['WATCH', 'BOARD', 'MANAGER']) {
+      const text = `---\ntask: ${id}\nagent: claude\nrepos:\n  - {path: ${root}, worktree: ${root}-x}\n---\nx\n`;
+      assert.throws(() => resolveSpec(splitSpecs(text)[0]!, { config, loadProject: () => undefined }), /cannot be a task ID: the window ".*" of the agentctl session is used by agentctl itself/, id);
+    }
+    assert.equal(resolve(config, 'agent: claude\n', root).task, 'NC-1');
+  });
+});
