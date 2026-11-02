@@ -35,6 +35,9 @@ import { formatTokens } from './usage-parse.ts';
 import { formatReset } from './usage.ts';
 import { awayView, setAway } from './away.ts';
 import type { AwayView } from './away.ts';
+import { MANAGER_STATE_TEXT, managerView } from './manager.ts';
+import type { ManagerView } from './manager.ts';
+import { MANAGER_WINDOW } from './windows.ts';
 import { AGENT_NAMES } from './config.ts';
 import type { AgentName, UsageSettings } from './config.ts';
 import { cohortKey, errorMessage } from './util.ts';
@@ -130,10 +133,15 @@ export interface BoardState {
   resumable: string[];
   /** Away mode (the phone gets the notifications); null before the first refresh. */
   away: AwayView | null;
+  /** The manager session (`agentctl manager`): its window and what its screen says; null before the first refresh. */
+  manager: ManagerView | null;
 }
 
+/** The cursor stands on the line of the manager (it is no task: Enter goes to its window). */
+export const MANAGER_SELECT = '@manager';
+
 export function initialBoardState(width: number, height: number): BoardState {
-  return { rows: [], selected: null, mode: { kind: 'list' }, notice: null, preview: null, width, height, refreshedAt: null, busy: null, loadError: null, quit: false, showFinished: false, showHidden: false, queue: [], queuePaused: false, cohortFilter: null, folded: [], plans: null, resumable: [], away: null };
+  return { rows: [], selected: null, mode: { kind: 'list' }, notice: null, preview: null, width, height, refreshedAt: null, busy: null, loadError: null, quit: false, showFinished: false, showHidden: false, queue: [], queuePaused: false, cohortFilter: null, folded: [], plans: null, resumable: [], away: null, manager: null };
 }
 
 /** What the front has to do after a key press. */
@@ -247,8 +255,14 @@ export function displayRows(state: BoardState): BoardRow[] {
 export function navTasks(state: BoardState): string[] {
   const active = reachableRows(state).map((r) => r.task);
   const rest = displayRows(state).slice(active.length).map((r) => r.task);
-  return [...active, ...queueViews(state).map((v) => v.entry.task), ...rest];
+  return [...(managerListed(state) ? [MANAGER_SELECT] : []), ...active, ...queueViews(state).map((v) => v.entry.task), ...rest];
 }
+
+/** The manager line is on the board and can be selected: its window exists. */
+export const managerListed = (state: BoardState): boolean => state.manager !== null && state.manager.state !== 'missing';
+
+/** The first thing a refresh selects: a task, never the manager line (unless it is all there is). */
+const firstSelectable = (tasks: string[]): string | null => tasks.find((t) => t !== MANAGER_SELECT) ?? tasks[0] ?? null;
 
 export function selectedIndex(state: BoardState): number {
   return state.selected === null ? -1 : displayRows(state).findIndex((r) => r.task === state.selected);
@@ -267,7 +281,7 @@ export function selectedRow(state: BoardState): BoardRow | undefined {
 function keepSelection(state: BoardState): BoardState {
   const tasks = navTasks(state);
   if (state.selected !== null && tasks.includes(state.selected)) return state;
-  const selected = tasks[0] ?? null;
+  const selected = firstSelectable(tasks);
   return selected === state.selected ? state : { ...state, selected, preview: null };
 }
 
@@ -365,6 +379,11 @@ function listKey(state: BoardState, input: string, key: KeyPress): KeyResult {
     return stay({ ...state, notice: null, mode: { kind: 'confirm', action: 'queue-rm', task: queued.entry.task } });
   }
 
+  if (state.selected === MANAGER_SELECT) {
+    if (key.return) return stay(state, [{ type: 'switch', task: MANAGER_WINDOW, window: MANAGER_WINDOW }]);
+    if (input === 'm' || input === 'M' || input === 'i' || input === 'c' || input === 'x' || input === 'h') return stay(withNotice(state, 'info', 'This is the manager, not a task: Enter goes to its window (agentctl manager stop closes it).'));
+    return stay();
+  }
   const row = selectedRow(state);
   const needsTask = key.return || input === 'm' || input === 'M' || input === 'i' || input === 'c' || input === 'x' || input === 'h';
   if (!needsTask) return stay();
@@ -535,15 +554,16 @@ export interface BoardSnapshot {
   plans?: Record<AgentName, PlanState>;
   resumable?: string[];
   away?: AwayView;
+  manager?: ManagerView;
   preview: Preview | null;
   refreshedAt: string;
 }
 
 /** Keep the selection when the task is still there, otherwise take the first row. */
 export function applySnapshot(state: BoardState, snap: BoardSnapshot): BoardState {
-  const next: BoardState = { ...state, rows: snap.rows, queue: snap.queue ?? [], queuePaused: snap.queuePaused ?? false, plans: snap.plans ?? null, resumable: snap.resumable ?? [], away: snap.away ?? null, refreshedAt: snap.refreshedAt, loadError: null };
+  const next: BoardState = { ...state, rows: snap.rows, queue: snap.queue ?? [], queuePaused: snap.queuePaused ?? false, plans: snap.plans ?? null, resumable: snap.resumable ?? [], away: snap.away ?? null, manager: snap.manager ?? null, refreshedAt: snap.refreshedAt, loadError: null };
   const listed = navTasks(next);
-  const selected = state.selected !== null && listed.includes(state.selected) ? state.selected : (listed[0] ?? null);
+  const selected = state.selected !== null && listed.includes(state.selected) ? state.selected : firstSelectable(listed);
   const preview = snap.preview && snap.preview.task === selected ? snap.preview : selected === state.selected ? state.preview : null;
   return { ...next, selected, preview };
 }
@@ -593,8 +613,18 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
   const queue = entries.length > 0 ? describeQueue(config, entries, await liveWindows(ctx), statusRows) : [];
   const queuePaused = queue.some((v) => v.condition.kind === 'paused');
   const resumable = (await findResumable(ctx, { rows: statusRows })).map((c) => c.task);
+  const manager = await managerView(ctx);
   const queued = queue.find((v) => v.entry.task === selected);
-  if (queued) return { rows, queue, queuePaused, plans, resumable, away: awayView(config), preview: { task: queued.entry.task, lines: queuePreview(queued) }, refreshedAt: clock(now) };
+  if (selected === MANAGER_SELECT && manager.state !== 'missing') {
+    let lines: string[];
+    try {
+      lines = await peekWindow(ctx, MANAGER_WINDOW, previewLines);
+    } catch (e) {
+      lines = [`(cannot read the window: ${errorMessage(e)})`];
+    }
+    return { rows, queue, queuePaused, plans, resumable, away: awayView(config), manager, preview: { task: MANAGER_SELECT, lines }, refreshedAt: clock(now) };
+  }
+  if (queued) return { rows, queue, queuePaused, plans, resumable, away: awayView(config), manager, preview: { task: queued.entry.task, lines: queuePreview(queued) }, refreshedAt: clock(now) };
   // The selected task; else the first one the list shows (not a hidden, closed or finished one).
   const target = rows.find((r) => r.task === selected) ?? rows.find((r) => !r.hidden && !r.finished) ?? rows.find((r) => !r.hidden) ?? rows[0];
   let preview: Preview | null = null;
@@ -613,7 +643,7 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
     const notes = [...(target.collide.length > 0 ? [collideText(target.collide)] : []), ...(target.reportSource ? [`report from ${shortPath(target.reportSource)}`] : [])];
     preview = { task: target.task, lines, ...(notes.length > 0 ? { note: notes.join(' · ') } : {}) };
   }
-  return { rows, queue, queuePaused, plans, resumable, away: awayView(config), preview, refreshedAt: clock(now) };
+  return { rows, queue, queuePaused, plans, resumable, away: awayView(config), manager, preview, refreshedAt: clock(now) };
 }
 
 /** The preview of a queued task: what it will run, what it waits for, how it ends if it failed, and the start of its prompt. */
@@ -647,7 +677,7 @@ export async function runBoardEffect(runner: Runner, config: GlobalConfig, effec
   try {
     switch (effect.type) {
       case 'switch':
-        if (!env.insideTmux) return { level: 'error', text: `Not inside tmux: run "agentctl attach ${effect.task}".` };
+        if (!env.insideTmux) return { level: 'error', text: effect.window === MANAGER_WINDOW ? `Not inside tmux: tmux attach -t ${config.session} \\; select-window -t ${MANAGER_WINDOW}` : `Not inside tmux: run "agentctl attach ${effect.task}".` };
         await showWindow(ctx, effect.window, true);
         return { level: 'info', text: `Switched to ${effect.task}. Back to the board: ${config.board.returnKey ?? 'Ctrl-b l'}` };
       case 'send':
@@ -969,6 +999,8 @@ export const HELP_LINES: string[] = [
   '  ↑ ↓ (j)     select a task (↑ up, ↓ or j down)',
   '  Enter       go to the task window (tmux switch-client); back: F12 or Ctrl-b l',
   '              on a finished task (no window): a menu (c copy, x close, h hide)',
+  '              🧭 line = the manager (the session you open from the phone):',
+  '              ↑ from the first task selects it, Enter goes to its window',
   '  m           type a message and send it to the agent (Enter sends, Esc cancels)',
   '  M           move the task to the other provider after a limit (asks first)',
   '  i           interrupt the current turn (asks first; the window stays open)',
@@ -1025,6 +1057,15 @@ export function promptText(state: BoardState): string | null {
   if (mode.action === 'close' && row?.finished) return `Close ${mode.task}? It has no window; it is marked closed and leaves the list${row.report === 'missing' ? ' – WARNING: no report was written' : ''}. [y/N]`;
   if (mode.action === 'close') return `Close ${mode.task}? Kills its tmux window${row && row.report === 'missing' ? ' – WARNING: no report yet' : ''}. [y/N]`;
   return `Also remove the git worktree of ${mode.task} (git worktree remove, the branch stays)? [y/N, Esc cancels]`;
+}
+
+/** The line of the manager under the header; null when there is no window and none is configured. */
+export function managerLine(state: Pick<BoardState, 'manager' | 'selected'>, configured: boolean): { text: string; selected: boolean; dim: boolean } | null {
+  const m = state.manager;
+  if (!m || (m.state === 'missing' && !configured)) return null;
+  const state_ = MANAGER_STATE_TEXT[m.state];
+  if (m.state === 'missing') return { text: `🧭 ${m.name}: ${state_} – agentctl manager`, selected: false, dim: true };
+  return { text: `🧭 ${m.name}: ${state_}${state.selected === MANAGER_SELECT ? ' · ⏎ wejście' : ''}`, selected: state.selected === MANAGER_SELECT, dim: m.state === 'connected' ? false : m.state === 'starting' };
 }
 
 /** The indicator in the header: "📱 away" while away is on, "📱 always" with notify.ntfy.always, dimmed "📱 off" when a phone is set up but quiet; null with no phone and no away. */

@@ -19,6 +19,7 @@ import {
   KEY_HINTS,
   awayLabel,
   loadBoard,
+  managerLine,
   loadLogLines,
   ProgressCache,
   promptText,
@@ -219,7 +220,8 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
   const active = state.rows.filter((r) => !r.closed && !r.finished && !r.hidden).length;
   const hiddenCount = state.showHidden ? 0 : state.rows.filter((r) => r.hidden).length;
   const panel = usagePanel(state.plans, ctx.config.usage, Date.now());
-  const rowsForBody = Math.max(3, state.height - 4 - panel.length);
+  const mline = managerLine(state, ctx.config.manager.autostart || ctx.config.manager.project !== null);
+  const rowsForBody = Math.max(3, state.height - 4 - panel.length - (mline ? 1 : 0));
   const away = awayLabel(state.away);
   const header = h(
     Box,
@@ -228,6 +230,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
     h(Text, { dimColor: true, wrap: 'truncate-end' }, `  ${ctx.config.session} · ${active} task${active === 1 ? '' : 's'}${state.queue.length > 0 ? ` · ${state.queue.length} queued` : ''}${state.cohortFilter !== null ? ` · cohort: ${cohortLabel(state)}` : ''}${hiddenCount > 0 ? ` · ${hiddenCount} hidden (a)` : ''}${state.refreshedAt ? ` · ${state.refreshedAt}` : ''}`),
     away ? h(Text, { wrap: 'truncate-end', ...(away.dim ? { dimColor: true } : { color: 'cyan', bold: true }) }, ` · ${away.text}`) : null,
   );
+  const managerBox = mline ? h(Text, { wrap: 'truncate-end', ...(mline.selected ? { inverse: true } : mline.dim ? { dimColor: true } : { color: 'cyan' }) }, mline.text) : null;
   const panelBox = panel.length === 0 ? null : h(Box, { flexDirection: 'column', width: state.width }, ...panel.map((l) => h(Text, { key: l.provider, wrap: 'truncate-end', ...(l.color ? { color: l.color } : { dimColor: true }) }, l.text)));
   const logMode = state.mode.kind === 'log' ? state.mode : null;
   const viewMode = state.mode.kind === 'view' ? state.mode : null;
@@ -244,7 +247,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
           h(TaskList, { state, width: layout.listWidth, capacity: rowsForBody - 1, icons: ctx.config.watch.windowIcons }),
           layout.showPreview ? h(Preview, { state, width: layout.previewWidth, height: rowsForBody }) : null,
         );
-  return h(Box, { flexDirection: 'column', width: state.width, height: state.height }, header, state.mode.kind === 'help' || logMode || viewMode ? null : panelBox, h(Box, { flexGrow: 1, flexDirection: 'column' }, body), h(Footer, { state, hint: navigationHint(ctx.config.board.returnKey) }));
+  return h(Box, { flexDirection: 'column', width: state.width, height: state.height }, header, state.mode.kind === 'help' || logMode || viewMode ? null : managerBox, state.mode.kind === 'help' || logMode || viewMode ? null : panelBox, h(Box, { flexGrow: 1, flexDirection: 'column' }, body), h(Footer, { state, hint: navigationHint(ctx.config.board.returnKey) }));
 }
 
 /** Show the board until the user quits; resolves when it is gone. Needs a terminal. */
