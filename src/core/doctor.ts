@@ -5,6 +5,7 @@ import { INSTALL_HINTS } from './agents.ts';
 import { PROJECT_CONFIG_NAME, loadGlobalConfig, loadProjectConfig } from './config.ts';
 import type { GlobalConfig } from './config.ts';
 import type { Runner } from './runner.ts';
+import { findMcpProcesses, staleProcesses, staleWarning } from './mcp-processes.ts';
 import { describeAllow, desktopConfigPath, readClaudeCodeRegistration, readDesktopRegistration, stableScript } from './mcp-install.ts';
 import type { McpRegistration } from './mcp-install.ts';
 import { findTerminalNotifier, notifierMemoryPath, readNotifierMemory } from './notify.ts';
@@ -128,7 +129,16 @@ export async function runDoctor(
     else if (r.stable === false) add(`mcp (${r.where})`, 'warn', `registered, but it runs ${r.script ?? 'an unknown script'}, not the stable copy ${stableScript(env, home)}; run "agentctl mcp install" from the stable copy`);
     else add(`mcp (${r.where})`, 'ok', `registered${r.script ? `, runs ${r.script}` : ''}`);
   }
-  if (config) add('mcp access', 'ok', describeAllow(config.mcp));
+  if (config) {
+    add('mcp access', 'ok', describeAllow(config.mcp));
+    // A config written for another version names tools this one does not know: the server runs without them, and says so here.
+    for (const w of config.mcp.warnings) add('mcp config', 'warn', w);
+  }
+  const procs = await findMcpProcesses(runner);
+  const stale = staleProcesses(procs, stableScript(env, home));
+  const warning = staleWarning(stale, stableScript(env, home));
+  if (warning) add('mcp server', 'warn', warning);
+  else if (procs.length > 0) add('mcp server', 'ok', `${procs.length} running (pid ${procs.map((p) => p.pid).join(', ')}), none older than the stable copy`);
 
   if (config) {
     const cache = config.cache;

@@ -15,6 +15,7 @@ import { archiveClosed, parseAge } from './core/archive.ts';
 import { appendStartLog, describeTerminal, loggedRun, startLogPath, waitForSize } from './core/boardstart.ts';
 import { setHidden } from './core/hide.ts';
 import { installClaudeCode, installDesktop, desktopConfigPath, mcpEntryFrom, pointsAtStable, stableScript, uninstallClaudeCode, uninstallDesktop } from './core/mcp-install.ts';
+import { findMcpProcesses, staleProcesses, staleWarning } from './core/mcp-processes.ts';
 import type { McpDeps } from './core/mcp-tools.ts';
 import { applyNavigation, describeNavigation } from './core/navigation.ts';
 import { handleEvent } from './core/event-command.ts';
@@ -193,6 +194,14 @@ export function describeNotifyResult(result: NotifyResult | undefined, backend: 
   lines.push('Did the notification appear? If not, allow notifications for "Script Editor" (osascript) in System Settings > Notifications.');
   return lines;
 }
+
+const realOrSelf = (p: string): string => {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return p;
+  }
+};
 
 function packageVersion(): string {
   try {
@@ -871,6 +880,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
             await (await makeNotifier(ctx)).notify('agentctl', message);
           },
           self: deps.selfArgv?.(),
+          server: { version: packageVersion(), script: realOrSelf(process.argv[1] ?? 'bin/agentctl.ts'), pid: process.pid, started: new Date().toISOString() },
         };
         const run =
           deps.runMcp ??
@@ -879,6 +889,18 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
             await runMcpServer(t, version);
           });
         await run(tools, packageVersion());
+      }),
+    );
+
+  mcp
+    .command('check')
+    .description('Look for MCP server processes ("agentctl … mcp", started by the Claude app) that run older code than the stable copy: after "agentctl-update" the app keeps the old process until it is quit (⌘Q) and opened again. Prints a warning; stops nothing.')
+    .action(
+      guarded(async () => {
+        const ctx = contextFor(false, { migrate: false });
+        const stable = stableScript();
+        const warning = staleWarning(staleProcesses(await findMcpProcesses(ctx.runner), stable), stable);
+        line(warning ? `warning: ${warning}` : 'No MCP server process runs older code than the stable copy.');
       }),
     );
 

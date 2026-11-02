@@ -44,6 +44,7 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`peek`](#agentctl-peek) | Print the last lines of the task window (without the agent footer), to read along without attaching. |
 | [`mcp`](#agentctl-mcp) | Local MCP server on stdio: lets a chat (the Claude app, Claude Code, VS Code) read status, window previews and reports. "mcp install" registers it; writing is off until mcp.allow says otherwise. |
 | [`mcp serve`](#agentctl-mcp-serve) | Serve the tools on stdin/stdout (this is what the app or Claude Code starts). Nothing else is ever printed to stdout. |
+| [`mcp check`](#agentctl-mcp-check) | Look for MCP server processes ("agentctl … mcp", started by the Claude app) that run older code than the stable copy: after "agentctl-update" the app keeps the old process until it is quit (⌘Q) and opened again. Prints a warning; stops nothing. |
 | [`mcp install`](#agentctl-mcp-install) | Register this agentctl as an MCP server: --desktop edits claude_desktop_config.json (diff, y/N, dated .bak copy, other servers kept), --claude-code runs "claude mcp add --scope user". |
 | [`mcp uninstall`](#agentctl-mcp-uninstall) | Remove the agentctl MCP server from the Claude desktop config and/or Claude Code (without a flag: both). |
 | [`doctor`](#agentctl-doctor) | Check tmux, node, claude, codex, gh, the cache directory and the configs. |
@@ -762,7 +763,7 @@ agentctl peek NC-42 -n 80
 
 Local MCP server on stdio: lets a chat (the Claude app, Claude Code, VS Code) read status, window previews and reports. "mcp install" registers it; writing is off until mcp.allow says otherwise.
 
-Subcommands: `mcp serve`, `mcp install`, `mcp uninstall`. Without a subcommand: `serve`.
+Subcommands: `mcp serve`, `mcp check`, `mcp install`, `mcp uninstall`. Without a subcommand: `serve`.
 
 ```
 agentctl mcp [options] [command]
@@ -774,6 +775,20 @@ Serve the tools on stdin/stdout (this is what the app or Claude Code starts). No
 
 ```
 agentctl mcp serve [options]
+```
+
+## agentctl mcp check
+
+Look for MCP server processes ("agentctl … mcp", started by the Claude app) that run older code than the stable copy: after "agentctl-update" the app keeps the old process until it is quit (⌘Q) and opened again. Prints a warning; stops nothing.
+
+```
+agentctl mcp check [options]
+```
+
+Examples:
+
+```sh
+agentctl mcp check                      # after agentctl-update: does the Claude app still run the old server?
 ```
 
 ## agentctl mcp install

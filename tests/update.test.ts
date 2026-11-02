@@ -123,6 +123,7 @@ describe('agentctl-update: --dry-run', () => {
       `+ ${r.stable}/bin/agentctl.ts doctor`,
       "+ tmux kill-window -t '=agentctl:watch'",
       `+ ${r.stable}/bin/agentctl.ts watch --tmux`,
+      `+ ${r.stable}/bin/agentctl.ts mcp check`,
     ]);
     assert.equal(fs.existsSync(r.stable), false);
     assert.match(r.stdout, /^watch restarted: yes \(dry run: would be\)$/m);
@@ -161,6 +162,7 @@ describe('agentctl-update: a real run against mocked git, npm and tmux', () => {
         'agentctl doctor',
         'tmux kill-window -t =agentctl:watch',
         'agentctl watch --tmux',
+        'agentctl mcp check',
       ],
     );
     assert.match(r.stdout, /^previous: \(none\)$/m);

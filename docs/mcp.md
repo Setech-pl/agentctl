@@ -19,7 +19,8 @@ These always work.
 
 | Tool | Arguments | What it returns |
 |---|---|---|
-| `status` | `all?`, `cohort?` | One line ("3 tasks: 1 working, 1 report-ready, 1 waiting") and the rows as JSON: agent, model, effort, state, window, `started` (UTC) and `startedLocal`, duration, progress, report, whether it was pulled, last line, the open question, hint, finished, hidden, closed, archived. Hidden and closed tasks only with `all: true`. A chat should call it first. |
+| `status` | `all?`, `cohort?` | One line ("3 tasks: 1 working, 1 report-ready, 1 waiting") and the rows as JSON: agent, model, effort, state, window, `started` (UTC) and `startedLocal`, duration, progress, report, whether it was pulled, last line, the open question, hint, finished, hidden, closed, archived. Hidden and closed tasks only with `all: true`. A chat should call it first. Before the rows, `status` says which server version answers (`MCP server: agentctl 0.10.0 (script, pid, started)`, with a hint when the stable copy on disk is newer) and any `Config warning:`. |
+| `version` | none | The version of agentctl this server process runs, its script, pid and start time, the version of the stable copy on disk (`older: true` when they differ), the write tools the user allowed and the warnings about the MCP part of the config. Use it when a tool seems to be missing. |
 | `peek` | `task`, `lines?` (1 to 200, default 40) | The last lines of a running task's window without the agent's footer. |
 | `list_reports` | `all?` | Which tasks have a report: size, `modified` (UTC) and `modifiedLocal`, whether it was pulled. |
 | `get_report` | `task` | One report, up to 200 KB. It reads only the file that the task's `TASK.md` names, never a path from the chat, and refuses a report that is a symbolic link. It does not mark the report as pulled. |
@@ -85,6 +86,17 @@ agentctl mcp install --claude-code         # claude mcp add --scope user …
 ```
 
 User scope makes the server available in every project; the VS Code extension reads the same configuration (`/mcp` in the chat panel shows it).
+
+### After an update: quit the Claude app (Cmd+Q)
+
+The app starts the server once and keeps that process for as long as it runs. `agentctl-update` replaces the files of the stable copy, but a process that is running keeps the code it loaded, so the chat goes on talking to the **old** version (new tools missing, old behaviour) until the app is quit completely (**Cmd+Q**, not just the window) and opened again. agentctl never stops the process for you.
+
+- `agentctl doctor` and, at its end, `agentctl-update` run `agentctl mcp check`: it finds the `agentctl … mcp` processes (from `ps`) that started before the stable copy was last updated and prints `serwer MCP w aplikacji działa na starej wersji – zamknij aplikację Claude (⌘Q) i otwórz ponownie`.
+- From inside the chat, `version` (and the first lines of `status`) show the version the running server has next to the one on disk.
+
+### A config written for another version
+
+`mcp.allow` may name a tool that this version does not know (a config from a newer or an older agentctl). That entry is ignored with a warning, and everything else works: `status` shows `Config warning: …` before its rows, `version` lists the warnings, `agentctl doctor` shows an `mcp config` line. The same goes for an unknown key or a wrong type inside `mcp`. Only a config that cannot be read at all (invalid YAML, not a mapping) stops the server.
 
 ### Remove and check
 
