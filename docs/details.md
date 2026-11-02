@@ -2,7 +2,7 @@
 
 How the pieces work, and what was checked on the real tools (Claude Code 2.1.309, Codex 0.166.0). The overview is in the [README](../README.md); the options of each command are in [commands.md](commands.md) and every key in [configuration.md](configuration.md). Status-bar and notification texts quoted below are those of the code and are in Polish in places.
 
-`npm run build` compiles TypeScript into `dist/` and rewrites imports to JavaScript. The installed command runs `dist/bin/agentctl.js` without a TypeScript loader. Development still uses `node --experimental-strip-types bin/agentctl.ts`. Run `npm ci`, `npm run build`, then `npm pack` to prepare a package.
+The npm runtime is JavaScript emitted into `dist/` by `npm run build`, with `.ts` imports rewritten to `.js`. Sources and tests run directly with Node 22.14+ type stripping. Installed packages need no type stripping inside `node_modules`.
 
 ## Setup
 
@@ -546,7 +546,10 @@ The tasks that still have a window come first. Tasks without a window (and witho
 Nothing destructive runs on a single key. The board reuses the core functions of the commands (`sendPrompts`, `interruptTask`, `pullTask`, `pullReady`, `closeTask`, `moveTask`); git is asked for
 the progress at most every 10 seconds. It needs a terminal; without tmux `Enter` tells you to use `agentctl attach`.
 
-> Ink uses `React.createElement` so development can run with Node type stripping. The npm build compiles the same source to JavaScript. Ink loads only when the board starts.
+> **Why Ink, and why `React.createElement` instead of JSX or `htm`?** The project runs on Node's type stripping with sources run directly during development, and JSX is not
+> erasable syntax, so it cannot run unprocessed. `htm` (tagged templates) would avoid the build, but it adds a dependency to write what is a few dozen lines of `createElement` calls,
+> and its templates are plain strings that `tsc --noEmit` cannot check; with `createElement` the component props are type-checked like the rest of the code.
+> Ink is only loaded when the board starts, so the other commands do not pay for React.
 
 ## Task states
 
@@ -618,6 +621,8 @@ when you call `status` or `pull`.
 
 ## Stable install and updates
 
+Recommended: `npm i -g @setech-pl/agentctl`. The packaged `agentctl-update` runs `npm install -g @setech-pl/agentctl@latest`, without git or tmux restart. Clone options `--ref`, `--no-watch`, `--no-link` are rejected in npm mode. `doctor` shows the installation source and warns about PATH conflicts. MCP uses the absolute installed JavaScript path. The clone mode below remains available for development.
+
 Use a **stable copy** for daily work and keep `~/Projects/agentctl` for development only. (`npm link` from the repo made the global
 `agentctl` run whatever branch was checked out there, finished or not.) The stable copy is a detached git worktree of the repo,
 by default `~/Projects/agentctl-stable`; `bin/agentctl-update` creates and updates it.
@@ -628,7 +633,7 @@ agentctl-update                             # later, after a PR is merged
 ```
 
 It does, in this order: `git fetch origin` in the repo; `git worktree add --detach <stable> <ref>` (or, when the copy exists, a refusal
-if it has local changes, else `git checkout --detach <ref>`); `npm ci` and `npm link` in the stable copy, so the global `agentctl` and
+if it has local changes, else `git checkout --detach <ref>`); `npm ci`, `npm run build` and `npm link` in the stable copy, so the global `agentctl` and
 `agentctl-update` point at it; `agentctl doctor` (a failure makes the script exit non-zero); if window `watch` exists in the tmux session
 `agentctl`, it kills that window and starts `agentctl watch --tmux` from the new version (no other window is touched); finally it prints the
 previous and new commit and whether watch was restarted.

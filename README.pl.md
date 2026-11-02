@@ -27,7 +27,7 @@ agentctl zarządza **zleceniami, nie oknami**. Jednostką jest spec: plik Markdo
 - **Zdarzenia dla czatu.** `agentctl events` i MCP `events_since` mówią czatowi, co zmieniło się od jego ostatniego wywołania.
 - **Sprzątanie i wznawianie.** `agentctl gc` odbiera worktree, stare pliki i scalone gałęzie zakończonych zadań; `agentctl resume` przywraca okna po restarcie, a `agentctl up` zaczyna dzień.
 - **Integracja z czatem.** Lokalny serwer MCP pozwala czatowi w aplikacji Claude lub w Claude Code czytać status i raporty oraz, jeśli na to pozwolisz, wysyłać prompty i uruchamiać zadania.
-`npm run build` kompiluje TypeScript do `dist/` i zmienia importy na JavaScript. Zainstalowane polecenie uruchamia `dist/bin/agentctl.js` bez loadera TS. W development nadal działa `node --experimental-strip-types bin/agentctl.ts`. Przygotowanie paczki: `npm ci`, `npm run build`, `npm pack`.
+- **Mały i przejrzysty.** TypeScript kompilowany do JavaScriptu dla npm, bez demona; `--dry-run` wypisuje każde polecenie zamiast je wykonać.
 
 ## Jak to działa
 
@@ -267,7 +267,26 @@ Te same diagramy z uwagami: [docs/diagrams.md](docs/diagrams.md) (po angielsku).
 
 ## Szybki start
 
-Wymagania: **Node 22.6+**, **git**, **tmux 3.2+** i agenci, których używasz (`claude`, `codex`). Opcjonalnie [`terminal-notifier`](https://github.com/julienXX/terminal-notifier), żeby kliknięcie w powiadomienie przełączało na okno zadania.
+Wymagania: **Node 22.14+**, **git**, **tmux 3.2+** i agenci, których używasz (`claude`, `codex`). Opcjonalnie [`terminal-notifier`](https://github.com/julienXX/terminal-notifier), żeby kliknięcie w powiadomienie przełączało na okno zadania.
+
+### npm (zalecane)
+
+```sh
+npm i -g @setech-pl/agentctl
+agentctl --version
+agentctl doctor
+```
+
+Nie mylić z **@orgloop/agentctl**, które również instaluje polecenie `agentctl`.
+Sprawdź `command -v agentctl`; `doctor` ostrzega, gdy PATH prowadzi do innej instalacji.
+Aktualizacja: `npm i -g @setech-pl/agentctl@latest` albo `agentctl-update`.
+Aktualizacja npm nie restartuje watcherów ani serwerów MCP; po aktualizacji uruchom te procesy ponownie.
+
+Runtime: macOS i Linux z git i tmux 3.2+. Powiadomienia macOS korzystają z terminal-notifier lub osascript;
+Linux z notify-send (bez obsługi kliknięcia). ntfy działa na obu systemach. Integracja Claude Desktop jest tylko na macOS.
+Windows nie jest wspierany (użyj środowiska Linux w WSL). CI sprawdza obecnie macOS; Linux nie został lokalnie zweryfikowany.
+
+### Klon (rozwój)
 
 ```sh
 git clone https://github.com/Setech-pl/agentctl.git
@@ -276,9 +295,9 @@ bin/agentctl-update            # stabilna kopia w ~/Projects/agentctl-stable, np
 agentctl doctor                # tmux, node, git, claude, codex, gh, katalog cache, configi
 ```
 
-`agentctl-update` utrzymuje odłączoną kopię repo do codziennej pracy, żeby niedokończona gałąź Twojego klonu nigdy nie była tym, co uruchamia globalne `agentctl`; po każdym wydaniu uruchom go ponownie. Szczegóły i opcje: [docs/details.pl.md](docs/details.pl.md#stabilna-instalacja-i-aktualizacje). Żeby tylko spróbować, wystarczy też `npm install && npm run build && npm link` w klonie.
+`agentctl-update` utrzymuje odłączoną kopię repo do codziennej pracy, żeby niedokończona gałąź Twojego klonu nigdy nie była tym, co uruchamia globalne `agentctl`; po każdym wydaniu uruchom go ponownie. Szczegóły i opcje: [docs/details.pl.md](docs/details.pl.md#stabilna-instalacja-i-aktualizacje). Link deweloperski: `npm ci && npm run build && npm link` w klonie. Po zmianach źródeł ponów build.
 
-`npm run build` kompiluje TypeScript do `dist/` i zmienia importy na JavaScript. Zainstalowane polecenie uruchamia `dist/bin/agentctl.js` bez loadera TS. W development nadal działa `node --experimental-strip-types bin/agentctl.ts`. Przygotowanie paczki: `npm ci`, `npm run build`, `npm pack`.
+Paczka npm uruchamia skompilowany JavaScript z `dist/`. Rozwój i testy mogą uruchamiać źródła TypeScript bezpośrednio przez wycinanie typów w Node.
 
 Pierwsze zadanie:
 
