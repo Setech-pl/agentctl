@@ -92,6 +92,8 @@ export interface GlobalConfig extends Layer {
   notify: NotifySettings;
   /** Away mode: when the phone gets notifications. */
   away: AwaySettings;
+  /** The dispatcher session (`agentctl manager`): a Claude Code session with Remote Control and the agentctl MCP, for the phone. */
+  manager: ManagerSettings;
   /** The board: what finishes up in the "Finished" section and what hides by itself. */
   board: BoardSettings;
   /** The local MCP server (`agentctl mcp`): which write tools the chat may call. Read tools are always there. */
@@ -242,6 +244,22 @@ export interface AwaySettings {
   autoIdle: number | null;
 }
 
+/** `manager`: the Claude Code session you talk to from the Claude app on the phone. */
+export interface ManagerSettings {
+  /** The directory the session runs in (absolute); null: the directory `agentctl manager` is run in. */
+  project: string | null;
+  /** The name of the session in the Claude app (`claude --remote-control <name>`) and of its Remote Control entry. */
+  name: string;
+  model: string;
+  effort: Effort;
+  /** A file with the rules for writing specs (a local copy of claude/AGENTCTL-SPEC-GUIDE), appended to the role of the manager; null: none. */
+  guide: string | null;
+  /** `agentctl up` starts the manager as well. */
+  autostart: boolean;
+}
+
+export const DEFAULT_MANAGER_NAME = 'agentctl manager';
+
 /** The mark that opens the line an agent prints for an error: bullets, tree corners, warning signs. */
 const LINE_MARK = '^[\\s⎿●•■⚠!*>-]*';
 
@@ -317,7 +335,7 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
 
 /** The keys accepted in every layer: the global config, `.agentctl.yaml` and (with a few of its own) a spec. docs/configuration.md describes each one. */
 export const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'setup', 'defaults'];
-export const GLOBAL_KEYS = [...LAYER_KEYS, 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away'];
+export const GLOBAL_KEYS = [...LAYER_KEYS, 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager'];
 export const LIMITS_KEYS = [...AGENT_NAMES, 'count_external'];
 export const DEFAULTS_KEYS = ['agent', 'model', 'effort'];
 export const LINK_KEYS = ['from', 'to'];
@@ -326,6 +344,7 @@ export const WATCH_KEYS = ['interval', 'waiting_after', 'window_icons', 'status_
 export const NOTIFY_KEYS = ['backend', 'events', 'turn_end', 'terminal_app', 'verdict_pattern', 'ntfy'];
 export const NTFY_KEYS = ['server', 'topic', 'token', 'events', 'priority', 'include_verdict', 'click_url', 'always'];
 export const AWAY_KEYS = ['auto_idle'];
+export const MANAGER_KEYS = ['project', 'name', 'model', 'effort', 'guide', 'autostart'];
 export const BOARD_KEYS = ['auto_hide_pulled_dead', 'mouse', 'return_key'];
 export const MCP_KEYS = ['allow', 'allow_rm_worktree'];
 export const QUEUE_KEYS = ['enabled', 'parallel_starts'];
@@ -667,6 +686,34 @@ function parseAway(v: unknown, p: Problems): AwaySettings {
   return away;
 }
 
+function parseManager(v: unknown, p: Problems): ManagerSettings {
+  const manager: ManagerSettings = { project: null, name: DEFAULT_MANAGER_NAME, model: 'sonnet', effort: 'medium', guide: null, autostart: false };
+  if (v === undefined || v === null) return manager;
+  if (!isObject(v)) {
+    p.add('config.manager must be a mapping like {project: ~/Projects/neon-city, model: sonnet}');
+    return manager;
+  }
+  checkKeys(v, MANAGER_KEYS, 'config.manager', p);
+  const project = parseString(v.project, 'config.manager.project', p);
+  if (project) manager.project = resolvePath(project);
+  const name = parseString(v.name, 'config.manager.name', p);
+  if (name) {
+    if (/[\r\n]/.test(name) || name.length > 80) p.add('config.manager.name must be one line of at most 80 characters');
+    else manager.name = name.trim();
+  }
+  const model = parseString(v.model, 'config.manager.model', p);
+  if (model) manager.model = model;
+  const effort = parseEnumValue(v.effort, EFFORTS, 'config.manager.effort', p);
+  if (effort) manager.effort = effort;
+  const guide = parseString(v.guide, 'config.manager.guide', p);
+  if (guide) manager.guide = resolvePath(guide);
+  if (v.autostart !== undefined && v.autostart !== null) {
+    if (typeof v.autostart === 'boolean') manager.autostart = v.autostart;
+    else p.add('config.manager.autostart must be true or false');
+  }
+  return manager;
+}
+
 function parseBoard(v: unknown, p: Problems): BoardSettings {
   const board: BoardSettings = { autoHidePulledDead: true, mouse: true, returnKey: 'F12' };
   if (v === undefined || v === null) return board;
@@ -878,6 +925,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   const watch = parseWatch(raw.watch, p);
   const notify = parseNotify(raw.notify, p);
   const away = parseAway(raw.away, p);
+  const manager = parseManager(raw.manager, p);
   const board = parseBoard(raw.board, p);
   const mcp = parseMcp(raw.mcp);
   const queue = parseQueue(raw.queue, p);
@@ -886,7 +934,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   const usage = parseUsage(raw.usage, p);
 
   p.throwIfAny(`Invalid config ${file}:`, 'Fix the listed keys; see the README section "Configuration".');
-  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, limits, countExternal, agents, equivalents, watch, notify, away, board, mcp, queue, collisions, cancel, usage, path: file, loaded: exists };
+  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, limits, countExternal, agents, equivalents, watch, notify, away, manager, board, mcp, queue, collisions, cancel, usage, path: file, loaded: exists };
   if (mirror) config.mirrorDir = resolvePath(mirror);
   return config;
 }

@@ -53,6 +53,8 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`away status`](#agentctl-away-status) | Is away on, who set it, and does the phone get notifications now. |
 | [`away on`](#agentctl-away-on) | Away: the notifications go to the phone as well. Takes effect at once, also in a running watch. |
 | [`away off`](#agentctl-away-off) | Back at the Mac: the phone is quiet again (unless notify.ntfy.always is true). |
+| [`manager`](#agentctl-manager) | The manager: a Claude Code session in window "manager" of the agentctl session, started with Remote Control, so you can talk to it from the Claude app on your phone. It has the agentctl MCP tools (status, reports; it starts more work only after your yes) and a role file generated in \<config dir>/manager/ - the project it runs in is not changed. Never a second copy. The first time, Claude Code asks in that window for the folder trust and "Enable Remote Control": answer there. |
+| [`manager stop`](#agentctl-manager-stop) | Close the window "manager": the session goes offline in the app (its conversation stays in the history of Claude Code). Nothing else is touched. |
 | [`ntfy-setup`](#agentctl-ntfy-setup) | Set up notifications to a phone through ntfy: makes a random topic (agentctl-\<24 hex digits>), writes it to config.yaml (comments and the order of the keys stay; the old file is kept as config.yaml.bak) and prints what to do on the phone. A topic that is already set is kept. |
 | [`notify-test`](#agentctl-notify-test) | Send one test notification and say which channels carried it, with the result and the time of each: the Mac (terminal-notifier with a click action, or the osascript fallback) and the phone (ntfy, whatever away says). Default: --local. |
 | [`adopt`](#agentctl-adopt) | Restore the state file of a task whose TASK.md is lost (the report and the window are still there). Agent, model and effort default to "unknown". |
@@ -1007,6 +1009,47 @@ Examples:
 
 ```sh
 agentctl away off                          # back: the phone is quiet
+```
+
+## agentctl manager
+
+The manager: a Claude Code session in window "manager" of the agentctl session, started with Remote Control, so you can talk to it from the Claude app on your phone. It has the agentctl MCP tools (status, reports; it starts more work only after your yes) and a role file generated in \<config dir>/manager/ - the project it runs in is not changed. Never a second copy. The first time, Claude Code asks in that window for the folder trust and "Enable Remote Control": answer there.
+
+Subcommands: `manager stop`.
+
+```
+agentctl manager [options] [command]
+```
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--name <name>` | the name of the session in the Claude app (default: manager.name, "agentctl manager") |  |
+| `--project <dir>` | the directory the session runs in (default: manager.project, else the current directory) |  |
+| `--model <model>` | model of the session (default: manager.model, sonnet) |  |
+| `--effort <level>` | effort of the session (default: manager.effort, medium) | one of `low`, `medium`, `high`, `xhigh`, `max` |
+| `--url` | only print the address of the session and the QR code, if the window shows them |  |
+| `--dry-run` | print the commands that would run, change nothing |  |
+
+Examples:
+
+```sh
+agentctl manager                       # start the session you open from the Claude app on the phone
+agentctl manager --project ~/Projects/neon-city --model sonnet --effort medium
+agentctl manager --url                 # the address / QR code, if the window shows them
+```
+
+## agentctl manager stop
+
+Close the window "manager": the session goes offline in the app (its conversation stays in the history of Claude Code). Nothing else is touched.
+
+```
+agentctl manager stop [options]
+```
+
+Examples:
+
+```sh
+agentctl manager stop                  # closes the window; the session goes offline in the app
 ```
 
 ## agentctl ntfy-setup

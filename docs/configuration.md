@@ -53,6 +53,7 @@ Column "Layers": **g** global config, **p** project config, **s** spec.
 | `collisions` | mapping | see below | g | Warnings about two active tasks changing the same files. |
 | `cancel` | mapping | see below | g | `agentctl cancel`: how a task at work is stopped. |
 | `away` | mapping | see below | g | When the phone gets notifications: `away.auto_idle`. See also `notify.ntfy`. |
+| `manager` | mapping | see below | g | The dispatcher session you talk to from the Claude app on the phone (`agentctl manager`). |
 | `usage` | mapping | see below | g | Token usage and plan limits: thresholds, queue hold, tmux status line, where the agents keep their logs. |
 
 ### `watch`
@@ -90,6 +91,19 @@ Default icons: `working` ⚙, `background` ⏳, `waiting` ⏸, `needs-input` ?, 
 | Key | Type | Default | Layers | Meaning |
 |---|---|---|---|---|
 | `away.auto_idle` | minutes | none | g | The Mac counts as away after this many minutes without keyboard or mouse (macOS, `HIDIdleTime`), and back at the first touch. Off by default; `agentctl away on|off` always works. |
+
+### `manager`
+
+The session started by `agentctl manager`: Claude Code with [Remote Control](https://code.claude.com/docs/en/remote-control), the agentctl MCP server and a role that makes it a dispatcher.
+
+| Key | Type | Default | Layers | Meaning |
+|---|---|---|---|---|
+| `manager.project` | path | none | g | The directory the session runs in (it should be a folder you have trusted in Claude Code, e.g. `~/Projects/neon-city`). Without it the manager runs in the directory where `agentctl manager` is typed. `--project` overrides it. |
+| `manager.name` | string | `agentctl manager` | g | The name of the session in the Claude app (`claude --remote-control <name>`). One line, at most 80 characters. |
+| `manager.model` | string | `sonnet` | g | `--model` of the session; `default` passes none. |
+| `manager.effort` | `low` `medium` `high` `xhigh` `max` | `medium` | g | `--effort` of the session. |
+| `manager.guide` | path | none | g | A local copy of the rules for writing specs (`claude/AGENTCTL-SPEC-GUIDE`): its text is appended to the role of the manager. Optional; a missing file is a warning, not an error. |
+| `manager.autostart` | boolean | `false` | g | `agentctl up` starts the manager too. |
 
 ### `board`
 
