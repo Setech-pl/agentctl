@@ -26,6 +26,9 @@ These always work.
 | `get_report` | `task` | One report, up to 200 KB. It reads only the file that the task's `TASK.md` names, never a path from the chat, and refuses a report that is a symbolic link. It does not mark the report as pulled. |
 | `pull_ready` | `cohort?` | All reports that are ready and not yet pulled, each under `=== NC-42 (claude opus/high) ===`, in one answer (up to 200 KB; the rest stays new). Marks them as pulled. This is the only read tool that changes anything, and only in agentctl's own state. A chat should call it at the start of discussing finished work. |
 | `queue_list` | none | The task queue: position, agent/model/effort, priority, `after`, what each task waits for (`startCondition`: `czeka na miejsce: claude 2/2`, `czeka na NC-42`, paused), since when, and the error of a start that failed. |
+| `usage` | `cohort?`, `since?` | Token usage and the plan limits: per provider the 5 hour and weekly window (percentage used, reset time; `available: false` when the provider did not say, shown as n/d) and the tokens today and in the period, per task, cohort, model and day. `since` is an age such as `12h`, `7d`, `2w` (default `7d`). A chat should call it before the user orders more tasks. `status` carries a one-line `Plans:` summary. |
+| `log` | `cohort?`, `since?` | The history of the tasks, newest first: agent/model/effort, start, report, duration, tokens (null: n/d), commits and files, the verdict line, cancel reason, move, and the result the user marked. |
+| `stats` | `cohort?`, `since?` | The history grouped by agent/model/effort: tasks, median time and tokens, how many were marked ok, partial or fail, cancelled, and moved to the other provider after a limit. |
 | `overlap` | `task?` | Pairs of active tasks of one repository that changed the same files, with the file lists (from git, now). `status` also carries `collidesWith` per task, and short `Queue` and `Collisions` lines. |
 | `cohort_list` | none | The cohorts (named groups of tasks): per cohort the number of tasks by state (`active`, `queued`, `reports`, `closed`, `cancelled`), `total`, `created` and the note. |
 | `cohort_show` | `cohort` | One cohort: its note, every task in it as `status` shows it (closed and cancelled ones too) and its queued tasks with what each waits for. |
@@ -41,7 +44,7 @@ Off until you list them in `~/.agentctl/config.yaml`. The list is read again on 
 
 ```yaml
 mcp:
-  allow: [send, interrupt]     # any of: send, new, interrupt, close, move, queue, queue_rm, cancel
+  allow: [send, interrupt]     # any of: send, new, interrupt, close, move, queue, queue_rm, cancel, mark
   allow_rm_worktree: false     # close may also remove the git worktree
 ```
 
@@ -54,6 +57,7 @@ mcp:
 | `queue` | `spec`, `agent?`, `confirm?` | Puts the tasks of a spec text in the queue (`priority`, `after` and `touches` work as in the CLI). The first call only returns the summary (where each task will stand, the review hint, `touches` warnings); the tasks are queued when it is called again with `confirm: true`. `setup` is refused, as in `new`. They start by themselves while `agentctl watch` runs. |
 | `queue_rm` | `task` | Takes a waiting or failed task out of the queue; it becomes cancelled (as `cancel` does for a queued task) and the tasks that wait for it become blocked. |
 | `cancel` | `task` or `cohort`, `reason?`, `remove_worktree?`, `confirm?` | Abandons a task, or all open tasks of a cohort: a task at work is interrupted and its window closed after `cancel.grace` seconds, a queued task leaves the queue. The task becomes cancelled; the worktree, the branch and a written report stay. A move is cancelled with its other half. The first call only describes what would be cancelled; `confirm: true` does it. `remove_worktree` needs `mcp.allow_rm_worktree`, as in `close`. The desktop notice names the reason. |
+| `mark` | `task`, `result` (`ok`, `partial` or `fail`), `note?` | Records the result the user judged for a task in the history (`log`, `stats`); the last mark wins. It changes nothing else, so it has no confirm step; a chat should record only what the user said. |
 | `move` | `task`, `agent?`, `confirm?` | Hands a task that hit its usage limit to the other provider. The first call only describes the move; `confirm: true` does it. |
 
 ## Safety model
