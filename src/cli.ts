@@ -50,6 +50,7 @@ import { DesktopNotifier, NOTIFIER_MEMORY_MS, notifierOptionsFor } from './core/
 import type { Notifier, NotifyResult } from './core/notify.ts';
 import { ensureWatchWindow, runWatch, WATCH_WINDOW } from './core/watch.ts';
 import { applyStatusLine, statusTmuxLine } from './core/statusline.ts';
+import { MANAGER_STATE_TEXT, MANAGER_WINDOW, managerAddress, managerAdvice, startManager, stopManager } from './core/manager.ts';
 import { BOARD_WINDOW, ensureWindow } from './core/windows.ts';
 import { interruptTask } from './core/interrupt.ts';
 import { handleTap } from './core/usage-tap.ts';
@@ -57,7 +58,7 @@ import { computeStats, logMarkdown, markTask, RESULTS, renderLog, renderStats, s
 import type { Result } from './core/history.ts';
 import { usageSummaryLines } from './core/usage-limits.ts';
 import { collectUsage, renderUsage, usageMarkdown } from './core/usage-report.ts';
-import { configDir, loadGlobalConfig } from './core/config.ts';
+import { configDir, EFFORTS, loadGlobalConfig } from './core/config.ts';
 import { ConfigStore, configStatePath, noteConfigState, readConfigState } from './core/config-store.ts';
 import { applyExamples } from './examples.ts';
 import type { Effort, GlobalConfig } from './core/config.ts';
@@ -1077,6 +1078,59 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         }),
       );
   }
+
+  const manager = program
+    .command('manager')
+    .description('The manager: a Claude Code session in window "manager" of the agentctl session, started with Remote Control, so you can talk to it from the Claude app on your phone. It has the agentctl MCP tools (status, reports; it starts more work only after your yes) and a role file generated in <config dir>/manager/ - the project it runs in is not changed. Never a second copy. The first time, Claude Code asks in that window for the folder trust and "Enable Remote Control": answer there.')
+    .option('--name <name>', 'the name of the session in the Claude app (default: manager.name, "agentctl manager")')
+    .option('--project <dir>', 'the directory the session runs in (default: manager.project, else the current directory)')
+    .option('--model <model>', 'model of the session (default: manager.model, sonnet)')
+    .addOption(new Option('--effort <level>', 'effort of the session (default: manager.effort, medium)').choices([...EFFORTS]))
+    .option('--url', 'only print the address of the session and the QR code, if the window shows them')
+    .option('--dry-run', 'print the commands that would run, change nothing')
+    .action(
+      guarded(async (opts: { name?: string; project?: string; model?: string; effort?: Effort; url?: boolean; dryRun?: boolean }) => {
+        const ctx = contextFor(Boolean(opts.dryRun), { migrate: false });
+        if (opts.url) {
+          const address = await managerAddress(ctx);
+          if (address.view.state === 'missing') throw new AgentctlError('the manager is not running', 'Start it: agentctl manager');
+          if (address.url) line(address.url);
+          for (const l of address.qr) line(l);
+          if (!address.url && address.qr.length === 0) {
+            line(`The address is not on the screen of window ${ctx.config.session}:${MANAGER_WINDOW}. In that window type /remote-control: it shows the address and a QR code. Or open the Claude app on the phone, tap Code, and pick the session "${address.view.name}" (a computer icon, a green dot).`);
+          }
+          return;
+        }
+        const self = deps.selfArgv?.();
+        if (!self) throw new AgentctlError('cannot tell how to start the agentctl MCP server for the manager', 'Run agentctl from its installed command.');
+        const interrupt = opts.dryRun ? undefined : deps.interruptSignal?.();
+        let result;
+        try {
+          result = await startManager(ctx, { project: opts.project, name: opts.name, model: opts.model, effort: opts.effort, self, ...(interrupt ? { signal: interrupt.signal } : {}) });
+        } finally {
+          interrupt?.dispose();
+        }
+        if (result.action === 'exists') {
+          line(`The manager is already running in window ${ctx.config.session}:${MANAGER_WINDOW}, left alone: ${MANAGER_STATE_TEXT[result.state]}. (agentctl manager stop closes it.)`);
+          if (result.state !== 'connected') for (const l of managerAdvice(ctx, result)) line(l);
+          return;
+        }
+        if (opts.dryRun) return;
+        line(`The manager "${result.name}" runs in window ${ctx.config.session}:${MANAGER_WINDOW}, in ${result.project}.`);
+        for (const l of managerAdvice(ctx, result)) line(l);
+        for (const l of describeNavigation(await applyNavigation(ctx), ctx.config.session, true)) line(l);
+      }),
+    );
+
+  manager
+    .command('stop')
+    .description('Close the window "manager": the session goes offline in the app (its conversation stays in the history of Claude Code). Nothing else is touched.')
+    .action(
+      guarded(async () => {
+        const ctx = contextFor(false, { migrate: false });
+        line((await stopManager(ctx)) === 'stopped' ? `The manager is stopped (window ${ctx.config.session}:${MANAGER_WINDOW} closed).` : 'The manager is not running.');
+      }),
+    );
 
   program
     .command('ntfy-setup')

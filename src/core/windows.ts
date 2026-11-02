@@ -4,6 +4,9 @@ import { AgentctlError } from './util.ts';
 /** Name of the tmux window that runs `agentctl board` (like WATCH_WINDOW, it is not a task). */
 export const BOARD_WINDOW = 'board';
 
+/** Name of the tmux window of the manager session (`agentctl manager`); like "board" and "watch" it is not a task. */
+export const MANAGER_WINDOW = 'manager';
+
 export type EnsureResult = 'created' | 'session-created' | 'exists' | 'restarted';
 
 /**

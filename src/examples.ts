@@ -67,6 +67,8 @@ export const COMMAND_EXAMPLES: Record<string, string[]> = {
   ],
   watch: ['agentctl watch --tmux                  # in window "watch" of the agentctl session', 'agentctl watch                         # in this terminal'],
   board: ['agentctl board --tmux                  # in window "board" of the agentctl session', 'agentctl board'],
+  manager: ['agentctl manager                       # start the session you open from the Claude app on the phone', 'agentctl manager --project ~/Projects/neon-city --model sonnet --effort medium', 'agentctl manager --url                 # the address / QR code, if the window shows them'],
+  'manager stop': ['agentctl manager stop                  # closes the window; the session goes offline in the app'],
   'notify-test': ['agentctl notify-test                      # the Mac', 'agentctl notify-test --phone              # the phone through ntfy: code and time', 'agentctl notify-test --all                # both'],
   adopt: ['agentctl adopt NC-42 --report ~/Projects/cache/nc-42/NC-42.md --agent claude --worktree ~/Projects/wt/app-nc-42'],
   interrupt: ['agentctl interrupt NC-42'],

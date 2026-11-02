@@ -2,7 +2,7 @@ import type { Context } from './context.ts';
 import { listTaskRecords } from './taskstore.ts';
 import { AgentctlError } from './util.ts';
 import { WATCH_WINDOW } from './watch.ts';
-import { BOARD_WINDOW } from './windows.ts';
+import { BOARD_WINDOW, MANAGER_WINDOW } from './windows.ts';
 
 /** A task agentctl can point at: it has a state file, a tmux window, or both. */
 export interface TaskTarget {
@@ -26,7 +26,7 @@ export function matchTask(input: string, targets: TaskTarget[]): TaskMatch {
   return { kind: 'none' };
 }
 
-/** Tasks with a state file plus the windows of the session that have none (orphans); windows "watch" and "board" are not tasks. */
+/** Tasks with a state file plus the windows of the session that have none (orphans); windows "watch", "board" and "manager" are not tasks. */
 export async function listTargets(ctx: Context): Promise<TaskTarget[]> {
   const live = new Set(await ctx.tmux.listWindows());
   const targets: TaskTarget[] = [];
@@ -38,7 +38,7 @@ export async function listTargets(ctx: Context): Promise<TaskTarget[]> {
     targets.push({ task: record.task, window: record.window, alive: live.has(record.window) });
   }
   for (const window of [...live].sort()) {
-    if (known.has(window) || window === WATCH_WINDOW || window === BOARD_WINDOW) continue;
+    if (known.has(window) || window === WATCH_WINDOW || window === BOARD_WINDOW || window === MANAGER_WINDOW) continue;
     targets.push({ task: window.toUpperCase(), window, alive: true });
   }
   return targets;
