@@ -8,6 +8,7 @@ import { Context } from '../src/core/context.ts';
 import { auditPath, MCP_TOOLS } from '../src/core/mcp-tools.ts';
 import type { McpDeps, McpToolDef, ToolResult } from '../src/core/mcp-tools.ts';
 import { readQueue } from '../src/core/queue.ts';
+import { readTaskRecord } from '../src/core/taskstore.ts';
 import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helpers.ts';
 
 const scratch = useScratch();
@@ -148,7 +149,8 @@ describe('mcp: queue write tools', () => {
     const t = setup('qr', 'mcp: {allow: [queue, queue_rm]}\n');
     await t.call('queue', { spec: t.spec('Q-1') + t.spec('Q-2'), confirm: true });
     const r = await t.call('queue_rm', { task: 'q-1' });
-    assert.equal(r.text, 'Q-1: removed from the queue');
+    assert.equal(r.text, 'Q-1: removed from the queue (cancelled)');
+    assert.equal(readTaskRecord(t.config, 'q-1')?.cancelSource, 'mcp');
     assert.deepEqual(readQueue(t.config).map((e) => e.task), ['Q-2']);
     assert.equal((await t.call('queue_rm', { task: 'Q-1' })).isError, true);
     assert.deepEqual(t.audit().filter((a) => a.tool === 'queue_rm').map((a) => a.outcome), ['requested', 'done', 'requested', 'error']);
