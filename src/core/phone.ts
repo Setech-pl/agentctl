@@ -152,7 +152,7 @@ export interface PhoneSendResult {
   error?: string;
 }
 
-export const PHONE_TIMEOUT_MS = 8000;
+export const PHONE_TIMEOUT_MS = 5000;
 
 /** One request. Never throws: a network error is a result. */
 export async function sendNtfy(fetchFn: FetchLike, ntfy: Pick<NtfySettings, 'server' | 'topic' | 'token'>, message: PhoneMessage, now: () => number = Date.now, timeoutMs: number = PHONE_TIMEOUT_MS): Promise<PhoneSendResult> {

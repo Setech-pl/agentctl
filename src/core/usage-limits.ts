@@ -118,7 +118,7 @@ export async function usageTick(ctx: Context, notifier: Notifier, log?: (line: s
     ledger[alert.key] = alert.level;
     changed = true;
     await notifier.notify('agentctl', text).catch(() => undefined);
-    await recordJournal(ctx, { kind: 'usage', text });
+    await recordJournal(ctx, { kind: 'usage', text, level: alert.level });
     await log?.(`usage: ${text}`);
     sent.push(text);
   }

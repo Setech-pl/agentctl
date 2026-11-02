@@ -107,6 +107,8 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
   return { client: opts.client, since: new Date(since.ms).toISOString(), sinceLabel: since.label, cohort, events, summary, markerMoved };
 }
 
+/** Behind an event that was sent to the phone (a retry in progress: "queued" is shown by the JSON field `phone`). */
+const PHONE_MARK = ' 📱';
 const hhmm = (iso: string): string => formatLocalTime(iso).slice(-5);
 const KIND_LABEL: Record<JournalEntry['kind'], string> = {
   'report-ready': 'RAPORT',
@@ -118,6 +120,7 @@ const KIND_LABEL: Record<JournalEntry['kind'], string> = {
   cancelled: 'ANULOWANE',
   limited: 'LIMIT',
   dead: 'OKNO ZNIKNĘŁO',
+  orphan: 'OKNO BEZ STANU',
   'cohort-done': 'KOHORTA',
   usage: 'UŻYCIE',
   'limits-changed': 'LIMITY',
@@ -133,14 +136,14 @@ export function renderEvents(report: EventsReport): string[] {
   const head = `Zdarzenia ${report.sinceLabel}${report.cohort ? `, kohorta ${report.cohort}` : ''}: ${report.events.length === 0 ? 'brak zmian' : String(report.events.length)}`;
   return [
     head,
-    ...report.events.map((e) => `${hhmm(e.at)}  ${KIND_LABEL[e.kind]}${e.task ? `  ${e.task}` : ''}  ${e.verdict ? `${e.verdict}` : e.text}`),
+    ...report.events.map((e) => `${hhmm(e.at)}  ${KIND_LABEL[e.kind]}${e.task ? `  ${e.task}` : ''}  ${e.verdict ? `${e.verdict}` : e.text}${e.phone ? PHONE_MARK : ''}`),
     summaryLine(report.summary),
   ];
 }
 
 export function eventsMarkdown(report: EventsReport): string {
   const lines = [`**${renderEvents(report)[0]}**`, ''];
-  for (const e of report.events) lines.push(`- ${hhmm(e.at)} **${KIND_LABEL[e.kind]}**${e.task ? ` ${e.task}` : ''} – ${e.verdict ?? e.text}`);
+  for (const e of report.events) lines.push(`- ${hhmm(e.at)} **${KIND_LABEL[e.kind]}**${e.task ? ` ${e.task}` : ''} – ${e.verdict ?? e.text}${e.phone ? PHONE_MARK : ''}`);
   if (report.events.length > 0) lines.push('');
   lines.push(summaryLine(report.summary));
   return `${lines.join('\n')}\n`;

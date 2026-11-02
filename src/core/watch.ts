@@ -10,6 +10,7 @@ import type { JournalKind } from './journal.ts';
 import type { Context } from './context.ts';
 import { Alerts } from './alert.ts';
 import { awayTick } from './away.ts';
+import { phoneTick } from './phone-send.ts';
 import type { Notifier } from './notify.ts';
 import { limitText, reportReadyText } from './event-command.ts';
 import type { SelfArgv } from './events.ts';
@@ -102,7 +103,7 @@ async function recordReport(ctx: Context, task: string): Promise<void> {
   if (record) await recordEvent(ctx, record, 'report');
 }
 
-const JOURNALED: Partial<Record<TaskState, JournalKind>> = { 'report-ready': 'report-ready', 'needs-trust': 'needs-trust', 'needs-input': 'needs-input', limited: 'limited', dead: 'dead' };
+const JOURNALED: Partial<Record<TaskState, JournalKind>> = { 'report-ready': 'report-ready', 'needs-trust': 'needs-trust', 'needs-input': 'needs-input', limited: 'limited', dead: 'dead', orphan: 'orphan' };
 
 /** The transition goes to the journal that `events` reads (the notification only reaches the desktop). */
 async function journalTransition(ctx: Context, row: StatusRow, e: WatchEvent): Promise<void> {
@@ -191,6 +192,8 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   await cohortTick(ctx, notifier, allRows, startLog).catch((e: unknown) => startLog(`cohort: ${errorMessage(e)}`));
   await collisionTick(ctx, memory.collisions, notifier, startLog).catch((e: unknown) => startLog(`collisions: ${errorMessage(e)}`));
   await usageTick(ctx, notifier, startLog).catch((e: unknown) => startLog(`usage: ${errorMessage(e)}`));
+  // The phone: requests that failed before are tried again (a network error never stops the watcher).
+  for (const l of await phoneTick(ctx).catch((e: unknown) => [`phone: ${errorMessage(e)}`])) await startLog(l);
   const events = detectTransitions(memory, rows, now, ctx.config.watch.waitingAfter * 1000);
   const alerts = new Alerts(ctx, notifier, { self: options.self });
   for (const e of events) {
