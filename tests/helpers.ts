@@ -12,7 +12,7 @@ import { renderTaskMd, taskDir, taskFile } from '../src/core/taskstore.ts';
 import type { TaskRecord } from '../src/core/taskstore.ts';
 
 export const REPO_ROOT = path.resolve(import.meta.dirname, '..');
-const SCRATCH = process.env.AGENTCTL_TEST_TMP ?? path.join(REPO_ROOT, '.cache');
+const SCRATCH = process.env.AGENTCTL_TEST_TMP ?? process.env.AGENTCTL_TEST_CACHE ?? path.join(REPO_ROOT, '.cache');
 
 /** Per-file scratch directory under the repo's own .cache/ (git-ignored); removed after the file's tests. */
 export function useScratch(): { dir: string; sub: (name: string) => string } {
