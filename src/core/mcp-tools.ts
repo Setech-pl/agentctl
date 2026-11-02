@@ -28,6 +28,7 @@ import { listArchivedRecords, listTaskRecords, readTaskPrompt } from './taskstor
 import type { TaskRecord } from './taskstore.ts';
 import { computeStats, markTask, parseResult, RESULTS, selectHistory } from './history.ts';
 import { collectUsage } from './usage-report.ts';
+import { planGc, renderGc } from './gc.ts';
 import { collectEvents, renderEvents } from './chat-events.ts';
 import { applySetLimits, collectLimits, planSetLimits, readReservations, releasePlaces, reservePlaces } from './limits.ts';
 import type { LimitAssignments } from './limits.ts';
@@ -231,6 +232,12 @@ async function runEventsSince(deps: McpDeps, args: { since?: string | undefined;
   const ctx = deps.context(() => {});
   const report = await collectEvents(ctx, { client: 'mcp', since: args.since, cohort: args.cohort, keep: Boolean(args.peek) });
   return ok(`${renderEvents(report).join('\n')}\n\n${JSON.stringify(report, null, 2)}`);
+}
+
+async function runGcPreview(deps: McpDeps, args: { older_than?: string | undefined; merged?: boolean | undefined; cohort?: string | undefined }): Promise<ToolResult> {
+  const ctx = deps.context(() => {});
+  const plan = await planGc(ctx, { olderThan: args.older_than, branches: args.merged, cohort: args.cohort });
+  return ok(`${renderGc(plan).join('\n')}\n\nThis is a preview only: the chat cannot clean up. The user runs "agentctl gc --apply" (or key G on the board).\n\n${JSON.stringify(plan, null, 2)}`);
 }
 
 async function runLimits(deps: McpDeps): Promise<ToolResult> {
@@ -688,6 +695,17 @@ export const MCP_TOOLS: McpToolDef[] = [
     input: { since: z.string().max(40).optional().describe('last (default), an age like 30m / 2h / 1d, HH:MM today, or an ISO time.'), cohort: cohortArg.optional(), peek: z.boolean().optional().describe('true: do not move the "last" marker.') },
     annotations: readOnly('What changed since the last look'),
     run: (deps, args) => guarded(() => runEventsSince(deps, args as { since?: string; cohort?: string; peek?: boolean })),
+  }),
+  def({
+    name: 'gc_preview',
+    title: 'Preview of the clean-up',
+    kind: 'read',
+    description:
+      'What "agentctl gc" would free now, without doing anything: git worktrees of closed, cancelled and archived tasks without uncommitted changes, old files next to the reports, state folders to archive, merged branches (merged: true), each with its size, and what is skipped and why. ' +
+      'There is no tool that cleans up: tell the user to run "agentctl gc --apply" (or press G on the board for the same preview).',
+    input: { older_than: z.string().max(10).optional().describe('Age of the files next to the reports before they count: 12h, 7d, 2w. Default 7d.'), merged: z.boolean().optional().describe('true: also list merged branches of finished tasks.'), cohort: cohortArg.optional() },
+    annotations: readOnly('Preview of the clean-up'),
+    run: (deps, args) => guarded(() => runGcPreview(deps, args as { older_than?: string; merged?: boolean; cohort?: string })),
   }),
   def({
     name: 'limits',

@@ -25,6 +25,7 @@ export const COMMAND_EXAMPLES: Record<string, string[]> = {
   'queue retry': ['agentctl queue retry NC-42             # after a failed start: back at the end of the line'],
   'queue pause': ['agentctl queue pause                  # nothing new starts; running tasks are not touched'],
   'queue resume': ['agentctl queue resume'],
+  gc: ['agentctl gc                               # dry run: what would go, with sizes', 'agentctl gc --apply                       # the list, y/N, then it does it', 'agentctl gc --branches --older-than 3d --apply -y', 'agentctl gc --cohort sprint-1 --json'],
   events: ['agentctl events                           # since the last call of the cli', 'agentctl events --since 2h --cohort sprint-1', 'agentctl events --clip                    # to paste at the start of a chat (does not move the marker)'],
   limits: ['agentctl limits                           # the same as limits show'],
   'limits show': ['agentctl limits show', 'agentctl limits show --json'],

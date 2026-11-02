@@ -37,6 +37,7 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`mark`](#agentctl-mark) | Say how a task turned out: ok, partial or fail (the result you judge, with an optional note). It goes to the history that "log" and "stats" read; the last mark of a task wins. |
 | [`log`](#agentctl-log) | The history of the tasks: when, agent/model/effort, how long, tokens, progress, the result you marked and the verdict of the report. One line per task, newest first. |
 | [`stats`](#agentctl-stats) | Which model and effort work: the tasks of the history grouped by agent/model/effort - how many, median time and tokens, the share of ok, partial and fail (agentctl mark), cancelled ones and tasks moved to the other provider after a limit. |
+| [`gc`](#agentctl-gc) | Take back disk space from finished tasks: the git worktrees of closed, cancelled and archived tasks without uncommitted changes, the files next to their reports that are older than --older-than (the *.md reports stay), their state folders (moved to the archive), and with --branches their branches merged into the base (git branch -d, never -D, never main/master or the current branch). A dry run with sizes unless --apply. History and reports stay; uncommitted work, foreign worktrees and unmerged branches are only listed as skipped. |
 | [`archive`](#agentctl-archive) | Move the state of closed tasks (agentctl close) to the archive folder next to the state folder. Reports and worktrees are not touched. |
 | [`hide`](#agentctl-hide) | Take tasks off the board and "status" (they stay in "status --all" and on the board under "a"). Does not close the task or touch its worktree. |
 | [`unhide`](#agentctl-unhide) | Show hidden tasks again on the board and in "status". A task shown on purpose is not hidden again by board.auto_hide_pulled_dead. |
@@ -660,6 +661,32 @@ agentctl stats                          # per agent/model/effort
 agentctl stats --since 30d
 agentctl stats --cohort sprint-1 --json
 agentctl stats --clip
+```
+
+## agentctl gc
+
+Take back disk space from finished tasks: the git worktrees of closed, cancelled and archived tasks without uncommitted changes, the files next to their reports that are older than --older-than (the *.md reports stay), their state folders (moved to the archive), and with --branches their branches merged into the base (git branch -d, never -D, never main/master or the current branch). A dry run with sizes unless --apply. History and reports stay; uncommitted work, foreign worktrees and unmerged branches are only listed as skipped.
+
+```
+agentctl gc [options]
+```
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--apply` | do it (after showing the list and asking y/N); without it nothing is changed |  |
+| `--older-than <age>` | age of the files next to the reports before they go: 12h, 7d, 2w (default 7d) |  |
+| `--branches` | also delete the branches of finished tasks that are merged into the base (git branch -d) |  |
+| `--cohort <name>` | only the tasks of this cohort |  |
+| `-y, --yes` | with --apply: do not ask |  |
+| `--json` | machine-readable output (the plan, or the result with --apply) |  |
+
+Examples:
+
+```sh
+agentctl gc                               # dry run: what would go, with sizes
+agentctl gc --apply                       # the list, y/N, then it does it
+agentctl gc --branches --older-than 3d --apply -y
+agentctl gc --cohort sprint-1 --json
 ```
 
 ## agentctl archive

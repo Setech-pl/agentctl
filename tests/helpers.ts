@@ -190,6 +190,11 @@ export class DiskRunner extends RecordingRunner {
     fs.copyFileSync(src, dest);
   }
 
+  override async remove(target: string): Promise<void> {
+    await super.remove(target);
+    fs.rmSync(target, { recursive: true, force: true });
+  }
+
   override async rename(from: string, to: string): Promise<void> {
     await super.rename(from, to);
     fs.mkdirSync(path.dirname(to), { recursive: true });
