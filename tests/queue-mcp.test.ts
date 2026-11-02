@@ -94,7 +94,8 @@ describe('mcp: queue read tools', () => {
     const lines = r.text.split('\n');
     assert.match(lines[0]!, /^2 tasks:/);
     assert.match(lines[1]!, /^Queue \(1\): Q-1 – czeka na miejsce: claude 2\/1\. queue_list has the detail\.$/);
-    assert.match(lines[2]!, /^Collisions: A-1 ⚠ A-2: 1; A-2 ⚠ A-1: 1\. overlap lists the files\.$/);
+    assert.match(lines[2]!, /^Plans: claude n\/d \(.*\) \| codex n\/d \(.*\)\. usage has the tokens\.$/);
+    assert.match(lines[3]!, /^Collisions: A-1 ⚠ A-2: 1; A-2 ⚠ A-1: 1\. overlap lists the files\.$/);
     const rows = JSON.parse(r.text.slice(r.text.indexOf('['))) as { task: string; collidesWith: unknown }[];
     assert.deepEqual(rows.find((x) => x.task === 'A-1')!.collidesWith, [{ task: 'A-2', files: 1 }]);
   });

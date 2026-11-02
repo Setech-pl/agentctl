@@ -26,6 +26,11 @@ import type { StatusRow } from './status.ts';
 import { summarizeSpecs } from './summary.ts';
 import { listArchivedRecords, listTaskRecords, readTaskPrompt } from './taskstore.ts';
 import type { TaskRecord } from './taskstore.ts';
+import { computeStats, markTask, parseResult, RESULTS, selectHistory } from './history.ts';
+import { collectUsage } from './usage-report.ts';
+import { planLine } from './usage-report.ts';
+import { openReader, readPlans } from './usage.ts';
+import { AGENT_NAMES } from './config.ts';
 import { AgentctlError, errorMessage, formatLocalTime } from './util.ts';
 
 /*
@@ -172,9 +177,51 @@ async function runStatus(deps: McpDeps, args: { all?: boolean | undefined; cohor
     extra.push(`Queue (${views.length}): ${views.map((v) => `${v.entry.task} – ${v.condition.text}`).join('; ')}. queue_list has the detail.`);
   }
   extra.push(...serverLines(deps, ctx));
+  extra.push(planSummary(ctx));
   const colliding = shown.filter((r) => r.collide.length > 0);
   if (colliding.length > 0) extra.push(`Collisions: ${colliding.map((r) => `${r.task} ${collideText(r.collide)}`).join('; ')}. overlap lists the files.`);
   return ok(`${[statusLine(shown, rows.length - shown.length), ...extra].join('\n')}\n\n${JSON.stringify(shown.map(statusRowForChat), null, 2)}`);
+}
+
+/** "Plans: claude 5h 62% ↻ 14:30 | codex n/d (…)": the limits of both providers; what is not known says n/d. usage has the detail. */
+function planSummary(ctx: Context): string {
+  const reader = openReader(ctx.config);
+  const now = ctx.runner.now();
+  const plans = readPlans(ctx.config, reader, now);
+  reader.save();
+  return `Plans: ${AGENT_NAMES.map((p) => `${p} ${planLine(plans[p], now)}`).join(' | ')}. usage has the tokens.`;
+}
+
+async function runUsage(deps: McpDeps, args: { cohort?: string | undefined; since?: string | undefined }): Promise<ToolResult> {
+  const ctx = deps.context(() => {});
+  const cohort = args.cohort === undefined ? undefined : findCohort(ctx.config, args.cohort).name;
+  const report = await collectUsage(ctx, { cohort, since: args.since });
+  const limits = AGENT_NAMES.map((p) => `${p}: ${planLine(report.plans[p], report.now)}`).join('; ');
+  return ok(`Plan limits - ${limits}. Tokens = input + output + cache writes of the tasks agentctl started (cache reads are listed apart); period: days since ${report.sinceDay}.\n\n${JSON.stringify(report, null, 2)}`);
+}
+
+async function runLog(deps: McpDeps, args: { cohort?: string | undefined; since?: string | undefined }): Promise<ToolResult> {
+  const ctx = deps.context(() => {});
+  const cohort = args.cohort === undefined ? undefined : findCohort(ctx.config, args.cohort).name;
+  const rows = selectHistory(ctx, { since: args.since, cohort });
+  if (rows.length === 0) return ok('The history is empty for this filter: a record is written when a report is ready and when a task is closed, cancelled, moved or marked.');
+  return ok(`${rows.length} task${rows.length === 1 ? '' : 's'}, newest first. result is what the user marked (null: not marked); tokens null means n/d.\n\n${JSON.stringify(rows, null, 2)}`);
+}
+
+async function runStats(deps: McpDeps, args: { cohort?: string | undefined; since?: string | undefined }): Promise<ToolResult> {
+  const ctx = deps.context(() => {});
+  const cohort = args.cohort === undefined ? undefined : findCohort(ctx.config, args.cohort).name;
+  const groups = computeStats(selectHistory(ctx, { since: args.since, cohort }));
+  if (groups.length === 0) return ok('The history is empty for this filter.');
+  return ok(`Per agent/model/effort. ok, partial and fail count the tasks the user marked; unmarked the rest; moved the tasks handed to the other provider after a limit.\n\n${JSON.stringify(groups, null, 2)}`);
+}
+
+async function runMark(deps: McpDeps, args: { task: string; result: string; note?: string | undefined }): Promise<ToolResult> {
+  return writeTool(deps, 'mark', { task: args.task, detail: `${args.result}${args.note ? ` – ${clipText(args.note, 80)}` : ''}` }, async (ctx) => {
+    const result = parseResult(args.result);
+    const marked = await markTask(ctx, args.task, result, args.note);
+    return { text: `${marked.task}: marked ${marked.result}${marked.previous && marked.previous !== marked.result ? ` (was ${marked.previous})` : ''}. It is in the history (log, stats).`, executed: true, announce: `mark ${marked.task} ${marked.result}` };
+  });
 }
 
 /** The version this server runs and what is wrong with its config: a chat sees both in `status`. */
@@ -676,6 +723,39 @@ export const MCP_TOOLS: McpToolDef[] = [
     run: (deps, args) => guarded(() => runCohortShow(deps, args as { cohort: string })),
   }),
   def({
+    name: 'usage',
+    title: 'Token usage and plan limits',
+    kind: 'read',
+    description:
+      'How many tokens the tasks used and how close the plans are to their limits. Per provider (claude, codex): the 5 hour and the weekly window with the percentage used and when it resets (windows: [] and available: false means n/d - the provider did not say; never guess a number), the tokens today and in the period; ' +
+      'per task (the active ones first) and per cohort the tokens; per model and per day. Use it BEFORE the user orders more tasks ("do we have room?"), when they ask what a task cost, or which provider has room. since: how far back the token columns go (12h, 7d, 2w; default 7d); cohort limits it to one cohort.',
+    input: { cohort: cohortArg.optional(), since: z.string().min(2).max(10).optional().describe('Age such as 12h, 7d, 2w. Default 7d.') },
+    annotations: readOnly('Token usage and plan limits'),
+    run: (deps, args) => guarded(() => runUsage(deps, args as { cohort?: string; since?: string })),
+  }),
+  def({
+    name: 'log',
+    title: 'History of the tasks',
+    kind: 'read',
+    description:
+      'The history of the tasks, newest first: agent/model/effort as ordered and as run, start and report time, duration, tokens (null: n/d), commits and files, the verdict line of the report, whether it was cancelled (with the reason) or moved to the other provider, and the result the user marked (ok, partial, fail). ' +
+      'Use it to choose a model and effort for a new task from what worked before. since (12h, 7d, 2w) and cohort filter it.',
+    input: { cohort: cohortArg.optional(), since: z.string().min(2).max(10).optional().describe('Age such as 12h, 7d, 2w. Default: all.') },
+    annotations: readOnly('History of the tasks'),
+    run: (deps, args) => guarded(() => runLog(deps, args as { cohort?: string; since?: string })),
+  }),
+  def({
+    name: 'stats',
+    title: 'Statistics per model and effort',
+    kind: 'read',
+    description:
+      'The history grouped by agent/model/effort: number of tasks, median time and tokens, how many were marked ok, partial or fail (and how many were not marked), cancelled tasks and tasks that had to be moved to the other provider after a usage limit. ' +
+      'Use it when the user asks which model or effort pays off. since (30d, 2w) and cohort filter it.',
+    input: { cohort: cohortArg.optional(), since: z.string().min(2).max(10).optional().describe('Age such as 30d, 2w. Default: all.') },
+    annotations: readOnly('Statistics per model and effort'),
+    run: (deps, args) => guarded(() => runStats(deps, args as { cohort?: string; since?: string })),
+  }),
+  def({
     name: 'overlap',
     title: 'Tasks that change the same files',
     kind: 'read',
@@ -751,6 +831,17 @@ export const MCP_TOOLS: McpToolDef[] = [
     },
     annotations: { title: 'Cancel tasks', readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
     run: (deps, args) => guarded(() => runCancel(deps, args as { task?: string; cohort?: string; reason?: string; remove_worktree?: boolean; confirm?: boolean })),
+  }),
+  def({
+    name: 'mark',
+    title: 'Mark how a task turned out',
+    kind: 'write',
+    description:
+      'WRITE, off unless the user put "mark" in mcp.allow. Records the result of a task the USER judged: ok, partial or fail, with an optional note; it goes to the history that log and stats read (the last mark of a task wins). ' +
+      'It changes nothing else and needs no confirmation, but record only what the user said about the result - do not judge a task yourself.',
+    input: { task: taskArg, result: z.enum(RESULTS).describe('ok, partial or fail.'), note: z.string().max(500).optional().describe('Why (optional).') },
+    annotations: { title: 'Mark how a task turned out', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    run: (deps, args) => guarded(() => runMark(deps, args as { task: string; result: string; note?: string })),
   }),
   def({
     name: 'interrupt',
