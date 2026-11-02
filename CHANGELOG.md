@@ -15,6 +15,18 @@ Versions 0.1.0 to 0.7.0 correspond to pull requests #1 to #7; their dates are th
 
 Nothing yet.
 
+## [0.16.0] - 2026-11-02
+
+### Added
+- Public npm packaging as `@setech-pl/agentctl`, with compiled JavaScript in `dist/`, a clean prepack build and test/typecheck gates before publishing.
+- GitHub CI on Node 22.14 and latest Node; release publishing through npm OIDC with provenance and no token secret.
+- npm installation and first-publication instructions; doctor reports npm global, linked clone or repository development and warns about command conflicts with `@orgloop/agentctl`.
+
+### Changed
+- `agentctl-update` supports npm global installs as well as clone installs; the clone path builds before linking.
+- MCP registration and process version detection support the compiled npm executable. Minimum Node is 22.14 (dependencies need 22.12; OIDC needs 22.14).
+- Live suites and unit scratch directories accept isolated task cache locations.
+
 ## [0.14.0] - 2026-11-02
 
 Pull request: remote control from your phone (`agentctl manager`). The date is the day it was prepared; set it to the merge date.

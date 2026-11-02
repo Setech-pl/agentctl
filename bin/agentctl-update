@@ -7,6 +7,9 @@ usage() {
   cat <<'EOF'
 Usage: agentctl-update [--ref <ref>] [--dry-run] [--no-watch] [--no-link] [--help]
 
+For an npm installation: npm install -g @setech-pl/agentctl@latest (no tmux restart).
+Clone-only options --ref, --no-watch and --no-link are rejected in npm mode.
+
 Updates the stable copy of agentctl (a detached git worktree of the repo) and makes the global
 `agentctl` and `agentctl-update` commands run from it:
 
@@ -67,14 +70,14 @@ script_dir() {
 commit_of() { git -C "$1" log -1 --format='%h %s' "${2:-HEAD}" 2>/dev/null || echo '(none)'; }
 
 main() {
-  local ref='origin/main' watch=1 link=1
+  local ref='origin/main' watch=1 link=1 clone_options=0
   while [ $# -gt 0 ]; do
     case "$1" in
-      --ref) [ $# -ge 2 ] || { echo "agentctl-update: --ref needs a value" >&2; return 2; }; ref="$2"; shift 2 ;;
-      --ref=*) ref="${1#--ref=}"; shift ;;
+      --ref) [ $# -ge 2 ] || { echo "agentctl-update: --ref needs a value" >&2; return 2; }; clone_options=1; ref="$2"; shift 2 ;;
+      --ref=*) clone_options=1; ref="${1#--ref=}"; shift ;;
       --dry-run) DRY_RUN=1; shift ;;
-      --no-watch) watch=0; shift ;;
-      --no-link) link=0; shift ;;
+      --no-watch) clone_options=1; watch=0; shift ;;
+      --no-link) clone_options=1; link=0; shift ;;
       -h|--help) usage; return 0 ;;
       *) echo "agentctl-update: unknown argument: $1 (see --help)" >&2; return 2 ;;
     esac
@@ -82,6 +85,13 @@ main() {
 
   local repo stable session
   repo="${AGENTCTL_REPO:-$(cd "$(script_dir)/.." && pwd)}"
+  if [ -z "${AGENTCTL_REPO:-}" ] && [ ! -e "$repo/.git" ]; then
+    [ "$clone_options" -eq 0 ] || { echo 'agentctl-update: --ref, --no-watch and --no-link require a clone' >&2; return 2; }
+    local package_name
+    package_name="$(node -p 'require(process.argv[1]).name' "$repo/package.json")"
+    run npm install -g "$package_name@latest"
+    return 0
+  fi
   stable="${AGENTCTL_STABLE_DIR:-$HOME/Projects/agentctl-stable}"
   session="${AGENTCTL_SESSION:-agentctl}"
   [ "$DRY_RUN" -eq 1 ] && echo "agentctl-update --dry-run: nothing below is executed"
@@ -119,7 +129,7 @@ main() {
   local watch_result='no (--no-watch)'
   if [ "$watch" -eq 1 ]; then
     watch_result='no (no window "watch" in session "'"$session"'")'
-    if tmux has-session -t "=$session" 2>/dev/null && tmux list-windows -t "=$session" -F '#{window_name}' 2>/dev/null | grep -qx 'watch'; then
+    if tmux has-session -t "=$session" 2>/dev/null && tmux list-windows -t "=$session" -F '#{window_name}' 2>/dev/null | grep -x 'watch' >/dev/null; then
       if [ "$doctor_rc" -ne 0 ]; then
         watch_result='no (doctor failed, the old watcher keeps running)'
       else

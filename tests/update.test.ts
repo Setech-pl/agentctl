@@ -25,6 +25,7 @@ function runUpdate(name: string, args: string[], env: Record<string, string> = {
   const bin = path.join(dir, 'fakebin');
   const log = path.join(dir, 'calls.log');
   fs.mkdirSync(bin, { recursive: true });
+  fs.symlinkSync(process.execPath, path.join(bin, 'node'));
   const stable = path.join(dir, 'stable');
   const fakeAgentctl = (_target: string): string => `#!/bin/sh\necho "agentctl $*" >> ${log}\nexit ${opts.doctorRc ?? 0}\n`;
   const write = (file: string, text: string): void => {
@@ -88,6 +89,7 @@ describe('agentctl-update: paths', () => {
     const dir = scratch.sub('up3');
     const real = path.join(dir, 'checkout', 'bin');
     fs.mkdirSync(real, { recursive: true });
+    fs.mkdirSync(path.join(real, '..', '.git'));
     fs.copyFileSync(SCRIPT, path.join(real, 'agentctl-update'));
     fs.mkdirSync(path.join(dir, 'global'), { recursive: true });
     fs.symlinkSync(path.join(real, 'agentctl-update'), path.join(dir, 'global', 'agentctl-update'));
@@ -204,5 +206,33 @@ describe('agentctl-update: packaging', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8')) as { bin: Record<string, string> };
     assert.equal(pkg.bin['agentctl-update'], 'bin/agentctl-update');
     assert.equal(pkg.bin['agentctl'], 'dist/bin/agentctl.js');
+  });
+});
+
+
+describe('agentctl-update: npm installation', () => {
+  function packaged(name: string): string {
+    const root = scratch.sub(name);
+    fs.mkdirSync(path.join(root, 'bin'));
+    const script = path.join(root, 'bin/agentctl-update');
+    fs.copyFileSync(SCRIPT, script);
+    fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: '@setech-pl/agentctl' }));
+    return script;
+  }
+  it('uses npm metadata and never invokes git or tmux in npm mode', () => {
+    const r = runUpdate('npm-run', [], { AGENTCTL_REPO: '' }, { script: packaged('npm-package') });
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(r.calls.length, 1);
+    assert.match(r.calls[0]!, /^npm install -g @setech-pl\/agentctl@latest /);
+  });
+  it('npm dry run prints the update but invokes no npm; clone flags are rejected', () => {
+    const script = packaged('npm-dry-package');
+    const r = runUpdate('npm-dry', ['--dry-run'], { AGENTCTL_REPO: '' }, { script });
+    assert.equal(r.code, 0, r.stderr);
+    assert.deepEqual(r.calls, []);
+    assert.match(r.stdout, /npm install -g @setech-pl\/agentctl@latest/);
+    const bad = runUpdate('npm-bad', ['--ref', 'main'], { AGENTCTL_REPO: '' }, { script });
+    assert.equal(bad.code, 2);
+    assert.deepEqual(bad.calls, []);
   });
 });
