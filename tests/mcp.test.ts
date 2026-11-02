@@ -220,6 +220,30 @@ describe('mcp: reading', () => {
   });
 });
 
+describe('mcp: times come in UTC and in local time', () => {
+  it('status, list_reports and task_spec carry startedLocal / modifiedLocal / pulledLocal next to the UTC values', async () => {
+    const before = process.env.TZ;
+    try {
+      process.env.TZ = 'Pacific/Auckland'; // UTC+13 in November: 2026-11-01 19:30 UTC is 2026-11-02 08:30 there
+      const t = setup('local-times');
+      withReport(t.config, 'NC-1', 'abc', { started: '2026-11-01T19:30:00.000Z', pulled: '2026-11-01T20:00:00.000Z' });
+      const status = await t.call('status');
+      const row = (JSON.parse(status.text.slice(status.text.indexOf('['))) as { started: string; startedLocal: string }[])[0]!;
+      assert.deepEqual([row.started, row.startedLocal], ['2026-11-01 19:30', '2026-11-02 08:30']);
+      const spec = await t.call('task_spec', { task: 'NC-1' });
+      assert.match(spec.text, /"started": "2026-11-01T19:30:00\.000Z"/);
+      assert.match(spec.text, /"startedLocal": "2026-11-02 08:30"/);
+      assert.match(spec.text, /"pulledLocal": "2026-11-02 09:00"/);
+      const reports = await t.call('list_reports');
+      const entry = (JSON.parse(reports.text.slice(reports.text.indexOf('['))) as { modified: string; modifiedLocal: string }[])[0]!;
+      assert.equal(entry.modifiedLocal, entry.modified === '' ? '-' : new Date(entry.modified).toLocaleString('sv-SE', { timeZone: 'Pacific/Auckland' }).slice(0, 16));
+    } finally {
+      if (before === undefined) delete process.env.TZ;
+      else process.env.TZ = before;
+    }
+  });
+});
+
 describe('mcp: writing is off by default', () => {
   const calls: [string, Record<string, unknown>][] = [
     ['send', { task: 'NC-1', text: 'hello' }],
