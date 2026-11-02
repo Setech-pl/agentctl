@@ -256,7 +256,7 @@ describe('mcp: doctor', () => {
     assert.equal(code?.status, 'warn');
     assert.match(code?.detail ?? '', /\/nowhere\/agentctl\.ts does not exist/);
     assert.equal(checks.find((c) => c.name === 'mcp access')?.detail, 'the chat may write: send, close; close may also remove worktrees (mcp.allow_rm_worktree)');
-    assert.equal(describeAllow({ allow: [], allowRmWorktree: false }), 'writing is off (mcp.allow is empty): the chat can only read');
+    assert.equal(describeAllow({ allow: [], allowRmWorktree: false, warnings: [] }), 'writing is off (mcp.allow is empty): the chat can only read');
   });
 
   it('readers: a broken file is a warning text, not an exception; no claude means no line', async () => {

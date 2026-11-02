@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import { cancelTasks, planCancel } from './cancel.ts';
+import { staleWarning, versionOf } from './mcp-processes.ts';
+import { stableScript } from './mcp-install.ts';
 import { closeTask } from './close.ts';
 import { cohortEntries, cohortRows, findCohort, openCohortTasks, summarizeCohorts } from './cohort.ts';
 import { collectOverlaps, collideText } from './collisions.ts';
@@ -53,6 +55,16 @@ export interface McpDeps {
   notify(message: string): Promise<void>;
   /** This very agentctl as a command line, for the hooks of a task started through `new`. */
   self?: SelfArgv | undefined;
+  /** What this server process is: the version it loaded, its script, its pid and when it started. Shown by `version` and `status`. */
+  server?: ServerInfo | undefined;
+}
+
+export interface ServerInfo {
+  version: string;
+  script: string;
+  pid: number;
+  /** ISO time the process started. */
+  started: string;
 }
 
 export interface ToolAnnotations {
@@ -159,9 +171,40 @@ async function runStatus(deps: McpDeps, args: { all?: boolean | undefined; cohor
   if (views.length > 0) {
     extra.push(`Queue (${views.length}): ${views.map((v) => `${v.entry.task} – ${v.condition.text}`).join('; ')}. queue_list has the detail.`);
   }
+  extra.push(...serverLines(deps, ctx));
   const colliding = shown.filter((r) => r.collide.length > 0);
   if (colliding.length > 0) extra.push(`Collisions: ${colliding.map((r) => `${r.task} ${collideText(r.collide)}`).join('; ')}. overlap lists the files.`);
   return ok(`${[statusLine(shown, rows.length - shown.length), ...extra].join('\n')}\n\n${JSON.stringify(shown.map(statusRowForChat), null, 2)}`);
+}
+
+/** The version this server runs and what is wrong with its config: a chat sees both in `status`. */
+function serverLines(deps: McpDeps, ctx: Context): string[] {
+  const lines: string[] = [];
+  if (deps.server) {
+    const stable = versionOf(stableScript());
+    lines.push(`MCP server: agentctl ${deps.server.version} (${deps.server.script}, pid ${deps.server.pid}, started ${deps.server.started})${stable && stable !== deps.server.version ? ` – the stable copy on disk is ${stable}: ${staleNote}` : ''}`);
+  }
+  for (const w of ctx.config.mcp.warnings) lines.push(`Config warning: ${w}`);
+  return lines;
+}
+
+const staleNote = 'the user should quit the Claude app (⌘Q) and open it again to load it';
+
+async function runVersion(deps: McpDeps): Promise<ToolResult> {
+  const ctx = deps.context(() => {});
+  const stableVersion = versionOf(stableScript());
+  const info = {
+    version: deps.server?.version ?? null,
+    script: deps.server?.script ?? null,
+    pid: deps.server?.pid ?? null,
+    started: deps.server?.started ?? null,
+    stableCopyVersion: stableVersion ?? null,
+    older: deps.server !== undefined && stableVersion !== undefined && stableVersion !== deps.server.version,
+    writeToolsAllowed: ctx.config.mcp.allow,
+    configWarnings: ctx.config.mcp.warnings,
+  };
+  const note = info.older ? `\n\nThis server runs ${info.version}, the stable copy on disk is ${stableVersion}: ${staleNote}.` : '';
+  return ok(`${JSON.stringify(info, null, 2)}${note}`);
 }
 
 async function queueViews(ctx: Context): Promise<ReturnType<typeof describeQueue>> {
@@ -538,6 +581,17 @@ export const MCP_TOOLS: McpToolDef[] = [
     input: { all: allArg, cohort: cohortArg.optional() },
     annotations: readOnly('Status of all agent tasks'),
     run: (deps, args) => guarded(() => runStatus(deps, args as { all?: boolean; cohort?: string })),
+  }),
+  def({
+    name: 'version',
+    title: 'Version of this server',
+    kind: 'read',
+    description:
+      'The version of agentctl this MCP server process runs, its script and pid, when it started, the version of the stable copy on disk, which write tools the user allowed and any warning about the MCP part of the config. ' +
+      'Use it when a tool seems to be missing or behaves differently than described: after an update the app may still run the old server until the user quits it (⌘Q) and opens it again.',
+    input: {},
+    annotations: readOnly('Version of this server'),
+    run: (deps) => guarded(() => runVersion(deps)),
   }),
   def({
     name: 'peek',

@@ -130,6 +130,10 @@ main() {
     fi
   fi
 
+  # The Claude app keeps its MCP server process through an update; say so (it is never stopped from here).
+  show "$stable/bin/agentctl.ts" mcp check
+  if [ "$DRY_RUN" -eq 0 ]; then "$stable/bin/agentctl.ts" mcp check || true; fi
+
   echo
   echo "previous: $before"
   if [ "$DRY_RUN" -eq 1 ]; then echo "new:      (dry run) $ref"; else echo "new:      $(commit_of "$stable")"; fi

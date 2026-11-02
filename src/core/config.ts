@@ -144,8 +144,13 @@ export interface CollisionSettings {
 export interface McpSettings {
   /** Write tools the chat may call; empty (the default): the server only reads. */
   allow: McpWriteTool[];
-  /** `close` may also remove the git worktree (never with --force, never the main checkout). */
+  /** `close` and `cancel` may also remove the git worktree (never with --force, never the main checkout). */
   allowRmWorktree: boolean;
+  /**
+   * What is wrong with the `mcp` section and was ignored (an unknown tool name in `allow` from a newer or older version, an unknown key, a
+   * wrong type). The server still runs; `status` and `doctor` show these. Only a config that cannot be read at all stops it.
+   */
+  warnings: string[];
 }
 
 export interface NotifySettings {
@@ -521,23 +526,29 @@ function parseBoard(v: unknown, p: Problems): BoardSettings {
   return board;
 }
 
-function parseMcp(v: unknown, p: Problems): McpSettings {
-  const mcp: McpSettings = { allow: [], allowRmWorktree: false };
+/**
+ * The `mcp` section is read leniently: a problem in it must not take the whole server down (a config written for another version
+ * of agentctl names tools this one does not know). The offending entry is ignored and said so in `warnings`.
+ */
+function parseMcp(v: unknown): McpSettings {
+  const mcp: McpSettings = { allow: [], allowRmWorktree: false, warnings: [] };
   if (v === undefined || v === null) return mcp;
   if (!isObject(v)) {
-    p.add(`config.mcp must be a mapping like {allow: [${MCP_WRITE_TOOLS.join(', ')}]}`);
+    mcp.warnings.push(`config.mcp must be a mapping like {allow: [${MCP_WRITE_TOOLS.join(', ')}]}: ignored, writing is off`);
     return mcp;
   }
-  checkKeys(v, MCP_KEYS, 'config.mcp', p);
-  const allow = parseStringList(v.allow, 'config.mcp.allow', p);
+  const q = new Problems();
+  checkKeys(v, MCP_KEYS, 'config.mcp', q);
+  const allow = parseStringList(v.allow, 'config.mcp.allow', q);
   for (const name of allow) {
-    if (!(MCP_WRITE_TOOLS as readonly string[]).includes(name)) p.add(`config.mcp.allow: "${name}" is not a write tool (allowed: ${MCP_WRITE_TOOLS.join(', ')})`);
+    if (!(MCP_WRITE_TOOLS as readonly string[]).includes(name)) mcp.warnings.push(`config.mcp.allow: "${name}" is not a write tool of this version, ignored (allowed: ${MCP_WRITE_TOOLS.join(', ')})`);
     else if (!mcp.allow.includes(name as McpWriteTool)) mcp.allow.push(name as McpWriteTool);
   }
   if (v.allow_rm_worktree !== undefined) {
     if (typeof v.allow_rm_worktree === 'boolean') mcp.allowRmWorktree = v.allow_rm_worktree;
-    else p.add('config.mcp.allow_rm_worktree must be true or false');
+    else q.add('config.mcp.allow_rm_worktree must be true or false');
   }
+  mcp.warnings.push(...q.items.map((item) => `${item}: ignored`));
   return mcp;
 }
 
@@ -655,7 +666,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   const watch = parseWatch(raw.watch, p);
   const notify = parseNotify(raw.notify, p);
   const board = parseBoard(raw.board, p);
-  const mcp = parseMcp(raw.mcp, p);
+  const mcp = parseMcp(raw.mcp);
   const queue = parseQueue(raw.queue, p);
   const collisions = parseCollisions(raw.collisions, p);
   const cancel = parseCancel(raw.cancel, p);

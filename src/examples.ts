@@ -63,6 +63,7 @@ export const COMMAND_EXAMPLES: Record<string, string[]> = {
   attach: ['agentctl attach NC-42', 'agentctl attach nc-4                    # a unique prefix is enough'],
   move: ['agentctl move NC-42                    # to the other provider, asks y/N', 'agentctl move NC-42 --agent codex -y'],
   peek: ['agentctl peek NC-42', 'agentctl peek NC-42 -n 80'],
+  'mcp check': ['agentctl mcp check                      # after agentctl-update: does the Claude app still run the old server?'],
   'mcp install': ['agentctl mcp install --desktop --dry-run', 'agentctl mcp install --desktop', 'agentctl mcp install --claude-code', 'agentctl mcp install --desktop --config ./copy.json --dry-run'],
   'mcp uninstall': ['agentctl mcp uninstall                 # both', 'agentctl mcp uninstall --desktop'],
   doctor: ['agentctl doctor'],
