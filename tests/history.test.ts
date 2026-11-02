@@ -309,7 +309,7 @@ describe('board: log and result keys', () => {
     assert.deepEqual(handleKey(finished, 'f', {}).effects, [{ type: 'mark', task: 'A-1', result: 'fail' }]);
     const ready = boardOf([row('A-2', { state: 'report-ready', report: 'yes' })]);
     assert.equal(handleKey(ready, 'o', {}).effects.length, 1);
-    const closed = boardOf([row('A-3', { closed: true, window: 'gone', state: 'closed' })]);
+    const closed: BoardState = { ...boardOf([row('A-3', { closed: true, hidden: true, hiddenBy: 'closed', window: 'gone', state: 'closed' })]), showHidden: true };
     assert.equal(handleKey(closed, 'f', {}).effects.length, 1);
     const working = boardOf([row('A-4')]);
     const o = handleKey(working, 'o', {});
