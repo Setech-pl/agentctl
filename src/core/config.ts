@@ -88,6 +88,8 @@ export interface GlobalConfig extends Layer {
   watch: { interval: number; waitingAfter: number; windowIcons: Record<TaskState, string> | null; statusLine: boolean };
   /** Notifications: events from the agents themselves, what a click on a notification does, the verdict line of a report. */
   notify: NotifySettings;
+  /** Away mode: when the phone gets notifications. */
+  away: AwaySettings;
   /** The board: what finishes up in the "Finished" section and what hides by itself. */
   board: BoardSettings;
   /** The local MCP server (`agentctl mcp`): which write tools the chat may call. Read tools are always there. */
@@ -187,6 +189,55 @@ export interface NotifySettings {
   terminalApp?: string;
   /** Regex for the report line that goes into the "report ready" notification; unset: a "Werdykt/Verdict/Status" line, else the first line of the text. */
   verdictPattern?: string;
+  /** Notifications to a phone through ntfy; unset: none. */
+  ntfy?: NtfySettings;
+}
+
+/** Events that can go to the phone (`notify.ntfy.events`). */
+export const PHONE_EVENTS = ['needs-input', 'needs-trust', 'limited', 'blocked', 'report-ready', 'cohort-done', 'queue-failed', 'orphan', 'dead', 'usage-critical'] as const;
+export type PhoneEvent = (typeof PHONE_EVENTS)[number];
+
+/** ntfy priorities by name (1..5). */
+export const NTFY_PRIORITIES = ['min', 'low', 'default', 'high', 'urgent'] as const;
+export type NtfyPriority = (typeof NTFY_PRIORITIES)[number];
+
+export const DEFAULT_NTFY_SERVER = 'https://ntfy.sh';
+
+export const DEFAULT_NTFY_PRIORITY: Record<PhoneEvent, NtfyPriority> = {
+  'needs-input': 'high',
+  'needs-trust': 'default',
+  limited: 'high',
+  blocked: 'default',
+  'report-ready': 'default',
+  'cohort-done': 'default',
+  'queue-failed': 'default',
+  orphan: 'default',
+  dead: 'default',
+  'usage-critical': 'high',
+};
+
+export interface NtfySettings {
+  /** Base URL of the ntfy server. */
+  server: string;
+  /** The topic; the phone subscribes to it. Unset: nothing is sent (`agentctl ntfy-setup` makes one). */
+  topic?: string;
+  /** Bearer token for a private server or an account. */
+  token?: string;
+  /** Which events are sent. */
+  events: PhoneEvent[];
+  priority: Record<PhoneEvent, NtfyPriority>;
+  /** The first line of the verdict goes into "report ready" (never more of the report). */
+  includeVerdict: boolean;
+  /** Link opened by a tap on the notification. */
+  clickUrl?: string;
+  /** Send always, not only while `agentctl away` is on. */
+  always: boolean;
+}
+
+/** `away`: the phone gets the notifications only while away. */
+export interface AwaySettings {
+  /** Minutes without keyboard or mouse after which the Mac counts as away (macOS, HIDIdleTime); null: only `agentctl away on|off`. */
+  autoIdle: number | null;
 }
 
 /** The mark that opens the line an agent prints for an error: bullets, tree corners, warning signs. */
@@ -264,13 +315,15 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
 
 /** The keys accepted in every layer: the global config, `.agentctl.yaml` and (with a few of its own) a spec. docs/configuration.md describes each one. */
 export const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'setup', 'defaults'];
-export const GLOBAL_KEYS = [...LAYER_KEYS, 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage'];
+export const GLOBAL_KEYS = [...LAYER_KEYS, 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away'];
 export const LIMITS_KEYS = [...AGENT_NAMES, 'count_external'];
 export const DEFAULTS_KEYS = ['agent', 'model', 'effort'];
 export const LINK_KEYS = ['from', 'to'];
 export const AGENT_KEYS = ['flags', 'effort_args', 'ready_pattern', 'ready_timeout', 'trust_timeout', 'trust_pattern', 'working_pattern', 'interrupt_key', 'footer_patterns', 'question_pattern', 'limit_patterns', 'background_patterns'];
 export const WATCH_KEYS = ['interval', 'waiting_after', 'window_icons', 'status_line'];
-export const NOTIFY_KEYS = ['backend', 'events', 'turn_end', 'terminal_app', 'verdict_pattern'];
+export const NOTIFY_KEYS = ['backend', 'events', 'turn_end', 'terminal_app', 'verdict_pattern', 'ntfy'];
+export const NTFY_KEYS = ['server', 'topic', 'token', 'events', 'priority', 'include_verdict', 'click_url', 'always'];
+export const AWAY_KEYS = ['auto_idle'];
 export const BOARD_KEYS = ['auto_hide_pulled_dead', 'mouse', 'return_key'];
 export const MCP_KEYS = ['allow', 'allow_rm_worktree'];
 export const QUEUE_KEYS = ['enabled', 'parallel_starts'];
@@ -524,7 +577,79 @@ function parseNotify(v: unknown, p: Problems): NotifySettings {
       p.add(`config.notify.verdict_pattern is not a valid regular expression: ${errorMessage(e)}`);
     }
   }
+  if (v.ntfy !== undefined && v.ntfy !== null) notify.ntfy = parseNtfy(v.ntfy, p);
   return notify;
+}
+
+function parseHttpUrl(v: unknown, where: string, p: Problems): string | undefined {
+  const s = parseString(v, where, p);
+  if (s === undefined) return undefined;
+  try {
+    const u = new URL(s);
+    if (u.protocol === 'http:' || u.protocol === 'https:') return s;
+  } catch {
+    // reported below
+  }
+  p.add(`${where} must be an http:// or https:// URL`);
+  return undefined;
+}
+
+function parseNtfy(v: unknown, p: Problems): NtfySettings {
+  const where = 'config.notify.ntfy';
+  const ntfy: NtfySettings = { server: DEFAULT_NTFY_SERVER, events: [...PHONE_EVENTS], priority: { ...DEFAULT_NTFY_PRIORITY }, includeVerdict: true, always: false };
+  if (!isObject(v)) {
+    p.add(`${where} must be a mapping like {topic: agentctl-3f9c…, server: https://ntfy.sh}`);
+    return ntfy;
+  }
+  checkKeys(v, NTFY_KEYS, where, p);
+  const server = parseHttpUrl(v.server, `${where}.server`, p);
+  if (server) ntfy.server = server.replace(/\/+$/, '');
+  const topic = parseString(v.topic, `${where}.topic`, p);
+  if (topic) {
+    if (/^[A-Za-z0-9_-]{1,64}$/.test(topic)) ntfy.topic = topic;
+    else p.add(`${where}.topic may have letters, digits, "_" and "-" only (at most 64)`);
+  }
+  const token = parseString(v.token, `${where}.token`, p);
+  if (token) ntfy.token = token;
+  if (v.events !== undefined && v.events !== null) {
+    const list = parseStringList(v.events, `${where}.events`, p);
+    const bad = list.filter((e) => !(PHONE_EVENTS as readonly string[]).includes(e));
+    if (bad.length > 0) p.add(`${where}.events: unknown ${bad.join(', ')} (allowed: ${PHONE_EVENTS.join(', ')})`);
+    else ntfy.events = list as PhoneEvent[];
+  }
+  if (v.priority !== undefined && v.priority !== null) {
+    if (!isObject(v.priority)) p.add(`${where}.priority must be a mapping like {report-ready: low}`);
+    else {
+      checkKeys(v.priority, [...PHONE_EVENTS], `${where}.priority`, p);
+      for (const event of PHONE_EVENTS) {
+        const level = parseEnumValue(v.priority[event], NTFY_PRIORITIES, `${where}.priority.${event}`, p);
+        if (level) ntfy.priority[event] = level;
+      }
+    }
+  }
+  for (const [key, field] of [['include_verdict', 'includeVerdict'], ['always', 'always']] as const) {
+    if (v[key] === undefined) continue;
+    if (typeof v[key] === 'boolean') ntfy[field] = v[key];
+    else p.add(`${where}.${key} must be true or false`);
+  }
+  const click = parseHttpUrl(v.click_url, `${where}.click_url`, p);
+  if (click) ntfy.clickUrl = click;
+  return ntfy;
+}
+
+function parseAway(v: unknown, p: Problems): AwaySettings {
+  const away: AwaySettings = { autoIdle: null };
+  if (v === undefined || v === null) return away;
+  if (!isObject(v)) {
+    p.add('config.away must be a mapping like {auto_idle: 15}');
+    return away;
+  }
+  checkKeys(v, AWAY_KEYS, 'config.away', p);
+  if (v.auto_idle !== undefined && v.auto_idle !== null) {
+    if (typeof v.auto_idle === 'number' && v.auto_idle > 0) away.autoIdle = v.auto_idle;
+    else p.add('config.away.auto_idle must be a positive number of minutes');
+  }
+  return away;
 }
 
 function parseBoard(v: unknown, p: Problems): BoardSettings {
@@ -737,6 +862,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   const mirror = parseString(raw.mirror_dir, 'config.mirror_dir', p);
   const watch = parseWatch(raw.watch, p);
   const notify = parseNotify(raw.notify, p);
+  const away = parseAway(raw.away, p);
   const board = parseBoard(raw.board, p);
   const mcp = parseMcp(raw.mcp);
   const queue = parseQueue(raw.queue, p);
@@ -745,7 +871,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   const usage = parseUsage(raw.usage, p);
 
   p.throwIfAny(`Invalid config ${file}:`, 'Fix the listed keys; see the README section "Configuration".');
-  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, limits, countExternal, agents, equivalents, watch, notify, board, mcp, queue, collisions, cancel, usage, path: file, loaded: exists };
+  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, limits, countExternal, agents, equivalents, watch, notify, away, board, mcp, queue, collisions, cancel, usage, path: file, loaded: exists };
   if (mirror) config.mirrorDir = resolvePath(mirror);
   return config;
 }
