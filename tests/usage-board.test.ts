@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { describe, it } from 'node:test';
-import { applySnapshot, boardColumns, handleKey, headerCells, initialBoardState, loadBoard, loadLogLines, ProgressCache, rowCells, runBoardEffect, usageBar, usagePanel } from '../src/core/board.ts';
+import { applySnapshot, boardColumns, handleKey, headerCells, initialBoardState, loadBoard, loadLogLines, ProgressCache, promptText, rowCells, runBoardEffect, usageBar, usagePanel } from '../src/core/board.ts';
 import type { BoardRow } from '../src/core/board.ts';
 import { Context } from '../src/core/context.ts';
 import { statusTmuxLine, tmuxLine } from '../src/core/statusline.ts';
@@ -167,6 +167,14 @@ describe('board: log view and result keys', () => {
     assert.deepEqual(handleKey(dead, 'f', {}).effects, [{ type: 'mark', task: 'A-1', result: 'fail' }]);
     const closed = { ...board([row('A-1', { closed: true, window: 'gone' })], 'A-1'), mode: { kind: 'finished' as const, task: 'A-1' } };
     assert.deepEqual(handleKey(closed, 'p', {}).effects, [{ type: 'mark', task: 'A-1', result: 'partial' }], 'a closed task can be marked, too');
+  });
+
+  it('the Enter menu of a finished task names the marks; o opens the window of a task that was moved', () => {
+    const menu = handleKey(board([row('A-1', { finished: true, window: 'gone', state: 'dead' })], 'A-1'), '', { return: true }).state;
+    assert.equal(menu.mode.kind, 'finished');
+    assert.match(promptText(menu) ?? '', /o ok · p partial · f fail/);
+    const moved = handleKey(board([row('A-2', { finished: true, state: 'superseded' })], 'A-2'), '', { return: true }).state;
+    assert.deepEqual(handleKey(moved, 'o', {}).effects.map((e) => e.type), ['switch']);
   });
 
   it('the effect writes the mark to the history and the footer says what was marked; the log lists it', async () => {
