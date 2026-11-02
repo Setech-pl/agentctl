@@ -1,0 +1,134 @@
+# Changelog
+
+All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/) while it is below 1.0 (minor versions may change behaviour).
+
+Versions 0.1.0 to 0.7.0 correspond to pull requests #1 to #7; their dates are the merge dates. The version numbers were assigned afterwards, when this changelog was written.
+
+## [Unreleased]
+
+Nothing yet.
+
+## [0.8.0] - 2026-11-02
+
+Documentation and help. The date is the day it was prepared; set it to the merge date.
+
+### Added
+- `README.md` rewritten as a project home page, with a Polish counterpart `README.pl.md`: problem, key features, quick start, daily loop, spec format, configuration, board, notifications, model equivalents, MCP, comparison with other tools, safety model, limitations and roadmap.
+- Mermaid diagrams (end-to-end sequence, architecture, task states) in both READMEs and in `docs/diagrams.md`.
+- `docs/commands.md`: every command, subcommand and option, generated from the command definitions by `npm run docs` (`scripts/gen-docs.ts`). A test fails when the file is out of date.
+- `docs/configuration.md`: every key of the global config, the project config and the spec, with type, default and meaning. A test fails when a key in the code is not described, and when a built-in screen pattern differs from the one shown.
+- `docs/mcp.md`: the MCP tools, the allow-list, `confirm`, the audit log, install, what has been checked and the limits.
+- `docs/details.md`: the long-form sections of the old README (events, notifications, limits and move, window icons, navigation, board, folder trust, stable install and others).
+- `agentctl <command> --help` ends with examples for every command; the same examples appear in `docs/commands.md`.
+- `CONTRIBUTING.md`, with the rule that closes every milestone.
+- Test that relative links and anchors in the documents resolve, and that the README and its Polish counterpart link to each other.
+- `package.json`: `description`, `keywords`, `homepage`, `bugs`; `docs` and the Polish README in `files`.
+
+### Changed
+- MCP: `status`, `task_spec` and `list_reports` return local times (`startedLocal`, `pulledLocal`, `modifiedLocal`) next to the UTC values, as `status --json` does. A chat had shown the UTC time as the start time.
+- `agentctl new --help` mentions the setup commands.
+- The lists of accepted config and spec keys are exported constants (used by the tests that check the documentation); behaviour is unchanged.
+
+## [0.7.0] - 2026-11-01
+
+Pull request #7: daily-use reliability, finished tasks in the board, local MCP server.
+
+### Added
+- `agentctl mcp`: a local MCP server on stdio (official SDK) for the Claude app, Claude Code and VS Code. Read tools `status`, `peek`, `list_reports`, `get_report`, `pull_ready`, `task_spec`; write tools `send`, `new`, `interrupt`, `close`, `move`, off unless listed in `mcp.allow`, audited in `mcp-audit.log`. `agentctl mcp install` and `uninstall` register it in the desktop app (diff, y/N, dated backup, other servers kept) and in Claude Code; `doctor` checks the registration.
+- `agentctl hide` and `unhide`; `board.auto_hide_pulled_dead`.
+- `agentctl close` marks the task closed (`closed`, `closed_at`): it leaves `status`, the board, `pull --ready`, `watch` and the window limits. `status --all` lists closed and archived tasks. `agentctl archive [--older-than]` moves the state of closed tasks to the archive folder.
+- Board: tasks without a window sit in their own **Finished** section; Enter on one opens a menu; closed tasks have their own section (key `a`).
+- State `background`: the agent idle at its prompt while its own shells and monitors run. Its end of turn is not announced and `watch` does not call it waiting.
+- `notify.backend` (`auto`, `terminal-notifier`, `osascript`): when terminal-notifier cannot show notifications, the same notification goes out through `osascript`, and terminal-notifier is left alone for an hour. `agentctl notify-test` says which channel carried a test message.
+- Navigation: `mouse on` in the agentctl tmux session (`board.mouse`) and a key back to the board from any window (`board.return_key`, default F12).
+
+### Changed
+- `board --tmux` and `watch --tmux` start their command as the process of the window, with `remain-on-exit failed`, so a failed start stays on the screen; the board waits for a terminal size, draws even with `CI` set, and logs to `board.log`.
+- `mcp install --dry-run` says that nothing was written and names the backup a real run would make.
+- The Finished and Closed titles of the board use `+` and `-`, so they are not taken for the selection marker.
+
+### Fixed
+- No state folder is created for an orphan window just because it was announced.
+
+## [0.6.0] - 2026-11-01
+
+Pull request #6: event notifications, click-to-window, verdict, limits.
+
+### Added
+- Events from the agents themselves: Claude Code hooks (`Notification`, `Stop`, `StopFailure`) through `--settings`, Codex through `-c notify=…` (the user's own `notify` command is forwarded). `agentctl event` records them, updates the task state at once and notifies. `notify.events` and `notify.turn_end` switch them off.
+- States `limited` (usage limit used up; `agents.<agent>.limit_patterns`) and `superseded`.
+- `agentctl move`: hands a task that hit its limit to the other provider in the same worktree.
+- Notifications through `terminal-notifier` with click-to-window (`agentctl attach --switch-client`); the "report ready" text quotes the verdict line of the report (`notify.verdict_pattern`); one transition is announced once, whichever of the event and the watcher sees it first.
+
+### Fixed
+- Fixes from the live runs, with tests for events, deduplication, click, verdict, limits and move.
+- `doctor` warns when terminal-notifier cannot show notifications yet.
+
+## [0.5.0] - 2026-11-01
+
+Pull request #5: board TUI, attach and peek, window icons, progress.
+
+### Added
+- `agentctl board`: a full-screen overview of the tasks (Ink) with a live preview of the selected window and keys to message, interrupt, move, pull and close.
+- `agentctl attach` and `agentctl peek`; task names are case-insensitive and a unique prefix is enough.
+- `PROGRESS` in `status`: commits over the base and changed files per worktree.
+- State icons in front of the tmux window names while `watch` runs (`watch.window_icons`); operations find windows by task name or by tmux window ID.
+- `agentctl status --tmux-line` and a task count in the status bar of the agentctl session (`watch --tmux`, `watch.status_line`).
+
+### Fixed
+- The status bar needed the pane target `=session:`, and its result must be checked.
+
+## [0.4.0] - 2026-11-01
+
+Pull request #4: pilot fixes.
+
+### Added
+- `state_dir`: agentctl's own state (`TASK.md`, `setup.log`, markers) moved out of the folder the agents write to, with an automatic migration; a Codex agent had deleted its `TASK.md` while tidying up.
+- States `orphan` (a window without a state file) and `needs-input` (the agent asks a question); `agentctl adopt` restores a lost state file.
+- `status` shows the start time in local time; `status --json` keeps the UTC `started` and adds `startedLocal`; the last line skips the agent's footer (`footer_patterns`).
+- `bin/agentctl-update`: a stable copy of agentctl as a detached worktree (`npm ci`, `npm link`, `doctor`, restart of the watch window).
+- `npm run typecheck`.
+
+### Fixed
+- tmux targets that start with `=` are quoted (zsh expands `=word` to a program path).
+
+## [0.3.0] - 2026-11-01
+
+Pull request #3: automation.
+
+### Added
+- `agentctl new --clip`, `send --clip` (spec or prompt from the clipboard, a summary and a y/N question; `-y` skips it) and `status --clip`.
+- `agentctl pull --ready` (all new reports in one text, marked as pulled, `--all` for the others) and `close` for several tasks at once.
+- `agentctl watch`: desktop notifications on state transitions (report ready, question, folder trust, waiting too long, died), a log, and `--tmux` to run it in its own window.
+
+## [0.2.0] - 2026-10-31
+
+Pull request #2: trust wait, setup step and literal links.
+
+### Added
+- `new` waits for you to answer the folder-trust dialog of a fresh worktree (`trust_timeout`, `--no-wait-trust`) instead of stopping at it. agentctl still never answers it.
+- `setup`: shell commands run in the first worktree before the links, with output in `setup.log`.
+- Links without a glob are literal paths and create their parent directories.
+- `agentctl new --no-agent`: only worktree, setup and links.
+
+## [0.1.0] - 2026-10-31
+
+Pull request #1: iteration 1, core and CLI.
+
+### Added
+- Spec files (YAML header and prompt) and layered configuration (global, project, spec) with validation that reports all mistakes at once.
+- `agentctl new` (git worktree, symlinks, environment, tmux window, agent, prompt), `send`, `status`, `pull`, `close`, `interrupt`, `doctor`, `spec example`, `--dry-run` through a recording runner.
+- Support for Claude Code and Codex, with effort flags and a guard against auto-accept flags.
+- Claude and Codex equivalents table, `new --agent`, switching when a provider's window limit is full, `pin`.
+- Task states (`working`, `waiting`, `needs-trust`, `report-ready`, `dead`) and folder-trust detection.
+- Per-provider window limits, the `review_of` cross-review rule, an optional mirror of the reports.
+
+[Unreleased]: https://github.com/Setech-pl/agentctl/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/Setech-pl/agentctl/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/Setech-pl/agentctl/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/Setech-pl/agentctl/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/Setech-pl/agentctl/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/Setech-pl/agentctl/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/Setech-pl/agentctl/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/Setech-pl/agentctl/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/Setech-pl/agentctl/releases/tag/v0.1.0

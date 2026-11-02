@@ -1,13 +1,26 @@
 {
   "name": "agentctl",
-  "version": "0.1.0",
-  "description": "Dispatcher for CLI coding agents (Claude Code, Codex): one spec file becomes a git worktree, symlinks, env and a tmux window with the agent running.",
+  "version": "0.8.0",
+  "description": "Dispatcher of work orders for CLI coding agents (Claude Code, Codex): a spec file becomes a git worktree, symlinks, env and a tmux window with the agent running, watched for you.",
   "type": "module",
   "license": "MIT",
   "author": "Marcin Krzetowski",
+  "keywords": [
+    "agents",
+    "claude-code",
+    "codex",
+    "tmux",
+    "git-worktree",
+    "cli",
+    "mcp"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Setech-pl/agentctl.git"
+  },
+  "homepage": "https://github.com/Setech-pl/agentctl#readme",
+  "bugs": {
+    "url": "https://github.com/Setech-pl/agentctl/issues"
   },
   "bin": {
     "agentctl": "bin/agentctl.ts",
@@ -16,8 +29,11 @@
   "files": [
     "bin",
     "src",
+    "docs",
     "LICENSE",
-    "README.md"
+    "README.md",
+    "README.pl.md",
+    "CHANGELOG.md"
   ],
   "engines": {
     "node": ">=22.6"
