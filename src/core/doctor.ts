@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { INSTALL_HINTS } from './agents.ts';
 import { configStatePath, readConfigState } from './config-store.ts';
-import { PROJECT_CONFIG_NAME, loadGlobalConfig, loadProjectConfig } from './config.ts';
+import { PROJECT_CONFIG_NAME, configDir, loadGlobalConfig, loadProjectConfig } from './config.ts';
 import type { GlobalConfig } from './config.ts';
 import type { Runner } from './runner.ts';
 import { findMcpProcesses, staleProcesses, staleWarning } from './mcp-processes.ts';
@@ -68,7 +68,9 @@ export async function runDoctor(
   try {
     config = loadConfig();
   } catch (e) {
-    add('config', 'fail', errorMessage(e).split('\n').join(' '));
+    // A running watch or MCP server keeps the last good settings meanwhile: say so.
+    const state = readConfigState(path.join(configDir(env), 'config-state.json'));
+    add('config', 'fail', `${errorMessage(e).split('\n').join(' ')}${state && !state.ok ? ` – the ${state.by} keeps the previous settings (since ${state.at})` : ''}`);
   }
 
   const tmuxVersion = await runner.exec('tmux', ['-V'], { readOnly: true });
