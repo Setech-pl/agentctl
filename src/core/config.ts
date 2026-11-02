@@ -23,6 +23,8 @@ export interface Defaults {
   agent?: AgentName;
   model?: string;
   effort?: Effort;
+  /** `defaults.remote_control: true`: Claude tasks start with `--remote-control <TASK>` unless the spec says otherwise. */
+  remoteControl?: boolean;
 }
 
 /** The part of the configuration that exists in every layer (global, project, spec). Values are unexpanded. */
@@ -337,7 +339,7 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
 export const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'setup', 'defaults'];
 export const GLOBAL_KEYS = [...LAYER_KEYS, 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager'];
 export const LIMITS_KEYS = [...AGENT_NAMES, 'count_external'];
-export const DEFAULTS_KEYS = ['agent', 'model', 'effort'];
+export const DEFAULTS_KEYS = ['agent', 'model', 'effort', 'remote_control'];
 export const LINK_KEYS = ['from', 'to'];
 export const AGENT_KEYS = ['flags', 'effort_args', 'ready_pattern', 'ready_timeout', 'trust_timeout', 'trust_pattern', 'working_pattern', 'interrupt_key', 'footer_patterns', 'question_pattern', 'limit_patterns', 'background_patterns'];
 export const WATCH_KEYS = ['interval', 'waiting_after', 'window_icons', 'status_line'];
@@ -446,6 +448,10 @@ function parseDefaults(v: unknown, where: string, p: Problems): Defaults {
   if (agent) defaults.agent = agent;
   if (model) defaults.model = model;
   if (effort) defaults.effort = effort;
+  if (v.remote_control !== undefined && v.remote_control !== null) {
+    if (typeof v.remote_control === 'boolean') defaults.remoteControl = v.remote_control;
+    else p.add(`${where}.remote_control must be true or false`);
+  }
   return defaults;
 }
 

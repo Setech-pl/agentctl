@@ -51,7 +51,9 @@ export async function liveWindows(ctx: Context): Promise<LiveWindow[]> {
 }
 
 function switchTo(spec: ResolvedSpec, to: Order, by: 'flag' | 'limit'): ResolvedSpec {
-  return { ...spec, agent: to.agent, model: to.model, effort: to.effort, switchedBy: by };
+  // Remote Control is Claude only: a task that goes to Codex loses it (a switch always changes the provider).
+  const { remoteControl: _remote, ...rest } = spec;
+  return { ...rest, agent: to.agent, model: to.model, effort: to.effort, switchedBy: by };
 }
 
 /**

@@ -30,6 +30,7 @@ Column "Layers": **g** global config, **p** project config, **s** spec.
 | `defaults.agent` | `claude` or `codex` | none | g p | Agent when the spec has no `agent`. |
 | `defaults.model` | string | `default` | g p | Model when the spec has none. `default` passes no model flag. |
 | `defaults.effort` | `low` `medium` `high` `xhigh` `max` | `high` | g p | Effort when the spec has none. |
+| `defaults.remote_control` | boolean | `false` | g p | `true`: Claude tasks start with Remote Control (see the spec key `remote_control`) unless the spec says `remote_control: false`. A Codex task is not affected. |
 
 ## Keys of the global config only
 
@@ -246,6 +247,7 @@ The header of a spec file, between `---` lines, followed by the prompt. Several 
 | `env` | mapping | `{}` | s | Same as in the other layers; merged over theirs. |
 | `review_of` | task ID | none | s | The task under review. The reviewer must use another agent or another model than the author. |
 | `report` | path or list | project, else global | s | Report path of this task, or the list described under the global key. |
+| `remote_control` | boolean | `false` | s | `true` (Claude only): the agent starts with `claude --remote-control <TASK>`, so the task shows up as a session named after it in the Claude app (Code) and can be answered from the phone. It goes with `--settings` (the event hooks), `--model` and `--effort`: it is an interactive session, not the server mode `claude remote-control`. The first start asks in the window once to "Enable Remote Control" (agentctl does not answer it, like the folder trust). A `needs-input` notification to the phone then says where to answer. `remote_control: true` on a Codex task is an error. Needs a claude.ai login (Pro, Max, Team, Enterprise), not an API key. |
 | `pin` | boolean | `false` | s | `true`: never move the task to the other provider, by `--agent` or by a limit. |
 | `after` | task ID or list | none | s | The task starts only when every named task has a report (`report-ready`, or closed with a report). Meant for the queue; `new` refuses a task whose `after` is not met. Unknown tasks and circles are errors. |
 | `touches` | glob or list of globs | none | s | Files the task will change. `queue` and `new` warn (and ask y/N) when an active task of the same repository already changes matching files. |

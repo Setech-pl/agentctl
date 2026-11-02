@@ -11,6 +11,7 @@ import { applyLinks, checkLinkTargets, planLinks } from './links.ts';
 import { planBatch } from './plan.ts';
 import type { PlanOptions } from './plan.ts';
 import { waitForReady } from './ready.ts';
+import { RC_CONFIRM, RC_FIRST_TIME } from './remote-control.ts';
 import type { ResolvedSpec } from './spec.ts';
 import { recordFromSpec, renderTaskMd, setHeaderField, taskDir, taskFile } from './taskstore.ts';
 import { AgentctlError } from './util.ts';
@@ -142,6 +143,10 @@ export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: Ne
     const settings = config.agents[spec.agent];
     const commandLine = agentCommandLine(buildAgentArgv(spec, settings, wiring?.args));
     if (wiring) ctx.info(`${spec.task}: ${wiring.note}`);
+    const remote = spec.remoteControl === true;
+    // Remote Control asks once to be switched on; like the folder trust that is a dialog for the human.
+    const dialog = remote ? 'folder trust or "Enable Remote Control"' : 'folder trust';
+    if (remote) ctx.info(`${spec.task}: Remote Control on: the session "${spec.task}" appears in the Claude app (Code). If a dialog comes up, ${RC_FIRST_TIME}`);
     // tmux's own ID of the window: operations keep finding it when `watch` puts a state icon in front of its name.
     const windowId = (await tmux.windows()).find((w) => w.plain === spec.window)?.id;
     if (windowId) await setHeaderField(runner, taskFile(config, spec.window), 'window_id', windowId);
@@ -153,14 +158,14 @@ export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: Ne
     const sendHint = `agentctl send ${taskFile(config, spec.window)}`;
     const ready = await waitForReady(runner, tmux, spec.window, {
       pattern: settings.readyPattern,
-      trustPattern: settings.trustPattern,
+      trustPattern: remote ? `${settings.trustPattern}|${RC_CONFIRM}` : settings.trustPattern,
       timeoutMs: settings.readyTimeout * 1000,
       ...(opts.signal ? { signal: opts.signal } : {}),
       ...(waitTrust
         ? {
             waitTrust: {
               timeoutMs: settings.trustTimeout * 1000,
-              onWaiting: () => ctx.info(`${spec.task}: agent waits for folder trust – attach: tmux attach -t ${config.session}, confirm in window ${spec.window}`),
+              onWaiting: () => ctx.info(`${spec.task}: agent waits for ${dialog} – attach: tmux attach -t ${config.session}, confirm in window ${spec.window}`),
             },
           }
         : {}),
@@ -175,14 +180,14 @@ export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: Ne
     }
     if (ready.trust && waitTrust) {
       throw new AgentctlError(
-        `${spec.task}: agent still waits for folder trust after ${settings.trustTimeout}s – attach: tmux attach -t ${config.session}, confirm in window ${spec.window}`,
+        `${spec.task}: agent still waits for ${dialog} after ${settings.trustTimeout}s – attach: tmux attach -t ${config.session}, confirm in window ${spec.window}`,
         `agentctl never answers that dialog. The window stays open and the prompt was not sent; once the agent shows its input, deliver it with: ${sendHint}. ` +
           `To wait longer, raise agents.${spec.agent}.trust_timeout in ${config.path}.`,
       );
     }
     if (ready.trust) {
       throw new AgentctlError(
-        `${spec.task}: agent waits for folder trust – attach: tmux attach -t ${config.session}, confirm, then agentctl status`,
+        `${spec.task}: agent waits for ${dialog} – attach: tmux attach -t ${config.session}, confirm, then agentctl status`,
         `agentctl never answers that dialog. The prompt was not sent; once the agent shows its input, deliver it with: ${sendHint}`,
       );
     }
