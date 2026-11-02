@@ -106,6 +106,20 @@ export interface AwayReport {
   phoneActive: boolean;
 }
 
+/** What the board needs to draw the indicator. */
+export interface AwayView {
+  on: boolean;
+  /** A topic is set. */
+  phone: boolean;
+  /** `notify.ntfy.always`. */
+  always: boolean;
+}
+
+export function awayView(config: GlobalConfig): AwayView {
+  const r = awayReport(config);
+  return { on: r.on, phone: r.phoneConfigured, always: r.always };
+}
+
 export function awayReport(config: GlobalConfig): AwayReport {
   const s = readAway(config);
   const ntfy = config.notify.ntfy;

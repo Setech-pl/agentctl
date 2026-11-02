@@ -81,7 +81,7 @@ describe('phone: sending from the events', () => {
     const entries = readJournal(u.config);
     assert.equal(entries.length, 1);
     assert.equal(entries[0]?.phone, 'sent');
-    assert.match(renderEvents({ client: 'cli', since: '', sinceLabel: 'x', cohort: null, events: entries, summary: { active: 0, working: 0, needYou: [], queued: 0, reportsToPull: [] }, markerMoved: false }).join('\n'), /Werdykt: PASS.* 📱/);
+    assert.match(renderEvents({ client: 'cli', since: '', sinceLabel: 'x', cohort: null, events: entries, summary: { active: 0, working: 0, needYou: [], queued: 0, reportsToPull: [] }, away: { on: true, phone: true, always: false }, markerMoved: false }).join('\n'), /Werdykt: PASS.* 📱/);
   });
 
   it('nothing of the report except the verdict line reaches the request: no path, no file name, no other line', async () => {
