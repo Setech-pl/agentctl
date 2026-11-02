@@ -5,7 +5,7 @@ import type { AgentModel } from './checks.ts';
 import { Alerts } from './alert.ts';
 import { checkAfter, hasReport, unmetAfter, waitingText } from './depends.ts';
 import { touchWarnings } from './collisions.ts';
-import type { AgentName, GlobalConfig } from './config.ts';
+import type { AgentName, Effort, GlobalConfig } from './config.ts';
 import { AGENT_NAMES } from './config.ts';
 import type { Context } from './context.ts';
 import { Context as ContextClass } from './context.ts';
@@ -17,8 +17,9 @@ import { collectStatus } from './status.ts';
 import type { StatusRow } from './status.ts';
 import { resolveSpec, splitSpecs } from './spec.ts';
 import type { RawSpec, ResolvedSpec } from './spec.ts';
-import { listArchivedRecords, listTaskRecords } from './taskstore.ts';
-import { AgentctlError, errorMessage, formatLocalTime } from './util.ts';
+import { listArchivedRecords, listTaskRecords, recordFromSpec, renderTaskMd, taskDir, taskFile } from './taskstore.ts';
+import type { CancelSource, TaskRecord } from './taskstore.ts';
+import { AgentctlError, errorMessage, formatLocalTime, windowName } from './util.ts';
 
 /*
  * The task queue. A queued task is a spec file in <AGENTCTL_HOME>/queue/ (one JSON file per task: the spec text and what the queue
@@ -238,12 +239,49 @@ export async function commitQueueAdd(ctx: Context, items: QueueAddItem[], opts: 
 
 // ---- managing
 
-/** `queue rm`: take a waiting (or failed) entry out. An entry that is being started cannot be removed. */
-export async function removeFromQueue(ctx: Context, input: string): Promise<QueueEntry> {
-  const entry = findEntry(ctx.config, input);
-  if (entry.status === 'starting') throw new AgentctlError(`${entry.task} is being started right now`, 'Wait for it to finish; it then shows as a task in "agentctl status".');
+/** The header fields that mark a task as cancelled. */
+export function cancelFields(opts: { reason?: string | undefined; source?: CancelSource | undefined }, at: string): Record<string, string | boolean> {
+  return { cancelled: true, cancelled_at: at, ...(opts.reason ? { cancel_reason: opts.reason } : {}), cancel_source: opts.source ?? 'cli' };
+}
+
+/** Take an entry out of the queue (its file and the log of its failed start). */
+export async function dropEntry(ctx: Context, entry: QueueEntry): Promise<void> {
   fs.rmSync(entryFile(ctx.config, entry), { force: true });
   fs.rmSync(queueLogFile(ctx.config, entry), { force: true });
+}
+
+/**
+ * A task that was cancelled in the queue never had a state file. It gets one now (the spec, no window, `cancelled`), so that it shows in
+ * `status --all` and in its cohort, and so that the tasks that wait for it can see that it is gone (they become blocked).
+ */
+export async function writeCancelledRecord(ctx: Context, entry: QueueEntry, opts: { reason?: string | undefined; source?: CancelSource | undefined; at?: string | undefined }): Promise<void> {
+  const { config, runner } = ctx;
+  let record: TaskRecord;
+  let prompt: string;
+  try {
+    const spec = resolveSpec(splitSpecs(entry.spec, `queue entry ${entry.task}`)[0] as RawSpec, { config });
+    record = recordFromSpec(spec, config, runner.now());
+    prompt = spec.prompt;
+  } catch {
+    // the spec no longer resolves (a repository config changed): the entry still says what task this was
+    record = { task: entry.task, window: windowName(entry.task), session: config.session, agent: entry.agent, model: entry.model, effort: entry.effort as TaskRecord['effort'], repos: [], links: [], env: {}, report: '', started: '', requested: { agent: entry.agent, model: entry.model, effort: entry.effort as Effort } };
+    prompt = entry.spec;
+  }
+  record.started = '';
+  Object.assign(record, { cancelled: true, cancelledAt: opts.at ?? new Date(runner.now()).toISOString(), ...(opts.reason ? { cancelReason: opts.reason } : {}), cancelSource: opts.source ?? 'cli' });
+  await runner.mkdir(taskDir(config, record.window));
+  await runner.writeFile(taskFile(config, record.window), renderTaskMd(record, prompt));
+}
+
+/**
+ * `queue rm`: take a waiting (or failed) entry out; the task is then `cancelled` (this is `agentctl cancel` for a queued task, without a
+ * reason unless one is given). An entry that is being started cannot be removed.
+ */
+export async function removeFromQueue(ctx: Context, input: string, opts: { reason?: string | undefined; source?: CancelSource | undefined } = {}): Promise<QueueEntry> {
+  const entry = findEntry(ctx.config, input);
+  if (entry.status === 'starting') throw new AgentctlError(`${entry.task} is being started right now`, 'Wait for it to finish; it then shows as a task in "agentctl status".');
+  await writeCancelledRecord(ctx, entry, opts);
+  await dropEntry(ctx, entry);
   return entry;
 }
 

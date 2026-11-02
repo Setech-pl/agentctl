@@ -48,6 +48,7 @@ Column "Layers": **g** global config, **p** project config, **s** spec.
 | `mcp` | mapping | see below | g | The local MCP server. |
 | `queue` | mapping | see below | g | The task queue (`agentctl queue`). |
 | `collisions` | mapping | see below | g | Warnings about two active tasks changing the same files. |
+| `cancel` | mapping | see below | g | `agentctl cancel`: how a task at work is stopped. |
 
 ### `watch`
 
@@ -93,6 +94,14 @@ Queued tasks live in `<config dir>/queue/` (one JSON file each, with the spec te
 |---|---|---|---|---|
 | `queue.enabled` | boolean | `true` | g | `false`: `watch` never starts a queued task (entries can still be added and listed). |
 | `queue.parallel_starts` | positive integer | `2` | g | Most queued tasks that `watch` is in the middle of starting (worktree, setup, waiting for the agent or for the folder-trust dialog) at the same time. |
+
+### `cancel`
+
+`agentctl cancel` stops a task that works: the agent's interrupt key, a short wait, then the window is closed. See [cancelling tasks](details.md#cancelling-tasks).
+
+| Key | Type | Default | Layers | Meaning |
+|---|---|---|---|---|
+| `cancel.grace` | seconds (0 or more) | `5` | g | Time between the interrupt key and the closing of the window of a task that is cancelled while it works. `0`: the window is closed at once. |
 
 ### `collisions`
 

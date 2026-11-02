@@ -181,6 +181,7 @@ stateDiagram-v2
 | `dead` | ✗ | the window is gone and there is no report |
 | `orphan` | ✗ | a window of the session has no state file; see `agentctl adopt` |
 | `closed` | ⊘ | `agentctl close` was run; listed only by `status --all` |
+| `cancelled` | ✕ | `agentctl cancel` was run: the work was abandoned, in the middle of a turn or in the queue; listed only by `status --all` |
 
 The same diagrams with notes: [docs/diagrams.md](docs/diagrams.md).
 

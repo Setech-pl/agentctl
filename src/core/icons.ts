@@ -1,6 +1,6 @@
 import type { TaskState } from './state.ts';
 
-export const TASK_STATES: readonly TaskState[] = ['working', 'background', 'waiting', 'needs-input', 'needs-trust', 'limited', 'report-ready', 'superseded', 'orphan', 'dead', 'closed'];
+export const TASK_STATES: readonly TaskState[] = ['working', 'background', 'waiting', 'needs-input', 'needs-trust', 'limited', 'report-ready', 'superseded', 'orphan', 'dead', 'closed', 'cancelled'];
 
 /** `watch.window_icons`: the icon in front of a tmux window name, per state. */
 export const DEFAULT_WINDOW_ICONS: Record<TaskState, string> = {
@@ -15,7 +15,11 @@ export const DEFAULT_WINDOW_ICONS: Record<TaskState, string> = {
   orphan: '✗',
   dead: '✗',
   closed: '⊘',
+  cancelled: '✕',
 };
+
+/** A queued task whose `after` names a cancelled task: it cannot start until `agentctl unblock` or `agentctl cancel` (no window, so not a state of `watch.window_icons`). */
+export const BLOCKED_ICON = '⛓';
 
 /** Every icon a window name may carry: the configured ones and the defaults (a config change leaves old icons on windows). */
 export function knownIcons(configured: Record<TaskState, string> | null): string[] {

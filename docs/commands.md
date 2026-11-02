@@ -12,7 +12,7 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`new`](#agentctl-new) | Start the tasks in a spec file: worktree, setup commands, symlinks, TASK.md, tmux window, agent, prompt. |
 | [`queue`](#agentctl-queue) | Put the tasks of a spec file in the queue: they start by themselves (while "agentctl watch" runs) when a window of their provider is free. Shows a summary and asks y/N first. |
 | [`queue list`](#agentctl-queue-list) | The queue: position, task, agent/model/effort, priority, start condition and how long it waits. |
-| [`queue rm`](#agentctl-queue-rm) | Take a task out of the queue (a waiting or a failed one). |
+| [`queue rm`](#agentctl-queue-rm) | Take a task out of the queue (a waiting or a failed one): the same as "agentctl cancel" for a queued task, without a reason. The task is then cancelled. |
 | [`queue up`](#agentctl-queue-up) | Move a waiting task to the front of the line (tasks with priority: high still go first). |
 | [`queue retry`](#agentctl-queue-retry) | Put a failed task back at the end of the line; it is tried once more (over the worktree the failed start left). |
 | [`queue pause`](#agentctl-queue-pause) | Stop starting queued tasks (running tasks are not touched; adding and listing still work). |
@@ -25,6 +25,7 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`unhide`](#agentctl-unhide) | Show hidden tasks again on the board and in "status". A task shown on purpose is not hidden again by board.auto_hide_pulled_dead. |
 | [`pull`](#agentctl-pull) | Copy the task report to the clipboard and print its path (without a report: last 40 lines of the window). --ready: all new reports at once. |
 | [`close`](#agentctl-close) | Kill the task windows; --rm-worktree also removes their git worktrees (branches are kept). Shows the list and asks y/N first. |
+| [`cancel`](#agentctl-cancel) | Abandon tasks: a task at work is interrupted, given cancel.grace seconds to stop, and its window is closed; a task in the queue is taken out of it. They become cancelled (not closed). The worktree and the branch stay unless --rm-worktree (worktree only, never the branch). Shows the list and asks y/N first. |
 | [`watch`](#agentctl-watch) | Foreground loop: notifies (macOS notification / notify-send) when a task has a report ready, asks something, hit its usage limit, waits too long, needs folder trust or died. |
 | [`board`](#agentctl-board) | Full-screen overview of the tasks: state, progress, a live preview of the selected window, and keys to switch to it, message, interrupt, pull and close. |
 | [`notify-test`](#agentctl-notify-test) | Send one test notification and say which channel carried it (terminal-notifier with a click action, or the osascript fallback). |
@@ -124,7 +125,7 @@ agentctl queue list --json
 
 ## agentctl queue rm
 
-Take a task out of the queue (a waiting or a failed one).
+Take a task out of the queue (a waiting or a failed one): the same as "agentctl cancel" for a queued task, without a reason. The task is then cancelled.
 
 ```
 agentctl queue rm [options] <task>
@@ -379,6 +380,33 @@ Examples:
 ```sh
 agentctl close NC-41 NC-42 --rm-worktree
 agentctl close NC-42 --dry-run
+```
+
+## agentctl cancel
+
+Abandon tasks: a task at work is interrupted, given cancel.grace seconds to stop, and its window is closed; a task in the queue is taken out of it. They become cancelled (not closed). The worktree and the branch stay unless --rm-worktree (worktree only, never the branch). Shows the list and asks y/N first.
+
+```
+agentctl cancel [options] <tasks...>
+```
+
+| Argument | Meaning |
+|---|---|
+| `<tasks...>` | task IDs; a unique prefix is enough. The other half of a "move" (the old task or its successor) is cancelled with it |
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--reason <text>` | why (optional); kept in TASK.md |  |
+| `--rm-worktree` | also run "git worktree remove" for the task worktrees (never --force; the branch stays) |  |
+| `-y, --yes` | do not ask |  |
+| `--dry-run` | print the commands that would run, execute nothing |  |
+
+Examples:
+
+```sh
+agentctl cancel NC-42 --reason "wrong approach"   # interrupt, close the window; worktree and branch stay
+agentctl cancel NC-41 NC-42 --rm-worktree -y      # also remove the worktrees (branches stay)
+agentctl cancel NC-43                             # a queued task: taken out of the queue
 ```
 
 ## agentctl watch

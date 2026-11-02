@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 import { Command, CommanderError, Option } from 'commander';
+import { cancelTasks, planCancel } from './core/cancel.ts';
 import { closeTasks, planClose } from './core/close.ts';
 import { confirmAction, readClipboard, specFromClipboard, writeClipboard } from './core/clipboard.ts';
 import { runDoctor } from './core/doctor.ts';
@@ -355,9 +356,16 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
 
   queue
     .command('rm')
-    .description('Take a task out of the queue (a waiting or a failed one).')
+    .description('Take a task out of the queue (a waiting or a failed one): the same as "agentctl cancel" for a queued task, without a reason. The task is then cancelled.')
     .argument('<task>', 'task ID; a unique prefix is enough')
-    .action(guarded(async (task: string) => line(`${(await removeFromQueue(contextFor(false, { migrate: false }), task)).task}: removed from the queue`)));
+    .action(
+      guarded(async (task: string) => {
+        const ctx = contextFor(false, { migrate: false });
+        const entry = await removeFromQueue(ctx, task, { source: 'cli' });
+        line(`${entry.task}: removed from the queue (cancelled)`);
+        for (const e of readQueue(ctx.config).filter((x) => x.after.includes(entry.task))) line(`  ⛓ ${e.task} is blocked: it waited for ${entry.task}. agentctl unblock ${e.task} --drop-after ${entry.task}, or agentctl cancel ${e.task}`);
+      }),
+    );
 
   queue
     .command('up')
@@ -514,6 +522,24 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         const summary = [`Close ${plan.length} task${plan.length === 1 ? '' : 's'}${closeOpts.rmWorktree ? ' and remove their worktrees (branches stay)' : ''}:`, ...plan.map((i) => `  ${i.line}`)];
         if (!(await confirmAction(ctx, summary, 'Go ahead?', Boolean(opts.yes) || Boolean(opts.dryRun)))) return;
         await closeTasks(ctx, plan.map((i) => i.task), closeOpts);
+      }),
+    );
+
+  program
+    .command('cancel')
+    .description('Abandon tasks: a task at work is interrupted, given cancel.grace seconds to stop, and its window is closed; a task in the queue is taken out of it. They become cancelled (not closed). The worktree and the branch stay unless --rm-worktree (worktree only, never the branch). Shows the list and asks y/N first.')
+    .argument('<tasks...>', 'task IDs; a unique prefix is enough. The other half of a "move" (the old task or its successor) is cancelled with it')
+    .option('--reason <text>', 'why (optional); kept in TASK.md')
+    .option('--rm-worktree', 'also run "git worktree remove" for the task worktrees (never --force; the branch stays)')
+    .option('-y, --yes', 'do not ask')
+    .option('--dry-run', 'print the commands that would run, execute nothing')
+    .action(
+      guarded(async (tasks: string[], opts: { reason?: string; rmWorktree?: boolean; yes?: boolean; dryRun?: boolean }) => {
+        const ctx = contextFor(Boolean(opts.dryRun));
+        const cancelOpts = { reason: opts.reason, rmWorktree: Boolean(opts.rmWorktree), source: 'cli' as const };
+        const plan = await planCancel(ctx, tasks, cancelOpts);
+        if (!(await confirmAction(ctx, plan.summary, 'Cancel?', Boolean(opts.yes) || Boolean(opts.dryRun)))) return;
+        await cancelTasks(ctx, plan, cancelOpts);
       }),
     );
 

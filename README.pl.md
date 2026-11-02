@@ -183,6 +183,7 @@ stateDiagram-v2
 | `dead` | ✗ | okno zniknęło i nie ma raportu |
 | `orphan` | ✗ | okno sesji bez pliku stanu; zob. `agentctl adopt` |
 | `closed` | ⊘ | uruchomiono `agentctl close`; widoczne tylko w `status --all` |
+| `cancelled` | ✕ | uruchomiono `agentctl cancel`: praca została porzucona w trakcie tury albo w kolejce; widoczne tylko w `status --all` |
 
 Te same diagramy z uwagami: [docs/diagrams.md](docs/diagrams.md) (po angielsku).
 

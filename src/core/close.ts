@@ -4,6 +4,7 @@ import type { Context } from './context.ts';
 import { gitFailure } from './git.ts';
 import { collectStatus } from './status.ts';
 import { readTaskRecord, setHeaderFields, taskFile } from './taskstore.ts';
+import type { TaskRecord } from './taskstore.ts';
 import { AgentctlError, Problems, windowName } from './util.ts';
 
 export interface CloseOptions {
@@ -41,7 +42,13 @@ export async function closeTask(ctx: Context, taskArg: string, opts: CloseOption
   }
 
   if (!opts.rmWorktree || !record) return;
-  for (const repo of record.repos) {
+  await removeWorktrees(ctx, taskArg, record.repos);
+}
+
+/** `git worktree remove` (never --force) for each worktree of a task. The main checkout, main/master and missing worktrees are left alone; branches are never deleted. */
+export async function removeWorktrees(ctx: Context, taskArg: string, repos: TaskRecord['repos']): Promise<void> {
+  const { runner } = ctx;
+  for (const repo of repos) {
     if (path.resolve(repo.worktree) === path.resolve(repo.path)) {
       ctx.info(`${taskArg}: skipping ${repo.worktree}: it is the main checkout`);
       continue;

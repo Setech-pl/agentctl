@@ -257,6 +257,17 @@ Three different things, from the lightest:
 - **Closed.** `agentctl close` (board: `x`) kills the window and writes `closed: true` and `closed_at` into `TASK.md`. A closed task is gone from `status`, the board, `pull --ready`, `watch` (closing a task that has no report is not a "window vanished" alarm) and the [window limits](#window-limits-and-cross-review); `status --all` and the board key `a` list it as `closed`. State and report stay.
   `agentctl archive [--older-than 7d]` moves the state folder of closed tasks to `~/.agentctl/archive/<task>/` (next to the state folder). A folder that is in the archive, moved there by `archive` or by hand, is a closed task, never an orphan or an error; a live window with the same name wins over it.
 
+## Cancelling tasks
+
+Work is sometimes abandoned half way. `agentctl cancel <TASK…> [--reason "…"] [--rm-worktree] [-y]` (board: `X`; MCP: `cancel`) shows the list and asks y/N, then:
+
+- **A task at work:** the agent's interrupt key is sent (like `interrupt`), agentctl waits `cancel.grace` seconds (default 5, once for all the tasks of one command), then the window is closed. `TASK.md` gets `cancelled: true`, `cancelled_at`, `cancel_reason` (if one was given) and `cancel_source` (`cli`, `board` or `mcp`).
+- **A task in the queue:** it is taken out of the queue (`queue rm` is the same without a reason) and gets a `TASK.md` of its own with the same fields, so that it shows in `status --all` and the tasks that wait for it can see that it is gone.
+- **A task you moved** (`agentctl move`): the old task (`superseded`) and its successor are one piece of work, so both are cancelled, after the one question.
+- **The worktree and the branch stay**, because partial work is often worth keeping. `--rm-worktree` runs `git worktree remove` (never `--force`; an unclean worktree is reported and left); a branch is never deleted.
+
+`cancelled` is a state of its own, not `closed`. A cancelled task leaves `status` and the board (`status --all` and the board key `a` list it under **Cancelled**), does not count against the [window limits](#window-limits-and-cross-review), is never taken by `pull --ready` and gives no "window vanished" alarm. A report the agent had written stays: `agentctl pull <TASK>` and the MCP `get_report` read it. A cancel from the terminal or the board announces nothing; one that the chat asks for (MCP `cancel`, `queue_rm`) shows the usual desktop notice.
+
 ## Navigation
 
 `agentctl board --tmux` and `agentctl watch --tmux` start their command **as the process of the window** (`tmux new-window … <command>`), not by typing it into a shell, and set `remain-on-exit failed` for the window in the same tmux call: when the command fails, the window stays with its error on the screen, and `~/.agentctl/board.log` / `watch.log` have the start (terminal size, `CI`, tty flags) and the end or the stack of the failure. Running `board --tmux` again starts a window whose process has ended in place. The board waits for a terminal size (a window without a client can report 0x0 for a moment) and draws even when a `CI` variable is in the environment (Ink would otherwise draw nothing).

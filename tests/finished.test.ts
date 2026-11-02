@@ -19,7 +19,7 @@ function row(task: string, extra: Partial<BoardRow> = {}): BoardRow {
     task, agent: 'claude', model: 'opus', effort: 'high', requested: 'claude opus/high', effective: 'claude opus/high', switchedBy: null,
     state: 'working', window: 'alive', windowName: task.toLowerCase(), windowId: '@1', started: '2026-11-01 08:00', startedLocal: '2026-11-01 09:00',
     duration: '12m', report: 'missing', reportPath: `/r/${task}.md`, pulled: null, lastLine: '', progress: null, hint: null, question: null, pin: false,
-    finished: false, hidden: false, hiddenBy: null, closed: false, closedAt: null, archived: false, worktrees: [], collide: [], ...extra,
+    finished: false, hidden: false, hiddenBy: null, closed: false, closedAt: null, archived: false, cancelled: false, cancelledAt: null, cancelReason: null, supersededBy: null, continues: null, worktrees: [], collide: [], ...extra,
   };
 }
 const dead = (task: string, extra: Partial<BoardRow> = {}): BoardRow => row(task, { state: 'dead', window: 'gone', windowId: null, finished: true, ...extra });
