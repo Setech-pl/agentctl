@@ -17,6 +17,16 @@ jobs:
           package-manager-cache: false
       - run: npm ci
       - run: npm run typecheck
-      - run: npm test
+      - name: Test with isolated user directories
+        env:
+          HOME: ${{ runner.temp }}/agentctl-test/home
+          AGENTCTL_HOME: ${{ runner.temp }}/agentctl-test/agentctl
+          CODEX_HOME: ${{ runner.temp }}/agentctl-test/codex
+          CLAUDE_CONFIG_DIR: ${{ runner.temp }}/agentctl-test/claude
+          AGENTCTL_TEST_TMP: ${{ runner.temp }}/agentctl-test/tmp
+          TMPDIR: ${{ runner.temp }}/agentctl-test/tmp
+        run: |
+          mkdir -p "$HOME" "$AGENTCTL_HOME" "$CODEX_HOME" "$CLAUDE_CONFIG_DIR" "$TMPDIR"
+          npm test
       - run: npm run build
       - run: npm pack --dry-run

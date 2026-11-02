@@ -14,14 +14,12 @@ Paczka npm zawiera JavaScript kompilowany przez `npm run build` do `dist/` (impo
 - `--dry-run` wypisuje komendy jako `(cd <worktree> && sh -c '…')`.
 - `new --no-agent` zatrzymuje się po setupie i linkach: bez TASK.md, okna i agenta. Przydatne do sprawdzenia setupu projektu.
 
-Zalecane dla Neon City (sprawdzone na żywo 2026-10-31: `npm ci` działa w świeżym worktree; `package.json` deklaruje `@neon-city/*` jako `file:../neon-city-backend/packages/*`, co nie rozwiązuje się z `~/Projects/wt`, więc linki kierują je na worktree backendu pod testem). Dodaj do `~/Projects/neon-city/.agentctl.yaml`:
+Dla projektu Node wymagającego instalacji zależności w każdym worktree dodaj do `.agentctl.yaml`:
 
 ```yaml
 setup:
   - npm ci --prefer-offline --no-audit --no-fund
 ```
-
-Istniejące `links:` tego pliku (`node_modules/@neon-city/protocol` i `…/sim` -> `~/Projects/wt/neon-city-backend-merge3/packages/*`) robią wtedy resztę; to ścieżki dosłowne, więc nie zależą już od istnienia `node_modules`.
 
 ## Linki
 
@@ -29,7 +27,7 @@ Linki to klej, dzięki któremu worktree używa kodu *innego* worktree (na przyk
 
 - `from` jest względne wobec pierwszego worktree, `to` to cel, na który ma wskazywać.
 - `to` musi istnieć (sprawdzane, zanim cokolwiek powstanie), inaczej `new` zatrzymuje się z listą brakujących celów.
-- `to` bez `*`: każde dopasowanie globu `from` staje się symlinkiem do `to`. `from` bez znaków globu to **ścieżka dosłowna**: jest linkowana, nawet jeśli nic tam jeszcze nie ma, a jej katalogi nadrzędne są tworzone (`mkdir -p`), więc `from: node_modules/@neon-city/protocol` działa w worktree bez `node_modules`.
+- `to` bez `*`: każde dopasowanie globu `from` staje się symlinkiem do `to`. `from` bez znaków globu to **ścieżka dosłowna**: jest linkowana, nawet jeśli nic tam jeszcze nie ma, a jej katalogi nadrzędne są tworzone (`mkdir -p`), więc `from: node_modules/@scope/protocol` działa w worktree bez `node_modules`.
 - Glob, który niczego nie dopasuje, tylko ostrzega, a ostrzeżenie wskazuje ścieżki dosłowne.
 - `to` kończące się na `/*` (i `from` kończące się na `/*`): jeden link na każdy wpis tego katalogu, nazwany jak wpis.
   `from: node_modules/@scope/*`, `to: ~/backend/packages/*` linkuje `node_modules/@scope/foo` do `~/backend/packages/foo` i tak dalej.

@@ -17,7 +17,7 @@ function agentctl(args: string[], env: Record<string, string>) {
   const r = spawnSync(process.execPath, ['--experimental-strip-types', '--no-warnings', BIN, ...args], {
     encoding: 'utf8',
     // CODEX_HOME: never read the real ~/.codex/config.toml (its notify would end up in the output)
-    env: { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', CODEX_HOME: path.join(scratch.dir, 'codex-home'), ...env },
+    env: { PATH: process.env.PATH ?? '', HOME: path.join(scratch.dir, 'user-home'), CLAUDE_CONFIG_DIR: path.join(scratch.dir, 'claude-home'), CODEX_HOME: path.join(scratch.dir, 'codex-home'), ...env },
     cwd: REPO_ROOT,
   });
   return { code: r.status, stdout: r.stdout, stderr: r.stderr };
@@ -114,7 +114,7 @@ Review NC-1.
     const r = spawnSync(process.execPath, ['--experimental-strip-types', '--no-warnings', BIN, 'new', '--dry-run', '-'], {
       encoding: 'utf8',
       input: fs.readFileSync(specFile, 'utf8'),
-      env: { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', AGENTCTL_HOME: home },
+      env: { PATH: process.env.PATH ?? '', HOME: path.join(scratch.dir, 'user-home'), CLAUDE_CONFIG_DIR: path.join(scratch.dir, 'claude-home'), AGENTCTL_HOME: home, CODEX_HOME: path.join(scratch.dir, 'codex-home') },
     });
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stdout, /tmux new-session -d -s agentctl -n nc-1/);
@@ -126,7 +126,9 @@ describe('spec example', () => {
     const r = agentctl(['spec', 'example'], { AGENTCTL_HOME: path.join(scratch.dir, 'none') });
     assert.equal(r.code, 0);
     assert.equal(r.stdout, EXAMPLE_SPEC);
-    assert.equal(splitSpecs(EXAMPLE_SPEC)[0]?.header.task, 'NC-42');
+    assert.doesNotMatch(EXAMPLE_SPEC, /neon.city|~\/Projects|marcinkrzetowski/i);
+    assert.deepEqual(splitSpecs(EXAMPLE_SPEC)[0]?.header.links, []);
+    assert.equal(splitSpecs(EXAMPLE_SPEC)[0]?.header.task, 'TASK-42');
     const readme = fs.readFileSync(path.join(REPO_ROOT, 'README.md'), 'utf8');
     assert.ok(readme.includes(EXAMPLE_SPEC), 'README must contain the example spec verbatim (see src/example.ts)');
   });
@@ -139,10 +141,10 @@ describe('spec example', () => {
     assert.equal(r.code, 0, r.stderr);
     const commands = r.stdout.split('\n').filter((l) => l && !l.startsWith('#')).map((l) => l.replace(/^(write \S+) \(\d+ bytes\)$/, '$1'));
     // with the events on (the default) the agent line ends with -c notify=[…agentctl event…]
-    assert.ok(commands.some((c) => c.startsWith("tmux send-keys -t '=agentctl:nc-42' -l -- 'codex --sandbox danger-full-access -m gpt-6-astra -c model_reasoning_effort=medium -c ") && c.includes('notify=[') && c.includes('event')));
+    assert.ok(commands.some((c) => c.startsWith("tmux send-keys -t '=agentctl:task-42' -l -- 'codex --sandbox danger-full-access -m gpt-6-astra -c model_reasoning_effort=medium -c ") && c.includes('notify=[') && c.includes('event')));
     assert.ok(!commands.some((c) => c.includes('claude')));
     assert.ok(r.stdout.includes('#   Model: gpt-6-astra · effort medium'));
-    assert.ok(commands.some((c) => c.startsWith('git -C ') && c.includes('worktree add -b nc-42-tram-bell')));
+    assert.ok(commands.some((c) => c.startsWith('git -C ') && c.includes('worktree add -b task-42-notification-sound')));
 
     const bad = agentctl(['new', '--dry-run', '--agent', 'gemini', f], { AGENTCTL_HOME: none });
     assert.equal(bad.code, 1);
@@ -154,7 +156,7 @@ describe('spec example', () => {
     fs.writeFileSync(f, EXAMPLE_SPEC);
     const r = agentctl(['new', '--dry-run', f], { AGENTCTL_HOME: path.join(scratch.dir, 'none') });
     assert.equal(r.code, 0, r.stderr);
-    assert.match(r.stdout, /git -C \S+neon-city worktree add -b nc-42-tram-bell \S+neon-city-nc-42 master/);
+    assert.match(r.stdout, /git -C \S+sample-app worktree add -b task-42-notification-sound \S+sample-app-task-42 main/);
   });
 });
 

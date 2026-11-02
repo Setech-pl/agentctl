@@ -14,14 +14,12 @@ The npm runtime is JavaScript emitted into `dist/` by `npm run build`, with `.ts
 - `--dry-run` prints the commands as `(cd <worktree> && sh -c '…')`.
 - `new --no-agent` stops after setup and links: no TASK.md, window or agent. Handy to check a project's setup.
 
-Recommended for Neon City (checked live on 2026-10-31: `npm ci` works in a fresh worktree; `package.json` declares `@neon-city/*` as `file:../neon-city-backend/packages/*`, which does not resolve from `~/Projects/wt`, so the links point them at the backend worktree under test). Add to `~/Projects/neon-city/.agentctl.yaml`:
+For a Node project that needs dependencies installed in each worktree, add to its `.agentctl.yaml`:
 
 ```yaml
 setup:
   - npm ci --prefer-offline --no-audit --no-fund
 ```
-
-The existing `links:` of that file (`node_modules/@neon-city/protocol` and `…/sim` -> `~/Projects/wt/neon-city-backend-merge3/packages/*`) then do the rest; they are literal paths, so they no longer depend on `node_modules` existing.
 
 ## Links
 
@@ -29,7 +27,7 @@ Links are the glue that lets a worktree use *another* worktree's code (for examp
 
 - `from` is relative to the first worktree, `to` is what it should point at.
 - `to` must exist (checked before anything is created), otherwise `new` stops with the list of missing targets.
-- `to` without `*`: every match of the glob `from` becomes a symlink to `to`. A `from` without glob characters is a **literal path**: it is linked even if nothing exists there yet, and its parent directories are created (`mkdir -p`), so `from: node_modules/@neon-city/protocol` works in a worktree without `node_modules`.
+- `to` without `*`: every match of the glob `from` becomes a symlink to `to`. A `from` without glob characters is a **literal path**: it is linked even if nothing exists there yet, and its parent directories are created (`mkdir -p`), so `from: node_modules/@scope/protocol` works in a worktree without `node_modules`.
 - A glob that matches nothing only warns, and the warning points to literal paths.
 - `to` ending in `/*` (and `from` ending in `/*`): one link per entry of that directory, named after the entry.
   `from: node_modules/@scope/*`, `to: ~/backend/packages/*` links `node_modules/@scope/foo` to `~/backend/packages/foo`, and so on.

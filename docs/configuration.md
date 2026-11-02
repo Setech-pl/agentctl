@@ -100,7 +100,7 @@ The session started by `agentctl manager`: Claude Code with [Remote Control](htt
 
 | Key | Type | Default | Layers | Meaning |
 |---|---|---|---|---|
-| `manager.project` | path | none | g | The directory the session runs in (it should be a folder you have trusted in Claude Code, e.g. `~/Projects/neon-city`). Without it the manager runs in the directory where `agentctl manager` is typed. `--project` overrides it. |
+| `manager.project` | path | none | g | The directory the session runs in (it should be a folder you have trusted in Claude Code, e.g. `~/src/sample-app`). Without it the manager runs in the directory where `agentctl manager` is typed. `--project` overrides it. |
 | `manager.name` | string | `agentctl manager` | g | The name of the session in the Claude app (`claude --remote-control <name>`). One line, at most 80 characters. |
 | `manager.model` | string | `sonnet` | g | `--model` of the session; `default` passes none. |
 | `manager.effort` | `low` `medium` `high` `xhigh` `max` | `medium` | g | `--effort` of the session. |

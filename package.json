@@ -40,7 +40,7 @@
     "node": ">=22.14.0"
   },
   "scripts": {
-    "test": "node --experimental-strip-types --no-warnings --test \"tests/**/*.test.ts\"",
+    "test": "node --experimental-strip-types --no-warnings --import ./tests/isolation.ts --test \"tests/**/*.test.ts\"",
     "typecheck": "tsc --noEmit",
     "agentctl": "node --experimental-strip-types --no-warnings bin/agentctl.ts",
     "docs": "node --experimental-strip-types --no-warnings scripts/gen-docs.ts",

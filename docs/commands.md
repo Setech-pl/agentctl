@@ -100,12 +100,12 @@ agentctl new [options] [file]
 Examples:
 
 ```sh
-agentctl new --dry-run nc-42.md        # print every command, run nothing
-agentctl new nc-42.md                  # start the tasks of the file
+agentctl new --dry-run task-42.md        # print every command, run nothing
+agentctl new task-42.md                  # start the tasks of the file
 agentctl new --clip                    # spec from the clipboard, summary, y/N
-agentctl new --agent codex nc-42.md    # run the specs on Codex (models through the equivalents table)
-agentctl new --no-agent nc-42.md       # only worktree, setup and links
-agentctl new --cohort sprint-1 nc-42.md   # the tasks of the file join the cohort
+agentctl new --agent codex task-42.md    # run the specs on Codex (models through the equivalents table)
+agentctl new --no-agent task-42.md       # only worktree, setup and links
+agentctl new --cohort sprint-1 task-42.md   # the tasks of the file join the cohort
 ```
 
 ## agentctl queue
@@ -132,10 +132,10 @@ agentctl queue [options] [command] [file]
 Examples:
 
 ```sh
-agentctl queue nc-42.md                # summary, y/N, then the tasks wait for a free window
+agentctl queue task-42.md                # summary, y/N, then the tasks wait for a free window
 agentctl queue --clip -y               # spec from the clipboard, no question
-agentctl queue --agent codex nc-42.md  # run them on Codex (through the equivalents table)
-agentctl queue --cohort sprint-1 nc-42.md   # the tasks of the file join the cohort
+agentctl queue --agent codex task-42.md  # run them on Codex (through the equivalents table)
+agentctl queue --cohort sprint-1 task-42.md   # the tasks of the file join the cohort
 ```
 
 ## agentctl queue list
@@ -174,7 +174,7 @@ agentctl queue rm [options] <task>
 Examples:
 
 ```sh
-agentctl queue rm NC-42
+agentctl queue rm TASK-42
 ```
 
 ## agentctl queue up
@@ -192,7 +192,7 @@ agentctl queue up [options] <task>
 Examples:
 
 ```sh
-agentctl queue up NC-42                # first in line (priority: high still goes first)
+agentctl queue up TASK-42                # first in line (priority: high still goes first)
 ```
 
 ## agentctl queue retry
@@ -210,7 +210,7 @@ agentctl queue retry [options] <task>
 Examples:
 
 ```sh
-agentctl queue retry NC-42             # after a failed start: back at the end of the line
+agentctl queue retry TASK-42             # after a failed start: back at the end of the line
 ```
 
 ## agentctl queue pause
@@ -260,8 +260,8 @@ agentctl unblock [options] <task>
 Examples:
 
 ```sh
-agentctl unblock NC-43                           # drop every cancelled task from its after
-agentctl unblock NC-43 --drop-after NC-42        # drop only this one
+agentctl unblock TASK-43                           # drop every cancelled task from its after
+agentctl unblock TASK-43 --drop-after TASK-42        # drop only this one
 ```
 
 ## agentctl cohort
@@ -337,7 +337,7 @@ agentctl cohort add [options] <name> <tasks...>
 Examples:
 
 ```sh
-agentctl cohort add sprint-1 NC-41 NC-42    # the cohort is made if it is new
+agentctl cohort add sprint-1 TASK-41 TASK-42    # the cohort is made if it is new
 ```
 
 ## agentctl cohort remove
@@ -355,7 +355,7 @@ agentctl cohort remove [options] <tasks...>
 Examples:
 
 ```sh
-agentctl cohort remove NC-42
+agentctl cohort remove TASK-42
 ```
 
 ## agentctl cohort note
@@ -622,7 +622,7 @@ Examples:
 
 ```sh
 agentctl resume                           # the list, y/N, then the windows come back
-agentctl resume NC-42 NC-43 -y
+agentctl resume TASK-42 TASK-43 -y
 agentctl resume --all                     # also tasks that have a report
 agentctl resume --dry-run
 ```
@@ -666,9 +666,9 @@ agentctl mark [options] <task> <result>
 Examples:
 
 ```sh
-agentctl mark NC-42 ok
-agentctl mark NC-42 partial --note "missed the edge case"
-agentctl mark NC-42 fail
+agentctl mark TASK-42 ok
+agentctl mark TASK-42 partial --note "missed the edge case"
+agentctl mark TASK-42 fail
 ```
 
 ## agentctl log
@@ -779,7 +779,7 @@ agentctl hide [options] <tasks...>
 Examples:
 
 ```sh
-agentctl hide NC-41 NC-42
+agentctl hide TASK-41 TASK-42
 ```
 
 ## agentctl unhide
@@ -797,7 +797,7 @@ agentctl unhide [options] <tasks...>
 Examples:
 
 ```sh
-agentctl unhide NC-42
+agentctl unhide TASK-42
 ```
 
 ## agentctl pull
@@ -821,7 +821,7 @@ agentctl pull [options] [task]
 Examples:
 
 ```sh
-agentctl pull NC-42                    # one report to the clipboard
+agentctl pull TASK-42                    # one report to the clipboard
 agentctl pull --ready                    # all new reports in one text
 agentctl pull --ready --all              # also the ones pulled before
 agentctl pull --ready --cohort sprint-1  # only the reports of one cohort
@@ -849,8 +849,8 @@ agentctl close [options] [tasks...]
 Examples:
 
 ```sh
-agentctl close NC-41 NC-42 --rm-worktree
-agentctl close NC-42 --dry-run
+agentctl close TASK-41 TASK-42 --rm-worktree
+agentctl close TASK-42 --dry-run
 agentctl close --cohort sprint-1        # the open tasks of a cohort: list, y/N
 ```
 
@@ -877,9 +877,9 @@ agentctl cancel [options] [tasks...]
 Examples:
 
 ```sh
-agentctl cancel NC-42 --reason "wrong approach"   # interrupt, close the window; worktree and branch stay
-agentctl cancel NC-41 NC-42 --rm-worktree -y      # also remove the worktrees (branches stay)
-agentctl cancel NC-43                             # a queued task: taken out of the queue
+agentctl cancel TASK-42 --reason "wrong approach"   # interrupt, close the window; worktree and branch stay
+agentctl cancel TASK-41 TASK-42 --rm-worktree -y      # also remove the worktrees (branches stay)
+agentctl cancel TASK-43                             # a queued task: taken out of the queue
 agentctl cancel --cohort sprint-1 --reason "scrapped"   # the whole cohort: list, y/N
 ```
 
@@ -944,8 +944,8 @@ agentctl report [options] <task>
 Examples:
 
 ```sh
-agentctl report NC-42                  # where the report is; what the search finds
-agentctl report NC-42 --from docs/reports/nc-42-final.md   # use that file (copied to the canonical path)
+agentctl report TASK-42                  # where the report is; what the search finds
+agentctl report TASK-42 --from docs/reports/task-42-final.md   # use that file (copied to the canonical path)
 ```
 
 ## agentctl away
@@ -1034,7 +1034,7 @@ Examples:
 
 ```sh
 agentctl manager                       # start the session you open from the Claude app on the phone
-agentctl manager --project ~/Projects/neon-city --model sonnet --effort medium
+agentctl manager --project ~/src/sample-app --model sonnet --effort medium
 agentctl manager --url                 # the address / QR code, if the window shows them
 ```
 
@@ -1122,7 +1122,7 @@ agentctl adopt [options] <task>
 Examples:
 
 ```sh
-agentctl adopt NC-42 --report ~/Projects/cache/nc-42/NC-42.md --agent claude --worktree ~/Projects/wt/app-nc-42
+agentctl adopt TASK-42 --report ~/reports/task-42/TASK-42.md --agent claude --worktree ~/worktrees/app-task-42
 ```
 
 ## agentctl interrupt
@@ -1144,7 +1144,7 @@ agentctl interrupt [options] <task>
 Examples:
 
 ```sh
-agentctl interrupt NC-42
+agentctl interrupt TASK-42
 ```
 
 ## agentctl attach
@@ -1166,8 +1166,8 @@ agentctl attach [options] [task]
 Examples:
 
 ```sh
-agentctl attach NC-42
-agentctl attach nc-4                    # a unique prefix is enough
+agentctl attach TASK-42
+agentctl attach task-4                    # a unique prefix is enough
 ```
 
 ## agentctl event
@@ -1205,7 +1205,7 @@ agentctl usage-tap [options]
 Examples:
 
 ```sh
-echo '{"session_id":"x","rate_limits":{}}' | agentctl usage-tap --task NC-42   # what the statusLine of a task window runs
+echo '{"session_id":"x","rate_limits":{}}' | agentctl usage-tap --task TASK-42   # what the statusLine of a task window runs
 ```
 
 ## agentctl move
@@ -1228,8 +1228,8 @@ agentctl move [options] <task>
 Examples:
 
 ```sh
-agentctl move NC-42                    # to the other provider, asks y/N
-agentctl move NC-42 --agent codex -y
+agentctl move TASK-42                    # to the other provider, asks y/N
+agentctl move TASK-42 --agent codex -y
 ```
 
 ## agentctl peek
@@ -1251,8 +1251,8 @@ agentctl peek [options] <task>
 Examples:
 
 ```sh
-agentctl peek NC-42
-agentctl peek NC-42 -n 80
+agentctl peek TASK-42
+agentctl peek TASK-42 -n 80
 ```
 
 ## agentctl mcp
@@ -1370,5 +1370,5 @@ agentctl spec example [options]
 Examples:
 
 ```sh
-agentctl spec example > nc-42.md
+agentctl spec example > task-42.md
 ```

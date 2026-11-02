@@ -82,7 +82,7 @@ describe('mcp: over stdio, as the app starts it', () => {
     const transport = new StdioClientTransport({
       command: process.execPath,
       args: ['--experimental-strip-types', '--no-warnings', path.join(REPO_ROOT, 'bin', 'agentctl.ts'), 'mcp'],
-      env: { PATH: process.env.PATH ?? '/usr/bin:/bin', AGENTCTL_HOME: home, TMUX_TMPDIR: root, LANG: 'en_US.UTF-8' },
+      env: { HOME: path.join(root, 'user-home'), CODEX_HOME: path.join(root, 'codex-home'), CLAUDE_CONFIG_DIR: path.join(root, 'claude-home'), PATH: process.env.PATH ?? '/usr/bin:/bin', AGENTCTL_HOME: home, TMUX_TMPDIR: root, LANG: 'en_US.UTF-8' },
       stderr: 'pipe',
     });
     const client = new Client({ name: 'stdio-test', version: '0' });

@@ -61,7 +61,8 @@ describe('events: the journal and the markers', () => {
     assert.equal((await collectEvents(w.ctx, { client: 'mcp', since: '30m', keep: true })).events.length, 0);
     assert.equal((await collectEvents(w.ctx, { client: 'mcp', since: '2h', keep: true })).events.length, 1);
     assert.equal((await collectEvents(w.ctx, { client: 'mcp', since: '2026-11-02T09:00:00Z', keep: true })).events.length, 1);
-    assert.equal(parseSince('11:30', 'cli', w.config, min(90)).ms < min(90), true);
+    // HH:MM may equal now (11:30 in UTC); it must never point into the future.
+    assert.equal(parseSince('11:30', 'cli', w.config, min(90)).ms <= min(90), true);
     assert.throws(() => parseSince('yesterday-ish', 'cli', w.config, min(0)), /cannot read the time/);
   });
 

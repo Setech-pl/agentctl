@@ -698,7 +698,7 @@ function parseManager(v: unknown, p: Problems): ManagerSettings {
   const manager: ManagerSettings = { project: null, name: DEFAULT_MANAGER_NAME, model: 'sonnet', effort: 'medium', guide: null, autostart: false };
   if (v === undefined || v === null) return manager;
   if (!isObject(v)) {
-    p.add('config.manager must be a mapping like {project: ~/Projects/neon-city, model: sonnet}');
+    p.add('config.manager must be a mapping like {project: ~/src/sample-app, model: sonnet}');
     return manager;
   }
   checkKeys(v, MANAGER_KEYS, 'config.manager', p);

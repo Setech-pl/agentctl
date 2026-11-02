@@ -35,6 +35,12 @@ Every milestone is closed in this order:
 
 ## Testing against the real tools
 
+`npm test` preloads `tests/isolation.ts`: each test process gets disposable HOME,
+AGENTCTL_HOME, CODEX_HOME, CLAUDE_CONFIG_DIR and tmux/temp directories, plus a PATH
+with inert agent, tmux, clipboard and notification commands. Scratch files live
+under `.cache/` (or `AGENTCTL_TEST_TMP`) and are removed on exit. Tests that need
+tool behavior supply their own fakes; they require no installed coding agents.
+
 Tests never touch your tmux or your agents. When you try a change live (a real tmux, real git, a started task), do it only through `scripts/live-harness.ts`; never by hand in your own `agentctl` session, and never against your own tasks. Earlier hand-made attempts started the real Claude Code twice, ran the real `notify` program of a Codex config once and overwrote the clipboard once.
 
 The harness builds a sandbox under `~/Projects/cache/<task>/live-<name>/` and gives every process under test:
