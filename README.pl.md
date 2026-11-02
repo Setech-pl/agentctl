@@ -16,6 +16,7 @@ agentctl zarządza **zleceniami, nie oknami**. Jednostką jest spec: plik Markdo
 - **Stany zadań.** `working`, `waiting`, `needs-input`, `needs-trust`, `limited`, `report-ready` i inne, z ekranu każdego okna oraz ze zdarzeń, które agenci wysyłają sami (hooki Claude, `notify` Codexa).
 - **Powiadomienia.** Jedno powiadomienie na zmianę stanu; kliknięcie przełącza na okno zadania.
 - **Telefon.** `agentctl ntfy-setup` i `agentctl away on`: zdarzenia, które Cię potrzebują, idą też na telefon przez ntfy, a w wiadomości są tylko ID zadania i linia werdyktu.
+- **Sterowanie z telefonu.** `agentctl manager` startuje sesję Claude Code z Remote Control i narzędziami MCP agentctl: rozmawiasz z agentami z aplikacji Claude na telefonie.
 - **Board.** Pełnoekranowy przegląd wszystkich zadań z podglądem na żywo wybranego okna.
 - **Raporty.** `agentctl pull --ready` zbiera nowe raporty w jeden tekst dla czatu planującego. Raport zapisany gdzie indziej, niż mówi spec, jest znajdowany i kopiowany ([Wykrywanie raportu](docs/details.pl.md#wykrywanie-raportu)).
 - **Kolejka, zależności, kolizje.** Więcej zadań niż wolnych okien? Czekają i startują same; przegląd może czekać na raport autora (`after`); dwa zadania zmieniające te same pliki są oznaczane wcześnie.
@@ -39,7 +40,8 @@ sequenceDiagram
     participant G as git + tmux
     participant X as Agent (Claude Code / Codex)
     participant W as watch + powiadomienia
-    participant P as Telefon (ntfy)
+    participant P as Telefon (ntfy, aplikacja Claude)
+    participant M as Manager (Claude Code, Remote Control)
 
     H->>C: opisujesz pracę
     C-->>H: spec (nagłówek YAML + prompt, opcjonalnie cohort: nazwa)
@@ -88,6 +90,13 @@ sequenceDiagram
     opt away jest włączone
         W-->>P: to samo, tylko ID zadania + linia werdyktu (ntfy, ponawiane przy braku sieci)
     end
+    opt z telefonu: działa okno managera (agentctl manager)
+        P->>M: aplikacja Claude, Code, sesja „agentctl manager": co słychać?
+        M->>A: events_since, status, get_report (MCP)
+        M-->>P: krótkie streszczenie
+        P->>M: tak, zlecaj następny krok
+        M->>A: new / send (MCP, mcp.allow - Claude Code pyta najpierw)
+    end
     C->>A: events_since (MCP): co się zmieniło od ostatniego wywołania
     W-->>H: kohorta sprint-1: wszystkie raporty gotowe (raz na kohortę)
     H->>A: agentctl pull --ready (albo MCP pull_ready)
@@ -117,7 +126,7 @@ flowchart TB
         BOARD["board (Ink, src/board)"]
         MCP["serwer MCP (src/mcp, stdio)"]
     end
-    CORE["src/core: spec, plan, new, queue, cancel, cohort, collisions, status, pull, close, move, watch, events, notify, usage, history, limits, chat-events, journal, gc, resume, away, phone"]
+    CORE["src/core: spec, plan, new, queue, cancel, cohort, collisions, status, pull, close, move, watch, events, notify, usage, history, limits, chat-events, journal, gc, resume, away, phone, manager, remote-control"]
     RUN["Runner: RealRunner / RecordingRunner"]
     subgraph world [Na zewnątrz]
         TMUX[sesja tmux agentctl]
@@ -125,6 +134,8 @@ flowchart TB
         AG[Claude Code i Codex]
         NOTE[terminal-notifier / osascript]
         PHONE["ntfy server -> phone"]
+        MGR["window manager: claude --remote-control + MCP, role from ~/.agentctl/manager/"]
+        APP["Claude app on the phone (Code)"]
         LOGS["logi agentów: ~/.claude/projects/…/*.jsonl, ~/.codex/sessions/…/*.jsonl"]
     end
     subgraph disk [Pliki]
@@ -154,6 +165,9 @@ flowchart TB
     CORE -- "limits.count_external" --> PS
     CORE --> NOTE
     CORE -- "away on: ID + verdict only" --> PHONE
+    TMUX --> MGR
+    MGR -. "agentctl mcp (--mcp-config)" .-> MCP
+    APP <-. "Remote Control (Anthropic API, TLS)" .-> MGR
     CORE <--> STATE
     CORE <--> QUEUE
     CORE <--> COH
@@ -462,6 +476,34 @@ away:
 
 Szczegóły: [docs/details.pl.md](docs/details.pl.md#powiadomienia-na-telefon).
 
+## Sterowanie z telefonu
+
+Lokalny serwer MCP nie działa w czatach claude.ai na telefonie (tylko w aplikacji desktopowej Claude). **Claude Code Remote Control** robi coś innego: sesję Claude Code, która działa na Twoim Macu, można kontynuować z aplikacji Claude na iOS i Androidzie, z jej lokalnymi narzędziami i serwerami MCP. `agentctl manager` startuje taką sesję za Ciebie, **dyspozytora**: widzi Twoich agentów przez narzędzia MCP agentctl, krótko odpowiada, co się dzieje, pobiera raporty, a kolejny krok zleca dopiero po Twojej wyraźnej zgodzie.
+
+1. **Sprawdź wymagania.** Claude Code zalogowany przez claude.ai (`claude auth login`; Pro, Max, Team lub Enterprise, w Team i Enterprise Owner musi włączyć Remote Control), **nie** klucz API, Bedrock, Vertex ani bramka (`ANTHROPIC_BASE_URL`). Aplikacja Claude na telefonie, zalogowana na to samo konto. `agentctl doctor` sprawdza flagi Twojego `claude` i ostrzega przed zmiennymi, przez które Claude Code odmawia Remote Control.
+2. **Uruchom managera.** `agentctl manager` (ustaw raz `manager.project`, folder, w którym pracujesz, np. `~/Projects/neon-city`; `--project` go nadpisuje). Tworzy okno `manager` w sesji agentctl i startuje w Twoim projekcie `claude --remote-control "agentctl manager"`. **Za pierwszym razem Claude Code pyta w tym oknie** o zaufanie do folderu i o *Enable Remote Control*: odpowiedz tam (`tmux attach -t agentctl \; select-window -t manager` albo zaznacz linię 🧭 na boardzie i naciśnij Enter). agentctl nigdy nie odpowiada na te okna dialogowe.
+3. **Otwórz na telefonie.** Aplikacja Claude, zakładka **Code**, sesja **agentctl manager** (ikona komputera z zieloną kropką). `agentctl manager --url` drukuje adres i kod QR, gdy okno je pokazuje; w oknie `/remote-control` pokazuje oba.
+4. **Rozmawiaj.** „Co słychać?" każe managerowi wywołać `events_since` i `status`. „Pokaż raport NC-42" daje krótką wersję. „Uruchom NC-43" każe mu pokazać spec i czekać na Twoje tak. To, co może zmienić, jest ograniczone dwa razy: przez `mcp.allow` w agentctl i przez Claude Code, który przed wywołaniem narzędzia zmieniającego coś prosi Cię o zgodę na telefonie (narzędzia tylko do odczytu nie wymagają stuknięcia).
+
+```yaml
+manager:
+  project: ~/Projects/neon-city        # gdzie działa sesja; jego pliki nie są zmieniane
+  # name: agentctl manager             # nazwa w aplikacji Claude
+  # model: sonnet                      # domyślnie
+  # effort: medium                     # domyślnie
+  # guide: ~/Projects/neon-city/claude/AGENTCTL-SPEC-GUIDE.md   # zasady pisania specyfikacji, dodane do roli
+  # autostart: true                    # agentctl up startuje też managera
+mcp:
+  allow: [send, new, queue]            # co manager w ogóle może, za Twoim tak
+```
+
+- **Co robi `agentctl manager`.** Jedno okno `manager`, nigdy drugi egzemplarz; `agentctl manager stop` je zamyka (sesja przechodzi offline w aplikacji). To sesja interaktywna, startowana z `--mcp-config` (serwer agentctl), `--settings` (narzędzia do odczytu nie wymagają stuknięcia) i `--append-system-prompt-file` (rola), wszystkie trzy z plików w `~/.agentctl/manager/`: nic w Twoim projekcie się nie zmienia. Rola: najpierw `events_since` i `status`, zmiany tylko za Twoim wyraźnym tak na tę właśnie czynność, streszczenia do 6 linii, nigdy merge, push ani tag. Okno **nie jest zadaniem**: nie jest sierotą w `status`, nie liczy się do limitów, a `close`, `cancel` i `gc` go nie ruszają. Board pokazuje je w osobnej linii (🧭 *czeka na potwierdzenie w oknie / czeka na połączenie / połączony*).
+- **Odpowiadanie zadaniu z telefonu.** `remote_control: true` w specu (albo `defaults.remote_control: true`, tylko Claude) startuje agenta z `--remote-control <TASK>`: zadanie pojawia się na tej samej liście w aplikacji Claude pod swoim ID i możesz tam odpowiedzieć na jego pytanie. Powiadomienie `needs-input` na telefonie kończy się wtedy: „Odpowiesz w aplikacji Claude: NC-42".
+- **Powiadomienia.** Gdy okno managera działa, powiadomienia na telefon o pytaniu, gotowym raporcie i skończonej kohorcie kończą się: „Otwórz sesję „agentctl manager” w aplikacji Claude." Bez linku i bez ścieżki.
+- **Ograniczenia.** Mac musi być włączony i **nie uśpiony**, a proces `claude` musi działać (tmux o to dba; zamknięcie okna kończy sesję). Po uśpieniu albo utracie sieci sesja interaktywna łączy się ponownie sama. Potrzebny plan claude.ai (Pro lub Max dla osoby); gdy sesja jest połączona, rozmowa jest przechowywana na serwerach Anthropic. Jedna sesja na proces `claude`. Komendy takie jak `/plugin` działają tylko przy Macu. Remote Control nie był tu próbowany na prawdziwym Claude Code (testy i harness używają atrapy `claude`): [co sprawdzono, a czego nie](docs/details.pl.md#zdalne-sterowanie-i-manager).
+
+Szczegóły: [docs/details.pl.md](docs/details.pl.md#zdalne-sterowanie-i-manager).
+
 ## Odpowiedniki modeli i move
 
 Modele Claude i Codexa nie odpowiadają sobie jeden do jednego, więc agentctl trzyma tabelę par, które uznajesz za równoważne (działa w obie strony), na przykład `opus/high` i `gpt-6-astra/medium`. Własne pary dodajesz w `equivalents:`; mają pierwszeństwo przed wbudowanymi. Fable i effort `max` są celowo niemapowane.
@@ -657,7 +699,7 @@ agentctl up                                # start dnia
 
 - `resume` tworzy okno od nowa i uruchamia agenta **w trybie wznowienia**, z tym samym modelem, effortem, flagami, hookami zdarzeń i usage-tap: Claude z `--resume <sesja>` (sesja zapisana przez hooki lub usage-tap) albo `--continue`, Codex z `resume <sesja>` albo `resume --last`. Prompt nie jest wklejany ponownie. Limit dostawcy jest respektowany; zadanie, które się nie mieści, jest pomijane.
 - Gdy startuje `watch`, wysyła jedno powiadomienie „N zadań do wznowienia”. Board wypisuje je w sekcji **„Do wznowienia”**; **`R`** je wznawia (po y/N). MCP: `resume` (zapis, za `mcp.allow`, najpierw podsumowanie i `confirm: true`).
-- `agentctl up` dba, żeby watcher i board działały w sesji agentctl (nigdy drugi egzemplarz), mówi, które zadania można wznowić, i przechodzi do boardu; bez terminala tylko wypisuje polecenie.
+- `agentctl up` dba, żeby watcher i board (a z `manager.autostart: true` także manager) działały w sesji agentctl (nigdy drugi egzemplarz), mówi, które zadania można wznowić, i przechodzi do boardu; bez terminala tylko wypisuje polecenie.
 
 ## Integracja z czatem (MCP)
 
@@ -705,6 +747,7 @@ Czego agentctl nigdy nie robi:
 - Kolejka rusza tylko, gdy działa `agentctl watch`. `watch` wczytuje config ponownie, gdy plik się zmieni, więc zmiana limitu nie wymaga restartu; po zmianie `session` albo `state_dir` w działającym watchu lepiej go zrestartować.
 - Kolizje porównują nazwy plików z gita, nie fragmenty; zadanie z niezacommitowanymi zmianami w innym checkoucie repozytorium nie jest widoczne.
 - `move` zaczyna nową rozmowę: nowy agent poznaje stan z `git log` i `git diff`, nie z kontekstu starego agenta.
+- Remote Control: Mac musi być włączony i nie uśpiony; zamknięte okno managera (albo zrestartowany Mac) znika, dopóki `agentctl manager` (albo `agentctl up` z `manager.autostart`) nie uruchomi go ponownie, jako nowa rozmowa. Teksty ekranu, które czyta agentctl (`/rc active`, komunikat o błędzie, okno „Enable Remote Control"), pochodzą z dokumentacji Claude Code, nie z prawdziwego ekranu.
 - Anulowanie zatrzymuje agenta jego klawiszem przerwania i zamyka okno; to, co agent już zrobił, zostaje w worktree (`cancel` tego nie cofa). `cancel --rm-worktree` odrzuca worktree z niezatwierdzonymi plikami, tak jak `close`.
 - Na boardzie `k` to filtr kohorty, więc nie przesuwa już zaznaczenia w górę (robi to strzałka; `j` nadal w dół).
 - `close --rm-worktree` najpierw zabija okno; worktree z niezatwierdzonymi plikami jest potem odrzucany (bez `--force`).

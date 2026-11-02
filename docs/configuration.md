@@ -95,7 +95,7 @@ Default icons: `working` ⚙, `background` ⏳, `waiting` ⏸, `needs-input` ?, 
 
 ### `manager`
 
-The session started by `agentctl manager`: Claude Code with [Remote Control](https://code.claude.com/docs/en/remote-control), the agentctl MCP server and a role that makes it a dispatcher.
+The session started by `agentctl manager`: Claude Code with [Remote Control](https://code.claude.com/docs/en/remote-control), the agentctl MCP server and a role that makes it a dispatcher. See [Remote control from your phone](../README.md#remote-control-from-your-phone) and [the details](details.md#remote-control-and-the-manager).
 
 | Key | Type | Default | Layers | Meaning |
 |---|---|---|---|---|

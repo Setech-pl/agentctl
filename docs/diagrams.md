@@ -15,7 +15,8 @@ sequenceDiagram
     participant G as git + tmux
     participant X as Agent (Claude Code / Codex)
     participant W as watch + notifier
-    participant P as Phone (ntfy)
+    participant P as Phone (ntfy, Claude app)
+    participant M as Manager (Claude Code, Remote Control)
 
     H->>C: describe the work
     C-->>H: spec (YAML header + prompt, optional cohort: name)
@@ -64,6 +65,13 @@ sequenceDiagram
     opt away is on
         W-->>P: the same, only task ID + verdict line (ntfy, retried if the network is down)
     end
+    opt from the phone: the manager window runs (agentctl manager)
+        P->>M: Claude app, Code, session "agentctl manager": what is going on?
+        M->>A: events_since, status, get_report (MCP)
+        M-->>P: a short summary
+        P->>M: yes, start the next step
+        M->>A: new / send (MCP, mcp.allow - Claude Code asks first)
+    end
     C->>A: events_since (MCP): what changed since the last call
     W-->>H: kohorta sprint-1: all reports ready (once per cohort)
     H->>A: agentctl pull --ready (or MCP pull_ready)
@@ -91,7 +99,7 @@ flowchart TB
         BOARD["board (Ink, src/board)"]
         MCP["MCP server (src/mcp, stdio)"]
     end
-    CORE["src/core: spec, plan, new, queue, cancel, cohort, collisions, status, pull, close, move, watch, events, notify, usage, history, limits, chat-events, journal, gc, resume, away, phone"]
+    CORE["src/core: spec, plan, new, queue, cancel, cohort, collisions, status, pull, close, move, watch, events, notify, usage, history, limits, chat-events, journal, gc, resume, away, phone, manager, remote-control"]
     RUN["Runner: RealRunner / RecordingRunner"]
     subgraph world [Outside]
         TMUX[tmux session agentctl]
@@ -99,6 +107,8 @@ flowchart TB
         AG[Claude Code and Codex]
         NOTE[terminal-notifier / osascript]
         PHONE["ntfy server -> phone"]
+        MGR["window manager: claude --remote-control + MCP, role from ~/.agentctl/manager/"]
+        APP["Claude app on the phone (Code)"]
         LOGS["agent logs: ~/.claude/projects/…/*.jsonl, ~/.codex/sessions/…/*.jsonl"]
         PS["ps, lsof: claude/codex sessions outside agentctl"]
     end
@@ -129,6 +139,9 @@ flowchart TB
     CORE -- "limits.count_external" --> PS
     CORE --> NOTE
     CORE -- "away on: ID + verdict only" --> PHONE
+    TMUX --> MGR
+    MGR -. "agentctl mcp (--mcp-config)" .-> MCP
+    APP <-. "Remote Control (Anthropic API, TLS)" .-> MGR
     CORE <--> STATE
     CORE <--> QUEUE
     CORE <--> COH
