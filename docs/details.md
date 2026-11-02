@@ -278,6 +278,37 @@ Tasks can be grouped under a name you chose: `cohort: sprint-1` in a spec, `--co
 - **Filters.** `--cohort <name>` on `status` (also `--json` and `--clip`), `pull --ready`, `close`, `cancel` and `queue list`. Without it every task is meant, as before. `close --cohort X` and `cancel --cohort X` show the list and ask y/N.
 - **Notification.** When every task of a cohort that was not cancelled has a report (the queued ones too), the watcher says `kohorta <nazwa>: wszystkie raporty gotowe (N)`: once per cohort, and again only when a task has joined since.
 
+## Live limits and the config reload
+
+- **`agentctl limits`** counts per provider: the windows of the agentctl session (attributed through `TASK.md`), plus the reserved places, plus the external sessions when `limits.count_external` is on; free = limit − used. The same count decides `new` (error or switch offer), `queue` (what the summary says), the queue ticks of `watch` and `queue list`.
+- **`limits set`** edits the file with the `yaml` package's document API: comments, order of the keys and the other values stay (an inline comment is written after one space). The old file is copied to `config.yaml.bak`; the result is loaded once to check it, and the old text comes back if it does not load. `off` (or `none`) deletes a key.
+- **Reservations** are `<config dir>/reservations.json`: per provider a count and a note. `reserve` adds, `release claude=1` subtracts, `release claude` drops all of them.
+- **External sessions** (`limits.count_external: true`): `ps -U <uid> -o pid=,ppid=,command=` lists the processes. A process counts when its command is `claude` or `codex` (or `node …/claude-code/….js`, `node …/@openai/codex/….js`) without `mcp`, `mcp-server`, `app-server`, `exec`, `-p`, `--print`, `usage-tap` or `agentctl` among its arguments, when no ancestor is a pane process of the agentctl session (`tmux list-panes -s`), and when no ancestor is itself a counted session (a helper process of a session is not a second session). The directory comes from `lsof -a -d cwd`. Nothing is killed or touched.
+- **The reload.** A `ConfigStore` keeps the configuration in force and the text it was loaded from. `watch` calls it at every tick and from `fs.watch` of the config folder; the MCP server calls it on every tool call (it always read the file again; now a file that does not load no longer takes the server down). A text that loads replaces the configuration in force (`Context.setConfig`: the tmux client follows a changed `session` or window icons) and the watch log says `config: reloaded (limits, mcp)`. A text that does not load is reported once (`config: config.yaml does not load, the previous settings stay in force: …`), `config-state.json` records it, `doctor` shows a `config reload` warning, the MCP `status` and `version` carry the warning, and a CLI command that cannot load the file mentions that the watcher keeps the previous settings. A `notify` change makes the watcher build its notifier again.
+
+## Events for the chat
+
+- **The journal** `<config dir>/journal.jsonl`: `{at, kind, task?, cohort?, text, verdict?}`. Kinds: `report-ready`, `queue-start`, `queue-failed`, `needs-input`, `needs-trust`, `blocked`, `cancelled`, `limited`, `dead`, `cohort-done`, `usage`, `limits-changed`. Writers: the watcher (a transition that was not already announced by the agent's own event), the event command, the queue (start, failed start, blocked), `cancel`, the cohort check, the plan thresholds, `limits set`/`reserve`/`release` and the config reload (written once if both saw the same change). A task event gets the cohort of the task.
+- **The marker** `<config dir>/events-seen.json`: the time of the last call per client (`cli`, `mcp`). `since: last` means after that time; the first call of a client looks back 24 hours; `--keep` / `peek: true` and `--clip` leave the marker. A dry run leaves it too.
+- **The summary line** counts the tasks with a window that are not finished (and how many work), the tasks that wait for you (needs-input, needs-trust, waiting), the queue and the reports ready and not pulled.
+- Events exist only while `agentctl watch` runs (or when a command writes them itself: cancel, limits). A chat that calls `events_since` after a night without a watcher still gets the summary of the state now.
+
+## Clean-up (`gc`)
+
+- **What is looked at:** the task records of `state_dir` and of the archive, for tasks that are `closed`, `cancelled` or archived and have no window. Everything else is out of reach: an active task, a worktree that another unfinished task also uses (a `move` shares one), a folder of the cache that belongs to no record.
+- **Worktrees:** `git status --porcelain` must be empty, the checked-out branch must not be `main`/`master`, the main checkout is never a candidate; the removal is `git worktree remove <path>` without `--force`. `git worktree list --porcelain` also names worktrees of the same repositories that no task owns; they are only listed as skipped.
+- **Files next to the reports:** in the folder of the report of such a task, every entry that is not `*.md` and whose newest file is older than `--older-than`. A folder counts by the newest thing in it.
+- **State:** the `<state_dir>/<task>/` of closed tasks moves to the archive (the same move as `agentctl archive`); the history (`history.jsonl`) and the reports are not touched.
+- **Branches** (`--branches`): the branch of the task's repo entry, if it still exists, is not `main`/`master`/the current branch/the base, is not used by an unfinished task, is not checked out in another worktree (one that gc removes in the same run does not count), and `git merge-base --is-ancestor <branch> <base>` succeeds. Then `git branch -d`; git's own check is the second safety net. Remote branches are never touched.
+- `--apply` shows the list, asks y/N (`-y` skips it without a terminal), does worktrees, files, archive moves, then branches, and reports what was freed and what failed. A failure of one item does not stop the others and makes the exit code 1.
+
+## Resume and `up`
+
+- **Which tasks:** not closed, not cancelled, not archived, not hidden, not superseded, with a record that names an agent, a worktree that exists, no tmux window, and no report (`--all` also takes tasks with one). Typed task IDs must be among them.
+- **What is started:** the window is made like `new` makes it (the task's env, a new session when the old one is gone), the event wiring is written again (the settings file with hooks and the usage tap, the Codex `notify`), then the agent: Claude `claude --model … --effort … --settings … --resume <id>` / `--continue`, Codex `codex resume <id> …` / `codex resume --last …` followed by the same flags as at the start (checked with `codex resume --help` of 0.166.0: the options come after `resume`). The session id is the last one recorded in `<state_dir>/<task>/sessions.json` by the hooks or the usage tap. No prompt is pasted and the folder-trust dialog is not answered.
+- **Limits:** the places of a provider are counted as for `new`; a task that does not fit is skipped and said so.
+- **`agentctl up`:** `watch --tmux` and `board --tmux` (each only if its window is missing), the resume hint, then `attach`/`switch-client` to the board window; with no terminal (or `--no-attach`) it prints `tmux attach -t <session> \; select-window -t board`.
+
 ## Usage and limits
 
 `agentctl usage [--cohort X] [--since 7d] [--json] [--clip]` answers two questions before you hand out more work: how many tokens do the tasks use, and how close are the plans of Claude Code and Codex to their limits. What a provider does not tell is **n/d**; no number is ever estimated.
@@ -343,7 +374,7 @@ agentctl queue retry NC-42       # a failed start, once more
 - **Never switches provider.** The queue starts a task on the agent and model it was ordered on (or on the `--agent` given when it was queued). Moving to the other provider stays an explicit act: `--agent`, `agentctl move`.
 - **Starting** is the same path as `new` (worktree, `setup`, links, TASK.md, window, wait for the agent, prompt) and runs in the background of the watcher. When the agent waits for the folder-trust dialog, `needs-trust` is notified as usual and the rest of the queue goes on; the prompt follows once you confirm. A notification says "Uruchomiono TASK z kolejki".
 - **A failed start** (setup failed, repository gone, agent not ready) puts the task at the end of the line as `failed`, with the error in `queue list` and the log of the attempt in `<config dir>/queue/<n>-<TASK>.log`, and sends a notification. It is not tried again by itself; `queue retry` is your decision (it reuses a worktree the failed start left).
-- The queue only moves while `agentctl watch` runs (`watch --tmux`); `watch` reads the config when it starts, so restart it after changing `limits`. `queue.enabled: false` in the config switches starting off; `queue.parallel_starts` bounds the starts in progress ([configuration](configuration.md#queue)).
+- The queue only moves while `agentctl watch` runs (`watch --tmux`); `watch` reads the config again when the file changes ([live limits](#live-limits-and-the-config-reload)), so a changed `limits` needs no restart. `queue.enabled: false` in the config switches starting off; `queue.parallel_starts` bounds the starts in progress ([configuration](configuration.md#queue)).
 
 ### Dependencies: `after`
 
@@ -430,7 +461,10 @@ shows the last 30 lines of the selected window (as `peek`, without the footer); 
 | `l` | the log of the tasks (`agentctl log`): `↑↓` scroll, `Esc` back |
 | `o` / `p` / `f` | mark the selected finished task ok / partial / fail ([History and stats](#history-and-stats)); `p` pauses the queue when no finished task is selected |
 | `k` | pick the cohort to show: `wszystkie` (all), a cohort, or `bez kohorty` (the tasks in no cohort); `↑↓` and `Enter`, or its number. The header says `cohort: <name>`; the lists, the queue and the sections follow the filter |
-| `g` / `G` | fold the cohort group of the selected task / open every group |
+| `g` / `E` | fold the cohort group of the selected task / open every group |
+| `L` | the limits (`agentctl limits`) |
+| `G` | preview of the clean-up (`agentctl gc`; nothing is deleted from the board) |
+| `R` | resume the tasks under "Do wznowienia" (after y/N) |
 | `h` | hide the selected task (or show a hidden one); nothing is closed or removed |
 | `u` | on a task of the **Queue (N)** section: move it to the front of the queue |
 | `d` | on a task of the **Queue (N)** section: remove it from the queue, after a `[y/N]` question |
@@ -510,7 +544,7 @@ when you call `status` or `pull`.
 
 ## Safety rules
 
-- `git` is only ever called with `worktree add`, `worktree remove`, and read-only queries (`rev-parse`). No merge, rebase, push, `--force` or branch deletion.
+- `git` is only ever called with `worktree add`, `worktree remove`, read-only queries (`rev-parse`, `status --porcelain`, `merge-base --is-ancestor`, `worktree list`) and, for `gc --branches` only, `branch -d` on a branch that is merged. No merge, rebase, push, `--force` or `branch -D`.
 - No auto-accept mode: agentctl adds no such flag and rejects configs that try to. Your own agent settings still apply (for example a default permission mode in `~/.claude/settings.json`); agentctl does not override them.
 - Files go to `state_dir` (agentctl's own state) and the cache directory (reports) only. Nothing is written to `~/.claude` or `/tmp`.
 - Messages that name a tmux target quote it (`-t '=agentctl:nc-42'`): zsh expands a word starting with `=` to a program path.
@@ -518,7 +552,7 @@ when you call `status` or `pull`.
 
 ## Window limits and cross-review
 
-- `limits.<agent>` caps simultaneous tmux windows per provider; the error lists the live windows. Windows are attributed to a provider through their `TASK.md`.
+- `limits.<agent>` caps simultaneous tmux windows per provider; the error lists the live windows. Windows are attributed to a provider through their `TASK.md`. Reserved places and (with `limits.count_external`) external sessions count too ([live limits](#live-limits-and-the-config-reload)).
 - `review_of: NC-6` looks up the author in `<state_dir>/nc-6/TASK.md` (or in the same file) and requires a different agent **or** a different model. `default` counts as a model name of its own.
 
 ## Stable install and updates
