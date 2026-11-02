@@ -13,7 +13,7 @@ Updates the stable copy of agentctl (a detached git worktree of the repo) and ma
   1. git fetch origin (in the repo)
   2. no stable copy yet: git worktree add --detach <stable> <ref>
      stable copy exists: refuse if it has local changes, else git checkout --detach <ref>
-  3. npm ci, then npm link, in the stable copy
+  3. npm ci, npm run build, then npm link, in the stable copy
   4. agentctl doctor (a failure makes this script exit non-zero)
   5. if window "watch" exists in tmux session "agentctl": kill it and start `agentctl watch --tmux` from the new version
      (no other window or task is touched)
@@ -105,6 +105,7 @@ main() {
   fi
 
   run_in "$stable" npm ci
+  run_in "$stable" npm run build
   if [ "$link" -eq 1 ]; then
     run_in "$stable" npm link
   else
@@ -112,8 +113,8 @@ main() {
   fi
 
   local doctor_rc=0
-  show "$stable/bin/agentctl.ts" doctor
-  if [ "$DRY_RUN" -eq 0 ]; then "$stable/bin/agentctl.ts" doctor || doctor_rc=$?; fi
+  show "$stable/dist/bin/agentctl.js" doctor
+  if [ "$DRY_RUN" -eq 0 ]; then "$stable/dist/bin/agentctl.js" doctor || doctor_rc=$?; fi
 
   local watch_result='no (--no-watch)'
   if [ "$watch" -eq 1 ]; then
@@ -123,7 +124,7 @@ main() {
         watch_result='no (doctor failed, the old watcher keeps running)'
       else
         run tmux kill-window -t "=$session:watch"
-        run "$stable/bin/agentctl.ts" watch --tmux
+        run "$stable/dist/bin/agentctl.js" watch --tmux
         watch_result='yes'
         [ "$DRY_RUN" -eq 1 ] && watch_result='yes (dry run: would be)'
       fi
@@ -131,8 +132,8 @@ main() {
   fi
 
   # The Claude app keeps its MCP server process through an update; say so (it is never stopped from here).
-  show "$stable/bin/agentctl.ts" mcp check
-  if [ "$DRY_RUN" -eq 0 ]; then "$stable/bin/agentctl.ts" mcp check || true; fi
+  show "$stable/dist/bin/agentctl.js" mcp check
+  if [ "$DRY_RUN" -eq 0 ]; then "$stable/dist/bin/agentctl.js" mcp check || true; fi
 
   echo
   echo "previous: $before"

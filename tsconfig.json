@@ -1,5 +1,5 @@
 {
-  "//": "Editor-only. agentctl has no build step: Node strips the types at runtime, so only erasable syntax is allowed.",
+  "//": "Development typecheck; tsconfig.build.json emits the npm JavaScript runtime. Keep source syntax erasable for direct Node development.",
   "compilerOptions": {
     "target": "ES2023",
     "module": "NodeNext",

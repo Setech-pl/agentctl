@@ -36,7 +36,7 @@ function runUpdate(name: string, args: string[], env: Record<string, string> = {
     `#!/bin/sh
 echo "git $*" >> ${log}
 case "$*" in
-  *"worktree add"*) mkdir -p "$6/bin" ; cp ${path.join(dir, 'fake-agentctl')} "$6/bin/agentctl.ts" ;;
+  *"worktree add"*) mkdir -p "$6/dist/bin" ; cp ${path.join(dir, 'fake-agentctl')} "$6/dist/bin/agentctl.js" ;;
   *"status --porcelain"*) ${opts.dirty ? 'echo " M src/cli.ts"' : 'true'} ;;
   *"log -1"*) echo "abc1234 Some commit title" ;;
 esac
@@ -57,8 +57,8 @@ exit 0
   );
   write(path.join(dir, 'fake-agentctl'), fakeAgentctl(stable));
   if (opts.stableExists) {
-    fs.mkdirSync(path.join(stable, 'bin'), { recursive: true });
-    write(path.join(stable, 'bin', 'agentctl.ts'), fakeAgentctl(stable));
+    fs.mkdirSync(path.join(stable, 'dist', 'bin'), { recursive: true });
+    write(path.join(stable, 'dist', 'bin', 'agentctl.js'), fakeAgentctl(stable));
   }
   const r = spawnSync('bash', [opts.script ?? SCRIPT, ...args], {
     encoding: 'utf8',
@@ -119,11 +119,12 @@ describe('agentctl-update: --dry-run', () => {
       `+ git -C ${r.dir}/repo fetch origin`,
       `+ git -C ${r.dir}/repo worktree add --detach ${r.stable} origin/main`,
       `+ (cd ${r.stable} && npm ci)`,
+      `+ (cd ${r.stable} && npm run build)`,
       `+ (cd ${r.stable} && npm link)`,
-      `+ ${r.stable}/bin/agentctl.ts doctor`,
+      `+ ${r.stable}/dist/bin/agentctl.js doctor`,
       "+ tmux kill-window -t '=agentctl:watch'",
-      `+ ${r.stable}/bin/agentctl.ts watch --tmux`,
-      `+ ${r.stable}/bin/agentctl.ts mcp check`,
+      `+ ${r.stable}/dist/bin/agentctl.js watch --tmux`,
+      `+ ${r.stable}/dist/bin/agentctl.js mcp check`,
     ]);
     assert.equal(fs.existsSync(r.stable), false);
     assert.match(r.stdout, /^watch restarted: yes \(dry run: would be\)$/m);
@@ -158,6 +159,7 @@ describe('agentctl-update: a real run against mocked git, npm and tmux', () => {
         `git -C ${r.dir}/repo fetch origin`,
         `git -C ${r.dir}/repo worktree add --detach ${r.stable} origin/main`,
         `npm ci (cwd ${fs.realpathSync(r.stable)})`,
+        `npm run build (cwd ${fs.realpathSync(r.stable)})`,
         `npm link (cwd ${fs.realpathSync(r.stable)})`,
         'agentctl doctor',
         'tmux kill-window -t =agentctl:watch',
@@ -201,6 +203,6 @@ describe('agentctl-update: packaging', () => {
     assert.match(text, /^set -euo pipefail$/m);
     const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8')) as { bin: Record<string, string> };
     assert.equal(pkg.bin['agentctl-update'], 'bin/agentctl-update');
-    assert.equal(pkg.bin['agentctl'], 'bin/agentctl.ts');
+    assert.equal(pkg.bin['agentctl'], 'dist/bin/agentctl.js');
   });
 });

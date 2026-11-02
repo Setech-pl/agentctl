@@ -24,7 +24,7 @@ export const PS_ARGS = ['-axww', '-o', 'pid=,lstart=,command='];
 
 const PS_LINE = /^\s*(\d+)\s+(\w{3}\s+\w{3}\s+\d+\s+\d\d:\d\d:\d\d\s+\d{4})\s+(.*\S)\s*$/;
 /** `node [flags] <path>/agentctl[.ts] mcp [serve]`: the server, not `mcp install` and not another command. */
-const MCP_COMMAND = /(?:^|\s)(\S*agentctl(?:\.ts)?)\s+mcp(?:\s+serve)?\s*$/;
+const MCP_COMMAND = /(?:^|\s)(\S*agentctl(?:\.ts|\.js)?)\s+mcp(?:\s+serve)?\s*$/;
 
 /** The `agentctl … mcp` server processes in the output of `ps`. */
 export function parsePs(stdout: string): McpProcess[] {
@@ -56,7 +56,7 @@ const realOrSelf = (p: string): string => {
 };
 
 /** The stable copy's root (`…/agentctl-stable`) from its script (`…/bin/agentctl.ts`). */
-const rootOf = (script: string): string => path.dirname(path.dirname(script));
+const rootOf = (script: string): string => path.dirname(path.dirname(script)).endsWith('/dist') ? path.dirname(path.dirname(path.dirname(script))) : path.dirname(path.dirname(script));
 
 /** Version in the package.json of the copy that `script` belongs to; undefined when it cannot be read. */
 export function versionOf(script: string): string | undefined {
