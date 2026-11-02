@@ -10,6 +10,13 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | Command | What it does |
 |---|---|
 | [`new`](#agentctl-new) | Start the tasks in a spec file: worktree, setup commands, symlinks, TASK.md, tmux window, agent, prompt. |
+| [`queue`](#agentctl-queue) | Put the tasks of a spec file in the queue: they start by themselves (while "agentctl watch" runs) when a window of their provider is free. Shows a summary and asks y/N first. |
+| [`queue list`](#agentctl-queue-list) | The queue: position, task, agent/model/effort, priority, start condition and how long it waits. |
+| [`queue rm`](#agentctl-queue-rm) | Take a task out of the queue (a waiting or a failed one). |
+| [`queue up`](#agentctl-queue-up) | Move a waiting task to the front of the line (tasks with priority: high still go first). |
+| [`queue retry`](#agentctl-queue-retry) | Put a failed task back at the end of the line; it is tried once more (over the worktree the failed start left). |
+| [`queue pause`](#agentctl-queue-pause) | Stop starting queued tasks (running tasks are not touched; adding and listing still work). |
+| [`queue resume`](#agentctl-queue-resume) | Let the queue start tasks again. |
 | [`send`](#agentctl-send) | Paste a follow-up prompt into the existing window of each task in the file. |
 | [`status`](#agentctl-status) | Table of tasks: window state, running time, report, last output line. |
 | [`archive`](#agentctl-archive) | Move the state of closed tasks (agentctl close) to the archive folder next to the state folder. Reports and worktrees are not touched. |
@@ -65,6 +72,135 @@ agentctl new nc-42.md                  # start the tasks of the file
 agentctl new --clip                    # spec from the clipboard, summary, y/N
 agentctl new --agent codex nc-42.md    # run the specs on Codex (models through the equivalents table)
 agentctl new --no-agent nc-42.md       # only worktree, setup and links
+```
+
+## agentctl queue
+
+Put the tasks of a spec file in the queue: they start by themselves (while "agentctl watch" runs) when a window of their provider is free. Shows a summary and asks y/N first.
+
+Subcommands: `queue list`, `queue rm`, `queue up`, `queue retry`, `queue pause`, `queue resume`.
+
+```
+agentctl queue [options] [command] [file]
+```
+
+| Argument | Meaning |
+|---|---|
+| `[file]` | spec file, or "-" for stdin |
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--clip` | read the spec from the clipboard |  |
+| `--agent <agent>` | run every spec on this provider, translated through the equivalents table (the queue never switches provider by itself) | one of `claude`, `codex` |
+| `-y, --yes` | do not ask |  |
+
+Examples:
+
+```sh
+agentctl queue nc-42.md                # summary, y/N, then the tasks wait for a free window
+agentctl queue --clip -y               # spec from the clipboard, no question
+agentctl queue --agent codex nc-42.md  # run them on Codex (through the equivalents table)
+```
+
+## agentctl queue list
+
+The queue: position, task, agent/model/effort, priority, start condition and how long it waits.
+
+```
+agentctl queue list [options]
+```
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--json` | machine-readable output |  |
+
+Examples:
+
+```sh
+agentctl queue list
+agentctl queue list --json
+```
+
+## agentctl queue rm
+
+Take a task out of the queue (a waiting or a failed one).
+
+```
+agentctl queue rm [options] <task>
+```
+
+| Argument | Meaning |
+|---|---|
+| `<task>` | task ID; a unique prefix is enough |
+
+Examples:
+
+```sh
+agentctl queue rm NC-42
+```
+
+## agentctl queue up
+
+Move a waiting task to the front of the line (tasks with priority: high still go first).
+
+```
+agentctl queue up [options] <task>
+```
+
+| Argument | Meaning |
+|---|---|
+| `<task>` | task ID; a unique prefix is enough |
+
+Examples:
+
+```sh
+agentctl queue up NC-42                # first in line (priority: high still goes first)
+```
+
+## agentctl queue retry
+
+Put a failed task back at the end of the line; it is tried once more (over the worktree the failed start left).
+
+```
+agentctl queue retry [options] <task>
+```
+
+| Argument | Meaning |
+|---|---|
+| `<task>` | task ID; a unique prefix is enough |
+
+Examples:
+
+```sh
+agentctl queue retry NC-42             # after a failed start: back at the end of the line
+```
+
+## agentctl queue pause
+
+Stop starting queued tasks (running tasks are not touched; adding and listing still work).
+
+```
+agentctl queue pause [options]
+```
+
+Examples:
+
+```sh
+agentctl queue pause                  # nothing new starts; running tasks are not touched
+```
+
+## agentctl queue resume
+
+Let the queue start tasks again.
+
+```
+agentctl queue resume [options]
+```
+
+Examples:
+
+```sh
+agentctl queue resume
 ```
 
 ## agentctl send

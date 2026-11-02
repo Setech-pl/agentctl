@@ -90,6 +90,8 @@ export interface GlobalConfig extends Layer {
   board: BoardSettings;
   /** The local MCP server (`agentctl mcp`): which write tools the chat may call. Read tools are always there. */
   mcp: McpSettings;
+  /** The task queue: tasks that wait for a free window of their provider and start by themselves (`agentctl queue`). */
+  queue: QueueSettings;
   /** Where the config was (or would be) read from. */
   path: string;
   loaded: boolean;
@@ -110,6 +112,13 @@ export interface BoardSettings {
   mouse: boolean;
   /** tmux key (no prefix) that goes back to the board from any window of the agentctl session; null: no key is bound. Default F12. */
   returnKey: string | null;
+}
+
+export interface QueueSettings {
+  /** `false`: `watch` never starts a queued task (entries can still be added and listed). */
+  enabled: boolean;
+  /** Most queued tasks that `watch` has in the middle of starting (worktree, setup, waiting for the agent) at the same time. */
+  parallelStarts: number;
 }
 
 export interface McpSettings {
@@ -207,7 +216,7 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
 
 /** The keys accepted in every layer: the global config, `.agentctl.yaml` and (with a few of its own) a spec. docs/configuration.md describes each one. */
 export const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'setup', 'defaults'];
-export const GLOBAL_KEYS = [...LAYER_KEYS, 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp'];
+export const GLOBAL_KEYS = [...LAYER_KEYS, 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue'];
 export const DEFAULTS_KEYS = ['agent', 'model', 'effort'];
 export const LINK_KEYS = ['from', 'to'];
 export const AGENT_KEYS = ['flags', 'effort_args', 'ready_pattern', 'ready_timeout', 'trust_timeout', 'trust_pattern', 'working_pattern', 'interrupt_key', 'footer_patterns', 'question_pattern', 'limit_patterns', 'background_patterns'];
@@ -215,6 +224,7 @@ export const WATCH_KEYS = ['interval', 'waiting_after', 'window_icons', 'status_
 export const NOTIFY_KEYS = ['backend', 'events', 'turn_end', 'terminal_app', 'verdict_pattern'];
 export const BOARD_KEYS = ['auto_hide_pulled_dead', 'mouse', 'return_key'];
 export const MCP_KEYS = ['allow', 'allow_rm_worktree'];
+export const QUEUE_KEYS = ['enabled', 'parallel_starts'];
 
 /** Screen patterns are case-insensitive and match per line. */
 export const PATTERN_FLAGS = 'im';
@@ -509,6 +519,25 @@ function parseMcp(v: unknown, p: Problems): McpSettings {
   return mcp;
 }
 
+function parseQueue(v: unknown, p: Problems): QueueSettings {
+  const queue: QueueSettings = { enabled: true, parallelStarts: 2 };
+  if (v === undefined || v === null) return queue;
+  if (!isObject(v)) {
+    p.add('config.queue must be a mapping like {enabled: true, parallel_starts: 2}');
+    return queue;
+  }
+  checkKeys(v, QUEUE_KEYS, 'config.queue', p);
+  if (v.enabled !== undefined) {
+    if (typeof v.enabled === 'boolean') queue.enabled = v.enabled;
+    else p.add('config.queue.enabled must be true or false');
+  }
+  if (v.parallel_starts !== undefined) {
+    if (typeof v.parallel_starts === 'number' && Number.isInteger(v.parallel_starts) && v.parallel_starts > 0) queue.parallelStarts = v.parallel_starts;
+    else p.add('config.queue.parallel_starts must be a positive integer');
+  }
+  return queue;
+}
+
 function readYamlFile(file: string): unknown {
   let text: string;
   try {
@@ -569,9 +598,10 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   const notify = parseNotify(raw.notify, p);
   const board = parseBoard(raw.board, p);
   const mcp = parseMcp(raw.mcp, p);
+  const queue = parseQueue(raw.queue, p);
 
   p.throwIfAny(`Invalid config ${file}:`, 'Fix the listed keys; see the README section "Configuration".');
-  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, limits, agents, equivalents, watch, notify, board, mcp, path: file, loaded: exists };
+  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, limits, agents, equivalents, watch, notify, board, mcp, queue, path: file, loaded: exists };
   if (mirror) config.mirrorDir = resolvePath(mirror);
   return config;
 }

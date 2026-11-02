@@ -9,6 +9,7 @@ import { collectStatus } from './status.ts';
 import type { StatusRow } from './status.ts';
 import type { TaskState } from './state.ts';
 import { decorateName } from './icons.ts';
+import { QueueMemory, queueTick } from './queue.ts';
 import { ensureWindow } from './windows.ts';
 import type { EnsureResult } from './windows.ts';
 
@@ -39,6 +40,8 @@ export class WatchMemory {
   started = false;
   /** Windows that got a state icon from this watcher (plain name -> tmux window ID, if known): they get their plain names back. */
   readonly decorated = new Map<string, string>();
+  /** Queued tasks this watcher is in the middle of starting. */
+  readonly queue = new QueueMemory();
 }
 
 const NOTIFY_ON: Partial<Record<TaskState, (row: StatusRow) => string>> = {
@@ -128,6 +131,8 @@ export async function restoreWindowNames(ctx: Context, memory: WatchMemory): Pro
 export interface TickOptions {
   /** This very agentctl as a command line: the click action of a notification runs `attach` with it. */
   self?: SelfArgv | undefined;
+  /** Ctrl-C: ends the waits of the queued tasks that are being started. */
+  signal?: AbortSignal | undefined;
 }
 
 /**
@@ -136,9 +141,16 @@ export interface TickOptions {
  */
 export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Notifier, options: TickOptions = {}): Promise<WatchEvent[]> {
   // A closed task is off the list: no transitions, no notifications (closing a task with no report is not a vanished window).
-  const rows = (await collectStatus(ctx, { progress: false })).filter((r) => !r.closed);
+  const allRows = await collectStatus(ctx, { progress: false, archived: true });
+  const rows = allRows.filter((r) => !r.closed);
   await decorateWindows(ctx, memory, rows);
   const now = ctx.runner.now();
+  // Queued tasks whose provider has a free window start now, in the background: a start can wait for a human (folder trust) for minutes.
+  const startLog = async (text: string): Promise<void> => {
+    await ctx.runner.appendFile(watchLogPath(ctx), `${new Date(ctx.runner.now()).toISOString()}  ${text}\n`);
+    ctx.out(text);
+  };
+  await queueTick(ctx, memory.queue, notifier, { self: options.self, signal: options.signal, rows: allRows, log: startLog });
   const events = detectTransitions(memory, rows, now, ctx.config.watch.waitingAfter * 1000);
   const alerts = new Alerts(ctx, notifier, { self: options.self });
   for (const e of events) {
@@ -173,9 +185,11 @@ export async function runWatch(ctx: Context, notifier: Notifier, opts: WatchOpti
     for (let tick = 0; !opts.signal?.aborted && (opts.maxTicks === undefined || tick < opts.maxTicks); tick++) {
       if (tick > 0) await ctx.runner.sleep(interval * 1000, opts.signal);
       if (opts.signal?.aborted) break;
-      await watchTick(ctx, memory, notifier, { self: opts.self });
+      await watchTick(ctx, memory, notifier, { self: opts.self, signal: opts.signal });
     }
   } finally {
+    // A start in progress is not abandoned half way: the window and the prompt are its result.
+    await memory.queue.idle();
     const restored = await restoreWindowNames(ctx, memory);
     if (restored > 0) ctx.out(`Window names restored (${restored}).`);
   }

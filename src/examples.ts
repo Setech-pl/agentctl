@@ -12,6 +12,17 @@ export const COMMAND_EXAMPLES: Record<string, string[]> = {
     'agentctl new --agent codex nc-42.md    # run the specs on Codex (models through the equivalents table)',
     'agentctl new --no-agent nc-42.md       # only worktree, setup and links',
   ],
+  queue: [
+    'agentctl queue nc-42.md                # summary, y/N, then the tasks wait for a free window',
+    'agentctl queue --clip -y               # spec from the clipboard, no question',
+    'agentctl queue --agent codex nc-42.md  # run them on Codex (through the equivalents table)',
+  ],
+  'queue list': ['agentctl queue list', 'agentctl queue list --json'],
+  'queue rm': ['agentctl queue rm NC-42'],
+  'queue up': ['agentctl queue up NC-42                # first in line (priority: high still goes first)'],
+  'queue retry': ['agentctl queue retry NC-42             # after a failed start: back at the end of the line'],
+  'queue pause': ['agentctl queue pause                  # nothing new starts; running tasks are not touched'],
+  'queue resume': ['agentctl queue resume'],
   send: [
     'agentctl send follow-up.md             # header: only "task:"; the prompt below it is pasted',
     'agentctl send --clip -y                # follow-up from the clipboard, no question',

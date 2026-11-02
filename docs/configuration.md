@@ -46,6 +46,7 @@ Column "Layers": **g** global config, **p** project config, **s** spec.
 | `notify` | mapping | see below | g | Notifications and the events of the agents. |
 | `board` | mapping | see below | g | The board and the navigation in the tmux session. |
 | `mcp` | mapping | see below | g | The local MCP server. |
+| `queue` | mapping | see below | g | The task queue (`agentctl queue`). |
 
 ### `watch`
 
@@ -82,6 +83,15 @@ Default icons: `working` ⚙, `background` ⏳, `waiting` ⏸, `needs-input` ?, 
 |---|---|---|---|---|
 | `mcp.allow` | list | `[]` | g | Write tools the chat may call: any of `send`, `new`, `interrupt`, `close`, `move`. Read again on every call. |
 | `mcp.allow_rm_worktree` | boolean | `false` | g | `close` from the chat may also remove the git worktree (never forced). |
+
+### `queue`
+
+Queued tasks live in `<config dir>/queue/` (one JSON file each, with the spec text) and are started by `agentctl watch`. See [the queue](details.md#the-queue).
+
+| Key | Type | Default | Layers | Meaning |
+|---|---|---|---|---|
+| `queue.enabled` | boolean | `true` | g | `false`: `watch` never starts a queued task (entries can still be added and listed). |
+| `queue.parallel_starts` | positive integer | `2` | g | Most queued tasks that `watch` is in the middle of starting (worktree, setup, waiting for the agent or for the folder-trust dialog) at the same time. |
 
 ## Keys per agent
 
@@ -168,6 +178,7 @@ The header of a spec file, between `---` lines, followed by the prompt. Several 
 | `review_of` | task ID | none | s | The task under review. The reviewer must use another agent or another model than the author. |
 | `report` | path | project, else global | s | Report path of this task. |
 | `pin` | boolean | `false` | s | `true`: never move the task to the other provider, by `--agent` or by a limit. |
+| `priority` | `high` or `normal` | `normal` | s | Queue order: `high` tasks start before every `normal` one (first come, first served inside each class). `new` ignores it. |
 
 ## Environment variables
 

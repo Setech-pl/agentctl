@@ -1,0 +1,434 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import YAML from 'yaml';
+import type { AgentModel } from './checks.ts';
+import { Alerts } from './alert.ts';
+import type { AgentName, GlobalConfig } from './config.ts';
+import { AGENT_NAMES } from './config.ts';
+import type { Context } from './context.ts';
+import { Context as ContextClass } from './context.ts';
+import type { SelfArgv } from './events.ts';
+import { newTasks } from './new.ts';
+import type { Notifier } from './notify.ts';
+import { liveWindows, planBatch } from './plan.ts';
+import type { StatusRow } from './status.ts';
+import { resolveSpec, splitSpecs } from './spec.ts';
+import type { RawSpec, ResolvedSpec } from './spec.ts';
+import { listArchivedRecords, listTaskRecords } from './taskstore.ts';
+import { AgentctlError, errorMessage, formatLocalTime } from './util.ts';
+
+/*
+ * The task queue. A queued task is a spec file in <AGENTCTL_HOME>/queue/ (one JSON file per task: the spec text and what the queue
+ * knows about it). `watch` starts the next one when its provider has a free window, by the same path as `agentctl new`.
+ */
+
+export type QueueStatus = 'queued' | 'starting' | 'failed';
+
+export interface QueueEntry {
+  /** The number in the file name; the next entry gets the highest + 1. */
+  seq: number;
+  task: string;
+  /** Sort key inside a priority class; `queue up` gives an entry a key below all the others. */
+  order: number;
+  priority: 'high' | 'normal';
+  status: QueueStatus;
+  /** ISO time of the `queue` command that added it. */
+  queuedAt: string;
+  /** The order as it will run (after `--agent`): what `queue list` shows. */
+  agent: AgentName;
+  model: string;
+  effort: string;
+  /** `--agent`: run the spec on this provider, translated through the equivalents table. Never set by a limit. */
+  agentOverride?: AgentName;
+  /** The task whose report this one reviews (`review_of`). */
+  reviewOf?: string;
+  /** Start again over a worktree that is already there (`queue retry`). */
+  reuse?: boolean;
+  /** `status: starting`: ISO time the watcher began the start. */
+  startingAt?: string;
+  /** `status: failed`: when and why. */
+  failedAt?: string;
+  error?: string;
+  /** The spec as text: `---`, header, `---`, prompt. */
+  spec: string;
+}
+
+export function queueDir(config: Pick<GlobalConfig, 'path'>): string {
+  return path.join(path.dirname(config.path), 'queue');
+}
+
+const pausedFile = (config: Pick<GlobalConfig, 'path'>): string => path.join(queueDir(config), 'paused');
+const entryFile = (config: Pick<GlobalConfig, 'path'>, e: Pick<QueueEntry, 'seq' | 'task'>): string => path.join(queueDir(config), `${String(e.seq).padStart(4, '0')}-${e.task}.json`);
+export const queueLogFile = (config: Pick<GlobalConfig, 'path'>, e: Pick<QueueEntry, 'seq' | 'task'>): string => entryFile(config, e).replace(/\.json$/, '.log');
+
+export function isPaused(config: Pick<GlobalConfig, 'path'>): boolean {
+  return fs.existsSync(pausedFile(config));
+}
+
+function parseEntry(text: string): QueueEntry | undefined {
+  let data: unknown;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  const d = data as Partial<QueueEntry> | null;
+  if (!d || typeof d !== 'object' || typeof d.seq !== 'number' || typeof d.task !== 'string' || typeof d.spec !== 'string') return undefined;
+  if (!(AGENT_NAMES as readonly unknown[]).includes(d.agent)) return undefined;
+  return {
+    ...(d as QueueEntry),
+    order: typeof d.order === 'number' ? d.order : d.seq,
+    priority: d.priority === 'high' ? 'high' : 'normal',
+    status: d.status === 'starting' || d.status === 'failed' ? d.status : 'queued',
+  };
+}
+
+/** Every entry, in the order the queue serves them: waiting ones (high priority first, then by order), the ones being started, the failed ones last. */
+export function readQueue(config: Pick<GlobalConfig, 'path'>): QueueEntry[] {
+  let names: string[];
+  try {
+    names = fs.readdirSync(queueDir(config));
+  } catch {
+    return [];
+  }
+  const entries: QueueEntry[] = [];
+  for (const name of names.sort()) {
+    if (!name.endsWith('.json')) continue;
+    try {
+      const entry = parseEntry(fs.readFileSync(path.join(queueDir(config), name), 'utf8'));
+      if (entry) entries.push(entry);
+    } catch {
+      // removed between the listing and the read
+    }
+  }
+  const rank = (e: QueueEntry): number => (e.status === 'queued' ? 0 : e.status === 'starting' ? 1 : 2);
+  return entries.sort((a, b) => rank(a) - rank(b) || (a.status === 'queued' && b.status === 'queued' ? Number(b.priority === 'high') - Number(a.priority === 'high') : 0) || a.order - b.order || a.seq - b.seq);
+}
+
+/** The entries that wait for their turn, in turn order. */
+export const waiting = (entries: QueueEntry[]): QueueEntry[] => entries.filter((e) => e.status === 'queued');
+
+export function findEntry(config: Pick<GlobalConfig, 'path'>, input: string): QueueEntry {
+  const entries = readQueue(config);
+  const wanted = input.trim().toLowerCase();
+  const exact = entries.filter((e) => e.task.toLowerCase() === wanted);
+  const found = exact.length > 0 ? exact : entries.filter((e) => e.task.toLowerCase().startsWith(wanted) && wanted !== '');
+  if (found.length === 1) return found[0] as QueueEntry;
+  if (found.length > 1) throw new AgentctlError(`"${input}" fits more than one queued task: ${found.map((e) => e.task).join(', ')}`, 'Use the full task ID.');
+  throw new AgentctlError(`${input} is not in the queue`, entries.length > 0 ? `In the queue: ${entries.map((e) => e.task).join(', ')}` : 'The queue is empty. "agentctl queue list" shows it.');
+}
+
+async function writeEntry(ctx: Context, entry: QueueEntry): Promise<void> {
+  await ctx.runner.writeFile(entryFile(ctx.config, entry), `${JSON.stringify(entry, null, 2)}\n`);
+}
+
+/** The spec of one raw spec as text, so that it can be parsed again when its turn comes. */
+export function renderRawSpec(raw: RawSpec): string {
+  return `---\n${YAML.stringify(raw.header).trimEnd()}\n---\n${raw.prompt.trim()}\n`;
+}
+
+// ---- adding
+
+export interface QueueAddItem {
+  raw: RawSpec;
+  spec: ResolvedSpec;
+}
+
+export interface QueueAddPlan {
+  items: QueueAddItem[];
+  /** What the human sees before the question. */
+  summary: string[];
+}
+
+/**
+ * Validate specs for the queue the way `new` does (review_of, pin, `--agent` mapping, codex efforts, duplicates, repositories), except that a
+ * full provider is not an error: that is what the queue is for. Throws one error listing every problem; nothing is written.
+ */
+export async function planQueueAdd(ctx: Context, raws: RawSpec[], opts: { agent?: AgentName } = {}): Promise<QueueAddPlan> {
+  const { config } = ctx;
+  const resolved = raws.map((raw) => resolveSpec(raw, { config }));
+  const entries = readQueue(config);
+  for (const spec of resolved) {
+    const inQueue = entries.find((e) => e.task === spec.task);
+    if (inQueue) throw new AgentctlError(`${spec.task} is already in the queue (${inQueue.status})`, `"agentctl queue rm ${spec.task}" takes it out${inQueue.status === 'failed' ? `; "agentctl queue retry ${spec.task}" tries it again` : ''}.`);
+  }
+  const knownAuthors = new Map<string, AgentModel>(entries.map((e) => [e.task, { agent: e.agent, model: e.model }]));
+  const specs = await planBatch(ctx, resolved, { ...(opts.agent ? { agent: opts.agent } : {}), ignoreLimits: true, knownAuthors });
+  const items = specs.map((spec, i) => ({ raw: raws[i] as RawSpec, spec }));
+  return { items, summary: describeQueueAdd(ctx, specs, entries, await liveWindows(ctx)) };
+}
+
+/** Per spec: the order and where it will stand ("starts at once" or "waits: claude 2/2, 1 ahead"). */
+export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: QueueEntry[], live: { agent?: AgentName }[]): string[] {
+  const { config } = ctx;
+  const load: Record<AgentName, number> = { claude: 0, codex: 0 };
+  for (const w of live) if (w.agent) load[w.agent]++;
+  const ahead: Record<AgentName, number> = { claude: 0, codex: 0 };
+  for (const e of waiting(entries)) ahead[e.agent]++;
+  const lines: string[] = [];
+  for (const spec of specs) {
+    const limit = config.limits[spec.agent];
+    const used = load[spec.agent] + ahead[spec.agent];
+    const full = limit !== undefined && used >= limit;
+    lines.push(`${spec.task}  ${spec.agent}/${spec.model}/${spec.effort}  priority ${spec.priority}${spec.switchedBy ? ` (ordered ${spec.requested.agent} ${spec.requested.model}/${spec.requested.effort})` : ''}`);
+    lines.push(`  repos:    ${spec.repos.map((r) => r.path).join(', ')}`);
+    lines.push(
+      `  start:    ${
+        full
+          ? `waits for a free ${spec.agent} window (${load[spec.agent]} running${ahead[spec.agent] > 0 ? `, ${ahead[spec.agent]} queued ahead` : ''}, limit ${limit})`
+          : 'at the next watch tick (a window is free)'
+      }`,
+    );
+    lines.push(`  prompt:   ${spec.prompt.length} characters`);
+    if (spec.pin) lines.push('  pin:      stays on this provider (it is never switched by the queue either)');
+    load[spec.agent]++;
+  }
+  return lines;
+}
+
+/** Write the entries (one per spec). Returns them in the order they were added. */
+export async function commitQueueAdd(ctx: Context, items: QueueAddItem[], opts: { agent?: AgentName } = {}): Promise<QueueEntry[]> {
+  const { config, runner } = ctx;
+  const existing = readQueue(config);
+  let seq = existing.reduce((n, e) => Math.max(n, e.seq), 0);
+  const added: QueueEntry[] = [];
+  for (const { raw, spec } of items) {
+    seq++;
+    const entry: QueueEntry = {
+      seq,
+      task: spec.task,
+      order: seq,
+      priority: spec.priority,
+      status: 'queued',
+      queuedAt: new Date(runner.now()).toISOString(),
+      agent: spec.agent,
+      model: spec.model,
+      effort: spec.effort,
+      spec: renderRawSpec(raw),
+    };
+    if (opts.agent) entry.agentOverride = opts.agent;
+    if (spec.reviewOf) entry.reviewOf = spec.reviewOf;
+    await writeEntry(ctx, entry);
+    added.push(entry);
+  }
+  return added;
+}
+
+// ---- managing
+
+/** `queue rm`: take a waiting (or failed) entry out. An entry that is being started cannot be removed. */
+export async function removeFromQueue(ctx: Context, input: string): Promise<QueueEntry> {
+  const entry = findEntry(ctx.config, input);
+  if (entry.status === 'starting') throw new AgentctlError(`${entry.task} is being started right now`, 'Wait for it to finish; it then shows as a task in "agentctl status".');
+  fs.rmSync(entryFile(ctx.config, entry), { force: true });
+  fs.rmSync(queueLogFile(ctx.config, entry), { force: true });
+  return entry;
+}
+
+/** `queue up`: first in the line of its priority class. */
+export async function moveToFront(ctx: Context, input: string): Promise<QueueEntry> {
+  const entry = findEntry(ctx.config, input);
+  if (entry.status !== 'queued') throw new AgentctlError(`${entry.task} is ${entry.status}, not waiting`, entry.status === 'failed' ? `"agentctl queue retry ${entry.task}" puts it back in the line.` : undefined);
+  const lowest = readQueue(ctx.config).reduce((n, e) => Math.min(n, e.order), entry.order);
+  const moved = { ...entry, order: lowest - 1 };
+  await writeEntry(ctx, moved);
+  return moved;
+}
+
+/** `queue retry`: a failed entry goes to the end of the line and is tried again (over the worktree it left, if any). */
+export async function retryEntry(ctx: Context, input: string): Promise<QueueEntry> {
+  const entry = findEntry(ctx.config, input);
+  if (entry.status !== 'failed') throw new AgentctlError(`${entry.task} is ${entry.status}, not failed`);
+  const highest = readQueue(ctx.config).reduce((n, e) => Math.max(n, e.order, e.seq), 0);
+  const { failedAt: _f, error: _e, startingAt: _s, ...rest } = entry;
+  const again: QueueEntry = { ...rest, status: 'queued', order: highest + 1, reuse: true };
+  await writeEntry(ctx, again);
+  return again;
+}
+
+export async function setPaused(ctx: Context, paused: boolean): Promise<boolean> {
+  const was = isPaused(ctx.config);
+  if (paused === was) return false;
+  if (paused) await ctx.runner.writeFile(pausedFile(ctx.config), `${new Date(ctx.runner.now()).toISOString()}\n`);
+  else fs.rmSync(pausedFile(ctx.config), { force: true });
+  return true;
+}
+
+// ---- what the queue waits for
+
+export type Condition =
+  | { kind: 'ready'; text: string }
+  | { kind: 'slot'; text: string }
+  | { kind: 'paused'; text: string }
+  | { kind: 'starting'; text: string }
+  | { kind: 'failed'; text: string };
+
+export interface QueueView {
+  /** 1-based place in the line of the waiting entries; null for the ones being started and the failed ones. */
+  position: number | null;
+  entry: QueueEntry;
+  condition: Condition;
+  /** ISO time since when it waits. */
+  since: string;
+}
+
+/**
+ * For every entry: what it waits for. Entries are walked in turn order, each one that will start in the next tick uses up a window of its
+ * provider, so the answer matches what `watch` does. `inflight` are the tasks this very process is starting.
+ */
+export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live: { agent?: AgentName }[]): QueueView[] {
+  const used: Record<AgentName, number> = { claude: 0, codex: 0 };
+  for (const w of live) if (w.agent) used[w.agent]++;
+  const paused = isPaused(config) || !config.queue.enabled;
+  const reason = !config.queue.enabled ? 'queue.enabled is false' : 'queue paused (agentctl queue resume)';
+  let position = 0;
+  return entries.map((entry): QueueView => {
+    if (entry.status === 'failed') return { position: null, entry, condition: { kind: 'failed', text: `failed: ${(entry.error ?? '').split('\n')[0] ?? ''}` }, since: entry.failedAt ?? entry.queuedAt };
+    if (entry.status === 'starting') return { position: null, entry, condition: { kind: 'starting', text: 'starting' }, since: entry.startingAt ?? entry.queuedAt };
+    position++;
+    if (paused) return { position, entry, condition: { kind: 'paused', text: reason }, since: entry.queuedAt };
+    const limit = config.limits[entry.agent];
+    if (limit !== undefined && used[entry.agent] >= limit) {
+      return { position, entry, condition: { kind: 'slot', text: `czeka na miejsce: ${entry.agent} ${used[entry.agent]}/${limit}` }, since: entry.queuedAt };
+    }
+    used[entry.agent]++;
+    return { position, entry, condition: { kind: 'ready', text: 'wolne miejsce – start przy najbliższym ticku watch' }, since: entry.queuedAt };
+  });
+}
+
+/** The lines of `queue list`. */
+export function renderQueueList(views: QueueView[], nowMs: number): string[] {
+  if (views.length === 0) return ['The queue is empty.'];
+  const age = (iso: string): string => {
+    const ms = nowMs - Date.parse(iso);
+    if (Number.isNaN(ms)) return '-';
+    const m = Math.max(0, Math.floor(ms / 60000));
+    return m < 60 ? `${m}m` : m < 1440 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m` : `${Math.floor(m / 1440)}d`;
+  };
+  const header = ['#', 'TASK', 'AGENT/MODEL/EFFORT', 'PRIORITY', 'START CONDITION', 'WAITING', 'QUEUED'];
+  const body = views.map((v) => [
+    v.position === null ? '-' : String(v.position),
+    v.entry.task,
+    `${v.entry.agent}/${v.entry.model}/${v.entry.effort}`,
+    v.entry.priority,
+    v.condition.text,
+    age(v.since),
+    formatLocalTime(v.entry.queuedAt),
+  ]);
+  const widths = header.map((h, i) => Math.max(h.length, ...body.map((row) => (row[i] as string).length)));
+  const fmt = (cells: string[]): string => cells.map((c, i) => (i === cells.length - 1 ? c : c.padEnd(widths[i] as number))).join('  ').trimEnd();
+  return [fmt(header), ...body.map(fmt)];
+}
+
+// ---- starting
+
+/** What `watch` remembers about the starts it has begun. */
+export class QueueMemory {
+  /** Tasks being started by this process: their agent counts against the provider limit before the window exists. */
+  readonly inflight = new Map<string, { agent: AgentName; promise: Promise<void> }>();
+
+  /** Resolves when every start that was begun has finished (tests, and a clean stop of `watch`). */
+  async idle(): Promise<void> {
+    while (this.inflight.size > 0) await Promise.all([...this.inflight.values()].map((i) => i.promise));
+  }
+}
+
+export interface QueueTickOptions {
+  self?: SelfArgv | undefined;
+  signal?: AbortSignal | undefined;
+  /** Status rows including closed and archived tasks (the watcher has them already). */
+  rows?: StatusRow[];
+  /** Where a start is reported to (the watch log). */
+  log?: (line: string) => Promise<void> | void;
+}
+
+const firstLine = (s: string): string => s.split('\n')[0] ?? s;
+
+/**
+ * One look at the queue: start every waiting entry whose provider has a free window, in turn order. The starts run in the background
+ * (a start waits for a human to answer the folder-trust dialog, and the queue must not stand still meanwhile), at most
+ * `queue.parallel_starts` at a time. Returns the tasks whose start began. Never changes the provider of a task.
+ */
+export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Notifier, opts: QueueTickOptions = {}): Promise<string[]> {
+  const { config } = ctx;
+  if (!config.queue.enabled || isPaused(config)) return [];
+  let entries = readQueue(config);
+  if (entries.length === 0) return [];
+  const records = new Set([...listTaskRecords(config), ...listArchivedRecords(config)].map((r) => r.task));
+  // A start that died with its watcher: the entry says "starting" and nothing here is doing it. Its task exists (the window is up,
+  // the prompt may be missing) or not: either way it goes to "failed", where a human decides.
+  for (const entry of entries) {
+    if (entry.status !== 'starting' || memory.inflight.has(entry.task)) continue;
+    if (records.has(entry.task)) {
+      fs.rmSync(entryFile(config, entry), { force: true });
+      fs.rmSync(queueLogFile(config, entry), { force: true });
+    } else await failEntry(ctx, entry, 'the start was interrupted (the watcher stopped before it finished)', notifier, opts, false);
+  }
+  entries = readQueue(config);
+  const live = await liveWindows(ctx);
+  const used: Record<AgentName, number> = { claude: 0, codex: 0 };
+  for (const w of live) if (w.agent) used[w.agent]++;
+  // A start in progress whose window is not up yet already holds its place.
+  for (const [task, i] of memory.inflight) if (!live.some((w) => w.window === task.toLowerCase())) used[i.agent]++;
+
+  const began: string[] = [];
+  for (const entry of waiting(entries)) {
+    if (memory.inflight.size >= config.queue.parallelStarts) break;
+    const limit = config.limits[entry.agent];
+    if (limit !== undefined && used[entry.agent] >= limit) continue;
+    used[entry.agent]++;
+    began.push(entry.task);
+    await beginStart(ctx, memory, notifier, entry, opts);
+  }
+  return began;
+}
+
+async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier, entry: QueueEntry, opts: QueueTickOptions): Promise<void> {
+  const { config } = ctx;
+  const starting: QueueEntry = { ...entry, status: 'starting', startingAt: new Date(ctx.runner.now()).toISOString() };
+  await writeEntry(ctx, starting);
+  const log: string[] = [];
+  const startCtx = new ContextClass(ctx.runner, config, (l) => void log.push(l));
+  const run = async (): Promise<void> => {
+    try {
+      await opts.log?.(`queue: starting ${entry.task} (${entry.agent})`);
+      const raws = splitSpecs(entry.spec, `queue entry ${entry.task}`);
+      const spec = resolveSpec(raws[0] as RawSpec, { config });
+      await newTasks(startCtx, [spec], {
+        ...(entry.agentOverride ? { agent: entry.agentOverride } : {}),
+        noSwitch: true,
+        reuse: Boolean(entry.reuse),
+        waitTrust: true,
+        ...(opts.self ? { self: opts.self } : {}),
+        ...(opts.signal ? { signal: opts.signal } : {}),
+      });
+      fs.rmSync(entryFile(config, starting), { force: true });
+      fs.rmSync(queueLogFile(config, starting), { force: true });
+      await opts.log?.(`queue: ${entry.task} started`);
+      await notifyPlain(ctx, notifier, entry.task, `Uruchomiono ${entry.task} z kolejki`, opts.self);
+    } catch (e) {
+      await failEntry(ctx, starting, errorMessage(e), notifier, opts, !opts.signal?.aborted, log).catch(() => undefined);
+    } finally {
+      memory.inflight.delete(entry.task);
+    }
+  };
+  memory.inflight.set(entry.task, { agent: entry.agent, promise: run() });
+}
+
+/** The entry goes to the end of the line as `failed`, with the log of the attempt; no retry loop: `queue retry` is a human's decision. */
+async function failEntry(ctx: Context, entry: QueueEntry, error: string, notifier: Notifier, opts: QueueTickOptions, notify: boolean, log: string[] = []): Promise<void> {
+  const { config } = ctx;
+  const highest = readQueue(config).reduce((n, e) => Math.max(n, e.order, e.seq), 0);
+  const { startingAt: _s, ...rest } = entry;
+  const failed: QueueEntry = { ...rest, status: 'failed', failedAt: new Date(ctx.runner.now()).toISOString(), error, order: highest + 1 };
+  await writeEntry(ctx, failed);
+  await ctx.runner.writeFile(queueLogFile(config, failed), `${log.join('\n')}${log.length > 0 ? '\n' : ''}error: ${error}\n`);
+  await opts.log?.(`queue: ${entry.task} failed: ${firstLine(error)}`);
+  if (notify) await notifyPlain(ctx, notifier, entry.task, `${entry.task}: start z kolejki nie powiódł się – ${firstLine(error)} (agentctl queue retry ${entry.task})`, opts.self);
+}
+
+async function notifyPlain(ctx: Context, notifier: Notifier, task: string, text: string, self: SelfArgv | undefined): Promise<void> {
+  const alerts = new Alerts(ctx, notifier, { self });
+  const { click, text: message } = await alerts.clickFor({ task, window: task.toLowerCase() }, text);
+  await notifier.notify('agentctl', message, click).catch(() => undefined);
+}

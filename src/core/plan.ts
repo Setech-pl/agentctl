@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import { checkReviewer, checkWindowLimit, findAuthor } from './checks.ts';
-import type { LiveWindow } from './checks.ts';
+import type { AgentModel, LiveWindow } from './checks.ts';
 import type { AgentName } from './config.ts';
 import type { Context } from './context.ts';
 import { formatModelEffort, translate } from './equivalents.ts';
@@ -15,6 +15,15 @@ export interface PlanOptions {
   /** `--no-switch`: never offer to move a task to the other provider when its limit is full. */
   noSwitch?: boolean;
   reuse?: boolean;
+  /** Queue validation: the provider limit is not an error (the task waits for a free window), and nothing is ever switched. */
+  ignoreLimits?: boolean;
+  /** Authors of reviewed tasks that are not started yet (waiting in the queue): task -> agent and model. */
+  knownAuthors?: ReadonlyMap<string, AgentModel>;
+  /**
+   * `new` with a full limit: with this sink and a terminal, the question "add to the queue?" is asked and the specs the human
+   * agreed to queue land here instead of being an error. Without a terminal the error names `agentctl queue`.
+   */
+  overflow?: { queued: ResolvedSpec[] };
 }
 
 /** Codex reasoning efforts; `max` is Claude-only. */
@@ -77,7 +86,7 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
 
     // 3. provider limit, with an offer to switch
     const occupied = (): LiveWindow[] => [...live, ...planned];
-    let limitProblem = checkWindowLimit(spec.agent, config.limits[spec.agent], occupied(), config.session);
+    let limitProblem = opts.ignoreLimits ? undefined : checkWindowLimit(spec.agent, config.limits[spec.agent], occupied(), config.session);
     if (limitProblem) {
       const other = otherAgent(spec.agent);
       const current: Order = { agent: spec.agent, model: spec.model, effort: spec.effort };
@@ -103,7 +112,20 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
           }
         }
       }
-      if (limitProblem) p.add(`${at} ${limitProblem}${offered ? ' (switch declined)' : ''} Close one with "agentctl close <task>" or raise limits.${spec.agent} in ${config.path}.`);
+      if (limitProblem && opts.overflow && ctx.confirm) {
+        const yes = await ctx.confirm(`${spec.task}: ${limitProblem}${offered ? ' (switch declined)' : ''}\n  Add it to the queue (it starts by itself when a ${spec.agent} window is free)? [y/N] `);
+        if (yes) {
+          opts.overflow.queued.push(spec);
+          limitProblem = undefined;
+          continue;
+        }
+      }
+      if (limitProblem) {
+        p.add(
+          `${at} ${limitProblem}${offered ? ' (switch declined)' : ''} Close one with "agentctl close <task>", raise limits.${spec.agent} in ${config.path}, ` +
+            `or queue the task: "agentctl queue <file>" starts it when a window is free.`,
+        );
+      }
     }
     planned.push({ window: spec.window, agent: spec.agent });
 
@@ -120,7 +142,7 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
 
   // 5. cross-review on the effective values (after any mapping or switch)
   for (const spec of result) {
-    const problem = checkReviewer(spec, spec.reviewOf ? findAuthor(spec.reviewOf, result, config) : undefined);
+    const problem = checkReviewer(spec, spec.reviewOf ? (findAuthor(spec.reviewOf, [...result, ...(opts.overflow?.queued ?? [])], config) ?? opts.knownAuthors?.get(spec.reviewOf)) : undefined);
     if (problem) p.add(`${spec.task}: ${problem}`);
   }
   p.throwIfAny('Cannot start the tasks:');
