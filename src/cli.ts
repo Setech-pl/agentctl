@@ -35,6 +35,7 @@ import { applyStatusLine, statusTmuxLine } from './core/statusline.ts';
 import { BOARD_WINDOW, ensureWindow } from './core/windows.ts';
 import { interruptTask } from './core/interrupt.ts';
 import { loadGlobalConfig } from './core/config.ts';
+import { applyExamples } from './examples.ts';
 import type { Effort, GlobalConfig } from './core/config.ts';
 import { Context } from './core/context.ts';
 import { EXAMPLE_SPEC } from './core/example.ts';
@@ -75,6 +76,8 @@ export interface CliDeps {
   insideTmux?: boolean;
   /** Pick one of several tasks on the terminal; absent when there is no terminal to ask on. */
   choose?: (targets: TaskTarget[]) => Promise<TaskTarget | undefined>;
+  /** Called with the finished command tree before the arguments are parsed (the help generator reads it; `npm run docs`). */
+  inspect?: (program: Command) => void;
   /** A signal that fires on Ctrl-C (or SIGTERM/SIGHUP) while a long wait runs; `dispose` restores the default Ctrl-C. Absent: no interrupt handling. */
   interruptSignal?: () => { signal: AbortSignal; dispose: () => void };
 }
@@ -255,7 +258,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
 
   program
     .command('new')
-    .description('Start the tasks in a spec file: worktree, symlinks, TASK.md, tmux window, agent, prompt.')
+    .description('Start the tasks in a spec file: worktree, setup commands, symlinks, TASK.md, tmux window, agent, prompt.')
     .argument('[file]', 'spec file, or "-" for stdin')
     .option('--dry-run', 'print the commands that would run, execute nothing')
     .option('--reuse', 'use worktrees that already exist instead of failing')
@@ -681,6 +684,8 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .description('Print an example spec (the Neon City example from the README).')
     .action(guarded(async () => deps.stdout(EXAMPLE_SPEC)));
 
+  applyExamples(program);
+  deps.inspect?.(program);
   try {
     await program.parseAsync(argv, { from: 'user' });
   } catch (e) {

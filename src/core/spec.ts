@@ -128,7 +128,9 @@ export interface ResolveContext {
   loadProject?: (repoPath: string) => Layer | undefined;
 }
 
-const SPEC_KEYS = ['task', 'agent', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'report', 'pin'];
+/** Keys of a spec header, and of one entry of its `repos`; docs/configuration.md describes each one. */
+export const SPEC_KEYS = ['task', 'agent', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'report', 'pin'];
+export const REPO_KEYS = ['path', 'worktree', 'base', 'branch'];
 
 function label(raw: RawSpec): string {
   const task = raw.header.task;
@@ -185,7 +187,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     h.repos.forEach((entry: unknown, i: number) => {
       const at = `repos[${i}]`;
       if (!isObject(entry)) return p.add(`${at} must be a mapping with a "path"`);
-      checkKeys(entry, ['path', 'worktree', 'base', 'branch'], at, p);
+      checkKeys(entry, REPO_KEYS, at, p);
       if (typeof entry.path !== 'string' || entry.path.trim() === '') return p.add(`${at}.path is required`);
       const repo: (typeof rawRepos)[number] = { path: entry.path };
       for (const key of ['worktree', 'base', 'branch'] as const) {

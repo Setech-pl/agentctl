@@ -205,8 +205,16 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
   },
 };
 
-const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'setup', 'defaults'];
-const GLOBAL_KEYS = [...LAYER_KEYS, 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp'];
+/** The keys accepted in every layer: the global config, `.agentctl.yaml` and (with a few of its own) a spec. docs/configuration.md describes each one. */
+export const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'setup', 'defaults'];
+export const GLOBAL_KEYS = [...LAYER_KEYS, 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp'];
+export const DEFAULTS_KEYS = ['agent', 'model', 'effort'];
+export const LINK_KEYS = ['from', 'to'];
+export const AGENT_KEYS = ['flags', 'effort_args', 'ready_pattern', 'ready_timeout', 'trust_timeout', 'trust_pattern', 'working_pattern', 'interrupt_key', 'footer_patterns', 'question_pattern', 'limit_patterns', 'background_patterns'];
+export const WATCH_KEYS = ['interval', 'waiting_after', 'window_icons', 'status_line'];
+export const NOTIFY_KEYS = ['backend', 'events', 'turn_end', 'terminal_app', 'verdict_pattern'];
+export const BOARD_KEYS = ['auto_hide_pulled_dead', 'mouse', 'return_key'];
+export const MCP_KEYS = ['allow', 'allow_rm_worktree'];
 
 /** Screen patterns are case-insensitive and match per line. */
 export const PATTERN_FLAGS = 'im';
@@ -245,7 +253,7 @@ export function parseLinks(v: unknown, where: string, p: Problems): Link[] {
   v.forEach((entry, i) => {
     const at = `${where}[${i}]`;
     if (!isObject(entry)) return p.add(`${at} must be a {from, to} mapping`);
-    checkKeys(entry, ['from', 'to'], at, p);
+    checkKeys(entry, LINK_KEYS, at, p);
     const from = parseString(entry.from, `${at}.from`, p);
     const to = parseString(entry.to, `${at}.to`, p);
     if (!from) p.add(`${at}: "from" is required`);
@@ -283,7 +291,7 @@ function parseDefaults(v: unknown, where: string, p: Problems): Defaults {
     p.add(`${where} must be a mapping`);
     return {};
   }
-  checkKeys(v, ['agent', 'model', 'effort'], where, p);
+  checkKeys(v, DEFAULTS_KEYS, where, p);
   const defaults: Defaults = {};
   const agent = parseEnumValue(v.agent, AGENT_NAMES, `${where}.agent`, p);
   const model = parseString(v.model, `${where}.model`, p);
@@ -323,7 +331,7 @@ function parseAgentSettings(name: AgentName, v: unknown, where: string, p: Probl
     p.add(`${where} must be a mapping`);
     return settings;
   }
-  checkKeys(v, ['flags', 'effort_args', 'ready_pattern', 'ready_timeout', 'trust_timeout', 'trust_pattern', 'working_pattern', 'interrupt_key', 'footer_patterns', 'question_pattern', 'limit_patterns', 'background_patterns'], where, p);
+  checkKeys(v, AGENT_KEYS, where, p);
   if (v.flags !== undefined) settings.flags = parseStringList(v.flags, `${where}.flags`, p);
   if (v.effort_args !== undefined) settings.effortArgs = parseStringList(v.effort_args, `${where}.effort_args`, p);
   for (const [key, list] of [['flags', settings.flags], ['effort_args', settings.effortArgs]] as const) {
@@ -415,7 +423,7 @@ function parseWatch(v: unknown, p: Problems): GlobalConfig['watch'] {
     p.add('config.watch must be a mapping like {interval: 15, waiting_after: 120}');
     return watch;
   }
-  checkKeys(v, ['interval', 'waiting_after', 'window_icons', 'status_line'], 'config.watch', p);
+  checkKeys(v, WATCH_KEYS, 'config.watch', p);
   watch.windowIcons = parseWindowIcons(v.window_icons, p);
   if (v.status_line !== undefined) {
     if (typeof v.status_line === 'boolean') watch.statusLine = v.status_line;
@@ -436,7 +444,7 @@ function parseNotify(v: unknown, p: Problems): NotifySettings {
     p.add('config.notify must be a mapping like {terminal_app: com.apple.Terminal, verdict_pattern: "^Verdict:"}');
     return notify;
   }
-  checkKeys(v, ['backend', 'events', 'turn_end', 'terminal_app', 'verdict_pattern'], 'config.notify', p);
+  checkKeys(v, NOTIFY_KEYS, 'config.notify', p);
   notify.backend = parseEnumValue(v.backend, NOTIFY_BACKENDS, 'config.notify.backend', p) ?? 'auto';
   for (const [key, field] of [['events', 'events'], ['turn_end', 'turnEnd']] as const) {
     if (v[key] === undefined) continue;
@@ -464,7 +472,7 @@ function parseBoard(v: unknown, p: Problems): BoardSettings {
     p.add('config.board must be a mapping like {auto_hide_pulled_dead: true, mouse: true, return_key: F12}');
     return board;
   }
-  checkKeys(v, ['auto_hide_pulled_dead', 'mouse', 'return_key'], 'config.board', p);
+  checkKeys(v, BOARD_KEYS, 'config.board', p);
   if (v.mouse !== undefined) {
     if (typeof v.mouse === 'boolean') board.mouse = v.mouse;
     else p.add('config.board.mouse must be true or false');
@@ -488,7 +496,7 @@ function parseMcp(v: unknown, p: Problems): McpSettings {
     p.add(`config.mcp must be a mapping like {allow: [${MCP_WRITE_TOOLS.join(', ')}]}`);
     return mcp;
   }
-  checkKeys(v, ['allow', 'allow_rm_worktree'], 'config.mcp', p);
+  checkKeys(v, MCP_KEYS, 'config.mcp', p);
   const allow = parseStringList(v.allow, 'config.mcp.allow', p);
   for (const name of allow) {
     if (!(MCP_WRITE_TOOLS as readonly string[]).includes(name)) p.add(`config.mcp.allow: "${name}" is not a write tool (allowed: ${MCP_WRITE_TOOLS.join(', ')})`);

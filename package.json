@@ -25,7 +25,8 @@
   "scripts": {
     "test": "node --experimental-strip-types --no-warnings --test \"tests/**/*.test.ts\"",
     "typecheck": "tsc --noEmit",
-    "agentctl": "node --experimental-strip-types --no-warnings bin/agentctl.ts"
+    "agentctl": "node --experimental-strip-types --no-warnings bin/agentctl.ts",
+    "docs": "node --experimental-strip-types --no-warnings scripts/gen-docs.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
