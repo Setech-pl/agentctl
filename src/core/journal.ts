@@ -59,3 +59,10 @@ export function readJournal(config: Pick<GlobalConfig, 'path'>, sinceMs: number 
   }
   return out;
 }
+
+/** Record unless the last entry of this kind said the same within `withinMs` (two writers of one fact: a command and the watcher that noticed it). */
+export async function recordJournalOnce(ctx: Context, entry: Omit<JournalEntry, 'at'>, withinMs = 5 * 60_000): Promise<void> {
+  const now = ctx.runner.now();
+  const last = readJournal(ctx.config, now - withinMs).filter((e) => e.kind === entry.kind && e.text === entry.text && (e.task ?? '') === (entry.task ?? ''));
+  if (last.length === 0) await recordJournal(ctx, entry);
+}

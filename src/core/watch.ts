@@ -1,4 +1,10 @@
+import fs from 'node:fs';
 import path from 'node:path';
+import { ConfigStore, configStatePath, noteConfigState } from './config-store.ts';
+import type { ConfigRefresh } from './config-store.ts';
+import { loadGlobalConfig } from './config.ts';
+import { limitsDiffText } from './limits.ts';
+import { recordJournalOnce } from './journal.ts';
 import type { Context } from './context.ts';
 import { Alerts } from './alert.ts';
 import type { Notifier } from './notify.ts';
@@ -187,6 +193,10 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
 }
 
 export interface WatchOptions {
+  /** Where the configuration is read again from; default: config.yaml next to the one this run started with. */
+  configStore?: ConfigStore;
+  /** Makes the notifier again when the `notify` section changed. */
+  remakeNotifier?: () => Promise<Notifier>;
   /** Ctrl-C. */
   signal?: AbortSignal;
   /** Stop after this many ticks (tests). */
@@ -195,18 +205,60 @@ export interface WatchOptions {
   self?: SelfArgv | undefined;
 }
 
+/**
+ * Read config.yaml again if its text changed. A file that loads comes into force at once (the next tick sees it: a raised limit starts the
+ * waiting tasks, a new `mcp.allow` is known to the server on its next call); a file that does not load leaves the previous settings in force
+ * and is reported once in the log, and `status` and `doctor` say so.
+ */
+export async function reloadConfig(ctx: Context, store: ConfigStore, by = 'watch'): Promise<ConfigRefresh> {
+  const before = ctx.config;
+  const r = store.refresh();
+  if (r.config !== before) ctx.setConfig(r.config);
+  const log = async (text: string): Promise<void> => {
+    await ctx.runner.appendFile(watchLogPath(ctx), `${new Date(ctx.runner.now()).toISOString()}  ${text}\n`);
+    ctx.out(text);
+  };
+  if (r.error) await log(`config: ${r.error}`);
+  else if (r.changed) {
+    await log(`config: reloaded (${r.keys.join(', ')})`);
+    const text = limitsDiffText(before.limits, r.config.limits);
+    if (text) await recordJournalOnce(ctx, { kind: 'limits-changed', text });
+  }
+  if (r.error || r.changed || before.reloadWarning) noteConfigState(configStatePath(r.config), by, ctx.runner.now(), r.error);
+  return r;
+}
+
 /** Foreground loop: tick every `watch.interval` seconds until aborted. */
 export async function runWatch(ctx: Context, notifier: Notifier, opts: WatchOptions = {}): Promise<void> {
   const memory = new WatchMemory();
+  const store = opts.configStore ?? new ConfigStore(() => loadGlobalConfig(path.dirname(ctx.config.path)), ctx.config);
+  let current = notifier;
   const { interval, waitingAfter } = ctx.config.watch;
   ctx.out(`Watching every ${interval}s (waiting notice after ${waitingAfter}s), log: ${watchLogPath(ctx)}. Ctrl-C stops.`);
+  // A change of the file is seen at once (and logged); the check at every tick is the safety net for a watcher that missed it.
+  let fileWatcher: fs.FSWatcher | undefined;
+  try {
+    fileWatcher = fs.watch(path.dirname(ctx.config.path), (_event, name) => {
+      if (name === path.basename(ctx.config.path)) void applyReload().catch(() => undefined);
+    });
+    fileWatcher.on('error', () => undefined);
+  } catch {
+    // no file watching here: the tick checks
+  }
+  const applyReload = async (): Promise<void> => {
+    const before = ctx.config.notify;
+    const r = await reloadConfig(ctx, store);
+    if (r.changed && JSON.stringify(before) !== JSON.stringify(ctx.config.notify) && opts.remakeNotifier) current = await opts.remakeNotifier();
+  };
   try {
     for (let tick = 0; !opts.signal?.aborted && (opts.maxTicks === undefined || tick < opts.maxTicks); tick++) {
-      if (tick > 0) await ctx.runner.sleep(interval * 1000, opts.signal);
+      if (tick > 0) await ctx.runner.sleep(ctx.config.watch.interval * 1000, opts.signal);
       if (opts.signal?.aborted) break;
-      await watchTick(ctx, memory, notifier, { self: opts.self, signal: opts.signal });
+      await applyReload();
+      await watchTick(ctx, memory, current, { self: opts.self, signal: opts.signal });
     }
   } finally {
+    fileWatcher?.close();
     // A start in progress is not abandoned half way: the window and the prompt are its result.
     await memory.queue.idle();
     const restored = await restoreWindowNames(ctx, memory);

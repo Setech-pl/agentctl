@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { Argument, Command, CommanderError, Option } from 'commander';
 import { cancelTasks, planCancel } from './core/cancel.ts';
@@ -47,7 +48,8 @@ import { computeStats, logMarkdown, markTask, RESULTS, renderLog, renderStats, s
 import type { Result } from './core/history.ts';
 import { usageSummaryLines } from './core/usage-limits.ts';
 import { collectUsage, renderUsage, usageMarkdown } from './core/usage-report.ts';
-import { loadGlobalConfig } from './core/config.ts';
+import { configDir, loadGlobalConfig } from './core/config.ts';
+import { ConfigStore, configStatePath, noteConfigState, readConfigState } from './core/config-store.ts';
 import { applyExamples } from './examples.ts';
 import type { Effort, GlobalConfig } from './core/config.ts';
 import { Context } from './core/context.ts';
@@ -246,7 +248,15 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
   };
 
   const contextFor = (dryRun: boolean, { migrate = true } = {}): Context => {
-    const config = deps.loadConfig();
+    let config: GlobalConfig;
+    try {
+      config = deps.loadConfig();
+    } catch (e) {
+      // A running watch or MCP server keeps working with the last good settings: say so, so that the broken file is not mistaken for an outage.
+      const state = readConfigState(path.join(configDir(), 'config-state.json'));
+      if (e instanceof AgentctlError && state && !state.ok) throw new AgentctlError(e.message, `${e.hint ? `${e.hint} ` : ''}The ${state.by} keeps the previous settings meanwhile (since ${state.at}).`);
+      throw e;
+    }
     // TASK.md and setup.log used to live in the cache folder, where agents could delete them: move them to state_dir.
     if (!dryRun && migrate) for (const message of migrateLegacyState(config)) line(message);
     return new Context(deps.makeRunner(dryRun, line), config, line, deps.confirm);
@@ -867,7 +877,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
           await loggedRun(startLogPath(ctx.config, 'watch'), 'watch', async () => {
             const notifier = await makeNotifier(ctx);
             const self = deps.selfArgv?.();
-            await runWatch(ctx, notifier, { ...(interrupt ? { signal: interrupt.signal } : {}), ...(self ? { self } : {}) });
+            await runWatch(ctx, notifier, { ...(interrupt ? { signal: interrupt.signal } : {}), ...(self ? { self } : {}), configStore: new ConfigStore(deps.loadConfig, ctx.config), remakeNotifier: () => makeNotifier(ctx) });
           }, { minLifetimeMs: 0 });
         } finally {
           interrupt?.dispose();
@@ -1047,7 +1057,14 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .action(
       guarded(async () => {
         // stdout belongs to the protocol: messages go to stderr, and the state is not migrated (that prints).
-        const contextAt = (out: (line: string) => void): Context => new Context(deps.makeRunner(false, () => {}), deps.loadConfig(), out);
+        // The file is read again when its text changes; one that does not load leaves the previous settings in force (and `status` says so).
+        const store = new ConfigStore(deps.loadConfig);
+        const contextAt = (out: (line: string) => void): Context => {
+          const r = store.refresh();
+          const config = r.config;
+          noteConfigState(configStatePath(config), 'mcp', Date.now(), r.error ?? (config.reloadWarning ? config.reloadWarning : undefined));
+          return new Context(deps.makeRunner(false, () => {}), config, out);
+        };
         const tools: McpDeps = {
           context: contextAt,
           notify: async (message) => {

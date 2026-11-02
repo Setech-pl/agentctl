@@ -232,6 +232,7 @@ function serverLines(deps: McpDeps, ctx: Context): string[] {
     lines.push(`MCP server: agentctl ${deps.server.version} (${deps.server.script}, pid ${deps.server.pid}, started ${deps.server.started})${stable && stable !== deps.server.version ? ` – the stable copy on disk is ${stable}: ${staleNote}` : ''}`);
   }
   for (const w of ctx.config.mcp.warnings) lines.push(`Config warning: ${w}`);
+  if (ctx.config.reloadWarning) lines.push(`Config warning: ${ctx.config.reloadWarning}`);
   return lines;
 }
 
@@ -248,7 +249,7 @@ async function runVersion(deps: McpDeps): Promise<ToolResult> {
     stableCopyVersion: stableVersion ?? null,
     older: deps.server !== undefined && stableVersion !== undefined && stableVersion !== deps.server.version,
     writeToolsAllowed: ctx.config.mcp.allow,
-    configWarnings: ctx.config.mcp.warnings,
+    configWarnings: [...ctx.config.mcp.warnings, ...(ctx.config.reloadWarning ? [ctx.config.reloadWarning] : [])],
   };
   const note = info.older ? `\n\nThis server runs ${info.version}, the stable copy on disk is ${stableVersion}: ${staleNote}.` : '';
   return ok(`${JSON.stringify(info, null, 2)}${note}`);
