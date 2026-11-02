@@ -29,6 +29,7 @@ These always work.
 | `usage` | `cohort?`, `since?` | Token usage and the plan limits: per provider the 5 hour and weekly window (percentage used, reset time; `available: false` when the provider did not say, shown as n/d) and the tokens today and in the period, per task, cohort, model and day. `since` is an age such as `12h`, `7d`, `2w` (default `7d`). A chat should call it before the user orders more tasks. `status` carries a one-line `Plans:` summary. |
 | `log` | `cohort?`, `since?` | The history of the tasks, newest first: agent/model/effort, start, report, duration, tokens (null: n/d), commits and files, the verdict line, cancel reason, move, and the result the user marked. |
 | `stats` | `cohort?`, `since?` | The history grouped by agent/model/effort: tasks, median time and tokens, how many were marked ok, partial or fail, cancelled, and moved to the other provider after a limit. |
+| `limits` | none | The limit per provider, what uses it up (windows of agentctl, reserved places, external sessions when `limits.count_external` is on), the free places and the tasks waiting in the queue. |
 | `overlap` | `task?` | Pairs of active tasks of one repository that changed the same files, with the file lists (from git, now). `status` also carries `collidesWith` per task, and short `Queue` and `Collisions` lines. |
 | `cohort_list` | none | The cohorts (named groups of tasks): per cohort the number of tasks by state (`active`, `queued`, `reports`, `closed`, `cancelled`), `total`, `created` and the note. |
 | `cohort_show` | `cohort` | One cohort: its note, every task in it as `status` shows it (closed and cancelled ones too) and its queued tasks with what each waits for. |
@@ -44,7 +45,7 @@ Off until you list them in `~/.agentctl/config.yaml`. The list is read again on 
 
 ```yaml
 mcp:
-  allow: [send, interrupt]     # any of: send, new, interrupt, close, move, queue, queue_rm, cancel, mark
+  allow: [send, interrupt]     # any of: send, new, interrupt, close, move, queue, queue_rm, cancel, mark, set_limits, reserve
   allow_rm_worktree: false     # close may also remove the git worktree
 ```
 
@@ -58,6 +59,8 @@ mcp:
 | `queue_rm` | `task` | Takes a waiting or failed task out of the queue; it becomes cancelled (as `cancel` does for a queued task) and the tasks that wait for it become blocked. |
 | `cancel` | `task` or `cohort`, `reason?`, `remove_worktree?`, `confirm?` | Abandons a task, or all open tasks of a cohort: a task at work is interrupted and its window closed after `cancel.grace` seconds, a queued task leaves the queue. The task becomes cancelled; the worktree, the branch and a written report stay. A move is cancelled with its other half. The first call only describes what would be cancelled; `confirm: true` does it. `remove_worktree` needs `mcp.allow_rm_worktree`, as in `close`. The desktop notice names the reason. |
 | `mark` | `task`, `result` (`ok`, `partial` or `fail`), `note?` | Records the result the user judged for a task in the history (`log`, `stats`); the last mark wins. It changes nothing else, so it has no confirm step; a chat should record only what the user said. |
+| `set_limits` | `claude?`, `codex?` (0 removes a limit), `confirm?` | Sets the most simultaneous agents per provider in `config.yaml` (comments stay, a `.bak` copy is kept). Takes effect at once, also in a running `watch`. The first call only describes the change; `confirm: true` writes it. |
+| `reserve` | `claude?`, `codex?`, `note?`, `release?`, `confirm?` | Holds places of a provider for agents you start by hand (they count against the limit), or gives them back with `release: true`. The first call only describes it; `confirm: true` does it. |
 | `move` | `task`, `agent?`, `confirm?` | Hands a task that hit its usage limit to the other provider. The first call only describes the move; `confirm: true` does it. |
 
 ## Safety model
@@ -66,7 +69,7 @@ mcp:
 - Every write is refused unless `mcp.allow` lists it. Refused calls are recorded too.
 - **Audit log:** `~/.agentctl/mcp-audit.log` (next to the config), one JSON line per step: time, tool, task, outcome `requested`, then `done`, `error`, `denied` or `preview`. The `requested` line is written before the action, and a write that cannot be recorded is not done.
 - **Notification:** a done write is announced on the desktop (`czat zlecił: <action> <TASK>`).
-- **Two-step tools:** `new`, `queue` and `move` change nothing on the first call; the chat has to show the summary and call again with `confirm: true`.
+- **Two-step tools:** `new`, `queue`, `move`, `set_limits` and `reserve` change nothing on the first call; the chat has to show the summary and call again with `confirm: true`.
 - The server runs as you and sees what you see. This is a trust decision about the chat, not a sandbox. Start with `allow: []`.
 
 ## Install

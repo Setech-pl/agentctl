@@ -26,6 +26,8 @@ import {
   rowCells,
   runBoardEffect,
   usagePanel,
+  loadViewLines,
+  VIEW_TITLES,
   showNotice,
   visibleItems,
   withBusy,
@@ -188,6 +190,9 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
       }
       return update((s) => (s.mode.kind === 'log' ? { ...s, mode: { kind: 'log', lines, offset: 0 } } : s));
     }
+    if (effect.type === 'view') {
+      return void loadViewLines(ctx, effect.what).catch((e: unknown) => [`cannot load: ${errorMessage(e)}`]).then((lines) => update((s) => (s.mode.kind === 'view' && s.mode.what === effect.what ? { ...s, mode: { kind: 'view', what: effect.what, lines, offset: 0 } } : s)));
+    }
     queue.current = queue.current.then(async () => {
       update((s) => withBusy(s, 'working…'));
       const notice = await runBoardEffect(ctx.runner, ctx.config, effect, { insideTmux, self });
@@ -217,8 +222,11 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
   );
   const panelBox = panel.length === 0 ? null : h(Box, { flexDirection: 'column', width: state.width }, ...panel.map((l) => h(Text, { key: l.provider, wrap: 'truncate-end', ...(l.color ? { color: l.color } : { dimColor: true }) }, l.text)));
   const logMode = state.mode.kind === 'log' ? state.mode : null;
+  const viewMode = state.mode.kind === 'view' ? state.mode : null;
   const body =
-    logMode
+    viewMode
+      ? h(Box, { flexDirection: 'column' }, h(Text, { bold: true }, `${VIEW_TITLES[viewMode.what]} (↑↓ scroll, Esc back)`), ...viewMode.lines.slice(viewMode.offset, viewMode.offset + Math.max(1, state.height - 4)).map((l, i) => h(Text, { key: i, wrap: 'truncate-end' }, l === '' ? ' ' : l)))
+      : logMode
       ? h(Box, { flexDirection: 'column' }, h(Text, { bold: true }, `Log – ${logMode.lines.length > 1 ? logMode.lines.length - 1 : 0} task${logMode.lines.length === 2 ? '' : 's'} (↑↓ scroll, Esc back)`), ...logMode.lines.slice(logMode.offset, logMode.offset + Math.max(1, state.height - 4)).map((l, i) => h(Text, { key: i, wrap: 'truncate-end', ...(i === 0 && logMode.offset === 0 ? { dimColor: true } : {}) }, l === '' ? ' ' : l)))
       : state.mode.kind === 'help'
       ? h(Box, { flexDirection: 'column' }, ...HELP_LINES.map((l, i) => h(Text, { key: i }, l === '' ? ' ' : l)))
@@ -228,7 +236,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
           h(TaskList, { state, width: layout.listWidth, capacity: rowsForBody - 1, icons: ctx.config.watch.windowIcons }),
           layout.showPreview ? h(Preview, { state, width: layout.previewWidth, height: rowsForBody }) : null,
         );
-  return h(Box, { flexDirection: 'column', width: state.width, height: state.height }, header, state.mode.kind === 'help' || logMode ? null : panelBox, h(Box, { flexGrow: 1, flexDirection: 'column' }, body), h(Footer, { state, hint: navigationHint(ctx.config.board.returnKey) }));
+  return h(Box, { flexDirection: 'column', width: state.width, height: state.height }, header, state.mode.kind === 'help' || logMode || viewMode ? null : panelBox, h(Box, { flexGrow: 1, flexDirection: 'column' }, body), h(Footer, { state, hint: navigationHint(ctx.config.board.returnKey) }));
 }
 
 /** Show the board until the user quits; resolves when it is gone. Needs a terminal. */

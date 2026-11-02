@@ -28,6 +28,8 @@ import { listArchivedRecords, listTaskRecords, readTaskPrompt } from './taskstor
 import type { TaskRecord } from './taskstore.ts';
 import { computeStats, markTask, parseResult, RESULTS, selectHistory } from './history.ts';
 import { collectUsage } from './usage-report.ts';
+import { applySetLimits, collectLimits, planSetLimits, readReservations, releasePlaces, reservePlaces } from './limits.ts';
+import type { LimitAssignments } from './limits.ts';
 import { planLine } from './usage-report.ts';
 import { openReader, readPlans } from './usage.ts';
 import { AGENT_NAMES } from './config.ts';
@@ -221,6 +223,45 @@ async function runMark(deps: McpDeps, args: { task: string; result: string; note
     const result = parseResult(args.result);
     const marked = await markTask(ctx, args.task, result, args.note);
     return { text: `${marked.task}: marked ${marked.result}${marked.previous && marked.previous !== marked.result ? ` (was ${marked.previous})` : ''}. It is in the history (log, stats).`, executed: true, announce: `mark ${marked.task} ${marked.result}` };
+  });
+}
+
+async function runLimits(deps: McpDeps): Promise<ToolResult> {
+  const ctx = deps.context(() => {});
+  const report = collectLimits(ctx.config, await liveWindows(ctx));
+  const reserved = readReservations(ctx.config);
+  return ok(
+    `Limits of simultaneous agents per provider. used = windows of agentctl + reserved places + external sessions (counted only if countExternal is true); free = limit - used; queued = tasks waiting for a place of that provider.\n\n${JSON.stringify({ ...report, reservations: reserved }, null, 2)}`,
+  );
+}
+
+const limitArg = z.number().int().min(0).max(50).optional();
+
+async function runSetLimits(deps: McpDeps, args: { claude?: number | undefined; codex?: number | undefined; confirm?: boolean | undefined }): Promise<ToolResult> {
+  return writeTool(deps, 'set_limits', { detail: `claude=${args.claude ?? '-'} codex=${args.codex ?? '-'} confirm=${Boolean(args.confirm)}` }, async (ctx) => {
+    const assignments: LimitAssignments = {};
+    for (const agent of AGENT_NAMES) if (args[agent] !== undefined) assignments[agent] = args[agent] === 0 ? null : (args[agent] as number);
+    if (Object.keys(assignments).length === 0) throw new AgentctlError('give claude and/or codex', '0 removes a limit.');
+    const plan = planSetLimits(ctx.config, assignments);
+    if (!args.confirm) return { text: `${plan.summary.join('\n')}\n\nNot changed yet. Show this to the user and ask; if they agree, call set_limits again with the same numbers and confirm: true.`, executed: false, announce: '' };
+    await applySetLimits(ctx, plan);
+    return { text: `Limits changed (${plan.changes.map((c) => `${c.agent} ${c.from ?? '-'} -> ${c.to ?? '-'}`).join(', ')}). They are in force now: a running watch picks the file up and starts waiting tasks at its next tick.`, executed: true, announce: `limity ${plan.changes.map((c) => `${c.agent}=${c.to ?? 'brak'}`).join(' ')}` };
+  });
+}
+
+async function runReserve(deps: McpDeps, args: { claude?: number | undefined; codex?: number | undefined; note?: string | undefined; release?: boolean | undefined; confirm?: boolean | undefined }): Promise<ToolResult> {
+  return writeTool(deps, 'reserve', { detail: `${args.release ? 'release ' : ''}claude=${args.claude ?? '-'} codex=${args.codex ?? '-'} confirm=${Boolean(args.confirm)}` }, async (ctx) => {
+    const counts: Partial<Record<(typeof AGENT_NAMES)[number], number | undefined>> = {};
+    for (const agent of AGENT_NAMES) if (args[agent] !== undefined && args[agent] !== 0) counts[agent] = args[agent];
+    if (Object.keys(counts).length === 0) throw new AgentctlError('give claude and/or codex (a number from 1)');
+    const what = Object.entries(counts).map(([a, n]) => `${a} ${n}`).join(', ');
+    if (!args.confirm) {
+      const have = Object.entries(readReservations(ctx.config)).map(([a, r]) => `${a} ${r.count}${r.note ? ` (${r.note})` : ''}`).join(', ') || 'nothing';
+      return { text: `${args.release ? 'Release' : 'Reserve'} places: ${what}${args.note ? ` – ${args.note}` : ''}. Reserved now: ${have}. A reserved place counts against the limit, so the queue leaves room for an agent the user starts by hand.\n\nNot done yet. Ask the user, then call reserve again with confirm: true.`, executed: false, announce: '' };
+    }
+    if (args.release) await releasePlaces(ctx, counts);
+    else await reservePlaces(ctx, counts, args.note);
+    return { text: `${args.release ? 'Released' : 'Reserved'}: ${what}.`, executed: true, announce: `${args.release ? 'zwolnienie' : 'rezerwacja'} ${what}` };
   });
 }
 
@@ -629,6 +670,39 @@ export const MCP_TOOLS: McpToolDef[] = [
     input: { all: allArg, cohort: cohortArg.optional() },
     annotations: readOnly('Status of all agent tasks'),
     run: (deps, args) => guarded(() => runStatus(deps, args as { all?: boolean; cohort?: string })),
+  }),
+  def({
+    name: 'limits',
+    title: 'Limits of simultaneous agents',
+    kind: 'read',
+    description:
+      'The limit of simultaneous agents per provider (claude, codex), what uses it up (windows of agentctl, places the user reserved for agents started by hand, external sessions if counted) and how many places are free; also the tasks waiting in the queue per provider. ' +
+      'Use it before proposing to start or queue tasks, and when the user says they changed the parity.',
+    input: {},
+    annotations: readOnly('Limits of simultaneous agents'),
+    run: (deps) => guarded(() => runLimits(deps)),
+  }),
+  def({
+    name: 'set_limits',
+    title: 'Change the limits',
+    kind: 'write',
+    description:
+      'WRITE, off unless the user put "set_limits" in mcp.allow. Sets the most simultaneous agents per provider in config.yaml (0 removes a limit); comments in the file stay, a copy is kept as config.yaml.bak. It takes effect at once, without restarting watch. ' +
+      'The FIRST call (confirm omitted) only describes the change; show it to the user, then call again with confirm: true.',
+    input: { claude: limitArg.describe('New limit for Claude; 0 = no limit. Omit to leave it.'), codex: limitArg.describe('New limit for Codex; 0 = no limit. Omit to leave it.'), confirm: z.boolean().optional().describe('true only after the user agreed to the described change.') },
+    annotations: { title: 'Change the limits', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    run: (deps, args) => guarded(() => runSetLimits(deps, args as { claude?: number; codex?: number; confirm?: boolean })),
+  }),
+  def({
+    name: 'reserve',
+    title: 'Reserve places for agents started by hand',
+    kind: 'write',
+    description:
+      'WRITE, off unless the user put "reserve" in mcp.allow. Holds places of a provider for agents the user starts by hand (they count against the limit, so the queue leaves room); release: true gives places back. Numbers are how many places. ' +
+      'The FIRST call (confirm omitted) only describes it; ask the user, then call again with confirm: true.',
+    input: { claude: limitArg.describe('Places of Claude.'), codex: limitArg.describe('Places of Codex.'), note: z.string().max(100).optional().describe('What the place is for (shown by limits).'), release: z.boolean().optional().describe('true: give the places back instead of reserving.'), confirm: z.boolean().optional().describe('true only after the user agreed.') },
+    annotations: { title: 'Reserve places for agents started by hand', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    run: (deps, args) => guarded(() => runReserve(deps, args as { claude?: number; codex?: number; note?: string; release?: boolean; confirm?: boolean })),
   }),
   def({
     name: 'version',
