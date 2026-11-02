@@ -11,7 +11,7 @@ const scratch = useScratch();
 it('reads only an attributed unresolved question and clears it after the matching tool result', () => {
  const config = makeConfig(scratch.dir);
  const home = path.join(scratch.dir, 'codex');
- const record = {agent:'codex', window:'q', env:{CODEX_HOME:home}, started:new Date().toISOString()} as TaskRecord;
+ const record = {agent:'codex', window:'q', env:{CODEX_HOME:home}, started:new Date().toISOString()} as unknown as TaskRecord;
  const dir = path.join(home, 'sessions', ...localDay(Date.now()).split('-'));
  fs.mkdirSync(dir, {recursive:true});
  const file = path.join(dir, 'rollout-test-id.jsonl');
