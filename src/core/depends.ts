@@ -2,6 +2,7 @@ import type { Context } from './context.ts';
 import type { QueueEntry } from './queue.ts';
 import type { StatusRow } from './status.ts';
 import { listArchivedRecords, listTaskRecords } from './taskstore.ts';
+import { BLOCKED_ICON } from './icons.ts';
 import { Problems } from './util.ts';
 
 /*
@@ -19,9 +20,47 @@ export function unmetAfter(after: readonly string[], rows: readonly StatusRow[])
   return after.filter((task) => !hasReport(rows.find((r) => r.task === task)));
 }
 
-/** "czeka na NC-4, NC-5": what a waiting task is waiting for; `queued` are the ones that still wait in the queue themselves. */
-export function waitingText(unmet: readonly string[], failed: ReadonlySet<string> = new Set()): string {
-  return `czeka na ${unmet.map((t) => (failed.has(t) ? `${t} (failed)` : t)).join(', ')}`;
+/** "czeka na NC-4, NC-5": what a waiting task is waiting for; `failed` are the ones whose start failed in the queue, `cancelled` the ones that were cancelled. */
+export function waitingText(unmet: readonly string[], failed: ReadonlySet<string> = new Set(), cancelled: ReadonlySet<string> = new Set()): string {
+  return `czeka na ${unmet.map((t) => (cancelled.has(t) ? `${t} (anulowane)` : failed.has(t) ? `${t} (failed)` : t)).join(', ')}`;
+}
+
+/** The tasks that were cancelled (`agentctl cancel`). */
+export function cancelledTasks(rows: readonly StatusRow[]): Set<string> {
+  return new Set(rows.filter((r) => r.cancelled).map((r) => r.task));
+}
+
+/** What keeps a queued task from ever starting: the cancelled tasks its `after` names, and the queued tasks that are blocked themselves. */
+export interface Blockers {
+  cancelled: string[];
+  blocked: string[];
+}
+
+/**
+ * The queued tasks that are blocked, with the cause. A task is blocked while its `after` names a cancelled task: it would wait for a report
+ * that never comes. A task that waits for a blocked task is blocked too. The way out is `agentctl unblock` or `agentctl cancel`.
+ */
+export function findBlocked(entries: readonly Pick<QueueEntry, 'task' | 'after' | 'status'>[], rows: readonly StatusRow[]): Map<string, Blockers> {
+  const cancelled = cancelledTasks(rows);
+  const blocked = new Map<string, Blockers>();
+  const waiting = entries.filter((e) => e.status === 'queued');
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const e of waiting) {
+      const b: Blockers = { cancelled: e.after.filter((t) => cancelled.has(t)), blocked: e.after.filter((t) => blocked.has(t)) };
+      if (b.cancelled.length + b.blocked.length === 0) continue;
+      const known = blocked.get(e.task);
+      if (known && known.cancelled.length === b.cancelled.length && known.blocked.length === b.blocked.length) continue;
+      blocked.set(e.task, b);
+      grew = true;
+    }
+  }
+  return blocked;
+}
+
+/** "⛓ zablokowane – NC-1 anulowane": the cause shown by `status`, `queue list` and the board. */
+export function blockedText(b: Blockers): string {
+  return `${BLOCKED_ICON} zablokowane – ${[...b.cancelled.map((t) => `${t} anulowane`), ...b.blocked.map((t) => `${t} zablokowane`)].join(', ')}`;
 }
 
 /** Tasks that exist: started (also closed and archived ones) or waiting in the queue. */
@@ -37,6 +76,8 @@ export function checkAfter(ctx: Context, batch: readonly { task: string; after: 
   const p = new Problems();
   const known = knownTasks(ctx, entries);
   for (const b of batch) known.add(b.task);
+  const cancelled = new Set([...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)].filter((r) => r.cancelled).map((r) => r.task));
+  const revived = new Set([...batch.map((b) => b.task), ...entries.map((e) => e.task)]);
   // task -> the tasks it waits for, among those that have not started yet
   const edges = new Map<string, readonly string[]>(entries.map((e) => [e.task, e.after ?? []]));
   for (const b of batch) edges.set(b.task, b.after);
@@ -44,6 +85,7 @@ export function checkAfter(ctx: Context, batch: readonly { task: string; after: 
     for (const dep of b.after) {
       if (dep === b.task) p.add(`${b.task}: after names the task itself`);
       else if (!known.has(dep)) p.add(`${b.task}: after ${dep}: there is no such task (not started, not in the queue, not in this file)`);
+      else if (cancelled.has(dep) && !revived.has(dep)) p.add(`${b.task}: after ${dep}: ${dep} was cancelled, so it never gets a report`);
     }
   }
   for (const b of batch) {

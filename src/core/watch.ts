@@ -10,7 +10,7 @@ import type { StatusRow } from './status.ts';
 import type { TaskState } from './state.ts';
 import { decorateName } from './icons.ts';
 import { CollisionMemory, collisionTick } from './collisions.ts';
-import { QueueMemory, queueTick } from './queue.ts';
+import { announceBlocked, QueueMemory, queueTick } from './queue.ts';
 import { errorMessage } from './util.ts';
 import { ensureWindow } from './windows.ts';
 import type { EnsureResult } from './windows.ts';
@@ -155,6 +155,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
     ctx.out(text);
   };
   await queueTick(ctx, memory.queue, notifier, { self: options.self, signal: options.signal, rows: allRows, log: startLog });
+  await announceBlocked(ctx, notifier, allRows, { self: options.self, log: startLog }).catch((e: unknown) => startLog(`queue: ${errorMessage(e)}`));
   await collisionTick(ctx, memory.collisions, notifier, startLog).catch((e: unknown) => startLog(`collisions: ${errorMessage(e)}`));
   const events = detectTransitions(memory, rows, now, ctx.config.watch.waitingAfter * 1000);
   const alerts = new Alerts(ctx, notifier, { self: options.self });

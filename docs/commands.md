@@ -17,6 +17,7 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`queue retry`](#agentctl-queue-retry) | Put a failed task back at the end of the line; it is tried once more (over the worktree the failed start left). |
 | [`queue pause`](#agentctl-queue-pause) | Stop starting queued tasks (running tasks are not touched; adding and listing still work). |
 | [`queue resume`](#agentctl-queue-resume) | Let the queue start tasks again. |
+| [`unblock`](#agentctl-unblock) | Let a blocked queued task go on: a task whose "after" names a cancelled task is blocked (⛓) and never starts. This drops the dependency (all the cancelled ones, or only --drop-after); the task is back in the queue and waits for the rest, or starts. The other way out is "agentctl cancel". |
 | [`overlap`](#agentctl-overlap) | Which active tasks of one repository changed the same files (git diff of each worktree against its base, plus uncommitted files). Without a task: every pair. |
 | [`send`](#agentctl-send) | Paste a follow-up prompt into the existing window of each task in the file. |
 | [`status`](#agentctl-status) | Table of tasks: window state, running time, report, last output line. |
@@ -203,6 +204,29 @@ Examples:
 
 ```sh
 agentctl queue resume
+```
+
+## agentctl unblock
+
+Let a blocked queued task go on: a task whose "after" names a cancelled task is blocked (⛓) and never starts. This drops the dependency (all the cancelled ones, or only --drop-after); the task is back in the queue and waits for the rest, or starts. The other way out is "agentctl cancel".
+
+```
+agentctl unblock [options] <task>
+```
+
+| Argument | Meaning |
+|---|---|
+| `<task>` | task ID; a unique prefix is enough |
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--drop-after <task>` | drop only this task from the "after" of the queued task |  |
+
+Examples:
+
+```sh
+agentctl unblock NC-43                           # drop every cancelled task from its after
+agentctl unblock NC-43 --drop-after NC-42        # drop only this one
 ```
 
 ## agentctl overlap

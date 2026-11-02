@@ -23,6 +23,7 @@ export const COMMAND_EXAMPLES: Record<string, string[]> = {
   'queue retry': ['agentctl queue retry NC-42             # after a failed start: back at the end of the line'],
   'queue pause': ['agentctl queue pause                  # nothing new starts; running tasks are not touched'],
   'queue resume': ['agentctl queue resume'],
+  unblock: ['agentctl unblock NC-43                           # drop every cancelled task from its after', 'agentctl unblock NC-43 --drop-after NC-42        # drop only this one'],
   overlap: ['agentctl overlap                        # every pair of active tasks that changed the same files', 'agentctl overlap LANDING-QS-1           # only the pairs with this task'],
   send: [
     'agentctl send follow-up.md             # header: only "task:"; the prompt below it is pasted',

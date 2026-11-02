@@ -24,7 +24,7 @@ import { listTargets, matchTask } from './core/resolve.ts';
 import type { TaskTarget } from './core/resolve.ts';
 import { migrateLegacyState } from './core/taskstore.ts';
 import { newTasks } from './core/new.ts';
-import { commitQueueAdd, describeQueue, isPaused, moveToFront, planQueueAdd, readQueue, queueStatusLines, removeFromQueue, renderQueueList, retryEntry, setPaused, waiting } from './core/queue.ts';
+import { commitQueueAdd, describeQueue, isPaused, moveToFront, planQueueAdd, readQueue, queueStatusLines, removeFromQueue, renderQueueList, retryEntry, setPaused, unblockEntry, waiting } from './core/queue.ts';
 import { liveWindows } from './core/plan.ts';
 import { collectOverlaps, renderOverlaps, touchWarnings } from './core/collisions.ts';
 import type { NewOptions } from './core/new.ts';
@@ -348,8 +348,9 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
       guarded(async (opts: { json?: boolean }) => {
         const ctx = contextFor(false, { migrate: false });
         const views = describeQueue(ctx.config, readQueue(ctx.config), await liveWindows(ctx), await collectStatus(ctx, { progress: false, archived: true }));
-        if (opts.json) return line(JSON.stringify(views.map((v) => ({ position: v.position, task: v.entry.task, status: v.entry.status, agent: v.entry.agent, model: v.entry.model, effort: v.entry.effort, priority: v.entry.priority, condition: v.condition.text, queued: v.entry.queuedAt, error: v.entry.error ?? null })), null, 2));
+        if (opts.json) return line(JSON.stringify(views.map((v) => ({ position: v.position, task: v.entry.task, status: v.entry.status, agent: v.entry.agent, model: v.entry.model, effort: v.entry.effort, priority: v.entry.priority, condition: v.condition.text, blocked: v.condition.kind === 'blocked', after: v.entry.after, queued: v.entry.queuedAt, error: v.entry.error ?? null })), null, 2));
         for (const l of renderQueueList(views, ctx.runner.now())) line(l);
+        for (const v of views.filter((x) => x.condition.kind === 'blocked')) line(`hint: ${v.entry.task} is blocked: agentctl unblock ${v.entry.task} [--drop-after <task>], or agentctl cancel ${v.entry.task}`);
         if (isPaused(ctx.config)) line('The queue is paused: "agentctl queue resume" lets it run again.');
       }),
     );
@@ -378,6 +379,18 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .description('Put a failed task back at the end of the line; it is tried once more (over the worktree the failed start left).')
     .argument('<task>', 'task ID; a unique prefix is enough')
     .action(guarded(async (task: string) => line(`${(await retryEntry(contextFor(false, { migrate: false }), task)).task}: back in the queue`)));
+
+  program
+    .command('unblock')
+    .description('Let a blocked queued task go on: a task whose "after" names a cancelled task is blocked (⛓) and never starts. This drops the dependency (all the cancelled ones, or only --drop-after); the task is back in the queue and waits for the rest, or starts. The other way out is "agentctl cancel".')
+    .argument('<task>', 'task ID; a unique prefix is enough')
+    .option('--drop-after <task>', 'drop only this task from the "after" of the queued task')
+    .action(
+      guarded(async (task: string, opts: { dropAfter?: string }) => {
+        const { entry, dropped } = await unblockEntry(contextFor(false, { migrate: false }), task, { dropAfter: opts.dropAfter });
+        line(`${entry.task}: no longer waits for ${dropped.join(', ')}; back in the queue${entry.after.length > 0 ? `, still waiting for ${entry.after.join(', ')}` : ''}`);
+      }),
+    );
 
   for (const pause of [true, false]) {
     queue
