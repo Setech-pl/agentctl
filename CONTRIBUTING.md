@@ -1,6 +1,6 @@
 # Contributing
 
-agentctl is a small TypeScript project that runs on Node's type stripping, with no build step. Node 22.6 or newer, git and tmux are enough to work on it.
+`npm run build` compiles TypeScript into `dist/` and rewrites imports to JavaScript. The installed command runs `dist/bin/agentctl.js` without a TypeScript loader. Development still uses `node --experimental-strip-types bin/agentctl.ts`. Run `npm ci`, `npm run build`, then `npm pack` to prepare a package.
 
 ```sh
 npm ci
@@ -55,3 +55,5 @@ await withHarness({ name: 'my-try' }, (h) => {
 ## Style
 
 Match the surrounding code. agentctl never merges, pushes, rebases or turns on an auto-accept mode, and deletes a branch only in `gc --branches`, with `git branch -d` for a merged one; a change that would do any of these is out of scope. Messages to the user are short and say what to do next.
+
+Codex: collapsed questions show their count and the shortcut read from “to answer”. `needs-input` takes priority while Codex keeps working; after answering, the screen determines the state again. Board preview, peek, status/MCP `question`, macOS and ntfy show the question or opening instructions.

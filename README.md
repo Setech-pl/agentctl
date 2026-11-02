@@ -27,7 +27,7 @@ agentctl manages **work orders, not windows**. The unit is a spec: a Markdown fi
 - **Events for the chat.** `agentctl events` and MCP `events_since` tell a chat what changed since its last call.
 - **Clean-up and resume.** `agentctl gc` takes back worktrees, old files and merged branches of finished tasks; `agentctl resume` brings the windows back after a restart, and `agentctl up` starts the day.
 - **Chat integration.** A local MCP server lets a chat in the Claude app or Claude Code read status and reports, and, if you allow it, send prompts and start tasks.
-- **Small and inspectable.** TypeScript on Node with no build step, no daemon; `--dry-run` prints every command instead of running it.
+`npm run build` compiles TypeScript into `dist/` and rewrites imports to JavaScript. The installed command runs `dist/bin/agentctl.js` without a TypeScript loader. Development still uses `node --experimental-strip-types bin/agentctl.ts`. Run `npm ci`, `npm run build`, then `npm pack` to prepare a package.
 
 ## How it works
 
@@ -217,7 +217,7 @@ stateDiagram-v2
     trust --> working: you confirm the dialog
     working --> waiting: end of turn, no report
     working --> ready: end of turn, report written
-    working --> input: question or permission dialog
+    working --> input: question (including collapsed) or permission dialog
     input --> working: you answer
     working --> limited: usage limit message
     limited --> working: limit reset, retry
@@ -271,13 +271,13 @@ Requirements: **Node 22.6+**, **git**, **tmux 3.2+**, and the agents you use (`c
 ```sh
 git clone https://github.com/Setech-pl/agentctl.git
 cd agentctl
-bin/agentctl-update            # a stable copy in ~/Projects/agentctl-stable, npm ci, npm link, doctor
+bin/agentctl-update            # a stable copy in ~/Projects/agentctl-stable, npm ci, npm run build, npm link, doctor
 agentctl doctor                # tmux, node, git, claude, codex, gh, cache directory, configs
 ```
 
-`agentctl-update` keeps a detached copy of the repo for daily use, so that a half-finished branch of your clone is never what the global `agentctl` runs; run it again after each release. Details and options: [docs/details.md](docs/details.md#stable-install-and-updates). To only try it, `npm install && npm link` in the clone also works.
+`agentctl-update` keeps a detached copy of the repo for daily use, so that a half-finished branch of your clone is never what the global `agentctl` runs; run it again after each release. Details and options: [docs/details.md](docs/details.md#stable-install-and-updates). To only try it, `npm install && npm run build && npm link` in the clone also works.
 
-The code runs directly on Node's type stripping (`node --experimental-strip-types`, set in the shebang), so there is nothing to build, but it has to be installed from a clone, not from a registry tarball (Node does not strip types inside `node_modules`).
+`npm run build` compiles TypeScript into `dist/` and rewrites imports to JavaScript. The installed command runs `dist/bin/agentctl.js` without a TypeScript loader. Development still uses `node --experimental-strip-types bin/agentctl.ts`. Run `npm ci`, `npm run build`, then `npm pack` to prepare a package.
 
 Your first task:
 
@@ -736,7 +736,7 @@ What agentctl never does:
 
 ## Limitations
 
-- **Install from a clone.** Node does not strip types inside `node_modules`, so a registry install would not run; a build step is planned for an npm release.
+`npm run build` compiles TypeScript into `dist/` and rewrites imports to JavaScript. The installed command runs `dist/bin/agentctl.js` without a TypeScript loader. Development still uses `node --experimental-strip-types bin/agentctl.ts`. Run `npm ci`, `npm run build`, then `npm pack` to prepare a package.
 - **Screen patterns are heuristics** tied to the wording of the current Claude Code (2.1.309) and Codex (0.166.0) TUIs; they are configurable.
 - **Not observed on a real screen:** the text of a usage-limit message in either TUI (the patterns come from strings in the binaries, so as not to burn a plan), and the footer text of Codex when it waits for background terminals (`agents.codex.background_patterns` is a best guess).
 - Codex 0.166.0 sends no event for an approval request, so those are found by the screen reader, and only while `watch` runs.
@@ -771,3 +771,5 @@ Ideas, not promises:
 ## License
 
 [MIT](LICENSE)
+
+Codex: collapsed questions show their count and the shortcut read from “to answer”. `needs-input` takes priority while Codex keeps working; after answering, the screen determines the state again. Board preview, peek, status/MCP `question`, macOS and ntfy show the question or opening instructions.

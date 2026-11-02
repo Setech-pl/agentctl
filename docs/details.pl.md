@@ -2,7 +2,7 @@
 
 Jak działają poszczególne elementy i co sprawdzono na prawdziwych narzędziach (Claude Code 2.1.309, Codex 0.166.0). Przegląd jest w [README](../README.pl.md); opcje każdego polecenia w [commands.md](commands.md) (po angielsku), a każdy klucz w [configuration.md](configuration.md) (po angielsku). Teksty paska stanu i powiadomień cytowane poniżej pochodzą dosłownie z kodu i miejscami są po polsku.
 
-Dlaczego TypeScript bez kroku budowania? Kod to TypeScript uruchamiany bezpośrednio przez wbudowane w Node wycinanie typów (`node --experimental-strip-types`, ustawione w shebangu `bin/agentctl.ts`). Wybrano to zamiast `tsx`, bo nie dodaje zależności ani warstwy budowania czy loadera i zachowuje się tak samo pod `npx`, `npm link` i w testach. Cena: tylko *wymazywalny* TypeScript (bez `enum` i `namespace`), importy wypisują `.ts`, a Node odmawia wycinania typów wewnątrz `node_modules`, więc instaluj z klonu, nie z paczki z rejestru. Od Node 22.18 i 23.6 flaga nic nie robi; zostaje w shebangu, żeby 22.6 do 22.17 nadal działały.
+`npm run build` kompiluje TypeScript do `dist/` i zmienia importy na JavaScript. Zainstalowane polecenie uruchamia `dist/bin/agentctl.js` bez loadera TS. W development nadal działa `node --experimental-strip-types bin/agentctl.ts`. Przygotowanie paczki: `npm ci`, `npm run build`, `npm pack`.
 
 ## Setup
 
@@ -546,7 +546,7 @@ Zadania, które nadal mają okno, są na początku. Zadania bez okna (i bez `clo
 Nic destrukcyjnego nie działa na pojedynczy klawisz. Board używa tych samych funkcji rdzenia co polecenia (`sendPrompts`, `interruptTask`, `pullTask`, `pullReady`, `closeTask`, `moveTask`); git jest pytany
 o postęp najwyżej co 10 sekund. Board wymaga terminala; bez tmux `Enter` mówi, żeby użyć `agentctl attach`.
 
-> **Dlaczego Ink i dlaczego `React.createElement` zamiast JSX lub `htm`?** Projekt działa na wycinaniu typów przez Node, bez kroku budowania, a JSX nie jest
+`npm run build` kompiluje TypeScript do `dist/` i zmienia importy na JavaScript. Zainstalowane polecenie uruchamia `dist/bin/agentctl.js` bez loadera TS. W development nadal działa `node --experimental-strip-types bin/agentctl.ts`. Przygotowanie paczki: `npm ci`, `npm run build`, `npm pack`.
 > składnią, którą da się po prostu wymazać, więc nie uruchomi się bez przetworzenia. `htm` (szablony tagowane) pozwoliłby uniknąć budowania, ale dodaje zależność, żeby napisać to, co jest kilkudziesięcioma liniami wywołań `createElement`,
 > a jego szablony to zwykłe napisy, których `tsc --noEmit` nie sprawdzi; z `createElement` propsy komponentów są sprawdzane typami jak reszta kodu.
 > Ink jest ładowany dopiero przy starcie boardu, więc pozostałe polecenia nie płacą za React.
@@ -649,3 +649,7 @@ poprzedni i nowy commit oraz to, czy watch został zrestartowany.
 ## Rozwój
 
 Zob. [CONTRIBUTING.md](../CONTRIBUTING.md): testy, typecheck, `npm run docs`, jak zorganizowany jest kod i jak zamyka się kamień milowy.
+
+Codex: zwinięte pytania pokazują liczbę i skrót z „to answer”. `needs-input` ma pierwszeństwo także podczas pracy; po odpowiedzi stan wynika ponownie z ekranu. Podgląd board, peek, status/MCP `question`, macOS i ntfy pokazują pytanie lub instrukcję otwarcia.
+
+Session fallback: a pending `request_user_input` function call can supply its first question when a Codex event has already attributed the session ID to the task. Reads are bounded to 256 KiB per matching session; missing, unowned, completed or code-mode-only calls fall back to the screen instructions. No personal sessions were inspected for this milestone.

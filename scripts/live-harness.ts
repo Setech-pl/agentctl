@@ -138,7 +138,7 @@ const FAKES: Record<string, string> = {
   'notify-send': FAKE_LOGGER('notify-send'),
 };
 
-export const defaultCacheRoot = (task = 'agentctl-12'): string => path.join(os.homedir(), 'Projects', 'cache', task);
+export const defaultCacheRoot = (task = 'agentctl-15'): string => path.join(os.homedir(), 'Projects', 'cache', task);
 
 export interface HarnessOptions {
   /** Directory name under the cache root (one sandbox per scenario). */

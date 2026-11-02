@@ -18,7 +18,7 @@ import type { Harness } from './live-harness.ts';
  * Run: node --experimental-strip-types --no-warnings scripts/live-phone.ts   Results: ~/Projects/cache/agentctl-13/live-results.json
  */
 
-const CACHE = path.join(os.homedir(), 'Projects', 'cache', 'agentctl-13');
+const CACHE = path.join(os.homedir(), 'Projects', 'cache', 'agentctl-15');
 
 interface Check {
   scenario: string;
@@ -222,7 +222,7 @@ async function main(): Promise<number> {
     }
   }
   const failed = checks.filter((c) => !c.ok);
-  fs.writeFileSync(path.join(CACHE, 'live-results.json'), `${JSON.stringify({ at: new Date().toISOString(), passed: checks.length - failed.length, failed: failed.length, checks }, null, 2)}\n`);
+  fs.writeFileSync(path.join(CACHE, 'live-phone-results.json'), `${JSON.stringify({ at: new Date().toISOString(), passed: checks.length - failed.length, failed: failed.length, checks }, null, 2)}\n`);
   console.log(`\n${checks.length - failed.length}/${checks.length} checks passed`);
   return failed.length === 0 ? 0 : 1;
 }

@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 Versions 0.1.0 to 0.7.0 correspond to pull requests #1 to #7; their dates are the merge dates. The version numbers were assigned afterwards, when this changelog was written.
 
+## [0.15.0] - 2026-11-02
+
+- Explain collapsed Codex questions with their count and the shortcut captured from the screen; retain needs-input while work continues. Peek and board preview preserve the explanation; notifications include question text.
+- Compile a distributable JavaScript package into dist; update runtime self commands, package version lookup, MCP process detection and the updater build step.
+- Keep phone and manager live suites separate; add collapsed-question live checks through the isolated harness.
+
 ## [Unreleased]
 
 Nothing yet.

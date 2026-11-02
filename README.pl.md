@@ -27,7 +27,7 @@ agentctl zarządza **zleceniami, nie oknami**. Jednostką jest spec: plik Markdo
 - **Zdarzenia dla czatu.** `agentctl events` i MCP `events_since` mówią czatowi, co zmieniło się od jego ostatniego wywołania.
 - **Sprzątanie i wznawianie.** `agentctl gc` odbiera worktree, stare pliki i scalone gałęzie zakończonych zadań; `agentctl resume` przywraca okna po restarcie, a `agentctl up` zaczyna dzień.
 - **Integracja z czatem.** Lokalny serwer MCP pozwala czatowi w aplikacji Claude lub w Claude Code czytać status i raporty oraz, jeśli na to pozwolisz, wysyłać prompty i uruchamiać zadania.
-- **Mały i przejrzysty.** TypeScript na Node bez kroku budowania, bez demona; `--dry-run` wypisuje każde polecenie zamiast je wykonać.
+`npm run build` kompiluje TypeScript do `dist/` i zmienia importy na JavaScript. Zainstalowane polecenie uruchamia `dist/bin/agentctl.js` bez loadera TS. W development nadal działa `node --experimental-strip-types bin/agentctl.ts`. Przygotowanie paczki: `npm ci`, `npm run build`, `npm pack`.
 
 ## Jak to działa
 
@@ -272,13 +272,13 @@ Wymagania: **Node 22.6+**, **git**, **tmux 3.2+** i agenci, których używasz (`
 ```sh
 git clone https://github.com/Setech-pl/agentctl.git
 cd agentctl
-bin/agentctl-update            # stabilna kopia w ~/Projects/agentctl-stable, npm ci, npm link, doctor
+bin/agentctl-update            # stabilna kopia w ~/Projects/agentctl-stable, npm ci, npm run build, npm link, doctor
 agentctl doctor                # tmux, node, git, claude, codex, gh, katalog cache, configi
 ```
 
-`agentctl-update` utrzymuje odłączoną kopię repo do codziennej pracy, żeby niedokończona gałąź Twojego klonu nigdy nie była tym, co uruchamia globalne `agentctl`; po każdym wydaniu uruchom go ponownie. Szczegóły i opcje: [docs/details.pl.md](docs/details.pl.md#stabilna-instalacja-i-aktualizacje). Żeby tylko spróbować, wystarczy też `npm install && npm link` w klonie.
+`agentctl-update` utrzymuje odłączoną kopię repo do codziennej pracy, żeby niedokończona gałąź Twojego klonu nigdy nie była tym, co uruchamia globalne `agentctl`; po każdym wydaniu uruchom go ponownie. Szczegóły i opcje: [docs/details.pl.md](docs/details.pl.md#stabilna-instalacja-i-aktualizacje). Żeby tylko spróbować, wystarczy też `npm install && npm run build && npm link` w klonie.
 
-Kod działa bezpośrednio na wycinaniu typów przez Node (`node --experimental-strip-types`, ustawione w shebangu), więc nie ma czego budować, ale trzeba go instalować z klonu, nie z paczki z rejestru (Node nie wycina typów wewnątrz `node_modules`).
+`npm run build` kompiluje TypeScript do `dist/` i zmienia importy na JavaScript. Zainstalowane polecenie uruchamia `dist/bin/agentctl.js` bez loadera TS. W development nadal działa `node --experimental-strip-types bin/agentctl.ts`. Przygotowanie paczki: `npm ci`, `npm run build`, `npm pack`.
 
 Pierwsze zadanie:
 
@@ -739,7 +739,7 @@ Czego agentctl nigdy nie robi:
 
 ## Ograniczenia
 
-- **Instalacja z klonu.** Node nie wycina typów w `node_modules`, więc instalacja z rejestru by nie działała; krok budowania jest planowany na wydanie npm.
+`npm run build` kompiluje TypeScript do `dist/` i zmienia importy na JavaScript. Zainstalowane polecenie uruchamia `dist/bin/agentctl.js` bez loadera TS. W development nadal działa `node --experimental-strip-types bin/agentctl.ts`. Przygotowanie paczki: `npm ci`, `npm run build`, `npm pack`.
 - **Wzorce ekranu to heurystyki** związane z brzmieniem obecnych TUI Claude Code (2.1.309) i Codexa (0.166.0); są konfigurowalne.
 - **Niezaobserwowane na prawdziwym ekranie:** tekst komunikatu o limicie użycia w którymkolwiek TUI (wzorce pochodzą z napisów w plikach binarnych, żeby nie spalać planu) oraz tekst stopki Codexa przy oczekiwaniu na terminale w tle (`agents.codex.background_patterns` to najlepsze przypuszczenie).
 - Codex 0.166.0 nie wysyła zdarzenia przy prośbie o zatwierdzenie, więc takie sytuacje wykrywa czytnik ekranu, i tylko gdy działa `watch`.
@@ -776,3 +776,5 @@ Dokumentacja szczegółowa jest po angielsku:
 ## Licencja
 
 [MIT](LICENSE)
+
+Codex: zwinięte pytania pokazują liczbę i skrót z „to answer”. `needs-input` ma pierwszeństwo także podczas pracy; po odpowiedzi stan wynika ponownie z ekranu. Podgląd board, peek, status/MCP `question`, macOS i ntfy pokazują pytanie lub instrukcję otwarcia.

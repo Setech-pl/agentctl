@@ -261,3 +261,5 @@ The header of a spec file, between `---` lines, followed by the prompt. Several 
 | `AGENTCTL_HOME` | Directory of the global config instead of `~/.agentctl`. |
 | `CODEX_HOME` | Where agentctl looks for the `notify` command of Codex's own `config.toml`, to forward to it (default `~/.codex`; a spec's `env` may set it). |
 | `AGENTCTL_REPO`, `AGENTCTL_STABLE_DIR`, `AGENTCTL_SESSION` | Only for `bin/agentctl-update`: the repo, the stable copy (default `~/Projects/agentctl-stable`) and the tmux session of the watch window. |
+
+In 0.15.0, installed runtime commands use `dist/bin/agentctl.js`. Status `question` includes collapsed Codex question count and the shortcut read from the screen. A visible pending question takes precedence over working. No configuration migration is required.
