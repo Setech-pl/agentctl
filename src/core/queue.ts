@@ -3,7 +3,8 @@ import path from 'node:path';
 import YAML from 'yaml';
 import type { AgentModel } from './checks.ts';
 import { Alerts } from './alert.ts';
-import { checkAfter, hasReport, unmetAfter, waitingText } from './depends.ts';
+import { cancelledTasks, checkAfter, findBlocked, blockedText, hasReport, unmetAfter, waitingText } from './depends.ts';
+import type { Blockers } from './depends.ts';
 import { touchWarnings } from './collisions.ts';
 import type { AgentName, Effort, GlobalConfig } from './config.ts';
 import { AGENT_NAMES } from './config.ts';
@@ -52,6 +53,8 @@ export interface QueueEntry {
   reuse?: boolean;
   /** `status: starting`: ISO time the watcher began the start. */
   startingAt?: string;
+  /** The cancelled authors of `after` that the watcher has announced as "blocked" already (once per author). */
+  blockedNotified?: string[];
   /** `status: failed`: when and why. */
   failedAt?: string;
   error?: string;
@@ -285,6 +288,54 @@ export async function removeFromQueue(ctx: Context, input: string, opts: { reaso
   return entry;
 }
 
+/** `agentctl unblock`: the entry's `after` loses the cancelled (or blocked) tasks, or just `dropAfter`; it waits for the rest, or starts. */
+export async function unblockEntry(ctx: Context, input: string, opts: { dropAfter?: string | undefined } = {}): Promise<{ entry: QueueEntry; dropped: string[] }> {
+  const entry = findEntry(ctx.config, input);
+  const rows = await collectStatus(ctx, { progress: false, archived: true });
+  const blocked = findBlocked(readQueue(ctx.config), rows).get(entry.task);
+  let dropped: string[];
+  if (opts.dropAfter !== undefined) {
+    const wanted = opts.dropAfter.trim().toLowerCase();
+    dropped = entry.after.filter((t) => t.toLowerCase() === wanted);
+    if (dropped.length === 0) throw new AgentctlError(`${entry.task} does not wait for ${opts.dropAfter}`, entry.after.length > 0 ? `Its after: ${entry.after.join(', ')}` : `${entry.task} has no after.`);
+  } else {
+    if (!blocked) throw new AgentctlError(`${entry.task} is not blocked`, entry.after.length > 0 ? `It waits for ${entry.after.join(', ')}; "agentctl unblock ${entry.task} --drop-after <task>" removes one of them.` : undefined);
+    dropped = [...blocked.cancelled, ...blocked.blocked];
+  }
+  const after = entry.after.filter((t) => !dropped.includes(t));
+  const raw = splitSpecs(entry.spec, `queue entry ${entry.task}`)[0] as RawSpec;
+  if (after.length > 0) raw.header.after = after;
+  else delete raw.header.after;
+  const updated: QueueEntry = { ...entry, after, spec: renderRawSpec(raw) };
+  if (entry.blockedNotified) updated.blockedNotified = entry.blockedNotified.filter((t) => after.includes(t));
+  if (updated.blockedNotified?.length === 0) delete updated.blockedNotified;
+  await writeEntry(ctx, updated);
+  return { entry: updated, dropped };
+}
+
+/**
+ * Once per cancelled author: "NC-3 zablokowane – NC-1 anulowane". The entries remember what was announced, so a restart of the watcher
+ * says nothing twice. Returns the announcements made.
+ */
+export async function announceBlocked(ctx: Context, notifier: Notifier, rows: readonly StatusRow[], opts: { self?: SelfArgv | undefined; log?: (line: string) => Promise<void> | void } = {}): Promise<string[]> {
+  const entries = readQueue(ctx.config);
+  const blocked = findBlocked(entries, rows);
+  const said: string[] = [];
+  for (const entry of entries) {
+    const b = blocked.get(entry.task);
+    const fresh = (b?.cancelled ?? []).filter((t) => !(entry.blockedNotified ?? []).includes(t));
+    if (!b || fresh.length === 0) continue;
+    await writeEntry(ctx, { ...entry, blockedNotified: [...(entry.blockedNotified ?? []), ...fresh] });
+    for (const author of fresh) {
+      const text = `${entry.task} zablokowane – ${author} anulowane`;
+      await opts.log?.(`queue: ${text}`);
+      await notifyPlain(ctx, notifier, entry.task, text, opts.self);
+      said.push(text);
+    }
+  }
+  return said;
+}
+
 /** `queue up`: first in the line of its priority class. */
 export async function moveToFront(ctx: Context, input: string): Promise<QueueEntry> {
   const entry = findEntry(ctx.config, input);
@@ -319,6 +370,7 @@ export async function setPaused(ctx: Context, paused: boolean): Promise<boolean>
 export type Condition =
   | { kind: 'ready'; text: string }
   | { kind: 'after'; text: string }
+  | { kind: 'blocked'; text: string; blockers: Blockers }
   | { kind: 'slot'; text: string }
   | { kind: 'paused'; text: string }
   | { kind: 'starting'; text: string }
@@ -343,14 +395,18 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
   for (const w of live) if (w.agent) used[w.agent]++;
   const paused = isPaused(config) || !config.queue.enabled;
   const reason = !config.queue.enabled ? 'queue.enabled is false' : 'queue paused (agentctl queue resume)';
+  const blocked = findBlocked(entries, rows);
+  const cancelled = cancelledTasks(rows);
   let position = 0;
   return entries.map((entry): QueueView => {
     if (entry.status === 'failed') return { position: null, entry, condition: { kind: 'failed', text: `failed: ${(entry.error ?? '').split('\n')[0] ?? ''}` }, since: entry.failedAt ?? entry.queuedAt };
     if (entry.status === 'starting') return { position: null, entry, condition: { kind: 'starting', text: 'starting' }, since: entry.startingAt ?? entry.queuedAt };
     position++;
     if (paused) return { position, entry, condition: { kind: 'paused', text: reason }, since: entry.queuedAt };
+    const stuck = blocked.get(entry.task);
+    if (stuck) return { position, entry, condition: { kind: 'blocked', text: blockedText(stuck), blockers: stuck }, since: entry.queuedAt };
     const unmet = unmetAfter(entry.after, rows);
-    if (unmet.length > 0) return { position, entry, condition: { kind: 'after', text: waitingText(unmet, failed) }, since: entry.queuedAt };
+    if (unmet.length > 0) return { position, entry, condition: { kind: 'after', text: waitingText(unmet, failed, cancelled) }, since: entry.queuedAt };
     const limit = config.limits[entry.agent];
     if (limit !== undefined && used[entry.agent] >= limit) {
       return { position, entry, condition: { kind: 'slot', text: `czeka na miejsce: ${entry.agent} ${used[entry.agent]}/${limit}` }, since: entry.queuedAt };

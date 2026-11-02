@@ -6,7 +6,7 @@ import type { Context } from './context.ts';
 import { formatModelEffort, translate } from './equivalents.ts';
 import type { Order } from './equivalents.ts';
 import type { ResolvedSpec } from './spec.ts';
-import { unmetAfter, waitingText } from './depends.ts';
+import { cancelledTasks, unmetAfter, waitingText } from './depends.ts';
 import { collectStatus } from './status.ts';
 import { listTaskRecords } from './taskstore.ts';
 import { Problems } from './util.ts';
@@ -65,7 +65,9 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
     const rows = await collectStatus(ctx, { progress: false, archived: true });
     for (const spec of specs) {
       const unmet = unmetAfter(spec.after, rows);
-      if (unmet.length > 0) p.add(`${spec.task}: after ${spec.after.join(', ')}: ${waitingText(unmet)} (no report yet). "agentctl queue" starts the task by itself once they have one.`);
+      const gone = cancelledTasks(rows);
+      if (unmet.some((t) => gone.has(t))) p.add(`${spec.task}: after ${spec.after.join(', ')}: ${unmet.filter((t) => gone.has(t)).join(', ')} was cancelled, so it never gets a report. Remove it from "after".`);
+      else if (unmet.length > 0) p.add(`${spec.task}: after ${spec.after.join(', ')}: ${waitingText(unmet)} (no report yet). "agentctl queue" starts the task by itself once they have one.`);
     }
   }
   const planned: LiveWindow[] = [];

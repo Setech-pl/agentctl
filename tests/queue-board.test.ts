@@ -262,8 +262,9 @@ describe('board: the Ink front draws the queue', () => {
       keys.write('d');
       await until(() => term.frames.some((f) => f.includes('Remove Q-1 from the queue? [y/N]')), term);
       keys.write('y');
-      await until(() => !term.screen().includes('Q-1 ') && term.screen().includes('Queue (1)'), term);
+      await until(() => term.screen().includes('Queue (1)'), term);
       assert.deepEqual(readQueue(s.config).map((e) => e.task), ['Q-2']);
+      assert.match(term.screen(), /Q-2\s+claude default\/hi…\s+1\. ⛓ zablokowane – Q-1 anulowane/, 'Q-2 waited for the task that was just cancelled');
       keys.write('p');
       await until(() => term.screen().includes('PAUSED'), term);
       assert.equal(isPaused(s.config), true);
