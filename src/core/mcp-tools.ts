@@ -2,6 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import { closeTask } from './close.ts';
+import { collectOverlaps, collideText } from './collisions.ts';
+import { commitQueueAdd, describeQueue, planQueueAdd, readQueue, removeFromQueue, waiting } from './queue.ts';
+import { liveWindows } from './plan.ts';
 import { MCP_WRITE_TOOLS } from './config.ts';
 import type { GlobalConfig, McpWriteTool } from './config.ts';
 import type { Context } from './context.ts';
@@ -119,6 +122,7 @@ function statusRowForChat(r: StatusRow): Record<string, unknown> {
     lastLine: r.lastLine,
     question: r.question,
     hint: r.hint,
+    collidesWith: r.collide,
     finished: r.finished,
     hidden: r.hidden && !r.closed,
     closed: r.closed,
@@ -140,7 +144,49 @@ async function runStatus(deps: McpDeps, args: { all?: boolean | undefined }): Pr
   const all = Boolean(args.all);
   const rows = await collectStatus(ctx, { archived: all });
   const shown = shownRows(rows, all);
-  return ok(`${statusLine(shown, rows.length - shown.length)}\n\n${JSON.stringify(shown.map(statusRowForChat), null, 2)}`);
+  // The queue and the collisions come as short lines before the rows (queue_list and overlap have the detail).
+  const extra: string[] = [];
+  const views = await queueViews(ctx);
+  if (views.length > 0) {
+    extra.push(`Queue (${views.length}): ${views.map((v) => `${v.entry.task} – ${v.condition.text}`).join('; ')}. queue_list has the detail.`);
+  }
+  const colliding = shown.filter((r) => r.collide.length > 0);
+  if (colliding.length > 0) extra.push(`Collisions: ${colliding.map((r) => `${r.task} ${collideText(r.collide)}`).join('; ')}. overlap lists the files.`);
+  return ok(`${[statusLine(shown, rows.length - shown.length), ...extra].join('\n')}\n\n${JSON.stringify(shown.map(statusRowForChat), null, 2)}`);
+}
+
+async function queueViews(ctx: Context): Promise<ReturnType<typeof describeQueue>> {
+  const entries = readQueue(ctx.config);
+  return entries.length === 0 ? [] : describeQueue(ctx.config, entries, await liveWindows(ctx), await collectStatus(ctx, { progress: false, archived: true }));
+}
+
+async function runQueueList(deps: McpDeps): Promise<ToolResult> {
+  const views = await queueViews(deps.context(() => {}));
+  if (views.length === 0) return ok('The queue is empty.');
+  const list = views.map((v) => ({
+    position: v.position,
+    task: v.entry.task,
+    status: v.entry.status,
+    agent: v.entry.agent,
+    model: v.entry.model,
+    effort: v.entry.effort,
+    priority: v.entry.priority,
+    after: v.entry.after,
+    startCondition: v.condition.text,
+    queued: v.entry.queuedAt,
+    queuedLocal: formatLocalTime(v.entry.queuedAt),
+    error: v.entry.error ?? null,
+  }));
+  const paused = views.some((v) => v.condition.kind === 'paused');
+  return ok(`${waiting(views.map((v) => v.entry)).length} waiting in the queue${paused ? ' (the queue is paused: nothing starts)' : ''}; ${views.length - waiting(views.map((v) => v.entry)).length} starting or failed.\n\n${JSON.stringify(list, null, 2)}`);
+}
+
+async function runOverlap(deps: McpDeps, args: { task?: string | undefined }): Promise<ToolResult> {
+  const ctx = deps.context(() => {});
+  const task = args.task ? findRecord(ctx, args.task).task : undefined;
+  const overlaps = await collectOverlaps(ctx, task);
+  if (overlaps.length === 0) return ok('No two active tasks change the same files.');
+  return ok(`${overlaps.length} colliding pair${overlaps.length === 1 ? '' : 's'}; files changed by both tasks, computed from git now.\n\n${JSON.stringify(overlaps, null, 2)}`);
 }
 
 async function runPeek(deps: McpDeps, args: { task: string; lines?: number | undefined }): Promise<ToolResult> {
@@ -387,6 +433,37 @@ async function runNew(deps: McpDeps, args: { spec: string; confirm?: boolean | u
   });
 }
 
+async function runQueue(deps: McpDeps, args: { spec: string; agent?: 'claude' | 'codex' | undefined; confirm?: boolean | undefined }): Promise<ToolResult> {
+  let tasks = '?';
+  try {
+    tasks = splitSpecs(args.spec, 'mcp').map((s) => String(s.header.task ?? '?')).join(', ');
+  } catch {
+    // only for the audit line
+  }
+  return writeTool(deps, 'queue', { task: tasks, detail: `${clipText(args.spec, 120)} confirm=${Boolean(args.confirm)}` }, async (ctx) => {
+    const raws = splitSpecs(args.spec, 'the spec from the chat');
+    for (const raw of raws) {
+      if ('setup' in raw.header) {
+        throw new AgentctlError(`${String(raw.header.task ?? 'a task')}: "setup" runs shell commands and is not accepted from the chat`, 'Put setup commands in the .agentctl.yaml of the repository, or queue the task from the terminal.');
+      }
+    }
+    const opts = args.agent ? { agent: args.agent } : {};
+    const plan = await planQueueAdd(ctx, raws, opts);
+    if (!args.confirm) {
+      return { text: `${plan.summary.join('\n')}\n\nNot queued yet. Show this to the user and ask; if they agree, call queue again with the same spec and confirm: true.`, executed: false, announce: '' };
+    }
+    const added = await commitQueueAdd(ctx, plan.items, opts);
+    return { text: `Queued: ${added.map((e) => e.task).join(', ')}. They start by themselves while "agentctl watch" runs, when a window of their provider is free (queue_list shows the line).`, executed: true, announce: `queue ${added.map((e) => e.task).join(', ')}` };
+  });
+}
+
+async function runQueueRm(deps: McpDeps, args: { task: string }): Promise<ToolResult> {
+  return writeTool(deps, 'queue_rm', { task: args.task }, async (ctx) => {
+    const entry = await removeFromQueue(ctx, args.task);
+    return { text: `${entry.task}: removed from the queue`, executed: true, announce: `queue_rm ${entry.task}` };
+  });
+}
+
 // ---- the registry
 
 const taskArg = z.string().min(1).max(60).describe('Task ID such as NC-42; case does not matter and a unique prefix is enough.');
@@ -460,6 +537,28 @@ export const MCP_TOOLS: McpToolDef[] = [
     run: (deps, args) => guarded(() => runTaskSpec(deps, args as { task: string })),
   }),
   def({
+    name: 'queue_list',
+    title: 'The task queue',
+    kind: 'read',
+    description:
+      'The queue of tasks that wait for a free window of their provider (or for another task\'s report, `after`): position, agent/model/effort, priority, what each waits for (startCondition), since when, and the error of a start that failed. ' +
+      'Use it when the user asks what is queued, why something has not started, or what runs next.',
+    input: {},
+    annotations: readOnly('The task queue'),
+    run: (deps) => guarded(() => runQueueList(deps)),
+  }),
+  def({
+    name: 'overlap',
+    title: 'Tasks that change the same files',
+    kind: 'read',
+    description:
+      'Pairs of active tasks of one repository that changed the same files (commits over the base plus uncommitted files, from git right now), with the file list. ' +
+      'Use it when the user asks whether tasks collide or before merging, or when status shows collidesWith. task limits it to the pairs with that task.',
+    input: { task: taskArg.optional() },
+    annotations: readOnly('Tasks that change the same files'),
+    run: (deps, args) => guarded(() => runOverlap(deps, args as { task?: string })),
+  }),
+  def({
     name: 'send',
     title: 'Send a prompt to a running task',
     kind: 'write',
@@ -481,6 +580,30 @@ export const MCP_TOOLS: McpToolDef[] = [
     input: { spec: z.string().min(1).max(100_000).describe('The spec text: ---, YAML header, ---, prompt. Several specs may follow each other.'), confirm: z.boolean().optional().describe('true only after the user agreed to the summary.') },
     annotations: { title: 'Start tasks from a spec', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     run: (deps, args) => guarded(() => runNew(deps, args as { spec: string; confirm?: boolean })),
+  }),
+  def({
+    name: 'queue',
+    title: 'Put tasks in the queue',
+    kind: 'write',
+    description:
+      'WRITE, off unless the user put "queue" in mcp.allow. Puts the tasks of a spec in the queue (same spec format as new, plus priority: high|normal, after: <TASK or list>, touches: [globs]): each starts by itself when a window of its provider is free and its `after` tasks have a report. ' +
+      'The FIRST call (confirm omitted) validates the spec and returns a summary (where each task will stand, hints, touches warnings); show it to the user. Only when they agree, call again with the same spec and confirm: true. "setup" is not accepted from the chat.',
+    input: {
+      spec: z.string().min(1).max(100_000).describe('The spec text: ---, YAML header, ---, prompt. Several specs may follow each other.'),
+      agent: z.enum(['claude', 'codex']).optional().describe('Run the specs on this provider, translated through the equivalents table. The queue never switches provider by itself.'),
+      confirm: z.boolean().optional().describe('true only after the user agreed to the summary.'),
+    },
+    annotations: { title: 'Put tasks in the queue', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    run: (deps, args) => guarded(() => runQueue(deps, args as { spec: string; agent?: 'claude' | 'codex'; confirm?: boolean })),
+  }),
+  def({
+    name: 'queue_rm',
+    title: 'Take a task out of the queue',
+    kind: 'write',
+    description: 'WRITE, off unless the user put "queue_rm" in mcp.allow. Removes a waiting (or failed) task from the queue; nothing that already runs is touched. Ask the user first.',
+    input: { task: taskArg },
+    annotations: { title: 'Take a task out of the queue', readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+    run: (deps, args) => guarded(() => runQueueRm(deps, args as { task: string })),
   }),
   def({
     name: 'interrupt',

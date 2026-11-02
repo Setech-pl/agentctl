@@ -24,6 +24,8 @@ These always work.
 | `list_reports` | `all?` | Which tasks have a report: size, `modified` (UTC) and `modifiedLocal`, whether it was pulled. |
 | `get_report` | `task` | One report, up to 200 KB. It reads only the file that the task's `TASK.md` names, never a path from the chat, and refuses a report that is a symbolic link. It does not mark the report as pulled. |
 | `pull_ready` | none | All reports that are ready and not yet pulled, each under `=== NC-42 (claude opus/high) ===`, in one answer (up to 200 KB; the rest stays new). Marks them as pulled. This is the only read tool that changes anything, and only in agentctl's own state. A chat should call it at the start of discussing finished work. |
+| `queue_list` | none | The task queue: position, agent/model/effort, priority, `after`, what each task waits for (`startCondition`: `czeka na miejsce: claude 2/2`, `czeka na NC-42`, paused), since when, and the error of a start that failed. |
+| `overlap` | `task?` | Pairs of active tasks of one repository that changed the same files, with the file lists (from git, now). `status` also carries `collidesWith` per task, and short `Queue` and `Collisions` lines. |
 | `task_spec` | `task` | The header of a task (agent, model, effort, repos and worktrees, report path, `started` and `startedLocal`, `pulled` and `pulledLocal`, `review_of`, `continues`, `superseded_by`, `pin`, `closed`, names of env variables without values) and the prompt from `TASK.md`. |
 
 `task` is a task ID, case-insensitive; a unique prefix is enough.
@@ -36,7 +38,7 @@ Off until you list them in `~/.agentctl/config.yaml`. The list is read again on 
 
 ```yaml
 mcp:
-  allow: [send, interrupt]     # any of: send, new, interrupt, close, move
+  allow: [send, interrupt]     # any of: send, new, interrupt, close, move, queue, queue_rm
   allow_rm_worktree: false     # close may also remove the git worktree
 ```
 
@@ -46,6 +48,8 @@ mcp:
 | `new` | `spec`, `confirm?` | Starts tasks from a spec text, validated like the CLI. The first call only returns the summary; tasks start only when it is called again with `confirm: true`. A spec with `setup` (shell commands) is refused, because a chat must not choose shell commands. It never waits for a folder-trust dialog (a human answers it in the window) and never switches provider. |
 | `interrupt` | `task` | Sends the agent its interrupt key; the window stays open. |
 | `close` | `task`, `remove_worktree?` | Closes the window and marks the task closed. The worktree and the branch stay, unless `remove_worktree: true` and `mcp.allow_rm_worktree` is set (`git worktree remove`, never forced). |
+| `queue` | `spec`, `agent?`, `confirm?` | Puts the tasks of a spec text in the queue (`priority`, `after` and `touches` work as in the CLI). The first call only returns the summary (where each task will stand, the review hint, `touches` warnings); the tasks are queued when it is called again with `confirm: true`. `setup` is refused, as in `new`. They start by themselves while `agentctl watch` runs. |
+| `queue_rm` | `task` | Takes a waiting or failed task out of the queue. |
 | `move` | `task`, `agent?`, `confirm?` | Hands a task that hit its usage limit to the other provider. The first call only describes the move; `confirm: true` does it. |
 
 ## Safety model
@@ -54,7 +58,7 @@ mcp:
 - Every write is refused unless `mcp.allow` lists it. Refused calls are recorded too.
 - **Audit log:** `~/.agentctl/mcp-audit.log` (next to the config), one JSON line per step: time, tool, task, outcome `requested`, then `done`, `error`, `denied` or `preview`. The `requested` line is written before the action, and a write that cannot be recorded is not done.
 - **Notification:** a done write is announced on the desktop (`czat zlecił: <action> <TASK>`).
-- **Two-step tools:** `new` and `move` change nothing on the first call; the chat has to show the summary and call again with `confirm: true`.
+- **Two-step tools:** `new`, `queue` and `move` change nothing on the first call; the chat has to show the summary and call again with `confirm: true`.
 - The server runs as you and sees what you see. This is a trust decision about the chat, not a sandbox. Start with `allow: []`.
 
 ## Install

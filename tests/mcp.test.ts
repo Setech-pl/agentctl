@@ -53,9 +53,9 @@ function withReport(config: GlobalConfig, task: string, text = `# ${task}\nWerdy
 }
 
 describe('mcp: the registry', () => {
-  it('has the six read tools and the five write tools, with unique short names', () => {
-    assert.deepEqual(MCP_TOOLS.filter((t) => t.kind === 'read').map((t) => t.name), ['status', 'peek', 'list_reports', 'get_report', 'pull_ready', 'task_spec']);
-    assert.deepEqual(MCP_TOOLS.filter((t) => t.kind === 'write').map((t) => t.name), ['send', 'new', 'interrupt', 'close', 'move']);
+  it('has the eight read tools and the seven write tools, with unique short names', () => {
+    assert.deepEqual(MCP_TOOLS.filter((t) => t.kind === 'read').map((t) => t.name), ['status', 'peek', 'list_reports', 'get_report', 'pull_ready', 'task_spec', 'queue_list', 'overlap']);
+    assert.deepEqual(MCP_TOOLS.filter((t) => t.kind === 'write').map((t) => t.name), ['send', 'new', 'queue', 'queue_rm', 'interrupt', 'close', 'move']);
     assert.equal(new Set(MCP_TOOL_NAMES).size, MCP_TOOL_NAMES.length);
     for (const t of MCP_TOOLS) assert.ok(t.name.length <= 64 && /^[a-z_]+$/.test(t.name), t.name);
   });
@@ -284,7 +284,7 @@ describe('mcp: writing is off by default', () => {
   });
 
   it('the config rejects a name that is not a write tool, and shell or merge are not among them', () => {
-    assert.throws(() => makeConfig(scratch.sub('w3'), 'mcp: {allow: [merge]}\n'), /"merge" is not a write tool \(allowed: send, new, interrupt, close, move\)/);
+    assert.throws(() => makeConfig(scratch.sub('w3'), 'mcp: {allow: [merge]}\n'), /"merge" is not a write tool \(allowed: send, new, interrupt, close, move, queue, queue_rm\)/);
     assert.throws(() => makeConfig(scratch.sub('w3b'), 'mcp: {allow: [shell]}\n'), /not a write tool/);
     assert.deepEqual(makeConfig(scratch.sub('w3c')).mcp, { allow: [], allowRmWorktree: false });
     assert.deepEqual(makeConfig(scratch.sub('w3d'), 'mcp: {allow: [send, send, close], allow_rm_worktree: true}\n').mcp, { allow: ['send', 'close'], allowRmWorktree: true });
