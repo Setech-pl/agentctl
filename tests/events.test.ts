@@ -143,13 +143,13 @@ describe('events: what `new` hands to the agents', () => {
     }
   });
 
-  it('Claude: --settings <state_dir>/<window>/claude-settings.json, and it adds, not replaces: only hooks are in the file', () => {
-    const w = planEventWiring({ agent: 'claude', task: 'NC-1', window: 'nc-1', config, self: SELF, env: {} });
+  it('Claude: --settings <state_dir>/<window>/claude-settings.json, and it adds, not replaces: only the hooks and the usage statusLine are in the file', () => {
+    const w = planEventWiring({ agent: 'claude', task: 'NC-1', window: 'nc-1', config, self: SELF, env: { CLAUDE_CONFIG_DIR: path.join(config.stateDir, 'no-claude-home') } });
     const file = path.join(config.stateDir, 'nc-1', 'claude-settings.json');
     assert.equal(claudeSettingsPath(config, 'nc-1'), file);
     assert.deepEqual(w.args, ['--settings', file]);
     assert.equal(w.files[0]?.path, file);
-    assert.deepEqual(Object.keys(JSON.parse(w.files[0]?.content as string)), ['hooks']);
+    assert.deepEqual(Object.keys(JSON.parse(w.files[0]?.content as string)), ['hooks', 'statusLine']);
     assert.match(w.note, /Notification, Stop and StopFailure/);
   });
 

@@ -49,6 +49,7 @@ Column "Layers": **g** global config, **p** project config, **s** spec.
 | `queue` | mapping | see below | g | The task queue (`agentctl queue`). |
 | `collisions` | mapping | see below | g | Warnings about two active tasks changing the same files. |
 | `cancel` | mapping | see below | g | `agentctl cancel`: how a task at work is stopped. |
+| `usage` | mapping | see below | g | Token usage and plan limits: thresholds, queue hold, tmux status line, where the agents keep their logs. |
 
 ### `watch`
 
@@ -113,6 +114,20 @@ Queued tasks live in `<config dir>/queue/` (one JSON file each, with the spec te
 | `collisions.interval` | positive number | `300` | g | Seconds between two checks by `watch`. |
 | `collisions.notify` | boolean | `true` | g | One notification for each new pair of colliding tasks. |
 | `collisions.ignore` | list of globs | `[]` | g | Paths that never count as shared, e.g. `["**/package-lock.json", "dist/**"]`. |
+
+### `usage`
+
+`agentctl usage`, the board and the tmux status line show the tokens of the tasks and the state of the plans of Claude and Codex. A percentage here is `80` (both providers) or `{claude: 80, codex: 70}` (per provider).
+
+| Key | Type | Default | Layers | Meaning |
+|---|---|---|---|---|
+| `usage.warn` | percentage or mapping | `80` | g | From this percentage of a plan window `watch` sends one notification per window and reset. |
+| `usage.critical` | percentage or mapping | `95` | g | The same, louder; not below `warn`. |
+| `usage.queue_hold` | percentage, mapping or `false` | `false` | g | The queue does not start a task of a provider whose plan is above this percentage (in any window); `queue list` says so. `false`: the plan never holds the queue. |
+| `usage.status_line` | boolean | `true` | g | The plan percentages (`C 62% · X 18%`) in the tmux status line of the agentctl session. |
+| `usage.claude_tap` | boolean | `true` | g | `new` sets the `statusLine` of a Claude window to `agentctl usage-tap`, which records the plan limits that Claude gives only to a statusLine and passes your own statusLine on. `false`: Claude's limits are n/d. |
+| `usage.claude_dir` | path | `$CLAUDE_CONFIG_DIR`, else `~/.claude` | g | Where Claude Code keeps `projects/` (the transcripts). |
+| `usage.codex_dir` | path | `$CODEX_HOME`, else `~/.codex` | g | Where Codex keeps `sessions/`. |
 
 ## Keys per agent
 

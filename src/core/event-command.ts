@@ -9,6 +9,7 @@ import { classifyScreen } from './state.ts';
 import type { EventKind } from './state.ts';
 import { listTaskRecords, taskDir } from './taskstore.ts';
 import type { TaskRecord } from './taskstore.ts';
+import { rememberSession, sessionOfStatusLine } from './usage-tap.ts';
 import { readVerdict } from './verdict.ts';
 import { isObject } from './util.ts';
 
@@ -58,6 +59,21 @@ export function limitText(record: { task: string; agent: string; pin?: boolean |
   const base = `${record.task}: ${record.agent} wyczerpał limit użycia`;
   if (record.pin) return `${base} (zadanie przypięte – pin: true – move go nie przeniesie)`;
   return `${base} – agentctl move ${record.task} przeniesie zadanie na ${otherAgent(record.agent)}`;
+}
+
+/** The session the event came from belongs to the task: `usage` counts its tokens for it. */
+async function noteSession(ctx: Context, record: TaskRecord, input: EventInput): Promise<void> {
+  try {
+    const data = isObject(input.payload) ? input.payload : {};
+    if (input.agent === 'claude') {
+      const session = sessionOfStatusLine(data);
+      if (session) await rememberSession(ctx.runner, ctx.config, record.window, 'claude', session);
+    } else if (typeof data['thread-id'] === 'string' && data['thread-id'] !== '') {
+      await rememberSession(ctx.runner, ctx.config, record.window, 'codex', { id: data['thread-id'] });
+    }
+  } catch {
+    // counting tokens must not break an event
+  }
 }
 
 export interface EventInput {
@@ -143,6 +159,7 @@ export async function handleEvent(ctx: Context, alerts: Alerts, input: EventInpu
       await runner.writeFile(eventFile(ctx, record.window), `${JSON.stringify(stored, null, 2)}\n`);
     }
     const target = { task: record.task, window: record.window };
+    await noteSession(ctx, record, input);
     let state: string | undefined;
     let text = '';
     if (event.outcome === 'needs-input') {

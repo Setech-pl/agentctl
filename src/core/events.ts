@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { AgentName, GlobalConfig } from './config.ts';
 import { taskDir } from './taskstore.ts';
+import { buildTapStatusLine } from './usage-tap.ts';
 import { isObject, resolvePath } from './util.ts';
 
 /*
@@ -171,13 +172,13 @@ export function claudeSettingsPath(config: GlobalConfig, window: string): string
 const shellWord = (s: string): string => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`);
 
 /** The settings file for one Claude window: only the three event hooks, merged by Claude with the user's and the project's own. */
-export function buildClaudeSettings(task: string, self: SelfArgv): Record<string, unknown> {
+export function buildClaudeSettings(task: string, self: SelfArgv, statusLine?: Record<string, unknown>): Record<string, unknown> {
   const hooks: Record<string, unknown> = {};
   for (const kind of CLAUDE_KINDS) {
     const command = [...self, ...eventArgs(task, 'claude', kind)].map(shellWord).join(' ');
     hooks[CLAUDE_HOOK_NAME[kind]] = [{ hooks: [{ type: 'command', command, timeout: 15 }] }];
   }
-  return { hooks };
+  return statusLine ? { hooks, statusLine } : { hooks };
 }
 
 const tomlString = (s: string): string => `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
@@ -277,6 +278,8 @@ export interface WiringInput {
   self: SelfArgv;
   /** The environment of the window (spec env): `CODEX_HOME` decides which config.toml holds the notify to keep. */
   env: Record<string, string>;
+  /** The primary worktree: its `.claude/settings*.json` may hold the statusLine that the usage tap passes on. */
+  worktree?: string | undefined;
   readConfig?: (file: string) => string | undefined;
 }
 
@@ -289,10 +292,11 @@ export interface WiringInput {
 export function planEventWiring(input: WiringInput): EventWiring {
   if (input.agent === 'claude') {
     const file = claudeSettingsPath(input.config, input.window);
+    const statusLine = buildTapStatusLine(input.task, input.self, input.config, input.worktree, input.env);
     return {
       args: ['--settings', file],
-      files: [{ path: file, content: `${JSON.stringify(buildClaudeSettings(input.task, input.self), null, 2)}\n` }],
-      note: `events: Claude hooks Notification, Stop and StopFailure in ${file}`,
+      files: [{ path: file, content: `${JSON.stringify(buildClaudeSettings(input.task, input.self, statusLine), null, 2)}\n` }],
+      note: `events: Claude hooks Notification, Stop and StopFailure${statusLine ? ', statusLine (usage-tap)' : ''} in ${file}`,
     };
   }
   const forward = userCodexNotify(input.env, input.readConfig);

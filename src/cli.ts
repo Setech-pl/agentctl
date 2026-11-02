@@ -41,6 +41,7 @@ import { ensureWatchWindow, runWatch, WATCH_WINDOW } from './core/watch.ts';
 import { applyStatusLine, statusTmuxLine } from './core/statusline.ts';
 import { BOARD_WINDOW, ensureWindow } from './core/windows.ts';
 import { interruptTask } from './core/interrupt.ts';
+import { handleTap } from './core/usage-tap.ts';
 import { loadGlobalConfig } from './core/config.ts';
 import { applyExamples } from './examples.ts';
 import type { Effort, GlobalConfig } from './core/config.ts';
@@ -50,7 +51,7 @@ import { RealRunner, RecordingRunner } from './core/runner.ts';
 import type { Runner } from './core/runner.ts';
 import { resolveSendSpec, resolveSpec, splitSpecs } from './core/spec.ts';
 import type { RawSpec } from './core/spec.ts';
-import { AgentctlError, cohortKey, cohortNameProblem, errorMessage, formatLocalTime, resolvePath, shellQuote } from './core/util.ts';
+import { AgentctlError, cohortKey, cohortNameProblem, errorMessage, formatLocalTime, resolvePath, shellQuote, windowName } from './core/util.ts';
 
 export interface CliDeps {
   stdout: (text: string) => void;
@@ -826,6 +827,24 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         });
       } catch (e) {
         deps.stderr(`agentctl event: ${errorMessage(e)}\n`);
+      }
+    });
+
+  program
+    .command('usage-tap')
+    .description('Called by Claude Code as the statusLine of a task window (set up by "new"): keeps the plan limits that Claude gives only to a statusLine, remembers the session, then runs your own statusLine command with the same input and prints its output. Always exits 0.')
+    .requiredOption('--task <task>', 'task ID')
+    .option('--forward <command>', 'your own statusLine command: run with the same input after this one')
+    .action(async (opts: { task: string; forward?: string }) => {
+      // A status line must never break the agent: whatever happens, the exit code stays 0.
+      try {
+        const config = deps.loadConfig();
+        const runner = deps.makeRunner(false, () => {});
+        const raw = deps.stdinIsTTY ? '' : deps.readStdin();
+        const result = await handleTap(runner, config, { task: opts.task, window: windowName(opts.task), raw, ...(opts.forward ? { forward: opts.forward } : {}) });
+        if (result.output !== '') deps.stdout(result.output);
+      } catch (e) {
+        deps.stderr(`agentctl usage-tap: ${errorMessage(e)}\n`);
       }
     });
 

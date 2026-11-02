@@ -40,6 +40,7 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`interrupt`](#agentctl-interrupt) | Interrupt the task's current turn (sends the agent's interrupt key, default Escape); the window stays open. |
 | [`attach`](#agentctl-attach) | Go to the task window: attach-session outside tmux, switch-client inside. Without a task: the only running one, or a list to choose from. |
 | [`event`](#agentctl-event) | Called by the agents themselves (hooks that "new" sets up): records the event, updates the task state and notifies at once. Always exits 0. |
+| [`usage-tap`](#agentctl-usage-tap) | Called by Claude Code as the statusLine of a task window (set up by "new"): keeps the plan limits that Claude gives only to a statusLine, remembers the session, then runs your own statusLine command with the same input and prints its output. Always exits 0. |
 | [`move`](#agentctl-move) | Hand a task that hit its usage limit to the other provider: new window \<task>-2 in the same worktree, the original prompt plus a note to continue. Asks y/N. |
 | [`peek`](#agentctl-peek) | Print the last lines of the task window (without the agent footer), to read along without attaching. |
 | [`mcp`](#agentctl-mcp) | Local MCP server on stdio: lets a chat (the Claude app, Claude Code, VS Code) read status, window previews and reports. "mcp install" registers it; writing is off until mcp.allow says otherwise. |
@@ -711,6 +712,25 @@ agentctl event [options] [payload]
 | `--agent <agent>` | the agent that reports | one of `claude`, `codex`; required |
 | `--kind <kind>` | claude: which hook called | one of `notification`, `stop`, `stop-failure` |
 | `--forward <json>` | codex: JSON list, the notify command the user had; run with the same JSON after this one |  |
+
+## agentctl usage-tap
+
+Called by Claude Code as the statusLine of a task window (set up by "new"): keeps the plan limits that Claude gives only to a statusLine, remembers the session, then runs your own statusLine command with the same input and prints its output. Always exits 0.
+
+```
+agentctl usage-tap [options]
+```
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--task <task>` | task ID | required |
+| `--forward <command>` | your own statusLine command: run with the same input after this one |  |
+
+Examples:
+
+```sh
+echo '{"session_id":"x","rate_limits":{}}' | agentctl usage-tap --task NC-42   # what the statusLine of a task window runs
+```
 
 ## agentctl move
 

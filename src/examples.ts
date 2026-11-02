@@ -61,6 +61,7 @@ export const COMMAND_EXAMPLES: Record<string, string[]> = {
   adopt: ['agentctl adopt NC-42 --report ~/Projects/cache/nc-42/NC-42.md --agent claude --worktree ~/Projects/wt/app-nc-42'],
   interrupt: ['agentctl interrupt NC-42'],
   attach: ['agentctl attach NC-42', 'agentctl attach nc-4                    # a unique prefix is enough'],
+  'usage-tap': ['echo \'{"session_id":"x","rate_limits":{}}\' | agentctl usage-tap --task NC-42   # what the statusLine of a task window runs'],
   move: ['agentctl move NC-42                    # to the other provider, asks y/N', 'agentctl move NC-42 --agent codex -y'],
   peek: ['agentctl peek NC-42', 'agentctl peek NC-42 -n 80'],
   'mcp check': ['agentctl mcp check                      # after agentctl-update: does the Claude app still run the old server?'],
