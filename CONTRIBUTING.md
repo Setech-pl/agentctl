@@ -32,7 +32,25 @@ Every milestone is closed in this order:
 
 ## Testing against the real tools
 
-Tests never touch your tmux or your agents. When you try a change live, do it in an isolated tmux server (a throwaway `TMUX_TMPDIR`, `TMUX` unset) and a throwaway `AGENTCTL_HOME`, never in your own `agentctl` session or against your own tasks. Do not run `npm link` from a development checkout over your daily install: use the stable copy (`bin/agentctl-update`).
+Tests never touch your tmux or your agents. When you try a change live (a real tmux, real git, a started task), do it only through `scripts/live-harness.ts`; never by hand in your own `agentctl` session, and never against your own tasks. Earlier hand-made attempts started the real Claude Code twice, ran the real `notify` program of a Codex config once and overwrote the clipboard once.
+
+The harness builds a sandbox under `~/Projects/cache/<task>/live-<name>/` and gives every process under test:
+
+- an isolated tmux server (`TMUX` unset, its own `TMUX_TMPDIR`, a `tmux.conf` with `exit-empty off` and a `default-command` that sets PATH explicitly, so a window's shell cannot find the real agents);
+- its own `AGENTCTL_HOME`, `CODEX_HOME` (no `notify` chain), `CLAUDE_CONFIG_DIR` and `HOME`;
+- a PATH with a directory of fakes (`claude`, `codex`, `pbcopy`, `pbpaste`, `terminal-notifier`, `osascript`, `notify-send`) and links to `tmux`, `git` and `node`, and no directory that holds a real `claude` or `codex`. The fake agents answer `--version` and `--help`, print an idle screen and log every start to `agent.log`.
+
+Before anything is started the harness checks `command -v` of each faked command and the `#{socket_path}` of the tmux server, and refuses (`HarnessRefusal`) when one points at a real binary, at the default tmux server, or outside the sandbox. `tests/harness.test.ts` tests those refusals. Cleanup (the tmux server, background processes) runs in `finally`.
+
+```ts
+import { withHarness } from './scripts/live-harness.ts';
+await withHarness({ name: 'my-try' }, (h) => {
+  console.log(h.agentctl(['status']).stdout);   // agentctl in the sandbox
+  h.tmux(['list-windows', '-a']);               // tmux on the sandbox's server only
+});
+```
+
+`scripts/live-scenarios.ts` is the set of live checks of the milestone (a limit raised without restarting the watcher, events, gc, resume after a tmux restart). Do not run `npm link` from a development checkout over your daily install: use the stable copy (`bin/agentctl-update`).
 
 ## Style
 
