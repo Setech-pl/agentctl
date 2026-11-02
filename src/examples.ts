@@ -61,6 +61,13 @@ export const COMMAND_EXAMPLES: Record<string, string[]> = {
   adopt: ['agentctl adopt NC-42 --report ~/Projects/cache/nc-42/NC-42.md --agent claude --worktree ~/Projects/wt/app-nc-42'],
   interrupt: ['agentctl interrupt NC-42'],
   attach: ['agentctl attach NC-42', 'agentctl attach nc-4                    # a unique prefix is enough'],
+  usage: [
+    'agentctl usage                         # plans, tokens today and in 7 days, active tasks, cohorts',
+    'agentctl usage --since 30d             # the token columns over 30 days',
+    'agentctl usage --cohort sprint-1       # only the tasks of one cohort',
+    'agentctl usage --json',
+    'agentctl usage --clip                  # Markdown table to the clipboard',
+  ],
   'usage-tap': ['echo \'{"session_id":"x","rate_limits":{}}\' | agentctl usage-tap --task NC-42   # what the statusLine of a task window runs'],
   move: ['agentctl move NC-42                    # to the other provider, asks y/N', 'agentctl move NC-42 --agent codex -y'],
   peek: ['agentctl peek NC-42', 'agentctl peek NC-42 -n 80'],

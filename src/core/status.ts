@@ -17,6 +17,9 @@ import { BOARD_WINDOW } from './windows.ts';
 import { WATCH_WINDOW } from './watch.ts';
 import { formatDuration, formatLocalTime, shellQuote } from './util.ts';
 import type { AgentName } from './config.ts';
+import { taskTokenMap } from './usage.ts';
+import type { TaskTokens } from './usage.ts';
+import { formatTokens } from './usage-parse.ts';
 
 export interface StatusRow {
   task: string;
@@ -77,6 +80,8 @@ export interface StatusRow {
   /** The task that took over after `agentctl move` (this one is then `superseded`), and the task this one continues. */
   supersededBy: string | null;
   continues: string | null;
+  /** Tokens of the sessions of the task (input + output + cache writes), when asked for (`CollectOptions.tokens`) and a session log was found; null otherwise (n/d). */
+  tokens?: TaskTokens | null;
 }
 
 /** The rows `status` and the board show: without the hidden ones unless `all`. */
@@ -94,6 +99,8 @@ export interface CollectOptions {
   progress?: boolean;
   /** Also the tasks whose state folder was moved to the archive (`status --all`, the board). */
   archived?: boolean;
+  /** Add the tokens of each task (reads the session logs of the agents, incrementally). */
+  tokens?: boolean;
 }
 
 export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Promise<StatusRow[]> {
@@ -223,13 +230,17 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       continues: null,
     });
   }
+  if (opts.tokens) {
+    const tokens = taskTokenMap(config, runner.now());
+    for (const row of rows) row.tokens = tokens.get(row.task) ?? null;
+  }
   attachCollisions(rows, config.collisions.ignore, config.collisions.enabled);
   return rows;
 }
 
 /** `status`: collect the rows and, when `mirror_dir` is configured, copy new reports and status.json there. */
 export async function reportStatus(ctx: Context, opts: { archived?: boolean } = {}): Promise<{ rows: StatusRow[]; mirror: MirrorResult | undefined }> {
-  const rows = await collectStatus(ctx, { archived: Boolean(opts.archived) });
+  const rows = await collectStatus(ctx, { archived: Boolean(opts.archived), tokens: true });
   return { rows, mirror: await syncMirror(ctx, rows.filter((r) => !r.archived)) };
 }
 
@@ -238,10 +249,11 @@ export function statusMarkdown(rows: StatusRow[]): string {
   const cell = (s: string): string => s.replace(/\|/g, '\\|');
   const pulled = (r: StatusRow): string => (r.report === 'missing' ? '-' : r.pulled ? `yes (${formatLocalTime(r.pulled)})` : 'no');
   const cohort = rows.some((r) => r.cohort !== null);
+  const tokens = rows.some((r) => Boolean(r.tokens));
   const lines = [
-    `| task | ${cohort ? 'cohort | ' : ''}agent/model/effort | state | time | progress | report | pulled? |`,
-    `|---|${cohort ? '---|' : ''}---|---|---|---|---|---|`,
-    ...rows.map((r) => `| ${cell(r.task)} | ${cohort ? `${cell(r.cohort ?? '-')} | ` : ''}${cell(`${r.agent}/${r.model}/${r.effort}`)} | ${r.state} | ${r.duration} | ${r.progress?.text ?? '-'} | ${r.report} | ${pulled(r)} |`),
+    `| task | ${cohort ? 'cohort | ' : ''}agent/model/effort | state | time | ${tokens ? 'tokens | ' : ''}progress | report | pulled? |`,
+    `|---|${cohort ? '---|' : ''}---|---|---|${tokens ? '---|' : ''}---|---|---|`,
+    ...rows.map((r) => `| ${cell(r.task)} | ${cohort ? `${cell(r.cohort ?? '-')} | ` : ''}${cell(`${r.agent}/${r.model}/${r.effort}`)} | ${r.state} | ${r.duration} | ${tokens ? `${r.tokens ? formatTokens(r.tokens.fresh) : 'n/d'} | ` : ''}${r.progress?.text ?? '-'} | ${r.report} | ${pulled(r)} |`),
   ];
   return `${lines.join('\n')}\n`;
 }
