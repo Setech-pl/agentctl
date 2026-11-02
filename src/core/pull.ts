@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import { findClipboardTool, writeClipboard } from './clipboard.ts';
 import { cohortRows } from './cohort.ts';
 import type { Context } from './context.ts';
+import { syncReport } from './report-detect.ts';
 import { syncMirror } from './mirror.ts';
 import { collectStatus } from './status.ts';
 import type { StatusRow } from './status.ts';
@@ -22,6 +23,8 @@ export async function pullTask(ctx: Context, taskArg: string, platform?: string)
   // With mirror_dir set, pull also refreshes the mirror (this report and status.json).
   if (config.mirrorDir) await syncMirror(ctx, await collectStatus(ctx));
 
+  // An agent that wrote the report elsewhere: copy it to the canonical path first.
+  if (record.report && !fs.existsSync(record.report)) await syncReport(ctx, record, { pane: true }).catch(() => undefined);
   if (record.report && fs.existsSync(record.report)) {
     const text = fs.readFileSync(record.report, 'utf8');
     const clip = await findClipboardTool(runner, 'write', platform);

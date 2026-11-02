@@ -24,7 +24,7 @@ Column "Layers": **g** global config, **p** project config, **s** spec.
 | `links[].from` | path | required | g p s | Where the link goes, relative to the first worktree. A glob links every match. |
 | `links[].to` | path | required | g p s | What it points at. Must exist. `from` and `to` ending in `/*` make one link per entry of the directory. |
 | `env` | mapping | `{}` | g p s | Environment variables of the tmux window (strings, numbers or booleans). |
-| `report` | path | `{cache}/{task}/{TASK}.md` | g p s | Where the agent writes its report. Used by `status`, `pull` and the notifications. |
+| `report` | path or list | `{cache}/{task}/{TASK}.md` | g p s | Where the agent writes its report. Used by `status`, `pull` and the notifications. A list: the first entry is the canonical path, the others are places to look (paths and globs `*`, `?`, `**`; absolute, `~/` or relative to the worktree; `{task}` and `{TASK}` work), e.g. `[~/Projects/cache/{task}/{TASK}.md, docs/reports/*{task}*.md, docs/reports/*{TASK}*.md]`. A report found in another place (also by itself, see [Report detection](details.md#report-detection)) is copied to the canonical path. |
 | `setup` | list of strings | `[]` | g p s | Shell commands run in the first worktree after `git worktree add` and before the links. A failing command stops `new`. |
 | `defaults` | mapping | `{}` | g p | Values for a spec that leaves them out: `agent`, `model`, `effort`. |
 | `defaults.agent` | `claude` or `codex` | none | g p | Agent when the spec has no `agent`. |
@@ -231,7 +231,7 @@ The header of a spec file, between `---` lines, followed by the prompt. Several 
 | `setup` | list of strings | project, else global | s | Same as in the other layers; replaces theirs. |
 | `env` | mapping | `{}` | s | Same as in the other layers; merged over theirs. |
 | `review_of` | task ID | none | s | The task under review. The reviewer must use another agent or another model than the author. |
-| `report` | path | project, else global | s | Report path of this task. |
+| `report` | path or list | project, else global | s | Report path of this task, or the list described under the global key. |
 | `pin` | boolean | `false` | s | `true`: never move the task to the other provider, by `--agent` or by a limit. |
 | `after` | task ID or list | none | s | The task starts only when every named task has a report (`report-ready`, or closed with a report). Meant for the queue; `new` refuses a task whose `after` is not met. Unknown tasks and circles are errors. |
 | `touches` | glob or list of globs | none | s | Files the task will change. `queue` and `new` warn (and ask y/N) when an active task of the same repository already changes matching files. |

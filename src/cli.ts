@@ -42,6 +42,7 @@ import { applySetLimits, collectLimits, parseAssignments, parseCounts, planSetLi
 import { collectOverlaps, renderOverlaps, touchWarnings } from './core/collisions.ts';
 import type { NewOptions } from './core/new.ts';
 import { pullReady, pullTask } from './core/pull.ts';
+import { reportInfo, shortPath } from './core/report-detect.ts';
 import { sendPrompts } from './core/send.ts';
 import { collectStatus, reportStatus, shownRows, statusMarkdown } from './core/status.ts';
 import { summarizeSpecs } from './core/summary.ts';
@@ -1017,6 +1018,32 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         const note = await loggedRun(startLogPath(ctx.config, 'board'), 'board', () => runBoard(ctx, deps.insideTmux ?? false, deps.selfArgv?.()), { startNote: describeTerminal(process.env, process.stdout, process.stdin), ...(deps.minBoardLifetimeMs !== undefined ? { minLifetimeMs: deps.minBoardLifetimeMs } : {}) });
         // A board that ends at once without an error says so: in a window kept with remain-on-exit this is what stays on the screen.
         if (note) throw new AgentctlError(note);
+      }),
+    );
+
+  program
+    .command('report')
+    .description('Where the report of a task is: the canonical path (the first "report:" entry) and, when the agent wrote it elsewhere, the source it was copied from. Without --from it also shows what the search finds now (the last lines of the window, the "report:" list); with --from <path> that file becomes the source and is copied to the canonical path (not over a report the agent wrote, unless --force).')
+    .argument('<task>', 'task ID')
+    .option('--from <path>', 'use this file as the report (absolute, ~/ or relative to the worktree)')
+    .option('--force', 'with --from: replace a canonical report that the agent wrote')
+    .option('--json', 'print JSON')
+    .option('--dry-run', 'with --from: copy nothing')
+    .action(
+      guarded(async (task: string, opts: { from?: string; force?: boolean; json?: boolean; dryRun?: boolean }) => {
+        if (opts.force && !opts.from) throw new AgentctlError('--force only works together with --from');
+        const info = await reportInfo(contextFor(Boolean(opts.dryRun)), task, { from: opts.from, force: opts.force });
+        if (opts.json) return line(JSON.stringify(info, null, 2));
+        line(`${info.task}: report ${info.canonical} (${info.canonicalExists ? 'exists' : 'missing'})`);
+        if (info.source) line(`  copied from ${info.source}`);
+        if (info.result) {
+          const r = info.result;
+          line(r.action === 'none' || r.action === 'kept' ? `  nothing copied${r.note ? `: ${r.note}` : ''}` : `  ${r.action}${opts.dryRun ? ' (dry run)' : ''} from ${r.source}`);
+        } else if (info.candidates.length === 0) line('  the search finds no other report (a .md file named in the last lines of the window or in the "report:" list, written after the task started)');
+        else {
+          for (const c of info.candidates) line(`  found: ${shortPath(c.file)} (${c.why})`);
+          line(`  agentctl report ${info.task} --from ${shortPath(info.candidates[0]?.file ?? '')}   # use the first`);
+        }
       }),
     );
 

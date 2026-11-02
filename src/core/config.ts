@@ -31,6 +31,8 @@ export interface Layer {
   links: Link[];
   env: Record<string, string>;
   report?: string;
+  /** More places the report may be (paths and globs, absolute or relative to the worktree): `report: [canonical, other, ...]`. */
+  reportAlt?: string[];
   /** Shell commands run in the first worktree after `git worktree add`, before the links. Unset: inherit from the layer below. */
   setup?: string[];
   defaults: Defaults;
@@ -349,6 +351,17 @@ function parseString(v: unknown, where: string, p: Problems): string | undefined
   return v;
 }
 
+/** `report`: one path, or a list whose first entry is the canonical path and the others are places to look (paths and globs). */
+export function parseReportPaths(v: unknown, where: string, p: Problems): string[] {
+  if (v === undefined || v === null) return [];
+  const list = Array.isArray(v) ? v : [v];
+  if (list.length === 0 || list.some((x) => typeof x !== 'string' || x.trim() === '')) {
+    p.add(`${where} must be a path, or a list of paths and globs`);
+    return [];
+  }
+  return list as string[];
+}
+
 export function parseStringList(v: unknown, where: string, p: Problems): string[] {
   if (v === undefined || v === null) return [];
   if (!Array.isArray(v) || v.some((x) => typeof x !== 'string')) {
@@ -432,9 +445,11 @@ function parseLayer(obj: Record<string, unknown>, where: string, p: Problems): L
     defaults: parseDefaults(obj.defaults, `${where}.defaults`, p),
   };
   const worktreeRoot = parseString(obj.worktree_root, `${where}.worktree_root`, p);
-  const report = parseString(obj.report, `${where}.report`, p);
+  const reports = parseReportPaths(obj.report, `${where}.report`, p);
+  const report = reports[0];
   if (worktreeRoot) layer.worktreeRoot = worktreeRoot;
   if (report) layer.report = report;
+  if (reports.length > 1) layer.reportAlt = reports.slice(1);
   if (obj.setup !== undefined && obj.setup !== null) layer.setup = parseSetup(obj.setup, `${where}.setup`, p);
   return layer;
 }

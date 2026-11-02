@@ -22,7 +22,7 @@ These always work.
 | `status` | `all?`, `cohort?` | One line ("3 tasks: 1 working, 1 report-ready, 1 waiting") and the rows as JSON: agent, model, effort, state, window, `started` (UTC) and `startedLocal`, duration, progress, report, whether it was pulled, last line, the open question, hint, finished, hidden, closed, archived. Hidden and closed tasks only with `all: true`. A chat should call it first. Before the rows, `status` says which server version answers (`MCP server: agentctl 0.10.0 (script, pid, started)`, with a hint when the stable copy on disk is newer) and any `Config warning:`. |
 | `version` | none | The version of agentctl this server process runs, its script, pid and start time, the version of the stable copy on disk (`older: true` when they differ), the write tools the user allowed and the warnings about the MCP part of the config. Use it when a tool seems to be missing. |
 | `peek` | `task`, `lines?` (1 to 200, default 40) | The last lines of a running task's window without the agent's footer. |
-| `list_reports` | `all?` | Which tasks have a report: size, `modified` (UTC) and `modifiedLocal`, whether it was pulled. |
+| `list_reports` | `all?` | Which tasks have a report: size, `modified` (UTC) and `modifiedLocal`, whether it was pulled, and `source` (where the agent wrote the report when the file is a copy, else `null`). |
 | `get_report` | `task` | One report, up to 200 KB. It reads only the file that the task's `TASK.md` names, never a path from the chat, and refuses a report that is a symbolic link. It does not mark the report as pulled. |
 | `pull_ready` | `cohort?` | All reports that are ready and not yet pulled, each under `=== NC-42 (claude opus/high) ===`, in one answer (up to 200 KB; the rest stays new). Marks them as pulled. This is the only read tool that changes anything, and only in agentctl's own state. A chat should call it at the start of discussing finished work. |
 | `queue_list` | none | The task queue: position, agent/model/effort, priority, `after`, what each task waits for (`startCondition`: `czeka na miejsce: claude 2/2`, `czeka na NC-42`, paused), since when, and the error of a start that failed. |
@@ -35,7 +35,7 @@ These always work.
 | `overlap` | `task?` | Pairs of active tasks of one repository that changed the same files, with the file lists (from git, now). `status` also carries `collidesWith` per task, and short `Queue` and `Collisions` lines. |
 | `cohort_list` | none | The cohorts (named groups of tasks): per cohort the number of tasks by state (`active`, `queued`, `reports`, `closed`, `cancelled`), `total`, `created` and the note. |
 | `cohort_show` | `cohort` | One cohort: its note, every task in it as `status` shows it (closed and cancelled ones too) and its queued tasks with what each waits for. |
-| `task_spec` | `task` | The header of a task (agent, model, effort, repos and worktrees, report path, `started` and `startedLocal`, `pulled` and `pulledLocal`, `review_of`, `continues`, `superseded_by`, `pin`, `closed`, names of env variables without values) and the prompt from `TASK.md`. |
+| `task_spec` | `task` | The header of a task (agent, model, effort, repos and worktrees, report path, `report_source` (see [Report detection](details.md#report-detection)), `started` and `startedLocal`, `pulled` and `pulledLocal`, `review_of`, `continues`, `superseded_by`, `pin`, `closed`, names of env variables without values) and the prompt from `TASK.md`. |
 
 `task` is a task ID, case-insensitive; a unique prefix is enough.
 

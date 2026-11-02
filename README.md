@@ -17,7 +17,7 @@ agentctl manages **work orders, not windows**. The unit is a spec: a Markdown fi
 - **Notifications.** One desktop notification per transition; a click on it switches to the task's window.
 - **Phone.** `agentctl ntfy-setup` and `agentctl away on`: the events that need you also go to your phone through ntfy, with only the task ID and the verdict line in the message.
 - **Board.** A full-screen overview of all tasks with a live preview of the selected window.
-- **Reports.** `agentctl pull --ready` collects the new reports into one text for your planning chat.
+- **Reports.** `agentctl pull --ready` collects the new reports into one text for your planning chat. A report the agent wrote elsewhere than the spec says is found and copied ([Report detection](docs/details.md#report-detection)).
 - **Queue, dependencies, collisions.** More tasks than free windows? They wait and start by themselves; a review can wait for the author's report (`after`); two tasks changing the same files are flagged early.
 - **Cancelling and cohorts.** Work is abandoned in the middle of a turn? `agentctl cancel` interrupts, closes the window and keeps the worktree; tasks that waited for it are blocked, not forgotten. Tasks you name a cohort for are grouped on the board, filtered by `--cohort` and announced together when all their reports are in.
 - **Provider switch.** A table of Claude and Codex equivalents; `agentctl move` hands a task that hit its usage limit to the other provider in the same worktree.

@@ -48,6 +48,7 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`cancel`](#agentctl-cancel) | Abandon tasks: a task at work is interrupted, given cancel.grace seconds to stop, and its window is closed; a task in the queue is taken out of it. They become cancelled (not closed). The worktree and the branch stay unless --rm-worktree (worktree only, never the branch). Shows the list and asks y/N first. |
 | [`watch`](#agentctl-watch) | Foreground loop: notifies (macOS notification / notify-send) when a task has a report ready, asks something, hit its usage limit, waits too long, needs folder trust or died. |
 | [`board`](#agentctl-board) | Full-screen overview of the tasks: state, progress, a live preview of the selected window, and keys to switch to it, message, interrupt, pull and close. |
+| [`report`](#agentctl-report) | Where the report of a task is: the canonical path (the first "report:" entry) and, when the agent wrote it elsewhere, the source it was copied from. Without --from it also shows what the search finds now (the last lines of the window, the "report:" list); with --from \<path> that file becomes the source and is copied to the canonical path (not over a report the agent wrote, unless --force). |
 | [`away`](#agentctl-away) | Away mode: the phone (ntfy) gets the notifications only while away is on; the notifications on the Mac do not depend on it. notify.ntfy.always: true sends always, away.auto_idle turns it on by itself when the Mac is idle. Without a subcommand: status. |
 | [`away status`](#agentctl-away-status) | Is away on, who set it, and does the phone get notifications now. |
 | [`away on`](#agentctl-away-on) | Away: the notifications go to the phone as well. Takes effect at once, also in a running watch. |
@@ -917,6 +918,32 @@ Examples:
 ```sh
 agentctl board --tmux                  # in window "board" of the agentctl session
 agentctl board
+```
+
+## agentctl report
+
+Where the report of a task is: the canonical path (the first "report:" entry) and, when the agent wrote it elsewhere, the source it was copied from. Without --from it also shows what the search finds now (the last lines of the window, the "report:" list); with --from \<path> that file becomes the source and is copied to the canonical path (not over a report the agent wrote, unless --force).
+
+```
+agentctl report [options] <task>
+```
+
+| Argument | Meaning |
+|---|---|
+| `<task>` | task ID |
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--from <path>` | use this file as the report (absolute, ~/ or relative to the worktree) |  |
+| `--force` | with --from: replace a canonical report that the agent wrote |  |
+| `--json` | print JSON |  |
+| `--dry-run` | with --from: copy nothing |  |
+
+Examples:
+
+```sh
+agentctl report NC-42                  # where the report is; what the search finds
+agentctl report NC-42 --from docs/reports/nc-42-final.md   # use that file (copied to the canonical path)
 ```
 
 ## agentctl away

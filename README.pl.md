@@ -17,7 +17,7 @@ agentctl zarządza **zleceniami, nie oknami**. Jednostką jest spec: plik Markdo
 - **Powiadomienia.** Jedno powiadomienie na zmianę stanu; kliknięcie przełącza na okno zadania.
 - **Telefon.** `agentctl ntfy-setup` i `agentctl away on`: zdarzenia, które Cię potrzebują, idą też na telefon przez ntfy, a w wiadomości są tylko ID zadania i linia werdyktu.
 - **Board.** Pełnoekranowy przegląd wszystkich zadań z podglądem na żywo wybranego okna.
-- **Raporty.** `agentctl pull --ready` zbiera nowe raporty w jeden tekst dla czatu planującego.
+- **Raporty.** `agentctl pull --ready` zbiera nowe raporty w jeden tekst dla czatu planującego. Raport zapisany gdzie indziej, niż mówi spec, jest znajdowany i kopiowany ([Wykrywanie raportu](docs/details.pl.md#wykrywanie-raportu)).
 - **Kolejka, zależności, kolizje.** Więcej zadań niż wolnych okien? Czekają i startują same; przegląd może czekać na raport autora (`after`); dwa zadania zmieniające te same pliki są oznaczane wcześnie.
 - **Anulowanie i kohorty.** Praca porzucona w trakcie tury? `agentctl cancel` przerywa, zamyka okno i zostawia worktree; zadania, które na nią czekały, są zablokowane, a nie zapomniane. Zadania z nadaną nazwą kohorty są grupowane na boardzie, filtrowane przez `--cohort` i ogłaszane razem, gdy wszystkie ich raporty są gotowe.
 - **Zmiana dostawcy.** Tabela odpowiedników Claude i Codexa; `agentctl move` przekazuje zadanie, które trafiło na limit użycia, drugiemu dostawcy w tym samym worktree.

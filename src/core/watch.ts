@@ -23,7 +23,8 @@ import { CollisionMemory, collisionTick } from './collisions.ts';
 import { cohortTick } from './cohort.ts';
 import { announceBlocked, QueueMemory, queueTick } from './queue.ts';
 import { usageTick } from './usage-limits.ts';
-import { listTaskRecords } from './taskstore.ts';
+import { listTaskRecords, readTaskRecord } from './taskstore.ts';
+import { syncReport } from './report-detect.ts';
 import { recordEvent } from './history.ts';
 import { errorMessage } from './util.ts';
 import { ensureWindow } from './windows.ts';
@@ -162,6 +163,19 @@ export async function restoreWindowNames(ctx: Context, memory: WatchMemory): Pro
   return restored;
 }
 
+/** Look for the report of every waiting task (its window and the `report:` list). True when a report was copied. */
+async function syncWaitingReports(ctx: Context, rows: StatusRow[]): Promise<boolean> {
+  let copied = false;
+  for (const row of rows) {
+    if (row.state !== 'waiting' || row.closed || row.cancelled || row.archived) continue;
+    const record = readTaskRecord(ctx.config, row.windowName);
+    if (!record) continue;
+    const r = await syncReport(ctx, record, { pane: true }).catch(() => undefined);
+    if (r && (r.action === 'copied' || r.action === 'updated')) copied = true;
+  }
+  return copied;
+}
+
 export interface TickOptions {
   /** This very agentctl as a command line: the click action of a notification runs `attach` with it. */
   self?: SelfArgv | undefined;
@@ -175,7 +189,9 @@ export interface TickOptions {
  */
 export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Notifier, options: TickOptions = {}): Promise<WatchEvent[]> {
   // A closed or cancelled task is off the list: no transitions, no notifications (closing a task with no report is not a vanished window).
-  const allRows = await collectStatus(ctx, { progress: false, archived: true });
+  let allRows = await collectStatus(ctx, { progress: false, archived: true });
+  // A waiting agent may have written its report somewhere else than the spec says: copy it to the canonical path before the states are read.
+  if (await syncWaitingReports(ctx, allRows)) allRows = await collectStatus(ctx, { progress: false, archived: true });
   const rows = allRows.filter((r) => !r.closed && !r.cancelled);
   await decorateWindows(ctx, memory, rows);
   const now = ctx.runner.now();

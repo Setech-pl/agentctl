@@ -1,3 +1,4 @@
+import { shortPath } from './report-detect.ts';
 import fs from 'node:fs';
 import type { Context } from './context.ts';
 import { formatModelEffort } from './equivalents.ts';
@@ -45,6 +46,8 @@ export interface StatusRow {
   /** The report file exists. */
   report: 'yes' | 'missing';
   reportPath: string;
+  /** Where the agent wrote the report when that was not the `report:` path (the file at `reportPath` is a copy). */
+  reportSource?: string;
   /** ISO time of the last pull that took the current report; null when never pulled or the report changed since. */
   pulled: string | null;
   lastLine: string;
@@ -164,6 +167,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       duration,
       report: reportMtime !== undefined ? 'yes' : 'missing',
       reportPath: record.report,
+      ...(record.reportSource ? { reportSource: record.reportSource } : {}),
       pulled,
       lastLine: lastContentLine(screenText, settings.footerPatterns),
       progress: opts.progress === false || record.repos.length === 0 ? null : await taskProgress(runner, record.repos),
@@ -253,7 +257,7 @@ export function statusMarkdown(rows: StatusRow[]): string {
   const lines = [
     `| task | ${cohort ? 'cohort | ' : ''}agent/model/effort | state | time | ${tokens ? 'tokens | ' : ''}progress | report | pulled? |`,
     `|---|${cohort ? '---|' : ''}---|---|---|${tokens ? '---|' : ''}---|---|---|`,
-    ...rows.map((r) => `| ${cell(r.task)} | ${cohort ? `${cell(r.cohort ?? '-')} | ` : ''}${cell(`${r.agent}/${r.model}/${r.effort}`)} | ${r.state} | ${r.duration} | ${tokens ? `${r.tokens ? formatTokens(r.tokens.fresh) : 'n/d'} | ` : ''}${r.progress?.text ?? '-'} | ${r.report} | ${pulled(r)} |`),
+    ...rows.map((r) => `| ${cell(r.task)} | ${cohort ? `${cell(r.cohort ?? '-')} | ` : ''}${cell(`${r.agent}/${r.model}/${r.effort}`)} | ${r.state} | ${r.duration} | ${tokens ? `${r.tokens ? formatTokens(r.tokens.fresh) : 'n/d'} | ` : ''}${r.progress?.text ?? '-'} | ${r.report}${r.reportSource ? ` (z ${cell(shortPath(r.reportSource))})` : ''} | ${pulled(r)} |`),
   ];
   return `${lines.join('\n')}\n`;
 }

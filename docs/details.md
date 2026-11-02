@@ -130,6 +130,18 @@ Commits are `git rev-list --count <base>..HEAD`. Files are the union of `git dif
 so changes the base got meanwhile do not count) and `git status --porcelain` (uncommitted and untracked files, collapsed to the directory for a fully untracked directory),
 each file counted once. Without a base the commits are `?` (`?c 3f`); a worktree that is gone is `-`. `--json` carries the per-worktree numbers.
 
+## Report detection
+
+The spec says where the report goes (`report:`, default `<cache>/<task>/<TASK>.md`), but agents write it where they like: `docs/reports/<…>.md` in the worktree, `~/Projects/cache/<other name>/…`. A task then hangs as `waiting` and `pull --ready` does not see it. agentctl looks for the report itself.
+
+- **When.** After every end of a turn (the Claude `Stop` hook with `last_assistant_message`, the Codex `notify` with `last-assistant-message`) and at every `watch` tick for a task in state `waiting`. Nothing is searched while the canonical file is already there (written after the task started), except to refresh a copy (below).
+- **Where.** The `report:` list first (see below), then the `.md` paths in the last message of the agent and in the last 400 lines of its window (`capture-pane -J`, so wrapped lines are joined): absolute, `~/…`, relative to the worktrees, quoted or backticked, after `pbcopy < `. URLs are ignored.
+- **What counts.** An existing regular file (not a symbolic link, not agentctl's own state) modified after the task started. Order: the `report:` list (newest first), then paths containing the task ID or `report`/`raport` (the one mentioned last first), then any other, the one mentioned last first.
+- **The list.** `report:` in a spec, `.agentctl.yaml` or `config.yaml` may be a list. The first entry is the canonical path; the others are places to look, paths or globs (`*`, `?`, `**`), absolute, `~/…` or relative to the worktree, with `{task}`/`{TASK}`: `report: [~/Projects/cache/{task}/{TASK}.md, docs/reports/*{task}*.md, docs/reports/*{TASK}*.md]`.
+- **What happens.** The file is copied to the canonical path. An existing canonical file is never overwritten, except a copy agentctl made earlier that nobody changed: it is refreshed when the source is newer. `TASK.md` gets `report_source`, `report_copied` and `report_source_mtime`; the journal gets "raport wykryty w <path>" (`events` shows it as RAPORT WYKRYTY); the state turns `report-ready` and the notification carries the verdict as for any report.
+- **By hand.** `agentctl report <TASK>` shows the canonical path, the source and what the search finds now (it copies nothing). `agentctl report <TASK> --from <path>` makes that file the source and copies it (`--force` also over a report the agent wrote; `--dry-run` copies nothing). `pull <TASK>` runs the search when the report is missing.
+- **Where you see it.** `status` (the report column: `yes (z <path>)`; `--json`: `reportSource`), the board (a note under the preview: `report from <path>`), the MCP `list_reports` (`source`) and `task_spec` (`report_source`).
+
 ## Events
 
 Reading a screen every 15 seconds is a guess about what the agent is doing. `agentctl new` therefore also asks each agent to tell agentctl itself, and `agentctl event` (a command you never type) takes the message:
