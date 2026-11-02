@@ -18,7 +18,7 @@ import type { Harness } from './live-harness.ts';
  * Run: node --experimental-strip-types --no-warnings scripts/live-phone.ts   Results: ~/Projects/cache/agentctl-15/live-phone-results.json
  */
 
-const CACHE = path.join(os.homedir(), 'Projects', 'cache', 'agentctl-15');
+const CACHE = process.env.AGENTCTL_LIVE_CACHE ?? path.join(os.homedir(), 'Projects', 'cache', 'agentctl-15');
 
 interface Check {
   scenario: string;
@@ -179,7 +179,12 @@ async function mockServer(): Promise<void> {
         fs.writeFileSync(path.join(h.root, 'cache', 'lp-4', 'LP-4.md'), 'Werdykt: FAIL\n');
         const down = h.agentctl(['event', '--task', 'LP-4', '--agent', 'claude', '--kind', 'stop'], { input: STOP });
         check('a dead server does not fail the event command (exit 0)', down.code === 0, down.stderr);
-        const queued = fs.existsSync(path.join(h.agentctlHome, 'phone-queue.json')) && /"attempts": 1/.test(fs.readFileSync(path.join(h.agentctlHome, 'phone-queue.json'), 'utf8'));
+        const queued = await until(() => {
+          try {
+            const queue = JSON.parse(fs.readFileSync(path.join(h.agentctlHome, 'phone-queue.json'), 'utf8'));
+            return queue.items.some((item: { attempts: number }) => item.attempts === 1) && /first try failed, queued/.test(fs.readFileSync(path.join(h.agentctlHome, 'phone.log'), 'utf8'));
+          } catch { return false; }
+        }, 5000);
         check('the request is queued and phone.log has the reason', queued && /first try failed, queued/.test(fs.readFileSync(path.join(h.agentctlHome, 'phone.log'), 'utf8')));
         check('the watcher survived the dead server', watch.exitCode === null);
         mock.start();
