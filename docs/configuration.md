@@ -84,7 +84,7 @@ Default icons: `working` ⚙, `background` ⏳, `waiting` ⏸, `needs-input` ?, 
 
 | Key | Type | Default | Layers | Meaning |
 |---|---|---|---|---|
-| `mcp.allow` | list | `[]` | g | Write tools the chat may call: any of `send`, `new`, `interrupt`, `close`, `move`, `queue`, `queue_rm`, `cancel`. Read again on every call. |
+| `mcp.allow` | list | `[]` | g | Write tools the chat may call: any of `send`, `new`, `interrupt`, `close`, `move`, `queue`, `queue_rm`, `cancel`, `mark`. Read again on every call. |
 | `mcp.allow_rm_worktree` | boolean | `false` | g | `close` and `cancel` from the chat may also remove the git worktree (never forced). |
 
 ### `queue`
@@ -117,7 +117,7 @@ Queued tasks live in `<config dir>/queue/` (one JSON file each, with the spec te
 
 ### `usage`
 
-`agentctl usage`, the board and the tmux status line show the tokens of the tasks and the state of the plans of Claude and Codex. A percentage here is `80` (both providers) or `{claude: 80, codex: 70}` (per provider).
+`agentctl usage`, the board and the tmux status line show the tokens of the tasks and the state of the plans of Claude and Codex ([how it works](details.md#usage-and-limits)). A percentage here is `80` (both providers) or `{claude: 80, codex: 70}` (per provider).
 
 | Key | Type | Default | Layers | Meaning |
 |---|---|---|---|---|
