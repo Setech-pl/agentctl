@@ -187,9 +187,12 @@ export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: Q
       const unmet = unmetAfter(spec.after, rows);
       lines.push(`  after:    ${spec.after.join(', ')}${unmet.length === 0 ? ' (all have a report already)' : ` – ${waitingText(unmet)}`}`);
     }
+    const unmetNow = unmetAfter(spec.after, rows);
     lines.push(
       `  start:    ${
-        full
+        unmetNow.length > 0
+          ? `when ${unmetNow.join(', ')} ${unmetNow.length === 1 ? 'has' : 'have'} a report${full ? ` and a ${spec.agent} window is free` : ''}`
+          : full
           ? `waits for a free ${spec.agent} window (${load[spec.agent]} running${ahead[spec.agent] > 0 ? `, ${ahead[spec.agent]} queued ahead` : ''}, limit ${limit})`
           : 'at the next watch tick (a window is free)'
       }`,

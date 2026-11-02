@@ -17,6 +17,7 @@ agentctl zarządza **zleceniami, nie oknami**. Jednostką jest spec: plik Markdo
 - **Powiadomienia.** Jedno powiadomienie na zmianę stanu; kliknięcie przełącza na okno zadania.
 - **Board.** Pełnoekranowy przegląd wszystkich zadań z podglądem na żywo wybranego okna.
 - **Raporty.** `agentctl pull --ready` zbiera nowe raporty w jeden tekst dla czatu planującego.
+- **Kolejka, zależności, kolizje.** Więcej zadań niż wolnych okien? Czekają i startują same; przegląd może czekać na raport autora (`after`); dwa zadania zmieniające te same pliki są oznaczane wcześnie.
 - **Zmiana dostawcy.** Tabela odpowiedników Claude i Codexa; `agentctl move` przekazuje zadanie, które trafiło na limit użycia, drugiemu dostawcy w tym samym worktree.
 - **Integracja z czatem.** Lokalny serwer MCP pozwala czatowi w aplikacji Claude lub w Claude Code czytać status i raporty oraz, jeśli na to pozwolisz, wysyłać prompty i uruchamiać zadania.
 - **Mały i przejrzysty.** TypeScript na Node bez kroku budowania, bez demona; `--dry-run` wypisuje każde polecenie zamiast je wykonać.
@@ -35,7 +36,14 @@ sequenceDiagram
 
     H->>C: opisujesz pracę
     C-->>H: spec (nagłówek YAML + prompt)
-    H->>A: agentctl new --clip
+    alt dostawca ma wolne okno
+        H->>A: agentctl new --clip
+    else limit jest pełny
+        H->>A: agentctl queue --clip (albo y przy new)
+        A-->>H: podsumowanie, y/N
+        Note over A,W: zadanie czeka w kolejce, także na raporty z after
+        W->>A: okno się zwolniło, a zadania z after mają raport
+    end
     A->>G: git worktree add, komendy setup, linki
     A->>G: TASK.md w state_dir, okno tmux
     A->>X: uruchamia agenta w worktree
@@ -48,6 +56,8 @@ sequenceDiagram
         X->>X: edycje, testy, commity
         X-->>A: zdarzenia (hooki Claude, notify Codexa)
         W->>G: czyta okna co 15 s
+        W->>G: co 300 s: pliki zmienione przez każde zadanie
+        W-->>H: ⚠ dwa zadania zmieniły te same pliki
     end
     X->>G: zapisuje plik raportu
     W-->>H: powiadomienie (raport gotowy, pytanie, limit)
@@ -74,7 +84,7 @@ flowchart TB
         BOARD["board (Ink, src/board)"]
         MCP["serwer MCP (src/mcp, stdio)"]
     end
-    CORE["src/core: spec, plan, new, status, pull, close, move, watch, events, notify"]
+    CORE["src/core: spec, plan, new, queue, collisions, status, pull, close, move, watch, events, notify"]
     RUN["Runner: RealRunner / RecordingRunner"]
     subgraph world [Na zewnątrz]
         TMUX[sesja tmux agentctl]
@@ -85,6 +95,7 @@ flowchart TB
     subgraph disk [Pliki]
         CFG["config: ~/.agentctl/config.yaml, .agentctl.yaml"]
         STATE["state_dir: ~/.agentctl/tasks/ID/TASK.md, event.json"]
+        QUEUE["kolejka: ~/.agentctl/queue/, collisions.json"]
         ARCH["archiwum: ~/.agentctl/archive/"]
         REP["cache: raporty zadań"]
         AUDIT["mcp-audit.log"]
@@ -99,6 +110,7 @@ flowchart TB
     AG -. "hooki / notify: agentctl event" .-> CLI
     CORE --> NOTE
     CORE <--> STATE
+    CORE <--> QUEUE
     CORE --> ARCH
     CORE --> CFG
     AG --> REP
@@ -123,7 +135,15 @@ stateDiagram-v2
     state "✗ dead" as dead
     state "✗ orphan" as orphan
     state "⊘ closed" as closed
+    state "⧗ queued" as queued
+    state "✗ start failed" as startfailed
 
+    [*] --> queued: queue, albo y gdy limit pełny
+    queued --> trust: okno wolne, after spełnione, świeży worktree
+    queued --> working: okno wolne, after spełnione
+    queued --> startfailed: start się nie udał
+    startfailed --> queued: queue retry
+    queued --> [*]: queue rm
     [*] --> trust: new, świeży worktree
     [*] --> working: new, prompt wklejony
     [*] --> orphan: okno bez pliku stanu
@@ -254,6 +274,9 @@ Add a bell sound to the tram when it leaves a stop.
 | `env` | nie | Zmienne środowiskowe okna tmux. |
 | `review_of` | nie | ID recenzowanego zadania; recenzent musi użyć innego agenta lub innego modelu niż autor. |
 | `pin` | nie | `true`: nigdy nie przenoś zadania do drugiego dostawcy. |
+| `priority` | nie | `high` albo `normal` (domyślnie): kolejność w kolejce. |
+| `after` | nie | ID zadania lub lista: zadanie z kolejki startuje dopiero, gdy każde ma raport. |
+| `touches` | nie | Globy plików, które zadanie zmieni: ostrzeżenie, gdy aktywne zadanie już je zmienia. |
 | `report` | nie | Gdzie agent zapisuje raport (domyślnie `<cache>/<task>/<TASK>.md`). |
 
 W ścieżkach działają placeholdery `{task}`, `{TASK}` i `{cache}`. Wszystkie klucze, typy i wartości domyślne: [docs/configuration.md](docs/configuration.md#spec-keys) (po angielsku). Błędy są zgłaszane wszystkie naraz, zwykłymi słowami, z podpowiedzią.
@@ -342,12 +365,57 @@ Modele Claude i Codexa nie odpowiadają sobie jeden do jednego, więc agentctl t
 
 Wbudowana tabela i zasady limitów: [docs/details.md](docs/details.md#model-equivalents) (po angielsku).
 
+## Kolejka
+
+Zlecasz więcej zadań, niż jest wolnych okien (`limits.claude`, `limits.codex`)? Nadmiarowe wstaw do kolejki; `agentctl watch` uruchamia każde, gdy tylko zwolni się okno jego dostawcy, tą samą ścieżką co `new` (worktree, setup, linki; dialog zaufania do folderu nadal jest Twój).
+
+```sh
+agentctl queue nc-42.md        # te same kontrole co "new", podsumowanie, y/N; -y pomija pytanie, --clip czyta schowek
+agentctl queue list            # pozycja, zadanie, agent/model/effort, priorytet, warunek startu, jak długo czeka
+agentctl queue up NC-42        # na początek (priority: high i tak idzie pierwsze)
+agentctl queue rm NC-42        # wyjmij z kolejki
+agentctl queue pause           # nic nowego nie startuje; queue resume wznawia
+agentctl queue retry NC-42     # nieudany start, jeszcze raz
+```
+
+- `new` przy pełnym limicie pyta „dodać do kolejki? [y/N]” zamiast tylko się zatrzymać (bez terminala: dotychczasowy błąd, teraz z podpowiedzią `agentctl queue`).
+- Pole specu `priority: high` idzie przed `normal`; w obrębie klasy obowiązuje kolejność zgłoszeń. Pełny dostawca nie wstrzymuje zadania drugiego dostawcy.
+- **Kolejka nigdy sama nie zmienia dostawcy.** Zadanie działa na agencie, na którym je zlecono; przeniesienie pozostaje jawne (`--agent`, `move`).
+- Nieudany start trafia na koniec jako `failed` z logiem i powiadomieniem i nie jest ponawiany w pętli; `queue retry` to Twoja decyzja. „Uruchomiono NC-42 z kolejki” mówi, że zadanie wystartowało.
+- Board ma sekcję **Queue (N)** (`u` na początek, `d` usuń, `p` pauza), a pasek tmux liczy kolejkę (`2⚙ 1⏳ 3⧗`).
+
+## Zależności
+
+`after: NC-42` (lub lista) w specu trzyma zadanie w kolejce, dopóki każde wskazane zadanie nie ma raportu (`report-ready` albo zamknięte z raportem). `status`, `queue list` i board pokazują `czeka na NC-42`. Typowy przypadek to przegląd krzyżowy: przegląd (`review_of: NC-42`) startuje sam zaraz po raporcie autora.
+
+```yaml
+---
+task: NC-42-REVIEW
+agent: codex
+review_of: NC-42
+after: NC-42
+---
+```
+
+Przegląd bez `after` dostaje w podsumowaniu podpowiedź. Nieistniejące zadanie lub pętla zależności to błąd przy dodawaniu. Szczegóły: [docs/details.md](docs/details.md#dependencies-after).
+
+## Kolizje
+
+Dwa aktywne zadania zmieniające te same pliki w tym samym repozytorium to konflikt scalania czekający na swoją kolej. Co 300 sekund (`collisions.interval`) `watch` pyta git, które pliki zmieniło każde aktywne zadanie (commity ponad bazą plus niezacommitowane), i porównuje zadania jednego repozytorium.
+
+- `agentctl status` pokazuje kolumnę `COLLIDE`, np. `⚠ LANDING-QS-1: 2` (dwa wspólne pliki); board oznacza zadanie `⚠`; `watch` wysyła jedno powiadomienie na nową parę.
+- `agentctl overlap [TASK]` wypisuje wspólne pliki.
+- `touches: [src/menu/**]` w specu sprawia, że `queue` i `new` ostrzegają (i pytają y/N), gdy aktywne zadanie już zmienia pasujące pliki.
+- `collisions.ignore` pomija pliki typu lockfile. Porównywane są nazwy plików, nie fragmenty: dwa zadania w różnych miejscach jednego pliku nadal są zgłaszane.
+
+Szczegóły: [docs/details.md](docs/details.md#collisions).
+
 ## Integracja z czatem (MCP)
 
 `agentctl mcp` to lokalny serwer MCP na stdio. Aplikacja Claude, Claude Code i VS Code uruchamiają go same; nic nie nasłuchuje na porcie.
 
-- **Narzędzia odczytu** (zawsze włączone): `status`, `peek`, `list_reports`, `get_report`, `pull_ready`, `task_spec`.
-- **Narzędzia zapisu** (wyłączone, dopóki nie wpiszesz ich w `mcp.allow`): `send`, `new`, `interrupt`, `close`, `move`. `new` i `move` nic nie zmieniają, dopóki nie zostaną wywołane ponownie z `confirm: true`. Każdy zapis trafia do audytu w `~/.agentctl/mcp-audit.log` i jest ogłaszany na pulpicie.
+- **Narzędzia odczytu** (zawsze włączone): `status`, `peek`, `list_reports`, `get_report`, `pull_ready`, `task_spec`, `queue_list`, `overlap`.
+- **Narzędzia zapisu** (wyłączone, dopóki nie wpiszesz ich w `mcp.allow`): `send`, `new`, `queue`, `queue_rm`, `interrupt`, `close`, `move`. `new`, `queue` i `move` nic nie zmieniają, dopóki nie zostaną wywołane ponownie z `confirm: true`. Każdy zapis trafia do audytu w `~/.agentctl/mcp-audit.log` i jest ogłaszany na pulpicie.
 - Żadne narzędzie nie scala, nie pushuje, nie robi rebase, nie usuwa gałęzi, nie uruchamia komend shell i nie przyjmuje ścieżki.
 
 ```sh
@@ -385,6 +453,8 @@ Czego agentctl nigdy nie robi:
 - **Niezaobserwowane na prawdziwym ekranie:** tekst komunikatu o limicie użycia w którymkolwiek TUI (wzorce pochodzą z napisów w plikach binarnych, żeby nie spalać planu) oraz tekst stopki Codexa przy oczekiwaniu na terminale w tle (`agents.codex.background_patterns` to najlepsze przypuszczenie).
 - Codex 0.166.0 nie wysyła zdarzenia przy prośbie o zatwierdzenie, więc takie sytuacje wykrywa czytnik ekranu, i tylko gdy działa `watch`.
 - Limity okien liczą tylko okna utworzone przez agentctl.
+- Kolejka rusza tylko, gdy działa `agentctl watch`, a `watch` czyta konfigurację przy starcie (po zmianie limitów uruchom go ponownie).
+- Kolizje porównują nazwy plików z gita, nie fragmenty; zadanie z niezacommitowanymi zmianami w innym checkoucie repozytorium nie jest widoczne.
 - `move` zaczyna nową rozmowę: nowy agent poznaje stan z `git log` i `git diff`, nie z kontekstu starego agenta.
 - `close --rm-worktree` najpierw zabija okno; worktree z niezatwierdzonymi plikami jest potem odrzucany (bez `--force`).
 - Serwer MCP jest lokalny i działa jako Ty. To decyzja zaufania wobec czatu, nie piaskownica.
@@ -394,12 +464,11 @@ Czego agentctl nigdy nie robi:
 
 Pomysły, nie obietnice:
 
-1. **Kolejka:** zadania czekające na wolne okno swojego dostawcy.
-2. **Historia, `gc` i `resume`:** lista zakończonej pracy, sprzątanie starych worktree i stanu, wznawianie zadania.
-3. **Powiadomienia na telefon.**
-4. **Zdalny MCP:** serwer dostępny dla czatu w przeglądarce lub na telefonie, z uwierzytelnianiem.
-5. **Modele lokalne** jako trzeci rodzaj agenta.
-6. **Wydanie npm** z krokiem budowania.
+1. **Historia, `gc` i `resume`:** lista zakończonej pracy, sprzątanie starych worktree i stanu, wznawianie zadania.
+2. **Powiadomienia na telefon.**
+3. **Zdalny MCP:** serwer dostępny dla czatu w przeglądarce lub na telefonie, z uwierzytelnianiem.
+4. **Modele lokalne** jako trzeci rodzaj agenta.
+5. **Wydanie npm** z krokiem budowania.
 
 ## Więcej
 

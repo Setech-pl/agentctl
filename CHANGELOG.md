@@ -8,6 +8,30 @@ Versions 0.1.0 to 0.7.0 correspond to pull requests #1 to #7; their dates are th
 
 Nothing yet.
 
+## [0.9.0] - 2026-11-02
+
+Pull request: queue, dependencies, collision warnings. The date is the day it was prepared; set it to the merge date.
+
+### Added
+- **Queue.** `agentctl queue [file|-|--clip] [-y] [--agent]`: the same checks as `new` (review_of, pin, `--agent` mapping, Codex efforts, duplicates, repositories) except the provider limit, a summary, y/N, then one JSON entry per task in `<config dir>/queue/`. `queue list [--json]`, `queue rm`, `queue up`, `queue pause`, `queue resume`, `queue retry`.
+- `agentctl watch` starts the next queued task (high priority first, then first come, first served) when its provider has a free window, by the path of `new`, in the background: a start that waits for the folder-trust dialog (`needs-trust` is notified) does not stop the rest of the queue. Notification "Uruchomiono TASK z kolejki". The queue never switches provider by itself.
+- A start that fails puts the task at the end of the line as `failed`, with a log (`queue/<n>-<TASK>.log`) and a notification; it is not retried in a loop.
+- `new` with a full provider limit asks "add to the queue? [y/N]" (without a terminal the error names `agentctl queue`).
+- **Dependencies.** Spec field `after: <TASK or list>`: a queued task starts when each named task has a report (`report-ready`, or closed with a report). `status`, `queue list` and the board say "czeka na TASK". An unknown task, a self reference and a circle are errors at adding; `new` refuses a task whose `after` is not met. A review (`review_of`) without `after` gets a hint in the summary.
+- **Collisions.** `watch` compares, every `collisions.interval` (300 s), the files changed by each active task (commits over the base plus uncommitted) per source repository: `COLLIDE` column in `status` (`⚠ LANDING-QS-1: 2`, also `collide` in `--json`), `⚠` on the board, one notification per new pair (remembered in `collisions.json`). `agentctl overlap [TASK] [--json]` lists the shared files.
+- Spec fields `priority: high|normal` and `touches: [globs]`; `queue` and `new` warn (and ask y/N) when an active task already changes files matching `touches`.
+- Board: **Queue (N)** section under the active tasks (`u` front, `d` remove after a question, `p` pause or resume), the preview of a queued task, `⚠` marker and the colliding tasks in the preview title. The tmux status line counts the queue (`2⚙ 1⏳ 3⧗`).
+- MCP: read tools `queue_list` and `overlap`; write tools `queue` (summary first, `confirm: true` to queue; `setup` refused) and `queue_rm`, both behind `mcp.allow`, audited and announced; `status` carries short `Queue` and `Collisions` lines and `collidesWith` per task.
+- Config: `queue.enabled`, `queue.parallel_starts`, `collisions.enabled`, `collisions.interval`, `collisions.notify`, `collisions.ignore`. Documentation: the Queue, Dependencies and Collisions sections of both READMEs, `docs/details.md`, `docs/configuration.md`, `docs/mcp.md`; the flow, architecture and state diagrams show the queue.
+
+### Changed
+- The board key line is shorter (`c/r pull`, `u/d/p`) to stay within 80 columns.
+- `mcp.allow` accepts `queue` and `queue_rm`.
+
+### Known limits
+- The queue moves only while `agentctl watch` runs; `watch` reads the config when it starts.
+- Collisions compare file names, not hunks.
+
 ## [0.8.0] - 2026-11-02
 
 Documentation and help. The date is the day it was prepared; set it to the merge date.
@@ -123,7 +147,8 @@ Pull request #1: iteration 1, core and CLI.
 - Task states (`working`, `waiting`, `needs-trust`, `report-ready`, `dead`) and folder-trust detection.
 - Per-provider window limits, the `review_of` cross-review rule, an optional mirror of the reports.
 
-[Unreleased]: https://github.com/Setech-pl/agentctl/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/Setech-pl/agentctl/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/Setech-pl/agentctl/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/Setech-pl/agentctl/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Setech-pl/agentctl/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Setech-pl/agentctl/compare/v0.5.0...v0.6.0

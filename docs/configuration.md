@@ -82,7 +82,7 @@ Default icons: `working` ⚙, `background` ⏳, `waiting` ⏸, `needs-input` ?, 
 
 | Key | Type | Default | Layers | Meaning |
 |---|---|---|---|---|
-| `mcp.allow` | list | `[]` | g | Write tools the chat may call: any of `send`, `new`, `interrupt`, `close`, `move`. Read again on every call. |
+| `mcp.allow` | list | `[]` | g | Write tools the chat may call: any of `send`, `new`, `interrupt`, `close`, `move`, `queue`, `queue_rm`. Read again on every call. |
 | `mcp.allow_rm_worktree` | boolean | `false` | g | `close` from the chat may also remove the git worktree (never forced). |
 
 ### `queue`

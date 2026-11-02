@@ -17,6 +17,7 @@ agentctl manages **work orders, not windows**. The unit is a spec: a Markdown fi
 - **Notifications.** One desktop notification per transition; a click on it switches to the task's window.
 - **Board.** A full-screen overview of all tasks with a live preview of the selected window.
 - **Reports.** `agentctl pull --ready` collects the new reports into one text for your planning chat.
+- **Queue, dependencies, collisions.** More tasks than free windows? They wait and start by themselves; a review can wait for the author's report (`after`); two tasks changing the same files are flagged early.
 - **Provider switch.** A table of Claude and Codex equivalents; `agentctl move` hands a task that hit its usage limit to the other provider in the same worktree.
 - **Chat integration.** A local MCP server lets a chat in the Claude app or Claude Code read status and reports, and, if you allow it, send prompts and start tasks.
 - **Small and inspectable.** TypeScript on Node with no build step, no daemon; `--dry-run` prints every command instead of running it.
@@ -35,7 +36,14 @@ sequenceDiagram
 
     H->>C: describe the work
     C-->>H: spec (YAML header + prompt)
-    H->>A: agentctl new --clip
+    alt a window of the provider is free
+        H->>A: agentctl new --clip
+    else the limit is full
+        H->>A: agentctl queue --clip (or answer y to new)
+        A-->>H: summary, y/N
+        Note over A,W: the task waits in the queue, also for the reports named in after
+        W->>A: a window is free and the after tasks have a report
+    end
     A->>G: git worktree add, setup commands, links
     A->>G: TASK.md in state_dir, tmux window
     A->>X: start the agent in the worktree
@@ -48,6 +56,8 @@ sequenceDiagram
         X->>X: edits, tests, commits
         X-->>A: events (Claude hooks, Codex notify)
         W->>G: read the windows every 15 s
+        W->>G: every 300 s: files each task changed
+        W-->>H: ⚠ two tasks changed the same files
     end
     X->>G: writes the report file
     W-->>H: notification (report ready, question, limit)
@@ -72,7 +82,7 @@ flowchart TB
         BOARD["board (Ink, src/board)"]
         MCP["MCP server (src/mcp, stdio)"]
     end
-    CORE["src/core: spec, plan, new, status, pull, close, move, watch, events, notify"]
+    CORE["src/core: spec, plan, new, queue, collisions, status, pull, close, move, watch, events, notify"]
     RUN["Runner: RealRunner / RecordingRunner"]
     subgraph world [Outside]
         TMUX[tmux session agentctl]
@@ -83,6 +93,7 @@ flowchart TB
     subgraph disk [Files]
         CFG["config: ~/.agentctl/config.yaml, .agentctl.yaml"]
         STATE["state_dir: ~/.agentctl/tasks/ID/TASK.md, event.json"]
+        QUEUE["queue: ~/.agentctl/queue/, collisions.json"]
         ARCH["archive: ~/.agentctl/archive/"]
         REP["cache: reports per task"]
         AUDIT["mcp-audit.log"]
@@ -97,6 +108,7 @@ flowchart TB
     AG -. "hooks / notify: agentctl event" .-> CLI
     CORE --> NOTE
     CORE <--> STATE
+    CORE <--> QUEUE
     CORE --> ARCH
     CORE --> CFG
     AG --> REP
@@ -121,7 +133,15 @@ stateDiagram-v2
     state "✗ dead" as dead
     state "✗ orphan" as orphan
     state "⊘ closed" as closed
+    state "⧗ queued" as queued
+    state "✗ start failed" as startfailed
 
+    [*] --> queued: queue, or y when the limit is full
+    queued --> trust: window free, after met, fresh worktree
+    queued --> working: window free, after met
+    queued --> startfailed: start failed
+    startfailed --> queued: queue retry
+    queued --> [*]: queue rm
     [*] --> trust: new, fresh worktree
     [*] --> working: new, prompt pasted
     [*] --> orphan: window without state file
@@ -250,6 +270,9 @@ Add a bell sound to the tram when it leaves a stop.
 | `env` | no | Environment variables of the tmux window. |
 | `review_of` | no | Task ID under review; the reviewer must use another agent or another model than the author. |
 | `pin` | no | `true`: never move the task to the other provider. |
+| `priority` | no | `high` or `normal` (default): queue order. |
+| `after` | no | Task ID or list: a queued task starts only when each has a report. |
+| `touches` | no | Globs of the files the task will change: a warning when an active task already changes them. |
 | `report` | no | Where the agent writes its report (default `<cache>/<task>/<TASK>.md`). |
 
 `{task}`, `{TASK}` and `{cache}` work as placeholders in paths. All keys, types and defaults: [docs/configuration.md](docs/configuration.md#spec-keys). Mistakes are reported all at once, in plain words, with a hint.
@@ -338,12 +361,57 @@ Claude and Codex models do not map one to one, so agentctl keeps a table of pair
 
 The built-in table and the rules for limits: [docs/details.md](docs/details.md#model-equivalents).
 
+## Queue
+
+You order more tasks than there are free windows (`limits.claude`, `limits.codex`)? Put the extra ones in the queue; `agentctl watch` starts each as soon as a window of its provider is free, by the same path as `new` (worktree, setup, links, the folder-trust dialog is still yours).
+
+```sh
+agentctl queue nc-42.md        # same checks as "new", a summary, y/N; -y skips the question, --clip reads the clipboard
+agentctl queue list            # position, task, agent/model/effort, priority, start condition, how long it waits
+agentctl queue up NC-42        # first in line (priority: high still goes first)
+agentctl queue rm NC-42        # take it out
+agentctl queue pause           # nothing new starts; queue resume lets it run again
+agentctl queue retry NC-42     # a failed start, once more
+```
+
+- `new` with a full limit asks "add to the queue? [y/N]" instead of only failing (without a terminal: the old error, now naming `agentctl queue`).
+- The spec field `priority: high` goes before `normal`; inside a class it is first come, first served. A full provider never holds back a task of the other provider.
+- **The queue never switches provider by itself.** A task runs on the agent it was ordered on; moving it stays explicit (`--agent`, `move`).
+- A start that fails goes to the end of the line as `failed` with a log and a notification, and is not tried in a loop; `queue retry` is your call. "Uruchomiono NC-42 z kolejki" tells you when one starts.
+- The board has a **Queue (N)** section (`u` front, `d` remove, `p` pause) and the tmux status bar counts the queue (`2⚙ 1⏳ 3⧗`).
+
+## Dependencies
+
+`after: NC-42` (or a list) in a spec keeps a queued task waiting until every named task has a report (`report-ready`, or closed with its report). `status`, `queue list` and the board say `czeka na NC-42`. The typical use is the cross-review: the review (`review_of: NC-42`) starts by itself right after the author's report.
+
+```yaml
+---
+task: NC-42-REVIEW
+agent: codex
+review_of: NC-42
+after: NC-42
+---
+```
+
+A review without `after` gets a hint in the summary. An unknown task or a circle is an error at adding. Details: [docs/details.md](docs/details.md#dependencies-after).
+
+## Collisions
+
+Two active tasks that change the same files in the same repository are a merge conflict waiting to happen. Every 300 seconds (`collisions.interval`) `watch` asks git which files each active task changed (commits over its base plus uncommitted ones) and compares the tasks of one repository.
+
+- `agentctl status` shows a `COLLIDE` column, e.g. `⚠ LANDING-QS-1: 2` (two shared files); the board marks the task with `⚠`; `watch` sends one notification per new pair.
+- `agentctl overlap [TASK]` lists the shared files.
+- `touches: [src/menu/**]` in a spec makes `queue` and `new` warn (and ask y/N) when an active task already changes matching files.
+- `collisions.ignore` leaves out lock files and the like. It compares file names, not hunks: two tasks in different parts of one file are still reported.
+
+Details: [docs/details.md](docs/details.md#collisions).
+
 ## Chat integration (MCP)
 
 `agentctl mcp` is a local MCP server on stdio. The Claude app, Claude Code and VS Code start it themselves; nothing listens on a port.
 
-- **Read tools** (always on): `status`, `peek`, `list_reports`, `get_report`, `pull_ready`, `task_spec`.
-- **Write tools** (off until listed in `mcp.allow`): `send`, `new`, `interrupt`, `close`, `move`. `new` and `move` change nothing until called again with `confirm: true`. Every write is audited in `~/.agentctl/mcp-audit.log` and announced on the desktop.
+- **Read tools** (always on): `status`, `peek`, `list_reports`, `get_report`, `pull_ready`, `task_spec`, `queue_list`, `overlap`.
+- **Write tools** (off until listed in `mcp.allow`): `send`, `new`, `queue`, `queue_rm`, `interrupt`, `close`, `move`. `new`, `queue` and `move` change nothing until called again with `confirm: true`. Every write is audited in `~/.agentctl/mcp-audit.log` and announced on the desktop.
 - No tool merges, pushes, rebases, deletes a branch, runs a shell command or takes a path.
 
 ```sh
@@ -381,6 +449,8 @@ What agentctl never does:
 - **Not observed on a real screen:** the text of a usage-limit message in either TUI (the patterns come from strings in the binaries, so as not to burn a plan), and the footer text of Codex when it waits for background terminals (`agents.codex.background_patterns` is a best guess).
 - Codex 0.166.0 sends no event for an approval request, so those are found by the screen reader, and only while `watch` runs.
 - Window limits count only windows created by agentctl.
+- The queue moves only while `agentctl watch` runs, and `watch` reads the config when it starts (restart it after changing limits).
+- Collisions compare file names from git, not hunks; a task that only has uncommitted edits in another checkout of the repository is not seen.
 - `move` starts a new conversation: the new agent learns the state from `git log` and `git diff`, not from the old agent's context.
 - `close --rm-worktree` kills the window first; a worktree with uncommitted files is then refused (no `--force`).
 - The MCP server is local and runs as you. It is a trust decision about the chat, not a sandbox.
@@ -390,12 +460,11 @@ What agentctl never does:
 
 Ideas, not promises:
 
-1. **Queue:** tasks that wait for a free window of their provider.
-2. **History, `gc` and `resume`:** a list of finished work, cleaning up old worktrees and state, resuming a task.
-3. **Phone notifications.**
-4. **Remote MCP:** a server a chat on the web or phone can reach, with authentication.
-5. **Local models** as a third kind of agent.
-6. **npm release** with a build step.
+1. **History, `gc` and `resume`:** a list of finished work, cleaning up old worktrees and state, resuming a task.
+2. **Phone notifications.**
+3. **Remote MCP:** a server a chat on the web or phone can reach, with authentication.
+4. **Local models** as a third kind of agent.
+5. **npm release** with a build step.
 
 ## More
 
