@@ -8,9 +8,9 @@ import { HINTED_EVENTS, phoneMessage, sendNtfy } from './phone.ts';
 import { managerPhoneHint, rcAnswerHint } from './remote-control.ts';
 import { readTaskRecord } from './taskstore.ts';
 import { MANAGER_WINDOW } from './windows.ts';
-import { windowName } from './util.ts';
-import type { PhoneMessage } from './phone.ts';
-import { isObject } from './util.ts';
+import { isObject, windowName } from './util.ts';
+import { collapsedQuestion } from './events.ts';
+import type { PhoneInput, PhoneMessage } from './phone.ts';
 
 /*
  * Sending to the phone. Every event the journal records goes through here once (the journal is written after the desktop notification was
@@ -49,6 +49,8 @@ export function phoneEventOf(entry: Pick<JournalEntry, 'kind' | 'level'>): Phone
 interface QueuedItem {
   event: PhoneEvent;
   message: PhoneMessage;
+  /** Kept locally so a changed privacy setting also applies to retries. Older queues have no input. */
+  input?: Pick<PhoneInput, 'task' | 'collapsed'>;
   /** Requests made so far. */
   attempts: number;
   /** ms timestamp of the next try. */
@@ -123,12 +125,20 @@ export async function notifyPhone(ctx: Context, entry: Pick<JournalEntry, 'kind'
   const ntfy = ctx.config.notify.ntfy;
   const event = phoneEventOf(entry);
   if (!ntfy || !event || !phoneActive(ctx.config) || !ntfy.events.includes(event)) return undefined;
-  const message = phoneMessage(event, { task: entry.task, cohort: entry.cohort, verdict: entry.verdict, usage: entry.text, text: entry.text, hint: await phoneHint(ctx, event, entry.task) }, ntfy);
+  const input: PhoneInput = { task: entry.task, cohort: entry.cohort, verdict: entry.verdict, usage: entry.text, text: entry.text, hint: await phoneHint(ctx, event, entry.task) };
+  if (event === 'needs-input' && entry.task) {
+    const record = readTaskRecord(ctx.config, windowName(entry.task));
+    if (record?.agent === 'codex') {
+      const screen = await ctx.tmux.capture(record.window).catch(() => undefined);
+      if (screen?.code === 0) input.collapsed = collapsedQuestion(screen.stdout);
+    }
+  }
+  const message = phoneMessage(event, input, ntfy);
   if (!message) return undefined;
   const r = await sendNtfy(ctx.fetch, ntfy, message, () => ctx.runner.now());
   if (r.ok) return 'sent';
   const queue = readQueue(ctx.config);
-  queue.items.push({ event, message, attempts: 1, next: ctx.runner.now() + (RETRY_BACKOFF_MS[0] as number), at: ctx.runner.now() });
+  queue.items.push({ event, message, ...(event === 'needs-input' ? { input: { task: input.task, collapsed: input.collapsed } } : {}), attempts: 1, next: ctx.runner.now() + (RETRY_BACKOFF_MS[0] as number), at: ctx.runner.now() });
   await failed(ctx, queue, event, r.error ?? 'failed', 'first try failed, queued');
   await writeQueue(ctx, queue);
   return 'queued';
@@ -153,6 +163,14 @@ export async function phoneTick(ctx: Context): Promise<string[]> {
     if (!ntfy?.topic) {
       await phoneLog(ctx, `${item.event}  dropped: notify.ntfy.topic is no longer set`);
       continue;
+    }
+    if (item.event === 'needs-input' && !ntfy.includeQuestion) {
+      // Old queue entries only have a formatted message; fail closed and retain session guidance.
+      const task = item.input?.task ?? /^agentctl · (.+): pytanie$/.exec(item.message.title)?.[1];
+      item.message = phoneMessage('needs-input', {
+        task: task ?? 'agent', collapsed: item.input?.collapsed,
+        hint: await phoneHint(ctx, 'needs-input', task),
+      }, ntfy)!;
     }
     const r = await sendNtfy(ctx.fetch, ntfy, item.message, () => ctx.runner.now());
     if (r.ok) {

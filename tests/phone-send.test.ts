@@ -5,13 +5,15 @@ import { describe, it } from 'node:test';
 import { Alerts } from '../src/core/alert.ts';
 import { setAway } from '../src/core/away.ts';
 import { renderEvents } from '../src/core/chat-events.ts';
+import { ConfigStore } from '../src/core/config-store.ts';
+import { loadGlobalConfig } from '../src/core/config.ts';
 import { Context } from '../src/core/context.ts';
 import { handleEvent } from '../src/core/event-command.ts';
 import { readJournal, recordJournal } from '../src/core/journal.ts';
 import type { Notifier } from '../src/core/notify.ts';
 import { phoneLogPath, phoneQueuePath, phoneTick, queuedForPhone, RETRY_BACKOFF_MS, WARN_EVERY_MS } from '../src/core/phone-send.ts';
 import type { FetchLike } from '../src/core/phone.ts';
-import { watchTick, WatchMemory } from '../src/core/watch.ts';
+import { reloadConfig, watchTick, WatchMemory } from '../src/core/watch.ts';
 import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helpers.ts';
 
 const scratch = useScratch();
@@ -61,6 +63,67 @@ function setup(name: string, yaml = NTFY, { away = true }: { away?: boolean } = 
 const phoneLog = (config: Parameters<typeof phoneLogPath>[0]): string => (fs.existsSync(phoneLogPath(config)) ? fs.readFileSync(phoneLogPath(config), 'utf8') : '');
 
 describe('phone: sending from the events', () => {
+  for (const agent of ['claude', 'codex'] as const) {
+    for (const include of [false, true]) {
+      it(`${agent} expanded question: include_question=${include} only changes the phone`, async () => {
+        const t = setup(`privacy-${agent}-${include}`, `${NTFY}    include_question: ${include}\n`);
+        seedTask(t.config, 'NC-1', { agent });
+        t.fake.windows[0]!.screen = 'Czy ujawnić hunter2?\n  1. Yes\n  2. No\n';
+        await t.ready();
+        await handleEvent(t.ctx, t.alerts, { task: 'NC-1', agent, ...(agent === 'claude' ? { kind: 'notification' as const } : {}),
+          payload: agent === 'claude' ? { notification_type: 'permission_prompt', message: 'Czy ujawnić hunter2?' } : { type: 'question', question: 'Czy ujawnić hunter2?' } });
+        assert.equal(t.requests.length, 1);
+        assert.equal(t.requests[0]!.body.includes('hunter2'), include);
+        assert.equal(t.requests[0]!.body, include ? 'NC-1: Czy ujawnić hunter2?' : 'NC-1: pytanie agenta – otwórz okno');
+        assert.doesNotMatch(t.requests[0]!.headers.Title!, /hunter2/);
+        assert.match(t.notifier.sent.join('\n'), /hunter2/, 'local notification keeps the question');
+        assert.match(readJournal(t.config)[0]!.text, /hunter2/, 'local journal keeps the question');
+      });
+    }
+  }
+
+  it('a collapsed Codex question sends only count and binding, with the manager hint', async () => {
+    const t = setup('private-collapsed');
+    seedTask(t.config, 'NC-1', { agent: 'codex' });
+    t.fake.windows[0]!.screen = 'Working (esc to interrupt)\n? 2 questions\n  ⇧↑ to answer\n';
+    t.fake.add('manager', '❯ ready');
+    await t.ready();
+    await recordJournal(t.ctx, { kind: 'needs-input', task: 'NC-1', text: 'NC-1: session secret hunter2' });
+    assert.equal(t.requests[0]?.body, 'Codex ma pytanie (2) – Enter → okno agenta, potem ⇧↑\nOtwórz sesję „agentctl manager” w aplikacji Claude.');
+    assert.doesNotMatch(JSON.stringify(t.requests), /hunter2/);
+  });
+
+  it('live reload applies in both directions and redacts queued questions, including old queue entries', async () => {
+    const t = setup('private-reload');
+    await t.ready();
+    const store = new ConfigStore(() => loadGlobalConfig(path.dirname(t.config.path)), t.config);
+    const change = async (value: boolean) => {
+      const text = fs.readFileSync(t.config.path, 'utf8').replace(/    include_question: (?:true|false)\n/g, '');
+      fs.writeFileSync(t.config.path, `${text}    include_question: ${value}\n`);
+      const r = await reloadConfig(t.ctx, store);
+      assert.ok(r.changed);
+      assert.ok(r.keys.includes('notify'));
+      assert.equal(t.ctx.config.notify.ntfy?.includeQuestion, value);
+    };
+    await change(true);
+    t.net.down = true;
+    await recordJournal(t.ctx, { kind: 'needs-input', task: 'NC-1', text: 'NC-1: secret hunter2' });
+    assert.match(t.requests[0]!.body, /hunter2/);
+    const queue = JSON.parse(fs.readFileSync(phoneQueuePath(t.config), 'utf8'));
+    const old = structuredClone(queue.items[0]);
+    delete old.input;
+    queue.items.push(old);
+    for (const item of queue.items) item.next = 0;
+    fs.writeFileSync(phoneQueuePath(t.config), JSON.stringify(queue));
+    await change(false);
+    t.net.down = false;
+    await phoneTick(t.ctx);
+    assert.equal(t.requests.length, 3);
+    assert.ok(t.requests.slice(1).every(r => r.body === 'NC-1: pytanie agenta – otwórz okno'));
+    assert.doesNotMatch(JSON.stringify(t.requests.slice(1)), /hunter2/);
+    assert.equal(queuedForPhone(t.config), 0);
+  });
+
   it('away off: the Mac is notified, the phone is not; away on: one request, the journal says so', async () => {
     const t = setup('s1', NTFY, { away: false });
     await t.stop();
@@ -100,8 +163,8 @@ describe('phone: sending from the events', () => {
     assert.equal(t.requests[0]?.body, 'NC-1: raport gotowy');
   });
 
-  it('a question on the screen reaches the phone', async () => {
-    const t = setup('s5');
+  it('a question on the screen reaches the phone only with include_question true', async () => {
+    const t = setup('s5', `${NTFY}    include_question: true\n`);
     await t.ready();
     (t.fake.windows[0] as { screen: string }).screen = fs.readFileSync(path.join(import.meta.dirname, 'fixtures', 'screen-claude-permission.txt'), 'utf8');
     await handleEvent(t.ctx, t.alerts, { task: 'NC-1', agent: 'claude', kind: 'notification', payload: JSON.parse(fs.readFileSync(path.join(import.meta.dirname, 'fixtures', 'claude-notification-permission.json'), 'utf8')) });

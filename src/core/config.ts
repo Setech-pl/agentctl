@@ -234,6 +234,8 @@ export interface NtfySettings {
   priority: Record<PhoneEvent, NtfyPriority>;
   /** The first line of the verdict goes into "report ready" (never more of the report). */
   includeVerdict: boolean;
+  /** Send question text to the phone; false keeps work content local. */
+  includeQuestion: boolean;
   /** Link opened by a tap on the notification. */
   clickUrl?: string;
   /** Send always, not only while `agentctl away` is on. */
@@ -344,7 +346,7 @@ export const LINK_KEYS = ['from', 'to'];
 export const AGENT_KEYS = ['flags', 'effort_args', 'ready_pattern', 'ready_timeout', 'trust_timeout', 'trust_pattern', 'working_pattern', 'interrupt_key', 'footer_patterns', 'question_pattern', 'limit_patterns', 'background_patterns'];
 export const WATCH_KEYS = ['interval', 'waiting_after', 'window_icons', 'status_line'];
 export const NOTIFY_KEYS = ['backend', 'events', 'turn_end', 'terminal_app', 'verdict_pattern', 'ntfy'];
-export const NTFY_KEYS = ['server', 'topic', 'token', 'events', 'priority', 'include_verdict', 'click_url', 'always'];
+export const NTFY_KEYS = ['server', 'topic', 'token', 'events', 'priority', 'include_verdict', 'include_question', 'click_url', 'always'];
 export const AWAY_KEYS = ['auto_idle'];
 export const MANAGER_KEYS = ['project', 'name', 'model', 'effort', 'guide', 'autostart'];
 export const BOARD_KEYS = ['auto_hide_pulled_dead', 'mouse', 'return_key'];
@@ -636,7 +638,7 @@ function parseHttpUrl(v: unknown, where: string, p: Problems): string | undefine
 
 function parseNtfy(v: unknown, p: Problems): NtfySettings {
   const where = 'config.notify.ntfy';
-  const ntfy: NtfySettings = { server: DEFAULT_NTFY_SERVER, events: [...PHONE_EVENTS], priority: { ...DEFAULT_NTFY_PRIORITY }, includeVerdict: true, always: false };
+  const ntfy: NtfySettings = { server: DEFAULT_NTFY_SERVER, events: [...PHONE_EVENTS], priority: { ...DEFAULT_NTFY_PRIORITY }, includeVerdict: true, includeQuestion: false, always: false };
   if (!isObject(v)) {
     p.add(`${where} must be a mapping like {topic: agentctl-3f9c…, server: https://ntfy.sh}`);
     return ntfy;
@@ -667,7 +669,7 @@ function parseNtfy(v: unknown, p: Problems): NtfySettings {
       }
     }
   }
-  for (const [key, field] of [['include_verdict', 'includeVerdict'], ['always', 'always']] as const) {
+  for (const [key, field] of [['include_verdict', 'includeVerdict'], ['include_question', 'includeQuestion'], ['always', 'always']] as const) {
     if (v[key] === undefined) continue;
     if (typeof v[key] === 'boolean') ntfy[field] = v[key];
     else p.add(`${where}.${key} must be true or false`);
