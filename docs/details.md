@@ -287,7 +287,7 @@ agentctl queue retry NC-42       # a failed start, once more
 - **Never switches provider.** The queue starts a task on the agent and model it was ordered on (or on the `--agent` given when it was queued). Moving to the other provider stays an explicit act: `--agent`, `agentctl move`.
 - **Starting** is the same path as `new` (worktree, `setup`, links, TASK.md, window, wait for the agent, prompt) and runs in the background of the watcher. When the agent waits for the folder-trust dialog, `needs-trust` is notified as usual and the rest of the queue goes on; the prompt follows once you confirm. A notification says "Uruchomiono TASK z kolejki".
 - **A failed start** (setup failed, repository gone, agent not ready) puts the task at the end of the line as `failed`, with the error in `queue list` and the log of the attempt in `<config dir>/queue/<n>-<TASK>.log`, and sends a notification. It is not tried again by itself; `queue retry` is your decision (it reuses a worktree the failed start left).
-- The queue only moves while `agentctl watch` runs (`watch --tmux`). `queue.enabled: false` in the config switches starting off; `queue.parallel_starts` bounds the starts in progress ([configuration](configuration.md#queue)).
+- The queue only moves while `agentctl watch` runs (`watch --tmux`); `watch` reads the config when it starts, so restart it after changing `limits`. `queue.enabled: false` in the config switches starting off; `queue.parallel_starts` bounds the starts in progress ([configuration](configuration.md#queue)).
 
 ### Dependencies: `after`
 

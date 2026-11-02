@@ -18,7 +18,14 @@ sequenceDiagram
 
     H->>C: describe the work
     C-->>H: spec (YAML header + prompt)
-    H->>A: agentctl new --clip
+    alt a window of the provider is free
+        H->>A: agentctl new --clip
+    else the limit is full
+        H->>A: agentctl queue --clip (or answer y to new)
+        A-->>H: summary, y/N
+        Note over A,W: the task waits in the queue, also for the reports named in after
+        W->>A: a window is free and the after tasks have a report
+    end
     A->>G: git worktree add, setup commands, links
     A->>G: TASK.md in state_dir, tmux window
     A->>X: start the agent in the worktree
@@ -31,6 +38,8 @@ sequenceDiagram
         X->>X: edits, tests, commits
         X-->>A: events (Claude hooks, Codex notify)
         W->>G: read the windows every 15 s
+        W->>G: every 300 s: files each task changed
+        W-->>H: ⚠ two tasks changed the same files
     end
     X->>G: writes the report file
     W-->>H: notification (report ready, question, limit)
@@ -55,7 +64,7 @@ flowchart TB
         BOARD["board (Ink, src/board)"]
         MCP["MCP server (src/mcp, stdio)"]
     end
-    CORE["src/core: spec, plan, new, status, pull, close, move, watch, events, notify"]
+    CORE["src/core: spec, plan, new, queue, collisions, status, pull, close, move, watch, events, notify"]
     RUN["Runner: RealRunner / RecordingRunner"]
     subgraph world [Outside]
         TMUX[tmux session agentctl]
@@ -66,6 +75,7 @@ flowchart TB
     subgraph disk [Files]
         CFG["config: ~/.agentctl/config.yaml, .agentctl.yaml"]
         STATE["state_dir: ~/.agentctl/tasks/ID/TASK.md, event.json"]
+        QUEUE["queue: ~/.agentctl/queue/, collisions.json"]
         ARCH["archive: ~/.agentctl/archive/"]
         REP["cache: reports per task"]
         AUDIT["mcp-audit.log"]
@@ -80,6 +90,7 @@ flowchart TB
     AG -. "hooks / notify: agentctl event" .-> CLI
     CORE --> NOTE
     CORE <--> STATE
+    CORE <--> QUEUE
     CORE --> ARCH
     CORE --> CFG
     AG --> REP
@@ -89,7 +100,7 @@ flowchart TB
 
 ## Task states
 
-What `status` and the board show for a task. A live window is classified from its screen (and the agent's events); a task without a window is `report-ready` if its report exists and `dead` if not. Precedence for a live window: `needs-trust`, `needs-input`, `working`, `limited`, `background`, then `report-ready` or `waiting`. `superseded` and `closed` override all of them.
+What `status` and the board show for a task. A live window is classified from its screen (and the agent's events); a task without a window is `report-ready` if its report exists and `dead` if not. Precedence for a live window: `needs-trust`, `needs-input`, `working`, `limited`, `background`, then `report-ready` or `waiting`. `superseded` and `closed` override all of them. A task in the queue is not in a state yet: it is a queue entry (`queued`, or `start failed` after a failed start) until `watch` starts it.
 
 ```mermaid
 stateDiagram-v2
@@ -104,7 +115,15 @@ stateDiagram-v2
     state "✗ dead" as dead
     state "✗ orphan" as orphan
     state "⊘ closed" as closed
+    state "⧗ queued" as queued
+    state "✗ start failed" as startfailed
 
+    [*] --> queued: queue, or y when the limit is full
+    queued --> trust: window free, after met, fresh worktree
+    queued --> working: window free, after met
+    queued --> startfailed: start failed
+    startfailed --> queued: queue retry
+    queued --> [*]: queue rm
     [*] --> trust: new, fresh worktree
     [*] --> working: new, prompt pasted
     [*] --> orphan: window without state file
