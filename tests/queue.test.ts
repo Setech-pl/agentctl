@@ -471,6 +471,7 @@ describe('after: dependencies', () => {
     const withAfter = (await planQueueAdd(s.ctx, splitSpecs(review({ after: 'F-1' }), 't'))).summary.join('\n');
     assert.doesNotMatch(withAfter, /hint:/);
     assert.match(withAfter, /after: {4}F-1 – czeka na F-1/);
+    assert.match(withAfter, /start: {4}when F-1 has a report/);
     writeReport(s, 'F-1');
     assert.doesNotMatch((await planQueueAdd(s.ctx, splitSpecs(review(), 't'))).summary.join('\n'), /hint:/);
   });
