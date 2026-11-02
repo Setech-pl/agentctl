@@ -1,0 +1,587 @@
+# Szczegóły
+
+Jak działają poszczególne elementy i co sprawdzono na prawdziwych narzędziach (Claude Code 2.1.309, Codex 0.166.0). Przegląd jest w [README](../README.pl.md); opcje każdego polecenia w [commands.md](commands.md) (po angielsku), a każdy klucz w [configuration.md](configuration.md) (po angielsku). Teksty paska stanu i powiadomień cytowane poniżej pochodzą dosłownie z kodu i miejscami są po polsku.
+
+Dlaczego TypeScript bez kroku budowania? Kod to TypeScript uruchamiany bezpośrednio przez wbudowane w Node wycinanie typów (`node --experimental-strip-types`, ustawione w shebangu `bin/agentctl.ts`). Wybrano to zamiast `tsx`, bo nie dodaje zależności ani warstwy budowania czy loadera i zachowuje się tak samo pod `npx`, `npm link` i w testach. Cena: tylko *wymazywalny* TypeScript (bez `enum` i `namespace`), importy wypisują `.ts`, a Node odmawia wycinania typów wewnątrz `node_modules`, więc instaluj z klonu, nie z paczki z rejestru. Od Node 22.18 i 23.6 flaga nic nie robi; zostaje w shebangu, żeby 22.6 do 22.17 nadal działały.
+
+## Setup
+
+`setup` to lista komend shell (spec > `.agentctl.yaml` projektu > config globalny; wygrywa pierwsza warstwa, która go ustawia, `setup: []` wyłącza).
+`new` uruchamia je w pierwszym worktree, każdą jako osobne `sh -c`, w tej kolejności: `git worktree add` → **setup** → linki → TASK.md → okno → agent.
+
+- Wyjście trafia do `<state_dir>/<task>/setup.log`.
+- Komenda, która się nie udaje, zatrzymuje `new` z jej kodem wyjścia i ostatnimi 15 liniami wyjścia. Worktree zostaje, okno nie jest tworzone; usuń przyczynę i uruchom `agentctl new --reuse` (setup uruchomi się ponownie).
+- `--dry-run` wypisuje komendy jako `(cd <worktree> && sh -c '…')`.
+- `new --no-agent` zatrzymuje się po setupie i linkach: bez TASK.md, okna i agenta. Przydatne do sprawdzenia setupu projektu.
+
+Zalecane dla Neon City (sprawdzone na żywo 2026-10-31: `npm ci` działa w świeżym worktree; `package.json` deklaruje `@neon-city/*` jako `file:../neon-city-backend/packages/*`, co nie rozwiązuje się z `~/Projects/wt`, więc linki kierują je na worktree backendu pod testem). Dodaj do `~/Projects/neon-city/.agentctl.yaml`:
+
+```yaml
+setup:
+  - npm ci --prefer-offline --no-audit --no-fund
+```
+
+Istniejące `links:` tego pliku (`node_modules/@neon-city/protocol` i `…/sim` -> `~/Projects/wt/neon-city-backend-merge3/packages/*`) robią wtedy resztę; to ścieżki dosłowne, więc nie zależą już od istnienia `node_modules`.
+
+## Linki
+
+Linki to klej, dzięki któremu worktree używa kodu *innego* worktree (na przykład klient wobec backendu pod testem).
+
+- `from` jest względne wobec pierwszego worktree, `to` to cel, na który ma wskazywać.
+- `to` musi istnieć (sprawdzane, zanim cokolwiek powstanie), inaczej `new` zatrzymuje się z listą brakujących celów.
+- `to` bez `*`: każde dopasowanie globu `from` staje się symlinkiem do `to`. `from` bez znaków globu to **ścieżka dosłowna**: jest linkowana, nawet jeśli nic tam jeszcze nie ma, a jej katalogi nadrzędne są tworzone (`mkdir -p`), więc `from: node_modules/@neon-city/protocol` działa w worktree bez `node_modules`.
+- Glob, który niczego nie dopasuje, tylko ostrzega, a ostrzeżenie wskazuje ścieżki dosłowne.
+- `to` kończące się na `/*` (i `from` kończące się na `/*`): jeden link na każdy wpis tego katalogu, nazwany jak wpis.
+  `from: node_modules/@scope/*`, `to: ~/backend/packages/*` linkuje `node_modules/@scope/foo` do `~/backend/packages/foo` i tak dalej.
+- Istniejące **symlinki** są zastępowane. Niczego, co nie jest symlinkiem, nie ruszamy: `new` zatrzymuje się i mówi, która ścieżka stoi na drodze.
+
+## Effort
+
+Prompt zawsze zaczyna się od linii `Model: <model> · effort <effort>`, niezależnie od flag.
+Poza tym agent jest uruchamiany z własnym ustawieniem effortu tam, gdzie takie istnieje. Co znalazłem w zainstalowanych wersjach:
+
+| Agent | Sprawdzona wersja | Wynik |
+|---|---|---|
+| Claude Code | 2.1.309 | Natywna flaga: `claude --effort <low\|medium\|high\|xhigh\|max>`. agentctl przekazuje `--effort <effort>`. |
+| Codex | 0.166.0 | Brak dedykowanej flagi. `-c, --config <key=value>` nadpisuje dowolny klucz `config.toml`, a `model_reasoning_effort` to klucz, którego używa `~/.codex/config.toml`. agentctl przekazuje `-c model_reasoning_effort=<effort>`. |
+
+Nadpisanie w Codexie sprawdzono na żywo: `codex -c model_reasoning_effort=low` w pustej sesji tmux pokazało `GPT-6.1-Sol low`
+w stopce, choć `~/.codex/config.toml` mówi `high`. `--effort low` w Claude pokazało `Opus 5.5 with low effort`.
+Jeśli przyszła wersja to zmieni, ustaw `agents.<name>.effort_args` (`[]`, żeby nie przekazywać niczego). `agentctl doctor` pokazuje, który
+mechanizm wykrywa.
+
+## Odpowiedniki modeli
+
+Modele Claude i Codexa nie odpowiadają sobie jeden do jednego, więc agentctl trzyma tabelę par, które uznajesz za równoważne
+(`config.equivalents`, działa w obie strony). Wbudowana tabela:
+
+| Claude (`model/effort`) | Codex (`model/effort`) |
+|---|---|
+| `haiku/low` | `gpt-6-luna/medium` |
+| `haiku/medium` | `gpt-6-luna/high` |
+| `sonnet/medium` | `gpt-6.1-sol/medium` |
+| `sonnet/high` | `gpt-6.1-sol/high` |
+| `opus/high` | `gpt-6-astra/medium` |
+| `opus/xhigh` | `gpt-6-astra/xhigh` |
+
+Własne pary dodajesz w `~/.agentctl/config.yaml`; mają pierwszeństwo przed wbudowanymi:
+
+```yaml
+equivalents:
+  - {claude: "opus/medium", codex: "gpt-6-astra/low"}
+```
+
+`fable` i effort `max` są celowo niemapowane. Tam, gdzie tabela nie ma pary, dostajesz błąd z linią do dodania.
+
+- `agentctl new --agent codex spec.md` uruchamia każdy spec na Codexie, tłumacząc `model/effort` przez tabelę
+  (`opus/high` staje się `gpt-6-astra/medium`). To jawne polecenie, więc o nic nie pyta.
+- Gdy limit okien wskazanego dostawcy jest pełny, a drugi ma miejsce, `new` **pyta**, czy zmienić
+  (`... Switch to codex gpt-6-astra/medium (equivalent of claude opus/high)? [y/N]`). Bez terminala albo z
+  `--no-switch` kończy się błędem z listą żywych okien. Nigdy nie zmienia po cichu.
+- `pin: true` w specu zakazuje każdej zmiany (przez limit lub `--agent`).
+- `TASK.md` i `status` trzymają zarówno **żądanego**, jak i **faktycznego** agenta/model/effort. `review_of` jest sprawdzane na
+  wartościach faktycznych, po mapowaniu: recenzent przesunięty na agenta i model autora zostaje odrzucony.
+
+## Utracony stan: orphany i adopt
+
+agentctl trzyma własne pliki (`TASK.md`, `setup.log`, znacznik `pulled`) w `state_dir` (domyślnie `~/.agentctl/tasks/<task>/`), a
+`<cache>/<task>/` zostawia agentowi, który dostaje tylko ścieżkę raportu. Starsze wersje trzymały wszystko w folderze cache, a agent
+Codexa, który posprzątał swój folder, usunął `TASK.md`: zadanie znikało ze `status`, `watch` i `pull`.
+
+- **Migracja.** Każde polecenie (poza `--dry-run`) najpierw szuka plików `TASK.md` zapisanych przez agentctl w `<cache>/<task>/` i przenosi je
+  razem z `setup.log` do `<state_dir>/<task>/`, wypisując jedną linię `migration: moved …` na zadanie. Istniejący stan nigdy nie jest nadpisywany.
+- **Orphany.** Okno tmux w sesji agentctl (inne niż `watch`) bez pliku stanu pojawia się w `status` jako stan `orphan`
+  z linią podpowiedzi, a `watch` powiadamia o nim raz.
+- **Adopt.** `agentctl adopt NC-42 --report ~/Projects/cache/nc-42/NC-42.md` zapisuje nowy plik stanu. Prompt przepada, tak samo
+  agent, model i effort, chyba że podasz `--agent`, `--model`, `--effort` (pokazują się jako `unknown`). Dodaj `--worktree <path>`, żeby
+  `close --rm-worktree` znało worktree. `--window <name>`, jeśli okno nie nazywa się ID zadania małymi literami. Odmawia, gdy plik stanu istnieje.
+
+## Przerwanie
+
+`agentctl interrupt NC-42` wysyła klawisz przerwania agenta (`agents.<name>.interrupt_key`, domyślnie `Escape` dla obu) do
+okna zadania. Niczego więcej nie wpisuje i nie zamyka okna. Celowo wysyłany jest tylko jeden klawisz: sprawdzone na żywo,
+pojedynczy `Escape` przy bezczynnym prompcie nic nie robi w Claude Code 2.1.309 i Codexie 0.166.0, a podwójny `Escape` w Codexie
+otwiera „edit previous message”. `--dry-run` wypisuje `tmux send-keys`, które by uruchomił.
+
+## Attach i peek
+
+`agentctl attach [TASK]` zabiera Cię do okna zadania. Poza tmux wybiera okno i uruchamia `tmux attach-session`;
+wewnątrz tmux (ustawione `$TMUX`) wybiera okno i uruchamia `tmux switch-client`. Zanim odda terminal, wypisuje jedną linię:
+
+```
+Ctrl-b d – wyjście bez przerywania agenta; nie wciskaj Esc ani Ctrl-c
+```
+
+Odłączenie przez `Ctrl-b d` zostawia agenta w pracy; `Esc` i `Ctrl-c` trafiłyby do samego agenta. Bez argumentu `attach` idzie do
+jedynego działającego zadania; przy kilku pokazuje numerowaną listę do wyboru (bez terminala: listę i błąd).
+
+`agentctl peek TASK [-n 40]` wypisuje ostatnie N linii zawartości okna (ekran i scrollback) bez dołączania. Linie stopki agenta
+(`footer_patterns`), ramki wokół pola wejściowego i puste prompty wejścia są pomijane, tym samym filtrem, którego używa `status` dla `LAST LINE`.
+
+`TASK` w obu nie rozróżnia wielkości liter, a wystarczy jednoznaczny prefiks (`agentctl peek nc-4` znajdzie `NC-42`). Dokładne ID zawsze wygrywa z dłuższym, którego jest prefiksem
+(`NC-4` przed `NC-42`). Niejednoznaczny prefiks to błąd z listą kandydatów; zadanie, którego okno zniknęło, mówi o tym wprost.
+Pozostałe polecenia (`send`, `pull`, `close`, `interrupt`, …) nadal przyjmują pełne ID.
+
+## Postęp
+
+`PROGRESS` w `status` (tabela, `--json` jako `progress`, `--clip`, `status.json` mirrora) pokazuje, co każde zadanie ma na swoim koncie:
+`2c 7f` to 2 commity ponad bazą i 7 zmienionych plików, zsumowane po worktree zadania. Bazą jest `base` repo ze specu, inaczej `main`, inaczej `master`.
+Commity to `git rev-list --count <base>..HEAD`. Pliki to suma `git diff --name-only <base>...HEAD` (co ta gałąź zmieniła, odkąd odeszła od bazy; trzy kropki,
+więc zmiany, które baza dostała w międzyczasie, się nie liczą) i `git status --porcelain` (pliki niezacommitowane i nieśledzone, dla całkowicie nieśledzonego katalogu zwinięte do katalogu),
+każdy plik liczony raz. Bez bazy commity to `?` (`?c 3f`); worktree, którego nie ma, to `-`. `--json` niesie liczby per worktree.
+
+## Zdarzenia
+
+Czytanie ekranu co 15 sekund to zgadywanie, co robi agent. Dlatego `agentctl new` prosi też każdego agenta, żeby zgłaszał się sam, a `agentctl event` (polecenie, którego nigdy nie wpisujesz) przyjmuje wiadomość:
+dopisuje linię do `<state_dir>/events.log`, zapisuje `<state_dir>/<task>/event.json` (więc `status` i [board](#board) od razu pokazują nowy stan, board nawet przeładowuje się, gdy plik się zmieni) i od razu wysyła powiadomienie.
+Zawsze kończy się kodem 0 i nic nie wypisuje, więc zepsuty hook nigdy nie zaszkodzi agentowi. Zadanie uruchomione bez zdarzeń (starsze zadania, `notify.events: false`) dalej działa samym czytaniem ekranu.
+
+| Agent | Zdarzenie | agentctl |
+|---|---|---|
+| Claude | `Notification` `permission_prompt` / `elicitation_dialog` (dowolny dialog uprawnień; `AskUserQuestion` wysyła ten sam typ) | `needs-input`, powiadomienie z pytaniem |
+| Claude | `Notification` `idle_prompt` („Claude is waiting for your input”, minutę po Stop) | tylko w logu |
+| Claude | `Stop` (koniec tury; niewysyłane, gdy przerwiesz przez Esc) | tura się kończy: `report-ready`, jeśli raport jest, inaczej `waiting` |
+| Claude | `StopFailure` z `rate_limit` lub `billing_error` | `limited` (inne błędy trafiają do logu) |
+| Codex | `agent-turn-complete` (koniec tury; wysyłane też raz dla tury, która zapisuje tytuł sesji, i to jest ignorowane) | jak `Stop` |
+| Codex | prośba o zatwierdzenie, `request_user_input` | **brak zdarzenia w 0.166.0**: wyłapuje je czytanie ekranu (`question_pattern`) |
+
+**Claude Code 2.1.309.** `new` zapisuje `<state_dir>/<task>/claude-settings.json` z hookami `Notification`, `Stop` i `StopFailure`, każdy uruchamia
+`<this agentctl> event --task <TASK> --agent claude --kind <notification|stop|stop-failure>` (JSON hooka przychodzi na stdin), i uruchamia `claude … --settings <ten plik>`.
+*Sprawdzone na żywo:* `--settings` **łączy się** z pozostałymi źródłami. Przy hooku użytkownika w `~/.claude/settings.json` (zestaw Neon City: SessionStart, UserPromptSubmit, PreToolUse, Stop), projektowym `.claude/settings.json` z hookiem Stop i `--settings` z własnymi hookami Stop i Notification
+jedno uruchomienie `claude -p` wykonało je wszystkie (`--debug-file` wypisuje każde `Hooks: Stop [...] finished with status 0`; znaczniki z hooka projektu i wstrzykniętego zostały zapisane). Żaden istniejący hook nie jest wyłączany ani zastępowany, a plik zawiera tylko trzy hooki zdarzeń.
+
+**Codex 0.166.0.** `new` dodaje `-c notify=["…agentctl", "event", "--task", "<TASK>", "--agent", "codex", "--forward", "<json>"]`; Codex dopisuje zdarzenie jako JSON do tego argv. *Sprawdzone na żywo:* `-c notify=` **zastępuje** `notify` z `config.toml`
+(hook `turn-ended` aplikacji Computer Use przestał działać), więc agentctl czyta `notify` najwyższego poziomu z `$CODEX_HOME/config.toml` (`~/.codex`, chyba że `env` specu ustawia `CODEX_HOME`) i przekazuje go jako `--forward`:
+`event` uruchamia go potem z tym samym JSON-em, tak jak zrobiłby to Codex. `~/.codex/config.toml` nigdy nie jest zmieniany.
+Codex 0.166.0 ma też hooki (`PermissionRequest`, `Stop`, …), które zgłaszałyby zatwierdzenia, ale trzeba im najpierw zaufać: Codex pokazuje dialog „Hooks need review” i zapisuje zaufanie w `config.toml`. agentctl nie odpowiada na dialogi
+ani nie zapisuje Twojego configu, więc z nich nie korzysta. Narzędzie `request_user_input` jest za flagą funkcji `default_mode_request_user_input` („under development”, wyłączona), więc nie dało się go wypróbować; jego ekran (`? <question>` … `Waiting for your answer`) pozostaje objęty przez `question_pattern`.
+
+**Tekst needs-input.** Pytanie jest brane z ekranu, gdy otwarty jest dialog z ponumerowanymi opcjami: ostatnia linia kończąca się na `?` nad opcjami, plus to, czego dotyczy, dla ogólnego
+(`Do you want to proceed? touch approved.txt`, `Would you like to run the following command? $ printf 'yes' > approved.txt`), najwyżej 120 znaków. JSON hooka Claude mówi tylko „Claude needs your permission”.
+Zdarzenie rozstrzyga o stanie tylko tam, gdzie ekran nie może: dialog uprawnień, którego nie zna żaden wzorzec, liczy się jako `needs-input`, dopóki pole wejściowe jest ukryte, i traci ważność, gdy pole wraca. Trwająca tura zawsze wygrywa.
+
+## Powiadomienia
+
+Każde powiadomienie ma tytuł `agentctl` i dźwięk. Tekst na przejście: `NC-42: <pytanie>` (needs-input), `NC-42: raport gotowy – <werdykt>` (report-ready), `NC-42: skończył turę i czeka na Ciebie – <ostatnie słowa>` (koniec tury bez raportu; wyłączane przez `notify.turn_end: false`),
+`NC-42: claude wyczerpał limit użycia – agentctl move NC-42 przeniesie zadanie na codex` (limited), a do tego `needs-trust`, `dead`, `orphan` i przypomnienie po `watch.waiting_after`.
+
+**Jedno przejście, jedno powiadomienie.** Zdarzenie i obserwator mogą zobaczyć to samo przejście. Ogłoszony stan jest trzymany w `<state_dir>/<task>/notified.json` razem ze źródłem: gdy drugie źródło ogłosiło ten sam stan mniej niż `max(90 s, 3 × watch.interval)` temu, to drugie tylko zapisuje w swoim logu
+(`already announced by the agent's event`). Dwa zdarzenia agenta nigdy się nie łączą (drugi dialog uprawnień to nowe pytanie).
+
+**Kliknięcie prowadzi do okna.** Z [`terminal-notifier`](https://github.com/julienXX/terminal-notifier) (`brew install terminal-notifier`; `doctor` mówi, gdy go brakuje) kliknięcie uruchamia
+
+```
+<this agentctl> attach NC-42 --switch-client      # wybierz okno, przełącz klienta tmux podłączonego do sesji agentctl
+```
+
+i wysuwa terminal na wierzch (`-activate`): `notify.terminal_app`, inaczej wykrywane z `TERM_PROGRAM` (`Apple_Terminal` → `com.apple.Terminal`, `iTerm.app` → `com.googlecode.iterm2`), inaczej ze środowiska, w którym wystartował serwer tmux; dla każdego innego terminala żadna aplikacja nie jest aktywowana.
+Gdy do sesji agentctl **nie jest podłączony żaden klient**, nie ma czego przełączać: kliknięcie tylko wysuwa terminal, a tekst kończy się na `· agentctl attach NC-42`. Polecenie kliknięcia niesie ścieżki bezwzględne oraz własne `PATH`, `AGENTCTL_HOME` i `TMUX_TMPDIR`,
+bo kliknięcie działa z gołym środowiskiem (na żywo: bez `PATH` nie znajdowano tmux, a bez `LANG` tmux drukował tabulator swoich formatów `-F` jako `_`, więc agentctl sam daje tmux lokalizację UTF-8).
+Bez terminal-notifier powiadomienie jest tym starym, przez `osascript` (`notify-send` na Linuksie), bez akcji. terminal-notifier 3.x nie pokazuje niczego, dopóki macOS nie da mu uprawnień (pierwsze powiadomienie o nie prosi) i dopóki jego styl alertu nie jest `None`
+(Ustawienia systemowe > Powiadomienia > terminal-notifier); `doctor` uruchamia `terminal-notifier -diagnose` i ostrzega dokładnie o tym.
+
+**Backend i rezerwa (`notify.backend`).** `auto` (domyślnie) najpierw próbuje terminal-notifier. terminal-notifier 3.x może zakończyć się komunikatem `Could not request notification permission: Notifications are not allowed for this application`, a tego uprawnienia nie da się nadać z wiersza poleceń: gdy kończy się kodem niezerowym albo wypisze ten komunikat, to samo powiadomienie idzie przez `osascript` (bez akcji kliknięcia), a terminal-notifier dostaje spokój na godzinę (`<config dir>/notifier.json`, żeby obserwator i hooki widziały to wszystkie); jednolinijkowe ostrzeżenie trafia do `<config dir>/notifier.log`. `terminal-notifier` albo `osascript` używają tylko tego kanału (bez rezerwy, nic nie jest zapamiętywane).
+`agentctl notify-test` wysyła jedno powiadomienie i mówi, który kanał je przeniósł, próbuje terminal-notifier jeszcze raz, nawet jeśli jest zapamiętany jako zepsuty, i kończy się kodem 1, gdy żaden kanał nie zadziałał. Żeby odzyskać kliknięcie do okna: Ustawienia systemowe > Powiadomienia > terminal-notifier > Zezwalaj na powiadomienia, styl alertu Banery; jeśli terminal-notifier nie ma na tej liście, ustaw `notify: {backend: osascript}`. `doctor` pokazuje ten stan i kroki.
+
+**Werdykt.** Powiadomienie `report-ready` cytuje pierwszą sensowną linię raportu, bez markdownu, najwyżej 100 znaków, w tej kolejności: pierwsza linia pasująca do `notify.verdict_pattern` (regex; jego pierwsza grupa, inaczej cała linia),
+linia zaczynająca się od `Werdykt`, `Verdict` lub `Status` (`**Werdykt:** PASS`; jeśli to samodzielny nagłówek, bierze się linię pod nim), inaczej pierwsza linia tekstu po nagłówku (front matter, linie poziome i wiersze tabel są pomijane).
+
+## Limity i move
+
+Gdy plan albo limit szybkości dostawcy się wyczerpie, zadanie ma stan `limited` (ikona `⛔`, board, `status --tmux-line`), dostajesz powiadomienie z propozycją, a `agentctl move` przenosi zadanie. Limit wykrywany jest z dwóch źródeł: zdarzenia Claude `StopFailure` (`rate_limit`, `billing_error`)
+i ekranu, przez `agents.<name>.limit_patterns` (wyrażenia regularne, bez rozróżniania wielkości liter, dopasowywane linia po linii; komunikat musi **otwierać** linię, po znacznikach punktorów takich jak `⎿ ● ■`, żeby nie wziąć za niego diffa ani zacytowanego zdania; trwająca tura nigdy nie jest `limited`).
+Domyślne wzorce to ciągi znalezione w zainstalowanych binarkach; nie wywołałem prawdziwego limitu (zużyłoby to plan), więc wygląd w TUI jest **wywnioskowany, nie zaobserwowany**:
+
+| Agent | Tekst (wersja) | Wzorzec | Pewność |
+|---|---|---|---|
+| Claude | `You've hit your session limit · resets 3pm`, `… weekly limit`, `… <model> limit`, `… monthly spend limit` (2.1.309) | `You.ve hit your .{0,60}limit` | wysoka co do tego, że ciągi istnieją (szablon `You've hit your ${window}${reset}` w binarce); miejsce w TUI nie zaobserwowane |
+| Claude | `Usage limit reached`, `You're out of extra usage` | dosłownie | średnia: widziane jako ciągi, kontekst niezweryfikowany |
+| Claude | `Request rejected (429)` (limit szybkości; drukowany także przy chwilowym problemie z przepustowością) | `Request rejected \(429\)` | niska: może być przejściowy, wtedy stan sam się czyści |
+| Claude | hook `StopFailure` z `error: rate_limit` lub `billing_error` | zdarzenie | schemat z binarki; próbka w testach jest syntetyczna |
+| Codex | `You've hit your usage limit. …` (z U+2019; warianty: `… for <model>. Switch to another model now`, `Upgrade to Plus …`, `… purchase more credits`) (0.166.0) | `You.ve hit your usage limit` | wysoka co do tego, że ciągi istnieją; miejsce w TUI nie zaobserwowane |
+| Codex | `Usage limit reached`, `You're out of credits`, `Your workspace is out of credits`, `You hit your spend cap …` | dosłownie | średnia |
+
+**`agentctl move <task> [--agent claude|codex] [-y]`** przenosi zadanie do drugiego dostawcy (albo do tego z `--agent`):
+
+- model i effort pochodzą z [tabeli odpowiedników](#odpowiedniki-modeli) (`claude opus/high` → `codex gpt-6-astra/medium`); brak pary (Fable, `max`) to błąd z podpowiedzią;
+- `pin: true` w specu (od tej wersji zapisywane w `TASK.md`; starsze zadania liczą się jako nieprzypięte) to błąd: przypięte zadania nigdy nie zmieniają dostawcy;
+- nowe okno `<task>-2` (`-3`, … jeśli zajęte) startuje w **tym samym worktree** z tym samym env i ścieżką raportu; jego prompt to oryginalny z `TASK.md` plus
+  `Poprzedni agent (<agent> <model>) przerwał przez limit. Kontynuuj od bieżącego stanu worktree: przeczytaj git log i git diff względem bazy, nie powtarzaj zrobionej pracy. Raport zapisz do <report>.`;
+- zawsze pyta y/N; bez terminala i bez `-y` to błąd. `limits` docelowego dostawcy nadal obowiązują;
+- stare okno **zostaje**: `status` i board pokazują je jako `superseded` (`↪`, bez powiadomień), a zamykasz je sam, `agentctl close <task>`.
+
+Na boardzie `M` robi to samo po pytaniu `[y/N]`.
+
+## Ikony okien i pasek stanu tmux
+
+Dopóki działa `agentctl watch`, ustawia on stan każdego żywego okna przed jego nazwą, więc `Ctrl-b w` i pasek stanu pokazują, co się dzieje:
+
+| Ikona | Stan |
+|---|---|
+| `⚙` | `working` |
+| `⏸` | `waiting` |
+| `?` | `needs-input` |
+| `🔒` | `needs-trust` |
+| `⛔` | `limited` |
+| `✓` | `report-ready` |
+| `↪` | `superseded` |
+| `✗` | `orphan` (i `dead`, które nie ma okna do nazwania) |
+
+Okno wygląda wtedy tak: `⚙ nc-42`. Jest przemianowywane tylko przy zmianie stanu, a gdy obserwator się zatrzyma (Ctrl-C albo zabicie okna), zwykłe nazwy wracają.
+Wyłączysz to przez `watch.window_icons: false` albo podmienisz pojedyncze ikony (`watch.window_icons: {working: "▶", needs-input: "❓"}`; `"?"` ujmij w cudzysłów w YAML).
+Okna `watch` i `board` nigdy nie są przemianowywane.
+
+Każde polecenie agentctl znajduje okno po nazwie zadania, cokolwiek stoi przed nią. `new` i `adopt` zapisują też własny ID okna tmux (`@12`) jako `window_id`
+w `TASK.md`, a polecenia celują w ten ID, dopóki okno nosi nazwę zadania (tmux używa ID ponownie po restarcie, więc nieaktualny ID nigdy nie jest brany na wiarę).
+Zadania uruchomione przed tą wersją nie mają ID i są dopasowywane po nazwie. Jeśli `watch` zostanie zabity brutalnie (`kill -9`), ikony zostają na oknach do następnego uruchomienia `watch`;
+w międzyczasie wszystko działa. Zmieniaj ikony, gdy obserwator jest zatrzymany (rozpoznaje swoje stare ikony tylko wtedy, gdy są symbolami albo są w configu).
+
+`agentctl status --tmux-line` drukuje liczbę zadań na stan jako jedną linię, `2⚙ 1✓ 1?`, a po niej zadania w kolejce jako `3⧗` (`2⚙ 1⏳ 3⧗`; zerowe liczby pomijane; raporty, które już pobrałeś, nie liczą się jako `✓`;
+`orphan` i `dead` dzielą `✗`). Nie wykonuje wywołań gita i nie drukuje niczego więcej, więc tmux może go uruchamiać. `agentctl watch --tmux` ustawia, **tylko dla sesji agentctl**
+(`set-option -t =agentctl:`, nigdy `-g`):
+
+```
+status-right    #(<this agentctl> status --tmux-line)
+status-interval 10
+```
+
+`<this agentctl>` to bezwzględna ścieżka node'a i skryptu tego checkoutu z bieżącym `AGENTCTL_HOME`, a nie goły `agentctl`, bo `PATH` serwera tmux często go nie zawiera.
+To zastępuje `status-right` sesji; cofniesz przez `tmux set-option -u -t agentctl: status-right`. Pasek zostawisz w spokoju przez `watch --tmux --no-status-line` albo `watch.status_line: false`.
+
+## Zamykanie i ukrywanie zadań
+
+Trzy różne rzeczy, od najlżejszej:
+
+- **Zakończone.** Zadanie, którego okna już nie ma (zamknąłeś agenta w oknie, zawiesił się albo został przeniesiony do drugiego dostawcy), ale którego nikt nie zamknął przez `agentctl close`. Zostaje w `status`, a na boardzie siedzi pod zamkniętym tytułem **Finished (N)**, przyciemnione. `Enter` otwiera tam menu (`c` kopiuj raport, `x` zamknij, `h` ukryj, `Esc`), bo nie ma okna, do którego można przejść.
+- **Ukryte.** `agentctl hide <task…>` (board: `h`) ustawia `hidden: true` w `TASK.md`. Zadanie znika ze `status` i z boardu (`status --all` i klawisz boardu `a` je przywracają, `agentctl unhide` / `h` pokazuje je znowu). Nic nie jest zamykane i żaden worktree nie jest ruszany. Przy `board.auto_hide_pulled_dead: true` (domyślnie) zadanie **bez okna, którego raport został pobrany** (`pull`, `pull --ready`, `c` albo `r` na boardzie, MCP `pull_ready`), ukrywa się samo; bez raportu zostaje pod Finished. `unhide` zapisuje `hidden: false`, co utrzymuje to zadanie widocznym. agentctl nigdy sam nie zamyka zadania ani nie usuwa worktree.
+- **Zamknięte.** `agentctl close` (board: `x`) zabija okno i zapisuje `closed: true` oraz `closed_at` w `TASK.md`. Zamknięte zadanie znika ze `status`, z boardu, z `pull --ready`, z `watch` (zamknięcie zadania bez raportu nie jest alarmem „okno zniknęło”) i z [limitów okien](#limity-okien-i-cross-review); `status --all` i klawisz boardu `a` wymieniają je jako `closed`. Stan i raport zostają.
+  `agentctl archive [--older-than 7d]` przenosi folder stanu zamkniętych zadań do `~/.agentctl/archive/<task>/` (obok folderu stanu). Folder, który jest w archiwum, przeniesiony tam przez `archive` albo ręcznie, to zamknięte zadanie, nigdy orphan ani błąd; żywe okno o tej samej nazwie ma nad nim pierwszeństwo.
+
+## Anulowanie zadań
+
+Czasem praca zostaje porzucona w połowie. `agentctl cancel <TASK…> [--reason "…"] [--rm-worktree] [-y]` (board: `X`; MCP: `cancel`) pokazuje listę i pyta y/N, a potem:
+
+- **Zadanie w pracy:** wysyłany jest klawisz przerwania agenta (jak w `interrupt`), agentctl czeka `cancel.grace` sekund (domyślnie 5, raz dla wszystkich zadań jednego polecenia), po czym okno jest zamykane. `TASK.md` dostaje `cancelled: true`, `cancelled_at`, `cancel_reason` (jeśli podano) i `cancel_source` (`cli`, `board` lub `mcp`).
+- **Zadanie w kolejce:** jest zdejmowane z kolejki (`queue rm` robi to samo bez powodu) i dostaje własny `TASK.md` z tymi samymi polami, żeby było widać je w `status --all`, a zadania, które na nie czekają, mogły zobaczyć, że go nie ma.
+- **Zadanie, które przeniosłeś** (`agentctl move`): stare zadanie (`superseded`) i jego następca to jedna praca, więc oba są anulowane, po jednym pytaniu.
+- **Worktree i gałąź zostają**, bo częściową pracę często warto zachować. `--rm-worktree` uruchamia `git worktree remove` (nigdy `--force`; niewyczyszczony worktree jest zgłaszany i zostawiany); gałąź nigdy nie jest usuwana.
+
+`cancelled` to osobny stan, nie `closed`. Anulowane zadanie znika ze `status` i z boardu (`status --all` i klawisz boardu `a` wymieniają je pod **Cancelled**), nie liczy się do [limitów okien](#limity-okien-i-cross-review), nigdy nie jest brane przez `pull --ready` i nie daje alarmu „okno zniknęło”. Raport, który agent zdążył napisać, zostaje: czytają go `agentctl pull <TASK>` i MCP `get_report`. Anulowanie z terminala albo z boardu niczego nie ogłasza; to, o które prosi czat (MCP `cancel`, `queue_rm`), pokazuje zwykłe powiadomienie na pulpicie.
+
+## Kohorty
+
+Zadania można grupować pod wybraną nazwą: `cohort: sprint-1` w specu, `--cohort sprint-1` przy `new` i `queue` (flaga wygrywa ze specem) albo `agentctl cohort add sprint-1 NC-41 NC-42` dla zadań, które już istnieją. Zadanie bez nazwy należy do **żadnej kohorty**: nie ma kohorty domyślnej i agentctl nigdy żadnej nie wymyśla.
+
+- **Nazwy.** Litery, cyfry, `-`, `_` i `.`, najwyżej 40 znaków, zaczynają się od litery, cyfry lub `_`. Porównanie ignoruje wielkość liter; nazwa jest pokazywana tak, jak została zapisana za pierwszym razem. Kohortę tworzy jej pierwsze zadanie; `<config dir>/cohorts/<name>.json` trzyma czas utworzenia i opcjonalny opis (`agentctl cohort note sprint-1 "…"`).
+- **Gdzie zadanie ją trzyma.** `cohort:` w jego `TASK.md` (i w jego wpisie kolejki, gdy czeka), obok `cancelled`/`cancel_reason`, żeby późniejszy kamień milowy z użyciem lub statystykami mógł liczyć zadania na kohortę i anulowania.
+- **Polecenia.** `cohort list` (zadania na kohortę według stanu: aktywne, w kolejce, raporty, zamknięte, anulowane; od kiedy), `cohort show <name>` (zadania jak w `status`), `cohort add <name> <TASK…>`, `cohort remove <TASK…>`, `cohort note <name> "…"`.
+- **Filtry.** `--cohort <name>` przy `status` (także `--json` i `--clip`), `pull --ready`, `close`, `cancel` i `queue list`. Bez niego chodzi o wszystkie zadania, jak dotąd. `close --cohort X` i `cancel --cohort X` pokazują listę i pytają y/N.
+- **Powiadomienie.** Gdy każde nieanulowane zadanie kohorty ma raport (także te w kolejce), obserwator mówi `kohorta <nazwa>: wszystkie raporty gotowe (N)`: raz na kohortę i ponownie tylko wtedy, gdy od tego czasu dołączyło nowe zadanie.
+
+## Limity na żywo i przeładowanie konfiguracji
+
+- **`agentctl limits`** liczy na dostawcę: okna sesji agentctl (przypisane przez `TASK.md`), plus zarezerwowane miejsca, plus sesje zewnętrzne, gdy `limits.count_external` jest włączone; wolne = limit − zajęte. To samo liczenie rozstrzyga `new` (błąd albo propozycja zmiany), `queue` (co mówi podsumowanie), tyknięcia kolejki w `watch` i `queue list`.
+- **`limits set`** edytuje plik przez API dokumentu pakietu `yaml`: komentarze, kolejność kluczy i pozostałe wartości zostają (komentarz w linii jest zapisywany po jednej spacji). Stary plik jest kopiowany do `config.yaml.bak`; wynik jest raz ładowany dla sprawdzenia, a stary tekst wraca, jeśli się nie ładuje. `off` (albo `none`) usuwa klucz.
+- **Rezerwacje** to `<config dir>/reservations.json`: na dostawcę liczba i notatka. `reserve` dodaje, `release claude=1` odejmuje, `release claude` zrzuca wszystkie.
+- **Sesje zewnętrzne** (`limits.count_external: true`): `ps -U <uid> -o pid=,ppid=,command=` wypisuje procesy. Proces się liczy, gdy jego komendą jest `claude` lub `codex` (albo `node …/claude-code/….js`, `node …/@openai/codex/….js`) bez `mcp`, `mcp-server`, `app-server`, `exec`, `-p`, `--print`, `usage-tap` ani `agentctl` wśród argumentów, gdy żaden przodek nie jest procesem panelu sesji agentctl (`tmux list-panes -s`) i gdy żaden przodek sam nie jest policzoną sesją (proces pomocniczy sesji nie jest drugą sesją). Katalog pochodzi z `lsof -a -d cwd`. Nic nie jest zabijane ani ruszane.
+- **Przeładowanie.** `ConfigStore` trzyma obowiązującą konfigurację i tekst, z którego została załadowana. `watch` wywołuje go przy każdym tyknięciu i z `fs.watch` folderu configu; serwer MCP wywołuje go przy każdym wywołaniu narzędzia (zawsze czytał plik od nowa; teraz plik, który się nie ładuje, nie przewraca już serwera). Tekst, który się ładuje, zastępuje obowiązującą konfigurację (`Context.setConfig`: klient tmux podąża za zmienionym `session` lub ikonami okien), a log watch mówi `config: reloaded (limits, mcp)`. Tekst, który się nie ładuje, jest zgłaszany raz (`config: config.yaml does not load, the previous settings stay in force: …`), `config-state.json` to zapisuje, `doctor` pokazuje ostrzeżenie `config reload`, MCP `status` i `version` niosą ostrzeżenie, a polecenie CLI, które nie może załadować pliku, wspomina, że obserwator zachowuje poprzednie ustawienia. Zmiana `notify` sprawia, że obserwator buduje swój notifier od nowa.
+
+## Zdarzenia dla czatu
+
+- **Dziennik** `<config dir>/journal.jsonl`: `{at, kind, task?, cohort?, text, verdict?}`. Rodzaje: `report-ready`, `queue-start`, `queue-failed`, `needs-input`, `needs-trust`, `blocked`, `cancelled`, `limited`, `dead`, `cohort-done`, `usage`, `limits-changed`. Piszą do niego: obserwator (przejście, którego nie ogłosiło już własne zdarzenie agenta), polecenie event, kolejka (start, nieudany start, zablokowanie), `cancel`, sprawdzanie kohorty, progi planu, `limits set`/`reserve`/`release` i przeładowanie konfiguracji (zapisywane raz, jeśli obie strony zobaczyły tę samą zmianę). Zdarzenie zadania dostaje kohortę zadania.
+- **Znacznik** `<config dir>/events-seen.json`: czas ostatniego wywołania na klienta (`cli`, `mcp`). `since: last` oznacza po tym czasie; pierwsze wywołanie klienta patrzy 24 godziny wstecz; `--keep` / `peek: true` i `--clip` zostawiają znacznik. Próbny przebieg też go zostawia.
+- **Linia podsumowania** liczy zadania z oknem, które nie są zakończone (i ile z nich pracuje), zadania czekające na Ciebie (needs-input, needs-trust, waiting), kolejkę oraz gotowe i niepobrane raporty.
+- Zdarzenia istnieją tylko wtedy, gdy działa `agentctl watch` (albo gdy polecenie samo je zapisuje: cancel, limits). Czat, który wywoła `events_since` po nocy bez obserwatora, i tak dostanie podsumowanie obecnego stanu.
+
+## Sprzątanie (`gc`)
+
+- **Na co patrzy:** rekordy zadań z `state_dir` i z archiwum, dla zadań `closed`, `cancelled` lub zarchiwizowanych i bez okna. Wszystko inne jest poza zasięgiem: aktywne zadanie, worktree, którego używa też inne niezakończone zadanie (`move` dzieli jeden), folder cache, który nie należy do żadnego rekordu.
+- **Worktree:** `git status --porcelain` musi być puste, wyewidencjonowana gałąź nie może być `main`/`master`, główny checkout nigdy nie jest kandydatem; usunięcie to `git worktree remove <path>` bez `--force`. `git worktree list --porcelain` wymienia też worktree tych samych repozytoriów, których nie posiada żadne zadanie; są tylko wypisywane jako pominięte.
+- **Pliki obok raportów:** w folderze raportu takiego zadania każdy wpis, który nie jest `*.md` i którego najnowszy plik jest starszy niż `--older-than`. Folder liczy się po najnowszej rzeczy w nim.
+- **Stan:** `<state_dir>/<task>/` zamkniętych zadań przechodzi do archiwum (to samo przeniesienie co `agentctl archive`); historia (`history.jsonl`) i raporty nie są ruszane.
+- **Gałęzie** (`--branches`): gałąź wpisu repo zadania, jeśli jeszcze istnieje, nie jest `main`/`master`/bieżącą gałęzią/bazą, nie jest używana przez niezakończone zadanie, nie jest wyewidencjonowana w innym worktree (ten, który gc usuwa w tym samym przebiegu, się nie liczy) i `git merge-base --is-ancestor <branch> <base>` się udaje. Wtedy `git branch -d`; własne sprawdzenie gita to druga siatka bezpieczeństwa. Gałęzie zdalne nigdy nie są ruszane.
+- `--apply` pokazuje listę, pyta y/N (`-y` pomija to bez terminala), robi worktree, pliki, przeniesienia do archiwum, potem gałęzie, i raportuje, co zwolniono, a co się nie udało. Porażka jednego elementu nie zatrzymuje pozostałych i daje kod wyjścia 1.
+
+## Wznawianie i `up`
+
+- **Które zadania:** niezamknięte, nieanulowane, niezarchiwizowane, nieukryte, niezastąpione (`superseded`), z rekordem, który wskazuje agenta, istniejącym worktree, bez okna tmux i bez raportu (`--all` bierze także zadania z raportem). Wpisane ID zadań muszą być wśród nich.
+- **Co jest uruchamiane:** okno powstaje tak, jak robi to `new` (env zadania, nowa sesja, gdy stara zniknęła), okablowanie zdarzeń jest zapisywane na nowo (plik ustawień z hookami i usage tap, `notify` Codexa), potem agent: Claude `claude --model … --effort … --settings … --resume <id>` / `--continue`, Codex `codex resume <id> …` / `codex resume --last …`, a po nich te same flagi co przy starcie (sprawdzone przez `codex resume --help` z 0.166.0: opcje idą po `resume`). ID sesji to ostatni zapisany w `<state_dir>/<task>/sessions.json` przez hooki albo usage tap. Żaden prompt nie jest wklejany, a dialog zaufania do folderu nie jest odpowiadany.
+- **Limity:** miejsca dostawcy są liczone jak przy `new`; zadanie, które się nie mieści, jest pomijane i jest o tym informacja.
+- **`agentctl up`:** `watch --tmux` i `board --tmux` (każde tylko jeśli brakuje jego okna), podpowiedź o wznowieniu, potem `attach`/`switch-client` do okna boardu; bez terminala (albo z `--no-attach`) drukuje `tmux attach -t <session> \; select-window -t board`.
+
+## Użycie i limity
+
+`agentctl usage [--cohort X] [--since 7d] [--json] [--clip]` odpowiada na dwa pytania, zanim rozdasz więcej pracy: ile tokenów zużywają zadania i jak blisko limitów są plany Claude Code i Codexa. Czego dostawca nie mówi, to **n/d**; żadna liczba nigdy nie jest szacowana.
+
+**Co dają źródła.** Sprawdzone na Claude Code 2.1.309 i Codex 0.166.0 (formaty są własne agentów, nie udokumentowanym interfejsem: mogą się zmienić).
+
+| | Claude Code | Codex |
+|---|---|---|
+| Log sesji | `<claude home>/projects/<cwd, każdy znak niealfanumeryczny jako "-">/<session id>.jsonl`; subagenci w `<session id>/subagents/agent-*.jsonl` | `<codex home>/sessions/YYYY/MM/DD/rollout-<time>-<thread id>.jsonl` |
+| Tokeny | `message.usage` każdej linii `assistant`: `input_tokens`, `output_tokens` (z myśleniem), `cache_read_input_tokens`, `cache_creation_input_tokens`; `message.model`. Wiadomość jest zapisywana raz na blok treści z tym samym `message.id` i usage: liczona jest raz | `event_msg` `token_count`: `info.total_token_usage`, skumulowane dla sesji (`input_tokens` zawiera `cached_input_tokens`); model jest w `turn_context`. Różnica między dwoma odczytami to praca pomiędzy nimi |
+| Które zadanie | `cwd` w każdej linii (worktree albo folder pod nim), `sessionId`; `transcript_path` i `session_id` w wejściu hooków i statusLine | `session_meta.cwd` (worktree), `session_meta.id`; `thread-id` w argumencie `notify` |
+| Limity planu | `rate_limits.five_hour` i `.seven_day` (`used_percentage`, `resets_at` w sekundach epoki) w JSON-ie, który komenda **statusLine** dostaje na stdin; tylko dla claude.ai Pro, Max i Ultra i tylko po pierwszej odpowiedzi sesji. Nie ma ich w transkryptach, nie ma lokalnego pliku | `rate_limits` w każdym `token_count`: okna `primary` i `secondary` z `used_percent`, `window_minutes` (300 = 5 godzin, 10080 = tydzień) i `resets_at`, plus `plan_type`. Niektóre plany mają tylko jedno okno; limit bez okien (`premium`) nic nie mówi |
+| Wiarygodność | Wiarygodne: tokeny i modele. Wiarygodne tylko przez tap: limity | Wiarygodne: tokeny, modele i limity (mówi najnowszy log; to konto, nie zadanie) |
+
+- **Tokeny.** Pokazywana liczba (`TOKENS` w `status` i na boardzie, `usage`) to input + output + zapisy cache. Odczyty cache są pominięte: długa sesja czyta swój kontekst od nowa w każdej turze i zagłuszyłyby resztę; są w `--json` i w tabeli *by model*. Liczba Codexa jest rozdzielana tak, żeby `input` było tylko świeżą częścią. Rozliczenia planów nie są publiczne, więc to wybór, nie rachunek dostawcy.
+- **Które sesje należą do zadania.** Sesje agenta zadania, których katalog roboczy to worktree zadania (albo folder pod nim) i które zaczęły się po starcie zadania (minuta zapasu), a przed jego końcem: startem zadania, które je kontynuuje po `move` (dzielącym worktree), jego `close` lub `cancel`. Z kilku zadań, które mogłyby być właścicielem sesji, wygrywa to, które wystartowało ostatnie przed nią. `<state_dir>/<task>/sessions.json` wymienia sesje, które nazwały zdarzenia agenta i statusLine; liczą się bez względu na to, co mówi katalog. `CLAUDE_CONFIG_DIR` i `CODEX_HOME` w `env` specu przenoszą wyszukiwanie do tego katalogu domowego. Sesje, które uruchamiasz ręcznie, nie są liczone, a sesja Codexa wznowiona lub rozwidlona z innej liczy całą jej historię jeszcze raz.
+- **Cache.** `<config dir>/usage-cache.json` trzyma na plik logu dotychczas przeczytany offset i sumy na dzień i model. Log tylko rośnie, więc następny odczyt zaczyna od offsetu (krótszy plik jest czytany od początku); niedopisana ostatnia linia czeka. `watch`, board i linia tmux mogą więc pytać co kilka sekund. Usuń plik, żeby wszystko przeczytać od nowa.
+- **Plan Claude: tap.** `new` wstawia `statusLine` do pliku ustawień okna Claude (`--settings`, ten sam plik co hooki zdarzeń): `agentctl usage-tap --task <ID> [--forward '<your command>']`. Przy każdej aktualizacji linii stanu zapisuje okna w `<config dir>/usage/claude-plan.json`, zapamiętuje sesję, po czym uruchamia Twój własny `statusLine` (z `.claude/settings.local.json` albo `settings.json` worktree, a w ostateczności z `~/.claude/settings.json`) z tym samym wejściem i drukuje jego wyjście, więc to, co widzisz, się nie zmienia. `statusLine` innego typu niż `command` zostaje nietknięty i tap nie jest ustawiany. Limity należą do konta, więc karmi je dowolne okno; plik jest tak świeży, jak ostatnia odpowiedź okna Claude uruchomionego przez agentctl. Żeby karmić go także z własnych sesji, ustaw swój globalny `statusLine` na `agentctl usage-tap --task none --forward '<your command>'` (nieznane zadanie tylko pomija zapamiętywanie sesji). `usage.claude_tap: false` zostawia linie stanu w spokoju.
+- **n/d.** Limity Claude są n/d, dopóki okno zadania nie odpowie choć raz, bez subskrypcji claude.ai albo z `usage.claude_tap: false`; Codexa, gdy żaden log z ostatnich trzech dni nie ma okna. Okno, którego czas resetu minął od odczytu, jest odrzucane (jego procent nie jest bieżący). Odczyt starszy niż 30 minut jest pokazywany z czasem.
+- **Ostrzeżenia.** `watch` patrzy na plany przy każdym tyknięciu. Gdy okno osiąga `usage.warn` (domyślnie 80), wysyła jedno powiadomienie, a przy `usage.critical` (95) jeszcze jedno; „Codex: 85% limitu 5h (reset 12:07) – blisko limitu; claude ma zapas (62%): --agent claude”. Jedno na próg i na okres okna (dostawca, okno, czas resetu), trzymane w `<config dir>/usage-alerts.json`, więc restart obserwatora go nie powtarza. Oba progi to procenty dla obu dostawców albo na dostawcę (`{claude: 80, codex: 70}`).
+- **Podpowiedź przed startem.** Podsumowanie `new --clip` i `queue` ma linię `plan:` na każdego użytego dostawcę oraz, dla każdego zadania, którego dostawca jest na poziomie swojego `usage.warn` lub powyżej, gdy drugi jest poniżej własnego: `hint: NC-42: claude blisko limitu (83%), codex ma zapas (15%): --agent codex`. Zwykłe `new` drukuje te linie, gdy jest coś do powiedzenia. Tylko o tym informuje: `--agent` zostaje Twoją decyzją, a zadaniu z `pin: true` mówi się, że zostaje.
+- **Wstrzymanie kolejki.** `usage.queue_hold: 90` (albo na dostawcę): obserwator nie startuje żadnego zadania z kolejki dostawcy, którego plan jest powyżej tego procentu w którymkolwiek oknie; `queue list`, `status` i board pokazują `wstrzymane: codex 96% limitu 5h (reset 12:10) > usage.queue_hold 90%`, a log watch mówi o tym raz. Dostawca z n/d nigdy nie jest wstrzymywany. Domyślnie wyłączone. Config jest czytany przy starcie `watch`: po zmianie uruchom go ponownie.
+- **Gdzie.** `usage` (tabela, `--json`, `--clip`), `status` (TOKENS; `tokens` w `--json`), board (panel pod tytułem z paskiem na dostawcę, zielonym poniżej `usage.warn`, żółtym od niego, czerwonym od `usage.critical`; kolumna TOKENS), pasek stanu tmux (`2⚙ │ C 62% · X 18%`, `usage.status_line`), narzędzie MCP `usage` i linia planu w MCP `status`.
+
+## Historia i statystyki
+
+Które modele i efforty sprawdzają się do czego, widać dopiero na wielu zadaniach. agentctl dopisuje po jednym obiekcie JSON na linię do `<config dir>/history.jsonl`:
+
+- gdy **raport zadania jest gotowy** (obserwator albo własne zdarzenie agenta, które zobaczy pierwsze; ten sam raport raz), gdy jest **zamknięte**, **anulowane** lub **przeniesione** i gdy je **oznaczysz**;
+- rekord: `event`, `at`, `task`, `cohort`, `project` (folder pierwszego repozytorium), `requested` i `effective` agent/model/effort, `started`, `reportAt`, `closedAt`/`cancelledAt` i `cancelReason`, `durationMs` (od startu do raportu, a w razie braku do zamknięcia lub anulowania), `tokens` (input, output, cacheRead, cacheWrite i `fresh`; `null`, gdy nie znaleziono logu), `progress` (commity i pliki; `null`, gdy git nie potrafił powiedzieć), `verdict` (pierwsza linia, jak w powiadomieniu), `movedFrom` i `movedTo`, `result`, `note`.
+
+`agentctl mark <TASK> ok|partial|fail [--note "…"]` zapisuje Twoją ocenę; wygrywa ostatnie oznaczenie. `agentctl log [--since 7d] [--cohort X] [--json] [--clip]` zwija rekordy do jednej linii na zadanie, od najnowszego (późniejsza pusta wartość nigdy nie zeruje znanej). `agentctl stats [--since 30d] [--cohort X] [--json] [--clip]` grupuje zadania według agent/model/effort: zadania, mediana czasu i mediana tokenów (n/d, gdy brak), udział ok, partial i fail **wśród oznaczonych**, nieoznaczone, anulowane i przeniesione (zadania grupy, które trafiły na limit i zostały przekazane drugiemu dostawcy). Historia jest tak dobra jak oznaczenia: nieoznaczone zadanie liczy się jako nieoznaczone, nigdy jako ok.
+
+Na boardzie **`l`** otwiera log (`↑↓` przewija, `Esc` wraca), a **`o`** / **`p`** / **`f`** oznaczają wybrane zakończone zadanie (zadanie bez okna, zamknięte lub anulowane albo z gotowym raportem); `p` nadal wstrzymuje kolejkę, dopóki żadne zakończone zadanie nie jest wybrane. Menu zakończonego zadania (`Enter`) oferuje te same oznaczenia. Serwer MCP ma `log`, `stats` i `usage` (odczyt) oraz `mark` (zapis; `mcp.allow`, audytowany, bez kroku potwierdzenia: nie zmienia niczego poza historią).
+
+## Nawigacja
+
+`agentctl board --tmux` i `agentctl watch --tmux` uruchamiają swoje polecenie **jako proces okna** (`tmux new-window … <command>`), a nie wpisując je do powłoki, i w tym samym wywołaniu tmux ustawiają dla okna `remain-on-exit failed`: gdy polecenie się nie powiedzie, okno zostaje z błędem na ekranie, a `~/.agentctl/board.log` / `watch.log` mają początek (rozmiar terminala, `CI`, flagi tty) oraz koniec albo stos błędu. Ponowne uruchomienie `board --tmux` startuje na miejscu okno, którego proces się zakończył. Board czeka na rozmiar terminala (okno bez klienta potrafi przez chwilę raportować 0x0) i rysuje się nawet wtedy, gdy w środowisku jest zmienna `CI` (Ink inaczej nie narysowałby niczego).
+
+W sesji agentctl (opcje sesji, nigdy `-g`) agentctl ustawia:
+
+- **`mouse on`** (`board.mouse`): kliknij nazwę okna na pasku stanu, żeby do niego przejść. Przy włączonej myszy zaznaczanie tekstu w Terminal.app wymaga przytrzymania klawisza **fn** (iTerm2: Option).
+- **`F12` wraca do boardu** z dowolnego okna sesji, bez prefiksu tmux (`board.return_key`, nazwa klawisza tmux; `false` oznacza brak). Powiązanie jest w tmux ogólnoserwerowe, więc jest warunkowe względem sesji: w każdej innej sesji F12 trafia do programu w panelu jak dotąd. Dlaczego F12: `⌥b` to „słowo wstecz” w polach wprowadzania Claude Code i Codexa i wymaga „Use Option as Meta” w Terminal.app; mylone są Ctrl i Cmd; żaden z agentów nie używa F12. Na MacBooku to `fn`+F12, chyba że włączono „Use F1, F2, etc. keys as standard function keys”. Jeśli klawisz jest już w tmux powiązany z czymś innym, zostaje nietknięty, a `board --tmux` o tym mówi. `Ctrl-b l` (ostatnie okno) nadal działa.
+
+Stopka boardu mówi `Enter – open the agent · F12 – back to the list`.
+
+## Kolejka
+
+`limits.claude` i `limits.codex` ograniczają liczbę okien na dostawcę. Gdy zlecasz więcej zadań, niż się mieści, nadmiarowych nie trzeba potem startować ręcznie: wstaw je do kolejki, a `agentctl watch` uruchomi każde samo, gdy tylko zwolni się okno jego dostawcy.
+
+```
+agentctl queue nc-42.md          # walidacja jak przy "new", podsumowanie, y/N
+agentctl queue list              # pozycja, zadanie, agent/model/effort, priorytet, warunek startu, czas oczekiwania
+agentctl queue up NC-42          # pierwsze w kolejce
+agentctl queue rm NC-42          # wyjmij z kolejki
+agentctl queue pause / resume    # wstrzymaj / zezwól na starty (działających zadań to nie dotyka)
+agentctl queue retry NC-42       # nieudany start, jeszcze raz
+```
+
+- **Dodawanie** przechodzi przez te same kontrole co `new` (`review_of`, `pin`, mapowanie `--agent`, effort Codexa, duplikaty, repozytoria) z wyjątkiem limitu dostawcy: pełny dostawca to właśnie powód, dla którego zadanie trafia do kolejki. Podsumowanie mówi, czy zadanie wystartuje przy najbliższym ticku, czy będzie czekać, a wpis jest zapisywany w `<config dir>/queue/` z kolejnym numerem.
+- **`new` przy pełnym limicie** pyta „dodać do kolejki? [y/N]” (po propozycji zmiany dostawcy, jeśli taka jest). Bez terminala zostaje błędem, teraz z podpowiedzią `agentctl queue`.
+- **Kolejność**: `priority: high` przed `priority: normal`, w obrębie klasy kto pierwszy, ten pierwszy; `queue up` stawia zadanie na początku jego klasy. Zadanie, którego dostawca jest pełny, nie wstrzymuje zadania drugiego dostawcy.
+- **Nigdy nie zmienia dostawcy.** Kolejka uruchamia zadanie na agencie i modelu, na których je zlecono (albo na `--agent` podanym przy dodawaniu do kolejki). Przejście do drugiego dostawcy zostaje jawną decyzją: `--agent`, `agentctl move`.
+- **Start** to ta sama ścieżka co `new` (worktree, `setup`, linki, TASK.md, okno, czekanie na agenta, prompt) i działa w tle obserwatora. Gdy agent czeka na dialog zaufania do folderu, `needs-trust` jest ogłaszany jak zwykle, a reszta kolejki idzie dalej; prompt trafia do okna po Twoim potwierdzeniu. Powiadomienie mówi „Uruchomiono TASK z kolejki”.
+- **Nieudany start** (setup się nie udał, repozytorium zniknęło, agent nie jest gotowy) odkłada zadanie na koniec kolejki jako `failed`, z błędem w `queue list` i logiem próby w `<config dir>/queue/<n>-<TASK>.log`, i wysyła powiadomienie. Nie jest ponawiany sam; `queue retry` to Twoja decyzja (używa ponownie worktree, który zostawił nieudany start).
+- Kolejka rusza tylko, gdy działa `agentctl watch` (`watch --tmux`); `watch` wczytuje config ponownie, gdy plik się zmieni ([limity na żywo](#limity-na-żywo-i-przeładowanie-konfiguracji)), więc zmiana `limits` nie wymaga restartu. `queue.enabled: false` w configu wyłącza starty; `queue.parallel_starts` ogranicza liczbę startów w toku ([konfiguracja](configuration.md#queue), po angielsku).
+
+### Zależności: `after`
+
+```yaml
+---
+task: NC-42-REVIEW
+agent: codex
+review_of: NC-42
+after: NC-42            # albo lista: [NC-41, NC-42]
+repos: [...]
+---
+```
+
+Zadanie z kolejki z `after` startuje dopiero wtedy, gdy każde wskazane zadanie ma raport: stan `report-ready` albo zamknięte z plikiem raportu nadal na miejscu. Do tego czasu `agentctl status`, `queue list` i board pokazują `czeka na NC-42`; zadanie czekające na zależność nie zajmuje miejsca w kolejce, więc pozostałe idą dalej. Przegląd (`review_of`) bez `after` dostaje w podsumowaniu podpowiedź, bo inaczej wystartowałby, gdy tylko zwolni się okno, zanim autor cokolwiek napisze.
+
+Przy dodawaniu zadanie wskazane w `after` musi istnieć (wystartowane, w kolejce albo w tym samym pliku), zadanie nie może czekać samo na siebie, a zadania nie mogą czekać na siebie nawzajem w kółko; każde z tych naruszeń jest błędem z nazwaną ścieżką. `new` nie ma kolejki, w której mógłby czekać: odmawia zadania, którego `after` nie jest spełnione, i wskazuje `agentctl queue`. Zależność, której start się nie udał, pozostaje niespełniona (`czeka na NC-42 (failed)`), dopóki nie zrobisz `queue retry` albo `queue rm`.
+
+**Zależność, która została anulowana**, nigdy nie dostanie raportu. `queue` i `new` odmawiają `after` wskazującego anulowane zadanie, a zadanie, które już czeka, staje się **zablokowane** (⛓): `status`, `queue list` i board pokazują `⛓ zablokowane – NC-42 anulowane` (`blocked: true` w `queue list --json`, `blocked` w MCP `queue_list`), nigdy nie wystartuje (zadanie czekające na zablokowane jest też zablokowane), a `watch` wysyła jedno powiadomienie na anulowanego autora, `NC-43 zablokowane – NC-42 anulowane`, zapamiętane we wpisie kolejki, żeby restart niczego nie powtórzył. Są dwa wyjścia: `agentctl cancel NC-43` albo `agentctl unblock NC-43 [--drop-after NC-42]`, które usuwa anulowane zadanie (albo tylko to wskazane) z `after`, we wpisie i w jego specu; zadanie wraca do kolejki i czeka na resztę swojego `after` albo startuje.
+
+## Kolizje
+
+Dwa zadania zmieniające te same pliki w tym samym repozytorium spotkają się w konflikcie scalania. agentctl mówi o tym wcześnie.
+
+- **Co jest porównywane.** Dla każdego aktywnego zadania (jego okno działa) pliki zmienione od chwili, gdy jego worktree odeszło od bazy (`git diff --name-only <base>...HEAD`), plus pliki z niezacommitowanymi zmianami, osobno dla każdego repozytorium źródłowego (`repos[].path`). Dwa zadania kolidują, gdy ich zbiory mają wspólne pliki. `collisions.ignore` pomija lockfile i podobne.
+- **`agentctl status`** dostaje kolumnę `COLLIDE`, dopóki cokolwiek koliduje: `⚠ LANDING-QS-1: 2` znaczy „2 wspólne pliki z LANDING-QS-1”. `status --json` ma to samo w `collide`.
+- **`agentctl watch`** pyta git co `collisions.interval` (300 s) i wysyła jedno powiadomienie na każdą nową parę („⚠ A i B zmieniają te same pliki (2): …”). Para jest zapamiętana w `<config dir>/collisions.json`, więc ani następne sprawdzenie, ani restart watchera jej nie powtórzy; gdy pliki przestaną się pokrywać, a potem znowu się pokryją, para jest znów nowa.
+- **`agentctl overlap [TASK]`** wypisuje wspólne pliki każdej pary (albo par z TASK), obliczone w tej chwili.
+- **`touches: [globs]`** w specu mówi, co zadanie zamierza zmienić. `queue` i `new` ostrzegają wtedy i pytają y/N, gdy aktywne zadanie już zmienia pasujące pliki (`new -y` nie pyta; bez terminala ostrzeżenie jest tylko wypisywane).
+- Board oznacza kolidujące zadanie znakiem `⚠` w pierwszej kolumnie i w podglądzie mówi, z kim koliduje ([board](#board)).
+
+## Board
+
+`agentctl board` to pełnoekranowy przegląd wszystkich zadań, odświeżany co 2 sekundy. `agentctl board --tmux` otwiera go w oknie `board` sesji agentctl
+(tworzonym, jeśli go brak, nigdy dwukrotnie); okna boardu i watcha nie są zadaniami.
+
+```
+agentctl board  agentctl-test · 3 tasks · 09:41:03
+  TASK       AGENT              STATE          TIME    PROGRESS REPORT │ AC5-C · last 13 lines
+  AC5-A      claude opus/high   ⏸ waiting      37s     2c 3f    -      │ bash-3.2$ claude --model sonnet --effort medium
+  AC5-B      codex gpt-6.1-sol… ✓ report-ready 37s     1c 1f    ready  │ Claude Code (fake) --model sonnet --effort medium
+▸ AC5-C      claude sonnet/med… ? needs-input  36s     2c 2f    -      │
+                                                                       │ ● got: Model: sonnet · effort medium
+                                                                       │
+                                                                       │ ● working on: Third fake task that asks you something. W…
+                                                                       │ ● Edited file-1.txt
+                                                                       │ ● Edited file-0.txt
+                                                                       │ ? Tea or coffee?
+                                                                       │   1. Tea
+                                                                       │   2. Coffee
+                                                                       │   Enter to select · Esc to cancel
+                                                                       │ ● you chose: tea please
+
+Enter – open the agent · F12 – back to the list
+↑↓ ⏎ m msg M move i int c/r pull x close X cancel k cohort h hide z/a u/d/p ?
+```
+
+Poniżej 110 kolumn podgląd jest ukryty, a lista zajmuje całą szerokość (tu 80 kolumn):
+
+```
+agentctl board  agentctl-test · 3 tasks · 09:40:39
+  TASK       AGENT              STATE          TIME    PROGRESS REPORT
+▸ AC5-A      claude opus/high   ⚙ working      13s     2c 3f    -
+  AC5-B      codex gpt-6.1-sol… ✓ report-ready 13s     1c 1f    ready
+  AC5-C      claude sonnet/med… ? needs-input  12s     2c 2f    -
+
+Enter – open the agent · F12 – back to the list
+↑↓ ⏎ m msg M move i int c/r pull x close X cancel k cohort h hide z/a u/d/p ?
+```
+
+Lista pokazuje zadanie, agenta/model/effort, ikonę stanu, czas, `PROGRESS` i raport (`-` brak, `ready` jeszcze niepobrany, `pulled`). Od 110 kolumn prawa kolumna
+pokazuje ostatnie 30 linii wybranego okna (jak `peek`, bez stopki); poniżej lista zajmuje całą szerokość i działa aż do 80 kolumn.
+
+| Klawisz | Działanie |
+|---|---|
+| `↑` `↓` (`j`) | wybór zadania (`k` jest teraz filtrem kohorty i już nie przesuwa w górę) |
+| `Enter` | przejście do okna zadania (`select-window` + `switch-client`); `F12` (albo `Ctrl-b l`) wraca do boardu. Przy zadaniu bez okna otwiera zamiast tego menu: `c` kopiuj raport, `x` zamknij, `h` ukryj, `Esc` |
+| `m` | wpisz wiadomość i wyślij ją agentowi tak jak `send` (`Enter` wysyła, `Esc` anuluje) |
+| `M` | przenieś zadanie do drugiego dostawcy po limicie użycia (`agentctl move`), po pytaniu `[y/N]`; odmowa dla zadań z `pin` i już przeniesionych |
+| `i` | przerwij bieżącą turę, po pytaniu `[y/N]` |
+| `c` | kopiuj raport wybranego zadania (`pull`) |
+| `r` | kopiuj wszystkie nowe raporty (`pull --ready`) |
+| `x` | zamknij okno, po pytaniu `[y/N]`; jeśli zadanie ma worktree, drugie pytanie dotyczy tego, czy usunąć także jego (`git worktree remove`, nigdy `--force`, gałąź zostaje; `Esc` anuluje) |
+| `X` | anuluj wybrane zadanie ([Anulowanie zadań](#anulowanie-zadań)): pyta o powód (opcjonalny; `Enter` idzie dalej, `Esc` zatrzymuje), potem `[y/N]`. Działa też na zadaniu z kolejki; zadanie z `move` jest anulowane razem z drugą połową. Worktree i gałąź zostają |
+| `l` | log zadań (`agentctl log`): `↑↓` przewijanie, `Esc` powrót |
+| `o` / `p` / `f` | oznacz wybrane zakończone zadanie jako ok / partial / fail ([Historia i statystyki](#historia-i-statystyki)); `p` wstrzymuje kolejkę, gdy nie zaznaczono zakończonego zadania |
+| `k` | wybierz kohortę do pokazania: `wszystkie`, kohorta albo `bez kohorty` (zadania bez żadnej kohorty); `↑↓` i `Enter`, albo jej numer. Nagłówek mówi `cohort: <nazwa>`; listy, kolejka i sekcje podążają za filtrem |
+| `g` / `E` | zwiń grupę kohorty wybranego zadania / rozwiń wszystkie grupy |
+| `L` | limity (`agentctl limits`) |
+| `G` | podgląd sprzątania (`agentctl gc`; board niczego nie usuwa) |
+| `R` | wznów zadania z sekcji „Do wznowienia” (po y/N) |
+| `h` | ukryj wybrane zadanie (albo pokaż ukryte); nic nie jest zamykane ani usuwane |
+| `u` | na zadaniu z sekcji **Queue (N)**: przesuń je na początek kolejki |
+| `d` | na zadaniu z sekcji **Queue (N)**: usuń je z kolejki, po pytaniu `[y/N]` |
+| `p` | wstrzymaj lub wznów kolejkę (`queue pause` / `queue resume`) |
+| `z` | otwórz lub zamknij sekcję **Finished (N)** |
+| `a` | pokaż także ukryte zadania (przyciemnione, oznaczone `·`) oraz zamknięte i anulowane, w ich własnych sekcjach **Closed (N)** i **Cancelled (N)** |
+| `?` / `q` | pomoc / wyjście (agenci dalej działają) |
+
+Sekcja **Queue (N)** stoi pod aktywnymi zadaniami (zob. [kolejka](#kolejka)): każde zadanie z kolejki pokazuje swoje miejsce w kolejce i to, na co czeka (`1. czeka na miejsce: claude 2/2`, `2. czeka na NC-42`, `✗ failed: …`), a podgląd pokazuje jego spec. Zadanie, które zmienia pliki zmieniane też przez inne aktywne zadanie, ma `⚠` w pierwszej kolumnie, a tytuł jego podglądu mówi, z kim (`⚠ LANDING-QS-1: 2`; [kolizje](#kolizje)).
+
+**Kohorty.** Gdy tylko jedno zadanie ma kohortę, aktywna lista jest grupowana: nagłówek na kohortę w kolejności nazw (`- sprint-1 (4) 2⚙ 1✓ 1⧗`: zadania, potem liczba zadań w każdym stanie, zadania z kolejki na końcu jako `⧗`), zadania bez kohorty na końcu pod `- bez kohorty (N)`. `g` zwija grupę (`+` z przodu, jej wiersze wypadają ze ścieżki kursora), `G` otwiera wszystkie. Zadania kohorty z kolejki są liczone w jej nagłówku, ale zostają w sekcji **Queue**. Bez żadnej kohorty lista jest płaska, jak dawniej. Pasek stanu tmux nie jest grupowany: liczy wszystkie zadania.
+
+Zadania, które nadal mają okno, są na początku. Zadania bez okna (i bez `close`: `dead`, `report-ready` po zamknięciu agenta w jego oknie, `superseded`) czekają przyciemnione pod zwiniętym tytułem **Finished (N)**; `z` go otwiera. Enter na jednym z nich nie próbuje przełączać na nieistniejące okno. Zob. [Zamykanie i ukrywanie zadań](#zamykanie-i-ukrywanie-zadań).
+
+Nic destrukcyjnego nie działa na pojedynczy klawisz. Board używa tych samych funkcji rdzenia co polecenia (`sendPrompts`, `interruptTask`, `pullTask`, `pullReady`, `closeTask`, `moveTask`); git jest pytany
+o postęp najwyżej co 10 sekund. Board wymaga terminala; bez tmux `Enter` mówi, żeby użyć `agentctl attach`.
+
+> **Dlaczego Ink i dlaczego `React.createElement` zamiast JSX lub `htm`?** Projekt działa na wycinaniu typów przez Node, bez kroku budowania, a JSX nie jest
+> składnią, którą da się po prostu wymazać, więc nie uruchomi się bez przetworzenia. `htm` (szablony tagowane) pozwoliłby uniknąć budowania, ale dodaje zależność, żeby napisać to, co jest kilkudziesięcioma liniami wywołań `createElement`,
+> a jego szablony to zwykłe napisy, których `tsc --noEmit` nie sprawdzi; z `createElement` propsy komponentów są sprawdzane typami jak reszta kodu.
+> Ink jest ładowany dopiero przy starcie boardu, więc pozostałe polecenia nie płacą za React.
+
+## Stany zadań
+
+`status` wyprowadza stan każdego zadania z okna (`tmux capture-pane`, wzorce per agent w configu) i z pliku raportu:
+
+| Stan | Znaczenie |
+|---|---|
+| `working` | trwa tura (`working_pattern`, domyślnie `esc to interrupt`) |
+| `background` | agent jest bezczynny przy prompcie, ale działa jego własna praca w tle (`background_patterns`; Claude Code pokazuje w stopce `· 1 shell, 6 monitors`). W międzyczasie kończy turę co kilka minut, więc koniec tury nie jest ogłaszany, a `watch` nie nazywa go oczekiwaniem; pasek stanu tmux liczy go razem z `working`; ikona ⏳. Powiadomienie przychodzi, gdy praca w tle się skończy. Codex ma „background terminals” (`/ps`); jego wzorzec to najlepsze przypuszczenie, tekstu stopki z licznikiem nie widziano na ekranie |
+| `waiting` | agent jest bezczynny przy prompcie i nie ma jeszcze raportu |
+| `needs-trust` | agent pokazuje dialog zaufania do folderu; musi na niego odpowiedzieć człowiek |
+| `needs-input` | agent zadał **Tobie** pytanie lub prosi o zgodę i czeka (`question_pattern`; Codex: `? <pytanie>` z opcjami i `• Waiting for your answer.` albo dialog zatwierdzenia; Claude Code: dialog `Enter to select · Esc to cancel` albo dialog uprawnień; albo [zdarzenie](#zdarzenia) `Notification` Claude'a) |
+| `limited` | agent mówi, że jego limit użycia jest wyczerpany (`limit_patterns` albo zdarzenie `StopFailure` Claude'a); zob. [Limity i move](#limity-i-move) |
+| `report-ready` | plik raportu istnieje i jest nowszy niż start (agent jest bezczynny albo okno zniknęło) |
+| `superseded` | zadanie przeniesiono do drugiego dostawcy przez `agentctl move`; to stare okno, które zamykasz sam |
+| `dead` | okno zniknęło i nie ma raportu |
+| `closed` | uruchomiono `agentctl close` (albo folder stanu jest w archiwum): widoczne tylko w `status --all` i pod klawiszem `a` na boardzie, zob. [Zamykanie i ukrywanie zadań](#zamykanie-i-ukrywanie-zadań) |
+| `cancelled` | uruchomiono `agentctl cancel` (praca została porzucona w trakcie tury albo w kolejce): widoczne tylko w `status --all` i pod klawiszem `a` na boardzie (sekcja **Cancelled**), zob. [Anulowanie zadań](#anulowanie-zadań). Wygrywa z `closed` |
+| `orphan` | okno sesji agentctl nie ma pliku stanu (zgubionego albo nigdy nieutworzonego) |
+
+Kolejność dla żywego okna: `needs-trust`, potem `needs-input`, potem `working`, potem `limited`, potem `background`, potem `report-ready`, potem `waiting` (`superseded` nadpisuje wszystkie; `closed` i `cancelled` dotyczą tylko zadania bez okna).
+To heurystyki oparte na tekście ekranu; jeśli aktualizacja CLI zmieni jego brzmienie, popraw wzorce w configu.
+
+## Zaufanie do folderu
+
+Świeży worktree gita to nowy korzeń projektu, więc Claude Code (sprawdzone na żywo, 2.1.309) i Codex (0.166.0) pytają o niego „czy ufasz temu folderowi?”, nawet gdy główny checkout albo katalog nadrzędny jest zaufany. agentctl **nigdy nie odpowiada na ten dialog**, ale `new` czeka, aż Ty to zrobisz:
+
+```
+NC-42: agent waits for folder trust – attach: tmux attach -t agentctl, confirm in window nc-42
+```
+
+`new` dalej odpytuje okno (`tmux capture-pane`). Gdy dialog zniknie, a agent pokaże pole wejściowe, wkleja prompt jak zwykle; agent dostaje wtedy znowu `ready_timeout` na start. Specyfikacje w jednym pliku są obsługiwane jedna po drugiej, więc na każdy dialog czeka się po kolei.
+
+- **Limit czasu:** `agents.<name>.trust_timeout` (sekundy, domyślnie 600). Po jego upływie `new` kończy, zostawia okno otwarte i wypisuje `agentctl send <cache>/<task>/TASK.md`.
+- **Ctrl-C** kończy czekanie bez zamykania okna, wypisuje specyfikacje, które nie wystartowały, i to samo polecenie `agentctl send`.
+- **`--no-wait-trust`** zachowuje zachowanie z iteracji 1: zatrzymanie od razu przy dialogu, z instrukcją attach.
+
+W każdym przypadku prompt jest wysyłany dopiero po zniknięciu dialogu; dostarcz go ręcznie przez `agentctl send <cache>/<task>/TASK.md`.
+
+**Czy zaufanie do katalogu nadrzędnego pomaga?** Sprawdzone na żywo 2026-10-31 (Claude Code 2.1.309 z zaufanym `~/Projects`, Codex 0.166.0 z zaufanym `~`), w nowych katalogach pod zaufanym:
+
+| Nowy katalog | Claude Code | Codex |
+|---|---|---|
+| zwykły folder (bez gita) | brak dialogu (dziedziczy) | brak dialogu (dziedziczy) |
+| nowe repozytorium git | **dialog** | **dialog** |
+| `git worktree add` tego repozytorium | **dialog** | **dialog**; mówi „trusting will apply to the repository root” |
+
+Zatem zaufanie do `worktree_root` (na przykład `~/Projects/wt`) **nie** obejmuje worktree gita, a `doctor` nie ma tu czego sprawdzać. Codex wiąże zaufanie do worktree z korzeniem repozytorium, więc zaufany główny checkout prawdopodobnie obejmuje jego worktree (niesprawdzone na żywo: wymaga to zaufanego repozytorium i nowego worktree na nim, co zmieniłoby Twój config Codexa); Claude Code zapytał także o worktree zaufanego checkoutu (iteracja 1). Stąd czekanie.
+
+## Mirror
+
+Domyślnie wyłączony. Ustaw `mirror_dir`, a `status` i `pull` skopiują każdy raport zadania (nowy lub zmieniony) do
+`<mirror_dir>/<task>/` i zapiszą `<mirror_dir>/status.json` (te same wiersze co `status --json`). Wskaż nim zsynchronizowany
+folder, żeby czytać raporty i stan floty z innego urządzenia. Nic nie działa w tle: mirror odświeża się,
+gdy wywołasz `status` lub `pull`.
+
+## Zasady bezpieczeństwa
+
+- `git` jest wołany tylko z `worktree add`, `worktree remove`, zapytaniami tylko do odczytu (`rev-parse`, `status --porcelain`, `merge-base --is-ancestor`, `worktree list`) i, tylko dla `gc --branches`, `branch -d` na gałęzi, która jest scalona. Bez merge, rebase, push, `--force` ani `branch -D`.
+- Brak trybu auto-accept: agentctl nie dodaje takiej flagi i odrzuca configi, które próbują. Twoje własne ustawienia agenta nadal obowiązują (na przykład domyślny tryb uprawnień w `~/.claude/settings.json`); agentctl ich nie nadpisuje.
+- Pliki trafiają tylko do `state_dir` (własny stan agentctl) i do katalogu cache (raporty). Nic nie jest zapisywane w `~/.claude` ani `/tmp`.
+- Komunikaty, które wskazują cel tmux, ujmują go w cudzysłów (`-t '=agentctl:nc-42'`): zsh rozwija słowo zaczynające się od `=` do ścieżki programu.
+- Komunikaty o błędach są krótkie i mówią, co zrobić dalej.
+
+## Limity okien i cross-review
+
+- `limits.<agent>` ogranicza jednoczesne okna tmux na dostawcę; błąd wymienia żywe okna. Okna są przypisywane do dostawcy przez ich `TASK.md`. Zarezerwowane miejsca i (z `limits.count_external`) sesje zewnętrzne też się liczą ([limity na żywo](#limity-na-żywo-i-przeładowanie-konfiguracji)).
+- `review_of: NC-6` szuka autora w `<state_dir>/nc-6/TASK.md` (albo w tym samym pliku) i wymaga innego agenta **albo** innego modelu. `default` liczy się jako osobna nazwa modelu.
+
+## Stabilna instalacja i aktualizacje
+
+Do codziennej pracy używaj **stabilnej kopii**, a `~/Projects/agentctl` zostaw wyłącznie do rozwoju. (`npm link` z repo sprawiał, że globalne
+`agentctl` uruchamiało dowolną gałąź, która była tam wyciągnięta, skończoną lub nie.) Stabilna kopia to odłączony worktree gita tego repo,
+domyślnie `~/Projects/agentctl-stable`; tworzy go i aktualizuje `bin/agentctl-update`.
+
+```sh
+~/Projects/agentctl/bin/agentctl-update     # pierwsza instalacja
+agentctl-update                             # później, po scaleniu PR
+```
+
+Robi to w tej kolejności: `git fetch origin` w repo; `git worktree add --detach <stable> <ref>` (a gdy kopia istnieje, odmowa,
+jeśli ma lokalne zmiany, w przeciwnym razie `git checkout --detach <ref>`); `npm ci` i `npm link` w stabilnej kopii, żeby globalne `agentctl` i
+`agentctl-update` wskazywały na nią; `agentctl doctor` (porażka kończy skrypt kodem niezerowym); jeśli w sesji tmux
+`agentctl` istnieje okno `watch`, zabija je i uruchamia `agentctl watch --tmux` z nowej wersji (żadne inne okno nie jest ruszane); na koniec wypisuje
+poprzedni i nowy commit oraz to, czy watch został zrestartowany.
+
+| Opcja / zmienna | Znaczenie |
+|---|---|
+| `--ref <ref>` | co zainstalować, domyślnie `origin/main` |
+| `--dry-run` | wypisz polecenia, żadnego nie uruchamiaj |
+| `--no-watch` | nie restartuj okna watch |
+| `--no-link` | pomiń `npm link` (do testowania skryptu bez przepinania globalnych poleceń) |
+| `AGENTCTL_REPO` | repo; domyślnie katalog powyżej `bin/` skryptu (z rozwiązanymi symlinkami) |
+| `AGENTCTL_STABLE_DIR` | stabilna kopia, domyślnie `~/Projects/agentctl-stable` |
+| `AGENTCTL_SESSION` | sesja tmux okna watch, domyślnie `agentctl` |
+
+## Rozwój
+
+Zob. [CONTRIBUTING.md](../CONTRIBUTING.md): testy, typecheck, `npm run docs`, jak zorganizowany jest kod i jak zamyka się kamień milowy.

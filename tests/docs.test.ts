@@ -143,3 +143,23 @@ describe('docs: links and versions', () => {
     assert.deepEqual(blocks(read('README.pl.md')).map((d) => d.split('\n')[0]), diagrams.map((d) => d.split('\n')[0]));
   });
 });
+
+describe('docs: details.pl.md is a full equivalent of details.md', () => {
+  const en = read('docs', 'details.md');
+  const pl = read('docs', 'details.pl.md');
+  const headings = (text: string): string[] => [...text.replace(/```[\s\S]*?```/g, '').matchAll(/^(#{1,6})\s/gm)].map((m) => m[1]!);
+
+  it('has the same headings (levels and order), code blocks and table rows', () => {
+    assert.deepEqual(headings(pl), headings(en));
+    assert.equal((pl.match(/```/g) ?? []).length, (en.match(/```/g) ?? []).length);
+    assert.equal((pl.match(/^\|/gm) ?? []).length, (en.match(/^\|/gm) ?? []).length);
+  });
+
+  it('README.pl.md links to the Polish details, not the English ones', () => {
+    const readme = read('README.pl.md');
+    const links = [...readme.matchAll(/\]\((docs\/details(?:\.pl)?\.md)[#)]/g)].map((m) => m[1]);
+    assert.ok(links.length > 5);
+    assert.ok(links.every((l) => l === 'docs/details.pl.md' || l === 'docs/details.md'));
+    assert.equal(readme.match(/\]\(docs\/details\.md#/g), null, 'an anchor link into the English details');
+  });
+});

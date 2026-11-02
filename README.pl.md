@@ -255,7 +255,7 @@ bin/agentctl-update            # stabilna kopia w ~/Projects/agentctl-stable, np
 agentctl doctor                # tmux, node, git, claude, codex, gh, katalog cache, configi
 ```
 
-`agentctl-update` utrzymuje odłączoną kopię repo do codziennej pracy, żeby niedokończona gałąź Twojego klonu nigdy nie była tym, co uruchamia globalne `agentctl`; po każdym wydaniu uruchom go ponownie. Szczegóły i opcje: [docs/details.md](docs/details.md#stable-install-and-updates) (po angielsku). Żeby tylko spróbować, wystarczy też `npm install && npm link` w klonie.
+`agentctl-update` utrzymuje odłączoną kopię repo do codziennej pracy, żeby niedokończona gałąź Twojego klonu nigdy nie była tym, co uruchamia globalne `agentctl`; po każdym wydaniu uruchom go ponownie. Szczegóły i opcje: [docs/details.pl.md](docs/details.pl.md#stabilna-instalacja-i-aktualizacje). Żeby tylko spróbować, wystarczy też `npm install && npm link` w klonie.
 
 Kod działa bezpośrednio na wycinaniu typów przez Node (`node --experimental-strip-types`, ustawione w shebangu), więc nie ma czego budować, ale trzeba go instalować z klonu, nie z paczki z rejestru (Node nie wycina typów wewnątrz `node_modules`).
 
@@ -280,7 +280,7 @@ czat daje spec -> agentctl new --clip -> agentctl watch powiadamia -> agentctl p
 
 1. **Czat daje spec** jako dokładnie jeden blok kodu zaczynający się od `---`, żeby przycisk kopiowania skopiował spec i nic więcej.
 2. **`agentctl new --clip`** czyta go ze schowka, wypisuje podsumowanie (zadanie, agent/model/effort, worktree, gałąź, setup, linki) i pyta `Start? [y/N]`. `-y` pomija pytanie. `agentctl send --clip` robi to samo dla dodatkowego promptu.
-3. **`agentctl watch --tmux`** uruchamia obserwatora we własnym oknie tmux. Co 15 sekund ustala [stan](docs/details.md#task-states) każdego zadania i wysyła jedno powiadomienie na zmianę stanu. Przed nazwą każdego okna ustawia też ikonę stanu, a w pasku stanu tmux liczbę zadań.
+3. **`agentctl watch --tmux`** uruchamia obserwatora we własnym oknie tmux. Co 15 sekund ustala [stan](docs/details.pl.md#stany-zadań) każdego zadania i wysyła jedno powiadomienie na zmianę stanu. Przed nazwą każdego okna ustawia też ikonę stanu, a w pasku stanu tmux liczbę zadań.
 4. **`agentctl pull --ready`** łączy każdy gotowy, jeszcze niepobrany raport w jeden tekst, każdy pod nagłówkiem `=== NC-42 (claude opus/high) ===`, kopiuje go i oznacza te zadania jako pobrane.
 5. **Wklejasz go do czatu.** Czat ocenia raporty; agentctl nigdy nie wydaje werdyktów.
 6. **Czat daje linię zamykającą**, na przykład `agentctl close NC-41 NC-42 --rm-worktree`. `close` wypisuje zadania (zaznaczając te bez raportu) i pyta y/N. Gałęzie zostają, nic nie jest scalane.
@@ -416,7 +416,7 @@ Pod linią tytułu panel pokazuje plan każdego dostawcy (pasek, procent i reset
 
 Gdy są kohorty, lista jest pogrupowana pod zwijanymi nagłówkami z licznikami stanów (`- sprint-1 (4) 2⚙ 1✓ 1⧗`), zadania bez kohorty na końcu pod `bez kohorty`. Pasek tmux dalej liczy wszystkie zadania.
 
-W sesji tmux agentctl włączona jest mysz (klik w nazwę okna w pasku stanu), a `F12` wraca do boardu z każdego okna. Żadna destrukcyjna akcja nie działa na pojedynczy klawisz. Więcej: [docs/details.md](docs/details.md#board) (po angielsku).
+W sesji tmux agentctl włączona jest mysz (klik w nazwę okna w pasku stanu), a `F12` wraca do boardu z każdego okna. Żadna destrukcyjna akcja nie działa na pojedynczy klawisz. Więcej: [docs/details.pl.md](docs/details.pl.md#board).
 
 ## Powiadomienia i zdarzenia
 
@@ -424,7 +424,7 @@ Czytanie ekranu co 15 sekund to zgadywanie, więc `agentctl new` prosi też każ
 
 - Powiadomienia idą przez `terminal-notifier`, jeśli jest zainstalowany (kliknięcie uruchamia `agentctl attach <task> --switch-client` i wysuwa terminal na wierzch), w przeciwnym razie przez `osascript` (`notify-send` na Linuksie). Kanał wybiera `notify.backend`; `agentctl notify-test` mówi, którym kanałem poszła wiadomość testowa.
 - Teksty: `NC-42: <pytanie>`, `NC-42: raport gotowy – <werdykt>` (werdykt to pierwsza sensowna linia raportu albo linia pasująca do `notify.verdict_pattern`), limit użycia, zadanie czekające dłużej niż 120 sekund, zniknięte okno. Teksty są na razie po polsku.
-- Stany: [diagram wyżej](#stany-zadań). Szczegóły, tabele zdarzeń i to, co sprawdzono na Claude Code 2.1.309 i Codex 0.166.0: [docs/details.md](docs/details.md#events) (po angielsku).
+- Stany: [diagram wyżej](#stany-zadań). Szczegóły, tabele zdarzeń i to, co sprawdzono na Claude Code 2.1.309 i Codex 0.166.0: [docs/details.pl.md](docs/details.pl.md#zdarzenia).
 
 ## Odpowiedniki modeli i move
 
@@ -434,7 +434,7 @@ Modele Claude i Codexa nie odpowiadają sobie jeden do jednego, więc agentctl t
 - Gdy limit okien wskazanego dostawcy jest pełny, a drugi ma miejsce, `new` pyta przed zmianą. Nigdy nie zmienia po cichu; `pin: true` to zakazuje.
 - `agentctl move NC-42` przekazuje zadanie, które trafiło na limit użycia, drugiemu dostawcy: nowe okno `nc-42-2` w tym samym worktree, z oryginalnym promptem i notatką, żeby kontynuować na podstawie `git log` i `git diff`. Stare okno zostaje jako `superseded` i zamykasz je sam.
 
-Wbudowana tabela i zasady limitów: [docs/details.md](docs/details.md#model-equivalents) (po angielsku).
+Wbudowana tabela i zasady limitów: [docs/details.pl.md](docs/details.pl.md#odpowiedniki-modeli).
 
 ## Kolejka
 
@@ -468,7 +468,7 @@ after: NC-42
 ---
 ```
 
-Przegląd bez `after` dostaje w podsumowaniu podpowiedź. Nieistniejące zadanie lub pętla zależności to błąd przy dodawaniu. Szczegóły: [docs/details.md](docs/details.md#dependencies-after).
+Przegląd bez `after` dostaje w podsumowaniu podpowiedź. Nieistniejące zadanie lub pętla zależności to błąd przy dodawaniu. Szczegóły: [docs/details.pl.md](docs/details.pl.md#zależności-after).
 
 ## Kolizje
 
@@ -479,7 +479,7 @@ Dwa aktywne zadania zmieniające te same pliki w tym samym repozytorium to konfl
 - `touches: [src/menu/**]` w specu sprawia, że `queue` i `new` ostrzegają (i pytają y/N), gdy aktywne zadanie już zmienia pasujące pliki.
 - `collisions.ignore` pomija pliki typu lockfile. Porównywane są nazwy plików, nie fragmenty: dwa zadania w różnych miejscach jednego pliku nadal są zgłaszane.
 
-Szczegóły: [docs/details.md](docs/details.md#collisions).
+Szczegóły: [docs/details.pl.md](docs/details.pl.md#kolizje).
 
 ## Anulowanie zadań
 
@@ -498,7 +498,7 @@ agentctl unblock NC-43 [--drop-after NC-42]      # zadanie, które czekało na a
 - Zadanie w kolejce, którego `after` wskazuje anulowane zadanie, jest **zablokowane** (⛓): widać przyczynę, `watch` raz mówi „NC-43 zablokowane – NC-42 anulowane”, a zadanie czeka, aż je `unblock`ujesz albo anulujesz.
 - Powód, czas i źródło (`cli`, `board`, `mcp`) trafiają do `TASK.md`. Na boardzie to **`X`**; dla czatu jest narzędzie MCP `cancel`, które ogłasza się na pulpicie.
 
-Szczegóły: [docs/details.md](docs/details.md#cancelling-tasks) (po angielsku).
+Szczegóły: [docs/details.pl.md](docs/details.pl.md#anulowanie-zadań).
 
 ## Kohorty
 
@@ -524,7 +524,7 @@ agentctl status --cohort sprint-1              # także --json, --clip; --cohort
 - Gdy wszystkie nieanulowane zadania kohorty mają raport, `watch` mówi „kohorta sprint-1: wszystkie raporty gotowe (3)”, raz; ponownie dopiero gdy dojdzie zadanie.
 - `close --cohort X` i `cancel --cohort X` wypisują listę i pytają y/N. Board grupuje po kohortach (`k` filtruje, `g` zwija); serwer MCP ma `cohort_list`, `cohort_show` i argument `cohort` w `status` i `pull_ready`.
 
-Szczegóły: [docs/details.md](docs/details.md#cohorts) (po angielsku).
+Szczegóły: [docs/details.pl.md](docs/details.pl.md#kohorty).
 
 ## Zużycie i limity
 
@@ -549,7 +549,7 @@ codex     n/d          3% ↻ Sun 04:00   300k   2.1M
 - **Ostrzeżenia:** `watch` wysyła jedno powiadomienie po przekroczeniu `usage.warn` (domyślnie 80) i jedno po przekroczeniu `usage.critical` (95), na dostawcę i okres okna. `new` i `queue` pokazują stan planu dostawcy zadania i, gdy jest blisko limitu, a drugi ma zapas, podpowiedź „claude blisko limitu (83%), codex ma zapas (15%): --agent codex”. To tylko podpowiedź: nic się nie przełącza, a zadanie z `pin: true` zostaje.
 - **Wstrzymanie kolejki:** z `usage.queue_hold: 90` kolejka nie startuje zadań dostawcy, którego plan jest powyżej 90 %; `queue list` podaje powód. Domyślnie wyłączone.
 
-Szczegóły, sprawdzone formaty i co jest n/d: [docs/details.md](docs/details.md#usage-and-limits).
+Szczegóły, sprawdzone formaty i co jest n/d: [docs/details.pl.md](docs/details.pl.md#użycie-i-limity).
 
 ## Historia i statystyki
 
@@ -565,7 +565,7 @@ agentctl stats --since 30d             # per agent/model/effort: zadania, median
 - Udziały ok, partial i fail w `stats` liczą się od zadań, które oznaczyłeś; zadania przeniesione po limicie do drugiego dostawcy liczą się w grupie, która go osiągnęła.
 - Board: **`l`** pokazuje log, **`o`** / **`p`** / **`f`** oznaczają zaznaczone zakończone zadanie jako ok / partial / fail (`p` nadal wstrzymuje kolejkę, gdy nie zaznaczono zakończonego zadania). MCP: `usage`, `log`, `stats` (odczyt) i `mark` (zapis, za `mcp.allow`, bez kroku confirm).
 
-Szczegóły: [docs/details.md](docs/details.md#history-and-stats).
+Szczegóły: [docs/details.pl.md](docs/details.pl.md#historia-i-statystyki).
 
 ## Limity
 
@@ -692,7 +692,7 @@ Dokumentacja szczegółowa jest po angielsku:
 - [docs/configuration.md](docs/configuration.md): każdy klucz configu i specu.
 - [docs/mcp.md](docs/mcp.md): serwer MCP.
 - [docs/diagrams.md](docs/diagrams.md): przepływ, architektura, stany zadań.
-- [docs/details.md](docs/details.md): jak działają poszczególne elementy i co sprawdzono na żywo.
+- [docs/details.pl.md](docs/details.pl.md): jak działają poszczególne elementy i co sprawdzono na żywo ([po angielsku](docs/details.md)).
 - [CHANGELOG.md](CHANGELOG.md), [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Licencja
