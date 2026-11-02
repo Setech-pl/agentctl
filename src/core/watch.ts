@@ -4,7 +4,8 @@ import { ConfigStore, configStatePath, noteConfigState } from './config-store.ts
 import type { ConfigRefresh } from './config-store.ts';
 import { loadGlobalConfig } from './config.ts';
 import { limitsDiffText } from './limits.ts';
-import { recordJournalOnce } from './journal.ts';
+import { recordJournal, recordJournalOnce } from './journal.ts';
+import type { JournalKind } from './journal.ts';
 import type { Context } from './context.ts';
 import { Alerts } from './alert.ts';
 import type { Notifier } from './notify.ts';
@@ -99,6 +100,16 @@ async function recordReport(ctx: Context, task: string): Promise<void> {
   if (record) await recordEvent(ctx, record, 'report');
 }
 
+const JOURNALED: Partial<Record<TaskState, JournalKind>> = { 'report-ready': 'report-ready', 'needs-trust': 'needs-trust', 'needs-input': 'needs-input', limited: 'limited', dead: 'dead' };
+
+/** The transition goes to the journal that `events` reads (the notification only reaches the desktop). */
+async function journalTransition(ctx: Context, row: StatusRow, e: WatchEvent): Promise<void> {
+  const kind = JOURNALED[e.to];
+  if (!kind) return;
+  const verdict = kind === 'report-ready' ? readVerdict(row.reportPath, ctx.config.notify.verdictPattern) : undefined;
+  await recordJournal(ctx, { kind, task: row.task, text: e.notification ?? e.to, ...(verdict ? { verdict } : {}) });
+}
+
 export function watchLogPath(ctx: Context): string {
   return path.join(ctx.config.cache, 'agentctl-watch.log');
 }
@@ -185,6 +196,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
       // The ledger key of a reminder differs from the state names, so it is never taken for the end-of-turn event.
       const key = e.reason === 'waiting-too-long' ? 'waiting-too-long' : e.to;
       if ((await alerts.send({ task: row.task, window: row.windowName }, key, e.notification, 'watch')) === 'duplicate') e.duplicate = true;
+      else if (e.reason === 'transition') await journalTransition(ctx, row, e);
     }
     await ctx.runner.appendFile(watchLogPath(ctx), logLine(now, e));
     if (e.reason !== 'baseline') ctx.out(logLine(now, e).trimEnd());

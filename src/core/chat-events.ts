@@ -1,0 +1,147 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { parseAge } from './archive.ts';
+import { findCohort } from './cohort.ts';
+import type { GlobalConfig } from './config.ts';
+import type { Context } from './context.ts';
+import { readJournal } from './journal.ts';
+import type { JournalEntry } from './journal.ts';
+import { readQueue, waiting } from './queue.ts';
+import { selectReady } from './pull.ts';
+import { collectStatus } from './status.ts';
+import { AgentctlError, cohortKey, formatLocalTime, isObject } from './util.ts';
+
+/*
+ * What changed since the last look, for a chat that gets no notifications: the journal of events (watch, the queue, cancel, the limits)
+ * from a time on, and a short summary of the state now. Each client (the MCP server, the CLI) has its own marker: "last" is the time of
+ * that client's previous call.
+ */
+
+export type EventClient = 'cli' | 'mcp';
+
+/** The first call of a client looks this far back. */
+export const FIRST_LOOK_MS = 24 * 3_600_000;
+
+export const markersPath = (config: Pick<GlobalConfig, 'path'>): string => path.join(path.dirname(config.path), 'events-seen.json');
+
+export function readMarkers(config: Pick<GlobalConfig, 'path'>): Partial<Record<EventClient, string>> {
+  try {
+    const d: unknown = JSON.parse(fs.readFileSync(markersPath(config), 'utf8'));
+    const out: Partial<Record<EventClient, string>> = {};
+    if (isObject(d)) for (const c of ['cli', 'mcp'] as const) if (typeof d[c] === 'string') out[c] = d[c];
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** "last", an age (30m, 2h, 1d), an ISO time, or HH:MM today (local); returns ms. */
+export function parseSince(text: string | undefined, client: EventClient, config: Pick<GlobalConfig, 'path'>, now: number): { ms: number; label: string } {
+  const t = (text ?? 'last').trim();
+  if (t === '' || t === 'last') {
+    const marker = readMarkers(config)[client];
+    const ms = marker ? Date.parse(marker) : now - FIRST_LOOK_MS;
+    return { ms, label: marker ? `od ostatniego wywołania (${client}, ${formatLocalTime(marker)})` : `z ostatnich 24 h (pierwsze wywołanie ${client})` };
+  }
+  if (/^\d+[mhdw]$/.test(t)) return { ms: now - parseAge(t), label: `z ostatnich ${t}` };
+  const hm = /^(\d{1,2}):(\d{2})$/.exec(t);
+  if (hm) {
+    const d = new Date(now);
+    d.setHours(Number(hm[1]), Number(hm[2]), 0, 0);
+    const ms = d.getTime() > now ? d.getTime() - 86_400_000 : d.getTime();
+    return { ms, label: `od ${t}` };
+  }
+  const ms = Date.parse(t);
+  if (Number.isNaN(ms)) throw new AgentctlError(`cannot read the time "${t}"`, 'Use last, an age (30m, 2h, 1d), HH:MM or an ISO time like 2026-11-02T10:00.');
+  return { ms, label: `od ${formatLocalTime(new Date(ms).toISOString())}` };
+}
+
+export interface EventsSummary {
+  /** Tasks with a window that are not finished. */
+  active: number;
+  working: number;
+  /** Tasks that wait for the user: needs-input, needs-trust, waiting. */
+  needYou: string[];
+  queued: number;
+  /** Reports ready and not pulled yet. */
+  reportsToPull: string[];
+}
+
+export interface EventsReport {
+  client: EventClient;
+  /** ISO time the events start after. */
+  since: string;
+  sinceLabel: string;
+  cohort: string | null;
+  events: JournalEntry[];
+  summary: EventsSummary;
+  /** The marker of this client moved to this call. */
+  markerMoved: boolean;
+}
+
+export async function collectEvents(ctx: Context, opts: { client: EventClient; since?: string | undefined; cohort?: string | undefined; keep?: boolean | undefined }): Promise<EventsReport> {
+  const { config, runner } = ctx;
+  const now = runner.now();
+  const since = parseSince(opts.since, opts.client, config, now);
+  const cohort = opts.cohort === undefined ? null : findCohort(config, opts.cohort).name;
+  const events = readJournal(config, since.ms).filter((e) => cohort === null || (e.cohort !== undefined && cohortKey(e.cohort) === cohortKey(cohort)));
+  const rows = await collectStatus(ctx, { progress: false, archived: false });
+  const open = rows.filter((r) => !r.closed && !r.cancelled && !r.hidden && (cohort === null || (r.cohort !== null && cohortKey(r.cohort) === cohortKey(cohort))));
+  const alive = open.filter((r) => r.window === 'alive' && !r.finished);
+  const queue = waiting(readQueue(config)).filter((e) => cohort === null || (e.cohort !== undefined && cohortKey(e.cohort) === cohortKey(cohort)));
+  const summary: EventsSummary = {
+    active: alive.length,
+    working: alive.filter((r) => r.state === 'working' || r.state === 'background').length,
+    needYou: alive.filter((r) => r.state === 'needs-input' || r.state === 'needs-trust' || r.state === 'waiting').map((r) => `${r.task} (${r.state})`),
+    queued: queue.length,
+    reportsToPull: selectReady(open, false).map((r) => r.task),
+  };
+  // A look that only peeks (or a dry run) leaves the marker where it was.
+  let markerMoved = false;
+  if (!opts.keep && !runner.dryRun) {
+    const markers = readMarkers(config);
+    markers[opts.client] = new Date(now).toISOString();
+    await runner.writeFile(markersPath(config), `${JSON.stringify(markers, null, 2)}\n`);
+    markerMoved = true;
+  }
+  return { client: opts.client, since: new Date(since.ms).toISOString(), sinceLabel: since.label, cohort, events, summary, markerMoved };
+}
+
+const hhmm = (iso: string): string => formatLocalTime(iso).slice(-5);
+const KIND_LABEL: Record<JournalEntry['kind'], string> = {
+  'report-ready': 'RAPORT',
+  'queue-start': 'START',
+  'queue-failed': 'BŁĄD STARTU',
+  'needs-input': 'PYTANIE',
+  'needs-trust': 'ZAUFANIE',
+  blocked: 'ZABLOKOWANE',
+  cancelled: 'ANULOWANE',
+  limited: 'LIMIT',
+  dead: 'OKNO ZNIKNĘŁO',
+  'cohort-done': 'KOHORTA',
+  usage: 'UŻYCIE',
+  'limits-changed': 'LIMITY',
+};
+
+export function summaryLine(s: EventsSummary): string {
+  const parts = [`${s.active} aktywne${s.working > 0 ? ` (${s.working} pracuje)` : ''}`, `${s.queued} w kolejce`, s.reportsToPull.length > 0 ? `${s.reportsToPull.length} raport${s.reportsToPull.length === 1 ? '' : 'y'} do pobrania (${s.reportsToPull.join(', ')})` : 'brak raportów do pobrania'];
+  if (s.needYou.length > 0) parts.push(`czeka na Ciebie: ${s.needYou.join(', ')}`);
+  return `Teraz: ${parts.join(' · ')}.`;
+}
+
+export function renderEvents(report: EventsReport): string[] {
+  const head = `Zdarzenia ${report.sinceLabel}${report.cohort ? `, kohorta ${report.cohort}` : ''}: ${report.events.length === 0 ? 'brak zmian' : String(report.events.length)}`;
+  return [
+    head,
+    ...report.events.map((e) => `${hhmm(e.at)}  ${KIND_LABEL[e.kind]}${e.task ? `  ${e.task}` : ''}  ${e.verdict ? `${e.verdict}` : e.text}`),
+    summaryLine(report.summary),
+  ];
+}
+
+export function eventsMarkdown(report: EventsReport): string {
+  const lines = [`**${renderEvents(report)[0]}**`, ''];
+  for (const e of report.events) lines.push(`- ${hhmm(e.at)} **${KIND_LABEL[e.kind]}**${e.task ? ` ${e.task}` : ''} – ${e.verdict ?? e.text}`);
+  if (report.events.length > 0) lines.push('');
+  lines.push(summaryLine(report.summary));
+  return `${lines.join('\n')}\n`;
+}

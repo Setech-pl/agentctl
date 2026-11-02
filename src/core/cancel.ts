@@ -1,3 +1,4 @@
+import { recordJournal } from './journal.ts';
 import type { Context } from './context.ts';
 import { removeWorktrees } from './close.ts';
 import { recordEvent } from './history.ts';
@@ -186,6 +187,7 @@ export async function cancelTasks(ctx: Context, plan: CancelPlan, opts: CancelOp
       }
       const cancelled = readTaskRecord(config, item.record?.window ?? item.task.toLowerCase());
       if (cancelled) await recordEvent(ctx, cancelled, 'cancelled');
+      await recordJournal(ctx, { kind: 'cancelled', task: item.task, text: `${item.task} anulowane${opts.reason ? ` – ${opts.reason}` : ''}`, ...(cancelled?.cohort ? { cohort: cancelled.cohort } : {}) });
       const worktree = item.record?.repos[0]?.worktree;
       ctx.out(`${item.task}: cancelled${worktree && !opts.rmWorktree ? ` (worktree ${worktree} and its branch stay)` : ''}`);
       if (opts.rmWorktree && item.record) await removeWorktrees(ctx, item.task, item.record.repos);

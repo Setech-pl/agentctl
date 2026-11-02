@@ -25,6 +25,7 @@ export const COMMAND_EXAMPLES: Record<string, string[]> = {
   'queue retry': ['agentctl queue retry NC-42             # after a failed start: back at the end of the line'],
   'queue pause': ['agentctl queue pause                  # nothing new starts; running tasks are not touched'],
   'queue resume': ['agentctl queue resume'],
+  events: ['agentctl events                           # since the last call of the cli', 'agentctl events --since 2h --cohort sprint-1', 'agentctl events --clip                    # to paste at the start of a chat (does not move the marker)'],
   limits: ['agentctl limits                           # the same as limits show'],
   'limits show': ['agentctl limits show', 'agentctl limits show --json'],
   'limits set': ['agentctl limits set claude=3 codex=5     # summary, y/N, takes effect at once', 'agentctl limits set codex=off -y         # no limit for Codex, no question'],

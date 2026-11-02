@@ -28,6 +28,7 @@ import { listArchivedRecords, listTaskRecords, readTaskPrompt } from './taskstor
 import type { TaskRecord } from './taskstore.ts';
 import { computeStats, markTask, parseResult, RESULTS, selectHistory } from './history.ts';
 import { collectUsage } from './usage-report.ts';
+import { collectEvents, renderEvents } from './chat-events.ts';
 import { applySetLimits, collectLimits, planSetLimits, readReservations, releasePlaces, reservePlaces } from './limits.ts';
 import type { LimitAssignments } from './limits.ts';
 import { planLine } from './usage-report.ts';
@@ -224,6 +225,12 @@ async function runMark(deps: McpDeps, args: { task: string; result: string; note
     const marked = await markTask(ctx, args.task, result, args.note);
     return { text: `${marked.task}: marked ${marked.result}${marked.previous && marked.previous !== marked.result ? ` (was ${marked.previous})` : ''}. It is in the history (log, stats).`, executed: true, announce: `mark ${marked.task} ${marked.result}` };
   });
+}
+
+async function runEventsSince(deps: McpDeps, args: { since?: string | undefined; cohort?: string | undefined; peek?: boolean | undefined }): Promise<ToolResult> {
+  const ctx = deps.context(() => {});
+  const report = await collectEvents(ctx, { client: 'mcp', since: args.since, cohort: args.cohort, keep: Boolean(args.peek) });
+  return ok(`${renderEvents(report).join('\n')}\n\n${JSON.stringify(report, null, 2)}`);
 }
 
 async function runLimits(deps: McpDeps): Promise<ToolResult> {
@@ -670,6 +677,17 @@ export const MCP_TOOLS: McpToolDef[] = [
     input: { all: allArg, cohort: cohortArg.optional() },
     annotations: readOnly('Status of all agent tasks'),
     run: (deps, args) => guarded(() => runStatus(deps, args as { all?: boolean; cohort?: string })),
+  }),
+  def({
+    name: 'events_since',
+    title: 'What changed since the last look',
+    kind: 'read',
+    description:
+      'Call this at the start of EVERY answer that concerns the work of the agents. It returns what happened since your previous call (or since a given time): reports that became ready (with the verdict), tasks started from the queue, questions and folder-trust waits, blocked, cancelled and limited tasks, finished cohorts, plan thresholds crossed and changed limits - then one line with the state now (active, queued, reports to pull). ' +
+      'The chat gets no notifications, so this is how you learn what changed; the "last" marker is kept per client, so the first call looks back 24 hours. Events are recorded while "agentctl watch" runs. since: last (default), an age (30m, 2h, 1d), HH:MM or an ISO time. peek: true does not move the marker.',
+    input: { since: z.string().max(40).optional().describe('last (default), an age like 30m / 2h / 1d, HH:MM today, or an ISO time.'), cohort: cohortArg.optional(), peek: z.boolean().optional().describe('true: do not move the "last" marker.') },
+    annotations: readOnly('What changed since the last look'),
+    run: (deps, args) => guarded(() => runEventsSince(deps, args as { since?: string; cohort?: string; peek?: boolean })),
   }),
   def({
     name: 'limits',

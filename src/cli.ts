@@ -30,6 +30,7 @@ import { migrateLegacyState } from './core/taskstore.ts';
 import { newTasks } from './core/new.ts';
 import { commitQueueAdd, describeQueue, isPaused, moveToFront, planQueueAdd, readQueue, queueStatusLines, removeFromQueue, renderQueueList, retryEntry, setPaused, unblockEntry, waiting } from './core/queue.ts';
 import { liveWindows } from './core/plan.ts';
+import { collectEvents, eventsMarkdown, renderEvents } from './core/chat-events.ts';
 import { applySetLimits, collectLimits, parseAssignments, parseCounts, planSetLimits, releasePlaces, renderLimits, reservePlaces } from './core/limits.ts';
 import { collectOverlaps, renderOverlaps, touchWarnings } from './core/collisions.ts';
 import type { NewOptions } from './core/new.ts';
@@ -664,6 +665,31 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         const reservations = await releasePlaces(ctx, parseCounts(places, undefined));
         const left = Object.entries(reservations).map(([a, r]) => `${a} ${r.count}`).join(', ');
         line(left === '' ? 'Nothing is reserved now.' : `Still reserved: ${left}`);
+      }),
+    );
+
+  program
+    .command('events')
+    .description('What changed since the last time: reports that became ready (with the verdict), starts from the queue, questions, folder trust, blocked, cancelled and limited tasks, finished cohorts, plan thresholds, changed limits - then a line with the state now. Needs "agentctl watch" for what it sees (the journal is written by watch and by the commands). Each client (cli, mcp) has its own "last" marker.')
+    .option('--since <time>', 'last (default: since this client looked), an age (30m, 2h, 1d), HH:MM or an ISO time')
+    .option('--cohort <name>', 'only the events and tasks of this cohort')
+    .option('--keep', 'do not move the "last" marker of the cli client')
+    .option('--json', 'machine-readable output')
+    .option('--clip', 'copy a compact Markdown text to the clipboard (to paste at the start of a chat)')
+    .action(
+      guarded(async (opts: { since?: string; cohort?: string; keep?: boolean; json?: boolean; clip?: boolean }) => {
+        if (opts.json && opts.clip) throw new AgentctlError('--json and --clip exclude each other');
+        const ctx = contextFor(false, { migrate: false });
+        const report = await collectEvents(ctx, { client: 'cli', since: opts.since, cohort: opts.cohort, keep: Boolean(opts.keep) || Boolean(opts.clip) });
+        if (opts.json) return line(JSON.stringify(report, null, 2));
+        if (opts.clip) {
+          const md = eventsMarkdown(report);
+          const copy = await writeClipboard(ctx.runner, md);
+          if (copy.ok) return line(`Copied the events to the clipboard (${copy.tool}), ${md.length} characters.`);
+          line(`${copy.error}; here is the text:`);
+          return deps.stdout(md);
+        }
+        for (const l of renderEvents(report)) line(l);
       }),
     );
 

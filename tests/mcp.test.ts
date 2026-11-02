@@ -53,8 +53,8 @@ function withReport(config: GlobalConfig, task: string, text = `# ${task}\nWerdy
 }
 
 describe('mcp: the registry', () => {
-  it('has the fifteen read tools and the eleven write tools, with unique short names', () => {
-    assert.deepEqual(MCP_TOOLS.filter((t) => t.kind === 'read').map((t) => t.name), ['status', 'limits', 'version', 'peek', 'list_reports', 'get_report', 'pull_ready', 'task_spec', 'queue_list', 'cohort_list', 'cohort_show', 'usage', 'log', 'stats', 'overlap']);
+  it('has the sixteen read tools and the eleven write tools, with unique short names', () => {
+    assert.deepEqual(MCP_TOOLS.filter((t) => t.kind === 'read').map((t) => t.name), ['status', 'events_since', 'limits', 'version', 'peek', 'list_reports', 'get_report', 'pull_ready', 'task_spec', 'queue_list', 'cohort_list', 'cohort_show', 'usage', 'log', 'stats', 'overlap']);
     assert.deepEqual(MCP_TOOLS.filter((t) => t.kind === 'write').map((t) => t.name), ['set_limits', 'reserve', 'send', 'new', 'queue', 'queue_rm', 'cancel', 'mark', 'interrupt', 'close', 'move']);
     assert.equal(new Set(MCP_TOOL_NAMES).size, MCP_TOOL_NAMES.length);
     for (const t of MCP_TOOLS) assert.ok(t.name.length <= 64 && /^[a-z_]+$/.test(t.name), t.name);
