@@ -8,7 +8,7 @@ agentctl is a small TypeScript project. Sources and tests use Node's type stripp
 npm ci
 npm test            # node:test; no real tmux, git or agent is involved
 npm run typecheck   # tsc --noEmit
-npm run build       # clean dist/, compile runtime, make executable
+npm run build       # compile runtime into dist/, make executable
 npm run docs        # regenerates docs/commands.md from the command definitions
 node bin/agentctl.ts doctor
 ```

@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format follows [Kee
 
 Versions 0.1.0 to 0.7.0 correspond to pull requests #1 to #7; their dates are the merge dates. The version numbers were assigned afterwards, when this changelog was written.
 
+## [0.16.0] - 2026-11-02
+
+### Added
+- Public npm distribution as `@setech-pl/agentctl`, with package metadata, a file whitelist and build/test/typecheck lifecycle gates.
+- GitHub CI on Node 22.14 and latest Node; release publishing through npm OIDC with provenance, skipping versions already in the registry.
+- npm installation, platform support and first-publication instructions, including the command-name conflict with `@orgloop/agentctl`.
+- Doctor reports the installation source and warns when another `agentctl` shadows this package in PATH.
+- Tarball runtime smoke checks through the isolated live harness; task-specific live and unit cache overrides.
+
+### Changed
+- `agentctl-update` updates npm global installations through npm and rejects clone-only options in that mode.
+- MCP registration uses the installed npm executable for npm installations.
+- Minimum Node is 22.14.0.
+
+### Fixed
+- Avoid updater SIGPIPE under `pipefail` when checking for the watch window.
+
 ## [0.15.0] - 2026-11-02
 
 - Explain collapsed Codex questions with their count and the shortcut captured from the screen; retain needs-input while work continues. Peek and board preview preserve the explanation; local notifications include question text.
@@ -14,18 +31,6 @@ Versions 0.1.0 to 0.7.0 correspond to pull requests #1 to #7; their dates are th
 ## [Unreleased]
 
 Nothing yet.
-
-## [0.16.0] - 2026-11-02
-
-### Added
-- Public npm packaging as `@setech-pl/agentctl`, with compiled JavaScript in `dist/`, a clean prepack build and test/typecheck gates before publishing.
-- GitHub CI on Node 22.14 and latest Node; release publishing through npm OIDC with provenance and no token secret.
-- npm installation and first-publication instructions; doctor reports npm global, linked clone or repository development and warns about command conflicts with `@orgloop/agentctl`.
-
-### Changed
-- `agentctl-update` supports npm global installs as well as clone installs; the clone path builds before linking.
-- MCP registration and process version detection support the compiled npm executable. Minimum Node is 22.14 (dependencies need 22.12; OIDC needs 22.14).
-- Live suites and unit scratch directories accept isolated task cache locations.
 
 ## [0.14.0] - 2026-11-02
 
