@@ -339,6 +339,19 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     return result === 'exists' ? 'exists' : 'created';
   };
 
+  /** `up` with manager.autostart: the window is made and the command typed; nothing is waited for, and a failure is a line, not the end of `up`. */
+  const startManagerForUp = async (ctx: Context): Promise<void> => {
+    try {
+      const self = deps.selfArgv?.();
+      if (!self) throw new AgentctlError('cannot tell how to start the agentctl MCP server for the manager');
+      const result = await startManager(ctx, { self, noWait: true });
+      if (result.action === 'exists') line(`Manager: already running in window ${ctx.config.session}:${MANAGER_WINDOW} (${MANAGER_STATE_TEXT[result.state]}), left alone.`);
+      else line(`Manager: started in window ${ctx.config.session}:${MANAGER_WINDOW}, in ${result.project}. The first time, answer the folder trust and "Enable Remote Control" in that window; agentctl manager --url shows the address.`);
+    } catch (e) {
+      line(`Manager: not started - ${errorMessage(e).split('\n')[0]}`);
+    }
+  };
+
   const program = new Command();
   program
     .name('agentctl')
@@ -776,13 +789,14 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
 
   program
     .command('up')
-    .description('Start of the day: make sure the watcher and the board run in the agentctl session (never a second copy), say which tasks can be resumed, and go to the board (attach, or switch inside tmux). Without a terminal it only prints the command to attach.')
+    .description('Start of the day: make sure the watcher and the board run in the agentctl session (never a second copy; with manager.autostart the manager too), say which tasks can be resumed, and go to the board (attach, or switch inside tmux). Without a terminal it only prints the command to attach.')
     .option('--no-attach', 'do not go to the board; print the command')
     .action(
       guarded(async (opts: { attach?: boolean }) => {
         const ctx = contextFor(false);
         await startWatchWindow(ctx, true);
         await startBoardWindow(ctx);
+        if (ctx.config.manager.autostart) await startManagerForUp(ctx);
         const resumable = await findResumable(ctx);
         if (resumable.length > 0) line(`${resumable.length} task${resumable.length === 1 ? '' : 's'} to resume (${resumable.map((r) => r.task).join(', ')}): agentctl resume`);
         const command = `tmux attach -t ${ctx.config.session} \\; select-window -t ${BOARD_WINDOW}`;
