@@ -7,7 +7,9 @@ import {
   boardLayout,
   cancelledTitle,
   closedTitle,
+  cohortLabel,
   finishedTitle,
+  groupTitle,
   BOARD_REFRESH_MS,
   clearNotice,
   handleKey,
@@ -64,9 +66,11 @@ function TaskList(props: { state: BoardState; width: number; capacity: number; i
   const visible = visibleItems(state, props.capacity);
   const body =
     visible.items.length === 0
-      ? [h(Text, { key: 'empty', dimColor: true }, state.refreshedAt === null ? 'Loading…' : state.rows.length === 0 ? 'No tasks. Start one with "agentctl new <spec>".' : 'No active tasks. z opens the finished ones.')]
+      ? [h(Text, { key: 'empty', dimColor: true }, state.refreshedAt === null ? 'Loading…' : state.rows.length === 0 ? 'No tasks. Start one with "agentctl new <spec>".' : state.cohortFilter !== null ? 'No tasks in this cohort. k picks another.' : 'No active tasks. z opens the finished ones.')]
       : visible.items.map((item) =>
-          item.kind === 'queue-title'
+          item.kind === 'group'
+            ? h(Text, { key: `group-${item.key}`, bold: true, wrap: 'truncate-end' }, groupTitle(item, props.icons))
+            : item.kind === 'queue-title'
             ? h(Text, { key: 'queue-title', dimColor: true, wrap: 'truncate-end' }, `- ${queueTitle(item.count, item.paused)}`)
             : item.kind === 'queue'
               ? h(Cells, { key: `q-${item.view.entry.task}`, cells: queueCells(item.view, item.view.entry.task === state.selected, cols) })
@@ -197,7 +201,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
     Box,
     { width: state.width },
     h(Text, { bold: true, wrap: 'truncate-end' }, 'agentctl board'),
-    h(Text, { dimColor: true, wrap: 'truncate-end' }, `  ${ctx.config.session} · ${active} task${active === 1 ? '' : 's'}${state.queue.length > 0 ? ` · ${state.queue.length} queued` : ''}${hiddenCount > 0 ? ` · ${hiddenCount} hidden (a)` : ''}${state.refreshedAt ? ` · ${state.refreshedAt}` : ''}`),
+    h(Text, { dimColor: true, wrap: 'truncate-end' }, `  ${ctx.config.session} · ${active} task${active === 1 ? '' : 's'}${state.queue.length > 0 ? ` · ${state.queue.length} queued` : ''}${state.cohortFilter !== null ? ` · cohort: ${cohortLabel(state)}` : ''}${hiddenCount > 0 ? ` · ${hiddenCount} hidden (a)` : ''}${state.refreshedAt ? ` · ${state.refreshedAt}` : ''}`),
   );
   const body =
     state.mode.kind === 'help'

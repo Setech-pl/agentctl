@@ -93,7 +93,7 @@ describe('board: Enter on a finished task opens a menu instead of switching', ()
     const r = open('A-2');
     assert.deepEqual(r.effects, []);
     assert.deepEqual(r.state.mode, { kind: 'finished', task: 'A-2' });
-    assert.equal(promptText(r.state), 'A-2 is finished (no window): c copy report · x close · h hide · Esc');
+    assert.equal(promptText(r.state), 'A-2 is finished (no window): c copy report · x close · X cancel · h hide · Esc');
     assert.equal(r.state.notice, null, 'no "has no tmux window" complaint');
   });
 
