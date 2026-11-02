@@ -74,7 +74,9 @@ describe('board: the Ink front renders the model', () => {
     const { term, keys, done } = setup('rd1', 80);
     await until(() => term.screen().includes('Finished (1)'));
     let screen = term.screen();
-    assert.match(screen, /TASK\s+AGENT\s+STATE\s+TIME\s+PROGRESS\s+REPORT/);
+    assert.match(screen, /TASK\s+AGENT\s+STATE\s+TIME\s+TOKENS\s+PROGRESS\s+REPORT/);
+    assert.match(screen, /claude\s+n\/d/, 'the usage panel: no reading of the plan, so n/d');
+    assert.match(screen, /codex\s+n\/d/);
     assert.match(screen, /NC-1\s+claude opus\/high\s+⚙ working/);
     assert.ok(!screen.includes('NC-2'), 'NC-2 has no window: it waits under the closed "Finished" title');
     assert.match(screen, /\+ Finished \(1\) – z opens/);

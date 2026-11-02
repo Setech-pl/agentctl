@@ -23,6 +23,12 @@ import type { TaskState } from './state.ts';
 import { collectStatus } from './status.ts';
 import type { StatusRow } from './status.ts';
 import { listArchivedRecords, listTaskRecords } from './taskstore.ts';
+import { openReader, readPlans } from './usage.ts';
+import type { PlanState } from './usage.ts';
+import { formatTokens } from './usage-parse.ts';
+import { formatReset } from './usage.ts';
+import { AGENT_NAMES } from './config.ts';
+import type { AgentName, UsageSettings } from './config.ts';
 import { cohortKey, errorMessage } from './util.ts';
 
 /*
@@ -102,10 +108,12 @@ export interface BoardState {
   cohortFilter: string | null;
   /** `g`: the groups (cohort keys, '' for "bez kohorty") whose tasks are folded away under their header. */
   folded: string[];
+  /** The plans of Claude and Codex for the panel on top; null before the first refresh. */
+  plans: Record<AgentName, PlanState> | null;
 }
 
 export function initialBoardState(width: number, height: number): BoardState {
-  return { rows: [], selected: null, mode: { kind: 'list' }, notice: null, preview: null, width, height, refreshedAt: null, busy: null, loadError: null, quit: false, showFinished: false, showHidden: false, queue: [], queuePaused: false, cohortFilter: null, folded: [] };
+  return { rows: [], selected: null, mode: { kind: 'list' }, notice: null, preview: null, width, height, refreshedAt: null, busy: null, loadError: null, quit: false, showFinished: false, showHidden: false, queue: [], queuePaused: false, cohortFilter: null, folded: [], plans: null };
 }
 
 /** What the front has to do after a key press. */
@@ -447,13 +455,15 @@ export interface BoardSnapshot {
   /** Absent: no queue (older callers). */
   queue?: QueueView[];
   queuePaused?: boolean;
+  /** Absent: no panel (older callers). */
+  plans?: Record<AgentName, PlanState>;
   preview: Preview | null;
   refreshedAt: string;
 }
 
 /** Keep the selection when the task is still there, otherwise take the first row. */
 export function applySnapshot(state: BoardState, snap: BoardSnapshot): BoardState {
-  const next: BoardState = { ...state, rows: snap.rows, queue: snap.queue ?? [], queuePaused: snap.queuePaused ?? false, refreshedAt: snap.refreshedAt, loadError: null };
+  const next: BoardState = { ...state, rows: snap.rows, queue: snap.queue ?? [], queuePaused: snap.queuePaused ?? false, plans: snap.plans ?? null, refreshedAt: snap.refreshedAt, loadError: null };
   const listed = navTasks(next);
   const selected = state.selected !== null && listed.includes(state.selected) ? state.selected : (listed[0] ?? null);
   const preview = snap.preview && snap.preview.task === selected ? snap.preview : selected === state.selected ? state.preview : null;
@@ -487,9 +497,12 @@ const clock = (ms: number): string => {
 /** One refresh from the core: the rows (with cached progress) and the preview of the selected task. */
 export async function loadBoard(ctx: Context, selected: string | null, cache: ProgressCache, previewLines: number = PREVIEW_LINES): Promise<BoardSnapshot> {
   const { runner, config } = ctx;
-  const statusRows = await collectStatus(ctx, { progress: false, archived: true });
+  const statusRows = await collectStatus(ctx, { progress: false, archived: true, tokens: true });
   const records = new Map([...listArchivedRecords(config), ...listTaskRecords(config)].map((r) => [r.task, r]));
   const now = runner.now();
+  const reader = openReader(config);
+  const plans = readPlans(config, reader, now);
+  reader.save();
   const rows: BoardRow[] = [];
   for (const row of statusRows) {
     const record = records.get(row.task);
@@ -502,7 +515,7 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
   const queue = entries.length > 0 ? describeQueue(config, entries, await liveWindows(ctx), statusRows) : [];
   const queuePaused = queue.some((v) => v.condition.kind === 'paused');
   const queued = queue.find((v) => v.entry.task === selected);
-  if (queued) return { rows, queue, queuePaused, preview: { task: queued.entry.task, lines: queuePreview(queued) }, refreshedAt: clock(now) };
+  if (queued) return { rows, queue, queuePaused, plans, preview: { task: queued.entry.task, lines: queuePreview(queued) }, refreshedAt: clock(now) };
   // The selected task; else the first one the list shows (not a hidden, closed or finished one).
   const target = rows.find((r) => r.task === selected) ?? rows.find((r) => !r.hidden && !r.finished) ?? rows.find((r) => !r.hidden) ?? rows[0];
   let preview: Preview | null = null;
@@ -520,7 +533,7 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
     }
     preview = { task: target.task, lines, ...(target.collide.length > 0 ? { note: collideText(target.collide) } : {}) };
   }
-  return { rows, queue, queuePaused, preview, refreshedAt: clock(now) };
+  return { rows, queue, queuePaused, plans, preview, refreshedAt: clock(now) };
 }
 
 /** The preview of a queued task: what it will run, what it waits for, how it ends if it failed, and the start of its prompt. */
@@ -628,14 +641,20 @@ export interface BoardColumns {
   time: number;
   progress: number;
   report: number;
+  /** The tokens of the task; absent (0) in a list too narrow for it. */
+  tokens?: number;
 }
+
+/** A list of this many columns or more has the TOKENS column. */
+export const TOKENS_MIN_WIDTH = 69;
 
 /** Column widths for a list of `width` columns; the agent column takes what the others leave (8 to 18). */
 export function boardColumns(width: number): BoardColumns {
+  const tokens = width >= TOKENS_MIN_WIDTH ? 7 : 0;
   const fixed = { marker: 1, task: 10, state: 14, time: 7, progress: 8, report: 7 };
-  const gaps = 6;
-  const used = Object.values(fixed).reduce((a, b) => a + b, 0) + gaps;
-  return { ...fixed, who: Math.max(8, Math.min(18, width - used)) };
+  const gaps = 6 + (tokens > 0 ? 1 : 0);
+  const used = Object.values(fixed).reduce((a, b) => a + b, 0) + tokens + gaps;
+  return { ...fixed, ...(tokens > 0 ? { tokens } : {}), who: Math.max(8, Math.min(18, width - used)) };
 }
 
 export interface BoardCell {
@@ -669,6 +688,7 @@ export function headerCells(cols: BoardColumns): BoardCell[] {
     { key: 'who', text: 'AGENT', width: cols.who },
     { key: 'state', text: 'STATE', width: cols.state },
     { key: 'time', text: 'TIME', width: cols.time },
+    ...(cols.tokens ? [{ key: 'tokens', text: 'TOKENS', width: cols.tokens }] : []),
     { key: 'progress', text: 'PROGRESS', width: cols.progress },
     { key: 'report', text: 'REPORT', width: cols.report },
   ].map((c) => ({ ...c, dim: true }));
@@ -689,10 +709,41 @@ export function rowCells(row: StatusRow, selected: boolean, cols: BoardColumns, 
     { key: 'who', text: row.agent === 'unknown' ? 'unknown' : `${row.agent} ${row.model}/${row.effort}`, width: cols.who },
     { key: 'state', text: `${icon} ${row.state}`, width: cols.state, color: STATE_COLOR[row.state] },
     { key: 'time', text: row.duration, width: cols.time },
+    ...(cols.tokens ? [{ key: 'tokens', text: row.tokens ? formatTokens(row.tokens.fresh) : 'n/d', width: cols.tokens, ...(row.tokens ? {} : { dim: true }) }] : []),
     { key: 'progress', text: row.progress?.text ?? '-', width: cols.progress },
     { key: 'report', text: reportLabel(row), width: cols.report, ...(row.report === 'missing' ? { dim: true } : row.pulled ? {} : { color: 'green' }) },
   ];
   return quiet ? cells.map((c) => (c.key === 'marker' ? c : { ...c, dim: true, ...(c.color ? { color: 'gray' } : {}) })) : cells;
+}
+
+// ---- the usage panel
+
+export const BAR_WIDTH = 10;
+
+/** `▓▓▓▓▓▓░░░░`: the percentage in tenths. */
+export function usageBar(percent: number): string {
+  const filled = Math.max(0, Math.min(BAR_WIDTH, Math.round(percent / (100 / BAR_WIDTH))));
+  return `${'▓'.repeat(filled)}${'░'.repeat(BAR_WIDTH - filled)}`;
+}
+
+export interface PanelLine {
+  provider: AgentName;
+  text: string;
+  /** Green below the warning threshold, yellow from it, red from the critical one; undefined (dim) when the plan is n/d. */
+  color?: string;
+}
+
+/** The two lines under the header: per provider the windows as a bar with the percentage and the reset, or n/d. */
+export function usagePanel(plans: Record<AgentName, PlanState> | null, usage: UsageSettings, now: number): PanelLine[] {
+  if (plans === null) return [];
+  return AGENT_NAMES.map((provider): PanelLine => {
+    const plan = plans[provider];
+    const name = provider.padEnd(6);
+    if (!plan.available) return { provider, text: `${name} n/d${plan.note ? ` – ${plan.note}` : ''}` };
+    const parts = plan.windows.map((w) => `${w.label} ${usageBar(w.usedPercent)} ${Math.round(w.usedPercent)}%${w.resetsAt === null ? '' : ` ↻${formatReset(w.resetsAt, now)}`}`);
+    const worst = plan.maxPercent ?? 0;
+    return { provider, text: `${name} ${parts.join('  ')}${plan.stale ? ' (old)' : ''}`, color: worst >= usage.critical[provider] ? 'red' : worst >= usage.warn[provider] ? 'yellow' : 'green' };
+  });
 }
 
 export type ListItem =
@@ -725,7 +776,7 @@ export function queueTitle(count: number, paused: boolean): string {
 /** A queued task as cells: the task, what it runs, and one wide cell for the place in line and what it waits for. */
 export function queueCells(view: QueueView, selected: boolean, cols: BoardColumns): BoardCell[] {
   const e = view.entry;
-  const wide = cols.state + cols.time + cols.progress + cols.report + 3;
+  const wide = cols.state + cols.time + (cols.tokens ?? 0) + cols.progress + cols.report + (cols.tokens ? 4 : 3);
   const text = `${view.position === null ? (e.status === 'failed' ? '✗' : '…') : `${view.position}.`} ${view.condition.text}${e.priority === 'high' ? ' · high' : ''}`;
   return [
     { key: 'marker', text: selected ? '▸' : '', width: cols.marker, bold: true },

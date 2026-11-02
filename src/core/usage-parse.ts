@@ -94,7 +94,8 @@ export function emptyStats(provider: AgentName): SessionStats {
   return { provider, id: null, cwd: null, firstAt: null, lastAt: null, buckets: {}, seen: {}, seenOrder: [], codex: { total: null, model: null }, plan: null };
 }
 
-const SEEN_MAX = 64;
+/** The blocks of one message are written one after another: a few ids are enough to tell them from the next message. */
+const SEEN_MAX = 16;
 
 const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0);
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');

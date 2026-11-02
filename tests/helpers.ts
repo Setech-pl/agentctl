@@ -33,7 +33,9 @@ export function useScratch(): { dir: string; sub: (name: string) => string } {
 export function makeConfig(root: string, extraYaml = ''): GlobalConfig {
   const home = path.join(root, 'home');
   fs.mkdirSync(home, { recursive: true });
-  fs.writeFileSync(path.join(home, 'config.yaml'), `cache: ${path.join(root, 'cache')}\nstate_dir: ${path.join(root, 'state')}\n${extraYaml}`);
+  // The agents' logs are read from the scratch directory, never from the real ~/.claude and ~/.codex.
+  const usage = /^usage:/m.test(extraYaml) ? '' : `usage:\n  claude_dir: ${path.join(root, 'claude-home')}\n  codex_dir: ${path.join(root, 'codex-home')}\n`;
+  fs.writeFileSync(path.join(home, 'config.yaml'), `cache: ${path.join(root, 'cache')}\nstate_dir: ${path.join(root, 'state')}\n${usage}${extraYaml}`);
   return loadGlobalConfig(home);
 }
 

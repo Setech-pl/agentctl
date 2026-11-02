@@ -57,3 +57,28 @@ export function makeWorld(scratch: ReturnType<typeof useScratch>, name: string, 
   return { root, claudeHome, codexHome, config, worktree, claudeSession, codexSession, task };
 }
 
+
+/** The reset times of the fixture are long past: move them ahead of `nowMs` and set the percentages of the newest reading (the last token_count). */
+export function setCodexPlan(file: string, nowMs: number, percent: { session: number; week: number }): void {
+  const reset = Math.floor(nowMs / 1000) + 3600;
+  const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((line) => {
+    const o = JSON.parse(line) as { payload?: { rate_limits?: { primary?: { used_percent: number; resets_at: number }; secondary?: { used_percent: number; resets_at: number } } } };
+    const limits = o.payload?.rate_limits;
+    if (limits?.primary && limits.secondary) {
+      limits.primary.used_percent = percent.session;
+      limits.primary.resets_at = reset;
+      limits.secondary.used_percent = percent.week;
+      limits.secondary.resets_at = reset + 86_400 * 4;
+    }
+    return JSON.stringify(o);
+  });
+  fs.writeFileSync(file, `${lines.join('\n')}\n`);
+}
+
+/** What `usage-tap` leaves for Claude: the 5 hour and the weekly window. */
+export function setClaudePlan(configPath: string, nowMs: number, percent: { session: number; week: number }, ageMs = 60_000): void {
+  const file = path.join(path.dirname(configPath), 'usage', 'claude-plan.json');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const reset = Math.floor(nowMs / 1000) + 7200;
+  fs.writeFileSync(file, JSON.stringify({ v: 1, at: nowMs - ageMs, windows: [{ kind: 'session', minutes: 300, usedPercent: percent.session, resetsAt: reset }, { kind: 'week', minutes: 10080, usedPercent: percent.week, resetsAt: reset + 86_400 * 3 }] }));
+}
