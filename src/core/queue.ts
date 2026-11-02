@@ -3,6 +3,7 @@ import path from 'node:path';
 import YAML from 'yaml';
 import type { AgentModel } from './checks.ts';
 import { Alerts } from './alert.ts';
+import { checkAfter, hasReport, unmetAfter, waitingText } from './depends.ts';
 import type { AgentName, GlobalConfig } from './config.ts';
 import { AGENT_NAMES } from './config.ts';
 import type { Context } from './context.ts';
@@ -11,6 +12,7 @@ import type { SelfArgv } from './events.ts';
 import { newTasks } from './new.ts';
 import type { Notifier } from './notify.ts';
 import { liveWindows, planBatch } from './plan.ts';
+import { collectStatus } from './status.ts';
 import type { StatusRow } from './status.ts';
 import { resolveSpec, splitSpecs } from './spec.ts';
 import type { RawSpec, ResolvedSpec } from './spec.ts';
@@ -42,6 +44,8 @@ export interface QueueEntry {
   agentOverride?: AgentName;
   /** The task whose report this one reviews (`review_of`). */
   reviewOf?: string;
+  /** The tasks that must have a report before this one starts. */
+  after: string[];
   /** Start again over a worktree that is already there (`queue retry`). */
   reuse?: boolean;
   /** `status: starting`: ISO time the watcher began the start. */
@@ -80,6 +84,7 @@ function parseEntry(text: string): QueueEntry | undefined {
     order: typeof d.order === 'number' ? d.order : d.seq,
     priority: d.priority === 'high' ? 'high' : 'normal',
     status: d.status === 'starting' || d.status === 'failed' ? d.status : 'queued',
+    after: Array.isArray(d.after) ? d.after.filter((x): x is string => typeof x === 'string') : [],
   };
 }
 
@@ -153,13 +158,15 @@ export async function planQueueAdd(ctx: Context, raws: RawSpec[], opts: { agent?
     if (inQueue) throw new AgentctlError(`${spec.task} is already in the queue (${inQueue.status})`, `"agentctl queue rm ${spec.task}" takes it out${inQueue.status === 'failed' ? `; "agentctl queue retry ${spec.task}" tries it again` : ''}.`);
   }
   const knownAuthors = new Map<string, AgentModel>(entries.map((e) => [e.task, { agent: e.agent, model: e.model }]));
-  const specs = await planBatch(ctx, resolved, { ...(opts.agent ? { agent: opts.agent } : {}), ignoreLimits: true, knownAuthors });
+  const specs = await planBatch(ctx, resolved, { ...(opts.agent ? { agent: opts.agent } : {}), ignoreLimits: true, skipAfter: true, knownAuthors });
+  checkAfter(ctx, specs, entries);
   const items = specs.map((spec, i) => ({ raw: raws[i] as RawSpec, spec }));
-  return { items, summary: describeQueueAdd(ctx, specs, entries, await liveWindows(ctx)) };
+  const rows = await collectStatus(ctx, { progress: false, archived: true });
+  return { items, summary: describeQueueAdd(ctx, specs, entries, await liveWindows(ctx), rows) };
 }
 
 /** Per spec: the order and where it will stand ("starts at once" or "waits: claude 2/2, 1 ahead"). */
-export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: QueueEntry[], live: { agent?: AgentName }[]): string[] {
+export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: QueueEntry[], live: { agent?: AgentName }[], rows: StatusRow[] = []): string[] {
   const { config } = ctx;
   const load: Record<AgentName, number> = { claude: 0, codex: 0 };
   for (const w of live) if (w.agent) load[w.agent]++;
@@ -172,6 +179,10 @@ export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: Q
     const full = limit !== undefined && used >= limit;
     lines.push(`${spec.task}  ${spec.agent}/${spec.model}/${spec.effort}  priority ${spec.priority}${spec.switchedBy ? ` (ordered ${spec.requested.agent} ${spec.requested.model}/${spec.requested.effort})` : ''}`);
     lines.push(`  repos:    ${spec.repos.map((r) => r.path).join(', ')}`);
+    if (spec.after.length > 0) {
+      const unmet = unmetAfter(spec.after, rows);
+      lines.push(`  after:    ${spec.after.join(', ')}${unmet.length === 0 ? ' (all have a report already)' : ` – ${waitingText(unmet)}`}`);
+    }
     lines.push(
       `  start:    ${
         full
@@ -180,6 +191,9 @@ export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: Q
       }`,
     );
     lines.push(`  prompt:   ${spec.prompt.length} characters`);
+    if (spec.reviewOf && spec.after.length === 0 && !hasReport(rows.find((r) => r.task === spec.reviewOf))) {
+      lines.push(`  hint:     ${spec.task} reviews ${spec.reviewOf}, which has no report yet: add "after: ${spec.reviewOf}" to the header so the review starts when the author's report is ready`);
+    }
     if (spec.pin) lines.push('  pin:      stays on this provider (it is never switched by the queue either)');
     load[spec.agent]++;
   }
@@ -204,6 +218,7 @@ export async function commitQueueAdd(ctx: Context, items: QueueAddItem[], opts: 
       agent: spec.agent,
       model: spec.model,
       effort: spec.effort,
+      after: spec.after,
       spec: renderRawSpec(raw),
     };
     if (opts.agent) entry.agentOverride = opts.agent;
@@ -258,6 +273,7 @@ export async function setPaused(ctx: Context, paused: boolean): Promise<boolean>
 
 export type Condition =
   | { kind: 'ready'; text: string }
+  | { kind: 'after'; text: string }
   | { kind: 'slot'; text: string }
   | { kind: 'paused'; text: string }
   | { kind: 'starting'; text: string }
@@ -276,7 +292,8 @@ export interface QueueView {
  * For every entry: what it waits for. Entries are walked in turn order, each one that will start in the next tick uses up a window of its
  * provider, so the answer matches what `watch` does. `inflight` are the tasks this very process is starting.
  */
-export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live: { agent?: AgentName }[]): QueueView[] {
+export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live: { agent?: AgentName }[], rows: StatusRow[] = []): QueueView[] {
+  const failed = new Set(entries.filter((e) => e.status === 'failed').map((e) => e.task));
   const used: Record<AgentName, number> = { claude: 0, codex: 0 };
   for (const w of live) if (w.agent) used[w.agent]++;
   const paused = isPaused(config) || !config.queue.enabled;
@@ -287,6 +304,8 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
     if (entry.status === 'starting') return { position: null, entry, condition: { kind: 'starting', text: 'starting' }, since: entry.startingAt ?? entry.queuedAt };
     position++;
     if (paused) return { position, entry, condition: { kind: 'paused', text: reason }, since: entry.queuedAt };
+    const unmet = unmetAfter(entry.after, rows);
+    if (unmet.length > 0) return { position, entry, condition: { kind: 'after', text: waitingText(unmet, failed) }, since: entry.queuedAt };
     const limit = config.limits[entry.agent];
     if (limit !== undefined && used[entry.agent] >= limit) {
       return { position, entry, condition: { kind: 'slot', text: `czeka na miejsce: ${entry.agent} ${used[entry.agent]}/${limit}` }, since: entry.queuedAt };
@@ -294,6 +313,18 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
     used[entry.agent]++;
     return { position, entry, condition: { kind: 'ready', text: 'wolne miejsce – start przy najbliższym ticku watch' }, since: entry.queuedAt };
   });
+}
+
+/** What `status` prints under its table: the waiting tasks and what each one waits for; nothing when the queue is empty. */
+export async function queueStatusLines(ctx: Context): Promise<string[]> {
+  const entries = readQueue(ctx.config);
+  if (entries.length === 0) return [];
+  const views = describeQueue(ctx.config, entries, await liveWindows(ctx), await collectStatus(ctx, { progress: false, archived: true }));
+  const open = views.filter((v) => v.entry.status !== 'failed');
+  return [
+    `Queue (${open.length}${views.length > open.length ? `, ${views.length - open.length} failed` : ''}): agentctl queue list`,
+    ...views.map((v) => `  ${v.position ?? '-'}. ${v.entry.task}  ${v.condition.text}`),
+  ];
 }
 
 /** The lines of `queue list`. */
@@ -366,6 +397,7 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   }
   entries = readQueue(config);
   const live = await liveWindows(ctx);
+  const rows = opts.rows ?? (await collectStatus(ctx, { progress: false, archived: true }));
   const used: Record<AgentName, number> = { claude: 0, codex: 0 };
   for (const w of live) if (w.agent) used[w.agent]++;
   // A start in progress whose window is not up yet already holds its place.
@@ -374,6 +406,7 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   const began: string[] = [];
   for (const entry of waiting(entries)) {
     if (memory.inflight.size >= config.queue.parallelStarts) break;
+    if (unmetAfter(entry.after, rows).length > 0) continue;
     const limit = config.limits[entry.agent];
     if (limit !== undefined && used[entry.agent] >= limit) continue;
     used[entry.agent]++;
@@ -397,6 +430,7 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
       await newTasks(startCtx, [spec], {
         ...(entry.agentOverride ? { agent: entry.agentOverride } : {}),
         noSwitch: true,
+        skipAfter: true,
         reuse: Boolean(entry.reuse),
         waitTrust: true,
         ...(opts.self ? { self: opts.self } : {}),

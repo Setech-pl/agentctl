@@ -178,6 +178,7 @@ The header of a spec file, between `---` lines, followed by the prompt. Several 
 | `review_of` | task ID | none | s | The task under review. The reviewer must use another agent or another model than the author. |
 | `report` | path | project, else global | s | Report path of this task. |
 | `pin` | boolean | `false` | s | `true`: never move the task to the other provider, by `--agent` or by a limit. |
+| `after` | task ID or list | none | s | The task starts only when every named task has a report (`report-ready`, or closed with a report). Meant for the queue; `new` refuses a task whose `after` is not met. Unknown tasks and circles are errors. |
 | `priority` | `high` or `normal` | `normal` | s | Queue order: `high` tasks start before every `normal` one (first come, first served inside each class). `new` ignores it. |
 
 ## Environment variables

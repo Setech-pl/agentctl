@@ -47,6 +47,8 @@ export interface ResolvedSpec {
   pin: boolean;
   /** Queue order: `high` starts before every `normal` task (FIFO inside each class). Only the queue looks at it. */
   priority: 'high' | 'normal';
+  /** Tasks that must have a report before this one starts (queue). `new` refuses to start a task whose `after` is not met. */
+  after: string[];
   /** The order as written in the spec; agent/model/effort above are the effective values. */
   requested: Order;
   /** Why the effective order differs from the requested one. */
@@ -133,7 +135,7 @@ export interface ResolveContext {
 }
 
 /** Keys of a spec header, and of one entry of its `repos`; docs/configuration.md describes each one. */
-export const SPEC_KEYS = ['task', 'agent', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'report', 'pin', 'priority'];
+export const SPEC_KEYS = ['task', 'agent', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'report', 'pin', 'priority', 'after'];
 export const REPO_KEYS = ['path', 'worktree', 'base', 'branch'];
 
 function label(raw: RawSpec): string {
@@ -224,6 +226,15 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   if (h.pin !== undefined && h.pin !== null) {
     if (typeof h.pin === 'boolean') pin = h.pin;
     else p.add('pin must be true or false');
+  }
+  const after: string[] = [];
+  if (h.after !== undefined && h.after !== null) {
+    const list = Array.isArray(h.after) ? h.after : [h.after];
+    for (const dep of list) {
+      if (typeof dep === 'string' && TASK_ID.test(dep)) {
+        if (!after.includes(dep)) after.push(dep);
+      } else p.add(`after must be a task ID or a list of task IDs (e.g. NC-12), got ${JSON.stringify(dep)}`);
+    }
   }
   const priority = parseEnumValue(h.priority, PRIORITIES, 'priority', p) ?? 'normal';
   if (raw.prompt === '') p.add('the prompt is empty (write it below the closing "---" of the header)');
@@ -319,6 +330,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     prompt: raw.prompt,
     pin,
     priority,
+    after,
     requested: { agent: agent as AgentName, model, effort },
   };
   if (reviewOf) spec.reviewOf = reviewOf;
