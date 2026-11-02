@@ -1,3 +1,6 @@
+import { sessionQuestion } from './codex-question.ts';
+import { collapsedQuestion } from './events.ts';
+import { extractQuestion } from './events.ts';
 import type { Context } from './context.ts';
 import { resolveRunningTask } from './resolve.ts';
 import { guessAgent } from './status.ts';
@@ -22,7 +25,8 @@ export async function peekWindow(ctx: Context, window: string, count: number): P
   if (screen.code !== 0) throw new AgentctlError(`cannot read window "${window}": ${screen.stderr.trim() || `tmux exit ${screen.code}`}`);
   const record = readTaskRecord(ctx.config, window);
   const agent: AgentName = record && record.agent !== 'unknown' ? record.agent : guessAgent(screen.stdout);
-  return contentLines(screen.stdout, ctx.config.agents[agent].footerPatterns, count);
+  const question = (record && collapsedQuestion(screen.stdout) ? sessionQuestion(ctx.config, record) : undefined) ?? extractQuestion(screen.stdout);
+  return [...(question ? [question] : []), ...contentLines(screen.stdout, ctx.config.agents[agent].footerPatterns, count)];
 }
 
 /** `agentctl peek TASK [-n 40]` */

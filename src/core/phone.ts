@@ -20,6 +20,7 @@ export interface PhoneMessage {
 }
 
 export interface PhoneInput {
+  text?: string | undefined;
   task?: string | undefined;
   cohort?: string | undefined;
   /** The verdict line of a report; used only for `report-ready` and when `include_verdict` is on. */
@@ -70,7 +71,7 @@ export function phoneMessage(event: PhoneEvent, input: PhoneInput, ntfy: Pick<Nt
     case 'needs-input':
       if (!task) return undefined;
       title = `${task}: pytanie`;
-      body = `${task} zadaje pytanie i czeka na odpowiedź`;
+      body = input.text || `${task} zadaje pytanie i czeka na odpowiedź`;
       break;
     case 'needs-trust':
       if (!task) return undefined;
