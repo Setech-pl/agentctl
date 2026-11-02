@@ -4,7 +4,7 @@ Three views of agentctl. GitHub renders the Mermaid blocks; the same diagrams ar
 
 ## End-to-end flow
 
-From a planning chat to a closed task. Steps in a yellow box are decisions that stay with the human: agentctl never answers the folder-trust dialog, never gives a verdict and never merges.
+From a planning chat to a closed task (or a cancelled one: the `opt` block). Steps in a yellow box are decisions that stay with the human: agentctl never answers the folder-trust dialog, never gives a verdict and never merges.
 
 ```mermaid
 sequenceDiagram
@@ -17,7 +17,7 @@ sequenceDiagram
     participant W as watch + notifier
 
     H->>C: describe the work
-    C-->>H: spec (YAML header + prompt)
+    C-->>H: spec (YAML header + prompt, optional cohort: name)
     alt a window of the provider is free
         H->>A: agentctl new --clip
     else the limit is full
@@ -41,8 +41,15 @@ sequenceDiagram
         W->>G: every 300 s: files each task changed
         W-->>H: ⚠ two tasks changed the same files
     end
+    opt the work is abandoned
+        H->>A: agentctl cancel NC-42 --reason "…"
+        A->>X: interrupt key, wait cancel.grace
+        A->>G: close the window (worktree and branch stay)
+        W-->>H: queued tasks that waited for it: ⛓ blocked
+    end
     X->>G: writes the report file
     W-->>H: notification (report ready, question, limit)
+    W-->>H: kohorta sprint-1: all reports ready (once per cohort)
     H->>A: agentctl pull --ready (or MCP pull_ready)
     A-->>C: reports (clipboard or MCP answer)
     rect rgb(255, 244, 200)
@@ -64,7 +71,7 @@ flowchart TB
         BOARD["board (Ink, src/board)"]
         MCP["MCP server (src/mcp, stdio)"]
     end
-    CORE["src/core: spec, plan, new, queue, collisions, status, pull, close, move, watch, events, notify"]
+    CORE["src/core: spec, plan, new, queue, cancel, cohort, collisions, status, pull, close, move, watch, events, notify"]
     RUN["Runner: RealRunner / RecordingRunner"]
     subgraph world [Outside]
         TMUX[tmux session agentctl]
@@ -76,6 +83,7 @@ flowchart TB
         CFG["config: ~/.agentctl/config.yaml, .agentctl.yaml"]
         STATE["state_dir: ~/.agentctl/tasks/ID/TASK.md, event.json"]
         QUEUE["queue: ~/.agentctl/queue/, collisions.json"]
+        COH["cohorts: ~/.agentctl/cohorts/name.json"]
         ARCH["archive: ~/.agentctl/archive/"]
         REP["cache: reports per task"]
         AUDIT["mcp-audit.log"]
@@ -91,6 +99,7 @@ flowchart TB
     CORE --> NOTE
     CORE <--> STATE
     CORE <--> QUEUE
+    CORE <--> COH
     CORE --> ARCH
     CORE --> CFG
     AG --> REP
@@ -100,7 +109,7 @@ flowchart TB
 
 ## Task states
 
-What `status` and the board show for a task. A live window is classified from its screen (and the agent's events); a task without a window is `report-ready` if its report exists and `dead` if not. Precedence for a live window: `needs-trust`, `needs-input`, `working`, `limited`, `background`, then `report-ready` or `waiting`. `superseded` and `closed` override all of them. A task in the queue is not in a state yet: it is a queue entry (`queued`, or `start failed` after a failed start) until `watch` starts it.
+What `status` and the board show for a task. A live window is classified from its screen (and the agent's events); a task without a window is `report-ready` if its report exists and `dead` if not. Precedence for a live window: `needs-trust`, `needs-input`, `working`, `limited`, `background`, then `report-ready` or `waiting`. `superseded`, `closed` and `cancelled` override all of them. A task in the queue is not in a state yet: it is a queue entry (`queued`, `start failed` after a failed start, or **blocked** when its `after` names a cancelled task) until `watch` starts it. `cancelled` can be reached from every state with `agentctl cancel`; the worktree and the branch stay.
 
 ```mermaid
 stateDiagram-v2
@@ -117,13 +126,18 @@ stateDiagram-v2
     state "⊘ closed" as closed
     state "⧗ queued" as queued
     state "✗ start failed" as startfailed
+    state "✕ cancelled" as cancelled
+    state "⛓ blocked" as blocked
 
     [*] --> queued: queue, or y when the limit is full
     queued --> trust: window free, after met, fresh worktree
     queued --> working: window free, after met
     queued --> startfailed: start failed
     startfailed --> queued: queue retry
-    queued --> [*]: queue rm
+    queued --> cancelled: cancel, queue rm
+    queued --> blocked: after names a cancelled task
+    blocked --> queued: unblock
+    blocked --> cancelled: cancel
     [*] --> trust: new, fresh worktree
     [*] --> working: new, prompt pasted
     [*] --> orphan: window without state file
@@ -148,4 +162,13 @@ stateDiagram-v2
     ready --> closed: close
     superseded --> closed: close
     closed --> [*]: archive
+    trust --> cancelled: cancel
+    working --> cancelled: cancel
+    input --> cancelled: cancel
+    limited --> cancelled: cancel
+    waiting --> cancelled: cancel
+    ready --> cancelled: cancel
+    dead --> cancelled: cancel
+    superseded --> cancelled: cancel
+    cancelled --> [*]
 ```

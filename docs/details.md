@@ -326,6 +326,8 @@ A queued task with `after` starts only when every task it names has a report: st
 
 At adding, a task named in `after` must exist (started, in the queue or in the same file), a task may not wait for itself, and tasks may not wait for each other in a circle; each of these is an error that names the path. `new` has no line to wait in: it refuses a task whose `after` is not met and points at `agentctl queue`. A dependency that failed to start stays unmet (`czeka na NC-42 (failed)`) until you `queue retry` or `queue rm` it.
 
+**A dependency that was cancelled** can never get a report. `queue` and `new` refuse an `after` that names a cancelled task, and a task that is already waiting becomes **blocked** (⛓): `status`, `queue list` and the board say `⛓ zablokowane – NC-42 anulowane` (`blocked: true` in `queue list --json`, `blocked` in the MCP `queue_list`), it never starts (a task that waits for a blocked one is blocked too), and `watch` sends one notification per cancelled author, `NC-43 zablokowane – NC-42 anulowane`, remembered in the queue entry so that a restart repeats nothing. Two ways out: `agentctl cancel NC-43`, or `agentctl unblock NC-43 [--drop-after NC-42]`, which removes the cancelled task (or only the one named) from `after`, in the entry and in its spec; the task is back in the line and waits for the rest of its `after`, or starts.
+
 ## Collisions
 
 Two tasks that change the same files in the same repository will meet in a merge conflict. agentctl says so early.
@@ -360,7 +362,7 @@ agentctl board  agentctl-test · 3 tasks · 09:41:03
                                                                        │ ● you chose: tea please
 
 Enter – open the agent · F12 – back to the list
-↑↓ ⏎  m msg  M move  i int  c/r pull  x close  h hide  z done  a all  u/d/p  ?
+↑↓ ⏎ m msg M move i int c/r pull x close X cancel k cohort h hide z/a u/d/p ?
 ```
 
 Below 110 columns the preview is hidden and the list takes the whole width (this is 80 columns):
@@ -373,7 +375,7 @@ agentctl board  agentctl-test · 3 tasks · 09:40:39
   AC5-C      claude sonnet/med… ? needs-input  12s     2c 2f    -
 
 Enter – open the agent · F12 – back to the list
-↑↓ ⏎  m msg  M move  i int  c/r pull  x close  h hide  z done  a all  u/d/p  ?
+↑↓ ⏎ m msg M move i int c/r pull x close X cancel k cohort h hide z/a u/d/p ?
 ```
 
 The list shows task, agent/model/effort, state icon, time, `PROGRESS` and the report (`-` none, `ready` not pulled yet, `pulled`). From 110 columns the right column
@@ -381,7 +383,7 @@ shows the last 30 lines of the selected window (as `peek`, without the footer); 
 
 | Key | Action |
 |---|---|
-| `↑` `↓` (`k` `j`) | select a task |
+| `↑` `↓` (`j`) | select a task (`k` is the cohort filter now and no longer moves up) |
 | `Enter` | go to the task's window (`select-window` + `switch-client`); `F12` (or `Ctrl-b l`) comes back to the board. On a task without a window it opens a menu instead: `c` copy the report, `x` close, `h` hide, `Esc` |
 | `m` | type a message and send it to the agent as `send` does (`Enter` sends, `Esc` cancels) |
 | `M` | move the task to the other provider after a usage limit (`agentctl move`), after a `[y/N]` question; refused for pinned and already moved tasks |
@@ -389,15 +391,20 @@ shows the last 30 lines of the selected window (as `peek`, without the footer); 
 | `c` | copy the selected task's report (`pull`) |
 | `r` | copy all new reports (`pull --ready`) |
 | `x` | close the window, after a `[y/N]` question; if the task has a worktree, a second question asks whether to remove it too (`git worktree remove`, never `--force`, the branch stays; `Esc` cancels) |
+| `X` | cancel the selected task ([Cancelling tasks](#cancelling-tasks)): asks for a reason (optional; `Enter` goes on, `Esc` stops), then `[y/N]`. Works on a queued task too; a task from a `move` is cancelled with its other half. The worktree and the branch stay |
+| `k` | pick the cohort to show: `wszystkie` (all), a cohort, or `bez kohorty` (the tasks in no cohort); `↑↓` and `Enter`, or its number. The header says `cohort: <name>`; the lists, the queue and the sections follow the filter |
+| `g` / `G` | fold the cohort group of the selected task / open every group |
 | `h` | hide the selected task (or show a hidden one); nothing is closed or removed |
 | `u` | on a task of the **Queue (N)** section: move it to the front of the queue |
 | `d` | on a task of the **Queue (N)** section: remove it from the queue, after a `[y/N]` question |
 | `p` | pause or resume the queue (`queue pause` / `queue resume`) |
 | `z` | open or close the **Finished (N)** section |
-| `a` | list hidden tasks too (dimmed, marked `·`) and the closed ones, in their own **Closed (N)** section |
+| `a` | list hidden tasks too (dimmed, marked `·`) and the closed and the cancelled ones, in their own **Closed (N)** and **Cancelled (N)** sections |
 | `?` / `q` | help / leave (the agents keep running) |
 
 The **Queue (N)** section stands under the active tasks (see [the queue](#the-queue)): each queued task shows its place in line and what it waits for (`1. czeka na miejsce: claude 2/2`, `2. czeka na NC-42`, `✗ failed: …`), and the preview shows its spec. A task that changes files another active task changes too has `⚠` in the first column, and its preview title says with whom (`⚠ LANDING-QS-1: 2`; [collisions](#collisions)).
+
+**Cohorts.** As soon as one task has a cohort, the active list is grouped: a header per cohort in name order (`- sprint-1 (4) 2⚙ 1✓ 1⧗`: tasks, then the number of tasks per state, queued ones last as `⧗`), the tasks of no cohort last under `- bez kohorty (N)`. `g` folds a group (`+` in front, its rows leave the cursor path), `G` opens all of them. The queued tasks of a cohort are counted in its header but stay in the **Queue** section. Without any cohort the list is flat, as before. The tmux status bar is not grouped: it counts all tasks.
 
 The tasks that still have a window come first. Tasks without a window (and without `close`: `dead`, `report-ready` after you closed the agent in its window, `superseded`) wait dimmed under a closed **Finished (N)** title; `z` opens it. Enter on one of them does not try to switch to a window that is not there. See [Closing and hiding tasks](#closing-and-hiding-tasks).
 
@@ -425,9 +432,10 @@ the progress at most every 10 seconds. It needs a terminal; without tmux `Enter`
 | `superseded` | the task was moved to the other provider with `agentctl move`; this is the old window, which you close yourself |
 | `dead` | the window is gone and there is no report |
 | `closed` | `agentctl close` was run (or the state folder is in the archive): listed only by `status --all` and the board key `a`, see [Closing and hiding tasks](#closing-and-hiding-tasks) |
+| `cancelled` | `agentctl cancel` was run (the work was abandoned, at work or in the queue): listed only by `status --all` and the board key `a` (section **Cancelled**), see [Cancelling tasks](#cancelling-tasks). It wins over `closed` |
 | `orphan` | a window of the agentctl session has no state file (lost or never created) |
 
-Precedence for a live window: `needs-trust`, then `needs-input`, then `working`, then `limited`, then `background`, then `report-ready`, then `waiting` (`superseded` overrides all of them; `closed` applies only to a task without a window).
+Precedence for a live window: `needs-trust`, then `needs-input`, then `working`, then `limited`, then `background`, then `report-ready`, then `waiting` (`superseded` overrides all of them; `closed` and `cancelled` apply only to a task without a window).
 These are heuristics on screen text; if a CLI update changes its wording, adjust the patterns in the config.
 
 ## Folder trust

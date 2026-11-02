@@ -18,6 +18,7 @@ agentctl manages **work orders, not windows**. The unit is a spec: a Markdown fi
 - **Board.** A full-screen overview of all tasks with a live preview of the selected window.
 - **Reports.** `agentctl pull --ready` collects the new reports into one text for your planning chat.
 - **Queue, dependencies, collisions.** More tasks than free windows? They wait and start by themselves; a review can wait for the author's report (`after`); two tasks changing the same files are flagged early.
+- **Cancelling and cohorts.** Work is abandoned in the middle of a turn? `agentctl cancel` interrupts, closes the window and keeps the worktree; tasks that waited for it are blocked, not forgotten. Tasks you name a cohort for are grouped on the board, filtered by `--cohort` and announced together when all their reports are in.
 - **Provider switch.** A table of Claude and Codex equivalents; `agentctl move` hands a task that hit its usage limit to the other provider in the same worktree.
 - **Chat integration.** A local MCP server lets a chat in the Claude app or Claude Code read status and reports, and, if you allow it, send prompts and start tasks.
 - **Small and inspectable.** TypeScript on Node with no build step, no daemon; `--dry-run` prints every command instead of running it.
@@ -35,7 +36,7 @@ sequenceDiagram
     participant W as watch + notifier
 
     H->>C: describe the work
-    C-->>H: spec (YAML header + prompt)
+    C-->>H: spec (YAML header + prompt, optional cohort: name)
     alt a window of the provider is free
         H->>A: agentctl new --clip
     else the limit is full
@@ -59,8 +60,15 @@ sequenceDiagram
         W->>G: every 300 s: files each task changed
         W-->>H: ⚠ two tasks changed the same files
     end
+    opt the work is abandoned
+        H->>A: agentctl cancel NC-42 --reason "…"
+        A->>X: interrupt key, wait cancel.grace
+        A->>G: close the window (worktree and branch stay)
+        W-->>H: queued tasks that waited for it: ⛓ blocked
+    end
     X->>G: writes the report file
     W-->>H: notification (report ready, question, limit)
+    W-->>H: kohorta sprint-1: all reports ready (once per cohort)
     H->>A: agentctl pull --ready (or MCP pull_ready)
     A-->>C: reports (clipboard or MCP answer)
     rect rgb(255, 244, 200)
@@ -82,7 +90,7 @@ flowchart TB
         BOARD["board (Ink, src/board)"]
         MCP["MCP server (src/mcp, stdio)"]
     end
-    CORE["src/core: spec, plan, new, queue, collisions, status, pull, close, move, watch, events, notify"]
+    CORE["src/core: spec, plan, new, queue, cancel, cohort, collisions, status, pull, close, move, watch, events, notify"]
     RUN["Runner: RealRunner / RecordingRunner"]
     subgraph world [Outside]
         TMUX[tmux session agentctl]
@@ -94,6 +102,7 @@ flowchart TB
         CFG["config: ~/.agentctl/config.yaml, .agentctl.yaml"]
         STATE["state_dir: ~/.agentctl/tasks/ID/TASK.md, event.json"]
         QUEUE["queue: ~/.agentctl/queue/, collisions.json"]
+        COH["cohorts: ~/.agentctl/cohorts/name.json"]
         ARCH["archive: ~/.agentctl/archive/"]
         REP["cache: reports per task"]
         AUDIT["mcp-audit.log"]
@@ -109,6 +118,7 @@ flowchart TB
     CORE --> NOTE
     CORE <--> STATE
     CORE <--> QUEUE
+    CORE <--> COH
     CORE --> ARCH
     CORE --> CFG
     AG --> REP
@@ -135,13 +145,18 @@ stateDiagram-v2
     state "⊘ closed" as closed
     state "⧗ queued" as queued
     state "✗ start failed" as startfailed
+    state "✕ cancelled" as cancelled
+    state "⛓ blocked" as blocked
 
     [*] --> queued: queue, or y when the limit is full
     queued --> trust: window free, after met, fresh worktree
     queued --> working: window free, after met
     queued --> startfailed: start failed
     startfailed --> queued: queue retry
-    queued --> [*]: queue rm
+    queued --> cancelled: cancel, queue rm
+    queued --> blocked: after names a cancelled task
+    blocked --> queued: unblock
+    blocked --> cancelled: cancel
     [*] --> trust: new, fresh worktree
     [*] --> working: new, prompt pasted
     [*] --> orphan: window without state file
@@ -166,6 +181,15 @@ stateDiagram-v2
     ready --> closed: close
     superseded --> closed: close
     closed --> [*]: archive
+    trust --> cancelled: cancel
+    working --> cancelled: cancel
+    input --> cancelled: cancel
+    limited --> cancelled: cancel
+    waiting --> cancelled: cancel
+    ready --> cancelled: cancel
+    dead --> cancelled: cancel
+    superseded --> cancelled: cancel
+    cancelled --> [*]
 ```
 
 | State | Icon | Meaning |
@@ -181,7 +205,9 @@ stateDiagram-v2
 | `dead` | ✗ | the window is gone and there is no report |
 | `orphan` | ✗ | a window of the session has no state file; see `agentctl adopt` |
 | `closed` | ⊘ | `agentctl close` was run; listed only by `status --all` |
-| `cancelled` | ✕ | `agentctl cancel` was run: the work was abandoned, in the middle of a turn or in the queue; listed only by `status --all` |
+| `cancelled` | ✕ | `agentctl cancel` was run: the work was abandoned, in the middle of a turn or in the queue; listed only by `status --all`, under **Cancelled** on the board |
+
+A queued task whose `after` names a cancelled task is **blocked** (⛓): not a state of a window, but a condition of the queue that `status`, `queue list` and the board show with its cause. [Cancelling tasks](#cancelling-tasks) and `agentctl unblock` are the ways out.
 
 The same diagrams with notes: [docs/diagrams.md](docs/diagrams.md).
 
@@ -274,6 +300,7 @@ Add a bell sound to the tram when it leaves a stop.
 | `priority` | no | `high` or `normal` (default): queue order. |
 | `after` | no | Task ID or list: a queued task starts only when each has a report. |
 | `touches` | no | Globs of the files the task will change: a warning when an active task already changes them. |
+| `cohort` | no | Name of the group the task belongs to (`--cohort` on `new` and `queue` overrides it). Without it the task is in no cohort. |
 | `report` | no | Where the agent writes its report (default `<cache>/<task>/<TASK>.md`). |
 
 `{task}`, `{TASK}` and `{cache}` work as placeholders in paths. All keys, types and defaults: [docs/configuration.md](docs/configuration.md#spec-keys). Mistakes are reported all at once, in plain words, with a hint.
@@ -328,19 +355,24 @@ agentctl board  agentctl-test · 3 tasks · 09:41:03
                                                                        │ ● you chose: tea please
 
 Enter – open the agent · F12 – back to the list
-↑↓ ⏎  m msg  M move  i int  c/r pull  x close  h hide  z done  a all  u/d/p  ?
+↑↓ ⏎ m msg M move i int c/r pull x close X cancel k cohort h hide z/a u/d/p ?
 ```
 
 | Key | Action |
 |---|---|
-| `↑` `↓` (`k` `j`) | select a task |
+| `↑` `↓` (`j`) | select a task |
 | `Enter` | go to the task's window; **`F12`** comes back to the board |
 | `m` / `i` | message the agent / interrupt its turn (after y/N) |
 | `M` | move the task to the other provider after a usage limit (after y/N) |
 | `c` / `r` | copy the selected report / all new reports |
 | `x` | close the window (after y/N; a second question for the worktree) |
-| `h` / `z` / `a` | hide a task / open the Finished section / list hidden and closed tasks |
+| `X` | cancel the task: an optional reason, then y/N; a queued task leaves the queue, a move is cancelled with its other half |
+| `k` | pick a cohort to show (`wszystkie`, a cohort, `bez kohorty`) |
+| `g` / `G` | fold the cohort group of the selected task / open all groups |
+| `h` / `z` / `a` | hide a task / open the Finished section / list hidden, closed and cancelled tasks |
 | `?` / `q` | help / leave (the agents keep running) |
+
+With cohorts the list is grouped under foldable headers with the counts of their states (`- sprint-1 (4) 2⚙ 1✓ 1⧗`), the tasks without a cohort last under `bez kohorty`. The tmux status bar keeps counting all tasks.
 
 In the agentctl tmux session the mouse is on (click a window name in the status bar), and `F12` goes back to the board from any window. Nothing destructive runs on a single key. More: [docs/details.md](docs/details.md#board).
 
@@ -407,12 +439,57 @@ Two active tasks that change the same files in the same repository are a merge c
 
 Details: [docs/details.md](docs/details.md#collisions).
 
+## Cancelling tasks
+
+Work is abandoned half way: the approach was wrong, the plan changed, the task was ordered twice.
+
+```sh
+agentctl cancel NC-42 --reason "wrong approach"   # list, y/N; interrupt, wait cancel.grace (5 s), close the window
+agentctl cancel NC-41 NC-42 --rm-worktree         # also remove the worktrees (never --force; branches stay)
+agentctl cancel --cohort sprint-1                 # every open task of a cohort, queued ones too
+agentctl unblock NC-43 [--drop-after NC-42]       # a task that waited for a cancelled one: drop the dependency
+```
+
+- **The worktree and the branch stay**, because half-done work is often worth keeping. `--rm-worktree` removes the worktree only.
+- `cancelled` is a state of its own (not `closed`). A cancelled task leaves `status` and the board (`status --all` and the board key `a` list it under **Cancelled**), does not count against the window limits and is never taken by `pull --ready`. A report it had written stays: `agentctl pull NC-42`.
+- A queued task is taken out of the queue (`queue rm` is the same without a reason). A task you moved with `move` is cancelled together with its other half, after one question.
+- A queued task whose `after` names a cancelled task is **blocked** (⛓): it shows the cause, `watch` says "NC-43 zablokowane – NC-42 anulowane" once, and it stays until you `unblock` it or cancel it.
+- The reason, the time and who asked (`cli`, `board`, `mcp`) are written into `TASK.md`. On the board it is **`X`**; for the chat there is the MCP tool `cancel`, which announces itself on the desktop.
+
+Details: [docs/details.md](docs/details.md#cancelling-tasks).
+
+## Cohorts
+
+Related tasks can share a name you choose, so you can watch, pull and close them as a group.
+
+```yaml
+---
+task: NC-42
+agent: claude
+cohort: sprint-1        # optional; no name, no cohort
+---
+```
+
+```sh
+agentctl new --cohort sprint-1 nc-42.md        # the flag overrides the spec; also on queue
+agentctl cohort list                           # tasks per cohort by state, since when
+agentctl cohort show sprint-1                  # the tasks as in status
+agentctl cohort add sprint-1 NC-43 NC-44       # existing tasks; cohort remove NC-44; cohort note sprint-1 "…"
+agentctl status --cohort sprint-1              # also --json, --clip; pull --ready, close, cancel, queue list take it too
+```
+
+- A task without a name belongs to **no cohort**: there is no default one. Names are letters, digits, `-`, `_` and `.`, compared without regard to case and shown as first written. The first task makes the cohort (`~/.agentctl/cohorts/<name>.json`).
+- When every task of a cohort that was not cancelled has a report, `watch` says "kohorta sprint-1: wszystkie raporty gotowe (3)", once; again only when a task joins.
+- `close --cohort X` and `cancel --cohort X` list the tasks and ask y/N. The board groups by cohort (`k` filters, `g` folds); the MCP server has `cohort_list`, `cohort_show` and a `cohort` argument of `status` and `pull_ready`.
+
+Details: [docs/details.md](docs/details.md#cohorts).
+
 ## Chat integration (MCP)
 
 `agentctl mcp` is a local MCP server on stdio. The Claude app, Claude Code and VS Code start it themselves; nothing listens on a port.
 
-- **Read tools** (always on): `status`, `peek`, `list_reports`, `get_report`, `pull_ready`, `task_spec`, `queue_list`, `overlap`.
-- **Write tools** (off until listed in `mcp.allow`): `send`, `new`, `queue`, `queue_rm`, `interrupt`, `close`, `move`. `new`, `queue` and `move` change nothing until called again with `confirm: true`. Every write is audited in `~/.agentctl/mcp-audit.log` and announced on the desktop.
+- **Read tools** (always on): `status`, `peek`, `list_reports`, `get_report`, `pull_ready`, `task_spec`, `queue_list`, `cohort_list`, `cohort_show`, `overlap`, `version`.
+- **Write tools** (off until listed in `mcp.allow`): `send`, `new`, `queue`, `queue_rm`, `cancel`, `interrupt`, `close`, `move`. `new`, `queue`, `cancel` and `move` change nothing until called again with `confirm: true`. Every write is audited in `~/.agentctl/mcp-audit.log` and announced on the desktop.
 - No tool merges, pushes, rebases, deletes a branch, runs a shell command or takes a path.
 
 ```sh
@@ -453,6 +530,8 @@ What agentctl never does:
 - The queue moves only while `agentctl watch` runs, and `watch` reads the config when it starts (restart it after changing limits).
 - Collisions compare file names from git, not hunks; a task that only has uncommitted edits in another checkout of the repository is not seen.
 - `move` starts a new conversation: the new agent learns the state from `git log` and `git diff`, not from the old agent's context.
+- Cancelling stops the agent with its interrupt key and closes the window; what the agent already did stays in the worktree (and `cancel` does not undo it). `cancel --rm-worktree` refuses a worktree with uncommitted files, like `close`.
+- On the board `k` is the cohort filter, so it no longer moves the selection up (the arrow does; `j` still moves down).
 - `close --rm-worktree` kills the window first; a worktree with uncommitted files is then refused (no `--force`).
 - The MCP server is local and runs as you. It is a trust decision about the chat, not a sandbox.
 - Tested on macOS; Linux is supported for the clipboard and `notify-send` but less used.

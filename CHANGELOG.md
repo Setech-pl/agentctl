@@ -8,6 +8,37 @@ Versions 0.1.0 to 0.7.0 correspond to pull requests #1 to #7; their dates are th
 
 Nothing yet.
 
+## [0.10.0] - 2026-11-02
+
+Pull request: task cancellation and cohorts. The date is the day it was prepared; set it to the merge date.
+
+### Added
+- **Cancelling.** `agentctl cancel <TASK…> [--reason "…"] [--rm-worktree] [-y] [--dry-run]`: shows the list and asks y/N. A task at work gets the agent's interrupt key, then `cancel.grace` seconds (default 5, one wait per command), then its window is closed; a finished task without a window is only marked; a task in the queue is taken out of it (`queue rm` is its alias, without a reason). The task is **`cancelled`** (new state ✕, not `closed`): `cancelled`, `cancelled_at`, `cancel_reason` and `cancel_source` (`cli`, `board`, `mcp`) in `TASK.md`. The worktree and the branch stay; `--rm-worktree` runs `git worktree remove` (never `--force`, never a branch). A task from `move` is cancelled together with its other half, after one question.
+- A cancelled task leaves `status` and the board (`status --all` and the board key `a`: section **Cancelled**; `cancelled`, `cancelledAt`, `cancelReason` in `status --json`), does not count against the window limits, is not taken by `pull --ready`, gives no "window vanished" notification and no collision. Its report, if one was written, stays (`pull <TASK>`).
+- **Blocked tasks.** A queued task whose `after` names a cancelled task is blocked (⛓): `status`, `queue list` (`blocked` in `--json`) and the board show `⛓ zablokowane – NC-42 anulowane`; it never starts (a task that waits for a blocked one is blocked too). `watch` sends one notification per cancelled author, "NC-43 zablokowane – NC-42 anulowane". `queue` and `new` refuse an `after` that names a cancelled task. **`agentctl unblock <TASK> [--drop-after <TASK>]`** removes the dependency; `agentctl cancel` is the other way out.
+- **Cohorts.** Spec field `cohort: <name>` and `--cohort <name>` on `new` and `queue` (the flag wins). No name, no cohort: there is no default and none is made up. Names: letters, digits, `-`, `_`, `.`, compared without regard to case, shown as first written; the first task makes the cohort (`<config dir>/cohorts/<name>.json`: created, optional note). `cohort` of a task is in its `TASK.md` and queue entry.
+- `agentctl cohort list [--json]` (tasks per cohort: active, queued, reports, closed, cancelled; since when), `cohort show <name> [--json]`, `cohort add <name> <TASK…>`, `cohort remove <TASK…>`, `cohort note <name> "…"`.
+- `--cohort <name>` filter on `status` (with `--json` and `--clip`), `pull --ready`, `close`, `cancel` and `queue list`; `close --cohort` and `cancel --cohort` list the tasks and ask y/N. `status` has a `COHORT` column once any task has a cohort.
+- `watch`: "kohorta <nazwa>: wszystkie raporty gotowe (N)" when every task of a cohort that was not cancelled (queued ones included) has a report; once per cohort, again only when a task joins.
+- Board: **`X`** cancels (optional reason, then y/N; also on queued tasks and in the menu of a finished task), grouping by cohort with foldable headers that carry the counts of states (`g` folds, `G` opens all, "bez kohorty" last), **`k`** picks the cohort to show, **Cancelled (N)** section under `a`, ⛓ in the Queue section.
+- MCP: write tool **`cancel`** (`task` or `cohort`, `reason`, `remove_worktree` behind `mcp.allow_rm_worktree`, `confirm: true` after a description; audited and announced with the reason), read tools `cohort_list`, `cohort_show` and `version`, `cohort` argument of `status` and `pull_ready`; `cohort`, `cancelled`, `cancelReason` in the status rows. `mcp.allow` accepts `cancel`.
+- Config: `cancel.grace`; `cancelled` among the keys of `watch.window_icons` (default ✕).
+- Documentation: the Cancelling tasks and Cohorts sections of both READMEs, `docs/details.md`, `docs/configuration.md`, `docs/mcp.md`; the flow, architecture and state diagrams show cancelling, blocked tasks and cohorts.
+- `agentctl mcp check` and the MCP `version` tool: see Fixed.
+
+### Changed
+- On the board **`k` no longer moves the selection up**: it is the cohort filter. The arrow moves up, `j` still moves down. The key line is `↑↓ ⏎ m msg M move i int c/r pull x close X cancel k cohort h hide z/a u/d/p ?`.
+- `queue rm` makes the task `cancelled` (it used to leave nothing behind) and says which waiting tasks became blocked.
+
+### Fixed
+- **One unknown name in `mcp.allow` switched the whole MCP server off** (for example `queue` read by an older server): nothing worked, not even `status`. Unknown names, unknown keys and wrong types in the `mcp` section are now warnings: the entry is ignored, the rest works, and `status`, `version` and `agentctl doctor` show the warning. Only a config that cannot be read at all stops the server.
+- **The Claude app kept the old MCP server process after `agentctl-update`.** The server now tells its version and script (MCP `version` and a line in `status`, with a hint when the stable copy on disk is newer). `agentctl doctor` and, at its end, `agentctl-update` run `agentctl mcp check`: it finds `agentctl … mcp` processes that started before the stable copy was last updated and warns "serwer MCP w aplikacji działa na starej wersji – zamknij aplikację Claude (⌘Q) i otwórz ponownie". Nothing is stopped for you; `docs/mcp.md` describes the update as quitting the app.
+
+### Known limits
+- `cancel` does not undo what the agent did; an unclean worktree is refused by `--rm-worktree`, as by `close`.
+- The staleness check compares process start times with the update time of the stable copy (`package.json`, `node_modules`); a server of another checkout is not judged.
+- Cohort and cancellation data are kept per task for a later usage and stats milestone; nothing counts them yet.
+
 ## [0.9.0] - 2026-11-02
 
 Pull request: queue, dependencies, collision warnings. The date is the day it was prepared; set it to the merge date.
