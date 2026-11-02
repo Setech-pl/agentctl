@@ -7,6 +7,7 @@ import type { Notifier } from '../src/core/notify.ts';
 import { liveWindows } from '../src/core/plan.ts';
 import { commitQueueAdd, describeQueue, findEntry, isPaused, moveToFront, planQueueAdd, queueDir, queueLogFile, queueTick, QueueMemory, readQueue, removeFromQueue, renderQueueList, retryEntry, setPaused, waiting } from '../src/core/queue.ts';
 import { splitSpecs } from '../src/core/spec.ts';
+import { collectStatus } from '../src/core/status.ts';
 import { readTaskRecord } from '../src/core/taskstore.ts';
 import { WatchMemory, watchLogPath, watchTick } from '../src/core/watch.ts';
 import { DiskRunner, FakeTmux, makeConfig, runCli, seedTask, useScratch } from './helpers.ts';
@@ -388,5 +389,98 @@ describe('watch starts the queue', () => {
     await memory.queue.idle();
     assert.deepEqual(readQueue(s.config), []);
     assert.ok(s.notified.includes('Uruchomiono NC-2 z kolejki'));
+  });
+});
+
+describe('after: dependencies', () => {
+  const writeReport = (s: Setup, task: string): void => {
+    const record = readTaskRecord(s.config, task.toLowerCase())!;
+    fs.mkdirSync(path.dirname(record.report), { recursive: true });
+    fs.writeFileSync(record.report, `# ${task}\nVerdict: PASS\n`);
+  };
+
+  it('a task with after waits until the named task has a report, then starts (the other tasks are not held back)', async () => {
+    const s = setup('after', 'limits: {claude: 5}\n');
+    await add(s, specOf(s.repo, 'NC-1'));
+    await s.tick();
+    assert.ok(readTaskRecord(s.config, 'nc-1'));
+    await add(s, specOf(s.repo, 'NC-1R', { after: 'NC-1', model: 'sonnet', review_of: 'NC-1' }) + specOf(s.repo, 'NC-3'));
+    assert.deepEqual(await s.tick(), ['NC-3'], 'the review waits, NC-3 does not');
+    const views = describeQueue(s.config, readQueue(s.config), await liveWindows(s.ctx), await collectStatus(s.ctx, { progress: false, archived: true }));
+    assert.deepEqual(views.map((v) => [v.entry.task, v.condition.kind, v.condition.text]), [['NC-1R', 'after', 'czeka na NC-1']]);
+    assert.deepEqual(await s.tick(), []);
+    writeReport(s, 'NC-1');
+    assert.deepEqual(await s.tick(), ['NC-1R']);
+    assert.deepEqual(readQueue(s.config), []);
+  });
+
+  it('a list of tasks: all of them need a report; a closed task with a report counts', async () => {
+    const s = setup('after-list', 'limits: {claude: 5}\n');
+    await add(s, specOf(s.repo, 'A-1') + specOf(s.repo, 'A-2'));
+    await s.tick();
+    await add(s, specOf(s.repo, 'A-3', { after: '[A-1, A-2]' }));
+    writeReport(s, 'A-1');
+    assert.deepEqual(await s.tick(), [], 'A-2 has no report yet');
+    writeReport(s, 'A-2');
+    s.tmux.windows = s.tmux.windows.filter((w) => w.name !== 'a-2');
+    assert.deepEqual(await s.tick(), ['A-3']);
+  });
+
+  it('a task that waits in the queue can be named too; a failed one is shown as failed', async () => {
+    const s = setup('after-queued', 'limits: {claude: 5}\n', (cmd, args) => (cmd === 'git' && args.includes('worktree') && args.some((a) => a.endsWith('-b-1')) ? { code: 1, stderr: 'boom' } : undefined));
+    await add(s, specOf(s.repo, 'B-1') + specOf(s.repo, 'B-2', { after: 'B-1' }));
+    await s.tick();
+    const views = describeQueue(s.config, readQueue(s.config), [], []);
+    assert.deepEqual(views.map((v) => v.condition.text.slice(0, 20)), ['czeka na B-1 (failed)', 'failed: git worktree '].map((t) => t.slice(0, 20)));
+  });
+
+  it('a circle or a task that does not exist is an error at adding', async () => {
+    const fresh = setup('after-bad2');
+    await assert.rejects(planQueueAdd(fresh.ctx, splitSpecs(specOf(fresh.repo, 'C-1', { after: 'C-99' }), 't')), /C-1: after C-99: there is no such task/);
+    await assert.rejects(planQueueAdd(fresh.ctx, splitSpecs(specOf(fresh.repo, 'C-1', { after: 'C-1' }), 't')), /after names the task itself/);
+    await assert.rejects(planQueueAdd(fresh.ctx, splitSpecs(specOf(fresh.repo, 'C-1', { after: 'C-2' }) + specOf(fresh.repo, 'C-2', { after: 'C-1' }), 't')), /after makes a circle: C-1 -> C-2 -> C-1/);
+    await assert.rejects(planQueueAdd(fresh.ctx, splitSpecs(specOf(fresh.repo, 'C-1', { after: '3' }), 't')), /after must be a task ID/);
+    // a circle through an entry that is in the queue already
+    await add(fresh, specOf(fresh.repo, 'D-1'));
+    const entry = readQueue(fresh.config)[0]!;
+    fs.writeFileSync(path.join(queueDir(fresh.config), '0001-D-1.json'), JSON.stringify({ ...entry, after: ['D-2'] }));
+    await assert.rejects(planQueueAdd(fresh.ctx, splitSpecs(specOf(fresh.repo, 'D-2', { after: 'D-1' }), 't')), /D-2: after makes a circle: D-2 -> D-1 -> D-2/);
+    assert.deepEqual(readQueue(fresh.config).map((e) => e.task), ['D-1']);
+  });
+
+  it('new refuses a task whose after is not met and points at the queue; once the report is there it starts', async () => {
+    const s = setup('after-new', 'limits: {claude: 5}\n');
+    await add(s, specOf(s.repo, 'E-1'));
+    await s.tick();
+    const text = specOf(s.repo, 'E-2', { after: 'E-1', model: 'sonnet' });
+    let r = await runCli(s.config, s.runner, ['new', '-'], { readStdin: () => text });
+    assert.equal(r.code, 1);
+    assert.match(r.stderr, /E-2: after E-1: czeka na E-1 \(no report yet\)\. "agentctl queue" starts the task by itself/);
+    writeReport(s, 'E-1');
+    r = await runCli(s.config, s.runner, ['new', '-'], { readStdin: () => text });
+    assert.equal(r.code, 0, r.stderr);
+  });
+
+  it('a review without after gets a hint in the summary; with after, or when the author has a report, it does not', async () => {
+    const s = setup('after-hint', 'limits: {claude: 5}\n');
+    await add(s, specOf(s.repo, 'F-1', { model: 'opus' }));
+    await s.tick();
+    const review = (extra: Record<string, string> = {}): string => specOf(s.repo, 'F-2', { review_of: 'F-1', model: 'sonnet', ...extra });
+    const hint = /hint: .*F-2 reviews F-1, which has no report yet: add "after: F-1"/;
+    assert.match((await planQueueAdd(s.ctx, splitSpecs(review(), 't'))).summary.join('\n'), hint);
+    const withAfter = (await planQueueAdd(s.ctx, splitSpecs(review({ after: 'F-1' }), 't'))).summary.join('\n');
+    assert.doesNotMatch(withAfter, /hint:/);
+    assert.match(withAfter, /after: {4}F-1 – czeka na F-1/);
+    writeReport(s, 'F-1');
+    assert.doesNotMatch((await planQueueAdd(s.ctx, splitSpecs(review(), 't'))).summary.join('\n'), /hint:/);
+  });
+
+  it('status prints the queue with what each task waits for', async () => {
+    const s = setup('after-status', 'limits: {claude: 5}\n');
+    await add(s, specOf(s.repo, 'G-1'));
+    await s.tick();
+    await add(s, specOf(s.repo, 'G-2', { after: 'G-1' }));
+    const r = await runCli(s.config, s.runner, ['status']);
+    assert.match(r.stdout, /Queue \(1\): agentctl queue list\n {2}1\. G-2 {2}czeka na G-1/);
   });
 });

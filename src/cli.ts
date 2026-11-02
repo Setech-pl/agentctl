@@ -23,12 +23,12 @@ import { matchTask } from './core/resolve.ts';
 import type { TaskTarget } from './core/resolve.ts';
 import { migrateLegacyState } from './core/taskstore.ts';
 import { newTasks } from './core/new.ts';
-import { commitQueueAdd, describeQueue, isPaused, moveToFront, planQueueAdd, readQueue, removeFromQueue, renderQueueList, retryEntry, setPaused, waiting } from './core/queue.ts';
+import { commitQueueAdd, describeQueue, isPaused, moveToFront, planQueueAdd, readQueue, queueStatusLines, removeFromQueue, renderQueueList, retryEntry, setPaused, waiting } from './core/queue.ts';
 import { liveWindows } from './core/plan.ts';
 import type { NewOptions } from './core/new.ts';
 import { pullReady, pullTask } from './core/pull.ts';
 import { sendPrompts } from './core/send.ts';
-import { reportStatus, shownRows, statusMarkdown } from './core/status.ts';
+import { collectStatus, reportStatus, shownRows, statusMarkdown } from './core/status.ts';
 import { summarizeSpecs } from './core/summary.ts';
 import { DesktopNotifier, NOTIFIER_MEMORY_MS, notifierOptionsFor } from './core/notify.ts';
 import type { Notifier, NotifyResult } from './core/notify.ts';
@@ -332,7 +332,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .action(
       guarded(async (opts: { json?: boolean }) => {
         const ctx = contextFor(false, { migrate: false });
-        const views = describeQueue(ctx.config, readQueue(ctx.config), await liveWindows(ctx));
+        const views = describeQueue(ctx.config, readQueue(ctx.config), await liveWindows(ctx), await collectStatus(ctx, { progress: false, archived: true }));
         if (opts.json) return line(JSON.stringify(views.map((v) => ({ position: v.position, task: v.entry.task, status: v.entry.status, agent: v.entry.agent, model: v.entry.model, effort: v.entry.effort, priority: v.entry.priority, condition: v.condition.text, queued: v.entry.queuedAt, error: v.entry.error ?? null })), null, 2));
         for (const l of renderQueueList(views, ctx.runner.now())) line(l);
         if (isPaused(ctx.config)) line('The queue is paused: "agentctl queue resume" lets it run again.');
@@ -404,9 +404,14 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
           return deps.stdout(md);
         }
         if (opts.json) return line(JSON.stringify(rows, null, 2));
-        if (rows.length === 0) return line(hiddenCount > 0 ? `No visible tasks; ${hiddenCount} hidden (see "agentctl status --all").` : `No tasks yet in ${ctx.config.stateDir}. Start one with "agentctl new <spec>".`);
+        if (rows.length === 0) {
+          line(hiddenCount > 0 ? `No visible tasks; ${hiddenCount} hidden (see "agentctl status --all").` : `No tasks yet in ${ctx.config.stateDir}. Start one with "agentctl new <spec>".`);
+          for (const l of await queueStatusLines(ctx)) line(l);
+          return;
+        }
         for (const l of renderStatusTable(rows)) line(l);
         for (const l of renderStatusHints(rows)) line(`hint: ${l}`);
+        for (const l of await queueStatusLines(ctx)) line(l);
         if (hiddenCount > 0) line(`${hiddenCount} hidden task${hiddenCount === 1 ? '' : 's'} not shown: agentctl status --all`);
       }),
     );

@@ -6,6 +6,8 @@ import type { Context } from './context.ts';
 import { formatModelEffort, translate } from './equivalents.ts';
 import type { Order } from './equivalents.ts';
 import type { ResolvedSpec } from './spec.ts';
+import { unmetAfter, waitingText } from './depends.ts';
+import { collectStatus } from './status.ts';
 import { listTaskRecords } from './taskstore.ts';
 import { Problems } from './util.ts';
 
@@ -17,6 +19,8 @@ export interface PlanOptions {
   reuse?: boolean;
   /** Queue validation: the provider limit is not an error (the task waits for a free window), and nothing is ever switched. */
   ignoreLimits?: boolean;
+  /** The queue starts a task whose `after` it has checked itself. */
+  skipAfter?: boolean;
   /** Authors of reviewed tasks that are not started yet (waiting in the queue): task -> agent and model. */
   knownAuthors?: ReadonlyMap<string, AgentModel>;
   /**
@@ -56,6 +60,14 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
   const { config } = ctx;
   const p = new Problems();
   const live = ctx.runner.dryRun ? [] : await liveWindows(ctx);
+  // `after` belongs to the queue: `new` starts a task now, so what it waits for must be done already.
+  if (!opts.skipAfter && !ctx.runner.dryRun && specs.some((s) => s.after.length > 0)) {
+    const rows = await collectStatus(ctx, { progress: false, archived: true });
+    for (const spec of specs) {
+      const unmet = unmetAfter(spec.after, rows);
+      if (unmet.length > 0) p.add(`${spec.task}: after ${spec.after.join(', ')}: ${waitingText(unmet)} (no report yet). "agentctl queue" starts the task by itself once they have one.`);
+    }
+  }
   const planned: LiveWindow[] = [];
   const seen = new Set<string>();
   const result: ResolvedSpec[] = [];

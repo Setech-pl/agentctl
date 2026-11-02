@@ -289,6 +289,22 @@ agentctl queue retry NC-42       # a failed start, once more
 - **A failed start** (setup failed, repository gone, agent not ready) puts the task at the end of the line as `failed`, with the error in `queue list` and the log of the attempt in `<config dir>/queue/<n>-<TASK>.log`, and sends a notification. It is not tried again by itself; `queue retry` is your decision (it reuses a worktree the failed start left).
 - The queue only moves while `agentctl watch` runs (`watch --tmux`). `queue.enabled: false` in the config switches starting off; `queue.parallel_starts` bounds the starts in progress ([configuration](configuration.md#queue)).
 
+### Dependencies: `after`
+
+```yaml
+---
+task: NC-42-REVIEW
+agent: codex
+review_of: NC-42
+after: NC-42            # or a list: [NC-41, NC-42]
+repos: [...]
+---
+```
+
+A queued task with `after` starts only when every task it names has a report: state `report-ready`, or closed with the report file still there. Until then `agentctl status`, `queue list` and the board say `czeka na NC-42`; a task that waits for a dependency does not take a place in the line, so the others go on. A review (`review_of`) without `after` gets a hint in the summary, because it would otherwise start as soon as a window is free, before the author has written anything.
+
+At adding, a task named in `after` must exist (started, in the queue or in the same file), a task may not wait for itself, and tasks may not wait for each other in a circle; each of these is an error that names the path. `new` has no line to wait in: it refuses a task whose `after` is not met and points at `agentctl queue`. A dependency that failed to start stays unmet (`czeka na NC-42 (failed)`) until you `queue retry` or `queue rm` it.
+
 ## Board
 
 `agentctl board` is a full-screen overview of all tasks, refreshed every 2 seconds. `agentctl board --tmux` opens it in window `board` of the agentctl session
