@@ -49,6 +49,8 @@ export interface ResolvedSpec {
   priority: 'high' | 'normal';
   /** Tasks that must have a report before this one starts (queue). `new` refuses to start a task whose `after` is not met. */
   after: string[];
+  /** Globs of the files the task will change: `queue` and `new` warn when an active task already changes matching files. */
+  touches: string[];
   /** The order as written in the spec; agent/model/effort above are the effective values. */
   requested: Order;
   /** Why the effective order differs from the requested one. */
@@ -135,7 +137,7 @@ export interface ResolveContext {
 }
 
 /** Keys of a spec header, and of one entry of its `repos`; docs/configuration.md describes each one. */
-export const SPEC_KEYS = ['task', 'agent', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'report', 'pin', 'priority', 'after'];
+export const SPEC_KEYS = ['task', 'agent', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'report', 'pin', 'priority', 'after', 'touches'];
 export const REPO_KEYS = ['path', 'worktree', 'base', 'branch'];
 
 function label(raw: RawSpec): string {
@@ -236,6 +238,14 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
       } else p.add(`after must be a task ID or a list of task IDs (e.g. NC-12), got ${JSON.stringify(dep)}`);
     }
   }
+  const touches: string[] = [];
+  if (h.touches !== undefined && h.touches !== null) {
+    const list = Array.isArray(h.touches) ? h.touches : [h.touches];
+    for (const glob of list) {
+      if (typeof glob === 'string' && glob.trim() !== '') touches.push(glob.trim());
+      else p.add(`touches must be a glob or a list of globs (e.g. [src/menu/**, "*.css"]), got ${JSON.stringify(glob)}`);
+    }
+  }
   const priority = parseEnumValue(h.priority, PRIORITIES, 'priority', p) ?? 'normal';
   if (raw.prompt === '') p.add('the prompt is empty (write it below the closing "---" of the header)');
 
@@ -331,6 +341,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     pin,
     priority,
     after,
+    touches,
     requested: { agent: agent as AgentName, model, effort },
   };
   if (reviewOf) spec.reviewOf = reviewOf;

@@ -305,6 +305,17 @@ A queued task with `after` starts only when every task it names has a report: st
 
 At adding, a task named in `after` must exist (started, in the queue or in the same file), a task may not wait for itself, and tasks may not wait for each other in a circle; each of these is an error that names the path. `new` has no line to wait in: it refuses a task whose `after` is not met and points at `agentctl queue`. A dependency that failed to start stays unmet (`czeka na NC-42 (failed)`) until you `queue retry` or `queue rm` it.
 
+## Collisions
+
+Two tasks that change the same files in the same repository will meet in a merge conflict. agentctl says so early.
+
+- **What is compared.** For each active task (its window runs) the files changed since its worktree left the base (`git diff --name-only <base>...HEAD`) plus the files with uncommitted changes, per source repository (`repos[].path`). Two tasks collide when the sets share files. `collisions.ignore` leaves out lock files and the like.
+- **`agentctl status`** gets a `COLLIDE` column while something collides: `⚠ LANDING-QS-1: 2` is "2 shared files with LANDING-QS-1". `status --json` has the same in `collide`.
+- **`agentctl watch`** asks git every `collisions.interval` (300 s) and sends one notification for each new pair ("⚠ A i B zmieniają te same pliki (2): …"). The pair is remembered in `<config dir>/collisions.json`, so neither the next check nor a restart of the watcher repeats it; when the files stop overlapping and later overlap again, it is new again.
+- **`agentctl overlap [TASK]`** lists the shared files of every pair (or of the pairs with TASK), computed right now.
+- **`touches: [globs]`** in a spec says what the task is going to change. `queue` and `new` then warn, and ask y/N, when an active task already changes matching files (`new -y` does not ask; without a terminal the warning is only printed).
+- The board marks a colliding task with `⚠` in the first column and says with whom in the preview ([board](#board)).
+
 ## Board
 
 `agentctl board` is a full-screen overview of all tasks, refreshed every 2 seconds. `agentctl board --tmux` opens it in window `board` of the agentctl session

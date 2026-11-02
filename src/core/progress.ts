@@ -4,6 +4,10 @@ import type { ResolvedRepo } from './spec.ts';
 /** What one worktree has to show for the task so far. */
 export interface RepoProgress {
   worktree: string;
+  /** The repository the worktree belongs to (the spec's `repos[].path`): tasks in the same one can collide. */
+  repoPath: string;
+  /** The files behind `files`: changed since the merge base with `base`, plus the ones with uncommitted changes. */
+  fileNames: string[];
   /** The ref the commits are counted from: the spec's `base`, else main or master; null when neither exists. */
   base: string | null;
   /** Commits on HEAD that are not in `base`; null without a base. */
@@ -53,7 +57,7 @@ export async function repoProgress(runner: Runner, repo: ResolvedRepo): Promise<
     // Three dots: the changes of this branch since it left the base, not the changes the base got meanwhile.
     for (const f of (await git(runner, repo.worktree, ['diff', '--name-only', `${base}...HEAD`])).lines) files.add(f);
   }
-  return { worktree: repo.worktree, base, commits, files: files.size };
+  return { worktree: repo.worktree, repoPath: repo.path, fileNames: [...files].sort(), base, commits, files: files.size };
 }
 
 export function formatProgress(commits: number | null, files: number): string {

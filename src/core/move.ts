@@ -117,6 +117,7 @@ export async function moveTask(ctx: Context, taskArg: string, opts: MoveOptions 
     pin: false,
     priority: 'normal',
     after: [],
+    touches: [],
     requested: from.requested,
     switchedBy: 'limit',
   };
