@@ -19,7 +19,7 @@ import type { StatusRow } from './status.ts';
 import { summarizeSpecs } from './summary.ts';
 import { listArchivedRecords, listTaskRecords, readTaskPrompt } from './taskstore.ts';
 import type { TaskRecord } from './taskstore.ts';
-import { AgentctlError, errorMessage } from './util.ts';
+import { AgentctlError, errorMessage, formatLocalTime } from './util.ts';
 
 /*
  * The tools of `agentctl mcp`. This file is data and functions only: the MCP SDK front (src/mcp/server.ts) registers them.
@@ -111,6 +111,7 @@ function statusRowForChat(r: StatusRow): Record<string, unknown> {
     state: r.state,
     window: r.window,
     started: r.started,
+    startedLocal: r.startedLocal,
     duration: r.duration,
     progress: r.progress?.text ?? null,
     report: r.report,
@@ -163,7 +164,7 @@ async function runListReports(deps: McpDeps, args: { all?: boolean | undefined }
     } catch {
       // gone between the listing and now
     }
-    return { task: r.task, state: r.state, pulled: r.pulled !== null, bytes, modified };
+    return { task: r.task, state: r.state, pulled: r.pulled !== null, bytes, modified, modifiedLocal: formatLocalTime(modified) };
   });
   return ok(`${list.length} report${list.length === 1 ? '' : 's'}; get_report reads one, pull_ready takes the new ones.\n\n${JSON.stringify(list, null, 2)}`);
 }
@@ -238,7 +239,9 @@ async function runTaskSpec(deps: McpDeps, args: { task: string }): Promise<ToolR
     repos: record.repos.map((r) => ({ path: r.path, worktree: r.worktree, branch: r.branch ?? null, base: r.base ?? null })),
     report: record.report,
     started: record.started,
+    startedLocal: formatLocalTime(record.started),
     pulled: record.pulled ?? null,
+    pulledLocal: record.pulled ? formatLocalTime(record.pulled) : null,
     review_of: record.reviewOf ?? null,
     continues: record.continues ?? null,
     superseded_by: record.supersededBy ?? null,
@@ -398,7 +401,7 @@ export const MCP_TOOLS: McpToolDef[] = [
     kind: 'read',
     description:
       'Current state of every agentctl task: agent/model/effort, state (working, background, waiting, needs-input, needs-trust, limited, report-ready, dead, orphan, superseded), ' +
-      'running time, git progress, whether a report exists and was already pulled, the last line and the open question of a waiting agent. ' +
+      'start time (started in UTC, startedLocal in the user\'s local time: show the local one), running time, git progress, whether a report exists and was already pulled, the last line and the open question of a waiting agent. ' +
       'Use this FIRST when the user asks what is running, who waits for them, or whether something is ready, and at the start of a planning session. ' +
       'Hidden and closed tasks are left out unless all is true.',
     input: { all: allArg },
