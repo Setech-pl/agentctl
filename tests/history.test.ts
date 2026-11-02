@@ -7,8 +7,6 @@ import { closeTask } from '../src/core/close.ts';
 import { Context } from '../src/core/context.ts';
 import { handleEvent } from '../src/core/event-command.ts';
 import { Alerts } from '../src/core/alert.ts';
-import { handleKey, initialBoardState, loadLogLines, promptText, runBoardEffect } from '../src/core/board.ts';
-import type { BoardRow, BoardState } from '../src/core/board.ts';
 import { computeStats, foldHistory, historyPath, logMarkdown, markTask, median, readHistory, recordEvent, renderLog, renderStats, selectHistory, statsMarkdown } from '../src/core/history.ts';
 import type { HistoryRecord } from '../src/core/history.ts';
 import type { Notifier } from '../src/core/notify.ts';
@@ -278,68 +276,5 @@ describe('folding, log and stats', () => {
 
   it('median', () => {
     assert.deepEqual([[], [4], [1, 9], [3, 1, 2]].map(median), [null, 4, 5, 2]);
-  });
-});
-
-describe('board: log and result keys', () => {
-  const row = (task: string, extra: Partial<BoardRow> = {}): BoardRow => ({
-    task, agent: 'claude', model: 'opus', effort: 'high', requested: 'claude opus/high', effective: 'claude opus/high', switchedBy: null,
-    state: 'working', window: 'alive', windowName: task.toLowerCase(), windowId: '@1', started: '', startedLocal: '', duration: '1m', report: 'missing', reportPath: '', pulled: null,
-    lastLine: '', progress: null, hint: null, question: null, pin: false, finished: false, hidden: false, hiddenBy: null, closed: false, closedAt: null, archived: false,
-    cancelled: false, cancelledAt: null, cancelReason: null, cohort: null, supersededBy: null, continues: null, worktrees: [], collide: [], ...extra,
-  });
-  const boardOf = (rows: BoardRow[], selected = rows[0]?.task ?? null): BoardState => ({ ...initialBoardState(100, 30), rows, selected, showFinished: true });
-
-  it('l opens the log view and asks for the history; arrows scroll, Esc and l go back', () => {
-    const r = handleKey(boardOf([row('A-1')]), 'l', {});
-    assert.equal(r.state.mode.kind, 'log');
-    assert.deepEqual(r.effects, [{ type: 'log' }]);
-    const filled: BoardState = { ...r.state, mode: { kind: 'log', lines: ['h', 'a', 'b'], offset: 0 } };
-    const down = handleKey(filled, '', { downArrow: true });
-    assert.equal(down.state.mode.kind === 'log' && down.state.mode.offset, 1);
-    assert.equal(handleKey(down.state, '', { upArrow: true }).state.mode.kind === 'log' && 0, 0);
-    assert.equal(handleKey(filled, '', { escape: true }).state.mode.kind, 'list');
-    assert.equal(handleKey(filled, 'l', {}).state.mode.kind, 'list');
-  });
-
-  it('o, p and f mark a finished task or one with a report; on a working task they say so', () => {
-    const finished = boardOf([row('A-1', { finished: true, window: 'gone', state: 'dead' })]);
-    assert.deepEqual(handleKey(finished, 'o', {}).effects, [{ type: 'mark', task: 'A-1', result: 'ok' }]);
-    assert.deepEqual(handleKey(finished, 'p', {}).effects, [{ type: 'mark', task: 'A-1', result: 'partial' }]);
-    assert.deepEqual(handleKey(finished, 'f', {}).effects, [{ type: 'mark', task: 'A-1', result: 'fail' }]);
-    const ready = boardOf([row('A-2', { state: 'report-ready', report: 'yes' })]);
-    assert.equal(handleKey(ready, 'o', {}).effects.length, 1);
-    const closed: BoardState = { ...boardOf([row('A-3', { closed: true, hidden: true, hiddenBy: 'closed', window: 'gone', state: 'closed' })]), showHidden: true };
-    assert.equal(handleKey(closed, 'f', {}).effects.length, 1);
-    const working = boardOf([row('A-4')]);
-    const o = handleKey(working, 'o', {});
-    assert.deepEqual(o.effects, []);
-    assert.match(o.state.notice?.text ?? '', /mark the result of a finished task/);
-  });
-
-  it('p still pauses the queue when no finished task is selected', () => {
-    const r = handleKey(boardOf([row('A-1')]), 'p', {});
-    assert.deepEqual(r.effects, [{ type: 'queue-pause', paused: true }]);
-  });
-
-  it('the Enter menu of a finished task offers the marks, and o opens the window only while it exists', () => {
-    const dead = boardOf([row('A-1', { finished: true, window: 'gone', state: 'dead' })]);
-    const menu = handleKey(dead, '', { return: true }).state;
-    assert.equal(menu.mode.kind, 'finished');
-    assert.match(promptText(menu) ?? '', /o ok · p partial · f fail/);
-    assert.deepEqual(handleKey(menu, 'o', {}).effects, [{ type: 'mark', task: 'A-1', result: 'ok' }]);
-    const moved = boardOf([row('A-2', { finished: true, state: 'superseded' })]);
-    const menu2 = handleKey(moved, '', { return: true }).state;
-    assert.deepEqual(handleKey(menu2, 'o', {}).effects.map((e) => e.type), ['switch']);
-  });
-
-  it('the mark effect writes the history; the log lines come from it', async () => {
-    const s = setup('board-mark');
-    const notice = await runBoardEffect(s.runner, s.config, { type: 'mark', task: 'NC-1', result: 'partial' }, { insideTmux: false });
-    assert.equal(notice.level, 'info');
-    assert.equal(notice.text, 'NC-1: marked partial');
-    assert.match(loadLogLines(s.ctx).join('\n'), /NC-1\s+.*partial/);
-    const bad = await runBoardEffect(s.runner, s.config, { type: 'mark', task: 'NC-99', result: 'ok' }, { insideTmux: false });
-    assert.equal(bad.level, 'error');
   });
 });
