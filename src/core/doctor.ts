@@ -9,6 +9,8 @@ import type { Runner } from './runner.ts';
 import { findMcpProcesses, staleProcesses, staleWarning } from './mcp-processes.ts';
 import { describeAllow, desktopConfigPath, readClaudeCodeRegistration, readDesktopRegistration, stableScript } from './mcp-install.ts';
 import type { McpRegistration } from './mcp-install.ts';
+import { awayReport, renderAway } from './away.ts';
+import { isPublicServer, weakTopic } from './ntfy-setup.ts';
 import { findTerminalNotifier, notifierMemoryPath, readNotifierMemory } from './notify.ts';
 import { Tmux } from './tmux.ts';
 import { errorMessage } from './util.ts';
@@ -120,6 +122,22 @@ export async function runDoctor(
       } else add('notifications', 'ok', `terminal-notifier (${notifier}): a click on a notification switches to the task window`);
     }
   } else add('notifications', 'ok', 'notify-send (no click action)');
+
+  // The phone is optional: a weak topic or a missing token is a warning.
+  if (config) {
+    const ntfy = config.notify.ntfy;
+    if (!ntfy?.topic) add('phone', 'ok', 'not set up (optional): agentctl ntfy-setup');
+    else {
+      const problems: string[] = [];
+      const weak = weakTopic(ntfy.topic);
+      if (weak && isPublicServer(ntfy.server)) problems.push(`the topic is guessable (${weak}) and on ${ntfy.server} the name is the only protection: run agentctl ntfy-setup --regenerate`);
+      else if (weak) problems.push(`the topic is weak (${weak})`);
+      if (!isPublicServer(ntfy.server) && !ntfy.token) problems.push(`${ntfy.server} is not the public server and notify.ntfy.token is not set (a private server wants a token)`);
+      add('phone', problems.length > 0 ? 'warn' : 'ok', problems.length > 0 ? problems.join('; ') : `${ntfy.server}, topic ${ntfy.topic.slice(0, 9)}…, ${ntfy.events.length} events`);
+      const report = awayReport(config);
+      add('away', 'ok', renderAway(report).join('; '));
+    }
+  }
 
   // The chat integration is optional: every line here is ok or a warning, never a failure.
   const registrations: McpRegistration[] = [];

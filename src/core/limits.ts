@@ -4,6 +4,7 @@ import { AGENT_NAMES, loadGlobalConfig } from './config.ts';
 import type { AgentName, GlobalConfig } from './config.ts';
 import type { LiveWindow } from './checks.ts';
 import type { Context } from './context.ts';
+import { editConfigText, writeConfigText } from './config-edit.ts';
 import { recordJournal, recordJournalOnce } from './journal.ts';
 import { readQueue, waiting } from './queue.ts';
 import { AgentctlError, errorMessage } from './util.ts';
@@ -288,43 +289,29 @@ export interface LimitsPlan {
 /** The edit as text; nothing is written. */
 export function planSetLimits(config: GlobalConfig, assignments: LimitAssignments): LimitsPlan {
   const file = config.path;
-  const original = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
-  const doc = YAML.parseDocument(original);
-  if (doc.errors.length > 0) throw new AgentctlError(`cannot edit ${file}: ${doc.errors[0]?.message ?? 'invalid YAML'}`, 'Fix the YAML syntax first.');
   const changes: LimitsChange[] = [];
-  for (const agent of AGENT_NAMES) {
-    const to = assignments[agent];
-    if (to === undefined) continue;
-    const from = config.limits[agent] ?? null;
-    if (to === null) doc.deleteIn(['limits', agent]);
-    else doc.setIn(['limits', agent], to);
-    changes.push({ agent, from, to });
-  }
+  const text = editConfigText(config, (doc) => {
+    for (const agent of AGENT_NAMES) {
+      const to = assignments[agent];
+      if (to === undefined) continue;
+      const from = config.limits[agent] ?? null;
+      if (to === null) doc.deleteIn(['limits', agent]);
+      else doc.setIn(['limits', agent], to);
+      changes.push({ agent, from, to });
+    }
+  });
   const show = (n: number | null): string => (n === null ? 'no limit' : String(n));
   return {
     file,
     changes,
-    text: doc.toString({ lineWidth: 0 }),
+    text,
     summary: [`${file}`, ...changes.map((c) => `  limits.${c.agent}: ${show(c.from)} -> ${show(c.to)}${c.from === c.to ? ' (unchanged)' : ''}`), '  (a copy of the file is kept as config.yaml.bak; comments and the order of the keys stay)'],
   };
 }
 
 /** Write the plan: a `.bak` copy first, the new text, and a check that the result loads (else the old text comes back). */
 export async function applySetLimits(ctx: Context, plan: LimitsPlan): Promise<void> {
-  const { runner } = ctx;
-  const existed = fs.existsSync(plan.file);
-  const original = existed ? fs.readFileSync(plan.file, 'utf8') : '';
-  if (existed) await runner.copyFile(plan.file, `${plan.file}.bak`);
-  await runner.writeFile(plan.file, plan.text);
-  if (!runner.dryRun) {
-    try {
-      loadGlobalConfig(path.dirname(plan.file));
-    } catch (e) {
-      if (existed) await runner.writeFile(plan.file, original);
-      else fs.rmSync(plan.file, { force: true });
-      throw new AgentctlError(`the edited config does not load, the old text is back: ${errorMessage(e).split('\n')[0]}`);
-    }
-  }
+  await writeConfigText(ctx, plan.file, plan.text);
   const after: GlobalConfig['limits'] = { ...ctx.config.limits };
   for (const c of plan.changes) {
     if (c.to === null) delete after[c.agent];
