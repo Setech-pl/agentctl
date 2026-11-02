@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { INSTALL_HINTS } from './agents.ts';
+import { configStatePath, readConfigState } from './config-store.ts';
 import { PROJECT_CONFIG_NAME, loadGlobalConfig, loadProjectConfig } from './config.ts';
 import type { GlobalConfig } from './config.ts';
 import type { Runner } from './runner.ts';
@@ -162,6 +163,8 @@ export async function runDoctor(
       }
     }
     add('config', 'ok', config.loaded ? `${config.path}` : `${config.path} not found, using defaults`);
+    const reload = readConfigState(configStatePath(config));
+    if (reload && !reload.ok) add('config reload', 'warn', `the ${reload.by} keeps the previous settings since ${reload.at}: ${reload.error ?? 'the file did not load'}`);
     if (config.mirrorDir) {
       const dir = config.mirrorDir;
       try {

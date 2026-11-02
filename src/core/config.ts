@@ -100,6 +100,8 @@ export interface GlobalConfig extends Layer {
   cancel: CancelSettings;
   /** Token usage and plan limits: warning thresholds, the hold of the queue, the tmux status line, where the agents keep their logs. */
   usage: UsageSettings;
+  /** Set by a long-running process (watch, MCP) when the file on disk does not load and the previous settings stay in force. */
+  reloadWarning?: string;
   /** Where the config was (or would be) read from. */
   path: string;
   loaded: boolean;

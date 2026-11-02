@@ -4,7 +4,7 @@ import { AGENT_NAMES, loadGlobalConfig } from './config.ts';
 import type { AgentName, GlobalConfig } from './config.ts';
 import type { LiveWindow } from './checks.ts';
 import type { Context } from './context.ts';
-import { recordJournal } from './journal.ts';
+import { recordJournal, recordJournalOnce } from './journal.ts';
 import { readQueue, waiting } from './queue.ts';
 import { AgentctlError, errorMessage } from './util.ts';
 import path from 'node:path';
@@ -265,6 +265,12 @@ export function parseAssignments(args: string[]): LimitAssignments {
   return out;
 }
 
+/** "limity: claude 3 → 4, codex 5 → -": the same words whoever changed the file, so that the journal says it once. */
+export function limitsDiffText(from: GlobalConfig['limits'], to: GlobalConfig['limits']): string | undefined {
+  const parts = AGENT_NAMES.filter((a) => (from[a] ?? null) !== (to[a] ?? null)).map((a) => `${a} ${from[a] ?? '-'} → ${to[a] ?? '-'}`);
+  return parts.length === 0 ? undefined : `limity: ${parts.join(', ')}`;
+}
+
 export interface LimitsChange {
   agent: AgentName;
   from: number | null;
@@ -319,6 +325,11 @@ export async function applySetLimits(ctx: Context, plan: LimitsPlan): Promise<vo
       throw new AgentctlError(`the edited config does not load, the old text is back: ${errorMessage(e).split('\n')[0]}`);
     }
   }
-  const real = plan.changes.filter((c) => c.from !== c.to);
-  if (real.length > 0) await recordJournal(ctx, { kind: 'limits-changed', text: `limity: ${real.map((c) => `${c.agent} ${c.from ?? '-'} → ${c.to ?? '-'}`).join(', ')}` });
+  const after: GlobalConfig['limits'] = { ...ctx.config.limits };
+  for (const c of plan.changes) {
+    if (c.to === null) delete after[c.agent];
+    else after[c.agent] = c.to;
+  }
+  const text = limitsDiffText(ctx.config.limits, after);
+  if (text) await recordJournalOnce(ctx, { kind: 'limits-changed', text });
 }
