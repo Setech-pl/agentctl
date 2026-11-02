@@ -8,6 +8,28 @@ Versions 0.1.0 to 0.7.0 correspond to pull requests #1 to #7; their dates are th
 
 Nothing yet.
 
+## [0.14.0] - 2026-11-02
+
+Pull request: remote control from your phone (`agentctl manager`). The date is the day it was prepared; set it to the merge date.
+
+### Added
+- **`agentctl manager [--name] [--project] [--model sonnet] [--effort medium] [--url] [--dry-run]`** and **`agentctl manager stop`**: a Claude Code session in the window `manager` of the agentctl session, started as `claude --model … --effort … --mcp-config <file> --remote-control <name> --settings <file> --append-system-prompt-file <file>` (an interactive session, not the server mode `claude remote-control`, which refuses `--settings` and cannot carry the role), so the Claude app on a phone (Code) can continue it. The three files are written at every start into `<config dir>/manager/`: `role.md` (a dispatcher: `events_since` and `status` first, changes only with your clear yes, summaries of at most 6 lines, no merge, push or tag; the text of `manager.guide` is added), `settings.json` (the read tools of the MCP server need no tap; the write tools make Claude Code ask) and `mcp.json` (the agentctl MCP server under the name `agentctl`). The project is not changed. Never a second copy. The folder trust and the one-time "Enable Remote Control" are left to you: the command says which window to go to. `--url` prints the session address and the QR code when the window shows them (it types nothing).
+- **`manager.*`** in the config: `project`, `name` (default `agentctl manager`), `model` (`sonnet`), `effort` (`medium`), `guide` (a local copy of the spec-writing rules, optional; a missing file is a warning), `autostart`. `agentctl up` starts the manager too when `autostart` is true, without waiting, and a manager that cannot start is one line, not the end of `up`.
+- **The manager is not a task**: it is no orphan in `status`, not a target of `close`, `cancel`, `send` or `gc`, and no place against a provider limit (`limits.count_external` does not count it either). `MANAGER`, `WATCH` and `BOARD` are refused as task IDs (those windows are agentctl's own; a task of that name would have been invisible in `status`).
+- **Board**: the manager in its own line under the header (🧭 name: *połączony*, *czeka na połączenie*, *czeka na potwierdzenie w oknie*, *połączenie nie działa*, *uruchamia się*, or dimmed *nie działa* when `manager.*` is set but no window exists). The arrow up from the first task selects it, **Enter** goes to its window (outside tmux the message gives the `tmux attach` command), the preview shows its screen; a refresh never selects it by itself.
+- **`remote_control: true`** in a spec, and **`defaults.remote_control`**: a Claude agent starts with `--remote-control <TASK>` after `agents.claude.flags` and before the event wiring, so `--settings`, `--model` and `--effort` go along. The task shows up in the Claude app under its ID. Kept in `TASK.md` (`remote_control: true`) and used again by `resume`. A Codex task with `remote_control: true` is an error, `defaults.remote_control` leaves Codex tasks alone, a switch to Codex drops it, and `--remote-control`, `--rc` or `remote-control` in `agents.claude.flags` is refused. The "Enable Remote Control" dialog is waited for like the folder trust.
+- **Phone**: with the manager window up, `needs-input`, `report-ready` and `cohort-done` end with "Otwórz sesję „agentctl manager” w aplikacji Claude."; a `needs-input` of a task with Remote Control ends with "Odpowiesz w aplikacji Claude: <TASK>". No link, no path.
+- **`doctor`**: `claude remote control` (the flags `--remote-control` and `--append-system-prompt-file` in the help; a warning for `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_OAUTH_TOKEN`, Bedrock/Vertex/Foundry and the two switches that turn feature flags off, the values never printed), `manager` (running and connected, waiting for you, a missing project or guide, `autostart` while it is not running) and `manager mcp` (the `node` and the script of `mcp.json` still exist).
+- Live scenarios `scripts/live-manager.ts` through the harness (the fake `claude` lists the Remote Control flags and shows `/rc active` when started with `--remote-control`): 29 checks.
+- Documentation: Remote control from your phone in both READMEs, `docs/details.md` and `docs/details.pl.md` (the modes and flags found in the research, the states, what was and was not checked), `docs/configuration.md` (`manager.*`, `remote_control`, `defaults.remote_control`), `docs/mcp.md`; the sequence and architecture diagrams show the phone and the manager.
+
+### Changed
+- `buildAgentArgv` and `buildResumeArgv` take the task ID and `remoteControl`; `Context`, the board state (`manager`) and the status code that skips non-task windows know the window `manager`.
+- `docs/details.md` and `docs/details.pl.md` have one more section each, kept in step by the test.
+
+### Limitations
+- Not tried against a real Claude Code (it would use the plan and register sessions on the account): that `--remote-control` is accepted together with `--settings`, `--mcp-config` and `--append-system-prompt-file`; the exact screen texts (`/rc active`, the failure notices, the "Enable Remote Control" dialog, which agentctl reads from the documentation); how the permission prompts of the MCP tools look on the phone; how the connection behaves after a sleep of the Mac. The Mac must be on and awake, the `claude` process must keep running, and a claude.ai login (Pro, Max, Team, Enterprise) is needed, not an API key.
+
 ## [0.13.0] - 2026-11-02
 
 Pull request: phone notifications through ntfy and away mode, `docs/details.pl.md`. The date is the day it was prepared; set it to the merge date.

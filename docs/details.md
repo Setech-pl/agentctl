@@ -210,6 +210,46 @@ A copy of the events the Mac gets goes to a phone through [ntfy](https://ntfy.sh
 - **Setup.** `agentctl ntfy-setup` edits `config.yaml` with the YAML document API, like `limits set` (comments and the order of the keys stay, `config.yaml.bak`, the result is loaded to check it). The topic is `agentctl-` and 24 random hex digits (96 bits from `crypto.randomBytes`). `doctor` calls a topic weak when it is shorter than 24 characters, has no digits or repeats a few characters, and warns about a private server without a token.
 - **Checked live** (sandbox of `scripts/live-harness.ts`, `scripts/live-phone.ts`): a `report-ready` event of a fake agent with away on gives one request to a mock server (Bearer, Priority, Tags, Click, the body without the report), none with away off, none extra from the watcher; a dead server queues the request and the watcher delivers it after 30 seconds; one `notify-test --phone` on a random topic of the public ntfy.sh answered HTTP 200 in about 0.4 s. The subscription link `ntfy://<host>/<topic>` of `--show-qr` was not tried on a phone.
 
+## Remote control and the manager
+
+The overview and the steps are in the [README](../README.md#remote-control-from-your-phone); this is how it works and what was (and was not) checked. Sources: the Remote Control page of the Claude Code documentation (https://code.claude.com/docs/en/remote-control, the CLI reference and the error reference), and `claude --help` and `claude remote-control --help` of the installed Claude Code 2.1.309 - only the help texts were read; no real session was started.
+
+| Way | What it is | Used by agentctl |
+|---|---|---|
+| `claude remote-control` | Server mode: no local session, several on demand. A global flag before `remote-control` that it cannot hand on to its sessions (`--settings`, for one) stops it with an error. | No: it cannot carry the event hooks, the role or the MCP configuration |
+| `claude --remote-control [name]` (`--rc`) | An ordinary interactive session with Remote Control switched on; the global flags (`--settings`, `--model`, `--effort`, `--mcp-config`, `--append-system-prompt-file`) are the session's own. | Yes: the manager, and `remote_control: true` in a spec |
+| `/remote-control [name]` | Switches Remote Control on in a running session. | No: it would mean typing into a window |
+| `remoteControlAtStartup: true` (`/config`, user settings) | Every interactive session connects by itself. | No: agentctl never changes your Claude settings; set it yourself if you want every task window in the app |
+
+- **The command.** Always an interactive session, the name always given (so the optional value of `--remote-control` never takes the next flag), the variadic `--mcp-config` before another flag, and never an auto-accept flag:
+
+```sh
+claude --model sonnet --effort medium --mcp-config ~/.agentctl/manager/mcp.json \
+  --remote-control "agentctl manager" --settings ~/.agentctl/manager/settings.json \
+  --append-system-prompt-file ~/.agentctl/manager/role.md
+```
+
+- **The files** are written at every start into `<config dir>/manager/`: `role.md` (the role, the write tools `mcp.allow` lets through, and the text of `manager.guide` up to 60 000 characters), `settings.json` (`permissions.allow` with the read tools of the MCP server, so the phone is not asked about `status`; the tools that change something are not listed, so Claude Code asks you first) and `mcp.json` (the same server entry `agentctl mcp install --claude-code` registers, under the same name, so the tools are `mcp__agentctl__*`). Nothing is written into the project. A conversation that is resumed keeps the system prompt it was started with (`--system-prompt-snapshot`), so a changed role applies to a new manager session; `agentctl manager stop` and `agentctl manager` make one.
+- **The window.** `manager` in the agentctl session, in `manager.project` (else `--project`, else where you are), made with `new-window` and the command typed into its shell, like a task. `status`, `close`, `cancel`, `gc` and `limits` do not see it as a task (like `watch` and `board` it is a reserved window name); it is untagged in the window list, so it is no place against a provider limit, and the processes in it are inside a window of agentctl, so `limits.count_external` does not count them either. A task cannot be called `MANAGER`.
+- **Dialogs.** The folder trust and the one-time "Enable Remote Control" are the human's: `agentctl manager` waits for the input prompt, and when a dialog is on the screen it stops there and tells you which window to go to. `agentctl up` (with `manager.autostart`) does not wait at all.
+- **What agentctl reads on the screen** (from the documentation, never seen on a real screen):
+
+| State | The screen shows | The board says |
+|---|---|---|
+| `connected` | `/rc active` | połączony |
+| `waiting` | the input prompt, no indicator (a few seconds after the start it is normal) | czeka na połączenie |
+| `confirm` | the folder-trust dialog, or `Enable Remote Control` (not the row "Enable Remote Control for all sessions" of `/config`) | czeka na potwierdzenie w oknie |
+| `failed` | `Remote Control failed`, `Remote Control disconnected` and the other refusals of the error reference | połączenie nie działa |
+| `starting` | anything else: Claude Code is not at its input yet | uruchamia się |
+| `missing` | no window | nie działa |
+
+- **`manager --url`** reads the last 600 lines of the window and prints the last `https://claude.ai/code/…` address and a QR code (a run of at least 12 lines of block characters). It types nothing into the window. When there is neither, it says to type `/remote-control` there, or to open the Claude app, tap Code and pick the session by its name.
+- **A task with `remote_control: true`** starts with `--remote-control <TASK>` after `agents.claude.flags` and before `--settings`, so the event hooks, `--model` and `--effort` are unchanged; the session in the app is named after the task. The same dialogs apply (`new` waits for the human, as for the folder trust). `remote_control` is kept in `TASK.md` and used again by `resume` (before `--resume`/`--continue`; Claude Code reconnects the session of a resumed conversation by itself). A Codex task cannot have it (an error); `defaults.remote_control` applies to Claude tasks only; a task moved to Codex by `move` or a limit loses it. `agents.claude.flags` must not hold `--remote-control`, `--rc` or `remote-control` (an error).
+- **The phone.** With the manager window up, `needs-input`, `report-ready` and `cohort-done` end with "Otwórz sesję „<manager.name>” w aplikacji Claude."; a `needs-input` of a task with `remote_control` ends with "Odpowiesz w aplikacji Claude: <TASK>" instead. Only text: no link, no path, no session address. Nothing is added while the window is not there.
+- **Sleep and the network** (documentation): the session talks to Anthropic over outbound HTTPS only and opens no port; when the Mac sleeps or the network drops, an interactive session reconnects when the Mac is back, the server mode would give up after about ten minutes. The `claude` process has to keep running, so closing the window or restarting the Mac ends it; `agentctl manager` (or `up` with `manager.autostart`) brings it back as a new conversation.
+- **Requirements and refusals** (documentation): a claude.ai login (`claude auth login`) on Pro, Max, Team or Enterprise; not an API key, `CLAUDE_CODE_OAUTH_TOKEN` from `setup-token`, Bedrock, Vertex, Foundry or an `ANTHROPIC_BASE_URL` other than api.anthropic.com; not with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` or `DISABLE_GROWTHBOOK`. `doctor` warns when one of these variables is set in its environment (a tmux server started from such a shell passes them on). Team and Enterprise: an Owner switches Remote Control on, and Trusted Devices may ask the phone to enrol. While connected, the transcript is stored on Anthropic's servers; `disableRemoteControl` in the settings turns the whole feature off.
+- **Checked** (sandbox of `scripts/live-harness.ts`, `scripts/live-manager.ts`, a fake `claude` that answers `--help` with the flags and prints `/rc active` when started with `--remote-control`): the exact command line of the manager and of a task, the files, the project left alone, no second window, `--url` with an address on the screen, `stop`, `up` with `manager.autostart`, `resume` with the flag, the refusal of a Codex task, `doctor` exit 0. **Not checked on a real Claude Code** (it would use the plan and register sessions on the account): that `--remote-control` is accepted together with `--settings`, `--mcp-config` and `--append-system-prompt-file` (the documentation calls it an ordinary interactive session and the help lists them as options of the same command), the texts of the screen above, that a first start shows the "Enable Remote Control" dialog at all, how the permission prompts of the MCP tools look on the phone, and how the manager line behaves after a sleep of the Mac.
+
 ## Limits and move
 
 When a provider's plan or rate limit runs out, the task shows state `limited` (icon `⛔`, board, `status --tmux-line`), you get a notification with the proposal, and `agentctl move` carries the task over. A limit comes from two sources: the Claude `StopFailure` event (`rate_limit`, `billing_error`)

@@ -98,6 +98,14 @@ agentctl mcp install --claude-code         # claude mcp add --scope user …
 
 User scope makes the server available in every project; the VS Code extension reads the same configuration (`/mcp` in the chat panel shows it).
 
+### The phone: the manager session
+
+The Claude app on a phone cannot reach this server directly (local MCP servers work in the desktop app only). [`agentctl manager`](../README.md#remote-control-from-your-phone) goes round it: it starts a Claude Code session in the window `manager` with Remote Control, and that session gets this server through `--mcp-config <config dir>/manager/mcp.json` (the same entry as `mcp install --claude-code`, under the name `agentctl`, so you need no user-scope registration for it; `doctor` checks that the file's `node` and script still exist). The tools are the same; what changes is who asks you:
+
+- The **read tools** are in `permissions.allow` of the `--settings` file of the manager, so the phone is not asked about `status` or `get_report`.
+- The **write tools** are not, so Claude Code asks for your permission on the phone before each call, and `mcp.allow` decides whether the server does it at all (and `confirm: true` where a tool has that step). The role of the manager adds a third rule: your clear yes to that very action first.
+- Everything is audited in `mcp-audit.log` as before; a tool call from the manager is a call like any other.
+
 ### After an update: quit the Claude app (Cmd+Q)
 
 The app starts the server once and keeps that process for as long as it runs. `agentctl-update` replaces the files of the stable copy, but a process that is running keeps the code it loaded, so the chat goes on talking to the **old** version (new tools missing, old behaviour) until the app is quit completely (**Cmd+Q**, not just the window) and opened again. agentctl never stops the process for you.
