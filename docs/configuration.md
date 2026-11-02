@@ -47,6 +47,7 @@ Column "Layers": **g** global config, **p** project config, **s** spec.
 | `board` | mapping | see below | g | The board and the navigation in the tmux session. |
 | `mcp` | mapping | see below | g | The local MCP server. |
 | `queue` | mapping | see below | g | The task queue (`agentctl queue`). |
+| `collisions` | mapping | see below | g | Warnings about two active tasks changing the same files. |
 
 ### `watch`
 
@@ -92,6 +93,17 @@ Queued tasks live in `<config dir>/queue/` (one JSON file each, with the spec te
 |---|---|---|---|---|
 | `queue.enabled` | boolean | `true` | g | `false`: `watch` never starts a queued task (entries can still be added and listed). |
 | `queue.parallel_starts` | positive integer | `2` | g | Most queued tasks that `watch` is in the middle of starting (worktree, setup, waiting for the agent or for the folder-trust dialog) at the same time. |
+
+### `collisions`
+
+`agentctl watch` checks every `collisions.interval` seconds which files each active task changed (commits over its base plus uncommitted files) and compares the tasks of one source repository. See [collisions](details.md#collisions).
+
+| Key | Type | Default | Layers | Meaning |
+|---|---|---|---|---|
+| `collisions.enabled` | boolean | `true` | g | `false`: no `COLLIDE` column, no marker on the board, no notification. `agentctl overlap` still works. |
+| `collisions.interval` | positive number | `300` | g | Seconds between two checks by `watch`. |
+| `collisions.notify` | boolean | `true` | g | One notification for each new pair of colliding tasks. |
+| `collisions.ignore` | list of globs | `[]` | g | Paths that never count as shared, e.g. `["**/package-lock.json", "dist/**"]`. |
 
 ## Keys per agent
 
@@ -179,6 +191,7 @@ The header of a spec file, between `---` lines, followed by the prompt. Several 
 | `report` | path | project, else global | s | Report path of this task. |
 | `pin` | boolean | `false` | s | `true`: never move the task to the other provider, by `--agent` or by a limit. |
 | `after` | task ID or list | none | s | The task starts only when every named task has a report (`report-ready`, or closed with a report). Meant for the queue; `new` refuses a task whose `after` is not met. Unknown tasks and circles are errors. |
+| `touches` | glob or list of globs | none | s | Files the task will change. `queue` and `new` warn (and ask y/N) when an active task of the same repository already changes matching files. |
 | `priority` | `high` or `normal` | `normal` | s | Queue order: `high` tasks start before every `normal` one (first come, first served inside each class). `new` ignores it. |
 
 ## Environment variables

@@ -17,6 +17,7 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`queue retry`](#agentctl-queue-retry) | Put a failed task back at the end of the line; it is tried once more (over the worktree the failed start left). |
 | [`queue pause`](#agentctl-queue-pause) | Stop starting queued tasks (running tasks are not touched; adding and listing still work). |
 | [`queue resume`](#agentctl-queue-resume) | Let the queue start tasks again. |
+| [`overlap`](#agentctl-overlap) | Which active tasks of one repository changed the same files (git diff of each worktree against its base, plus uncommitted files). Without a task: every pair. |
 | [`send`](#agentctl-send) | Paste a follow-up prompt into the existing window of each task in the file. |
 | [`status`](#agentctl-status) | Table of tasks: window state, running time, report, last output line. |
 | [`archive`](#agentctl-archive) | Move the state of closed tasks (agentctl close) to the archive folder next to the state folder. Reports and worktrees are not touched. |
@@ -62,7 +63,7 @@ agentctl new [options] [file]
 | `--no-agent` | only create the worktree, run setup and links; no TASK.md, window or agent |  |
 | `--no-wait-trust` | stop at the folder-trust dialog instead of waiting for you to confirm it (the old behaviour) |  |
 | `--clip` | read the spec from the clipboard; shows a summary and asks y/N first |  |
-| `-y, --yes` | with --clip: do not ask |  |
+| `-y, --yes` | with --clip: do not ask; also skips the question after a "touches" warning |  |
 
 Examples:
 
@@ -201,6 +202,29 @@ Examples:
 
 ```sh
 agentctl queue resume
+```
+
+## agentctl overlap
+
+Which active tasks of one repository changed the same files (git diff of each worktree against its base, plus uncommitted files). Without a task: every pair.
+
+```
+agentctl overlap [options] [task]
+```
+
+| Argument | Meaning |
+|---|---|
+| `[task]` | only the pairs with this task; case does not matter and a unique prefix is enough |
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--json` | machine-readable output |  |
+
+Examples:
+
+```sh
+agentctl overlap                        # every pair of active tasks that changed the same files
+agentctl overlap LANDING-QS-1           # only the pairs with this task
 ```
 
 ## agentctl send

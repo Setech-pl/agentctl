@@ -19,12 +19,13 @@ import { CLAUDE_KINDS, parseJson } from './core/events.ts';
 import type { ClaudeKind, SelfArgv } from './core/events.ts';
 import { moveTask } from './core/move.ts';
 import { peekTask, PEEK_LINES } from './core/peek.ts';
-import { matchTask } from './core/resolve.ts';
+import { listTargets, matchTask } from './core/resolve.ts';
 import type { TaskTarget } from './core/resolve.ts';
 import { migrateLegacyState } from './core/taskstore.ts';
 import { newTasks } from './core/new.ts';
 import { commitQueueAdd, describeQueue, isPaused, moveToFront, planQueueAdd, readQueue, queueStatusLines, removeFromQueue, renderQueueList, retryEntry, setPaused, waiting } from './core/queue.ts';
 import { liveWindows } from './core/plan.ts';
+import { collectOverlaps, renderOverlaps, touchWarnings } from './core/collisions.ts';
 import type { NewOptions } from './core/new.ts';
 import { pullReady, pullTask } from './core/pull.ts';
 import { sendPrompts } from './core/send.ts';
@@ -236,6 +237,13 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
   const makeNotifier = (ctx: Context, opts?: { retryBroken?: boolean }): Promise<Notifier> =>
     deps.makeNotifier?.(ctx.runner, ctx.config, opts) ?? DesktopNotifier.detect(ctx.runner, undefined, notifierOptionsFor(ctx.config, opts));
 
+  /** A task ID from what the user typed: any task agentctl knows (a unique prefix is enough). */
+  const resolveAnyTask = async (ctx: Context, input: string): Promise<string> => {
+    const match = matchTask(input, await listTargets(ctx));
+    if (match.kind === 'one') return match.target.task;
+    throw new AgentctlError(match.kind === 'many' ? `"${input}" fits more than one task: ${match.matches.map((m) => m.task).join(', ')}` : `no task "${input}"`, 'See "agentctl status".');
+  };
+
   /** Window "watch" exists in the agentctl session: something is there to start the queued tasks. */
   const watchRunning = async (ctx: Context): Promise<boolean> => (await ctx.tmux.hasSession()) && (await ctx.tmux.listWindows()).includes(WATCH_WINDOW);
 
@@ -273,7 +281,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('--no-agent', 'only create the worktree, run setup and links; no TASK.md, window or agent')
     .option('--no-wait-trust', 'stop at the folder-trust dialog instead of waiting for you to confirm it (the old behaviour)')
     .option('--clip', 'read the spec from the clipboard; shows a summary and asks y/N first')
-    .option('-y, --yes', 'with --clip: do not ask')
+    .option('-y, --yes', 'with --clip: do not ask; also skips the question after a "touches" warning')
     .action(
       guarded(async (file: string | undefined, opts: { clip?: boolean; yes?: boolean; dryRun?: boolean; reuse?: boolean; agent?: 'claude' | 'codex' | false; switch?: boolean; waitTrust?: boolean }) => {
         const ctx = contextFor(Boolean(opts.dryRun));
@@ -281,6 +289,12 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         const raws = splitSpecs(await readSpecSource(file, opts.clip), source);
         const specs = raws.map((raw) => resolveSpec(raw, { config: ctx.config }));
         if (opts.clip && !(await confirmAction(ctx, summarizeSpecs(specs), 'Start?', Boolean(opts.yes) || Boolean(opts.dryRun)))) return;
+        // `touches`: an active task already changes files the new one says it will touch. Printed always; asked y/N with a terminal.
+        if (!opts.dryRun && opts.agent !== false) {
+          const warnings = await touchWarnings(ctx, specs);
+          for (const w of warnings) line(`⚠ ${w}`);
+          if (warnings.length > 0 && ctx.confirm && !opts.yes && !(await ctx.confirm('Start anyway? [y/N] '))) return void line('Aborted, nothing was done.');
+        }
         const options: NewOptions = { reuse: Boolean(opts.reuse), noSwitch: opts.switch === false, waitTrust: opts.waitTrust !== false };
         const self = deps.selfArgv?.();
         if (self) options.self = self;
@@ -317,7 +331,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         const ctx = contextFor(false);
         const raws = splitSpecs(await readSpecSource(file, opts.clip), opts.clip ? 'clipboard' : (file ?? 'stdin'));
         const plan = await planQueueAdd(ctx, raws, { ...(opts.agent ? { agent: opts.agent } : {}) });
-        if (!(await confirmAction(ctx, plan.summary, 'Add to the queue?', Boolean(opts.yes)))) return;
+        if (!(await confirmAction(ctx, plan.summary, plan.warnings.length > 0 ? 'Add to the queue anyway?' : 'Add to the queue?', Boolean(opts.yes)))) return;
         const added = await commitQueueAdd(ctx, plan.items, { ...(opts.agent ? { agent: opts.agent } : {}) });
         const entries = waiting(readQueue(ctx.config));
         for (const e of added) line(`${e.task}: queued (position ${entries.findIndex((x) => x.task === e.task) + 1} of ${entries.length})`);
@@ -363,6 +377,21 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
       .description(pause ? 'Stop starting queued tasks (running tasks are not touched; adding and listing still work).' : 'Let the queue start tasks again.')
       .action(guarded(async () => line((await setPaused(contextFor(false, { migrate: false }), pause)) ? (pause ? 'Queue paused.' : 'Queue resumed.') : `Queue was already ${pause ? 'paused' : 'running'}.`)));
   }
+
+  program
+    .command('overlap')
+    .description('Which active tasks of one repository changed the same files (git diff of each worktree against its base, plus uncommitted files). Without a task: every pair.')
+    .argument('[task]', 'only the pairs with this task; case does not matter and a unique prefix is enough')
+    .option('--json', 'machine-readable output')
+    .action(
+      guarded(async (task: string | undefined, opts: { json?: boolean }) => {
+        const ctx = contextFor(false, { migrate: false });
+        const resolved = task ? (await resolveAnyTask(ctx, task)) : undefined;
+        const overlaps = await collectOverlaps(ctx, resolved);
+        if (opts.json) return line(JSON.stringify(overlaps, null, 2));
+        for (const l of renderOverlaps(overlaps)) line(l);
+      }),
+    );
 
   program
     .command('send')

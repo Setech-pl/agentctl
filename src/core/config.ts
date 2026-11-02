@@ -92,6 +92,8 @@ export interface GlobalConfig extends Layer {
   mcp: McpSettings;
   /** The task queue: tasks that wait for a free window of their provider and start by themselves (`agentctl queue`). */
   queue: QueueSettings;
+  /** Collision warnings: two active tasks of one repository changing the same files. */
+  collisions: CollisionSettings;
   /** Where the config was (or would be) read from. */
   path: string;
   loaded: boolean;
@@ -119,6 +121,17 @@ export interface QueueSettings {
   enabled: boolean;
   /** Most queued tasks that `watch` has in the middle of starting (worktree, setup, waiting for the agent) at the same time. */
   parallelStarts: number;
+}
+
+export interface CollisionSettings {
+  /** `false`: no collision column, no marker on the board, no notification (`agentctl overlap` still works). */
+  enabled: boolean;
+  /** Seconds between two collision checks by `watch` (git is asked for the changed files of every active task). */
+  interval: number;
+  /** One notification per new pair of colliding tasks. */
+  notify: boolean;
+  /** Globs of paths that never count (lock files, generated files). */
+  ignore: string[];
 }
 
 export interface McpSettings {
@@ -216,7 +229,7 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
 
 /** The keys accepted in every layer: the global config, `.agentctl.yaml` and (with a few of its own) a spec. docs/configuration.md describes each one. */
 export const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'setup', 'defaults'];
-export const GLOBAL_KEYS = [...LAYER_KEYS, 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue'];
+export const GLOBAL_KEYS = [...LAYER_KEYS, 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions'];
 export const DEFAULTS_KEYS = ['agent', 'model', 'effort'];
 export const LINK_KEYS = ['from', 'to'];
 export const AGENT_KEYS = ['flags', 'effort_args', 'ready_pattern', 'ready_timeout', 'trust_timeout', 'trust_pattern', 'working_pattern', 'interrupt_key', 'footer_patterns', 'question_pattern', 'limit_patterns', 'background_patterns'];
@@ -225,6 +238,7 @@ export const NOTIFY_KEYS = ['backend', 'events', 'turn_end', 'terminal_app', 've
 export const BOARD_KEYS = ['auto_hide_pulled_dead', 'mouse', 'return_key'];
 export const MCP_KEYS = ['allow', 'allow_rm_worktree'];
 export const QUEUE_KEYS = ['enabled', 'parallel_starts'];
+export const COLLISION_KEYS = ['enabled', 'interval', 'notify', 'ignore'];
 
 /** Screen patterns are case-insensitive and match per line. */
 export const PATTERN_FLAGS = 'im';
@@ -538,6 +552,27 @@ function parseQueue(v: unknown, p: Problems): QueueSettings {
   return queue;
 }
 
+function parseCollisions(v: unknown, p: Problems): CollisionSettings {
+  const collisions: CollisionSettings = { enabled: true, interval: 300, notify: true, ignore: [] };
+  if (v === undefined || v === null) return collisions;
+  if (!isObject(v)) {
+    p.add('config.collisions must be a mapping like {interval: 300, ignore: ["**/package-lock.json"]}');
+    return collisions;
+  }
+  checkKeys(v, COLLISION_KEYS, 'config.collisions', p);
+  for (const key of ['enabled', 'notify'] as const) {
+    if (v[key] === undefined) continue;
+    if (typeof v[key] === 'boolean') collisions[key] = v[key];
+    else p.add(`config.collisions.${key} must be true or false`);
+  }
+  if (v.interval !== undefined) {
+    if (typeof v.interval === 'number' && v.interval > 0) collisions.interval = v.interval;
+    else p.add('config.collisions.interval must be a positive number of seconds');
+  }
+  if (v.ignore !== undefined) collisions.ignore = parseStringList(v.ignore, 'config.collisions.ignore', p);
+  return collisions;
+}
+
 function readYamlFile(file: string): unknown {
   let text: string;
   try {
@@ -599,9 +634,10 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   const board = parseBoard(raw.board, p);
   const mcp = parseMcp(raw.mcp, p);
   const queue = parseQueue(raw.queue, p);
+  const collisions = parseCollisions(raw.collisions, p);
 
   p.throwIfAny(`Invalid config ${file}:`, 'Fix the listed keys; see the README section "Configuration".');
-  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, limits, agents, equivalents, watch, notify, board, mcp, queue, path: file, loaded: exists };
+  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, limits, agents, equivalents, watch, notify, board, mcp, queue, collisions, path: file, loaded: exists };
   if (mirror) config.mirrorDir = resolvePath(mirror);
   return config;
 }

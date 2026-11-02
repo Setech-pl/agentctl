@@ -47,7 +47,7 @@ describe('repoProgress', () => {
       respond: mockGit({ '/wt/a': { count: 2, diff: ['src/a.ts', 'src/c.ts', 'README.md'], status: [' M src/a.ts', '?? notes.txt', 'R  old.ts -> src/b.ts'] } }),
     });
     const p = await repoProgress(runner, { path: '/repo', worktree: '/wt/a' });
-    assert.deepEqual(p, { worktree: '/wt/a', base: 'main', commits: 2, files: 5 });
+    assert.deepEqual(p, { worktree: '/wt/a', repoPath: '/repo', fileNames: ['README.md', 'notes.txt', 'src/a.ts', 'src/b.ts', 'src/c.ts'], base: 'main', commits: 2, files: 5 });
     assert.equal(formatProgress(p!.commits, p!.files), '2c 5f');
   });
 
@@ -64,7 +64,7 @@ describe('repoProgress', () => {
     assert.equal((await repoProgress(onMaster, { path: '/r', worktree: '/wt/a' }))?.base, 'master');
     const none = new RecordingRunner({ dryRun: false, respond: mockGit({ '/wt/a': { refs: [], status: [' M a.ts', ' M b.ts'] } }) });
     const p = await repoProgress(none, { path: '/r', worktree: '/wt/a' });
-    assert.deepEqual(p, { worktree: '/wt/a', base: null, commits: null, files: 2 });
+    assert.deepEqual(p, { worktree: '/wt/a', repoPath: '/r', fileNames: ['a.ts', 'b.ts'], base: null, commits: null, files: 2 });
     assert.equal(formatProgress(p!.commits, p!.files), '?c 2f');
   });
 

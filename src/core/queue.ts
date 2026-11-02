@@ -4,6 +4,7 @@ import YAML from 'yaml';
 import type { AgentModel } from './checks.ts';
 import { Alerts } from './alert.ts';
 import { checkAfter, hasReport, unmetAfter, waitingText } from './depends.ts';
+import { touchWarnings } from './collisions.ts';
 import type { AgentName, GlobalConfig } from './config.ts';
 import { AGENT_NAMES } from './config.ts';
 import type { Context } from './context.ts';
@@ -141,6 +142,8 @@ export interface QueueAddItem {
 
 export interface QueueAddPlan {
   items: QueueAddItem[];
+  /** An active task already changes files that a `touches` of the specs names (the summary shows them). */
+  warnings: string[];
   /** What the human sees before the question. */
   summary: string[];
 }
@@ -162,7 +165,8 @@ export async function planQueueAdd(ctx: Context, raws: RawSpec[], opts: { agent?
   checkAfter(ctx, specs, entries);
   const items = specs.map((spec, i) => ({ raw: raws[i] as RawSpec, spec }));
   const rows = await collectStatus(ctx, { progress: false, archived: true });
-  return { items, summary: describeQueueAdd(ctx, specs, entries, await liveWindows(ctx), rows) };
+  const warnings = await touchWarnings(ctx, specs);
+  return { items, warnings, summary: [...describeQueueAdd(ctx, specs, entries, await liveWindows(ctx), rows), ...warnings.map((w) => `⚠ ${w}`)] };
 }
 
 /** Per spec: the order and where it will stand ("starts at once" or "waits: claude 2/2, 1 ahead"). */

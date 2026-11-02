@@ -1,9 +1,12 @@
 import type { Check } from './core/doctor.ts';
+import { collideText } from './core/collisions.ts';
 import type { StatusRow } from './core/status.ts';
 
 /** Plain-text status table. The core returns rows (data); this is only presentation. */
 export function renderStatusTable(rows: StatusRow[], maxLast = 60): string[] {
-  const header = ['TASK', 'AGENT/MODEL/EFFORT', 'STATE', 'WINDOW', 'STARTED', 'DURATION', 'PROGRESS', 'REPORT', 'LAST LINE'];
+  // The COLLIDE column is there only while some task collides with another one.
+  const collide = rows.some((r) => r.collide.length > 0);
+  const header = ['TASK', 'AGENT/MODEL/EFFORT', 'STATE', 'WINDOW', 'STARTED', 'DURATION', 'PROGRESS', ...(collide ? ['COLLIDE'] : []), 'REPORT', 'LAST LINE'];
   const body = rows.map((r) => [
     r.archived ? `${r.task} (archived)` : r.closed ? `${r.task} (closed)` : r.hidden ? `${r.task} (hidden)` : r.task,
     r.switchedBy ? `${r.agent}/${r.model}/${r.effort} (ordered ${r.requested})` : `${r.agent}/${r.model}/${r.effort}`,
@@ -12,6 +15,7 @@ export function renderStatusTable(rows: StatusRow[], maxLast = 60): string[] {
     r.startedLocal,
     r.duration,
     r.progress?.text ?? '-',
+    ...(collide ? [collideText(r.collide) || '-'] : []),
     r.report,
     r.lastLine.length > maxLast ? `${r.lastLine.slice(0, maxLast - 1)}…` : r.lastLine,
   ]);

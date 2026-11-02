@@ -280,7 +280,7 @@ describe('board: M moves a task', () => {
     ({
       task, agent: 'claude', model: 'opus', effort: 'high', requested: 'claude opus/high', effective: 'claude opus/high', switchedBy: null,
       state: 'limited', window: 'alive', windowName: task.toLowerCase(), windowId: '@1', started: '', startedLocal: '', duration: '1m', report: 'missing',
-      reportPath: '', pulled: null, lastLine: '', progress: null, hint: null, question: null, pin: false, worktrees: [], ...extra,
+      reportPath: '', pulled: null, lastLine: '', progress: null, hint: null, question: null, pin: false, worktrees: [], collide: [], ...extra,
     }) as BoardRow;
   const boardOf = (rows: BoardRow[]): BoardState => applySnapshot(initialBoardState(100, 30), { rows, preview: null, refreshedAt: '09:00:00' });
   const press = (state: BoardState, input: string) => handleKey(state, input, {});

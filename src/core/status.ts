@@ -11,6 +11,8 @@ import { taskProgress } from './progress.ts';
 import type { Progress } from './progress.ts';
 import { lastContentLine } from './tmux.ts';
 import { listArchivedRecords, listTaskRecords } from './taskstore.ts';
+import { attachCollisions } from './collisions.ts';
+import type { Collide } from './collisions.ts';
 import { BOARD_WINDOW } from './windows.ts';
 import { WATCH_WINDOW } from './watch.ts';
 import { formatDuration, formatLocalTime, shellQuote } from './util.ts';
@@ -45,6 +47,8 @@ export interface StatusRow {
   lastLine: string;
   /** Commits over the base and changed files per worktree ("2c 7f"); null when the task has no readable worktree. */
   progress: Progress | null;
+  /** Active tasks of the same repository that changed some of the same files (needs the progress of both): task and number of shared files. */
+  collide: Collide[];
   /** What to do about this row (orphans: the adopt command, limited tasks: the move command); null otherwise. */
   hint: string | null;
   /** The question the agent waits on (state needs-input), from the screen or from its event; null otherwise. */
@@ -144,6 +148,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       pulled,
       lastLine: lastContentLine(screenText, settings.footerPatterns),
       progress: opts.progress === false || record.repos.length === 0 ? null : await taskProgress(runner, record.repos),
+      collide: [],
       hint: stateHint(record.task, state, record.pin === true, record.supersededBy),
       question: state === 'needs-input' ? (extractQuestion(screenText) ?? (stored?.outcome === 'needs-input' && stored.text !== '' ? stored.text : null)) : null,
       pin: record.pin === true,
@@ -182,6 +187,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       pulled: null,
       lastLine: lastContentLine(screenText, config.agents[agent].footerPatterns),
       progress: null,
+      collide: [],
       hint: orphanHint(ctx, window),
       question: null,
       pin: false,
@@ -193,6 +199,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       archived: false,
     });
   }
+  attachCollisions(rows, config.collisions.ignore, config.collisions.enabled);
   return rows;
 }
 
