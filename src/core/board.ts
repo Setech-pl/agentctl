@@ -11,6 +11,7 @@ import { interruptTask } from './interrupt.ts';
 import { moveTask } from './move.ts';
 import { liveWindows } from './plan.ts';
 import { collectLimits, renderLimits } from './limits.ts';
+import { planGc, renderGc } from './gc.ts';
 import { describeQueue, moveToFront, readQueue, removeFromQueue, setPaused } from './queue.ts';
 import type { QueueView } from './queue.ts';
 import { peekWindow } from './peek.ts';
@@ -779,7 +780,7 @@ export const loadLogLines = (ctx: Context): string[] => logLines(ctx);
 /** The lines of a view: the same text the command prints. */
 export async function loadViewLines(ctx: Context, what: ViewKind): Promise<string[]> {
   if (what === 'limits') return renderLimits(collectLimits(ctx.config, await liveWindows(ctx)));
-  return ['(not available)'];
+  return renderGc(await planGc(ctx, {}));
 }
 
 export const BAR_WIDTH = 10;

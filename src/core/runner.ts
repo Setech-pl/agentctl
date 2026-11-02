@@ -36,6 +36,8 @@ export interface Runner {
   copyFile(src: string, dest: string): Promise<void>;
   /** Move a file or directory (same file system). */
   rename(from: string, to: string): Promise<void>;
+  /** Delete a file or a directory with its contents (`agentctl gc` only; never a path it did not list). */
+  remove(target: string): Promise<void>;
   /** Create `linkPath` pointing at `target`, replacing an existing symlink. */
   symlink(target: string, linkPath: string): Promise<void>;
   /** Wait `ms`; aborting `signal` ends the wait early. */
@@ -101,6 +103,10 @@ export class RealRunner implements Runner {
   async rename(from: string, to: string): Promise<void> {
     fs.mkdirSync(path.dirname(to), { recursive: true });
     fs.renameSync(from, to);
+  }
+
+  async remove(target: string): Promise<void> {
+    fs.rmSync(target, { recursive: true, force: true });
   }
 
   async symlink(target: string, linkPath: string): Promise<void> {
@@ -218,6 +224,10 @@ export class RecordingRunner implements Runner {
 
   async rename(from: string, to: string): Promise<void> {
     this.record(`mv ${shellLine(from, [])} ${shellLine(to, [])}`);
+  }
+
+  async remove(target: string): Promise<void> {
+    this.record(`rm -rf ${shellLine(target, [])}`);
   }
 
   async symlink(target: string, linkPath: string): Promise<void> {
