@@ -33,6 +33,8 @@ import { commitQueueAdd, describeQueue, isPaused, moveToFront, planQueueAdd, rea
 import { liveWindows } from './core/plan.ts';
 import { applyGc, planGc, renderGc } from './core/gc.ts';
 import { collectEvents, eventsMarkdown, renderEvents } from './core/chat-events.ts';
+import { planNtfySetup, renderQr, setupInstructions, subscriptionLink } from './core/ntfy-setup.ts';
+import { writeConfigText } from './core/config-edit.ts';
 import { awayReport, renderAway, setAway } from './core/away.ts';
 import { applySetLimits, collectLimits, parseAssignments, parseCounts, planSetLimits, releasePlaces, renderLimits, reservePlaces } from './core/limits.ts';
 import { collectOverlaps, renderOverlaps, touchWarnings } from './core/collisions.ts';
@@ -1044,6 +1046,34 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         }),
       );
   }
+
+  program
+    .command('ntfy-setup')
+    .description('Set up notifications to a phone through ntfy: makes a random topic (agentctl-<24 hex digits>), writes it to config.yaml (comments and the order of the keys stay; the old file is kept as config.yaml.bak) and prints what to do on the phone. A topic that is already set is kept.')
+    .option('--server <url>', 'a ntfy server of your own (default https://ntfy.sh)')
+    .option('--regenerate', 'make a new topic although one is set (the phone subscribes again)')
+    .option('--show-qr', 'print the subscription link as a QR code (needs the qrencode tool: brew install qrencode)')
+    .option('--dry-run', 'print what would be written, change nothing')
+    .action(
+      guarded(async (opts: { server?: string; regenerate?: boolean; showQr?: boolean; dryRun?: boolean }) => {
+        const ctx = contextFor(Boolean(opts.dryRun), { migrate: false });
+        const plan = planNtfySetup(ctx.config, { server: opts.server, regenerate: opts.regenerate });
+        if (plan.text !== undefined) {
+          await writeConfigText(ctx, plan.file, plan.text);
+          line(opts.dryRun ? `Would write notify.ntfy.topic to ${plan.file}` : `Topic written to ${plan.file} (notify.ntfy.topic; a copy of the old file: config.yaml.bak)`);
+        } else line(`The topic is already set in ${plan.file}; kept (--regenerate makes a new one).`);
+        line(`Topic:  ${plan.topic}`);
+        line(`Server: ${plan.server}`);
+        line('');
+        for (const l of setupInstructions(plan.server, plan.topic)) line(l);
+        if (opts.showQr) {
+          const qr = await renderQr(ctx.runner, subscriptionLink(plan.server, plan.topic));
+          line('');
+          if (qr) for (const l of qr) line(l);
+          else line('No QR code: it needs the qrencode tool (brew install qrencode). Type the topic in the app instead.');
+        }
+      }),
+    );
 
   program
     .command('notify-test')

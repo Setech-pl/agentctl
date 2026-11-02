@@ -84,6 +84,7 @@ export const COMMAND_EXAMPLES: Record<string, string[]> = {
   'away status': ['agentctl away status', 'agentctl away status --json'],
   'away on': ['agentctl away on                           # leaving the Mac: the phone gets the notifications'],
   'away off': ['agentctl away off                          # back: the phone is quiet'],
+  'ntfy-setup': ['agentctl ntfy-setup                       # random topic into config.yaml + what to do on the phone', 'agentctl ntfy-setup --server https://ntfy.example.com   # your own server', 'agentctl ntfy-setup --show-qr             # also the subscription link as a QR code'],
   'usage-tap': ['echo \'{"session_id":"x","rate_limits":{}}\' | agentctl usage-tap --task NC-42   # what the statusLine of a task window runs'],
   move: ['agentctl move NC-42                    # to the other provider, asks y/N', 'agentctl move NC-42 --agent codex -y'],
   peek: ['agentctl peek NC-42', 'agentctl peek NC-42 -n 80'],

@@ -52,6 +52,7 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`away status`](#agentctl-away-status) | Is away on, who set it, and does the phone get notifications now. |
 | [`away on`](#agentctl-away-on) | Away: the notifications go to the phone as well. Takes effect at once, also in a running watch. |
 | [`away off`](#agentctl-away-off) | Back at the Mac: the phone is quiet again (unless notify.ntfy.always is true). |
+| [`ntfy-setup`](#agentctl-ntfy-setup) | Set up notifications to a phone through ntfy: makes a random topic (agentctl-\<24 hex digits>), writes it to config.yaml (comments and the order of the keys stay; the old file is kept as config.yaml.bak) and prints what to do on the phone. A topic that is already set is kept. |
 | [`notify-test`](#agentctl-notify-test) | Send one test notification and say which channel carried it (terminal-notifier with a click action, or the osascript fallback). |
 | [`adopt`](#agentctl-adopt) | Restore the state file of a task whose TASK.md is lost (the report and the window are still there). Agent, model and effort default to "unknown". |
 | [`interrupt`](#agentctl-interrupt) | Interrupt the task's current turn (sends the agent's interrupt key, default Escape); the window stays open. |
@@ -979,6 +980,29 @@ Examples:
 
 ```sh
 agentctl away off                          # back: the phone is quiet
+```
+
+## agentctl ntfy-setup
+
+Set up notifications to a phone through ntfy: makes a random topic (agentctl-\<24 hex digits>), writes it to config.yaml (comments and the order of the keys stay; the old file is kept as config.yaml.bak) and prints what to do on the phone. A topic that is already set is kept.
+
+```
+agentctl ntfy-setup [options]
+```
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--server <url>` | a ntfy server of your own (default https://ntfy.sh) |  |
+| `--regenerate` | make a new topic although one is set (the phone subscribes again) |  |
+| `--show-qr` | print the subscription link as a QR code (needs the qrencode tool: brew install qrencode) |  |
+| `--dry-run` | print what would be written, change nothing |  |
+
+Examples:
+
+```sh
+agentctl ntfy-setup                       # random topic into config.yaml + what to do on the phone
+agentctl ntfy-setup --server https://ntfy.example.com   # your own server
+agentctl ntfy-setup --show-qr             # also the subscription link as a QR code
 ```
 
 ## agentctl notify-test
