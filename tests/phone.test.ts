@@ -3,7 +3,8 @@ import { describe, it } from 'node:test';
 import { DEFAULT_NTFY_SERVER, PHONE_EVENTS } from '../src/core/config.ts';
 import { buildNtfyRequest, headerValue, phoneMessage, safeVerdict, sendNtfy } from '../src/core/phone.ts';
 import type { FetchLike } from '../src/core/phone.ts';
-import { makeConfig, useScratch } from './helpers.ts';
+import { RecordingRunner } from '../src/core/runner.ts';
+import { makeConfig, runCli, useScratch } from './helpers.ts';
 
 const scratch = useScratch();
 const ntfyOf = (name: string, yaml: string) => makeConfig(scratch.sub(name), yaml).notify.ntfy;
@@ -156,5 +157,61 @@ describe('phone: sending', () => {
     const r = await sendNtfy(async () => (calls++, new Response('', { status: 200 })), { server: 'https://x' }, message);
     assert.equal(r.ok, false);
     assert.equal(calls, 0);
+  });
+});
+
+describe('phone: notify-test', () => {
+  const NTFY = 'notify:\n  ntfy:\n    server: https://ntfy.example.com\n    topic: agentctl-0123456789abcdef01234567\n    token: tk_1\n';
+  const make = (name: string, yaml = NTFY) => {
+    const config = makeConfig(scratch.sub(name), yaml);
+    const calls: { url: string; headers: Record<string, string>; body: string }[] = [];
+    const answer = { status: 200 as number | 'down' };
+    const fetchFn: FetchLike = async (url, init) => {
+      calls.push({ url, headers: init.headers as Record<string, string>, body: String(init.body) });
+      if (answer.status === 'down') throw new TypeError('fetch failed', { cause: new Error('ENOTFOUND') });
+      return new Response('{}', { status: answer.status });
+    };
+    const runner = new RecordingRunner({ dryRun: false, startTime: Date.UTC(2026, 10, 2, 12, 0, 0), respond: (cmd) => (cmd === 'sh' ? { code: 1 } : undefined) });
+    return { config, calls, answer, runner, fetchFn };
+  };
+  const notifier = async () => ({ notify: async () => ({ channel: 'osascript' as const, ok: true }) });
+
+  it('--phone sends one request with the code and the time, whatever away says', async () => {
+    const t = make('n1');
+    const r = await runCli(t.config, t.runner, ['notify-test', '--phone'], { fetch: t.fetchFn, makeNotifier: notifier });
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(t.calls.length, 1);
+    assert.equal(t.calls[0]?.url, 'https://ntfy.example.com/agentctl-0123456789abcdef01234567');
+    assert.equal(t.calls[0]?.headers.Authorization, 'Bearer tk_1');
+    assert.match(t.calls[0]?.body ?? '', /Test powiadomienia agentctl/);
+    assert.match(r.stdout, /Phone:  ntfy  ok  HTTP 200  \d+ ms  \(https:\/\/ntfy\.example\.com, topic agentctl-0123…\)/);
+    assert.doesNotMatch(r.stdout, /Sent through/, '--phone does not touch the Mac');
+    assert.match(r.stdout, /away is off/);
+    assert.doesNotMatch(r.stdout, /abcdef01234567/, 'the whole topic is not printed');
+  });
+
+  it('--all reports both channels; a failure of the phone is exit code 1 with the reason', async () => {
+    const t = make('n2');
+    t.answer.status = 'down';
+    const r = await runCli(t.config, t.runner, ['notify-test', '--all'], { fetch: t.fetchFn, makeNotifier: notifier });
+    assert.equal(r.code, 1);
+    assert.match(r.stdout, /Mac:    osascript  ok  \d+ ms/);
+    assert.match(r.stdout, /Phone:  ntfy  FAILED  no answer \(fetch failed: ENOTFOUND\)/);
+    const bad = make('n3');
+    bad.answer.status = 403;
+    const r403 = await runCli(bad.config, bad.runner, ['notify-test', '--phone'], { fetch: bad.fetchFn });
+    assert.equal(r403.code, 1);
+    assert.match(r403.stdout, /FAILED  HTTP 403/);
+  });
+
+  it('--local and the default do not send to the phone; --phone without a topic says how to set it up', async () => {
+    const t = make('n4');
+    await runCli(t.config, t.runner, ['notify-test'], { fetch: t.fetchFn, makeNotifier: notifier });
+    await runCli(t.config, t.runner, ['notify-test', '--local'], { fetch: t.fetchFn, makeNotifier: notifier });
+    assert.equal(t.calls.length, 0);
+    const none = make('n5', '');
+    const r = await runCli(none.config, none.runner, ['notify-test', '--phone'], { fetch: none.fetchFn });
+    assert.match(r.stdout, /not set up .*ntfy-setup/);
+    assert.equal(none.calls.length, 0);
   });
 });

@@ -53,7 +53,7 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`away on`](#agentctl-away-on) | Away: the notifications go to the phone as well. Takes effect at once, also in a running watch. |
 | [`away off`](#agentctl-away-off) | Back at the Mac: the phone is quiet again (unless notify.ntfy.always is true). |
 | [`ntfy-setup`](#agentctl-ntfy-setup) | Set up notifications to a phone through ntfy: makes a random topic (agentctl-\<24 hex digits>), writes it to config.yaml (comments and the order of the keys stay; the old file is kept as config.yaml.bak) and prints what to do on the phone. A topic that is already set is kept. |
-| [`notify-test`](#agentctl-notify-test) | Send one test notification and say which channel carried it (terminal-notifier with a click action, or the osascript fallback). |
+| [`notify-test`](#agentctl-notify-test) | Send one test notification and say which channels carried it, with the result and the time of each: the Mac (terminal-notifier with a click action, or the osascript fallback) and the phone (ntfy, whatever away says). Default: --local. |
 | [`adopt`](#agentctl-adopt) | Restore the state file of a task whose TASK.md is lost (the report and the window are still there). Agent, model and effort default to "unknown". |
 | [`interrupt`](#agentctl-interrupt) | Interrupt the task's current turn (sends the agent's interrupt key, default Escape); the window stays open. |
 | [`attach`](#agentctl-attach) | Go to the task window: attach-session outside tmux, switch-client inside. Without a task: the only running one, or a list to choose from. |
@@ -1007,16 +1007,24 @@ agentctl ntfy-setup --show-qr             # also the subscription link as a QR c
 
 ## agentctl notify-test
 
-Send one test notification and say which channel carried it (terminal-notifier with a click action, or the osascript fallback).
+Send one test notification and say which channels carried it, with the result and the time of each: the Mac (terminal-notifier with a click action, or the osascript fallback) and the phone (ntfy, whatever away says). Default: --local.
 
 ```
 agentctl notify-test [options]
 ```
 
+| Option | Meaning | Notes |
+|---|---|---|
+| `--local` | the notification on the Mac (the default) |  |
+| `--phone` | the phone through ntfy |  |
+| `--all` | both |  |
+
 Examples:
 
 ```sh
-agentctl notify-test
+agentctl notify-test                      # the Mac
+agentctl notify-test --phone              # the phone through ntfy: code and time
+agentctl notify-test --all                # both
 ```
 
 ## agentctl adopt

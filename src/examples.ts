@@ -66,7 +66,7 @@ export const COMMAND_EXAMPLES: Record<string, string[]> = {
   ],
   watch: ['agentctl watch --tmux                  # in window "watch" of the agentctl session', 'agentctl watch                         # in this terminal'],
   board: ['agentctl board --tmux                  # in window "board" of the agentctl session', 'agentctl board'],
-  'notify-test': ['agentctl notify-test'],
+  'notify-test': ['agentctl notify-test                      # the Mac', 'agentctl notify-test --phone              # the phone through ntfy: code and time', 'agentctl notify-test --all                # both'],
   adopt: ['agentctl adopt NC-42 --report ~/Projects/cache/nc-42/NC-42.md --agent claude --worktree ~/Projects/wt/app-nc-42'],
   interrupt: ['agentctl interrupt NC-42'],
   attach: ['agentctl attach NC-42', 'agentctl attach nc-4                    # a unique prefix is enough'],

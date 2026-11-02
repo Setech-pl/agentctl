@@ -1,4 +1,5 @@
 import type { GlobalConfig } from './config.ts';
+import type { FetchLike } from './phone.ts';
 import type { Runner } from './runner.ts';
 import { knownIcons } from './icons.ts';
 import { readTaskRecord } from './taskstore.ts';
@@ -12,6 +13,8 @@ export class Context {
   /** Asks a yes/no question on the terminal; undefined when there is no TTY. */
   readonly confirm: ((question: string) => Promise<boolean>) | undefined;
   private sink: (line: string) => void;
+  /** HTTP for the phone notifications (ntfy); tests give a mock. */
+  fetch: FetchLike = (url, init) => globalThis.fetch(url, init);
 
   constructor(runner: Runner, config: GlobalConfig, out: (line: string) => void, confirm?: (question: string) => Promise<boolean>) {
     this.confirm = confirm;
