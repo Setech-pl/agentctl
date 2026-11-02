@@ -41,7 +41,9 @@ export function mcpEntryFrom(self: SelfArgv): McpEntry {
 
 /** Where the stable copy lives (the same variable the update script reads). */
 export function stableScript(env: NodeJS.ProcessEnv = process.env, home: string = os.homedir()): string {
-  return path.join(env.AGENTCTL_STABLE_DIR ?? path.join(home, 'Projects', 'agentctl-stable'), 'bin', 'agentctl.ts');
+  const root = env.AGENTCTL_STABLE_DIR ?? path.join(home, 'Projects', 'agentctl-stable');
+  const built = path.join(root, 'dist', 'bin', 'agentctl.js');
+  return fs.existsSync(built) ? built : path.join(root, 'bin', 'agentctl.ts');
 }
 
 const realOrSelf = (p: string): string => {

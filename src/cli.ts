@@ -154,7 +154,7 @@ export function defaultDeps(): CliDeps {
 function selfCommand(args: string): string {
   const env = process.env.AGENTCTL_HOME ? `AGENTCTL_HOME=${shellQuote(process.env.AGENTCTL_HOME)} ` : '';
   const script = fs.realpathSync(process.argv[1] ?? 'bin/agentctl.ts');
-  return `${env}${shellQuote(process.execPath)} --experimental-strip-types --no-warnings ${shellQuote(script)} ${args}`;
+  return `${env}${shellQuote(process.execPath)} ${script.endsWith('.ts') ? '--experimental-strip-types --no-warnings ' : ''}${shellQuote(script)} ${args}`;
 }
 
 /**
@@ -165,7 +165,7 @@ function selfCommand(args: string): string {
 export function selfArgv(): SelfArgv {
   const script = fs.realpathSync(process.argv[1] ?? 'bin/agentctl.ts');
   const env = (['AGENTCTL_HOME', 'TMUX_TMPDIR', 'PATH'] as const).filter((k) => process.env[k]).map((k) => `${k}=${process.env[k]}`);
-  return [...(env.length > 0 ? ['/usr/bin/env', ...env] : []), process.execPath, '--experimental-strip-types', '--no-warnings', script];
+  return [...(env.length > 0 ? ['/usr/bin/env', ...env] : []), process.execPath, ...(script.endsWith('.ts') ? ['--experimental-strip-types', '--no-warnings'] : []), script];
 }
 
 async function askOnTerminal(question: string): Promise<boolean> {
@@ -225,7 +225,7 @@ const realOrSelf = (p: string): string => {
 
 function packageVersion(): string {
   try {
-    const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string };
+    const pkg = JSON.parse(fs.readFileSync(new URL(import.meta.url.endsWith('.ts') ? '../package.json' : '../../package.json', import.meta.url), 'utf8')) as { version: string };
     return pkg.version;
   } catch {
     return '0.0.0';
