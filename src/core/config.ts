@@ -96,6 +96,8 @@ export interface GlobalConfig extends Layer {
   collisions: CollisionSettings;
   /** `agentctl cancel`: how it stops a task that is in the middle of a turn. */
   cancel: CancelSettings;
+  /** Token usage and plan limits: warning thresholds, the hold of the queue, the tmux status line, where the agents keep their logs. */
+  usage: UsageSettings;
   /** Where the config was (or would be) read from. */
   path: string;
   loaded: boolean;
@@ -128,6 +130,23 @@ export interface QueueSettings {
 export interface CancelSettings {
   /** Seconds between the interrupt key and the closing of the window of a task that is cancelled while it works (0: close at once). */
   grace: number;
+}
+
+export interface UsageSettings {
+  /** Percent of a plan window (per provider) from which `watch` warns, once per window. */
+  warn: Record<AgentName, number>;
+  /** Percent from which it warns again, louder. */
+  critical: Record<AgentName, number>;
+  /** Percent above which the queue does not start a task of that provider by itself. A provider missing here is never held. */
+  queueHold: Partial<Record<AgentName, number>>;
+  /** The plan percentages in the tmux status line ("C 62% · X 18%"). */
+  statusLine: boolean;
+  /** `new` wires a statusLine command into Claude windows that records the plan's rate_limits (and runs the user's own statusLine after it). */
+  claudeTap: boolean;
+  /** Claude's config directory (holds `projects/`); null: `$CLAUDE_CONFIG_DIR`, else ~/.claude. */
+  claudeDir: string | null;
+  /** Codex's home (holds `sessions/`); null: `$CODEX_HOME`, else ~/.codex. */
+  codexDir: string | null;
 }
 
 export interface CollisionSettings {
@@ -241,7 +260,7 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
 
 /** The keys accepted in every layer: the global config, `.agentctl.yaml` and (with a few of its own) a spec. docs/configuration.md describes each one. */
 export const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'setup', 'defaults'];
-export const GLOBAL_KEYS = [...LAYER_KEYS, 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel'];
+export const GLOBAL_KEYS = [...LAYER_KEYS, 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage'];
 export const DEFAULTS_KEYS = ['agent', 'model', 'effort'];
 export const LINK_KEYS = ['from', 'to'];
 export const AGENT_KEYS = ['flags', 'effort_args', 'ready_pattern', 'ready_timeout', 'trust_timeout', 'trust_pattern', 'working_pattern', 'interrupt_key', 'footer_patterns', 'question_pattern', 'limit_patterns', 'background_patterns'];
@@ -251,6 +270,7 @@ export const BOARD_KEYS = ['auto_hide_pulled_dead', 'mouse', 'return_key'];
 export const MCP_KEYS = ['allow', 'allow_rm_worktree'];
 export const QUEUE_KEYS = ['enabled', 'parallel_starts'];
 export const CANCEL_KEYS = ['grace'];
+export const USAGE_KEYS = ['warn', 'critical', 'queue_hold', 'status_line', 'claude_tap', 'claude_dir', 'codex_dir'];
 export const COLLISION_KEYS = ['enabled', 'interval', 'notify', 'ignore'];
 
 /** Screen patterns are case-insensitive and match per line. */
@@ -586,6 +606,48 @@ function parseCancel(v: unknown, p: Problems): CancelSettings {
   return cancel;
 }
 
+/** A percentage for both providers (`80`) or per provider (`{claude: 80, codex: 70}`); undefined when it is not one (the problem is added). */
+function parsePercent(v: unknown, where: string, p: Problems, fallback: Partial<Record<AgentName, number>>): Partial<Record<AgentName, number>> {
+  const ok = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x) && x > 0 && x <= 100;
+  if (ok(v)) return { claude: v, codex: v };
+  if (isObject(v)) {
+    checkKeys(v, [...AGENT_NAMES], where, p);
+    const out = { ...fallback };
+    for (const name of AGENT_NAMES) {
+      if (v[name] === undefined) continue;
+      if (ok(v[name])) out[name] = v[name];
+      else p.add(`${where}.${name} must be a percentage above 0 and up to 100`);
+    }
+    return out;
+  }
+  p.add(`${where} must be a percentage like 80, or per provider like {claude: 80, codex: 70}`);
+  return fallback;
+}
+
+function parseUsage(v: unknown, p: Problems): UsageSettings {
+  const usage: UsageSettings = { warn: { claude: 80, codex: 80 }, critical: { claude: 95, codex: 95 }, queueHold: {}, statusLine: true, claudeTap: true, claudeDir: null, codexDir: null };
+  if (v === undefined || v === null) return usage;
+  if (!isObject(v)) {
+    p.add('config.usage must be a mapping like {warn: 80, critical: 95}');
+    return usage;
+  }
+  checkKeys(v, USAGE_KEYS, 'config.usage', p);
+  if (v.warn !== undefined) Object.assign(usage.warn, parsePercent(v.warn, 'config.usage.warn', p, usage.warn));
+  if (v.critical !== undefined) Object.assign(usage.critical, parsePercent(v.critical, 'config.usage.critical', p, usage.critical));
+  for (const name of AGENT_NAMES) if (usage.critical[name] < usage.warn[name]) p.add(`config.usage: critical (${usage.critical[name]}) for ${name} is below warn (${usage.warn[name]})`);
+  if (v.queue_hold !== undefined && v.queue_hold !== false) usage.queueHold = parsePercent(v.queue_hold, 'config.usage.queue_hold', p, {});
+  for (const [key, field] of [['status_line', 'statusLine'], ['claude_tap', 'claudeTap']] as const) {
+    if (v[key] === undefined) continue;
+    if (typeof v[key] === 'boolean') usage[field] = v[key];
+    else p.add(`config.usage.${key} must be true or false`);
+  }
+  for (const [key, field] of [['claude_dir', 'claudeDir'], ['codex_dir', 'codexDir']] as const) {
+    const dir = parseString(v[key], `config.usage.${key}`, p);
+    if (dir) usage[field] = resolvePath(dir);
+  }
+  return usage;
+}
+
 function parseCollisions(v: unknown, p: Problems): CollisionSettings {
   const collisions: CollisionSettings = { enabled: true, interval: 300, notify: true, ignore: [] };
   if (v === undefined || v === null) return collisions;
@@ -670,9 +732,10 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   const queue = parseQueue(raw.queue, p);
   const collisions = parseCollisions(raw.collisions, p);
   const cancel = parseCancel(raw.cancel, p);
+  const usage = parseUsage(raw.usage, p);
 
   p.throwIfAny(`Invalid config ${file}:`, 'Fix the listed keys; see the README section "Configuration".');
-  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, limits, agents, equivalents, watch, notify, board, mcp, queue, collisions, cancel, path: file, loaded: exists };
+  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, limits, agents, equivalents, watch, notify, board, mcp, queue, collisions, cancel, usage, path: file, loaded: exists };
   if (mirror) config.mirrorDir = resolvePath(mirror);
   return config;
 }
