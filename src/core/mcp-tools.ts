@@ -1,7 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
+import { cancelTasks, planCancel } from './cancel.ts';
 import { closeTask } from './close.ts';
+import { cohortEntries, cohortRows, findCohort, openCohortTasks, summarizeCohorts } from './cohort.ts';
 import { collectOverlaps, collideText } from './collisions.ts';
 import { commitQueueAdd, describeQueue, planQueueAdd, readQueue, removeFromQueue, waiting } from './queue.ts';
 import { liveWindows } from './plan.ts';
@@ -122,10 +124,14 @@ function statusRowForChat(r: StatusRow): Record<string, unknown> {
     lastLine: r.lastLine,
     question: r.question,
     hint: r.hint,
+    cohort: r.cohort,
     collidesWith: r.collide,
     finished: r.finished,
     hidden: r.hidden && !r.closed,
     closed: r.closed,
+    cancelled: r.cancelled,
+    cancelledAt: r.cancelledAt,
+    cancelReason: r.cancelReason,
     archived: r.archived,
   };
 }
@@ -139,14 +145,17 @@ export function statusLine(shown: StatusRow[], hiddenCount: number): string {
   return hiddenCount > 0 ? `${base} (${hiddenCount} hidden or closed not shown; all: true lists them)` : base;
 }
 
-async function runStatus(deps: McpDeps, args: { all?: boolean | undefined }): Promise<ToolResult> {
+async function runStatus(deps: McpDeps, args: { all?: boolean | undefined; cohort?: string | undefined }): Promise<ToolResult> {
   const ctx = deps.context(() => {});
   const all = Boolean(args.all);
-  const rows = await collectStatus(ctx, { archived: all });
+  const cohort = args.cohort === undefined ? undefined : findCohort(ctx.config, args.cohort).name;
+  const everyRow = await collectStatus(ctx, { archived: all });
+  const rows = cohort === undefined ? everyRow : cohortRows(everyRow, cohort);
   const shown = shownRows(rows, all);
   // The queue and the collisions come as short lines before the rows (queue_list and overlap have the detail).
   const extra: string[] = [];
-  const views = await queueViews(ctx);
+  if (cohort !== undefined) extra.push(`Cohort ${cohort}: only its tasks are listed.`);
+  const views = (await queueViews(ctx)).filter((v) => cohort === undefined || cohortEntries([v.entry], cohort).length > 0);
   if (views.length > 0) {
     extra.push(`Queue (${views.length}): ${views.map((v) => `${v.entry.task} – ${v.condition.text}`).join('; ')}. queue_list has the detail.`);
   }
@@ -176,9 +185,27 @@ async function runQueueList(deps: McpDeps): Promise<ToolResult> {
     queued: v.entry.queuedAt,
     queuedLocal: formatLocalTime(v.entry.queuedAt),
     error: v.entry.error ?? null,
+    cohort: v.entry.cohort ?? null,
+    blocked: v.condition.kind === 'blocked',
   }));
   const paused = views.some((v) => v.condition.kind === 'paused');
   return ok(`${waiting(views.map((v) => v.entry)).length} waiting in the queue${paused ? ' (the queue is paused: nothing starts)' : ''}; ${views.length - waiting(views.map((v) => v.entry)).length} starting or failed.\n\n${JSON.stringify(list, null, 2)}`);
+}
+
+async function runCohortList(deps: McpDeps): Promise<ToolResult> {
+  const list = await summarizeCohorts(deps.context(() => {}));
+  if (list.length === 0) return ok('No cohorts. A task joins one with "cohort: <name>" in its spec.');
+  return ok(`${list.length} cohort${list.length === 1 ? '' : 's'}; cohort_show lists the tasks of one.\n\n${JSON.stringify(list, null, 2)}`);
+}
+
+async function runCohortShow(deps: McpDeps, args: { cohort: string }): Promise<ToolResult> {
+  const ctx = deps.context(() => {});
+  const meta = findCohort(ctx.config, args.cohort);
+  const rows = cohortRows(await collectStatus(ctx, { archived: true }), meta.name);
+  const views = (await queueViews(ctx)).filter((v) => cohortEntries([v.entry], meta.name).length > 0);
+  const queued = views.map((v) => ({ task: v.entry.task, position: v.position, startCondition: v.condition.text, blocked: v.condition.kind === 'blocked' }));
+  const head = { cohort: meta.name, created: meta.created || null, note: meta.note ?? null, tasks: rows.length, queued: queued.length };
+  return ok(`${JSON.stringify(head)}\n\n${JSON.stringify({ tasks: rows.map(statusRowForChat), queued }, null, 2)}`);
 }
 
 async function runOverlap(deps: McpDeps, args: { task?: string | undefined }): Promise<ToolResult> {
@@ -246,9 +273,10 @@ async function runGetReport(deps: McpDeps, args: { task: string }): Promise<Tool
   return ok(`=== ${record.task} (${record.agent} ${record.model}/${record.effort}) ===\n${r.text.trimEnd()}${note}`);
 }
 
-async function runPullReady(deps: McpDeps): Promise<ToolResult> {
+async function runPullReady(deps: McpDeps, args: { cohort?: string | undefined } = {}): Promise<ToolResult> {
   const ctx = deps.context(() => {});
-  const rows = await collectStatus(ctx);
+  const everyRow = await collectStatus(ctx);
+  const rows = args.cohort === undefined ? everyRow : cohortRows(everyRow, findCohort(ctx.config, args.cohort).name);
   const chosen = selectReady(rows, false);
   if (chosen.length === 0) return ok(noReadyMessage(rows));
   // As many reports as fit under the size limit; the others stay un-pulled for the next call.
@@ -293,6 +321,10 @@ async function runTaskSpec(deps: McpDeps, args: { task: string }): Promise<ToolR
     superseded_by: record.supersededBy ?? null,
     pin: record.pin === true,
     closed: record.closed === true,
+    cohort: record.cohort ?? null,
+    cancelled: record.cancelled === true,
+    cancelled_at: record.cancelledAt ?? null,
+    cancel_reason: record.cancelReason ?? null,
     // Names only: the values of env may hold secrets.
     env_names: Object.keys(record.env),
   };
@@ -459,14 +491,36 @@ async function runQueue(deps: McpDeps, args: { spec: string; agent?: 'claude' | 
 
 async function runQueueRm(deps: McpDeps, args: { task: string }): Promise<ToolResult> {
   return writeTool(deps, 'queue_rm', { task: args.task }, async (ctx) => {
-    const entry = await removeFromQueue(ctx, args.task);
-    return { text: `${entry.task}: removed from the queue`, executed: true, announce: `queue_rm ${entry.task}` };
+    const entry = await removeFromQueue(ctx, args.task, { source: 'mcp' });
+    return { text: `${entry.task}: removed from the queue (cancelled)`, executed: true, announce: `queue_rm ${entry.task}` };
+  });
+}
+
+async function runCancel(deps: McpDeps, args: { task?: string | undefined; cohort?: string | undefined; reason?: string | undefined; remove_worktree?: boolean | undefined; confirm?: boolean | undefined }): Promise<ToolResult> {
+  const label = args.task ?? (args.cohort !== undefined ? `cohort ${args.cohort}` : '?');
+  return writeTool(deps, 'cancel', { task: label, detail: `${args.reason ? `reason=${clipText(args.reason, 80)} ` : ''}${args.remove_worktree ? 'remove_worktree ' : ''}confirm=${Boolean(args.confirm)}` }, async (ctx, lines) => {
+    if ((args.task === undefined) === (args.cohort === undefined)) throw new AgentctlError('give either task or cohort', 'cancel takes one task (task) or all open tasks of a cohort (cohort), not both and not neither.');
+    if (args.remove_worktree && !ctx.config.mcp.allowRmWorktree) {
+      throw new AgentctlError('removing the worktree is not allowed for the chat', `The user can allow it with: mcp: {allow_rm_worktree: true} in ${ctx.config.path}. Without remove_worktree the worktree and the branch stay.`);
+    }
+    const cohortName = args.cohort === undefined ? undefined : findCohort(ctx.config, args.cohort).name;
+    const inputs = args.task !== undefined ? [args.task] : await openCohortTasks(ctx, cohortName as string, { queued: true });
+    if (inputs.length === 0) throw new AgentctlError(`cohort ${cohortName} has no open tasks`, 'Call cohort_show.');
+    const opts = { reason: args.reason?.trim() || undefined, rmWorktree: Boolean(args.remove_worktree), source: 'mcp' as const };
+    const plan = await planCancel(ctx, inputs, opts);
+    if (!args.confirm) {
+      return { text: `${plan.summary.join('\n')}\n\nNot cancelled yet. Show this to the user and ask; if they agree, call cancel again with the same arguments and confirm: true.`, executed: false, announce: '' };
+    }
+    const results = await cancelTasks(ctx, plan, opts);
+    const tasks = results.map((r) => r.task).join(', ');
+    return { text: `Cancelled: ${tasks}\n${lines.join('\n')}`.trim(), executed: true, announce: `cancel ${tasks}${opts.reason ? ` (${clipText(opts.reason, 80)})` : ''}` };
   });
 }
 
 // ---- the registry
 
 const taskArg = z.string().min(1).max(60).describe('Task ID such as NC-42; case does not matter and a unique prefix is enough.');
+const cohortArg = z.string().min(1).max(60).describe('Cohort name; case does not matter.');
 const allArg = z.boolean().optional().describe('true: also hidden and closed (and archived) tasks. Default false.');
 
 const readOnly = (title: string): ToolAnnotations => ({ title, readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false });
@@ -480,10 +534,10 @@ export const MCP_TOOLS: McpToolDef[] = [
       'Current state of every agentctl task: agent/model/effort, state (working, background, waiting, needs-input, needs-trust, limited, report-ready, dead, orphan, superseded), ' +
       'start time (started in UTC, startedLocal in the user\'s local time: show the local one), running time, git progress, whether a report exists and was already pulled, the last line and the open question of a waiting agent. ' +
       'Use this FIRST when the user asks what is running, who waits for them, or whether something is ready, and at the start of a planning session. ' +
-      'Hidden and closed tasks are left out unless all is true.',
-    input: { all: allArg },
+      'Hidden, closed and cancelled tasks are left out unless all is true. cohort limits it to the tasks of one cohort (a group the user named). Every row has its cohort (null: none).',
+    input: { all: allArg, cohort: cohortArg.optional() },
     annotations: readOnly('Status of all agent tasks'),
-    run: (deps, args) => guarded(() => runStatus(deps, args as { all?: boolean })),
+    run: (deps, args) => guarded(() => runStatus(deps, args as { all?: boolean; cohort?: string })),
   }),
   def({
     name: 'peek',
@@ -522,10 +576,10 @@ export const MCP_TOOLS: McpToolDef[] = [
     kind: 'read',
     description:
       'All reports that are ready and not yet pulled, each under a header with the task and agent, in one answer; they are then marked as pulled (the only thing this tool changes, in agentctl\'s own state). ' +
-      'Use it at the START of discussing the results of finished tasks, instead of asking the user to paste reports. A second call returns only reports that arrived since.',
-    input: {},
+      'Use it at the START of discussing the results of finished tasks, instead of asking the user to paste reports. A second call returns only reports that arrived since. cohort: only the reports of that cohort (the others stay new). Cancelled tasks are never included.',
+    input: { cohort: cohortArg.optional() },
     annotations: { title: 'Take all new reports', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-    run: (deps) => guarded(() => runPullReady(deps)),
+    run: (deps, args) => guarded(() => runPullReady(deps, args as { cohort?: string })),
   }),
   def({
     name: 'task_spec',
@@ -546,6 +600,26 @@ export const MCP_TOOLS: McpToolDef[] = [
     input: {},
     annotations: readOnly('The task queue'),
     run: (deps) => guarded(() => runQueueList(deps)),
+  }),
+  def({
+    name: 'cohort_list',
+    title: 'The cohorts',
+    kind: 'read',
+    description:
+      'The cohorts (groups of tasks the user named, for example one batch of related work): per cohort the number of tasks by state (active, queued, reports, closed, cancelled), since when, and its note. ' +
+      'Use it when the user talks about a batch by name or asks how a group of tasks is doing. Tasks without a name belong to no cohort.',
+    input: {},
+    annotations: readOnly('The cohorts'),
+    run: (deps) => guarded(() => runCohortList(deps)),
+  }),
+  def({
+    name: 'cohort_show',
+    title: 'The tasks of a cohort',
+    kind: 'read',
+    description: 'One cohort: its note and every task in it as status shows it (closed and cancelled ones too), and its queued tasks with what each waits for. Use it to review a batch of work.',
+    input: { cohort: cohortArg },
+    annotations: readOnly('The tasks of a cohort'),
+    run: (deps, args) => guarded(() => runCohortShow(deps, args as { cohort: string })),
   }),
   def({
     name: 'overlap',
@@ -600,10 +674,29 @@ export const MCP_TOOLS: McpToolDef[] = [
     name: 'queue_rm',
     title: 'Take a task out of the queue',
     kind: 'write',
-    description: 'WRITE, off unless the user put "queue_rm" in mcp.allow. Removes a waiting (or failed) task from the queue; nothing that already runs is touched. Ask the user first.',
+    description: 'WRITE, off unless the user put "queue_rm" in mcp.allow. Removes a waiting (or failed) task from the queue; the task becomes cancelled (the same as cancel for a queued task, without a reason) and tasks that wait for it become blocked. Nothing that already runs is touched. Ask the user first.',
     input: { task: taskArg },
     annotations: { title: 'Take a task out of the queue', readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     run: (deps, args) => guarded(() => runQueueRm(deps, args as { task: string })),
+  }),
+  def({
+    name: 'cancel',
+    title: 'Cancel tasks',
+    kind: 'write',
+    description:
+      'WRITE, off unless the user put "cancel" in mcp.allow. Abandons a task: one at work is interrupted, given a few seconds to stop and its window closed; one in the queue is taken out of it. It becomes cancelled (not closed) and leaves status; ' +
+      'the worktree and the branch stay, a written report stays readable. Tasks that wait for it (after) become blocked. A task that was moved to the other provider is cancelled together with its other half. ' +
+      'Give task, or cohort for all open tasks of a cohort. reason is kept with the task. remove_worktree: true (git worktree remove, never forced) works only if the user also set mcp.allow_rm_worktree. ' +
+      'The FIRST call (confirm omitted) only describes what would be cancelled; show it to the user and ask, then call again with confirm: true. The user gets a desktop notification.',
+    input: {
+      task: taskArg.optional(),
+      cohort: cohortArg.optional(),
+      reason: z.string().max(500).optional().describe('Why the work is cancelled (optional).'),
+      remove_worktree: z.boolean().optional().describe('Also remove the git worktree. Refused unless the user allowed it in the config.'),
+      confirm: z.boolean().optional().describe('true only after the user agreed to the described cancellation.'),
+    },
+    annotations: { title: 'Cancel tasks', readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    run: (deps, args) => guarded(() => runCancel(deps, args as { task?: string; cohort?: string; reason?: string; remove_worktree?: boolean; confirm?: boolean })),
   }),
   def({
     name: 'interrupt',

@@ -106,7 +106,7 @@ export const NOTIFY_BACKENDS = ['auto', 'terminal-notifier', 'osascript'] as con
 export type NotifyBackend = (typeof NOTIFY_BACKENDS)[number];
 
 /** Write tools of the MCP server; each one must be listed in `mcp.allow` to work. */
-export const MCP_WRITE_TOOLS = ['send', 'new', 'interrupt', 'close', 'move', 'queue', 'queue_rm'] as const;
+export const MCP_WRITE_TOOLS = ['send', 'new', 'interrupt', 'close', 'move', 'queue', 'queue_rm', 'cancel'] as const;
 export type McpWriteTool = (typeof MCP_WRITE_TOOLS)[number];
 
 export interface BoardSettings {
