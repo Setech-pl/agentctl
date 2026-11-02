@@ -52,6 +52,7 @@ Column "Layers": **g** global config, **p** project config, **s** spec.
 | `queue` | mapping | see below | g | The task queue (`agentctl queue`). |
 | `collisions` | mapping | see below | g | Warnings about two active tasks changing the same files. |
 | `cancel` | mapping | see below | g | `agentctl cancel`: how a task at work is stopped. |
+| `away` | mapping | see below | g | When the phone gets notifications: `away.auto_idle`. See also `notify.ntfy`. |
 | `usage` | mapping | see below | g | Token usage and plan limits: thresholds, queue hold, tmux status line, where the agents keep their logs. |
 
 ### `watch`
@@ -74,6 +75,21 @@ Default icons: `working` ⚙, `background` ⏳, `waiting` ⏸, `needs-input` ?, 
 | `notify.turn_end` | boolean | `true` | g | A notification when a turn ends and the agent waits. `false`: only questions, reports and limits. |
 | `notify.terminal_app` | bundle ID | detected | g | The terminal app a click on a notification brings to the front, for example `com.apple.Terminal`. |
 | `notify.verdict_pattern` | regex | none | g | Picks the report line quoted in the "report ready" notification; its first group, else the whole line. Without it a line starting with `Werdykt`, `Verdict` or `Status`, else the first line of text. |
+| `notify.ntfy` | mapping | none | g | Notifications to a phone through [ntfy](https://ntfy.sh); the keys below. Without `topic` nothing is sent. `agentctl ntfy-setup` writes it for you. |
+| `notify.ntfy.server` | URL | `https://ntfy.sh` | g | The ntfy server; your own for a private one. |
+| `notify.ntfy.topic` | text | none | g | The topic the phone subscribes to (letters, digits, `_`, `-`). On the public server its name is the only protection: keep it long and random. |
+| `notify.ntfy.token` | text | none | g | Bearer token for a private server or an ntfy account. |
+| `notify.ntfy.events` | list | all ten | g | `needs-input`, `needs-trust`, `limited`, `blocked`, `report-ready`, `cohort-done`, `queue-failed`, `orphan`, `dead`, `usage-critical`. |
+| `notify.ntfy.priority` | mapping | `needs-input`, `limited`, `usage-critical`: `high`; the rest `default` | g | ntfy priority per event: `min`, `low`, `default`, `high`, `urgent`. |
+| `notify.ntfy.include_verdict` | boolean | `true` | g | The first line of the verdict goes into "report ready". Never more of the report; no paths or file names. |
+| `notify.ntfy.click_url` | URL | none | g | Opened by a tap on the notification, for example the address of the chat. |
+| `notify.ntfy.always` | boolean | `false` | g | Send always, not only while `agentctl away` is on. |
+
+### `away`
+
+| Key | Type | Default | Layers | Meaning |
+|---|---|---|---|---|
+| `away.auto_idle` | minutes | none | g | The Mac counts as away after this many minutes without keyboard or mouse (macOS, `HIDIdleTime`), and back at the first touch. Off by default; `agentctl away on|off` always works. |
 
 ### `board`
 
