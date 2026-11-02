@@ -47,7 +47,7 @@ Off until you list them in `~/.agentctl/config.yaml`. The list is read again on 
 
 ```yaml
 mcp:
-  allow: [send, interrupt]     # any of: send, new, interrupt, close, move, queue, queue_rm, cancel, mark, set_limits, reserve
+  allow: [send, interrupt]     # any of: send, new, interrupt, close, move, queue, queue_rm, cancel, mark, set_limits, reserve, resume
   allow_rm_worktree: false     # close may also remove the git worktree
 ```
 
@@ -63,6 +63,7 @@ mcp:
 | `mark` | `task`, `result` (`ok`, `partial` or `fail`), `note?` | Records the result the user judged for a task in the history (`log`, `stats`); the last mark wins. It changes nothing else, so it has no confirm step; a chat should record only what the user said. |
 | `set_limits` | `claude?`, `codex?` (0 removes a limit), `confirm?` | Sets the most simultaneous agents per provider in `config.yaml` (comments stay, a `.bak` copy is kept). Takes effect at once, also in a running `watch`. The first call only describes the change; `confirm: true` writes it. |
 | `reserve` | `claude?`, `codex?`, `note?`, `release?`, `confirm?` | Holds places of a provider for agents you start by hand (they count against the limit), or gives them back with `release: true`. The first call only describes it; `confirm: true` does it. |
+| `resume` | `tasks?`, `all?`, `confirm?` | After a restart of the Mac or of tmux: gives the window back to active tasks that have a worktree and no window and starts the agent in resume mode (Claude `--resume <session>` or `--continue`, Codex `resume <session>` or `resume --last`), same model and effort, no prompt pasted again. Tasks with a ready report are left alone unless `all: true`. The first call only lists the tasks; `confirm: true` does it. |
 | `move` | `task`, `agent?`, `confirm?` | Hands a task that hit its usage limit to the other provider. The first call only describes the move; `confirm: true` does it. |
 
 ## Safety model
@@ -71,7 +72,7 @@ mcp:
 - Every write is refused unless `mcp.allow` lists it. Refused calls are recorded too.
 - **Audit log:** `~/.agentctl/mcp-audit.log` (next to the config), one JSON line per step: time, tool, task, outcome `requested`, then `done`, `error`, `denied` or `preview`. The `requested` line is written before the action, and a write that cannot be recorded is not done.
 - **Notification:** a done write is announced on the desktop (`czat zlecił: <action> <TASK>`).
-- **Two-step tools:** `new`, `queue`, `move`, `set_limits` and `reserve` change nothing on the first call; the chat has to show the summary and call again with `confirm: true`.
+- **Two-step tools:** `new`, `queue`, `move`, `set_limits`, `reserve` and `resume` change nothing on the first call; the chat has to show the summary and call again with `confirm: true`.
 - The server runs as you and sees what you see. This is a trust decision about the chat, not a sandbox. Start with `allow: []`.
 
 ## Install

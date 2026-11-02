@@ -4,6 +4,7 @@ import { ConfigStore, configStatePath, noteConfigState } from './config-store.ts
 import type { ConfigRefresh } from './config-store.ts';
 import { loadGlobalConfig } from './config.ts';
 import { limitsDiffText } from './limits.ts';
+import { findResumable, resumeText } from './resume.ts';
 import { recordJournal, recordJournalOnce } from './journal.ts';
 import type { JournalKind } from './journal.ts';
 import type { Context } from './context.ts';
@@ -240,6 +241,17 @@ export async function reloadConfig(ctx: Context, store: ConfigStore, by = 'watch
   return r;
 }
 
+/** One notification "N zadań do wznowienia" when the watcher starts and tasks can be resumed (`agentctl resume`). Returns how many. */
+export async function announceResumable(ctx: Context, notifier: Notifier): Promise<number> {
+  const n = (await findResumable(ctx)).length;
+  if (n === 0) return 0;
+  const text = resumeText(n);
+  await ctx.runner.appendFile(watchLogPath(ctx), `${new Date(ctx.runner.now()).toISOString()}  resume: ${text}\n`);
+  ctx.out(`resume: ${text}`);
+  await notifier.notify('agentctl', text).catch(() => undefined);
+  return n;
+}
+
 /** Foreground loop: tick every `watch.interval` seconds until aborted. */
 export async function runWatch(ctx: Context, notifier: Notifier, opts: WatchOptions = {}): Promise<void> {
   const memory = new WatchMemory();
@@ -262,6 +274,8 @@ export async function runWatch(ctx: Context, notifier: Notifier, opts: WatchOpti
     const r = await reloadConfig(ctx, store);
     if (r.changed && JSON.stringify(before) !== JSON.stringify(ctx.config.notify) && opts.remakeNotifier) current = await opts.remakeNotifier();
   };
+  // After a restart of the Mac the tasks that were at work have a worktree and no window: say so once, when the watcher starts.
+  await announceResumable(ctx, current).catch(() => undefined);
   try {
     for (let tick = 0; !opts.signal?.aborted && (opts.maxTicks === undefined || tick < opts.maxTicks); tick++) {
       if (tick > 0) await ctx.runner.sleep(ctx.config.watch.interval * 1000, opts.signal);

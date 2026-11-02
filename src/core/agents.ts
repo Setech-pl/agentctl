@@ -22,6 +22,21 @@ export function buildAgentArgv(spec: Pick<ResolvedSpec, 'agent' | 'model' | 'eff
   return ['codex', '--sandbox', 'danger-full-access', ...(hasModel ? ['-m', spec.model] : []), ...effortArgs, ...settings.flags, ...extra];
 }
 
+/**
+ * The command line that takes a task's conversation up again, with the same model, effort, flags and event wiring as when it was started
+ * (no prompt: the conversation has it).
+ *
+ * - claude: `… --resume <session id>` when a session of the task is known (hooks and the usage tap record it), else `… --continue`
+ *   (the most recent conversation of the worktree).
+ * - codex:  `codex resume <session id> …` or `codex resume --last …` (the most recent session of the worktree); the flags follow `resume`.
+ */
+export function buildResumeArgv(spec: Pick<ResolvedSpec, 'agent' | 'model' | 'effort'>, settings: AgentSettings, extra: string[] = [], sessionId?: string): string[] {
+  const argv = buildAgentArgv(spec, settings, extra);
+  if (spec.agent === 'claude') return [...argv, ...(sessionId ? ['--resume', sessionId] : ['--continue'])];
+  const [cmd, ...rest] = argv as [string, ...string[]];
+  return [cmd, 'resume', ...(sessionId ? [sessionId] : ['--last']), ...rest];
+}
+
 export function agentCommandLine(argv: string[]): string {
   const [cmd, ...args] = argv;
   return shellLine(cmd as string, args);
