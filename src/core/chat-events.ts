@@ -4,6 +4,8 @@ import { parseAge } from './archive.ts';
 import { findCohort } from './cohort.ts';
 import type { GlobalConfig } from './config.ts';
 import type { Context } from './context.ts';
+import { awayView } from './away.ts';
+import type { AwayView } from './away.ts';
 import { readJournal } from './journal.ts';
 import type { JournalEntry } from './journal.ts';
 import { readQueue, waiting } from './queue.ts';
@@ -75,6 +77,8 @@ export interface EventsReport {
   cohort: string | null;
   events: JournalEntry[];
   summary: EventsSummary;
+  /** Away mode: while on, the phone gets the notifications. */
+  away: AwayView;
   /** The marker of this client moved to this call. */
   markerMoved: boolean;
 }
@@ -104,7 +108,7 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
     await runner.writeFile(markersPath(config), `${JSON.stringify(markers, null, 2)}\n`);
     markerMoved = true;
   }
-  return { client: opts.client, since: new Date(since.ms).toISOString(), sinceLabel: since.label, cohort, events, summary, markerMoved };
+  return { client: opts.client, since: new Date(since.ms).toISOString(), sinceLabel: since.label, cohort, events, summary, away: awayView(config), markerMoved };
 }
 
 /** Behind an event that was sent to the phone (a retry in progress: "queued" is shown by the JSON field `phone`). */
@@ -138,6 +142,7 @@ export function renderEvents(report: EventsReport): string[] {
     head,
     ...report.events.map((e) => `${hhmm(e.at)}  ${KIND_LABEL[e.kind]}${e.task ? `  ${e.task}` : ''}  ${e.verdict ? `${e.verdict}` : e.text}${e.phone ? PHONE_MARK : ''}`),
     summaryLine(report.summary),
+    ...(report.away.on ? ['Away włączone: telefon dostaje powiadomienia (📱 przy zdarzeniu = poszło na telefon).'] : []),
   ];
 }
 
@@ -146,5 +151,6 @@ export function eventsMarkdown(report: EventsReport): string {
   for (const e of report.events) lines.push(`- ${hhmm(e.at)} **${KIND_LABEL[e.kind]}**${e.task ? ` ${e.task}` : ''} – ${e.verdict ?? e.text}${e.phone ? PHONE_MARK : ''}`);
   if (report.events.length > 0) lines.push('');
   lines.push(summaryLine(report.summary));
+  if (report.away.on) lines.push('', 'Away włączone: telefon dostaje powiadomienia.');
   return `${lines.join('\n')}\n`;
 }

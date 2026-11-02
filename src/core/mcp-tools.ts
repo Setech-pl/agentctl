@@ -9,6 +9,7 @@ import { cohortEntries, cohortRows, findCohort, openCohortTasks, summarizeCohort
 import { collectOverlaps, collideText } from './collisions.ts';
 import { commitQueueAdd, describeQueue, planQueueAdd, readQueue, removeFromQueue, waiting } from './queue.ts';
 import { liveWindows } from './plan.ts';
+import { awayReport, renderAway, setAway } from './away.ts';
 import { MCP_WRITE_TOOLS } from './config.ts';
 import type { GlobalConfig, McpWriteTool } from './config.ts';
 import type { Context } from './context.ts';
@@ -185,7 +186,16 @@ async function runStatus(deps: McpDeps, args: { all?: boolean | undefined; cohor
   extra.push(planSummary(ctx));
   const colliding = shown.filter((r) => r.collide.length > 0);
   if (colliding.length > 0) extra.push(`Collisions: ${colliding.map((r) => `${r.task} ${collideText(r.collide)}`).join('; ')}. overlap lists the files.`);
+  extra.push(awayLine(ctx));
   return ok(`${[statusLine(shown, rows.length - shown.length), ...extra].join('\n')}\n\n${JSON.stringify(shown.map(statusRowForChat), null, 2)}`);
+}
+
+/** "Away: on since …; the phone gets the notifications" - what the chat should know about the phone. */
+function awayLine(ctx: Context): string {
+  const r = awayReport(ctx.config);
+  const state = r.on ? `ON${r.since ? ` since ${r.since}` : ''} (set by ${r.by})` : 'off';
+  const phone = !r.phoneConfigured ? 'no phone is set up' : r.phoneActive ? 'the phone gets the notifications' : 'the phone is quiet';
+  return `Away: ${state}; ${phone}${r.always ? ' (notify.ntfy.always)' : ''}. The "away" tool switches it when allowed.`;
 }
 
 /** "Plans: claude 5h 62% ↻ 14:30 | codex n/d (…)": the limits of both providers; what is not known says n/d. usage has the detail. */
@@ -226,6 +236,13 @@ async function runMark(deps: McpDeps, args: { task: string; result: string; note
     const result = parseResult(args.result);
     const marked = await markTask(ctx, args.task, result, args.note);
     return { text: `${marked.task}: marked ${marked.result}${marked.previous && marked.previous !== marked.result ? ` (was ${marked.previous})` : ''}. It is in the history (log, stats).`, executed: true, announce: `mark ${marked.task} ${marked.result}` };
+  });
+}
+
+async function runAway(deps: McpDeps, args: { on: boolean }): Promise<ToolResult> {
+  return writeTool(deps, 'away', { detail: args.on ? 'on' : 'off' }, async (ctx) => {
+    const { state, changed } = await setAway(ctx, args.on, 'mcp');
+    return { text: `${changed ? 'Away is' : 'Away was already'} ${state.on ? 'on' : 'off'}.\n${renderAway(awayReport(ctx.config)).join('\n')}`, executed: changed, announce: `away ${state.on ? 'on' : 'off'}` };
   });
 }
 
@@ -975,6 +992,17 @@ export const MCP_TOOLS: McpToolDef[] = [
     input: { task: taskArg, result: z.enum(RESULTS).describe('ok, partial or fail.'), note: z.string().max(500).optional().describe('Why (optional).') },
     annotations: { title: 'Mark how a task turned out', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     run: (deps, args) => guarded(() => runMark(deps, args as { task: string; result: string; note?: string })),
+  }),
+  def({
+    name: 'away',
+    title: 'Switch away mode (the phone)',
+    kind: 'write',
+    description:
+      'WRITE, off unless the user put "away" in mcp.allow. on: true makes agentctl send its notifications to the user\'s phone (ntfy) as well, on: false stops that. The notifications on the Mac do not depend on it. ' +
+      'It costs nothing and needs no confirmation (it is recorded in the audit log), but switch it only when the user says they are leaving or are back. status and events_since say whether away is on.',
+    input: { on: z.boolean().describe('true: away, the phone gets the notifications. false: back at the Mac.') },
+    annotations: { title: 'Switch away mode (the phone)', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    run: (deps, args) => guarded(() => runAway(deps, args as { on: boolean })),
   }),
   def({
     name: 'interrupt',

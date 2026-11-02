@@ -1,6 +1,7 @@
 import type { Context } from './context.ts';
 import { DEFAULT_WINDOW_ICONS } from './icons.ts';
 import type { StatusRow } from './status.ts';
+import { readAway } from './away.ts';
 import { collectStatus, shownRows } from './status.ts';
 import { readQueue } from './queue.ts';
 import { openReader, readPlans } from './usage.ts';
@@ -10,6 +11,9 @@ import type { TaskState } from './state.ts';
 /** The queue in the line: "3⧗" is three tasks waiting for a free window or for another task. */
 export const QUEUE_ICON = '⧗';
 
+/** In front of the line while away is on (the phone gets the notifications). */
+export const AWAY_ICON = '📱';
+
 /** Seconds between two runs of the status command in tmux. */
 export const STATUS_INTERVAL = 10;
 
@@ -17,10 +21,10 @@ export const STATUS_INTERVAL = 10;
 const LINE_ORDER: TaskState[][] = [['working', 'background'], ['waiting'], ['report-ready'], ['needs-input'], ['needs-trust'], ['limited'], ['orphan', 'dead']];
 
 /**
- * One short line for the tmux status bar: "2⚙ 1✓ 1? 3⧗" (the last one: tasks in the queue), then the plans "C 62% · X 18%" (usage.status_line). The count of tasks per state, zero counts left out; reports that were
+ * One short line for the tmux status bar: "📱 2⚙ 1✓ 1? 3⧗" (the last one: tasks in the queue), then the plans "C 62% · X 18%" (usage.status_line); the 📱 in front means away is on. The count of tasks per state, zero counts left out; reports that were
  * already pulled do not count as ✓ (nothing is left to do with them). Empty when there is nothing to show.
  */
-export function tmuxLine(rows: StatusRow[], icons: Record<TaskState, string> | null, queued = 0, plan = ''): string {
+export function tmuxLine(rows: StatusRow[], icons: Record<TaskState, string> | null, queued = 0, plan = '', away = false): string {
   const set = icons ?? DEFAULT_WINDOW_ICONS;
   const parts: string[] = [];
   for (const states of LINE_ORDER) {
@@ -29,7 +33,8 @@ export function tmuxLine(rows: StatusRow[], icons: Record<TaskState, string> | n
   }
   if (queued > 0) parts.push(`${queued}${QUEUE_ICON}`);
   const tasks = parts.join(' ');
-  return tasks !== '' && plan !== '' ? `${tasks} │ ${plan}` : `${tasks}${plan}`;
+  const body = tasks !== '' && plan !== '' ? `${tasks} │ ${plan}` : `${tasks}${plan}`;
+  return away ? (body === '' ? AWAY_ICON : `${AWAY_ICON} ${body}`) : body;
 }
 
 export async function statusTmuxLine(ctx: Context): Promise<string> {
@@ -41,7 +46,7 @@ export async function statusTmuxLine(ctx: Context): Promise<string> {
     plan = planStatusLine(readPlans(ctx.config, reader, ctx.runner.now()));
     reader.save();
   }
-  return tmuxLine(shownRows(await collectStatus(ctx, { progress: false }), false), ctx.config.watch.windowIcons, queued, plan);
+  return tmuxLine(shownRows(await collectStatus(ctx, { progress: false }), false), ctx.config.watch.windowIcons, queued, plan, readAway(ctx.config).on);
 }
 
 /**

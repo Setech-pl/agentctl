@@ -32,6 +32,8 @@ import { openReader, readPlans } from './usage.ts';
 import type { PlanState } from './usage.ts';
 import { formatTokens } from './usage-parse.ts';
 import { formatReset } from './usage.ts';
+import { awayView, setAway } from './away.ts';
+import type { AwayView } from './away.ts';
 import { AGENT_NAMES } from './config.ts';
 import type { AgentName, UsageSettings } from './config.ts';
 import { cohortKey, errorMessage } from './util.ts';
@@ -74,7 +76,7 @@ export type BoardMode =
   | { kind: 'input'; task: string; text: string }
   /** Enter on a finished task (no window): it cannot be switched to, so the choices are the ones that still make sense. */
   | { kind: 'finished'; task: string }
-  | { kind: 'confirm'; action: 'interrupt' | 'close' | 'close-worktree' | 'move' | 'queue-rm' | 'cancel' | 'resume'; task: string; reason?: string }
+  | { kind: 'confirm'; action: 'interrupt' | 'close' | 'close-worktree' | 'move' | 'queue-rm' | 'cancel' | 'resume' | 'away'; task: string; reason?: string }
   /** `X`: the reason for the cancellation (optional: Enter on an empty line goes on without one). */
   | { kind: 'cancel-reason'; task: string; text: string }
   /** `k`: pick the cohort to show; `value` null is every task, '' the tasks without a cohort. */
@@ -125,10 +127,12 @@ export interface BoardState {
   plans: Record<AgentName, PlanState> | null;
   /** Tasks that can be resumed (active, a worktree, no window): the section "Do wznowienia", key R. */
   resumable: string[];
+  /** Away mode (the phone gets the notifications); null before the first refresh. */
+  away: AwayView | null;
 }
 
 export function initialBoardState(width: number, height: number): BoardState {
-  return { rows: [], selected: null, mode: { kind: 'list' }, notice: null, preview: null, width, height, refreshedAt: null, busy: null, loadError: null, quit: false, showFinished: false, showHidden: false, queue: [], queuePaused: false, cohortFilter: null, folded: [], plans: null, resumable: [] };
+  return { rows: [], selected: null, mode: { kind: 'list' }, notice: null, preview: null, width, height, refreshedAt: null, busy: null, loadError: null, quit: false, showFinished: false, showHidden: false, queue: [], queuePaused: false, cohortFilter: null, folded: [], plans: null, resumable: [], away: null };
 }
 
 /** What the front has to do after a key press. */
@@ -147,6 +151,8 @@ export type BoardEffect =
   | { type: 'queue-pause'; paused: boolean }
   /** `R`: resume every task listed under "Do wznowienia" (agentctl resume). */
   | { type: 'resume' }
+  /** `w`: away on or off (agentctl away). */
+  | { type: 'away'; on: boolean }
   /** `o`, `p`, `f`: the result of a finished task, for the history (`agentctl mark`). */
   | { type: 'mark'; task: string; result: Result }
   /** `l`: load the history into the log view. */
@@ -298,6 +304,10 @@ function listKey(state: BoardState, input: string, key: KeyPress): KeyResult {
     const markable = picked !== undefined && selectedQueueView(state) === undefined && (picked.finished || picked.closed || picked.cancelled || picked.state === 'report-ready');
     if (markable) return stay(withNotice(state, 'info', `${picked.task}: marking it ${result}…`), [{ type: 'mark', task: picked.task, result }]);
     if (input !== 'p') return stay(withNotice(state, 'error', 'o / p / f mark the result of a finished task (one with a report, or without a window): select one first.'));
+  }
+  if (input === 'w') {
+    const on = !(state.away?.on ?? false);
+    return stay({ ...state, notice: null, mode: { kind: 'confirm', action: 'away', task: on ? 'on' : 'off' } });
   }
   if (input === 'R') {
     if (state.resumable.length === 0) return stay(withNotice(state, 'info', 'Nothing to resume: no active task without a window.'));
@@ -454,6 +464,9 @@ function confirmKey(state: BoardState, mode: Extract<BoardMode, { kind: 'confirm
   if (mode.action === 'queue-rm') {
     return yes ? { state: withNotice(toList(state), 'info', `${mode.task}: removing from the queue…`), effects: [{ type: 'queue-rm', task: mode.task }] } : cancel();
   }
+  if (mode.action === 'away') {
+    return yes ? { state: withNotice(toList(state), 'info', `Away ${mode.task}…`), effects: [{ type: 'away', on: mode.task === 'on' }] } : cancel();
+  }
   if (mode.action === 'resume') {
     return yes ? { state: withNotice(toList(state), 'info', 'Resuming…'), effects: [{ type: 'resume' }] } : cancel();
   }
@@ -520,13 +533,14 @@ export interface BoardSnapshot {
   /** Absent: no panel (older callers). */
   plans?: Record<AgentName, PlanState>;
   resumable?: string[];
+  away?: AwayView;
   preview: Preview | null;
   refreshedAt: string;
 }
 
 /** Keep the selection when the task is still there, otherwise take the first row. */
 export function applySnapshot(state: BoardState, snap: BoardSnapshot): BoardState {
-  const next: BoardState = { ...state, rows: snap.rows, queue: snap.queue ?? [], queuePaused: snap.queuePaused ?? false, plans: snap.plans ?? null, resumable: snap.resumable ?? [], refreshedAt: snap.refreshedAt, loadError: null };
+  const next: BoardState = { ...state, rows: snap.rows, queue: snap.queue ?? [], queuePaused: snap.queuePaused ?? false, plans: snap.plans ?? null, resumable: snap.resumable ?? [], away: snap.away ?? null, refreshedAt: snap.refreshedAt, loadError: null };
   const listed = navTasks(next);
   const selected = state.selected !== null && listed.includes(state.selected) ? state.selected : (listed[0] ?? null);
   const preview = snap.preview && snap.preview.task === selected ? snap.preview : selected === state.selected ? state.preview : null;
@@ -579,7 +593,7 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
   const queuePaused = queue.some((v) => v.condition.kind === 'paused');
   const resumable = (await findResumable(ctx, { rows: statusRows })).map((c) => c.task);
   const queued = queue.find((v) => v.entry.task === selected);
-  if (queued) return { rows, queue, queuePaused, plans, resumable, preview: { task: queued.entry.task, lines: queuePreview(queued) }, refreshedAt: clock(now) };
+  if (queued) return { rows, queue, queuePaused, plans, resumable, away: awayView(config), preview: { task: queued.entry.task, lines: queuePreview(queued) }, refreshedAt: clock(now) };
   // The selected task; else the first one the list shows (not a hidden, closed or finished one).
   const target = rows.find((r) => r.task === selected) ?? rows.find((r) => !r.hidden && !r.finished) ?? rows.find((r) => !r.hidden) ?? rows[0];
   let preview: Preview | null = null;
@@ -597,7 +611,7 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
     }
     preview = { task: target.task, lines, ...(target.collide.length > 0 ? { note: collideText(target.collide) } : {}) };
   }
-  return { rows, queue, queuePaused, plans, resumable, preview, refreshedAt: clock(now) };
+  return { rows, queue, queuePaused, plans, resumable, away: awayView(config), preview, refreshedAt: clock(now) };
 }
 
 /** The preview of a queued task: what it will run, what it waits for, how it ends if it failed, and the start of its prompt. */
@@ -677,6 +691,10 @@ export async function runBoardEffect(runner: Runner, config: GlobalConfig, effec
         if (plan.items.length === 0) return { level: 'info', text: plan.summary[0] ?? 'Nothing to resume.' };
         const results = await resumeTasks(ctx, plan, { self: env.self });
         return { level: 'info', text: `Resumed: ${results.map((r) => r.task).join(', ')}${plan.skipped.length > 0 ? `; skipped: ${plan.skipped.map((x) => x.task).join(', ')} (limit)` : ''}` };
+      }
+      case 'away': {
+        const { state } = await setAway(ctx, effect.on, 'board');
+        return { level: 'info', text: `away ${state.on ? 'on' : 'off'}${state.on && !config.notify.ntfy?.topic ? ' - but no phone is set up yet (agentctl ntfy-setup)' : ''}` };
       }
       case 'queue-pause':
         await setPaused(ctx, effect.paused);
@@ -941,7 +959,7 @@ export function visibleRows(state: BoardState, capacity: number): { rows: BoardR
 
 // ---- texts
 
-export const KEY_HINTS = 'm msg M move i int c/r pull x close X cancel k cohort h hide l log L G R u/d/p ?';
+export const KEY_HINTS = 'm M move i int c/r pull x close X cancel k cohort h hide l log L G R w u/d/p ?';
 
 export const HELP_LINES: string[] = [
   'agentctl board',
@@ -968,6 +986,7 @@ export const HELP_LINES: string[] = [
   '  L           the limits per provider and what uses them (agentctl limits)',
   '  G           preview of the clean-up (agentctl gc): what would be freed',
   '  R           resume the tasks under "Do wznowienia" (asks first)',
+  '  w           away on or off (asks first): notifications to the phone',
   '  h           hide the task (or show a hidden one); nothing is closed or removed',
   '  z           open or close the "Finished" section (tasks without a window)',
   '  a           list hidden tasks too (dimmed, marked ·)',
@@ -992,6 +1011,7 @@ export function promptText(state: BoardState): string | null {
   if (mode.kind !== 'confirm') return null;
   const row = state.rows.find((r) => r.task === mode.task);
   if (mode.action === 'queue-rm') return `Remove ${mode.task} from the queue? [y/N]`;
+  if (mode.action === 'away') return mode.task === 'on' ? `Away on? The notifications go to the phone as well.${state.away && !state.away.phone ? ' (No phone is set up yet: agentctl ntfy-setup.)' : ''} [y/N]` : 'Away off? The phone is quiet again (the Mac still gets everything). [y/N]';
   if (mode.action === 'resume') return `Resume ${mode.task}? New windows, the agents continue their conversations (no prompt is pasted). [y/N]`;
   if (mode.action === 'cancel') {
     const partner = row?.supersededBy ?? row?.continues;
@@ -1003,4 +1023,12 @@ export function promptText(state: BoardState): string | null {
   if (mode.action === 'close' && row?.finished) return `Close ${mode.task}? It has no window; it is marked closed and leaves the list${row.report === 'missing' ? ' – WARNING: no report was written' : ''}. [y/N]`;
   if (mode.action === 'close') return `Close ${mode.task}? Kills its tmux window${row && row.report === 'missing' ? ' – WARNING: no report yet' : ''}. [y/N]`;
   return `Also remove the git worktree of ${mode.task} (git worktree remove, the branch stays)? [y/N, Esc cancels]`;
+}
+
+/** The indicator in the header: "📱 away" while away is on, "📱 always" with notify.ntfy.always, dimmed "📱 off" when a phone is set up but quiet; null with no phone and no away. */
+export function awayLabel(away: AwayView | null): { text: string; dim: boolean } | null {
+  if (!away) return null;
+  if (away.on) return { text: '📱 away', dim: false };
+  if (away.always) return { text: '📱 always', dim: false };
+  return away.phone ? { text: '📱 off', dim: true } : null;
 }

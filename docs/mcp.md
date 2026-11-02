@@ -47,7 +47,7 @@ Off until you list them in `~/.agentctl/config.yaml`. The list is read again on 
 
 ```yaml
 mcp:
-  allow: [send, interrupt]     # any of: send, new, interrupt, close, move, queue, queue_rm, cancel, mark, set_limits, reserve, resume
+  allow: [send, interrupt]     # any of: send, new, interrupt, close, move, queue, queue_rm, cancel, mark, set_limits, reserve, resume, away
   allow_rm_worktree: false     # close may also remove the git worktree
 ```
 
@@ -61,6 +61,7 @@ mcp:
 | `queue_rm` | `task` | Takes a waiting or failed task out of the queue; it becomes cancelled (as `cancel` does for a queued task) and the tasks that wait for it become blocked. |
 | `cancel` | `task` or `cohort`, `reason?`, `remove_worktree?`, `confirm?` | Abandons a task, or all open tasks of a cohort: a task at work is interrupted and its window closed after `cancel.grace` seconds, a queued task leaves the queue. The task becomes cancelled; the worktree, the branch and a written report stay. A move is cancelled with its other half. The first call only describes what would be cancelled; `confirm: true` does it. `remove_worktree` needs `mcp.allow_rm_worktree`, as in `close`. The desktop notice names the reason. |
 | `mark` | `task`, `result` (`ok`, `partial` or `fail`), `note?` | Records the result the user judged for a task in the history (`log`, `stats`); the last mark wins. It changes nothing else, so it has no confirm step; a chat should record only what the user said. |
+| `away` | `on` | Turns away mode on or off: while it is on, agentctl sends its notifications to the user's phone (ntfy) as well; the Mac is not affected. It costs nothing, so it has no confirm step, and it is recorded in the audit log. `status` and `events_since` say whether away is on. |
 | `set_limits` | `claude?`, `codex?` (0 removes a limit), `confirm?` | Sets the most simultaneous agents per provider in `config.yaml` (comments stay, a `.bak` copy is kept). Takes effect at once, also in a running `watch`. The first call only describes the change; `confirm: true` writes it. |
 | `reserve` | `claude?`, `codex?`, `note?`, `release?`, `confirm?` | Holds places of a provider for agents you start by hand (they count against the limit), or gives them back with `release: true`. The first call only describes it; `confirm: true` does it. |
 | `resume` | `tasks?`, `all?`, `confirm?` | After a restart of the Mac or of tmux: gives the window back to active tasks that have a worktree and no window and starts the agent in resume mode (Claude `--resume <session>` or `--continue`, Codex `resume <session>` or `resume --last`), same model and effort, no prompt pasted again. Tasks with a ready report are left alone unless `all: true`. The first call only lists the tasks; `confirm: true` does it. |
