@@ -71,13 +71,14 @@ flowchart TB
         BOARD["board (Ink, src/board)"]
         MCP["MCP server (src/mcp, stdio)"]
     end
-    CORE["src/core: spec, plan, new, queue, cancel, cohort, collisions, status, pull, close, move, watch, events, notify"]
+    CORE["src/core: spec, plan, new, queue, cancel, cohort, collisions, status, pull, close, move, watch, events, notify, usage, history"]
     RUN["Runner: RealRunner / RecordingRunner"]
     subgraph world [Outside]
         TMUX[tmux session agentctl]
         GIT[git worktrees]
         AG[Claude Code and Codex]
         NOTE[terminal-notifier / osascript]
+        LOGS["agent logs: ~/.claude/projects/…/*.jsonl, ~/.codex/sessions/…/*.jsonl"]
     end
     subgraph disk [Files]
         CFG["config: ~/.agentctl/config.yaml, .agentctl.yaml"]
@@ -87,6 +88,7 @@ flowchart TB
         ARCH["archive: ~/.agentctl/archive/"]
         REP["cache: reports per task"]
         AUDIT["mcp-audit.log"]
+        HIST["history.jsonl, usage-cache.json, usage-alerts.json, usage/claude-plan.json"]
     end
     CLI --> CORE
     BOARD --> CORE
@@ -96,6 +98,10 @@ flowchart TB
     RUN --> GIT
     TMUX --> AG
     AG -. "hooks / notify: agentctl event" .-> CLI
+    AG -. "statusLine: agentctl usage-tap (plan limits)" .-> CLI
+    AG --> LOGS
+    CORE -- "usage readers (incremental)" --> LOGS
+    CORE <--> HIST
     CORE --> NOTE
     CORE <--> STATE
     CORE <--> QUEUE

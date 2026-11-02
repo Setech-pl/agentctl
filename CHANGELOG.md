@@ -8,6 +8,28 @@ Versions 0.1.0 to 0.7.0 correspond to pull requests #1 to #7; their dates are th
 
 Nothing yet.
 
+## [0.11.0] - 2026-11-02
+
+Pull request: token usage, plan limits, task history and stats. The date is the day it was prepared; set it to the merge date.
+
+### Added
+- **Usage.** `agentctl usage [--cohort X] [--since 7d] [--json] [--clip]`: per provider the 5 hour and weekly window (percentage used and reset time, or n/d) and the tokens today and in the period; the active tasks with their tokens; the cohorts; the models. Tokens are read from the agents' own logs, incrementally (a cache of file offsets in `<config dir>/usage-cache.json`): Claude Code transcripts (`~/.claude/projects/…`, subagents included) and Codex session logs (`~/.codex/sessions/…`). A session belongs to the task whose worktree it ran in, between the task's start and its end (also across `move`); the sessions named by the agent's events (`<state_dir>/<task>/sessions.json`) count too. The number shown is input + output + cache writes; cache reads are kept apart.
+- **Plan limits.** Codex: from the `rate_limits` of the newest session log. Claude Code: only a statusLine command gets them, so `new` sets the `statusLine` of a Claude window to the new command **`agentctl usage-tap`**, which stores the windows, remembers the session and runs your own statusLine afterwards with the same input (your status line does not change; a statusLine that is not a `command` is left alone). What is not known is **n/d** (no reading yet, no subscription, a window reset since the reading, no log): nothing is guessed.
+- `status`: a `TOKENS` column (`1.2M`) when a session log is found (n/d for a task without one), `tokens` in `--json`, a column in `--clip`.
+- Board: a usage panel under the title (bar, percentage and reset per provider; green, yellow, red by the thresholds), a `TOKENS` column, **`l`** the log, **`o`** / **`p`** / **`f`** mark the selected finished task. The tmux status line adds `C 62% · X 18%` (`usage.status_line`).
+- **Warnings.** `watch` notifies once when a plan window crosses `usage.warn` (80) and once when it crosses `usage.critical` (95), per provider and window period (`<config dir>/usage-alerts.json`). The summary of `new --clip` and `queue` shows the plan of the task's provider and the hint "claude blisko limitu (83%), codex ma zapas (15%): --agent codex" (nothing is switched; a pinned task stays). **`usage.queue_hold`** (off by default) keeps the queue from starting tasks of a provider above that percentage; `queue list`, `status` and the board say why.
+- **History.** `<config dir>/history.jsonl` gets a record when a report is ready, and when a task is closed, cancelled, moved or marked: task, cohort, project, requested and effective agent/model/effort, start, report, close or cancel with the reason, duration, tokens (null when unknown), commits and files, the first line of the verdict, the move, the result. **`agentctl mark <TASK> ok|partial|fail [--note]`**, **`agentctl log [--since] [--cohort] [--json] [--clip]`**, **`agentctl stats [--since 30d] [--cohort] [--json] [--clip]`** (per agent/model/effort: tasks, median time and tokens, shares of ok/partial/fail among the marked, unmarked, cancelled, moved after a limit).
+- MCP: read tools **`usage`**, **`log`**, **`stats`** (`cohort`, `since`), write tool **`mark`** behind `mcp.allow` (audited, no confirm step), a one-line plan summary in `status`.
+- Config: the `usage` section (`warn`, `critical`, `queue_hold`, `status_line`, `claude_tap`, `claude_dir`, `codex_dir`).
+- Documentation: the Usage and limits and History and stats sections of both READMEs and `docs/details.md` (formats that were checked, what is n/d), `docs/configuration.md`, `docs/mcp.md`; the architecture diagram shows the readers of the agents' logs and the usage tap.
+
+### Changed
+- The board key line is `m msg M move i int c/r pull x close X cancel k cohort h hide l log o/f u/d/p ?` (the arrows and Enter are in the help). The board list has a `TOKENS` column from 69 columns on.
+- Tests read the agents' logs from the scratch directory (`usage.claude_dir`, `usage.codex_dir`), never from the real `~/.claude` and `~/.codex`.
+
+### Limitations
+- Tokens are those of the sessions agentctl can bind to a task; sessions you start by hand and Claude's limits outside task windows are not seen. A Codex session resumed or forked from another counts the inherited history again. The formats are the agents' own and undocumented: a change in them shows as n/d.
+
 ## [0.10.0] - 2026-11-02
 
 Pull request: task cancellation and cohorts. The date is the day it was prepared; set it to the merge date.
@@ -178,7 +200,9 @@ Pull request #1: iteration 1, core and CLI.
 - Task states (`working`, `waiting`, `needs-trust`, `report-ready`, `dead`) and folder-trust detection.
 - Per-provider window limits, the `review_of` cross-review rule, an optional mirror of the reports.
 
-[Unreleased]: https://github.com/Setech-pl/agentctl/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/Setech-pl/agentctl/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/Setech-pl/agentctl/compare/v0.10.0...v0.11.0
+[0.10.0]: https://github.com/Setech-pl/agentctl/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/Setech-pl/agentctl/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/Setech-pl/agentctl/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Setech-pl/agentctl/compare/v0.6.0...v0.7.0

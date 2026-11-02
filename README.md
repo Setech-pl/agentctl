@@ -20,6 +20,7 @@ agentctl manages **work orders, not windows**. The unit is a spec: a Markdown fi
 - **Queue, dependencies, collisions.** More tasks than free windows? They wait and start by themselves; a review can wait for the author's report (`after`); two tasks changing the same files are flagged early.
 - **Cancelling and cohorts.** Work is abandoned in the middle of a turn? `agentctl cancel` interrupts, closes the window and keeps the worktree; tasks that waited for it are blocked, not forgotten. Tasks you name a cohort for are grouped on the board, filtered by `--cohort` and announced together when all their reports are in.
 - **Provider switch.** A table of Claude and Codex equivalents; `agentctl move` hands a task that hit its usage limit to the other provider in the same worktree.
+- **Usage and limits.** `agentctl usage` shows the tokens of the tasks and how close the Claude and Codex plans are to their limits (n/d when a provider does not say); `watch` warns at 80 % and 95 %, `new` hints at the provider with room, the queue can hold back a provider that is nearly out. `agentctl log` and `stats` keep a history of the tasks to calibrate the choice of model and effort.
 - **Chat integration.** A local MCP server lets a chat in the Claude app or Claude Code read status and reports, and, if you allow it, send prompts and start tasks.
 - **Small and inspectable.** TypeScript on Node with no build step, no daemon; `--dry-run` prints every command instead of running it.
 
@@ -90,13 +91,14 @@ flowchart TB
         BOARD["board (Ink, src/board)"]
         MCP["MCP server (src/mcp, stdio)"]
     end
-    CORE["src/core: spec, plan, new, queue, cancel, cohort, collisions, status, pull, close, move, watch, events, notify"]
+    CORE["src/core: spec, plan, new, queue, cancel, cohort, collisions, status, pull, close, move, watch, events, notify, usage, history"]
     RUN["Runner: RealRunner / RecordingRunner"]
     subgraph world [Outside]
         TMUX[tmux session agentctl]
         GIT[git worktrees]
         AG[Claude Code and Codex]
         NOTE[terminal-notifier / osascript]
+        LOGS["agent logs: ~/.claude/projects/…/*.jsonl, ~/.codex/sessions/…/*.jsonl"]
     end
     subgraph disk [Files]
         CFG["config: ~/.agentctl/config.yaml, .agentctl.yaml"]
@@ -106,6 +108,7 @@ flowchart TB
         ARCH["archive: ~/.agentctl/archive/"]
         REP["cache: reports per task"]
         AUDIT["mcp-audit.log"]
+        HIST["history.jsonl, usage-cache.json, usage-alerts.json, usage/claude-plan.json"]
     end
     CLI --> CORE
     BOARD --> CORE
@@ -115,6 +118,10 @@ flowchart TB
     RUN --> GIT
     TMUX --> AG
     AG -. "hooks / notify: agentctl event" .-> CLI
+    AG -. "statusLine: agentctl usage-tap (plan limits)" .-> CLI
+    AG --> LOGS
+    CORE -- "usage readers (incremental)" --> LOGS
+    CORE <--> HIST
     CORE --> NOTE
     CORE <--> STATE
     CORE <--> QUEUE
@@ -355,7 +362,7 @@ agentctl board  agentctl-test · 3 tasks · 09:41:03
                                                                        │ ● you chose: tea please
 
 Enter – open the agent · F12 – back to the list
-↑↓ ⏎ m msg M move i int c/r pull x close X cancel k cohort h hide z/a u/d/p ?
+m msg M move i int c/r pull x close X cancel k cohort h hide l log o/f u/d/p ?
 ```
 
 | Key | Action |
@@ -369,8 +376,12 @@ Enter – open the agent · F12 – back to the list
 | `X` | cancel the task: an optional reason, then y/N; a queued task leaves the queue, a move is cancelled with its other half |
 | `k` | pick a cohort to show (`wszystkie`, a cohort, `bez kohorty`) |
 | `g` / `G` | fold the cohort group of the selected task / open all groups |
+| `l` | the log of the tasks (history; `↑↓` scroll, `Esc` back) |
+| `o` / `p` / `f` | mark the selected finished task ok / partial / fail (`p` pauses the queue when no finished task is selected) |
 | `h` / `z` / `a` | hide a task / open the Finished section / list hidden, closed and cancelled tasks |
 | `?` / `q` | help / leave (the agents keep running) |
+
+Under the title line a panel shows the plan of each provider (a bar, the percentage and the reset; n/d when unknown), and a TOKENS column the tokens of each task.
 
 With cohorts the list is grouped under foldable headers with the counts of their states (`- sprint-1 (4) 2⚙ 1✓ 1⧗`), the tasks without a cohort last under `bez kohorty`. The tmux status bar keeps counting all tasks.
 
@@ -484,12 +495,53 @@ agentctl status --cohort sprint-1              # also --json, --clip; pull --rea
 
 Details: [docs/details.md](docs/details.md#cohorts).
 
+## Usage and limits
+
+How many tokens do the tasks use, and how close are the plans of Claude and Codex? Ask before you hand out more work.
+
+```sh
+agentctl usage                       # plans (5 hour and weekly window, with the reset), tokens today and in 7 days, active tasks, cohorts
+agentctl usage --since 30d --cohort sprint-1
+agentctl usage --json                # or --clip: a Markdown table to the clipboard
+agentctl status                      # a TOKENS column (1.2M) once a session log is found
+```
+
+```
+PROVIDER  5H LIMIT     WEEK LIMIT       TODAY  7D
+claude    62% ↻ 14:30  41% ↻ Sun 18:00  1.2M   8.4M
+codex     n/d          3% ↻ Sun 04:00   300k   2.1M
+```
+
+- **Tokens** are read from the agents' own logs: Claude Code's transcripts (`~/.claude/projects/…/<session>.jsonl`, subagents included) and Codex's session logs (`~/.codex/sessions/…`). A session belongs to the task whose worktree it ran in, from the task's start to its end (a task that continues it after `move`, its close or its cancel); the sessions named by the agent's own events count too. The number shown is input + output + cache writes; cache reads are kept apart (`--json`). The files are read once and then only what was appended, so `watch`, the board and the tmux line can ask every few seconds.
+- **Plan limits** are what the provider says, never a guess. Codex writes its 5 hour and weekly windows (percentage, reset) into every session log, so the newest log tells. Claude Code hands them only to a `statusLine` command; `agentctl new` therefore sets the `statusLine` of a Claude window to `agentctl usage-tap`, which keeps the numbers, remembers the session and runs your own `statusLine` after it (`usage.claude_tap: false` turns it off). Until a Claude window has answered once, or when you have no claude.ai subscription, Claude's limit is **n/d**; so is a window that was reset since the last reading.
+- **Board and tmux:** a panel with a bar, the percentage and the reset per provider (green, yellow from `usage.warn`, red from `usage.critical`), a TOKENS column, and `C 62% · X 18%` in the status line of the session (`usage.status_line`).
+- **Warnings:** `watch` sends one notification when a window crosses `usage.warn` (default 80) and one when it crosses `usage.critical` (95), per provider and per window period. `new` and `queue` show the plan of the provider of the task and, when it is close to its limit while the other one has room, the hint "claude blisko limitu (83%), codex ma zapas (15%): --agent codex". It only says so: nothing is switched, and a `pin: true` task stays.
+- **Queue hold:** with `usage.queue_hold: 90` the queue starts no task of a provider whose plan is above 90 %; `queue list` says why. Off by default.
+
+Details, the formats that were checked and what is n/d: [docs/details.md](docs/details.md#usage-and-limits).
+
+## History and stats
+
+Which model and effort work for what? Every report, close and cancel is written to `~/.agentctl/history.jsonl`.
+
+```sh
+agentctl mark NC-42 ok                 # ok | partial | fail, --note "…": how it turned out, as you judge it
+agentctl log --since 7d                # one line per task: agent/model/effort, time, tokens, progress, result, verdict
+agentctl stats --since 30d             # per agent/model/effort: tasks, median time and tokens, ok/partial/fail, cancelled, moved
+```
+
+- A record has the task, cohort, project, the order as written and as run, start, report, close or cancel (with the reason), duration, tokens (input, output, cache; `null` when no log was found), commits and files, the first line of the verdict, and the move. The same report is recorded once.
+- `stats` shares of ok, partial and fail are of the tasks you marked; tasks moved to the other provider after a limit are counted in the group that hit it.
+- Board: **`l`** shows the log, **`o`** / **`p`** / **`f`** mark the selected finished task ok / partial / fail (`p` is still the queue pause when no finished task is selected). MCP: `usage`, `log`, `stats` (read) and `mark` (write, behind `mcp.allow`, no confirm step).
+
+Details: [docs/details.md](docs/details.md#history-and-stats).
+
 ## Chat integration (MCP)
 
 `agentctl mcp` is a local MCP server on stdio. The Claude app, Claude Code and VS Code start it themselves; nothing listens on a port.
 
-- **Read tools** (always on): `status`, `peek`, `list_reports`, `get_report`, `pull_ready`, `task_spec`, `queue_list`, `cohort_list`, `cohort_show`, `overlap`, `version`.
-- **Write tools** (off until listed in `mcp.allow`): `send`, `new`, `queue`, `queue_rm`, `cancel`, `interrupt`, `close`, `move`. `new`, `queue`, `cancel` and `move` change nothing until called again with `confirm: true`. Every write is audited in `~/.agentctl/mcp-audit.log` and announced on the desktop.
+- **Read tools** (always on): `status`, `peek`, `list_reports`, `get_report`, `pull_ready`, `task_spec`, `queue_list`, `cohort_list`, `cohort_show`, `overlap`, `usage`, `log`, `stats`, `version`.
+- **Write tools** (off until listed in `mcp.allow`): `send`, `new`, `queue`, `queue_rm`, `cancel`, `interrupt`, `close`, `move`, `mark`. `new`, `queue`, `cancel` and `move` change nothing until called again with `confirm: true`; `mark` only records the result you named in the history, so it has no confirm step. Every write is audited in `~/.agentctl/mcp-audit.log` and announced on the desktop.
 - No tool merges, pushes, rebases, deletes a branch, runs a shell command or takes a path.
 
 ```sh
@@ -540,7 +592,7 @@ What agentctl never does:
 
 Ideas, not promises:
 
-1. **History, `gc` and `resume`:** a list of finished work, cleaning up old worktrees and state, resuming a task.
+1. **`gc` and `resume`:** cleaning up old worktrees and state, resuming a task.
 2. **Phone notifications.**
 3. **Remote MCP:** a server a chat on the web or phone can reach, with authentication.
 4. **Local models** as a third kind of agent.
