@@ -9,6 +9,7 @@ import { recordJournal, recordJournalOnce } from './journal.ts';
 import type { JournalKind } from './journal.ts';
 import type { Context } from './context.ts';
 import { Alerts } from './alert.ts';
+import { awayTick } from './away.ts';
 import type { Notifier } from './notify.ts';
 import { limitText, reportReadyText } from './event-command.ts';
 import type { SelfArgv } from './events.ts';
@@ -177,6 +178,9 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   const rows = allRows.filter((r) => !r.closed && !r.cancelled);
   await decorateWindows(ctx, memory, rows);
   const now = ctx.runner.now();
+  // away.auto_idle: the Mac idle for long enough counts as away; before the events of this tick, so they reach the phone.
+  const awayChange = await awayTick(ctx).catch(() => undefined);
+  if (awayChange) await ctx.runner.appendFile(watchLogPath(ctx), `${new Date(now).toISOString()}  away ${awayChange} (away.auto_idle)\n`);
   // Queued tasks whose provider has a free window start now, in the background: a start can wait for a human (folder trust) for minutes.
   const startLog = async (text: string): Promise<void> => {
     await ctx.runner.appendFile(watchLogPath(ctx), `${new Date(ctx.runner.now()).toISOString()}  ${text}\n`);

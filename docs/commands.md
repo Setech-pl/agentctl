@@ -48,6 +48,10 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`cancel`](#agentctl-cancel) | Abandon tasks: a task at work is interrupted, given cancel.grace seconds to stop, and its window is closed; a task in the queue is taken out of it. They become cancelled (not closed). The worktree and the branch stay unless --rm-worktree (worktree only, never the branch). Shows the list and asks y/N first. |
 | [`watch`](#agentctl-watch) | Foreground loop: notifies (macOS notification / notify-send) when a task has a report ready, asks something, hit its usage limit, waits too long, needs folder trust or died. |
 | [`board`](#agentctl-board) | Full-screen overview of the tasks: state, progress, a live preview of the selected window, and keys to switch to it, message, interrupt, pull and close. |
+| [`away`](#agentctl-away) | Away mode: the phone (ntfy) gets the notifications only while away is on; the notifications on the Mac do not depend on it. notify.ntfy.always: true sends always, away.auto_idle turns it on by itself when the Mac is idle. Without a subcommand: status. |
+| [`away status`](#agentctl-away-status) | Is away on, who set it, and does the phone get notifications now. |
+| [`away on`](#agentctl-away-on) | Away: the notifications go to the phone as well. Takes effect at once, also in a running watch. |
+| [`away off`](#agentctl-away-off) | Back at the Mac: the phone is quiet again (unless notify.ntfy.always is true). |
 | [`notify-test`](#agentctl-notify-test) | Send one test notification and say which channel carried it (terminal-notifier with a click action, or the osascript fallback). |
 | [`adopt`](#agentctl-adopt) | Restore the state file of a task whose TASK.md is lost (the report and the window are still there). Agent, model and effort default to "unknown". |
 | [`interrupt`](#agentctl-interrupt) | Interrupt the task's current turn (sends the agent's interrupt key, default Escape); the window stays open. |
@@ -912,6 +916,69 @@ Examples:
 ```sh
 agentctl board --tmux                  # in window "board" of the agentctl session
 agentctl board
+```
+
+## agentctl away
+
+Away mode: the phone (ntfy) gets the notifications only while away is on; the notifications on the Mac do not depend on it. notify.ntfy.always: true sends always, away.auto_idle turns it on by itself when the Mac is idle. Without a subcommand: status.
+
+Subcommands: `away status`, `away on`, `away off`. Without a subcommand: `status`.
+
+```
+agentctl away [options] [command]
+```
+
+Examples:
+
+```sh
+agentctl away                              # the same as away status
+```
+
+## agentctl away status
+
+Is away on, who set it, and does the phone get notifications now.
+
+```
+agentctl away status [options]
+```
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--json` | machine-readable output |  |
+
+Examples:
+
+```sh
+agentctl away status
+agentctl away status --json
+```
+
+## agentctl away on
+
+Away: the notifications go to the phone as well. Takes effect at once, also in a running watch.
+
+```
+agentctl away on [options]
+```
+
+Examples:
+
+```sh
+agentctl away on                           # leaving the Mac: the phone gets the notifications
+```
+
+## agentctl away off
+
+Back at the Mac: the phone is quiet again (unless notify.ntfy.always is true).
+
+```
+agentctl away off [options]
+```
+
+Examples:
+
+```sh
+agentctl away off                          # back: the phone is quiet
 ```
 
 ## agentctl notify-test

@@ -33,6 +33,7 @@ import { commitQueueAdd, describeQueue, isPaused, moveToFront, planQueueAdd, rea
 import { liveWindows } from './core/plan.ts';
 import { applyGc, planGc, renderGc } from './core/gc.ts';
 import { collectEvents, eventsMarkdown, renderEvents } from './core/chat-events.ts';
+import { awayReport, renderAway, setAway } from './core/away.ts';
 import { applySetLimits, collectLimits, parseAssignments, parseCounts, planSetLimits, releasePlaces, renderLimits, reservePlaces } from './core/limits.ts';
 import { collectOverlaps, renderOverlaps, touchWarnings } from './core/collisions.ts';
 import type { NewOptions } from './core/new.ts';
@@ -1012,6 +1013,37 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         if (note) throw new AgentctlError(note);
       }),
     );
+
+  const away = program
+    .command('away')
+    .description('Away mode: the phone (ntfy) gets the notifications only while away is on; the notifications on the Mac do not depend on it. notify.ntfy.always: true sends always, away.auto_idle turns it on by itself when the Mac is idle. Without a subcommand: status.');
+
+  away
+    .command('status', { isDefault: true })
+    .description('Is away on, who set it, and does the phone get notifications now.')
+    .option('--json', 'machine-readable output')
+    .action(
+      guarded(async (opts: { json?: boolean }) => {
+        const ctx = contextFor(false, { migrate: false });
+        const report = awayReport(ctx.config);
+        if (opts.json) return line(JSON.stringify(report, null, 2));
+        for (const l of renderAway(report)) line(l);
+      }),
+    );
+
+  for (const on of [true, false]) {
+    away
+      .command(on ? 'on' : 'off')
+      .description(on ? 'Away: the notifications go to the phone as well. Takes effect at once, also in a running watch.' : 'Back at the Mac: the phone is quiet again (unless notify.ntfy.always is true).')
+      .action(
+        guarded(async () => {
+          const ctx = contextFor(false, { migrate: false });
+          const { state, changed } = await setAway(ctx, on, 'cli');
+          line(changed ? `away ${state.on ? 'on' : 'off'}` : `away was already ${state.on ? 'on' : 'off'}`);
+          if (on && !ctx.config.notify.ntfy?.topic) line('Note: no phone is set up yet - run "agentctl ntfy-setup".');
+        }),
+      );
+  }
 
   program
     .command('notify-test')
