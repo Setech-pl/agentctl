@@ -268,6 +268,16 @@ Work is sometimes abandoned half way. `agentctl cancel <TASK…> [--reason "…"
 
 `cancelled` is a state of its own, not `closed`. A cancelled task leaves `status` and the board (`status --all` and the board key `a` list it under **Cancelled**), does not count against the [window limits](#window-limits-and-cross-review), is never taken by `pull --ready` and gives no "window vanished" alarm. A report the agent had written stays: `agentctl pull <TASK>` and the MCP `get_report` read it. A cancel from the terminal or the board announces nothing; one that the chat asks for (MCP `cancel`, `queue_rm`) shows the usual desktop notice.
 
+## Cohorts
+
+Tasks can be grouped under a name you chose: `cohort: sprint-1` in a spec, `--cohort sprint-1` on `new` and `queue` (the flag wins over the spec), or `agentctl cohort add sprint-1 NC-41 NC-42` for tasks that exist already. A task with no name belongs to **no cohort**: there is no default cohort and agentctl never makes one up.
+
+- **Names.** Letters, digits, `-`, `_` and `.`, at most 40 characters, starting with a letter, a digit or `_`. Comparison ignores case; the name is shown the way it was written the first time. The cohort is made by its first task; `<config dir>/cohorts/<name>.json` keeps when it was created and an optional description (`agentctl cohort note sprint-1 "…"`).
+- **Where a task keeps it.** `cohort:` in its `TASK.md` (and in its queue entry while it waits), next to `cancelled`/`cancel_reason`, so that a later usage or stats milestone can count tasks per cohort and cancellations.
+- **Commands.** `cohort list` (tasks per cohort by state: active, queued, reports, closed, cancelled; since when), `cohort show <name>` (the tasks as in `status`), `cohort add <name> <TASK…>`, `cohort remove <TASK…>`, `cohort note <name> "…"`.
+- **Filters.** `--cohort <name>` on `status` (also `--json` and `--clip`), `pull --ready`, `close`, `cancel` and `queue list`. Without it every task is meant, as before. `close --cohort X` and `cancel --cohort X` show the list and ask y/N.
+- **Notification.** When every task of a cohort that was not cancelled has a report (the queued ones too), the watcher says `kohorta <nazwa>: wszystkie raporty gotowe (N)`: once per cohort, and again only when a task has joined since.
+
 ## Navigation
 
 `agentctl board --tmux` and `agentctl watch --tmux` start their command **as the process of the window** (`tmux new-window … <command>`), not by typing it into a shell, and set `remain-on-exit failed` for the window in the same tmux call: when the command fails, the window stays with its error on the screen, and `~/.agentctl/board.log` / `watch.log` have the start (terminal size, `CI`, tty flags) and the end or the stack of the failure. Running `board --tmux` again starts a window whose process has ended in place. The board waits for a terminal size (a window without a client can report 0x0 for a moment) and draws even when a `CI` variable is in the environment (Ink would otherwise draw nothing).

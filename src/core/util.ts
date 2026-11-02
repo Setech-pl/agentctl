@@ -49,6 +49,24 @@ export function fillPlaceholders(template: string, vars: { task: string; cache: 
 
 export const TASK_ID = /^[A-Z][A-Z0-9_-]{0,39}$/;
 
+/**
+ * A cohort name: letters, digits, "-", "_" and "." (it is a file name in `<config dir>/cohorts/`). It starts with a letter, a digit or "_",
+ * so it is never a flag, a hidden file or a path.
+ */
+export const COHORT_NAME = /^[\p{L}\p{N}_][\p{L}\p{N}_.-]{0,39}$/u;
+
+/** Cohort names are compared without regard to case (and to Unicode composition). */
+export function cohortKey(name: string): string {
+  return name.normalize('NFC').toLowerCase();
+}
+
+/** The reason a cohort name is not valid, or undefined when it is. */
+export function cohortNameProblem(name: unknown): string | undefined {
+  if (typeof name !== 'string' || name.trim() === '') return 'a cohort name cannot be empty (leave it out for a task without a cohort)';
+  if (!COHORT_NAME.test(name.normalize('NFC'))) return `invalid cohort name ${JSON.stringify(name)}: letters, digits, "-", "_" and "." only, at most 40 characters, starting with a letter, a digit or "_"`;
+  return undefined;
+}
+
 /** tmux window name for a task: always the lowercase task ID. */
 export function windowName(task: string): string {
   return task.toLowerCase();

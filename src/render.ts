@@ -3,12 +3,14 @@ import { collideText } from './core/collisions.ts';
 import type { StatusRow } from './core/status.ts';
 
 /** Plain-text status table. The core returns rows (data); this is only presentation. */
-export function renderStatusTable(rows: StatusRow[], maxLast = 60): string[] {
-  // The COLLIDE column is there only while some task collides with another one.
+export function renderStatusTable(rows: StatusRow[], maxLast = 60, opts: { cohort?: boolean } = {}): string[] {
+  // The COLLIDE column is there only while some task collides with another one, COHORT only while some task has a cohort.
   const collide = rows.some((r) => r.collide.length > 0);
-  const header = ['TASK', 'AGENT/MODEL/EFFORT', 'STATE', 'WINDOW', 'STARTED', 'DURATION', 'PROGRESS', ...(collide ? ['COLLIDE'] : []), 'REPORT', 'LAST LINE'];
+  const cohort = opts.cohort !== false && rows.some((r) => r.cohort !== null);
+  const header = ['TASK', ...(cohort ? ['COHORT'] : []), 'AGENT/MODEL/EFFORT', 'STATE', 'WINDOW', 'STARTED', 'DURATION', 'PROGRESS', ...(collide ? ['COLLIDE'] : []), 'REPORT', 'LAST LINE'];
   const body = rows.map((r) => [
     r.archived ? `${r.task} (archived)` : r.cancelled ? `${r.task} (cancelled)` : r.closed ? `${r.task} (closed)` : r.hidden ? `${r.task} (hidden)` : r.task,
+    ...(cohort ? [r.cohort ?? '-'] : []),
     r.switchedBy ? `${r.agent}/${r.model}/${r.effort} (ordered ${r.requested})` : `${r.agent}/${r.model}/${r.effort}`,
     r.state,
     r.window,

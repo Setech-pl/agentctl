@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 import { Command, CommanderError, Option } from 'commander';
 import { cancelTasks, planCancel } from './core/cancel.ts';
+import { touchCohort } from './core/cohort.ts';
+import { cohortEntries, cohortRows, findCohort, listCohorts, openCohortTasks, renderCohortList, setCohortOf, setNote, summarizeCohorts } from './core/cohort.ts';
 import { closeTasks, planClose } from './core/close.ts';
 import { confirmAction, readClipboard, specFromClipboard, writeClipboard } from './core/clipboard.ts';
 import { runDoctor } from './core/doctor.ts';
@@ -47,7 +49,7 @@ import { RealRunner, RecordingRunner } from './core/runner.ts';
 import type { Runner } from './core/runner.ts';
 import { resolveSendSpec, resolveSpec, splitSpecs } from './core/spec.ts';
 import type { RawSpec } from './core/spec.ts';
-import { AgentctlError, errorMessage, resolvePath, shellQuote } from './core/util.ts';
+import { AgentctlError, cohortKey, cohortNameProblem, errorMessage, formatLocalTime, resolvePath, shellQuote } from './core/util.ts';
 
 export interface CliDeps {
   stdout: (text: string) => void;
@@ -245,6 +247,34 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     throw new AgentctlError(match.kind === 'many' ? `"${input}" fits more than one task: ${match.matches.map((m) => m.task).join(', ')}` : `no task "${input}"`, 'See "agentctl status".');
   };
 
+  /** `--cohort <name>` on new and queue: every spec of the file joins that cohort (the flag wins over `cohort:` in a spec). */
+  const applyCohortFlag = (raws: RawSpec[], cohort: string | undefined): void => {
+    if (cohort === undefined) return;
+    const problem = cohortNameProblem(cohort);
+    if (problem) throw new AgentctlError(`--cohort: ${problem}`);
+    for (const raw of raws) raw.header.cohort = cohort;
+  };
+
+  /**
+   * The tasks a command acts on: the ones typed, or all open tasks of `--cohort`, or (both) the typed ones, which must belong to the cohort.
+   * `queued`: tasks waiting in the queue count (cancel takes them out; close has no window to close for them).
+   */
+  const tasksOrCohort = async (ctx: Context, typed: string[], cohort: string | undefined, queued: boolean): Promise<string[]> => {
+    if (cohort === undefined) {
+      if (typed.length === 0) throw new AgentctlError('give at least one task, or --cohort <name>');
+      return typed;
+    }
+    const meta = findCohort(ctx.config, cohort);
+    const open = await openCohortTasks(ctx, meta.name, { queued });
+    if (typed.length === 0) {
+      if (open.length === 0) throw new AgentctlError(`cohort ${meta.name} has no open tasks`, 'See "agentctl cohort show ' + meta.name + '".');
+      return open;
+    }
+    const outside = typed.filter((t) => !open.some((o) => o.toLowerCase() === t.toLowerCase() || o.toLowerCase().startsWith(t.toLowerCase())));
+    if (outside.length > 0) throw new AgentctlError(`not an open task of cohort ${meta.name}: ${outside.join(', ')}`, `Its open tasks: ${open.join(', ') || 'none'}.`);
+    return typed;
+  };
+
   /** Window "watch" exists in the agentctl session: something is there to start the queued tasks. */
   const watchRunning = async (ctx: Context): Promise<boolean> => (await ctx.tmux.hasSession()) && (await ctx.tmux.listWindows()).includes(WATCH_WINDOW);
 
@@ -283,11 +313,13 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('--no-wait-trust', 'stop at the folder-trust dialog instead of waiting for you to confirm it (the old behaviour)')
     .option('--clip', 'read the spec from the clipboard; shows a summary and asks y/N first')
     .option('-y, --yes', 'with --clip: do not ask; also skips the question after a "touches" warning')
+    .option('--cohort <name>', 'put every task of the file in this cohort (overrides "cohort:" in a spec); without it a task has a cohort only if its spec names one')
     .action(
-      guarded(async (file: string | undefined, opts: { clip?: boolean; yes?: boolean; dryRun?: boolean; reuse?: boolean; agent?: 'claude' | 'codex' | false; switch?: boolean; waitTrust?: boolean }) => {
+      guarded(async (file: string | undefined, opts: { clip?: boolean; yes?: boolean; dryRun?: boolean; reuse?: boolean; agent?: 'claude' | 'codex' | false; switch?: boolean; waitTrust?: boolean; cohort?: string }) => {
         const ctx = contextFor(Boolean(opts.dryRun));
         const source = opts.clip ? 'clipboard' : (file ?? 'stdin');
         const raws = splitSpecs(await readSpecSource(file, opts.clip), source);
+        applyCohortFlag(raws, opts.cohort);
         const specs = raws.map((raw) => resolveSpec(raw, { config: ctx.config }));
         if (opts.clip && !(await confirmAction(ctx, summarizeSpecs(specs), 'Start?', Boolean(opts.yes) || Boolean(opts.dryRun)))) return;
         // `touches`: an active task already changes files the new one says it will touch. Printed always; asked y/N with a terminal.
@@ -327,10 +359,12 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('--clip', 'read the spec from the clipboard')
     .addOption(new Option('--agent <agent>', 'run every spec on this provider, translated through the equivalents table (the queue never switches provider by itself)').choices(['claude', 'codex']))
     .option('-y, --yes', 'do not ask')
+    .option('--cohort <name>', 'put every task of the file in this cohort (overrides "cohort:" in a spec); without it a task has a cohort only if its spec names one')
     .action(
-      guarded(async (file: string | undefined, opts: { clip?: boolean; yes?: boolean; agent?: 'claude' | 'codex' }) => {
+      guarded(async (file: string | undefined, opts: { clip?: boolean; yes?: boolean; agent?: 'claude' | 'codex'; cohort?: string }) => {
         const ctx = contextFor(false);
         const raws = splitSpecs(await readSpecSource(file, opts.clip), opts.clip ? 'clipboard' : (file ?? 'stdin'));
+        applyCohortFlag(raws, opts.cohort);
         const plan = await planQueueAdd(ctx, raws, { ...(opts.agent ? { agent: opts.agent } : {}) });
         if (!(await confirmAction(ctx, plan.summary, plan.warnings.length > 0 ? 'Add to the queue anyway?' : 'Add to the queue?', Boolean(opts.yes)))) return;
         const added = await commitQueueAdd(ctx, plan.items, { ...(opts.agent ? { agent: opts.agent } : {}) });
@@ -344,11 +378,16 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .command('list')
     .description('The queue: position, task, agent/model/effort, priority, start condition and how long it waits.')
     .option('--json', 'machine-readable output')
+    .option('--cohort <name>', 'only the tasks of this cohort (the positions are those of the whole queue)')
     .action(
-      guarded(async (opts: { json?: boolean }) => {
+      guarded(async (opts: { json?: boolean; cohort?: string }, command: Command) => {
         const ctx = contextFor(false, { migrate: false });
-        const views = describeQueue(ctx.config, readQueue(ctx.config), await liveWindows(ctx), await collectStatus(ctx, { progress: false, archived: true }));
-        if (opts.json) return line(JSON.stringify(views.map((v) => ({ position: v.position, task: v.entry.task, status: v.entry.status, agent: v.entry.agent, model: v.entry.model, effort: v.entry.effort, priority: v.entry.priority, condition: v.condition.text, blocked: v.condition.kind === 'blocked', after: v.entry.after, queued: v.entry.queuedAt, error: v.entry.error ?? null })), null, 2));
+        // `queue` has a --cohort of its own (for the file it adds): commander hands that one the flag, wherever it stands in the line.
+        const wanted = opts.cohort ?? (command.optsWithGlobals() as { cohort?: string }).cohort;
+        const cohort = wanted === undefined ? undefined : findCohort(ctx.config, wanted).name;
+        const all = describeQueue(ctx.config, readQueue(ctx.config), await liveWindows(ctx), await collectStatus(ctx, { progress: false, archived: true }));
+        const views = cohort === undefined ? all : all.filter((v) => v.entry.cohort !== undefined && cohortKey(v.entry.cohort) === cohortKey(cohort));
+        if (opts.json) return line(JSON.stringify(views.map((v) => ({ position: v.position, task: v.entry.task, cohort: v.entry.cohort ?? null, status: v.entry.status, agent: v.entry.agent, model: v.entry.model, effort: v.entry.effort, priority: v.entry.priority, condition: v.condition.text, blocked: v.condition.kind === 'blocked', after: v.entry.after, queued: v.entry.queuedAt, error: v.entry.error ?? null })), null, 2));
         for (const l of renderQueueList(views, ctx.runner.now())) line(l);
         for (const v of views.filter((x) => x.condition.kind === 'blocked')) line(`hint: ${v.entry.task} is blocked: agentctl unblock ${v.entry.task} [--drop-after <task>], or agentctl cancel ${v.entry.task}`);
         if (isPaused(ctx.config)) line('The queue is paused: "agentctl queue resume" lets it run again.');
@@ -399,6 +438,77 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
       .action(guarded(async () => line((await setPaused(contextFor(false, { migrate: false }), pause)) ? (pause ? 'Queue paused.' : 'Queue resumed.') : `Queue was already ${pause ? 'paused' : 'running'}.`)));
   }
 
+  const cohort = program
+    .command('cohort')
+    .description('Cohorts: tasks grouped under a name you chose ("cohort: <name>" in a spec, or --cohort). A task without a name belongs to no cohort. Without a subcommand: list.');
+
+  cohort
+    .command('list', { isDefault: true })
+    .description('The cohorts: how many tasks each has by state (active, queued, reports, closed, cancelled) and since when.')
+    .option('--json', 'machine-readable output')
+    .action(
+      guarded(async (opts: { json?: boolean }) => {
+        const list = await summarizeCohorts(contextFor(false, { migrate: false }));
+        if (opts.json) return line(JSON.stringify(list, null, 2));
+        for (const l of renderCohortList(list)) line(l);
+      }),
+    );
+
+  cohort
+    .command('show')
+    .description('The tasks of one cohort as in "status" (closed and cancelled ones too) and its queued tasks.')
+    .argument('<name>', 'cohort name; case does not matter')
+    .option('--json', 'machine-readable output')
+    .action(
+      guarded(async (name: string, opts: { json?: boolean }) => {
+        const ctx = contextFor(false);
+        const meta = findCohort(ctx.config, name);
+        const { rows } = await reportStatus(ctx, { archived: true });
+        const mine = cohortRows(rows, meta.name);
+        if (opts.json) return line(JSON.stringify({ cohort: meta.name, created: meta.created || null, note: meta.note ?? null, tasks: mine, queued: cohortEntries(readQueue(ctx.config), meta.name).map((e) => e.task) }, null, 2));
+        line(`Cohort ${meta.name}${meta.created ? ` (since ${formatLocalTime(meta.created)})` : ''}${meta.note ? `: ${meta.note}` : ''}`);
+        if (mine.length > 0) for (const l of renderStatusTable(mine, 60, { cohort: false })) line(l);
+        const queued = await queueStatusLines(ctx, meta.name);
+        for (const l of queued) line(l);
+        if (mine.length === 0 && queued.length === 0) line('No tasks in it.');
+      }),
+    );
+
+  cohort
+    .command('add')
+    .description('Put existing tasks (running, finished or queued) into a cohort; it is created if it is new. A task that was in another cohort moves.')
+    .argument('<name>', 'cohort name')
+    .argument('<tasks...>', 'task IDs; a unique prefix is enough')
+    .action(
+      guarded(async (name: string, tasks: string[]) => {
+        const ctx = contextFor(false);
+        const meta = await touchCohort(ctx, name);
+        for (const c of await setCohortOf(ctx, tasks, meta)) line(`${c.task}: ${c.was === null ? 'joined' : cohortKey(c.was) === cohortKey(meta.name) ? 'already in' : `moved from ${c.was} to`} cohort ${meta.name}`);
+      }),
+    );
+
+  cohort
+    .command('remove')
+    .description('Take tasks out of their cohort (they then belong to none).')
+    .argument('<tasks...>', 'task IDs; a unique prefix is enough')
+    .action(
+      guarded(async (tasks: string[]) => {
+        for (const c of await setCohortOf(contextFor(false), tasks, undefined)) line(c.was === null ? `${c.task}: was in no cohort` : `${c.task}: left cohort ${c.was}`);
+      }),
+    );
+
+  cohort
+    .command('note')
+    .description('Write the description of a cohort (an empty text removes it).')
+    .argument('<name>', 'cohort name')
+    .argument('<text...>', 'the description')
+    .action(
+      guarded(async (name: string, text: string[]) => {
+        const meta = await setNote(contextFor(false), name, text.join(' '));
+        line(meta.note ? `Cohort ${meta.name}: ${meta.note}` : `Cohort ${meta.name}: note removed`);
+      }),
+    );
+
   program
     .command('overlap')
     .description('Which active tasks of one repository changed the same files (git diff of each worktree against its base, plus uncommitted files). Without a task: every pair.')
@@ -437,13 +547,16 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('--json', 'machine-readable output')
     .option('--clip', 'copy a compact Markdown table to the clipboard (to paste at the start of a chat session)')
     .option('--tmux-line', 'one short line for the tmux status bar, like "2⚙ 1✓ 1? 3⧗" (tasks per state, then the tasks in the queue)')
-    .option('--all', 'also the hidden and the closed tasks (see "agentctl hide", "agentctl close"), archived ones included')
+    .option('--all', 'also the hidden, the closed and the cancelled tasks (see "agentctl hide", "agentctl close", "agentctl cancel"), archived ones included')
+    .option('--cohort <name>', 'only the tasks of this cohort (also with --json and --clip)')
     .action(
-      guarded(async (opts: { json?: boolean; clip?: boolean; tmuxLine?: boolean; all?: boolean }) => {
+      guarded(async (opts: { json?: boolean; clip?: boolean; tmuxLine?: boolean; all?: boolean; cohort?: string }) => {
         if ([opts.json, opts.clip, opts.tmuxLine].filter(Boolean).length > 1) throw new AgentctlError('--json, --clip and --tmux-line exclude each other');
         if (opts.tmuxLine) return line(await statusTmuxLine(contextFor(false, { migrate: false })));
         const ctx = contextFor(false);
-        const { rows: allRows } = await reportStatus(ctx, { archived: Boolean(opts.all) });
+        const cohort = opts.cohort === undefined ? undefined : findCohort(ctx.config, opts.cohort).name;
+        const { rows: everyRow } = await reportStatus(ctx, { archived: Boolean(opts.all) });
+        const allRows = cohort === undefined ? everyRow : cohortRows(everyRow, cohort);
         const rows = shownRows(allRows, Boolean(opts.all));
         const hiddenCount = allRows.length - rows.length;
         if (opts.clip) {
@@ -455,13 +568,13 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         }
         if (opts.json) return line(JSON.stringify(rows, null, 2));
         if (rows.length === 0) {
-          line(hiddenCount > 0 ? `No visible tasks; ${hiddenCount} hidden (see "agentctl status --all").` : `No tasks yet in ${ctx.config.stateDir}. Start one with "agentctl new <spec>".`);
-          for (const l of await queueStatusLines(ctx)) line(l);
+          line(hiddenCount > 0 ? `No visible tasks${cohort ? ` in cohort ${cohort}` : ''}; ${hiddenCount} hidden (see "agentctl status --all").` : cohort ? `No tasks in cohort ${cohort}.` : `No tasks yet in ${ctx.config.stateDir}. Start one with "agentctl new <spec>".`);
+          for (const l of await queueStatusLines(ctx, cohort)) line(l);
           return;
         }
         for (const l of renderStatusTable(rows)) line(l);
         for (const l of renderStatusHints(rows)) line(`hint: ${l}`);
-        for (const l of await queueStatusLines(ctx)) line(l);
+        for (const l of await queueStatusLines(ctx, cohort)) line(l);
         if (hiddenCount > 0) line(`${hiddenCount} hidden task${hiddenCount === 1 ? '' : 's'} not shown: agentctl status --all`);
       }),
     );
@@ -507,12 +620,15 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .argument('[task]', 'task ID')
     .option('--ready', 'join every report in state report-ready that was not pulled yet, copy it and mark the tasks as pulled')
     .option('--all', 'with --ready: also the reports that were pulled before')
+    .option('--cohort <name>', 'with --ready: only the reports of this cohort')
     .action(
-      guarded(async (task: string | undefined, opts: { ready?: boolean; all?: boolean }) => {
+      guarded(async (task: string | undefined, opts: { ready?: boolean; all?: boolean; cohort?: string }) => {
         if (opts.all && !opts.ready) throw new AgentctlError('--all only works together with --ready');
+        if (opts.cohort !== undefined && !opts.ready) throw new AgentctlError('--cohort only works together with --ready');
         if (opts.ready) {
           if (task) throw new AgentctlError('--ready takes no task ID', 'Use "agentctl pull --ready" or "agentctl pull <task>".');
-          await pullReady(contextFor(false), { all: Boolean(opts.all) });
+          const ctx = contextFor(false);
+          await pullReady(ctx, { all: Boolean(opts.all), ...(opts.cohort === undefined ? {} : { cohort: findCohort(ctx.config, opts.cohort).name }) });
           return;
         }
         if (!task) throw new AgentctlError('give a task ID, or --ready', 'Example: "agentctl pull NC-42" or "agentctl pull --ready".');
@@ -523,14 +639,16 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
   program
     .command('close')
     .description('Kill the task windows; --rm-worktree also removes their git worktrees (branches are kept). Shows the list and asks y/N first.')
-    .argument('<tasks...>', 'task IDs')
+    .argument('[tasks...]', 'task IDs (or --cohort)')
+    .option('--cohort <name>', 'close the open tasks of this cohort (with task IDs: only those, which must belong to it)')
     .option('--rm-worktree', 'run "git worktree remove" for the task worktrees (never --force)')
     .option('-y, --yes', 'do not ask')
     .option('--dry-run', 'print the commands that would run, execute nothing')
     .action(
-      guarded(async (tasks: string[], opts: { rmWorktree?: boolean; yes?: boolean; dryRun?: boolean }) => {
+      guarded(async (typed: string[], opts: { rmWorktree?: boolean; yes?: boolean; dryRun?: boolean; cohort?: string }) => {
         const ctx = contextFor(Boolean(opts.dryRun));
         const closeOpts = { rmWorktree: Boolean(opts.rmWorktree) };
+        const tasks = await tasksOrCohort(ctx, typed, opts.cohort, false);
         const plan = await planClose(ctx, tasks, closeOpts);
         const summary = [`Close ${plan.length} task${plan.length === 1 ? '' : 's'}${closeOpts.rmWorktree ? ' and remove their worktrees (branches stay)' : ''}:`, ...plan.map((i) => `  ${i.line}`)];
         if (!(await confirmAction(ctx, summary, 'Go ahead?', Boolean(opts.yes) || Boolean(opts.dryRun)))) return;
@@ -541,16 +659,17 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
   program
     .command('cancel')
     .description('Abandon tasks: a task at work is interrupted, given cancel.grace seconds to stop, and its window is closed; a task in the queue is taken out of it. They become cancelled (not closed). The worktree and the branch stay unless --rm-worktree (worktree only, never the branch). Shows the list and asks y/N first.')
-    .argument('<tasks...>', 'task IDs; a unique prefix is enough. The other half of a "move" (the old task or its successor) is cancelled with it')
+    .argument('[tasks...]', 'task IDs (or --cohort); a unique prefix is enough. The other half of a "move" (the old task or its successor) is cancelled with it')
+    .option('--cohort <name>', 'cancel the open tasks of this cohort, the queued ones too (with task IDs: only those, which must belong to it)')
     .option('--reason <text>', 'why (optional); kept in TASK.md')
     .option('--rm-worktree', 'also run "git worktree remove" for the task worktrees (never --force; the branch stays)')
     .option('-y, --yes', 'do not ask')
     .option('--dry-run', 'print the commands that would run, execute nothing')
     .action(
-      guarded(async (tasks: string[], opts: { reason?: string; rmWorktree?: boolean; yes?: boolean; dryRun?: boolean }) => {
+      guarded(async (typed: string[], opts: { reason?: string; rmWorktree?: boolean; yes?: boolean; dryRun?: boolean; cohort?: string }) => {
         const ctx = contextFor(Boolean(opts.dryRun));
         const cancelOpts = { reason: opts.reason, rmWorktree: Boolean(opts.rmWorktree), source: 'cli' as const };
-        const plan = await planCancel(ctx, tasks, cancelOpts);
+        const plan = await planCancel(ctx, await tasksOrCohort(ctx, typed, opts.cohort, true), cancelOpts);
         if (!(await confirmAction(ctx, plan.summary, 'Cancel?', Boolean(opts.yes) || Boolean(opts.dryRun)))) return;
         await cancelTasks(ctx, plan, cancelOpts);
       }),
