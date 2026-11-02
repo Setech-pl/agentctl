@@ -411,7 +411,7 @@ async function runListReports(deps: McpDeps, args: { all?: boolean | undefined }
     } catch {
       // gone between the listing and now
     }
-    return { task: r.task, state: r.state, pulled: r.pulled !== null, bytes, modified, modifiedLocal: formatLocalTime(modified) };
+    return { task: r.task, state: r.state, pulled: r.pulled !== null, bytes, modified, modifiedLocal: formatLocalTime(modified), source: r.reportSource ?? null };
   });
   return ok(`${list.length} report${list.length === 1 ? '' : 's'}; get_report reads one, pull_ready takes the new ones.\n\n${JSON.stringify(list, null, 2)}`);
 }
@@ -486,6 +486,7 @@ async function runTaskSpec(deps: McpDeps, args: { task: string }): Promise<ToolR
     requested: record.requested,
     repos: record.repos.map((r) => ({ path: r.path, worktree: r.worktree, branch: r.branch ?? null, base: r.base ?? null })),
     report: record.report,
+    report_source: record.reportSource ?? null,
     started: record.started,
     startedLocal: formatLocalTime(record.started),
     pulled: record.pulled ?? null,

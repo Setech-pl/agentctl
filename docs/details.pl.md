@@ -130,6 +130,18 @@ Commity to `git rev-list --count <base>..HEAD`. Pliki to suma `git diff --name-o
 więc zmiany, które baza dostała w międzyczasie, się nie liczą) i `git status --porcelain` (pliki niezacommitowane i nieśledzone, dla całkowicie nieśledzonego katalogu zwinięte do katalogu),
 każdy plik liczony raz. Bez bazy commity to `?` (`?c 3f`); worktree, którego nie ma, to `-`. `--json` niesie liczby per worktree.
 
+## Wykrywanie raportu
+
+Spec mówi, gdzie ma trafić raport (`report:`, domyślnie `<cache>/<task>/<TASK>.md`), ale agenci zapisują go, gdzie chcą: `docs/reports/<…>.md` w worktree, `~/Projects/cache/<inna nazwa>/…`. Zadanie wisi wtedy jako `waiting`, a `pull --ready` go nie widzi. agentctl szuka raportu sam.
+
+- **Kiedy.** Po każdym końcu tury (hook Claude `Stop` z `last_assistant_message`, Codex `notify` z `last-assistant-message`) i przy każdym ticku `watch` dla zadania w stanie `waiting`. Dopóki plik kanoniczny jest na miejscu (zapisany po starcie zadania), nic nie jest szukane, poza odświeżeniem kopii (niżej).
+- **Gdzie.** Najpierw lista `report:` (niżej), potem ścieżki `.md` w ostatniej wiadomości agenta i w ostatnich 400 liniach jego okna (`capture-pane -J`, więc zawinięte linie są sklejone): absolutne, `~/…`, względne do worktree, w cudzysłowie lub apostrofach odwrotnych, po `pbcopy < `. Adresy URL są pomijane.
+- **Co się liczy.** Istniejący zwykły plik (nie dowiązanie symboliczne, nie stan agentctl) zmodyfikowany po starcie zadania. Kolejność: lista `report:` (najnowszy pierwszy), potem ścieżki z ID zadania albo `report`/`raport` (wymieniona ostatnio pierwsza), potem każda inna, wymieniona ostatnio pierwsza.
+- **Lista.** `report:` w specu, `.agentctl.yaml` albo `config.yaml` może być listą. Pierwszy wpis to ścieżka kanoniczna; pozostałe to miejsca do przeszukania, ścieżki lub globy (`*`, `?`, `**`), absolutne, `~/…` albo względne do worktree, z `{task}`/`{TASK}`: `report: [~/Projects/cache/{task}/{TASK}.md, docs/reports/*{task}*.md, docs/reports/*{TASK}*.md]`.
+- **Co się dzieje.** Plik jest kopiowany do ścieżki kanonicznej. Istniejący plik kanoniczny nigdy nie jest nadpisywany, poza kopią, którą agentctl zrobił wcześniej i której nikt nie zmienił: jest odświeżana, gdy źródło jest nowsze. `TASK.md` dostaje `report_source`, `report_copied` i `report_source_mtime`; dziennik dostaje „raport wykryty w <ścieżka>” (`events` pokazuje to jako RAPORT WYKRYTY); stan zmienia się na `report-ready`, a powiadomienie niesie werdykt jak przy każdym raporcie.
+- **Ręcznie.** `agentctl report <TASK>` pokazuje ścieżkę kanoniczną, źródło i to, co wyszukiwanie znajduje teraz (niczego nie kopiuje). `agentctl report <TASK> --from <ścieżka>` czyni ten plik źródłem i kopiuje go (`--force` także na raport, który napisał agent; `--dry-run` niczego nie kopiuje). `pull <TASK>` uruchamia wyszukiwanie, gdy raportu brak.
+- **Gdzie to widać.** `status` (kolumna raportu: `yes (z <ścieżka>)`; `--json`: `reportSource`), board (notatka pod podglądem: `report from <ścieżka>`), MCP `list_reports` (`source`) i `task_spec` (`report_source`).
+
 ## Zdarzenia
 
 Czytanie ekranu co 15 sekund to zgadywanie, co robi agent. Dlatego `agentctl new` prosi też każdego agenta, żeby zgłaszał się sam, a `agentctl event` (polecenie, którego nigdy nie wpisujesz) przyjmuje wiadomość:

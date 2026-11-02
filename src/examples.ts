@@ -56,6 +56,7 @@ export const COMMAND_EXAMPLES: Record<string, string[]> = {
   archive: ['agentctl archive --older-than 7d --dry-run'],
   hide: ['agentctl hide NC-41 NC-42'],
   unhide: ['agentctl unhide NC-42'],
+  report: ['agentctl report NC-42                  # where the report is; what the search finds', 'agentctl report NC-42 --from docs/reports/nc-42-final.md   # use that file (copied to the canonical path)'],
   pull: ['agentctl pull NC-42                    # one report to the clipboard', 'agentctl pull --ready                    # all new reports in one text', 'agentctl pull --ready --all              # also the ones pulled before', 'agentctl pull --ready --cohort sprint-1  # only the reports of one cohort'],
   close: ['agentctl close NC-41 NC-42 --rm-worktree', 'agentctl close NC-42 --dry-run', 'agentctl close --cohort sprint-1        # the open tasks of a cohort: list, y/N'],
   cancel: [

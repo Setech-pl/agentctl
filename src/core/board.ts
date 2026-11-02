@@ -1,3 +1,4 @@
+import { shortPath } from './report-detect.ts';
 import path from 'node:path';
 import { attachCollisions, collideText } from './collisions.ts';
 import { cancelTasks, planCancel } from './cancel.ts';
@@ -609,7 +610,8 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
         lines = [`(cannot read the window: ${errorMessage(e)})`];
       }
     }
-    preview = { task: target.task, lines, ...(target.collide.length > 0 ? { note: collideText(target.collide) } : {}) };
+    const notes = [...(target.collide.length > 0 ? [collideText(target.collide)] : []), ...(target.reportSource ? [`report from ${shortPath(target.reportSource)}`] : [])];
+    preview = { task: target.task, lines, ...(notes.length > 0 ? { note: notes.join(' · ') } : {}) };
   }
   return { rows, queue, queuePaused, plans, resumable, away: awayView(config), preview, refreshedAt: clock(now) };
 }

@@ -9,6 +9,7 @@ import {
   parseEnv,
   parseLinks,
 } from './config.ts';
+import { parseReportPaths } from './config.ts';
 import type { AgentName, Effort, GlobalConfig, Layer, Link } from './config.ts';
 import type { Order } from './equivalents.ts';
 import { AgentctlError, Problems, TASK_ID, cohortNameProblem, errorMessage, fillPlaceholders, isObject, resolvePath, windowName } from './util.ts';
@@ -42,6 +43,8 @@ export interface ResolvedSpec {
   env: Record<string, string>;
   reviewOf?: string;
   report: string;
+  /** Other places the report may be (paths and globs, placeholders filled; a relative one is relative to the worktree). */
+  reportAlt?: string[];
   prompt: string;
   /** `pin: true`: never switch this task to the other provider. */
   pin: boolean;
@@ -221,11 +224,8 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     if (typeof h.review_of === 'string' && TASK_ID.test(h.review_of)) reviewOf = h.review_of;
     else p.add(`review_of must be the task ID of the work under review (e.g. NC-12), got ${JSON.stringify(h.review_of)}`);
   }
-  let specReport: string | undefined;
-  if (h.report !== undefined && h.report !== null) {
-    if (typeof h.report === 'string' && h.report.trim() !== '') specReport = h.report;
-    else p.add('report must be a path');
-  }
+  let specReport: string[] = [];
+  if (h.report !== undefined && h.report !== null) specReport = parseReportPaths(h.report, 'report', p);
   let pin = false;
   if (h.pin !== undefined && h.pin !== null) {
     if (typeof h.pin === 'boolean') pin = h.pin;
@@ -332,7 +332,12 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     }
   }
 
-  const reportTemplate = specReport ?? project?.report ?? config.report ?? '{cache}/{task}/{TASK}.md';
+  const reportLayer = specReport.length > 0 ? { first: specReport[0], alt: specReport.slice(1) } : project?.report ? { first: project.report, alt: project.reportAlt ?? [] } : config.report ? { first: config.report, alt: config.reportAlt ?? [] } : undefined;
+  const reportTemplate = reportLayer?.first ?? '{cache}/{task}/{TASK}.md';
+  const reportAlt = (reportLayer?.alt ?? []).map((a) => {
+    const filled = fill(a);
+    return filled === '~' || filled.startsWith('~/') ? resolvePath(filled) : filled;
+  });
   const spec: ResolvedSpec = {
     index: raw.index,
     task: taskId,
@@ -354,5 +359,6 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   };
   if (reviewOf) spec.reviewOf = reviewOf;
   if (cohort) spec.cohort = cohort;
+  if (reportAlt.length > 0) spec.reportAlt = reportAlt;
   return spec;
 }

@@ -171,8 +171,8 @@ export class Tmux {
   }
 
   /** Visible screen (or the last `lines` lines of scrollback + screen) of the window. */
-  async capture(window: string, lines?: number, infos?: WindowInfo[], hintId?: string): Promise<ExecResult> {
-    const args = ['capture-pane', '-p', '-t', await this.targetFor(window, infos, hintId)];
+  async capture(window: string, lines?: number, infos?: WindowInfo[], hintId?: string, join?: boolean): Promise<ExecResult> {
+    const args = ['capture-pane', '-p', ...(join ? ['-J'] : []), '-t', await this.targetFor(window, infos, hintId)];
     if (lines !== undefined) args.push('-S', `-${lines}`);
     return this.runner.exec('tmux', args, { readOnly: true });
   }

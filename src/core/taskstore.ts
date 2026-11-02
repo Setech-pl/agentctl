@@ -32,6 +32,13 @@ export interface TaskRecord {
   /** The cohort of the task (display name, as the cohort was first written). Absent: no cohort. */
   cohort?: string;
   report: string;
+  /** Other places the report may be (paths and globs; relative ones are relative to the worktree): `report: [canonical, ...]`. */
+  reportAlt?: string[];
+  /** Where the report was found when the agent wrote it elsewhere; the canonical file is a copy of it. */
+  reportSource?: string;
+  /** ISO time of the last copy from `reportSource` and the modification time (ISO) of the source that was copied. */
+  reportCopied?: string;
+  reportSourceMtime?: string;
   /** ISO timestamp of `agentctl new`. */
   started: string;
   /** The order as written in the spec; agent/model/effort above are what actually runs. */
@@ -98,6 +105,7 @@ export function recordFromSpec(spec: ResolvedSpec, config: GlobalConfig, started
   if (spec.reviewOf) record.reviewOf = spec.reviewOf;
   if (spec.pin) record.pin = true;
   if (spec.cohort) record.cohort = spec.cohort;
+  if (spec.reportAlt) record.reportAlt = spec.reportAlt;
   return record;
 }
 
@@ -121,6 +129,10 @@ export function renderTaskMd(record: TaskRecord, prompt: string): string {
   if (record.switchedBy) header.switched_by = record.switchedBy;
   if (record.cohort) header.cohort = record.cohort;
   header.report = record.report;
+  if (record.reportAlt && record.reportAlt.length > 0) header.report_alt = record.reportAlt;
+  if (record.reportSource) header.report_source = record.reportSource;
+  if (record.reportCopied) header.report_copied = record.reportCopied;
+  if (record.reportSourceMtime) header.report_source_mtime = record.reportSourceMtime;
   header.started = record.started;
   if (record.pulled) header.pulled = record.pulled;
   if (record.adopted) header.adopted = record.adopted;
@@ -201,6 +213,10 @@ export function parseTaskRecord(text: string): TaskRecord | undefined {
   if (data.switched_by === 'flag' || data.switched_by === 'limit') record.switchedBy = data.switched_by;
   if (typeof data.review_of === 'string') record.reviewOf = data.review_of;
   if (typeof data.cohort === 'string' && data.cohort !== '') record.cohort = data.cohort;
+  if (Array.isArray(data.report_alt) && data.report_alt.every((x: unknown) => typeof x === 'string')) record.reportAlt = data.report_alt as string[];
+  if (typeof data.report_source === 'string' && data.report_source !== '') record.reportSource = data.report_source;
+  if (typeof data.report_copied === 'string') record.reportCopied = data.report_copied;
+  if (typeof data.report_source_mtime === 'string') record.reportSourceMtime = data.report_source_mtime;
   if (typeof data.pulled === 'string') record.pulled = data.pulled;
   if (typeof data.adopted === 'string') record.adopted = data.adopted;
   if (data.pin === true) record.pin = true;

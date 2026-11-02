@@ -128,6 +128,7 @@ const KIND_LABEL: Record<JournalEntry['kind'], string> = {
   'cohort-done': 'KOHORTA',
   usage: 'UŻYCIE',
   'limits-changed': 'LIMITY',
+  'report-detected': 'RAPORT WYKRYTY',
 };
 
 export function summaryLine(s: EventsSummary): string {

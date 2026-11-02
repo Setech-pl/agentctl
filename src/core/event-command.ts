@@ -13,6 +13,7 @@ import { recordEvent } from './history.ts';
 import { rememberSession, sessionOfStatusLine } from './usage-tap.ts';
 import { recordJournal } from './journal.ts';
 import { readVerdict } from './verdict.ts';
+import { syncReport } from './report-detect.ts';
 import { isObject } from './util.ts';
 
 /** Wait for a dialog to be drawn: Claude runs the Notification hook a moment before the screen shows the options. */
@@ -125,6 +126,13 @@ async function backgroundOnScreen(ctx: Context, record: TaskRecord): Promise<boo
   return classifyScreen(screen.stdout, ctx.config.agents[record.agent === 'unknown' ? 'claude' : record.agent]) === 'background';
 }
 
+/** The full last message of the agent (Claude: last_assistant_message, Codex: last-assistant-message), for the search of the report path. */
+function lastMessage(payload: unknown): string {
+  if (!isObject(payload)) return '';
+  const m = payload.last_assistant_message ?? payload['last-assistant-message'];
+  return typeof m === 'string' ? m : '';
+}
+
 function reportReady(ctx: Context, record: TaskRecord): boolean {
   if (!record.report) return false;
   try {
@@ -173,13 +181,17 @@ export async function handleEvent(ctx: Context, alerts: Alerts, input: EventInpu
         // The agent ends its turn every few minutes while its shells and monitors run: that is not "waiting for you". The
         // watcher announces the report or the wait once the background work is gone.
         detail = '[not announced: background work is still running]';
-      } else if (reportReady(ctx, record)) {
-        state = 'report-ready';
-        text = reportReadyText(record.task, readVerdict(record.report, ctx.config.notify.verdictPattern));
-        await recordEvent(ctx, record, 'report');
-      } else if (ctx.config.notify.turnEnd) {
-        state = 'waiting';
-        text = `${record.task}: skończył turę i czeka na Ciebie${event.text ? ` – ${event.text}` : ''}`;
+      } else {
+        // The agent may have written the report somewhere else than the spec says: find it, copy it to the canonical path.
+        await syncReport(ctx, record, { message: lastMessage(input.payload), pane: true }).catch(() => undefined);
+        if (reportReady(ctx, record)) {
+          state = 'report-ready';
+          text = reportReadyText(record.task, readVerdict(record.report, ctx.config.notify.verdictPattern));
+          await recordEvent(ctx, record, 'report');
+        } else if (ctx.config.notify.turnEnd) {
+          state = 'waiting';
+          text = `${record.task}: skończył turę i czeka na Ciebie${event.text ? ` – ${event.text}` : ''}`;
+        }
       }
     } else if (event.outcome === 'limited') {
       state = 'limited';
