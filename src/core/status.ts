@@ -60,13 +60,21 @@ export interface StatusRow {
   /** Hidden from board and status: by `agentctl hide`, or by itself (`auto`: no window and the report was pulled). The task and its worktree are untouched. */
   hidden: boolean;
   /** `closed`: `agentctl close` ran and the window is gone, or the state folder is in the archive. */
-  hiddenBy: 'user' | 'auto' | 'closed' | null;
+  hiddenBy: 'user' | 'auto' | 'closed' | 'cancelled' | null;
   /** The task was closed (`agentctl close`) and has no window: state `closed`, listed only by `status --all`. */
   closed: boolean;
   /** ISO time of the `close`; null when not closed (or an archived folder that does not say). */
   closedAt: string | null;
   /** The state folder sits in the archive (`agentctl archive`, or moved there by hand). */
   archived: boolean;
+  /** `agentctl cancel` ran and the window is gone: state `cancelled`, listed only by `status --all`. Its report, if one was written, stays. */
+  cancelled: boolean;
+  /** ISO time of the `cancel` and the reason that was given; null when not cancelled (or none given). */
+  cancelledAt: string | null;
+  cancelReason: string | null;
+  /** The task that took over after `agentctl move` (this one is then `superseded`), and the task this one continues. */
+  supersededBy: string | null;
+  continues: string | null;
 }
 
 /** The rows `status` and the board show: without the hidden ones unless `all`. */
@@ -125,9 +133,11 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     const stored = alive ? readStoredEvent(config, record) : undefined;
     // mtimeMs has a fraction, the stored time only whole milliseconds: a pull in the same millisecond as the report still counts.
     const pulled = record.pulled && reportMtime !== undefined && Date.parse(record.pulled) >= Math.floor(reportMtime) ? record.pulled : null;
-    const closed = archived || (record.closed === true && !alive);
-    const hiddenBy: StatusRow['hiddenBy'] = closed ? 'closed' : record.hidden === true ? 'user' : record.hidden === undefined && config.board.autoHidePulledDead && !alive && pulled !== null ? 'auto' : null;
-    const state: TaskState = closed ? 'closed' : record.supersededBy ? 'superseded' : taskState({ alive, screen: screenText, settings, reportReady, event: stored?.outcome });
+    // Cancelled wins over closed: the task was abandoned, not finished.
+    const cancelled = record.cancelled === true && !alive;
+    const closed = !cancelled && (archived || (record.closed === true && !alive));
+    const hiddenBy: StatusRow['hiddenBy'] = cancelled ? 'cancelled' : closed ? 'closed' : record.hidden === true ? 'user' : record.hidden === undefined && config.board.autoHidePulledDead && !alive && pulled !== null ? 'auto' : null;
+    const state: TaskState = cancelled ? 'cancelled' : closed ? 'closed' : record.supersededBy ? 'superseded' : taskState({ alive, screen: screenText, settings, reportReady, event: stored?.outcome });
     rows.push({
       task: record.task,
       agent: record.agent,
@@ -158,6 +168,11 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       closed,
       closedAt: closed ? (record.closedAt ?? null) : null,
       archived,
+      cancelled,
+      cancelledAt: cancelled ? (record.cancelledAt ?? null) : null,
+      cancelReason: cancelled ? (record.cancelReason ?? null) : null,
+      supersededBy: record.supersededBy ?? null,
+      continues: record.continues ?? null,
     });
   }
   // Windows of the session that agentctl has no state file for: never skipped silently.
@@ -197,6 +212,11 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       closed: false,
       closedAt: null,
       archived: false,
+      cancelled: false,
+      cancelledAt: null,
+      cancelReason: null,
+      supersededBy: null,
+      continues: null,
     });
   }
   attachCollisions(rows, config.collisions.ignore, config.collisions.enabled);

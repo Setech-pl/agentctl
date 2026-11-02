@@ -39,6 +39,11 @@ export const COMMAND_EXAMPLES: Record<string, string[]> = {
   unhide: ['agentctl unhide NC-42'],
   pull: ['agentctl pull NC-42                    # one report to the clipboard', 'agentctl pull --ready                    # all new reports in one text', 'agentctl pull --ready --all              # also the ones pulled before'],
   close: ['agentctl close NC-41 NC-42 --rm-worktree', 'agentctl close NC-42 --dry-run'],
+  cancel: [
+    'agentctl cancel NC-42 --reason "wrong approach"   # interrupt, close the window; worktree and branch stay',
+    'agentctl cancel NC-41 NC-42 --rm-worktree -y      # also remove the worktrees (branches stay)',
+    'agentctl cancel NC-43                             # a queued task: taken out of the queue',
+  ],
   watch: ['agentctl watch --tmux                  # in window "watch" of the agentctl session', 'agentctl watch                         # in this terminal'],
   board: ['agentctl board --tmux                  # in window "board" of the agentctl session', 'agentctl board'],
   'notify-test': ['agentctl notify-test'],

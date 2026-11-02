@@ -130,12 +130,12 @@ export interface KeyResult {
 
 /** Tasks that still have a window, in the order of the status table; hidden ones only with the `a` key. */
 export function activeRows(state: BoardState): BoardRow[] {
-  return state.rows.filter((r) => !r.closed && !r.finished && (state.showHidden || !r.hidden));
+  return state.rows.filter((r) => !r.closed && !r.cancelled && !r.finished && (state.showHidden || !r.hidden));
 }
 
 /** Tasks without a window (or moved to the other provider) that were not closed: the "Finished" section. */
 export function finishedRows(state: BoardState): BoardRow[] {
-  return state.rows.filter((r) => !r.closed && r.finished && (state.showHidden || !r.hidden));
+  return state.rows.filter((r) => !r.closed && !r.cancelled && r.finished && (state.showHidden || !r.hidden));
 }
 
 /** Tasks closed with `agentctl close` (or archived): their own section, only while the `a` key lists hidden tasks. */
@@ -143,9 +143,14 @@ export function closedRows(state: BoardState): BoardRow[] {
   return state.showHidden ? state.rows.filter((r) => r.closed) : [];
 }
 
-/** The rows the cursor can stand on: the active ones, the finished ones while that section is open, then the closed ones. */
+/** Tasks cancelled with `agentctl cancel`: their own section, like the closed ones only while `a` lists hidden tasks. */
+export function cancelledRows(state: BoardState): BoardRow[] {
+  return state.showHidden ? state.rows.filter((r) => r.cancelled) : [];
+}
+
+/** The rows the cursor can stand on: the active ones, the finished ones while that section is open, then the closed and the cancelled ones. */
 export function displayRows(state: BoardState): BoardRow[] {
-  return [...activeRows(state), ...(state.showFinished ? finishedRows(state) : []), ...closedRows(state)];
+  return [...activeRows(state), ...(state.showFinished ? finishedRows(state) : []), ...closedRows(state), ...cancelledRows(state)];
 }
 
 /** Every task the cursor can stand on, top to bottom: the active rows, the queue, the finished rows (while open), the closed ones. */
@@ -231,11 +236,11 @@ function listKey(state: BoardState, input: string, key: KeyPress): KeyResult {
   if (!row) return stay(withNotice(state, 'error', 'No task selected.'));
 
   if (input === 'c') return stay(withNotice(state, 'info', `${row.task}: copying the report…`), [{ type: 'pull', task: row.task }]);
-  if (row.closed && (input === 'x' || input === 'h' || input === 'm' || input === 'M' || input === 'i')) return stay(withNotice(state, 'error', `${row.task} is closed${row.archived ? ' and archived' : ''}; only c (copy the report) works on it.`));
+  if ((row.closed || row.cancelled) && (input === 'x' || input === 'h' || input === 'm' || input === 'M' || input === 'i')) return stay(withNotice(state, 'error', `${row.task} is ${row.cancelled ? 'cancelled' : 'closed'}${row.archived ? ' and archived' : ''}; only c (copy the report) works on it.`));
   if (input === 'x') return stay({ ...state, notice: null, mode: { kind: 'confirm', action: 'close', task: row.task } });
   if (input === 'h') return stay(withNotice(state, 'info', row.hidden ? `${row.task}: showing it again…` : `${row.task}: hiding it (a lists hidden tasks)…`), [{ type: 'hide', task: row.task, hidden: !row.hidden }]);
   // A task without a window cannot be switched to: Enter offers what still makes sense.
-  if (key.return && (row.finished || row.closed)) return stay({ ...state, notice: null, mode: { kind: 'finished', task: row.task } });
+  if (key.return && (row.finished || row.closed || row.cancelled)) return stay({ ...state, notice: null, mode: { kind: 'finished', task: row.task } });
   if (input === 'M') {
     if (row.state === 'superseded') return stay(withNotice(state, 'error', `${row.task} was already moved.`));
     if (row.pin) return stay(withNotice(state, 'error', `${row.task} is pinned (pin: true): it is never moved to the other provider.`));
@@ -253,7 +258,7 @@ function finishedKey(state: BoardState, mode: Extract<BoardMode, { kind: 'finish
   if (key.escape || (key.ctrl && input === 'c')) return { state: toList(state), effects: [] };
   if (!row) return { state: withNotice(toList(state), 'error', `${mode.task} is gone.`), effects: [] };
   if (input === 'c') return { state: withNotice(toList(state), 'info', `${row.task}: copying the report…`), effects: [{ type: 'pull', task: row.task }] };
-  if (row.closed && input !== 'c') return { state, effects: [] };
+  if ((row.closed || row.cancelled) && input !== 'c') return { state, effects: [] };
   if (input === 'x') return { state: { ...state, mode: { kind: 'confirm', action: 'close', task: row.task } }, effects: [] };
   if (input === 'h') return { state: withNotice(toList(state), 'info', `${row.task}: hiding it (a lists hidden tasks)…`), effects: [{ type: 'hide', task: row.task, hidden: true }] };
   if (input === 'o' && isAlive(row)) return { state: toList(state), effects: [{ type: 'switch', task: row.task, window: row.windowName }] };
@@ -382,7 +387,8 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
   let preview: Preview | null = null;
   if (target) {
     let lines: string[];
-    if (target.closed) lines = [`(closed${target.closedAt ? ` ${target.closedAt.slice(0, 16).replace('T', ' ')} UTC` : ''}${target.archived ? ', archived' : ''}; the report ${target.report === 'yes' ? 'is still there: c copies it' : 'was never written'})`];
+    if (target.cancelled) lines = [`(cancelled${target.cancelledAt ? ` ${target.cancelledAt.slice(0, 16).replace('T', ' ')} UTC` : ''}${target.cancelReason ? `: ${target.cancelReason}` : ''}; the report ${target.report === 'yes' ? 'is still there: c copies it' : 'was never written'})`];
+    else if (target.closed) lines = [`(closed${target.closedAt ? ` ${target.closedAt.slice(0, 16).replace('T', ' ')} UTC` : ''}${target.archived ? ', archived' : ''}; the report ${target.report === 'yes' ? 'is still there: c copies it' : 'was never written'})`];
     else if (!isAlive(target)) lines = [`(finished: no tmux window${target.report === 'yes' ? `; the report is ${target.pulled ? 'pulled' : 'ready: c copies it'}` : '; no report was written'})`];
     else {
       try {
@@ -524,6 +530,7 @@ const STATE_COLOR: Record<TaskState, string> = {
   orphan: 'red',
   dead: 'red',
   closed: 'gray',
+  cancelled: 'gray',
 };
 
 export function headerCells(cols: BoardColumns): BoardCell[] {
@@ -564,7 +571,8 @@ export type ListItem =
   | { kind: 'queue-title'; count: number; paused: boolean }
   | { kind: 'queue'; view: QueueView }
   | { kind: 'finished'; count: number; expanded: boolean }
-  | { kind: 'closed'; count: number };
+  | { kind: 'closed'; count: number }
+  | { kind: 'cancelled'; count: number };
 
 /** `Queue (3)` title under the active tasks. */
 export function queueTitle(count: number, paused: boolean): string {
@@ -594,10 +602,16 @@ export function closedTitle(count: number): string {
   return `Closed (${count}) – off the list; \`agentctl archive\` moves their state away`;
 }
 
+/** Title of the section of tasks cancelled with `agentctl cancel` (shown while `a` lists hidden tasks). */
+export function cancelledTitle(count: number): string {
+  return `Cancelled (${count}) – abandoned; the report, if any, stays: c copies it`;
+}
+
 /** Everything the list shows, top to bottom: active rows, the "Finished" title and rows, the "Closed" title and rows. */
 export function listItems(state: BoardState): ListItem[] {
   const finished = finishedRows(state);
   const closed = closedRows(state);
+  const cancelled = cancelledRows(state);
   return [
     ...activeRows(state).map((row): ListItem => ({ kind: 'row', row })),
     ...(state.queue.length > 0 ? [{ kind: 'queue-title', count: state.queue.length, paused: state.queuePaused } as ListItem, ...state.queue.map((view): ListItem => ({ kind: 'queue', view }))] : []),
@@ -605,6 +619,8 @@ export function listItems(state: BoardState): ListItem[] {
     ...(state.showFinished ? finished.map((row): ListItem => ({ kind: 'row', row })) : []),
     ...(closed.length > 0 ? [{ kind: 'closed', count: closed.length } as ListItem] : []),
     ...closed.map((row): ListItem => ({ kind: 'row', row })),
+    ...(cancelled.length > 0 ? [{ kind: 'cancelled', count: cancelled.length } as ListItem] : []),
+    ...cancelled.map((row): ListItem => ({ kind: 'row', row })),
   ];
 }
 

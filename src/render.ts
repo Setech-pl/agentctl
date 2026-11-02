@@ -8,7 +8,7 @@ export function renderStatusTable(rows: StatusRow[], maxLast = 60): string[] {
   const collide = rows.some((r) => r.collide.length > 0);
   const header = ['TASK', 'AGENT/MODEL/EFFORT', 'STATE', 'WINDOW', 'STARTED', 'DURATION', 'PROGRESS', ...(collide ? ['COLLIDE'] : []), 'REPORT', 'LAST LINE'];
   const body = rows.map((r) => [
-    r.archived ? `${r.task} (archived)` : r.closed ? `${r.task} (closed)` : r.hidden ? `${r.task} (hidden)` : r.task,
+    r.archived ? `${r.task} (archived)` : r.cancelled ? `${r.task} (cancelled)` : r.closed ? `${r.task} (closed)` : r.hidden ? `${r.task} (hidden)` : r.task,
     r.switchedBy ? `${r.agent}/${r.model}/${r.effort} (ordered ${r.requested})` : `${r.agent}/${r.model}/${r.effort}`,
     r.state,
     r.window,

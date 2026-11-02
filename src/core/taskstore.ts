@@ -54,7 +54,19 @@ export interface TaskRecord {
   closed?: boolean;
   /** ISO timestamp of the `close`. */
   closedAt?: string;
+  /**
+   * `agentctl cancel` ran: the work was abandoned (mid-turn, or before it started: a task from the queue has a record only for this).
+   * The task is off `status`, the board, `pull --ready` and the limits (`status --all` lists it); the state, the report and the worktree stay.
+   */
+  cancelled?: boolean;
+  /** ISO timestamp of the `cancel`, the reason that was given and where the cancel came from (history: `stats` counts them). */
+  cancelledAt?: string;
+  cancelReason?: string;
+  cancelSource?: CancelSource;
 }
+
+/** Who asked for the cancellation: the CLI, the board, or the chat (MCP). */
+export type CancelSource = 'cli' | 'board' | 'mcp';
 
 /** agentctl's own state for a task. Agents get the report directory (`<cache>/<task>/`), never this one. */
 export function taskDir(config: GlobalConfig, window: string): string {
@@ -114,6 +126,10 @@ export function renderTaskMd(record: TaskRecord, prompt: string): string {
   if (record.hidden !== undefined) header.hidden = record.hidden;
   if (record.closed) header.closed = true;
   if (record.closedAt) header.closed_at = record.closedAt;
+  if (record.cancelled) header.cancelled = true;
+  if (record.cancelledAt) header.cancelled_at = record.cancelledAt;
+  if (record.cancelReason) header.cancel_reason = record.cancelReason;
+  if (record.cancelSource) header.cancel_source = record.cancelSource;
   return `---\n${YAML.stringify(header)}---\n\n${prompt.trim()}\n`;
 }
 
@@ -188,6 +204,10 @@ export function parseTaskRecord(text: string): TaskRecord | undefined {
   if (typeof data.hidden === 'boolean') record.hidden = data.hidden;
   if (data.closed === true) record.closed = true;
   if (typeof data.closed_at === 'string') record.closedAt = data.closed_at;
+  if (data.cancelled === true) record.cancelled = true;
+  if (typeof data.cancelled_at === 'string') record.cancelledAt = data.cancelled_at;
+  if (typeof data.cancel_reason === 'string') record.cancelReason = data.cancel_reason;
+  if (data.cancel_source === 'cli' || data.cancel_source === 'board' || data.cancel_source === 'mcp') record.cancelSource = data.cancel_source;
   return record;
 }
 
@@ -236,12 +256,12 @@ export function listArchivedRecords(config: GlobalConfig): TaskRecord[] {
 }
 
 /** Set one key in the YAML header of an existing TASK.md; the body (prompt, follow-ups) and the other keys stay as they are. */
-export async function setHeaderField(runner: Runner, file: string, key: string, value: string | boolean): Promise<boolean> {
+export async function setHeaderField(runner: Runner, file: string, key: string, value: string | boolean | null): Promise<boolean> {
   return setHeaderFields(runner, file, { [key]: value });
 }
 
-/** Set several keys of the header in one write. */
-export async function setHeaderFields(runner: Runner, file: string, fields: Record<string, string | boolean>): Promise<boolean> {
+/** Set several keys of the header in one write; `null` removes the key. */
+export async function setHeaderFields(runner: Runner, file: string, fields: Record<string, string | boolean | null>): Promise<boolean> {
   let text: string;
   try {
     text = fs.readFileSync(file, 'utf8');
@@ -251,7 +271,10 @@ export async function setHeaderFields(runner: Runner, file: string, fields: Reco
   const match = /^---\n([\s\S]*?)\n---(?=\n|$)/.exec(text.replace(/\r\n/g, '\n'));
   if (!match) return false;
   const doc = YAML.parseDocument(match[1] as string);
-  for (const [key, value] of Object.entries(fields)) doc.set(key, value);
+  for (const [key, value] of Object.entries(fields)) {
+    if (value === null) doc.delete(key);
+    else doc.set(key, value);
+  }
   const rest = text.replace(/\r\n/g, '\n').slice(match[0].length);
   await runner.writeFile(file, `---\n${doc.toString().trimEnd()}\n---${rest}`);
   return true;

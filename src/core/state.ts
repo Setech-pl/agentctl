@@ -13,9 +13,10 @@ import type { AgentSettings } from './config.ts';
  * - superseded:  the task was moved to the other provider (`agentctl move`); this window is the old one and is closed by hand
  * - dead:        the window is gone and there is no report
  * - closed:      `agentctl close` was run (or the state folder was moved to the archive): off every list except `status --all`
+ * - cancelled:   `agentctl cancel` was run (the work was abandoned, it may have been in the middle of a turn, or never started): off every list except `status --all`; its report, if one was written, stays
  * - orphan:      a window of the agentctl session has no state file (lost or never created); see `agentctl adopt`
  */
-export type TaskState = 'working' | 'background' | 'waiting' | 'needs-trust' | 'needs-input' | 'limited' | 'report-ready' | 'superseded' | 'dead' | 'orphan' | 'closed';
+export type TaskState = 'working' | 'background' | 'waiting' | 'needs-trust' | 'needs-input' | 'limited' | 'report-ready' | 'superseded' | 'dead' | 'orphan' | 'closed' | 'cancelled';
 
 export type ScreenState = 'needs-trust' | 'needs-input' | 'limited' | 'working' | 'background' | 'idle';
 

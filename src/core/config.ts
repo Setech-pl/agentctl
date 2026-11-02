@@ -94,6 +94,8 @@ export interface GlobalConfig extends Layer {
   queue: QueueSettings;
   /** Collision warnings: two active tasks of one repository changing the same files. */
   collisions: CollisionSettings;
+  /** `agentctl cancel`: how it stops a task that is in the middle of a turn. */
+  cancel: CancelSettings;
   /** Where the config was (or would be) read from. */
   path: string;
   loaded: boolean;
@@ -121,6 +123,11 @@ export interface QueueSettings {
   enabled: boolean;
   /** Most queued tasks that `watch` has in the middle of starting (worktree, setup, waiting for the agent) at the same time. */
   parallelStarts: number;
+}
+
+export interface CancelSettings {
+  /** Seconds between the interrupt key and the closing of the window of a task that is cancelled while it works (0: close at once). */
+  grace: number;
 }
 
 export interface CollisionSettings {
@@ -229,7 +236,7 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
 
 /** The keys accepted in every layer: the global config, `.agentctl.yaml` and (with a few of its own) a spec. docs/configuration.md describes each one. */
 export const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'setup', 'defaults'];
-export const GLOBAL_KEYS = [...LAYER_KEYS, 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions'];
+export const GLOBAL_KEYS = [...LAYER_KEYS, 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel'];
 export const DEFAULTS_KEYS = ['agent', 'model', 'effort'];
 export const LINK_KEYS = ['from', 'to'];
 export const AGENT_KEYS = ['flags', 'effort_args', 'ready_pattern', 'ready_timeout', 'trust_timeout', 'trust_pattern', 'working_pattern', 'interrupt_key', 'footer_patterns', 'question_pattern', 'limit_patterns', 'background_patterns'];
@@ -238,6 +245,7 @@ export const NOTIFY_KEYS = ['backend', 'events', 'turn_end', 'terminal_app', 've
 export const BOARD_KEYS = ['auto_hide_pulled_dead', 'mouse', 'return_key'];
 export const MCP_KEYS = ['allow', 'allow_rm_worktree'];
 export const QUEUE_KEYS = ['enabled', 'parallel_starts'];
+export const CANCEL_KEYS = ['grace'];
 export const COLLISION_KEYS = ['enabled', 'interval', 'notify', 'ignore'];
 
 /** Screen patterns are case-insensitive and match per line. */
@@ -552,6 +560,21 @@ function parseQueue(v: unknown, p: Problems): QueueSettings {
   return queue;
 }
 
+function parseCancel(v: unknown, p: Problems): CancelSettings {
+  const cancel: CancelSettings = { grace: 5 };
+  if (v === undefined || v === null) return cancel;
+  if (!isObject(v)) {
+    p.add('config.cancel must be a mapping like {grace: 5}');
+    return cancel;
+  }
+  checkKeys(v, CANCEL_KEYS, 'config.cancel', p);
+  if (v.grace !== undefined) {
+    if (typeof v.grace === 'number' && v.grace >= 0 && Number.isFinite(v.grace)) cancel.grace = v.grace;
+    else p.add('config.cancel.grace must be a number of seconds, 0 or more');
+  }
+  return cancel;
+}
+
 function parseCollisions(v: unknown, p: Problems): CollisionSettings {
   const collisions: CollisionSettings = { enabled: true, interval: 300, notify: true, ignore: [] };
   if (v === undefined || v === null) return collisions;
@@ -635,9 +658,10 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   const mcp = parseMcp(raw.mcp, p);
   const queue = parseQueue(raw.queue, p);
   const collisions = parseCollisions(raw.collisions, p);
+  const cancel = parseCancel(raw.cancel, p);
 
   p.throwIfAny(`Invalid config ${file}:`, 'Fix the listed keys; see the README section "Configuration".');
-  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, limits, agents, equivalents, watch, notify, board, mcp, queue, collisions, path: file, loaded: exists };
+  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, limits, agents, equivalents, watch, notify, board, mcp, queue, collisions, cancel, path: file, loaded: exists };
   if (mirror) config.mirrorDir = resolvePath(mirror);
   return config;
 }

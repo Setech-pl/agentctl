@@ -101,7 +101,7 @@ export function collideText(collide: readonly Collide[]): string {
 }
 
 /** A task takes part in collisions while its window runs (a finished task changes nothing any more). */
-const isActive = (r: Pick<StatusRow, 'window' | 'closed' | 'state'>): boolean => r.window === 'alive' && !r.closed && r.state !== 'superseded';
+const isActive = (r: Pick<StatusRow, 'window' | 'closed' | 'cancelled' | 'state'>): boolean => r.window === 'alive' && !r.closed && !r.cancelled && r.state !== 'superseded';
 
 /**
  * Fill `collide` of the rows from the progress they carry. Rows without progress (git could not be asked, or it was not asked)
@@ -120,7 +120,7 @@ export async function collectActiveFiles(ctx: Context): Promise<TaskFiles[]> {
   const live = new Set(await ctx.tmux.listWindows());
   const tasks: TaskFiles[] = [];
   for (const record of listTaskRecords(ctx.config)) {
-    if (record.closed || record.supersededBy || !live.has(record.window) || record.repos.length === 0) continue;
+    if (record.closed || record.cancelled || record.supersededBy || !live.has(record.window) || record.repos.length === 0) continue;
     const progress = await taskProgress(ctx.runner, record.repos);
     if (progress) tasks.push(filesOfProgress(record.task, progress));
   }
