@@ -264,7 +264,7 @@ agentctl status [options]
 |---|---|---|
 | `--json` | machine-readable output |  |
 | `--clip` | copy a compact Markdown table to the clipboard (to paste at the start of a chat session) |  |
-| `--tmux-line` | one short line for the tmux status bar, like "2⚙ 1✓ 1?" (tasks per state) |  |
+| `--tmux-line` | one short line for the tmux status bar, like "2⚙ 1✓ 1? 3⧗" (tasks per state, then the tasks in the queue) |  |
 | `--all` | also the hidden and the closed tasks (see "agentctl hide", "agentctl close"), archived ones included |  |
 
 Examples:

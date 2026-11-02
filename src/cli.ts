@@ -415,7 +415,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .description('Table of tasks: window state, running time, report, last output line.')
     .option('--json', 'machine-readable output')
     .option('--clip', 'copy a compact Markdown table to the clipboard (to paste at the start of a chat session)')
-    .option('--tmux-line', 'one short line for the tmux status bar, like "2⚙ 1✓ 1?" (tasks per state)')
+    .option('--tmux-line', 'one short line for the tmux status bar, like "2⚙ 1✓ 1? 3⧗" (tasks per state, then the tasks in the queue)')
     .option('--all', 'also the hidden and the closed tasks (see "agentctl hide", "agentctl close"), archived ones included')
     .action(
       guarded(async (opts: { json?: boolean; clip?: boolean; tmuxLine?: boolean; all?: boolean }) => {

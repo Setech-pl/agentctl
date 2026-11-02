@@ -2,7 +2,11 @@ import type { Context } from './context.ts';
 import { DEFAULT_WINDOW_ICONS } from './icons.ts';
 import type { StatusRow } from './status.ts';
 import { collectStatus, shownRows } from './status.ts';
+import { readQueue } from './queue.ts';
 import type { TaskState } from './state.ts';
+
+/** The queue in the line: "3⧗" is three tasks waiting for a free window or for another task. */
+export const QUEUE_ICON = '⧗';
 
 /** Seconds between two runs of the status command in tmux. */
 export const STATUS_INTERVAL = 10;
@@ -11,21 +15,24 @@ export const STATUS_INTERVAL = 10;
 const LINE_ORDER: TaskState[][] = [['working', 'background'], ['waiting'], ['report-ready'], ['needs-input'], ['needs-trust'], ['limited'], ['orphan', 'dead']];
 
 /**
- * One short line for the tmux status bar: "2⚙ 1✓ 1?". The count of tasks per state, zero counts left out; reports that were
+ * One short line for the tmux status bar: "2⚙ 1✓ 1? 3⧗" (the last one: tasks in the queue). The count of tasks per state, zero counts left out; reports that were
  * already pulled do not count as ✓ (nothing is left to do with them). Empty when there is nothing to show.
  */
-export function tmuxLine(rows: StatusRow[], icons: Record<TaskState, string> | null): string {
+export function tmuxLine(rows: StatusRow[], icons: Record<TaskState, string> | null, queued = 0): string {
   const set = icons ?? DEFAULT_WINDOW_ICONS;
   const parts: string[] = [];
   for (const states of LINE_ORDER) {
     const count = rows.filter((r) => states.includes(r.state) && !(r.state === 'report-ready' && r.pulled !== null)).length;
     if (count > 0) parts.push(`${count}${set[states[0] as TaskState]}`);
   }
+  if (queued > 0) parts.push(`${queued}${QUEUE_ICON}`);
   return parts.join(' ');
 }
 
 export async function statusTmuxLine(ctx: Context): Promise<string> {
-  return tmuxLine(shownRows(await collectStatus(ctx, { progress: false }), false), ctx.config.watch.windowIcons);
+  // Waiting and starting entries count; a failed one is waiting for a human, not for a window.
+  const queued = readQueue(ctx.config).filter((e) => e.status !== 'failed').length;
+  return tmuxLine(shownRows(await collectStatus(ctx, { progress: false }), false), ctx.config.watch.windowIcons, queued);
 }
 
 /**

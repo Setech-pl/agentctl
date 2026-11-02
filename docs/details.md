@@ -236,7 +236,7 @@ in `TASK.md`, and commands target that ID while the window still carries the tas
 Tasks started before this version have no ID and are matched by name. If `watch` is killed hard (`kill -9`), the icons stay on the windows until the next `watch` run;
 everything keeps working meanwhile. Change the icons while the watcher is stopped (it recognises its old icons only if they are symbols or in the config).
 
-`agentctl status --tmux-line` prints the number of tasks per state as one line, `2⚙ 1✓ 1?` (zero counts left out; reports you already pulled do not count as `✓`;
+`agentctl status --tmux-line` prints the number of tasks per state as one line, `2⚙ 1✓ 1?`, followed by the tasks in the queue as `3⧗` (`2⚙ 1⏳ 3⧗`; zero counts left out; reports you already pulled do not count as `✓`;
 `orphan` and `dead` share `✗`). It makes no git calls and prints nothing else, so tmux can run it. `agentctl watch --tmux` sets, **for the agentctl session only**
 (`set-option -t =agentctl:`, never `-g`):
 
@@ -339,7 +339,7 @@ agentctl board  agentctl-test · 3 tasks · 09:41:03
                                                                        │ ● you chose: tea please
 
 Enter – open the agent · F12 – back to the list
-↑↓ ⏎ go  m msg  M move  i int  c pull  r new  x close  h hide  z done  a all  ?
+↑↓ ⏎  m msg  M move  i int  c/r pull  x close  h hide  z done  a all  u/d/p  ?
 ```
 
 Below 110 columns the preview is hidden and the list takes the whole width (this is 80 columns):
@@ -352,7 +352,7 @@ agentctl board  agentctl-test · 3 tasks · 09:40:39
   AC5-C      claude sonnet/med… ? needs-input  12s     2c 2f    -
 
 Enter – open the agent · F12 – back to the list
-↑↓ ⏎ go  m msg  M move  i int  c pull  r new  x close  h hide  z done  a all  ?
+↑↓ ⏎  m msg  M move  i int  c/r pull  x close  h hide  z done  a all  u/d/p  ?
 ```
 
 The list shows task, agent/model/effort, state icon, time, `PROGRESS` and the report (`-` none, `ready` not pulled yet, `pulled`). From 110 columns the right column
@@ -369,9 +369,14 @@ shows the last 30 lines of the selected window (as `peek`, without the footer); 
 | `r` | copy all new reports (`pull --ready`) |
 | `x` | close the window, after a `[y/N]` question; if the task has a worktree, a second question asks whether to remove it too (`git worktree remove`, never `--force`, the branch stays; `Esc` cancels) |
 | `h` | hide the selected task (or show a hidden one); nothing is closed or removed |
+| `u` | on a task of the **Queue (N)** section: move it to the front of the queue |
+| `d` | on a task of the **Queue (N)** section: remove it from the queue, after a `[y/N]` question |
+| `p` | pause or resume the queue (`queue pause` / `queue resume`) |
 | `z` | open or close the **Finished (N)** section |
 | `a` | list hidden tasks too (dimmed, marked `·`) and the closed ones, in their own **Closed (N)** section |
 | `?` / `q` | help / leave (the agents keep running) |
+
+The **Queue (N)** section stands under the active tasks (see [the queue](#the-queue)): each queued task shows its place in line and what it waits for (`1. czeka na miejsce: claude 2/2`, `2. czeka na NC-42`, `✗ failed: …`), and the preview shows its spec. A task that changes files another active task changes too has `⚠` in the first column, and its preview title says with whom (`⚠ LANDING-QS-1: 2`; [collisions](#collisions)).
 
 The tasks that still have a window come first. Tasks without a window (and without `close`: `dead`, `report-ready` after you closed the agent in its window, `superseded`) wait dimmed under a closed **Finished (N)** title; `z` opens it. Enter on one of them does not try to switch to a window that is not there. See [Closing and hiding tasks](#closing-and-hiding-tasks).
 
