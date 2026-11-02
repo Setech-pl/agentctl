@@ -24,6 +24,7 @@ import {
   queueTitle,
   rowCells,
   runBoardEffect,
+  usagePanel,
   showNotice,
   visibleItems,
   withBusy,
@@ -196,13 +197,15 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
   const layout = boardLayout(state.width);
   const active = state.rows.filter((r) => !r.closed && !r.finished && !r.hidden).length;
   const hiddenCount = state.showHidden ? 0 : state.rows.filter((r) => r.hidden).length;
-  const rowsForBody = Math.max(3, state.height - 4);
+  const panel = usagePanel(state.plans, ctx.config.usage, Date.now());
+  const rowsForBody = Math.max(3, state.height - 4 - panel.length);
   const header = h(
     Box,
     { width: state.width },
     h(Text, { bold: true, wrap: 'truncate-end' }, 'agentctl board'),
     h(Text, { dimColor: true, wrap: 'truncate-end' }, `  ${ctx.config.session} · ${active} task${active === 1 ? '' : 's'}${state.queue.length > 0 ? ` · ${state.queue.length} queued` : ''}${state.cohortFilter !== null ? ` · cohort: ${cohortLabel(state)}` : ''}${hiddenCount > 0 ? ` · ${hiddenCount} hidden (a)` : ''}${state.refreshedAt ? ` · ${state.refreshedAt}` : ''}`),
   );
+  const panelBox = panel.length === 0 ? null : h(Box, { flexDirection: 'column', width: state.width }, ...panel.map((l) => h(Text, { key: l.provider, wrap: 'truncate-end', ...(l.color ? { color: l.color } : { dimColor: true }) }, l.text)));
   const body =
     state.mode.kind === 'help'
       ? h(Box, { flexDirection: 'column' }, ...HELP_LINES.map((l, i) => h(Text, { key: i }, l === '' ? ' ' : l)))
@@ -212,7 +215,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
           h(TaskList, { state, width: layout.listWidth, capacity: rowsForBody - 1, icons: ctx.config.watch.windowIcons }),
           layout.showPreview ? h(Preview, { state, width: layout.previewWidth, height: rowsForBody }) : null,
         );
-  return h(Box, { flexDirection: 'column', width: state.width, height: state.height }, header, h(Box, { flexGrow: 1, flexDirection: 'column' }, body), h(Footer, { state, hint: navigationHint(ctx.config.board.returnKey) }));
+  return h(Box, { flexDirection: 'column', width: state.width, height: state.height }, header, state.mode.kind === 'help' ? null : panelBox, h(Box, { flexGrow: 1, flexDirection: 'column' }, body), h(Footer, { state, hint: navigationHint(ctx.config.board.returnKey) }));
 }
 
 /** Show the board until the user quits; resolves when it is gone. Needs a terminal. */
