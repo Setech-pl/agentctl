@@ -8,6 +8,27 @@ Versions 0.1.0 to 0.7.0 correspond to pull requests #1 to #7; their dates are th
 
 Nothing yet.
 
+## [0.13.0] - 2026-11-02
+
+Pull request: phone notifications through ntfy and away mode, `docs/details.pl.md`. The date is the day it was prepared; set it to the merge date.
+
+### Added
+- **Phone notifications.** `notify.ntfy` (`server` default `https://ntfy.sh`, `topic`, `token` as a Bearer header, `events` default all ten: `needs-input`, `needs-trust`, `limited`, `blocked`, `report-ready`, `cohort-done`, `queue-failed`, `orphan`, `dead`, `usage-critical`; `priority` per event, `high` for `needs-input`, `limited` and `usage-critical`; `include_verdict` default true; `click_url`; `always`). The request is `POST <server>/<topic>` with `Title`, `Priority`, `Tags`, `Click` and `Authorization`; a title with non-ASCII characters is sent as RFC 2047. The message holds only the task ID, the name of a cohort and the first line of the verdict, with path-like words cut; never a report, a question, a path or a file name. It is sent from the journal write, so the phone gets exactly what the Mac announced (the de-duplication of the Mac applies); the journal entry gets `phone: sent|queued` and `events` marks it with 📱. A failed request is queued in `phone-queue.json` and retried by the watcher three times (30 s, 2 min, 10 min), then dropped with a line in `phone.log`; the watch log warns once an hour; a network error never stops the watcher. `orphan` is a journal kind now, and a `usage` entry carries `level`.
+- **Away.** `agentctl away [status|on|off]` (state in `<config dir>/away.json`, `--json` for status); the phone is quiet while away is off unless `notify.ntfy.always: true`; the Mac is not affected. `away.auto_idle: <minutes>` (macOS, `ioreg` `HIDIdleTime`) turns it on when the Mac is idle and off at the first activity; a hand-made `off` is not undone while the Mac stays idle. Off by default.
+- **`agentctl ntfy-setup [--server URL] [--regenerate] [--show-qr] [--dry-run]`**: a random topic (`agentctl-` and 24 hex digits) written to `config.yaml` with comments and key order kept (the YAML edit is shared with `limits set` now: `config-edit.ts`), steps for iOS and Android and for a server of your own, the warning that on the public ntfy.sh the topic is the only protection. `--show-qr` uses `qrencode` when installed; no dependency was added. `doctor` warns about a weak topic and a private server without a token, and shows away.
+- **`agentctl notify-test [--local|--phone|--all]`**: the channel, the result and the time of each; the phone test ignores away and never prints the whole topic.
+- Board: `📱 away` / `📱 always` / dimmed `📱 off` in the header and key **`w`** (after y/N). tmux status line: `📱` in front while away is on. MCP: `status` and `events_since` carry the away state; write tool **`away`** (`on`) behind `mcp.allow`, no confirm step, audited and announced.
+- **`docs/details.pl.md`**: the full Polish equivalent of `docs/details.md`; `README.pl.md` links to it. The link test covers both and a test keeps their headings, tables and code blocks in step.
+- Live scenarios `scripts/live-phone.ts` through the harness: a mock ntfy server on localhost (one request, headers, no report text, no duplicate from the watcher, none with away off, queue and retry after a dead server) and one request to the public ntfy.sh on a random temporary topic (HTTP 200).
+- Documentation: Phone notifications in both READMEs and both details files, `docs/configuration.md` (`notify.ntfy.*`, `away.*`), `docs/mcp.md`; the sequence and architecture diagrams show the phone.
+
+### Changed
+- The board key line is `m M move i int c/r pull x close X cancel k cohort h hide l log L G R w u/d/p ?` (it must fit 80 columns).
+- `Context` has a `fetch` for the phone (tests give a mock).
+
+### Limitations
+- On the public ntfy.sh the name of the topic is the only protection. The `ntfy://` link of `--show-qr` was not tried on a phone. `away.auto_idle` needs macOS (`ioreg`). Texts on the phone are in Polish, like those of the Mac.
+
 ## [0.12.0] - 2026-11-02
 
 Pull request: live limits, events for the chat, gc, resume, `agentctl up`, a safe harness for live tests. The date is the day it was prepared; set it to the merge date.

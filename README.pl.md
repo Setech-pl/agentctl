@@ -15,6 +15,7 @@ agentctl zarządza **zleceniami, nie oknami**. Jednostką jest spec: plik Markdo
 - **Jeden spec, jedno polecenie.** `agentctl new` tworzy worktree gita, uruchamia komendy setup, robi symlinki, ustawia środowisko, otwiera okno tmux, uruchamia agenta i wkleja prompt.
 - **Stany zadań.** `working`, `waiting`, `needs-input`, `needs-trust`, `limited`, `report-ready` i inne, z ekranu każdego okna oraz ze zdarzeń, które agenci wysyłają sami (hooki Claude, `notify` Codexa).
 - **Powiadomienia.** Jedno powiadomienie na zmianę stanu; kliknięcie przełącza na okno zadania.
+- **Telefon.** `agentctl ntfy-setup` i `agentctl away on`: zdarzenia, które Cię potrzebują, idą też na telefon przez ntfy, a w wiadomości są tylko ID zadania i linia werdyktu.
 - **Board.** Pełnoekranowy przegląd wszystkich zadań z podglądem na żywo wybranego okna.
 - **Raporty.** `agentctl pull --ready` zbiera nowe raporty w jeden tekst dla czatu planującego.
 - **Kolejka, zależności, kolizje.** Więcej zadań niż wolnych okien? Czekają i startują same; przegląd może czekać na raport autora (`after`); dwa zadania zmieniające te same pliki są oznaczane wcześnie.
@@ -38,6 +39,7 @@ sequenceDiagram
     participant G as git + tmux
     participant X as Agent (Claude Code / Codex)
     participant W as watch + powiadomienia
+    participant P as Telefon (ntfy)
 
     H->>C: opisujesz pracę
     C-->>H: spec (nagłówek YAML + prompt, opcjonalnie cohort: nazwa)
@@ -83,6 +85,9 @@ sequenceDiagram
     end
     X->>G: zapisuje plik raportu
     W-->>H: powiadomienie (raport gotowy, pytanie, limit)
+    opt away jest włączone
+        W-->>P: to samo, tylko ID zadania + linia werdyktu (ntfy, ponawiane przy braku sieci)
+    end
     C->>A: events_since (MCP): co się zmieniło od ostatniego wywołania
     W-->>H: kohorta sprint-1: wszystkie raporty gotowe (raz na kohortę)
     H->>A: agentctl pull --ready (albo MCP pull_ready)
@@ -112,13 +117,14 @@ flowchart TB
         BOARD["board (Ink, src/board)"]
         MCP["serwer MCP (src/mcp, stdio)"]
     end
-    CORE["src/core: spec, plan, new, queue, cancel, cohort, collisions, status, pull, close, move, watch, events, notify, usage, history, limits, chat-events, journal, gc, resume"]
+    CORE["src/core: spec, plan, new, queue, cancel, cohort, collisions, status, pull, close, move, watch, events, notify, usage, history, limits, chat-events, journal, gc, resume, away, phone"]
     RUN["Runner: RealRunner / RecordingRunner"]
     subgraph world [Na zewnątrz]
         TMUX[sesja tmux agentctl]
         GIT[worktree gita]
         AG[Claude Code i Codex]
         NOTE[terminal-notifier / osascript]
+        PHONE["ntfy server -> phone"]
         LOGS["logi agentów: ~/.claude/projects/…/*.jsonl, ~/.codex/sessions/…/*.jsonl"]
     end
     subgraph disk [Pliki]
@@ -130,7 +136,7 @@ flowchart TB
         REP["cache: raporty zadań"]
         AUDIT["mcp-audit.log"]
         HIST["history.jsonl, usage-cache.json, usage-alerts.json, usage/claude-plan.json"]
-        JOURNAL["journal.jsonl, events-seen.json, reservations.json, config-state.json"]
+        JOURNAL["journal.jsonl, events-seen.json, reservations.json, config-state.json, away.json, phone-queue.json, phone.log"]
     end
     CLI --> CORE
     BOARD --> CORE
@@ -147,6 +153,7 @@ flowchart TB
     CORE <--> JOURNAL
     CORE -- "limits.count_external" --> PS
     CORE --> NOTE
+    CORE -- "away on: ID + verdict only" --> PHONE
     CORE <--> STATE
     CORE <--> QUEUE
     CORE <--> COH
@@ -426,6 +433,35 @@ Czytanie ekranu co 15 sekund to zgadywanie, więc `agentctl new` prosi też każ
 - Teksty: `NC-42: <pytanie>`, `NC-42: raport gotowy – <werdykt>` (werdykt to pierwsza sensowna linia raportu albo linia pasująca do `notify.verdict_pattern`), limit użycia, zadanie czekające dłużej niż 120 sekund, zniknięte okno. Teksty są na razie po polsku.
 - Stany: [diagram wyżej](#stany-zadań). Szczegóły, tabele zdarzeń i to, co sprawdzono na Claude Code 2.1.309 i Codex 0.166.0: [docs/details.pl.md](docs/details.pl.md#zdarzenia).
 
+## Powiadomienia na telefon
+
+Gdy wychodzisz od Maca, zdarzenia, które Cię potrzebują, mogą iść na telefon przez [ntfy](https://ntfy.sh) – darmową aplikację powiadomień na iOS i Androida. Działa z publicznym serwerem `ntfy.sh` albo z Twoim własnym. Powiadomienia na Macu zostają bez zmian; telefon to dodatek i milczy, gdy siedzisz przy Macu.
+
+1. **Utwórz temat.** `agentctl ntfy-setup` zapisuje w `config.yaml` losowy temat (`agentctl-` i 24 cyfry szesnastkowe), zachowuje Twoje komentarze i drukuje te kroki. `--server https://ntfy.example.com` jest dla własnego serwera; `--show-qr` drukuje też link subskrypcji jako kod QR, jeśli zainstalowane jest narzędzie `qrencode` (`brew install qrencode`; agentctl nie dodaje do tego żadnej zależności).
+2. **Zasubskrybuj na telefonie.** Zainstaluj aplikację (iOS: App Store, „ntfy"; Android: Google Play lub F-Droid, „ntfy"), stuknij **+** i wpisz temat. Dla własnego serwera włącz „Use another server" i wpisz jego adres.
+3. **Sprawdź.** `agentctl notify-test --phone` wysyła jedną wiadomość i drukuje wynik, kod HTTP i czas (`--all` testuje też Maca).
+4. **Powiedz, kiedy Cię nie ma.** `agentctl away on` przy wyjściu, `agentctl away off` po powrocie; `agentctl away` pokazuje stan. Albo niech zdecyduje Mac: `away: {auto_idle: 15}` uznaje Maca za nieobecnego po 15 minutach bez klawiatury i myszy (macOS), a za obecnego od pierwszego dotyku. `notify.ntfy.always: true` wysyła zawsze.
+
+```yaml
+notify:
+  ntfy:
+    topic: agentctl-3f9c0a7e51b2d84c6e19a0f7   # zapisane przez ntfy-setup
+    # server: https://ntfy.sh                  # zamiast tego własny serwer
+    # token: tk_...                            # serwer prywatny albo konto ntfy
+    # events: [needs-input, report-ready, limited, dead]
+    # priority: {report-ready: low}
+    # click_url: https://claude.ai/             # otwierany po dotknięciu powiadomienia
+away:
+  auto_idle: 15
+```
+
+- **Co jest wysyłane.** Domyślnie `needs-input`, `needs-trust`, `limited`, `blocked`, `report-ready`, `cohort-done`, `queue-failed`, `orphan`, `dead` i `usage-critical`; wybiera je `notify.ntfy.events`. `needs-input`, `limited` i `usage-critical` mają priorytet `high`, reszta `default`; zmienia to `notify.ntfy.priority`. Telefon dostaje to, co Mac: jedna zmiana stanu jest ogłaszana raz, także gdy widzą ją i zdarzenie agenta, i obserwator.
+- **Prywatność.** Na publicznym `ntfy.sh` każdy, kto zna nazwę tematu, może czytać wiadomości i wysyłać własne: **nazwa jest jedynym zabezpieczeniem**, więc nie ujawniaj jej, nie commituj `config.yaml` i do wrażliwych rzeczy używaj własnego serwera albo konta z tokenem. Dlatego wiadomość zawiera tylko ID zadania, nazwę kohorty i pierwszą linię werdyktu (`include_verdict: false` ją pomija). Nigdy treści raportu, pytania agenta, ścieżki ani nazwy pliku. `agentctl doctor` ostrzega przed krótkim lub podobnym do słów tematem i przed serwerem prywatnym bez tokenu.
+- **Gdy sieć nie działa.** Obserwator nie zwalnia ani się nie zatrzymuje. Nieudana wiadomość jest ponawiana trzy razy (po 30 sekundach, 2 i 10 minutach), potem porzucana z wpisem w `<katalog konfiguracji>/phone.log`; log obserwatora ostrzega raz na godzinę. `agentctl events` oznacza 📱 zdarzenia, które poszły na telefon.
+- **Gdzie widać away.** Nagłówek boardu (`📱 away`; klawisz `w` przełącza, po y/N), 📱 przed paskiem tmux, `agentctl away status` oraz MCP `status` i `events_since`. Czat może to przełączyć narzędziem MCP `away`, jeśli wpiszesz `away` do `mcp.allow` (bez potwierdzenia; jest w audycie).
+
+Szczegóły: [docs/details.pl.md](docs/details.pl.md#powiadomienia-na-telefon).
+
 ## Odpowiedniki modeli i move
 
 Modele Claude i Codexa nie odpowiadają sobie jeden do jednego, więc agentctl trzyma tabelę par, które uznajesz za równoważne (działa w obie strony), na przykład `opus/high` i `gpt-6-astra/medium`. Własne pary dodajesz w `equivalents:`; mają pierwszeństwo przed wbudowanymi. Fable i effort `max` są celowo niemapowane.
@@ -679,10 +715,9 @@ Czego agentctl nigdy nie robi:
 
 Pomysły, nie obietnice:
 
-1. **Powiadomienia na telefon.**
-2. **Zdalny MCP:** serwer dostępny dla czatu w przeglądarce lub na telefonie, z uwierzytelnianiem.
-3. **Modele lokalne** jako trzeci rodzaj agenta.
-4. **Wydanie npm** z krokiem budowania.
+1. **Zdalny MCP:** serwer dostępny dla czatu w przeglądarce lub na telefonie, z uwierzytelnianiem.
+2. **Modele lokalne** jako trzeci rodzaj agenta.
+3. **Wydanie npm** z krokiem budowania.
 
 ## Więcej
 

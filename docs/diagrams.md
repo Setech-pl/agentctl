@@ -15,6 +15,7 @@ sequenceDiagram
     participant G as git + tmux
     participant X as Agent (Claude Code / Codex)
     participant W as watch + notifier
+    participant P as Phone (ntfy)
 
     H->>C: describe the work
     C-->>H: spec (YAML header + prompt, optional cohort: name)
@@ -60,6 +61,9 @@ sequenceDiagram
     end
     X->>G: writes the report file
     W-->>H: notification (report ready, question, limit)
+    opt away is on
+        W-->>P: the same, only task ID + verdict line (ntfy, retried if the network is down)
+    end
     C->>A: events_since (MCP): what changed since the last call
     W-->>H: kohorta sprint-1: all reports ready (once per cohort)
     H->>A: agentctl pull --ready (or MCP pull_ready)
@@ -87,13 +91,14 @@ flowchart TB
         BOARD["board (Ink, src/board)"]
         MCP["MCP server (src/mcp, stdio)"]
     end
-    CORE["src/core: spec, plan, new, queue, cancel, cohort, collisions, status, pull, close, move, watch, events, notify, usage, history, limits, chat-events, journal, gc, resume"]
+    CORE["src/core: spec, plan, new, queue, cancel, cohort, collisions, status, pull, close, move, watch, events, notify, usage, history, limits, chat-events, journal, gc, resume, away, phone"]
     RUN["Runner: RealRunner / RecordingRunner"]
     subgraph world [Outside]
         TMUX[tmux session agentctl]
         GIT[git worktrees]
         AG[Claude Code and Codex]
         NOTE[terminal-notifier / osascript]
+        PHONE["ntfy server -> phone"]
         LOGS["agent logs: ~/.claude/projects/…/*.jsonl, ~/.codex/sessions/…/*.jsonl"]
         PS["ps, lsof: claude/codex sessions outside agentctl"]
     end
@@ -106,7 +111,7 @@ flowchart TB
         REP["cache: reports per task"]
         AUDIT["mcp-audit.log"]
         HIST["history.jsonl, usage-cache.json, usage-alerts.json, usage/claude-plan.json"]
-        JOURNAL["journal.jsonl, events-seen.json, reservations.json, config-state.json"]
+        JOURNAL["journal.jsonl, events-seen.json, reservations.json, config-state.json, away.json, phone-queue.json, phone.log"]
     end
     CLI --> CORE
     BOARD --> CORE
@@ -123,6 +128,7 @@ flowchart TB
     CORE <--> JOURNAL
     CORE -- "limits.count_external" --> PS
     CORE --> NOTE
+    CORE -- "away on: ID + verdict only" --> PHONE
     CORE <--> STATE
     CORE <--> QUEUE
     CORE <--> COH

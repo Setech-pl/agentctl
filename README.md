@@ -15,6 +15,7 @@ agentctl manages **work orders, not windows**. The unit is a spec: a Markdown fi
 - **One spec, one command.** `agentctl new` creates the git worktree, runs your setup commands, makes the symlinks, sets the environment, opens a tmux window, starts the agent and pastes the prompt.
 - **Task states.** `working`, `waiting`, `needs-input`, `needs-trust`, `limited`, `report-ready` and more, from the screen of each window and from events the agents send themselves (Claude hooks, Codex `notify`).
 - **Notifications.** One desktop notification per transition; a click on it switches to the task's window.
+- **Phone.** `agentctl ntfy-setup` and `agentctl away on`: the events that need you also go to your phone through ntfy, with only the task ID and the verdict line in the message.
 - **Board.** A full-screen overview of all tasks with a live preview of the selected window.
 - **Reports.** `agentctl pull --ready` collects the new reports into one text for your planning chat.
 - **Queue, dependencies, collisions.** More tasks than free windows? They wait and start by themselves; a review can wait for the author's report (`after`); two tasks changing the same files are flagged early.
@@ -38,6 +39,7 @@ sequenceDiagram
     participant G as git + tmux
     participant X as Agent (Claude Code / Codex)
     participant W as watch + notifier
+    participant P as Phone (ntfy)
 
     H->>C: describe the work
     C-->>H: spec (YAML header + prompt, optional cohort: name)
@@ -83,6 +85,9 @@ sequenceDiagram
     end
     X->>G: writes the report file
     W-->>H: notification (report ready, question, limit)
+    opt away is on
+        W-->>P: the same, only task ID + verdict line (ntfy, retried if the network is down)
+    end
     C->>A: events_since (MCP): what changed since the last call
     W-->>H: kohorta sprint-1: all reports ready (once per cohort)
     H->>A: agentctl pull --ready (or MCP pull_ready)
@@ -110,13 +115,14 @@ flowchart TB
         BOARD["board (Ink, src/board)"]
         MCP["MCP server (src/mcp, stdio)"]
     end
-    CORE["src/core: spec, plan, new, queue, cancel, cohort, collisions, status, pull, close, move, watch, events, notify, usage, history, limits, chat-events, journal, gc, resume"]
+    CORE["src/core: spec, plan, new, queue, cancel, cohort, collisions, status, pull, close, move, watch, events, notify, usage, history, limits, chat-events, journal, gc, resume, away, phone"]
     RUN["Runner: RealRunner / RecordingRunner"]
     subgraph world [Outside]
         TMUX[tmux session agentctl]
         GIT[git worktrees]
         AG[Claude Code and Codex]
         NOTE[terminal-notifier / osascript]
+        PHONE["ntfy server -> phone"]
         LOGS["agent logs: ~/.claude/projects/…/*.jsonl, ~/.codex/sessions/…/*.jsonl"]
         PS["ps, lsof: claude/codex sessions outside agentctl"]
     end
@@ -129,7 +135,7 @@ flowchart TB
         REP["cache: reports per task"]
         AUDIT["mcp-audit.log"]
         HIST["history.jsonl, usage-cache.json, usage-alerts.json, usage/claude-plan.json"]
-        JOURNAL["journal.jsonl, events-seen.json, reservations.json, config-state.json"]
+        JOURNAL["journal.jsonl, events-seen.json, reservations.json, config-state.json, away.json, phone-queue.json, phone.log"]
     end
     CLI --> CORE
     BOARD --> CORE
@@ -146,6 +152,7 @@ flowchart TB
     CORE <--> JOURNAL
     CORE -- "limits.count_external" --> PS
     CORE --> NOTE
+    CORE -- "away on: ID + verdict only" --> PHONE
     CORE <--> STATE
     CORE <--> QUEUE
     CORE <--> COH
@@ -423,6 +430,35 @@ Reading a screen every 15 seconds is a guess, so `agentctl new` also asks each a
 - Texts: `NC-42: <question>`, `NC-42: raport gotowy – <verdict>` (the verdict is the first meaningful report line, or the line `notify.verdict_pattern` matches), a usage limit, a task that waits for more than 120 seconds, a vanished window. The texts are in Polish at the moment.
 - States: [docs/diagrams.md](docs/diagrams.md#task-states). Details, event tables and what was checked on Claude Code 2.1.309 and Codex 0.166.0: [docs/details.md](docs/details.md#events).
 
+## Phone notifications
+
+When you leave the Mac, the events that need you can go to your phone through [ntfy](https://ntfy.sh), a free notification app for iOS and Android. It works with the public server `ntfy.sh` or with one of your own. The notifications on the Mac stay as they are; the phone is an addition, and it is quiet while you sit at the Mac.
+
+1. **Make a topic.** `agentctl ntfy-setup` writes a random topic (`agentctl-` and 24 hex digits) to `config.yaml`, keeps your comments, and prints these steps. `--server https://ntfy.example.com` is for a server of your own; `--show-qr` also prints the subscription link as a QR code if the `qrencode` tool is installed (`brew install qrencode`; agentctl adds no dependency for it).
+2. **Subscribe on the phone.** Install the app (iOS: App Store, "ntfy"; Android: Google Play or F-Droid, "ntfy"), tap **+** and type the topic. For your own server switch on "Use another server" and enter its address.
+3. **Test it.** `agentctl notify-test --phone` sends one message and prints the result, the HTTP code and the time (`--all` tests the Mac as well).
+4. **Say when you are away.** `agentctl away on` when you leave, `agentctl away off` when you are back; `agentctl away` shows the state. Or let the Mac decide: `away: {auto_idle: 15}` counts the Mac as away after 15 minutes without keyboard or mouse (macOS) and back at the first touch. `notify.ntfy.always: true` sends always.
+
+```yaml
+notify:
+  ntfy:
+    topic: agentctl-3f9c0a7e51b2d84c6e19a0f7   # written by ntfy-setup
+    # server: https://ntfy.sh                  # your own server instead
+    # token: tk_...                            # a private server or an ntfy account
+    # events: [needs-input, report-ready, limited, dead]
+    # priority: {report-ready: low}
+    # click_url: https://claude.ai/             # opened by a tap on the notification
+away:
+  auto_idle: 15
+```
+
+- **What is sent.** `needs-input`, `needs-trust`, `limited`, `blocked`, `report-ready`, `cohort-done`, `queue-failed`, `orphan`, `dead` and `usage-critical` by default; `notify.ntfy.events` chooses. `needs-input`, `limited` and `usage-critical` have the priority `high`, the rest `default`; `notify.ntfy.priority` changes it. The phone gets what the Mac got: one transition is announced once, also when the agent's event and the watcher both see it.
+- **Privacy.** On the public `ntfy.sh` anyone who knows the topic name can read the messages and send their own: **the name is the only protection**, so keep it secret, do not commit `config.yaml`, and prefer your own server or an account with a token for anything sensitive. That is why a message holds only the task ID, the name of a cohort and the first line of the verdict (`include_verdict: false` leaves that out). Never the text of a report, a question of an agent, a path or a file name. `agentctl doctor` warns about a short or word-like topic and about a private server without a token.
+- **When the network is down.** The watcher is not slowed or stopped. A failed message is tried again three times (after 30 seconds, 2 and 10 minutes), then dropped with a line in `<config dir>/phone.log`; the watch log warns once an hour. `agentctl events` marks the events that went to the phone with 📱.
+- **Where you see away.** The board header (`📱 away`; key `w` switches it, after y/N), a 📱 in front of the tmux status line, `agentctl away status`, and the MCP `status` and `events_since`. A chat can switch it with the MCP tool `away` if you put `away` in `mcp.allow` (no confirm step; it is audited).
+
+Details: [docs/details.md](docs/details.md#phone-notifications).
+
 ## Model equivalents and move
 
 Claude and Codex models do not map one to one, so agentctl keeps a table of pairs you consider equivalent (usable both ways), for example `opus/high` and `gpt-6-astra/medium`. Add your own under `equivalents:`; they win over the built-in ones. Fable and effort `max` are deliberately not mapped.
@@ -676,10 +712,9 @@ What agentctl never does:
 
 Ideas, not promises:
 
-1. **Phone notifications.**
-2. **Remote MCP:** a server a chat on the web or phone can reach, with authentication.
-3. **Local models** as a third kind of agent.
-4. **npm release** with a build step.
+1. **Remote MCP:** a server a chat on the web or phone can reach, with authentication.
+2. **Local models** as a third kind of agent.
+3. **npm release** with a build step.
 
 ## More
 
