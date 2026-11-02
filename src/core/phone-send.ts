@@ -4,7 +4,11 @@ import { phoneActive } from './away.ts';
 import type { GlobalConfig, PhoneEvent } from './config.ts';
 import type { Context } from './context.ts';
 import type { JournalEntry } from './journal.ts';
-import { phoneMessage, sendNtfy } from './phone.ts';
+import { HINTED_EVENTS, phoneMessage, sendNtfy } from './phone.ts';
+import { managerPhoneHint, rcAnswerHint } from './remote-control.ts';
+import { readTaskRecord } from './taskstore.ts';
+import { MANAGER_WINDOW } from './windows.ts';
+import { windowName } from './util.ts';
 import type { PhoneMessage } from './phone.ts';
 import { isObject } from './util.ts';
 
@@ -101,6 +105,17 @@ async function failed(ctx: Context, queue: PhoneQueue, event: PhoneEvent, error:
 }
 
 /**
+ * The last line of the notification: a question of a task that runs with Remote Control is answered in the Claude app, in the session named
+ * after the task; the other events that wait for a human point to the manager session, when it runs. Nothing else is added - no link, no path.
+ */
+export async function phoneHint(ctx: Context, event: PhoneEvent, task: string | undefined): Promise<string | undefined> {
+  if (!HINTED_EVENTS.includes(event)) return undefined;
+  if (event === 'needs-input' && task && readTaskRecord(ctx.config, windowName(task))?.remoteControl === true) return rcAnswerHint(task);
+  const windows = await ctx.tmux.listWindows().catch(() => [] as string[]);
+  return windows.includes(MANAGER_WINDOW) ? managerPhoneHint(ctx.config.manager.name) : undefined;
+}
+
+/**
  * Send the event to the phone if the phone is on duty: a topic, away on (or `notify.ntfy.always`) and the event in `notify.ntfy.events`.
  * Returns `sent`, `queued` (the first request failed; the watcher retries), or undefined when nothing was sent.
  */
@@ -108,7 +123,7 @@ export async function notifyPhone(ctx: Context, entry: Pick<JournalEntry, 'kind'
   const ntfy = ctx.config.notify.ntfy;
   const event = phoneEventOf(entry);
   if (!ntfy || !event || !phoneActive(ctx.config) || !ntfy.events.includes(event)) return undefined;
-  const message = phoneMessage(event, { task: entry.task, cohort: entry.cohort, verdict: entry.verdict, usage: entry.text }, ntfy);
+  const message = phoneMessage(event, { task: entry.task, cohort: entry.cohort, verdict: entry.verdict, usage: entry.text, hint: await phoneHint(ctx, event, entry.task) }, ntfy);
   if (!message) return undefined;
   const r = await sendNtfy(ctx.fetch, ntfy, message, () => ctx.runner.now());
   if (r.ok) return 'sent';

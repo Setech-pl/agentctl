@@ -26,7 +26,12 @@ export interface PhoneInput {
   verdict?: string | undefined;
   /** Prepared text for `usage-critical` (a provider and a percentage - no task). */
   usage?: string | undefined;
+  /** A last line of the body: where to answer from the phone (the Remote Control session of the task, or the manager). Never a link. */
+  hint?: string | undefined;
 }
+
+/** The events a hint is added to: the ones the phone user answers (a question), reads and decides on (a report) or follows up (a cohort). */
+export const HINTED_EVENTS: readonly PhoneEvent[] = ['needs-input', 'report-ready', 'cohort-done'];
 
 export const NTFY_TAGS: Record<PhoneEvent, string> = {
   'needs-input': 'question',
@@ -114,6 +119,7 @@ export function phoneMessage(event: PhoneEvent, input: PhoneInput, ntfy: Pick<Nt
       body = input.usage ? clip(input.usage, 140) : 'limit planu prawie wyczerpany';
       break;
   }
+  if (input.hint && HINTED_EVENTS.includes(event)) body = `${body}\n${input.hint}`;
   const message: PhoneMessage = { event, title: `agentctl · ${title}`, body, priority: ntfy.priority[event], tags: [NTFY_TAGS[event]] };
   if (ntfy.clickUrl) message.click = ntfy.clickUrl;
   return message;
