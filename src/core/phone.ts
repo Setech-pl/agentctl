@@ -1,10 +1,10 @@
 import type { Context } from './context.ts';
 import type { NtfyPriority, NtfySettings, PhoneEvent } from './config.ts';
-import { clip } from './events.ts';
+import { clip, MAX_QUESTION } from './events.ts';
 
 /*
  * Notifications to a phone through ntfy (https://ntfy.sh). On the public server the name of the topic is the only protection, so a message
- * carries the task ID, the name of a cohort and (if allowed) the first line of the verdict - never the text of a report, a path or a file name.
+ * carries the task ID, the name of a cohort and (if allowed) the first line of the verdict. Question text requires explicit opt-in.
  */
 
 export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
@@ -21,6 +21,8 @@ export interface PhoneMessage {
 
 export interface PhoneInput {
   text?: string | undefined;
+  /** Screen metadata only, separate from the question text (which may come from a session log). */
+  collapsed?: { count: number; shortcut: string | null } | undefined;
   task?: string | undefined;
   cohort?: string | undefined;
   /** The verdict line of a report; used only for `report-ready` and when `include_verdict` is on. */
@@ -63,7 +65,7 @@ export function safeVerdict(verdict: string): string {
 }
 
 /** The notification for the phone; undefined when the event needs a task or a cohort that is not given. */
-export function phoneMessage(event: PhoneEvent, input: PhoneInput, ntfy: Pick<NtfySettings, 'priority' | 'includeVerdict' | 'clickUrl'>): PhoneMessage | undefined {
+export function phoneMessage(event: PhoneEvent, input: PhoneInput, ntfy: Pick<NtfySettings, 'priority' | 'includeVerdict' | 'includeQuestion' | 'clickUrl'>): PhoneMessage | undefined {
   const { task, cohort } = input;
   let title: string;
   let body: string;
@@ -71,7 +73,15 @@ export function phoneMessage(event: PhoneEvent, input: PhoneInput, ntfy: Pick<Nt
     case 'needs-input':
       if (!task) return undefined;
       title = `${task}: pytanie`;
-      body = input.text || `${task} zadaje pytanie i czeka na odpowiedź`;
+      body = `${task}: pytanie agenta – otwórz okno`;
+      if (ntfy.includeQuestion) body = input.text ? clip(input.text, MAX_QUESTION) : `${task} zadaje pytanie i czeka na odpowiedź`;
+      else if (input.collapsed && Number.isSafeInteger(input.collapsed.count) && input.collapsed.count > 0) {
+        // The screen is untrusted: only keyboard notation may be copied into a private notification.
+        const shortcut = input.collapsed.shortcut;
+        const binding = shortcut && /^(?:[⇧⌃⌥⌘↑↓←→]+|(?:(?:Ctrl|Control|Shift|Alt|Meta|Cmd|Super)[+-])*(?:Up|Down|Left|Right|Enter|Return|Tab|Esc|Escape|[A-Za-z0-9]))$/i.test(shortcut)
+          ? shortcut : 'skrót przy „to answer” na ekranie';
+        body = `Codex ma pytanie (${input.collapsed.count}) – Enter → okno agenta, potem ${binding}`;
+      }
       break;
     case 'needs-trust':
       if (!task) return undefined;

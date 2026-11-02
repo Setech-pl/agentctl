@@ -9,13 +9,13 @@ import { withHarness } from './live-harness.ts';
 import type { Harness } from './live-harness.ts';
 
 /*
- * The live checks of milestone 0.13.0 (phone notifications), all inside the sandbox of live-harness.ts. The network is touched twice:
+ * The live checks of milestone 0.13.0 (phone notifications), all inside the sandbox of live-harness.ts. Network requests go only to localhost:
  *   1. a mock ntfy server on 127.0.0.1 (a separate process: the harness runs agentctl with spawnSync) - a report-ready event of a
  *      fake agent while away is on gives exactly one request; away off gives none; a dead server queues the request and the
  *      watcher delivers it after the first backoff
- *   2. ONE request to the public https://ntfy.sh on a temporary random topic (notify-test --phone, code 200); the topic is removed
+ *   2. notify-test --phone to a mock ntfy server (HTTP 200); the temporary topic is removed
  *      from the test config afterwards
- * Run: node --experimental-strip-types --no-warnings scripts/live-phone.ts   Results: ~/Projects/cache/agentctl-13/live-results.json
+ * Run: node --experimental-strip-types --no-warnings scripts/live-phone.ts   Results: ~/Projects/cache/agentctl-15/live-phone-results.json
  */
 
 const CACHE = path.join(os.homedir(), 'Projects', 'cache', 'agentctl-15');
@@ -195,18 +195,25 @@ async function mockServer(): Promise<void> {
   );
 }
 
-async function publicNtfy(): Promise<void> {
-  current = 'public ntfy.sh';
+async function phoneTest(): Promise<void> {
+  current = 'notify-test mock ntfy';
   const topic = `agentctl-live-${randomBytes(16).toString('hex')}`;
-  await withHarness({ name: 'phone-public', cacheRoot: CACHE, config: `notify:\n  ntfy:\n    topic: ${topic}\n` }, async (h) => {
+  await withHarness({ name: 'phone-notify-test', cacheRoot: CACHE, config: `notify:\n  ntfy:\n    topic: ${topic}\n` }, async (h) => {
     const configFile = path.join(h.agentctlHome, 'config.yaml');
     const setup = h.agentctl(['doctor']);
     check('doctor sees the phone: public server, long topic, no warning', /phone\s+ntfy\.sh|✓ phone/.test(setup.stdout) && !/! phone/.test(setup.stdout), setup.stdout.split('\n').filter((l) => /phone/.test(l)).join('\n'));
-    const r = h.agentctl(['notify-test', '--phone'], { timeoutMs: 30_000 });
-    check('ONE request to https://ntfy.sh on a random temporary topic: HTTP 200', r.code === 0 && /Phone: {2}ntfy {2}ok {2}HTTP 200 {2}\d+ ms {2}\(https:\/\/ntfy\.sh, topic agentctl-live…\)/.test(r.stdout), r.stdout + r.stderr);
-    check('the output does not print the whole topic', !r.stdout.includes(topic));
+    const port = await freePort();
+    const mock = new MockNtfy(port, path.join(h.root, 'ntfy-test-requests.jsonl'));
+    mock.start();
+    try {
+      await sleep(500);
+      fs.appendFileSync(configFile, `    server: http://127.0.0.1:${port}\n`);
+      const r = h.agentctl(['notify-test', '--phone'], { timeoutMs: 30_000 });
+      check('ONE request to mock ntfy: HTTP 200', r.code === 0 && /Phone: {2}ntfy {2}ok {2}HTTP 200/.test(r.stdout) && mock.seen().length === 1, r.stdout + r.stderr);
+      check('the output does not print the whole topic', !r.stdout.includes(topic));
+    } finally { mock.stop(); }
     // remove the temporary topic from the test config
-    fs.writeFileSync(configFile, fs.readFileSync(configFile, 'utf8').replace(/notify:\n {2}ntfy:\n {4}topic: .*\n/, ''));
+    fs.writeFileSync(configFile, fs.readFileSync(configFile, 'utf8').replace(/notify:\n[\s\S]*$/, ''));
     check('the temporary topic is removed from the test config', !fs.readFileSync(configFile, 'utf8').includes(topic));
     check('notify-test --phone now says the phone is not set up (no request)', /not set up/.test(h.agentctl(['notify-test', '--phone']).stdout));
   });
@@ -214,7 +221,7 @@ async function publicNtfy(): Promise<void> {
 
 async function main(): Promise<number> {
   fs.mkdirSync(CACHE, { recursive: true });
-  for (const run of [mockServer, publicNtfy]) {
+  for (const run of [mockServer, phoneTest]) {
     try {
       await run();
     } catch (e) {

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { MAX_QUESTION } from '../src/core/events.ts';
 import { DEFAULT_NTFY_SERVER, PHONE_EVENTS } from '../src/core/config.ts';
 import { buildNtfyRequest, headerValue, phoneMessage, safeVerdict, sendNtfy } from '../src/core/phone.ts';
 import type { FetchLike } from '../src/core/phone.ts';
@@ -18,9 +19,19 @@ describe('phone: config notify.ntfy', () => {
     assert.equal(n.topic, 'agentctl-abc123');
     assert.deepEqual(n.events, [...PHONE_EVENTS]);
     assert.equal(n.includeVerdict, true);
+    assert.equal(n.includeQuestion, false);
     assert.equal(n.always, false);
     assert.equal(n.token, undefined);
     assert.equal(n.clickUrl, undefined);
+  });
+
+  it('include_question accepts only booleans and is opt-in', () => {
+    for (const value of [false, true]) {
+      assert.equal(ntfyOf(`question-${value}`, `notify:\n  ntfy:\n    include_question: ${value}\n`)?.includeQuestion, value);
+    }
+    for (const value of ['yes', '1', 'null', '"false"']) {
+      assert.throws(() => ntfyOf(`question-bad-${value.replace(/"/g, '')}`, `notify:\n  ntfy:\n    include_question: ${value}\n`), /include_question must be true or false/);
+    }
   });
 
   it('default priorities: high for needs-input, limited and usage-critical, the rest default', () => {
@@ -59,7 +70,7 @@ describe('phone: config notify.ntfy', () => {
   });
 });
 
-const settings = { priority: ntfyOf('pm', 'notify:\n  ntfy:\n    topic: t1\n')!.priority, includeVerdict: true };
+const settings = { priority: ntfyOf('pm', 'notify:\n  ntfy:\n    topic: t1\n')!.priority, includeVerdict: true, includeQuestion: false };
 
 describe('phone: the message', () => {
   it('has the task ID, the cohort and the verdict - nothing else', () => {
@@ -80,6 +91,27 @@ describe('phone: the message', () => {
     assert.equal(f?.body, 'NC-2: start z kolejki nie powiódł się');
     const none = phoneMessage('report-ready', { task: 'NC-3', verdict: 'Werdykt: PASS' }, { ...settings, includeVerdict: false });
     assert.equal(none?.body, 'NC-3: raport gotowy');
+  });
+
+  it('question content is private by default, including expanded dialogs and session text', () => {
+    const text = 'NC-1: Czy wysłać hunter2 z /Users/m/secret.txt?';
+    const message = phoneMessage('needs-input', { task: 'NC-1', text }, settings)!;
+    assert.equal(message.body, 'NC-1: pytanie agenta – otwórz okno');
+    assert.doesNotMatch(JSON.stringify(buildNtfyRequest({ server: 'http://localhost', topic: 'test' }, message)), /hunter2|secret|Users/);
+    const collapsed = phoneMessage('needs-input', { task: 'NC-1', text, collapsed: { count: 2, shortcut: '⇧↑' } }, settings)!;
+    assert.equal(collapsed.body, 'Codex ma pytanie (2) – Enter → okno agenta, potem ⇧↑');
+    assert.doesNotMatch(collapsed.title + collapsed.body, /hunter2|secret|Users/);
+    const unsafe = phoneMessage('needs-input', { task: 'NC-1', text, collapsed: { count: 2, shortcut: 'hunter2' } }, settings)!;
+    assert.doesNotMatch(unsafe.body, /hunter2/);
+    assert.match(unsafe.body, /skrót przy/);
+  });
+
+  it('include_question true sends question text with the notification limit and the session hint', () => {
+    const text = 'NC-1: Czy wysłać hunter2?';
+    const enabled = { ...settings, includeQuestion: true };
+    assert.equal(phoneMessage('needs-input', { task: 'NC-1', text, hint: 'Odpowiesz w aplikacji Claude: NC-1' }, enabled)?.body,
+      `${text}\nOdpowiesz w aplikacji Claude: NC-1`);
+    assert.ok(phoneMessage('needs-input', { task: 'NC-1', text: text.repeat(100) }, enabled)!.body.length <= MAX_QUESTION);
   });
 
   it('paths and file names inside the verdict line are cut', () => {
@@ -107,7 +139,7 @@ describe('phone: the HTTP request', () => {
     const r = buildNtfyRequest({ server: 'https://ntfy.example.com', topic: 'agentctl-xyz', token: 'tk_1' }, m);
     assert.equal(r.url, 'https://ntfy.example.com/agentctl-xyz');
     assert.equal(r.init.method, 'POST');
-    assert.equal(r.init.body, 'NC-7 zadaje pytanie i czeka na odpowiedź');
+    assert.equal(r.init.body, 'NC-7: pytanie agenta – otwórz okno');
     const h = r.init.headers;
     assert.equal(h.Priority, 'high');
     assert.equal(h.Tags, 'question');

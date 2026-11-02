@@ -83,6 +83,7 @@ Default icons: `working` ⚙, `background` ⏳, `waiting` ⏸, `needs-input` ?, 
 | `notify.ntfy.token` | text | none | g | Bearer token for a private server or an ntfy account. |
 | `notify.ntfy.events` | list | all ten | g | `needs-input`, `needs-trust`, `limited`, `blocked`, `report-ready`, `cohort-done`, `queue-failed`, `orphan`, `dead`, `usage-critical`. |
 | `notify.ntfy.priority` | mapping | `needs-input`, `limited`, `usage-critical`: `high`; the rest `default` | g | ntfy priority per event: `min`, `low`, `default`, `high`, `urgent`. |
+| `notify.ntfy.include_question` | boolean | `false` | g | Opt in to sending question text to the phone (clipped to 120 characters). By default only the opening instructions and session hints are sent; local notifications, board, peek and status/MCP retain the question. Reloads live, including queued retries. |
 | `notify.ntfy.include_verdict` | boolean | `true` | g | The first line of the verdict goes into "report ready". Never more of the report; no paths or file names. |
 | `notify.ntfy.click_url` | URL | none | g | Opened by a tap on the notification, for example the address of the chat. |
 | `notify.ntfy.always` | boolean | `false` | g | Send always, not only while `agentctl away` is on. |

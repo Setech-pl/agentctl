@@ -56,4 +56,4 @@ await withHarness({ name: 'my-try' }, (h) => {
 
 Match the surrounding code. agentctl never merges, pushes, rebases or turns on an auto-accept mode, and deletes a branch only in `gc --branches`, with `git branch -d` for a merged one; a change that would do any of these is out of scope. Messages to the user are short and say what to do next.
 
-Codex: collapsed questions show their count and the shortcut read from “to answer”. `needs-input` takes priority while Codex keeps working; after answering, the screen determines the state again. Board preview, peek, status/MCP `question`, macOS and ntfy show the question or opening instructions.
+Codex: collapsed questions show their count and the shortcut read from “to answer”. `needs-input` takes priority while Codex keeps working; after answering, the screen determines the state again. Board preview, peek, status/MCP `question` and macOS show the question or opening instructions. ntfy sends only opening instructions by default; `notify.ntfy.include_question: true` opts into question text.
