@@ -213,6 +213,7 @@ export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: Q
     if (spec.reviewOf && spec.after.length === 0 && !hasReport(rows.find((r) => r.task === spec.reviewOf))) {
       lines.push(`  hint:     ${spec.task} reviews ${spec.reviewOf}, which has no report yet: add "after: ${spec.reviewOf}" to the header so the review starts when the author's report is ready`);
     }
+    if (spec.remoteControl) lines.push('  remote:   Remote Control on: the session is named after the task in the Claude app');
     if (spec.pin) lines.push('  pin:      stays on this provider (it is never switched by the queue either)');
     load[spec.agent]++;
   }

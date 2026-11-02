@@ -8,6 +8,7 @@ import { mcpEntryFrom, MCP_SERVER_NAME } from './mcp-install.ts';
 import type { McpEntry } from './mcp-install.ts';
 import { MCP_TOOLS } from './mcp-tools.ts';
 import { waitForReady } from './ready.ts';
+import { RC_CONFIRM, RC_CONNECTED, RC_FAILED, RC_FIRST_TIME } from './remote-control.ts';
 import { AgentctlError, expandHome } from './util.ts';
 import type { SelfArgv } from './events.ts';
 import { MANAGER_WINDOW } from './windows.ts';
@@ -20,7 +21,7 @@ import { MANAGER_WINDOW } from './windows.ts';
  * file, does not count against the limits and is not touched by close, cancel or gc.
  */
 
-export { MANAGER_WINDOW };
+export { MANAGER_WINDOW, RC_CONFIRM, RC_CONNECTED, RC_FAILED };
 
 /** Where the files the manager is started with live (all of them are rewritten at every start). */
 export function managerFiles(config: Pick<GlobalConfig, 'path'>): { dir: string; role: string; settings: string; mcp: string } {
@@ -44,15 +45,6 @@ export type ManagerState =
   | 'failed'
   /** The window is there, Claude Code does not show its input yet. */
   | 'starting';
-
-/*
- * What Claude Code 2.1.309 prints, from the Remote Control documentation (https://code.claude.com/docs/en/remote-control): `/rc active` while
- * connected, "Remote Control failed" / "Remote Control disconnected" when not, a dialog "Enable Remote Control" until it is accepted once.
- * Not seen on a real screen by agentctl (it never starts the real claude in tests), so doctor and the docs say it is a reading of the docs.
- */
-export const RC_CONNECTED = '/rc active';
-export const RC_FAILED = 'Remote Control (?:failed|disconnected)|Remote Control (?:requires|is disabled|is only available|isn.t enabled)|Couldn.t (?:verify|reconnect)';
-export const RC_CONFIRM = 'Enable Remote Control\\b(?! for all sessions)';
 
 const test = (pattern: string, screen: string): boolean => new RegExp(pattern, PATTERN_FLAGS).test(screen);
 
@@ -358,7 +350,7 @@ export function managerAdvice(ctx: Pick<Context, 'config'>, result: ManagerStart
       return [`The manager "${result.name}" is connected. Open the Claude app on the phone, tap Code, and pick the session with a computer icon and a green dot.`];
     case 'confirm':
       return [
-        `The manager waits for you in window ${session}:${MANAGER_WINDOW}: confirm the folder trust and, the first time, "Enable Remote Control" there (agentctl never answers these dialogs).`,
+        `The manager waits for you in window ${session}:${MANAGER_WINDOW}: ${RC_FIRST_TIME}.`,
         `Go there: ${attach}`,
         'Then: agentctl manager --url, or open the Claude app on the phone, tap Code and pick the session.',
       ];

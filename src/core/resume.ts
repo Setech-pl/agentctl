@@ -112,7 +112,7 @@ export async function resumeTasks(ctx: Context, plan: ResumePlan, opts: { self?:
     sessionUp = true;
     const windowId = (await tmux.windows()).find((w) => w.plain === c.window)?.id;
     if (windowId) await setHeaderField(runner, taskFile(config, c.window), 'window_id', windowId);
-    const command = agentCommandLine(buildResumeArgv({ agent: c.agent, model: c.model, effort: c.effort as never }, config.agents[c.agent], wiring?.args, c.sessionId));
+    const command = agentCommandLine(buildResumeArgv({ agent: c.agent, model: c.model, effort: c.effort as never, task: c.task, remoteControl: record.remoteControl }, config.agents[c.agent], wiring?.args, c.sessionId));
     await tmux.typeCommand(c.window, command);
     ctx.info(`${c.task}: window ${config.session}:${c.window} running ${command}`);
     results.push({ task: c.task, command });

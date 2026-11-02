@@ -50,6 +50,8 @@ export interface TaskRecord {
   adopted?: string;
   /** `pin: true` in the spec: `agentctl move` never hands this task to the other provider. Absent in records from before it was kept. */
   pin?: boolean;
+  /** `remote_control: true` in the spec: the agent runs with `--remote-control <TASK>` (the session in the Claude app is named after the task). */
+  remoteControl?: boolean;
   /** The task that took over after `agentctl move`; this one is then `superseded`. */
   supersededBy?: string;
   /** The task this one continues (`agentctl move`). */
@@ -104,6 +106,7 @@ export function recordFromSpec(spec: ResolvedSpec, config: GlobalConfig, started
   if (spec.switchedBy) record.switchedBy = spec.switchedBy;
   if (spec.reviewOf) record.reviewOf = spec.reviewOf;
   if (spec.pin) record.pin = true;
+  if (spec.remoteControl) record.remoteControl = true;
   if (spec.cohort) record.cohort = spec.cohort;
   if (spec.reportAlt) record.reportAlt = spec.reportAlt;
   return record;
@@ -137,6 +140,7 @@ export function renderTaskMd(record: TaskRecord, prompt: string): string {
   if (record.pulled) header.pulled = record.pulled;
   if (record.adopted) header.adopted = record.adopted;
   if (record.pin) header.pin = true;
+  if (record.remoteControl) header.remote_control = true;
   if (record.supersededBy) header.superseded_by = record.supersededBy;
   if (record.continues) header.continues = record.continues;
   if (record.hidden !== undefined) header.hidden = record.hidden;
@@ -220,6 +224,7 @@ export function parseTaskRecord(text: string): TaskRecord | undefined {
   if (typeof data.pulled === 'string') record.pulled = data.pulled;
   if (typeof data.adopted === 'string') record.adopted = data.adopted;
   if (data.pin === true) record.pin = true;
+  if (data.remote_control === true) record.remoteControl = true;
   if (typeof data.superseded_by === 'string') record.supersededBy = data.superseded_by;
   if (typeof data.continues === 'string') record.continues = data.continues;
   if (typeof data.hidden === 'boolean') record.hidden = data.hidden;

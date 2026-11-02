@@ -48,6 +48,8 @@ export interface ResolvedSpec {
   prompt: string;
   /** `pin: true`: never switch this task to the other provider. */
   pin: boolean;
+  /** `remote_control: true` (Claude only): the agent starts with `--remote-control <TASK>`, so the task can be answered from the Claude app. Absent: off. */
+  remoteControl?: boolean;
   /** Queue order: `high` starts before every `normal` task (FIFO inside each class). Only the queue looks at it. */
   priority: 'high' | 'normal';
   /** Tasks that must have a report before this one starts (queue). `new` refuses to start a task whose `after` is not met. */
@@ -142,7 +144,7 @@ export interface ResolveContext {
 }
 
 /** Keys of a spec header, and of one entry of its `repos`; docs/configuration.md describes each one. */
-export const SPEC_KEYS = ['task', 'agent', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'report', 'pin', 'priority', 'after', 'touches', 'cohort'];
+export const SPEC_KEYS = ['task', 'agent', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'report', 'pin', 'remote_control', 'priority', 'after', 'touches', 'cohort'];
 export const REPO_KEYS = ['path', 'worktree', 'base', 'branch'];
 
 function label(raw: RawSpec): string {
@@ -231,6 +233,11 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     if (typeof h.pin === 'boolean') pin = h.pin;
     else p.add('pin must be true or false');
   }
+  let specRemote: boolean | undefined;
+  if (h.remote_control !== undefined && h.remote_control !== null) {
+    if (typeof h.remote_control === 'boolean') specRemote = h.remote_control;
+    else p.add('remote_control must be true or false');
+  }
   const after: string[] = [];
   if (h.after !== undefined && h.after !== null) {
     const list = Array.isArray(h.after) ? h.after : [h.after];
@@ -275,6 +282,16 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   }
   const model = specModel ?? project?.defaults.model ?? config.defaults.model ?? 'default';
   const effort = specEffort ?? project?.defaults.effort ?? config.defaults.effort ?? 'high';
+
+  // Remote Control is a Claude Code feature. In the spec it is an order (a codex task that asks for it is an error); as a default it only
+  // applies to Claude tasks.
+  const remoteDefault = project?.defaults.remoteControl ?? config.defaults.remoteControl ?? false;
+  if (specRemote === true && agent === 'codex') p.add('remote_control: true works for Claude only (Codex has no Remote Control); drop the key or use agent: claude');
+  if (specRemote === true || (specRemote === undefined && remoteDefault && agent === 'claude')) {
+    const flags = config.agents.claude.flags;
+    const own = flags.find((f) => f === '--remote-control' || f === '--rc' || f === 'remote-control');
+    if (agent !== 'codex' && own) p.add(`remote_control: true, but agents.claude.flags in ${config.path} already has ${own}: use one of them (the server mode "remote-control" refuses the settings of the event hooks)`);
+  }
 
   p.throwIfAny(`${label(raw)} is invalid:`, 'Run "agentctl spec example" to see the format.');
 
@@ -358,6 +375,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     requested: { agent: agent as AgentName, model, effort },
   };
   if (reviewOf) spec.reviewOf = reviewOf;
+  if (agent === 'claude' && (specRemote ?? remoteDefault)) spec.remoteControl = true;
   if (cohort) spec.cohort = cohort;
   if (reportAlt.length > 0) spec.reportAlt = reportAlt;
   return spec;
