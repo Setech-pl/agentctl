@@ -29,6 +29,8 @@ export interface TaskRecord {
   links: Link[];
   env: Record<string, string>;
   reviewOf?: string;
+  /** The cohort of the task (display name, as the cohort was first written). Absent: no cohort. */
+  cohort?: string;
   report: string;
   /** ISO timestamp of `agentctl new`. */
   started: string;
@@ -95,6 +97,7 @@ export function recordFromSpec(spec: ResolvedSpec, config: GlobalConfig, started
   if (spec.switchedBy) record.switchedBy = spec.switchedBy;
   if (spec.reviewOf) record.reviewOf = spec.reviewOf;
   if (spec.pin) record.pin = true;
+  if (spec.cohort) record.cohort = spec.cohort;
   return record;
 }
 
@@ -116,6 +119,7 @@ export function renderTaskMd(record: TaskRecord, prompt: string): string {
   };
   if (record.reviewOf) header.review_of = record.reviewOf;
   if (record.switchedBy) header.switched_by = record.switchedBy;
+  if (record.cohort) header.cohort = record.cohort;
   header.report = record.report;
   header.started = record.started;
   if (record.pulled) header.pulled = record.pulled;
@@ -196,6 +200,7 @@ export function parseTaskRecord(text: string): TaskRecord | undefined {
   if (typeof data.window_id === 'string' && /^@\d+$/.test(data.window_id)) record.windowId = data.window_id;
   if (data.switched_by === 'flag' || data.switched_by === 'limit') record.switchedBy = data.switched_by;
   if (typeof data.review_of === 'string') record.reviewOf = data.review_of;
+  if (typeof data.cohort === 'string' && data.cohort !== '') record.cohort = data.cohort;
   if (typeof data.pulled === 'string') record.pulled = data.pulled;
   if (typeof data.adopted === 'string') record.adopted = data.adopted;
   if (data.pin === true) record.pin = true;

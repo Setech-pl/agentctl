@@ -72,6 +72,8 @@ export interface StatusRow {
   /** ISO time of the `cancel` and the reason that was given; null when not cancelled (or none given). */
   cancelledAt: string | null;
   cancelReason: string | null;
+  /** The cohort of the task (as first written); null when it has none. */
+  cohort: string | null;
   /** The task that took over after `agentctl move` (this one is then `superseded`), and the task this one continues. */
   supersededBy: string | null;
   continues: string | null;
@@ -171,6 +173,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       cancelled,
       cancelledAt: cancelled ? (record.cancelledAt ?? null) : null,
       cancelReason: cancelled ? (record.cancelReason ?? null) : null,
+      cohort: record.cohort ?? null,
       supersededBy: record.supersededBy ?? null,
       continues: record.continues ?? null,
     });
@@ -215,6 +218,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       cancelled: false,
       cancelledAt: null,
       cancelReason: null,
+      cohort: null,
       supersededBy: null,
       continues: null,
     });
@@ -233,10 +237,11 @@ export async function reportStatus(ctx: Context, opts: { archived?: boolean } = 
 export function statusMarkdown(rows: StatusRow[]): string {
   const cell = (s: string): string => s.replace(/\|/g, '\\|');
   const pulled = (r: StatusRow): string => (r.report === 'missing' ? '-' : r.pulled ? `yes (${formatLocalTime(r.pulled)})` : 'no');
+  const cohort = rows.some((r) => r.cohort !== null);
   const lines = [
-    '| task | agent/model/effort | state | time | progress | report | pulled? |',
-    '|---|---|---|---|---|---|---|',
-    ...rows.map((r) => `| ${cell(r.task)} | ${cell(`${r.agent}/${r.model}/${r.effort}`)} | ${r.state} | ${r.duration} | ${r.progress?.text ?? '-'} | ${r.report} | ${pulled(r)} |`),
+    `| task | ${cohort ? 'cohort | ' : ''}agent/model/effort | state | time | progress | report | pulled? |`,
+    `|---|${cohort ? '---|' : ''}---|---|---|---|---|---|`,
+    ...rows.map((r) => `| ${cell(r.task)} | ${cohort ? `${cell(r.cohort ?? '-')} | ` : ''}${cell(`${r.agent}/${r.model}/${r.effort}`)} | ${r.state} | ${r.duration} | ${r.progress?.text ?? '-'} | ${r.report} | ${pulled(r)} |`),
   ];
   return `${lines.join('\n')}\n`;
 }

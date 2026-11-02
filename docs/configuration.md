@@ -201,6 +201,7 @@ The header of a spec file, between `---` lines, followed by the prompt. Several 
 | `pin` | boolean | `false` | s | `true`: never move the task to the other provider, by `--agent` or by a limit. |
 | `after` | task ID or list | none | s | The task starts only when every named task has a report (`report-ready`, or closed with a report). Meant for the queue; `new` refuses a task whose `after` is not met. Unknown tasks and circles are errors. |
 | `touches` | glob or list of globs | none | s | Files the task will change. `queue` and `new` warn (and ask y/N) when an active task of the same repository already changes matching files. |
+| `cohort` | name | none | s | The cohort of the task: letters, digits, `-`, `_` and `.` (at most 40 characters), compared without regard to case and shown as it was first written. The cohort is made by its first task; its file is `<config dir>/cohorts/<name>.json`. Without the key the task belongs to no cohort (there is no default one). `new --cohort` and `queue --cohort` override it for the whole file. See [cohorts](details.md#cohorts). |
 | `priority` | `high` or `normal` | `normal` | s | Queue order: `high` tasks start before every `normal` one (first come, first served inside each class). `new` ignores it. |
 
 ## Environment variables

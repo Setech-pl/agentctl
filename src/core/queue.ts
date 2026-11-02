@@ -6,6 +6,7 @@ import { Alerts } from './alert.ts';
 import { cancelledTasks, checkAfter, findBlocked, blockedText, hasReport, unmetAfter, waitingText } from './depends.ts';
 import type { Blockers } from './depends.ts';
 import { touchWarnings } from './collisions.ts';
+import { touchCohort } from './cohort.ts';
 import type { AgentName, Effort, GlobalConfig } from './config.ts';
 import { AGENT_NAMES } from './config.ts';
 import type { Context } from './context.ts';
@@ -20,7 +21,7 @@ import { resolveSpec, splitSpecs } from './spec.ts';
 import type { RawSpec, ResolvedSpec } from './spec.ts';
 import { listArchivedRecords, listTaskRecords, recordFromSpec, renderTaskMd, taskDir, taskFile } from './taskstore.ts';
 import type { CancelSource, TaskRecord } from './taskstore.ts';
-import { AgentctlError, errorMessage, formatLocalTime, windowName } from './util.ts';
+import { AgentctlError, cohortKey, errorMessage, formatLocalTime, windowName } from './util.ts';
 
 /*
  * The task queue. A queued task is a spec file in <AGENTCTL_HOME>/queue/ (one JSON file per task: the spec text and what the queue
@@ -49,6 +50,8 @@ export interface QueueEntry {
   reviewOf?: string;
   /** The tasks that must have a report before this one starts. */
   after: string[];
+  /** The cohort of the task (display name); absent: none. */
+  cohort?: string;
   /** Start again over a worktree that is already there (`queue retry`). */
   reuse?: boolean;
   /** `status: starting`: ISO time the watcher began the start. */
@@ -131,6 +134,9 @@ export function findEntry(config: Pick<GlobalConfig, 'path'>, input: string): Qu
 async function writeEntry(ctx: Context, entry: QueueEntry): Promise<void> {
   await ctx.runner.writeFile(entryFile(ctx.config, entry), `${JSON.stringify(entry, null, 2)}\n`);
 }
+
+/** Write an entry back after a change (its cohort, its `after`). */
+export const saveEntry = writeEntry;
 
 /** The spec of one raw spec as text, so that it can be parsed again when its turn comes. */
 export function renderRawSpec(raw: RawSpec): string {
@@ -234,6 +240,7 @@ export async function commitQueueAdd(ctx: Context, items: QueueAddItem[], opts: 
     };
     if (opts.agent) entry.agentOverride = opts.agent;
     if (spec.reviewOf) entry.reviewOf = spec.reviewOf;
+    if (spec.cohort) entry.cohort = (await touchCohort(ctx, spec.cohort)).name;
     await writeEntry(ctx, entry);
     added.push(entry);
   }
@@ -417,10 +424,13 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
 }
 
 /** What `status` prints under its table: the waiting tasks and what each one waits for; nothing when the queue is empty. */
-export async function queueStatusLines(ctx: Context): Promise<string[]> {
+export async function queueStatusLines(ctx: Context, cohort?: string): Promise<string[]> {
   const entries = readQueue(ctx.config);
   if (entries.length === 0) return [];
-  const views = describeQueue(ctx.config, entries, await liveWindows(ctx), await collectStatus(ctx, { progress: false, archived: true }));
+  const all = describeQueue(ctx.config, entries, await liveWindows(ctx), await collectStatus(ctx, { progress: false, archived: true }));
+  // The places in line are those of the whole queue, whatever is shown.
+  const views = cohort ? all.filter((v) => v.entry.cohort !== undefined && cohortKey(v.entry.cohort) === cohortKey(cohort)) : all;
+  if (views.length === 0) return [];
   const open = views.filter((v) => v.entry.status !== 'failed');
   return [
     `Queue (${open.length}${views.length > open.length ? `, ${views.length - open.length} failed` : ''}): agentctl queue list`,

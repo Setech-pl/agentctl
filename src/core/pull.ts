@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import { findClipboardTool, writeClipboard } from './clipboard.ts';
+import { cohortRows } from './cohort.ts';
 import type { Context } from './context.ts';
 import { syncMirror } from './mirror.ts';
 import { collectStatus } from './status.ts';
@@ -72,14 +73,16 @@ export interface PullReadyResult {
  * (`all`: pulled ones too) into one text, copy it to the clipboard and mark each task as pulled
  * in its TASK.md. Nothing is marked when the copy fails.
  */
-export async function pullReady(ctx: Context, opts: { all?: boolean } = {}, platform?: string): Promise<PullReadyResult> {
+export async function pullReady(ctx: Context, opts: { all?: boolean; cohort?: string } = {}, platform?: string): Promise<PullReadyResult> {
   const { config, runner } = ctx;
-  const rows = await collectStatus(ctx);
-  if (config.mirrorDir) await syncMirror(ctx, rows);
+  const allRows = await collectStatus(ctx);
+  if (config.mirrorDir) await syncMirror(ctx, allRows);
+  // `cohort`: only the tasks of that cohort (the mirror above still gets every report).
+  const rows = opts.cohort ? cohortRows(allRows, opts.cohort) : allRows;
   const chosen = selectReady(rows, Boolean(opts.all));
   const empty: PullReadyResult = { pulled: [], totalBytes: 0, text: '', copied: false, warnedLarge: false };
   if (chosen.length === 0) {
-    ctx.out(noReadyMessage(rows));
+    ctx.out(opts.cohort ? `${noReadyMessage(rows)} (cohort ${opts.cohort})` : noReadyMessage(rows));
     return empty;
   }
 

@@ -11,7 +11,7 @@ import {
 } from './config.ts';
 import type { AgentName, Effort, GlobalConfig, Layer, Link } from './config.ts';
 import type { Order } from './equivalents.ts';
-import { AgentctlError, Problems, TASK_ID, errorMessage, fillPlaceholders, isObject, resolvePath, windowName } from './util.ts';
+import { AgentctlError, Problems, TASK_ID, cohortNameProblem, errorMessage, fillPlaceholders, isObject, resolvePath, windowName } from './util.ts';
 
 /** A spec as written in the file: untouched YAML header plus the prompt below it. */
 export interface RawSpec {
@@ -51,6 +51,8 @@ export interface ResolvedSpec {
   after: string[];
   /** Globs of the files the task will change: `queue` and `new` warn when an active task already changes matching files. */
   touches: string[];
+  /** The cohort the task belongs to, as written. Absent: no cohort (there is no default one). */
+  cohort?: string;
   /** The order as written in the spec; agent/model/effort above are the effective values. */
   requested: Order;
   /** Why the effective order differs from the requested one. */
@@ -137,7 +139,7 @@ export interface ResolveContext {
 }
 
 /** Keys of a spec header, and of one entry of its `repos`; docs/configuration.md describes each one. */
-export const SPEC_KEYS = ['task', 'agent', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'report', 'pin', 'priority', 'after', 'touches'];
+export const SPEC_KEYS = ['task', 'agent', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'report', 'pin', 'priority', 'after', 'touches', 'cohort'];
 export const REPO_KEYS = ['path', 'worktree', 'base', 'branch'];
 
 function label(raw: RawSpec): string {
@@ -246,6 +248,12 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
       else p.add(`touches must be a glob or a list of globs (e.g. [src/menu/**, "*.css"]), got ${JSON.stringify(glob)}`);
     }
   }
+  let cohort: string | undefined;
+  if (h.cohort !== undefined && h.cohort !== null) {
+    const problem = cohortNameProblem(h.cohort);
+    if (problem) p.add(problem);
+    else cohort = (h.cohort as string).normalize('NFC');
+  }
   const priority = parseEnumValue(h.priority, PRIORITIES, 'priority', p) ?? 'normal';
   if (raw.prompt === '') p.add('the prompt is empty (write it below the closing "---" of the header)');
 
@@ -345,5 +353,6 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     requested: { agent: agent as AgentName, model, effort },
   };
   if (reviewOf) spec.reviewOf = reviewOf;
+  if (cohort) spec.cohort = cohort;
   return spec;
 }

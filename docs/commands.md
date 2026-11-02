@@ -18,6 +18,12 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`queue pause`](#agentctl-queue-pause) | Stop starting queued tasks (running tasks are not touched; adding and listing still work). |
 | [`queue resume`](#agentctl-queue-resume) | Let the queue start tasks again. |
 | [`unblock`](#agentctl-unblock) | Let a blocked queued task go on: a task whose "after" names a cancelled task is blocked (⛓) and never starts. This drops the dependency (all the cancelled ones, or only --drop-after); the task is back in the queue and waits for the rest, or starts. The other way out is "agentctl cancel". |
+| [`cohort`](#agentctl-cohort) | Cohorts: tasks grouped under a name you chose ("cohort: \<name>" in a spec, or --cohort). A task without a name belongs to no cohort. Without a subcommand: list. |
+| [`cohort list`](#agentctl-cohort-list) | The cohorts: how many tasks each has by state (active, queued, reports, closed, cancelled) and since when. |
+| [`cohort show`](#agentctl-cohort-show) | The tasks of one cohort as in "status" (closed and cancelled ones too) and its queued tasks. |
+| [`cohort add`](#agentctl-cohort-add) | Put existing tasks (running, finished or queued) into a cohort; it is created if it is new. A task that was in another cohort moves. |
+| [`cohort remove`](#agentctl-cohort-remove) | Take tasks out of their cohort (they then belong to none). |
+| [`cohort note`](#agentctl-cohort-note) | Write the description of a cohort (an empty text removes it). |
 | [`overlap`](#agentctl-overlap) | Which active tasks of one repository changed the same files (git diff of each worktree against its base, plus uncommitted files). Without a task: every pair. |
 | [`send`](#agentctl-send) | Paste a follow-up prompt into the existing window of each task in the file. |
 | [`status`](#agentctl-status) | Table of tasks: window state, running time, report, last output line. |
@@ -66,6 +72,7 @@ agentctl new [options] [file]
 | `--no-wait-trust` | stop at the folder-trust dialog instead of waiting for you to confirm it (the old behaviour) |  |
 | `--clip` | read the spec from the clipboard; shows a summary and asks y/N first |  |
 | `-y, --yes` | with --clip: do not ask; also skips the question after a "touches" warning |  |
+| `--cohort <name>` | put every task of the file in this cohort (overrides "cohort:" in a spec); without it a task has a cohort only if its spec names one |  |
 
 Examples:
 
@@ -75,6 +82,7 @@ agentctl new nc-42.md                  # start the tasks of the file
 agentctl new --clip                    # spec from the clipboard, summary, y/N
 agentctl new --agent codex nc-42.md    # run the specs on Codex (models through the equivalents table)
 agentctl new --no-agent nc-42.md       # only worktree, setup and links
+agentctl new --cohort sprint-1 nc-42.md   # the tasks of the file join the cohort
 ```
 
 ## agentctl queue
@@ -96,6 +104,7 @@ agentctl queue [options] [command] [file]
 | `--clip` | read the spec from the clipboard |  |
 | `--agent <agent>` | run every spec on this provider, translated through the equivalents table (the queue never switches provider by itself) | one of `claude`, `codex` |
 | `-y, --yes` | do not ask |  |
+| `--cohort <name>` | put every task of the file in this cohort (overrides "cohort:" in a spec); without it a task has a cohort only if its spec names one |  |
 
 Examples:
 
@@ -103,6 +112,7 @@ Examples:
 agentctl queue nc-42.md                # summary, y/N, then the tasks wait for a free window
 agentctl queue --clip -y               # spec from the clipboard, no question
 agentctl queue --agent codex nc-42.md  # run them on Codex (through the equivalents table)
+agentctl queue --cohort sprint-1 nc-42.md   # the tasks of the file join the cohort
 ```
 
 ## agentctl queue list
@@ -116,12 +126,14 @@ agentctl queue list [options]
 | Option | Meaning | Notes |
 |---|---|---|
 | `--json` | machine-readable output |  |
+| `--cohort <name>` | only the tasks of this cohort (the positions are those of the whole queue) |  |
 
 Examples:
 
 ```sh
 agentctl queue list
 agentctl queue list --json
+agentctl queue list --cohort sprint-1
 ```
 
 ## agentctl queue rm
@@ -229,6 +241,119 @@ agentctl unblock NC-43                           # drop every cancelled task fro
 agentctl unblock NC-43 --drop-after NC-42        # drop only this one
 ```
 
+## agentctl cohort
+
+Cohorts: tasks grouped under a name you chose ("cohort: \<name>" in a spec, or --cohort). A task without a name belongs to no cohort. Without a subcommand: list.
+
+Subcommands: `cohort list`, `cohort show`, `cohort add`, `cohort remove`, `cohort note`. Without a subcommand: `list`.
+
+```
+agentctl cohort [options] [command]
+```
+
+Examples:
+
+```sh
+agentctl cohort                           # the same as cohort list
+```
+
+## agentctl cohort list
+
+The cohorts: how many tasks each has by state (active, queued, reports, closed, cancelled) and since when.
+
+```
+agentctl cohort list [options]
+```
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--json` | machine-readable output |  |
+
+Examples:
+
+```sh
+agentctl cohort list
+agentctl cohort list --json
+```
+
+## agentctl cohort show
+
+The tasks of one cohort as in "status" (closed and cancelled ones too) and its queued tasks.
+
+```
+agentctl cohort show [options] <name>
+```
+
+| Argument | Meaning |
+|---|---|
+| `<name>` | cohort name; case does not matter |
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--json` | machine-readable output |  |
+
+Examples:
+
+```sh
+agentctl cohort show sprint-1
+```
+
+## agentctl cohort add
+
+Put existing tasks (running, finished or queued) into a cohort; it is created if it is new. A task that was in another cohort moves.
+
+```
+agentctl cohort add [options] <name> <tasks...>
+```
+
+| Argument | Meaning |
+|---|---|
+| `<name>` | cohort name |
+| `<tasks...>` | task IDs; a unique prefix is enough |
+
+Examples:
+
+```sh
+agentctl cohort add sprint-1 NC-41 NC-42    # the cohort is made if it is new
+```
+
+## agentctl cohort remove
+
+Take tasks out of their cohort (they then belong to none).
+
+```
+agentctl cohort remove [options] <tasks...>
+```
+
+| Argument | Meaning |
+|---|---|
+| `<tasks...>` | task IDs; a unique prefix is enough |
+
+Examples:
+
+```sh
+agentctl cohort remove NC-42
+```
+
+## agentctl cohort note
+
+Write the description of a cohort (an empty text removes it).
+
+```
+agentctl cohort note [options] <name> <text...>
+```
+
+| Argument | Meaning |
+|---|---|
+| `<name>` | cohort name |
+| `<text...>` | the description |
+
+Examples:
+
+```sh
+agentctl cohort note sprint-1 "landing page and menu"
+```
+
 ## agentctl overlap
 
 Which active tasks of one repository changed the same files (git diff of each worktree against its base, plus uncommitted files). Without a task: every pair.
@@ -290,7 +415,8 @@ agentctl status [options]
 | `--json` | machine-readable output |  |
 | `--clip` | copy a compact Markdown table to the clipboard (to paste at the start of a chat session) |  |
 | `--tmux-line` | one short line for the tmux status bar, like "2⚙ 1✓ 1? 3⧗" (tasks per state, then the tasks in the queue) |  |
-| `--all` | also the hidden and the closed tasks (see "agentctl hide", "agentctl close"), archived ones included |  |
+| `--all` | also the hidden, the closed and the cancelled tasks (see "agentctl hide", "agentctl close", "agentctl cancel"), archived ones included |  |
+| `--cohort <name>` | only the tasks of this cohort (also with --json and --clip) |  |
 
 Examples:
 
@@ -298,7 +424,8 @@ Examples:
 agentctl status
 agentctl status --json                 # rows with started (UTC) and startedLocal
 agentctl status --clip                 # Markdown table to paste into a chat
-agentctl status --all                  # hidden, closed and archived tasks too
+agentctl status --all                  # hidden, closed, cancelled and archived tasks too
+agentctl status --cohort sprint-1      # only the tasks of one cohort (also with --json, --clip)
 ```
 
 ## agentctl archive
@@ -372,6 +499,7 @@ agentctl pull [options] [task]
 |---|---|---|
 | `--ready` | join every report in state report-ready that was not pulled yet, copy it and mark the tasks as pulled |  |
 | `--all` | with --ready: also the reports that were pulled before |  |
+| `--cohort <name>` | with --ready: only the reports of this cohort |  |
 
 Examples:
 
@@ -379,6 +507,7 @@ Examples:
 agentctl pull NC-42                    # one report to the clipboard
 agentctl pull --ready                    # all new reports in one text
 agentctl pull --ready --all              # also the ones pulled before
+agentctl pull --ready --cohort sprint-1  # only the reports of one cohort
 ```
 
 ## agentctl close
@@ -386,15 +515,16 @@ agentctl pull --ready --all              # also the ones pulled before
 Kill the task windows; --rm-worktree also removes their git worktrees (branches are kept). Shows the list and asks y/N first.
 
 ```
-agentctl close [options] <tasks...>
+agentctl close [options] [tasks...]
 ```
 
 | Argument | Meaning |
 |---|---|
-| `<tasks...>` | task IDs |
+| `[tasks...]` | task IDs (or --cohort) |
 
 | Option | Meaning | Notes |
 |---|---|---|
+| `--cohort <name>` | close the open tasks of this cohort (with task IDs: only those, which must belong to it) |  |
 | `--rm-worktree` | run "git worktree remove" for the task worktrees (never --force) |  |
 | `-y, --yes` | do not ask |  |
 | `--dry-run` | print the commands that would run, execute nothing |  |
@@ -404,6 +534,7 @@ Examples:
 ```sh
 agentctl close NC-41 NC-42 --rm-worktree
 agentctl close NC-42 --dry-run
+agentctl close --cohort sprint-1        # the open tasks of a cohort: list, y/N
 ```
 
 ## agentctl cancel
@@ -411,15 +542,16 @@ agentctl close NC-42 --dry-run
 Abandon tasks: a task at work is interrupted, given cancel.grace seconds to stop, and its window is closed; a task in the queue is taken out of it. They become cancelled (not closed). The worktree and the branch stay unless --rm-worktree (worktree only, never the branch). Shows the list and asks y/N first.
 
 ```
-agentctl cancel [options] <tasks...>
+agentctl cancel [options] [tasks...]
 ```
 
 | Argument | Meaning |
 |---|---|
-| `<tasks...>` | task IDs; a unique prefix is enough. The other half of a "move" (the old task or its successor) is cancelled with it |
+| `[tasks...]` | task IDs (or --cohort); a unique prefix is enough. The other half of a "move" (the old task or its successor) is cancelled with it |
 
 | Option | Meaning | Notes |
 |---|---|---|
+| `--cohort <name>` | cancel the open tasks of this cohort, the queued ones too (with task IDs: only those, which must belong to it) |  |
 | `--reason <text>` | why (optional); kept in TASK.md |  |
 | `--rm-worktree` | also run "git worktree remove" for the task worktrees (never --force; the branch stays) |  |
 | `-y, --yes` | do not ask |  |
@@ -431,6 +563,7 @@ Examples:
 agentctl cancel NC-42 --reason "wrong approach"   # interrupt, close the window; worktree and branch stay
 agentctl cancel NC-41 NC-42 --rm-worktree -y      # also remove the worktrees (branches stay)
 agentctl cancel NC-43                             # a queued task: taken out of the queue
+agentctl cancel --cohort sprint-1 --reason "scrapped"   # the whole cohort: list, y/N
 ```
 
 ## agentctl watch

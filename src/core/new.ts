@@ -3,6 +3,7 @@ import path from 'node:path';
 import { agentCommandLine, buildAgentArgv, INSTALL_HINTS, promptWithHeader } from './agents.ts';
 import type { Context } from './context.ts';
 import type { Order } from './equivalents.ts';
+import { touchCohort } from './cohort.ts';
 import { planEventWiring } from './events.ts';
 import type { SelfArgv } from './events.ts';
 import { addWorktree } from './git.ts';
@@ -121,6 +122,8 @@ export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: Ne
 
     // 4. TASK.md
     const record = recordFromSpec(spec, config, runner.now());
+    // The cohort is made by its first task; a name that exists keeps the spelling it had.
+    if (spec.cohort) record.cohort = (await touchCohort(ctx, spec.cohort)).name;
     await runner.mkdir(taskDir(config, spec.window));
     await runner.writeFile(taskFile(config, spec.window), renderTaskMd(record, spec.prompt));
     // The agent's own folder: only the report goes there (agentctl's state is in state_dir).
