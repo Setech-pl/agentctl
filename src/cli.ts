@@ -23,6 +23,8 @@ import { matchTask } from './core/resolve.ts';
 import type { TaskTarget } from './core/resolve.ts';
 import { migrateLegacyState } from './core/taskstore.ts';
 import { newTasks } from './core/new.ts';
+import { commitQueueAdd, describeQueue, isPaused, moveToFront, planQueueAdd, readQueue, removeFromQueue, renderQueueList, retryEntry, setPaused, waiting } from './core/queue.ts';
+import { liveWindows } from './core/plan.ts';
 import type { NewOptions } from './core/new.ts';
 import { pullReady, pullTask } from './core/pull.ts';
 import { sendPrompts } from './core/send.ts';
@@ -42,6 +44,7 @@ import { EXAMPLE_SPEC } from './core/example.ts';
 import { RealRunner, RecordingRunner } from './core/runner.ts';
 import type { Runner } from './core/runner.ts';
 import { resolveSendSpec, resolveSpec, splitSpecs } from './core/spec.ts';
+import type { RawSpec } from './core/spec.ts';
 import { AgentctlError, errorMessage, resolvePath, shellQuote } from './core/util.ts';
 
 export interface CliDeps {
@@ -233,6 +236,9 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
   const makeNotifier = (ctx: Context, opts?: { retryBroken?: boolean }): Promise<Notifier> =>
     deps.makeNotifier?.(ctx.runner, ctx.config, opts) ?? DesktopNotifier.detect(ctx.runner, undefined, notifierOptionsFor(ctx.config, opts));
 
+  /** Window "watch" exists in the agentctl session: something is there to start the queued tasks. */
+  const watchRunning = async (ctx: Context): Promise<boolean> => (await ctx.tmux.hasSession()) && (await ctx.tmux.listWindows()).includes(WATCH_WINDOW);
+
   const program = new Command();
   program
     .name('agentctl')
@@ -272,7 +278,8 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
       guarded(async (file: string | undefined, opts: { clip?: boolean; yes?: boolean; dryRun?: boolean; reuse?: boolean; agent?: 'claude' | 'codex' | false; switch?: boolean; waitTrust?: boolean }) => {
         const ctx = contextFor(Boolean(opts.dryRun));
         const source = opts.clip ? 'clipboard' : (file ?? 'stdin');
-        const specs = splitSpecs(await readSpecSource(file, opts.clip), source).map((raw) => resolveSpec(raw, { config: ctx.config }));
+        const raws = splitSpecs(await readSpecSource(file, opts.clip), source);
+        const specs = raws.map((raw) => resolveSpec(raw, { config: ctx.config }));
         if (opts.clip && !(await confirmAction(ctx, summarizeSpecs(specs), 'Start?', Boolean(opts.yes) || Boolean(opts.dryRun)))) return;
         const options: NewOptions = { reuse: Boolean(opts.reuse), noSwitch: opts.switch === false, waitTrust: opts.waitTrust !== false };
         const self = deps.selfArgv?.();
@@ -281,15 +288,81 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         if (opts.agent === false) options.noAgent = true; // commander reads --no-agent as the negation of --agent
         const interrupt = opts.dryRun ? undefined : deps.interruptSignal?.();
         if (interrupt) options.signal = interrupt.signal;
+        // A full provider: with a terminal, "add to the queue?" instead of an error (see "agentctl queue").
+        const overflow: { queued: typeof specs } = { queued: [] };
+        if (!opts.dryRun && !options.noAgent) options.overflow = overflow;
         try {
           await newTasks(ctx, specs, options);
         } finally {
           interrupt?.dispose();
         }
+        if (overflow.queued.length > 0) {
+          const added = await commitQueueAdd(ctx, overflow.queued.map((spec) => ({ raw: raws[spec.index - 1] as RawSpec, spec })), { ...(opts.agent ? { agent: opts.agent } : {}) });
+          for (const e of added) line(`${e.task}: queued (position ${waiting(readQueue(ctx.config)).findIndex((x) => x.task === e.task) + 1}); it starts when a ${e.agent} window is free${await watchRunning(ctx) ? '' : ' – nothing starts it unless "agentctl watch" runs: agentctl watch --tmux'}`);
+        }
         // The session exists now (it may have been created by this very command): mouse and the key back to the board.
         if (!opts.dryRun && !options.noAgent) for (const l of describeNavigation(await applyNavigation(ctx), ctx.config.session, true)) line(l);
       }),
     );
+
+  const queue = program
+    .command('queue')
+    .description('Put the tasks of a spec file in the queue: they start by themselves (while "agentctl watch" runs) when a window of their provider is free. Shows a summary and asks y/N first.')
+    .argument('[file]', 'spec file, or "-" for stdin')
+    .option('--clip', 'read the spec from the clipboard')
+    .addOption(new Option('--agent <agent>', 'run every spec on this provider, translated through the equivalents table (the queue never switches provider by itself)').choices(['claude', 'codex']))
+    .option('-y, --yes', 'do not ask')
+    .action(
+      guarded(async (file: string | undefined, opts: { clip?: boolean; yes?: boolean; agent?: 'claude' | 'codex' }) => {
+        const ctx = contextFor(false);
+        const raws = splitSpecs(await readSpecSource(file, opts.clip), opts.clip ? 'clipboard' : (file ?? 'stdin'));
+        const plan = await planQueueAdd(ctx, raws, { ...(opts.agent ? { agent: opts.agent } : {}) });
+        if (!(await confirmAction(ctx, plan.summary, 'Add to the queue?', Boolean(opts.yes)))) return;
+        const added = await commitQueueAdd(ctx, plan.items, { ...(opts.agent ? { agent: opts.agent } : {}) });
+        const entries = waiting(readQueue(ctx.config));
+        for (const e of added) line(`${e.task}: queued (position ${entries.findIndex((x) => x.task === e.task) + 1} of ${entries.length})`);
+        if (!(await watchRunning(ctx))) line('hint: nothing starts the queue unless "agentctl watch" runs: agentctl watch --tmux');
+      }),
+    );
+
+  queue
+    .command('list')
+    .description('The queue: position, task, agent/model/effort, priority, start condition and how long it waits.')
+    .option('--json', 'machine-readable output')
+    .action(
+      guarded(async (opts: { json?: boolean }) => {
+        const ctx = contextFor(false, { migrate: false });
+        const views = describeQueue(ctx.config, readQueue(ctx.config), await liveWindows(ctx));
+        if (opts.json) return line(JSON.stringify(views.map((v) => ({ position: v.position, task: v.entry.task, status: v.entry.status, agent: v.entry.agent, model: v.entry.model, effort: v.entry.effort, priority: v.entry.priority, condition: v.condition.text, queued: v.entry.queuedAt, error: v.entry.error ?? null })), null, 2));
+        for (const l of renderQueueList(views, ctx.runner.now())) line(l);
+        if (isPaused(ctx.config)) line('The queue is paused: "agentctl queue resume" lets it run again.');
+      }),
+    );
+
+  queue
+    .command('rm')
+    .description('Take a task out of the queue (a waiting or a failed one).')
+    .argument('<task>', 'task ID; a unique prefix is enough')
+    .action(guarded(async (task: string) => line(`${(await removeFromQueue(contextFor(false, { migrate: false }), task)).task}: removed from the queue`)));
+
+  queue
+    .command('up')
+    .description('Move a waiting task to the front of the line (tasks with priority: high still go first).')
+    .argument('<task>', 'task ID; a unique prefix is enough')
+    .action(guarded(async (task: string) => line(`${(await moveToFront(contextFor(false, { migrate: false }), task)).task}: first in line`)));
+
+  queue
+    .command('retry')
+    .description('Put a failed task back at the end of the line; it is tried once more (over the worktree the failed start left).')
+    .argument('<task>', 'task ID; a unique prefix is enough')
+    .action(guarded(async (task: string) => line(`${(await retryEntry(contextFor(false, { migrate: false }), task)).task}: back in the queue`)));
+
+  for (const pause of [true, false]) {
+    queue
+      .command(pause ? 'pause' : 'resume')
+      .description(pause ? 'Stop starting queued tasks (running tasks are not touched; adding and listing still work).' : 'Let the queue start tasks again.')
+      .action(guarded(async () => line((await setPaused(contextFor(false, { migrate: false }), pause)) ? (pause ? 'Queue paused.' : 'Queue resumed.') : `Queue was already ${pause ? 'paused' : 'running'}.`)));
+  }
 
   program
     .command('send')

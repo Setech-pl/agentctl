@@ -45,11 +45,15 @@ export interface ResolvedSpec {
   prompt: string;
   /** `pin: true`: never switch this task to the other provider. */
   pin: boolean;
+  /** Queue order: `high` starts before every `normal` task (FIFO inside each class). Only the queue looks at it. */
+  priority: 'high' | 'normal';
   /** The order as written in the spec; agent/model/effort above are the effective values. */
   requested: Order;
   /** Why the effective order differs from the requested one. */
   switchedBy?: 'flag' | 'limit';
 }
+
+export const PRIORITIES = ['high', 'normal'] as const;
 
 const FENCE = '---';
 const isFence = (line: string | undefined): boolean => line !== undefined && line.trimEnd() === FENCE;
@@ -129,7 +133,7 @@ export interface ResolveContext {
 }
 
 /** Keys of a spec header, and of one entry of its `repos`; docs/configuration.md describes each one. */
-export const SPEC_KEYS = ['task', 'agent', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'report', 'pin'];
+export const SPEC_KEYS = ['task', 'agent', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'report', 'pin', 'priority'];
 export const REPO_KEYS = ['path', 'worktree', 'base', 'branch'];
 
 function label(raw: RawSpec): string {
@@ -221,6 +225,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     if (typeof h.pin === 'boolean') pin = h.pin;
     else p.add('pin must be true or false');
   }
+  const priority = parseEnumValue(h.priority, PRIORITIES, 'priority', p) ?? 'normal';
   if (raw.prompt === '') p.add('the prompt is empty (write it below the closing "---" of the header)');
 
   // Project layer comes from the first repo.
@@ -313,6 +318,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     report: pathOf(reportTemplate),
     prompt: raw.prompt,
     pin,
+    priority,
     requested: { agent: agent as AgentName, model, effort },
   };
   if (reviewOf) spec.reviewOf = reviewOf;

@@ -268,6 +268,27 @@ In the agentctl session (session options, never `-g`) agentctl sets:
 
 The board's footer says `Enter – open the agent · F12 – back to the list`.
 
+## The queue
+
+`limits.claude` and `limits.codex` cap the windows per provider. When you order more than fit, the extra tasks do not have to be started by hand later: put them in the queue and `agentctl watch` starts each one by itself as soon as a window of its provider is free.
+
+```
+agentctl queue nc-42.md          # validate like "new", summary, y/N
+agentctl queue list              # position, task, agent/model/effort, priority, start condition, waiting time
+agentctl queue up NC-42          # first in line
+agentctl queue rm NC-42          # take it out
+agentctl queue pause / resume    # stop / allow starting (running tasks are never touched)
+agentctl queue retry NC-42       # a failed start, once more
+```
+
+- **Adding** goes through the same checks as `new` (`review_of`, `pin`, `--agent` mapping, Codex efforts, duplicates, repositories) except the provider limit: a full provider is exactly why a task is queued. The summary says whether the task starts at the next tick or waits, and the entry is written to `<config dir>/queue/` with a running number.
+- **`new` with a full limit** asks "add to the queue? [y/N]" (after the offer to switch provider, if there is one). Without a terminal it stays an error, now naming `agentctl queue`.
+- **Order**: `priority: high` before `priority: normal`, first come, first served inside a class; `queue up` puts a task first in its class. A task whose provider is full does not hold back a task of the other provider.
+- **Never switches provider.** The queue starts a task on the agent and model it was ordered on (or on the `--agent` given when it was queued). Moving to the other provider stays an explicit act: `--agent`, `agentctl move`.
+- **Starting** is the same path as `new` (worktree, `setup`, links, TASK.md, window, wait for the agent, prompt) and runs in the background of the watcher. When the agent waits for the folder-trust dialog, `needs-trust` is notified as usual and the rest of the queue goes on; the prompt follows once you confirm. A notification says "Uruchomiono TASK z kolejki".
+- **A failed start** (setup failed, repository gone, agent not ready) puts the task at the end of the line as `failed`, with the error in `queue list` and the log of the attempt in `<config dir>/queue/<n>-<TASK>.log`, and sends a notification. It is not tried again by itself; `queue retry` is your decision (it reuses a worktree the failed start left).
+- The queue only moves while `agentctl watch` runs (`watch --tmux`). `queue.enabled: false` in the config switches starting off; `queue.parallel_starts` bounds the starts in progress ([configuration](configuration.md#queue)).
+
 ## Board
 
 `agentctl board` is a full-screen overview of all tasks, refreshed every 2 seconds. `agentctl board --tmux` opens it in window `board` of the agentctl session

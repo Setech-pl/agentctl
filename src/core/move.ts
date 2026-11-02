@@ -115,6 +115,7 @@ export async function moveTask(ctx: Context, taskArg: string, opts: MoveOptions 
     report: from.report,
     prompt: plan.prompt,
     pin: false,
+    priority: 'normal',
     requested: from.requested,
     switchedBy: 'limit',
   };
