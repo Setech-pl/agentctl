@@ -1,3 +1,4 @@
+import { installation } from './installation.ts';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -41,6 +42,8 @@ export function mcpEntryFrom(self: SelfArgv): McpEntry {
 
 /** Where the stable copy lives (the same variable the update script reads). */
 export function stableScript(env: NodeJS.ProcessEnv = process.env, home: string = os.homedir()): string {
+  const installed = installation(undefined, env);
+  if (!env.AGENTCTL_STABLE_DIR && installed.source === 'npm global') return installed.executable;
   const root = env.AGENTCTL_STABLE_DIR ?? path.join(home, 'Projects', 'agentctl-stable');
   const built = path.join(root, 'dist', 'bin', 'agentctl.js');
   return fs.existsSync(built) ? built : path.join(root, 'bin', 'agentctl.ts');

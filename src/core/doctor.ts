@@ -1,3 +1,4 @@
+import { installation } from './installation.ts';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -23,7 +24,7 @@ export interface Check {
   detail: string;
 }
 
-const MIN_NODE = [22, 6];
+const MIN_NODE = [22, 14];
 const MIN_TMUX = [3, 2];
 
 function firstLine(s: string): string {
@@ -89,7 +90,13 @@ export async function runDoctor(
     checks.push({ name, status, detail });
   };
 
-  add('node', atLeast(nodeVersion, MIN_NODE) ? 'ok' : 'fail', atLeast(nodeVersion, MIN_NODE) ? `v${nodeVersion}` : `v${nodeVersion}: Node ${MIN_NODE.join('.')}+ is required (type stripping)`);
+  add('node', atLeast(nodeVersion, MIN_NODE) ? 'ok' : 'fail', atLeast(nodeVersion, MIN_NODE) ? `v${nodeVersion}` : `v${nodeVersion}: Node ${MIN_NODE.join('.')}+ is required`);
+
+  const installed = installation(undefined, env);
+  add('installation', 'ok', `${installed.source}: ${installed.executable}`);
+  add('agentctl PATH', installed.matches ? 'ok' : 'warn', installed.matches
+    ? `${installed.found} points to this package`
+    : `${installed.found ?? 'agentctl not found in PATH'}; expected ${installed.executable}. Do not confuse @setech-pl/agentctl with @orgloop/agentctl (same command name). Check: command -v agentctl`);
 
   const git = await runner.exec('git', ['--version'], { readOnly: true });
   if (git.code === 0) add('git', 'ok', firstLine(git.stdout));
