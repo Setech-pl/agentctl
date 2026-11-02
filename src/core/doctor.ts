@@ -10,6 +10,8 @@ import { findMcpProcesses, staleProcesses, staleWarning } from './mcp-processes.
 import { describeAllow, desktopConfigPath, readClaudeCodeRegistration, readDesktopRegistration, stableScript } from './mcp-install.ts';
 import type { McpRegistration } from './mcp-install.ts';
 import { awayReport, renderAway } from './away.ts';
+import { Context } from './context.ts';
+import { blockingEnv, managerFiles, managerView, readManagerMcp, remoteControlSupport } from './manager.ts';
 import { isPublicServer, weakTopic } from './ntfy-setup.ts';
 import { findTerminalNotifier, notifierMemoryPath, readNotifierMemory } from './notify.ts';
 import { Tmux } from './tmux.ts';
@@ -43,6 +45,33 @@ function atLeast(version: string, min: number[]): boolean {
   const nums = (/(\d+)\.(\d+)/.exec(version) ?? []).slice(1).map(Number);
   const [major = 0, minor = 0] = nums;
   return major > (min[0] as number) || (major === min[0] && minor >= (min[1] as number));
+}
+
+/** The manager (optional, so a warning at most): does it run, is its configuration usable, can Claude Code reach the agentctl MCP server. */
+async function managerChecks(runner: Runner, config: GlobalConfig, tmuxOk: boolean, add: (name: string, status: Check['status'], detail: string) => void): Promise<void> {
+  const m = config.manager;
+  const problems: string[] = [];
+  if (m.project && !fs.existsSync(m.project)) problems.push(`manager.project ${m.project} does not exist`);
+  if (m.guide && !fs.existsSync(m.guide)) problems.push(`manager.guide ${m.guide} does not exist (the manager starts without it)`);
+  const configured = m.autostart || m.project !== null;
+  if (!tmuxOk) {
+    if (m.autostart) problems.push('manager.autostart is on, but tmux is missing');
+  } else {
+    const view = await managerView(new Context(runner, config, () => {}));
+    if (view.state === 'connected') add('manager', problems.length > 0 ? 'warn' : 'ok', [`"${view.name}" runs in window ${config.session}:manager, connected to Remote Control`, ...problems].join('; '));
+    else if (view.state === 'missing') {
+      if (m.autostart) problems.push('manager.autostart is on, but it is not running: agentctl manager (agentctl up starts it)');
+      add('manager', problems.length > 0 ? 'warn' : 'ok', problems.length > 0 ? problems.join('; ') : configured ? 'not running: agentctl manager' : 'not running (optional): agentctl manager, then talk to it from the Claude app on the phone');
+    } else add('manager', 'warn', [`window ${config.session}:manager is up, but ${view.text}`, ...problems].join('; '));
+  }
+  if (!tmuxOk && problems.length > 0) add('manager', 'warn', problems.join('; '));
+  // Claude Code reaches the MCP server of agentctl either from its user scope (agentctl mcp install --claude-code) or from the manager's mcp.json.
+  const file = readManagerMcp(config);
+  if (file) {
+    const missing = [file.command, file.script].filter((p): p is string => p !== undefined && !fs.existsSync(p));
+    if (missing.length > 0) add('manager mcp', 'warn', `${managerFiles(config).mcp} runs ${missing.join(', ')}, which does not exist; start the manager again (agentctl manager stop, agentctl manager)`);
+    else add('manager mcp', 'ok', `the manager gets the agentctl MCP server from ${managerFiles(config).mcp}${file.script ? ` (runs ${file.script})` : ''}`);
+  } else add('manager mcp', 'ok', 'written at the first start of the manager (--mcp-config); for other Claude Code sessions: agentctl mcp install --claude-code');
 }
 
 /** Probe the machine: required tools fail the check, optional ones only warn. */
@@ -91,6 +120,13 @@ export async function runDoctor(
       ? 'effort: native --effort flag'
       : 'effort: no --effort flag in this version; set agents.claude.effort_args: [] (the prompt header still carries the effort)';
     add('claude', 'ok', `${firstLine(claude.stdout)}; ${effort}`);
+    // Remote Control (the manager, and remote_control: true in a spec) needs these two flags and a claude.ai login without an API key or a gateway.
+    const support = remoteControlSupport(help.stdout);
+    const blocking = blockingEnv(env);
+    if (!support.remoteControl) add('claude remote control', 'warn', 'this Claude Code has no --remote-control flag in its help: agentctl manager and remote_control: true need it (claude update)');
+    else if (!support.roleFile) add('claude remote control', 'warn', 'has --remote-control, but no --append-system-prompt-file: agentctl manager cannot give the manager its role (claude update)');
+    else if (blocking.length > 0) add('claude remote control', 'warn', `has --remote-control, but ${blocking.join(', ')} ${blocking.length === 1 ? 'is' : 'are'} set here: Claude Code then refuses Remote Control (it needs a claude.ai login, not an API key or a gateway). A tmux server started from this shell has them too`);
+    else add('claude remote control', 'ok', 'has --remote-control and --append-system-prompt-file (the login is not checked: claude auth status)');
   }
 
   const codex = await runner.exec('codex', ['--version'], { readOnly: true });
@@ -205,6 +241,7 @@ export async function runDoctor(
       const up = await tmux.hasSession();
       add('session', 'ok', up ? `"${config.session}" is running` : `"${config.session}" not running yet (created by "agentctl new")`);
     }
+    await managerChecks(runner, config, tmuxVersion.code === 0, add);
   }
   return checks;
 }

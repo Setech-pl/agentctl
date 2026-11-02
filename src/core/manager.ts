@@ -373,3 +373,36 @@ export async function stopManager(ctx: Context): Promise<'stopped' | 'not-runnin
   if (r.code !== 0) throw new AgentctlError(`tmux could not close the window "${MANAGER_WINDOW}": ${r.stderr.trim() || `exit ${r.code}`}`);
   return 'stopped';
 }
+
+// ---- doctor
+
+/** Variables that make Claude Code refuse Remote Control (an API key or a gateway instead of a claude.ai login, no feature flags). */
+export const RC_BLOCKING_ENV = [
+  'ANTHROPIC_API_KEY',
+  'ANTHROPIC_AUTH_TOKEN',
+  'ANTHROPIC_BASE_URL',
+  'CLAUDE_CODE_OAUTH_TOKEN',
+  'CLAUDE_CODE_USE_BEDROCK',
+  'CLAUDE_CODE_USE_VERTEX',
+  'CLAUDE_CODE_USE_FOUNDRY',
+  'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
+  'DISABLE_GROWTHBOOK',
+] as const;
+
+/** The variables of `env` that block Remote Control (set and not empty). */
+export function blockingEnv(env: NodeJS.ProcessEnv): string[] {
+  return RC_BLOCKING_ENV.filter((name) => (env[name] ?? '') !== '');
+}
+
+/** The script and node the manager's `mcp.json` runs, when the file is there: for doctor, which says if they still exist. */
+export function readManagerMcp(config: Pick<GlobalConfig, 'path'>): { command: string; script: string | undefined } | undefined {
+  try {
+    const data = JSON.parse(fs.readFileSync(managerFiles(config).mcp, 'utf8')) as { mcpServers?: Record<string, { command?: unknown; args?: unknown }> };
+    const server = data.mcpServers?.[MCP_SERVER_NAME];
+    if (!server || typeof server.command !== 'string') return undefined;
+    const args = Array.isArray(server.args) ? server.args.filter((a): a is string => typeof a === 'string') : [];
+    return { command: server.command, script: args.find((a) => /\.(?:ts|js|mjs)$/.test(a)) };
+  } catch {
+    return undefined;
+  }
+}
