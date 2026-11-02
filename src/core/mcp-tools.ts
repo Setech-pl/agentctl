@@ -28,6 +28,7 @@ import { listArchivedRecords, listTaskRecords, readTaskPrompt } from './taskstor
 import type { TaskRecord } from './taskstore.ts';
 import { computeStats, markTask, parseResult, RESULTS, selectHistory } from './history.ts';
 import { collectUsage } from './usage-report.ts';
+import { planResume, resumeTasks } from './resume.ts';
 import { planGc, renderGc } from './gc.ts';
 import { collectEvents, renderEvents } from './chat-events.ts';
 import { applySetLimits, collectLimits, planSetLimits, readReservations, releasePlaces, reservePlaces } from './limits.ts';
@@ -238,6 +239,16 @@ async function runGcPreview(deps: McpDeps, args: { older_than?: string | undefin
   const ctx = deps.context(() => {});
   const plan = await planGc(ctx, { olderThan: args.older_than, branches: args.merged, cohort: args.cohort });
   return ok(`${renderGc(plan).join('\n')}\n\nThis is a preview only: the chat cannot clean up. The user runs "agentctl gc --apply" (or key G on the board).\n\n${JSON.stringify(plan, null, 2)}`);
+}
+
+async function runResume(deps: McpDeps, args: { tasks?: string[] | undefined; all?: boolean | undefined; confirm?: boolean | undefined }): Promise<ToolResult> {
+  return writeTool(deps, 'resume', { task: args.tasks?.join(', ') ?? 'all', detail: `${args.all ? 'all ' : ''}confirm=${Boolean(args.confirm)}` }, async (ctx, lines) => {
+    const plan = await planResume(ctx, args.tasks ?? [], { all: Boolean(args.all) });
+    if (plan.items.length === 0) return { text: plan.summary.join('\n'), executed: false, announce: '' };
+    if (!args.confirm) return { text: `${plan.summary.join('\n')}\n\nNot resumed yet. Show this to the user and ask; if they agree, call resume again with the same arguments and confirm: true.`, executed: false, announce: '' };
+    const results = await resumeTasks(ctx, plan, { self: deps.self });
+    return { text: `Resumed: ${results.map((r) => r.task).join(', ')}\n${lines.join('\n')}`.trim(), executed: true, announce: `resume ${results.map((r) => r.task).join(', ')}` };
+  });
 }
 
 async function runLimits(deps: McpDeps): Promise<ToolResult> {
@@ -876,6 +887,17 @@ export const MCP_TOOLS: McpToolDef[] = [
     input: { task: taskArg.optional() },
     annotations: readOnly('Tasks that change the same files'),
     run: (deps, args) => guarded(() => runOverlap(deps, args as { task?: string })),
+  }),
+  def({
+    name: 'resume',
+    title: 'Resume tasks after a restart',
+    kind: 'write',
+    description:
+      'WRITE, off unless the user put "resume" in mcp.allow. After a restart of the Mac or of tmux, active tasks that have a worktree and no window get their window back and the agent is started in resume mode (the conversation continues, the prompt is not pasted again), with the same model and effort. ' +
+      'Tasks whose report is ready are left alone unless all is true. The FIRST call (confirm omitted) only lists what would be resumed; ask the user, then call again with confirm: true.',
+    input: { tasks: z.array(taskArg).max(20).optional().describe('Task IDs to resume; omit for every task that can be resumed.'), all: z.boolean().optional().describe('true: also tasks that already have a report.'), confirm: z.boolean().optional().describe('true only after the user agreed to the listed tasks.') },
+    annotations: { title: 'Resume tasks after a restart', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    run: (deps, args) => guarded(() => runResume(deps, args as { tasks?: string[]; all?: boolean; confirm?: boolean })),
   }),
   def({
     name: 'send',

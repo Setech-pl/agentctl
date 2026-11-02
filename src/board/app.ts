@@ -23,6 +23,7 @@ import {
   promptText,
   queueCells,
   queueTitle,
+  resumeTitle,
   rowCells,
   runBoardEffect,
   usagePanel,
@@ -76,6 +77,10 @@ function TaskList(props: { state: BoardState; width: number; capacity: number; i
             ? h(Text, { key: `group-${item.key}`, bold: true, wrap: 'truncate-end' }, groupTitle(item, props.icons))
             : item.kind === 'queue-title'
             ? h(Text, { key: 'queue-title', dimColor: true, wrap: 'truncate-end' }, `- ${queueTitle(item.count, item.paused)}`)
+            : item.kind === 'resume-title'
+            ? h(Text, { key: 'resume-title', color: 'yellow', wrap: 'truncate-end' }, `- ${resumeTitle(item.count)}`)
+            : item.kind === 'resume'
+            ? h(Text, { key: `r-${item.task}`, dimColor: true, wrap: 'truncate-end' }, `    ${item.task}`)
             : item.kind === 'queue'
               ? h(Cells, { key: `q-${item.view.entry.task}`, cells: queueCells(item.view, item.view.entry.task === state.selected, cols) })
               : item.kind === 'finished'

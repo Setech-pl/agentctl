@@ -12,6 +12,7 @@ import { moveTask } from './move.ts';
 import { liveWindows } from './plan.ts';
 import { collectLimits, renderLimits } from './limits.ts';
 import { planGc, renderGc } from './gc.ts';
+import { findResumable, planResume, resumeTasks } from './resume.ts';
 import { describeQueue, moveToFront, readQueue, removeFromQueue, setPaused } from './queue.ts';
 import type { QueueView } from './queue.ts';
 import { peekWindow } from './peek.ts';
@@ -73,7 +74,7 @@ export type BoardMode =
   | { kind: 'input'; task: string; text: string }
   /** Enter on a finished task (no window): it cannot be switched to, so the choices are the ones that still make sense. */
   | { kind: 'finished'; task: string }
-  | { kind: 'confirm'; action: 'interrupt' | 'close' | 'close-worktree' | 'move' | 'queue-rm' | 'cancel'; task: string; reason?: string }
+  | { kind: 'confirm'; action: 'interrupt' | 'close' | 'close-worktree' | 'move' | 'queue-rm' | 'cancel' | 'resume'; task: string; reason?: string }
   /** `X`: the reason for the cancellation (optional: Enter on an empty line goes on without one). */
   | { kind: 'cancel-reason'; task: string; text: string }
   /** `k`: pick the cohort to show; `value` null is every task, '' the tasks without a cohort. */
@@ -122,10 +123,12 @@ export interface BoardState {
   folded: string[];
   /** The plans of Claude and Codex for the panel on top; null before the first refresh. */
   plans: Record<AgentName, PlanState> | null;
+  /** Tasks that can be resumed (active, a worktree, no window): the section "Do wznowienia", key R. */
+  resumable: string[];
 }
 
 export function initialBoardState(width: number, height: number): BoardState {
-  return { rows: [], selected: null, mode: { kind: 'list' }, notice: null, preview: null, width, height, refreshedAt: null, busy: null, loadError: null, quit: false, showFinished: false, showHidden: false, queue: [], queuePaused: false, cohortFilter: null, folded: [], plans: null };
+  return { rows: [], selected: null, mode: { kind: 'list' }, notice: null, preview: null, width, height, refreshedAt: null, busy: null, loadError: null, quit: false, showFinished: false, showHidden: false, queue: [], queuePaused: false, cohortFilter: null, folded: [], plans: null, resumable: [] };
 }
 
 /** What the front has to do after a key press. */
@@ -142,6 +145,8 @@ export type BoardEffect =
   | { type: 'queue-rm'; task: string }
   | { type: 'cancel'; task: string; reason?: string }
   | { type: 'queue-pause'; paused: boolean }
+  /** `R`: resume every task listed under "Do wznowienia" (agentctl resume). */
+  | { type: 'resume' }
   /** `o`, `p`, `f`: the result of a finished task, for the history (`agentctl mark`). */
   | { type: 'mark'; task: string; result: Result }
   /** `l`: load the history into the log view. */
@@ -294,6 +299,10 @@ function listKey(state: BoardState, input: string, key: KeyPress): KeyResult {
     if (markable) return stay(withNotice(state, 'info', `${picked.task}: marking it ${result}…`), [{ type: 'mark', task: picked.task, result }]);
     if (input !== 'p') return stay(withNotice(state, 'error', 'o / p / f mark the result of a finished task (one with a report, or without a window): select one first.'));
   }
+  if (input === 'R') {
+    if (state.resumable.length === 0) return stay(withNotice(state, 'info', 'Nothing to resume: no active task without a window.'));
+    return stay({ ...state, notice: null, mode: { kind: 'confirm', action: 'resume', task: state.resumable.join(', ') } });
+  }
   if (input === 'z') {
     const next = keepSelection({ ...state, notice: null, showFinished: !state.showFinished });
     return stay(next, next.selected !== state.selected ? [{ type: 'refresh' }] : []);
@@ -445,6 +454,9 @@ function confirmKey(state: BoardState, mode: Extract<BoardMode, { kind: 'confirm
   if (mode.action === 'queue-rm') {
     return yes ? { state: withNotice(toList(state), 'info', `${mode.task}: removing from the queue…`), effects: [{ type: 'queue-rm', task: mode.task }] } : cancel();
   }
+  if (mode.action === 'resume') {
+    return yes ? { state: withNotice(toList(state), 'info', 'Resuming…'), effects: [{ type: 'resume' }] } : cancel();
+  }
   if (mode.action === 'move') {
     return yes ? { state: withNotice(toList(state), 'info', `${mode.task}: moving to the other provider…`), effects: [{ type: 'move', task: mode.task }] } : cancel();
   }
@@ -507,13 +519,14 @@ export interface BoardSnapshot {
   queuePaused?: boolean;
   /** Absent: no panel (older callers). */
   plans?: Record<AgentName, PlanState>;
+  resumable?: string[];
   preview: Preview | null;
   refreshedAt: string;
 }
 
 /** Keep the selection when the task is still there, otherwise take the first row. */
 export function applySnapshot(state: BoardState, snap: BoardSnapshot): BoardState {
-  const next: BoardState = { ...state, rows: snap.rows, queue: snap.queue ?? [], queuePaused: snap.queuePaused ?? false, plans: snap.plans ?? null, refreshedAt: snap.refreshedAt, loadError: null };
+  const next: BoardState = { ...state, rows: snap.rows, queue: snap.queue ?? [], queuePaused: snap.queuePaused ?? false, plans: snap.plans ?? null, resumable: snap.resumable ?? [], refreshedAt: snap.refreshedAt, loadError: null };
   const listed = navTasks(next);
   const selected = state.selected !== null && listed.includes(state.selected) ? state.selected : (listed[0] ?? null);
   const preview = snap.preview && snap.preview.task === selected ? snap.preview : selected === state.selected ? state.preview : null;
@@ -564,8 +577,9 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
   const entries = readQueue(config);
   const queue = entries.length > 0 ? describeQueue(config, entries, await liveWindows(ctx), statusRows) : [];
   const queuePaused = queue.some((v) => v.condition.kind === 'paused');
+  const resumable = (await findResumable(ctx, { rows: statusRows })).map((c) => c.task);
   const queued = queue.find((v) => v.entry.task === selected);
-  if (queued) return { rows, queue, queuePaused, plans, preview: { task: queued.entry.task, lines: queuePreview(queued) }, refreshedAt: clock(now) };
+  if (queued) return { rows, queue, queuePaused, plans, resumable, preview: { task: queued.entry.task, lines: queuePreview(queued) }, refreshedAt: clock(now) };
   // The selected task; else the first one the list shows (not a hidden, closed or finished one).
   const target = rows.find((r) => r.task === selected) ?? rows.find((r) => !r.hidden && !r.finished) ?? rows.find((r) => !r.hidden) ?? rows[0];
   let preview: Preview | null = null;
@@ -583,7 +597,7 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
     }
     preview = { task: target.task, lines, ...(target.collide.length > 0 ? { note: collideText(target.collide) } : {}) };
   }
-  return { rows, queue, queuePaused, plans, preview, refreshedAt: clock(now) };
+  return { rows, queue, queuePaused, plans, resumable, preview, refreshedAt: clock(now) };
 }
 
 /** The preview of a queued task: what it will run, what it waits for, how it ends if it failed, and the start of its prompt. */
@@ -657,6 +671,12 @@ export async function runBoardEffect(runner: Runner, config: GlobalConfig, effec
       case 'mark': {
         const marked = await markTask(ctx, effect.task, effect.result);
         return { level: 'info', text: `${marked.task}: marked ${marked.result}${marked.previous && marked.previous !== marked.result ? ` (was ${marked.previous})` : ''}` };
+      }
+      case 'resume': {
+        const plan = await planResume(ctx, []);
+        if (plan.items.length === 0) return { level: 'info', text: plan.summary[0] ?? 'Nothing to resume.' };
+        const results = await resumeTasks(ctx, plan, { self: env.self });
+        return { level: 'info', text: `Resumed: ${results.map((r) => r.task).join(', ')}${plan.skipped.length > 0 ? `; skipped: ${plan.skipped.map((x) => x.task).join(', ')} (limit)` : ''}` };
       }
       case 'queue-pause':
         await setPaused(ctx, effect.paused);
@@ -816,6 +836,8 @@ export type ListItem =
   | { kind: 'group'; key: string; name: string | null; folded: boolean; rows: BoardRow[]; queued: number }
   | { kind: 'queue-title'; count: number; paused: boolean }
   | { kind: 'queue'; view: QueueView }
+  | { kind: 'resume-title'; count: number }
+  | { kind: 'resume'; task: string }
   | { kind: 'finished'; count: number; expanded: boolean }
   | { kind: 'closed'; count: number }
   | { kind: 'cancelled'; count: number };
@@ -852,6 +874,8 @@ export function queueCells(view: QueueView, selected: boolean, cols: BoardColumn
 }
 
 /** `Finished (3)` title that stands between the active and the finished rows (or under the active ones while the section is closed). */
+export const resumeTitle = (count: number): string => `Do wznowienia (${count}) – R wznawia (agentctl resume)`;
+
 export function finishedTitle(count: number, expanded: boolean): string {
   return expanded ? `Finished (${count}) – z closes` : `Finished (${count}) – z opens`;
 }
@@ -885,6 +909,7 @@ export function listItems(state: BoardState): ListItem[] {
   return [
     ...activeItems,
     ...(queue.length > 0 ? [{ kind: 'queue-title', count: queue.length, paused: state.queuePaused } as ListItem, ...queue.map((view): ListItem => ({ kind: 'queue', view }))] : []),
+    ...(state.resumable.length > 0 ? [{ kind: 'resume-title', count: state.resumable.length } as ListItem, ...state.resumable.map((task): ListItem => ({ kind: 'resume', task }))] : []),
     ...(finished.length > 0 ? [{ kind: 'finished', count: finished.length, expanded: state.showFinished } as ListItem] : []),
     ...(state.showFinished ? finished.map((row): ListItem => ({ kind: 'row', row })) : []),
     ...(closed.length > 0 ? [{ kind: 'closed', count: closed.length } as ListItem] : []),
@@ -942,7 +967,7 @@ export const HELP_LINES: string[] = [
   '  g / E       fold the cohort group of the selected task / open all groups',
   '  L           the limits per provider and what uses them (agentctl limits)',
   '  G           preview of the clean-up (agentctl gc): what would be freed',
-  '  R           resume the tasks listed under "Do wznowienia" (agentctl resume)',
+  '  R           resume the tasks under "Do wznowienia" (asks first)',
   '  h           hide the task (or show a hidden one); nothing is closed or removed',
   '  z           open or close the "Finished" section (tasks without a window)',
   '  a           list hidden tasks too (dimmed, marked ·)',
@@ -967,6 +992,7 @@ export function promptText(state: BoardState): string | null {
   if (mode.kind !== 'confirm') return null;
   const row = state.rows.find((r) => r.task === mode.task);
   if (mode.action === 'queue-rm') return `Remove ${mode.task} from the queue? [y/N]`;
+  if (mode.action === 'resume') return `Resume ${mode.task}? New windows, the agents continue their conversations (no prompt is pasted). [y/N]`;
   if (mode.action === 'cancel') {
     const partner = row?.supersededBy ?? row?.continues;
     const queued = state.queue.some((v) => v.entry.task === mode.task);

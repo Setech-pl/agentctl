@@ -10,7 +10,8 @@ import { confirmAction, readClipboard, specFromClipboard, writeClipboard } from 
 import { runDoctor } from './core/doctor.ts';
 import { renderChecks, renderStatusHints, renderStatusTable } from './render.ts';
 import { adoptTask } from './core/adopt.ts';
-import { attachTask, switchAttachedClient } from './core/attach.ts';
+import { attachTask, showWindow, switchAttachedClient } from './core/attach.ts';
+import { findResumable, planResume, resumeTasks } from './core/resume.ts';
 import { Alerts } from './core/alert.ts';
 import { archiveClosed, parseAge } from './core/archive.ts';
 import { appendStartLog, describeTerminal, loggedRun, startLogPath, waitForSize } from './core/boardstart.ts';
@@ -304,6 +305,30 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
 
   /** Window "watch" exists in the agentctl session: something is there to start the queued tasks. */
   const watchRunning = async (ctx: Context): Promise<boolean> => (await ctx.tmux.hasSession()) && (await ctx.tmux.listWindows()).includes(WATCH_WINDOW);
+
+  /** `watch --tmux`: window "watch" in the agentctl session (never a second one), the navigation key and the task counts in the status bar. */
+  const startWatchWindow = async (ctx: Context, statusLine: boolean): Promise<'created' | 'exists'> => {
+    const result = await ensureWatchWindow(ctx, deps.watchCommand(), process.cwd());
+    if (result === 'exists') line(`Window ${ctx.config.session}:${WATCH_WINDOW} already exists, left alone.`);
+    else line(`${result === 'restarted' ? 'Started again (its process had ended)' : 'Started'} the watcher in window ${ctx.config.session}:${WATCH_WINDOW}${result === 'session-created' ? ' (session created)' : ''}. Attach: tmux attach -t ${ctx.config.session}. If it fails to start, the window stays with the error; ${startLogPath(ctx.config, 'watch')} has it too.`);
+    for (const l of describeNavigation(await applyNavigation(ctx), ctx.config.session)) line(l);
+    if (statusLine && ctx.config.watch.statusLine) {
+      const shown = await applyStatusLine(ctx, deps.statusLineCommand?.() ?? 'agentctl status --tmux-line');
+      if (shown === 'set') line(`Status bar of session ${ctx.config.session}: task counts, refreshed every 10 s (this session only; undo: tmux set-option -u -t ${ctx.config.session}: status-right).`);
+      else if (typeof shown === 'object') line(`Status bar not set – ${shown.failed}`);
+      else line(`Status bar left alone (${shown === 'no-session' ? 'the session is not running' : 'the command contains unbalanced parentheses'}).`);
+    }
+    return result === 'exists' ? 'exists' : 'created';
+  };
+
+  /** `board --tmux`: window "board" in the agentctl session (never a second one). */
+  const startBoardWindow = async (ctx: Context): Promise<'created' | 'exists'> => {
+    const result = await ensureWindow(ctx, BOARD_WINDOW, deps.boardCommand?.() ?? 'agentctl board', process.cwd());
+    if (result === 'exists') line(`Window ${ctx.config.session}:${BOARD_WINDOW} already exists, left alone.`);
+    else line(`${result === 'restarted' ? 'Started again (its process had ended)' : 'Started'} the board in window ${ctx.config.session}:${BOARD_WINDOW}${result === 'session-created' ? ' (session created)' : ''}. If it fails to start, the window stays with the error; ${startLogPath(ctx.config, 'board')} has it too.`);
+    for (const l of describeNavigation(await applyNavigation(ctx), ctx.config.session)) line(l);
+    return result === 'exists' ? 'exists' : 'created';
+  };
 
   const program = new Command();
   program
@@ -720,6 +745,44 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     );
 
   program
+    .command('resume')
+    .description('After a restart (the Mac, the tmux server): make the window again for active tasks that have a worktree and no window, and start the agent in resume mode - Claude with --resume <session> or --continue, Codex with "resume <session>" or "resume --last" - with the same model, effort, flags, event hooks and usage tap, without pasting the prompt again. Tasks whose report is ready are left alone unless --all. Shows the list and asks y/N first.')
+    .argument('[tasks...]', 'task IDs; a unique prefix is enough. Default: every task that can be resumed')
+    .option('--all', 'also tasks that already have a report')
+    .option('-y, --yes', 'do not ask')
+    .option('--dry-run', 'print the commands that would run, execute nothing')
+    .action(
+      guarded(async (typed: string[], opts: { all?: boolean; yes?: boolean; dryRun?: boolean }) => {
+        const ctx = contextFor(Boolean(opts.dryRun));
+        const plan = await planResume(ctx, typed, { all: Boolean(opts.all) });
+        if (plan.items.length === 0) {
+          for (const l of plan.summary) line(l);
+          return;
+        }
+        if (!(await confirmAction(ctx, plan.summary, 'Resume?', Boolean(opts.yes) || Boolean(opts.dryRun)))) return;
+        await resumeTasks(ctx, plan, { self: deps.selfArgv?.() });
+        line(`attach with: tmux attach -t ${ctx.config.session}`);
+      }),
+    );
+
+  program
+    .command('up')
+    .description('Start of the day: make sure the watcher and the board run in the agentctl session (never a second copy), say which tasks can be resumed, and go to the board (attach, or switch inside tmux). Without a terminal it only prints the command to attach.')
+    .option('--no-attach', 'do not go to the board; print the command')
+    .action(
+      guarded(async (opts: { attach?: boolean }) => {
+        const ctx = contextFor(false);
+        await startWatchWindow(ctx, true);
+        await startBoardWindow(ctx);
+        const resumable = await findResumable(ctx);
+        if (resumable.length > 0) line(`${resumable.length} task${resumable.length === 1 ? '' : 's'} to resume (${resumable.map((r) => r.task).join(', ')}): agentctl resume`);
+        const command = `tmux attach -t ${ctx.config.session} \\; select-window -t ${BOARD_WINDOW}`;
+        if (opts.attach === false || !deps.stdinIsTTY) return line(`Open the board: ${command}`);
+        await showWindow(ctx, BOARD_WINDOW, deps.insideTmux ?? false);
+      }),
+    );
+
+  program
     .command('mark')
     .description('Say how a task turned out: ok, partial or fail (the result you judge, with an optional note). It goes to the history that "log" and "stats" read; the last mark of a task wins.')
     .argument('<task>', 'task ID; case does not matter and a unique prefix is enough')
@@ -914,16 +977,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
       guarded(async (opts: { tmux?: boolean; statusLine?: boolean }) => {
         const ctx = contextFor(false);
         if (opts.tmux) {
-          const result = await ensureWatchWindow(ctx, deps.watchCommand(), process.cwd());
-          if (result === 'exists') line(`Window ${ctx.config.session}:${WATCH_WINDOW} already exists, left alone.`);
-          else line(`${result === 'restarted' ? 'Started again (its process had ended)' : 'Started'} the watcher in window ${ctx.config.session}:${WATCH_WINDOW}${result === 'session-created' ? ' (session created)' : ''}. Attach: tmux attach -t ${ctx.config.session}. If it fails to start, the window stays with the error; ${startLogPath(ctx.config, 'watch')} has it too.`);
-          for (const l of describeNavigation(await applyNavigation(ctx), ctx.config.session)) line(l);
-          if (opts.statusLine !== false && ctx.config.watch.statusLine) {
-            const shown = await applyStatusLine(ctx, deps.statusLineCommand?.() ?? 'agentctl status --tmux-line');
-            if (shown === 'set') line(`Status bar of session ${ctx.config.session}: task counts, refreshed every 10 s (this session only; undo: tmux set-option -u -t ${ctx.config.session}: status-right).`);
-            else if (typeof shown === 'object') line(`Status bar not set – ${shown.failed}`);
-            else line(`Status bar left alone (${shown === 'no-session' ? 'the session is not running' : 'the command contains unbalanced parentheses'}).`);
-          }
+          await startWatchWindow(ctx, opts.statusLine !== false);
           return;
         }
         const interrupt = deps.interruptSignal?.();
@@ -947,10 +1001,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
       guarded(async (opts: { tmux?: boolean }) => {
         const ctx = contextFor(false);
         if (opts.tmux) {
-          const result = await ensureWindow(ctx, BOARD_WINDOW, deps.boardCommand?.() ?? 'agentctl board', process.cwd());
-          if (result === 'exists') line(`Window ${ctx.config.session}:${BOARD_WINDOW} already exists, left alone.`);
-          else line(`${result === 'restarted' ? 'Started again (its process had ended)' : 'Started'} the board in window ${ctx.config.session}:${BOARD_WINDOW}${result === 'session-created' ? ' (session created)' : ''}. If it fails to start, the window stays with the error; ${startLogPath(ctx.config, 'board')} has it too.`);
-          for (const l of describeNavigation(await applyNavigation(ctx), ctx.config.session)) line(l);
+          await startBoardWindow(ctx);
           line(`Open it: tmux attach -t ${ctx.config.session} \\; select-window -t ${BOARD_WINDOW}   (inside tmux: tmux select-window -t ${ctx.config.session}:${BOARD_WINDOW})`);
           return;
         }

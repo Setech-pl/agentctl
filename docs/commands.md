@@ -34,6 +34,8 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`limits release`](#agentctl-limits-release) | Give reserved places back: claude=1 releases one, a bare provider name releases all of its places. |
 | [`events`](#agentctl-events) | What changed since the last time: reports that became ready (with the verdict), starts from the queue, questions, folder trust, blocked, cancelled and limited tasks, finished cohorts, plan thresholds, changed limits - then a line with the state now. Needs "agentctl watch" for what it sees (the journal is written by watch and by the commands). Each client (cli, mcp) has its own "last" marker. |
 | [`usage`](#agentctl-usage) | Token usage of the tasks and the state of the plans: per provider the limit used (5 h and weekly window, with the reset) and the tokens today and in the period, the active tasks with their tokens, the cohorts. What a provider does not tell is n/d. |
+| [`resume`](#agentctl-resume) | After a restart (the Mac, the tmux server): make the window again for active tasks that have a worktree and no window, and start the agent in resume mode - Claude with --resume \<session> or --continue, Codex with "resume \<session>" or "resume --last" - with the same model, effort, flags, event hooks and usage tap, without pasting the prompt again. Tasks whose report is ready are left alone unless --all. Shows the list and asks y/N first. |
+| [`up`](#agentctl-up) | Start of the day: make sure the watcher and the board run in the agentctl session (never a second copy), say which tasks can be resumed, and go to the board (attach, or switch inside tmux). Without a terminal it only prints the command to attach. |
 | [`mark`](#agentctl-mark) | Say how a task turned out: ok, partial or fail (the result you judge, with an optional note). It goes to the history that "log" and "stats" read; the last mark of a task wins. |
 | [`log`](#agentctl-log) | The history of the tasks: when, agent/model/effort, how long, tokens, progress, the result you marked and the verdict of the report. One line per task, newest first. |
 | [`stats`](#agentctl-stats) | Which model and effort work: the tasks of the history grouped by agent/model/effort - how many, median time and tokens, the share of ok, partial and fail (agentctl mark), cancelled ones and tasks moved to the other provider after a limit. |
@@ -588,6 +590,52 @@ agentctl usage --since 30d             # the token columns over 30 days
 agentctl usage --cohort sprint-1       # only the tasks of one cohort
 agentctl usage --json
 agentctl usage --clip                  # Markdown table to the clipboard
+```
+
+## agentctl resume
+
+After a restart (the Mac, the tmux server): make the window again for active tasks that have a worktree and no window, and start the agent in resume mode - Claude with --resume \<session> or --continue, Codex with "resume \<session>" or "resume --last" - with the same model, effort, flags, event hooks and usage tap, without pasting the prompt again. Tasks whose report is ready are left alone unless --all. Shows the list and asks y/N first.
+
+```
+agentctl resume [options] [tasks...]
+```
+
+| Argument | Meaning |
+|---|---|
+| `[tasks...]` | task IDs; a unique prefix is enough. Default: every task that can be resumed |
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--all` | also tasks that already have a report |  |
+| `-y, --yes` | do not ask |  |
+| `--dry-run` | print the commands that would run, execute nothing |  |
+
+Examples:
+
+```sh
+agentctl resume                           # the list, y/N, then the windows come back
+agentctl resume NC-42 NC-43 -y
+agentctl resume --all                     # also tasks that have a report
+agentctl resume --dry-run
+```
+
+## agentctl up
+
+Start of the day: make sure the watcher and the board run in the agentctl session (never a second copy), say which tasks can be resumed, and go to the board (attach, or switch inside tmux). Without a terminal it only prints the command to attach.
+
+```
+agentctl up [options]
+```
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--no-attach` | do not go to the board; print the command |  |
+
+Examples:
+
+```sh
+agentctl up                               # watcher and board in the session, hint about resume, then the board
+agentctl up --no-attach                   # only print the command to open the board
 ```
 
 ## agentctl mark
