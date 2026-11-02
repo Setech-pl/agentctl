@@ -97,9 +97,7 @@ describe('findCandidates', () => {
     s.write(path.join(s.worktree, 'b.md'), 'b');
     const found = findCandidates(s.ctx, s.record, `${a} potem b.md`);
     assert.equal(found[0]?.file, path.join(s.worktree, 'b.md'));
-    const home = fs.mkdtempSync(path.join(s.root, 'h-'));
-    assert.equal(findCandidates(s.ctx, s.record, `~/${path.relative(HOME, a)}`).length, a.startsWith(`${HOME}/`) ? 1 : 0);
-    assert.ok(home);
+    assert.equal(findCandidates(s.ctx, s.record, `~/${path.relative(HOME, a)}`).length, 1);
   });
 
   it('ignores the canonical file and the state folder', () => {

@@ -64,7 +64,7 @@ describe('live harness: refusals', () => {
   it('refuses the real AGENTCTL_HOME and CODEX_HOME, and homes outside the sandbox', () => {
     const base = input('homes');
     assert.throws(() => checkHarnessSafety({ ...base, agentctlHome: '/Users/someone/.agentctl' }), /AGENTCTL_HOME .* not inside the sandbox/);
-    assert.throws(() => checkHarnessSafety({ ...base, codexHome: path.join(os_home(), '.codex') }), /CODEX_HOME .* not inside the sandbox/);
+    assert.throws(() => checkHarnessSafety({ ...base, codexHome: '/Users/someone/.codex' }), /CODEX_HOME .* not inside the sandbox/);
   });
 
   it('commandV finds the first executable of a PATH and ignores directories', () => {
@@ -87,7 +87,3 @@ describe('live harness: refusals', () => {
     assert.ok(!h.env.PATH?.includes('/opt/homebrew'), 'the real agents live there');
   });
 });
-
-function os_home(): string {
-  return process.env.HOME ?? '/Users/someone';
-}

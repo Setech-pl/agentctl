@@ -42,7 +42,7 @@ describe('docs: commands', () => {
     assert.equal(code, 0);
     const text = out.join('');
     assert.match(text, /--ready/);
-    assert.match(text, /Examples:\n {2}agentctl pull NC-42/);
+    assert.match(text, /Examples:\n {2}agentctl pull TASK-42/);
   });
 });
 

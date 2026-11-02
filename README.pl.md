@@ -333,29 +333,26 @@ Spec to nagłówek YAML między liniami `---`, a po nim prompt. Kilka specyfikac
 
 ```markdown
 ---
-task: NC-42
+task: TASK-42
 agent: claude
 model: opus
 effort: high
 repos:
-  - path: ~/Projects/neon-city
-    worktree: ~/Projects/wt/neon-city-nc-42
-    base: master
-    branch: nc-42-tram-bell
-links:
-  # Point the client's @neon-city/* packages at the backend worktree under test.
-  - from: node_modules/@neon-city/*
-    to: ~/Projects/wt/neon-city-backend-merge3/packages/*
+  - path: ~/src/sample-app
+    worktree: ~/worktrees/sample-app-task-42
+    base: main
+    branch: task-42-notification-sound
+links: []
 env:
-  NEON_CITY_TASK: NC-42
-report: ~/Projects/cache/nc-42/NC-42.md
+  APP_TASK: TASK-42
+report: ~/reports/task-42/TASK-42.md
 ---
-Add a bell sound to the tram when it leaves a stop.
+Play a notification sound when a background task finishes.
 
 - Reuse the existing audio bus; do not add new dependencies.
 - Cover the new behaviour with a test.
 - When you are done, write a short report (what changed, how you checked it,
-  what is left) to ~/Projects/cache/nc-42/NC-42.md.
+  what is left) to ~/reports/task-42/TASK-42.md.
 ```
 
 (Przykład jest po angielsku, bo to dokładnie to, co drukuje `agentctl spec example`; prompt możesz pisać w dowolnym języku.)
@@ -500,17 +497,17 @@ Szczegóły: [docs/details.pl.md](docs/details.pl.md#powiadomienia-na-telefon).
 Lokalny serwer MCP nie działa w czatach claude.ai na telefonie (tylko w aplikacji desktopowej Claude). **Claude Code Remote Control** robi coś innego: sesję Claude Code, która działa na Twoim Macu, można kontynuować z aplikacji Claude na iOS i Androidzie, z jej lokalnymi narzędziami i serwerami MCP. `agentctl manager` startuje taką sesję za Ciebie, **dyspozytora**: widzi Twoich agentów przez narzędzia MCP agentctl, krótko odpowiada, co się dzieje, pobiera raporty, a kolejny krok zleca dopiero po Twojej wyraźnej zgodzie.
 
 1. **Sprawdź wymagania.** Claude Code zalogowany przez claude.ai (`claude auth login`; Pro, Max, Team lub Enterprise, w Team i Enterprise Owner musi włączyć Remote Control), **nie** klucz API, Bedrock, Vertex ani bramka (`ANTHROPIC_BASE_URL`). Aplikacja Claude na telefonie, zalogowana na to samo konto. `agentctl doctor` sprawdza flagi Twojego `claude` i ostrzega przed zmiennymi, przez które Claude Code odmawia Remote Control.
-2. **Uruchom managera.** `agentctl manager` (ustaw raz `manager.project`, folder, w którym pracujesz, np. `~/Projects/neon-city`; `--project` go nadpisuje). Tworzy okno `manager` w sesji agentctl i startuje w Twoim projekcie `claude --remote-control "agentctl manager"`. **Za pierwszym razem Claude Code pyta w tym oknie** o zaufanie do folderu i o *Enable Remote Control*: odpowiedz tam (`tmux attach -t agentctl \; select-window -t manager` albo zaznacz linię 🧭 na boardzie i naciśnij Enter). agentctl nigdy nie odpowiada na te okna dialogowe.
+2. **Uruchom managera.** `agentctl manager` (ustaw raz `manager.project`, folder, w którym pracujesz, np. `~/src/sample-app`; `--project` go nadpisuje). Tworzy okno `manager` w sesji agentctl i startuje w Twoim projekcie `claude --remote-control "agentctl manager"`. **Za pierwszym razem Claude Code pyta w tym oknie** o zaufanie do folderu i o *Enable Remote Control*: odpowiedz tam (`tmux attach -t agentctl \; select-window -t manager` albo zaznacz linię 🧭 na boardzie i naciśnij Enter). agentctl nigdy nie odpowiada na te okna dialogowe.
 3. **Otwórz na telefonie.** Aplikacja Claude, zakładka **Code**, sesja **agentctl manager** (ikona komputera z zieloną kropką). `agentctl manager --url` drukuje adres i kod QR, gdy okno je pokazuje; w oknie `/remote-control` pokazuje oba.
 4. **Rozmawiaj.** „Co słychać?" każe managerowi wywołać `events_since` i `status`. „Pokaż raport NC-42" daje krótką wersję. „Uruchom NC-43" każe mu pokazać spec i czekać na Twoje tak. To, co może zmienić, jest ograniczone dwa razy: przez `mcp.allow` w agentctl i przez Claude Code, który przed wywołaniem narzędzia zmieniającego coś prosi Cię o zgodę na telefonie (narzędzia tylko do odczytu nie wymagają stuknięcia).
 
 ```yaml
 manager:
-  project: ~/Projects/neon-city        # gdzie działa sesja; jego pliki nie są zmieniane
+  project: ~/src/sample-app        # gdzie działa sesja; jego pliki nie są zmieniane
   # name: agentctl manager             # nazwa w aplikacji Claude
   # model: sonnet                      # domyślnie
   # effort: medium                     # domyślnie
-  # guide: ~/Projects/neon-city/claude/AGENTCTL-SPEC-GUIDE.md   # zasady pisania specyfikacji, dodane do roli
+  # guide: ~/src/sample-app/claude/AGENTCTL-SPEC-GUIDE.md   # zasady pisania specyfikacji, dodane do roli
   # autostart: true                    # agentctl up startuje też managera
 mcp:
   allow: [send, new, queue]            # co manager w ogóle może, za Twoim tak
