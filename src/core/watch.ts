@@ -12,6 +12,7 @@ import { decorateName } from './icons.ts';
 import { CollisionMemory, collisionTick } from './collisions.ts';
 import { cohortTick } from './cohort.ts';
 import { announceBlocked, QueueMemory, queueTick } from './queue.ts';
+import { usageTick } from './usage-limits.ts';
 import { errorMessage } from './util.ts';
 import { ensureWindow } from './windows.ts';
 import type { EnsureResult } from './windows.ts';
@@ -159,6 +160,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   await announceBlocked(ctx, notifier, allRows, { self: options.self, log: startLog }).catch((e: unknown) => startLog(`queue: ${errorMessage(e)}`));
   await cohortTick(ctx, notifier, allRows, startLog).catch((e: unknown) => startLog(`cohort: ${errorMessage(e)}`));
   await collisionTick(ctx, memory.collisions, notifier, startLog).catch((e: unknown) => startLog(`collisions: ${errorMessage(e)}`));
+  await usageTick(ctx, notifier, startLog).catch((e: unknown) => startLog(`usage: ${errorMessage(e)}`));
   const events = detectTransitions(memory, rows, now, ctx.config.watch.waitingAfter * 1000);
   const alerts = new Alerts(ctx, notifier, { self: options.self });
   for (const e of events) {
