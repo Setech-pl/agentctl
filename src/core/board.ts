@@ -10,6 +10,7 @@ import type { SelfArgv } from './events.ts';
 import { interruptTask } from './interrupt.ts';
 import { moveTask } from './move.ts';
 import { liveWindows } from './plan.ts';
+import { collectLimits, renderLimits } from './limits.ts';
 import { describeQueue, moveToFront, readQueue, removeFromQueue, setPaused } from './queue.ts';
 import type { QueueView } from './queue.ts';
 import { peekWindow } from './peek.ts';
@@ -78,7 +79,13 @@ export type BoardMode =
   | { kind: 'cohort-pick'; options: CohortOption[]; index: number }
   | { kind: 'help' }
   /** `l`: the history of the tasks (`agentctl log`), scrolled with the arrows. */
-  | { kind: 'log'; lines: string[]; offset: number };
+  | { kind: 'log'; lines: string[]; offset: number }
+  /** `L` (limits), `G` (gc preview): a page of lines from the core, scrolled with the arrows. */
+  | { kind: 'view'; what: ViewKind; lines: string[]; offset: number };
+
+export type ViewKind = 'limits' | 'gc';
+
+export const VIEW_TITLES: Record<ViewKind, string> = { limits: 'Limits', gc: 'Clean-up preview (agentctl gc)' };
 
 export interface CohortOption {
   label: string;
@@ -138,6 +145,8 @@ export type BoardEffect =
   | { type: 'mark'; task: string; result: Result }
   /** `l`: load the history into the log view. */
   | { type: 'log' }
+  /** `L`, `G`: load the lines of a view. */
+  | { type: 'view'; what: ViewKind }
   /** The selection moved: load the preview of the new one now instead of at the next refresh. */
   | { type: 'refresh' }
   | { type: 'quit' };
@@ -274,6 +283,8 @@ function listKey(state: BoardState, input: string, key: KeyPress): KeyResult {
 
   if (input === '?') return stay({ ...state, mode: { kind: 'help' } });
   if (input === 'l') return stay({ ...state, notice: null, mode: { kind: 'log', lines: ['Loading…'], offset: 0 } }, [{ type: 'log' }]);
+  const view: ViewKind | null = input === 'L' ? 'limits' : input === 'G' ? 'gc' : null;
+  if (view) return stay({ ...state, notice: null, mode: { kind: 'view', what: view, lines: ['Loading…'], offset: 0 } }, [{ type: 'view', what: view }]);
   // o / p / f: how a finished task turned out. `p` is also the queue's pause: it marks only while a finished task is selected.
   const result = input === 'o' ? 'ok' : input === 'p' ? 'partial' : input === 'f' ? 'fail' : null;
   if (result) {
@@ -296,7 +307,7 @@ function listKey(state: BoardState, input: string, key: KeyPress): KeyResult {
     if (options.length <= 2 && state.cohortFilter === null) return stay(withNotice(state, 'error', 'No cohorts yet: a task joins one with "cohort: <name>" in its spec, or agentctl cohort add.'));
     return stay({ ...state, notice: null, mode: { kind: 'cohort-pick', options, index: Math.max(0, options.findIndex((o) => o.value === state.cohortFilter)) } });
   }
-  if (input === 'G') return stay(withNotice({ ...state, folded: [] }, 'info', 'All groups are open.'));
+  if (input === 'E') return stay(withNotice({ ...state, folded: [] }, 'info', 'All groups are open.'));
   if (input === 'p') {
     const pause = !state.queuePaused;
     return stay(withNotice(state, 'info', pause ? 'Pausing the queue…' : 'Resuming the queue…'), [{ type: 'queue-pause', paused: pause }]);
@@ -466,7 +477,17 @@ export function handleKey(state: BoardState, input: string, key: KeyPress): KeyR
       return { state: toList(state), effects: [] };
     case 'log':
       return logKey(state, state.mode, input, key);
+    case 'view':
+      return viewKey(state, state.mode, input, key);
   }
+}
+
+function viewKey(state: BoardState, mode: Extract<BoardMode, { kind: 'view' }>, input: string, key: KeyPress): KeyResult {
+  const opener = mode.what === 'limits' ? 'L' : 'G';
+  if (key.escape || input === 'q' || input === opener || (key.ctrl && input === 'c')) return { state: toList(state), effects: [] };
+  const step = key.upArrow || input === 'k' ? -1 : key.downArrow || input === 'j' ? 1 : 0;
+  if (step === 0) return { state, effects: [] };
+  return { state: { ...state, mode: { ...mode, offset: Math.max(0, Math.min(Math.max(0, mode.lines.length - 1), mode.offset + step)) } }, effects: [] };
 }
 
 function logKey(state: BoardState, mode: Extract<BoardMode, { kind: 'log' }>, input: string, key: KeyPress): KeyResult {
@@ -644,6 +665,7 @@ export async function runBoardEffect(runner: Runner, config: GlobalConfig, effec
         return { level: 'info', text: effect.hidden ? `${effect.task}: hidden (a lists hidden tasks, h shows it again)` : `${effect.task}: shown again` };
       case 'refresh':
       case 'log':
+      case 'view':
       case 'quit':
         return { level: 'info', text: '' };
     }
@@ -753,6 +775,12 @@ export function rowCells(row: StatusRow, selected: boolean, cols: BoardColumns, 
 
 /** The lines of the log view: the history of the tasks, newest first. */
 export const loadLogLines = (ctx: Context): string[] => logLines(ctx);
+
+/** The lines of a view: the same text the command prints. */
+export async function loadViewLines(ctx: Context, what: ViewKind): Promise<string[]> {
+  if (what === 'limits') return renderLimits(collectLimits(ctx.config, await liveWindows(ctx)));
+  return ['(not available)'];
+}
 
 export const BAR_WIDTH = 10;
 
@@ -887,7 +915,7 @@ export function visibleRows(state: BoardState, capacity: number): { rows: BoardR
 
 // ---- texts
 
-export const KEY_HINTS = 'm msg M move i int c/r pull x close X cancel k cohort h hide l log o/f u/d/p ?';
+export const KEY_HINTS = 'm msg M move i int c/r pull x close X cancel k cohort h hide l log L G R u/d/p ?';
 
 export const HELP_LINES: string[] = [
   'agentctl board',
@@ -910,7 +938,10 @@ export const HELP_LINES: string[] = [
   '              p marks only on a finished task, else it pauses the queue',
   '  k           pick a cohort to show (↑↓ ⏎ or its number); "wszystkie" = all,',
   '              "bez kohorty" = the tasks that are in no cohort',
-  '  g / G       fold the cohort group of the selected task / open all groups',
+  '  g / E       fold the cohort group of the selected task / open all groups',
+  '  L           the limits per provider and what uses them (agentctl limits)',
+  '  G           preview of the clean-up (agentctl gc): what would be freed',
+  '  R           resume the tasks listed under "Do wznowienia" (agentctl resume)',
   '  h           hide the task (or show a hidden one); nothing is closed or removed',
   '  z           open or close the "Finished" section (tasks without a window)',
   '  a           list hidden tasks too (dimmed, marked ·)',

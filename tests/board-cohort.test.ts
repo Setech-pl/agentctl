@@ -100,7 +100,7 @@ describe('board: grouping by cohort', () => {
     s = press(s, 'g').state; // on B-1: folds Wave too
     assert.deepEqual(s.folded, ['alpha', 'wave']);
     assert.deepEqual(navTasks(s), ['C-1']);
-    r = press(s, 'G');
+    r = press(s, 'E');
     assert.deepEqual(r.state.folded, []);
     assert.deepEqual(navTasks(r.state), ['A-1', 'A-2', 'B-1', 'B-2', 'C-1']);
     assert.equal(press(boardOf([row('X-1')]), 'g').state.notice?.text, 'No cohorts: nothing to fold.');
@@ -248,7 +248,7 @@ describe('board: X cancels', () => {
     assert.deepEqual(all.map((i) => i.kind), ['row', 'cancelled', 'row']);
     assert.equal(KEY_HINTS.includes('X cancel') && KEY_HINTS.includes('k cohort'), true);
     const help = HELP_LINES.join('\n');
-    for (const needle of ['X ', 'k ', 'g / G', 'bez kohorty', 'Cancelled tasks are listed under "a"']) assert.ok(help.includes(needle), needle);
+    for (const needle of ['X ', 'k ', 'g / E', 'bez kohorty', 'Cancelled tasks are listed under "a"']) assert.ok(help.includes(needle), needle);
     // open the cancelled one with a: only c works on it
     const onCancelled = press({ ...s, showHidden: true, selected: 'A-2' }, 'x').state;
     assert.match(onCancelled.notice?.text ?? '', /A-2 is cancelled; only c \(copy the report\) works on it\./);

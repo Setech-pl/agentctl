@@ -9,6 +9,11 @@ import { describeQueue, readQueue } from '../src/core/queue.ts';
 import { readJournal } from '../src/core/journal.ts';
 import { DiskRunner, FakeTmux, makeConfig, makeContext, runCli, seedTask, useScratch } from './helpers.ts';
 import { Context } from '../src/core/context.ts';
+import { z } from 'zod';
+import { handleKey, initialBoardState, loadViewLines } from '../src/core/board.ts';
+import type { BoardState } from '../src/core/board.ts';
+import { auditPath, MCP_TOOLS } from '../src/core/mcp-tools.ts';
+import type { McpDeps, McpToolDef } from '../src/core/mcp-tools.ts';
 import { RecordingRunner } from '../src/core/runner.ts';
 import type { QueueEntry } from '../src/core/queue.ts';
 
@@ -203,5 +208,75 @@ describe('limits: sessions outside agentctl', () => {
 
   it('count_external: a wrong type is a config error', () => {
     assert.throws(() => makeConfig(scratch.sub('ext-bad'), 'limits:\n  count_external: maybe\n'), /count_external must be true or false/);
+  });
+});
+
+describe('limits: MCP and board', () => {
+  const SELF = ['/usr/bin/env', '/opt/node/bin/node', '/opt/agentctl/bin/agentctl.ts'];
+  function mcpSetup(name: string, extra: string) {
+    const config = makeConfig(scratch.sub(name), extra);
+    const tmux = new FakeTmux();
+    const runner = new DiskRunner({ dryRun: false, respond: tmux.respond });
+    const notified: string[] = [];
+    const deps: McpDeps = { context: (out) => new Context(runner, loadGlobalConfig(path.dirname(config.path)), out), notify: async (m) => void notified.push(m), self: SELF as never };
+    const call = (tool: string, args: Record<string, unknown> = {}) => {
+      const t = MCP_TOOLS.find((x) => x.name === tool) as McpToolDef;
+      return t.run(deps, z.object(t.input).parse(args) as never);
+    };
+    return { config, call, notified };
+  }
+
+  it('limits reads for everyone and carries the reservations', async () => {
+    const s = mcpSetup('mcp-limits', 'limits:\n  claude: 2\n');
+    const r = await s.call('limits');
+    assert.equal(r.isError, undefined);
+    assert.match(r.text, /"limit": 2/);
+    assert.match(r.text, /"free": 2/);
+  });
+
+  it('set_limits: off by default; two steps (summary, then confirm: true); audited; announced', async () => {
+    const s = mcpSetup('mcp-set', 'limits:\n  claude: 3\n');
+    const denied = await s.call('set_limits', { claude: 2 });
+    assert.equal(denied.isError, true);
+    assert.match(denied.text, /not in mcp\.allow/);
+    fs.appendFileSync(s.config.path, 'mcp:\n  allow: [set_limits, reserve]\n');
+    const preview = await s.call('set_limits', { claude: 2, codex: 4 });
+    assert.match(preview.text, /limits\.claude: 3 -> 2/);
+    assert.match(preview.text, /confirm: true/);
+    assert.equal(loadGlobalConfig(path.dirname(s.config.path)).limits.claude, 3, 'nothing written yet');
+    const done = await s.call('set_limits', { claude: 2, codex: 4, confirm: true });
+    assert.match(done.text, /Limits changed/);
+    assert.deepEqual(loadGlobalConfig(path.dirname(s.config.path)).limits, { claude: 2, codex: 4 });
+    assert.deepEqual(s.notified, ['czat zlecił: limity claude=2 codex=4']);
+    const audit = fs.readFileSync(auditPath(s.config), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    assert.deepEqual(audit.map((a: { tool: string; outcome: string }) => `${a.tool}:${a.outcome}`), ['set_limits:denied', 'set_limits:requested', 'set_limits:preview', 'set_limits:requested', 'set_limits:done']);
+    assert.equal((await s.call('set_limits', { confirm: true })).isError, true);
+  });
+
+  it('reserve and release go through a summary and confirm: true', async () => {
+    const s = mcpSetup('mcp-reserve', 'mcp:\n  allow: [reserve]\nlimits:\n  claude: 3\n');
+    const preview = await s.call('reserve', { claude: 1, note: 'mój terminal' });
+    assert.match(preview.text, /Not done yet/);
+    assert.deepEqual(readReservations(s.config), {});
+    await s.call('reserve', { claude: 1, note: 'mój terminal', confirm: true });
+    assert.equal(readReservations(s.config).claude?.count, 1);
+    assert.deepEqual(s.notified, ['czat zlecił: rezerwacja claude 1']);
+    await s.call('reserve', { claude: 1, release: true, confirm: true });
+    assert.deepEqual(readReservations(s.config), {});
+  });
+
+  it('board: L opens the limits view, scrolls and leaves; the effect loads the lines of the limits command', async () => {
+    const config = makeConfig(scratch.sub('board-l'), 'limits:\n  claude: 2\n');
+    const state = initialBoardState(100, 30);
+    const r = handleKey(state, 'L', {});
+    assert.equal(r.state.mode.kind, 'view');
+    assert.deepEqual(r.effects, [{ type: 'view', what: 'limits' }]);
+    const filled: BoardState = { ...r.state, mode: { kind: 'view', what: 'limits', lines: ['a', 'b', 'c'], offset: 0 } };
+    assert.equal((handleKey(filled, '', { downArrow: true }).state.mode as { offset: number }).offset, 1);
+    for (const [input, key] of [['', { escape: true }], ['q', {}], ['L', {}]] as const) assert.equal(handleKey(filled, input, key).state.mode.kind, 'list');
+    const tmux = new FakeTmux();
+    const ctx = new Context(new DiskRunner({ dryRun: false, respond: tmux.respond }), config, () => {});
+    const lines = await loadViewLines(ctx, 'limits');
+    assert.match(lines.join('\n'), /PROVIDER\s+LIMIT\s+USED\s+FREE/);
   });
 });
