@@ -87,7 +87,9 @@ describe('mcp: cancel', () => {
 
   it('a queued task is cancelled the same way; the tasks that wait for it become blocked', async () => {
     const t = setup('queued', 'mcp: {allow: [queue, cancel]}\n');
+    await t.call('queue', { spec: t.spec('Q-1') + t.spec('Q-2', 'after: Q-1\n') });
     await t.call('queue', { spec: t.spec('Q-1') + t.spec('Q-2', 'after: Q-1\n'), confirm: true });
+    await t.call('cancel', { task: 'Q-1' });
     const r = await t.call('cancel', { task: 'Q-1', confirm: true });
     assert.equal(r.isError, undefined, r.text);
     assert.match(r.text, /⛓ Q-2 is blocked: it waited for Q-1/);
@@ -101,9 +103,11 @@ describe('mcp: cancel', () => {
     const t = setup('cohort', 'mcp: {allow: [queue, cancel]}\n');
     t.running('A-1', 'Sprint-1');
     t.running('B-1', 'Other');
+    await t.call('queue', { spec: t.spec('Q-1', 'cohort: sprint-1\n') });
     await t.call('queue', { spec: t.spec('Q-1', 'cohort: sprint-1\n'), confirm: true });
     const preview = await t.call('cancel', { cohort: 'SPRINT-1' });
     assert.match(preview.text, /Cancel 2 tasks:\n {2}A-1 .*\n {2}Q-1 /);
+    await t.call('cancel', { cohort: 'sprint-1', reason: 'scrapped' });
     await t.call('cancel', { cohort: 'sprint-1', confirm: true, reason: 'scrapped' });
     assert.deepEqual(['a-1', 'q-1', 'b-1'].map((x) => readTaskRecord(t.config, x)?.cancelled), [true, true, undefined]);
     assert.deepEqual(t.tmux.windows.map((w) => w.name), ['b-1']);
@@ -120,12 +124,14 @@ describe('mcp: cancel', () => {
   it('remove_worktree needs mcp.allow_rm_worktree, like close', async () => {
     const t = setup('rmwt', 'mcp: {allow: [cancel]}\n');
     t.running('NC-1');
+    await t.call('cancel', { task: 'NC-1', remove_worktree: true });
     const denied = await t.call('cancel', { task: 'NC-1', remove_worktree: true, confirm: true });
     assert.equal(denied.isError, true);
     assert.match(denied.text, /removing the worktree is not allowed for the chat/);
     assert.equal(readTaskRecord(t.config, 'nc-1')?.cancelled, undefined);
     const ok = setup('rmwt2', 'mcp: {allow: [cancel], allow_rm_worktree: true}\n');
     const worktree = ok.running('NC-1');
+    await ok.call('cancel', { task: 'NC-1', remove_worktree: true });
     const r = await ok.call('cancel', { task: 'NC-1', remove_worktree: true, confirm: true });
     assert.equal(r.isError, undefined, r.text);
     assert.ok(ok.runner.commands.some((c) => c.includes(`worktree remove ${worktree}`) && !c.includes('--force')));
@@ -148,12 +154,12 @@ describe('mcp: cohorts', () => {
     t.running('B-1', 'Other');
     t.running('C-1');
     seedTask(t.config, 'A-2', { cohort: 'Sprint-1', cancelled: true, cancelledAt: '2026-11-02T08:00:00.000Z', cancelReason: 'x' });
-    const all = json<{ task: string; cohort: string | null }[]>(await t.call('status'));
+    const all = json<{ tasks: { task: string; cohort: string | null }[] }>(await t.call('status')).tasks;
     assert.deepEqual(all.map((r) => [r.task, r.cohort]), [['A-1', 'Sprint-1'], ['B-1', 'Other'], ['C-1', null]]);
     const one = await t.call('status', { cohort: 'sprint-1' });
     assert.match(one.text, /^1 task: 1 working \(1 hidden or closed not shown; all: true lists them\)\nCohort Sprint-1: only its tasks are listed\./);
-    assert.deepEqual(json<{ task: string }[]>(one).map((r) => r.task), ['A-1']);
-    const withAll = json<{ task: string; cancelled: boolean; cancelReason: string | null }[]>(await t.call('status', { cohort: 'sprint-1', all: true }));
+    assert.deepEqual(json<{ tasks: { task: string }[] }>(one).tasks.map((r) => r.task), ['A-1']);
+    const withAll = json<{ tasks: { task: string; cancelled: boolean; cancelReason: string | null }[] }>(await t.call('status', { cohort: 'sprint-1', all: true })).tasks;
     assert.deepEqual(withAll.map((r) => [r.task, r.cancelled, r.cancelReason]), [['A-1', false, null], ['A-2', true, 'x']]);
     const unknown = await t.call('status', { cohort: 'nope' });
     assert.equal(unknown.isError, true);
@@ -165,7 +171,9 @@ describe('mcp: cohorts', () => {
     t.running('A-1', 'Sprint-1');
     t.ready('A-2', 'Sprint-1');
     t.running('C-1');
+    await t.call('queue', { spec: t.spec('Q-1', 'cohort: Sprint-1\n') });
     await t.call('queue', { spec: t.spec('Q-1', 'cohort: Sprint-1\n'), confirm: true });
+    await t.call('queue', { spec: t.spec('Q-2') });
     await t.call('queue', { spec: t.spec('Q-2'), confirm: true });
     const list = json<{ name: string; active: number; queued: number; reports: number; total: number }[]>(await t.call('cohort_list'));
     assert.deepEqual(list.map((c) => [c.name, c.active, c.queued, c.reports, c.total]), [['Sprint-1', 1, 1, 1, 3]]);

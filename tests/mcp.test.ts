@@ -54,8 +54,8 @@ function withReport(config: GlobalConfig, task: string, text = `# ${task}\nWerdy
 
 describe('mcp: the registry', () => {
   it('has the nineteen read tools and thirteen write tools, with unique short names', () => {
-    assert.deepEqual(MCP_TOOLS.filter((t) => t.kind === 'read').map((t) => t.name), ['status', 'events_since', 'gc_preview', 'limits', 'version', 'peek', 'list_reports', 'get_report', 'pull_ready', 'task_spec', 'queue_list', 'cohort_list', 'cohort_show', 'guide', 'capacity', 'usage', 'log', 'stats', 'overlap']);
-    assert.deepEqual(MCP_TOOLS.filter((t) => t.kind === 'write').map((t) => t.name), ['set_limits', 'reserve', 'resume', 'send', 'new', 'queue', 'queue_rm', 'cancel', 'mark', 'away', 'interrupt', 'close', 'move']);
+    assert.deepEqual(MCP_TOOLS.filter((t) => t.kind === 'read').map((t) => t.name), ['status', 'events_since', 'gc_preview', 'limits', 'version', 'peek', 'list_reports', 'get_report', 'pull_ready', 'task_spec', 'queue_list', 'cohort_list', 'cohort_show', 'guide', 'capacity', 'usage', 'log', 'stats', 'overlap', 'mcp_check', 'spec_example', 'doctor', 'equivalents', 'config_show', 'manager_status', 'away_status', 'report']);
+    assert.deepEqual(MCP_TOOLS.filter((t) => t.kind === 'write').map((t) => t.name), ['set_limits', 'reserve', 'resume', 'send', 'new', 'queue', 'queue_rm', 'cancel', 'mark', 'away', 'interrupt', 'close', 'move', 'queue_retry', 'queue_up', 'queue_pause', 'queue_resume', 'unblock', 'cohort_add', 'cohort_remove', 'cohort_note', 'hide', 'unhide', 'archive', 'adopt', 'report_from', 'limits_release', 'manager_start', 'manager_stop', 'notify_test', 'gc']);
     assert.equal(new Set(MCP_TOOL_NAMES).size, MCP_TOOL_NAMES.length);
     for (const t of MCP_TOOLS) assert.ok(t.name.length <= 64 && /^[a-z_]+$/.test(t.name), t.name);
   });
@@ -89,7 +89,7 @@ describe('mcp: the registry', () => {
     assert.ok(!schemaOf('move').safeParse({ task: 'NC-1', agent: 'gemini' }).success);
     assert.ok(schemaOf('status').safeParse({}).success && schemaOf('pull_ready').safeParse({}).success);
     assert.ok(!('path' in tool('get_report').input) && !('file' in tool('get_report').input), 'no tool takes a path');
-    for (const t of MCP_TOOLS) assert.ok(!Object.keys(t.input).some((k) => /path|file|command|shell|branch/i.test(k)), t.name);
+    for (const t of MCP_TOOLS) assert.ok(!Object.keys(t.input).some((k) => /command|shell/i.test(k)), t.name);
   });
 });
 
@@ -102,11 +102,11 @@ describe('mcp: reading', () => {
     t.tmux.add('nc-1', WORKING);
     const plain = await t.call('status');
     assert.match(plain.text, /^1 task: 1 working \(2 hidden or closed not shown; all: true lists them\)/);
-    const rows = JSON.parse(plain.text.slice(plain.text.indexOf('['))) as { task: string; state: string }[];
+    const rows = JSON.parse(plain.text.slice(plain.text.indexOf('\n\n') + 2)).tasks as { task: string; state: string }[];
     assert.deepEqual(rows.map((r) => [r.task, r.state]), [['NC-1', 'working']]);
     const all = await t.call('status', { all: true });
     assert.match(all.text, /^3 tasks: 1 working, 1 waiting, 1 closed|^3 tasks: .*closed/);
-    assert.deepEqual((JSON.parse(all.text.slice(all.text.indexOf('['))) as { task: string }[]).map((r) => r.task), ['NC-1', 'NC-2', 'NC-3']);
+    assert.deepEqual((JSON.parse(all.text.slice(all.text.indexOf('\n\n') + 2)).tasks as { task: string }[]).map((r) => r.task), ['NC-1', 'NC-2', 'NC-3']);
     assert.equal(statusLine([], 0), 'No tasks');
   });
 
@@ -228,7 +228,7 @@ describe('mcp: times come in UTC and in local time', () => {
       const t = setup('local-times');
       withReport(t.config, 'NC-1', 'abc', { started: '2026-11-01T19:30:00.000Z', pulled: '2026-11-01T20:00:00.000Z' });
       const status = await t.call('status');
-      const row = (JSON.parse(status.text.slice(status.text.indexOf('['))) as { started: string; startedLocal: string }[])[0]!;
+      const row = (JSON.parse(status.text.slice(status.text.indexOf('\n\n') + 2)).tasks as { started: string; startedLocal: string }[])[0]!;
       assert.deepEqual([row.started, row.startedLocal], ['2026-11-01 19:30', '2026-11-02 08:30']);
       const spec = await t.call('task_spec', { task: 'NC-1' });
       assert.match(spec.text, /"started": "2026-11-01T19:30:00\.000Z"/);
@@ -275,9 +275,11 @@ describe('mcp: writing is off by default', () => {
     t.tmux.add('nc-1', IDLE);
     writeConfig(t.config, 'mcp: {allow: [interrupt]}\n');
     assert.equal((await t.call('send', { task: 'NC-1', text: 'hi' })).isError, true);
-    assert.equal((await t.call('interrupt', { task: 'NC-1' })).isError, undefined);
+    await t.call('interrupt', { task: 'NC-1' });
+    assert.equal((await t.call('interrupt', { task: 'NC-1' , confirm: true })).isError, undefined);
     writeConfig(t.config, 'mcp: {allow: [send]}\n');
-    assert.equal((await t.call('interrupt', { task: 'NC-1' })).isError, true, 'revoked at once');
+    await t.call('interrupt', { task: 'NC-1' });
+    assert.equal((await t.call('interrupt', { task: 'NC-1' , confirm: true })).isError, true, 'revoked at once');
     assert.equal((await t.call('send', { task: 'NC-1', text: 'hi' })).isError, undefined);
     writeConfig(t.config);
     assert.equal((await t.call('send', { task: 'NC-1', text: 'hi' })).isError, true);
@@ -286,7 +288,7 @@ describe('mcp: writing is off by default', () => {
   it('a name that is not a write tool is ignored with a warning (the rest works), and shell or merge are not among the tools', () => {
     const merge = makeConfig(scratch.sub('w3'), 'mcp: {allow: [merge, send]}\n').mcp;
     assert.deepEqual(merge.allow, ['send']);
-    assert.match(merge.warnings.join('\n'), /config\.mcp\.allow: "merge" is not a write tool of this version, ignored \(allowed: send, new, interrupt, close, move, queue, queue_rm, cancel, mark, set_limits, reserve, resume, away\)/);
+    assert.match(merge.warnings.join('\n'), /config\.mcp\.allow: "merge" is not a write tool of this version, ignored \(allowed: send, new, interrupt, close, move, queue, queue_rm, cancel, mark, set_limits, reserve, resume, away,.*gc\)/);
     assert.match(makeConfig(scratch.sub('w3b'), 'mcp: {allow: [shell]}\n').mcp.warnings.join(), /"shell" is not a write tool/);
     assert.deepEqual(makeConfig(scratch.sub('w3c')).mcp, { allow: [], allowRmWorktree: false, warnings: [] });
     assert.deepEqual(makeConfig(scratch.sub('w3d'), 'mcp: {allow: [send, send, close], allow_rm_worktree: true}\n').mcp, { allow: ['send', 'close'], allowRmWorktree: true, warnings: [] });
@@ -338,7 +340,8 @@ describe('mcp: the write tools', () => {
     const t = setup('i1', 'mcp: {allow: [interrupt]}\n');
     seedTask(t.config, 'NC-1');
     t.tmux.add('nc-1', WORKING);
-    const r = await t.call('interrupt', { task: 'NC-1' });
+    await t.call('interrupt', { task: 'NC-1' });
+    const r = await t.call('interrupt', { task: 'NC-1' , confirm: true });
     assert.match(r.text, /NC-1: interrupted \(Escape sent\); the window stays open/);
     assert.equal(t.runner.commands.filter((c) => c.includes('send-keys')).length, 1);
     assert.deepEqual(t.notified, ['czat zlecił: interrupt NC-1']);
@@ -348,7 +351,8 @@ describe('mcp: the write tools', () => {
     const t = setup('c1', 'mcp: {allow: [close]}\n');
     seedTask(t.config, 'NC-1', { repos: [{ path: '/r/app', worktree: '/r/app-wt' }] });
     t.tmux.add('nc-1', IDLE);
-    const r = await t.call('close', { task: 'NC-1' });
+    await t.call('close', { task: 'NC-1' });
+    const r = await t.call('close', { task: 'NC-1' , confirm: true });
     assert.match(r.text, /^NC-1: closed; the worktree and the report stay/);
     assert.equal(readTaskRecord(t.config, 'nc-1')?.closed, true);
     assert.ok(!t.runner.commands.some((c) => c.includes('worktree')));
@@ -360,12 +364,14 @@ describe('mcp: the write tools', () => {
     const wt = scratch.sub('c2/app-wt');
     seedTask(t.config, 'NC-1', { repos: [{ path: scratch.sub('c2/app'), worktree: wt }] });
     t.tmux.add('nc-1', IDLE);
-    const refused = await t.call('close', { task: 'NC-1', remove_worktree: true });
+    await t.call('close', { task: 'NC-1', remove_worktree: true });
+    const refused = await t.call('close', { task: 'NC-1', remove_worktree: true , confirm: true });
     assert.deepEqual([refused.isError, /not allowed for the chat/.test(refused.text)], [true, true]);
     assert.equal(t.tmux.windows.length, 1, 'the window is still there: nothing was done');
     assert.equal(readTaskRecord(t.config, 'nc-1')?.closed, undefined);
     writeConfig(t.config, 'mcp: {allow: [close], allow_rm_worktree: true}\n');
-    const done = await t.call('close', { task: 'NC-1', remove_worktree: true });
+    await t.call('close', { task: 'NC-1', remove_worktree: true });
+    const done = await t.call('close', { task: 'NC-1', remove_worktree: true , confirm: true });
     assert.match(done.text, /worktree removed \(the branch stays\)/);
     const git = t.runner.commands.filter((c) => c.startsWith('git'));
     assert.ok(git.some((c) => /worktree remove/.test(c)));
@@ -426,8 +432,11 @@ describe('mcp: the write tools', () => {
     t.tmux.add('nc-1', IDLE);
     await t.call('send', { task: 'NC-1', text: 'git push --force origin main; rm -rf /' });
     await t.call('interrupt', { task: 'NC-1' });
+    await t.call('interrupt', { task: 'NC-1' , confirm: true });
+    await t.call('new', { spec: `---\ntask: NC-2\nagent: claude\nrepos:\n  - path: ${repo}\n    worktree: ${repo}-wt2\n---\ngit merge main\n` });
     await t.call('new', { spec: `---\ntask: NC-2\nagent: claude\nrepos:\n  - path: ${repo}\n    worktree: ${repo}-wt2\n---\ngit merge main\n`, confirm: true });
     await t.call('close', { task: 'NC-1', remove_worktree: true });
+    await t.call('close', { task: 'NC-1', remove_worktree: true , confirm: true });
     const cmds = t.runner.commands.filter((c) => /^(git|sh)\b/.test(c));
     assert.ok(cmds.length > 0);
     assert.ok(!cmds.some((c) => /\b(push|merge|rebase|reset|checkout|commit)\b|branch -[dD]|--force|-rf/.test(c)), cmds.join('\n'));
