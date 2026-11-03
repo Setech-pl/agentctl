@@ -826,7 +826,7 @@ export function reportLabel(row: StatusRow): string {
   return row.pulled ? 'pulled' : 'ready';
 }
 
-export function rowCells(row: StatusRow, selected: boolean, cols: BoardColumns, icons: Record<TaskState, string> | null = null): BoardCell[] {
+export function rowCells(row: StatusRow, selected: boolean, cols: BoardColumns, icons: Record<TaskState, string> | null = null, selectedColor = 'blue'): BoardCell[] {
   const icon = (icons ?? DEFAULT_WINDOW_ICONS)[row.state];
   // Finished and hidden tasks are dimmed: they are history, not work in progress.
   const quiet = row.finished || row.hidden;
@@ -840,7 +840,8 @@ export function rowCells(row: StatusRow, selected: boolean, cols: BoardColumns, 
     { key: 'progress', text: row.progress?.text ?? '-', width: cols.progress },
     { key: 'report', text: reportLabel(row), width: cols.report, ...(row.report === 'missing' ? { dim: true } : row.pulled ? {} : { color: 'green' }) },
   ];
-  return quiet ? cells.map((c) => (c.key === 'marker' ? c : { ...c, dim: true, ...(c.color ? { color: 'gray' } : {}) })) : cells;
+  const subdued = quiet ? cells.map((c) => (c.key === 'marker' ? c : { ...c, dim: true, ...(c.color ? { color: 'gray' } : {}) })) : cells;
+  return selected ? subdued.map((c) => ({ ...c, bold: true, ...(!process.env.NO_COLOR && !c.color ? { color: selectedColor } : {}) })) : subdued;
 }
 
 // ---- the usage panel
@@ -913,16 +914,17 @@ export function queueTitle(count: number, paused: boolean): string {
 }
 
 /** A queued task as cells: the task, what it runs, and one wide cell for the place in line and what it waits for. */
-export function queueCells(view: QueueView, selected: boolean, cols: BoardColumns): BoardCell[] {
+export function queueCells(view: QueueView, selected: boolean, cols: BoardColumns, selectedColor = 'blue'): BoardCell[] {
   const e = view.entry;
   const wide = cols.state + cols.time + (cols.tokens ?? 0) + cols.progress + cols.report + (cols.tokens ? 4 : 3);
   const text = `${view.position === null ? (e.status === 'failed' ? '✗' : '…') : `${view.position}.`} ${view.condition.text}${e.priority === 'high' ? ' · high' : ''}`;
-  return [
+  const cells: BoardCell[] = [
     { key: 'marker', text: selected ? '▸' : '', width: cols.marker, bold: true },
     { key: 'task', text: e.task, width: cols.task, bold: selected },
     { key: 'who', text: `${e.agent} ${e.model}/${e.effort}`, width: cols.who },
     { key: 'report', text, width: wide, ...(e.status === 'failed' ? { color: 'red' } : view.condition.kind === 'blocked' ? { color: 'yellow' } : { dim: true }) },
   ];
+  return selected ? cells.map((c) => ({ ...c, bold: true, ...(!process.env.NO_COLOR && !c.color ? { color: selectedColor } : {}) })) : cells;
 }
 
 /** `Finished (3)` title that stands between the active and the finished rows (or under the active ones while the section is closed). */

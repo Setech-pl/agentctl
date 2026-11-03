@@ -134,6 +134,8 @@ export interface BoardSettings {
   mouse: boolean;
   /** tmux key (no prefix) that goes back to the board from any window of the agentctl session; null: no key is bound. Default F12. */
   returnKey: string | null;
+  /** Color used on non-status cells of the selected board row. */
+  selectedColor: string;
 }
 
 export interface QueueSettings {
@@ -353,7 +355,7 @@ export const NOTIFY_KEYS = ['backend', 'events', 'turn_end', 'terminal_app', 've
 export const NTFY_KEYS = ['server', 'topic', 'token', 'events', 'priority', 'include_verdict', 'include_question', 'click_url', 'always'];
 export const AWAY_KEYS = ['auto_idle'];
 export const MANAGER_KEYS = ['project', 'name', 'model', 'effort', 'guide', 'autostart'];
-export const BOARD_KEYS = ['auto_hide_pulled_dead', 'mouse', 'return_key'];
+export const BOARD_KEYS = ['auto_hide_pulled_dead', 'mouse', 'return_key', 'selected_color'];
 export const MCP_KEYS = ['allow', 'allow_rm_worktree'];
 export const QUEUE_KEYS = ['enabled', 'parallel_starts'];
 export const CANCEL_KEYS = ['grace'];
@@ -729,7 +731,7 @@ function parseManager(v: unknown, p: Problems): ManagerSettings {
 }
 
 function parseBoard(v: unknown, p: Problems): BoardSettings {
-  const board: BoardSettings = { autoHidePulledDead: true, mouse: true, returnKey: 'F12' };
+  const board: BoardSettings = { autoHidePulledDead: true, mouse: true, returnKey: 'F12', selectedColor: 'blue' };
   if (v === undefined || v === null) return board;
   if (!isObject(v)) {
     p.add('config.board must be a mapping like {auto_hide_pulled_dead: true, mouse: true, return_key: F12}');
@@ -748,6 +750,11 @@ function parseBoard(v: unknown, p: Problems): BoardSettings {
   if (v.auto_hide_pulled_dead !== undefined) {
     if (typeof v.auto_hide_pulled_dead === 'boolean') board.autoHidePulledDead = v.auto_hide_pulled_dead;
     else p.add('config.board.auto_hide_pulled_dead must be true or false');
+  }
+  if (v.selected_color !== undefined) {
+    const colors = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white', 'gray', 'grey', 'blackBright', 'redBright', 'greenBright', 'yellowBright', 'blueBright', 'magentaBright', 'cyanBright', 'whiteBright'];
+    if (typeof v.selected_color === 'string' && colors.includes(v.selected_color)) board.selectedColor = v.selected_color;
+    else p.add(`config.board.selected_color must be an Ink color name (${colors.join(', ')})`);
   }
   return board;
 }

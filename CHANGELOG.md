@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Changed
 - Lead both READMEs with the parallel Claude Code and Codex workflow and its benefits.
+- Highlight the selected board row in bold blue, with a configurable color and `NO_COLOR` support.
 
 Versions 0.1.0 to 0.7.0 correspond to pull requests #1 to #7; their dates are the merge dates. The version numbers were assigned afterwards, when this changelog was written.
 

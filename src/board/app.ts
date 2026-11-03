@@ -67,7 +67,7 @@ function Cells(props: { cells: BoardCell[]; inverse?: boolean }): React.ReactEle
   );
 }
 
-function TaskList(props: { state: BoardState; width: number; capacity: number; icons: Parameters<typeof rowCells>[3] }): React.ReactElement {
+function TaskList(props: { state: BoardState; width: number; capacity: number; icons: Parameters<typeof rowCells>[3]; selectedColor: string }): React.ReactElement {
   const { state } = props;
   const cols = boardColumns(props.width);
   const visible = visibleItems(state, props.capacity);
@@ -84,14 +84,14 @@ function TaskList(props: { state: BoardState; width: number; capacity: number; i
             : item.kind === 'resume'
             ? h(Text, { key: `r-${item.task}`, dimColor: true, wrap: 'truncate-end' }, `    ${item.task}`)
             : item.kind === 'queue'
-              ? h(Cells, { key: `q-${item.view.entry.task}`, cells: queueCells(item.view, item.view.entry.task === state.selected, cols) })
+              ? h(Cells, { key: `q-${item.view.entry.task}`, cells: queueCells(item.view, item.view.entry.task === state.selected, cols, props.selectedColor) })
               : item.kind === 'finished'
             ? h(Text, { key: 'finished', dimColor: true, wrap: 'truncate-end' }, `${item.expanded ? '-' : '+'} ${finishedTitle(item.count, item.expanded)}`)
             : item.kind === 'closed'
               ? h(Text, { key: 'closed', dimColor: true, wrap: 'truncate-end' }, `- ${closedTitle(item.count)}`)
               : item.kind === 'cancelled'
                 ? h(Text, { key: 'cancelled', dimColor: true, wrap: 'truncate-end' }, `- ${cancelledTitle(item.count)}`)
-                : h(Cells, { key: item.row.task, cells: rowCells(item.row, item.row.task === state.selected, cols, props.icons) }),
+                : h(Cells, { key: item.row.task, cells: rowCells(item.row, item.row.task === state.selected, cols, props.icons, props.selectedColor) }),
         );
   return h(Box, { flexDirection: 'column', width: props.width }, h(Cells, { cells: headerCells(cols) }), ...body);
 }
@@ -230,7 +230,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
     h(Text, { dimColor: true, wrap: 'truncate-end' }, `  ${ctx.config.session} · ${active} task${active === 1 ? '' : 's'}${state.queue.length > 0 ? ` · ${state.queue.length} queued` : ''}${state.cohortFilter !== null ? ` · cohort: ${cohortLabel(state)}` : ''}${hiddenCount > 0 ? ` · ${hiddenCount} hidden (a)` : ''}${state.refreshedAt ? ` · ${state.refreshedAt}` : ''}`),
     away ? h(Text, { wrap: 'truncate-end', ...(away.dim ? { dimColor: true } : { color: 'cyan', bold: true }) }, ` · ${away.text}`) : null,
   );
-  const managerBox = mline ? h(Text, { wrap: 'truncate-end', ...(mline.selected ? { inverse: true } : mline.dim ? { dimColor: true } : { color: 'cyan' }) }, mline.text) : null;
+  const managerBox = mline ? h(Text, { wrap: 'truncate-end', ...(mline.selected ? { bold: true, ...(process.env.NO_COLOR ? { inverse: true } : { color: ctx.config.board.selectedColor }) } : mline.dim ? { dimColor: true } : { color: 'cyan' }) }, mline.text) : null;
   const panelBox = panel.length === 0 ? null : h(Box, { flexDirection: 'column', width: state.width }, ...panel.map((l) => h(Text, { key: l.provider, wrap: 'truncate-end', ...(l.color ? { color: l.color } : { dimColor: true }) }, l.text)));
   const logMode = state.mode.kind === 'log' ? state.mode : null;
   const viewMode = state.mode.kind === 'view' ? state.mode : null;
@@ -244,7 +244,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
       : h(
           Box,
           { flexDirection: 'row', height: rowsForBody },
-          h(TaskList, { state, width: layout.listWidth, capacity: rowsForBody - 1, icons: ctx.config.watch.windowIcons }),
+          h(TaskList, { state, width: layout.listWidth, capacity: rowsForBody - 1, icons: ctx.config.watch.windowIcons, selectedColor: ctx.config.board.selectedColor }),
           layout.showPreview ? h(Preview, { state, width: layout.previewWidth, height: rowsForBody }) : null,
         );
   return h(Box, { flexDirection: 'column', width: state.width, height: state.height }, header, state.mode.kind === 'help' || logMode || viewMode ? null : managerBox, state.mode.kind === 'help' || logMode || viewMode ? null : panelBox, h(Box, { flexGrow: 1, flexDirection: 'column' }, body), h(Footer, { state, hint: navigationHint(ctx.config.board.returnKey) }));

@@ -114,6 +114,7 @@ The session started by `agentctl manager`: Claude Code with [Remote Control](htt
 | `board.auto_hide_pulled_dead` | boolean | `true` | g | A task without a window whose report was pulled hides by itself. |
 | `board.mouse` | boolean | `true` | g | `mouse on` in the agentctl tmux session (this session only). |
 | `board.return_key` | tmux key name or `false` | `F12` | g | Key (no prefix) that goes back to the board from any window of the session. `false`: none. |
+| `board.selected_color` | Ink color name | `blue` | g | Color for the selected board row, manager line and queue entry. State and result cells keep their own colors. `NO_COLOR` disables color; the selection stays bold (manager line uses inverse video). |
 
 ### `mcp`
 
