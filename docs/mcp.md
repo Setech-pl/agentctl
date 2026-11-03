@@ -140,3 +140,12 @@ agentctl doctor                            # registered? runs the stable copy? w
 - The report limit is 200 KB per answer; larger reports are cut with a note, and `pull_ready` leaves what does not fit as new.
 
 In 0.15.0, installed runtime commands use `dist/bin/agentctl.js`. Status `question` includes collapsed Codex question count and the shortcut read from the screen. A visible pending question takes precedence over working. No configuration migration is required.
+
+### Dispatcher read tools
+
+| Tool | Input | Result |
+|---|---|---|
+| `guide` | optional project repository path, lang en/pl | Shared dispatcher manual plus the trusted project guide from .agentctl.yaml; a missing overlay warns. This tool explicitly permits reading the configured overlay of the requested project. |
+| `capacity` | none | Current windows/age/stale, pace/projection, labeled token estimates, slots, queue, equivalents and seven-day stats; null is n/d. |
+
+Both are always readable without mcp.allow. New/queue previews and executed responses append capacity snapshots without removing existing result fields; disable with capacity.snapshot: false. Start an ordering chat with guide then capacity, and use events_since → status → pull_ready → get_report as work proceeds. See [dispatcher guide](dispatcher.md) and [Polish](dispatcher.pl.md).

@@ -8,6 +8,12 @@ From a planning chat to a closed task (or a cancelled one: the `opt` block). Ste
 
 ```mermaid
 sequenceDiagram
+    participant D as Dispatcher agent
+    participant C as guide + capacity
+    D->>C: Read shared guide + project overlay
+    D->>C: Read plan windows, pace, reset, slots, stats
+    C-->>D: Facts; n/d and labeled estimates
+    Note over D: Agent chooses provider/model/effort
     autonumber
     actor H as You
     participant C as Planning chat

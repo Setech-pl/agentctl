@@ -4,6 +4,25 @@ All notable changes to this project are documented here. The format follows [Kee
 
 Versions 0.1.0 to 0.7.0 correspond to pull requests #1 to #7; their dates are the merge dates. The version numbers were assigned afterwards, when this changelog was written.
 
+## [0.17.0] - 2026-11-03
+
+### Added
+- Capacity across CLI (--clip/--json), MCP and board C: source age, plan windows/reset, bounded sample history, pace/projection, explicitly labeled token estimates, slots, queue, equivalents and seven-day model/effort stats.
+- Capacity snapshots in new/queue; configurable thresholds, stale events with active tasks and reset events in events_since.
+- Project-independent dispatcher manuals EN/PL shared by guide CLI/MCP and manager, project guide overlays, missing-overlay doctor warnings and packaged guide smoke coverage.
+- CLI version alias and service restarts by stable tmux role.
+
+### Fixed
+- Serialize event/watch notification ownership and ntfy retry queue mutations across processes.
+- Prefer stable Homebrew Node paths in MCP entries; doctor gives complete repair commands.
+- MCP install dry-run reads current registration and reports no write accurately.
+- Watch panes survive early exit and doctor reports missing/dead watcher; up --no-attach is documented.
+- Clone updater keeps detached checkout and finds renamed watcher by role, with worktree regression coverage.
+
+### Before release
+- Configure npm trusted publisher for Setech-pl/agentctl, workflow publish.yml; explicitly allow direct npm publish. First successful OIDC publish must occur within two days of configuration.
+- If the package does not yet exist, manually bootstrap 0.16.0 or 0.17.0 with 2FA outside this task, then configure OIDC. A manually published 0.17.0 is skipped by publish.yml; validate OIDC with the next unpublished version. See the release report for the full procedure.
+
 ## [0.16.0] - 2026-11-02
 
 ### Added

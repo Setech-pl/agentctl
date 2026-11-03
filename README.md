@@ -33,6 +33,12 @@ agentctl manages **work orders, not windows**. The unit is a spec: a Markdown fi
 
 ```mermaid
 sequenceDiagram
+    participant D as Dispatcher agent
+    participant C as guide + capacity
+    D->>C: Read shared guide + project overlay
+    D->>C: Read plan windows, pace, reset, slots, stats
+    C-->>D: Facts; n/d and labeled estimates
+    Note over D: Agent chooses provider/model/effort
     autonumber
     actor H as You
     participant C as Planning chat
@@ -789,3 +795,11 @@ Ideas, not promises:
 [MIT](LICENSE)
 
 Codex: collapsed questions show their count and the shortcut read from “to answer”. `needs-input` takes priority while Codex keeps working; after answering, the screen determines the state again. Board preview, peek, status/MCP `question` and macOS show the question or opening instructions. ntfy sends only opening instructions by default; `notify.ntfy.include_question: true` opts into question text.
+
+## For the ordering agent
+
+Start any project with `agentctl guide --project /path/to/repo --clip` and `agentctl capacity --clip` (or the read-only MCP tools `guide` and `capacity`). The shared [dispatcher guide](docs/dispatcher.md) covers specs, provider/model/effort selection, cross-review, cohorts, queue and the `events_since` → `pull_ready` → `get_report` chat loop. [Polski](docs/dispatcher.pl.md).
+
+Capacity shows current windows, reading age, pace, reset, slots, queue, equivalents and seven-day stats. Unknown is n/d; token estimates carry their basis and confidence. Percent includes work outside agentctl. New and queue responses include a short snapshot (`capacity.snapshot: false` disables it). agentctl reports facts; the ordering agent chooses. Add `guide: docs/agent-dispatch.md` to `.agentctl.yaml` for project rules; a missing overlay warns in guide and doctor. `guide.lang: en|pl` in the global config sets the default language.
+
+Board: `C` opens capacity. Start without attaching: `agentctl up --no-attach`. Restart by stable role: `agentctl watch --tmux --restart` / `agentctl board --tmux --restart`; renamed windows are supported. `agentctl version` is an alias of `--version`.

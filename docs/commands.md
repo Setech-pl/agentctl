@@ -9,6 +9,9 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 
 | Command | What it does |
 |---|---|
+| [`version`](#agentctl-version) | Print the installed version (alias of --version). |
+| [`guide`](#agentctl-guide) | Read the dispatcher guide and optional project overlay. |
+| [`capacity`](#agentctl-capacity) | Current plan windows, pace, slots, queue, equivalents and seven-day model statistics; no provider selection. |
 | [`new`](#agentctl-new) | Start the tasks in a spec file: worktree, setup commands, symlinks, TASK.md, tmux window, agent, prompt. |
 | [`queue`](#agentctl-queue) | Put the tasks of a spec file in the queue: they start by themselves (while "agentctl watch" runs) when a window of their provider is free. Shows a summary and asks y/N first. |
 | [`queue list`](#agentctl-queue-list) | The queue: position, task, agent/model/effort, priority, start condition and how long it waits. |
@@ -73,6 +76,62 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`spec`](#agentctl-spec) | Spec helpers. |
 | [`spec example`](#agentctl-spec-example) | Print an example spec (the Neon City example from the README). |
 
+## agentctl version
+
+Print the installed version (alias of --version).
+
+```
+agentctl version [options]
+```
+
+Examples:
+
+```sh
+agentctl version
+```
+
+## agentctl guide
+
+Read the dispatcher guide and optional project overlay.
+
+```
+agentctl guide [options]
+```
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--project <repo>` | repository whose .agentctl.yaml supplies guide: |  |
+| `--lang <lang>` | guide language (default config.guide.lang or en) | one of `en`, `pl` |
+| `--clip` | copy the guide to the clipboard |  |
+| `--json` | machine-readable guide with warnings |  |
+
+Examples:
+
+```sh
+agentctl guide --project /path/to/repo --lang en --clip
+agentctl guide --lang pl
+```
+
+## agentctl capacity
+
+Current plan windows, pace, slots, queue, equivalents and seven-day model statistics; no provider selection.
+
+```
+agentctl capacity [options]
+```
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--json` | machine-readable capacity; null means n/d |  |
+| `--clip` | copy the capacity summary |  |
+
+Examples:
+
+```sh
+agentctl capacity --json
+agentctl capacity --clip
+```
+
 ## agentctl new
 
 Start the tasks in a spec file: worktree, setup commands, symlinks, TASK.md, tmux window, agent, prompt.
@@ -88,6 +147,7 @@ agentctl new [options] [file]
 | Option | Meaning | Notes |
 |---|---|---|
 | `--dry-run` | print the commands that would run, execute nothing |  |
+| `--json` | machine-readable results and capacity snapshot |  |
 | `--reuse` | use worktrees that already exist instead of failing |  |
 | `--agent <agent>` | run every spec on this provider, translated through the equivalents table | one of `claude`, `codex` |
 | `--no-switch` | never offer to move a task to the other provider when its limit is full |  |
@@ -127,6 +187,7 @@ agentctl queue [options] [command] [file]
 | `--clip` | read the spec from the clipboard |  |
 | `--agent <agent>` | run every spec on this provider, translated through the equivalents table (the queue never switches provider by itself) | one of `claude`, `codex` |
 | `-y, --yes` | do not ask |  |
+| `--json` | machine-readable queued entries and capacity snapshot |  |
 | `--cohort <name>` | put every task of the file in this cohort (overrides "cohort:" in a spec); without it a task has a cohort only if its spec names one |  |
 
 Examples:
@@ -894,6 +955,7 @@ agentctl watch [options]
 | Option | Meaning | Notes |
 |---|---|---|
 | `--tmux` | run it in window "watch" of the agentctl session (created if missing) instead of here; also shows the task counts in the status bar of that session |  |
+| `--restart` | with --tmux: restart the window identified by its stable role |  |
 | `--no-status-line` | with --tmux: leave the status bar of the session alone |  |
 
 Examples:
@@ -913,6 +975,7 @@ agentctl board [options]
 
 | Option | Meaning | Notes |
 |---|---|---|
+| `--restart` | with --tmux: restart the window identified by its stable role |  |
 | `--tmux` | open it in window "board" of the agentctl session (created if missing) instead of here |  |
 
 Examples:
