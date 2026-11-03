@@ -30,7 +30,7 @@ These always work.
 | `log` | `cohort?`, `since?` | The history of the tasks, newest first: agent/model/effort, start, report, duration, tokens (null: n/d), commits and files, the verdict line, cancel reason, move, and the result the user marked. |
 | `stats` | `cohort?`, `since?` | The history grouped by agent/model/effort: tasks, median time and tokens, how many were marked ok, partial or fail, cancelled, and moved to the other provider after a limit. |
 | `events_since` | `since?`, `cohort?`, `peek?` | What changed since the previous call of this client (or since a time: an age like `2h`, `HH:MM`, an ISO time): reports ready with the verdict, starts from the queue, questions, folder trust, blocked, cancelled and limited tasks, finished cohorts, plan thresholds, changed limits - and one line with the state now. **A chat should call it at the start of every answer about the agents' work**: it gets no notifications. The marker is kept per client (`mcp`, `cli`); the first call looks back 24 hours; `peek: true` leaves the marker. Events are recorded while `agentctl watch` runs. |
-| `gc_preview` | `older_than?`, `merged?`, `cohort?` | What `agentctl gc` would free now, with sizes, and what it skips and why: worktrees of finished tasks without uncommitted changes, old files next to the reports, state folders to archive, merged branches. Read only: there is no MCP tool that cleans up. |
+| `gc_preview` | `older_than?`, `merged?`, `cohort?` | What `agentctl gc` would free now, with sizes, and what it skips and why: worktrees of finished tasks without uncommitted changes, old files next to the reports, state folders to archive, merged branches. Read only; use the separately allowed, two-step `gc` tool to apply the same plan. |
 | `limits` | none | The limit per provider, what uses it up (windows of agentctl, reserved places, external sessions when `limits.count_external` is on), the free places and the tasks waiting in the queue. |
 | `overlap` | `task?` | Pairs of active tasks of one repository that changed the same files, with the file lists (from git, now). `status` also carries `collidesWith` per task, and short `Queue` and `Collisions` lines. |
 | `cohort_list` | none | The cohorts (named groups of tasks): per cohort the number of tasks by state (`active`, `queued`, `reports`, `closed`, `cancelled`), `total`, `created` and the note. |
@@ -69,7 +69,7 @@ mcp:
 
 ## Safety model
 
-- There is no tool for merge, push, rebase, deleting a branch or running a shell command, and none that reads a file other than a report named by a task's `TASK.md` or the `TASK.md` itself. No argument is a path.
+- There is no tool for merge, push, rebase or running a shell command. The two-step `gc` tool can delete merged local branches with `git branch -d`; `report_from` and `adopt` accept explicit metadata/report paths.
 - Every write is refused unless `mcp.allow` lists it. Refused calls are recorded too.
 - **Audit log:** `~/.agentctl/mcp-audit.log` (next to the config), one JSON line per step: time, tool, task, outcome `requested`, then `done`, `error`, `denied` or `preview`. The `requested` line is written before the action, and a write that cannot be recorded is not done.
 - **Notification:** a done write is announced on the desktop (`czat zlecił: <action> <TASK>`).
@@ -149,3 +149,202 @@ In 0.15.0, installed runtime commands use `dist/bin/agentctl.js`. Status `questi
 | `capacity` | none | Current windows/age/stale, pace/projection, labeled token estimates, slots, queue, equivalents and seven-day stats; null is n/d. |
 
 Both are always readable without mcp.allow. New/queue previews and executed responses append capacity snapshots without removing existing result fields; disable with capacity.snapshot: false. Start an ordering chat with guide then capacity, and use events_since → status → pull_ready → get_report as work proceeds. See [dispatcher guide](dispatcher.md) and [Polish](dispatcher.pl.md).
+
+<!-- BEGIN GENERATED MCP PARITY -->
+
+| CLI | MCP | Exception / reason |
+|---|---|---|
+| `version` | `version` |  |
+| `guide` | `guide` |  |
+| `capacity` | `capacity` |  |
+| `new` | `new` |  |
+| `queue` | `queue` |  |
+| `queue list` | `queue_list` |  |
+| `queue rm` | `queue_rm` |  |
+| `queue up` | `queue_up` |  |
+| `queue retry` | `queue_retry` |  |
+| `queue pause` | `queue_pause` |  |
+| `queue resume` | `queue_resume` |  |
+| `unblock` | `unblock` |  |
+| `cohort` | `cohort_list` |  |
+| `cohort list` | `cohort_list` |  |
+| `cohort show` | `cohort_show` |  |
+| `cohort add` | `cohort_add` |  |
+| `cohort remove` | `cohort_remove` |  |
+| `cohort note` | `cohort_note` |  |
+| `overlap` | `overlap` |  |
+| `send` | `send` |  |
+| `status` | `status` |  |
+| `limits` | `limits` |  |
+| `limits show` | `limits` |  |
+| `limits set` | `set_limits` |  |
+| `limits reserve` | `reserve` |  |
+| `limits release` | `limits_release` |  |
+| `events` | `events_since` |  |
+| `usage` | `usage` |  |
+| `resume` | `resume` |  |
+| `up` | — | Interactive terminal orchestration: opens watch/board and optionally manager; use the CLI. |
+| `mark` | `mark` |  |
+| `log` | `log` |  |
+| `stats` | `stats` |  |
+| `gc` | `gc_preview`, `gc` |  |
+| `archive` | `archive` |  |
+| `hide` | `hide` |  |
+| `unhide` | `unhide` |  |
+| `pull` | `get_report`, `pull_ready` |  |
+| `close` | `close` |  |
+| `cancel` | `cancel` |  |
+| `watch` | — | Long-running terminal watcher, started and supervised locally. |
+| `board` | — | Interactive terminal UI. |
+| `report` | `report`, `report_from` |  |
+| `away` | `away_status`, `away` |  |
+| `away status` | `away_status` |  |
+| `away on` | `away` |  |
+| `away off` | `away` |  |
+| `manager` | `manager_start`, `manager_status` |  |
+| `manager stop` | `manager_stop` |  |
+| `ntfy-setup` | — | Generates and saves a subscription secret; run locally. |
+| `notify-test` | `notify_test` |  |
+| `adopt` | `adopt` |  |
+| `interrupt` | `interrupt` |  |
+| `attach` | — | Attaches or switches a human terminal. |
+| `event` | — | Internal agent callback; accepts forwarding hooks and must not be callable by chat. |
+| `usage-tap` | — | Internal agent statusLine callback; may forward a local shell command. |
+| `move` | `move` |  |
+| `peek` | `peek` |  |
+| `mcp` | — | MCP server transport itself; cannot start a nested server over a tool call. |
+| `mcp serve` | — | MCP server transport itself. |
+| `mcp check` | `mcp_check` |  |
+| `mcp install` | — | Changes MCP client configuration. |
+| `mcp uninstall` | — | Changes MCP client configuration. |
+| `doctor` | `doctor` |  |
+| `spec` | `spec_example` |  |
+| `spec example` | `spec_example` |  |
+
+CLI arguments and options are generated in [commands.md](commands.md). MCP arguments:
+
+| Tool | Kind | Arguments |
+|---|---|---|
+| `status` | read | `all?`, `cohort?` |
+| `events_since` | read | `since?`, `cohort?`, `peek?` |
+| `gc_preview` | read | `older_than?`, `merged?`, `cohort?` |
+| `limits` | read |  |
+| `set_limits` | write | `claude?`, `codex?`, `confirm?` |
+| `reserve` | write | `claude?`, `codex?`, `note?`, `release?`, `confirm?` |
+| `version` | read |  |
+| `peek` | read | `task`, `lines?` |
+| `list_reports` | read | `all?` |
+| `get_report` | read | `task` |
+| `pull_ready` | read | `cohort?`, `all?` |
+| `task_spec` | read | `task` |
+| `queue_list` | read | `cohort?` |
+| `cohort_list` | read |  |
+| `cohort_show` | read | `cohort` |
+| `guide` | read | `project?`, `lang?` |
+| `capacity` | read |  |
+| `usage` | read | `cohort?`, `since?` |
+| `log` | read | `cohort?`, `since?` |
+| `stats` | read | `cohort?`, `since?` |
+| `overlap` | read | `task?` |
+| `resume` | write | `tasks?`, `all?`, `confirm?` |
+| `send` | write | `task`, `text` |
+| `new` | write | `spec`, `agent?`, `reuse?`, `no_agent?`, `cohort?`, `wait_trust?`, `confirm?` |
+| `queue` | write | `spec`, `cohort?`, `agent?`, `confirm?` |
+| `queue_rm` | write | `task`, `confirm?` |
+| `cancel` | write | `task?`, `tasks?`, `cohort?`, `reason?`, `remove_worktree?`, `confirm?` |
+| `mark` | write | `task`, `result`, `note?` |
+| `away` | write | `on` |
+| `interrupt` | write | `task`, `confirm?` |
+| `close` | write | `task?`, `tasks?`, `cohort?`, `remove_worktree?`, `confirm?` |
+| `move` | write | `task`, `agent?`, `confirm?` |
+| `mcp_check` | read |  |
+| `spec_example` | read |  |
+| `doctor` | read |  |
+| `equivalents` | read |  |
+| `config_show` | read |  |
+| `manager_status` | read |  |
+| `away_status` | read |  |
+| `report` | read | `task` |
+| `queue_retry` | write | `task`, `confirm?` |
+| `queue_up` | write | `task`, `confirm?` |
+| `queue_pause` | write | `confirm?` |
+| `queue_resume` | write | `confirm?` |
+| `unblock` | write | `task`, `drop_after?`, `confirm?` |
+| `cohort_add` | write | `cohort`, `tasks`, `confirm?` |
+| `cohort_remove` | write | `tasks`, `confirm?` |
+| `cohort_note` | write | `cohort`, `text`, `confirm?` |
+| `hide` | write | `tasks`, `confirm?` |
+| `unhide` | write | `tasks`, `confirm?` |
+| `archive` | write | `older_than?`, `confirm?` |
+| `adopt` | write | `task`, `report`, `window?`, `worktree?`, `agent?`, `model?`, `effort?`, `confirm?` |
+| `report_from` | write | `task`, `from`, `force?`, `confirm?` |
+| `limits_release` | write | `claude?`, `codex?`, `confirm?` |
+| `manager_start` | write | `project?`, `name?`, `model?`, `effort?`, `confirm?` |
+| `manager_stop` | write | `confirm?` |
+| `notify_test` | write | `phone?`, `confirm?` |
+| `gc` | write | `cohort?`, `older_than?`, `branches?`, `confirm?` |
+
+- `guide`: `--project &lt;repo&gt;`, `--lang &lt;lang&gt;`, `--clip`, `--json`
+- `capacity`: `--json`, `--clip`
+- `new`: `--dry-run`, `--json`, `--reuse`, `--agent &lt;agent&gt;`, `--no-switch`, `--no-agent`, `--no-wait-trust`, `--clip`, `-y, --yes`, `--cohort &lt;name&gt;`
+- `queue`: `--clip`, `--agent &lt;agent&gt;`, `-y, --yes`, `--json`, `--cohort &lt;name&gt;`
+- `queue list`: `--json`, `--cohort &lt;name&gt;`
+- `unblock`: `--drop-after &lt;task&gt;`
+- `cohort list`: `--json`
+- `cohort show`: `--json`
+- `overlap`: `--json`
+- `send`: `--dry-run`, `--clip`, `-y, --yes`
+- `status`: `--json`, `--clip`, `--tmux-line`, `--all`, `--cohort &lt;name&gt;`
+- `limits show`: `--json`
+- `limits set`: `-y, --yes`, `--dry-run`
+- `limits reserve`: `--note &lt;text&gt;`
+- `events`: `--since &lt;time&gt;`, `--cohort &lt;name&gt;`, `--keep`, `--json`, `--clip`
+- `usage`: `--cohort &lt;name&gt;`, `--since &lt;age&gt;`, `--json`, `--clip`
+- `resume`: `--all`, `-y, --yes`, `--dry-run`
+- `up`: `--no-attach`
+- `mark`: `--note &lt;text&gt;`
+- `log`: `--since &lt;age&gt;`, `--cohort &lt;name&gt;`, `--json`, `--clip`
+- `stats`: `--since &lt;age&gt;`, `--cohort &lt;name&gt;`, `--json`, `--clip`
+- `gc`: `--apply`, `--older-than &lt;age&gt;`, `--branches`, `--cohort &lt;name&gt;`, `-y, --yes`, `--json`
+- `archive`: `--older-than &lt;age&gt;`, `--dry-run`
+- `pull`: `--ready`, `--all`, `--cohort &lt;name&gt;`
+- `close`: `--cohort &lt;name&gt;`, `--rm-worktree`, `-y, --yes`, `--dry-run`
+- `cancel`: `--cohort &lt;name&gt;`, `--reason &lt;text&gt;`, `--rm-worktree`, `-y, --yes`, `--dry-run`
+- `watch`: `--tmux`, `--restart`, `--no-status-line`
+- `board`: `--restart`, `--tmux`
+- `report`: `--from &lt;path&gt;`, `--force`, `--json`, `--dry-run`
+- `away status`: `--json`
+- `manager`: `--name &lt;name&gt;`, `--project &lt;dir&gt;`, `--model &lt;model&gt;`, `--effort &lt;level&gt;`, `--url`, `--dry-run`
+- `ntfy-setup`: `--server &lt;url&gt;`, `--regenerate`, `--show-qr`, `--dry-run`
+- `notify-test`: `--local`, `--phone`, `--all`
+- `adopt`: `--report &lt;path&gt;`, `--window &lt;name&gt;`, `--worktree &lt;path&gt;`, `--agent &lt;agent&gt;`, `--model &lt;model&gt;`, `--effort &lt;effort&gt;`, `--dry-run`
+- `interrupt`: `--dry-run`
+- `attach`: `--switch-client`
+- `event`: `--task &lt;task&gt;`, `--agent &lt;agent&gt;`, `--kind &lt;kind&gt;`, `--forward &lt;json&gt;`
+- `usage-tap`: `--task &lt;task&gt;`, `--forward &lt;command&gt;`
+- `move`: `--agent &lt;agent&gt;`, `-y, --yes`
+- `peek`: `-n, --lines &lt;n&gt;`
+- `mcp install`: `--desktop`, `--claude-code`, `--config &lt;file&gt;`, `--dry-run`, `-y, --yes`
+- `mcp uninstall`: `--desktop`, `--claude-code`, `--config &lt;file&gt;`, `--dry-run`, `-y, --yes`
+
+<!-- END GENERATED MCP PARITY -->
+
+## Parity and permissions in 0.17.1
+
+Read tools always work. Write tools require their exact name in `mcp.allow`, or an explicit group:
+
+| Group | Expands to |
+|---|---|
+| `queue:*` | `queue`, `queue_rm`, `queue_retry`, `queue_up`, `queue_pause`, `queue_resume` |
+| `cohort` | `cohort_add`, `cohort_remove`, `cohort_note` |
+| `manager:*` | `manager_start`, `manager_stop` |
+
+Existing entries `new`, `queue`, `send`, `close`, `cancel`, `set_limits`, `reserve` retain their permission scope. In particular, `queue` does **not** implicitly grant retries or removal. `doctor` explains the change to confirmation: `interrupt`, `close`, and `queue_rm` now require a preview followed by `confirm: true`, as do new parity writes. The existing two-step start/cancel/move/resume tools now enforce a prior preview in this server session. Arguments must be identical; a preview expires after ten minutes and is consumed once. A changed task/queue/window/config scope or GC plan requires a fresh preview, so the scope cannot silently expand. Restarting the server discards previews.
+
+Every write request is recorded in `mcp-audit.log`; successful executions also write `mcp-write` to the journal and notify the desktop. Permission revocation takes effect on the next call. `pull_ready` and `events_since` retain their documented read-tool exception for report-read markers and per-client cursors; they never start or remove work.
+
+`queue_list` includes the complete failed reason and a `queue_retry` hint. Read that reason first. Retry validates remaining directories against Git worktree registrations; an unregistered partial directory is refused. `gc_preview` uses `merged` for its legacy branch option; `gc` uses `branches` (default false). Both call the CLI's `planGc`; confirmation executes that validated plan through `applyGc`. The tool never uses force, merges or pushes. Dirty worktrees, foreign work, protected/current branches and unmerged branches are skipped. A changed plan requires a new preview.
+
+`status` returns a text summary followed by JSON `{disk, tasks}`. `capacity.disk` contains device-deduplicated filesystem readings and the cached size of recorded worktrees. `config_show` masks environment values and ntfy token, topic and credential-bearing URL parts. `report_from` explicitly accepts the user's report source path; `force` only permits replacing the canonical report, never a Git force operation. `adopt` accepts explicit metadata paths. `notify_test` is local by default; `phone: true` explicitly sends a phone test.
+
+The generated table above lists every commander command, tool arguments, and justified exceptions. Terminal UI, local installation, internal callbacks and secret generation remain CLI-only. The separate `agentctl-update` executable remains CLI-only because it replaces running code. There is no interactive setup command in the current commander tree. `npm run docs` regenerates the inventory; the guard test fails if a new CLI command has neither tools nor a documented exception.

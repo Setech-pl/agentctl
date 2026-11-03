@@ -697,7 +697,7 @@ agentctl gc --branches --older-than 3d --cohort sprint-1 --apply -y
 
 - Candidates: the worktrees of closed, cancelled and archived tasks **without uncommitted changes** (`git worktree remove`, never forced); the files next to their reports older than `--older-than` (default 7d; the `*.md` reports stay); the state folders of closed tasks (moved to the archive); with `--branches` their branches merged into the base (`git branch -d`, never `-D`, never `main`/`master`, the current branch or a remote one).
 - Uncommitted work, worktrees that are not agentctl's, branches that are not merged and files that are too new are listed as **skipped (reason)**. A folder of the cache that belongs to no task of agentctl is not touched. The history and the reports stay.
-- Board: **`G`** shows the preview. MCP: `gc_preview` (read only: no tool cleans up).
+- Board: **`G`** shows the preview. MCP: `gc_preview` reads the plan; the separately allowed, two-step `gc` applies it.
 
 ## Resuming
 
@@ -786,3 +786,5 @@ Ideas, not promises:
 ## License
 
 [MIT](LICENSE)
+
+Since 0.17.1 MCP covers queue retry/control, cohorts, `gc` and diagnostics. Check `capacity.disk` before dispatching work. For a failed queue entry, read the reason and propose a repair or `queue_retry`. At disk-warn propose `gc_preview`; at disk-critical seek approval for `gc`, or use it within the user’s authorization. Starts and removals require preview and confirmation; `mcp.allow` alone does not replace confirmation. See [MCP](docs/mcp.md).

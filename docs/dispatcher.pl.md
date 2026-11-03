@@ -54,7 +54,7 @@ Wprowadź zmianę API, sprawdź kryteria odbioru i zapisz raport.
 
 ## Cykl pracy
 
-`new` uruchamia od razu, `queue` czeka na sloty lub raporty. Grupuj zadania w kohorty i sprawdzaj `cohort list/show`, pozycję oraz warunki startu. Kolejką zarządzają `queue pause/resume/up/retry/rm`. Anulowana zależność daje `blocked`: świadomie wykonaj `unblock` (ewentualnie `--drop-after TASK`) lub anuluj potomków. MCP `resume` potrafi wznowić zadanie lub odblokować wpis kolejki; sprawdź jego schemat wejściowy.
+`new` uruchamia od razu, `queue` czeka na sloty lub raporty. Grupuj zadania w kohorty i sprawdzaj `cohort list/show`, pozycję oraz warunki startu. Kolejką zarządzają `queue pause/resume/up/retry/rm`. Anulowana zależność daje `blocked`: świadomie wykonaj `unblock` (ewentualnie `--drop-after TASK`) lub anuluj potomków. MCP `resume` wznawia zadania; `unblock` usuwa zależność w kolejce, a `queue_retry` ponawia nieudany start.
 
 Każdą odpowiedź czatu o pracy zacznij od `events_since`, potem `status`. Pobierz nowe raporty przez `pull_ready`, pojedynczy przez `get_report`, a pytanie lub postęp przez `peek`. Nie uznawaj samego report-ready za sukces: przeczytaj dowody i werdykt. `mark` zapisuje upoważnioną ocenę. Na pytania o uprawnienia i zaufanie odpowiadaj przez terminal lub Remote Control; nie akceptuj ich automatycznie.
 
@@ -78,3 +78,5 @@ Przy `limited` sprawdź capacity i stan zadania. Poczekanie na reset, zmiana zle
 ## Granice
 
 agentctl nie scala, nie pushuje, nie publikuje, nie tworzy PR, nie wybiera dostawcy, nie ocenia poprawności raportu i nie przenosi automatycznie zadań. Nie zamienia n/d w liczbę. Zdarzenia zapisują obserwujące polecenia i watch; events_since nie jest subskrypcją w tle. Włącz watch (`agentctl up --no-attach`) dla kolejki i powiadomień. Okna watch i board mają stabilną opcję tmux `@agentctl-role`; restartuj przez `agentctl watch --tmux --restart` lub `agentctl board --tmux --restart`, bez zależności od nazwy okna.
+
+Od 0.17.1 MCP udostępnia ponawianie i sterowanie kolejką, kohorty, sprzątanie `gc` i diagnostykę. Sprawdź `capacity.disk` przed zleceniem pracy. Przy `failed` przeczytaj powód i zaproponuj naprawę lub `queue_retry`; przy `disk-warn` zaproponuj `gc_preview`, a przy `disk-critical` poproś o zgodę na `gc` albo użyj go w ramach uprawnień użytkownika. Każde usuwanie/start wymaga podglądu i potwierdzenia; samo `mcp.allow` nie zastępuje potwierdzenia. Szczegóły: [MCP](mcp.md).

@@ -2,9 +2,16 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/) while it is below 1.0 (minor versions may change behaviour).
 
-## Unreleased
+## [0.17.1] - 2026-11-03
 
-### Changed
+- Add MCP parity for queue retry/up/pause/resume, unblock, cohort membership/notes, hide/unhide/archive/adopt/report-from, reservation release, manager control, notification tests and GC; add doctor, config, equivalents, manager/away status and local inspection tools.
+- Generate CLI → MCP inventory (including options and explicit terminal/installation/internal-hook exceptions) with a guard test. Descriptions name the CLI equivalent.
+- Keep existing mcp.allow permissions unchanged. New explicit groups are queue:*, cohort and manager:*. close, interrupt and queue_rm now require two steps. Enforce session-bound previews for starts/removals, reject changed scopes, audit and journal writes and announce them on the desktop.
+- Expose device-deduplicated disk facts through capacity/status/doctor/board, five-minute size caching, configurable 50/20 GiB thresholds, transition events/notifications and critical-space start warnings. Unknown values stay n/d.
+- Use git.timeout_s (default 600 s) for worktree checkout and setup. Serialize worktree creation by Git common directory, recover dead lock owners, preserve uncertain partial checkouts with actionable residue details, and validate residue before queue retry.
+- MCP status JSON now has {disk, tasks}; gc_preview remains read-only, while the separately permitted gc applies the protected CLI plan (branches opt-in, never force).
+
+### Documentation
 - Repair flow diagrams, validate Mermaid in CI and reorganize both READMEs.
 - Lead both READMEs with the parallel Claude Code and Codex workflow and its benefits.
 - Highlight the selected board row in bold blue, with a configurable color and `NO_COLOR` support.
