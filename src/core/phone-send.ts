@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { withFileLock } from './file-lock.ts';
 import path from 'node:path';
 import { phoneActive } from './away.ts';
 import type { GlobalConfig, PhoneEvent } from './config.ts';
@@ -137,11 +138,13 @@ export async function notifyPhone(ctx: Context, entry: Pick<JournalEntry, 'kind'
   if (!message) return undefined;
   const r = await sendNtfy(ctx.fetch, ntfy, message, () => ctx.runner.now());
   if (r.ok) return 'sent';
+  return withFileLock(`${phoneQueuePath(ctx.config)}.lock`, async () => {
   const queue = readQueue(ctx.config);
   queue.items.push({ event, message, ...(event === 'needs-input' ? { input: { task: input.task, collapsed: input.collapsed } } : {}), attempts: 1, next: ctx.runner.now() + (RETRY_BACKOFF_MS[0] as number), at: ctx.runner.now() });
   await failed(ctx, queue, event, r.error ?? 'failed', 'first try failed, queued');
   await writeQueue(ctx, queue);
   return 'queued';
+  });
 }
 
 /**
@@ -149,6 +152,11 @@ export async function notifyPhone(ctx: Context, entry: Pick<JournalEntry, 'kind'
  * 1 + 3 times; then it is dropped with a line in phone.log. Returns the lines for the watch log.
  */
 export async function phoneTick(ctx: Context): Promise<string[]> {
+  if (ctx.runner.dryRun) return [];
+  return withFileLock(`${phoneQueuePath(ctx.config)}.lock`, () => phoneTickLocked(ctx));
+}
+
+async function phoneTickLocked(ctx: Context): Promise<string[]> {
   const ntfy = ctx.config.notify.ntfy;
   const queue = readQueue(ctx.config);
   const lines: string[] = [];

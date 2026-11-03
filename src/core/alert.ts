@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { withFileLock } from './file-lock.ts';
 import path from 'node:path';
 import type { Context } from './context.ts';
 import { terminalAppFor } from './notify.ts';
@@ -96,9 +97,15 @@ export class Alerts {
 
   /** Announce `state` of the task with `text` unless the other source did it just now. */
   async send(target: AlertTarget, state: string, text: string, source: AlertSource): Promise<'sent' | 'duplicate'> {
+    if (this.ctx.runner.dryRun || !fs.existsSync(taskFile(this.ctx.config, target.window))) return this.deliver(target, state, text, source);
+    return withFileLock(`${ledgerPath(this.ctx, target.window)}.lock`, () => this.deliver(target, state, text, source));
+  }
+
+  private async deliver(target: AlertTarget, state: string, text: string, source: AlertSource): Promise<'sent' | 'duplicate'> {
     if (this.isDuplicate(target, state, source)) return 'duplicate';
     const { click, text: message } = await this.clickFor(target, text);
-    await this.notifier.notify(ALERT_TITLE, message, click);
+    const result = await this.notifier.notify(ALERT_TITLE, message, click);
+    if (result && !result.ok) throw new Error(`Notification failed: ${result.error ?? result.channel}`);
     // An orphan window has no state folder, and one is not made for it.
     if (fs.existsSync(taskFile(this.ctx.config, target.window))) {
       const ledger: Ledger = { state, source, at: this.ctx.runner.now() };
