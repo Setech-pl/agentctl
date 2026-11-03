@@ -1,0 +1,3 @@
+# Copy to .agentctl.yaml in your repository.
+guide: docs/agent-dispatch.md
+report: [reports/{task}.md, docs/reports/{task}.md]

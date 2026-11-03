@@ -29,6 +29,8 @@ export interface Defaults {
 
 /** The part of the configuration that exists in every layer (global, project, spec). Values are unexpanded. */
 export interface Layer {
+  /** Project guide overlay, relative to the repository or starting with ~. */
+  guide?: string;
   worktreeRoot?: string;
   links: Link[];
   env: Record<string, string>;
@@ -108,6 +110,8 @@ export interface GlobalConfig extends Layer {
   cancel: CancelSettings;
   /** Token usage and plan limits: warning thresholds, the hold of the queue, the tmux status line, where the agents keep their logs. */
   usage: UsageSettings;
+  guideLang: 'en' | 'pl';
+  capacity: { snapshot: boolean; staleMinutes: number; sampleLimit: number; thresholds: number[]; codexRefresh: boolean };
   /** Set by a long-running process (watch, MCP) when the file on disk does not load and the previous settings stay in force. */
   reloadWarning?: string;
   /** Where the config was (or would be) read from. */
@@ -338,8 +342,8 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
 };
 
 /** The keys accepted in every layer: the global config, `.agentctl.yaml` and (with a few of its own) a spec. docs/configuration.md describes each one. */
-export const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'setup', 'defaults'];
-export const GLOBAL_KEYS = [...LAYER_KEYS, 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager'];
+export const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'setup', 'defaults', 'guide'];
+export const GLOBAL_KEYS = [...LAYER_KEYS, 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity'];
 export const LIMITS_KEYS = [...AGENT_NAMES, 'count_external'];
 export const DEFAULTS_KEYS = ['agent', 'model', 'effort', 'remote_control'];
 export const LINK_KEYS = ['from', 'to'];
@@ -471,6 +475,8 @@ function parseLayer(obj: Record<string, unknown>, where: string, p: Problems): L
     env: parseEnv(obj.env, `${where}.env`, p),
     defaults: parseDefaults(obj.defaults, `${where}.defaults`, p),
   };
+  if (typeof obj.guide === 'string') layer.guide = obj.guide;
+  else if (obj.guide !== undefined && where !== 'config') p.add(`${where}.guide must be a path`);
   const worktreeRoot = parseString(obj.worktree_root, `${where}.worktree_root`, p);
   const reports = parseReportPaths(obj.report, `${where}.report`, p);
   const report = reports[0];
@@ -940,9 +946,35 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   const collisions = parseCollisions(raw.collisions, p);
   const cancel = parseCancel(raw.cancel, p);
   const usage = parseUsage(raw.usage, p);
+  let guideLang: 'en' | 'pl' = 'en';
+  if (isObject(raw.guide)) {
+    checkKeys(raw.guide, ['lang'], 'config.guide', p);
+    if (raw.guide.lang === 'en' || raw.guide.lang === 'pl') guideLang = raw.guide.lang;
+    else if (raw.guide.lang !== undefined) p.add('config.guide.lang must be en or pl');
+  } else if (raw.guide !== undefined) p.add('config.guide must be a mapping like {lang: en}');
+  const capacity = { snapshot: true, staleMinutes: 30, sampleLimit: 2048, thresholds: [80, 95], codexRefresh: true };
+  if (raw.capacity !== undefined) {
+    if (!isObject(raw.capacity)) p.add('config.capacity must be a mapping');
+    else {
+      checkKeys(raw.capacity, ['snapshot', 'stale_minutes', 'sample_limit', 'thresholds', 'codex_refresh'], 'config.capacity', p);
+      for (const [key, field] of [['snapshot', 'snapshot'], ['codex_refresh', 'codexRefresh']] as const) {
+        if (typeof raw.capacity[key] === 'boolean') capacity[field] = raw.capacity[key];
+        else if (raw.capacity[key] !== undefined) p.add(`config.capacity.${key} must be boolean`);
+      }
+      for (const [key, field, min, max] of [['stale_minutes', 'staleMinutes', 1, 10080], ['sample_limit', 'sampleLimit', 2, 10000]] as const) {
+        const value = raw.capacity[key];
+        if (typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max) capacity[field] = value;
+        else if (value !== undefined) p.add(`config.capacity.${key} must be an integer from ${min} to ${max}`);
+      }
+      if (raw.capacity.thresholds !== undefined) {
+        if (Array.isArray(raw.capacity.thresholds) && raw.capacity.thresholds.length <= 20 && raw.capacity.thresholds.every((x) => typeof x === 'number' && x > 0 && x <= 100)) capacity.thresholds = [...new Set(raw.capacity.thresholds as number[])].sort((a, b) => a - b);
+        else p.add('config.capacity.thresholds must be up to 20 percentages in (0, 100]');
+      }
+    }
+  }
 
   p.throwIfAny(`Invalid config ${file}:`, 'Fix the listed keys; see the README section "Configuration".');
-  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, limits, countExternal, agents, equivalents, watch, notify, away, manager, board, mcp, queue, collisions, cancel, usage, path: file, loaded: exists };
+  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, limits, countExternal, agents, equivalents, watch, notify, away, manager, board, mcp, queue, collisions, cancel, usage, guideLang, capacity, path: file, loaded: exists };
   if (mirror) config.mirrorDir = resolvePath(mirror);
   return config;
 }
