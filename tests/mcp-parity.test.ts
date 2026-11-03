@@ -112,6 +112,38 @@ describe('MCP parity guard', () => {
       assert.ok(readJournal(f.config).some((e) => e.kind === 'mcp-write' && e.text.startsWith(name)));
     });
   }
+  it('new previews the effective provider and supports no_agent without starting a provider', async () => {
+    const f = fixture('new-options', 'new');
+    const repo = scratch.sub('new-options/repo');
+    const spec = `---\ntask: OPT-1\nagent: claude\nmodel: sonnet\neffort: medium\nrepos:\n  - path: ${repo}\n    worktree: ${repo}-wt\n---\nFake.\n`;
+    const args = { spec, agent: 'codex', no_agent: true, cohort: 'Batch' };
+    const preview = await f.call('new', args);
+    assert.equal(preview.isError, undefined, preview.text);
+    assert.match(preview.text, /OPT-1  codex/);
+    const done = await f.call('new', { ...args, confirm: true });
+    assert.equal(done.isError, undefined, done.text);
+    assert.match(done.text, /no agent started/);
+    assert.ok(!f.runner.commands.some((line) => /tmux new|claude --|codex -/.test(line)));
+  });
+  it('all added reads remain available without allow', async () => {
+    const f = fixture('reads'); seedTask(f.config, 'A-1');
+    for (const name of ['doctor', 'equivalents', 'config_show', 'manager_status', 'away_status', 'report', 'mcp_check', 'spec_example']) {
+      const result = await f.call(name, name === 'report' ? { task: 'A-1' } : {});
+      assert.equal(result.isError, undefined, `${name}: ${result.text}`);
+    }
+  });
+  it('changed task scope invalidates a pending batch cancellation and revocation takes effect', async () => {
+    const f = fixture('cancel-change', 'cancel');
+    seedTask(f.config, 'A-1', { cohort: 'Batch' });
+    await f.call('cancel', { cohort: 'Batch' });
+    seedTask(f.config, 'B-1', { cohort: 'Batch' });
+    const changed = await f.call('cancel', { cohort: 'Batch', confirm: true });
+    assert.equal(changed.isError, true);
+    assert.match(changed.text, /changed preview/);
+    await f.call('cancel', { tasks: ['A-1', 'B-1'] });
+    f.config.mcp.allow = [];
+    assert.match((await f.call('cancel', { tasks: ['A-1', 'B-1'], confirm: true })).text, /not in mcp.allow/);
+  });
   it('rejects expansion of the gc plan and requires a new preview', async () => {
     const f = fixture('gc-expands', 'gc');
     await f.call('gc');

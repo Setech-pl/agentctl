@@ -27,7 +27,7 @@ import { closeTask, closeTasks, planClose } from './close.ts';
 import { cohortEntries, cohortRows, findCohort, openCohortTasks, summarizeCohorts } from './cohort.ts';
 import { collectOverlaps, collideText } from './collisions.ts';
 import { commitQueueAdd, describeQueue, planQueueAdd, readQueue, removeFromQueue, waiting } from './queue.ts';
-import { liveWindows } from './plan.ts';
+import { liveWindows, planBatch } from './plan.ts';
 import { awayReport, renderAway, setAway } from './away.ts';
 import { MCP_WRITE_TOOLS } from './config.ts';
 import type { GlobalConfig, McpWriteTool } from './config.ts';
@@ -666,7 +666,7 @@ async function runNew(deps: McpDeps, args: NewMcpArgs): Promise<ToolResult> {
         throw new AgentctlError(`${String(raw.header.task ?? 'a task')}: "setup" runs shell commands and is not accepted from the chat`, 'Put setup commands in the .agentctl.yaml of the repository, or start the task from the terminal.');
       }
     }
-    const specs = raws.map((raw) => resolveSpec(raw, { config: ctx.config }));
+    const specs = await planBatch(ctx, raws.map((raw) => resolveSpec(raw, { config: ctx.config })), { noSwitch: true, reuse: Boolean(args.reuse), ...(args.agent ? { agent: args.agent } : {}) });
     const cap = !args.confirm && ctx.config.capacity.snapshot ? capacitySnapshot(await collectCapacity(ctx), specs.map((s) => s.agent)) : undefined;
     const disk = await collectDisk(ctx);
     const summary = summarizeSpecs(specs, [...(cap ? snapshotLines(cap) : []), ...(disk.level === 'critical' ? [`WARNING: ${diskLine(disk)}`] : [])]).join('\n');
@@ -676,12 +676,12 @@ async function runNew(deps: McpDeps, args: NewMcpArgs): Promise<ToolResult> {
     // The chat cannot answer a folder-trust dialog: stop at it (the error says so) instead of waiting for a person.
     const results = await newTasks(ctx, specs, { waitTrust: args.wait_trust ?? false, noSwitch: true, reuse: Boolean(args.reuse), noAgent: Boolean(args.no_agent), ...(args.agent ? { agent: args.agent } : {}), ...(deps.self ? { self: deps.self } : {}) });
     const startedCap = ctx.config.capacity.snapshot ? capacitySnapshot(await collectCapacity(ctx), results.map((r) => r.effective.agent)) : undefined;
-    const started = results.map((r) => `${r.task} (window ${r.window}, ${r.effective.agent} ${r.effective.model}/${r.effective.effort})`).join('; ');
-    return { text: `Started: ${started}\n${startedCap ? snapshotLines(startedCap).join('\n') + '\n' : ''}${lines.join('\n')}`.trim(), executed: true, announce: `new ${results.map((r) => r.task).join(', ')}` };
+    const started = results.map((r) => r.agentStarted ? `${r.task} (window ${r.window}, ${r.effective.agent} ${r.effective.model}/${r.effective.effort})` : `${r.task} (worktrees prepared, no agent started)`).join('; ');
+    return { text: `${args.no_agent ? 'Prepared' : 'Started'}: ${started}\n${startedCap ? snapshotLines(startedCap).join('\n') + '\n' : ''}${lines.join('\n')}`.trim(), executed: true, announce: `new ${results.map((r) => r.task).join(', ')}` };
   });
 }
 
-async function runQueue(deps: McpDeps, args: { spec: string; agent?: 'claude' | 'codex' | undefined; confirm?: boolean | undefined }): Promise<ToolResult> {
+async function runQueue(deps: McpDeps, args: { spec: string; agent?: 'claude' | 'codex' | undefined; cohort?: string | undefined; confirm?: boolean | undefined }): Promise<ToolResult> {
   let tasks = '?';
   try {
     tasks = splitSpecs(args.spec, 'mcp').map((s) => String(s.header.task ?? '?')).join(', ');
@@ -690,6 +690,7 @@ async function runQueue(deps: McpDeps, args: { spec: string; agent?: 'claude' | 
   }
   return writeTool(deps, 'queue', { task: tasks, detail: `${clipText(args.spec, 120)} confirm=${Boolean(args.confirm)}` }, async (ctx) => {
     const raws = splitSpecs(args.spec, 'the spec from the chat');
+    if (args.cohort) for (const raw of raws) raw.header.cohort = args.cohort;
     for (const raw of raws) {
       if ('setup' in raw.header) {
         throw new AgentctlError(`${String(raw.header.task ?? 'a task')}: "setup" runs shell commands and is not accepted from the chat`, 'Put setup commands in the .agentctl.yaml of the repository, or queue the task from the terminal.');
@@ -713,15 +714,15 @@ async function runQueueRm(deps: McpDeps, args: { task: string }): Promise<ToolRe
   });
 }
 
-async function runCancel(deps: McpDeps, args: { task?: string | undefined; cohort?: string | undefined; reason?: string | undefined; remove_worktree?: boolean | undefined; confirm?: boolean | undefined }): Promise<ToolResult> {
-  const label = args.task ?? (args.cohort !== undefined ? `cohort ${args.cohort}` : '?');
+async function runCancel(deps: McpDeps, args: { tasks?: string[] | undefined; task?: string | undefined; cohort?: string | undefined; reason?: string | undefined; remove_worktree?: boolean | undefined; confirm?: boolean | undefined }): Promise<ToolResult> {
+  const label = args.task ?? args.tasks?.join(', ') ?? (args.cohort !== undefined ? `cohort ${args.cohort}` : '?');
   return writeTool(deps, 'cancel', { task: label, detail: `${args.reason ? `reason=${clipText(args.reason, 80)} ` : ''}${args.remove_worktree ? 'remove_worktree ' : ''}confirm=${Boolean(args.confirm)}` }, async (ctx, lines) => {
-    if ((args.task === undefined) === (args.cohort === undefined)) throw new AgentctlError('give either task or cohort', 'cancel takes one task (task) or all open tasks of a cohort (cohort), not both and not neither.');
+    if ([args.task !== undefined, args.tasks !== undefined, args.cohort !== undefined].filter(Boolean).length !== 1) throw new AgentctlError('give either task or cohort', 'cancel takes one task (task) or all open tasks of a cohort (cohort), not both and not neither.');
     if (args.remove_worktree && !ctx.config.mcp.allowRmWorktree) {
       throw new AgentctlError('removing the worktree is not allowed for the chat', `The user can allow it with: mcp: {allow_rm_worktree: true} in ${ctx.config.path}. Without remove_worktree the worktree and the branch stay.`);
     }
     const cohortName = args.cohort === undefined ? undefined : findCohort(ctx.config, args.cohort).name;
-    const inputs = args.task !== undefined ? [args.task] : await openCohortTasks(ctx, cohortName as string, { queued: true });
+    const inputs = args.tasks ?? (args.task !== undefined ? [args.task] : await openCohortTasks(ctx, cohortName as string, { queued: true }));
     if (inputs.length === 0) throw new AgentctlError(`cohort ${cohortName} has no open tasks`, 'Call cohort_show.');
     const opts = { reason: args.reason?.trim() || undefined, rmWorktree: Boolean(args.remove_worktree), source: 'mcp' as const };
     const plan = await planCancel(ctx, inputs, opts);
@@ -1004,11 +1005,12 @@ export const MCP_TOOLS: McpToolDef[] = [
       'The FIRST call (confirm omitted) validates the spec and returns a summary (where each task will stand, hints, touches warnings); show it to the user. Only when they agree, call again with the same spec and confirm: true. "setup" is not accepted from the chat.',
     input: {
       spec: z.string().min(1).max(100_000).describe('The spec text: ---, YAML header, ---, prompt. Several specs may follow each other.'),
+      cohort: cohortArg.optional(),
       agent: z.enum(['claude', 'codex']).optional().describe('Run the specs on this provider, translated through the equivalents table. The queue never switches provider by itself.'),
       confirm: z.boolean().optional().describe('true only after the user agreed to the summary.'),
     },
     annotations: { title: 'Put tasks in the queue', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-    run: (deps, args) => guarded(() => runQueue(deps, args as { spec: string; agent?: 'claude' | 'codex'; confirm?: boolean })),
+    run: (deps, args) => guarded(() => runQueue(deps, args as { spec: string; agent?: 'claude' | 'codex'; cohort?: string; confirm?: boolean })),
   }),
   def({
     name: 'queue_rm',
@@ -1030,13 +1032,14 @@ export const MCP_TOOLS: McpToolDef[] = [
       'The FIRST call (confirm omitted) only describes what would be cancelled; show it to the user and ask, then call again with confirm: true. The user gets a desktop notification.',
     input: {
       task: taskArg.optional(),
+      tasks: z.array(taskArg).min(1).max(100).optional(),
       cohort: cohortArg.optional(),
       reason: z.string().max(500).optional().describe('Why the work is cancelled (optional).'),
       remove_worktree: z.boolean().optional().describe('Also remove the git worktree. Refused unless the user allowed it in the config.'),
       confirm: z.boolean().optional().describe('true only after the user agreed to the described cancellation.'),
     },
     annotations: { title: 'Cancel tasks', readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
-    run: (deps, args) => guarded(() => runCancel(deps, args as { task?: string; cohort?: string; reason?: string; remove_worktree?: boolean; confirm?: boolean })),
+    run: (deps, args) => guarded(() => runCancel(deps, args as { tasks?: string[]; task?: string; cohort?: string; reason?: string; remove_worktree?: boolean; confirm?: boolean })),
   }),
   def({
     name: 'mark',
@@ -1103,8 +1106,8 @@ const confirmArg = z.boolean().optional().describe('First call previews. true ex
 function extraRead(name: string, cli: string, use: string, input: z.ZodRawShape, read: (ctx: Context, args: Record<string, unknown>) => Promise<unknown>): McpToolDef {
   return def({ name, title: use, kind: 'read', description: `${use}. CLI: agentctl ${cli}. Use when you need these facts; no mcp.allow required.`, input, annotations: readOnly(use), run: (deps, args) => guarded(async () => ok(JSON.stringify(await read(deps.context(() => {}), args), null, 2))) });
 }
-function extraWrite(name: McpWriteTool, cli: string, use: string, input: z.ZodRawShape, action: (ctx: Context, args: any, deps: McpDeps) => Promise<unknown>): McpToolDef {
-  return def({ name, title: use, kind: 'write', description: `WRITE, off unless the user put "${name}" in mcp.allow. ${use}. CLI: agentctl ${cli}. Use only for work the user requested. Requires ${name} in mcp.allow; preview then confirm: true with identical arguments. Every execution is audited, journaled and announced on the desktop.`, input: { ...input, confirm: confirmArg }, annotations: { title: use, readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false }, run: (deps, args) => guarded(() => writeTool(deps, name, {}, async (ctx) => ({ text: JSON.stringify(await action(ctx, args, deps), null, 2), executed: true, announce: name }))) });
+function extraWrite<S extends z.ZodRawShape>(name: McpWriteTool, cli: string, use: string, input: S, action: (ctx: Context, args: z.infer<z.ZodObject<S>>, deps: McpDeps) => Promise<unknown>): McpToolDef {
+  return def({ name, title: use, kind: 'write', description: `WRITE, off unless the user put "${name}" in mcp.allow. ${use}. CLI: agentctl ${cli}. Use only for work the user requested. Requires ${name} in mcp.allow; preview then confirm: true with identical arguments. Every execution is audited, journaled and announced on the desktop.`, input: { ...input, confirm: confirmArg }, annotations: { title: use, readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false }, run: (deps, args) => guarded(() => writeTool(deps, name, {}, async (ctx) => ({ text: JSON.stringify(await action(ctx, args as z.infer<z.ZodObject<S>>, deps), null, 2), executed: true, announce: name }))) });
 }
 MCP_TOOLS.push(
   extraRead('mcp_check', 'mcp check', 'Inspect stale MCP server processes without stopping them', {}, async (ctx) => ({ stale: staleProcesses(await findMcpProcesses(ctx.runner), stableScript()) })),

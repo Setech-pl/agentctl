@@ -42,7 +42,8 @@ const freshMachine = (...list: string[]): Respond => {
   const capture = screens(...list);
   return (cmd, args, opts) => {
     if (cmd === 'tmux' && (args[0] === 'has-session' || args[0] === 'list-windows')) return { code: 1 };
-    if (cmd === 'git' && args.includes('--verify')) return { code: 1 };
+    if (cmd === 'git' && args.includes('--quiet')) return { code: 1 };
+    if (cmd === 'git' && args.includes('--verify')) return { code: 0, stdout: 'base-oid' };
     return capture(cmd, args, opts);
   };
 };
@@ -82,7 +83,8 @@ Second line.
     assert.deepEqual(
       runner.commands.filter((c) => !c.startsWith('write ')),
       [
-        `git -C ${repoA} worktree add -b nc-1 ${wt('1')} main`,
+        `git -C ${repoA} branch nc-1 base-oid`,
+        `git -C ${repoA} worktree add ${wt('1')} nc-1`,
         `git -C ${repoB} worktree add --detach ${repoB}-wt1`,
         `ln -sfn ${pkgs}/protocol ${wt('1')}/node_modules/@nc/protocol`,
         `ln -sfn ${pkgs}/sim ${wt('1')}/node_modules/@nc/sim`,
