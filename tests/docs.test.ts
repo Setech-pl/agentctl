@@ -136,10 +136,10 @@ describe('docs: links and versions', () => {
     assert.equal(newest, version, 'the newest released version in CHANGELOG.md must be the version in package.json');
   });
 
-  it('the English README has the diagrams of docs/diagrams.md, and the Polish one has the same three kinds', () => {
+  it('the English README has the diagrams of docs/diagrams.md, and the Polish one has the same four diagrams', () => {
     const blocks = (text: string): string[] => [...text.matchAll(/```mermaid\n([\s\S]*?)```/g)].map((m) => m[1]!);
     const diagrams = blocks(read('docs', 'diagrams.md'));
-    assert.deepEqual(diagrams.map((d) => d.split('\n')[0]), ['sequenceDiagram', 'flowchart TB', 'stateDiagram-v2']);
+    assert.deepEqual(diagrams.map((d) => d.split('\n')[0]), ['sequenceDiagram', 'sequenceDiagram', 'flowchart TB', 'stateDiagram-v2']);
     assert.deepEqual(blocks(read('README.md')).sort(), [...diagrams].sort());
     assert.deepEqual(blocks(read('README.pl.md')).map((d) => d.split('\n')[0]), diagrams.map((d) => d.split('\n')[0]));
   });

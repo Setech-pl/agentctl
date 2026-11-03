@@ -22,6 +22,25 @@ agentctl turns a short spec into a git worktree, a tmux window and a running cod
 
 Planning in a Claude chat? The [built-in MCP server](docs/mcp.md) lets the chat read plan usage and pick up reports itself, and order tasks when write access is allowed. The [clipboard workflow](#daily-loop) also works without MCP.
 
+## For the ordering agent
+
+Start any project with `agentctl guide --project /path/to/repo --clip` and `agentctl capacity --clip` (or the read-only MCP tools `guide` and `capacity`). The shared [dispatcher guide](docs/dispatcher.md) covers specs, provider/model/effort selection, cross-review, cohorts, queue and the `events_since` → `pull_ready` → `get_report` chat loop. [Polski](docs/dispatcher.pl.md).
+
+Capacity shows current windows, reading age, pace, reset, slots, queue, equivalents and seven-day stats. Unknown is n/d; token estimates carry their basis and confidence. Percent includes work outside agentctl. New and queue responses include a short snapshot (`capacity.snapshot: false` disables it). agentctl reports facts; the ordering agent chooses. Add `guide: docs/agent-dispatch.md` to `.agentctl.yaml` for project rules; a missing overlay warns in guide and doctor. `guide.lang: en|pl` in the global config sets the default language.
+
+Board: `C` opens capacity. Start without attaching: `agentctl up --no-attach`. Restart by stable role: `agentctl watch --tmux --restart` / `agentctl board --tmux --restart`; renamed windows are supported. `agentctl version` is an alias of `--version`.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant D as Dispatcher agent
+    participant F as guide + capacity
+    D->>F: Read shared guide + project overlay
+    D->>F: Read plan windows, pace, reset, slots, stats
+    F-->>D: Facts, n/d and labeled estimates
+    Note over D: Agent chooses provider/model/effort
+```
+
 ## In daily use
 
 <!-- Numbers from agentctl stats on the author's machine – verify before publishing -->
@@ -37,12 +56,6 @@ The board tracks `working`, `waiting`, `needs-input`, `needs-trust`, `limited`, 
 
 ```mermaid
 sequenceDiagram
-    participant D as Dispatcher agent
-    participant C as guide + capacity
-    D->>C: Read shared guide + project overlay
-    D->>C: Read plan windows, pace, reset, slots, stats
-    C-->>D: Facts; n/d and labeled estimates
-    Note over D: Agent chooses provider/model/effort
     autonumber
     actor H as You
     participant C as Planning chat
@@ -273,7 +286,7 @@ Windows is unsupported (use a Linux environment in WSL). CI currently validates 
 ```sh
 git clone https://github.com/Setech-pl/agentctl.git
 cd agentctl
-bin/agentctl-update            # a stable copy in ~/Projects/agentctl-stable, npm ci, npm run build, npm link, doctor
+bin/agentctl-update            # a stable copy in ~/workspace/agentctl-stable, npm ci, npm run build, npm link, doctor
 agentctl doctor                # tmux, node, git, claude, codex, gh, cache directory, configs
 ```
 
@@ -363,7 +376,7 @@ Three layers, the later one wins: the global `~/.agentctl/config.yaml`, then `.a
 
 ```yaml
 # ~/.agentctl/config.yaml
-cache: ~/Projects/cache        # one folder per task for the reports; the only place agents write to
+cache: ~/workspace/cache        # one folder per task for the reports; the only place agents write to
 state_dir: ~/.agentctl/tasks   # agentctl's own state per task, out of the agents' reach
 session: agentctl              # tmux session name
 limits: {claude: 3, codex: 3}  # most simultaneous windows per provider
@@ -375,11 +388,11 @@ mcp: {allow: []}               # write tools the chat may use: send, new, interr
 
 ```yaml
 # .agentctl.yaml in the project repo
-worktree_root: ~/Projects/wt   # worktrees go to <worktree_root>/<repo>-<task>
+worktree_root: ~/workspace/wt   # worktrees go to <worktree_root>/<repo>-<task>
 setup:
   - npm ci --prefer-offline --no-audit --no-fund
 env:
-  NEON_CITY_TASK: "{TASK}"
+  APP_TASK: "{TASK}"
 defaults: {agent: claude}
 ```
 
@@ -443,6 +456,9 @@ Reading a screen every 15 seconds is a guess, so `agentctl new` also asks each a
 - Texts: `NC-42: <question>`, `NC-42: raport gotowy – <verdict>` (the verdict is the first meaningful report line, or the line `notify.verdict_pattern` matches), a usage limit, a task that waits for more than 120 seconds, a vanished window. The texts are in Polish at the moment.
 - States: [docs/diagrams.md](docs/diagrams.md#task-states). Details, event tables and what was checked on Claude Code 2.1.309 and Codex 0.166.0: [docs/details.md](docs/details.md#events).
 
+
+Codex: collapsed questions show their count and the shortcut read from “to answer”. `needs-input` takes priority while Codex keeps working; after answering, the screen determines the state again. Board preview, peek, status/MCP `question` and macOS show the question or opening instructions. ntfy sends only opening instructions by default; `notify.ntfy.include_question: true` opts into question text.
+
 ## Phone notifications
 
 When you leave the Mac, the events that need you can go to your phone through [ntfy](https://ntfy.sh), a free notification app for iOS and Android. It works with the public server `ntfy.sh` or with one of your own. The notifications on the Mac stay as they are; the phone is an addition, and it is quiet while you sit at the Mac.
@@ -487,7 +503,7 @@ manager:
   # name: agentctl manager             # the name in the Claude app
   # model: sonnet                      # the default
   # effort: medium                     # the default
-  # guide: ~/src/sample-app/claude/AGENTCTL-SPEC-GUIDE.md   # rules for writing specs, added to the role
+  # guide: docs/agent-dispatch.md   # rules for writing specs, added to the role
   # autostart: true                    # agentctl up starts the manager too
 mcp:
   allow: [send, new, queue]            # what the manager may do at all, with your yes
@@ -754,9 +770,9 @@ What agentctl never does:
 
 Ideas, not promises:
 
-1. **Remote MCP:** a server a chat on the web or phone can reach, with authentication.
-2. **Local models** as a third kind of agent.
-3. **npm release** with a build step.
+1. More providers through a provider layer – next: Google Antigravity CLI.
+2. npm publication (the package is prepared).
+3. Field fixes from daily use.
 
 ## More
 
@@ -770,13 +786,3 @@ Ideas, not promises:
 ## License
 
 [MIT](LICENSE)
-
-Codex: collapsed questions show their count and the shortcut read from “to answer”. `needs-input` takes priority while Codex keeps working; after answering, the screen determines the state again. Board preview, peek, status/MCP `question` and macOS show the question or opening instructions. ntfy sends only opening instructions by default; `notify.ntfy.include_question: true` opts into question text.
-
-## For the ordering agent
-
-Start any project with `agentctl guide --project /path/to/repo --clip` and `agentctl capacity --clip` (or the read-only MCP tools `guide` and `capacity`). The shared [dispatcher guide](docs/dispatcher.md) covers specs, provider/model/effort selection, cross-review, cohorts, queue and the `events_since` → `pull_ready` → `get_report` chat loop. [Polski](docs/dispatcher.pl.md).
-
-Capacity shows current windows, reading age, pace, reset, slots, queue, equivalents and seven-day stats. Unknown is n/d; token estimates carry their basis and confidence. Percent includes work outside agentctl. New and queue responses include a short snapshot (`capacity.snapshot: false` disables it). agentctl reports facts; the ordering agent chooses. Add `guide: docs/agent-dispatch.md` to `.agentctl.yaml` for project rules; a missing overlay warns in guide and doctor. `guide.lang: en|pl` in the global config sets the default language.
-
-Board: `C` opens capacity. Start without attaching: `agentctl up --no-attach`. Restart by stable role: `agentctl watch --tmux --restart` / `agentctl board --tmux --restart`; renamed windows are supported. `agentctl version` is an alias of `--version`.

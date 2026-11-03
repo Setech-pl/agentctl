@@ -1,19 +1,20 @@
 # Diagrams
 
-Three views of agentctl. GitHub renders the Mermaid blocks; the same diagrams are in the [README](../README.md) ([Polish](../README.pl.md)). A test keeps this file and the English README identical.
-
-## End-to-end flow
-
-From a planning chat to a closed task (or a cancelled one: the `opt` block). Steps in a yellow box are decisions that stay with the human: agentctl never answers the folder-trust dialog, never gives a verdict and never merges.
+Generated from README.md by `npm run docs`.
 
 ```mermaid
 sequenceDiagram
+    autonumber
     participant D as Dispatcher agent
-    participant C as guide + capacity
-    D->>C: Read shared guide + project overlay
-    D->>C: Read plan windows, pace, reset, slots, stats
-    C-->>D: Facts; n/d and labeled estimates
+    participant F as guide + capacity
+    D->>F: Read shared guide + project overlay
+    D->>F: Read plan windows, pace, reset, slots, stats
+    F-->>D: Facts, n/d and labeled estimates
     Note over D: Agent chooses provider/model/effort
+```
+
+```mermaid
+sequenceDiagram
     autonumber
     actor H as You
     participant C as Planning chat
@@ -94,10 +95,6 @@ sequenceDiagram
     end
 ```
 
-## Architecture
-
-The CLI, the board and the MCP server are thin fronts. They call the same functions in `src/core`, and every side effect goes through the `Runner`, which is a recorder in `--dry-run` and in tests.
-
 ```mermaid
 flowchart TB
     subgraph fronts [Fronts]
@@ -159,10 +156,6 @@ flowchart TB
     MCP --> AUDIT
     MCP -- "events_since" --> JOURNAL
 ```
-
-## Task states
-
-What `status` and the board show for a task. A live window is classified from its screen (and the agent's events); a task without a window is `report-ready` if its report exists and `dead` if not. Precedence for a live window: `needs-trust`, `needs-input`, `working`, `limited`, `background`, then `report-ready` or `waiting`. `superseded`, `closed` and `cancelled` override all of them. A task in the queue is not in a state yet: it is a queue entry (`queued`, `start failed` after a failed start, or **blocked** when its `after` names a cancelled task) until `watch` starts it. `cancelled` can be reached from every state with `agentctl cancel`; the worktree and the branch stay.
 
 ```mermaid
 stateDiagram-v2
