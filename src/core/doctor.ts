@@ -1,3 +1,4 @@
+import { projectGuide } from './guide.ts';
 import { installation } from './installation.ts';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -188,9 +189,10 @@ export async function runDoctor(
   const code = await readClaudeCodeRegistration(runner, env, home);
   if (code) registrations.push(code);
   for (const r of registrations) {
+    if (r.command && /\/Cellar\/node(?:@[^/]+)?\//.test(r.command)) add(`mcp node (${r.where})`, 'warn', `versioned Node path ${r.command}; repair: agentctl mcp install --desktop --claude-code`);
     if (!r.registered) add(`mcp (${r.where})`, 'warn', `agentctl is not registered: ${r.detail}`);
-    else if (r.scriptExists === false) add(`mcp (${r.where})`, 'warn', `registered, but the script ${r.script} does not exist; run "agentctl mcp install" again`);
-    else if (r.stable === false) add(`mcp (${r.where})`, 'warn', `registered, but it runs ${r.script ?? 'an unknown script'}, not the stable copy ${stableScript(env, home)}; run "agentctl mcp install" from the stable copy`);
+    else if (r.scriptExists === false) add(`mcp (${r.where})`, 'warn', `registered, but the script ${r.script} does not exist; run "agentctl mcp install --desktop --claude-code" again`);
+    else if (r.stable === false) add(`mcp (${r.where})`, 'warn', `registered, but it runs ${r.script ?? 'an unknown script'}, not the stable copy ${stableScript(env, home)}; run "agentctl mcp install --desktop --claude-code" from the stable copy`);
     else add(`mcp (${r.where})`, 'ok', `registered${r.script ? `, runs ${r.script}` : ''}`);
   }
   if (config) {
@@ -205,6 +207,12 @@ export async function runDoctor(
   else if (procs.length > 0) add('mcp server', 'ok', `${procs.length} running (pid ${procs.map((p) => p.pid).join(', ')}), none older than the stable copy`);
 
   if (config) {
+    if (tmuxVersion.code === 0) {
+      const tmux = new Tmux(runner, config.session);
+      const window = (await tmux.windows()).find((w) => w.role === 'watch' || w.plain === 'watch');
+      const alive = window && !(await tmux.paneDead('watch'));
+      add('watch', alive ? 'ok' : 'warn', alive ? 'watch window is running' : 'watch is not running; start: agentctl watch --tmux --restart (or agentctl up --no-attach)');
+    }
     const cache = config.cache;
     if (!fs.existsSync(cache)) add('cache', 'warn', `${cache} does not exist yet (created on first "agentctl new")`);
     else {
@@ -239,6 +247,7 @@ export async function runDoctor(
     } else add('mirror', 'ok', 'off (set mirror_dir in the config to enable)');
     try {
       const project = loadProjectConfig(cwd);
+      for (const warning of projectGuide(cwd).warnings) add('project guide', 'warn', warning);
       add('project config', 'ok', project ? project.path : `no ${PROJECT_CONFIG_NAME} in ${path.resolve(cwd)} (optional)`);
     } catch (e) {
       add('project config', 'fail', errorMessage(e).split('\n').join(' '));

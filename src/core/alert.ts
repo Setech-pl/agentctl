@@ -105,7 +105,7 @@ export class Alerts {
     if (this.isDuplicate(target, state, source)) return 'duplicate';
     const { click, text: message } = await this.clickFor(target, text);
     const result = await this.notifier.notify(ALERT_TITLE, message, click);
-    if (result && !result.ok) throw new Error(`Notification failed: ${result.error ?? result.channel}`);
+    if (result && !result.ok) this.ctx.out(`warning: local notification failed (${result.error ?? result.channel}); phone delivery follows independently`);
     // An orphan window has no state folder, and one is not made for it.
     if (fs.existsSync(taskFile(this.ctx.config, target.window))) {
       const ledger: Ledger = { state, source, at: this.ctx.runner.now() };
