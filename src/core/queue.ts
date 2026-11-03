@@ -1,3 +1,4 @@
+import { collectCapacity, capacitySnapshot, snapshotLines } from './capacity.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import YAML from 'yaml';
@@ -158,6 +159,7 @@ export interface QueueAddPlan {
   warnings: string[];
   /** What the human sees before the question. */
   summary: string[];
+  capacity?: ReturnType<typeof capacitySnapshot>;
 }
 
 /**
@@ -178,7 +180,8 @@ export async function planQueueAdd(ctx: Context, raws: RawSpec[], opts: { agent?
   const items = specs.map((spec, i) => ({ raw: raws[i] as RawSpec, spec }));
   const rows = await collectStatus(ctx, { progress: false, archived: true });
   const warnings = await touchWarnings(ctx, specs);
-  return { items, warnings, summary: [...describeQueueAdd(ctx, specs, entries, await liveWindows(ctx), rows), ...usageSummaryLines(config, specs, ctx.runner.now()), ...warnings.map((w) => `⚠ ${w}`)] };
+  const capacity = config.capacity.snapshot && !ctx.runner.dryRun ? capacitySnapshot(await collectCapacity(ctx), specs.map((s) => s.agent)) : undefined;
+  return { items, warnings, ...(capacity ? { capacity } : {}), summary: [...describeQueueAdd(ctx, specs, entries, await liveWindows(ctx), rows), ...usageSummaryLines(config, specs, ctx.runner.now()), ...(capacity ? snapshotLines(capacity) : []), ...warnings.map((w) => `⚠ ${w}`)] };
 }
 
 /** Per spec: the order and where it will stand ("starts at once" or "waits: claude 2/2, 1 ahead"). */
