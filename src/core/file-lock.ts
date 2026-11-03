@@ -31,8 +31,8 @@ export function tryFileLock(file: string): (() => void) | undefined {
 }
 
 /** Short, process-shared critical section. A dead owner's lock can be recovered; a live owner is never evicted. */
-export async function withFileLock<T>(file: string, action: () => Promise<T>): Promise<T> {
-  const deadline = Date.now() + 60_000;
+export async function withFileLock<T>(file: string, action: () => Promise<T>, timeoutMs = 60_000): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
   let release: (() => void) | undefined;
   while (!(release = tryFileLock(file))) {
     if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${file}`);
