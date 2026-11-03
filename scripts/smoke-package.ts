@@ -8,6 +8,7 @@ const tarball = process.env.AGENTCTL_SMOKE_TARBALL;
 const node22 = process.env.AGENTCTL_NODE22;
 const node26 = process.env.AGENTCTL_NODE26;
 if (!cache || !tarball || !node22 || !node26) throw new Error('Set AGENTCTL_LIVE_CACHE, AGENTCTL_SMOKE_TARBALL, AGENTCTL_NODE22 and AGENTCTL_NODE26');
+const expectedVersion: string = JSON.parse(fs.readFileSync(path.resolve(import.meta.dirname, '../package.json'), 'utf8')).version;
 const results: unknown[] = [];
 for (const [name, node, npm] of [
   ['node22', node22, path.resolve(node22, '../../lib/node_modules/npm/bin/npm-cli.js')],
@@ -24,7 +25,7 @@ for (const [name, node, npm] of [
     const checks: { name: string; ok: boolean }[] = [];
     const run = (args: string[]) => { h.check(); return spawnSync(bin, args, { env: h.env, cwd: h.root, encoding: 'utf8', timeout: 20000 }); };
     const check = (name: string, ok: boolean) => { checks.push({ name, ok }); console.log(`${ok ? 'PASS' : 'FAIL'} ${name}`); assert.ok(ok, name); };
-    const version = run(['version']); check('version 0.17.0', version.status === 0 && version.stdout.trim() === '0.17.0');
+    const version = run(['version']); check(`version ${expectedVersion}`, version.status === 0 && version.stdout.trim() === expectedVersion);
     const vflag = run(['--version']); check('version alias', vflag.stdout === version.stdout);
     check('help', run(['--help']).stdout.includes('capacity'));
     const guide = run(['guide']); check('global packaged EN guide', guide.status === 0 && guide.stdout.startsWith('# Dispatcher guide\n'));
