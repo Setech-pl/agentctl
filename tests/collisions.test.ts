@@ -117,7 +117,7 @@ describe('collisions: status', () => {
     s.task('LANDING-QS-1', { committed: ['a.ts', 'b.ts'] });
     s.task('LANDING-BRAND-1', { committed: ['a.ts', 'b.ts'] });
     const r = await runCli(s.config, s.runner, ['status']);
-    assert.match(r.stdout.split('\n')[0]!, /PROGRESS\s+COLLIDE\s+REPORT/);
+    assert.match(r.stdout.split('\n').find((line) => line.includes('PROGRESS'))!, /PROGRESS\s+COLLIDE\s+REPORT/);
     assert.match(r.stdout, /LANDING-BRAND-1[^\n]*⚠ LANDING-QS-1: 2/);
     assert.match(r.stdout, /LANDING-QS-1[^\n]*⚠ LANDING-BRAND-1: 2/);
     const json = JSON.parse((await runCli(s.config, s.runner, ['status', '--json'])).stdout) as { task: string; collide: unknown }[];

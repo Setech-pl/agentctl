@@ -30,6 +30,9 @@ export const phoneQueuePath = (config: Pick<GlobalConfig, 'path'>): string => pa
 /** The phone event of a journal entry; undefined for entries that never go to the phone. */
 export function phoneEventOf(entry: Pick<JournalEntry, 'kind' | 'level'>): PhoneEvent | undefined {
   switch (entry.kind) {
+    case 'disk-warn':
+    case 'disk-critical':
+    case 'disk-ok':
     case 'needs-input':
     case 'needs-trust':
     case 'limited':

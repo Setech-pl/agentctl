@@ -37,6 +37,9 @@ export interface PhoneInput {
 export const HINTED_EVENTS: readonly PhoneEvent[] = ['needs-input', 'report-ready', 'cohort-done'];
 
 export const NTFY_TAGS: Record<PhoneEvent, string> = {
+  'disk-warn': 'warning',
+  'disk-critical': 'warning',
+  'disk-ok': 'white_check_mark',
   'needs-input': 'question',
   'needs-trust': 'lock',
   limited: 'hourglass_flowing_sand',
@@ -124,6 +127,12 @@ export function phoneMessage(event: PhoneEvent, input: PhoneInput, ntfy: Pick<Nt
       if (!task) return undefined;
       title = `${task}: okno zniknęło`;
       body = `${task}: okno zniknęło bez raportu`;
+      break;
+    case 'disk-warn':
+    case 'disk-critical':
+    case 'disk-ok':
+      title = event;
+      body = input.text ?? event;
       break;
     case 'usage-critical':
       title = 'limit planu';

@@ -1,3 +1,5 @@
+import { collectDisk } from './disk.ts';
+import type { DiskReport } from './disk.ts';
 import { collectCapacity, renderCapacity } from './capacity.ts';
 import { shortPath } from './report-detect.ts';
 import path from 'node:path';
@@ -129,6 +131,7 @@ export interface BoardState {
   /** `g`: the groups (cohort keys, '' for "bez kohorty") whose tasks are folded away under their header. */
   folded: string[];
   /** The plans of Claude and Codex for the panel on top; null before the first refresh. */
+  disk: DiskReport | null;
   plans: Record<AgentName, PlanState> | null;
   /** Tasks that can be resumed (active, a worktree, no window): the section "Do wznowienia", key R. */
   resumable: string[];
@@ -142,7 +145,7 @@ export interface BoardState {
 export const MANAGER_SELECT = '@manager';
 
 export function initialBoardState(width: number, height: number): BoardState {
-  return { rows: [], selected: null, mode: { kind: 'list' }, notice: null, preview: null, width, height, refreshedAt: null, busy: null, loadError: null, quit: false, showFinished: false, showHidden: false, queue: [], queuePaused: false, cohortFilter: null, folded: [], plans: null, resumable: [], away: null, manager: null };
+  return { rows: [], selected: null, mode: { kind: 'list' }, notice: null, preview: null, width, height, refreshedAt: null, busy: null, loadError: null, quit: false, showFinished: false, showHidden: false, queue: [], queuePaused: false, cohortFilter: null, folded: [], disk: null, plans: null, resumable: [], away: null, manager: null };
 }
 
 /** What the front has to do after a key press. */
@@ -547,6 +550,7 @@ function logKey(state: BoardState, mode: Extract<BoardMode, { kind: 'log' }>, in
 // ---- data in
 
 export interface BoardSnapshot {
+  disk?: DiskReport;
   rows: BoardRow[];
   /** Absent: no queue (older callers). */
   queue?: QueueView[];
@@ -562,7 +566,7 @@ export interface BoardSnapshot {
 
 /** Keep the selection when the task is still there, otherwise take the first row. */
 export function applySnapshot(state: BoardState, snap: BoardSnapshot): BoardState {
-  const next: BoardState = { ...state, rows: snap.rows, queue: snap.queue ?? [], queuePaused: snap.queuePaused ?? false, plans: snap.plans ?? null, resumable: snap.resumable ?? [], away: snap.away ?? null, manager: snap.manager ?? null, refreshedAt: snap.refreshedAt, loadError: null };
+  const next: BoardState = { ...state, rows: snap.rows, queue: snap.queue ?? [], queuePaused: snap.queuePaused ?? false, disk: snap.disk ?? null, plans: snap.plans ?? null, resumable: snap.resumable ?? [], away: snap.away ?? null, manager: snap.manager ?? null, refreshedAt: snap.refreshedAt, loadError: null };
   const listed = navTasks(next);
   const selected = state.selected !== null && listed.includes(state.selected) ? state.selected : firstSelectable(listed);
   const preview = snap.preview && snap.preview.task === selected ? snap.preview : selected === state.selected ? state.preview : null;
@@ -601,6 +605,7 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
   const now = runner.now();
   const reader = openReader(config);
   const plans = readPlans(config, reader, now);
+  const disk = await collectDisk(ctx);
   reader.save();
   const rows: BoardRow[] = [];
   for (const row of statusRows) {
@@ -623,9 +628,9 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
     } catch (e) {
       lines = [`(cannot read the window: ${errorMessage(e)})`];
     }
-    return { rows, queue, queuePaused, plans, resumable, away: awayView(config), manager, preview: { task: MANAGER_SELECT, lines }, refreshedAt: clock(now) };
+    return { rows, queue, queuePaused, disk, plans, resumable, away: awayView(config), manager, preview: { task: MANAGER_SELECT, lines }, refreshedAt: clock(now) };
   }
-  if (queued) return { rows, queue, queuePaused, plans, resumable, away: awayView(config), manager, preview: { task: queued.entry.task, lines: queuePreview(queued) }, refreshedAt: clock(now) };
+  if (queued) return { rows, queue, queuePaused, disk, plans, resumable, away: awayView(config), manager, preview: { task: queued.entry.task, lines: queuePreview(queued) }, refreshedAt: clock(now) };
   // The selected task; else the first one the list shows (not a hidden, closed or finished one).
   const target = rows.find((r) => r.task === selected) ?? rows.find((r) => !r.hidden && !r.finished) ?? rows.find((r) => !r.hidden) ?? rows[0];
   let preview: Preview | null = null;
@@ -644,7 +649,7 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
     const notes = [...(target.collide.length > 0 ? [collideText(target.collide)] : []), ...(target.reportSource ? [`report from ${shortPath(target.reportSource)}`] : [])];
     preview = { task: target.task, lines, ...(notes.length > 0 ? { note: notes.join(' · ') } : {}) };
   }
-  return { rows, queue, queuePaused, plans, resumable, away: awayView(config), manager, preview, refreshedAt: clock(now) };
+  return { rows, queue, queuePaused, disk, plans, resumable, away: awayView(config), manager, preview, refreshedAt: clock(now) };
 }
 
 /** The preview of a queued task: what it will run, what it waits for, how it ends if it failed, and the start of its prompt. */

@@ -1,3 +1,4 @@
+import { collectDisk, diskLine, confirmDiskStart } from './core/disk.ts';
 import { collectCapacity, capacitySnapshot, renderCapacity, snapshotLines } from './core/capacity.ts';
 import { collectGuide } from './core/guide.ts';
 import fs from 'node:fs';
@@ -430,6 +431,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .action(
       guarded(async (file: string | undefined, opts: { clip?: boolean; yes?: boolean; dryRun?: boolean; reuse?: boolean; agent?: 'claude' | 'codex' | false; switch?: boolean; waitTrust?: boolean; cohort?: string; json?: boolean }) => {
         const ctx = contextFor(Boolean(opts.dryRun), { silent: Boolean(opts.json) });
+        if (!opts.dryRun && !(await confirmDiskStart(ctx, Boolean(opts.yes)))) return;
         const source = opts.clip ? 'clipboard' : (file ?? 'stdin');
         const raws = splitSpecs(await readSpecSource(file, opts.clip), source);
         applyCohortFlag(raws, opts.cohort);
@@ -490,6 +492,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         const ctx = contextFor(false, { silent: Boolean(opts.json) });
         const raws = splitSpecs(await readSpecSource(file, opts.clip), opts.clip ? 'clipboard' : (file ?? 'stdin'));
         applyCohortFlag(raws, opts.cohort);
+        if (!(await confirmDiskStart(ctx, Boolean(opts.yes)))) return;
         const plan = await planQueueAdd(ctx, raws, { ...(opts.agent ? { agent: opts.agent } : {}) });
         if (!(await confirmAction(ctx, plan.summary, plan.warnings.length > 0 ? 'Add to the queue anyway?' : 'Add to the queue?', Boolean(opts.yes)))) return;
         const added = await commitQueueAdd(ctx, plan.items, { ...(opts.agent ? { agent: opts.agent } : {}) });
@@ -695,6 +698,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
           return deps.stdout(md);
         }
         if (opts.json) return line(JSON.stringify(rows, null, 2));
+        line(diskLine(await collectDisk(ctx)));
         if (rows.length === 0) {
           line(hiddenCount > 0 ? `No visible tasks${cohort ? ` in cohort ${cohort}` : ''}; ${hiddenCount} hidden (see "agentctl status --all").` : cohort ? `No tasks in cohort ${cohort}.` : `No tasks yet in ${ctx.config.stateDir}. Start one with "agentctl new <spec>".`);
           for (const l of await queueStatusLines(ctx, cohort)) line(l);
@@ -882,6 +886,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         const cohort = opts.cohort === undefined ? undefined : findCohort(ctx.config, opts.cohort).name;
         const rows = selectHistory(ctx, { since: opts.since, cohort });
         if (opts.json) return line(JSON.stringify(rows, null, 2));
+        line(diskLine(await collectDisk(ctx)));
         if (opts.clip) {
           const md = logMarkdown(rows);
           const copy = await writeClipboard(ctx.runner, md);

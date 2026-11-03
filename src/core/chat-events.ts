@@ -115,6 +115,10 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
 const PHONE_MARK = ' 📱';
 const hhmm = (iso: string): string => formatLocalTime(iso).slice(-5);
 const KIND_LABEL: Record<JournalEntry['kind'], string> = {
+  'mcp-write': 'MCP',
+  'disk-warn': 'DYSK',
+  'disk-critical': 'DYSK KRYTYCZNY',
+  'disk-ok': 'DYSK OK',
   'report-ready': 'RAPORT',
   'queue-start': 'START',
   'queue-failed': 'BŁĄD STARTU',
