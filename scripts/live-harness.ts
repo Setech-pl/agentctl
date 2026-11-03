@@ -109,6 +109,12 @@ const FAKE_AGENT = (name: 'claude' | 'codex'): string => `#!/bin/bash
 # A fake ${name} for live tests: answers --version and --help, prints an idle screen, echoes what it is given. Every start is logged.
 echo "${name} $*" >> "\${HARNESS_AGENT_LOG:-/dev/null}"
 case "$1" in
+  app-server) while IFS= read -r line; do
+    case "$line" in
+      *'"id":1'*) printf '%s\\n' '{"id":1,"result":{}}';;
+      *'"id":2'*) printf '%s\\n' '{"id":2,"result":{"rateLimits":{}}}';;
+    esac
+  done; exit 0;;
   --version) echo "${name === 'claude' ? '2.1.309 (Claude Code, fake)' : 'codex-cli 0.166.0 (fake)'}"; exit 0;;
   --help) ${name === 'claude' ? `echo "  --effort <level>"; echo "  --remote-control [name]               Start an interactive session with Remote Control enabled"; echo "  --append-system-prompt <prompt>       Append a system prompt (--bare: --append-system-prompt[-file])"` : `echo "  -c, --config <key=value>"`}; exit 0;;
 esac

@@ -41,7 +41,7 @@ async function until(fn: () => boolean, timeoutMs = 20_000): Promise<boolean> {
 
 const windows = (h: Harness): string[] => h.tmux(['list-windows', '-t', `=${h.session}`, '-F', '#{window_name}']).stdout.split('\n').filter(Boolean);
 /** The starts of the fake claude, without the --version / --help probes of agentctl. */
-const starts = (h: Harness): string[] => h.agentStarts().filter((l) => !/^claude --(?:version|help)$/.test(l));
+const starts = (h: Harness): string[] => h.agentStarts().filter((l) => !/^(?:(?:claude|codex) --(?:version|help)|codex app-server)$/.test(l));
 
 function git(h: Harness, cwd: string, args: string[]): string {
   const r = spawnSync('git', args, { cwd, env: h.env, encoding: 'utf8' });
@@ -86,7 +86,7 @@ async function managerScenario(): Promise<void> {
     check('the fake claude got exactly the expected command line', started.length === 1 && started[0] === expected, `${started.join('\n')}\n--- expected\n${expected}`);
     check('the shell line is an interactive session, not the server mode', !/^claude remote-control/.test(started[0] ?? ''));
     const role = fs.existsSync(files.role) ? fs.readFileSync(files.role, 'utf8') : '';
-    check('role.md has the role, the allowed tools and the guide', /dispatcher of agentctl/.test(role) && /\(send, new\) - only after Marcin has agreed/.test(role) && /Short prompts\./.test(role), role.slice(0, 300));
+    check('role.md has the role, the allowed tools and the guide', /# Dispatcher guide/.test(role) && /Available write tools: send, new/.test(role) && /Short prompts\./.test(role), role.slice(0, 300));
     const settings = fs.existsSync(files.settings) ? (JSON.parse(fs.readFileSync(files.settings, 'utf8')) as { permissions: { allow: string[] } }) : { permissions: { allow: [] } };
     check('settings.json lets only the read tools through', settings.permissions.allow.includes('mcp__agentctl__status') && !settings.permissions.allow.includes('mcp__agentctl__send'), JSON.stringify(settings));
     const mcp = fs.existsSync(files.mcp) ? (JSON.parse(fs.readFileSync(files.mcp, 'utf8')) as { mcpServers: Record<string, { command: string; args: string[] }> }) : { mcpServers: {} };
