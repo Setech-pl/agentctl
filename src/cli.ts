@@ -1,3 +1,5 @@
+import { collectCapacity, capacitySnapshot, renderCapacity, snapshotLines } from './core/capacity.ts';
+import { collectGuide } from './core/guide.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline/promises';
@@ -40,7 +42,7 @@ import type { FetchLike } from './core/phone.ts';
 import { awayReport, phoneActive, renderAway, setAway } from './core/away.ts';
 import { applySetLimits, collectLimits, parseAssignments, parseCounts, planSetLimits, releasePlaces, renderLimits, reservePlaces } from './core/limits.ts';
 import { collectOverlaps, renderOverlaps, touchWarnings } from './core/collisions.ts';
-import type { NewOptions } from './core/new.ts';
+import type { NewOptions, NewResult } from './core/new.ts';
 import { pullReady, pullTask } from './core/pull.ts';
 import { reportInfo, shortPath } from './core/report-detect.ts';
 import { sendPrompts } from './core/send.ts';
@@ -135,7 +137,7 @@ export function defaultDeps(): CliDeps {
     },
     insideTmux: Boolean(process.env.TMUX),
     choose: process.stdin.isTTY ? chooseOnTerminal : undefined,
-    makeRunner: (dryRun, emit) => (dryRun ? new RecordingRunner({ emit }) : new RealRunner()),
+    makeRunner: (dryRun, emit) => (dryRun ? new RecordingRunner({ emit, readRunner: new RealRunner() }) : new RealRunner()),
     interruptSignal: () => {
       const controller = new AbortController();
       const onStop = (): void => controller.abort();
@@ -259,7 +261,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     }
   };
 
-  const contextFor = (dryRun: boolean, { migrate = true } = {}): Context => {
+  const contextFor = (dryRun: boolean, { migrate = true, silent = false } = {}): Context => {
     let config: GlobalConfig;
     try {
       config = deps.loadConfig();
@@ -270,8 +272,9 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
       throw e;
     }
     // TASK.md and setup.log used to live in the cache folder, where agents could delete them: move them to state_dir.
-    if (!dryRun && migrate) for (const message of migrateLegacyState(config)) line(message);
-    return new Context(deps.makeRunner(dryRun, line), config, line, deps.confirm);
+    const output = silent ? () => {} : line;
+    if (!dryRun && migrate) for (const message of migrateLegacyState(config)) output(message);
+    return new Context(deps.makeRunner(dryRun, output), config, output, deps.confirm);
   };
 
   const makeNotifier = (ctx: Context, opts?: { retryBroken?: boolean }): Promise<Notifier> =>
@@ -375,11 +378,47 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     }
   };
 
+  program.command('version').description('Print the installed version (alias of --version).').action(() => line(packageVersion()));
+
+  program.command('guide').description('Read the dispatcher guide and optional project overlay.')
+    .option('--project <repo>', 'repository whose .agentctl.yaml supplies guide:')
+    .addOption(new Option('--lang <lang>', 'guide language (default config.guide.lang or en)').choices(['en', 'pl']))
+    .option('--clip', 'copy the guide to the clipboard').option('--json', 'machine-readable guide with warnings')
+    .action(guarded(async (opts: { project?: string; lang?: 'en' | 'pl'; clip?: boolean; json?: boolean }) => {
+      if (opts.clip && opts.json) throw new AgentctlError('--json and --clip exclude each other');
+      const ctx = contextFor(false, { migrate: false });
+      const result = collectGuide(ctx.config, opts);
+      if (opts.json) return line(JSON.stringify(result, null, 2));
+      if (opts.clip) {
+        const copy = await writeClipboard(ctx.runner, result.text);
+        if (copy.ok) return line(`Copied the guide to the clipboard (${copy.tool}).`);
+        line(copy.error ?? 'Clipboard unavailable');
+      }
+      deps.stdout(result.text);
+    }));
+
+  program.command('capacity').description('Current plan windows, pace, slots, queue, equivalents and seven-day model statistics; no provider selection.')
+    .option('--json', 'machine-readable capacity; null means n/d').option('--clip', 'copy the capacity summary')
+    .action(guarded(async (opts: { json?: boolean; clip?: boolean }) => {
+      if (opts.clip && opts.json) throw new AgentctlError('--json and --clip exclude each other');
+      const ctx = contextFor(false, { migrate: false });
+      const result = await collectCapacity(ctx);
+      if (opts.json) return line(JSON.stringify(result, null, 2));
+      const text = renderCapacity(result).join('\n') + '\n';
+      if (opts.clip) {
+        const copy = await writeClipboard(ctx.runner, text);
+        if (copy.ok) return line(`Copied capacity to the clipboard (${copy.tool}).`);
+        line(copy.error ?? 'Clipboard unavailable');
+      }
+      deps.stdout(text);
+    }));
+
   program
     .command('new')
     .description('Start the tasks in a spec file: worktree, setup commands, symlinks, TASK.md, tmux window, agent, prompt.')
     .argument('[file]', 'spec file, or "-" for stdin')
     .option('--dry-run', 'print the commands that would run, execute nothing')
+    .option('--json', 'machine-readable results and capacity snapshot')
     .option('--reuse', 'use worktrees that already exist instead of failing')
     .addOption(new Option('--agent <agent>', 'run every spec on this provider, translated through the equivalents table').choices(['claude', 'codex']))
     .option('--no-switch', 'never offer to move a task to the other provider when its limit is full')
@@ -389,8 +428,8 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('-y, --yes', 'with --clip: do not ask; also skips the question after a "touches" warning')
     .option('--cohort <name>', 'put every task of the file in this cohort (overrides "cohort:" in a spec); without it a task has a cohort only if its spec names one')
     .action(
-      guarded(async (file: string | undefined, opts: { clip?: boolean; yes?: boolean; dryRun?: boolean; reuse?: boolean; agent?: 'claude' | 'codex' | false; switch?: boolean; waitTrust?: boolean; cohort?: string }) => {
-        const ctx = contextFor(Boolean(opts.dryRun));
+      guarded(async (file: string | undefined, opts: { clip?: boolean; yes?: boolean; dryRun?: boolean; reuse?: boolean; agent?: 'claude' | 'codex' | false; switch?: boolean; waitTrust?: boolean; cohort?: string; json?: boolean }) => {
+        const ctx = contextFor(Boolean(opts.dryRun), { silent: Boolean(opts.json) });
         const source = opts.clip ? 'clipboard' : (file ?? 'stdin');
         const raws = splitSpecs(await readSpecSource(file, opts.clip), source);
         applyCohortFlag(raws, opts.cohort);
@@ -399,11 +438,11 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         const planLines = opts.dryRun || opts.agent === false ? [] : usageSummaryLines(ctx.config, specs.map((s) => (opts.agent && !s.pin ? { ...s, agent: opts.agent } : s)), ctx.runner.now());
         if (opts.clip && !(await confirmAction(ctx, summarizeSpecs(specs, planLines), 'Start?', Boolean(opts.yes) || Boolean(opts.dryRun)))) return;
         // Without the summary of --clip: only what there is to say (a plan that is n/d is not worth a line before every start).
-        if (!opts.clip) for (const l of planLines.filter((x) => !/ n\/d/.test(x))) line(l);
+        if (!opts.clip && !opts.json) for (const l of planLines.filter((x) => !/ n\/d/.test(x))) line(l);
         // `touches`: an active task already changes files the new one says it will touch. Printed always; asked y/N with a terminal.
         if (!opts.dryRun && opts.agent !== false) {
           const warnings = await touchWarnings(ctx, specs);
-          for (const w of warnings) line(`⚠ ${w}`);
+          if (!opts.json) for (const w of warnings) line(`⚠ ${w}`);
           if (warnings.length > 0 && ctx.confirm && !opts.yes && !(await ctx.confirm('Start anyway? [y/N] '))) return void line('Aborted, nothing was done.');
         }
         const options: NewOptions = { reuse: Boolean(opts.reuse), noSwitch: opts.switch === false, waitTrust: opts.waitTrust !== false };
@@ -416,17 +455,24 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         // A full provider: with a terminal, "add to the queue?" instead of an error (see "agentctl queue").
         const overflow: { queued: typeof specs } = { queued: [] };
         if (!opts.dryRun && !options.noAgent) options.overflow = overflow;
+        let results: NewResult[] = [];
         try {
-          await newTasks(ctx, specs, options);
+          results = await newTasks(ctx, specs, options);
         } finally {
           interrupt?.dispose();
         }
         if (overflow.queued.length > 0) {
           const added = await commitQueueAdd(ctx, overflow.queued.map((spec) => ({ raw: raws[spec.index - 1] as RawSpec, spec })), { ...(opts.agent ? { agent: opts.agent } : {}) });
-          for (const e of added) line(`${e.task}: queued (position ${waiting(readQueue(ctx.config)).findIndex((x) => x.task === e.task) + 1}); it starts when a ${e.agent} window is free${await watchRunning(ctx) ? '' : ' – nothing starts it unless "agentctl watch" runs: agentctl watch --tmux'}`);
+          if (!opts.json) for (const e of added) line(`${e.task}: queued (position ${waiting(readQueue(ctx.config)).findIndex((x) => x.task === e.task) + 1}); it starts when a ${e.agent} window is free${await watchRunning(ctx) ? '' : ' – nothing starts it unless "agentctl watch" runs: agentctl watch --tmux'}`);
         }
         // The session exists now (it may have been created by this very command): mouse and the key back to the board.
-        if (!opts.dryRun && !options.noAgent) for (const l of describeNavigation(await applyNavigation(ctx), ctx.config.session, true)) line(l);
+        if (!opts.dryRun && !options.noAgent) {
+          const nav = describeNavigation(await applyNavigation(ctx), ctx.config.session, true);
+          if (!opts.json) for (const l of nav) line(l);
+        }
+        const capacity = !opts.dryRun && ctx.config.capacity.snapshot && !options.noAgent ? capacitySnapshot(await collectCapacity(ctx), [...results.map((r) => r.effective.agent), ...overflow.queued.map((s) => s.agent)]) : undefined;
+        if (opts.json) line(JSON.stringify({ results, queued: overflow.queued.map((s) => s.task), ...(capacity ? { capacity } : {}) }, null, 2));
+        else if (capacity) for (const l of snapshotLines(capacity)) line(l);
       }),
     );
 
@@ -437,15 +483,19 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('--clip', 'read the spec from the clipboard')
     .addOption(new Option('--agent <agent>', 'run every spec on this provider, translated through the equivalents table (the queue never switches provider by itself)').choices(['claude', 'codex']))
     .option('-y, --yes', 'do not ask')
+    .option('--json', 'machine-readable queued entries and capacity snapshot')
     .option('--cohort <name>', 'put every task of the file in this cohort (overrides "cohort:" in a spec); without it a task has a cohort only if its spec names one')
     .action(
-      guarded(async (file: string | undefined, opts: { clip?: boolean; yes?: boolean; agent?: 'claude' | 'codex'; cohort?: string }) => {
-        const ctx = contextFor(false);
+      guarded(async (file: string | undefined, opts: { clip?: boolean; yes?: boolean; agent?: 'claude' | 'codex'; cohort?: string; json?: boolean }) => {
+        const ctx = contextFor(false, { silent: Boolean(opts.json) });
         const raws = splitSpecs(await readSpecSource(file, opts.clip), opts.clip ? 'clipboard' : (file ?? 'stdin'));
         applyCohortFlag(raws, opts.cohort);
         const plan = await planQueueAdd(ctx, raws, { ...(opts.agent ? { agent: opts.agent } : {}) });
         if (!(await confirmAction(ctx, plan.summary, plan.warnings.length > 0 ? 'Add to the queue anyway?' : 'Add to the queue?', Boolean(opts.yes)))) return;
         const added = await commitQueueAdd(ctx, plan.items, { ...(opts.agent ? { agent: opts.agent } : {}) });
+        const capacity = ctx.config.capacity.snapshot ? capacitySnapshot(await collectCapacity(ctx), added.map((e) => e.agent)) : undefined;
+        if (opts.json) return line(JSON.stringify({ entries: added, ...(capacity ? { capacity } : {}) }, null, 2));
+        if (capacity) for (const l of snapshotLines(capacity)) line(l);
         const entries = waiting(readQueue(ctx.config));
         for (const e of added) line(`${e.task}: queued (position ${entries.findIndex((x) => x.task === e.task) + 1} of ${entries.length})`);
         if (!(await watchRunning(ctx))) line('hint: nothing starts the queue unless "agentctl watch" runs: agentctl watch --tmux');
@@ -465,7 +515,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         const cohort = wanted === undefined ? undefined : findCohort(ctx.config, wanted).name;
         const all = describeQueue(ctx.config, readQueue(ctx.config), await liveWindows(ctx), await collectStatus(ctx, { progress: false, archived: true }));
         const views = cohort === undefined ? all : all.filter((v) => v.entry.cohort !== undefined && cohortKey(v.entry.cohort) === cohortKey(cohort));
-        if (opts.json) return line(JSON.stringify(views.map((v) => ({ position: v.position, task: v.entry.task, cohort: v.entry.cohort ?? null, status: v.entry.status, agent: v.entry.agent, model: v.entry.model, effort: v.entry.effort, priority: v.entry.priority, condition: v.condition.text, blocked: v.condition.kind === 'blocked', after: v.entry.after, queued: v.entry.queuedAt, error: v.entry.error ?? null })), null, 2));
+        if (opts.json || (command.optsWithGlobals() as { json?: boolean }).json) return line(JSON.stringify(views.map((v) => ({ position: v.position, task: v.entry.task, cohort: v.entry.cohort ?? null, status: v.entry.status, agent: v.entry.agent, model: v.entry.model, effort: v.entry.effort, priority: v.entry.priority, condition: v.condition.text, blocked: v.condition.kind === 'blocked', after: v.entry.after, queued: v.entry.queuedAt, error: v.entry.error ?? null })), null, 2));
         for (const l of renderQueueList(views, ctx.runner.now())) line(l);
         for (const v of views.filter((x) => x.condition.kind === 'blocked')) line(`hint: ${v.entry.task} is blocked: agentctl unblock ${v.entry.task} [--drop-after <task>], or agentctl cancel ${v.entry.task}`);
         if (isPaused(ctx.config)) line('The queue is paused: "agentctl queue resume" lets it run again.');
@@ -995,21 +1045,27 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .command('watch')
     .description('Foreground loop: notifies (macOS notification / notify-send) when a task has a report ready, asks something, hit its usage limit, waits too long, needs folder trust or died.')
     .option('--tmux', `run it in window "${WATCH_WINDOW}" of the agentctl session (created if missing) instead of here; also shows the task counts in the status bar of that session`)
+    .option('--restart', 'with --tmux: restart the window identified by its stable role')
     .option('--no-status-line', 'with --tmux: leave the status bar of the session alone')
     .action(
-      guarded(async (opts: { tmux?: boolean; statusLine?: boolean }) => {
+      guarded(async (opts: { tmux?: boolean; statusLine?: boolean; restart?: boolean }) => {
         const ctx = contextFor(false);
         if (opts.tmux) {
+          if (opts.restart) await ctx.tmux.killRole('watch');
           await startWatchWindow(ctx, opts.statusLine !== false);
           return;
         }
         const interrupt = deps.interruptSignal?.();
         try {
-          await loggedRun(startLogPath(ctx.config, 'watch'), 'watch', async () => {
+          const note = await loggedRun(startLogPath(ctx.config, 'watch'), 'watch', async () => {
             const notifier = await makeNotifier(ctx);
             const self = deps.selfArgv?.();
             await runWatch(ctx, notifier, { ...(interrupt ? { signal: interrupt.signal } : {}), ...(self ? { self } : {}), configStore: new ConfigStore(deps.loadConfig, ctx.config), remakeNotifier: () => makeNotifier(ctx) });
-          }, { minLifetimeMs: 0 });
+          });
+          if (note && !interrupt?.signal.aborted) throw new AgentctlError(note);
+        } catch (e) {
+          await (await makeNotifier(ctx)).notify('agentctl', `watch failed: ${errorMessage(e).split('\n')[0]}; restart: agentctl watch --tmux --restart`).catch(() => undefined);
+          throw e;
         } finally {
           interrupt?.dispose();
         }
@@ -1019,11 +1075,13 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
   program
     .command('board')
     .description(`Full-screen overview of the tasks: state, progress, a live preview of the selected window, and keys to switch to it, message, interrupt, pull and close.`)
+    .option('--restart', 'with --tmux: restart the window identified by its stable role')
     .option('--tmux', `open it in window "${BOARD_WINDOW}" of the agentctl session (created if missing) instead of here`)
     .action(
-      guarded(async (opts: { tmux?: boolean }) => {
+      guarded(async (opts: { tmux?: boolean; restart?: boolean }) => {
         const ctx = contextFor(false);
         if (opts.tmux) {
+          if (opts.restart) await ctx.tmux.killRole('board');
           await startBoardWindow(ctx);
           line(`Open it: tmux attach -t ${ctx.config.session} \\; select-window -t ${BOARD_WINDOW}   (inside tmux: tmux select-window -t ${ctx.config.session}:${BOARD_WINDOW})`);
           return;

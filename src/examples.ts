@@ -5,6 +5,9 @@ import type { Command } from 'commander';
  * and in docs/commands.md (npm run docs), so the two cannot drift apart.
  */
 export const COMMAND_EXAMPLES: Record<string, string[]> = {
+  version: ['agentctl version'],
+  guide: ['agentctl guide --project /path/to/repo --lang en --clip', 'agentctl guide --lang pl'],
+  capacity: ['agentctl capacity --json', 'agentctl capacity --clip'],
   new: [
     'agentctl new --dry-run task-42.md        # print every command, run nothing',
     'agentctl new task-42.md                  # start the tasks of the file',
