@@ -20,7 +20,7 @@ agentctl turns a short spec into a git worktree, a tmux window and a running cod
 2. `agentctl new` creates the worktree, opens a tmux window and starts the agent within your per-provider limits – or queues it until a slot frees up.
 3. Watch and decide: the board and notifications tell you when an agent asks or finishes; `pull` brings the report; you review, merge and close.
 
-Planning in a Claude chat? The [built-in MCP server](docs/mcp.md) lets the chat order tasks, read plan usage and pick up reports itself. The [clipboard workflow](#daily-loop) also works without MCP.
+Planning in a Claude chat? The [built-in MCP server](docs/mcp.md) lets the chat read plan usage and pick up reports itself, and order tasks when write access is allowed. The [clipboard workflow](#daily-loop) also works without MCP.
 
 ## In daily use
 

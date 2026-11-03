@@ -20,7 +20,7 @@ agentctl zamienia krótki opis zadania w gitowy worktree, okno tmux i działają
 2. `agentctl new` tworzy worktree, otwiera okno tmux i uruchamia agenta w ramach limitu dostawcy albo umieszcza zadanie w kolejce do zwolnienia miejsca.
 3. Obserwuj i decyduj: board i powiadomienia informują o pytaniach i zakończeniu pracy; `pull` pobiera raport, a Ty go sprawdzasz, scalasz i zamykasz zadanie.
 
-Planujesz w czacie Claude? [Wbudowany serwer MCP](docs/mcp.md) pozwala mu zlecać zadania, odczytywać użycie planu i pobierać raporty. Możesz też używać [schowka](#codzienna-pętla) bez MCP.
+Planujesz w czacie Claude? [Wbudowany serwer MCP](docs/mcp.md) pozwala mu odczytywać użycie planu i pobierać raporty, a także zlecać zadania, jeśli przyznano dostęp do operacji zapisu. Możesz też używać [schowka](#codzienna-pętla) bez MCP.
 
 ## W codziennym użyciu
 

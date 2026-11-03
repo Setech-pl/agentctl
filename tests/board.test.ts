@@ -490,3 +490,29 @@ describe('board: selectedRow', () => {
   });
 });
 
+describe('board: selected row colors', () => {
+  it('uses the configured blue for uncolored cells and preserves state colors', () => {
+    const previous = process.env.NO_COLOR;
+    delete process.env.NO_COLOR;
+    const cells = rowCells(row('A'), true, boardColumns(100), null, 'blue');
+    if (previous !== undefined) process.env.NO_COLOR = previous;
+    assert.equal(cells.find((c) => c.key === 'task')?.color, 'blue');
+    assert.equal(cells.find((c) => c.key === 'task')?.bold, true);
+    assert.equal(cells.find((c) => c.key === 'state')?.color, 'cyan');
+  });
+
+  it('keeps the selected row bold without adding color when NO_COLOR is set', () => {
+    const previous = process.env.NO_COLOR;
+    process.env.NO_COLOR = '1';
+    try {
+      const cells = rowCells(row('A'), true, boardColumns(100), null, 'blue');
+      assert.equal(cells.find((c) => c.key === 'task')?.color, undefined);
+      assert.equal(cells.find((c) => c.key === 'task')?.bold, true);
+      assert.equal(cells.find((c) => c.key === 'state')?.color, 'cyan');
+    } finally {
+      if (previous === undefined) delete process.env.NO_COLOR;
+      else process.env.NO_COLOR = previous;
+    }
+  });
+});
+
