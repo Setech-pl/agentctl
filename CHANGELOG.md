@@ -4,6 +4,9 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.17.2] - 2026-11-03
 
+- Second review: overload budgets survive brief work/waiting and reset only after 600 s continuous work (overload.reset_after_s) or completion; deadlines stay anchored and attention is announced once. Claude detection requires a prefixed error directly under its CLI block.
+- Independent event cursors for concurrent same-name MCP sessions, with a persisted client high-water mark for successors; explicit client opts into sharing. Preserve ordinary nonsecret env facts during redaction. Fix peek losing collapsed questions behind wrapped numeric attempt IDs in scrollback. TUI fixture whitespace has an explicit scoped Git attribute.
+
 Economy and reliability.
 
 - Cross-review safety fixes: adapter-specific final error banners, guarded retries before Enter, recovery-reset persistent episodes and give_up_after; complete attempt-bound reports require report-end or an ended/settled write. Timed-out checkout reuse now checks git status, locks, HEAD/branch and running work.

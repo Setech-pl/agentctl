@@ -106,7 +106,7 @@ export interface GlobalConfig extends Layer {
   /** The task queue: tasks that wait for a free window of their provider and start by themselves (`agentctl queue`). */
   queue: QueueSettings;
   reportSettleS: number;
-  overload: { autoRetry: boolean; retryAfter: number; maxRetries: number; giveUpAfter: number; message: string };
+  overload: { autoRetry: boolean; retryAfter: number; maxRetries: number; giveUpAfter: number; resetAfterS: number; message: string };
   /** Collision warnings: two active tasks of one repository changing the same files. */
   collisions: CollisionSettings;
   /** `agentctl cancel`: how it stops a task that is in the middle of a turn. */
@@ -321,7 +321,7 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
     ],
     // Claude Code 2.1.309 footer "⏵⏵ auto mode on · 1 shell, 6 monitors" and the lines "… · 1 shell, 6 monitors still running". A "·" or "⏵⏵" on the same
     // line keeps a sentence of the conversation ("ran 2 shells") from counting.
-    overloadPatterns: ['^\\s*(?:⎿\\s*)?API Error:\\s*529(?:\\s|$)', '^\\s*⎿\\s*(?:API Error:\\s*)?Overloaded(?:[.:]|$)'],
+    overloadPatterns: ['^\\s*⎿\\s*API Error:\\s*529(?:\\s|$)', '^\\s*⎿\\s*(?:API Error:\\s*)?Overloaded(?:[.:]|$)'],
     backgroundPatterns: ['^\\s*\\d+ (?:monitors?|shells?)(?:, \\d+ (?:monitors?|shells?))? still running\\b', BACKGROUND_CLAUDE, '[·⏵].*\\b\\d+ background\\b'],
   },
   codex: {
@@ -1010,16 +1010,16 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
     }
   }
 
-  const overload = { autoRetry: true, retryAfter: 300, maxRetries: 3, giveUpAfter: 1800, message: 'kontynuuj' };
+  const overload = { autoRetry: true, retryAfter: 300, maxRetries: 3, giveUpAfter: 1800, resetAfterS: 600, message: 'kontynuuj' };
   if (raw.overload !== undefined) {
     if (!isObject(raw.overload)) p.add('config.overload must be a mapping');
     else {
-      checkKeys(raw.overload, ['auto_retry', 'retry_after', 'max_retries', 'give_up_after', 'message'], 'config.overload', p);
+      checkKeys(raw.overload, ['auto_retry', 'retry_after', 'max_retries', 'give_up_after', 'reset_after_s', 'message'], 'config.overload', p);
       if (raw.overload.auto_retry !== undefined) {
         if (typeof raw.overload.auto_retry === 'boolean') overload.autoRetry = raw.overload.auto_retry;
         else p.add('config.overload.auto_retry must be boolean');
       }
-      for (const [key, field, min] of [['retry_after', 'retryAfter', 1], ['max_retries', 'maxRetries', 0], ['give_up_after', 'giveUpAfter', 1]] as const) {
+      for (const [key, field, min] of [['retry_after', 'retryAfter', 1], ['max_retries', 'maxRetries', 0], ['give_up_after', 'giveUpAfter', 1], ['reset_after_s', 'resetAfterS', 1]] as const) {
         const value = raw.overload[key];
         if (typeof value === 'number' && Number.isInteger(value) && value >= min) overload[field] = value;
         else if (value !== undefined) p.add(`config.overload.${key} must be an integer >= ${min}`);

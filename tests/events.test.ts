@@ -279,3 +279,8 @@ it('describes a collapsed Codex question with the screen shortcut, without inven
   assert.match(extractQuestion('Working (esc to interrupt)\nQueued follow-up inputs\n? 2 questions\n  ⇧↑ to answer') ?? '', /zwinięte, 2.*⇧↑/);
   assert.equal(extractQuestion('Queued follow-up inputs\nmessage queued'), undefined);
 });
+it('D11: peek scrollback with wrapped numeric attempt ID cannot hide the latest collapsed question', () => {
+  const history = 'Report protocol: attempt abcdef12-\n56. Include <!-- agentctl:attempt abcdef12-56 -->\n? 1 question\n';
+  assert.match(extractQuestion(history + 'Working (esc to interrupt)\n? 2 questions\n  ⇧↑ to answer') ?? '', /zwinięte, 2.*Enter → okno agenta, potem ⇧↑/);
+  assert.match(extractQuestion('? 2 questions\n  ⇧↑ to answer\nAllow this command?\n  1. Yes\n  2. No') ?? '', /^Allow this command\?/);
+});

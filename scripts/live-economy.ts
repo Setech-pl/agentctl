@@ -28,7 +28,7 @@ await withHarness({ name: 'economy', cacheRoot: cache, config: 'watch: {interval
   seed('OVER-1', path.join(h.root, 'OVER-1.md'));
   const control = path.join(h.root, 'screen-mode'); fs.writeFileSync(control, 'draft');
   const fake = path.join(h.root, 'fake-pane.mjs');
-  fs.writeFileSync(fake, `import fs from 'node:fs'; let mode='',draft=''; const draw=()=>process.stdout.write('\\x1b[2J\\x1b[H'+(mode==='busy'?'Working (esc to interrupt)\\n':mode==='background'?'3 monitors still running\\n':'  ⎿ API Error: 529 Overloaded\\n')+'────────────────\\n❯ '+(mode==='draft'?'unsent draft':draft)); const render=()=>{const m=fs.readFileSync(${JSON.stringify(control)},'utf8');if(m!==mode){mode=m;draft='';draw();}};process.stdin.setRawMode(true);process.stdin.resume();process.stdin.on('data',b=>{const s=b.toString().replace(/\\x1b\\[20[01]~/g,'');if(/[\\r\\n]/.test(s)){draft='';draw();}else{draft+=s;draw();}});setInterval(render,100);render();`);
+  fs.writeFileSync(fake, `import fs from 'node:fs'; let mode='',draft=''; const draw=()=>process.stdout.write('\\x1b[2J\\x1b[H'+(mode==='busy'?'Working (esc to interrupt)\\n':mode==='background'?'3 monitors still running\\n':'⏺ Request failed.\\n  ⎿ API Error: 529 Overloaded\\n')+'────────────────\\n❯ '+(mode==='draft'?'unsent draft':draft)); const render=()=>{const m=fs.readFileSync(${JSON.stringify(control)},'utf8');if(m!==mode){mode=m;draft='';draw();}};process.stdin.setRawMode(true);process.stdin.resume();process.stdin.on('data',b=>{const s=b.toString().replace(/\\x1b\\[20[01]~/g,'');if(/[\\r\\n]/.test(s)){draft='';draw();}else{draft+=s;draw();}});setInterval(render,100);render();`);
   assert.equal(h.tmux(['new-session', '-d', '-s', h.session, '-n', 'over-1', `${process.execPath} ${fake}`]).code, 0);
   const watch = h.spawnAgentctl(['watch'], path.join(h.root, 'watch.log'));
   const delay = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -75,6 +75,12 @@ await withHarness({ name: 'economy', cacheRoot: cache, config: 'watch: {interval
     await next.connect(new StdioClientTransport({ command: process.execPath, args: ['--experimental-strip-types', '--no-warnings', path.resolve(import.meta.dirname, '../bin/agentctl.ts'), 'mcp'], env: h.env as Record<string, string>, stderr: 'pipe' }));
     clients[0] = next;
     check('W2: restarted manager session continues the stable cursor', !(await call(next, 'events_since')).includes('fixture ready'));
+    const parallel = new Client({ name: 'manager', version: '3' });
+    await parallel.connect(new StdioClientTransport({ command: process.execPath, args: ['--experimental-strip-types', '--no-warnings', path.resolve(import.meta.dirname, '../bin/agentctl.ts'), 'mcp'], env: h.env as Record<string, string>, stderr: 'pipe' }));
+    clients.push(parallel);
+    fs.appendFileSync(path.join(h.agentctlHome, 'journal.jsonl'), JSON.stringify({ at: new Date().toISOString(), kind: 'queue-start', text: 'N3 parallel stdio event' }) + '\n');
+    check('N3: first same-name session gets the event', (await call(next, 'events_since')).includes('N3 parallel stdio event'));
+    check('N3: parallel same-name session gets the same event independently', (await call(parallel, 'events_since')).includes('N3 parallel stdio event'));
     const sameAt = new Date().toISOString();
     for (let i = 0; i < 25; i++) fs.appendFileSync(path.join(h.agentctlHome, 'journal.jsonl'), JSON.stringify({ at: sameAt, kind: 'queue-start', task: `PAGE-${i}`, text: 'data ' + 'x'.repeat(500) }) + '\n');
     const delivered: string[] = [];

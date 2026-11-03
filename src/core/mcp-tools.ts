@@ -59,7 +59,7 @@ import type { LimitAssignments } from './limits.ts';
 import { planLine } from './usage-report.ts';
 import { openReader, readPlans } from './usage.ts';
 import { AGENT_NAMES } from './config.ts';
-import { AgentctlError, errorMessage, formatLocalTime, resolvePath } from './util.ts';
+import { AgentctlError, cohortKey, errorMessage, formatLocalTime, resolvePath } from './util.ts';
 
 /*
  * The tools of `agentctl mcp`. This file is data and functions only: the MCP SDK front (src/mcp/server.ts) registers them.
@@ -93,6 +93,8 @@ export interface McpDeps {
   /** What this server process is: the version it loaded, its script, its pid and when it started. Shown by `version` and `status`. */
   server?: ServerInfo | undefined;
   clientId?: string;
+  /** Each initialized transport snapshots the client's high-water marks, then consumes independently. */
+  eventsSession?: { initialSince: string; markers: Partial<Record<string, string>>; cursors: Partial<Record<string, string>> };
 }
 
 export interface ServerInfo {
@@ -337,7 +339,13 @@ async function runAway(deps: McpDeps, args: { on: boolean }): Promise<ToolResult
 
 async function runEventsSince(deps: McpDeps, args: { since?: string | undefined; cohort?: string | undefined; peek?: boolean | undefined; client?: string; cursor?: string; limit?: number }): Promise<ToolResult> {
   const ctx = deps.context(() => {});
-  const report = await collectEvents(ctx, { client: `mcp:${deps.clientId ?? 'unknown'}:${args.client ?? ctx.config.mcp.client ?? 'default'}`, cursor: args.cursor, limit: args.limit, since: args.since, cohort: args.cohort, keep: Boolean(args.peek) });
+  const shared = args.client ?? ctx.config.mcp.client;
+  const client = `mcp:${deps.clientId ?? 'unknown'}:${shared ?? 'default'}`;
+  const session = shared === undefined ? deps.eventsSession : undefined;
+  const key = args.cohort === undefined ? client : `${client}|cohort:${cohortKey(args.cohort)}`;
+  const sessionCursor = session ? (session.cursors[key] ?? session.markers[key] ?? session.markers.mcp ?? session.initialSince) : undefined;
+  const report = await collectEvents(ctx, { client, cursor: args.cursor ?? ((!args.since || args.since === 'last') ? sessionCursor : undefined), limit: args.limit, since: args.since, cohort: args.cohort, keep: Boolean(args.peek) });
+  if (session && !args.peek) session.cursors[key] = report.next_cursor;
   return { text: renderEvents(report).join('\n'), data: report };
 }
 
@@ -879,8 +887,8 @@ export const MCP_TOOLS: McpToolDef[] = [
     kind: 'read',
     description:
       'Call this at the start of EVERY answer that concerns the work of the agents. It returns what happened since your previous call (or since a given time): reports that became ready (with the verdict), tasks started from the queue, questions and folder-trust waits, blocked, cancelled and limited tasks, finished cohorts, plan thresholds crossed and changed limits - then one line with the state now (active, queued, reports to pull). ' +
-      'The chat gets no notifications, so this is how you learn what changed; the "last" marker is kept per client, so the first call looks back 24 hours. Events are recorded while "agentctl watch" runs. since: last (default), an age (30m, 2h, 1d), HH:MM or an ISO time. peek: true does not move the marker.',
-    input: { cursor: z.string().max(2048).optional(), limit: z.number().int().min(1).max(200).optional(), client: z.string().min(1).max(200).optional(), since: z.string().max(40).optional().describe('last (default), an age like 30m / 2h / 1d, HH:MM today, or an ISO time.'), cohort: cohortArg.optional(), peek: z.boolean().optional().describe('true: do not move the "last" marker.') },
+      'The chat gets no notifications, so this is how you learn what changed; the "last" marker is independent per initialized session. New sessions inherit the saved high-water mark per client (first-ever look: 24 hours); explicit client intentionally shares a cursor. Responses are bounded and provide has_more/next_cursor. Events are recorded while "agentctl watch" runs. since: last (default), an age (30m, 2h, 1d), HH:MM or an ISO time. peek: true does not move the marker.',
+    input: { cursor: z.string().max(2048).optional(), limit: z.number().int().min(1).max(200).optional(), client: z.string().min(1).max(200).optional().describe('Intentionally share a stable cursor between sessions of this client; omit for independent session cursors.'), since: z.string().max(40).optional().describe('last (default), an age like 30m / 2h / 1d, HH:MM today, or an ISO time.'), cohort: cohortArg.optional(), peek: z.boolean().optional().describe('true: do not move the "last" marker.') },
     annotations: readOnly('What changed since the last look'),
     run: (deps, args) => guarded(() => runEventsSince(deps, args as { since?: string; cohort?: string; peek?: boolean })),
   }),

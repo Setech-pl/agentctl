@@ -18,6 +18,8 @@ import { readTaskRecord, renderTaskMd, taskFile } from '../src/core/taskstore.ts
 import { checkRetryWorktrees } from '../src/core/git.ts';
 import { RealRunner } from '../src/core/runner.ts';
 import { WatchMemory, watchTick } from '../src/core/watch.ts';
+import { redactQueue } from '../src/core/mcp-redact.ts';
+import type { QueueEntry } from '../src/core/queue.ts';
 import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helpers.ts';
 const scratch = useScratch();
 const screen = (name: string) => fs.readFileSync(path.join(import.meta.dirname, 'fixtures/economy', name + '.txt'), 'utf8');
@@ -31,6 +33,90 @@ function fixture(name: string, yaml = '') {
   return { root, config, tmux, runner, ctx, deps, call, report };
 }
 const notify = { notify: async () => {} };
+it('N1: reviewer eight overload/work cycles send exactly two retries and one attention; sustained work ends the episode', async () => {
+  const f = fixture('n1', 'overload: {retry_after: 1, max_retries: 2, give_up_after: 1800}\n');
+  seedTask(f.config, 'NC-1'); const pane = f.tmux.add('nc-1', screen('claude-overloaded'));
+  const tick = async () => overloadTick(f.ctx, await collectStatus(f.ctx, { progress: false }), notifier);
+  const notices: string[] = [], notifier = { notify: async (_title: string, text: string) => { notices.push(text); } };
+  const file = path.join(path.dirname(f.config.path), 'overload-retries.json');
+  for (let i = 0; i < 8; i++) {
+    pane.screen = screen('claude-overloaded'); await tick(); await f.runner.sleep(1100); await tick();
+    pane.screen = screen('codex-recovered'); await tick(); await f.runner.sleep(1000); await tick();
+  }
+  assert.equal(f.tmux.seen.filter(s => s.startsWith('send-keys')).length, 2);
+  assert.equal(readJournal(f.config).filter(e => e.kind === 'overload-retry').length, 2);
+  assert.equal(notices.filter(t => t.includes('wymaga uwagi')).length, 1);
+  assert.equal(readJournal(f.config).filter(e => e.kind === 'overloaded' && e.text.includes('wymaga uwagi')).length, 1);
+  const episode = JSON.parse(fs.readFileSync(file, 'utf8'))['NC-1']; assert.equal(episode.attempts, 2);
+  await f.runner.sleep(599000); await tick();
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), {});
+  pane.screen = screen('claude-overloaded'); await tick(); await f.runner.sleep(1100); await tick();
+  assert.equal(f.tmux.seen.filter(s => s.startsWith('send-keys')).length, 3, 'new episode gets a fresh budget');
+});
+it('N1: give_up_after stays anchored through brief work and waiting; report ends an episode immediately', async () => {
+  const f = fixture('n1-deadline', 'overload: {retry_after: 1, max_retries: 20, give_up_after: 5, reset_after_s: 600}\n');
+  const task = seedTask(f.config, 'NC-1'); const pane = f.tmux.add('nc-1', screen('claude-overloaded'));
+  const notices: string[] = [], notifier = { notify: async (_title: string, text: string) => { notices.push(text); } };
+  const tick = async () => overloadTick(f.ctx, await collectStatus(f.ctx, { progress: false }), notifier);
+  await tick(); await f.runner.sleep(1100); await tick();
+  pane.screen = screen('codex-recovered'); await tick(); await f.runner.sleep(2000);
+  pane.screen = '❯'; await tick(); await f.runner.sleep(2000);
+  pane.screen = screen('claude-overloaded'); await tick(); await tick();
+  assert.equal(f.tmux.seen.filter(s => s.startsWith('send-keys')).length, 1);
+  assert.equal(notices.length, 1);
+  fs.mkdirSync(path.dirname(task.report), { recursive: true }); fs.writeFileSync(task.report, 'Werdykt: FAIL\n' + REPORT_END);
+  await tick(); assert.deepEqual(JSON.parse(fs.readFileSync(path.join(path.dirname(f.config.path), 'overload-retries.json'), 'utf8')), {});
+});
+it('N2: unprefixed reviewer error quote and prefixed error embedded in prose never become overload', () => {
+  const chrome = '\n────────────────\n❯\n────────────────\n? for shortcuts';
+  for (const text of ['API Error: 529 Overloaded', '⏺ Here is the explanation.\nThis is an example error:\n  ⎿ API Error: 529 Overloaded', '  ⎿ API Error: 529 Overloaded']) {
+    assert.equal(isOverloaded(text + chrome), false, text);
+  }
+  assert.equal(isOverloaded(screen('claude-overloaded')), true);
+  assert.equal(isOverloaded(screen('codex-overloaded')), true);
+});
+it('N3: parallel same-name sessions consume independently; successors inherit high-water; explicit client shares; legacy migrates', async () => {
+  const f = fixture('n3'), journal = path.join(path.dirname(f.config.path), 'journal.jsonl');
+  const append = (text: string) => fs.appendFileSync(journal, JSON.stringify({ at: new Date(f.runner.now() - 1).toISOString(), kind: 'queue-start', text }) + '\n');
+  const session = async () => {
+    const server = buildMcpServer(f.deps, '0.17.2'), client = new Client({ name: 'same-name', version: '1' });
+    const [a, b] = InMemoryTransport.createLinkedPair(); await Promise.all([server.connect(a), client.connect(b)]);
+    return { client, read: async (args = {}) => JSON.stringify((await client.callTool({ name: 'events_since', arguments: args })).content) };
+  };
+  append('legacy-old'); append('parallel-event');
+  fs.writeFileSync(markersPath(f.config), JSON.stringify({ mcp: 'e2:1:0' }));
+  const a = await session(), b = await session();
+  try {
+    const reads = await Promise.all([a.read(), b.read()]);
+    for (const read of reads) { assert.match(read, /parallel-event/); assert.doesNotMatch(read, /legacy-old/); }
+    append('next-event'); assert.match(await a.read(), /next-event/); assert.match(await b.read(), /next-event/);
+    assert.doesNotMatch(await a.read(), /next-event/);
+    append('ahead-of-peer'); assert.match(await b.read(), /ahead-of-peer/);
+  } finally { await a.client.close(); await b.client.close(); }
+  const c = await session(), d = await session();
+  try {
+    assert.doesNotMatch(await c.read(), /parallel-event|next-event|legacy-old|ahead-of-peer/);
+    append('explicit-shared'); assert.match(await c.read({ client: 'common' }), /explicit-shared/);
+    assert.doesNotMatch(await d.read({ client: 'common' }), /explicit-shared/);
+  } finally { await c.client.close(); await d.client.close(); }
+  assert.equal(JSON.parse(fs.readFileSync(markersPath(f.config), 'utf8')).mcp, undefined);
+});
+it('D8: common nonsecret env values do not erase unrelated prompt/error facts; secret fields and values remain masked', () => {
+  const f = fixture('d8');
+  const entry = { task: 'ENV-1', spec: '---\ntask: ENV-1\nagent: claude\nenv: {COUNT: "1", FLAG: "true", MODE: production, API_TOKEN: hidden-token}\n---\n1 production task is true; token hidden-token', error: '1 production task is true; hidden-token' } as QueueEntry;
+  const result = redactQueue(entry, f.config) as QueueEntry;
+  assert.match(result.spec, /1 production task is true/); assert.match(result.error!, /1 production task is true/);
+  assert.doesNotMatch(JSON.stringify(result), /hidden-token|COUNT: ['"]?1|MODE: production/);
+});
+it('D9: an ended pane alone cannot confirm a current-attempt report without a completion signal', async () => {
+  const f = fixture('d9', 'report: {settle_s: 30}\n');
+  const record = seedTask(f.config, 'CRASH-1', { attemptId: 'current', attemptStarted: new Date(f.runner.now() - 60000).toISOString(), turnEndedAt: undefined });
+  fs.mkdirSync(path.dirname(record.report), { recursive: true }); fs.writeFileSync(record.report, 'Werdykt: PASS\npartial or complete: unknown');
+  const time = (f.runner.now() - 31000) / 1000; fs.utimesSync(record.report, time, time);
+  assert.equal((await collectStatus(f.ctx, { progress: false }))[0]!.state, 'report-candidate');
+  fs.appendFileSync(record.report, '\n' + REPORT_END);
+  assert.equal((await collectStatus(f.ctx, { progress: false }))[0]!.state, 'report-ready');
+});
 it('B1 D7: exact review probes are not overloads; realistic per-adapter banners and recovery', () => {
   const f = fixture('b1');
   for (const probe of ['529 testów przeszło', 'Overloaded functions were removed.', '"overloaded_error"', 'The servers are overloaded in staging']) assert.equal(isOverloaded(probe + '\n❯ \n'), false, probe);
@@ -44,7 +130,7 @@ it('B1 D7: exact review probes are not overloads; realistic per-adapter banners 
   assert.equal(taskState({ alive: true, screen: screen('claude-overloaded') + '\nEnter to select · Esc to cancel', settings: f.config.agents.claude, reportReady: true }), 'needs-input');
   assert.equal(isOverloaded('API Error: 529\n❯ \n', []), false);
 });
-it('B1 W1 D2 D6: retry episode persists, resets on work, has deadline, guards report/draft/recovery and logs send failure', async () => {
+it('B1 W1 D2 D6: retry episode persists, resets after sustained work, has deadline, guards report/draft/recovery and logs send failure', async () => {
   const f = fixture('w1', 'overload: {retry_after: 1, max_retries: 2, give_up_after: 8}\n');
   const record = seedTask(f.config, 'NC-1'); const pane = f.tmux.add('nc-1', screen('claude-overloaded'));
   const rows = () => collectStatus(f.ctx, { progress: false });
@@ -55,11 +141,13 @@ it('B1 W1 D2 D6: retry episode persists, resets on work, has deadline, guards re
   await overloadTick(f.ctx, await rows(), notify);
   assert.equal(readJournal(f.config).filter(e => e.kind === 'overload-retry').length, 1);
   pane.screen = screen('codex-recovered'); await overloadTick(f.ctx, await rows(), notify);
+  await f.runner.sleep(600000); await overloadTick(f.ctx, await rows(), notify);
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(path.dirname(f.config.path), 'overload-retries.json'), 'utf8')), {});
   pane.screen = screen('claude-overloaded'); await overloadTick(f.ctx, await rows(), notify);
   await f.runner.sleep(9000); await overloadTick(f.ctx, await rows(), notify);
   assert.ok(readJournal(f.config).some(e => e.text.includes('give_up_after')));
   pane.screen = screen('codex-recovered'); await overloadTick(f.ctx, await rows(), notify);
+  await f.runner.sleep(600000); await overloadTick(f.ctx, await rows(), notify);
   pane.screen = screen('claude-overloaded'); await overloadTick(f.ctx, await rows(), notify);
   await f.runner.sleep(1100);
   const paste = f.ctx.tmux.pasteText.bind(f.ctx.tmux);

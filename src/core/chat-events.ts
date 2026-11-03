@@ -97,7 +97,7 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
   const all = readJournal(config, -1);
   const key = cohort === null ? opts.client : `${opts.client}|cohort:${cohortKey(cohort)}`;
   const saved = opts.cursor ?? ((!opts.since || opts.since === 'last') ? (readMarkers(config)[key] ?? (opts.client.startsWith('mcp:') && readMarkers(config).mcp?.startsWith('e2:') ? readMarkers(config).mcp : undefined)) : undefined);
-  let position = saved?.startsWith('e2:') ? decodeCursor(saved) : { index: all.findIndex(e => Date.parse(e.at) > since.ms), offset: 0 };
+  let position = saved?.startsWith('e2:') ? decodeCursor(saved) : { index: all.findIndex(e => Date.parse(e.at) > (saved ? Date.parse(saved) : since.ms)), offset: 0 };
   if (position.index < 0) position.index = all.length;
   if (position.index > all.length) throw new AgentctlError('events cursor is beyond this journal; request an explicit since');
   const events: Array<JournalEntry & { fragment?: { offset: number; total: number; encoding: string } }> = [];

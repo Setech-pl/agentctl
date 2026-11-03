@@ -92,6 +92,9 @@ export function isOverloaded(screen: string, patterns: string[] = [...DEFAULT_AG
     last = line; lastIndex = index; lastInCode = fence !== null;
   }
   if (lastInCode) return false;
+  // Claude's error belongs directly to an assistant block. A pasted error in prose (even with ⎿) is not a banner.
+  if (/^\s*⎿/.test(last) && !/^\s*⏺(?:\s|$)/.test(lines[lastIndex - 1] ?? '')) return false;
+  if (!/^\s*[⎿■]/.test(last)) return false;
   for (let i = lastIndex - 1; i >= 0 && lines[i]!.trim(); i--) {
     if (/^\s*[⏺●•]\s*(?:Bash|Read|Grep|Search|Run|Ran|Shell)(?:\(|\s|:)/i.test(lines[i]!)) return false;
   }

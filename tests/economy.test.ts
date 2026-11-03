@@ -128,21 +128,22 @@ it('economy: report candidates cannot satisfy dependencies; valid configured rep
 
 it('economy: overload retry requires idle visible empty input, honors interval, restart and cap', async () => {
   const f = fixture('overload', 'overload: {retry_after: 1, max_retries: 2}\n');
-  seedTask(f.config, 'NC-1'); const w = f.tmux.add('nc-1', 'API Error: 529 Overloaded\n❯ \n');
+  seedTask(f.config, 'NC-1'); const w = f.tmux.add('nc-1', '⏺ Request failed.\n  ⎿ API Error: 529 Overloaded\n❯ \n');
   assert.ok(isOverloaded(w.screen));
-  assert.ok(isOverloaded('API Error: 529 Overloaded'));
+  assert.ok(isOverloaded('⏺ Request failed.\n  ⎿ API Error: 529 Overloaded'));
   assert.ok(isOverloaded('■ Selected model is at capacity. Please try a different model.'));
   assert.equal(parseClaudeEvent('stop-failure', { error: 'overloaded_error' }).outcome, 'overloaded');
   const tick = async () => overloadTick(f.ctx, await collectStatus(f.ctx, { progress: false }), notify);
   await tick(); await f.runner.sleep(1001);
   w.screen += 'esc to interrupt'; await tick();
   assert.equal(readJournal(f.config).filter(e => e.kind === 'overload-retry').length, 0);
-  w.screen = 'API Error: 529 Overloaded\n❯ unsent\n'; await tick();
+  w.screen = '⏺ Request failed.\n  ⎿ API Error: 529 Overloaded\n❯ unsent\n'; await tick();
   assert.equal(readJournal(f.config).filter(e => e.kind === 'overload-retry').length, 0);
-  w.screen = 'API Error: 529 Overloaded\n❯ \n3 monitors still running'; await tick();
+  w.screen = '⏺ Request failed.\n  ⎿ API Error: 529 Overloaded\n❯ \n3 monitors still running'; await tick();
   assert.equal(readJournal(f.config).filter(e => e.kind === 'overload-retry').length, 0);
-  w.screen = 'API Error: 529 Overloaded\n❯ \n'; await tick();
-  await f.runner.sleep(1001); await tick(); assert.equal(readJournal(f.config).filter(e => e.kind === 'overload-retry').length, 1);
+  w.screen = '⏺ Request failed.\n  ⎿ API Error: 529 Overloaded\n❯ \n'; await tick();
+  assert.equal(readJournal(f.config).filter(e => e.kind === 'overload-retry').length, 1);
+  await f.runner.sleep(1001); await tick();
   await f.runner.sleep(1001); await tick();
   await f.runner.sleep(1001); await tick(); await tick();
   assert.equal(readJournal(f.config).filter(e => e.kind === 'overload-retry').length, 2);

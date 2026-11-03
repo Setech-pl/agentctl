@@ -377,9 +377,10 @@ Groups: `queue:*` = `queue`, `queue_rm`, `queue_retry`, `queue_up`, `queue_pause
 
 | Key | Default / meaning |
 |---|---|
-| `agents.<agent>.overload_patterns` | Adapter-specific regexes matched only against the last non-chrome error element, outside fenced code. Claude: API Error: 529 or an ⎿ Overloaded banner; Codex: ■ Selected model is at capacity. Mentions, test output and stale errors do not match. `[]` disables screen overload detection for this adapter. |
-| `overload.give_up_after` | 1800 seconds from the start of an overload episode, including time when retry is unsafe. Independent of max_retries. Recovery/finish clears the episode; watcher restarts preserve it. |
-| `mcp.client` | Optional stable suffix to initialize clientInfo.name. Tool parameter client overrides it. No PID/session in the cursor key. |
+| `agents.<agent>.overload_patterns` | Adapter-specific regexes matched only against the last non-chrome error element, outside fenced code. Claude: ⎿ API Error: 529 or ⎿ Overloaded directly below a ⏺ block (not tool output or intervening prose); Codex: ■ Selected model is at capacity. Mentions, test output and stale errors do not match. `[]` disables screen overload detection for this adapter. |
+| `overload.give_up_after` | 1800 seconds from the start of an overload episode, including time when retry is unsafe. Independent of max_retries. Brief working/waiting does not reset it; watcher restarts preserve it. Completion/report clears it. |
+| `overload.reset_after_s` | 600 seconds of continuous working without another overload before clearing the episode. Waiting/background/question interrupts the recovery timer. |
+| `mcp.client` | Optional stable suffix to clientInfo.name that intentionally shares a cursor between sessions. Tool parameter client overrides it. By default each session consumes independently from its initialization checkpoint; new sessions inherit the client high-water mark. |
 | `report.settle_s` | 30 seconds without report changes after an ended agent turn. Set with mapping syntax below. Zero disables the settling delay, not attempt checks. |
 | `report.path` | Canonical path in mapping syntax, compatible with legacy report: path. |
 | `report.paths` | Canonical first path and detection alternatives in mapping syntax, compatible with legacy report: [paths]. |
@@ -393,6 +394,7 @@ overload:
   retry_after: 300
   max_retries: 3
   give_up_after: 1800
+  reset_after_s: 600
   message: kontynuuj
 ```
 
@@ -405,7 +407,11 @@ PL: Domyślnie raport wymaga końcowej linii `<!-- agentctl:report-end -->` albo
 Adapter overload patterns (terminal status/error context only):
 
 ```text
-^\s*(?:⎿\s*)?API Error:\s*529(?:\s|$)
+^\s*⎿\s*API Error:\s*529(?:\s|$)
 ^\s*⎿\s*(?:API Error:\s*)?Overloaded(?:[.:]|$)
 ^\s*■\s*Selected model is at capacity(?:\.|$)
 ```
+
+PL: Krótkie przejście przez working nie kasuje limitu przeciążenia. Epizod kończy się po 600 s ciągłej pracy (`overload.reset_after_s`) albo po zakończeniu/raporcie. `give_up_after` biegnie od pierwszej awarii. Po limicie jedno powiadomienie „wymaga uwagi” i brak dalszych wysyłek w tym epizodzie. Samotna linia API Error: 529 bez kontekstu banera jest pomijana; wolimy przeoczyć nieznaną formę błędu niż wznowić zakończoną pracę. Nie zweryfikowano formy bez prefiksu w rzeczywistym CLI.
+
+A closed pane is not evidence that a current-attempt report finished writing. Without a report-end marker or recorded turn completion it remains a candidate, even after settling. Once the owner verifies completeness, append the final report-end marker or record the turn-complete event; do not infer completion from a crash. Legacy records without attempt IDs retain their conservative compatibility rules. PL: Zniknięcie okna nie potwierdza kompletności raportu bieżącej próby; po sprawdzeniu pliku właściciel może dodać końcowy znacznik albo jawnie zarejestrować koniec tury.
