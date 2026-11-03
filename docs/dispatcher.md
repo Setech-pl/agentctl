@@ -56,7 +56,7 @@ Implement the bounded API change. Test the acceptance criteria. Write the report
 
 Use `new` for immediate work, `queue` for work waiting on slots or reports. Group related orders with `cohort`; inspect `cohort list/show`, queue position and start conditions. `queue pause/resume/up/retry/rm` manage waiting work. A cancelled dependency makes its descendants `blocked`: explicitly `unblock` (optionally `--drop-after TASK`) or cancel them after deciding what the missing result means. MCP `resume` restores resumable tasks; `unblock` removes a queued dependency and `queue_retry` retries a failed start.
 
-At the start of each chat reply about work call `events_since`, then `status`. Call `pull_ready` to take newly completed reports, `get_report` for one full report, and `peek` for a question or progress. Do not claim success from a ready flag alone. Read the verdict and evidence; use `mark` for an authorized evaluation. Answer permission and trust prompts through the supported terminal/Remote Control flow; never auto-accept them.
+At the start of each chat reply about work call `events_since` (without a separate `status`). Call `pull_ready` to take newly completed reports, `get_report` with `section` for a selected section, and `peek` for a question or progress. Do not claim success from a ready flag alone. Read the verdict and evidence; use `mark` for an authorized evaluation. Answer permission and trust prompts through the supported terminal/Remote Control flow; never auto-accept them.
 
 Example MCP sequence (tool names may have an installation prefix):
 
@@ -80,3 +80,5 @@ On `limited`, inspect capacity and the task's state. Waiting for reset, changing
 agentctl does not merge, push, publish, open PRs, choose a provider, judge report correctness or automatically transfer tasks. It does not turn n/d into a number. It records events only while an observing command/watch runs; events_since is not a background subscription. Keep watch running (`agentctl up --no-attach`) for queue service and notifications. UI labels may change: watch and board windows carry stable tmux `@agentctl-role` options; restart with `agentctl watch --tmux --restart` or `agentctl board --tmux --restart`, without relying on window names.
 
 Since 0.17.1 MCP covers queue retry/control, cohorts, `gc` and diagnostics. Check `capacity.disk` before dispatching work. For a failed queue entry, read the reason and propose a repair or `queue_retry`. At disk-warn propose `gc_preview`; at disk-critical seek approval for `gc`, or use it within the user’s authorization. Starts and removals require preview and confirmation; `mcp.allow` alone does not replace confirmation. See [MCP](mcp.md).
+
+Use `pull_ready` summary mode for reports; request only the needed `get_report` section. Allocate from provider percentages, reset times and stats. Token estimates are informational. `self_verdict` is the agent assessment; `mark` is the human evaluation.

@@ -1,4 +1,6 @@
+import { withFileLock } from './file-lock.ts';
 import fs from 'node:fs';
+import { foldHistory, readHistory } from './history.ts';
 import path from 'node:path';
 import { parseAge } from './archive.ts';
 import { findCohort } from './cohort.ts';
@@ -19,7 +21,7 @@ import { AgentctlError, cohortKey, formatLocalTime, isObject } from './util.ts';
  * that client's previous call.
  */
 
-export type EventClient = 'cli' | 'mcp';
+export type EventClient = string;
 
 /** The first call of a client looks this far back. */
 export const FIRST_LOOK_MS = 24 * 3_600_000;
@@ -30,7 +32,7 @@ export function readMarkers(config: Pick<GlobalConfig, 'path'>): Partial<Record<
   try {
     const d: unknown = JSON.parse(fs.readFileSync(markersPath(config), 'utf8'));
     const out: Partial<Record<EventClient, string>> = {};
-    if (isObject(d)) for (const c of ['cli', 'mcp'] as const) if (typeof d[c] === 'string') out[c] = d[c];
+    if (isObject(d)) for (const [c, v] of Object.entries(d)) if (typeof v === 'string') out[c] = v;
     return out;
   } catch {
     return {};
@@ -41,8 +43,9 @@ export function readMarkers(config: Pick<GlobalConfig, 'path'>): Partial<Record<
 export function parseSince(text: string | undefined, client: EventClient, config: Pick<GlobalConfig, 'path'>, now: number): { ms: number; label: string } {
   const t = (text ?? 'last').trim();
   if (t === '' || t === 'last') {
-    const marker = readMarkers(config)[client];
-    const ms = marker ? Date.parse(marker) : now - FIRST_LOOK_MS;
+    const marker = readMarkers(config)[client]; // New identities replay 24h; retain legacy mcp marker without consuming it.
+    const legacy = client.startsWith('mcp:') ? readMarkers(config).mcp : undefined;
+    const ms = marker ? Date.parse(marker) : legacy ? Math.min(Date.parse(legacy), now - FIRST_LOOK_MS) : now - FIRST_LOOK_MS;
     return { ms, label: marker ? `od ostatniego wywołania (${client}, ${formatLocalTime(marker)})` : `z ostatnich 24 h (pierwsze wywołanie ${client})` };
   }
   if (/^\d+[mhdw]$/.test(t)) return { ms: now - parseAge(t), label: `z ostatnich ${t}` };
@@ -61,6 +64,7 @@ export function parseSince(text: string | undefined, client: EventClient, config
 export interface EventsSummary {
   /** Tasks with a window that are not finished. */
   active: number;
+  unmarked?: number;
   working: number;
   /** Tasks that wait for the user: needs-input, needs-trust, waiting. */
   needYou: string[];
@@ -95,6 +99,7 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
   const queue = waiting(readQueue(config)).filter((e) => cohort === null || (e.cohort !== undefined && cohortKey(e.cohort) === cohortKey(cohort)));
   const summary: EventsSummary = {
     active: alive.length,
+    unmarked: foldHistory(readHistory(config)).filter(r => r.reportAt && !r.result).length,
     working: alive.filter((r) => r.state === 'working' || r.state === 'background').length,
     needYou: alive.filter((r) => r.state === 'needs-input' || r.state === 'needs-trust' || r.state === 'waiting').map((r) => `${r.task} (${r.state})`),
     queued: queue.length,
@@ -103,10 +108,12 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
   // A look that only peeks (or a dry run) leaves the marker where it was.
   let markerMoved = false;
   if (!opts.keep && !runner.dryRun) {
+    await withFileLock(`${markersPath(config)}.lock`, async () => {
     const markers = readMarkers(config);
     markers[opts.client] = new Date(now).toISOString();
     await runner.writeFile(markersPath(config), `${JSON.stringify(markers, null, 2)}\n`);
     markerMoved = true;
+    });
   }
   return { client: opts.client, since: new Date(since.ms).toISOString(), sinceLabel: since.label, cohort, events, summary, away: awayView(config), markerMoved };
 }
@@ -115,6 +122,10 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
 const PHONE_MARK = ' 📱';
 const hhmm = (iso: string): string => formatLocalTime(iso).slice(-5);
 const KIND_LABEL: Record<JournalEntry['kind'], string> = {
+  'report-candidate': 'KANDYDAT',
+  overloaded: 'PRZECIĄŻENIE',
+  'overload-retry': 'PONOWIENIE',
+  'queue-retry': 'PONOWIENIE STARTU',
   'mcp-write': 'MCP',
   'disk-warn': 'DYSK',
   'disk-critical': 'DYSK KRYTYCZNY',
@@ -137,6 +148,7 @@ const KIND_LABEL: Record<JournalEntry['kind'], string> = {
 
 export function summaryLine(s: EventsSummary): string {
   const parts = [`${s.active} aktywne${s.working > 0 ? ` (${s.working} pracuje)` : ''}`, `${s.queued} w kolejce`, s.reportsToPull.length > 0 ? `${s.reportsToPull.length} raport${s.reportsToPull.length === 1 ? '' : 'y'} do pobrania (${s.reportsToPull.join(', ')})` : 'brak raportów do pobrania'];
+  if (s.unmarked) parts.push(`${s.unmarked} zadań bez oceny`);
   if (s.needYou.length > 0) parts.push(`czeka na Ciebie: ${s.needYou.join(', ')}`);
   return `Teraz: ${parts.join(' · ')}.`;
 }

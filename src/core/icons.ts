@@ -1,6 +1,6 @@
 import type { TaskState } from './state.ts';
 
-export const TASK_STATES: readonly TaskState[] = ['working', 'background', 'waiting', 'needs-input', 'needs-trust', 'limited', 'report-ready', 'superseded', 'orphan', 'dead', 'closed', 'cancelled'];
+export const TASK_STATES: readonly TaskState[] = ['overloaded', 'report-candidate', 'working', 'background', 'waiting', 'needs-input', 'needs-trust', 'limited', 'report-ready', 'superseded', 'orphan', 'dead', 'closed', 'cancelled'];
 
 /** `watch.window_icons`: the icon in front of a tmux window name, per state. */
 export const DEFAULT_WINDOW_ICONS: Record<TaskState, string> = {
@@ -9,6 +9,8 @@ export const DEFAULT_WINDOW_ICONS: Record<TaskState, string> = {
   waiting: '⏸',
   'needs-input': '?',
   'needs-trust': '🔒',
+  overloaded: '⏳',
+  'report-candidate': '?',
   limited: '⛔',
   'report-ready': '✓',
   superseded: '↪',

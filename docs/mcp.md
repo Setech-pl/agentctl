@@ -19,20 +19,20 @@ These always work.
 
 | Tool | Arguments | What it returns |
 |---|---|---|
-| `status` | `all?`, `cohort?` | One line ("3 tasks: 1 working, 1 report-ready, 1 waiting") and the rows as JSON: agent, model, effort, state, window, `started` (UTC) and `startedLocal`, duration, progress, report, whether it was pulled, last line, the open question, hint, finished, hidden, closed, archived. Hidden and closed tasks only with `all: true`. A chat should call it first. Before the rows, `status` says which server version answers (`MCP server: agentctl 0.10.0 (script, pid, started)`, with a hint when the stable copy on disk is newer) and any `Config warning:`. |
+| `status` | `all?`, `cohort?` | One line ("3 tasks: 1 working, 1 report-ready, 1 waiting") and concise task rows (JSON only with format: json / detail: true): agent, model, effort, state, window, `started` (UTC) and `startedLocal`, duration, progress, report, whether it was pulled, last line, the open question, hint, finished, hidden, closed, archived. Hidden and closed tasks only with `all: true`. Start with events_since; request status only for task details. Before the rows, `status` says which server version answers (`MCP server: agentctl 0.10.0 (script, pid, started)`, with a hint when the stable copy on disk is newer) and any `Config warning:`. |
 | `version` | none | The version of agentctl this server process runs, its script, pid and start time, the version of the stable copy on disk (`older: true` when they differ), the write tools the user allowed and the warnings about the MCP part of the config. Use it when a tool seems to be missing. |
 | `peek` | `task`, `lines?` (1 to 200, default 40) | The last lines of a running task's window without the agent's footer. |
 | `list_reports` | `all?` | Which tasks have a report: size, `modified` (UTC) and `modifiedLocal`, whether it was pulled, and `source` (where the agent wrote the report when the file is a copy, else `null`). |
-| `get_report` | `task` | One report, up to 200 KB. It reads only the file that the task's `TASK.md` names, never a path from the chat, and refuses a report that is a symbolic link. It does not mark the report as pulled. |
-| `pull_ready` | `cohort?` | All reports that are ready and not yet pulled, each under `=== NC-42 (claude opus/high) ===`, in one answer (up to 200 KB; the rest stays new). Marks them as pulled. This is the only read tool that changes anything, and only in agentctl's own state. A chat should call it at the start of discussing finished work. |
+| `get_report` | `task`, `section?`, `offset?`, `limit?` | A selected Markdown section or line page, up to 200 KiB. It reads only the file that the task's `TASK.md` names, never a path from the chat, and refuses a report that is a symbolic link. It does not mark the report as pulled. |
+| `pull_ready` | `cohort?`, `mode?`, `offset?`, `limit?` | Summary excerpts by default: task/path/size/first-line verdict/SHA/branch and 1500 characters of summary; total 16000 bytes. mode: full returns bodies up to 200 KiB; omitted reports stay new. Marks them as pulled. This is the only read tool that changes anything, and only in agentctl's own state. A chat should call it at the start of discussing finished work. |
 | `queue_list` | none | The task queue: position, agent/model/effort, priority, `after`, what each task waits for (`startCondition`: `czeka na miejsce: claude 2/2`, `czeka na NC-42`, paused), since when, and the error of a start that failed. |
 | `usage` | `cohort?`, `since?` | Token usage and the plan limits: per provider the 5 hour and weekly window (percentage used, reset time; `available: false` when the provider did not say, shown as n/d) and the tokens today and in the period, per task, cohort, model and day. `since` is an age such as `12h`, `7d`, `2w` (default `7d`). A chat should call it before the user orders more tasks. `status` carries a one-line `Plans:` summary. |
 | `log` | `cohort?`, `since?` | The history of the tasks, newest first: agent/model/effort, start, report, duration, tokens (null: n/d), commits and files, the verdict line, cancel reason, move, and the result the user marked. |
 | `stats` | `cohort?`, `since?` | The history grouped by agent/model/effort: tasks, median time and tokens, how many were marked ok, partial or fail, cancelled, and moved to the other provider after a limit. |
-| `events_since` | `since?`, `cohort?`, `peek?` | What changed since the previous call of this client (or since a time: an age like `2h`, `HH:MM`, an ISO time): reports ready with the verdict, starts from the queue, questions, folder trust, blocked, cancelled and limited tasks, finished cohorts, plan thresholds, changed limits - and one line with the state now. **A chat should call it at the start of every answer about the agents' work**: it gets no notifications. The marker is kept per client (`mcp`, `cli`); the first call looks back 24 hours; `peek: true` leaves the marker. Events are recorded while `agentctl watch` runs. |
+| `events_since` | `since?`, `cohort?`, `peek?` | What changed since the previous call of this client (or since a time: an age like `2h`, `HH:MM`, an ISO time): reports ready with the verdict, starts from the queue, questions, folder trust, blocked, cancelled and limited tasks, finished cohorts, plan thresholds, changed limits - and one line with the state now. **A chat should call it at the start of every answer about the agents' work**: it gets no notifications. The marker is kept per initialized MCP client identity or explicit client fallback (CLI has its own cursor); the first call looks back 24 hours; `peek: true` leaves the marker. Events are recorded while `agentctl watch` runs. |
 | `gc_preview` | `older_than?`, `merged?`, `cohort?` | What `agentctl gc` would free now, with sizes, and what it skips and why: worktrees of finished tasks without uncommitted changes, old files next to the reports, state folders to archive, merged branches. Read only; use the separately allowed, two-step `gc` tool to apply the same plan. |
 | `limits` | none | The limit per provider, what uses it up (windows of agentctl, reserved places, external sessions when `limits.count_external` is on), the free places and the tasks waiting in the queue. |
-| `overlap` | `task?` | Pairs of active tasks of one repository that changed the same files, with the file lists (from git, now). `status` also carries `collidesWith` per task, and short `Queue` and `Collisions` lines. |
+| `overlap` | `task?` | Pairs of active tasks of one repository that changed the same files, with the file lists (from git, now). `status` also carries a collision count per task, and short `Queue` and `Collisions` lines. |
 | `cohort_list` | none | The cohorts (named groups of tasks): per cohort the number of tasks by state (`active`, `queued`, `reports`, `closed`, `cancelled`), `total`, `created` and the note. |
 | `cohort_show` | `cohort` | One cohort: its note, every task in it as `status` shows it (closed and cancelled ones too) and its queued tasks with what each waits for. |
 | `task_spec` | `task` | The header of a task (agent, model, effort, repos and worktrees, report path, `report_source` (see [Report detection](details.md#report-detection)), `started` and `startedLocal`, `pulled` and `pulledLocal`, `review_of`, `continues`, `superseded_by`, `pin`, `closed`, names of env variables without values) and the prompt from `TASK.md`. |
@@ -160,6 +160,7 @@ Both are always readable without mcp.allow. New/queue previews and executed resp
 | `new` | `new` |  |
 | `queue` | `queue` |  |
 | `queue list` | `queue_list` |  |
+| `queue show` | `queue_show` |  |
 | `queue rm` | `queue_rm` |  |
 | `queue up` | `queue_up` |  |
 | `queue retry` | `queue_retry` |  |
@@ -225,23 +226,23 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 
 | Tool | Kind | Arguments |
 |---|---|---|
-| `status` | read | `all?`, `cohort?` |
-| `events_since` | read | `since?`, `cohort?`, `peek?` |
+| `status` | read | `all?`, `cohort?`, `format?`, `detail?` |
+| `events_since` | read | `client?`, `since?`, `cohort?`, `peek?`, `format?`, `detail?` |
 | `gc_preview` | read | `older_than?`, `merged?`, `cohort?` |
-| `limits` | read |  |
+| `limits` | read | `format?`, `detail?` |
 | `set_limits` | write | `claude?`, `codex?`, `confirm?` |
 | `reserve` | write | `claude?`, `codex?`, `note?`, `release?`, `confirm?` |
 | `version` | read |  |
 | `peek` | read | `task`, `lines?` |
 | `list_reports` | read | `all?` |
-| `get_report` | read | `task` |
-| `pull_ready` | read | `cohort?`, `all?` |
+| `get_report` | read | `task`, `section?`, `offset?`, `limit?` |
+| `pull_ready` | read | `cohort?`, `all?`, `mode?`, `offset?`, `limit?` |
 | `task_spec` | read | `task` |
-| `queue_list` | read | `cohort?` |
+| `queue_list` | read | `cohort?`, `format?`, `detail?` |
 | `cohort_list` | read |  |
-| `cohort_show` | read | `cohort` |
+| `cohort_show` | read | `cohort`, `format?`, `detail?` |
 | `guide` | read | `project?`, `lang?` |
-| `capacity` | read |  |
+| `capacity` | read | `format?`, `detail?` |
 | `usage` | read | `cohort?`, `since?` |
 | `log` | read | `cohort?`, `since?` |
 | `stats` | read | `cohort?`, `since?` |
@@ -257,6 +258,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 | `interrupt` | write | `task`, `confirm?` |
 | `close` | write | `task?`, `tasks?`, `cohort?`, `remove_worktree?`, `confirm?` |
 | `move` | write | `task`, `agent?`, `confirm?` |
+| `queue_show` | read | `task` |
 | `mcp_check` | read |  |
 | `spec_example` | read |  |
 | `doctor` | read |  |
@@ -348,3 +350,57 @@ Every write request is recorded in `mcp-audit.log`; successful executions also w
 `status` returns a text summary followed by JSON `{disk, tasks}`. `capacity.disk` contains device-deduplicated filesystem readings and the cached size of recorded worktrees. `config_show` masks environment values and ntfy token, topic and credential-bearing URL parts. `report_from` explicitly accepts the user's report source path; `force` only permits replacing the canonical report, never a Git force operation. `adopt` accepts explicit metadata paths. `notify_test` is local by default; `phone: true` explicitly sends a phone test.
 
 The generated table above lists every commander command, tool arguments, and justified exceptions. Terminal UI, local installation, internal callbacks and secret generation remain CLI-only. The separate `agentctl-update` executable remains CLI-only because it replaces running code. There is no interactive setup command in the current commander tree. `npm run docs` regenerates the inventory; the guard test fails if a new CLI command has neither tools nor a documented exception.
+
+## Complete MCP write allow-list (0.17.2)
+
+Each write needs its exact name in `mcp.allow` (or the listed group). No wildcard grants other tools. Start/stop/removal operations preview first, then require identical `confirm: true`.
+
+| Tool | mcp.allow entry | Group |
+|---|---|---|
+| `send` | `send` | — |
+| `new` | `new` | — |
+| `interrupt` | `interrupt` | — |
+| `close` | `close` | — |
+| `move` | `move` | — |
+| `queue` | `queue` | `queue:*` |
+| `queue_rm` | `queue_rm` | `queue:*` |
+| `cancel` | `cancel` | — |
+| `mark` | `mark` | — |
+| `set_limits` | `set_limits` | — |
+| `reserve` | `reserve` | — |
+| `resume` | `resume` | — |
+| `away` | `away` | — |
+| `queue_retry` | `queue_retry` | `queue:*` |
+| `queue_up` | `queue_up` | `queue:*` |
+| `queue_pause` | `queue_pause` | `queue:*` |
+| `queue_resume` | `queue_resume` | `queue:*` |
+| `unblock` | `unblock` | — |
+| `cohort_add` | `cohort_add` | `cohort` |
+| `cohort_remove` | `cohort_remove` | `cohort` |
+| `cohort_note` | `cohort_note` | `cohort` |
+| `hide` | `hide` | — |
+| `unhide` | `unhide` | — |
+| `archive` | `archive` | — |
+| `adopt` | `adopt` | — |
+| `report_from` | `report_from` | — |
+| `limits_release` | `limits_release` | — |
+| `manager_start` | `manager_start` | `manager:*` |
+| `manager_stop` | `manager_stop` | `manager:*` |
+| `notify_test` | `notify_test` | — |
+| `gc` | `gc` | — |
+
+Groups: `queue:*` = `queue`, `queue_rm`, `queue_retry`, `queue_up`, `queue_pause`, `queue_resume`; `cohort` = `cohort_add`, `cohort_remove`, `cohort_note`; `manager:*` = `manager_start`, `manager_stop`. `queue:*` includes `queue_retry`; retry is technical and retains the same provider.
+
+## Concise reads and report pagination (0.17.2)
+
+| Tool | Read behavior |
+|---|---|
+| `queue_show` | Full queued/failed spec, start reason and attempt history. |
+
+`events_since`, `status`, `queue_list`, `cohort_show`, `limits`, `capacity`: text only by default; `format: "json"` or `detail: true` returns JSON only. Status rows carry task, agent/model/effort, state, duration, cohort, report (yes/candidate/missing) and open question; overlap detail lives in `overlap`.
+
+`events_since` identifies clients from initialize clientInfo.name plus server session/process identity; non-protocol callers may supply `client`. New identities conservatively replay at least 24h and the legacy shared cursor interval, leaving the legacy marker intact. Duplicate replay is possible during migration; consuming another client’s events is not.
+
+`pull_ready`: summary default includes task/path/bytes/first nonempty verdict line, SHA/branch lines and Streszczenie/Summary/Decyzje (otherwise first 40 lines, capped at 1500 characters). Response excerpt budget 16000 bytes, omitted reports stay new and are named. `mode: "full"` returns up to 200 KiB. `offset`/`limit` paginate report selection. Pulled semantics are unchanged. `get_report`: `section` is a Markdown heading (case-insensitive, ends at next same/higher heading); `offset` and `limit` select lines within it, zero based, with at most 200 KiB per response. Reading does not mark pulled.
+
+Begin work discussion with `events_since`; no separate status is required. Use pull_ready summaries; get_report only for the needed section. Provider percentages, reset and stats inform allocation; token estimates are informational. `self_verdict` is agent self assessment, independent from the human mark; events remind about unmarked reports. `usage_hint` and `draft_input` hold usage footers and unsent input, never lastLine.

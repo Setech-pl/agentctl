@@ -1,3 +1,4 @@
+import { overloadTick } from './overload.ts';
 import { diskTick } from './disk.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -68,6 +69,8 @@ const NOTIFY_ON: Partial<Record<TaskState, (row: StatusRow) => string>> = {
   'report-ready': (r) => reportReadyText(r.task, undefined),
   'needs-trust': (r) => `${r.task} czeka na zaufanie folderu (trust)`,
   'needs-input': (r) => (r.question ? `${r.task}: ${r.question}` : `${r.task} zadaje pytanie i czeka na odpowiedź`),
+  overloaded: r => `${r.task}: dostawca przeciążony (overloaded)`,
+  'report-candidate': r => `${r.task}: report-candidate ${r.reportCandidate ?? 'n/d'}`,
   limited: (r) => limitText(r),
   dead: (r) => `${r.task}: okno zniknęło bez raportu`,
   orphan: (r) => `${r.task}: okno bez pliku stanu (orphan) – agentctl adopt ${r.task} --report <ścieżka>`,
@@ -105,7 +108,7 @@ async function recordReport(ctx: Context, task: string): Promise<void> {
   if (record) await recordEvent(ctx, record, 'report');
 }
 
-const JOURNALED: Partial<Record<TaskState, JournalKind>> = { 'report-ready': 'report-ready', 'needs-trust': 'needs-trust', 'needs-input': 'needs-input', limited: 'limited', dead: 'dead', orphan: 'orphan' };
+const JOURNALED: Partial<Record<TaskState, JournalKind>> = { overloaded: 'overloaded', 'report-ready': 'report-ready', 'needs-trust': 'needs-trust', 'needs-input': 'needs-input', limited: 'limited', dead: 'dead', orphan: 'orphan' };
 
 /** The transition goes to the journal that `events` reads (the notification only reaches the desktop). */
 async function journalTransition(ctx: Context, row: StatusRow, e: WatchEvent): Promise<void> {
@@ -168,11 +171,11 @@ export async function restoreWindowNames(ctx: Context, memory: WatchMemory): Pro
 async function syncWaitingReports(ctx: Context, rows: StatusRow[]): Promise<boolean> {
   let copied = false;
   for (const row of rows) {
-    if (row.state !== 'waiting' || row.closed || row.cancelled || row.archived) continue;
+    if (!['waiting', 'report-candidate', 'dead'].includes(row.state) || row.closed || row.cancelled || row.archived) continue;
     const record = readTaskRecord(ctx.config, row.windowName);
     if (!record) continue;
     const r = await syncReport(ctx, record, { pane: true }).catch(() => undefined);
-    if (r && (r.action === 'copied' || r.action === 'updated')) copied = true;
+    if (r) copied = true;
   }
   return copied;
 }
@@ -194,6 +197,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   // A waiting agent may have written its report somewhere else than the spec says: copy it to the canonical path before the states are read.
   if (await syncWaitingReports(ctx, allRows)) allRows = await collectStatus(ctx, { progress: false, archived: true });
   const rows = allRows.filter((r) => !r.closed && !r.cancelled);
+  await overloadTick(ctx, rows, notifier);
   await decorateWindows(ctx, memory, rows);
   const now = ctx.runner.now();
   // away.auto_idle: the Mac idle for long enough counts as away; before the events of this tick, so they reach the phone.

@@ -37,7 +37,7 @@ describe('phone: config notify.ntfy', () => {
   it('default priorities: high for needs-input, limited and usage-critical, the rest default', () => {
     const n = ntfyOf('p2', 'notify:\n  ntfy:\n    topic: t1\n');
     assert.ok(n);
-    for (const e of PHONE_EVENTS) assert.equal(n.priority[e], ['needs-input', 'limited', 'usage-critical', 'disk-critical'].includes(e) ? 'high' : 'default', e);
+    for (const e of PHONE_EVENTS) assert.equal(n.priority[e], ['needs-input', 'overloaded', 'limited', 'usage-critical', 'disk-critical'].includes(e) ? 'high' : 'default', e);
   });
 
   it('events, priority, token, server, click_url and include_verdict are read; a trailing slash of the server goes', () => {

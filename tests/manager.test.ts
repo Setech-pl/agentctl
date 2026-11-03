@@ -104,7 +104,7 @@ describe('manager: the files', () => {
   it('the role: events first, consent for every change, short summaries, no merge or push', () => {
     const role = renderManagerRole({ name: 'agentctl manager', allowedWrites: ['send', 'new'] });
     assert.match(role, /events_since/);
-    assert.match(role, /then `status`/);
+    assert.match(role, /summary replaces a separate status/);
     assert.match(role, /Available write tools: send, new/);
     assert.match(role, /at most 6 lines/);
     assert.match(role, /Do not merge, rebase, push/);

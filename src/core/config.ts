@@ -104,6 +104,7 @@ export interface GlobalConfig extends Layer {
   mcp: McpSettings;
   /** The task queue: tasks that wait for a free window of their provider and start by themselves (`agentctl queue`). */
   queue: QueueSettings;
+  overload: { autoRetry: boolean; retryAfter: number; maxRetries: number; message: string };
   /** Collision warnings: two active tasks of one repository changing the same files. */
   collisions: CollisionSettings;
   /** `agentctl cancel`: how it stops a task that is in the middle of a turn. */
@@ -215,7 +216,7 @@ export interface NotifySettings {
 }
 
 /** Events that can go to the phone (`notify.ntfy.events`). */
-export const PHONE_EVENTS = ['disk-warn', 'disk-critical', 'disk-ok', 'needs-input', 'needs-trust', 'limited', 'blocked', 'report-ready', 'cohort-done', 'queue-failed', 'orphan', 'dead', 'usage-critical'] as const;
+export const PHONE_EVENTS = ['disk-warn', 'disk-critical', 'disk-ok', 'needs-input', 'needs-trust', 'overloaded', 'limited', 'blocked', 'report-ready', 'cohort-done', 'queue-failed', 'orphan', 'dead', 'usage-critical'] as const;
 export type PhoneEvent = (typeof PHONE_EVENTS)[number];
 
 /** ntfy priorities by name (1..5). */
@@ -230,6 +231,7 @@ export const DEFAULT_NTFY_PRIORITY: Record<PhoneEvent, NtfyPriority> = {
   'disk-ok': 'default',
   'needs-input': 'high',
   'needs-trust': 'default',
+  overloaded: 'high',
   limited: 'high',
   blocked: 'default',
   'report-ready': 'default',
@@ -316,7 +318,7 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
     ],
     // Claude Code 2.1.309 footer "⏵⏵ auto mode on · 1 shell, 6 monitors" and the lines "… · 1 shell, 6 monitors still running". A "·" or "⏵⏵" on the same
     // line keeps a sentence of the conversation ("ran 2 shells") from counting.
-    backgroundPatterns: [BACKGROUND_CLAUDE, '[·⏵].*\\b\\d+ background\\b'],
+    backgroundPatterns: ['^\\s*\\d+ (?:monitors?|shells?)(?:, \\d+ (?:monitors?|shells?))? still running\\b', BACKGROUND_CLAUDE, '[·⏵].*\\b\\d+ background\\b'],
   },
   codex: {
     flags: [],
@@ -357,7 +359,7 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
 
 /** The keys accepted in every layer: the global config, `.agentctl.yaml` and (with a few of its own) a spec. docs/configuration.md describes each one. */
 export const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'setup', 'defaults', 'guide'];
-export const GLOBAL_KEYS = [...LAYER_KEYS, 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git'];
+export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git'];
 export const LIMITS_KEYS = [...AGENT_NAMES, 'count_external'];
 export const DEFAULTS_KEYS = ['agent', 'model', 'effort', 'remote_control'];
 export const LINK_KEYS = ['from', 'to'];
@@ -994,6 +996,24 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
     }
   }
 
+  const overload = { autoRetry: true, retryAfter: 300, maxRetries: 3, message: 'kontynuuj' };
+  if (raw.overload !== undefined) {
+    if (!isObject(raw.overload)) p.add('config.overload must be a mapping');
+    else {
+      checkKeys(raw.overload, ['auto_retry', 'retry_after', 'max_retries', 'message'], 'config.overload', p);
+      if (raw.overload.auto_retry !== undefined) {
+        if (typeof raw.overload.auto_retry === 'boolean') overload.autoRetry = raw.overload.auto_retry;
+        else p.add('config.overload.auto_retry must be boolean');
+      }
+      for (const [key, field, min] of [['retry_after', 'retryAfter', 1], ['max_retries', 'maxRetries', 0]] as const) {
+        const value = raw.overload[key];
+        if (typeof value === 'number' && Number.isInteger(value) && value >= min) overload[field] = value;
+        else if (value !== undefined) p.add(`config.overload.${key} must be an integer >= ${min}`);
+      }
+      if (typeof raw.overload.message === 'string' && raw.overload.message.trim()) overload.message = raw.overload.message;
+      else if (raw.overload.message !== undefined) p.add('config.overload.message must be nonempty text');
+    }
+  }
   const disk = { warnGb: 50, criticalGb: 20 };
   const git = { timeoutS: 600 };
   for (const [section, target, fields] of [
@@ -1012,7 +1032,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   }
   if (disk.criticalGb > disk.warnGb) p.add('config.disk.critical_gb must not exceed warn_gb');
   p.throwIfAny(`Invalid config ${file}:`, 'Fix the listed keys; see the README section "Configuration".');
-  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, limits, countExternal, agents, equivalents, watch, notify, away, manager, board, mcp, queue, collisions, cancel, usage, guideLang, capacity, disk, git, path: file, loaded: exists };
+  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, limits, countExternal, agents, equivalents, watch, notify, away, manager, board, mcp, queue, overload, collisions, cancel, usage, guideLang, capacity, disk, git, path: file, loaded: exists };
   if (mirror) config.mirrorDir = resolvePath(mirror);
   return config;
 }

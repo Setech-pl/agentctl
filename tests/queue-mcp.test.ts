@@ -68,8 +68,8 @@ describe('mcp: queue read tools', () => {
     t.running('NC-9', []);
     await t.call('queue', { spec: t.spec('Q-1') + t.spec('Q-2', 'after: Q-1\n') });
     assert.equal((await t.call('queue', { spec: t.spec('Q-1') + t.spec('Q-2', 'after: Q-1\n'), confirm: true })).isError, undefined);
-    const r = await t.call('queue_list');
-    assert.match(r.text, /^2 waiting in the queue; 0 starting or failed\./);
+    const r = await t.call('queue_list', { format: 'json' });
+    assert.equal(JSON.parse(r.text).length, 2);
     const list = JSON.parse(r.text.slice(r.text.indexOf('['))) as { task: string; position: number; startCondition: string; after: string[] }[];
     assert.deepEqual(list.map((x) => [x.task, x.position, x.startCondition, x.after]), [['Q-1', 1, 'czeka na miejsce: claude 1/1', []], ['Q-2', 2, 'czeka na Q-1', ['Q-1']]]);
   });
@@ -97,9 +97,9 @@ describe('mcp: queue read tools', () => {
     assert.match(lines[0]!, /^2 tasks:/);
     assert.match(lines[1]!, /^Queue \(1\): Q-1 – czeka na miejsce: claude 2\/1\. queue_list has the detail\.$/);
     assert.match(lines[2]!, /^Plans: claude n\/d \(.*\) \| codex n\/d \(.*\)\. usage has the tokens\.$/);
-    assert.match(lines[3]!, /^Collisions: A-1 ⚠ A-2: 1; A-2 ⚠ A-1: 1\. overlap lists the files\.$/);
-    const rows = JSON.parse(r.text.slice(r.text.indexOf('\n\n') + 2)).tasks as { task: string; collidesWith: unknown }[];
-    assert.deepEqual(rows.find((x) => x.task === 'A-1')!.collidesWith, [{ task: 'A-2', files: 1 }]);
+    assert.match(lines[3]!, /^⚠2 tasks overlap; overlap has details\.$/);
+    const rows = JSON.parse((await t.call('status', { format: 'json' })).text).tasks as { task: string; collisions: number }[];
+    assert.equal(rows.find((x) => x.task === 'A-1')!.collisions, 1);
   });
 });
 

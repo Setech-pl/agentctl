@@ -163,7 +163,7 @@ describe('MCP parity guard', () => {
   });
   it('status exposes disk and tasks together; all tool descriptions name the CLI', async () => {
     const f = fixture('status-disk');
-    const result = await f.call('status');
+    const result = await f.call('status', { format: 'json' });
     const data = JSON.parse(result.text.split('\n\n').at(-1)!);
     assert.ok(data.disk.volumes.length > 0);
     assert.deepEqual(data.tasks, []);

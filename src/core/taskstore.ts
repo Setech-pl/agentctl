@@ -36,6 +36,8 @@ export interface TaskRecord {
   reportAlt?: string[];
   /** Where the report was found when the agent wrote it elsewhere; the canonical file is a copy of it. */
   reportSource?: string;
+  reportCandidate?: string;
+  agentCliVersion?: string;
   /** ISO time of the last copy from `reportSource` and the modification time (ISO) of the source that was copied. */
   reportCopied?: string;
   reportSourceMtime?: string;
@@ -133,6 +135,8 @@ export function renderTaskMd(record: TaskRecord, prompt: string): string {
   if (record.cohort) header.cohort = record.cohort;
   header.report = record.report;
   if (record.reportAlt && record.reportAlt.length > 0) header.report_alt = record.reportAlt;
+  if (record.agentCliVersion) header.agent_cli_version = record.agentCliVersion;
+  if (record.reportCandidate) header.report_candidate = record.reportCandidate;
   if (record.reportSource) header.report_source = record.reportSource;
   if (record.reportCopied) header.report_copied = record.reportCopied;
   if (record.reportSourceMtime) header.report_source_mtime = record.reportSourceMtime;
@@ -218,6 +222,8 @@ export function parseTaskRecord(text: string): TaskRecord | undefined {
   if (typeof data.review_of === 'string') record.reviewOf = data.review_of;
   if (typeof data.cohort === 'string' && data.cohort !== '') record.cohort = data.cohort;
   if (Array.isArray(data.report_alt) && data.report_alt.every((x: unknown) => typeof x === 'string')) record.reportAlt = data.report_alt as string[];
+  if (typeof data.agent_cli_version === 'string') record.agentCliVersion = data.agent_cli_version;
+  if (typeof data.report_candidate === 'string') record.reportCandidate = data.report_candidate;
   if (typeof data.report_source === 'string' && data.report_source !== '') record.reportSource = data.report_source;
   if (typeof data.report_copied === 'string') record.reportCopied = data.report_copied;
   if (typeof data.report_source_mtime === 'string') record.reportSourceMtime = data.report_source_mtime;

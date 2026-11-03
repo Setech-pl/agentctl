@@ -136,7 +136,7 @@ describe('status states from mocked capture-pane', () => {
         ['NC-6', 'waiting'], // an old report from before the start does not count
       ],
     );
-    assert.equal(rows[5]?.report, 'yes');
+    assert.equal(rows[5]?.report, 'missing');
   });
 
   it('a closed window with a fresh report is report-ready', async () => {

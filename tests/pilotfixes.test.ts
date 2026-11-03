@@ -383,8 +383,8 @@ describe('last line without TUI footers', () => {
     assert.equal(lastContentLine(CODEX_QUEUED, codex.footerPatterns), '↳ please also check the HUD');
   });
 
-  it('a typed, unsent input line is content; an empty screen gives an empty line', () => {
-    assert.equal(lastContentLine('● ok\n❯ fix the menu\n  ? for shortcuts', claude.footerPatterns), '❯ fix the menu');
+  it('unsent input is excluded from work content; empty screens stay empty', () => {
+    assert.equal(lastContentLine('● ok\n❯ fix the menu\n  ? for shortcuts', claude.footerPatterns), '● ok');
     assert.equal(lastContentLine('\n  ? for shortcuts\n', claude.footerPatterns), '');
   });
 

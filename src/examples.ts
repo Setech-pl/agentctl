@@ -22,6 +22,7 @@ export const COMMAND_EXAMPLES: Record<string, string[]> = {
     'agentctl queue --agent codex task-42.md  # run them on Codex (through the equivalents table)',
     'agentctl queue --cohort sprint-1 task-42.md   # the tasks of the file join the cohort',
   ],
+  'queue show': ['agentctl queue show TASK-42'],
   'queue list': ['agentctl queue list', 'agentctl queue list --json', 'agentctl queue list --cohort sprint-1'],
   'queue rm': ['agentctl queue rm TASK-42'],
   'queue up': ['agentctl queue up TASK-42                # first in line (priority: high still goes first)'],

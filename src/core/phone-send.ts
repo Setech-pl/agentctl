@@ -35,6 +35,7 @@ export function phoneEventOf(entry: Pick<JournalEntry, 'kind' | 'level'>): Phone
     case 'disk-ok':
     case 'needs-input':
     case 'needs-trust':
+    case 'overloaded':
     case 'limited':
     case 'blocked':
     case 'report-ready':

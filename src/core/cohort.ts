@@ -239,7 +239,7 @@ export function renderCohortList(list: readonly CohortSummary[]): string[] {
 
 /** "2⚙ 1✓ 1⧗" for the header of a group on the board: tasks per state, queued ones last. */
 export function countsLine(rows: readonly StatusRow[], queued: number, icons: Record<string, string>): string {
-  const order = ['working', 'background', 'waiting', 'needs-input', 'needs-trust', 'limited', 'report-ready', 'superseded', 'orphan', 'dead'];
+  const order = ['overloaded', 'report-candidate', 'working', 'background', 'waiting', 'needs-input', 'needs-trust', 'limited', 'report-ready', 'superseded', 'orphan', 'dead'];
   const counts = new Map<string, number>();
   for (const r of rows) if (!r.closed && !r.cancelled) counts.set(r.state, (counts.get(r.state) ?? 0) + 1);
   const parts = order.filter((s) => counts.has(s)).map((s) => `${counts.get(s)}${icons[s] ?? s}`);

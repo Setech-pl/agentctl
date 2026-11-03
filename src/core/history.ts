@@ -6,7 +6,7 @@ import type { Order } from './equivalents.ts';
 import { taskProgress } from './progress.ts';
 import { resolveTask } from './resolve.ts';
 import type { TaskRecord } from './taskstore.ts';
-import { allRecords, taskTokenMap } from './usage.ts';
+import { collectTaskUsage, openReader, allRecords, taskTokenMap } from './usage.ts';
 import { homeDir } from './usage-sources.ts';
 import { formatTokens } from './usage-parse.ts';
 import { readVerdict } from './verdict.ts';
@@ -24,6 +24,7 @@ export type HistoryEvent = 'report' | 'closed' | 'cancelled' | 'moved' | 'mark';
 
 export interface HistoryTokens {
   input: number;
+  reasoning_output_tokens?: number;
   output: number;
   cacheRead: number;
   cacheWrite: number;
@@ -42,6 +43,11 @@ export interface HistoryRecord {
   project: string | null;
   requested: Order | null;
   effective: Order | null;
+  resolved?: Order | null;
+  observed?: { model: string; effort: string };
+  agent_cli_version?: string;
+  observation_warning?: string | null;
+  self_verdict?: string | null;
   started: string | null;
   /** ISO time the report was last written; null without a report. */
   reportAt: string | null;
@@ -86,6 +92,7 @@ export async function snapshot(ctx: Context, record: TaskRecord, event: HistoryE
     const p = await taskProgress(runner, record.repos).catch(() => null);
     if (p) progress = { commits: p.commits, files: p.files };
   }
+  const usage = collectTaskUsage(config, openReader(config), allRecords(config), now).get(record.task);
   const verdict = record.report ? readVerdict(record.report, config.notify.verdictPattern) : undefined;
   return {
     v: 1,
@@ -95,6 +102,11 @@ export async function snapshot(ctx: Context, record: TaskRecord, event: HistoryE
     cohort: record.cohort ?? null,
     project: record.repos[0] ? path.basename(record.repos[0].path) : null,
     requested: record.requested,
+    resolved: orderOf(record.agent, record.model, record.effort),
+    observed: { model: usage?.observed?.model ?? 'unknown', effort: usage?.observed?.effort ?? 'unknown' },
+    agent_cli_version: usage?.observed?.cliVersion && usage.observed.cliVersion !== 'unknown' ? usage.observed.cliVersion : record.agentCliVersion ?? 'unknown',
+    observation_warning: usage?.warning ?? null,
+    self_verdict: selfVerdict(record.report),
     effective: orderOf(record.agent, record.model, record.effort),
     started: Number.isNaN(started) ? null : record.started,
     reportAt: reportMs === null ? null : new Date(reportMs).toISOString(),
@@ -179,6 +191,11 @@ export interface TaskHistory {
   project: string | null;
   requested: Order | null;
   effective: Order | null;
+  resolved?: Order | null;
+  observed?: { model: string; effort: string };
+  agent_cli_version?: string;
+  observation_warning?: string | null;
+  self_verdict?: string | null;
   started: string | null;
   /** The newest event of the task, and what ended it. */
   at: string;
@@ -211,6 +228,11 @@ export function foldHistory(records: readonly HistoryRecord[]): TaskHistory[] {
       project: pick(r.project, prev?.project),
       requested: pick(r.requested, prev?.requested),
       effective: pick(r.effective, prev?.effective),
+      resolved: pick(r.resolved, prev?.resolved),
+      observed: r.observed ?? prev?.observed ?? { model: 'unknown', effort: 'unknown' },
+      observation_warning: pick(r.observation_warning, prev?.observation_warning),
+      agent_cli_version: r.agent_cli_version ?? prev?.agent_cli_version ?? 'unknown',
+      self_verdict: pick(r.self_verdict, prev?.self_verdict),
       started: pick(r.started, prev?.started),
       at: r.at,
       end: prev && RANK[prev.end] > RANK[r.event] ? prev.end : r.event,
@@ -302,6 +324,8 @@ export interface StatsGroup {
   fail: number;
   /** Tasks that were not marked. */
   unmarked: number;
+  self_verdicts: Record<string, number>;
+  reasoning_output_tokens: number;
   /** Tasks of the group that were moved to the other provider after a limit. */
   moved: number;
 }
@@ -321,7 +345,7 @@ export function computeStats(rows: readonly TaskHistory[]): StatsGroup[] {
     const key = o ? `${o.agent}/${o.model}/${o.effort}` : 'unknown/unknown/unknown';
     let g = groups.get(key);
     if (!g) {
-      g = { group: { agent: o?.agent ?? 'unknown', model: o?.model ?? 'unknown', effort: o?.effort ?? 'unknown', tasks: 0, cancelled: 0, medianDurationMs: null, medianTokens: null, ok: 0, partial: 0, fail: 0, unmarked: 0, moved: 0 }, durations: [], tokens: [] };
+      g = { group: { agent: o?.agent ?? 'unknown', model: o?.model ?? 'unknown', effort: o?.effort ?? 'unknown', tasks: 0, cancelled: 0, medianDurationMs: null, medianTokens: null, ok: 0, partial: 0, fail: 0, unmarked: 0, self_verdicts: {}, reasoning_output_tokens: 0, moved: 0 }, durations: [], tokens: [] };
       groups.set(key, g);
     }
     if (t.movedTo !== null) g.group.moved++;
@@ -330,6 +354,9 @@ export function computeStats(rows: readonly TaskHistory[]): StatsGroup[] {
       continue;
     }
     g.group.tasks++;
+    const verdict = t.self_verdict ?? 'unknown';
+    g.group.self_verdicts[verdict] = (g.group.self_verdicts[verdict] ?? 0) + 1;
+    g.group.reasoning_output_tokens += t.tokens?.reasoning_output_tokens ?? 0;
     if (t.durationMs !== null) g.durations.push(t.durationMs);
     if (t.tokens !== null) g.tokens.push(t.tokens.fresh);
     if (t.result) g.group[t.result]++;
@@ -345,19 +372,19 @@ const pct = (n: number, of: number): string => (of === 0 ? '-' : `${Math.round((
 /** The lines of `agentctl stats`: the share of ok, partial and fail is of the tasks that were marked. */
 export function renderStats(groups: readonly StatsGroup[]): string[] {
   if (groups.length === 0) return ['No history yet: a record is written when a report is ready and when a task is closed, cancelled or marked.'];
-  const header = ['AGENT/MODEL/EFFORT', 'TASKS', 'MEDIAN TIME', 'MEDIAN TOKENS', 'OK', 'PARTIAL', 'FAIL', 'UNMARKED', 'CANCELLED', 'MOVED'];
+  const header = ['AGENT/MODEL/EFFORT', 'TASKS', 'MEDIAN TIME', 'MEDIAN TOKENS', 'OK', 'PARTIAL', 'FAIL', 'UNMARKED', 'CANCELLED', 'MOVED', 'SELF_VERDICTS', 'REASONING_OUT'];
   const body = groups.map((g) => {
     const marked = g.ok + g.partial + g.fail;
-    return [`${g.agent}/${g.model}/${g.effort}`, String(g.tasks), durationText(g.medianDurationMs), g.medianTokens === null ? 'n/d' : formatTokens(g.medianTokens), pct(g.ok, marked), pct(g.partial, marked), pct(g.fail, marked), String(g.unmarked), String(g.cancelled), String(g.moved)];
+    return [`${g.agent}/${g.model}/${g.effort}`, String(g.tasks), durationText(g.medianDurationMs), g.medianTokens === null ? 'n/d' : formatTokens(g.medianTokens), pct(g.ok, marked), pct(g.partial, marked), pct(g.fail, marked), String(g.unmarked), String(g.cancelled), String(g.moved), JSON.stringify(g.self_verdicts), String(g.reasoning_output_tokens)];
   });
   return [...columns(header, body), 'OK, PARTIAL and FAIL are shares of the marked tasks (agentctl mark); MOVED: tasks handed to the other provider after a usage limit.'];
 }
 
 export function statsMarkdown(groups: readonly StatsGroup[]): string {
-  const lines = ['| agent/model/effort | tasks | median time | median tokens | ok | partial | fail | unmarked | cancelled | moved |', '|---|---|---|---|---|---|---|---|---|---|'];
+  const lines = ['| agent/model/effort | tasks | median time | median tokens | ok | partial | fail | unmarked | cancelled | moved | self_verdicts | reasoning_output_tokens |', '|---|---|---|---|---|---|---|---|---|---|---|---|'];
   for (const g of groups) {
     const marked = g.ok + g.partial + g.fail;
-    lines.push(`| ${g.agent}/${g.model}/${g.effort} | ${g.tasks} | ${durationText(g.medianDurationMs)} | ${g.medianTokens === null ? 'n/d' : formatTokens(g.medianTokens)} | ${pct(g.ok, marked)} | ${pct(g.partial, marked)} | ${pct(g.fail, marked)} | ${g.unmarked} | ${g.cancelled} | ${g.moved} |`);
+    lines.push(`| ${g.agent}/${g.model}/${g.effort} | ${g.tasks} | ${durationText(g.medianDurationMs)} | ${g.medianTokens === null ? 'n/d' : formatTokens(g.medianTokens)} | ${pct(g.ok, marked)} | ${pct(g.partial, marked)} | ${pct(g.fail, marked)} | ${g.unmarked} | ${g.cancelled} | ${g.moved} | ${JSON.stringify(g.self_verdicts)} | ${g.reasoning_output_tokens} |`);
   }
   return `${lines.join('\n')}\n`;
 }
@@ -365,4 +392,12 @@ export function statsMarkdown(groups: readonly StatsGroup[]): string {
 /** The lines of the board's log view: one task per line, newest first. */
 export function logLines(ctx: Context, filter: HistoryFilter = {}): string[] {
   return renderLog(selectHistory(ctx, filter));
+}
+
+/** Agent's self assessment is separate from the human mark. Only the first nonempty line qualifies. */
+export function selfVerdict(file: string): string | null {
+  try {
+    const first = fs.readFileSync(file, 'utf8').split('\n').find(l => l.trim());
+    return /^Werdykt:\s*([\w-]+)/i.exec(first?.trim() ?? '')?.[1]?.toUpperCase() ?? null;
+  } catch { return null; }
 }

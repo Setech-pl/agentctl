@@ -43,7 +43,7 @@ interface CachedPlan {
 }
 
 interface CacheData {
-  v: 1;
+  v: 2;
   meta: Record<string, SessionMeta>;
   files: Record<string, CachedFile>;
   plans: Record<string, CachedPlan>;
@@ -53,7 +53,7 @@ const CHUNK = 16 * 1024 * 1024;
 const META_BYTES = 512 * 1024;
 const TAIL_BYTES = 256 * 1024;
 
-const emptyCache = (): CacheData => ({ v: 1, meta: {}, files: {}, plans: {} });
+const emptyCache = (): CacheData => ({ v: 2, meta: {}, files: {}, plans: {} });
 
 export function cachePath(config: Pick<GlobalConfig, 'path'>): string {
   return path.join(homeDir(config), 'usage-cache.json');
@@ -84,7 +84,7 @@ export class UsageReader {
     if (!file) return;
     try {
       const parsed: unknown = JSON.parse(fs.readFileSync(file, 'utf8'));
-      if (isObject(parsed) && parsed.v === 1 && isObject(parsed.meta) && isObject(parsed.files) && isObject(parsed.plans)) this.data = parsed as unknown as CacheData;
+      if (isObject(parsed) && parsed.v === 2 && isObject(parsed.meta) && isObject(parsed.files) && isObject(parsed.plans)) this.data = parsed as unknown as CacheData;
     } catch {
       // no cache yet, or an unreadable one: it is made again
     }

@@ -65,6 +65,8 @@ export interface QueueEntry {
   /** `status: failed`: when and why. */
   failedAt?: string;
   error?: string;
+  retryAt?: string;
+  attempts?: { at: string; error: string; transient: boolean }[];
   /** The spec as text: `---`, header, `---`, prompt. */
   spec: string;
 }
@@ -423,6 +425,7 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
     if (entry.status === 'starting') return { position: null, entry, condition: { kind: 'starting', text: 'starting' }, since: entry.startingAt ?? entry.queuedAt };
     position++;
     if (paused) return { position, entry, condition: { kind: 'paused', text: reason }, since: entry.queuedAt };
+    if (entry.retryAt && Date.parse(entry.retryAt) > nowMs) return { position, entry, condition: { kind: 'hold', text: `retry at ${entry.retryAt}: ${entry.error ?? ''}` }, since: entry.queuedAt };
     const stuck = blocked.get(entry.task);
     if (stuck) return { position, entry, condition: { kind: 'blocked', text: blockedText(stuck), blockers: stuck }, since: entry.queuedAt };
     const unmet = unmetAfter(entry.after, rows);
@@ -535,6 +538,7 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   const holds = queueHolds(config, ctx.runner.now());
   const stillHeld = new Set<string>();
   for (const entry of waiting(entries)) {
+    if (entry.retryAt && Date.parse(entry.retryAt) > ctx.runner.now()) continue;
     if (memory.inflight.size >= config.queue.parallelStarts) break;
     if (unmetAfter(entry.after, rows).length > 0) continue;
     const held = holds[entry.agent];
@@ -567,6 +571,7 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
       await opts.log?.(`queue: starting ${entry.task} (${entry.agent})`);
       const raws = splitSpecs(entry.spec, `queue entry ${entry.task}`);
       const spec = resolveSpec(raws[0] as RawSpec, { config });
+      if (entry.reuse && entry.retryAt) await checkRetryWorktrees(ctx.runner, spec.repos);
       await newTasks(startCtx, [spec], {
         ...(entry.agentOverride ? { agent: entry.agentOverride } : {}),
         noSwitch: true,
@@ -594,17 +599,26 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
 async function failEntry(ctx: Context, entry: QueueEntry, error: string, notifier: Notifier, opts: QueueTickOptions, notify: boolean, log: string[] = []): Promise<void> {
   const { config } = ctx;
   const highest = readQueue(config).reduce((n, e) => Math.max(n, e.order, e.seq), 0);
-  const { startingAt: _s, ...rest } = entry;
-  const failed: QueueEntry = { ...rest, status: 'failed', failedAt: new Date(ctx.runner.now()).toISOString(), error, order: highest + 1 };
+  const { startingAt: _s, retryAt: _r, ...rest } = entry;
+  const attempts = [...(entry.attempts ?? []), { at: new Date(ctx.runner.now()).toISOString(), error, transient: transientStartError(error) }];
+  const retry = transientStartError(error) && attempts.length <= 3 && notify;
+  const failed: QueueEntry = { ...rest, attempts, ...(retry ? { retryAt: new Date(ctx.runner.now() + [60_000, 300_000, 900_000][attempts.length - 1]!).toISOString(), reuse: true } : {}), status: retry ? 'queued' : 'failed', failedAt: new Date(ctx.runner.now()).toISOString(), error, order: highest + 1 };
   await writeEntry(ctx, failed);
   await ctx.runner.writeFile(queueLogFile(config, failed), `${log.join('\n')}${log.length > 0 ? '\n' : ''}error: ${error}\n`);
-  await opts.log?.(`queue: ${entry.task} failed: ${firstLine(error)}`);
-  await recordJournal(ctx, { kind: 'queue-failed', task: entry.task, text: `${entry.task}: start z kolejki nie powiódł się – ${firstLine(error)}`, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
-  if (notify) await notifyPlain(ctx, notifier, entry.task, `${entry.task}: start z kolejki nie powiódł się – ${firstLine(error)} (agentctl queue retry ${entry.task})`, opts.self);
+  const text = retry ? `${entry.task}: start z kolejki – ${firstLine(error)}; ponowienie ${attempts.length}/3 o ${failed.retryAt}` : `${entry.task}: start z kolejki nie powiódł się – ${firstLine(error)}`;
+  await opts.log?.(`queue: ${text}`);
+  await recordJournal(ctx, { kind: retry ? 'queue-retry' : 'queue-failed', task: entry.task, text, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
+  if (notify) await notifyPlain(ctx, notifier, entry.task, retry ? text : `${text} (agentctl queue retry ${entry.task})`, opts.self);
 }
 
 async function notifyPlain(ctx: Context, notifier: Notifier, task: string, text: string, self: SelfArgv | undefined): Promise<void> {
   const alerts = new Alerts(ctx, notifier, { self });
   const { click, text: message } = await alerts.clickFor({ task, window: task.toLowerCase() }, text);
   await notifier.notify('agentctl', message, click).catch(() => undefined);
+}
+
+/** Explicit OS/network failures only; spec/path/branch failures are permanent by default. */
+export function transientStartError(error: string): boolean {
+  if (/ENOENT|not (?:exist|found)|invalid spec|branch.*(?:exists|conflict)|already checked out/i.test(error)) return false;
+  return /\b(?:ETIMEDOUT|EAGAIN|ECONNRESET|ECONNREFUSED|ENETUNREACH|EAI_AGAIN)\b|lock.*(?:busy|temporar)|timed out waiting for .*lock|network.*(?:timeout|temporar)/i.test(error);
 }

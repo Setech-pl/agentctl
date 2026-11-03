@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/) while it is below 1.0 (minor versions may change behaviour).
 
+## [0.17.2] - 2026-11-03
+
+Economy and reliability.
+
+- Behavior change: MCP events_since, status, queue_list, cohort_show, limits and capacity default to concise text only; `format: json` / `detail: true` returns full data. pull_ready defaults to bounded summaries, with explicit full mode and pagination. get_report supports Markdown sections and line pagination.
+- Per-client MCP cursors with conservative legacy replay; manager begins with events_since, reads report summaries and uses provider percentages/reset/stats for allocation.
+- Strict report alternatives and visible report-candidate state; canonical report wins, explicit report_from confirms. Candidates never release dependencies or complete cohorts.
+- Separate overloaded state, persisted bounded idle-only retries; bounded transient queue-start retries and queue show diagnostics. Background monitor/shell wording and unsent drafts are recognized.
+- Task-local worktree placeholders with explicit fallback in links/env. History requested/resolved/observed and CLI version, self_verdict separate from mark; reasoning output tokens remain a subset of output.
+- EN/PL documentation and isolated regression/live/package validation.
+
 ## [0.17.1] - 2026-11-03
 
 - Add MCP parity for queue retry/up/pause/resume, unblock, cohort membership/notes, hide/unhide/archive/adopt/report-from, reservation release, manager control, notification tests and GC; add doctor, config, equivalents, manager/away status and local inspection tools.

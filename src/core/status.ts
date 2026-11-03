@@ -12,7 +12,7 @@ import { extractQuestion } from './events.ts';
 import type { TaskState } from './state.ts';
 import { taskProgress } from './progress.ts';
 import type { Progress } from './progress.ts';
-import { lastContentLine } from './tmux.ts';
+import { screenMetadata, lastContentLine } from './tmux.ts';
 import { listArchivedRecords, listTaskRecords } from './taskstore.ts';
 import { attachCollisions } from './collisions.ts';
 import type { Collide } from './collisions.ts';
@@ -53,6 +53,9 @@ export interface StatusRow {
   /** ISO time of the last pull that took the current report; null when never pulled or the report changed since. */
   pulled: string | null;
   lastLine: string;
+  usage_hint?: string | null;
+  draft_input?: string | null;
+  reportCandidate?: string;
   /** Commits over the base and changed files per worktree ("2c 7f"); null when the task has no readable worktree. */
   progress: Progress | null;
   /** Active tasks of the same repository that changed some of the same files (needs the progress of both): task and number of shared files. */
@@ -160,14 +163,16 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       requested: `${record.requested.agent} ${formatModelEffort(record.requested)}`,
       effective: `${record.agent} ${record.model}/${record.effort}`,
       switchedBy: record.switchedBy ?? null,
-      state,
+      state: !reportReady && record.reportCandidate && !['working', 'background', 'limited', 'overloaded', 'needs-input', 'needs-trust'].includes(state) ? 'report-candidate' : state,
+      ...(record.reportCandidate && !reportReady ? { reportCandidate: record.reportCandidate } : {}),
+      ...screenMetadata(screenText),
       window: alive ? 'alive' : 'gone',
       windowName: record.window,
       windowId: alive ? (tmux.resolve(record.window, infos, record.windowId)?.id || null) : null,
       started: record.started ? record.started.replace('T', ' ').slice(0, 16) : '-',
       startedLocal: formatLocalTime(record.started),
       duration,
-      report: reportMtime !== undefined ? 'yes' : 'missing',
+      report: reportReady ? 'yes' : 'missing',
       reportPath: record.report,
       ...(record.reportSource ? { reportSource: record.reportSource } : {}),
       pulled,

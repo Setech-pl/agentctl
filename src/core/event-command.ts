@@ -42,7 +42,7 @@ export function readStoredEvent(config: Context['config'], record: Pick<TaskReco
     const data: unknown = JSON.parse(fs.readFileSync(path.join(taskDir(config, record.window), 'event.json'), 'utf8'));
     if (!isObject(data) || typeof data.at !== 'string') return undefined;
     const outcome = data.outcome;
-    if (outcome !== 'needs-input' && outcome !== 'turn-complete' && outcome !== 'limited') return undefined;
+    if (outcome !== 'needs-input' && outcome !== 'turn-complete' && outcome !== 'limited' && outcome !== 'overloaded') return undefined;
     const startedMs = Date.parse(record.started);
     if (!Number.isNaN(startedMs) && Date.parse(data.at) < startedMs) return undefined;
     return { outcome, at: data.at, type: typeof data.type === 'string' ? data.type : '', text: typeof data.text === 'string' ? data.text : '' };
@@ -193,6 +193,9 @@ export async function handleEvent(ctx: Context, alerts: Alerts, input: EventInpu
           text = `${record.task}: skończył turę i czeka na Ciebie${event.text ? ` – ${event.text}` : ''}`;
         }
       }
+    } else if (event.outcome === 'overloaded') {
+      state = 'overloaded';
+      text = `${record.task}: dostawca przeciążony (overloaded)`;
     } else if (event.outcome === 'limited') {
       state = 'limited';
       text = limitText(record);
@@ -201,7 +204,7 @@ export async function handleEvent(ctx: Context, alerts: Alerts, input: EventInpu
       const result = await alerts.send(target, state, text, 'event');
       announced = { state, text, result };
       if (result === 'sent') {
-        const kind = state === 'report-ready' ? 'report-ready' : state === 'needs-input' ? 'needs-input' : state === 'limited' ? 'limited' : undefined;
+        const kind = state === 'report-ready' ? 'report-ready' : state === 'needs-input' ? 'needs-input' : state === 'limited' ? 'limited' : state === 'overloaded' ? 'overloaded' : undefined;
         const verdict = state === 'report-ready' ? readVerdict(record.report, ctx.config.notify.verdictPattern) : undefined;
         if (kind) await recordJournal(ctx, { kind, task: record.task, text, ...(verdict ? { verdict } : {}) });
       }

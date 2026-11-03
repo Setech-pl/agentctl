@@ -1,3 +1,4 @@
+import { isOverloaded } from './state.ts';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -19,7 +20,7 @@ import { isObject, resolvePath } from './util.ts';
 export const MAX_QUESTION = 120;
 const MAX_SNIPPET = 100;
 
-export type EventOutcome = 'needs-input' | 'turn-complete' | 'limited' | 'idle' | 'ignored';
+export type EventOutcome = 'overloaded' | 'needs-input' | 'turn-complete' | 'limited' | 'idle' | 'ignored';
 
 /** One event of an agent, normalised. */
 export interface AgentEvent {
@@ -76,7 +77,7 @@ export function parseClaudeEvent(kind: ClaudeKind, input: unknown): AgentEvent {
   if (kind === 'stop') return { agent: 'claude', outcome: 'turn-complete', type: 'stop', text: firstLine(str(data.last_assistant_message)) };
   const error = str(data.error);
   const detail = clip(str(data.error_details) || str(data.last_assistant_message) || error, MAX_QUESTION);
-  return { agent: 'claude', outcome: CLAUDE_LIMIT_ERRORS.has(error) ? 'limited' : 'ignored', type: `stop-failure:${error || 'unknown'}`, text: detail };
+  return { agent: 'claude', outcome: error === 'overloaded_error' || isOverloaded(detail) ? 'overloaded' : CLAUDE_LIMIT_ERRORS.has(error) ? 'limited' : 'ignored', type: `stop-failure:${error || 'unknown'}`, text: detail };
 }
 
 /** Codex also runs the notify command for the turn that writes the session title: a one-key JSON object, not a real turn. */

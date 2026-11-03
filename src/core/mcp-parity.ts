@@ -7,7 +7,7 @@ import { MCP_TOOLS } from './mcp-tools.ts';
 /** Each executable command has an explicit mapping or a justified terminal/installation exception. */
 export const CLI_MCP: Record<string, string[]> = {
   'mcp check': ['mcp_check'], spec: ['spec_example'], 'spec example': ['spec_example'], version: ['version'], guide: ['guide'], capacity: ['capacity'], new: ['new'],
-  queue: ['queue'], 'queue list': ['queue_list'], 'queue rm': ['queue_rm'], 'queue up': ['queue_up'], 'queue retry': ['queue_retry'], 'queue pause': ['queue_pause'], 'queue resume': ['queue_resume'],
+  queue: ['queue'], 'queue show': ['queue_show'], 'queue list': ['queue_list'], 'queue rm': ['queue_rm'], 'queue up': ['queue_up'], 'queue retry': ['queue_retry'], 'queue pause': ['queue_pause'], 'queue resume': ['queue_resume'],
   unblock: ['unblock'], cohort: ['cohort_list'], 'cohort list': ['cohort_list'], 'cohort show': ['cohort_show'], 'cohort add': ['cohort_add'], 'cohort remove': ['cohort_remove'], 'cohort note': ['cohort_note'],
   overlap: ['overlap'], send: ['send'], status: ['status'], limits: ['limits'], 'limits show': ['limits'], 'limits set': ['set_limits'], 'limits reserve': ['reserve'], 'limits release': ['limits_release'],
   events: ['events_since'], usage: ['usage'], resume: ['resume'], mark: ['mark'], log: ['log'], stats: ['stats'], gc: ['gc_preview', 'gc'], archive: ['archive'], hide: ['hide'], unhide: ['unhide'], pull: ['get_report', 'pull_ready'], close: ['close'], cancel: ['cancel'],

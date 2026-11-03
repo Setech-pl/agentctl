@@ -16,9 +16,9 @@ import type { AgentSettings } from './config.ts';
  * - cancelled:   `agentctl cancel` was run (the work was abandoned, it may have been in the middle of a turn, or never started): off every list except `status --all`; its report, if one was written, stays
  * - orphan:      a window of the agentctl session has no state file (lost or never created); see `agentctl adopt`
  */
-export type TaskState = 'working' | 'background' | 'waiting' | 'needs-trust' | 'needs-input' | 'limited' | 'report-ready' | 'superseded' | 'dead' | 'orphan' | 'closed' | 'cancelled';
+export type TaskState = 'overloaded' | 'report-candidate' | 'working' | 'background' | 'waiting' | 'needs-trust' | 'needs-input' | 'limited' | 'report-ready' | 'superseded' | 'dead' | 'orphan' | 'closed' | 'cancelled';
 
-export type ScreenState = 'needs-trust' | 'needs-input' | 'limited' | 'working' | 'background' | 'idle';
+export type ScreenState = 'overloaded' | 'needs-trust' | 'needs-input' | 'limited' | 'working' | 'background' | 'idle';
 
 const matches = (pattern: string, screen: string): boolean => new RegExp(pattern, PATTERN_FLAGS).test(screen);
 
@@ -33,6 +33,7 @@ export function classifyScreen(
   if (matches(settings.trustPattern, screen)) return 'needs-trust';
   if (matches(settings.questionPattern, screen)) return 'needs-input';
   if (matches(settings.workingPattern, screen)) return 'working';
+  if (isOverloaded(screen)) return 'overloaded';
   if (settings.limitPatterns.some((p) => matches(p, screen))) return 'limited';
   if ((settings.backgroundPatterns ?? []).some((p) => matches(p, screen))) return 'background';
   return 'idle';
@@ -44,7 +45,7 @@ export function inputVisible(screen: string, settings: Pick<AgentSettings, 'read
 }
 
 /** What the agent itself reported last (see events.ts); it fills in what the screen cannot show. */
-export type EventKind = 'needs-input' | 'turn-complete' | 'limited';
+export type EventKind = 'overloaded' | 'needs-input' | 'turn-complete' | 'limited';
 
 export interface StateInput {
   alive: boolean;
@@ -64,11 +65,17 @@ export interface StateInput {
 export function taskState(input: StateInput): TaskState {
   if (!input.alive) return input.reportReady ? 'report-ready' : 'dead';
   const screen = classifyScreen(input.screen, input.settings);
-  if (screen === 'needs-trust' || screen === 'needs-input' || screen === 'limited') return screen;
+  if (screen === 'needs-trust' || screen === 'needs-input' || screen === 'limited' || screen === 'overloaded') return screen;
   if (screen === 'working') return 'working';
   // Idle, but its own shells and monitors run: the turn ends every few minutes and a new one starts by itself.
   if (screen === 'background') return 'background';
   if (input.event === 'needs-input' && !inputVisible(input.screen, input.settings)) return 'needs-input';
+  if (input.event === 'overloaded') return 'overloaded';
   if (input.event === 'limited') return 'limited';
   return input.reportReady ? 'report-ready' : 'waiting';
+}
+
+/** Claude 529/Overloaded and selected-model capacity messages; Codex capacity text is verified in protocol/src/error.rs; raw error-code variants are fixture-tested. */
+export function isOverloaded(screen: string): boolean {
+  return /(?:^|\n)\s*(?:[■●⏺!⚠✻]\s*)?(?:Selected model is at capacity|(?:API Error:?\s*)?529\b|(?:Error:?\s*)?Overloaded\b|.*overloaded_error\b|.*server(?:_is)?_overloaded|.*servers? (?:is |are (?:currently )?)?(?:overloaded|at capacity))/i.test(screen);
 }

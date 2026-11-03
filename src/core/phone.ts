@@ -42,6 +42,7 @@ export const NTFY_TAGS: Record<PhoneEvent, string> = {
   'disk-ok': 'white_check_mark',
   'needs-input': 'question',
   'needs-trust': 'lock',
+  overloaded: 'warning',
   limited: 'hourglass_flowing_sand',
   blocked: 'no_entry',
   'report-ready': 'white_check_mark',
@@ -90,6 +91,11 @@ export function phoneMessage(event: PhoneEvent, input: PhoneInput, ntfy: Pick<Nt
       if (!task) return undefined;
       title = `${task}: zaufanie folderu`;
       body = `${task} czeka na zaufanie folderu (trust)`;
+      break;
+    case 'overloaded':
+      if (!task) return undefined;
+      title = `${task}: przeciążenie`;
+      body = input.text?.includes('wymaga uwagi') ? `${task}: overloaded – wymaga uwagi` : `${task}: dostawca przeciążony (overloaded)`;
       break;
     case 'limited':
       if (!task) return undefined;

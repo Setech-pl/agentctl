@@ -305,7 +305,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
 
   const taskId = task as string;
   const vars = { task: taskId, cache: config.cache };
-  const fill = (s: string): string => fillPlaceholders(s, vars);
+  let fill = (s: string): string => fillPlaceholders(s, vars);
   const pathOf = (s: string): string => resolvePath(fill(s));
 
   const repos: ResolvedRepo[] = [];
@@ -341,10 +341,20 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   }
   p.throwIfAny(`${label(raw)} is invalid:`, 'Run "agentctl spec example" to see the format.');
 
+  const basicFill = fill;
+  fill = (text: string): string => basicFill(text.replace(/\{worktree:([^{}|]+)(?:\|([^{}]+))?\}/g, (_match, name: string, fallback: string | undefined) => {
+    const matches = repos.filter(r => path.basename(r.path) === name);
+    if (matches.length > 1) throw new AgentctlError(`${taskId}: ambiguous worktree repository "${name}"`);
+    if (matches[0]) return matches[0].worktree;
+    if (fallback) return resolvePath(basicFill(fallback));
+    throw new AgentctlError(`${taskId}: no repository "${name}" for {worktree:${name}}; add it to repos or provide {worktree:${name}|~/fallback}`);
+  }));
   // Links: later layers win for the same `from`.
   const linkByFrom = new Map<string, Link>();
   for (const link of [...config.links, ...(project?.links ?? []), ...specLinks]) {
-    const from = fill(link.from);
+    const expanded = fill(link.from);
+    const from = path.isAbsolute(expanded) ? path.relative(repos[0]!.worktree, expanded) : expanded;
+    if (from.startsWith('../')) throw new AgentctlError(`${taskId}: link from must stay inside the primary worktree: ${expanded}`);
     linkByFrom.set(from, { from, to: pathOf(link.to) });
   }
 

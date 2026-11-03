@@ -159,6 +159,8 @@ export function readTaskSessions(config: Pick<GlobalConfig, 'stateDir'>, window:
 }
 
 export interface TaskUsage {
+  observed?: { model: string; effort: string; cliVersion: string };
+  warning?: string;
   task: string;
   window: string;
   agent: string;
@@ -266,6 +268,10 @@ export function collectTaskUsage(config: GlobalConfig, reader: UsageReader, reco
       const stats = reader.stats(file, candidate.provider);
       if (!stats) continue;
       counted = true;
+      if (file === candidate.file && stats.observed) {
+        u.observed = stats.observed;
+        if ((stats.observed.model !== 'unknown' && record.requested.model !== 'default' && stats.observed.model !== record.requested.model) || (stats.observed.effort !== 'unknown' && stats.observed.effort !== record.requested.effort)) u.warning = 'observed differs from requested';
+      }
       for (const [key, t] of Object.entries(stats.buckets)) u.buckets[key] = addTokens(u.buckets[key] ?? zeroTokens(), t);
       u.total = addTokens(u.total, sumBuckets(stats.buckets));
       if (stats.firstAt !== null) u.firstAt = u.firstAt === null ? stats.firstAt : Math.min(u.firstAt, stats.firstAt);

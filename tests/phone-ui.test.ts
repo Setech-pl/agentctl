@@ -146,7 +146,7 @@ describe('phone: MCP', () => {
     assert.match(status.text, /Away: ON since .* \(set by cli\); the phone gets the notifications\./);
     const ev = await s.call('events_since', { peek: true });
     assert.match(ev.text, /Away włączone/);
-    assert.match(ev.text, /"away": \{\s+"on": true/);
+    assert.equal(JSON.parse((await s.call('events_since', { peek: true, format: 'json' })).text).away.on, true);
   });
 
   it('events: the journal field phone shows as 📱 in the text and the markdown', async () => {

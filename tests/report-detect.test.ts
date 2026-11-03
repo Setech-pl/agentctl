@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -68,7 +69,9 @@ function setup(name: string, extra: Parameters<typeof seedTask>[2] = {}) {
   const runner = new DiskRunner({ dryRun: false, respond: fake.respond, startTime: Date.now() });
   const out: string[] = [];
   const ctx = new Context(runner, config, (l) => out.push(l));
-  const record = seedTask(config, 'NC-1', { repos: [{ path: path.join(root, 'repo'), worktree }], ...extra });
+  spawnSync('git', ['init', worktree]);
+  spawnSync('git', ['-C', worktree, '-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit', '--allow-empty', '-m', 'initial'], { env: { ...process.env, GIT_AUTHOR_DATE: '2020-01-01T00:00:00Z', GIT_COMMITTER_DATE: '2020-01-01T00:00:00Z' } });
+  const record = seedTask(config, 'NC-1', { reportAlt: ['docs/reports/*.md', path.join(root, 'cache/other-name/*.md')], repos: [{ path: path.join(root, 'repo'), worktree }], ...extra });
   const write = (file: string, text: string, when?: Date): string => {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, text);
@@ -79,20 +82,20 @@ function setup(name: string, extra: Parameters<typeof seedTask>[2] = {}) {
 }
 
 describe('findCandidates', () => {
-  it('takes a relative path from the worktree, rejects a file older than the start, prefers a name with the ID or "report"', () => {
+  it('takes a relative path from the worktree, keeps an old file only as a candidate, prefers a name with the ID or "report"', () => {
     const s = setup('cand');
     const old = s.write(path.join(s.worktree, 'docs/old.md'), 'old', new Date(Date.UTC(2026, 9, 1)));
     s.write(path.join(s.worktree, 'docs/notes.md'), 'n');
     s.write(path.join(s.worktree, 'docs/reports/nc-1-final.md'), 'r');
     const text = 'Zobacz docs/reports/nc-1-final.md i docs/old.md oraz docs/notes.md';
     const found = findCandidates(s.ctx, s.record, text);
-    assert.deepEqual(found.map((c) => path.relative(s.worktree, c.file)), ['docs/reports/nc-1-final.md', 'docs/notes.md']);
-    assert.deepEqual(found.map((c) => c.why), ['named', 'mentioned']);
-    assert.ok(!found.some((c) => c.file === old));
+    assert.deepEqual(found.map((c) => path.relative(s.worktree, c.file)), ['docs/reports/nc-1-final.md', 'docs/notes.md', 'docs/old.md']);
+    assert.deepEqual(found.map((c) => c.why), ['configured', 'mentioned', 'mentioned']);
+    assert.ok(found.some((c) => c.file === old));
   });
 
   it('prefers the latest mentioned among equals and reads absolute and ~ paths', () => {
-    const s = setup('cand2');
+    const s = setup('cand2', { reportAlt: [] });
     const a = s.write(path.join(s.root, 'cache/other-name/a.md'), 'a');
     s.write(path.join(s.worktree, 'b.md'), 'b');
     const found = findCandidates(s.ctx, s.record, `${a} potem b.md`);
@@ -145,15 +148,15 @@ describe('syncReport', () => {
     assert.equal(fs.readFileSync(s.record.report, 'utf8'), 'other');
   });
 
-  it('updates its own copy when the source is newer, but not a copy somebody changed', async () => {
+  it('canonical wins even when an earlier detected source is newer', async () => {
     const s = setup('update');
     const src = s.write(path.join(s.worktree, 'docs/r.md'), 'v1');
-    await syncReport(s.ctx, s.record, { message: 'docs/r.md' });
+    await syncReport(s.ctx, s.record, { from: 'docs/r.md' });
     let rec = readTaskRecord(s.config, 'nc-1')!;
     const later = new Date(Date.now() + 10_000);
     s.write(src, 'v2', later);
-    assert.equal((await syncReport(s.ctx, rec, {})).action, 'updated');
-    assert.equal(fs.readFileSync(s.record.report, 'utf8'), 'v2');
+    assert.equal((await syncReport(s.ctx, rec, {})).action, 'none');
+    assert.equal(fs.readFileSync(s.record.report, 'utf8'), 'v1');
     assert.equal(readJournal(s.config).filter((e) => e.kind === 'report-detected').length, 1, 'the update is not announced again');
     // somebody edits the canonical file: it is no longer a copy
     rec = readTaskRecord(s.config, 'nc-1')!;
@@ -165,7 +168,7 @@ describe('syncReport', () => {
 
   it('searches the last lines of the window (joined) when the message names nothing', async () => {
     const s = setup('pane');
-    s.write(path.join(s.worktree, 'docs/reports/nc-1-raport.md'), 'R');
+    s.write(path.join(s.worktree, 'docs/reports/nc-1-raport.md'), 'Werdykt: PASS');
     s.fake.windows[0]!.screen = `${IDLE}\n⏺ pbcopy < ${path.join(s.worktree, 'docs/reports/nc-1-raport.md')}\n`;
     const r = await syncReport(s.ctx, s.record, { pane: true, message: 'Gotowe.' });
     assert.equal(r.action, 'copied');
@@ -181,7 +184,7 @@ describe('syncReport', () => {
 describe('the end of a turn and the watcher', () => {
   it('Claude Stop: a report written elsewhere becomes report-ready with the verdict', async () => {
     const s = setup('event');
-    s.write(path.join(s.worktree, 'docs/reports/nc-1.md'), '# Raport\n\nWerdykt: PASS – 3 testy\n');
+    s.write(path.join(s.worktree, 'docs/reports/nc-1.md'), 'Werdykt: PASS – 3 testy\n\n# Raport\n');
     const notifier = new Quiet();
     const res = await handleEvent(s.ctx, new Alerts(s.ctx, notifier, { env: {} }), {
       task: 'NC-1',
@@ -198,7 +201,7 @@ describe('the end of a turn and the watcher', () => {
 
   it('Codex notify: last-assistant-message is searched too', async () => {
     const s = setup('codex', { agent: 'codex' });
-    const abs = s.write(path.join(s.root, 'cache/other-name/NC-1-report.md'), 'Status: ok\n');
+    const abs = s.write(path.join(s.root, 'cache/other-name/NC-1-report.md'), 'Werdykt: PASS\n');
     const res = await handleEvent(s.ctx, new Alerts(s.ctx, new Quiet(), { env: {} }), {
       task: 'NC-1',
       agent: 'codex',

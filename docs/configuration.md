@@ -308,3 +308,67 @@ A critical reading warns before `new` or queue insertion. The terminal asks y/N 
 MCP write permissions accept exact tool names and explicit groups: `queue:*`, `cohort`, `manager:*`. Existing `queue` still permits only insertion. All previous names keep their permission scope. Group membership is generated in docs/mcp.md; reads remain available without allow.
 
 Worktree checkout and setup release the event loop while running, so independent repositories can start concurrently. A timed-out checkout/setup stops its own process group (including children). Per-repository locks remain held only for Git worktree creation. A new branch is created by a separate `git branch` command, which is also visible in `new --dry-run`, before attaching the worktree.
+
+## Overload recovery (0.17.2)
+
+| Key | Default / behavior |
+|---|---|
+| `overload` | Technical recovery of provider overload; independent of usage limits. |
+| `overload.auto_retry` | `true`; retry only at a visible idle prompt with no draft or background work. |
+| `overload.retry_after` | `300` seconds between attempts; recheck busy windows next watch tick. |
+| `overload.max_retries` | `3`; then keep overloaded and notify “wymaga uwagi”. Attempts persist and are journaled. |
+| `overload.message` | `kontynuuj`; submitted as a prompt, never a command. |
+
+Queue transient starts retry after 1, 5, 15 minutes, then fail. Explicit ETIMEDOUT, EAGAIN, ECONNRESET, ECONNREFUSED, ENETUNREACH, EAI_AGAIN, temporarily busy locks and transient network setup timeouts qualify. Missing paths, branch conflicts and invalid specs fail immediately. `queue show TASK` / MCP `queue_show` exposes the spec, reason and attempt history.
+
+### Task worktree placeholders / placeholdery worktree zadania
+
+In links `to`, links `from` (inside the primary worktree only) and env use `{worktree:repo-basename}`. It resolves against `repos[].path` of this task, never another task. Fallback syntax: `{worktree:repo-basename|~/Projects/wt/fallback}`. A present repo always wins; a missing repo without fallback is an error. Duplicate basenames are ambiguous. Example: `to: "{worktree:neon-city-backend|~/Projects/wt/neon-city-backend-integration-12}/packages/sim"`. Targets are checked after task worktrees/setup exist; external fallback targets are also checked before mutation. New/queue previews show every resolved link.
+
+MCP od 0.17.2 domyślnie zwraca zwięzły tekst dla events_since/status/queue_list/cohort_show/limits/capacity; pełne dane przez `format: "json"` lub `detail: true`. `pull_ready` daje skrót (1500 znaków/raport, 16000 bajtów razem), pełny tekst przez `mode: "full"` (200 KiB), offset/limit paginują raporty. `get_report` section wybiera nagłówek Markdown, offset/limit paginują linie od zera, limit odpowiedzi 200 KiB. `usage_hint` i `draft_input` są metadanymi ekranu, a lastLine pokazuje pracę agenta.
+
+Additional Claude background pattern (fixture-tested; current runtime wording unverified):
+
+```text
+^\s*\d+ (?:monitors?|shells?)(?:, \d+ (?:monitors?|shells?))? still running\b
+```
+
+## Complete MCP write allow-list (0.17.2)
+
+Each write needs its exact name in `mcp.allow` (or the listed group). No wildcard grants other tools. Start/stop/removal operations preview first, then require identical `confirm: true`.
+
+| Tool | mcp.allow entry | Group |
+|---|---|---|
+| `send` | `send` | — |
+| `new` | `new` | — |
+| `interrupt` | `interrupt` | — |
+| `close` | `close` | — |
+| `move` | `move` | — |
+| `queue` | `queue` | `queue:*` |
+| `queue_rm` | `queue_rm` | `queue:*` |
+| `cancel` | `cancel` | — |
+| `mark` | `mark` | — |
+| `set_limits` | `set_limits` | — |
+| `reserve` | `reserve` | — |
+| `resume` | `resume` | — |
+| `away` | `away` | — |
+| `queue_retry` | `queue_retry` | `queue:*` |
+| `queue_up` | `queue_up` | `queue:*` |
+| `queue_pause` | `queue_pause` | `queue:*` |
+| `queue_resume` | `queue_resume` | `queue:*` |
+| `unblock` | `unblock` | — |
+| `cohort_add` | `cohort_add` | `cohort` |
+| `cohort_remove` | `cohort_remove` | `cohort` |
+| `cohort_note` | `cohort_note` | `cohort` |
+| `hide` | `hide` | — |
+| `unhide` | `unhide` | — |
+| `archive` | `archive` | — |
+| `adopt` | `adopt` | — |
+| `report_from` | `report_from` | — |
+| `limits_release` | `limits_release` | — |
+| `manager_start` | `manager_start` | `manager:*` |
+| `manager_stop` | `manager_stop` | `manager:*` |
+| `notify_test` | `notify_test` | — |
+| `gc` | `gc` | — |
+
+Groups: `queue:*` = `queue`, `queue_rm`, `queue_retry`, `queue_up`, `queue_pause`, `queue_resume`; `cohort` = `cohort_add`, `cohort_remove`, `cohort_note`; `manager:*` = `manager_start`, `manager_stop`. `queue:*` includes `queue_retry`; retry is technical and retains the same provider.

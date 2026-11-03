@@ -32,25 +32,31 @@ await withHarness({ name: 'mcp-parity', cacheRoot: defaultCacheRoot('agentctl-mc
     let failed;
     const deadline = Date.now() + 20000;
     while (Date.now() < deadline) {
-      const list = await call('queue_list');
+      const list = await call('queue_list', { format: 'json' });
       if (list.text.includes('ETIMEDOUT')) { failed = list; break; }
       await new Promise((r) => setTimeout(r, 250));
     }
     assert.ok(failed, 'queue_list must expose timeout');
-    assert.match(failed.text, /queue_retry/);
+    assert.match(failed.text, /ETIMEDOUT/);
+    const queued = JSON.parse(failed.text)[0];
+    assert.equal(queued.status, 'queued');
     evidence.failed = failed;
-    evidence.capacity = JSON.parse((await call('capacity')).text);
+    evidence.capacity = JSON.parse((await call('capacity', { format: 'json' })).text);
     assert.ok((evidence.capacity as { disk: unknown }).disk);
-    const preview = await call('queue_retry', { task: 'PARITY-1' });
-    assert.ok(!preview.isError, preview.text);
-    evidence.retryPreview = preview;
-    const retry = await call('queue_retry', { task: 'PARITY-1', confirm: true });
-    assert.ok(!retry.isError, retry.text);
-    evidence.retryConfirmed = retry;
+    evidence.queueShow = await call('queue_show', { task: 'PARITY-1' });
+    // Advance only the sandbox retry deadline; no production state or real clock changes.
+    const queueDir = path.join(h.agentctlHome, 'queue');
+    const entryFile = fs.readdirSync(queueDir).find(n => n.endsWith('.json'))!;
+    const entryPath = path.join(queueDir, entryFile);
+    const entry = JSON.parse(fs.readFileSync(entryPath, 'utf8'));
+    assert.equal(entry.attempts.length, 1);
+    entry.retryAt = new Date(Date.now() - 1000).toISOString();
+    fs.writeFileSync(entryPath, JSON.stringify(entry));
+    evidence.autoRetry = true;
     let working;
     const end = Date.now() + 30000;
     while (Date.now() < end) {
-      const status = await call('status');
+      const status = await call('status', { format: 'json' });
       const data = JSON.parse(status.text.split('\n\n').at(-1)!);
       if (data.tasks.some((t: { task: string; state: string }) => t.task === 'PARITY-1' && ['working', 'waiting'].includes(t.state))) { working = data; break; }
       await new Promise((r) => setTimeout(r, 250));
@@ -60,7 +66,7 @@ await withHarness({ name: 'mcp-parity', cacheRoot: defaultCacheRoot('agentctl-mc
     h.tmux(['send-keys', '-t', `=${h.session}:parity-1`, '-l', 'esc to interrupt']);
     h.tmux(['send-keys', '-t', `=${h.session}:parity-1`, 'Enter']);
     await new Promise((r) => setTimeout(r, 300));
-    const status = await call('status');
+    const status = await call('status', { format: 'json' });
     evidence.working = status;
     assert.match(status.text, /working/);
     await call('close', { task: 'PARITY-1' });
@@ -74,4 +80,4 @@ await withHarness({ name: 'mcp-parity', cacheRoot: defaultCacheRoot('agentctl-mc
   } finally { await client.close(); }
 });
 fs.writeFileSync(path.join(defaultCacheRoot('agentctl-mcp-parity'), 'live-mcp-parity-results.json'), JSON.stringify(evidence, null, 2));
-console.log('PASS: isolated queue timeout → MCP failed reason → queue_retry → working → gc');
+console.log('PASS: isolated queue timeout → MCP retry reason → automatic retry → working → gc');
