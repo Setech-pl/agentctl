@@ -24,7 +24,7 @@ Column "Layers": **g** global config, **p** project config, **s** spec.
 | `links[].from` | path | required | g p s | Where the link goes, relative to the first worktree. A glob links every match. |
 | `links[].to` | path | required | g p s | What it points at. Must exist. `from` and `to` ending in `/*` make one link per entry of the directory. |
 | `env` | mapping | `{}` | g p s | Environment variables of the tmux window (strings, numbers or booleans). |
-| `report` | path or list | `{cache}/{task}/{TASK}.md` | g p s | Where the agent writes its report. Used by `status`, `pull` and the notifications. A list: the first entry is the canonical path, the others are places to look (paths and globs `*`, `?`, `**`; absolute, `~/` or relative to the worktree; `{task}` and `{TASK}` work), e.g. `[~/Projects/cache/{task}/{TASK}.md, docs/reports/*{task}*.md, docs/reports/*{TASK}*.md]`. A report found in another place (also by itself, see [Report detection](details.md#report-detection)) is copied to the canonical path. |
+| `report` | path or list | `{cache}/{task}/{TASK}.md` | g p s | Where the agent writes its report. Used by `status`, `pull` and the notifications. A list: the first entry is the canonical path, the others are places to look (paths and globs `*`, `?`, `**`; absolute, `~/` or relative to the worktree; `{task}` and `{TASK}` work), e.g. `[~/workspace/cache/{task}/{TASK}.md, docs/reports/*{task}*.md, docs/reports/*{TASK}*.md]`. A report found in another place (also by itself, see [Report detection](details.md#report-detection)) is copied to the canonical path. |
 | `setup` | list of strings | `[]` | g p s | Shell commands run in the first worktree after `git worktree add` and before the links. A failing command stops `new`. |
 | `defaults` | mapping | `{}` | g p | Values for a spec that leaves them out: `agent`, `model`, `effort`. |
 | `defaults.agent` | `claude` or `codex` | none | g p | Agent when the spec has no `agent`. |
@@ -36,7 +36,7 @@ Column "Layers": **g** global config, **p** project config, **s** spec.
 
 | Key | Type | Default | Layers | Meaning |
 |---|---|---|---|---|
-| `cache` | path | `~/Projects/cache` | g | Directory with one folder per task, `<cache>/<task>/`: the only place the agents write to (reports). |
+| `cache` | path | `~/workspace/cache` | g | Directory with one folder per task, `<cache>/<task>/`: the only place the agents write to (reports). |
 | `state_dir` | path | `<config dir>/tasks` | g | agentctl's own state per task (`TASK.md`, `setup.log`, `event.json`, `notified.json`), out of the agents' reach. Closed tasks are archived next to it, in `archive/`. |
 | `session` | string | `agentctl` | g | Name of the tmux session. Letters, digits, `_` and `-`. |
 | `limits` | mapping | none | g | Most simultaneous windows per provider. |
@@ -262,7 +262,7 @@ The header of a spec file, between `---` lines, followed by the prompt. Several 
 |---|---|
 | `AGENTCTL_HOME` | Directory of the global config instead of `~/.agentctl`. |
 | `CODEX_HOME` | Where agentctl looks for the `notify` command of Codex's own `config.toml`, to forward to it (default `~/.codex`; a spec's `env` may set it). |
-| `AGENTCTL_REPO`, `AGENTCTL_STABLE_DIR`, `AGENTCTL_SESSION` | Only for `bin/agentctl-update`: the repo, the stable copy (default `~/Projects/agentctl-stable`) and the tmux session of the watch window. |
+| `AGENTCTL_REPO`, `AGENTCTL_STABLE_DIR`, `AGENTCTL_SESSION` | Only for `bin/agentctl-update`: the repo, the stable copy (default `~/workspace/agentctl-stable`) and the tmux session of the watch window. |
 
 In 0.15.0, installed runtime commands use `dist/bin/agentctl.js`. Status `question` includes collapsed Codex question count and the shortcut read from the screen. A visible pending question takes precedence over working. No configuration migration is required.
 

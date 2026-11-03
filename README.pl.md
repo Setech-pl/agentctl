@@ -22,6 +22,25 @@ agentctl zamienia krótki opis zadania w gitowy worktree, okno tmux i działają
 
 Planujesz w czacie Claude? [Wbudowany serwer MCP](docs/mcp.md) pozwala mu odczytywać użycie planu i pobierać raporty, a także zlecać zadania, jeśli przyznano dostęp do operacji zapisu. Możesz też używać [schowka](#codzienna-pętla) bez MCP.
 
+## Dla agenta zlecającego
+
+Zacznij w dowolnym projekcie od `agentctl guide --project /sciezka/do/repo --lang pl --clip` i `agentctl capacity --clip` albo narzędzi MCP `guide` i `capacity` (odczyt bez mcp.allow). Wspólny [podręcznik dyspozytora](docs/dispatcher.pl.md) opisuje specy, dobór dostawcy/modelu/effortu, przegląd krzyżowy, kohorty, kolejkę oraz pętlę `events_since` → `pull_ready` → `get_report`.
+
+Capacity pokazuje okna planu, wiek, tempo, reset, sloty, kolejkę, równoważniki i stats z 7 dni. Brak danych to n/d; szacunki tokenów mają podstawę i pewność. Procent obejmuje pracę poza agentctl. New i queue dodają krótką migawkę (`capacity.snapshot: false` ją wyłącza). Narzędzie podaje fakty; zlecający wybiera. `guide: docs/agent-dispatch.md` w `.agentctl.yaml` dołącza zasady projektu, brak pliku ostrzega także w doctor. Globalne `guide: {lang: pl}` ustala język.
+
+Na boardzie `C` otwiera capacity. `agentctl up --no-attach` nie podłącza terminala. Restart po stabilnej roli: `agentctl watch --tmux --restart` / `agentctl board --tmux --restart`, także po zmianie nazwy okna. `agentctl version` działa jak `--version`.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant D as Agent zlecający
+    participant F as guide + capacity
+    D->>F: Instrukcja ogólna i nakładka projektu
+    D->>F: Okna planu, tempo, reset, sloty, stats
+    F-->>D: Fakty, n/d i jawne szacunki
+    Note over D: Agent dobiera dostawcę/model/effort
+```
+
 ## W codziennym użyciu
 
 <!-- Numbers from agentctl stats on the author's machine – verify before publishing -->
@@ -37,12 +56,6 @@ Board pokazuje m.in. stany `working`, `waiting`, `needs-input`, `needs-trust`, `
 
 ```mermaid
 sequenceDiagram
-    participant D as Agent zlecający
-    participant C as guide + capacity
-    D->>C: Instrukcja ogólna i nakładka projektu
-    D->>C: Okna planu, tempo, reset, sloty, stats
-    C-->>D: Fakty; n/d i jawne szacunki
-    Note over D: Agent dobiera dostawcę/model/effort
     autonumber
     actor H as Ty
     participant C as Czat planujący
@@ -272,7 +285,7 @@ Windows nie jest wspierany (użyj środowiska Linux w WSL). CI sprawdza obecnie 
 ```sh
 git clone https://github.com/Setech-pl/agentctl.git
 cd agentctl
-bin/agentctl-update            # stabilna kopia w ~/Projects/agentctl-stable, npm ci, npm run build, npm link, doctor
+bin/agentctl-update            # stabilna kopia w ~/workspace/agentctl-stable, npm ci, npm run build, npm link, doctor
 agentctl doctor                # tmux, node, git, claude, codex, gh, katalog cache, configi
 ```
 
@@ -364,7 +377,7 @@ Trzy warstwy, późniejsza wygrywa: globalny `~/.agentctl/config.yaml`, potem `.
 
 ```yaml
 # ~/.agentctl/config.yaml
-cache: ~/Projects/cache        # jeden folder na zadanie na raporty; jedyne miejsce, gdzie piszą agenci
+cache: ~/workspace/cache        # jeden folder na zadanie na raporty; jedyne miejsce, gdzie piszą agenci
 state_dir: ~/.agentctl/tasks   # własny stan agentctl na zadanie, poza zasięgiem agentów
 session: agentctl              # nazwa sesji tmux
 limits: {claude: 3, codex: 3}  # najwięcej jednoczesnych okien na dostawcę
@@ -376,11 +389,11 @@ mcp: {allow: []}               # narzędzia zapisu dozwolone dla czatu: send, ne
 
 ```yaml
 # .agentctl.yaml w repo projektu
-worktree_root: ~/Projects/wt   # worktree trafiają do <worktree_root>/<repo>-<task>
+worktree_root: ~/workspace/wt   # worktree trafiają do <worktree_root>/<repo>-<task>
 setup:
   - npm ci --prefer-offline --no-audit --no-fund
 env:
-  NEON_CITY_TASK: "{TASK}"
+  APP_TASK: "{TASK}"
 defaults: {agent: claude}
 ```
 
@@ -444,6 +457,9 @@ Czytanie ekranu co 15 sekund to zgadywanie, więc `agentctl new` prosi też każ
 - Teksty: `NC-42: <pytanie>`, `NC-42: raport gotowy – <werdykt>` (werdykt to pierwsza sensowna linia raportu albo linia pasująca do `notify.verdict_pattern`), limit użycia, zadanie czekające dłużej niż 120 sekund, zniknięte okno. Teksty są na razie po polsku.
 - Stany: [diagram wyżej](#stany-zadań). Szczegóły, tabele zdarzeń i to, co sprawdzono na Claude Code 2.1.309 i Codex 0.166.0: [docs/details.pl.md](docs/details.pl.md#zdarzenia).
 
+
+Codex: zwinięte pytania pokazują liczbę i skrót z „to answer”. `needs-input` ma pierwszeństwo także podczas pracy; po odpowiedzi stan wynika ponownie z ekranu. Podgląd board, peek, status/MCP `question` i macOS pokazują pytanie lub instrukcję otwarcia. ntfy domyślnie wysyła tylko instrukcję otwarcia; `notify.ntfy.include_question: true` włącza treść pytania.
+
 ## Powiadomienia na telefon
 
 Gdy wychodzisz od Maca, zdarzenia, które Cię potrzebują, mogą iść na telefon przez [ntfy](https://ntfy.sh) – darmową aplikację powiadomień na iOS i Androida. Działa z publicznym serwerem `ntfy.sh` albo z Twoim własnym. Powiadomienia na Macu zostają bez zmian; telefon to dodatek i milczy, gdy siedzisz przy Macu.
@@ -488,7 +504,7 @@ manager:
   # name: agentctl manager             # nazwa w aplikacji Claude
   # model: sonnet                      # domyślnie
   # effort: medium                     # domyślnie
-  # guide: ~/src/sample-app/claude/AGENTCTL-SPEC-GUIDE.md   # zasady pisania specyfikacji, dodane do roli
+  # guide: docs/agent-dispatch.md   # zasady pisania specyfikacji, dodane do roli
   # autostart: true                    # agentctl up startuje też managera
 mcp:
   allow: [send, new, queue]            # co manager w ogóle może, za Twoim tak
@@ -755,9 +771,9 @@ Czego agentctl nigdy nie robi:
 
 Pomysły, nie obietnice:
 
-1. **Zdalny MCP:** serwer dostępny dla czatu w przeglądarce lub na telefonie, z uwierzytelnianiem.
-2. **Modele lokalne** jako trzeci rodzaj agenta.
-3. **Wydanie npm** z krokiem budowania.
+1. Więcej dostawców przez warstwę providerów – następny: Google Antigravity CLI.
+2. Publikacja npm (paczka jest przygotowana).
+3. Poprawki wynikające z codziennego użycia.
 
 ## Więcej
 
@@ -773,13 +789,3 @@ Dokumentacja szczegółowa jest po angielsku:
 ## Licencja
 
 [MIT](LICENSE)
-
-Codex: zwinięte pytania pokazują liczbę i skrót z „to answer”. `needs-input` ma pierwszeństwo także podczas pracy; po odpowiedzi stan wynika ponownie z ekranu. Podgląd board, peek, status/MCP `question` i macOS pokazują pytanie lub instrukcję otwarcia. ntfy domyślnie wysyła tylko instrukcję otwarcia; `notify.ntfy.include_question: true` włącza treść pytania.
-
-## Dla agenta zlecającego
-
-Zacznij w dowolnym projekcie od `agentctl guide --project /sciezka/do/repo --lang pl --clip` i `agentctl capacity --clip` albo narzędzi MCP `guide` i `capacity` (odczyt bez mcp.allow). Wspólny [podręcznik dyspozytora](docs/dispatcher.pl.md) opisuje specy, dobór dostawcy/modelu/effortu, przegląd krzyżowy, kohorty, kolejkę oraz pętlę `events_since` → `pull_ready` → `get_report`.
-
-Capacity pokazuje okna planu, wiek, tempo, reset, sloty, kolejkę, równoważniki i stats z 7 dni. Brak danych to n/d; szacunki tokenów mają podstawę i pewność. Procent obejmuje pracę poza agentctl. New i queue dodają krótką migawkę (`capacity.snapshot: false` ją wyłącza). Narzędzie podaje fakty; zlecający wybiera. `guide: docs/agent-dispatch.md` w `.agentctl.yaml` dołącza zasady projektu, brak pliku ostrzega także w doctor. Globalne `guide: {lang: pl}` ustala język.
-
-Na boardzie `C` otwiera capacity. `agentctl up --no-attach` nie podłącza terminala. Restart po stabilnej roli: `agentctl watch --tmux --restart` / `agentctl board --tmux --restart`, także po zmianie nazwy okna. `agentctl version` działa jak `--version`.

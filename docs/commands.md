@@ -74,7 +74,7 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`mcp uninstall`](#agentctl-mcp-uninstall) | Remove the agentctl MCP server from the Claude desktop config and/or Claude Code (without a flag: both). |
 | [`doctor`](#agentctl-doctor) | Check tmux, node, claude, codex, gh, the cache directory and the configs. |
 | [`spec`](#agentctl-spec) | Spec helpers. |
-| [`spec example`](#agentctl-spec-example) | Print an example spec (the Neon City example from the README). |
+| [`spec example`](#agentctl-spec-example) | Print an example spec (the project example from the README). |
 
 ## agentctl version
 
@@ -1424,7 +1424,7 @@ agentctl spec [options] [command]
 
 ## agentctl spec example
 
-Print an example spec (the Neon City example from the README).
+Print an example spec (the project example from the README).
 
 ```
 agentctl spec example [options]

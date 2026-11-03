@@ -5,6 +5,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ## Unreleased
 
 ### Changed
+- Repair flow diagrams, validate Mermaid in CI and reorganize both READMEs.
 - Lead both READMEs with the parallel Claude Code and Codex workflow and its benefits.
 - Highlight the selected board row in bold blue, with a configurable color and `NO_COLOR` support.
 

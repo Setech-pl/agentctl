@@ -90,7 +90,7 @@ agent that tidied up its folder deleted the `TASK.md`: the task vanished from `s
   with `setup.log`, to `<state_dir>/<task>/`, printing one `migration: moved …` line per task. Existing state is never overwritten.
 - **Orphans.** A tmux window in the agentctl session (other than `watch`) without a state file shows up in `status` as state `orphan`
   with a hint line, and `watch` notifies about it once.
-- **Adopt.** `agentctl adopt NC-42 --report ~/Projects/cache/nc-42/NC-42.md` writes a new state file. The prompt is lost, and so are
+- **Adopt.** `agentctl adopt NC-42 --report ~/workspace/cache/nc-42/NC-42.md` writes a new state file. The prompt is lost, and so are
   agent, model and effort unless you pass `--agent`, `--model`, `--effort` (they show as `unknown`). Add `--worktree <path>` so that
   `close --rm-worktree` knows the worktree. `--window <name>` if the window is not the lowercase task ID. It refuses when a state file exists.
 
@@ -130,12 +130,12 @@ each file counted once. Without a base the commits are `?` (`?c 3f`); a worktree
 
 ## Report detection
 
-The spec says where the report goes (`report:`, default `<cache>/<task>/<TASK>.md`), but agents write it where they like: `docs/reports/<…>.md` in the worktree, `~/Projects/cache/<other name>/…`. A task then hangs as `waiting` and `pull --ready` does not see it. agentctl looks for the report itself.
+The spec says where the report goes (`report:`, default `<cache>/<task>/<TASK>.md`), but agents write it where they like: `docs/reports/<…>.md` in the worktree, `~/workspace/cache/<other name>/…`. A task then hangs as `waiting` and `pull --ready` does not see it. agentctl looks for the report itself.
 
 - **When.** After every end of a turn (the Claude `Stop` hook with `last_assistant_message`, the Codex `notify` with `last-assistant-message`) and at every `watch` tick for a task in state `waiting`. Nothing is searched while the canonical file is already there (written after the task started), except to refresh a copy (below).
 - **Where.** The `report:` list first (see below), then the `.md` paths in the last message of the agent and in the last 400 lines of its window (`capture-pane -J`, so wrapped lines are joined): absolute, `~/…`, relative to the worktrees, quoted or backticked, after `pbcopy < `. URLs are ignored.
 - **What counts.** An existing regular file (not a symbolic link, not agentctl's own state) modified after the task started. Order: the `report:` list (newest first), then paths containing the task ID or `report`/`raport` (the one mentioned last first), then any other, the one mentioned last first.
-- **The list.** `report:` in a spec, `.agentctl.yaml` or `config.yaml` may be a list. The first entry is the canonical path; the others are places to look, paths or globs (`*`, `?`, `**`), absolute, `~/…` or relative to the worktree, with `{task}`/`{TASK}`: `report: [~/Projects/cache/{task}/{TASK}.md, docs/reports/*{task}*.md, docs/reports/*{TASK}*.md]`.
+- **The list.** `report:` in a spec, `.agentctl.yaml` or `config.yaml` may be a list. The first entry is the canonical path; the others are places to look, paths or globs (`*`, `?`, `**`), absolute, `~/…` or relative to the worktree, with `{task}`/`{TASK}`: `report: [~/workspace/cache/{task}/{TASK}.md, docs/reports/*{task}*.md, docs/reports/*{TASK}*.md]`.
 - **What happens.** The file is copied to the canonical path. An existing canonical file is never overwritten, except a copy agentctl made earlier that nobody changed: it is refreshed when the source is newer. `TASK.md` gets `report_source`, `report_copied` and `report_source_mtime`; the journal gets "raport wykryty w <path>" (`events` shows it as RAPORT WYKRYTY); the state turns `report-ready` and the notification carries the verdict as for any report.
 - **By hand.** `agentctl report <TASK>` shows the canonical path, the source and what the search finds now (it copies nothing). `agentctl report <TASK> --from <path>` makes that file the source and copies it (`--force` also over a report the agent wrote; `--dry-run` copies nothing). `pull <TASK>` runs the search when the report is missing.
 - **Where you see it.** `status` (the report column: `yes (z <path>)`; `--json`: `reportSource`), the board (a note under the preview: `report from <path>`), the MCP `list_reports` (`source`) and `task_spec` (`report_source`).
@@ -157,7 +157,7 @@ It always exits 0 and prints nothing, so a broken hook can never disturb the age
 
 **Claude Code 2.1.309.** `new` writes `<state_dir>/<task>/claude-settings.json` with hooks `Notification`, `Stop` and `StopFailure`, each running
 `<this agentctl> event --task <TASK> --agent claude --kind <notification|stop|stop-failure>` (the hook JSON arrives on stdin), and starts `claude … --settings <that file>`.
-*Checked live:* `--settings` **merges** with the other sources. With a user hook set in `~/.claude/settings.json` (Neon City kit: SessionStart, UserPromptSubmit, PreToolUse, Stop), a project `.claude/settings.json` with a Stop hook, and `--settings` with its own Stop and Notification hooks,
+*Checked live:* `--settings` **merges** with the other sources. With a user hook set in `~/.claude/settings.json` (example hook set: SessionStart, UserPromptSubmit, PreToolUse, Stop), a project `.claude/settings.json` with a Stop hook, and `--settings` with its own Stop and Notification hooks,
 one `claude -p` run executed all of them (`--debug-file` lists every `Hooks: Stop [...] finished with status 0`; markers from the project and the injected hook were both written). No existing hook is disabled or replaced, and the file holds only the three event hooks.
 
 **Codex 0.166.0.** `new` adds `-c notify=["…agentctl", "event", "--task", "<TASK>", "--agent", "codex", "--forward", "<json>"]`; Codex appends the event as JSON to that argv. *Checked live:* `-c notify=` **replaces** the `notify` of `config.toml`
@@ -587,7 +587,7 @@ NC-42: agent waits for folder trust – attach: tmux attach -t agentctl, confirm
 
 In every case the prompt is only sent after the dialog is gone; deliver it by hand with `agentctl send <cache>/<task>/TASK.md`.
 
-**Does trusting a parent directory help?** Checked live on 2026-10-31 (Claude Code 2.1.309 with `~/Projects` trusted, Codex 0.166.0 with `~` trusted), in new directories below the trusted one:
+**Does trusting a parent directory help?** Checked live on 2026-10-31 (Claude Code 2.1.309 with `~/workspace` trusted, Codex 0.166.0 with `~` trusted), in new directories below the trusted one:
 
 | New directory | Claude Code | Codex |
 |---|---|---|
@@ -595,7 +595,7 @@ In every case the prompt is only sent after the dialog is gone; deliver it by ha
 | new git repository | **dialog** | **dialog** |
 | `git worktree add` of that repository | **dialog** | **dialog**; says "trusting will apply to the repository root" |
 
-So trusting `worktree_root` (for example `~/Projects/wt`) does **not** cover git worktrees, and `doctor` has nothing to check there. Codex keys a worktree's trust to the repository root, so a trusted main checkout probably covers its worktrees (not tested live: that needs a trusted repository and a new worktree on it, which would change your Codex config); Claude Code asked for a worktree of a trusted checkout too (iteration 1). Hence the wait.
+So trusting `worktree_root` (for example `~/workspace/wt`) does **not** cover git worktrees, and `doctor` has nothing to check there. Codex keys a worktree's trust to the repository root, so a trusted main checkout probably covers its worktrees (not tested live: that needs a trusted repository and a new worktree on it, which would change your Codex config); Claude Code asked for a worktree of a trusted checkout too (iteration 1). Hence the wait.
 
 ## Mirror
 
@@ -621,12 +621,12 @@ when you call `status` or `pull`.
 
 Recommended: `npm i -g @setech-pl/agentctl`. The packaged `agentctl-update` runs `npm install -g @setech-pl/agentctl@latest`, without git or tmux restart. Clone options `--ref`, `--no-watch`, `--no-link` are rejected in npm mode. `doctor` shows the installation source and warns about PATH conflicts. MCP uses the absolute installed JavaScript path. The clone mode below remains available for development.
 
-Use a **stable copy** for daily work and keep `~/Projects/agentctl` for development only. (`npm link` from the repo made the global
+Use a **stable copy** for daily work and keep `~/workspace/agentctl` for development only. (`npm link` from the repo made the global
 `agentctl` run whatever branch was checked out there, finished or not.) The stable copy is a detached git worktree of the repo,
-by default `~/Projects/agentctl-stable`; `bin/agentctl-update` creates and updates it.
+by default `~/workspace/agentctl-stable`; `bin/agentctl-update` creates and updates it.
 
 ```sh
-~/Projects/agentctl/bin/agentctl-update     # first installation
+~/workspace/agentctl/bin/agentctl-update     # first installation
 agentctl-update                             # later, after a PR is merged
 ```
 
@@ -643,7 +643,7 @@ previous and new commit and whether watch was restarted.
 | `--no-watch` | do not restart the watch window |
 | `--no-link` | skip `npm link` (for testing the script without re-pointing the global commands) |
 | `AGENTCTL_REPO` | the repo; default: the directory above the script's `bin/` (symlinks resolved) |
-| `AGENTCTL_STABLE_DIR` | the stable copy, default `~/Projects/agentctl-stable` |
+| `AGENTCTL_STABLE_DIR` | the stable copy, default `~/workspace/agentctl-stable` |
 | `AGENTCTL_SESSION` | tmux session of the watch window, default `agentctl` |
 
 ## Development
