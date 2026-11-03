@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { describe, it } from 'node:test';
 import { collectDisk, diskLevel, diskTick, DISK_INTERVAL_MS } from '../src/core/disk.ts';
+import { commitQueueAdd, planQueueAdd } from '../src/core/queue.ts';
+import { splitSpecs } from '../src/core/spec.ts';
 import { readJournal } from '../src/core/journal.ts';
 import { makeConfig, makeContext, useScratch, seedTask, DiskRunner } from './helpers.ts';
 import { Context } from '../src/core/context.ts';
@@ -29,6 +31,20 @@ describe('disk facts', () => {
     assert.equal((await collectDisk(ctx, fake)).worktreeBytes, 3);
     await runner.sleep(DISK_INTERVAL_MS);
     assert.equal((await collectDisk(ctx, fake)).worktreeBytes, 6);
+  });
+  it('includes a queued project before its first task record exists', async () => {
+    const config = makeConfig(scratch.sub('queued-disk'));
+    const repo = scratch.sub('queued-disk/repo');
+    const wtRoot = scratch.sub('queued-disk/project-worktrees');
+    fs.writeFileSync(`${repo}/.agentctl.yaml`, `worktree_root: ${wtRoot}\n`);
+    const runner = new DiskRunner({ dryRun: false });
+    const ctx = new Context(runner, config, () => {});
+    const raw = splitSpecs(`---\ntask: QD-1\nagent: claude\nrepos:\n  - path: ${repo}\n---\nFake.\n`);
+    const plan = await planQueueAdd(ctx, raw);
+    await commitQueueAdd(ctx, plan.items);
+    const report = await collectDisk(ctx, stat(60 * 1024 ** 3));
+    assert.ok(report.volumes.some((v) => v.paths.includes(wtRoot)));
+    assert.equal(report.worktreeBytes, 0);
   });
   it('reports n/d on permission failures and falls back to df when available', async () => {
     const config = makeConfig(scratch.sub('denied'));
