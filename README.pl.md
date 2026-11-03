@@ -698,7 +698,7 @@ agentctl gc --branches --older-than 3d --cohort sprint-1 --apply -y
 
 - Kandydaci: worktree zadań zamkniętych, anulowanych i zarchiwizowanych **bez niezacommitowanych zmian** (`git worktree remove`, nigdy z force); pliki obok raportów starsze niż `--older-than` (domyślnie 7d; raporty `*.md` zostają); foldery stanu zamkniętych zadań (przenoszone do archiwum); z `--branches` ich gałęzie scalone do bazy (`git branch -d`, nigdy `-D`, nigdy `main`/`master`, bieżąca ani zdalna).
 - Niezacommitowana praca, worktree nie z agentctl, niescalone gałęzie i zbyt świeże pliki są wypisane jako **pominięte (powód)**. Folder cache, który nie należy do żadnego zadania agentctl, nie jest ruszany. Historia i raporty zostają.
-- Board: **`G`** pokazuje podgląd. MCP: `gc_preview` (tylko odczyt: żadne narzędzie nie sprząta).
+- Board: **`G`** pokazuje podgląd. MCP: `gc_preview` odczytuje plan; osobno dozwolone, dwuetapowe `gc` wykonuje go.
 
 ## Wznawianie
 
@@ -789,3 +789,5 @@ Dokumentacja szczegółowa jest po angielsku:
 ## Licencja
 
 [MIT](LICENSE)
+
+Od 0.17.1 MCP udostępnia ponawianie i sterowanie kolejką, kohorty, sprzątanie `gc` i diagnostykę. Sprawdź `capacity.disk` przed zleceniem pracy. Przy `failed` przeczytaj powód i zaproponuj naprawę lub `queue_retry`; przy `disk-warn` zaproponuj `gc_preview`, a przy `disk-critical` poproś o zgodę na `gc` albo użyj go w ramach uprawnień użytkownika. Każde usuwanie/start wymaga podglądu i potwierdzenia; samo `mcp.allow` nie zastępuje potwierdzenia. Szczegóły: [MCP](docs/mcp.md).

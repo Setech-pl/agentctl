@@ -290,3 +290,19 @@ capacity:
 ```
 
 The guide ships in npm `docs/dispatcher*.md`, with no dependency on a development checkout. See [the example project config](examples/project-guide.yaml).
+
+## Disk and git start limits (0.17.1)
+
+| Key | Default | Meaning |
+|---|---|---|
+| `disk` | mapping | Disk thresholds, in GiB (1024³ bytes). |
+| `disk.warn_gb` | `50` | Warn below this available space on any known filesystem. |
+| `disk.critical_gb` | `20` | Critical below this space; must not exceed warn_gb. |
+| `git` | mapping | Worktree checkout and setup limits. |
+| `git.timeout_s` | `600` | Positive timeout in seconds for worktree add (including checkout) and each setup command. |
+
+`capacity` (including JSON/MCP), MCP `status`, CLI `status`, `doctor`, and the board show disk facts. Unknown readings are `null` / `n/d`. Filesystems holding the global worktree root, known projects' `.agentctl.yaml` roots, recorded worktrees, cache and state are deduplicated by device. `statfs` falls back to `df -kP`. Worktree sizes are cached for five minutes; symlinks are not followed. The watcher checks every five minutes, persists the previous level, and records `disk-warn`, `disk-critical`, `disk-ok` once per transition. These events can be selected in `notify.ntfy.events`.
+
+A critical reading warns before `new` or queue insertion. The terminal asks y/N (`--yes` acknowledges the warning); MCP shows it before confirmation. It does not impose a capacity limit or switch providers.
+
+MCP write permissions accept exact tool names and explicit groups: `queue:*`, `cohort`, `manager:*`. Existing `queue` still permits only insertion. All previous names keep their permission scope. Group membership is generated in docs/mcp.md; reads remain available without allow.
