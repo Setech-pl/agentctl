@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { recordSamples } from './usage-samples.ts';
 import path from 'node:path';
 import type { AgentName, GlobalConfig } from './config.ts';
 import { listArchivedRecords, listTaskRecords } from './taskstore.ts';
@@ -49,6 +50,7 @@ export interface PlanState {
   note: string;
   /** Older than PLAN_STALE_MS. */
   stale: boolean;
+  source?: string;
 }
 
 function windowLabel(w: Pick<PlanWindow, 'kind' | 'minutes'>): string {
@@ -102,15 +104,35 @@ export function readClaudeSnapshot(config: Pick<GlobalConfig, 'path'>): PlanSnap
 /** Both plans. Reads one file for Claude and the tail of the newest Codex logs. */
 export function readPlans(config: GlobalConfig, reader: UsageReader, now: number): Record<AgentName, PlanState> {
   const homes = agentHomes(config);
-  return {
+  const plans = {
     claude: planState(
       'claude',
       readClaudeSnapshot(config),
       now,
       config.usage.claudeTap ? 'no reading yet: Claude Code reports its limits only to a statusLine, which starts with the next task window (see "agentctl usage --help")' : 'usage.claude_tap is off: Claude Code gives its limits only to a statusLine',
     ),
-    codex: planState('codex', reader.codexPlan(homes.codex, now), now, `no Codex session log with rate limits in ${path.join(homes.codex, 'sessions')} for the last 3 days`),
+    codex: planState('codex', newestCodexSnapshot(config, reader.codexPlan(homes.codex, now)), now, `no Codex session log with rate limits in ${path.join(homes.codex, 'sessions')} for the last 3 days`),
   };
+  plans.claude.source = 'claude-statusline';
+  const refreshed = readCodexSnapshot(config);
+  plans.codex.source = refreshed?.at === plans.codex.readAt ? 'codex-app-server:account/rateLimits/read' : 'codex-session-log';
+  for (const p of [plans.claude, plans.codex]) p.stale = p.readAt !== null && now - p.readAt > config.capacity.staleMinutes * 60_000;
+  const totals = { claude: 0, codex: 0 };
+  for (const u of collectTaskUsage(config, reader, allRecords(config), now).values()) if (u.agent === 'claude' || u.agent === 'codex') totals[u.agent] += freshTokens(u.total);
+  recordSamples(config, plans, totals, now);
+  return plans;
+}
+
+export const codexPlanFile = (config: Pick<GlobalConfig, 'path'>): string => path.join(homeDir(config), 'usage', 'codex-plan.json');
+function readCodexSnapshot(config: GlobalConfig): PlanSnapshot | undefined {
+  try {
+    const s = JSON.parse(fs.readFileSync(codexPlanFile(config), 'utf8')) as PlanSnapshot;
+    return Number.isFinite(s.at) && Array.isArray(s.windows) ? s : undefined;
+  } catch { return undefined; }
+}
+function newestCodexSnapshot(config: GlobalConfig, log: PlanSnapshot | undefined): PlanSnapshot | undefined {
+  const rpc = readCodexSnapshot(config);
+  return rpc && (!log || rpc.at > log.at) ? rpc : log;
 }
 
 // ---- tokens per task

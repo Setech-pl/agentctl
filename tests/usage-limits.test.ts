@@ -71,7 +71,7 @@ describe('alerts: one notification per threshold and window period', () => {
     const s = setup('tick', '', { codex: { session: 85, week: 10 }, claude: { session: 20, week: 20 } });
     const sent = await usageTick(s.ctx, s.notifier);
     assert.equal(sent.length, 1);
-    assert.match(sent[0]!, /^Codex: 85% limitu 5h \(reset \d\d:\d\d\) – blisko limitu; claude ma zapas \(20%\): --agent claude$/);
+    assert.match(sent[0]!, /^Codex: 85% limitu 5h \(reset \d\d:\d\d\) – blisko limitu; claude ma zapas \(20%\)$/);
     assert.deepEqual(s.notified, sent);
     assert.ok(fs.existsSync(alertsFile(s.config)));
     assert.deepEqual(await usageTick(s.ctx, s.notifier), []);
@@ -105,12 +105,12 @@ describe('alerts: one notification per threshold and window period', () => {
 });
 
 describe('hint before a task starts', () => {
-  it('names the provider with room and says --agent; both plans are shown', () => {
+  it('reports both providers as facts without choosing an order', () => {
     const s = setup('hint', '', { codex: { session: 15, week: 10 }, claude: { session: 83, week: 40 } });
     const lines = usageSummaryLines(s.config, [{ task: 'NC-1', agent: 'claude', pin: false }, { task: 'NC-2', agent: 'codex', pin: false }], NOW);
     assert.match(lines[0]!, /^plan:\s+claude 5h 83% ↻ \d\d:\d\d · week 40% ↻ \w{3} \d\d:\d\d$/);
     assert.match(lines[1]!, /^plan:\s+codex 5h 15%/);
-    assert.deepEqual(lines.slice(2), ['hint:     NC-1: claude blisko limitu (83%), codex ma zapas (15%): --agent codex']);
+    assert.deepEqual(lines.slice(2), ['hint:     NC-1: claude blisko limitu (83%), codex ma zapas (15%)']);
   });
 
   it('a pinned task is told it stays; no switching is offered', () => {
@@ -133,7 +133,7 @@ describe('hint before a task starts', () => {
     const text = `---\ntask: NC-1\nagent: claude\nrepos:\n  - {path: ${repo}, worktree: ${repo}-nc1}\n---\nPrompt.\n`;
     const plan = await planQueueAdd(s.ctx, splitSpecs(text, 't'));
     assert.ok(plan.summary.some((l) => /^plan:\s+claude 5h 83%/.test(l)));
-    assert.ok(plan.summary.some((l) => /--agent codex/.test(l)));
+    assert.ok(plan.summary.some((l) => /codex ma zapas/.test(l)));
     assert.deepEqual(summarizeSpecs([], ['plan: x']), ['plan: x']);
   });
 });

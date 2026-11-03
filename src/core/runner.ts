@@ -1,3 +1,4 @@
+import { readRateLimits } from './readonly-rpc.ts';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -10,6 +11,7 @@ export interface ExecResult {
 }
 
 export interface ExecOptions {
+  rpc?: { method: 'account/rateLimits/read' };
   cwd?: string;
   /** Written to the command's stdin. */
   input?: string;
@@ -60,6 +62,7 @@ export class RealRunner implements Runner {
   readonly dryRun = false;
 
   async exec(cmd: string, args: string[], opts: ExecOptions = {}): Promise<ExecResult> {
+    if (opts.rpc) return readRateLimits(cmd, args, opts.cwd, opts.timeoutMs ?? 3000);
     const env = cmd === 'tmux' ? tmuxEnv(process.env) : process.env;
     if (opts.interactive) {
       const r = spawnSync(cmd, args, { cwd: opts.cwd, stdio: 'inherit', env });
@@ -146,6 +149,7 @@ export interface RecordedCall {
 }
 
 export interface RecordingOptions {
+  readRunner?: Runner;
   /** `true` (default) for --dry-run. Tests that exercise polling pass `false`. */
   dryRun?: boolean;
   /** Scripted answers for commands; return undefined to fall back to the default (success, empty output). */
@@ -167,11 +171,13 @@ export class RecordingRunner implements Runner {
   /** Everything the run would have appended to files, by path. */
   readonly appended = new Map<string, string>();
   private clock: number;
+  private readonly readRunner: Runner | undefined;
   private respond: RecordingOptions['respond'];
   private emit: RecordingOptions['emit'];
 
   constructor(options: RecordingOptions = {}) {
     this.dryRun = options.dryRun ?? true;
+    this.readRunner = options.readRunner;
     this.respond = options.respond;
     this.emit = options.emit;
     this.clock = options.startTime ?? Date.UTC(2026, 9, 31, 12, 0, 0);
@@ -197,6 +203,7 @@ export class RecordingRunner implements Runner {
     const scripted = this.respond?.(cmd, args, opts);
     if (opts.readOnly) {
       this.queries.push(line);
+      if (this.readRunner && !scripted) return this.readRunner.exec(cmd, args, opts);
       // dryResult is only the stand-in for a dry run; a scripted (test) answer always wins.
       return { code: 0, stdout: '', stderr: '', ...(this.dryRun ? opts.dryResult : undefined), ...scripted };
     }
