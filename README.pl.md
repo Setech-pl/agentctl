@@ -2,34 +2,38 @@
 
 English: [README.md](README.md)
 
-**agentctl zamienia plik spec w działającego agenta kodującego: worktree gita, okno tmux i prompt, a potem pilnuje go za Ciebie.** Rozdziela zlecenia do agentów CLI [Claude Code](https://docs.claude.com/en/docs/claude-code) i [Codex](https://github.com/openai/codex).
+**Uruchamiaj Claude Code i Codex równolegle – z jednej kolejki i według tych samych zasad.**
 
-## Problem
+agentctl zamienia krótki opis zadania w gitowy worktree, okno tmux i działającego agenta kodującego – Claude Code albo Codexa, z wybranym przez Ciebie modelem i poziomem rozumowania. Pilnuje pracy agentów, informuje, gdy któryś zada pytanie lub skończy, i zbiera raporty. Decyzja i scalanie zostają po Twojej stronie.
 
-Kilku agentów kodujących równolegle to dużo ręcznych kroków na każde zadanie: utworzyć worktree, zainstalować zależności, podłączyć symlinki i zmienne środowiskowe, otworzyć terminal, uruchomić właściwego agenta z właściwym modelem i effortem, wkleić prompt, a potem zaglądać do każdego okna, żeby zobaczyć, kto skończył, kto o coś pyta, a kto trafił na limit użycia. Menedżery okien pomagają z oknami. Nie wiedzą, czym jest zadanie.
+## Po co korzystać z dwóch dostawców
 
-agentctl zarządza **zleceniami, nie oknami**. Jednostką jest spec: plik Markdown z nagłówkiem YAML i promptem, który można przejrzeć, wersjonować i użyć ponownie. Reszta z niego wynika.
-
-## Najważniejsze funkcje
-
-- **Jeden spec, jedno polecenie.** `agentctl new` tworzy worktree gita, uruchamia komendy setup, robi symlinki, ustawia środowisko, otwiera okno tmux, uruchamia agenta i wkleja prompt.
-- **Stany zadań.** `working`, `waiting`, `needs-input`, `needs-trust`, `limited`, `report-ready` i inne, z ekranu każdego okna oraz ze zdarzeń, które agenci wysyłają sami (hooki Claude, `notify` Codexa).
-- **Powiadomienia.** Jedno powiadomienie na zmianę stanu; kliknięcie przełącza na okno zadania.
-- **Telefon.** `agentctl ntfy-setup` i `agentctl away on`: zdarzenia, które Cię potrzebują, idą też na telefon przez ntfy, a w wiadomości są tylko ID zadania i linia werdyktu.
-- **Sterowanie z telefonu.** `agentctl manager` startuje sesję Claude Code z Remote Control i narzędziami MCP agentctl: rozmawiasz z agentami z aplikacji Claude na telefonie.
-- **Board.** Pełnoekranowy przegląd wszystkich zadań z podglądem na żywo wybranego okna.
-- **Raporty.** `agentctl pull --ready` zbiera nowe raporty w jeden tekst dla czatu planującego. Raport zapisany gdzie indziej, niż mówi spec, jest znajdowany i kopiowany ([Wykrywanie raportu](docs/details.pl.md#wykrywanie-raportu)).
-- **Kolejka, zależności, kolizje.** Więcej zadań niż wolnych okien? Czekają i startują same; przegląd może czekać na raport autora (`after`); dwa zadania zmieniające te same pliki są oznaczane wcześnie.
-- **Anulowanie i kohorty.** Praca porzucona w trakcie tury? `agentctl cancel` przerywa, zamyka okno i zostawia worktree; zadania, które na nią czekały, są zablokowane, a nie zapomniane. Zadania z nadaną nazwą kohorty są grupowane na boardzie, filtrowane przez `--cohort` i ogłaszane razem, gdy wszystkie ich raporty są gotowe.
-- **Zmiana dostawcy.** Tabela odpowiedników Claude i Codexa; `agentctl move` przekazuje zadanie, które trafiło na limit użycia, drugiemu dostawcy w tym samym worktree.
-- **Zużycie i limity.** `agentctl usage` pokazuje tokeny zadań i jak blisko limitów są plany Claude i Codexa (n/d, gdy dostawca nie mówi); `watch` ostrzega przy 80 % i 95 %, `new` podpowiada dostawcę z zapasem, kolejka może wstrzymać dostawcę bliskiego wyczerpania. `agentctl log` i `stats` prowadzą historię zadań, żeby dobierać model i effort.
-- **Limity na żywo.** `agentctl limits set claude=3 codex=5` zmienia parytet, gdy działa `watch`; miejsca dla agentów uruchomionych ręcznie można zarezerwować albo liczyć.
-- **Zdarzenia dla czatu.** `agentctl events` i MCP `events_since` mówią czatowi, co zmieniło się od jego ostatniego wywołania.
-- **Sprzątanie i wznawianie.** `agentctl gc` odbiera worktree, stare pliki i scalone gałęzie zakończonych zadań; `agentctl resume` przywraca okna po restarcie, a `agentctl up` zaczyna dzień.
-- **Integracja z czatem.** Lokalny serwer MCP pozwala czatowi w aplikacji Claude lub w Claude Code czytać status i raporty oraz, jeśli na to pozwolisz, wysyłać prompty i uruchamiać zadania.
-- **Mały i przejrzysty.** TypeScript kompilowany do JavaScriptu dla npm, bez demona; `--dry-run` wypisuje każde polecenie zamiast je wykonać.
+- **Większa przepustowość i mniej przestojów.** Plany Claude i Codexa mają osobne limity. Gdy jeden z dostawców osiągnie limit, możesz przenieść pracę do drugiego. agentctl pokazuje użycie obu planów, czas resetu i dostępne miejsca ([zużycie i limity](docs/details.pl.md#użycie-i-limity)).
+- **Model dobrany do zadania.** Spec może określać agenta, model i effort. Lżejsze modele sprawdzą się przy rutynowych pracach, mocniejsze przy trudniejszych; [tabela odpowiedników](docs/details.pl.md#odpowiedniki-modeli) pomaga dobrać model po przeniesieniu zadania do drugiego dostawcy.
+- **Recenzja innym modelem.** Reguła `review_of` wymaga, by recenzent użył innego agenta lub modelu niż autor ([recenzja krzyżowa](docs/details.pl.md#limity-okien-i-cross-review)). Drugi model może wnieść inną perspektywę.
+- **Zmiana dostawcy w razie potrzeby.** Obaj agenci korzystają z tych samych speców i formatu raportów, a zadania widać na tym samym boardzie. `agentctl move` jednym poleceniem przekazuje zadanie po osiągnięciu limitu drugiemu dostawcy ([limity i przenoszenie](docs/details.pl.md#limity-i-move)).
+- **Jeden panel pracy.** [Terminalowy board](docs/details.pl.md#board) pokazuje zadania obu dostawców: kto pracuje, kto potrzebuje Twojej uwagi i które raporty są gotowe. Powiadomienia mogą trafiać na Maca i opcjonalnie na telefon.
 
 ## Jak to działa
+
+1. Przygotuj spec (albo poproś o niego czat planujący): zadanie, agenta, model, effort, repozytoria i ścieżkę raportu.
+2. `agentctl new` tworzy worktree, otwiera okno tmux i uruchamia agenta w ramach limitu dostawcy albo umieszcza zadanie w kolejce do zwolnienia miejsca.
+3. Obserwuj i decyduj: board i powiadomienia informują o pytaniach i zakończeniu pracy; `pull` pobiera raport, a Ty go sprawdzasz, scalasz i zamykasz zadanie.
+
+Planujesz w czacie Claude? [Wbudowany serwer MCP](docs/mcp.md) pozwala mu zlecać zadania, odczytywać użycie planu i pobierać raporty. Możesz też używać [schowka](#codzienna-pętla) bez MCP.
+
+## W codziennym użyciu
+
+<!-- Numbers from agentctl stats on the author's machine – verify before publishing -->
+agentctl powstał i jest używany przy prawdziwym projekcie: codziennie równolegle działają kohorty zadań Claude Code i Codexa, a przed scaleniem każdy wynik przechodzi recenzję innym modelem.
+
+> agentctl to niezależne narzędzie open source, niepowiązane z Anthropic ani OpenAI. Claude Code i Codex są ich produktami.
+
+## Stany zadań
+
+Board pokazuje m.in. stany `working`, `waiting`, `needs-input`, `needs-trust`, `limited`, `report-ready`, `background`, `queued`, `blocked`, `dead`, `orphan`, `closed`, `cancelled`, `superseded` i `start-failed`. Szczegóły opisuje [dokumentacja stanów zadań](docs/details.pl.md#stany-zadań).
+
+### Architektura i przebieg pracy
 
 ```mermaid
 sequenceDiagram
@@ -119,12 +123,6 @@ sequenceDiagram
     end
 ```
 
-Żółte ramki to decyzje, które zostają przy człowieku: agentctl nigdy nie odpowiada na dialog zaufania, nie wydaje werdyktu i nie scala.
-
-### Architektura
-
-CLI, board i serwer MCP to cienkie fronty nad tym samym rdzeniem. Każdy efekt uboczny przechodzi przez `Runner`, który w `--dry-run` i w testach jest rejestratorem.
-
 ```mermaid
 flowchart TB
     subgraph fronts [Fronty]
@@ -185,10 +183,6 @@ flowchart TB
     MCP --> AUDIT
     MCP -- "events_since" --> JOURNAL
 ```
-
-### Stany zadań
-
-`status`, board i nazwy okien tmux pokazują jeden z tych stanów na zadanie. Żywe okno jest klasyfikowane z ekranu i ze zdarzeń agenta; zadanie bez okna jest `report-ready`, gdy jego raport istnieje, i `dead`, gdy nie istnieje.
 
 ```mermaid
 stateDiagram-v2
@@ -251,25 +245,6 @@ stateDiagram-v2
     superseded --> cancelled: cancel
     cancelled --> [*]
 ```
-
-| Stan | Ikona | Znaczenie |
-|---|---|---|
-| `working` | ⚙ | trwa tura |
-| `background` | ⏳ | bezczynny, ale działają własne shelle lub monitory agenta; koniec tury nie jest ogłaszany |
-| `waiting` | ⏸ | bezczynny przy prompcie, brak raportu |
-| `needs-input` | ? | agent zadał pytanie lub prosi o zgodę |
-| `needs-trust` | 🔒 | otwarty dialog zaufania do folderu; musi go potwierdzić człowiek |
-| `limited` | ⛔ | limit użycia wyczerpany; `agentctl move` przekazuje zadanie |
-| `report-ready` | ✓ | raport istnieje i jest nowszy niż start |
-| `superseded` | ↪ | przeniesione do drugiego dostawcy; to stare okno |
-| `dead` | ✗ | okno zniknęło i nie ma raportu |
-| `orphan` | ✗ | okno sesji bez pliku stanu; zob. `agentctl adopt` |
-| `closed` | ⊘ | uruchomiono `agentctl close`; widoczne tylko w `status --all` |
-| `cancelled` | ✕ | uruchomiono `agentctl cancel`: praca została porzucona w trakcie tury albo w kolejce; widoczne tylko w `status --all` i na boardzie w sekcji **Cancelled** |
-
-Zadanie w kolejce, którego `after` wskazuje anulowane zadanie, jest **zablokowane** (⛓): to nie stan okna, tylko warunek kolejki, który `status`, `queue list` i board pokazują razem z przyczyną. Wyjście to [anulowanie zadań](#anulowanie-zadań) albo `agentctl unblock`.
-
-Te same diagramy z uwagami: [docs/diagrams.md](docs/diagrams.md) (po angielsku).
 
 ## Szybki start
 
