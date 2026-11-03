@@ -44,7 +44,6 @@ async function requireTool(ctx: Context, tool: string, args: string[]): Promise<
   if (r.code !== 0) throw new AgentctlError(`${tool} not found or not working`, INSTALL_HINTS[tool]);
 }
 
-const SETUP_TIMEOUT_MS = 20 * 60_000;
 const SETUP_TAIL_LINES = 15;
 
 /** Run the spec's `setup` commands in the primary worktree, logging to `<state_dir>/<task>/setup.log`. A failure stops `new`. */
@@ -55,14 +54,14 @@ async function runSetup(ctx: Context, spec: ResolvedSpec, worktree: string): Pro
   if (!runner.dryRun) await runner.writeFile(logFile, '');
   for (const [i, command] of spec.setup.entries()) {
     ctx.info(`${spec.task}: setup ${i + 1}/${spec.setup.length}: ${command}`);
-    const r = await runner.exec('sh', ['-c', command], { cwd: worktree, timeoutMs: SETUP_TIMEOUT_MS });
+    const r = await runner.exec('sh', ['-c', command], { cwd: worktree, timeoutMs: ctx.config.git.timeoutS * 1000 });
     if (runner.dryRun) continue;
     const output = `${r.stdout}${r.stderr}`;
     await runner.appendFile(logFile, `$ ${command}\n${output}${output.endsWith('\n') || output === '' ? '' : '\n'}[exit ${r.code}]\n\n`);
     if (r.code !== 0) {
       const tail = output.trimEnd().split('\n').slice(-SETUP_TAIL_LINES).join('\n');
       throw new AgentctlError(
-        `${spec.task}: setup command failed (exit ${r.code}): ${command}\n${tail}`,
+        `${spec.task}: setup command failed${/ETIMEDOUT/i.test(r.stderr) ? ` after ${config.git.timeoutS}s (git.timeout_s; check disk/I/O or increase the timeout)` : ''} (exit ${r.code}): ${command}\n${tail}`,
         `Full output: ${logFile}. The worktree ${worktree} was kept and no window was started; fix the cause and run "agentctl new --reuse" again.`,
       );
     }
@@ -94,7 +93,7 @@ export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: Ne
     for (const repo of spec.repos) {
       if (opts.reuse && fs.existsSync(repo.worktree)) ctx.info(`${spec.task}: reusing worktree ${repo.worktree}`);
       else {
-        await addWorktree(runner, repo);
+        await addWorktree(runner, repo, config.git.timeoutS);
         ctx.info(`${spec.task}: worktree ${repo.worktree}`);
       }
     }

@@ -1,3 +1,4 @@
+import { checkRetryWorktrees } from './git.ts';
 import { collectCapacity, capacitySnapshot, snapshotLines } from './capacity.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -364,6 +365,8 @@ export async function moveToFront(ctx: Context, input: string): Promise<QueueEnt
 export async function retryEntry(ctx: Context, input: string): Promise<QueueEntry> {
   const entry = findEntry(ctx.config, input);
   if (entry.status !== 'failed') throw new AgentctlError(`${entry.task} is ${entry.status}, not failed`);
+  const spec = resolveSpec(splitSpecs(entry.spec, `queue entry ${entry.task}`)[0] as RawSpec, { config: ctx.config });
+  await checkRetryWorktrees(ctx.runner, spec.repos);
   const highest = readQueue(ctx.config).reduce((n, e) => Math.max(n, e.order, e.seq), 0);
   const { failedAt: _f, error: _e, startingAt: _s, ...rest } = entry;
   const again: QueueEntry = { ...rest, status: 'queued', order: highest + 1, reuse: true };
@@ -579,7 +582,7 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
       await notifyPlain(ctx, notifier, entry.task, `Uruchomiono ${entry.task} z kolejki`, opts.self);
       await recordJournal(ctx, { kind: 'queue-start', task: entry.task, text: `Uruchomiono ${entry.task} z kolejki (${entry.agent})`, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
     } catch (e) {
-      await failEntry(ctx, starting, errorMessage(e), notifier, opts, !opts.signal?.aborted, log).catch(() => undefined);
+      await failEntry(ctx, starting, e instanceof AgentctlError && e.hint ? `${e.message}\nHint: ${e.hint}` : errorMessage(e), notifier, opts, !opts.signal?.aborted, log).catch(() => undefined);
     } finally {
       memory.inflight.delete(entry.task);
     }
