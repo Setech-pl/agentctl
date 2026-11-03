@@ -1,5 +1,5 @@
 import { readRateLimits } from './readonly-rpc.ts';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { shellLine } from './util.ts';
@@ -21,6 +21,8 @@ export interface ExecOptions {
   /** What a dry run pretends a read-only query returned. */
   dryResult?: Partial<ExecResult>;
   timeoutMs?: number;
+  /** Release the event loop while an independent repository checkout or setup runs. */
+  async?: boolean;
   /** Hand the terminal to the command (stdin, stdout and stderr are inherited, no timeout): `tmux attach-session`. */
   interactive?: boolean;
 }
@@ -71,6 +73,43 @@ export class RealRunner implements Runner {
       if (r.error) return { code: (r.error as NodeJS.ErrnoException).code === 'ENOENT' ? 127 : 1, stdout: '', stderr: r.error.message };
       return { code: r.status ?? 1, stdout: '', stderr: '' };
     }
+    if (opts.async) return new Promise<ExecResult>((resolve) => {
+      let timedOut = false;
+      let failure: NodeJS.ErrnoException | undefined;
+      let size = 0;
+      const stdout: Buffer[] = [];
+      const stderr: Buffer[] = [];
+      const child = spawn(cmd, args, { cwd: opts.cwd, env, detached: process.platform !== 'win32', stdio: 'pipe' });
+      const signalGroup = (signal: NodeJS.Signals): void => {
+        if (!child.pid) return;
+        try { process.kill(process.platform === 'win32' ? child.pid : -child.pid, signal); } catch { /* already exited */ }
+      };
+      let escalation: NodeJS.Timeout | undefined;
+      const timeout = setTimeout(() => {
+        timedOut = true;
+        signalGroup('SIGTERM');
+        escalation = setTimeout(() => signalGroup('SIGKILL'), 1000);
+      }, opts.timeoutMs ?? 30_000);
+      const collect = (into: Buffer[], chunk: Buffer): void => {
+        size += chunk.length;
+        if (size > 64 * 1024 * 1024) {
+          failure = new Error('command output exceeded 64 MiB');
+          signalGroup('SIGKILL');
+        } else into.push(chunk);
+      };
+      child.stdout.on('data', (chunk: Buffer) => collect(stdout, chunk));
+      child.stderr.on('data', (chunk: Buffer) => collect(stderr, chunk));
+      child.on('error', (error: NodeJS.ErrnoException) => { failure = error; });
+      child.on('close', (code) => {
+        clearTimeout(timeout); clearTimeout(escalation);
+        if (timedOut) signalGroup('SIGKILL');
+        const detail = timedOut ? `ETIMEDOUT after ${opts.timeoutMs ?? 30_000}ms` : failure?.message;
+        const err = Buffer.concat(stderr).toString('utf8');
+        resolve({ code: failure?.code === 'ENOENT' ? 127 : timedOut || failure ? 1 : code ?? 1, stdout: Buffer.concat(stdout).toString('utf8'), stderr: detail ? `${err}${err ? '\n' : ''}${detail}` : err });
+      });
+      child.stdin.on('error', () => { /* a child that exits before reading stdin may close the pipe */ });
+      child.stdin.end(opts.input);
+    });
     const r = spawnSync(cmd, args, {
       cwd: opts.cwd,
       env,

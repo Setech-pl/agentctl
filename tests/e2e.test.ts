@@ -61,7 +61,8 @@ Review NC-1.
     const lines = r.stdout.split('\n');
     const commands = lines.filter((l) => l && !l.startsWith('#')).map((l) => l.replace(/^(write \S+) \(\d+ bytes\)$/, '$1'));
     assert.deepEqual(commands, [
-      `git -C ${repo} worktree add -b nc-1 ${wtDir} main`,
+      `git -C ${repo} branch nc-1 main`,
+      `git -C ${repo} worktree add ${wtDir} nc-1`,
       `mkdir -p ${config.stateDir}/nc-1`,
       `write ${config.stateDir}/nc-1/TASK.md`,
       `mkdir -p ${config.cache}/nc-1`,
@@ -144,7 +145,7 @@ describe('spec example', () => {
     assert.ok(commands.some((c) => c.startsWith("tmux send-keys -t '=agentctl:task-42' -l -- 'codex --sandbox danger-full-access -m gpt-6-astra -c model_reasoning_effort=medium -c ") && c.includes('notify=[') && c.includes('event')));
     assert.ok(!commands.some((c) => c.includes('claude')));
     assert.ok(r.stdout.includes('#   Model: gpt-6-astra · effort medium'));
-    assert.ok(commands.some((c) => c.startsWith('git -C ') && c.includes('worktree add -b task-42-notification-sound')));
+    assert.ok(commands.some((c) => c.startsWith('git -C ') && c.includes('branch task-42-notification-sound')));
 
     const bad = agentctl(['new', '--dry-run', '--agent', 'gemini', f], { AGENTCTL_HOME: none });
     assert.equal(bad.code, 1);
@@ -156,7 +157,7 @@ describe('spec example', () => {
     fs.writeFileSync(f, EXAMPLE_SPEC);
     const r = agentctl(['new', '--dry-run', f], { AGENTCTL_HOME: path.join(scratch.dir, 'none') });
     assert.equal(r.code, 0, r.stderr);
-    assert.match(r.stdout, /git -C \S+sample-app worktree add -b task-42-notification-sound \S+sample-app-task-42 main/);
+    assert.match(r.stdout, /git -C \S+sample-app branch task-42-notification-sound main/);
   });
 });
 

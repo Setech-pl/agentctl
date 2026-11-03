@@ -54,7 +54,7 @@ async function runSetup(ctx: Context, spec: ResolvedSpec, worktree: string): Pro
   if (!runner.dryRun) await runner.writeFile(logFile, '');
   for (const [i, command] of spec.setup.entries()) {
     ctx.info(`${spec.task}: setup ${i + 1}/${spec.setup.length}: ${command}`);
-    const r = await runner.exec('sh', ['-c', command], { cwd: worktree, timeoutMs: ctx.config.git.timeoutS * 1000 });
+    const r = await runner.exec('sh', ['-c', command], { cwd: worktree, timeoutMs: ctx.config.git.timeoutS * 1000, async: true });
     if (runner.dryRun) continue;
     const output = `${r.stdout}${r.stderr}`;
     await runner.appendFile(logFile, `$ ${command}\n${output}${output.endsWith('\n') || output === '' ? '' : '\n'}[exit ${r.code}]\n\n`);

@@ -39,23 +39,18 @@ export async function addWorktree(runner: Runner, repo: ResolvedRepo, timeoutS =
       else {
         const base = await runner.exec('git', ['-C', repo.path, 'rev-parse', '--verify', repo.base ?? 'HEAD'], { readOnly: true });
         if (base.code === 0) baseOid = base.stdout.trim();
-        if (runner.dryRun) {
-          args.push('-b', repo.branch, repo.worktree);
-          if (repo.base) args.push(repo.base);
-        } else {
-          // A successful explicit creation is ownership evidence; a failed -b checkout alone is not.
-          if (!baseOid) throw gitFailure(`cannot resolve base for ${repo.worktree}`, base.stderr);
-          const created = await runner.exec('git', ['-C', repo.path, 'branch', repo.branch, baseOid], { timeoutMs: timeoutS * 1000 });
-          if (created.code !== 0) throw gitFailure(`cannot create branch ${repo.branch}`, created.stderr);
-          createdBranch = true;
-          args.push(repo.worktree, repo.branch);
-        }
+        // A successful explicit creation is ownership evidence; a failed -b checkout alone is not.
+        if (!baseOid && !runner.dryRun) throw gitFailure(`cannot resolve base for ${repo.worktree}`, base.stderr);
+        const created = await runner.exec('git', ['-C', repo.path, 'branch', repo.branch, repo.base ?? 'HEAD'], { timeoutMs: timeoutS * 1000, async: true });
+        if (created.code !== 0) throw gitFailure(`cannot create branch ${repo.branch}`, created.stderr);
+        createdBranch = !runner.dryRun;
+        args.push(repo.worktree, repo.branch);
       }
     } else {
       args.push('--detach', repo.worktree);
       if (repo.base) args.push(repo.base);
     }
-    const r = await runner.exec('git', args, { timeoutMs: timeoutS * 1000 });
+    const r = await runner.exec('git', args, { timeoutMs: timeoutS * 1000, async: true });
     if (r.code === 0) return;
     const residue: string[] = [];
     // Nonempty partial checkouts are kept: a failed checkout cannot prove who wrote their contents.

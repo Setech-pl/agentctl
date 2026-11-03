@@ -62,7 +62,7 @@ import { AgentctlError, errorMessage, formatLocalTime, resolvePath } from './uti
  * The tools of `agentctl mcp`. This file is data and functions only: the MCP SDK front (src/mcp/server.ts) registers them.
  *
  * What the chat can reach: the status of the tasks, the last lines of a task window, the report file each task's TASK.md names,
- * and the prompt in TASK.md. Nothing takes a path from the chat. With `mcp.allow` set, the chat can also send a prompt, start tasks
+ * and the prompt in TASK.md. Only explicit report/adoption tools accept user-supplied paths. With `mcp.allow` set, the chat can also send a prompt, start tasks
  * from a spec, interrupt, close and move. Never: merge, push, rebase or run a shell command. gc uses only the shared protected plan; report_from/adopt accept explicit user paths.
  */
 

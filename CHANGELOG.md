@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - Generate CLI → MCP inventory (including options and explicit terminal/installation/internal-hook exceptions) with a guard test. Descriptions name the CLI equivalent.
 - Keep existing mcp.allow permissions unchanged. New explicit groups are queue:*, cohort and manager:*. close, interrupt and queue_rm now require two steps. Enforce session-bound previews for starts/removals, reject changed scopes, audit and journal writes and announce them on the desktop.
 - Expose device-deduplicated disk facts through capacity/status/doctor/board, five-minute size caching, configurable 50/20 GiB thresholds, transition events/notifications and critical-space start warnings. Unknown values stay n/d.
+- Run checkout and setup asynchronously across repositories; timeouts terminate their own child process groups.
 - Use git.timeout_s (default 600 s) for worktree checkout and setup. Serialize worktree creation by Git common directory, recover dead lock owners, preserve uncertain partial checkouts with actionable residue details, and validate residue before queue retry.
 - MCP status JSON now has {disk, tasks}; gc_preview remains read-only, while the separately permitted gc applies the protected CLI plan (branches opt-in, never force).
 
