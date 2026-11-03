@@ -67,7 +67,7 @@ Match the surrounding code. agentctl never merges, pushes, rebases or turns on a
 
 Codex: collapsed questions show their count and the shortcut read from “to answer”. `needs-input` takes priority while Codex keeps working; after answering, the screen determines the state again. Board preview, peek, status/MCP `question` and macOS show the question or opening instructions. ntfy sends only opening instructions by default; `notify.ntfy.include_question: true` opts into question text.
 
-## npm releases and first publication (Marcin)
+## npm releases and first publication
 
 Normal releases: change the version in package.json and package-lock.json, update CHANGELOG, open a PR,
 merge after CI, then create a GitHub release whose tag equals `v` plus the package version on the merge commit.
@@ -82,16 +82,16 @@ The following are instructions for the maintainer to execute later, not steps ru
 1. On [npmjs.com](https://www.npmjs.com/signup), create/verify your account and email. Enable 2FA in Account Settings
    (security key/passkey or the method currently offered by npm). Create the free public-package organization `setech-pl`
    or obtain owner/publish permissions from its existing owner. GitHub membership does not grant npm permissions.
-2. Merge the 0.16.0 PR first. On the clean merge commit, prepare and inspect the package using zsh:
+2. Merge the reviewed 0.17.0 changes first. On the clean merge commit, prepare and inspect the package using zsh:
 
 ```zsh
 cd ~/Projects/agentctl
 [[ -z $(git status --porcelain) ]] || return 1
-[[ $(node -p 'require("./package.json").version') == 0.16.0 ]] || return 1
-mkdir -p ~/Projects/cache/agentctl-16
-export npm_config_cache=~/Projects/cache/agentctl-16/npm-cache
-export TMPDIR=~/Projects/cache/agentctl-16/tmp
-export AGENTCTL_TEST_CACHE=~/Projects/cache/agentctl-16/tests
+[[ $(node -p 'require("./package.json").version') == 0.17.0 ]] || return 1
+mkdir -p ~/Projects/cache/agentctl-17
+export npm_config_cache=~/Projects/cache/agentctl-17/npm-cache
+export TMPDIR=~/Projects/cache/agentctl-17/tmp
+export AGENTCTL_TEST_CACHE=~/Projects/cache/agentctl-17/tests
 mkdir -p "$TMPDIR"
 npm ci
 npm test
@@ -102,7 +102,7 @@ npm publish --dry-run
 ```
 
 3. Trusted publisher configuration requires an existing package. For this new package the first publication is manual.
-   Login interactively, complete browser authentication and 2FA, then publish 0.16.0 from that reviewed commit.
+   Login interactively, complete browser authentication and 2FA, then publish 0.17.0 from that reviewed commit.
    Local publication explicitly disables provenance: attestations need a supported CI identity.
    These commands change npm authentication and publish publicly; execute them only when ready:
 
@@ -111,11 +111,13 @@ cd ~/Projects/agentctl
 npm login --registry=https://registry.npmjs.org/
 npm whoami
 npm publish --access public --provenance=false
-npm view @setech-pl/agentctl@0.16.0 version dist --json
+npm view @setech-pl/agentctl@0.17.0 version dist --json
 ```
 
-4. Create the GitHub release `v0.16.0` from the reviewed merge commit. The workflow sees the manual bootstrap and skips
-   republishing that immutable npm version. The first OIDC/provenance publication must use a new version, for example 0.16.1.
+4. If the first manual publication is 0.17.0, create the GitHub release `v0.17.0` from that reviewed commit. The workflow
+   sees the manual bootstrap and skips republishing the immutable version. It does not validate OIDC or add provenance
+   retroactively; the first OIDC publication must use the next unpublished version. Alternatively, manually bootstrap
+   the reviewed 0.16.0 first; then 0.17.0 can be the first OIDC release. Do not create the publisher until that release is ready.
 5. When that next release is ready, open the package's Settings → Trusted publishing on npmjs.com. Choose GitHub Actions:
    owner **Setech-pl**, repository **agentctl**, workflow filename **publish.yml** (only the filename), environment blank.
    Enable direct **npm publish** permission; stage-only permission does not authorize this workflow.
