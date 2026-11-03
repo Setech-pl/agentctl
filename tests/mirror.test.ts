@@ -1,3 +1,4 @@
+import { completedRecordFromSpec as recordFromSpec } from './helpers.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -7,7 +8,7 @@ import { syncMirror } from '../src/core/mirror.ts';
 import { pullTask } from '../src/core/pull.ts';
 import { resolveSpec, splitSpecs } from '../src/core/spec.ts';
 import { collectStatus, reportStatus } from '../src/core/status.ts';
-import { recordFromSpec, renderTaskMd, taskFile } from '../src/core/taskstore.ts';
+import { renderTaskMd, taskFile } from '../src/core/taskstore.ts';
 import { makeConfig, makeContext, useScratch } from './helpers.ts';
 
 const scratch = useScratch();

@@ -1,3 +1,4 @@
+import { reportFingerprint } from './report-state.ts';
 import fs from 'node:fs';
 import { findClipboardTool, writeClipboard } from './clipboard.ts';
 import { cohortRows } from './cohort.ts';
@@ -131,6 +132,7 @@ export function joinReports(rows: StatusRow[]): { text: string; pulled: PulledRe
 
 /** Write the pull time into TASK.md of each task: `pull --ready` does not hand the report over again. */
 export async function markPulled(ctx: Context, rows: StatusRow[]): Promise<void> {
+  for (const row of rows) if (row.reportSignature && reportFingerprint(row.reportPath) !== row.reportSignature) throw new AgentctlError(`${row.task}: report changed during delivery; it remains unread`);
   const when = new Date(ctx.runner.now()).toISOString();
   for (const row of rows) await setHeaderField(ctx.runner, taskFile(ctx.config, row.task.toLowerCase()), 'pulled', when);
 }

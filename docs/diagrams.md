@@ -206,7 +206,7 @@ stateDiagram-v2
     working --> overloaded: provider capacity error
     overloaded --> working: bounded retry, idle empty input only
     waiting --> candidate: unconfirmed report path
-    candidate --> ready: canonical or confirmed report
+    candidate --> ready: report-end or ended and settled current attempt
     working --> limited: usage limit message
     limited --> working: limit reset, retry
     limited --> superseded: move to the other provider

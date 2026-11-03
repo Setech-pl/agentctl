@@ -1,3 +1,4 @@
+import { completedRecordFromSpec as recordFromSpec } from './helpers.ts';
 import assert from 'node:assert/strict';
 import { formatLocalTime } from '../src/core/util.ts';
 import fs from 'node:fs';
@@ -12,7 +13,7 @@ import { collectStatus } from '../src/core/status.ts';
 import { renderStatusTable } from '../src/render.ts';
 import { resolveSendSpec, resolveSpec, splitSpecs } from '../src/core/spec.ts';
 import type { ResolvedSpec } from '../src/core/spec.ts';
-import { recordFromSpec, renderTaskMd, taskFile } from '../src/core/taskstore.ts';
+import { renderTaskMd, taskFile } from '../src/core/taskstore.ts';
 import type { ExecOptions, ExecResult } from '../src/core/runner.ts';
 import { makeConfig, makeContext, useScratch } from './helpers.ts';
 
@@ -99,7 +100,8 @@ Second line.
       ],
     );
     const paste = runner.calls.find((c) => c.line.startsWith('tmux load-buffer'));
-    assert.equal(paste?.input, 'Model: opus · effort medium\n\nFirst line.\nSecond line.');
+    assert.ok(paste?.input?.startsWith('Model: opus · effort medium\n\nFirst line.\nSecond line.\n\nReport protocol:'));
+    assert.match(paste!.input!, /agentctl:report-end/);
 
     const record = fs.existsSync(path.join(state, 'TASK.md'));
     assert.equal(record, false, 'a recording runner must not write files');

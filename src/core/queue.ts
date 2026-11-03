@@ -1,3 +1,4 @@
+import { redactQueue } from './mcp-redact.ts';
 import { checkRetryWorktrees } from './git.ts';
 import { collectCapacity, capacitySnapshot, snapshotLines } from './capacity.ts';
 import fs from 'node:fs';
@@ -571,7 +572,10 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
       await opts.log?.(`queue: starting ${entry.task} (${entry.agent})`);
       const raws = splitSpecs(entry.spec, `queue entry ${entry.task}`);
       const spec = resolveSpec(raws[0] as RawSpec, { config });
-      if (entry.reuse && entry.retryAt) await checkRetryWorktrees(ctx.runner, spec.repos);
+      if (entry.reuse) {
+        if ((await ctx.tmux.windows()).some(w => w.plain === spec.window)) throw new AgentctlError(`${entry.task}: task window already exists; inspect it instead of retrying`);
+        await checkRetryWorktrees(ctx.runner, spec.repos);
+      }
       await newTasks(startCtx, [spec], {
         ...(entry.agentOverride ? { agent: entry.agentOverride } : {}),
         noSwitch: true,
@@ -605,7 +609,8 @@ async function failEntry(ctx: Context, entry: QueueEntry, error: string, notifie
   const failed: QueueEntry = { ...rest, attempts, ...(retry ? { retryAt: new Date(ctx.runner.now() + [60_000, 300_000, 900_000][attempts.length - 1]!).toISOString(), reuse: true } : {}), status: retry ? 'queued' : 'failed', failedAt: new Date(ctx.runner.now()).toISOString(), error, order: highest + 1 };
   await writeEntry(ctx, failed);
   await ctx.runner.writeFile(queueLogFile(config, failed), `${log.join('\n')}${log.length > 0 ? '\n' : ''}error: ${error}\n`);
-  const text = retry ? `${entry.task}: start z kolejki – ${firstLine(error)}; ponowienie ${attempts.length}/3 o ${failed.retryAt}` : `${entry.task}: start z kolejki nie powiódł się – ${firstLine(error)}`;
+  const safeError = (redactQueue({ ...entry, error }, config) as QueueEntry).error ?? 'n/d';
+  const text = retry ? `${entry.task}: start z kolejki – ${firstLine(safeError)}; ponowienie ${attempts.length}/3 o ${failed.retryAt}` : `${entry.task}: start z kolejki nie powiódł się – ${firstLine(safeError)}`;
   await opts.log?.(`queue: ${text}`);
   await recordJournal(ctx, { kind: retry ? 'queue-retry' : 'queue-failed', task: entry.task, text, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
   if (notify) await notifyPlain(ctx, notifier, entry.task, retry ? text : `${text} (agentctl queue retry ${entry.task})`, opts.self);

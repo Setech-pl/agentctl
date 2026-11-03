@@ -1,3 +1,4 @@
+import { readTaskRecord } from '../src/core/taskstore.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -95,7 +96,8 @@ describe('resume: starting the agents', () => {
     assert.match(results[0]?.command ?? '', /^claude --model opus --effort high --settings \S+claude-settings\.json --resume aaaa-bbbb$/);
     assert.match(results[1]?.command ?? '', /^codex resume --last --sandbox danger-full-access -m gpt-6\.1-sol -c model_reasoning_effort=high -c 'notify=/);
     const cmds = w.runner.commands.join('\n');
-    assert.ok(!/paste-buffer|load-buffer/.test(cmds), 'no prompt is pasted');
+    assert.ok(w.runner.calls.filter(c => c.line.includes('load-buffer')).every(c => c.input?.startsWith('Report protocol:')), 'only new attempt instructions, not the original task prompt');
+    assert.ok(readTaskRecord(w.config, 'nc-1')!.attemptId);
     assert.ok(fs.existsSync(path.join(w.config.stateDir, 'nc-1', 'claude-settings.json')), 'the hooks and the usage tap are wired again');
     assert.match(fs.readFileSync(path.join(w.config.stateDir, 'nc-1', 'claude-settings.json'), 'utf8'), /usage-tap/);
     assert.match(fs.readFileSync(path.join(w.config.stateDir, 'nc-1', 'TASK.md'), 'utf8'), /window_id: ['"]?@/);

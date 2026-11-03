@@ -82,3 +82,5 @@ agentctl does not merge, push, publish, open PRs, choose a provider, judge repor
 Since 0.17.1 MCP covers queue retry/control, cohorts, `gc` and diagnostics. Check `capacity.disk` before dispatching work. For a failed queue entry, read the reason and propose a repair or `queue_retry`. At disk-warn propose `gc_preview`; at disk-critical seek approval for `gc`, or use it within the user’s authorization. Starts and removals require preview and confirmation; `mcp.allow` alone does not replace confirmation. See [MCP](mcp.md).
 
 Use `pull_ready` summary mode for reports; request only the needed `get_report` section. Allocate from provider percentages, reset times and stats. Token estimates are informational. `self_verdict` is the agent assessment; `mark` is the human evaluation.
+
+0.17.2 review correction / poprawka po przeglądzie: summary_delivered ≠ pulled ≠ mark. Use full report pages or explicit ack; reports require current attempt plus report-end or settled ended turn. Stable client event cursors and bounded pages are described in [mcp.md](mcp.md); report.settle_s and overload.give_up_after in [configuration.md](configuration.md).

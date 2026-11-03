@@ -1,0 +1,9 @@
+╭────────────────────────────────────────────────────────────╮
+│ >_ OpenAI Codex (v0.166.0)                                 │
+│ model: gpt-6.1-sol high       directory: /worktrees/app     │
+╰────────────────────────────────────────────────────────────╯
+› Implement the patch.
+■ Selected model is at capacity. Please try a different model.
+
+› 
+  ? for shortcuts                                  97% context left

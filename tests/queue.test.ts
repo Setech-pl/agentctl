@@ -267,8 +267,8 @@ describe('queue: starting', () => {
     const again = await retryEntry(s.ctx, 'NC-1');
     assert.deepEqual([again.status, again.reuse, again.error], ['queued', true, undefined]);
     assert.deepEqual(waiting(readQueue(s.config)).map((e) => e.task), ['NC-2', 'NC-1']);
-    broken = false;
-    fs.mkdirSync(`${s.repo}-nc-1`, { recursive: true });
+    broken = false; // retry without an on-disk fixture creates a new complete worktree through the fake git adapter
+
     assert.deepEqual(await s.tick(), ['NC-2', 'NC-1']);
     assert.equal(readQueue(s.config).length, 0);
   });
@@ -414,7 +414,7 @@ describe('after: dependencies', () => {
   const writeReport = (s: Setup, task: string): void => {
     const record = readTaskRecord(s.config, task.toLowerCase())!;
     fs.mkdirSync(path.dirname(record.report), { recursive: true });
-    fs.writeFileSync(record.report, `# ${task}\nVerdict: PASS\n`);
+    fs.writeFileSync(record.report, `# ${task}\nVerdict: PASS\n<!-- agentctl:report-end -->`);
   };
 
   it('a task with after waits until the named task has a report, then starts (the other tasks are not held back)', async () => {

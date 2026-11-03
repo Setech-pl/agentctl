@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 Economy and reliability.
 
+- Cross-review safety fixes: adapter-specific final error banners, guarded retries before Enter, recovery-reset persistent episodes and give_up_after; complete attempt-bound reports require report-end or an ended/settled write. Timed-out checkout reuse now checks git status, locks, HEAD/branch and running work.
+- MCP behavior correction: summary receipt no longer marks full reports pulled. Explicit ack, complete full-mode delivery or contiguous get_report EOF is separate from user mark. Stable client cursors, bounded event fragments/pages, stable report selections, fence-aware report pages and secret redaction in queue_show.
+
+
 - Behavior change: MCP events_since, status, queue_list, cohort_show, limits and capacity default to concise text only; `format: json` / `detail: true` returns full data. pull_ready defaults to bounded summaries, with explicit full mode and pagination. get_report supports Markdown sections and line pagination.
 - Per-client MCP cursors with conservative legacy replay; manager begins with events_since, reads report summaries and uses provider percentages/reset/stats for allocation.
 - Strict report alternatives and visible report-candidate state; canonical report wins, explicit report_from confirms. Candidates never release dependencies or complete cohorts.

@@ -1,3 +1,4 @@
+import { completedRecordFromSpec as recordFromSpec } from './helpers.ts';
 import assert from 'node:assert/strict';
 import { formatLocalTime } from '../src/core/util.ts';
 import fs from 'node:fs';
@@ -18,7 +19,7 @@ import { resolveSpec, splitSpecs } from '../src/core/spec.ts';
 import type { ResolvedSpec } from '../src/core/spec.ts';
 import { DEFAULT_WINDOW_ICONS } from '../src/core/icons.ts';
 import { collectStatus, statusMarkdown } from '../src/core/status.ts';
-import { readTaskRecord, recordFromSpec, renderTaskMd, taskFile } from '../src/core/taskstore.ts';
+import { readTaskRecord, renderTaskMd, taskFile } from '../src/core/taskstore.ts';
 import { ensureWatchWindow, runWatch, WatchMemory, watchLogPath, watchTick } from '../src/core/watch.ts';
 import { makeConfig, useScratch } from './helpers.ts';
 

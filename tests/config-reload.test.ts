@@ -20,7 +20,7 @@ import { DiskRunner, FakeTmux, makeConfig, runCli, seedTask, useScratch } from '
 
 const scratch = useScratch();
 const write = (config: GlobalConfig, extra: string): void =>
-  fs.writeFileSync(config.path, `cache: ${config.cache}\nstate_dir: ${config.stateDir}\nusage:\n  claude_dir: ${config.usage.claudeDir}\n  codex_dir: ${config.usage.codexDir}\n${extra}`);
+  fs.writeFileSync(config.path, `cache: ${config.cache}\nstate_dir: ${config.stateDir}\nreport: {settle_s: 0}\nusage:\n  claude_dir: ${config.usage.claudeDir}\n  codex_dir: ${config.usage.codexDir}\n${extra}`);
 const loader = (config: GlobalConfig) => () => loadGlobalConfig(path.dirname(config.path));
 
 describe('config store', () => {

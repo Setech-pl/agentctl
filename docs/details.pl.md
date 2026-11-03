@@ -561,7 +561,7 @@ o postęp najwyżej co 10 sekund. Board wymaga terminala; bez tmux `Enter` mówi
 | `needs-trust` | agent pokazuje dialog zaufania do folderu; musi na niego odpowiedzieć człowiek |
 | `needs-input` | agent zadał **Tobie** pytanie lub prosi o zgodę i czeka (`question_pattern`; Codex: `? <pytanie>` z opcjami i `• Waiting for your answer.` albo dialog zatwierdzenia; Claude Code: dialog `Enter to select · Esc to cancel` albo dialog uprawnień; albo [zdarzenie](#zdarzenia) `Notification` Claude'a) |
 | `limited` | agent mówi, że jego limit użycia jest wyczerpany (`limit_patterns` albo zdarzenie `StopFailure` Claude'a); zob. [Limity i move](#limity-i-move) |
-| `report-ready` | plik raportu istnieje i jest nowszy niż start (agent jest bezczynny albo okno zniknęło) |
+| `report-ready` | raport bieżącej próby jest kompletny (znacznik końca lub stabilny po końcu tury); agent bezczynny albo okno zniknęło |
 | `superseded` | zadanie przeniesiono do drugiego dostawcy przez `agentctl move`; to stare okno, które zamykasz sam |
 | `dead` | okno zniknęło i nie ma raportu |
 | `closed` | uruchomiono `agentctl close` (albo folder stanu jest w archiwum): widoczne tylko w `status --all` i pod klawiszem `a` na boardzie, zob. [Zamykanie i ukrywanie zadań](#zamykanie-i-ukrywanie-zadań) |
@@ -683,3 +683,5 @@ Kolejka ponawia wyłącznie jawne błędy przejściowe OS/sieci: ETIMEDOUT, EAGA
 W links i env użyj `{worktree:nazwa-repo|~/fallback}`: repozytorium z repos tego zadania wygrywa, a fallback służy tylko przy jego braku. Brak obu daje czytelny błąd; cel linku musi istnieć po utworzeniu worktree i setup. Podgląd new/queue pokazuje rozwiązane ścieżki linków.
 
 Źródła: [błędy API Anthropic](https://platform.claude.com/docs/en/api/errors) potwierdzają 529/overloaded_error; [kod błędów Codexa](https://github.com/openai/codex/blob/main/codex-rs/protocol/src/error.rs) potwierdza komunikat Selected model is at capacity jako ServerOverloaded. Nie uruchamiano rzeczywistych agentów. Dodatkowe warianty monitorów/powłok i surowych kodów błędów przetestowano na atrapach; ich brzmienia w aktualnej zainstalowanej wersji nie zweryfikowano.
+
+0.17.2 review correction / poprawka po przeglądzie: summary_delivered ≠ pulled ≠ mark. Use full report pages or explicit ack; reports require current attempt plus report-end or settled ended turn. Stable client event cursors and bounded pages are described in [mcp.md](mcp.md); report.settle_s and overload.give_up_after in [configuration.md](configuration.md).

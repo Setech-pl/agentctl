@@ -239,7 +239,7 @@ stateDiagram-v2
     working --> overloaded: provider capacity error
     overloaded --> working: bounded retry, idle empty input only
     waiting --> candidate: unconfirmed report path
-    candidate --> ready: canonical or confirmed report
+    candidate --> ready: report-end or ended and settled current attempt
     working --> limited: usage limit message
     limited --> working: limit reset, retry
     limited --> superseded: move to the other provider
@@ -796,3 +796,5 @@ Ideas, not promises:
 Since 0.17.1 MCP covers queue retry/control, cohorts, `gc` and diagnostics. Check `capacity.disk` before dispatching work. For a failed queue entry, read the reason and propose a repair or `queue_retry`. At disk-warn propose `gc_preview`; at disk-critical seek approval for `gc`, or use it within the user’s authorization. Starts and removals require preview and confirmation; `mcp.allow` alone does not replace confirmation. See [MCP](docs/mcp.md).
 
 0.17.2 changes MCP read defaults to concise text and `pull_ready` to report excerpts. Use `format: "json"`, `mode: "full"` or `get_report` sections for detail. Unconfirmed reports (`report-candidate`) do not release dependencies; `overloaded` retries only at an idle empty prompt. See [configuration](docs/configuration.md).
+
+Report summaries are receipts, not full-report acknowledgment: use full delivery or explicit ack; user mark is separate. Reports complete with `<!-- agentctl:report-end -->` or an ended turn plus report.settle_s (30 s), within the current attempt.

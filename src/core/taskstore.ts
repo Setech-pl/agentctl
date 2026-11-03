@@ -1,3 +1,4 @@
+import { attemptFields } from './report-state.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import YAML from 'yaml';
@@ -37,12 +38,19 @@ export interface TaskRecord {
   /** Where the report was found when the agent wrote it elsewhere; the canonical file is a copy of it. */
   reportSource?: string;
   reportCandidate?: string;
+  reportCompleteHash?: string;
   agentCliVersion?: string;
   /** ISO time of the last copy from `reportSource` and the modification time (ISO) of the source that was copied. */
   reportCopied?: string;
   reportSourceMtime?: string;
   /** ISO timestamp of `agentctl new`. */
   started: string;
+  attempt?: number;
+  attemptId?: string;
+  attemptStarted?: string;
+  attemptReportBaseline?: string;
+  turnEndedAt?: string;
+  summaryDelivered?: string;
   /** The order as written in the spec; agent/model/effort above are what actually runs. */
   requested: Order;
   switchedBy?: 'flag' | 'limit';
@@ -105,6 +113,7 @@ export function recordFromSpec(spec: ResolvedSpec, config: GlobalConfig, started
     started: new Date(startedMs).toISOString(),
     requested: spec.requested,
   };
+  Object.assign(record, attemptFields(record, startedMs));
   if (spec.switchedBy) record.switchedBy = spec.switchedBy;
   if (spec.reviewOf) record.reviewOf = spec.reviewOf;
   if (spec.pin) record.pin = true;
@@ -137,10 +146,12 @@ export function renderTaskMd(record: TaskRecord, prompt: string): string {
   if (record.reportAlt && record.reportAlt.length > 0) header.report_alt = record.reportAlt;
   if (record.agentCliVersion) header.agent_cli_version = record.agentCliVersion;
   if (record.reportCandidate) header.report_candidate = record.reportCandidate;
+  if (record.reportCompleteHash) header.report_complete_hash = record.reportCompleteHash;
   if (record.reportSource) header.report_source = record.reportSource;
   if (record.reportCopied) header.report_copied = record.reportCopied;
   if (record.reportSourceMtime) header.report_source_mtime = record.reportSourceMtime;
   header.started = record.started;
+  for (const [key, value] of Object.entries({ attempt: record.attempt, attempt_id: record.attemptId, attempt_started: record.attemptStarted, attempt_report_baseline: record.attemptReportBaseline, turn_ended_at: record.turnEndedAt, summary_delivered: record.summaryDelivered })) if (value !== undefined) header[key] = value;
   if (record.pulled) header.pulled = record.pulled;
   if (record.adopted) header.adopted = record.adopted;
   if (record.pin) header.pin = true;
@@ -217,6 +228,8 @@ export function parseTaskRecord(text: string): TaskRecord | undefined {
     model: record.model,
     effort: record.effort === 'unknown' ? 'high' : record.effort,
   };
+  if (typeof data.attempt === 'number') record.attempt = data.attempt;
+  for (const [key, field] of [['attempt_id', 'attemptId'], ['attempt_started', 'attemptStarted'], ['attempt_report_baseline', 'attemptReportBaseline'], ['turn_ended_at', 'turnEndedAt'], ['summary_delivered', 'summaryDelivered']] as const) if (typeof data[key] === 'string') record[field] = data[key];
   if (typeof data.window_id === 'string' && /^@\d+$/.test(data.window_id)) record.windowId = data.window_id;
   if (data.switched_by === 'flag' || data.switched_by === 'limit') record.switchedBy = data.switched_by;
   if (typeof data.review_of === 'string') record.reviewOf = data.review_of;
@@ -224,6 +237,7 @@ export function parseTaskRecord(text: string): TaskRecord | undefined {
   if (Array.isArray(data.report_alt) && data.report_alt.every((x: unknown) => typeof x === 'string')) record.reportAlt = data.report_alt as string[];
   if (typeof data.agent_cli_version === 'string') record.agentCliVersion = data.agent_cli_version;
   if (typeof data.report_candidate === 'string') record.reportCandidate = data.report_candidate;
+  if (typeof data.report_complete_hash === 'string') record.reportCompleteHash = data.report_complete_hash;
   if (typeof data.report_source === 'string' && data.report_source !== '') record.reportSource = data.report_source;
   if (typeof data.report_copied === 'string') record.reportCopied = data.report_copied;
   if (typeof data.report_source_mtime === 'string') record.reportSourceMtime = data.report_source_mtime;
@@ -288,12 +302,12 @@ export function listArchivedRecords(config: GlobalConfig): TaskRecord[] {
 }
 
 /** Set one key in the YAML header of an existing TASK.md; the body (prompt, follow-ups) and the other keys stay as they are. */
-export async function setHeaderField(runner: Runner, file: string, key: string, value: string | boolean | null): Promise<boolean> {
+export async function setHeaderField(runner: Runner, file: string, key: string, value: string | number | boolean | null): Promise<boolean> {
   return setHeaderFields(runner, file, { [key]: value });
 }
 
 /** Set several keys of the header in one write; `null` removes the key. */
-export async function setHeaderFields(runner: Runner, file: string, fields: Record<string, string | boolean | null>): Promise<boolean> {
+export async function setHeaderFields(runner: Runner, file: string, fields: Record<string, string | number | boolean | null>): Promise<boolean> {
   let text: string;
   try {
     text = fs.readFileSync(file, 'utf8');

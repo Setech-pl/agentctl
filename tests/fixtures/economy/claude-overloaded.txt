@@ -1,0 +1,10 @@
+╭── Claude Code v2.1.309 ─────────────────────────────────────╮
+│ Sonnet · Claude Max · /worktrees/app                        │
+╰────────────────────────────────────────────────────────────╯
+❯ Implement the change and write the report.
+⏺ I will inspect the tests.
+  ⎿  API Error: 529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}
+──────────────────────────────────────────────────────────────
+❯ 
+──────────────────────────────────────────────────────────────
+  ? for shortcuts

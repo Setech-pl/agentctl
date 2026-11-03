@@ -77,7 +77,7 @@ export function parseClaudeEvent(kind: ClaudeKind, input: unknown): AgentEvent {
   if (kind === 'stop') return { agent: 'claude', outcome: 'turn-complete', type: 'stop', text: firstLine(str(data.last_assistant_message)) };
   const error = str(data.error);
   const detail = clip(str(data.error_details) || str(data.last_assistant_message) || error, MAX_QUESTION);
-  return { agent: 'claude', outcome: error === 'overloaded_error' || isOverloaded(detail) ? 'overloaded' : CLAUDE_LIMIT_ERRORS.has(error) ? 'limited' : 'ignored', type: `stop-failure:${error || 'unknown'}`, text: detail };
+  return { agent: 'claude', outcome: ['overloaded', 'overloaded_error'].includes(error) || /^API Error:\s*529\b/.test(detail) ? 'overloaded' : CLAUDE_LIMIT_ERRORS.has(error) ? 'limited' : 'ignored', type: `stop-failure:${error || 'unknown'}`, text: detail };
 }
 
 /** Codex also runs the notify command for the turn that writes the session title: a one-key JSON object, not a real turn. */

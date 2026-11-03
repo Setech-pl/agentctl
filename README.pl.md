@@ -238,7 +238,7 @@ stateDiagram-v2
     working --> overloaded: przeciążenie dostawcy
     overloaded --> working: ponowienie tylko przy pustym bezczynnym promptcie
     waiting --> candidate: niepotwierdzona ścieżka raportu
-    candidate --> ready: raport kanoniczny lub potwierdzony
+    candidate --> ready: koniec raportu lub stabilny po zakończonej turze próby
     working --> limited: komunikat o limicie użycia
     limited --> working: limit odnowiony, ponowienie
     limited --> superseded: move do drugiego dostawcy
@@ -799,3 +799,5 @@ Dokumentacja szczegółowa jest po angielsku:
 Od 0.17.1 MCP udostępnia ponawianie i sterowanie kolejką, kohorty, sprzątanie `gc` i diagnostykę. Sprawdź `capacity.disk` przed zleceniem pracy. Przy `failed` przeczytaj powód i zaproponuj naprawę lub `queue_retry`; przy `disk-warn` zaproponuj `gc_preview`, a przy `disk-critical` poproś o zgodę na `gc` albo użyj go w ramach uprawnień użytkownika. Każde usuwanie/start wymaga podglądu i potwierdzenia; samo `mcp.allow` nie zastępuje potwierdzenia. Szczegóły: [MCP](docs/mcp.md).
 
 W 0.17.2 odczyty MCP domyślnie zwracają zwięzły tekst, a `pull_ready` skróty raportów. Pełne dane: `format: "json"`, `mode: "full"` lub sekcja `get_report`. `report-candidate` nie spełnia zależności; `overloaded` ponawia tylko przy pustym, bezczynnym promptcie. Szczegóły w [konfiguracji](docs/configuration.md).
+
+Skrót raportu oznacza dostarczenie skrótu; pełne pobranie i ocena mark są odrębne. Raport kończy znacznik `<!-- agentctl:report-end -->` albo zakończona tura i report.settle_s (30 s), w bieżącej próbie.

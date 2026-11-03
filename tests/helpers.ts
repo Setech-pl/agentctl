@@ -8,7 +8,7 @@ import type { GlobalConfig } from '../src/core/config.ts';
 import { Context } from '../src/core/context.ts';
 import { RecordingRunner } from '../src/core/runner.ts';
 import type { ExecOptions, ExecResult, RecordingOptions, Runner } from '../src/core/runner.ts';
-import { renderTaskMd, taskDir, taskFile } from '../src/core/taskstore.ts';
+import { recordFromSpec, renderTaskMd, taskDir, taskFile } from '../src/core/taskstore.ts';
 import type { TaskRecord } from '../src/core/taskstore.ts';
 
 export const REPO_ROOT = path.resolve(import.meta.dirname, '..');
@@ -34,8 +34,9 @@ export function makeConfig(root: string, extraYaml = ''): GlobalConfig {
   const home = path.join(root, 'home');
   fs.mkdirSync(home, { recursive: true });
   // The agents' logs are read from the scratch directory, never from the real ~/.claude and ~/.codex.
+  const reportSettings = /^report:/m.test(extraYaml) ? '' : 'report: {settle_s: 0}\n';
   const usage = /^usage:/m.test(extraYaml) ? '' : `usage:\n  claude_dir: ${path.join(root, 'claude-home')}\n  codex_dir: ${path.join(root, 'codex-home')}\n`;
-  fs.writeFileSync(path.join(home, 'config.yaml'), `cache: ${path.join(root, 'cache')}\nstate_dir: ${path.join(root, 'state')}\n${usage}${extraYaml}`);
+  fs.writeFileSync(path.join(home, 'config.yaml'), `cache: ${path.join(root, 'cache')}\nstate_dir: ${path.join(root, 'state')}\n${usage}${reportSettings}${extraYaml}`);
   return loadGlobalConfig(home);
 }
 
@@ -68,6 +69,7 @@ export function seedTask(config: GlobalConfig, task: string, extra: Partial<Task
     links: [],
     env: {},
     report: path.join(config.cache, task.toLowerCase(), `${task}.md`),
+    turnEndedAt: new Date().toISOString(),
     started: new Date(Date.UTC(2026, 9, 31, 11, 0, 0)).toISOString(),
     requested: { agent: 'claude', model: 'opus', effort: 'high' },
     ...extra,
@@ -212,4 +214,9 @@ export async function runCli(config: GlobalConfig, runner: Runner, argv: string[
   };
   const code = await main(argv, deps);
   return { code, stdout: out.join(''), stderr: err.join('') };
+}
+
+/** Fixture with a completed turn; readiness mechanics themselves are tested with default 30s in economy-fix. */
+export function completedRecordFromSpec(...args: Parameters<typeof recordFromSpec>): TaskRecord {
+  return { ...recordFromSpec(...args), turnEndedAt: new Date(Math.max(Date.now(), args[2])).toISOString() };
 }

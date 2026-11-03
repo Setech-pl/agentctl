@@ -17,7 +17,7 @@ await withHarness({ name: 'measure-economy', cacheRoot: defaultCacheRoot(), conf
     const record: TaskRecord = { task, window, session: h.session, agent: 'claude', model: 'sonnet', effort: 'medium', repos: [], links: [], env: {}, report, started: new Date(Date.now() - 60000).toISOString(), requested: { agent: 'claude', model: 'sonnet', effort: 'medium' }, cohort: 'fixture' };
     fs.mkdirSync(path.join(config.stateDir, window), { recursive: true });
     fs.writeFileSync(path.join(config.stateDir, window, 'TASK.md'), renderTaskMd(record, 'Fixture'));
-    fs.writeFileSync(report, `Werdykt: PASS\nSHA: abc123; branch: fixture\n## Summary\nDecision ${i}\n## Evidence\n${'x'.repeat(20000)}\n`);
+    fs.writeFileSync(report, `Werdykt: PASS\nSHA: abc123; branch: fixture\n## Summary\nDecision ${i}\n## Evidence\n${'x'.repeat(20000)}\n<!-- agentctl:report-end -->`);
   }
   fs.writeFileSync(path.join(h.agentctlHome, 'journal.jsonl'), JSON.stringify({ at: new Date(Date.now() - 5000).toISOString(), kind: 'report-ready', task: 'NC-1', text: 'Fixture ready' }) + '\n');
   const originals = new Map(fs.readdirSync(config.stateDir).map(n => { const file = path.join(config.stateDir, n, 'TASK.md'); return [file, fs.readFileSync(file, 'utf8')]; }));

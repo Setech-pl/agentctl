@@ -1,0 +1,16 @@
+╭── Claude Code v2.1.309 ─────────────────────────────────────╮
+│ Sonnet · Claude Max · /worktrees/app                        │
+╰────────────────────────────────────────────────────────────╯
+❯ Explain the patch.
+⏺ Bash(npm test)
+  ⎿  529 testów przeszło
+⏺ The old overload handler was removed:
+```ts
+const type = "overloaded_error";
+# komentarz
+```
+⏺ Overloaded functions were removed.
+──────────────────────────────────────────────────────────────
+❯ 
+──────────────────────────────────────────────────────────────
+  ? for shortcuts

@@ -84,9 +84,9 @@ it('economy: independent MCP clients and conservative migration preserve events'
   await f.runner.appendFile(path.join(path.dirname(f.config.path), 'journal.jsonl'), JSON.stringify({ at: new Date(now - 2 * 86400000).toISOString(), kind: 'queue-start', text: 'old', task: 'NC-1' }) + '\n');
   const a = await collectEvents(f.ctx, { client: 'mcp:manager:1' });
   const b = await collectEvents(f.ctx, { client: 'mcp:chat:2' });
-  assert.equal(a.events.length, 1); assert.equal(b.events.length, 1);
+  assert.equal(a.events.length, 1); assert.equal(b.events.length, 0);
   assert.equal((await collectEvents(f.ctx, { client: 'mcp:manager:1' })).events.length, 0);
-  assert.ok(JSON.parse(fs.readFileSync(markersPath(f.config), 'utf8')).mcp);
+  assert.equal(JSON.parse(fs.readFileSync(markersPath(f.config), 'utf8')).mcp, undefined);
 });
 
 it('economy: usage footer and unsent draft never become lastLine; monitors are background', () => {
@@ -128,7 +128,7 @@ it('economy: report candidates cannot satisfy dependencies; valid configured rep
 
 it('economy: overload retry requires idle visible empty input, honors interval, restart and cap', async () => {
   const f = fixture('overload', 'overload: {retry_after: 1, max_retries: 2}\n');
-  seedTask(f.config, 'NC-1'); const w = f.tmux.add('nc-1', 'Selected model is at capacity\n❯ \n');
+  seedTask(f.config, 'NC-1'); const w = f.tmux.add('nc-1', 'API Error: 529 Overloaded\n❯ \n');
   assert.ok(isOverloaded(w.screen));
   assert.ok(isOverloaded('API Error: 529 Overloaded'));
   assert.ok(isOverloaded('■ Selected model is at capacity. Please try a different model.'));
@@ -137,12 +137,12 @@ it('economy: overload retry requires idle visible empty input, honors interval, 
   await tick(); await f.runner.sleep(1001);
   w.screen += 'esc to interrupt'; await tick();
   assert.equal(readJournal(f.config).filter(e => e.kind === 'overload-retry').length, 0);
-  w.screen = 'Selected model is at capacity\n❯ unsent\n'; await tick();
+  w.screen = 'API Error: 529 Overloaded\n❯ unsent\n'; await tick();
   assert.equal(readJournal(f.config).filter(e => e.kind === 'overload-retry').length, 0);
-  w.screen = 'Selected model is at capacity\n❯ \n3 monitors still running'; await tick();
+  w.screen = 'API Error: 529 Overloaded\n❯ \n3 monitors still running'; await tick();
   assert.equal(readJournal(f.config).filter(e => e.kind === 'overload-retry').length, 0);
-  w.screen = 'Selected model is at capacity\n❯ \n'; await tick();
-  await tick(); assert.equal(readJournal(f.config).filter(e => e.kind === 'overload-retry').length, 1);
+  w.screen = 'API Error: 529 Overloaded\n❯ \n'; await tick();
+  await f.runner.sleep(1001); await tick(); assert.equal(readJournal(f.config).filter(e => e.kind === 'overload-retry').length, 1);
   await f.runner.sleep(1001); await tick();
   await f.runner.sleep(1001); await tick(); await tick();
   assert.equal(readJournal(f.config).filter(e => e.kind === 'overload-retry').length, 2);

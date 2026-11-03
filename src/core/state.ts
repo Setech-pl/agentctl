@@ -1,4 +1,4 @@
-import { PATTERN_FLAGS } from './config.ts';
+import { DEFAULT_AGENT_SETTINGS, PATTERN_FLAGS } from './config.ts';
 import type { AgentSettings } from './config.ts';
 
 /**
@@ -28,12 +28,12 @@ const matches = (pattern: string, screen: string): boolean => new RegExp(pattern
  */
 export function classifyScreen(
   screen: string,
-  settings: Pick<AgentSettings, 'trustPattern' | 'workingPattern' | 'questionPattern' | 'limitPatterns'> & Partial<Pick<AgentSettings, 'backgroundPatterns'>>,
+  settings: Pick<AgentSettings, 'trustPattern' | 'workingPattern' | 'questionPattern' | 'limitPatterns'> & Partial<Pick<AgentSettings, 'backgroundPatterns' | 'overloadPatterns'>>,
 ): ScreenState {
   if (matches(settings.trustPattern, screen)) return 'needs-trust';
   if (matches(settings.questionPattern, screen)) return 'needs-input';
   if (matches(settings.workingPattern, screen)) return 'working';
-  if (isOverloaded(screen)) return 'overloaded';
+  if (isOverloaded(screen, settings.overloadPatterns)) return 'overloaded';
   if (settings.limitPatterns.some((p) => matches(p, screen))) return 'limited';
   if ((settings.backgroundPatterns ?? []).some((p) => matches(p, screen))) return 'background';
   return 'idle';
@@ -51,7 +51,7 @@ export interface StateInput {
   alive: boolean;
   /** Screen of the window; ignored when the window is gone. */
   screen: string;
-  settings: Pick<AgentSettings, 'trustPattern' | 'workingPattern' | 'questionPattern' | 'limitPatterns' | 'readyPattern'> & Partial<Pick<AgentSettings, 'backgroundPatterns'>>;
+  settings: Pick<AgentSettings, 'trustPattern' | 'workingPattern' | 'questionPattern' | 'limitPatterns' | 'readyPattern'> & Partial<Pick<AgentSettings, 'backgroundPatterns' | 'overloadPatterns'>>;
   /** The report file exists and was written after the task started. */
   reportReady: boolean;
   /** The last event the agent sent, if any. */
@@ -65,17 +65,35 @@ export interface StateInput {
 export function taskState(input: StateInput): TaskState {
   if (!input.alive) return input.reportReady ? 'report-ready' : 'dead';
   const screen = classifyScreen(input.screen, input.settings);
-  if (screen === 'needs-trust' || screen === 'needs-input' || screen === 'limited' || screen === 'overloaded') return screen;
+  if (screen === 'needs-trust' || screen === 'needs-input') return screen;
+  if (input.reportReady && screen === 'overloaded') return 'report-ready';
+  if (screen === 'limited' || screen === 'overloaded') return screen;
   if (screen === 'working') return 'working';
   // Idle, but its own shells and monitors run: the turn ends every few minutes and a new one starts by itself.
   if (screen === 'background') return 'background';
   if (input.event === 'needs-input' && !inputVisible(input.screen, input.settings)) return 'needs-input';
-  if (input.event === 'overloaded') return 'overloaded';
+  // An old hook cannot override the current visible screen after autonomous recovery.
   if (input.event === 'limited') return 'limited';
   return input.reportReady ? 'report-ready' : 'waiting';
 }
 
 /** Claude 529/Overloaded and selected-model capacity messages; Codex capacity text is verified in protocol/src/error.rs; raw error-code variants are fixture-tested. */
-export function isOverloaded(screen: string): boolean {
-  return /(?:^|\n)\s*(?:[■●⏺!⚠✻]\s*)?(?:Selected model is at capacity|(?:API Error:?\s*)?529\b|(?:Error:?\s*)?Overloaded\b|.*overloaded_error\b|.*server(?:_is)?_overloaded|.*servers? (?:is |are (?:currently )?)?(?:overloaded|at capacity))/i.test(screen);
+export function isOverloaded(screen: string, patterns: string[] = [...DEFAULT_AGENT_SETTINGS.claude.overloadPatterns, ...DEFAULT_AGENT_SETTINGS.codex.overloadPatterns]): boolean {
+  let fence: { char: string; size: number } | null = null;
+  let last = '';
+  let lastIndex = -1;
+  let lastInCode = false;
+  const lines = screen.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').split('\n');
+  for (const [index, raw] of lines.entries()) {
+    const line = raw.trimEnd();
+    const marker = /^\s{0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    if (marker) { if (!fence) fence = { char: marker[0]!, size: marker.length }; else if (marker[0] === fence.char && marker.length >= fence.size) fence = null; last = line; lastIndex = index; lastInCode = true; continue; }
+    if (!line.trim() || /^[\s─━═│╭╮╰╯┌┐└┘-]+$/.test(line) || /^\s*[❯›](?:\s|$)/.test(line) || /\? for shortcuts|shift\+tab to cycle|^\s*[⏵⏸]|(?:weekly|usage|session).*limit.*(?:left|remaining|reset)/i.test(line)) continue;
+    last = line; lastIndex = index; lastInCode = fence !== null;
+  }
+  if (lastInCode) return false;
+  for (let i = lastIndex - 1; i >= 0 && lines[i]!.trim(); i--) {
+    if (/^\s*[⏺●•]\s*(?:Bash|Read|Grep|Search|Run|Ran|Shell)(?:\(|\s|:)/i.test(lines[i]!)) return false;
+  }
+  return patterns.some(p => new RegExp(p, 'i').test(last));
 }

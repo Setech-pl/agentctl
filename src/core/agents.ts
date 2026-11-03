@@ -47,8 +47,10 @@ export function agentCommandLine(argv: string[]): string {
 }
 
 /** Every prompt agentctl delivers starts with this line, whatever flags the agent took. */
-export function promptWithHeader(spec: Pick<ResolvedSpec, 'model' | 'effort' | 'prompt'>): string {
-  return `Model: ${spec.model} · effort ${spec.effort}\n\n${spec.prompt}`;
+export const reportInstructions = (attemptId = 'current') => `Report protocol: write the report for attempt ${attemptId}. Include <!-- agentctl:attempt ${attemptId} --> and append <!-- agentctl:report-end --> as the final line only after the entire report is written.`;
+
+export function promptWithHeader(spec: Pick<ResolvedSpec, 'model' | 'effort' | 'prompt'>, attemptId?: string): string {
+  return `Model: ${spec.model} · effort ${spec.effort}\n\n${spec.prompt}\n\n${reportInstructions(attemptId)}`;
 }
 
 export const INSTALL_HINTS: Record<string, string> = {

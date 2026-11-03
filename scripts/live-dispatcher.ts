@@ -30,7 +30,7 @@ async function trial(id: number, parallel: boolean, retry = false, fallback = fa
       const notifier = path.join(h.fakeBin, 'terminal-notifier');
       fs.writeFileSync(notifier, fs.readFileSync(notifier, 'utf8').replace('exit 0', `sleep 3\n${fallback ? 'exit 1' : 'exit 0'}`));
       const report = path.join(h.root, 'cache', task.toLowerCase(), `${task}.md`);
-      fs.mkdirSync(path.dirname(report), { recursive: true }); fs.writeFileSync(report, 'Werdykt: PASS\n');
+      fs.mkdirSync(path.dirname(report), { recursive: true }); fs.writeFileSync(report, 'Werdykt: PASS\n<!-- agentctl:report-end -->');
       h.check();
       const event = spawn(process.execPath, ['--experimental-strip-types', '--no-warnings', path.resolve(import.meta.dirname, '../bin/agentctl.ts'), 'event', '--task', task, '--agent', 'claude', '--kind', 'stop'], { env: h.env, stdio: ['pipe', 'ignore', 'ignore'] });
       event.stdin.end(JSON.stringify({ last_assistant_message: 'ok' }));

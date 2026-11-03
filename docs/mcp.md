@@ -23,8 +23,8 @@ These always work.
 | `version` | none | The version of agentctl this server process runs, its script, pid and start time, the version of the stable copy on disk (`older: true` when they differ), the write tools the user allowed and the warnings about the MCP part of the config. Use it when a tool seems to be missing. |
 | `peek` | `task`, `lines?` (1 to 200, default 40) | The last lines of a running task's window without the agent's footer. |
 | `list_reports` | `all?` | Which tasks have a report: size, `modified` (UTC) and `modifiedLocal`, whether it was pulled, and `source` (where the agent wrote the report when the file is a copy, else `null`). |
-| `get_report` | `task`, `section?`, `offset?`, `limit?` | A selected Markdown section or line page, up to 200 KiB. It reads only the file that the task's `TASK.md` names, never a path from the chat, and refuses a report that is a symbolic link. It does not mark the report as pulled. |
-| `pull_ready` | `cohort?`, `mode?`, `offset?`, `limit?` | Summary excerpts by default: task/path/size/first-line verdict/SHA/branch and 1500 characters of summary; total 16000 bytes. mode: full returns bodies up to 200 KiB; omitted reports stay new. Marks them as pulled. This is the only read tool that changes anything, and only in agentctl's own state. A chat should call it at the start of discussing finished work. |
+| `get_report` | `task`, `section?`, `offset?`, `limit?` | A selected Markdown section or line page, up to 200 KiB. It reads only the file that the task's `TASK.md` names, never a path from the chat, and refuses a report that is a symbolic link. A contiguous whole-file read marks it pulled only at EOF; sections do not. |
+| `pull_ready` | `cohort?`, `mode?`, `offset?`, `limit?` | Summary excerpts by default: task/path/size/first-line verdict/SHA/branch and 1500 characters of summary; total 16000 bytes. mode: full returns bodies up to 200 KiB; omitted reports stay new. Only mode full or explicit ack marks fully delivered reports as pulled. This is the only read tool that changes anything, and only in agentctl's own state. A chat should call it at the start of discussing finished work. |
 | `queue_list` | none | The task queue: position, agent/model/effort, priority, `after`, what each task waits for (`startCondition`: `czeka na miejsce: claude 2/2`, `czeka na NC-42`, paused), since when, and the error of a start that failed. |
 | `usage` | `cohort?`, `since?` | Token usage and the plan limits: per provider the 5 hour and weekly window (percentage used, reset time; `available: false` when the provider did not say, shown as n/d) and the tokens today and in the period, per task, cohort, model and day. `since` is an age such as `12h`, `7d`, `2w` (default `7d`). A chat should call it before the user orders more tasks. `status` carries a one-line `Plans:` summary. |
 | `log` | `cohort?`, `since?` | The history of the tasks, newest first: agent/model/effort, start, report, duration, tokens (null: n/d), commits and files, the verdict line, cancel reason, move, and the result the user marked. |
@@ -227,7 +227,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 | Tool | Kind | Arguments |
 |---|---|---|
 | `status` | read | `all?`, `cohort?`, `format?`, `detail?` |
-| `events_since` | read | `client?`, `since?`, `cohort?`, `peek?`, `format?`, `detail?` |
+| `events_since` | read | `cursor?`, `limit?`, `client?`, `since?`, `cohort?`, `peek?`, `format?`, `detail?` |
 | `gc_preview` | read | `older_than?`, `merged?`, `cohort?` |
 | `limits` | read | `format?`, `detail?` |
 | `set_limits` | write | `claude?`, `codex?`, `confirm?` |
@@ -235,8 +235,8 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 | `version` | read |  |
 | `peek` | read | `task`, `lines?` |
 | `list_reports` | read | `all?` |
-| `get_report` | read | `task`, `section?`, `offset?`, `limit?` |
-| `pull_ready` | read | `cohort?`, `all?`, `mode?`, `offset?`, `limit?` |
+| `get_report` | read | `task`, `section?`, `byte_offset?`, `offset?`, `limit?` |
+| `pull_ready` | read | `cohort?`, `all?`, `mode?`, `ack?`, `cursor?`, `offset?`, `limit?` |
 | `task_spec` | read | `task` |
 | `queue_list` | read | `cohort?`, `format?`, `detail?` |
 | `cohort_list` | read |  |
@@ -399,8 +399,22 @@ Groups: `queue:*` = `queue`, `queue_rm`, `queue_retry`, `queue_up`, `queue_pause
 
 `events_since`, `status`, `queue_list`, `cohort_show`, `limits`, `capacity`: text only by default; `format: "json"` or `detail: true` returns JSON only. Status rows carry task, agent/model/effort, state, duration, cohort, report (yes/candidate/missing) and open question; overlap detail lives in `overlap`.
 
-`events_since` identifies clients from initialize clientInfo.name plus server session/process identity; non-protocol callers may supply `client`. New identities conservatively replay at least 24h and the legacy shared cursor interval, leaving the legacy marker intact. Duplicate replay is possible during migration; consuming another client’s events is not.
+`events_since` identifies clients from initialize stable clientInfo.name plus an optional configured/explicit client suffix; non-protocol callers may supply `client`. An existing legacy mcp marker seeds the first stable migration and is removed; subsequent sessions of that client continue its cursor. New clients use the normal 24h first look. Process/session keys are pruned.
 
-`pull_ready`: summary default includes task/path/bytes/first nonempty verdict line, SHA/branch lines and Streszczenie/Summary/Decyzje (otherwise first 40 lines, capped at 1500 characters). Response excerpt budget 16000 bytes, omitted reports stay new and are named. `mode: "full"` returns up to 200 KiB. `offset`/`limit` paginate report selection. Pulled semantics are unchanged. `get_report`: `section` is a Markdown heading (case-insensitive, ends at next same/higher heading); `offset` and `limit` select lines within it, zero based, with at most 200 KiB per response. Reading does not mark pulled.
+`pull_ready`: summary default includes task/path/bytes/first nonempty verdict line, SHA/branch lines and Streszczenie/Summary/Decyzje (otherwise first 40 lines, capped at 1500 characters). Response excerpt budget 16000 bytes, omitted reports stay new and are named. `mode: "full"` returns up to 200 KiB. `offset`/`limit` paginate report selection. Summary delivery and full-file acknowledgment are separate. `get_report`: `section` is a Markdown heading (case-insensitive, ends at next same/higher heading); `offset` and `limit` select lines within it, zero based, with at most 200 KiB per response. Only a contiguous full-file read marks pulled at EOF; reading a section does not.
 
 Begin work discussion with `events_since`; no separate status is required. Use pull_ready summaries; get_report only for the needed section. Provider percentages, reset and stats inform allocation; token estimates are informational. `self_verdict` is agent self assessment, independent from the human mark; events remind about unmarked reports. `usage_hint` and `draft_input` hold usage footers and unsent input, never lastLine.
+
+## Review corrections: receipt, full delivery and user evaluation
+
+`pull_ready` summary delivery records `summary_delivered` only. It **does not** set pulled and remains visible among reports to read. Each excerpt carries task/attempt, verdict, SHA/branch facts, blockers/questions/errors, decisions, path/size, truncation and detail availability. `ack: true` explicitly attests that the full reports delivered in this response were read through another channel; it sets pulled but never mark. `mode: "full"` marks only fully delivered bodies; oversized reports stay unread and use get_report pagination. CLI pull --ready still copies complete reports and marks on successful clipboard delivery. Human `mark` remains a separate judgment.
+
+`pull_ready` selection is snapshotted per server session/scope. Continue with next_cursor (cursor argument) or offset/limit against that same snapshot; marking earlier reports cannot shrink it and skip later ones. Restart at offset 0 after an expired snapshot. Large single first lines are clipped and labeled in the excerpt, so a report cannot be permanently omitted because of its verdict line.
+
+`get_report` returns page metadata after `--- page ---`: total_lines, returned_bytes, has_more, next_offset and next_byte_offset. offset is zero-based line index; byte_offset is UTF-8 offset inside an oversized single line. Pass both returned offsets to continue. Fenced code headings are not section boundaries. Only contiguous, complete whole-report delivery (same client/attempt/fingerprint) sets pulled at EOF. A section or a jump to EOF does not acknowledge the whole file. Explicit ack remains available after reading outside MCP.
+
+`events_since` is bounded to 16000 UTF-8 bytes for the entire text or JSON response. limit (default 100, max 200) bounds events per page. has_more/next_cursor are always supplied; continue with cursor. The persistent stable client marker advances only over delivered events. Same-time events have distinct journal positions. A single oversized event is transported in numbered JSON fragments (fragment.offset, total, encoding=json); concatenate text fragments and parse the complete JSON event. The marker does not skip a suffix. Cohort cursors are scoped independently. clientInfo.name plus optional client parameter/config suffix survives server restarts; legacy mcp migration is consumed once. Obsolete process/session keys are removed and the marker map is bounded to 256 entries.
+
+`queue_show` is always redacted through MCP: all env values, secret-key fields (TOKEN/KEY/SECRET/PASSWORD/PASS/AUTH/COOKIE), known configured secret values, credential URLs and their occurrences in prompt/stderr become ***. CLI queue show retains owner access to the original values. Status JSON again includes collidesWith; the concise text shows counts only.
+
+PL: Dostarczenie skrótu, pełne pobranie i ocena mark to trzy różne fakty. Skrót zostawia raport do przeczytania. ack jest jawnym potwierdzeniem pełnego odczytu inną drogą. Strony events_since nie przesuwają kursora za niedostarczone dane, a get_report podaje oba offsety i oznacza pobranie dopiero po ciągłym odczycie całości. queue_show przez MCP zawsze redaguje sekrety.
