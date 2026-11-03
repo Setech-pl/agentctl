@@ -217,6 +217,23 @@ describe('agentctl event: limits, bad input, the notify of the user', () => {
 describe('agentctl event and watch: one transition, one notification', () => {
   const REPORT = '# Report\n\nWerdykt: PASS\n';
 
+  it('concurrent event and watch share one delivery owner while the notifier is delayed', async () => {
+    const t = setup('dup-concurrent');
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const sent: string[] = [];
+    const notifier: Notifier = { async notify(_title, text) { sent.push(text); await gate; } };
+    const a = new Alerts(t.ctx, notifier);
+    const b = new Alerts(t.ctx, notifier);
+    const target = { task: 'NC-1', window: 'nc-1' };
+    const first = a.send(target, 'report-ready', 'report ready', 'event');
+    const second = b.send(target, 'report-ready', 'report ready', 'watch');
+    await new Promise((resolve) => setImmediate(resolve));
+    release();
+    assert.deepEqual((await Promise.all([first, second])).sort(), ['duplicate', 'sent']);
+    assert.equal(sent.length, 1);
+  });
+
   it('event first, watcher second: the watcher logs it and stays quiet', async () => {
     const t = setup('dup1');
     t.screen(WORKING);
