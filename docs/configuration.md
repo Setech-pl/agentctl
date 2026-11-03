@@ -264,3 +264,28 @@ The header of a spec file, between `---` lines, followed by the prompt. Several 
 | `AGENTCTL_REPO`, `AGENTCTL_STABLE_DIR`, `AGENTCTL_SESSION` | Only for `bin/agentctl-update`: the repo, the stable copy (default `~/Projects/agentctl-stable`) and the tmux session of the watch window. |
 
 In 0.15.0, installed runtime commands use `dist/bin/agentctl.js`. Status `question` includes collapsed Codex question count and the shortcut read from the screen. A visible pending question takes precedence over working. No configuration migration is required.
+
+### Dispatcher guide and capacity
+
+| Key | Type | Default | Layers | Meaning |
+|---|---|---|---|---|
+| `guide` | mapping (global), path (project) | `{lang: en}` globally | g, p | Global guide settings; project `.agentctl.yaml` uses `guide: docs/agent-dispatch.md` (repository-relative or `~/…`) as a trusted project overlay. A missing file warns in guide and doctor, and does not fail an order. |
+| `guide.lang` | en or pl | en | g | Default language for CLI, MCP and manager shared guide. |
+| `capacity` | mapping | see below | g | Dispatcher capacity settings. |
+| `capacity.snapshot` | boolean | true | g | Add both providers' capacity to new and queue responses. |
+| `capacity.stale_minutes` | integer 1–10080 | 30 | g | Reading age that sets stale; emits one event per reading while that provider has active task windows. |
+| `capacity.sample_limit` | integer 2–10000 | 2048 | g | Maximum combined provider samples in `usage-samples.jsonl` (under 10 MB even at maximum). Each distinct usage reading is sampled; repeated timestamps do not create samples. |
+| `capacity.thresholds` | percentage list | `[80, 95]` | g | Up to 20 thresholds applied to each provider window. Crossings and reset events are deduplicated per provider, window and reset boundary. `usage.warn`/`critical` independently control desktop/phone warnings. |
+| `capacity.codex_refresh` | boolean | true | g | For capacity, query Codex app-server account/rateLimits/read (3 s deadline), without a thread or agent turn. False uses existing session readings only. Failure retains the original timestamp and provenance of the last known reading. |
+
+```yaml
+guide: {lang: en}
+capacity:
+  snapshot: true
+  stale_minutes: 30
+  sample_limit: 2048
+  thresholds: [80, 95]
+  codex_refresh: true
+```
+
+The guide ships in npm `docs/dispatcher*.md`, with no dependency on a development checkout. See [the example project config](examples/project-guide.yaml).

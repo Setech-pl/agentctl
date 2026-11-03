@@ -33,6 +33,12 @@ agentctl zarządza **zleceniami, nie oknami**. Jednostką jest spec: plik Markdo
 
 ```mermaid
 sequenceDiagram
+    participant D as Agent zlecający
+    participant C as guide + capacity
+    D->>C: Instrukcja ogólna i nakładka projektu
+    D->>C: Okna planu, tempo, reset, sloty, stats
+    C-->>D: Fakty; n/d i jawne szacunki
+    Note over D: Agent dobiera dostawcę/model/effort
     autonumber
     actor H as Ty
     participant C as Czat planujący
@@ -794,3 +800,11 @@ Dokumentacja szczegółowa jest po angielsku:
 [MIT](LICENSE)
 
 Codex: zwinięte pytania pokazują liczbę i skrót z „to answer”. `needs-input` ma pierwszeństwo także podczas pracy; po odpowiedzi stan wynika ponownie z ekranu. Podgląd board, peek, status/MCP `question` i macOS pokazują pytanie lub instrukcję otwarcia. ntfy domyślnie wysyła tylko instrukcję otwarcia; `notify.ntfy.include_question: true` włącza treść pytania.
+
+## Dla agenta zlecającego
+
+Zacznij w dowolnym projekcie od `agentctl guide --project /sciezka/do/repo --lang pl --clip` i `agentctl capacity --clip` albo narzędzi MCP `guide` i `capacity` (odczyt bez mcp.allow). Wspólny [podręcznik dyspozytora](docs/dispatcher.pl.md) opisuje specy, dobór dostawcy/modelu/effortu, przegląd krzyżowy, kohorty, kolejkę oraz pętlę `events_since` → `pull_ready` → `get_report`.
+
+Capacity pokazuje okna planu, wiek, tempo, reset, sloty, kolejkę, równoważniki i stats z 7 dni. Brak danych to n/d; szacunki tokenów mają podstawę i pewność. Procent obejmuje pracę poza agentctl. New i queue dodają krótką migawkę (`capacity.snapshot: false` ją wyłącza). Narzędzie podaje fakty; zlecający wybiera. `guide: docs/agent-dispatch.md` w `.agentctl.yaml` dołącza zasady projektu, brak pliku ostrzega także w doctor. Globalne `guide: {lang: pl}` ustala język.
+
+Na boardzie `C` otwiera capacity. `agentctl up --no-attach` nie podłącza terminala. Restart po stabilnej roli: `agentctl watch --tmux --restart` / `agentctl board --tmux --restart`, także po zmianie nazwy okna. `agentctl version` działa jak `--version`.
