@@ -105,17 +105,17 @@ describe('manager: the files', () => {
     const role = renderManagerRole({ name: 'agentctl manager', allowedWrites: ['send', 'new'] });
     assert.match(role, /events_since/);
     assert.match(role, /then `status`/);
-    assert.match(role, /\(send, new\) - only after Marcin has agreed/);
+    assert.match(role, /Available write tools: send, new/);
     assert.match(role, /at most 6 lines/);
     assert.match(role, /Do not merge, rebase, push/);
     assert.match(role, /Do not edit files of the project/);
-    assert.doesNotMatch(role, /Rules for writing specs/);
+    assert.doesNotMatch(role, /Additional manager guide/);
     assert.match(renderManagerRole({ name: 'm', allowedWrites: [] }), /none \(the server is read-only for now\)/);
   });
 
   it('appends the guide when there is one, cut at the limit', () => {
     const role = renderManagerRole({ name: 'm', allowedWrites: [], guide: '# Spec guide\nUse short prompts.\n' });
-    assert.match(role, /## Rules for writing specs[\s\S]*Use short prompts\./);
+    assert.match(role, /## Additional manager guide[\s\S]*Use short prompts\./);
     assert.match(renderManagerRole({ name: 'm', allowedWrites: [], guide: 'x'.repeat(70_000) }), /\[cut: the guide is longer than 60000 characters\]/);
   });
 });
@@ -154,7 +154,7 @@ describe('manager: start, look, stop', () => {
     const files = managerFiles(w.config);
     assert.ok(files.dir.endsWith('/manager'));
     assert.equal(fs.readFileSync(files.mcp, 'utf8').includes('"agentctl"'), true);
-    assert.match(fs.readFileSync(files.role, 'utf8'), /dispatcher of agentctl/);
+    assert.match(fs.readFileSync(files.role, 'utf8'), /Manager appendix/);
     assert.equal(JSON.parse(fs.readFileSync(files.settings, 'utf8')).permissions.allow.includes('mcp__agentctl__status'), true);
     const created = w.runner.commands.find((c) => c.includes('new-session'));
     assert.match(created ?? '', new RegExp(`-n manager -c ${w.project}`));
@@ -173,7 +173,7 @@ describe('manager: start, look, stop', () => {
     assert.match(result.command, /--model opus --effort high .*--remote-control Dyspozytor /);
     const role = fs.readFileSync(managerFiles(w.config).role, 'utf8');
     assert.match(role, /GUIDE-TEXT/);
-    assert.match(role, /\(send\) - only after/);
+    assert.match(role, /Available write tools: send/);
     // flags win over the config
     const w2 = world('start-3');
     const r2 = await startManager(w2.ctx, { project: w2.project, name: 'N', model: 'haiku', effort: 'low', self: SELF });
@@ -230,7 +230,7 @@ describe('manager: start, look, stop', () => {
     const w = world('start-12', `manager:\n  guide: ${scratch.sub('start-12-g')}/nope.md\n`);
     await startManager(w.ctx, { project: w.project, self: SELF });
     assert.match(w.out.join('\n'), /warning: manager\.guide .* cannot be read/);
-    assert.doesNotMatch(fs.readFileSync(managerFiles(w.config).role, 'utf8'), /Rules for writing specs/);
+    assert.doesNotMatch(fs.readFileSync(managerFiles(w.config).role, 'utf8'), /Additional manager guide/);
   });
 
   it('writes nothing and starts nothing in a dry run', async () => {

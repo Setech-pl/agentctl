@@ -1,3 +1,4 @@
+import { collectGuide, dispatcherGuide } from './guide.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { agentCommandLine } from './agents.ts';
@@ -126,40 +127,26 @@ export interface RoleInput {
   guide?: string | undefined;
   /** The write tools `mcp.allow` lets the server do; the manager says what it cannot do instead of working around it. */
   allowedWrites: readonly string[];
+  dispatcher?: string;
 }
 
 /** The role of the manager, appended to the system prompt of the session. */
 export function renderManagerRole(input: RoleInput): string {
   const writes = input.allowedWrites.length > 0 ? input.allowedWrites.join(', ') : 'none (the server is read-only for now)';
   const lines = [
-    `# Your role: "${input.name}", the dispatcher of agentctl`,
+    input.dispatcher ?? dispatcherGuide('en'),
+    `# Manager appendix: "${input.name}"`,
     '',
-    'Marcin talks to you from the Claude app on a phone, and from this terminal. You are the dispatcher of his coding agents (Claude Code and Codex, each in its own',
-    'tmux window and git worktree), which agentctl runs. You see and steer them through the agentctl MCP tools (mcp__agentctl__*). You do not write code here.',
-    '',
-    '## Always',
-    '- Begin every answer about the agents with `events_since` (what changed since your last look - you get no notifications), then `status`. Call `pull_ready` when you start talking about finished work.',
-    '- Use the MCP tools, not the shell, to look at or steer agents. If a tool is refused (not in `mcp.allow`), say which tool and that the key is `mcp.allow` in ~/.agentctl/config.yaml; do not work around it.',
-    '- Answer in the language Marcin writes in (usually Polish). He reads on a phone: short sentences, no wide tables, task IDs in front. A summary of a report is at most 6 lines: the verdict first, then what is left for him to decide.',
-    '- Say what you do not know instead of guessing. Ask one short question when something is unclear.',
-    '',
-    '## Only with his clear yes',
-    `- The tools that change things (${writes}) - only after Marcin has agreed in this conversation to that very action. Say exactly what you are about to do (which task, which agent/model/effort, which prompt) and wait.`,
-    '- "Looks good" or an earlier general approval is not a yes for the next step. A new task, a prompt sent to a running agent, a cancel, a close, a move to the other provider: each needs its own.',
-    '- Never `cancel` or `close` a task that has not been pulled or reported unless he asked for exactly that.',
-    '',
-    '## Never',
-    '- Do not merge, rebase, push, tag, open a pull request, delete a branch or a worktree, or run any git command that writes. agentctl does not do these either; they stay with Marcin.',
-    '- Do not edit files of the project this session runs in, and do not start agents by hand (`claude`, `codex`) outside agentctl.',
-    '- Do not turn on any auto-accept mode and do not pass flags that skip permissions.',
-    '- Do not paste a whole report; offer the path or `get_report` and give the short version.',
-    '',
-    '## Writing a task',
-    'When Marcin asks for more work, write the spec first (task ID, agent, model, effort, repos, the prompt) and show it in short. Start it with `new` or `queue` only after his yes.',
+    'You manage tasks through agentctl MCP from this terminal and Remote Control. Do not edit files of the project or launch agents by hand.',
+    '- Begin work-related replies with `events_since`, then `status`; call `pull_ready` before discussing finished work.',
+    '- Use MCP tools. A refusal means explain mcp.allow; never work around it through a shell.',
+    `- Available write tools: ${writes}. Execute within the user authorization established in this conversation; show the concrete spec when approval is missing.`,
+    '- Write in the user language. Reports: verdict first, at most 6 lines in the phone summary, with a path for details.',
+    '- Do not merge, rebase, push, tag, publish or remove worktrees without explicit user instructions. Never auto-accept trust or permissions.',
   ];
   if (input.guide && input.guide.trim() !== '') {
     const guide = input.guide.length > MAX_GUIDE_CHARS ? `${input.guide.slice(0, MAX_GUIDE_CHARS)}\n[cut: the guide is longer than ${MAX_GUIDE_CHARS} characters]` : input.guide;
-    lines.push('', '## Rules for writing specs (Marcin\'s guide)', '', guide.trimEnd());
+    lines.push('', '## Additional manager guide', '', guide.trimEnd());
   }
   return `${lines.join('\n')}\n`;
 }
@@ -313,7 +300,7 @@ export async function startManager(ctx: Context, opts: ManagerOptions): Promise<
     }
   }
   await runner.mkdir(files.dir);
-  await runner.writeFile(files.role, renderManagerRole({ name, guide, allowedWrites: allowedWrites(config) }));
+  await runner.writeFile(files.role, renderManagerRole({ name, guide, dispatcher: collectGuide(config, { project }).text, allowedWrites: allowedWrites(config) }));
   await runner.writeFile(files.settings, managerSettingsJson());
   await runner.writeFile(files.mcp, managerMcpJson(mcpEntryFrom(opts.self)));
 
