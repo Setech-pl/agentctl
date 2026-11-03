@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/) while it is below 1.0 (minor versions may change behaviour).
 
+## Unreleased
+
+### Changed
+- Lead both READMEs with the parallel Claude Code and Codex workflow and its benefits.
+
 Versions 0.1.0 to 0.7.0 correspond to pull requests #1 to #7; their dates are the merge dates. The version numbers were assigned afterwards, when this changelog was written.
 
 ## [0.17.0] - 2026-11-03

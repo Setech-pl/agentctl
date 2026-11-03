@@ -2,34 +2,38 @@
 
 Polski: [README.pl.md](README.pl.md)
 
-**agentctl turns a spec file into a running coding agent: a git worktree, a tmux window and a prompt, and then watches it for you.** It dispatches work orders to the CLI agents [Claude Code](https://docs.claude.com/en/docs/claude-code) and [Codex](https://github.com/openai/codex).
+**Run Claude Code and Codex in parallel – from one queue, under one set of rules.**
 
-## The problem
+agentctl turns a short spec into a git worktree, a tmux window and a running coding agent – Claude Code or Codex, with the model and reasoning effort you chose. It watches every agent for you, tells you when one asks a question or finishes, and collects the reports. You stay the one who decides and merges.
 
-Running several coding agents in parallel means a lot of manual steps per task: create a worktree, install dependencies, wire symlinks and environment variables, open a terminal, start the right agent with the right model and effort, paste the prompt, then keep looking at each window to see who is done, who asks something and who ran into a usage limit. Window managers help with the windows. They do not know what a task is.
+## Why two vendors at once
 
-agentctl manages **work orders, not windows**. The unit is a spec: a Markdown file with a YAML header and a prompt, which you can review, version and reuse. Everything else follows from it.
-
-## Key features
-
-- **One spec, one command.** `agentctl new` creates the git worktree, runs your setup commands, makes the symlinks, sets the environment, opens a tmux window, starts the agent and pastes the prompt.
-- **Task states.** `working`, `waiting`, `needs-input`, `needs-trust`, `limited`, `report-ready` and more, from the screen of each window and from events the agents send themselves (Claude hooks, Codex `notify`).
-- **Notifications.** One desktop notification per transition; a click on it switches to the task's window.
-- **Phone.** `agentctl ntfy-setup` and `agentctl away on`: the events that need you also go to your phone through ntfy, with only the task ID and the verdict line in the message.
-- **Remote control.** `agentctl manager` starts a Claude Code session with Remote Control and the agentctl MCP tools: you talk to your agents from the Claude app on the phone.
-- **Board.** A full-screen overview of all tasks with a live preview of the selected window.
-- **Reports.** `agentctl pull --ready` collects the new reports into one text for your planning chat. A report the agent wrote elsewhere than the spec says is found and copied ([Report detection](docs/details.md#report-detection)).
-- **Queue, dependencies, collisions.** More tasks than free windows? They wait and start by themselves; a review can wait for the author's report (`after`); two tasks changing the same files are flagged early.
-- **Cancelling and cohorts.** Work is abandoned in the middle of a turn? `agentctl cancel` interrupts, closes the window and keeps the worktree; tasks that waited for it are blocked, not forgotten. Tasks you name a cohort for are grouped on the board, filtered by `--cohort` and announced together when all their reports are in.
-- **Provider switch.** A table of Claude and Codex equivalents; `agentctl move` hands a task that hit its usage limit to the other provider in the same worktree.
-- **Usage and limits.** `agentctl usage` shows the tokens of the tasks and how close the Claude and Codex plans are to their limits (n/d when a provider does not say); `watch` warns at 80 % and 95 %, `new` hints at the provider with room, the queue can hold back a provider that is nearly out. `agentctl log` and `stats` keep a history of the tasks to calibrate the choice of model and effort.
-- **Live limits.** `agentctl limits set claude=3 codex=5` changes the parity while `watch` runs; places for agents you start by hand can be reserved or counted.
-- **Events for the chat.** `agentctl events` and MCP `events_since` tell a chat what changed since its last call.
-- **Clean-up and resume.** `agentctl gc` takes back worktrees, old files and merged branches of finished tasks; `agentctl resume` brings the windows back after a restart, and `agentctl up` starts the day.
-- **Chat integration.** A local MCP server lets a chat in the Claude app or Claude Code read status and reports, and, if you allow it, send prompts and start tasks.
-- **Small and inspectable.** TypeScript compiled to JavaScript for npm, no daemon; `--dry-run` prints every command instead of running it.
+- **More capacity, fewer idle periods.** Claude and Codex plans have separate limits. When one provider reaches its limit, you can move work to the other. agentctl shows both plans' usage, reset times and available slots in one place ([usage and limits](docs/details.md#usage-and-limits)).
+- **The right model for each job.** A task can specify its agent, model and effort. Choose lighter models for routine work and stronger ones for harder parts; the [equivalents table](docs/details.md#model-equivalents) maps choices when a task moves to the other provider.
+- **Reviews by a different model.** A `review_of` rule requires a reviewer to use another agent or model than the author ([cross-review](docs/details.md#window-limits-and-cross-review)). A second model can bring a different perspective.
+- **Switch providers when needed.** Both agents use the same spec and report convention, and appear on the same board. `agentctl move` can hand a task that hits a limit to the other provider in one command ([limits and move](docs/details.md#limits-and-move)).
+- **One cockpit.** The [terminal board](docs/details.md#board) shows tasks across both vendors – who is working, who needs you, and which reports are ready. Notifications can go to the Mac and, optionally, the phone.
 
 ## How it works
+
+1. Write a spec (or let your planning chat write it): task, agent, model, effort, repos, report path.
+2. `agentctl new` creates the worktree, opens a tmux window and starts the agent within your per-provider limits – or queues it until a slot frees up.
+3. Watch and decide: the board and notifications tell you when an agent asks or finishes; `pull` brings the report; you review, merge and close.
+
+Planning in a Claude chat? The [built-in MCP server](docs/mcp.md) lets the chat order tasks, read plan usage and pick up reports itself. The [clipboard workflow](#daily-loop) also works without MCP.
+
+## In daily use
+
+<!-- Numbers from agentctl stats on the author's machine – verify before publishing -->
+agentctl is built for and used on a real project: cohorts of tasks run every day across Claude Code and Codex in parallel, with cross-model reviews before every merge.
+
+> agentctl is an independent open-source tool. It is not affiliated with Anthropic or OpenAI; Claude Code and Codex are their respective products.
+
+## Task states
+
+The board tracks `working`, `waiting`, `needs-input`, `needs-trust`, `limited`, `report-ready`, `background`, `queued`, `blocked`, `dead`, `orphan`, `closed`, `cancelled`, `superseded` and `start-failed`. See [task states and details](docs/details.md#task-states).
+
+### Architecture and flow
 
 ```mermaid
 sequenceDiagram
@@ -119,10 +123,6 @@ sequenceDiagram
     end
 ```
 
-### Architecture
-
-The CLI, the board and the MCP server are thin fronts over the same core. Every side effect goes through the `Runner`, which is a recorder in `--dry-run` and in tests.
-
 ```mermaid
 flowchart TB
     subgraph fronts [Fronts]
@@ -185,10 +185,6 @@ flowchart TB
     MCP -- "events_since" --> JOURNAL
 ```
 
-### Task states
-
-`status`, the board and the tmux window names show one of these states per task. A live window is classified from its screen and from the agent's events; a task without a window is `report-ready` when its report exists and `dead` when it does not.
-
 ```mermaid
 stateDiagram-v2
     state "🔒 needs-trust" as trust
@@ -250,25 +246,6 @@ stateDiagram-v2
     superseded --> cancelled: cancel
     cancelled --> [*]
 ```
-
-| State | Icon | Meaning |
-|---|---|---|
-| `working` | ⚙ | a turn is running |
-| `background` | ⏳ | idle, but the agent's own shells or monitors run; the end of turn is not announced |
-| `waiting` | ⏸ | idle at the prompt, no report yet |
-| `needs-input` | ? | the agent asked a question or for a permission |
-| `needs-trust` | 🔒 | the folder-trust dialog is open; a human must answer it |
-| `limited` | ⛔ | the usage limit is used up; `agentctl move` hands the task over |
-| `report-ready` | ✓ | the report exists and is newer than the start |
-| `superseded` | ↪ | moved to the other provider; this is the old window |
-| `dead` | ✗ | the window is gone and there is no report |
-| `orphan` | ✗ | a window of the session has no state file; see `agentctl adopt` |
-| `closed` | ⊘ | `agentctl close` was run; listed only by `status --all` |
-| `cancelled` | ✕ | `agentctl cancel` was run: the work was abandoned, in the middle of a turn or in the queue; listed only by `status --all`, under **Cancelled** on the board |
-
-A queued task whose `after` names a cancelled task is **blocked** (⛓): not a state of a window, but a condition of the queue that `status`, `queue list` and the board show with its cause. [Cancelling tasks](#cancelling-tasks) and `agentctl unblock` are the ways out.
-
-The same diagrams with notes: [docs/diagrams.md](docs/diagrams.md).
 
 ## Quick start
 
