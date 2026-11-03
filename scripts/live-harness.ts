@@ -202,6 +202,7 @@ export class Harness {
     this.env = {
       PATH: pathEnv,
       HOME: this.home,
+      TMPDIR: path.join(this.root, 'tmp'),
       LANG: 'en_US.UTF-8',
       TERM: 'screen-256color',
       TMUX_TMPDIR: this.tmuxDir,
@@ -236,7 +237,7 @@ export class Harness {
     // A sandbox is made new every time (its own folder `live-<name>`, nothing else is ever removed).
     if (!/^live-[a-z0-9-]+$/.test(path.basename(this.root))) throw new HarnessRefusal(`${this.root} is not a sandbox folder`);
     fs.rmSync(this.root, { recursive: true, force: true });
-    for (const dir of [this.root, this.fakeBin, this.home, this.agentctlHome, this.codexHome, this.tmuxDir, this.env.CLAUDE_CONFIG_DIR as string]) fs.mkdirSync(dir, { recursive: true });
+    for (const dir of [this.root, this.fakeBin, this.home, this.agentctlHome, this.codexHome, this.tmuxDir, this.env.CLAUDE_CONFIG_DIR as string, this.env.TMPDIR as string]) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(this.root, 'gitconfig'), '[user]\n\tname = Harness\n\temail = harness@example.invalid\n[init]\n\tdefaultBranch = main\n');
     for (const [name, body] of Object.entries(FAKES)) fs.writeFileSync(path.join(this.fakeBin, name), body, { mode: 0o755 });
     for (const name of LINKED_COMMANDS) {
