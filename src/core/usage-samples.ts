@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { tryFileLock } from './file-lock.ts';
 import path from 'node:path';
 import type { AgentName, GlobalConfig } from './config.ts';
 import type { PlanState, PlanWindowView } from './usage.ts';
@@ -28,13 +29,13 @@ export function readSamples(config: GlobalConfig): UsageSample[] {
 export function recordSamples(config: GlobalConfig, plans: Record<AgentName, PlanState>, totals: Record<AgentName, number>, now: number): void {
   const file = samplesPath(config);
   const lock = `${file}.lock`;
-  let fd: number;
-  try {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fd = fs.openSync(lock, 'wx');
-  } catch { return; }
+  let release: (() => void) | undefined;
+  try { release = tryFileLock(lock); } catch { return; }
+  if (!release) return;
   try {
     const samples = readSamples(config);
+    const before = samples.length;
+    let changed = false;
     const stateFile = path.join(path.dirname(file), 'capacity-events.json');
     let seen: Record<string, number> = {};
     try { seen = JSON.parse(fs.readFileSync(stateFile, 'utf8')) as Record<string, number>; } catch { /* first read */ }
@@ -42,6 +43,7 @@ export function recordSamples(config: GlobalConfig, plans: Record<AgentName, Pla
       if (seen[key] !== undefined) return;
       fs.appendFileSync(journalPath(config), `${JSON.stringify({ at: new Date(now).toISOString(), kind: 'usage', text })}\n`);
       seen[key] = now;
+      changed = true;
     };
     for (const provider of ['claude', 'codex'] as const) {
       const p = plans[provider];
@@ -60,12 +62,24 @@ export function recordSamples(config: GlobalConfig, plans: Record<AgentName, Pla
       }
       samples.push({ provider, at: p.readAt, capturedAt: now, windows: p.windows, taskTokens: totals[provider] });
     }
-    const tmp = `${file}.${process.pid}`;
-    fs.writeFileSync(tmp, samples.slice(-config.capacity.sampleLimit).map((s) => JSON.stringify(s)).join('\n') + '\n');
-    fs.renameSync(tmp, file);
-    // Keep dedup through a weekly reset; bounded even with frequent provider refreshes.
-    seen = Object.fromEntries(Object.entries(seen).filter(([, at]) => at >= now - 14 * 86_400_000).slice(-10000));
-    fs.writeFileSync(stateFile, JSON.stringify(seen));
+    if (samples.length > before) {
+      if (samples.length <= config.capacity.sampleLimit) fs.appendFileSync(file, samples.slice(before).map((s) => JSON.stringify(s)).join('\n') + '\n');
+      else {
+        const tmp = `${file}.${process.pid}`;
+        fs.writeFileSync(tmp, samples.slice(-config.capacity.sampleLimit).map((s) => JSON.stringify(s)).join('\n') + '\n');
+        fs.renameSync(tmp, file);
+      }
+    }
+    if (changed) {
+      // Keep dedup for current sampled windows even when the source has not refreshed for weeks.
+      const persistent = new Set(['claude', 'codex'].flatMap((provider) => {
+        const latest = samples.filter((s) => s.provider === provider).at(-1);
+        return latest?.windows.map((w) => `${provider}|${w.kind}|${w.resetsAt ?? 'open'}|`) ?? [];
+      }));
+      seen = Object.fromEntries(Object.entries(seen).filter(([key, at]) => at >= now - 14 * 86_400_000 || [...persistent].some((p) => key.startsWith(p))).slice(-10000));
+      const tmp = `${stateFile}.${process.pid}`;
+      fs.writeFileSync(tmp, JSON.stringify(seen)); fs.renameSync(tmp, stateFile);
+    }
   } catch { /* sampling must not break usage */ }
-  finally { fs.closeSync(fd); fs.unlinkSync(lock); }
+  finally { release(); }
 }

@@ -2,9 +2,9 @@ import { spawn } from 'node:child_process';
 import type { ExecResult } from './runner.ts';
 
 /** Bounded handshake for the single read method, with no thread or agent turn. */
-export function readRateLimits(cmd: string, args: string[], cwd: string | undefined, timeoutMs: number): Promise<ExecResult> {
+export function readRateLimits(cmd: string, args: string[], cwd: string | undefined, timeoutMs: number, env: NodeJS.ProcessEnv = process.env): Promise<ExecResult> {
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, { cwd, env: process.env, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(cmd, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
     let buffer = '';
     let result: ExecResult = { code: 1, stdout: '', stderr: 'RPC ended before a response' };
     let completed = false;
@@ -33,7 +33,7 @@ export function readRateLimits(cmd: string, args: string[], cwd: string | undefi
         const line = buffer.slice(0, end); buffer = buffer.slice(end + 1);
         try {
           const msg = JSON.parse(line) as { id?: number; error?: unknown; result?: unknown };
-          if (msg.id === 1) {
+          if (msg.id === 1 && !completed) {
             if (msg.error) return finish({ code: 1, stdout: '', stderr: 'RPC initialization failed' });
             send({ method: 'initialized', params: {} });
             send({ id: 2, method: 'account/rateLimits/read' });

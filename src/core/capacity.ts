@@ -1,3 +1,4 @@
+import { collectStatus } from './status.ts';
 import { recordStaleCapacity } from './capacity-events.ts';
 import type { AgentName } from './config.ts';
 import { AGENT_NAMES } from './config.ts';
@@ -11,6 +12,7 @@ import type { PlanWindowView } from './usage.ts';
 import { readSamples } from './usage-samples.ts';
 import type { UsageSample } from './usage-samples.ts';
 import { isObject } from './util.ts';
+import { agentHomes } from './usage-sources.ts';
 import { windowKind } from './usage-parse.ts';
 
 export interface TokenEstimate {
@@ -50,8 +52,9 @@ export function capacityTrend(samples: UsageSample[], provider: AgentName, windo
 /** Read-only RPC: initialize then account/rateLimits/read. No thread/start or turn/start. */
 export async function refreshCodexCapacity(ctx: Context): Promise<string | null> {
   if (!ctx.config.capacity.codexRefresh || ctx.runner.dryRun) return null;
-  const r = await ctx.runner.exec('codex', ['app-server'], { readOnly: true, timeoutMs: 3000, rpc: { method: 'account/rateLimits/read' } });
+  const r = await ctx.runner.exec('codex', ['app-server'], { readOnly: true, timeoutMs: 3000, rpc: { method: 'account/rateLimits/read' }, env: { ...process.env, CODEX_HOME: agentHomes(ctx.config).codex } });
   try {
+    if (r.code !== 0) throw new Error('RPC failed');
     const result: unknown = JSON.parse(r.stdout);
     if (!isObject(result)) return 'Codex app-server returned no rate limits';
     const limits = isObject(result.rateLimitsByLimitId) && isObject(result.rateLimitsByLimitId.codex) ? result.rateLimitsByLimitId.codex : result.rateLimits;
@@ -77,6 +80,7 @@ export async function collectCapacity(ctx: Context) {
   const samples = readSamples(ctx.config);
   const loads = collectLimits(ctx.config, await liveWindows(ctx));
   const queue = waiting(readQueue(ctx.config));
+  const rows = await collectStatus(ctx, { progress: false });
   const stats = computeStats(selectHistory(ctx, { since: '7d' }));
   return {
     at: new Date(now).toISOString(),
@@ -94,7 +98,7 @@ export async function collectCapacity(ctx: Context) {
       if (load.free === 0) hints.push('no free configured slots');
       return {
         provider, estimate: [...windows].sort((a, b) => a.remainingPercent - b.remainingPercent)[0]?.estimate ?? null, source: plan.source, ageSeconds: plan.readAt === null ? null : Math.max(0, Math.floor((now - plan.readAt) / 1000)), stale: plan.stale, windows,
-        limited: windows.length > 0 ? windows.some((w) => w.usedPercent >= 100) : null,
+        limited: rows.some((r) => r.agent === provider && r.window === 'alive' && r.state === 'limited') || (windows.length > 0 ? windows.some((w) => w.usedPercent >= 100) : null),
         slots: { active: load.windows.length, limit: load.limit, reserved: load.reserved, external: load.external.length, free: load.free },
         queue: { count: load.queued, next: queue.find((q) => q.agent === provider)?.task ?? null },
         models: [...new Map(ctx.config.equivalents.map((e) => [`${e[provider].model}/${e[provider].effort}`, e[provider]])).values()],
@@ -111,7 +115,7 @@ export function capacitySnapshot(report: Capacity, ordered: readonly AgentName[]
   });
 }
 export function snapshotLines(snapshot: ReturnType<typeof capacitySnapshot>): string[] {
-  return snapshot.map((p) => `capacity: ${p.provider}${p.ordered ? ' (order)' : ''}: remaining ${p.remainingPercent ?? 'n/d'}%, reset ${p.resetsInMinutes ?? 'n/d'} min, age ${p.ageSeconds ?? 'n/d'} s${p.stale ? ' stale' : ''}, free slots ${p.freeSlots ?? 'unbounded'}${p.estimate ? `, estimate.remainingTokens ${p.estimate.remainingTokens} (${p.estimate.confidence})` : ''}`);
+  return snapshot.map((p) => `capacity: ${p.provider}${p.ordered ? ' (order)' : ''}: remaining ${p.remainingPercent === null ? 'n/d' : `${p.remainingPercent}%`}, reset ${p.resetsInMinutes ?? 'n/d'} min, age ${p.ageSeconds ?? 'n/d'} s${p.stale ? ' stale' : ''}, free slots ${p.freeSlots ?? 'unbounded'}${p.estimate ? `, estimate.remainingTokens ${p.estimate.remainingTokens} (${p.estimate.confidence})` : ''}`);
 }
 export function renderCapacity(report: Capacity): string[] {
   return [...snapshotLines(capacitySnapshot(report)), ...report.providers.flatMap((p) => [
