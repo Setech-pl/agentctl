@@ -16,6 +16,8 @@ jobs:
           node-version: ${{ matrix.node }}
           package-manager-cache: false
       - run: npm ci
+      - run: npm run docs
+      - run: npm run docs:mermaid
       - run: npm run typecheck
       - name: Test with isolated user directories
         env:
