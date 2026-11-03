@@ -11,6 +11,7 @@ export interface ExecResult {
 }
 
 export interface ExecOptions {
+  env?: NodeJS.ProcessEnv;
   rpc?: { method: 'account/rateLimits/read' };
   cwd?: string;
   /** Written to the command's stdin. */
@@ -62,8 +63,9 @@ export class RealRunner implements Runner {
   readonly dryRun = false;
 
   async exec(cmd: string, args: string[], opts: ExecOptions = {}): Promise<ExecResult> {
-    if (opts.rpc) return readRateLimits(cmd, args, opts.cwd, opts.timeoutMs ?? 3000);
-    const env = cmd === 'tmux' ? tmuxEnv(process.env) : process.env;
+    if (opts.rpc) return readRateLimits(cmd, args, opts.cwd, opts.timeoutMs ?? 3000, opts.env);
+    const commandEnv = opts.env ?? process.env;
+    const env = cmd === 'tmux' ? tmuxEnv(commandEnv) : commandEnv;
     if (opts.interactive) {
       const r = spawnSync(cmd, args, { cwd: opts.cwd, stdio: 'inherit', env });
       if (r.error) return { code: (r.error as NodeJS.ErrnoException).code === 'ENOENT' ? 127 : 1, stdout: '', stderr: r.error.message };

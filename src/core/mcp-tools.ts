@@ -631,15 +631,16 @@ async function runNew(deps: McpDeps, args: { spec: string; confirm?: boolean | u
       }
     }
     const specs = raws.map((raw) => resolveSpec(raw, { config: ctx.config }));
-    const cap = ctx.config.capacity.snapshot ? capacitySnapshot(await collectCapacity(ctx), specs.map((s) => s.agent)) : undefined;
+    const cap = !args.confirm && ctx.config.capacity.snapshot ? capacitySnapshot(await collectCapacity(ctx), specs.map((s) => s.agent)) : undefined;
     const summary = summarizeSpecs(specs, cap ? snapshotLines(cap) : []).join('\n');
     if (!args.confirm) {
       return { text: `${summary}\n\nNot started yet. Show this to the user and ask; if they agree, call new again with the same spec and confirm: true.`, executed: false, announce: '' };
     }
     // The chat cannot answer a folder-trust dialog: stop at it (the error says so) instead of waiting for a person.
     const results = await newTasks(ctx, specs, { waitTrust: false, noSwitch: true, ...(deps.self ? { self: deps.self } : {}) });
+    const startedCap = ctx.config.capacity.snapshot ? capacitySnapshot(await collectCapacity(ctx), results.map((r) => r.effective.agent)) : undefined;
     const started = results.map((r) => `${r.task} (window ${r.window}, ${r.effective.agent} ${r.effective.model}/${r.effective.effort})`).join('; ');
-    return { text: `Started: ${started}\n${cap ? snapshotLines(cap).join('\n') + '\n' : ''}${lines.join('\n')}`.trim(), executed: true, announce: `new ${results.map((r) => r.task).join(', ')}` };
+    return { text: `Started: ${started}\n${startedCap ? snapshotLines(startedCap).join('\n') + '\n' : ''}${lines.join('\n')}`.trim(), executed: true, announce: `new ${results.map((r) => r.task).join(', ')}` };
   });
 }
 

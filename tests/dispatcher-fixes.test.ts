@@ -75,3 +75,39 @@ describe('dispatcher production regressions', () => {
     assert.ok(Date.now() - start < 2000);
   });
 });
+
+describe('notification ownership durability', () => {
+  it('recovers a dead lock owner but never steals a live owner', async () => {
+    const { tryFileLock, withFileLock } = await import('../src/core/file-lock.ts');
+    const file = path.join(scratch.sub('lock-owner'), 'send.lock');
+    fs.writeFileSync(file, '99999999');
+    const release = tryFileLock(file); assert.ok(release);
+    assert.equal(tryFileLock(file), undefined);
+    release();
+    await assert.rejects(withFileLock(file, async () => { throw new Error('delivery failed'); }), /delivery failed/);
+    assert.equal(fs.existsSync(file), false);
+  });
+  it('concurrent failed enqueues and a retry cannot overwrite or duplicate another pending notification', async () => {
+    const { notifyPhone, phoneTick, queuedForPhone } = await import('../src/core/phone-send.ts');
+    const config = makeConfig(scratch.sub('phone-owner'), 'notify:\n  ntfy:\n    topic: local-only\n    server: http://127.0.0.1:1\n    always: true\n');
+    const fake = new FakeTmux(); const runner = new DiskRunner({ dryRun: false, respond: fake.respond });
+    const ctx = new Context(runner, config, () => {});
+    let phase = 0; const accepted: string[] = [];
+    ctx.fetch = async (_url, init) => {
+      const body = String(init?.body);
+      const ok = phase > 0 && (phase > 1 || !body.includes('APP-5'));
+      if (ok) accepted.push(body);
+      await new Promise((resolve) => setImmediate(resolve));
+      return { status: ok ? 200 : 503 } as Response;
+    };
+    const send = (task: string) => notifyPhone(ctx, { kind: 'report-ready', task, text: 'ready' });
+    await Promise.all(['APP-1', 'APP-2', 'APP-3', 'APP-4'].map(send));
+    assert.equal(queuedForPhone(config), 4);
+    phase = 1; await runner.sleep(30001);
+    await Promise.all([phoneTick(ctx), send('APP-5')]);
+    assert.equal(queuedForPhone(config), 1);
+    phase = 2; await runner.sleep(30001); await phoneTick(ctx);
+    assert.equal(queuedForPhone(config), 0);
+    assert.equal(accepted.length, 5); assert.equal(new Set(accepted).size, 5);
+  });
+});

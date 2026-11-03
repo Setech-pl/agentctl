@@ -120,7 +120,7 @@ describe('capacity: current facts and bounded history', () => {
     const runner = new DiskRunner({ dryRun: false, startTime: NOW, respond: (cmd, args, opts) => {
       if (cmd === 'codex') {
         assert.deepEqual(args, ['app-server']);
-        assert.equal(opts.rpc?.method, 'account/rateLimits/read'); calls++;
+        assert.equal(opts.rpc?.method, 'account/rateLimits/read'); assert.ok(opts.env?.CODEX_HOME?.endsWith('codex-home')); calls++;
         return calls === 1 ? { stdout: JSON.stringify({ rateLimits: { primary: { usedPercent: 25, windowDurationMins: 300, resetsAt: (NOW + 3_600_000) / 1000 } } }) } : { code: 1, stdout: '' };
       }
       return { code: 1 };
@@ -171,5 +171,56 @@ describe('guide: one source across fronts', () => {
     const v = await runCli(t.config, t.runner, ['version']);
     const flag = await runCli(t.config, t.runner, ['--version']);
     assert.equal(v.stdout, flag.stdout);
+  });
+});
+
+describe('capacity: scheduling evidence', () => {
+  it('reports live reservations, nearest queue entry and seven-day model statistics without task history rows', async () => {
+    const t = world('evidence', 'limits: {claude: 4}\n');
+    const { seedTask } = await import('./helpers.ts');
+    const { historyPath } = await import('../src/core/history.ts');
+    const { reservationsFile } = await import('../src/core/limits.ts');
+    const { queueDir } = await import('../src/core/queue.ts');
+    seedTask(t.config, 'APP-1'); t.fake.add('app-1', 'Thinking…\nesc to interrupt');
+    fs.writeFileSync(reservationsFile(t.config), JSON.stringify({ claude: { count: 1, at: new Date(NOW).toISOString() } }));
+    fs.mkdirSync(queueDir(t.config));
+    for (const [task, seq, priority] of [['APP-2', 1, 'normal'], ['APP-3', 2, 'high']] as const) fs.writeFileSync(path.join(queueDir(t.config), `${seq}-${task}.json`), JSON.stringify({ seq, task, order: seq, status: 'queued', priority, agent: 'claude', model: 'sonnet', effort: 'medium', spec: 'x' }));
+    const history = { v: 1, task: 'OLD-1', event: 'mark', at: new Date(NOW - 1000).toISOString(), effective: { agent: 'claude', model: 'sonnet', effort: 'medium' }, durationMs: 60000, tokens: { fresh: 5000 }, result: 'ok' };
+    fs.writeFileSync(historyPath(t.config), JSON.stringify(history) + '\n');
+    const p = (await collectCapacity(t.ctx)).providers[0]!;
+    assert.deepEqual(p.slots, { active: 1, limit: 4, reserved: 1, external: 0, free: 2 });
+    assert.deepEqual(p.queue, { count: 2, next: 'APP-3' });
+    assert.equal(p.stats[0]!.medianDurationMs, 60000); assert.equal(p.stats[0]!.medianTokens, 5000); assert.equal(p.stats[0]!.ok, 1);
+    assert.ok(!('tasks' in p));
+  });
+  it('emits stale event only with active task windows and does not repeat it on the next look', async () => {
+    const t = world('stale', 'capacity: {stale_minutes: 5}\n');
+    setClaudePlan(t.config.path, NOW, { session: 2, week: 1 }, 10 * 60000);
+    await collectCapacity(t.ctx);
+    assert.equal(readJournal(t.config).filter((e) => /stale with active/.test(e.text)).length, 0);
+    const { seedTask } = await import('./helpers.ts');
+    seedTask(t.config, 'APP-1'); t.fake.add('app-1', 'Thinking…\nesc to interrupt');
+    await collectCapacity(t.ctx); await collectCapacity(t.ctx);
+    assert.equal(readJournal(t.config).filter((e) => /stale with active/.test(e.text)).length, 1);
+  });
+  it('new and queue JSON are parseable, include both providers, and obey capacity.snapshot false', async () => {
+    const t = world('order-snapshot'); const repo = scratch.sub('order-repo');
+    const { specText } = await import('./helpers.ts');
+    const spec = specText({ task: 'APP-1', agent: 'claude', model: 'sonnet', effort: 'medium' }, repo);
+    const fresh = new DiskRunner({ dryRun: false, startTime: NOW, respond: (cmd, args, opts) => {
+      if (cmd === 'git' && args.includes('--verify')) return { code: 1 };
+      if (cmd === 'tmux') return args[0] === 'capture-pane' ? { stdout: '❯ Try "fake"' } : (args[0] === 'has-session' || args[0] === 'list-windows' ? { code: 1 } : {});
+      if (cmd === 'codex') return { code: 127 };
+      return {};
+    } });
+    const started = await runCli(t.config, fresh, ['new', '-', '--json', '-y'], { readStdin: () => spec });
+    assert.equal(started.code, 0, started.stderr);
+    assert.equal(JSON.parse(started.stdout).capacity.length, 2);
+    const queuedSpec = specText({ task: 'APP-2', agent: 'claude' }, repo);
+    const queued = await runCli(t.config, t.runner, ['queue', '-', '--json', '-y'], { readStdin: () => queuedSpec });
+    assert.equal(queued.code, 0, queued.stderr); assert.equal(JSON.parse(queued.stdout).capacity.length, 2);
+    t.config.capacity.snapshot = false;
+    const disabled = await runCli(t.config, t.runner, ['queue', '-', '--json', '-y'], { readStdin: () => specText({ task: 'APP-3', agent: 'claude' }, repo) });
+    assert.equal(disabled.code, 0, disabled.stderr); assert.ok(!('capacity' in JSON.parse(disabled.stdout)));
   });
 });
