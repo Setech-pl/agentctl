@@ -408,7 +408,7 @@ Na boardzie **`l`** otwiera log (`↑↓` przewija, `Esc` wraca), a **`o`** / **
 
 ## Nawigacja
 
-`agentctl board --tmux` i `agentctl watch --tmux` uruchamiają swoje polecenie **jako proces okna** (`tmux new-window … <command>`), a nie wpisując je do powłoki, i w tym samym wywołaniu tmux ustawiają dla okna `remain-on-exit failed`: gdy polecenie się nie powiedzie, okno zostaje z błędem na ekranie, a `~/.agentctl/board.log` / `watch.log` mają początek (rozmiar terminala, `CI`, flagi tty) oraz koniec albo stos błędu. Ponowne uruchomienie `board --tmux` startuje na miejscu okno, którego proces się zakończył. Board czeka na rozmiar terminala (okno bez klienta potrafi przez chwilę raportować 0x0) i rysuje się nawet wtedy, gdy w środowisku jest zmienna `CI` (Ink inaczej nie narysowałby niczego).
+`agentctl board --tmux` i `agentctl watch --tmux` uruchamiają swoje polecenie **jako proces okna** (`tmux new-window … <command>`), a nie wpisując je do powłoki, i w tym samym wywołaniu tmux ustawiają `remain-on-exit` (`failed` dla boardu, `on` dla watch): nieudany board i każdy zakończony proces watch zostawiają wynik na ekranie, a `~/.agentctl/board.log` / `watch.log` mają początek (rozmiar terminala, `CI`, flagi tty) oraz koniec albo stos błędu. Ponowne uruchomienie `board --tmux` startuje na miejscu okno, którego proces się zakończył. Board czeka na rozmiar terminala (okno bez klienta potrafi przez chwilę raportować 0x0) i rysuje się nawet wtedy, gdy w środowisku jest zmienna `CI` (Ink inaczej nie narysowałby niczego).
 
 W sesji agentctl (opcje sesji, nigdy `-g`) agentctl ustawia:
 
@@ -633,7 +633,7 @@ agentctl-update                             # później, po scaleniu PR
 Robi to w tej kolejności: `git fetch origin` w repo; `git worktree add --detach <stable> <ref>` (a gdy kopia istnieje, odmowa,
 jeśli ma lokalne zmiany, w przeciwnym razie `git checkout --detach <ref>`); `npm ci`, `npm run build` i `npm link` w stabilnej kopii, żeby globalne `agentctl` i
 `agentctl-update` wskazywały na nią; `agentctl doctor` (porażka kończy skrypt kodem niezerowym); jeśli w sesji tmux
-`agentctl` istnieje okno `watch`, zabija je i uruchamia `agentctl watch --tmux` z nowej wersji (żadne inne okno nie jest ruszane); na koniec wypisuje
+`agentctl` istnieje okno z `@agentctl-role=watch` (albo starszą nazwą `watch`), zabija je po ID i uruchamia `agentctl watch --tmux` z nowej wersji (żadne inne okno nie jest ruszane); na koniec wypisuje
 poprzedni i nowy commit oraz to, czy watch został zrestartowany.
 
 | Opcja / zmienna | Znaczenie |

@@ -408,7 +408,7 @@ On the board **`l`** opens the log (`↑↓` scroll, `Esc` back) and **`o`** / *
 
 ## Navigation
 
-`agentctl board --tmux` and `agentctl watch --tmux` start their command **as the process of the window** (`tmux new-window … <command>`), not by typing it into a shell, and set `remain-on-exit failed` for the window in the same tmux call: when the command fails, the window stays with its error on the screen, and `~/.agentctl/board.log` / `watch.log` have the start (terminal size, `CI`, tty flags) and the end or the stack of the failure. Running `board --tmux` again starts a window whose process has ended in place. The board waits for a terminal size (a window without a client can report 0x0 for a moment) and draws even when a `CI` variable is in the environment (Ink would otherwise draw nothing).
+`agentctl board --tmux` and `agentctl watch --tmux` start their command **as the process of the window** (`tmux new-window … <command>`), not by typing it into a shell, and set `remain-on-exit` in the same tmux call (`failed` for board, `on` for watch): failed board commands and every ended watch process leave their output on screen, and `~/.agentctl/board.log` / `watch.log` have the start (terminal size, `CI`, tty flags) and the end or the stack of the failure. Running `board --tmux` again starts a window whose process has ended in place. The board waits for a terminal size (a window without a client can report 0x0 for a moment) and draws even when a `CI` variable is in the environment (Ink would otherwise draw nothing).
 
 In the agentctl session (session options, never `-g`) agentctl sets:
 
@@ -632,8 +632,8 @@ agentctl-update                             # later, after a PR is merged
 
 It does, in this order: `git fetch origin` in the repo; `git worktree add --detach <stable> <ref>` (or, when the copy exists, a refusal
 if it has local changes, else `git checkout --detach <ref>`); `npm ci`, `npm run build` and `npm link` in the stable copy, so the global `agentctl` and
-`agentctl-update` point at it; `agentctl doctor` (a failure makes the script exit non-zero); if window `watch` exists in the tmux session
-`agentctl`, it kills that window and starts `agentctl watch --tmux` from the new version (no other window is touched); finally it prints the
+`agentctl-update` point at it; `agentctl doctor` (a failure makes the script exit non-zero); if a window with `@agentctl-role=watch` (or the legacy name `watch`) exists in the tmux session
+`agentctl`, it kills that window by ID and starts `agentctl watch --tmux` from the new version (no other window is touched); finally it prints the
 previous and new commit and whether watch was restarted.
 
 | Option / variable | Meaning |
