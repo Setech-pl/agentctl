@@ -57,11 +57,19 @@ export async function collectDisk(ctx: Context, statfs = fs.promises.statfs): Pr
     volumes.set(key, { device, paths: [target], availableBytes, totalBytes, level: diskLevel(availableBytes, ctx.config.disk.warnGb, ctx.config.disk.criticalGb), ...(error ? { error } : {}) });
   }
   const worktrees = [...new Set(records.flatMap((r) => r.repos.map((r) => r.worktree)))].sort();
-  const key = JSON.stringify(worktrees);
+  const key = `${ctx.config.path}:${JSON.stringify(worktrees)}`;
+  const sizeFile = path.join(path.dirname(ctx.config.path), 'disk-sizes.json');
   let size = sizes.get(key);
+  if (!size) {
+    try {
+      const cached = JSON.parse(fs.readFileSync(sizeFile, 'utf8'));
+      if (cached.key === key && typeof cached.at === 'number' && (cached.bytes === null || typeof cached.bytes === 'number') && ctx.runner.now() >= cached.at && ctx.runner.now() - cached.at < DISK_INTERVAL_MS) size = { at: cached.at, bytes: cached.bytes };
+    } catch { /* first read or torn cache */ }
+  }
   if (!size || ctx.runner.now() - size.at >= DISK_INTERVAL_MS) {
     try { size = { at: ctx.runner.now(), bytes: worktrees.reduce((n, wt) => n + sizeOf(wt), 0) }; }
     catch { size = { at: ctx.runner.now(), bytes: null }; }
+    try { await ctx.runner.writeFile(sizeFile, JSON.stringify({ key, ...size })); } catch { /* cache cannot make a read fail */ }
     sizes.set(key, size);
     if (sizes.size > 32) sizes.delete(sizes.keys().next().value!);
   }
