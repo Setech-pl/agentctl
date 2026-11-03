@@ -2,6 +2,8 @@
 
 Generated from README.md by `npm run docs`.
 
+## Dispatcher
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -12,6 +14,8 @@ sequenceDiagram
     F-->>D: Facts, n/d and labeled estimates
     Note over D: Agent chooses provider/model/effort
 ```
+
+## Flow
 
 ```mermaid
 sequenceDiagram
@@ -95,6 +99,8 @@ sequenceDiagram
     end
 ```
 
+## Architecture
+
 ```mermaid
 flowchart TB
     subgraph fronts [Fronts]
@@ -156,6 +162,8 @@ flowchart TB
     MCP --> AUDIT
     MCP -- "events_since" --> JOURNAL
 ```
+
+## Task states
 
 ```mermaid
 stateDiagram-v2

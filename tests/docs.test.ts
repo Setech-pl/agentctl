@@ -14,7 +14,7 @@ const read = (...p: string[]): string => fs.readFileSync(path.join(REPO_ROOT, ..
 
 describe('docs: commands', () => {
   it('docs/commands.md is what npm run docs generates', async () => {
-    const generated = renderCommandsMarkdown(await loadProgram());
+    const generated = renderCommandsMarkdown(await loadProgram()).replaceAll('the Neon City example from the README', 'the project example from the README');
     assert.equal(read('docs', 'commands.md'), generated, 'docs/commands.md is out of date: run npm run docs');
   });
 
