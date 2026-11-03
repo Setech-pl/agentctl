@@ -84,3 +84,5 @@ Od 0.17.1 MCP udostępnia ponawianie i sterowanie kolejką, kohorty, sprzątanie
 Raporty pobieraj przez `pull_ready` w trybie skrótu; `get_report` tylko ze wskazaną sekcją. Przydział opieraj na procentach dostawcy, resecie i stats. Estymaty tokenów są informacyjne. `self_verdict` to samoocena agenta, `mark` to ocena człowieka.
 
 0.17.2 review correction / poprawka po przeglądzie: summary_delivered ≠ pulled ≠ mark. Use full report pages or explicit ack; reports require current attempt plus report-end or settled ended turn. Stable client event cursors and bounded pages are described in [mcp.md](mcp.md); report.settle_s and overload.give_up_after in [configuration.md](configuration.md).
+
+Nie podawaj events_since.client dla niezależnych równoległych sesji. Nowa sesja dziedziczy zapisaną pozycję klienta; client ustawiaj tylko, gdy chcesz świadomie współdzielić pobieranie zdarzeń.

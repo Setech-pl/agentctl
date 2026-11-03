@@ -80,7 +80,8 @@ done
     const status = h.agentctl(['status', '--json']);
     check('working plus question is needs-input', /needs-input/.test(status.stdout), status.stdout);
     check('status has count and shortcut', /zwinięte, 2/.test(status.stdout) && /⇧↑/.test(status.stdout), status.stdout);
-    check('peek explains how to open', /Enter → okno agenta, potem ⇧↑/.test(h.agentctl(['peek', 'LQ-1']).stdout));
+    const peek = h.agentctl(['peek', 'LQ-1']);
+    check('peek explains how to open', /Enter → okno agenta, potem ⇧↑/.test(peek.stdout), JSON.stringify(peek));
     check('repeated reads keep needs-input', [1,2,3].every(() => /needs-input/.test(h.agentctl(['status', '--json']).stdout)));
     h.tmux(['send-keys', '-t', `=${h.session}:lq-1`, 'ANSWER', 'Enter']);
     await sleep(500);

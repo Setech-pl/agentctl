@@ -132,6 +132,13 @@ const GENERIC_QUESTION = /^(?:do you want|would you like|allow|proceed|continue)
  */
 export function extractQuestion(screen: string, max: number = MAX_QUESTION): string | undefined {
   const lines = screen.split('\n').map((l) => l.trimEnd());
+  // peek includes scrollback: a wrapped UUID such as "56. Include..." there can look like an old option.
+  // The latest question UI wins; old options must not hide a newer collapsed question.
+  const collapsedAt = lines.findLastIndex(l => /^\s*\?\s+\d+ questions?\b/i.test(l));
+  if (collapsedAt > lines.findLastIndex(l => OPTION.test(l))) {
+    const collapsed = collapsedQuestion(screen)!;
+    return clip(`Codex ma pytanie (zwinięte, ${collapsed.count}) – Enter → okno agenta, potem ${collapsed.shortcut ?? 'skrót przy „to answer” na ekranie'}`, max);
+  }
   let first = -1;
   for (let i = lines.length - 1; i >= 0; i--) {
     const l = lines[i] as string;
@@ -313,7 +320,7 @@ export function planEventWiring(input: WiringInput): EventWiring {
 
 /** Read the live queue marker; a queued message alone is not a question. */
 export function collapsedQuestion(screen: string): { count: number; shortcut: string | null } | undefined {
-  const marker = /^\s*\?\s+(\d+) questions?\b/im.exec(screen);
+  const marker = [...screen.matchAll(/^\s*\?\s+(\d+) questions?\b/gim)].at(-1);
   if (!marker) return undefined;
   const tail = screen.slice(marker.index + marker[0].length).split('\n').slice(0, 5).join('\n');
   const shortcut = /^\s*(.+?)\s+to answer\s*$/im.exec(tail)?.[1]?.trim() ?? null;

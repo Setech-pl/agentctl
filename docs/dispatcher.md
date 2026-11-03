@@ -84,3 +84,5 @@ Since 0.17.1 MCP covers queue retry/control, cohorts, `gc` and diagnostics. Chec
 Use `pull_ready` summary mode for reports; request only the needed `get_report` section. Allocate from provider percentages, reset times and stats. Token estimates are informational. `self_verdict` is the agent assessment; `mark` is the human evaluation.
 
 0.17.2 review correction / poprawka po przeglądzie: summary_delivered ≠ pulled ≠ mark. Use full report pages or explicit ack; reports require current attempt plus report-end or settled ended turn. Stable client event cursors and bounded pages are described in [mcp.md](mcp.md); report.settle_s and overload.give_up_after in [configuration.md](configuration.md).
+
+Leave events_since.client unset for independent concurrent sessions. A new session inherits the saved client high-water mark; set client only when sharing consumption is intentional.

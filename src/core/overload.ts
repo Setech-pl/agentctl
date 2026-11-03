@@ -10,8 +10,8 @@ import { recordJournal } from './journal.ts';
 import { readTaskRecord } from './taskstore.ts';
 import { errorMessage } from './util.ts';
 
-interface Retry { since: number; firstAt: number; attempts: number; attention?: boolean }
-/** An episode survives a watcher restart; working/completion starts a fresh episode. */
+interface Retry { since: number; firstAt: number; attempts: number; attention?: boolean; workingSince?: number }
+/** An episode survives brief work and watcher restarts; only sustained recovery or completion ends it. */
 export async function overloadTick(ctx: Context, rows: StatusRow[], notifier: Notifier): Promise<void> {
   if (ctx.runner.dryRun) return;
   const file = path.join(path.dirname(ctx.config.path), 'overload-retries.json');
@@ -21,7 +21,12 @@ export async function overloadTick(ctx: Context, rows: StatusRow[], notifier: No
   const persist = () => ctx.runner.writeFile(file, JSON.stringify(state));
   for (const task of Object.keys(state)) {
     const row = rows.find(r => r.task === task);
-    if (!row || row.finished || row.closed || row.cancelled || row.report === 'yes' || ['working', 'waiting', 'report-ready'].includes(row.state)) delete state[task];
+    const episode = state[task]!;
+    if (!row || row.finished || row.closed || row.cancelled || row.report === 'yes' || row.state === 'report-ready') { delete state[task]; continue; }
+    if (row.state === 'working') {
+      episode.workingSince ??= now;
+      if (now - episode.workingSince >= settings.resetAfterS * 1000) delete state[task];
+    } else delete episode.workingSince;
   }
   for (const row of rows) {
     if (row.state !== 'overloaded' || row.window !== 'alive' || row.finished || row.report === 'yes' || row.reportCandidate) continue;

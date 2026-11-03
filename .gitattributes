@@ -1,0 +1,2 @@
+# Blank TUI input prompts deliberately end with a space; all other whitespace checks remain enabled.
+tests/fixtures/economy/*.txt whitespace=-blank-at-eol

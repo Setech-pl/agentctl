@@ -3,7 +3,7 @@ import type { GlobalConfig } from './config.ts';
 import type { QueueEntry } from './queue.ts';
 import { splitSpecs } from './spec.ts';
 const SECRET_KEY = /TOKEN|KEY|SECRET|PASSWORD|PASS|AUTH|COOKIE/i;
-/** MCP never receives queued env values, including in stderr or the prompt. CLI remains owner-only and unredacted. */
+/** Env fields are always masked. Global text substitution applies to secrets, not common nonsecret env settings. */
 export function redactQueue(entry: QueueEntry, config: GlobalConfig): unknown {
   const secrets = new Set<string>();
   const collect = (value: unknown, key = ''): void => {
@@ -19,7 +19,9 @@ export function redactQueue(entry: QueueEntry, config: GlobalConfig): unknown {
   for (const spec of specs) {
     collect(spec.header);
     const env = spec.header.env;
-    if (env && typeof env === 'object') for (const value of Object.values(env)) if (typeof value === 'string' && value) secrets.add(value);
+    if (env && typeof env === 'object') for (const [key, value] of Object.entries(env)) {
+      if (typeof value === 'string' && value && (SECRET_KEY.test(key) || (value.length >= 16 && /^[\w./+=:-]+$/.test(value) && /[0-9]/.test(value)))) secrets.add(value);
+    }
   }
   const cleanText = (text: string): string => {
     for (const secret of [...secrets].sort((a, b) => b.length - a.length)) text = text.split(secret).join('***');
