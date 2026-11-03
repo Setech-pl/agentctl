@@ -65,12 +65,12 @@ describe('mcp: lenient allow list', () => {
   }
 
   it('an unknown name in mcp.allow does not take the server down: it is ignored, the others stay, status warns', async () => {
-    const t = setup('len1', 'mcp: {allow: [queue_pause, send, cancel]}\n');
+    const t = setup('len1', 'mcp: {allow: [future_tool, send, cancel]}\n');
     assert.deepEqual(t.config.mcp.allow, ['send', 'cancel']);
     const r = await t.call('status');
     assert.equal(r.isError, undefined);
     assert.match(r.text, /^No tasks\n/);
-    assert.match(r.text, /Config warning: config\.mcp\.allow: "queue_pause" is not a write tool of this version, ignored/);
+    assert.match(r.text, /Config warning: config\.mcp\.allow: "future_tool" is not a write tool of this version, ignored/);
     // the write tools that are known still work
     assert.match((await t.call('send', { task: 'NC-1', text: 'hi' })).text, /no task|No tasks|unknown/i);
   });

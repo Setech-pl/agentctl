@@ -30,7 +30,7 @@ export interface ArchiveResult {
  * (`<state_dir>/../archive/<task>/`). Only tasks that `agentctl close` marked closed and that have no window; the report in the cache
  * and the worktree are not touched. `status --all` and the board (key a) still list archived tasks as closed.
  */
-export async function archiveClosed(ctx: Context, opts: { olderThanMs?: number | undefined } = {}): Promise<ArchiveResult> {
+export async function archiveClosed(ctx: Context, opts: { olderThanMs?: number | undefined; preview?: boolean } = {}): Promise<ArchiveResult> {
   const { config, runner } = ctx;
   const live = new Set(await ctx.tmux.listWindows());
   const dest = archiveDir(config);
@@ -56,8 +56,14 @@ export async function archiveClosed(ctx: Context, opts: { olderThanMs?: number |
       result.kept.push({ task: record.task, reason: `${to} already exists` });
       continue;
     }
-    await runner.rename(taskDir(config, record.window), to);
+
     result.moved.push({ task: record.task, from: taskDir(config, record.window), to });
   }
+  if (!opts.preview) await applyArchive(ctx, result);
   return result;
+}
+
+/** Execute only the state folders listed by a freshly validated archive preview. */
+export async function applyArchive(ctx: Context, plan: ArchiveResult): Promise<void> {
+  for (const item of plan.moved) await ctx.runner.rename(item.from, item.to);
 }

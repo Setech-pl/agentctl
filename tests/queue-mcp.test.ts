@@ -66,6 +66,7 @@ describe('mcp: queue read tools', () => {
     const t = setup('ql', 'mcp: {allow: [queue]}\n');
     assert.equal((await t.call('queue_list')).text, 'The queue is empty.');
     t.running('NC-9', []);
+    await t.call('queue', { spec: t.spec('Q-1') + t.spec('Q-2', 'after: Q-1\n') });
     assert.equal((await t.call('queue', { spec: t.spec('Q-1') + t.spec('Q-2', 'after: Q-1\n'), confirm: true })).isError, undefined);
     const r = await t.call('queue_list');
     assert.match(r.text, /^2 waiting in the queue; 0 starting or failed\./);
@@ -89,6 +90,7 @@ describe('mcp: queue read tools', () => {
     const t = setup('st', 'mcp: {allow: [queue]}\n');
     t.running('A-1', ['y.ts']);
     t.running('A-2', ['y.ts']);
+    await t.call('queue', { spec: t.spec('Q-1') });
     await t.call('queue', { spec: t.spec('Q-1'), confirm: true });
     const r = await t.call('status');
     const lines = r.text.split('\n');
@@ -96,7 +98,7 @@ describe('mcp: queue read tools', () => {
     assert.match(lines[1]!, /^Queue \(1\): Q-1 – czeka na miejsce: claude 2\/1\. queue_list has the detail\.$/);
     assert.match(lines[2]!, /^Plans: claude n\/d \(.*\) \| codex n\/d \(.*\)\. usage has the tokens\.$/);
     assert.match(lines[3]!, /^Collisions: A-1 ⚠ A-2: 1; A-2 ⚠ A-1: 1\. overlap lists the files\.$/);
-    const rows = JSON.parse(r.text.slice(r.text.indexOf('['))) as { task: string; collidesWith: unknown }[];
+    const rows = JSON.parse(r.text.slice(r.text.indexOf('\n\n') + 2)).tasks as { task: string; collidesWith: unknown }[];
     assert.deepEqual(rows.find((x) => x.task === 'A-1')!.collidesWith, [{ task: 'A-2', files: 1 }]);
   });
 });
@@ -109,7 +111,8 @@ describe('mcp: queue write tools', () => {
     assert.match(r.text, /Writing is off for "queue"/);
     assert.deepEqual(readQueue(t.config), []);
     assert.deepEqual(t.audit().map((a) => [a.tool, a.outcome]), [['queue', 'denied']]);
-    assert.equal((await t.call('queue_rm', { task: 'Q-1' })).isError, true);
+    await t.call('queue_rm', { task: 'Q-1' });
+    assert.equal((await t.call('queue_rm', { task: 'Q-1' , confirm: true })).isError, true);
   });
 
   it('the first call returns the summary and writes nothing; confirm: true queues, audits and notifies', async () => {
@@ -136,6 +139,7 @@ describe('mcp: queue write tools', () => {
     assert.equal(bad.isError, true);
     assert.match(bad.text, /after NOPE-1: there is no such task/);
     const setupSpec = t.spec('Q-2').replace('repos:', 'setup: [rm -rf /]\nrepos:');
+    await t.call('queue', { spec: setupSpec });
     const refused = await t.call('queue', { spec: setupSpec, confirm: true });
     assert.equal(refused.isError, true);
     assert.match(refused.text, /"setup" runs shell commands and is not accepted from the chat/);
@@ -148,13 +152,16 @@ describe('mcp: queue write tools', () => {
 
   it('queue_rm takes a task out; an unknown one is an error; both are audited', async () => {
     const t = setup('qr', 'mcp: {allow: [queue, queue_rm]}\n');
+    await t.call('queue', { spec: t.spec('Q-1') + t.spec('Q-2') });
     await t.call('queue', { spec: t.spec('Q-1') + t.spec('Q-2'), confirm: true });
-    const r = await t.call('queue_rm', { task: 'q-1' });
+    await t.call('queue_rm', { task: 'q-1' });
+    const r = await t.call('queue_rm', { task: 'q-1' , confirm: true });
     assert.equal(r.text, 'Q-1: removed from the queue (cancelled)');
     assert.equal(readTaskRecord(t.config, 'q-1')?.cancelSource, 'mcp');
     assert.deepEqual(readQueue(t.config).map((e) => e.task), ['Q-2']);
-    assert.equal((await t.call('queue_rm', { task: 'Q-1' })).isError, true);
-    assert.deepEqual(t.audit().filter((a) => a.tool === 'queue_rm').map((a) => a.outcome), ['requested', 'done', 'requested', 'error']);
+    await t.call('queue_rm', { task: 'Q-1' });
+    assert.equal((await t.call('queue_rm', { task: 'Q-1' , confirm: true })).isError, true);
+    assert.deepEqual(t.audit().filter((a) => a.tool === 'queue_rm').map((a) => a.outcome), ['requested', 'preview', 'requested', 'done', 'requested', 'preview', 'requested', 'error']);
     assert.ok(t.notified.includes('czat zlecił: queue_rm Q-1'));
   });
 });

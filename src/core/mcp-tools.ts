@@ -1,3 +1,20 @@
+import { findMcpProcesses, staleProcesses } from './mcp-processes.ts';
+import { EXAMPLE_SPEC } from './example.ts';
+import { checkRetryWorktrees } from './git.ts';
+import { createHash } from 'node:crypto';
+import { collectDisk, diskLine } from './disk.ts';
+import { retryEntry, moveToFront, setPaused, unblockEntry, findEntry } from './queue.ts';
+import { touchCohort, setCohortOf, setNote } from './cohort.ts';
+import { setHidden } from './hide.ts';
+import { archiveClosed, applyArchive, parseAge } from './archive.ts';
+import { adoptTask } from './adopt.ts';
+import { reportInfo } from './report-detect.ts';
+import { managerView, startManager, stopManager } from './manager.ts';
+import { runDoctor } from './doctor.ts';
+import { sendPhoneTest } from './phone.ts';
+import { recordJournal } from './journal.ts';
+import type { GcPlan } from './gc.ts';
+import { applyGc } from './gc.ts';
 import { collectCapacity, capacitySnapshot, snapshotLines } from './capacity.ts';
 import { collectGuide } from './guide.ts';
 import fs from 'node:fs';
@@ -6,7 +23,7 @@ import { z } from 'zod';
 import { cancelTasks, planCancel } from './cancel.ts';
 import { staleWarning, versionOf } from './mcp-processes.ts';
 import { stableScript } from './mcp-install.ts';
-import { closeTask } from './close.ts';
+import { closeTask, closeTasks, planClose } from './close.ts';
 import { cohortEntries, cohortRows, findCohort, openCohortTasks, summarizeCohorts } from './cohort.ts';
 import { collectOverlaps, collideText } from './collisions.ts';
 import { commitQueueAdd, describeQueue, planQueueAdd, readQueue, removeFromQueue, waiting } from './queue.ts';
@@ -39,14 +56,14 @@ import type { LimitAssignments } from './limits.ts';
 import { planLine } from './usage-report.ts';
 import { openReader, readPlans } from './usage.ts';
 import { AGENT_NAMES } from './config.ts';
-import { AgentctlError, errorMessage, formatLocalTime } from './util.ts';
+import { AgentctlError, errorMessage, formatLocalTime, resolvePath } from './util.ts';
 
 /*
  * The tools of `agentctl mcp`. This file is data and functions only: the MCP SDK front (src/mcp/server.ts) registers them.
  *
  * What the chat can reach: the status of the tasks, the last lines of a task window, the report file each task's TASK.md names,
  * and the prompt in TASK.md. Nothing takes a path from the chat. With `mcp.allow` set, the chat can also send a prompt, start tasks
- * from a spec, interrupt, close and move. Never: merge, push, rebase, delete a branch, run a shell command, read any other file.
+ * from a spec, interrupt, close and move. Never: merge, push, rebase or run a shell command. gc uses only the shared protected plan; report_from/adopt accept explicit user paths.
  */
 
 /** Longest report or prompt that a tool returns (bytes); the chat gets a note when it is cut. */
@@ -189,7 +206,8 @@ async function runStatus(deps: McpDeps, args: { all?: boolean | undefined; cohor
   const colliding = shown.filter((r) => r.collide.length > 0);
   if (colliding.length > 0) extra.push(`Collisions: ${colliding.map((r) => `${r.task} ${collideText(r.collide)}`).join('; ')}. overlap lists the files.`);
   extra.push(awayLine(ctx));
-  return ok(`${[statusLine(shown, rows.length - shown.length), ...extra].join('\n')}\n\n${JSON.stringify(shown.map(statusRowForChat), null, 2)}`);
+  extra.push(diskLine(await collectDisk(ctx)));
+  return ok(`${[statusLine(shown, rows.length - shown.length), ...extra].join('\n')}\n\n${JSON.stringify({ disk: await collectDisk(ctx), tasks: shown.map(statusRowForChat) }, null, 2)}`);
 }
 
 /** "Away: on since …; the phone gets the notifications" - what the chat should know about the phone. */
@@ -345,8 +363,10 @@ async function queueViews(ctx: Context): Promise<ReturnType<typeof describeQueue
   return entries.length === 0 ? [] : describeQueue(ctx.config, entries, await liveWindows(ctx), await collectStatus(ctx, { progress: false, archived: true }));
 }
 
-async function runQueueList(deps: McpDeps): Promise<ToolResult> {
-  const views = await queueViews(deps.context(() => {}));
+async function runQueueList(deps: McpDeps, args: { cohort?: string | undefined } = {}): Promise<ToolResult> {
+  const ctx = deps.context(() => {});
+  const cohort = args.cohort ? findCohort(ctx.config, args.cohort).name : undefined;
+  const views = (await queueViews(ctx)).filter((v) => !cohort || cohortEntries([v.entry], cohort).length > 0);
   if (views.length === 0) return ok('The queue is empty.');
   const list = views.map((v) => ({
     position: v.position,
@@ -362,6 +382,7 @@ async function runQueueList(deps: McpDeps): Promise<ToolResult> {
     queuedLocal: formatLocalTime(v.entry.queuedAt),
     error: v.entry.error ?? null,
     cohort: v.entry.cohort ?? null,
+    retryHint: v.entry.status === 'failed' ? `Read error, inspect residue, then queue_retry task=${v.entry.task}` : null,
     blocked: v.condition.kind === 'blocked',
   }));
   const paused = views.some((v) => v.condition.kind === 'paused');
@@ -449,11 +470,11 @@ async function runGetReport(deps: McpDeps, args: { task: string }): Promise<Tool
   return ok(`=== ${record.task} (${record.agent} ${record.model}/${record.effort}) ===\n${r.text.trimEnd()}${note}`);
 }
 
-async function runPullReady(deps: McpDeps, args: { cohort?: string | undefined } = {}): Promise<ToolResult> {
+async function runPullReady(deps: McpDeps, args: { cohort?: string | undefined; all?: boolean | undefined } = {}): Promise<ToolResult> {
   const ctx = deps.context(() => {});
   const everyRow = await collectStatus(ctx);
   const rows = args.cohort === undefined ? everyRow : cohortRows(everyRow, findCohort(ctx.config, args.cohort).name);
-  const chosen = selectReady(rows, false);
+  const chosen = selectReady(rows, Boolean(args.all));
   if (chosen.length === 0) return ok(noReadyMessage(rows));
   // As many reports as fit under the size limit; the others stay un-pulled for the next call.
   const taken: StatusRow[] = [];
@@ -561,7 +582,10 @@ async function writeTool(
   try {
     const result = await body(ctx, lines);
     audit(ctx, { tool, task: label.task, outcome: result.executed ? 'done' : 'preview' });
-    if (result.executed) await deps.notify(`czat zlecił: ${result.announce}`).catch(() => undefined);
+    if (result.executed) {
+      await recordJournal(ctx, { kind: 'mcp-write', text: `${tool}: ${result.announce}` });
+      await deps.notify(`czat zlecił: ${result.announce}`).catch(() => undefined);
+    }
     return ok(result.text);
   } catch (e) {
     audit(ctx, { tool, task: label.task, outcome: 'error', detail: errorMessage(e).split('\n')[0] });
@@ -587,18 +611,28 @@ async function runInterrupt(deps: McpDeps, args: { task: string }): Promise<Tool
   });
 }
 
-async function runClose(deps: McpDeps, args: { task: string; remove_worktree?: boolean | undefined }): Promise<ToolResult> {
-  return writeTool(deps, 'close', { task: args.task, detail: args.remove_worktree ? 'remove_worktree' : undefined }, async (ctx, lines) => {
-    if (args.remove_worktree && !ctx.config.mcp.allowRmWorktree) {
-      throw new AgentctlError('removing the worktree is not allowed for the chat', `The user can allow it with: mcp: {allow_rm_worktree: true} in ${ctx.config.path}. Without remove_worktree the window is closed and the worktree stays.`);
-    }
-    const targets = await listTargets(ctx);
-    const match = matchTask(args.task, targets);
-    if (match.kind === 'many') throw new AgentctlError(`"${args.task}" fits more than one task:\n${describeTargets(match.matches).join('\n')}`, 'Use the full task ID.');
-    if (match.kind === 'none') throw new AgentctlError(`no task "${args.task}"`, 'Call status.');
-    const task = match.target.task;
-    await closeTask(ctx, task, { rmWorktree: Boolean(args.remove_worktree) });
-    return { text: `${task}: closed${args.remove_worktree ? ', worktree removed (the branch stays)' : '; the worktree and the report stay'}\n${lines.join('\n')}`.trim(), executed: true, announce: `close ${task}` };
+interface CloseMcpArgs { task?: string | undefined; tasks?: string[] | undefined; cohort?: string | undefined; remove_worktree?: boolean | undefined }
+async function closeInputs(ctx: Context, args: CloseMcpArgs): Promise<string[]> {
+  if (!args.task && !args.tasks?.length && !args.cohort) throw new AgentctlError('give task, tasks or cohort');
+  const inputs = args.tasks ?? (args.task ? [args.task] : await openCohortTasks(ctx, findCohort(ctx.config, args.cohort!).name, { queued: false }));
+  const targets = await listTargets(ctx);
+  const selected = inputs.map((input) => {
+    const match = matchTask(input, targets);
+    if (match.kind !== 'one') throw new AgentctlError(`no task "${input}" or ambiguous task`);
+    return match.target.task;
+  });
+  if (args.cohort) {
+    const cohort = findCohort(ctx.config, args.cohort).name;
+    for (const task of selected) if (!cohortRows(await collectStatus(ctx, { archived: true }), cohort).some((r) => r.task === task)) throw new AgentctlError(`${task} does not belong to ${cohort}`);
+  }
+  return selected;
+}
+async function runClose(deps: McpDeps, args: CloseMcpArgs): Promise<ToolResult> {
+  return writeTool(deps, 'close', { task: args.task ?? args.tasks?.join(', ') ?? args.cohort }, async (ctx, lines) => {
+    if (args.remove_worktree && !ctx.config.mcp.allowRmWorktree) throw new AgentctlError('removing the worktree is not allowed for the chat');
+    const tasks = await closeInputs(ctx, args);
+    await closeTasks(ctx, tasks, { rmWorktree: Boolean(args.remove_worktree) });
+    return { text: `${tasks.join(', ')}: closed${args.remove_worktree ? ', worktree removed (the branch stays)' : '; the worktree and the report stay'}\n${lines.join('\n')}`.trim(), executed: true, announce: `close ${tasks.join(', ')}` };
   });
 }
 
@@ -613,7 +647,8 @@ async function runMove(deps: McpDeps, args: { task: string; agent?: 'claude' | '
   });
 }
 
-async function runNew(deps: McpDeps, args: { spec: string; confirm?: boolean | undefined }): Promise<ToolResult> {
+interface NewMcpArgs { spec: string; confirm?: boolean | undefined; agent?: 'claude' | 'codex' | undefined; reuse?: boolean | undefined; no_agent?: boolean | undefined; cohort?: string | undefined; wait_trust?: boolean | undefined }
+async function runNew(deps: McpDeps, args: NewMcpArgs): Promise<ToolResult> {
   const probe = (): { tasks: string } => {
     // Only for the audit line: the task IDs named in the spec, without resolving anything.
     try {
@@ -624,6 +659,7 @@ async function runNew(deps: McpDeps, args: { spec: string; confirm?: boolean | u
   };
   return writeTool(deps, 'new', { task: probe().tasks, detail: `${clipText(args.spec, 120)} confirm=${Boolean(args.confirm)}` }, async (ctx, lines) => {
     const raws = splitSpecs(args.spec, 'the spec from the chat');
+    if (args.cohort) for (const raw of raws) raw.header.cohort = args.cohort;
     for (const raw of raws) {
       // `setup` commands run in a shell. A task the chat starts runs no shell command of the chat's choosing; setup belongs in .agentctl.yaml.
       if ('setup' in raw.header) {
@@ -632,12 +668,13 @@ async function runNew(deps: McpDeps, args: { spec: string; confirm?: boolean | u
     }
     const specs = raws.map((raw) => resolveSpec(raw, { config: ctx.config }));
     const cap = !args.confirm && ctx.config.capacity.snapshot ? capacitySnapshot(await collectCapacity(ctx), specs.map((s) => s.agent)) : undefined;
-    const summary = summarizeSpecs(specs, cap ? snapshotLines(cap) : []).join('\n');
+    const disk = await collectDisk(ctx);
+    const summary = summarizeSpecs(specs, [...(cap ? snapshotLines(cap) : []), ...(disk.level === 'critical' ? [`WARNING: ${diskLine(disk)}`] : [])]).join('\n');
     if (!args.confirm) {
       return { text: `${summary}\n\nNot started yet. Show this to the user and ask; if they agree, call new again with the same spec and confirm: true.`, executed: false, announce: '' };
     }
     // The chat cannot answer a folder-trust dialog: stop at it (the error says so) instead of waiting for a person.
-    const results = await newTasks(ctx, specs, { waitTrust: false, noSwitch: true, ...(deps.self ? { self: deps.self } : {}) });
+    const results = await newTasks(ctx, specs, { waitTrust: args.wait_trust ?? false, noSwitch: true, reuse: Boolean(args.reuse), noAgent: Boolean(args.no_agent), ...(args.agent ? { agent: args.agent } : {}), ...(deps.self ? { self: deps.self } : {}) });
     const startedCap = ctx.config.capacity.snapshot ? capacitySnapshot(await collectCapacity(ctx), results.map((r) => r.effective.agent)) : undefined;
     const started = results.map((r) => `${r.task} (window ${r.window}, ${r.effective.agent} ${r.effective.model}/${r.effective.effort})`).join('; ');
     return { text: `Started: ${started}\n${startedCap ? snapshotLines(startedCap).join('\n') + '\n' : ''}${lines.join('\n')}`.trim(), executed: true, announce: `new ${results.map((r) => r.task).join(', ')}` };
@@ -661,7 +698,7 @@ async function runQueue(deps: McpDeps, args: { spec: string; agent?: 'claude' | 
     const opts = args.agent ? { agent: args.agent } : {};
     const plan = await planQueueAdd(ctx, raws, opts);
     if (!args.confirm) {
-      return { text: `${plan.summary.join('\n')}\n\nNot queued yet. Show this to the user and ask; if they agree, call queue again with the same spec and confirm: true.`, executed: false, announce: '' };
+      return { text: `${plan.summary.join('\n')}\n${diskLine(await collectDisk(ctx))}\n\nNot queued yet. Show this to the user and ask; if they agree, call queue again with the same spec and confirm: true.`, executed: false, announce: '' };
     }
     const added = await commitQueueAdd(ctx, plan.items, opts);
     const capacity = ctx.config.capacity.snapshot ? snapshotLines(capacitySnapshot(await collectCapacity(ctx), added.map((e) => e.agent))).join('\n') : '';
@@ -736,7 +773,7 @@ export const MCP_TOOLS: McpToolDef[] = [
     kind: 'read',
     description:
       'What "agentctl gc" would free now, without doing anything: git worktrees of closed, cancelled and archived tasks without uncommitted changes, old files next to the reports, state folders to archive, merged branches (merged: true), each with its size, and what is skipped and why. ' +
-      'There is no tool that cleans up: tell the user to run "agentctl gc --apply" (or press G on the board for the same preview).',
+      'Use the separately allowed gc tool to apply this protected plan with preview and confirm: true (branches default false).',
     input: { older_than: z.string().max(10).optional().describe('Age of the files next to the reports before they count: 12h, 7d, 2w. Default 7d.'), merged: z.boolean().optional().describe('true: also list merged branches of finished tasks.'), cohort: cohortArg.optional() },
     annotations: readOnly('Preview of the clean-up'),
     run: (deps, args) => guarded(() => runGcPreview(deps, args as { older_than?: string; merged?: boolean; cohort?: string })),
@@ -823,9 +860,9 @@ export const MCP_TOOLS: McpToolDef[] = [
     description:
       'All reports that are ready and not yet pulled, each under a header with the task and agent, in one answer; they are then marked as pulled (the only thing this tool changes, in agentctl\'s own state). ' +
       'Use it at the START of discussing the results of finished tasks, instead of asking the user to paste reports. A second call returns only reports that arrived since. cohort: only the reports of that cohort (the others stay new). Cancelled tasks are never included.',
-    input: { cohort: cohortArg.optional() },
+    input: { cohort: cohortArg.optional(), all: z.boolean().optional() },
     annotations: { title: 'Take all new reports', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-    run: (deps, args) => guarded(() => runPullReady(deps, args as { cohort?: string })),
+    run: (deps, args) => guarded(() => runPullReady(deps, args as { cohort?: string; all?: boolean })),
   }),
   def({
     name: 'task_spec',
@@ -843,9 +880,9 @@ export const MCP_TOOLS: McpToolDef[] = [
     description:
       'The queue of tasks that wait for a free window of their provider (or for another task\'s report, `after`): position, agent/model/effort, priority, what each waits for (startCondition), since when, and the error of a start that failed. ' +
       'Use it when the user asks what is queued, why something has not started, or what runs next.',
-    input: {},
+    input: { cohort: cohortArg.optional() },
     annotations: readOnly('The task queue'),
-    run: (deps) => guarded(() => runQueueList(deps)),
+    run: (deps, args) => guarded(() => runQueueList(deps, args as { cohort?: string })),
   }),
   def({
     name: 'cohort_list',
@@ -954,9 +991,9 @@ export const MCP_TOOLS: McpToolDef[] = [
       'WRITE, off unless the user put "new" in mcp.allow. Starts agent tasks from a spec: a YAML header between --- lines (task, agent, model, effort, repos …) followed by the prompt, the same format as the agentctl CLI. ' +
       'The FIRST call (confirm omitted) validates the spec and returns a summary of what would start; show it to the user. Only when they agree, call again with the same spec and confirm: true. ' +
       '"setup" commands (shell) are not accepted from the chat.',
-    input: { spec: z.string().min(1).max(100_000).describe('The spec text: ---, YAML header, ---, prompt. Several specs may follow each other.'), confirm: z.boolean().optional().describe('true only after the user agreed to the summary.') },
+    input: { spec: z.string().min(1).max(100_000).describe('The spec text: ---, YAML header, ---, prompt. Several specs may follow each other.'), agent: z.enum(AGENT_NAMES).optional(), reuse: z.boolean().optional(), no_agent: z.boolean().optional(), cohort: cohortArg.optional(), wait_trust: z.boolean().optional(), confirm: z.boolean().optional().describe('true only after the user agreed to the summary.') },
     annotations: { title: 'Start tasks from a spec', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-    run: (deps, args) => guarded(() => runNew(deps, args as { spec: string; confirm?: boolean })),
+    run: (deps, args) => guarded(() => runNew(deps, args as NewMcpArgs)),
   }),
   def({
     name: 'queue',
@@ -1039,9 +1076,9 @@ export const MCP_TOOLS: McpToolDef[] = [
     description:
       'WRITE, off unless the user put "close" in mcp.allow. Closes the tmux window of a task (the agent ends) and marks the task closed: it leaves status and the board; its report and state stay. The worktree and the branch are NOT removed; ' +
       'remove_worktree: true (git worktree remove, never forced) works only if the user also set mcp.allow_rm_worktree. Closing ends a running agent: ask the user first.',
-    input: { task: taskArg, remove_worktree: z.boolean().optional().describe('Also remove the git worktree. Refused unless the user allowed it in the config.') },
+    input: { task: taskArg.optional(), tasks: z.array(taskArg).min(1).max(100).optional(), cohort: cohortArg.optional(), remove_worktree: z.boolean().optional().describe('Also remove the git worktree. Refused unless the user allowed it in the config.') },
     annotations: { title: 'Close a task', readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
-    run: (deps, args) => guarded(() => runClose(deps, args as { task: string; remove_worktree?: boolean })),
+    run: (deps, args) => guarded(() => runClose(deps, args as CloseMcpArgs)),
   }),
   def({
     name: 'move',
@@ -1059,6 +1096,138 @@ export const MCP_TOOLS: McpToolDef[] = [
     run: (deps, args) => guarded(() => runMove(deps, args as { task: string; agent?: 'claude' | 'codex'; confirm?: boolean })),
   }),
 ];
+
+
+const optionalText = z.string().min(1).max(4096).optional();
+const confirmArg = z.boolean().optional().describe('First call previews. true executes only the unchanged preview in this server session.');
+function extraRead(name: string, cli: string, use: string, input: z.ZodRawShape, read: (ctx: Context, args: Record<string, unknown>) => Promise<unknown>): McpToolDef {
+  return def({ name, title: use, kind: 'read', description: `${use}. CLI: agentctl ${cli}. Use when you need these facts; no mcp.allow required.`, input, annotations: readOnly(use), run: (deps, args) => guarded(async () => ok(JSON.stringify(await read(deps.context(() => {}), args), null, 2))) });
+}
+function extraWrite(name: McpWriteTool, cli: string, use: string, input: z.ZodRawShape, action: (ctx: Context, args: any, deps: McpDeps) => Promise<unknown>): McpToolDef {
+  return def({ name, title: use, kind: 'write', description: `WRITE, off unless the user put "${name}" in mcp.allow. ${use}. CLI: agentctl ${cli}. Use only for work the user requested. Requires ${name} in mcp.allow; preview then confirm: true with identical arguments. Every execution is audited, journaled and announced on the desktop.`, input: { ...input, confirm: confirmArg }, annotations: { title: use, readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false }, run: (deps, args) => guarded(() => writeTool(deps, name, {}, async (ctx) => ({ text: JSON.stringify(await action(ctx, args, deps), null, 2), executed: true, announce: name }))) });
+}
+MCP_TOOLS.push(
+  extraRead('mcp_check', 'mcp check', 'Inspect stale MCP server processes without stopping them', {}, async (ctx) => ({ stale: staleProcesses(await findMcpProcesses(ctx.runner), stableScript()) })),
+  extraRead('spec_example', 'spec example', 'Read an example spec before writing a new order', {}, async () => EXAMPLE_SPEC),
+  extraRead('doctor', 'doctor', 'Diagnose the installation, permissions and disk', {}, async (ctx) => runDoctor(ctx.runner, () => ctx.config)),
+  extraRead('equivalents', 'capacity', 'Read the Claude/Codex equivalents table', {}, async (ctx) => ctx.config.equivalents),
+  extraRead('config_show', 'doctor', 'Read effective configuration with secrets masked', {}, async (ctx) => redactConfig(ctx.config)),
+  extraRead('manager_status', 'manager --url', 'Inspect the manager session', {}, async (ctx) => managerView(ctx)),
+  extraRead('away_status', 'away status', 'Inspect away mode', {}, async (ctx) => awayReport(ctx.config)),
+  extraRead('report', 'report <TASK>', 'Inspect report location and candidates', { task: taskArg }, async (ctx, a) => reportInfo(ctx, a.task as string)),
+  extraWrite('queue_retry', 'queue retry <TASK>', 'Retry a failed queue start after reading its error and checking residue', { task: taskArg }, async (ctx, a) => retryEntry(ctx, a.task)),
+  extraWrite('queue_up', 'queue up <TASK>', 'Move a waiting task to the front of its priority class', { task: taskArg }, async (ctx, a) => moveToFront(ctx, a.task)),
+  extraWrite('queue_pause', 'queue pause', 'Pause automatic queue starts', {}, async (ctx) => ({ changed: await setPaused(ctx, true) })),
+  extraWrite('queue_resume', 'queue resume', 'Resume automatic queue starts', {}, async (ctx) => ({ changed: await setPaused(ctx, false) })),
+  extraWrite('unblock', 'unblock <TASK> [--drop-after <TASK>]', 'Remove blocked dependencies, allowing a task to start', { task: taskArg, drop_after: optionalText }, async (ctx, a) => unblockEntry(ctx, a.task, { dropAfter: a.drop_after })),
+  extraWrite('cohort_add', 'cohort add <NAME> <TASKS...>', 'Put existing tasks in a cohort', { cohort: cohortArg, tasks: z.array(taskArg).min(1).max(100) }, async (ctx, a) => setCohortOf(ctx, a.tasks, await touchCohort(ctx, a.cohort))),
+  extraWrite('cohort_remove', 'cohort remove <TASKS...>', 'Remove cohort membership', { tasks: z.array(taskArg).min(1).max(100) }, async (ctx, a) => setCohortOf(ctx, a.tasks, undefined)),
+  extraWrite('cohort_note', 'cohort note <NAME> <TEXT>', 'Change the note of a cohort', { cohort: cohortArg, text: z.string().max(20000) }, async (ctx, a) => setNote(ctx, a.cohort, a.text)),
+  ...(['hide', 'unhide'] as const).map((name) => extraWrite(name, `${name} <TASKS...>`, `${name} tasks on the board`, { tasks: z.array(taskArg).min(1).max(100) }, async (ctx, a) => setHidden(ctx, a.tasks, name === 'hide'))),
+  extraWrite('archive', 'archive [--older-than <AGE>]', 'Archive the state of closed tasks', { older_than: optionalText }, async (ctx, a) => archiveClosed(ctx, { olderThanMs: a.older_than ? parseAge(a.older_than) : undefined })),
+  extraWrite('adopt', 'adopt <TASK> --report <PATH>', 'Restore missing task metadata from facts supplied by the user', { task: taskArg, report: z.string().min(1), window: optionalText, worktree: optionalText, agent: z.enum(AGENT_NAMES).optional(), model: optionalText, effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional() }, async (ctx, a) => { await adoptTask(ctx, a.task, a); return { task: a.task, adopted: true }; }),
+  extraWrite('report_from', 'report <TASK> --from <FILE> [--force]', 'Copy a chosen report to its canonical location', { task: taskArg, from: z.string().min(1), force: z.boolean().optional() }, async (ctx, a) => reportInfo(ctx, a.task, { from: a.from, force: a.force })),
+  extraWrite('limits_release', 'limits release [claude=N codex=N]', 'Release reserved provider places', { claude: limitArg, codex: limitArg }, async (ctx, a) => releasePlaces(ctx, { ...(a.claude !== undefined ? { claude: a.claude } : {}), ...(a.codex !== undefined ? { codex: a.codex } : {}) })),
+  extraWrite('manager_start', 'manager', 'Start the supervising manager session', { project: optionalText, name: optionalText, model: optionalText, effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional() }, async (ctx, a, deps) => { if (!deps.self) throw new AgentctlError('this server has no self command for the manager'); return startManager(ctx, { ...a, self: deps.self, noWait: true }); }),
+  extraWrite('manager_stop', 'manager stop', 'Stop the manager session', {}, async (ctx) => ({ state: await stopManager(ctx) })),
+  extraWrite('notify_test', 'notify-test [--phone]', 'Test desktop notifications; phone true explicitly sends to ntfy', { phone: z.boolean().optional() }, async (ctx, a, deps) => { if (a.phone) return sendPhoneTest(ctx); await deps.notify('agentctl notification test'); return { local: true }; }),
+  extraWrite('gc', 'gc --apply [--cohort <NAME>] [--older-than <AGE>] [--branches]', 'Reclaim disk space from finished tasks using the same protected plan as gc_preview', { cohort: cohortArg.optional(), older_than: optionalText, branches: z.boolean().optional() }, async (ctx, a) => { const plan = await planGc(ctx, { cohort: a.cohort, olderThan: a.older_than, branches: a.branches ?? false }); return { plan, result: await applyGc(ctx, plan) }; }),
+);
+
+/** Do not expose environment values or credential-bearing ntfy URLs as well as token/topic. */
+function redactConfig(config: GlobalConfig): unknown {
+  const copy = JSON.parse(JSON.stringify(config));
+  copy.env = Object.fromEntries(Object.keys(copy.env ?? {}).map((key) => [key, '[masked]']));
+  if (copy.notify.ntfy) {
+    for (const key of ['token', 'topic', 'clickUrl']) if (copy.notify.ntfy[key]) copy.notify.ntfy[key] = '[masked]';
+    try { const url = new URL(copy.notify.ntfy.server); url.username = ''; url.password = ''; url.search = ''; copy.notify.ntfy.server = url.toString(); } catch { copy.notify.ntfy.server = '[masked]'; }
+  }
+  return copy;
+}
+
+const confirmedTools = new Set(['new', 'queue', 'cancel', 'resume', 'move', 'interrupt', 'close', 'queue_rm', ...MCP_TOOLS.filter((t) => t.kind === 'write' && !['send', 'mark', 'away', 'set_limits', 'reserve'].includes(t.name)).map((t) => t.name)]);
+const previews = new WeakMap<McpDeps, Map<string, { fingerprint: string; at: number }>>();
+/** Exact arguments and observed task/queue/window identities bind confirmation to this session. No scope can silently grow. */
+async function confirmationScope(ctx: Context, name: string, args: Record<string, unknown>): Promise<unknown> {
+  if (name === 'close') await planClose(ctx, await closeInputs(ctx, args as CloseMcpArgs), { rmWorktree: Boolean(args.remove_worktree) });
+  if (name === 'gc') {
+    const plan = await planGc(ctx, { cohort: args.cohort as string | undefined, olderThan: args.older_than as string | undefined, branches: Boolean(args.branches) });
+    return plan;
+  }
+  if (name === 'new' || name === 'queue') {
+    const rawSpecs = splitSpecs(args.spec as string, 'MCP preview');
+    if (args.cohort) for (const raw of rawSpecs) raw.header.cohort = args.cohort;
+    for (const raw of rawSpecs) if ('setup' in raw.header) throw new AgentctlError(`${String(raw.header.task ?? 'a task')}: \"setup\" runs shell commands and is not accepted from the chat`);
+    return { config: ctx.config, specs: rawSpecs.map((raw) => resolveSpec(raw, { config: ctx.config })), tasks: listTaskRecords(ctx.config), queue: readQueue(ctx.config), windows: await ctx.tmux.windows(), diskLevel: (await collectDisk(ctx)).level };
+  }
+  if (name === 'queue_retry') {
+    const entry = findEntry(ctx.config, args.task as string);
+    if (entry.status !== 'failed') throw new AgentctlError(`${entry.task} is ${entry.status}, not failed`);
+    const spec = resolveSpec(splitSpecs(entry.spec, 'queue retry')[0]!, { config: ctx.config });
+    await checkRetryWorktrees(ctx.runner, spec.repos);
+  }
+  if (name === 'report_from') {
+    const record = findRecord(ctx, args.task as string);
+    const source = resolvePath(args.from as string, record.repos[0]?.worktree);
+    const signature = (file: string) => { try { const st = fs.statSync(file); return { size: st.size, mtime: st.mtimeMs, ino: st.ino, hash: createHash('sha256').update(fs.readFileSync(file)).digest('hex') }; } catch { return null; } };
+    return { record, source, sourceSignature: signature(source), destinationSignature: signature(record.report) };
+  }
+  if (name === 'archive') return archiveClosed(ctx, { olderThanMs: args.older_than ? parseAge(args.older_than as string) : undefined, preview: true });
+  const tasks = [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)];
+  const queue = readQueue(ctx.config);
+  const windows = await ctx.tmux.windows();
+  return { tasks, queue, windows: windows.map(({ id, plain }) => ({ id, plain })), config: redactConfig(ctx.config) };
+}
+for (const tool of MCP_TOOLS) {
+  const cli = ({ queue_list: 'queue list', queue_rm: 'queue rm', queue_retry: 'queue retry', queue_up: 'queue up', queue_pause: 'queue pause', queue_resume: 'queue resume', cohort_list: 'cohort list', cohort_show: 'cohort show', list_reports: 'status', get_report: 'pull <TASK>', pull_ready: 'pull --ready', task_spec: 'peek <TASK>', gc_preview: 'gc', events_since: 'events', set_limits: 'limits set', reserve: 'limits reserve' } as Record<string, string>)[tool.name] ?? tool.name.replaceAll('_', ' ');
+  if (!tool.description.includes('CLI:')) tool.description += ` Use when the user needs this operation. CLI: agentctl ${cli}.`;
+  if (!confirmedTools.has(tool.name)) continue;
+  tool.input = { ...tool.input, confirm: confirmArg };
+  tool.description += ' Two steps are mandatory: preview, then confirm: true with identical arguments. A changed scope requires a new preview.';
+  const original = tool.run;
+  tool.run = (deps, args) => guarded(async () => {
+    const ctx = deps.context(() => {});
+    if (!ctx.config.mcp.allow.includes(tool.name as McpWriteTool)) return writeTool(deps, tool.name as McpWriteTool, {}, async () => { throw new Error('unreachable'); });
+    const { confirm, ...input } = args;
+    const key = `${tool.name}:${JSON.stringify(Object.entries(input).sort(([a], [b]) => a.localeCompare(b)))}`;
+    if (input.remove_worktree && !ctx.config.mcp.allowRmWorktree) {
+      audit(ctx, { tool: tool.name, outcome: 'denied', detail: 'worktree removal not allowed' });
+      return fail('removing the worktree is not allowed for the chat');
+    }
+    let scope: unknown;
+    try { scope = await confirmationScope(ctx, tool.name, input); }
+    catch (e) { audit(ctx, { tool: tool.name, outcome: 'error', detail: errorMessage(e) }); throw e; }
+    const fingerprint = createHash('sha256').update(JSON.stringify(scope)).digest('hex');
+    let pending = previews.get(deps);
+    if (!pending) { pending = new Map(); previews.set(deps, pending); }
+    if (!confirm) {
+      let result: ToolResult;
+      if (['new', 'queue', 'cancel', 'resume', 'move'].includes(tool.name)) result = await original(deps, args);
+      else result = await writeTool(deps, tool.name as McpWriteTool, {}, async () => {
+        const detail = tool.name === 'gc' ? renderGc(await planGc(ctx, { cohort: input.cohort as string | undefined, olderThan: input.older_than as string | undefined, branches: Boolean(input.branches) })).join('\n') : JSON.stringify({ operation: tool.name, arguments: input, scope: tool.name === 'archive' ? scope : { tasks: listTaskRecords(ctx.config).map((r) => ({ task: r.task, window: r.window, closed: r.closed, report: r.report, repos: r.repos })), queue: readQueue(ctx.config).map(({ spec: _spec, ...entry }) => entry), windows: await ctx.tmux.windows() } }, null, 2);
+        return { text: `${detail}\nNot executed. Review, then call with identical arguments and confirm: true.`, executed: false, announce: '' };
+      });
+      if (!result.isError) { if (pending.size >= 100) pending.delete(pending.keys().next().value!); pending.set(key, { fingerprint, at: ctx.runner.now() }); }
+      return result;
+    }
+    const preview = pending.get(key);
+    pending.delete(key);
+    if (!preview || ctx.runner.now() - preview.at > 10 * 60_000 || preview.fingerprint !== fingerprint) {
+      audit(ctx, { tool: tool.name, outcome: 'denied', detail: 'missing, expired or changed preview' });
+      return fail('Confirmation refused: missing, expired or changed preview. Call again without confirm to recalculate the scope. Nothing was done.');
+    }
+    if (tool.name === 'archive') return writeTool(deps, 'archive', {}, async (fresh) => {
+      await applyArchive(fresh, scope as Awaited<ReturnType<typeof archiveClosed>>);
+      return { text: JSON.stringify(scope, null, 2), executed: true, announce: 'archive closed task state' };
+    });
+    if (tool.name === 'gc') return writeTool(deps, 'gc', {}, async (fresh) => {
+      const plan = scope as GcPlan;
+      const result = await applyGc(fresh, plan);
+      return { text: JSON.stringify({ plan, result }, null, 2), executed: true, announce: `gc: ${result.done.length} items, ${result.freedBytes} bytes` };
+    });
+    return original(deps, args);
+  });
+}
 
 /** Names of the tools, read first. */
 export const MCP_TOOL_NAMES = MCP_TOOLS.map((t) => t.name);

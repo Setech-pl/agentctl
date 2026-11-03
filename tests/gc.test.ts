@@ -233,6 +233,6 @@ describe('gc: CLI, board and MCP', () => {
     assert.match(res.text, /preview only/);
     assert.match(res.text, /old\.log/);
     assert.ok(fs.existsSync(path.join(w.config.cache, 'nc-1', 'old.log')), 'a preview deletes nothing');
-    assert.ok(!MCP_TOOLS.some((t) => /^gc(_apply)?$/.test(t.name)));
+    assert.equal(MCP_TOOLS.find((t) => t.name === 'gc')?.kind, 'write');
   });
 });
