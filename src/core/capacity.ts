@@ -1,3 +1,4 @@
+import { collectDisk, diskLine } from './disk.ts';
 import { collectStatus } from './status.ts';
 import { recordStaleCapacity } from './capacity-events.ts';
 import type { AgentName } from './config.ts';
@@ -84,6 +85,7 @@ export async function collectCapacity(ctx: Context) {
   const stats = computeStats(selectHistory(ctx, { since: '7d' }));
   return {
     at: new Date(now).toISOString(),
+    disk: await collectDisk(ctx),
     note: 'n/d = null. Plan percentages include use outside agentctl. Estimates are not provider token quotas.',
     providers: AGENT_NAMES.map((provider) => {
       const plan = plans[provider];
@@ -118,7 +120,7 @@ export function snapshotLines(snapshot: ReturnType<typeof capacitySnapshot>): st
   return snapshot.map((p) => `capacity: ${p.provider}${p.ordered ? ' (order)' : ''}: remaining ${p.remainingPercent === null ? 'n/d' : `${p.remainingPercent}%`}, reset ${p.resetsInMinutes ?? 'n/d'} min, age ${p.ageSeconds ?? 'n/d'} s${p.stale ? ' stale' : ''}, free slots ${p.freeSlots ?? 'unbounded'}${p.estimate ? `, estimate.remainingTokens ${p.estimate.remainingTokens} (${p.estimate.confidence})` : ''}`);
 }
 export function renderCapacity(report: Capacity): string[] {
-  return [...snapshotLines(capacitySnapshot(report)), ...report.providers.flatMap((p) => [
+  return [diskLine(report.disk), ...snapshotLines(capacitySnapshot(report)), ...report.providers.flatMap((p) => [
     ...p.windows.map((w) => `${p.provider} ${w.label}: used ${w.usedPercent}%, remaining ${w.remainingPercent}%, reset ${w.resetsInMinutes ?? 'n/d'} min, pace ${w.percentPerHour === null ? 'n/d' : w.percentPerHour.toFixed(2)}%/h, projectedExhaustAt ${w.projectedExhaustAt ?? 'n/d'}, estimate ${w.estimate ? JSON.stringify(w.estimate) : 'n/d'}`),
     `${p.provider}: slots ${p.slots.active}/${p.slots.limit ?? 'unbounded'}, reserve ${p.slots.reserved}, queue ${p.queue.count} (next ${p.queue.next ?? 'n/d'}), limited ${p.limited ?? 'n/d'}, source ${p.source}`,
     `${p.provider}: models ${p.models.map((m) => `${m.model}/${m.effort}`).join(', ')}`,

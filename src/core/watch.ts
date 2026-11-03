@@ -1,3 +1,4 @@
+import { diskTick } from './disk.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { ConfigStore, configStatePath, noteConfigState } from './config-store.ts';
@@ -207,6 +208,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   await announceBlocked(ctx, notifier, allRows, { self: options.self, log: startLog }).catch((e: unknown) => startLog(`queue: ${errorMessage(e)}`));
   await cohortTick(ctx, notifier, allRows, startLog).catch((e: unknown) => startLog(`cohort: ${errorMessage(e)}`));
   await collisionTick(ctx, memory.collisions, notifier, startLog).catch((e: unknown) => startLog(`collisions: ${errorMessage(e)}`));
+  await diskTick(ctx, notifier).catch((e: unknown) => startLog(`disk: ${errorMessage(e)}`));
   await usageTick(ctx, notifier, startLog).catch((e: unknown) => startLog(`usage: ${errorMessage(e)}`));
   // The phone: requests that failed before are tried again (a network error never stops the watcher).
   for (const l of await phoneTick(ctx).catch((e: unknown) => [`phone: ${errorMessage(e)}`])) await startLog(l);

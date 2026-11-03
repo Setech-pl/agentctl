@@ -1,3 +1,4 @@
+import { diskLine } from '../core/disk.ts';
 import fs from 'node:fs';
 import React, { useEffect, useRef, useState } from 'react';
 import { Box, Text, render, useApp, useInput, useWindowSize } from 'ink';
@@ -228,6 +229,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
     { width: state.width },
     h(Text, { bold: true, wrap: 'truncate-end' }, 'agentctl board'),
     h(Text, { dimColor: true, wrap: 'truncate-end' }, `  ${ctx.config.session} · ${active} task${active === 1 ? '' : 's'}${state.queue.length > 0 ? ` · ${state.queue.length} queued` : ''}${state.cohortFilter !== null ? ` · cohort: ${cohortLabel(state)}` : ''}${hiddenCount > 0 ? ` · ${hiddenCount} hidden (a)` : ''}${state.refreshedAt ? ` · ${state.refreshedAt}` : ''}`),
+    state.disk ? h(Text, { color: state.disk.level === 'critical' ? 'red' : state.disk.level === 'warn' ? 'yellow' : 'green', wrap: 'truncate-end' }, ` · ${diskLine(state.disk)}`) : null,
     away ? h(Text, { wrap: 'truncate-end', ...(away.dim ? { dimColor: true } : { color: 'cyan', bold: true }) }, ` · ${away.text}`) : null,
   );
   const managerBox = mline ? h(Text, { wrap: 'truncate-end', ...(mline.selected ? { bold: true, ...(process.env.NO_COLOR ? { inverse: true } : { color: ctx.config.board.selectedColor }) } : mline.dim ? { dimColor: true } : { color: 'cyan' }) }, mline.text) : null;

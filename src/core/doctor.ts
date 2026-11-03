@@ -1,3 +1,4 @@
+import { collectDisk, diskLine } from './disk.ts';
 import { projectGuide } from './guide.ts';
 import { installation } from './installation.ts';
 import fs from 'node:fs';
@@ -106,6 +107,9 @@ export async function runDoctor(
   let config: GlobalConfig | undefined;
   try {
     config = loadConfig();
+    const disk = await collectDisk(new Context(runner, config, () => {}));
+    add('disk', disk.level === 'critical' ? 'fail' : disk.level === 'ok' ? 'ok' : 'warn', diskLine(disk));
+    add('MCP permissions', 'ok', 'Existing queue permission still permits only queue insertion; queue:* explicitly enables the queue group. close/interrupt/queue_rm now require preview then confirm.');
   } catch (e) {
     // A running watch or MCP server keeps the last good settings meanwhile: say so.
     const state = readConfigState(path.join(configDir(env), 'config-state.json'));
