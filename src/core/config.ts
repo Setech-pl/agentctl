@@ -111,6 +111,8 @@ export interface GlobalConfig extends Layer {
   /** Token usage and plan limits: warning thresholds, the hold of the queue, the tmux status line, where the agents keep their logs. */
   usage: UsageSettings;
   guideLang: 'en' | 'pl';
+  disk: { warnGb: number; criticalGb: number };
+  git: { timeoutS: number };
   capacity: { snapshot: boolean; staleMinutes: number; sampleLimit: number; thresholds: number[]; codexRefresh: boolean };
   /** Set by a long-running process (watch, MCP) when the file on disk does not load and the previous settings stay in force. */
   reloadWarning?: string;
@@ -124,8 +126,15 @@ export const NOTIFY_BACKENDS = ['auto', 'terminal-notifier', 'osascript'] as con
 export type NotifyBackend = (typeof NOTIFY_BACKENDS)[number];
 
 /** Write tools of the MCP server; each one must be listed in `mcp.allow` to work. */
-export const MCP_WRITE_TOOLS = ['send', 'new', 'interrupt', 'close', 'move', 'queue', 'queue_rm', 'cancel', 'mark', 'set_limits', 'reserve', 'resume', 'away'] as const;
+export const MCP_WRITE_TOOLS = ['send', 'new', 'interrupt', 'close', 'move', 'queue', 'queue_rm', 'cancel', 'mark', 'set_limits', 'reserve', 'resume', 'away', 'queue_retry', 'queue_up', 'queue_pause', 'queue_resume', 'unblock', 'cohort_add', 'cohort_remove', 'cohort_note', 'hide', 'unhide', 'archive', 'adopt', 'report_from', 'limits_release', 'manager_start', 'manager_stop', 'notify_test', 'gc'] as const;
 export type McpWriteTool = (typeof MCP_WRITE_TOOLS)[number];
+
+/** Explicit group names avoid broadening existing single-tool permissions. */
+export const MCP_ALLOW_GROUPS: Record<string, readonly McpWriteTool[]> = {
+  'queue:*': ['queue', 'queue_rm', 'queue_retry', 'queue_up', 'queue_pause', 'queue_resume'],
+  cohort: ['cohort_add', 'cohort_remove', 'cohort_note'],
+  'manager:*': ['manager_start', 'manager_stop'],
+};
 
 export interface BoardSettings {
   /** A task without a window whose report was pulled hides by itself (a task without a report stays in "Finished"). */
@@ -206,7 +215,7 @@ export interface NotifySettings {
 }
 
 /** Events that can go to the phone (`notify.ntfy.events`). */
-export const PHONE_EVENTS = ['needs-input', 'needs-trust', 'limited', 'blocked', 'report-ready', 'cohort-done', 'queue-failed', 'orphan', 'dead', 'usage-critical'] as const;
+export const PHONE_EVENTS = ['disk-warn', 'disk-critical', 'disk-ok', 'needs-input', 'needs-trust', 'limited', 'blocked', 'report-ready', 'cohort-done', 'queue-failed', 'orphan', 'dead', 'usage-critical'] as const;
 export type PhoneEvent = (typeof PHONE_EVENTS)[number];
 
 /** ntfy priorities by name (1..5). */
@@ -216,6 +225,9 @@ export type NtfyPriority = (typeof NTFY_PRIORITIES)[number];
 export const DEFAULT_NTFY_SERVER = 'https://ntfy.sh';
 
 export const DEFAULT_NTFY_PRIORITY: Record<PhoneEvent, NtfyPriority> = {
+  'disk-warn': 'default',
+  'disk-critical': 'high',
+  'disk-ok': 'default',
   'needs-input': 'high',
   'needs-trust': 'default',
   limited: 'high',
@@ -345,7 +357,7 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
 
 /** The keys accepted in every layer: the global config, `.agentctl.yaml` and (with a few of its own) a spec. docs/configuration.md describes each one. */
 export const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'setup', 'defaults', 'guide'];
-export const GLOBAL_KEYS = [...LAYER_KEYS, 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity'];
+export const GLOBAL_KEYS = [...LAYER_KEYS, 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git'];
 export const LIMITS_KEYS = [...AGENT_NAMES, 'count_external'];
 export const DEFAULTS_KEYS = ['agent', 'model', 'effort', 'remote_control'];
 export const LINK_KEYS = ['from', 'to'];
@@ -774,7 +786,9 @@ function parseMcp(v: unknown): McpSettings {
   checkKeys(v, MCP_KEYS, 'config.mcp', q);
   const allow = parseStringList(v.allow, 'config.mcp.allow', q);
   for (const name of allow) {
-    if (!(MCP_WRITE_TOOLS as readonly string[]).includes(name)) mcp.warnings.push(`config.mcp.allow: "${name}" is not a write tool of this version, ignored (allowed: ${MCP_WRITE_TOOLS.join(', ')})`);
+    if (MCP_ALLOW_GROUPS[name]) {
+      for (const tool of MCP_ALLOW_GROUPS[name]) if (!mcp.allow.includes(tool)) mcp.allow.push(tool);
+    } else if (!(MCP_WRITE_TOOLS as readonly string[]).includes(name)) mcp.warnings.push(`config.mcp.allow: "${name}" is not a write tool of this version, ignored (allowed: ${MCP_WRITE_TOOLS.join(', ')})`);
     else if (!mcp.allow.includes(name as McpWriteTool)) mcp.allow.push(name as McpWriteTool);
   }
   if (v.allow_rm_worktree !== undefined) {
@@ -980,8 +994,25 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
     }
   }
 
+  const disk = { warnGb: 50, criticalGb: 20 };
+  const git = { timeoutS: 600 };
+  for (const [section, target, fields] of [
+    ['disk', disk, { warn_gb: 'warnGb', critical_gb: 'criticalGb' }],
+    ['git', git, { timeout_s: 'timeoutS' }],
+  ] as const) {
+    const value = raw[section];
+    if (value === undefined) continue;
+    if (!isObject(value)) { p.add(`config.${section} must be a mapping`); continue; }
+    checkKeys(value, Object.keys(fields), `config.${section}`, p);
+    for (const [key, field] of Object.entries(fields)) {
+      if (value[key] === undefined) continue;
+      if (typeof value[key] !== 'number' || !Number.isFinite(value[key]) || value[key] <= 0) p.add(`config.${section}.${key} must be positive`);
+      else (target as unknown as Record<string, number>)[field] = value[key];
+    }
+  }
+  if (disk.criticalGb > disk.warnGb) p.add('config.disk.critical_gb must not exceed warn_gb');
   p.throwIfAny(`Invalid config ${file}:`, 'Fix the listed keys; see the README section "Configuration".');
-  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, limits, countExternal, agents, equivalents, watch, notify, away, manager, board, mcp, queue, collisions, cancel, usage, guideLang, capacity, path: file, loaded: exists };
+  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, limits, countExternal, agents, equivalents, watch, notify, away, manager, board, mcp, queue, collisions, cancel, usage, guideLang, capacity, disk, git, path: file, loaded: exists };
   if (mirror) config.mirrorDir = resolvePath(mirror);
   return config;
 }
