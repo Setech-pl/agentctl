@@ -168,7 +168,7 @@ describe('events: the CLI and the MCP tool', () => {
     assert.match(first.text, /START {2}NC-5/);
     const second = await call();
     assert.match(second.text, /brak zmian/);
-    assert.match(second.text, /"client": "mcp"/);
+    assert.match((await call({ format: 'json' })).text, /"client": "mcp:/);
     assert.equal((await call({ since: 'soon' })).isError, true);
   });
 });

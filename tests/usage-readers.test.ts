@@ -65,13 +65,13 @@ describe('Codex session parser', () => {
     const sol = sumBuckets(stats.buckets, { model: 'gpt-6.1-sol' });
     const mini = sumBuckets(stats.buckets, { model: 'gpt-6.1-mini' });
     // input_tokens contains the cached part: only the rest is fresh input
-    assert.deepEqual(sol, { input: 1300, output: 150, cacheRead: 1700, cacheWrite: 0 });
-    assert.deepEqual(mini, { input: 300, output: 50, cacheRead: 300, cacheWrite: 0 });
+    assert.deepEqual(sol, { input: 1300, output: 150, cacheRead: 1700, cacheWrite: 0, reasoning_output_tokens: 0 });
+    assert.deepEqual(mini, { input: 300, output: 50, cacheRead: 300, cacheWrite: 0, reasoning_output_tokens: 0 });
   });
 
   it('takes the cumulative total once: the token_count without info adds nothing', () => {
     const all = sumBuckets(stats.buckets);
-    assert.deepEqual(all, { input: 1600, output: 200, cacheRead: 2000, cacheWrite: 0 });
+    assert.deepEqual(all, { input: 1600, output: 200, cacheRead: 2000, cacheWrite: 0, reasoning_output_tokens: 0 });
   });
 
   it('keeps the newest plan: a 5 hour and a weekly window with their resets', () => {
@@ -152,7 +152,7 @@ describe('incremental reading', () => {
     fs.writeFileSync(file, `${lines.slice(0, 4).join('\n')}\n`);
     const again = new UsageReader(path.join(s, 'c.json')).stats(file, 'codex');
     assert.ok(again);
-    assert.deepEqual(sumBuckets(again.buckets), { input: 800, output: 50, cacheRead: 200, cacheWrite: 0 });
+    assert.deepEqual(sumBuckets(again.buckets), { input: 800, output: 50, cacheRead: 200, cacheWrite: 0, reasoning_output_tokens: 0 });
   });
 });
 
@@ -207,7 +207,7 @@ describe('sessions of a task', () => {
     w.codexSession(wt, 'thread-1', '2026-11-01T11:00:00.000Z');
     const t = taskTokenMap(w.config, NOW).get('NC-2');
     assert.ok(t);
-    assert.deepEqual(t.tokens, { input: 1600, output: 200, cacheRead: 2000, cacheWrite: 0 });
+    assert.deepEqual(t.tokens, { input: 1600, output: 200, cacheRead: 2000, cacheWrite: 0, reasoning_output_tokens: 0 });
   });
 
   it('a Claude task does not take a Codex session of its worktree', () => {

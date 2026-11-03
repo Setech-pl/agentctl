@@ -54,14 +54,14 @@ function withReport(config: GlobalConfig, task: string, text = `# ${task}\nWerdy
 
 describe('mcp: the registry', () => {
   it('has the nineteen read tools and thirteen write tools, with unique short names', () => {
-    assert.deepEqual(MCP_TOOLS.filter((t) => t.kind === 'read').map((t) => t.name), ['status', 'events_since', 'gc_preview', 'limits', 'version', 'peek', 'list_reports', 'get_report', 'pull_ready', 'task_spec', 'queue_list', 'cohort_list', 'cohort_show', 'guide', 'capacity', 'usage', 'log', 'stats', 'overlap', 'mcp_check', 'spec_example', 'doctor', 'equivalents', 'config_show', 'manager_status', 'away_status', 'report']);
+    assert.deepEqual(MCP_TOOLS.filter((t) => t.kind === 'read').map((t) => t.name), ['status', 'events_since', 'gc_preview', 'limits', 'version', 'peek', 'list_reports', 'get_report', 'pull_ready', 'task_spec', 'queue_list', 'cohort_list', 'cohort_show', 'guide', 'capacity', 'usage', 'log', 'stats', 'overlap', 'queue_show', 'mcp_check', 'spec_example', 'doctor', 'equivalents', 'config_show', 'manager_status', 'away_status', 'report']);
     assert.deepEqual(MCP_TOOLS.filter((t) => t.kind === 'write').map((t) => t.name), ['set_limits', 'reserve', 'resume', 'send', 'new', 'queue', 'queue_rm', 'cancel', 'mark', 'away', 'interrupt', 'close', 'move', 'queue_retry', 'queue_up', 'queue_pause', 'queue_resume', 'unblock', 'cohort_add', 'cohort_remove', 'cohort_note', 'hide', 'unhide', 'archive', 'adopt', 'report_from', 'limits_release', 'manager_start', 'manager_stop', 'notify_test', 'gc']);
     assert.equal(new Set(MCP_TOOL_NAMES).size, MCP_TOOL_NAMES.length);
     for (const t of MCP_TOOLS) assert.ok(t.name.length <= 64 && /^[a-z_]+$/.test(t.name), t.name);
   });
 
   it('the descriptions tell the chat when to use each tool, and mark the write tools', () => {
-    assert.match(tool('status').description, /FIRST/);
+    assert.match(tool('status').description, /events_since FIRST/);
     assert.match(tool('pull_ready').description, /START of discussing/);
     assert.match(tool('peek').description, /what a task is doing right now/);
     assert.match(tool('get_report').description, /never another path/);
@@ -102,11 +102,11 @@ describe('mcp: reading', () => {
     t.tmux.add('nc-1', WORKING);
     const plain = await t.call('status');
     assert.match(plain.text, /^1 task: 1 working \(2 hidden or closed not shown; all: true lists them\)/);
-    const rows = JSON.parse(plain.text.slice(plain.text.indexOf('\n\n') + 2)).tasks as { task: string; state: string }[];
+    const rows = JSON.parse((await t.call('status', { format: 'json' })).text).tasks as { task: string; state: string }[];
     assert.deepEqual(rows.map((r) => [r.task, r.state]), [['NC-1', 'working']]);
     const all = await t.call('status', { all: true });
     assert.match(all.text, /^3 tasks: 1 working, 1 waiting, 1 closed|^3 tasks: .*closed/);
-    assert.deepEqual((JSON.parse(all.text.slice(all.text.indexOf('\n\n') + 2)).tasks as { task: string }[]).map((r) => r.task), ['NC-1', 'NC-2', 'NC-3']);
+    assert.deepEqual((JSON.parse((await t.call('status', { all: true, format: 'json' })).text).tasks as { task: string }[]).map((r) => r.task), ['NC-1', 'NC-2', 'NC-3']);
     assert.equal(statusLine([], 0), 'No tasks');
   });
 
@@ -116,7 +116,7 @@ describe('mcp: reading', () => {
     seedTask(t.config, 'NC-2');
     t.tmux.add('nc-1', `line one\nline two\nline three\n  ⏵⏵ auto mode on (shift+tab to cycle)\n❯ `);
     const r = await t.call('peek', { task: 'nc-1', lines: 2 });
-    assert.match(r.text, /^NC-1: last 2 lines of its window \(agent footer removed\)\n\nline two\nline three$/);
+    assert.match(r.text, /^NC-1: last 2 lines of its window \(agent footer removed\)\n\nline two\nline three\nusage_hint: n\/d\ndraft_input: n\/d$/);
     const gone = await t.call('peek', { task: 'NC-2' });
     assert.equal(gone.isError, true);
     assert.match(gone.text, /NC-2 has no tmux window/);
@@ -188,12 +188,12 @@ describe('mcp: reading', () => {
     withReport(t.config, 'NC-2', '# two\n', { agent: 'codex', model: 'gpt-6.1-sol', effort: 'low' });
     seedTask(t.config, 'NC-3');
     await t.runner.sleep(1000);
-    const first = await t.call('pull_ready');
+    const first = await t.call('pull_ready', { mode: 'full' });
     assert.match(first.text, /^2 new reports, now marked as pulled: NC-1, NC-2\n\n=== NC-1 \(claude opus\/high\) ===\n# one\n\n=== NC-2 \(codex gpt-6\.1-sol\/low\) ===\n# two/);
     assert.ok(readTaskRecord(t.config, 'nc-1')?.pulled && readTaskRecord(t.config, 'nc-2')?.pulled);
     assert.equal(readTaskRecord(t.config, 'nc-3')?.pulled, undefined);
-    assert.equal((await t.call('pull_ready')).text, 'No new reports (2 already pulled; --all takes them again).');
-    assert.equal((await setup('r8b').call('pull_ready')).text, 'No reports ready.');
+    assert.equal((await t.call('pull_ready', { mode: 'full' })).text, 'No new reports (2 already pulled; --all takes them again).');
+    assert.equal((await setup('r8b').call('pull_ready', { mode: 'full' })).text, 'No reports ready.');
   });
 
   it('pull_ready takes as many reports as fit under 200 KB and leaves the rest new', async () => {
@@ -201,10 +201,10 @@ describe('mcp: reading', () => {
     withReport(t.config, 'NC-1', 'a'.repeat(150 * 1024));
     withReport(t.config, 'NC-2', 'b'.repeat(150 * 1024));
     await t.runner.sleep(1000);
-    const first = await t.call('pull_ready');
+    const first = await t.call('pull_ready', { mode: 'full' });
     assert.match(first.text, /^1 new report, now marked as pulled: NC-1\n1 more did not fit under 200 KB and stay new: NC-2\. Call pull_ready again\./);
     assert.equal(readTaskRecord(t.config, 'nc-2')?.pulled, undefined);
-    assert.match((await t.call('pull_ready')).text, /^1 new report, now marked as pulled: NC-2/);
+    assert.match((await t.call('pull_ready', { mode: 'full' })).text, /^1 new report, now marked as pulled: NC-2/);
   });
 
   it('task_spec: header and prompt; env values are not shown and follow-ups are not part of the prompt', async () => {
@@ -227,8 +227,8 @@ describe('mcp: times come in UTC and in local time', () => {
       process.env.TZ = 'Pacific/Auckland'; // UTC+13 in November: 2026-11-01 19:30 UTC is 2026-11-02 08:30 there
       const t = setup('local-times');
       withReport(t.config, 'NC-1', 'abc', { started: '2026-11-01T19:30:00.000Z', pulled: '2026-11-01T20:00:00.000Z' });
-      const status = await t.call('status');
-      const row = (JSON.parse(status.text.slice(status.text.indexOf('\n\n') + 2)).tasks as { started: string; startedLocal: string }[])[0]!;
+      const status = await t.call('status', { format: 'json' });
+      const row = (JSON.parse(status.text).tasks as { started: string; startedLocal: string }[])[0]!;
       assert.deepEqual([row.started, row.startedLocal], ['2026-11-01 19:30', '2026-11-02 08:30']);
       const spec = await t.call('task_spec', { task: 'NC-1' });
       assert.match(spec.text, /"started": "2026-11-01T19:30:00\.000Z"/);

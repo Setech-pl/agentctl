@@ -39,9 +39,10 @@ export interface NewResult {
   switchedBy?: 'flag' | 'limit';
 }
 
-async function requireTool(ctx: Context, tool: string, args: string[]): Promise<void> {
+async function requireTool(ctx: Context, tool: string, args: string[]): Promise<string> {
   const r = await ctx.runner.exec(tool, args, { readOnly: true });
   if (r.code !== 0) throw new AgentctlError(`${tool} not found or not working`, INSTALL_HINTS[tool]);
+  return r.stdout.trim().split('\n')[0] || 'unknown';
 }
 
 const SETUP_TAIL_LINES = 15;
@@ -79,9 +80,10 @@ export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: Ne
     await requireTool(ctx, 'git', ['--version']);
   }
   const specs = await planBatch(ctx, requested, opts);
-  for (const spec of specs) checkLinkTargets(spec.links, spec.task);
+  for (const spec of specs) checkLinkTargets(spec.links.filter(l => !spec.repos.some(r => l.to === r.worktree || l.to.startsWith(`${r.worktree}/`))), spec.task);
+  const versions: Record<string, string> = {};
   if (!runner.dryRun && !opts.noAgent) {
-    for (const agent of new Set(specs.map((s) => s.agent))) await requireTool(ctx, agent, ['--version']);
+    for (const agent of new Set(specs.map((s) => s.agent))) versions[agent] = await requireTool(ctx, agent, ['--version']);
   }
 
   const results: NewResult[] = [];
@@ -102,6 +104,7 @@ export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: Ne
     await runSetup(ctx, spec, primary);
 
     // 3. symlinks (in the primary worktree)
+    checkLinkTargets(spec.links, spec.task);
     const { ops, warnings } = planLinks(spec.links, primary);
     for (const w of warnings) ctx.info(`${spec.task}: warning: ${w}`);
     await applyLinks(runner, ops);
@@ -122,6 +125,7 @@ export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: Ne
 
     // 4. TASK.md
     const record = recordFromSpec(spec, config, runner.now());
+    record.agentCliVersion = versions[spec.agent] ?? 'unknown';
     // The cohort is made by its first task; a name that exists keeps the spelling it had.
     if (spec.cohort) record.cohort = (await touchCohort(ctx, spec.cohort)).name;
     await runner.mkdir(taskDir(config, spec.window));

@@ -1,3 +1,4 @@
+import { findEntry } from './core/queue.ts';
 import { collectDisk, diskLine, confirmDiskStart } from './core/disk.ts';
 import { collectCapacity, capacitySnapshot, renderCapacity, snapshotLines } from './core/capacity.ts';
 import { collectGuide } from './core/guide.ts';
@@ -524,6 +525,8 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         if (isPaused(ctx.config)) line('The queue is paused: "agentctl queue resume" lets it run again.');
       }),
     );
+
+  queue.command('show').description('Full queued spec, start error and attempts.').argument('<task>', 'task ID or unique prefix').action(guarded(async (task: string) => { const entry = findEntry(contextFor(false, { migrate: false }).config, task); line(JSON.stringify(entry, null, 2)); }));
 
   queue
     .command('rm')

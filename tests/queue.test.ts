@@ -221,6 +221,24 @@ describe('queue: starting', () => {
     assert.deepEqual(await s.tick(), ['NC-2']);
   });
 
+  it('transient starts retry after 1/5/15 minutes, persist attempts, then fail; permanent errors do not retry', async () => {
+    const s = setup('transient', 'limits: {claude: 3}\n', (cmd, args) => cmd === 'git' && args.includes('add') ? { code: 1, stderr: 'ETIMEDOUT' } : undefined);
+    await add(s, specOf(s.repo, 'RETRY-1'));
+    for (const [index, delay] of [60000, 300000, 900000].entries()) {
+      assert.deepEqual(await s.tick(), ['RETRY-1']);
+      const e = readQueue(s.config)[0]!;
+      assert.equal(e.status, 'queued'); assert.equal(e.attempts!.length, index + 1);
+      assert.equal(Date.parse(e.retryAt!) - s.runner.now(), delay);
+      assert.deepEqual(await s.tick(), []);
+      await s.runner.sleep(delay);
+    }
+    await s.tick();
+    const e = readQueue(s.config)[0]!;
+    assert.equal(e.status, 'failed'); assert.equal(e.attempts!.length, 4);
+    assert.deepEqual(await s.tick(), []);
+    assert.equal((await runCli(s.config, s.runner, ['queue', 'show', 'RETRY-1'])).code, 0);
+  });
+
   it('a failed start goes to the end as failed, with a log and a notification, and is not tried again by itself', async () => {
     const s = setup('failed', 'limits: {claude: 3}\n', (cmd, args) => (cmd === 'git' && args.includes('worktree') && args.some((a) => a.endsWith('-nc-1')) ? { code: 128, stderr: 'fatal: boom' } : undefined));
     await add(s, specOf(s.repo, 'NC-1') + specOf(s.repo, 'NC-2'));

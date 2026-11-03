@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import type { Context } from './context.ts';
 import { recordJournal } from './journal.ts';
@@ -116,13 +117,12 @@ export interface ReportCandidate {
 const startedOf = (record: Pick<TaskRecord, 'started'>): number => Date.parse(record.started);
 
 /**
- * The files that may be the report of the task: existing, modified after the task started, not the canonical file itself.
+ * The files that may be the report of the task: existing files, not the canonical file itself; freshness is required only for confirmation.
  * Best first: the `report:` list (newest), then paths with the task ID or "report"/"raport" in them (latest mention first),
  * then the others (latest mention first).
  */
 export function findCandidates(ctx: Context, record: TaskRecord, text: string): ReportCandidate[] {
   const worktrees = worktreesOf(record);
-  const startedMs = startedOf(record);
   const canonical = path.normalize(record.report);
   const stateDir = path.normalize(ctx.config.stateDir) + path.sep;
   const seen = new Set<string>();
@@ -135,7 +135,6 @@ export function findCandidates(ctx: Context, record: TaskRecord, text: string): 
     } catch {
       return;
     }
-    if (!Number.isNaN(startedMs) && mtimeMs < startedMs) return;
     seen.add(file);
     out.push({ file, mtimeMs, why });
   };
@@ -164,6 +163,27 @@ function mtime(file: string): number {
   }
 }
 
+/** All evidence is required for automatic confirmation. Explicit --from is the human override. */
+export function confirmedCandidate(ctx: Context, record: TaskRecord, candidate: ReportCandidate): boolean {
+  const name = path.basename(candidate.file);
+  if (/^(?:CLAUDE|AGENTS|CHANGELOG)\.md$|^README.*\.md$/i.test(name)) return false;
+  if (!name.toLowerCase().includes(record.task.toLowerCase())) return false;
+  if (candidate.mtimeMs <= startedOf(record) || candidate.why !== 'configured') return false;
+  const first = fs.readFileSync(candidate.file, 'utf8').split('\n').find(l => l.trim()) ?? '';
+  if (!new RegExp(ctx.config.notify.verdictPattern ?? '^Werdykt:', 'i').test(first)) return false;
+  // HEAD at task start, rather than today's index: newly committed reports remain eligible.
+  for (const root of worktreesOf(record)) {
+    const rel = path.relative(root, candidate.file);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) continue;
+    const revision = spawnSync('git', ['-C', root, 'rev-list', '-1', `--before=${record.started}`, 'HEAD'], { encoding: 'utf8' });
+    if (revision.status !== 0) return false;
+    if (!revision.stdout.trim()) continue;
+    const tracked = spawnSync('git', ['-C', root, 'cat-file', '-e', `${revision.stdout.trim()}:${rel}`]);
+    if (tracked.status === 0) return false;
+  }
+  return true;
+}
+
 export interface SyncResult {
   action: 'copied' | 'updated' | 'none' | 'kept';
   source?: string | undefined;
@@ -187,7 +207,7 @@ export interface SyncOptions {
 const canonicalFresh = (record: TaskRecord): boolean => {
   const startedMs = startedOf(record);
   const m = mtime(record.report);
-  return m > 0 && (Number.isNaN(startedMs) || m >= startedMs);
+  return isFile(record.report) && m > 0 && (Number.isNaN(startedMs) || m >= startedMs);
 };
 
 /** The canonical file is the copy agentctl made and nobody changed it since. */
@@ -205,25 +225,30 @@ async function paneText(ctx: Context, record: TaskRecord): Promise<string> {
 
 /**
  * Find where the agent wrote the report and make the canonical file a copy of it. Never overwrites a canonical file that the agent (or
- * the user) wrote; a copy agentctl made earlier is updated when the source is newer. The task record keeps `report_source`; the journal
+ * the user) wrote. A fresh canonical file always wins, including a prior detected copy. The task record keeps `report_source`; the journal
  * says "raport wykryty w <path>". Returns what happened; throws nothing for a missing file or a failed copy.
  */
 export async function syncReport(ctx: Context, record: TaskRecord, opts: SyncOptions = {}): Promise<SyncResult> {
   const { runner } = ctx;
   const file = taskFile(ctx.config, record.window);
   let source: string | undefined;
+  if (!opts.from && canonicalFresh(record)) return { action: 'none' };
   if (opts.from) {
     const found = absolutes(opts.from, worktreesOf(record)).find((f) => isFile(f));
     if (!found) return { action: 'none', note: `${opts.from} is not an existing file` };
     source = found;
-  } else if (record.reportSource && canonicalIsOurCopy(record) && mtime(record.reportSource) > Date.parse(record.reportSourceMtime ?? '') + 1) {
-    // The agent went on writing the report where it was found: keep the copy up to date.
-    source = record.reportSource;
   } else if (canonicalFresh(record)) {
     return { action: 'none' };
   } else {
     const text = `${opts.pane ? await paneText(ctx, record) : ''}\n${opts.message ?? ''}`;
-    source = findCandidates(ctx, record, text)[0]?.file;
+    const candidates = findCandidates(ctx, record, text);
+    source = candidates.find(c => confirmedCandidate(ctx, record, c))?.file;
+    const candidate = candidates[0]?.file;
+    if (!source && candidate && candidate !== record.reportCandidate && !opts.dryRun) {
+      record.reportCandidate = candidate;
+      await setHeaderFields(runner, file, { report_candidate: candidate });
+      await recordJournal(ctx, { kind: 'report-candidate', task: record.task, text: `${record.task}: report-candidate ${candidate}` });
+    }
   }
   if (!source) return { action: 'none' };
   if (source === path.normalize(record.report)) return { action: 'none' };
@@ -246,7 +271,7 @@ export async function syncReport(ctx: Context, record: TaskRecord, opts: SyncOpt
   record.reportSource = source;
   record.reportCopied = nowIso;
   record.reportSourceMtime = sourceMtime;
-  await setHeaderFields(runner, file, { report_source: source, report_copied: nowIso, report_source_mtime: sourceMtime });
+  await setHeaderFields(runner, file, { report_candidate: null, report_source: source, report_copied: nowIso, report_source_mtime: sourceMtime });
   if (first) await recordJournal(ctx, { kind: 'report-detected', task: record.task, text: `${record.task}: raport wykryty w ${shortPath(source)}` });
   return { action: exists ? 'updated' : 'copied', source };
 }

@@ -646,7 +646,7 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
         lines = [`(cannot read the window: ${errorMessage(e)})`];
       }
     }
-    const notes = [...(target.collide.length > 0 ? [collideText(target.collide)] : []), ...(target.reportSource ? [`report from ${shortPath(target.reportSource)}`] : [])];
+    const notes = [...(target.collide.length > 0 ? [collideText(target.collide)] : []), ...(target.reportSource ? [`report from ${shortPath(target.reportSource)}`] : []), ...(target.reportCandidate && target.report !== 'yes' ? [`report-candidate ${shortPath(target.reportCandidate)}`] : []), ...(target.usage_hint ? [`usage_hint: ${target.usage_hint}`] : []), ...(target.draft_input ? [`draft_input: ${target.draft_input}`] : [])];
     preview = { task: target.task, lines, ...(notes.length > 0 ? { note: notes.join(' · ') } : {}) };
   }
   return { rows, queue, queuePaused, disk, plans, resumable, away: awayView(config), manager, preview, refreshedAt: clock(now) };
@@ -804,6 +804,8 @@ const STATE_COLOR: Record<TaskState, string> = {
   waiting: 'yellow',
   'needs-input': 'magenta',
   'needs-trust': 'magenta',
+  overloaded: 'yellow',
+  'report-candidate': 'yellow',
   limited: 'red',
   'report-ready': 'green',
   superseded: 'gray',
@@ -827,6 +829,7 @@ export function headerCells(cols: BoardColumns): BoardCell[] {
 }
 
 export function reportLabel(row: StatusRow): string {
+  if (row.reportCandidate && row.report !== 'yes') return `candidate: ${row.reportCandidate}`;
   if (row.report === 'missing') return '-';
   return row.pulled ? 'pulled' : 'ready';
 }

@@ -45,7 +45,7 @@ function setup(name: string, extraYaml = '') {
   return { config, tmux, runner, notified, call, audit, spec, running, ready };
 }
 
-const json = <T>(r: ToolResult): T => JSON.parse(r.text.slice(r.text.indexOf('\n\n') + 2)) as T;
+const json = <T>(r: ToolResult): T => JSON.parse(r.text.trimStart().startsWith('{') || r.text.trimStart().startsWith('[') ? r.text : r.text.slice(r.text.indexOf('\n\n') + 2)) as T;
 
 describe('mcp: cancel', () => {
   it('is a write tool that is off unless mcp.allow lists it; the refusal is audited and nothing is done', () => {
@@ -95,7 +95,7 @@ describe('mcp: cancel', () => {
     assert.match(r.text, /⛓ Q-2 is blocked: it waited for Q-1/);
     assert.deepEqual(readQueue(t.config).map((e) => e.task), ['Q-2']);
     assert.equal(readTaskRecord(t.config, 'q-1')?.cancelSource, 'mcp');
-    const list = json<{ task: string; blocked: boolean; startCondition: string }[]>(await t.call('queue_list'));
+    const list = json<{ task: string; blocked: boolean; startCondition: string }[]>(await t.call('queue_list', { format: 'json' }));
     assert.deepEqual(list.map((l) => [l.task, l.blocked, l.startCondition]), [['Q-2', true, '⛓ zablokowane – Q-1 anulowane']]);
   });
 
@@ -105,7 +105,7 @@ describe('mcp: cancel', () => {
     t.running('B-1', 'Other');
     await t.call('queue', { spec: t.spec('Q-1', 'cohort: sprint-1\n') });
     await t.call('queue', { spec: t.spec('Q-1', 'cohort: sprint-1\n'), confirm: true });
-    const preview = await t.call('cancel', { cohort: 'SPRINT-1' });
+    const preview = await t.call('cancel', { cohort: 'SPRINT-1', format: 'json' });
     assert.match(preview.text, /Cancel 2 tasks:\n {2}A-1 .*\n {2}Q-1 /);
     await t.call('cancel', { cohort: 'sprint-1', reason: 'scrapped' });
     await t.call('cancel', { cohort: 'sprint-1', confirm: true, reason: 'scrapped' });
@@ -118,7 +118,7 @@ describe('mcp: cancel', () => {
       assert.match(bad.text, /give either task or cohort/);
     }
     assert.match((await t.call('cancel', { cohort: 'nope' })).text, /no cohort "nope"/);
-    assert.match((await t.call('cancel', { cohort: 'sprint-1' })).text, /cohort sprint-1 has no open tasks/);
+    assert.match((await t.call('cancel', { cohort: 'sprint-1', format: 'json' })).text, /cohort sprint-1 has no open tasks/);
   });
 
   it('remove_worktree needs mcp.allow_rm_worktree, like close', async () => {
@@ -154,12 +154,12 @@ describe('mcp: cohorts', () => {
     t.running('B-1', 'Other');
     t.running('C-1');
     seedTask(t.config, 'A-2', { cohort: 'Sprint-1', cancelled: true, cancelledAt: '2026-11-02T08:00:00.000Z', cancelReason: 'x' });
-    const all = json<{ tasks: { task: string; cohort: string | null }[] }>(await t.call('status')).tasks;
+    const all = json<{ tasks: { task: string; cohort: string | null }[] }>(await t.call('status', { format: 'json' })).tasks;
     assert.deepEqual(all.map((r) => [r.task, r.cohort]), [['A-1', 'Sprint-1'], ['B-1', 'Other'], ['C-1', null]]);
-    const one = await t.call('status', { cohort: 'sprint-1' });
-    assert.match(one.text, /^1 task: 1 working \(1 hidden or closed not shown; all: true lists them\)\nCohort Sprint-1: only its tasks are listed\./);
+    const one = await t.call('status', { cohort: 'sprint-1', format: 'json' });
+    assert.equal(json<{ tasks: unknown[] }>(one).tasks.length, 1);
     assert.deepEqual(json<{ tasks: { task: string }[] }>(one).tasks.map((r) => r.task), ['A-1']);
-    const withAll = json<{ tasks: { task: string; cancelled: boolean; cancelReason: string | null }[] }>(await t.call('status', { cohort: 'sprint-1', all: true })).tasks;
+    const withAll = json<{ tasks: { task: string; cancelled: boolean; cancelReason: string | null }[] }>(await t.call('status', { cohort: 'sprint-1', all: true, format: 'json' })).tasks;
     assert.deepEqual(withAll.map((r) => [r.task, r.cancelled, r.cancelReason]), [['A-1', false, null], ['A-2', true, 'x']]);
     const unknown = await t.call('status', { cohort: 'nope' });
     assert.equal(unknown.isError, true);
@@ -177,8 +177,8 @@ describe('mcp: cohorts', () => {
     await t.call('queue', { spec: t.spec('Q-2'), confirm: true });
     const list = json<{ name: string; active: number; queued: number; reports: number; total: number }[]>(await t.call('cohort_list'));
     assert.deepEqual(list.map((c) => [c.name, c.active, c.queued, c.reports, c.total]), [['Sprint-1', 1, 1, 1, 3]]);
-    const show = await t.call('cohort_show', { cohort: 'SPRINT-1' });
-    assert.match(show.text, /^\{"cohort":"Sprint-1",.*"tasks":2,"queued":1\}/);
+    const show = await t.call('cohort_show', { cohort: 'SPRINT-1', format: 'json' });
+    assert.equal(json<{ cohort: string }>(show).cohort, 'Sprint-1');
     const body = json<{ tasks: { task: string; state: string }[]; queued: { task: string }[] }>(show);
     assert.deepEqual(body.tasks.map((x) => [x.task, x.state]), [['A-1', 'working'], ['A-2', 'report-ready']]);
     assert.deepEqual(body.queued.map((x) => x.task), ['Q-1']);
@@ -190,11 +190,11 @@ describe('mcp: cohorts', () => {
     const t = setup('pull');
     t.ready('A-1', 'Sprint-1');
     t.ready('B-1', 'Other');
-    const r = await t.call('pull_ready', { cohort: 'sprint-1' });
+    const r = await t.call('pull_ready', { cohort: 'sprint-1', format: 'json' });
     assert.match(r.text, /^1 new report, now marked as pulled: A-1/);
     assert.doesNotMatch(r.text, /report of B-1/);
     assert.equal(readTaskRecord(t.config, 'b-1')?.pulled, undefined);
-    assert.match((await t.call('pull_ready', { cohort: 'sprint-1' })).text, /No new reports \(1 already pulled/);
+    assert.match((await t.call('pull_ready', { cohort: 'sprint-1', format: 'json' })).text, /No new reports \(1 already pulled/);
     assert.match((await t.call('pull_ready')).text, /^1 new report, now marked as pulled: B-1/);
   });
 

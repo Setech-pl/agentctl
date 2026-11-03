@@ -41,6 +41,6 @@ export function readRateLimits(cmd: string, args: string[], cwd: string | undefi
         } catch { /* non-JSON diagnostic */ }
       }
     });
-    send({ id: 1, method: 'initialize', params: { clientInfo: { name: 'agentctl_capacity', version: '0.17.1' }, capabilities: {} } });
+    send({ id: 1, method: 'initialize', params: { clientInfo: { name: 'agentctl_capacity', version: '0.17.2' }, capabilities: {} } });
   });
 }

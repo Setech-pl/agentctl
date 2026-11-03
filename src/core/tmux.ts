@@ -263,6 +263,19 @@ export function lastNonEmptyLine(screen: string): string {
 /** A line made only of box-drawing characters and spaces: borders and separators around the input field. */
 const BORDER_LINE = /^[\s─━═│┃║╭╮╰╯┌┐└┘├┤┬┴┼╌╍┄┅┈┉-]*$/u;
 
+/** Unsent input and usage notices are metadata, never agent work. */
+export function screenMetadata(screen: string): { usage_hint: string | null; draft_input: string | null } {
+  const lines = screen.split('\n');
+  const usage = lines.filter(l => /(?:weekly|session|usage|model|daily).*limit.*(?:left|remaining|%|reset)/i.test(l));
+  const prompt = lines.filter(l => /^\s*[❯›>]\s/.test(l)).at(-1);
+  const draft = prompt?.replace(/^\s*[❯›>]\s*/, '').trim();
+  return { usage_hint: usage.map(l => l.trim()).join(' | ') || null, draft_input: draft && !/^Try\s|^\d+\./.test(draft) ? draft : null };
+}
+
+function metadataLine(line: string): boolean {
+  return /^\s*[❯›>]\s/.test(line) || /(?:weekly|session|usage|model|daily).*limit.*(?:left|remaining|%|reset)/i.test(line);
+}
+
 /**
  * The last line of real content: skips blank lines, borders, the agent's footer lines (`footerPatterns`,
  * regexes matched per line, case-insensitive) and empty input fields. Empty when nothing else is on screen.
@@ -272,7 +285,7 @@ export function lastContentLine(screen: string, footerPatterns: string[]): strin
   const lines = screen.split('\n').map((l) => l.trimEnd());
   for (let i = lines.length - 1; i >= 0; i--) {
     const l = lines[i] as string;
-    if (BORDER_LINE.test(l) || footers.some((f) => f.test(l))) continue;
+    if (metadataLine(l) || BORDER_LINE.test(l) || footers.some((f) => f.test(l))) continue;
     return l.trim();
   }
   return '';
@@ -287,6 +300,7 @@ export function contentLines(screen: string, footerPatterns: string[], count: nu
   const kept = screen
     .split('\n')
     .map((l) => l.trimEnd())
+    .filter(l => !metadataLine(l))
     .filter((l) => (l === '' || !BORDER_LINE.test(l)) && !footers.some((f) => f.test(l)));
   while (kept.length > 0 && kept[kept.length - 1] === '') kept.pop();
   while (kept.length > 0 && kept[0] === '') kept.shift();

@@ -228,7 +228,7 @@ describe('limits: MCP and board', () => {
 
   it('limits reads for everyone and carries the reservations', async () => {
     const s = mcpSetup('mcp-limits', 'limits:\n  claude: 2\n');
-    const r = await s.call('limits');
+    const r = await s.call('limits', { format: 'json' });
     assert.equal(r.isError, undefined);
     assert.match(r.text, /"limit": 2/);
     assert.match(r.text, /"free": 2/);

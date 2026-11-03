@@ -59,7 +59,7 @@ describe('events: Claude hooks (JSON samples from Claude Code 2.1.309)', () => {
     assert.equal(limit.type, 'stop-failure:rate_limit');
     assert.match(limit.text, /session limit/);
     assert.equal(parseClaudeEvent('stop-failure', { error: 'billing_error' }).outcome, 'limited');
-    assert.equal(parseClaudeEvent('stop-failure', { error: 'overloaded' }).outcome, 'ignored');
+    assert.equal(parseClaudeEvent('stop-failure', { error: 'overloaded' }).outcome, 'overloaded');
     assert.equal(parseClaudeEvent('stop-failure', { error: 'authentication_failed' }).outcome, 'ignored');
   });
 

@@ -50,7 +50,7 @@ agentctl powstał i jest używany przy prawdziwym projekcie: codziennie równole
 
 ## Stany zadań
 
-Board pokazuje m.in. stany `working`, `waiting`, `needs-input`, `needs-trust`, `limited`, `report-ready`, `background`, `queued`, `blocked`, `dead`, `orphan`, `closed`, `cancelled`, `superseded` i `start-failed`. Szczegóły opisuje [dokumentacja stanów zadań](docs/details.pl.md#stany-zadań).
+Board pokazuje m.in. stany `overloaded`, `report-candidate`, `working`, `waiting`, `needs-input`, `needs-trust`, `limited`, `report-ready`, `background`, `queued`, `blocked`, `dead`, `orphan`, `closed`, `cancelled`, `superseded` i `start-failed`. Szczegóły opisuje [dokumentacja stanów zadań](docs/details.pl.md#stany-zadań).
 
 ### Architektura i przebieg pracy
 
@@ -204,6 +204,8 @@ stateDiagram-v2
     state "⏳ background" as background
     state "⏸ waiting" as waiting
     state "? needs-input" as input
+    state "⏳ overloaded" as overloaded
+    state "? report-candidate" as candidate
     state "⛔ limited" as limited
     state "✓ report-ready" as ready
     state "↪ superseded" as superseded
@@ -233,6 +235,10 @@ stateDiagram-v2
     working --> ready: koniec tury, raport zapisany
     working --> input: pytanie lub dialog uprawnień
     input --> working: odpowiadasz
+    working --> overloaded: przeciążenie dostawcy
+    overloaded --> working: ponowienie tylko przy pustym bezczynnym promptcie
+    waiting --> candidate: niepotwierdzona ścieżka raportu
+    candidate --> ready: raport kanoniczny lub potwierdzony
     working --> limited: komunikat o limicie użycia
     limited --> working: limit odnowiony, ponowienie
     limited --> superseded: move do drugiego dostawcy
@@ -496,7 +502,7 @@ Lokalny serwer MCP nie działa w czatach claude.ai na telefonie (tylko w aplikac
 1. **Sprawdź wymagania.** Claude Code zalogowany przez claude.ai (`claude auth login`; Pro, Max, Team lub Enterprise, w Team i Enterprise Owner musi włączyć Remote Control), **nie** klucz API, Bedrock, Vertex ani bramka (`ANTHROPIC_BASE_URL`). Aplikacja Claude na telefonie, zalogowana na to samo konto. `agentctl doctor` sprawdza flagi Twojego `claude` i ostrzega przed zmiennymi, przez które Claude Code odmawia Remote Control.
 2. **Uruchom managera.** `agentctl manager` (ustaw raz `manager.project`, folder, w którym pracujesz, np. `~/src/sample-app`; `--project` go nadpisuje). Tworzy okno `manager` w sesji agentctl i startuje w Twoim projekcie `claude --remote-control "agentctl manager"`. **Za pierwszym razem Claude Code pyta w tym oknie** o zaufanie do folderu i o *Enable Remote Control*: odpowiedz tam (`tmux attach -t agentctl \; select-window -t manager` albo zaznacz linię 🧭 na boardzie i naciśnij Enter). agentctl nigdy nie odpowiada na te okna dialogowe.
 3. **Otwórz na telefonie.** Aplikacja Claude, zakładka **Code**, sesja **agentctl manager** (ikona komputera z zieloną kropką). `agentctl manager --url` drukuje adres i kod QR, gdy okno je pokazuje; w oknie `/remote-control` pokazuje oba.
-4. **Rozmawiaj.** „Co słychać?" każe managerowi wywołać `events_since` i `status`. „Pokaż raport NC-42" daje krótką wersję. „Uruchom NC-43" każe mu pokazać spec i czekać na Twoje tak. To, co może zmienić, jest ograniczone dwa razy: przez `mcp.allow` w agentctl i przez Claude Code, który przed wywołaniem narzędzia zmieniającego coś prosi Cię o zgodę na telefonie (narzędzia tylko do odczytu nie wymagają stuknięcia).
+4. **Rozmawiaj.** „Co słychać?" każe managerowi wywołać `events_since`. „Pokaż raport NC-42" daje krótką wersję. „Uruchom NC-43" każe mu pokazać spec i czekać na Twoje tak. To, co może zmienić, jest ograniczone dwa razy: przez `mcp.allow` w agentctl i przez Claude Code, który przed wywołaniem narzędzia zmieniającego coś prosi Cię o zgodę na telefonie (narzędzia tylko do odczytu nie wymagają stuknięcia).
 
 ```yaml
 manager:
@@ -510,7 +516,7 @@ mcp:
   allow: [send, new, queue]            # co manager w ogóle może, za Twoim tak
 ```
 
-- **Co robi `agentctl manager`.** Jedno okno `manager`, nigdy drugi egzemplarz; `agentctl manager stop` je zamyka (sesja przechodzi offline w aplikacji). To sesja interaktywna, startowana z `--mcp-config` (serwer agentctl), `--settings` (narzędzia do odczytu nie wymagają stuknięcia) i `--append-system-prompt-file` (rola), wszystkie trzy z plików w `~/.agentctl/manager/`: nic w Twoim projekcie się nie zmienia. Rola: najpierw `events_since` i `status`, zmiany tylko za Twoim wyraźnym tak na tę właśnie czynność, streszczenia do 6 linii, nigdy merge, push ani tag. Okno **nie jest zadaniem**: nie jest sierotą w `status`, nie liczy się do limitów, a `close`, `cancel` i `gc` go nie ruszają. Board pokazuje je w osobnej linii (🧭 *czeka na potwierdzenie w oknie / czeka na połączenie / połączony*).
+- **Co robi `agentctl manager`.** Jedno okno `manager`, nigdy drugi egzemplarz; `agentctl manager stop` je zamyka (sesja przechodzi offline w aplikacji). To sesja interaktywna, startowana z `--mcp-config` (serwer agentctl), `--settings` (narzędzia do odczytu nie wymagają stuknięcia) i `--append-system-prompt-file` (rola), wszystkie trzy z plików w `~/.agentctl/manager/`: nic w Twoim projekcie się nie zmienia. Rola: najpierw `events_since`, zmiany tylko za Twoim wyraźnym tak na tę właśnie czynność, streszczenia do 6 linii, nigdy merge, push ani tag. Okno **nie jest zadaniem**: nie jest sierotą w `status`, nie liczy się do limitów, a `close`, `cancel` i `gc` go nie ruszają. Board pokazuje je w osobnej linii (🧭 *czeka na potwierdzenie w oknie / czeka na połączenie / połączony*).
 - **Odpowiadanie zadaniu z telefonu.** `remote_control: true` w specu (albo `defaults.remote_control: true`, tylko Claude) startuje agenta z `--remote-control <TASK>`: zadanie pojawia się na tej samej liście w aplikacji Claude pod swoim ID i możesz tam odpowiedzieć na jego pytanie. Powiadomienie `needs-input` na telefonie kończy się wtedy: „Odpowiesz w aplikacji Claude: NC-42".
 - **Powiadomienia.** Gdy okno managera działa, powiadomienia na telefon o pytaniu, gotowym raporcie i skończonej kohorcie kończą się: „Otwórz sesję „agentctl manager” w aplikacji Claude." Bez linku i bez ścieżki.
 - **Ograniczenia.** Mac musi być włączony i **nie uśpiony**, a proces `claude` musi działać (tmux o to dba; zamknięcie okna kończy sesję). Po uśpieniu albo utracie sieci sesja interaktywna łączy się ponownie sama. Potrzebny plan claude.ai (Pro lub Max dla osoby); gdy sesja jest połączona, rozmowa jest przechowywana na serwerach Anthropic. Jedna sesja na proces `claude`. Komendy takie jak `/plugin` działają tylko przy Macu. Remote Control nie był tu próbowany na prawdziwym Claude Code (testy i harness używają atrapy `claude`): [co sprawdzono, a czego nie](docs/details.pl.md#zdalne-sterowanie-i-manager).
@@ -791,3 +797,5 @@ Dokumentacja szczegółowa jest po angielsku:
 [MIT](LICENSE)
 
 Od 0.17.1 MCP udostępnia ponawianie i sterowanie kolejką, kohorty, sprzątanie `gc` i diagnostykę. Sprawdź `capacity.disk` przed zleceniem pracy. Przy `failed` przeczytaj powód i zaproponuj naprawę lub `queue_retry`; przy `disk-warn` zaproponuj `gc_preview`, a przy `disk-critical` poproś o zgodę na `gc` albo użyj go w ramach uprawnień użytkownika. Każde usuwanie/start wymaga podglądu i potwierdzenia; samo `mcp.allow` nie zastępuje potwierdzenia. Szczegóły: [MCP](docs/mcp.md).
+
+W 0.17.2 odczyty MCP domyślnie zwracają zwięzły tekst, a `pull_ready` skróty raportów. Pełne dane: `format: "json"`, `mode: "full"` lub sekcja `get_report`. `report-candidate` nie spełnia zależności; `overloaded` ponawia tylko przy pustym, bezczynnym promptcie. Szczegóły w [konfiguracji](docs/configuration.md).
