@@ -18,7 +18,7 @@ export const SERVER_INSTRUCTIONS =
 export function buildMcpServer(deps: McpDeps, version: string): McpServer {
   const server = new McpServer({ name: 'agentctl', version }, { instructions: SERVER_INSTRUCTIONS });
   const sessionDeps = { ...deps };
-  server.server.oninitialized = () => { sessionDeps.clientId = `mcp:${server.server.getClientVersion()?.name ?? 'unknown'}:${process.pid}:${crypto.randomUUID()}`; };
+  server.server.oninitialized = () => { sessionDeps.clientId = server.server.getClientVersion()?.name.slice(0, 200) ?? 'unknown'; };
   for (const tool of MCP_TOOLS) {
     server.registerTool(tool.name, { title: tool.title, description: tool.description, inputSchema: tool.input, annotations: tool.annotations }, async (args: Record<string, unknown>) => {
       const result = await tool.run(sessionDeps, args as never);

@@ -1,3 +1,4 @@
+import { inspectReport } from './report-state.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { Alerts } from './alert.ts';
@@ -7,7 +8,7 @@ import { extractQuestion, parseClaudeEvent, parseCodexEvent } from './events.ts'
 import type { AgentEvent, ClaudeKind } from './events.ts';
 import { classifyScreen } from './state.ts';
 import type { EventKind } from './state.ts';
-import { listTaskRecords, taskDir } from './taskstore.ts';
+import { listTaskRecords, taskDir, setHeaderField, taskFile } from './taskstore.ts';
 import type { TaskRecord } from './taskstore.ts';
 import { recordEvent } from './history.ts';
 import { rememberSession, sessionOfStatusLine } from './usage-tap.ts';
@@ -37,13 +38,13 @@ export function eventsLogPath(ctx: Context): string {
 }
 
 /** The stored event of a task; one from before the task (re)started does not count. */
-export function readStoredEvent(config: Context['config'], record: Pick<TaskRecord, 'window' | 'started'>): StoredEvent | undefined {
+export function readStoredEvent(config: Context['config'], record: Pick<TaskRecord, 'window' | 'started' | 'attemptStarted'>): StoredEvent | undefined {
   try {
     const data: unknown = JSON.parse(fs.readFileSync(path.join(taskDir(config, record.window), 'event.json'), 'utf8'));
     if (!isObject(data) || typeof data.at !== 'string') return undefined;
     const outcome = data.outcome;
     if (outcome !== 'needs-input' && outcome !== 'turn-complete' && outcome !== 'limited' && outcome !== 'overloaded') return undefined;
-    const startedMs = Date.parse(record.started);
+    const startedMs = Date.parse(record.attemptStarted ?? record.started);
     if (!Number.isNaN(startedMs) && Date.parse(data.at) < startedMs) return undefined;
     return { outcome, at: data.at, type: typeof data.type === 'string' ? data.type : '', text: typeof data.text === 'string' ? data.text : '' };
   } catch {
@@ -134,14 +135,7 @@ function lastMessage(payload: unknown): string {
 }
 
 function reportReady(ctx: Context, record: TaskRecord): boolean {
-  if (!record.report) return false;
-  try {
-    const mtime = fs.statSync(record.report).mtimeMs;
-    const startedMs = Date.parse(record.started);
-    return Number.isNaN(startedMs) || mtime >= startedMs;
-  } catch {
-    return false;
-  }
+  return inspectReport(ctx.config, record, ctx.runner.now(), true).ready;
 }
 
 /**
@@ -177,6 +171,8 @@ export async function handleEvent(ctx: Context, alerts: Alerts, input: EventInpu
       state = 'needs-input';
       text = question ? `${record.task}: ${question}` : event.text ? `${record.task}: ${event.text}` : `${record.task} zadaje pytanie i czeka na odpowiedź`;
     } else if (event.outcome === 'turn-complete') {
+      record.turnEndedAt = new Date(now).toISOString();
+      await setHeaderField(runner, taskFile(ctx.config, record.window), 'turn_ended_at', record.turnEndedAt);
       if (await backgroundOnScreen(ctx, record)) {
         // The agent ends its turn every few minutes while its shells and monitors run: that is not "waiting for you". The
         // watcher announces the report or the wait once the background work is gone.

@@ -1,3 +1,6 @@
+import { withFileLock as withReportLock } from './file-lock.ts';
+import { redactQueue } from './mcp-redact.ts';
+import { reportFingerprint } from './report-state.ts';
 import { findMcpProcesses, staleProcesses } from './mcp-processes.ts';
 import { EXAMPLE_SPEC } from './example.ts';
 import { checkRetryWorktrees } from './git.ts';
@@ -44,7 +47,7 @@ import { resolveSpec, splitSpecs } from './spec.ts';
 import { collectStatus, shownRows } from './status.ts';
 import type { StatusRow } from './status.ts';
 import { summarizeSpecs } from './summary.ts';
-import { listArchivedRecords, listTaskRecords, readTaskPrompt } from './taskstore.ts';
+import { listArchivedRecords, listTaskRecords, readTaskPrompt, setHeaderField, taskFile } from './taskstore.ts';
 import type { TaskRecord } from './taskstore.ts';
 import { computeStats, markTask, parseResult, RESULTS, selectHistory } from './history.ts';
 import { collectUsage } from './usage-report.ts';
@@ -76,6 +79,8 @@ export const MAX_PEEK_LINES = 200;
 export interface ToolResult {
   text: string;
   isError?: boolean;
+  delivered?: number;
+  data?: unknown;
 }
 
 export interface McpDeps {
@@ -134,18 +139,28 @@ async function guarded(body: () => Promise<ToolResult>): Promise<ToolResult> {
   }
 }
 
+export function markdownHeadings(text: string): Array<{ line: number; level: number; title: string }> {
+  let fence: { char: string; size: number } | null = null;
+  const out: Array<{ line: number; level: number; title: string }> = [];
+  for (const [line, raw] of text.split('\n').entries()) {
+    const marker = /^\s{0,3}(`{3,}|~{3,})/.exec(raw)?.[1];
+    if (marker) { if (!fence) fence = { char: marker[0]!, size: marker.length }; else if (marker[0] === fence.char && marker.length >= fence.size) fence = null; continue; }
+    if (fence) continue;
+    const h = /^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$/.exec(raw);
+    if (h) out.push({ line, level: h[1]!.length, title: h[2]!.trim() });
+  }
+  return out;
+}
 export function reportSection(text: string, heading: string): string {
-  const lines = text.split('\n');
-  const start = lines.findIndex(l => /^#{1,6}\s+/.test(l) && l.replace(/^#+\s+/, '').replace(/\s+#+$/, '').trim().toLowerCase() === heading.trim().toLowerCase());
-  if (start < 0) throw new AgentctlError(`No Markdown section "${heading}"`);
-  const level = /^#+/.exec(lines[start]!)![0].length;
-  let end = start + 1;
-  while (end < lines.length && !new RegExp(`^#{1,${level}}\\s+`).test(lines[end]!)) end++;
-  return lines.slice(start, end).join('\n');
+  const headings = markdownHeadings(text);
+  const start = headings.find(h => h.title.toLowerCase() === heading.trim().toLowerCase());
+  if (!start) throw new AgentctlError(`No Markdown section "${heading}"`);
+  const end = headings.find(h => h.line > start.line && h.level <= start.level)?.line;
+  return text.split('\n').slice(start.line, end).join('\n');
 }
 
 export function reportSummary(text: string): string {
-  const heading = /^#{1,6}\s+(Streszczenie|Summary|Decyzje)\s*#*\s*$/im.exec(text)?.[1];
+  const heading = markdownHeadings(text).find(h => /^(Streszczenie|Summary|Decyzje)$/i.test(h.title))?.title;
   return (heading ? reportSection(text, heading) : text.split('\n').slice(0, 40).join('\n')).slice(0, 1500);
 }
 
@@ -153,24 +168,30 @@ function compactStatus(r: StatusRow): string {
   return `${r.task} ${r.agent}/${r.model}/${r.effort} ${r.state} ${r.duration} cohort=${r.cohort ?? 'n/d'} report=${r.report === 'yes' ? 'tak' : r.reportCandidate ? `kandydat:${r.reportCandidate}` : 'brak'}${r.collide.length ? ` ⚠${r.collide.length}` : ''}${r.question ? ` ? ${r.question}` : ''}`;
 }
 
-async function pullSummaries(ctx: Context, rows: StatusRow[]): Promise<ToolResult> {
+async function pullSummaries(ctx: Context, rows: StatusRow[], ack = false): Promise<ToolResult> {
   if (!rows.length) return ok('No new reports.');
   const taken: StatusRow[] = [];
   const parts: string[] = [];
   const response = () => {
     const omitted = rows.filter(r => !taken.includes(r)).map(r => r.task);
-    return `${taken.length} new report${taken.length === 1 ? '' : 's'}, now marked as pulled: ${taken.map(r => r.task).join(', ')}. Omitted (remain new): ${omitted.join(', ') || 'none'}.\n\n${parts.join('\n\n')}`;
+    return `${taken.length} report summar${taken.length === 1 ? 'y' : 'ies'} delivered (full reports ${ack ? 'explicitly acknowledged' : 'not marked as pulled'}): ${taken.map(r => r.task).join(', ')}. Omitted (remain new): ${omitted.length ? `${omitted.length}: ${omitted.slice(0, 10).join(', ')}${omitted.length > 10 ? ', …' : ''}` : 'none'}.\n\n${parts.join('\n\n')}`;
   };
   for (const row of rows) {
     const r = readReportFile({ task: row.task, report: row.reportPath });
-    const first = r.text.split('\n').find(l => l.trim()) ?? 'n/d';
-    const refs = r.text.split('\n').filter(l => /(?:\b(?:SHA|branch|commit)\b|gałąź)/i.test(l)).slice(0, 8).map(l => l.slice(0, 300)).join('\n');
-    const part = `=== ${row.task} ===\npath: ${row.reportPath}\nbytes: ${r.bytes}\n${first}\n${refs}\n${reportSummary(r.text)}\n[excerpt; get_report section/offset/limit reads more]`;
+    const reportText = fs.readFileSync(row.reportPath, 'utf8');
+    const cut = (text: string, bytes: number) => Buffer.byteLength(text) > bytes ? Buffer.from(text).subarray(0, bytes).toString('utf8') + ' [cut]' : text;
+    const first = cut((reportText.split('\n').find(l => l.trim()) ?? 'n/d'), 500);
+    const refs = cut(reportText.split('\n').filter(l => /(?:\b(?:SHA|branch|commit)\b|gałąź)/i.test(l)).slice(0, 8).map(l => l.slice(0, 300)).join('\n'), 1000);
+    const factSection = (pattern: RegExp) => { const h = markdownHeadings(reportText).find(h => pattern.test(h.title)); return h ? cut(reportSection(reportText, h.title), 600) : 'n/d'; };
+    const blockers = cut([factSection(/blok|block|question|pytani|error|błęd/i), ...reportText.split('\n').filter(l => /^(?:[-*]\s*)?(?:BLOKER|BLOCKER|BLOCKED|ERROR|BŁĄD|PYTANIE|QUESTION)\s*[:—-]/i.test(l.trim())).slice(0, 10)].join('\n'), 700);
+    const decisions = factSection(/decyzj|decision/i);
+    const part = `=== ${row.task} ===\nattempt: ${row.attemptId ?? row.attempt ?? 'n/d (legacy)'}\npath: ${row.reportPath}\nbytes: ${r.bytes}\nverdict: ${first}\nblockers: ${blockers}\ndecisions: ${decisions}\ntruncated: true; details: get_report\n${first}\n${refs}\n${cut(reportSummary(reportText), 3000)}\n[excerpt; get_report section/offset/limit reads more]`;
     parts.push(part); taken.push(row);
-    if (Buffer.byteLength(response()) > 16000) { parts.pop(); taken.pop(); }
+    if (Buffer.byteLength(response()) > 15500) { parts.pop(); taken.pop(); break; }
   }
-  await markPulled(ctx, taken);
-  return ok(response());
+  for (const row of taken) await setHeaderField(ctx.runner, taskFile(ctx.config, row.windowName), 'summary_delivered', new Date(ctx.runner.now()).toISOString());
+  if (ack) await markPulled(ctx, taken);
+  return { ...ok(response()), delivered: taken.length };
 }
 
 // ---- finding a task
@@ -192,6 +213,9 @@ function findRecord(ctx: Context, arg: string): TaskRecord {
 function statusRowForChat(r: StatusRow): Record<string, unknown> {
   return {
     task: r.task,
+    attempt: r.attempt ?? null,
+    attempt_id: r.attemptId ?? null,
+    summary_delivered: r.summaryDelivered ?? null,
     agent: r.agent,
     model: r.model,
     effort: r.effort,
@@ -210,6 +234,7 @@ function statusRowForChat(r: StatusRow): Record<string, unknown> {
     hint: r.hint,
     cohort: r.cohort,
     collisions: r.collide.length,
+    collidesWith: r.collide,
     usage_hint: r.usage_hint ?? null,
     draft_input: r.draft_input ?? null,
     finished: r.finished,
@@ -251,7 +276,7 @@ async function runStatus(deps: McpDeps, args: { all?: boolean | undefined; cohor
   if (colliding.length > 0) extra.push(`⚠${colliding.length} tasks overlap; overlap has details.`);
   extra.push(awayLine(ctx));
   extra.push(diskLine(await collectDisk(ctx)));
-  return ok(`${[statusLine(shown, rows.length - shown.length), ...extra, ...shown.map(compactStatus)].join('\n')}\n\n${JSON.stringify({ disk: await collectDisk(ctx), tasks: shown.map(statusRowForChat) }, null, 2)}`);
+  return { text: [statusLine(shown, rows.length - shown.length), ...extra, ...shown.map(compactStatus)].join('\n'), data: { disk: await collectDisk(ctx), tasks: shown.map(statusRowForChat) } };
 }
 
 /** "Away: on since …; the phone gets the notifications" - what the chat should know about the phone. */
@@ -310,10 +335,10 @@ async function runAway(deps: McpDeps, args: { on: boolean }): Promise<ToolResult
   });
 }
 
-async function runEventsSince(deps: McpDeps, args: { since?: string | undefined; cohort?: string | undefined; peek?: boolean | undefined }): Promise<ToolResult> {
+async function runEventsSince(deps: McpDeps, args: { since?: string | undefined; cohort?: string | undefined; peek?: boolean | undefined; client?: string; cursor?: string; limit?: number }): Promise<ToolResult> {
   const ctx = deps.context(() => {});
-  const report = await collectEvents(ctx, { client: deps.clientId ?? ('client' in args && typeof args.client === 'string' ? `mcp:${args.client}` : `mcp:${process.pid}`), since: args.since, cohort: args.cohort, keep: Boolean(args.peek) });
-  return ok(`${renderEvents(report).join('\n')}\n\n${JSON.stringify(report, null, 2)}`);
+  const report = await collectEvents(ctx, { client: `mcp:${deps.clientId ?? 'unknown'}:${args.client ?? ctx.config.mcp.client ?? 'default'}`, cursor: args.cursor, limit: args.limit, since: args.since, cohort: args.cohort, keep: Boolean(args.peek) });
+  return { text: renderEvents(report).join('\n'), data: report };
 }
 
 async function runGcPreview(deps: McpDeps, args: { older_than?: string | undefined; merged?: boolean | undefined; cohort?: string | undefined }): Promise<ToolResult> {
@@ -404,7 +429,11 @@ async function runVersion(deps: McpDeps): Promise<ToolResult> {
 
 async function queueViews(ctx: Context): Promise<ReturnType<typeof describeQueue>> {
   const entries = readQueue(ctx.config);
-  return entries.length === 0 ? [] : describeQueue(ctx.config, entries, await liveWindows(ctx), await collectStatus(ctx, { progress: false, archived: true }));
+  return entries.length === 0 ? [] : describeQueue(ctx.config, entries, await liveWindows(ctx), await collectStatus(ctx, { progress: false, archived: true })).map(view => {
+    const safe = redactQueue(view.entry, ctx.config) as typeof view.entry;
+    const condition = redactQueue({ ...view.entry, error: view.condition.text }, ctx.config) as typeof view.entry;
+    return { ...view, entry: { ...view.entry, ...safe }, condition: { ...view.condition, text: condition.error ?? 'n/d' } };
+  });
 }
 
 async function runQueueList(deps: McpDeps, args: { cohort?: string | undefined } = {}): Promise<ToolResult> {
@@ -489,49 +518,87 @@ async function runListReports(deps: McpDeps, args: { all?: boolean | undefined }
  * The text of the report file that the task's TASK.md names. The path comes from agentctl's own state folder, never from the chat, and a
  * report that is a symbolic link (an agent could have made one) is refused instead of followed.
  */
-export function readReportFile(record: Pick<TaskRecord, 'task' | 'report'>, opts: { section?: string; offset?: number; limit?: number } = {}): { text: string; bytes: number; truncated: boolean } {
-  const file = record.report;
-  if (!file) throw new AgentctlError(`${record.task} has no report path`);
+export interface ReportPage { text: string; bytes: number; truncated: boolean; total_lines: number; offset: number; byte_offset: number; next_offset: number | null; next_byte_offset: number; has_more: boolean; returned_bytes: number; start_byte: number; end_byte: number; signature: string }
+export function readReportFile(record: Pick<TaskRecord, 'task' | 'report'>, opts: { section?: string; offset?: number; limit?: number; byte_offset?: number } = {}): ReportPage {
+  if (!record.report) throw new AgentctlError(`${record.task} has no report path`);
   let st: fs.Stats;
-  try {
-    st = fs.lstatSync(file);
-  } catch {
-    throw new AgentctlError(`${record.task} has no report yet`, 'Call peek to see what the agent is doing, or wait for it to finish.');
+  try { st = fs.lstatSync(record.report); } catch { throw new AgentctlError(`${record.task} has no report yet`, 'Call peek or wait for it to finish.'); }
+  if (!st.isFile() || st.isSymbolicLink()) throw new AgentctlError(`the report of ${record.task} is not a regular file; refusing to read it`);
+  const full = fs.readFileSync(record.report, 'utf8');
+  const section = opts.section ? reportSection(full, opts.section) : full;
+  const lines = section.split('\n');
+  const offset = opts.offset ?? 0, byteOffset = opts.byte_offset ?? 0;
+  if (offset > lines.length) throw new AgentctlError('report offset is beyond end');
+  const original = Buffer.from(section);
+  const startByte = Math.min(original.length, Buffer.byteLength(lines.slice(0, offset).join('\n')) + (offset > 0 ? 1 : 0) + byteOffset);
+  if (byteOffset > Buffer.byteLength(lines[offset] ?? '')) throw new AgentctlError('report byte_offset is beyond line');
+  const desiredEnd = Math.min(lines.length, offset + (opts.limit ?? lines.length));
+  const targetEnd = Math.min(original.length, Buffer.byteLength(lines.slice(0, desiredEnd).join('\n')) + (desiredEnd < lines.length ? 1 : 0));
+  let end = Math.min(targetEnd, startByte + MAX_TEXT_BYTES - 4096);
+  if (end < targetEnd) {
+    const boundary = original.lastIndexOf(10, end - 1);
+    if (boundary >= startByte) end = boundary + 1;
+    else while (end > startByte && (original[end]! & 0xc0) === 0x80) end--;
   }
-  if (st.isSymbolicLink() || !st.isFile()) throw new AgentctlError(`the report of ${record.task} is not a regular file; refusing to read it`);
-  let text = fs.readFileSync(file, 'utf8');
-  if (opts.section) text = reportSection(text, opts.section);
-  const lines = text.split('\n');
-  text = lines.slice(opts.offset ?? 0, (opts.offset ?? 0) + (opts.limit ?? lines.length)).join('\n');
-  const bytes = Buffer.byteLength(text);
-  return { text: Buffer.from(text).subarray(0, MAX_TEXT_BYTES).toString('utf8'), bytes: st.size, truncated: bytes > MAX_TEXT_BYTES };
-
+  const text = original.subarray(startByte, end).toString('utf8');
+  const before = original.subarray(0, end).toString('utf8');
+  const nextOffset = (before.match(/\n/g) ?? []).length;
+  const lastBreak = original.lastIndexOf(10, end - 1);
+  const hasMore = end < original.length;
+  return { text, bytes: Buffer.byteLength(full), truncated: hasMore, total_lines: lines.length, offset, byte_offset: byteOffset, next_offset: hasMore ? nextOffset : null, next_byte_offset: hasMore ? end - lastBreak - 1 : 0, has_more: hasMore, returned_bytes: end - startByte, start_byte: startByte, end_byte: end, signature: createHash('sha256').update(full).digest('hex') };
 }
 
-async function runGetReport(deps: McpDeps, args: { task: string; section?: string; offset?: number; limit?: number }): Promise<ToolResult> {
-  const record = findRecord(deps.context(() => {}), args.task);
+async function runGetReport(deps: McpDeps, args: { task: string; section?: string; offset?: number; limit?: number; byte_offset?: number }): Promise<ToolResult> {
+  const ctx = deps.context(() => {});
+  const record = findRecord(ctx, args.task);
   const r = readReportFile(record, args);
-  const note = r.truncated ? `\n\n[cut: the first ${MAX_TEXT_BYTES / 1024} KB of ${r.bytes} bytes]` : '';
-  return ok(`=== ${record.task} (${record.agent} ${record.model}/${record.effort}) ===\n${r.text.trimEnd()}${note}`);
+  let pulled = false;
+  if (!args.section) {
+    const file = path.join(path.dirname(ctx.config.path), 'report-read-progress.json');
+    await withReportLock(`${file}.lock`, async () => {
+      let reads: Record<string, number> = {};
+      try { const parsed: unknown = JSON.parse(fs.readFileSync(file, 'utf8')); if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) reads = Object.fromEntries(Object.entries(parsed).filter(([, v]) => typeof v === 'number' && Number.isFinite(v) && v >= 0)); } catch { /* first read */ }
+      const key = `${deps.clientId ?? 'direct'}:${record.task}:${record.attemptId ?? record.started}:${r.signature}`;
+      const covered = reads[key] ?? 0;
+      if (r.start_byte <= covered) reads[key] = Math.max(covered, r.end_byte);
+      const current = (await collectStatus(ctx, { archived: true })).find(row => row.task === record.task);
+      if (!r.has_more && (reads[key] ?? 0) >= r.bytes && current?.report === 'yes' && current.reportSignature === r.signature) {
+        await setHeaderField(ctx.runner, taskFile(ctx.config, record.window), 'pulled', new Date(Math.max(ctx.runner.now(), Math.ceil(fs.statSync(record.report).mtimeMs))).toISOString()); pulled = true;
+      }
+      const entries = Object.entries(reads).slice(-256);
+      await ctx.runner.writeFile(file, JSON.stringify(Object.fromEntries(entries)));
+    });
+  }
+  const { text, signature: _signature, ...page } = r;
+  return ok(`=== ${record.task} (${record.agent} ${record.model}/${record.effort}) ===\n${text}\n--- page ---\n${JSON.stringify({ ...page, pulled })}`);
 }
 
-async function runPullReady(deps: McpDeps, args: { cohort?: string | undefined; all?: boolean | undefined; mode?: string; offset?: number; limit?: number } = {}): Promise<ToolResult> {
+async function runPullReady(deps: McpDeps, args: { cohort?: string | undefined; all?: boolean | undefined; mode?: string; offset?: number; limit?: number; ack?: boolean; cursor?: string } = {}): Promise<ToolResult> {
   const ctx = deps.context(() => {});
   const everyRow = await collectStatus(ctx);
   const rows = args.cohort === undefined ? everyRow : cohortRows(everyRow, findCohort(ctx.config, args.cohort).name);
-  const chosen = selectReady(rows, Boolean(args.all)).slice(args.offset ?? 0, (args.offset ?? 0) + (args.limit ?? 100));
+  const scope = `${args.cohort ?? ''}:${Boolean(args.all)}:${args.mode ?? 'summary'}`;
+  let snapshots = reportSelections.get(deps); if (!snapshots) { snapshots = new Map(); reportSelections.set(deps, snapshots); }
+  let selection = snapshots.get(scope);
+  if (snapshots.size > 64) snapshots.delete(snapshots.keys().next().value!);
+  if (!selection || (!args.cursor && !(args.offset ?? 0))) { selection = { id: crypto.randomUUID(), rows: selectReady(rows, Boolean(args.all)) }; snapshots.set(scope, selection); }
+  let offset = args.offset ?? 0;
+  if (args.cursor) { const [id, index] = args.cursor.split(':'); if (id !== selection.id || !/^\d+$/.test(index ?? '')) throw new AgentctlError('expired or invalid report selection cursor; restart from offset 0'); offset = Number(index); }
+  const chosen = selection.rows.slice(offset, offset + (args.limit ?? 100));
   if (chosen.length === 0) return ok(noReadyMessage(rows));
-  if (args.mode !== 'full') return pullSummaries(ctx, chosen);
+  if (chosen.some(row => { const current = rows.find(r => r.task === row.task); return !current || current.report !== 'yes' || current.attemptId !== row.attemptId; })) throw new AgentctlError('report selection changed; restart at offset 0 before acknowledging');
+  if (args.mode !== 'full') { const result = await pullSummaries(ctx, chosen, args.ack); return ok(`${result.text}\nnext_cursor: ${selection.id}:${offset + (result.delivered ?? 0)}; has_more: ${offset + (result.delivered ?? 0) < selection.rows.length}`); }
   if (chosen.length === 0) return ok(noReadyMessage(rows));
   // As many reports as fit under the size limit; the others stay un-pulled for the next call.
   const taken: StatusRow[] = [];
   let total = 0;
   for (const row of chosen) {
     const size = fs.statSync(row.reportPath).size;
-    if (taken.length > 0 && total + size > MAX_TEXT_BYTES) continue;
+    if (total + size + 2048 > MAX_TEXT_BYTES) break;
     taken.push(row);
     total += size;
   }
+  const advanced = taken.length || 1;
   const left = chosen.filter((r) => !taken.includes(r));
   const { text, pulled } = joinReports(taken);
   let body = text;
@@ -540,8 +607,8 @@ async function runPullReady(deps: McpDeps, args: { cohort?: string | undefined; 
   }
   await markPulled(ctx, taken);
   const head = `${pulled.length} new report${pulled.length === 1 ? '' : 's'}, now marked as pulled: ${pulled.map((p) => p.task).join(', ')}`;
-  const rest = left.length > 0 ? `\n${left.length} more did not fit under ${MAX_TEXT_BYTES / 1024} KB and stay new: ${left.map((r) => r.task).join(', ')}. Call pull_ready again.` : '';
-  return ok(`${head}${rest}\n\n${body}`);
+  const rest = left.length > 0 ? `\n${left.length} more did not fit under ${MAX_TEXT_BYTES / 1024} KB and stay new: ${left.map((r) => r.task).join(', ')}. Continue with next_cursor; an oversized first report requires get_report pages and remains unread.` : '';
+  return ok(`${head}${rest}\n\n${body}\nnext_cursor: ${selection.id}:${offset + advanced}; has_more: ${offset + advanced < selection.rows.length}`);
 }
 
 async function runTaskSpec(deps: McpDeps, args: { task: string }): Promise<ToolResult> {
@@ -790,6 +857,8 @@ const allArg = z.boolean().optional().describe('true: also hidden and closed (an
 
 const readOnly = (title: string): ToolAnnotations => ({ title, readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false });
 
+const reportSelections = new WeakMap<McpDeps, Map<string, { id: string; rows: StatusRow[] }>>();
+
 export const MCP_TOOLS: McpToolDef[] = [
   def({
     name: 'status',
@@ -811,7 +880,7 @@ export const MCP_TOOLS: McpToolDef[] = [
     description:
       'Call this at the start of EVERY answer that concerns the work of the agents. It returns what happened since your previous call (or since a given time): reports that became ready (with the verdict), tasks started from the queue, questions and folder-trust waits, blocked, cancelled and limited tasks, finished cohorts, plan thresholds crossed and changed limits - then one line with the state now (active, queued, reports to pull). ' +
       'The chat gets no notifications, so this is how you learn what changed; the "last" marker is kept per client, so the first call looks back 24 hours. Events are recorded while "agentctl watch" runs. since: last (default), an age (30m, 2h, 1d), HH:MM or an ISO time. peek: true does not move the marker.',
-    input: { client: z.string().min(1).max(200).optional(), since: z.string().max(40).optional().describe('last (default), an age like 30m / 2h / 1d, HH:MM today, or an ISO time.'), cohort: cohortArg.optional(), peek: z.boolean().optional().describe('true: do not move the "last" marker.') },
+    input: { cursor: z.string().max(2048).optional(), limit: z.number().int().min(1).max(200).optional(), client: z.string().min(1).max(200).optional(), since: z.string().max(40).optional().describe('last (default), an age like 30m / 2h / 1d, HH:MM today, or an ISO time.'), cohort: cohortArg.optional(), peek: z.boolean().optional().describe('true: do not move the "last" marker.') },
     annotations: readOnly('What changed since the last look'),
     run: (deps, args) => guarded(() => runEventsSince(deps, args as { since?: string; cohort?: string; peek?: boolean })),
   }),
@@ -896,9 +965,9 @@ export const MCP_TOOLS: McpToolDef[] = [
     kind: 'read',
     description:
       `The report of one task (the file its spec names), up to ${MAX_TEXT_BYTES / 1024} KB. Use it when the user asks for the result of a particular task, also an older or closed one. ` +
-      'section selects a Markdown heading; offset and limit paginate lines (zero-based offset), capped at 200 KiB per response. It does not mark the report as pulled. Reads only that report file, never another path.',
-    input: { task: taskArg, section: z.string().optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(10000).optional() },
-    annotations: readOnly('Read one report'),
+      'section selects a Markdown heading; offset and limit paginate lines (zero-based offset), capped at 200 KiB per response. Contiguous whole-file delivery marks pulled at EOF; sections do not. Page metadata includes total_lines, returned_bytes, has_more, next_offset and next_byte_offset. Reads only that report file, never another path.',
+    input: { task: taskArg, section: z.string().optional(), byte_offset: z.number().int().min(0).optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(10000).optional() },
+    annotations: { ...readOnly('Read one report'), readOnlyHint: false },
     run: (deps, args) => guarded(() => runGetReport(deps, args as { task: string })),
   }),
   def({
@@ -906,9 +975,9 @@ export const MCP_TOOLS: McpToolDef[] = [
     title: 'Take all new reports',
     kind: 'read',
     description:
-      'Default: summary excerpts (1500 characters each; 16000 bytes total) with task, path, size, first-line verdict and SHA/branch when present. mode: full reads bodies (200 KiB total); offset/limit paginate reports. All reports that are ready and not yet pulled, each under a header with the task and agent, in one answer; they are then marked as pulled (the only thing this tool changes, in agentctl\'s own state). ' +
+      'Default: summary receipt only (not pulled); ack: true attests full read elsewhere. Summary excerpts (1500 characters each; 16000 bytes total) with task, path, size, first-line verdict and SHA/branch when present. mode: full reads bodies (200 KiB total); offset/limit paginate reports. All reports that are ready and not yet pulled, each under a header with the task and agent, in one answer; they are then marked as pulled (the only thing this tool changes, in agentctl\'s own state). ' +
       'Use it at the START of discussing the results of finished tasks, instead of asking the user to paste reports. A second call returns only reports that arrived since. cohort: only the reports of that cohort (the others stay new). Cancelled tasks are never included.',
-    input: { cohort: cohortArg.optional(), all: z.boolean().optional(), mode: z.enum(['summary', 'full']).optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional() },
+    input: { cohort: cohortArg.optional(), all: z.boolean().optional(), mode: z.enum(['summary', 'full']).optional(), ack: z.boolean().optional().describe('Explicitly attest that the full reports were read elsewhere; independent of mark.'), cursor: z.string().max(200).optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional() },
     annotations: { title: 'Take all new reports', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     run: (deps, args) => guarded(() => runPullReady(deps, args as { cohort?: string; all?: boolean })),
   }),
@@ -1157,7 +1226,7 @@ function extraWrite<S extends z.ZodRawShape>(name: McpWriteTool, cli: string, us
   return def({ name, title: use, kind: 'write', description: `WRITE, off unless the user put "${name}" in mcp.allow. ${use}. CLI: agentctl ${cli}. Use only for work the user requested. Requires ${name} in mcp.allow; preview then confirm: true with identical arguments. Every execution is audited, journaled and announced on the desktop.`, input: { ...input, confirm: confirmArg }, annotations: { title: use, readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false }, run: (deps, args) => guarded(() => writeTool(deps, name, {}, async (ctx) => ({ text: JSON.stringify(await action(ctx, args as z.infer<z.ZodObject<S>>, deps), null, 2), executed: true, announce: name }))) });
 }
 MCP_TOOLS.push(
-  extraRead('queue_show', 'queue show <TASK>', 'Read full queued spec, error and attempt history', { task: taskArg }, async (ctx, a) => findEntry(ctx.config, a.task as string)),
+  extraRead('queue_show', 'queue show <TASK>', 'Read full queued spec, error and attempt history', { task: taskArg }, async (ctx, a) => redactQueue(findEntry(ctx.config, a.task as string), ctx.config)),
   extraRead('mcp_check', 'mcp check', 'Inspect stale MCP server processes without stopping them', {}, async (ctx) => ({ stale: staleProcesses(await findMcpProcesses(ctx.runner), stableScript()) })),
   extraRead('spec_example', 'spec example', 'Read an example spec before writing a new order', {}, async () => EXAMPLE_SPEC),
   extraRead('doctor', 'doctor', 'Diagnose the installation, permissions and disk', {}, async (ctx) => runDoctor(ctx.runner, () => ctx.config)),
@@ -1287,6 +1356,7 @@ for (const tool of MCP_TOOLS.filter(t => ['status', 'events_since', 'queue_list'
   tool.run = async (deps, args) => {
     const result = await run(deps, args);
     if (result.isError) return result;
+    if (result.data !== undefined) return ok(args.format === 'json' || args.detail === true ? JSON.stringify(result.data, null, 2) : result.text);
     const at = result.text.search(/\n\n(?=[{[])/);
     const raw = at >= 0 ? result.text.slice(at + 2) : result.text;
     if (args.format === 'json' || args.detail === true) return ok(raw);

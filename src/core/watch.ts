@@ -174,8 +174,9 @@ async function syncWaitingReports(ctx: Context, rows: StatusRow[]): Promise<bool
     if (!['waiting', 'report-candidate', 'dead'].includes(row.state) || row.closed || row.cancelled || row.archived) continue;
     const record = readTaskRecord(ctx.config, row.windowName);
     if (!record) continue;
+    const candidateBefore = record.reportCandidate;
     const r = await syncReport(ctx, record, { pane: true }).catch(() => undefined);
-    if (r) copied = true;
+    if (r && (r.action === 'copied' || r.action === 'updated' || record.reportCandidate !== candidateBefore)) copied = true;
   }
   return copied;
 }
@@ -197,7 +198,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   // A waiting agent may have written its report somewhere else than the spec says: copy it to the canonical path before the states are read.
   if (await syncWaitingReports(ctx, allRows)) allRows = await collectStatus(ctx, { progress: false, archived: true });
   const rows = allRows.filter((r) => !r.closed && !r.cancelled);
-  await overloadTick(ctx, rows, notifier);
+  await overloadTick(ctx, rows, notifier).catch(e => ctx.out(`overload recovery: ${errorMessage(e)}`));
   await decorateWindows(ctx, memory, rows);
   const now = ctx.runner.now();
   // away.auto_idle: the Mac idle for long enough counts as away; before the events of this tick, so they reach the phone.

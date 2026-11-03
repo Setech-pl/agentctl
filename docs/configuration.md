@@ -372,3 +372,40 @@ Each write needs its exact name in `mcp.allow` (or the listed group). No wildcar
 | `gc` | `gc` | — |
 
 Groups: `queue:*` = `queue`, `queue_rm`, `queue_retry`, `queue_up`, `queue_pause`, `queue_resume`; `cohort` = `cohort_add`, `cohort_remove`, `cohort_note`; `manager:*` = `manager_start`, `manager_stop`. `queue:*` includes `queue_retry`; retry is technical and retains the same provider.
+
+## Review corrections: delivery, attempts and overload safety
+
+| Key | Default / meaning |
+|---|---|
+| `agents.<agent>.overload_patterns` | Adapter-specific regexes matched only against the last non-chrome error element, outside fenced code. Claude: API Error: 529 or an ⎿ Overloaded banner; Codex: ■ Selected model is at capacity. Mentions, test output and stale errors do not match. `[]` disables screen overload detection for this adapter. |
+| `overload.give_up_after` | 1800 seconds from the start of an overload episode, including time when retry is unsafe. Independent of max_retries. Recovery/finish clears the episode; watcher restarts preserve it. |
+| `mcp.client` | Optional stable suffix to initialize clientInfo.name. Tool parameter client overrides it. No PID/session in the cursor key. |
+| `report.settle_s` | 30 seconds without report changes after an ended agent turn. Set with mapping syntax below. Zero disables the settling delay, not attempt checks. |
+| `report.path` | Canonical path in mapping syntax, compatible with legacy report: path. |
+| `report.paths` | Canonical first path and detection alternatives in mapping syntax, compatible with legacy report: [paths]. |
+
+```yaml
+report:
+  paths: ["{cache}/{task}/{TASK}.md", "docs/reports/*{task}*.md"]
+  settle_s: 30
+overload:
+  auto_retry: true
+  retry_after: 300
+  max_retries: 3
+  give_up_after: 1800
+  message: kontynuuj
+```
+
+The final report line `<!-- agentctl:report-end -->` explicitly completes a write. Without it the report needs an ended turn and settle_s; a partial canonical file is a candidate. new/queue prompts include report instructions and current attempt ID. TASK.md keeps attempt, attempt_id, attempt_started and the previous report fingerprint; resume starts another attempt, move/new/retry get fresh identities. Old report content cannot complete a new attempt just by touching its mtime. A FAIL report still satisfies after; agent self assessment and user mark remain independent.
+
+Auto-retry rechecks report/candidate, window identity, prompt, draft, work, trust and question before paste and again before Enter. A failure is journaled and watch continues. Retry of a timed-out checkout requires registration, toplevel, successful clean tracked git status, no index.lock, expected HEAD/branch and no task/git process or window. Uncertain residue is preserved with repair instructions.
+
+PL: Domyślnie raport wymaga końcowej linii `<!-- agentctl:report-end -->` albo zakończonej tury i 30 sekund stabilności. Nowa próba nie korzysta ze starego raportu. Przeciążenie ma limit czasu i prób, nie wygrywa z potwierdzonym raportem ani pytaniem; ponowienie sprawdza stan także tuż przed Enter. Skrót MCP nie oznacza pobrania pełnego raportu ani oceny użytkownika.
+
+Adapter overload patterns (terminal status/error context only):
+
+```text
+^\s*(?:⎿\s*)?API Error:\s*529(?:\s|$)
+^\s*⎿\s*(?:API Error:\s*)?Overloaded(?:[.:]|$)
+^\s*■\s*Selected model is at capacity(?:\.|$)
+```

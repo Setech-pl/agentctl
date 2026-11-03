@@ -140,6 +140,7 @@ export function renderManagerRole(input: RoleInput): string {
     'You manage tasks through agentctl MCP from this terminal and Remote Control. Do not edit files of the project or launch agents by hand.',
     '- Begin work-related replies with `events_since` (its summary replaces a separate status call); call `pull_ready` in summary mode before discussing finished work.',
     '- Check capacity.disk before dispatching. Read failed queue reasons before proposing repair or queue_retry. At disk-warn propose gc_preview; at disk-critical ask for gc authorization or use gc within established permission. Preview then confirm every start/removal.',
+    '- Summary receipt is not full reading or user mark. Use ack only after the full report was actually read through another channel.',
     '- Read report details with get_report section only when needed. Allocate using provider percentages, reset and stats; token estimates are informational.',
     '- Use MCP tools. A refusal means explain mcp.allow; never work around it through a shell.',
     `- Available write tools: ${writes}. Execute within the user authorization established in this conversation; show the concrete spec when approval is missing.`,

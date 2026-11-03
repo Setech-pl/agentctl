@@ -114,7 +114,7 @@ function makeRepo(h: Harness): string {
 }
 
 const STOP = JSON.stringify({ last_assistant_message: 'ok' });
-const REPORT = '# Raport LP-1\n\nWerdykt: PASS – 12 testów\n\nZmieniłem /Users/marcin/Projects/secret-app/src/token.ts i sekret hunter2.\n';
+const REPORT = '# Raport LP-1\n\nWerdykt: PASS – 12 testów\n\nZmieniłem /Users/marcin/Projects/secret-app/src/token.ts i sekret hunter2.\n' + String.fromCharCode(10) + '<!-- agentctl:report-end -->';
 
 async function mockServer(): Promise<void> {
   current = 'mock ntfy';
@@ -166,7 +166,7 @@ async function mockServer(): Promise<void> {
         check('away off', h.agentctl(['away', 'off']).code === 0);
         fs.mkdirSync(path.join(h.root, 'cache', 'lp-3'), { recursive: true });
         check('LP-3 starts', h.agentctl(['new', spec(h, repo, 'LP-3'), '-y']).code === 0);
-        fs.writeFileSync(path.join(h.root, 'cache', 'lp-3', 'LP-3.md'), 'Werdykt: PASS\n');
+        fs.writeFileSync(path.join(h.root, 'cache', 'lp-3', 'LP-3.md'), 'Werdykt: PASS\n<!-- agentctl:report-end -->');
         h.agentctl(['event', '--task', 'LP-3', '--agent', 'claude', '--kind', 'stop'], { input: STOP });
         await sleep(1500);
         check('away off: the third report did not go to the phone', mock.seen().length === 1);
@@ -176,7 +176,7 @@ async function mockServer(): Promise<void> {
         check('away on again', h.agentctl(['away', 'on']).code === 0);
         check('LP-4 starts', h.agentctl(['new', spec(h, repo, 'LP-4'), '-y']).code === 0);
         fs.mkdirSync(path.join(h.root, 'cache', 'lp-4'), { recursive: true });
-        fs.writeFileSync(path.join(h.root, 'cache', 'lp-4', 'LP-4.md'), 'Werdykt: FAIL\n');
+        fs.writeFileSync(path.join(h.root, 'cache', 'lp-4', 'LP-4.md'), 'Werdykt: FAIL\n<!-- agentctl:report-end -->');
         const down = h.agentctl(['event', '--task', 'LP-4', '--agent', 'claude', '--kind', 'stop'], { input: STOP });
         check('a dead server does not fail the event command (exit 0)', down.code === 0, down.stderr);
         const queued = await until(() => {

@@ -1,3 +1,4 @@
+import { inspectReport } from './report-state.ts';
 import { sessionQuestion } from './codex-question.ts';
 import { collapsedQuestion } from './events.ts';
 import { shortPath } from './report-detect.ts';
@@ -6,7 +7,7 @@ import type { Context } from './context.ts';
 import { formatModelEffort } from './equivalents.ts';
 import { syncMirror } from './mirror.ts';
 import type { MirrorResult } from './mirror.ts';
-import { taskState } from './state.ts';
+import { classifyScreen, taskState } from './state.ts';
 import { readStoredEvent } from './event-command.ts';
 import { extractQuestion } from './events.ts';
 import type { TaskState } from './state.ts';
@@ -26,6 +27,9 @@ import { formatTokens } from './usage-parse.ts';
 
 export interface StatusRow {
   task: string;
+  attempt?: number;
+  attemptId?: string;
+  summaryDelivered?: string | null;
   /** Effective agent, model and effort: what is actually running. */
   agent: string;
   model: string;
@@ -48,6 +52,7 @@ export interface StatusRow {
   /** The report file exists. */
   report: 'yes' | 'missing';
   reportPath: string;
+  reportSignature?: string;
   /** Where the agent wrote the report when that was not the `report:` path (the file at `reportPath` is a copy). */
   reportSource?: string;
   /** ISO time of the last pull that took the current report; null when never pulled or the report changed since. */
@@ -134,7 +139,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       reportMtime = undefined;
     }
     // A leftover report from before this run does not count as "ready".
-    const reportReady = reportMtime !== undefined && (Number.isNaN(startedMs) || reportMtime >= startedMs);
+    let reportReady = false;
     let duration = '-';
     if (!Number.isNaN(startedMs)) {
       if (alive) duration = formatDuration(runner.now() - startedMs);
@@ -147,7 +152,11 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     }
     const screenAgent = record.agent === 'unknown' ? guessAgent(screenText) : record.agent;
     const settings = config.agents[screenAgent];
-    const stored = alive ? readStoredEvent(config, record) : undefined;
+    const stored = readStoredEvent(config, record);
+    const reportState = inspectReport(config, { ...record, ...(stored?.outcome === 'turn-complete' ? { turnEndedAt: stored.at } : {}) }, runner.now(), !record.attemptId && (!alive || (config.reportSettleS === 0 && classifyScreen(screenText, settings) === 'idle')));
+    reportReady = reportState.ready;
+    if (reportState.exists && !reportReady && !record.reportCandidate) record.reportCandidate = record.report;
+    if (reportReady && !alive && reportState.mtime !== undefined && !Number.isNaN(startedMs)) duration = formatDuration(reportState.mtime - startedMs);
     // mtimeMs has a fraction, the stored time only whole milliseconds: a pull in the same millisecond as the report still counts.
     const pulled = record.pulled && reportMtime !== undefined && Date.parse(record.pulled) >= Math.floor(reportMtime) ? record.pulled : null;
     // Cancelled wins over closed: the task was abandoned, not finished.
@@ -157,6 +166,9 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     const state: TaskState = cancelled ? 'cancelled' : closed ? 'closed' : record.supersededBy ? 'superseded' : taskState({ alive, screen: screenText, settings, reportReady, event: stored?.outcome });
     rows.push({
       task: record.task,
+      attempt: record.attempt,
+      attemptId: record.attemptId,
+      summaryDelivered: record.summaryDelivered ?? null,
       agent: record.agent,
       model: record.model,
       effort: record.effort,
@@ -174,6 +186,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       duration,
       report: reportReady ? 'yes' : 'missing',
       reportPath: record.report,
+      reportSignature: reportState.signature,
       ...(record.reportSource ? { reportSource: record.reportSource } : {}),
       pulled,
       lastLine: lastContentLine(screenText, settings.footerPatterns),

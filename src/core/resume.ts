@@ -1,5 +1,9 @@
+import { waitForReady } from './ready.ts';
+import { classifyScreen, inputVisible } from './state.ts';
+import { screenMetadata } from './tmux.ts';
+import { attemptFields } from './report-state.ts';
 import fs from 'node:fs';
-import { agentCommandLine, buildResumeArgv } from './agents.ts';
+import { agentCommandLine, buildResumeArgv, reportInstructions } from './agents.ts';
 import { checkWindowLimit } from './checks.ts';
 import type { LiveWindow } from './checks.ts';
 import type { AgentName } from './config.ts';
@@ -10,7 +14,7 @@ import { liveWindows } from './plan.ts';
 import { matchTask } from './resolve.ts';
 import { collectStatus } from './status.ts';
 import type { StatusRow } from './status.ts';
-import { readTaskRecord, setHeaderField, taskFile } from './taskstore.ts';
+import { readTaskRecord, setHeaderField, setHeaderFields, taskFile } from './taskstore.ts';
 import type { TaskRecord } from './taskstore.ts';
 import { readTaskSessions } from './usage.ts';
 import { AgentctlError } from './util.ts';
@@ -105,6 +109,9 @@ export async function resumeTasks(ctx: Context, plan: ResumePlan, opts: { self?:
   let sessionUp = await tmux.hasSession();
   for (const c of plan.items) {
     const record = readTaskRecord(config, c.window) as TaskRecord;
+    const attempt = attemptFields(record, runner.now());
+    Object.assign(record, attempt);
+    await setHeaderFields(runner, taskFile(config, c.window), { attempt: attempt.attempt, attempt_id: attempt.attemptId, attempt_started: attempt.attemptStarted, attempt_report_baseline: attempt.attemptReportBaseline, turn_ended_at: null, report_candidate: null, pulled: null, summary_delivered: null, report_complete_hash: null });
     const wiring = config.notify.events && opts.self ? planEventWiring({ agent: c.agent, task: c.task, window: c.window, config, self: opts.self, env: record.env, worktree: c.worktree }) : undefined;
     for (const file of wiring?.files ?? []) await runner.writeFile(file.path, file.content);
     const started = sessionUp ? await tmux.newWindow(c.window, c.worktree, record.env) : await tmux.newSession(c.window, c.worktree, record.env);
@@ -114,6 +121,13 @@ export async function resumeTasks(ctx: Context, plan: ResumePlan, opts: { self?:
     if (windowId) await setHeaderField(runner, taskFile(config, c.window), 'window_id', windowId);
     const command = agentCommandLine(buildResumeArgv({ agent: c.agent, model: c.model, effort: c.effort as never, task: c.task, remoteControl: record.remoteControl }, config.agents[c.agent], wiring?.args, c.sessionId));
     await tmux.typeCommand(c.window, command);
+    const settings = config.agents[c.agent], note = reportInstructions(attempt.attemptId);
+    const ready = await waitForReady(runner, tmux, c.window, { pattern: settings.readyPattern, trustPattern: settings.trustPattern, timeoutMs: Math.min(5000, settings.readyTimeout * 1000) });
+    const guard = async (phase: 'before-paste' | 'before-enter') => {
+      const capture = await tmux.capture(c.window); const draft = screenMetadata(capture.stdout).draft_input;
+      return capture.code === 0 && inputVisible(capture.stdout, settings) && classifyScreen(capture.stdout, settings) === 'idle' && (!draft || (phase === 'before-enter' && note.startsWith(draft)));
+    };
+    if (!ready.ready || !await tmux.submitPrompt(c.window, note, guard)) ctx.info(`${c.task}: report instructions pending until idle: ${note}`);
     ctx.info(`${c.task}: window ${config.session}:${c.window} running ${command}`);
     results.push({ task: c.task, command });
   }

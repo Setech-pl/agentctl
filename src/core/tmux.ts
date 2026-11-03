@@ -172,11 +172,15 @@ export class Tmux {
   }
 
   /** Paste, give the TUI a moment to take the paste in, then submit with a separate Enter. */
-  async submitPrompt(window: string, text: string): Promise<void> {
+  async submitPrompt(window: string, text: string, guard?: (phase: 'before-paste' | 'before-enter') => Promise<boolean>): Promise<boolean> {
+    if (guard && !await guard('before-paste')) return false;
     await this.pasteText(window, text);
     this.runner.note(`wait ${PASTE_SETTLE_MS}ms for the agent to take in the paste`);
     await this.runner.sleep(PASTE_SETTLE_MS);
-    await this.pressEnter(window);
+    if (guard && !await guard('before-enter')) return false;
+    const sent = await this.pressEnter(window);
+    if (sent.code !== 0) throw new Error(`tmux Enter failed: ${sent.stderr}`);
+    return true;
   }
 
   /** Visible screen (or the last `lines` lines of scrollback + screen) of the window. */
@@ -269,7 +273,7 @@ export function screenMetadata(screen: string): { usage_hint: string | null; dra
   const usage = lines.filter(l => /(?:weekly|session|usage|model|daily).*limit.*(?:left|remaining|%|reset)/i.test(l));
   const prompt = lines.filter(l => /^\s*[❯›>]\s/.test(l)).at(-1);
   const draft = prompt?.replace(/^\s*[❯›>]\s*/, '').trim();
-  return { usage_hint: usage.map(l => l.trim()).join(' | ') || null, draft_input: draft && !/^Try\s|^\d+\./.test(draft) ? draft : null };
+  return { usage_hint: usage.map(l => l.trim()).join(' | ') || null, draft_input: draft && !/^Try\s|^Ask Codex to do anything$|^\d+\./.test(draft) ? draft : null };
 }
 
 function metadataLine(line: string): boolean {

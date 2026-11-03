@@ -1,3 +1,4 @@
+import { inspectReport } from './report-state.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseAge } from './archive.ts';
@@ -81,7 +82,7 @@ export async function snapshot(ctx: Context, record: TaskRecord, event: HistoryE
   let reportMs: number | null = null;
   try {
     const mtime = record.report ? fs.statSync(record.report).mtimeMs : NaN;
-    if (!Number.isNaN(mtime) && (Number.isNaN(started) || mtime >= started)) reportMs = Math.floor(mtime);
+    if (inspectReport(config, record, now, !record.attemptId).ready && !Number.isNaN(mtime)) reportMs = Math.floor(mtime);
   } catch {
     reportMs = null;
   }

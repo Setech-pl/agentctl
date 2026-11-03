@@ -72,8 +72,8 @@ describe('mcp: the registry', () => {
   });
 
   it('the annotations are honest: reads are read-only, pull_ready and the writes are not, close is destructive', () => {
-    for (const t of MCP_TOOLS.filter((x) => x.kind === 'read' && x.name !== 'pull_ready')) assert.equal(t.annotations.readOnlyHint, true, t.name);
-    for (const t of MCP_TOOLS.filter((x) => x.kind === 'write' || x.name === 'pull_ready')) assert.equal(t.annotations.readOnlyHint, false, t.name);
+    for (const t of MCP_TOOLS.filter((x) => x.kind === 'read' && !['pull_ready', 'get_report'].includes(x.name))) assert.equal(t.annotations.readOnlyHint, true, t.name);
+    for (const t of MCP_TOOLS.filter((x) => x.kind === 'write' || ['pull_ready', 'get_report'].includes(x.name))) assert.equal(t.annotations.readOnlyHint, false, t.name);
     assert.equal(tool('close').annotations.destructiveHint, true);
     assert.ok(MCP_TOOLS.every((t) => t.annotations.openWorldHint === false && t.annotations.title === t.title));
   });
@@ -126,9 +126,9 @@ describe('mcp: reading', () => {
     const t = setup('r3');
     withReport(t.config, 'NC-42', '# NC-42\nWerdykt: PASS\n');
     withReport(t.config, 'OLD-7', '# old\n', { closed: true });
-    assert.equal((await t.call('get_report', { task: 'nc-4' })).text, '=== NC-42 (claude opus/high) ===\n# NC-42\nWerdykt: PASS');
+    assert.ok((await t.call('get_report', { task: 'nc-4' })).text.startsWith('=== NC-42 (claude opus/high) ===\n# NC-42\nWerdykt: PASS'));
     assert.match((await t.call('get_report', { task: 'OLD-7' })).text, /# old/);
-    assert.equal(readTaskRecord(t.config, 'nc-42')?.pulled, undefined);
+    assert.ok(readTaskRecord(t.config, 'nc-42')?.pulled);
   });
 
   it('get_report never takes a path: whatever is given must name a task', async () => {
@@ -165,7 +165,7 @@ describe('mcp: reading', () => {
     withReport(t.config, 'NC-1', big);
     const r = await t.call('get_report', { task: 'NC-1' });
     assert.ok(Buffer.byteLength(r.text) < MAX_TEXT_BYTES + 400);
-    assert.ok(r.text.endsWith(`[cut: the first 200 KB of ${big.length} bytes]`));
+    assert.equal(JSON.parse(r.text.split('--- page ---\n')[1]!).has_more, true);
     seedTask(t.config, 'NC-2');
     const none = await t.call('get_report', { task: 'NC-2' });
     assert.deepEqual([none.isError, /has no report yet/.test(none.text)], [true, true]);
@@ -202,7 +202,7 @@ describe('mcp: reading', () => {
     withReport(t.config, 'NC-2', 'b'.repeat(150 * 1024));
     await t.runner.sleep(1000);
     const first = await t.call('pull_ready', { mode: 'full' });
-    assert.match(first.text, /^1 new report, now marked as pulled: NC-1\n1 more did not fit under 200 KB and stay new: NC-2\. Call pull_ready again\./);
+    assert.match(first.text, /^1 new report, now marked as pulled: NC-1\n1 more did not fit under 200 KB and stay new: NC-2\. Continue with next_cursor/);
     assert.equal(readTaskRecord(t.config, 'nc-2')?.pulled, undefined);
     assert.match((await t.call('pull_ready', { mode: 'full' })).text, /^1 new report, now marked as pulled: NC-2/);
   });

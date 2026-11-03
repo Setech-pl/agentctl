@@ -201,7 +201,7 @@ export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: Ne
           `if the prompt looks normal, adjust agents.${spec.agent}.ready_pattern / ready_timeout in ${config.path}.`,
       );
     }
-    await tmux.submitPrompt(spec.window, promptWithHeader(spec));
+    await tmux.submitPrompt(spec.window, promptWithHeader(spec, record.attemptId));
     ctx.info(`${spec.task}: prompt sent`);
 
     const result: NewResult = {

@@ -82,3 +82,5 @@ agentctl nie scala, nie pushuje, nie publikuje, nie tworzy PR, nie wybiera dosta
 Od 0.17.1 MCP udostępnia ponawianie i sterowanie kolejką, kohorty, sprzątanie `gc` i diagnostykę. Sprawdź `capacity.disk` przed zleceniem pracy. Przy `failed` przeczytaj powód i zaproponuj naprawę lub `queue_retry`; przy `disk-warn` zaproponuj `gc_preview`, a przy `disk-critical` poproś o zgodę na `gc` albo użyj go w ramach uprawnień użytkownika. Każde usuwanie/start wymaga podglądu i potwierdzenia; samo `mcp.allow` nie zastępuje potwierdzenia. Szczegóły: [MCP](mcp.md).
 
 Raporty pobieraj przez `pull_ready` w trybie skrótu; `get_report` tylko ze wskazaną sekcją. Przydział opieraj na procentach dostawcy, resecie i stats. Estymaty tokenów są informacyjne. `self_verdict` to samoocena agenta, `mark` to ocena człowieka.
+
+0.17.2 review correction / poprawka po przeglądzie: summary_delivered ≠ pulled ≠ mark. Use full report pages or explicit ack; reports require current attempt plus report-end or settled ended turn. Stable client event cursors and bounded pages are described in [mcp.md](mcp.md); report.settle_s and overload.give_up_after in [configuration.md](configuration.md).

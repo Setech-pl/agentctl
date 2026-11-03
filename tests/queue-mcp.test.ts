@@ -86,7 +86,7 @@ describe('mcp: queue read tools', () => {
     assert.equal((await t.call('overlap', { task: 'zzz' })).isError, true);
   });
 
-  it('status carries the queue and the collisions as short lines before the rows, and collidesWith per task', async () => {
+  it('D4: status carries the queue and the collisions as short lines before the rows, and collidesWith per task', async () => {
     const t = setup('st', 'mcp: {allow: [queue]}\n');
     t.running('A-1', ['y.ts']);
     t.running('A-2', ['y.ts']);
@@ -98,8 +98,9 @@ describe('mcp: queue read tools', () => {
     assert.match(lines[1]!, /^Queue \(1\): Q-1 – czeka na miejsce: claude 2\/1\. queue_list has the detail\.$/);
     assert.match(lines[2]!, /^Plans: claude n\/d \(.*\) \| codex n\/d \(.*\)\. usage has the tokens\.$/);
     assert.match(lines[3]!, /^⚠2 tasks overlap; overlap has details\.$/);
-    const rows = JSON.parse((await t.call('status', { format: 'json' })).text).tasks as { task: string; collisions: number }[];
+    const rows = JSON.parse((await t.call('status', { format: 'json' })).text).tasks as { task: string; collisions: number; collidesWith: unknown }[];
     assert.equal(rows.find((x) => x.task === 'A-1')!.collisions, 1);
+    assert.deepEqual(rows.find(x => x.task === 'A-1')!.collidesWith, [{ task: 'A-2', files: 1 }]);
   });
 });
 

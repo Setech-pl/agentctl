@@ -95,7 +95,13 @@ describe('worktree start resilience', () => {
   });
   it('retry accepts only registered worktrees with their own toplevel', async () => {
     const r = repo('registered'); fs.mkdirSync(r.worktree);
-    const runner = new RecordingRunner({ dryRun: false, respond: (_cmd, args) => args.includes('list') ? { stdout: `worktree ${r.worktree}\n` } : { stdout: r.worktree } });
+    const runner = new RecordingRunner({ dryRun: false, respond: (cmd, args) => {
+      if (cmd === 'ps' || args.includes('status')) return { stdout: '' };
+      if (args.includes('--git-path')) return { stdout: `${r.worktree}/index.lock` };
+      if (args.includes('symbolic-ref')) return { stdout: r.branch ?? '', code: r.branch ? 0 : 1 };
+      if (args.includes('--verify')) return { stdout: 'abc123' };
+      return args.includes('list') ? { stdout: `worktree ${r.worktree}\n` } : { stdout: r.worktree };
+    } });
     await checkRetryWorktrees(runner, [r]);
   });
 });

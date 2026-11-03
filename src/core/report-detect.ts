@@ -1,3 +1,4 @@
+import { inspectReport } from './report-state.ts';
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
@@ -114,7 +115,7 @@ export interface ReportCandidate {
   why: 'configured' | 'named' | 'mentioned';
 }
 
-const startedOf = (record: Pick<TaskRecord, 'started'>): number => Date.parse(record.started);
+const startedOf = (record: Pick<TaskRecord, 'started' | 'attemptStarted'>): number => Date.parse(record.attemptStarted ?? record.started);
 
 /**
  * The files that may be the report of the task: existing files, not the canonical file itself; freshness is required only for confirmation.
@@ -242,7 +243,7 @@ export async function syncReport(ctx: Context, record: TaskRecord, opts: SyncOpt
   } else {
     const text = `${opts.pane ? await paneText(ctx, record) : ''}\n${opts.message ?? ''}`;
     const candidates = findCandidates(ctx, record, text);
-    source = candidates.find(c => confirmedCandidate(ctx, record, c))?.file;
+    source = candidates.find(c => confirmedCandidate(ctx, record, c) && inspectReport(ctx.config, record, ctx.runner.now(), Boolean(record.turnEndedAt), c.file).ready)?.file;
     const candidate = candidates[0]?.file;
     if (!source && candidate && candidate !== record.reportCandidate && !opts.dryRun) {
       record.reportCandidate = candidate;
@@ -253,6 +254,7 @@ export async function syncReport(ctx: Context, record: TaskRecord, opts: SyncOpt
   if (!source) return { action: 'none' };
   if (source === path.normalize(record.report)) return { action: 'none' };
 
+  const sourceCompleteness = inspectReport(ctx.config, record, runner.now(), false, source);
   const exists = mtime(record.report) > 0;
   const ours = canonicalIsOurCopy(record);
   if (exists && !ours && !opts.force && canonicalFresh(record)) return { action: 'kept', source, note: `${record.report} exists and is not a copy of agentctl; it was not overwritten` };
@@ -268,10 +270,11 @@ export async function syncReport(ctx: Context, record: TaskRecord, opts: SyncOpt
   const nowIso = new Date(mtime(record.report) || runner.now()).toISOString();
   const sourceMtime = new Date(mtime(source)).toISOString();
   const first = record.reportSource !== source;
+  if (sourceCompleteness.ready) record.reportCompleteHash = sourceCompleteness.signature;
   record.reportSource = source;
   record.reportCopied = nowIso;
   record.reportSourceMtime = sourceMtime;
-  await setHeaderFields(runner, file, { report_candidate: null, report_source: source, report_copied: nowIso, report_source_mtime: sourceMtime });
+  await setHeaderFields(runner, file, { report_complete_hash: sourceCompleteness.ready ? sourceCompleteness.signature ?? null : null, report_candidate: null, report_source: source, report_copied: nowIso, report_source_mtime: sourceMtime });
   if (first) await recordJournal(ctx, { kind: 'report-detected', task: record.task, text: `${record.task}: raport wykryty w ${shortPath(source)}` });
   return { action: exists ? 'updated' : 'copied', source };
 }

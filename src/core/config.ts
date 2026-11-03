@@ -70,6 +70,7 @@ export interface AgentSettings {
    * It ends its turn every few minutes meanwhile; that is state `background`, not `waiting`, and the end of turn is not announced.
    */
   backgroundPatterns: string[];
+  overloadPatterns: string[];
 }
 
 export interface GlobalConfig extends Layer {
@@ -104,7 +105,8 @@ export interface GlobalConfig extends Layer {
   mcp: McpSettings;
   /** The task queue: tasks that wait for a free window of their provider and start by themselves (`agentctl queue`). */
   queue: QueueSettings;
-  overload: { autoRetry: boolean; retryAfter: number; maxRetries: number; message: string };
+  reportSettleS: number;
+  overload: { autoRetry: boolean; retryAfter: number; maxRetries: number; giveUpAfter: number; message: string };
   /** Collision warnings: two active tasks of one repository changing the same files. */
   collisions: CollisionSettings;
   /** `agentctl cancel`: how it stops a task that is in the middle of a turn. */
@@ -189,6 +191,7 @@ export interface CollisionSettings {
 }
 
 export interface McpSettings {
+  client?: string;
   /** Write tools the chat may call; empty (the default): the server only reads. */
   allow: McpWriteTool[];
   /** `close` and `cancel` may also remove the git worktree (never with --force, never the main checkout). */
@@ -318,6 +321,7 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
     ],
     // Claude Code 2.1.309 footer "⏵⏵ auto mode on · 1 shell, 6 monitors" and the lines "… · 1 shell, 6 monitors still running". A "·" or "⏵⏵" on the same
     // line keeps a sentence of the conversation ("ran 2 shells") from counting.
+    overloadPatterns: ['^\\s*(?:⎿\\s*)?API Error:\\s*529(?:\\s|$)', '^\\s*⎿\\s*(?:API Error:\\s*)?Overloaded(?:[.:]|$)'],
     backgroundPatterns: ['^\\s*\\d+ (?:monitors?|shells?)(?:, \\d+ (?:monitors?|shells?))? still running\\b', BACKGROUND_CLAUDE, '[·⏵].*\\b\\d+ background\\b'],
   },
   codex: {
@@ -353,6 +357,7 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
     ],
     // Codex 0.166.0 has "background terminals" (/ps lists them, /stop ends them, "Waiting for background terminal"). The exact footer text with a
     // count was not seen on a screen: this pattern is a best guess, see the README.
+    overloadPatterns: ['^\\s*■\\s*Selected model is at capacity(?:\\.|$)'],
     backgroundPatterns: ['\\b\\d+ background terminals?\\b'],
   },
 };
@@ -363,14 +368,14 @@ export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'cache', 'state_dir', 'se
 export const LIMITS_KEYS = [...AGENT_NAMES, 'count_external'];
 export const DEFAULTS_KEYS = ['agent', 'model', 'effort', 'remote_control'];
 export const LINK_KEYS = ['from', 'to'];
-export const AGENT_KEYS = ['flags', 'effort_args', 'ready_pattern', 'ready_timeout', 'trust_timeout', 'trust_pattern', 'working_pattern', 'interrupt_key', 'footer_patterns', 'question_pattern', 'limit_patterns', 'background_patterns'];
+export const AGENT_KEYS = ['flags', 'effort_args', 'ready_pattern', 'ready_timeout', 'trust_timeout', 'trust_pattern', 'working_pattern', 'interrupt_key', 'footer_patterns', 'question_pattern', 'limit_patterns', 'background_patterns', 'overload_patterns'];
 export const WATCH_KEYS = ['interval', 'waiting_after', 'window_icons', 'status_line'];
 export const NOTIFY_KEYS = ['backend', 'events', 'turn_end', 'terminal_app', 'verdict_pattern', 'ntfy'];
 export const NTFY_KEYS = ['server', 'topic', 'token', 'events', 'priority', 'include_verdict', 'include_question', 'click_url', 'always'];
 export const AWAY_KEYS = ['auto_idle'];
 export const MANAGER_KEYS = ['project', 'name', 'model', 'effort', 'guide', 'autostart'];
 export const BOARD_KEYS = ['auto_hide_pulled_dead', 'mouse', 'return_key', 'selected_color'];
-export const MCP_KEYS = ['allow', 'allow_rm_worktree'];
+export const MCP_KEYS = ['allow', 'allow_rm_worktree', 'client'];
 export const QUEUE_KEYS = ['enabled', 'parallel_starts'];
 export const CANCEL_KEYS = ['grace'];
 export const USAGE_KEYS = ['warn', 'critical', 'queue_hold', 'status_line', 'claude_tap', 'claude_dir', 'codex_dir'];
@@ -397,6 +402,10 @@ function parseString(v: unknown, where: string, p: Problems): string | undefined
 /** `report`: one path, or a list whose first entry is the canonical path and the others are places to look (paths and globs). */
 export function parseReportPaths(v: unknown, where: string, p: Problems): string[] {
   if (v === undefined || v === null) return [];
+  if (isObject(v)) {
+    checkKeys(v, ['path', 'paths', 'settle_s'], where, p);
+    return parseReportPaths(v.paths ?? v.path, where, p);
+  }
   const list = Array.isArray(v) ? v : [v];
   if (list.length === 0 || list.some((x) => typeof x !== 'string' || x.trim() === '')) {
     p.add(`${where} must be a path, or a list of paths and globs`);
@@ -548,6 +557,10 @@ function parseAgentSettings(name: AgentName, v: unknown, where: string, p: Probl
       }
     }
     settings.limitPatterns = list;
+  }
+  if (v.overload_patterns !== undefined) {
+    settings.overloadPatterns = parseStringList(v.overload_patterns, `${where}.overload_patterns`, p);
+    for (const pattern of settings.overloadPatterns) try { new RegExp(pattern, PATTERN_FLAGS); } catch { p.add(`${where}.overload_patterns: invalid regex`); }
   }
   if (v.background_patterns !== undefined) {
     const list = parseStringList(v.background_patterns, `${where}.background_patterns`, p);
@@ -786,6 +799,7 @@ function parseMcp(v: unknown): McpSettings {
   }
   const q = new Problems();
   checkKeys(v, MCP_KEYS, 'config.mcp', q);
+  if (v.client !== undefined) { if (typeof v.client === 'string' && v.client.trim()) mcp.client = v.client.trim(); else q.add('config.mcp.client must be nonempty text'); }
   const allow = parseStringList(v.allow, 'config.mcp.allow', q);
   for (const name of allow) {
     if (MCP_ALLOW_GROUPS[name]) {
@@ -996,16 +1010,16 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
     }
   }
 
-  const overload = { autoRetry: true, retryAfter: 300, maxRetries: 3, message: 'kontynuuj' };
+  const overload = { autoRetry: true, retryAfter: 300, maxRetries: 3, giveUpAfter: 1800, message: 'kontynuuj' };
   if (raw.overload !== undefined) {
     if (!isObject(raw.overload)) p.add('config.overload must be a mapping');
     else {
-      checkKeys(raw.overload, ['auto_retry', 'retry_after', 'max_retries', 'message'], 'config.overload', p);
+      checkKeys(raw.overload, ['auto_retry', 'retry_after', 'max_retries', 'give_up_after', 'message'], 'config.overload', p);
       if (raw.overload.auto_retry !== undefined) {
         if (typeof raw.overload.auto_retry === 'boolean') overload.autoRetry = raw.overload.auto_retry;
         else p.add('config.overload.auto_retry must be boolean');
       }
-      for (const [key, field, min] of [['retry_after', 'retryAfter', 1], ['max_retries', 'maxRetries', 0]] as const) {
+      for (const [key, field, min] of [['retry_after', 'retryAfter', 1], ['max_retries', 'maxRetries', 0], ['give_up_after', 'giveUpAfter', 1]] as const) {
         const value = raw.overload[key];
         if (typeof value === 'number' && Number.isInteger(value) && value >= min) overload[field] = value;
         else if (value !== undefined) p.add(`config.overload.${key} must be an integer >= ${min}`);
@@ -1013,6 +1027,11 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
       if (typeof raw.overload.message === 'string' && raw.overload.message.trim()) overload.message = raw.overload.message;
       else if (raw.overload.message !== undefined) p.add('config.overload.message must be nonempty text');
     }
+  }
+  let reportSettleS = 30;
+  if (isObject(raw.report) && raw.report.settle_s !== undefined) {
+    if (typeof raw.report.settle_s === 'number' && Number.isFinite(raw.report.settle_s) && raw.report.settle_s >= 0) reportSettleS = raw.report.settle_s;
+    else p.add('config.report.settle_s must be a nonnegative number');
   }
   const disk = { warnGb: 50, criticalGb: 20 };
   const git = { timeoutS: 600 };
@@ -1032,7 +1051,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   }
   if (disk.criticalGb > disk.warnGb) p.add('config.disk.critical_gb must not exceed warn_gb');
   p.throwIfAny(`Invalid config ${file}:`, 'Fix the listed keys; see the README section "Configuration".');
-  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, limits, countExternal, agents, equivalents, watch, notify, away, manager, board, mcp, queue, overload, collisions, cancel, usage, guideLang, capacity, disk, git, path: file, loaded: exists };
+  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, limits, countExternal, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, overload, collisions, cancel, usage, guideLang, capacity, disk, git, path: file, loaded: exists };
   if (mirror) config.mirrorDir = resolvePath(mirror);
   return config;
 }

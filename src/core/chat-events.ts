@@ -43,9 +43,9 @@ export function readMarkers(config: Pick<GlobalConfig, 'path'>): Partial<Record<
 export function parseSince(text: string | undefined, client: EventClient, config: Pick<GlobalConfig, 'path'>, now: number): { ms: number; label: string } {
   const t = (text ?? 'last').trim();
   if (t === '' || t === 'last') {
-    const marker = readMarkers(config)[client]; // New identities replay 24h; retain legacy mcp marker without consuming it.
+    const marker = readMarkers(config)[client];
     const legacy = client.startsWith('mcp:') ? readMarkers(config).mcp : undefined;
-    const ms = marker ? Date.parse(marker) : legacy ? Math.min(Date.parse(legacy), now - FIRST_LOOK_MS) : now - FIRST_LOOK_MS;
+    const ms = marker && !marker.startsWith('e2:') ? Date.parse(marker) : legacy && !legacy.startsWith('e2:') ? Date.parse(legacy) : now - FIRST_LOOK_MS;
     return { ms, label: marker ? `od ostatniego wywołania (${client}, ${formatLocalTime(marker)})` : `z ostatnich 24 h (pierwsze wywołanie ${client})` };
   }
   if (/^\d+[mhdw]$/.test(t)) return { ms: now - parseAge(t), label: `z ostatnich ${t}` };
@@ -85,14 +85,22 @@ export interface EventsReport {
   away: AwayView;
   /** The marker of this client moved to this call. */
   markerMoved: boolean;
+  has_more: boolean;
+  next_cursor: string;
 }
 
-export async function collectEvents(ctx: Context, opts: { client: EventClient; since?: string | undefined; cohort?: string | undefined; keep?: boolean | undefined }): Promise<EventsReport> {
+export async function collectEvents(ctx: Context, opts: { client: EventClient; since?: string | undefined; cohort?: string | undefined; keep?: boolean | undefined; cursor?: string; limit?: number; maxBytes?: number }): Promise<EventsReport> {
   const { config, runner } = ctx;
   const now = runner.now();
   const since = parseSince(opts.since, opts.client, config, now);
   const cohort = opts.cohort === undefined ? null : findCohort(config, opts.cohort).name;
-  const events = readJournal(config, since.ms).filter((e) => cohort === null || (e.cohort !== undefined && cohortKey(e.cohort) === cohortKey(cohort)));
+  const all = readJournal(config, -1);
+  const key = cohort === null ? opts.client : `${opts.client}|cohort:${cohortKey(cohort)}`;
+  const saved = opts.cursor ?? ((!opts.since || opts.since === 'last') ? (readMarkers(config)[key] ?? (opts.client.startsWith('mcp:') && readMarkers(config).mcp?.startsWith('e2:') ? readMarkers(config).mcp : undefined)) : undefined);
+  let position = saved?.startsWith('e2:') ? decodeCursor(saved) : { index: all.findIndex(e => Date.parse(e.at) > since.ms), offset: 0 };
+  if (position.index < 0) position.index = all.length;
+  if (position.index > all.length) throw new AgentctlError('events cursor is beyond this journal; request an explicit since');
+  const events: Array<JournalEntry & { fragment?: { offset: number; total: number; encoding: string } }> = [];
   const rows = await collectStatus(ctx, { progress: false, archived: false });
   const open = rows.filter((r) => !r.closed && !r.cancelled && !r.hidden && (cohort === null || (r.cohort !== null && cohortKey(r.cohort) === cohortKey(cohort))));
   const alive = open.filter((r) => r.window === 'alive' && !r.finished);
@@ -101,21 +109,58 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
     active: alive.length,
     unmarked: foldHistory(readHistory(config)).filter(r => r.reportAt && !r.result).length,
     working: alive.filter((r) => r.state === 'working' || r.state === 'background').length,
-    needYou: alive.filter((r) => r.state === 'needs-input' || r.state === 'needs-trust' || r.state === 'waiting').map((r) => `${r.task} (${r.state})`),
+    needYou: alive.filter((r) => r.state === 'needs-input' || r.state === 'needs-trust' || r.state === 'waiting').map((r) => `${r.task} (${r.state})`).slice(0, 10),
     queued: queue.length,
-    reportsToPull: selectReady(open, false).map((r) => r.task),
+    reportsToPull: selectReady(open, false).map((r) => r.task).slice(0, 10),
   };
-  // A look that only peeks (or a dry run) leaves the marker where it was.
-  let markerMoved = false;
+  // Bound the complete JSON and text forms before advancing the persistent cursor.
+  const report: EventsReport = { client: opts.client, since: new Date(since.ms).toISOString(), sinceLabel: since.label, cohort, events, summary, away: awayView(config), markerMoved: false, has_more: false, next_cursor: '' };
+  const encode = () => `e2:${position.index}:${position.offset}`;
+  const fits = () => Math.max(Buffer.byteLength(JSON.stringify(report, null, 2)), Buffer.byteLength(renderEvents(report).join('\n'))) <= (opts.maxBytes ?? 16000);
+  const limit = Math.max(1, Math.min(200, opts.limit ?? 100));
+  while (position.index < all.length && events.length < limit) {
+    const event = all[position.index]!;
+    if (cohort !== null && (!event.cohort || cohortKey(event.cohort) !== cohortKey(cohort))) { position = { index: position.index + 1, offset: 0 }; continue; }
+    const raw = JSON.stringify(event);
+    const previous = { ...position };
+    if (position.offset === 0) {
+      events.push(event); position.index++;
+      report.has_more = position.index < all.length; report.next_cursor = encode();
+      if (fits()) continue;
+      events.pop(); position = previous;
+      if (events.length) break;
+    }
+    // Oversized single events are transported as numbered JSON fragments. Never skip an undelivered suffix.
+    let count = Math.min(2000, raw.length - position.offset);
+    for (;;) {
+      const chunk = { at: event.at, kind: event.kind, text: raw.slice(position.offset, position.offset + count), fragment: { offset: position.offset, total: raw.length, encoding: 'json' } };
+      events.push(chunk);
+      report.has_more = true; report.next_cursor = encode();
+      if (fits()) break;
+      events.pop(); count = Math.floor(count / 2);
+      if (!count) throw new AgentctlError('event response metadata exceeds the response budget');
+    }
+    position.offset += count;
+    if (position.offset >= raw.length) position = { index: position.index + 1, offset: 0 };
+    break;
+  }
+  report.has_more = position.index < all.length;
+  report.next_cursor = encode();
   if (!opts.keep && !runner.dryRun) {
     await withFileLock(`${markersPath(config)}.lock`, async () => {
-    const markers = readMarkers(config);
-    markers[opts.client] = new Date(now).toISOString();
-    await runner.writeFile(markersPath(config), `${JSON.stringify(markers, null, 2)}\n`);
-    markerMoved = true;
+      const markers = readMarkers(config);
+      // Migrate once into a stable client key. New clients then start at the normal bounded first look.
+      if (opts.client.startsWith('mcp:')) delete markers.mcp;
+      for (const old of Object.keys(markers)) if (/^mcp:.*:\d+:[0-9a-f-]{36}$/.test(old)) delete markers[old];
+      const previous = markers[key]?.startsWith('e2:') ? decodeCursor(markers[key]!) : null;
+      const next = !previous || previous.index < position.index || (previous.index === position.index && previous.offset <= position.offset) ? report.next_cursor : markers[key]!;
+      delete markers[key]; markers[key] = next;
+      while (Object.keys(markers).length > 256) delete markers[Object.keys(markers).find(k => k !== key && k !== 'cli')!];
+      await runner.writeFile(markersPath(config), `${JSON.stringify(markers, null, 2)}\n`);
+      report.markerMoved = true;
     });
   }
-  return { client: opts.client, since: new Date(since.ms).toISOString(), sinceLabel: since.label, cohort, events, summary, away: awayView(config), markerMoved };
+  return report;
 }
 
 /** Behind an event that was sent to the phone (a retry in progress: "queued" is shown by the JSON field `phone`). */
@@ -159,6 +204,7 @@ export function renderEvents(report: EventsReport): string[] {
     head,
     ...report.events.map((e) => `${hhmm(e.at)}  ${KIND_LABEL[e.kind]}${e.task ? `  ${e.task}` : ''}  ${e.verdict ? `${e.verdict}` : e.text}${e.phone ? PHONE_MARK : ''}`),
     summaryLine(report.summary),
+    `has_more: ${report.has_more}; next_cursor: ${report.next_cursor}`,
     ...(report.away.on ? ['Away włączone: telefon dostaje powiadomienia (📱 przy zdarzeniu = poszło na telefon).'] : []),
   ];
 }
@@ -170,4 +216,12 @@ export function eventsMarkdown(report: EventsReport): string {
   lines.push(summaryLine(report.summary));
   if (report.away.on) lines.push('', 'Away włączone: telefon dostaje powiadomienia.');
   return `${lines.join('\n')}\n`;
+}
+
+function decodeCursor(value: string): { index: number; offset: number } {
+  const match = /^e2:(\d+):(\d+)$/.exec(value);
+  if (!match) throw new AgentctlError('invalid events cursor');
+  const index = Number(match[1]), offset = Number(match[2]);
+  if (!Number.isSafeInteger(index) || !Number.isSafeInteger(offset)) throw new AgentctlError('invalid events cursor');
+  return { index, offset };
 }

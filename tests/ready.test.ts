@@ -81,7 +81,8 @@ describe('agent command lines', () => {
   });
 
   it('every prompt starts with the model/effort line', () => {
-    assert.equal(promptWithHeader({ model: 'opus', effort: 'high', prompt: 'Do it.' }), 'Model: opus · effort high\n\nDo it.');
+    assert.ok(promptWithHeader({ model: 'opus', effort: 'high', prompt: 'Do it.' }).startsWith('Model: opus · effort high\n\nDo it.'));
+    assert.match(promptWithHeader({ model: 'opus', effort: 'high', prompt: 'Do it.' }), /agentctl:report-end/);
   });
 });
 

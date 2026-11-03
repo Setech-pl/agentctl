@@ -1,0 +1,9 @@
+╭────────────────────────────────────────────────────────────╮
+│ >_ OpenAI Codex (v0.166.0)                                 │
+╰────────────────────────────────────────────────────────────╯
+■ Selected model is at capacity. Please try a different model.
+• Reconnecting and inspecting src/core/state.ts
+• Working (3s • esc to interrupt)
+
+› 
+  ? for shortcuts                                  97% context left

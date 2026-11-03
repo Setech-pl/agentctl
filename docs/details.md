@@ -351,7 +351,7 @@ Tasks can be grouped under a name you chose: `cohort: sprint-1` in a spec, `--co
 ## Events for the chat
 
 - **The journal** `<config dir>/journal.jsonl`: `{at, kind, task?, cohort?, text, verdict?, level?, phone?}` (`level` of a `usage` entry: `warn` or `critical`; `phone`: `sent` or `queued`, see [Phone notifications](#phone-notifications)). Kinds: `report-ready`, `queue-start`, `queue-failed`, `needs-input`, `needs-trust`, `blocked`, `cancelled`, `limited`, `dead`, `orphan`, `cohort-done`, `usage`, `limits-changed`. Writers: the watcher (a transition that was not already announced by the agent's own event), the event command, the queue (start, failed start, blocked), `cancel`, the cohort check, the plan thresholds, `limits set`/`reserve`/`release` and the config reload (written once if both saw the same change). A task event gets the cohort of the task.
-- **The marker** `<config dir>/events-seen.json`: the time of the last call per client (`cli`, `mcp`). `since: last` means after that time; the first call of a client looks back 24 hours; `--keep` / `peek: true` and `--clip` leave the marker. A dry run leaves it too.
+- **The marker** `<config dir>/events-seen.json`: a delivered journal position per stable client (CLI and each initialized MCP identity). `since: last` means after that time; the first call of a client looks back 24 hours; `--keep` / `peek: true` and `--clip` leave the marker. A dry run leaves it too.
 - **The summary line** counts the tasks with a window that are not finished (and how many work), the tasks that wait for you (needs-input, needs-trust, waiting), the queue and the reports ready and not pulled.
 - Events exist only while `agentctl watch` runs (or when a command writes them itself: cancel, limits). A chat that calls `events_since` after a night without a watcher still gets the summary of the state now.
 
@@ -561,7 +561,7 @@ the progress at most every 10 seconds. It needs a terminal; without tmux `Enter`
 | `needs-trust` | the agent shows its folder-trust dialog; a human must answer it |
 | `needs-input` | the agent asked **you** a question or for a permission and waits (`question_pattern`; Codex: `? <question>` with options and `• Waiting for your answer.`, or the approval dialog; Claude Code: the `Enter to select · Esc to cancel` dialog or a permission dialog; or Claude's `Notification` [event](#events)) |
 | `limited` | the agent says its usage limit is used up (`limit_patterns`, or Claude's `StopFailure` event); see [Limits and move](#limits-and-move) |
-| `report-ready` | the report file exists and is newer than the start (the agent is idle, or the window is gone) |
+| `report-ready` | current-attempt report is complete (report-end or settled after turn end), agent idle or window gone |
 | `superseded` | the task was moved to the other provider with `agentctl move`; this is the old window, which you close yourself |
 | `dead` | the window is gone and there is no report |
 | `closed` | `agentctl close` was run (or the state folder is in the archive): listed only by `status --all` and the board key `a`, see [Closing and hiding tasks](#closing-and-hiding-tasks) |
@@ -685,3 +685,5 @@ History records requested, resolved and observed model/effort (from the session;
 Queue retries only explicit transient OS/network failures: ETIMEDOUT, EAGAIN, ECONNRESET, ECONNREFUSED, ENETUNREACH, EAI_AGAIN, a temporarily busy lock and transient network setup timeouts. Delays: 1, 5, 15 minutes, then failed; invalid specs, missing paths and branch conflicts fail immediately. `agentctl queue show TASK` / MCP `queue_show` includes the full spec, reason and attempt history. Automatic reuse passes the same residue safety check as a manual retry.
 
 Verified sources: [Anthropic API errors](https://platform.claude.com/docs/en/api/errors) documents 529/overloaded_error; [Codex error definitions](https://github.com/openai/codex/blob/main/codex-rs/protocol/src/error.rs) maps the selected-model capacity message to ServerOverloaded. No real inference agents were run. Bare monitor/shell wording and raw error-code variants are fixture-tested; installed current runtime wording remains unverified.
+
+0.17.2 review correction / poprawka po przeglądzie: summary_delivered ≠ pulled ≠ mark. Use full report pages or explicit ack; reports require current attempt plus report-end or settled ended turn. Stable client event cursors and bounded pages are described in [mcp.md](mcp.md); report.settle_s and overload.give_up_after in [configuration.md](configuration.md).
