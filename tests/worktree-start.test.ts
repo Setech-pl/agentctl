@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { addWorktree, checkRetryWorktrees } from '../src/core/git.ts';
-import { RecordingRunner } from '../src/core/runner.ts';
+import { RealRunner, RecordingRunner } from '../src/core/runner.ts';
 import type { ExecOptions, ExecResult } from '../src/core/runner.ts';
 import type { ResolvedRepo } from '../src/core/spec.ts';
 import { useScratch } from './helpers.ts';
@@ -44,6 +44,20 @@ describe('worktree start resilience', () => {
     assert.equal(runner.max.get(b.path), 1);
     assert.equal(runner.maxTotal, 2);
     assert.ok(!fs.existsSync(path.join(a.path, '.git/agentctl-start.lock')));
+  });
+  it('real async runner overlaps independent children and reports timeouts', async () => {
+    const runner = new RealRunner();
+    const program = 'console.log(Date.now()); setTimeout(() => console.log(Date.now()), 200)';
+    const results = await Promise.all([1, 2].map(() => runner.exec(process.execPath, ['-e', program], { async: true, timeoutMs: 3000 })));
+    const spans = results.map((r) => { assert.equal(r.code, 0, r.stderr); return r.stdout.trim().split('\n').map(Number); });
+    assert.ok(Math.max(...spans.map((s) => s[0]!)) < Math.min(...spans.map((s) => s[1]!)), 'independent commands must overlap');
+    const timeout = await runner.exec(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { async: true, timeoutMs: 50 });
+    assert.notEqual(timeout.code, 0);
+    assert.match(timeout.stderr, /ETIMEDOUT after 50ms/);
+    const started = Date.now();
+    const shell = await runner.exec('sh', ['-c', 'sleep 5'], { async: true, timeoutMs: 50 });
+    assert.match(shell.stderr, /ETIMEDOUT/);
+    assert.ok(Date.now() - started < 2000, 'timeout must stop the shell and its child, rather than waiting for the child pipe');
   });
   it('sets the configured timeout and removes only a new empty residue; branch deletion is -d', async () => {
     const r = repo('empty');

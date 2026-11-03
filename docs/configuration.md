@@ -306,3 +306,5 @@ The guide ships in npm `docs/dispatcher*.md`, with no dependency on a developmen
 A critical reading warns before `new` or queue insertion. The terminal asks y/N (`--yes` acknowledges the warning); MCP shows it before confirmation. It does not impose a capacity limit or switch providers.
 
 MCP write permissions accept exact tool names and explicit groups: `queue:*`, `cohort`, `manager:*`. Existing `queue` still permits only insertion. All previous names keep their permission scope. Group membership is generated in docs/mcp.md; reads remain available without allow.
+
+Worktree checkout and setup release the event loop while running, so independent repositories can start concurrently. A timed-out checkout/setup stops its own process group (including children). Per-repository locks remain held only for Git worktree creation. A new branch is created by a separate `git branch` command, which is also visible in `new --dry-run`, before attaching the worktree.

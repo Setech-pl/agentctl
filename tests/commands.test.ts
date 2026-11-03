@@ -83,7 +83,7 @@ Second line.
     assert.deepEqual(
       runner.commands.filter((c) => !c.startsWith('write ')),
       [
-        `git -C ${repoA} branch nc-1 base-oid`,
+        `git -C ${repoA} branch nc-1 main`,
         `git -C ${repoA} worktree add ${wt('1')} nc-1`,
         `git -C ${repoB} worktree add --detach ${repoB}-wt1`,
         `ln -sfn ${pkgs}/protocol ${wt('1')}/node_modules/@nc/protocol`,
