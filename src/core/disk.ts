@@ -1,3 +1,5 @@
+import { readQueue } from './queue.ts';
+import { resolveSpec, splitSpecs } from './spec.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { loadProjectConfig } from './config.ts';
@@ -26,7 +28,11 @@ export async function collectDisk(ctx: Context, statfs = fs.promises.statfs): Pr
   const records = [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)];
   const targets = new Set([ctx.config.cache, ctx.config.stateDir]);
   if (ctx.config.worktreeRoot) targets.add(resolvePath(ctx.config.worktreeRoot));
-  for (const repo of records.flatMap((r) => r.repos)) {
+  const queuedRepos = readQueue(ctx.config).flatMap((entry) => {
+    try { return resolveSpec(splitSpecs(entry.spec, 'disk queue inventory')[0]!, { config: ctx.config }).repos; }
+    catch { return []; }
+  });
+  for (const repo of [...records.flatMap((r) => r.repos), ...queuedRepos]) {
     targets.add(repo.worktree);
     try {
       const root = loadProjectConfig(repo.path)?.worktreeRoot;

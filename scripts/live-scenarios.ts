@@ -79,7 +79,7 @@ async function limitsAndEvents(): Promise<void> {
     check('LV-2 left the queue and started, with the same watcher process (no restart)', started && watch.exitCode === null);
     const log = fs.readFileSync(path.join(h.root, 'cache', 'agentctl-watch.log'), 'utf8');
     check('the watch log says the config was reloaded', /config: reloaded \(limits\)/.test(log), log.slice(-400));
-    check('queue list is empty', /The queue is empty/.test(h.agentctl(['queue', 'list']).stdout));
+    check('queue list is empty', await until('queue start finished', () => /The queue is empty/.test(h.agentctl(['queue', 'list']).stdout)));
     // a broken config: the watcher keeps the old settings and says so
     fs.writeFileSync(path.join(h.agentctlHome, 'config.yaml.keep'), fs.readFileSync(path.join(h.agentctlHome, 'config.yaml'), 'utf8'));
     fs.appendFileSync(path.join(h.agentctlHome, 'config.yaml'), 'queue: [broken\n');
