@@ -1,3 +1,4 @@
+import { collectCapacity, renderCapacity } from './capacity.ts';
 import { shortPath } from './report-detect.ts';
 import path from 'node:path';
 import { attachCollisions, collideText } from './collisions.ts';
@@ -91,9 +92,9 @@ export type BoardMode =
   /** `L` (limits), `G` (gc preview): a page of lines from the core, scrolled with the arrows. */
   | { kind: 'view'; what: ViewKind; lines: string[]; offset: number };
 
-export type ViewKind = 'limits' | 'gc';
+export type ViewKind = 'limits' | 'gc' | 'capacity';
 
-export const VIEW_TITLES: Record<ViewKind, string> = { limits: 'Limits', gc: 'Clean-up preview (agentctl gc)' };
+export const VIEW_TITLES: Record<ViewKind, string> = { capacity: 'Capacity', limits: 'Limits', gc: 'Clean-up preview (agentctl gc)' };
 
 export interface CohortOption {
   label: string;
@@ -310,7 +311,7 @@ function listKey(state: BoardState, input: string, key: KeyPress): KeyResult {
 
   if (input === '?') return stay({ ...state, mode: { kind: 'help' } });
   if (input === 'l') return stay({ ...state, notice: null, mode: { kind: 'log', lines: ['Loading…'], offset: 0 } }, [{ type: 'log' }]);
-  const view: ViewKind | null = input === 'L' ? 'limits' : input === 'G' ? 'gc' : null;
+  const view: ViewKind | null = input === 'C' ? 'capacity' : input === 'L' ? 'limits' : input === 'G' ? 'gc' : null;
   if (view) return stay({ ...state, notice: null, mode: { kind: 'view', what: view, lines: ['Loading…'], offset: 0 } }, [{ type: 'view', what: view }]);
   // o / p / f: how a finished task turned out. `p` is also the queue's pause: it marks only while a finished task is selected.
   const result = input === 'o' ? 'ok' : input === 'p' ? 'partial' : input === 'f' ? 'fail' : null;
@@ -849,6 +850,7 @@ export const loadLogLines = (ctx: Context): string[] => logLines(ctx);
 
 /** The lines of a view: the same text the command prints. */
 export async function loadViewLines(ctx: Context, what: ViewKind): Promise<string[]> {
+  if (what === 'capacity') return renderCapacity(await collectCapacity(ctx));
   if (what === 'limits') return renderLimits(collectLimits(ctx.config, await liveWindows(ctx)));
   return renderGc(await planGc(ctx, {}));
 }
@@ -1018,6 +1020,7 @@ export const HELP_LINES: string[] = [
   '              "bez kohorty" = the tasks that are in no cohort',
   '  g / E       fold the cohort group of the selected task / open all groups',
   '  L           the limits per provider and what uses them (agentctl limits)',
+  '  C           current capacity (plans, pace, slots, stats, estimates)',
   '  G           preview of the clean-up (agentctl gc): what would be freed',
   '  R           resume the tasks under "Do wznowienia" (asks first)',
   '  w           away on or off (asks first): notifications to the phone',

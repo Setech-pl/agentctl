@@ -5,7 +5,8 @@ import type { AgentName, GlobalConfig } from './config.ts';
 import type { Context } from './context.ts';
 import type { Notifier } from './notify.ts';
 import type { ResolvedSpec } from './spec.ts';
-import { recordJournal } from './journal.ts';
+import { notifyPhone } from './phone-send.ts';
+import { recordStaleCapacity } from './capacity-events.ts';
 import { formatReset, openReader, readPlans } from './usage.ts';
 import type { PlanState, PlanWindowView } from './usage.ts';
 import { planLine } from './usage-report.ts';
@@ -81,14 +82,14 @@ export function providerHint(config: Pick<GlobalConfig, 'usage'>, plans: Record<
   const other = plans[otherOf(provider)];
   if (!mine.available || mine.maxPercent === null || mine.maxPercent < config.usage.warn[provider]) return undefined;
   if (!other.available || other.maxPercent === null || other.maxPercent >= config.usage.warn[other.provider]) return undefined;
-  return `${provider} blisko limitu (${Math.round(mine.maxPercent)}%), ${other.provider} ma zapas (${Math.round(other.maxPercent)}%): --agent ${other.provider}`;
+  return `${provider} blisko limitu (${Math.round(mine.maxPercent)}%), ${other.provider} ma zapas (${Math.round(other.maxPercent)}%)`;
 }
 
 export function alertText(config: Pick<GlobalConfig, 'usage'>, plans: Record<AgentName, PlanState>, alert: UsageAlert, now: number): string {
   const when = alert.window.resetsAt === null ? '' : ` (reset ${formatReset(alert.window.resetsAt, now)})`;
   const base = `${NAME[alert.provider]}: ${Math.round(alert.percent)}% limitu ${alert.window.label}${when} – ${alert.level === 'critical' ? 'limit prawie wyczerpany' : 'blisko limitu'}`;
   const other = otherOf(alert.provider);
-  return providerHint(config, plans, alert.provider) ? `${base}; ${other} ma zapas (${Math.round(plans[other].maxPercent as number)}%): --agent ${other}` : base;
+  return providerHint(config, plans, alert.provider) ? `${base}; ${other} ma zapas (${Math.round(plans[other].maxPercent as number)}%)` : base;
 }
 
 /**
@@ -101,6 +102,7 @@ export async function usageTick(ctx: Context, notifier: Notifier, log?: (line: s
   const reader = openReader(config);
   const plans = readPlans(config, reader, now);
   reader.save();
+  await recordStaleCapacity(ctx, plans);
   const ledger = readAlertLedger(config);
   const alerts = pendingAlerts(config, plans, ledger);
   // Windows that are over are forgotten, so the ledger does not grow for ever.
@@ -118,7 +120,7 @@ export async function usageTick(ctx: Context, notifier: Notifier, log?: (line: s
     ledger[alert.key] = alert.level;
     changed = true;
     await notifier.notify('agentctl', text).catch(() => undefined);
-    await recordJournal(ctx, { kind: 'usage', text, level: alert.level });
+    await notifyPhone(ctx, { kind: 'usage', text, level: alert.level });
     await log?.(`usage: ${text}`);
     sent.push(text);
   }
