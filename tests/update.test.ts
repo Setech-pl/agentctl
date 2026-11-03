@@ -39,6 +39,7 @@ echo "git $*" >> ${log}
 case "$*" in
   *"worktree add"*) mkdir -p "$6/dist/bin" ; cp ${path.join(dir, 'fake-agentctl')} "$6/dist/bin/agentctl.js" ;;
   *"status --porcelain"*) ${opts.dirty ? 'echo " M src/cli.ts"' : 'true'} ;;
+  *"checkout "*) case "$*" in *"checkout --detach "*) true ;; *) echo "already used by worktree" >&2; exit 128 ;; esac ;;
   *"log -1"*) echo "abc1234 Some commit title" ;;
 esac
 exit 0
@@ -70,6 +71,18 @@ exit 0
 }
 
 describe('agentctl-update: paths', () => {
+  it('existing stable worktree updates without claiming a branch already occupied elsewhere', () => {
+    const r = runUpdate('occupied-worktree', ['--no-watch', '--no-link'], {}, { stableExists: true });
+    assert.equal(r.code, 0, r.stderr);
+    assert.ok(r.calls.some((c) => c.endsWith('checkout --detach origin/main')));
+  });
+  it('restarts a renamed watcher by stable tmux role and ID', () => {
+    const r = runUpdate('renamed-watch', ['--no-link'], {}, { windows: '@7\\tchanged title\\twatch\\n@8\\tother\\t\\n' });
+    assert.equal(r.code, 0, r.stderr);
+    assert.ok(r.calls.includes('tmux kill-window -t @7'), r.calls.join('\n'));
+    assert.ok(!r.calls.includes('tmux kill-window -t @8'));
+  });
+
   it('uses AGENTCTL_REPO and AGENTCTL_STABLE_DIR, and defaults the ref to origin/main', () => {
     const r = runUpdate('up1', ['--dry-run']);
     assert.equal(r.code, 0, r.stderr);

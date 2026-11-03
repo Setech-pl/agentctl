@@ -13,6 +13,7 @@ export interface WindowInfo {
   name: string;
   /** The name without the icon: the task's window name. */
   plain: string;
+  role?: string;
 }
 
 export interface TmuxOptions {
@@ -60,7 +61,7 @@ export class Tmux {
 
   /** The windows of the agentctl session (empty when the session does not exist). */
   async windows(): Promise<WindowInfo[]> {
-    const r = await this.runner.exec('tmux', ['list-windows', '-t', `=${this.session}`, '-F', '#{window_id}\t#{window_name}'], {
+    const r = await this.runner.exec('tmux', ['list-windows', '-t', `=${this.session}`, '-F', '#{window_id}\t#{window_name}\t#{@agentctl-role}'], {
       readOnly: true,
       dryResult: { code: 1 },
     });
@@ -70,8 +71,10 @@ export class Tmux {
       if (line.trim() === '') continue;
       const tab = line.indexOf('\t');
       const id = tab >= 0 ? line.slice(0, tab).trim() : '';
-      const name = (tab >= 0 ? line.slice(tab + 1) : line).trim();
-      infos.push({ id, name, plain: stripIcon(name, this.icons) });
+      const fields = tab >= 0 ? line.slice(tab + 1).split('\t') : [line];
+      const name = (fields[0] ?? '').trim();
+      const role = fields[1]?.trim();
+      infos.push({ id, name, plain: role && ['watch', 'board', 'manager'].includes(role) ? role : stripIcon(name, this.icons), ...(role ? { role } : {}) });
     }
     return infos;
   }
@@ -120,10 +123,16 @@ export class Tmux {
     const create = sessionUp
       ? ['new-window', '-d', '-t', `=${this.session}:`, '-n', window, '-c', cwd, commandLine]
       : ['new-session', '-d', '-s', this.session, '-n', window, '-c', cwd, commandLine];
-    const r = await this.runner.exec('tmux', [...create, ';', 'set-option', '-w', '-t', this.target(window), 'remain-on-exit', 'failed']);
+    const r = await this.runner.exec('tmux', [...create, ';', 'set-option', '-w', '-t', this.target(window), 'remain-on-exit', window === 'watch' ? 'on' : 'failed', ';', 'set-option', '-w', '-t', this.target(window), '@agentctl-role', window]);
     if (r.code === 0 || !/remain-on-exit|invalid|unknown/i.test(r.stderr)) return r;
     // tmux before 3.3 has no "failed": keep every ended window (a quit board then stays as a dead pane, which is better than a lost error).
-    return this.runner.exec('tmux', ['set-option', '-w', '-t', this.target(window), 'remain-on-exit', 'on']);
+    return this.runner.exec('tmux', ['set-option', '-w', '-t', this.target(window), 'remain-on-exit', 'on', ';', 'set-option', '-w', '-t', this.target(window), '@agentctl-role', window]);
+  }
+
+  /** Restart by role, including windows renamed by tmux or the user; legacy name is a migration fallback. */
+  async killRole(role: string): Promise<void> {
+    const found = (await this.windows()).find((w) => w.role === role || w.plain === role);
+    if (found) await this.runner.exec('tmux', ['kill-window', '-t', found.id || this.target(found.name)]);
   }
 
   /** The process of the window has ended and the window was kept (remain-on-exit). */

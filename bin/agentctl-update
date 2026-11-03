@@ -18,7 +18,7 @@ Updates the stable copy of agentctl (a detached git worktree of the repo) and ma
      stable copy exists: refuse if it has local changes, else git checkout --detach <ref>
   3. npm ci, npm run build, then npm link, in the stable copy
   4. agentctl doctor (a failure makes this script exit non-zero)
-  5. if window "watch" exists in tmux session "agentctl": kill it and start `agentctl watch --tmux` from the new version
+  5. find the watch window by @agentctl-role (legacy name fallback), restart only that window
      (no other window or task is touched)
   6. print the previous and the new commit, and whether watch was restarted
 
@@ -129,11 +129,15 @@ main() {
   local watch_result='no (--no-watch)'
   if [ "$watch" -eq 1 ]; then
     watch_result='no (no window "watch" in session "'"$session"'")'
-    if tmux has-session -t "=$session" 2>/dev/null && tmux list-windows -t "=$session" -F '#{window_name}' 2>/dev/null | grep -x 'watch' >/dev/null; then
+    local watch_target=''
+    if tmux has-session -t "=$session" 2>/dev/null; then
+      watch_target="$(tmux list-windows -t "=$session" -F '#{window_id}\t#{window_name}\t#{@agentctl-role}' 2>/dev/null | awk -F '\t' -v legacy="=$session:watch" '$3 == "watch" || $2 == "watch" { found=$1 } $1 == "watch" { found=legacy } END { if (found != "") print found }')"
+    fi
+    if [ -n "$watch_target" ]; then
       if [ "$doctor_rc" -ne 0 ]; then
         watch_result='no (doctor failed, the old watcher keeps running)'
       else
-        run tmux kill-window -t "=$session:watch"
+        run tmux kill-window -t "$watch_target"
         run "$stable/dist/bin/agentctl.js" watch --tmux
         watch_result='yes'
         [ "$DRY_RUN" -eq 1 ] && watch_result='yes (dry run: would be)'

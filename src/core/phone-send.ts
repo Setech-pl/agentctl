@@ -143,7 +143,7 @@ export async function notifyPhone(ctx: Context, entry: Pick<JournalEntry, 'kind'
   queue.items.push({ event, message, ...(event === 'needs-input' ? { input: { task: input.task, collapsed: input.collapsed } } : {}), attempts: 1, next: ctx.runner.now() + (RETRY_BACKOFF_MS[0] as number), at: ctx.runner.now() });
   await failed(ctx, queue, event, r.error ?? 'failed', 'first try failed, queued');
   await writeQueue(ctx, queue);
-  return 'queued';
+  return 'queued' as const;
   });
 }
 

@@ -37,7 +37,19 @@ export function mcpEntryFrom(self: SelfArgv): McpEntry {
   }
   const [command, ...args] = rest;
   if (!command || !path.isAbsolute(command)) throw new AgentctlError('cannot tell the absolute path of node for the entry', 'Run this as "agentctl mcp install …" from the installed command.');
-  return { command, args: [...args, 'mcp'], env };
+  return { command: stableNodePath(command), args: [...args, 'mcp'], env };
+}
+
+/** Prefer the symlink outside Homebrew Cellar; do not pin a version removed by brew upgrade. */
+export function stableNodePath(command: string, pathEnv = process.env.PATH ?? ''): string {
+  if (!/\/Cellar\/node(?:@[^/]+)?\//.test(command)) return command;
+  const prefix = command.split('/Cellar/')[0];
+  const candidates = [...pathEnv.split(path.delimiter).map((d) => path.join(d, 'node')), `${prefix}/bin/node`, `${prefix}/opt/node/bin/node`];
+  for (const candidate of candidates) {
+    if (!path.isAbsolute(candidate) || /\/Cellar\//.test(candidate)) continue;
+    try { if (fs.realpathSync(candidate) === fs.realpathSync(command)) return candidate; } catch { /* absent */ }
+  }
+  return command;
 }
 
 /** Where the stable copy lives (the same variable the update script reads). */
@@ -251,6 +263,10 @@ export async function installClaudeCode(ctx: Context, entry: McpEntry, opts: { y
   }
   const r = await runner.exec('claude', add);
   if (r.code !== 0) throw new AgentctlError(`claude mcp add failed: ${r.stderr.trim() || r.stdout.trim() || `exit ${r.code}`}`);
+  if (runner.dryRun) {
+    ctx.out('Dry run: nothing was registered or replaced.');
+    return { outcome: 'dry-run' };
+  }
   ctx.out(r.stdout.trim() || 'Registered. In a Claude Code session, /mcp lists it; new sessions pick it up.');
   return { outcome: runner.dryRun ? 'dry-run' : 'written' };
 }
@@ -278,6 +294,7 @@ export interface McpRegistration {
   /** The entry runs the stable copy. */
   stable?: boolean;
   script?: string;
+  command?: string;
   scriptExists?: boolean;
   detail: string;
 }
@@ -299,6 +316,7 @@ export function readDesktopRegistration(file: string, env: NodeJS.ProcessEnv, ho
   return {
     where: 'Claude desktop',
     registered: true,
+    ...(typeof raw.command === 'string' ? { command: raw.command } : {}),
     stable: pointsAtStable({ args }, env, home),
     ...(script ? { script, scriptExists: fs.existsSync(script) } : {}),
     detail: file,
@@ -315,6 +333,7 @@ export async function readClaudeCodeRegistration(runner: Runner, env: NodeJS.Pro
   return {
     where: 'Claude Code',
     registered: true,
+    ...(/Command:\s*(\S+)/.exec(text)?.[1] ? { command: /Command:\s*(\S+)/.exec(text)![1]! } : {}),
     ...(script ? { script, scriptExists: fs.existsSync(script), stable: realOrSelf(script) === realOrSelf(stableScript(env, home)) } : {}),
     detail: 'claude mcp get agentctl',
   };

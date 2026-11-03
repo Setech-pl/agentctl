@@ -104,7 +104,7 @@ describe('board start: the tmux commands', () => {
     const { ctx, runner } = makeContext(config, { respond: tmux.respond });
     assert.equal(await ensureWindow(ctx, 'board', 'AGENTCTL_HOME=/h node /x/agentctl.ts board', '/work'), 'created');
     const create = runner.commands.find((c) => c.includes('new-window'));
-    assert.equal(sh(create ?? ''), 'tmux new-window -d -t =agentctl: -n board -c /work AGENTCTL_HOME=/h node /x/agentctl.ts board ; set-option -w -t =agentctl:board remain-on-exit failed');
+    assert.equal(sh(create ?? ''), 'tmux new-window -d -t =agentctl: -n board -c /work AGENTCTL_HOME=/h node /x/agentctl.ts board ; set-option -w -t =agentctl:board remain-on-exit failed ; set-option -w -t =agentctl:board @agentctl-role board');
     assert.ok(!runner.commands.some((c) => c.startsWith('tmux send-keys')));
   });
 
@@ -112,7 +112,7 @@ describe('board start: the tmux commands', () => {
     const config = makeConfig(scratch.sub('t2'));
     const { ctx, runner } = makeContext(config, { respond: new FakeTmux().respond });
     assert.equal(await ensureWindow(ctx, 'board', 'agentctl board', '/work'), 'session-created');
-    assert.equal(sh(runner.commands[0] ?? ''), 'tmux new-session -d -s agentctl -n board -c /work agentctl board ; set-option -w -t =agentctl:board remain-on-exit failed');
+    assert.equal(sh(runner.commands[0] ?? ''), 'tmux new-session -d -s agentctl -n board -c /work agentctl board ; set-option -w -t =agentctl:board remain-on-exit failed ; set-option -w -t =agentctl:board @agentctl-role board');
   });
 
   it('a window that exists is left alone; one whose process ended (kept by remain-on-exit) is started again in place', async () => {
@@ -137,7 +137,7 @@ describe('board start: the tmux commands', () => {
       cmd === 'tmux' && args.includes('failed') ? { code: 1, stderr: 'invalid value: remain-on-exit failed' } : tmux.respond(cmd, args, opts);
     const { ctx, runner } = makeContext(config, { respond });
     assert.equal(await ensureWindow(ctx, 'board', 'agentctl board', '/work'), 'created');
-    assert.equal(sh(runner.commands.at(-1) ?? ''), 'tmux set-option -w -t =agentctl:board remain-on-exit on');
+    assert.equal(sh(runner.commands.at(-1) ?? ''), 'tmux set-option -w -t =agentctl:board remain-on-exit on ; set-option -w -t =agentctl:board @agentctl-role board');
   });
 
   it('a tmux that refuses to create the window is an error, not a silent success', async () => {
