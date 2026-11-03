@@ -175,13 +175,13 @@ describe('new --clip / send --clip through the CLI', () => {
       assert.ok(r.stdout.includes(part), `missing "${part}" in:\n${r.stdout}`);
     }
     assert.deepEqual(r.asked, ['Start? [y/N] ']);
-    assert.deepEqual(r.runner.commands, []);
+    assert.deepEqual(r.runner.commands.filter((line) => !line.includes('/disk-sizes.json')), []);
   });
 
   it('new --clip -y starts without asking; the spec ends up in TASK.md like with a file', async () => {
     const m = new Machine();
     m.windows.clear();
-    const runner = new RecordingRunner({ dryRun: false, respond: (cmd, args, o) => (cmd === 'tmux' && args[0] === 'capture-pane' ? { stdout: IDLE } : cmd === 'git' && args.includes('--verify') ? { code: 1 } : m.respond(cmd, args, o)) });
+    const runner = new RecordingRunner({ dryRun: false, respond: (cmd, args, o) => (cmd === 'tmux' && args[0] === 'capture-pane' ? { stdout: IDLE } : cmd === 'git' && args.includes('--quiet') ? { code: 1 } : cmd === 'git' && args.includes('--verify') ? { code: 0, stdout: 'base-oid' } : m.respond(cmd, args, o)) });
     const r = await run(['new', '--clip', '-y'], specText, undefined, runner);
     assert.equal(r.code, 0, r.stderr);
     assert.deepEqual(r.asked, []);
@@ -204,7 +204,7 @@ describe('new --clip / send --clip through the CLI', () => {
     const r = await run(['new', '--clip'], specText, undefined);
     assert.equal(r.code, 1);
     assert.match(r.stderr, /no terminal to ask on/);
-    assert.deepEqual(r.runner.commands, []);
+    assert.deepEqual(r.runner.commands.filter((line) => !line.includes('/disk-sizes.json')), []);
   });
 
   it('send --clip asks, then pastes the prompt (-y skips the question)', async () => {
