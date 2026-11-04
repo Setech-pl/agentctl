@@ -695,7 +695,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
           if (file !== undefined || opts.clip) throw new AgentctlError('--enter-only takes a task and nothing else: no file, no --clip');
           const target = await resolveRunningTask(ctx, opts.enterOnly);
           const [done] = await submitDrafts(ctx, [{ task: target.task, window: target.window }]);
-          if (done?.warning) process.exitCode = 1;
+          if (done?.refused) throw new AgentctlError(`${target.task}: ${done.message}`);
           return;
         }
         const items = splitSpecs(await readSpecSource(file, opts.clip), opts.clip ? 'clipboard' : (file ?? 'stdin')).map(resolveSendSpec);

@@ -380,3 +380,64 @@ process.stdin.on('data',data=>{stream+=data.toString();for(;;){
 `;
   fs.writeFileSync(path.join(h.fakeBin, agent), program, { mode: 0o755 });
 }
+
+export interface ReplaySpec {
+  agent: 'claude' | 'codex';
+  /** Recorded screens (tests/fixtures/screen-*): ready, busy (a turn runs), pasted (the paste stands in the field), accepted (Enter was taken), question. */
+  screens: Record<'ready' | 'busy' | 'pasted' | 'accepted' | 'question', string>;
+  /** The state to show now; the double redraws when it changes. */
+  state: 'ready' | 'busy' | 'question';
+  /** How many Enter presses after a paste it ignores (the swallowed Enter of P15). */
+  swallow: number;
+  /** Claude: run the UserPromptSubmit hook of --settings with the payload Claude Code really sends (a collapsed paste wrapped in <pasted_content>). */
+  hook: boolean;
+}
+
+/**
+ * A fake agent that replays RECORDED screens in the real tmux of the harness and logs every paste and Enter to `log`. It reads `<root>/replay-spec.json`
+ * on every action, so a scenario can change what it does between steps (`writeReplaySpec`). Replaces only a fake inside this harness.
+ */
+export function installReplayAgent(h: Harness, agent: 'claude' | 'codex', log: string): void {
+  h.check();
+  const program = `#!${process.execPath}
+import fs from 'node:fs';
+import { spawn } from 'node:child_process';
+const args=process.argv.slice(2);
+if(args.includes('--version')){console.log('${agent} ${agent === 'claude' ? '2.1.311' : '0.166.0'} (replay)');process.exit(0);}
+if(args.includes('--help')){console.log('--effort --remote-control --append-system-prompt');process.exit(0);}
+const SPEC=${JSON.stringify(path.join(h.root, 'replay-spec.json'))}, LOG=${JSON.stringify(log)};
+const spec=()=>JSON.parse(fs.readFileSync(SPEC,'utf8')), note=v=>fs.appendFileSync(LOG,JSON.stringify(v)+'\\n');
+let state=spec().state, field='', pasted='', enters=0, count=0, stream='', shown='';
+const PLACEHOLDER=/^(❯|›)(\\s)(?:\\[Pasted text #\\d+(?: \\+\\d+ lines)?\\]|Press up to edit queued messages)\\s*$/m;
+const out=t=>process.stdout.write(t.replace(/\\n/g,'\\r\\n'));
+const draw=name=>{let s=spec().screens[name];const marker='${agent === 'claude' ? '❯' : '›'}';
+ const text=name==='pasted'||name==='ready'?field:'';
+ if(name==='pasted')s=s.replace(PLACEHOLDER,(_m,mk)=>mk+'\\u00a0'+text);
+ if(name==='ready')s=s+(text?marker+' '+text+'\\n':'');
+ shown=name;out('\\x1b[2J\\x1b[H'+s);};
+const label=()=>{const lines=pasted.split('\\n').length;return lines>1?'[Pasted text #'+count+' +'+lines+' lines]':pasted.length>200?'[Pasted text #'+count+']':pasted;};
+const hook=text=>{if(!spec().hook||${JSON.stringify(agent)}!=='claude')return;const i=args.indexOf('--settings');if(i<0)return;
+ const settings=JSON.parse(fs.readFileSync(args[i+1],'utf8')),prompt=text.split('\\n').length>1||text.length>200?'<pasted_content id="80b3">\\n'+text+'\\n</pasted_content id="80b3">':text;
+ const child=spawn(settings.hooks.UserPromptSubmit[0].hooks[0].command,{shell:true,stdio:['pipe','ignore','ignore']});child.stdin.end(JSON.stringify({hook_event_name:'UserPromptSubmit',prompt}));};
+process.stdout.write('\\x1b[?2004h');process.stdin.setRawMode(true);process.stdin.resume();draw(state);
+let seenSpec=spec().state;setInterval(()=>{const s=spec().state;if(s!==seenSpec){seenSpec=s;state=s;draw(state==='ready'?'ready':state==='busy'?'busy':'question');}},100);
+process.stdin.on('data',data=>{stream+=data.toString();for(;;){
+ if(stream.startsWith('\\x1b[200~')){const end=stream.indexOf('\\x1b[201~');if(end<0)return;pasted=stream.slice(6,end);stream=stream.slice(end+6);count++;enters=0;note({paste:pasted,state});
+  if(state==='question')continue;field=label();draw(state==='ready'?'ready':'pasted');continue;}
+ if(!stream.length)return;
+ if(stream.startsWith('\\x1b') && stream.length<6)return;
+ const c=stream[0];stream=stream.slice(1);
+ if(c==='\\r'||c==='\\n'){if(!field||state==='question')continue;enters++;note({enter:enters,state});
+  if(state==='ready'){field='';state='busy';draw('busy');hook(pasted);continue;}
+  if(enters<=spec().swallow){draw('pasted');continue;}
+  field='';draw('accepted');note({accepted:true});hook(pasted);continue;}
+ if(state!=='question'){if(c==='\\x7f'){field=field.slice(0,-1);note({backspace:true});}else{field+=c;note({typed:c});}draw(state==='ready'?'ready':'pasted');}
+}});
+`;
+  fs.writeFileSync(path.join(h.fakeBin, agent), program, { mode: 0o755 });
+}
+
+/** (Re)write the spec of the replay agent; it picks the change up within 100 ms. */
+export function writeReplaySpec(h: Harness, spec: ReplaySpec): void {
+  fs.writeFileSync(path.join(h.root, 'replay-spec.json'), JSON.stringify(spec));
+}

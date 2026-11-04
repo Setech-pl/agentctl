@@ -94,13 +94,13 @@ async function openQuestion(ctx: Context, window: string, agent: string): Promis
 }
 
 /** `send --enter-only TASK`: press Enter for the text our own paste left in the input field; refuses anything else. */
-export async function submitDrafts(ctx: Context, items: { task: string; window: string }[]): Promise<{ task: string; message: string; warning?: string }[]> {
-  const results: { task: string; message: string; warning?: string }[] = [];
+export async function submitDrafts(ctx: Context, items: { task: string; window: string }[]): Promise<{ task: string; message: string; warning?: string; refused?: boolean }[]> {
+  const results: { task: string; message: string; warning?: string; refused?: boolean }[] = [];
   for (const item of items) {
     const done = ctx.runner.dryRun ? await submitDraft(ctx, item.window) : await withStartLock(ctx, () => submitDraft(ctx, item.window));
     if (!ctx.runner.dryRun && done.outcome === 'submitted') await recordJournal(ctx, { kind: 'delivery', task: item.task, text: `${item.task}: ${done.message}` });
-    ctx.info(`${item.task}: ${done.message}`);
-    results.push({ task: item.task, message: done.message, ...(done.outcome === 'submitted' ? {} : { warning: done.message }) });
+    if (done.outcome !== 'refused') ctx.info(`${item.task}: ${done.message}`);
+    results.push({ task: item.task, message: done.message, ...(done.outcome === 'submitted' ? {} : { warning: done.message }), ...(done.outcome === 'refused' ? { refused: true } : {}) });
   }
   return results;
 }
