@@ -2,6 +2,30 @@
 
 Generated from README.md by `npm run docs`.
 
+## Automatic flow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Chat
+    participant A as agentctl
+    participant G as Agent window
+    C->>A: new or queue (answer carries a capacity snapshot)
+    A->>G: worktree, window, prompt
+    G->>A: asks a question
+    C->>A: events_since (needs-input)
+    C->>A: send (your answer)
+    A->>G: the answer
+    G->>A: report written
+    C->>A: events_since (report-ready)
+    C->>A: pull_ready (verdict, SHA, blockers)
+    C->>A: get_report (one section, on demand)
+    C->>A: mark ok
+    A->>G: review task with after starts from the queue
+    G->>A: review report
+    Note over A,G: In the background: overload gives an automatic "continue" to an idle window only, a transient start failure is retried, a disk or plan threshold becomes an event
+```
+
 ## Dispatcher
 
 ```mermaid
