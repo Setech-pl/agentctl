@@ -42,7 +42,7 @@ class SandboxRunner extends RealRunner {
 }
 const plan = (now: number, used = 100, reset: number | null = now + 60000) => Object.fromEntries(['claude', 'codex'].map(provider => [provider, { provider, available: true, readAt: now, planType: null, windows: [{ kind: 'session', label: '5h', minutes: 300, usedPercent: used, resetsAt: reset }], maxPercent: used, note: '', stale: false }])) as Record<'claude' | 'codex', PlanState>;
 
-await withHarness({ name: 'nc-workflow', cacheRoot: cache, config: 'watch: {interval: 1}\nqueue: {enabled: false}\ncohort: {done_grace_s: 0}\ncapacity: {snapshot: false, codex_refresh: false}\noverload: {retry_after: 1, max_retries: 2, give_up_after: 30}\ndelivery_confirm_s: 1\nmcp: {max_response_kb: 8, allow: [new, queue, queue_rm, send, mark, close, hide, unhide, cohort_add, cohort_remove, cohort_note, unblock, notify_test, adopt, archive, gc]}\n' }, async h => {
+await withHarness({ name: 'nc-workflow', cacheRoot: cache, config: 'watch: {interval: 1}\nreport: {settle_s: 0}\nqueue: {enabled: false}\ncohort: {done_grace_s: 0}\ncapacity: {snapshot: false, codex_refresh: false}\noverload: {retry_after: 1, max_retries: 2, give_up_after: 30}\ndelivery_confirm_s: 1\nmcp: {max_response_kb: 8, allow: [new, queue, queue_rm, send, mark, close, hide, unhide, cohort_add, cohort_remove, cohort_note, unblock, notify_test, adopt, archive, gc]}\n' }, async h => {
   const config = loadGlobalConfig(h.agentctlHome), runner = new SandboxRunner(h), ctx = new Context(runner, config, () => {}), notices: string[] = [];
   const notifier = { notify: async (_title: string, text: string) => { notices.push(text); } };
   const repo = path.join(h.root, 'repo'); fs.mkdirSync(repo);
