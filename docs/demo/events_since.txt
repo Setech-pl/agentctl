@@ -1,0 +1,8 @@
+Zdarzenia z ostatnich 1d: 5
+10:37  UŻYCIE  codex week: usage crossed 80% (83%)
+10:38  RAPORT  API-AUTH-1  Verdict: PASS – refresh rotates the session id, logout revokes the whole token family.
+10:39  PYTANIE  UI-CART-2  UI-CART-2: Compute the cart total on the server or the client?
+10:40  RAPORT  DOCS-SEARCH-1  Verdict: PASS – search guide and API reference written, the index rebuild finished.
+10:41  START  REVIEW-DOCS-SEARCH-1  Uruchomiono REVIEW-DOCS-SEARCH-1 z kolejki (claude)
+Teraz: 7 aktywne (3 pracuje) · 1 w kolejce · 2 raporty do pobrania (API-AUTH-1, DOCS-SEARCH-1) · 2 zadań bez oceny · czeka na Ciebie: REVIEW-DOCS-SEARCH-1 (waiting), UI-CART-2 (needs-input).
+has_more: false; next_cursor: e2:5:0
