@@ -1,5 +1,7 @@
 import { withStartLock } from './start-lock.ts';
-import { authorCheckoutBusy, authorWaitReason, repinReview, syncReviewLedger } from './review-gate.ts';
+import { assertReviewIsolated, authorCheckoutBusy, authorTerminal, authorWaitReason, findAuthorRecord, LEGACY_REVIEW_HINT, repinReview, syncReviewLedger } from './review-gate.ts';
+import { queueFile as promptQueueFile } from './prompt-queue.ts';
+import { withFileLock } from './file-lock.ts';
 import { reportPathWarnings } from './report-path.ts';
 import { missingLinkTargets, checkLinkTargets } from './links.ts';
 import type { OutputVerdict } from './outputs.ts';
@@ -31,7 +33,7 @@ import type { RawSpec, ResolvedSpec, AutoReviewSource } from './spec.ts';
 import { listArchivedRecords, listTaskRecords, recordFromSpec, renderTaskMd, taskDir, taskFile } from './taskstore.ts';
 import type { CancelSource, TaskRecord } from './taskstore.ts';
 import { queueHolds, usageSummaryLines } from './usage-limits.ts';
-import { AgentctlError, cohortKey, errorMessage, formatLocalTime, windowName } from './util.ts';
+import { AgentctlError, cohortKey, errorMessage, formatLocalTime, plural, windowName } from './util.ts';
 
 /*
  * The task queue. A queued task is a spec file in <AGENTCTL_HOME>/queue/ (one JSON file per task: the spec text and what the queue
@@ -204,7 +206,7 @@ export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: Q
   const ahead: Record<AgentName, number> = { claude: 0, codex: 0 };
   for (const e of waiting(entries)) ahead[e.agent]++;
   const readyCount = rows.filter(r => r.state === 'report-ready' && r.window === 'alive').length;
-  const lines: string[] = readyCount ? [`${readyCount} okien report-ready – close zwolni okna`] : [];
+  const lines: string[] = readyCount ? [`${readyCount} ${plural(readyCount, 'okno', 'okna', 'okien')} report-ready – close zwolni okna`] : [];
   for (const spec of specs) {
     const limit = config.limits[spec.agent];
     const used = load[spec.agent] + ahead[spec.agent];
@@ -385,13 +387,17 @@ export async function retryEntry(ctx: Context, input: string): Promise<QueueEntr
   return withStartLock(ctx, () => retryEntryLocked(ctx, input));
 }
 async function retryEntryLocked(ctx: Context, input: string): Promise<QueueEntry> {
-  const entry = findEntry(ctx.config, input);
+  const original = findEntry(ctx.config, input);
+  let entry = original;
   if (entry.status !== 'failed') throw new AgentctlError(`${entry.task} is ${entry.status}, not failed`);
+  // An old-format automatic review is rebuilt BEFORE any residue check: the residue it complains about is the author's checkout it must not use.
+  if (entry.autoReview) entry = await rebuildAutoReview(ctx, entry, { write: false });
   const spec = resolveSpec(splitSpecs(entry.spec, `queue entry ${entry.task}`)[0] as RawSpec, { config: ctx.config });
   await checkRetryWorktrees(ctx.runner, spec.repos);
   const highest = readQueue(ctx.config).reduce((n, e) => Math.max(n, e.order, e.seq), 0);
   const { failedAt: _f, error: _e, startingAt: _s, ...rest } = entry;
-  const again: QueueEntry = { ...rest, status: 'queued', order: highest + 1, reuse: true };
+  const again: QueueEntry = { ...rest, status: 'queued', order: highest + 1, ...(entry !== original && !entry.reuse ? {} : { reuse: true }) };
+  if (entry !== original && entry.autoReview) await syncReviewLedger(ctx, entry.autoReview.author, entry.task, entry.autoReview.heads);
   await writeEntry(ctx, again);
   return again;
 }
@@ -450,7 +456,7 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
     if (entry.retryAt && Date.parse(entry.retryAt) > nowMs) return { position, entry, condition: { kind: 'hold', text: `retry at ${entry.retryAt}: ${entry.error ?? ''}` }, since: entry.queuedAt };
     const unmet = unmetAfter(entry.after, rows, entry.afterVerdicts);
     if (unmet.length > 0) return { position, entry, condition: { kind: 'after', text: waitingText(unmet, failed, cancelled) }, since: entry.queuedAt };
-    const waitsFor = authorWaitReason(entry.autoReview, rows, config.reportSettleS, nowMs);
+    const waitsFor = authorWaitReason(config, entry.autoReview, rows, nowMs);
     if (waitsFor) return { position, entry, condition: { kind: 'after', text: waitsFor }, since: entry.queuedAt };
     const held = holds[entry.agent];
     if (held) return { position, entry, condition: { kind: 'hold', text: held }, since: entry.queuedAt };
@@ -563,15 +569,22 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   for (let entry of waiting(entries)) {
     if (entry.retryAt && Date.parse(entry.retryAt) > ctx.runner.now()) continue;
     if (memory.inflight.size >= config.queue.parallelStarts) break;
+    if (entry.autoReview) {
+      // A review of an author who was closed or cancelled without a finished report cannot happen by itself: a terminal state, not an endless wait.
+      const terminal = authorTerminal(config, entry.autoReview, rows, ctx.runner.now());
+      if (terminal) {
+        await failEntry(ctx, entry, `${terminal.state === 'cancelled' ? 'cancelled: ' : ''}${terminal.text}`, notifier, opts, true);
+        continue;
+      }
+    }
     if (unmetAfter(entry.after, rows, entry.afterVerdicts).length > 0) continue;
-    // An automatic review waits until its author's turn is over: report-end, settle, no follow-up in flight, no git running in its checkout.
-    const waitsFor = authorWaitReason(entry.autoReview, rows, config.reportSettleS, ctx.runner.now()) ?? (entry.autoReview ? await authorCheckoutBusy(ctx, entry.autoReview.author).then(b => b && `czeka na autora ${entry.autoReview!.author}: ${b}`) : undefined);
+    // An automatic review waits until its author's turn is over (the claim in beginStart checks it again, on fresh state, under the lock).
+    const waitsFor = entry.autoReview ? await reviewWaitReason(ctx, entry, rows) : undefined;
     if (waitsFor) {
       stillHeld.add(entry.task);
       if (memory.held.get(entry.task) !== waitsFor) { memory.held.set(entry.task, waitsFor); await opts.log?.(`queue: ${entry.task} ${waitsFor}`); }
       continue;
     }
-    if (entry.autoReview) entry = await repinQueuedReview(ctx, entry, opts);
     const held = holds[entry.agent];
     if (held) {
       stillHeld.add(entry.task);
@@ -590,30 +603,63 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   return began;
 }
 
-/** The review reads the author's current commit in its own checkout; an entry from before that rule is converted (author's worktree, branch, reuse). */
-async function repinQueuedReview(ctx: Context, entry: QueueEntry, opts: QueueTickOptions): Promise<QueueEntry> {
+/** Why the review of `entry` has to wait for its author now: its turn is not over, or a git process works in its checkout. */
+async function reviewWaitReason(ctx: Context, entry: QueueEntry, rows: StatusRow[]): Promise<string | undefined> {
+  const waits = authorWaitReason(ctx.config, entry.autoReview, rows, ctx.runner.now());
+  if (waits) return waits;
+  const busy = await authorCheckoutBusy(ctx, entry.autoReview!.author);
+  return busy ? `czeka na autora ${entry.autoReview!.author}: ${busy}` : undefined;
+}
+
+/**
+ * The spec of an automatic review is rebuilt from the author's record with the same code that made it (own detached worktree at the author's
+ * commits, own report, delta and prompt) when the author committed again or the entry is in the old format. Idempotent; throws when the data
+ * to do it safely is not there.
+ */
+export async function rebuildAutoReview(ctx: Context, entry: QueueEntry, opts: { write: boolean; log?: QueueTickOptions['log'] }): Promise<QueueEntry> {
+  if (!entry.autoReview) return entry;
   const head = async (repoPath: string, branch: string): Promise<string | undefined> => {
     const r = await ctx.runner.exec('git', ['-C', repoPath, 'rev-parse', '--verify', '--end-of-options', `refs/heads/${branch}^{commit}`], { readOnly: true });
     return r.code === 0 && /^[a-f0-9]{40}$/i.test(r.stdout.trim()) ? r.stdout.trim() : undefined;
   };
-  const result = await repinReview(ctx, splitSpecs(entry.spec, `queue entry ${entry.task}`)[0] as RawSpec, entry.autoReview!, Boolean(entry.reuse), head);
+  const result = await repinReview(ctx, splitSpecs(entry.spec, `queue entry ${entry.task}`)[0] as RawSpec, entry.autoReview, Boolean(entry.reuse), head);
   if (!result) return entry;
-  const updated: QueueEntry = { ...entry, spec: renderRawSpec(result.raw), autoReview: result.autoReview, ...(result.reuse ? { reuse: true } : {}) };
-  if (!result.reuse) delete updated.reuse;
-  await writeEntry(ctx, updated);
-  await syncReviewLedger(ctx, result.autoReview.author, entry.task, result.autoReview.heads);
-  await recordJournal(ctx, { kind: 'review-repinned', task: entry.task, text: `${entry.task}: ${result.reason}; ${result.autoReview.delta}`, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
-  await opts.log?.(`queue: ${entry.task} ${result.reason}`);
+  const { reuse: _drop, ...rest } = entry;
+  const updated: QueueEntry = { ...rest, spec: renderRawSpec(result.raw), autoReview: result.autoReview, ...(result.reuse ? { reuse: true } : {}) };
+  if (opts.write) {
+    await writeEntry(ctx, updated);
+    await syncReviewLedger(ctx, result.autoReview.author, entry.task, result.autoReview.heads);
+    await recordJournal(ctx, { kind: 'review-repinned', task: entry.task, text: `${entry.task}: ${result.reason}; ${result.autoReview.delta}`, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
+    await opts.log?.(`queue: ${entry.task} ${result.reason}`);
+  }
   return updated;
 }
 
-async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier, entry: QueueEntry, opts: QueueTickOptions): Promise<boolean> {
+async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier, initial: QueueEntry, opts: QueueTickOptions): Promise<boolean> {
   const { config } = ctx;
+  let entry = initial;
+  const claim = async (fresh: QueueEntry): Promise<boolean> => {
+    await writeEntry(ctx, { ...fresh, status: 'starting', startingPid: process.pid, startingAt: new Date(ctx.runner.now()).toISOString() });
+    entry = fresh;
+    return true;
+  };
   const claimed = await withStartLock(ctx, async () => {
     const fresh = readQueue(config).find(e => e.seq === entry.seq && e.task === entry.task);
     if (!fresh || fresh.status !== 'queued') return false;
-    await writeEntry(ctx, { ...fresh, status: 'starting', startingPid: process.pid, startingAt: new Date(ctx.runner.now()).toISOString() });
-    return true;
+    if (!fresh.autoReview) return claim(fresh);
+    // The review starts on the author's state as it is NOW: under the lock that send/enqueuePrompt takes, a follow-up cannot slip in between the check and the claim.
+    const authorWindow = findAuthorRecord(config, fresh.autoReview.author)?.window ?? windowName(fresh.autoReview.author);
+    return withFileLock(`${promptQueueFile(ctx, authorWindow)}.lock`, async () => {
+      try {
+        const rows = await collectStatus(ctx, { progress: false, archived: true });
+        const waits = await reviewWaitReason(ctx, fresh, rows);
+        if (waits) { await opts.log?.(`queue: ${fresh.task} ${waits}`); return false; }
+        return claim(await rebuildAutoReview(ctx, fresh, { write: true, ...(opts.log ? { log: opts.log } : {}) }));
+      } catch (e) {
+        await failEntry(ctx, fresh, e instanceof AgentctlError && e.hint ? `${e.message}\nHint: ${e.hint}` : errorMessage(e), notifier, opts, false);
+        return false;
+      }
+    });
   });
   if (!claimed) return false;
   const starting: QueueEntry = { ...entry, status: 'starting', startingAt: new Date(ctx.runner.now()).toISOString() };
@@ -624,7 +670,13 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
       await opts.log?.(`queue: starting ${entry.task} (${entry.agent})`);
       const raws = splitSpecs(entry.spec, `queue entry ${entry.task}`);
       const spec = resolveSpec(raws[0] as RawSpec, { config });
-      if (entry.autoReview) spec.autoReview = entry.autoReview;
+      if (entry.autoReview) {
+        spec.autoReview = entry.autoReview;
+        // Hard invariant of every review start: never the author's report, never the author's checkout.
+        const author = findAuthorRecord(config, entry.autoReview.author);
+        if (!author) throw new AgentctlError(`${entry.task}: no record of the author ${entry.autoReview.author}`, LEGACY_REVIEW_HINT);
+        assertReviewIsolated(spec, author);
+      }
       if (entry.reuse) {
         if ((await ctx.tmux.windows()).some(w => w.plain === spec.window)) throw new AgentctlError(`${entry.task}: task window already exists; inspect it instead of retrying`);
         await checkRetryWorktrees(ctx.runner, spec.repos);

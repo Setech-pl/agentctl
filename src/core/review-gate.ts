@@ -1,40 +1,72 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Context } from './context.ts';
-import type { AutoReviewSource, RawSpec, ResolvedRepo } from './spec.ts';
+import type { GlobalConfig } from './config.ts';
+import type { AutoReviewSource, RawSpec, ResolvedSpec } from './spec.ts';
 import type { StatusRow } from './status.ts';
 import type { TaskRecord } from './taskstore.ts';
-import { readTaskRecord } from './taskstore.ts';
+import { findRecordAnywhere } from './taskstore.ts';
+import { inspectReport } from './report-state.ts';
 import { withFileLock } from './file-lock.ts';
 import { loadProjectConfig } from './config.ts';
-import { fillPlaceholders, resolvePath, windowName } from './util.ts';
+import { AgentctlError, fillPlaceholders, resolvePath, windowName } from './util.ts';
 
 /*
  * An automatic review reads the author's finished work. It starts only when the author's turn is really over, and it runs in its own
- * checkout (detached at the author's commit), so it never shares a worktree, an index or a branch with the author.
+ * checkout (detached at the author's commit) with its own report, so it never shares a worktree, an index, a branch or a report file with
+ * the author. The spec of a review is built in ONE place (`buildReviewRaw`): for a new review, for a review whose author committed again,
+ * and for an entry written by an earlier build (rebuilt from scratch, never patched).
  */
+
+export const DEFAULT_REVIEW_TEMPLATE = `Review the commits of {task} ({delta}) in your own detached checkout (path below).\nAuthor report: {report}\nRecord evidence, checks, problems and proposed actions.\nDo not merge, do not run mark or any other agentctl action; write the decisions for the owner into the decisions of your agentctl-outputs block.\nDo not modify the author's files or branch. Write only your review report at the canonical path in the report protocol.\n{checkout}`;
+
+export const LEGACY_REVIEW_HINT = 'stary wpis auto-review – usuń (queue_rm) i zakolejkuj przegląd ponownie';
 
 const BUSY_STATES = new Set(['working', 'background', 'limited', 'overloaded', 'needs-trust']);
 
-/** Why the review of `entry` must wait for its author; undefined when the author is quiet (or gone) and the review may start. */
-export function authorWaitReason(autoReview: AutoReviewSource | undefined, rows: StatusRow[], settleS: number, nowMs: number): string | undefined {
+type GateConfig = Pick<GlobalConfig, 'stateDir' | 'cache' | 'reportSettleS'>;
+
+/** The author of a review: a current task, else one in the archive. The same lookup serves migration and the `review_of` check. */
+export const findAuthorRecord = (config: GlobalConfig, task: string): TaskRecord | undefined => findRecordAnywhere(config, task);
+
+/** Has the author delivered a finished report of the current attempt: an explicit report-end directive, not only a settled turn. */
+export function authorReportEnded(config: GateConfig, author: TaskRecord, nowMs: number): { ended: boolean; reason: string; mtime?: number } {
+  const state = inspectReport(config, author, nowMs, !author.attemptId);
+  const mtime = state.mtime !== undefined ? { mtime: state.mtime } : {};
+  if (!state.ready) return { ended: false, reason: `raport niegotowy (${state.reason})`, ...mtime };
+  if (!state.sentinel) return { ended: false, reason: 'raport bez jawnego report-end bieżącej próby', ...mtime };
+  return { ended: true, reason: '', ...mtime };
+}
+
+/** Why the review of `autoReview` must wait for its author; undefined when the author is quiet (or gone) and the review may start. */
+export function authorWaitReason(config: GlobalConfig, autoReview: AutoReviewSource | undefined, rows: StatusRow[], nowMs: number): string | undefined {
   if (!autoReview) return undefined;
-  const author = rows.find((r) => r.task === autoReview.author);
-  // No window left, closed or cancelled: nobody can change the work any more.
-  if (!author || author.window !== 'alive' || author.closed || author.cancelled) return undefined;
+  const row = rows.find((r) => r.task === autoReview.author);
+  // No window left, closed or cancelled: nobody can change the work any more (a missing report is decided by `authorTerminal`).
+  if (!row || row.window !== 'alive' || row.closed || row.cancelled) return undefined;
+  const author = findAuthorRecord(config, autoReview.author);
   const why: string[] = [];
-  if (BUSY_STATES.has(author.state)) why.push(`stan ${author.state}`);
-  if ((author.promptQueue?.length ?? 0) > 0) why.push(`follow-up w kolejce (${author.promptQueue!.length})`);
-  if (author.promptDelivery && author.promptDelivery !== 'sent') why.push(`wiadomość niepotwierdzona (${author.promptDelivery})`);
-  if (author.draft_input) why.push('szkic w polu wpisywania');
-  if (author.report !== 'yes') why.push('raport bez report-end');
-  else {
-    try {
-      const age = nowMs - fs.statSync(author.reportPath).mtimeMs;
-      if (settleS > 0 && age < settleS * 1000) why.push(`raport ustala się (${Math.ceil(settleS - age / 1000)} s)`);
-    } catch { /* the report is gone: the fields above decide */ }
-  }
+  if (BUSY_STATES.has(row.state)) why.push(`stan ${row.state}`);
+  if ((row.promptQueue?.length ?? 0) > 0) why.push(`follow-up w kolejce (${row.promptQueue!.length})`);
+  if (row.promptDelivery && row.promptDelivery !== 'sent') why.push(`wiadomość niepotwierdzona (${row.promptDelivery})`);
+  if (row.draft_input) why.push('szkic w polu wpisywania');
+  if (author) {
+    const end = authorReportEnded(config, author, nowMs);
+    if (!end.ended) why.push(end.reason);
+    else if (config.reportSettleS > 0 && end.mtime !== undefined && nowMs - end.mtime < config.reportSettleS * 1000) why.push(`raport ustala się (${Math.ceil(config.reportSettleS - (nowMs - end.mtime) / 1000)} s)`);
+  } else why.push('brak rekordu autora');
   return why.length > 0 ? `czeka na autora ${autoReview.author}: ${why.join('; ')}` : undefined;
+}
+
+/** The author is closed or cancelled and never delivered a finished report: the review cannot happen by itself. */
+export function authorTerminal(config: GlobalConfig, autoReview: AutoReviewSource | undefined, rows: StatusRow[], nowMs: number): { state: 'closed' | 'cancelled'; text: string } | undefined {
+  if (!autoReview) return undefined;
+  const row = rows.find((r) => r.task === autoReview.author);
+  if (!row || (!row.closed && !row.cancelled)) return undefined;
+  const author = findAuthorRecord(config, autoReview.author);
+  if (author && authorReportEnded(config, author, nowMs).ended) return undefined;
+  const state = row.cancelled ? 'cancelled' : 'closed';
+  return { state, text: `autor ${autoReview.author} ${state === 'cancelled' ? 'anulowany' : 'zamknięty'} bez nowego, zakończonego raportu; przegląd wstrzymany (queue_retry, gdy autor dostarczy raport)` };
 }
 
 export function sameDelta(heads: Record<string, string>, bases: Record<string, string>): string {
@@ -49,66 +81,125 @@ export function reviewWorktree(ctx: Context, repoPath: string, authorWorktree: s
   return path.join(dir, `${path.basename(repoPath)}-${windowName(task)}`);
 }
 
-export interface RepinResult { raw: RawSpec; autoReview: AutoReviewSource; reuse: boolean; changed: boolean; reason?: string }
-
-/**
- * Before the review starts: make sure it reads the author's current commit in a checkout of its own. A newer author commit moves the
- * pin (spec base, delta text, heads). An entry written by 0.17.4 before this fix (author's worktree and branch, reuse) is converted to
- * the new layout. `head` resolves the author's branch tip; undefined result: nothing to do.
- */
-export async function repinReview(ctx: Context, raw: RawSpec, autoReview: AutoReviewSource, reuse: boolean, head: (repoPath: string, branch: string) => Promise<string | undefined>): Promise<RepinResult | undefined> {
-  const author: TaskRecord | undefined = readTaskRecord(ctx.config, windowName(autoReview.author));
-  if (!author) return undefined;
-  const repos = Array.isArray(raw.header.repos) ? (raw.header.repos as Record<string, unknown>[]) : [];
-  const shares = (r: Record<string, unknown>): boolean => Boolean(r.branch) || author.repos.some((a: ResolvedRepo) => a.worktree === r.worktree);
-  const legacy = repos.some(shares);
-  const heads = { ...autoReview.heads }, bases = { ...(autoReview.bases ?? {}) };
-  for (const r of repos) if (legacy && typeof r.path === 'string' && typeof r.base === 'string' && bases[r.path] === undefined) bases[r.path] = r.base;
-  let moved = false;
-  for (const a of author.repos) {
-    if (!a.branch) continue;
-    const now = await head(a.path, a.branch);
-    if (now && heads[a.path] && now !== heads[a.path]) { heads[a.path] = now; moved = true; }
-  }
-  if (!legacy && !moved) return undefined;
-  const nextRepos = repos.map((r) => {
-    const p = r.path as string;
-    const { branch: _branch, worktree, ...rest } = r;
-    // A legacy entry pointed at the author's checkout: drop it, the review gets its own.
-    const own = legacy && author.repos.some((a: ResolvedRepo) => a.worktree === worktree) ? reviewWorktree(ctx, p, worktree as string, String(raw.header.task)) : worktree;
-    return { ...rest, ...(own ? { worktree: own } : {}), base: heads[p] ?? r.base };
-  });
-  const delta = sameDelta(heads, bases);
-  const prompt = autoReview.delta && raw.prompt.includes(autoReview.delta) ? raw.prompt.split(autoReview.delta).join(delta) : raw.prompt;
-  return {
-    raw: { ...raw, header: { ...raw.header, repos: nextRepos }, prompt },
-    autoReview: { ...autoReview, heads, bases, delta },
-    reuse: legacy ? false : reuse,
-    changed: true,
-    reason: legacy ? 'przegląd przeniesiony do własnego checkoutu' : 'autor dodał commit: przegląd przypięty do nowego SHA',
-  };
+/** The prompt of a review (the author's `review.prompt_template`, else the default), always naming the reviewer's own checkout and the delta. */
+function reviewPrompt(author: TaskRecord, repos: { worktree: string }[], delta: string): string {
+  let template = DEFAULT_REVIEW_TEMPLATE;
+  if (author.review?.promptTemplate) template = fs.readFileSync(resolvePath(author.review.promptTemplate, author.repos[0]?.path), 'utf8');
+  const checkout = `Your own checkout (detached at the author's commit, do not use the author's worktree): ${repos.map((r) => r.worktree).join(', ')}`;
+  const vars = { task: author.task, report: author.report, delta, checkout };
+  return (template.includes('{checkout}') ? template : `${template}\n{checkout}`).replace(/\{(task|report|delta|checkout)\}/g, (_, key: keyof typeof vars) => vars[key]);
 }
 
-/** Another process is changing the author's checkout right now (a git command, or a stale index.lock). */
-export async function authorCheckoutBusy(ctx: Context, authorTask: string): Promise<string | undefined> {
-  const author = readTaskRecord(ctx.config, windowName(authorTask));
-  if (!author || ctx.runner.dryRun) return undefined;
-  const ps = await ctx.runner.exec('ps', ['-axo', 'pid=,args='], { readOnly: true });
-  for (const repo of author.repos) {
-    if (!fs.existsSync(repo.worktree)) continue;
-    const lock = await ctx.runner.exec('git', ['-C', repo.worktree, 'rev-parse', '--git-path', 'index.lock'], { readOnly: true });
-    if (lock.code === 0 && lock.stdout.trim() && fs.existsSync(path.resolve(repo.worktree, lock.stdout.trim()))) return `index.lock w ${repo.worktree}`;
-    if (ps.code !== 0) continue;
-    for (const line of ps.stdout.split('\n')) {
-      const m = /^\s*(\d+)\s+(.+)$/.exec(line);
-      if (!m || !/(?:^|[\s/])git(?:\s|$)/.test(m[2]!) || !m[2]!.includes(repo.worktree)) continue;
-      return `proces git w ${repo.worktree}`;
+/**
+ * The one builder of a review spec: its own detached worktrees at the author's `heads`, its own canonical report, the delta from `bases`,
+ * and the prompt for exactly these. `header` carries task, agent/model/effort, cohort, after, review_of.
+ */
+export function buildReviewRaw(ctx: Context, author: TaskRecord, task: string, header: Record<string, unknown>, heads: Record<string, string>, bases: Record<string, string>): { raw: RawSpec; delta: string } {
+  const repos = author.repos.map((repo) => {
+    if (!heads[repo.path]) throw new AgentctlError(`${task}: no commit of ${repo.path} to review`, LEGACY_REVIEW_HINT);
+    return { path: repo.path, worktree: reviewWorktree(ctx, repo.path, repo.worktree, task), base: heads[repo.path]! };
+  });
+  const delta = sameDelta(heads, bases);
+  const report = fillPlaceholders('{cache}/{task}/{TASK}.md', { task, cache: ctx.config.cache });
+  const { repos: _r, report: _p, ...rest } = header;
+  return { raw: { index: 1, header: { ...rest, report, repos }, prompt: reviewPrompt(author, repos, delta) }, delta };
+}
+
+const norm = (p: string): string => path.resolve(p);
+const inside = (p: string, dir: string): boolean => norm(p) === norm(dir) || norm(p).startsWith(`${norm(dir)}${path.sep}`);
+
+/** The hard invariant of every review start: its report is not the author's, and none of its worktrees is (or lies in, or contains) an author's worktree. */
+export function assertReviewIsolated(spec: Pick<ResolvedSpec, 'task' | 'report' | 'repos'> & { reportAlt?: string[] | undefined }, author: TaskRecord): void {
+  const reports = [spec.report, ...(spec.reportAlt ?? [])].map(norm);
+  if (reports.includes(norm(author.report))) throw new AgentctlError(`${spec.task}: start refused – the review's report ${spec.report} is the author's report (${author.task}); a review never writes the author's file`, LEGACY_REVIEW_HINT);
+  for (const repo of spec.repos) for (const theirs of author.repos) {
+    if (inside(repo.worktree, theirs.worktree) || inside(theirs.worktree, repo.worktree)) throw new AgentctlError(`${spec.task}: start refused – the review's worktree ${repo.worktree} overlaps the author's checkout ${theirs.worktree}; a review runs only in its own checkout`, LEGACY_REVIEW_HINT);
+  }
+}
+
+export interface RepinResult { raw: RawSpec; autoReview: AutoReviewSource; reuse: boolean; changed: true; reason: string }
+
+const canon = (v: unknown): string => JSON.stringify(v, (_k, x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.entries(x as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b))) : x));
+
+/** An entry written by 0.17.4 before the own-checkout rule: no own report, the author's worktree/branch, no recorded delta or bases. */
+export function isLegacyReview(raw: RawSpec, autoReview: AutoReviewSource, author: TaskRecord): boolean {
+  const repos = Array.isArray(raw.header.repos) ? (raw.header.repos as Record<string, unknown>[]) : [];
+  return !raw.header.report || !autoReview.delta || !autoReview.bases || repos.some((r) => Boolean(r.branch) || author.repos.some((a) => a.worktree === r.worktree));
+}
+
+/**
+ * Before a review starts (or is retried): rebuild its spec from the author's record with the shared builder when the author committed again
+ * or the entry is in the old format. Idempotent: a spec that is already what the builder yields is left alone (undefined). Throws when the
+ * data to rebuild it safely is not there.
+ */
+export async function repinReview(ctx: Context, raw: RawSpec, autoReview: AutoReviewSource, reuse: boolean, head: (repoPath: string, branch: string) => Promise<string | undefined>): Promise<RepinResult | undefined> {
+  const task = String(raw.header.task);
+  const author = findAuthorRecord(ctx.config, autoReview.author);
+  if (!author) throw new AgentctlError(`${task}: no record of the author ${autoReview.author}, not even in the archive`, LEGACY_REVIEW_HINT);
+  const legacy = isLegacyReview(raw, autoReview, author);
+  const specRepos = Array.isArray(raw.header.repos) ? (raw.header.repos as Record<string, unknown>[]) : [];
+  const heads: Record<string, string> = {}, bases: Record<string, string> = {};
+  let moved = false;
+  for (const a of author.repos) {
+    const recorded = autoReview.heads[a.path];
+    if (!recorded) throw new AgentctlError(`${task}: the entry does not say which commit of ${a.path} to review`, LEGACY_REVIEW_HINT);
+    const now = a.branch ? await head(a.path, a.branch) : undefined;
+    heads[a.path] = now ?? recorded;
+    if (now && now !== recorded) moved = true;
+    // The start of the delta: recorded, else the old spec's base, else the merge-base of the author's own base with the commit.
+    const old = specRepos.find((r) => r.path === a.path)?.base;
+    let base = autoReview.bases?.[a.path] ?? (legacy && typeof old === 'string' && /^[0-9a-f]{7,40}$/i.test(old) ? old : undefined);
+    if (!base && a.base) {
+      const mb = await ctx.runner.exec('git', ['-C', a.path, 'merge-base', '--end-of-options', a.base, heads[a.path]!], { readOnly: true });
+      if (mb.code === 0 && /^[0-9a-f]{40}$/i.test(mb.stdout.trim())) base = mb.stdout.trim();
     }
+    if (!base) throw new AgentctlError(`${task}: the start of the reviewed delta of ${a.path} cannot be recovered`, LEGACY_REVIEW_HINT);
+    bases[a.path] = base;
+  }
+  const { repos: _r, report: _p, ...header } = raw.header;
+  const built = buildReviewRaw(ctx, author, task, header, heads, bases);
+  const next: AutoReviewSource = { ...autoReview, heads, bases, delta: built.delta };
+  const nextReuse = legacy ? false : reuse;
+  if (canon([built.raw.header, built.raw.prompt, next]) === canon([raw.header, raw.prompt, autoReview]) && nextReuse === reuse) return undefined;
+  return { raw: built.raw, autoReview: next, reuse: nextReuse, changed: true, reason: legacy ? 'przegląd odbudowany od nowa (stary format wpisu)' : moved ? 'autor dodał commit: przegląd przypięty do nowego SHA' : 'przegląd odświeżony' };
+}
+
+/** Another process is changing the author's checkout right now: a git command (or its child) whose cwd is in the author's worktree, or a lock. */
+export async function authorCheckoutBusy(ctx: Context, authorTask: string): Promise<string | undefined> {
+  const author = findAuthorRecord(ctx.config, authorTask);
+  if (!author || ctx.runner.dryRun) return undefined;
+  const worktrees = author.repos.map((r) => r.worktree).filter((w) => fs.existsSync(w));
+  if (worktrees.length === 0) return undefined;
+  for (const worktree of worktrees) {
+    const lock = await ctx.runner.exec('git', ['-C', worktree, 'rev-parse', '--git-path', 'index.lock'], { readOnly: true });
+    if (lock.code === 0 && lock.stdout.trim() && fs.existsSync(path.resolve(worktree, lock.stdout.trim()))) return `index.lock w ${worktree}`;
+  }
+  const ps = await ctx.runner.exec('ps', ['-axo', 'pid=,ppid=,args='], { readOnly: true });
+  if (ps.code !== 0) return 'nie można sprawdzić procesów (ps) w checkoucie autora';
+  const procs = ps.stdout.split('\n').flatMap((line) => { const m = /^\s*(\d+)\s+(\d+)\s+(.+)$/.exec(line); return m ? [{ pid: m[1]!, ppid: m[2]!, args: m[3]! }] : []; });
+  const isGit = (args: string): boolean => /(?:^|\/)git$/.test(args.split(/\s+/)[0] ?? '');
+  // git processes and everything below them (an alias or hook spawns children with the same cwd).
+  const suspects = new Set(procs.filter((p) => isGit(p.args)).map((p) => p.pid));
+  for (let grew = true; grew;) { grew = false; for (const p of procs) if (!suspects.has(p.pid) && suspects.has(p.ppid)) { suspects.add(p.pid); grew = true; } }
+  suspects.delete(String(process.pid));
+  for (const pid of suspects) {
+    const proc = procs.find((p) => p.pid === pid)!;
+    const named = worktrees.find((w) => proc.args.includes(w));
+    if (named) return `proces ${pid} (${proc.args.slice(0, 60)}) w ${named}`;
+    const cwd = await ctx.runner.exec(process.platform === 'darwin' ? '/usr/sbin/lsof' : 'lsof', ['-a', '-p', pid, '-d', 'cwd', '-Fn'], { readOnly: true });
+    if (cwd.code !== 0) {
+      const alive = await ctx.runner.exec('ps', ['-p', pid, '-o', 'pid='], { readOnly: true });
+      if (alive.code !== 0 || !alive.stdout.trim()) continue; // gone between ps and lsof
+      return `nie można sprawdzić katalogu procesu ${pid} (${proc.args.slice(0, 40)})`;
+    }
+    const dirs = cwd.stdout.split('\n').filter((l) => l.startsWith('n')).map((l) => l.slice(1));
+    const hit = worktrees.find((w) => dirs.some((d) => inside(d, w)));
+    if (hit) return `proces ${pid} (${proc.args.slice(0, 60)}) działa w ${hit}`;
   }
   return undefined;
 }
 
-/** The ledger of automatic reviews follows a re-pinned review, so that the next review's delta starts at the commit this one read. */
+/** The ledger of automatic reviews follows a rebuilt review, so that the next review's delta starts at the commit this one read. */
 export async function syncReviewLedger(ctx: Context, authorTask: string, task: string, heads: Record<string, string>): Promise<void> {
   const file = path.join(path.dirname(ctx.config.path), 'auto-reviews.json');
   await withFileLock(`${file}.lock`, async () => {

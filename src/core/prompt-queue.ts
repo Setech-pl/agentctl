@@ -11,7 +11,7 @@ import { readTaskRecord, taskFile } from './taskstore.ts';
 import { queuePrompt, deliverPendingPrompt } from './prompt-delivery.ts';
 
 export interface QueuedPrompt { id: string; text: string; queuedAt: string }
-const queueFile = (ctx: Context, window: string) => path.join(ctx.config.stateDir, window, 'prompt-queue.json');
+export const queueFile = (ctx: Context, window: string) => path.join(ctx.config.stateDir, window, 'prompt-queue.json');
 export function readPromptQueue(ctx: Context, window: string): QueuedPrompt[] {
   try { const data: unknown = JSON.parse(fs.readFileSync(queueFile(ctx, window), 'utf8')); return Array.isArray(data) ? data.filter((p): p is QueuedPrompt => p && typeof p.id === 'string' && typeof p.text === 'string' && typeof p.queuedAt === 'string') : []; } catch { return []; }
 }

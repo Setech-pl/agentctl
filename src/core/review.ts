@@ -14,9 +14,9 @@ import { planBatch } from './plan.ts';
 import { recordJournal } from './journal.ts';
 import { withFileLock } from './file-lock.ts';
 import { AgentctlError, errorMessage, fillPlaceholders, resolvePath } from './util.ts';
-import { reviewWorktree, sameDelta } from './review-gate.ts';
+import { buildReviewRaw, DEFAULT_REVIEW_TEMPLATE } from './review-gate.ts';
 
-export const DEFAULT_REVIEW_TEMPLATE = `Review {task} on the author's branch. Review only the delta {delta}.\nAuthor report: {report}\nRecord evidence, checks, problems and proposed actions. Do not merge or issue an agentctl decision.\nDo not modify the author's files or branch. Write only your review report at the canonical path in the report protocol.\n{checkout}`;
+export { DEFAULT_REVIEW_TEMPLATE };
 
 /** Prefer a different installed provider. Fallback uses only an explicitly configured, different model. */
 export async function reviewOrder(ctx: Context, author: TaskRecord, review: ReviewSettings): Promise<{ order: Order; rule: string }> {
@@ -46,7 +46,7 @@ export async function reviewTick(ctx: Context): Promise<string[]> {
     const added: string[] = [];
     for (const author of listTaskRecords(ctx.config).filter(r => r.review && !r.reviewOf && !r.cancelled && !r.supersededBy)) {
       const report = inspectReport(ctx.config, author, ctx.runner.now(), !author.attemptId);
-      if (!report.ready || !report.signature) continue;
+      if (!report.ready || !report.sentinel || !report.signature) continue;
       const runs = state[author.task] ??= [];
       if (runs.some(r => r.hash === report.signature) || (runs.length && !author.review!.rerun)) continue;
       const task = `${author.task}-REV${runs.length ? runs.length + 1 : ''}`;
@@ -54,7 +54,6 @@ export async function reviewTick(ctx: Context): Promise<string[]> {
         const { order, rule } = await reviewOrder(ctx, author, author.review!);
         const heads: Record<string, string> = {};
         const previous = runs.at(-1);
-        const repos: { path: string; worktree: string; base: string }[] = [];
         const bases: Record<string, string> = {};
         for (const repo of author.repos) {
           if (!repo.branch) throw new AgentctlError(`${author.task}: review branch for ${repo.path} is n/d`);
@@ -67,23 +66,14 @@ export async function reviewTick(ctx: Context): Promise<string[]> {
           const base = previous?.heads[repo.path] ?? repo.base;
           if (!base) throw new AgentctlError(`${author.task}: review base for ${repo.path} is n/d`);
           bases[repo.path] = await git(base);
-          // The reviewer never shares the author's checkout or branch: its own worktree, detached at the author's commit.
-          repos.push({ path: repo.path, worktree: reviewWorktree(ctx, repo.path, repo.worktree, task), base: heads[repo.path]! });
         }
-        let template = DEFAULT_REVIEW_TEMPLATE;
-        if (author.review!.promptTemplate) template = fs.readFileSync(resolvePath(author.review!.promptTemplate, author.repos[0]?.path), 'utf8');
-        const delta = sameDelta(heads, bases);
-        const checkout = `Your own checkout (detached at the author's commit, do not use the author's worktree): ${repos.map(r => r.worktree).join(', ')}`;
-        const vars = { task: author.task, report: author.report, delta, checkout };
-        const prompt = (template.includes('{checkout}') ? template : `${template}\n{checkout}`).replace(/\{(task|report|delta|checkout)\}/g, (_, key: keyof typeof vars) => vars[key]);
-        const own = fillPlaceholders('{cache}/{task}/{TASK}.md', { task, cache: ctx.config.cache });
-        const raw: RawSpec = { index: 1, header: { task, ...order, review_of: author.task, review: false, after: [author.task], report: own, repos, ...(author.cohort ? { cohort: author.cohort } : {}) }, prompt };
+        const { raw, delta } = buildReviewRaw(ctx, author, task, { task, ...order, review_of: author.task, review: false, after: [author.task], ...(author.cohort ? { cohort: author.cohort } : {}) }, heads, bases);
         const known = [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config), ...readQueue(ctx.config)].find(r => r.task === task);
         if (known && (known.autoReview?.author !== author.task || known.autoReview.hash !== report.signature)) throw new AgentctlError(`${task} already exists and is not this automatic review; choose another task ID for the existing task`);
         if (!known) {
           const spec = (await planBatch(ctx, [resolveSpec(raw, { config: ctx.config })], { ignoreLimits: true, skipAfter: true }))[0]!;
           await commitQueueAdd(ctx, [{ raw, spec }], { autoReview: { author: author.task, hash: report.signature, heads, bases, delta } });
-          await recordJournal(ctx, { kind: 'review-added', task, ...(author.cohort ? { cohort: author.cohort } : {}), text: `dodano przegląd ${task} dla ${author.task}: ${order.agent}/${order.model}/${order.effort}; ${rule}; ${vars.delta}` });
+          await recordJournal(ctx, { kind: 'review-added', task, ...(author.cohort ? { cohort: author.cohort } : {}), text: `dodano przegląd ${task} dla ${author.task}: ${order.agent}/${order.model}/${order.effort}; ${rule}; ${delta}` });
           added.push(task);
         }
         runs.push({ hash: report.signature, task, heads: known?.autoReview?.heads ?? heads });

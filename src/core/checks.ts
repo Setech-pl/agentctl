@@ -1,6 +1,6 @@
 import type { AgentName, GlobalConfig } from './config.ts';
 import type { ResolvedSpec } from './spec.ts';
-import { readTaskRecord } from './taskstore.ts';
+import { findRecordAnywhere } from './taskstore.ts';
 
 export interface AgentModel {
   agent: AgentName;
@@ -26,7 +26,7 @@ export function checkReviewer(spec: Pick<ResolvedSpec, 'task' | 'agent' | 'model
 export function findAuthor(task: string, batch: ResolvedSpec[], config: GlobalConfig): AgentModel | undefined {
   const inBatch = batch.find((s) => s.task === task);
   if (inBatch) return { agent: inBatch.agent, model: inBatch.model };
-  const record = readTaskRecord(config, task.toLowerCase());
+  const record = findRecordAnywhere(config, task);
   return record && record.agent !== 'unknown' ? { agent: record.agent, model: record.model } : undefined;
 }
 

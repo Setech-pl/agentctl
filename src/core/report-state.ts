@@ -11,7 +11,7 @@ export function reportFingerprint(file: string): string {
 export function attemptFields(record: Pick<TaskRecord, 'report' | 'attempt'>, now: number) {
   return { attempt: (record.attempt ?? 0) + 1, outputsProtocol: 1, attemptId: randomUUID(), attemptStarted: new Date(now).toISOString(), attemptReportBaseline: reportFingerprint(record.report) };
 }
-export interface ReportState { ready: boolean; exists: boolean; mtime?: number; signature?: string; reason: string }
+export interface ReportState { ready: boolean; exists: boolean; mtime?: number; signature?: string; reason: string; /** The report ends with the explicit report-end directive of this attempt (not only a settled turn). */ sentinel?: boolean }
 /** Single report readiness rule for status, hooks, history, cohorts and dependency consumers. */
 export function inspectReport(config: Pick<GlobalConfig, 'reportSettleS'> & Partial<Pick<GlobalConfig, 'cache'>>, record: TaskRecord, now: number, turnEnded: boolean, file = record.report): ReportState {
   try {
@@ -35,6 +35,6 @@ export function inspectReport(config: Pick<GlobalConfig, 'reportSettleS'> & Part
     const copiedComplete = file === record.report && signature === record.reportCompleteHash;
     const ended = turnEnded || (!!record.turnEndedAt && Date.parse(record.turnEndedAt) >= (Number.isFinite(start) ? start : 0) && (config.reportSettleS === 0 || Date.parse(record.turnEndedAt) >= Math.floor(st.mtimeMs)));
     const ready = sentinel || copiedComplete || (ended && (config.reportSettleS === 0 || now - st.mtimeMs >= config.reportSettleS * 1000));
-    return { ready, exists: true, mtime: st.mtimeMs, signature, reason: ready ? sentinel ? 'report-end marker' : 'settled after turn end' : 'incomplete: awaiting report-end or settled turn end' };
+    return { ready, exists: true, mtime: st.mtimeMs, signature, sentinel, reason: ready ? sentinel ? 'report-end marker' : 'settled after turn end' : 'incomplete: awaiting report-end or settled turn end' };
   } catch (error) { return { ready: false, exists: false, reason: (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'no report' : error instanceof Error ? error.message : 'no report' }; }
 }

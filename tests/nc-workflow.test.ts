@@ -11,7 +11,7 @@ import { parseOutputs, readOutputs, aggregateOutputs, dependencyVerdict, journal
 import { collectStatus } from '../src/core/status.ts';
 import { splitSpecs, resolveSpec } from '../src/core/spec.ts';
 import { unmetAfter, findBlocked, blockedText } from '../src/core/depends.ts';
-import { planQueueAdd, commitQueueAdd, readQueue, unblockEntry, describeQueue, queueTick, QueueMemory, renderRawSpec } from '../src/core/queue.ts';
+import { planQueueAdd, commitQueueAdd, readQueue, unblockEntry, describeQueue, queueTick, QueueMemory, renderRawSpec, rebuildAutoReview } from '../src/core/queue.ts';
 import { enqueuePrompt } from '../src/core/prompt-queue.ts';
 import { missingLinkTargets } from '../src/core/links.ts';
 import { readTaskRecord, taskFile, setHeaderFields } from '../src/core/taskstore.ts';
@@ -391,15 +391,15 @@ describe('0.17.4 fix 1: automatic review runs in its own checkout, after the aut
     await reviewTick(f.ctx); fs.utimesSync(author.report, new Date(), new Date());
     assert.match((await view())[0]!.condition.text, /raport ustala się/);
     f.config.reportSettleS = 0; assert.equal((await view())[0]!.condition.kind, 'ready');
-    const busy = authorFixture('b1-git', 'limits: {codex: 1}\n', (cmd, args) => cmd === 'ps' ? { stdout: ` 4242 git -C ${path.join(scratch.dir, 'b1-git', 'repo-author')} status\n` } : undefined);
+    const busy = authorFixture('b1-git', 'limits: {codex: 1}\n', (cmd, args) => cmd === 'ps' ? { stdout: ` 4242 1 git -C ${path.join(scratch.dir, 'b1-git', 'repo-author')} status\n` } : undefined);
     await reviewTick(busy.f.ctx); assert.deepEqual((await busy.tick()).began, []); assert.equal(readQueue(busy.f.config)[0]!.status, 'queued'); void tick;
   });
 
   it('B1: a new author commit after queueing re-pins the review to the new SHA (delta and heads), ledger follows', async () => {
     let tip = A;
     const { f, tick } = authorFixture('b1-repin', 'block', (cmd, args) => cmd === 'git' && args.includes('refs/heads/author^{commit}') ? { stdout: tip } : undefined);
-    await reviewTick(f.ctx); tip = B;
-    await tick();
+    await reviewTick(f.ctx); tip = B; void tick;
+    await rebuildAutoReview(f.ctx, readQueue(f.config)[0]!, { write: true });
     const entry = readQueue(f.config)[0]!, spec = resolveSpec(splitSpecs(entry.spec)[0]!, { config: f.config });
     assert.equal(spec.repos[0]!.base, B); assert.equal(entry.autoReview!.heads[f.repo], B); assert.match(spec.prompt, new RegExp(`${A}\\.\\.${B}`)); assert.ok(!spec.prompt.includes(`${A}..${A}`));
     assert.ok(readJournal(f.config).some(e => e.kind === 'review-repinned'));
@@ -410,8 +410,8 @@ describe('0.17.4 fix 1: automatic review runs in its own checkout, after the aut
     const { f, tick } = authorFixture('b1-legacy', 'block');
     const raw = f.raw('AUTHOR-REV', { agent: 'codex', model: 'gpt-6-astra', effort: 'medium', review_of: 'AUTHOR', review: false, after: ['AUTHOR'], repos: [{ path: f.repo, worktree: `${f.repo}-author`, branch: 'author', base: B }] });
     const spec = resolveSpec(raw, { config: f.config });
-    await commitQueueAdd(f.ctx, [{ raw, spec }], { reuse: true, autoReview: { author: 'AUTHOR', hash: 'h', heads: { [f.repo]: A } } });
-    await tick();
+    await commitQueueAdd(f.ctx, [{ raw, spec }], { reuse: true, autoReview: { author: 'AUTHOR', hash: 'h', heads: { [f.repo]: A } } }); void tick;
+    await rebuildAutoReview(f.ctx, readQueue(f.config)[0]!, { write: true });
     const entry = readQueue(f.config)[0]!, migrated = resolveSpec(splitSpecs(entry.spec)[0]!, { config: f.config });
     assert.equal(entry.reuse, undefined); assert.equal(migrated.repos[0]!.branch, undefined); assert.equal(migrated.repos[0]!.worktree, `${f.root}/repo-author-rev`); assert.equal(migrated.repos[0]!.base, A);
     assert.equal(entry.autoReview!.bases?.[f.repo], B);
@@ -484,6 +484,8 @@ describe('0.17.4 fix 1: outputs are validated per section and entry (B2)', () =>
   it('B2: a missing version or verdict still refuses the whole block, and a missing block says so', () => {
     assert.equal(parseOutputs('```agentctl-outputs\nversion: 2\nverdict: PASS\n```\n').outputs, null);
     assert.equal(parseOutputs('```agentctl-outputs\nversion: 1\nverdict: MAYBE\n```\n').outputs, null);
+    const missingVersion = parseOutputs('```agentctl-outputs\nverdict: PASS\n```\n'), missingVerdict = parseOutputs('```agentctl-outputs\nversion: 1\n```\n');
+    assert.equal(missingVersion.outputs, null); assert.match(missingVersion.outputs_errors.join(), /version/); assert.equal(missingVerdict.outputs, null); assert.match(missingVerdict.outputs_errors.join(), /verdict/);
     assert.match(parseOutputs('nothing').outputs_errors[0]!, /missing agentctl-outputs/);
   });
 });
@@ -566,9 +568,12 @@ describe('P12: cohort archive (CLI and MCP), data and history stay', () => {
   it('CLI --older-than archives only inactive cohorts older than the age', async () => {
     const f = fixture('p12-age'); closedTask(f, 'A1', 'ANCIENT', '2026-09-01T10:00:00.000Z'); closedTask(f, 'N1', 'NEWISH', new Date().toISOString());
     for (const c of ['ANCIENT', 'NEWISH']) await touchCohort(f.ctx, c);
-    // touching stamps "created" with now; age counts from the newest activity, so use a tight limit on a fresh one
+    // The cohort files carry the creation time: make ANCIENT old, NEWISH stays fresh.
+    const metaFile = (name: string) => path.join(path.dirname(f.config.path), 'cohorts', `${name}.json`);
+    for (const [name, created] of [['ANCIENT', '2026-09-01T10:00:00.000Z'], ['NEWISH', new Date().toISOString()]] as const) { const meta = JSON.parse(fs.readFileSync(metaFile(name), 'utf8')); fs.writeFileSync(metaFile(name), JSON.stringify({ ...meta, created })); }
     const r = await runCli(f.config, f.runner, ['cohort', 'archive', '--older-than', '7d']); assert.equal(r.code, 0, r.stderr);
-    assert.ok(!r.stdout.includes('archive NEWISH'));
+    assert.match(r.stdout, /archive ANCIENT \(1 task/); assert.ok(!r.stdout.includes('archive NEWISH'));
+    assert.match((await runCli(f.config, f.runner, ['cohort', 'archive', '--older-than', '7d', '--yes'])).stdout, /Archived: ANCIENT/);
   });
   it('MCP cohort_archive: preview, then confirm with the same arguments; list hides it unless all', async () => {
     const f = fixture('p12-mcp'); f.config.mcp.allow.push('cohort_archive' as never); closedTask(f, 'O1', 'OLDC'); await touchCohort(f.ctx, 'OLDC');

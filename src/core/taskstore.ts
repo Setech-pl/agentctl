@@ -9,7 +9,7 @@ import { AGENT_NAMES, EFFORTS } from './config.ts';
 import type { AgentName, Effort, GlobalConfig, Link, ReviewSettings } from './config.ts';
 import type { ResolvedRepo, ResolvedSpec, AutoReviewSource } from './spec.ts';
 import type { Order } from './equivalents.ts';
-import { isObject } from './util.ts';
+import { isObject, windowName } from './util.ts';
 
 /** Agent, model and effort are "unknown" for a task restored with `agentctl adopt` without those flags. */
 export type RecordAgent = AgentName | 'unknown';
@@ -330,6 +330,12 @@ export function listTaskRecords(config: GlobalConfig): TaskRecord[] {
 /** Tasks whose state folder sits in the archive (moved there by `agentctl archive`, or by hand). They are closed, whatever their TASK.md says. */
 export function listArchivedRecords(config: GlobalConfig): TaskRecord[] {
   return recordsIn(archiveDir(config));
+}
+
+/** A task by its ID (any case), current first, else in the archive: one lookup for everything that needs "the record of that task". */
+export function findRecordAnywhere(config: GlobalConfig, task: string): TaskRecord | undefined {
+  const wanted = task.toLowerCase();
+  return readTaskRecord(config, windowName(task)) ?? listTaskRecords(config).find((r) => r.task.toLowerCase() === wanted) ?? listArchivedRecords(config).find((r) => r.task.toLowerCase() === wanted);
 }
 
 /** Set one key in the YAML header of an existing TASK.md; the body (prompt, follow-ups) and the other keys stay as they are. */
