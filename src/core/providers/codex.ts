@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { DEFAULT_AGENT_SETTINGS } from '../config.ts';
-import { buildAgentArgv, buildResumeArgv, INSTALL_HINTS } from '../agents.ts';
+
 import { CLAUDE_KINDS, parseClaudeEvent, parseCodexEvent, planEventWiring } from '../events.ts';
 import type { ClaudeKind } from '../events.ts';
 import { sessionOfStatusLine } from '../usage-tap.ts';
@@ -9,8 +9,8 @@ import { agentHomes } from '../usage-sources.ts';
 import { feedClaudeLine, feedCodexLine } from '../usage-parse.ts';
 import { refreshCodexCapacity } from '../capacity.ts';
 import { defaultEquivalents, formatModelEffort } from '../equivalents.ts';
-import { modelLabel } from '../model-label.ts';
-import { findAutoAcceptFlag } from '../safety.ts';
+import { modelLabel } from './model-label.ts';
+import { splitFlag } from './safety.ts';
 import { sessionAgent } from '../limits.ts';
 import { sessionQuestion } from '../codex-question.ts';
 import { isObject } from '../util.ts';
@@ -19,7 +19,7 @@ import type { ProviderAdapter } from './types.ts';
 /** Initially delegates to the 0.17.4 implementation; subsequent steps move each responsibility here. */
 export const codex: ProviderAdapter = {
   id: 'codex', displayName: 'Codex', boardLabel: 'cx', letter: 'X', command: 'codex',
-  get installHint() { return INSTALL_HINTS.codex!; },
+  installHint: 'Install Codex CLI: npm i -g @openai/codex (https://github.com/openai/codex).',
   capabilities: { remoteControl: false, statusLineTap: false, mcpInstall: false, busyPrompt: true },
   defaultSettings: () => structuredClone(DEFAULT_AGENT_SETTINGS.codex),
   async detect(runner) {
@@ -28,9 +28,13 @@ export const codex: ProviderAdapter = {
     return { found: version.code === 0, version: /\d+\.\d+\.\d+/.exec(version.stdout)?.[0] ?? null, raw: version.stdout.trim().split('\n')[0] ?? '', features: { effortFlag: /--effort\b/.test(help.stdout), config: /-c, --config/.test(help.stdout), remoteControl: /--remote-control\b/.test(help.stdout), appendSystemPromptFile: /--append-system-prompt-file\b/.test(help.stdout) } };
   },
   doctor(d) { return [{ name: 'codex', level: d.found ? 'ok' : 'warn', text: d.found ? d.raw : `not found (only needed for agent: codex). ${this.installHint}` }]; },
-  argv: (order, settings, extra) => buildAgentArgv({ ...order, agent: 'codex' }, settings, extra),
+  argv(spec, settings, extra) {
+  const hasModel = spec.model !== 'default';
+  const effortArgs = settings.effortArgs.map((a) => a.replaceAll('{effort}', spec.effort));
+  return ['codex', '--sandbox', 'danger-full-access', ...(hasModel ? ['-m', spec.model] : []), ...effortArgs, ...settings.flags, ...extra];
+  },
   launchEnv: () => ({}),
-  resumeArgv: (order, settings, extra, sessionId) => buildResumeArgv({ ...order, agent: 'codex' }, settings, extra, sessionId),
+  resumeArgv(order, settings, extra, sessionId) { const [cmd, ...rest] = this.argv(order, settings, extra) as [string, ...string[]]; return [cmd, 'resume', ...(sessionId ? [sessionId] : ['--last']), ...rest]; },
   resumeLabel: (sessionId) => sessionId ? `resume ${sessionId}` : 'resume --last',
   effort: { accepted: ['low', 'medium', 'high', 'xhigh'], mode: 'config', args: (effort, settings) => settings.effortArgs.map(a => a.replaceAll('{effort}', effort)) },
   screen: { echoMarker: '›', sessionQuestion },
@@ -60,6 +64,12 @@ export const codex: ProviderAdapter = {
     planSources: ['codex-session-log', 'codex-app-server:account/rateLimits/read'],
   },
   models: { get equivalents() { const rows = defaultEquivalents().map(row => formatModelEffort(row.codex)); return { light: rows.slice(0, 2), medium: rows.slice(2, 4), strong: rows.slice(4) }; }, label: modelLabel },
-  safety: { forbiddenFlags: ['--dangerously-bypass-approvals-and-sandbox', '--yolo', '--full-auto', '--approve-for-me'], check: findAutoAcceptFlag },
+  safety: { forbiddenFlags: ['--dangerously-bypass-approvals-and-sandbox', '--yolo', '--full-auto', '--approve-for-me'], check(args) {
+      const [arg, next] = args; if (!arg) return undefined;
+      const [flag, inlineValue] = splitFlag(arg); const value = inlineValue ?? next;
+      if ((flag === '-a' || flag === '--ask-for-approval') && value === 'never') return `${flag} ${value}`;
+      if ((flag === '-c' || flag === '--config') && value !== undefined && /^approval_policy\s*=\s*["']?never/.test(value)) return `${flag} ${value}`;
+      return undefined;
+    } },
   isExternalSession: tokens => sessionAgent(tokens.join(' ')) === 'codex',
 };

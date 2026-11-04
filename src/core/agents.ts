@@ -1,3 +1,4 @@
+import { provider, PROVIDER_IDS } from './providers/registry.ts';
 import { OUTPUT_PROTOCOL } from './outputs.ts';
 import type { AgentSettings } from './config.ts';
 import type { ResolvedSpec } from './spec.ts';
@@ -19,13 +20,7 @@ export const DEFAULT_MODEL = 'default';
  * `extra` (event wiring: `--settings <file>` for Claude, `-c notify=[…]` for Codex) goes last.
  */
 export function buildAgentArgv(spec: Pick<ResolvedSpec, 'agent' | 'model' | 'effort'> & { remoteControl?: boolean | undefined; task?: string | undefined }, settings: AgentSettings, extra: string[] = []): string[] {
-  const hasModel = spec.model !== DEFAULT_MODEL;
-  const effortArgs = settings.effortArgs.map((a) => a.replaceAll('{effort}', spec.effort));
-  if (spec.agent === 'claude') {
-    if (spec.remoteControl && !spec.task) throw new Error('remote control needs the task ID as the name of the session');
-    return ['claude', ...(hasModel ? ['--model', spec.model] : []), ...effortArgs, ...settings.flags, ...(spec.remoteControl ? ['--remote-control', spec.task as string] : []), ...extra];
-  }
-  return ['codex', '--sandbox', 'danger-full-access', ...(hasModel ? ['-m', spec.model] : []), ...effortArgs, ...settings.flags, ...extra];
+  return provider(spec.agent).argv({ ...spec, task: spec.task ?? '' }, settings, extra);
 }
 
 /**
@@ -37,10 +32,7 @@ export function buildAgentArgv(spec: Pick<ResolvedSpec, 'agent' | 'model' | 'eff
  * - codex:  `codex resume <session id> …` or `codex resume --last …` (the most recent session of the worktree); the flags follow `resume`.
  */
 export function buildResumeArgv(spec: Pick<ResolvedSpec, 'agent' | 'model' | 'effort'> & { remoteControl?: boolean | undefined; task?: string | undefined }, settings: AgentSettings, extra: string[] = [], sessionId?: string): string[] {
-  const argv = buildAgentArgv(spec, settings, extra);
-  if (spec.agent === 'claude') return [...argv, ...(sessionId ? ['--resume', sessionId] : ['--continue'])];
-  const [cmd, ...rest] = argv as [string, ...string[]];
-  return [cmd, 'resume', ...(sessionId ? [sessionId] : ['--last']), ...rest];
+  return provider(spec.agent).resumeArgv({ ...spec, task: spec.task ?? '' }, settings, extra, sessionId);
 }
 
 export function agentCommandLine(argv: string[]): string {
@@ -55,9 +47,7 @@ export function promptWithHeader(spec: Pick<ResolvedSpec, 'model' | 'effort' | '
   return `Model: ${spec.model} · effort ${spec.effort}\n\n${spec.prompt}\n\n${reportInstructions(attemptId, spec.report)}`;
 }
 
-export const INSTALL_HINTS: Record<string, string> = {
+export const INSTALL_HINTS: Record<string, string> = Object.defineProperties({
   tmux: 'Install tmux: "brew install tmux" (macOS) or "sudo apt install tmux" (Debian/Ubuntu).',
   git: 'Install git: https://git-scm.com/downloads',
-  claude: 'Install Claude Code: https://docs.claude.com/en/docs/claude-code (npm i -g @anthropic-ai/claude-code).',
-  codex: 'Install Codex CLI: npm i -g @openai/codex (https://github.com/openai/codex).',
-};
+}, Object.fromEntries(PROVIDER_IDS.map(id => [id, { enumerable: true, get: () => provider(id).installHint }])));
