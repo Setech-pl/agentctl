@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/) while it is below 1.0 (minor versions may change behaviour).
 
+## [Unreleased]
+
+- Board: the header names the version (`agentctl 0.17.2 board · …`, the one `agentctl version` prints) and the board titles its terminal window `agentctl <version> · board` (OSC 2; the previous title is restored on exit where the terminal supports the xterm title stack). In tmux the outer terminal's title is set through the session options `set-titles` and `set-titles-string` of the agentctl session only. `board.window_title: false` turns all of it off.
+- Docs: the README leads with the dispatcher workflow, a board screenshot generated from a demo session (`npm run docs:screenshot`), the key benefits and the automatic flow with real `events_since` / `pull_ready` output from that demo.
+
 ## [0.17.2] - 2026-11-03
 
 - Board: compact provider/model/version/effort labels (e.g. cx S 6.1 XH), observed/configured alias version fallbacks, full names in preview/help, wider lists at 140+ columns, and board.list_width / board.model_versions configuration. Queue rows share the same formatter; selection/state colors and NO_COLOR stay unchanged.

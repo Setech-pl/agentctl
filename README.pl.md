@@ -2,17 +2,93 @@
 
 English: [README.md](README.md)
 
-**Uruchamiaj Claude Code i Codex równolegle – z jednej kolejki i według tych samych zasad.**
+**Jeden czat zleca i nadzoruje pracę wielu agentów CLI – dziś Claude Code i Codexa, w następnym wydaniu także Google Gemini (Antigravity CLI) – z jednej kolejki i według tych samych zasad.**
 
-agentctl zamienia krótki opis zadania w gitowy worktree, okno tmux i działającego agenta kodującego – Claude Code albo Codexa, z wybranym przez Ciebie modelem i poziomem rozumowania. Pilnuje pracy agentów, informuje, gdy któryś zada pytanie lub skończy, i zbiera raporty. Decyzja i scalanie zostają po Twojej stronie.
+agentctl zamienia krótki opis zadania w gitowy worktree, okno tmux i działającego agenta z wybranym przez Ciebie modelem i poziomem rozumowania. Pilnuje każdego agenta, informuje, gdy któryś zada pytanie lub skończy, i oddaje raporty Twojemu czatowi. Decyzja i scalanie zostają po Twojej stronie.
 
-## Po co korzystać z dwóch dostawców
+![Board agentctl w sesji demo: sześć działających zadań w dwóch kohortach, gotowy raport, pytanie czekające na odpowiedź, dwie recenzje w kolejce, ostrzeżenie o kolizji i zużycie planów obu dostawców](docs/img/board.svg)
 
-- **Większa przepustowość i mniej przestojów.** Plany Claude i Codexa mają osobne limity. Gdy jeden z dostawców osiągnie limit, możesz przenieść pracę do drugiego. agentctl pokazuje użycie obu planów, czas resetu i dostępne miejsca ([zużycie i limity](docs/details.pl.md#użycie-i-limity)).
-- **Model dobrany do zadania.** Spec może określać agenta, model i effort. Lżejsze modele sprawdzą się przy rutynowych pracach, mocniejsze przy trudniejszych; [tabela odpowiedników](docs/details.pl.md#odpowiedniki-modeli) pomaga dobrać model po przeniesieniu zadania do drugiego dostawcy.
-- **Recenzja innym modelem.** Reguła `review_of` wymaga, by recenzent użył innego agenta lub modelu niż autor ([recenzja krzyżowa](docs/details.pl.md#limity-okien-i-cross-review)). Drugi model może wnieść inną perspektywę.
-- **Zmiana dostawcy w razie potrzeby.** Obaj agenci korzystają z tych samych speców i formatu raportów, a zadania widać na tym samym boardzie. `agentctl move` jednym poleceniem przekazuje zadanie po osiągnięciu limitu drugiemu dostawcy ([limity i przenoszenie](docs/details.pl.md#limity-i-move)).
-- **Jeden panel pracy.** [Terminalowy board](docs/details.pl.md#board) pokazuje zadania obu dostawców: kto pracuje, kto potrzebuje Twojej uwagi i które raporty są gotowe. Powiadomienia mogą trafiać na Maca i opcjonalnie na telefon.
+*Board sesji demo na atrapach agentów: dwie kohorty, pytanie czekające na Ciebie, gotowy raport, łańcuch recenzji w kolejce, ostrzeżenie o kolizji (⚠) i zużycie planów obu dostawców. Generuje go `npm run docs:screenshot`; część napisów produktu (np. „czeka na”) jest dziś po polsku.*
+
+## Dlaczego agentctl
+
+- **Jeden czat, wielu wykonawców.** Planujesz w czacie ([serwer MCP](docs/mcp.md) albo schowek), a zadania trafiają do Claude Code i Codexa – Gemini dojdzie wkrótce – każde z modelem i poziomem rozumowania wybranym osobno.
+- **Więcej pojemności.** Każdy plan ma własne limity. agentctl pokazuje oba plany z czasem resetu i wolne sloty okien, `capacity` podaje wiek każdego odczytu, praca czeka w [kolejce](#kolejka) zamiast przekraczać limit, a `agentctl move` przekazuje zadanie, które wyczerpało limit, drugiemu dostawcy ([zużycie i limity](docs/details.pl.md#użycie-i-limity)).
+- **Mniej tokenów w czacie.** Odpowiedzi MCP są domyślnie zwięzłe, a raporty przychodzą jako streszczenia – sekcje i pełny tekst na żądanie. Na zestawie atrap (sześć raportów po ok. 20 KB, `pull_ready` z `all: true`, 0.17.1 kontra 0.17.2) odpowiedź skurczyła się ze 120 762 do 1 522 bajtów – to pomiar na atrapach, nie obietnica dla Twojej pracy. `defaults.effort` ustawia effort raz, a `peek` pokazuje okno bez wklejania logów do czatu.
+- **Statystyki.** Tokeny na zadanie, kohortę, model i effort pochodzą z logów samych agentów. Twoja ocena `mark` (ok / partial / fail) i linia werdyktu z raportu agenta dają skuteczność per model × effort, więc widać, który model opłaca się do jakiej pracy ([historia i statystyki](#historia-i-statystyki)).
+- **Recenzja innym modelem i kolejka z zależnościami.** `review_of` nie pozwala, by ten sam agent i model oceniał własną pracę, a `after` trzyma zadanie w kolejce, dopóki nie powstanie raport, od którego zależy – recenzja startuje więc sama po raporcie autora ([kolejka](#kolejka), [zależności](#zależności)).
+- **Nadzór bez pilnowania.** Board i powiadomienia (Mac oraz telefon przez ntfy) mówią o pytaniach, oknach zaufania, przeciążeniach, limitach, kolizjach i wolnym miejscu na dysku. Po przeciążeniu dostawcy agentctl wysyła „kontynuuj” – tylko do bezczynnego okna z pustym promptem i kilka razy – a przejściowy błąd startu ponawia po 1, 5 i 15 minutach.
+- **Bezpieczeństwo z założenia.** Osobny git worktree na zadanie. agentctl nigdy nie scala, nie pushuje, nie używa `--force` i nie akceptuje za Ciebie zgód ani okien zaufania ([model bezpieczeństwa](#model-bezpieczeństwa)).
+- **Otwarte i lokalne.** Licencja MIT, działa na Twoim Macu, nie ma własnego serwera; serwer MCP to lokalny proces uruchomiony jako Ty.
+
+## Automatyczny przepływ
+
+Czat rozmawia z agentctl, agentctl z agentami. Między Twoimi odpowiedziami większość dzieje się sama:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Czat
+    participant A as agentctl
+    participant G as Okno agenta
+    C->>A: new lub queue (odpowiedź niesie migawkę capacity)
+    A->>G: worktree, okno, prompt
+    G->>A: zadaje pytanie
+    C->>A: events_since (needs-input)
+    C->>A: send (Twoja odpowiedź)
+    A->>G: odpowiedź
+    G->>A: raport gotowy
+    C->>A: events_since (report-ready)
+    C->>A: pull_ready (werdykt, SHA, blokery)
+    C->>A: get_report (jedna sekcja, na żądanie)
+    C->>A: mark ok
+    A->>G: zadanie z after (recenzja) startuje z kolejki
+    G->>A: raport recenzji
+    Note over A,G: W tle: przeciążenie daje automatyczne „kontynuuj” tylko bezczynnemu oknu, przejściowy błąd startu jest ponawiany, próg dysku lub planu staje się zdarzeniem
+```
+
+Co widzi czat w sesji demo ze zrzutu (wyjście narzędzi jest dziś po polsku). `events_since` po pracy agentów:
+
+```text
+Zdarzenia z ostatnich 1d: 5
+10:37  UŻYCIE  codex week: usage crossed 80% (83%)
+10:38  RAPORT  API-AUTH-1  Verdict: PASS – refresh rotates the session id, logout revokes the whole token family.
+10:39  PYTANIE  UI-CART-2  UI-CART-2: Compute the cart total on the server or the client?
+10:40  RAPORT  DOCS-SEARCH-1  Verdict: PASS – search guide and API reference written, the index rebuild finished.
+10:41  START  REVIEW-DOCS-SEARCH-1  Uruchomiono REVIEW-DOCS-SEARCH-1 z kolejki (claude)
+Teraz: 7 aktywne (3 pracuje) · 1 w kolejce · 2 raporty do pobrania (API-AUTH-1, DOCS-SEARCH-1) · 2 zadań bez oceny · czeka na Ciebie: REVIEW-DOCS-SEARCH-1 (waiting), UI-CART-2 (needs-input).
+has_more: false; next_cursor: e2:5:0
+```
+
+`pull_ready` w domyślnym trybie streszczeń, z jedynym gotowym raportem:
+
+```text
+1 report summary delivered (full reports not marked as pulled): API-AUTH-1. Omitted (remain new): none.
+
+=== API-AUTH-1 ===
+attempt: 3f9c2a7e-51d4-4b86-9e0a-7c1d6b2f8a45
+path: /home/demo/agentctl/cache/api-auth-1/API-AUTH-1.md
+bytes: 589
+verdict: Verdict: PASS – refresh rotates the session id, logout revokes the whole token family.
+blockers: ## Blockers
+
+None.
+
+decisions: ## Decisions
+
+- Revoking one token revokes its whole family: a replayed refresh token is treated as theft.
+
+truncated: true; details: get_report
+Verdict: PASS – refresh rotates the session id, logout revokes the whole token family.
+- Branch: agent/api-auth-1
+- SHA: 41c39c35c2118f44d822a4be08d5c20aa2f7c153
+## Summary
+
+Refresh tokens are single-use and belong to a family (`src/auth/token.ts`). The session id rotates on every refresh (`src/auth/session.ts`) and a revoked family answers 401 (`src/auth/middleware.ts`).
+
+[excerpt; get_report section/offset/limit reads more]
+next_cursor: 8b1e4d93-0a7c-42f5-b6d8-2e9f1c3a7d60:1; has_more: false
+```
 
 ## Jak to działa
 
@@ -45,8 +121,6 @@ sequenceDiagram
 
 <!-- Numbers from agentctl stats on the author's machine – verify before publishing -->
 agentctl powstał i jest używany przy prawdziwym projekcie: codziennie równolegle działają kohorty zadań Claude Code i Codexa, a przed scaleniem każdy wynik przechodzi recenzję innym modelem.
-
-> agentctl to niezależne narzędzie open source, niepowiązane z Anthropic ani OpenAI. Claude Code i Codex są ich produktami.
 
 ## Stany zadań
 
@@ -410,7 +484,7 @@ Każdy klucz z typem, wartością domyślną i znaczeniem: [docs/configuration.m
 `agentctl board` to pełnoekranowy przegląd wszystkich zadań, odświeżany co 2 sekundy. `agentctl board --tmux` otwiera go w oknie `board` sesji agentctl. Od 110 kolumn po prawej widać ostatnie linie wybranego okna; poniżej lista zajmuje całą szerokość.
 
 ```text
-agentctl board  agentctl-test · 2 tasks · 06:54:51 · Disk: ok; free 307.4 GiB; agentctl worktrees 0.0 GiB
+agentctl 0.17.2 board · agentctl-test · 2 tasks · 06:54:51 · Disk: ok; free 307.4 GiB; agentctl worktrees 0.0 GiB
   TASK                 AGENT          STATE               TIME    TOKENS  PROGRESS REPORT   │ NEON-BACKEND-TASK-12 · last 1 lines
 ▸ NEON-BACKEND-TASK-12 cx S 6.1 XH    ⚙ working           1m 00s  n/d     -        -        │ codex · model: gpt-6.1-sol · effort: xhigh
   NEON-CITY-REVIEW-12  cl O 5.5 HI    ⚙ working           1m 00s  n/d     -        -        │ Working (esc to interrupt)
@@ -774,11 +848,15 @@ Czego agentctl nigdy nie robi:
 - Serwer MCP jest lokalny i działa jako Ty. To decyzja zaufania wobec czatu, nie piaskownica.
 - Testowane na macOS; Linux jest obsługiwany dla schowka i `notify-send`, ale rzadziej używany.
 
+## Niezależność
+
+agentctl to niezależne narzędzie open source. Nie jest powiązane z Anthropic, OpenAI ani Google, nie jest przez nie wspierane ani sponsorowane. Claude Code, Codex i Gemini są produktami i znakami towarowymi ich właścicieli.
+
 ## Plan rozwoju
 
 Pomysły, nie obietnice:
 
-1. Więcej dostawców przez warstwę providerów – następny: Google Antigravity CLI.
+1. Google Antigravity CLI (Gemini) jako następny dostawca, przez warstwę providerów.
 2. Publikacja npm (paczka jest przygotowana).
 3. Poprawki wynikające z codziennego użycia.
 

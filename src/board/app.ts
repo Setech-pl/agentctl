@@ -44,6 +44,8 @@ import type { Context } from '../core/context.ts';
 import type { SelfArgv } from '../core/events.ts';
 import { navigationHint } from '../core/navigation.ts';
 import { errorMessage } from '../core/util.ts';
+import { tmuxTitleString, titleEnd, titleStart } from '../core/title.ts';
+import { packageVersion } from '../core/version.ts';
 
 /*
  * The Ink front of `agentctl board`: draws a BoardState and forwards keys to handleKey. No JSX: the project runs on Node's
@@ -229,8 +231,8 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
   const header = h(
     Box,
     { width: state.width },
-    h(Text, { bold: true, wrap: 'truncate-end' }, 'agentctl board'),
-    h(Text, { dimColor: true, wrap: 'truncate-end' }, `  ${ctx.config.session} · ${active} task${active === 1 ? '' : 's'}${state.queue.length > 0 ? ` · ${state.queue.length} queued` : ''}${state.cohortFilter !== null ? ` · cohort: ${cohortLabel(state)}` : ''}${hiddenCount > 0 ? ` · ${hiddenCount} hidden (a)` : ''}${state.refreshedAt ? ` · ${state.refreshedAt}` : ''}`),
+    h(Text, { bold: true, wrap: 'truncate-end' }, `agentctl ${packageVersion()} board`),
+    h(Text, { dimColor: true, wrap: 'truncate-end' }, ` · ${ctx.config.session} · ${active} task${active === 1 ? '' : 's'}${state.queue.length > 0 ? ` · ${state.queue.length} queued` : ''}${state.cohortFilter !== null ? ` · cohort: ${cohortLabel(state)}` : ''}${hiddenCount > 0 ? ` · ${hiddenCount} hidden (a)` : ''}${state.refreshedAt ? ` · ${state.refreshedAt}` : ''}`),
     state.disk ? h(Text, { color: state.disk.level === 'critical' ? 'red' : state.disk.level === 'warn' ? 'yellow' : 'green', wrap: 'truncate-end' }, ` · ${diskLine(state.disk)}`) : null,
     away ? h(Text, { wrap: 'truncate-end', ...(away.dim ? { dimColor: true } : { color: 'cyan', bold: true }) }, ` · ${away.text}`) : null,
   );
@@ -256,7 +258,22 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
 
 /** Show the board until the user quits; resolves when it is gone. Needs a terminal. */
 export async function runBoardApp(ctx: Context, insideTmux: boolean, streams: { stdout?: NodeJS.WriteStream; stdin?: NodeJS.ReadStream } = {}, self?: SelfArgv): Promise<void> {
-  // interactive: true - Ink draws nothing in a "CI" environment (a CI or BUILD_* variable in the tmux server's environment), but the board only runs in a terminal.
-  const app = render(h(Board, { ctx, insideTmux, self }), { alternateScreen: true, exitOnCtrlC: false, interactive: true, ...streams });
-  await app.waitUntilExit();
+  const out = streams.stdout ?? process.stdout;
+  const titled = ctx.config.board.windowTitle;
+  const version = packageVersion();
+  if (titled) {
+    out.write(titleStart(version));
+    // The outer terminal's title, for the agentctl session only (no -g): the options are session options.
+    if (insideTmux) {
+      await ctx.tmux.setSessionOption('set-titles', 'on').catch(() => undefined);
+      await ctx.tmux.setSessionOption('set-titles-string', tmuxTitleString(version)).catch(() => undefined);
+    }
+  }
+  try {
+    // interactive: true - Ink draws nothing in a "CI" environment (a CI or BUILD_* variable in the tmux server's environment), but the board only runs in a terminal.
+    const app = render(h(Board, { ctx, insideTmux, self }), { alternateScreen: true, exitOnCtrlC: false, interactive: true, ...streams });
+    await app.waitUntilExit();
+  } finally {
+    if (titled) out.write(titleEnd());
+  }
 }

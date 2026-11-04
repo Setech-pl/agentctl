@@ -1,0 +1,315 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1489" height="540" viewBox="0 0 1489 540" role="img" aria-label="agentctl 0.17.2 · board">
+<title>agentctl 0.17.2 · board</title>
+<rect width="1489" height="540" rx="10" fill="#30363d"/>
+<rect x="1" y="1" width="1487" height="538" rx="9" fill="#0d1117"/>
+<path d="M1 36V10a9 9 0 0 1 9-9h1469a9 9 0 0 1 9 9v26z" fill="#161b22"/>
+<circle cx="22" cy="19" r="6" fill="#ff5f56"/>
+<circle cx="42" cy="19" r="6" fill="#ffbd2e"/>
+<circle cx="62" cy="19" r="6" fill="#27c93f"/>
+<text x="744.5" y="24" text-anchor="middle" font-family="'DejaVu Sans Mono', 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="13" fill="#8b949e">agentctl 0.17.2 · board</text>
+<g font-family="'DejaVu Sans Mono', 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="15">
+<text x="22.00" y="66.04" fill="#c9d1d9" font-weight="700" textLength="72.24" lengthAdjust="spacing">agentctl</text>
+<text x="103.27" y="66.04" fill="#c9d1d9" font-weight="700" textLength="54.18" lengthAdjust="spacing">0.17.2</text>
+<text x="166.48" y="66.04" fill="#c9d1d9" font-weight="700" textLength="45.15" lengthAdjust="spacing">board</text>
+<text x="220.66" y="66.04" fill="#c9d1d9" opacity="0.6">·</text>
+<text x="238.72" y="66.04" fill="#c9d1d9" opacity="0.6" textLength="36.12" lengthAdjust="spacing">work</text>
+<text x="283.87" y="66.04" fill="#c9d1d9" opacity="0.6">·</text>
+<text x="301.93" y="66.04" fill="#c9d1d9" opacity="0.6">6</text>
+<text x="319.99" y="66.04" fill="#c9d1d9" opacity="0.6" textLength="45.15" lengthAdjust="spacing">tasks</text>
+<text x="374.17" y="66.04" fill="#c9d1d9" opacity="0.6">·</text>
+<text x="392.23" y="66.04" fill="#c9d1d9" opacity="0.6">2</text>
+<text x="410.29" y="66.04" fill="#c9d1d9" opacity="0.6" textLength="54.18" lengthAdjust="spacing">queued</text>
+<text x="473.50" y="66.04" fill="#c9d1d9" opacity="0.6">·</text>
+<text x="491.56" y="66.04" fill="#c9d1d9" opacity="0.6" textLength="72.24" lengthAdjust="spacing">10:42:07</text>
+<text x="572.83" y="66.04" fill="#3fb950">·</text>
+<text x="590.89" y="66.04" fill="#3fb950" textLength="45.15" lengthAdjust="spacing">Disk:</text>
+<text x="645.07" y="66.04" fill="#3fb950" textLength="27.09" lengthAdjust="spacing">ok;</text>
+<text x="681.19" y="66.04" fill="#3fb950" textLength="36.12" lengthAdjust="spacing">free</text>
+<text x="726.34" y="66.04" fill="#3fb950" textLength="45.15" lengthAdjust="spacing">412.6</text>
+<text x="780.52" y="66.04" fill="#3fb950" textLength="36.12" lengthAdjust="spacing">GiB;</text>
+<text x="825.67" y="66.04" fill="#3fb950" textLength="72.24" lengthAdjust="spacing">agentctl</text>
+<text x="906.94" y="66.04" fill="#3fb950" textLength="81.27" lengthAdjust="spacing">worktrees</text>
+<text x="997.24" y="66.04" fill="#3fb950" textLength="27.09" lengthAdjust="spacing">0.0</text>
+<text x="1033.36" y="66.04" fill="#3fb950" textLength="27.09" lengthAdjust="spacing">GiB</text>
+<text x="22.00" y="85.54" fill="#3fb950" textLength="54.18" lengthAdjust="spacing">claude</text>
+<text x="85.21" y="85.54" fill="#3fb950" textLength="18.06" lengthAdjust="spacing">5h</text>
+<text x="112.30" y="85.54" fill="#3fb950" textLength="90.30" lengthAdjust="spacing">▓▓▓▓▓▓░░░░</text>
+<text x="211.63" y="85.54" fill="#3fb950" textLength="27.09" lengthAdjust="spacing">62%</text>
+<text x="247.75" y="85.54" fill="#3fb950" textLength="54.18" lengthAdjust="spacing">↻13:09</text>
+<text x="319.99" y="85.54" fill="#3fb950" textLength="36.12" lengthAdjust="spacing">week</text>
+<text x="365.14" y="85.54" fill="#3fb950" textLength="90.30" lengthAdjust="spacing">▓▓▓▓░░░░░░</text>
+<text x="464.47" y="85.54" fill="#3fb950" textLength="27.09" lengthAdjust="spacing">41%</text>
+<text x="500.59" y="85.54" fill="#3fb950" textLength="36.12" lengthAdjust="spacing">↻Fri</text>
+<text x="545.74" y="85.54" fill="#3fb950" textLength="45.15" lengthAdjust="spacing">18:42</text>
+<text x="22.00" y="105.04" fill="#d29922" textLength="45.15" lengthAdjust="spacing">codex</text>
+<text x="85.21" y="105.04" fill="#d29922" textLength="18.06" lengthAdjust="spacing">5h</text>
+<text x="112.30" y="105.04" fill="#d29922" textLength="90.30" lengthAdjust="spacing">▓▓▓░░░░░░░</text>
+<text x="211.63" y="105.04" fill="#d29922" textLength="27.09" lengthAdjust="spacing">34%</text>
+<text x="247.75" y="105.04" fill="#d29922" textLength="54.18" lengthAdjust="spacing">↻14:07</text>
+<text x="319.99" y="105.04" fill="#d29922" textLength="36.12" lengthAdjust="spacing">week</text>
+<text x="365.14" y="105.04" fill="#d29922" textLength="90.30" lengthAdjust="spacing">▓▓▓▓▓▓▓▓░░</text>
+<text x="464.47" y="105.04" fill="#d29922" textLength="27.09" lengthAdjust="spacing">83%</text>
+<text x="500.59" y="105.04" fill="#d29922" textLength="36.12" lengthAdjust="spacing">↻Sat</text>
+<text x="545.74" y="105.04" fill="#d29922" textLength="45.15" lengthAdjust="spacing">18:42</text>
+<text x="40.06" y="124.54" fill="#c9d1d9" opacity="0.6" textLength="36.12" lengthAdjust="spacing">TASK</text>
+<text x="229.69" y="124.54" fill="#c9d1d9" opacity="0.6" textLength="45.15" lengthAdjust="spacing">AGENT</text>
+<text x="365.14" y="124.54" fill="#c9d1d9" opacity="0.6" textLength="45.15" lengthAdjust="spacing">STATE</text>
+<text x="545.74" y="124.54" fill="#c9d1d9" opacity="0.6" textLength="36.12" lengthAdjust="spacing">TIME</text>
+<text x="617.98" y="124.54" fill="#c9d1d9" opacity="0.6" textLength="54.18" lengthAdjust="spacing">TOKENS</text>
+<text x="690.22" y="124.54" fill="#c9d1d9" opacity="0.6" textLength="72.24" lengthAdjust="spacing">PROGRESS</text>
+<text x="771.49" y="124.54" fill="#c9d1d9" opacity="0.6" textLength="54.18" lengthAdjust="spacing">REPORT</text>
+<rect x="856.77" y="110.50" width="1" height="19.5" fill="#c9d1d9" opacity="0.8"/>
+<text x="870.82" y="124.54" fill="#c9d1d9" opacity="0.6" textLength="81.27" lengthAdjust="spacing">UI-CART-2</text>
+<text x="961.12" y="124.54" fill="#c9d1d9" opacity="0.6">·</text>
+<text x="979.18" y="124.54" fill="#c9d1d9" opacity="0.6">⚠</text>
+<text x="997.24" y="124.54" fill="#c9d1d9" opacity="0.6" textLength="117.39" lengthAdjust="spacing">PERF-CACHE-2:</text>
+<text x="1123.66" y="124.54" fill="#c9d1d9" opacity="0.6">2</text>
+<text x="22.00" y="144.04" fill="#c9d1d9" font-weight="700">-</text>
+<text x="40.06" y="144.04" fill="#c9d1d9" font-weight="700" textLength="72.24" lengthAdjust="spacing">sprint-1</text>
+<text x="121.33" y="144.04" fill="#c9d1d9" font-weight="700" textLength="27.09" lengthAdjust="spacing">(5)</text>
+<text x="157.45" y="144.04" fill="#c9d1d9" font-weight="700" textLength="18.06" lengthAdjust="spacing">2⚙</text>
+<text x="184.54" y="144.04" fill="#c9d1d9" font-weight="700">1</text>
+<path d="M198.81 133.12H206.39L202.60 139.75ZM202.60 139.75L206.39 146.38H198.81Z" fill="#c9d1d9"/>
+<text x="220.66" y="144.04" fill="#c9d1d9" font-weight="700" textLength="18.06" lengthAdjust="spacing">1✓</text>
+<text x="247.75" y="144.04" fill="#c9d1d9" font-weight="700">1</text>
+<path d="M257.86 133.12H264.73L261.29 139.75ZM261.29 139.75L264.73 146.38H257.86Z" fill="#c9d1d9"/>
+<rect x="856.77" y="130.00" width="1" height="19.5" fill="#c9d1d9" opacity="0.8"/>
+<text x="870.82" y="144.04" fill="#c9d1d9" opacity="0.6" textLength="45.15" lengthAdjust="spacing">codex</text>
+<text x="925.00" y="144.04" fill="#c9d1d9" opacity="0.6">·</text>
+<text x="943.06" y="144.04" fill="#c9d1d9" opacity="0.6" textLength="54.18" lengthAdjust="spacing">model:</text>
+<text x="1006.27" y="144.04" fill="#c9d1d9" opacity="0.6" textLength="90.30" lengthAdjust="spacing">gpt-6-luna</text>
+<text x="1105.60" y="144.04" fill="#c9d1d9" opacity="0.6">·</text>
+<text x="1123.66" y="144.04" fill="#c9d1d9" opacity="0.6" textLength="63.21" lengthAdjust="spacing">effort:</text>
+<text x="1195.90" y="144.04" fill="#c9d1d9" opacity="0.6" textLength="54.18" lengthAdjust="spacing">medium</text>
+<text x="40.06" y="163.54" fill="#c9d1d9" textLength="90.30" lengthAdjust="spacing">API-AUTH-1</text>
+<text x="229.69" y="163.54" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">cx</text>
+<text x="256.78" y="163.54" fill="#c9d1d9">S</text>
+<text x="274.84" y="163.54" fill="#c9d1d9" textLength="27.09" lengthAdjust="spacing">6.1</text>
+<text x="310.96" y="163.54" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">MD</text>
+<text x="365.14" y="163.54" fill="#3fb950">✓</text>
+<text x="383.20" y="163.54" fill="#3fb950" textLength="108.36" lengthAdjust="spacing">report-ready</text>
+<text x="545.74" y="163.54" fill="#c9d1d9" textLength="27.09" lengthAdjust="spacing">41m</text>
+<text x="581.86" y="163.54" fill="#c9d1d9" textLength="27.09" lengthAdjust="spacing">20s</text>
+<text x="617.98" y="163.54" fill="#c9d1d9" textLength="36.12" lengthAdjust="spacing">250k</text>
+<text x="690.22" y="163.54" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">3c</text>
+<text x="717.31" y="163.54" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">5f</text>
+<text x="771.49" y="163.54" fill="#3fb950" textLength="45.15" lengthAdjust="spacing">ready</text>
+<rect x="856.77" y="149.50" width="1" height="19.5" fill="#c9d1d9" opacity="0.8"/>
+<text x="870.82" y="163.54" fill="#c9d1d9" textLength="63.21" lengthAdjust="spacing">Compute</text>
+<text x="943.06" y="163.54" fill="#c9d1d9" textLength="27.09" lengthAdjust="spacing">the</text>
+<text x="979.18" y="163.54" fill="#c9d1d9" textLength="36.12" lengthAdjust="spacing">cart</text>
+<text x="1024.33" y="163.54" fill="#c9d1d9" textLength="45.15" lengthAdjust="spacing">total</text>
+<text x="1078.51" y="163.54" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">on</text>
+<text x="1105.60" y="163.54" fill="#c9d1d9" textLength="27.09" lengthAdjust="spacing">the</text>
+<text x="1141.72" y="163.54" fill="#c9d1d9" textLength="54.18" lengthAdjust="spacing">server</text>
+<text x="1204.93" y="163.54" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">or</text>
+<text x="1232.02" y="163.54" fill="#c9d1d9" textLength="27.09" lengthAdjust="spacing">the</text>
+<text x="1268.14" y="163.54" fill="#c9d1d9" textLength="63.21" lengthAdjust="spacing">client?</text>
+<text x="40.06" y="183.04" fill="#c9d1d9" textLength="108.36" lengthAdjust="spacing">DB-MIGRATE-3</text>
+<text x="229.69" y="183.04" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">cx</text>
+<text x="256.78" y="183.04" fill="#c9d1d9">S</text>
+<text x="274.84" y="183.04" fill="#c9d1d9" textLength="27.09" lengthAdjust="spacing">6.1</text>
+<text x="310.96" y="183.04" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">HI</text>
+<text x="365.14" y="183.04" fill="#39c5cf">⚙</text>
+<text x="383.20" y="183.04" fill="#39c5cf" textLength="63.21" lengthAdjust="spacing">working</text>
+<text x="545.74" y="183.04" fill="#c9d1d9" textLength="27.09" lengthAdjust="spacing">24m</text>
+<text x="581.86" y="183.04" fill="#c9d1d9" textLength="27.09" lengthAdjust="spacing">20s</text>
+<text x="617.98" y="183.04" fill="#c9d1d9" textLength="36.12" lengthAdjust="spacing">369k</text>
+<text x="690.22" y="183.04" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">2c</text>
+<text x="717.31" y="183.04" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">4f</text>
+<text x="771.49" y="183.04" fill="#c9d1d9" opacity="0.6">-</text>
+<rect x="856.77" y="169.00" width="1" height="19.5" fill="#c9d1d9" opacity="0.8"/>
+<text x="870.82" y="183.04" fill="#c9d1d9">•</text>
+<text x="888.88" y="183.04" fill="#c9d1d9" textLength="36.12" lengthAdjust="spacing">Read</text>
+<text x="934.03" y="183.04" fill="#c9d1d9" textLength="153.51" lengthAdjust="spacing">src/cart/store.ts</text>
+<text x="40.06" y="202.54" fill="#c9d1d9" textLength="117.39" lengthAdjust="spacing">DOCS-SEARCH-1</text>
+<text x="229.69" y="202.54" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">cl</text>
+<text x="256.78" y="202.54" fill="#c9d1d9">S</text>
+<text x="274.84" y="202.54" fill="#c9d1d9" textLength="27.09" lengthAdjust="spacing">5.5</text>
+<text x="310.96" y="202.54" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">MD</text>
+<path d="M370.38 191.62H377.96L374.17 198.25ZM374.17 198.25L377.96 204.88H370.38Z" fill="#39c5cf"/>
+<text x="392.23" y="202.54" fill="#39c5cf" textLength="90.30" lengthAdjust="spacing">background</text>
+<text x="545.74" y="202.54" fill="#c9d1d9" textLength="27.09" lengthAdjust="spacing">17m</text>
+<text x="581.86" y="202.54" fill="#c9d1d9" textLength="27.09" lengthAdjust="spacing">20s</text>
+<text x="617.98" y="202.54" fill="#c9d1d9" textLength="27.09" lengthAdjust="spacing">92k</text>
+<text x="690.22" y="202.54" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">1c</text>
+<text x="717.31" y="202.54" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">2f</text>
+<text x="771.49" y="202.54" fill="#c9d1d9" opacity="0.6">-</text>
+<rect x="856.77" y="188.50" width="1" height="19.5" fill="#c9d1d9" opacity="0.8"/>
+<text x="870.82" y="202.54" fill="#c9d1d9">•</text>
+<text x="888.88" y="202.54" fill="#c9d1d9">A</text>
+<text x="906.94" y="202.54" fill="#c9d1d9" textLength="45.15" lengthAdjust="spacing">price</text>
+<text x="961.12" y="202.54" fill="#c9d1d9" textLength="27.09" lengthAdjust="spacing">can</text>
+<text x="997.24" y="202.54" fill="#c9d1d9" textLength="54.18" lengthAdjust="spacing">change</text>
+<text x="1060.45" y="202.54" fill="#c9d1d9" textLength="45.15" lengthAdjust="spacing">while</text>
+<text x="1114.63" y="202.54" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">an</text>
+<text x="1141.72" y="202.54" fill="#c9d1d9" textLength="36.12" lengthAdjust="spacing">item</text>
+<text x="1186.87" y="202.54" fill="#c9d1d9" textLength="36.12" lengthAdjust="spacing">sits</text>
+<text x="1232.02" y="202.54" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">in</text>
+<text x="1259.11" y="202.54" fill="#c9d1d9" textLength="27.09" lengthAdjust="spacing">the</text>
+<text x="1295.23" y="202.54" fill="#c9d1d9" textLength="45.15" lengthAdjust="spacing">cart,</text>
+<text x="40.06" y="222.04" fill="#c9d1d9" textLength="153.51" lengthAdjust="spacing">REVIEW-API-AUTH-1</text>
+<text x="229.69" y="222.04" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">cl</text>
+<text x="256.78" y="222.04" fill="#c9d1d9">O</text>
+<text x="274.84" y="222.04" fill="#c9d1d9" textLength="27.09" lengthAdjust="spacing">5.5</text>
+<text x="310.96" y="222.04" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">HI</text>
+<text x="365.14" y="222.04" fill="#39c5cf">⚙</text>
+<text x="383.20" y="222.04" fill="#39c5cf" textLength="63.21" lengthAdjust="spacing">working</text>
+<text x="545.74" y="222.04" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">9m</text>
+<text x="572.83" y="222.04" fill="#c9d1d9" textLength="27.09" lengthAdjust="spacing">20s</text>
+<text x="617.98" y="222.04" fill="#c9d1d9" textLength="36.12" lengthAdjust="spacing">117k</text>
+<text x="690.22" y="222.04" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">0c</text>
+<text x="717.31" y="222.04" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">1f</text>
+<text x="771.49" y="222.04" fill="#c9d1d9" opacity="0.6">-</text>
+<rect x="856.77" y="208.00" width="1" height="19.5" fill="#c9d1d9" opacity="0.8"/>
+<text x="888.88" y="222.04" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">so</text>
+<text x="915.97" y="222.04" fill="#c9d1d9" textLength="27.09" lengthAdjust="spacing">the</text>
+<text x="952.09" y="222.04" fill="#c9d1d9" textLength="45.15" lengthAdjust="spacing">total</text>
+<text x="1006.27" y="222.04" fill="#c9d1d9" textLength="27.09" lengthAdjust="spacing">has</text>
+<text x="1042.39" y="222.04" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">to</text>
+<text x="1069.48" y="222.04" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">be</text>
+<text x="1096.57" y="222.04" fill="#c9d1d9" textLength="108.36" lengthAdjust="spacing">recalculated</text>
+<text x="1213.96" y="222.04" fill="#c9d1d9" textLength="90.30" lengthAdjust="spacing">somewhere.</text>
+<text x="22.00" y="241.54" fill="#c9d1d9" font-weight="700">-</text>
+<text x="40.06" y="241.54" fill="#c9d1d9" font-weight="700" textLength="72.24" lengthAdjust="spacing">sprint-2</text>
+<text x="121.33" y="241.54" fill="#c9d1d9" font-weight="700" textLength="27.09" lengthAdjust="spacing">(3)</text>
+<text x="157.45" y="241.54" fill="#c9d1d9" font-weight="700" textLength="18.06" lengthAdjust="spacing">1⚙</text>
+<text x="184.54" y="241.54" fill="#c9d1d9" font-weight="700" textLength="18.06" lengthAdjust="spacing">1?</text>
+<text x="211.63" y="241.54" fill="#c9d1d9" font-weight="700">1</text>
+<path d="M221.74 230.62H228.61L225.17 237.25ZM225.17 237.25L228.61 243.88H221.74Z" fill="#c9d1d9"/>
+<rect x="856.77" y="227.50" width="1" height="19.5" fill="#c9d1d9" opacity="0.8"/>
+<text x="22.00" y="261.04" fill="#d29922" font-weight="700">⚠</text>
+<text x="40.06" y="261.04" fill="#c9d1d9" textLength="108.36" lengthAdjust="spacing">PERF-CACHE-2</text>
+<text x="229.69" y="261.04" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">cx</text>
+<text x="256.78" y="261.04" fill="#c9d1d9">L</text>
+<text x="274.84" y="261.04" fill="#c9d1d9">6</text>
+<text x="292.90" y="261.04" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">MD</text>
+<text x="365.14" y="261.04" fill="#39c5cf">⚙</text>
+<text x="383.20" y="261.04" fill="#39c5cf" textLength="63.21" lengthAdjust="spacing">working</text>
+<text x="545.74" y="261.04" fill="#c9d1d9" textLength="27.09" lengthAdjust="spacing">15m</text>
+<text x="581.86" y="261.04" fill="#c9d1d9" textLength="27.09" lengthAdjust="spacing">20s</text>
+<text x="617.98" y="261.04" fill="#c9d1d9" textLength="36.12" lengthAdjust="spacing">185k</text>
+<text x="690.22" y="261.04" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">2c</text>
+<text x="717.31" y="261.04" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">4f</text>
+<text x="771.49" y="261.04" fill="#c9d1d9" opacity="0.6">-</text>
+<rect x="856.77" y="247.00" width="1" height="19.5" fill="#c9d1d9" opacity="0.8"/>
+<text x="888.88" y="261.04" fill="#c9d1d9" textLength="72.24" lengthAdjust="spacing">Question</text>
+<text x="970.15" y="261.04" fill="#c9d1d9" textLength="27.09" lengthAdjust="spacing">1/1</text>
+<text x="22.00" y="280.54" fill="#58a6ff" font-weight="700">▸</text>
+<text x="40.06" y="280.54" fill="#58a6ff" font-weight="700" textLength="81.27" lengthAdjust="spacing">UI-CART-2</text>
+<text x="229.69" y="280.54" fill="#58a6ff" font-weight="700" textLength="18.06" lengthAdjust="spacing">cx</text>
+<text x="256.78" y="280.54" fill="#58a6ff" font-weight="700">L</text>
+<text x="274.84" y="280.54" fill="#58a6ff" font-weight="700">6</text>
+<text x="292.90" y="280.54" fill="#58a6ff" font-weight="700" textLength="18.06" lengthAdjust="spacing">MD</text>
+<text x="365.14" y="280.54" fill="#bc8cff" font-weight="700">?</text>
+<text x="383.20" y="280.54" fill="#bc8cff" font-weight="700" textLength="99.33" lengthAdjust="spacing">needs-input</text>
+<text x="545.74" y="280.54" fill="#58a6ff" font-weight="700" textLength="27.09" lengthAdjust="spacing">12m</text>
+<text x="581.86" y="280.54" fill="#58a6ff" font-weight="700" textLength="27.09" lengthAdjust="spacing">20s</text>
+<text x="617.98" y="280.54" fill="#58a6ff" font-weight="700" textLength="36.12" lengthAdjust="spacing">144k</text>
+<text x="690.22" y="280.54" fill="#58a6ff" font-weight="700" textLength="18.06" lengthAdjust="spacing">1c</text>
+<text x="717.31" y="280.54" fill="#58a6ff" font-weight="700" textLength="18.06" lengthAdjust="spacing">3f</text>
+<text x="771.49" y="280.54" fill="#58a6ff" font-weight="700" opacity="0.6">-</text>
+<rect x="856.77" y="266.50" width="1" height="19.5" fill="#c9d1d9" opacity="0.8"/>
+<text x="888.88" y="280.54" fill="#c9d1d9" textLength="63.21" lengthAdjust="spacing">Compute</text>
+<text x="961.12" y="280.54" fill="#c9d1d9" textLength="27.09" lengthAdjust="spacing">the</text>
+<text x="997.24" y="280.54" fill="#c9d1d9" textLength="36.12" lengthAdjust="spacing">cart</text>
+<text x="1042.39" y="280.54" fill="#c9d1d9" textLength="45.15" lengthAdjust="spacing">total</text>
+<text x="1096.57" y="280.54" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">on</text>
+<text x="1123.66" y="280.54" fill="#c9d1d9" textLength="27.09" lengthAdjust="spacing">the</text>
+<text x="1159.78" y="280.54" fill="#c9d1d9" textLength="54.18" lengthAdjust="spacing">server</text>
+<text x="1222.99" y="280.54" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">or</text>
+<text x="1250.08" y="280.54" fill="#c9d1d9" textLength="27.09" lengthAdjust="spacing">the</text>
+<text x="1286.20" y="280.54" fill="#c9d1d9" textLength="63.21" lengthAdjust="spacing">client?</text>
+<text x="22.00" y="300.04" fill="#c9d1d9" opacity="0.6">-</text>
+<text x="40.06" y="300.04" fill="#c9d1d9" opacity="0.6" textLength="45.15" lengthAdjust="spacing">Queue</text>
+<text x="94.24" y="300.04" fill="#c9d1d9" opacity="0.6" textLength="27.09" lengthAdjust="spacing">(2)</text>
+<text x="130.36" y="300.04" fill="#c9d1d9" opacity="0.6">–</text>
+<text x="148.42" y="300.04" fill="#c9d1d9" opacity="0.6">u</text>
+<text x="166.48" y="300.04" fill="#c9d1d9" opacity="0.6" textLength="45.15" lengthAdjust="spacing">front</text>
+<text x="229.69" y="300.04" fill="#c9d1d9" opacity="0.6">d</text>
+<text x="247.75" y="300.04" fill="#c9d1d9" opacity="0.6" textLength="54.18" lengthAdjust="spacing">remove</text>
+<text x="319.99" y="300.04" fill="#c9d1d9" opacity="0.6">p</text>
+<text x="338.05" y="300.04" fill="#c9d1d9" opacity="0.6" textLength="45.15" lengthAdjust="spacing">pause</text>
+<rect x="856.77" y="286.00" width="1" height="19.5" fill="#c9d1d9" opacity="0.8"/>
+<text x="40.06" y="319.54" fill="#c9d1d9" textLength="180.60" lengthAdjust="spacing">REVIEW-DOCS-SEARCH-1</text>
+<text x="229.69" y="319.54" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">cl</text>
+<text x="256.78" y="319.54" fill="#c9d1d9">O</text>
+<text x="274.84" y="319.54" fill="#c9d1d9" textLength="27.09" lengthAdjust="spacing">5.5</text>
+<text x="310.96" y="319.54" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">HI</text>
+<text x="365.14" y="319.54" fill="#c9d1d9" opacity="0.6" textLength="18.06" lengthAdjust="spacing">1.</text>
+<text x="392.23" y="319.54" fill="#c9d1d9" opacity="0.6" textLength="45.15" lengthAdjust="spacing">czeka</text>
+<text x="446.41" y="319.54" fill="#c9d1d9" opacity="0.6" textLength="18.06" lengthAdjust="spacing">na</text>
+<text x="473.50" y="319.54" fill="#c9d1d9" opacity="0.6" textLength="117.39" lengthAdjust="spacing">DOCS-SEARCH-1</text>
+<rect x="856.77" y="305.50" width="1" height="19.5" fill="#c9d1d9" opacity="0.8"/>
+<text x="906.94" y="319.54" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">2.</text>
+<text x="934.03" y="319.54" fill="#c9d1d9" textLength="54.18" lengthAdjust="spacing">Client</text>
+<text x="997.24" y="319.54" fill="#c9d1d9" textLength="45.15" lengthAdjust="spacing">store</text>
+<text x="1132.69" y="319.54" fill="#c9d1d9" textLength="63.21" lengthAdjust="spacing">Instant</text>
+<text x="1204.93" y="319.54" fill="#c9d1d9" textLength="27.09" lengthAdjust="spacing">UI,</text>
+<text x="1241.05" y="319.54" fill="#c9d1d9" textLength="45.15" lengthAdjust="spacing">needs</text>
+<text x="1295.23" y="319.54" fill="#c9d1d9">a</text>
+<text x="1313.29" y="319.54" fill="#c9d1d9" textLength="54.18" lengthAdjust="spacing">guard.</text>
+<text x="40.06" y="339.04" fill="#c9d1d9" textLength="144.48" lengthAdjust="spacing">REVIEW-UI-CART-2</text>
+<text x="229.69" y="339.04" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">cl</text>
+<text x="256.78" y="339.04" fill="#c9d1d9">O</text>
+<text x="274.84" y="339.04" fill="#c9d1d9" textLength="27.09" lengthAdjust="spacing">5.5</text>
+<text x="310.96" y="339.04" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">HI</text>
+<text x="365.14" y="339.04" fill="#c9d1d9" opacity="0.6" textLength="18.06" lengthAdjust="spacing">2.</text>
+<text x="392.23" y="339.04" fill="#c9d1d9" opacity="0.6" textLength="45.15" lengthAdjust="spacing">czeka</text>
+<text x="446.41" y="339.04" fill="#c9d1d9" opacity="0.6" textLength="18.06" lengthAdjust="spacing">na</text>
+<text x="473.50" y="339.04" fill="#c9d1d9" opacity="0.6" textLength="81.27" lengthAdjust="spacing">UI-CART-2</text>
+<rect x="856.77" y="325.00" width="1" height="19.5" fill="#c9d1d9" opacity="0.8"/>
+<text x="906.94" y="339.04" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">3.</text>
+<text x="934.03" y="339.04" fill="#c9d1d9" textLength="81.27" lengthAdjust="spacing">Something</text>
+<text x="1024.33" y="339.04" fill="#c9d1d9" textLength="36.12" lengthAdjust="spacing">else</text>
+<rect x="856.77" y="344.50" width="1" height="19.5" fill="#c9d1d9" opacity="0.8"/>
+<rect x="856.77" y="364.00" width="1" height="19.5" fill="#c9d1d9" opacity="0.8"/>
+<text x="888.88" y="378.04" fill="#c9d1d9" textLength="45.15" lengthAdjust="spacing">Press</text>
+<text x="943.06" y="378.04" fill="#c9d1d9" textLength="45.15" lengthAdjust="spacing">enter</text>
+<text x="997.24" y="378.04" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">to</text>
+<text x="1024.33" y="378.04" fill="#c9d1d9" textLength="63.21" lengthAdjust="spacing">confirm</text>
+<text x="1096.57" y="378.04" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">or</text>
+<text x="1123.66" y="378.04" fill="#c9d1d9" textLength="27.09" lengthAdjust="spacing">esc</text>
+<text x="1159.78" y="378.04" fill="#c9d1d9" textLength="18.06" lengthAdjust="spacing">to</text>
+<text x="1186.87" y="378.04" fill="#c9d1d9" textLength="54.18" lengthAdjust="spacing">cancel</text>
+<rect x="856.77" y="383.50" width="1" height="19.5" fill="#c9d1d9" opacity="0.8"/>
+<rect x="856.77" y="403.00" width="1" height="19.5" fill="#c9d1d9" opacity="0.8"/>
+<rect x="856.77" y="422.50" width="1" height="19.5" fill="#c9d1d9" opacity="0.8"/>
+<rect x="856.77" y="442.00" width="1" height="19.5" fill="#c9d1d9" opacity="0.8"/>
+<text x="22.00" y="495.04" fill="#c9d1d9" opacity="0.6" textLength="45.15" lengthAdjust="spacing">Enter</text>
+<text x="76.18" y="495.04" fill="#c9d1d9" opacity="0.6">–</text>
+<text x="94.24" y="495.04" fill="#c9d1d9" opacity="0.6" textLength="36.12" lengthAdjust="spacing">open</text>
+<text x="139.39" y="495.04" fill="#c9d1d9" opacity="0.6" textLength="27.09" lengthAdjust="spacing">the</text>
+<text x="175.51" y="495.04" fill="#c9d1d9" opacity="0.6" textLength="45.15" lengthAdjust="spacing">agent</text>
+<text x="229.69" y="495.04" fill="#c9d1d9" opacity="0.6">·</text>
+<text x="247.75" y="495.04" fill="#c9d1d9" opacity="0.6" textLength="27.09" lengthAdjust="spacing">F12</text>
+<text x="283.87" y="495.04" fill="#c9d1d9" opacity="0.6">–</text>
+<text x="301.93" y="495.04" fill="#c9d1d9" opacity="0.6" textLength="36.12" lengthAdjust="spacing">back</text>
+<text x="347.08" y="495.04" fill="#c9d1d9" opacity="0.6" textLength="18.06" lengthAdjust="spacing">to</text>
+<text x="374.17" y="495.04" fill="#c9d1d9" opacity="0.6" textLength="27.09" lengthAdjust="spacing">the</text>
+<text x="410.29" y="495.04" fill="#c9d1d9" opacity="0.6" textLength="36.12" lengthAdjust="spacing">list</text>
+<text x="22.00" y="514.54" fill="#c9d1d9" opacity="0.6">m</text>
+<text x="40.06" y="514.54" fill="#c9d1d9" opacity="0.6">M</text>
+<text x="58.12" y="514.54" fill="#c9d1d9" opacity="0.6" textLength="36.12" lengthAdjust="spacing">move</text>
+<text x="103.27" y="514.54" fill="#c9d1d9" opacity="0.6">i</text>
+<text x="121.33" y="514.54" fill="#c9d1d9" opacity="0.6" textLength="27.09" lengthAdjust="spacing">int</text>
+<text x="157.45" y="514.54" fill="#c9d1d9" opacity="0.6" textLength="27.09" lengthAdjust="spacing">c/r</text>
+<text x="193.57" y="514.54" fill="#c9d1d9" opacity="0.6" textLength="36.12" lengthAdjust="spacing">pull</text>
+<text x="238.72" y="514.54" fill="#c9d1d9" opacity="0.6">x</text>
+<text x="256.78" y="514.54" fill="#c9d1d9" opacity="0.6" textLength="45.15" lengthAdjust="spacing">close</text>
+<text x="310.96" y="514.54" fill="#c9d1d9" opacity="0.6">X</text>
+<text x="329.02" y="514.54" fill="#c9d1d9" opacity="0.6" textLength="54.18" lengthAdjust="spacing">cancel</text>
+<text x="392.23" y="514.54" fill="#c9d1d9" opacity="0.6">k</text>
+<text x="410.29" y="514.54" fill="#c9d1d9" opacity="0.6" textLength="54.18" lengthAdjust="spacing">cohort</text>
+<text x="473.50" y="514.54" fill="#c9d1d9" opacity="0.6">h</text>
+<text x="491.56" y="514.54" fill="#c9d1d9" opacity="0.6" textLength="36.12" lengthAdjust="spacing">hide</text>
+<text x="536.71" y="514.54" fill="#c9d1d9" opacity="0.6">l</text>
+<text x="554.77" y="514.54" fill="#c9d1d9" opacity="0.6" textLength="27.09" lengthAdjust="spacing">log</text>
+<text x="590.89" y="514.54" fill="#c9d1d9" opacity="0.6">L</text>
+<text x="608.95" y="514.54" fill="#c9d1d9" opacity="0.6">G</text>
+<text x="627.01" y="514.54" fill="#c9d1d9" opacity="0.6">R</text>
+<text x="645.07" y="514.54" fill="#c9d1d9" opacity="0.6">w</text>
+<text x="663.13" y="514.54" fill="#c9d1d9" opacity="0.6" textLength="45.15" lengthAdjust="spacing">u/d/p</text>
+<text x="717.31" y="514.54" fill="#c9d1d9" opacity="0.6">?</text>
+</g>
+</svg>
