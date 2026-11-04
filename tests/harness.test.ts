@@ -87,3 +87,16 @@ describe('live harness: refusals', () => {
     assert.ok(!h.env.PATH?.includes('/opt/homebrew'), 'the real agents live there');
   });
 });
+
+// Kimi safety is required even before the adapter becomes available.
+it('refuses a real kimi resolver and any PATH directory containing a real kimi', () => {
+  const base = input('kimi-safety');
+  assert.throws(() => checkHarnessSafety({ ...base, resolve: (name, env) => name === 'kimi' ? '/opt/homebrew/bin/kimi' : base.resolve(name, env) }), /"kimi" resolves to \/opt\/homebrew\/bin\/kimi/);
+  const directory = scratch.sub('real-kimi-directory');
+  fs.writeFileSync(path.join(directory, 'kimi'), '#!/bin/sh\n', { mode: 0o755 });
+  assert.throws(() => checkHarnessSafety({ ...base, pathEnv: `${base.fakeBin}:${directory}` }), /has a real "kimi"/);
+});
+it('refuses KIMI_CODE_HOME outside the live sandbox', () => {
+  const base = input('kimi-home-safety');
+  assert.throws(() => checkHarnessSafety({ ...base, kimiHome: '/outside/kimi-home' }), /KIMI_CODE_HOME .* not inside the sandbox/);
+});

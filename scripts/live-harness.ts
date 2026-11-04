@@ -1,3 +1,4 @@
+import { PROVIDER_IDS } from '../src/core/providers/types.ts';
 import { spawn, spawnSync } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
@@ -20,7 +21,8 @@ export class HarnessRefusal extends Error {
 }
 
 /** Commands that must resolve to a fake in the sandbox, never to the real binary. */
-export const FAKED_COMMANDS = ['claude', 'codex', 'pbcopy', 'pbpaste', 'terminal-notifier', 'osascript', 'notify-send', 'wl-copy', 'wl-paste', 'xclip'] as const;
+const SAFETY_AGENTS = [...new Set<string>([...PROVIDER_IDS, 'kimi'])];
+export const FAKED_COMMANDS = [...SAFETY_AGENTS, 'pbcopy', 'pbpaste', 'terminal-notifier', 'osascript', 'notify-send', 'wl-copy', 'wl-paste', 'xclip'] as const;
 /** Real tools the scripts under test need: linked into the fake bin directory (the real directory may hold the real agents too). */
 export const LINKED_COMMANDS = ['tmux', 'git', 'node'] as const;
 
@@ -39,6 +41,8 @@ export interface SafetyInput {
   defaultSocketPath?: string | undefined;
   agentctlHome: string;
   codexHome: string;
+  kimiHome?: string;
+  claudeConfigDir?: string;
   /** The user's real directories, which must never be the sandbox's ones. */
   realHomes?: readonly string[];
 }
@@ -64,16 +68,17 @@ export function checkHarnessSafety(input: SafetyInput): void {
       throw new HarnessRefusal(`"${name}" resolves to ${found}, outside the fake bin directory ${input.fakeBin}. Remove its directory from PATH.`);
     }
   }
-  for (const name of ['claude', 'codex']) {
+  for (const name of PROVIDER_IDS) {
     if (input.resolve(name, input.pathEnv) === undefined) throw new HarnessRefusal(`the fake "${name}" is not found on PATH (${input.pathEnv})`);
   }
   for (const dir of input.pathEnv.split(path.delimiter).filter(Boolean)) {
     if (inside(path.resolve(dir), input.fakeBin)) continue;
-    for (const name of ['claude', 'codex']) {
+    for (const name of SAFETY_AGENTS) {
       if (fs.existsSync(path.join(dir, name))) throw new HarnessRefusal(`PATH contains ${dir}, which has a real "${name}"`);
     }
   }
-  for (const [label, dir] of [['AGENTCTL_HOME', input.agentctlHome], ['CODEX_HOME', input.codexHome]] as const) {
+  for (const [label, dir] of [['AGENTCTL_HOME', input.agentctlHome], ['CODEX_HOME', input.codexHome], ['KIMI_CODE_HOME', input.kimiHome], ['CLAUDE_CONFIG_DIR', input.claudeConfigDir]] as const) {
+    if (dir === undefined) continue;
     if (!inside(real(dir), real(input.root))) throw new HarnessRefusal(`${label} (${dir}) is not inside the sandbox ${input.root}`);
     for (const home of input.realHomes ?? []) {
       if (real(dir) === real(home)) throw new HarnessRefusal(`${label} is ${home}, the real one`);
@@ -134,6 +139,7 @@ exit 0
 const FAKES: Record<string, string> = {
   claude: FAKE_AGENT('claude'),
   codex: FAKE_AGENT('codex'),
+  kimi: '#!/bin/sh\nexit 1\n',
   pbcopy: '#!/bin/bash\ncat > "${HARNESS_CLIPBOARD:?}"\n',
   pbpaste: '#!/bin/bash\ncat "${HARNESS_CLIPBOARD:?}" 2>/dev/null\n',
   'wl-copy': '#!/bin/bash\ncat > "${HARNESS_CLIPBOARD:?}"\n',
@@ -209,6 +215,7 @@ export class Harness {
       AGENTCTL_HOME: this.agentctlHome,
       CODEX_HOME: this.codexHome,
       CLAUDE_CONFIG_DIR: path.join(this.root, 'claude-config'),
+      KIMI_CODE_HOME: path.join(this.root, 'kimi-home'),
       GIT_CONFIG_GLOBAL: path.join(this.root, 'gitconfig'),
       GIT_CONFIG_NOSYSTEM: '1',
       HARNESS_AGENT_LOG: this.agentLog,
@@ -228,7 +235,9 @@ export class Harness {
       defaultSocketPath: defaultTmuxSocket(),
       agentctlHome: this.agentctlHome,
       codexHome: this.codexHome,
-      realHomes: [path.join(os.homedir(), '.agentctl'), path.join(os.homedir(), '.codex')],
+      kimiHome: this.env.KIMI_CODE_HOME,
+      claudeConfigDir: this.env.CLAUDE_CONFIG_DIR,
+      realHomes: [path.join(os.homedir(), '.agentctl'), path.join(os.homedir(), '.codex'), path.join(os.homedir(), '.claude'), path.join(os.homedir(), '.kimi-code')],
     });
   }
 
@@ -237,7 +246,7 @@ export class Harness {
     // A sandbox is made new every time (its own folder `live-<name>`, nothing else is ever removed).
     if (!/^live-[a-z0-9-]+$/.test(path.basename(this.root))) throw new HarnessRefusal(`${this.root} is not a sandbox folder`);
     fs.rmSync(this.root, { recursive: true, force: true });
-    for (const dir of [this.root, this.fakeBin, this.home, this.agentctlHome, this.codexHome, this.tmuxDir, this.env.CLAUDE_CONFIG_DIR as string, this.env.TMPDIR as string]) fs.mkdirSync(dir, { recursive: true });
+    for (const dir of [this.root, this.fakeBin, this.home, this.agentctlHome, this.codexHome, this.tmuxDir, this.env.CLAUDE_CONFIG_DIR as string, this.env.KIMI_CODE_HOME as string, this.env.TMPDIR as string]) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(this.root, 'gitconfig'), '[user]\n\tname = Harness\n\temail = harness@example.invalid\n[init]\n\tdefaultBranch = main\n');
     for (const [name, body] of Object.entries(FAKES)) fs.writeFileSync(path.join(this.fakeBin, name), body, { mode: 0o755 });
     for (const name of LINKED_COMMANDS) {
@@ -253,7 +262,7 @@ export class Harness {
     );
     fs.writeFileSync(
       this.tmuxConf,
-      `set -g exit-empty off\nset -g default-command "exec env PATH=${this.env.PATH} HOME=${this.home} AGENTCTL_HOME=${this.agentctlHome} CODEX_HOME=${this.codexHome} CLAUDE_CONFIG_DIR=${this.env.CLAUDE_CONFIG_DIR} GIT_CONFIG_GLOBAL=${this.env.GIT_CONFIG_GLOBAL} HARNESS_AGENT_LOG=${this.agentLog} HARNESS_NOTIFY_LOG=${this.notifyLog} HARNESS_CLIPBOARD=${this.clipboard} bash --noprofile --norc"\n`,
+      `set -g exit-empty off\nset -g default-command "exec env PATH=${this.env.PATH} HOME=${this.home} AGENTCTL_HOME=${this.agentctlHome} CODEX_HOME=${this.codexHome} CLAUDE_CONFIG_DIR=${this.env.CLAUDE_CONFIG_DIR} KIMI_CODE_HOME=${this.env.KIMI_CODE_HOME} TMPDIR=${this.env.TMPDIR} GIT_CONFIG_GLOBAL=${this.env.GIT_CONFIG_GLOBAL} HARNESS_AGENT_LOG=${this.agentLog} HARNESS_NOTIFY_LOG=${this.notifyLog} HARNESS_CLIPBOARD=${this.clipboard} bash --noprofile --norc"\n`,
     );
     this.check();
     const started = this.tmux(['-f', this.tmuxConf, 'start-server', ';', 'display-message', '-p', '#{socket_path}']);
