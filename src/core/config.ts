@@ -9,8 +9,10 @@ import { findAutoAcceptFlag } from './safety.ts';
 import type { TaskState } from './state.ts';
 import { AgentctlError, Problems, errorMessage, expandHome, isObject, resolvePath } from './util.ts';
 
-export const AGENT_NAMES = ['claude', 'codex'] as const;
-export type AgentName = (typeof AGENT_NAMES)[number];
+import { PROVIDER_IDS } from './providers/types.ts';
+import type { ProviderId } from './providers/types.ts';
+export const AGENT_NAMES = PROVIDER_IDS;
+export type AgentName = ProviderId;
 export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type Effort = (typeof EFFORTS)[number];
 
@@ -87,6 +89,7 @@ export interface AgentSettings {
 }
 
 export interface GlobalConfig extends Layer {
+  providers: ProviderId[];
   /** Absolute path of the directory that holds per-task cache folders: only the reports the agents write. */
   cache: string;
   /** Where agentctl keeps its own state per task (`<stateDir>/<window>/TASK.md`, setup.log, markers), out of reach of the agents. */
@@ -396,7 +399,7 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
 
 /** The keys accepted in every layer: the global config, `.agentctl.yaml` and (with a few of its own) a spec. docs/configuration.md describes each one. */
 export const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'setup', 'defaults', 'guide', 'review'];
-export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'limited', 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git', 'cohort', 'delivery_confirm_s', 'preview'];
+export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'limited', 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git', 'cohort', 'delivery_confirm_s', 'preview', 'providers'];
 export const LIMITS_KEYS = [...AGENT_NAMES, 'count_external', 'count_report_ready'];
 export const DEFAULTS_KEYS = ['agent', 'model', 'effort', 'remote_control'];
 export const LINK_KEYS = ['from', 'to'];
@@ -1028,6 +1031,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   if (!isObject(raw)) throw new AgentctlError(`${file}: the top level must be a mapping`);
   checkKeys(raw, GLOBAL_KEYS, 'config', p);
   const layer = parseLayer(raw, 'config', p);
+  const providers = parseProviders(raw.providers, p);
 
   const cache = parseString(raw.cache, 'config.cache', p) ?? '~/Projects/cache';
   const stateDir = parseString(raw.state_dir, 'config.state_dir', p) ?? path.join(dir, 'tasks');
@@ -1182,7 +1186,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   const deliveryConfirmS = raw.delivery_confirm_s ?? 60;
   if (typeof deliveryConfirmS !== 'number' || !Number.isFinite(deliveryConfirmS) || deliveryConfirmS <= 0) p.add('config.delivery_confirm_s must be a positive number');
   p.throwIfAny(`Invalid config ${file}:`, 'Fix the listed keys; see the README section "Configuration".');
-  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, deliveryConfirmS: deliveryConfirmS as number, limits, countExternal, countReportReady, preview, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, cohort, overload, limited, collisions, cancel, usage, guideLang, capacity, disk, git, path: file, loaded: exists };
+  const config: GlobalConfig = { ...layer, providers, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, deliveryConfirmS: deliveryConfirmS as number, limits, countExternal, countReportReady, preview, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, cohort, overload, limited, collisions, cancel, usage, guideLang, capacity, disk, git, path: file, loaded: exists };
   if (mirror) config.mirrorDir = resolvePath(mirror);
   return config;
 }
@@ -1200,4 +1204,16 @@ export function loadProjectConfig(repoPath: string): (Layer & { path: string }) 
   const layer = parseLayer(raw, PROJECT_CONFIG_NAME, p);
   p.throwIfAny(`Invalid project config ${file}:`, 'Fix the listed keys; see the README section "Configuration".');
   return { ...layer, path: file };
+}
+
+/** Both original providers remain mandatory; order controls the alternatives. */
+function parseProviders(value: unknown, p: Problems): ProviderId[] {
+  if (value === undefined) return [...PROVIDER_IDS];
+  if (!Array.isArray(value) || value.some(id => typeof id !== 'string' || !(PROVIDER_IDS as readonly string[]).includes(id))) {
+    p.add(`config.providers must be a list of known providers: ${PROVIDER_IDS.join(', ')}`);
+    return [...PROVIDER_IDS];
+  }
+  if (new Set(value).size !== value.length) p.add('config.providers must not contain duplicates');
+  for (const required of ['claude', 'codex']) if (!value.includes(required)) p.add(`config.providers must include ${required}`);
+  return value as ProviderId[];
 }

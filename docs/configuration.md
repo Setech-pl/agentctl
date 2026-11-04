@@ -36,6 +36,7 @@ Column "Layers": **g** global config, **p** project config, **s** spec.
 
 | Key | Type | Default | Layers | Meaning |
 |---|---|---|---|---|
+| `providers` | global | `[claude, codex]` | Active providers in order; both claude and codex are required, without duplicates. |
 | `cache` | path | `~/workspace/cache` | g | Directory with one folder per task, `<cache>/<task>/`: the only place the agents write to (reports). |
 | `state_dir` | path | `<config dir>/tasks` | g | agentctl's own state per task (`TASK.md`, `setup.log`, `event.json`, `notified.json`), out of the agents' reach. Closed tasks are archived next to it, in `archive/`. |
 | `session` | string | `agentctl` | g | Name of the tmux session. Letters, digits, `_` and `-`. |
