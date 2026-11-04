@@ -488,3 +488,25 @@ describe('0.17.4 fix 1: outputs are validated per section and entry (B2)', () =>
   });
 });
 
+describe('0.17.4 fix 1: queue preview identity ignores mutable start state (P13)', () => {
+  const queueSpec = (f: ReturnType<typeof fixture>, task: string, header = '') => `---\ntask: ${task}\nagent: claude\nmodel: opus\neffort: high\npin: true\n${header}repos:\n  - path: ${f.repo}\n    worktree: ${f.repo}-${task.toLowerCase()}\n    branch: ${task.toLowerCase()}\n    base: ${A}\n---\nDo ${task}.\n`;
+  const token = (text: string) => /preview_token: ([\da-f-]+)/.exec(text)![1];
+  it('P13: pin + satisfied after: preview then confirm queues the task', async () => {
+    const f = fixture('p13-met'); report(seedTask(f.config, 'DONE', {}), {});
+    const spec = queueSpec(f, 'NEXT', 'after: DONE\n'); const p = await f.full('queue', { spec }); assert.ok(!p.isError, p.text);
+    const c = await f.full('queue', { spec, confirm: true, preview_token: token(p.text) }); assert.ok(!c.isError, c.text); assert.equal(readQueue(f.config).length, 1);
+  });
+  it('P13: pin + unmet after queues too', async () => {
+    const f = fixture('p13-unmet'); seedTask(f.config, 'WAIT', {});
+    const spec = queueSpec(f, 'NEXT', 'after: WAIT\n'); const p = await f.full('queue', { spec });
+    const c = await f.full('queue', { spec, confirm: true, preview_token: token(p.text) }); assert.ok(!c.isError, c.text); assert.equal(readQueue(f.config)[0]!.task, 'NEXT');
+  });
+  it('P13: the after becomes satisfied between preview and confirm (start state flips from waiting to ready) and confirm still holds', async () => {
+    const f = fixture('p13-flip'); const dep = seedTask(f.config, 'DEP', {});
+    const spec = queueSpec(f, 'NEXT', 'after: DEP\n'); const p = await f.full('queue', { spec }); assert.match(p.text, /DEP/);
+    report(dep, {}); const c = await f.full('queue', { spec, confirm: true, preview_token: token(p.text) }); assert.ok(!c.isError, c.text);
+    const again = await f.full('queue', { spec: queueSpec(f, 'THIRD', 'after: DEP\n') }); const t3 = token(again.text);
+    fs.rmSync(dep.report); const c3 = await f.full('queue', { spec: queueSpec(f, 'THIRD', 'after: DEP\n'), confirm: true, preview_token: t3 }); assert.ok(!c3.isError, c3.text);
+  });
+});
+
