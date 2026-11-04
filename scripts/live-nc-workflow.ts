@@ -153,6 +153,21 @@ await withHarness({ name: 'nc-workflow', cacheRoot: cache, config: 'watch: {inte
       const cwd = h.tmux(['display-message', '-p', '-t', `=${h.session}:iso-author-rev`, '#{pane_current_path}']).stdout.trim();
       check('review record with its own checkout resumes there (pane cwd is not the author worktree)', resumed.code === 0 && fs.realpathSync(cwd) === fs.realpathSync(ownWt) && fs.realpathSync(cwd) !== fs.realpathSync(authorWt));
     }
+    // E1 (live, real tmux): Claude Code's dim suggestion in the empty field is not a draft; text somebody typed is. The screens are recorded from Claude Code 2.1.311, replayed with their colours.
+    {
+      const fixtures = path.resolve(import.meta.dirname, '../tests/fixtures'), stamp = new Date(Date.now() - 60000).toISOString();
+      for (const [task, file] of [['SUGGEST', 'screen-claude-suggestion-ansi.txt'], ['TYPED', 'screen-claude-draft-ansi.txt']] as const) {
+        const window = task.toLowerCase();
+        h.tmux(['new-window', '-d', '-t', h.session, '-n', window, `sh -c 'cat ${path.join(fixtures, file)}; sleep 600'`]);
+        const pane = (await ctx.tmux.windows()).find(w => w.plain === window)!;
+        const seed: TaskRecord = { task, window, windowId: pane.id, session: h.session, agent: 'claude', model: 'haiku', effort: 'low', repos: [], links: [], env: {}, report: path.join(config.cache, `${task}.md`), started: stamp, requested: { agent: 'claude', model: 'haiku', effort: 'low' } };
+        fs.mkdirSync(path.dirname(taskFile(config, window)), { recursive: true }); fs.writeFileSync(taskFile(config, window), renderTaskMd(seed, `Fixture ${task}`));
+      }
+      await pause(500);
+      const rows = await collectStatus(ctx, { progress: false });
+      check('real tmux: dim suggestion in the field is not a draft', rows.find(r => r.task === 'SUGGEST')?.draft_input === null);
+      check('real tmux: text typed into the field is a draft', rows.find(r => r.task === 'TYPED')?.draft_input === 'my real draft');
+    }
     const timed = path.join(h.root, 'timed.md'); fs.writeFileSync(timed, spec('TIMED', { cohort: 'Timing', setup: ['sleep 2'] }));
     const timedResult = h.agentctl(['new', timed, '-y']); const timedRecord = record('TIMED');
     check('real setup time is included before the agent starts', timedResult.code === 0 && Date.now() - Date.parse(timedRecord.started) >= 2000);
