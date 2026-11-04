@@ -25,7 +25,7 @@ export async function pullTask(ctx: Context, taskArg: string, platform?: string)
   if (config.mirrorDir) await syncMirror(ctx, await collectStatus(ctx));
 
   // An agent that wrote the report elsewhere: copy it to the canonical path first.
-  if (record.report && !fs.existsSync(record.report)) await syncReport(ctx, record, { pane: true }).catch(() => undefined);
+  if (record.report && !fs.existsSync(record.report)) await syncReport(ctx, record).catch(() => undefined);
   if (record.report && fs.existsSync(record.report)) {
     const text = fs.readFileSync(record.report, 'utf8');
     const clip = await findClipboardTool(runner, 'write', platform);

@@ -40,13 +40,27 @@ export function makeConfig(root: string, extraYaml = ''): GlobalConfig {
   return loadGlobalConfig(home);
 }
 
+/** Legacy scripted TUIs acknowledge a submitted paste on the next joined capture. */
+export function acknowledgingRespond(respond?: RecordingOptions['respond']): RecordingOptions['respond'] {
+  const pasted = new Set<string>(), ack = new Set<string>();
+  return (cmd, args, opts) => {
+    const target = args[args.indexOf('-t') + 1] ?? '';
+    if (cmd === 'tmux') {
+      if (args[0] === 'paste-buffer') pasted.add(target);
+      if (args[0] === 'send-keys' && args.at(-1) === 'Enter' && pasted.delete(target)) ack.add(target);
+      if (args[0] === 'capture-pane' && args.includes('-J') && ack.delete(target)) return { stdout: 'Working (esc to interrupt)\n' };
+    }
+    return respond?.(cmd, args, opts);
+  };
+}
+
 export function makeContext(
   config: GlobalConfig,
   options: RecordingOptions = {},
   confirm?: (question: string) => Promise<boolean>,
 ): { ctx: Context; runner: RecordingRunner; out: string[] } {
   const out: string[] = [];
-  const runner = new RecordingRunner({ dryRun: false, ...options });
+  const runner = options.dryRun ? new RecordingRunner({ ...options }) : new DiskRunner({ dryRun: false, ...options, respond: acknowledgingRespond(options.respond) });
   return { ctx: new Context(runner, config, (l) => out.push(l), confirm), runner, out };
 }
 
@@ -83,6 +97,7 @@ export interface FakeWindow {
   id: string;
   name: string;
   screen: string;
+  role?: string;
 }
 
 /**
@@ -93,6 +108,8 @@ export class FakeTmux {
   windows: FakeWindow[] = [];
   readonly session: string;
   private nextId = 1;
+  private pasted = new Set<string>();
+  private ack = new Set<string>();
   /** The screen of windows created by new-window and new-session: an idle Claude prompt. */
   newWindowScreen = '❯ \n';
   /** Every tmux command seen, as "subcommand target". */
@@ -109,7 +126,7 @@ export class FakeTmux {
   }
 
   add(name: string, screen = '', id?: string): FakeWindow {
-    const w = { id: id ?? `@${this.nextId++}`, name, screen };
+    const w = { id: id ?? `@${this.nextId++}`, name, screen, role: ['watch', 'board', 'manager'].includes(name) ? name : 'task' };
     this.windows.push(w);
     return w;
   }
@@ -129,7 +146,7 @@ export class FakeTmux {
       case 'list-windows': {
         if (this.windows.length === 0) return { code: 1 };
         const format = args[args.indexOf('-F') + 1] ?? '#{window_name}';
-        return { stdout: this.windows.map((w) => format.replace('#{window_id}', w.id).replace('#{window_name}', w.name)).join('\n') };
+        return { stdout: this.windows.map((w) => format.replace('#{window_id}', w.id).replace('#{window_name}', w.name).replace('#{@agentctl-role}', w.role ?? '')).join('\n') };
       }
       case 'has-session':
         return { code: this.windows.length ? 0 : 1 };
@@ -142,6 +159,7 @@ export class FakeTmux {
         return {};
       case 'capture-pane': {
         const w = this.find(target);
+        if (w && args.includes('-J') && this.ack.delete(w.id)) return { stdout: 'Working (esc to interrupt)\n' };
         return w ? { stdout: w.screen } : { code: 1, stderr: `can't find window: ${target}` };
       }
       case 'rename-window': {
@@ -162,9 +180,9 @@ export class FakeTmux {
         this.add(name, this.newWindowScreen);
         return {};
       }
+      case 'paste-buffer': { const w = this.find(target); if (w) this.pasted.add(w.id); return w ? {} : { code: 1 }; }
+      case 'send-keys': { const w = this.find(target); if (w && w.screen === '❯ \n' && args.includes('-l') && args.at(-1)?.startsWith('codex ')) w.screen = '› Ask Codex to do anything\n'; if (w && args.at(-1) === 'Enter' && this.pasted.delete(w.id)) this.ack.add(w.id); return w ? {} : { code: 1 }; }
       case 'select-window':
-      case 'send-keys':
-      case 'paste-buffer':
         return this.find(target) ? {} : { code: 1, stderr: `can't find window: ${target}` };
       default:
         return undefined;

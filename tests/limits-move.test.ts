@@ -213,6 +213,7 @@ describe('move', () => {
     assert.ok(t.runner.commands.some((c) => c.startsWith('tmux new-window') && c.includes('-n nc-1-2') && c.includes(`-c ${t.worktree}`)), 'the same worktree');
     assert.ok(!t.runner.commands.some((c) => c.includes('worktree add')), 'no new worktree');
     const pasted = t.runner.calls.find((c) => c.line.startsWith('tmux load-buffer') && c.input?.includes('Poprzedni agent'));
+    assert.ok(pasted?.input?.includes(result!.plan.from.report), '0173-FIX-B move canonical path');
     assert.ok(pasted?.input?.startsWith(`Model: gpt-6-astra · effort medium\n\nDo NC-1.\n\n${continuationNote(t.record)}`));
     assert.match(pasted!.input!, /agentctl:report-end/);
 

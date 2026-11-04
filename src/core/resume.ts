@@ -1,6 +1,5 @@
+import { queuePrompt, deliverPendingPrompt } from './prompt-delivery.ts';
 import { waitForReady } from './ready.ts';
-import { classifyScreen, inputVisible } from './state.ts';
-import { screenMetadata } from './tmux.ts';
 import { attemptFields } from './report-state.ts';
 import fs from 'node:fs';
 import { agentCommandLine, buildResumeArgv, reportInstructions } from './agents.ts';
@@ -120,14 +119,12 @@ export async function resumeTasks(ctx: Context, plan: ResumePlan, opts: { self?:
     const windowId = (await tmux.windows()).find((w) => w.plain === c.window)?.id;
     if (windowId) await setHeaderField(runner, taskFile(config, c.window), 'window_id', windowId);
     const command = agentCommandLine(buildResumeArgv({ agent: c.agent, model: c.model, effort: c.effort as never, task: c.task, remoteControl: record.remoteControl }, config.agents[c.agent], wiring?.args, c.sessionId));
+    await runner.exec('tmux', ['set-option', '-w', '-t', windowId || tmux.target(c.window), '@agentctl-role', 'task']);
     await tmux.typeCommand(c.window, command);
-    const settings = config.agents[c.agent], note = reportInstructions(attempt.attemptId);
-    const ready = await waitForReady(runner, tmux, c.window, { pattern: settings.readyPattern, trustPattern: settings.trustPattern, timeoutMs: Math.min(5000, settings.readyTimeout * 1000) });
-    const guard = async (phase: 'before-paste' | 'before-enter') => {
-      const capture = await tmux.capture(c.window); const draft = screenMetadata(capture.stdout).draft_input;
-      return capture.code === 0 && inputVisible(capture.stdout, settings) && classifyScreen(capture.stdout, settings) === 'idle' && (!draft || (phase === 'before-enter' && note.startsWith(draft)));
-    };
-    if (!ready.ready || !await tmux.submitPrompt(c.window, note, guard)) ctx.info(`${c.task}: report instructions pending until idle: ${note}`);
+    const settings = config.agents[c.agent], note = reportInstructions(attempt.attemptId, record.report);
+    const ready = await waitForReady(runner, tmux, c.window, { pattern: settings.readyPattern, emptyInput: true, trustPattern: settings.trustPattern, timeoutMs: Math.min(5000, settings.readyTimeout * 1000) });
+    await queuePrompt(ctx, record, note);
+    if (!ready.ready || await deliverPendingPrompt(ctx, c.window) !== 'sent') ctx.info(`${c.task}: report instructions pending until idle: ${note}`);
     ctx.info(`${c.task}: window ${config.session}:${c.window} running ${command}`);
     results.push({ task: c.task, command });
   }

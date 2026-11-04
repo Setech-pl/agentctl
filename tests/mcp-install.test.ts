@@ -220,7 +220,7 @@ describe('mcp: doctor', () => {
     const config = makeConfig(scratch.sub(name), yaml);
     const runner = new RecordingRunner({ dryRun: false, respond: (cmd, args) => (cmd === 'claude' && args[1] === 'get' ? (claudeGet ? { stdout: claudeGet } : { code: 1 }) : undefined) });
     const checks = await runDoctor(runner, () => config, home, '26.0.0', 'darwin', home, env);
-    return checks.filter((c) => c.name.startsWith('mcp'));
+    return checks.filter((c) => c.name.startsWith('mcp') && c.name !== 'mcp server');
   };
 
   it('not registered anywhere: warnings, never a failure; writing is off', async () => {

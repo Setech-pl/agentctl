@@ -1,3 +1,4 @@
+import { queuePrompt, deliverPendingPrompt } from './prompt-delivery.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { agentCommandLine, buildAgentArgv, INSTALL_HINTS, promptWithHeader } from './agents.ts';
@@ -13,7 +14,7 @@ import type { PlanOptions } from './plan.ts';
 import { waitForReady } from './ready.ts';
 import { RC_CONFIRM, RC_FIRST_TIME } from './remote-control.ts';
 import type { ResolvedSpec } from './spec.ts';
-import { recordFromSpec, renderTaskMd, setHeaderField, taskDir, taskFile } from './taskstore.ts';
+import { recordFromSpec, renderTaskMd, readTaskRecord, setHeaderField, taskDir, taskFile } from './taskstore.ts';
 import { AgentctlError } from './util.ts';
 
 export interface NewOptions extends PlanOptions {
@@ -130,6 +131,7 @@ export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: Ne
     if (spec.cohort) record.cohort = (await touchCohort(ctx, spec.cohort)).name;
     await runner.mkdir(taskDir(config, spec.window));
     await runner.writeFile(taskFile(config, spec.window), renderTaskMd(record, spec.prompt));
+    await queuePrompt(ctx, record, promptWithHeader(spec, record.attemptId), 'launching');
     // The agent's own folder: only the report goes there (agentctl's state is in state_dir).
     await runner.mkdir(path.dirname(spec.report));
 
@@ -153,14 +155,16 @@ export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: Ne
     // tmux's own ID of the window: operations keep finding it when `watch` puts a state icon in front of its name.
     const windowId = (await tmux.windows()).find((w) => w.plain === spec.window)?.id;
     if (windowId) await setHeaderField(runner, taskFile(config, spec.window), 'window_id', windowId);
+    await runner.exec('tmux', ['set-option', '-w', '-t', windowId || tmux.target(spec.window), '@agentctl-role', 'task']);
     await tmux.typeCommand(spec.window, commandLine);
     ctx.info(`${spec.task}: window ${config.session}:${spec.window} running ${commandLine}`);
 
     // 6. wait for the agent; never answer a trust dialog (wait for the human to do it); then paste the prompt and press Enter
     const waitTrust = opts.waitTrust !== false;
-    const sendHint = `agentctl send ${taskFile(config, spec.window)}`;
+    const sendHint = `agentctl watch --tmux (original prompt with report protocol is pending in ${taskFile(config, spec.window)}; sent once after trust and ready input)`;
     const ready = await waitForReady(runner, tmux, spec.window, {
       pattern: settings.readyPattern,
+      emptyInput: true,
       trustPattern: remote ? `${settings.trustPattern}|${RC_CONFIRM}` : settings.trustPattern,
       timeoutMs: settings.readyTimeout * 1000,
       ...(opts.signal ? { signal: opts.signal } : {}),
@@ -168,40 +172,46 @@ export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: Ne
         ? {
             waitTrust: {
               timeoutMs: settings.trustTimeout * 1000,
-              onWaiting: () => ctx.info(`${spec.task}: agent waits for ${dialog} – attach: tmux attach -t ${config.session}, confirm in window ${spec.window}`),
+              onWaiting: async () => { await setHeaderField(runner, taskFile(config, spec.window), 'prompt_delivery', 'pending'); ctx.info(`${spec.task}: agent waits for ${dialog} – attach: tmux attach -t ${config.session}, confirm in window ${spec.window}`); },
             },
           }
         : {}),
     });
+    const fresh = readTaskRecord(config, spec.window);
+    if (fresh?.promptDelivery === 'sent') { ready.ready = true; ready.trust = false; }
+    if (fresh?.promptDelivery === 'launching' && (ready.trust || ready.ready)) await setHeaderField(runner, taskFile(config, spec.window), 'prompt_delivery', 'pending');
     if (ready.aborted) {
       const notStarted = specs.slice(index + 1).map((s) => s.task);
       throw new AgentctlError(
         `${spec.task}: interrupted while waiting for the agent; window ${config.session}:${spec.window} stays open, the prompt was not sent` +
           (notStarted.length > 0 ? `, not started: ${notStarted.join(', ')}` : ''),
-        `Once the agent shows its input, deliver the prompt with: ${sendHint}`,
+        `Once the agent shows its input, watch will automatically deliver the original prompt once ready: ${sendHint}`,
       );
     }
     if (ready.trust && waitTrust) {
       throw new AgentctlError(
         `${spec.task}: agent still waits for ${dialog} after ${settings.trustTimeout}s – attach: tmux attach -t ${config.session}, confirm in window ${spec.window}`,
-        `agentctl never answers that dialog. The window stays open and the prompt was not sent; once the agent shows its input, deliver it with: ${sendHint}. ` +
+        `agentctl never answers that dialog. The window stays open and the prompt was not sent; once the agent shows its input, watch will automatically deliver it once ready: ${sendHint}. ` +
           `To wait longer, raise agents.${spec.agent}.trust_timeout in ${config.path}.`,
       );
     }
     if (ready.trust) {
       throw new AgentctlError(
         `${spec.task}: agent waits for ${dialog} – attach: tmux attach -t ${config.session}, confirm, then agentctl status`,
-        `agentctl never answers that dialog. The prompt was not sent; once the agent shows its input, deliver it with: ${sendHint}`,
+        `agentctl never answers that dialog. The prompt was not sent; once the agent shows its input, watch will automatically deliver it once ready: ${sendHint}`,
       );
     }
     if (!ready.ready) {
+      await setHeaderField(runner, taskFile(config, spec.window), 'prompt_delivery', 'needs-attention');
+      await setHeaderField(runner, taskFile(config, spec.window), 'prompt_error', `${spec.agent} did not become ready; original prompt remains in TASK.md`);
       throw new AgentctlError(
         `${spec.task}: ${spec.agent} did not show its input prompt within ${settings.readyTimeout}s (pattern /${settings.readyPattern}/)`,
         `The window is still open: "tmux attach -t ${config.session}". Once the agent is ready, send the prompt with "agentctl send"; ` +
           `if the prompt looks normal, adjust agents.${spec.agent}.ready_pattern / ready_timeout in ${config.path}.`,
       );
     }
-    await tmux.submitPrompt(spec.window, promptWithHeader(spec, record.attemptId));
+    if (runner.dryRun) await tmux.submitPrompt(spec.window, promptWithHeader(spec, record.attemptId));
+    else if (await deliverPendingPrompt(ctx, spec.window) !== 'sent') throw new AgentctlError(`${spec.task}: needs-attention — prompt delivery not confirmed`, 'Inspect the pane with peek/attach. The original prompt and report protocol remain in TASK.md.');
     ctx.info(`${spec.task}: prompt sent`);
 
     const result: NewResult = {

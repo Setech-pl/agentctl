@@ -191,11 +191,11 @@ describe('mcp: cohorts', () => {
     t.ready('A-1', 'Sprint-1');
     t.ready('B-1', 'Other');
     const r = await t.call('pull_ready', { cohort: 'sprint-1', mode: 'full' });
-    assert.match(r.text, /^1 new report, now marked as pulled: A-1/);
+    assert.match(r.text, /^1 new report; marked as pulled after complete delivery: A-1/);
     assert.doesNotMatch(r.text, /report of B-1/);
     assert.equal(readTaskRecord(t.config, 'b-1')?.pulled, undefined);
     assert.match((await t.call('pull_ready', { cohort: 'sprint-1', mode: 'full' })).text, /No new reports \(1 already pulled/);
-    assert.match((await t.call('pull_ready', { mode: 'full' })).text, /^1 new report, now marked as pulled: B-1/);
+    assert.match((await t.call('pull_ready', { mode: 'full' })).text, /^1 new report; marked as pulled after complete delivery: B-1/);
   });
 
   it('task_spec carries the cohort and the cancellation; a cancelled task keeps its report readable', async () => {

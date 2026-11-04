@@ -128,12 +128,6 @@ async function backgroundOnScreen(ctx: Context, record: TaskRecord): Promise<boo
 }
 
 /** The full last message of the agent (Claude: last_assistant_message, Codex: last-assistant-message), for the search of the report path. */
-function lastMessage(payload: unknown): string {
-  if (!isObject(payload)) return '';
-  const m = payload.last_assistant_message ?? payload['last-assistant-message'];
-  return typeof m === 'string' ? m : '';
-}
-
 function reportReady(ctx: Context, record: TaskRecord): boolean {
   return inspectReport(ctx.config, record, ctx.runner.now(), true).ready;
 }
@@ -178,8 +172,8 @@ export async function handleEvent(ctx: Context, alerts: Alerts, input: EventInpu
         // watcher announces the report or the wait once the background work is gone.
         detail = '[not announced: background work is still running]';
       } else {
-        // The agent may have written the report somewhere else than the spec says: find it, copy it to the canonical path.
-        await syncReport(ctx, record, { message: lastMessage(input.payload), pane: true }).catch(() => undefined);
+        // The agent may have written the report somewhere else than the spec says: record a configured candidate without copying it.
+        await syncReport(ctx, record).catch(() => undefined);
         if (reportReady(ctx, record)) {
           state = 'report-ready';
           text = reportReadyText(record.task, readVerdict(record.report, ctx.config.notify.verdictPattern));

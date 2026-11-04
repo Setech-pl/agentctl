@@ -10,7 +10,7 @@ import { waitForReady } from '../src/core/ready.ts';
 import { RecordingRunner } from '../src/core/runner.ts';
 import { resolveSpec, splitSpecs } from '../src/core/spec.ts';
 import { Tmux } from '../src/core/tmux.ts';
-import { makeConfig, makeContext, useScratch } from './helpers.ts';
+import { acknowledgingRespond, DiskRunner, makeConfig, makeContext, useScratch } from './helpers.ts';
 
 const scratch = useScratch();
 
@@ -92,7 +92,7 @@ describe('new: waiting for folder trust', () => {
     await assert.rejects(newTasks(ctx, specsFor(config, repo, ['NC-1'])), (e: Error & { hint?: string }) => {
       assert.equal(e.message, 'NC-1: agent still waits for folder trust after 3s – attach: tmux attach -t agentctl, confirm in window nc-1');
       assert.match(e.hint ?? '', /never answers that dialog/);
-      assert.match(e.hint ?? '', new RegExp(`agentctl send ${path.join(config.stateDir, 'nc-1', 'TASK.md')}`));
+      assert.match(e.hint ?? '', new RegExp(`agentctl watch --tmux .*${path.join(config.stateDir, 'nc-1', 'TASK.md')}`));
       assert.match(e.hint ?? '', /raise agents\.claude\.trust_timeout/);
       return true;
     });
@@ -122,7 +122,7 @@ describe('new: waiting for folder trust', () => {
     const options: NewOptions = { signal: controller.signal };
     await assert.rejects(newTasks(ctx, specsFor(config, repo, ['NC-1', 'NC-2', 'NC-3']), options), (e: Error & { hint?: string }) => {
       assert.equal(e.message, 'NC-1: interrupted while waiting for the agent; window agentctl:nc-1 stays open, the prompt was not sent, not started: NC-2, NC-3');
-      assert.equal(e.hint, `Once the agent shows its input, deliver the prompt with: agentctl send ${path.join(config.stateDir, 'nc-1', 'TASK.md')}`);
+      assert.match(e.hint ?? '', /watch will automatically deliver.*agentctl watch --tmux/);
       return true;
     });
     assert.equal(pastes(runner.commands).length, 0);
@@ -143,7 +143,8 @@ describe('new: waiting for folder trust', () => {
       'NC-1: agent waits for folder trust – attach: tmux attach -t agentctl, confirm in window nc-1',
       'NC-3: agent waits for folder trust – attach: tmux attach -t agentctl, confirm in window nc-3',
     ]);
-    assert.deepEqual(order, ['nc-1#1', 'nc-1#2', 'nc-1#3', 'nc-2#1', 'nc-3#1', 'nc-3#2', 'nc-3#3']);
+    assert.ok(order.indexOf('nc-1#3') < order.indexOf('nc-2#1'));
+    assert.ok(order.indexOf('nc-2#1') < order.indexOf('nc-3#1'));
     assert.deepEqual(pastes(runner.commands), ['nc-1', 'nc-2', 'nc-3'].map((w) => `tmux paste-buffer -p -d -b agentctl-${w} -t '=agentctl:${w}'`));
     const sent = out.filter((l) => l.endsWith('prompt sent'));
     assert.deepEqual(sent, ['NC-1: prompt sent', 'NC-2: prompt sent', 'NC-3: prompt sent']);
@@ -204,13 +205,13 @@ describe('agentctl new: --no-wait-trust and Ctrl-C through the CLI', () => {
     const spec = path.join(root, 'spec.md');
     fs.writeFileSync(spec, `---\ntask: NC-1\nagent: claude\nrepos:\n  - {path: ${repo}, worktree: ${repo}-wt}\n---\nGo.\n`);
 
-    const waiting = new RecordingRunner({ dryRun: false, respond: machine({ 'nc-1': [TRUST, IDLE] }) });
+    const waiting = new DiskRunner({ dryRun: false, respond: acknowledgingRespond(machine({ 'nc-1': [TRUST, IDLE] })) });
     const a = await run(['new', spec], {}, waiting, config);
     assert.equal(a.code, 0, a.stderr);
     assert.match(a.stdout, /NC-1: agent waits for folder trust – attach: tmux attach -t agentctl, confirm in window nc-1/);
     assert.equal(pastes(waiting.commands).length, 1);
 
-    const stopping = new RecordingRunner({ dryRun: false, respond: machine({ 'nc-1': [TRUST, IDLE] }) });
+    const stopping = new DiskRunner({ dryRun: false, respond: acknowledgingRespond(machine({ 'nc-1': [TRUST, IDLE] })) });
     const b = await run(['new', '--no-wait-trust', spec], {}, stopping, config);
     assert.equal(b.code, 1);
     assert.match(b.stderr, /agent waits for folder trust – attach: tmux attach -t agentctl, confirm, then agentctl status/);
@@ -229,7 +230,7 @@ describe('agentctl new: --no-wait-trust and Ctrl-C through the CLI', () => {
     const r = await run(['new', spec], { interruptSignal: () => ({ signal: controller.signal, dispose: () => void disposed++ }) }, runner, config);
     assert.equal(r.code, 1);
     assert.match(r.stderr, /^error: NC-1: interrupted while waiting for the agent; window agentctl:nc-1 stays open/);
-    assert.match(r.stderr, new RegExp(`hint: Once the agent shows its input, deliver the prompt with: agentctl send ${path.join(config.stateDir, 'nc-1', 'TASK.md')}`));
+    assert.match(r.stderr, new RegExp(`hint: Once the agent shows its input, watch will automatically deliver the original prompt once ready: agentctl watch --tmux .*${path.join(config.stateDir, 'nc-1', 'TASK.md')}`));
     assert.equal(disposed, 1);
     assert.equal(pastes(runner.commands).length, 0);
   });

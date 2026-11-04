@@ -18,7 +18,7 @@ export const AWAY_ICON = '📱';
 export const STATUS_INTERVAL = 10;
 
 /** Left to right in the tmux status line: running work first, then what waits for you. */
-const LINE_ORDER: TaskState[][] = [['working', 'background'], ['waiting'], ['report-ready'], ['needs-input'], ['needs-trust'], ['limited'], ['overloaded'], ['orphan', 'dead']];
+const LINE_ORDER: TaskState[][] = [['needs-attention'], ['working', 'background'], ['waiting'], ['report-ready'], ['needs-input'], ['needs-trust'], ['limited'], ['overloaded'], ['orphan', 'dead']];
 
 /**
  * One short line for the tmux status bar: "📱 2⚙ 1✓ 1? 3⧗" (the last one: tasks in the queue), then the plans "C 62% · X 18%" (usage.status_line); the 📱 in front means away is on. The count of tasks per state, zero counts left out; reports that were

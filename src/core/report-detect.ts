@@ -110,7 +110,7 @@ export interface ReportCandidate {
 const startedOf = (record: Pick<TaskRecord, 'started' | 'attemptStarted'>): number => Date.parse(record.attemptStarted ?? record.started);
 
 /** Fresh regular files from report alternatives, newest first; prompt text is never evidence. */
-export function findCandidates(ctx: Context, record: TaskRecord, _text: string): ReportCandidate[] {
+export function findCandidates(ctx: Context, record: TaskRecord): ReportCandidate[] {
   const worktrees = worktreesOf(record);
   const canonical = path.normalize(record.report);
   const stateDir = path.normalize(ctx.config.stateDir) + path.sep;
@@ -153,10 +153,6 @@ export interface SyncResult {
 }
 
 export interface SyncOptions {
-  /** The last message of the agent (the full text, not the clipped line of the event). */
-  message?: string | undefined;
-  /** Search the last lines of the window too. */
-  pane?: boolean | undefined;
   /** Use this file as the source (`agentctl report --from`). */
   from?: string | undefined;
   /** Copy over a canonical file even if the agent wrote it. */
@@ -169,13 +165,6 @@ const canonicalFresh = (record: TaskRecord): boolean => {
   const startedMs = startedOf(record);
   const m = mtime(record.report);
   return isFile(record.report) && m > 0 && (Number.isNaN(startedMs) || m >= startedMs);
-};
-
-/** The canonical file is the copy agentctl made and nobody changed it since. */
-const canonicalIsOurCopy = (record: TaskRecord): boolean => {
-  if (!record.reportSource || !record.reportCopied) return false;
-  const copied = Date.parse(record.reportCopied);
-  return !Number.isNaN(copied) && mtime(record.report) <= copied + 1000;
 };
 
 /** Detect candidates; copy only when the caller explicitly supplies from. */
@@ -191,7 +180,7 @@ export async function syncReport(ctx: Context, record: TaskRecord, opts: SyncOpt
   } else if (canonicalFresh(record)) {
     return { action: 'none' };
   } else {
-    const candidates = findCandidates(ctx, record, '');
+    const candidates = findCandidates(ctx, record);
     const candidate = candidates[0]?.file;
     if (candidate !== record.reportCandidate && !opts.dryRun) {
       record.reportCandidate = candidate;
@@ -200,13 +189,14 @@ export async function syncReport(ctx: Context, record: TaskRecord, opts: SyncOpt
     }
   }
   if (!source) return { action: 'none' };
-  if (source === path.normalize(record.report)) return { action: 'none' };
+  if (source === path.normalize(record.report)) {
+    if (!opts.dryRun) await setHeaderFields(runner, file, { report_confirmed: new Date(runner.now()).toISOString() });
+    return { action: 'none' };
+  }
 
   const sourceCompleteness = inspectReport(ctx.config, record, runner.now(), false, source);
   const exists = mtime(record.report) > 0;
-  const ours = canonicalIsOurCopy(record);
-  if (exists && !ours && !opts.force && canonicalFresh(record)) return { action: 'kept', source, note: `${record.report} exists and is not a copy of agentctl; it was not overwritten` };
-  if (exists && !ours && !opts.force) return { action: 'kept', source, note: `${record.report} exists (from before the task started); it was not overwritten, --force replaces it` };
+  if (exists && !opts.force) return { action: 'kept', source, note: `${record.report} exists; --force is required to replace the canonical report` };
   if (opts.dryRun) return { action: exists ? 'updated' : 'copied', source };
 
   try {
@@ -219,10 +209,11 @@ export async function syncReport(ctx: Context, record: TaskRecord, opts: SyncOpt
   const sourceMtime = new Date(mtime(source)).toISOString();
   const first = record.reportSource !== source;
   if (sourceCompleteness.ready) record.reportCompleteHash = sourceCompleteness.signature;
+  record.reportConfirmed = new Date(runner.now()).toISOString();
   record.reportSource = source;
   record.reportCopied = nowIso;
   record.reportSourceMtime = sourceMtime;
-  await setHeaderFields(runner, file, { report_complete_hash: sourceCompleteness.ready ? sourceCompleteness.signature ?? null : null, report_candidate: null, report_source: source, report_copied: nowIso, report_source_mtime: sourceMtime });
+  await setHeaderFields(runner, file, { report_complete_hash: sourceCompleteness.ready ? sourceCompleteness.signature ?? null : null, report_candidate: null, report_source: source, report_confirmed: record.reportConfirmed, report_copied: nowIso, report_source_mtime: sourceMtime });
   if (first) await recordJournal(ctx, { kind: 'report-detected', task: record.task, text: `${record.task}: raport wykryty w ${shortPath(source)}` });
   return { action: exists ? 'updated' : 'copied', source };
 }
@@ -255,6 +246,6 @@ export async function reportInfo(ctx: Context, taskArg: string, opts: { from?: s
   if (!record) throw new AgentctlError(`unknown task ${taskArg}: no TASK.md in ${ctx.config.stateDir}/${window}`, 'List known tasks with "agentctl status".');
   const result = opts.from ? await syncReport(ctx, record, { from: opts.from, force: opts.force, dryRun: ctx.runner.dryRun }) : undefined;
   const fresh = readTaskRecord(ctx.config, window) ?? record;
-  const candidates = opts.from ? [] : findCandidates(ctx, fresh, '');
+  const candidates = opts.from ? [] : findCandidates(ctx, fresh);
   return { task: fresh.task, canonical: fresh.report, canonicalExists: mtime(fresh.report) > 0, source: fresh.reportSource, candidates, ...(result ? { result } : {}) };
 }

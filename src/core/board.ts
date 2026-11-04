@@ -804,6 +804,7 @@ export interface BoardCell {
 }
 
 const STATE_COLOR: Record<TaskState, string> = {
+  'needs-attention': 'red',
   working: 'cyan',
   background: 'cyan',
   waiting: 'yellow',

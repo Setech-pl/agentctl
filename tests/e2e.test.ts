@@ -59,7 +59,7 @@ Review NC-1.
     const r = agentctl(['new', '--dry-run', specFile], { AGENTCTL_HOME: home });
     assert.equal(r.code, 0, r.stderr);
     const lines = r.stdout.split('\n');
-    const commands = lines.filter((l) => l && !l.startsWith('#')).map((l) => l.replace(/^(write \S+) \(\d+ bytes\)$/, '$1'));
+    const commands = lines.filter((l) => l && !l.startsWith('#') && !l.includes('@agentctl-role')).map((l) => l.replace(/^(write \S+) \(\d+ bytes\)$/, '$1'));
     assert.deepEqual(commands, [
       `git -C ${repo} branch nc-1 main`,
       `git -C ${repo} worktree add ${wtDir} nc-1`,
@@ -140,7 +140,7 @@ describe('spec example', () => {
     const none = path.join(scratch.dir, 'none');
     const r = agentctl(['new', '--dry-run', '--agent', 'codex', f], { AGENTCTL_HOME: none });
     assert.equal(r.code, 0, r.stderr);
-    const commands = r.stdout.split('\n').filter((l) => l && !l.startsWith('#')).map((l) => l.replace(/^(write \S+) \(\d+ bytes\)$/, '$1'));
+    const commands = r.stdout.split('\n').filter((l) => l && !l.startsWith('#') && !l.includes('@agentctl-role')).map((l) => l.replace(/^(write \S+) \(\d+ bytes\)$/, '$1'));
     // with the events on (the default) the agent line ends with -c notify=[…agentctl event…]
     assert.ok(commands.some((c) => c.startsWith("tmux send-keys -t '=agentctl:task-42' -l -- 'codex --sandbox danger-full-access -m gpt-6-astra -c model_reasoning_effort=medium -c ") && c.includes('notify=[') && c.includes('event')));
     assert.ok(!commands.some((c) => c.includes('claude')));

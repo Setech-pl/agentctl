@@ -1,3 +1,4 @@
+import { deliverPendingPrompt } from './prompt-delivery.ts';
 import { overloadTick } from './overload.ts';
 import { diskTick } from './disk.ts';
 import fs from 'node:fs';
@@ -66,6 +67,7 @@ export class WatchMemory {
 }
 
 const NOTIFY_ON: Partial<Record<TaskState, (row: StatusRow) => string>> = {
+  'needs-attention': r => `${r.task}: ${r.hint ?? 'prompt delivery needs attention'}`,
   'report-ready': (r) => reportReadyText(r.task, undefined),
   'needs-trust': (r) => `${r.task} czeka na zaufanie folderu (trust)`,
   'needs-input': (r) => (r.question ? `${r.task}: ${r.question}` : `${r.task} zadaje pytanie i czeka na odpowiedź`),
@@ -107,7 +109,7 @@ async function recordReport(ctx: Context, task: string): Promise<void> {
   if (record) await recordEvent(ctx, record, 'report');
 }
 
-const JOURNALED: Partial<Record<TaskState, JournalKind>> = { overloaded: 'overloaded', 'report-ready': 'report-ready', 'needs-trust': 'needs-trust', 'needs-input': 'needs-input', limited: 'limited', dead: 'dead', orphan: 'orphan' };
+const JOURNALED: Partial<Record<TaskState, JournalKind>> = { 'needs-attention': 'needs-attention', overloaded: 'overloaded', 'report-ready': 'report-ready', 'needs-trust': 'needs-trust', 'needs-input': 'needs-input', limited: 'limited', dead: 'dead', orphan: 'orphan' };
 
 /** The transition goes to the journal that `events` reads (the notification only reaches the desktop). */
 async function journalTransition(ctx: Context, row: StatusRow, e: WatchEvent): Promise<void> {
@@ -174,7 +176,7 @@ async function syncWaitingReports(ctx: Context, rows: StatusRow[]): Promise<bool
     const record = readTaskRecord(ctx.config, row.windowName);
     if (!record) continue;
     const candidateBefore = record.reportCandidate;
-    const r = await syncReport(ctx, record, { pane: true }).catch(() => undefined);
+    const r = await syncReport(ctx, record).catch(() => undefined);
     if (r && (r.action === 'copied' || r.action === 'updated' || record.reportCandidate !== candidateBefore)) copied = true;
   }
   return copied;
@@ -194,7 +196,14 @@ export interface TickOptions {
 export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Notifier, options: TickOptions = {}): Promise<WatchEvent[]> {
   // A closed or cancelled task is off the list: no transitions, no notifications (closing a task with no report is not a vanished window).
   let allRows = await collectStatus(ctx, { progress: false, archived: true });
-  // A waiting agent may have written its report somewhere else than the spec says: copy it to the canonical path before the states are read.
+  for (const row of allRows) {
+    const record = !row.closed && !row.cancelled && row.window === 'alive' ? readTaskRecord(ctx.config, row.windowName) : undefined;
+    if (record?.promptDelivery === 'pending' || record?.promptDelivery === 'sending') {
+      const result = await deliverPendingPrompt(ctx, row.windowName);
+      if (result !== 'pending') allRows = await collectStatus(ctx, { progress: false, archived: true });
+    }
+  }
+  // A waiting agent may have written its report somewhere else than the spec says: record a candidate without changing the execution state.
   if (await syncWaitingReports(ctx, allRows)) allRows = await collectStatus(ctx, { progress: false, archived: true });
   const rows = allRows.filter((r) => !r.closed && !r.cancelled);
   await overloadTick(ctx, rows, notifier).catch(e => ctx.out(`overload recovery: ${errorMessage(e)}`));

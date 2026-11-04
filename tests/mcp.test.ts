@@ -189,21 +189,21 @@ describe('mcp: reading', () => {
     seedTask(t.config, 'NC-3');
     await t.runner.sleep(1000);
     const first = await t.call('pull_ready', { mode: 'full' });
-    assert.match(first.text, /^2 new reports, now marked as pulled: NC-1, NC-2\n\n=== NC-1 \(claude opus\/high\) ===\n# one\n\n=== NC-2 \(codex gpt-6\.1-sol\/low\) ===\n# two/);
+    assert.match(first.text, /^2 new reports; marked as pulled after complete delivery: NC-1, NC-2\n\n=== NC-1 \(claude opus\/high\) ===\n# one\n\n=== NC-2 \(codex gpt-6\.1-sol\/low\) ===\n# two/);
     assert.ok(readTaskRecord(t.config, 'nc-1')?.pulled && readTaskRecord(t.config, 'nc-2')?.pulled);
     assert.equal(readTaskRecord(t.config, 'nc-3')?.pulled, undefined);
     assert.equal((await t.call('pull_ready', { mode: 'full' })).text, 'No new reports (2 already pulled; --all takes them again).');
     assert.equal((await setup('r8b').call('pull_ready', { mode: 'full' })).text, 'No reports ready.');
   });
 
-  it('0173-1: oversized full reports stay unread and direct users to get_report', async () => {
+  it('0173-1/FIX-K: oversized full reports are paged and remain unread until delivered', async () => {
     const t = setup('r9');
     withReport(t.config, 'NC-1', 'a'.repeat(150 * 1024));
     withReport(t.config, 'NC-2', 'b'.repeat(150 * 1024));
     await t.runner.sleep(1000);
     const first = await t.call('pull_ready', { mode: 'full' });
-    assert.match(first.text, /0 new reports/);
-    assert.match(first.text, /get_report/);
+    assert.equal(JSON.parse(first.text).truncated, true);
+    assert.equal(JSON.parse(first.text).has_more, true);
     assert.equal(readTaskRecord(t.config, 'nc-1')?.pulled, undefined);
     assert.equal(readTaskRecord(t.config, 'nc-2')?.pulled, undefined);
   });

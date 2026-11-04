@@ -56,6 +56,7 @@ export interface StatusRow {
   reportSignature?: string;
   /** Where the agent wrote the report when that was not the `report:` path (the file at `reportPath` is a copy). */
   reportSource?: string;
+  reportConfirmed?: string;
   /** ISO time of the last pull that took the current report; null when never pulled or the report changed since. */
   pulled: string | null;
   lastLine: string;
@@ -156,7 +157,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     const stored = readStoredEvent(config, record);
     const reportState = inspectReport(config, { ...record, ...(stored?.outcome === 'turn-complete' ? { turnEndedAt: stored.at } : {}) }, runner.now(), !record.attemptId && (!alive || (config.reportSettleS === 0 && classifyScreen(screenText, settings) === 'idle')));
     reportReady = reportState.ready;
-    if (record.reportCandidate && record.reportCandidate !== record.report && !findCandidates(ctx, record, '').some(c => c.file === record.reportCandidate)) delete record.reportCandidate;
+    if (record.reportCandidate && record.reportCandidate !== record.report && !findCandidates(ctx, record).some(c => c.file === record.reportCandidate)) delete record.reportCandidate;
     if (reportState.exists && !reportReady && !record.reportCandidate) record.reportCandidate = record.report;
     if (reportReady && !alive && reportState.mtime !== undefined && !Number.isNaN(startedMs)) duration = formatDuration(reportState.mtime - startedMs);
     // mtimeMs has a fraction, the stored time only whole milliseconds: a pull in the same millisecond as the report still counts.
@@ -165,7 +166,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     const cancelled = record.cancelled === true && !alive;
     const closed = !cancelled && (archived || (record.closed === true && !alive));
     const hiddenBy: StatusRow['hiddenBy'] = cancelled ? 'cancelled' : closed ? 'closed' : record.hidden === true ? 'user' : record.hidden === undefined && config.board.autoHidePulledDead && !alive && pulled !== null ? 'auto' : null;
-    const state: TaskState = cancelled ? 'cancelled' : closed ? 'closed' : record.supersededBy ? 'superseded' : taskState({ alive, screen: screenText, settings, reportReady, event: stored?.outcome });
+    const state: TaskState = cancelled ? 'cancelled' : closed ? 'closed' : record.supersededBy ? 'superseded' : record.promptDelivery === 'needs-attention' ? 'needs-attention' : taskState({ alive, screen: screenText, settings, reportReady, event: stored?.outcome });
     rows.push({
       task: record.task,
       attempt: record.attempt,
@@ -190,11 +191,12 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       reportPath: record.report,
       reportSignature: reportState.signature,
       ...(record.reportSource ? { reportSource: record.reportSource } : {}),
+      ...(record.reportConfirmed ? { reportConfirmed: record.reportConfirmed } : {}),
       pulled,
       lastLine: lastContentLine(screenText, settings.footerPatterns),
       progress: opts.progress === false || record.repos.length === 0 ? null : await taskProgress(runner, record.repos),
       collide: [],
-      hint: [stateHint(record.task, state, record.pin === true, record.supersededBy), record.reportSource && path.normalize(record.reportSource) !== path.normalize(record.report) ? `raport pochodzi z kopii ${record.reportSource} – sprawdź` : null].filter(Boolean).join('; ') || null,
+      hint: [record.promptDelivery === 'needs-attention' ? record.promptError : record.promptDelivery === 'pending' ? 'original prompt pending; watch sends it once after folder trust and empty ready input' : stateHint(record.task, state, record.pin === true, record.supersededBy), !record.reportConfirmed && record.reportSource && path.normalize(record.reportSource) !== path.normalize(record.report) ? `raport pochodzi z kopii ${record.reportSource} – sprawdź` : null].filter(Boolean).join('; ') || null,
       question: state === 'needs-input' ? ((collapsedQuestion(screenText) ? sessionQuestion(config, record) : undefined) ?? extractQuestion(screenText) ?? (stored?.outcome === 'needs-input' && stored.text !== '' ? stored.text : null)) : null,
       pin: record.pin === true,
       finished: !alive || state === 'superseded',
@@ -216,6 +218,9 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     if (window === WATCH_WINDOW || window === BOARD_WINDOW || window === MANAGER_WINDOW || knownWindows.has(window)) continue;
     const screen = await tmux.capture(window, undefined, infos);
     const screenText = screen.code === 0 ? screen.stdout : '';
+    const info = tmux.resolve(window, infos);
+    const command = await ctx.runner.exec('tmux', ['display-message', '-p', '-t', info?.id || tmux.target(window), '#{pane_current_command}'], { readOnly: true });
+    if (info?.role !== 'task' && !/^(?:claude|codex)(?:\s|$)/.test(command.stdout.trim())) continue;
     const agent = guessAgent(screenText);
     const task = window.toUpperCase();
     rows.push({

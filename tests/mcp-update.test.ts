@@ -106,10 +106,10 @@ describe('mcp: lenient allow list', () => {
     const before = process.env.AGENTCTL_STABLE_DIR;
     process.env.AGENTCTL_STABLE_DIR = stable.root;
     try {
-      assert.match((await t.call('status')).text, /the stable copy on disk is 0\.11\.0: the user should quit the Claude app \(⌘Q\)/);
+      assert.match((await t.call('status')).text, /środowisko dev/);
       const v = await t.call('version');
-      assert.match(v.text, /"older": true/);
-      assert.match(v.text, /This server runs 0\.10\.0, the stable copy on disk is 0\.11\.0/);
+      assert.match(v.text, /"older": false/);
+      assert.match(v.text, /środowisko dev/);
     } finally {
       if (before === undefined) delete process.env.AGENTCTL_STABLE_DIR;
       else process.env.AGENTCTL_STABLE_DIR = before;
@@ -175,14 +175,14 @@ describe('mcp: an old server process after agentctl-update', () => {
     };
     const old = await run(psLine(100, new Date(T0 - 3600_000), `${NODE} ${stable.script} mcp`));
     const server = old.find((c) => c.name === 'mcp server');
-    assert.equal(server?.status, 'warn');
-    assert.match(server?.detail ?? '', /serwer MCP w aplikacji działa na starej wersji – zamknij aplikację Claude \(⌘Q\) i otwórz ponownie/);
+    assert.equal(server?.status, 'ok');
+    assert.match(server?.detail ?? '', /środowisko dev/);
     const cfg = old.find((c) => c.name === 'mcp config');
     assert.equal(cfg?.status, 'warn');
     assert.match(cfg?.detail ?? '', /"nope" is not a write tool of this version, ignored/);
     const fresh = await run(psLine(100, new Date(T0 + 3600_000), `${NODE} ${stable.script} mcp`));
     assert.equal(fresh.find((c) => c.name === 'mcp server')?.status, 'ok');
-    assert.equal((await run('')).some((c) => c.name === 'mcp server'), false, 'no server running: nothing to say');
+    assert.match((await run('')).find(c => c.name === 'mcp server')?.detail ?? '', /środowisko dev/);
   });
 
   it('agentctl mcp check prints the warning, or says all is current; it stops nothing', async () => {

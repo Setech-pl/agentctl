@@ -131,7 +131,8 @@ export class Tmux {
 
   /** Restart by role, including windows renamed by tmux or the user; legacy name is a migration fallback. */
   async killRole(role: string): Promise<void> {
-    const found = (await this.windows()).find((w) => w.role === role || w.plain === role);
+    const windows = await this.windows();
+    const found = windows.find(w => w.role === role) ?? windows.find(w => !w.role && w.plain === role);
     if (found) await this.runner.exec('tmux', ['kill-window', '-t', found.id || this.target(found.name)]);
   }
 
@@ -167,8 +168,10 @@ export class Tmux {
    */
   async pasteText(window: string, text: string): Promise<void> {
     const buffer = `agentctl-${window}`;
-    await this.runner.exec('tmux', ['load-buffer', '-b', buffer, '-'], { input: text });
-    await this.runner.exec('tmux', ['paste-buffer', '-p', '-d', '-b', buffer, '-t', await this.targetFor(window)]);
+    const loaded = await this.runner.exec('tmux', ['load-buffer', '-b', buffer, '-'], { input: text });
+    if (loaded.code !== 0) throw new Error(`tmux load-buffer failed: ${loaded.stderr}`);
+    const pasted = await this.runner.exec('tmux', ['paste-buffer', '-p', '-d', '-b', buffer, '-t', await this.targetFor(window)]);
+    if (pasted.code !== 0) throw new Error(`tmux paste-buffer failed: ${pasted.stderr}`);
   }
 
   /** Paste, give the TUI a moment to take the paste in, then submit with a separate Enter. */

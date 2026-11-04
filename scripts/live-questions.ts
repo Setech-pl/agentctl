@@ -126,7 +126,7 @@ while IFS= read -r line; do
   *OPTIN*) printf 'Czy ujawnić opt-in hunter2-private-question?\\n  1. Yes\\n  2. No\\n  Press enter to confirm or esc to cancel\\n';;
   *EXPANDED*) printf 'Czy ujawnić hunter2-private-question?\\n  1. Yes\\n  2. No\\n  Press enter to confirm or esc to cancel\\n';;
   *COLLAPSED*) printf 'Working (esc to interrupt)\\n? 2 questions\\n  ⇧↑ to answer\\n';;
-  *) printf '› Ask Codex to do anything\\n';;
+  *) printf '● got: prompt accepted\\n› Ask Codex to do anything\\n';;
  esac
 done
 `);

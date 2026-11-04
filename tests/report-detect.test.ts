@@ -88,7 +88,7 @@ describe('findCandidates', () => {
     s.write(path.join(s.worktree, 'docs/notes.md'), 'n');
     s.write(path.join(s.worktree, 'docs/reports/nc-1-final.md'), 'r');
     const text = 'Zobacz docs/reports/nc-1-final.md i docs/old.md oraz docs/notes.md';
-    const found = findCandidates(s.ctx, s.record, text);
+    const found = findCandidates(s.ctx, s.record);
     assert.deepEqual(found.map((c) => path.relative(s.worktree, c.file)), ['docs/reports/nc-1-final.md']);
     assert.deepEqual(found.map((c) => c.why), ['configured']);
     assert.ok(!found.some((c) => c.file === old));
@@ -98,15 +98,15 @@ describe('findCandidates', () => {
     const s = setup('cand2', { reportAlt: [] });
     const a = s.write(path.join(s.root, 'cache/other-name/a.md'), 'a');
     s.write(path.join(s.worktree, 'b.md'), 'b');
-    const found = findCandidates(s.ctx, s.record, `${a} potem b.md`);
+    const found = findCandidates(s.ctx, s.record);
     assert.deepEqual(found, []);
-    assert.equal(findCandidates(s.ctx, s.record, `~/${path.relative(HOME, a)}`).length, 0);
+    assert.equal(findCandidates(s.ctx, s.record).length, 0);
   });
 
   it('ignores the canonical file and the state folder', () => {
     const s = setup('cand3');
     s.write(s.record.report, 'canonical');
-    assert.deepEqual(findCandidates(s.ctx, s.record, s.record.report), []);
+    assert.deepEqual(findCandidates(s.ctx, s.record), []);
   });
 
   it('uses the globs of the report list with {task} filled, the newest first, before the paths in the text', () => {
@@ -114,7 +114,7 @@ describe('findCandidates', () => {
     s.write(path.join(s.worktree, 'docs/reports/a-nc-1.md'), 'a', new Date(Date.now() - 5000));
     s.write(path.join(s.worktree, 'docs/reports/b-nc-1.md'), 'b');
     s.write(path.join(s.worktree, 'docs/mentioned.md'), 'm');
-    const found = findCandidates(s.ctx, s.record, 'docs/mentioned.md');
+    const found = findCandidates(s.ctx, s.record);
     assert.deepEqual(found.map((c) => [path.basename(c.file), c.why]), [['b-nc-1.md', 'configured'], ['a-nc-1.md', 'configured']]);
   });
 });
@@ -123,7 +123,7 @@ describe('syncReport', () => {
   it('copies the report to the canonical path, remembers the source and writes "raport wykryty w …" to the journal', async () => {
     const s = setup('sync');
     const src = s.write(path.join(s.worktree, 'docs/reports/nc-1.md'), 'Werdykt: PASS\n');
-    assert.equal((await syncReport(s.ctx, s.record, { message: 'Raport w docs/reports/nc-1.md' })).action, 'none');
+    assert.equal((await syncReport(s.ctx, s.record)).action, 'none');
     assert.equal(fs.existsSync(s.record.report), false);
     const r = await syncReport(s.ctx, s.record, { from: src });
     assert.equal(r.action, 'copied');
@@ -140,7 +140,7 @@ describe('syncReport', () => {
     const s = setup('keep');
     s.write(s.record.report, 'canonical');
     s.write(path.join(s.worktree, 'docs/x.md'), 'other');
-    const auto = await syncReport(s.ctx, s.record, { message: 'docs/x.md' });
+    const auto = await syncReport(s.ctx, s.record);
     assert.equal(auto.action, 'none');
     const manual = await syncReport(s.ctx, s.record, { from: 'docs/x.md' });
     assert.equal(manual.action, 'kept');
@@ -172,14 +172,14 @@ describe('syncReport', () => {
     const s = setup('pane');
     s.write(path.join(s.worktree, 'docs/reports/nc-1-raport.md'), 'Werdykt: PASS');
     s.fake.windows[0]!.screen = `${IDLE}\n⏺ pbcopy < ${path.join(s.worktree, 'docs/reports/nc-1-raport.md')}\n`;
-    const r = await syncReport(s.ctx, s.record, { pane: true, message: 'Gotowe.' });
+    const r = await syncReport(s.ctx, s.record);
     assert.equal(r.action, 'none');
     assert.ok(readTaskRecord(s.config, 'nc-1')?.reportCandidate);
   });
 
   it('finds nothing without a candidate', async () => {
     const s = setup('none');
-    assert.equal((await syncReport(s.ctx, s.record, { pane: true, message: 'Gotowe, brak pliku.' })).action, 'none');
+    assert.equal((await syncReport(s.ctx, s.record)).action, 'none');
     assert.equal(fs.existsSync(s.record.report), false);
   });
 });

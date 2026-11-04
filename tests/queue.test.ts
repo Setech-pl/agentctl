@@ -323,6 +323,7 @@ describe('new with a full limit proposes the queue', () => {
     assert.ok(questions.some((q) => /NC-1: window limit for claude reached.*Add it to the queue.*\[y\/N\]/s.test(q)), questions.join('|'));
     assert.deepEqual(readQueue(s.config).map((e) => e.task), ['NC-1']);
     assert.ok(s.tmux.windows.some((w) => w.name === 'nc-2'), 'the codex task started');
+    assert.ok(s.runner.calls.some(c => c.line.includes('load-buffer') && c.input?.includes(readTaskRecord(s.config, 'nc-2')!.report)), '0173-FIX-B queue canonical path');
     assert.match(r.stdout, /NC-1: queued \(position 1\)/);
   });
 

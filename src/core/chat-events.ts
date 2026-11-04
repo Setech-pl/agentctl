@@ -109,7 +109,7 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
     active: alive.length,
     unmarked: foldHistory(readHistory(config)).filter(r => r.reportAt && !r.result).length,
     working: alive.filter((r) => r.state === 'working' || r.state === 'background').length,
-    needYou: alive.filter((r) => r.state === 'needs-input' || r.state === 'needs-trust' || r.state === 'waiting').map((r) => `${r.task} (${r.state})${r.question ? `: ${r.question}` : ''}`),
+    needYou: alive.filter((r) => r.state === 'needs-attention' || r.state === 'needs-input' || r.state === 'needs-trust' || r.state === 'waiting').map((r) => `${r.task} (${r.state})${r.question ? `: ${r.question}` : r.state === 'needs-attention' ? `: ${r.hint}` : ''}`),
     queued: queue.length,
     reportsToPull: selectReady(open, false).map((r) => r.task).slice(0, 10),
   };
@@ -167,6 +167,7 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
 const PHONE_MARK = ' 📱';
 const hhmm = (iso: string): string => formatLocalTime(iso).slice(-5);
 const KIND_LABEL: Record<JournalEntry['kind'], string> = {
+  'needs-attention': 'WYMAGA UWAGI',
   'report-candidate': 'KANDYDAT',
   overloaded: 'PRZECIĄŻENIE',
   'overload-retry': 'PONOWIENIE',
