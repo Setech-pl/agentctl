@@ -1,3 +1,4 @@
+import { activeProviders, PROVIDER_IDS } from './providers/registry.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Context } from './context.ts';
@@ -26,7 +27,7 @@ export async function limitedTick(ctx: Context, rows: StatusRow[], notifier: Not
     const state = readState(file), now = ctx.runner.now(), settings = ctx.config.limited;
     const plans = supplied ?? plansNow(ctx);
     const persist = () => ctx.runner.writeFile(file, JSON.stringify(state));
-    for (const provider of ['claude', 'codex'] as const) {
+    for (const provider of activeProviders(ctx.config)) {
       const mine = rows.filter(r => r.agent === provider && !r.closed && !r.cancelled && r.window === 'alive' && r.report !== 'yes' && !r.finished);
       const limited = mine.filter(r => r.state === 'limited');
       const exhausted = plans[provider].windows.filter(w => w.usedPercent >= 100);

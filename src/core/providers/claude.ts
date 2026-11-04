@@ -1,12 +1,14 @@
 import path from 'node:path';
+import fs from 'node:fs';
+import { within } from './usage-shared.ts';
 import { defaultSettings } from './settings.ts';
 
 import { CLAUDE_KINDS, parseClaudeEvent, planClaudeEvents } from './claude-events.ts';
 import type { ClaudeKind } from '../events.ts';
 import { sessionOfStatusLine } from '../usage-tap.ts';
-import { readPlans } from '../usage.ts';
+import { readClaudePlan, claudeHome } from './claude-usage.ts';
 import { agentHomes } from '../usage-sources.ts';
-import { feedClaudeLine, feedCodexLine } from '../usage-parse.ts';
+import { feedClaudeLine } from './claude-parse.ts';
 import { refreshCodexCapacity } from '../capacity.ts';
 import { defaultEquivalents, formatModelEffort } from '../equivalents.ts';
 import { modelLabel } from './model-label.ts';
@@ -52,15 +54,15 @@ export const claude: ProviderAdapter = {
     },
   },
   usage: {
-    home: (config, env) => agentHomes(config, env).claude, homeEnv: 'CLAUDE_CONFIG_DIR',
+    home: claudeHome, homeEnv: 'CLAUDE_CONFIG_DIR',
     sessions(reader, home, record, worktrees, known, now) {
-      const out = worktrees.flatMap(w => reader.claudeSessions(home, w).flatMap(file => { const meta = reader.meta(file, 'claude'); return meta?.cwd && (meta.cwd === w || meta.cwd.startsWith(`${w}/`)) ? [{ file, firstAt: meta.firstAt, explicit: false }] : []; }));
-      for (const session of known) if (session.transcript) out.push({ file: session.transcript, firstAt: reader.meta(session.transcript, 'claude')?.firstAt ?? null, explicit: true });
+      const out = worktrees.flatMap(w => reader.claudeSessions(home, w).flatMap(file => { const meta = reader.meta(file, 'claude'); return meta?.cwd && within(meta.cwd, w) ? [{ file, firstAt: meta.firstAt, explicit: false }] : []; }));
+      for (const session of known) if (session.transcript && fs.existsSync(session.transcript)) out.push({ file: session.transcript, firstAt: reader.meta(session.transcript, 'claude')?.firstAt ?? null, explicit: true });
       return out;
     },
     related: (reader, file) => reader.claudeSubagents(file),
     feedLine: feedClaudeLine,
-    readPlan: (config, reader, now) => readPlans(config, reader, now).claude,
+    readPlan: readClaudePlan,
     
     planSources: ['claude-statusline'],
   },

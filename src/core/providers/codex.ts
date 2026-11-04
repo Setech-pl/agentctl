@@ -1,13 +1,14 @@
+import { within } from './usage-shared.ts';
 import path from 'node:path';
 import { defaultSettings } from './settings.ts';
 
 import { parseCodexEvent, planCodexEvents } from './codex-events.ts';
 import type { ClaudeKind } from '../events.ts';
 import { sessionOfStatusLine } from '../usage-tap.ts';
-import { readPlans } from '../usage.ts';
+import { readCodexPlan, codexHome } from './codex-usage.ts';
 import { agentHomes } from '../usage-sources.ts';
-import { feedClaudeLine, feedCodexLine } from '../usage-parse.ts';
-import { refreshCodexCapacity } from '../capacity.ts';
+import { feedCodexLine } from './codex-parse.ts';
+import { refreshCodexCapacity } from './codex-usage.ts';
 import { defaultEquivalents, formatModelEffort } from '../equivalents.ts';
 import { modelLabel } from './model-label.ts';
 import { splitFlag } from './safety.ts';
@@ -52,19 +53,19 @@ export const codex: ProviderAdapter = {
     
   },
   usage: {
-    home: (config, env) => agentHomes(config, env).codex, homeEnv: 'CODEX_HOME',
+    home: codexHome, homeEnv: 'CODEX_HOME',
     sessions(reader, home, record, worktrees, known, now) {
       const start = Date.parse(record.started);
       const ids = new Set(known.map(s => s.id));
       return reader.codexSessions(home, Number.isNaN(start) ? now : start - 86_400_000, now).flatMap(file => {
         const meta = reader.meta(file, 'codex'); if (!meta) return [];
         const explicit = meta.id !== null && ids.has(meta.id);
-        return explicit || (meta.cwd && worktrees.some(w => meta.cwd === w || meta.cwd!.startsWith(`${w}/`))) ? [{ file, firstAt: meta.firstAt, explicit }] : [];
+        return explicit || (meta.cwd && worktrees.some(w => within(meta.cwd!, w))) ? [{ file, firstAt: meta.firstAt, explicit }] : [];
       });
     },
     
     feedLine: feedCodexLine,
-    readPlan: (config, reader, now) => readPlans(config, reader, now).codex,
+    readPlan: readCodexPlan,
     refreshPlan: refreshCodexCapacity,
     planSources: ['codex-session-log', 'codex-app-server:account/rateLimits/read'],
   },

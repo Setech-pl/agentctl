@@ -1,3 +1,4 @@
+import { provider as adapter, activeProviders, perProvider, PROVIDER_IDS } from './providers/registry.ts';
 import fs from 'node:fs';
 import { recordSamples } from './usage-samples.ts';
 import path from 'node:path';
@@ -81,77 +82,36 @@ export function formatReset(ms: number, now: number): string {
 }
 
 /** The file `usage-tap` writes in the windows of Claude: the plan windows of the newest statusLine call. */
-export function claudePlanFile(config: Pick<GlobalConfig, 'path'>): string {
-  return path.join(homeDir(config), 'usage', 'claude-plan.json');
-}
-
-export function readClaudeSnapshot(config: Pick<GlobalConfig, 'path'>): PlanSnapshot | undefined {
-  try {
-    const data: unknown = JSON.parse(fs.readFileSync(claudePlanFile(config), 'utf8'));
-    if (!isObject(data) || typeof data.at !== 'number' || !Array.isArray(data.windows)) return undefined;
-    const windows: PlanWindow[] = [];
-    for (const w of data.windows) {
-      if (!isObject(w) || typeof w.usedPercent !== 'number') continue;
-      const minutes = typeof w.minutes === 'number' ? w.minutes : null;
-      windows.push({ kind: windowKind(minutes), minutes, usedPercent: w.usedPercent, resetsAt: typeof w.resetsAt === 'number' ? w.resetsAt : null });
-    }
-    return windows.length > 0 ? { at: data.at, planType: null, windows } : undefined;
-  } catch {
-    return undefined;
-  }
-}
+export { claudePlanFile, readClaudeSnapshot } from './providers/claude-usage.ts';
 
 /** Both plans. Reads one file for Claude and the tail of the newest Codex logs. */
 export function readPlans(config: GlobalConfig, reader: UsageReader, now: number): Record<AgentName, PlanState> {
-  const homes = agentHomes(config);
-  const plans = {
-    claude: planState(
-      'claude',
-      readClaudeSnapshot(config),
-      now,
-      config.usage.claudeTap ? 'no reading yet: Claude Code reports its limits only to a statusLine, which starts with the next task window (see "agentctl usage --help")' : 'usage.claude_tap is off: Claude Code gives its limits only to a statusLine',
-    ),
-    codex: planState('codex', newestCodexSnapshot(config, reader.codexPlan(homes.codex, now)), now, `no Codex session log with rate limits in ${path.join(homes.codex, 'sessions')} for the last 3 days`),
-  };
-  plans.claude.source = 'claude-statusline';
-  const refreshed = readCodexSnapshot(config);
-  plans.codex.source = refreshed?.at === plans.codex.readAt ? 'codex-app-server:account/rateLimits/read' : 'codex-session-log';
-  for (const p of [plans.claude, plans.codex]) p.stale = p.readAt !== null && now - p.readAt > config.capacity.staleMinutes * 60_000;
-  const totals = { claude: 0, codex: 0 };
-  for (const u of collectTaskUsage(config, reader, allRecords(config), now).values()) if (u.agent === 'claude' || u.agent === 'codex') totals[u.agent] += freshTokens(u.total);
+  const ids = activeProviders(config);
+  const plans = perProvider(ids, id => adapter(id).usage.readPlan(config, reader, now));
+  for (const id of ids) { const p = plans[id]; p.stale = p.readAt !== null && now - p.readAt > config.capacity.staleMinutes * 60_000; }
+  const totals = perProvider(ids, () => 0);
+  for (const u of collectTaskUsage(config, reader, allRecords(config), now).values()) if ((ids as string[]).includes(u.agent)) totals[u.agent as AgentName] += freshTokens(u.total);
   recordSamples(config, plans, totals, now);
   return plans;
 }
 
-export const codexPlanFile = (config: Pick<GlobalConfig, 'path'>): string => path.join(homeDir(config), 'usage', 'codex-plan.json');
-function readCodexSnapshot(config: GlobalConfig): PlanSnapshot | undefined {
-  try {
-    const s = JSON.parse(fs.readFileSync(codexPlanFile(config), 'utf8')) as PlanSnapshot;
-    return Number.isFinite(s.at) && Array.isArray(s.windows) ? s : undefined;
-  } catch { return undefined; }
-}
-function newestCodexSnapshot(config: GlobalConfig, log: PlanSnapshot | undefined): PlanSnapshot | undefined {
-  const rpc = readCodexSnapshot(config);
-  return rpc && (!log || rpc.at > log.at) ? rpc : log;
-}
+export { codexPlanFile } from './providers/codex-usage.ts';
 
 // ---- tokens per task
 
 /** `<state_dir>/<task>/sessions.json`: the sessions the agent's own events named (transcript paths of Claude, thread ids of Codex). */
-export interface TaskSessions {
-  claude: { id: string; transcript?: string }[];
-  codex: { id: string }[];
-}
+export type TaskSessions = Record<AgentName, { id: string; transcript?: string }[]>;
 
 export const sessionsFile = (config: Pick<GlobalConfig, 'stateDir'>, window: string): string => path.join(config.stateDir, window, 'sessions.json');
 
 export function readTaskSessions(config: Pick<GlobalConfig, 'stateDir'>, window: string): TaskSessions {
-  const out: TaskSessions = { claude: [], codex: [] };
+  const out: TaskSessions = perProvider(PROVIDER_IDS, () => []);
   try {
     const data: unknown = JSON.parse(fs.readFileSync(sessionsFile(config, window), 'utf8'));
     if (!isObject(data)) return out;
-    for (const c of Array.isArray(data.claude) ? data.claude : []) if (isObject(c) && typeof c.id === 'string') out.claude.push({ id: c.id, ...(typeof c.transcript === 'string' ? { transcript: c.transcript } : {}) });
-    for (const c of Array.isArray(data.codex) ? data.codex : []) if (isObject(c) && typeof c.id === 'string') out.codex.push({ id: c.id });
+    for (const id of PROVIDER_IDS) {
+      for (const c of Array.isArray(data[id]) ? data[id] : []) if (isObject(c) && typeof c.id === 'string') out[id].push({ id: c.id, ...(adapter(id).capabilities.statusLineTap && typeof c.transcript === 'string' ? { transcript: c.transcript } : {}) });
+    }
   } catch {
     // none recorded
   }
@@ -198,40 +158,15 @@ interface Candidate {
 
 /** The session logs that could belong to a task, with the evidence for each. */
 function candidates(config: GlobalConfig, reader: UsageReader, record: TaskRecord, now: number, codexScan: Map<string, string[]>): Candidate[] {
-  const homes = {
-    claude: record.env.CLAUDE_CONFIG_DIR ? path.resolve(record.env.CLAUDE_CONFIG_DIR) : agentHomes(config).claude,
-    codex: record.env.CODEX_HOME ? path.resolve(record.env.CODEX_HOME) : agentHomes(config).codex,
-  };
   const out: Candidate[] = [];
   const sessions = readTaskSessions(config, record.window);
-  const worktrees = record.repos.map((r) => r.worktree);
-  if (record.agent !== 'codex') {
-    for (const w of worktrees) {
-      for (const file of reader.claudeSessions(homes.claude, w)) {
-        const meta = reader.meta(file, 'claude');
-        if (meta?.cwd && within(meta.cwd, w)) out.push({ file, provider: 'claude', firstAt: meta.firstAt, explicit: false });
-      }
-    }
-    for (const s of sessions.claude) {
-      const file = s.transcript ?? '';
-      if (file !== '' && fs.existsSync(file)) out.push({ file, provider: 'claude', firstAt: reader.meta(file, 'claude')?.firstAt ?? null, explicit: true });
-    }
-  }
-  if (record.agent !== 'claude') {
-    const since = Date.parse(record.started);
-    const scanKey = `${homes.codex}|${localDay(Number.isNaN(since) ? now : since)}`;
-    let files = codexScan.get(scanKey);
-    if (!files) {
-      files = reader.codexSessions(homes.codex, Number.isNaN(since) ? now : since - 86_400_000, now);
-      codexScan.set(scanKey, files);
-    }
-    const ids = new Set(sessions.codex.map((s) => s.id));
-    for (const file of files) {
-      const meta = reader.meta(file, 'codex');
-      if (!meta) continue;
-      const explicit = meta.id !== null && ids.has(meta.id);
-      if (explicit || (meta.cwd && worktrees.some((w) => within(meta.cwd as string, w)))) out.push({ file, provider: 'codex', firstAt: meta.firstAt, explicit });
-    }
+  const worktrees = record.repos.map(r => r.worktree);
+  const ids = record.agent === 'unknown' ? activeProviders(config) : [record.agent];
+  for (const id of ids) {
+    const usage = adapter(id).usage;
+    const override = usage.homeEnv ? record.env[usage.homeEnv] : undefined;
+    const home = override ? path.resolve(override) : usage.home(config);
+    for (const candidate of usage.sessions(reader, home, record, worktrees, sessions[id], now)) out.push({ ...candidate, provider: id });
   }
   return out;
 }
@@ -262,7 +197,7 @@ export function collectTaskUsage(config: GlobalConfig, reader: UsageReader, reco
   }
   for (const { record, candidate } of claimed.values()) {
     const u = usage.get(record.task) as TaskUsage;
-    const files = [candidate.file, ...(candidate.provider === 'claude' ? reader.claudeSubagents(candidate.file) : [])];
+    const files = [candidate.file, ...(adapter(candidate.provider).usage.related?.(reader, candidate.file) ?? [])];
     let counted = false;
     for (const file of files) {
       const stats = reader.stats(file, candidate.provider);

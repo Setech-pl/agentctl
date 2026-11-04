@@ -1,3 +1,4 @@
+import { activeProviders, PROVIDER_IDS } from './providers/registry.ts';
 import { atomicWriteFile, atomicAppendFile } from './atomic-file.ts';
 import fs from 'node:fs';
 import { tryFileLock } from './file-lock.ts';
@@ -20,7 +21,7 @@ export function readSamples(config: GlobalConfig): UsageSample[] {
     return fs.readFileSync(samplesPath(config), 'utf8').split('\n').filter(Boolean).flatMap((line) => {
       try {
         const s = JSON.parse(line) as UsageSample;
-        return ['claude', 'codex'].includes(s.provider) && Number.isFinite(s.at) && Number.isFinite(s.capturedAt) && Number.isFinite(s.taskTokens) && Array.isArray(s.windows) && s.windows.every((w) => Number.isFinite(w.usedPercent) && w.usedPercent >= 0 && w.usedPercent <= 100 && (w.resetsAt === null || Number.isFinite(w.resetsAt))) ? [s] : [];
+        return (PROVIDER_IDS as readonly string[]).includes(s.provider) && Number.isFinite(s.at) && Number.isFinite(s.capturedAt) && Number.isFinite(s.taskTokens) && Array.isArray(s.windows) && s.windows.every((w) => Number.isFinite(w.usedPercent) && w.usedPercent >= 0 && w.usedPercent <= 100 && (w.resetsAt === null || Number.isFinite(w.resetsAt))) ? [s] : [];
       } catch { return []; }
     }).slice(-config.capacity.sampleLimit);
   } catch { return []; }
@@ -66,7 +67,7 @@ export function recordSamples(config: GlobalConfig, plans: Record<AgentName, Pla
       seen[key] = resetsAt;
       changed = true;
     };
-    for (const provider of ['claude', 'codex'] as const) {
+    for (const provider of activeProviders(config)) {
       const p = plans[provider];
       const previous = samples.filter((s) => s.provider === provider).at(-1);
       // A stale source: the old deadline passed a while ago and the usage did not grow since, so the window is over even if nobody re-read it.
@@ -96,7 +97,7 @@ export function recordSamples(config: GlobalConfig, plans: Record<AgentName, Pla
     }
     if (changed) {
       // Keep dedup for current sampled windows even when the source has not refreshed for weeks.
-      const persistent = new Set(['claude', 'codex'].flatMap((provider) => {
+      const persistent = new Set(activeProviders(config).flatMap((provider) => {
         const latest = samples.filter((s) => s.provider === provider).at(-1);
         return latest?.windows.map((w) => `${provider}|${w.kind}|${w.resetsAt ?? 'open'}|`) ?? [];
       }));

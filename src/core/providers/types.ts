@@ -85,7 +85,7 @@ export interface UsageCandidate { file: string; firstAt: number | null; explicit
 /** Zużycie i limity. */
 export interface UsageSupport {
   /** Katalog domowy dostawcy: config.usage.<id>_dir ?? env[homeEnv] ?? domyślny. */
-  home(config: GlobalConfig, env?: Record<string, string | undefined>): string;
+  home(config: Pick<GlobalConfig, 'usage'>, env?: Record<string, string | undefined>): string;
   /** Zmienna środowiska przenosząca katalog (CLAUDE_CONFIG_DIR, CODEX_HOME, KIMI_CODE_HOME) – także dla tests/isolation.ts i live-harness. */
   homeEnv: string | null;
   /** Logi sesji zadania: najpierw jawnie nazwane sesje (sessions.json), potem po cwd w worktree. */

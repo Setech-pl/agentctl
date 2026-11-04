@@ -1,3 +1,4 @@
+import { provider as adapter, activeProviders, perProvider } from './providers/registry.ts';
 import { collectDisk, diskLine } from './disk.ts';
 import { collectStatus } from './status.ts';
 import { recordStaleCapacity } from './capacity-events.ts';
@@ -50,29 +51,11 @@ export function capacityTrend(samples: UsageSample[], provider: AgentName, windo
   return { percentPerHour: rate, projectedExhaustAt, estimate };
 }
 
-/** Read-only RPC: initialize then account/rateLimits/read. No thread/start or turn/start. */
-export async function refreshCodexCapacity(ctx: Context): Promise<string | null> {
-  if (!ctx.config.capacity.codexRefresh || ctx.runner.dryRun) return null;
-  const r = await ctx.runner.exec('codex', ['app-server'], { readOnly: true, timeoutMs: 3000, rpc: { method: 'account/rateLimits/read' }, env: { ...process.env, CODEX_HOME: agentHomes(ctx.config).codex } });
-  try {
-    if (r.code !== 0) throw new Error('RPC failed');
-    const result: unknown = JSON.parse(r.stdout);
-    if (!isObject(result)) return 'Codex app-server returned no rate limits';
-    const limits = isObject(result.rateLimitsByLimitId) && isObject(result.rateLimitsByLimitId.codex) ? result.rateLimitsByLimitId.codex : result.rateLimits;
-    if (!isObject(limits)) return 'Codex app-server rate limits n/d';
-    const windows = [limits.primary, limits.secondary].flatMap((w) => {
-      if (!isObject(w) || typeof w.usedPercent !== 'number' || !Number.isFinite(w.usedPercent) || w.usedPercent < 0 || w.usedPercent > 100) return [];
-      const minutes = typeof w.windowDurationMins === 'number' ? w.windowDurationMins : null;
-      return [{ kind: windowKind(minutes), minutes, usedPercent: w.usedPercent, resetsAt: typeof w.resetsAt === 'number' ? w.resetsAt : null }];
-    });
-    if (windows.length === 0) return 'Codex app-server rate limits n/d';
-    await ctx.runner.writeFile(codexPlanFile(ctx.config), JSON.stringify({ at: ctx.runner.now(), planType: null, windows }));
-    return null;
-  } catch { return `Codex live reading unavailable (${r.code === 127 ? 'CLI missing' : 'RPC failed or timed out'}); using latest session reading if present`; }
-}
+export { refreshCodexCapacity } from './providers/codex-usage.ts';
 
 export async function collectCapacity(ctx: Context) {
-  const refreshNote = await refreshCodexCapacity(ctx);
+  const refreshNotes = perProvider(activeProviders(ctx.config), () => null as string | null);
+  for (const id of activeProviders(ctx.config)) refreshNotes[id] = await adapter(id).usage.refreshPlan?.(ctx) ?? null;
   const now = ctx.runner.now();
   const reader = openReader(ctx.config);
   const plans = readPlans(ctx.config, reader, now);
@@ -87,7 +70,7 @@ export async function collectCapacity(ctx: Context) {
     at: new Date(now).toISOString(),
     disk: await collectDisk(ctx),
     note: 'n/d = null. Plan percentages include use outside agentctl. Estimates are not provider token quotas.',
-    providers: AGENT_NAMES.map((provider) => {
+    providers: activeProviders(ctx.config).map((provider) => {
       const plan = plans[provider];
       const load = loads.providers.find((p) => p.agent === provider)!;
       const windows = plan.windows.map((w) => ({ ...w, remainingPercent: 100 - w.usedPercent, resetsInMinutes: w.resetsAt === null ? null : Math.max(0, Math.ceil((w.resetsAt - now) / 60_000)), ...capacityTrend(samples, provider, w) }));
@@ -99,12 +82,12 @@ export async function collectCapacity(ctx: Context) {
       if (plan.stale) hints.push(`reading older than ${ctx.config.capacity.staleMinutes} minutes`);
       if (load.free === 0) hints.push('no free configured slots');
       return {
-        provider, estimate: [...windows].sort((a, b) => a.remainingPercent - b.remainingPercent)[0]?.estimate ?? null, source: plan.source, ageSeconds: plan.readAt === null ? null : Math.max(0, Math.floor((now - plan.readAt) / 1000)), stale: plan.stale, staleDescription: plan.stale && plan.readAt !== null ? `${provider === 'claude' ? 'Claude' : 'Codex'}: brak aktywnej sesji od ${((now - plan.readAt) / 3600000).toFixed(1)} h (odczyt z ${new Date(plan.readAt).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })})` : null, windows,
+        provider, estimate: [...windows].sort((a, b) => a.remainingPercent - b.remainingPercent)[0]?.estimate ?? null, source: plan.source, ageSeconds: plan.readAt === null ? null : Math.max(0, Math.floor((now - plan.readAt) / 1000)), stale: plan.stale, staleDescription: plan.stale && plan.readAt !== null ? `${adapter(provider).displayName}: brak aktywnej sesji od ${((now - plan.readAt) / 3600000).toFixed(1)} h (odczyt z ${new Date(plan.readAt).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })})` : null, windows,
         limited: rows.some((r) => r.agent === provider && r.window === 'alive' && r.state === 'limited') || (windows.length > 0 ? windows.some((w) => w.usedPercent >= 100) : null),
         slots: { starting: load.starting, active: load.working.length, reportReady: load.reportReady.length, used: load.used, limit: load.limit, reserved: load.reserved, external: load.external.length, free: load.free },
         queue: { count: load.queued, next: queue.find((q) => q.agent === provider)?.task ?? null },
         models: [...new Map(ctx.config.equivalents.map((e) => [`${e[provider].model}/${e[provider].effort}`, e[provider]])).values()],
-        stats: stats.filter((s) => s.agent === provider), hints, note: [plan.note, provider === 'codex' ? refreshNote : null].filter(Boolean).join('; '),
+        stats: stats.filter((s) => s.agent === provider), hints, note: [plan.note, refreshNotes[provider]].filter(Boolean).join('; '),
       };
     }),
   };

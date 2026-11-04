@@ -1,3 +1,4 @@
+import { activeProviders, PROVIDER_IDS } from './providers/registry.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Context } from './context.ts';
@@ -15,7 +16,7 @@ export async function recordStaleCapacity(ctx: Context, plans: Record<AgentName,
   await withFileLock(`${file}.lock`, async () => {
     let state: Partial<Record<AgentName, string>> = {};
     try { state = JSON.parse(fs.readFileSync(file, 'utf8')) as typeof state; } catch { /* first look */ }
-    for (const provider of ['claude', 'codex'] as const) {
+    for (const provider of activeProviders(ctx.config)) {
       const plan = plans[provider];
       const active = live.some((w) => w.agent === provider && w.kind === undefined);
       const stale = active && plan.readAt !== null && ctx.runner.now() - plan.readAt > ctx.config.capacity.staleMinutes * 60_000;

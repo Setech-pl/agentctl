@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { AGENT_NAMES } from './config.ts';
+import { provider as adapter, alternatives } from './providers/registry.ts';
 import type { AgentName, GlobalConfig } from './config.ts';
 import type { Context } from './context.ts';
 import type { Notifier } from './notify.ts';
@@ -22,7 +22,7 @@ import { isObject } from './util.ts';
 export type Level = 'warn' | 'critical';
 const RANK: Record<Level, number> = { warn: 1, critical: 2 };
 
-const NAME: Record<AgentName, string> = { claude: 'Claude', codex: 'Codex' };
+const planIds = (plans: Record<AgentName, PlanState>): AgentName[] => Object.keys(plans) as AgentName[];
 
 /** The level a percentage has for a provider, or undefined below the warning threshold. */
 export function levelOf(config: Pick<GlobalConfig, 'usage'>, provider: AgentName, percent: number): Level | undefined {
@@ -61,7 +61,7 @@ const windowKey = (provider: AgentName, w: PlanWindowView): string => `${provide
 /** The windows that crossed a threshold they were not announced for yet: one alert per threshold and window instance (a window is a new one after its reset). */
 export function pendingAlerts(config: Pick<GlobalConfig, 'usage'>, plans: Record<AgentName, PlanState>, ledger: Record<string, Level>): UsageAlert[] {
   const out: UsageAlert[] = [];
-  for (const provider of AGENT_NAMES) {
+  for (const provider of planIds(plans)) {
     for (const window of plans[provider].windows) {
       const level = levelOf(config, provider, window.usedPercent);
       if (!level) continue;
@@ -74,21 +74,20 @@ export function pendingAlerts(config: Pick<GlobalConfig, 'usage'>, plans: Record
   return out;
 }
 
-const otherOf = (p: AgentName): AgentName => (p === 'claude' ? 'codex' : 'claude');
+const othersOf = (plans: Record<AgentName, PlanState>, p: AgentName) => alternatives({ providers: planIds(plans) }, p);
 
 /** "claude blisko limitu (83%), codex ma zapas (12%): --agent codex"; undefined when no hint applies (the other provider is n/d or close too). */
 export function providerHint(config: Pick<GlobalConfig, 'usage'>, plans: Record<AgentName, PlanState>, provider: AgentName): string | undefined {
   const mine = plans[provider];
-  const other = plans[otherOf(provider)];
   if (!mine.available || mine.maxPercent === null || mine.maxPercent < config.usage.warn[provider]) return undefined;
-  if (!other.available || other.maxPercent === null || other.maxPercent >= config.usage.warn[other.provider]) return undefined;
-  return `${provider} blisko limitu (${Math.round(mine.maxPercent)}%), ${other.provider} ma zapas (${Math.round(other.maxPercent)}%)`;
+  const spare = othersOf(plans, provider).map(id => plans[id]).filter(other => other.available && other.maxPercent !== null && other.maxPercent < config.usage.warn[other.provider]);
+  return spare.length ? `${provider} blisko limitu (${Math.round(mine.maxPercent)}%), ${spare.map(other => `${other.provider} ma zapas (${Math.round(other.maxPercent!)}%)`).join(', ')}` : undefined;
 }
 
 export function alertText(config: Pick<GlobalConfig, 'usage'>, plans: Record<AgentName, PlanState>, alert: UsageAlert, now: number): string {
   const when = alert.window.resetsAt === null ? '' : ` (reset ${formatReset(alert.window.resetsAt, now)})`;
-  const base = `${NAME[alert.provider]}: ${Math.round(alert.percent)}% limitu ${alert.window.label}${when} – ${alert.level === 'critical' ? 'limit prawie wyczerpany' : 'blisko limitu'}`;
-  const other = otherOf(alert.provider);
+  const base = `${adapter(alert.provider).displayName}: ${Math.round(alert.percent)}% limitu ${alert.window.label}${when} – ${alert.level === 'critical' ? 'limit prawie wyczerpany' : 'blisko limitu'}`;
+  const other = othersOf(plans, alert.provider).find(id => plans[id].available && plans[id].maxPercent !== null && plans[id].maxPercent! < config.usage.warn[id])!;
   return providerHint(config, plans, alert.provider) ? `${base}; ${other} ma zapas (${Math.round(plans[other].maxPercent as number)}%)` : base;
 }
 
@@ -106,7 +105,7 @@ export async function usageTick(ctx: Context, notifier: Notifier, log?: (line: s
   const ledger = readAlertLedger(config);
   const alerts = pendingAlerts(config, plans, ledger);
   // Windows that are over are forgotten, so the ledger does not grow for ever.
-  const live = new Set(AGENT_NAMES.flatMap((p) => plans[p].windows.map((w) => windowKey(p, w))));
+  const live = new Set(planIds(plans).flatMap((p) => plans[p].windows.map((w) => windowKey(p, w))));
   let changed = false;
   for (const key of Object.keys(ledger)) {
     if (!live.has(key) && !alerts.some((a) => a.key === key)) {
@@ -162,7 +161,7 @@ export function queueHolds(config: GlobalConfig, now: number, plans?: Record<Age
     reader.save();
   }
   const out: Partial<Record<AgentName, string>> = {};
-  for (const provider of AGENT_NAMES) {
+  for (const provider of planIds(state)) {
     const limit = limits[provider];
     const plan = state[provider];
     if (limit === undefined || !plan.available || plan.maxPercent === null || plan.maxPercent <= limit) continue;

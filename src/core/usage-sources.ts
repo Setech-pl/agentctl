@@ -1,3 +1,6 @@
+import { codexLogPlan, codexSessions } from './providers/codex-usage.ts';
+import { claudeSessions, claudeSubagents } from './providers/claude-usage.ts';
+import { provider as adapter, perProvider, PROVIDER_IDS } from './providers/registry.ts';
 import { atomicWriteFile } from './atomic-file.ts';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -14,17 +17,14 @@ import { isObject } from './util.ts';
 
 /** Claude's config directory and Codex's home: the config, else the environment, else the default. */
 export function agentHomes(config: Pick<GlobalConfig, 'usage'>, env: Record<string, string | undefined> = process.env): Record<AgentName, string> {
-  return {
-    claude: config.usage.claudeDir ?? env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), '.claude'),
-    codex: config.usage.codexDir ?? env.CODEX_HOME ?? path.join(os.homedir(), '.codex'),
-  };
+  return perProvider(PROVIDER_IDS, id => adapter(id).usage.home(config, env));
 }
 
 /** The directory of agentctl's own files (`config.yaml` sits in it). */
 export const homeDir = (config: Pick<GlobalConfig, 'path'>): string => path.dirname(config.path);
 
 /** How Claude names the folder of a working directory under `projects/`: every character that is not a letter or a digit becomes "-". */
-export const claudeProjectName = (cwd: string): string => cwd.replace(/[^A-Za-z0-9]/g, '-');
+export { claudeProjectName } from './providers/claude-usage.ts';
 
 export interface SessionMeta {
   id: string | null;
@@ -60,7 +60,7 @@ export function cachePath(config: Pick<GlobalConfig, 'path'>): string {
   return path.join(homeDir(config), 'usage-cache.json');
 }
 
-function readRange(file: string, from: number, length: number): string {
+export function readRange(file: string, from: number, length: number): string {
   const fd = fs.openSync(file, 'r');
   try {
     const buf = Buffer.alloc(length);
@@ -166,79 +166,23 @@ export class UsageReader {
     return entry.stats;
   }
 
-  /** The newest plan state in the tail of the most recently written Codex session logs; undefined when none says anything. */
-  codexPlan(codexHome: string, now: number): PlanSnapshot | undefined {
-    const files = this.recentCodexFiles(codexHome, now, 12);
-    const signature = files.map((f) => `${f.file}:${f.size}:${Math.floor(f.mtimeMs)}`).join('|');
-    const cached = this.data.plans[codexHome];
-    if (cached && cached.signature === signature) return cached.snapshot ?? undefined;
-    let best: PlanSnapshot | null = null;
-    for (const f of files) {
-      const probe = emptyStats('codex');
-      try {
-        const from = Math.max(0, f.size - TAIL_BYTES);
-        const text = readRange(f.file, from, Math.min(TAIL_BYTES, f.size));
-        feedText(probe, from > 0 ? text.slice(text.indexOf('\n') + 1) : text);
-      } catch {
-        continue;
-      }
-      if (probe.plan && (best === null || probe.plan.at > best.at)) best = probe.plan;
-    }
-    this.data.plans[codexHome] = { signature, snapshot: best };
-    this.dirty = true;
-    return best ?? undefined;
-  }
+  /** Compatibility wrapper; provider owns the log layout and parsing. */
+  codexPlan(home: string, now: number): PlanSnapshot | undefined { return codexLogPlan(this, home, now); }
 
-  private recentCodexFiles(codexHome: string, now: number, count: number): { file: string; size: number; mtimeMs: number }[] {
-    const found: { file: string; size: number; mtimeMs: number }[] = [];
-    // The last three days are enough: a plan reading older than that says nothing about the window now.
-    for (let back = 0; back < 3; back++) {
-      const d = localDay(now - back * 86_400_000).split('-');
-      const dir = path.join(codexHome, 'sessions', ...d);
-      for (const name of this.list(dir, '.jsonl')) {
-        if (!name.startsWith('rollout-')) continue;
-        const file = path.join(dir, name);
-        try {
-          const st = fs.statSync(file);
-          found.push({ file, size: st.size, mtimeMs: st.mtimeMs });
-        } catch {
-          // gone meanwhile
-        }
-      }
-    }
-    return found.sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, count);
+  cachedPlan(key: string, signature: string, read: () => PlanSnapshot | undefined): PlanSnapshot | undefined {
+    const cached = this.data.plans[key];
+    if (cached && cached.signature === signature) return cached.snapshot ?? undefined;
+    const snapshot = read(); this.data.plans[key] = { signature, snapshot: snapshot ?? null }; this.dirty = true; return snapshot;
   }
 
   /** Session logs of Codex written on or after the day of `sinceMs`. */
-  codexSessions(codexHome: string, sinceMs: number, now: number): string[] {
-    const out: string[] = [];
-    const days = Math.max(1, Math.min(120, Math.ceil((now - sinceMs) / 86_400_000) + 1));
-    for (let back = 0; back < days; back++) {
-      const d = localDay(now - back * 86_400_000).split('-');
-      const dir = path.join(codexHome, 'sessions', ...d);
-      for (const name of this.list(dir, '.jsonl')) if (name.startsWith('rollout-')) out.push(path.join(dir, name));
-    }
-    return out;
-  }
+  codexSessions(home: string, since: number, now: number): string[] { return codexSessions(this, home, since, now); }
 
   /** Transcripts of Claude whose folder under `projects/` belongs to the working directory `cwd` or to a folder below it. */
-  claudeSessions(claudeHome: string, cwd: string): string[] {
-    const projects = path.join(claudeHome, 'projects');
-    const wanted = claudeProjectName(cwd);
-    const out: string[] = [];
-    for (const name of this.list(projects)) {
-      if (name !== wanted && !name.startsWith(`${wanted}-`)) continue;
-      const dir = path.join(projects, name);
-      for (const f of this.list(dir, '.jsonl')) out.push(path.join(dir, f));
-    }
-    return out;
-  }
+  claudeSessions(home: string, cwd: string): string[] { return claudeSessions(this, home, cwd); }
 
   /** The logs of the subagents of a Claude session: `<transcript without .jsonl>/subagents/agent-*.jsonl`. */
-  claudeSubagents(transcript: string): string[] {
-    const dir = path.join(transcript.replace(/\.jsonl$/, ''), 'subagents');
-    return this.list(dir, '.jsonl').map((f) => path.join(dir, f));
-  }
+  claudeSubagents(file: string): string[] { return claudeSubagents(this, file); }
 
   save(): void {
     if (!this.file || !this.dirty) return;
