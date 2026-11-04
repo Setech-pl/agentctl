@@ -2,6 +2,7 @@ import { collectDisk } from './disk.ts';
 import type { DiskReport } from './disk.ts';
 import { collectCapacity, renderCapacity } from './capacity.ts';
 import { shortPath } from './report-detect.ts';
+import { modelLabel, providerLabel } from './model-label.ts';
 import path from 'node:path';
 import { attachCollisions, collideText } from './collisions.ts';
 import { cancelTasks, planCancel } from './cancel.ts';
@@ -67,6 +68,7 @@ export interface BoardRow extends StatusRow {
 }
 
 export interface Preview {
+  model?: string;
   task: string;
   lines: string[];
   /** Said next to the title of the preview, e.g. the collisions of the task. */
@@ -630,7 +632,7 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
     }
     return { rows, queue, queuePaused, disk, plans, resumable, away: awayView(config), manager, preview: { task: MANAGER_SELECT, lines }, refreshedAt: clock(now) };
   }
-  if (queued) return { rows, queue, queuePaused, disk, plans, resumable, away: awayView(config), manager, preview: { task: queued.entry.task, lines: queuePreview(queued) }, refreshedAt: clock(now) };
+  if (queued) return { rows, queue, queuePaused, disk, plans, resumable, away: awayView(config), manager, preview: { task: queued.entry.task, model: `${queued.entry.agent} · model: ${queued.entry.model} · effort: ${queued.entry.effort}`, lines: queuePreview(queued) }, refreshedAt: clock(now) };
   // The selected task; else the first one the list shows (not a hidden, closed or finished one).
   const target = rows.find((r) => r.task === selected) ?? rows.find((r) => !r.hidden && !r.finished) ?? rows.find((r) => !r.hidden) ?? rows[0];
   let preview: Preview | null = null;
@@ -647,7 +649,7 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
       }
     }
     const notes = [...(target.collide.length > 0 ? [collideText(target.collide)] : []), ...(target.reportSource ? [`report from ${shortPath(target.reportSource)}`] : []), ...(target.reportCandidate && target.report !== 'yes' ? [`report-candidate ${shortPath(target.reportCandidate)}`] : []), ...(target.usage_hint ? [`usage_hint: ${target.usage_hint}`] : []), ...(target.draft_input ? [`draft_input: ${target.draft_input}`] : [])];
-    preview = { task: target.task, lines, ...(notes.length > 0 ? { note: notes.join(' · ') } : {}) };
+    preview = { task: target.task, model: `${target.agent} · model: ${target.model} · effort: ${target.effort}`, lines, ...(notes.length > 0 ? { note: notes.join(' · ') } : {}) };
   }
   return { rows, queue, queuePaused, disk, plans, resumable, away: awayView(config), manager, preview, refreshedAt: clock(now) };
 }
@@ -760,9 +762,12 @@ export interface BoardLayout {
   previewWidth: number;
 }
 
-export function boardLayout(width: number): BoardLayout {
+export function boardLayout(width: number, requested?: number | string): BoardLayout {
   const showPreview = width >= PREVIEW_MIN_WIDTH;
-  return showPreview ? { showPreview, listWidth: LIST_WIDTH, previewWidth: width - LIST_WIDTH } : { showPreview, listWidth: width, previewWidth: 0 };
+  const preferred = requested === undefined ? (width >= 140 ? Math.max(92, Math.floor(width * .45)) : LIST_WIDTH)
+    : typeof requested === 'number' ? requested : Math.floor(width * Number.parseInt(requested, 10) / 100);
+  const listWidth = Math.min(width - 32, Math.max(64, preferred));
+  return showPreview ? { showPreview, listWidth, previewWidth: width - listWidth } : { showPreview, listWidth: width, previewWidth: 0 };
 }
 
 export interface BoardColumns {
@@ -783,7 +788,7 @@ export const TOKENS_MIN_WIDTH = 69;
 /** Column widths for a list of `width` columns; the agent column takes what the others leave (8 to 18). */
 export function boardColumns(width: number): BoardColumns {
   const tokens = width >= TOKENS_MIN_WIDTH ? 7 : 0;
-  const fixed = { marker: 1, task: 10, state: 14, time: 7, progress: 8, report: 7 };
+  const fixed = { marker: 1, task: width >= 92 ? 20 : 10, state: width >= 92 ? 19 : 14, time: 7, progress: 8, report: width >= 92 ? 9 : 7 };
   const gaps = 6 + (tokens > 0 ? 1 : 0);
   const used = Object.values(fixed).reduce((a, b) => a + b, 0) + tokens + gaps;
   return { ...fixed, ...(tokens > 0 ? { tokens } : {}), who: Math.max(8, Math.min(18, width - used)) };
@@ -834,14 +839,14 @@ export function reportLabel(row: StatusRow): string {
   return row.pulled ? 'pulled' : 'ready';
 }
 
-export function rowCells(row: StatusRow, selected: boolean, cols: BoardColumns, icons: Record<TaskState, string> | null = null, selectedColor = 'blue'): BoardCell[] {
+export function rowCells(row: StatusRow, selected: boolean, cols: BoardColumns, icons: Record<TaskState, string> | null = null, selectedColor = 'blue', versions: Readonly<Record<string, string>> = {}): BoardCell[] {
   const icon = (icons ?? DEFAULT_WINDOW_ICONS)[row.state];
   // Finished and hidden tasks are dimmed: they are history, not work in progress.
   const quiet = row.finished || row.hidden;
   const cells: BoardCell[] = [
     { key: 'marker', text: selected ? '▸' : row.collide.length > 0 ? '⚠' : row.hidden ? '·' : '', width: cols.marker, bold: true, ...(!selected && row.collide.length > 0 ? { color: 'yellow' } : {}) },
     { key: 'task', text: row.task, width: cols.task, bold: selected },
-    { key: 'who', text: row.agent === 'unknown' ? 'unknown' : `${row.agent} ${row.model}/${row.effort}`, width: cols.who },
+    { key: 'who', text: `${providerLabel(row.agent)} ${modelLabel(row.model, row.effort, row.tokens?.observed?.model, versions)}`, width: cols.who },
     { key: 'state', text: `${icon} ${row.state}${row.question?.includes("zwinięte") ? " (zw.)" : ""}`, width: cols.state, color: STATE_COLOR[row.state] },
     { key: 'time', text: row.duration, width: cols.time },
     ...(cols.tokens ? [{ key: 'tokens', text: row.tokens ? formatTokens(row.tokens.fresh) : 'n/d', width: cols.tokens, ...(row.tokens ? {} : { dim: true }) }] : []),
@@ -922,14 +927,14 @@ export function queueTitle(count: number, paused: boolean): string {
 }
 
 /** A queued task as cells: the task, what it runs, and one wide cell for the place in line and what it waits for. */
-export function queueCells(view: QueueView, selected: boolean, cols: BoardColumns, selectedColor = 'blue'): BoardCell[] {
+export function queueCells(view: QueueView, selected: boolean, cols: BoardColumns, selectedColor = 'blue', versions: Readonly<Record<string, string>> = {}): BoardCell[] {
   const e = view.entry;
   const wide = cols.state + cols.time + (cols.tokens ?? 0) + cols.progress + cols.report + (cols.tokens ? 4 : 3);
   const text = `${view.position === null ? (e.status === 'failed' ? '✗' : '…') : `${view.position}.`} ${view.condition.text}${e.priority === 'high' ? ' · high' : ''}`;
   const cells: BoardCell[] = [
     { key: 'marker', text: selected ? '▸' : '', width: cols.marker, bold: true },
     { key: 'task', text: e.task, width: cols.task, bold: selected },
-    { key: 'who', text: `${e.agent} ${e.model}/${e.effort}`, width: cols.who },
+    { key: 'who', text: `${providerLabel(e.agent)} ${modelLabel(e.model, e.effort, undefined, versions)}`, width: cols.who },
     { key: 'report', text, width: wide, ...(e.status === 'failed' ? { color: 'red' } : view.condition.kind === 'blocked' ? { color: 'yellow' } : { dim: true }) },
   ];
   return selected ? cells.map((c) => ({ ...c, bold: true, ...(!process.env.NO_COLOR && !c.color ? { color: selectedColor } : {}) })) : cells;
@@ -1007,6 +1012,9 @@ export const KEY_HINTS = 'm M move i int c/r pull x close X cancel k cohort h hi
 
 export const HELP_LINES: string[] = [
   'agentctl board',
+  '  AGENT: cl = claude, cx = codex; S 6.1 XH = model family/version/effort',
+  '  Effort: MN minimal, LO low, MD medium, HI high, XH xhigh, MX max, NO none',
+  '          – = unknown; full selected model and effort appear above',
   '',
   '  ↑ ↓ (j)     select a task (↑ up, ↓ or j down)',
   '  Enter       go to the task window (tmux switch-client); back: F12 or Ctrl-b l',
@@ -1087,4 +1095,10 @@ export function awayLabel(away: AwayView | null): { text: string; dim: boolean }
   if (away.on) return { text: '📱 away', dim: false };
   if (away.always) return { text: '📱 always', dim: false };
   return away.phone ? { text: '📱 off', dim: true } : null;
+}
+
+/** Full selected model facts stay available even in terminals without a preview. */
+export function modelHelp(state: BoardState): string[] {
+  const row = state.rows.find(r => r.task === state.selected) ?? state.queue.find(v => v.entry.task === state.selected)?.entry;
+  return row ? [`${row.task}: ${row.agent} · model: ${row.model} · effort: ${row.effort}`] : [];
 }

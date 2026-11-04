@@ -114,6 +114,8 @@ The session started by `agentctl manager`: Claude Code with [Remote Control](htt
 | `board.auto_hide_pulled_dead` | boolean | `true` | g | A task without a window whose report was pulled hides by itself. |
 | `board.mouse` | boolean | `true` | g | `mouse on` in the agentctl tmux session (this session only). |
 | `board.return_key` | tmux key name or `false` | `F12` | g | Key (no prefix) that goes back to the board from any window of the session. `false`: none. |
+| `board.model_versions` | alias → quoted version mapping | `{}` | g | Fallback versions for aliases after observed session model; never guessed. |
+| `board.list_width` | integer >=64 or percentage string | automatic | g | List width with preview; 92+ at 140+ terminal columns by default, at least 32 columns left for preview. |
 | `board.selected_color` | Ink color name | `blue` | g | Color for the selected board row, manager line and queue entry. State and result cells keep their own colors. `NO_COLOR` disables color; the selection stays bold (manager line uses inverse video). |
 
 ### `mcp`
@@ -415,3 +417,17 @@ Adapter overload patterns (terminal status/error context only):
 PL: Krótkie przejście przez working nie kasuje limitu przeciążenia. Epizod kończy się po 600 s ciągłej pracy (`overload.reset_after_s`) albo po zakończeniu/raporcie. `give_up_after` biegnie od pierwszej awarii. Po limicie jedno powiadomienie „wymaga uwagi” i brak dalszych wysyłek w tym epizodzie. Samotna linia API Error: 529 bez kontekstu banera jest pomijana; wolimy przeoczyć nieznaną formę błędu niż wznowić zakończoną pracę. Nie zweryfikowano formy bez prefiksu w rzeczywistym CLI.
 
 A closed pane is not evidence that a current-attempt report finished writing. Without a report-end marker or recorded turn completion it remains a candidate, even after settling. Once the owner verifies completeness, append the final report-end marker or record the turn-complete event; do not infer completion from a crash. Legacy records without attempt IDs retain their conservative compatibility rules. PL: Zniknięcie okna nie potwierdza kompletności raportu bieżącej próby; po sprawdzeniu pliku właściciel może dodać końcowy znacznik albo jawnie zarejestrować koniec tury.
+
+## Board model labels and list width (0.17.2)
+
+```yaml
+board:
+  model_versions: {sonnet: "5.5", opus: "5.5"}
+  list_width: "55%"  # or 100 (columns); omit for automatic sizing
+```
+
+`board.model_versions` defaults to `{}` and maps model names/aliases to quoted numeric versions. Explicit versions in the selected model win; an alias uses the observed session model of the same family before this fallback map. No observation or mapping means the initial only (for example `S MD`), never a guessed version. The chosen effort remains the spec/resolved effort, even when a session observes a different one. Efforts: minimal MN, low LO, medium MD, high HI, xhigh XH, max MX, none NO, missing/unknown `–`.
+
+`board.list_width` accepts an integer >=64 columns or a percentage string from `"1%"` to `"100%"`. With a preview it is clamped to at least 64 columns and at most terminal width minus 32. Below 110 columns the preview stays hidden and the list uses the whole terminal; the override has no effect there. Without an override, 110–139 columns retains the 71-column list; at >=140 columns use max(92, floor(45% of terminal width)), preserving at least 32 columns for preview. Large model/version strings may still truncate in constrained lists; full names remain in preview/help. Queue rows use the same abbreviations and fallback mapping. The manager line shows connection state rather than a model, so it retains its existing form.
+
+PL: `model_versions` to opcjonalna mapa wersji aliasów, bez domyślnych zgadywanych wartości. `list_width` przyjmuje kolumny lub procent; ograniczenia chronią miejsce na listę i podgląd. Zaznaczenie nadal bold/niebieskie, kolory stanów oraz NO_COLOR zachowują poprzednie zachowanie.

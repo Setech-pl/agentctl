@@ -243,8 +243,8 @@ describe('board: layout and cells', () => {
     assert.equal(text(row('NC-1', { state: 'needs-trust' }), 'state'), '🔒 needs-trust');
     assert.equal(text(row('NC-1'), 'progress'), '2c 7f');
     assert.equal(text(row('NC-1', { progress: null }), 'progress'), '-');
-    assert.equal(text(row('NC-1'), 'who'), 'claude opus/high');
-    assert.equal(text(row('NC-1', { agent: 'unknown' }), 'who'), 'unknown');
+    assert.equal(text(row('NC-1'), 'who'), 'cl O HI');
+    assert.equal(text(row('NC-1', { agent: 'unknown' }), 'who'), 'un O HI');
     assert.equal(text(row('NC-1'), 'time'), '12m 04s');
     assert.equal(reportLabel(row('NC-1')), '-');
     assert.equal(reportLabel(row('NC-1', { report: 'yes' })), 'ready');
@@ -315,7 +315,7 @@ describe('board: loading data', () => {
     assert.ok(runner.queries.some((q) => /capture-pane -p -t @1 -S -70$/.test(q)), runner.queries.filter((q) => q.includes('capture')).join('\n'));
     const second = await loadBoard(ctx, 'NC-2', new ProgressCache());
     // the git mock gives every worktree the same files, so the two tasks collide
-    assert.deepEqual(second.preview, { task: 'NC-2', lines: ['● idle'], note: '⚠ NC-1: 2' });
+    assert.deepEqual(second.preview, { task: 'NC-2', model: 'claude · model: opus · effort: high', lines: ['● idle'], note: '⚠ NC-1: 2' });
   });
 
   it('a task without a window gets a one-line preview; an unknown selection falls back to the first row', async () => {

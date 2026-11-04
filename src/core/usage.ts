@@ -289,6 +289,7 @@ export const allRecords = (config: GlobalConfig): TaskRecord[] => [...listTaskRe
 export const openReader = (config: GlobalConfig): UsageReader => new UsageReader(cachePath(config));
 
 export interface TaskTokens {
+  observed?: TaskUsage['observed'];
   /** input + output + cache writes: the number shown as TOKENS. */
   fresh: number;
   tokens: Tokens;
@@ -298,7 +299,7 @@ export interface TaskTokens {
 /** Tokens of each task that has a session log; tasks without one are not in the map (shown as n/d). */
 export function taskTokenMap(config: GlobalConfig, now: number, records: readonly TaskRecord[] = allRecords(config), reader: UsageReader = openReader(config)): Map<string, TaskTokens> {
   const out = new Map<string, TaskTokens>();
-  for (const [task, u] of collectTaskUsage(config, reader, records, now)) if (u.sessions > 0) out.set(task, { fresh: freshTokens(u.total), tokens: u.total, sessions: u.sessions });
+  for (const [task, u] of collectTaskUsage(config, reader, records, now)) if (u.sessions > 0) out.set(task, { fresh: freshTokens(u.total), tokens: u.total, sessions: u.sessions, ...(u.observed ? { observed: u.observed } : {}) });
   reader.save();
   return out;
 }

@@ -409,26 +409,27 @@ Każdy klucz z typem, wartością domyślną i znaczeniem: [docs/configuration.m
 
 `agentctl board` to pełnoekranowy przegląd wszystkich zadań, odświeżany co 2 sekundy. `agentctl board --tmux` otwiera go w oknie `board` sesji agentctl. Od 110 kolumn po prawej widać ostatnie linie wybranego okna; poniżej lista zajmuje całą szerokość.
 
+```text
+agentctl board  agentctl-test · 2 tasks · 06:54:51 · Disk: ok; free 307.4 GiB; agentctl worktrees 0.0 GiB
+  TASK                 AGENT          STATE               TIME    TOKENS  PROGRESS REPORT   │ NEON-BACKEND-TASK-12 · last 1 lines
+▸ NEON-BACKEND-TASK-12 cx S 6.1 XH    ⚙ working           1m 00s  n/d     -        -        │ codex · model: gpt-6.1-sol · effort: xhigh
+  NEON-CITY-REVIEW-12  cl O 5.5 HI    ⚙ working           1m 00s  n/d     -        -        │ Working (esc to interrupt)
 ```
-agentctl board  agentctl-test · 3 tasks · 09:41:03
-  TASK       AGENT              STATE          TIME    PROGRESS REPORT │ AC5-C · last 13 lines
-  AC5-A      claude opus/high   ⏸ waiting      37s     2c 3f    -      │ bash-3.2$ claude --model sonnet --effort medium
-  AC5-B      codex gpt-6.1-sol… ✓ report-ready 37s     1c 1f    ready  │ Claude Code (fake) --model sonnet --effort medium
-▸ AC5-C      claude sonnet/med… ? needs-input  36s     2c 2f    -      │
-                                                                       │ ● got: Model: sonnet · effort medium
-                                                                       │
-                                                                       │ ● working on: Third fake task that asks you something. W…
-                                                                       │ ● Edited file-1.txt
-                                                                       │ ● Edited file-0.txt
-                                                                       │ ? Tea or coffee?
-                                                                       │   1. Tea
-                                                                       │   2. Coffee
-                                                                       │   Enter to select · Esc to cancel
-                                                                       │ ● you chose: tea please
 
-Enter – open the agent · F12 – back to the list
-m msg M move i int c/r pull x close X cancel k cohort h hide l log L G R u/d/p ?
-```
+Kolumna AGENT używa `cl` (Claude) / `cx` (Codex), inicjału rodziny modelu, znanej wersji i dwuliterowego effortu. `cx S 6.1 XH` oznacza codex / gpt-6.1-sol / xhigh. Wersja aliasu pochodzi najpierw z modelu zaobserwowanego w sesji tej samej rodziny, następnie z `board.model_versions`; nieznana wersja jest pomijana. `default`/brak modelu i brak effortu dają `–`. Podgląd wybranego zadania i pomoc `?` zachowują pełne nazwy modelu i effortu.
+
+Od 140 kolumn terminala lista dostaje co najmniej 92 kolumny, a następnie około 45% szerokości. Mieszczą się typowe 20-znakowe ID oraz kolumny modelu, stanu, czasu, postępu i raportu. Podgląd zachowuje co najmniej 32 kolumny. Węższe terminale zachowują poprzedni podział. Można go nadpisać przez `board.list_width: 100` lub `board.list_width: "55%"`; zobacz [konfigurację](docs/configuration.md).
+
+| Effort | Skrót |
+|---|---|
+| minimal | MN |
+| low | LO |
+| medium | MD |
+| high | HI |
+| xhigh | XH |
+| max | MX |
+| none | NO |
+
 
 | Klawisz | Działanie |
 |---|---|

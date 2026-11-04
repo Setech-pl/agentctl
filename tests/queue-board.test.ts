@@ -77,7 +77,7 @@ describe('board: the Queue section', () => {
     const cells = queueCells(state.queue[0]!, false, boardColumns(71));
     assert.deepEqual(cells.map((c) => c.key), ['marker', 'task', 'who', 'report']);
     assert.equal(cells[1]!.text, 'Q-1');
-    assert.equal(cells[2]!.text, 'claude default/high');
+    assert.equal(cells[2]!.text, 'cl – HI');
     assert.match(cells[3]!.text, /^1\. czeka na miejsce: claude 1\/1 · high$/);
     const total = cells.reduce((n, c) => n + c.width + 1, 0) - 1;
     assert.equal(total, 71 - 0, 'the wide cell fills the line like a task row');
@@ -255,8 +255,8 @@ describe('board: the Ink front draws the queue', () => {
       let screen = term.screen();
       assert.match(screen, /2 queued/);
       assert.match(screen, /- Queue \(2\) – u front {2}d remove {2}p pause/);
-      assert.match(screen, /Q-1\s+claude default\/hi…\s+1\. czeka na miejsce: claude 1\/1/);
-      assert.match(screen, /Q-2\s+claude default\/hi…\s+2\. czeka na Q-1/);
+      assert.match(screen, /Q-1\s+cl – HI\s+1\. czeka na miejsce: claude 1\/1/);
+      assert.match(screen, /Q-2\s+cl – HI\s+2\. czeka na Q-1/);
       keys.write('j');
       await new Promise((r) => setTimeout(r, 150));
       keys.write('d');
@@ -264,7 +264,7 @@ describe('board: the Ink front draws the queue', () => {
       keys.write('y');
       await until(() => term.screen().includes('Queue (1)'), term);
       assert.deepEqual(readQueue(s.config).map((e) => e.task), ['Q-2']);
-      assert.match(term.screen(), /Q-2\s+claude default\/hi…\s+1\. ⛓ zablokowane – Q-1 anulowane/, 'Q-2 waited for the task that was just cancelled');
+      assert.match(term.screen(), /Q-2\s+cl – HI\s+1\. ⛓ zablokowane – Q-1 anulowane/, 'Q-2 waited for the task that was just cancelled');
       keys.write('p');
       await until(() => term.screen().includes('PAUSED'), term);
       assert.equal(isPaused(s.config), true);

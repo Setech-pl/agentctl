@@ -140,6 +140,8 @@ export const MCP_ALLOW_GROUPS: Record<string, readonly McpWriteTool[]> = {
 };
 
 export interface BoardSettings {
+  modelVersions: Record<string, string>;
+  listWidth?: number | string;
   /** A task without a window whose report was pulled hides by itself (a task without a report stays in "Finished"). */
   autoHidePulledDead: boolean;
   /** `mouse on` in the agentctl tmux session (this session only): click a window name in the status bar. Selecting text then takes the fn key in Terminal.app. */
@@ -374,7 +376,7 @@ export const NOTIFY_KEYS = ['backend', 'events', 'turn_end', 'terminal_app', 've
 export const NTFY_KEYS = ['server', 'topic', 'token', 'events', 'priority', 'include_verdict', 'include_question', 'click_url', 'always'];
 export const AWAY_KEYS = ['auto_idle'];
 export const MANAGER_KEYS = ['project', 'name', 'model', 'effort', 'guide', 'autostart'];
-export const BOARD_KEYS = ['auto_hide_pulled_dead', 'mouse', 'return_key', 'selected_color'];
+export const BOARD_KEYS = ['auto_hide_pulled_dead', 'mouse', 'return_key', 'selected_color', 'model_versions', 'list_width'];
 export const MCP_KEYS = ['allow', 'allow_rm_worktree', 'client'];
 export const QUEUE_KEYS = ['enabled', 'parallel_starts'];
 export const CANCEL_KEYS = ['grace'];
@@ -758,13 +760,21 @@ function parseManager(v: unknown, p: Problems): ManagerSettings {
 }
 
 function parseBoard(v: unknown, p: Problems): BoardSettings {
-  const board: BoardSettings = { autoHidePulledDead: true, mouse: true, returnKey: 'F12', selectedColor: 'blue' };
+  const board: BoardSettings = { autoHidePulledDead: true, mouse: true, returnKey: 'F12', selectedColor: 'blue', modelVersions: {} };
   if (v === undefined || v === null) return board;
   if (!isObject(v)) {
     p.add('config.board must be a mapping like {auto_hide_pulled_dead: true, mouse: true, return_key: F12}');
     return board;
   }
   checkKeys(v, BOARD_KEYS, 'config.board', p);
+  if (v.model_versions !== undefined) {
+    if (isObject(v.model_versions) && Object.entries(v.model_versions).every(([k, n]) => /^[a-z0-9._-]+$/i.test(k) && typeof n === 'string' && /^\d+(?:\.\d+)*$/.test(n))) board.modelVersions = Object.fromEntries(Object.entries(v.model_versions).map(([k, n]) => [k.toLowerCase(), n as string]));
+    else p.add('config.board.model_versions must map model aliases to quoted numeric versions, e.g. {sonnet: "5.5"}');
+  }
+  if (v.list_width !== undefined) {
+    if ((typeof v.list_width === 'number' && Number.isInteger(v.list_width) && v.list_width >= 64) || (typeof v.list_width === 'string' && /^(?:[1-9]\d?|100)%$/.test(v.list_width))) board.listWidth = v.list_width;
+    else p.add('config.board.list_width must be an integer >= 64 columns or a percentage such as "45%"');
+  }
   if (v.mouse !== undefined) {
     if (typeof v.mouse === 'boolean') board.mouse = v.mouse;
     else p.add('config.board.mouse must be true or false');
