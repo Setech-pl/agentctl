@@ -1,3 +1,6 @@
+import { collectStatus } from './status.ts';
+import { inspectReport } from './report-state.ts';
+import { missingLinkTargets, projectLinks } from './links.ts';
 import { listTaskRecords, listArchivedRecords } from './taskstore.ts';
 import { collectDisk, diskLine } from './disk.ts';
 import { projectGuide } from './guide.ts';
@@ -253,9 +256,12 @@ export async function runDoctor(
       }
     } else add('mirror', 'ok', 'off (set mirror_dir in the config to enable)');
     try {
+      const reportRows = new Map((await collectStatus(new Context(runner, config, () => {}), { progress: false, archived: true })).map(r => [r.task, r]));
       const taskProcesses = (await runner.exec('ps', ['-axo', 'command='], { readOnly: true })).stdout.split('\n');
       for (const record of [...listTaskRecords(config), ...listArchivedRecords(config)]) {
-        if (!record.reportConfirmed && record.reportSource && path.normalize(record.reportSource) !== path.normalize(record.report)) add(`report ${record.task}`, 'warn', `raport pochodzi z kopii ${record.reportSource} – sprawdź`);
+        const report = inspectReport(config, record, runner.now(), !record.attemptId);
+        if (reportRows.get(record.task)?.report !== 'yes') add(`report ${record.task}`, 'warn', `${report.ready ? 'incomplete for current turn' : report.reason}: ${record.report}${record.reportSource ? ` (previous copy: ${record.reportSource})` : ''}`);
+        else if (!record.reportConfirmed && record.reportSource && path.normalize(record.reportSource) !== path.normalize(record.report)) add(`report ${record.task}`, 'warn', `raport pochodzi z kopii ${record.reportSource} – sprawdź`);
         if (record.closed || record.cancelled) continue;
         if (taskProcesses.some(command => /\/Cellar\/node(?:@[^/]+)?\//.test(command) && command.includes('--task') && command.replaceAll(/[^a-zA-Z0-9_-]+/g, ' ').split(' ').includes(record.task))) add(`task node ${record.task}`, 'warn', 'versioned Node path in active callback argv; works until Node is upgraded; regenerate task wiring when convenient');
         const dir = path.join(config.stateDir, record.window);
@@ -264,9 +270,15 @@ export async function runDoctor(
         }
       }
     } catch (e) { add('task diagnostics', 'warn', errorMessage(e)); }
+    for (const repo of new Set([...listTaskRecords(config), ...listArchivedRecords(config)].flatMap(r => r.repos.map(repo => repo.path)))) {
+      if (repo === cwd) continue;
+      try { for (const warning of missingLinkTargets(projectLinks(repo, '', config.cache))) add('project links', 'fail', `${repo}: ${warning}`); }
+      catch (e) { add('project links', 'fail', errorMessage(e)); }
+    }
     if (cwd === null) add('project', 'ok', 'bez projektu');
     else try {
       const project = loadProjectConfig(cwd);
+      for (const warning of missingLinkTargets(projectLinks(cwd, '', config.cache))) add('project links', 'fail', warning);
       for (const warning of projectGuide(cwd).warnings) add('project guide', 'warn', warning);
       add('project config', 'ok', project ? project.path : `no ${PROJECT_CONFIG_NAME} in ${path.resolve(cwd)} (optional)`);
     } catch (e) {

@@ -36,6 +36,8 @@ export interface LiveWindow {
   agent?: AgentName;
   /** Absent: a window of agentctl. `reserved`: a place held with `limits reserve`; `external`: a session found outside (limits.count_external). */
   kind?: 'reserved' | 'external';
+  reportReady?: boolean;
+  counted?: boolean;
   pid?: number;
   cwd?: string;
 }
@@ -43,7 +45,7 @@ export interface LiveWindow {
 /** Provider limit: counts windows already running for the agent and refuses one more past the limit. */
 export function checkWindowLimit(agent: AgentName, limit: number | undefined, live: LiveWindow[], session: string): string | undefined {
   if (limit === undefined) return undefined;
-  const running = live.filter((w) => w.agent === agent);
+  const running = live.filter((w) => w.agent === agent && w.counted !== false);
   if (running.length < limit) return undefined;
   const list = running.map((w) => w.window).join(', ');
   return `window limit for ${agent} reached: ${running.length} of ${limit} in session "${session}" (${list}).`;

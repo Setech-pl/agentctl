@@ -184,6 +184,7 @@ describe('decorating window names', () => {
     await watchTick(ctx, memory, notifier);
     assert.equal(renames(), 5, 'the second tick finds the names right and renames nothing');
     tmux.windows.find((w) => w.id === '@1')!.screen = IDLE;
+    await watchTick(ctx, memory, notifier); // confirm idle on the second reading
     await watchTick(ctx, memory, notifier);
     assert.equal(renames(), 6);
     assert.equal(tmux.windows[0]?.name, '⏸ nc-1');

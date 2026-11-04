@@ -1,3 +1,4 @@
+import { missingLinkTargets, checkLinkTargets } from './links.ts';
 import type { OutputVerdict } from './outputs.ts';
 import { redactQueue } from './mcp-redact.ts';
 import { checkRetryWorktrees } from './git.ts';
@@ -186,19 +187,20 @@ export async function planQueueAdd(ctx: Context, raws: RawSpec[], opts: { agent?
   checkAfter(ctx, specs, entries);
   const items = specs.map((spec, i) => ({ raw: raws[i] as RawSpec, spec }));
   const rows = await collectStatus(ctx, { progress: false, archived: true });
-  const warnings = await touchWarnings(ctx, specs);
+  const warnings = [...await touchWarnings(ctx, specs), ...specs.flatMap(s => missingLinkTargets(s.links).map(w => `${s.task}: ${w}`))];
   const capacity = config.capacity.snapshot && !ctx.runner.dryRun ? capacitySnapshot(await collectCapacity(ctx), specs.map((s) => s.agent)) : undefined;
   return { items, warnings, ...(capacity ? { capacity } : {}), summary: [...describeQueueAdd(ctx, specs, entries, await liveWindows(ctx), rows), ...usageSummaryLines(config, specs, ctx.runner.now()), ...(capacity ? snapshotLines(capacity) : []), ...warnings.map((w) => `⚠ ${w}`)] };
 }
 
 /** Per spec: the order and where it will stand ("starts at once" or "waits: claude 2/2, 1 ahead"). */
-export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: QueueEntry[], live: { agent?: AgentName }[], rows: StatusRow[] = []): string[] {
+export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: QueueEntry[], live: { agent?: AgentName; counted?: boolean }[], rows: StatusRow[] = []): string[] {
   const { config } = ctx;
   const load: Record<AgentName, number> = { claude: 0, codex: 0 };
-  for (const w of live) if (w.agent) load[w.agent]++;
+  for (const w of live) if (w.agent && w.counted !== false) load[w.agent]++;
   const ahead: Record<AgentName, number> = { claude: 0, codex: 0 };
   for (const e of waiting(entries)) ahead[e.agent]++;
-  const lines: string[] = [];
+  const readyCount = rows.filter(r => r.state === 'report-ready' && r.window === 'alive').length;
+  const lines: string[] = readyCount ? [`${readyCount} okien report-ready – close zwolni okna`] : [];
   for (const spec of specs) {
     const limit = config.limits[spec.agent];
     const used = load[spec.agent] + ahead[spec.agent];
@@ -234,6 +236,7 @@ export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: Q
 /** Write the entries (one per spec). Returns them in the order they were added. */
 export async function commitQueueAdd(ctx: Context, items: QueueAddItem[], opts: { agent?: AgentName; reuse?: boolean; autoReview?: AutoReviewSource } = {}): Promise<QueueEntry[]> {
   const { config, runner } = ctx;
+  for (const { spec } of items) checkLinkTargets(spec.links, spec.task);
   const existing = readQueue(config);
   let seq = existing.reduce((n, e) => Math.max(n, e.seq), 0);
   const added: QueueEntry[] = [];
@@ -419,10 +422,10 @@ export interface QueueView {
  * For every entry: what it waits for. Entries are walked in turn order, each one that will start in the next tick uses up a window of its
  * provider, so the answer matches what `watch` does. `inflight` are the tasks this very process is starting.
  */
-export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live: { agent?: AgentName }[], rows: StatusRow[] = [], nowMs: number = Date.now()): QueueView[] {
+export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live: { agent?: AgentName; counted?: boolean }[], rows: StatusRow[] = [], nowMs: number = Date.now()): QueueView[] {
   const failed = new Set(entries.filter((e) => e.status === 'failed').map((e) => e.task));
   const used: Record<AgentName, number> = { claude: 0, codex: 0 };
-  for (const w of live) if (w.agent) used[w.agent]++;
+  for (const w of live) if (w.agent && w.counted !== false) used[w.agent]++;
   const paused = isPaused(config) || !config.queue.enabled;
   const reason = !config.queue.enabled ? 'queue.enabled is false' : 'queue paused (agentctl queue resume)';
   const blocked = findBlocked(entries, rows);
@@ -540,7 +543,7 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   const live = await liveWindows(ctx);
   const rows = opts.rows ?? (await collectStatus(ctx, { progress: false, archived: true }));
   const used: Record<AgentName, number> = { claude: 0, codex: 0 };
-  for (const w of live) if (w.agent) used[w.agent]++;
+  for (const w of live) if (w.agent && w.counted !== false) used[w.agent]++;
   // A start in progress whose window is not up yet already holds its place.
   for (const [task, i] of memory.inflight) if (!live.some((w) => w.window === task.toLowerCase())) used[i.agent]++;
 

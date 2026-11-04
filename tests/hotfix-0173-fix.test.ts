@@ -41,7 +41,7 @@ for (const agent of ['codex', 'claude'] as const) for (const swallowed of [1, 9]
     assert.equal(await deliverPendingPrompt(f.ctx, 't1'), swallowed === 1 ? 'sent' : 'confirming');
     assert.equal(pastes, 1); assert.equal(enters, swallowed === 1 ? 2 : 3);
     assert.equal(readTaskRecord(f.config, 't1')!.promptDelivery, swallowed === 1 ? 'sent' : 'confirming');
-    if (swallowed > 1) { assert.equal((await collectStatus(f.ctx))[0]!.state, 'waiting'); assert.match(readTaskRecord(f.config, 't1')!.promptError!, /two retries/); await f.runner.sleep(60000); await watchTick(f.ctx, new WatchMemory(), { notify: async () => {} }); assert.equal((await collectStatus(f.ctx))[0]!.state, 'needs-attention'); }
+    if (swallowed > 1) { assert.equal((await collectStatus(f.ctx))[0]!.state, 'working'); assert.equal((await collectStatus(f.ctx))[0]!.state, 'waiting'); assert.match(readTaskRecord(f.config, 't1')!.promptError!, /two retries/); await f.runner.sleep(60000); await watchTick(f.ctx, new WatchMemory(), { notify: async () => {} }); assert.equal((await collectStatus(f.ctx))[0]!.state, 'needs-attention'); }
   });
 }
 it('0173-FIX-B/C: canonical absolute report path survives pending trust; competing new/watch send once', async () => {
@@ -94,7 +94,7 @@ for (const tool of ['close', 'cancel', 'archive', 'gc', 'mark'] as const) it(`01
   const f = fixture(`scope-${tool}`), closed = tool === 'archive' || tool === 'gc';
   for (const id of ['T1','T2','T3']) { seedTask(f.config, id, { cohort: 'NC', closed }); if (!closed) f.tmux.add(id.toLowerCase(), '❯ \n'); }
   seedTask(f.config, 'OTHER', { cohort: 'other', closed });
-  const args = { cohort: 'NC', ...(tool === 'mark' ? { result: 'ok' } : {}) };
+  const args = { cohort: 'NC', ...(tool === 'gc' ? { detail: true } : {}), ...(tool === 'mark' ? { result: 'ok' } : {}) };
   const preview = await f.full(tool, args); for (const id of ['T1','T2','T3']) assert.ok(preview.includes(id), `${tool}: ${preview}`); assert.ok(!preview.includes('OTHER'));
   const executed = await f.full(tool, { ...args, confirm: true });
   if (tool === 'close' || tool === 'cancel') for (const id of ['T1','T2','T3']) assert.equal(Boolean(readTaskRecord(f.config, id.toLowerCase())![tool === 'close' ? 'closed' : 'cancelled']), true);

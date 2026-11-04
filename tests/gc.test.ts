@@ -204,7 +204,7 @@ describe('gc: CLI, board and MCP', () => {
     assert.equal(dry.code, 0, dry.stderr);
     assert.match(dry.stdout, /Would clean up \(a dry run/);
     assert.ok(fs.existsSync(path.join(w.config.cache, 'nc-1', 'old.log')));
-    assert.equal(JSON.parse((await runCli(w.config, w.runner, ['gc', '--json'])).stdout).items.length > 0, true);
+    assert.equal(JSON.parse((await runCli(w.config, w.runner, ['gc', '--json', '--verbose'])).stdout).details.items.length > 0, true);
     const noTty = await runCli(w.config, w.runner, ['gc', '--apply']);
     assert.equal(noTty.code, 1);
     assert.match(noTty.stderr, /no terminal to ask on/);
@@ -230,8 +230,10 @@ describe('gc: CLI, board and MCP', () => {
     const tool = MCP_TOOLS.find((t) => t.name === 'gc_preview')!;
     assert.equal(tool.kind, 'read');
     const res = await tool.run(deps, z.object(tool.input).parse({}) as never);
-    assert.match(res.text, /preview only/);
-    assert.match(res.text, /old\.log/);
+    assert.match(res.text, /"preview":true/);
+    assert.doesNotMatch(res.text, /old\.log/);
+    const detailed = await tool.run(deps, { detail: true });
+    assert.match(detailed.text, /old\.log/);
     assert.ok(fs.existsSync(path.join(w.config.cache, 'nc-1', 'old.log')), 'a preview deletes nothing');
     assert.equal(MCP_TOOLS.find((t) => t.name === 'gc')?.kind, 'write');
   });

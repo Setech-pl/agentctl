@@ -384,7 +384,7 @@ describe('mcp: the write tools', () => {
     const repo = scratch.sub('n1/app');
     const spec = `---\ntask: NC-9\nagent: claude\nrepos:\n  - path: ${repo}\n    worktree: ${repo}-wt\n---\nZrób NC-9.\n`;
     const preview = await t.call('new', { spec });
-    assert.match(preview.text, /^NC-9 {2}claude\/default\/high\n {2}worktree: .*app-wt[\s\S]*Not started yet\. Show this to the user and ask; if they agree, call new again with the same spec and confirm: true\.\npreview_token: [0-9a-f-]+$/);
+    assert.match(preview.text, /^NC-9 {2}claude\/default\/high\n {2}worktree: .*app-wt[\s\S]*Not started yet\. Show this to the user and ask; if they agree, call new again with the same spec and confirm: true\.\npreview_ttl_s: [^\n]+\npreview_token: [0-9a-f-]+$/);
     assert.deepEqual(t.runner.commands.filter((c) => !c.startsWith('write ') && !c.startsWith('append ')), [], 'nothing ran');
     assert.deepEqual(t.notified, []);
     assert.deepEqual(t.audit().map((a) => a.outcome), ['requested', 'preview']);
@@ -404,7 +404,7 @@ describe('mcp: the write tools', () => {
     const noAgent = await t.call('new', { spec: `---\ntask: nc-9\nrepos:\n  - path: ${repo}\n---\nx\n`, confirm: true });
     assert.equal(noAgent.isError, true);
     const withSetup = await t.call('new', { spec: `---\ntask: NC-9\nagent: claude\nsetup: ["touch /tmp/x"]\nrepos:\n  - path: ${repo}\n---\nx\n`, confirm: true });
-    assert.match(withSetup.text, /NC-9: "setup" runs shell commands and is not accepted from the chat/);
+    assert.match(withSetup.text, /Confirmation refused: missing preview/);
     assert.ok(!t.runner.commands.some((c) => c.startsWith('sh ') || c.includes('touch')), 'no shell ran');
     assert.ok(!t.runner.commands.some((c) => c.startsWith('git')));
     assert.deepEqual(t.notified, []);
@@ -416,7 +416,7 @@ describe('mcp: the write tools', () => {
     seedTask(t.config, 'NC-1', { repos: [{ path: scratch.sub('m1/app'), worktree: scratch.sub('m1/app-wt') }], requested: { agent: 'claude', model: 'opus', effort: 'high' } });
     t.tmux.add('nc-1', "  ⎿  You've hit your session limit · resets 3pm\n❯ ");
     const preview = await t.call('move', { task: 'NC-1' });
-    assert.match(preview.text, /^Move NC-1 \(claude opus\/high\) -> NC-1-2 \(codex .*\)[\s\S]*Not moved yet\. Ask the user, then call move again with confirm: true\.\npreview_token: [0-9a-f-]+$/);
+    assert.match(preview.text, /^Move NC-1 \(claude opus\/high\) -> NC-1-2 \(codex .*\)[\s\S]*Not moved yet\. Ask the user, then call move again with confirm: true\.\npreview_ttl_s: [^\n]+\npreview_token: [0-9a-f-]+$/);
     assert.ok(!t.tmux.windows.some((w) => w.name === 'nc-1-2'));
     assert.deepEqual(t.notified, []);
     const done = await t.call('move', { task: 'NC-1', confirm: true });

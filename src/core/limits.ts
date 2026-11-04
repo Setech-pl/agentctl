@@ -193,6 +193,8 @@ export interface ProviderLoad {
   limit: number | null;
   /** Windows of agentctl. */
   windows: string[];
+  working: string[];
+  reportReady: string[];
   reserved: number;
   reservedNote: string | null;
   external: { pid: number; cwd: string | null }[];
@@ -219,18 +221,20 @@ export function collectLimits(config: GlobalConfig, live: readonly LiveWindow[])
     providers: AGENT_NAMES.map((agent): ProviderLoad => {
       const mine = live.filter((w) => w.agent === agent);
       const windows = mine.filter((w) => w.kind === undefined).map((w) => w.window);
+      const working = mine.filter(w => w.kind === undefined && !w.reportReady).map(w => w.window);
+      const reportReady = mine.filter(w => w.reportReady).map(w => w.window);
       const reserved = mine.filter((w) => w.kind === 'reserved').length;
       const external = mine.filter((w) => w.kind === 'external').map((w) => ({ pid: w.pid ?? 0, cwd: w.cwd ?? null }));
       const limit = config.limits[agent] ?? null;
-      const used = windows.length + reserved + external.length;
-      return { agent, limit, windows, reserved, reservedNote: reservations[agent]?.note ?? null, external, used, free: limit === null ? null : Math.max(0, limit - used), queued: queue.filter((e) => e.agent === agent).length };
+      const used = mine.filter(w => w.kind === undefined && w.counted !== false).length + reserved + external.length;
+      return { agent, limit, windows, working, reportReady, reserved, reservedNote: reservations[agent]?.note ?? null, external, used, free: limit === null ? null : Math.max(0, limit - used), queued: queue.filter((e) => e.agent === agent).length };
     }),
   };
 }
 
 export function renderLimits(report: LimitsReport): string[] {
-  const header = ['PROVIDER', 'LIMIT', 'USED', 'FREE', 'AGENTCTL', 'RESERVED', 'EXTERNAL', 'QUEUED'];
-  const body = report.providers.map((p) => [p.agent, p.limit === null ? '-' : String(p.limit), String(p.used), p.free === null ? '-' : String(p.free), String(p.windows.length), String(p.reserved), report.countExternal ? String(p.external.length) : 'off', String(p.queued)]);
+  const header = ['PROVIDER', 'LIMIT', 'USED', 'FREE', 'AGENTCTL', 'WORKING', 'REPORT-READY', 'RESERVED', 'EXTERNAL', 'QUEUED'];
+  const body = report.providers.map((p) => [p.agent, p.limit === null ? '-' : String(p.limit), String(p.used), p.free === null ? '-' : String(p.free), String(p.windows.length), String(p.working.length), String(p.reportReady.length), String(p.reserved), report.countExternal ? String(p.external.length) : 'off', String(p.queued)]);
   const widths = header.map((h, i) => Math.max(h.length, ...body.map((r) => (r[i] as string).length)));
   const fmt = (cells: string[]): string => cells.map((c, i) => (i === cells.length - 1 ? c : c.padEnd(widths[i] as number))).join('  ').trimEnd();
   const lines = [fmt(header), ...body.map(fmt)];

@@ -128,7 +128,7 @@ async function questionOnScreen(ctx: Context, record: TaskRecord): Promise<strin
 async function backgroundOnScreen(ctx: Context, record: TaskRecord): Promise<boolean> {
   const screen = await ctx.tmux.capture(record.window, undefined, undefined, record.windowId);
   if (screen.code !== 0) return false;
-  return classifyScreen(screen.stdout, ctx.config.agents[record.agent === 'unknown' ? 'claude' : record.agent]) === 'background';
+  return ['working', 'background'].includes(classifyScreen(screen.stdout, ctx.config.agents[record.agent === 'unknown' ? 'claude' : record.agent]));
 }
 
 /** The full last message of the agent (Claude: last_assistant_message, Codex: last-assistant-message), for the search of the report path. */

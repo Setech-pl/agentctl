@@ -1,3 +1,5 @@
+import { missingLinkTargets, checkLinkTargets } from './links.ts';
+import { inspectReport } from './report-state.ts';
 import { findBlocked } from './depends.ts';
 import { mcpWriteNotice } from './mcp-notify.ts';
 import { planMark, markTasks } from './mark.ts';
@@ -58,7 +60,7 @@ import type { TaskRecord } from './taskstore.ts';
 import { computeStats, markTask, parseResult, RESULTS, selectHistory } from './history.ts';
 import { collectUsage } from './usage-report.ts';
 import { planResume, resumeTasks } from './resume.ts';
-import { planGc, renderGc } from './gc.ts';
+import { planGc, renderGc, gcView } from './gc.ts';
 import { collectEvents, renderEvents } from './chat-events.ts';
 import { applySetLimits, collectLimits, planSetLimits, readReservations, releasePlaces, reservePlaces } from './limits.ts';
 import type { LimitAssignments } from './limits.ts';
@@ -368,10 +370,10 @@ async function runEventsSince(deps: McpDeps, args: { since?: string | undefined;
   return { text: renderEvents(report).join('\n'), data: report };
 }
 
-async function runGcPreview(deps: McpDeps, args: { older_than?: string | undefined; merged?: boolean | undefined; cohort?: string | undefined }): Promise<ToolResult> {
+async function runGcPreview(deps: McpDeps, args: { older_than?: string | undefined; merged?: boolean | undefined; cohort?: string | undefined; detail?: boolean; offset?: number; limit?: number }): Promise<ToolResult> {
   const ctx = deps.context(() => {});
   const plan = await planGc(ctx, { olderThan: args.older_than, branches: args.merged, cohort: args.cohort });
-  return ok(`${renderGc(plan).join('\n')}\n\nThis is a preview only. ${ctx.config.mcp.allow.includes('gc') ? 'Cleanup is available through gc: preview, then confirm with identical arguments.' : 'Cleanup requires gc in mcp.allow or local agentctl gc --apply.'}\n\n${JSON.stringify(plan, null, 2)}`);
+  return ok(JSON.stringify({ ...gcView(plan, args), preview: true, execution: ctx.config.mcp.allow.includes('gc') ? 'gc preview then confirm' : 'requires gc in mcp.allow or CLI --apply' }));
 }
 
 async function runResume(deps: McpDeps, args: { tasks?: string[] | undefined; all?: boolean | undefined; confirm?: boolean | undefined }): Promise<ToolResult> {
@@ -582,6 +584,11 @@ export function readReportFile(record: Pick<TaskRecord, 'task' | 'report'>, opts
 async function runGetReport(deps: McpDeps, args: { task: string; section?: string; offset?: number; limit?: number; byte_offset?: number }): Promise<ToolResult> {
   const ctx = deps.context(() => {});
   const record = findRecord(ctx, args.task);
+  const row = (await collectStatus(ctx, { progress: false, archived: true })).find(r => r.task === record.task);
+  if (row?.report !== 'yes') {
+    const state = inspectReport(ctx.config, record, ctx.runner.now(), !record.attemptId);
+    throw new AgentctlError(state.reason === 'not a regular report' ? `the report of ${record.task} is not a regular file; refusing to read it` : `${record.task} has no report yet: ${state.reason}`, 'Use report to inspect candidates or wait for completion.');
+  }
   const outputs = await readOutputs(ctx, record);
   const render = (r: ReportPage, pulled: boolean): ToolResult => {
     const { text, signature: _signature, ...page } = r;
@@ -720,6 +727,7 @@ async function writeTool(
     const result = await body(ctx, lines);
     audit(ctx, { tool, task: label.task, outcome: result.executed ? 'done' : 'preview' });
     if (result.executed) {
+      lastPreviewMutation.set(deps, tool);
       await recordJournal(ctx, { kind: 'mcp-write', text: `${tool}: ${result.announce}` });
       await mcpWriteNotice(ctx, deps.notify.bind(deps), result.announce);
     }
@@ -806,7 +814,8 @@ async function runNew(deps: McpDeps, args: NewMcpArgs): Promise<ToolResult> {
     const specs = await planBatch(ctx, raws.map((raw) => resolveSpec(raw, { config: ctx.config })), { noSwitch: true, reuse: Boolean(args.reuse), ...(args.agent ? { agent: args.agent } : {}) });
     const cap = !args.confirm && ctx.config.capacity.snapshot ? capacitySnapshot(await collectCapacity(ctx), specs.map((s) => s.agent)) : undefined;
     const disk = await collectDisk(ctx);
-    const summary = summarizeSpecs(specs, [...(cap ? snapshotLines(cap) : []), ...(disk.level === 'critical' ? [`WARNING: ${diskLine(disk)}`] : [])]).join('\n');
+    const readyCount = (await liveWindows(ctx)).filter(w => w.reportReady).length;
+    const summary = summarizeSpecs(specs, [...(!cap && readyCount ? [`${readyCount} okien report-ready – close zwolni okna`] : []), ...(cap ? snapshotLines(cap) : []), ...(disk.level === 'critical' ? [`WARNING: ${diskLine(disk)}`] : [])]).join('\n');
     if (!args.confirm) {
       return { text: `${summary}\n\nNot started yet. Show this to the user and ask; if they agree, call new again with the same spec and confirm: true.`, executed: false, announce: '' };
     }
@@ -914,7 +923,7 @@ export const MCP_TOOLS: McpToolDef[] = [
     description:
       'What "agentctl gc" would free now, without doing anything: git worktrees of closed, cancelled and archived tasks without uncommitted changes, old files next to the reports, state folders to archive, merged branches (merged: true), each with its size, and what is skipped and why. ' +
       'Use the separately allowed gc tool to apply this protected plan with preview and confirm: true (branches default false).',
-    input: { older_than: z.string().max(10).optional().describe('Age of the files next to the reports before they count: 12h, 7d, 2w. Default 7d.'), merged: z.boolean().optional().describe('true: also list merged branches of finished tasks.'), cohort: cohortArg.optional() },
+    input: { detail: z.boolean().optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional(), older_than: z.string().max(10).optional().describe('Age of the files next to the reports before they count: 12h, 7d, 2w. Default 7d.'), merged: z.boolean().optional().describe('true: also list merged branches of finished tasks.'), cohort: cohortArg.optional() },
     annotations: readOnly('Preview of the clean-up'),
     run: (deps, args) => guarded(() => runGcPreview(deps, args as { older_than?: string; merged?: boolean; cohort?: string })),
   }),
@@ -1274,7 +1283,7 @@ MCP_TOOLS.push(
   extraWrite('manager_start', 'manager', 'Start the supervising manager session', { project: optionalText, name: optionalText, model: optionalText, effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional() }, async (ctx, a, deps) => { if (!deps.self) throw new AgentctlError('this server has no self command for the manager'); return startManager(ctx, { ...a, self: deps.self, noWait: true }); }),
   extraWrite('manager_stop', 'manager stop', 'Stop the manager session', {}, async (ctx) => ({ state: await stopManager(ctx) })),
   extraWrite('notify_test', 'notify-test [--phone]', 'Test desktop notifications; phone true explicitly sends to ntfy', { phone: z.boolean().optional() }, async (ctx, a, deps) => { if (a.phone) return sendPhoneTest(ctx); await deps.notify('agentctl notification test'); return { local: true }; }),
-  extraWrite('gc', 'gc --apply [--cohort <NAME>] [--older-than <AGE>] [--branches]', 'Reclaim disk space from finished tasks using the same protected plan as gc_preview', { cohort: cohortArg.optional(), older_than: optionalText, branches: z.boolean().optional() }, async (ctx, a) => { const plan = await planGc(ctx, { cohort: a.cohort, olderThan: a.older_than, branches: a.branches ?? false }); return { plan, result: await applyGc(ctx, plan) }; }),
+  extraWrite('gc', 'gc --apply [--cohort <NAME>] [--older-than <AGE>] [--branches]', 'Reclaim disk space from finished tasks using the same protected plan as gc_preview', { detail: z.boolean().optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional(), cohort: cohortArg.optional(), older_than: optionalText, branches: z.boolean().optional() }, async (ctx, a) => { const plan = await planGc(ctx, { cohort: a.cohort, olderThan: a.older_than, branches: a.branches ?? false }); return { plan, result: await applyGc(ctx, plan) }; }),
 );
 
 /** Do not expose environment values or credential-bearing ntfy URLs as well as token/topic. */
@@ -1289,7 +1298,34 @@ function redactConfig(config: GlobalConfig): unknown {
 }
 
 const confirmedTools = new Set(['mark', 'new', 'queue', 'cancel', 'resume', 'move', 'interrupt', 'close', 'queue_rm', ...MCP_TOOLS.filter((t) => t.kind === 'write' && !['send', 'mark', 'away', 'set_limits', 'reserve'].includes(t.name)).map((t) => t.name)]);
-const previews = new WeakMap<McpDeps, Map<string, { key: string; fingerprint: string; at: number }>>();
+const previews = new WeakMap<McpDeps, Map<string, { key: string; arguments: Record<string, unknown>; scope: string; at: number; ttlS: number }>>();
+const lastPreviewMutation = new WeakMap<McpDeps, string>();
+const previewSessions = new WeakMap<McpDeps, string>();
+const issuedPreviewTokens = new Map<string, { session: string; state: string }>();
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, canonical(v)]));
+  return value;
+}
+function previewArguments(input: Record<string, unknown>): Record<string, unknown> {
+  return canonical({ ...input, ...(typeof input.spec === 'string' ? { spec: splitSpecs(input.spec, 'preview arguments').map(s => ({ header: s.header, prompt: s.prompt.replace(/\r\n?/g, '\n').split('\n').map(line => line.trimEnd()).join('\n').trim() })) } : {}) }) as Record<string, unknown>;
+}
+
+/** Guard target identities, excluding receipt timestamps written by read tools. */
+function confirmationTargets(name: string, scope: unknown): unknown {
+  if (name === 'new' || name === 'queue') return null;
+  if (name === 'gc') return (scope as GcPlan).items.map(({ kind, task, target, repo, branch }) => ({ kind, task, target, repo, branch }));
+  const project = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(project);
+    if (!value || typeof value !== 'object') return value;
+    const obj = value as Record<string, unknown>;
+    if (typeof obj.window === 'string' && typeof obj.started === 'string' && Array.isArray(obj.repos)) {
+      return Object.fromEntries(['task', 'window', 'windowId', 'started', 'agent', 'model', 'effort', 'attemptId', 'report', 'repos', 'closed', 'cancelled', 'hidden', 'cohort', 'supersededBy'].filter(k => obj[k] !== undefined).map(k => [k, obj[k]]));
+    }
+    return Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, project(v)]));
+  };
+  return project(scope);
+}
 /** Exact arguments and observed task/queue/window identities bind confirmation to this session. No scope can silently grow. */
 async function confirmationScope(ctx: Context, name: string, args: Record<string, unknown>): Promise<unknown> {
   if (name === 'queue_up' || name === 'queue_rm') {
@@ -1324,8 +1360,8 @@ async function confirmationScope(ctx: Context, name: string, args: Record<string
     const rawSpecs = splitSpecs(args.spec as string, 'MCP preview');
     if (args.cohort) for (const raw of rawSpecs) raw.header.cohort = args.cohort;
     for (const raw of rawSpecs) if ('setup' in raw.header) throw new AgentctlError(`${String(raw.header.task ?? 'a task')}: \"setup\" runs shell commands and is not accepted from the chat`);
-    const specs = await planBatch(ctx, rawSpecs.map(raw => resolveSpec(raw, { config: ctx.config })), { noSwitch: true, ignoreLimits: name === 'queue', deferBases: name === 'queue', skipAfter: name === 'queue' });
-    return { config: ctx.config, specs, tasks: listTaskRecords(ctx.config), queue: readQueue(ctx.config), windows: await ctx.tmux.windows(), diskLevel: (await collectDisk(ctx)).level };
+    const specs = await planBatch(ctx, rawSpecs.map(raw => resolveSpec(raw, { config: ctx.config })), { noSwitch: true, reuse: Boolean(args.reuse), ...(args.agent ? { agent: args.agent as 'claude' | 'codex' } : {}), ignoreLimits: name === 'queue', deferBases: name === 'queue', skipAfter: name === 'queue' });
+    return { specs };
   }
   if (name === 'queue_retry') {
     const entry = findEntry(ctx.config, args.task as string);
@@ -1333,6 +1369,7 @@ async function confirmationScope(ctx: Context, name: string, args: Record<string
     const spec = resolveSpec(splitSpecs(entry.spec, 'queue retry')[0]!, { config: ctx.config });
     await checkRetryWorktrees(ctx.runner, spec.repos);
   }
+  if (name === 'manager_start' || name === 'manager_stop') return { manager: await managerView(ctx) };
   if (name === 'report_from') {
     const record = findRecord(ctx, args.task as string);
     const source = resolvePath(args.from as string, record.repos[0]?.worktree);
@@ -1343,7 +1380,11 @@ async function confirmationScope(ctx: Context, name: string, args: Record<string
   const tasks = [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)];
   const queue = readQueue(ctx.config);
   const windows = await ctx.tmux.windows();
-  return { tasks, queue, windows: windows.map(({ id, plain }) => ({ id, plain })), config: redactConfig(ctx.config) };
+  const selected = [...(Array.isArray(args.tasks) ? args.tasks as string[] : []), ...(typeof args.task === 'string' ? [args.task] : [])];
+  const fits = (r: { task: string; cohort?: string }) => args.cohort ? cohortKey(r.cohort ?? '') === cohortKey(args.cohort as string) : selected.length ? selected.some(id => r.task.toLowerCase().startsWith(id.toLowerCase())) : true;
+  const targetTasks = tasks.filter(fits), targetQueue = queue.filter(fits);
+  const names = new Set([...targetTasks.map(r => r.window), ...targetQueue.map(r => r.task.toLowerCase())]);
+  return { tasks: targetTasks, queue: targetQueue, windows: windows.filter(w => names.has(w.plain)).map(({ id, plain }) => ({ id, plain })) };
 }
 /** Display only the operation's targets; the private fingerprint still guards the full observed scope. */
 async function previewScope(ctx: Context, name: string, args: Record<string, unknown>, scope: unknown): Promise<unknown> {
@@ -1376,39 +1417,55 @@ for (const tool of MCP_TOOLS) {
     if (!ctx.config.mcp.allow.includes(tool.name as McpWriteTool)) return writeTool(deps, tool.name as McpWriteTool, {}, async () => { throw new Error('unreachable'); });
     if (tool.name === 'mark' && planMark(ctx, args as MarkSelection).length === 1) return original(deps, args);
     const { confirm, preview_token, ...input } = args;
-    const key = `${tool.name}:${JSON.stringify(Object.entries(input).sort(([a], [b]) => a.localeCompare(b)))}`;
+    const { detail: _detail, offset: _offset, limit: _limit, ...identityInput } = input;
+    const arguments_ = previewArguments(tool.name === 'gc' ? identityInput : input);
+    const key = `${tool.name}:${createHash('sha256').update(JSON.stringify(arguments_)).digest('hex')}`;
     if (input.remove_worktree && !ctx.config.mcp.allowRmWorktree) {
       audit(ctx, { tool: tool.name, outcome: 'denied', detail: 'worktree removal not allowed' });
       return fail('removing the worktree is not allowed for the chat');
     }
+    let session = previewSessions.get(deps);
+    if (!session) { session = crypto.randomUUID(); previewSessions.set(deps, session); }
+    let pending = previews.get(deps);
+    if (!pending) { pending = new Map(); previews.set(deps, pending); }
+    const token = typeof preview_token === 'string' ? preview_token : ([...pending].reverse().find(([, entry]) => entry.key === key) ?? [...pending].reverse().find(([, entry]) => entry.key.startsWith(`${tool.name}:`)))?.[0];
+    const preview = token ? pending.get(token) : undefined;
+    const deny = (reason: string) => { audit(ctx, { tool: tool.name, outcome: 'denied', detail: reason }); return fail(`Confirmation refused: ${reason}. Call again without confirm to recalculate the scope. Nothing was done.`); };
+    if (confirm) {
+      if (!preview) {
+        const issued = token ? issuedPreviewTokens.get(token) : undefined;
+        return deny(issued ? issued.session !== session ? 'different session' : `invalidated by ${issued.state}` : 'missing preview in this session (unknown token or restarted session)');
+      }
+      if (preview.key !== key) {
+        const fields = [...new Set([...Object.keys(preview.arguments), ...Object.keys(arguments_)])].filter(k => JSON.stringify(preview.arguments[k]) !== JSON.stringify(arguments_[k]));
+        return deny(`different argument hash: ${fields.join(', ') || 'operation'}`);
+      }
+      if (ctx.runner.now() - preview.at > preview.ttlS * 1000) return deny(`TTL expired (${preview.ttlS}s since preview)`);
+    }
     let scope: unknown;
     try { scope = await confirmationScope(ctx, tool.name, input); }
     catch (e) { audit(ctx, { tool: tool.name, outcome: 'error', detail: errorMessage(e) }); throw e; }
-    const fingerprint = createHash('sha256').update(JSON.stringify(scope)).digest('hex');
-    let pending = previews.get(deps);
-    if (!pending) { pending = new Map(); previews.set(deps, pending); }
+    // Argument identity is independent of mutable runtime facts. Destructive scopes are checked separately.
+    const scopeIdentity = JSON.stringify(canonical(confirmationTargets(tool.name, scope)));
     if (!confirm) {
       let result: ToolResult;
       if (['new', 'queue', 'cancel', 'resume', 'move'].includes(tool.name)) result = await original(deps, args);
       else result = await writeTool(deps, tool.name as McpWriteTool, {}, async () => {
-        const detail = tool.name === 'gc' ? renderGc(await planGc(ctx, { cohort: input.cohort as string | undefined, olderThan: input.older_than as string | undefined, branches: Boolean(input.branches) })).join('\n') : JSON.stringify({ operation: tool.name, arguments: input, scope: await previewScope(ctx, tool.name, input, scope) }, null, 2);
+        const detail = tool.name === 'gc' ? renderGc(await planGc(ctx, { cohort: input.cohort as string | undefined, olderThan: input.older_than as string | undefined, branches: Boolean(input.branches) }), { detail: Boolean(input.detail), offset: input.offset as number | undefined, limit: input.limit as number | undefined }).join('\n') : JSON.stringify({ operation: tool.name, arguments: input, scope: await previewScope(ctx, tool.name, input, scope) }, null, 2);
         return { text: `${detail}\nNot executed. Review, then call with identical arguments and confirm: true.`, executed: false, announce: '' };
       });
       if (!result.isError) {
         const token = crypto.randomUUID();
-        if (pending.size >= 100) pending.delete(pending.keys().next().value!);
-        pending.set(token, { key, fingerprint, at: ctx.runner.now() });
-        result.text += `\npreview_token: ${token}`;
+        if (pending.size >= 100) { const evicted = pending.keys().next().value!; pending.delete(evicted); issuedPreviewTokens.set(evicted, { session, state: 'preview capacity eviction' }); }
+        pending.set(token, { key, arguments: arguments_, scope: scopeIdentity, at: ctx.runner.now(), ttlS: ctx.config.preview.ttlS });
+        issuedPreviewTokens.set(token, { session, state: 'pending' });
+        if (issuedPreviewTokens.size > 10000) issuedPreviewTokens.delete(issuedPreviewTokens.keys().next().value!);
+        result.text += `\npreview_ttl_s: ${ctx.config.preview.ttlS}; expires_at: ${new Date(ctx.runner.now() + ctx.config.preview.ttlS * 1000).toISOString()}\npreview_token: ${token}`;
       }
       return result;
     }
-    const token = typeof preview_token === 'string' ? preview_token : [...pending].reverse().find(([, entry]) => entry.key === key)?.[0];
-    const preview = token ? pending.get(token) : undefined;
-    if (token) pending.delete(token);
-    if (!preview || preview.key !== key || ctx.runner.now() - preview.at > 10 * 60_000 || preview.fingerprint !== fingerprint) {
-      audit(ctx, { tool: tool.name, outcome: 'denied', detail: 'missing, expired or changed preview' });
-      return fail(`Confirmation refused: missing, expired or changed preview${token ? ` ${token}` : ''}. Call again without confirm to recalculate the scope. Nothing was done.`);
-    }
+    if (preview!.scope !== scopeIdentity) return deny(`changed preview: invalidated by ${lastPreviewMutation.get(deps) ?? 'external operation'} (${tool.name} target scope changed)`);
+    if (token) { pending.delete(token); issuedPreviewTokens.set(token, { session, state: `${tool.name} confirmation already consumed` }); }
     if (tool.name === 'archive') return writeTool(deps, 'archive', {}, async (fresh) => {
       await applyArchive(fresh, scope as Awaited<ReturnType<typeof archiveClosed>>);
       return { text: JSON.stringify(scope, null, 2), executed: true, announce: 'archive closed task state' };

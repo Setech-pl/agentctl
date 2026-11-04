@@ -1,6 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { Link } from './config.ts';
+import { loadProjectConfig } from './config.ts';
+import type { Link, GlobalConfig } from './config.ts';
+import { listTaskRecords, listArchivedRecords } from './taskstore.ts';
+import { fillPlaceholders, resolvePath } from './util.ts';
 import type { Runner } from './runner.ts';
 import { AgentctlError, Problems } from './util.ts';
 
@@ -105,4 +108,42 @@ export async function applyLinks(runner: Runner, ops: LinkOp[]): Promise<void> {
     );
   }
   for (const op of ops) await runner.symlink(op.target, op.link);
+}
+
+/** Missing targets are warnings in previews and errors at the write boundary. */
+export function missingLinkTargets(links: Link[]): string[] {
+  return links.filter(({ to }) => !fs.existsSync(to.endsWith('/*') ? path.dirname(to) : to)).map(({ from, to }) => `link ${from} -> ${to}: target does not exist; create/check out the target first or fix links.to`);
+}
+
+export function projectLinks(repo: string, task = '', cache = repo): Link[] {
+  return (loadProjectConfig(repo)?.links ?? []).map(link => ({ ...link, to: resolvePath(fillPlaceholders(link.to, { task, cache }), repo) }));
+}
+
+/** Known projects come from current and archived task records; active tasks can also supply spec-only links. */
+export function knownLinkReferences(config: GlobalConfig): { target: string; source: string }[] {
+  const active = listTaskRecords(config).filter(r => !r.closed && !r.cancelled);
+  const records = [...listTaskRecords(config), ...listArchivedRecords(config)];
+  const refs = active.flatMap(r => r.links.map(l => ({ target: l.to, source: `active task ${r.task}` })));
+  for (const repo of new Set(records.flatMap(r => r.repos.map(repo => repo.path)))) {
+    try {
+      for (const record of records.filter(r => r.repos.some(x => x.path === repo))) {
+        refs.push(...projectLinks(repo, record.task, config.cache).map(l => ({ target: l.to, source: `${repo}/.agentctl.yaml` })));
+      }
+    } catch (error) {
+      // An unreadable known config cannot prove that a candidate is unused.
+      refs.push({ target: '*', source: `${repo}/.agentctl.yaml: ${String(error)}` });
+    }
+  }
+  return refs;
+}
+
+export function linkUsers(worktree: string, refs: ReturnType<typeof knownLinkReferences>): string[] {
+  const root = path.resolve(worktree);
+  const real = (file: string) => { try { return fs.realpathSync(file); } catch { return path.resolve(file); } };
+  const roots = [root, real(root)];
+  return [...new Set(refs.filter(ref => {
+    if (ref.target === '*') return true;
+    const target = ref.target.endsWith('/*') ? path.dirname(ref.target) : ref.target;
+    return [path.resolve(target), real(target)].some(p => roots.some(w => p === w || p.startsWith(`${w}${path.sep}`)));
+  }).map(ref => ref.source))];
 }

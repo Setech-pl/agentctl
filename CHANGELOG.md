@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.17.4] - 2026-11-04
 
+- Production P1: confirm idle after `watch.idle_confirm_ticks` consecutive reads (default 2). Recognize running tools and Claude spinner variants; Stop cannot announce waiting while work is visible.
+- Production P2/P3: preview all missing link targets, reject confirmation before writes, check project links in doctor, and protect GC worktrees referenced by known project/active-task links (`--force-links` is CLI-only). Preview tokens hash canonical arguments, survive reads and unrelated starts, and expose `preview.ttl_s` (600 s), expiry and precise rejection causes. Destructive target expansion still refuses.
+- Production P5: one report readiness rule across doctor, status, list/get_report and pull_ready, including missing canonical files with historical copy metadata.
+- Production P8/P9: `gc --preview`/`--dry-run` alias the default preview; `--apply` executes. Aggregate-first GC summaries include bytes/counts by category, reason and cohort, newer skips grouped by task, with opt-in paginated details (`--verbose` / `detail: true`).
+- Production P10/P11: idle report-ready windows release provider slots by default (`limits.count_report_ready: false`); capacity/limits separate working and awaiting collection. Follow-ups count again and refuse with a warning at a full limit. Stale readings explain elapsed hours and local read time.
+
 - Board: the header names the version (`agentctl 0.17.2 board · …`, the one `agentctl version` prints) and the board titles its terminal window `agentctl <version> · board` (OSC 2; the previous title is restored on exit where the terminal supports the xterm title stack). In tmux the outer terminal's title is set through the session options `set-titles` and `set-titles-string` of the agentctl session only. `board.window_title: false` turns all of it off.
 - Docs: the README leads with the dispatcher workflow, a board screenshot generated from a demo session (`npm run docs:screenshot`), the key benefits and the automatic flow with real `events_since` / `pull_ready` output from that demo.
 

@@ -288,6 +288,7 @@ describe('orphan windows', () => {
     m.windows.set('nc-1', CODEX_FOOTER_IDLE);
     m.windows.set('nc-9', CODEX_FOOTER_IDLE);
     m.windows.set('watch', 'Watching every 15s');
+    await collectStatus(ctx); // first idle observation
     const rows = await collectStatus(ctx);
     assert.deepEqual(rows.map((r) => [r.task, r.state]), [['NC-1', 'waiting'], ['NC-9', 'orphan']]);
     const orphan = rows[1]!;

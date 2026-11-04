@@ -64,8 +64,9 @@ it('0173-P2: later canonical PASS report beats needs-attention and reaches event
   const memory = new WatchMemory(); await watchTick(f.ctx, memory, f.notifier);
   assert.equal((await collectStatus(f.ctx))[0]!.state, 'needs-attention');
   fs.mkdirSync(path.dirname(f.record().report), { recursive: true }); fs.writeFileSync(f.record().report, 'Werdykt: PASS\n<!-- agentctl:report-end -->\n');
-  f.pane.screen = working; // the final spinner may remain painted after the report is complete
-  const row = (await collectStatus(f.ctx))[0]!; assert.equal(row.state, 'report-ready'); assert.equal(hasReport(row), true); assert.deepEqual(unmetAfter(['T1'], [row]), []);
+  f.pane.screen = working; // a complete report must not release the slot while work is visible
+  const row = (await collectStatus(f.ctx))[0]!; assert.equal(row.state, 'working'); assert.equal(row.report, 'yes'); assert.equal(hasReport(row), false); assert.deepEqual(unmetAfter(['T1'], [row]), ['T1']);
+  f.pane.screen = '❯ \n';
   await watchTick(f.ctx, memory, f.notifier);
   assert.equal(f.record().promptDelivery, 'sent'); assert.equal(f.record().promptError, undefined); assert.equal((await collectStatus(f.ctx))[0]!.state, 'report-ready');
   assert.ok(readJournal(f.config).some(e => e.kind === 'report-ready'));

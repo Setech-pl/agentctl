@@ -43,7 +43,7 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`mark`](#agentctl-mark) | Record the result the user judged. Multiple tasks require a preview and confirmation. |
 | [`log`](#agentctl-log) | The history of the tasks: when, agent/model/effort, how long, tokens, progress, the result you marked and the verdict of the report. One line per task, newest first. |
 | [`stats`](#agentctl-stats) | Which model and effort work: the tasks of the history grouped by agent/model/effort - how many, median time and tokens, the share of ok, partial and fail (agentctl mark), cancelled ones and tasks moved to the other provider after a limit. |
-| [`gc`](#agentctl-gc) | Take back disk space from finished tasks: the git worktrees of closed, cancelled and archived tasks without uncommitted changes, the files next to their reports that are older than --older-than (the *.md reports stay), their state folders (moved to the archive), and with --branches their branches merged into the base (git branch -d, never -D, never main/master or the current branch). A dry run with sizes unless --apply. History and reports stay; uncommitted work, foreign worktrees and unmerged branches are only listed as skipped. |
+| [`gc`](#agentctl-gc) | Bez flag = podgląd, --apply wykonuje. Take back disk space from finished tasks: the git worktrees of closed, cancelled and archived tasks without uncommitted changes, the files next to their reports that are older than --older-than (the *.md reports stay), their state folders (moved to the archive), and with --branches their branches merged into the base (git branch -d, never -D, never main/master or the current branch). A dry run with sizes unless --apply. History and reports stay; uncommitted work, foreign worktrees and unmerged branches are only listed as skipped. |
 | [`archive`](#agentctl-archive) | Move the state of closed tasks (agentctl close) to the archive folder next to the state folder. Reports and worktrees are not touched. |
 | [`hide`](#agentctl-hide) | Take tasks off the board and "status" (they stay in "status --all" and on the board under "a"). Does not close the task or touch its worktree. |
 | [`unhide`](#agentctl-unhide) | Show hidden tasks again on the board and in "status". A task shown on purpose is not hidden again by board.auto_hide_pulled_dead. |
@@ -803,7 +803,7 @@ agentctl stats --clip
 
 ## agentctl gc
 
-Take back disk space from finished tasks: the git worktrees of closed, cancelled and archived tasks without uncommitted changes, the files next to their reports that are older than --older-than (the *.md reports stay), their state folders (moved to the archive), and with --branches their branches merged into the base (git branch -d, never -D, never main/master or the current branch). A dry run with sizes unless --apply. History and reports stay; uncommitted work, foreign worktrees and unmerged branches are only listed as skipped.
+Bez flag = podgląd, --apply wykonuje. Take back disk space from finished tasks: the git worktrees of closed, cancelled and archived tasks without uncommitted changes, the files next to their reports that are older than --older-than (the *.md reports stay), their state folders (moved to the archive), and with --branches their branches merged into the base (git branch -d, never -D, never main/master or the current branch). A dry run with sizes unless --apply. History and reports stay; uncommitted work, foreign worktrees and unmerged branches are only listed as skipped.
 
 ```
 agentctl gc [options]
@@ -811,6 +811,12 @@ agentctl gc [options]
 
 | Option | Meaning | Notes |
 |---|---|---|
+| `--preview` | alias of the default preview; changes nothing |  |
+| `--dry-run` | alias of the default preview; changes nothing |  |
+| `--verbose` | full details, paginated with --offset/--limit |  |
+| `--offset <n>` | page offset | default `0` |
+| `--limit <n>` | page size (1–100) | default `10` |
+| `--force-links` | CLI only: allow removing a worktree referenced by links (other protections stay) |  |
 | `--apply` | do it (after showing the list and asking y/N); without it nothing is changed |  |
 | `--older-than <age>` | age of the files next to the reports before they go: 12h, 7d, 2w (default 7d) |  |
 | `--branches` | also delete the branches of finished tasks that are merged into the base (git branch -d) |  |

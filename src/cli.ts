@@ -39,7 +39,7 @@ import { migrateLegacyState } from './core/taskstore.ts';
 import { newTasks } from './core/new.ts';
 import { commitQueueAdd, describeQueue, isPaused, moveToFront, planQueueAdd, readQueue, queueStatusLines, removeFromQueue, renderQueueList, retryEntry, setPaused, unblockEntry, waiting } from './core/queue.ts';
 import { liveWindows } from './core/plan.ts';
-import { applyGc, planGc, renderGc } from './core/gc.ts';
+import { applyGc, planGc, renderGc, gcView } from './core/gc.ts';
 import { collectEvents, eventsMarkdown, renderEvents } from './core/chat-events.ts';
 import { planNtfySetup, renderQr, setupInstructions, subscriptionLink } from './core/ntfy-setup.ts';
 import { writeConfigText } from './core/config-edit.ts';
@@ -932,7 +932,13 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
 
   program
     .command('gc')
-    .description('Take back disk space from finished tasks: the git worktrees of closed, cancelled and archived tasks without uncommitted changes, the files next to their reports that are older than --older-than (the *.md reports stay), their state folders (moved to the archive), and with --branches their branches merged into the base (git branch -d, never -D, never main/master or the current branch). A dry run with sizes unless --apply. History and reports stay; uncommitted work, foreign worktrees and unmerged branches are only listed as skipped.')
+    .description('Bez flag = podgląd, --apply wykonuje. Take back disk space from finished tasks: the git worktrees of closed, cancelled and archived tasks without uncommitted changes, the files next to their reports that are older than --older-than (the *.md reports stay), their state folders (moved to the archive), and with --branches their branches merged into the base (git branch -d, never -D, never main/master or the current branch). A dry run with sizes unless --apply. History and reports stay; uncommitted work, foreign worktrees and unmerged branches are only listed as skipped.')
+    .option('--preview', 'alias of the default preview; changes nothing')
+    .option('--dry-run', 'alias of the default preview; changes nothing')
+    .option('--verbose', 'full details, paginated with --offset/--limit')
+    .option('--offset <n>', 'page offset', '0')
+    .option('--limit <n>', 'page size (1–100)', '10')
+    .option('--force-links', 'CLI only: allow removing a worktree referenced by links (other protections stay)')
     .option('--apply', 'do it (after showing the list and asking y/N); without it nothing is changed')
     .option('--older-than <age>', 'age of the files next to the reports before they go: 12h, 7d, 2w (default 7d)')
     .option('--branches', 'also delete the branches of finished tasks that are merged into the base (git branch -d)')
@@ -940,12 +946,15 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('-y, --yes', 'with --apply: do not ask')
     .option('--json', 'machine-readable output (the plan, or the result with --apply)')
     .action(
-      guarded(async (opts: { apply?: boolean; olderThan?: string; branches?: boolean; cohort?: string; yes?: boolean; json?: boolean }) => {
+      guarded(async (opts: { preview?: boolean; dryRun?: boolean; verbose?: boolean; offset: string; limit: string; forceLinks?: boolean; apply?: boolean; olderThan?: string; branches?: boolean; cohort?: string; yes?: boolean; json?: boolean }) => {
         const ctx = contextFor(false, { migrate: false });
-        const plan = await planGc(ctx, { olderThan: opts.olderThan, branches: opts.branches, cohort: opts.cohort });
+        if (opts.apply && (opts.preview || opts.dryRun)) throw new AgentctlError("--apply cannot be combined with --preview or --dry-run");
+        const view = { detail: Boolean(opts.verbose), offset: Number(opts.offset), limit: Number(opts.limit) };
+        if (!Number.isInteger(view.offset) || view.offset < 0 || !Number.isInteger(view.limit) || view.limit < 1 || view.limit > 100) throw new AgentctlError("offset must be >=0 and limit must be 1–100");
+        const plan = await planGc(ctx, { olderThan: opts.olderThan, branches: opts.branches, cohort: opts.cohort, forceLinks: opts.forceLinks });
         if (!opts.apply) {
-          if (opts.json) return line(JSON.stringify(plan, null, 2));
-          for (const l of renderGc(plan)) line(l);
+          if (opts.json) return line(JSON.stringify(gcView(plan, view), null, 2));
+          for (const l of renderGc(plan, view)) line(l);
           return;
         }
         if (plan.items.length === 0) return opts.json ? line(JSON.stringify({ plan, done: [], failed: [], freedBytes: 0 }, null, 2)) : void renderGc(plan).forEach(line);

@@ -1,3 +1,5 @@
+import { liveWindows } from './plan.ts';
+import { checkWindowLimit } from './checks.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -32,6 +34,10 @@ export async function drainPromptQueue(ctx: Context, window: string): Promise<vo
     let queue = readPromptQueue(ctx, window);
     while (queue.length) {
       record = readTaskRecord(ctx.config, window)!;
+      if (record.agent !== 'unknown') {
+        const live = await liveWindows(ctx);
+        if (live.some(w => w.window === window && w.counted === false) && checkWindowLimit(record.agent, ctx.config.limits[record.agent], live, ctx.config.session)) return;
+      }
       const item = queue[0]!;
       if (record.deliveryId !== item.id) await queuePrompt(ctx, record, item.text, 'pending', { kind: 'followup', id: item.id });
       // Transfer persisted before the item leaves the FIFO. Recovery sees the same delivery ID.

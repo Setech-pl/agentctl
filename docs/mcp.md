@@ -228,7 +228,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 |---|---|---|
 | `status` | read | `all?`, `cohort?`, `format?`, `detail?`, `offset?`, `limit?` |
 | `events_since` | read | `cursor?`, `limit?`, `client?`, `since?`, `cohort?`, `peek?`, `format?`, `detail?` |
-| `gc_preview` | read | `older_than?`, `merged?`, `cohort?` |
+| `gc_preview` | read | `detail?`, `offset?`, `limit?`, `older_than?`, `merged?`, `cohort?` |
 | `limits` | read | `format?`, `detail?` |
 | `set_limits` | write | `claude?`, `codex?`, `confirm?` |
 | `reserve` | write | `claude?`, `codex?`, `note?`, `release?`, `confirm?` |
@@ -284,7 +284,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 | `manager_start` | write | `project?`, `name?`, `model?`, `effort?`, `confirm?`, `preview_token?` |
 | `manager_stop` | write | `confirm?`, `preview_token?` |
 | `notify_test` | write | `phone?`, `confirm?`, `preview_token?` |
-| `gc` | write | `cohort?`, `older_than?`, `branches?`, `confirm?`, `preview_token?` |
+| `gc` | write | `detail?`, `offset?`, `limit?`, `cohort?`, `older_than?`, `branches?`, `confirm?`, `preview_token?` |
 | `response_page` | read | `response_id`, `response_offset` |
 
 - `guide`: `--project &lt;repo&gt;`, `--lang &lt;lang&gt;`, `--clip`, `--json`
@@ -308,7 +308,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 - `mark`: `--cohort &lt;name&gt;`, `--note &lt;text&gt;`, `-y, --yes`
 - `log`: `--since &lt;age&gt;`, `--cohort &lt;name&gt;`, `--json`, `--clip`
 - `stats`: `--since &lt;age&gt;`, `--cohort &lt;name&gt;`, `--json`, `--clip`
-- `gc`: `--apply`, `--older-than &lt;age&gt;`, `--branches`, `--cohort &lt;name&gt;`, `-y, --yes`, `--json`
+- `gc`: `--preview`, `--dry-run`, `--verbose`, `--offset &lt;n&gt;`, `--limit &lt;n&gt;`, `--force-links`, `--apply`, `--older-than &lt;age&gt;`, `--branches`, `--cohort &lt;name&gt;`, `-y, --yes`, `--json`
 - `archive`: `--older-than &lt;age&gt;`, `--dry-run`
 - `pull`: `--ready`, `--all`, `--cohort &lt;name&gt;`
 - `close`: `--cohort &lt;name&gt;`, `--rm-worktree`, `-y, --yes`, `--dry-run`

@@ -241,6 +241,7 @@ describe('agentctl event and watch: one transition, one notification', () => {
     await watchTick(t.ctx, memory, t.notifier);
     fs.mkdirSync(path.dirname(t.record.report), { recursive: true });
     fs.writeFileSync(t.record.report, REPORT);
+    t.screen(IDLE);
     await t.send({ kind: 'stop', payload: json('claude-stop.json') });
     t.screen(IDLE);
     await t.runner.sleep(3000);

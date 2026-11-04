@@ -122,7 +122,7 @@ describe('mcp: queue write tools', () => {
     const first = await t.call('queue', { spec: t.spec('Q-1') });
     assert.match(first.text, /Q-1 {2}claude\/default\/high {2}priority normal/);
     assert.match(first.text, /waits for a free claude window/);
-    assert.match(first.text, /Not queued yet\. Show this to the user and ask; .*confirm: true\.\npreview_token: [0-9a-f-]+$/);
+    assert.match(first.text, /Not queued yet\. Show this to the user and ask; .*confirm: true\.\npreview_ttl_s: [^\n]+\npreview_token: [0-9a-f-]+$/);
     assert.deepEqual(readQueue(t.config), []);
     assert.deepEqual(t.audit().map((a) => [a.tool, a.task, a.outcome]), [['queue', 'Q-1', 'requested'], ['queue', 'Q-1', 'preview']]);
     assert.deepEqual(t.notified, []);
@@ -143,7 +143,7 @@ describe('mcp: queue write tools', () => {
     await t.call('queue', { spec: setupSpec });
     const refused = await t.call('queue', { spec: setupSpec, confirm: true });
     assert.equal(refused.isError, true);
-    assert.match(refused.text, /"setup" runs shell commands and is not accepted from the chat/);
+    assert.match(refused.text, /Confirmation refused: missing preview/);
     const warn = await t.call('queue', { spec: t.spec('Q-3', 'touches: src/menu/**\n') });
     assert.match(warn.text, /⚠ Q-3 touches src\/menu\/\*\*, and A-1 already changes 1 matching file/);
     const hint = await t.call('queue', { spec: t.spec('Q-4', 'review_of: A-1\nmodel: sonnet\n') });
@@ -162,7 +162,7 @@ describe('mcp: queue write tools', () => {
     assert.deepEqual(readQueue(t.config).map((e) => e.task), ['Q-2']);
     await t.call('queue_rm', { task: 'Q-1' });
     assert.equal((await t.call('queue_rm', { task: 'Q-1' , confirm: true })).isError, true);
-    assert.deepEqual(t.audit().filter((a) => a.tool === 'queue_rm').map((a) => a.outcome), ['requested', 'preview', 'requested', 'done', 'error', 'error']);
+    assert.deepEqual(t.audit().filter((a) => a.tool === 'queue_rm').map((a) => a.outcome), ['requested', 'preview', 'requested', 'done', 'error', 'denied']);
     assert.ok(t.notified.includes('czat zlecił: queue_rm Q-1'));
   });
 });

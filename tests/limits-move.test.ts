@@ -234,6 +234,7 @@ describe('move', () => {
   it('status and the board: the old row is superseded (no notification), the new one runs', async () => {
     const t = setup('mv8');
     await moveTask(t.ctx, 'NC-1', { yes: true, self: SELF });
+    await collectStatus(t.ctx); // confirm idle on the next sample
     const rows = await collectStatus(t.ctx, { progress: false });
     assert.deepEqual(rows.map((r) => `${r.task}:${r.state}`), ['NC-1:superseded', 'NC-1-2:waiting']);
     assert.equal(rows[0]?.hint, 'moved to NC-1-2; close this window when you are done: agentctl close NC-1');

@@ -72,7 +72,7 @@ async function limitsAndEvents(): Promise<void> {
     await sleep(5000);
     check('LV-2 still waits while the limit is 1', !windows(h).includes('lv-2'));
     const lim = h.agentctl(['limits']);
-    check('limits shows 1/1 used and one queued', /claude\s+1\s+1\s+0\s+1\s+0\s+off\s+1/.test(lim.stdout), lim.stdout);
+    check('limits shows 1/1 used and one queued', /claude\s+1\s+1\s+0\s+1\s+1\s+0\s+0\s+off\s+1/.test(lim.stdout), lim.stdout);
     const set = h.agentctl(['limits', 'set', 'claude=2', '-y']);
     check('limits set claude=2 writes the config and keeps a .bak', set.code === 0 && fs.existsSync(path.join(h.agentctlHome, 'config.yaml.bak')), set.stdout + set.stderr);
     const started = await until('LV-2 starts', () => windows(h).includes('lv-2'));
@@ -121,7 +121,7 @@ async function gcScenario(): Promise<void> {
     fs.writeFileSync(shots, 'old output');
     const old = new Date(Date.now() - 20 * 86_400_000);
     fs.utimesSync(shots, old, old);
-    const dry = h.agentctl(['gc', '--branches']);
+    const dry = h.agentctl(['gc', '--branches', '--verbose', '--limit', '100']);
     check('dry run lists the worktree of LG-1', new RegExp(`worktree\\s+LG-1\\s+${wt1}`).test(dry.stdout), dry.stdout);
     check('dry run skips LG-2 with "uncommitted changes"', /LG-2.*uncommitted changes/.test(dry.stdout), dry.stdout);
     check('dry run lists the old file, the archive move and the merged branch', /cache\s+LG-1.*shots\.log/.test(dry.stdout) && /archive\s+LG-1/.test(dry.stdout) && /branch\s+LG-1.*agent\/lg-1/.test(dry.stdout), dry.stdout);

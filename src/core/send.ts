@@ -1,3 +1,7 @@
+import path from 'node:path';
+import { withFileLock } from './file-lock.ts';
+import { liveWindows } from './plan.ts';
+import { checkWindowLimit } from './checks.ts';
 import fs from 'node:fs';
 import type { Context } from './context.ts';
 import { enqueuePrompt, drainPromptQueue, readPromptQueue } from './prompt-queue.ts';
@@ -12,6 +16,11 @@ export interface SendItem {
 
 /** Paste a follow-up prompt into existing windows and log it in TASK.md. */
 export async function sendPrompts(ctx: Context, items: SendItem[]): Promise<{ task: string; message: string; warning?: string }[]> {
+  if (ctx.runner.dryRun) return sendPromptsUnlocked(ctx, items);
+  return withFileLock(path.join(ctx.config.stateDir, 'send-admission.lock'), () => sendPromptsUnlocked(ctx, items));
+}
+
+async function sendPromptsUnlocked(ctx: Context, items: SendItem[]): Promise<{ task: string; message: string; warning?: string }[]> {
   const { runner, tmux, config } = ctx;
   if (!runner.dryRun) {
     const tool = await runner.exec('tmux', ['-V'], { readOnly: true });
@@ -32,6 +41,14 @@ export async function sendPrompts(ctx: Context, items: SendItem[]): Promise<{ ta
     let message = 'wklejono (prompt sent)';
     let warning: string | undefined;
     if (record && record.agent !== 'unknown' && !runner.dryRun) {
+      const live = await liveWindows(ctx);
+      if (live.some(w => w.window === item.window && w.counted === false)) {
+        const full = checkWindowLimit(record.agent, config.limits[record.agent], live, config.session);
+        if (full) {
+          warning = `${full} report-ready follow-up not sent; close a working window or raise the limit first.`;
+          results.push({ task: item.task, message: warning, warning }); ctx.info(warning); continue;
+        }
+      }
       const queued = await enqueuePrompt(ctx, item.window, item.prompt);
       await drainPromptQueue(ctx, item.window);
       const fresh = readTaskRecord(config, item.window);

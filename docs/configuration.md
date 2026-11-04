@@ -42,6 +42,7 @@ Column "Layers": **g** global config, **p** project config, **s** spec.
 | `limits` | mapping | none | g | Most simultaneous windows per provider. |
 | `limits.claude` | positive integer | unlimited | g | Cap for Claude windows (agentctl windows + reserved places + external sessions when counted). `agentctl limits set claude=3` changes it. |
 | `limits.codex` | positive integer | unlimited | g | Cap for Codex windows. |
+| `limits.count_report_ready` | boolean | `false` | g | Idle windows with a complete report do not occupy provider slots by default. Capacity/limits separate working windows and reports awaiting collection. A follow-up counts again; send warns and refuses to resume it when the provider is full. |
 | `limits.count_external` | boolean | `false` | g | Terminal sessions of `claude` / `codex` outside the windows of agentctl (found with `ps`, not MCP servers, headless runs or agentctl itself) count against the limit and show as "external" in `agentctl limits`. Places for agents you start by hand can also be held with `agentctl limits reserve`. |
 | `agents` | mapping | see below | g | Settings per agent: `agents.claude`, `agents.codex`. |
 | `equivalents` | list | `[]` | g | Extra Claude and Codex pairs, `{claude: "opus/medium", codex: "gpt-6-astra/low"}`, consulted before the built-in table. Both sides are `model/effort`. |
@@ -62,6 +63,7 @@ Column "Layers": **g** global config, **p** project config, **s** spec.
 | Key | Type | Default | Layers | Meaning |
 |---|---|---|---|---|
 | `watch.interval` | seconds | `15` | g | Time between two polls of the watcher. |
+| `watch.idle_confirm_ticks` | positive integer | `2` | g | Consecutive idle reads required after visible work before waiting. Working resets the counter. Stop may end an idle turn immediately; running tools/spinners always win over Stop. |
 | `watch.waiting_after` | seconds | `120` | g | How long an idle task may wait before it is worth a notification. |
 | `watch.window_icons` | `true`, `false` or mapping | `true` | g | State icon in front of tmux window names. A mapping replaces single icons by state name (`{working: "▶", needs-input: "❓"}`); `false` leaves the names alone. |
 | `watch.status_line` | boolean | `true` | g | `watch --tmux` shows the task counts in the status bar of the agentctl session. |
@@ -182,6 +184,8 @@ Queued tasks live in `<config dir>/queue/` (one JSON file each, with the spec te
 | `agents.<agent>.trust_timeout` | seconds | `600` | g | How long `new` waits for you to answer the trust dialog. |
 | `agents.<agent>.working_pattern` | regex | see below | g | A turn is running, including Claude 2.1.x spinner progress. |
 | `agents.<agent>.delivery_pattern` | regex | see below | g | New adapter assistant output acknowledges a submitted prompt; input drafts never count. |
+| `preview` | mapping | `{ttl_s: 600}` | g | MCP preview token lifetime and argument identity. |
+| `preview.ttl_s` | positive seconds | `600` | g | Lifetime measured from preview creation; responses include TTL and expiry. Canonical YAML key order/formatting and trailing prompt whitespace are ignored. Read tools and unrelated starts do not invalidate previews. Destructive target changes still require a fresh preview; refusals identify TTL, changed fields, session or invalidation. |
 | `delivery_confirm_s` | seconds | `60` | g | Watch deadline for uncertain prompt delivery; positive number. Start/send succeeds with a warning while checking; no evidence by the deadline produces needs-attention. |
 | `agents.<agent>.interrupt_key` | tmux key name | `Escape` | g | Key sent by `agentctl interrupt`. |
 | `agents.<agent>.footer_patterns` | list of regexes | see below | g | Lines of TUI chrome that `status` and `peek` skip. |
@@ -196,7 +200,7 @@ claude:
   effort_args: ['--effort', '{effort}']
   ready_pattern: '^\s*❯\s(?!\d+\.)'
   trust_pattern: 'Quick safety check|Yes, I trust this folder'
-  working_pattern: 'esc to interrupt|^\s*[✶✻✽✢·*]\s+[^\n]+(?:…|\.\.\.)\s*\([^\n]*(?:\d+(?:\.\d+)?s\s*·|thinking|tokens)[^\n]*\)'
+  working_pattern: 'esc to interrupt|^\s*(?:⏺\s+)?Running(?:\s|…|\.\.\.)|^\s*[✶✻✽✢·*]\s+[^\n]+(?:…|\.\.\.)\s*\([^\n]*(?:\d+(?:\.\d+)?s\s*·|thinking|tokens)[^\n]*\)'
   delivery_pattern: '^\s*⏺|● got:'
   question_pattern: 'Enter to select\b.*Esc to cancel|Esc to cancel · Tab to amend'
   footer_patterns:
@@ -470,3 +474,11 @@ PL: `board.window_title` (domyślnie `true`) ustawia tytuł okna i sesji boarda;
 Automatic review requires an explicit author `repos[].branch`. The review shares the author's worktree/branch, uses `review_of` and `after`, and is prompted to read only and write its separate report. Start validates that the shared checkout is clean. A missing provider/model/template/base leaves the author report ready and records a visible review error. Defaults come from `equivalents`, not model guesses. An explicit same-provider model is allowed only when different from the author.
 
 PL: `outputs` to fakty autora, bez wykonywania `actions.shell` i bez scalania. Błędny/brakujący blok ostrzega, ale raport nadal jest gotowy. `after` może wymagać konkretnego werdyktu. `review: auto` tworzy przegląd po raporcie, `rerun` włącza przeglądy delty. `limited` wznawia wyłącznie na tym samym dostawcy/modelu, z pustym polem i kontrolą przed Enterem. Zbiorczy `mark` zapisuje ocenę podaną przez użytkownika, po podglądzie zakresu. F12 wraca do boarda własnej sesji, także przy równoległym `agentctl-dev`.
+
+## Production fixes before 0.17.4 UAT
+
+`new` and `queue` previews warn for each missing target in resolved project/spec links. Confirmation refuses with repair instructions before writing task state. `doctor --project <path>` checks project link targets; known task repositories are checked as well. GC treats any target inside a finished worktree as a reference, including `dir/*` and real paths through symlinks. Project configs from current/archived task repositories and spec links of active tasks protect the target. Only local CLI `--force-links` overrides link protection; dirty, active, foreign and protected worktrees retain their guards.
+
+`gc`, `gc --preview` and `gc --dry-run` show the same summary; `--apply` executes. Totals come first: reclaimable GB/bytes and counts/bytes for worktrees, archive moves, cache, merged branches and skipped reasons. Cohort totals and newer-than-7d skips grouped by task are paginated. `--verbose --offset 0 --limit 10` adds detailed entries; MCP uses `detail: true`, `offset`, `limit`. JSON preview uses the same bounded summary. Archive moves and branch deletion have zero reclaimable bytes.
+
+Canonical report readiness is shared by doctor, status, list_reports, get_report and pull_ready. Historical copy metadata cannot imply that a displaced report still exists. Stale capacity facts keep their meaning and include elapsed hours and the local time of the reading.

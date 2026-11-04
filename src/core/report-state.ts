@@ -20,6 +20,7 @@ export function inspectReport(config: Pick<GlobalConfig, 'reportSettleS'>, recor
     if (Number.isFinite(start) && st.mtimeMs < start) return { ready: false, exists: true, mtime: st.mtimeMs, reason: 'before current attempt' };
     const text = fs.readFileSync(file, 'utf8');
     const signature = createHash('sha256').update(text).digest('hex');
+    if (record.deliveryStartedAt && signature === record.deliveryReportBaseline && (record.promptDelivery !== 'sent' || record.promptKind === 'followup')) return { ready: false, exists: true, mtime: st.mtimeMs, signature, reason: 'unchanged before prompt delivery' };
     if (record.attemptReportBaseline && signature === record.attemptReportBaseline) return { ready: false, exists: true, mtime: st.mtimeMs, signature, reason: 'unchanged from previous attempt' };
     let fence: string | null = null, declaredAttempt: string | undefined, lastDirective = '';
     for (const line of text.split('\n')) {

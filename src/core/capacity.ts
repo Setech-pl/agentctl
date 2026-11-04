@@ -99,9 +99,9 @@ export async function collectCapacity(ctx: Context) {
       if (plan.stale) hints.push(`reading older than ${ctx.config.capacity.staleMinutes} minutes`);
       if (load.free === 0) hints.push('no free configured slots');
       return {
-        provider, estimate: [...windows].sort((a, b) => a.remainingPercent - b.remainingPercent)[0]?.estimate ?? null, source: plan.source, ageSeconds: plan.readAt === null ? null : Math.max(0, Math.floor((now - plan.readAt) / 1000)), stale: plan.stale, windows,
+        provider, estimate: [...windows].sort((a, b) => a.remainingPercent - b.remainingPercent)[0]?.estimate ?? null, source: plan.source, ageSeconds: plan.readAt === null ? null : Math.max(0, Math.floor((now - plan.readAt) / 1000)), stale: plan.stale, staleDescription: plan.stale && plan.readAt !== null ? `${provider === 'claude' ? 'Claude' : 'Codex'}: brak aktywnej sesji od ${((now - plan.readAt) / 3600000).toFixed(1)} h (odczyt z ${new Date(plan.readAt).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })})` : null, windows,
         limited: rows.some((r) => r.agent === provider && r.window === 'alive' && r.state === 'limited') || (windows.length > 0 ? windows.some((w) => w.usedPercent >= 100) : null),
-        slots: { active: load.windows.length, limit: load.limit, reserved: load.reserved, external: load.external.length, free: load.free },
+        slots: { active: load.working.length, reportReady: load.reportReady.length, used: load.used, limit: load.limit, reserved: load.reserved, external: load.external.length, free: load.free },
         queue: { count: load.queued, next: queue.find((q) => q.agent === provider)?.task ?? null },
         models: [...new Map(ctx.config.equivalents.map((e) => [`${e[provider].model}/${e[provider].effort}`, e[provider]])).values()],
         stats: stats.filter((s) => s.agent === provider), hints, note: [plan.note, provider === 'codex' ? refreshNote : null].filter(Boolean).join('; '),
@@ -113,11 +113,11 @@ export type Capacity = Awaited<ReturnType<typeof collectCapacity>>;
 export function capacitySnapshot(report: Capacity, ordered: readonly AgentName[] = []) {
   return report.providers.map((p) => {
     const worst = [...p.windows].sort((a, b) => a.remainingPercent - b.remainingPercent)[0];
-    return { provider: p.provider, ordered: ordered.includes(p.provider), remainingPercent: worst?.remainingPercent ?? null, resetsInMinutes: worst?.resetsInMinutes ?? null, ageSeconds: p.ageSeconds, stale: p.stale, freeSlots: p.slots.free, estimate: worst?.estimate ? { remainingTokens: worst.estimate.remainingTokens, confidence: worst.estimate.confidence } : null };
+    return { provider: p.provider, ordered: ordered.includes(p.provider), remainingPercent: worst?.remainingPercent ?? null, resetsInMinutes: worst?.resetsInMinutes ?? null, ageSeconds: p.ageSeconds, stale: p.stale, staleDescription: p.staleDescription, reportReady: p.slots.reportReady, freeSlots: p.slots.free, estimate: worst?.estimate ? { remainingTokens: worst.estimate.remainingTokens, confidence: worst.estimate.confidence } : null };
   });
 }
 export function snapshotLines(snapshot: ReturnType<typeof capacitySnapshot>): string[] {
-  return snapshot.map((p) => `capacity: ${p.provider}${p.ordered ? ' (order)' : ''}: remaining ${p.remainingPercent === null ? 'n/d' : `${p.remainingPercent}%`}, reset ${p.resetsInMinutes ?? 'n/d'} min, age ${p.ageSeconds ?? 'n/d'} s${p.stale ? ' stale' : ''}, free slots ${p.freeSlots ?? 'unbounded'}${p.estimate ? `, estimate.remainingTokens ${p.estimate.remainingTokens} (${p.estimate.confidence})` : ''}`);
+  return snapshot.map((p) => `capacity: ${p.provider}${p.ordered ? ' (order)' : ''}: remaining ${p.remainingPercent === null ? 'n/d' : `${p.remainingPercent}%`}, reset ${p.resetsInMinutes ?? 'n/d'} min, age ${p.ageSeconds ?? 'n/d'} s${p.staleDescription ? `, ${p.staleDescription}` : ''}, free slots ${p.freeSlots ?? 'unbounded'}${p.reportReady ? `; ${p.reportReady} okien report-ready – close zwolni okna` : ''}${p.estimate ? `, estimate.remainingTokens ${p.estimate.remainingTokens} (${p.estimate.confidence})` : ''}`);
 }
 export function renderCapacity(report: Capacity): string[] {
   return [diskLine(report.disk), ...snapshotLines(capacitySnapshot(report)), ...report.providers.flatMap((p) => [

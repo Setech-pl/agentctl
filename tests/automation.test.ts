@@ -276,7 +276,8 @@ describe('watch', () => {
     const memory = new WatchMemory();
     await watchTick(ctx, memory, n);
     m.windows.set('nc-1', IDLE);
-    await watchTick(ctx, memory, n); // enters waiting at t0
+    await watchTick(ctx, memory, n); // first idle reading is still working
+    await watchTick(ctx, memory, n); // second idle reading enters waiting at t0
     await runner.sleep(119_000);
     await watchTick(ctx, memory, n);
     assert.deepEqual(n.sent, []);
@@ -290,6 +291,7 @@ describe('watch', () => {
     m.windows.set('nc-1', WORKING);
     await watchTick(ctx, memory, n);
     m.windows.set('nc-1', IDLE);
+    await watchTick(ctx, memory, n);
     await watchTick(ctx, memory, n);
     await runner.sleep(121_000);
     await watchTick(ctx, memory, n);
@@ -342,8 +344,8 @@ describe('watch', () => {
 
   it('config: defaults 15 s / 120 s, overridable, validated', () => {
     const root = scratch.sub('watchcfg');
-    assert.deepEqual(makeConfig(root).watch, { interval: 15, waitingAfter: 120, windowIcons: DEFAULT_WINDOW_ICONS, statusLine: true });
-    assert.deepEqual(makeConfig(root, 'watch: {interval: 5, waiting_after: 30}\n').watch, { interval: 5, waitingAfter: 30, windowIcons: DEFAULT_WINDOW_ICONS, statusLine: true });
+    assert.deepEqual(makeConfig(root).watch, { interval: 15, waitingAfter: 120, idleConfirmTicks: 2, windowIcons: DEFAULT_WINDOW_ICONS, statusLine: true });
+    assert.deepEqual(makeConfig(root, 'watch: {interval: 5, waiting_after: 30}\n').watch, { interval: 5, waitingAfter: 30, idleConfirmTicks: 2, windowIcons: DEFAULT_WINDOW_ICONS, statusLine: true });
     assert.throws(() => makeConfig(root, 'watch: {interval: 0}\n'), /watch.interval must be a positive number/);
     assert.throws(() => makeConfig(root, 'watch: {every: 3}\n'), /unknown key "every"/);
   });

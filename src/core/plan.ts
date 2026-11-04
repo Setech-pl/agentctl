@@ -1,3 +1,4 @@
+import { inspectReport } from './report-state.ts';
 import { resolveTaskBases } from './base-ref.ts';
 import fs from 'node:fs';
 import { checkReviewer, checkWindowLimit, findAuthor } from './checks.ts';
@@ -44,13 +45,19 @@ export async function liveWindows(ctx: Context): Promise<LiveWindow[]> {
   const names = await ctx.tmux.listWindows();
   const agentByWindow = new Map<string, AgentName>();
   for (const record of listTaskRecords(ctx.config)) if (record.agent !== 'unknown') agentByWindow.set(record.window, record.agent);
+  const records = listTaskRecords(ctx.config);
+  const candidates = records.some(r => inspectReport(ctx.config, r, ctx.runner.now(), !r.attemptId).ready);
+  const rows = candidates ? await collectStatus(ctx, { progress: false }) : [];
   const windows = names.map((window): LiveWindow => {
     const agent = agentByWindow.get(window);
-    return agent ? { window, agent } : { window };
+    const reportReady = rows.some(r => r.windowName === window && r.state === 'report-ready');
+    return agent ? { window, agent, ...(reportReady ? { reportReady: true, counted: configCountsReady(ctx) } : {}) } : { window };
   });
   // Places held by the user (`limits reserve`) and sessions outside agentctl count against the limit like its own windows.
   return [...windows, ...(await slotHolders(ctx))];
 }
+
+function configCountsReady(ctx: Context): boolean { return ctx.config.countReportReady; }
 
 function switchTo(spec: ResolvedSpec, to: Order, by: 'flag' | 'limit'): ResolvedSpec {
   // Remote Control is Claude only: a task that goes to Codex loses it (a switch always changes the provider).

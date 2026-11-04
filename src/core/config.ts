@@ -98,6 +98,8 @@ export interface GlobalConfig extends Layer {
   limits: Partial<Record<AgentName, number>>;
   /** `limits.count_external`: claude/codex terminal sessions outside agentctl's windows count against the limit (detected with ps). */
   countExternal: boolean;
+  countReportReady: boolean;
+  preview: { ttlS: number };
   agents: Record<AgentName, AgentSettings>;
   /** Claude<->Codex pairs: your `equivalents` first, then the built-in table. */
   equivalents: Equivalent[];
@@ -107,7 +109,7 @@ export interface GlobalConfig extends Layer {
    * `agentctl watch`: poll interval, how long an idle task may wait before it is worth a notification, and the state icons
    * in front of the tmux window names (`null`: the windows keep their plain names).
    */
-  watch: { interval: number; waitingAfter: number; windowIcons: Record<TaskState, string> | null; statusLine: boolean };
+  watch: { idleConfirmTicks: number; interval: number; waitingAfter: number; windowIcons: Record<TaskState, string> | null; statusLine: boolean };
   /** Notifications: events from the agents themselves, what a click on a notification does, the verdict line of a report. */
   notify: NotifySettings;
   /** Away mode: when the phone gets notifications. */
@@ -326,7 +328,7 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
     readyTimeout: 60,
     trustTimeout: 600,
     trustPattern: 'Quick safety check|Yes, I trust this folder',
-    workingPattern: 'esc to interrupt|^\\s*[✶✻✽✢·*]\\s+[^\\n]+(?:…|\\.\\.\\.)\\s*\\([^\\n]*(?:\\d+(?:\\.\\d+)?s\\s*·|thinking|tokens)[^\\n]*\\)',
+    workingPattern: 'esc to interrupt|^\\s*(?:⏺\\s+)?Running(?:\\s|…|\\.\\.\\.)|^\\s*[✶✻✽✢·*]\\s+[^\\n]+(?:…|\\.\\.\\.)\\s*\\([^\\n]*(?:\\d+(?:\\.\\d+)?s\\s*·|thinking|tokens)[^\\n]*\\)',
     deliveryPattern: '^\\s*⏺|● got:',
     interruptKey: 'Escape',
     footerPatterns: [
@@ -392,12 +394,12 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
 
 /** The keys accepted in every layer: the global config, `.agentctl.yaml` and (with a few of its own) a spec. docs/configuration.md describes each one. */
 export const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'setup', 'defaults', 'guide', 'review'];
-export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'limited', 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git', 'cohort', 'delivery_confirm_s'];
-export const LIMITS_KEYS = [...AGENT_NAMES, 'count_external'];
+export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'limited', 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git', 'cohort', 'delivery_confirm_s', 'preview'];
+export const LIMITS_KEYS = [...AGENT_NAMES, 'count_external', 'count_report_ready'];
 export const DEFAULTS_KEYS = ['agent', 'model', 'effort', 'remote_control'];
 export const LINK_KEYS = ['from', 'to'];
 export const AGENT_KEYS = ['accepts_busy_prompt', 'flags', 'effort_args', 'ready_pattern', 'ready_timeout', 'trust_timeout', 'trust_pattern', 'working_pattern', 'delivery_pattern', 'interrupt_key', 'footer_patterns', 'question_pattern', 'limit_patterns', 'background_patterns', 'overload_patterns'];
-export const WATCH_KEYS = ['interval', 'waiting_after', 'window_icons', 'status_line'];
+export const WATCH_KEYS = ['interval', 'waiting_after', 'window_icons', 'status_line', 'idle_confirm_ticks'];
 export const NOTIFY_KEYS = ['backend', 'events', 'turn_end', 'terminal_app', 'verdict_pattern', 'ntfy', 'mcp_writes', 'mcp_writes_interval_s'];
 export const NTFY_KEYS = ['server', 'topic', 'token', 'events', 'priority', 'include_verdict', 'include_question', 'click_url', 'always'];
 export const AWAY_KEYS = ['auto_idle'];
@@ -642,7 +644,7 @@ function parseAgentSettings(name: AgentName, v: unknown, where: string, p: Probl
   return settings;
 }
 
-export const DEFAULT_WATCH = { interval: 15, waitingAfter: 120 };
+export const DEFAULT_WATCH = { interval: 15, waitingAfter: 120, idleConfirmTicks: 2 };
 
 /** `true` or absent: the default icons; `false`: none; a mapping: the default icons with those states replaced. */
 function parseWindowIcons(v: unknown, p: Problems): GlobalConfig['watch']['windowIcons'] {
@@ -672,6 +674,10 @@ function parseWatch(v: unknown, p: Problems): GlobalConfig['watch'] {
     return watch;
   }
   checkKeys(v, WATCH_KEYS, 'config.watch', p);
+  if (v.idle_confirm_ticks !== undefined) {
+    if (Number.isInteger(v.idle_confirm_ticks) && Number(v.idle_confirm_ticks) >= 1) watch.idleConfirmTicks = Number(v.idle_confirm_ticks);
+    else p.add('config.watch.idle_confirm_ticks must be a positive integer');
+  }
   watch.windowIcons = parseWindowIcons(v.window_icons, p);
   if (v.status_line !== undefined) {
     if (typeof v.status_line === 'boolean') watch.statusLine = v.status_line;
@@ -1024,6 +1030,18 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
 
   const limits: GlobalConfig['limits'] = {};
   let countExternal = false;
+  let countReportReady = false;
+  const preview = { ttlS: 600 };
+  if (raw.preview !== undefined) {
+    if (!isObject(raw.preview)) p.add("config.preview must be a mapping");
+    else {
+      checkKeys(raw.preview, ["ttl_s"], "config.preview", p);
+      if (raw.preview.ttl_s !== undefined) {
+        if (typeof raw.preview.ttl_s === "number" && Number.isFinite(raw.preview.ttl_s) && raw.preview.ttl_s > 0) preview.ttlS = raw.preview.ttl_s;
+        else p.add("config.preview.ttl_s must be a positive number");
+      }
+    }
+  }
   if (raw.limits !== undefined && raw.limits !== null) {
     if (!isObject(raw.limits)) p.add('config.limits must be a mapping like {claude: 3, codex: 3}');
     else {
@@ -1031,6 +1049,10 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
       if (raw.limits.count_external !== undefined) {
         if (typeof raw.limits.count_external === 'boolean') countExternal = raw.limits.count_external;
         else p.add('config.limits.count_external must be true or false');
+      }
+      if (raw.limits.count_report_ready !== undefined) {
+        if (typeof raw.limits.count_report_ready === "boolean") countReportReady = raw.limits.count_report_ready;
+        else p.add("config.limits.count_report_ready must be true or false");
       }
       for (const name of AGENT_NAMES) {
         const value = raw.limits[name];
@@ -1154,7 +1176,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   const deliveryConfirmS = raw.delivery_confirm_s ?? 60;
   if (typeof deliveryConfirmS !== 'number' || !Number.isFinite(deliveryConfirmS) || deliveryConfirmS <= 0) p.add('config.delivery_confirm_s must be a positive number');
   p.throwIfAny(`Invalid config ${file}:`, 'Fix the listed keys; see the README section "Configuration".');
-  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, deliveryConfirmS: deliveryConfirmS as number, limits, countExternal, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, cohort, overload, limited, collisions, cancel, usage, guideLang, capacity, disk, git, path: file, loaded: exists };
+  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, deliveryConfirmS: deliveryConfirmS as number, limits, countExternal, countReportReady, preview, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, cohort, overload, limited, collisions, cancel, usage, guideLang, capacity, disk, git, path: file, loaded: exists };
   if (mirror) config.mirrorDir = resolvePath(mirror);
   return config;
 }

@@ -1,3 +1,4 @@
+import { tryFileLock } from './file-lock.ts';
 import { promptQueueView } from './prompt-queue.ts';
 import { readOutputs, dependencyVerdict } from './outputs.ts';
 import type { OutputData, OutputVerdict } from './outputs.ts';
@@ -131,6 +132,8 @@ export interface CollectOptions {
   tokens?: boolean;
 }
 
+const idleObservations = new Map<string, { working: boolean; idle: number; attempt: string; observedWork: boolean; workStopAt?: string }>();
+
 export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Promise<StatusRow[]> {
   const { runner, tmux, config } = ctx;
   const infos = await tmux.windows();
@@ -161,15 +164,16 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       else if (reportReady && reportMtime !== undefined) duration = formatDuration(reportMtime - startedMs);
     }
     let screenText = '';
+    let screenRead = !alive;
     if (alive) {
       const screen = await tmux.capture(record.window, undefined, infos, record.windowId);
-      if (screen.code === 0) screenText = screen.stdout;
+      if (screen.code === 0) { screenText = screen.stdout; screenRead = true; }
     }
     const screenAgent = record.agent === 'unknown' ? guessAgent(screenText) : record.agent;
     const settings = config.agents[screenAgent];
     const stored = readStoredEvent(config, record);
     const reportState = inspectReport(config, { ...record, ...(stored?.outcome === 'turn-complete' ? { turnEndedAt: stored.at } : {}) }, runner.now(), !record.attemptId && (!alive || (config.reportSettleS === 0 && classifyScreen(screenText, settings) === 'idle')));
-    reportReady = reportState.ready && (!record.deliveryStartedAt || reportState.signature !== record.deliveryReportBaseline || record.promptDelivery === 'sent');
+    reportReady = reportState.ready;
     if (record.reportCandidate && record.reportCandidate !== record.report && !findCandidates(ctx, record).some(c => c.file === record.reportCandidate)) delete record.reportCandidate;
     if (reportState.exists && !reportReady && !record.reportCandidate) record.reportCandidate = record.report;
     if (reportReady && !alive && reportState.mtime !== undefined && !Number.isNaN(startedMs)) duration = formatDuration(reportState.mtime - startedMs);
@@ -179,9 +183,29 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     const cancelled = record.cancelled === true && !alive;
     const closed = !cancelled && (archived || (record.closed === true && !alive));
     const hiddenBy: StatusRow['hiddenBy'] = cancelled ? 'cancelled' : closed ? 'closed' : record.hidden === true ? 'user' : record.hidden === undefined && config.board.autoHidePulledDead && !alive && pulled !== null ? 'auto' : null;
-    const deliveryReport = reportReady && (record.promptDelivery === 'needs-attention' || (record.deliveryId && reportState.signature !== record.deliveryReportBaseline)) && !['needs-input', 'needs-trust'].includes(classifyScreen(screenText, settings));
+    const deliveryReport = reportReady && (record.promptDelivery === 'needs-attention' || (record.deliveryId && reportState.signature !== record.deliveryReportBaseline)) && (!alive || classifyScreen(screenText, settings) === 'idle');
     const unconfirmed = record.promptDelivery === 'needs-attention' && !reportReady && !deliveryEvidence(ctx, record, screenText);
-    const state: TaskState = cancelled ? 'cancelled' : closed ? 'closed' : record.supersededBy ? 'superseded' : deliveryReport ? 'report-ready' : unconfirmed ? 'needs-attention' : taskState({ alive, screen: screenText, settings, reportReady, event: stored?.outcome });
+    let state: TaskState = cancelled ? 'cancelled' : closed ? 'closed' : record.supersededBy ? 'superseded' : deliveryReport ? 'report-ready' : unconfirmed ? 'needs-attention' : taskState({ alive, screen: screenText, settings, reportReady, event: stored?.outcome });
+    const observationKey = `${config.stateDir}:${record.window}`;
+    if (idleObservations.size > 2000) idleObservations.delete(idleObservations.keys().next().value!);
+    const identity = `${record.attemptId ?? record.started}:${record.deliveryStartedAt ?? ''}:${record.windowId ?? ''}`;
+    const observationFile = path.join(config.stateDir, record.window, 'idle-observation.json');
+    let release: (() => void) | undefined;
+    try { if (!runner.dryRun && alive && !archived) release = tryFileLock(`${observationFile}.lock`); } catch { /* read-only state: retain process-local observations */ }
+    let prev = idleObservations.get(observationKey);
+    try { const stored = JSON.parse(fs.readFileSync(observationFile, 'utf8')); if (typeof stored.attempt === 'string' && typeof stored.idle === 'number' && typeof stored.working === 'boolean' && typeof stored.observedWork === 'boolean') prev = stored; } catch { /* first observation */ }
+    const observation = prev?.attempt === identity ? prev : { working: true, idle: 0, attempt: identity, observedWork: false };
+    if (!screenRead && state === 'waiting') state = 'working';
+    if (state === 'working' || state === 'background') { observation.working = true; observation.idle = 0; observation.observedWork = true; observation.workStopAt = stored?.at ?? record.turnEndedAt; }
+    else if (state === 'waiting' && observation.working) {
+      observation.idle++;
+      const stopAt = stored?.outcome === 'turn-complete' ? stored.at : !observation.observedWork ? record.turnEndedAt : undefined;
+      const stop = !!stopAt && stopAt !== observation.workStopAt && Date.parse(stopAt) >= Date.parse(record.deliveryStartedAt ?? record.attemptStarted ?? record.started);
+      if (!stop && observation.idle < config.watch.idleConfirmTicks) state = 'working';
+      else observation.working = false;
+    } else { observation.working = false; observation.idle = 0; }
+    idleObservations.set(observationKey, observation);
+    if (release) { try { fs.writeFileSync(observationFile, JSON.stringify(observation), { mode: 0o600 }); } catch { /* observation persistence is best effort */ } finally { release(); } }
     const outputData = reportReady ? await readOutputs(ctx, record) : undefined;
     let verdict: OutputVerdict | undefined;
     if (reportReady) { try { verdict = dependencyVerdict(fs.readFileSync(record.report, 'utf8')); } catch { /* absent */ } }
