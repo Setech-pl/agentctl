@@ -195,7 +195,7 @@ describe('FIX2 A: automatic review start gate and old entries', () => {
     const { f, author, tick } = authorCase('r5-closed'); await reviewTick(f.ctx);
     await queuePrompt(f.ctx, author, 'Another turn', 'pending', { kind: 'followup' });
     await f.ctx.tmux.killWindow('author'); await setFields(f.runner, taskFile(f.config, 'author'), { closed: true, delivery_started_at: new Date().toISOString() });
-    await tick(); const entry = readQueue(f.config)[0]!; assert.equal(entry.status, 'failed'); assert.match(entry.error!, /zamknięty bez nowego/); assert.doesNotMatch(entry.error!, /^cancelled/);
+    await tick(); const entry = readQueue(f.config)[0]!; assert.equal(entry.status, 'failed'); assert.match(entry.error!, /^closed: autor AUTHOR zamknięty bez zakończonego raportu/); assert.doesNotMatch(entry.error!, /^cancelled/);
   });
   it('A5/R5: a cancelled author without a new finished report cancels the review', async () => {
     const { f, author, tick } = authorCase('r5-cancel'); await reviewTick(f.ctx);

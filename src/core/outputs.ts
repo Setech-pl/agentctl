@@ -136,22 +136,31 @@ export function resolveOutputRepo(record: Pick<TaskRecord, 'repos'>, name: strin
   return { allowed, problem: hits.length === 0 ? 'missing' : 'ambiguous' };
 }
 
+/** The record a review's repo spellings are read against: its author (current or archived). */
+export const outputAuthor = (ctx: Context, record: Pick<TaskRecord, 'reviewOf'>): TaskRecord | undefined => (record.reviewOf ? findRecordAnywhere(ctx.config, record.reviewOf) : undefined);
+
+/** The one canonicalisation of the `repo` of a commit/integrate reference: validation (readOutputs) and base refs resolve it the same way. */
+export function resolveRefRepo(ctx: Context, record: TaskRecord, name: string): RepoResolution {
+  return resolveOutputRepo(record, name, outputAuthor(ctx, record));
+}
+
 export function outputRepo(record: Pick<TaskRecord, 'repos'>, name: string, author?: Pick<TaskRecord, 'repos'> | undefined) {
   return resolveOutputRepo(record, name, author).repo;
 }
 
 /** Validation observes git; it never fetches, checks out or integrates anything. */
 export async function readOutputs(ctx: Context, record: TaskRecord): Promise<OutputData> {
+  // The one gate of every consumer (status, get_report, pull_ready, cohort_show, events, base refs): a report still being written is not judged.
+  if (outputsPending(ctx.config, record, inspectReport(ctx.config, record, ctx.runner.now(), !record.attemptId), ctx.runner.now())) return { outputs: null, outputs_valid: false, outputs_errors: [], outputs_partial: false, outputs_pending: true };
   let data: OutputData;
   try { data = parseOutputs(readReportText(ctx.config, record, record.report)); }
   catch { return { outputs: null, outputs_valid: false, outputs_errors: ['no report'] }; }
   if (!data.outputs) return data;
-  const author = record.reviewOf ? findRecordAnywhere(ctx.config, record.reviewOf) : undefined;
   // One message per distinct problem, with the number of entries it covers.
   const problems = new Map<string, number>();
   const note = (message: string): void => void problems.set(message, (problems.get(message) ?? 0) + 1);
   for (const ref of [...data.outputs.commits, ...data.outputs.integrate]) {
-    const found = resolveOutputRepo(record, ref.repo, author);
+    const found = resolveRefRepo(ctx, record, ref.repo);
     if (!found.repo) { note(`repo ${ref.repo}: ${found.problem === 'ambiguous' ? 'ambiguous' : 'not'} in the task repos; write one of: ${found.allowed.join(', ')}`); continue; }
     const repo = found.repo;
     const git = async (args: string[]) => ctx.runner.exec('git', ['-C', repo.path, ...args], { readOnly: true });

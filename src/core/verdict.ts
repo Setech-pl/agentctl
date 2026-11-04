@@ -48,8 +48,26 @@ export function reportVerdict(report: string, pattern?: string): string | undefi
 }
 
 const VERDICT_WORD = /^(PASS|PARTIAL|FAIL|BLOCKED)\b/i;
-/** How many leading lines of a report count as its header: a "Werdykt:" further down is prose, not the verdict. */
-const HEADER_LINES = 12;
+
+/**
+ * The header of a report: its title and its metadata lines ("Label: value"), up to the first section heading (## …), the first fenced code
+ * block or the first line of prose. A fenced block (``` or ~~~) and a quote are examples, never the verdict of the report; the boundary is the
+ * structure of the text, not a number of lines.
+ */
+export function headerLines(text: string): string[] {
+  const out: string[] = [];
+  let bare = false; // the previous line was a label with no value: its value is the next line
+  for (const line of text.split('\n')) {
+    if (/^\s{0,3}(?:`{3,}|~{3,})/.test(line) || /^\s{0,3}#{2,6}\s/.test(line)) break;
+    if (/^\s{0,3}>/.test(line) || line.trim() === '') continue;
+    const label = /^\s*(?:[-*]\s+)?(?:\*\*|__)?[^:：\n]{1,40}[:：]\s*(?:\*\*|__)?\s*(.*)$/.exec(line);
+    const isTitle = /^\s{0,3}#\s/.test(line);
+    if (!label && !isTitle && !bare) break;
+    bare = Boolean(label) && label![1]!.trim() === '';
+    out.push(line);
+  }
+  return out;
+}
 
 /**
  * The verdict a notification shows. First the declared `agentctl-outputs` verdict; then the user's `notify.verdict_pattern`; then a
@@ -69,7 +87,7 @@ export function eventVerdict(report: string, pattern?: string): string | undefin
       if (hit !== '') return clip(hit, MAX_VERDICT);
     }
   }
-  const head = clean.filter((l) => l.trim() !== '').slice(0, HEADER_LINES);
+  const head = headerLines(text).map(stripMarkdown);
   for (const [i, line] of head.entries()) {
     const m = LABEL.exec(line);
     if (!m) continue;

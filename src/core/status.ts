@@ -212,9 +212,8 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     } else { observation.working = false; observation.idle = 0; }
     idleObservations.set(observationKey, observation);
     if (release) { try { atomicWriteFile(observationFile, JSON.stringify(observation)); } catch { /* observation persistence is best effort */ } finally { release(); } }
-    let outputData = reportReady ? await readOutputs(ctx, record) : undefined;
-    // Still being written (no report-end yet, or not settled): no warnings about the block yet.
-    if (outputData && outputsPending(config, record, reportState, runner.now())) outputData = { ...outputData, outputs_errors: [], outputs_partial: false, outputs_pending: true };
+    // Still being written (no report-end yet, or not settled): readOutputs says `outputs_pending` and judges nothing.
+    const outputData = reportReady ? await readOutputs(ctx, record) : undefined;
     let verdict: OutputVerdict | undefined;
     if (reportReady) { try { verdict = dependencyVerdict(fs.readFileSync(record.report, 'utf8')); } catch { /* absent */ } }
     rows.push({

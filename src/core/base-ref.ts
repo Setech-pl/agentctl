@@ -2,7 +2,7 @@ import path from 'node:path';
 import type { Context } from './context.ts';
 import type { ResolvedSpec } from './spec.ts';
 import { listTaskRecords, listArchivedRecords } from './taskstore.ts';
-import { readOutputs, outputRepo } from './outputs.ts';
+import { readOutputs, outputAuthor, resolveRefRepo } from './outputs.ts';
 import { AgentctlError } from './util.ts';
 
 /** Resolve at start, before creating any worktree. Queue specs retain @TASK until then. */
@@ -20,7 +20,8 @@ export async function resolveTaskBases(ctx: Context, spec: ResolvedSpec): Promis
     if (candidates.length !== 1) throw new AgentctlError(`${spec.task}: base ${raw}: repository missing or ambiguous; use @TASK:repo-name; start blocked`);
     const selected = candidates[0]!;
     const data = await readOutputs(ctx, source);
-    const refs = [...(data.outputs?.commits ?? []), ...(data.outputs?.integrate ?? [])].filter(r => outputRepo(source, r.repo) === selected);
+    if (data.outputs_pending) throw new AgentctlError(`${spec.task}: base ${raw}: the report of ${source.task} is not settled yet; start blocked`);
+    const refs = [...(data.outputs?.commits ?? []), ...(data.outputs?.integrate ?? [])].filter(r => resolveRefRepo(ctx, source, r.repo).repo === selected);
     const shas = [...new Set(refs.map(r => r.sha))];
     if (shas.length > 1) throw new AgentctlError(`${spec.task}: base ${raw}: ambiguous output commits; start blocked`);
     const refErrors = data.outputs_errors.filter(e => /^(commits|integrate)\b|^repo |branch .* does not exist|commit .* does not exist/.test(e));
@@ -32,7 +33,9 @@ export async function resolveTaskBases(ctx: Context, spec: ResolvedSpec): Promis
         const b = await ctx.runner.exec('git', ['-C', selected.worktree, 'symbolic-ref', '--quiet', '--short', 'HEAD'], { readOnly: true });
         if (b.code === 0) branch = b.stdout.trim();
       }
-      if (!branch) throw new AgentctlError(`${spec.task}: base ${raw}: no outputs or author branch; start blocked`);
+      // A review's own checkout is detached: without commits in its outputs it stands for the branch it reviewed.
+      if (!branch && source.reviewOf) branch = outputAuthor(ctx, source)?.repos.find(a => a.path === selected.path)?.branch;
+      if (!branch) throw new AgentctlError(`${spec.task}: base ${raw}: ${source.task} has no commits in its outputs and no branch (a detached review checkout); name the commit in outputs.commits; start blocked`);
       ref = `refs/heads/${branch}`;
     }
     const result = await ctx.runner.exec('git', ['-C', repo.path, 'rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`], { readOnly: true });
