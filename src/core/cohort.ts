@@ -29,6 +29,8 @@ export interface CohortMeta {
   note?: string;
   /** The tasks that were all done (had a report) when "all reports ready" was announced; announced again only when a task joins. */
   announced?: string[];
+  observed?: string;
+  changedAt?: number;
 }
 
 export function cohortsDir(config: Pick<GlobalConfig, 'path'>): string {
@@ -48,6 +50,8 @@ function parseMeta(text: string): CohortMeta | undefined {
   const meta: CohortMeta = { name: data.name, created: data.created };
   if (typeof data.note === 'string' && data.note !== '') meta.note = data.note;
   if (Array.isArray(data.announced)) meta.announced = data.announced.filter((x): x is string => typeof x === 'string');
+  if (typeof data.observed === 'string') meta.observed = data.observed;
+  if (typeof data.changedAt === 'number') meta.changedAt = data.changedAt;
   return meta;
 }
 
@@ -89,7 +93,11 @@ export async function touchCohort(ctx: Context, name: string): Promise<CohortMet
   const problem = cohortNameProblem(name);
   if (problem) throw new AgentctlError(problem);
   const known = readCohort(ctx.config, name);
-  if (known) return known;
+  if (known) {
+    const updated = { ...known, changedAt: ctx.runner.now(), observed: undefined };
+    await saveCohort(ctx, updated);
+    return updated;
+  }
   const meta: CohortMeta = { name: name.normalize('NFC'), created: new Date(ctx.runner.now()).toISOString() };
   await saveCohort(ctx, meta);
   return meta;
@@ -213,6 +221,7 @@ export async function setCohortOf(ctx: Context, inputs: string[], cohort: Cohort
       else delete raw.header.cohort;
       await saveEntry(ctx, { ...rest, ...(cohort ? { cohort: cohort.name } : {}), spec: renderRawSpec(raw) });
     }
+    if (was && was !== cohort?.name) await touchCohort(ctx, was);
     changes.push({ task, was });
   }
   return changes;
@@ -239,7 +248,7 @@ export function renderCohortList(list: readonly CohortSummary[]): string[] {
 
 /** "2⚙ 1✓ 1⧗" for the header of a group on the board: tasks per state, queued ones last. */
 export function countsLine(rows: readonly StatusRow[], queued: number, icons: Record<string, string>): string {
-  const order = ['overloaded', 'report-candidate', 'working', 'background', 'waiting', 'needs-input', 'needs-trust', 'limited', 'report-ready', 'superseded', 'orphan', 'dead'];
+  const order = ['overloaded', 'working', 'background', 'waiting', 'needs-input', 'needs-trust', 'limited', 'report-ready', 'superseded', 'orphan', 'dead'];
   const counts = new Map<string, number>();
   for (const r of rows) if (!r.closed && !r.cancelled) counts.set(r.state, (counts.get(r.state) ?? 0) + 1);
   const parts = order.filter((s) => counts.has(s)).map((s) => `${counts.get(s)}${icons[s] ?? s}`);
@@ -269,7 +278,13 @@ export async function cohortTick(ctx: Context, notifier: Notifier, rows: readonl
   const said: string[] = [];
   for (const meta of listCohorts(ctx.config)) {
     const { done, open } = counted(rows, entries, meta.name);
-    if (done.length === 0 || open.length > 0) continue;
+    const observed = JSON.stringify({ rows: cohortRows(rows, meta.name).map(r => [r.task, r.state, r.report, r.attemptId]).sort(), queue: cohortEntries(entries, meta.name).map(e => [e.task, e.status]).sort() });
+    const now = ctx.runner.now();
+    if (meta.observed !== observed) {
+      meta.observed = observed; meta.changedAt = now;
+      await saveCohort(ctx, meta);
+    }
+    if (done.length === 0 || open.length > 0 || now - (meta.changedAt ?? now) < ctx.config.cohort.doneGraceS * 1000) continue;
     const announced = new Set(meta.announced ?? []);
     if (done.every((t) => announced.has(t))) continue;
     const text = cohortDoneText(meta.name, done.length);

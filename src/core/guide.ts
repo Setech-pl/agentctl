@@ -19,7 +19,7 @@ export function dispatcherGuide(lang: GuideLanguage): string {
 export function projectGuide(project: string): { text: string; warnings: string[] } {
   const repo = resolvePath(project);
   const overlay = loadProjectConfig(repo)?.guide;
-  if (!overlay) return { text: '', warnings: [] };
+  if (!overlay) return { text: '', warnings: [`brak nakładki projektu (pole guide w ${repo}/.agentctl.yaml)`] };
   const file = overlay.startsWith('~') ? resolvePath(overlay) : path.resolve(repo, overlay);
   try { return { text: fs.readFileSync(file, 'utf8'), warnings: [] }; }
   catch { return { text: '', warnings: [`Project guide cannot be read: ${file}`] }; }

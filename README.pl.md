@@ -50,7 +50,7 @@ agentctl powstał i jest używany przy prawdziwym projekcie: codziennie równole
 
 ## Stany zadań
 
-Board pokazuje m.in. stany `overloaded`, `report-candidate`, `working`, `waiting`, `needs-input`, `needs-trust`, `limited`, `report-ready`, `background`, `queued`, `blocked`, `dead`, `orphan`, `closed`, `cancelled`, `superseded` i `start-failed`. Szczegóły opisuje [dokumentacja stanów zadań](docs/details.pl.md#stany-zadań).
+Board pokazuje m.in. stany `overloaded`, `working`, `waiting`, `needs-input`, `needs-trust`, `limited`, `report-ready`, `background`, `queued`, `blocked`, `dead`, `orphan`, `closed`, `cancelled`, `superseded` i `start-failed`. `report-candidate` to osobna flaga raportu, bez zmiany stanu. Szczegóły opisuje [dokumentacja stanów zadań](docs/details.pl.md#stany-zadań).
 
 ### Architektura i przebieg pracy
 
@@ -205,7 +205,6 @@ stateDiagram-v2
     state "⏸ waiting" as waiting
     state "? needs-input" as input
     state "⏳ overloaded" as overloaded
-    state "? report-candidate" as candidate
     state "⛔ limited" as limited
     state "✓ report-ready" as ready
     state "↪ superseded" as superseded
@@ -237,8 +236,6 @@ stateDiagram-v2
     input --> working: odpowiadasz
     working --> overloaded: przeciążenie dostawcy
     overloaded --> working: ponowienie tylko przy pustym bezczynnym promptcie
-    waiting --> candidate: niepotwierdzona ścieżka raportu
-    candidate --> ready: koniec raportu lub stabilny po zakończonej turze próby
     working --> limited: komunikat o limicie użycia
     limited --> working: limit odnowiony, ponowienie
     limited --> superseded: move do drugiego dostawcy

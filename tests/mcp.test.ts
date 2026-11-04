@@ -54,7 +54,7 @@ function withReport(config: GlobalConfig, task: string, text = `# ${task}\nWerdy
 
 describe('mcp: the registry', () => {
   it('has the nineteen read tools and thirteen write tools, with unique short names', () => {
-    assert.deepEqual(MCP_TOOLS.filter((t) => t.kind === 'read').map((t) => t.name), ['status', 'events_since', 'gc_preview', 'limits', 'version', 'peek', 'list_reports', 'get_report', 'pull_ready', 'task_spec', 'queue_list', 'cohort_list', 'cohort_show', 'guide', 'capacity', 'usage', 'log', 'stats', 'overlap', 'queue_show', 'mcp_check', 'spec_example', 'doctor', 'equivalents', 'config_show', 'manager_status', 'away_status', 'report']);
+    assert.deepEqual(MCP_TOOLS.filter((t) => t.kind === 'read').map((t) => t.name), ['status', 'events_since', 'gc_preview', 'limits', 'version', 'peek', 'list_reports', 'get_report', 'pull_ready', 'task_spec', 'queue_list', 'cohort_list', 'cohort_show', 'guide', 'capacity', 'usage', 'log', 'stats', 'overlap', 'queue_show', 'mcp_check', 'spec_example', 'doctor', 'equivalents', 'config_show', 'manager_status', 'away_status', 'report', 'response_page']);
     assert.deepEqual(MCP_TOOLS.filter((t) => t.kind === 'write').map((t) => t.name), ['set_limits', 'reserve', 'resume', 'send', 'new', 'queue', 'queue_rm', 'cancel', 'mark', 'away', 'interrupt', 'close', 'move', 'queue_retry', 'queue_up', 'queue_pause', 'queue_resume', 'unblock', 'cohort_add', 'cohort_remove', 'cohort_note', 'hide', 'unhide', 'archive', 'adopt', 'report_from', 'limits_release', 'manager_start', 'manager_stop', 'notify_test', 'gc']);
     assert.equal(new Set(MCP_TOOL_NAMES).size, MCP_TOOL_NAMES.length);
     for (const t of MCP_TOOLS) assert.ok(t.name.length <= 64 && /^[a-z_]+$/.test(t.name), t.name);
@@ -196,15 +196,16 @@ describe('mcp: reading', () => {
     assert.equal((await setup('r8b').call('pull_ready', { mode: 'full' })).text, 'No reports ready.');
   });
 
-  it('pull_ready takes as many reports as fit under 200 KB and leaves the rest new', async () => {
+  it('0173-1: oversized full reports stay unread and direct users to get_report', async () => {
     const t = setup('r9');
     withReport(t.config, 'NC-1', 'a'.repeat(150 * 1024));
     withReport(t.config, 'NC-2', 'b'.repeat(150 * 1024));
     await t.runner.sleep(1000);
     const first = await t.call('pull_ready', { mode: 'full' });
-    assert.match(first.text, /^1 new report, now marked as pulled: NC-1\n1 more did not fit under 200 KB and stay new: NC-2\. Continue with next_cursor/);
+    assert.match(first.text, /0 new reports/);
+    assert.match(first.text, /get_report/);
+    assert.equal(readTaskRecord(t.config, 'nc-1')?.pulled, undefined);
     assert.equal(readTaskRecord(t.config, 'nc-2')?.pulled, undefined);
-    assert.match((await t.call('pull_ready', { mode: 'full' })).text, /^1 new report, now marked as pulled: NC-2/);
   });
 
   it('task_spec: header and prompt; env values are not shown and follow-ups are not part of the prompt', async () => {
@@ -290,8 +291,8 @@ describe('mcp: writing is off by default', () => {
     assert.deepEqual(merge.allow, ['send']);
     assert.match(merge.warnings.join('\n'), /config\.mcp\.allow: "merge" is not a write tool of this version, ignored \(allowed: send, new, interrupt, close, move, queue, queue_rm, cancel, mark, set_limits, reserve, resume, away,.*gc\)/);
     assert.match(makeConfig(scratch.sub('w3b'), 'mcp: {allow: [shell]}\n').mcp.warnings.join(), /"shell" is not a write tool/);
-    assert.deepEqual(makeConfig(scratch.sub('w3c')).mcp, { allow: [], allowRmWorktree: false, warnings: [] });
-    assert.deepEqual(makeConfig(scratch.sub('w3d'), 'mcp: {allow: [send, send, close], allow_rm_worktree: true}\n').mcp, { allow: ['send', 'close'], allowRmWorktree: true, warnings: [] });
+    assert.deepEqual(makeConfig(scratch.sub('w3c')).mcp, { maxResponseKb: 8, allow: [], allowRmWorktree: false, warnings: [] });
+    assert.deepEqual(makeConfig(scratch.sub('w3d'), 'mcp: {allow: [send, send, close], allow_rm_worktree: true}\n').mcp, { maxResponseKb: 8, allow: ['send', 'close'], allowRmWorktree: true, warnings: [] });
     for (const t of MCP_TOOLS) assert.ok(!/shell|merge|push/.test(t.name), t.name);
   });
 

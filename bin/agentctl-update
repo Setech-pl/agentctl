@@ -18,14 +18,14 @@ Updates the stable copy of agentctl (a detached git worktree of the repo) and ma
      stable copy exists: refuse if it has local changes, else git checkout --detach <ref>
   3. npm ci, npm run build, then npm link, in the stable copy
   4. agentctl doctor (a failure makes this script exit non-zero)
-  5. find the watch window by @agentctl-role (legacy name fallback), restart only that window
-     (no other window or task is touched)
+  5. find the watch window by @agentctl-role (legacy name fallback), restart watch and board through their role-aware --restart commands
+     (task windows are untouched)
   6. print the previous and the new commit, and whether watch was restarted
 
 Options:
   --ref <ref>   what to install (default: origin/main)
   --dry-run     print the commands without running any of them
-  --no-watch    do not restart the watch window
+  --no-watch    do not restart watch or board
   --no-link     do not run npm link (for tests: the global commands stay where they are)
   --help        this text
 
@@ -126,23 +126,27 @@ main() {
   show "$stable/dist/bin/agentctl.js" doctor
   if [ "$DRY_RUN" -eq 0 ]; then "$stable/dist/bin/agentctl.js" doctor || doctor_rc=$?; fi
 
-  local watch_result='no (--no-watch)'
+  local watch_result='no (--no-watch)' board_result='no (--no-watch)'
   if [ "$watch" -eq 1 ]; then
-    watch_result='no (no window "watch" in session "'"$session"'")'
-    local watch_target=''
-    if tmux has-session -t "=$session" 2>/dev/null; then
-      watch_target="$(tmux list-windows -t "=$session" -F '#{window_id}\t#{window_name}\t#{@agentctl-role}' 2>/dev/null | awk -F '\t' -v legacy="=$session:watch" '$3 == "watch" || $2 == "watch" { found=$1 } $1 == "watch" { found=legacy } END { if (found != "") print found }')"
+    local role target result inventory='' tmux_locale="${LC_ALL:-${LC_CTYPE:-${LANG:-}}}"
+    case "$tmux_locale" in *UTF-8*|*utf8*|*utf-8*) ;; *) tmux_locale=en_US.UTF-8 ;; esac
+    if LC_ALL="$tmux_locale" tmux has-session -t "=$session" 2>/dev/null; then
+      inventory="$(LC_ALL="$tmux_locale" tmux list-windows -t "=$session" -F $'#{window_id}\t#{window_name}\t#{@agentctl-role}' 2>/dev/null)"
     fi
-    if [ -n "$watch_target" ]; then
-      if [ "$doctor_rc" -ne 0 ]; then
-        watch_result='no (doctor failed, the old watcher keeps running)'
-      else
-        run tmux kill-window -t "$watch_target"
-        run "$stable/dist/bin/agentctl.js" watch --tmux
-        watch_result='yes'
-        [ "$DRY_RUN" -eq 1 ] && watch_result='yes (dry run: would be)'
+    for role in watch board; do
+      result="no (no window \"$role\" in session \"$session\")"
+      target="$(printf '%s\n' "$inventory" | awk -F '\t' -v role="$role" -v legacy="=$session:$role" '$3 == role { tagged=$1 } $2 == role && $3 == "" { fallback=$1 } $1 == role { fallback=legacy } END { if (tagged != "") print tagged; else if (fallback != "") print fallback }')"
+      if [ -n "$target" ]; then
+        if [ "$doctor_rc" -ne 0 ]; then
+          result='no (doctor failed, the old process keeps running)'
+        else
+          run "$stable/dist/bin/agentctl.js" "$role" --tmux --restart
+          result='yes'
+          [ "$DRY_RUN" -eq 1 ] && result='yes (dry run: would be)'
+        fi
       fi
-    fi
+      if [ "$role" = watch ]; then watch_result="$result"; else board_result="$result"; fi
+    done
   fi
 
   # The Claude app keeps its MCP server process through an update; say so (it is never stopped from here).
@@ -153,6 +157,7 @@ main() {
   echo "previous: $before"
   if [ "$DRY_RUN" -eq 1 ]; then echo "new:      (dry run) $ref"; else echo "new:      $(commit_of "$stable")"; fi
   echo "watch restarted: $watch_result"
+  echo "board restarted: $board_result"
   if [ "$doctor_rc" -ne 0 ]; then echo "agentctl doctor failed (exit $doctor_rc)" >&2; fi
   return "$doctor_rc"
 }

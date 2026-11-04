@@ -13,9 +13,9 @@ import { withFileLock } from './file-lock.ts';
 
 export type DiskLevel = 'ok' | 'warn' | 'critical' | 'unknown';
 export interface DiskVolume { device: string | null; paths: string[]; availableBytes: number | null; totalBytes: number | null; level: DiskLevel; error?: string }
-export interface DiskReport { volumes: DiskVolume[]; worktreeBytes: number | null; measuredAt: string; level: DiskLevel }
+export interface DiskReport { worktreeCount?: number; largestWorktrees?: { path: string; bytes: number }[]; pathsTotal?: number; pathsOffset?: number; pathsNextOffset?: number | null; volumes: DiskVolume[]; worktreeBytes: number | null; measuredAt: string; level: DiskLevel }
 export const DISK_INTERVAL_MS = 5 * 60_000;
-const sizes = new Map<string, { at: number; bytes: number | null }>();
+const sizes = new Map<string, { at: number; bytes: number | null; worktrees?: { path: string; bytes: number }[] }>();
 export function diskLevel(bytes: number | null, warnGb: number, criticalGb: number): DiskLevel {
   return bytes === null ? 'unknown' : bytes < criticalGb * 1024 ** 3 ? 'critical' : bytes < warnGb * 1024 ** 3 ? 'warn' : 'ok';
 }
@@ -24,7 +24,7 @@ function existingAncestor(target: string): string {
   while (!fs.existsSync(current) && path.dirname(current) !== current) current = path.dirname(current);
   return current;
 }
-export async function collectDisk(ctx: Context, statfs = fs.promises.statfs): Promise<DiskReport> {
+export async function collectDisk(ctx: Context, statfs = fs.promises.statfs, opts: { detail?: boolean; offset?: number; limit?: number } = {}): Promise<DiskReport> {
   const records = [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)];
   const targets = new Set([ctx.config.cache, ctx.config.stateDir]);
   if (ctx.config.worktreeRoot) targets.add(resolvePath(ctx.config.worktreeRoot));
@@ -69,11 +69,11 @@ export async function collectDisk(ctx: Context, statfs = fs.promises.statfs): Pr
   if (!size) {
     try {
       const cached = JSON.parse(fs.readFileSync(sizeFile, 'utf8'));
-      if (cached.key === key && typeof cached.at === 'number' && (cached.bytes === null || typeof cached.bytes === 'number') && ctx.runner.now() >= cached.at && ctx.runner.now() - cached.at < DISK_INTERVAL_MS) size = { at: cached.at, bytes: cached.bytes };
+      if (cached.key === key && Array.isArray(cached.worktrees) && typeof cached.at === 'number' && (cached.bytes === null || typeof cached.bytes === 'number') && ctx.runner.now() >= cached.at && ctx.runner.now() - cached.at < DISK_INTERVAL_MS) size = { at: cached.at, bytes: cached.bytes, worktrees: cached.worktrees };
     } catch { /* first read or torn cache */ }
   }
   if (!size || ctx.runner.now() - size.at >= DISK_INTERVAL_MS) {
-    try { size = { at: ctx.runner.now(), bytes: worktrees.reduce((n, wt) => n + sizeOf(wt), 0) }; }
+    try { const entries = worktrees.map(wt => ({ path: wt, bytes: sizeOf(wt) })).sort((a, b) => b.bytes - a.bytes || a.path.localeCompare(b.path)); size = { at: ctx.runner.now(), bytes: entries.reduce((n, wt) => n + wt.bytes, 0), worktrees: entries }; }
     catch { size = { at: ctx.runner.now(), bytes: null }; }
     try { await ctx.runner.writeFile(sizeFile, JSON.stringify({ key, ...size })); } catch { /* cache cannot make a read fail */ }
     sizes.set(key, size);
@@ -81,7 +81,9 @@ export async function collectDisk(ctx: Context, statfs = fs.promises.statfs): Pr
   }
   const all = [...volumes.values()];
   const level = (['critical', 'warn', 'unknown', 'ok'] as const).find((l) => all.some((v) => v.level === l)) ?? 'unknown';
-  return { volumes: all, worktreeBytes: size.bytes, measuredAt: new Date(size.at).toISOString(), level };
+  const offset = opts.offset ?? 0, limit = Math.min(opts.limit ?? 20, 100);
+  const paths = all.flatMap(v => v.paths), page = new Set(opts.detail ? paths.slice(offset, offset + limit) : []);
+  return { worktreeCount: worktrees.length, largestWorktrees: size.worktrees?.slice(0, 5) ?? [], pathsTotal: paths.length, pathsOffset: offset, pathsNextOffset: opts.detail && offset + limit < paths.length ? offset + limit : null, volumes: all.map(v => ({ ...v, pathCount: v.paths.length, paths: v.paths.filter(p => page.has(p)) })), worktreeBytes: size.bytes, measuredAt: new Date(size.at).toISOString(), level };
 }
 export function diskLine(disk: DiskReport): string {
   return `Disk: ${disk.level}; free ${disk.volumes.map((v) => v.availableBytes === null ? 'n/d' : `${(v.availableBytes / 1024 ** 3).toFixed(1)} GiB`).join(' / ')}; agentctl worktrees ${disk.worktreeBytes === null ? 'n/d' : `${(disk.worktreeBytes / 1024 ** 3).toFixed(1)} GiB`}${disk.level === 'critical' || disk.level === 'warn' ? '; inspect gc_preview / agentctl gc' : ''}`;
@@ -97,7 +99,7 @@ export async function diskTick(ctx: Context, notifier: Notifier): Promise<void> 
     try { previous = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* first reading */ }
     const next: Record<string, DiskLevel> = {};
     for (const volume of report.volumes) {
-      const id = volume.device ?? volume.paths[0]!;
+      const id = volume.device ?? 'unknown';
       next[id] = volume.level;
       if (volume.level === 'unknown' || previous[id] === volume.level || (!previous[id] && volume.level === 'ok')) continue;
       const text = diskLine({ ...report, volumes: [volume], level: volume.level });

@@ -51,7 +51,7 @@ exit 0
     `#!/bin/sh
 case "$1" in
   has-session) exit 0 ;;
-  list-windows) printf '${opts.windows ?? 'watch\\nnc-1\\n'}' ; exit 0 ;;
+  list-windows) case \"$*\" in *\"$(printf '\\t')\"*) ;; *) exit 1 ;; esac; printf '${opts.windows ?? 'watch\\nnc-1\\n'}' ; exit 0 ;;
   *) echo "tmux $*" >> ${log} ;;
 esac
 exit 0
@@ -76,10 +76,11 @@ describe('agentctl-update: paths', () => {
     assert.equal(r.code, 0, r.stderr);
     assert.ok(r.calls.some((c) => c.endsWith('checkout --detach origin/main')));
   });
-  it('restarts a renamed watcher by stable tmux role and ID', () => {
-    const r = runUpdate('renamed-watch', ['--no-link'], {}, { windows: '@7\\tchanged title\\twatch\\n@8\\tother\\t\\n' });
+  it('0173-10: restarts renamed watch and board through role-aware CLI commands', () => {
+    const r = runUpdate('renamed-watch', ['--no-link'], {}, { windows: '@7\\tchanged title\\twatch\\n@8\\tother\\tboard\\n' });
     assert.equal(r.code, 0, r.stderr);
-    assert.ok(r.calls.includes('tmux kill-window -t @7'), r.calls.join('\n'));
+    assert.ok(r.calls.includes('agentctl watch --tmux --restart'), r.calls.join('\n'));
+    assert.ok(r.calls.includes('agentctl board --tmux --restart'), r.calls.join('\n'));
     assert.ok(!r.calls.includes('tmux kill-window -t @8'));
   });
 
@@ -137,8 +138,7 @@ describe('agentctl-update: --dry-run', () => {
       `+ (cd ${r.stable} && npm run build)`,
       `+ (cd ${r.stable} && npm link)`,
       `+ ${r.stable}/dist/bin/agentctl.js doctor`,
-      "+ tmux kill-window -t '=agentctl:watch'",
-      `+ ${r.stable}/dist/bin/agentctl.js watch --tmux`,
+      `+ ${r.stable}/dist/bin/agentctl.js watch --tmux --restart`,
       `+ ${r.stable}/dist/bin/agentctl.js mcp check`,
     ]);
     assert.equal(fs.existsSync(r.stable), false);
@@ -177,8 +177,7 @@ describe('agentctl-update: a real run against mocked git, npm and tmux', () => {
         `npm run build (cwd ${fs.realpathSync(r.stable)})`,
         `npm link (cwd ${fs.realpathSync(r.stable)})`,
         'agentctl doctor',
-        'tmux kill-window -t =agentctl:watch',
-        'agentctl watch --tmux',
+        'agentctl watch --tmux --restart',
         'agentctl mcp check',
       ],
     );

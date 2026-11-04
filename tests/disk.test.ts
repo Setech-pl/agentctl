@@ -21,7 +21,7 @@ describe('disk facts', () => {
     const { ctx, runner } = makeContext(config);
     let calls = 0;
     const fake = (async (...args: Parameters<typeof fs.promises.statfs>) => { calls++; return stat(25 * 1024 ** 3)(...args); }) as typeof fs.promises.statfs;
-    const first = await collectDisk(ctx, fake);
+    const first = await collectDisk(ctx, fake, { detail: true });
     assert.equal(first.volumes.length, 1);
     assert.equal(calls, 1);
     assert.ok(first.volumes[0]!.paths.includes(projectRoot));
@@ -42,7 +42,7 @@ describe('disk facts', () => {
     const raw = splitSpecs(`---\ntask: QD-1\nagent: claude\nrepos:\n  - path: ${repo}\n---\nFake.\n`);
     const plan = await planQueueAdd(ctx, raw);
     await commitQueueAdd(ctx, plan.items);
-    const report = await collectDisk(ctx, stat(60 * 1024 ** 3));
+    const report = await collectDisk(ctx, stat(60 * 1024 ** 3), { detail: true });
     assert.ok(report.volumes.some((v) => v.paths.includes(wtRoot)));
     assert.equal(report.worktreeBytes, 0);
   });

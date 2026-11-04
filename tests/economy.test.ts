@@ -35,7 +35,7 @@ function fixture(name: string, yaml = '') {
 const notify = { notify: async () => {} };
 
 it('economy: six 20KB reports have bounded summaries, full mode and section/line pagination', async () => {
-  const f = fixture('six');
+  const f = fixture('six', 'mcp: {max_response_kb: 256}\n');
   for (let i = 1; i <= 6; i++) {
     const r = seedTask(f.config, `NC-${i}`);
     fs.mkdirSync(path.dirname(r.report), { recursive: true });
@@ -112,14 +112,14 @@ it('economy: report candidates cannot satisfy dependencies; valid configured rep
     assert.ok(!fs.existsSync(rec.report), name);
   }
   const rows = await collectStatus(f.ctx, { progress: false });
-  assert.equal(rows[0]!.state, 'report-candidate');
+  assert.equal(rows[0]!.state, 'waiting');
   assert.equal(hasReport(rows[0]), false);
   assert.match((await f.call('pull_ready')).text, /No reports ready/);
   const candidateEvents = readJournal(f.config).filter(e => e.kind === 'report-candidate');
   await syncReport(f.ctx, rec, { message: rec.reportCandidate });
   assert.equal(readJournal(f.config).filter(e => e.kind === 'report-candidate').length, candidateEvents.length);
   fs.writeFileSync(path.join(wt, 'NC-1-valid.md'), 'Werdykt: PASS\n## Summary\nDone');
-  assert.equal((await syncReport(f.ctx, rec)).action, 'copied');
+  assert.equal((await syncReport(f.ctx, rec, { from: path.join(wt, 'NC-1-valid.md') })).action, 'copied');
   fs.writeFileSync(rec.report, 'canonical wins');
   fs.writeFileSync(path.join(wt, 'NC-1-valid.md'), 'Werdykt: FAIL');
   assert.equal((await syncReport(f.ctx, readTaskRecord(f.config, 'nc-1')!)).action, 'none');

@@ -24,7 +24,7 @@ Column "Layers": **g** global config, **p** project config, **s** spec.
 | `links[].from` | path | required | g p s | Where the link goes, relative to the first worktree. A glob links every match. |
 | `links[].to` | path | required | g p s | What it points at. Must exist. `from` and `to` ending in `/*` make one link per entry of the directory. |
 | `env` | mapping | `{}` | g p s | Environment variables of the tmux window (strings, numbers or booleans). |
-| `report` | path or list | `{cache}/{task}/{TASK}.md` | g p s | Where the agent writes its report. Used by `status`, `pull` and the notifications. A list: the first entry is the canonical path, the others are places to look (paths and globs `*`, `?`, `**`; absolute, `~/` or relative to the worktree; `{task}` and `{TASK}` work), e.g. `[~/workspace/cache/{task}/{TASK}.md, docs/reports/*{task}*.md, docs/reports/*{TASK}*.md]`. A report found in another place (also by itself, see [Report detection](details.md#report-detection)) is copied to the canonical path. |
+| `report` | path or list | `{cache}/{task}/{TASK}.md` | g p s | Where the agent writes its report. Used by `status`, `pull` and the notifications. A list: the first entry is the canonical path, the others are places to look (paths and globs `*`, `?`, `**`; absolute, `~/` or relative to the worktree; `{task}` and `{TASK}` work), e.g. `[~/workspace/cache/{task}/{TASK}.md, docs/reports/*{task}*.md, docs/reports/*{TASK}*.md]`. Fresh alternatives bearing the task ID become candidate flags (see [Report detection](details.md#report-detection)); copying requires explicit `report --from` / `report_from`. |
 | `setup` | list of strings | `[]` | g p s | Shell commands run in the first worktree after `git worktree add` and before the links. A failing command stops `new`. |
 | `defaults` | mapping | `{}` | g p | Values for a spec that leaves them out: `agent`, `model`, `effort`. |
 | `defaults.agent` | `claude` or `codex` | none | g p | Agent when the spec has no `agent`. |
@@ -431,3 +431,9 @@ board:
 `board.list_width` accepts an integer >=64 columns or a percentage string from `"1%"` to `"100%"`. With a preview it is clamped to at least 64 columns and at most terminal width minus 32. Below 110 columns the preview stays hidden and the list uses the whole terminal; the override has no effect there. Without an override, 110–139 columns retains the 71-column list; at >=140 columns use max(92, floor(45% of terminal width)), preserving at least 32 columns for preview. Large model/version strings may still truncate in constrained lists; full names remain in preview/help. Queue rows use the same abbreviations and fallback mapping. The manager line shows connection state rather than a model, so it retains its existing form.
 
 PL: `model_versions` to opcjonalna mapa wersji aliasów, bez domyślnych zgadywanych wartości. `list_width` przyjmuje kolumny lub procent; ograniczenia chronią miejsce na listę i podgląd. Zaznaczenie nadal bold/niebieskie, kolory stanów oraz NO_COLOR zachowują poprzednie zachowanie.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `mcp.max_response_kb` | `8` | Limit of each serialized MCP tool result in KiB (1–1024). Larger results return fragments through `response_page`; continuation never repeats the operation. |
+| `cohort` | `{done_grace_s: 300}` | Global cohort completion settings. |
+| `cohort.done_grace_s` | `300` | Wait after the last observed membership or task-state change before announcing all reports ready. Adding work cancels the pending completion; persisted across watcher restarts. `0` restores immediate notices. |

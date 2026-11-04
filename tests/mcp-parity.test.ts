@@ -167,6 +167,6 @@ describe('MCP parity guard', () => {
     const data = JSON.parse(result.text.split('\n\n').at(-1)!);
     assert.ok(data.disk.volumes.length > 0);
     assert.deepEqual(data.tasks, []);
-    for (const tool of MCP_TOOLS) { assert.match(tool.description, /CLI: agentctl/); if (tool.kind === 'read') assert.doesNotMatch(tool.description, /^WRITE/); }
+    for (const tool of MCP_TOOLS) { assert.match(tool.description, tool.name === 'response_page' ? /CLI: no equivalent/ : /CLI: agentctl/); if (tool.kind === 'read') assert.doesNotMatch(tool.description, /^WRITE/); }
   });
 });

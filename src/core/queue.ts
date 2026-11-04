@@ -209,7 +209,7 @@ export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: Q
     const unmetNow = unmetAfter(spec.after, rows);
     lines.push(
       `  start:    ${
-        unmetNow.length > 0
+        isPaused(config) ? 'queue paused; starts after queue_resume (agentctl queue resume)' : !config.queue.enabled ? 'queue.enabled is false; enable the queue first' : unmetNow.length > 0
           ? `when ${unmetNow.join(', ')} ${unmetNow.length === 1 ? 'has' : 'have'} a report${full ? ` and a ${spec.agent} window is free` : ''}`
           : full
           ? `waits for a free ${spec.agent} window (${load[spec.agent]} running${ahead[spec.agent] > 0 ? `, ${ahead[spec.agent]} queued ahead` : ''}, limit ${limit})`

@@ -12,7 +12,7 @@ import type { TaskRecord } from '../src/core/taskstore.ts';
 const cache = defaultCacheRoot('agentctl-economy');
 const checks: string[] = [];
 const check = (name: string, ok: unknown) => { assert.ok(ok, name); checks.push(name); console.log(`PASS ${name}`); };
-await withHarness({ name: 'economy', cacheRoot: cache, config: 'watch: {interval: 1}\noverload: {retry_after: 1, max_retries: 2}\ncapacity: {codex_refresh: false}\n' }, async h => {
+await withHarness({ name: 'economy', cacheRoot: cache, config: 'mcp: {max_response_kb: 256}\nwatch: {interval: 1}\noverload: {retry_after: 1, max_retries: 2}\ncapacity: {codex_refresh: false}\n' }, async h => {
   const config = loadGlobalConfig(h.agentctlHome);
   const seed = (task: string, report: string, extra: Partial<TaskRecord> = {}) => {
     const record: TaskRecord = { task, window: task.toLowerCase(), session: h.session, agent: 'claude', model: 'sonnet', effort: 'medium', repos: [], links: [], env: {}, report, started: new Date(Date.now() - 60000).toISOString(), requested: { agent: 'claude', model: 'sonnet', effort: 'medium' }, ...extra };
@@ -104,12 +104,14 @@ await withHarness({ name: 'economy', cacheRoot: cache, config: 'watch: {interval
   const rows = () => JSON.parse(h.agentctl(['status', '--all', '--json']).stdout) as { task: string; state: string; reportCandidate?: string }[];
   let end = Date.now() + 10000;
   while (!rows().find(r => r.task === 'integration-12')?.reportCandidate && Date.now() < end) await delay(200);
-  check('live README/CLAUDE/no-verdict remain candidates, canonical absent', !fs.existsSync(canonical) && rows().some(r => r.task === 'integration-12' && r.state === 'report-candidate' && r.reportCandidate));
+  check('live only configured ID file is a candidate flag, canonical absent', !fs.existsSync(canonical) && rows().some(r => r.task === 'integration-12' && r.state === 'dead' && r.reportCandidate));
   check('candidate cohort never announces done', !fs.readFileSync(path.join(h.agentctlHome, 'journal.jsonl'), 'utf8').split('\n').some(l => l.includes('"kind":"cohort-done"') && l.includes('candidate-fixture')));
   fs.writeFileSync(path.join(candidateDir, 'integration-12-good.md'), 'Werdykt: PASS\n## Summary\nConfirmed\n<!-- agentctl:report-end -->');
   end = Date.now() + 10000;
-  while (!fs.existsSync(canonical) && Date.now() < end) await delay(200);
-  check('live valid configured report confirms automatically', fs.existsSync(canonical) && fs.readFileSync(canonical, 'utf8').startsWith('Werdykt: PASS'));
+  check('live valid configured report never copies automatically', !fs.existsSync(canonical));
+  const confirmed = h.agentctl(['report', 'integration-12', '--from', path.join(candidateDir, 'integration-12-good.md')]);
+  check('live explicit report --from succeeds', confirmed.code === 0);
+  check('live valid configured report confirms explicitly', fs.existsSync(canonical) && fs.readFileSync(canonical, 'utf8').startsWith('Werdykt: PASS'));
   fs.writeFileSync(canonical, 'Werdykt: CANONICAL');
   fs.writeFileSync(path.join(candidateDir, 'integration-12-good.md'), 'Werdykt: FAIL');
   await delay(1300); check('live canonical always wins over modified source', fs.readFileSync(canonical, 'utf8') === 'Werdykt: CANONICAL');

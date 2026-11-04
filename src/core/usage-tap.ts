@@ -1,3 +1,4 @@
+import { stableSelfArgv } from './mcp-install.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { AgentName, GlobalConfig } from './config.ts';
@@ -116,6 +117,7 @@ const shellWord = (s: string): string => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(s) ? s
 
 /** The `statusLine` entry for a task's settings file, or undefined when the tap is off or must not replace the user's own status line. */
 export function buildTapStatusLine(task: string, self: string[], config: Pick<GlobalConfig, 'usage'>, worktree: string | undefined, env: Record<string, string>): Record<string, unknown> | undefined {
+  self = stableSelfArgv(self);
   if (!config.usage.claudeTap) return undefined;
   const user = userStatusLine(worktree, env.CLAUDE_CONFIG_DIR ?? agentHomes(config, { ...process.env, ...env }).claude);
   if (user.foreign) return undefined;

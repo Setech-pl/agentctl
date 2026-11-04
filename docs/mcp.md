@@ -226,7 +226,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 
 | Tool | Kind | Arguments |
 |---|---|---|
-| `status` | read | `all?`, `cohort?`, `format?`, `detail?` |
+| `status` | read | `all?`, `cohort?`, `format?`, `detail?`, `offset?`, `limit?` |
 | `events_since` | read | `cursor?`, `limit?`, `client?`, `since?`, `cohort?`, `peek?`, `format?`, `detail?` |
 | `gc_preview` | read | `older_than?`, `merged?`, `cohort?` |
 | `limits` | read | `format?`, `detail?` |
@@ -242,7 +242,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 | `cohort_list` | read |  |
 | `cohort_show` | read | `cohort`, `format?`, `detail?` |
 | `guide` | read | `project?`, `lang?` |
-| `capacity` | read | `format?`, `detail?` |
+| `capacity` | read | `format?`, `detail?`, `offset?`, `limit?` |
 | `usage` | read | `cohort?`, `since?` |
 | `log` | read | `cohort?`, `since?` |
 | `stats` | read | `cohort?`, `since?` |
@@ -261,7 +261,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 | `queue_show` | read | `task` |
 | `mcp_check` | read |  |
 | `spec_example` | read |  |
-| `doctor` | read |  |
+| `doctor` | read | `project?` |
 | `equivalents` | read |  |
 | `config_show` | read |  |
 | `manager_status` | read |  |
@@ -285,6 +285,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 | `manager_stop` | write | `confirm?` |
 | `notify_test` | write | `phone?`, `confirm?` |
 | `gc` | write | `cohort?`, `older_than?`, `branches?`, `confirm?` |
+| `response_page` | read | `response_id`, `response_offset` |
 
 - `guide`: `--project &lt;repo&gt;`, `--lang &lt;lang&gt;`, `--clip`, `--json`
 - `capacity`: `--json`, `--clip`
@@ -420,3 +421,21 @@ Begin work discussion with `events_since`; no separate status is required. Use p
 PL: Dostarczenie skrótu, pełne pobranie i ocena mark to trzy różne fakty. Skrót zostawia raport do przeczytania. ack jest jawnym potwierdzeniem pełnego odczytu inną drogą. Strony events_since nie przesuwają kursora za niedostarczone dane, a get_report podaje oba offsety i oznacza pobranie dopiero po ciągłym odczycie całości. queue_show przez MCP zawsze redaguje sekrety.
 
 PL: Równoległe sesje MCP tej samej nazwy otrzymują niezależnie wszystkie nowe zdarzenia. Nowa sesja zaczyna od najwyższej pozycji dostarczonej poprzednim sesjom tego klienta. Parametr `client` lub `mcp.client` wymusza współdzielony kursor, więc używaj go tylko świadomie.
+
+## Bounded responses (0.17.3)
+
+Every tool response, including previews, JSON and errors, fits `mcp.max_response_kb` (default 8 KiB, including serialized content overhead). A large response is a JSON envelope with `truncated: true`, `fragment`, `response_id`, `next_response_offset` and `has_more`. Call `response_page` with `response_id` and `response_offset: next_response_offset`; concatenate the fragments to recover the original text or JSON. Offsets here count JavaScript string units. These session-local snapshots retain the most recent 16 responses; expired snapshots require another read or preview, never blindly repeat a confirmed write.
+
+| Tool | Purpose |
+|---|---|
+| `response_page` | Retrieve the next cached fragment without rerunning a tool, write or event read. |
+
+Write previews show only affected tasks. Global queue pause/resume previews show counts and at most five queued tasks; `queue_list` provides the queue. The private confirmation fingerprint still guards the full observed scope. Closed tasks are absent from ordinary operation previews (archive explicitly targets closed state).
+
+`status` and `capacity` disk data defaults to total size, worktree count and the five largest worktrees. `format: json` does not expand paths. For inventory use `detail: true, offset: 0, limit: 20`; continue with `disk.pathsNextOffset` (each page can also use the response envelope).
+
+`get_report.next_byte_offset` always equals `end_byte`, including EOF. Supply it as absolute `byte_offset` for the next page of the same whole file or selected section; `has_more` tells whether another page exists. Report reads are sized before delivery and only contiguous whole-file delivery marks pulled. Oversized `pull_ready` full reports stay unread and require `get_report` pages.
+
+`guide(project)` reads `<project>/.agentctl.yaml`, appends its `guide` overlay, or explicitly warns about the missing overlay. MCP `doctor` accepts `project`; omitted means “bez projektu”, independent of server cwd. New/queue resolve the project layer from the first repo in each spec.
+
+Report discovery ignores all paths mentioned in prompts and pane text. Only fresh configured report alternatives with the task ID in the basename become candidates. A candidate is a report flag, never a task state; questions remain visible in status and events. Only explicit `report_from` / `agentctl report --from` copies to the canonical path. Status and doctor warn about stored `report_source` copies for human review; they do not alter old files.

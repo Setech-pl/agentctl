@@ -16,7 +16,7 @@ import type { AgentSettings } from './config.ts';
  * - cancelled:   `agentctl cancel` was run (the work was abandoned, it may have been in the middle of a turn, or never started): off every list except `status --all`; its report, if one was written, stays
  * - orphan:      a window of the agentctl session has no state file (lost or never created); see `agentctl adopt`
  */
-export type TaskState = 'overloaded' | 'report-candidate' | 'working' | 'background' | 'waiting' | 'needs-trust' | 'needs-input' | 'limited' | 'report-ready' | 'superseded' | 'dead' | 'orphan' | 'closed' | 'cancelled';
+export type TaskState = 'overloaded' | 'working' | 'background' | 'waiting' | 'needs-trust' | 'needs-input' | 'limited' | 'report-ready' | 'superseded' | 'dead' | 'orphan' | 'closed' | 'cancelled';
 
 export type ScreenState = 'overloaded' | 'needs-trust' | 'needs-input' | 'limited' | 'working' | 'background' | 'idle';
 

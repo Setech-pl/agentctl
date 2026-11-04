@@ -70,7 +70,6 @@ const NOTIFY_ON: Partial<Record<TaskState, (row: StatusRow) => string>> = {
   'needs-trust': (r) => `${r.task} czeka na zaufanie folderu (trust)`,
   'needs-input': (r) => (r.question ? `${r.task}: ${r.question}` : `${r.task} zadaje pytanie i czeka na odpowiedź`),
   overloaded: r => `${r.task}: dostawca przeciążony (overloaded)`,
-  'report-candidate': r => `${r.task}: report-candidate ${r.reportCandidate ?? 'n/d'}`,
   limited: (r) => limitText(r),
   dead: (r) => `${r.task}: okno zniknęło bez raportu`,
   orphan: (r) => `${r.task}: okno bez pliku stanu (orphan) – agentctl adopt ${r.task} --report <ścieżka>`,
@@ -167,11 +166,11 @@ export async function restoreWindowNames(ctx: Context, memory: WatchMemory): Pro
   return restored;
 }
 
-/** Look for the report of every waiting task (its window and the `report:` list). True when a report was copied. */
+/** Discover configured candidates for open tasks without overriding their screen/event state. */
 async function syncWaitingReports(ctx: Context, rows: StatusRow[]): Promise<boolean> {
   let copied = false;
   for (const row of rows) {
-    if (!['waiting', 'report-candidate', 'dead'].includes(row.state) || row.closed || row.cancelled || row.archived) continue;
+    if (row.report === 'yes' || row.closed || row.cancelled || row.archived) continue;
     const record = readTaskRecord(ctx.config, row.windowName);
     if (!record) continue;
     const candidateBefore = record.reportCandidate;

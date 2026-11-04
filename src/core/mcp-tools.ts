@@ -167,7 +167,7 @@ export function reportSummary(text: string): string {
 }
 
 function compactStatus(r: StatusRow): string {
-  return `${r.task} ${r.agent}/${r.model}/${r.effort} ${r.state} ${r.duration} cohort=${r.cohort ?? 'n/d'} report=${r.report === 'yes' ? 'tak' : r.reportCandidate ? `kandydat:${r.reportCandidate}` : 'brak'}${r.collide.length ? ` ⚠${r.collide.length}` : ''}${r.question ? ` ? ${r.question}` : ''}`;
+  return `${r.task} ${r.agent}/${r.model}/${r.effort} ${r.state} ${r.duration} cohort=${r.cohort ?? 'n/d'} report=${r.report === 'yes' ? 'tak' : r.reportCandidate ? `kandydat:${r.reportCandidate}` : 'brak'}${r.collide.length ? ` ⚠${r.collide.length}` : ''}${r.question ? ` ? ${r.question}` : ''}${r.reportSource && path.normalize(r.reportSource) !== path.normalize(r.reportPath) ? `; raport pochodzi z kopii ${r.reportSource} – sprawdź` : ''}`;
 }
 
 async function pullSummaries(ctx: Context, rows: StatusRow[], ack = false): Promise<ToolResult> {
@@ -189,7 +189,7 @@ async function pullSummaries(ctx: Context, rows: StatusRow[], ack = false): Prom
     const decisions = factSection(/decyzj|decision/i);
     const part = `=== ${row.task} ===\nattempt: ${row.attemptId ?? row.attempt ?? 'n/d (legacy)'}\npath: ${row.reportPath}\nbytes: ${r.bytes}\nverdict: ${first}\nblockers: ${blockers}\ndecisions: ${decisions}\ntruncated: true; details: get_report\n${first}\n${refs}\n${cut(reportSummary(reportText), 3000)}\n[excerpt; get_report section/offset/limit reads more]`;
     parts.push(part); taken.push(row);
-    if (Buffer.byteLength(response()) > 15500) { parts.pop(); taken.pop(); break; }
+    if (responseWireBytes(ok(response())) > ctx.config.mcp.maxResponseKb * 1024 - 512) { if (taken.length > 1) { parts.pop(); taken.pop(); } break; }
   }
   for (const row of taken) await setHeaderField(ctx.runner, taskFile(ctx.config, row.windowName), 'summary_delivered', new Date(ctx.runner.now()).toISOString());
   if (ack) await markPulled(ctx, taken);
@@ -229,6 +229,7 @@ function statusRowForChat(r: StatusRow): Record<string, unknown> {
     progress: r.progress?.text ?? null,
     report: r.report,
     reportCandidate: r.reportCandidate ?? null,
+    reportSource: r.reportSource ?? null,
     reportPath: r.reportPath,
     reportPulled: r.pulled !== null,
     lastLine: r.lastLine,
@@ -258,7 +259,7 @@ export function statusLine(shown: StatusRow[], hiddenCount: number): string {
   return hiddenCount > 0 ? `${base} (${hiddenCount} hidden or closed not shown; all: true lists them)` : base;
 }
 
-async function runStatus(deps: McpDeps, args: { all?: boolean | undefined; cohort?: string | undefined }): Promise<ToolResult> {
+async function runStatus(deps: McpDeps, args: { all?: boolean | undefined; cohort?: string | undefined; detail?: boolean; offset?: number; limit?: number }): Promise<ToolResult> {
   const ctx = deps.context(() => {});
   const all = Boolean(args.all);
   const cohort = args.cohort === undefined ? undefined : findCohort(ctx.config, args.cohort).name;
@@ -278,7 +279,7 @@ async function runStatus(deps: McpDeps, args: { all?: boolean | undefined; cohor
   if (colliding.length > 0) extra.push(`⚠${colliding.length} tasks overlap; overlap has details.`);
   extra.push(awayLine(ctx));
   extra.push(diskLine(await collectDisk(ctx)));
-  return { text: [statusLine(shown, rows.length - shown.length), ...extra, ...shown.map(compactStatus)].join('\n'), data: { disk: await collectDisk(ctx), tasks: shown.map(statusRowForChat) } };
+  return { text: [statusLine(shown, rows.length - shown.length), ...extra, ...shown.map(compactStatus)].join('\n'), data: { disk: await collectDisk(ctx, undefined, args), tasks: shown.map(statusRowForChat) } };
 }
 
 /** "Away: on since …; the phone gets the notifications" - what the chat should know about the phone. */
@@ -527,7 +528,7 @@ async function runListReports(deps: McpDeps, args: { all?: boolean | undefined }
  * report that is a symbolic link (an agent could have made one) is refused instead of followed.
  */
 export interface ReportPage { text: string; bytes: number; truncated: boolean; total_lines: number; offset: number; byte_offset: number; next_offset: number | null; next_byte_offset: number; has_more: boolean; returned_bytes: number; start_byte: number; end_byte: number; signature: string }
-export function readReportFile(record: Pick<TaskRecord, 'task' | 'report'>, opts: { section?: string; offset?: number; limit?: number; byte_offset?: number } = {}): ReportPage {
+export function readReportFile(record: Pick<TaskRecord, 'task' | 'report'>, opts: { section?: string; offset?: number; limit?: number; byte_offset?: number; maxBytes?: number } = {}): ReportPage {
   if (!record.report) throw new AgentctlError(`${record.task} has no report path`);
   let st: fs.Stats;
   try { st = fs.lstatSync(record.report); } catch { throw new AgentctlError(`${record.task} has no report yet`, 'Call peek or wait for it to finish.'); }
@@ -538,11 +539,12 @@ export function readReportFile(record: Pick<TaskRecord, 'task' | 'report'>, opts
   const offset = opts.offset ?? 0, byteOffset = opts.byte_offset ?? 0;
   if (offset > lines.length) throw new AgentctlError('report offset is beyond end');
   const original = Buffer.from(section);
-  const startByte = Math.min(original.length, Buffer.byteLength(lines.slice(0, offset).join('\n')) + (offset > 0 ? 1 : 0) + byteOffset);
-  if (byteOffset > Buffer.byteLength(lines[offset] ?? '')) throw new AgentctlError('report byte_offset is beyond line');
-  const desiredEnd = Math.min(lines.length, offset + (opts.limit ?? lines.length));
+  const startByte = Math.min(original.length, opts.byte_offset !== undefined ? byteOffset : Buffer.byteLength(lines.slice(0, offset).join('\n')) + (offset > 0 ? 1 : 0));
+  if (byteOffset > original.length) throw new AgentctlError('report byte_offset is beyond end');
+  const startLine = opts.byte_offset !== undefined ? (original.subarray(0, startByte).toString('utf8').match(/\n/g) ?? []).length : offset;
+  const desiredEnd = Math.min(lines.length, startLine + (opts.limit ?? lines.length));
   const targetEnd = Math.min(original.length, Buffer.byteLength(lines.slice(0, desiredEnd).join('\n')) + (desiredEnd < lines.length ? 1 : 0));
-  let end = Math.min(targetEnd, startByte + MAX_TEXT_BYTES - 4096);
+  let end = Math.min(targetEnd, startByte + (opts.maxBytes ?? MAX_TEXT_BYTES - 4096));
   if (end < targetEnd) {
     const boundary = original.lastIndexOf(10, end - 1);
     if (boundary >= startByte) end = boundary + 1;
@@ -551,15 +553,22 @@ export function readReportFile(record: Pick<TaskRecord, 'task' | 'report'>, opts
   const text = original.subarray(startByte, end).toString('utf8');
   const before = original.subarray(0, end).toString('utf8');
   const nextOffset = (before.match(/\n/g) ?? []).length;
-  const lastBreak = original.lastIndexOf(10, end - 1);
   const hasMore = end < original.length;
-  return { text, bytes: Buffer.byteLength(full), truncated: hasMore, total_lines: lines.length, offset, byte_offset: byteOffset, next_offset: hasMore ? nextOffset : null, next_byte_offset: hasMore ? end - lastBreak - 1 : 0, has_more: hasMore, returned_bytes: end - startByte, start_byte: startByte, end_byte: end, signature: createHash('sha256').update(full).digest('hex') };
+  return { text, bytes: Buffer.byteLength(full), truncated: hasMore, total_lines: lines.length, offset, byte_offset: byteOffset, next_offset: hasMore ? nextOffset : null, next_byte_offset: end, has_more: hasMore, returned_bytes: end - startByte, start_byte: startByte, end_byte: end, signature: createHash('sha256').update(full).digest('hex') };
 }
 
 async function runGetReport(deps: McpDeps, args: { task: string; section?: string; offset?: number; limit?: number; byte_offset?: number }): Promise<ToolResult> {
   const ctx = deps.context(() => {});
   const record = findRecord(ctx, args.task);
-  const r = readReportFile(record, args);
+  const render = (r: ReportPage, pulled: boolean): ToolResult => {
+    const { text, signature: _signature, ...page } = r;
+    return ok(`=== ${record.task} (${record.agent} ${record.model}/${record.effort}) ===\n${text}\n--- page ---\n${JSON.stringify({ ...page, pulled })}`);
+  };
+  let maxBytes = Math.max(4, Math.floor(ctx.config.mcp.maxResponseKb * 1024) - 800);
+  let r = readReportFile(record, { ...args, maxBytes });
+  while (responseWireBytes(render(r, false)) > ctx.config.mcp.maxResponseKb * 1024 && maxBytes > 4) {
+    maxBytes = Math.max(4, Math.floor(maxBytes / 2)); r = readReportFile(record, { ...args, maxBytes });
+  }
   let pulled = false;
   if (!args.section) {
     const file = path.join(path.dirname(ctx.config.path), 'report-read-progress.json');
@@ -577,8 +586,7 @@ async function runGetReport(deps: McpDeps, args: { task: string; section?: strin
       await ctx.runner.writeFile(file, JSON.stringify(Object.fromEntries(entries)));
     });
   }
-  const { text, signature: _signature, ...page } = r;
-  return ok(`=== ${record.task} (${record.agent} ${record.model}/${record.effort}) ===\n${text}\n--- page ---\n${JSON.stringify({ ...page, pulled })}`);
+  return render(r, pulled);
 }
 
 async function runPullReady(deps: McpDeps, args: { cohort?: string | undefined; all?: boolean | undefined; mode?: string; offset?: number; limit?: number; ack?: boolean; cursor?: string } = {}): Promise<ToolResult> {
@@ -597,26 +605,23 @@ async function runPullReady(deps: McpDeps, args: { cohort?: string | undefined; 
   if (chosen.some(row => { const current = rows.find(r => r.task === row.task); return !current || current.report !== 'yes' || current.attemptId !== row.attemptId; })) throw new AgentctlError('report selection changed; restart at offset 0 before acknowledging');
   if (args.mode !== 'full') { const result = await pullSummaries(ctx, chosen, args.ack); return ok(`${result.text}\nnext_cursor: ${selection.id}:${offset + (result.delivered ?? 0)}; has_more: ${offset + (result.delivered ?? 0) < selection.rows.length}`); }
   if (chosen.length === 0) return ok(noReadyMessage(rows));
-  // As many reports as fit under the size limit; the others stay un-pulled for the next call.
+  // Size the complete serialized delivery before marking any report as read.
   const taken: StatusRow[] = [];
-  let total = 0;
+  const render = (selected: StatusRow[]): ToolResult => {
+    const left = chosen.filter(r => !selected.includes(r));
+    const { text, pulled } = joinReports(selected);
+    const advanced = selected.length || 1;
+    const head = `${pulled.length} new report${pulled.length === 1 ? '' : 's'}, now marked as pulled: ${pulled.map(p => p.task).join(', ')}`;
+    const rest = left.length ? `\n${left.length} more did not fit under ${ctx.config.mcp.maxResponseKb} KB and stay new: ${left.slice(0, 10).map(r => r.task).join(', ')}${left.length > 10 ? ', …' : ''}. Continue with next_cursor; an oversized first report requires get_report pages and remains unread.` : '';
+    return ok(`${head}${rest}\n\n${text}\nnext_cursor: ${selection!.id}:${offset + advanced}; has_more: ${offset + advanced < selection!.rows.length}`);
+  };
   for (const row of chosen) {
-    const size = fs.statSync(row.reportPath).size;
-    if (total + size + 2048 > MAX_TEXT_BYTES) break;
+    if (fs.statSync(row.reportPath).size > MAX_TEXT_BYTES || responseWireBytes(render([...taken, row])) > ctx.config.mcp.maxResponseKb * 1024) break;
     taken.push(row);
-    total += size;
   }
-  const advanced = taken.length || 1;
-  const left = chosen.filter((r) => !taken.includes(r));
-  const { text, pulled } = joinReports(taken);
-  let body = text;
-  if (Buffer.byteLength(body) > MAX_TEXT_BYTES) {
-    body = `${Buffer.from(body).subarray(0, MAX_TEXT_BYTES).toString('utf8')}\n\n[cut at ${MAX_TEXT_BYTES / 1024} KB; get_report ${taken[0]?.task ?? ''} reads the file in full]`;
-  }
+  const result = render(taken);
   await markPulled(ctx, taken);
-  const head = `${pulled.length} new report${pulled.length === 1 ? '' : 's'}, now marked as pulled: ${pulled.map((p) => p.task).join(', ')}`;
-  const rest = left.length > 0 ? `\n${left.length} more did not fit under ${MAX_TEXT_BYTES / 1024} KB and stay new: ${left.map((r) => r.task).join(', ')}. Continue with next_cursor; an oversized first report requires get_report pages and remains unread.` : '';
-  return ok(`${head}${rest}\n\n${body}\nnext_cursor: ${selection.id}:${offset + advanced}; has_more: ${offset + advanced < selection.rows.length}`);
+  return result;
 }
 
 async function runTaskSpec(deps: McpDeps, args: { task: string }): Promise<ToolResult> {
@@ -972,8 +977,8 @@ export const MCP_TOOLS: McpToolDef[] = [
     title: 'Read one report',
     kind: 'read',
     description:
-      `The report of one task (the file its spec names), up to ${MAX_TEXT_BYTES / 1024} KB. Use it when the user asks for the result of a particular task, also an older or closed one. ` +
-      'section selects a Markdown heading; offset and limit paginate lines (zero-based offset), capped at 200 KiB per response. Contiguous whole-file delivery marks pulled at EOF; sections do not. Page metadata includes total_lines, returned_bytes, has_more, next_offset and next_byte_offset. Reads only that report file, never another path.',
+      `The report of one task (the file its spec names), paginated within mcp.max_response_kb. Use it when the user asks for the result of a particular task, also an older or closed one. ` +
+      'section selects a Markdown heading; offset and limit paginate lines (zero-based offset), capped by mcp.max_response_kb. byte_offset is absolute within the selected whole report or section; next_byte_offset equals end_byte. Contiguous whole-file delivery marks pulled at EOF; sections do not. Page metadata includes total_lines, returned_bytes, has_more, next_offset and next_byte_offset. Reads only that report file, never another path.',
     input: { task: taskArg, section: z.string().optional(), byte_offset: z.number().int().min(0).optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(10000).optional() },
     annotations: { ...readOnly('Read one report'), readOnlyHint: false },
     run: (deps, args) => guarded(() => runGetReport(deps, args as { task: string })),
@@ -1040,7 +1045,7 @@ export const MCP_TOOLS: McpToolDef[] = [
     name: 'capacity', title: 'Current capacity', kind: 'read',
     description: 'Fresh read of provider windows, age, stale, consumption pace, reset, slots, queue, models/efforts, seven-day stats and explicitly labeled token estimates. null = n/d. Includes usage outside agentctl. Facts only; choose the order yourself. No mcp.allow entry needed.',
     input: {}, annotations: readOnly('Current capacity'),
-    run: (deps) => guarded(async () => ({ text: JSON.stringify(await collectCapacity(deps.context(() => {})), null, 2) })),
+    run: (deps, args) => guarded(async () => { const ctx = deps.context(() => {}); const report = await collectCapacity(ctx); return { text: JSON.stringify({ ...report, disk: await collectDisk(ctx, undefined, args as { detail?: boolean; offset?: number; limit?: number }) }, null, 2) }; }),
   }),
   def({
     name: 'usage',
@@ -1237,7 +1242,7 @@ MCP_TOOLS.push(
   extraRead('queue_show', 'queue show <TASK>', 'Read full queued spec, error and attempt history', { task: taskArg }, async (ctx, a) => redactQueue(findEntry(ctx.config, a.task as string), ctx.config)),
   extraRead('mcp_check', 'mcp check', 'Inspect stale MCP server processes without stopping them', {}, async (ctx) => ({ stale: staleProcesses(await findMcpProcesses(ctx.runner), stableScript()) })),
   extraRead('spec_example', 'spec example', 'Read an example spec before writing a new order', {}, async () => EXAMPLE_SPEC),
-  extraRead('doctor', 'doctor', 'Diagnose the installation, permissions and disk', {}, async (ctx) => runDoctor(ctx.runner, () => ctx.config)),
+  extraRead('doctor', 'doctor', 'Diagnose the installation, permissions and disk', { project: optionalText }, async (ctx, a) => runDoctor(ctx.runner, () => ctx.config, a.project as string ?? null)),
   extraRead('equivalents', 'capacity', 'Read the Claude/Codex equivalents table', {}, async (ctx) => ctx.config.equivalents),
   extraRead('config_show', 'doctor', 'Read effective configuration with secrets masked', {}, async (ctx) => redactConfig(ctx.config)),
   extraRead('manager_status', 'manager --url', 'Inspect the manager session', {}, async (ctx) => managerView(ctx)),
@@ -1306,6 +1311,18 @@ async function confirmationScope(ctx: Context, name: string, args: Record<string
   const windows = await ctx.tmux.windows();
   return { tasks, queue, windows: windows.map(({ id, plain }) => ({ id, plain })), config: redactConfig(ctx.config) };
 }
+/** Display only the operation's targets; the private fingerprint still guards the full observed scope. */
+async function previewScope(ctx: Context, name: string, args: Record<string, unknown>, scope: unknown): Promise<unknown> {
+  if (name === 'archive') return scope;
+  const records = listTaskRecords(ctx.config).filter(r => !r.closed && !r.cancelled);
+  const queue = readQueue(ctx.config);
+  const selected = new Set<string>([...(Array.isArray(args.tasks) ? args.tasks as string[] : []), ...(typeof args.task === 'string' ? [args.task] : [])]);
+  const known = [...records.map(r => r.task), ...queue.map(e => e.task)];
+  const targets = new Set([...selected].flatMap(id => { const exact = known.filter(task => task.toLowerCase() === id.toLowerCase()); return exact.length ? exact : known.filter(task => task.toLowerCase().startsWith(id.toLowerCase())); }));
+  const fits = (task: string) => targets.has(task);
+  if (name === 'queue_pause' || name === 'queue_resume') return { queued: queue.length, tasks: queue.slice(0, 5).map(e => ({ task: e.task, status: e.status })), omitted: Math.max(0, queue.length - 5), more: 'queue_list' };
+  return { tasks: records.filter(r => fits(r.task)).map(r => ({ task: r.task, window: r.window, report: r.report, repos: r.repos })), queue: queue.filter(e => fits(e.task)).map(e => ({ task: e.task, status: e.status })), ...(name === 'manager_stop' || name === 'manager_start' ? { manager: await managerView(ctx) } : {}) };
+}
 for (const tool of MCP_TOOLS) {
   const cli = ({ queue_list: 'queue list', queue_rm: 'queue rm', queue_retry: 'queue retry', queue_up: 'queue up', queue_pause: 'queue pause', queue_resume: 'queue resume', cohort_list: 'cohort list', cohort_show: 'cohort show', list_reports: 'status', get_report: 'pull <TASK>', pull_ready: 'pull --ready', task_spec: 'peek <TASK>', gc_preview: 'gc', events_since: 'events', set_limits: 'limits set', reserve: 'limits reserve' } as Record<string, string>)[tool.name] ?? tool.name.replaceAll('_', ' ');
   if (!tool.description.includes('CLI:')) tool.description += ` Use when the user needs this operation. CLI: agentctl ${cli}.`;
@@ -1332,7 +1349,7 @@ for (const tool of MCP_TOOLS) {
       let result: ToolResult;
       if (['new', 'queue', 'cancel', 'resume', 'move'].includes(tool.name)) result = await original(deps, args);
       else result = await writeTool(deps, tool.name as McpWriteTool, {}, async () => {
-        const detail = tool.name === 'gc' ? renderGc(await planGc(ctx, { cohort: input.cohort as string | undefined, olderThan: input.older_than as string | undefined, branches: Boolean(input.branches) })).join('\n') : JSON.stringify({ operation: tool.name, arguments: input, scope: tool.name === 'archive' ? scope : { tasks: listTaskRecords(ctx.config).map((r) => ({ task: r.task, window: r.window, closed: r.closed, report: r.report, repos: r.repos })), queue: readQueue(ctx.config).map(({ spec: _spec, ...entry }) => entry), windows: await ctx.tmux.windows() } }, null, 2);
+        const detail = tool.name === 'gc' ? renderGc(await planGc(ctx, { cohort: input.cohort as string | undefined, olderThan: input.older_than as string | undefined, branches: Boolean(input.branches) })).join('\n') : JSON.stringify({ operation: tool.name, arguments: input, scope: await previewScope(ctx, tool.name, input, scope) }, null, 2);
         return { text: `${detail}\nNot executed. Review, then call with identical arguments and confirm: true.`, executed: false, announce: '' };
       });
       if (!result.isError) { if (pending.size >= 100) pending.delete(pending.keys().next().value!); pending.set(key, { fingerprint, at: ctx.runner.now() }); }
@@ -1358,7 +1375,7 @@ for (const tool of MCP_TOOLS) {
 }
 
 for (const tool of MCP_TOOLS.filter(t => ['status', 'events_since', 'queue_list', 'cohort_show', 'limits', 'capacity'].includes(t.name))) {
-  tool.input = { ...tool.input, format: z.enum(['text', 'json']).optional(), detail: z.boolean().optional() };
+  tool.input = { ...tool.input, format: z.enum(['text', 'json']).optional(), detail: z.boolean().optional(), ...(['status', 'capacity'].includes(tool.name) ? { offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional() } : {}) };
   tool.description += ' Default: concise text only. format: "json" or detail: true returns full data.';
   const run = tool.run;
   tool.run = async (deps, args) => {
@@ -1385,6 +1402,45 @@ function compactFacts(value: unknown, prefix = ''): string {
   if (Array.isArray(value)) return value.map((v, i) => compactFacts(v, `${prefix}[${i}]`)).join('\n');
   if (typeof value === 'object') return Object.entries(value).map(([k, v]) => compactFacts(v, prefix ? `${prefix}.${k}` : k)).join('\n');
   return `${prefix}=${value}`;
+}
+
+/** Session-local snapshots: continuing a response never repeats a write or consumes another event page. */
+const responses = new WeakMap<McpDeps, Map<string, { tool: string; text: string; isError?: boolean }>>();
+MCP_TOOLS.push(def({ name: 'response_page', title: 'Continue a bounded response', kind: 'read', description: 'Retrieve a cached response fragment without repeating the original operation. CLI: no equivalent (MCP response transport).', input: { response_id: z.string().max(100), response_offset: z.number().int().min(0) }, annotations: readOnly('Continue a bounded response'), run: async () => fail('response_id is required') }));
+export function responseWireBytes(result: ToolResult): number {
+  return Buffer.byteLength(JSON.stringify({ content: [{ type: 'text', text: result.text }], ...(result.isError ? { isError: true } : {}) }));
+}
+for (const tool of MCP_TOOLS) {
+  const run = tool.run;
+  tool.description += ' Every response is bounded by mcp.max_response_kb (default 8 KiB). A truncated JSON envelope gives response_id and next_response_offset; call response_page with only those continuation fields to retrieve the next fragment without executing again. Concatenate fragment values to recover the original text/JSON.';
+  tool.run = (deps, args) => guarded(async () => {
+    const budget = Math.floor(deps.context(() => {}).config.mcp.maxResponseKb * 1024);
+    const { response_id, response_offset, ...input } = args;
+    let cache = responses.get(deps);
+    if (!cache) { cache = new Map(); responses.set(deps, cache); }
+    let id = response_id as string | undefined;
+    let saved: { tool: string; text: string; isError?: boolean };
+    if (id) {
+      const found = cache.get(id);
+      if (!found || (tool.name !== 'response_page' && found.tool !== tool.name)) return fail('Response expired or belongs to another tool. Repeat the original read/preview; do not repeat a confirmed write.');
+      saved = found;
+    } else {
+      if (response_offset !== undefined) return fail('response_offset requires response_id');
+      const result = await guarded(() => run(deps, input));
+      if (responseWireBytes(result) <= budget && Buffer.byteLength(JSON.stringify(result)) <= budget) return result;
+      saved = { tool: tool.name, text: result.text, ...(result.isError ? { isError: true } : {}) };
+      id = crypto.randomUUID();
+      while (cache.size >= 16 || [...cache.values()].reduce((n, r) => n + Buffer.byteLength(r.text), 0) > 8 * 1024 * 1024) cache.delete(cache.keys().next().value!);
+      cache.set(id, saved);
+    }
+    const offset = Number(response_offset ?? 0);
+    if (offset > saved.text.length) return fail('response_offset is beyond end');
+    const page = (end: number): ToolResult => ({ text: JSON.stringify({ truncated: true, response_id: id, response_offset: offset, next_response_offset: end, has_more: end < saved.text.length, total_bytes: Buffer.byteLength(saved.text), fragment: saved.text.slice(offset, end), continuation: 'Call response_page with response_id and response_offset=next_response_offset only; concatenate fragments. No operation is repeated.' }), ...(saved.isError ? { isError: true } : {}) });
+    let lo = offset, hi = saved.text.length;
+    while (lo < hi) { const mid = Math.ceil((lo + hi) / 2); const result = page(mid); if (responseWireBytes(result) <= budget && Buffer.byteLength(JSON.stringify(result)) <= budget) lo = mid; else hi = mid - 1; }
+    if (lo > offset && /[\uD800-\uDBFF]/.test(saved.text[lo - 1]!)) lo--;
+    return page(lo);
+  });
 }
 
 /** Names of the tools, read first. */

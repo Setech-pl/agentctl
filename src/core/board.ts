@@ -810,7 +810,6 @@ const STATE_COLOR: Record<TaskState, string> = {
   'needs-input': 'magenta',
   'needs-trust': 'magenta',
   overloaded: 'yellow',
-  'report-candidate': 'yellow',
   limited: 'red',
   'report-ready': 'green',
   superseded: 'gray',

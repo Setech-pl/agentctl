@@ -1,7 +1,8 @@
+import path from 'node:path';
 import { inspectReport } from './report-state.ts';
 import { sessionQuestion } from './codex-question.ts';
 import { collapsedQuestion } from './events.ts';
-import { shortPath } from './report-detect.ts';
+import { findCandidates, shortPath } from './report-detect.ts';
 import fs from 'node:fs';
 import type { Context } from './context.ts';
 import { formatModelEffort } from './equivalents.ts';
@@ -155,6 +156,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     const stored = readStoredEvent(config, record);
     const reportState = inspectReport(config, { ...record, ...(stored?.outcome === 'turn-complete' ? { turnEndedAt: stored.at } : {}) }, runner.now(), !record.attemptId && (!alive || (config.reportSettleS === 0 && classifyScreen(screenText, settings) === 'idle')));
     reportReady = reportState.ready;
+    if (record.reportCandidate && record.reportCandidate !== record.report && !findCandidates(ctx, record, '').some(c => c.file === record.reportCandidate)) delete record.reportCandidate;
     if (reportState.exists && !reportReady && !record.reportCandidate) record.reportCandidate = record.report;
     if (reportReady && !alive && reportState.mtime !== undefined && !Number.isNaN(startedMs)) duration = formatDuration(reportState.mtime - startedMs);
     // mtimeMs has a fraction, the stored time only whole milliseconds: a pull in the same millisecond as the report still counts.
@@ -175,7 +177,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       requested: `${record.requested.agent} ${formatModelEffort(record.requested)}`,
       effective: `${record.agent} ${record.model}/${record.effort}`,
       switchedBy: record.switchedBy ?? null,
-      state: !reportReady && record.reportCandidate && !['working', 'background', 'limited', 'overloaded', 'needs-input', 'needs-trust'].includes(state) ? 'report-candidate' : state,
+      state,
       ...(record.reportCandidate && !reportReady ? { reportCandidate: record.reportCandidate } : {}),
       ...screenMetadata(screenText),
       window: alive ? 'alive' : 'gone',
@@ -192,7 +194,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       lastLine: lastContentLine(screenText, settings.footerPatterns),
       progress: opts.progress === false || record.repos.length === 0 ? null : await taskProgress(runner, record.repos),
       collide: [],
-      hint: stateHint(record.task, state, record.pin === true, record.supersededBy),
+      hint: [stateHint(record.task, state, record.pin === true, record.supersededBy), record.reportSource && path.normalize(record.reportSource) !== path.normalize(record.report) ? `raport pochodzi z kopii ${record.reportSource} – sprawdź` : null].filter(Boolean).join('; ') || null,
       question: state === 'needs-input' ? ((collapsedQuestion(screenText) ? sessionQuestion(config, record) : undefined) ?? extractQuestion(screenText) ?? (stored?.outcome === 'needs-input' && stored.text !== '' ? stored.text : null)) : null,
       pin: record.pin === true,
       finished: !alive || state === 'superseded',

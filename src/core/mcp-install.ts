@@ -52,6 +52,12 @@ export function stableNodePath(command: string, pathEnv = process.env.PATH ?? ''
   return command;
 }
 
+/** Normalize only the executable word, preserving env assignments and forwarded commands. */
+export function stableSelfArgv(self: string[]): string[] {
+  const index = self[0] === '/usr/bin/env' ? self.findIndex((word, i) => i > 0 && !word.includes('=')) : 0;
+  return self.map((word, i) => i === index ? stableNodePath(word) : word);
+}
+
 /** Where the stable copy lives (the same variable the update script reads). */
 export function stableScript(env: NodeJS.ProcessEnv = process.env, home: string = os.homedir()): string {
   const installed = installation(undefined, env);

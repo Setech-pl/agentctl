@@ -1,6 +1,5 @@
 import { inspectReport } from './report-state.ts';
 import fs from 'node:fs';
-import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import type { Context } from './context.ts';
 import { recordJournal } from './journal.ts';
@@ -8,15 +7,8 @@ import { readTaskRecord, setHeaderFields, taskFile } from './taskstore.ts';
 import type { TaskRecord } from './taskstore.ts';
 import { AgentctlError, expandHome, windowName } from './util.ts';
 
-/*
- * Agents write their report where they like (docs/reports/<…>.md in the worktree, ~/Projects/cache/<other name>/…) instead of the
- * `report:` path of the spec. This finds it: in the last message of the agent, in the last lines of its window and in the `report:`
- * list of the spec/project (more paths and globs). A report found elsewhere is copied to the canonical path (the first `report:`
- * entry), the original stays and is remembered as `report_source`.
- */
-
-/** Lines of the window (joined where tmux wrapped them) that are searched for paths. */
-export const PANE_LINES = 400;
+/* Only fresh configured report alternatives bearing the task ID are candidates.
+ * Copying to the canonical path always requires an explicit --from / report_from. */
 
 const QUOTED_MD = /(["'`])((?:~\/|\/|\.{1,2}\/)?[^"'`\n]*?\.md)\1/g;
 const BARE_MD = /(?<![\w/.~@%+=,-])((?:~\/|\/|\.{1,2}\/)?[\w.@%+=,-]+(?:\/[\w.@%+=,-]+)*\.md)(?![\w/-])/g;
@@ -111,18 +103,14 @@ function absolutes(raw: string, worktrees: string[]): string[] {
 export interface ReportCandidate {
   file: string;
   mtimeMs: number;
-  /** Why it was chosen: the `report:` list, a name with the task ID or "report"/"raport", or just the latest one mentioned. */
-  why: 'configured' | 'named' | 'mentioned';
+  /** The configured report alternatives are the only discovery source. */
+  why: 'configured';
 }
 
 const startedOf = (record: Pick<TaskRecord, 'started' | 'attemptStarted'>): number => Date.parse(record.attemptStarted ?? record.started);
 
-/**
- * The files that may be the report of the task: existing files, not the canonical file itself; freshness is required only for confirmation.
- * Best first: the `report:` list (newest), then paths with the task ID or "report"/"raport" in them (latest mention first),
- * then the others (latest mention first).
- */
-export function findCandidates(ctx: Context, record: TaskRecord, text: string): ReportCandidate[] {
+/** Fresh regular files from report alternatives, newest first; prompt text is never evidence. */
+export function findCandidates(ctx: Context, record: TaskRecord, _text: string): ReportCandidate[] {
   const worktrees = worktreesOf(record);
   const canonical = path.normalize(record.report);
   const stateDir = path.normalize(ctx.config.stateDir) + path.sep;
@@ -136,6 +124,7 @@ export function findCandidates(ctx: Context, record: TaskRecord, text: string): 
     } catch {
       return;
     }
+    if (mtimeMs <= startedOf(record) || !path.basename(file).toLowerCase().includes(record.task.toLowerCase())) return;
     seen.add(file);
     out.push({ file, mtimeMs, why });
   };
@@ -145,14 +134,6 @@ export function findCandidates(ctx: Context, record: TaskRecord, text: string): 
   const fresh = (files: string[]): string[] => files.filter((f) => f !== canonical && isFile(f)).sort((a, b) => mtime(b) - mtime(a));
   for (const f of fresh(configured)) add(f, 'configured');
 
-  const id = record.task.toLowerCase();
-  const mentioned = extractMdPaths(text).flatMap((raw) => absolutes(raw, worktrees)).reverse(); // latest first
-  const named = (f: string): boolean => {
-    const base = f.toLowerCase();
-    return base.includes(id) || /report|raport/.test(base);
-  };
-  for (const f of mentioned) if (named(f)) add(f, 'named');
-  for (const f of mentioned) add(f, 'mentioned');
   return out;
 }
 
@@ -162,27 +143,6 @@ function mtime(file: string): number {
   } catch {
     return 0;
   }
-}
-
-/** All evidence is required for automatic confirmation. Explicit --from is the human override. */
-export function confirmedCandidate(ctx: Context, record: TaskRecord, candidate: ReportCandidate): boolean {
-  const name = path.basename(candidate.file);
-  if (/^(?:CLAUDE|AGENTS|CHANGELOG)\.md$|^README.*\.md$/i.test(name)) return false;
-  if (!name.toLowerCase().includes(record.task.toLowerCase())) return false;
-  if (candidate.mtimeMs <= startedOf(record) || candidate.why !== 'configured') return false;
-  const first = fs.readFileSync(candidate.file, 'utf8').split('\n').find(l => l.trim()) ?? '';
-  if (!new RegExp(ctx.config.notify.verdictPattern ?? '^Werdykt:', 'i').test(first)) return false;
-  // HEAD at task start, rather than today's index: newly committed reports remain eligible.
-  for (const root of worktreesOf(record)) {
-    const rel = path.relative(root, candidate.file);
-    if (rel.startsWith('..') || path.isAbsolute(rel)) continue;
-    const revision = spawnSync('git', ['-C', root, 'rev-list', '-1', `--before=${record.started}`, 'HEAD'], { encoding: 'utf8' });
-    if (revision.status !== 0) return false;
-    if (!revision.stdout.trim()) continue;
-    const tracked = spawnSync('git', ['-C', root, 'cat-file', '-e', `${revision.stdout.trim()}:${rel}`]);
-    if (tracked.status === 0) return false;
-  }
-  return true;
 }
 
 export interface SyncResult {
@@ -218,17 +178,7 @@ const canonicalIsOurCopy = (record: TaskRecord): boolean => {
   return !Number.isNaN(copied) && mtime(record.report) <= copied + 1000;
 };
 
-/** Windows text for the search: the last lines of the pane, joined where tmux wrapped. */
-async function paneText(ctx: Context, record: TaskRecord): Promise<string> {
-  const screen = await ctx.tmux.capture(record.window, PANE_LINES, undefined, record.windowId, true).catch(() => undefined);
-  return screen && screen.code === 0 ? screen.stdout : '';
-}
-
-/**
- * Find where the agent wrote the report and make the canonical file a copy of it. Never overwrites a canonical file that the agent (or
- * the user) wrote. A fresh canonical file always wins, including a prior detected copy. The task record keeps `report_source`; the journal
- * says "raport wykryty w <path>". Returns what happened; throws nothing for a missing file or a failed copy.
- */
+/** Detect candidates; copy only when the caller explicitly supplies from. */
 export async function syncReport(ctx: Context, record: TaskRecord, opts: SyncOptions = {}): Promise<SyncResult> {
   const { runner } = ctx;
   const file = taskFile(ctx.config, record.window);
@@ -241,14 +191,12 @@ export async function syncReport(ctx: Context, record: TaskRecord, opts: SyncOpt
   } else if (canonicalFresh(record)) {
     return { action: 'none' };
   } else {
-    const text = `${opts.pane ? await paneText(ctx, record) : ''}\n${opts.message ?? ''}`;
-    const candidates = findCandidates(ctx, record, text);
-    source = candidates.find(c => confirmedCandidate(ctx, record, c) && inspectReport(ctx.config, record, ctx.runner.now(), Boolean(record.turnEndedAt), c.file).ready)?.file;
+    const candidates = findCandidates(ctx, record, '');
     const candidate = candidates[0]?.file;
-    if (!source && candidate && candidate !== record.reportCandidate && !opts.dryRun) {
+    if (candidate !== record.reportCandidate && !opts.dryRun) {
       record.reportCandidate = candidate;
-      await setHeaderFields(runner, file, { report_candidate: candidate });
-      await recordJournal(ctx, { kind: 'report-candidate', task: record.task, text: `${record.task}: report-candidate ${candidate}` });
+      await setHeaderFields(runner, file, { report_candidate: candidate ?? null });
+      if (candidate) await recordJournal(ctx, { kind: 'report-candidate', task: record.task, text: `${record.task}: report-candidate ${candidate}` });
     }
   }
   if (!source) return { action: 'none' };
@@ -307,6 +255,6 @@ export async function reportInfo(ctx: Context, taskArg: string, opts: { from?: s
   if (!record) throw new AgentctlError(`unknown task ${taskArg}: no TASK.md in ${ctx.config.stateDir}/${window}`, 'List known tasks with "agentctl status".');
   const result = opts.from ? await syncReport(ctx, record, { from: opts.from, force: opts.force, dryRun: ctx.runner.dryRun }) : undefined;
   const fresh = readTaskRecord(ctx.config, window) ?? record;
-  const candidates = opts.from ? [] : findCandidates(ctx, fresh, `${await paneText(ctx, fresh)}`);
+  const candidates = opts.from ? [] : findCandidates(ctx, fresh, '');
   return { task: fresh.task, canonical: fresh.report, canonicalExists: mtime(fresh.report) > 0, source: fresh.reportSource, candidates, ...(result ? { result } : {}) };
 }
