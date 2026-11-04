@@ -9,7 +9,7 @@ export function reportFingerprint(file: string): string {
   try { return createHash('sha256').update(fs.readFileSync(file)).digest('hex'); } catch { return ''; }
 }
 export function attemptFields(record: Pick<TaskRecord, 'report' | 'attempt'>, now: number) {
-  return { attempt: (record.attempt ?? 0) + 1, attemptId: randomUUID(), attemptStarted: new Date(now).toISOString(), attemptReportBaseline: reportFingerprint(record.report) };
+  return { attempt: (record.attempt ?? 0) + 1, outputsProtocol: 1, attemptId: randomUUID(), attemptStarted: new Date(now).toISOString(), attemptReportBaseline: reportFingerprint(record.report) };
 }
 export interface ReportState { ready: boolean; exists: boolean; mtime?: number; signature?: string; reason: string }
 /** Single report readiness rule for status, hooks, history, cohorts and dependency consumers. */

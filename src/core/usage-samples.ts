@@ -26,6 +26,16 @@ export function readSamples(config: GlobalConfig): UsageSample[] {
   } catch { return []; }
 }
 
+const RESET_DROP_POINTS = 20;
+const RESET_GRACE_MS = 5 * 60_000;
+export function isWindowReset(old: PlanWindowView, cur: PlanWindowView, now: number): boolean {
+  const forward = old.resetsAt !== null && cur.resetsAt !== null ? cur.resetsAt - old.resetsAt : 0;
+  const windowMs = Math.max(1, cur.minutes || old.minutes || 60) * 60_000;
+  const dropped = old.usedPercent - cur.usedPercent >= RESET_DROP_POINTS;
+  const expired = old.resetsAt !== null && old.resetsAt <= now;
+  return forward >= windowMs / 2 || (dropped && (expired || forward > 0));
+}
+
 /** Synchronous, short critical section; competing readers leave sampling to the owner, never block a usage query. */
 export function recordSamples(config: GlobalConfig, plans: Record<AgentName, PlanState>, totals: Record<AgentName, number>, now: number): void {
   const file = samplesPath(config);
@@ -49,17 +59,20 @@ export function recordSamples(config: GlobalConfig, plans: Record<AgentName, Pla
     for (const provider of ['claude', 'codex'] as const) {
       const p = plans[provider];
       const previous = samples.filter((s) => s.provider === provider).at(-1);
+      // A stale source: the old deadline passed a while ago and the usage did not grow since, so the window is over even if nobody re-read it.
       for (const w of previous?.windows ?? []) {
-        if (w.resetsAt !== null && w.resetsAt <= now) emit(`${provider}|${w.kind}|${w.resetsAt}|reset`, `${provider} ${w.label}: window reset; current usage ${p.windows.find((x) => x.kind === w.kind)?.usedPercent ?? 'n/d'}`);
+        const cur = p.windows.find((x) => x.kind === w.kind);
+        if (w.resetsAt !== null && w.resetsAt + RESET_GRACE_MS <= now && (!cur || cur.usedPercent <= w.usedPercent)) emit(`${provider}|${w.kind}|${w.resetsAt}|reset`, `${provider} ${w.label}: window reset; current usage ${cur?.usedPercent ?? 'n/d'}`);
       }
       for (const w of p.windows) for (const threshold of config.capacity.thresholds) {
         if (w.usedPercent >= threshold) emit(`${provider}|${w.kind}|${w.resetsAt ?? 'open'}|${threshold}`, `${provider} ${w.label}: usage crossed ${threshold}% (${w.usedPercent}%)`);
       }
       if (p.readAt === null || p.windows.length === 0 || (previous && p.readAt <= previous.at)) continue;
-      // A reset can be observed before the old reset deadline (provider refresh or manual reset).
+      // A reset needs evidence of a new window, not a jittering boundary: the reset time moved forward by about a window, or the usage fell
+      // clearly (hysteresis) while the old deadline had passed or the boundary moved forward. Same window instance: announced once.
       for (const w of p.windows) {
         const old = previous?.windows.find((x) => x.kind === w.kind);
-        if (old && old.resetsAt !== null && old.resetsAt !== w.resetsAt) emit(`${provider}|${w.kind}|${old.resetsAt}|reset`, `${provider} ${w.label}: window reset (new reset boundary observed)`);
+        if (old && isWindowReset(old, w, now)) emit(`${provider}|${w.kind}|${old.resetsAt ?? 'open'}|reset`, `${provider} ${w.label}: window reset; current usage ${w.usedPercent}%`);
       }
       samples.push({ provider, at: p.readAt, capturedAt: now, windows: p.windows, taskTokens: totals[provider] });
     }

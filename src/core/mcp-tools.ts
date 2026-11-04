@@ -747,7 +747,9 @@ async function runSend(deps: McpDeps, args: { task: string; text: string }): Pro
     if (args.text.length > MAX_SEND_CHARS) throw new AgentctlError(`the text is ${args.text.length} characters; the limit is ${MAX_SEND_CHARS}`);
     const target = await resolveRunningTask(ctx, args.task);
     const sent = await sendPrompts(ctx, [{ task: target.task, window: target.window, prompt: args.text }]);
-    return { text: `${target.task}: ${sent[0]?.message ?? 'wklejono'} (${args.text.length} characters)\n${lines.join('\n')}`.trim(), executed: true, announce: `send ${target.task}` };
+    // sendPrompts reports the same result through ctx.info; the first line already says it.
+    const message = `${target.task}: ${sent[0]?.message ?? 'wklejono'}`;
+    return { text: `${message} (${args.text.length} characters)\n${lines.filter(l => l !== message).join('\n')}`.trim(), executed: true, announce: `send ${target.task}` };
   });
 }
 

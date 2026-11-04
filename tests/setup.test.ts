@@ -142,12 +142,12 @@ describe('links: literal paths and targets', () => {
     const text = specText('NC-7', `links:\n  - {from: node_modules/@neon-city/protocol, to: ${base}/no/such/protocol}\n`);
     const { ctx, runner } = makeContext(config, { respond: machine() });
     await assert.rejects(newTasks(ctx, resolveAll(config, text)), (e: Error & { hint?: string }) => {
-      assert.match(e.message, /NC-7: link targets are missing:[\s\S]*no\/such\/protocol does not exist/);
+      assert.match(e.message, /NC-7: link targets are missing:[\s\S]*no\/such\/protocol: links\.to does not exist/);
       assert.match(e.hint ?? '', /Nothing was started/);
       return true;
     });
     assert.deepEqual(runner.commands, [], 'no worktree was created');
-    assert.throws(() => checkLinkTargets([{ from: 'x/*', to: `${base}/missing-dir/*` }], 'NC-7'), /missing-dir does not exist/);
+    assert.throws(() => checkLinkTargets([{ from: 'x/*', to: `${base}/missing-dir/*` }], 'NC-7'), /missing-dir: links\.to does not exist/);
     assert.doesNotThrow(() => checkLinkTargets([{ from: 'x/*', to: `${backend}/*` }], 'NC-7'));
   });
 

@@ -92,7 +92,7 @@ export function checkLinkTargets(links: Link[], task: string): void {
   const p = new Problems();
   for (const { from, to } of links) {
     const target = to.endsWith('/*') ? path.dirname(to) : to;
-    if (!fs.existsSync(target)) p.add(`link ${from} -> ${to}: ${target} does not exist`);
+    if (!fs.existsSync(target)) p.add(`link ${from} -> ${path.resolve(target)}: links.to does not exist (the link side, links.from, is created for you)`);
   }
   p.throwIfAny(`${task}: link targets are missing:`, 'Create/check out the target first (for example the backend worktree), or fix the "to" path. Nothing was started.');
 }
@@ -111,8 +111,16 @@ export async function applyLinks(runner: Runner, ops: LinkOp[]): Promise<void> {
 }
 
 /** Missing targets are warnings in previews and errors at the write boundary. */
-export function missingLinkTargets(links: Link[]): string[] {
-  return links.filter(({ to }) => !fs.existsSync(to.endsWith('/*') ? path.dirname(to) : to)).map(({ from, to }) => `link ${from} -> ${to}: target does not exist; create/check out the target first or fix links.to`);
+export function missingLinkTargets(links: Link[], primary?: string): string[] {
+  return links.flatMap(({ from, to }) => {
+    const target = path.resolve(to.endsWith('/*') ? path.dirname(to) : to);
+    if (fs.existsSync(target)) return [];
+    let missing = target;
+    // The first path component that is not there: the thing to create or to fix.
+    for (let dir = path.dirname(missing); !fs.existsSync(dir) && dir !== path.dirname(dir); dir = path.dirname(dir)) missing = dir;
+    const place = primary ? path.join(primary, from) : from;
+    return [`link ${place} -> ${target}: links.to points at a path that does not exist (first missing: ${missing}); create/check out ${missing === target ? 'it' : 'that directory'} first, or correct links.to (the link side, links.from, is created for you)`];
+  });
 }
 
 export function projectLinks(repo: string, task = '', cache = repo): Link[] {

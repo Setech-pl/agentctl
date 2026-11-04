@@ -173,7 +173,7 @@ describe('new --clip / send --clip through the CLI', () => {
   it('new --clip prints the summary (task, agent/model/effort, worktree, branch, setup, links) and does nothing on N', async () => {
     const r = await run(['new', '--clip'], specText, false);
     assert.equal(r.code, 0);
-    for (const part of ['NC-1  claude/opus/medium', `worktree: ${root}/app-wt`, 'branch:   nc-1  from main', 'setup:    npm ci', `links:    node_modules/x -> ${root}/x`]) {
+    for (const part of ['NC-1  claude/opus/medium', `worktree: ${root}/app-wt`, 'branch:   nc-1  from main', 'setup:    npm ci', `links:    ${root}/app-wt/node_modules/x -> ${root}/x`]) {
       assert.ok(r.stdout.includes(part), `missing "${part}" in:\n${r.stdout}`);
     }
     assert.deepEqual(r.asked, ['Start? [y/N] ']);

@@ -33,6 +33,8 @@ export interface CohortMeta {
   observed?: string;
   changedAt?: number;
   gcSuggested?: string;
+  /** The first watch tick that saw this cohort has passed: a cohort already closed by then is the past, not a suggestion. */
+  gcSeen?: boolean;
 }
 
 export function cohortsDir(config: Pick<GlobalConfig, 'path'>): string {
@@ -54,6 +56,7 @@ function parseMeta(text: string): CohortMeta | undefined {
   if (Array.isArray(data.announced)) meta.announced = data.announced.filter((x): x is string => typeof x === 'string');
   if (typeof data.observed === 'string') meta.observed = data.observed;
   if (typeof data.gcSuggested === 'string') meta.gcSuggested = data.gcSuggested;
+  if (data.gcSeen === true) meta.gcSeen = true;
   if (typeof data.changedAt === 'number') meta.changedAt = data.changedAt;
   return meta;
 }
@@ -282,7 +285,14 @@ export async function cohortTick(ctx: Context, notifier: Notifier, rows: readonl
   for (const meta of listCohorts(ctx.config)) {
     const members = cohortRows(rows, meta.name);
     const closure = JSON.stringify(members.map(r => [r.task, r.closedAt, r.cancelledAt]).sort());
-    if (members.length && members.every(r => r.closed || r.cancelled) && !cohortEntries(entries, meta.name).length && meta.gcSuggested !== closure) {
+    const allClosed = members.length > 0 && members.every(r => r.closed || r.cancelled) && !cohortEntries(entries, meta.name).length;
+    if (!meta.gcSeen) {
+      // Upgrade: cohorts closed before this version looked at them get no suggestion wave, only the ones that close from now on.
+      meta.gcSeen = true;
+      if (allClosed) meta.gcSuggested = closure;
+      await saveCohort(ctx, meta);
+    }
+    if (allClosed && meta.gcSuggested !== closure) {
       const gc_preview = await planGc(ctx, { cohort: meta.name });
       await recordJournal(ctx, { kind: 'gc_suggest', cohort: meta.name, text: `kohorta ${meta.name}: zamknięta; gc_preview gotowy, bez automatycznego usuwania`, gc_preview });
       meta.gcSuggested = closure;

@@ -510,3 +510,33 @@ describe('0.17.4 fix 1: queue preview identity ignores mutable start state (P13)
   });
 });
 
+describe('0.17.4 fix 1: UAT polish (U-a … U-f)', () => {
+  it('U-a/U-b: a missing links.to is named as links.to, with the resolved paths and the first missing component', () => {
+    const f = fixture('u-links'); const wt = path.join(f.root, 'wt'); const to = path.join(f.root, 'gone', 'deeper', 'sim');
+    const warnings = missingLinkTargets([{ from: 'sim', to }], wt);
+    assert.equal(warnings.length, 1); assert.match(warnings[0]!, /links\.to points at a path that does not exist/); assert.ok(warnings[0]!.includes(`${wt}/sim -> ${to}`), 'the link is shown as <worktree>/sim, not /sim');
+    assert.ok(warnings[0]!.includes(`first missing: ${path.join(f.root, 'gone')}`)); assert.match(warnings[0]!, /links\.from, is created for you|correct links\.to/); assert.ok(!/fix links\.to$/.test(warnings[0]!));
+    assert.deepEqual(missingLinkTargets([{ from: 'sim', to: f.root }], wt), []);
+  });
+  it('U-c: a closed task from before the outputs protocol gets no "missing block" warning; one run with the protocol still does', async () => {
+    const f = fixture('u-protocol'); const old = seedTask(f.config, 'OLD', { closed: true } as never), now = seedTask(f.config, 'NEW', { outputsProtocol: 1, attemptId: 'x' } as never);
+    for (const r of [old, now]) { fs.mkdirSync(path.dirname(r.report), { recursive: true }); fs.writeFileSync(r.report, 'Werdykt: PASS\n<!-- agentctl:report-end -->\n'); }
+    await journalOutputs(f.ctx, readTaskRecord(f.config, 'old')!); await journalOutputs(f.ctx, readTaskRecord(f.config, 'new')!);
+    const entries = readJournal(f.config).filter(e => e.kind === 'report-outputs'); assert.deepEqual(entries.map(e => e.task), ['NEW']); assert.match(entries[0]!.text, /missing agentctl-outputs/);
+  });
+  it('U-d: cohorts that were closed before this version first looked at them get no gc_suggest; a cohort that closes afterwards does, once', async () => {
+    const f = fixture('u-gc'); const closed = (task: string, cohort: string) => seedTask(f.config, task, { cohort, closed: true, closedAt: new Date().toISOString() } as never);
+    await touchCohort(f.ctx, 'OLDC'); closed('O1', 'OLDC'); await touchCohort(f.ctx, 'NEWC'); seedTask(f.config, 'N1', { cohort: 'NEWC' });
+    const rows = () => collectStatus(f.ctx, { progress: false, archived: true });
+    await cohortTick(f.ctx, f.notifier as never, await rows());
+    assert.equal(readJournal(f.config).filter(e => e.kind === 'gc_suggest').length, 0);
+    closed('N1', 'NEWC'); await cohortTick(f.ctx, f.notifier as never, await rows()); await cohortTick(f.ctx, f.notifier as never, await rows());
+    assert.deepEqual(readJournal(f.config).filter(e => e.kind === 'gc_suggest').map(e => e.cohort), ['NEWC']);
+  });
+  it('U-f: the send answer says "wklejono" once', async () => {
+    const f = fixture('u-send'); f.config.mcp.allow.push('send'); seedTask(f.config, 'SENDER', { repos: [] }); f.tmux.add('sender', '❯ \n');
+    const tool = MCP_TOOLS.find(t => t.name === 'send')!, deps = { ...f.deps, context: (log: (line: string) => void) => new Context(f.runner, f.config, log) };
+    const r = await tool.run(deps as never, z.object(tool.input).parse({ task: 'SENDER', text: 'hello there' })); assert.ok(!r.isError, r.text);
+    assert.equal((r.text.match(/wklejono|w kolejce/g) ?? []).length, 1, r.text);
+  });
+});

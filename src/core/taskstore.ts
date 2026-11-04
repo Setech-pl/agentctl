@@ -62,6 +62,8 @@ export interface TaskRecord {
   started: string;
   attempt?: number;
   attemptId?: string;
+  /** The version of the outputs protocol that the agent of this attempt was told to follow (absent: the attempt predates it). */
+  outputsProtocol?: number;
   attemptStarted?: string;
   attemptReportBaseline?: string;
   turnEndedAt?: string;
@@ -173,7 +175,7 @@ export function renderTaskMd(record: TaskRecord, prompt: string): string {
   if (record.reportCopied) header.report_copied = record.reportCopied;
   if (record.reportSourceMtime) header.report_source_mtime = record.reportSourceMtime;
   header.started = record.started;
-  for (const [key, value] of Object.entries({ attempt: record.attempt, attempt_id: record.attemptId, attempt_started: record.attemptStarted, attempt_report_baseline: record.attemptReportBaseline, turn_ended_at: record.turnEndedAt, summary_delivered: record.summaryDelivered })) if (value !== undefined) header[key] = value;
+  for (const [key, value] of Object.entries({ attempt: record.attempt, attempt_id: record.attemptId, outputs_protocol: record.outputsProtocol, attempt_started: record.attemptStarted, attempt_report_baseline: record.attemptReportBaseline, turn_ended_at: record.turnEndedAt, summary_delivered: record.summaryDelivered })) if (value !== undefined) header[key] = value;
   if (record.pulled) header.pulled = record.pulled;
   if (record.adopted) header.adopted = record.adopted;
   if (record.pin) header.pin = true;
@@ -255,6 +257,7 @@ export function parseTaskRecord(text: string): TaskRecord | undefined {
   if (data.prompt_kind === 'initial' || data.prompt_kind === 'followup') record.promptKind = data.prompt_kind;
   if (typeof data.delivery_was_busy === 'boolean') record.deliveryWasBusy = data.delivery_was_busy;
   if (typeof data.attempt === 'number') record.attempt = data.attempt;
+  if (typeof data.outputs_protocol === 'number') record.outputsProtocol = data.outputs_protocol;
   for (const [key, field] of [['attempt_id', 'attemptId'], ['attempt_started', 'attemptStarted'], ['attempt_report_baseline', 'attemptReportBaseline'], ['turn_ended_at', 'turnEndedAt'], ['summary_delivered', 'summaryDelivered']] as const) if (typeof data[key] === 'string') record[field] = data[key];
   if (typeof data.window_id === 'string' && /^@\d+$/.test(data.window_id)) record.windowId = data.window_id;
   if (data.switched_by === 'flag' || data.switched_by === 'limit') record.switchedBy = data.switched_by;
