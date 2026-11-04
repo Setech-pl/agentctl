@@ -35,7 +35,7 @@ export interface LiveWindow {
   /** Unknown when the window was not created through agentctl. */
   agent?: AgentName;
   /** Absent: a window of agentctl. `reserved`: a place held with `limits reserve`; `external`: a session found outside (limits.count_external). */
-  kind?: 'reserved' | 'external';
+  kind?: 'reserved' | 'external' | 'starting';
   reportReady?: boolean;
   counted?: boolean;
   pid?: number;

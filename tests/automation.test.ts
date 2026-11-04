@@ -73,7 +73,7 @@ class Machine {
 
 function specFor(config: Config, task: string, extra = '', agent = 'claude', model = 'opus'): ResolvedSpec {
   const dir = path.dirname(config.cache);
-  const text = `---\ntask: ${task}\nagent: ${agent}\nmodel: ${model}\neffort: high\nreport: ${dir}/${task}.md\n${extra}repos:\n  - {path: ${dir}/app, worktree: ${dir}/app-${task}, branch: ${task.toLowerCase()}}\n---\nDo ${task}.\n`;
+  const text = `---\ntask: ${task}\nagent: ${agent}\nmodel: ${model}\neffort: high\nreport: ${config.cache}/${task}.md\n${extra}repos:\n  - {path: ${dir}/app, worktree: ${dir}/app-${task}, branch: ${task.toLowerCase()}}\n---\nDo ${task}.\n`;
   return resolveSpec(splitSpecs(text)[0]!, { config, loadProject: () => undefined });
 }
 
@@ -82,7 +82,7 @@ function seed(config: Config, spec: ResolvedSpec, startedMs: number): void {
   fs.writeFileSync(taskFile(config, spec.window), renderTaskMd(recordFromSpec(spec, config, startedMs), spec.prompt));
 }
 
-const writeReport = (spec: ResolvedSpec, text: string): void => fs.writeFileSync(spec.report, text);
+const writeReport = (spec: ResolvedSpec, text: string): void => { fs.mkdirSync(path.dirname(spec.report), { recursive: true }); fs.writeFileSync(spec.report, text); };
 
 describe('clipboard input', () => {
   it('reads pbpaste on macOS and falls back from wl-paste to xclip on Linux', async () => {

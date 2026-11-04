@@ -60,7 +60,7 @@ it('0173-FIX-B/C: canonical absolute report path survives pending trust; competi
   await watchTick(f.ctx, new WatchMemory(), { notify: async () => {} }); assert.equal(f.runner.commands.filter(c => c.includes('paste-buffer')).length, 1);
 });
 it('0173-FIX-D/J: explicit report confirmation clears historical warning; preview shows source/overwrite facts and force is required', async () => {
-  const f = fixture('confirm'), source = path.join(f.root, 'T1-report.md'); fs.writeFileSync(source, 'Werdykt: PASS\n');
+  const f = fixture('confirm'); fs.mkdirSync(f.config.cache, { recursive: true }); const source = path.join(f.config.cache, 'T1-report.md'); fs.writeFileSync(source, 'Werdykt: PASS\n');
   const r = seedTask(f.config, 'T1', { reportSource: source }); fs.mkdirSync(path.dirname(r.report), { recursive: true }); fs.writeFileSync(r.report, 'original');
   assert.match((await f.call('status')).text, /sprawdź/);
   const preview = await f.full('report_from', { task: 'T1', from: source }); const scope = JSON.parse(preview.slice(0, preview.indexOf('\nNot executed.'))).scope;
@@ -116,7 +116,7 @@ it('0173-FIX-I guard inventory: every two-stage cohort selector has a scope-equa
 });
 it('0173-FIX-J/H: missing report source is explicit; unowned real-agent process is an orphan, plain shell is not', async () => {
   const f = fixture('missing'); seedTask(f.config, 'T1');
-  const preview = await f.full('report_from', { task: 'T1', from: path.join(f.root, 'missing.md') }); assert.match(preview, /"source_exists": false/); assert.match(preview, /"source_bytes": null/);
+  const preview = await f.full('report_from', { task: 'T1', from: path.join(f.config.cache, 'missing.md') }); assert.match(preview, /"source_exists": false/); assert.match(preview, /"source_bytes": null/);
   const tmux = new FakeTmux(); tmux.add('lost-agent', '').role = '';
   const runner = new DiskRunner({ dryRun: false, respond: (cmd, args, opts) => cmd === 'tmux' && args[0] === 'display-message' ? { stdout: 'codex' } : tmux.respond(cmd, args, opts) });
   assert.equal((await collectStatus(new Context(runner, f.config, () => {}))).find(r => r.task === 'LOST-AGENT')!.state, 'orphan');

@@ -1,3 +1,5 @@
+import { readReportText } from './report-path.ts';
+import { readTaskRecord } from './taskstore.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Context } from './context.ts';
@@ -34,7 +36,8 @@ export async function syncMirror(ctx: Context, rows: StatusRow[]): Promise<Mirro
     const dest = path.join(dir, row.task.toLowerCase(), path.basename(row.reportPath));
     if (!needsCopy(row.reportPath, dest)) continue;
     await runner.mkdir(path.dirname(dest));
-    await runner.copyFile(row.reportPath, dest);
+    const record = readTaskRecord(ctx.config, row.windowName);
+    await runner.writeFile(dest, readReportText(ctx.config, { repos: record?.repos ?? [] }, row.reportPath));
     copied.push(dest);
   }
   const statusJson = path.join(dir, 'status.json');

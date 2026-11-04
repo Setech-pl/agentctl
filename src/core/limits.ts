@@ -193,6 +193,7 @@ export interface ProviderLoad {
   limit: number | null;
   /** Windows of agentctl. */
   windows: string[];
+  starting: number;
   working: string[];
   reportReady: string[];
   reserved: number;
@@ -223,11 +224,12 @@ export function collectLimits(config: GlobalConfig, live: readonly LiveWindow[])
       const windows = mine.filter((w) => w.kind === undefined).map((w) => w.window);
       const working = mine.filter(w => w.kind === undefined && !w.reportReady).map(w => w.window);
       const reportReady = mine.filter(w => w.reportReady).map(w => w.window);
+      const starting = mine.filter(w => w.kind === 'starting').length;
       const reserved = mine.filter((w) => w.kind === 'reserved').length;
       const external = mine.filter((w) => w.kind === 'external').map((w) => ({ pid: w.pid ?? 0, cwd: w.cwd ?? null }));
       const limit = config.limits[agent] ?? null;
-      const used = mine.filter(w => w.kind === undefined && w.counted !== false).length + reserved + external.length;
-      return { agent, limit, windows, working, reportReady, reserved, reservedNote: reservations[agent]?.note ?? null, external, used, free: limit === null ? null : Math.max(0, limit - used), queued: queue.filter((e) => e.agent === agent).length };
+      const used = mine.filter(w => w.kind === undefined && w.counted !== false).length + starting + reserved + external.length;
+      return { agent, limit, windows, starting, working, reportReady, reserved, reservedNote: reservations[agent]?.note ?? null, external, used, free: limit === null ? null : Math.max(0, limit - used), queued: queue.filter((e) => e.agent === agent).length };
     }),
   };
 }

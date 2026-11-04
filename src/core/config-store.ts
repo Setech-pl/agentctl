@@ -1,3 +1,4 @@
+import { atomicWriteFile } from './atomic-file.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { GlobalConfig } from './config.ts';
@@ -113,10 +114,6 @@ export function noteConfigState(file: string, by: string, nowMs: number, error: 
   const was = readConfigState(file);
   if (was && was.ok === (error === undefined) && was.error === error) return;
   if (!was && error === undefined) return;
-  try {
-    const state: ConfigState = { ok: error === undefined, at: new Date(nowMs).toISOString(), by, ...(error ? { error } : {}) };
-    fs.writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`);
-  } catch {
-    // a read-only home: nothing to tell
-  }
+  const state: ConfigState = { ok: error === undefined, at: new Date(nowMs).toISOString(), by, ...(error ? { error } : {}) };
+  atomicWriteFile(file, `${JSON.stringify(state, null, 2)}\n`);
 }

@@ -1,3 +1,4 @@
+import { reportPathWarnings } from './core/report-path.ts';
 import { planMark, markTasks } from './core/mark.ts';
 import { aggregateOutputs } from './core/outputs.ts';
 import { stableNodePath } from './core/mcp-install.ts';
@@ -433,6 +434,8 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         applyCohortFlag(raws, opts.cohort);
         const specs = raws.map((raw) => resolveSpec(raw, { config: ctx.config }));
         // The state of the plan of each provider the tasks run on, and the hint when the other one has room (it only says so: nothing is switched).
+        const pathWarnings = specs.flatMap(spec => reportPathWarnings(ctx.config, spec).map(warning => `WARNING ${spec.task}: ${warning}`));
+        if (!opts.json) for (const warning of pathWarnings) line(warning);
         const planLines = opts.dryRun || opts.agent === false ? [] : usageSummaryLines(ctx.config, specs.map((s) => (opts.agent && !s.pin ? { ...s, agent: opts.agent } : s)), ctx.runner.now());
         if (opts.clip && !(await confirmAction(ctx, summarizeSpecs(specs, planLines), 'Start?', Boolean(opts.yes) || Boolean(opts.dryRun)))) return;
         // Without the summary of --clip: only what there is to say (a plan that is n/d is not worth a line before every start).

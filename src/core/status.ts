@@ -1,3 +1,4 @@
+import { atomicWriteFile, stateWriteFailure } from './atomic-file.ts';
 import { tryFileLock } from './file-lock.ts';
 import { promptQueueView } from './prompt-queue.ts';
 import { readOutputs, dependencyVerdict } from './outputs.ts';
@@ -184,8 +185,9 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     const closed = !cancelled && (archived || (record.closed === true && !alive));
     const hiddenBy: StatusRow['hiddenBy'] = cancelled ? 'cancelled' : closed ? 'closed' : record.hidden === true ? 'user' : record.hidden === undefined && config.board.autoHidePulledDead && !alive && pulled !== null ? 'auto' : null;
     const deliveryReport = reportReady && (record.promptDelivery === 'needs-attention' || (record.deliveryId && reportState.signature !== record.deliveryReportBaseline)) && (!alive || classifyScreen(screenText, settings) === 'idle');
+    const writeFailure = stateWriteFailure(path.join(config.stateDir, record.window, 'TASK.md'));
     const unconfirmed = record.promptDelivery === 'needs-attention' && !reportReady && !deliveryEvidence(ctx, record, screenText);
-    let state: TaskState = cancelled ? 'cancelled' : closed ? 'closed' : record.supersededBy ? 'superseded' : deliveryReport ? 'report-ready' : unconfirmed ? 'needs-attention' : taskState({ alive, screen: screenText, settings, reportReady, event: stored?.outcome });
+    let state: TaskState = cancelled ? 'cancelled' : closed ? 'closed' : record.supersededBy ? 'superseded' : writeFailure ? 'needs-attention' : deliveryReport ? 'report-ready' : unconfirmed ? 'needs-attention' : taskState({ alive, screen: screenText, settings, reportReady, event: stored?.outcome });
     const observationKey = `${config.stateDir}:${record.window}`;
     if (idleObservations.size > 2000) idleObservations.delete(idleObservations.keys().next().value!);
     const identity = `${record.attemptId ?? record.started}:${record.deliveryStartedAt ?? ''}:${record.windowId ?? ''}`;
@@ -205,7 +207,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       else observation.working = false;
     } else { observation.working = false; observation.idle = 0; }
     idleObservations.set(observationKey, observation);
-    if (release) { try { fs.writeFileSync(observationFile, JSON.stringify(observation), { mode: 0o600 }); } catch { /* observation persistence is best effort */ } finally { release(); } }
+    if (release) { try { atomicWriteFile(observationFile, JSON.stringify(observation)); } catch { /* observation persistence is best effort */ } finally { release(); } }
     const outputData = reportReady ? await readOutputs(ctx, record) : undefined;
     let verdict: OutputVerdict | undefined;
     if (reportReady) { try { verdict = dependencyVerdict(fs.readFileSync(record.report, 'utf8')); } catch { /* absent */ } }
@@ -241,7 +243,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       lastLine: lastContentLine(screenText, settings.footerPatterns),
       progress: opts.progress === false || record.repos.length === 0 ? null : await taskProgress(runner, record.repos),
       collide: [],
-      hint: [unconfirmed ? record.promptError : record.promptDelivery === 'confirming' || record.promptDelivery === 'sending' ? 'dostarczenie niepotwierdzone – sprawdzam; watch confirms within delivery_confirm_s' : record.promptDelivery === 'pending' ? 'original prompt pending; watch sends it once after folder trust and empty ready input' : stateHint(record.task, state, record.pin === true, record.supersededBy), !record.reportConfirmed && record.reportSource && path.normalize(record.reportSource) !== path.normalize(record.report) ? `raport pochodzi z kopii ${record.reportSource} – sprawdź` : null].filter(Boolean).join('; ') || null,
+      hint: [writeFailure ? `State write failed: ${writeFailure.reason}; old TASK.md preserved` : unconfirmed ? record.promptError : record.promptDelivery === 'confirming' || record.promptDelivery === 'sending' ? 'dostarczenie niepotwierdzone – sprawdzam; watch confirms within delivery_confirm_s' : record.promptDelivery === 'pending' ? 'original prompt pending; watch sends it once after folder trust and empty ready input' : stateHint(record.task, state, record.pin === true, record.supersededBy), !record.reportConfirmed && record.reportSource && path.normalize(record.reportSource) !== path.normalize(record.report) ? `raport pochodzi z kopii ${record.reportSource} – sprawdź` : null].filter(Boolean).join('; ') || null,
       question: state === 'needs-input' ? ((collapsedQuestion(screenText) ? sessionQuestion(config, record) : undefined) ?? extractQuestion(screenText) ?? (stored?.outcome === 'needs-input' && stored.text !== '' ? stored.text : null)) : null,
       pin: record.pin === true,
       finished: !alive || state === 'superseded',

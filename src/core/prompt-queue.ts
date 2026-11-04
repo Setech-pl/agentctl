@@ -1,3 +1,5 @@
+import { stateWriteFailure } from './atomic-file.ts';
+import { withStartLock } from './start-lock.ts';
 import { liveWindows } from './plan.ts';
 import { checkWindowLimit } from './checks.ts';
 import fs from 'node:fs';
@@ -25,9 +27,9 @@ export async function enqueuePrompt(ctx: Context, window: string, text: string):
 /** Durable FIFO. An uncertain active delivery keeps later messages queued, never discarded or repasted. */
 export async function drainPromptQueue(ctx: Context, window: string): Promise<void> {
   if (ctx.runner.dryRun) return;
-  await withFileLock(`${queueFile(ctx, window)}.lock`, async () => {
+  await withStartLock(ctx, () => withFileLock(`${queueFile(ctx, window)}.lock`, async () => {
     let record = readTaskRecord(ctx.config, window);
-    if (!record || record.closed || record.cancelled) return;
+    if (!record || record.closed || record.cancelled || stateWriteFailure(taskFile(ctx.config, window))) return;
     if (record.pendingPrompt && record.promptDelivery !== 'sent') {
       if (record.promptDelivery === 'launching' || await deliverPendingPrompt(ctx, window) !== 'sent') return;
     }
@@ -48,7 +50,7 @@ export async function drainPromptQueue(ctx: Context, window: string): Promise<vo
       if (fresh.deliveryStartedAt) await ctx.runner.appendFile(taskFile(ctx.config, window), `\n\n## Follow-up ${result === 'sent' ? 'sent' : 'pasted, unconfirmed'} ${fresh.deliveryStartedAt} (${item.id})\n`);
       if (result !== 'sent') return;
     }
-  });
+  }));
 }
 
 export function promptQueueView(ctx: Context, window: string) {

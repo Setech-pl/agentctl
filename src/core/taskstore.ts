@@ -1,3 +1,5 @@
+import { withFileLock, withFileLockSync, taskLock } from './file-lock.ts';
+import { noteStateWriteFailure, atomicWriteFile } from './atomic-file.ts';
 import { attemptFields } from './report-state.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -334,6 +336,9 @@ export async function setHeaderField(runner: Runner, file: string, key: string, 
 
 /** Set several keys of the header in one write; `null` removes the key. */
 export async function setHeaderFields(runner: Runner, file: string, fields: Record<string, string | number | boolean | null>): Promise<boolean> {
+  let entered = false;
+  const change = async () => {
+  entered = true;
   let text: string;
   try {
     text = fs.readFileSync(file, 'utf8');
@@ -348,8 +353,11 @@ export async function setHeaderFields(runner: Runner, file: string, fields: Reco
     else doc.set(key, value);
   }
   const rest = text.replace(/\r\n/g, '\n').slice(match[0].length);
-  await runner.writeFile(file, `---\n${doc.toString().trimEnd()}\n---${rest}`);
+  try { await runner.writeFile(file, `---\n${doc.toString().trimEnd()}\n---${rest}`); }
+  catch (error) { noteStateWriteFailure(file, error); throw error; }
   return true;
+  };
+  try { return runner.dryRun ? await change() : await withFileLock(taskLock(file), change); } catch (error) { if (!entered) noteStateWriteFailure(file, error); throw error; }
 }
 
 /** Names of the files that are agentctl state, not agent output: moved out of the cache by the migration. */
@@ -388,13 +396,12 @@ export function migrateLegacyState(config: GlobalConfig): string[] {
       const from = path.join(legacyDir, file);
       const to = path.join(target, file);
       if (!fs.existsSync(from) || fs.existsSync(to)) continue;
-      try {
-        fs.renameSync(from, to);
-      } catch {
-        fs.copyFileSync(from, to);
-        fs.rmSync(from);
-      }
-      moved.push(file);
+      const copied = withFileLockSync(taskLock(to), () => {
+        if (!fs.existsSync(from) || fs.existsSync(to)) return false;
+        atomicWriteFile(to, fs.readFileSync(from)); fs.rmSync(from);
+        return true;
+      });
+      if (copied) moved.push(file);
     }
     messages.push(`migration: moved ${moved.join(' and ')} of ${name} from ${legacyDir} to ${target} (agentctl state now lives outside the agents' directories)`);
   }

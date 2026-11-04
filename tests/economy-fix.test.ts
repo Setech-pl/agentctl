@@ -283,7 +283,8 @@ it('B1: a CLI-looking error inside command output or mixed fenced code is not a 
 });
 it('W7: a settled alternate report stays complete after the canonical copy gets a newer mtime', async () => {
   const f = fixture('w7-copy', 'report: {settle_s: 30}\n');
-  const alternative = path.join(f.root, 'ALT-1.md'); fs.writeFileSync(alternative, 'Werdykt: FAIL\nComplete after ended turn');
+  fs.mkdirSync(f.config.cache, { recursive: true });
+  const alternative = path.join(f.config.cache, 'ALT-1.md'); fs.writeFileSync(alternative, 'Werdykt: FAIL\nComplete after ended turn');
   const old = new Date(Date.now() - 60000); fs.utimesSync(alternative, old, old);
   const r = seedTask(f.config, 'ALT-1', { reportAlt: [alternative] });
   const { syncReport } = await import('../src/core/report-detect.ts');

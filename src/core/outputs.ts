@@ -1,3 +1,4 @@
+import { readReportText } from './report-path.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import YAML from 'yaml';
@@ -52,7 +53,7 @@ export function outputRepo(record: Pick<TaskRecord, 'repos'>, name: string) {
 /** Validation observes git; it never fetches, checks out or integrates anything. */
 export async function readOutputs(ctx: Context, record: TaskRecord): Promise<OutputData> {
   let data: OutputData;
-  try { data = parseOutputs(fs.readFileSync(record.report, 'utf8')); }
+  try { data = parseOutputs(readReportText(ctx.config, record, record.report)); }
   catch { return { outputs: null, outputs_valid: false, outputs_errors: ['no report'] }; }
   if (!data.outputs) return data;
   for (const ref of [...data.outputs.commits, ...data.outputs.integrate]) {

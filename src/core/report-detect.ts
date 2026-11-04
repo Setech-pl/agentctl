@@ -1,3 +1,6 @@
+import { noteStateWriteFailure } from './atomic-file.ts';
+import { withFileLock, taskLock } from './file-lock.ts';
+import { checkReportPath, readReportText } from './report-path.ts';
 import { inspectReport } from './report-state.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -155,6 +158,7 @@ export interface SyncResult {
 export interface SyncOptions {
   /** Use this file as the source (`agentctl report --from`). */
   from?: string | undefined;
+  sourcePolicy?: 'cli' | 'mcp';
   /** Copy over a canonical file even if the agent wrote it. */
   force?: boolean | undefined;
   /** Only look: copy nothing, change nothing. */
@@ -169,12 +173,17 @@ const canonicalFresh = (record: TaskRecord): boolean => {
 
 /** Detect candidates; copy only when the caller explicitly supplies from. */
 export async function syncReport(ctx: Context, record: TaskRecord, opts: SyncOptions = {}): Promise<SyncResult> {
+  return ctx.runner.dryRun || opts.dryRun ? syncReportLocked(ctx, record, opts) : withFileLock(taskLock(taskFile(ctx.config, record.window)), () => syncReportLocked(ctx, record, opts));
+}
+async function syncReportLocked(ctx: Context, record: TaskRecord, opts: SyncOptions): Promise<SyncResult> {
   const { runner } = ctx;
   const file = taskFile(ctx.config, record.window);
   let source: string | undefined;
   if (!opts.from && canonicalFresh(record)) return { action: 'none' };
   if (opts.from) {
-    const found = absolutes(opts.from, worktreesOf(record)).find((f) => isFile(f));
+    const candidates = absolutes(opts.from, worktreesOf(record));
+    for (const candidate of candidates) checkReportPath(ctx.config, record, candidate, { allowOutside: opts.sourcePolicy !== 'mcp' && opts.force });
+    const found = candidates.find((f) => isFile(f));
     if (!found) return { action: 'none', note: `${opts.from} is not an existing file` };
     source = found;
   } else if (canonicalFresh(record)) {
@@ -200,10 +209,11 @@ export async function syncReport(ctx: Context, record: TaskRecord, opts: SyncOpt
   if (opts.dryRun) return { action: exists ? 'updated' : 'copied', source };
 
   try {
-    await runner.copyFile(source, record.report);
-  } catch (e) {
-    return { action: 'none', source, note: `copy failed: ${e instanceof Error ? e.message : String(e)}` };
-  }
+    const allowOutside = opts.sourcePolicy !== 'mcp' && opts.force;
+    checkReportPath(ctx.config, record, record.report, { allowOutside });
+    const content = readReportText(ctx.config, record, source, { allowOutside });
+    await runner.writeFile(record.report, content);
+  } catch (error) { noteStateWriteFailure(file, error); throw error; }
   // The modification time of the copy itself (the clock of a test run is not the clock of the file system).
   const nowIso = new Date(mtime(record.report) || runner.now()).toISOString();
   const sourceMtime = new Date(mtime(source)).toISOString();
@@ -240,11 +250,11 @@ export interface ReportInfo {
  * `agentctl report <TASK>`: where the report is and what the search finds (nothing changes). With `from`: that file becomes the source
  * and is copied to the canonical path (`force` also over a canonical file the agent wrote).
  */
-export async function reportInfo(ctx: Context, taskArg: string, opts: { from?: string | undefined; force?: boolean | undefined } = {}): Promise<ReportInfo> {
+export async function reportInfo(ctx: Context, taskArg: string, opts: { from?: string | undefined; force?: boolean | undefined; sourcePolicy?: 'cli' | 'mcp' } = {}): Promise<ReportInfo> {
   const window = windowName(taskArg);
   const record = readTaskRecord(ctx.config, window);
   if (!record) throw new AgentctlError(`unknown task ${taskArg}: no TASK.md in ${ctx.config.stateDir}/${window}`, 'List known tasks with "agentctl status".');
-  const result = opts.from ? await syncReport(ctx, record, { from: opts.from, force: opts.force, dryRun: ctx.runner.dryRun }) : undefined;
+  const result = opts.from ? await syncReport(ctx, record, { from: opts.from, force: opts.force, sourcePolicy: opts.sourcePolicy, dryRun: ctx.runner.dryRun }) : undefined;
   const fresh = readTaskRecord(ctx.config, window) ?? record;
   const candidates = opts.from ? [] : findCandidates(ctx, fresh);
   return { task: fresh.task, canonical: fresh.report, canonicalExists: mtime(fresh.report) > 0, source: fresh.reportSource, candidates, ...(result ? { result } : {}) };

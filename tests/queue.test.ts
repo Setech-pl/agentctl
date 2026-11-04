@@ -416,6 +416,7 @@ describe('after: dependencies', () => {
     const record = readTaskRecord(s.config, task.toLowerCase())!;
     fs.mkdirSync(path.dirname(record.report), { recursive: true });
     fs.writeFileSync(record.report, `# ${task}\nVerdict: PASS\n<!-- agentctl:report-end -->`);
+    const time = new Date(Math.max(Date.now(), Date.parse(record.attemptStarted ?? record.started) + 1)); fs.utimesSync(record.report, time, time);
   };
 
   it('a task with after waits until the named task has a report, then starts (the other tasks are not held back)', async () => {

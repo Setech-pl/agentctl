@@ -1,3 +1,4 @@
+import { withStartLock, reserveStarts, releaseStarts } from './start-lock.ts';
 import { queuePrompt, deliverPendingPrompt } from './prompt-delivery.ts';
 import { waitForReady } from './ready.ts';
 import { attemptFields } from './report-state.ts';
@@ -80,6 +81,7 @@ export async function planResume(ctx: Context, typed: string[], opts: { all?: bo
   const items: ResumeCandidate[] = [];
   const occupied: LiveWindow[] = await liveWindows(ctx);
   for (const c of chosen) {
+    if (occupied.some(w => w.window === c.window)) { skipped.push({ task: c.task, reason: 'task is already starting or running' }); continue; }
     const problem = checkWindowLimit(c.agent, config.limits[c.agent], occupied, config.session);
     if (problem) {
       skipped.push({ task: c.task, reason: problem });
@@ -103,6 +105,17 @@ export interface ResumeResult {
 
 /** Make the windows and start the agents in resume mode. The prompt is not pasted again. Stops at the first failure and says which tasks went. */
 export async function resumeTasks(ctx: Context, plan: ResumePlan, opts: { self?: SelfArgv | undefined } = {}): Promise<ResumeResult[]> {
+  if (ctx.runner.dryRun) return startResumed(ctx, plan, opts);
+  const admission = await withStartLock(ctx, async () => {
+    const fresh = await planResume(ctx, plan.items.map(c => c.task), { all: true });
+    const wanted = new Set(plan.items.map(c => c.task));
+    fresh.items = fresh.items.filter(c => wanted.has(c.task));
+    return { plan: fresh, ids: await reserveStarts(ctx, fresh.items) };
+  });
+  try { return await startResumed(ctx, admission.plan, opts); }
+  finally { await releaseStarts(ctx, admission.ids); }
+}
+async function startResumed(ctx: Context, plan: ResumePlan, opts: { self?: SelfArgv | undefined }): Promise<ResumeResult[]> {
   const { tmux, runner, config } = ctx;
   const results: ResumeResult[] = [];
   let sessionUp = await tmux.hasSession();
@@ -110,7 +123,7 @@ export async function resumeTasks(ctx: Context, plan: ResumePlan, opts: { self?:
     const record = readTaskRecord(config, c.window) as TaskRecord;
     const attempt = attemptFields(record, runner.now());
     Object.assign(record, attempt);
-    await setHeaderFields(runner, taskFile(config, c.window), { attempt: attempt.attempt, attempt_id: attempt.attemptId, attempt_started: attempt.attemptStarted, attempt_report_baseline: attempt.attemptReportBaseline, turn_ended_at: null, report_candidate: null, pulled: null, summary_delivered: null, report_complete_hash: null });
+    await withStartLock(ctx, () => setHeaderFields(runner, taskFile(config, c.window), { attempt: attempt.attempt, attempt_id: attempt.attemptId, attempt_started: attempt.attemptStarted, attempt_report_baseline: attempt.attemptReportBaseline, turn_ended_at: null, report_candidate: null, pulled: null, summary_delivered: null, report_complete_hash: null }));
     const wiring = config.notify.events && opts.self ? planEventWiring({ agent: c.agent, task: c.task, window: c.window, config, self: opts.self, env: record.env, worktree: c.worktree }) : undefined;
     for (const file of wiring?.files ?? []) await runner.writeFile(file.path, file.content);
     const started = sessionUp ? await tmux.newWindow(c.window, c.worktree, record.env) : await tmux.newSession(c.window, c.worktree, record.env);

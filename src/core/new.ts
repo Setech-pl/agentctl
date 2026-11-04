@@ -1,3 +1,4 @@
+import { withStartLock, reserveStarts, releaseStarts } from './start-lock.ts';
 import { queuePrompt, deliverPendingPrompt, DELIVERY_WARNING } from './prompt-delivery.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -14,7 +15,7 @@ import type { PlanOptions } from './plan.ts';
 import { waitForReady } from './ready.ts';
 import { RC_CONFIRM, RC_FIRST_TIME } from './remote-control.ts';
 import type { ResolvedSpec } from './spec.ts';
-import { recordFromSpec, renderTaskMd, readTaskRecord, setHeaderField, taskDir, taskFile } from './taskstore.ts';
+import { recordFromSpec, renderTaskMd, readTaskRecord, setHeaderField, setHeaderFields, taskDir, taskFile } from './taskstore.ts';
 import { AgentctlError } from './util.ts';
 
 export interface NewOptions extends PlanOptions {
@@ -74,6 +75,17 @@ async function runSetup(ctx: Context, spec: ResolvedSpec, worktree: string): Pro
 
 /** Start every spec: worktree, links, TASK.md, tmux window, agent, prompt. Plans and validates everything first. */
 export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOptions = {}): Promise<NewResult[]> {
+  if (ctx.runner.dryRun || opts.noAgent) return startTasks(ctx, requested, opts);
+  const admission = await withStartLock(ctx, async () => {
+    const specs = await planBatch(ctx, requested, opts);
+    for (const spec of specs) checkLinkTargets(spec.links.filter(l => !spec.repos.some(r => l.to === r.worktree || l.to.startsWith(`${r.worktree}/`))), spec.task);
+    return { specs, ids: await reserveStarts(ctx, specs) };
+  });
+  try { return await startTasks(ctx, admission.specs, opts, true); }
+  finally { await releaseStarts(ctx, admission.ids); }
+}
+
+async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOptions, admitted = false): Promise<NewResult[]> {
   const { runner, tmux, config } = ctx;
 
   // Tools needed by the orders as written; the provider may change below, so check both agents the batch could end on.
@@ -81,7 +93,7 @@ export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: Ne
     if (!opts.noAgent) await requireTool(ctx, 'tmux', ['-V']);
     await requireTool(ctx, 'git', ['--version']);
   }
-  const specs = await planBatch(ctx, requested, opts);
+  const specs = admitted ? requested : await planBatch(ctx, requested, opts);
   for (const spec of specs) checkLinkTargets(spec.links.filter(l => !spec.repos.some(r => l.to === r.worktree || l.to.startsWith(`${r.worktree}/`))), spec.task);
   const versions: Record<string, string> = {};
   if (!runner.dryRun && !opts.noAgent) {
@@ -131,9 +143,12 @@ export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: Ne
     record.agentCliVersion = versions[spec.agent] ?? 'unknown';
     // The cohort is made by its first task; a name that exists keeps the spelling it had.
     if (spec.cohort) record.cohort = (await touchCohort(ctx, spec.cohort)).name;
-    await runner.mkdir(taskDir(config, spec.window));
-    await runner.writeFile(taskFile(config, spec.window), renderTaskMd(record, spec.prompt));
-    await queuePrompt(ctx, record, promptWithHeader(spec, record.attemptId), 'launching');
+    // The reservation spans checkout/setup; its first TASK snapshot commits under the same global admission lock.
+    await withStartLock(ctx, async () => {
+      await runner.mkdir(taskDir(config, spec.window));
+      await runner.writeFile(taskFile(config, spec.window), renderTaskMd(record, spec.prompt));
+      await queuePrompt(ctx, record, promptWithHeader(spec, record.attemptId), 'launching');
+    });
     // The agent's own folder: only the report goes there (agentctl's state is in state_dir).
     await runner.mkdir(path.dirname(spec.report));
 
@@ -204,8 +219,7 @@ export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: Ne
       );
     }
     if (!ready.ready) {
-      await setHeaderField(runner, taskFile(config, spec.window), 'prompt_delivery', 'needs-attention');
-      await setHeaderField(runner, taskFile(config, spec.window), 'prompt_error', `${spec.agent} did not become ready; original prompt remains in TASK.md`);
+      await setHeaderFields(runner, taskFile(config, spec.window), { prompt_delivery: 'needs-attention', prompt_error: `${spec.agent} did not become ready; original prompt remains in TASK.md` });
       throw new AgentctlError(
         `${spec.task}: ${spec.agent} did not show its input prompt within ${settings.readyTimeout}s (pattern /${settings.readyPattern}/)`,
         `The window is still open: "tmux attach -t ${config.session}". Once the agent is ready, send the prompt with "agentctl send"; ` +

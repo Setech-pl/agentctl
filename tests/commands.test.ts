@@ -79,7 +79,7 @@ Second line.
 
     const cache = path.join(config.cache, 'nc-1');
     const state = path.join(config.stateDir, 'nc-1');
-    const taskMd = runner.commands.find((c) => c.startsWith('write '));
+    const taskMd = runner.commands.find((c) => c.startsWith('write ') && c.includes('/TASK.md '));
     assert.match(taskMd ?? '', new RegExp(`^write ${state}/TASK.md \\(\\d+ bytes\\)$`));
     assert.deepEqual(
       runner.commands.filter((c) => !c.startsWith('write ') && !c.includes('@agentctl-role')),
@@ -283,7 +283,8 @@ describe('status', () => {
   const start = Date.UTC(2026, 9, 31, 10, 0, 0);
 
   it('builds a table from TASK.md files and mocked tmux output', async () => {
-    const report = path.join(root, 'r2.md');
+    fs.mkdirSync(config.cache, { recursive: true });
+    const report = path.join(config.cache, 'r2.md');
     const specs = resolveAll(
       config,
       `---\ntask: NC-1\nagent: claude\nmodel: opus\neffort: high\nrepos:\n  - {path: ${repo}, worktree: ${repo}-1}\n---\nA\n---\ntask: NC-2\nagent: codex\nreport: ${report}\nrepos:\n  - {path: ${repo}, worktree: ${repo}-2}\n---\nB\n`,
@@ -322,7 +323,8 @@ describe('pull', () => {
   const root = scratch.sub('pull');
   const repo = scratch.sub('pull/app');
   const config = makeConfig(root);
-  const report = path.join(root, 'REPORT.md');
+  fs.mkdirSync(config.cache, { recursive: true });
+  const report = path.join(config.cache, 'REPORT.md');
   const [spec] = resolveAll(config, `---\ntask: NC-1\nagent: claude\nreport: ${report}\nrepos:\n  - {path: ${repo}, worktree: ${repo}-1}\n---\nA\n`);
   seedTask(config, spec!, 0);
   const hasClipboard = (name: string): Respond => (cmd, args) => (cmd === 'sh' && args.at(-1) === name ? { code: 0 } : cmd === 'sh' ? { code: 1 } : undefined);

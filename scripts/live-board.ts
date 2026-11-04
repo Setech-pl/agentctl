@@ -24,7 +24,7 @@ await withHarness({ name: 'board-models', cacheRoot: root, config: 'board: {mode
     const command = `${node} ${shellQuote(pane)}`;
     const args = i === '0' ? ['new-session', '-d', '-s', h.session, '-n', window, '-x', '160', '-y', '30', command] : ['new-window', '-d', '-t', `=${h.session}:`, '-n', window, command];
     assert.equal(h.tmux(args).code, 0);
-    const record: TaskRecord = { task: task!, window, session: h.session, agent: agent as 'claude' | 'codex', model: model!, effort: effort!, repos: [], links: [], env: {}, report: path.join(h.root, task! + '.md'), started: new Date(Date.now() - 60000).toISOString(), requested: { agent: agent as 'claude' | 'codex', model: model!, effort: effort! } };
+    const record: TaskRecord = { task: task!, window, session: h.session, agent: agent as 'claude' | 'codex', model: model!, effort: effort!, repos: [], links: [], env: {}, report: path.join(config.cache, task! + '.md'), started: new Date(Date.now() - 60000).toISOString(), requested: { agent: agent as 'claude' | 'codex', model: model!, effort: effort! } };
     fs.mkdirSync(path.join(config.stateDir, window), { recursive: true });
     fs.writeFileSync(path.join(config.stateDir, window, 'TASK.md'), renderTaskMd(record, 'Isolated board fixture'));
   }

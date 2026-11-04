@@ -1,3 +1,4 @@
+import { atomicWriteFile, atomicAppendFile } from './atomic-file.ts';
 import fs from 'node:fs';
 import { tryFileLock } from './file-lock.ts';
 import path from 'node:path';
@@ -41,7 +42,7 @@ export function recordSamples(config: GlobalConfig, plans: Record<AgentName, Pla
     try { seen = JSON.parse(fs.readFileSync(stateFile, 'utf8')) as Record<string, number>; } catch { /* first read */ }
     const emit = (key: string, text: string): void => {
       if (seen[key] !== undefined) return;
-      fs.appendFileSync(journalPath(config), `${JSON.stringify({ at: new Date(now).toISOString(), kind: 'usage', text })}\n`);
+      atomicAppendFile(journalPath(config), `${JSON.stringify({ at: new Date(now).toISOString(), kind: 'usage', text })}\n`);
       seen[key] = now;
       changed = true;
     };
@@ -63,10 +64,10 @@ export function recordSamples(config: GlobalConfig, plans: Record<AgentName, Pla
       samples.push({ provider, at: p.readAt, capturedAt: now, windows: p.windows, taskTokens: totals[provider] });
     }
     if (samples.length > before) {
-      if (samples.length <= config.capacity.sampleLimit) fs.appendFileSync(file, samples.slice(before).map((s) => JSON.stringify(s)).join('\n') + '\n');
+      if (samples.length <= config.capacity.sampleLimit) atomicAppendFile(file, samples.slice(before).map((s) => JSON.stringify(s)).join('\n') + '\n');
       else {
         const tmp = `${file}.${process.pid}`;
-        fs.writeFileSync(tmp, samples.slice(-config.capacity.sampleLimit).map((s) => JSON.stringify(s)).join('\n') + '\n');
+        atomicWriteFile(tmp, samples.slice(-config.capacity.sampleLimit).map((s) => JSON.stringify(s)).join('\n') + '\n');
         fs.renameSync(tmp, file);
       }
     }
@@ -78,7 +79,7 @@ export function recordSamples(config: GlobalConfig, plans: Record<AgentName, Pla
       }));
       seen = Object.fromEntries(Object.entries(seen).filter(([key, at]) => at >= now - 14 * 86_400_000 || [...persistent].some((p) => key.startsWith(p))).slice(-10000));
       const tmp = `${stateFile}.${process.pid}`;
-      fs.writeFileSync(tmp, JSON.stringify(seen)); fs.renameSync(tmp, stateFile);
+      atomicWriteFile(tmp, JSON.stringify(seen)); fs.renameSync(tmp, stateFile);
     }
   } catch { /* sampling must not break usage */ }
   finally { release(); }

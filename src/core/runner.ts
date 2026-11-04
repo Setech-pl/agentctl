@@ -1,3 +1,5 @@
+import { atomicWriteFile, atomicAppendFile, noteStateWriteFailure } from './atomic-file.ts';
+import { withFileLock, taskLock } from './file-lock.ts';
 import { readRateLimits } from './readonly-rpc.ts';
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -129,19 +131,24 @@ export class RealRunner implements Runner {
     fs.mkdirSync(dir, { recursive: true });
   }
 
+  private async writeLocked(file: string, operation: () => void): Promise<void> {
+    let entered = false;
+    try { await withFileLock(path.basename(file) === 'TASK.md' ? taskLock(file) : `${file}.write.lock`, async () => {
+      entered = true;
+      try { operation(); } catch (error) { noteStateWriteFailure(file, error); throw error; }
+    }); } catch (error) { if (!entered) noteStateWriteFailure(file, error); throw error; }
+  }
+
   async writeFile(file: string, content: string): Promise<void> {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, content);
+    await this.writeLocked(file, () => atomicWriteFile(file, content));
   }
 
   async appendFile(file: string, content: string): Promise<void> {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.appendFileSync(file, content);
+    await this.writeLocked(file, () => atomicAppendFile(file, content));
   }
 
   async copyFile(src: string, dest: string): Promise<void> {
-    fs.mkdirSync(path.dirname(dest), { recursive: true });
-    fs.copyFileSync(src, dest);
+    await this.writeLocked(dest, () => atomicWriteFile(dest, fs.readFileSync(src)));
   }
 
   async rename(from: string, to: string): Promise<void> {

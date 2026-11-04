@@ -1,3 +1,5 @@
+import { checkReportPath, readReportText, reportPathWarnings } from './report-path.ts';
+import { atomicAppendFile } from './atomic-file.ts';
 import { missingLinkTargets, checkLinkTargets } from './links.ts';
 import { inspectReport } from './report-state.ts';
 import { findBlocked } from './depends.ts';
@@ -188,8 +190,8 @@ async function pullSummaries(ctx: Context, rows: StatusRow[], ack = false): Prom
     return `${taken.length} report summar${taken.length === 1 ? 'y' : 'ies'} delivered (full reports ${ack ? 'explicitly acknowledged' : 'not marked as pulled'}): ${taken.map(r => r.task).join(', ')}. Omitted (remain new): ${omitted.length ? `${omitted.length}: ${omitted.slice(0, 10).join(', ')}${omitted.length > 10 ? ', …' : ''}` : 'none'}.\n\n${parts.join('\n\n')}`;
   };
   for (const row of rows) {
-    const r = readReportFile({ task: row.task, report: row.reportPath });
-    const reportText = fs.readFileSync(row.reportPath, 'utf8');
+    const r = readReportFile(findRecord(ctx, row.task), { config: ctx.config });
+    const reportText = readReportText(ctx.config, findRecord(ctx, row.task), row.reportPath);
     const cut = (text: string, bytes: number) => Buffer.byteLength(text) > bytes ? Buffer.from(text).subarray(0, bytes).toString('utf8') + ' [cut]' : text;
     const first = cut((reportText.split('\n').find(l => l.trim()) ?? 'n/d'), 500);
     const refs = cut(reportText.split('\n').filter(l => /(?:\b(?:SHA|branch|commit)\b|gałąź)/i.test(l)).slice(0, 8).map(l => l.slice(0, 300)).join('\n'), 1000);
@@ -552,12 +554,12 @@ async function runListReports(deps: McpDeps, args: { all?: boolean | undefined }
  * report that is a symbolic link (an agent could have made one) is refused instead of followed.
  */
 export interface ReportPage { text: string; bytes: number; truncated: boolean; total_lines: number; offset: number; byte_offset: number; next_offset: number | null; next_byte_offset: number; has_more: boolean; returned_bytes: number; start_byte: number; end_byte: number; signature: string }
-export function readReportFile(record: Pick<TaskRecord, 'task' | 'report'>, opts: { section?: string; offset?: number; limit?: number; byte_offset?: number; maxBytes?: number } = {}): ReportPage {
+export function readReportFile(record: Pick<TaskRecord, 'task' | 'report'> & Partial<Pick<TaskRecord, 'repos'>>, opts: { config?: Pick<GlobalConfig, 'cache'>; section?: string; offset?: number; limit?: number; byte_offset?: number; maxBytes?: number } = {}): ReportPage {
   if (!record.report) throw new AgentctlError(`${record.task} has no report path`);
   let st: fs.Stats;
   try { st = fs.lstatSync(record.report); } catch { throw new AgentctlError(`${record.task} has no report yet`, 'Call peek or wait for it to finish.'); }
   if (!st.isFile() || st.isSymbolicLink()) throw new AgentctlError(`the report of ${record.task} is not a regular file; refusing to read it`);
-  const full = fs.readFileSync(record.report, 'utf8');
+  const full = opts.config ? readReportText(opts.config, { repos: record.repos ?? [] }, record.report) : fs.readFileSync(record.report, 'utf8');
   const section = opts.section ? reportSection(full, opts.section) : full;
   const lines = section.split('\n');
   const offset = opts.offset ?? 0, byteOffset = opts.byte_offset ?? 0;
@@ -595,9 +597,9 @@ async function runGetReport(deps: McpDeps, args: { task: string; section?: strin
     return ok(`=== ${record.task} (${record.agent} ${record.model}/${record.effort}) ===\n${text}\n--- page ---\n${JSON.stringify({ ...page, pulled, ...outputs })}`);
   };
   let maxBytes = Math.max(4, Math.floor(ctx.config.mcp.maxResponseKb * 1024) - 800);
-  let r = readReportFile(record, { ...args, maxBytes });
+  let r = readReportFile(record, { ...args, maxBytes, config: ctx.config });
   while (responseWireBytes(render(r, false)) > ctx.config.mcp.maxResponseKb * 1024 && maxBytes > 4) {
-    maxBytes = Math.max(4, Math.floor(maxBytes / 2)); r = readReportFile(record, { ...args, maxBytes });
+    maxBytes = Math.max(4, Math.floor(maxBytes / 2)); r = readReportFile(record, { ...args, maxBytes, config: ctx.config });
   }
   let pulled = false;
   if (!args.section) {
@@ -635,7 +637,7 @@ async function runPullReady(deps: McpDeps, args: { cohort?: string | undefined; 
   if (chosen.some(row => { const current = rows.find(r => r.task === row.task); return !current || current.report !== 'yes' || current.attemptId !== row.attemptId; })) throw new AgentctlError('report selection changed; restart at offset 0 before acknowledging');
   if (args.mode !== 'full') { const result = await pullSummaries(ctx, chosen, args.ack); return ok(`${result.text}\nnext_cursor: ${selection.id}:${offset + (result.delivered ?? 0)}; has_more: ${offset + (result.delivered ?? 0) < selection.rows.length}`); }
   if (chosen.length === 0) return ok(noReadyMessage(rows));
-  const { text, pulled } = joinReports(chosen);
+  const { text, pulled } = joinReports(chosen, ctx);
   const head = `${pulled.length} new report${pulled.length === 1 ? '' : 's'}; marked as pulled after complete delivery: ${pulled.map(p => p.task).join(', ')}`;
   return { text: `${head}\n\n${text}\nnext_cursor: ${selection.id}:${offset + chosen.length}; has_more: ${offset + chosen.length < selection.rows.length}`, onDelivered: () => markPulled(ctx, chosen) };
 
@@ -695,7 +697,7 @@ function audit(ctx: Context, entry: AuditEntry): void {
   try {
     const file = auditPath(ctx.config);
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.appendFileSync(file, `${line}\n`);
+    atomicAppendFile(file, `${line}\n`);
   } catch (e) {
     throw new AgentctlError(`cannot write the audit log ${auditPath(ctx.config)}: ${errorMessage(e)}`, 'Nothing was done: writes by the chat are only allowed while they can be recorded.');
   }
@@ -1278,7 +1280,7 @@ MCP_TOOLS.push(
   ...(['hide', 'unhide'] as const).map((name) => extraWrite(name, `${name} <TASKS...>`, `${name} tasks on the board`, { tasks: z.array(taskArg).min(1).max(100) }, async (ctx, a) => setHidden(ctx, a.tasks, name === 'hide'))),
   extraWrite('archive', 'archive [--older-than <AGE>]', 'Archive the state of closed tasks', { older_than: optionalText, cohort: cohortArg.optional() }, async (ctx, a) => archiveClosed(ctx, { cohort: a.cohort, olderThanMs: a.older_than ? parseAge(a.older_than) : undefined })),
   extraWrite('adopt', 'adopt <TASK> --report <PATH>', 'Restore missing task metadata from facts supplied by the user', { task: taskArg, report: z.string().min(1), window: optionalText, worktree: optionalText, agent: z.enum(AGENT_NAMES).optional(), model: optionalText, effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional() }, async (ctx, a) => { await adoptTask(ctx, a.task, a); return { task: a.task, adopted: true }; }),
-  extraWrite('report_from', 'report <TASK> --from <FILE> [--force]', 'Copy a chosen report to its canonical location', { task: taskArg, from: z.string().min(1), force: z.boolean().optional() }, async (ctx, a) => { const info = await reportInfo(ctx, a.task, { from: a.from, force: a.force }); if (info.result?.action === 'kept' || (info.result?.action === 'none' && info.result.note)) throw new AgentctlError(info.result.note ?? 'report was not copied', 'Preview again with force: true only if replacing the canonical file is intended.'); return info; }),
+  extraWrite('report_from', 'report <TASK> --from <FILE> [--force]', 'Copy a regular report from task worktrees or cache to its canonical location; force only overwrites, never permits outside or symlink sources', { task: taskArg, from: z.string().min(1), force: z.boolean().optional() }, async (ctx, a) => { const info = await reportInfo(ctx, a.task, { from: a.from, force: a.force, sourcePolicy: 'mcp' }); if (info.result?.action === 'kept' || (info.result?.action === 'none' && info.result.note)) throw new AgentctlError(info.result.note ?? 'report was not copied', 'Preview again with force: true only if replacing the canonical file is intended.'); return info; }),
   extraWrite('limits_release', 'limits release [claude=N codex=N]', 'Release reserved provider places', { claude: limitArg, codex: limitArg }, async (ctx, a) => releasePlaces(ctx, { ...(a.claude !== undefined ? { claude: a.claude } : {}), ...(a.codex !== undefined ? { codex: a.codex } : {}) })),
   extraWrite('manager_start', 'manager', 'Start the supervising manager session', { project: optionalText, name: optionalText, model: optionalText, effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional() }, async (ctx, a, deps) => { if (!deps.self) throw new AgentctlError('this server has no self command for the manager'); return startManager(ctx, { ...a, self: deps.self, noWait: true }); }),
   extraWrite('manager_stop', 'manager stop', 'Stop the manager session', {}, async (ctx) => ({ state: await stopManager(ctx) })),
@@ -1361,6 +1363,7 @@ async function confirmationScope(ctx: Context, name: string, args: Record<string
     if (args.cohort) for (const raw of rawSpecs) raw.header.cohort = args.cohort;
     for (const raw of rawSpecs) if ('setup' in raw.header) throw new AgentctlError(`${String(raw.header.task ?? 'a task')}: \"setup\" runs shell commands and is not accepted from the chat`);
     const specs = await planBatch(ctx, rawSpecs.map(raw => resolveSpec(raw, { config: ctx.config })), { noSwitch: true, reuse: Boolean(args.reuse), ...(args.agent ? { agent: args.agent as 'claude' | 'codex' } : {}), ignoreLimits: name === 'queue', deferBases: name === 'queue', skipAfter: name === 'queue' });
+    for (const spec of specs) { const warnings = reportPathWarnings(ctx.config, spec); if (warnings.length) throw new AgentctlError(`${spec.task}: ${warnings.join('; ')}`); }
     return { specs };
   }
   if (name === 'queue_retry') {
@@ -1373,7 +1376,9 @@ async function confirmationScope(ctx: Context, name: string, args: Record<string
   if (name === 'report_from') {
     const record = findRecord(ctx, args.task as string);
     const source = resolvePath(args.from as string, record.repos[0]?.worktree);
-    const signature = (file: string) => { try { const st = fs.statSync(file); return { size: st.size, mtime: st.mtimeMs, ino: st.ino, hash: createHash('sha256').update(fs.readFileSync(file)).digest('hex') }; } catch { return null; } };
+    checkReportPath(ctx.config, record, source, { existing: fs.existsSync(source) });
+    checkReportPath(ctx.config, record, record.report);
+    const signature = (file: string) => { try { const st = fs.statSync(file); return { size: st.size, mtime: st.mtimeMs, ino: st.ino, hash: createHash('sha256').update(readReportText(ctx.config, record, file)).digest('hex') }; } catch { return null; } };
     return { record, source, sourceSignature: signature(source), destinationSignature: signature(record.report) };
   }
   if (name === 'archive') return archiveClosed(ctx, { cohort: args.cohort as string | undefined, olderThanMs: args.older_than ? parseAge(args.older_than as string) : undefined, preview: true });

@@ -1,3 +1,4 @@
+import { pendingStarts } from './start-lock.ts';
 import { inspectReport } from './report-state.ts';
 import { resolveTaskBases } from './base-ref.ts';
 import fs from 'node:fs';
@@ -54,7 +55,7 @@ export async function liveWindows(ctx: Context): Promise<LiveWindow[]> {
     return agent ? { window, agent, ...(reportReady ? { reportReady: true, counted: configCountsReady(ctx) } : {}) } : { window };
   });
   // Places held by the user (`limits reserve`) and sessions outside agentctl count against the limit like its own windows.
-  return [...windows, ...(await slotHolders(ctx))];
+  return [...windows, ...pendingStarts(ctx.config).filter(r => !names.includes(r.window)).map(r => ({ window: r.window, agent: r.agent, kind: 'starting' as const })), ...(await slotHolders(ctx))];
 }
 
 function configCountsReady(ctx: Context): boolean { return ctx.config.countReportReady; }

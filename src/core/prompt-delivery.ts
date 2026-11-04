@@ -1,3 +1,4 @@
+import { stateWriteFailure } from './atomic-file.ts';
 import path from 'node:path';
 import fs from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -53,6 +54,7 @@ export async function deliverPendingPrompt(ctx: Context, window: string): Promis
     if (!record) return 'needs-attention';
     if (record.promptDelivery === 'sent') return 'sent';
     const file = taskFile(ctx.config, window);
+    if (stateWriteFailure(file)) return 'needs-attention';
     const attention = async (why: string) => {
       await setHeaderFields(ctx.runner, file, { prompt_delivery: 'needs-attention', prompt_error: `Prompt delivery not confirmed: ${why}. Inspect ${record.task} with peek/attach; the prompt remains in TASK.md. agentctl will not silently retry or leave this as waiting.` });
       return 'needs-attention' as const;

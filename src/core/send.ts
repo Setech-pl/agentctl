@@ -1,5 +1,4 @@
-import path from 'node:path';
-import { withFileLock } from './file-lock.ts';
+import { withStartLock } from './start-lock.ts';
 import { liveWindows } from './plan.ts';
 import { checkWindowLimit } from './checks.ts';
 import fs from 'node:fs';
@@ -17,7 +16,7 @@ export interface SendItem {
 /** Paste a follow-up prompt into existing windows and log it in TASK.md. */
 export async function sendPrompts(ctx: Context, items: SendItem[]): Promise<{ task: string; message: string; warning?: string }[]> {
   if (ctx.runner.dryRun) return sendPromptsUnlocked(ctx, items);
-  return withFileLock(path.join(ctx.config.stateDir, 'send-admission.lock'), () => sendPromptsUnlocked(ctx, items));
+  return withStartLock(ctx, () => sendPromptsUnlocked(ctx, items));
 }
 
 async function sendPromptsUnlocked(ctx: Context, items: SendItem[]): Promise<{ task: string; message: string; warning?: string }[]> {

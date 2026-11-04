@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.17.4] - 2026-11-04
 
+- Kimi audit K1/S3/N3: atomic state snapshots (same-directory temporary file, fsync, rename), a shared per-task lock for all TASK.md writes/appends and prompt delivery, grouped report metadata updates, preserved old state on ENOSPC/interruption and durable needs-attention diagnostics with emergency disk space.
+- Kimi audit K2/W2: restrict MCP report sources/spec paths to task worktrees and cache; reject symlinks and boundary escapes. CLI warns for outside spec paths and permits an explicit outside regular report source only with --force. Report reads validate paths and opened inode before/after reading, including pull_ready and mirrors.
+- Kimi audit W4: one global start admission lock with durable slot reservations for new, queued/retried starts, resume and move. Shared admission with report-ready follow-ups; preserve repository checkout concurrency and recover dead reservation owners. Independent watchers claim queue entries once.
+
 - Production P1: confirm idle after `watch.idle_confirm_ticks` consecutive reads (default 2). Recognize running tools and Claude spinner variants; Stop cannot announce waiting while work is visible.
 - Production P2/P3: preview all missing link targets, reject confirmation before writes, check project links in doctor, and protect GC worktrees referenced by known project/active-task links (`--force-links` is CLI-only). Preview tokens hash canonical arguments, survive reads and unrelated starts, and expose `preview.ttl_s` (600 s), expiry and precise rejection causes. Destructive target expansion still refuses.
 - Production P5: one report readiness rule across doctor, status, list/get_report and pull_ready, including missing canonical files with historical copy metadata.

@@ -13,7 +13,7 @@ const cache = defaultCacheRoot('agentctl-economy');
 const checks: string[] = [];
 const check = (name: string, ok: unknown) => { assert.ok(ok, name); checks.push(name); console.log(`PASS ${name}`); };
 await withHarness({ name: 'economy', cacheRoot: cache, config: 'mcp: {max_response_kb: 256}\nwatch: {interval: 1}\noverload: {retry_after: 1, max_retries: 2}\ncapacity: {codex_refresh: false}\n' }, async h => {
-  const config = loadGlobalConfig(h.agentctlHome);
+  const config = loadGlobalConfig(h.agentctlHome); fs.mkdirSync(config.cache, { recursive: true });
   const seed = (task: string, report: string, extra: Partial<TaskRecord> = {}) => {
     const record: TaskRecord = { task, window: task.toLowerCase(), session: h.session, agent: 'claude', model: 'sonnet', effort: 'medium', repos: [], links: [], env: {}, report, started: new Date(Date.now() - 60000).toISOString(), requested: { agent: 'claude', model: 'sonnet', effort: 'medium' }, ...extra };
     const dir = path.join(config.stateDir, record.window); fs.mkdirSync(dir, { recursive: true });
@@ -21,11 +21,11 @@ await withHarness({ name: 'economy', cacheRoot: cache, config: 'mcp: {max_respon
   };
   for (let i = 1; i <= 6; i++) {
     fs.appendFileSync(path.join(h.agentctlHome, 'history.jsonl'), JSON.stringify({ v: 1, event: 'report', at: new Date().toISOString(), task: `NC-${i}`, reportAt: new Date().toISOString(), result: null }) + '\n');
-    const report = path.join(h.root, `NC-${i}.md`); seed(`NC-${i}`, report);
+    const report = path.join(config.cache, `NC-${i}.md`); seed(`NC-${i}`, report);
     fs.writeFileSync(report, `Werdykt: PASS\nSHA: abc123; branch: economy\n## Summary\nResult ${i}\n## Evidence\n${'x'.repeat(20000)}\n<!-- agentctl:report-end -->`);
   }
   fs.writeFileSync(path.join(h.agentctlHome, 'journal.jsonl'), JSON.stringify({ at: new Date(Date.now() - 5000).toISOString(), kind: 'report-ready', task: 'NC-1', text: 'fixture ready' }) + '\n');
-  seed('OVER-1', path.join(h.root, 'OVER-1.md'));
+  seed('OVER-1', path.join(config.cache, 'OVER-1.md'));
   const control = path.join(h.root, 'screen-mode'); fs.writeFileSync(control, 'draft');
   const fake = path.join(h.root, 'fake-pane.mjs');
   fs.writeFileSync(fake, `import fs from 'node:fs'; let mode='',draft=''; const draw=()=>process.stdout.write('\\x1b[2J\\x1b[H'+(mode==='busy'?'Working (esc to interrupt)\\n':mode==='background'?'3 monitors still running\\n':'⏺ Request failed.\\n  ⎿ API Error: 529 Overloaded\\n')+'────────────────\\n❯ '+(mode==='draft'?'unsent draft':draft)); const render=()=>{const m=fs.readFileSync(${JSON.stringify(control)},'utf8');if(m!==mode){mode=m;draft='';draw();}};process.stdin.setRawMode(true);process.stdin.resume();process.stdin.on('data',b=>{const s=b.toString().replace(/\\x1b\\[20[01]~/g,'');if(/[\\r\\n]/.test(s)){draft='';draw();}else{draft+=s;draw();}});setInterval(render,100);render();`);
@@ -96,9 +96,9 @@ await withHarness({ name: 'economy', cacheRoot: cache, config: 'mcp: {max_respon
     check('W6: owner CLI still reads original queued values', h.agentctl(['queue', 'show', 'Q-SECRET']).stdout.includes('LIVE_SECRET'));
 
   } finally { for (const c of clients) await c.close(); }
-  const candidateDir = path.join(h.root, 'candidates'); fs.mkdirSync(candidateDir);
+  const candidateDir = path.join(config.cache, 'candidates'); fs.mkdirSync(candidateDir);
   for (const name of ['CLAUDE.md', 'README.md', 'integration-12.md']) fs.writeFileSync(path.join(candidateDir, name), name === 'integration-12.md' ? '# Missing verdict' : 'Werdykt: PASS');
-  const canonical = path.join(h.root, 'canonical-integration.md');
+  const canonical = path.join(config.cache, 'canonical-integration.md');
   seed('integration-12', canonical, { reportAlt: [path.join(candidateDir, '*.md')], cohort: 'candidate-fixture' });
   const watcher = h.spawnAgentctl(['watch'], path.join(h.root, 'candidate-watch.log'));
   const rows = () => JSON.parse(h.agentctl(['status', '--all', '--json']).stdout) as { task: string; state: string; reportCandidate?: string }[];
@@ -134,7 +134,7 @@ await withHarness({ name: 'economy', cacheRoot: cache, config: 'mcp: {max_respon
   const refusal = h.agentctl(['new', missing, '--no-agent', '-y']);
   check('live missing worktree without fallback has clear error', refusal.code !== 0 && /no repository "back"/.test(refusal.stderr));
 
-  const attemptReport = path.join(h.root, 'RESTART-1.md');
+  const attemptReport = path.join(config.cache, 'RESTART-1.md');
   fs.writeFileSync(attemptReport, 'Werdykt: PASS\n<!-- agentctl:report-end -->');
   seed('RESTART-1', attemptReport, { repos: [{ path: path.join(h.root, 'front'), worktree: path.join(h.root, 'TWO-front') }] });
   const resume = h.agentctl(['resume', 'RESTART-1', '-y']);

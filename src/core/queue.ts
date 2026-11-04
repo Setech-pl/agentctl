@@ -1,3 +1,5 @@
+import { withStartLock } from './start-lock.ts';
+import { reportPathWarnings } from './report-path.ts';
 import { missingLinkTargets, checkLinkTargets } from './links.ts';
 import type { OutputVerdict } from './outputs.ts';
 import { redactQueue } from './mcp-redact.ts';
@@ -65,6 +67,7 @@ export interface QueueEntry {
   reuse?: boolean;
   /** `status: starting`: ISO time the watcher began the start. */
   startingAt?: string;
+  startingPid?: number;
   /** The cancelled authors of `after` that the watcher has announced as "blocked" already (once per author). */
   blockedNotified?: string[];
   /** `status: failed`: when and why. */
@@ -187,7 +190,7 @@ export async function planQueueAdd(ctx: Context, raws: RawSpec[], opts: { agent?
   checkAfter(ctx, specs, entries);
   const items = specs.map((spec, i) => ({ raw: raws[i] as RawSpec, spec }));
   const rows = await collectStatus(ctx, { progress: false, archived: true });
-  const warnings = [...await touchWarnings(ctx, specs), ...specs.flatMap(s => missingLinkTargets(s.links).map(w => `${s.task}: ${w}`))];
+  const warnings = [...await touchWarnings(ctx, specs), ...specs.flatMap(s => reportPathWarnings(ctx.config, s).map(w => `${s.task}: ${w}`)), ...specs.flatMap(s => missingLinkTargets(s.links).map(w => `${s.task}: ${w}`))];
   const capacity = config.capacity.snapshot && !ctx.runner.dryRun ? capacitySnapshot(await collectCapacity(ctx), specs.map((s) => s.agent)) : undefined;
   return { items, warnings, ...(capacity ? { capacity } : {}), summary: [...describeQueueAdd(ctx, specs, entries, await liveWindows(ctx), rows), ...usageSummaryLines(config, specs, ctx.runner.now()), ...(capacity ? snapshotLines(capacity) : []), ...warnings.map((w) => `⚠ ${w}`)] };
 }
@@ -378,6 +381,9 @@ export async function moveToFront(ctx: Context, input: string): Promise<QueueEnt
 
 /** `queue retry`: a failed entry goes to the end of the line and is tried again (over the worktree it left, if any). */
 export async function retryEntry(ctx: Context, input: string): Promise<QueueEntry> {
+  return withStartLock(ctx, () => retryEntryLocked(ctx, input));
+}
+async function retryEntryLocked(ctx: Context, input: string): Promise<QueueEntry> {
   const entry = findEntry(ctx.config, input);
   if (entry.status !== 'failed') throw new AgentctlError(`${entry.task} is ${entry.status}, not failed`);
   const spec = resolveSpec(splitSpecs(entry.spec, `queue entry ${entry.task}`)[0] as RawSpec, { config: ctx.config });
@@ -534,6 +540,7 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   // the prompt may be missing) or not: either way it goes to "failed", where a human decides.
   for (const entry of entries) {
     if (entry.status !== 'starting' || memory.inflight.has(entry.task)) continue;
+    if (entry.startingPid) { try { process.kill(entry.startingPid, 0); continue; } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') continue; } }
     if (records.has(entry.task)) {
       fs.rmSync(entryFile(config, entry), { force: true });
       fs.rmSync(queueLogFile(config, entry), { force: true });
@@ -566,17 +573,22 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
     const limit = config.limits[entry.agent];
     if (limit !== undefined && used[entry.agent] >= limit) continue;
     used[entry.agent]++;
-    began.push(entry.task);
-    await beginStart(ctx, memory, notifier, entry, opts);
+    if (await beginStart(ctx, memory, notifier, entry, opts)) began.push(entry.task);
   }
   for (const task of [...memory.held.keys()]) if (!stillHeld.has(task)) memory.held.delete(task);
   return began;
 }
 
-async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier, entry: QueueEntry, opts: QueueTickOptions): Promise<void> {
+async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier, entry: QueueEntry, opts: QueueTickOptions): Promise<boolean> {
   const { config } = ctx;
+  const claimed = await withStartLock(ctx, async () => {
+    const fresh = readQueue(config).find(e => e.seq === entry.seq && e.task === entry.task);
+    if (!fresh || fresh.status !== 'queued') return false;
+    await writeEntry(ctx, { ...fresh, status: 'starting', startingPid: process.pid, startingAt: new Date(ctx.runner.now()).toISOString() });
+    return true;
+  });
+  if (!claimed) return false;
   const starting: QueueEntry = { ...entry, status: 'starting', startingAt: new Date(ctx.runner.now()).toISOString() };
-  await writeEntry(ctx, starting);
   const log: string[] = [];
   const startCtx = new ContextClass(ctx.runner, config, (l) => void log.push(l));
   const run = async (): Promise<void> => {
@@ -604,12 +616,14 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
       await notifyPlain(ctx, notifier, entry.task, `Uruchomiono ${entry.task} z kolejki`, opts.self);
       await recordJournal(ctx, { kind: 'queue-start', task: entry.task, text: `Uruchomiono ${entry.task} z kolejki (${entry.agent})`, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
     } catch (e) {
+      if (/window limit for .* reached/.test(errorMessage(e))) { await writeEntry(ctx, { ...entry, status: 'queued' }); return; }
       await failEntry(ctx, starting, e instanceof AgentctlError && e.hint ? `${e.message}\nHint: ${e.hint}` : errorMessage(e), notifier, opts, !opts.signal?.aborted, log).catch(() => undefined);
     } finally {
       memory.inflight.delete(entry.task);
     }
   };
   memory.inflight.set(entry.task, { agent: entry.agent, promise: run() });
+  return true;
 }
 
 /** The entry goes to the end of the line as `failed`, with the log of the attempt; no retry loop: `queue retry` is a human's decision. */

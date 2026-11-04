@@ -1,3 +1,4 @@
+import { atomicWriteFile } from './atomic-file.ts';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -244,7 +245,7 @@ export class UsageReader {
     try {
       fs.mkdirSync(path.dirname(this.file), { recursive: true });
       const tmp = `${this.file}.${process.pid}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify(this.data));
+      atomicWriteFile(tmp, JSON.stringify(this.data));
       fs.renameSync(tmp, this.file);
       this.dirty = false;
     } catch {

@@ -101,7 +101,7 @@ describe('status states from mocked capture-pane', () => {
   const config = makeConfig(root);
   const start = Date.UTC(2026, 9, 31, 10, 0, 0);
   const headers = ['NC-1', 'NC-2', 'NC-3', 'NC-4', 'NC-5', 'NC-6'].map((t, i) => {
-    const report = path.join(root, `${t}.md`);
+    const report = path.join(config.cache, `${t}.md`);
     return `---\ntask: ${t}\nagent: ${i === 2 ? 'codex' : 'claude'}\nreport: ${report}\nrepos:\n  - {path: ${repo}, worktree: ${repo}-${i}}\n---\nGo\n`;
   });
   const specs: ResolvedSpec[] = splitSpecs(headers.join('')).map((raw) => resolveSpec(raw, { config, loadProject: () => undefined }));
@@ -109,10 +109,11 @@ describe('status states from mocked capture-pane', () => {
     fs.mkdirSync(path.dirname(taskFile(config, s.window)), { recursive: true });
     fs.writeFileSync(taskFile(config, s.window), renderTaskMd(recordFromSpec(s, config, start), 'Go'));
   }
-  fs.writeFileSync(path.join(root, 'NC-4.md'), 'done');
-  fs.utimesSync(path.join(root, 'NC-4.md'), new Date(start + 60_000), new Date(start + 60_000));
-  fs.writeFileSync(path.join(root, 'NC-6.md'), 'left over from an earlier run');
-  fs.utimesSync(path.join(root, 'NC-6.md'), new Date(start - 3_600_000), new Date(start - 3_600_000));
+  fs.mkdirSync(config.cache, { recursive: true });
+  fs.writeFileSync(path.join(config.cache, 'NC-4.md'), 'done');
+  fs.utimesSync(path.join(config.cache, 'NC-4.md'), new Date(start + 60_000), new Date(start + 60_000));
+  fs.writeFileSync(path.join(config.cache, 'NC-6.md'), 'left over from an earlier run');
+  fs.utimesSync(path.join(config.cache, 'NC-6.md'), new Date(start - 3_600_000), new Date(start - 3_600_000));
 
   it('reports working / waiting / needs-trust / report-ready / dead', async () => {
     const screens: Record<string, string> = { 'nc-1': WORKING, 'nc-2': CLAUDE_IDLE, 'nc-3': CODEX_TRUST, 'nc-4': CLAUDE_IDLE };
