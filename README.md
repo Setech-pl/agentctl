@@ -459,7 +459,7 @@ Play a notification sound when a background task finishes.
 | `model` | no | Model name passed to the agent; omitted or `default`: the agent's own default. |
 | `effort` | no | `low`, `medium`, `high` (default), `xhigh`, `max` (not for Codex). |
 | `repos[]` | yes | At least one `{path, worktree, base, branch}`. The agent starts in the first worktree. |
-| `setup` | no | Shell commands run in the first worktree after `git worktree add` and before the links. Each `repos[]` entry may also carry its own `setup` (run in that repository's worktree), and a repository's own `.agentctl.yaml` setup runs in its worktree too; not accepted from the chat. |
+| `setup` | no | Shell commands run after `git worktree add` and before the links, per repository in that repository's own worktree: the entry's `repos[].setup`, else the `setup` of that repository's `.agentctl.yaml`. The top-level `setup` (and the global one) belongs to the first repository only. Not accepted from the chat. |
 | `links[]` | no | `{from, to}` symlinks in the first worktree, for example to wire a client to a backend under test. |
 | `env` | no | Environment variables of the tmux window. |
 | `review_of` | no | Task ID under review; the reviewer must use another agent or another model than the author. |

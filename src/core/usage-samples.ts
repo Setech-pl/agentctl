@@ -28,6 +28,7 @@ export function readSamples(config: GlobalConfig): UsageSample[] {
 
 const RESET_DROP_POINTS = 20;
 const RESET_GRACE_MS = 5 * 60_000;
+const RESET_TOLERANCE_MS = 15 * 60_000;
 export function isWindowReset(old: PlanWindowView, cur: PlanWindowView, now: number): boolean {
   const forward = old.resetsAt !== null && cur.resetsAt !== null ? cur.resetsAt - old.resetsAt : 0;
   const windowMs = Math.max(1, cur.minutes || old.minutes || 60) * 60_000;
@@ -56,13 +57,22 @@ export function recordSamples(config: GlobalConfig, plans: Record<AgentName, Pla
       seen[key] = now;
       changed = true;
     };
+    // One announcement per window instance: a boundary that only jitters (within RESET_TOLERANCE_MS of the one already announced) is the same window.
+    const emitReset = (provider: AgentName, kind: string, resetsAt: number | null, text: string): void => {
+      if (resetsAt === null) return emit(`${provider}|${kind}|open|reset`, text);
+      const key = `${provider}|${kind}|reset-at`, last = seen[key];
+      if (last !== undefined && Math.abs(resetsAt - last) < RESET_TOLERANCE_MS) return;
+      atomicAppendFile(journalPath(config), `${JSON.stringify({ at: new Date(now).toISOString(), kind: 'usage', text })}\n`);
+      seen[key] = resetsAt;
+      changed = true;
+    };
     for (const provider of ['claude', 'codex'] as const) {
       const p = plans[provider];
       const previous = samples.filter((s) => s.provider === provider).at(-1);
       // A stale source: the old deadline passed a while ago and the usage did not grow since, so the window is over even if nobody re-read it.
       for (const w of previous?.windows ?? []) {
         const cur = p.windows.find((x) => x.kind === w.kind);
-        if (w.resetsAt !== null && w.resetsAt + RESET_GRACE_MS <= now && (!cur || cur.usedPercent <= w.usedPercent)) emit(`${provider}|${w.kind}|${w.resetsAt}|reset`, `${provider} ${w.label}: window reset; current usage ${cur?.usedPercent ?? 'n/d'}`);
+        if (w.resetsAt !== null && w.resetsAt + RESET_GRACE_MS <= now && (!cur || cur.usedPercent <= w.usedPercent)) emitReset(provider, w.kind, w.resetsAt, `${provider} ${w.label}: window reset; current usage ${cur?.usedPercent ?? 'n/d'}`);
       }
       for (const w of p.windows) for (const threshold of config.capacity.thresholds) {
         if (w.usedPercent >= threshold) emit(`${provider}|${w.kind}|${w.resetsAt ?? 'open'}|${threshold}`, `${provider} ${w.label}: usage crossed ${threshold}% (${w.usedPercent}%)`);
@@ -72,7 +82,7 @@ export function recordSamples(config: GlobalConfig, plans: Record<AgentName, Pla
       // clearly (hysteresis) while the old deadline had passed or the boundary moved forward. Same window instance: announced once.
       for (const w of p.windows) {
         const old = previous?.windows.find((x) => x.kind === w.kind);
-        if (old && isWindowReset(old, w, now)) emit(`${provider}|${w.kind}|${old.resetsAt ?? 'open'}|reset`, `${provider} ${w.label}: window reset; current usage ${w.usedPercent}%`);
+        if (old && isWindowReset(old, w, now)) emitReset(provider, w.kind, old.resetsAt, `${provider} ${w.label}: window reset; current usage ${w.usedPercent}%`);
       }
       samples.push({ provider, at: p.readAt, capturedAt: now, windows: p.windows, taskTokens: totals[provider] });
     }

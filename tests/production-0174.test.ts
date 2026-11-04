@@ -118,8 +118,8 @@ it('P9 160 tasks / 16000 files: compact default, exact byte/category/cohort tota
 it('P10 ready idle windows release slots; new/queue hint; send cannot exceed a full provider limit and resumes counting', async () => {
   const f = fixture('slots', 'limits: {claude: 1}\n'), r = seedTask(f.config, 'READY'); report(r); const ready = f.tmux.add('ready', '❯ \n');
   let load = collectLimits(f.config, await liveWindows(f.ctx)).providers[0]!; assert.equal(load.used, 0); assert.deepEqual(load.reportReady, ['ready']); assert.equal(load.free, 1);
-  const preview = await f.call('new', { spec: f.spec('NEXT'), no_agent: true }); assert.match(preview.text, /1 okien report-ready/);
-  const q = await planQueueAdd(f.ctx, splitSpecs(f.spec('QUEUED'))); assert.match(q.summary.join('\n'), /1 okien report-ready/);
+  const preview = await f.call('new', { spec: f.spec('NEXT'), no_agent: true }); assert.match(preview.text, /1 okno report-ready/);
+  const q = await planQueueAdd(f.ctx, splitSpecs(f.spec('QUEUED'))); assert.match(q.summary.join('\n'), /1 okno report-ready/);
   seedTask(f.config, 'BUSY'); const busy = f.tmux.add('busy', screen); const sent = await sendPrompts(f.ctx, [{ task: r.task, window: r.window, prompt: 'more' }]); assert.match(sent[0]!.warning!, /limit.*reached/); assert.equal(f.runner.commands.some(c => c.startsWith('tmux paste-buffer')), false);
   f.tmux.windows.splice(f.tmux.windows.indexOf(busy), 1); const accepted = await sendPrompts(f.ctx, [{ task: r.task, window: r.window, prompt: 'continue working' }]); assert.ok(!accepted[0]!.warning?.includes('limit'));
   ready.screen = screen; load = collectLimits(f.config, await liveWindows(f.ctx)).providers[0]!; assert.equal(load.used, 1); assert.equal(load.reportReady.length, 0);

@@ -233,6 +233,14 @@ describe('FIX2 A: automatic review start gate and old entries', () => {
   });
 });
 
+describe('FIX2 C: window reset identity (R6)', () => {
+  it('R6: jitter of an already expired boundary does not duplicate the "window reset"', () => {
+    const f = fixture('r6'); const now = Date.now();
+    for (let i = 0; i < 3; i++) recordSamples(f.config, plans(now + i * 1000, 80, now - 600_000 + i * 1000), { claude: 0, codex: 0 }, now + i * 1000);
+    assert.equal(readJournal(f.config).filter(e => /claude.*window reset/.test(e.text)).length, 1);
+  });
+});
+
 describe('FIX2 B: outputs repo, verdict label, pending block', () => {
   const sha = 'abcdef1';
   const block = (commits: string) => `Werdykt: PASS\n\n\`\`\`agentctl-outputs\nversion: 1\nverdict: PASS\ncommits:\n${commits}\`\`\`\n<!-- agentctl:report-end -->\n`;
@@ -293,3 +301,16 @@ describe('FIX2 B: outputs repo, verdict label, pending block', () => {
   });
 });
 
+describe('FIX2 C4: Polish numerals', () => {
+  it('1 okno / 2–4 okna / 5+ okien, and the teens', () => {
+    const w = (n: number) => `${n} ${plural(n, 'okno', 'okna', 'okien')}`;
+    assert.deepEqual([1, 2, 3, 4, 5, 11, 12, 14, 21, 22, 25, 112].map(w), ['1 okno', '2 okna', '3 okna', '4 okna', '5 okien', '11 okien', '12 okien', '14 okien', '21 okien', '22 okna', '25 okien', '112 okien']);
+  });
+  it('the start summary says "3 okna report-ready", never "3 okien"', async () => {
+    const f = fixture('c4');
+    for (const t of ['R1', 'R2', 'R3']) { seedTask(f.config, t, {}); f.tmux.add(t.toLowerCase(), '❯ \n'); }
+    f.config.limits.claude = 1;
+    const spec = `---\ntask: NEWT\nagent: claude\nrepos:\n  - {path: ${f.repo}, worktree: ${f.repo}-newt}\n---\nGo.\n`;
+    const p = await f.full('new', { spec }); assert.doesNotMatch(p.text, /\b[234] okien/); assert.doesNotMatch(p.text, /\b1 okien/);
+  });
+});

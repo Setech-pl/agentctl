@@ -33,6 +33,8 @@ import type { PlanState } from '../src/core/usage.ts';
 const cache = defaultCacheRoot('agentctl-0174'), results: { name: string; ok: boolean }[] = [];
 const check = (name: string, ok: unknown) => { results.push({ name, ok: Boolean(ok) }); console.log(`${ok ? 'PASS' : 'FAIL'} ${name}`); assert.ok(ok, name); };
 const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+/** Wait for a condition instead of a fixed sleep: PTY clients attach and keys arrive later on a loaded machine. */
+const until = async (condition: () => boolean, ms = 8000) => { const end = Date.now() + ms; while (Date.now() < end) { if (condition()) return true; await pause(50); } return condition(); };
 class SandboxRunner extends RealRunner {
   readonly harness: Harness;
   constructor(harness: Harness) { super(); this.harness = harness; }
@@ -113,11 +115,12 @@ await withHarness({ name: 'nc-workflow', cacheRoot: cache, config: 'watch: {inte
       h.tmux(['select-window', '-t', `=${session}:${session === h.session ? 'navigation-task' : 'task'}`]);
       const terminal = spawn('/usr/bin/python3', ['-c', "import os,pty,select,sys,fcntl,termios,struct,signal\npid,fd=pty.fork()\nif pid==0: os.execv(sys.argv[1],[sys.argv[1],'attach-session','-t',sys.argv[2]])\nfcntl.ioctl(fd,termios.TIOCSWINSZ,struct.pack('HHHH',32,160,0,0))\ntry:\n while True:\n  for source in select.select([0,fd],[],[])[0]:\n   data=os.read(source,65536)\n   if not data: raise EOFError()\n   if source==0: os.write(fd,data)\nexcept (EOFError,OSError): pass\nfinally:\n os.close(fd)\n try: os.kill(pid,signal.SIGTERM)\n except ProcessLookupError: pass\n os.waitpid(pid,0)\n", path.join(h.fakeBin, 'tmux'), `=${session}`], { env: h.env, stdio: ['pipe', 'ignore', 'ignore'] });
       attached.push(terminal);
-      await pause(250);
+      check(`PTY client attached to ${session}`, await until(() => h.tmux(['list-clients', '-t', `=${session}`, '-F', '#{client_name}']).stdout.trim() !== ''));
     }
-    attached[0]!.stdin!.write('\x1b[24~'); await pause(350);
+    const windowOf = (session: string) => h.tmux(['display-message', '-p', '-t', `=${session}:`, '#{window_name}']).stdout.trim();
+    attached[0]!.stdin!.write('\x1b[24~'); await until(() => windowOf(h.session) === 'board');
     check('actual F12 in first client selects only its board', h.tmux(['display-message', '-p', '-t', `=${h.session}:`, '#{window_name}']).stdout.trim() === 'board' && h.tmux(['display-message', '-p', '-t', '=second-dev:', '#{window_name}']).stdout.trim() === 'task');
-    attached[1]!.stdin!.write('\x1b[24~'); await pause(350);
+    attached[1]!.stdin!.write('\x1b[24~'); await until(() => windowOf('second-dev') === 'board');
     check('actual F12 in second client selects second board', h.tmux(['display-message', '-p', '-t', '=second-dev:', '#{window_name}']).stdout.trim() === 'board');
     const mode = path.join(h.root, 'pane-mode'), inputLog = path.join(h.root, 'pane-input.log'), fake = path.join(h.root, 'pane.mjs'); fs.writeFileSync(mode, 'limited');
     fs.writeFileSync(fake, `import fs from 'node:fs';let mode='',draft='',stream='',queued='',working=false;const file=${JSON.stringify(mode)},log=${JSON.stringify(inputLog)};const draw=()=>{const m=fs.readFileSync(file,'utf8');mode=m;process.stdout.write('\\x1b[2J\\x1b[H'+(m==='limited'?"You've hit your session limit\\n":m==='busy'?'Working (esc to interrupt)\\n':'')+(queued?'Queued follow-up inputs\\n'+queued+'\\n':'')+'❯ '+(m==='draft'?'unsent draft':draft)+'\\n');};process.stdout.write('\\x1b[?2004h');process.stdin.setRawMode(true);process.stdin.resume();process.stdin.on('data',b=>{stream+=b.toString();for(;;){if(stream.startsWith('\\x1b[200~')){const end=stream.indexOf('\\x1b[201~');if(end<0)return;draft=stream.slice(6,end);stream=stream.slice(end+6);fs.appendFileSync(log,JSON.stringify({paste:draft})+'\\n');draw();continue;}if(!stream.length)return;if(stream.startsWith('\\x1b')&&stream.length<6)return;const c=stream[0];stream=stream.slice(1);if(c==='\\r'||c==='\\n'){fs.appendFileSync(log,JSON.stringify({enter:true})+'\\n');if(mode!=='stuck'){queued=draft;draft='';}draw();}}});setInterval(()=>{const m=fs.readFileSync(file,'utf8');if(m!==mode){draft='';queued='';draw();}},80);draw();`);
