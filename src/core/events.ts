@@ -192,7 +192,8 @@ export function buildClaudeSettings(task: string, self: SelfArgv, statusLine?: R
     const command = [...self, ...eventArgs(task, 'claude', kind)].map(shellWord).join(' ');
     hooks[CLAUDE_HOOK_NAME[kind]] = [{ hooks: [{ type: 'command', command, timeout: 15 }] }];
   }
-  return statusLine ? { hooks, statusLine } : { hooks };
+  // Claude Code shows a dim suggestion of the next prompt in the empty field; it is not the human's text, so it is switched off for the tasks agentctl starts.
+  return statusLine ? { hooks, statusLine, promptSuggestionEnabled: false } : { hooks, promptSuggestionEnabled: false };
 }
 
 const tomlString = (s: string): string => `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;

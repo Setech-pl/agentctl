@@ -190,7 +190,11 @@ export class Tmux {
   async capture(window: string, lines?: number, infos?: WindowInfo[], hintId?: string, join?: boolean): Promise<ExecResult> {
     const args = ['capture-pane', '-p', ...(join ? ['-J'] : []), '-t', await this.targetFor(window, infos, hintId)];
     if (lines !== undefined) args.push('-S', `-${lines}`);
-    return this.runner.exec('tmux', args, { readOnly: true });
+    const plain = await this.runner.exec('tmux', args, { readOnly: true });
+    if (plain.code !== 0 || !lastPromptText(plain.stdout)) return plain;
+    // Text in the input field: a draft of the human, or the dim suggestion of the next prompt that Claude Code shows in an empty field. Only the colour tells them apart.
+    const styled = await this.runner.exec('tmux', ['capture-pane', '-p', '-e', ...args.slice(2)], { readOnly: true });
+    return styled.code === 0 ? { ...plain, stdout: withoutDimInput(plain.stdout, styled.stdout) } : plain;
   }
 
   /** Make `window` the current window of the session (what a client attached to the session then shows). */
@@ -265,6 +269,43 @@ export class Tmux {
 export function lastNonEmptyLine(screen: string): string {
   const lines = screen.split('\n').map((l) => l.trimEnd()).filter((l) => l.trim() !== '');
   return lines.length ? (lines[lines.length - 1] as string).trim() : '';
+}
+
+const PROMPT_LINE = /^\s*[❯›>](?:\s|$)/;
+/** The text after the prompt marker on the last prompt line of a screen; '' when the field is empty. */
+export function lastPromptText(screen: string): string {
+  const line = screen.split('\n').filter((l) => PROMPT_LINE.test(l)).at(-1);
+  return line ? line.replace(/^\s*[❯›>]\s*/, '').trim() : '';
+}
+
+/** Is everything the line shows after its prompt marker dim (SGR 2)? That is a suggestion the agent shows in an empty field, not text somebody typed. */
+export function inputIsDim(styledLine: string): boolean {
+  let dim = false, marker = false, seen = false;
+  for (let i = 0; i < styledLine.length; i++) {
+    const ch = styledLine[i]!;
+    if (ch === '\x1b' && styledLine[i + 1] === '[') {
+      const end = styledLine.indexOf('m', i);
+      if (end < 0) break;
+      for (const code of styledLine.slice(i + 2, end).split(';')) { if (code === '2') dim = true; else if (code === '' || code === '0' || code === '22') dim = false; }
+      i = end;
+      continue;
+    }
+    if (!marker) { if ('❯›>'.includes(ch)) marker = true; continue; }
+    if (/\s/.test(ch)) continue;
+    if (!dim) return false;
+    seen = true;
+  }
+  return seen;
+}
+
+/** The screen with the dim text of the last prompt line taken out: what is left is what a human typed. `styled` is the same screen from `capture-pane -e`. */
+export function withoutDimInput(plain: string, styled: string): string {
+  const lines = plain.split('\n'), styledLines = styled.split('\n');
+  let at = -1;
+  for (let i = lines.length - 1; i >= 0; i--) if (PROMPT_LINE.test(lines[i]!)) { at = i; break; }
+  if (at < 0 || styledLines.length !== lines.length || !inputIsDim(styledLines[at]!)) return plain;
+  lines[at] = lines[at]!.replace(/^(\s*[❯›>]).*$/, '$1');
+  return lines.join('\n');
 }
 
 /** A line made only of box-drawing characters and spaces: borders and separators around the input field. */

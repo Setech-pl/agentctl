@@ -97,6 +97,8 @@ export interface FakeWindow {
   id: string;
   name: string;
   screen: string;
+  /** The screen as `capture-pane -e` shows it (ANSI colours); absent: the same as `screen`. */
+  styled?: string;
   role?: string;
 }
 
@@ -160,7 +162,7 @@ export class FakeTmux {
       case 'capture-pane': {
         const w = this.find(target);
         if (w && args.includes('-J') && this.ack.delete(w.id)) return { stdout: 'Working (esc to interrupt)\n' };
-        return w ? { stdout: w.screen } : { code: 1, stderr: `can't find window: ${target}` };
+        return w ? { stdout: args.includes('-e') ? (w.styled ?? w.screen) : w.screen } : { code: 1, stderr: `can't find window: ${target}` };
       }
       case 'rename-window': {
         const w = this.find(target);
