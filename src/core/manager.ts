@@ -1,3 +1,5 @@
+import { remoteControlSupport, blockingEnv } from './providers/claude-rc.ts';
+export { remoteControlSupport, blockingEnv, RC_BLOCKING_ENV } from './providers/claude-rc.ts';
 import { collectGuide, dispatcherGuide } from './guide.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -190,9 +192,7 @@ export function buildManagerArgv(launch: ManagerLaunch, settings: Pick<AgentSett
 }
 
 /** What `claude --help` must list for the manager to start. */
-export function remoteControlSupport(help: string): { remoteControl: boolean; roleFile: boolean } {
-  return { remoteControl: /--remote-control\b/.test(help), roleFile: /--append-system-prompt(?:-file\b|\[-file\])/.test(help) };
-}
+
 
 // ---- looking at the window
 
@@ -367,23 +367,6 @@ export async function stopManager(ctx: Context): Promise<'stopped' | 'not-runnin
 // ---- doctor
 
 /** Variables that make Claude Code refuse Remote Control (an API key or a gateway instead of a claude.ai login, no feature flags). */
-export const RC_BLOCKING_ENV = [
-  'ANTHROPIC_API_KEY',
-  'ANTHROPIC_AUTH_TOKEN',
-  'ANTHROPIC_BASE_URL',
-  'CLAUDE_CODE_OAUTH_TOKEN',
-  'CLAUDE_CODE_USE_BEDROCK',
-  'CLAUDE_CODE_USE_VERTEX',
-  'CLAUDE_CODE_USE_FOUNDRY',
-  'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
-  'DISABLE_GROWTHBOOK',
-] as const;
-
-/** The variables of `env` that block Remote Control (set and not empty). */
-export function blockingEnv(env: NodeJS.ProcessEnv): string[] {
-  return RC_BLOCKING_ENV.filter((name) => (env[name] ?? '') !== '');
-}
-
 /** The script and node the manager's `mcp.json` runs, when the file is there: for doctor, which says if they still exist. */
 export function readManagerMcp(config: Pick<GlobalConfig, 'path'>): { command: string; script: string | undefined } | undefined {
   try {

@@ -1,3 +1,4 @@
+import { provider, isActive } from './providers/registry.ts';
 import { withStartLock, reserveStarts, releaseStarts } from './start-lock.ts';
 import { queuePrompt, deliverPendingPrompt } from './prompt-delivery.ts';
 import { waitForReady } from './ready.ts';
@@ -52,7 +53,7 @@ export async function findResumable(ctx: Context, opts: { all?: boolean; rows?: 
     const hasReport = row.report === 'yes';
     if (hasReport && !opts.all) continue;
     const sessions = readTaskSessions(ctx.config, record.window);
-    const sessionId = (record.agent === 'claude' ? sessions.claude : sessions.codex).at(-1)?.id;
+    const sessionId = sessions[record.agent].at(-1)?.id;
     out.push({ task: row.task, window: record.window, agent: record.agent, model: record.model, effort: record.effort, worktree, ...(sessionId ? { sessionId } : {}), hasReport });
   }
   return out;
@@ -82,6 +83,7 @@ export async function planResume(ctx: Context, typed: string[], opts: { all?: bo
   const items: ResumeCandidate[] = [];
   const occupied: LiveWindow[] = await liveWindows(ctx);
   for (const c of chosen) {
+    if (!isActive(config, c.agent)) { skipped.push({ task: c.task, reason: `provider ${c.agent} is not enabled` }); continue; }
     if (occupied.some(w => w.window === c.window)) { skipped.push({ task: c.task, reason: 'task is already starting or running' }); continue; }
     const problem = checkWindowLimit(c.agent, config.limits[c.agent], occupied, config.session);
     if (problem) {
@@ -93,7 +95,7 @@ export async function planResume(ctx: Context, typed: string[], opts: { all?: bo
   }
   const summary = [
     items.length === 0 ? 'Nothing to resume.' : `Resume ${items.length} task${items.length === 1 ? '' : 's'}:`,
-    ...items.map((c) => `  ${c.task}  ${c.agent}/${c.model}/${c.effort}  ${c.sessionId ? `session ${c.sessionId.slice(0, 8)}` : c.agent === 'claude' ? '--continue' : 'resume --last'}  in ${c.worktree}${c.hasReport ? '  (has a report)' : ''}`),
+    ...items.map((c) => `  ${c.task}  ${c.agent}/${c.model}/${c.effort}  ${c.sessionId ? `session ${c.sessionId.slice(0, 8)}` : provider(c.agent).resumeLabel()}  in ${c.worktree}${c.hasReport ? '  (has a report)' : ''}`),
     ...skipped.map((s) => `  skipped ${s.task}: ${s.reason}`),
   ];
   return { items, skipped, summary };

@@ -1,3 +1,4 @@
+import { blockingEnv } from './claude-rc.ts';
 import path from 'node:path';
 import fs from 'node:fs';
 import { within } from './usage-shared.ts';
@@ -10,13 +11,13 @@ import { readClaudePlan, claudeHome } from './claude-usage.ts';
 import { agentHomes } from '../usage-sources.ts';
 import { feedClaudeLine } from './claude-parse.ts';
 import { refreshCodexCapacity } from '../capacity.ts';
-import { defaultEquivalents, formatModelEffort } from '../equivalents.ts';
+import { DEFAULT_EQUIVALENTS } from './equivalents.ts';
 import { modelLabel } from './model-label.ts';
 import { splitFlag } from './safety.ts';
 import { interactiveTokens } from './process.ts';
 import { sessionQuestion } from '../codex-question.ts';
 import { isObject } from '../util.ts';
-import type { ProviderAdapter } from './types.ts';
+import type { ProviderAdapter, DoctorLine } from './types.ts';
 
 /** Initially delegates to the 0.17.4 implementation; subsequent steps move each responsibility here. */
 export const claude: ProviderAdapter = {
@@ -27,9 +28,25 @@ export const claude: ProviderAdapter = {
   async detect(runner) {
     const version = await runner.exec('claude', ['--version'], { readOnly: true });
     const help = version.code === 0 ? await runner.exec('claude', ['--help'], { readOnly: true }) : { stdout: '' };
-    return { found: version.code === 0, version: /\d+\.\d+\.\d+/.exec(version.stdout)?.[0] ?? null, raw: version.stdout.trim().split('\n')[0] ?? '', features: { effortFlag: /--effort\b/.test(help.stdout), config: /-c, --config/.test(help.stdout), remoteControl: /--remote-control\b/.test(help.stdout), appendSystemPromptFile: /--append-system-prompt-file\b/.test(help.stdout) } };
+    return { found: version.code === 0, version: /\d+\.\d+\.\d+/.exec(version.stdout)?.[0] ?? null, raw: version.stdout.split('\n').map(line => line.trim()).find(Boolean) ?? '', features: { effortFlag: /--effort\b/.test(help.stdout), config: /-c, --config/.test(help.stdout), remoteControl: /--remote-control\b/.test(help.stdout), appendSystemPromptFile: /--append-system-prompt(?:-file\b|\[-file\])/.test(help.stdout) } };
   },
-  doctor(d) { return [{ name: 'claude', level: d.found ? 'ok' : 'warn', text: d.found ? d.raw : `not found (only needed for agent: claude). ${this.installHint}` }]; },
+  doctor(d, env) {
+    if (!d.found) return [{ name: 'claude', level: 'warn', text: `not found (only needed for agent: claude). ${this.installHint}` }];
+    const lines: DoctorLine[] = [];
+    const add = (name: string, level: DoctorLine['level'], text: string) => lines.push({ name, level, text });
+    const effort = d.features.effortFlag
+      ? 'effort: native --effort flag'
+      : 'effort: no --effort flag in this version; set agents.claude.effort_args: [] (the prompt header still carries the effort)';
+    add('claude', 'ok', `${d.raw}; ${effort}`);
+    // Remote Control (the manager, and remote_control: true in a spec) needs these two flags and a claude.ai login without an API key or a gateway.
+    const support = { remoteControl: d.features.remoteControl, roleFile: d.features.appendSystemPromptFile };
+    const blocking = blockingEnv(env);
+    if (!support.remoteControl) add('claude remote control', 'warn', 'this Claude Code has no --remote-control flag in its help: agentctl manager and remote_control: true need it (claude update)');
+    else if (!support.roleFile) add('claude remote control', 'warn', 'has --remote-control, but no --append-system-prompt-file: agentctl manager cannot give the manager its role (claude update)');
+    else if (blocking.length > 0) add('claude remote control', 'warn', `has --remote-control, but ${blocking.join(', ')} ${blocking.length === 1 ? 'is' : 'are'} set here: Claude Code then refuses Remote Control (it needs a claude.ai login, not an API key or a gateway). A tmux server started from this shell has them too`);
+    else add('claude remote control', 'ok', 'has --remote-control and --append-system-prompt-file (the login is not checked: claude auth status)');
+    return lines;
+  },
   argv(spec, settings, extra) {
   const hasModel = spec.model !== 'default';
   const effortArgs = settings.effortArgs.map((a) => a.replaceAll('{effort}', spec.effort));
@@ -66,7 +83,7 @@ export const claude: ProviderAdapter = {
     
     planSources: ['claude-statusline'],
   },
-  models: { get equivalents() { const rows = defaultEquivalents().map(row => formatModelEffort(row.claude)); return { light: rows.slice(0, 2), medium: rows.slice(2, 4), strong: rows.slice(4) }; }, label: modelLabel },
+  models: { get equivalents() { const rows = DEFAULT_EQUIVALENTS.map(row => row.claude); return { light: rows.slice(0, 2), medium: rows.slice(2, 4), strong: rows.slice(4) }; }, label: modelLabel },
   safety: { forbiddenFlags: ['--dangerously-skip-permissions', '--allow-dangerously-skip-permissions'], check(args) {
       const [arg, next] = args; if (!arg) return undefined;
       const [flag, inlineValue] = splitFlag(arg); const value = inlineValue ?? next;

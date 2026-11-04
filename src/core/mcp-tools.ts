@@ -1,3 +1,5 @@
+import type { AgentName } from './config.ts';
+import { provider, activeProviders, perProvider, PROVIDER_IDS } from './providers/registry.ts';
 import { checkReportPath, readReportText, reportPathWarnings } from './report-path.ts';
 import { atomicAppendFile } from './atomic-file.ts';
 import { missingLinkTargets, checkLinkTargets } from './links.ts';
@@ -321,14 +323,14 @@ function planSummary(ctx: Context): string {
   const now = ctx.runner.now();
   const plans = readPlans(ctx.config, reader, now);
   reader.save();
-  return `Plans: ${AGENT_NAMES.map((p) => `${p} ${planLine(plans[p], now)}`).join(' | ')}. usage has the tokens.`;
+  return `Plans: ${activeProviders(ctx.config).map((p) => `${p} ${planLine(plans[p], now)}`).join(' | ')}. usage has the tokens.`;
 }
 
 async function runUsage(deps: McpDeps, args: { cohort?: string | undefined; since?: string | undefined }): Promise<ToolResult> {
   const ctx = deps.context(() => {});
   const cohort = args.cohort === undefined ? undefined : findCohort(ctx.config, args.cohort).name;
   const report = await collectUsage(ctx, { cohort, since: args.since });
-  const limits = AGENT_NAMES.map((p) => `${p}: ${planLine(report.plans[p], report.now)}`).join('; ');
+  const limits = (Object.keys(report.plans) as AgentName[]).map((p) => `${p}: ${planLine(report.plans[p], report.now)}`).join('; ');
   return ok(`Plan limits - ${limits}. Tokens = input + output + cache writes of the tasks agentctl started (cache reads are listed apart); period: days since ${report.sinceDay}.\n\n${JSON.stringify(report, null, 2)}`);
 }
 
@@ -402,11 +404,11 @@ async function runLimits(deps: McpDeps): Promise<ToolResult> {
 
 const limitArg = z.number().int().min(0).max(50).optional();
 
-async function runSetLimits(deps: McpDeps, args: { claude?: number | undefined; codex?: number | undefined; confirm?: boolean | undefined }): Promise<ToolResult> {
-  return writeTool(deps, 'set_limits', { detail: `claude=${args.claude ?? '-'} codex=${args.codex ?? '-'} confirm=${Boolean(args.confirm)}` }, async (ctx) => {
+async function runSetLimits(deps: McpDeps, args: Partial<Record<AgentName, number>> & { confirm?: boolean | undefined }): Promise<ToolResult> {
+  return writeTool(deps, 'set_limits', { detail: `${PROVIDER_IDS.map(id => `${id}=${args[id] ?? '-'}`).join(' ')} confirm=${Boolean(args.confirm)}` }, async (ctx) => {
     const assignments: LimitAssignments = {};
-    for (const agent of AGENT_NAMES) if (args[agent] !== undefined) assignments[agent] = args[agent] === 0 ? null : (args[agent] as number);
-    if (Object.keys(assignments).length === 0) throw new AgentctlError('give claude and/or codex', '0 removes a limit.');
+    for (const agent of activeProviders(ctx.config)) if (args[agent] !== undefined) assignments[agent] = args[agent] === 0 ? null : (args[agent] as number);
+    if (Object.keys(assignments).length === 0) throw new AgentctlError(`give ${PROVIDER_IDS.join(' and/or ')}`,  '0 removes a limit.');
     const plan = planSetLimits(ctx.config, assignments);
     if (!args.confirm) return { text: `${plan.summary.join('\n')}\n\nNot changed yet. Show this to the user and ask; if they agree, call set_limits again with the same numbers and confirm: true.`, executed: false, announce: '' };
     await applySetLimits(ctx, plan);
@@ -414,11 +416,11 @@ async function runSetLimits(deps: McpDeps, args: { claude?: number | undefined; 
   });
 }
 
-async function runReserve(deps: McpDeps, args: { claude?: number | undefined; codex?: number | undefined; note?: string | undefined; release?: boolean | undefined; confirm?: boolean | undefined }): Promise<ToolResult> {
-  return writeTool(deps, 'reserve', { detail: `${args.release ? 'release ' : ''}claude=${args.claude ?? '-'} codex=${args.codex ?? '-'} confirm=${Boolean(args.confirm)}` }, async (ctx) => {
+async function runReserve(deps: McpDeps, args: Partial<Record<AgentName, number>> & { note?: string | undefined; release?: boolean | undefined; confirm?: boolean | undefined }): Promise<ToolResult> {
+  return writeTool(deps, 'reserve', { detail: `${args.release ? 'release ' : ''}${PROVIDER_IDS.map(id => `${id}=${args[id] ?? '-'}`).join(' ')} confirm=${Boolean(args.confirm)}` }, async (ctx) => {
     const counts: Partial<Record<(typeof AGENT_NAMES)[number], number | undefined>> = {};
-    for (const agent of AGENT_NAMES) if (args[agent] !== undefined && args[agent] !== 0) counts[agent] = args[agent];
-    if (Object.keys(counts).length === 0) throw new AgentctlError('give claude and/or codex (a number from 1)');
+    for (const agent of activeProviders(ctx.config)) if (args[agent] !== undefined && args[agent] !== 0) counts[agent] = args[agent];
+    if (Object.keys(counts).length === 0) throw new AgentctlError(`give ${PROVIDER_IDS.join(' and/or ')} (a number from 1)`);
     const what = Object.entries(counts).map(([a, n]) => `${a} ${n}`).join(', ');
     if (!args.confirm) {
       const have = Object.entries(readReservations(ctx.config)).map(([a, r]) => `${a} ${r.count}${r.note ? ` (${r.note})` : ''}`).join(', ') || 'nothing';
@@ -794,7 +796,7 @@ async function runClose(deps: McpDeps, args: CloseMcpArgs): Promise<ToolResult> 
   });
 }
 
-async function runMove(deps: McpDeps, args: { task: string; agent?: 'claude' | 'codex' | undefined; confirm?: boolean | undefined }): Promise<ToolResult> {
+async function runMove(deps: McpDeps, args: { task: string; agent?: AgentName | undefined; confirm?: boolean | undefined }): Promise<ToolResult> {
   return writeTool(deps, 'move', { task: args.task, detail: `agent=${args.agent ?? 'other'} confirm=${Boolean(args.confirm)}` }, async (ctx, lines) => {
     const plan = await planMove(ctx, args.task, { agent: args.agent });
     if (!args.confirm) {
@@ -808,7 +810,7 @@ async function runMove(deps: McpDeps, args: { task: string; agent?: 'claude' | '
 /** `setup` runs shell commands: neither the top-level key nor `repos[].setup` is accepted from the chat (a repository's .agentctl.yaml setup still runs). */
 const chatSetup = (header: Record<string, unknown>): boolean => 'setup' in header || (Array.isArray(header.repos) && header.repos.some((r) => typeof r === 'object' && r !== null && 'setup' in r));
 
-interface NewMcpArgs { spec: string; confirm?: boolean | undefined; agent?: 'claude' | 'codex' | undefined; reuse?: boolean | undefined; no_agent?: boolean | undefined; cohort?: string | undefined; wait_trust?: boolean | undefined }
+interface NewMcpArgs { spec: string; confirm?: boolean | undefined; agent?: AgentName | undefined; reuse?: boolean | undefined; no_agent?: boolean | undefined; cohort?: string | undefined; wait_trust?: boolean | undefined }
 async function runNew(deps: McpDeps, args: NewMcpArgs): Promise<ToolResult> {
   const probe = (): { tasks: string } => {
     // Only for the audit line: the task IDs named in the spec, without resolving anything.
@@ -843,7 +845,7 @@ async function runNew(deps: McpDeps, args: NewMcpArgs): Promise<ToolResult> {
   });
 }
 
-async function runQueue(deps: McpDeps, args: { spec: string; agent?: 'claude' | 'codex' | undefined; cohort?: string | undefined; confirm?: boolean | undefined }): Promise<ToolResult> {
+async function runQueue(deps: McpDeps, args: { spec: string; agent?: AgentName | undefined; cohort?: string | undefined; confirm?: boolean | undefined }): Promise<ToolResult> {
   let tasks = '?';
   try {
     tasks = splitSpecs(args.spec, 'mcp').map((s) => String(s.header.task ?? '?')).join(', ');
@@ -961,7 +963,7 @@ export const MCP_TOOLS: McpToolDef[] = [
     description:
       'WRITE, off unless the user put "set_limits" in mcp.allow. Sets the most simultaneous agents per provider in config.yaml (0 removes a limit); comments in the file stay, a copy is kept as config.yaml.bak. It takes effect at once, without restarting watch. ' +
       'The FIRST call (confirm omitted) only describes the change; show it to the user, then call again with confirm: true.',
-    input: { claude: limitArg.describe('New limit for Claude; 0 = no limit. Omit to leave it.'), codex: limitArg.describe('New limit for Codex; 0 = no limit. Omit to leave it.'), confirm: z.boolean().optional().describe('true only after the user agreed to the described change.') },
+    input: { ...perProvider(PROVIDER_IDS, id => limitArg.describe(`New limit for ${provider(id).displayName}; 0 = no limit. Omit to leave it.`)), confirm: z.boolean().optional().describe('true only after the user agreed to the described change.') },
     annotations: { title: 'Change the limits', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     run: (deps, args) => guarded(() => runSetLimits(deps, args as { claude?: number; codex?: number; confirm?: boolean })),
   }),
@@ -972,7 +974,7 @@ export const MCP_TOOLS: McpToolDef[] = [
     description:
       'WRITE, off unless the user put "reserve" in mcp.allow. Holds places of a provider for agents the user starts by hand (they count against the limit, so the queue leaves room); release: true gives places back. Numbers are how many places. ' +
       'The FIRST call (confirm omitted) only describes it; ask the user, then call again with confirm: true.',
-    input: { claude: limitArg.describe('Places of Claude.'), codex: limitArg.describe('Places of Codex.'), note: z.string().max(100).optional().describe('What the place is for (shown by limits).'), release: z.boolean().optional().describe('true: give the places back instead of reserving.'), confirm: z.boolean().optional().describe('true only after the user agreed.') },
+    input: { ...perProvider(PROVIDER_IDS, id => limitArg.describe(`Places of ${provider(id).displayName}.`)), note: z.string().max(100).optional().describe('What the place is for (shown by limits).'), release: z.boolean().optional().describe('true: give the places back instead of reserving.'), confirm: z.boolean().optional().describe('true only after the user agreed.') },
     annotations: { title: 'Reserve places for agents started by hand', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     run: (deps, args) => guarded(() => runReserve(deps, args as { claude?: number; codex?: number; note?: string; release?: boolean; confirm?: boolean })),
   }),
@@ -1156,7 +1158,7 @@ export const MCP_TOOLS: McpToolDef[] = [
       'WRITE, off unless the user put "new" in mcp.allow. Starts agent tasks from a spec: a YAML header between --- lines (task, agent, model, effort, repos …) followed by the prompt, the same format as the agentctl CLI. ' +
       'The FIRST call (confirm omitted) validates the spec and returns a summary of what would start; show it to the user. Only when they agree, call again with the same spec and confirm: true. ' +
       '"setup" commands (shell) are not accepted from the chat.',
-    input: { spec: z.string().min(1).max(100_000).describe('The spec text: ---, YAML header, ---, prompt. Several specs may follow each other.'), agent: z.enum(AGENT_NAMES).optional(), reuse: z.boolean().optional(), no_agent: z.boolean().optional(), cohort: cohortArg.optional(), wait_trust: z.boolean().optional(), confirm: z.boolean().optional().describe('true only after the user agreed to the summary.') },
+    input: { spec: z.string().min(1).max(100_000).describe('The spec text: ---, YAML header, ---, prompt. Several specs may follow each other.'), agent: z.enum(PROVIDER_IDS).optional(), reuse: z.boolean().optional(), no_agent: z.boolean().optional(), cohort: cohortArg.optional(), wait_trust: z.boolean().optional(), confirm: z.boolean().optional().describe('true only after the user agreed to the summary.') },
     annotations: { title: 'Start tasks from a spec', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     run: (deps, args) => guarded(() => runNew(deps, args as NewMcpArgs)),
   }),
@@ -1170,11 +1172,11 @@ export const MCP_TOOLS: McpToolDef[] = [
     input: {
       spec: z.string().min(1).max(100_000).describe('The spec text: ---, YAML header, ---, prompt. Several specs may follow each other.'),
       cohort: cohortArg.optional(),
-      agent: z.enum(['claude', 'codex']).optional().describe('Run the specs on this provider, translated through the equivalents table. The queue never switches provider by itself.'),
+      agent: z.enum(PROVIDER_IDS).optional().describe('Run the specs on this provider, translated through the equivalents table. The queue never switches provider by itself.'),
       confirm: z.boolean().optional().describe('true only after the user agreed to the summary.'),
     },
     annotations: { title: 'Put tasks in the queue', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-    run: (deps, args) => guarded(() => runQueue(deps, args as { spec: string; agent?: 'claude' | 'codex'; cohort?: string; confirm?: boolean })),
+    run: (deps, args) => guarded(() => runQueue(deps, args as { spec: string; agent?: AgentName; cohort?: string; confirm?: boolean })),
   }),
   def({
     name: 'queue_rm',
@@ -1256,11 +1258,11 @@ export const MCP_TOOLS: McpToolDef[] = [
       'The FIRST call (confirm omitted) only describes the move; ask the user, then call again with confirm: true.',
     input: {
       task: taskArg,
-      agent: z.enum(['claude', 'codex']).optional().describe('Target provider; default: the other one.'),
+      agent: z.enum(PROVIDER_IDS).optional().describe('Target provider; default: the other one.'),
       confirm: z.boolean().optional().describe('true only after the user agreed to the described move.'),
     },
     annotations: { title: 'Move a task to the other provider', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-    run: (deps, args) => guarded(() => runMove(deps, args as { task: string; agent?: 'claude' | 'codex'; confirm?: boolean })),
+    run: (deps, args) => guarded(() => runMove(deps, args as { task: string; agent?: AgentName; confirm?: boolean })),
   }),
 ];
 
@@ -1297,9 +1299,9 @@ MCP_TOOLS.push(
   extraWrite('cohort_note', 'cohort note <NAME> <TEXT>', 'Change the note of a cohort', { cohort: cohortArg, text: z.string().max(20000) }, async (ctx, a) => setNote(ctx, a.cohort, a.text)),
   ...(['hide', 'unhide'] as const).map((name) => extraWrite(name, `${name} <TASKS...>`, `${name} tasks on the board`, { tasks: z.array(taskArg).min(1).max(100) }, async (ctx, a) => setHidden(ctx, a.tasks, name === 'hide'))),
   extraWrite('archive', 'archive [--older-than <AGE>]', 'Archive the state of closed tasks', { older_than: optionalText, cohort: cohortArg.optional() }, async (ctx, a) => archiveClosed(ctx, { cohort: a.cohort, olderThanMs: a.older_than ? parseAge(a.older_than) : undefined })),
-  extraWrite('adopt', 'adopt <TASK> --report <PATH>', 'Restore missing task metadata from facts supplied by the user', { task: taskArg, report: z.string().min(1), window: optionalText, worktree: optionalText, agent: z.enum(AGENT_NAMES).optional(), model: optionalText, effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional() }, async (ctx, a) => { await adoptTask(ctx, a.task, a); return { task: a.task, adopted: true }; }),
+  extraWrite('adopt', 'adopt <TASK> --report <PATH>', 'Restore missing task metadata from facts supplied by the user', { task: taskArg, report: z.string().min(1), window: optionalText, worktree: optionalText, agent: z.enum(PROVIDER_IDS).optional(), model: optionalText, effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional() }, async (ctx, a) => { await adoptTask(ctx, a.task, a); return { task: a.task, adopted: true }; }),
   extraWrite('report_from', 'report <TASK> --from <FILE> [--force]', 'Copy a regular report from task worktrees or cache to its canonical location; force only overwrites, never permits outside or symlink sources', { task: taskArg, from: z.string().min(1), force: z.boolean().optional() }, async (ctx, a) => { const info = await reportInfo(ctx, a.task, { from: a.from, force: a.force, sourcePolicy: 'mcp' }); if (info.result?.action === 'kept' || (info.result?.action === 'none' && info.result.note)) throw new AgentctlError(info.result.note ?? 'report was not copied', 'Preview again with force: true only if replacing the canonical file is intended.'); return info; }),
-  extraWrite('limits_release', 'limits release [claude=N codex=N]', 'Release reserved provider places', { claude: limitArg, codex: limitArg }, async (ctx, a) => releasePlaces(ctx, { ...(a.claude !== undefined ? { claude: a.claude } : {}), ...(a.codex !== undefined ? { codex: a.codex } : {}) })),
+  extraWrite('limits_release', 'limits release [claude=N codex=N]', 'Release reserved provider places', perProvider(PROVIDER_IDS, () => limitArg), async (ctx, a) => releasePlaces(ctx, Object.fromEntries(PROVIDER_IDS.filter(id => a[id] !== undefined).map(id => [id, a[id]])))),
   extraWrite('manager_start', 'manager', 'Start the supervising manager session', { project: optionalText, name: optionalText, model: optionalText, effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional() }, async (ctx, a, deps) => { if (!deps.self) throw new AgentctlError('this server has no self command for the manager'); return startManager(ctx, { ...a, self: deps.self, noWait: true }); }),
   extraWrite('manager_stop', 'manager stop', 'Stop the manager session', {}, async (ctx) => ({ state: await stopManager(ctx) })),
   extraWrite('notify_test', 'notify-test [--phone]', 'Test desktop notifications; phone true explicitly sends to ntfy', { phone: z.boolean().optional() }, async (ctx, a, deps) => { if (a.phone) return sendPhoneTest(ctx); await deps.notify('agentctl notification test'); return { local: true }; }),
@@ -1381,7 +1383,7 @@ async function confirmationScope(ctx: Context, name: string, args: Record<string
     const rawSpecs = splitSpecs(args.spec as string, 'MCP preview');
     if (args.cohort) for (const raw of rawSpecs) raw.header.cohort = args.cohort;
     for (const raw of rawSpecs) if (chatSetup(raw.header)) throw new AgentctlError(`${String(raw.header.task ?? 'a task')}: \"setup\" runs shell commands and is not accepted from the chat`);
-    const specs = await planBatch(ctx, rawSpecs.map(raw => resolveSpec(raw, { config: ctx.config })), { noSwitch: true, reuse: Boolean(args.reuse), ...(args.agent ? { agent: args.agent as 'claude' | 'codex' } : {}), ignoreLimits: name === 'queue', deferBases: name === 'queue', skipAfter: name === 'queue' });
+    const specs = await planBatch(ctx, rawSpecs.map(raw => resolveSpec(raw, { config: ctx.config })), { noSwitch: true, reuse: Boolean(args.reuse), ...(args.agent ? { agent: args.agent as AgentName } : {}), ignoreLimits: name === 'queue', deferBases: name === 'queue', skipAfter: name === 'queue' });
     for (const spec of specs) { const warnings = reportPathWarnings(ctx.config, spec); if (warnings.length) throw new AgentctlError(`${spec.task}: ${warnings.join('; ')}`); }
     return { specs };
   }

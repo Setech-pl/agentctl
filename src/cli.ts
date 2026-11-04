@@ -1,4 +1,5 @@
-import { provider, PROVIDER_IDS } from './core/providers/registry.ts';
+import type { AgentName } from './core/config.ts';
+import { provider, PROVIDER_IDS, activeProviders } from './core/providers/registry.ts';
 import { reportPathWarnings } from './core/report-path.ts';
 import { planMark, markTasks } from './core/mark.ts';
 import { aggregateOutputs } from './core/outputs.ts';
@@ -420,7 +421,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('--dry-run', 'print the commands that would run, execute nothing')
     .option('--json', 'machine-readable results and capacity snapshot')
     .option('--reuse', 'use worktrees that already exist instead of failing')
-    .addOption(new Option('--agent <agent>', 'run every spec on this provider, translated through the equivalents table').choices(['claude', 'codex']))
+    .addOption(new Option('--agent <agent>', 'run every spec on this provider, translated through the equivalents table').choices([...PROVIDER_IDS]))
     .option('--no-switch', 'never offer to move a task to the other provider when its limit is full')
     .option('--no-agent', 'only create the worktree, run setup and links; no TASK.md, window or agent')
     .option('--no-wait-trust', 'stop at the folder-trust dialog instead of waiting for you to confirm it (the old behaviour)')
@@ -428,7 +429,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('-y, --yes', 'with --clip: do not ask; also skips the question after a "touches" warning')
     .option('--cohort <name>', 'put every task of the file in this cohort (overrides "cohort:" in a spec); without it a task has a cohort only if its spec names one')
     .action(
-      guarded(async (file: string | undefined, opts: { clip?: boolean; yes?: boolean; dryRun?: boolean; reuse?: boolean; agent?: 'claude' | 'codex' | false; switch?: boolean; waitTrust?: boolean; cohort?: string; json?: boolean }) => {
+      guarded(async (file: string | undefined, opts: { clip?: boolean; yes?: boolean; dryRun?: boolean; reuse?: boolean; agent?: AgentName | false; switch?: boolean; waitTrust?: boolean; cohort?: string; json?: boolean }) => {
         const ctx = contextFor(Boolean(opts.dryRun), { silent: Boolean(opts.json) });
         if (!opts.dryRun && !(await confirmDiskStart(ctx, Boolean(opts.yes)))) return;
         const source = opts.clip ? 'clipboard' : (file ?? 'stdin');
@@ -484,12 +485,12 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .description('Put the tasks of a spec file in the queue: they start by themselves (while "agentctl watch" runs) when a window of their provider is free. Shows a summary and asks y/N first.')
     .argument('[file]', 'spec file, or "-" for stdin')
     .option('--clip', 'read the spec from the clipboard')
-    .addOption(new Option('--agent <agent>', 'run every spec on this provider, translated through the equivalents table (the queue never switches provider by itself)').choices(['claude', 'codex']))
+    .addOption(new Option('--agent <agent>', 'run every spec on this provider, translated through the equivalents table (the queue never switches provider by itself)').choices([...PROVIDER_IDS]))
     .option('-y, --yes', 'do not ask')
     .option('--json', 'machine-readable queued entries and capacity snapshot')
     .option('--cohort <name>', 'put every task of the file in this cohort (overrides "cohort:" in a spec); without it a task has a cohort only if its spec names one')
     .action(
-      guarded(async (file: string | undefined, opts: { clip?: boolean; yes?: boolean; agent?: 'claude' | 'codex'; cohort?: string; json?: boolean }) => {
+      guarded(async (file: string | undefined, opts: { clip?: boolean; yes?: boolean; agent?: AgentName; cohort?: string; json?: boolean }) => {
         const ctx = contextFor(false, { silent: Boolean(opts.json) });
         const raws = splitSpecs(await readSpecSource(file, opts.clip), opts.clip ? 'clipboard' : (file ?? 'stdin'));
         applyCohortFlag(raws, opts.cohort);
@@ -762,7 +763,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .action(
       guarded(async (assignments: string[], opts: { yes?: boolean; dryRun?: boolean }) => {
         const ctx = contextFor(Boolean(opts.dryRun), { migrate: false });
-        const plan = planSetLimits(ctx.config, parseAssignments(assignments));
+        const plan = planSetLimits(ctx.config, parseAssignments(assignments, activeProviders(ctx.config)));
         if (!(await confirmAction(ctx, plan.summary, 'Write it?', Boolean(opts.yes) || Boolean(opts.dryRun)))) return;
         await applySetLimits(ctx, plan);
         if (!opts.dryRun) line('Done. The limits are in force now.');
@@ -777,7 +778,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .action(
       guarded(async (places: string[], opts: { note?: string }) => {
         const ctx = contextFor(false, { migrate: false });
-        const reservations = await reservePlaces(ctx, parseCounts(places, 1), opts.note);
+        const reservations = await reservePlaces(ctx, parseCounts(places, 1, activeProviders(ctx.config)), opts.note);
         line(`Reserved: ${Object.entries(reservations).map(([a, r]) => `${a} ${r.count}${r.note ? ` (${r.note})` : ''}`).join(', ')}`);
       }),
     );
@@ -789,7 +790,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .action(
       guarded(async (places: string[]) => {
         const ctx = contextFor(false, { migrate: false });
-        const reservations = await releasePlaces(ctx, parseCounts(places, undefined));
+        const reservations = await releasePlaces(ctx, parseCounts(places, undefined, activeProviders(ctx.config)));
         const left = Object.entries(reservations).map(([a, r]) => `${a} ${r.count}`).join(', ');
         line(left === '' ? 'Nothing is reserved now.' : `Still reserved: ${left}`);
       }),
@@ -1316,12 +1317,12 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .requiredOption('--report <path>', 'path of the task report')
     .option('--window <name>', 'tmux window of the task (default: the lowercase task ID)')
     .option('--worktree <path>', 'worktree of the task, so "close --rm-worktree" knows it')
-    .addOption(new Option('--agent <agent>', 'agent running in the window').choices(['claude', 'codex']))
+    .addOption(new Option('--agent <agent>', 'agent running in the window').choices([...PROVIDER_IDS]))
     .option('--model <model>', 'model of the task')
     .addOption(new Option('--effort <effort>', 'effort of the task').choices(['low', 'medium', 'high', 'xhigh', 'max']))
     .option('--dry-run', 'print what would be written, write nothing')
     .action(
-      guarded(async (task: string, opts: { report: string; window?: string; worktree?: string; agent?: 'claude' | 'codex'; model?: string; effort?: Effort; dryRun?: boolean }) => {
+      guarded(async (task: string, opts: { report: string; window?: string; worktree?: string; agent?: AgentName; model?: string; effort?: Effort; dryRun?: boolean }) => {
         await adoptTask(contextFor(Boolean(opts.dryRun)), task, opts);
       }),
     );
@@ -1358,11 +1359,11 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .command('event')
     .description('Called by the agents themselves (hooks that "new" sets up): records the event, updates the task state and notifies at once. Always exits 0.')
     .requiredOption('--task <task>', 'task ID')
-    .addOption(new Option('--agent <agent>', 'the agent that reports').choices(['claude', 'codex']).makeOptionMandatory())
+    .addOption(new Option('--agent <agent>', 'the agent that reports').choices([...PROVIDER_IDS]).makeOptionMandatory())
     .addOption(new Option('--kind <kind>', 'claude: which hook called').choices(PROVIDER_IDS.flatMap(id => [...provider(id).events.kinds])))
     .option('--forward <json>', 'codex: JSON list, the notify command the user had; run with the same JSON after this one')
     .argument('[payload]', 'the event as JSON (codex puts it here; claude sends it on stdin)')
-    .action(async (payload: string | undefined, opts: { task: string; agent: 'claude' | 'codex'; kind?: ClaudeKind; forward?: string }) => {
+    .action(async (payload: string | undefined, opts: { task: string; agent: AgentName; kind?: ClaudeKind; forward?: string }) => {
       // A hook must never break the agent: whatever happens, the exit code stays 0.
       try {
         const config = deps.loadConfig();
@@ -1406,10 +1407,10 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .command('move')
     .description('Hand a task that hit its usage limit to the other provider: new window <task>-2 in the same worktree, the original prompt plus a note to continue. Asks y/N.')
     .argument('<task>', 'task ID')
-    .addOption(new Option('--agent <agent>', 'move to this provider (default: the other one)').choices(['claude', 'codex']))
+    .addOption(new Option('--agent <agent>', 'move to this provider (default: the other one)').choices([...PROVIDER_IDS]))
     .option('-y, --yes', 'do not ask')
     .action(
-      guarded(async (task: string, opts: { agent?: 'claude' | 'codex'; yes?: boolean }) => {
+      guarded(async (task: string, opts: { agent?: AgentName; yes?: boolean }) => {
         const ctx = contextFor(false);
         const self = deps.selfArgv?.();
         const interrupt = deps.interruptSignal?.();

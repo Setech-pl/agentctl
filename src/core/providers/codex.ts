@@ -9,13 +9,13 @@ import { readCodexPlan, codexHome } from './codex-usage.ts';
 import { agentHomes } from '../usage-sources.ts';
 import { feedCodexLine } from './codex-parse.ts';
 import { refreshCodexCapacity } from './codex-usage.ts';
-import { defaultEquivalents, formatModelEffort } from '../equivalents.ts';
+import { DEFAULT_EQUIVALENTS } from './equivalents.ts';
 import { modelLabel } from './model-label.ts';
 import { splitFlag } from './safety.ts';
 import { interactiveTokens } from './process.ts';
 import { sessionQuestion } from './codex-question.ts';
 import { isObject } from '../util.ts';
-import type { ProviderAdapter } from './types.ts';
+import type { ProviderAdapter, DoctorLine } from './types.ts';
 
 /** Initially delegates to the 0.17.4 implementation; subsequent steps move each responsibility here. */
 export const codex: ProviderAdapter = {
@@ -26,9 +26,18 @@ export const codex: ProviderAdapter = {
   async detect(runner) {
     const version = await runner.exec('codex', ['--version'], { readOnly: true });
     const help = version.code === 0 ? await runner.exec('codex', ['--help'], { readOnly: true }) : { stdout: '' };
-    return { found: version.code === 0, version: /\d+\.\d+\.\d+/.exec(version.stdout)?.[0] ?? null, raw: version.stdout.trim().split('\n')[0] ?? '', features: { effortFlag: /--effort\b/.test(help.stdout), config: /-c, --config/.test(help.stdout), remoteControl: /--remote-control\b/.test(help.stdout), appendSystemPromptFile: /--append-system-prompt-file\b/.test(help.stdout) } };
+    return { found: version.code === 0, version: /\d+\.\d+\.\d+/.exec(version.stdout)?.[0] ?? null, raw: version.stdout.split('\n').map(line => line.trim()).find(Boolean) ?? '', features: { effortFlag: /--effort\b/.test(help.stdout), config: /-c, --config/.test(help.stdout), remoteControl: /--remote-control\b/.test(help.stdout), appendSystemPromptFile: /--append-system-prompt(?:-file\b|\[-file\])/.test(help.stdout) } };
   },
-  doctor(d) { return [{ name: 'codex', level: d.found ? 'ok' : 'warn', text: d.found ? d.raw : `not found (only needed for agent: codex). ${this.installHint}` }]; },
+  doctor(d, env) {
+    if (!d.found) return [{ name: 'codex', level: 'warn', text: `not found (only needed for agent: codex). ${this.installHint}` }];
+    const lines: DoctorLine[] = [];
+    const add = (name: string, level: DoctorLine['level'], text: string) => lines.push({ name, level, text });
+    const effort = d.features.config
+      ? 'effort: via -c model_reasoning_effort=<effort>'
+      : 'effort: no -c/--config flag in this version; set agents.codex.effort_args: [] (the prompt header still carries the effort)';
+    add('codex', 'ok', `${d.raw}; ${effort}`);
+    return lines;
+  },
   argv(spec, settings, extra) {
   const hasModel = spec.model !== 'default';
   const effortArgs = settings.effortArgs.map((a) => a.replaceAll('{effort}', spec.effort));
@@ -69,7 +78,7 @@ export const codex: ProviderAdapter = {
     refreshPlan: refreshCodexCapacity,
     planSources: ['codex-session-log', 'codex-app-server:account/rateLimits/read'],
   },
-  models: { get equivalents() { const rows = defaultEquivalents().map(row => formatModelEffort(row.codex)); return { light: rows.slice(0, 2), medium: rows.slice(2, 4), strong: rows.slice(4) }; }, label: modelLabel },
+  models: { get equivalents() { const rows = DEFAULT_EQUIVALENTS.map(row => row.codex); return { light: rows.slice(0, 2), medium: rows.slice(2, 4), strong: rows.slice(4) }; }, label: modelLabel },
   safety: { forbiddenFlags: ['--dangerously-bypass-approvals-and-sandbox', '--yolo', '--full-auto', '--approve-for-me'], check(args) {
       const [arg, next] = args; if (!arg) return undefined;
       const [flag, inlineValue] = splitFlag(arg); const value = inlineValue ?? next;

@@ -1,3 +1,4 @@
+import { provider, PROVIDER_IDS, isActive } from './providers/registry.ts';
 import { collectStatus } from './status.ts';
 import { inspectReport } from './report-state.ts';
 import { missingLinkTargets, projectLinks } from './links.ts';
@@ -129,31 +130,11 @@ export async function runDoctor(
     else add('tmux', 'warn', `${v}: tmux ${MIN_TMUX.join('.')}+ is needed for per-window environment (new-window -e)`);
   }
 
-  const claude = await runner.exec('claude', ['--version'], { readOnly: true });
-  if (claude.code !== 0) add('claude', 'warn', `not found (only needed for agent: claude). ${INSTALL_HINTS.claude}`);
-  else {
-    const help = await runner.exec('claude', ['--help'], { readOnly: true });
-    const effort = /--effort\b/.test(help.stdout)
-      ? 'effort: native --effort flag'
-      : 'effort: no --effort flag in this version; set agents.claude.effort_args: [] (the prompt header still carries the effort)';
-    add('claude', 'ok', `${firstLine(claude.stdout)}; ${effort}`);
-    // Remote Control (the manager, and remote_control: true in a spec) needs these two flags and a claude.ai login without an API key or a gateway.
-    const support = remoteControlSupport(help.stdout);
-    const blocking = blockingEnv(env);
-    if (!support.remoteControl) add('claude remote control', 'warn', 'this Claude Code has no --remote-control flag in its help: agentctl manager and remote_control: true need it (claude update)');
-    else if (!support.roleFile) add('claude remote control', 'warn', 'has --remote-control, but no --append-system-prompt-file: agentctl manager cannot give the manager its role (claude update)');
-    else if (blocking.length > 0) add('claude remote control', 'warn', `has --remote-control, but ${blocking.join(', ')} ${blocking.length === 1 ? 'is' : 'are'} set here: Claude Code then refuses Remote Control (it needs a claude.ai login, not an API key or a gateway). A tmux server started from this shell has them too`);
-    else add('claude remote control', 'ok', 'has --remote-control and --append-system-prompt-file (the login is not checked: claude auth status)');
-  }
-
-  const codex = await runner.exec('codex', ['--version'], { readOnly: true });
-  if (codex.code !== 0) add('codex', 'warn', `not found (only needed for agent: codex). ${INSTALL_HINTS.codex}`);
-  else {
-    const help = await runner.exec('codex', ['--help'], { readOnly: true });
-    const effort = /-c, --config/.test(help.stdout)
-      ? 'effort: via -c model_reasoning_effort=<effort>'
-      : 'effort: no -c/--config flag in this version; set agents.codex.effort_args: [] (the prompt header still carries the effort)';
-    add('codex', 'ok', `${firstLine(codex.stdout)}; ${effort}`);
+  for (const id of PROVIDER_IDS) {
+    const adapter = provider(id);
+    const detection = await adapter.detect(runner);
+    if (config && !isActive(config, id) && !detection.found) continue;
+    for (const check of adapter.doctor(detection, env)) add(check.name, check.level, check.text);
   }
 
   const gh = await runner.exec('gh', ['--version'], { readOnly: true });

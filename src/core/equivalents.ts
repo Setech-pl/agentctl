@@ -1,3 +1,5 @@
+import { PROVIDER_IDS } from './providers/types.ts';
+import { DEFAULT_EQUIVALENTS } from './providers/equivalents.ts';
 import { EFFORTS } from './config.ts';
 import type { AgentName, Effort } from './config.ts';
 import { Problems, isObject } from './util.ts';
@@ -20,14 +22,7 @@ export interface Order extends ModelEffort {
 }
 
 /** Built-in table. Fable and effort `max` are deliberately absent: they have no counterpart. */
-export const DEFAULT_EQUIVALENTS: { claude: string; codex: string }[] = [
-  { claude: 'haiku/low', codex: 'gpt-6-luna/medium' },
-  { claude: 'haiku/medium', codex: 'gpt-6-luna/high' },
-  { claude: 'sonnet/medium', codex: 'gpt-6.1-sol/medium' },
-  { claude: 'sonnet/high', codex: 'gpt-6.1-sol/high' },
-  { claude: 'opus/high', codex: 'gpt-6-astra/medium' },
-  { claude: 'opus/xhigh', codex: 'gpt-6-astra/xhigh' },
-];
+export { DEFAULT_EQUIVALENTS } from './providers/equivalents.ts';
 
 export function formatModelEffort(m: ModelEffort): string {
   return `${m.model}/${m.effort}`;
@@ -64,11 +59,10 @@ export function parseEquivalents(v: unknown, where: string, p: Problems): Equiva
     const at = `${where}[${i}]`;
     if (!isObject(entry)) return p.add(`${at} must be a {claude, codex} mapping`);
     for (const key of Object.keys(entry)) {
-      if (key !== 'claude' && key !== 'codex') p.add(`${at}: unknown key "${key}" (allowed: claude, codex)`);
+      if (!(PROVIDER_IDS as readonly string[]).includes(key)) p.add(`${at}: unknown key "${key}" (allowed: ${PROVIDER_IDS.join(', ')})`);
     }
-    const claude = parseModelEffort(entry.claude, `${at}.claude`, p);
-    const codex = parseModelEffort(entry.codex, `${at}.codex`, p);
-    if (claude && codex) pairs.push({ claude, codex });
+    const fields = PROVIDER_IDS.map(id => [id, parseModelEffort(entry[id], `${at}.${id}`, p)] as const);
+    if (fields.every(([, value]) => value)) pairs.push(Object.fromEntries(fields) as unknown as Equivalent);
   });
   return pairs;
 }
@@ -98,7 +92,7 @@ export function translate(order: Order, target: AgentName, table: Equivalent[]):
     };
   }
   const placeholder = '<model>/<effort>';
-  const line = order.agent === 'claude' ? `{claude: "${here}", codex: "${placeholder}"}` : `{claude: "${placeholder}", codex: "${here}"}`;
+  const line = `{${PROVIDER_IDS.map(id => `${id}: "${id === order.agent ? here : placeholder}"`).join(', ')}}`;
   return {
     ok: false,
     message: `no ${target} equivalent for ${order.agent} ${here}`,

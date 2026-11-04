@@ -1,3 +1,4 @@
+import { PROVIDER_IDS } from './providers/types.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -11,7 +12,7 @@ export function pendingStarts(config: Pick<GlobalConfig, 'stateDir'>): StartRese
   try {
     const entries = JSON.parse(fs.readFileSync(file(config), 'utf8')) as StartReservation[];
     return entries.filter(r => {
-      if (!r || typeof r.id !== 'string' || (!Number.isInteger(r.pid) || r.pid <= 0) || !['claude', 'codex'].includes(r.agent)) return false;
+      if (!r || typeof r.id !== 'string' || (!Number.isInteger(r.pid) || r.pid <= 0) || !(PROVIDER_IDS as readonly string[]).includes(r.agent)) return false;
       try { process.kill(r.pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code !== 'ESRCH'; }
     });
   } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error; }

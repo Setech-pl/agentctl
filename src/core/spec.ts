@@ -1,3 +1,4 @@
+import { provider, isActive } from './providers/registry.ts';
 import { VERDICTS } from './outputs.ts';
 import type { OutputVerdict } from './outputs.ts';
 import path from 'node:path';
@@ -329,11 +330,13 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   // Remote Control is a Claude Code feature. In the spec it is an order (a codex task that asks for it is an error); as a default it only
   // applies to Claude tasks.
   const remoteDefault = project?.defaults.remoteControl ?? config.defaults.remoteControl ?? false;
-  if (specRemote === true && agent === 'codex') p.add('remote_control: true works for Claude only (Codex has no Remote Control); drop the key or use agent: claude');
-  if (specRemote === true || (specRemote === undefined && remoteDefault && agent === 'claude')) {
-    const flags = config.agents.claude.flags;
+  const remote = agent ? provider(agent).capabilities.remoteControl : false;
+  if (agent && !isActive(config, agent)) p.add(`provider ${agent} is not enabled; add it to providers in ${config.path}`);
+  if (specRemote === true && agent && !remote) p.add(`remote_control: true works for Claude only (${provider(agent).displayName} has no Remote Control); drop the key or use agent: claude`);
+  if (agent && remote && (specRemote === true || (specRemote === undefined && remoteDefault))) {
+    const flags = config.agents[agent].flags;
     const own = flags.find((f) => f === '--remote-control' || f === '--rc' || f === 'remote-control');
-    if (agent !== 'codex' && own) p.add(`remote_control: true, but agents.claude.flags in ${config.path} already has ${own}: use one of them (the server mode "remote-control" refuses the settings of the event hooks)`);
+    if (own) p.add(`remote_control: true, but agents.claude.flags in ${config.path} already has ${own}: use one of them (the server mode "remote-control" refuses the settings of the event hooks)`);
   }
 
   p.throwIfAny(`${label(raw)} is invalid:`, 'Run "agentctl spec example" to see the format.');
@@ -434,7 +437,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   };
   if (reviewOf) spec.reviewOf = reviewOf;
   if (review) spec.review = review;
-  if (agent === 'claude' && (specRemote ?? remoteDefault)) spec.remoteControl = true;
+  if (agent && remote && (specRemote ?? remoteDefault)) spec.remoteControl = true;
   if (cohort) spec.cohort = cohort;
   if (reportAlt.length > 0) spec.reportAlt = reportAlt;
   return spec;

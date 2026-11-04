@@ -1141,6 +1141,6 @@ function parseProviders(value: unknown, p: Problems): ProviderId[] {
     return [...PROVIDER_IDS];
   }
   if (new Set(value).size !== value.length) p.add('config.providers must not contain duplicates');
-  for (const required of ['claude', 'codex']) if (!value.includes(required)) p.add(`config.providers must include ${required}`);
+  for (const required of DEFAULT_PROVIDERS) if (!value.includes(required)) p.add(`config.providers must include ${required}`);
   return value as ProviderId[];
 }
