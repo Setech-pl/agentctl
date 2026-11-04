@@ -599,7 +599,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         const meta = findCohort(ctx.config, name);
         const { rows } = await reportStatus(ctx, { archived: true });
         const mine = cohortRows(rows, meta.name);
-        const outputs = aggregateOutputs(mine.filter(r => r.report === 'yes').map(r => ({ task: r.task, data: { outputs: r.outputs ?? null, outputs_valid: r.outputs_valid ?? false, outputs_partial: r.outputs_partial ?? false, outputs_errors: r.outputs_errors ?? [] } })));
+        const outputs = aggregateOutputs(mine.filter(r => r.report === 'yes').map(r => ({ task: r.task, reviewOf: r.reviewOf, data: { outputs: r.outputs ?? null, outputs_valid: r.outputs_valid ?? false, outputs_partial: r.outputs_partial ?? false, outputs_errors: r.outputs_errors ?? [] } })));
         if (opts.json) return line(JSON.stringify({ ...outputs, cohort: meta.name, created: meta.created || null, note: meta.note ?? null, tasks: mine, queued: cohortEntries(readQueue(ctx.config), meta.name).map((e) => e.task) }, null, 2));
         line(`Cohort ${meta.name}${meta.created ? ` (since ${formatLocalTime(meta.created)})` : ''}${meta.note ? `: ${meta.note}` : ''}`);
         if (mine.length > 0) for (const l of renderStatusTable(mine, 60, { cohort: false })) line(l);

@@ -1,7 +1,7 @@
 import { atomicWriteFile, stateWriteFailure } from './atomic-file.ts';
 import { tryFileLock } from './file-lock.ts';
 import { promptQueueView } from './prompt-queue.ts';
-import { readOutputs, dependencyVerdict } from './outputs.ts';
+import { readOutputs, dependencyVerdict, outputsPending } from './outputs.ts';
 import type { OutputData, OutputVerdict } from './outputs.ts';
 import path from 'node:path';
 import { inspectReport } from './report-state.ts';
@@ -37,6 +37,7 @@ export interface StatusRow {
   outputs?: OutputData['outputs'];
   outputs_valid?: boolean;
   outputs_partial?: boolean;
+  outputs_pending?: boolean;
   outputs_errors?: string[];
   verdict?: OutputVerdict;
   decisionsCount?: number;
@@ -111,6 +112,8 @@ export interface StatusRow {
   /** The task that took over after `agentctl move` (this one is then `superseded`), and the task this one continues. */
   supersededBy: string | null;
   continues: string | null;
+  /** The task whose work this one reviews (its decisions and actions are the reviewer's, not the author's). */
+  reviewOf?: string | null;
   /** Tokens of the sessions of the task (input + output + cache writes), when asked for (`CollectOptions.tokens`) and a session log was found; null otherwise (n/d). */
   tokens?: TaskTokens | null;
 }
@@ -209,7 +212,9 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     } else { observation.working = false; observation.idle = 0; }
     idleObservations.set(observationKey, observation);
     if (release) { try { atomicWriteFile(observationFile, JSON.stringify(observation)); } catch { /* observation persistence is best effort */ } finally { release(); } }
-    const outputData = reportReady ? await readOutputs(ctx, record) : undefined;
+    let outputData = reportReady ? await readOutputs(ctx, record) : undefined;
+    // Still being written (no report-end yet, or not settled): no warnings about the block yet.
+    if (outputData && outputsPending(config, record, reportState, runner.now())) outputData = { ...outputData, outputs_errors: [], outputs_partial: false, outputs_pending: true };
     let verdict: OutputVerdict | undefined;
     if (reportReady) { try { verdict = dependencyVerdict(fs.readFileSync(record.report, 'utf8')); } catch { /* absent */ } }
     rows.push({
@@ -259,6 +264,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       cohort: record.cohort ?? null,
       supersededBy: record.supersededBy ?? null,
       continues: record.continues ?? null,
+      reviewOf: record.reviewOf ?? null,
     });
   }
   // Windows of the session that agentctl has no state file for: never skipped silently.

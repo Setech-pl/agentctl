@@ -2,7 +2,7 @@ import path from 'node:path';
 import type { Context } from './context.ts';
 import type { ResolvedSpec } from './spec.ts';
 import { listTaskRecords, listArchivedRecords } from './taskstore.ts';
-import { readOutputs } from './outputs.ts';
+import { readOutputs, outputRepo } from './outputs.ts';
 import { AgentctlError } from './util.ts';
 
 /** Resolve at start, before creating any worktree. Queue specs retain @TASK until then. */
@@ -20,7 +20,7 @@ export async function resolveTaskBases(ctx: Context, spec: ResolvedSpec): Promis
     if (candidates.length !== 1) throw new AgentctlError(`${spec.task}: base ${raw}: repository missing or ambiguous; use @TASK:repo-name; start blocked`);
     const selected = candidates[0]!;
     const data = await readOutputs(ctx, source);
-    const refs = [...(data.outputs?.commits ?? []), ...(data.outputs?.integrate ?? [])].filter(r => r.repo === selected.path || r.repo === path.basename(selected.path));
+    const refs = [...(data.outputs?.commits ?? []), ...(data.outputs?.integrate ?? [])].filter(r => outputRepo(source, r.repo) === selected);
     const shas = [...new Set(refs.map(r => r.sha))];
     if (shas.length > 1) throw new AgentctlError(`${spec.task}: base ${raw}: ambiguous output commits; start blocked`);
     const refErrors = data.outputs_errors.filter(e => /^(commits|integrate)\b|^repo |branch .* does not exist|commit .* does not exist/.test(e));

@@ -233,3 +233,63 @@ describe('FIX2 A: automatic review start gate and old entries', () => {
   });
 });
 
+describe('FIX2 B: outputs repo, verdict label, pending block', () => {
+  const sha = 'abcdef1';
+  const block = (commits: string) => `Werdykt: PASS\n\n\`\`\`agentctl-outputs\nversion: 1\nverdict: PASS\ncommits:\n${commits}\`\`\`\n<!-- agentctl:report-end -->\n`;
+  const write = (record: ReturnType<typeof seedTask>, text: string) => { fs.mkdirSync(path.dirname(record.report), { recursive: true }); fs.writeFileSync(record.report, text); };
+  it('B1/N1: repo may be the repo name, the repository path or the task worktree', async () => {
+    const f = fixture('b1-repo'); const wt = `${f.repo}-t`;
+    const r = seedTask(f.config, 'T', { repos: [{ path: f.repo, worktree: wt, branch: 't', base: A }] });
+    for (const name of ['repo', f.repo, wt]) {
+      write(r, block(`  - {repo: "${name}", branch: t, sha: ${sha}}\n`));
+      const data = await readOutputs(f.ctx, r); assert.deepEqual(data.outputs_errors, [], name); assert.equal(data.outputs_valid, true);
+    }
+  });
+  it('B1/N1: a reviewer may name the author\'s worktree, the author\'s repository path or the author\'s branch', async () => {
+    const f = fixture('b1-review-repo'); const authorWt = `${f.repo}-author`;
+    seedTask(f.config, 'AUTHOR', { repos: [{ path: f.repo, worktree: authorWt, branch: 'dev-u2', base: A }] });
+    const rev = seedTask(f.config, 'AUTHOR-REV', { reviewOf: 'AUTHOR', repos: [{ path: f.repo, worktree: `${f.repo}-author-rev`, base: A }] });
+    for (const name of [authorWt, f.repo, 'dev-u2', 'repo']) {
+      write(rev, block(`  - {repo: "${name}", branch: dev-u2, sha: ${sha}}\n`));
+      const data = await readOutputs(f.ctx, rev); assert.deepEqual(data.outputs_errors, [], name);
+    }
+  });
+  it('B1/N1: an unknown or ambiguous repo is an error that lists the accepted values, once with a count', async () => {
+    const f = fixture('b1-repo-bad'); const other = path.join(f.root, 'x', 'repo'); fs.mkdirSync(other, { recursive: true });
+    const r = seedTask(f.config, 'T', { repos: [{ path: f.repo, worktree: `${f.repo}-t`, base: A }, { path: other, worktree: `${other}-t`, base: A }] });
+    write(r, block(`  - {repo: nowhere, branch: t, sha: ${sha}}\n  - {repo: nowhere, branch: t, sha: ${sha}}\n  - {repo: nowhere, branch: t, sha: ${sha}}\n  - {repo: repo, branch: t, sha: ${sha}}\n`));
+    const data = await readOutputs(f.ctx, r);
+    const missing = data.outputs_errors.filter(e => e.startsWith('repo nowhere')); assert.equal(missing.length, 1); assert.match(missing[0]!, /\(3 entries\)/); assert.ok(missing[0]!.includes(f.repo) && missing[0]!.includes(`${f.repo}-t`));
+    assert.ok(data.outputs_errors.some(e => /^repo repo: ambiguous/.test(e)), data.outputs_errors.join('|'));
+  });
+  it('B2: the protocol injected into agents says that one-key maps and lower-case results are accepted, and what repo means', () => {
+    assert.match(OUTPUT_PROTOCOL, /one-key mapping/); assert.match(OUTPUT_PROTOCOL, /lower-case result/); assert.match(OUTPUT_PROTOCOL, /`repo` is the name of the repository/); assert.match(OUTPUT_PROTOCOL, /repo: sandbox/);
+  });
+  it('B3/N3: the report event takes outputs.verdict, then a header line; never a sentence of the body; one label', () => {
+    const f = fixture('b3');
+    const fileOf = (name: string, text: string) => { const p = path.join(f.root, `${name}.md`); fs.writeFileSync(p, text); return p; };
+    assert.equal(readVerdict(fileOf('declared', block('  []\n').replace('Werdykt: PASS', 'Werdykt: FAIL').replace('verdict: PASS', 'verdict: BLOCKED'))), 'Werdykt: BLOCKED');
+    assert.equal(readVerdict(fileOf('header', 'Verdict: pass\n\nBody.\n')), 'Werdykt: PASS');
+    assert.equal(readVerdict(fileOf('header2', '# Przegląd\n\nwerdykt: PARTIAL – brak testów\n')), 'Werdykt: PARTIAL – brak testów');
+    const prose = ['# Review', ...Array.from({ length: 20 }, (_, i) => `Line ${i} of the review.`), 'verdict: PASS jest zgodny z treścią raportu, ale sam blok nie przechodzi walidacji schematu.'].join('\n');
+    assert.equal(readVerdict(fileOf('prose', prose)), undefined);
+  });
+  it('B4/N4: an unfinished report of a protocol task is not judged: no "missing block" until report-end and settle', async () => {
+    const f = fixture('b4'); const r = seedTask(f.config, 'W', { outputsProtocol: 1 });
+    write(r, 'Werdykt: PASS\nstill writing the review…\n');
+    const row = () => collectStatus(f.ctx, { progress: false }).then(rows => rows.find(x => x.task === 'W')!);
+    const early = await row(); assert.deepEqual(early.outputs_errors, []); assert.equal(early.outputs_pending, true);
+    await journalOutputs(f.ctx, r); assert.equal(readJournal(f.config).filter(e => e.kind === 'report-outputs').length, 0);
+    write(r, 'Werdykt: PASS\nfinished\n<!-- agentctl:report-end -->\n');
+    const done = await row(); assert.match((done.outputs_errors ?? [])[0] ?? '', /missing agentctl-outputs/); assert.notEqual(done.outputs_pending, true);
+    await journalOutputs(f.ctx, r); assert.equal(readJournal(f.config).filter(e => e.kind === 'report-outputs').length, 1);
+  });
+  it('A6: a reviewer\'s decisions are labelled as the review\'s in events and the cohort aggregate', async () => {
+    const f = fixture('a6-source'); const rev = seedTask(f.config, 'AUTHOR-REV', { reviewOf: 'AUTHOR', outputsProtocol: 1, cohort: 'C' }); await touchCohort(f.ctx, 'C');
+    write(rev, block('  []\n').replace('commits:\n  []\n', 'decisions: [Czy scalić?]\n'));
+    await journalOutputs(f.ctx, rev);
+    const events = await collectEvents(f.ctx, { client: 'a6' }); assert.ok(events.summary.needYou.some(s => s.startsWith('przegląd AUTHOR-REV: decision: Czy scalić?')), events.summary.needYou.join('|'));
+    const shown = await f.full('cohort_show', { cohort: 'C', format: 'json' }); assert.match(shown.text, /"source": "przegląd AUTHOR-REV"/);
+  });
+});
+

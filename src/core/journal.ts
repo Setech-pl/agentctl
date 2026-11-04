@@ -25,6 +25,8 @@ export interface JournalEntry {
   /** The verdict line of a report that became ready. */
   verdict?: string;
   reportHash?: string;
+  /** `report-outputs` of an automatic/manual review: the task it reviews, so its decisions are shown as the reviewer's. */
+  reviewOf?: string;
   decisions?: string[];
   actions?: Array<{ title: string; shell: string }>;
   gc_preview?: unknown;

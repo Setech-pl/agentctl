@@ -16,7 +16,7 @@ import { EXAMPLE_SPEC } from './example.ts';
 import { checkRetryWorktrees } from './git.ts';
 import { createHash } from 'node:crypto';
 import { collectDisk, diskLine } from './disk.ts';
-import { retryEntry, moveToFront, setPaused, unblockEntry, findEntry } from './queue.ts';
+import { retryEntry, moveToFront, setPaused, unblockEntry, findEntry, rebuildAutoReview } from './queue.ts';
 import { touchCohort, setCohortOf, setNote, planCohortArchive, applyCohortArchive } from './cohort.ts';
 import { setHidden } from './hide.ts';
 import { archiveClosed, applyArchive, parseAge } from './archive.ts';
@@ -69,7 +69,7 @@ import type { LimitAssignments } from './limits.ts';
 import { planLine } from './usage-report.ts';
 import { openReader, readPlans } from './usage.ts';
 import { AGENT_NAMES } from './config.ts';
-import { AgentctlError, cohortKey, errorMessage, formatLocalTime, resolvePath } from './util.ts';
+import { AgentctlError, cohortKey, errorMessage, formatLocalTime, plural, resolvePath } from './util.ts';
 
 /*
  * The tools of `agentctl mcp`. This file is data and functions only: the MCP SDK front (src/mcp/server.ts) registers them.
@@ -517,7 +517,7 @@ async function runCohortShow(deps: McpDeps, args: { cohort: string }): Promise<T
   const rows = cohortRows(await collectStatus(ctx, { archived: true }), meta.name);
   const views = (await queueViews(ctx)).filter((v) => cohortEntries([v.entry], meta.name).length > 0);
   const queued = views.map((v) => ({ task: v.entry.task, position: v.position, startCondition: v.condition.text, blocked: v.condition.kind === 'blocked' }));
-  const outputs = aggregateOutputs(rows.filter(r => r.report === 'yes').map(r => ({ task: r.task, data: { outputs: r.outputs ?? null, outputs_valid: r.outputs_valid ?? false, outputs_partial: r.outputs_partial ?? false, outputs_errors: r.outputs_errors ?? [] } })));
+  const outputs = aggregateOutputs(rows.filter(r => r.report === 'yes').map(r => ({ task: r.task, reviewOf: r.reviewOf, data: { outputs: r.outputs ?? null, outputs_valid: r.outputs_valid ?? false, outputs_partial: r.outputs_partial ?? false, outputs_errors: r.outputs_errors ?? [] } })));
   const head = { cohort: meta.name, created: meta.created || null, note: meta.note ?? null, tasks: rows.length, queued: queued.length };
   return ok(`${JSON.stringify(head)}\n\n${JSON.stringify({ ...head, tasks: rows.map(statusRowForChat), queued, ...outputs }, null, 2)}`);
 }
@@ -829,7 +829,7 @@ async function runNew(deps: McpDeps, args: NewMcpArgs): Promise<ToolResult> {
     const cap = !args.confirm && ctx.config.capacity.snapshot ? capacitySnapshot(await collectCapacity(ctx), specs.map((s) => s.agent)) : undefined;
     const disk = await collectDisk(ctx);
     const readyCount = (await liveWindows(ctx)).filter(w => w.reportReady).length;
-    const summary = summarizeSpecs(specs, [...(!cap && readyCount ? [`${readyCount} okien report-ready – close zwolni okna`] : []), ...(cap ? snapshotLines(cap) : []), ...(disk.level === 'critical' ? [`WARNING: ${diskLine(disk)}`] : [])]).join('\n');
+    const summary = summarizeSpecs(specs, [...(!cap && readyCount ? [`${readyCount} ${plural(readyCount, 'okno', 'okna', 'okien')} report-ready – close zwolni okna`] : []), ...(cap ? snapshotLines(cap) : []), ...(disk.level === 'critical' ? [`WARNING: ${diskLine(disk)}`] : [])]).join('\n');
     if (!args.confirm) {
       return { text: `${summary}\n\nNot started yet. Show this to the user and ask; if they agree, call new again with the same spec and confirm: true.`, executed: false, announce: '' };
     }
@@ -1384,8 +1384,9 @@ async function confirmationScope(ctx: Context, name: string, args: Record<string
     return { specs };
   }
   if (name === 'queue_retry') {
-    const entry = findEntry(ctx.config, args.task as string);
+    let entry = findEntry(ctx.config, args.task as string);
     if (entry.status !== 'failed') throw new AgentctlError(`${entry.task} is ${entry.status}, not failed`);
+    if (entry.autoReview) entry = await rebuildAutoReview(ctx, entry, { write: false });
     const spec = resolveSpec(splitSpecs(entry.spec, 'queue retry')[0]!, { config: ctx.config });
     await checkRetryWorktrees(ctx.runner, spec.repos);
   }

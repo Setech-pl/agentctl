@@ -15,7 +15,7 @@ import type { JournalEntry } from './journal.ts';
 import { readQueue, waiting } from './queue.ts';
 import { selectReady } from './pull.ts';
 import { collectStatus } from './status.ts';
-import { AgentctlError, cohortKey, formatLocalTime, isObject } from './util.ts';
+import { AgentctlError, cohortKey, formatLocalTime, isObject, plural } from './util.ts';
 
 /*
  * What changed since the last look, for a chat that gets no notifications: the journal of events (watch, the queue, cancel, the limits)
@@ -120,7 +120,7 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
   const report: EventsReport = { client: opts.client, since: new Date(since.ms).toISOString(), sinceLabel: since.label, cohort, events, summary, away: awayView(config), markerMoved: false, has_more: false, next_cursor: '' };
   const encode = () => `e2:${position.index}:${position.offset}`;
   const baseNeedYou = [...summary.needYou];
-  const updateNeedYou = () => { report.summary.needYou = [...baseNeedYou, ...events.filter(e => !('fragment' in e) && e.kind === 'report-outputs').flatMap(e => [...(e.decisions ?? []).map(text => `${e.task}: decision: ${text}`), ...(e.actions ?? []).map(a => `${e.task}: action: ${a.title} (${a.shell})`)])]; };
+  const updateNeedYou = () => { report.summary.needYou = [...baseNeedYou, ...events.filter(e => !('fragment' in e) && e.kind === 'report-outputs').flatMap(e => [...(e.decisions ?? []).map(text => `${e.reviewOf ? 'przegląd ' : ''}${e.task}: decision: ${text}`), ...(e.actions ?? []).map(a => `${e.reviewOf ? 'przegląd ' : ''}${e.task}: action: ${a.title} (${a.shell})`)])]; };
   const fits = () => { updateNeedYou(); return Math.max(Buffer.byteLength(JSON.stringify(report, null, 2)), Buffer.byteLength(renderEvents(report).join('\n'))) <= (opts.maxBytes ?? 16000); };
   const limit = Math.max(1, Math.min(200, opts.limit ?? 100));
   while (position.index < all.length && events.length < limit) {
@@ -205,7 +205,7 @@ const KIND_LABEL: Record<JournalEntry['kind'], string> = {
 
 export function summaryLine(s: EventsSummary): string {
   const parts = [`${s.active} aktywne${s.working > 0 ? ` (${s.working} pracuje)` : ''}`, `${s.queued} w kolejce`, s.reportsToPull.length > 0 ? `${s.reportsToPull.length} raport${s.reportsToPull.length === 1 ? '' : 'y'} do pobrania (${s.reportsToPull.join(', ')})` : 'brak raportów do pobrania'];
-  if (s.unmarked) parts.push(`${s.unmarked} zadań bez oceny`);
+  if (s.unmarked) parts.push(`${s.unmarked} ${plural(s.unmarked, 'zadanie', 'zadania', 'zadań')} bez oceny`);
   if (s.needYou.length > 0) parts.push(`czeka na Ciebie: ${s.needYou.join(', ')}`);
   return `Teraz: ${parts.join(' · ')}.`;
 }
