@@ -1,3 +1,4 @@
+import { activeProviders, perProvider, isActive } from './providers/registry.ts';
 import { withStartLock } from './start-lock.ts';
 import { authorCheckoutBusy, authorTerminal, authorWaitReason, effectiveAfter, findAuthorRecord, repinReview, syncReviewLedger } from './review-gate.ts';
 import { queueFile as promptQueueFile } from './prompt-queue.ts';
@@ -201,9 +202,9 @@ export async function planQueueAdd(ctx: Context, raws: RawSpec[], opts: { agent?
 /** Per spec: the order and where it will stand ("starts at once" or "waits: claude 2/2, 1 ahead"). */
 export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: QueueEntry[], live: { agent?: AgentName; counted?: boolean }[], rows: StatusRow[] = []): string[] {
   const { config } = ctx;
-  const load: Record<AgentName, number> = { claude: 0, codex: 0 };
+  const load: Record<AgentName, number> = perProvider(activeProviders(config), () => 0);
   for (const w of live) if (w.agent && w.counted !== false) load[w.agent]++;
-  const ahead: Record<AgentName, number> = { claude: 0, codex: 0 };
+  const ahead: Record<AgentName, number> = perProvider(activeProviders(config), () => 0);
   for (const e of waiting(entries)) ahead[e.agent]++;
   const readyCount = rows.filter(r => r.state === 'report-ready' && r.window === 'alive').length;
   const lines: string[] = readyCount ? [`${readyCount} ${plural(readyCount, 'okno', 'okna', 'okien')} report-ready – close zwolni okna`] : [];
@@ -437,7 +438,7 @@ export interface QueueView {
  */
 export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live: { agent?: AgentName; counted?: boolean }[], rows: StatusRow[] = [], nowMs: number = Date.now()): QueueView[] {
   const failed = new Set(entries.filter((e) => e.status === 'failed').map((e) => e.task));
-  const used: Record<AgentName, number> = { claude: 0, codex: 0 };
+  const used: Record<AgentName, number> = perProvider(activeProviders(config), () => 0);
   for (const w of live) if (w.agent && w.counted !== false) used[w.agent]++;
   const paused = isPaused(config) || !config.queue.enabled;
   const reason = !config.queue.enabled ? 'queue.enabled is false' : 'queue paused (agentctl queue resume)';
@@ -558,7 +559,7 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   entries = readQueue(config);
   const live = await liveWindows(ctx);
   const rows = opts.rows ?? (await collectStatus(ctx, { progress: false, archived: true }));
-  const used: Record<AgentName, number> = { claude: 0, codex: 0 };
+  const used: Record<AgentName, number> = perProvider(activeProviders(config), () => 0);
   for (const w of live) if (w.agent && w.counted !== false) used[w.agent]++;
   // A start in progress whose window is not up yet already holds its place.
   for (const [task, i] of memory.inflight) if (!live.some((w) => w.window === task.toLowerCase())) used[i.agent]++;

@@ -937,7 +937,7 @@ export interface PanelLine {
 /** The two lines under the header: per provider the windows as a bar with the percentage and the reset, or n/d. */
 export function usagePanel(plans: Record<AgentName, PlanState> | null, usage: UsageSettings, now: number): PanelLine[] {
   if (plans === null) return [];
-  return AGENT_NAMES.map((provider): PanelLine => {
+  return (Object.keys(plans) as AgentName[]).map((provider): PanelLine => {
     const plan = plans[provider];
     const name = provider.padEnd(6);
     if (!plan.available) return { provider, text: `${name} n/d${plan.note ? ` – ${plan.note}` : ''}` };

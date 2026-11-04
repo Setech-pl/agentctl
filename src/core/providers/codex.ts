@@ -12,7 +12,7 @@ import { refreshCodexCapacity } from './codex-usage.ts';
 import { defaultEquivalents, formatModelEffort } from '../equivalents.ts';
 import { modelLabel } from './model-label.ts';
 import { splitFlag } from './safety.ts';
-import { sessionAgent } from '../limits.ts';
+import { interactiveTokens } from './process.ts';
 import { sessionQuestion } from './codex-question.ts';
 import { isObject } from '../util.ts';
 import type { ProviderAdapter } from './types.ts';
@@ -77,5 +77,5 @@ export const codex: ProviderAdapter = {
       if ((flag === '-c' || flag === '--config') && value !== undefined && /^approval_policy\s*=\s*["']?never/.test(value)) return `${flag} ${value}`;
       return undefined;
     } },
-  isExternalSession: tokens => sessionAgent(tokens.join(' ')) === 'codex',
+  isExternalSession(tokens) { const first = path.basename(tokens[0] ?? ''); return (first === 'codex' || (/^node(js)?$/.test(first) && /@openai\/codex\/\S*\.js$/.test(tokens[1] ?? ''))) && interactiveTokens(tokens); },
 };

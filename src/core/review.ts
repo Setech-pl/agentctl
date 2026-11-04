@@ -1,3 +1,4 @@
+import { alternatives } from './providers/registry.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Context } from './context.ts';
@@ -21,7 +22,7 @@ export { DEFAULT_REVIEW_TEMPLATE };
 /** Prefer a different installed provider. Fallback uses only an explicitly configured, different model. */
 export async function reviewOrder(ctx: Context, author: TaskRecord, review: ReviewSettings): Promise<{ order: Order; rule: string }> {
   if (author.agent === 'unknown') throw new AgentctlError(`${author.task}: review author provider is n/d`);
-  const other: AgentName = author.agent === 'claude' ? 'codex' : 'claude';
+  const other = alternatives(ctx.config, author.agent)[0]!;
   const target = review.agent ?? other;
   const available = async (agent: AgentName) => (await ctx.runner.exec(agent, ['--version'], { readOnly: true })).code === 0;
   if (await available(target)) {

@@ -11,7 +11,7 @@ import { findAutoAcceptFlag } from './safety.ts';
 import type { TaskState } from './state.ts';
 import { AgentctlError, Problems, errorMessage, expandHome, isObject, resolvePath } from './util.ts';
 
-import { PROVIDER_IDS } from './providers/types.ts';
+import { PROVIDER_IDS, DEFAULT_PROVIDERS } from './providers/types.ts';
 import type { ProviderId } from './providers/types.ts';
 export const AGENT_NAMES = PROVIDER_IDS;
 export type AgentName = ProviderId;
@@ -1135,7 +1135,7 @@ export function loadProjectConfig(repoPath: string): (Layer & { path: string }) 
 
 /** Both original providers remain mandatory; order controls the alternatives. */
 function parseProviders(value: unknown, p: Problems): ProviderId[] {
-  if (value === undefined) return [...PROVIDER_IDS];
+  if (value === undefined) return [...DEFAULT_PROVIDERS];
   if (!Array.isArray(value) || value.some(id => typeof id !== 'string' || !(PROVIDER_IDS as readonly string[]).includes(id))) {
     p.add(`config.providers must be a list of known providers: ${PROVIDER_IDS.join(', ')}`);
     return [...PROVIDER_IDS];

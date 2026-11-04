@@ -8,6 +8,7 @@ import type { SessionStats } from '../usage-parse.ts';
 import type { UsageReader } from '../usage-sources.ts';
 
 export const PROVIDER_IDS = ['claude', 'codex'] as const;
+export const DEFAULT_PROVIDERS = ['claude', 'codex'] as const;
 export type ProviderId = (typeof PROVIDER_IDS)[number];      // config.ts: export type AgentName = ProviderId
 
 /** Klasa modelu w tabeli equivalents (opis dla dyspozytora, nie gwarancja jakości). */

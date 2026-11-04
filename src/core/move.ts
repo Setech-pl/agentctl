@@ -1,3 +1,4 @@
+import { alternatives } from './providers/registry.ts';
 import { confirmAction } from './clipboard.ts';
 import type { AgentName } from './config.ts';
 import type { Context } from './context.ts';
@@ -32,7 +33,7 @@ export interface MovePlan {
   prompt: string;
 }
 
-const otherAgent = (a: AgentName): AgentName => (a === 'claude' ? 'codex' : 'claude');
+
 const label = (o: Order): string => `${o.agent} ${formatModelEffort(o)}`;
 
 /** The text added to the original prompt for the agent that takes over. */
@@ -65,8 +66,10 @@ export async function planMove(ctx: Context, taskArg: string, opts: MoveOptions 
   if (from.supersededBy) throw new AgentctlError(`${from.task} was already moved to ${from.supersededBy}`, `Close the old window when you are done: agentctl close ${from.task}`);
   if (from.pin) throw new AgentctlError(`${from.task} is pinned (pin: true): it is never moved to the other provider`, 'Wait for the limit to reset, or remove the pin from the spec and start the task again.');
   if (from.agent === 'unknown') throw new AgentctlError(`the agent of ${from.task} is unknown (adopted without --agent), so its model cannot be translated`, 'Start the task again on the provider you want, with "agentctl new --agent <agent>".');
-  const target = opts.agent ?? otherAgent(from.agent);
-  if (target === from.agent) throw new AgentctlError(`${from.task} already runs on ${from.agent}`, `Pick the other provider: agentctl move ${from.task} --agent ${otherAgent(from.agent)}`);
+  const others = alternatives(config, from.agent);
+  if (!opts.agent && others.length > 1) throw new AgentctlError(`wybierz dostawcę: --agent ${others.join('|')}`);
+  const target = opts.agent ?? others[0]!;
+  if (target === from.agent) throw new AgentctlError(`${from.task} already runs on ${from.agent}`, `Pick the other provider: agentctl move ${from.task} --agent ${others.join('|')}`);
 
   const t = translate({ agent: from.agent, model: from.model, effort: from.effort === 'unknown' ? 'high' : from.effort }, target, config.equivalents);
   if (!t.ok) throw new AgentctlError(`${from.task}: ${t.message}`, t.hint);

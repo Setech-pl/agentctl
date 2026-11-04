@@ -13,7 +13,7 @@ import { refreshCodexCapacity } from '../capacity.ts';
 import { defaultEquivalents, formatModelEffort } from '../equivalents.ts';
 import { modelLabel } from './model-label.ts';
 import { splitFlag } from './safety.ts';
-import { sessionAgent } from '../limits.ts';
+import { interactiveTokens } from './process.ts';
 import { sessionQuestion } from '../codex-question.ts';
 import { isObject } from '../util.ts';
 import type { ProviderAdapter } from './types.ts';
@@ -73,5 +73,5 @@ export const claude: ProviderAdapter = {
       if (flag === '--permission-mode' && value !== undefined && ['bypassPermissions', 'acceptEdits', 'auto', 'dontAsk'].includes(value)) return `${flag} ${value}`;
       return undefined;
     } },
-  isExternalSession: tokens => sessionAgent(tokens.join(' ')) === 'claude',
+  isExternalSession(tokens) { const first = path.basename(tokens[0] ?? ''); return (first === 'claude' || (/^node(js)?$/.test(first) && /claude-code\/\S*\.js$/.test(tokens[1] ?? ''))) && interactiveTokens(tokens); },
 };

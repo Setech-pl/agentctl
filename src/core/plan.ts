@@ -1,3 +1,4 @@
+import { provider, alternatives } from './providers/registry.ts';
 import { pendingStarts } from './start-lock.ts';
 import { inspectReport } from './report-state.ts';
 import { resolveTaskBases } from './base-ref.ts';
@@ -36,9 +37,9 @@ export interface PlanOptions {
 }
 
 /** Codex reasoning efforts; `max` is Claude-only. */
-const CODEX_EFFORTS = ['low', 'medium', 'high', 'xhigh'];
 
-const otherAgent = (a: AgentName): AgentName => (a === 'claude' ? 'codex' : 'claude');
+
+
 const label = (o: Order): string => `${o.agent} ${formatModelEffort(o)}`;
 
 /** Windows currently in the session, each tagged with the agent that agentctl started in it, then the places held by reservations and external sessions. */
@@ -113,8 +114,8 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
         else p.add(`${at} ${t.message}. ${t.hint}`);
       }
     }
-    if (spec.agent === 'codex' && !CODEX_EFFORTS.includes(spec.effort)) {
-      p.add(`${at} codex has no effort "${spec.effort}" (use ${CODEX_EFFORTS.join(', ')})`);
+    if (!provider(spec.agent).effort.accepted.includes(spec.effort)) {
+      p.add(`${at} ${spec.agent} has no effort "${spec.effort}" (use ${provider(spec.agent).effort.accepted.join(', ')})`);
     }
 
     // 2. duplicates and existing windows
@@ -128,12 +129,13 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
     const occupied = (): LiveWindow[] => [...live, ...planned];
     let limitProblem = opts.ignoreLimits ? undefined : checkWindowLimit(spec.agent, config.limits[spec.agent], occupied(), config.session);
     if (limitProblem) {
-      const other = otherAgent(spec.agent);
+      const others = alternatives(config, spec.agent);
       const current: Order = { agent: spec.agent, model: spec.model, effort: spec.effort };
       let offered = false;
       if (spec.pin) {
         limitProblem += ' The task is pinned (pin: true), so it will not be moved to the other provider.';
-      } else if (checkWindowLimit(other, config.limits[other], occupied(), config.session)) {
+      } else for (const other of others) {
+      if (checkWindowLimit(other, config.limits[other], occupied(), config.session)) {
         limitProblem += ` ${other} is full too.`;
       } else {
         const t = translate(current, other, config.equivalents);
@@ -149,8 +151,10 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
             spec = switchTo(spec, t.order, 'limit');
             ctx.info(`${spec.task}: switched ${label(current)} -> ${label(t.order)} (limit)`);
             limitProblem = undefined;
+            break;
           }
         }
+      }
       }
       if (limitProblem && opts.overflow && ctx.confirm) {
         const yes = await ctx.confirm(`${spec.task}: ${limitProblem}${offered ? ' (switch declined)' : ''}\n  Add it to the queue (it starts by itself when a ${spec.agent} window is free)? [y/N] `);
