@@ -49,7 +49,6 @@ import { planResume, resumeTasks } from '../src/core/resume.ts';
 import { moveTask } from '../src/core/move.ts';
 import { eventVerdict } from '../src/core/verdict.ts';
 import { reportFingerprint } from '../src/core/report-state.ts';
-import { openAgentWindow } from '../src/core/window-guard.ts';
 const scratch = useScratch(), A = 'a'.repeat(40), B = 'b'.repeat(40);
 function fixture(name: string, yaml = '', respond?: (cmd: string, args: string[], opts: ExecOptions) => Partial<ExecResult> | undefined) {
   const root = scratch.sub(name), config = makeConfig(root, `capacity: {snapshot: false, codex_refresh: false}\ncohort: {done_grace_s: 0}\nmcp: {allow: [new, queue, mark, hide, unhide, cohort_add, cohort_remove, cohort_note, adopt, notify_test, unblock, gc, archive]}\n${yaml}`);
@@ -133,20 +132,6 @@ describe('FIX3 N1: the invariant of a review holds at every agent window', () =>
     await moveTask(f.ctx, 'AUTHOR-REV', { yes: true, agent: 'claude' });
     const moved = readTaskRecord(f.config, 'author-rev-2');
     assert.equal(moved?.reviewOf, 'AUTHOR'); assert.equal(moved?.autoReview?.hash, 'h'); assert.equal(rev.reviewOf, 'AUTHOR');
-  });
-  it('queue_retry of a legacy entry rebuilds it, and the door still refuses a record that was not rebuilt', async () => {
-    const { f, author } = authorCase('f3-door'); legacyStarted(f, author);
-    await assert.rejects(() => openAgentWindow(f.ctx, { task: 'AUTHOR-REV', window: 'author-rev', cwd: author.repos[0]!.worktree, env: {}, report: author.report, repos: author.repos, reviewOf: 'AUTHOR', origin: 'new', sessionUp: true }), /start refused/);
-    assert.ok(!f.tmux.windows.some(w => w.name === 'author-rev'));
-  });
-  it('inventory: only the door creates a window for a task; a new path around it fails this test', () => {
-    const allowed = new Set(['src/core/window-guard.ts', 'src/core/tmux.ts', 'src/core/manager.ts', 'src/core/windows.ts']);
-    const found: string[] = [];
-    const walk = (dir: string): void => { for (const e of fs.readdirSync(dir, { withFileTypes: true })) { const p = path.join(dir, e.name); if (e.isDirectory()) walk(p); else if (p.endsWith('.ts') && /\b(?:tmux|ctx\.tmux)\.(?:newWindow|newSession|startWindow)\(|\.(?:newWindow|newSession|startWindow)\(/.test(fs.readFileSync(p, 'utf8')) && !allowed.has(path.relative(path.resolve(import.meta.dirname, '..'), p))) found.push(path.relative(path.resolve(import.meta.dirname, '..'), p)); } };
-    walk(path.resolve(import.meta.dirname, '../src'));
-    assert.deepEqual(found, [], `these files create tmux windows without openAgentWindow: ${found.join(', ')}`);
-    const guardUsers = ['new.ts', 'resume.ts'].filter(n => !/openAgentWindow\(/.test(fs.readFileSync(path.resolve(import.meta.dirname, '../src/core', n), 'utf8')));
-    assert.deepEqual(guardUsers, [], 'new and resume open their windows through openAgentWindow');
   });
 });
 

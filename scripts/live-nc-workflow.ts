@@ -136,6 +136,23 @@ await withHarness({ name: 'nc-workflow', cacheRoot: cache, config: 'watch: {inte
     fs.writeFileSync(mode, 'stuck'); await pause(200); await queuePrompt(ctx, readTaskRecord(config, seed.window)!, 'Stuck message'); await deliverPendingPrompt(ctx, seed.window); await handleEvent(ctx, new Alerts(ctx, notifier), { task: seed.task, agent: 'claude', kind: 'notification', payload: { notification_type: 'idle_prompt' } }); await pause(1100); check('idle_prompt never confirms stuck real composer', await deliverPendingPrompt(ctx, seed.window) === 'needs-attention');
     config.notify.mcpWritesIntervalS = 1; const notifications: string[] = [], notice = async (text: string) => { notifications.push(text); }; await mcpWriteNotice(ctx, notice, 'one'); await mcpWriteNotice(ctx, notice, 'two'); await mcpWriteNotice(ctx, notice, 'three'); await pause(1100); await mcpWriteNotice(ctx, notice); check('MCP notifications aggregate while preserving writes', notifications.length === 2 && notifications[1]?.includes('two; three'));
     const stalePlans = plan(Date.now() - 3600000); await recordStaleCapacity(ctx, stalePlans); await recordStaleCapacity(ctx, stalePlans); check('stale plan event once per reading with live task', readJournal(config).filter(e => e.text.includes('claude: plan reading stale')).length === 1);
+    // N1 (live, real tmux): a review record is resumed only through the one door - refused while it shares the author's checkout/report, in its own checkout otherwise.
+    {
+      const authorWt = path.join(h.root, 'wt', 'iso-author'), ownWt = path.join(h.root, 'wt', 'iso-author-rev'); git(repo, ['worktree', 'add', '-q', '-b', 'iso-author', authorWt]); git(repo, ['worktree', 'add', '-q', '--detach', ownWt]);
+      const stamp = new Date(Date.now() - 60000).toISOString(), reportOf = (t: string) => path.join(config.cache, t.toLowerCase(), `${t}.md`);
+      const mk = (over: Partial<TaskRecord> & { task: string; window: string }): TaskRecord => ({ session: h.session, agent: 'claude', model: 'sonnet', effort: 'medium', repos: [{ path: repo, worktree: authorWt, branch: 'iso-author', base }], links: [], env: {}, report: reportOf(over.task), started: stamp, requested: { agent: 'claude', model: 'sonnet', effort: 'medium' }, ...over });
+      const put = (r: TaskRecord) => { fs.mkdirSync(path.dirname(taskFile(config, r.window)), { recursive: true }); fs.writeFileSync(taskFile(config, r.window), renderTaskMd(r, `Prompt of ${r.task}`)); };
+      const author = mk({ task: 'ISO-AUTHOR', window: 'iso-author', closed: true, closedAt: stamp }); put(author); fs.mkdirSync(path.dirname(author.report), { recursive: true }); fs.writeFileSync(author.report, 'Werdykt: PASS\n<!-- agentctl:report-end -->\n');
+      const authorBytes = fs.readFileSync(author.report, 'utf8');
+      put(mk({ task: 'ISO-AUTHOR-REV', window: 'iso-author-rev', agent: 'codex', model: 'gpt-6-astra', reviewOf: 'ISO-AUTHOR', report: author.report }));
+      const refused = h.agentctl(['resume', 'ISO-AUTHOR-REV', '--yes']);
+      check('legacy review record: resume refused before any window', refused.code !== 0 && /stary rekord przeglądu/.test(`${refused.stdout}${refused.stderr}`) && h.tmux(['list-windows', '-t', h.session, '-F', '#{window_name}']).stdout.split('\n').every(w => !w.includes('iso-author-rev')));
+      check('refused resume leaves the author report and the record untouched', fs.readFileSync(author.report, 'utf8') === authorBytes && readTaskRecord(config, 'iso-author-rev')?.report === author.report);
+      put(mk({ task: 'ISO-AUTHOR-REV', window: 'iso-author-rev', agent: 'codex', model: 'gpt-6-astra', reviewOf: 'ISO-AUTHOR', repos: [{ path: repo, worktree: ownWt, base }] }));
+      const resumed = h.agentctl(['resume', 'ISO-AUTHOR-REV', '--yes']);
+      const cwd = h.tmux(['display-message', '-p', '-t', `=${h.session}:iso-author-rev`, '#{pane_current_path}']).stdout.trim();
+      check('review record with its own checkout resumes there (pane cwd is not the author worktree)', resumed.code === 0 && fs.realpathSync(cwd) === fs.realpathSync(ownWt) && fs.realpathSync(cwd) !== fs.realpathSync(authorWt));
+    }
     const timed = path.join(h.root, 'timed.md'); fs.writeFileSync(timed, spec('TIMED', { cohort: 'Timing', setup: ['sleep 2'] }));
     const timedResult = h.agentctl(['new', timed, '-y']); const timedRecord = record('TIMED');
     check('real setup time is included before the agent starts', timedResult.code === 0 && Date.now() - Date.parse(timedRecord.started) >= 2000);
