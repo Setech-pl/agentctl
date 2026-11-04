@@ -1,4 +1,5 @@
 import { stableNodePath } from './core/mcp-install.ts';
+import { packageVersion } from './core/version.ts';
 import { findEntry } from './core/queue.ts';
 import { collectDisk, diskLine, confirmDiskStart } from './core/disk.ts';
 import { collectCapacity, capacitySnapshot, renderCapacity, snapshotLines } from './core/capacity.ts';
@@ -227,15 +228,6 @@ const realOrSelf = (p: string): string => {
     return p;
   }
 };
-
-function packageVersion(): string {
-  try {
-    const pkg = JSON.parse(fs.readFileSync(new URL(import.meta.url.endsWith('.ts') ? '../package.json' : '../../package.json', import.meta.url), 'utf8')) as { version: string };
-    return pkg.version;
-  } catch {
-    return '0.0.0';
-  }
-}
 
 /** Run the CLI; returns the process exit code. */
 export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promise<number> {

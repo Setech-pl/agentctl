@@ -146,6 +146,8 @@ export const MCP_ALLOW_GROUPS: Record<string, readonly McpWriteTool[]> = {
 
 export interface BoardSettings {
   modelVersions: Record<string, string>;
+  /** The board names its terminal window "agentctl <version> · board" (OSC 2) and the agentctl tmux session titles the outer terminal (this session only). */
+  windowTitle: boolean;
   listWidth?: number | string;
   /** A task without a window whose report was pulled hides by itself (a task without a report stays in "Finished"). */
   autoHidePulledDead: boolean;
@@ -384,7 +386,7 @@ export const NOTIFY_KEYS = ['backend', 'events', 'turn_end', 'terminal_app', 've
 export const NTFY_KEYS = ['server', 'topic', 'token', 'events', 'priority', 'include_verdict', 'include_question', 'click_url', 'always'];
 export const AWAY_KEYS = ['auto_idle'];
 export const MANAGER_KEYS = ['project', 'name', 'model', 'effort', 'guide', 'autostart'];
-export const BOARD_KEYS = ['auto_hide_pulled_dead', 'mouse', 'return_key', 'selected_color', 'model_versions', 'list_width'];
+export const BOARD_KEYS = ['auto_hide_pulled_dead', 'mouse', 'return_key', 'selected_color', 'model_versions', 'list_width', 'window_title'];
 export const MCP_KEYS = ['allow', 'allow_rm_worktree', 'client', 'max_response_kb'];
 export const QUEUE_KEYS = ['enabled', 'parallel_starts'];
 export const CANCEL_KEYS = ['grace'];
@@ -768,7 +770,7 @@ function parseManager(v: unknown, p: Problems): ManagerSettings {
 }
 
 function parseBoard(v: unknown, p: Problems): BoardSettings {
-  const board: BoardSettings = { autoHidePulledDead: true, mouse: true, returnKey: 'F12', selectedColor: 'blue', modelVersions: {} };
+  const board: BoardSettings = { autoHidePulledDead: true, mouse: true, returnKey: 'F12', selectedColor: 'blue', modelVersions: {}, windowTitle: true };
   if (v === undefined || v === null) return board;
   if (!isObject(v)) {
     p.add('config.board must be a mapping like {auto_hide_pulled_dead: true, mouse: true, return_key: F12}');
@@ -782,6 +784,10 @@ function parseBoard(v: unknown, p: Problems): BoardSettings {
   if (v.list_width !== undefined) {
     if ((typeof v.list_width === 'number' && Number.isInteger(v.list_width) && v.list_width >= 64) || (typeof v.list_width === 'string' && /^(?:[1-9]\d?|100)%$/.test(v.list_width))) board.listWidth = v.list_width;
     else p.add('config.board.list_width must be an integer >= 64 columns or a percentage such as "45%"');
+  }
+  if (v.window_title !== undefined) {
+    if (typeof v.window_title === 'boolean') board.windowTitle = v.window_title;
+    else p.add('config.board.window_title must be true or false');
   }
   if (v.mouse !== undefined) {
     if (typeof v.mouse === 'boolean') board.mouse = v.mouse;

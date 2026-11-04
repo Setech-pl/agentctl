@@ -2,6 +2,10 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/) while it is below 1.0 (minor versions may change behaviour).
 
+## [Unreleased]
+
+- Board: the header names the version (`agentctl 0.17.2 board · …`, the one `agentctl version` prints) and the board titles its terminal window `agentctl <version> · board` (OSC 2; the previous title is restored on exit where the terminal supports the xterm title stack). In tmux the outer terminal's title is set through the session options `set-titles` and `set-titles-string` of the agentctl session only. `board.window_title: false` turns all of it off.
+
 ## [0.17.3] - 2026-11-04
 
 - FIX2 P: recognize Claude Code 2.1.x spinner progress and submitted transcript echoes. Confirm delivery from current-generation Claude UserPromptSubmit/Stop/Notification or Codex notify before screen heuristics. New/queue/send return success with an uncertainty warning; watch resolves within delivery_confirm_s (60 s) and notifies once on timeout. Later work, turn completion or a completed canonical report clears needs-attention and unblocks report consumers. Adapter delivery/working patterns are configurable.
