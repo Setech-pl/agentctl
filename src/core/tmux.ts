@@ -191,7 +191,7 @@ export class Tmux {
     const args = ['capture-pane', '-p', ...(join ? ['-J'] : []), '-t', await this.targetFor(window, infos, hintId)];
     if (lines !== undefined) args.push('-S', `-${lines}`);
     const plain = await this.runner.exec('tmux', args, { readOnly: true });
-    if (plain.code !== 0 || !lastPromptText(plain.stdout)) return plain;
+    if (plain.code !== 0 || !screenMetadata(plain.stdout).draft_input) return plain;
     // Text in the input field: a draft of the human, or the dim suggestion of the next prompt that Claude Code shows in an empty field. Only the colour tells them apart.
     const styled = await this.runner.exec('tmux', ['capture-pane', '-p', '-e', ...args.slice(2)], { readOnly: true });
     return styled.code === 0 ? { ...plain, stdout: withoutDimInput(plain.stdout, styled.stdout) } : plain;

@@ -399,7 +399,7 @@ describe('Claude statusLine tap', () => {
     assert.equal(settings(wire()).statusLine, undefined);
     const off = makeConfigOff(w.root);
     assert.equal(buildTapStatusLine('NC-1', self, off, undefined, {}), undefined);
-    assert.deepEqual(Object.keys(buildClaudeSettings('NC-1', self)), ['hooks']);
+    assert.deepEqual(Object.keys(buildClaudeSettings('NC-1', self)), ['hooks', 'promptSuggestionEnabled']);
   });
 });
 

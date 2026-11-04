@@ -32,8 +32,9 @@ function machine(script: Record<string, string[]>, onCapture?: (window: string, 
     if (a[0] === 'has-session' || a[0] === 'list-windows') return { code: 1 };
     if (a[0] !== 'capture-pane') return undefined;
     const window = a[a.indexOf('-t') + 1]!.split(':').pop()!;
-    const n = (seen[window] = (seen[window] ?? 0) + 1);
-    onCapture?.(window, n);
+    // capture -e re-reads the screen just captured (for the colours); it is not another step of the script.
+    const n = a.includes('-e') ? (seen[window] ?? 1) : (seen[window] = (seen[window] ?? 0) + 1);
+    if (!a.includes('-e')) onCapture?.(window, n);
     const screens = script[window] ?? [IDLE];
     return { stdout: screens[Math.min(n - 1, screens.length - 1)] as string };
   };
