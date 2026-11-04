@@ -42,7 +42,7 @@ export function readMarkers(config: Pick<GlobalConfig, 'path'>): Partial<Record<
 }
 
 /** "last", an age (30m, 2h, 1d), an ISO time, or HH:MM today (local); returns ms. */
-export function parseSince(text: string | undefined, client: EventClient, config: Pick<GlobalConfig, 'path'>, now: number): { ms: number; label: string } {
+export function parseSince(text: string | undefined, client: EventClient, config: Pick<GlobalConfig, 'path'>, now: number): { ms: number; label: string; note?: string } {
   const t = (text ?? 'last').trim();
   if (t === '' || t === 'last') {
     const marker = readMarkers(config)[client];
@@ -55,8 +55,9 @@ export function parseSince(text: string | undefined, client: EventClient, config
   if (hm) {
     const d = new Date(now);
     d.setHours(Number(hm[1]), Number(hm[2]), 0, 0);
-    const ms = d.getTime() > now ? d.getTime() - 86_400_000 : d.getTime();
-    return { ms, label: `od ${t}` };
+    // HH:MM is today, local time. A moment that has not come yet has no events: never a fallback to the last 24 hours.
+    const future = d.getTime() > now;
+    return { ms: d.getTime(), label: `od ${t}`, ...(future ? { note: `${t} jest dziś w przyszłości (teraz ${formatLocalTime(new Date(now).toISOString()).slice(11)}): brak zdarzeń. Podaj wiek (np. 30m) albo pełny czas ISO, by sięgnąć do wczoraj.` } : {}) };
   }
   const ms = Date.parse(t);
   if (Number.isNaN(ms)) throw new AgentctlError(`cannot read the time "${t}"`, 'Use last, an age (30m, 2h, 1d), HH:MM or an ISO time like 2026-11-02T10:00.');
@@ -80,6 +81,8 @@ export interface EventsReport {
   /** ISO time the events start after. */
   since: string;
   sinceLabel: string;
+  /** Why the list is empty although a time was asked for (HH:MM later today). */
+  note?: string;
   cohort: string | null;
   events: JournalEntry[];
   summary: EventsSummary;
@@ -117,7 +120,7 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
     reportsToPull: selectReady(open, false).map((r) => r.task).slice(0, 10),
   };
   // Bound the complete JSON and text forms before advancing the persistent cursor.
-  const report: EventsReport = { client: opts.client, since: new Date(since.ms).toISOString(), sinceLabel: since.label, cohort, events, summary, away: awayView(config), markerMoved: false, has_more: false, next_cursor: '' };
+  const report: EventsReport = { client: opts.client, since: new Date(since.ms).toISOString(), sinceLabel: since.label, ...(since.note ? { note: since.note } : {}), cohort, events, summary, away: awayView(config), markerMoved: false, has_more: false, next_cursor: '' };
   const encode = () => `e2:${position.index}:${position.offset}`;
   const baseNeedYou = [...summary.needYou];
   const updateNeedYou = () => { report.summary.needYou = [...baseNeedYou, ...events.filter(e => !('fragment' in e) && e.kind === 'report-outputs').flatMap(e => [...(e.decisions ?? []).map(text => `${e.reviewOf ? 'przegląd ' : ''}${e.task}: decision: ${text}`), ...(e.actions ?? []).map(a => `${e.reviewOf ? 'przegląd ' : ''}${e.task}: action: ${a.title} (${a.shell})`)])]; };
@@ -204,7 +207,7 @@ const KIND_LABEL: Record<JournalEntry['kind'], string> = {
 };
 
 export function summaryLine(s: EventsSummary): string {
-  const parts = [`${s.active} aktywne${s.working > 0 ? ` (${s.working} pracuje)` : ''}`, `${s.queued} w kolejce`, s.reportsToPull.length > 0 ? `${s.reportsToPull.length} raport${s.reportsToPull.length === 1 ? '' : 'y'} do pobrania (${s.reportsToPull.join(', ')})` : 'brak raportów do pobrania'];
+  const parts = [`${s.active} aktywne${s.working > 0 ? ` (${s.working} pracuje)` : ''}`, `${s.queued} w kolejce`, s.reportsToPull.length > 0 ? `${s.reportsToPull.length} ${plural(s.reportsToPull.length, 'raport', 'raporty', 'raportów')} do pobrania (${s.reportsToPull.join(', ')})` : 'brak raportów do pobrania'];
   if (s.unmarked) parts.push(`${s.unmarked} ${plural(s.unmarked, 'zadanie', 'zadania', 'zadań')} bez oceny`);
   if (s.needYou.length > 0) parts.push(`czeka na Ciebie: ${s.needYou.join(', ')}`);
   return `Teraz: ${parts.join(' · ')}.`;
@@ -214,6 +217,7 @@ export function renderEvents(report: EventsReport): string[] {
   const head = `Zdarzenia ${report.sinceLabel}${report.cohort ? `, kohorta ${report.cohort}` : ''}: ${report.events.length === 0 ? 'brak zmian' : String(report.events.length)}`;
   return [
     head,
+    ...(report.note ? [report.note] : []),
     ...report.events.map((e) => `${hhmm(e.at)}  ${KIND_LABEL[e.kind]}${e.task ? `  ${e.task}` : ''}  ${e.verdict ? `${e.verdict}` : e.text}${e.phone ? PHONE_MARK : ''}`),
     summaryLine(report.summary),
     `has_more: ${report.has_more}; next_cursor: ${report.next_cursor}`,

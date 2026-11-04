@@ -9,7 +9,9 @@ import { inspectReport } from './report-state.ts';
 import { recordJournal, readJournal } from './journal.ts';
 import { withFileLock } from './file-lock.ts';
 import { findRecordAnywhere } from './taskstore.ts';
-import { resolvePath } from './util.ts';
+import { plural, resolvePath } from './util.ts';
+
+const countText = (n: number, one: string, few: string, many: string): string => `${n} ${plural(n, one, few, many)}`;
 
 export const VERDICTS = ['PASS', 'PARTIAL', 'FAIL', 'BLOCKED'] as const;
 export type OutputVerdict = typeof VERDICTS[number];
@@ -215,7 +217,7 @@ export async function journalOutputs(ctx: Context, record: TaskRecord): Promise<
     if (!record.outputsProtocol && !data.outputs) { await ctx.runner.writeFile(file, JSON.stringify([...seen, report.signature])); return; }
     // Journal is also the recovery ledger if a process died before writing outputs-seen.
     if (!readJournal(ctx.config, -1).some(e => e.kind === 'report-outputs' && e.task === record.task && e.reportHash === report.signature)) {
-      await recordJournal(ctx, { kind: 'report-outputs', task: record.task, ...(record.reviewOf ? { reviewOf: record.reviewOf } : {}), reportHash: report.signature, decisions: data.outputs?.decisions ?? [], actions: data.outputs?.actions ?? [], text: data.outputs_valid ? `${record.task}: ${data.outputs!.decisions.length} decisions, ${data.outputs!.actions.length} actions` : `${record.task}: outputs warning: ${data.outputs_errors.join('; ')}` });
+      await recordJournal(ctx, { kind: 'report-outputs', task: record.task, ...(record.reviewOf ? { reviewOf: record.reviewOf } : {}), reportHash: report.signature, decisions: data.outputs?.decisions ?? [], actions: data.outputs?.actions ?? [], text: data.outputs_valid ? `${record.task}: ${countText(data.outputs!.decisions.length, 'decyzja', 'decyzje', 'decyzji')}, ${countText(data.outputs!.actions.length, 'akcja', 'akcje', 'akcji')}` : `${record.task}: outputs warning: ${data.outputs_errors.join('; ')}` });
     }
     await ctx.runner.writeFile(file, JSON.stringify([...seen, report.signature]));
   });

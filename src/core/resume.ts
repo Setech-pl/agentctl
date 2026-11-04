@@ -18,7 +18,7 @@ import { readTaskRecord, setHeaderField, setHeaderFields, taskFile } from './tas
 import type { TaskRecord } from './taskstore.ts';
 import { readTaskSessions } from './usage.ts';
 import { assertAgentSpawnAllowed, openAgentWindow } from './window-guard.ts';
-import { AgentctlError } from './util.ts';
+import { AgentctlError, plural } from './util.ts';
 
 /*
  * `agentctl resume`: after a restart of the Mac (or a killed tmux server) the tasks that were at work have a worktree and no window.
@@ -147,6 +147,5 @@ async function startResumed(ctx: Context, plan: ResumePlan, opts: { self?: SelfA
   return results;
 }
 
-const plural = (n: number): string => (n === 1 ? 'zadanie' : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? 'zadania' : 'zadań');
-export const resumeText = (n: number): string => `${n} ${plural(n)} do wznowienia (agentctl resume)`;
+export const resumeText = (n: number): string => `${n} ${plural(n, 'zadanie', 'zadania', 'zadań')} do wznowienia (agentctl resume)`;
 
