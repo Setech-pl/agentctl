@@ -1,3 +1,4 @@
+import { provider, PROVIDER_IDS } from './providers/registry.ts';
 import { DEFAULT_AGENT_SETTINGS, PATTERN_FLAGS } from './config.ts';
 import type { AgentSettings } from './config.ts';
 
@@ -78,7 +79,7 @@ export function taskState(input: StateInput): TaskState {
 }
 
 /** Claude 529/Overloaded and selected-model capacity messages; Codex capacity text is verified in protocol/src/error.rs; raw error-code variants are fixture-tested. */
-export function isOverloaded(screen: string, patterns: string[] = [...DEFAULT_AGENT_SETTINGS.claude.overloadPatterns, ...DEFAULT_AGENT_SETTINGS.codex.overloadPatterns]): boolean {
+export function isOverloaded(screen: string, patterns: string[] = PROVIDER_IDS.flatMap(id => provider(id).defaultSettings().overloadPatterns)): boolean {
   let fence: { char: string; size: number } | null = null;
   let last = '';
   let lastIndex = -1;

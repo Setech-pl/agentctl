@@ -1,3 +1,4 @@
+import { provider } from './providers/registry.ts';
 import { stateWriteFailure } from './atomic-file.ts';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -40,7 +41,7 @@ export function deliveryEvidence(ctx: Context, record: TaskRecord, screen: strin
   if (record.deliveryWasBusy && /Queued follow-up inputs|Queued messages?/i.test(screen) && record.pendingPrompt && screen.includes(record.pendingPrompt.split('\n')[0]!)) return true;
   if (!record.deliveryWasBusy && new RegExp(settings.deliveryPattern, PATTERN_FLAGS).test(screen) && outputFingerprint(screen, settings.deliveryPattern) !== record.deliveryOutputBaseline) return true;
   // A submitted user line followed by an empty composer is a transcript echo, not a draft.
-  const marker = record.agent === 'claude' ? '❯' : '›';
+  const marker = provider(record.agent).screen.echoMarker;
   const first = record.pendingPrompt?.split('\n')[0]?.trim();
   const lines = screen.split('\n').filter(line => line.trimStart().startsWith(marker));
   return Boolean(first && lines.length > 1 && lines.slice(0, -1).some(line => line.trim().slice(1).trim() === first));

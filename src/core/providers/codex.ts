@@ -12,7 +12,7 @@ import { defaultEquivalents, formatModelEffort } from '../equivalents.ts';
 import { modelLabel } from './model-label.ts';
 import { splitFlag } from './safety.ts';
 import { sessionAgent } from '../limits.ts';
-import { sessionQuestion } from '../codex-question.ts';
+import { sessionQuestion } from './codex-question.ts';
 import { isObject } from '../util.ts';
 import type { ProviderAdapter } from './types.ts';
 
