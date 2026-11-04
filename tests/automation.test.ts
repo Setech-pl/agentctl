@@ -211,11 +211,11 @@ describe('new --clip / send --clip through the CLI', () => {
 
   it('send --clip asks, then pastes the prompt (-y skips the question)', async () => {
     const send = `---\ntask: NC-1\n---\nFollow up please.\n`;
-    const respond: Respond = (cmd, args) => (cmd === 'tmux' && args[0] === 'list-windows' ? { stdout: 'nc-1\n' } : undefined);
+    const respond = acknowledgingRespond((cmd, args) => (cmd === 'tmux' && args[0] === 'list-windows' ? { stdout: 'nc-1\n' } : cmd === 'tmux' && args[0] === 'capture-pane' ? { stdout: '❯ Try \"fake\"\n' } : undefined));
     const declined = await run(['send', '--clip'], send, false, new RecordingRunner({ dryRun: false, respond }));
     assert.deepEqual(declined.runner.commands, []);
     assert.match(declined.stdout, /NC-1  ->  window agentctl:nc-1, 17 characters: Follow up please\./);
-    const yes = await run(['send', '--clip', '-y'], send, undefined, new RecordingRunner({ dryRun: false, respond }));
+    const yes = await run(['send', '--clip', '-y'], send, undefined, new DiskRunner({ dryRun: false, respond }));
     assert.equal(yes.code, 0, yes.stderr);
     assert.ok(yes.runner.commands.some((c) => c.startsWith('tmux paste-buffer')));
   });

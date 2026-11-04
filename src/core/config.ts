@@ -57,6 +57,8 @@ export interface AgentSettings {
   trustPattern: string;
   /** Regex: the agent is busy with a turn. */
   workingPattern: string;
+  /** Regex: adapter output acknowledges a submitted prompt (not the composer). */
+  deliveryPattern: string;
   /** tmux key name that interrupts the current turn. */
   interruptKey: string;
   /** Regexes for TUI chrome (shortcut hints, mode and warning lines, empty input prompts). `status` skips these lines when it shows the last line. */
@@ -79,6 +81,8 @@ export interface GlobalConfig extends Layer {
   /** Where agentctl keeps its own state per task (`<stateDir>/<window>/TASK.md`, setup.log, markers), out of reach of the agents. */
   stateDir: string;
   session: string;
+  /** Seconds watch allows for asynchronous prompt acknowledgement. */
+  deliveryConfirmS: number;
   /** Max simultaneous windows per provider (agent). Missing = unlimited. */
   limits: Partial<Record<AgentName, number>>;
   /** `limits.count_external`: claude/codex terminal sessions outside agentctl's windows count against the limit (detected with ps). */
@@ -305,7 +309,8 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
     readyTimeout: 60,
     trustTimeout: 600,
     trustPattern: 'Quick safety check|Yes, I trust this folder',
-    workingPattern: 'esc to interrupt',
+    workingPattern: 'esc to interrupt|^\\s*[✶✻✽✢·*]\\s+[^\\n]+(?:…|\\.\\.\\.)\\s*\\([^\\n]*(?:\\d+(?:\\.\\d+)?s\\s*·|thinking|tokens)[^\\n]*\\)',
+    deliveryPattern: '^\\s*⏺|● got:',
     interruptKey: 'Escape',
     footerPatterns: [
       '\\? for shortcuts',
@@ -337,6 +342,7 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
     trustTimeout: 600,
     trustPattern: 'Trust this folder\\?|Folder settings can run code automatically',
     workingPattern: 'esc to interrupt',
+    deliveryPattern: '^\\s*[•■]|● got:',
     interruptKey: 'Escape',
     // Codex 0.166.0 footer: "GPT-6.1-Sol low · <dir> · <title>" and "? for shortcuts … ⚠ 1 warning · f2 to view".
     footerPatterns: [
@@ -368,11 +374,11 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
 
 /** The keys accepted in every layer: the global config, `.agentctl.yaml` and (with a few of its own) a spec. docs/configuration.md describes each one. */
 export const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'setup', 'defaults', 'guide'];
-export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git', 'cohort'];
+export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git', 'cohort', 'delivery_confirm_s'];
 export const LIMITS_KEYS = [...AGENT_NAMES, 'count_external'];
 export const DEFAULTS_KEYS = ['agent', 'model', 'effort', 'remote_control'];
 export const LINK_KEYS = ['from', 'to'];
-export const AGENT_KEYS = ['flags', 'effort_args', 'ready_pattern', 'ready_timeout', 'trust_timeout', 'trust_pattern', 'working_pattern', 'interrupt_key', 'footer_patterns', 'question_pattern', 'limit_patterns', 'background_patterns', 'overload_patterns'];
+export const AGENT_KEYS = ['flags', 'effort_args', 'ready_pattern', 'ready_timeout', 'trust_timeout', 'trust_pattern', 'working_pattern', 'delivery_pattern', 'interrupt_key', 'footer_patterns', 'question_pattern', 'limit_patterns', 'background_patterns', 'overload_patterns'];
 export const WATCH_KEYS = ['interval', 'waiting_after', 'window_icons', 'status_line'];
 export const NOTIFY_KEYS = ['backend', 'events', 'turn_end', 'terminal_app', 'verdict_pattern', 'ntfy'];
 export const NTFY_KEYS = ['server', 'topic', 'token', 'events', 'priority', 'include_verdict', 'include_question', 'click_url', 'always'];
@@ -530,7 +536,7 @@ function parseAgentSettings(name: AgentName, v: unknown, where: string, p: Probl
     const bad = findAutoAcceptFlag(list);
     if (bad) p.add(`${where}.${key}: "${bad}" enables auto-accept, which agentctl never allows`);
   }
-  for (const [key, field] of [['ready_pattern', 'readyPattern'], ['trust_pattern', 'trustPattern'], ['working_pattern', 'workingPattern'], ['question_pattern', 'questionPattern']] as const) {
+  for (const [key, field] of [['ready_pattern', 'readyPattern'], ['trust_pattern', 'trustPattern'], ['working_pattern', 'workingPattern'], ['delivery_pattern', 'deliveryPattern'], ['question_pattern', 'questionPattern']] as const) {
     const pattern = parseString(v[key], `${where}.${key}`, p);
     if (!pattern) continue;
     try {
@@ -1077,8 +1083,10 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
       }
     }
   }
+  const deliveryConfirmS = raw.delivery_confirm_s ?? 60;
+  if (typeof deliveryConfirmS !== 'number' || !Number.isFinite(deliveryConfirmS) || deliveryConfirmS <= 0) p.add('config.delivery_confirm_s must be a positive number');
   p.throwIfAny(`Invalid config ${file}:`, 'Fix the listed keys; see the README section "Configuration".');
-  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, limits, countExternal, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, cohort, overload, collisions, cancel, usage, guideLang, capacity, disk, git, path: file, loaded: exists };
+  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, deliveryConfirmS: deliveryConfirmS as number, limits, countExternal, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, cohort, overload, collisions, cancel, usage, guideLang, capacity, disk, git, path: file, loaded: exists };
   if (mirror) config.mirrorDir = resolvePath(mirror);
   return config;
 }

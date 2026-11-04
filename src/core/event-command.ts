@@ -150,6 +150,13 @@ export async function handleEvent(ctx: Context, alerts: Alerts, input: EventInpu
       await runner.appendFile(eventsLogPath(ctx), logLine(now, input.task, input.agent, event.type, 'unknown task, ignored'));
       return { task: input.task, event, note: 'unknown task' };
     }
+    // Separate evidence avoids a TASK.md lock in synchronous UserPromptSubmit hooks.
+    // In particular, never wait for the sender's prompt-delivery lock here.
+    const normalizePrompt = (text: string) => text.replace(/\r\n?/g, '\n').trim();
+    const submitted = input.kind === 'user-prompt-submit' && isObject(input.payload) && typeof input.payload.prompt === 'string' && normalizePrompt(input.payload.prompt) === normalizePrompt(record.pendingPrompt ?? '');
+    if (record.deliveryId && (submitted || ['turn-complete', 'needs-input', 'idle'].includes(event.outcome))) {
+      await runner.writeFile(path.join(taskDir(ctx.config, record.window), 'delivery-evidence.json'), JSON.stringify({ deliveryId: record.deliveryId, at: new Date(now).toISOString(), type: event.type }));
+    }
     let announced: EventResult['announced'];
     let detail = '';
     if (event.outcome !== 'ignored') {

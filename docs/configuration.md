@@ -179,7 +179,9 @@ Queued tasks live in `<config dir>/queue/` (one JSON file each, with the spec te
 | `agents.<agent>.ready_timeout` | seconds | `60` | g | How long `new` waits for `ready_pattern`. |
 | `agents.<agent>.trust_pattern` | regex | see below | g | The agent shows its folder-trust dialog. agentctl never answers it. |
 | `agents.<agent>.trust_timeout` | seconds | `600` | g | How long `new` waits for you to answer the trust dialog. |
-| `agents.<agent>.working_pattern` | regex | `esc to interrupt` | g | A turn is running. |
+| `agents.<agent>.working_pattern` | regex | see below | g | A turn is running, including Claude 2.1.x spinner progress. |
+| `agents.<agent>.delivery_pattern` | regex | see below | g | New adapter assistant output acknowledges a submitted prompt; input drafts never count. |
+| `delivery_confirm_s` | seconds | `60` | g | Watch deadline for uncertain prompt delivery; positive number. Start/send succeeds with a warning while checking; no evidence by the deadline produces needs-attention. |
 | `agents.<agent>.interrupt_key` | tmux key name | `Escape` | g | Key sent by `agentctl interrupt`. |
 | `agents.<agent>.footer_patterns` | list of regexes | see below | g | Lines of TUI chrome that `status` and `peek` skip. |
 | `agents.<agent>.question_pattern` | regex | see below | g | The agent asks you something and waits (state `needs-input`). |
@@ -193,7 +195,8 @@ claude:
   effort_args: ['--effort', '{effort}']
   ready_pattern: '^\s*❯\s(?!\d+\.)'
   trust_pattern: 'Quick safety check|Yes, I trust this folder'
-  working_pattern: 'esc to interrupt'
+  working_pattern: 'esc to interrupt|^\s*[✶✻✽✢·*]\s+[^\n]+(?:…|\.\.\.)\s*\([^\n]*(?:\d+(?:\.\d+)?s\s*·|thinking|tokens)[^\n]*\)'
+  delivery_pattern: '^\s*⏺|● got:'
   question_pattern: 'Enter to select\b.*Esc to cancel|Esc to cancel · Tab to amend'
   footer_patterns:
     - '\? for shortcuts'
@@ -213,6 +216,7 @@ codex:
   ready_pattern: '^›\s(?!\d+\.)|\? for shortcuts'
   trust_pattern: 'Trust this folder\?|Folder settings can run code automatically'
   working_pattern: 'esc to interrupt'
+  delivery_pattern: '^\s*[•■]|● got:'
   question_pattern: 'Waiting for your answer|^\s*\?\s+\d+ questions?\b|to answer\s*$|Press enter to confirm or esc to cancel'
   footer_patterns:
     - '\? for shortcuts'

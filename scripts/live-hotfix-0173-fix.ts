@@ -6,7 +6,7 @@ import { withHarness, installPromptAgent, defaultCacheRoot } from './live-harnes
 const checks: { name: string; ok: boolean }[] = [];
 const check = (name: string, ok: boolean) => { checks.push({ name, ok }); console.log(`${ok ? 'PASS' : 'FAIL'} ${name}`); assert.ok(ok, name); };
 for (const agent of ['codex','claude'] as const) for (const mode of ['swallow-first','swallow-all','trust'] as const) {
- await withHarness({ name: `fix-${agent}-${mode}`, cacheRoot: defaultCacheRoot('agentctl-0173'), config: 'capacity: {snapshot: false, codex_refresh: false}\nwatch: {interval: 1}\n' }, async h => {
+ await withHarness({ name: `fix-${agent}-${mode}`, cacheRoot: defaultCacheRoot('agentctl-0173'), config: 'capacity: {snapshot: false, codex_refresh: false}\nwatch: {interval: 1}\ndelivery_confirm_s: 6\n' }, async h => {
   const log = path.join(h.root, 'delivery.jsonl'); installPromptAgent(h, agent, mode, log);
   const repo=path.join(h.root,'repo');fs.mkdirSync(repo);
   for(const args of [['init','-qb','main'],['commit','--allow-empty','-qm','fixture']])assert.equal(spawnSync('git',args,{cwd:repo,env:h.env}).status,0);
@@ -20,7 +20,10 @@ for (const agent of ['codex','claude'] as const) for (const mode of ['swallow-fi
    try {h.tmux(['send-keys','-t',`=${h.session}:t1`,'-l','y']);const until=Date.now()+10000;while(!entries().some(e=>e.working)&&Date.now()<until)await new Promise(r=>setTimeout(r,150));
     check(`${agent} C: watcher sends after human trust`,entries().some(e=>e.working));await new Promise(r=>setTimeout(r,1400));
    } finally {watcher.kill('SIGTERM');await new Promise(r=>watcher.once('close',r));}
-  } else check(`${agent} A: new returns ${mode==='swallow-first'?'success':'explicit attention'}`,mode==='swallow-first'?result.code===0:result.code!==0&&result.stderr.includes('needs-attention'));
+  } else {
+   check(`${agent} A/P: new returns success${mode==='swallow-all'?' with pending confirmation':''}`,result.code===0 && (mode!=='swallow-all' || result.stdout.includes('dostarczenie niepotwierdzone')));
+   if(mode==='swallow-all'){const watcher=h.spawnAgentctl(['watch'],path.join(h.root,'watch.log'));try{const until=Date.now()+10000;while(!h.agentctl(['status','--json']).stdout.includes('needs-attention')&&Date.now()<until)await new Promise(r=>setTimeout(r,150));}finally{watcher.kill('SIGTERM');await new Promise(r=>watcher.once('close',r));}}
+  }
   check(`${agent} A/C: paste exactly once (${mode})`,entries().filter(e=>e.paste).length===1);
   check(`${agent} B: original prompt and canonical filename in delivered protocol (${mode})`,entries().some(e=>e.paste?.includes(report)&&e.paste.includes('T1.md')&&e.paste.includes('Original prompt')));
   if(mode!=='trust')check(`${agent} A: bounded Enter retries (${mode})`,entries().filter(e=>e.enter).length===(mode==='swallow-first'?2:3));

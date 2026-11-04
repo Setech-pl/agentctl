@@ -24,7 +24,7 @@ function fixture(name: string, respond?: NonNullable<ConstructorParameters<typeo
   return { root, config, tmux, runner, ctx, deps, call, full };
 }
 for (const agent of ['codex', 'claude'] as const) for (const swallowed of [1, 9]) {
-  it(`0173-FIX-A ${agent}: swallowed Enter ${swallowed === 1 ? 'recovers without repaste' : 'stops after two retries with needs-attention'}`, async () => {
+  it(`0173-FIX-A ${agent}: swallowed Enter ${swallowed === 1 ? 'recovers without repaste' : 'stops after two retries, watch resolves confirmation deadline'}`, async () => {
     let draft = '', enters = 0, pastes = 0, payload = '';
     const f = fixture(`enter-${agent}-${swallowed}`, (cmd, args, opts) => {
       if (cmd !== 'tmux') return undefined;
@@ -38,10 +38,10 @@ for (const agent of ['codex', 'claude'] as const) for (const swallowed of [1, 9]
     const r = seedTask(f.config, 'T1', { agent, windowId: '@1' });
     const text = promptWithHeader({ model: 'default', effort: 'low', prompt: 'ą'.repeat(600), report: r.report }, r.attemptId);
     await queuePrompt(f.ctx, r, text);
-    assert.equal(await deliverPendingPrompt(f.ctx, 't1'), swallowed === 1 ? 'sent' : 'needs-attention');
+    assert.equal(await deliverPendingPrompt(f.ctx, 't1'), swallowed === 1 ? 'sent' : 'confirming');
     assert.equal(pastes, 1); assert.equal(enters, swallowed === 1 ? 2 : 3);
-    assert.equal(readTaskRecord(f.config, 't1')!.promptDelivery, swallowed === 1 ? 'sent' : 'needs-attention');
-    if (swallowed > 1) { assert.equal((await collectStatus(f.ctx))[0]!.state, 'needs-attention'); assert.match(readTaskRecord(f.config, 't1')!.promptError!, /two retries/); }
+    assert.equal(readTaskRecord(f.config, 't1')!.promptDelivery, swallowed === 1 ? 'sent' : 'confirming');
+    if (swallowed > 1) { assert.equal((await collectStatus(f.ctx))[0]!.state, 'waiting'); assert.match(readTaskRecord(f.config, 't1')!.promptError!, /two retries/); await f.runner.sleep(60000); await watchTick(f.ctx, new WatchMemory(), { notify: async () => {} }); assert.equal((await collectStatus(f.ctx))[0]!.state, 'needs-attention'); }
   });
 }
 it('0173-FIX-B/C: canonical absolute report path survives pending trust; competing new/watch send once', async () => {

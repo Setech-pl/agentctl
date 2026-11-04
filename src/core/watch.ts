@@ -197,9 +197,16 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   // A closed or cancelled task is off the list: no transitions, no notifications (closing a task with no report is not a vanished window).
   let allRows = await collectStatus(ctx, { progress: false, archived: true });
   for (const row of allRows) {
-    const record = !row.closed && !row.cancelled && row.window === 'alive' ? readTaskRecord(ctx.config, row.windowName) : undefined;
-    if (record?.promptDelivery === 'pending' || record?.promptDelivery === 'sending') {
+    const record = !row.closed && !row.cancelled ? readTaskRecord(ctx.config, row.windowName) : undefined;
+    if (record && ['pending', 'sending', 'confirming', 'needs-attention'].includes(record.promptDelivery ?? '')) {
+      if (record.promptDelivery === 'pending' && row.window !== 'alive') continue;
       const result = await deliverPendingPrompt(ctx, row.windowName);
+      if (result === 'needs-attention' && record.promptDelivery !== 'needs-attention' && !memory.started) {
+        const updated = readTaskRecord(ctx.config, row.windowName);
+        const text = `${row.task}: ${updated?.promptError}`;
+        await new Alerts(ctx, notifier, { self: options.self }).send({ task: row.task, window: row.windowName }, 'needs-attention', text, 'watch');
+        await journalTransition(ctx, row, { task: row.task, from: row.state, to: 'needs-attention', reason: 'transition', notification: text });
+      }
       if (result !== 'pending') allRows = await collectStatus(ctx, { progress: false, archived: true });
     }
   }
