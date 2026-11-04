@@ -330,7 +330,7 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
     readyTimeout: 60,
     trustTimeout: 600,
     trustPattern: 'Quick safety check|Yes, I trust this folder',
-    workingPattern: 'esc to interrupt|^\\s*(?:⏺\\s+)?Running(?:\\s|…|\\.\\.\\.)|^\\s*[✶✻✽✢·*]\\s+[^\\n]+(?:…|\\.\\.\\.)\\s*\\([^\\n]*(?:\\d+(?:\\.\\d+)?s\\s*·|thinking|tokens)[^\\n]*\\)',
+    workingPattern: 'esc to interrupt|^\\s*(?:⏺\\s+)?Running(?:\\s|…|\\.\\.\\.)|^\\s*[✶✻✽✢✳·*]\\s+[^\\n]+(?:…|\\.\\.\\.)\\s*\\([^\\n]*(?:\\d+(?:\\.\\d+)?s\\s*·|thinking|tokens)[^\\n]*\\)',
     deliveryPattern: '^\\s*⏺|● got:',
     interruptKey: 'Escape',
     footerPatterns: [

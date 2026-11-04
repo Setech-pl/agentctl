@@ -11,6 +11,8 @@ import { sendPrompts } from '../src/core/send.ts';
 import { collectStatus } from '../src/core/status.ts';
 import { readTaskRecord, setHeaderFields, taskFile } from '../src/core/taskstore.ts';
 import { dimInputText, screenMetadata } from '../src/core/tmux.ts';
+import { classifyScreen } from '../src/core/state.ts';
+import { DEFAULT_AGENT_SETTINGS } from '../src/core/config.ts';
 import { watchTick, WatchMemory } from '../src/core/watch.ts';
 import { DiskRunner, makeConfig, seedTask, useScratch } from './helpers.ts';
 import type { AgentName } from '../src/core/config.ts';
@@ -152,6 +154,31 @@ describe('P15b: Claude takes a collapsed paste into its queue while it works', (
 });
 
 describe('P15: the paste must not stay in the field', () => {
+  // A real capture (sonnet/high, 2026-11-04): the spinner is on its "✳" frame, the footer "esc to interrupt" is not drawn (a paste was made a moment ago).
+  const star = fx('screen-claude-spinner-star-no-footer.txt');
+  const oldPattern = { ...DEFAULT_AGENT_SETTINGS.claude, workingPattern: DEFAULT_AGENT_SETTINGS.claude.workingPattern.replace('✳', '') };
+  it('every spinner frame of Claude Code is a working screen, "✳" too (58 of 554 recorded spinner lines); before, that frame read as idle without the footer', () => {
+    assert.ok(!/esc to interrupt/.test(star));
+    assert.equal(classifyScreen(star, oldPattern), 'idle');
+    for (const glyph of ['·', '✢', '✳', '✶', '✻', '✽']) assert.equal(classifyScreen(star.replace('✳', glyph), DEFAULT_AGENT_SETTINGS.claude), 'working', glyph);
+  });
+  it('the frame that used to read as idle: a follow-up is a busy follow-up (queued in the agent), one paste, one Enter', async () => {
+    let state: 'before' | 'pasted' | 'queued' = 'before';
+    const f = fixture('p15-star', { screen: () => state === 'before' ? star : state === 'pasted' ? star.replace(/^❯\s*$/m, '❯\u00a0[Pasted text #2]').replace('✳', '✶') : busyQueued, styled: () => state === 'queued' ? busyQueuedAnsi : undefined, paste: () => { state = 'pasted'; }, enter: () => { state = 'queued'; } });
+    await followup(f, LONG.replace(/\n/g, ' ').slice(0, 970));
+    assert.equal(await deliverPendingPrompt(f.ctx, 't1'), 'sent');
+    assert.deepEqual([f.seen.pastes, f.seen.enters], [1, 1]);
+    assert.equal(f.record().deliveryWasBusy, true);
+  });
+  it('the agent read as idle before the paste (a pattern without the "✳" frame) and working after it: Enter is still pressed, as it was not before the fix', async () => {
+    let state: 'before' | 'pasted' | 'queued' = 'before';
+    const f = fixture('p15-old-pattern', { screen: () => state === 'before' ? star : state === 'pasted' ? star.replace(/^❯\s*$/m, '❯\u00a0[Pasted text #2]').replace('✳', '✶') : busyQueued, styled: () => state === 'queued' ? busyQueuedAnsi : undefined, paste: () => { state = 'pasted'; }, enter: () => { state = 'queued'; } },
+      'claude', `agents:\n  claude:\n    working_pattern: ${JSON.stringify(oldPattern.workingPattern)}\n`);
+    await followup(f, LONG.replace(/\n/g, ' ').slice(0, 970));
+    assert.equal(await deliverPendingPrompt(f.ctx, 't1'), 'sent');
+    assert.deepEqual([f.seen.pastes, f.seen.enters], [1, 1]);
+    assert.equal(f.record().deliveryWasBusy, true, 'recognised as busy once the paste was in');
+  });
   it('the state flips to working between the check and the paste: Enter is still pressed (it used to stop with the paste in the field)', async () => {
     let state: 'idle' | 'pasted' | 'queued' = 'idle';
     const idleScreen = emptied(busyPaste, /^❯ \[Pasted text #1 \+7 lines\]$/m).replace(/^· Clauding….*$/m, '').replace(/^  Sleeping 20 seconds.*$/m, '');

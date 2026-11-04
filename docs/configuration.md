@@ -201,7 +201,7 @@ claude:
   effort_args: ['--effort', '{effort}']
   ready_pattern: '^\s*❯\s(?!\d+\.)'
   trust_pattern: 'Quick safety check|Yes, I trust this folder'
-  working_pattern: 'esc to interrupt|^\s*(?:⏺\s+)?Running(?:\s|…|\.\.\.)|^\s*[✶✻✽✢·*]\s+[^\n]+(?:…|\.\.\.)\s*\([^\n]*(?:\d+(?:\.\d+)?s\s*·|thinking|tokens)[^\n]*\)'
+  working_pattern: 'esc to interrupt|^\s*(?:⏺\s+)?Running(?:\s|…|\.\.\.)|^\s*[✶✻✽✢✳·*]\s+[^\n]+(?:…|\.\.\.)\s*\([^\n]*(?:\d+(?:\.\d+)?s\s*·|thinking|tokens)[^\n]*\)'
   delivery_pattern: '^\s*⏺|● got:'
   question_pattern: 'Enter to select\b.*Esc to cancel|Esc to cancel · Tab to amend'
   footer_patterns:
