@@ -1,3 +1,5 @@
+import { journalOutputs } from './outputs.ts';
+import { listTaskRecords } from './taskstore.ts';
 import { withFileLock } from './file-lock.ts';
 import fs from 'node:fs';
 import { foldHistory, readHistory } from './history.ts';
@@ -94,6 +96,7 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
   const now = runner.now();
   const since = parseSince(opts.since, opts.client, config, now);
   const cohort = opts.cohort === undefined ? null : findCohort(config, opts.cohort).name;
+  for (const record of listTaskRecords(config)) await journalOutputs(ctx, record);
   const all = readJournal(config, -1);
   const key = cohort === null ? opts.client : `${opts.client}|cohort:${cohortKey(cohort)}`;
   const saved = opts.cursor ?? ((!opts.since || opts.since === 'last') ? (readMarkers(config)[key] ?? (opts.client.startsWith('mcp:') && readMarkers(config).mcp?.startsWith('e2:') ? readMarkers(config).mcp : undefined)) : undefined);
@@ -116,7 +119,9 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
   // Bound the complete JSON and text forms before advancing the persistent cursor.
   const report: EventsReport = { client: opts.client, since: new Date(since.ms).toISOString(), sinceLabel: since.label, cohort, events, summary, away: awayView(config), markerMoved: false, has_more: false, next_cursor: '' };
   const encode = () => `e2:${position.index}:${position.offset}`;
-  const fits = () => Math.max(Buffer.byteLength(JSON.stringify(report, null, 2)), Buffer.byteLength(renderEvents(report).join('\n'))) <= (opts.maxBytes ?? 16000);
+  const baseNeedYou = [...summary.needYou];
+  const updateNeedYou = () => { report.summary.needYou = [...baseNeedYou, ...events.filter(e => !('fragment' in e) && e.kind === 'report-outputs').flatMap(e => [...(e.decisions ?? []).map(text => `${e.task}: decision: ${text}`), ...(e.actions ?? []).map(a => `${e.task}: action: ${a.title} (${a.shell})`)])]; };
+  const fits = () => { updateNeedYou(); return Math.max(Buffer.byteLength(JSON.stringify(report, null, 2)), Buffer.byteLength(renderEvents(report).join('\n'))) <= (opts.maxBytes ?? 16000); };
   const limit = Math.max(1, Math.min(200, opts.limit ?? 100));
   while (position.index < all.length && events.length < limit) {
     const event = all[position.index]!;
@@ -144,6 +149,7 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
     if (position.offset >= raw.length) position = { index: position.index + 1, offset: 0 };
     break;
   }
+  updateNeedYou();
   report.has_more = position.index < all.length;
   report.next_cursor = encode();
   if (!opts.keep && !runner.dryRun) {
@@ -167,6 +173,10 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
 const PHONE_MARK = ' 📱';
 const hhmm = (iso: string): string => formatLocalTime(iso).slice(-5);
 const KIND_LABEL: Record<JournalEntry['kind'], string> = {
+  'report-outputs': 'WYNIKI RAPORTU',
+  'review-added': 'DODANO PRZEGLĄD',
+  gc_suggest: 'SUGESTIA GC',
+  'limited-resume': 'WZNOWIENIE',
   'needs-attention': 'WYMAGA UWAGI',
   'report-candidate': 'KANDYDAT',
   overloaded: 'PRZECIĄŻENIE',

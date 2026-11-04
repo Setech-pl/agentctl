@@ -1,3 +1,4 @@
+import type { OutputVerdict } from './outputs.ts';
 import { redactQueue } from './mcp-redact.ts';
 import { checkRetryWorktrees } from './git.ts';
 import { collectCapacity, capacitySnapshot, snapshotLines } from './capacity.ts';
@@ -22,7 +23,7 @@ import { liveWindows, planBatch } from './plan.ts';
 import { collectStatus } from './status.ts';
 import type { StatusRow } from './status.ts';
 import { resolveSpec, splitSpecs } from './spec.ts';
-import type { RawSpec, ResolvedSpec } from './spec.ts';
+import type { RawSpec, ResolvedSpec, AutoReviewSource } from './spec.ts';
 import { listArchivedRecords, listTaskRecords, recordFromSpec, renderTaskMd, taskDir, taskFile } from './taskstore.ts';
 import type { CancelSource, TaskRecord } from './taskstore.ts';
 import { queueHolds, usageSummaryLines } from './usage-limits.ts';
@@ -36,6 +37,7 @@ import { AgentctlError, cohortKey, errorMessage, formatLocalTime, windowName } f
 export type QueueStatus = 'queued' | 'starting' | 'failed';
 
 export interface QueueEntry {
+  autoReview?: AutoReviewSource;
   /** The number in the file name; the next entry gets the highest + 1. */
   seq: number;
   task: string;
@@ -55,6 +57,7 @@ export interface QueueEntry {
   reviewOf?: string;
   /** The tasks that must have a report before this one starts. */
   after: string[];
+  afterVerdicts?: Record<string, OutputVerdict[]>;
   /** The cohort of the task (display name); absent: none. */
   cohort?: string;
   /** Start again over a worktree that is already there (`queue retry`). */
@@ -179,7 +182,7 @@ export async function planQueueAdd(ctx: Context, raws: RawSpec[], opts: { agent?
     if (inQueue) throw new AgentctlError(`${spec.task} is already in the queue (${inQueue.status})`, `"agentctl queue rm ${spec.task}" takes it out${inQueue.status === 'failed' ? `; "agentctl queue retry ${spec.task}" tries it again` : ''}.`);
   }
   const knownAuthors = new Map<string, AgentModel>(entries.map((e) => [e.task, { agent: e.agent, model: e.model }]));
-  const specs = await planBatch(ctx, resolved, { ...(opts.agent ? { agent: opts.agent } : {}), ignoreLimits: true, skipAfter: true, knownAuthors });
+  const specs = await planBatch(ctx, resolved, { ...(opts.agent ? { agent: opts.agent } : {}), ignoreLimits: true, skipAfter: true, deferBases: true, knownAuthors });
   checkAfter(ctx, specs, entries);
   const items = specs.map((spec, i) => ({ raw: raws[i] as RawSpec, spec }));
   const rows = await collectStatus(ctx, { progress: false, archived: true });
@@ -203,10 +206,10 @@ export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: Q
     lines.push(`${spec.task}  ${spec.agent}/${spec.model}/${spec.effort}  priority ${spec.priority}${spec.switchedBy ? ` (ordered ${spec.requested.agent} ${spec.requested.model}/${spec.requested.effort})` : ''}`);
     lines.push(`  repos:    ${spec.repos.map((r) => r.path).join(', ')}`);
     if (spec.after.length > 0) {
-      const unmet = unmetAfter(spec.after, rows);
+      const unmet = unmetAfter(spec.after, rows, spec.afterVerdicts);
       lines.push(`  after:    ${spec.after.join(', ')}${unmet.length === 0 ? ' (all have a report already)' : ` – ${waitingText(unmet)}`}`);
     }
-    const unmetNow = unmetAfter(spec.after, rows);
+    const unmetNow = unmetAfter(spec.after, rows, spec.afterVerdicts);
     lines.push(
       `  start:    ${
         isPaused(config) ? 'queue paused; starts after queue_resume (agentctl queue resume)' : !config.queue.enabled ? 'queue.enabled is false; enable the queue first' : unmetNow.length > 0
@@ -216,6 +219,7 @@ export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: Q
           : 'at the next watch tick (a window is free)'
       }`,
     );
+    if (spec.review) lines.push(`  review:   auto -> ${spec.task}-REV after the confirmed author report; another provider, else another configured model; rerun=${Boolean(spec.review.rerun)}`);
     lines.push(`  prompt:   ${spec.prompt.length} characters`);
     if (spec.reviewOf && spec.after.length === 0 && !hasReport(rows.find((r) => r.task === spec.reviewOf))) {
       lines.push(`  hint:     ${spec.task} reviews ${spec.reviewOf}, which has no report yet: add "after: ${spec.reviewOf}" to the header so the review starts when the author's report is ready`);
@@ -228,7 +232,7 @@ export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: Q
 }
 
 /** Write the entries (one per spec). Returns them in the order they were added. */
-export async function commitQueueAdd(ctx: Context, items: QueueAddItem[], opts: { agent?: AgentName } = {}): Promise<QueueEntry[]> {
+export async function commitQueueAdd(ctx: Context, items: QueueAddItem[], opts: { agent?: AgentName; reuse?: boolean; autoReview?: AutoReviewSource } = {}): Promise<QueueEntry[]> {
   const { config, runner } = ctx;
   const existing = readQueue(config);
   let seq = existing.reduce((n, e) => Math.max(n, e.seq), 0);
@@ -238,6 +242,8 @@ export async function commitQueueAdd(ctx: Context, items: QueueAddItem[], opts: 
     const entry: QueueEntry = {
       seq,
       task: spec.task,
+      ...(opts.reuse ? { reuse: true } : {}),
+      ...(opts.autoReview ? { autoReview: opts.autoReview } : {}),
       order: seq,
       priority: spec.priority,
       status: 'queued',
@@ -246,6 +252,7 @@ export async function commitQueueAdd(ctx: Context, items: QueueAddItem[], opts: 
       model: spec.model,
       effort: spec.effort,
       after: spec.after,
+      ...(spec.afterVerdicts ? { afterVerdicts: spec.afterVerdicts } : {}),
       spec: renderRawSpec(raw),
     };
     if (opts.agent) entry.agentOverride = opts.agent;
@@ -306,7 +313,7 @@ export async function removeFromQueue(ctx: Context, input: string, opts: { reaso
 }
 
 /** `agentctl unblock`: the entry's `after` loses the cancelled (or blocked) tasks, or just `dropAfter`; it waits for the rest, or starts. */
-export async function unblockEntry(ctx: Context, input: string, opts: { dropAfter?: string | undefined } = {}): Promise<{ entry: QueueEntry; dropped: string[] }> {
+export async function unblockEntry(ctx: Context, input: string, opts: { dropAfter?: string | undefined; preview?: boolean } = {}): Promise<{ entry: QueueEntry; dropped: string[] }> {
   const entry = findEntry(ctx.config, input);
   const rows = await collectStatus(ctx, { progress: false, archived: true });
   const blocked = findBlocked(readQueue(ctx.config), rows).get(entry.task);
@@ -317,16 +324,17 @@ export async function unblockEntry(ctx: Context, input: string, opts: { dropAfte
     if (dropped.length === 0) throw new AgentctlError(`${entry.task} does not wait for ${opts.dropAfter}`, entry.after.length > 0 ? `Its after: ${entry.after.join(', ')}` : `${entry.task} has no after.`);
   } else {
     if (!blocked) throw new AgentctlError(`${entry.task} is not blocked`, entry.after.length > 0 ? `It waits for ${entry.after.join(', ')}; "agentctl unblock ${entry.task} --drop-after <task>" removes one of them.` : undefined);
-    dropped = [...blocked.cancelled, ...blocked.blocked];
+    dropped = [...blocked.cancelled, ...blocked.blocked, ...(blocked.verdicts ?? []).map(v => v.task)];
   }
   const after = entry.after.filter((t) => !dropped.includes(t));
   const raw = splitSpecs(entry.spec, `queue entry ${entry.task}`)[0] as RawSpec;
-  if (after.length > 0) raw.header.after = after;
+  const afterVerdicts = Object.fromEntries(Object.entries(entry.afterVerdicts ?? {}).filter(([t]) => after.includes(t)));
+  if (after.length > 0) raw.header.after = after.map(t => afterVerdicts[t] ? { task: t, verdict: afterVerdicts[t] } : t);
   else delete raw.header.after;
-  const updated: QueueEntry = { ...entry, after, spec: renderRawSpec(raw) };
+  const updated: QueueEntry = { ...entry, after, afterVerdicts, spec: renderRawSpec(raw) };
   if (entry.blockedNotified) updated.blockedNotified = entry.blockedNotified.filter((t) => after.includes(t));
   if (updated.blockedNotified?.length === 0) delete updated.blockedNotified;
-  await writeEntry(ctx, updated);
+  if (!opts.preview) await writeEntry(ctx, updated);
   return { entry: updated, dropped };
 }
 
@@ -340,11 +348,12 @@ export async function announceBlocked(ctx: Context, notifier: Notifier, rows: re
   const said: string[] = [];
   for (const entry of entries) {
     const b = blocked.get(entry.task);
-    const fresh = (b?.cancelled ?? []).filter((t) => !(entry.blockedNotified ?? []).includes(t));
+    const reasons = b ? [...b.cancelled.map(task => ({ key: task, text: `${task} anulowane` })), ...(b.verdicts ?? []).map(v => ({ key: `${v.task}:${v.reason}`, text: `${v.task}: ${v.reason}` }))] : [];
+    const fresh = reasons.filter(r => !(entry.blockedNotified ?? []).includes(r.key));
     if (!b || fresh.length === 0) continue;
-    await writeEntry(ctx, { ...entry, blockedNotified: [...(entry.blockedNotified ?? []), ...fresh] });
-    for (const author of fresh) {
-      const text = `${entry.task} zablokowane – ${author} anulowane`;
+    await writeEntry(ctx, { ...entry, blockedNotified: [...(entry.blockedNotified ?? []), ...fresh.map(r => r.key)] });
+    for (const reason of fresh) {
+      const text = `${entry.task} zablokowane – ${reason.text}`;
       await opts.log?.(`queue: ${text}`);
       await notifyPlain(ctx, notifier, entry.task, text, opts.self);
       await recordJournal(ctx, { kind: 'blocked', task: entry.task, text, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
@@ -425,11 +434,11 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
     if (entry.status === 'failed') return { position: null, entry, condition: { kind: 'failed', text: `failed: ${(entry.error ?? '').split('\n')[0] ?? ''}` }, since: entry.failedAt ?? entry.queuedAt };
     if (entry.status === 'starting') return { position: null, entry, condition: { kind: 'starting', text: 'starting' }, since: entry.startingAt ?? entry.queuedAt };
     position++;
-    if (paused) return { position, entry, condition: { kind: 'paused', text: reason }, since: entry.queuedAt };
-    if (entry.retryAt && Date.parse(entry.retryAt) > nowMs) return { position, entry, condition: { kind: 'hold', text: `retry at ${entry.retryAt}: ${entry.error ?? ''}` }, since: entry.queuedAt };
     const stuck = blocked.get(entry.task);
     if (stuck) return { position, entry, condition: { kind: 'blocked', text: blockedText(stuck), blockers: stuck }, since: entry.queuedAt };
-    const unmet = unmetAfter(entry.after, rows);
+    if (paused) return { position, entry, condition: { kind: 'paused', text: reason }, since: entry.queuedAt };
+    if (entry.retryAt && Date.parse(entry.retryAt) > nowMs) return { position, entry, condition: { kind: 'hold', text: `retry at ${entry.retryAt}: ${entry.error ?? ''}` }, since: entry.queuedAt };
+    const unmet = unmetAfter(entry.after, rows, entry.afterVerdicts);
     if (unmet.length > 0) return { position, entry, condition: { kind: 'after', text: waitingText(unmet, failed, cancelled) }, since: entry.queuedAt };
     const held = holds[entry.agent];
     if (held) return { position, entry, condition: { kind: 'hold', text: held }, since: entry.queuedAt };
@@ -541,7 +550,7 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   for (const entry of waiting(entries)) {
     if (entry.retryAt && Date.parse(entry.retryAt) > ctx.runner.now()) continue;
     if (memory.inflight.size >= config.queue.parallelStarts) break;
-    if (unmetAfter(entry.after, rows).length > 0) continue;
+    if (unmetAfter(entry.after, rows, entry.afterVerdicts).length > 0) continue;
     const held = holds[entry.agent];
     if (held) {
       stillHeld.add(entry.task);
@@ -572,6 +581,7 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
       await opts.log?.(`queue: starting ${entry.task} (${entry.agent})`);
       const raws = splitSpecs(entry.spec, `queue entry ${entry.task}`);
       const spec = resolveSpec(raws[0] as RawSpec, { config });
+      if (entry.autoReview) spec.autoReview = entry.autoReview;
       if (entry.reuse) {
         if ((await ctx.tmux.windows()).some(w => w.plain === spec.window)) throw new AgentctlError(`${entry.task}: task window already exists; inspect it instead of retrying`);
         await checkRetryWorktrees(ctx.runner, spec.repos);

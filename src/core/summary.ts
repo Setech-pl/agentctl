@@ -8,8 +8,9 @@ export function summarizeSpecs(specs: ResolvedSpec[], extra: string[] = []): str
     lines.push(`${spec.task}  ${spec.agent}/${spec.model}/${spec.effort}${spec.switchedBy ? ` (ordered ${spec.requested.agent} ${spec.requested.model}/${spec.requested.effort})` : ''}`);
     for (const repo of spec.repos) {
       lines.push(`  worktree: ${repo.worktree}${repo === primary ? '' : '  (extra repo)'}`);
-      lines.push(`  branch:   ${repo.branch ?? '(none, detached HEAD)'}${repo.base ? `  from ${repo.base}` : ''}`);
+      lines.push(`  branch:   ${repo.branch ?? '(none, detached HEAD)'}${repo.base ? `  from ${repo.base}${repo.baseTask ? ` (${repo.baseTask})` : ''}` : ''}`);
     }
+    if (spec.review) lines.push(`  review:   auto -> ${spec.task}-REV after the confirmed author report; another provider, else another configured model; rerun=${Boolean(spec.review.rerun)}`);
     lines.push(`  setup:    ${spec.setup.length ? spec.setup.join(' && ') : '-'}`);
     lines.push(`  links:    ${spec.links.length ? spec.links.map((l) => `${l.from} -> ${l.to}`).join(', ') : '-'}`);
     lines.push(`  prompt:   ${spec.prompt.length} characters`);

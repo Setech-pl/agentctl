@@ -32,7 +32,7 @@ function setup(name: string, extraYaml = '') {
   const outLines: string[] = [];
   let notifyFails = false;
   const deps: McpDeps = {
-    context: (out) => new Context(runner, loadGlobalConfig(path.dirname(config.path)), (l) => (out(l), outLines.push(l))),
+    context: (out) => new Context(runner, { ...loadGlobalConfig(path.dirname(config.path)), notify: { ...loadGlobalConfig(path.dirname(config.path)).notify, mcpWrites: 'all' } }, (l) => (out(l), outLines.push(l))),
     notify: async (m) => {
       if (notifyFails) throw new Error('no notifier');
       notified.push(m);
@@ -116,7 +116,7 @@ describe('mcp: reading', () => {
     seedTask(t.config, 'NC-2');
     t.tmux.add('nc-1', `line one\nline two\nline three\n  ⏵⏵ auto mode on (shift+tab to cycle)\n❯ `);
     const r = await t.call('peek', { task: 'nc-1', lines: 2 });
-    assert.match(r.text, /^NC-1: last 2 lines of its window \(agent footer removed\)\n\nline two\nline three\nusage_hint: n\/d\ndraft_input: n\/d$/);
+    assert.match(r.text, /^NC-1: last 2 lines of its window \(agent footer removed\)\n\nline two\nline three\nusage_hint: n\/d\ndraft_input: n\/d\nprompt_delivery: n\/d\nprompt_queue: \[\]$/);
     const gone = await t.call('peek', { task: 'NC-2' });
     assert.equal(gone.isError, true);
     assert.match(gone.text, /NC-2 has no tmux window/);
@@ -314,10 +314,10 @@ describe('mcp: the write tools', () => {
     seedTask(t.config, 'NC-1');
     t.tmux.add('nc-1', IDLE);
     const r = await t.call('send', { task: 'nc-1', text: 'dopisz test' });
-    assert.match(r.text, /^NC-1: prompt sent \(11 characters\)/);
+    assert.match(r.text, /^NC-1: wklejono \(prompt sent\) \(11 characters\)/);
     assert.ok(t.runner.commands.some((c) => c.startsWith('tmux paste-buffer')));
     assert.ok(t.runner.commands.some((c) => c.includes('send-keys') && c.includes('Enter')));
-    assert.match(fs.readFileSync(taskFile(t.config, 'nc-1'), 'utf8'), /## Follow-up sent .*\n\ndopisz test/);
+    assert.match(fs.readFileSync(taskFile(t.config, 'nc-1'), 'utf8'), /## Follow-up queued .*\n\ndopisz test[\s\S]*## Follow-up sent /);
     assert.deepEqual(t.audit().map((a) => [a.tool, a.task, a.outcome]), [['send', 'nc-1', 'requested'], ['send', 'nc-1', 'done']]);
     assert.equal(t.audit()[0]?.detail, 'dopisz test');
     assert.deepEqual(t.notified, ['czat zlecił: send NC-1']);
@@ -384,7 +384,7 @@ describe('mcp: the write tools', () => {
     const repo = scratch.sub('n1/app');
     const spec = `---\ntask: NC-9\nagent: claude\nrepos:\n  - path: ${repo}\n    worktree: ${repo}-wt\n---\nZrób NC-9.\n`;
     const preview = await t.call('new', { spec });
-    assert.match(preview.text, /^NC-9 {2}claude\/default\/high\n {2}worktree: .*app-wt[\s\S]*Not started yet\. Show this to the user and ask; if they agree, call new again with the same spec and confirm: true\.$/);
+    assert.match(preview.text, /^NC-9 {2}claude\/default\/high\n {2}worktree: .*app-wt[\s\S]*Not started yet\. Show this to the user and ask; if they agree, call new again with the same spec and confirm: true\.\npreview_token: [0-9a-f-]+$/);
     assert.deepEqual(t.runner.commands.filter((c) => !c.startsWith('write ') && !c.startsWith('append ')), [], 'nothing ran');
     assert.deepEqual(t.notified, []);
     assert.deepEqual(t.audit().map((a) => a.outcome), ['requested', 'preview']);
@@ -416,7 +416,7 @@ describe('mcp: the write tools', () => {
     seedTask(t.config, 'NC-1', { repos: [{ path: scratch.sub('m1/app'), worktree: scratch.sub('m1/app-wt') }], requested: { agent: 'claude', model: 'opus', effort: 'high' } });
     t.tmux.add('nc-1', "  ⎿  You've hit your session limit · resets 3pm\n❯ ");
     const preview = await t.call('move', { task: 'NC-1' });
-    assert.match(preview.text, /^Move NC-1 \(claude opus\/high\) -> NC-1-2 \(codex .*\)[\s\S]*Not moved yet\. Ask the user, then call move again with confirm: true\.$/);
+    assert.match(preview.text, /^Move NC-1 \(claude opus\/high\) -> NC-1-2 \(codex .*\)[\s\S]*Not moved yet\. Ask the user, then call move again with confirm: true\.\npreview_token: [0-9a-f-]+$/);
     assert.ok(!t.tmux.windows.some((w) => w.name === 'nc-1-2'));
     assert.deepEqual(t.notified, []);
     const done = await t.call('move', { task: 'NC-1', confirm: true });

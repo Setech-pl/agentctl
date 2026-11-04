@@ -1,3 +1,7 @@
+import { limitedTick } from './limited.ts';
+import { collectStatus } from './status.ts';
+import { journalOutputs } from './outputs.ts';
+import { reviewTick } from './review.ts';
 import { inspectReport } from './report-state.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -154,8 +158,9 @@ export async function handleEvent(ctx: Context, alerts: Alerts, input: EventInpu
     // In particular, never wait for the sender's prompt-delivery lock here.
     const normalizePrompt = (text: string) => text.replace(/\r\n?/g, '\n').trim();
     const submitted = input.kind === 'user-prompt-submit' && isObject(input.payload) && typeof input.payload.prompt === 'string' && normalizePrompt(input.payload.prompt) === normalizePrompt(record.pendingPrompt ?? '');
-    if (record.deliveryId && (submitted || ['turn-complete', 'needs-input', 'idle'].includes(event.outcome))) {
-      await runner.writeFile(path.join(taskDir(ctx.config, record.window), 'delivery-evidence.json'), JSON.stringify({ deliveryId: record.deliveryId, at: new Date(now).toISOString(), type: event.type }));
+    const codexInput = input.agent === 'codex' && isObject(input.payload) && Array.isArray(input.payload['input-messages']) && input.payload['input-messages'].some(text => typeof text === 'string' && normalizePrompt(text) === normalizePrompt(record.pendingPrompt ?? ''));
+    if (record.deliveryId && record.deliveryStartedAt && now >= Date.parse(record.deliveryStartedAt) && (submitted || codexInput)) {
+      await runner.writeFile(path.join(taskDir(ctx.config, record.window), 'delivery-evidence.json'), JSON.stringify({ deliveryId: record.deliveryId, at: new Date(now).toISOString(), type: event.type, accepted: true }));
     }
     let announced: EventResult['announced'];
     let detail = '';
@@ -185,6 +190,8 @@ export async function handleEvent(ctx: Context, alerts: Alerts, input: EventInpu
           state = 'report-ready';
           text = reportReadyText(record.task, readVerdict(record.report, ctx.config.notify.verdictPattern));
           await recordEvent(ctx, record, 'report');
+          await journalOutputs(ctx, record);
+          await reviewTick(ctx);
         } else if (ctx.config.notify.turnEnd) {
           state = 'waiting';
           text = `${record.task}: skończył turę i czeka na Ciebie${event.text ? ` – ${event.text}` : ''}`;
@@ -194,8 +201,10 @@ export async function handleEvent(ctx: Context, alerts: Alerts, input: EventInpu
       state = 'overloaded';
       text = `${record.task}: dostawca przeciążony (overloaded)`;
     } else if (event.outcome === 'limited') {
-      state = 'limited';
-      text = limitText(record);
+      await limitedTick(ctx, await collectStatus(ctx, { progress: false }), { notify: async (_title, message) => {
+        const result = await alerts.send(target, 'limited', message, 'event');
+        announced = { state: 'limited', text: message, result };
+      } });
     }
     if (state && text) {
       const result = await alerts.send(target, state, text, 'event');

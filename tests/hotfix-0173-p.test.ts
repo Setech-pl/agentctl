@@ -43,7 +43,7 @@ it('0173-P1: exact Claude Code 2.1.311 haiku/low screen and all spinner glyphs a
 for (const agent of ['claude','codex'] as const) it(`0173-P1/P4 ${agent}: hook/notify is preferred to an unreadable screen; stale generation cannot confirm send`, async () => {
   const f = fixture(`hook-${agent}`, agent); await queuePrompt(f.ctx, f.record(), 'Original prompt\nSecond line');
   await setHeaderFields(f.runner, taskFile(f.config, 't1'), { prompt_delivery: 'confirming', delivery_started_at: new Date(f.runner.now()).toISOString() });
-  const event = agent === 'claude' ? { task: 'T1', agent, kind: 'user-prompt-submit' as const, payload: { prompt: 'Original prompt\rSecond line' } } : { task: 'T1', agent, payload: { type: 'agent-turn-complete', 'last-assistant-message': 'Done' } };
+  const event = agent === 'claude' ? { task: 'T1', agent, kind: 'user-prompt-submit' as const, payload: { prompt: 'Original prompt\rSecond line' } } : { task: 'T1', agent, payload: { type: 'agent-turn-complete', 'last-assistant-message': 'Done', 'input-messages': ['Original prompt\nSecond line'] } };
   await handleEvent(f.ctx, new Alerts(f.ctx, f.notifier), event);
   assert.equal(deliveryEvidence(f.ctx, f.record(), ''), true);
   assert.equal(await deliverPendingPrompt(f.ctx, 't1'), 'sent');
@@ -52,11 +52,11 @@ for (const agent of ['claude','codex'] as const) it(`0173-P1/P4 ${agent}: hook/n
   assert.equal(deliveryEvidence(f.ctx, f.record(), ''), false);
   if (agent === 'claude') { await handleEvent(f.ctx, new Alerts(f.ctx, f.notifier), event); assert.equal(deliveryEvidence(f.ctx, f.record(), ''), false); }
 });
-for (const kind of ['stop','notification'] as const) it(`0173-P1 Claude ${kind}: fresh completion/idle hook acknowledges delivery without screen`, async () => {
+for (const kind of ['stop','notification'] as const) it(`0173-P1 Claude ${kind}: completion/idle hook without submission cannot acknowledge delivery`, async () => {
   const f = fixture(kind); await queuePrompt(f.ctx, f.record(), 'Original prompt');
   await setHeaderFields(f.runner, taskFile(f.config, 't1'), { prompt_delivery: 'confirming', delivery_started_at: new Date(f.runner.now()).toISOString() });
   await handleEvent(f.ctx, new Alerts(f.ctx, f.notifier), { task: 'T1', agent: 'claude', kind, payload: { notification_type: 'idle_prompt' } });
-  assert.equal(await deliverPendingPrompt(f.ctx, 't1'), 'sent');
+  assert.equal(await deliverPendingPrompt(f.ctx, 't1'), 'confirming');
 });
 it('0173-P2: later canonical PASS report beats needs-attention and reaches events, pull_ready, after and cohort-done', async () => {
   const f = fixture('late-report'); await touchCohort(f.ctx, 'P');

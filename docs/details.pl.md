@@ -405,7 +405,7 @@ Które modele i efforty sprawdzają się do czego, widać dopiero na wielu zadan
 
 `agentctl mark <TASK> ok|partial|fail [--note "…"]` zapisuje Twoją ocenę; wygrywa ostatnie oznaczenie. `agentctl log [--since 7d] [--cohort X] [--json] [--clip]` zwija rekordy do jednej linii na zadanie, od najnowszego (późniejsza pusta wartość nigdy nie zeruje znanej). `agentctl stats [--since 30d] [--cohort X] [--json] [--clip]` grupuje zadania według agent/model/effort: zadania, mediana czasu i mediana tokenów (n/d, gdy brak), udział ok, partial i fail **wśród oznaczonych**, nieoznaczone, anulowane i przeniesione (zadania grupy, które trafiły na limit i zostały przekazane drugiemu dostawcy). Historia jest tak dobra jak oznaczenia: nieoznaczone zadanie liczy się jako nieoznaczone, nigdy jako ok.
 
-Na boardzie **`l`** otwiera log (`↑↓` przewija, `Esc` wraca), a **`o`** / **`p`** / **`f`** oznaczają wybrane zakończone zadanie (zadanie bez okna, zamknięte lub anulowane albo z gotowym raportem); `p` nadal wstrzymuje kolejkę, dopóki żadne zakończone zadanie nie jest wybrane. Menu zakończonego zadania (`Enter`) oferuje te same oznaczenia. Serwer MCP ma `log`, `stats` i `usage` (odczyt) oraz `mark` (zapis; `mcp.allow`, audytowany, bez kroku potwierdzenia: nie zmienia niczego poza historią).
+Na boardzie **`l`** otwiera log (`↑↓` przewija, `Esc` wraca), a **`o`** / **`p`** / **`f`** oznaczają wybrane zakończone zadanie (zadanie bez okna, zamknięte lub anulowane albo z gotowym raportem); `p` nadal wstrzymuje kolejkę, dopóki żadne zakończone zadanie nie jest wybrane. Menu zakończonego zadania (`Enter`) oferuje te same oznaczenia. Serwer MCP ma `log`, `stats` i `usage` (odczyt) oraz `mark` (zapis; `mcp.allow`, audytowany, wiele zadań wymaga podglądu/potwierdzenia; pojedyncze zadanie jest zapisywane od razu).
 
 ## Nawigacja
 
@@ -696,3 +696,45 @@ Od 0.17.3 kohorta czeka domyślnie 300 s od ostatniej zmiany składu/stanu (`coh
 Pierwszy prompt (także z kolejki lub po move) i instrukcja resume zawierają pełną ścieżkę kanoniczną raportu. TASK.md przechowuje pending_prompt, prompt_delivery i prompt_sent_at. Po zaufaniu folderu new lub watch wysyła prompt raz; blokada między procesami zapobiega duplikacji. Adapter wkleja raz, sprawdza widoczny ekran i ponawia tylko Enter, najwyżej dwukrotnie, wyłącznie przy własnym szkicu. Stan working albo nowa odpowiedź agenta potwierdza wysłanie. Brak potwierdzenia zwraca sukces startu/send z ostrzeżeniem „dostarczenie niepotwierdzone – sprawdzam”. Watch czeka najwyżej delivery_confirm_s (domyślnie 60 s) od wklejenia, potem jednorazowo zgłasza needs-attention. Późniejszy hook, ekran pracy, zakończenie tury albo aktualny raport kanoniczny usuwa attention; raport pozostaje dostępny dla events_since, pull_ready, after i kohort. Najpierw sprawdzane są hooki Claude UserPromptSubmit (zgodny z bieżącym promptem), Stop i Notification oraz notify Codexa; identyfikator dostarczenia wyklucza stare potwierdzenia. Konfigurowalne wzorce adapterów working_pattern rozpoznają spinner Claude 2.1.x bez „esc to interrupt”, a delivery_pattern nową odpowiedź. Echo wysłanego promptu w transkrypcie przed pustym polem wpisywania też potwierdza dostarczenie. Nie odpowiada automatycznie na dialogi.
 
 Jawne report_from zapisuje report_confirmed; źródło pozostaje w detail, ale znika ostrzeżenie o historycznej kopii. Kandydat raportu nie uruchamia lokalnego ani telefonicznego powiadomienia: pozostaje w journal, status i board, aby nie konkurować z pytaniem agenta. Duże pull_ready full ma kontynuację przez response_page i nie oznacza raportu pulled przed pełnym, ciągłym odbiorem. Okna zwykłej powłoki nie są orphan; wymagany jest proces agenta albo rola zadania.
+
+## Workflow NC: raporty, przeglądy i wiadomości
+
+Protokół kompletnego raportu prosi o wersjonowany blok YAML przed `<!-- agentctl:report-end -->`:
+
+```agentctl-outputs
+version: 1
+verdict: PASS
+commits: [{repo: app, branch: feature, sha: aaaaaaa}]
+integrate: [{repo: app, branch: feature, sha: aaaaaaa, note: propozycja integracji}]
+decisions: [Wybierz termin wdrożenia]
+actions: [{title: Wdrożenie po zgodzie, shell: "echo proponowana komenda"}]
+checks: ["unit: PASS"]
+preview: https://example.invalid/preview
+notes: []
+```
+
+`outputs`, `outputs_valid` i `outputs_errors` opisują fakty. Gałęzie i SHA muszą istnieć w repozytoriach zadania. Brak/błąd danych ostrzega, lecz kompletny raport nadal jest gotowy. Akcje są propozycjami; agentctl nie wykonuje ich komend, nie ocenia wyniku i nie scala. `status` liczy decyzje/akcje; `pull_ready` i `get_report` pokazują dane. `cohort_show` zbiera propozycje integracji (oznacza duplikaty i różne SHA tej samej gałęzi), decyzje, akcje i sprawdzenia z ID zadań. `events_since` dodaje nowe decyzje/akcje do `needYou` raz na hash raportu.
+
+```yaml
+review: auto
+# Lub w .agentctl.yaml:
+# review: {default: auto, rerun: true, template: review.md}
+after: [{task: IMPLEMENT, verdict: [PASS, PARTIAL]}]
+repos:
+  - path: ~/code/app
+    worktree: ~/work/app-check
+    branch: check
+    base: "@IMPLEMENT:app"
+```
+
+Automatyczny przegląd dodaje `TASK-REV` po raporcie autora, na jego gałęzi i w tej samej kohorcie. Preferuje innego dostępnego dostawcę z `review.*` lub `equivalents`; w razie niedostępności wymaga innego skonfigurowanego modelu. Brak poprawnej pary daje jawny wpis o oczekującym przeglądzie. Recenzent czyta czysty checkout autora i pisze osobny raport. `review.rerun: true` tworzy `REV2` po nowym raporcie, z SHA zapisanym dla poprzedniego przeglądu jako bazą delty. Pierwszą bazą jest zapisana baza autora. Szablon znajduje się w `docs/examples/`, a ustawienia opisuje dokument konfiguracji.
+
+`base: "@TASK"` przy starcie wybiera commit z outputs tego zadania, a bez niego HEAD jego gałęzi; przy wielu repozytoriach podaj `:repo-name`. Konkretny commit widać w podglądzie new i w TASK.md. Brak lub niejednoznaczność blokuje start. Warunkowe `after` blokuje przy innym werdykcie albo z powodem `brak werdyktu`; zwykłe `after: TASK` nadal czeka wyłącznie na kompletny raport.
+
+`send` od razu wkleja follow-up pracującemu Claude/Codexowi. Potwierdzenie wymaga przyjęcia, nowego stanu pracy, echa transkryptu/kolejki lub nowego kompletnego raportu. Sam `idle_prompt` ani spóźniony Stop nie potwierdza dostarczenia; zablokowane pole daje `needs-attention` po `delivery_confirm_s`. Adapter wymagający bezczynności (`accepts_busy_prompt: false`) lub niepotwierdzona poprzednia wiadomość zatrzymuje kolejne w trwałej kolejce FIFO. Status/peek pokazują kolejkę, odpowiedź mówi „wklejono”, pozycję w kolejce albo „niepotwierdzone”. Watch wysyła po kolei.
+
+Limit dostawcy daje jedno powiadomienie na epizod, z czasem resetu albo `n/d`. Świeży odczyt wolnego limitu powyżej `limited.resume_above_percent` (domyślnie 5) lub upłynięcie znanego resetu dopuszcza wysłanie `limited.message` (`kontynuuj`) do bezczynnego okna z pustym polem. Zabezpieczenia overload sprawdzają warunki przed wklejeniem i Enterem; licznik prób i ograniczenia przeżywają restart. `limited.auto_resume: false` wyłącza wysyłanie. Dostawca i model pozostają te same.
+
+`agentctl mark --cohort NC ok --note "sprawdzone"` pokazuje dokładny zakres; `--yes` go potwierdza. MCP przyjmuje `task`, `tasks` lub `cohort`; więcej niż jedno zadanie wymaga podglądu/potwierdzenia. Przy filtrze kohorty board `o/p/f` pokazuje ID przed oceną. Agentctl zapisuje wynik podany przez człowieka. Zamknięcie wszystkich zadań kohorty daje `gc_suggest` z chronionym planem sprzątania tej kohorty, bez automatycznego usuwania.
+
+Podglądy MCP mają niezależne `preview_token`, ważne dziesięć minut, i odmawiają wykonania po zmianie zakresu. Przekaż token oraz identyczne argumenty z `confirm: true`; bez tokena działa ostatni pasujący podgląd. `gc_preview` dla kohorty podaje tylko liczbę obcych worktree; potwierdzone `gc` zwraca wyniki bez powtarzania planu. `notify.mcp_writes` domyślnie ma `summary`, najwyżej raz na 60 sekund; dostępne też `all` i `off`. Audyt pozostaje pełny. F12 wraca do boarda własnej sesji, także przy równoległym dev. Czas obejmuje checkout/setup przed uruchomieniem agenta; ostrzeżenie o starym odczycie planu pojawia się raz na odczyt.

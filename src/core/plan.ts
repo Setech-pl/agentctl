@@ -1,3 +1,4 @@
+import { resolveTaskBases } from './base-ref.ts';
 import fs from 'node:fs';
 import { checkReviewer, checkWindowLimit, findAuthor } from './checks.ts';
 import type { AgentModel, LiveWindow } from './checks.ts';
@@ -10,7 +11,7 @@ import { cancelledTasks, unmetAfter, waitingText } from './depends.ts';
 import { slotHolders } from './limits.ts';
 import { collectStatus } from './status.ts';
 import { listTaskRecords } from './taskstore.ts';
-import { Problems } from './util.ts';
+import { AgentctlError, Problems } from './util.ts';
 
 export interface PlanOptions {
   /** `--agent`: run every spec on this provider, translating through the equivalents table. */
@@ -29,6 +30,7 @@ export interface PlanOptions {
    * agreed to queue land here instead of being an error. Without a terminal the error names `agentctl queue`.
    */
   overflow?: { queued: ResolvedSpec[] };
+  deferBases?: boolean;
 }
 
 /** Codex reasoning efforts; `max` is Claude-only. */
@@ -69,7 +71,7 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
   if (!opts.skipAfter && !ctx.runner.dryRun && specs.some((s) => s.after.length > 0)) {
     const rows = await collectStatus(ctx, { progress: false, archived: true });
     for (const spec of specs) {
-      const unmet = unmetAfter(spec.after, rows);
+      const unmet = unmetAfter(spec.after, rows, spec.afterVerdicts);
       const gone = cancelledTasks(rows);
       if (unmet.some((t) => gone.has(t))) p.add(`${spec.task}: after ${spec.after.join(', ')}: ${unmet.filter((t) => gone.has(t)).join(', ')} was cancelled, so it never gets a report. Remove it from "after".`);
       else if (unmet.length > 0) p.add(`${spec.task}: after ${spec.after.join(', ')}: ${waitingText(unmet)} (no report yet). "agentctl queue" starts the task by itself once they have one.`);
@@ -80,6 +82,17 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
   const result: ResolvedSpec[] = [];
 
   for (let spec of specs) {
+    if (!opts.deferBases) spec = await resolveTaskBases(ctx, spec);
+    if (spec.review) {
+      const repos = [];
+      for (const repo of spec.repos) {
+        if (!repo.branch) throw new AgentctlError(`${spec.task}: review: auto requires an explicit author repos[].branch`);
+        const r = await ctx.runner.exec('git', ['-C', repo.path, 'rev-parse', '--verify', '--end-of-options', `${repo.base ?? 'HEAD'}^{commit}`], { readOnly: true });
+        if (r.code !== 0 || !/^[a-f0-9]{40}$/i.test(r.stdout.trim())) throw new AgentctlError(`${spec.task}: cannot freeze author base for auto review in ${repo.path}`);
+        repos.push({ ...repo, base: r.stdout.trim() });
+      }
+      spec = { ...spec, repos };
+    }
     const at = `${spec.task}:`;
 
     // 1. --agent: explicit, so no question asked.

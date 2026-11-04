@@ -17,6 +17,7 @@ const scratch = useScratch();
 const additions = MCP_WRITE_TOOLS.slice(13);
 function fixture(name: string, allow = '') {
   const config = makeConfig(scratch.sub(name), `mcp: {allow: [${allow}]}\ncapacity: {codex_refresh: false}\n`);
+  config.notify.mcpWrites = 'all';
   const tmux = new FakeTmux();
   const runner = new DiskRunner({ dryRun: false, respond: (cmd, args, opts) => cmd === 'claude' ? { code: 0, stdout: '--remote-control --append-system-prompt-file' } : tmux.respond(cmd, args, opts) });
   const notices: string[] = [];

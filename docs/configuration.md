@@ -442,3 +442,31 @@ PL: `board.window_title` (domyślnie `true`) ustawia tytuł okna i sesji boarda;
 | `mcp.max_response_kb` | `8` | Limit of each serialized MCP tool result in KiB (1–1024). Larger results return fragments through `response_page`; continuation never repeats the operation. |
 | `cohort` | `{done_grace_s: 300}` | Global cohort completion settings. |
 | `cohort.done_grace_s` | `300` | Wait after the last observed membership or task-state change before announcing all reports ready. Adding work cancels the pending completion; persisted across watcher restarts. `0` restores immediate notices. |
+
+## NC workflow (0.17.4)
+
+| Key | Default | Layers | Meaning |
+|---|---|---|---|
+| `review` | disabled | global, project, spec | Automatic review settings. In a spec: `auto`, `false`, or `{agent, model, effort, prompt_template}`. |
+| `review.default` | `false` | global, project | `auto` schedules a review after a complete author report. Explicit spec `false` disables it. |
+| `review.agent` | other provider | global, project, spec | Explicit reviewer provider. Prefer a different installed provider; if unavailable or unmapped, use a different configured model on the author provider. |
+| `review.model` | equivalents | global, project, spec | Reviewer model; no guessed models. A same-provider reviewer must use another model. |
+| `review.effort` | equivalents | global, project, spec | Reviewer effort, validated against the selected provider. |
+| `review.template` | built-in | global, project | Path to a review prompt. Alias of `prompt_template`; relative paths use the author repository. Default example: [review-template.md](examples/review-template.md). |
+| `review.prompt_template` | built-in | global, project, spec | Template path. Placeholders: `{task}`, `{report}`, `{delta}`. |
+| `review.rerun` | `false` | global, project, spec | A new author report schedules `TASK-REV2`, then `REV3`, etc.; the previous scheduled review SHA becomes the next delta base. |
+| `limited` | see below | global | Recovery of windows stopped at a provider usage limit; never changes provider or model. |
+| `limited.auto_resume` | `true` | global | Send `limited.message` after confirmed recovery at an idle, empty composer. |
+| `limited.resume_above_percent` | `5` | global | Remaining percentage must be strictly above this threshold (0–<100), from a fresh reading since the episode; a known elapsed reset also permits recovery. Unknown/stale readings do not imply recovery. |
+| `limited.message` | `kontynuuj` | global | Recovery message. Uses overload retry delay, maximum attempts, give-up interval and sustained recovery duration. |
+| `agents.<agent>.accepts_busy_prompt` | `true` | global | Claude/Codex accept follow-ups while working. Set `false` for an adapter that needs idle; messages remain in a durable FIFO, visible in status/peek. |
+| `notify.mcp_writes` | `summary` | global | `all`, `summary`, `off`. Audit and journal still record every write. Summary emits at most once per interval; watch flushes pending summaries. |
+| `notify.mcp_writes_interval_s` | `60` | global | Positive seconds between write summaries, persisted over restarts. |
+
+`after` accepts existing task IDs and conditions, for example `after: [BUILD, {task: TEST, verdict: [PASS, PARTIAL]}]`. A complete report with another verdict blocks the task with the observed/required values; no verdict says `brak werdyktu`. The data block's verdict wins; an explicit `Werdykt:` / `Verdict:` line is the legacy fallback. `unblock` previews which dependency it removes.
+
+`repos[].base: "@TASK"` uses that task's output commit, otherwise its branch HEAD. `"@TASK:repo-name"` selects one repository. Resolution happens at start; the exact existing commit and original reference are saved in TASK.md and displayed in the new preview. Queue entries retain the reference until start. Missing tasks, commits, branches and ambiguous repositories block start.
+
+Automatic review requires an explicit author `repos[].branch`. The review shares the author's worktree/branch, uses `review_of` and `after`, and is prompted to read only and write its separate report. Start validates that the shared checkout is clean. A missing provider/model/template/base leaves the author report ready and records a visible review error. Defaults come from `equivalents`, not model guesses. An explicit same-provider model is allowed only when different from the author.
+
+PL: `outputs` to fakty autora, bez wykonywania `actions.shell` i bez scalania. Błędny/brakujący blok ostrzega, ale raport nadal jest gotowy. `after` może wymagać konkretnego werdyktu. `review: auto` tworzy przegląd po raporcie, `rerun` włącza przeglądy delty. `limited` wznawia wyłącznie na tym samym dostawcy/modelu, z pustym polem i kontrolą przed Enterem. Zbiorczy `mark` zapisuje ocenę podaną przez użytkownika, po podglądzie zakresu. F12 wraca do boarda własnej sesji, także przy równoległym `agentctl-dev`.

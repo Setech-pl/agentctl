@@ -360,7 +360,7 @@ const note=(value)=>fs.appendFileSync(log,JSON.stringify(value)+'\\n');
 const acknowledge=(prompt)=>{
  if(${JSON.stringify(mode)}!=='hook')return;
  setTimeout(()=>{
-  const payload=${agent === 'claude' ? "{prompt}" : "{type:'agent-turn-complete','last-assistant-message':'Done'}"};
+  const payload=${agent === 'claude' ? "{prompt}" : "{type:'agent-turn-complete','last-assistant-message':'Done','input-messages':[prompt]}"};
   let result;
   if(${JSON.stringify(agent)}==='claude'){const i=args.indexOf('--settings');const settings=JSON.parse(fs.readFileSync(args[i+1],'utf8'));result=spawnSync(settings.hooks.UserPromptSubmit[0].hooks[0].command,{shell:true,input:JSON.stringify(payload),encoding:'utf8'});}
   else {const notify=JSON.parse(args.find(a=>a.startsWith('notify=')).slice(7));result=spawnSync(notify[0],[...notify.slice(1),JSON.stringify(payload)],{encoding:'utf8'});}

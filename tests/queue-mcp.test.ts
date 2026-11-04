@@ -37,7 +37,7 @@ function setup(name: string, extraYaml = '') {
   });
   const notified: string[] = [];
   const deps: McpDeps = {
-    context: (out) => new Context(runner, loadGlobalConfig(path.dirname(config.path)), out),
+    context: (out) => new Context(runner, { ...loadGlobalConfig(path.dirname(config.path)), notify: { ...loadGlobalConfig(path.dirname(config.path)).notify, mcpWrites: 'all' } }, out),
     notify: async (m) => void notified.push(m),
   };
   const call = (n: string, args: Record<string, unknown> = {}): Promise<ToolResult> => tool(n).run(deps, z.object(tool(n).input).parse(args) as never);
@@ -122,7 +122,7 @@ describe('mcp: queue write tools', () => {
     const first = await t.call('queue', { spec: t.spec('Q-1') });
     assert.match(first.text, /Q-1 {2}claude\/default\/high {2}priority normal/);
     assert.match(first.text, /waits for a free claude window/);
-    assert.match(first.text, /Not queued yet\. Show this to the user and ask; .*confirm: true\.$/);
+    assert.match(first.text, /Not queued yet\. Show this to the user and ask; .*confirm: true\.\npreview_token: [0-9a-f-]+$/);
     assert.deepEqual(readQueue(t.config), []);
     assert.deepEqual(t.audit().map((a) => [a.tool, a.task, a.outcome]), [['queue', 'Q-1', 'requested'], ['queue', 'Q-1', 'preview']]);
     assert.deepEqual(t.notified, []);
@@ -162,7 +162,7 @@ describe('mcp: queue write tools', () => {
     assert.deepEqual(readQueue(t.config).map((e) => e.task), ['Q-2']);
     await t.call('queue_rm', { task: 'Q-1' });
     assert.equal((await t.call('queue_rm', { task: 'Q-1' , confirm: true })).isError, true);
-    assert.deepEqual(t.audit().filter((a) => a.tool === 'queue_rm').map((a) => a.outcome), ['requested', 'preview', 'requested', 'done', 'requested', 'preview', 'requested', 'error']);
+    assert.deepEqual(t.audit().filter((a) => a.tool === 'queue_rm').map((a) => a.outcome), ['requested', 'preview', 'requested', 'done', 'error', 'error']);
     assert.ok(t.notified.includes('czat zlecił: queue_rm Q-1'));
   });
 });

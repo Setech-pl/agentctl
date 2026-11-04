@@ -34,10 +34,8 @@ describe('navigation: the tmux session', () => {
     const result = await applyNavigation(ctx);
     assert.deepEqual(result, { session: true, mouse: 'on', key: { name: 'F12', state: 'bound' } });
     const cmds = runner.commands.filter((c) => /set-option|bind-key/.test(c));
-    assert.deepEqual(cmds, [
-      "tmux set-option -t '=agentctl:' mouse on",
-      `tmux bind-key -n F12 if-shell -F '${returnKeyCondition('agentctl')}' 'select-window -t '\\''=agentctl:board'\\''' 'send-keys F12'`,
-    ]);
+    assert.ok(cmds.some(c => c.includes("set-option -t '=agentctl:' @agentctl-return-key F12")));
+    assert.ok(cmds.some(c => c.includes('bind-key -n F12') && c.includes('@agentctl-return-key') && c.includes(':board')));
     assert.ok(!cmds.some((c) => /\s-g\s/.test(c)), 'nothing global');
   });
 
@@ -106,4 +104,16 @@ describe('navigation: what is said', () => {
     const notice = await runBoardEffect(runner, config, { type: 'switch', task: 'NC-1', window: 'nc-1' }, { insideTmux: true });
     assert.match(notice.text, /Back to the board: F12/);
   });
+});
+
+it('a legacy production F12 binding remains a fallback when the dev session installs its dispatcher', async () => {
+  const config = makeConfig(scratch.sub('legacy-prod'), 'session: agentctl-dev\n');
+  const tmux = new FakeTmux('agentctl-dev'); tmux.add('board');
+  const existing = `bind-key -T root F12 if-shell -F "${returnKeyCondition('agentctl')}" "select-window -t '=agentctl:board'" "send-keys F12"`;
+  const { ctx, runner } = makeContext(config, { respond: (cmd, args, opts) => cmd === 'tmux' && args[0] === 'list-keys' ? { stdout: existing } : tmux.respond(cmd, args, opts) });
+  assert.equal((await applyNavigation(ctx) as { key: { state: string } }).key.state, 'bound');
+  const binding = runner.commands.find(c => c.includes('bind-key'))!;
+  assert.ok(binding.includes(returnKeyCondition('agentctl')), 'keeps production fallback without changing production session options');
+  assert.ok(binding.includes('@agentctl-return-key'));
+  assert.ok(!runner.commands.some(c => c.includes("-t '=agentctl:'")));
 });

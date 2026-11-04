@@ -1,3 +1,6 @@
+import { promptQueueView } from './prompt-queue.ts';
+import { readOutputs, dependencyVerdict } from './outputs.ts';
+import type { OutputData, OutputVerdict } from './outputs.ts';
 import path from 'node:path';
 import { inspectReport } from './report-state.ts';
 import { sessionQuestion } from './codex-question.ts';
@@ -29,6 +32,15 @@ import { formatTokens } from './usage-parse.ts';
 
 export interface StatusRow {
   task: string;
+  outputs?: OutputData['outputs'];
+  outputs_valid?: boolean;
+  outputs_errors?: string[];
+  verdict?: OutputVerdict;
+  decisionsCount?: number;
+  actionsCount?: number;
+  promptQueue?: ReturnType<typeof promptQueueView>;
+  promptDelivery?: string;
+
   attempt?: number;
   attemptId?: string;
   summaryDelivered?: string | null;
@@ -170,8 +182,14 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     const deliveryReport = reportReady && (record.promptDelivery === 'needs-attention' || (record.deliveryId && reportState.signature !== record.deliveryReportBaseline)) && !['needs-input', 'needs-trust'].includes(classifyScreen(screenText, settings));
     const unconfirmed = record.promptDelivery === 'needs-attention' && !reportReady && !deliveryEvidence(ctx, record, screenText);
     const state: TaskState = cancelled ? 'cancelled' : closed ? 'closed' : record.supersededBy ? 'superseded' : deliveryReport ? 'report-ready' : unconfirmed ? 'needs-attention' : taskState({ alive, screen: screenText, settings, reportReady, event: stored?.outcome });
+    const outputData = reportReady ? await readOutputs(ctx, record) : undefined;
+    let verdict: OutputVerdict | undefined;
+    if (reportReady) { try { verdict = dependencyVerdict(fs.readFileSync(record.report, 'utf8')); } catch { /* absent */ } }
     rows.push({
+      ...(outputData ? { ...outputData, verdict, decisionsCount: outputData.outputs?.decisions.length ?? 0, actionsCount: outputData.outputs?.actions.length ?? 0 } : {}),
       task: record.task,
+      promptQueue: promptQueueView(ctx, record.window),
+      promptDelivery: record.promptDelivery,
       attempt: record.attempt,
       attemptId: record.attemptId,
       summaryDelivered: record.summaryDelivered ?? null,

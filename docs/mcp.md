@@ -60,7 +60,7 @@ mcp:
 | `queue` | `spec`, `agent?`, `confirm?` | Puts the tasks of a spec text in the queue (`priority`, `after` and `touches` work as in the CLI). The first call only returns the summary (where each task will stand, the review hint, `touches` warnings); the tasks are queued when it is called again with `confirm: true`. `setup` is refused, as in `new`. They start by themselves while `agentctl watch` runs. |
 | `queue_rm` | `task` | Takes a waiting or failed task out of the queue; it becomes cancelled (as `cancel` does for a queued task) and the tasks that wait for it become blocked. |
 | `cancel` | `task` or `cohort`, `reason?`, `remove_worktree?`, `confirm?` | Abandons a task, or all open tasks of a cohort: a task at work is interrupted and its window closed after `cancel.grace` seconds, a queued task leaves the queue. The task becomes cancelled; the worktree, the branch and a written report stay. A move is cancelled with its other half. The first call only describes what would be cancelled; `confirm: true` does it. `remove_worktree` needs `mcp.allow_rm_worktree`, as in `close`. The desktop notice names the reason. |
-| `mark` | `task`, `result` (`ok`, `partial` or `fail`), `note?` | Records the result the user judged for a task in the history (`log`, `stats`); the last mark wins. It changes nothing else, so it has no confirm step; a chat should record only what the user said. |
+| `mark` | `task?`, `tasks?`, `cohort?`, `result` (`ok`, `partial` or `fail`), `note?` | Records the result the user judged for a task in the history (`log`, `stats`); the last mark wins. Multiple tasks require preview/confirm; a single mark is immediate; a chat should record only what the user said. |
 | `away` | `on` | Turns away mode on or off: while it is on, agentctl sends its notifications to the user's phone (ntfy) as well; the Mac is not affected. It costs nothing, so it has no confirm step, and it is recorded in the audit log. `status` and `events_since` say whether away is on. |
 | `set_limits` | `claude?`, `codex?` (0 removes a limit), `confirm?` | Sets the most simultaneous agents per provider in `config.yaml` (comments stay, a `.bak` copy is kept). Takes effect at once, also in a running `watch`. The first call only describes the change; `confirm: true` writes it. |
 | `reserve` | `claude?`, `codex?`, `note?`, `release?`, `confirm?` | Holds places of a provider for agents you start by hand (they count against the limit), or gives them back with `release: true`. The first call only describes it; `confirm: true` does it. |
@@ -72,7 +72,7 @@ mcp:
 - There is no tool for merge, push, rebase or running a shell command. The two-step `gc` tool can delete merged local branches with `git branch -d`; `report_from` and `adopt` accept explicit metadata/report paths.
 - Every write is refused unless `mcp.allow` lists it. Refused calls are recorded too.
 - **Audit log:** `~/.agentctl/mcp-audit.log` (next to the config), one JSON line per step: time, tool, task, outcome `requested`, then `done`, `error`, `denied` or `preview`. The `requested` line is written before the action, and a write that cannot be recorded is not done.
-- **Notification:** a done write is announced on the desktop (`czat zlecił: <action> <TASK>`).
+- **Notification:** `notify.mcp_writes` selects all, summary (default, at most once per 60 seconds), or off; each done write remains in the audit and journal.
 - **Two-step tools:** `new`, `queue`, `move`, `set_limits`, `reserve` and `resume` change nothing on the first call; the chat has to show the summary and call again with `confirm: true`.
 - The server runs as you and sees what you see. This is a trust decision about the chat, not a sandbox. Start with `allow: []`.
 
@@ -247,17 +247,17 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 | `log` | read | `cohort?`, `since?` |
 | `stats` | read | `cohort?`, `since?` |
 | `overlap` | read | `task?` |
-| `resume` | write | `tasks?`, `all?`, `confirm?` |
+| `resume` | write | `tasks?`, `all?`, `confirm?`, `preview_token?` |
 | `send` | write | `task`, `text` |
-| `new` | write | `spec`, `agent?`, `reuse?`, `no_agent?`, `cohort?`, `wait_trust?`, `confirm?` |
-| `queue` | write | `spec`, `cohort?`, `agent?`, `confirm?` |
-| `queue_rm` | write | `task`, `confirm?` |
-| `cancel` | write | `task?`, `tasks?`, `cohort?`, `reason?`, `remove_worktree?`, `confirm?` |
-| `mark` | write | `task`, `result`, `note?` |
+| `new` | write | `spec`, `agent?`, `reuse?`, `no_agent?`, `cohort?`, `wait_trust?`, `confirm?`, `preview_token?` |
+| `queue` | write | `spec`, `cohort?`, `agent?`, `confirm?`, `preview_token?` |
+| `queue_rm` | write | `task`, `confirm?`, `preview_token?` |
+| `cancel` | write | `task?`, `tasks?`, `cohort?`, `reason?`, `remove_worktree?`, `confirm?`, `preview_token?` |
+| `mark` | write | `task?`, `tasks?`, `cohort?`, `result`, `note?`, `confirm?`, `preview_token?` |
 | `away` | write | `on` |
-| `interrupt` | write | `task`, `confirm?` |
-| `close` | write | `task?`, `tasks?`, `cohort?`, `remove_worktree?`, `confirm?` |
-| `move` | write | `task`, `agent?`, `confirm?` |
+| `interrupt` | write | `task`, `confirm?`, `preview_token?` |
+| `close` | write | `task?`, `tasks?`, `cohort?`, `remove_worktree?`, `confirm?`, `preview_token?` |
+| `move` | write | `task`, `agent?`, `confirm?`, `preview_token?` |
 | `queue_show` | read | `task` |
 | `mcp_check` | read |  |
 | `spec_example` | read |  |
@@ -267,24 +267,24 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 | `manager_status` | read |  |
 | `away_status` | read |  |
 | `report` | read | `task` |
-| `queue_retry` | write | `task`, `confirm?` |
-| `queue_up` | write | `task`, `confirm?` |
-| `queue_pause` | write | `confirm?` |
-| `queue_resume` | write | `confirm?` |
-| `unblock` | write | `task`, `drop_after?`, `confirm?` |
-| `cohort_add` | write | `cohort`, `tasks`, `confirm?` |
-| `cohort_remove` | write | `tasks`, `confirm?` |
-| `cohort_note` | write | `cohort`, `text`, `confirm?` |
-| `hide` | write | `tasks`, `confirm?` |
-| `unhide` | write | `tasks`, `confirm?` |
-| `archive` | write | `older_than?`, `cohort?`, `confirm?` |
-| `adopt` | write | `task`, `report`, `window?`, `worktree?`, `agent?`, `model?`, `effort?`, `confirm?` |
-| `report_from` | write | `task`, `from`, `force?`, `confirm?` |
-| `limits_release` | write | `claude?`, `codex?`, `confirm?` |
-| `manager_start` | write | `project?`, `name?`, `model?`, `effort?`, `confirm?` |
-| `manager_stop` | write | `confirm?` |
-| `notify_test` | write | `phone?`, `confirm?` |
-| `gc` | write | `cohort?`, `older_than?`, `branches?`, `confirm?` |
+| `queue_retry` | write | `task`, `confirm?`, `preview_token?` |
+| `queue_up` | write | `task`, `confirm?`, `preview_token?` |
+| `queue_pause` | write | `confirm?`, `preview_token?` |
+| `queue_resume` | write | `confirm?`, `preview_token?` |
+| `unblock` | write | `task`, `drop_after?`, `confirm?`, `preview_token?` |
+| `cohort_add` | write | `cohort`, `tasks`, `confirm?`, `preview_token?` |
+| `cohort_remove` | write | `tasks`, `confirm?`, `preview_token?` |
+| `cohort_note` | write | `cohort`, `text`, `confirm?`, `preview_token?` |
+| `hide` | write | `tasks`, `confirm?`, `preview_token?` |
+| `unhide` | write | `tasks`, `confirm?`, `preview_token?` |
+| `archive` | write | `older_than?`, `cohort?`, `confirm?`, `preview_token?` |
+| `adopt` | write | `task`, `report`, `window?`, `worktree?`, `agent?`, `model?`, `effort?`, `confirm?`, `preview_token?` |
+| `report_from` | write | `task`, `from`, `force?`, `confirm?`, `preview_token?` |
+| `limits_release` | write | `claude?`, `codex?`, `confirm?`, `preview_token?` |
+| `manager_start` | write | `project?`, `name?`, `model?`, `effort?`, `confirm?`, `preview_token?` |
+| `manager_stop` | write | `confirm?`, `preview_token?` |
+| `notify_test` | write | `phone?`, `confirm?`, `preview_token?` |
+| `gc` | write | `cohort?`, `older_than?`, `branches?`, `confirm?`, `preview_token?` |
 | `response_page` | read | `response_id`, `response_offset` |
 
 - `guide`: `--project &lt;repo&gt;`, `--lang &lt;lang&gt;`, `--clip`, `--json`
@@ -305,7 +305,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 - `usage`: `--cohort &lt;name&gt;`, `--since &lt;age&gt;`, `--json`, `--clip`
 - `resume`: `--all`, `-y, --yes`, `--dry-run`
 - `up`: `--no-attach`
-- `mark`: `--note &lt;text&gt;`
+- `mark`: `--cohort &lt;name&gt;`, `--note &lt;text&gt;`, `-y, --yes`
 - `log`: `--since &lt;age&gt;`, `--cohort &lt;name&gt;`, `--json`, `--clip`
 - `stats`: `--since &lt;age&gt;`, `--cohort &lt;name&gt;`, `--json`, `--clip`
 - `gc`: `--apply`, `--older-than &lt;age&gt;`, `--branches`, `--cohort &lt;name&gt;`, `-y, --yes`, `--json`
@@ -450,3 +450,45 @@ Initial dispatch is acknowledged by the screen. `needs-attention` reports an unc
 ### Prompt delivery confirmation
 
 `new` and queue starts succeed even when delivery is uncertain: “dostarczenie niepotwierdzone – sprawdzam”. Do not repeat the order. `send` uses the same adapter confirmation. Watch checks hooks/notify first, then adapter screen progress, transcript echo or a completed canonical report within `delivery_confirm_s` (default 60 s); if none arrives it announces needs-attention once. Later evidence clears that state automatically. Canonical reports unblock events_since, pull_ready, after and cohort completion. Configure `agents.<agent>.working_pattern` and `delivery_pattern` for TUI changes; Claude 2.1.x spinner progress is included by default. Watch must be running to resolve uncertainty.
+
+## NC workflow: reports, reviews and follow-ups
+
+A complete report requests a versioned YAML data block before `<!-- agentctl:report-end -->`:
+
+```agentctl-outputs
+version: 1
+verdict: PASS
+commits: [{repo: app, branch: feature, sha: aaaaaaa}]
+integrate: [{repo: app, branch: feature, sha: aaaaaaa, note: proposed integration}]
+decisions: [Choose a deployment time]
+actions: [{title: Deploy after approval, shell: "echo proposed command"}]
+checks: ["unit: PASS"]
+preview: https://example.invalid/preview
+notes: []
+```
+
+`outputs`, `outputs_valid` and `outputs_errors` are shared facts. Branches and SHAs must exist in task repositories. Missing/invalid data warns without making a complete report incomplete. Actions are proposed text; agentctl never runs their shell commands, judges a result, or merges. `status` counts decisions/actions; `pull_ready` and `get_report` include the data. `cohort_show` aggregates integration refs (duplicate/conflicting branch tips flagged), decisions, actions and checks with task IDs. `events_since` includes new decisions/actions in `needYou`, once per report hash.
+
+```yaml
+review: auto
+# Or in .agentctl.yaml:
+# review: {default: auto, rerun: true, template: review.md}
+after: [{task: IMPLEMENT, verdict: [PASS, PARTIAL]}]
+repos:
+  - path: ~/code/app
+    worktree: ~/work/app-check
+    branch: check
+    base: "@IMPLEMENT:app"
+```
+
+Automatic review adds `TASK-REV` after the author report, on the author branch and in the same cohort. It prefers another available provider, using `review.*` or `equivalents`; otherwise it needs another configured model. No valid pairing leaves a visible pending review error. The reviewer reads the clean author checkout and writes its own report. `review.rerun: true` schedules `REV2` for a new report, with the previous review's scheduled SHA as the delta base. The first base is the author's recorded base. See the review template in `docs/examples/` and the configuration reference for overrides.
+
+`base: "@TASK"` resolves at start to that task's output commit, otherwise its branch HEAD; specify `:repo-name` for multiple repositories. The resolved commit is shown in the new preview and stored in TASK.md. Missing or ambiguous sources block start. A verdict condition blocks on another verdict or `brak werdyktu`; ordinary `after: TASK` still waits only for a complete report.
+
+`send` pastes a follow-up immediately while Claude/Codex work. Delivery is confirmed from submission, a new working state, transcript/queued-message echo or a new complete report. `idle_prompt` and a late Stop alone do not confirm it; a stuck composer becomes `needs-attention` after `delivery_confirm_s`. An idle-only adapter (`accepts_busy_prompt: false`), or an unconfirmed previous message, keeps later messages in a durable FIFO. Status/peek show the queue; the response says pasted, queued position, or unconfirmed. The watcher drains it in order.
+
+A provider limit emits one notice per episode with the known reset (otherwise `n/d`). Fresh remaining capacity above `limited.resume_above_percent` (5 by default), or an elapsed known reset, permits `limited.message` (`kontynuuj`) to the idle empty window. The overload guards check again before paste and Enter; attempts and limits survive restarts. `limited.auto_resume: false` disables sending. Provider and model stay the same.
+
+`agentctl mark --cohort NC ok --note "reviewed"` previews its exact range; `--yes` confirms. MCP accepts `task`, `tasks` or `cohort`; more than one task requires preview/confirm. With a cohort filter, board `o/p/f` previews its IDs before marking. Agentctl records the user's result. Closing every cohort task emits `gc_suggest` with that cohort's protected cleanup preview; it never deletes automatically.
+
+MCP previews have independent `preview_token` values, expire after ten minutes and refuse a changed range. Pass the token and identical arguments with `confirm: true`; omitting a token uses the latest matching preview for compatibility. `gc_preview` with a cohort gives only the count of foreign worktrees; confirmed `gc` returns its results without repeating the plan. `notify.mcp_writes` defaults to `summary`, at most once per 60 seconds; `all` and `off` are explicit alternatives. Audit remains complete. F12 returns to the board of the current configured session, including a parallel dev session. Duration includes checkout/setup before the agent starts; stale plan notices are once per reading.

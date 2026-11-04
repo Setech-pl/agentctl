@@ -236,6 +236,7 @@ stateDiagram-v2
     background --> ready: background work gone, report there
     waiting --> working: send, follow-up prompt
     ready --> working: send, follow-up prompt
+    working --> working: send, queued follow-up
     waiting --> dead: window gone, no report
     working --> dead: window gone, no report
     waiting --> ready: window gone, report there

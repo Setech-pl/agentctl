@@ -405,7 +405,7 @@ Which model and effort work for what is only visible over many tasks. agentctl a
 
 `agentctl mark <TASK> ok|partial|fail [--note "…"]` records your judgement; the last mark wins. `agentctl log [--since 7d] [--cohort X] [--json] [--clip]` folds the records to one line per task, newest first (a later empty value never wipes one that was known). `agentctl stats [--since 30d] [--cohort X] [--json] [--clip]` groups the tasks by agent/model/effort: tasks, median time and median tokens (n/d without any), the share of ok, partial and fail **among the marked ones**, unmarked, cancelled, and moved (tasks of the group that hit a limit and were handed to the other provider). A history is as good as the marks: an unmarked task counts as unmarked, never as ok.
 
-On the board **`l`** opens the log (`↑↓` scroll, `Esc` back) and **`o`** / **`p`** / **`f`** mark the selected finished task (a task without a window, a closed or cancelled one, or one with a report ready); `p` keeps pausing the queue while no finished task is selected. The menu of a finished task (`Enter`) offers the same marks. The MCP server has `log`, `stats` and `usage` (read) and `mark` (write; `mcp.allow`, audited, no confirm step: it changes nothing but the history).
+On the board **`l`** opens the log (`↑↓` scroll, `Esc` back) and **`o`** / **`p`** / **`f`** mark the selected finished task (a task without a window, a closed or cancelled one, or one with a report ready); `p` keeps pausing the queue while no finished task is selected. The menu of a finished task (`Enter`) offers the same marks. The MCP server has `log`, `stats` and `usage` (read) and `mark` (write; `mcp.allow`, audited, single-task marks are immediate; multiple tasks require a scope preview/confirmation).
 
 ## Navigation
 
@@ -698,3 +698,45 @@ Since 0.17.3 cohort completion waits 300 seconds after the last membership/state
 Initial prompts (also from queue/move) and resume instructions name the absolute canonical report file. TASK.md persists pending_prompt, prompt_delivery and prompt_sent_at. After folder trust, new/watch sends the saved prompt once under a process-shared lock. The adapter pastes once, checks only the visible screen, and retries Enter at most twice while its own draft remains. Working or new assistant output acknowledges delivery; otherwise start/send succeeds with “dostarczenie niepotwierdzone – sprawdzam”. Watch checks for up to delivery_confirm_s (default 60 s) from the paste, then emits needs-attention once if no evidence arrives. A later hook, working screen, completed turn or current canonical report clears attention automatically; a completed canonical report remains available to events_since, pull_ready, after and cohorts. Claude UserPromptSubmit (matching the current prompt), Stop and Notification and Codex notify are checked before screens. Delivery generations reject old acknowledgements. Adapter working_pattern recognizes Claude 2.1.x spinner progress without requiring “esc to interrupt”; delivery_pattern recognizes new assistant output. A submitted transcript echo followed by an empty composer also confirms delivery. Dialogs are never answered automatically.
 
 Explicit report_from records report_confirmed; detail retains the source while the historical-copy warning disappears. Report candidates generate no local/phone notification: journal/status/board retain the flag so it does not compete with a question. Large pull_ready full responses continue through response_page and are not marked pulled until contiguous delivery completes. Plain shells are not orphans; an agent process or task role is required.
+
+## NC workflow: reports, reviews and follow-ups
+
+A complete report requests a versioned YAML data block before `<!-- agentctl:report-end -->`:
+
+```agentctl-outputs
+version: 1
+verdict: PASS
+commits: [{repo: app, branch: feature, sha: aaaaaaa}]
+integrate: [{repo: app, branch: feature, sha: aaaaaaa, note: proposed integration}]
+decisions: [Choose a deployment time]
+actions: [{title: Deploy after approval, shell: "echo proposed command"}]
+checks: ["unit: PASS"]
+preview: https://example.invalid/preview
+notes: []
+```
+
+`outputs`, `outputs_valid` and `outputs_errors` are shared facts. Branches and SHAs must exist in task repositories. Missing/invalid data warns without making a complete report incomplete. Actions are proposed text; agentctl never runs their shell commands, judges a result, or merges. `status` counts decisions/actions; `pull_ready` and `get_report` include the data. `cohort_show` aggregates integration refs (duplicate/conflicting branch tips flagged), decisions, actions and checks with task IDs. `events_since` includes new decisions/actions in `needYou`, once per report hash.
+
+```yaml
+review: auto
+# Or in .agentctl.yaml:
+# review: {default: auto, rerun: true, template: review.md}
+after: [{task: IMPLEMENT, verdict: [PASS, PARTIAL]}]
+repos:
+  - path: ~/code/app
+    worktree: ~/work/app-check
+    branch: check
+    base: "@IMPLEMENT:app"
+```
+
+Automatic review adds `TASK-REV` after the author report, on the author branch and in the same cohort. It prefers another available provider, using `review.*` or `equivalents`; otherwise it needs another configured model. No valid pairing leaves a visible pending review error. The reviewer reads the clean author checkout and writes its own report. `review.rerun: true` schedules `REV2` for a new report, with the previous review's scheduled SHA as the delta base. The first base is the author's recorded base. See the review template in `docs/examples/` and the configuration reference for overrides.
+
+`base: "@TASK"` resolves at start to that task's output commit, otherwise its branch HEAD; specify `:repo-name` for multiple repositories. The resolved commit is shown in the new preview and stored in TASK.md. Missing or ambiguous sources block start. A verdict condition blocks on another verdict or `brak werdyktu`; ordinary `after: TASK` still waits only for a complete report.
+
+`send` pastes a follow-up immediately while Claude/Codex work. Delivery is confirmed from submission, a new working state, transcript/queued-message echo or a new complete report. `idle_prompt` and a late Stop alone do not confirm it; a stuck composer becomes `needs-attention` after `delivery_confirm_s`. An idle-only adapter (`accepts_busy_prompt: false`), or an unconfirmed previous message, keeps later messages in a durable FIFO. Status/peek show the queue; the response says pasted, queued position, or unconfirmed. The watcher drains it in order.
+
+A provider limit emits one notice per episode with the known reset (otherwise `n/d`). Fresh remaining capacity above `limited.resume_above_percent` (5 by default), or an elapsed known reset, permits `limited.message` (`kontynuuj`) to the idle empty window. The overload guards check again before paste and Enter; attempts and limits survive restarts. `limited.auto_resume: false` disables sending. Provider and model stay the same.
+
+`agentctl mark --cohort NC ok --note "reviewed"` previews its exact range; `--yes` confirms. MCP accepts `task`, `tasks` or `cohort`; more than one task requires preview/confirm. With a cohort filter, board `o/p/f` previews its IDs before marking. Agentctl records the user's result. Closing every cohort task emits `gc_suggest` with that cohort's protected cleanup preview; it never deletes automatically.
+
+MCP previews have independent `preview_token` values, expire after ten minutes and refuse a changed range. Pass the token and identical arguments with `confirm: true`; omitting a token uses the latest matching preview for compatibility. `gc_preview` with a cohort gives only the count of foreign worktrees; confirmed `gc` returns its results without repeating the plan. `notify.mcp_writes` defaults to `summary`, at most once per 60 seconds; `all` and `off` are explicit alternatives. Audit remains complete. F12 returns to the board of the current configured session, including a parallel dev session. Duration includes checkout/setup before the agent starts; stale plan notices are once per reading.

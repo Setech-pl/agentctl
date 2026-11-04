@@ -79,6 +79,17 @@ None.
 
 None.
 
+\`\`\`agentctl-outputs
+version: 1
+verdict: PASS
+commits: [{repo: shop, branch: agent/api-auth-1, sha: ${sha}}]
+integrate: [{repo: shop, branch: agent/api-auth-1, sha: ${sha}, note: ready for human integration}]
+decisions: [Choose the rollout window]
+actions: []
+checks: ["auth tests: 18 passed"]
+notes: []
+\`\`\`
+
 <!-- agentctl:report-end -->
 `,
     tokens: { input: 212_000, output: 38_000, cacheRead: 1_400_000 },
@@ -320,6 +331,16 @@ const docsReport = (sha: string): string => `Verdict: PASS – search guide and 
 ## Blockers
 
 None.
+
+\`\`\`agentctl-outputs
+version: 1
+verdict: PASS
+commits: [{repo: shop, branch: agent/docs-search-1, sha: ${sha}}]
+decisions: []
+actions: []
+checks: ["index rebuild: PASS"]
+notes: []
+\`\`\`
 
 <!-- agentctl:report-end -->
 `;

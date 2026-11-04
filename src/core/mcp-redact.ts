@@ -6,6 +6,7 @@ const SECRET_KEY = /TOKEN|KEY|SECRET|PASSWORD|PASS|AUTH|COOKIE/i;
 /** Env fields are always masked. Global text substitution applies to secrets, not common nonsecret env settings. */
 export function redactQueue(entry: QueueEntry, config: GlobalConfig): unknown {
   const secrets = new Set<string>();
+  const taskIds = new Set([entry.task, ...(entry.after ?? [])]);
   const collect = (value: unknown, key = ''): void => {
     if (typeof value === 'string' && SECRET_KEY.test(key) && value) secrets.add(value);
     else if (value && typeof value === 'object') for (const [k, v] of Object.entries(value)) collect(v, k);
@@ -27,10 +28,10 @@ export function redactQueue(entry: QueueEntry, config: GlobalConfig): unknown {
     for (const secret of [...secrets].sort((a, b) => b.length - a.length)) text = text.split(secret).join('***');
     return text.replace(/https?:\/\/[^\s"'<>]+/g, raw => {
       try { const u = new URL(raw); if (u.username || u.password) { u.username = '***'; u.password = '***'; } for (const k of [...u.searchParams.keys()]) if (SECRET_KEY.test(k)) u.searchParams.set(k, '***'); return u.toString(); } catch { return raw; }
-    }).replace(/((?:[\w.-]*(?:TOKEN|KEY|SECRET|PASSWORD|PASS|AUTH|COOKIE)[\w.-]*)\s*[:=]\s*)([^\s,;]+)/gi, (all, prefix: string, value: string) => value.includes('***') ? all : `${prefix}***`);
+    }).replace(/((?:[\w.-]*(?:TOKEN|KEY|SECRET|PASSWORD|PASS|AUTH|COOKIE)[\w.-]*)\s*[:=]\s*)([^\s,;]+)/gi, (all, prefix: string, value: string) => taskIds.has(prefix.trim().replace(/[:=]$/, '').trim()) || value.includes('***') ? all : `${prefix}***`);
   };
   const walk = (value: unknown, key = ''): unknown => {
-    if (SECRET_KEY.test(key)) return '***';
+    if (SECRET_KEY.test(key) && !taskIds.has(key)) return '***';
     if (typeof value === 'string') return cleanText(value);
     if (Array.isArray(value)) return value.map(v => walk(v));
     if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, key === 'env' ? '***' : walk(v, k)]));

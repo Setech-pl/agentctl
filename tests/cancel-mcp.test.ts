@@ -23,7 +23,7 @@ function setup(name: string, extraYaml = '') {
   const runner = new DiskRunner({ dryRun: false, startTime: Date.now() + 3_600_000, respond: tmux.respond });
   const notified: string[] = [];
   const deps: McpDeps = {
-    context: (out) => new Context(runner, loadGlobalConfig(path.dirname(config.path)), out),
+    context: (out) => new Context(runner, { ...loadGlobalConfig(path.dirname(config.path)), notify: { ...loadGlobalConfig(path.dirname(config.path)).notify, mcpWrites: 'all' } }, out),
     notify: async (m) => void notified.push(m),
   };
   const call = (n: string, args: Record<string, unknown> = {}): Promise<ToolResult> => tool(n).run(deps, z.object(tool(n).input).parse(args) as never);

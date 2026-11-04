@@ -12,8 +12,8 @@ import type { TaskRecord } from './taskstore.ts';
 import { errorMessage } from './util.ts';
 
 /** Persist before waiting for trust, so a watcher can finish the same delivery after new returns. */
-export async function queuePrompt(ctx: Context, record: TaskRecord, text: string, delivery: 'launching' | 'pending' = 'pending'): Promise<void> {
-  await setHeaderFields(ctx.runner, taskFile(ctx.config, record.window), { pending_prompt: text, prompt_delivery: delivery, prompt_error: null, prompt_sent_at: null, delivery_id: randomUUID(), delivery_started_at: null, delivery_report_baseline: reportFingerprint(record.report) });
+export async function queuePrompt(ctx: Context, record: TaskRecord, text: string, delivery: 'launching' | 'pending' = 'pending', options: { kind?: 'followup'; id?: string } = {}): Promise<void> {
+  await setHeaderFields(ctx.runner, taskFile(ctx.config, record.window), { pending_prompt: text, prompt_delivery: delivery, prompt_error: null, prompt_sent_at: null, delivery_id: options.id ?? randomUUID(), prompt_kind: options.kind ?? 'initial', delivery_was_busy: null, delivery_started_at: null, delivery_report_baseline: reportFingerprint(record.report) });
 }
 
 const outputFingerprint = (screen: string, pattern: string) => createHash('sha256').update(screen.split('\n').filter(line => new RegExp(pattern, PATTERN_FLAGS).test(line)).join('\n')).digest('hex');
@@ -22,26 +22,22 @@ export const DELIVERY_WARNING = 'dostarczenie niepotwierdzone – sprawdzam';
 
 /** Hooks are checked first; screen evidence is adapter-specific and never an input draft. */
 export function deliveryEvidence(ctx: Context, record: TaskRecord, screen: string): boolean {
+  const draft = screenMetadata(screen).draft_input;
+  if (draft) return false;
   try {
     const evidence = JSON.parse(fs.readFileSync(path.join(ctx.config.stateDir, record.window, 'delivery-evidence.json'), 'utf8'));
-    if (record.deliveryId && evidence.deliveryId === record.deliveryId && Date.parse(evidence.at) >= Date.parse(record.deliveryStartedAt ?? '')) return true;
+    if (record.deliveryId && evidence.accepted === true && evidence.deliveryId === record.deliveryId && Date.parse(evidence.at) >= Date.parse(record.deliveryStartedAt ?? '')) return true;
   } catch { /* no current hook acknowledgement */ }
-  if (!record.deliveryId) {
-    try {
-      const event = JSON.parse(fs.readFileSync(path.join(ctx.config.stateDir, record.window, 'event.json'), 'utf8'));
-      if (['turn-complete', 'needs-input'].includes(event.outcome) && Date.parse(event.at) >= Date.parse(record.deliveryStartedAt ?? record.attemptStarted ?? record.started)) return true;
-    } catch { /* legacy task without delivery generation */ }
-  }
   const report = inspectReport(ctx.config, record, ctx.runner.now(), false);
   if (report.ready && (!record.deliveryStartedAt || report.signature !== record.deliveryReportBaseline)) return true;
   if (record.agent === 'unknown') return false;
   const settings = ctx.config.agents[record.agent], state = classifyScreen(screen, settings);
-  if (state === 'working' || state === 'background') return true;
-  if (screenMetadata(screen).draft_input) return false;
+  if ((state === 'working' || state === 'background') && !record.deliveryWasBusy) return true;
   // Only output from after this delivery started can acknowledge a fast completed turn.
   if (!record.deliveryStartedAt) return false;
-  if (state === 'needs-input') return true;
-  if (new RegExp(settings.deliveryPattern, PATTERN_FLAGS).test(screen) && outputFingerprint(screen, settings.deliveryPattern) !== record.deliveryOutputBaseline) return true;
+  // A question or idle notification alone can belong to the previous turn.
+  if (record.deliveryWasBusy && /Queued follow-up inputs|Queued messages?/i.test(screen) && record.pendingPrompt && screen.includes(record.pendingPrompt.split('\n')[0]!)) return true;
+  if (!record.deliveryWasBusy && new RegExp(settings.deliveryPattern, PATTERN_FLAGS).test(screen) && outputFingerprint(screen, settings.deliveryPattern) !== record.deliveryOutputBaseline) return true;
   // A submitted user line followed by an empty composer is a transcript echo, not a draft.
   const marker = record.agent === 'claude' ? '❯' : '›';
   const first = record.pendingPrompt?.split('\n')[0]?.trim();
@@ -80,12 +76,15 @@ export async function deliverPendingPrompt(ctx: Context, window: string): Promis
     const settings = ctx.config.agents[record.agent], text = record.pendingPrompt;
     if (record.promptDelivery === 'launching') return 'pending';
     const before = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
-    if (before.code !== 0 || !inputVisible(before.stdout, settings) || classifyScreen(before.stdout, settings) !== 'idle') return 'pending';
+    const beforeState = classifyScreen(before.stdout, settings);
+    const busyFollowup = record.promptKind === 'followup' && settings.acceptsBusyPrompt !== false && ['working', 'background'].includes(beforeState);
+    if (before.code !== 0 || !inputVisible(before.stdout, settings) || (!busyFollowup && beforeState !== 'idle')) return 'pending';
 
     const ownsDraft = (draft: string) => text.startsWith(draft) || draft.startsWith(text.split('\n')[0]!) || /\[Pasted|pasted (?:text|content)/i.test(draft);
+    record.deliveryWasBusy = busyFollowup;
     record.deliveryStartedAt = new Date(ctx.runner.now()).toISOString();
     record.deliveryOutputBaseline = outputFingerprint(before.stdout, settings.deliveryPattern);
-    await setHeaderFields(ctx.runner, file, { prompt_delivery: 'sending', delivery_started_at: record.deliveryStartedAt, delivery_output_baseline: record.deliveryOutputBaseline });
+    await setHeaderFields(ctx.runner, file, { prompt_delivery: 'sending', delivery_was_busy: busyFollowup, delivery_started_at: record.deliveryStartedAt, delivery_output_baseline: record.deliveryOutputBaseline });
     if (screenMetadata(before.stdout).draft_input) return uncertain('the input already contains a draft; it was not overwritten');
     try {
       await ctx.tmux.pasteText(window, text);
@@ -96,7 +95,7 @@ export async function deliverPendingPrompt(ctx: Context, window: string): Promis
         const currentState = classifyScreen(ready.stdout, settings), currentDraft = screenMetadata(ready.stdout).draft_input;
         if (deliveryEvidence(ctx, record, ready.stdout !== before.stdout ? ready.stdout : '')) return sent();
         if (currentDraft && !ownsDraft(currentDraft)) return uncertain('the input changed before Enter');
-        if (ready.code !== 0 || currentState !== 'idle') return uncertain('the agent is no longer idle before Enter');
+        if (ready.code !== 0 || (currentState !== 'idle' && !(busyFollowup && ['working', 'background'].includes(currentState)))) return uncertain('the agent is no longer idle before Enter');
         const enter = await ctx.tmux.pressEnter(window);
         if (enter.code !== 0) return uncertain(`Enter failed: ${enter.stderr}`);
         let ourDraft = false;
@@ -107,7 +106,7 @@ export async function deliverPendingPrompt(ctx: Context, window: string): Promis
           const state = classifyScreen(pane.stdout, settings), draft = screenMetadata(pane.stdout).draft_input;
           // A quick completed turn can finish between polls; require new assistant output as its acknowledgement.
           if (deliveryEvidence(ctx, record, pane.stdout !== before.stdout ? pane.stdout : '')) return sent();
-          if (state !== 'idle') return uncertain(`the agent shows ${state}; no further key was sent`);
+          if (state !== 'idle' && !(busyFollowup && ['working', 'background'].includes(state))) return uncertain(`the agent shows ${state}; no further key was sent`);
           ourDraft = Boolean(draft && ownsDraft(draft));
           if (draft && !ourDraft) return uncertain('the input changed to another draft');
         }

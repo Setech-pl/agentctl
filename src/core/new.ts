@@ -91,6 +91,7 @@ export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: Ne
   const results: NewResult[] = [];
   let sessionUp = await tmux.hasSession();
   for (const [index, spec] of specs.entries()) {
+    const taskStartedMs = runner.now();
     const primary = spec.repos[0]!.worktree;
 
     // 1. worktrees
@@ -126,7 +127,7 @@ export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: Ne
     }
 
     // 4. TASK.md
-    const record = recordFromSpec(spec, config, runner.now());
+    const record = recordFromSpec(spec, config, taskStartedMs);
     record.agentCliVersion = versions[spec.agent] ?? 'unknown';
     // The cohort is made by its first task; a name that exists keeps the spelling it had.
     if (spec.cohort) record.cohort = (await touchCohort(ctx, spec.cohort)).name;

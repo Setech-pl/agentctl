@@ -1,3 +1,4 @@
+import { markTasks } from './mark.ts';
 import { collectDisk } from './disk.ts';
 import type { DiskReport } from './disk.ts';
 import { collectCapacity, renderCapacity } from './capacity.ts';
@@ -18,7 +19,7 @@ import { liveWindows } from './plan.ts';
 import { collectLimits, renderLimits } from './limits.ts';
 import { planGc, renderGc } from './gc.ts';
 import { findResumable, planResume, resumeTasks } from './resume.ts';
-import { describeQueue, moveToFront, readQueue, removeFromQueue, setPaused } from './queue.ts';
+import { describeQueue, moveToFront, readQueue, removeFromQueue, setPaused, isPaused } from './queue.ts';
 import type { QueueView } from './queue.ts';
 import { peekWindow } from './peek.ts';
 import { pullReady, pullTask } from './pull.ts';
@@ -85,7 +86,7 @@ export type BoardMode =
   | { kind: 'input'; task: string; text: string }
   /** Enter on a finished task (no window): it cannot be switched to, so the choices are the ones that still make sense. */
   | { kind: 'finished'; task: string }
-  | { kind: 'confirm'; action: 'interrupt' | 'close' | 'close-worktree' | 'move' | 'queue-rm' | 'cancel' | 'resume' | 'away'; task: string; reason?: string }
+  | { kind: 'confirm'; action: 'interrupt' | 'close' | 'close-worktree' | 'move' | 'queue-rm' | 'cancel' | 'resume' | 'away' | 'mark-cohort'; task: string; reason?: string; tasks?: string[]; result?: Result }
   /** `X`: the reason for the cancellation (optional: Enter on an empty line goes on without one). */
   | { kind: 'cancel-reason'; task: string; text: string }
   /** `k`: pick the cohort to show; `value` null is every task, '' the tasks without a cohort. */
@@ -170,6 +171,7 @@ export type BoardEffect =
   | { type: 'away'; on: boolean }
   /** `o`, `p`, `f`: the result of a finished task, for the history (`agentctl mark`). */
   | { type: 'mark'; task: string; result: Result }
+  | { type: 'mark-cohort'; cohort: string; tasks: string[]; result: Result }
   /** `l`: load the history into the log view. */
   | { type: 'log' }
   /** `L`, `G`: load the lines of a view. */
@@ -321,6 +323,11 @@ function listKey(state: BoardState, input: string, key: KeyPress): KeyResult {
   // o / p / f: how a finished task turned out. `p` is also the queue's pause: it marks only while a finished task is selected.
   const result = input === 'o' ? 'ok' : input === 'p' ? 'partial' : input === 'f' ? 'fail' : null;
   if (result) {
+    if (state.cohortFilter) {
+      const tasks = state.rows.filter(r => r.cohort && cohortKey(r.cohort) === cohortKey(state.cohortFilter!)).map(r => r.task);
+      if (tasks.length > 1) return stay({ ...state, notice: null, mode: { kind: 'confirm', action: 'mark-cohort', task: state.cohortFilter, tasks, result } });
+      if (tasks.length === 1) return stay(state, [{ type: 'mark', task: tasks[0]!, result }]);
+    }
     const picked = selectedRow(state);
     const markable = picked !== undefined && selectedQueueView(state) === undefined && (picked.finished || picked.closed || picked.cancelled || picked.state === 'report-ready');
     if (markable) return stay(withNotice(state, 'info', `${picked.task}: marking it ${result}…`), [{ type: 'mark', task: picked.task, result }]);
@@ -481,6 +488,12 @@ function cohortPickKey(state: BoardState, mode: Extract<BoardMode, { kind: 'coho
 function confirmKey(state: BoardState, mode: Extract<BoardMode, { kind: 'confirm' }>, input: string, key: KeyPress): KeyResult {
   const yes = input === 'y' || input === 'Y';
   const cancel = (): KeyResult => ({ state: withNotice(toList(state), 'info', 'Cancelled.'), effects: [] });
+  if (mode.action === 'mark-cohort') {
+    if (!yes) return cancel();
+    const tasks = state.rows.filter(r => r.cohort && cohortKey(r.cohort) === cohortKey(mode.task)).map(r => r.task);
+    if (JSON.stringify([...tasks].sort()) !== JSON.stringify([...(mode.tasks ?? [])].sort())) return { state: withNotice(toList(state), 'error', 'Cohort scope changed; preview o / p / f again.'), effects: [] };
+    return { state: toList(state), effects: [{ type: 'mark-cohort', cohort: mode.task, tasks: mode.tasks!, result: mode.result! }] };
+  }
   if (mode.action === 'interrupt') {
     return yes ? { state: withNotice(toList(state), 'info', `${mode.task}: interrupting…`), effects: [{ type: 'interrupt', task: mode.task }] } : cancel();
   }
@@ -619,7 +632,7 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
   attachCollisions(rows, config.collisions.ignore, config.collisions.enabled);
   const entries = readQueue(config);
   const queue = entries.length > 0 ? describeQueue(config, entries, await liveWindows(ctx), statusRows) : [];
-  const queuePaused = queue.some((v) => v.condition.kind === 'paused');
+  const queuePaused = isPaused(config) || !config.queue.enabled;
   const resumable = (await findResumable(ctx, { rows: statusRows })).map((c) => c.task);
   const manager = await managerView(ctx);
   const queued = queue.find((v) => v.entry.task === selected);
@@ -649,6 +662,8 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
       }
     }
     const notes = [...(target.collide.length > 0 ? [collideText(target.collide)] : []), ...(target.reportSource ? [`report from ${shortPath(target.reportSource)}`] : []), ...(target.reportCandidate && target.report !== 'yes' ? [`report-candidate ${shortPath(target.reportCandidate)}`] : []), ...(target.usage_hint ? [`usage_hint: ${target.usage_hint}`] : []), ...(target.draft_input ? [`draft_input: ${target.draft_input}`] : [])];
+    if (target.report === 'yes') notes.push(`decisions ${target.decisionsCount ?? 0}, actions ${target.actionsCount ?? 0}`);
+    if (target.promptQueue?.length) notes.push(`${target.promptQueue.length} messages (${target.promptDelivery ?? 'queued'})`);
     preview = { task: target.task, model: `${target.agent} · model: ${target.model} · effort: ${target.effort}`, lines, ...(notes.length > 0 ? { note: notes.join(' · ') } : {}) };
   }
   return { rows, queue, queuePaused, disk, plans, resumable, away: awayView(config), manager, preview, refreshedAt: clock(now) };
@@ -689,8 +704,8 @@ export async function runBoardEffect(runner: Runner, config: GlobalConfig, effec
         await showWindow(ctx, effect.window, true);
         return { level: 'info', text: `Switched to ${effect.task}. Back to the board: ${config.board.returnKey ?? 'Ctrl-b l'}` };
       case 'send':
-        await sendPrompts(ctx, [{ task: effect.task, window: effect.window, prompt: effect.text }]);
-        return { level: 'info', text: `${effect.task}: prompt sent` };
+        const sent = await sendPrompts(ctx, [{ task: effect.task, window: effect.window, prompt: effect.text }]);
+        return { level: 'info', text: `${effect.task}: ${sent[0]?.message}` };
       case 'interrupt': {
         const r = await interruptTask(ctx, effect.task);
         return { level: 'info', text: `${r.task}: interrupted (${r.key} sent), the window stays open` };
@@ -721,6 +736,10 @@ export async function runBoardEffect(runner: Runner, config: GlobalConfig, effec
         const tasks = plan.items.map((i) => i.task).join(', ');
         const blocked = [...new Set(plan.items.flatMap((i) => i.blocks))];
         return { level: 'info', text: `${tasks}: cancelled${blocked.length > 0 ? `; ⛓ blocked: ${blocked.join(', ')}` : ''}` };
+      }
+      case 'mark-cohort': {
+        const marked = await markTasks(ctx, effect.tasks, effect.result);
+        return { level: 'info', text: `${effect.cohort}: marked ${marked.map(r => r.task).join(', ')} ${effect.result}` };
       }
       case 'mark': {
         const marked = await markTask(ctx, effect.task, effect.result);
@@ -1065,6 +1084,7 @@ export function promptText(state: BoardState): string | null {
   if (mode.kind === 'finished') return `${mode.task} is finished (no window): c copy report · x close · X cancel · h hide · ${state.rows.find((r) => r.task === mode.task && isAlive(r)) ? 'o open window · ' : 'o ok · '}p partial · f fail · Esc`;
   if (mode.kind !== 'confirm') return null;
   const row = state.rows.find((r) => r.task === mode.task);
+  if (mode.action === 'mark-cohort') return `Mark cohort ${mode.task}: ${(mode.tasks ?? []).join(', ')} ${mode.result}? [y/N]`;
   if (mode.action === 'queue-rm') return `Remove ${mode.task} from the queue? [y/N]`;
   if (mode.action === 'away') return mode.task === 'on' ? `Away on? The notifications go to the phone as well.${state.away && !state.away.phone ? ' (No phone is set up yet: agentctl ntfy-setup.)' : ''} [y/N]` : 'Away off? The phone is quiet again (the Mac still gets everything). [y/N]';
   if (mode.action === 'resume') return `Resume ${mode.task}? New windows, the agents continue their conversations (no prompt is pasted). [y/N]`;

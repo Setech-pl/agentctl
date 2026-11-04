@@ -17,7 +17,7 @@ export interface AdoptOptions {
  * `adopt`: write a new state file (TASK.md in the state directory) for a task whose own was lost.
  * Only what is given is known; the rest stays "unknown". The original prompt cannot be restored.
  */
-export async function adoptTask(ctx: Context, taskArg: string, opts: AdoptOptions): Promise<void> {
+export async function adoptTask(ctx: Context, taskArg: string, opts: AdoptOptions, preview = false): Promise<ReturnType<typeof recordForAdopt>> {
   const { config, runner } = ctx;
   const task = taskArg.toUpperCase();
   if (!TASK_ID.test(task)) throw new AgentctlError(`"${taskArg}" is not a task ID`, 'Task IDs look like NC-42: letters, digits, "-" and "_".');
@@ -33,6 +33,7 @@ export async function adoptTask(ctx: Context, taskArg: string, opts: AdoptOption
   const record = recordForAdopt(input, runner.now());
   const windowId = (await ctx.tmux.windows()).find((w) => w.plain === window)?.id;
   if (windowId) record.windowId = windowId;
+  if (preview) { delete record.adopted; return record; }
   const body = `Restored by "agentctl adopt" on ${record.adopted}: the original prompt of this task is lost.`;
   await runner.mkdir(taskDir(config, windowName(task)));
   await runner.writeFile(file, renderTaskMd(record, body));
@@ -40,4 +41,5 @@ export async function adoptTask(ctx: Context, taskArg: string, opts: AdoptOption
   const unknown = [!opts.agent && 'agent', !opts.model && 'model', !opts.effort && 'effort'].filter(Boolean);
   if (unknown.length) ctx.info(`${task}: ${unknown.join(', ')} unknown; pass --agent/--model/--effort to record them`);
   ctx.info(`Check: agentctl status. Window contents: agentctl peek ${shellQuote(task)}, or tmux capture-pane -p -t ${shellQuote(`=${config.session}:${window}`)}`);
+  return record;
 }

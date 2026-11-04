@@ -50,14 +50,16 @@ sequenceDiagram
 What the chat sees in the demo session of the screenshot (the output of the tools is Polish today). `events_since`, after the agents did their work:
 
 ```text
-Zdarzenia z ostatnich 1d: 5
+Zdarzenia z ostatnich 1d: 7
 10:37  UŻYCIE  codex week: usage crossed 80% (83%)
-10:38  RAPORT  API-AUTH-1  Verdict: PASS – refresh rotates the session id, logout revokes the whole token family.
-10:39  PYTANIE  UI-CART-2  UI-CART-2: Compute the cart total on the server or the client?
-10:40  RAPORT  DOCS-SEARCH-1  Verdict: PASS – search guide and API reference written, the index rebuild finished.
-10:41  START  REVIEW-DOCS-SEARCH-1  Uruchomiono REVIEW-DOCS-SEARCH-1 z kolejki (claude)
-Teraz: 7 aktywne (3 pracuje) · 1 w kolejce · 2 raporty do pobrania (API-AUTH-1, DOCS-SEARCH-1) · 2 zadań bez oceny · czeka na Ciebie: REVIEW-DOCS-SEARCH-1 (waiting), UI-CART-2 (needs-input).
-has_more: false; next_cursor: e2:5:0
+10:38  WYNIKI RAPORTU  API-AUTH-1  API-AUTH-1: 1 decisions, 0 actions
+10:39  RAPORT  API-AUTH-1  Verdict: PASS – refresh rotates the session id, logout revokes the whole token family.
+10:40  PYTANIE  UI-CART-2  UI-CART-2: Compute the cart total on the server or the client?
+10:41  WYNIKI RAPORTU  DOCS-SEARCH-1  DOCS-SEARCH-1: 0 decisions, 0 actions
+10:42  RAPORT  DOCS-SEARCH-1  Verdict: PASS – search guide and API reference written, the index rebuild finished.
+10:43  START  REVIEW-DOCS-SEARCH-1  Uruchomiono REVIEW-DOCS-SEARCH-1 z kolejki (claude)
+Teraz: 7 aktywne (3 pracuje) · 1 w kolejce · 2 raporty do pobrania (API-AUTH-1, DOCS-SEARCH-1) · 2 zadań bez oceny · czeka na Ciebie: REVIEW-DOCS-SEARCH-1 (waiting), UI-CART-2 (needs-input): Compute the cart total on the server or the client?, API-AUTH-1: decision: Choose the rollout window.
+has_more: false; next_cursor: e2:7:0
 ```
 
 `pull_ready` in its default summary mode, with the one report that was ready:
@@ -68,25 +70,45 @@ has_more: false; next_cursor: e2:5:0
 === API-AUTH-1 ===
 attempt: 3f9c2a7e-51d4-4b86-9e0a-7c1d6b2f8a45
 path: /home/demo/agentctl/cache/api-auth-1/API-AUTH-1.md
-bytes: 589
-verdict: Verdict: PASS – refresh rotates the session id, logout revokes the whole token family.
-blockers: ## Blockers
-
-None.
-
-decisions: ## Decisions
-
-- Revoking one token revokes its whole family: a replayed refresh token is treated as theft.
-
-truncated: true; details: get_report
+bytes: 965
+{"outputs":{"version":1,"verdict":"PASS","commits":[{"repo":"shop","branch":"agent/api-auth-1","sha":"41c39c35c2118f44d822a4be08d5c20aa2f7c153"}],"integrate":[{"repo":"shop","branch":"agent/api-auth-1","sha":"41c39c35c2118f44d822a4be08d5c20aa2f7c153","note":"ready for human integration"}],"decisions":["Choose the rollout window"],"actions":[],"checks":["auth tests: 18 passed"],"notes":[]},"outputs_valid":true,"outputs_errors":[]}
+sha: 41c39c35c2118f44d822a4be08d5c20aa2f7c153
+truncated: false
 Verdict: PASS – refresh rotates the session id, logout revokes the whole token family.
+
 - Branch: agent/api-auth-1
 - SHA: 41c39c35c2118f44d822a4be08d5c20aa2f7c153
+- Tests: 18 passed, 0 failed
+
 ## Summary
 
 Refresh tokens are single-use and belong to a family (`src/auth/token.ts`). The session id rotates on every refresh (`src/auth/session.ts`) and a revoked family answers 401 (`src/auth/middleware.ts`).
 
-[excerpt; get_report section/offset/limit reads more]
+## Blockers
+
+None.
+
+## Decisions
+
+- Revoking one token revokes its whole family: a replayed refresh token is treated as theft.
+
+## Open points
+
+None.
+
+```agentctl-outputs
+version: 1
+verdict: PASS
+commits: [{repo: shop, branch: agent/api-auth-1, sha: 41c39c35c2118f44d822a4be08d5c20aa2f7c153}]
+integrate: [{repo: shop, branch: agent/api-auth-1, sha: 41c39c35c2118f44d822a4be08d5c20aa2f7c153, note: ready for human integration}]
+decisions: [Choose the rollout window]
+actions: []
+checks: ["auth tests: 18 passed"]
+notes: []
+```
+
+<!-- agentctl:report-end -->
+
 next_cursor: 8b1e4d93-0a7c-42f5-b6d8-2e9f1c3a7d60:1; has_more: false
 ```
 
@@ -319,6 +341,7 @@ stateDiagram-v2
     background --> ready: background work gone, report there
     waiting --> working: send, follow-up prompt
     ready --> working: send, follow-up prompt
+    working --> working: send, queued follow-up
     waiting --> dead: window gone, no report
     working --> dead: window gone, no report
     waiting --> ready: window gone, report there
@@ -731,7 +754,7 @@ agentctl stats --since 30d             # per agent/model/effort: tasks, median t
 
 - A record has the task, cohort, project, the order as written and as run, start, report, close or cancel (with the reason), duration, tokens (input, output, cache; `null` when no log was found), commits and files, the first line of the verdict, and the move. The same report is recorded once.
 - `stats` shares of ok, partial and fail are of the tasks you marked; tasks moved to the other provider after a limit are counted in the group that hit it.
-- Board: **`l`** shows the log, **`o`** / **`p`** / **`f`** mark the selected finished task ok / partial / fail (`p` is still the queue pause when no finished task is selected). MCP: `usage`, `log`, `stats` (read) and `mark` (write, behind `mcp.allow`, no confirm step).
+- Board: **`l`** shows the log, **`o`** / **`p`** / **`f`** mark the selected finished task ok / partial / fail (`p` is still the queue pause when no finished task is selected). MCP: `usage`, `log`, `stats` (read) and `mark` (write, behind `mcp.allow`, batch marks require preview/confirm).
 
 Details: [docs/details.md](docs/details.md#history-and-stats).
 
@@ -796,7 +819,7 @@ agentctl up                                # the start of the day
 `agentctl mcp` is a local MCP server on stdio. The Claude app, Claude Code and VS Code start it themselves; nothing listens on a port.
 
 - **Read tools** (always on): `status`, `events_since`, `peek`, `list_reports`, `get_report`, `pull_ready`, `task_spec`, `queue_list`, `cohort_list`, `cohort_show`, `overlap`, `usage`, `log`, `stats`, `limits`, `gc_preview`, `version`.
-- **Write tools** (off until listed in `mcp.allow`): `send`, `new`, `queue`, `queue_rm`, `cancel`, `interrupt`, `close`, `move`, `mark`, `set_limits`, `reserve`, `resume`. `new`, `queue`, `cancel`, `move`, `set_limits`, `reserve` and `resume` change nothing until called again with `confirm: true`; `mark` only records the result you named in the history, so it has no confirm step. Every write is audited in `~/.agentctl/mcp-audit.log` and announced on the desktop.
+- **Write tools** (off until listed in `mcp.allow`): `send`, `new`, `queue`, `queue_rm`, `cancel`, `interrupt`, `close`, `move`, `mark`, `set_limits`, `reserve`, `resume`. `new`, `queue`, `cancel`, `move`, `set_limits`, `reserve` and `resume` change nothing until called again with `confirm: true`; `mark` records the result you named; multiple tasks require a scope preview and confirmation. Every write is audited in `~/.agentctl/mcp-audit.log`; desktop write notices are grouped by default.
 - No tool merges, pushes, rebases, deletes a branch, cleans up (`gc_preview` only looks), runs a shell command or takes a path.
 
 ```sh
@@ -874,3 +897,45 @@ Since 0.17.1 MCP covers queue retry/control, cohorts, `gc` and diagnostics. Chec
 0.17.2 changes MCP read defaults to concise text and `pull_ready` to report excerpts. Use `format: "json"`, `mode: "full"` or `get_report` sections for detail. Unconfirmed reports (`report-candidate`) do not release dependencies; `overloaded` retries only at an idle empty prompt. See [configuration](docs/configuration.md).
 
 Report summaries are receipts, not full-report acknowledgment: use full delivery or explicit ack; user mark is separate. Reports complete with `<!-- agentctl:report-end -->` or an ended turn plus report.settle_s (30 s), within the current attempt.
+
+## NC workflow: reports, reviews and follow-ups
+
+A complete report requests a versioned YAML data block before `<!-- agentctl:report-end -->`:
+
+```agentctl-outputs
+version: 1
+verdict: PASS
+commits: [{repo: app, branch: feature, sha: aaaaaaa}]
+integrate: [{repo: app, branch: feature, sha: aaaaaaa, note: proposed integration}]
+decisions: [Choose a deployment time]
+actions: [{title: Deploy after approval, shell: "echo proposed command"}]
+checks: ["unit: PASS"]
+preview: https://example.invalid/preview
+notes: []
+```
+
+`outputs`, `outputs_valid` and `outputs_errors` are shared facts. Branches and SHAs must exist in task repositories. Missing/invalid data warns without making a complete report incomplete. Actions are proposed text; agentctl never runs their shell commands, judges a result, or merges. `status` counts decisions/actions; `pull_ready` and `get_report` include the data. `cohort_show` aggregates integration refs (duplicate/conflicting branch tips flagged), decisions, actions and checks with task IDs. `events_since` includes new decisions/actions in `needYou`, once per report hash.
+
+```yaml
+review: auto
+# Or in .agentctl.yaml:
+# review: {default: auto, rerun: true, template: review.md}
+after: [{task: IMPLEMENT, verdict: [PASS, PARTIAL]}]
+repos:
+  - path: ~/code/app
+    worktree: ~/work/app-check
+    branch: check
+    base: "@IMPLEMENT:app"
+```
+
+Automatic review adds `TASK-REV` after the author report, on the author branch and in the same cohort. It prefers another available provider, using `review.*` or `equivalents`; otherwise it needs another configured model. No valid pairing leaves a visible pending review error. The reviewer reads the clean author checkout and writes its own report. `review.rerun: true` schedules `REV2` for a new report, with the previous review's scheduled SHA as the delta base. The first base is the author's recorded base. See the review template in `docs/examples/` and the configuration reference for overrides.
+
+`base: "@TASK"` resolves at start to that task's output commit, otherwise its branch HEAD; specify `:repo-name` for multiple repositories. The resolved commit is shown in the new preview and stored in TASK.md. Missing or ambiguous sources block start. A verdict condition blocks on another verdict or `brak werdyktu`; ordinary `after: TASK` still waits only for a complete report.
+
+`send` pastes a follow-up immediately while Claude/Codex work. Delivery is confirmed from submission, a new working state, transcript/queued-message echo or a new complete report. `idle_prompt` and a late Stop alone do not confirm it; a stuck composer becomes `needs-attention` after `delivery_confirm_s`. An idle-only adapter (`accepts_busy_prompt: false`), or an unconfirmed previous message, keeps later messages in a durable FIFO. Status/peek show the queue; the response says pasted, queued position, or unconfirmed. The watcher drains it in order.
+
+A provider limit emits one notice per episode with the known reset (otherwise `n/d`). Fresh remaining capacity above `limited.resume_above_percent` (5 by default), or an elapsed known reset, permits `limited.message` (`kontynuuj`) to the idle empty window. The overload guards check again before paste and Enter; attempts and limits survive restarts. `limited.auto_resume: false` disables sending. Provider and model stay the same.
+
+`agentctl mark --cohort NC ok --note "reviewed"` previews its exact range; `--yes` confirms. MCP accepts `task`, `tasks` or `cohort`; more than one task requires preview/confirm. With a cohort filter, board `o/p/f` previews its IDs before marking. Agentctl records the user's result. Closing every cohort task emits `gc_suggest` with that cohort's protected cleanup preview; it never deletes automatically.
+
+MCP previews have independent `preview_token` values, expire after ten minutes and refuse a changed range. Pass the token and identical arguments with `confirm: true`; omitting a token uses the latest matching preview for compatibility. `gc_preview` with a cohort gives only the count of foreign worktrees; confirmed `gc` returns its results without repeating the plan. `notify.mcp_writes` defaults to `summary`, at most once per 60 seconds; `all` and `off` are explicit alternatives. Audit remains complete. F12 returns to the board of the current configured session, including a parallel dev session. Duration includes checkout/setup before the agent starts; stale plan notices are once per reading.

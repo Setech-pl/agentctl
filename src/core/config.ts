@@ -28,7 +28,17 @@ export interface Defaults {
 }
 
 /** The part of the configuration that exists in every layer (global, project, spec). Values are unexpanded. */
+export interface ReviewSettings {
+  default?: 'auto' | false;
+  agent?: AgentName;
+  model?: string;
+  effort?: Effort;
+  promptTemplate?: string;
+  rerun?: boolean;
+}
+
 export interface Layer {
+  review?: ReviewSettings;
   /** Project guide overlay, relative to the repository or starting with ~. */
   guide?: string;
   worktreeRoot?: string;
@@ -45,6 +55,7 @@ export interface Layer {
 export interface AgentSettings {
   /** Extra flags appended to the agent command line. */
   flags: string[];
+  acceptsBusyPrompt?: boolean;
   /** Flags that carry the effort level; `{effort}` is replaced. */
   effortArgs: string[];
   /** Regex matched against the tmux screen to decide the agent is ready for input. */
@@ -111,6 +122,7 @@ export interface GlobalConfig extends Layer {
   queue: QueueSettings;
   reportSettleS: number;
   cohort: { doneGraceS: number };
+  limited: { autoResume: boolean; resumeAbovePercent: number; message: string };
   overload: { autoRetry: boolean; retryAfter: number; maxRetries: number; giveUpAfter: number; resetAfterS: number; message: string };
   /** Collision warnings: two active tasks of one repository changing the same files. */
   collisions: CollisionSettings;
@@ -216,6 +228,8 @@ export interface McpSettings {
 export interface NotifySettings {
   /** Which channel sends notifications; default `auto`. */
   backend: NotifyBackend;
+  mcpWrites?: 'all' | 'summary' | 'off';
+  mcpWritesIntervalS?: number;
   /** Hooks (Claude) and `-c notify=…` (Codex) report the agents' own events to `agentctl event`. `false`: screen reading only. */
   events: boolean;
   /** A notification when a turn ends and the agent waits (not only for questions, reports and limits). */
@@ -304,6 +318,7 @@ const BACKGROUND_CLAUDE = '[·⏵].*\\b\\d+ (?:shells?|monitors?)\\b(?: still ru
 
 export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
   claude: {
+    acceptsBusyPrompt: true,
     flags: [],
     effortArgs: ['--effort', '{effort}'],
     // Claude Code 2.1.309 idle screen: the input box line "❯ Try ...". The trust dialog also uses "❯", but with "1. Yes".
@@ -336,6 +351,7 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
     backgroundPatterns: ['^\\s*\\d+ (?:monitors?|shells?)(?:, \\d+ (?:monitors?|shells?))? still running\\b', BACKGROUND_CLAUDE, '[·⏵].*\\b\\d+ background\\b'],
   },
   codex: {
+    acceptsBusyPrompt: true,
     flags: [],
     effortArgs: ['-c', 'model_reasoning_effort={effort}'],
     // Codex 0.166.0 idle screen: "› Ask Codex to do anything" and the footer "? for shortcuts".
@@ -375,14 +391,14 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
 };
 
 /** The keys accepted in every layer: the global config, `.agentctl.yaml` and (with a few of its own) a spec. docs/configuration.md describes each one. */
-export const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'setup', 'defaults', 'guide'];
-export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git', 'cohort', 'delivery_confirm_s'];
+export const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'setup', 'defaults', 'guide', 'review'];
+export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'limited', 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git', 'cohort', 'delivery_confirm_s'];
 export const LIMITS_KEYS = [...AGENT_NAMES, 'count_external'];
 export const DEFAULTS_KEYS = ['agent', 'model', 'effort', 'remote_control'];
 export const LINK_KEYS = ['from', 'to'];
-export const AGENT_KEYS = ['flags', 'effort_args', 'ready_pattern', 'ready_timeout', 'trust_timeout', 'trust_pattern', 'working_pattern', 'delivery_pattern', 'interrupt_key', 'footer_patterns', 'question_pattern', 'limit_patterns', 'background_patterns', 'overload_patterns'];
+export const AGENT_KEYS = ['accepts_busy_prompt', 'flags', 'effort_args', 'ready_pattern', 'ready_timeout', 'trust_timeout', 'trust_pattern', 'working_pattern', 'delivery_pattern', 'interrupt_key', 'footer_patterns', 'question_pattern', 'limit_patterns', 'background_patterns', 'overload_patterns'];
 export const WATCH_KEYS = ['interval', 'waiting_after', 'window_icons', 'status_line'];
-export const NOTIFY_KEYS = ['backend', 'events', 'turn_end', 'terminal_app', 'verdict_pattern', 'ntfy'];
+export const NOTIFY_KEYS = ['backend', 'events', 'turn_end', 'terminal_app', 'verdict_pattern', 'ntfy', 'mcp_writes', 'mcp_writes_interval_s'];
 export const NTFY_KEYS = ['server', 'topic', 'token', 'events', 'priority', 'include_verdict', 'include_question', 'click_url', 'always'];
 export const AWAY_KEYS = ['auto_idle'];
 export const MANAGER_KEYS = ['project', 'name', 'model', 'effort', 'guide', 'autostart'];
@@ -506,6 +522,29 @@ function parseSetup(v: unknown, where: string, p: Problems): string[] {
   return commands;
 }
 
+/** Shared review parser for global/project settings and explicit spec orders. */
+export function parseReview(value: unknown, where: string, p: Problems): ReviewSettings | undefined {
+  if (value === 'auto' || value === true) return { default: 'auto' };
+  if (value === false) return { default: false };
+  if (!isObject(value)) { p.add(`${where} must be auto, false or a mapping`); return undefined; }
+  checkKeys(value, ['default', 'agent', 'model', 'effort', 'prompt_template', 'template', 'rerun'], where, p);
+  const review: ReviewSettings = {};
+  if (value.default !== undefined) {
+    if (value.default === 'auto' || value.default === false) review.default = value.default;
+    else p.add(`${where}.default must be auto or false`);
+  }
+  review.agent = parseEnumValue(value.agent, AGENT_NAMES, `${where}.agent`, p);
+  review.effort = parseEnumValue(value.effort, EFFORTS, `${where}.effort`, p);
+  if (value.model !== undefined) review.model = parseString(value.model, `${where}.model`, p);
+  const template = value.prompt_template ?? value.template;
+  if (template !== undefined) review.promptTemplate = parseString(template, `${where}.prompt_template`, p);
+  if (value.rerun !== undefined) {
+    if (typeof value.rerun === 'boolean') review.rerun = value.rerun;
+    else p.add(`${where}.rerun must be boolean`);
+  }
+  return review;
+}
+
 function parseLayer(obj: Record<string, unknown>, where: string, p: Problems): Layer {
   const layer: Layer = {
     links: parseLinks(obj.links, `${where}.links`, p),
@@ -521,6 +560,7 @@ function parseLayer(obj: Record<string, unknown>, where: string, p: Problems): L
   if (report) layer.report = report;
   if (reports.length > 1) layer.reportAlt = reports.slice(1);
   if (obj.setup !== undefined && obj.setup !== null) layer.setup = parseSetup(obj.setup, `${where}.setup`, p);
+  if (obj.review !== undefined) layer.review = parseReview(obj.review, `${where}.review`, p);
   return layer;
 }
 
@@ -532,6 +572,10 @@ function parseAgentSettings(name: AgentName, v: unknown, where: string, p: Probl
     return settings;
   }
   checkKeys(v, AGENT_KEYS, where, p);
+  if (v.accepts_busy_prompt !== undefined) {
+    if (typeof v.accepts_busy_prompt === 'boolean') settings.acceptsBusyPrompt = v.accepts_busy_prompt;
+    else p.add(`${where}.accepts_busy_prompt must be boolean`);
+  }
   if (v.flags !== undefined) settings.flags = parseStringList(v.flags, `${where}.flags`, p);
   if (v.effort_args !== undefined) settings.effortArgs = parseStringList(v.effort_args, `${where}.effort_args`, p);
   for (const [key, list] of [['flags', settings.flags], ['effort_args', settings.effortArgs]] as const) {
@@ -642,13 +686,18 @@ function parseWatch(v: unknown, p: Problems): GlobalConfig['watch'] {
 }
 
 function parseNotify(v: unknown, p: Problems): NotifySettings {
-  const notify: NotifySettings = { backend: 'auto', events: true, turnEnd: true };
+  const notify: NotifySettings = { backend: 'auto', events: true, turnEnd: true, mcpWrites: 'summary', mcpWritesIntervalS: 60 };
   if (v === undefined || v === null) return notify;
   if (!isObject(v)) {
     p.add('config.notify must be a mapping like {terminal_app: com.apple.Terminal, verdict_pattern: "^Verdict:"}');
     return notify;
   }
   checkKeys(v, NOTIFY_KEYS, 'config.notify', p);
+  notify.mcpWrites = parseEnumValue(v.mcp_writes, ['all', 'summary', 'off'] as const, 'config.notify.mcp_writes', p) ?? 'summary';
+  if (v.mcp_writes_interval_s !== undefined) {
+    if (typeof v.mcp_writes_interval_s === 'number' && Number.isFinite(v.mcp_writes_interval_s) && v.mcp_writes_interval_s > 0) notify.mcpWritesIntervalS = v.mcp_writes_interval_s;
+    else p.add('config.notify.mcp_writes_interval_s must be positive seconds');
+  }
   notify.backend = parseEnumValue(v.backend, NOTIFY_BACKENDS, 'config.notify.backend', p) ?? 'auto';
   for (const [key, field] of [['events', 'events'], ['turn_end', 'turnEnd']] as const) {
     if (v[key] === undefined) continue;
@@ -1038,6 +1087,19 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
     }
   }
 
+  const limited = { autoResume: true, resumeAbovePercent: 5, message: 'kontynuuj' };
+  if (raw.limited !== undefined) {
+    if (!isObject(raw.limited)) p.add('config.limited must be a mapping');
+    else {
+      checkKeys(raw.limited, ['auto_resume', 'resume_above_percent', 'message'], 'config.limited', p);
+      if (typeof raw.limited.auto_resume === 'boolean') limited.autoResume = raw.limited.auto_resume;
+      else if (raw.limited.auto_resume !== undefined) p.add('config.limited.auto_resume must be boolean');
+      if (typeof raw.limited.resume_above_percent === 'number' && Number.isFinite(raw.limited.resume_above_percent) && raw.limited.resume_above_percent >= 0 && raw.limited.resume_above_percent < 100) limited.resumeAbovePercent = raw.limited.resume_above_percent;
+      else if (raw.limited.resume_above_percent !== undefined) p.add('config.limited.resume_above_percent must be >= 0 and < 100');
+      if (typeof raw.limited.message === 'string' && raw.limited.message.trim()) limited.message = raw.limited.message;
+      else if (raw.limited.message !== undefined) p.add('config.limited.message must be nonempty text');
+    }
+  }
   const overload = { autoRetry: true, retryAfter: 300, maxRetries: 3, giveUpAfter: 1800, resetAfterS: 600, message: 'kontynuuj' };
   if (raw.overload !== undefined) {
     if (!isObject(raw.overload)) p.add('config.overload must be a mapping');
@@ -1092,7 +1154,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   const deliveryConfirmS = raw.delivery_confirm_s ?? 60;
   if (typeof deliveryConfirmS !== 'number' || !Number.isFinite(deliveryConfirmS) || deliveryConfirmS <= 0) p.add('config.delivery_confirm_s must be a positive number');
   p.throwIfAny(`Invalid config ${file}:`, 'Fix the listed keys; see the README section "Configuration".');
-  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, deliveryConfirmS: deliveryConfirmS as number, limits, countExternal, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, cohort, overload, collisions, cancel, usage, guideLang, capacity, disk, git, path: file, loaded: exists };
+  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, deliveryConfirmS: deliveryConfirmS as number, limits, countExternal, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, cohort, overload, limited, collisions, cancel, usage, guideLang, capacity, disk, git, path: file, loaded: exists };
   if (mirror) config.mirrorDir = resolvePath(mirror);
   return config;
 }

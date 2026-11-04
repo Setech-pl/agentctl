@@ -1,3 +1,4 @@
+import { planGc } from './gc.ts';
 import { recordJournal } from './journal.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -31,6 +32,7 @@ export interface CohortMeta {
   announced?: string[];
   observed?: string;
   changedAt?: number;
+  gcSuggested?: string;
 }
 
 export function cohortsDir(config: Pick<GlobalConfig, 'path'>): string {
@@ -51,6 +53,7 @@ function parseMeta(text: string): CohortMeta | undefined {
   if (typeof data.note === 'string' && data.note !== '') meta.note = data.note;
   if (Array.isArray(data.announced)) meta.announced = data.announced.filter((x): x is string => typeof x === 'string');
   if (typeof data.observed === 'string') meta.observed = data.observed;
+  if (typeof data.gcSuggested === 'string') meta.gcSuggested = data.gcSuggested;
   if (typeof data.changedAt === 'number') meta.changedAt = data.changedAt;
   return meta;
 }
@@ -191,7 +194,7 @@ export interface MembershipChange {
 }
 
 /** Put existing tasks (running, finished or queued) into a cohort, or (`cohort` undefined) take them out of theirs. */
-export async function setCohortOf(ctx: Context, inputs: string[], cohort: CohortMeta | undefined): Promise<MembershipChange[]> {
+export async function setCohortOf(ctx: Context, inputs: string[], cohort: CohortMeta | undefined, preview = false): Promise<MembershipChange[]> {
   const { config, runner } = ctx;
   const records = listTaskRecords(config);
   const entries = readQueue(config);
@@ -213,15 +216,15 @@ export async function setCohortOf(ctx: Context, inputs: string[], cohort: Cohort
     const record = records.find((r) => r.task === task);
     const entry = entries.find((e) => e.task === task);
     const was = record?.cohort ?? entry?.cohort ?? null;
-    if (record) await setHeaderField(runner, taskFile(config, record.window), 'cohort', cohort ? cohort.name : null);
-    if (entry) {
+    if (record && !preview) await setHeaderField(runner, taskFile(config, record.window), 'cohort', cohort ? cohort.name : null);
+    if (entry && !preview) {
       const { cohort: _drop, ...rest } = entry;
       const raw = splitSpecs(entry.spec, `queue entry ${entry.task}`)[0] as RawSpec;
       if (cohort) raw.header.cohort = cohort.name;
       else delete raw.header.cohort;
       await saveEntry(ctx, { ...rest, ...(cohort ? { cohort: cohort.name } : {}), spec: renderRawSpec(raw) });
     }
-    if (was && was !== cohort?.name) await touchCohort(ctx, was);
+    if (was && was !== cohort?.name && !preview) await touchCohort(ctx, was);
     changes.push({ task, was });
   }
   return changes;
@@ -277,6 +280,14 @@ export async function cohortTick(ctx: Context, notifier: Notifier, rows: readonl
   const entries = readQueue(ctx.config);
   const said: string[] = [];
   for (const meta of listCohorts(ctx.config)) {
+    const members = cohortRows(rows, meta.name);
+    const closure = JSON.stringify(members.map(r => [r.task, r.closedAt, r.cancelledAt]).sort());
+    if (members.length && members.every(r => r.closed || r.cancelled) && !cohortEntries(entries, meta.name).length && meta.gcSuggested !== closure) {
+      const gc_preview = await planGc(ctx, { cohort: meta.name });
+      await recordJournal(ctx, { kind: 'gc_suggest', cohort: meta.name, text: `kohorta ${meta.name}: zamknięta; gc_preview gotowy, bez automatycznego usuwania`, gc_preview });
+      meta.gcSuggested = closure;
+      await saveCohort(ctx, meta);
+    }
     const { done, open } = counted(rows, entries, meta.name);
     const observed = JSON.stringify({ rows: cohortRows(rows, meta.name).map(r => [r.task, r.state, r.report, r.attemptId]).sort(), queue: cohortEntries(entries, meta.name).map(e => [e.task, e.status]).sort() });
     const now = ctx.runner.now();

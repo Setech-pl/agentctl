@@ -43,6 +43,7 @@ export interface GcPlan {
   olderThanMs: number;
   /** Folders of the cache that belong to no task of agentctl (not touched, not listed one by one). */
   unknownCacheDirs: number;
+  foreignWorktrees?: number;
 }
 
 export interface GcOptions {
@@ -269,7 +270,8 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
   }
 
   const freeBytes = items.reduce((n, i) => n + i.bytes, 0);
-  return { items, skipped, freeBytes, olderThanMs, unknownCacheDirs };
+  const foreignWorktrees = skipped.filter(s => s.kind === 'worktree-foreign').length;
+  return { items, skipped: cohort === undefined ? skipped : skipped.filter(s => s.kind !== 'worktree-foreign'), freeBytes, olderThanMs, unknownCacheDirs, ...(cohort !== undefined ? { foreignWorktrees } : {}) };
 }
 
 export interface GcResult {
@@ -320,6 +322,7 @@ export function renderGc(plan: GcPlan, opts: { applied?: GcResult | undefined } 
     lines.push('Skipped (reason):');
     for (const s of plan.skipped) lines.push(`  ${s.kind === 'worktree-foreign' ? 'worktree' : s.kind.padEnd(8)} ${s.task.padEnd(12)} ${s.target}  (${s.reason})`);
   }
+  if (plan.foreignWorktrees) lines.push(`${plan.foreignWorktrees} foreign worktrees: not touched.`);
   if (plan.unknownCacheDirs > 0) lines.push(`${plan.unknownCacheDirs} folder${plan.unknownCacheDirs === 1 ? '' : 's'} in the cache belong to no task of agentctl: not touched.`);
   if (opts.applied) {
     lines.push(`Freed ${formatBytes(opts.applied.freedBytes)} (${opts.applied.done.length} done${opts.applied.failed.length > 0 ? `, ${opts.applied.failed.length} failed` : ''}).`);

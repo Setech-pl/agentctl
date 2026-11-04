@@ -179,19 +179,19 @@ describe('agentctl event: the end of a turn', () => {
 });
 
 describe('agentctl event: limits, bad input, the notify of the user', () => {
-  it('a limit event: state limited, a notification with the proposal', async () => {
+  it('a limit event: state limited, provider episode notification', async () => {
     const t = setup('ev-l1');
     await t.send({ kind: 'stop-failure', payload: json('claude-stop-failure-rate-limit.synthetic.json') });
-    assert.deepEqual(t.notifier.messages, ['NC-1: claude wyczerpał limit użycia – agentctl move NC-1 przeniesie zadanie na codex']);
+    assert.deepEqual(t.notifier.messages, ['claude: limit wyczerpany – zresetuj lub poczekaj do n/d']);
     assert.equal((await collectStatus(t.ctx, { progress: false }))[0]?.state, 'limited');
     t.screen(WORKING);
     assert.equal((await collectStatus(t.ctx, { progress: false }))[0]?.state, 'working', 'a retry after the reset clears it');
   });
 
-  it('a pinned task: the notification says move will not help', async () => {
+  it('a pinned task: recovery notice preserves its provider', async () => {
     const t = setup('ev-l2', '', 'NC-1', { pin: true });
     await t.send({ kind: 'stop-failure', payload: { error: 'billing_error' } });
-    assert.match(t.notifier.messages[0] as string, /przypięte – pin: true – move go nie przeniesie/);
+    assert.match(t.notifier.messages[0] as string, /claude: limit wyczerpany – zresetuj lub poczekaj do n\/d/);
   });
 
   it('an unknown task, garbage and a missing --kind never throw', async () => {
@@ -286,7 +286,7 @@ describe('agentctl event and watch: one transition, one notification', () => {
     assert.equal(late.announced?.result, 'sent', 'after the window the same state is announced again');
   });
 
-  it('the watcher asks about a question with its text, and about a limit with the proposal', async () => {
+  it('the watcher asks about a question and announces the provider limit episode', async () => {
     const t = setup('dup5');
     t.screen(WORKING);
     const memory = new WatchMemory();
@@ -296,7 +296,7 @@ describe('agentctl event and watch: one transition, one notification', () => {
     assert.deepEqual(t.notifier.messages, ['NC-1: Which colour do you prefer, red or blue?']);
     t.screen(`${IDLE}\n  ⎿  You've hit your session limit · resets 3pm`);
     await watchTick(t.ctx, memory, t.notifier);
-    assert.equal(t.notifier.messages[1], 'NC-1: claude wyczerpał limit użycia – agentctl move NC-1 przeniesie zadanie na codex');
+    assert.equal(t.notifier.messages[1], 'claude: limit wyczerpany – zresetuj lub poczekaj do n/d');
   });
 
   it('an orphan window is notified without a state folder being made for it', async () => {

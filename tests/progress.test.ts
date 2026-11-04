@@ -119,7 +119,7 @@ describe('PROGRESS in status', () => {
     const table = renderStatusTable(rows);
     assert.match(table[0] as string, /DURATION\s+PROGRESS\s+REPORT/);
     assert.match(table[1] as string, /\s2c 3f\s/);
-    assert.match(table[2] as string, /\s-\s+missing/);
+    assert.match(table[2] as string, /\s-\s+no/);
   });
 
   it('progress: false asks git nothing', async () => {

@@ -1,3 +1,5 @@
+import { planMark, markTasks } from './core/mark.ts';
+import { aggregateOutputs } from './core/outputs.ts';
 import { stableNodePath } from './core/mcp-install.ts';
 import { packageVersion } from './core/version.ts';
 import { findEntry } from './core/queue.ts';
@@ -60,7 +62,7 @@ import { MANAGER_STATE_TEXT, MANAGER_WINDOW, managerAddress, managerAdvice, star
 import { BOARD_WINDOW, ensureWindow } from './core/windows.ts';
 import { interruptTask } from './core/interrupt.ts';
 import { handleTap } from './core/usage-tap.ts';
-import { computeStats, logMarkdown, markTask, RESULTS, renderLog, renderStats, selectHistory, statsMarkdown } from './core/history.ts';
+import { computeStats, logMarkdown, markTask, parseResult, RESULTS, renderLog, renderStats, selectHistory, statsMarkdown } from './core/history.ts';
 import type { Result } from './core/history.ts';
 import { usageSummaryLines } from './core/usage-limits.ts';
 import { collectUsage, renderUsage, usageMarkdown } from './core/usage-report.ts';
@@ -592,12 +594,14 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         const meta = findCohort(ctx.config, name);
         const { rows } = await reportStatus(ctx, { archived: true });
         const mine = cohortRows(rows, meta.name);
-        if (opts.json) return line(JSON.stringify({ cohort: meta.name, created: meta.created || null, note: meta.note ?? null, tasks: mine, queued: cohortEntries(readQueue(ctx.config), meta.name).map((e) => e.task) }, null, 2));
+        const outputs = aggregateOutputs(mine.filter(r => r.report === 'yes').map(r => ({ task: r.task, data: { outputs: r.outputs ?? null, outputs_valid: r.outputs_valid ?? false, outputs_errors: r.outputs_errors ?? [] } })));
+        if (opts.json) return line(JSON.stringify({ ...outputs, cohort: meta.name, created: meta.created || null, note: meta.note ?? null, tasks: mine, queued: cohortEntries(readQueue(ctx.config), meta.name).map((e) => e.task) }, null, 2));
         line(`Cohort ${meta.name}${meta.created ? ` (since ${formatLocalTime(meta.created)})` : ''}${meta.note ? `: ${meta.note}` : ''}`);
         if (mine.length > 0) for (const l of renderStatusTable(mine, 60, { cohort: false })) line(l);
         const queued = await queueStatusLines(ctx, meta.name);
         for (const l of queued) line(l);
         if (mine.length === 0 && queued.length === 0) line('No tasks in it.');
+        line(`outputs: ${JSON.stringify(outputs)}`);
       }),
     );
 
@@ -857,16 +861,23 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
 
   program
     .command('mark')
-    .description('Say how a task turned out: ok, partial or fail (the result you judge, with an optional note). It goes to the history that "log" and "stats" read; the last mark of a task wins.')
-    .argument('<task>', 'task ID; case does not matter and a unique prefix is enough')
-    .addArgument(new Argument('<result>', 'how it turned out').choices([...RESULTS]))
+    .description('Record the result the user judged. Multiple tasks require a preview and confirmation.')
+    .argument('<taskOrResult>', 'task ID, or result when --cohort is used')
+    .argument('[result]', 'ok, partial or fail')
+    .option('--cohort <name>', 'mark every task in this cohort')
     .option('--note <text>', 'why (optional)')
-    .action(
-      guarded(async (task: string, result: Result, opts: { note?: string }) => {
-        const marked = await markTask(contextFor(false, { migrate: false }), task, result, opts.note);
-        line(`${marked.task}: ${marked.result}${marked.previous && marked.previous !== marked.result ? ` (was ${marked.previous})` : ''}`);
-      }),
-    );
+    .option('-y, --yes', 'confirm the displayed batch')
+    .action(guarded(async (taskOrResult: string, value: string | undefined, opts: { cohort?: string; note?: string; yes?: boolean }) => {
+      const ctx = contextFor(false, { migrate: false });
+      const result = parseResult(opts.cohort ? taskOrResult : value ?? '');
+      if (opts.cohort && value) throw new AgentctlError('with --cohort give only the result');
+      const tasks = planMark(ctx, opts.cohort ? { cohort: opts.cohort } : { task: taskOrResult });
+      if (tasks.length > 1) {
+        line(`Would mark ${tasks.join(', ')}: ${result}${opts.note ? ` – ${opts.note}` : ''}`);
+        if (!opts.yes && (!ctx.confirm || !await ctx.confirm('Apply these marks? [y/N] '))) { line('Not executed. Re-run with --yes to confirm this batch.'); return; }
+      }
+      for (const r of await markTasks(ctx, tasks, result, opts.note)) line(`${r.task}: ${r.result}${r.previous && r.previous !== r.result ? ` (was ${r.previous})` : ''}`);
+    }));
 
   program
     .command('log')

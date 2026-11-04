@@ -2,10 +2,15 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/) while it is below 1.0 (minor versions may change behaviour).
 
-## [Unreleased]
+## [0.17.4] - 2026-11-04
 
 - Board: the header names the version (`agentctl 0.17.2 board · …`, the one `agentctl version` prints) and the board titles its terminal window `agentctl <version> · board` (OSC 2; the previous title is restored on exit where the terminal supports the xterm title stack). In tmux the outer terminal's title is set through the session options `set-titles` and `set-titles-string` of the agentctl session only. `board.window_title: false` turns all of it off.
 - Docs: the README leads with the dispatcher workflow, a board screenshot generated from a demo session (`npm run docs:screenshot`), the key benefits and the automatic flow with real `events_since` / `pull_ready` output from that demo.
+
+- NC workflow: version 1 report outputs with git validation, verdict-gated dependencies, automatic cross-provider reviews and repeat delta reviews, task-referenced base commits, cohort output aggregation and once-per-report decision/action events. Invalid/missing outputs warn without changing report readiness.
+- Recover limited windows on the same model/provider using persisted overload guards and retry bounds; one provider notice per episode. Closed cohorts emit protected gc_suggest plans, without deleting anything. Batch human marks share exact previews across CLI, board and MCP.
+- Independent MCP preview tokens, concrete scopes and preflight failures; scoped GC hides foreign paths and confirmed GC returns results only. Include checkout/setup in task duration; stale plan notices stay once per reading. Consistent MCP report values; grouped MCP write notices by default; F12 works across concurrent sessions.
+- REV3 F1/F2: follow-ups paste during work for Claude/Codex, idle-only adapters retain durable FIFO messages visible in status/peek, and idle/late Stop alone cannot acknowledge a stuck draft. Submission/echo/working evidence resolves delivery; timeouts become needs-attention.
 
 ## [0.17.3] - 2026-11-04
 

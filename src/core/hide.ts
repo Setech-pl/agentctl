@@ -18,7 +18,7 @@ export interface HideResult {
  * automatic hiding of pulled finished tasks (`board.auto_hide_pulled_dead`) leaves a task you brought back alone.
  * All names are resolved first: one that does not match stops everything before anything is written.
  */
-export async function setHidden(ctx: Context, taskArgs: string[], hidden: boolean): Promise<HideResult[]> {
+export async function setHidden(ctx: Context, taskArgs: string[], hidden: boolean, preview = false): Promise<HideResult[]> {
   const live = new Set(await ctx.tmux.listWindows());
   // A closed task is off every list already; it cannot be hidden or shown again (`status --all` lists it).
   const records = listTaskRecords(ctx.config).filter((r) => !((r.closed || r.cancelled) && !live.has(r.window)));
@@ -34,7 +34,7 @@ export async function setHidden(ctx: Context, taskArgs: string[], hidden: boolea
   const results: HideResult[] = [];
   for (const record of chosen) {
     const unchanged = record.hidden === hidden;
-    if (!unchanged) await setHeaderField(ctx.runner, taskFile(ctx.config, record.window), 'hidden', hidden);
+    if (!unchanged && !preview) await setHeaderField(ctx.runner, taskFile(ctx.config, record.window), 'hidden', hidden);
     results.push({ task: record.task, windowAlive: live.has(record.window), unchanged });
   }
   return results;

@@ -1,3 +1,4 @@
+import type { OutputVerdict } from './outputs.ts';
 import type { Context } from './context.ts';
 import type { QueueEntry } from './queue.ts';
 import type { StatusRow } from './status.ts';
@@ -16,8 +17,8 @@ export function hasReport(row: StatusRow | undefined): boolean {
 }
 
 /** The tasks of `after` that do not have a report yet (a task that does not exist yet, one in the queue, one still working). */
-export function unmetAfter(after: readonly string[], rows: readonly StatusRow[]): string[] {
-  return after.filter((task) => !hasReport(rows.find((r) => r.task === task)));
+export function unmetAfter(after: readonly string[], rows: readonly StatusRow[], verdicts: Record<string, OutputVerdict[]> = {}): string[] {
+  return after.filter(task => { const row = rows.find(r => r.task === task); return !hasReport(row) || (verdicts[task] !== undefined && (!row?.verdict || !verdicts[task]!.includes(row.verdict))); });
 }
 
 /** "czeka na NC-4, NC-5": what a waiting task is waiting for; `failed` are the ones whose start failed in the queue, `cancelled` the ones that were cancelled. */
@@ -34,13 +35,14 @@ export function cancelledTasks(rows: readonly StatusRow[]): Set<string> {
 export interface Blockers {
   cancelled: string[];
   blocked: string[];
+  verdicts?: Array<{ task: string; reason: string }>;
 }
 
 /**
  * The queued tasks that are blocked, with the cause. A task is blocked while its `after` names a cancelled task: it would wait for a report
  * that never comes. A task that waits for a blocked task is blocked too. The way out is `agentctl unblock` or `agentctl cancel`.
  */
-export function findBlocked(entries: readonly Pick<QueueEntry, 'task' | 'after' | 'status'>[], rows: readonly StatusRow[]): Map<string, Blockers> {
+export function findBlocked(entries: readonly Pick<QueueEntry, 'task' | 'after' | 'status' | 'afterVerdicts'>[], rows: readonly StatusRow[]): Map<string, Blockers> {
   const cancelled = cancelledTasks(rows);
   const blocked = new Map<string, Blockers>();
   const waiting = entries.filter((e) => e.status === 'queued');
@@ -48,9 +50,14 @@ export function findBlocked(entries: readonly Pick<QueueEntry, 'task' | 'after' 
     grew = false;
     for (const e of waiting) {
       const b: Blockers = { cancelled: e.after.filter((t) => cancelled.has(t)), blocked: e.after.filter((t) => blocked.has(t)) };
-      if (b.cancelled.length + b.blocked.length === 0) continue;
+      const verdicts = Object.entries(e.afterVerdicts ?? {}).flatMap(([task, allowed]) => {
+        const row = rows.find(r => r.task === task);
+        return hasReport(row) && (!row?.verdict || !allowed.includes(row.verdict)) ? [{ task, reason: row?.verdict ? `werdykt ${row.verdict}; wymagany ${allowed.join('|')}` : 'brak werdyktu' }] : [];
+      });
+      if (verdicts.length) b.verdicts = verdicts;
+      if (b.cancelled.length + b.blocked.length + verdicts.length === 0) continue;
       const known = blocked.get(e.task);
-      if (known && known.cancelled.length === b.cancelled.length && known.blocked.length === b.blocked.length) continue;
+      if (known && known.cancelled.length === b.cancelled.length && known.blocked.length === b.blocked.length && JSON.stringify(known.verdicts) === JSON.stringify(b.verdicts)) continue;
       blocked.set(e.task, b);
       grew = true;
     }
@@ -60,7 +67,7 @@ export function findBlocked(entries: readonly Pick<QueueEntry, 'task' | 'after' 
 
 /** "⛓ zablokowane – NC-1 anulowane": the cause shown by `status`, `queue list` and the board. */
 export function blockedText(b: Blockers): string {
-  return `${BLOCKED_ICON} zablokowane – ${[...b.cancelled.map((t) => `${t} anulowane`), ...b.blocked.map((t) => `${t} zablokowane`)].join(', ')}`;
+  return `${BLOCKED_ICON} zablokowane – ${[...b.cancelled.map((t) => `${t} anulowane`), ...b.blocked.map((t) => `${t} zablokowane`), ...(b.verdicts ?? []).map(v => `${v.task}: ${v.reason}`)].join(', ')}`;
 }
 
 /** Tasks that exist: started (also closed and archived ones) or waiting in the queue. */

@@ -24,7 +24,7 @@ export async function recordStaleCapacity(ctx: Context, plans: Record<AgentName,
         await recordJournal(ctx, { kind: 'usage', text: `${provider}: plan reading stale with active tasks (>${ctx.config.capacity.staleMinutes} min, age ${plan.readAt === null ? 'n/d' : Math.floor((ctx.runner.now() - plan.readAt) / 1000)} s)` });
         state[provider] = key;
       }
-      if (!stale) delete state[provider];
+      // A temporary absence of active windows is not a new reading. Keep its identity.
     }
     await ctx.runner.writeFile(file, JSON.stringify(state));
   });

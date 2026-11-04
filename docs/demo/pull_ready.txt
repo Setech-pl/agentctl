@@ -3,23 +3,43 @@
 === API-AUTH-1 ===
 attempt: 3f9c2a7e-51d4-4b86-9e0a-7c1d6b2f8a45
 path: /home/demo/agentctl/cache/api-auth-1/API-AUTH-1.md
-bytes: 589
-verdict: Verdict: PASS – refresh rotates the session id, logout revokes the whole token family.
-blockers: ## Blockers
-
-None.
-
-decisions: ## Decisions
-
-- Revoking one token revokes its whole family: a replayed refresh token is treated as theft.
-
-truncated: true; details: get_report
+bytes: 965
+{"outputs":{"version":1,"verdict":"PASS","commits":[{"repo":"shop","branch":"agent/api-auth-1","sha":"41c39c35c2118f44d822a4be08d5c20aa2f7c153"}],"integrate":[{"repo":"shop","branch":"agent/api-auth-1","sha":"41c39c35c2118f44d822a4be08d5c20aa2f7c153","note":"ready for human integration"}],"decisions":["Choose the rollout window"],"actions":[],"checks":["auth tests: 18 passed"],"notes":[]},"outputs_valid":true,"outputs_errors":[]}
+sha: 41c39c35c2118f44d822a4be08d5c20aa2f7c153
+truncated: false
 Verdict: PASS – refresh rotates the session id, logout revokes the whole token family.
+
 - Branch: agent/api-auth-1
 - SHA: 41c39c35c2118f44d822a4be08d5c20aa2f7c153
+- Tests: 18 passed, 0 failed
+
 ## Summary
 
 Refresh tokens are single-use and belong to a family (`src/auth/token.ts`). The session id rotates on every refresh (`src/auth/session.ts`) and a revoked family answers 401 (`src/auth/middleware.ts`).
 
-[excerpt; get_report section/offset/limit reads more]
+## Blockers
+
+None.
+
+## Decisions
+
+- Revoking one token revokes its whole family: a replayed refresh token is treated as theft.
+
+## Open points
+
+None.
+
+```agentctl-outputs
+version: 1
+verdict: PASS
+commits: [{repo: shop, branch: agent/api-auth-1, sha: 41c39c35c2118f44d822a4be08d5c20aa2f7c153}]
+integrate: [{repo: shop, branch: agent/api-auth-1, sha: 41c39c35c2118f44d822a4be08d5c20aa2f7c153, note: ready for human integration}]
+decisions: [Choose the rollout window]
+actions: []
+checks: ["auth tests: 18 passed"]
+notes: []
+```
+
+<!-- agentctl:report-end -->
+
 next_cursor: 8b1e4d93-0a7c-42f5-b6d8-2e9f1c3a7d60:1; has_more: false

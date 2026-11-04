@@ -16,7 +16,7 @@ import { cohortTick, cohortsDir } from '../src/core/cohort.ts';
 import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helpers.ts';
 const scratch = useScratch();
 function fixture(name: string, respond?: NonNullable<ConstructorParameters<typeof DiskRunner>[0]>['respond']) {
-  const root = scratch.sub(name), config = makeConfig(root, 'capacity: {codex_refresh: false}\nmcp: {allow: [close, cancel, gc, archive, report_from]}\n');
+  const root = scratch.sub(name), config = makeConfig(root, 'capacity: {codex_refresh: false}\nmcp: {allow: [mark, close, cancel, gc, archive, report_from]}\n');
   const tmux = new FakeTmux(), runner = new DiskRunner({ dryRun: false, startTime: Date.now() + 1000, respond: respond ?? tmux.respond });
   const ctx = new Context(runner, config, () => {}), deps = { context: () => ctx, notify: async () => {} };
   const call = (name: string, args: Record<string, unknown> = {}) => MCP_TOOLS.find(t => t.name === name)!.run(deps, args as never);
@@ -90,13 +90,15 @@ it('0173-FIX-F/G/H: no stale before first reading, dev identity, shell windows i
   const rows = await collectStatus(f.ctx); assert.ok(!rows.some(r => r.task === 'SHELL')); assert.equal(rows.find(r => r.task === 'LOST')!.state, 'orphan');
   assert.match(await f.full('doctor'), /środowisko dev/);
 });
-for (const tool of ['close', 'cancel', 'archive', 'gc'] as const) it(`0173-FIX-I scope guard: ${tool} cohort preview IDs equal executed IDs (three tasks)`, async () => {
+for (const tool of ['close', 'cancel', 'archive', 'gc', 'mark'] as const) it(`0173-FIX-I scope guard: ${tool} cohort preview IDs equal executed IDs (three tasks)`, async () => {
   const f = fixture(`scope-${tool}`), closed = tool === 'archive' || tool === 'gc';
   for (const id of ['T1','T2','T3']) { seedTask(f.config, id, { cohort: 'NC', closed }); if (!closed) f.tmux.add(id.toLowerCase(), '❯ \n'); }
   seedTask(f.config, 'OTHER', { cohort: 'other', closed });
-  const preview = await f.full(tool, { cohort: 'NC' }); for (const id of ['T1','T2','T3']) assert.ok(preview.includes(id), `${tool}: ${preview}`); assert.ok(!preview.includes('OTHER'));
-  const executed = await f.full(tool, { cohort: 'NC', confirm: true });
+  const args = { cohort: 'NC', ...(tool === 'mark' ? { result: 'ok' } : {}) };
+  const preview = await f.full(tool, args); for (const id of ['T1','T2','T3']) assert.ok(preview.includes(id), `${tool}: ${preview}`); assert.ok(!preview.includes('OTHER'));
+  const executed = await f.full(tool, { ...args, confirm: true });
   if (tool === 'close' || tool === 'cancel') for (const id of ['T1','T2','T3']) assert.equal(Boolean(readTaskRecord(f.config, id.toLowerCase())![tool === 'close' ? 'closed' : 'cancelled']), true);
+  else if (tool === 'mark') { for (const id of ['T1','T2','T3']) assert.ok(executed.includes(id)); assert.ok(!executed.includes('OTHER')); }
   else for (const id of ['T1','T2','T3']) { assert.ok(executed.includes(id)); assert.equal(readTaskRecord(f.config, id.toLowerCase()), undefined); }
   assert.equal(Boolean(readTaskRecord(f.config, 'other')?.cancelled), false);
 });
@@ -110,7 +112,7 @@ it('0173-FIX-M: an existing finished cohort bootstraps grace from its last task 
 
 it('0173-FIX-I guard inventory: every two-stage cohort selector has a scope-equality scenario', () => {
   const selectors = MCP_TOOLS.filter(t => t.kind === 'write' && t.input.confirm && t.input.cohort && !['new','queue','cohort_add','cohort_note'].includes(t.name));
-  assert.deepEqual(selectors.map(t => t.name).sort(), ['archive','cancel','close','gc']);
+  assert.deepEqual(selectors.map(t => t.name).sort(), ['archive','cancel','close','gc','mark']);
 });
 it('0173-FIX-J/H: missing report source is explicit; unowned real-agent process is an orphan, plain shell is not', async () => {
   const f = fixture('missing'); seedTask(f.config, 'T1');

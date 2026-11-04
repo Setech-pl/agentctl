@@ -1,3 +1,5 @@
+import { VERDICTS } from './outputs.ts';
+import type { OutputVerdict } from './outputs.ts';
 import path from 'node:path';
 import YAML from 'yaml';
 import {
@@ -8,9 +10,10 @@ import {
   parseEnumValue,
   parseEnv,
   parseLinks,
+  parseReview,
 } from './config.ts';
 import { parseReportPaths } from './config.ts';
-import type { AgentName, Effort, GlobalConfig, Layer, Link } from './config.ts';
+import type { AgentName, Effort, GlobalConfig, Layer, Link, ReviewSettings } from './config.ts';
 import type { Order } from './equivalents.ts';
 import { AgentctlError, Problems, TASK_ID, cohortNameProblem, errorMessage, fillPlaceholders, isObject, resolvePath, windowName } from './util.ts';
 
@@ -26,10 +29,15 @@ export interface ResolvedRepo {
   path: string;
   worktree: string;
   base?: string;
+  baseTask?: string;
   branch?: string;
 }
 
+export interface AutoReviewSource { author: string; hash: string; heads: Record<string, string> }
+
 export interface ResolvedSpec {
+  /** Internal queue provenance, never accepted from spec YAML. */
+  autoReview?: AutoReviewSource;
   index: number;
   task: string;
   window: string;
@@ -42,6 +50,7 @@ export interface ResolvedSpec {
   setup: string[];
   env: Record<string, string>;
   reviewOf?: string;
+  review?: ReviewSettings;
   report: string;
   /** Other places the report may be (paths and globs, placeholders filled; a relative one is relative to the worktree). */
   reportAlt?: string[];
@@ -54,6 +63,7 @@ export interface ResolvedSpec {
   priority: 'high' | 'normal';
   /** Tasks that must have a report before this one starts (queue). `new` refuses to start a task whose `after` is not met. */
   after: string[];
+  afterVerdicts?: Record<string, OutputVerdict[]>;
   /** Globs of the files the task will change: `queue` and `new` warn when an active task already changes matching files. */
   touches: string[];
   /** The cohort the task belongs to, as written. Absent: no cohort (there is no default one). */
@@ -147,7 +157,7 @@ export interface ResolveContext {
 /** Task IDs whose window name is one agentctl uses for itself (`watch`, `board`, `manager`). */
 export const RESERVED_TASK_IDS = ['WATCH', 'BOARD', 'MANAGER'];
 
-export const SPEC_KEYS = ['task', 'agent', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'report', 'pin', 'remote_control', 'priority', 'after', 'touches', 'cohort'];
+export const SPEC_KEYS = ['task', 'agent', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'review', 'report', 'pin', 'remote_control', 'priority', 'after', 'touches', 'cohort'];
 export const REPO_KEYS = ['path', 'worktree', 'base', 'branch'];
 
 function label(raw: RawSpec): string {
@@ -247,11 +257,18 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     else p.add('remote_control must be true or false');
   }
   const after: string[] = [];
+  const afterVerdicts: Record<string, OutputVerdict[]> = {};
   if (h.after !== undefined && h.after !== null) {
     const list = Array.isArray(h.after) ? h.after : [h.after];
     for (const dep of list) {
       if (typeof dep === 'string' && TASK_ID.test(dep)) {
         if (!after.includes(dep)) after.push(dep);
+      } else if (isObject(dep) && typeof dep.task === 'string' && TASK_ID.test(dep.task)) {
+        checkKeys(dep, ['task', 'verdict'], 'after', p);
+        const values = Array.isArray(dep.verdict) ? dep.verdict : [dep.verdict];
+        if (!values.length || !values.every(v => (VERDICTS as readonly unknown[]).includes(v))) p.add('after.verdict must be PASS, PARTIAL, FAIL, BLOCKED or a non-empty list of them');
+        else if (after.includes(dep.task)) p.add(`duplicate after task ${dep.task}`);
+        else { after.push(dep.task); afterVerdicts[dep.task] = values as OutputVerdict[]; }
       } else p.add(`after must be a task ID or a list of task IDs (e.g. NC-12), got ${JSON.stringify(dep)}`);
     }
   }
@@ -284,6 +301,10 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     }
   }
 
+  const inheritedReview = { ...config.review, ...project?.review };
+  const explicitReview = h.review !== undefined ? parseReview(h.review, 'spec.review', p) : undefined;
+  const reviewEnabled = h.review === false ? false : h.review !== undefined || inheritedReview.default === 'auto';
+  const review = reviewEnabled ? { ...inheritedReview, ...explicitReview, default: 'auto' as const } : undefined;
   const agent = specAgent ?? project?.defaults.agent ?? config.defaults.agent;
   if (!agent && h.agent === undefined) {
     p.add(`missing "agent" (one of ${AGENT_NAMES.join(', ')}); or set defaults.agent in .agentctl.yaml or ${config.path}`);
@@ -389,10 +410,12 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     pin,
     priority,
     after,
+    ...(Object.keys(afterVerdicts).length ? { afterVerdicts } : {}),
     touches,
     requested: { agent: agent as AgentName, model, effort },
   };
   if (reviewOf) spec.reviewOf = reviewOf;
+  if (review) spec.review = review;
   if (agent === 'claude' && (specRemote ?? remoteDefault)) spec.remoteControl = true;
   if (cohort) spec.cohort = cohort;
   if (reportAlt.length > 0) spec.reportAlt = reportAlt;

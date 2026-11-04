@@ -4,8 +4,8 @@ import path from 'node:path';
 import YAML from 'yaml';
 import type { Runner } from './runner.ts';
 import { AGENT_NAMES, EFFORTS } from './config.ts';
-import type { AgentName, Effort, GlobalConfig, Link } from './config.ts';
-import type { ResolvedRepo, ResolvedSpec } from './spec.ts';
+import type { AgentName, Effort, GlobalConfig, Link, ReviewSettings } from './config.ts';
+import type { ResolvedRepo, ResolvedSpec, AutoReviewSource } from './spec.ts';
 import type { Order } from './equivalents.ts';
 import { isObject } from './util.ts';
 
@@ -15,6 +15,7 @@ export type RecordEffort = Effort | 'unknown';
 
 /** What agentctl remembers about a task: the YAML header of `<state_dir>/<task>/TASK.md`. */
 export interface TaskRecord {
+  autoReview?: AutoReviewSource;
   task: string;
   window: string;
   /**
@@ -30,6 +31,7 @@ export interface TaskRecord {
   links: Link[];
   env: Record<string, string>;
   reviewOf?: string;
+  review?: ReviewSettings;
   /** The cohort of the task (display name, as the cohort was first written). Absent: no cohort. */
   cohort?: string;
   report: string;
@@ -39,6 +41,8 @@ export interface TaskRecord {
   reportSource?: string;
   reportConfirmed?: string;
   pendingPrompt?: string;
+  promptKind?: 'initial' | 'followup';
+  deliveryWasBusy?: boolean;
   promptDelivery?: 'launching' | 'pending' | 'sending' | 'confirming' | 'sent' | 'needs-attention';
   deliveryId?: string;
   deliveryStartedAt?: string;
@@ -125,6 +129,8 @@ export function recordFromSpec(spec: ResolvedSpec, config: GlobalConfig, started
   Object.assign(record, attemptFields(record, startedMs));
   if (spec.switchedBy) record.switchedBy = spec.switchedBy;
   if (spec.reviewOf) record.reviewOf = spec.reviewOf;
+  if (spec.review) record.review = spec.review;
+  if (spec.autoReview) record.autoReview = spec.autoReview;
   if (spec.pin) record.pin = true;
   if (spec.remoteControl) record.remoteControl = true;
   if (spec.cohort) record.cohort = spec.cohort;
@@ -149,9 +155,13 @@ export function renderTaskMd(record: TaskRecord, prompt: string): string {
     env: record.env,
   };
   if (record.reviewOf) header.review_of = record.reviewOf;
+  if (record.review) header.review = record.review;
+  if (record.autoReview) header.auto_review = record.autoReview;
   if (record.switchedBy) header.switched_by = record.switchedBy;
   if (record.cohort) header.cohort = record.cohort;
   for (const [key, value] of Object.entries({ delivery_output_baseline: record.deliveryOutputBaseline, delivery_id: record.deliveryId, delivery_started_at: record.deliveryStartedAt, delivery_report_baseline: record.deliveryReportBaseline, report_confirmed: record.reportConfirmed, pending_prompt: record.pendingPrompt, prompt_delivery: record.promptDelivery, prompt_sent_at: record.promptSentAt, prompt_error: record.promptError })) if (value !== undefined) header[key] = value;
+  if (record.promptKind) header.prompt_kind = record.promptKind;
+  if (record.deliveryWasBusy !== undefined) header.delivery_was_busy = record.deliveryWasBusy;
   header.report = record.report;
   if (record.reportAlt && record.reportAlt.length > 0) header.report_alt = record.reportAlt;
   if (record.agentCliVersion) header.agent_cli_version = record.agentCliVersion;
@@ -204,7 +214,7 @@ export function readTaskPrompt(config: GlobalConfig, window: string): string | u
   const match = /^---\n[\s\S]*?\n---(?:\n|$)/.exec(text.replace(/\r\n/g, '\n'));
   if (!match) return undefined;
   const body = text.replace(/\r\n/g, '\n').slice(match[0].length);
-  return body.split(/\n\n## Follow-up sent /)[0]?.trim();
+  return body.split(/\n\n## Follow-up (?:sent|queued|pasted, unconfirmed) /)[0]?.trim();
 }
 
 export function parseTaskRecord(text: string): TaskRecord | undefined {
@@ -240,11 +250,15 @@ export function parseTaskRecord(text: string): TaskRecord | undefined {
   };
   for (const [key, field] of [['delivery_output_baseline', 'deliveryOutputBaseline'], ['delivery_id', 'deliveryId'], ['delivery_started_at', 'deliveryStartedAt'], ['delivery_report_baseline', 'deliveryReportBaseline'], ['report_confirmed', 'reportConfirmed'], ['pending_prompt', 'pendingPrompt'], ['prompt_sent_at', 'promptSentAt'], ['prompt_error', 'promptError']] as const) if (typeof data[key] === 'string') record[field] = data[key];
   if (['launching', 'pending', 'sending', 'confirming', 'sent', 'needs-attention'].includes(String(data.prompt_delivery))) record.promptDelivery = data.prompt_delivery as TaskRecord['promptDelivery'];
+  if (data.prompt_kind === 'initial' || data.prompt_kind === 'followup') record.promptKind = data.prompt_kind;
+  if (typeof data.delivery_was_busy === 'boolean') record.deliveryWasBusy = data.delivery_was_busy;
   if (typeof data.attempt === 'number') record.attempt = data.attempt;
   for (const [key, field] of [['attempt_id', 'attemptId'], ['attempt_started', 'attemptStarted'], ['attempt_report_baseline', 'attemptReportBaseline'], ['turn_ended_at', 'turnEndedAt'], ['summary_delivered', 'summaryDelivered']] as const) if (typeof data[key] === 'string') record[field] = data[key];
   if (typeof data.window_id === 'string' && /^@\d+$/.test(data.window_id)) record.windowId = data.window_id;
   if (data.switched_by === 'flag' || data.switched_by === 'limit') record.switchedBy = data.switched_by;
   if (typeof data.review_of === 'string') record.reviewOf = data.review_of;
+  if (isObject(data.review)) record.review = data.review as ReviewSettings;
+  if (isObject(data.auto_review)) record.autoReview = data.auto_review as unknown as AutoReviewSource;
   if (typeof data.cohort === 'string' && data.cohort !== '') record.cohort = data.cohort;
   if (Array.isArray(data.report_alt) && data.report_alt.every((x: unknown) => typeof x === 'string')) record.reportAlt = data.report_alt as string[];
   if (typeof data.agent_cli_version === 'string') record.agentCliVersion = data.agent_cli_version;

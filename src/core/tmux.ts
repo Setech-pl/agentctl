@@ -274,7 +274,7 @@ const BORDER_LINE = /^[\s─━═│┃║╭╮╰╯┌┐└┘├┤┬┴�
 export function screenMetadata(screen: string): { usage_hint: string | null; draft_input: string | null } {
   const lines = screen.split('\n');
   const usage = lines.filter(l => /(?:weekly|session|usage|model|daily).*limit.*(?:left|remaining|%|reset)/i.test(l));
-  const prompt = lines.filter(l => /^\s*[❯›>]\s/.test(l)).at(-1);
+  const prompt = lines.filter(l => /^\s*[❯›>](?:\s|$)/.test(l)).at(-1);
   const draft = prompt?.replace(/^\s*[❯›>]\s*/, '').trim();
   return { usage_hint: usage.map(l => l.trim()).join(' | ') || null, draft_input: draft && !/^Try\s|^Ask Codex to do anything$|^\d+\./.test(draft) ? draft : null };
 }
