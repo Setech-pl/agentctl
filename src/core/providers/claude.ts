@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { defaultSettings } from './settings.ts';
 
-import { CLAUDE_KINDS, parseClaudeEvent, parseCodexEvent, planEventWiring } from '../events.ts';
+import { CLAUDE_KINDS, parseClaudeEvent, planClaudeEvents } from './claude-events.ts';
 import type { ClaudeKind } from '../events.ts';
 import { sessionOfStatusLine } from '../usage-tap.ts';
 import { readPlans } from '../usage.ts';
@@ -42,10 +42,14 @@ export const claude: ProviderAdapter = {
   events: {
     emits: { turnEnd: true, needsInput: true, limit: true, overload: true, promptSubmit: true },
     get kinds() { return CLAUDE_KINDS; }, payloadFrom: 'stdin',
-    plan: input => planEventWiring({ ...input, agent: 'claude' }),
-    parse: e => parseClaudeEvent(e.kind as ClaudeKind, e.payload),
+    plan: planClaudeEvents,
+    parse: e => e.kind ? parseClaudeEvent(e.kind as ClaudeKind, e.payload) : undefined,
     session(e) { return sessionOfStatusLine(isObject(e.payload) ? e.payload : {}); },
-    acknowledgesPrompt: e => e.kind === 'user-prompt-submit',
+    acknowledgesPrompt(e) {
+      const normalize = (s: string) => s.replace(/\r\n?/g, '\n').trim();
+      const data = isObject(e.payload) ? e.payload : {};
+      return e.kind === 'user-prompt-submit' && typeof data.prompt === 'string' && normalize(data.prompt) === normalize(e.prompt ?? '');
+    },
   },
   usage: {
     home: (config, env) => agentHomes(config, env).claude, homeEnv: 'CLAUDE_CONFIG_DIR',

@@ -54,7 +54,7 @@ export interface ScreenProfile {
 }
 
 export interface SessionRef { id: string; transcript?: string }
-export interface RawEvent { kind?: string; payload: unknown; raw?: string }
+export interface RawEvent { kind?: string; payload: unknown; raw?: string; prompt?: string }
 
 export interface EventWiringInput {
   task: string; window: string; config: GlobalConfig;

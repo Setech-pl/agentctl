@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { defaultSettings } from './settings.ts';
 
-import { CLAUDE_KINDS, parseClaudeEvent, parseCodexEvent, planEventWiring } from '../events.ts';
+import { parseCodexEvent, planCodexEvents } from './codex-events.ts';
 import type { ClaudeKind } from '../events.ts';
 import { sessionOfStatusLine } from '../usage-tap.ts';
 import { readPlans } from '../usage.ts';
@@ -41,9 +41,14 @@ export const codex: ProviderAdapter = {
   events: {
     emits: { turnEnd: true, needsInput: false, limit: false, overload: false, promptSubmit: false },
     kinds: [], payloadFrom: 'argv',
-    plan: input => planEventWiring({ ...input, agent: 'codex' }),
+    plan: planCodexEvents,
     parse: e => parseCodexEvent(e.payload),
     session(e) { const data = isObject(e.payload) ? e.payload : {}; return typeof data['thread-id'] === 'string' && data['thread-id'] !== '' ? { id: data['thread-id'] } : undefined; },
+    acknowledgesPrompt(e) {
+      const normalize = (s: string) => s.replace(/\r\n?/g, '\n').trim();
+      const data = isObject(e.payload) ? e.payload : {};
+      return Array.isArray(data['input-messages']) && data['input-messages'].some(text => typeof text === 'string' && normalize(text) === normalize(e.prompt ?? ''));
+    },
     
   },
   usage: {

@@ -1,3 +1,4 @@
+import { provider, PROVIDER_IDS } from './core/providers/registry.ts';
 import { reportPathWarnings } from './core/report-path.ts';
 import { planMark, markTasks } from './core/mark.ts';
 import { aggregateOutputs } from './core/outputs.ts';
@@ -1358,7 +1359,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .description('Called by the agents themselves (hooks that "new" sets up): records the event, updates the task state and notifies at once. Always exits 0.')
     .requiredOption('--task <task>', 'task ID')
     .addOption(new Option('--agent <agent>', 'the agent that reports').choices(['claude', 'codex']).makeOptionMandatory())
-    .addOption(new Option('--kind <kind>', 'claude: which hook called').choices([...CLAUDE_KINDS]))
+    .addOption(new Option('--kind <kind>', 'claude: which hook called').choices(PROVIDER_IDS.flatMap(id => [...provider(id).events.kinds])))
     .option('--forward <json>', 'codex: JSON list, the notify command the user had; run with the same JSON after this one')
     .argument('[payload]', 'the event as JSON (codex puts it here; claude sends it on stdin)')
     .action(async (payload: string | undefined, opts: { task: string; agent: 'claude' | 'codex'; kind?: ClaudeKind; forward?: string }) => {
@@ -1366,7 +1367,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
       try {
         const config = deps.loadConfig();
         const ctx = new Context(deps.makeRunner(false, line), config, () => {}, deps.confirm);
-        const raw = payload ?? (opts.agent === 'claude' && !deps.stdinIsTTY ? deps.readStdin() : '');
+        const raw = payload ?? (provider(opts.agent).events.payloadFrom === 'stdin' && !deps.stdinIsTTY ? deps.readStdin() : '');
         const forward = opts.forward ? parseJson(opts.forward) : undefined;
         const notifier = await makeNotifier(ctx);
         const self = deps.selfArgv?.();
@@ -1375,7 +1376,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
           agent: opts.agent,
           kind: opts.kind,
           payload: parseJson(raw),
-          rawPayload: opts.agent === 'codex' ? raw : undefined,
+          rawPayload: provider(opts.agent).events.payloadFrom === 'argv' ? raw : undefined,
           forward: Array.isArray(forward) && forward.every((x) => typeof x === 'string') ? (forward as string[]) : undefined,
         });
       } catch (e) {

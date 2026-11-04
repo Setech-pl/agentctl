@@ -1,3 +1,4 @@
+import { provider, alternatives, PROVIDER_IDS } from './providers/registry.ts';
 import { limitedTick } from './limited.ts';
 import { collectStatus } from './status.ts';
 import { journalOutputs } from './outputs.ts';
@@ -61,7 +62,7 @@ export function reportReadyText(task: string, verdict: string | undefined): stri
   return verdict ? `${task}: raport gotowy – ${verdict}` : `${task}: raport gotowy`;
 }
 
-const otherAgent = (a: string): string => (a === 'claude' ? 'codex' : a === 'codex' ? 'claude' : 'drugiego dostawcę');
+const otherAgent = (a: string): string => (PROVIDER_IDS as readonly string[]).includes(a) ? alternatives({ providers: [...PROVIDER_IDS] }, a as AgentName).join(', ') : 'drugiego dostawcę';
 
 export function limitText(record: { task: string; agent: string; pin?: boolean | undefined }): string {
   const base = `${record.task}: ${record.agent} wyczerpał limit użycia`;
@@ -72,13 +73,8 @@ export function limitText(record: { task: string; agent: string; pin?: boolean |
 /** The session the event came from belongs to the task: `usage` counts its tokens for it. */
 async function noteSession(ctx: Context, record: TaskRecord, input: EventInput): Promise<void> {
   try {
-    const data = isObject(input.payload) ? input.payload : {};
-    if (input.agent === 'claude') {
-      const session = sessionOfStatusLine(data);
-      if (session) await rememberSession(ctx.runner, ctx.config, record.window, 'claude', session);
-    } else if (typeof data['thread-id'] === 'string' && data['thread-id'] !== '') {
-      await rememberSession(ctx.runner, ctx.config, record.window, 'codex', { id: data['thread-id'] });
-    }
+    const session = provider(input.agent).events.session({ kind: input.kind, payload: input.payload });
+    if (session) await rememberSession(ctx.runner, ctx.config, record.window, input.agent, session);
   } catch {
     // counting tokens must not break an event
   }
@@ -143,7 +139,7 @@ function reportReady(ctx: Context, record: TaskRecord): boolean {
 export async function handleEvent(ctx: Context, alerts: Alerts, input: EventInput): Promise<EventResult> {
   const { runner } = ctx;
   const now = runner.now();
-  const event = input.agent === 'claude' ? (input.kind ? parseClaudeEvent(input.kind, input.payload) : undefined) : parseCodexEvent(input.payload);
+  const event = provider(input.agent).events.parse({ kind: input.kind, payload: input.payload });
   const record = findRecord(ctx, input.task);
   try {
     if (!event) {
@@ -156,10 +152,8 @@ export async function handleEvent(ctx: Context, alerts: Alerts, input: EventInpu
     }
     // Separate evidence avoids a TASK.md lock in synchronous UserPromptSubmit hooks.
     // In particular, never wait for the sender's prompt-delivery lock here.
-    const normalizePrompt = (text: string) => text.replace(/\r\n?/g, '\n').trim();
-    const submitted = input.kind === 'user-prompt-submit' && isObject(input.payload) && typeof input.payload.prompt === 'string' && normalizePrompt(input.payload.prompt) === normalizePrompt(record.pendingPrompt ?? '');
-    const codexInput = input.agent === 'codex' && isObject(input.payload) && Array.isArray(input.payload['input-messages']) && input.payload['input-messages'].some(text => typeof text === 'string' && normalizePrompt(text) === normalizePrompt(record.pendingPrompt ?? ''));
-    if (record.deliveryId && record.deliveryStartedAt && now >= Date.parse(record.deliveryStartedAt) && (submitted || codexInput)) {
+    const accepted = provider(input.agent).events.acknowledgesPrompt?.({ kind: input.kind, payload: input.payload, prompt: record.pendingPrompt ?? '' });
+    if (record.deliveryId && record.deliveryStartedAt && now >= Date.parse(record.deliveryStartedAt) && accepted) {
       await runner.writeFile(path.join(taskDir(ctx.config, record.window), 'delivery-evidence.json'), JSON.stringify({ deliveryId: record.deliveryId, at: new Date(now).toISOString(), type: event.type, accepted: true }));
     }
     let announced: EventResult['announced'];

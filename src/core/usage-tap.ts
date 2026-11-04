@@ -1,3 +1,4 @@
+import { provider } from './providers/registry.ts';
 import { stableSelfArgv } from './mcp-install.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -46,13 +47,13 @@ export async function rememberSession(runner: Runner, config: Pick<GlobalConfig,
   const file = sessionsFile(config, window);
   if (!fs.existsSync(path.dirname(file))) return; // an orphan window has no state folder
   const known = readTaskSessions(config, window);
-  if (agent === 'claude') {
-    const have = known.claude.find((s) => s.id === session.id);
+  if (provider(agent).capabilities.statusLineTap) {
+    const have = known[agent].find((s) => s.id === session.id) as { id: string; transcript?: string } | undefined;
     if (have && (have.transcript !== undefined || session.transcript === undefined)) return;
-    known.claude = [...known.claude.filter((s) => s.id !== session.id), session];
+    known[agent] = [...known[agent].filter((s) => s.id !== session.id), session];
   } else {
-    if (known.codex.some((s) => s.id === session.id)) return;
-    known.codex.push({ id: session.id });
+    if (known[agent].some((s) => s.id === session.id)) return;
+    known[agent].push({ id: session.id });
   }
   await runner.writeFile(file, `${JSON.stringify(known, null, 2)}\n`);
 }
