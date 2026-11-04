@@ -78,7 +78,7 @@ Default icons: `working` ⚙, `background` ⏳, `waiting` ⏸, `needs-input` ?, 
 | `notify.events` | boolean | `true` | g | The agents report questions, end of turn and limits to `agentctl event` (Claude hooks, Codex `notify`). `false`: screen reading only. |
 | `notify.turn_end` | boolean | `true` | g | A notification when a turn ends and the agent waits. `false`: only questions, reports and limits. |
 | `notify.terminal_app` | bundle ID | detected | g | The terminal app a click on a notification brings to the front, for example `com.apple.Terminal`. |
-| `notify.verdict_pattern` | regex | none | g | Picks the report line quoted in the "report ready" notification; its first group, else the whole line. Without it a line starting with `Werdykt`, `Verdict` or `Status`, else the first line of text. |
+| `notify.verdict_pattern` | regex | none | g | Picks the report line quoted in the "report ready" notification; its first group, else the whole line. Without it: the `verdict` of the report's `agentctl-outputs` block, else a verdict line in the report header (`Werdykt: PASS`, `Verdict - FAIL`, or `# Werdykt` with the value on the next line); never an arbitrary line of text. |
 | `notify.ntfy` | mapping | none | g | Notifications to a phone through [ntfy](https://ntfy.sh); the keys below. Without `topic` nothing is sent. `agentctl ntfy-setup` writes it for you. |
 | `notify.ntfy.server` | URL | `https://ntfy.sh` | g | The ntfy server; your own for a private one. |
 | `notify.ntfy.topic` | text | none | g | The topic the phone subscribes to (letters, digits, `_`, `-`). On the public server its name is the only protection: keep it long and random. |

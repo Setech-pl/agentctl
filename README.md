@@ -556,7 +556,7 @@ In the agentctl tmux session the mouse is on (click a window name in the status 
 Reading a screen every 15 seconds is a guess, so `agentctl new` also asks each agent to report itself: Claude Code through hooks (`Notification`, `Stop`, `StopFailure`), Codex through its `notify` command. `agentctl event` (never typed by hand) records the message, updates the task state at once and notifies. The watcher stays as the fallback, and one transition is announced once.
 
 - Notifications go through `terminal-notifier` when installed (a click runs `agentctl attach <task> --switch-client` and brings your terminal forward), else through `osascript` (`notify-send` on Linux). `notify.backend` chooses; `agentctl notify-test` says which channel carried a test message.
-- Texts: `NC-42: <question>`, `NC-42: raport gotowy – <verdict>` (the verdict is the first meaningful report line, or the line `notify.verdict_pattern` matches), a usage limit, a task that waits for more than 120 seconds, a vanished window. The texts are in Polish at the moment.
+- Texts: `NC-42: <question>`, `NC-42: raport gotowy – <verdict>` (the verdict is the `verdict` of the outputs block, the line `notify.verdict_pattern` matches, or a verdict line in the report header), a usage limit, a task that waits for more than 120 seconds, a vanished window. The texts are in Polish at the moment.
 - States: [docs/diagrams.md](docs/diagrams.md#task-states). Details, event tables and what was checked on Claude Code 2.1.309 and Codex 0.166.0: [docs/details.md](docs/details.md#events).
 
 

@@ -58,12 +58,14 @@ export function headerLines(text: string): string[] {
   const out: string[] = [];
   let bare = false; // the previous line was a label with no value: its value is the next line
   for (const line of text.split('\n')) {
-    if (/^\s{0,3}(?:`{3,}|~{3,})/.test(line) || /^\s{0,3}#{2,6}\s/.test(line)) break;
+    const plain = stripMarkdown(line);
+    const verdictLabel = LABEL.exec(plain); // "Werdykt – PASS", "Verdict:", "# Werdykt": a verdict label in any of its forms keeps the header going
+    if (/^\s{0,3}(?:`{3,}|~{3,})/.test(line) || (/^\s{0,3}#{2,6}\s/.test(line) && !verdictLabel)) break;
     if (/^\s{0,3}>/.test(line) || line.trim() === '') continue;
-    const label = /^\s*(?:[-*]\s+)?(?:\*\*|__)?[^:：\n]{1,40}[:：]\s*(?:\*\*|__)?\s*(.*)$/.exec(line);
+    const label = verdictLabel ?? /^\s*(?:[-*]\s+)?(?:\*\*|__)?[^:：\n]{1,40}[:：]\s*(?:\*\*|__)?\s*(.*)$/.exec(line);
     const isTitle = /^\s{0,3}#\s/.test(line);
     if (!label && !isTitle && !bare) break;
-    bare = Boolean(label) && label![1]!.trim() === '';
+    bare = Boolean(label) && (label![1] ?? '').trim() === '';
     out.push(line);
   }
   return out;
