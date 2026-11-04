@@ -10,7 +10,7 @@ import { RecordingRunner } from '../src/core/runner.ts';
 import type { ExecOptions, ExecResult } from '../src/core/runner.ts';
 import { resolveSpec, splitSpecs } from '../src/core/spec.ts';
 import type { ResolvedSpec } from '../src/core/spec.ts';
-import { makeConfig, makeContext, useScratch } from './helpers.ts';
+import { acknowledgingRespond, DiskRunner, makeConfig, makeContext, useScratch } from './helpers.ts';
 
 const scratch = useScratch();
 const IDLE = '❯ Try "how does <filepath> work?"\n› Ask Codex to do anything\n? for shortcuts';
@@ -114,7 +114,7 @@ describe('new: worktree -> setup -> links -> window', () => {
     assert.ok(runner.commands.some((c) => c.includes('worktree add')));
     assert.ok(!runner.commands.some((c) => c.startsWith('tmux')));
     // --agent still works next to --no-agent
-    const r2 = new RecordingRunner({ dryRun: false, respond: machine((_c, _a) => undefined) });
+    const r2 = new DiskRunner({ dryRun: false, respond: acknowledgingRespond(machine((_c, _a) => undefined)) });
     const code2 = await main(['new', '--agent', 'codex', file], { ...deps, makeRunner: () => r2 });
     assert.equal(code2, 0, err.join(''));
     assert.ok(r2.commands.some((c) => c.includes('codex --sandbox')), `--agent codex is not read as --no-agent: ${r2.commands.join(' | ')}`);

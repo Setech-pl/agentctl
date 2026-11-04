@@ -1,3 +1,4 @@
+import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -30,4 +31,11 @@ export function installation(root = packageRoot(), env: NodeJS.ProcessEnv = proc
   const matches = found !== undefined && realPath(found) === realPath(executable);
   const clone = fs.existsSync(path.join(root, '.git'));
   return { source: clone ? (matches && fs.lstatSync(found!).isSymbolicLink() ? 'npm link klonu' : 'repo dev') : 'npm global', executable, ...(found ? { found } : {}), matches };
+}
+
+/** A separate state home or a different executable is an intentional dev environment. */
+export function developmentEnvironment(configPath?: string, script?: string, stable?: string, home = os.homedir()): boolean {
+  const customHome = configPath !== undefined && realPath(path.dirname(configPath)) !== realPath(path.join(home, '.agentctl'));
+  const otherScript = script !== undefined && stable !== undefined && realPath(script) !== realPath(stable);
+  return customHome || otherScript;
 }

@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.17.3] - 2026-11-04
 
+- Post-live fixes A–O: acknowledge initial prompt delivery for Codex and Claude, retry a swallowed Enter at most twice without repasting, and persist needs-attention when delivery is unconfirmed. Trust-delayed prompts are sent once by new/watch with a durable task marker.
+- Every dispatched/resumed report protocol names the absolute canonical report path and filename. Explicit report_from confirms provenance without a review warning; overwrites require force.
+- Small pull_ready summaries are truthful about truncation, extract backticked SHAs and avoid duplicated headings. Full reports paginate through response_page and are marked pulled only after contiguous complete delivery.
+- Dev MCP identity no longer asks users to restart Claude because stable has another version; doctor reports dev PATH differences as information. Ignore plain shell windows when detecting orphans, and avoid stale-plan events before the first reading.
+- Cohort close previews use the execution plan; report_from previews show source/overwrite facts; archive honors an explicit cohort. Bootstrap cohort grace from the latest stored task change.
+- Behavior change: report candidates are journal/status/board flags without local or ntfy notifications, keeping a candidate from competing with an agent question. 0173-11 is a determinism fix to a test, not a regression that fails reliably on 0.17.2. Remove dead syncReport pane/message options.
+
 - Bound all MCP responses to 8 KiB by default with session-local response fragments; write previews show affected tasks only, global queue operations show counts and five queued tasks.
 - Report discovery accepts only current-attempt configured alternatives bearing the task ID; copying always requires explicit report_from/--from. Candidate flags preserve task states and questions. Status/doctor flag historical report_source copies for review.
 - Delay cohort completion until 300 seconds after its last membership/state change (cohort.done_grace_s).

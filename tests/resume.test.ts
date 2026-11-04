@@ -97,6 +97,7 @@ describe('resume: starting the agents', () => {
     assert.match(results[1]?.command ?? '', /^codex resume --last --sandbox danger-full-access -m gpt-6\.1-sol -c model_reasoning_effort=high -c 'notify=/);
     const cmds = w.runner.commands.join('\n');
     assert.ok(w.runner.calls.filter(c => c.line.includes('load-buffer')).every(c => c.input?.startsWith('Report protocol:')), 'only new attempt instructions, not the original task prompt');
+    for (const id of ['nc-1','nc-2']) assert.ok(w.runner.calls.some(c => c.line.includes('load-buffer') && c.input?.includes(readTaskRecord(w.config, id)!.report)), '0173-FIX-B resume canonical path');
     assert.ok(readTaskRecord(w.config, 'nc-1')!.attemptId);
     assert.ok(fs.existsSync(path.join(w.config.stateDir, 'nc-1', 'claude-settings.json')), 'the hooks and the usage tap are wired again');
     assert.match(fs.readFileSync(path.join(w.config.stateDir, 'nc-1', 'claude-settings.json'), 'utf8'), /usage-tap/);

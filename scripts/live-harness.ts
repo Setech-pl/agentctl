@@ -344,3 +344,28 @@ export async function withHarness<T>(options: HarnessOptions, fn: (h: Harness) =
     h.stop();
   }
 }
+
+/** Raw-TTY double for paste acknowledgements; replaces only a fake inside this harness. */
+export function installPromptAgent(h: Harness, agent: 'claude' | 'codex', mode: 'swallow-first' | 'swallow-all' | 'trust', log: string): void {
+  h.check();
+  const program = `#!${process.execPath}
+import fs from 'node:fs';
+const args=process.argv.slice(2);
+if(args.includes('--version')){console.log('${agent} 0.166.0 (fake)');process.exit(0);}
+if(args.includes('--help')){console.log('--effort --remote-control --append-system-prompt');process.exit(0);}
+let trusted=${mode !== 'trust'}, pasted='', stream='', enters=0, submitted=false;
+const log=${JSON.stringify(log)};
+const note=(value)=>fs.appendFileSync(log,JSON.stringify(value)+'\\n');
+const draw=()=>process.stdout.write('\\x1b[2J\\x1b[H'+(!trusted?'Do you trust this folder?\\n❯ No, exit\\nYes, I trust this folder\\n':submitted?'Working (esc to interrupt)\\n':'Heads up, you have less than 25% of your weekly limit left\\n${agent === 'codex' ? '›' : '❯'} '+(pasted?'[Pasted Content '+pasted.length+' chars]':'${agent === 'codex' ? 'Ask Codex to do anything' : 'Try "fake"'}')+'\\n'));
+process.stdout.write('\\x1b[?2004h');process.stdin.setRawMode(true);process.stdin.resume();
+process.stdin.on('data',data=>{stream+=data.toString();for(;;){
+ if(stream.startsWith('\\x1b[200~')){const end=stream.indexOf('\\x1b[201~');if(end<0)return;pasted=stream.slice(6,end);stream=stream.slice(end+6);note({paste:pasted});draw();continue;}
+ if(!stream.length)return;
+ if(stream.startsWith('\\x1b') && stream.length<6)return;
+ const c=stream[0];stream=stream.slice(1);
+ if(!trusted){if(c==='y'){trusted=true;note({trusted:true});draw();}continue;}
+ if(c==='\\r'||c==='\\n'){enters++;note({enter:enters});if(${JSON.stringify(mode)}!=='swallow-all' && (enters>1 || ${JSON.stringify(mode)}==='trust')){submitted=true;pasted='';note({working:true});}draw();}
+}});draw();
+`;
+  fs.writeFileSync(path.join(h.fakeBin, agent), program, { mode: 0o755 });
+}

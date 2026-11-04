@@ -54,8 +54,8 @@ it('0173-2/3: mentioned README is ignored; glob candidate is a flag beside needs
   const r = seedTask(f.config, 'T2', { repos: [{ path: wt, worktree: wt }], reportAlt: ['*.md'] });
   f.tmux.add('t2', question);
   for (const name of ['README.md', 'CHANGELOG.md', 'CLAUDE.md', 'integration-12.md']) fs.writeFileSync(path.join(wt, name), 'Werdykt: PASS');
-  await syncReport(f.ctx, r, { message: 'README.md CHANGELOG.md CLAUDE.md integration-12.md' });
-  assert.deepEqual(findCandidates(f.ctx, r, 'README.md'), []);
+  await syncReport(f.ctx, r);
+  assert.deepEqual(findCandidates(f.ctx, r), []);
   assert.equal((await collectStatus(f.ctx))[0]!.state, 'needs-input');
   fs.writeFileSync(path.join(wt, 'T2-final.md'), 'Werdykt: PASS\n');
   await syncReport(f.ctx, r);
@@ -67,8 +67,8 @@ it('0173-2/3: mentioned README is ignored; glob candidate is a flag beside needs
   assert.equal((await f.call('report_from', { task: 'T2', from: 'T2-final.md' })).isError, undefined);
   assert.equal((await f.call('report_from', { task: 'T2', from: 'T2-final.md', confirm: true })).isError, undefined);
   assert.equal(fs.readFileSync(r.report, 'utf8'), 'Werdykt: PASS\n');
-  assert.match((await f.call('status')).text, /raport pochodzi z kopii/);
-  assert.match((await f.call('doctor')).text, /raport pochodzi z kopii/);
+  assert.doesNotMatch((await f.call('status')).text, /raport pochodzi z kopii/);
+  assert.doesNotMatch((await f.call('doctor')).text, /raport pochodzi z kopii/);
 });
 it('0173-4: grace persists, resets on membership/state changes, cancels for new work and announces a later cohort again', async () => {
   const f = fixture('grace'); assert.equal(f.config.cohort.doneGraceS, 300);

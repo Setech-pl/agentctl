@@ -18,7 +18,7 @@ export async function recordStaleCapacity(ctx: Context, plans: Record<AgentName,
     for (const provider of ['claude', 'codex'] as const) {
       const plan = plans[provider];
       const active = live.some((w) => w.agent === provider && w.kind === undefined);
-      const stale = active && (plan.readAt === null || ctx.runner.now() - plan.readAt > ctx.config.capacity.staleMinutes * 60_000);
+      const stale = active && plan.readAt !== null && ctx.runner.now() - plan.readAt > ctx.config.capacity.staleMinutes * 60_000;
       const key = String(plan.readAt);
       if (stale && state[provider] !== key) {
         await recordJournal(ctx, { kind: 'usage', text: `${provider}: plan reading stale with active tasks (>${ctx.config.capacity.staleMinutes} min, age ${plan.readAt === null ? 'n/d' : Math.floor((ctx.runner.now() - plan.readAt) / 1000)} s)` });

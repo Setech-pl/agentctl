@@ -1,3 +1,4 @@
+import { developmentEnvironment } from './installation.ts';
 import { withFileLock as withReportLock } from './file-lock.ts';
 import { redactQueue } from './mcp-redact.ts';
 import { reportFingerprint } from './report-state.ts';
@@ -81,6 +82,7 @@ export interface ToolResult {
   isError?: boolean;
   delivered?: number;
   data?: unknown;
+  onDelivered?: () => Promise<void>;
 }
 
 export interface McpDeps {
@@ -167,7 +169,7 @@ export function reportSummary(text: string): string {
 }
 
 function compactStatus(r: StatusRow): string {
-  return `${r.task} ${r.agent}/${r.model}/${r.effort} ${r.state} ${r.duration} cohort=${r.cohort ?? 'n/d'} report=${r.report === 'yes' ? 'tak' : r.reportCandidate ? `kandydat:${r.reportCandidate}` : 'brak'}${r.collide.length ? ` ⚠${r.collide.length}` : ''}${r.question ? ` ? ${r.question}` : ''}${r.reportSource && path.normalize(r.reportSource) !== path.normalize(r.reportPath) ? `; raport pochodzi z kopii ${r.reportSource} – sprawdź` : ''}`;
+  return `${r.task} ${r.agent}/${r.model}/${r.effort} ${r.state} ${r.duration} cohort=${r.cohort ?? 'n/d'} report=${r.report === 'yes' ? 'tak' : r.reportCandidate ? `kandydat:${r.reportCandidate}` : 'brak'}${r.collide.length ? ` ⚠${r.collide.length}` : ''}${r.question ? ` ? ${r.question}` : ''}${r.state === 'needs-attention' ? `; ${r.hint}` : ''}${!r.reportConfirmed && r.reportSource && path.normalize(r.reportSource) !== path.normalize(r.reportPath) ? `; raport pochodzi z kopii ${r.reportSource} – sprawdź` : ''}`;
 }
 
 async function pullSummaries(ctx: Context, rows: StatusRow[], ack = false): Promise<ToolResult> {
@@ -187,7 +189,10 @@ async function pullSummaries(ctx: Context, rows: StatusRow[], ack = false): Prom
     const factSection = (pattern: RegExp) => { const h = markdownHeadings(reportText).find(h => pattern.test(h.title)); return h ? cut(reportSection(reportText, h.title), 600) : 'n/d'; };
     const blockers = cut([factSection(/blok|block|question|pytani|error|błęd/i), ...reportText.split('\n').filter(l => /^(?:[-*]\s*)?(?:BLOKER|BLOCKER|BLOCKED|ERROR|BŁĄD|PYTANIE|QUESTION)\s*[:—-]/i.test(l.trim())).slice(0, 10)].join('\n'), 700);
     const decisions = factSection(/decyzj|decision/i);
-    const part = `=== ${row.task} ===\nattempt: ${row.attemptId ?? row.attempt ?? 'n/d (legacy)'}\npath: ${row.reportPath}\nbytes: ${r.bytes}\nverdict: ${first}\nblockers: ${blockers}\ndecisions: ${decisions}\ntruncated: true; details: get_report\n${first}\n${refs}\n${cut(reportSummary(reportText), 3000)}\n[excerpt; get_report section/offset/limit reads more]`;
+    const sha = /`([0-9a-f]{7,40})`/i.exec(reportText)?.[1] ?? /\b(?:SHA|commit)\s*[:=]?\s*`?([0-9a-f]{7,40})\b/i.exec(reportText)?.[1] ?? 'n/d';
+    const complete = Buffer.byteLength(reportText) <= 1500;
+    const excerpt = reportSummary(reportText).split('\n').filter((line, i) => i > 0 || line.trim() !== first.trim()).join('\n');
+    const part = `=== ${row.task} ===\nattempt: ${row.attemptId ?? row.attempt ?? 'n/d (legacy)'}\npath: ${row.reportPath}\nbytes: ${r.bytes}\nsha: ${sha}\ntruncated: ${!complete}\n${complete ? reportText : `verdict: ${first}\nblockers: ${blockers}\ndecisions: ${decisions}\n${refs}\n${cut(excerpt, 3000)}\n[excerpt; get_report section/offset/limit reads more]`}`;
     parts.push(part); taken.push(row);
     if (responseWireBytes(ok(response())) > ctx.config.mcp.maxResponseKb * 1024 - 512) { if (taken.length > 1) { parts.pop(); taken.pop(); } break; }
   }
@@ -230,6 +235,7 @@ function statusRowForChat(r: StatusRow): Record<string, unknown> {
     report: r.report,
     reportCandidate: r.reportCandidate ?? null,
     reportSource: r.reportSource ?? null,
+    reportConfirmed: r.reportConfirmed ?? null,
     reportPath: r.reportPath,
     reportPulled: r.pulled !== null,
     lastLine: r.lastLine,
@@ -410,7 +416,8 @@ function serverLines(deps: McpDeps, ctx: Context): string[] {
   const lines: string[] = [];
   if (deps.server) {
     const stable = versionOf(stableScript());
-    lines.push(`MCP server: agentctl ${deps.server.version} (${deps.server.script}, pid ${deps.server.pid}, started ${deps.server.started})${stable && stable !== deps.server.version ? ` – the stable copy on disk is ${stable}: ${staleNote}` : ''}`);
+    const dev = developmentEnvironment(ctx.config.path, deps.server.script, stableScript());
+    lines.push(`MCP server: agentctl ${deps.server.version} (${deps.server.script}, pid ${deps.server.pid}, started ${deps.server.started})${dev ? ' – środowisko dev' : stable && stable !== deps.server.version ? ` – the stable copy on disk is ${stable}: ${staleNote}` : ''}`);
   }
   for (const w of ctx.config.mcp.warnings) lines.push(`Config warning: ${w}`);
   if (ctx.config.reloadWarning) lines.push(`Config warning: ${ctx.config.reloadWarning}`);
@@ -422,13 +429,15 @@ const staleNote = 'the user should quit the Claude app (⌘Q) and open it again 
 async function runVersion(deps: McpDeps): Promise<ToolResult> {
   const ctx = deps.context(() => {});
   const stableVersion = versionOf(stableScript());
+  const dev = developmentEnvironment(ctx.config.path, deps.server?.script, stableScript());
   const info = {
+    environment: dev ? 'środowisko dev' : 'stable',
     version: deps.server?.version ?? null,
     script: deps.server?.script ?? null,
     pid: deps.server?.pid ?? null,
     started: deps.server?.started ?? null,
     stableCopyVersion: stableVersion ?? null,
-    older: deps.server !== undefined && stableVersion !== undefined && stableVersion !== deps.server.version,
+    older: !dev && deps.server !== undefined && stableVersion !== undefined && stableVersion !== deps.server.version,
     writeToolsAllowed: ctx.config.mcp.allow,
     configWarnings: [...ctx.config.mcp.warnings, ...(ctx.config.reloadWarning ? [ctx.config.reloadWarning] : [])],
   };
@@ -605,23 +614,10 @@ async function runPullReady(deps: McpDeps, args: { cohort?: string | undefined; 
   if (chosen.some(row => { const current = rows.find(r => r.task === row.task); return !current || current.report !== 'yes' || current.attemptId !== row.attemptId; })) throw new AgentctlError('report selection changed; restart at offset 0 before acknowledging');
   if (args.mode !== 'full') { const result = await pullSummaries(ctx, chosen, args.ack); return ok(`${result.text}\nnext_cursor: ${selection.id}:${offset + (result.delivered ?? 0)}; has_more: ${offset + (result.delivered ?? 0) < selection.rows.length}`); }
   if (chosen.length === 0) return ok(noReadyMessage(rows));
-  // Size the complete serialized delivery before marking any report as read.
-  const taken: StatusRow[] = [];
-  const render = (selected: StatusRow[]): ToolResult => {
-    const left = chosen.filter(r => !selected.includes(r));
-    const { text, pulled } = joinReports(selected);
-    const advanced = selected.length || 1;
-    const head = `${pulled.length} new report${pulled.length === 1 ? '' : 's'}, now marked as pulled: ${pulled.map(p => p.task).join(', ')}`;
-    const rest = left.length ? `\n${left.length} more did not fit under ${ctx.config.mcp.maxResponseKb} KB and stay new: ${left.slice(0, 10).map(r => r.task).join(', ')}${left.length > 10 ? ', …' : ''}. Continue with next_cursor; an oversized first report requires get_report pages and remains unread.` : '';
-    return ok(`${head}${rest}\n\n${text}\nnext_cursor: ${selection!.id}:${offset + advanced}; has_more: ${offset + advanced < selection!.rows.length}`);
-  };
-  for (const row of chosen) {
-    if (fs.statSync(row.reportPath).size > MAX_TEXT_BYTES || responseWireBytes(render([...taken, row])) > ctx.config.mcp.maxResponseKb * 1024) break;
-    taken.push(row);
-  }
-  const result = render(taken);
-  await markPulled(ctx, taken);
-  return result;
+  const { text, pulled } = joinReports(chosen);
+  const head = `${pulled.length} new report${pulled.length === 1 ? '' : 's'}; marked as pulled after complete delivery: ${pulled.map(p => p.task).join(', ')}`;
+  return { text: `${head}\n\n${text}\nnext_cursor: ${selection.id}:${offset + chosen.length}; has_more: ${offset + chosen.length < selection.rows.length}`, onDelivered: () => markPulled(ctx, chosen) };
+
 }
 
 async function runTaskSpec(deps: McpDeps, args: { task: string }): Promise<ToolResult> {
@@ -988,7 +984,7 @@ export const MCP_TOOLS: McpToolDef[] = [
     title: 'Take all new reports',
     kind: 'read',
     description:
-      'Default: summary receipt only (not pulled); ack: true attests full read elsewhere. Summary excerpts (1500 characters each; 16000 bytes total) with task, path, size, first-line verdict and SHA/branch when present. mode: full reads bodies (200 KiB total); offset/limit paginate reports. All reports that are ready and not yet pulled, each under a header with the task and agent, in one answer; they are then marked as pulled (the only thing this tool changes, in agentctl\'s own state). ' +
+      'Default: summary receipt only (not pulled); ack: true attests full read elsewhere. Summary excerpts (small reports delivered whole; larger excerpts up to 1500 characters each, bounded by mcp.max_response_kb) with task, path, size, first-line verdict and SHA/branch when present. mode: full returns complete report bodies through bounded response_page fragments; offset/limit paginate report selection. Pulled is recorded only after contiguous complete delivery. All reports that are ready and not yet pulled, each under a header with the task and agent, in one answer; they are then marked as pulled (the only thing this tool changes, in agentctl\'s own state). ' +
       'Use it at the START of discussing the results of finished tasks, instead of asking the user to paste reports. A second call returns only reports that arrived since. cohort: only the reports of that cohort (the others stay new). Cancelled tasks are never included.',
     input: { cohort: cohortArg.optional(), all: z.boolean().optional(), mode: z.enum(['summary', 'full']).optional(), ack: z.boolean().optional().describe('Explicitly attest that the full reports were read elsewhere; independent of mark.'), cursor: z.string().max(200).optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional() },
     annotations: { title: 'Take all new reports', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
@@ -1257,9 +1253,9 @@ MCP_TOOLS.push(
   extraWrite('cohort_remove', 'cohort remove <TASKS...>', 'Remove cohort membership', { tasks: z.array(taskArg).min(1).max(100) }, async (ctx, a) => setCohortOf(ctx, a.tasks, undefined)),
   extraWrite('cohort_note', 'cohort note <NAME> <TEXT>', 'Change the note of a cohort', { cohort: cohortArg, text: z.string().max(20000) }, async (ctx, a) => setNote(ctx, a.cohort, a.text)),
   ...(['hide', 'unhide'] as const).map((name) => extraWrite(name, `${name} <TASKS...>`, `${name} tasks on the board`, { tasks: z.array(taskArg).min(1).max(100) }, async (ctx, a) => setHidden(ctx, a.tasks, name === 'hide'))),
-  extraWrite('archive', 'archive [--older-than <AGE>]', 'Archive the state of closed tasks', { older_than: optionalText }, async (ctx, a) => archiveClosed(ctx, { olderThanMs: a.older_than ? parseAge(a.older_than) : undefined })),
+  extraWrite('archive', 'archive [--older-than <AGE>]', 'Archive the state of closed tasks', { older_than: optionalText, cohort: cohortArg.optional() }, async (ctx, a) => archiveClosed(ctx, { cohort: a.cohort, olderThanMs: a.older_than ? parseAge(a.older_than) : undefined })),
   extraWrite('adopt', 'adopt <TASK> --report <PATH>', 'Restore missing task metadata from facts supplied by the user', { task: taskArg, report: z.string().min(1), window: optionalText, worktree: optionalText, agent: z.enum(AGENT_NAMES).optional(), model: optionalText, effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional() }, async (ctx, a) => { await adoptTask(ctx, a.task, a); return { task: a.task, adopted: true }; }),
-  extraWrite('report_from', 'report <TASK> --from <FILE> [--force]', 'Copy a chosen report to its canonical location', { task: taskArg, from: z.string().min(1), force: z.boolean().optional() }, async (ctx, a) => reportInfo(ctx, a.task, { from: a.from, force: a.force })),
+  extraWrite('report_from', 'report <TASK> --from <FILE> [--force]', 'Copy a chosen report to its canonical location', { task: taskArg, from: z.string().min(1), force: z.boolean().optional() }, async (ctx, a) => { const info = await reportInfo(ctx, a.task, { from: a.from, force: a.force }); if (info.result?.action === 'kept' || (info.result?.action === 'none' && info.result.note)) throw new AgentctlError(info.result.note ?? 'report was not copied', 'Preview again with force: true only if replacing the canonical file is intended.'); return info; }),
   extraWrite('limits_release', 'limits release [claude=N codex=N]', 'Release reserved provider places', { claude: limitArg, codex: limitArg }, async (ctx, a) => releasePlaces(ctx, { ...(a.claude !== undefined ? { claude: a.claude } : {}), ...(a.codex !== undefined ? { codex: a.codex } : {}) })),
   extraWrite('manager_start', 'manager', 'Start the supervising manager session', { project: optionalText, name: optionalText, model: optionalText, effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional() }, async (ctx, a, deps) => { if (!deps.self) throw new AgentctlError('this server has no self command for the manager'); return startManager(ctx, { ...a, self: deps.self, noWait: true }); }),
   extraWrite('manager_stop', 'manager stop', 'Stop the manager session', {}, async (ctx) => ({ state: await stopManager(ctx) })),
@@ -1282,7 +1278,7 @@ const confirmedTools = new Set(['new', 'queue', 'cancel', 'resume', 'move', 'int
 const previews = new WeakMap<McpDeps, Map<string, { fingerprint: string; at: number }>>();
 /** Exact arguments and observed task/queue/window identities bind confirmation to this session. No scope can silently grow. */
 async function confirmationScope(ctx: Context, name: string, args: Record<string, unknown>): Promise<unknown> {
-  if (name === 'close') await planClose(ctx, await closeInputs(ctx, args as CloseMcpArgs), { rmWorktree: Boolean(args.remove_worktree) });
+  if (name === 'close') { const ids = await closeInputs(ctx, args as CloseMcpArgs); return { tasks: await planClose(ctx, ids, { rmWorktree: Boolean(args.remove_worktree) }), records: listTaskRecords(ctx.config).filter(r => ids.includes(r.task)) }; }
   if (name === 'gc') {
     const plan = await planGc(ctx, { cohort: args.cohort as string | undefined, olderThan: args.older_than as string | undefined, branches: Boolean(args.branches) });
     return plan;
@@ -1305,7 +1301,7 @@ async function confirmationScope(ctx: Context, name: string, args: Record<string
     const signature = (file: string) => { try { const st = fs.statSync(file); return { size: st.size, mtime: st.mtimeMs, ino: st.ino, hash: createHash('sha256').update(fs.readFileSync(file)).digest('hex') }; } catch { return null; } };
     return { record, source, sourceSignature: signature(source), destinationSignature: signature(record.report) };
   }
-  if (name === 'archive') return archiveClosed(ctx, { olderThanMs: args.older_than ? parseAge(args.older_than as string) : undefined, preview: true });
+  if (name === 'archive') return archiveClosed(ctx, { cohort: args.cohort as string | undefined, olderThanMs: args.older_than ? parseAge(args.older_than as string) : undefined, preview: true });
   const tasks = [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)];
   const queue = readQueue(ctx.config);
   const windows = await ctx.tmux.windows();
@@ -1314,6 +1310,11 @@ async function confirmationScope(ctx: Context, name: string, args: Record<string
 /** Display only the operation's targets; the private fingerprint still guards the full observed scope. */
 async function previewScope(ctx: Context, name: string, args: Record<string, unknown>, scope: unknown): Promise<unknown> {
   if (name === 'archive') return scope;
+  if (name === 'close') return { tasks: (scope as { tasks: unknown[] }).tasks, omitted: 0 };
+  if (name === 'report_from') {
+    const plan = scope as { record: TaskRecord; source: string; sourceSignature: { size: number } | null; destinationSignature: unknown };
+    return { tasks: [{ task: plan.record.task }], source: plan.source, source_exists: plan.sourceSignature !== null, source_bytes: plan.sourceSignature?.size ?? null, canonical: plan.record.report, canonical_exists: plan.destinationSignature !== null, would_overwrite: plan.destinationSignature !== null, requires_force: plan.destinationSignature !== null && !args.force };
+  }
   const records = listTaskRecords(ctx.config).filter(r => !r.closed && !r.cancelled);
   const queue = readQueue(ctx.config);
   const selected = new Set<string>([...(Array.isArray(args.tasks) ? args.tasks as string[] : []), ...(typeof args.task === 'string' ? [args.task] : [])]);
@@ -1405,7 +1406,7 @@ function compactFacts(value: unknown, prefix = ''): string {
 }
 
 /** Session-local snapshots: continuing a response never repeats a write or consumes another event page. */
-const responses = new WeakMap<McpDeps, Map<string, { tool: string; text: string; isError?: boolean }>>();
+const responses = new WeakMap<McpDeps, Map<string, { tool: string; text: string; isError?: boolean; onDelivered?: () => Promise<void>; covered?: number }>>();
 MCP_TOOLS.push(def({ name: 'response_page', title: 'Continue a bounded response', kind: 'read', description: 'Retrieve a cached response fragment without repeating the original operation. CLI: no equivalent (MCP response transport).', input: { response_id: z.string().max(100), response_offset: z.number().int().min(0) }, annotations: readOnly('Continue a bounded response'), run: async () => fail('response_id is required') }));
 export function responseWireBytes(result: ToolResult): number {
   return Buffer.byteLength(JSON.stringify({ content: [{ type: 'text', text: result.text }], ...(result.isError ? { isError: true } : {}) }));
@@ -1419,7 +1420,7 @@ for (const tool of MCP_TOOLS) {
     let cache = responses.get(deps);
     if (!cache) { cache = new Map(); responses.set(deps, cache); }
     let id = response_id as string | undefined;
-    let saved: { tool: string; text: string; isError?: boolean };
+    let saved: { tool: string; text: string; isError?: boolean; onDelivered?: () => Promise<void>; covered?: number };
     if (id) {
       const found = cache.get(id);
       if (!found || (tool.name !== 'response_page' && found.tool !== tool.name)) return fail('Response expired or belongs to another tool. Repeat the original read/preview; do not repeat a confirmed write.');
@@ -1427,8 +1428,8 @@ for (const tool of MCP_TOOLS) {
     } else {
       if (response_offset !== undefined) return fail('response_offset requires response_id');
       const result = await guarded(() => run(deps, input));
-      if (responseWireBytes(result) <= budget && Buffer.byteLength(JSON.stringify(result)) <= budget) return result;
-      saved = { tool: tool.name, text: result.text, ...(result.isError ? { isError: true } : {}) };
+      if (responseWireBytes(result) <= budget && Buffer.byteLength(JSON.stringify(result)) <= budget) { await result.onDelivered?.(); const { onDelivered: _callback, ...delivered } = result; return delivered; }
+      saved = { tool: tool.name, text: result.text, onDelivered: result.onDelivered, covered: 0, ...(result.isError ? { isError: true } : {}) };
       id = crypto.randomUUID();
       while (cache.size >= 16 || [...cache.values()].reduce((n, r) => n + Buffer.byteLength(r.text), 0) > 8 * 1024 * 1024) cache.delete(cache.keys().next().value!);
       cache.set(id, saved);
@@ -1439,6 +1440,8 @@ for (const tool of MCP_TOOLS) {
     let lo = offset, hi = saved.text.length;
     while (lo < hi) { const mid = Math.ceil((lo + hi) / 2); const result = page(mid); if (responseWireBytes(result) <= budget && Buffer.byteLength(JSON.stringify(result)) <= budget) lo = mid; else hi = mid - 1; }
     if (lo > offset && /[\uD800-\uDBFF]/.test(saved.text[lo - 1]!)) lo--;
+    if (offset <= (saved.covered ?? 0)) saved.covered = Math.max(saved.covered ?? 0, lo);
+    if (saved.covered === saved.text.length && saved.onDelivered) { await saved.onDelivered(); delete saved.onDelivered; }
     return page(lo);
   });
 }

@@ -1,6 +1,7 @@
 import type { AgentSettings } from './config.ts';
 import type { ResolvedSpec } from './spec.ts';
-import { shellLine } from './util.ts';
+import path from 'node:path';
+import { resolvePath, shellLine } from './util.ts';
 
 export const DEFAULT_MODEL = 'default';
 
@@ -47,10 +48,10 @@ export function agentCommandLine(argv: string[]): string {
 }
 
 /** Every prompt agentctl delivers starts with this line, whatever flags the agent took. */
-export const reportInstructions = (attemptId = 'current') => `Report protocol: write the report for attempt ${attemptId}. Include <!-- agentctl:attempt ${attemptId} --> and append <!-- agentctl:report-end --> as the final line only after the entire report is written.`;
+export const reportInstructions = (attemptId = 'current', report?: string) => `Report protocol: write the report${report ? ` to the canonical absolute path ${resolvePath(report)} (filename: ${path.basename(report)})` : ''} for attempt ${attemptId}. Include <!-- agentctl:attempt ${attemptId} --> and append <!-- agentctl:report-end --> as the final line only after the entire report is written.`;
 
-export function promptWithHeader(spec: Pick<ResolvedSpec, 'model' | 'effort' | 'prompt'>, attemptId?: string): string {
-  return `Model: ${spec.model} · effort ${spec.effort}\n\n${spec.prompt}\n\n${reportInstructions(attemptId)}`;
+export function promptWithHeader(spec: Pick<ResolvedSpec, 'model' | 'effort' | 'prompt'> & { report?: string }, attemptId?: string): string {
+  return `Model: ${spec.model} · effort ${spec.effort}\n\n${spec.prompt}\n\n${reportInstructions(attemptId, spec.report)}`;
 }
 
 export const INSTALL_HINTS: Record<string, string> = {

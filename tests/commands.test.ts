@@ -82,7 +82,7 @@ Second line.
     const taskMd = runner.commands.find((c) => c.startsWith('write '));
     assert.match(taskMd ?? '', new RegExp(`^write ${state}/TASK.md \\(\\d+ bytes\\)$`));
     assert.deepEqual(
-      runner.commands.filter((c) => !c.startsWith('write ')),
+      runner.commands.filter((c) => !c.startsWith('write ') && !c.includes('@agentctl-role')),
       [
         `git -C ${repoA} branch nc-1 main`,
         `git -C ${repoA} worktree add ${wt('1')} nc-1`,
@@ -102,9 +102,10 @@ Second line.
     const paste = runner.calls.find((c) => c.line.startsWith('tmux load-buffer'));
     assert.ok(paste?.input?.startsWith('Model: opus · effort medium\n\nFirst line.\nSecond line.\n\nReport protocol:'));
     assert.match(paste!.input!, /agentctl:report-end/);
+    assert.ok(paste!.input!.includes(path.join(config.cache, 'nc-1/NC-1.md')), '0173-FIX-B new canonical path');
 
     const record = fs.existsSync(path.join(state, 'TASK.md'));
-    assert.equal(record, false, 'a recording runner must not write files');
+    assert.equal(record, true, 'delivery state persists before polling');
   });
 
   it('adds a window to an existing session and starts codex with its flags', async () => {

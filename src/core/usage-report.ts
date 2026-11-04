@@ -58,7 +58,7 @@ export interface UsageReport {
   cohorts: CohortUsage[];
 }
 
-const ACTIVE = new Set(['overloaded', 'working', 'background', 'waiting', 'needs-input', 'needs-trust', 'limited', 'report-ready']);
+const ACTIVE = new Set(['needs-attention', 'overloaded', 'working', 'background', 'waiting', 'needs-input', 'needs-trust', 'limited', 'report-ready']);
 
 export interface UsageOptions {
   cohort?: string | undefined;

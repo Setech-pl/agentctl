@@ -1,3 +1,4 @@
+import { screenMetadata } from './tmux.ts';
 import { PATTERN_FLAGS } from './config.ts';
 import type { Runner } from './runner.ts';
 import type { Tmux } from './tmux.ts';
@@ -7,11 +8,12 @@ export interface TrustWait {
   /** How long to wait for a human to answer the dialog. */
   timeoutMs: number;
   /** Called once, when the dialog first shows up. */
-  onWaiting: () => void;
+  onWaiting: () => void | Promise<void>;
 }
 
 export interface ReadyOptions {
   pattern: string;
+  emptyInput?: boolean;
   /** If the screen matches this (folder-trust dialog), the human has to answer it: stop waiting, or wait for them (`waitTrust`). */
   trustPattern?: string;
   timeoutMs: number;
@@ -63,14 +65,14 @@ export async function waitForReady(runner: Runner, tmux: Tmux, window: string, o
         if (!inTrust) {
           inTrust = true;
           deadline = runner.now() + opts.waitTrust.timeoutMs;
-          opts.waitTrust.onWaiting();
+          await opts.waitTrust.onWaiting();
         }
       } else {
         if (inTrust) {
           inTrust = false;
           deadline = runner.now() + opts.timeoutMs;
         }
-        if (regex.test(screen)) return { ready: true, trust: false, screen };
+        if (regex.test(screen) && (!opts.emptyInput || !screenMetadata(screen).draft_input)) return { ready: true, trust: false, screen };
       }
     }
     if (runner.now() >= deadline) return { ready: false, trust: inTrust, screen };

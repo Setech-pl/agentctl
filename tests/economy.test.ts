@@ -108,7 +108,7 @@ it('economy: report candidates cannot satisfy dependencies; valid configured rep
   f.tmux.add('nc-1', '❯ \n');
   for (const name of ['CLAUDE.md', 'README.md', 'AGENTS.md', 'CHANGELOG.md', 'integration-12.md', 'NC-1-no-verdict.md', 'NC-1-tracked.md']) {
     fs.writeFileSync(path.join(wt, name), ['integration-12.md', 'NC-1-no-verdict.md'].includes(name) ? '# no verdict' : 'Werdykt: PASS\n');
-    assert.equal((await syncReport(f.ctx, rec, { message: name })).action, 'none', name);
+    assert.equal((await syncReport(f.ctx, rec)).action, 'none', name);
     assert.ok(!fs.existsSync(rec.report), name);
   }
   const rows = await collectStatus(f.ctx, { progress: false });
@@ -116,7 +116,7 @@ it('economy: report candidates cannot satisfy dependencies; valid configured rep
   assert.equal(hasReport(rows[0]), false);
   assert.match((await f.call('pull_ready')).text, /No reports ready/);
   const candidateEvents = readJournal(f.config).filter(e => e.kind === 'report-candidate');
-  await syncReport(f.ctx, rec, { message: rec.reportCandidate });
+  await syncReport(f.ctx, rec);
   assert.equal(readJournal(f.config).filter(e => e.kind === 'report-candidate').length, candidateEvents.length);
   fs.writeFileSync(path.join(wt, 'NC-1-valid.md'), 'Werdykt: PASS\n## Summary\nDone');
   assert.equal((await syncReport(f.ctx, rec, { from: path.join(wt, 'NC-1-valid.md') })).action, 'copied');

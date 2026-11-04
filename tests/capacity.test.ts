@@ -11,7 +11,7 @@ import type { UsageSample } from '../src/core/usage-samples.ts';
 import { MCP_TOOLS } from '../src/core/mcp-tools.ts';
 import { loadViewLines } from '../src/core/board.ts';
 import { Context } from '../src/core/context.ts';
-import { DiskRunner, FakeTmux, makeConfig, runCli, useScratch } from './helpers.ts';
+import { acknowledgingRespond, DiskRunner, FakeTmux, makeConfig, runCli, useScratch } from './helpers.ts';
 import { makeWorld, setClaudePlan } from './usage-world.ts';
 const scratch = useScratch();
 const NOW = Date.parse('2026-11-03T12:00:00Z');
@@ -207,12 +207,12 @@ describe('capacity: scheduling evidence', () => {
     const t = world('order-snapshot'); const repo = scratch.sub('order-repo');
     const { specText } = await import('./helpers.ts');
     const spec = specText({ task: 'APP-1', agent: 'claude', model: 'sonnet', effort: 'medium' }, repo);
-    const fresh = new DiskRunner({ dryRun: false, startTime: NOW, respond: (cmd, args, opts) => {
+    const fresh = new DiskRunner({ dryRun: false, startTime: NOW, respond: acknowledgingRespond((cmd, args, opts) => {
       if (cmd === 'git' && args.includes('--verify')) return { code: 1 };
       if (cmd === 'tmux') return args[0] === 'capture-pane' ? { stdout: '❯ Try "fake"' } : (args[0] === 'has-session' || args[0] === 'list-windows' ? { code: 1 } : {});
       if (cmd === 'codex') return { code: 127 };
       return {};
-    } });
+    }) });
     const started = await runCli(t.config, fresh, ['new', '-', '--json', '-y'], { readStdin: () => spec });
     assert.equal(started.code, 0, started.stderr);
     assert.equal(JSON.parse(started.stdout).capacity.length, 2);

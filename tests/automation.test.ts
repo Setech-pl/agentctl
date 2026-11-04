@@ -1,3 +1,4 @@
+import { acknowledgingRespond } from './helpers.ts';
 import { completedRecordFromSpec as recordFromSpec } from './helpers.ts';
 import assert from 'node:assert/strict';
 import { formatLocalTime } from '../src/core/util.ts';
@@ -182,7 +183,7 @@ describe('new --clip / send --clip through the CLI', () => {
   it('new --clip -y starts without asking; the spec ends up in TASK.md like with a file', async () => {
     const m = new Machine();
     m.windows.clear();
-    const runner = new RecordingRunner({ dryRun: false, respond: (cmd, args, o) => (cmd === 'tmux' && args[0] === 'capture-pane' ? { stdout: IDLE } : cmd === 'git' && args.includes('--quiet') ? { code: 1 } : cmd === 'git' && args.includes('--verify') ? { code: 0, stdout: 'base-oid' } : m.respond(cmd, args, o)) });
+    const runner = new DiskRunner({ dryRun: false, respond: acknowledgingRespond((cmd, args, o) => (cmd === 'tmux' && args[0] === 'capture-pane' ? { stdout: IDLE } : cmd === 'git' && args.includes('--quiet') ? { code: 1 } : cmd === 'git' && args.includes('--verify') ? { code: 0, stdout: 'base-oid' } : m.respond(cmd, args, o))) });
     const r = await run(['new', '--clip', '-y'], specText, undefined, runner);
     assert.equal(r.code, 0, r.stderr);
     assert.deepEqual(r.asked, []);

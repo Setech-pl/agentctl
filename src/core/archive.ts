@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Context } from './context.ts';
 import { archiveDir, listTaskRecords, taskDir, taskFile } from './taskstore.ts';
-import { AgentctlError } from './util.ts';
+import { AgentctlError, cohortKey } from './util.ts';
 
 const UNIT_MS = { m: 60_000, h: 3_600_000, d: 86_400_000, w: 7 * 86_400_000 } as const;
 
@@ -30,12 +30,13 @@ export interface ArchiveResult {
  * (`<state_dir>/../archive/<task>/`). Only tasks that `agentctl close` marked closed and that have no window; the report in the cache
  * and the worktree are not touched. `status --all` and the board (key a) still list archived tasks as closed.
  */
-export async function archiveClosed(ctx: Context, opts: { olderThanMs?: number | undefined; preview?: boolean } = {}): Promise<ArchiveResult> {
+export async function archiveClosed(ctx: Context, opts: { olderThanMs?: number | undefined; preview?: boolean; cohort?: string } = {}): Promise<ArchiveResult> {
   const { config, runner } = ctx;
   const live = new Set(await ctx.tmux.listWindows());
   const dest = archiveDir(config);
   const result: ArchiveResult = { moved: [], kept: [] };
   for (const record of listTaskRecords(config)) {
+    if (opts.cohort && (!record.cohort || cohortKey(record.cohort) !== cohortKey(opts.cohort))) continue;
     if (!record.closed || live.has(record.window)) continue;
     if (opts.olderThanMs !== undefined) {
       let closedMs = record.closedAt ? Date.parse(record.closedAt) : Number.NaN;

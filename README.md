@@ -50,7 +50,7 @@ agentctl is built for and used on a real project: cohorts of tasks run every day
 
 ## Task states
 
-The board tracks `overloaded`, `working`, `waiting`, `needs-input`, `needs-trust`, `limited`, `report-ready`, `background`, `queued`, `blocked`, `dead`, `orphan`, `closed`, `cancelled`, `superseded` and `start-failed`. A `report-candidate` flag keeps the current task state. See [task states and details](docs/details.md#task-states).
+The board tracks `needs-attention`, `overloaded`, `working`, `waiting`, `needs-input`, `needs-trust`, `limited`, `report-ready`, `background`, `queued`, `blocked`, `dead`, `orphan`, `closed`, `cancelled`, `superseded` and `start-failed`. A `report-candidate` flag keeps the current task state. See [task states and details](docs/details.md#task-states).
 
 ### Architecture and flow
 

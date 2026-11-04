@@ -1,3 +1,4 @@
+import { acknowledgingRespond } from './helpers.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -68,7 +69,7 @@ class Machine {
   windows = new Map<string, string>();
   respond = (cmd: string, args: string[], _opts: ExecOptions): Partial<ExecResult> | undefined => {
     if (cmd !== 'tmux') return undefined;
-    if (args[0] === 'list-windows') return this.windows.size ? { stdout: [...this.windows.keys()].join('\n') } : { code: 1 };
+    if (args[0] === 'list-windows') return this.windows.size ? { stdout: [...this.windows.keys()].map(name => `\t${name}\ttask`).join('\n') } : { code: 1 };
     if (args[0] === 'has-session') return { code: this.windows.size ? 0 : 1 };
     if (args[0] === 'capture-pane') {
       const window = (args[args.indexOf('-t') + 1] as string).split(':')[1] as string;
@@ -209,7 +210,7 @@ describe('state_dir', () => {
     const runner = new DiskRunner({
       dryRun: false,
       startTime: Date.now(),
-      respond: (cmd, args) => (cmd === 'tmux' && args[0] === 'capture-pane' ? { stdout: 'Welcome\n❯ Try "x"' } : cmd === 'tmux' && args[0] === 'has-session' ? { code: 1 } : undefined),
+      respond: acknowledgingRespond((cmd, args) => (cmd === 'tmux' && args[0] === 'capture-pane' ? { stdout: 'Welcome\n❯ Try "x"' } : cmd === 'tmux' && args[0] === 'has-session' ? { code: 1 } : undefined)),
     });
     await newTasks(new Context(runner, config, () => {}), [spec], { reuse: true });
     assert.ok(fs.existsSync(path.join(config.stateDir, 'nc-1', 'TASK.md')));

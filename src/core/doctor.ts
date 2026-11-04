@@ -1,7 +1,7 @@
 import { listTaskRecords, listArchivedRecords } from './taskstore.ts';
 import { collectDisk, diskLine } from './disk.ts';
 import { projectGuide } from './guide.ts';
-import { installation } from './installation.ts';
+import { developmentEnvironment, installation } from './installation.ts';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -97,7 +97,8 @@ export async function runDoctor(
 
   const installed = installation(undefined, env);
   add('installation', 'ok', `${installed.source}: ${installed.executable}`);
-  add('agentctl PATH', installed.matches ? 'ok' : 'warn', installed.matches
+  const dev = developmentEnvironment(undefined, process.argv[1] ?? installed.executable, stableScript(env, home), home) || developmentEnvironment(env.AGENTCTL_HOME ? path.join(env.AGENTCTL_HOME, 'config.yaml') : undefined, undefined, undefined, home);
+  add('agentctl PATH', installed.matches || dev ? 'ok' : 'warn', dev && !installed.matches ? `środowisko dev; PATH: ${installed.found ?? 'not installed'}; running ${installed.executable}` : installed.matches
     ? `${installed.found} points to this package`
     : `${installed.found ?? 'agentctl not found in PATH'}; expected ${installed.executable}. Do not confuse @setech-pl/agentctl with @orgloop/agentctl (same command name). Check: command -v agentctl`);
 
@@ -208,7 +209,8 @@ export async function runDoctor(
   const procs = await findMcpProcesses(runner);
   const stale = staleProcesses(procs, stableScript(env, home));
   const warning = staleWarning(stale, stableScript(env, home));
-  if (warning) add('mcp server', 'warn', warning);
+  if (warning && !dev) add('mcp server', 'warn', warning);
+  else if (dev) add('mcp server', 'ok', 'środowisko dev; stable MCP version comparison is informational');
   else if (procs.length > 0) add('mcp server', 'ok', `${procs.length} running (pid ${procs.map((p) => p.pid).join(', ')}), none older than the stable copy`);
 
   if (config) {
@@ -250,16 +252,18 @@ export async function runDoctor(
         add('mirror', 'fail', `${dir} is not writable`);
       }
     } else add('mirror', 'ok', 'off (set mirror_dir in the config to enable)');
-    const taskProcesses = (await runner.exec('ps', ['-axo', 'command='], { readOnly: true })).stdout.split('\n');
-    for (const record of [...listTaskRecords(config), ...listArchivedRecords(config)]) {
-      if (record.reportSource && path.normalize(record.reportSource) !== path.normalize(record.report)) add(`report ${record.task}`, 'warn', `raport pochodzi z kopii ${record.reportSource} – sprawdź`);
-      if (record.closed || record.cancelled) continue;
-      if (taskProcesses.some(command => /\/Cellar\/node(?:@[^/]+)?\//.test(command) && command.includes('--task') && command.replaceAll(/[^a-zA-Z0-9_-]+/g, ' ').split(' ').includes(record.task))) add(`task node ${record.task}`, 'warn', 'versioned Node path in active callback argv; works until Node is upgraded; regenerate task wiring when convenient');
-      const dir = path.join(config.stateDir, record.window);
-      for (const name of ['claude-settings.json']) {
-        try { if (/\/Cellar\/node(?:@[^/]+)?\//.test(fs.readFileSync(path.join(dir, name), 'utf8'))) add(`task node ${record.task}`, 'warn', `versioned Node path in ${name}; works until Node is upgraded; regenerate task wiring when convenient`); } catch { /* absent */ }
+    try {
+      const taskProcesses = (await runner.exec('ps', ['-axo', 'command='], { readOnly: true })).stdout.split('\n');
+      for (const record of [...listTaskRecords(config), ...listArchivedRecords(config)]) {
+        if (!record.reportConfirmed && record.reportSource && path.normalize(record.reportSource) !== path.normalize(record.report)) add(`report ${record.task}`, 'warn', `raport pochodzi z kopii ${record.reportSource} – sprawdź`);
+        if (record.closed || record.cancelled) continue;
+        if (taskProcesses.some(command => /\/Cellar\/node(?:@[^/]+)?\//.test(command) && command.includes('--task') && command.replaceAll(/[^a-zA-Z0-9_-]+/g, ' ').split(' ').includes(record.task))) add(`task node ${record.task}`, 'warn', 'versioned Node path in active callback argv; works until Node is upgraded; regenerate task wiring when convenient');
+        const dir = path.join(config.stateDir, record.window);
+        for (const name of ['claude-settings.json']) {
+          try { if (/\/Cellar\/node(?:@[^/]+)?\//.test(fs.readFileSync(path.join(dir, name), 'utf8'))) add(`task node ${record.task}`, 'warn', `versioned Node path in ${name}; works until Node is upgraded; regenerate task wiring when convenient`); } catch { /* absent */ }
+        }
       }
-    }
+    } catch (e) { add('task diagnostics', 'warn', errorMessage(e)); }
     if (cwd === null) add('project', 'ok', 'bez projektu');
     else try {
       const project = loadProjectConfig(cwd);

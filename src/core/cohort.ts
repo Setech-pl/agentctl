@@ -248,7 +248,7 @@ export function renderCohortList(list: readonly CohortSummary[]): string[] {
 
 /** "2⚙ 1✓ 1⧗" for the header of a group on the board: tasks per state, queued ones last. */
 export function countsLine(rows: readonly StatusRow[], queued: number, icons: Record<string, string>): string {
-  const order = ['overloaded', 'working', 'background', 'waiting', 'needs-input', 'needs-trust', 'limited', 'report-ready', 'superseded', 'orphan', 'dead'];
+  const order = ['needs-attention', 'overloaded', 'working', 'background', 'waiting', 'needs-input', 'needs-trust', 'limited', 'report-ready', 'superseded', 'orphan', 'dead'];
   const counts = new Map<string, number>();
   for (const r of rows) if (!r.closed && !r.cancelled) counts.set(r.state, (counts.get(r.state) ?? 0) + 1);
   const parts = order.filter((s) => counts.has(s)).map((s) => `${counts.get(s)}${icons[s] ?? s}`);
@@ -281,7 +281,15 @@ export async function cohortTick(ctx: Context, notifier: Notifier, rows: readonl
     const observed = JSON.stringify({ rows: cohortRows(rows, meta.name).map(r => [r.task, r.state, r.report, r.attemptId]).sort(), queue: cohortEntries(entries, meta.name).map(e => [e.task, e.status]).sort() });
     const now = ctx.runner.now();
     if (meta.observed !== observed) {
-      meta.observed = observed; meta.changedAt = now;
+      if (meta.observed === undefined && meta.changedAt === undefined) {
+        const times = [Date.parse(meta.created), ...cohortEntries(entries, meta.name).map(e => Date.parse(e.queuedAt))];
+        for (const record of listTaskRecords(ctx.config).filter(r => r.cohort && cohortKey(r.cohort) === cohortKey(meta.name))) {
+          times.push(...[record.started, record.attemptStarted, record.turnEndedAt, record.closedAt, record.cancelledAt, record.reportCopied].filter((t): t is string => Boolean(t)).map(t => Date.parse(t)));
+          for (const file of [record.report, taskFile(ctx.config, record.window)]) { try { times.push(fs.statSync(file).mtimeMs); } catch { /* absent */ } }
+        }
+        meta.changedAt = Math.min(now, Math.max(...times.filter(Number.isFinite), 0));
+      } else meta.changedAt = now;
+      meta.observed = observed;
       await saveCohort(ctx, meta);
     }
     if (done.length === 0 || open.length > 0 || now - (meta.changedAt ?? now) < ctx.config.cohort.doneGraceS * 1000) continue;

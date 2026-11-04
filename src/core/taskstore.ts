@@ -37,6 +37,11 @@ export interface TaskRecord {
   reportAlt?: string[];
   /** Where the report was found when the agent wrote it elsewhere; the canonical file is a copy of it. */
   reportSource?: string;
+  reportConfirmed?: string;
+  pendingPrompt?: string;
+  promptDelivery?: 'launching' | 'pending' | 'sending' | 'sent' | 'needs-attention';
+  promptSentAt?: string;
+  promptError?: string;
   reportCandidate?: string;
   reportCompleteHash?: string;
   agentCliVersion?: string;
@@ -142,6 +147,7 @@ export function renderTaskMd(record: TaskRecord, prompt: string): string {
   if (record.reviewOf) header.review_of = record.reviewOf;
   if (record.switchedBy) header.switched_by = record.switchedBy;
   if (record.cohort) header.cohort = record.cohort;
+  for (const [key, value] of Object.entries({ report_confirmed: record.reportConfirmed, pending_prompt: record.pendingPrompt, prompt_delivery: record.promptDelivery, prompt_sent_at: record.promptSentAt, prompt_error: record.promptError })) if (value !== undefined) header[key] = value;
   header.report = record.report;
   if (record.reportAlt && record.reportAlt.length > 0) header.report_alt = record.reportAlt;
   if (record.agentCliVersion) header.agent_cli_version = record.agentCliVersion;
@@ -228,6 +234,8 @@ export function parseTaskRecord(text: string): TaskRecord | undefined {
     model: record.model,
     effort: record.effort === 'unknown' ? 'high' : record.effort,
   };
+  for (const [key, field] of [['report_confirmed', 'reportConfirmed'], ['pending_prompt', 'pendingPrompt'], ['prompt_sent_at', 'promptSentAt'], ['prompt_error', 'promptError']] as const) if (typeof data[key] === 'string') record[field] = data[key];
+  if (['launching', 'pending', 'sending', 'sent', 'needs-attention'].includes(String(data.prompt_delivery))) record.promptDelivery = data.prompt_delivery as TaskRecord['promptDelivery'];
   if (typeof data.attempt === 'number') record.attempt = data.attempt;
   for (const [key, field] of [['attempt_id', 'attemptId'], ['attempt_started', 'attemptStarted'], ['attempt_report_baseline', 'attemptReportBaseline'], ['turn_ended_at', 'turnEndedAt'], ['summary_delivered', 'summaryDelivered']] as const) if (typeof data[key] === 'string') record[field] = data[key];
   if (typeof data.window_id === 'string' && /^@\d+$/.test(data.window_id)) record.windowId = data.window_id;
