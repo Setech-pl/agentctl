@@ -31,6 +31,8 @@ export interface ResolvedRepo {
   base?: string;
   baseTask?: string;
   branch?: string;
+  /** Shell commands for this repository's worktree: the spec's `repos[].setup`, else the repository's own .agentctl.yaml (the first repository also takes the spec/global `setup`). */
+  setup?: string[];
 }
 
 export interface AutoReviewSource {
@@ -166,7 +168,7 @@ export interface ResolveContext {
 export const RESERVED_TASK_IDS = ['WATCH', 'BOARD', 'MANAGER'];
 
 export const SPEC_KEYS = ['task', 'agent', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'review', 'report', 'pin', 'remote_control', 'priority', 'after', 'touches', 'cohort'];
-export const REPO_KEYS = ['path', 'worktree', 'base', 'branch'];
+export const REPO_KEYS = ['path', 'worktree', 'base', 'branch', 'setup'];
 
 function label(raw: RawSpec): string {
   const task = raw.header.task;
@@ -221,7 +223,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   }
 
   // Repos
-  const rawRepos: { path: string; worktree?: string; base?: string; branch?: string }[] = [];
+  const rawRepos: { path: string; worktree?: string; base?: string; branch?: string; setup?: string[] }[] = [];
   if (!Array.isArray(h.repos) || h.repos.length === 0) {
     p.add('"repos" must list at least one repository: repos: [{path: ~/code/app, worktree: ~/wt/app-task}]');
   } else {
@@ -236,6 +238,10 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
         if (value === undefined || value === null) continue;
         if (typeof value === 'string' && value.trim() !== '') repo[key] = value.trim();
         else p.add(`${at}.${key} must be a non-empty string`);
+      }
+      if (entry.setup !== undefined && entry.setup !== null) {
+        if (Array.isArray(entry.setup) && entry.setup.every((c: unknown) => typeof c === 'string' && c.trim() !== '')) repo.setup = entry.setup as string[];
+        else p.add(`${at}.setup must be a list of non-empty shell commands`);
       }
       rawRepos.push(repo);
     });
@@ -362,6 +368,9 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     const resolved: ResolvedRepo = { path: repoPath, worktree };
     if (repo.base) resolved.base = repo.base;
     if (repo.branch) resolved.branch = repo.branch;
+    // Own setup of this repository: its spec entry, then (first repository) the spec's top-level setup, then the repository's own project config.
+    const own = repo.setup ?? (repo === firstRepo ? specSetup : undefined) ?? projectOfRepo?.setup ?? (repo === firstRepo ? config.setup : undefined);
+    if (own && own.length > 0) resolved.setup = own.map(c => c);
     repos.push(resolved);
   }
   for (let i = 0; i < repos.length; i++) {
@@ -378,6 +387,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     if (fallback) return resolvePath(basicFill(fallback));
     throw new AgentctlError(`${taskId}: no repository "${name}" for {worktree:${name}}; add it to repos or provide {worktree:${name}|~/fallback}`);
   }));
+  for (const r of repos) if (r.setup) r.setup = r.setup.map(fill);
   // Links: later layers win for the same `from`.
   const linkByFrom = new Map<string, Link>();
   for (const link of [...config.links, ...(project?.links ?? []), ...specLinks]) {
@@ -411,7 +421,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     effort,
     repos,
     links: [...linkByFrom.values()],
-    setup: (specSetup ?? project?.setup ?? config.setup ?? []).map(fill),
+    setup: repos[0]?.setup ?? [],
     env,
     report: pathOf(reportTemplate),
     prompt: raw.prompt,

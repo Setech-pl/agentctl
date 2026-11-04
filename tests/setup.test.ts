@@ -6,6 +6,7 @@ import { main } from '../src/cli.ts';
 import type { CliDeps } from '../src/cli.ts';
 import { checkLinkTargets, planLinks } from '../src/core/links.ts';
 import { newTasks } from '../src/core/new.ts';
+import { summarizeSpecs } from '../src/core/summary.ts';
 import { RecordingRunner } from '../src/core/runner.ts';
 import type { ExecOptions, ExecResult } from '../src/core/runner.ts';
 import { resolveSpec, splitSpecs } from '../src/core/spec.ts';
@@ -59,7 +60,7 @@ describe('new: worktree -> setup -> links -> window', () => {
     const out = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join('\n');
     const { ctx, runner } = makeContext(config, { respond: machine((_c, a) => (a[1] === 'npm ci' ? { code: 1, stdout: out, stderr: '\nnpm ERR! boom\n' } : undefined)) });
     await assert.rejects(newTasks(ctx, resolveAll(config, text)), (e: Error & { hint?: string }) => {
-      assert.match(e.message, /^NC-2: setup command failed \(exit 1\): npm ci\n/);
+      assert.match(e.message, /^NC-2: setup command failed in app \(exit 1\): npm ci\n/);
       assert.match(e.message, /npm ERR! boom/);
       assert.match(e.message, /line 30/);
       assert.doesNotMatch(e.message, /line 1\n/, 'only the tail is shown');
@@ -157,5 +158,32 @@ describe('links: literal paths and targets', () => {
     assert.equal(ops.length, 0);
     assert.equal(warnings.length, 1);
     assert.match(warnings[0]!, /no match for "node_modules\/@neon-city\/\*".*literal path.*e\.g\. from: node_modules\/@scope\/name/);
+  });
+});
+
+describe('P14: setup per repository of a multi-repo spec', () => {
+  const config = makeConfig(scratch.sub('setup-pair'));
+  const client = scratch.sub('setup-pair/client');
+  const pair = (task: string, top: string, a = '', b = '') => `---\ntask: ${task}\nagent: claude\n${top}repos:\n  - {path: ${repo}, worktree: ${repo}-${task.toLowerCase()}${a}}\n  - {path: ${client}, worktree: ${client}-${task.toLowerCase()}${b}}\n---\nGo.\n`;
+  const project = (map: Record<string, string[]>): Parameters<typeof resolveSpec>[1]['loadProject'] => (dir: string) => (map[dir] ? { links: [], env: {}, defaults: {}, setup: map[dir] } : undefined) as never;
+
+  it('repos[].setup and each repository\'s own .agentctl.yaml setup run in that repository\'s worktree', async () => {
+    const specs = resolveAll(config, pair('NC-P1', '', ', setup: [echo spec-app]'), project({ [client]: ['echo cfg-client'] }));
+    assert.deepEqual(specs[0]!.repos.map((r) => r.setup), [['echo spec-app'], ['echo cfg-client']]);
+    const { ctx, runner } = makeContext(config, { respond: machine() });
+    await newTasks(ctx, specs);
+    assert.ok(runner.commands.includes(`(cd ${repo}-nc-p1 && sh -c 'echo spec-app')`));
+    assert.ok(runner.commands.includes(`(cd ${client}-nc-p1 && sh -c 'echo cfg-client')`));
+  });
+  it('a failing setup of the second repository stops new and names that repository', async () => {
+    const specs = resolveAll(config, pair('NC-P2', '', '', ', setup: [bad-cmd]'));
+    const { ctx } = makeContext(config, { respond: machine((_c, args) => (args[1] === 'bad-cmd' ? { code: 1, stderr: 'nope' } : undefined)) });
+    await assert.rejects(newTasks(ctx, specs), /setup command failed in client/);
+  });
+  it('the preview shows setup per repository; the top-level setup stays the first repository\'s', () => {
+    const specs = resolveAll(config, pair('NC-P3', 'setup: [echo top]\n', '', ', setup: [echo second]'));
+    assert.deepEqual(specs[0]!.repos.map((r) => r.setup), [['echo top'], ['echo second']]); assert.deepEqual(specs[0]!.setup, ['echo top']);
+    const text = summarizeSpecs(specs).join('\n');
+    assert.match(text, /setup:    app 1\/1 \(echo top\), client 1\/1 \(echo second\)/);
   });
 });

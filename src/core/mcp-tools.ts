@@ -797,6 +797,9 @@ async function runMove(deps: McpDeps, args: { task: string; agent?: 'claude' | '
   });
 }
 
+/** `setup` runs shell commands: neither the top-level key nor `repos[].setup` is accepted from the chat (a repository's .agentctl.yaml setup still runs). */
+const chatSetup = (header: Record<string, unknown>): boolean => 'setup' in header || (Array.isArray(header.repos) && header.repos.some((r) => typeof r === 'object' && r !== null && 'setup' in r));
+
 interface NewMcpArgs { spec: string; confirm?: boolean | undefined; agent?: 'claude' | 'codex' | undefined; reuse?: boolean | undefined; no_agent?: boolean | undefined; cohort?: string | undefined; wait_trust?: boolean | undefined }
 async function runNew(deps: McpDeps, args: NewMcpArgs): Promise<ToolResult> {
   const probe = (): { tasks: string } => {
@@ -812,7 +815,7 @@ async function runNew(deps: McpDeps, args: NewMcpArgs): Promise<ToolResult> {
     if (args.cohort) for (const raw of raws) raw.header.cohort = args.cohort;
     for (const raw of raws) {
       // `setup` commands run in a shell. A task the chat starts runs no shell command of the chat's choosing; setup belongs in .agentctl.yaml.
-      if ('setup' in raw.header) {
+      if (chatSetup(raw.header)) {
         throw new AgentctlError(`${String(raw.header.task ?? 'a task')}: "setup" runs shell commands and is not accepted from the chat`, 'Put setup commands in the .agentctl.yaml of the repository, or start the task from the terminal.');
       }
     }
@@ -843,7 +846,7 @@ async function runQueue(deps: McpDeps, args: { spec: string; agent?: 'claude' | 
     const raws = splitSpecs(args.spec, 'the spec from the chat');
     if (args.cohort) for (const raw of raws) raw.header.cohort = args.cohort;
     for (const raw of raws) {
-      if ('setup' in raw.header) {
+      if (chatSetup(raw.header)) {
         throw new AgentctlError(`${String(raw.header.task ?? 'a task')}: "setup" runs shell commands and is not accepted from the chat`, 'Put setup commands in the .agentctl.yaml of the repository, or queue the task from the terminal.');
       }
     }
@@ -1364,7 +1367,7 @@ async function confirmationScope(ctx: Context, name: string, args: Record<string
   if (name === 'new' || name === 'queue') {
     const rawSpecs = splitSpecs(args.spec as string, 'MCP preview');
     if (args.cohort) for (const raw of rawSpecs) raw.header.cohort = args.cohort;
-    for (const raw of rawSpecs) if ('setup' in raw.header) throw new AgentctlError(`${String(raw.header.task ?? 'a task')}: \"setup\" runs shell commands and is not accepted from the chat`);
+    for (const raw of rawSpecs) if (chatSetup(raw.header)) throw new AgentctlError(`${String(raw.header.task ?? 'a task')}: \"setup\" runs shell commands and is not accepted from the chat`);
     const specs = await planBatch(ctx, rawSpecs.map(raw => resolveSpec(raw, { config: ctx.config })), { noSwitch: true, reuse: Boolean(args.reuse), ...(args.agent ? { agent: args.agent as 'claude' | 'codex' } : {}), ignoreLimits: name === 'queue', deferBases: name === 'queue', skipAfter: name === 'queue' });
     for (const spec of specs) { const warnings = reportPathWarnings(ctx.config, spec); if (warnings.length) throw new AgentctlError(`${spec.task}: ${warnings.join('; ')}`); }
     return { specs };

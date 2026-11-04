@@ -50,27 +50,34 @@ async function requireTool(ctx: Context, tool: string, args: string[]): Promise<
 
 const SETUP_TAIL_LINES = 15;
 
-/** Run the spec's `setup` commands in the primary worktree, logging to `<state_dir>/<task>/setup.log`. A failure stops `new`. */
-async function runSetup(ctx: Context, spec: ResolvedSpec, worktree: string): Promise<void> {
-  if (spec.setup.length === 0) return;
+/**
+ * Run the `setup` commands of every repository in its own worktree (the spec's `repos[].setup`, else the repository's .agentctl.yaml; the first
+ * repository also takes the spec's/global `setup`), logging to `<state_dir>/<task>/setup.log`. A failure stops `new`.
+ */
+async function runSetup(ctx: Context, spec: ResolvedSpec): Promise<void> {
   const { runner, config } = ctx;
   const logFile = path.join(taskDir(config, spec.window), 'setup.log');
+  const todo = spec.repos.filter((r) => (r.setup?.length ?? 0) > 0);
+  if (todo.length === 0) return;
   if (!runner.dryRun) await runner.writeFile(logFile, '');
-  for (const [i, command] of spec.setup.entries()) {
-    ctx.info(`${spec.task}: setup ${i + 1}/${spec.setup.length}: ${command}`);
-    const r = await runner.exec('sh', ['-c', command], { cwd: worktree, timeoutMs: ctx.config.git.timeoutS * 1000, async: true });
-    if (runner.dryRun) continue;
-    const output = `${r.stdout}${r.stderr}`;
-    await runner.appendFile(logFile, `$ ${command}\n${output}${output.endsWith('\n') || output === '' ? '' : '\n'}[exit ${r.code}]\n\n`);
-    if (r.code !== 0) {
-      const tail = output.trimEnd().split('\n').slice(-SETUP_TAIL_LINES).join('\n');
-      throw new AgentctlError(
-        `${spec.task}: setup command failed${/ETIMEDOUT/i.test(r.stderr) ? ` after ${config.git.timeoutS}s (git.timeout_s; check disk/I/O or increase the timeout)` : ''} (exit ${r.code}): ${command}\n${tail}`,
-        `Full output: ${logFile}. The worktree ${worktree} was kept and no window was started; fix the cause and run "agentctl new --reuse" again.`,
-      );
+  for (const repo of todo) {
+    const name = path.basename(repo.path), commands = repo.setup!;
+    for (const [i, command] of commands.entries()) {
+      ctx.info(`${spec.task}: setup ${name} ${i + 1}/${commands.length}: ${command}`);
+      const r = await runner.exec('sh', ['-c', command], { cwd: repo.worktree, timeoutMs: ctx.config.git.timeoutS * 1000, async: true });
+      if (runner.dryRun) continue;
+      const output = `${r.stdout}${r.stderr}`;
+      await runner.appendFile(logFile, `[${name}] $ ${command}\n${output}${output.endsWith('\n') || output === '' ? '' : '\n'}[exit ${r.code}]\n\n`);
+      if (r.code !== 0) {
+        const tail = output.trimEnd().split('\n').slice(-SETUP_TAIL_LINES).join('\n');
+        throw new AgentctlError(
+          `${spec.task}: setup command failed in ${name}${/ETIMEDOUT/i.test(r.stderr) ? ` after ${config.git.timeoutS}s (git.timeout_s; check disk/I/O or increase the timeout)` : ''} (exit ${r.code}): ${command}\n${tail}`,
+          `Full output: ${logFile}. The worktree ${repo.worktree} was kept and no window was started; fix the cause and run "agentctl new --reuse" again.`,
+        );
+      }
     }
   }
-  ctx.info(`${spec.task}: setup done, output in ${logFile}`);
+  ctx.info(`${spec.task}: setup done (${todo.map((r) => path.basename(r.path)).join(', ')}), output in ${logFile}`);
 }
 
 /** Start every spec: worktree, links, TASK.md, tmux window, agent, prompt. Plans and validates everything first. */
@@ -115,8 +122,8 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
       }
     }
 
-    // 2. setup commands (in the primary worktree; an install may wipe node_modules, so this comes before the links)
-    await runSetup(ctx, spec, primary);
+    // 2. setup commands (per repository, in its own worktree; an install may wipe node_modules, so this comes before the links)
+    await runSetup(ctx, spec);
 
     // 3. symlinks (in the primary worktree)
     checkLinkTargets(spec.links, spec.task);

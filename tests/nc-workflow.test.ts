@@ -540,3 +540,12 @@ describe('0.17.4 fix 1: UAT polish (U-a … U-f)', () => {
     assert.equal((r.text.match(/wklejono|w kolejce/g) ?? []).length, 1, r.text);
   });
 });
+
+describe('P14: chat specs cannot carry repos[].setup', () => {
+  it('new and queue refuse a per-repo setup from the chat, with the same hint as the top-level one', async () => {
+    const f = fixture('p14-mcp');
+    const spec = `---\ntask: PAIR\nagent: claude\nrepos:\n  - {path: ${f.repo}, worktree: ${f.repo}-pair, setup: [echo hi]}\n---\nGo.\n`;
+    for (const tool of ['new', 'queue']) { const r = await f.full(tool, { spec }); assert.equal(r.isError, true, tool); assert.match(r.text, /"setup" runs shell commands/); }
+  });
+});
+
