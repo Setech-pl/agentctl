@@ -23,7 +23,8 @@ export async function resolveTaskBases(ctx: Context, spec: ResolvedSpec): Promis
     const refs = [...(data.outputs?.commits ?? []), ...(data.outputs?.integrate ?? [])].filter(r => r.repo === selected.path || r.repo === path.basename(selected.path));
     const shas = [...new Set(refs.map(r => r.sha))];
     if (shas.length > 1) throw new AgentctlError(`${spec.task}: base ${raw}: ambiguous output commits; start blocked`);
-    if (shas.length && !data.outputs_valid) throw new AgentctlError(`${spec.task}: base ${raw}: invalid outputs: ${data.outputs_errors.join('; ')}; start blocked`);
+    const refErrors = data.outputs_errors.filter(e => /^(commits|integrate)\b|^repo |branch .* does not exist|commit .* does not exist/.test(e));
+    if (refErrors.length) throw new AgentctlError(`${spec.task}: base ${raw}: invalid outputs: ${refErrors.join('; ')}; start blocked`);
     let ref = shas[0];
     if (!ref) {
       let branch = selected.branch;

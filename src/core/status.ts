@@ -36,6 +36,7 @@ export interface StatusRow {
   task: string;
   outputs?: OutputData['outputs'];
   outputs_valid?: boolean;
+  outputs_partial?: boolean;
   outputs_errors?: string[];
   verdict?: OutputVerdict;
   decisionsCount?: number;

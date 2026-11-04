@@ -201,7 +201,7 @@ async function pullSummaries(ctx: Context, rows: StatusRow[], ack = false): Prom
     const sha = /`([0-9a-f]{7,40})`/i.exec(reportText)?.[1] ?? /\b(?:SHA|commit)\s*[:=]?\s*`?([0-9a-f]{7,40})\b/i.exec(reportText)?.[1] ?? 'n/d';
     const complete = Buffer.byteLength(reportText) <= 1500;
     const excerpt = reportSummary(reportText).split('\n').filter((line, i) => i > 0 || line.trim() !== first.trim()).join('\n');
-    const outputData = { outputs: row.outputs ?? null, outputs_valid: row.outputs_valid ?? false, outputs_errors: row.outputs_errors ?? [] };
+    const outputData = { outputs: row.outputs ?? null, outputs_valid: row.outputs_valid ?? false, outputs_partial: row.outputs_partial ?? false, outputs_errors: row.outputs_errors ?? [] };
     const part = `=== ${row.task} ===\nattempt: ${row.attemptId ?? row.attempt ?? 'n/d (legacy)'}\npath: ${row.reportPath}\nbytes: ${r.bytes}\n${JSON.stringify(outputData)}\nsha: ${sha}\ntruncated: ${!complete}\n${complete ? reportText : `verdict: ${first}\nblockers: ${blockers}\ndecisions: ${decisions}\n${refs}\n${cut(excerpt, 3000)}\n[excerpt; get_report section/offset/limit reads more]`}`;
     parts.push(part); taken.push(row);
     if (responseWireBytes(ok(response())) > ctx.config.mcp.maxResponseKb * 1024 - 512) { if (taken.length > 1) { parts.pop(); taken.pop(); } break; }
@@ -248,6 +248,7 @@ function statusRowForChat(r: StatusRow): Record<string, unknown> {
     decisions: r.decisionsCount ?? 0,
     actions: r.actionsCount ?? 0,
     outputs_valid: r.outputs_valid ?? null,
+    outputs_partial: r.outputs_partial ?? false,
     outputs_errors: r.outputs_errors ?? [],
     reportCandidate: r.reportCandidate ?? null,
     reportSource: r.reportSource ?? null,
@@ -510,7 +511,7 @@ async function runCohortShow(deps: McpDeps, args: { cohort: string }): Promise<T
   const rows = cohortRows(await collectStatus(ctx, { archived: true }), meta.name);
   const views = (await queueViews(ctx)).filter((v) => cohortEntries([v.entry], meta.name).length > 0);
   const queued = views.map((v) => ({ task: v.entry.task, position: v.position, startCondition: v.condition.text, blocked: v.condition.kind === 'blocked' }));
-  const outputs = aggregateOutputs(rows.filter(r => r.report === 'yes').map(r => ({ task: r.task, data: { outputs: r.outputs ?? null, outputs_valid: r.outputs_valid ?? false, outputs_errors: r.outputs_errors ?? [] } })));
+  const outputs = aggregateOutputs(rows.filter(r => r.report === 'yes').map(r => ({ task: r.task, data: { outputs: r.outputs ?? null, outputs_valid: r.outputs_valid ?? false, outputs_partial: r.outputs_partial ?? false, outputs_errors: r.outputs_errors ?? [] } })));
   const head = { cohort: meta.name, created: meta.created || null, note: meta.note ?? null, tasks: rows.length, queued: queued.length };
   return ok(`${JSON.stringify(head)}\n\n${JSON.stringify({ ...head, tasks: rows.map(statusRowForChat), queued, ...outputs }, null, 2)}`);
 }

@@ -4,7 +4,7 @@
 attempt: 3f9c2a7e-51d4-4b86-9e0a-7c1d6b2f8a45
 path: /home/demo/agentctl/cache/api-auth-1/API-AUTH-1.md
 bytes: 965
-{"outputs":{"version":1,"verdict":"PASS","commits":[{"repo":"shop","branch":"agent/api-auth-1","sha":"41c39c35c2118f44d822a4be08d5c20aa2f7c153"}],"integrate":[{"repo":"shop","branch":"agent/api-auth-1","sha":"41c39c35c2118f44d822a4be08d5c20aa2f7c153","note":"ready for human integration"}],"decisions":["Choose the rollout window"],"actions":[],"checks":["auth tests: 18 passed"],"notes":[]},"outputs_valid":true,"outputs_errors":[]}
+{"outputs":{"version":1,"verdict":"PASS","commits":[{"repo":"shop","branch":"agent/api-auth-1","sha":"41c39c35c2118f44d822a4be08d5c20aa2f7c153"}],"integrate":[{"repo":"shop","branch":"agent/api-auth-1","sha":"41c39c35c2118f44d822a4be08d5c20aa2f7c153","note":"ready for human integration"}],"decisions":["Choose the rollout window"],"actions":[],"checks":[{"name":"auth tests","result":"PASS","note":"18 passed"}],"notes":[]},"outputs_valid":true,"outputs_errors":[]}
 sha: 41c39c35c2118f44d822a4be08d5c20aa2f7c153
 truncated: false
 Verdict: PASS – refresh rotates the session id, logout revokes the whole token family.
@@ -36,7 +36,7 @@ commits: [{repo: shop, branch: agent/api-auth-1, sha: 41c39c35c2118f44d822a4be08
 integrate: [{repo: shop, branch: agent/api-auth-1, sha: 41c39c35c2118f44d822a4be08d5c20aa2f7c153, note: ready for human integration}]
 decisions: [Choose the rollout window]
 actions: []
-checks: ["auth tests: 18 passed"]
+checks: [{name: auth tests, result: PASS, note: 18 passed}]
 notes: []
 ```
 

@@ -86,7 +86,7 @@ commits: [{repo: shop, branch: agent/api-auth-1, sha: ${sha}}]
 integrate: [{repo: shop, branch: agent/api-auth-1, sha: ${sha}, note: ready for human integration}]
 decisions: [Choose the rollout window]
 actions: []
-checks: ["auth tests: 18 passed"]
+checks: [{name: auth tests, result: PASS, note: 18 passed}]
 notes: []
 \`\`\`
 
@@ -338,7 +338,7 @@ verdict: PASS
 commits: [{repo: shop, branch: agent/docs-search-1, sha: ${sha}}]
 decisions: []
 actions: []
-checks: ["index rebuild: PASS"]
+checks: [{name: index rebuild, result: PASS}]
 notes: []
 \`\`\`
 

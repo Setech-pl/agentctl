@@ -424,3 +424,67 @@ describe('0.17.4 fix 1: automatic review runs in its own checkout, after the aut
   });
 });
 
+
+// The block of ~/Projects/cache-dev/dev-u1/DEV-U1.md (UAT of 0.17.4), verbatim.
+const DEV_U1_REPORT = `Werdykt: PASS
+
+Utworzono \`uat/u1.txt\` z treścią \`hello from DEV-U1\` i zapisano commit \`3db6b8d\` na gałęzi \`dev-u1\` w repozytorium \`sandbox\`.
+
+<!-- agentctl:attempt 66eb0549-7646-456f-b716-2e08216fc6b2 -->
+
+\`\`\`agentctl-outputs
+version: 1
+verdict: PASS
+commits:
+  - repo: sandbox
+    branch: dev-u1
+    sha: 3db6b8d
+integrate:
+  - repo: sandbox
+    branch: dev-u1
+    sha: 3db6b8d
+    note: do scalenia testowego
+decisions:
+  - Czy scalić dev-u1 do main?
+actions:
+  - title: Scal testowo
+    shell: git merge dev-u1
+checks:
+  - plik istnieje: PASS
+\`\`\`
+
+<!-- agentctl:report-end -->
+`;
+
+describe('0.17.4 fix 1: outputs are validated per section and entry (B2)', () => {
+  const block = (yaml: string) => `\`\`\`agentctl-outputs\nversion: 1\nverdict: PASS\n${yaml}\`\`\`\n<!-- agentctl:report-end -->\n`;
+  it('B2: the DEV-U1 fixture keeps decisions=1, actions=1, checks=1 and is valid; checks are normalized', async () => {
+    const parsed = parseOutputs(DEV_U1_REPORT);
+    assert.equal(parsed.outputs_valid, true, parsed.outputs_errors.join('; ')); assert.deepEqual(parsed.outputs_errors, []);
+    assert.equal(parsed.outputs!.decisions.length, 1); assert.equal(parsed.outputs!.actions.length, 1);
+    assert.deepEqual(parsed.outputs!.checks, [{ name: 'plik istnieje', result: 'PASS' }]);
+    const f = fixture('b2-status'); const repo = path.join(f.root, 'sandbox'); fs.mkdirSync(repo);
+    const r = seedTask(f.config, 'DEVU1', { repos: [{ path: repo, worktree: `${repo}-wt`, branch: 'dev-u1', base: A }], attemptId: '66eb0549-7646-456f-b716-2e08216fc6b2' });
+    fs.mkdirSync(path.dirname(r.report), { recursive: true }); fs.writeFileSync(r.report, DEV_U1_REPORT);
+    const row = (await collectStatus(f.ctx, { progress: false })).find(x => x.task === 'DEVU1')!;
+    assert.equal(row.decisionsCount, 1); assert.equal(row.actionsCount, 1); assert.equal(row.outputs?.checks.length, 1); assert.equal(row.outputs_valid, true);
+    const total = aggregateOutputs([{ task: 'DEVU1', data: row as never }]); assert.equal(total.decisions.length, 1); assert.equal(total.actions.length, 1); assert.equal(total.checks.length, 1); assert.deepEqual(total.warnings, []);
+  });
+  it('B2: all three forms of a check, any letter case of the result, are accepted and normalized', () => {
+    const p = parseOutputs(block('checks:\n  - "unit: pass"\n  - build: Fail\n  - {name: lint, result: warn, note: 2 warnings}\n  - "plain text without result"\n  - {smoke: skip}\n'));
+    assert.equal(p.outputs_valid, true, p.outputs_errors.join('; '));
+    assert.deepEqual(p.outputs!.checks, [{ name: 'unit', result: 'PASS' }, { name: 'build', result: 'FAIL' }, { name: 'lint', result: 'WARN', note: '2 warnings' }, { name: 'plain text without result' }, { name: 'smoke', result: 'SKIP' }]);
+  });
+  it('B2: one bad entry is dropped with a warning; the other sections and entries stay; partial is reported', () => {
+    const p = parseOutputs(block('commits:\n  - {repo: r, branch: b, sha: nothex}\n  - {repo: r, branch: b, sha: abcdef1}\ndecisions: [ok decision, 7]\nactions:\n  - {title: A, shell: echo}\n  - {title: no shell}\nchecks:\n  - {a: 1, b: 2}\n  - fine: PASS\nmystery: 1\n'));
+    assert.equal(p.outputs_valid, false); assert.equal(p.outputs_partial, true); assert.ok(p.outputs);
+    assert.equal(p.outputs!.commits.length, 1); assert.deepEqual(p.outputs!.decisions, ['ok decision']); assert.equal(p.outputs!.actions.length, 1); assert.deepEqual(p.outputs!.checks, [{ name: 'fine', result: 'PASS' }]);
+    assert.deepEqual(p.outputs_errors.map(e => e.split(':')[0]), ['mystery', 'commits.0.sha', 'decisions.1', 'actions.1.shell', 'checks.0']);
+  });
+  it('B2: a missing version or verdict still refuses the whole block, and a missing block says so', () => {
+    assert.equal(parseOutputs('```agentctl-outputs\nversion: 2\nverdict: PASS\n```\n').outputs, null);
+    assert.equal(parseOutputs('```agentctl-outputs\nversion: 1\nverdict: MAYBE\n```\n').outputs, null);
+    assert.match(parseOutputs('nothing').outputs_errors[0]!, /missing agentctl-outputs/);
+  });
+});
+
