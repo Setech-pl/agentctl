@@ -1,4 +1,5 @@
 import { withStartLock } from './start-lock.ts';
+import { authorCheckoutBusy, authorWaitReason, repinReview, syncReviewLedger } from './review-gate.ts';
 import { reportPathWarnings } from './report-path.ts';
 import { missingLinkTargets, checkLinkTargets } from './links.ts';
 import type { OutputVerdict } from './outputs.ts';
@@ -190,7 +191,7 @@ export async function planQueueAdd(ctx: Context, raws: RawSpec[], opts: { agent?
   checkAfter(ctx, specs, entries);
   const items = specs.map((spec, i) => ({ raw: raws[i] as RawSpec, spec }));
   const rows = await collectStatus(ctx, { progress: false, archived: true });
-  const warnings = [...await touchWarnings(ctx, specs), ...specs.flatMap(s => reportPathWarnings(ctx.config, s).map(w => `${s.task}: ${w}`)), ...specs.flatMap(s => missingLinkTargets(s.links).map(w => `${s.task}: ${w}`))];
+  const warnings = [...await touchWarnings(ctx, specs), ...specs.flatMap(s => reportPathWarnings(ctx.config, s).map(w => `${s.task}: ${w}`)), ...specs.flatMap(s => missingLinkTargets(s.links, s.repos[0]?.worktree).map(w => `${s.task}: ${w}`))];
   const capacity = config.capacity.snapshot && !ctx.runner.dryRun ? capacitySnapshot(await collectCapacity(ctx), specs.map((s) => s.agent)) : undefined;
   return { items, warnings, ...(capacity ? { capacity } : {}), summary: [...describeQueueAdd(ctx, specs, entries, await liveWindows(ctx), rows), ...usageSummaryLines(config, specs, ctx.runner.now()), ...(capacity ? snapshotLines(capacity) : []), ...warnings.map((w) => `⚠ ${w}`)] };
 }
@@ -449,6 +450,8 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
     if (entry.retryAt && Date.parse(entry.retryAt) > nowMs) return { position, entry, condition: { kind: 'hold', text: `retry at ${entry.retryAt}: ${entry.error ?? ''}` }, since: entry.queuedAt };
     const unmet = unmetAfter(entry.after, rows, entry.afterVerdicts);
     if (unmet.length > 0) return { position, entry, condition: { kind: 'after', text: waitingText(unmet, failed, cancelled) }, since: entry.queuedAt };
+    const waitsFor = authorWaitReason(entry.autoReview, rows, config.reportSettleS, nowMs);
+    if (waitsFor) return { position, entry, condition: { kind: 'after', text: waitsFor }, since: entry.queuedAt };
     const held = holds[entry.agent];
     if (held) return { position, entry, condition: { kind: 'hold', text: held }, since: entry.queuedAt };
     const limit = config.limits[entry.agent];
@@ -557,10 +560,18 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   const began: string[] = [];
   const holds = queueHolds(config, ctx.runner.now());
   const stillHeld = new Set<string>();
-  for (const entry of waiting(entries)) {
+  for (let entry of waiting(entries)) {
     if (entry.retryAt && Date.parse(entry.retryAt) > ctx.runner.now()) continue;
     if (memory.inflight.size >= config.queue.parallelStarts) break;
     if (unmetAfter(entry.after, rows, entry.afterVerdicts).length > 0) continue;
+    // An automatic review waits until its author's turn is over: report-end, settle, no follow-up in flight, no git running in its checkout.
+    const waitsFor = authorWaitReason(entry.autoReview, rows, config.reportSettleS, ctx.runner.now()) ?? (entry.autoReview ? await authorCheckoutBusy(ctx, entry.autoReview.author).then(b => b && `czeka na autora ${entry.autoReview!.author}: ${b}`) : undefined);
+    if (waitsFor) {
+      stillHeld.add(entry.task);
+      if (memory.held.get(entry.task) !== waitsFor) { memory.held.set(entry.task, waitsFor); await opts.log?.(`queue: ${entry.task} ${waitsFor}`); }
+      continue;
+    }
+    if (entry.autoReview) entry = await repinQueuedReview(ctx, entry, opts);
     const held = holds[entry.agent];
     if (held) {
       stillHeld.add(entry.task);
@@ -577,6 +588,23 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   }
   for (const task of [...memory.held.keys()]) if (!stillHeld.has(task)) memory.held.delete(task);
   return began;
+}
+
+/** The review reads the author's current commit in its own checkout; an entry from before that rule is converted (author's worktree, branch, reuse). */
+async function repinQueuedReview(ctx: Context, entry: QueueEntry, opts: QueueTickOptions): Promise<QueueEntry> {
+  const head = async (repoPath: string, branch: string): Promise<string | undefined> => {
+    const r = await ctx.runner.exec('git', ['-C', repoPath, 'rev-parse', '--verify', '--end-of-options', `refs/heads/${branch}^{commit}`], { readOnly: true });
+    return r.code === 0 && /^[a-f0-9]{40}$/i.test(r.stdout.trim()) ? r.stdout.trim() : undefined;
+  };
+  const result = await repinReview(ctx, splitSpecs(entry.spec, `queue entry ${entry.task}`)[0] as RawSpec, entry.autoReview!, Boolean(entry.reuse), head);
+  if (!result) return entry;
+  const updated: QueueEntry = { ...entry, spec: renderRawSpec(result.raw), autoReview: result.autoReview, ...(result.reuse ? { reuse: true } : {}) };
+  if (!result.reuse) delete updated.reuse;
+  await writeEntry(ctx, updated);
+  await syncReviewLedger(ctx, result.autoReview.author, entry.task, result.autoReview.heads);
+  await recordJournal(ctx, { kind: 'review-repinned', task: entry.task, text: `${entry.task}: ${result.reason}; ${result.autoReview.delta}`, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
+  await opts.log?.(`queue: ${entry.task} ${result.reason}`);
+  return updated;
 }
 
 async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier, entry: QueueEntry, opts: QueueTickOptions): Promise<boolean> {
@@ -631,8 +659,10 @@ async function failEntry(ctx: Context, entry: QueueEntry, error: string, notifie
   const { config } = ctx;
   const highest = readQueue(config).reduce((n, e) => Math.max(n, e.order, e.seq), 0);
   const { startingAt: _s, retryAt: _r, ...rest } = entry;
-  const attempts = [...(entry.attempts ?? []), { at: new Date(ctx.runner.now()).toISOString(), error, transient: transientStartError(error) }];
-  const retry = transientStartError(error) && attempts.length <= 3 && notify;
+  const attempts = [...(entry.attempts ?? []), { at: new Date(ctx.runner.now()).toISOString(), error, transient: transientStartError(error) || (Boolean(entry.autoReview) && /unsafe start residue/.test(error)) }];
+  // A review never owns the author's checkout, so a "residue" refusal there is a passing state of the author, not a broken start.
+  const passing = Boolean(entry.autoReview) && /unsafe start residue/.test(error);
+  const retry = (transientStartError(error) || passing) && attempts.length <= 3 && notify;
   const failed: QueueEntry = { ...rest, attempts, ...(retry ? { retryAt: new Date(ctx.runner.now() + [60_000, 300_000, 900_000][attempts.length - 1]!).toISOString(), reuse: true } : {}), status: retry ? 'queued' : 'failed', failedAt: new Date(ctx.runner.now()).toISOString(), error, order: highest + 1 };
   await writeEntry(ctx, failed);
   await ctx.runner.writeFile(queueLogFile(config, failed), `${log.join('\n')}${log.length > 0 ? '\n' : ''}error: ${error}\n`);

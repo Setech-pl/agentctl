@@ -70,7 +70,7 @@ await withHarness({ name: 'nc-workflow', cacheRoot: cache, config: 'watch: {inte
     check('author TASK.md freezes initial base before work', record('AUTHOR').repos[0]?.base === base);
     const wt = record('AUTHOR').repos[0]!.worktree; git(wt, ['commit', '--allow-empty', '-qm', 'author result']); const first = git(wt, ['rev-parse', 'HEAD']); writeReport('AUTHOR', first);
     const event = h.agentctl(['event', '--task', 'AUTHOR', '--agent', 'claude', '--kind', 'stop'], { input: '{}' }); check('real hook creates automatic review', event.code === 0 && readQueue(config).some(e => e.task === 'AUTHOR-REV'));
-    const rev = readQueue(config).find(e => e.task === 'AUTHOR-REV')!; const parsed = splitHeader(rev.spec); check('review provider differs and branch/cohort/dependency match author', rev.agent === 'codex' && rev.cohort === 'NC' && rev.after[0] === 'AUTHOR' && (parsed.repos as { branch: string }[])[0]?.branch === 'author');
+    const rev = readQueue(config).find(e => e.task === 'AUTHOR-REV')!; const parsed = splitHeader(rev.spec); const reviewRepo = (parsed.repos as { branch?: string; worktree: string; base: string }[])[0]!; check('review provider differs, own detached checkout (no author branch), cohort and dependency match author', rev.agent === 'codex' && rev.cohort === 'NC' && rev.after[0] === 'AUTHOR' && reviewRepo.branch === undefined && /-author-rev$/.test(reviewRepo.worktree) && !rev.reuse);
     check('same report hook does not duplicate review', h.agentctl(['event', '--task', 'AUTHOR', '--agent', 'claude', '--kind', 'stop'], { input: '{}' }).code === 0 && readQueue(config).length === 1);
     const status = JSON.parse((await call('status', { format: 'json', all: true })).text); check('status counts report decisions/actions', status.tasks.find((r: { task: string }) => r.task === 'AUTHOR').decisions === 1);
     const outputs = await call('pull_ready'); check('pull_ready includes validated structured outputs', outputs.text.includes('"outputs_valid":true') && outputs.text.includes(first));
@@ -93,6 +93,7 @@ await withHarness({ name: 'nc-workflow', cacheRoot: cache, config: 'watch: {inte
     check('batch mark confirmed records two user marks only', !(await call('mark', { cohort: 'NC', result: 'ok', confirm: true })).error && readHistory(config).filter(r => r.event === 'mark').length === 2);
     const gc = await call('gc_preview', { cohort: 'NC' }); check('GC permission description allows chat cleanup and keeps foreign paths out', !gc.text.includes('chat cannot clean up'));
     for (const e of readQueue(config)) { await call('queue_rm', { task: e.task }); await call('queue_rm', { task: e.task, confirm: true }); }
+    await cohortTick(ctx, notifier, await collectStatus(ctx, { archived: true })); // the cohort is seen open first: only cohorts closing afterwards get a suggestion
     await call('close', { cohort: 'NC' }); await call('close', { cohort: 'NC', confirm: true });
     await cohortTick(ctx, notifier, await collectStatus(ctx, { archived: true })); await cohortTick(ctx, notifier, await collectStatus(ctx, { archived: true }));
     check('closed cohort suggests GC once and never deletes automatically', readJournal(config).filter(e => e.kind === 'gc_suggest').length === 1 && fs.existsSync(wt));

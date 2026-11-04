@@ -33,7 +33,15 @@ export interface ResolvedRepo {
   branch?: string;
 }
 
-export interface AutoReviewSource { author: string; hash: string; heads: Record<string, string> }
+export interface AutoReviewSource {
+  author: string;
+  hash: string;
+  /** The author's commit per repository that the review is pinned to (its own checkout is detached there). */
+  heads: Record<string, string>;
+  /** The start of the reviewed delta per repository, and the delta text in the prompt (to re-pin when the author commits again). */
+  bases?: Record<string, string>;
+  delta?: string;
+}
 
 export interface ResolvedSpec {
   /** Internal queue provenance, never accepted from spec YAML. */

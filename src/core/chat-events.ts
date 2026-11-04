@@ -175,6 +175,7 @@ const hhmm = (iso: string): string => formatLocalTime(iso).slice(-5);
 const KIND_LABEL: Record<JournalEntry['kind'], string> = {
   'report-outputs': 'WYNIKI RAPORTU',
   'review-added': 'DODANO PRZEGLĄD',
+  'review-repinned': 'PRZEGLĄD PRZYPIĘTY',
   gc_suggest: 'SUGESTIA GC',
   'limited-resume': 'WZNOWIENIE',
   'needs-attention': 'WYMAGA UWAGI',

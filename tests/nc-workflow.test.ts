@@ -11,7 +11,9 @@ import { parseOutputs, readOutputs, aggregateOutputs, dependencyVerdict, journal
 import { collectStatus } from '../src/core/status.ts';
 import { splitSpecs, resolveSpec } from '../src/core/spec.ts';
 import { unmetAfter, findBlocked, blockedText } from '../src/core/depends.ts';
-import { planQueueAdd, commitQueueAdd, readQueue, unblockEntry, describeQueue } from '../src/core/queue.ts';
+import { planQueueAdd, commitQueueAdd, readQueue, unblockEntry, describeQueue, queueTick, QueueMemory, renderRawSpec } from '../src/core/queue.ts';
+import { enqueuePrompt } from '../src/core/prompt-queue.ts';
+import { missingLinkTargets } from '../src/core/links.ts';
 import { readTaskRecord, taskFile, setHeaderFields } from '../src/core/taskstore.ts';
 import { reviewTick, reviewOrder } from '../src/core/review.ts';
 import { resolveTaskBases } from '../src/core/base-ref.ts';
@@ -139,7 +141,7 @@ describe('0.17.4 automatic reviews and pinned task bases', () => {
     fs.mkdirSync(`${f.repo}-author`); report(author, { verdict: 'PASS' });
     assert.deepEqual(await reviewTick(f.ctx), ['AUTHOR-REV']); assert.deepEqual(await reviewTick(f.ctx), []);
     let entry = readQueue(f.config)[0]!; let spec = resolveSpec(splitSpecs(entry.spec)[0]!, { config: f.config });
-    assert.equal(spec.agent, 'codex'); assert.equal(spec.model, 'gpt-6-astra'); assert.equal(spec.effort, 'medium'); assert.equal(spec.cohort, 'NC'); assert.equal(spec.reviewOf, 'AUTHOR'); assert.equal(spec.repos[0]?.branch, 'author'); assert.equal(spec.repos[0]?.base, A, 'fake resolves the author base'); assert.equal(entry.reuse, true); assert.deepEqual(entry.after, ['AUTHOR']);
+    assert.equal(spec.agent, 'codex'); assert.equal(spec.model, 'gpt-6-astra'); assert.equal(spec.effort, 'medium'); assert.equal(spec.cohort, 'NC'); assert.equal(spec.reviewOf, 'AUTHOR'); assert.equal(spec.repos[0]?.branch, undefined, 'detached review checkout, no author branch'); assert.equal(spec.repos[0]?.base, A, 'pinned to the author head'); assert.equal(entry.reuse, undefined); assert.deepEqual(entry.after, ['AUTHOR']);
     tip = B; report(author, { verdict: 'PARTIAL', notes: ['second report'] }); assert.deepEqual(await reviewTick(f.ctx), ['AUTHOR-REV2']);
     entry = readQueue(f.config).find(e => e.task === 'AUTHOR-REV2')!; assert.match(entry.spec, new RegExp(`${A}\\.\\.${B}`));
     assert.equal(readJournal(f.config).filter(e => e.kind === 'review-added').length, 2);
@@ -343,5 +345,82 @@ it('automatic review is atomically queued with reuse/provenance; a colliding man
   seedTask(f.config, 'AUTHOR-REV', { reviewOf: 'AUTHOR' }); assert.deepEqual(await reviewTick(f.ctx), []);
   assert.ok(readJournal(f.config).some(e => e.text.includes('already exists and is not this automatic review'))); assert.equal(readQueue(f.config).length, 0);
   fs.rmSync(path.dirname(taskFile(f.config, 'author-rev')), { recursive: true }); await reviewTick(f.ctx);
-  const entry = readQueue(f.config)[0]!; assert.equal(entry.reuse, true); assert.equal(entry.autoReview?.author, 'AUTHOR'); assert.ok(entry.autoReview?.hash);
+  const entry = readQueue(f.config)[0]!; assert.equal(entry.reuse, undefined); assert.equal(entry.autoReview?.author, 'AUTHOR'); assert.ok(entry.autoReview?.hash);
 });
+
+describe('0.17.4 fix 1: automatic review runs in its own checkout, after the author is quiet', () => {
+  const authorFixture = (name: string, yaml = 'block', respond?: Parameters<typeof fixture>[2]) => {
+    const f = fixture(name, yaml === 'block' ? '' : yaml, respond); if (yaml === 'block') f.config.limits.codex = 0;
+    const author = seedTask(f.config, 'AUTHOR', { cohort: 'NC', review: { default: 'auto' }, repos: [{ path: f.repo, worktree: `${f.repo}-author`, branch: 'author', base: B }] });
+    fs.mkdirSync(`${f.repo}-author`); f.tmux.add('author', '❯ \n'); report(author, { verdict: 'PASS' });
+    const tick = async () => { const memory = new QueueMemory(); const began = await queueTick(f.ctx, memory, { clickable: false, notify: async () => {} }, {}); await memory.idle(); return { began, memory }; };
+    const view = async () => { const rows = await collectStatus(f.ctx, { progress: false, archived: true }); return describeQueue(f.config, readQueue(f.config), [], rows, f.runner.now()); };
+    return { f, author, tick, view };
+  };
+
+  it('B1: the review gets its own detached worktree, branch-less, no reuse, and its own canonical report path', async () => {
+    const { f } = authorFixture('b1-own');
+    assert.deepEqual(await reviewTick(f.ctx), ['AUTHOR-REV']);
+    const entry = readQueue(f.config)[0]!, spec = resolveSpec(splitSpecs(entry.spec)[0]!, { config: f.config });
+    assert.equal(spec.repos[0]!.worktree, `${f.root}/repo-author-rev`); assert.notEqual(spec.repos[0]!.worktree, `${f.repo}-author`);
+    assert.equal(spec.repos[0]!.branch, undefined); assert.equal(spec.repos[0]!.base, A); assert.equal(entry.reuse, undefined);
+    assert.equal(spec.report, path.join(f.config.cache, 'author-rev', 'AUTHOR-REV.md')); assert.match(entry.spec, /report:/);
+    assert.ok(spec.prompt.includes(`${f.root}/repo-author-rev`), 'the prompt names the reviewer checkout'); assert.equal(entry.autoReview?.heads[f.repo], A);
+  });
+
+  it('B1: a repo pair gets one own checkout per repository', async () => {
+    const f = fixture('b1-pair'); f.config.limits.codex = 0; const second = path.join(f.root, 'client'); fs.mkdirSync(second);
+    const author = seedTask(f.config, 'PAIR', { review: { default: 'auto' }, repos: [{ path: f.repo, worktree: `${f.repo}-pair`, branch: 'pair', base: B }, { path: second, worktree: `${second}-pair`, branch: 'pair', base: B }] });
+    fs.mkdirSync(`${f.repo}-pair`); fs.mkdirSync(`${second}-pair`); report(author, {});
+    assert.deepEqual(await reviewTick(f.ctx), ['PAIR-REV']);
+    const spec = resolveSpec(splitSpecs(readQueue(f.config)[0]!.spec)[0]!, { config: f.config });
+    assert.deepEqual(spec.repos.map(r => r.worktree), [`${f.root}/repo-pair-rev`, `${f.root}/client-pair-rev`]); assert.ok(spec.repos.every(r => r.branch === undefined));
+  });
+
+  it('B1: the review waits for an author with a follow-up in flight (not failed), then starts', async () => {
+    const { f, tick, view } = authorFixture('b1-wait', 'limits: {codex: 1}\n');
+    await reviewTick(f.ctx); await enqueuePrompt(f.ctx, 'author', 'F1: dopisz raport');
+    const waiting = (await view())[0]!; assert.equal(waiting.condition.kind, 'after'); assert.match(waiting.condition.text, /czeka na autora AUTHOR.*follow-up/);
+    assert.deepEqual((await tick()).began, []); assert.equal(readQueue(f.config)[0]!.status, 'queued'); assert.equal(readQueue(f.config)[0]!.attempts, undefined);
+    fs.rmSync(path.join(f.config.stateDir, 'author', 'prompt-queue.json')); assert.equal((await view())[0]!.condition.kind, 'ready');
+    assert.deepEqual((await tick()).began, ['AUTHOR-REV']);
+  });
+
+  it('B1: a report that settles later and an author git process keep the review waiting', async () => {
+    const { f, author, tick, view } = authorFixture('b1-settle', 'limits: {codex: 1}\nreport: {settle_s: 3600}\n');
+    await reviewTick(f.ctx); fs.utimesSync(author.report, new Date(), new Date());
+    assert.match((await view())[0]!.condition.text, /raport ustala się/);
+    f.config.reportSettleS = 0; assert.equal((await view())[0]!.condition.kind, 'ready');
+    const busy = authorFixture('b1-git', 'limits: {codex: 1}\n', (cmd, args) => cmd === 'ps' ? { stdout: ` 4242 git -C ${path.join(scratch.dir, 'b1-git', 'repo-author')} status\n` } : undefined);
+    await reviewTick(busy.f.ctx); assert.deepEqual((await busy.tick()).began, []); assert.equal(readQueue(busy.f.config)[0]!.status, 'queued'); void tick;
+  });
+
+  it('B1: a new author commit after queueing re-pins the review to the new SHA (delta and heads), ledger follows', async () => {
+    let tip = A;
+    const { f, tick } = authorFixture('b1-repin', 'block', (cmd, args) => cmd === 'git' && args.includes('refs/heads/author^{commit}') ? { stdout: tip } : undefined);
+    await reviewTick(f.ctx); tip = B;
+    await tick();
+    const entry = readQueue(f.config)[0]!, spec = resolveSpec(splitSpecs(entry.spec)[0]!, { config: f.config });
+    assert.equal(spec.repos[0]!.base, B); assert.equal(entry.autoReview!.heads[f.repo], B); assert.match(spec.prompt, new RegExp(`${A}\\.\\.${B}`)); assert.ok(!spec.prompt.includes(`${A}..${A}`));
+    assert.ok(readJournal(f.config).some(e => e.kind === 'review-repinned'));
+    const ledger = JSON.parse(fs.readFileSync(path.join(path.dirname(f.config.path), 'auto-reviews.json'), 'utf8')); assert.equal(ledger.AUTHOR[0].heads[f.repo], B);
+  });
+
+  it('B1: an entry queued by the previous build (author worktree, branch, reuse) is converted to the own-checkout layout', async () => {
+    const { f, tick } = authorFixture('b1-legacy', 'block');
+    const raw = f.raw('AUTHOR-REV', { agent: 'codex', model: 'gpt-6-astra', effort: 'medium', review_of: 'AUTHOR', review: false, after: ['AUTHOR'], repos: [{ path: f.repo, worktree: `${f.repo}-author`, branch: 'author', base: B }] });
+    const spec = resolveSpec(raw, { config: f.config });
+    await commitQueueAdd(f.ctx, [{ raw, spec }], { reuse: true, autoReview: { author: 'AUTHOR', hash: 'h', heads: { [f.repo]: A } } });
+    await tick();
+    const entry = readQueue(f.config)[0]!, migrated = resolveSpec(splitSpecs(entry.spec)[0]!, { config: f.config });
+    assert.equal(entry.reuse, undefined); assert.equal(migrated.repos[0]!.branch, undefined); assert.equal(migrated.repos[0]!.worktree, `${f.root}/repo-author-rev`); assert.equal(migrated.repos[0]!.base, A);
+    assert.equal(entry.autoReview!.bases?.[f.repo], B);
+  });
+
+  it('B1: "unsafe start residue" on a review start is transient and retried, not failed', async () => {
+    const { f, tick } = authorFixture('b1-transient', 'limits: {codex: 1}\n', (cmd, args) => cmd === 'git' && args.includes('worktree') && args.includes('add') ? { code: 1, stderr: 'unsafe start residue: x: task/git process still running in checkout' } : undefined);
+    await reviewTick(f.ctx); assert.deepEqual((await tick()).began, ['AUTHOR-REV']);
+    const entry = readQueue(f.config)[0]!; assert.equal(entry.status, 'queued'); assert.ok(entry.retryAt); assert.equal(entry.attempts![0]!.transient, true);
+  });
+});
+
