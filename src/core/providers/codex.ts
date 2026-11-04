@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { DEFAULT_AGENT_SETTINGS } from '../config.ts';
+import { defaultSettings } from './settings.ts';
 
 import { CLAUDE_KINDS, parseClaudeEvent, parseCodexEvent, planEventWiring } from '../events.ts';
 import type { ClaudeKind } from '../events.ts';
@@ -21,7 +21,7 @@ export const codex: ProviderAdapter = {
   id: 'codex', displayName: 'Codex', boardLabel: 'cx', letter: 'X', command: 'codex',
   installHint: 'Install Codex CLI: npm i -g @openai/codex (https://github.com/openai/codex).',
   capabilities: { remoteControl: false, statusLineTap: false, mcpInstall: false, busyPrompt: true },
-  defaultSettings: () => structuredClone(DEFAULT_AGENT_SETTINGS.codex),
+  defaultSettings: () => defaultSettings('codex'),
   async detect(runner) {
     const version = await runner.exec('codex', ['--version'], { readOnly: true });
     const help = version.code === 0 ? await runner.exec('codex', ['--help'], { readOnly: true }) : { stdout: '' };

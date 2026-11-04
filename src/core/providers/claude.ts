@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { DEFAULT_AGENT_SETTINGS } from '../config.ts';
+import { defaultSettings } from './settings.ts';
 
 import { CLAUDE_KINDS, parseClaudeEvent, parseCodexEvent, planEventWiring } from '../events.ts';
 import type { ClaudeKind } from '../events.ts';
@@ -21,7 +21,7 @@ export const claude: ProviderAdapter = {
   id: 'claude', displayName: 'Claude', boardLabel: 'cl', letter: 'C', command: 'claude',
   installHint: 'Install Claude Code: https://docs.claude.com/en/docs/claude-code (npm i -g @anthropic-ai/claude-code).',
   capabilities: { remoteControl: true, statusLineTap: true, mcpInstall: true, busyPrompt: true },
-  defaultSettings: () => structuredClone(DEFAULT_AGENT_SETTINGS.claude),
+  defaultSettings: () => defaultSettings('claude'),
   async detect(runner) {
     const version = await runner.exec('claude', ['--version'], { readOnly: true });
     const help = version.code === 0 ? await runner.exec('claude', ['--help'], { readOnly: true }) : { stdout: '' };

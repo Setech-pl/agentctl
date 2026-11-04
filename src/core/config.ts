@@ -1,3 +1,5 @@
+import { activeProviders, perProvider } from './providers/registry.ts';
+import { defaultSettings } from './providers/settings.ts';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -318,84 +320,7 @@ export interface ManagerSettings {
 
 export const DEFAULT_MANAGER_NAME = 'agentctl manager';
 
-/** The mark that opens the line an agent prints for an error: bullets, tree corners, warning signs. */
-const LINE_MARK = '^[\\s⎿●•■⚠!*>-]*';
-
-const BACKGROUND_CLAUDE = '[·⏵].*\\b\\d+ (?:shells?|monitors?)\\b(?: still running)?';
-
-export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
-  claude: {
-    acceptsBusyPrompt: true,
-    flags: [],
-    effortArgs: ['--effort', '{effort}'],
-    // Claude Code 2.1.309 idle screen: the input box line "❯ Try ...". The trust dialog also uses "❯", but with "1. Yes".
-    readyPattern: '^\\s*❯\\s(?!\\d+\\.)',
-    readyTimeout: 60,
-    trustTimeout: 600,
-    trustPattern: 'Quick safety check|Yes, I trust this folder',
-    workingPattern: 'esc to interrupt|^\\s*(?:⏺\\s+)?Running(?:\\s|…|\\.\\.\\.)|^\\s*[✶✻✽✢·*]\\s+[^\\n]+(?:…|\\.\\.\\.)\\s*\\([^\\n]*(?:\\d+(?:\\.\\d+)?s\\s*·|thinking|tokens)[^\\n]*\\)',
-    deliveryPattern: '^\\s*⏺|● got:',
-    interruptKey: 'Escape',
-    footerPatterns: [
-      '\\? for shortcuts',
-      '^\\s*(⏵⏵|⏸)',
-      'shift\\+tab to cycle',
-      '^\\s*[❯>]\\s*(Try ".*")?$',
-    ],
-    // AskUserQuestion dialog footer, and the footer of a permission dialog ("Esc to cancel · Tab to amend").
-    questionPattern: 'Enter to select\\b.*Esc to cancel|Esc to cancel · Tab to amend',
-    // Strings of the 2.1.309 binary: "You've hit your session limit" / "weekly limit" / "<model> limit" / "monthly spend limit" (+ " · resets …"),
-    // "Usage limit reached", "You're out of extra usage". The 429 line is also printed for a passing capacity problem (lower confidence).
-    limitPatterns: [
-      `${LINE_MARK}You.ve hit your .{0,60}limit`,
-      `${LINE_MARK}Usage limit reached`,
-      `${LINE_MARK}You.re out of extra usage`,
-      `${LINE_MARK}(?:API Error: )?Request rejected \\(429\\)`,
-    ],
-    // Claude Code 2.1.309 footer "⏵⏵ auto mode on · 1 shell, 6 monitors" and the lines "… · 1 shell, 6 monitors still running". A "·" or "⏵⏵" on the same
-    // line keeps a sentence of the conversation ("ran 2 shells") from counting.
-    overloadPatterns: ['^\\s*⎿\\s*API Error:\\s*529(?:\\s|$)', '^\\s*⎿\\s*(?:API Error:\\s*)?Overloaded(?:[.:]|$)'],
-    backgroundPatterns: ['^\\s*\\d+ (?:monitors?|shells?)(?:, \\d+ (?:monitors?|shells?))? still running\\b', BACKGROUND_CLAUDE, '[·⏵].*\\b\\d+ background\\b'],
-  },
-  codex: {
-    acceptsBusyPrompt: true,
-    flags: [],
-    effortArgs: ['-c', 'model_reasoning_effort={effort}'],
-    // Codex 0.166.0 idle screen: "› Ask Codex to do anything" and the footer "? for shortcuts".
-    readyPattern: '^›\\s(?!\\d+\\.)|\\? for shortcuts',
-    readyTimeout: 60,
-    trustTimeout: 600,
-    trustPattern: 'Trust this folder\\?|Folder settings can run code automatically',
-    workingPattern: 'esc to interrupt',
-    deliveryPattern: '^\\s*[•■]|● got:',
-    interruptKey: 'Escape',
-    // Codex 0.166.0 footer: "GPT-6.1-Sol low · <dir> · <title>" and "? for shortcuts … ⚠ 1 warning · f2 to view".
-    footerPatterns: [
-      '\\? for shortcuts',
-      '⚠ \\d+ warnings?',
-      'f2 to view',
-      '^\\s*[\\w.-]+ (low|medium|high|xhigh|minimal|none) · ',
-      '^\\s*›\\s*(Ask Codex to do anything)?\\s*$',
-      'Queued follow-up inputs|⇧.? (edit last queued message|to answer)',
-    ],
-    // A pending request_user_input question: "? Which color…" with options, then "• Waiting for your answer."; and the footer of an
-    // approval dialog ("Would you like to run the following command?" … "Press enter to confirm or esc to cancel").
-    questionPattern: 'Waiting for your answer|^\\s*\\?\\s+\\d+ questions?\\b|to answer\\s*$|Press enter to confirm or esc to cancel',
-    // Strings of the 0.166.0 binary (the apostrophe there is U+2019): "You've hit your usage limit. …", "Usage limit reached",
-    // "You're out of credits", "Your workspace is out of credits", "You hit your spend cap …".
-    limitPatterns: [
-      `${LINE_MARK}You.ve hit your usage limit`,
-      `${LINE_MARK}Usage limit reached`,
-      `${LINE_MARK}You.re out of credits`,
-      `${LINE_MARK}Your workspace is out of credits`,
-      `${LINE_MARK}You hit your spend cap`,
-    ],
-    // Codex 0.166.0 has "background terminals" (/ps lists them, /stop ends them, "Waiting for background terminal"). The exact footer text with a
-    // count was not seen on a screen: this pattern is a best guess, see the README.
-    overloadPatterns: ['^\\s*■\\s*Selected model is at capacity(?:\\.|$)'],
-    backgroundPatterns: ['\\b\\d+ background terminals?\\b'],
-  },
-};
+export const DEFAULT_AGENT_SETTINGS = Object.fromEntries(PROVIDER_IDS.map(id => [id, defaultSettings(id)])) as Record<ProviderId, AgentSettings>;
 
 /** The keys accepted in every layer: the global config, `.agentctl.yaml` and (with a few of its own) a spec. docs/configuration.md describes each one. */
 export const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'setup', 'defaults', 'guide', 'review'];
@@ -413,7 +338,7 @@ export const BOARD_KEYS = ['auto_hide_pulled_dead', 'mouse', 'return_key', 'sele
 export const MCP_KEYS = ['allow', 'allow_rm_worktree', 'client', 'max_response_kb'];
 export const QUEUE_KEYS = ['enabled', 'parallel_starts'];
 export const CANCEL_KEYS = ['grace'];
-export const USAGE_KEYS = ['warn', 'critical', 'queue_hold', 'status_line', 'claude_tap', 'claude_dir', 'codex_dir'];
+export const USAGE_KEYS = ['warn', 'critical', 'queue_hold', 'status_line', 'claude_tap', ...PROVIDER_IDS.map(id => `${id}_dir`)];
 export const COLLISION_KEYS = ['enabled', 'interval', 'notify', 'ignore'];
 
 /** Screen patterns are case-insensitive and match per line. */
@@ -942,13 +867,13 @@ function parseCancel(v: unknown, p: Problems): CancelSettings {
 }
 
 /** A percentage for both providers (`80`) or per provider (`{claude: 80, codex: 70}`); undefined when it is not one (the problem is added). */
-function parsePercent(v: unknown, where: string, p: Problems, fallback: Partial<Record<AgentName, number>>): Partial<Record<AgentName, number>> {
+function parsePercent(v: unknown, where: string, p: Problems, fallback: Partial<Record<AgentName, number>>, ids: readonly ProviderId[]): Partial<Record<AgentName, number>> {
   const ok = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x) && x > 0 && x <= 100;
-  if (ok(v)) return { claude: v, codex: v };
+  if (ok(v)) return perProvider(ids, () => v);
   if (isObject(v)) {
     checkKeys(v, [...AGENT_NAMES], where, p);
     const out = { ...fallback };
-    for (const name of AGENT_NAMES) {
+    for (const name of ids) {
       if (v[name] === undefined) continue;
       if (ok(v[name])) out[name] = v[name];
       else p.add(`${where}.${name} must be a percentage above 0 and up to 100`);
@@ -959,24 +884,26 @@ function parsePercent(v: unknown, where: string, p: Problems, fallback: Partial<
   return fallback;
 }
 
-function parseUsage(v: unknown, p: Problems): UsageSettings {
-  const usage: UsageSettings = { warn: { claude: 80, codex: 80 }, critical: { claude: 95, codex: 95 }, queueHold: {}, statusLine: true, claudeTap: true, claudeDir: null, codexDir: null };
+function parseUsage(v: unknown, p: Problems, ids: readonly ProviderId[]): UsageSettings {
+  const usage: UsageSettings = { warn: perProvider(ids, () => 80), critical: perProvider(ids, () => 95), queueHold: {}, statusLine: true, claudeTap: true, claudeDir: null, codexDir: null };
   if (v === undefined || v === null) return usage;
   if (!isObject(v)) {
     p.add('config.usage must be a mapping like {warn: 80, critical: 95}');
     return usage;
   }
   checkKeys(v, USAGE_KEYS, 'config.usage', p);
-  if (v.warn !== undefined) Object.assign(usage.warn, parsePercent(v.warn, 'config.usage.warn', p, usage.warn));
-  if (v.critical !== undefined) Object.assign(usage.critical, parsePercent(v.critical, 'config.usage.critical', p, usage.critical));
-  for (const name of AGENT_NAMES) if (usage.critical[name] < usage.warn[name]) p.add(`config.usage: critical (${usage.critical[name]}) for ${name} is below warn (${usage.warn[name]})`);
-  if (v.queue_hold !== undefined && v.queue_hold !== false) usage.queueHold = parsePercent(v.queue_hold, 'config.usage.queue_hold', p, {});
+  if (v.warn !== undefined) Object.assign(usage.warn, parsePercent(v.warn, 'config.usage.warn', p, usage.warn, ids));
+  if (v.critical !== undefined) Object.assign(usage.critical, parsePercent(v.critical, 'config.usage.critical', p, usage.critical, ids));
+  for (const name of ids) if (usage.critical[name] < usage.warn[name]) p.add(`config.usage: critical (${usage.critical[name]}) for ${name} is below warn (${usage.warn[name]})`);
+  if (v.queue_hold !== undefined && v.queue_hold !== false) usage.queueHold = parsePercent(v.queue_hold, 'config.usage.queue_hold', p, {}, ids);
   for (const [key, field] of [['status_line', 'statusLine'], ['claude_tap', 'claudeTap']] as const) {
     if (v[key] === undefined) continue;
     if (typeof v[key] === 'boolean') usage[field] = v[key];
     else p.add(`config.usage.${key} must be true or false`);
   }
-  for (const [key, field] of [['claude_dir', 'claudeDir'], ['codex_dir', 'codexDir']] as const) {
+  for (const id of PROVIDER_IDS) {
+    const key = `${id}_dir`;
+    const field = `${id}Dir` as 'claudeDir' | 'codexDir';
     const dir = parseString(v[key], `config.usage.${key}`, p);
     if (dir) usage[field] = resolvePath(dir);
   }
@@ -1064,7 +991,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
         if (typeof raw.limits.count_report_ready === "boolean") countReportReady = raw.limits.count_report_ready;
         else p.add("config.limits.count_report_ready must be true or false");
       }
-      for (const name of AGENT_NAMES) {
+      for (const name of activeProviders({ providers })) {
         const value = raw.limits[name];
         if (value === undefined) continue;
         if (typeof value === 'number' && Number.isInteger(value) && value > 0) limits[name] = value;
@@ -1078,7 +1005,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   if (rawAgents !== undefined && rawAgents !== null && !isObject(rawAgents)) p.add('config.agents must be a mapping');
   const agentMap = isObject(rawAgents) ? rawAgents : {};
   checkKeys(agentMap, [...AGENT_NAMES], 'config.agents', p);
-  for (const name of AGENT_NAMES) agents[name] = parseAgentSettings(name, agentMap[name], `config.agents.${name}`, p);
+  for (const name of activeProviders({ providers })) agents[name] = parseAgentSettings(name, agentMap[name], `config.agents.${name}`, p);
 
   const equivalents = [...parseEquivalents(raw.equivalents, 'config.equivalents', p), ...parseEquivalents(DEFAULT_EQUIVALENTS, 'defaults', p)];
   const mirror = parseString(raw.mirror_dir, 'config.mirror_dir', p);
@@ -1091,7 +1018,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   const queue = parseQueue(raw.queue, p);
   const collisions = parseCollisions(raw.collisions, p);
   const cancel = parseCancel(raw.cancel, p);
-  const usage = parseUsage(raw.usage, p);
+  const usage = parseUsage(raw.usage, p, activeProviders({ providers }));
   let guideLang: 'en' | 'pl' = 'en';
   if (isObject(raw.guide)) {
     checkKeys(raw.guide, ['lang'], 'config.guide', p);
