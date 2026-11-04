@@ -1,3 +1,4 @@
+import { stableSelfArgv } from './mcp-install.ts';
 import { isOverloaded } from './state.ts';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -184,6 +185,7 @@ const shellWord = (s: string): string => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(s) ? s
 
 /** The settings file for one Claude window: only the three event hooks, merged by Claude with the user's and the project's own. */
 export function buildClaudeSettings(task: string, self: SelfArgv, statusLine?: Record<string, unknown>): Record<string, unknown> {
+  self = stableSelfArgv(self);
   const hooks: Record<string, unknown> = {};
   for (const kind of CLAUDE_KINDS) {
     const command = [...self, ...eventArgs(task, 'claude', kind)].map(shellWord).join(' ');
@@ -197,6 +199,7 @@ export const tomlArray = (items: string[]): string => `[${items.map(tomlString).
 
 /** Codex's `-c notify=[…]` value: this agentctl's `event` command, and the notify command the user already has (run by `event` afterwards). */
 export function buildCodexNotify(task: string, self: SelfArgv, forward: string[] | undefined): string[] {
+  self = stableSelfArgv(self);
   return [...self, ...eventArgs(task, 'codex'), ...(forward && forward.length > 0 ? ['--forward', JSON.stringify(forward)] : [])];
 }
 

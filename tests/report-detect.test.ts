@@ -82,16 +82,16 @@ function setup(name: string, extra: Parameters<typeof seedTask>[2] = {}) {
 }
 
 describe('findCandidates', () => {
-  it('takes a relative path from the worktree, keeps an old file only as a candidate, prefers a name with the ID or "report"', () => {
+  it('0173-2: only fresh configured files with the task ID qualify', () => {
     const s = setup('cand');
     const old = s.write(path.join(s.worktree, 'docs/old.md'), 'old', new Date(Date.UTC(2026, 9, 1)));
     s.write(path.join(s.worktree, 'docs/notes.md'), 'n');
     s.write(path.join(s.worktree, 'docs/reports/nc-1-final.md'), 'r');
     const text = 'Zobacz docs/reports/nc-1-final.md i docs/old.md oraz docs/notes.md';
     const found = findCandidates(s.ctx, s.record, text);
-    assert.deepEqual(found.map((c) => path.relative(s.worktree, c.file)), ['docs/reports/nc-1-final.md', 'docs/notes.md', 'docs/old.md']);
-    assert.deepEqual(found.map((c) => c.why), ['configured', 'mentioned', 'mentioned']);
-    assert.ok(found.some((c) => c.file === old));
+    assert.deepEqual(found.map((c) => path.relative(s.worktree, c.file)), ['docs/reports/nc-1-final.md']);
+    assert.deepEqual(found.map((c) => c.why), ['configured']);
+    assert.ok(!found.some((c) => c.file === old));
   });
 
   it('prefers the latest mentioned among equals and reads absolute and ~ paths', () => {
@@ -99,8 +99,8 @@ describe('findCandidates', () => {
     const a = s.write(path.join(s.root, 'cache/other-name/a.md'), 'a');
     s.write(path.join(s.worktree, 'b.md'), 'b');
     const found = findCandidates(s.ctx, s.record, `${a} potem b.md`);
-    assert.equal(found[0]?.file, path.join(s.worktree, 'b.md'));
-    assert.equal(findCandidates(s.ctx, s.record, `~/${path.relative(HOME, a)}`).length, 1);
+    assert.deepEqual(found, []);
+    assert.equal(findCandidates(s.ctx, s.record, `~/${path.relative(HOME, a)}`).length, 0);
   });
 
   it('ignores the canonical file and the state folder', () => {
@@ -115,7 +115,7 @@ describe('findCandidates', () => {
     s.write(path.join(s.worktree, 'docs/reports/b-nc-1.md'), 'b');
     s.write(path.join(s.worktree, 'docs/mentioned.md'), 'm');
     const found = findCandidates(s.ctx, s.record, 'docs/mentioned.md');
-    assert.deepEqual(found.map((c) => [path.basename(c.file), c.why]), [['b-nc-1.md', 'configured'], ['a-nc-1.md', 'configured'], ['mentioned.md', 'mentioned']]);
+    assert.deepEqual(found.map((c) => [path.basename(c.file), c.why]), [['b-nc-1.md', 'configured'], ['a-nc-1.md', 'configured']]);
   });
 });
 
@@ -123,7 +123,9 @@ describe('syncReport', () => {
   it('copies the report to the canonical path, remembers the source and writes "raport wykryty w …" to the journal', async () => {
     const s = setup('sync');
     const src = s.write(path.join(s.worktree, 'docs/reports/nc-1.md'), 'Werdykt: PASS\n');
-    const r = await syncReport(s.ctx, s.record, { message: 'Raport w docs/reports/nc-1.md' });
+    assert.equal((await syncReport(s.ctx, s.record, { message: 'Raport w docs/reports/nc-1.md' })).action, 'none');
+    assert.equal(fs.existsSync(s.record.report), false);
+    const r = await syncReport(s.ctx, s.record, { from: src });
     assert.equal(r.action, 'copied');
     assert.equal(fs.readFileSync(s.record.report, 'utf8'), 'Werdykt: PASS\n');
     const stored = readTaskRecord(s.config, 'nc-1');
@@ -171,7 +173,8 @@ describe('syncReport', () => {
     s.write(path.join(s.worktree, 'docs/reports/nc-1-raport.md'), 'Werdykt: PASS');
     s.fake.windows[0]!.screen = `${IDLE}\n⏺ pbcopy < ${path.join(s.worktree, 'docs/reports/nc-1-raport.md')}\n`;
     const r = await syncReport(s.ctx, s.record, { pane: true, message: 'Gotowe.' });
-    assert.equal(r.action, 'copied');
+    assert.equal(r.action, 'none');
+    assert.ok(readTaskRecord(s.config, 'nc-1')?.reportCandidate);
   });
 
   it('finds nothing without a candidate', async () => {
@@ -182,7 +185,7 @@ describe('syncReport', () => {
 });
 
 describe('the end of a turn and the watcher', () => {
-  it('Claude Stop: a report written elsewhere becomes report-ready with the verdict', async () => {
+  it('0173-2: Claude Stop records a candidate without copying', async () => {
     const s = setup('event');
     s.write(path.join(s.worktree, 'docs/reports/nc-1.md'), 'Werdykt: PASS – 3 testy\n\n# Raport\n');
     const notifier = new Quiet();
@@ -192,14 +195,14 @@ describe('the end of a turn and the watcher', () => {
       kind: 'stop',
       payload: { last_assistant_message: 'Zapisałem raport w docs/reports/nc-1.md. Werdykt na końcu.' },
     });
-    assert.equal(res.announced?.state, 'report-ready');
-    assert.match(res.announced?.text ?? '', /NC-1: raport gotowy – Werdykt: PASS/);
-    assert.ok(fs.existsSync(s.record.report));
+    assert.notEqual(res.announced?.state, 'report-ready');
+    assert.equal(fs.existsSync(s.record.report), false);
     const kinds = readJournal(s.config).map((e) => e.kind);
-    assert.deepEqual(kinds, ['report-detected', 'report-ready']);
+    assert.ok(kinds.includes('report-candidate'));
+    assert.ok(!kinds.includes('report-ready'));
   });
 
-  it('Codex notify: last-assistant-message is searched too', async () => {
+  it('0173-2: Codex notify cannot copy a mentioned file', async () => {
     const s = setup('codex', { agent: 'codex' });
     const abs = s.write(path.join(s.root, 'cache/other-name/NC-1-report.md'), 'Werdykt: PASS\n');
     const res = await handleEvent(s.ctx, new Alerts(s.ctx, new Quiet(), { env: {} }), {
@@ -207,21 +210,23 @@ describe('the end of a turn and the watcher', () => {
       agent: 'codex',
       payload: { type: 'agent-turn-complete', 'last-assistant-message': `Raport: ${abs}`, 'thread-id': 't' },
     });
-    assert.equal(res.announced?.state, 'report-ready');
+    assert.notEqual(res.announced?.state, 'report-ready');
   });
 
-  it('a waiting task: the watcher finds the report in the window and the task turns report-ready', async () => {
+  it('0173-3: watcher preserves waiting until explicit report confirmation', async () => {
     const s = setup('watch');
     s.write(path.join(s.worktree, 'docs/reports/nc-1.md'), 'Werdykt: PASS\n');
     s.fake.windows[0]!.screen = `${IDLE}\nraport: docs/reports/nc-1.md\n`;
     const notifier = new Quiet();
     const events = await watchTick(s.ctx, new WatchMemory(), notifier);
-    assert.ok(fs.existsSync(s.record.report));
+    assert.equal(fs.existsSync(s.record.report), false);
     const row = (await collectStatus(s.ctx, { progress: false })).find((r) => r.task === 'NC-1');
-    assert.equal(row?.state, 'report-ready');
-    assert.equal(row?.reportSource, path.join(s.worktree, 'docs/reports/nc-1.md'));
+    assert.equal(row?.state, 'waiting');
+    assert.equal(row?.reportCandidate, path.join(s.worktree, 'docs/reports/nc-1.md'));
+    await syncReport(s.ctx, s.record, { from: 'docs/reports/nc-1.md' });
+    const confirmed = await collectStatus(s.ctx, { progress: false });
     assert.ok(Array.isArray(events));
-    assert.match(statusMarkdown(row ? [row] : []), /yes \(z .*docs\/reports\/nc-1\.md\)/);
+    assert.match(statusMarkdown(confirmed), /yes \(z .*docs\/reports\/nc-1\.md\)/);
   });
 });
 

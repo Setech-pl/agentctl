@@ -1,3 +1,4 @@
+import { stableNodePath } from './core/mcp-install.ts';
 import { findEntry } from './core/queue.ts';
 import { collectDisk, diskLine, confirmDiskStart } from './core/disk.ts';
 import { collectCapacity, capacitySnapshot, renderCapacity, snapshotLines } from './core/capacity.ts';
@@ -158,7 +159,7 @@ export function defaultDeps(): CliDeps {
 function selfCommand(args: string): string {
   const env = process.env.AGENTCTL_HOME ? `AGENTCTL_HOME=${shellQuote(process.env.AGENTCTL_HOME)} ` : '';
   const script = fs.realpathSync(process.argv[1] ?? 'bin/agentctl.ts');
-  return `${env}${shellQuote(process.execPath)} ${script.endsWith('.ts') ? '--experimental-strip-types --no-warnings ' : ''}${shellQuote(script)} ${args}`;
+  return `${env}${shellQuote(stableNodePath(process.execPath))} ${script.endsWith('.ts') ? '--experimental-strip-types --no-warnings ' : ''}${shellQuote(script)} ${args}`;
 }
 
 /**
@@ -169,7 +170,7 @@ function selfCommand(args: string): string {
 export function selfArgv(): SelfArgv {
   const script = fs.realpathSync(process.argv[1] ?? 'bin/agentctl.ts');
   const env = (['AGENTCTL_HOME', 'TMUX_TMPDIR', 'PATH'] as const).filter((k) => process.env[k]).map((k) => `${k}=${process.env[k]}`);
-  return [...(env.length > 0 ? ['/usr/bin/env', ...env] : []), process.execPath, ...(script.endsWith('.ts') ? ['--experimental-strip-types', '--no-warnings'] : []), script];
+  return [...(env.length > 0 ? ['/usr/bin/env', ...env] : []), stableNodePath(process.execPath), ...(script.endsWith('.ts') ? ['--experimental-strip-types', '--no-warnings'] : []), script];
 }
 
 async function askOnTerminal(question: string): Promise<boolean> {

@@ -91,7 +91,7 @@ describe('operations find a window that carries an icon', () => {
     assert.equal(used.length, 5, used.join('\n'));
     assert.ok(used.every((c) => c.includes(` ${w.id}`) || c.includes('load-buffer')), used.join('\n'));
     const reads = runner.queries.filter((q) => q.includes('capture-pane'));
-    assert.equal(reads.length, 3, 'peek, the search for a report elsewhere, and the pull fallback');
+    assert.equal(reads.length, 2, 'peek and pull fallback; glob discovery does not capture the pane');
     assert.ok(reads.every((q) => q.includes(` ${w.id}`)), reads.join('\n'));
     assert.equal(tmux.windows.length, 0, 'the decorated window was closed');
     assert.ok(!runner.commands.some((c) => c.includes('=agentctl:nc-1')), 'no target by the plain name');

@@ -173,7 +173,6 @@ stateDiagram-v2
     state "⏸ waiting" as waiting
     state "? needs-input" as input
     state "⏳ overloaded" as overloaded
-    state "? report-candidate" as candidate
     state "⛔ limited" as limited
     state "✓ report-ready" as ready
     state "↪ superseded" as superseded
@@ -205,8 +204,6 @@ stateDiagram-v2
     input --> working: you answer
     working --> overloaded: provider capacity error
     overloaded --> working: bounded retry, idle empty input only
-    waiting --> candidate: unconfirmed report path
-    candidate --> ready: report-end or ended and settled current attempt
     working --> limited: usage limit message
     limited --> working: limit reset, retry
     limited --> superseded: move to the other provider

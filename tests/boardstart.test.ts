@@ -26,8 +26,8 @@ describe('board start: waiting for a terminal size', () => {
     assert.equal(sleeps.length, 3);
   });
 
-  it('a size that is there at once costs no waiting; a missing columns or rows counts as no size', async () => {
-    assert.deepEqual(await waitForSize({ columns: 80, rows: 24 }), { columns: 80, rows: 24, waitedMs: 0 });
+  it('0173-11: a size that is there at once costs no waiting; a missing columns or rows counts as no size', async () => {
+    assert.deepEqual(await waitForSize({ columns: 80, rows: 24 }, { now: () => 42, sleep: async () => { assert.fail('must not sleep'); } }), { columns: 80, rows: 24, waitedMs: 0 });
     let clock = 0;
     await assert.rejects(
       waitForSize({ columns: 80, rows: undefined }, { timeoutMs: 1000, now: () => clock, sleep: async (ms) => void (clock += ms) }),

@@ -113,7 +113,7 @@ it('D9: an ended pane alone cannot confirm a current-attempt report without a co
   const record = seedTask(f.config, 'CRASH-1', { attemptId: 'current', attemptStarted: new Date(f.runner.now() - 60000).toISOString(), turnEndedAt: undefined });
   fs.mkdirSync(path.dirname(record.report), { recursive: true }); fs.writeFileSync(record.report, 'Werdykt: PASS\npartial or complete: unknown');
   const time = (f.runner.now() - 31000) / 1000; fs.utimesSync(record.report, time, time);
-  assert.equal((await collectStatus(f.ctx, { progress: false }))[0]!.state, 'report-candidate');
+  assert.equal((await collectStatus(f.ctx, { progress: false }))[0]!.state, 'dead');
   fs.appendFileSync(record.report, '\n' + REPORT_END);
   assert.equal((await collectStatus(f.ctx, { progress: false }))[0]!.state, 'report-ready');
 });
@@ -208,7 +208,7 @@ it('W4 D3 D5: summary receipt differs from full read/ack/mark; stable full pagin
   await f.call('pull_ready', { mode: 'full', limit: 1 });
   assert.ok(readTaskRecord(f.config, 'a-1')!.pulled);
   const second = await f.call('pull_ready', { mode: 'full', offset: 1, limit: 1 }); assert.match(second.text, /A-2/);
-  assert.ok(readTaskRecord(f.config, 'a-2')!.pulled);
+  assert.equal(readTaskRecord(f.config, 'a-2')!.pulled, undefined, 'oversized report needs get_report pages');
   await f.call('pull_ready', { all: true, ack: true }); assert.ok(readTaskRecord(f.config, 'a-1')!.pulled);
 });
 it('W5: fence-aware sections and continuous >1MB report pagination, including a giant line; only EOF after contiguous read marks pulled', async () => {
@@ -220,7 +220,7 @@ it('W5: fence-aware sections and continuous >1MB report pagination, including a 
   // Jumping to EOF alone is not evidence of full delivery.
   await f.call('get_report', { task: 'BIG-1', offset: content.split('\n').length - 1 });
   assert.equal(readTaskRecord(f.config, 'big-1')!.pulled, undefined);
-  for (let i = 0; i < 100; i++) {
+  for (let i = 0; i < 1000; i++) {
     const response = await f.call('get_report', { task: 'BIG-1', offset, byte_offset });
     assert.ok(!response.isError, response.text);
     assert.ok(Buffer.byteLength(response.text) <= 200 * 1024);
@@ -270,7 +270,7 @@ it('W8: real registered partial checkout, lock and wrong branch fail; complete e
 it('D1 D2: unchanged waiting reports avoid a second status collection; recovery persistence failure cannot stop watch', async () => {
   const f = fixture('d1'); seedTask(f.config, 'D-1'); const pane = f.tmux.add('d-1', 'Done\n❯ \n');
   await watchTick(f.ctx, new WatchMemory(), notify);
-  assert.equal(f.tmux.seen.filter(c => c.startsWith('capture-pane')).length, 2, 'one status capture and one report search');
+  assert.equal(f.tmux.seen.filter(c => c.startsWith('capture-pane')).length, 1, 'one status capture; glob discovery does not read pane text');
   pane.screen = screen('claude-overloaded');
   const write = f.runner.writeFile.bind(f.runner);
   f.runner.writeFile = async (file, text) => { if (file.endsWith('overload-retries.json')) throw new Error('state disk unavailable'); return write(file, text); };
@@ -287,7 +287,7 @@ it('W7: a settled alternate report stays complete after the canonical copy gets 
   const old = new Date(Date.now() - 60000); fs.utimesSync(alternative, old, old);
   const r = seedTask(f.config, 'ALT-1', { reportAlt: [alternative] });
   const { syncReport } = await import('../src/core/report-detect.ts');
-  assert.equal((await syncReport(f.ctx, r)).action, 'copied');
+  assert.equal((await syncReport(f.ctx, r, { from: alternative })).action, 'copied');
   assert.equal((await collectStatus(f.ctx))[0]!.report, 'yes');
   fs.writeFileSync(alternative, 'Later source edit');
   assert.equal((await collectStatus(f.ctx))[0]!.report, 'yes', 'canonical proof belongs to the copied content');

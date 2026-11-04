@@ -21,7 +21,7 @@ const WORKING = '● Reading src/menu.ts\n  esc to interrupt\n';
 function setup(name: string, extraYaml = '') {
   const root = scratch.sub(name);
   const repo = scratch.sub(`${name}/app`);
-  const config = makeConfig(root, extraYaml);
+  const config = makeConfig(root, `cohort: {done_grace_s: 0}\n${extraYaml}`);
   const tmux = new FakeTmux();
   // the fake clock runs ahead of the files the test writes, so a pull is later than the report it takes
   const runner = new DiskRunner({ dryRun: false, startTime: Date.now() + 3_600_000, respond: tmux.respond });

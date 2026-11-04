@@ -1,3 +1,4 @@
+import { listTaskRecords, listArchivedRecords } from './taskstore.ts';
 import { collectDisk, diskLine } from './disk.ts';
 import { projectGuide } from './guide.ts';
 import { installation } from './installation.ts';
@@ -81,7 +82,7 @@ async function managerChecks(runner: Runner, config: GlobalConfig, tmuxOk: boole
 export async function runDoctor(
   runner: Runner,
   loadConfig: () => GlobalConfig = loadGlobalConfig,
-  cwd: string = process.cwd(),
+  cwd: string | null = process.cwd(),
   nodeVersion: string = process.versions.node,
   platform: string = os.platform(),
   home: string = os.homedir(),
@@ -249,7 +250,18 @@ export async function runDoctor(
         add('mirror', 'fail', `${dir} is not writable`);
       }
     } else add('mirror', 'ok', 'off (set mirror_dir in the config to enable)');
-    try {
+    const taskProcesses = (await runner.exec('ps', ['-axo', 'command='], { readOnly: true })).stdout.split('\n');
+    for (const record of [...listTaskRecords(config), ...listArchivedRecords(config)]) {
+      if (record.reportSource && path.normalize(record.reportSource) !== path.normalize(record.report)) add(`report ${record.task}`, 'warn', `raport pochodzi z kopii ${record.reportSource} – sprawdź`);
+      if (record.closed || record.cancelled) continue;
+      if (taskProcesses.some(command => /\/Cellar\/node(?:@[^/]+)?\//.test(command) && command.includes('--task') && command.replaceAll(/[^a-zA-Z0-9_-]+/g, ' ').split(' ').includes(record.task))) add(`task node ${record.task}`, 'warn', 'versioned Node path in active callback argv; works until Node is upgraded; regenerate task wiring when convenient');
+      const dir = path.join(config.stateDir, record.window);
+      for (const name of ['claude-settings.json']) {
+        try { if (/\/Cellar\/node(?:@[^/]+)?\//.test(fs.readFileSync(path.join(dir, name), 'utf8'))) add(`task node ${record.task}`, 'warn', `versioned Node path in ${name}; works until Node is upgraded; regenerate task wiring when convenient`); } catch { /* absent */ }
+      }
+    }
+    if (cwd === null) add('project', 'ok', 'bez projektu');
+    else try {
       const project = loadProjectConfig(cwd);
       for (const warning of projectGuide(cwd).warnings) add('project guide', 'warn', warning);
       add('project config', 'ok', project ? project.path : `no ${PROJECT_CONFIG_NAME} in ${path.resolve(cwd)} (optional)`);

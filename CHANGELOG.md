@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/) while it is below 1.0 (minor versions may change behaviour).
 
+## [0.17.3] - 2026-11-04
+
+- Bound all MCP responses to 8 KiB by default with session-local response fragments; write previews show affected tasks only, global queue operations show counts and five queued tasks.
+- Report discovery accepts only current-attempt configured alternatives bearing the task ID; copying always requires explicit report_from/--from. Candidate flags preserve task states and questions. Status/doctor flag historical report_source copies for review.
+- Delay cohort completion until 300 seconds after its last membership/state change (cohort.done_grace_s).
+- Correct paused queue previews and absolute get_report byte offsets, including EOF and sections.
+- Summarize disk inventory by total, count and five largest worktrees; detailed paths require pagination.
+- Resolve project guide/doctor context explicitly over MCP; diagnose missing overlays. Keep new/queue project configuration independent of server cwd.
+- Use stable Node paths in task hooks, notify and usage tap; doctor warns about active legacy task paths.
+- Restart watch and board by tmux role after updates; make the immediate terminal-size regression independent of wall time.
+
 ## [0.17.2] - 2026-11-03
 
 - Board: compact provider/model/version/effort labels (e.g. cx S 6.1 XH), observed/configured alias version fallbacks, full names in preview/help, wider lists at 140+ columns, and board.list_width / board.model_versions configuration. Queue rows share the same formatter; selection/state colors and NO_COLOR stay unchanged.

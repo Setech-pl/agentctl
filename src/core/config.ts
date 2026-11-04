@@ -106,6 +106,7 @@ export interface GlobalConfig extends Layer {
   /** The task queue: tasks that wait for a free window of their provider and start by themselves (`agentctl queue`). */
   queue: QueueSettings;
   reportSettleS: number;
+  cohort: { doneGraceS: number };
   overload: { autoRetry: boolean; retryAfter: number; maxRetries: number; giveUpAfter: number; resetAfterS: number; message: string };
   /** Collision warnings: two active tasks of one repository changing the same files. */
   collisions: CollisionSettings;
@@ -193,6 +194,7 @@ export interface CollisionSettings {
 }
 
 export interface McpSettings {
+  maxResponseKb: number;
   client?: string;
   /** Write tools the chat may call; empty (the default): the server only reads. */
   allow: McpWriteTool[];
@@ -366,7 +368,7 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
 
 /** The keys accepted in every layer: the global config, `.agentctl.yaml` and (with a few of its own) a spec. docs/configuration.md describes each one. */
 export const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'setup', 'defaults', 'guide'];
-export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git'];
+export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git', 'cohort'];
 export const LIMITS_KEYS = [...AGENT_NAMES, 'count_external'];
 export const DEFAULTS_KEYS = ['agent', 'model', 'effort', 'remote_control'];
 export const LINK_KEYS = ['from', 'to'];
@@ -377,7 +379,7 @@ export const NTFY_KEYS = ['server', 'topic', 'token', 'events', 'priority', 'inc
 export const AWAY_KEYS = ['auto_idle'];
 export const MANAGER_KEYS = ['project', 'name', 'model', 'effort', 'guide', 'autostart'];
 export const BOARD_KEYS = ['auto_hide_pulled_dead', 'mouse', 'return_key', 'selected_color', 'model_versions', 'list_width'];
-export const MCP_KEYS = ['allow', 'allow_rm_worktree', 'client'];
+export const MCP_KEYS = ['allow', 'allow_rm_worktree', 'client', 'max_response_kb'];
 export const QUEUE_KEYS = ['enabled', 'parallel_starts'];
 export const CANCEL_KEYS = ['grace'];
 export const USAGE_KEYS = ['warn', 'critical', 'queue_hold', 'status_line', 'claude_tap', 'claude_dir', 'codex_dir'];
@@ -600,7 +602,7 @@ function parseWindowIcons(v: unknown, p: Problems): GlobalConfig['watch']['windo
     p.add(`${where} must be true, false or a mapping like {working: "⚙", report-ready: "✓"}`);
     return icons;
   }
-  checkKeys(v, [...TASK_STATES], where, p);
+  checkKeys(v, [...TASK_STATES, 'report-candidate'], where, p); // Accept the obsolete icon key from older configs; candidates are now a flag.
   for (const state of TASK_STATES) {
     const icon = v[state];
     if (icon === undefined) continue;
@@ -801,7 +803,7 @@ function parseBoard(v: unknown, p: Problems): BoardSettings {
  * of agentctl names tools this one does not know). The offending entry is ignored and said so in `warnings`.
  */
 function parseMcp(v: unknown): McpSettings {
-  const mcp: McpSettings = { allow: [], allowRmWorktree: false, warnings: [] };
+  const mcp: McpSettings = { maxResponseKb: 8, allow: [], allowRmWorktree: false, warnings: [] };
   if (v === undefined || v === null) return mcp;
   if (!isObject(v)) {
     mcp.warnings.push(`config.mcp must be a mapping like {allow: [${MCP_WRITE_TOOLS.join(', ')}]}: ignored, writing is off`);
@@ -810,6 +812,10 @@ function parseMcp(v: unknown): McpSettings {
   const q = new Problems();
   checkKeys(v, MCP_KEYS, 'config.mcp', q);
   if (v.client !== undefined) { if (typeof v.client === 'string' && v.client.trim()) mcp.client = v.client.trim(); else q.add('config.mcp.client must be nonempty text'); }
+  if (v.max_response_kb !== undefined) {
+    if (typeof v.max_response_kb === 'number' && Number.isFinite(v.max_response_kb) && v.max_response_kb >= 1 && v.max_response_kb <= 1024) mcp.maxResponseKb = v.max_response_kb;
+    else q.add('config.mcp.max_response_kb must be between 1 and 1024');
+  }
   const allow = parseStringList(v.allow, 'config.mcp.allow', q);
   for (const name of allow) {
     if (MCP_ALLOW_GROUPS[name]) {
@@ -1060,8 +1066,19 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
     }
   }
   if (disk.criticalGb > disk.warnGb) p.add('config.disk.critical_gb must not exceed warn_gb');
+  const cohort = { doneGraceS: 300 };
+  if (raw.cohort !== undefined) {
+    if (!isObject(raw.cohort)) p.add('config.cohort must be a mapping');
+    else {
+      checkKeys(raw.cohort, ['done_grace_s'], 'config.cohort', p);
+      if (raw.cohort.done_grace_s !== undefined) {
+        if (typeof raw.cohort.done_grace_s === 'number' && Number.isFinite(raw.cohort.done_grace_s) && raw.cohort.done_grace_s >= 0) cohort.doneGraceS = raw.cohort.done_grace_s;
+        else p.add('config.cohort.done_grace_s must be a nonnegative number');
+      }
+    }
+  }
   p.throwIfAny(`Invalid config ${file}:`, 'Fix the listed keys; see the README section "Configuration".');
-  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, limits, countExternal, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, overload, collisions, cancel, usage, guideLang, capacity, disk, git, path: file, loaded: exists };
+  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, limits, countExternal, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, cohort, overload, collisions, cancel, usage, guideLang, capacity, disk, git, path: file, loaded: exists };
   if (mirror) config.mirrorDir = resolvePath(mirror);
   return config;
 }

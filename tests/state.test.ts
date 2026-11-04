@@ -134,7 +134,7 @@ describe('status states from mocked capture-pane', () => {
         ['NC-3', 'needs-trust'],
         ['NC-4', 'report-ready'], // window alive and idle, fresh report
         ['NC-5', 'dead'], // window gone, no report
-        ['NC-6', 'report-candidate'], // an old report from before the start does not count
+        ['NC-6', 'waiting'], // an old report from before the start does not count
       ],
     );
     assert.equal(rows[5]?.report, 'missing');
