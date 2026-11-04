@@ -1,5 +1,7 @@
 # agentctl
 
+[![M8ven Score](https://m8ven.ai/badge/mcp/setech-pl-agentctl-l34k8f?v=c1d18923d10fa591b50a8758c68555b8)](https://m8ven.ai/mcp/setech-pl-agentctl-l34k8f?s=readme)
+
 Polski: [README.pl.md](README.pl.md)
 
 **One chat orders and supervises the work of many CLI coding agents – Claude Code and Codex today, Google Gemini (Antigravity CLI) in the next release – from one queue, under one set of rules.**
