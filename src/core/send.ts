@@ -4,6 +4,10 @@ import { checkWindowLimit } from './checks.ts';
 import fs from 'node:fs';
 import type { Context } from './context.ts';
 import { enqueuePrompt, drainPromptQueue, readPromptQueue } from './prompt-queue.ts';
+import { deliveryNote, submitDraft } from './prompt-delivery.ts';
+import { classifyScreen } from './state.ts';
+import { recordJournal } from './journal.ts';
+import { collapsedQuestion } from './events.ts';
 import { readTaskRecord, renderFollowUp, taskFile } from './taskstore.ts';
 import { AgentctlError, Problems } from './util.ts';
 
@@ -55,8 +59,20 @@ async function sendPromptsUnlocked(ctx: Context, items: SendItem[]): Promise<{ t
       const position = waiting.findIndex(p => p.id === queued.id);
       if (position >= 0 || (fresh?.deliveryId === queued.id && fresh.promptDelivery === 'pending')) {
         const n = position >= 0 ? position + 1 + (fresh?.pendingPrompt ? 1 : 0) : 1;
-        message = warning = `w kolejce ${n}; watch wysyła FIFO po bezczynności lub potwierdzeniu poprzedniej wiadomości`;
-      } else if (fresh?.deliveryId === queued.id && fresh.promptDelivery !== 'sent') message = warning = 'wklejono; dostarczenie niepotwierdzone – sprawdzam (watch)';
+        const question = await openQuestion(ctx, item.window, record.agent);
+        message = warning = question
+          ? `w kolejce ${n}; ${question} – wiadomość nie jest wklejana w pole pytania (to nie byłaby odpowiedź); odpowiedz w oknie (attach), watch wyśle ją po pytaniu`
+          : `w kolejce ${n}; watch wysyła FIFO po bezczynności lub potwierdzeniu poprzedniej wiadomości`;
+      } else if (fresh?.deliveryId === queued.id) {
+        const note = deliveryNote(fresh);
+        if (fresh.promptDelivery !== 'sent') {
+          message = warning = note ?? 'wklejono; dostarczenie niepotwierdzone – sprawdzam (watch)';
+          if (note) await recordJournal(ctx, { kind: 'delivery', task: item.task, text: `${item.task}: ${note}` });
+        } else if (note) {
+          message = note;
+          await recordJournal(ctx, { kind: 'delivery', task: item.task, text: `${item.task}: ${note}` });
+        }
+      }
     } else {
       await tmux.submitPrompt(item.window, item.prompt);
       const file = taskFile(config, item.window);
@@ -64,6 +80,27 @@ async function sendPromptsUnlocked(ctx: Context, items: SendItem[]): Promise<{ t
     }
     results.push({ task: item.task, message, ...(warning ? { warning } : {}) });
     ctx.info(`${item.task}: ${message}`);
+  }
+  return results;
+}
+
+/** The agent has a dialog or a question open that a pasted message would land in: what it says, in a few words; undefined when there is none. */
+async function openQuestion(ctx: Context, window: string, agent: string): Promise<string | undefined> {
+  if (agent !== 'claude' && agent !== 'codex') return undefined;
+  const screen = await ctx.tmux.capture(window, undefined, undefined, undefined, true);
+  if (screen.code !== 0 || classifyScreen(screen.stdout, ctx.config.agents[agent]) !== 'needs-input') return undefined;
+  const collapsed = collapsedQuestion(screen.stdout);
+  return collapsed ? `${agent === 'codex' ? 'Codex' : 'agent'} ma otwarte pytanie (zwinięte, ${collapsed.count})` : 'agent ma otwarte pytanie lub okno dialogowe';
+}
+
+/** `send --enter-only TASK`: press Enter for the text our own paste left in the input field; refuses anything else. */
+export async function submitDrafts(ctx: Context, items: { task: string; window: string }[]): Promise<{ task: string; message: string; warning?: string }[]> {
+  const results: { task: string; message: string; warning?: string }[] = [];
+  for (const item of items) {
+    const done = ctx.runner.dryRun ? await submitDraft(ctx, item.window) : await withStartLock(ctx, () => submitDraft(ctx, item.window));
+    if (!ctx.runner.dryRun && done.outcome === 'submitted') await recordJournal(ctx, { kind: 'delivery', task: item.task, text: `${item.task}: ${done.message}` });
+    ctx.info(`${item.task}: ${done.message}`);
+    results.push({ task: item.task, message: done.message, ...(done.outcome === 'submitted' ? {} : { warning: done.message }) });
   }
   return results;
 }

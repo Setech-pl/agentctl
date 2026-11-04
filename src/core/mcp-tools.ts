@@ -52,7 +52,7 @@ import { newTasks } from './new.ts';
 import { peekTask } from './peek.ts';
 import { joinReports, markPulled, noReadyMessage, selectReady } from './pull.ts';
 import { describeTargets, listTargets, matchTask, resolveRunningTask } from './resolve.ts';
-import { sendPrompts } from './send.ts';
+import { sendPrompts, submitDrafts } from './send.ts';
 import { resolveSpec, splitSpecs } from './spec.ts';
 import { collectStatus, shownRows } from './status.ts';
 import type { StatusRow } from './status.ts';
@@ -244,6 +244,7 @@ function statusRowForChat(r: StatusRow): Record<string, unknown> {
     progress: r.progress?.text ?? null,
     report: r.report === 'yes' ? 'yes' : r.reportCandidate ? 'candidate' : 'no',
     prompt_delivery: r.promptDelivery ?? null,
+    ...(r.deliveryResult ? { delivery_result: r.deliveryResult } : {}),
     prompt_queue: r.promptQueue ?? [],
     decisions: r.decisionsCount ?? 0,
     actions: r.actionsCount ?? 0,
@@ -749,15 +750,25 @@ async function writeTool(
   }
 }
 
-async function runSend(deps: McpDeps, args: { task: string; text: string }): Promise<ToolResult> {
-  return writeTool(deps, 'send', { task: args.task, detail: clipText(args.text) }, async (ctx, lines) => {
-    if (args.text.trim() === '') throw new AgentctlError('the text is empty');
-    if (args.text.length > MAX_SEND_CHARS) throw new AgentctlError(`the text is ${args.text.length} characters; the limit is ${MAX_SEND_CHARS}`);
+async function runSend(deps: McpDeps, args: { task: string; text?: string; enter_only?: boolean }): Promise<ToolResult> {
+  if (args.enter_only) {
+    if (args.text !== undefined && args.text !== '') return fail('enter_only presses Enter only: do not give text');
+    return writeTool(deps, 'send', { task: args.task, detail: 'enter_only' }, async (ctx) => {
+      const target = await resolveRunningTask(ctx, args.task);
+      const [done] = await submitDrafts(ctx, [{ task: target.task, window: target.window }]);
+      return { text: `${target.task}: ${done?.message ?? 'nic nie zatwierdzono'}`, executed: !done?.warning, announce: `send ${target.task} (Enter)` };
+    });
+  }
+  if (args.text === undefined) return fail('text is required (or enter_only: true to press Enter for the text a send left in the input field)');
+  const text = args.text;
+  return writeTool(deps, 'send', { task: args.task, detail: clipText(text) }, async (ctx, lines) => {
+    if (text.trim() === '') throw new AgentctlError('the text is empty');
+    if (text.length > MAX_SEND_CHARS) throw new AgentctlError(`the text is ${text.length} characters; the limit is ${MAX_SEND_CHARS}`);
     const target = await resolveRunningTask(ctx, args.task);
-    const sent = await sendPrompts(ctx, [{ task: target.task, window: target.window, prompt: args.text }]);
+    const sent = await sendPrompts(ctx, [{ task: target.task, window: target.window, prompt: text }]);
     // sendPrompts reports the same result through ctx.info; the first line already says it.
     const message = `${target.task}: ${sent[0]?.message ?? 'wklejono'}`;
-    return { text: `${message} (${args.text.length} characters)\n${lines.filter(l => l !== message).join('\n')}`.trim(), executed: true, announce: `send ${target.task}` };
+    return { text: `${message} (${text.length} characters)\n${lines.filter(l => l !== message).join('\n')}`.trim(), executed: true, announce: `send ${target.task}` };
   });
 }
 
@@ -1143,10 +1154,12 @@ export const MCP_TOOLS: McpToolDef[] = [
     kind: 'write',
     description:
       `WRITE, off unless the user put "send" in mcp.allow. Pastes a follow-up prompt (up to ${MAX_SEND_CHARS} characters) into the window of a running task, as if the user typed it, and presses Enter. ` +
+      'To a working agent the message goes into the agent\'s own queue; the answer says delivered, "w kolejce agenta" (queued in the agent) or "nie dostarczono – tekst w polu wpisywania" (the paste stands in the input field). ' +
+      'In the last case give enter_only: true (no text) to press Enter for that text; it refuses any other text in the field. An agent with an open question gets nothing pasted. ' +
       'Use it only when the user asked you to instruct an agent; say what you will send first. The user gets a desktop notification.',
-    input: { task: taskArg, text: z.string().min(1).max(MAX_SEND_CHARS).describe('The prompt for the agent.') },
+    input: { task: taskArg, text: z.string().min(1).max(MAX_SEND_CHARS).optional().describe('The prompt for the agent. Required unless enter_only is true.'), enter_only: z.boolean().optional().describe('true: paste nothing, press Enter for the text that an earlier send left in the input field (only that text).') },
     annotations: { title: 'Send a prompt to a running task', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-    run: (deps, args) => guarded(() => runSend(deps, args as { task: string; text: string })),
+    run: (deps, args) => guarded(() => runSend(deps, args as { task: string; text?: string; enter_only?: boolean })),
   }),
   def({
     name: 'new',

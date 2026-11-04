@@ -53,7 +53,8 @@ import { collectOverlaps, renderOverlaps, touchWarnings } from './core/collision
 import type { NewOptions, NewResult } from './core/new.ts';
 import { pullReady, pullTask } from './core/pull.ts';
 import { reportInfo, shortPath } from './core/report-detect.ts';
-import { sendPrompts } from './core/send.ts';
+import { sendPrompts, submitDrafts } from './core/send.ts';
+import { resolveRunningTask } from './core/resolve.ts';
 import { collectStatus, reportStatus, shownRows, statusMarkdown } from './core/status.ts';
 import { summarizeSpecs } from './core/summary.ts';
 import { DesktopNotifier, NOTIFIER_MEMORY_MS, notifierOptionsFor } from './core/notify.ts';
@@ -686,9 +687,17 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('--dry-run', 'print the commands that would run, execute nothing')
     .option('--clip', 'read the prompt from the clipboard; shows a summary and asks y/N first')
     .option('-y, --yes', 'with --clip: do not ask')
+    .option('--enter-only <task>', 'paste nothing: press Enter for the text that an earlier send left in the input field of the task ("nie dostarczono – tekst w polu wpisywania"); refuses any other text')
     .action(
-      guarded(async (file: string | undefined, opts: { clip?: boolean; yes?: boolean; dryRun?: boolean }) => {
+      guarded(async (file: string | undefined, opts: { clip?: boolean; yes?: boolean; dryRun?: boolean; enterOnly?: string }) => {
         const ctx = contextFor(Boolean(opts.dryRun));
+        if (opts.enterOnly !== undefined) {
+          if (file !== undefined || opts.clip) throw new AgentctlError('--enter-only takes a task and nothing else: no file, no --clip');
+          const target = await resolveRunningTask(ctx, opts.enterOnly);
+          const [done] = await submitDrafts(ctx, [{ task: target.task, window: target.window }]);
+          if (done?.warning) process.exitCode = 1;
+          return;
+        }
         const items = splitSpecs(await readSpecSource(file, opts.clip), opts.clip ? 'clipboard' : (file ?? 'stdin')).map(resolveSendSpec);
         const summary = items.map((i) => `${i.task}  ->  window ${ctx.config.session}:${i.window}, ${i.prompt.length} characters: ${i.prompt.split('\n')[0]!.slice(0, 80)}`);
         if (opts.clip && !(await confirmAction(ctx, summary, 'Send?', Boolean(opts.yes) || Boolean(opts.dryRun)))) return;
