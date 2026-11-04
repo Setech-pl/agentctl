@@ -331,3 +331,34 @@ describe('board: loadBoard and the Ink front with cohorts', () => {
     }
   });
 });
+
+describe('P12: the k list stays short and scrolls; archived cohorts leave the choice', () => {
+  // 14 finished cohorts (c01 oldest … c14 newest, no window) and one with a working task.
+  const many = (): BoardRow[] => [
+    ...Array.from({ length: 14 }, (_, i) => inCohort(`T${i + 1}`, `c${String(i + 1).padStart(2, '0')}`, { finished: true, closed: false, state: 'report-ready', report: 'yes', started: `2026-10-${String(i + 1).padStart(2, '0')} 08:00` })),
+    inCohort('LIVE', 'c01', { started: '2026-10-01 08:00' }),
+  ];
+  const labels = (s: BoardState, expanded = false) => cohortOptions(s, expanded).map((o) => o.label);
+
+  it('lists the cohorts_recent newest cohorts plus the ones with work, older quiet ones fold into "starsze…"', () => {
+    const s = boardOf(many());
+    const l = labels(s);
+    assert.equal(l[0], 'wszystkie'); assert.ok(l.includes('c01'), 'a cohort with a working task always shows'); assert.ok(l.includes('c14') && l.includes('c06') && !l.includes('c02'));
+    assert.match(l.at(-1)!, /^starsze… \(4\)$/); assert.equal(l.length, 1 + 10 + 1);
+    assert.ok(labels(s, true).includes('c02')); assert.ok(!labels(s, true).some((x) => x.startsWith('starsze')));
+    assert.equal(cohortOptions({ ...s, cohortsRecent: 3 }).length, 5, 'wszystkie + active c01 + 2 newest + starsze…: N counts the active cohort too');
+  });
+  it('"starsze…" expands the choice in place; PgUp/PgDn/arrows scroll and the prompt shows a window', () => {
+    let s = press(boardOf(many()), 'k').state; assert.equal(s.mode.kind, 'cohort-pick');
+    const m0 = s.mode as Extract<BoardState['mode'], { kind: 'cohort-pick' }>;
+    s = press(s, '', { pageDown: true }).state; assert.equal((s.mode as typeof m0).index, 7);
+    s = press(s, '', { pageDown: true }).state; assert.equal((s.mode as typeof m0).index, m0.options.length - 1, 'clamped at the last');
+    s = press(s, '', { return: true }).state; const exp = s.mode as typeof m0; assert.equal(exp.expanded, true); assert.ok(exp.options.length > m0.options.length);
+    s = press(s, '', { pageUp: true }).state; assert.ok(promptText(s)!.length < 200 && promptText(s)!.includes('›'), 'a window, not all 16 entries');
+  });
+  it('an archived cohort is not in the choice, its tasks are still listed', () => {
+    const s = boardOf(many(), { archivedCohorts: ['c14', 'c13'] });
+    assert.ok(!labels(s).includes('c14') && !labels(s).includes('c13') && labels(s).includes('c12'));
+    assert.ok(activeRows(s).some((r) => r.task === 'LIVE'));
+  });
+});

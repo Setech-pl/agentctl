@@ -7,7 +7,7 @@ Paczka npm zawiera JavaScript kompilowany przez `npm run build` do `dist/` (impo
 ## Setup
 
 `setup` to lista komend shell (spec > `.agentctl.yaml` projektu > config globalny; wygrywa pierwsza warstwa, która go ustawia, `setup: []` wyłącza).
-`new` uruchamia je w pierwszym worktree, każdą jako osobne `sh -c`, w tej kolejności: `git worktree add` → **setup** → linki → TASK.md → okno → agent.
+`new` uruchamia je per repozytorium, każdą w jego worktree (`repos[].setup`, w razie braku `.agentctl.yaml` tego repo; `setup` ze specu/globalny należy do pierwszego repo), każdą jako osobne `sh -c`, w tej kolejności: `git worktree add` → **setup** → linki → TASK.md → okno → agent.
 
 - Wyjście trafia do `<state_dir>/<task>/setup.log`.
 - Komenda, która się nie udaje, zatrzymuje `new` z jej kodem wyjścia i ostatnimi 15 liniami wyjścia. Worktree zostaje, okno nie jest tworzone; usuń przyczynę i uruchom `agentctl new --reuse` (setup uruchomi się ponownie).

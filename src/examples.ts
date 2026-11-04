@@ -43,6 +43,7 @@ export const COMMAND_EXAMPLES: Record<string, string[]> = {
   'cohort show': ['agentctl cohort show sprint-1'],
   'cohort add': ['agentctl cohort add sprint-1 TASK-41 TASK-42    # the cohort is made if it is new'],
   'cohort remove': ['agentctl cohort remove TASK-42'],
+  'cohort archive': ['agentctl cohort archive sprint-1            # preview: hide a finished cohort from the board choice', 'agentctl cohort archive --older-than 7d --yes   # every inactive cohort whose last activity is older'],
   'cohort note': ['agentctl cohort note sprint-1 "landing page and menu"'],
   unblock: ['agentctl unblock TASK-43                           # drop every cancelled task from its after', 'agentctl unblock TASK-43 --drop-after TASK-42        # drop only this one'],
   overlap: ['agentctl overlap                        # every pair of active tasks that changed the same files', 'agentctl overlap LANDING-QS-1           # only the pairs with this task'],

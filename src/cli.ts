@@ -13,6 +13,7 @@ import { createInterface } from 'node:readline/promises';
 import { Argument, Command, CommanderError, Option } from 'commander';
 import { cancelTasks, planCancel } from './core/cancel.ts';
 import { touchCohort } from './core/cohort.ts';
+import { applyCohortArchive, planCohortArchive } from './core/cohort.ts';
 import { cohortEntries, cohortRows, findCohort, listCohorts, openCohortTasks, renderCohortList, setCohortOf, setNote, summarizeCohorts } from './core/cohort.ts';
 import { closeTasks, planClose } from './core/close.ts';
 import { confirmAction, readClipboard, specFromClipboard, writeClipboard } from './core/clipboard.ts';
@@ -578,9 +579,10 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .command('list', { isDefault: true })
     .description('The cohorts: how many tasks each has by state (active, queued, reports, closed, cancelled) and since when.')
     .option('--json', 'machine-readable output')
+    .option('--all', 'include archived cohorts')
     .action(
-      guarded(async (opts: { json?: boolean }) => {
-        const list = await summarizeCohorts(contextFor(false, { migrate: false }));
+      guarded(async (opts: { json?: boolean; all?: boolean }) => {
+        const list = (await summarizeCohorts(contextFor(false, { migrate: false }))).filter((c) => opts.all || !c.archived);
         if (opts.json) return line(JSON.stringify(list, null, 2));
         for (const l of renderCohortList(list)) line(l);
       }),
@@ -628,6 +630,25 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .action(
       guarded(async (tasks: string[]) => {
         for (const c of await setCohortOf(contextFor(false), tasks, undefined)) line(c.was === null ? `${c.task}: was in no cohort` : `${c.task}: left cohort ${c.was}`);
+      }),
+    );
+
+  cohort
+    .command('archive')
+    .description('Hide finished cohorts from the board choice and the default list; their tasks, reports and history stay. Cohorts with active or queued work are never archived. Shows the plan; --yes does it.')
+    .argument('[names...]', 'cohort names; case does not matter')
+    .option('--older-than <age>', 'every inactive cohort whose last activity is older, like 7d, 12h, 2w')
+    .option('--yes', 'archive without asking')
+    .action(
+      guarded(async (names: string[], opts: { olderThan?: string; yes?: boolean }) => {
+        if (names.length === 0 && !opts.olderThan) throw new AgentctlError('name the cohorts to archive, or give --older-than <age> (for example 7d)');
+        const ctx = contextFor(false);
+        const plan = await planCohortArchive(ctx, { ...(names.length ? { names } : {}), ...(opts.olderThan ? { olderThanMs: parseAge(opts.olderThan) } : {}) });
+        for (const a of plan.archive) line(`archive ${a.name} (${a.tasks} task${a.tasks === 1 ? '' : 's'}, last activity ${a.last ? formatLocalTime(a.last) : 'n/d'})`);
+        for (const s of plan.skipped) line(`skip ${s.name}: ${s.reason}`);
+        if (plan.archive.length === 0) return line('Nothing to archive.');
+        if (!opts.yes) return line('Not executed. Run again with --yes to archive; tasks, reports and history stay.');
+        line(`Archived: ${(await applyCohortArchive(ctx, plan)).join(', ')}`);
       }),
     );
 

@@ -17,7 +17,7 @@ import { checkRetryWorktrees } from './git.ts';
 import { createHash } from 'node:crypto';
 import { collectDisk, diskLine } from './disk.ts';
 import { retryEntry, moveToFront, setPaused, unblockEntry, findEntry } from './queue.ts';
-import { touchCohort, setCohortOf, setNote } from './cohort.ts';
+import { touchCohort, setCohortOf, setNote, planCohortArchive, applyCohortArchive } from './cohort.ts';
 import { setHidden } from './hide.ts';
 import { archiveClosed, applyArchive, parseAge } from './archive.ts';
 import { adoptTask } from './adopt.ts';
@@ -499,8 +499,14 @@ async function runQueueList(deps: McpDeps, args: { cohort?: string | undefined }
   return ok(`${waiting(views.map((v) => v.entry)).length} waiting in the queue${paused ? ' (the queue is paused: nothing starts)' : ''}; ${views.length - waiting(views.map((v) => v.entry)).length} starting or failed.\n\n${JSON.stringify(list, null, 2)}`);
 }
 
-async function runCohortList(deps: McpDeps): Promise<ToolResult> {
-  const list = await summarizeCohorts(deps.context(() => {}));
+/** `cohort_archive` / `cohort archive`: names, or an age; one of the two. */
+async function cohortArchivePlan(ctx: Context, a: { cohorts?: string[] | undefined; older_than?: string | undefined }) {
+  if (!a.cohorts?.length && !a.older_than) throw new AgentctlError('name the cohorts to archive, or give older_than (for example 7d)');
+  return planCohortArchive(ctx, { ...(a.cohorts?.length ? { names: a.cohorts } : {}), ...(a.older_than ? { olderThanMs: parseAge(a.older_than) } : {}) });
+}
+
+async function runCohortList(deps: McpDeps, args: { all?: boolean | undefined } = {}): Promise<ToolResult> {
+  const list = (await summarizeCohorts(deps.context(() => {}))).filter((c) => args.all || !c.archived);
   if (list.length === 0) return ok('No cohorts. A task joins one with "cohort: <name>" in its spec.');
   return ok(`${list.length} cohort${list.length === 1 ? '' : 's'}; cohort_show lists the tasks of one.\n\n${JSON.stringify(list, null, 2)}`);
 }
@@ -1048,9 +1054,9 @@ export const MCP_TOOLS: McpToolDef[] = [
     description:
       'The cohorts (groups of tasks the user named, for example one batch of related work): per cohort the number of tasks by state (active, queued, reports, closed, cancelled), since when, and its note. ' +
       'Use it when the user talks about a batch by name or asks how a group of tasks is doing. Tasks without a name belong to no cohort.',
-    input: {},
+    input: { all: z.boolean().optional().describe('Include archived cohorts (hidden by default).') },
     annotations: readOnly('The cohorts'),
-    run: (deps) => guarded(() => runCohortList(deps)),
+    run: (deps, args) => guarded(() => runCohortList(deps, args as { all?: boolean })),
   }),
   def({
     name: 'cohort_show',
@@ -1282,6 +1288,10 @@ MCP_TOOLS.push(
   extraWrite('unblock', 'unblock <TASK> [--drop-after <TASK>]', 'Remove blocked dependencies, allowing a task to start', { task: taskArg, drop_after: optionalText }, async (ctx, a) => unblockEntry(ctx, a.task, { dropAfter: a.drop_after })),
   extraWrite('cohort_add', 'cohort add <NAME> <TASKS...>', 'Put existing tasks in a cohort', { cohort: cohortArg, tasks: z.array(taskArg).min(1).max(100) }, async (ctx, a) => setCohortOf(ctx, a.tasks, await touchCohort(ctx, a.cohort))),
   extraWrite('cohort_remove', 'cohort remove <TASKS...>', 'Remove cohort membership', { tasks: z.array(taskArg).min(1).max(100) }, async (ctx, a) => setCohortOf(ctx, a.tasks, undefined)),
+  extraWrite('cohort_archive', 'cohort archive <NAMES...> | --older-than <AGE>', 'Hide finished cohorts from the board choice and the default cohort list; tasks, reports and history stay. Cohorts with active or queued work are never archived', { cohorts: z.array(cohortArg).max(50).optional(), older_than: optionalText }, async (ctx, a) => {
+    const plan = await cohortArchivePlan(ctx, a);
+    return { plan, archived: await applyCohortArchive(ctx, plan) };
+  }),
   extraWrite('cohort_note', 'cohort note <NAME> <TEXT>', 'Change the note of a cohort', { cohort: cohortArg, text: z.string().max(20000) }, async (ctx, a) => setNote(ctx, a.cohort, a.text)),
   ...(['hide', 'unhide'] as const).map((name) => extraWrite(name, `${name} <TASKS...>`, `${name} tasks on the board`, { tasks: z.array(taskArg).min(1).max(100) }, async (ctx, a) => setHidden(ctx, a.tasks, name === 'hide'))),
   extraWrite('archive', 'archive [--older-than <AGE>]', 'Archive the state of closed tasks', { older_than: optionalText, cohort: cohortArg.optional() }, async (ctx, a) => archiveClosed(ctx, { cohort: a.cohort, olderThanMs: a.older_than ? parseAge(a.older_than) : undefined })),
@@ -1347,6 +1357,7 @@ async function confirmationScope(ctx: Context, name: string, args: Record<string
     const target = name === 'cohort_add' ? { name: args.cohort as string, created: '' } : undefined;
     return { tasks: await setCohortOf(ctx, args.tasks as string[], target, true), cohort: target?.name ?? null };
   }
+  if (name === 'cohort_archive') return cohortArchivePlan(ctx, args as { cohorts?: string[]; older_than?: string });
   if (name === 'cohort_note') return { cohort: findCohort(ctx.config, args.cohort as string), note: args.text };
   if (name === 'adopt') return { task: await adoptTask(ctx, args.task as string, args as unknown as Parameters<typeof adoptTask>[2], true) };
   if (name === 'notify_test') {
@@ -1401,7 +1412,7 @@ async function confirmationScope(ctx: Context, name: string, args: Record<string
 async function previewScope(ctx: Context, name: string, args: Record<string, unknown>, scope: unknown): Promise<unknown> {
   if (name === 'mark') { const plan = scope as { tasks: TaskRecord[]; result: unknown; note: unknown }; return { ...plan, tasks: plan.tasks.map(r => ({ task: r.task, cohort: r.cohort ?? null, agent: r.agent, model: r.model, effort: r.effort, report: r.report })) }; }
   if (name === 'queue_up' || name === 'queue_rm') { const plan = scope as { queue: ReturnType<typeof readQueue> }; return { tasks: [], queue: plan.queue.map(e => ({ task: e.task, status: e.status, after: e.after, afterVerdicts: e.afterVerdicts })) }; }
-  if (['archive', 'interrupt', 'hide', 'unhide', 'cohort_add', 'cohort_remove', 'cohort_note', 'adopt', 'notify_test', 'unblock'].includes(name)) return scope;
+  if (['archive', 'interrupt', 'hide', 'unhide', 'cohort_add', 'cohort_remove', 'cohort_note', 'cohort_archive', 'adopt', 'notify_test', 'unblock'].includes(name)) return scope;
   if (name === 'close') return { tasks: (scope as { tasks: unknown[] }).tasks, omitted: 0 };
   if (name === 'report_from') {
     const plan = scope as { record: TaskRecord; source: string; sourceSignature: { size: number } | null; destinationSignature: unknown };

@@ -148,13 +148,13 @@ export const NOTIFY_BACKENDS = ['auto', 'terminal-notifier', 'osascript'] as con
 export type NotifyBackend = (typeof NOTIFY_BACKENDS)[number];
 
 /** Write tools of the MCP server; each one must be listed in `mcp.allow` to work. */
-export const MCP_WRITE_TOOLS = ['send', 'new', 'interrupt', 'close', 'move', 'queue', 'queue_rm', 'cancel', 'mark', 'set_limits', 'reserve', 'resume', 'away', 'queue_retry', 'queue_up', 'queue_pause', 'queue_resume', 'unblock', 'cohort_add', 'cohort_remove', 'cohort_note', 'hide', 'unhide', 'archive', 'adopt', 'report_from', 'limits_release', 'manager_start', 'manager_stop', 'notify_test', 'gc'] as const;
+export const MCP_WRITE_TOOLS = ['send', 'new', 'interrupt', 'close', 'move', 'queue', 'queue_rm', 'cancel', 'mark', 'set_limits', 'reserve', 'resume', 'away', 'queue_retry', 'queue_up', 'queue_pause', 'queue_resume', 'unblock', 'cohort_add', 'cohort_remove', 'cohort_note', 'cohort_archive', 'hide', 'unhide', 'archive', 'adopt', 'report_from', 'limits_release', 'manager_start', 'manager_stop', 'notify_test', 'gc'] as const;
 export type McpWriteTool = (typeof MCP_WRITE_TOOLS)[number];
 
 /** Explicit group names avoid broadening existing single-tool permissions. */
 export const MCP_ALLOW_GROUPS: Record<string, readonly McpWriteTool[]> = {
   'queue:*': ['queue', 'queue_rm', 'queue_retry', 'queue_up', 'queue_pause', 'queue_resume'],
-  cohort: ['cohort_add', 'cohort_remove', 'cohort_note'],
+  cohort: ['cohort_add', 'cohort_remove', 'cohort_note', 'cohort_archive'],
   'manager:*': ['manager_start', 'manager_stop'],
 };
 
@@ -162,6 +162,8 @@ export interface BoardSettings {
   modelVersions: Record<string, string>;
   /** The board names its terminal window "agentctl <version> · board" (OSC 2) and the agentctl tmux session titles the outer terminal (this session only). */
   windowTitle: boolean;
+  /** How many of the most recently active cohorts the board's `k` choice lists; older quiet ones fold into "starsze…". */
+  cohortsRecent: number;
   listWidth?: number | string;
   /** A task without a window whose report was pulled hides by itself (a task without a report stays in "Finished"). */
   autoHidePulledDead: boolean;
@@ -404,7 +406,7 @@ export const NOTIFY_KEYS = ['backend', 'events', 'turn_end', 'terminal_app', 've
 export const NTFY_KEYS = ['server', 'topic', 'token', 'events', 'priority', 'include_verdict', 'include_question', 'click_url', 'always'];
 export const AWAY_KEYS = ['auto_idle'];
 export const MANAGER_KEYS = ['project', 'name', 'model', 'effort', 'guide', 'autostart'];
-export const BOARD_KEYS = ['auto_hide_pulled_dead', 'mouse', 'return_key', 'selected_color', 'model_versions', 'list_width', 'window_title'];
+export const BOARD_KEYS = ['auto_hide_pulled_dead', 'mouse', 'return_key', 'selected_color', 'model_versions', 'list_width', 'window_title', 'cohorts_recent'];
 export const MCP_KEYS = ['allow', 'allow_rm_worktree', 'client', 'max_response_kb'];
 export const QUEUE_KEYS = ['enabled', 'parallel_starts'];
 export const CANCEL_KEYS = ['grace'];
@@ -825,7 +827,7 @@ function parseManager(v: unknown, p: Problems): ManagerSettings {
 }
 
 function parseBoard(v: unknown, p: Problems): BoardSettings {
-  const board: BoardSettings = { autoHidePulledDead: true, mouse: true, returnKey: 'F12', selectedColor: 'blue', modelVersions: {}, windowTitle: true };
+  const board: BoardSettings = { autoHidePulledDead: true, mouse: true, returnKey: 'F12', selectedColor: 'blue', modelVersions: {}, windowTitle: true, cohortsRecent: 10 };
   if (v === undefined || v === null) return board;
   if (!isObject(v)) {
     p.add('config.board must be a mapping like {auto_hide_pulled_dead: true, mouse: true, return_key: F12}');
@@ -843,6 +845,10 @@ function parseBoard(v: unknown, p: Problems): BoardSettings {
   if (v.window_title !== undefined) {
     if (typeof v.window_title === 'boolean') board.windowTitle = v.window_title;
     else p.add('config.board.window_title must be true or false');
+  }
+  if (v.cohorts_recent !== undefined) {
+    if (typeof v.cohorts_recent === 'number' && Number.isInteger(v.cohorts_recent) && v.cohorts_recent >= 1) board.cohortsRecent = v.cohorts_recent;
+    else p.add('config.board.cohorts_recent must be a positive integer');
   }
   if (v.mouse !== undefined) {
     if (typeof v.mouse === 'boolean') board.mouse = v.mouse;

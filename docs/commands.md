@@ -27,6 +27,7 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`cohort show`](#agentctl-cohort-show) | The tasks of one cohort as in "status" (closed and cancelled ones too) and its queued tasks. |
 | [`cohort add`](#agentctl-cohort-add) | Put existing tasks (running, finished or queued) into a cohort; it is created if it is new. A task that was in another cohort moves. |
 | [`cohort remove`](#agentctl-cohort-remove) | Take tasks out of their cohort (they then belong to none). |
+| [`cohort archive`](#agentctl-cohort-archive) | Hide finished cohorts from the board choice and the default list; their tasks, reports and history stay. Cohorts with active or queued work are never archived. Shows the plan; --yes does it. |
 | [`cohort note`](#agentctl-cohort-note) | Write the description of a cohort (an empty text removes it). |
 | [`overlap`](#agentctl-overlap) | Which active tasks of one repository changed the same files (git diff of each worktree against its base, plus uncommitted files). Without a task: every pair. |
 | [`send`](#agentctl-send) | Paste a follow-up prompt into the existing window of each task in the file. |
@@ -348,7 +349,7 @@ agentctl unblock TASK-43 --drop-after TASK-42        # drop only this one
 
 Cohorts: tasks grouped under a name you chose ("cohort: \<name>" in a spec, or --cohort). A task without a name belongs to no cohort. Without a subcommand: list.
 
-Subcommands: `cohort list`, `cohort show`, `cohort add`, `cohort remove`, `cohort note`. Without a subcommand: `list`.
+Subcommands: `cohort list`, `cohort show`, `cohort add`, `cohort remove`, `cohort archive`, `cohort note`. Without a subcommand: `list`.
 
 ```
 agentctl cohort [options] [command]
@@ -371,6 +372,7 @@ agentctl cohort list [options]
 | Option | Meaning | Notes |
 |---|---|---|
 | `--json` | machine-readable output |  |
+| `--all` | include archived cohorts |  |
 
 Examples:
 
@@ -436,6 +438,30 @@ Examples:
 
 ```sh
 agentctl cohort remove TASK-42
+```
+
+## agentctl cohort archive
+
+Hide finished cohorts from the board choice and the default list; their tasks, reports and history stay. Cohorts with active or queued work are never archived. Shows the plan; --yes does it.
+
+```
+agentctl cohort archive [options] [names...]
+```
+
+| Argument | Meaning |
+|---|---|
+| `[names...]` | cohort names; case does not matter |
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--older-than <age>` | every inactive cohort whose last activity is older, like 7d, 12h, 2w |  |
+| `--yes` | archive without asking |  |
+
+Examples:
+
+```sh
+agentctl cohort archive sprint-1            # preview: hide a finished cohort from the board choice
+agentctl cohort archive --older-than 7d --yes   # every inactive cohort whose last activity is older
 ```
 
 ## agentctl cohort note

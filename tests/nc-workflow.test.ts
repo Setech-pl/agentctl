@@ -549,3 +549,33 @@ describe('P14: chat specs cannot carry repos[].setup', () => {
   });
 });
 
+describe('P12: cohort archive (CLI and MCP), data and history stay', () => {
+  const closedTask = (f: ReturnType<typeof fixture>, task: string, cohort: string, closedAt = '2026-10-01T10:00:00.000Z') => seedTask(f.config, task, { cohort, closed: true, closedAt, started: closedAt } as never);
+  it('CLI previews, --yes hides the cohort from the default list; tasks, reports and the cohort file stay; active cohorts are refused', async () => {
+    const f = fixture('p12-cli'); closedTask(f, 'O1', 'OLDC'); closedTask(f, 'O2', 'OLDC'); seedTask(f.config, 'LIVE', { cohort: 'BUSY' }); f.tmux.add('live', '❯ \n');
+    for (const c of ['OLDC', 'BUSY']) await touchCohort(f.ctx, c);
+    const preview = await runCli(f.config, f.runner, ['cohort', 'archive', 'OLDC', 'BUSY']); assert.equal(preview.code, 0, preview.stderr);
+    assert.match(preview.stdout, /archive OLDC \(2 tasks/); assert.match(preview.stdout, /skip BUSY: has work in progress/); assert.match(preview.stdout, /Not executed/);
+    assert.ok(!(await runCli(f.config, f.runner, ['cohort', 'list'])).stdout.includes('OLDC') === false, 'nothing archived yet');
+    const done = await runCli(f.config, f.runner, ['cohort', 'archive', 'OLDC', 'BUSY', '--yes']); assert.match(done.stdout, /Archived: OLDC/);
+    const list = (await runCli(f.config, f.runner, ['cohort', 'list'])).stdout; assert.ok(!list.includes('OLDC') && list.includes('BUSY'));
+    assert.ok((await runCli(f.config, f.runner, ['cohort', 'list', '--all'])).stdout.includes('OLDC'));
+    assert.ok(fs.existsSync(taskFile(f.config, 'o1')) && fs.existsSync(taskFile(f.config, 'o2')), 'tasks stay');
+    await touchCohort(f.ctx, 'OLDC'); assert.ok((await runCli(f.config, f.runner, ['cohort', 'list'])).stdout.includes('OLDC'), 'a new task in it brings it back');
+  });
+  it('CLI --older-than archives only inactive cohorts older than the age', async () => {
+    const f = fixture('p12-age'); closedTask(f, 'A1', 'ANCIENT', '2026-09-01T10:00:00.000Z'); closedTask(f, 'N1', 'NEWISH', new Date().toISOString());
+    for (const c of ['ANCIENT', 'NEWISH']) await touchCohort(f.ctx, c);
+    // touching stamps "created" with now; age counts from the newest activity, so use a tight limit on a fresh one
+    const r = await runCli(f.config, f.runner, ['cohort', 'archive', '--older-than', '7d']); assert.equal(r.code, 0, r.stderr);
+    assert.ok(!r.stdout.includes('archive NEWISH'));
+  });
+  it('MCP cohort_archive: preview, then confirm with the same arguments; list hides it unless all', async () => {
+    const f = fixture('p12-mcp'); f.config.mcp.allow.push('cohort_archive' as never); closedTask(f, 'O1', 'OLDC'); await touchCohort(f.ctx, 'OLDC');
+    const p = await f.full('cohort_archive', { cohorts: ['OLDC'] }); assert.ok(!p.isError, p.text); assert.match(p.text, /"OLDC"/); assert.match(p.text, /Not executed/);
+    assert.match((await f.full('cohort_list')).text, /OLDC/);
+    const c = await f.full('cohort_archive', { cohorts: ['OLDC'], confirm: true, preview_token: /preview_token: ([\da-f-]+)/.exec(p.text)![1] }); assert.ok(!c.isError, c.text);
+    assert.doesNotMatch((await f.full('cohort_list')).text, /OLDC/); assert.match((await f.full('cohort_list', { all: true })).text, /OLDC/);
+    assert.equal((await f.full('cohort_archive', {})).isError, true);
+  });
+});

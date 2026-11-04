@@ -55,7 +55,7 @@ function withReport(config: GlobalConfig, task: string, text = `# ${task}\nWerdy
 describe('mcp: the registry', () => {
   it('has the nineteen read tools and thirteen write tools, with unique short names', () => {
     assert.deepEqual(MCP_TOOLS.filter((t) => t.kind === 'read').map((t) => t.name), ['status', 'events_since', 'gc_preview', 'limits', 'version', 'peek', 'list_reports', 'get_report', 'pull_ready', 'task_spec', 'queue_list', 'cohort_list', 'cohort_show', 'guide', 'capacity', 'usage', 'log', 'stats', 'overlap', 'queue_show', 'mcp_check', 'spec_example', 'doctor', 'equivalents', 'config_show', 'manager_status', 'away_status', 'report', 'response_page']);
-    assert.deepEqual(MCP_TOOLS.filter((t) => t.kind === 'write').map((t) => t.name), ['set_limits', 'reserve', 'resume', 'send', 'new', 'queue', 'queue_rm', 'cancel', 'mark', 'away', 'interrupt', 'close', 'move', 'queue_retry', 'queue_up', 'queue_pause', 'queue_resume', 'unblock', 'cohort_add', 'cohort_remove', 'cohort_note', 'hide', 'unhide', 'archive', 'adopt', 'report_from', 'limits_release', 'manager_start', 'manager_stop', 'notify_test', 'gc']);
+    assert.deepEqual(MCP_TOOLS.filter((t) => t.kind === 'write').map((t) => t.name), ['set_limits', 'reserve', 'resume', 'send', 'new', 'queue', 'queue_rm', 'cancel', 'mark', 'away', 'interrupt', 'close', 'move', 'queue_retry', 'queue_up', 'queue_pause', 'queue_resume', 'unblock', 'cohort_add', 'cohort_remove', 'cohort_archive', 'cohort_note', 'hide', 'unhide', 'archive', 'adopt', 'report_from', 'limits_release', 'manager_start', 'manager_stop', 'notify_test', 'gc']);
     assert.equal(new Set(MCP_TOOL_NAMES).size, MCP_TOOL_NAMES.length);
     for (const t of MCP_TOOLS) assert.ok(t.name.length <= 64 && /^[a-z_]+$/.test(t.name), t.name);
   });

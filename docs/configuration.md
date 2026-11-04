@@ -25,7 +25,7 @@ Column "Layers": **g** global config, **p** project config, **s** spec.
 | `links[].to` | path | required | g p s | What it points at. Must exist. `from` and `to` ending in `/*` make one link per entry of the directory. |
 | `env` | mapping | `{}` | g p s | Environment variables of the tmux window (strings, numbers or booleans). |
 | `report` | path or list | `{cache}/{task}/{TASK}.md` | g p s | Where the agent writes its report. Used by `status`, `pull` and the notifications. A list: the first entry is the canonical path, the others are places to look (paths and globs `*`, `?`, `**`; absolute, `~/` or relative to the worktree; `{task}` and `{TASK}` work), e.g. `[~/workspace/cache/{task}/{TASK}.md, docs/reports/*{task}*.md, docs/reports/*{TASK}*.md]`. Fresh alternatives bearing the task ID become candidate flags (see [Report detection](details.md#report-detection)); copying requires explicit `report --from` / `report_from`. |
-| `setup` | list of strings | `[]` | g p s | Shell commands run in the first worktree after `git worktree add` and before the links. A failing command stops `new`. |
+| `setup` | list of strings | `[]` | g p s | Shell commands run in the first worktree after `git worktree add` and before the links. A failing command stops `new`. In a multi-repo spec every repository runs its own setup in its own worktree: `repos[].setup` in the spec, else the `setup` of that repository's `.agentctl.yaml` (the top-level spec/global `setup` belongs to the first repository). The preview lists them per repository (`backend 1/1, client 1/1`). The chat (MCP) cannot send `setup`, top-level or per repo; project config setup still runs. |
 | `defaults` | mapping | `{}` | g p | Values for a spec that leaves them out: `agent`, `model`, `effort`. |
 | `defaults.agent` | `claude` or `codex` | none | g p | Agent when the spec has no `agent`. |
 | `defaults.model` | string | `default` | g p | Model when the spec has none. `default` passes no model flag. |
@@ -118,6 +118,7 @@ The session started by `agentctl manager`: Claude Code with [Remote Control](htt
 | `board.return_key` | tmux key name or `false` | `F12` | g | Key (no prefix) that goes back to the board from any window of the session. `false`: none. |
 | `board.model_versions` | alias → quoted version mapping | `{}` | g | Fallback versions for aliases after observed session model; never guessed. |
 | `board.list_width` | integer >=64 or percentage string | automatic | g | List width with preview; 92+ at 140+ terminal columns by default, at least 32 columns left for preview. |
+| `board.cohorts_recent` | integer >= 1 | `10` | g | How many of the most recently active cohorts the board's `k` choice lists (cohorts with active or queued work always show). Older quiet cohorts fold into `starsze… (n)`; ↑↓ PgUp/PgDn scroll the choice. `agentctl cohort archive` removes finished cohorts from it altogether. |
 | `board.window_title` | boolean | `true` | g | The board names its terminal window `agentctl <version> · board` (OSC 2, previous title restored on exit where the terminal supports it) and the agentctl tmux session sets `set-titles` / `set-titles-string` (`agentctl <version> · #W`) for the outer terminal – session options of that session only, never global. `false`: no title is written and no tmux option is set. |
 | `board.selected_color` | Ink color name | `blue` | g | Color for the selected board row, manager line and queue entry. State and result cells keep their own colors. `NO_COLOR` disables color; the selection stays bold (manager line uses inverse video). |
 
@@ -253,6 +254,7 @@ The header of a spec file, between `---` lines, followed by the prompt. Several 
 | `repos` | list | required | s | At least one repository. The agent starts in the worktree of the first one. |
 | `repos[].path` | path | required | s | The existing checkout. |
 | `repos[].worktree` | path | `<worktree_root>/<repo>-<task>` | s | Where the new worktree goes. Must differ from `path`. |
+| `repos[].setup` | list of strings | none | s | Shell commands for this repository's own worktree (see `setup`). The chat cannot send it. |
 | `repos[].base` | git ref | none | s | Start point of the worktree. |
 | `repos[].branch` | string | none | s | Branch to create (or reuse). Without it the worktree is detached. |
 | `links` | list | `[]` | s | Same as in the other layers; added to theirs. |
@@ -371,6 +373,7 @@ Each write needs its exact name in `mcp.allow` (or the listed group). No wildcar
 | `cohort_add` | `cohort_add` | `cohort` |
 | `cohort_remove` | `cohort_remove` | `cohort` |
 | `cohort_note` | `cohort_note` | `cohort` |
+| `cohort_archive` | `cohort_archive` | `cohort` |
 | `hide` | `hide` | — |
 | `unhide` | `unhide` | — |
 | `archive` | `archive` | — |
@@ -382,7 +385,7 @@ Each write needs its exact name in `mcp.allow` (or the listed group). No wildcar
 | `notify_test` | `notify_test` | — |
 | `gc` | `gc` | — |
 
-Groups: `queue:*` = `queue`, `queue_rm`, `queue_retry`, `queue_up`, `queue_pause`, `queue_resume`; `cohort` = `cohort_add`, `cohort_remove`, `cohort_note`; `manager:*` = `manager_start`, `manager_stop`. `queue:*` includes `queue_retry`; retry is technical and retains the same provider.
+Groups: `queue:*` = `queue`, `queue_rm`, `queue_retry`, `queue_up`, `queue_pause`, `queue_resume`; `cohort` = `cohort_add`, `cohort_remove`, `cohort_note`, `cohort_archive`; `manager:*` = `manager_start`, `manager_stop`. `queue:*` includes `queue_retry`; retry is technical and retains the same provider.
 
 ## Review corrections: delivery, attempts and overload safety
 

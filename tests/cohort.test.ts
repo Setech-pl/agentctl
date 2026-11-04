@@ -149,8 +149,8 @@ describe('cohort list, show, add, remove, note', () => {
     assert.match(lines.find((l) => l.startsWith('other')) ?? '', /^other\s+1\s+0\s+0\s+0\s+0\s+-$/);
     assert.match(lines.find((l) => l.startsWith('Sprint-1')) ?? '', /^Sprint-1\s+1\s+1\s+1\s+1\s+1\s+\d{4}-\d\d-\d\d \d\d:\d\d$/);
     assert.equal(r.stdout.includes('C-1'), false);
-    const json = JSON.parse((await runCli(s.config, s.runner, ['cohort', 'list', '--json'])).stdout) as { name: string; created: string; active: number; queued: number; reports: number; closed: number; cancelled: number; total: number }[];
-    assert.deepEqual(json.find((c) => c.name === 'Sprint-1'), { name: 'Sprint-1', created: json.find((c) => c.name === 'Sprint-1')?.created, note: null, active: 1, queued: 1, reports: 1, closed: 1, cancelled: 1, total: 5 });
+    const json = JSON.parse((await runCli(s.config, s.runner, ['cohort', 'list', '--json'])).stdout) as { name: string; created: string; last: string; active: number; queued: number; reports: number; closed: number; cancelled: number; total: number }[];
+    assert.deepEqual(json.find((c) => c.name === 'Sprint-1'), { name: 'Sprint-1', created: json.find((c) => c.name === 'Sprint-1')?.created, note: null, archived: null, last: json.find((c) => c.name === 'Sprint-1')?.last, active: 1, queued: 1, reports: 1, closed: 1, cancelled: 1, total: 5 });
     assert.match((await runCli(s.config, s.runner, ['cohort'])).stdout, /^COHORT/, 'cohort alone is cohort list');
     assert.match((await runCli(setup('list-empty').config, s.runner, ['cohort', 'list'])).stdout, /No cohorts\./);
   });

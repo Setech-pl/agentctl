@@ -7,7 +7,7 @@ The npm runtime is JavaScript emitted into `dist/` by `npm run build`, with `.ts
 ## Setup
 
 `setup` is a list of shell commands (spec > project `.agentctl.yaml` > global config; the first layer that sets it wins, `setup: []` switches it off).
-`new` runs them in the first worktree, one `sh -c` each, in this order: `git worktree add` → **setup** → links → TASK.md → window → agent.
+`new` runs them (per repository, each in its own worktree: `repos[].setup`, else that repository's `.agentctl.yaml`; the spec/global `setup` is the first repository's), one `sh -c` each, in this order: `git worktree add` → **setup** → links → TASK.md → window → agent.
 
 - Output goes to `<state_dir>/<task>/setup.log`.
 - A failing command stops `new` with its exit code and the last 15 lines of output. The worktree stays, no window is created; fix the cause and run `agentctl new --reuse` (setup runs again).

@@ -172,6 +172,7 @@ Both are always readable without mcp.allow. New/queue previews and executed resp
 | `cohort show` | `cohort_show` |  |
 | `cohort add` | `cohort_add` |  |
 | `cohort remove` | `cohort_remove` |  |
+| `cohort archive` | `cohort_archive` |  |
 | `cohort note` | `cohort_note` |  |
 | `overlap` | `overlap` |  |
 | `send` | `send` |  |
@@ -239,7 +240,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 | `pull_ready` | read | `cohort?`, `all?`, `mode?`, `ack?`, `cursor?`, `offset?`, `limit?` |
 | `task_spec` | read | `task` |
 | `queue_list` | read | `cohort?`, `format?`, `detail?` |
-| `cohort_list` | read |  |
+| `cohort_list` | read | `all?` |
 | `cohort_show` | read | `cohort`, `format?`, `detail?` |
 | `guide` | read | `project?`, `lang?` |
 | `capacity` | read | `format?`, `detail?`, `offset?`, `limit?` |
@@ -274,6 +275,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 | `unblock` | write | `task`, `drop_after?`, `confirm?`, `preview_token?` |
 | `cohort_add` | write | `cohort`, `tasks`, `confirm?`, `preview_token?` |
 | `cohort_remove` | write | `tasks`, `confirm?`, `preview_token?` |
+| `cohort_archive` | write | `cohorts?`, `older_than?`, `confirm?`, `preview_token?` |
 | `cohort_note` | write | `cohort`, `text`, `confirm?`, `preview_token?` |
 | `hide` | write | `tasks`, `confirm?`, `preview_token?` |
 | `unhide` | write | `tasks`, `confirm?`, `preview_token?` |
@@ -293,8 +295,9 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 - `queue`: `--clip`, `--agent &lt;agent&gt;`, `-y, --yes`, `--json`, `--cohort &lt;name&gt;`
 - `queue list`: `--json`, `--cohort &lt;name&gt;`
 - `unblock`: `--drop-after &lt;task&gt;`
-- `cohort list`: `--json`
+- `cohort list`: `--json`, `--all`
 - `cohort show`: `--json`
+- `cohort archive`: `--older-than &lt;age&gt;`, `--yes`
 - `overlap`: `--json`
 - `send`: `--dry-run`, `--clip`, `-y, --yes`
 - `status`: `--json`, `--clip`, `--tmux-line`, `--all`, `--cohort &lt;name&gt;`
@@ -339,7 +342,7 @@ Read tools always work. Write tools require their exact name in `mcp.allow`, or 
 | Group | Expands to |
 |---|---|
 | `queue:*` | `queue`, `queue_rm`, `queue_retry`, `queue_up`, `queue_pause`, `queue_resume` |
-| `cohort` | `cohort_add`, `cohort_remove`, `cohort_note` |
+| `cohort` | `cohort_add`, `cohort_remove`, `cohort_note`, `cohort_archive` |
 | `manager:*` | `manager_start`, `manager_stop` |
 
 Existing entries `new`, `queue`, `send`, `close`, `cancel`, `set_limits`, `reserve` retain their permission scope. In particular, `queue` does **not** implicitly grant retries or removal. `doctor` explains the change to confirmation: `interrupt`, `close`, and `queue_rm` now require a preview followed by `confirm: true`, as do new parity writes. The existing two-step start/cancel/move/resume tools now enforce a prior preview in this server session. Arguments must be identical; a preview expires after ten minutes and is consumed once. A changed task/queue/window/config scope or GC plan requires a fresh preview, so the scope cannot silently expand. Restarting the server discards previews.
@@ -379,6 +382,7 @@ Each write needs its exact name in `mcp.allow` (or the listed group). No wildcar
 | `cohort_add` | `cohort_add` | `cohort` |
 | `cohort_remove` | `cohort_remove` | `cohort` |
 | `cohort_note` | `cohort_note` | `cohort` |
+| `cohort_archive` | `cohort_archive` | `cohort` |
 | `hide` | `hide` | — |
 | `unhide` | `unhide` | — |
 | `archive` | `archive` | — |
@@ -390,7 +394,7 @@ Each write needs its exact name in `mcp.allow` (or the listed group). No wildcar
 | `notify_test` | `notify_test` | — |
 | `gc` | `gc` | — |
 
-Groups: `queue:*` = `queue`, `queue_rm`, `queue_retry`, `queue_up`, `queue_pause`, `queue_resume`; `cohort` = `cohort_add`, `cohort_remove`, `cohort_note`; `manager:*` = `manager_start`, `manager_stop`. `queue:*` includes `queue_retry`; retry is technical and retains the same provider.
+Groups: `queue:*` = `queue`, `queue_rm`, `queue_retry`, `queue_up`, `queue_pause`, `queue_resume`; `cohort` = `cohort_add`, `cohort_remove`, `cohort_note`, `cohort_archive`; `manager:*` = `manager_start`, `manager_stop`. `queue:*` includes `queue_retry`; retry is technical and retains the same provider.
 
 ## Concise reads and report pagination (0.17.2)
 

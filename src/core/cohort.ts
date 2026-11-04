@@ -35,6 +35,8 @@ export interface CohortMeta {
   gcSuggested?: string;
   /** The first watch tick that saw this cohort has passed: a cohort already closed by then is the past, not a suggestion. */
   gcSeen?: boolean;
+  /** ISO time of `cohort archive`: the cohort is gone from the board's choice and the default list; tasks, history and files stay. A new task in it brings it back. */
+  archived?: string;
 }
 
 export function cohortsDir(config: Pick<GlobalConfig, 'path'>): string {
@@ -57,6 +59,7 @@ function parseMeta(text: string): CohortMeta | undefined {
   if (typeof data.observed === 'string') meta.observed = data.observed;
   if (typeof data.gcSuggested === 'string') meta.gcSuggested = data.gcSuggested;
   if (data.gcSeen === true) meta.gcSeen = true;
+  if (typeof data.archived === 'string') meta.archived = data.archived;
   if (typeof data.changedAt === 'number') meta.changedAt = data.changedAt;
   return meta;
 }
@@ -100,7 +103,7 @@ export async function touchCohort(ctx: Context, name: string): Promise<CohortMet
   if (problem) throw new AgentctlError(problem);
   const known = readCohort(ctx.config, name);
   if (known) {
-    const updated = { ...known, changedAt: ctx.runner.now(), observed: undefined };
+    const updated = { ...known, changedAt: ctx.runner.now(), observed: undefined, archived: undefined };
     await saveCohort(ctx, updated);
     return updated;
   }
@@ -173,6 +176,10 @@ export interface CohortSummary extends CohortCounts {
   /** ISO time of the first use; '' when unknown. */
   created: string;
   note: string | null;
+  /** ISO time of `cohort archive`, else null. */
+  archived: string | null;
+  /** ISO time of the newest thing that happened in it (a task started or closed, an entry queued); '' when unknown. */
+  last: string;
 }
 
 /** Every cohort with the counts of its tasks. A cohort that tasks use but that has no file is listed too. */
@@ -185,7 +192,46 @@ export async function summarizeCohorts(ctx: Context): Promise<CohortSummary[]> {
   }
   return [...metas.values()]
     .sort((a, b) => cohortKey(a.name).localeCompare(cohortKey(b.name)))
-    .map((m) => ({ name: m.name, created: m.created, note: m.note ?? null, ...countCohort(cohortRows(rows, m.name), cohortEntries(entries, m.name)) }));
+    .map((m) => ({ name: m.name, created: m.created, note: m.note ?? null, archived: m.archived ?? null, last: lastActivity(m, cohortRows(rows, m.name), cohortEntries(entries, m.name)), ...countCohort(cohortRows(rows, m.name), cohortEntries(entries, m.name)) }));
+}
+
+const asMs = (text: string | null | undefined): number => { const t = Date.parse((text ?? '').replace(' ', 'T')); return Number.isFinite(t) ? t : 0; };
+/** ISO time of the newest start/close/cancel of its tasks or entry queued; the cohort's creation when it has none. */
+export function lastActivity(meta: Pick<CohortMeta, 'created'>, rows: readonly StatusRow[], entries: readonly QueueEntry[]): string {
+  const ms = Math.max(asMs(meta.created), ...rows.flatMap((r) => [asMs(r.started), asMs(r.closedAt), asMs(r.cancelledAt)]), ...entries.map((e) => asMs(e.queuedAt)));
+  return ms > 0 ? new Date(ms).toISOString() : '';
+}
+
+export interface ArchivePlan {
+  archive: { name: string; tasks: number; last: string }[];
+  skipped: { name: string; reason: string }[];
+}
+
+/** Which cohorts `cohort archive` would hide: named ones, or every inactive one whose last activity is older than `olderThanMs`. Cohorts with work in progress or queued entries never. */
+export async function planCohortArchive(ctx: Context, opts: { names?: string[]; olderThanMs?: number }): Promise<ArchivePlan> {
+  const list = await summarizeCohorts(ctx);
+  const plan: ArchivePlan = { archive: [], skipped: [] };
+  const wanted = opts.names ? opts.names.map((n) => findCohort(ctx.config, n).name) : list.map((c) => c.name);
+  for (const name of wanted) {
+    const c = list.find((x) => cohortKey(x.name) === cohortKey(name));
+    if (!c) { plan.skipped.push({ name, reason: 'no such cohort' }); continue; }
+    if (c.archived) { plan.skipped.push({ name: c.name, reason: 'already archived' }); continue; }
+    if (c.active > 0 || c.queued > 0) { plan.skipped.push({ name: c.name, reason: `has work in progress (${c.active} active, ${c.queued} queued)` }); continue; }
+    if (opts.olderThanMs !== undefined && (asMs(c.last) === 0 || ctx.runner.now() - asMs(c.last) < opts.olderThanMs)) { if (opts.names) plan.skipped.push({ name: c.name, reason: 'newer than the age limit' }); continue; }
+    plan.archive.push({ name: c.name, tasks: c.total, last: c.last });
+  }
+  return plan;
+}
+
+/** Hide the planned cohorts. Their tasks, reports, history and files are untouched. */
+export async function applyCohortArchive(ctx: Context, plan: ArchivePlan): Promise<string[]> {
+  const done: string[] = [];
+  for (const item of plan.archive) {
+    const meta = readCohort(ctx.config, item.name) ?? { name: item.name, created: '' };
+    await saveCohort(ctx, { ...meta, archived: new Date(ctx.runner.now()).toISOString() });
+    done.push(item.name);
+  }
+  return done;
 }
 
 // ---- changing the membership of existing tasks

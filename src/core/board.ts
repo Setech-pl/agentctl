@@ -7,7 +7,7 @@ import { modelLabel, providerLabel } from './model-label.ts';
 import path from 'node:path';
 import { attachCollisions, collideText } from './collisions.ts';
 import { cancelTasks, planCancel } from './cancel.ts';
-import { countsLine } from './cohort.ts';
+import { countsLine, lastActivity, listCohorts } from './cohort.ts';
 import { closeTask } from './close.ts';
 import { Context } from './context.ts';
 import type { GlobalConfig } from './config.ts';
@@ -90,7 +90,7 @@ export type BoardMode =
   /** `X`: the reason for the cancellation (optional: Enter on an empty line goes on without one). */
   | { kind: 'cancel-reason'; task: string; text: string }
   /** `k`: pick the cohort to show; `value` null is every task, '' the tasks without a cohort. */
-  | { kind: 'cohort-pick'; options: CohortOption[]; index: number }
+  | { kind: 'cohort-pick'; options: CohortOption[]; index: number; expanded?: boolean }
   | { kind: 'help' }
   /** `l`: the history of the tasks (`agentctl log`), scrolled with the arrows. */
   | { kind: 'log'; lines: string[]; offset: number }
@@ -142,13 +142,17 @@ export interface BoardState {
   away: AwayView | null;
   /** The manager session (`agentctl manager`): its window and what its screen says; null before the first refresh. */
   manager: ManagerView | null;
+  /** Keys of the cohorts hidden by `cohort archive`: not in the `k` choice. */
+  archivedCohorts: string[];
+  /** `board.cohorts_recent`: how many of the most recently active cohorts the `k` choice lists before "starsze…". */
+  cohortsRecent: number;
 }
 
 /** The cursor stands on the line of the manager (it is no task: Enter goes to its window). */
 export const MANAGER_SELECT = '@manager';
 
 export function initialBoardState(width: number, height: number): BoardState {
-  return { rows: [], selected: null, mode: { kind: 'list' }, notice: null, preview: null, width, height, refreshedAt: null, busy: null, loadError: null, quit: false, showFinished: false, showHidden: false, queue: [], queuePaused: false, cohortFilter: null, folded: [], disk: null, plans: null, resumable: [], away: null, manager: null };
+  return { rows: [], selected: null, mode: { kind: 'list' }, notice: null, preview: null, width, height, refreshedAt: null, busy: null, loadError: null, quit: false, showFinished: false, showHidden: false, queue: [], queuePaused: false, cohortFilter: null, folded: [], disk: null, plans: null, resumable: [], away: null, manager: null, archivedCohorts: [], cohortsRecent: 10 };
 }
 
 /** What the front has to do after a key press. */
@@ -184,6 +188,8 @@ export type BoardEffect =
 export interface KeyPress {
   upArrow?: boolean;
   downArrow?: boolean;
+  pageUp?: boolean;
+  pageDown?: boolean;
   return?: boolean;
   escape?: boolean;
   backspace?: boolean;
@@ -464,10 +470,20 @@ function cancelReasonKey(state: BoardState, mode: Extract<BoardMode, { kind: 'ca
 }
 
 /** The choices of the `k` list: every task, each cohort that is in use, and the tasks without one (when there are any). */
-export function cohortOptions(state: BoardState): CohortOption[] {
-  const groups = groupOrder(state).filter((g) => g.key !== '');
+export const OLDER_COHORTS = '\u0000older';
+export function cohortOptions(state: BoardState, expanded = false): CohortOption[] {
+  const groups = groupOrder(state).filter((g) => g.key !== '' && !state.archivedCohorts.includes(g.key));
   const anyPlain = state.rows.some((r) => r.cohort === null) || state.queue.some((v) => v.entry.cohort === undefined);
-  return [{ label: 'wszystkie', value: null }, ...groups.map((g) => ({ label: g.name as string, value: g.key })), ...(anyPlain ? [{ label: 'bez kohorty', value: '' }] : [])];
+  // Cohorts with work in progress or queued always show; of the rest the `cohorts_recent` most recently active ones, the others fold into "starsze…".
+  const active = (key: string): boolean => state.queue.some((v) => groupOf(v.entry.cohort) === key) || state.rows.some((r) => groupOf(r.cohort) === key && !r.closed && !r.cancelled && !r.finished);
+  const last = (key: string): number => { const t = Date.parse(lastActivity({ created: '' }, state.rows.filter((r) => groupOf(r.cohort) === key), state.queue.filter((v) => groupOf(v.entry.cohort) === key).map((v) => v.entry))); return Number.isFinite(t) ? t : 0; };
+  const quiet = groups.filter((g) => !active(g.key)).sort((a, b) => last(b.key) - last(a.key));
+  const slots = Math.max(0, state.cohortsRecent - groups.filter((g) => active(g.key)).length);
+  const hidden = expanded ? new Set<string>() : new Set(quiet.slice(slots).map((g) => g.key));
+  // The cohort being filtered stays in the choice even when it is old.
+  if (state.cohortFilter) hidden.delete(state.cohortFilter);
+  const shown = groups.filter((g) => !hidden.has(g.key));
+  return [{ label: 'wszystkie', value: null }, ...shown.map((g) => ({ label: g.name as string, value: g.key })), ...(hidden.size > 0 ? [{ label: `starsze… (${hidden.size})`, value: OLDER_COHORTS }] : []), ...(anyPlain ? [{ label: 'bez kohorty', value: '' }] : [])];
 }
 
 function cohortPickKey(state: BoardState, mode: Extract<BoardMode, { kind: 'cohort-pick' }>, input: string, key: KeyPress): KeyResult {
@@ -475,14 +491,26 @@ function cohortPickKey(state: BoardState, mode: Extract<BoardMode, { kind: 'coho
   const last = mode.options.length - 1;
   const choose = (index: number): KeyResult => {
     const option = mode.options[index] as CohortOption;
+    if (option.value === OLDER_COHORTS) {
+      const options = cohortOptions(state, true);
+      return { state: { ...state, mode: { kind: 'cohort-pick', options, index: Math.min(options.length - 1, index), expanded: true } }, effects: [] };
+    }
     const next = keepSelection({ ...toList(state), cohortFilter: option.value, notice: null });
     return { state: withNotice(next, 'info', option.value === null ? 'All tasks are listed.' : `Only ${option.label} is listed (k picks another).`), effects: next.selected !== state.selected ? [{ type: 'refresh' }] : [] };
   };
   if (key.return) return choose(mode.index);
   if (/^[1-9]$/.test(input) && Number(input) - 1 <= last) return choose(Number(input) - 1);
-  const move = key.upArrow ? -1 : key.downArrow || input === 'j' ? 1 : 0;
+  const move = key.upArrow ? -1 : key.downArrow || input === 'j' ? 1 : key.pageUp ? -COHORT_PAGE : key.pageDown ? COHORT_PAGE : 0;
   if (move !== 0) return { state: { ...state, mode: { ...mode, index: Math.min(last, Math.max(0, mode.index + move)) } }, effects: [] };
   return { state, effects: [] };
+}
+
+const COHORT_PAGE = 7;
+/** The visible part of the `k` choice: a page around the cursor, with arrows where more is. */
+export function cohortPickWindow(options: CohortOption[], index: number): string {
+  const start = options.length <= COHORT_PAGE ? 0 : Math.min(Math.max(0, index - Math.floor(COHORT_PAGE / 2)), options.length - COHORT_PAGE);
+  const end = Math.min(options.length, start + COHORT_PAGE);
+  return `${start > 0 ? `‹${start} ` : ''}${options.slice(start, end).map((o, i) => (start + i === index ? `[${start + i + 1} ${o.label}]` : `${start + i + 1} ${o.label}`)).join('  ')}${end < options.length ? ` ${options.length - end}›` : ''}`;
 }
 
 function confirmKey(state: BoardState, mode: Extract<BoardMode, { kind: 'confirm' }>, input: string, key: KeyPress): KeyResult {
@@ -575,13 +603,15 @@ export interface BoardSnapshot {
   resumable?: string[];
   away?: AwayView;
   manager?: ManagerView;
+  archivedCohorts?: string[];
+  cohortsRecent?: number;
   preview: Preview | null;
   refreshedAt: string;
 }
 
 /** Keep the selection when the task is still there, otherwise take the first row. */
 export function applySnapshot(state: BoardState, snap: BoardSnapshot): BoardState {
-  const next: BoardState = { ...state, rows: snap.rows, queue: snap.queue ?? [], queuePaused: snap.queuePaused ?? false, disk: snap.disk ?? null, plans: snap.plans ?? null, resumable: snap.resumable ?? [], away: snap.away ?? null, manager: snap.manager ?? null, refreshedAt: snap.refreshedAt, loadError: null };
+  const next: BoardState = { ...state, rows: snap.rows, queue: snap.queue ?? [], queuePaused: snap.queuePaused ?? false, disk: snap.disk ?? null, plans: snap.plans ?? null, resumable: snap.resumable ?? [], away: snap.away ?? null, manager: snap.manager ?? null, archivedCohorts: snap.archivedCohorts ?? state.archivedCohorts, cohortsRecent: snap.cohortsRecent ?? state.cohortsRecent, refreshedAt: snap.refreshedAt, loadError: null };
   const listed = navTasks(next);
   const selected = state.selected !== null && listed.includes(state.selected) ? state.selected : firstSelectable(listed);
   const preview = snap.preview && snap.preview.task === selected ? snap.preview : selected === state.selected ? state.preview : null;
@@ -635,6 +665,7 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
   const queuePaused = isPaused(config) || !config.queue.enabled;
   const resumable = (await findResumable(ctx, { rows: statusRows })).map((c) => c.task);
   const manager = await managerView(ctx);
+  const archivedCohorts = listCohorts(config).filter((m) => m.archived).map((m) => cohortKey(m.name));
   const queued = queue.find((v) => v.entry.task === selected);
   if (selected === MANAGER_SELECT && manager.state !== 'missing') {
     let lines: string[];
@@ -643,9 +674,9 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
     } catch (e) {
       lines = [`(cannot read the window: ${errorMessage(e)})`];
     }
-    return { rows, queue, queuePaused, disk, plans, resumable, away: awayView(config), manager, preview: { task: MANAGER_SELECT, lines }, refreshedAt: clock(now) };
+    return { rows, queue, queuePaused, disk, plans, resumable, away: awayView(config), manager, archivedCohorts, cohortsRecent: config.board.cohortsRecent, preview: { task: MANAGER_SELECT, lines }, refreshedAt: clock(now) };
   }
-  if (queued) return { rows, queue, queuePaused, disk, plans, resumable, away: awayView(config), manager, preview: { task: queued.entry.task, model: `${queued.entry.agent} · model: ${queued.entry.model} · effort: ${queued.entry.effort}`, lines: queuePreview(queued) }, refreshedAt: clock(now) };
+  if (queued) return { rows, queue, queuePaused, disk, plans, resumable, away: awayView(config), manager, archivedCohorts, cohortsRecent: config.board.cohortsRecent, preview: { task: queued.entry.task, model: `${queued.entry.agent} · model: ${queued.entry.model} · effort: ${queued.entry.effort}`, lines: queuePreview(queued) }, refreshedAt: clock(now) };
   // The selected task; else the first one the list shows (not a hidden, closed or finished one).
   const target = rows.find((r) => r.task === selected) ?? rows.find((r) => !r.hidden && !r.finished) ?? rows.find((r) => !r.hidden) ?? rows[0];
   let preview: Preview | null = null;
@@ -666,7 +697,7 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
     if (target.promptQueue?.length) notes.push(`${target.promptQueue.length} messages (${target.promptDelivery ?? 'queued'})`);
     preview = { task: target.task, model: `${target.agent} · model: ${target.model} · effort: ${target.effort}`, lines, ...(notes.length > 0 ? { note: notes.join(' · ') } : {}) };
   }
-  return { rows, queue, queuePaused, disk, plans, resumable, away: awayView(config), manager, preview, refreshedAt: clock(now) };
+  return { rows, queue, queuePaused, disk, plans, resumable, away: awayView(config), manager, archivedCohorts, cohortsRecent: config.board.cohortsRecent, preview, refreshedAt: clock(now) };
 }
 
 /** The preview of a queued task: what it will run, what it waits for, how it ends if it failed, and the start of its prompt. */
@@ -1053,7 +1084,8 @@ export const HELP_LINES: string[] = [
   '  l           the history of the tasks (agentctl log): ↑↓ scroll, Esc back',
   '  o / p / f   mark a finished task ok / partial / fail (agentctl mark);',
   '              p marks only on a finished task, else it pauses the queue',
-  '  k           pick a cohort to show (↑↓ ⏎ or its number); "wszystkie" = all,',
+  '  k           pick a cohort to show (↑↓ PgUp/PgDn ⏎, number); "wszystkie" = all,',
+  '              newest first; "starsze…" opens the rest',
   '              "bez kohorty" = the tasks that are in no cohort',
   '  g / E       fold the cohort group of the selected task / open all groups',
   '  L           the limits per provider and what uses them (agentctl limits)',
@@ -1080,7 +1112,7 @@ export function promptText(state: BoardState): string | null {
   const mode = state.mode;
   if (mode.kind === 'input') return `Message to ${mode.task} (Enter sends, Esc cancels): ${mode.text}`;
   if (mode.kind === 'cancel-reason') return `Cancel ${mode.task} – reason, optional (Enter goes on, Esc stops): ${mode.text}`;
-  if (mode.kind === 'cohort-pick') return `Cohort: ${mode.options.map((o, i) => (i === mode.index ? `[${i + 1} ${o.label}]` : `${i + 1} ${o.label}`)).join('  ')}  (↑↓ ⏎ or a number, Esc)`;
+  if (mode.kind === 'cohort-pick') return `Cohort: ${cohortPickWindow(mode.options, mode.index)}  (↑↓ PgUp/PgDn ⏎ or a number, Esc)`;
   if (mode.kind === 'finished') return `${mode.task} is finished (no window): c copy report · x close · X cancel · h hide · ${state.rows.find((r) => r.task === mode.task && isAlive(r)) ? 'o open window · ' : 'o ok · '}p partial · f fail · Esc`;
   if (mode.kind !== 'confirm') return null;
   const row = state.rows.find((r) => r.task === mode.task);

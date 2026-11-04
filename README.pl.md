@@ -457,7 +457,7 @@ Play a notification sound when a background task finishes.
 | `model` | nie | Nazwa modelu przekazana agentowi; pominięta lub `default`: domyślny model agenta. |
 | `effort` | nie | `low`, `medium`, `high` (domyślnie), `xhigh`, `max` (nie dla Codexa). |
 | `repos[]` | tak | Co najmniej jeden `{path, worktree, base, branch}`. Agent startuje w pierwszym worktree. |
-| `setup` | nie | Komendy shell uruchamiane w pierwszym worktree po `git worktree add` i przed linkami. |
+| `setup` | nie | Komendy shell uruchamiane w pierwszym worktree po `git worktree add` i przed linkami. Każdy wpis `repos[]` może mieć własne `setup` (w worktree tego repo), a setup z `.agentctl.yaml` repozytorium też działa w jego worktree; z czatu niedozwolone. |
 | `links[]` | nie | Symlinki `{from, to}` w pierwszym worktree, np. żeby podłączyć klienta do testowanego backendu. |
 | `env` | nie | Zmienne środowiskowe okna tmux. |
 | `review_of` | nie | ID recenzowanego zadania; recenzent musi użyć innego agenta lub innego modelu niż autor. |
