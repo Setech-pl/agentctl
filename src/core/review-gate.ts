@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { Context } from './context.ts';
 import type { GlobalConfig } from './config.ts';
 import type { AutoReviewSource, RawSpec, ResolvedSpec } from './spec.ts';
+import type { QueueEntry } from './queue.ts';
 import type { StatusRow } from './status.ts';
 import type { TaskRecord } from './taskstore.ts';
 import { findRecordAnywhere } from './taskstore.ts';
@@ -21,6 +22,7 @@ import { AgentctlError, fillPlaceholders, resolvePath, windowName } from './util
 export const DEFAULT_REVIEW_TEMPLATE = `Review the commits of {task} ({delta}) in your own detached checkout (path below).\nAuthor report: {report}\nRecord evidence, checks, problems and proposed actions.\nDo not merge, do not run mark or any other agentctl action; write the decisions for the owner into the decisions of your agentctl-outputs block.\nDo not modify the author's files or branch. Write only your review report at the canonical path in the report protocol.\n{checkout}`;
 
 export const LEGACY_REVIEW_HINT = 'stary wpis auto-review – usuń (queue_rm) i zakolejkuj przegląd ponownie';
+export const LEGACY_RECORD_HINT = 'stary rekord przeglądu – zamknij go (close) i zakolejkuj przegląd ponownie';
 
 const BUSY_STATES = new Set(['working', 'background', 'limited', 'overloaded', 'needs-trust']);
 
@@ -42,19 +44,22 @@ export function authorReportEnded(config: GateConfig, author: TaskRecord, nowMs:
 export function authorWaitReason(config: GlobalConfig, autoReview: AutoReviewSource | undefined, rows: StatusRow[], nowMs: number): string | undefined {
   if (!autoReview) return undefined;
   const row = rows.find((r) => r.task === autoReview.author);
-  // No window left, closed or cancelled: nobody can change the work any more (a missing report is decided by `authorTerminal`).
-  if (!row || row.window !== 'alive' || row.closed || row.cancelled) return undefined;
+  if (!row) return undefined;
   const author = findAuthorRecord(config, autoReview.author);
+  const alive = row.window === 'alive' && !row.closed && !row.cancelled;
   const why: string[] = [];
-  if (BUSY_STATES.has(row.state)) why.push(`stan ${row.state}`);
-  if ((row.promptQueue?.length ?? 0) > 0) why.push(`follow-up w kolejce (${row.promptQueue!.length})`);
-  if (row.promptDelivery && row.promptDelivery !== 'sent') why.push(`wiadomość niepotwierdzona (${row.promptDelivery})`);
-  if (row.draft_input) why.push('szkic w polu wpisywania');
+  if (alive) {
+    if (BUSY_STATES.has(row.state)) why.push(`stan ${row.state}`);
+    if ((row.promptQueue?.length ?? 0) > 0) why.push(`follow-up w kolejce (${row.promptQueue!.length})`);
+    if (row.promptDelivery && row.promptDelivery !== 'sent') why.push(`wiadomość niepotwierdzona (${row.promptDelivery})`);
+    if (row.draft_input) why.push('szkic w polu wpisywania');
+  }
   if (author) {
     const end = authorReportEnded(config, author, nowMs);
-    if (!end.ended) why.push(end.reason);
+    // A closed or cancelled author without a finished report is not waited for: `authorTerminal` fails the review. Everyone else needs report-end and settle, window or not.
+    if (!end.ended) { if (alive || !(row.closed || row.cancelled)) why.push(end.reason); }
     else if (config.reportSettleS > 0 && end.mtime !== undefined && nowMs - end.mtime < config.reportSettleS * 1000) why.push(`raport ustala się (${Math.ceil(config.reportSettleS - (nowMs - end.mtime) / 1000)} s)`);
-  } else why.push('brak rekordu autora');
+  } else if (alive) why.push('brak rekordu autora');
   return why.length > 0 ? `czeka na autora ${autoReview.author}: ${why.join('; ')}` : undefined;
 }
 
@@ -66,7 +71,17 @@ export function authorTerminal(config: GlobalConfig, autoReview: AutoReviewSourc
   const author = findAuthorRecord(config, autoReview.author);
   if (author && authorReportEnded(config, author, nowMs).ended) return undefined;
   const state = row.cancelled ? 'cancelled' : 'closed';
-  return { state, text: `autor ${autoReview.author} ${state === 'cancelled' ? 'anulowany' : 'zamknięty'} bez nowego, zakończonego raportu; przegląd wstrzymany (queue_retry, gdy autor dostarczy raport)` };
+  return { state, text: `${state}: autor ${autoReview.author} ${state === 'cancelled' ? 'anulowany' : 'zamknięty'} bez zakończonego raportu bieżącej próby; przegląd wstrzymany – gdy autor dostarczy nowy raport z report-end, uruchom queue_retry tego przeglądu` };
+}
+
+/** `after` of a queued entry as the queue must read it: an automatic review does not wait for a report of a cancelled author that has already delivered a finished one. */
+export function effectiveAfter(config: GlobalConfig, entry: Pick<QueueEntry, 'after' | 'autoReview'>, rows: readonly StatusRow[], nowMs: number): string[] {
+  const ar = entry.autoReview;
+  if (!ar || !entry.after.includes(ar.author)) return entry.after;
+  const row = rows.find((r) => r.task === ar.author);
+  if (!row?.cancelled) return entry.after;
+  const author = findAuthorRecord(config, ar.author);
+  return author && authorReportEnded(config, author, nowMs).ended ? entry.after.filter((t) => t !== ar.author) : entry.after;
 }
 
 export function sameDelta(heads: Record<string, string>, bases: Record<string, string>): string {
@@ -109,7 +124,7 @@ const norm = (p: string): string => path.resolve(p);
 const inside = (p: string, dir: string): boolean => norm(p) === norm(dir) || norm(p).startsWith(`${norm(dir)}${path.sep}`);
 
 /** The hard invariant of every review start: its report is not the author's, and none of its worktrees is (or lies in, or contains) an author's worktree. */
-export function assertReviewIsolated(spec: Pick<ResolvedSpec, 'task' | 'report' | 'repos'> & { reportAlt?: string[] | undefined }, author: TaskRecord): void {
+export function assertReviewIsolated(spec: { task: string; report: string; repos: { worktree: string }[]; reportAlt?: string[] | undefined }, author: TaskRecord): void {
   const reports = [spec.report, ...(spec.reportAlt ?? [])].map(norm);
   if (reports.includes(norm(author.report))) throw new AgentctlError(`${spec.task}: start refused – the review's report ${spec.report} is the author's report (${author.task}); a review never writes the author's file`, LEGACY_REVIEW_HINT);
   for (const repo of spec.repos) for (const theirs of author.repos) {

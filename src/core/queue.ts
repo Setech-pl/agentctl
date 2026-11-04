@@ -1,5 +1,5 @@
 import { withStartLock } from './start-lock.ts';
-import { assertReviewIsolated, authorCheckoutBusy, authorTerminal, authorWaitReason, findAuthorRecord, LEGACY_REVIEW_HINT, repinReview, syncReviewLedger } from './review-gate.ts';
+import { authorCheckoutBusy, authorTerminal, authorWaitReason, effectiveAfter, findAuthorRecord, repinReview, syncReviewLedger } from './review-gate.ts';
 import { queueFile as promptQueueFile } from './prompt-queue.ts';
 import { withFileLock } from './file-lock.ts';
 import { reportPathWarnings } from './report-path.ts';
@@ -353,7 +353,7 @@ export async function unblockEntry(ctx: Context, input: string, opts: { dropAfte
  */
 export async function announceBlocked(ctx: Context, notifier: Notifier, rows: readonly StatusRow[], opts: { self?: SelfArgv | undefined; log?: (line: string) => Promise<void> | void } = {}): Promise<string[]> {
   const entries = readQueue(ctx.config);
-  const blocked = findBlocked(entries, rows);
+  const blocked = findBlocked(entries.map((e) => ({ ...e, after: effectiveAfter(ctx.config, e, rows, ctx.runner.now()) })), rows);
   const said: string[] = [];
   for (const entry of entries) {
     const b = blocked.get(entry.task);
@@ -441,7 +441,7 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
   for (const w of live) if (w.agent && w.counted !== false) used[w.agent]++;
   const paused = isPaused(config) || !config.queue.enabled;
   const reason = !config.queue.enabled ? 'queue.enabled is false' : 'queue paused (agentctl queue resume)';
-  const blocked = findBlocked(entries, rows);
+  const blocked = findBlocked(entries.map((e) => ({ ...e, after: effectiveAfter(config, e, rows, nowMs) })), rows);
   const cancelled = cancelledTasks(rows);
   // `usage.queue_hold`: a provider whose plan is above the limit starts nothing (off by default).
   const holds = queueHolds(config, nowMs);
@@ -454,7 +454,7 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
     if (stuck) return { position, entry, condition: { kind: 'blocked', text: blockedText(stuck), blockers: stuck }, since: entry.queuedAt };
     if (paused) return { position, entry, condition: { kind: 'paused', text: reason }, since: entry.queuedAt };
     if (entry.retryAt && Date.parse(entry.retryAt) > nowMs) return { position, entry, condition: { kind: 'hold', text: `retry at ${entry.retryAt}: ${entry.error ?? ''}` }, since: entry.queuedAt };
-    const unmet = unmetAfter(entry.after, rows, entry.afterVerdicts);
+    const unmet = unmetAfter(effectiveAfter(config, entry, rows, nowMs), rows, entry.afterVerdicts);
     if (unmet.length > 0) return { position, entry, condition: { kind: 'after', text: waitingText(unmet, failed, cancelled) }, since: entry.queuedAt };
     const waitsFor = authorWaitReason(config, entry.autoReview, rows, nowMs);
     if (waitsFor) return { position, entry, condition: { kind: 'after', text: waitsFor }, since: entry.queuedAt };
@@ -573,11 +573,11 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
       // A review of an author who was closed or cancelled without a finished report cannot happen by itself: a terminal state, not an endless wait.
       const terminal = authorTerminal(config, entry.autoReview, rows, ctx.runner.now());
       if (terminal) {
-        await failEntry(ctx, entry, `${terminal.state === 'cancelled' ? 'cancelled: ' : ''}${terminal.text}`, notifier, opts, true);
+        await failEntry(ctx, entry, terminal.text, notifier, opts, true);
         continue;
       }
     }
-    if (unmetAfter(entry.after, rows, entry.afterVerdicts).length > 0) continue;
+    if (unmetAfter(effectiveAfter(config, entry, rows, ctx.runner.now()), rows, entry.afterVerdicts).length > 0) continue;
     // An automatic review waits until its author's turn is over (the claim in beginStart checks it again, on fresh state, under the lock).
     const waitsFor = entry.autoReview ? await reviewWaitReason(ctx, entry, rows) : undefined;
     if (waitsFor) {
@@ -651,8 +651,13 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
     const authorWindow = findAuthorRecord(config, fresh.autoReview.author)?.window ?? windowName(fresh.autoReview.author);
     return withFileLock(`${promptQueueFile(ctx, authorWindow)}.lock`, async () => {
       try {
+        // The last read before the claim is the status: whatever the checks below took time for, the decision is on the state as it is now.
+        const busy = await authorCheckoutBusy(ctx, fresh.autoReview!.author);
         const rows = await collectStatus(ctx, { progress: false, archived: true });
-        const waits = await reviewWaitReason(ctx, fresh, rows);
+        const terminal = authorTerminal(config, fresh.autoReview, rows, ctx.runner.now());
+        if (terminal) { await failEntry(ctx, fresh, terminal.text, notifier, opts, true); return false; }
+        if (unmetAfter(effectiveAfter(config, fresh, rows, ctx.runner.now()), rows, fresh.afterVerdicts).length > 0) return false;
+        const waits = authorWaitReason(config, fresh.autoReview, rows, ctx.runner.now()) ?? (busy ? `czeka na autora ${fresh.autoReview!.author}: ${busy}` : undefined);
         if (waits) { await opts.log?.(`queue: ${fresh.task} ${waits}`); return false; }
         return claim(await rebuildAutoReview(ctx, fresh, { write: true, ...(opts.log ? { log: opts.log } : {}) }));
       } catch (e) {
@@ -670,13 +675,8 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
       await opts.log?.(`queue: starting ${entry.task} (${entry.agent})`);
       const raws = splitSpecs(entry.spec, `queue entry ${entry.task}`);
       const spec = resolveSpec(raws[0] as RawSpec, { config });
-      if (entry.autoReview) {
-        spec.autoReview = entry.autoReview;
-        // Hard invariant of every review start: never the author's report, never the author's checkout.
-        const author = findAuthorRecord(config, entry.autoReview.author);
-        if (!author) throw new AgentctlError(`${entry.task}: no record of the author ${entry.autoReview.author}`, LEGACY_REVIEW_HINT);
-        assertReviewIsolated(spec, author);
-      }
+      // The review invariant (own report, own checkout) is checked by the door every agent window goes through (window-guard).
+      if (entry.autoReview) spec.autoReview = entry.autoReview;
       if (entry.reuse) {
         if ((await ctx.tmux.windows()).some(w => w.plain === spec.window)) throw new AgentctlError(`${entry.task}: task window already exists; inspect it instead of retrying`);
         await checkRetryWorktrees(ctx.runner, spec.repos);

@@ -16,7 +16,10 @@ import { waitForReady } from './ready.ts';
 import { RC_CONFIRM, RC_FIRST_TIME } from './remote-control.ts';
 import type { ResolvedSpec } from './spec.ts';
 import { recordFromSpec, renderTaskMd, readTaskRecord, setHeaderField, setHeaderFields, taskDir, taskFile } from './taskstore.ts';
+import { assertAgentSpawnAllowed, openAgentWindow } from './window-guard.ts';
 import { AgentctlError } from './util.ts';
+
+const guardRequest = (spec: ResolvedSpec) => ({ task: spec.task, window: spec.window, report: spec.report, reportAlt: spec.reportAlt, repos: spec.repos, reviewOf: spec.reviewOf, autoReview: spec.autoReview });
 
 export interface NewOptions extends PlanOptions {
   /** Wait for a human to answer the folder-trust dialog (default). `false` (--no-wait-trust): stop at the dialog. */
@@ -27,6 +30,8 @@ export interface NewOptions extends PlanOptions {
   signal?: AbortSignal;
   /** This very agentctl as a command line (absolute node and script): the agents report their events to it. Absent: no event wiring. */
   self?: SelfArgv | undefined;
+  /** Who asks for the window; `move` makes a refusal of an old review record say so. */
+  origin?: 'move';
 }
 
 export interface NewResult {
@@ -110,6 +115,8 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
   const results: NewResult[] = [];
   let sessionUp = await tmux.hasSession();
   for (const [index, spec] of specs.entries()) {
+    // The same check as in the door itself, before the first worktree or file exists.
+    assertAgentSpawnAllowed(ctx, { ...guardRequest(spec), origin: opts.origin ?? (spec.autoReview ? 'start' : 'new') });
     const taskStartedMs = runner.now();
     const primary = spec.repos[0]!.worktree;
 
@@ -164,11 +171,8 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
     for (const file of wiring?.files ?? []) await runner.writeFile(file.path, file.content);
 
     // 5. window + agent
-    if (sessionUp) await tmux.newWindow(spec.window, primary, spec.env);
-    else {
-      await tmux.newSession(spec.window, primary, spec.env);
-      sessionUp = true;
-    }
+    await openAgentWindow(ctx, { ...guardRequest(spec), cwd: primary, env: spec.env, origin: opts.origin ?? (spec.autoReview ? 'start' : 'new'), sessionUp });
+    sessionUp = true;
     const settings = config.agents[spec.agent];
     const commandLine = agentCommandLine(buildAgentArgv(spec, settings, wiring?.args));
     if (wiring) ctx.info(`${spec.task}: ${wiring.note}`);

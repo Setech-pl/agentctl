@@ -11,6 +11,7 @@ import { listTargets, matchTask, describeTargets } from './resolve.ts';
 import type { ResolvedSpec } from './spec.ts';
 import { readTaskPrompt, readTaskRecord, setHeaderField, taskFile } from './taskstore.ts';
 import type { TaskRecord } from './taskstore.ts';
+import { assertAgentSpawnAllowed } from './window-guard.ts';
 import { AgentctlError, windowName } from './util.ts';
 
 export interface MoveOptions {
@@ -74,6 +75,8 @@ export async function planMove(ctx: Context, taskArg: string, opts: MoveOptions 
   const original = readTaskPrompt(config, from.window);
   if (!original) throw new AgentctlError(`cannot read the prompt of ${from.task} from ${taskFile(config, from.window)}`);
 
+  // A review record from before the own-checkout rule never moves: the new window would open in the author's checkout.
+  assertAgentSpawnAllowed(ctx, { task: from.task, report: from.report, repos: from.repos, reviewOf: from.reviewOf, autoReview: from.autoReview, origin: 'move' });
   const used = new Set([...targets.map((x) => x.window), ...targets.map((x) => x.task.toLowerCase())]);
   const task = nextTaskId(from.task, (candidate) => used.has(windowName(candidate)) || used.has(candidate.toLowerCase()));
   return { from, to: t.order, task, window: windowName(task), prompt: `${original}\n\n${continuationNote(from)}` };
@@ -113,6 +116,7 @@ export async function moveTask(ctx: Context, taskArg: string, opts: MoveOptions 
     setup: [],
     env: from.env,
     ...(from.reviewOf ? { reviewOf: from.reviewOf } : {}),
+    ...(from.autoReview ? { autoReview: from.autoReview } : {}),
     report: from.report,
     prompt: plan.prompt,
     pin: false,
@@ -122,7 +126,8 @@ export async function moveTask(ctx: Context, taskArg: string, opts: MoveOptions 
     requested: from.requested,
     switchedBy: 'limit',
   };
-  const [result] = await newTasks(ctx, [spec], { reuse: true, noSwitch: true, ...(opts.self ? { self: opts.self } : {}), ...(opts.signal ? { signal: opts.signal } : {}) });
+  // origin 'move': a review record written before the own-checkout rule is refused before anything is made.
+  const [result] = await newTasks(ctx, [spec], { reuse: true, noSwitch: true, origin: 'move', ...(opts.self ? { self: opts.self } : {}), ...(opts.signal ? { signal: opts.signal } : {}) });
   await setHeaderField(ctx.runner, taskFile(ctx.config, plan.window), 'continues', from.task);
   await setHeaderField(ctx.runner, taskFile(ctx.config, from.window), 'superseded_by', plan.task);
   const moved = readTaskRecord(ctx.config, from.window);
