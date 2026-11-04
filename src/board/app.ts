@@ -21,6 +21,7 @@ import {
   awayLabel,
   loadBoard,
   managerLine,
+  modelHelp,
   loadLogLines,
   ProgressCache,
   promptText,
@@ -68,7 +69,7 @@ function Cells(props: { cells: BoardCell[]; inverse?: boolean }): React.ReactEle
   );
 }
 
-function TaskList(props: { state: BoardState; width: number; capacity: number; icons: Parameters<typeof rowCells>[3]; selectedColor: string }): React.ReactElement {
+function TaskList(props: { state: BoardState; width: number; capacity: number; icons: Parameters<typeof rowCells>[3]; selectedColor: string; versions: Record<string, string> }): React.ReactElement {
   const { state } = props;
   const cols = boardColumns(props.width);
   const visible = visibleItems(state, props.capacity);
@@ -85,14 +86,14 @@ function TaskList(props: { state: BoardState; width: number; capacity: number; i
             : item.kind === 'resume'
             ? h(Text, { key: `r-${item.task}`, dimColor: true, wrap: 'truncate-end' }, `    ${item.task}`)
             : item.kind === 'queue'
-              ? h(Cells, { key: `q-${item.view.entry.task}`, cells: queueCells(item.view, item.view.entry.task === state.selected, cols, props.selectedColor) })
+              ? h(Cells, { key: `q-${item.view.entry.task}`, cells: queueCells(item.view, item.view.entry.task === state.selected, cols, props.selectedColor, props.versions) })
               : item.kind === 'finished'
             ? h(Text, { key: 'finished', dimColor: true, wrap: 'truncate-end' }, `${item.expanded ? '-' : '+'} ${finishedTitle(item.count, item.expanded)}`)
             : item.kind === 'closed'
               ? h(Text, { key: 'closed', dimColor: true, wrap: 'truncate-end' }, `- ${closedTitle(item.count)}`)
               : item.kind === 'cancelled'
                 ? h(Text, { key: 'cancelled', dimColor: true, wrap: 'truncate-end' }, `- ${cancelledTitle(item.count)}`)
-                : h(Cells, { key: item.row.task, cells: rowCells(item.row, item.row.task === state.selected, cols, props.icons, props.selectedColor) }),
+                : h(Cells, { key: item.row.task, cells: rowCells(item.row, item.row.task === state.selected, cols, props.icons, props.selectedColor, props.versions) }),
         );
   return h(Box, { flexDirection: 'column', width: props.width }, h(Cells, { cells: headerCells(cols) }), ...body);
 }
@@ -100,11 +101,12 @@ function TaskList(props: { state: BoardState; width: number; capacity: number; i
 function Preview(props: { state: BoardState; width: number; height: number }): React.ReactElement {
   const { state } = props;
   const preview = state.preview;
-  const lines = preview ? preview.lines.slice(-Math.max(1, props.height - 1)) : [];
+  const lines = preview ? preview.lines.slice(-Math.max(1, props.height - (preview?.model ? 3 : 1))) : [];
   return h(
     Box,
     { flexDirection: 'column', width: props.width, borderStyle: 'single', borderTop: false, borderRight: false, borderBottom: false, paddingLeft: 1 },
     h(Text, { dimColor: true, wrap: 'truncate-end' }, preview ? (preview.note ? `${preview.task} · ${preview.note}` : `${preview.task} · last ${preview.lines.length} lines`) : ''),
+    preview?.model ? h(Text, { dimColor: true }, preview.model) : null,
     ...lines.map((l, i) => h(Text, { key: i, wrap: 'truncate-end' }, l === '' ? ' ' : l)),
   );
 }
@@ -217,7 +219,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
     for (const effect of result.effects) runEffect(effect);
   });
 
-  const layout = boardLayout(state.width);
+  const layout = boardLayout(state.width, ctx.config.board.listWidth);
   const active = state.rows.filter((r) => !r.closed && !r.finished && !r.hidden).length;
   const hiddenCount = state.showHidden ? 0 : state.rows.filter((r) => r.hidden).length;
   const panel = usagePanel(state.plans, ctx.config.usage, Date.now());
@@ -242,11 +244,11 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
       : logMode
       ? h(Box, { flexDirection: 'column' }, h(Text, { bold: true }, `Log – ${logMode.lines.length > 1 ? logMode.lines.length - 1 : 0} task${logMode.lines.length === 2 ? '' : 's'} (↑↓ scroll, Esc back)`), ...logMode.lines.slice(logMode.offset, logMode.offset + Math.max(1, state.height - 4)).map((l, i) => h(Text, { key: i, wrap: 'truncate-end', ...(i === 0 && logMode.offset === 0 ? { dimColor: true } : {}) }, l === '' ? ' ' : l)))
       : state.mode.kind === 'help'
-      ? h(Box, { flexDirection: 'column' }, ...HELP_LINES.map((l, i) => h(Text, { key: i }, l === '' ? ' ' : l)))
+      ? h(Box, { flexDirection: 'column' }, ...[...modelHelp(state), ...HELP_LINES].map((l, i) => h(Text, { key: i }, l === '' ? ' ' : l)))
       : h(
           Box,
           { flexDirection: 'row', height: rowsForBody },
-          h(TaskList, { state, width: layout.listWidth, capacity: rowsForBody - 1, icons: ctx.config.watch.windowIcons, selectedColor: ctx.config.board.selectedColor }),
+          h(TaskList, { state, width: layout.listWidth, capacity: rowsForBody - 1, icons: ctx.config.watch.windowIcons, selectedColor: ctx.config.board.selectedColor, versions: ctx.config.board.modelVersions }),
           layout.showPreview ? h(Preview, { state, width: layout.previewWidth, height: rowsForBody }) : null,
         );
   return h(Box, { flexDirection: 'column', width: state.width, height: state.height }, header, state.mode.kind === 'help' || logMode || viewMode ? null : managerBox, state.mode.kind === 'help' || logMode || viewMode ? null : panelBox, h(Box, { flexGrow: 1, flexDirection: 'column' }, body), h(Footer, { state, hint: navigationHint(ctx.config.board.returnKey) }));

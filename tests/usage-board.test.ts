@@ -72,6 +72,11 @@ describe('board TOKENS column', () => {
     assert.equal(headerCells(boardColumns(60)).some((c) => c.key === 'tokens'), false);
   });
 
+  it('compact alias version uses observed model before the configured map, without changing selected effort', () => {
+    const r = row({ tokens: { fresh: 0, sessions: 1, tokens: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}, observed: {model: 'claude-opus-5-5', effort: 'low', cliVersion: 'unknown'} } });
+    assert.equal(rowCells(r, false, boardColumns(92), null, 'blue', {opus: '4.5'}).find(c => c.key === 'who')?.text, 'cl O 5.5 HI');
+  });
+
   it('shows 1.2M for a task with tokens, n/d for one without', () => {
     const cols = boardColumns(80);
     const text = (r: BoardRow): string => rowCells(r, false, cols).find((c) => c.key === 'tokens')?.text ?? '';

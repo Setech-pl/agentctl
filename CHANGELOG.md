@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.17.2] - 2026-11-03
 
+- Board: compact provider/model/version/effort labels (e.g. cx S 6.1 XH), observed/configured alias version fallbacks, full names in preview/help, wider lists at 140+ columns, and board.list_width / board.model_versions configuration. Queue rows share the same formatter; selection/state colors and NO_COLOR stay unchanged.
+
 - Second review: overload budgets survive brief work/waiting and reset only after 600 s continuous work (overload.reset_after_s) or completion; deadlines stay anchored and attention is announced once. Claude detection requires a prefixed error directly under its CLI block.
 - Independent event cursors for concurrent same-name MCP sessions, with a persisted client high-water mark for successors; explicit client opts into sharing. Preserve ordinary nonsecret env facts during redaction. Fix peek losing collapsed questions behind wrapped numeric attempt IDs in scrollback. TUI fixture whitespace has an explicit scoped Git attribute.
 
