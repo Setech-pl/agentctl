@@ -1268,7 +1268,7 @@ agentctl event [options] [payload]
 |---|---|---|
 | `--task <task>` | task ID | required |
 | `--agent <agent>` | the agent that reports | one of `claude`, `codex`; required |
-| `--kind <kind>` | claude: which hook called | one of `notification`, `stop`, `stop-failure` |
+| `--kind <kind>` | claude: which hook called | one of `notification`, `stop`, `stop-failure`, `user-prompt-submit` |
 | `--forward <json>` | codex: JSON list, the notify command the user had; run with the same JSON after this one |  |
 
 ## agentctl usage-tap

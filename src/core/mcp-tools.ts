@@ -721,8 +721,8 @@ async function runSend(deps: McpDeps, args: { task: string; text: string }): Pro
     if (args.text.trim() === '') throw new AgentctlError('the text is empty');
     if (args.text.length > MAX_SEND_CHARS) throw new AgentctlError(`the text is ${args.text.length} characters; the limit is ${MAX_SEND_CHARS}`);
     const target = await resolveRunningTask(ctx, args.task);
-    await sendPrompts(ctx, [{ task: target.task, window: target.window, prompt: args.text }]);
-    return { text: `${target.task}: prompt sent (${args.text.length} characters)\n${lines.join('\n')}`.trim(), executed: true, announce: `send ${target.task}` };
+    const sent = await sendPrompts(ctx, [{ task: target.task, window: target.window, prompt: args.text }]);
+    return { text: `${target.task}: ${sent[0]?.warning ?? 'prompt sent'} (${args.text.length} characters)\n${lines.join('\n')}`.trim(), executed: true, announce: `send ${target.task}` };
   });
 }
 
@@ -799,7 +799,7 @@ async function runNew(deps: McpDeps, args: NewMcpArgs): Promise<ToolResult> {
     // The chat cannot answer a folder-trust dialog: stop at it (the error says so) instead of waiting for a person.
     const results = await newTasks(ctx, specs, { waitTrust: args.wait_trust ?? false, noSwitch: true, reuse: Boolean(args.reuse), noAgent: Boolean(args.no_agent), ...(args.agent ? { agent: args.agent } : {}), ...(deps.self ? { self: deps.self } : {}) });
     const startedCap = ctx.config.capacity.snapshot ? capacitySnapshot(await collectCapacity(ctx), results.map((r) => r.effective.agent)) : undefined;
-    const started = results.map((r) => r.agentStarted ? `${r.task} (window ${r.window}, ${r.effective.agent} ${r.effective.model}/${r.effective.effort})` : `${r.task} (worktrees prepared, no agent started)`).join('; ');
+    const started = results.map((r) => r.agentStarted ? `${r.task} (window ${r.window}, ${r.effective.agent} ${r.effective.model}/${r.effective.effort})${r.warning ? '; ' + r.warning : ''}` : `${r.task} (worktrees prepared, no agent started)`).join('; ');
     return { text: `${args.no_agent ? 'Prepared' : 'Started'}: ${started}\n${startedCap ? snapshotLines(startedCap).join('\n') + '\n' : ''}${lines.join('\n')}`.trim(), executed: true, announce: `new ${results.map((r) => r.task).join(', ')}` };
   });
 }

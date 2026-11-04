@@ -1,0 +1,9 @@
+╭─── Claude Code v2.1.311 ───╮
+│ Haiku · low               │
+╰───────────────────────────╯
+❯ Original prompt
+✶ Transmogrifying… (5s · ↓ 816 tokens · thinking with low effort)
+
+❯
+○ low · /effort
+paste again to expand

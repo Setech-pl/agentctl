@@ -129,10 +129,10 @@ describe('events: the question on a screen', () => {
 describe('events: what `new` hands to the agents', () => {
   const config = makeConfig(scratch.sub('wiring'));
 
-  it('Claude: a settings file with the three hooks, each calling agentctl event with the task', () => {
+  it('Claude: a settings file with the four hooks, each calling agentctl event with the task', () => {
     const settings = buildClaudeSettings('NC-1', SELF) as { hooks: Record<string, { hooks: { type: string; command: string; timeout: number }[] }[]> };
-    assert.deepEqual(Object.keys(settings.hooks), ['Notification', 'Stop', 'StopFailure']);
-    for (const [name, kind] of [['Notification', 'notification'], ['Stop', 'stop'], ['StopFailure', 'stop-failure']] as const) {
+    assert.deepEqual(Object.keys(settings.hooks), ['Notification', 'Stop', 'StopFailure', 'UserPromptSubmit']);
+    for (const [name, kind] of [['Notification', 'notification'], ['Stop', 'stop'], ['StopFailure', 'stop-failure'], ['UserPromptSubmit', 'user-prompt-submit']] as const) {
       const hook = settings.hooks[name]?.[0]?.hooks[0];
       assert.equal(hook?.type, 'command');
       assert.equal(hook?.timeout, 15);
@@ -150,7 +150,7 @@ describe('events: what `new` hands to the agents', () => {
     assert.deepEqual(w.args, ['--settings', file]);
     assert.equal(w.files[0]?.path, file);
     assert.deepEqual(Object.keys(JSON.parse(w.files[0]?.content as string)), ['hooks', 'statusLine']);
-    assert.match(w.note, /Notification, Stop and StopFailure/);
+    assert.match(w.note, /UserPromptSubmit, Notification, Stop and StopFailure/);
   });
 
   it('paths with spaces or quotes survive the shell in a hook command', () => {

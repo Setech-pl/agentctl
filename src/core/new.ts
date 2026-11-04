@@ -1,4 +1,4 @@
-import { queuePrompt, deliverPendingPrompt } from './prompt-delivery.ts';
+import { queuePrompt, deliverPendingPrompt, DELIVERY_WARNING } from './prompt-delivery.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { agentCommandLine, buildAgentArgv, INSTALL_HINTS, promptWithHeader } from './agents.ts';
@@ -35,6 +35,7 @@ export interface NewResult {
   worktrees: string[];
   /** False with `--no-agent`. */
   agentStarted: boolean;
+  warning?: string;
   requested: Order;
   effective: Order;
   switchedBy?: 'flag' | 'limit';
@@ -211,8 +212,8 @@ export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: Ne
       );
     }
     if (runner.dryRun) await tmux.submitPrompt(spec.window, promptWithHeader(spec, record.attemptId));
-    else if (await deliverPendingPrompt(ctx, spec.window) !== 'sent') throw new AgentctlError(`${spec.task}: needs-attention — prompt delivery not confirmed`, 'Inspect the pane with peek/attach. The original prompt and report protocol remain in TASK.md.');
-    ctx.info(`${spec.task}: prompt sent`);
+    const delivery = runner.dryRun ? 'sent' : await deliverPendingPrompt(ctx, spec.window);
+    ctx.info(`${spec.task}: ${delivery === 'sent' ? 'prompt sent' : DELIVERY_WARNING + '; watch confirms within delivery_confirm_s; do not repeat new'}`);
 
     const result: NewResult = {
       task: spec.task,
@@ -220,6 +221,7 @@ export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: Ne
       agentCommand: commandLine,
       worktrees: spec.repos.map((r) => r.worktree),
       agentStarted: true,
+      ...(delivery !== 'sent' ? { warning: DELIVERY_WARNING } : {}),
       requested: spec.requested,
       effective: { agent: spec.agent, model: spec.model, effort: spec.effort },
     };

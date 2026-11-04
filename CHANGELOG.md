@@ -4,7 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.17.3] - 2026-11-04
 
-- Post-live fixes A–O: acknowledge initial prompt delivery for Codex and Claude, retry a swallowed Enter at most twice without repasting, and persist needs-attention when delivery is unconfirmed. Trust-delayed prompts are sent once by new/watch with a durable task marker.
+- FIX2 P: recognize Claude Code 2.1.x spinner progress and submitted transcript echoes. Confirm delivery from current-generation Claude UserPromptSubmit/Stop/Notification or Codex notify before screen heuristics. New/queue/send return success with an uncertainty warning; watch resolves within delivery_confirm_s (60 s) and notifies once on timeout. Later work, turn completion or a completed canonical report clears needs-attention and unblocks report consumers. Adapter delivery/working patterns are configurable.
+- Post-live fixes A–O: acknowledge initial prompt delivery for Codex and Claude, retry a swallowed Enter at most twice without repasting, and defer uncertain delivery to watch before needs-attention. Trust-delayed prompts are sent once by new/watch with a durable task marker.
 - Every dispatched/resumed report protocol names the absolute canonical report path and filename. Explicit report_from confirms provenance without a review warning; overwrites require force.
 - Small pull_ready summaries are truthful about truncation, extract backticked SHAs and avoid duplicated headings. Full reports paginate through response_page and are marked pulled only after contiguous complete delivery.
 - Dev MCP identity no longer asks users to restart Claude because stable has another version; doctor reports dev PATH differences as information. Ignore plain shell windows when detecting orphans, and avoid stale-plan events before the first reading.

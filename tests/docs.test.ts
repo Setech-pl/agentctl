@@ -79,7 +79,7 @@ describe('docs: configuration', () => {
   it('shows the built-in screen patterns exactly as the code has them', () => {
     for (const agent of ['claude', 'codex'] as const) {
       const s = DEFAULT_AGENT_SETTINGS[agent];
-      for (const pattern of [s.readyPattern, s.trustPattern, s.workingPattern, s.questionPattern, ...s.footerPatterns, ...s.limitPatterns, ...s.backgroundPatterns]) {
+      for (const pattern of [s.readyPattern, s.trustPattern, s.workingPattern, s.deliveryPattern, s.questionPattern, ...s.footerPatterns, ...s.limitPatterns, ...s.backgroundPatterns]) {
         assert.ok(doc.includes(pattern), `${agent}: the default pattern ${pattern} is missing in docs/configuration.md`);
       }
       assert.ok(doc.includes(s.effortArgs.join(' ')) || doc.includes(JSON.stringify(s.effortArgs)) || doc.includes(`[${s.effortArgs.map((a) => `'${a}'`).join(', ')}]`), `${agent}: effort_args default`);

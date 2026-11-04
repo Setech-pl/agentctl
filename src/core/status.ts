@@ -9,6 +9,7 @@ import { formatModelEffort } from './equivalents.ts';
 import { syncMirror } from './mirror.ts';
 import type { MirrorResult } from './mirror.ts';
 import { classifyScreen, taskState } from './state.ts';
+import { deliveryEvidence } from './prompt-delivery.ts';
 import { readStoredEvent } from './event-command.ts';
 import { extractQuestion } from './events.ts';
 import type { TaskState } from './state.ts';
@@ -156,7 +157,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     const settings = config.agents[screenAgent];
     const stored = readStoredEvent(config, record);
     const reportState = inspectReport(config, { ...record, ...(stored?.outcome === 'turn-complete' ? { turnEndedAt: stored.at } : {}) }, runner.now(), !record.attemptId && (!alive || (config.reportSettleS === 0 && classifyScreen(screenText, settings) === 'idle')));
-    reportReady = reportState.ready;
+    reportReady = reportState.ready && (!record.deliveryStartedAt || reportState.signature !== record.deliveryReportBaseline || record.promptDelivery === 'sent');
     if (record.reportCandidate && record.reportCandidate !== record.report && !findCandidates(ctx, record).some(c => c.file === record.reportCandidate)) delete record.reportCandidate;
     if (reportState.exists && !reportReady && !record.reportCandidate) record.reportCandidate = record.report;
     if (reportReady && !alive && reportState.mtime !== undefined && !Number.isNaN(startedMs)) duration = formatDuration(reportState.mtime - startedMs);
@@ -166,7 +167,9 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     const cancelled = record.cancelled === true && !alive;
     const closed = !cancelled && (archived || (record.closed === true && !alive));
     const hiddenBy: StatusRow['hiddenBy'] = cancelled ? 'cancelled' : closed ? 'closed' : record.hidden === true ? 'user' : record.hidden === undefined && config.board.autoHidePulledDead && !alive && pulled !== null ? 'auto' : null;
-    const state: TaskState = cancelled ? 'cancelled' : closed ? 'closed' : record.supersededBy ? 'superseded' : record.promptDelivery === 'needs-attention' ? 'needs-attention' : taskState({ alive, screen: screenText, settings, reportReady, event: stored?.outcome });
+    const deliveryReport = reportReady && (record.promptDelivery === 'needs-attention' || (record.deliveryId && reportState.signature !== record.deliveryReportBaseline)) && !['needs-input', 'needs-trust'].includes(classifyScreen(screenText, settings));
+    const unconfirmed = record.promptDelivery === 'needs-attention' && !reportReady && !deliveryEvidence(ctx, record, screenText);
+    const state: TaskState = cancelled ? 'cancelled' : closed ? 'closed' : record.supersededBy ? 'superseded' : deliveryReport ? 'report-ready' : unconfirmed ? 'needs-attention' : taskState({ alive, screen: screenText, settings, reportReady, event: stored?.outcome });
     rows.push({
       task: record.task,
       attempt: record.attempt,
@@ -196,7 +199,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       lastLine: lastContentLine(screenText, settings.footerPatterns),
       progress: opts.progress === false || record.repos.length === 0 ? null : await taskProgress(runner, record.repos),
       collide: [],
-      hint: [record.promptDelivery === 'needs-attention' ? record.promptError : record.promptDelivery === 'pending' ? 'original prompt pending; watch sends it once after folder trust and empty ready input' : stateHint(record.task, state, record.pin === true, record.supersededBy), !record.reportConfirmed && record.reportSource && path.normalize(record.reportSource) !== path.normalize(record.report) ? `raport pochodzi z kopii ${record.reportSource} – sprawdź` : null].filter(Boolean).join('; ') || null,
+      hint: [unconfirmed ? record.promptError : record.promptDelivery === 'confirming' || record.promptDelivery === 'sending' ? 'dostarczenie niepotwierdzone – sprawdzam; watch confirms within delivery_confirm_s' : record.promptDelivery === 'pending' ? 'original prompt pending; watch sends it once after folder trust and empty ready input' : stateHint(record.task, state, record.pin === true, record.supersededBy), !record.reportConfirmed && record.reportSource && path.normalize(record.reportSource) !== path.normalize(record.report) ? `raport pochodzi z kopii ${record.reportSource} – sprawdź` : null].filter(Boolean).join('; ') || null,
       question: state === 'needs-input' ? ((collapsedQuestion(screenText) ? sessionQuestion(config, record) : undefined) ?? extractQuestion(screenText) ?? (stored?.outcome === 'needs-input' && stored.text !== '' ? stored.text : null)) : null,
       pin: record.pin === true,
       finished: !alive || state === 'superseded',

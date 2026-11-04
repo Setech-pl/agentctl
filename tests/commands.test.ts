@@ -196,16 +196,17 @@ describe('send', () => {
     const [spec] = resolveAll(config, `---\ntask: NC-1\nagent: claude\nrepos:\n  - {path: ${repo}, worktree: ${repo}-wt}\n---\nOriginal.\n`);
     seedTask(config, spec!, 0);
     const { ctx, runner } = makeContext(config, {
-      respond: (cmd, args) => (cmd === 'tmux' && args[0] === 'list-windows' ? { stdout: 'nc-1\n' } : undefined),
+      respond: (cmd, args) => (cmd === 'tmux' && args[0] === 'list-windows' ? { stdout: 'nc-1\n' } : cmd === 'tmux' && args[0] === 'capture-pane' ? { stdout: '❯ Try \"fake\"\n' } : undefined),
     });
     await sendPrompts(ctx, [item]);
-    assert.deepEqual(runner.commands, [
+    assert.deepEqual(runner.commands.filter(c => c.startsWith('tmux ')), [
       'tmux load-buffer -b agentctl-nc-1 -',
-      'tmux paste-buffer -p -d -b agentctl-nc-1 -t \'=agentctl:nc-1\'',
-      'tmux send-keys -t \'=agentctl:nc-1\' Enter',
-      `append ${taskFile(config, 'nc-1')} (${Buffer.byteLength(`\n\n## Follow-up sent 2026-10-31T12:00:00.300Z\n\nPlease also add a test.\n`)} bytes)`,
+      "tmux paste-buffer -p -d -b agentctl-nc-1 -t '=agentctl:nc-1'",
+      "tmux send-keys -t '=agentctl:nc-1' Enter",
     ]);
-    assert.equal(runner.calls[0]?.input, 'Please also add a test.');
+    assert.ok(runner.commands.some(c => c.startsWith(`append ${taskFile(config, 'nc-1')}`)));
+    assert.ok(fs.readFileSync(taskFile(config, 'nc-1'), 'utf8').includes('Please also add a test.'));
+    assert.equal(runner.calls.find(c => c.line.includes('load-buffer'))?.input, 'Please also add a test.');
   });
 
   it('fails when the window does not exist', async () => {
