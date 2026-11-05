@@ -523,7 +523,8 @@ agentctl send [options] [file]
 | `--dry-run` | print the commands that would run, execute nothing |  |
 | `--clip` | read the prompt from the clipboard; shows a summary and asks y/N first |  |
 | `-y, --yes` | with --clip: do not ask |  |
-| `--enter-only <task>` | paste nothing: press Enter for the text that an earlier send left in the input field of the task ("nie dostarczono – tekst w polu wpisywania"); refuses any other text |  |
+| `--enter-only <task>` | paste nothing: show the exact text that an earlier send left in the input field of the task ("nie dostarczono – tekst w polu wpisywania") with a token; refuses any other text |  |
+| `--confirm <token>` | with --enter-only: press Enter if the field is still exactly the text the preview showed |  |
 
 Examples:
 

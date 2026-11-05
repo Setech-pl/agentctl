@@ -10,7 +10,7 @@ import { Context } from '../src/core/context.ts';
 import { handleEvent } from '../src/core/event-command.ts';
 import { readJournal } from '../src/core/journal.ts';
 import { auditPath } from '../src/core/mcp-tools.ts';
-import { deliveryNote, deliveryProof, deliverPendingPrompt, ENTER_RETRY_S, MAX_ENTERS, queuePrompt, submitDraft } from '../src/core/prompt-delivery.ts';
+import { deliveryNote, deliveryProof, deliverPendingPrompt, echoLines, queuePrompt, submitDraft } from '../src/core/prompt-delivery.ts';
 import { sendPrompts } from '../src/core/send.ts';
 import { classifyScreen } from '../src/core/state.ts';
 import { readTaskRecord, setHeaderFields, taskFile } from '../src/core/taskstore.ts';
@@ -25,6 +25,11 @@ import type { ExecOptions, ExecResult } from '../src/core/runner.ts';
  * P15-FIX2: the counterexamples E1-E10 of the cross review (AGENTCTL-P15-REV.md). Each test was red on e539375 and is green after the fix; the few
  * that are not red on e539375 are positive controls and say so. Only the API that e539375 already had is used, so the file runs on both.
  * The panes are scripted: they show what Claude Code 2.1.311 / codex-cli 0.166.0 showed in the recordings under tests/fixtures.
+ *
+ * P15-FIX3 changed the contract in two places, and the tests that pinned the old contract say so where they changed: (1) watch never presses Enter
+ * again (the "4th Enter" controls and E10 now expect no key and needs-attention with the way out); (2) the screen (queue sign, echo of Codex) only
+ * classifies, so the controls that expected "delivered / sent" from the screen expect "confirming, queued-in-agent" and a hook for "delivered";
+ * `send --enter-only` is a preview with the exact text and a token, then a confirm (`enterOnly` below).
  */
 const scratch = useScratch();
 const fx = (name: string) => fs.readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
@@ -65,7 +70,12 @@ function fixture(name: string, model: Model, agent: AgentName = 'claude', allow 
 type Fixture = ReturnType<typeof fixture>;
 const followup = (f: Fixture, text: string) => queuePrompt(f.ctx, f.record(), text, 'pending', { kind: 'followup' });
 const confirming = (f: Fixture, extra: Record<string, unknown> = {}) => setHeaderFields(f.runner, taskFile(f.config, 't1'), { prompt_delivery: 'confirming', delivery_was_busy: true, delivery_started_at: new Date(f.runner.now() - 1000).toISOString(), ...extra });
-const retryPause = (f: Fixture) => f.runner.sleep(ENTER_RETRY_S * 1000 + 100);
+const retryPause = (f: Fixture) => f.runner.sleep(8100);
+/** `send --enter-only` since P15-FIX3: a preview (exact text, token), then the confirm with that token. A refused preview ends it. */
+const enterOnly = async (f: Fixture) => {
+  const preview = await submitDraft(f.ctx, 't1');
+  return preview.outcome === 'ready' ? submitDraft(f.ctx, 't1', { token: preview.token! }) : preview;
+};
 
 /** A delivery whose Enter is swallowed: the paste stands in the field, three Enter presses went in. `shown` is what the field shows after the paste. */
 async function swallowed(name: string, text: string, shown: string[]) {
@@ -122,11 +132,12 @@ describe('E1 / R1: watch presses Enter again only while the whole field is exact
     await deliverPendingPrompt(f.ctx, 't1');
     assert.equal(f.seen.enters, 3, 'no Enter into the edited field');
   });
-  it('E1 control: the unchanged field still gets the 4th Enter (and the paste is not repeated)', async () => {
+  it('E1 control (P15-FIX3: was "the unchanged field still gets the 4th Enter"): even the unchanged field gets no Enter from watch; it is reported with the way out', async () => {
     const { f } = await swallowed('e1-control', text, ['FIRST LINE', 'ORIGINAL BODY']);
     await retryPause(f);
-    await deliverPendingPrompt(f.ctx, 't1');
-    assert.equal(f.seen.enters, 4); assert.equal(f.seen.pastes, 1);
+    assert.equal(await deliverPendingPrompt(f.ctx, 't1'), 'needs-attention');
+    assert.equal(f.seen.enters, 3); assert.equal(f.seen.pastes, 1);
+    assert.match(f.record().promptError!, /^nie dostarczono – tekst w polu wpisywania/); assert.match(f.record().promptError!, /send --enter-only T1/);
   });
 });
 
@@ -138,24 +149,25 @@ describe('E2 / R2: send --enter-only needs the origin and the whole field', () =
   };
   it('E2 the start of the pending text, typed by a human, is not ours', async () => {
     const f = await stuck('e2-prefix', 'A sufficiently long prefix AND A MISSING SUFFIX', ['A sufficiently long prefix']);
-    const done = await submitDraft(f.ctx, 't1');
+    const done = await enterOnly(f);
     assert.notEqual(done.outcome, 'submitted'); assert.notEqual(done.outcome, 'pending');
     assert.equal(f.seen.enters, 0);
   });
   it('E2 a text equal to the pending one that agentctl never pasted is not ours', async () => {
     const f = await stuck('e2-never-pasted', 'exact pending message', ['exact pending message']);
-    await submitDraft(f.ctx, 't1');
+    await enterOnly(f);
     assert.equal(f.seen.enters, 0);
   });
   it('E2 our own paste, changed afterwards, is refused', async () => {
     const { f, show } = await swallowed('e2-changed', 'FIRST LINE\nORIGINAL BODY', ['FIRST LINE', 'ORIGINAL BODY']);
     show(['FIRST LINE', 'ORIGINAL BODY', 'AND MORE']);
-    await submitDraft(f.ctx, 't1');
+    await enterOnly(f);
     assert.equal(f.seen.enters, 3);
   });
   it('E2 control: our own unchanged paste is submitted', async () => {
     const { f } = await swallowed('e2-control', 'FIRST LINE\nORIGINAL BODY', ['FIRST LINE', 'ORIGINAL BODY']);
-    await submitDraft(f.ctx, 't1');
+    const done = await enterOnly(f);
+    assert.equal(done.outcome, 'not-delivered'); assert.equal(done.keySent, true);
     assert.equal(f.seen.enters, 4);
   });
 });
@@ -185,12 +197,12 @@ describe('E3 / R3: the queue sign of Claude is not an acknowledgement by itself'
     assert.notEqual(result, 'sent'); assert.equal(f.record().deliveryResult, undefined);
     assert.equal(f.seen.enters, 0);
   });
-  it('E3 control: the sign that appears after our own Enter confirms queued-in-agent', async () => {
+  it('E3 control (P15-FIX3: was "confirms queued-in-agent / sent"): the sign that appears after our own Enter classifies queued-in-agent and the delivery stays unconfirmed', async () => {
     let state: 'before' | 'field' | 'queued' = 'before';
     const f = fixture('e3-control', { screen: () => state === 'before' ? claude([]) : state === 'field' ? claude(['[Pasted text #2 +1 lines]']) : QUEUED_SCREEN.replace(/^❯.*$/m, '❯'), paste: () => { state = 'field'; }, enter: () => { state = 'queued'; } });
     await followup(f, 'FIRST LINE\nORIGINAL BODY');
-    assert.equal(await deliverPendingPrompt(f.ctx, 't1'), 'sent');
-    assert.equal(f.record().deliveryResult, 'queued-in-agent');
+    assert.equal(await deliverPendingPrompt(f.ctx, 't1'), 'confirming');
+    assert.equal(f.record().deliveryResult, 'queued-in-agent'); assert.equal(f.record().pendingPrompt, 'FIRST LINE\nORIGINAL BODY');
   });
 });
 
@@ -198,7 +210,9 @@ describe('E4 / R4: the echo of Codex is the whole message', () => {
   const echoOf = async (pending: string, echo: string[], agent: AgentName = 'codex') => {
     const f = fixture(`e4-${pending.length}-${echo.length}`, { screen: () => codex([], echo) }, agent);
     await followup(f, pending); await confirming(f);
-    return deliveryProof(f.ctx, f.record(), codex([], echo));
+    // P15-FIX3: the screen echo confirms nothing; what the tests ask is whether it is read as exactly this message (echoLines), and that deliveryProof stays null.
+    assert.equal(deliveryProof(f.ctx, f.record(), codex([], echo)), null);
+    return echoLines(codex([], echo), '›', pending, 'codex') > 0 ? 'delivered' : null;
   };
   it('E4 "ok" is not "okay, do something else"', async () => assert.equal(await echoOf('ok', ['› okay, do something else']), null));
   it('E4 two messages with the same first 60 characters are two messages', async () => {
@@ -211,7 +225,10 @@ describe('E4 / R4: the echo of Codex is the whole message', () => {
   });
   it('E4 control: a long message wrapped by the TUI over several lines is found whole', async () => {
     const text = 'Please add a test for the empty case and then run the whole suite once more, reporting every failure by name and cause.';
-    assert.equal(await echoOf(text, [`› ${text.slice(0, 50)}`, `  ${text.slice(50, 100)}`, `  ${text.slice(100)}`]), 'delivered');
+    // The TUI wraps at a space and swallows that space (P15-FIX3: a cut in the middle of white space is no longer read back, white space is not squeezed).
+    const rows: string[] = []; for (const word of text.split(' ')) { if (rows.length && rows.at(-1)!.length + 1 + word.length <= 50) rows[rows.length - 1] += ` ${word}`; else rows.push(word); }
+    assert.ok(rows.length >= 3);
+    assert.equal(await echoOf(text, rows.map((row, i) => i === 0 ? `› ${row}` : `  ${row}`)), 'delivered');
   });
   it('E4 control: a short message is found as it is', async () => assert.equal(await echoOf('ok', ['› ok']), 'delivered'));
 });
@@ -252,8 +269,10 @@ describe('E6 / R6: enter_only over MCP (a real Client)', () => {
     const f = fixture('e6-refused', { screen: () => claude(['FOREIGN DRAFT']) });
     await followup(f, 'exact'); await confirming(f);
     const mcp = await connect(f);
-    const r = await mcp.client.callTool({ name: 'send', arguments: { task: 'T1', enter_only: true, confirm: true } });
-    assert.equal(r.isError, true); assert.match(mcp.text(r), /agentctl nie wkleił|co innego|brak śladu/);
+    const r = await mcp.client.callTool({ name: 'send', arguments: { task: 'T1', enter_only: true } });
+    assert.equal(r.isError, true); assert.match(mcp.text(r), /agentctl nie wkleił|różni się|brak śladu/);
+    const c = await mcp.client.callTool({ name: 'send', arguments: { task: 'T1', enter_only: true, confirm: true, token: '0123456789abcdef' } });
+    assert.equal(c.isError, true);
     assert.equal(f.seen.enters, 0);
     assert.equal(audit(f).at(-1)!.outcome, 'error'); assert.match(audit(f).at(-1)!.detail ?? '', /refused/);
     await mcp.close();
@@ -263,7 +282,11 @@ describe('E6 / R6: enter_only over MCP (a real Client)', () => {
     void show;
     f.notices.length = 0;
     const mcp = await connect(f);
-    const r = await mcp.client.callTool({ name: 'send', arguments: { task: 'T1', enter_only: true, confirm: true } });
+    const preview = await mcp.client.callTool({ name: 'send', arguments: { task: 'T1', enter_only: true } });
+    const token = /token: "([0-9a-f]{16})"/.exec(mcp.text(preview))?.[1];
+    assert.ok(token, mcp.text(preview)); assert.match(mcp.text(preview), /Tekst w polu \(dokładnie\):\nFIRST LINE\nORIGINAL BODY/);
+    assert.equal(f.seen.enters, 3, 'the preview presses nothing');
+    const r = await mcp.client.callTool({ name: 'send', arguments: { task: 'T1', enter_only: true, confirm: true, token } });
     assert.ok(!r.isError, mcp.text(r)); assert.match(mcp.text(r), /Enter wysłany: tak/); assert.match(mcp.text(r), /potwierdzone: nie/);
     assert.equal(f.seen.enters, 4);
     const last = audit(f).at(-1)!;
@@ -294,10 +317,10 @@ describe('E6 / R6: enter_only over MCP (a real Client)', () => {
 
 describe('E7 / R7: every result of a delivery reaches the journal and the events', () => {
   it('E7 a delivery that a later watch tick confirms (delivered) is recorded with its delivery id', async () => {
-    let echoed = false;
-    const f = fixture('e7-watch', { screen: () => echoed ? codex([], ['› unique message']) : codex([]) }, 'codex');
+    const f = fixture('e7-watch', { screen: () => codex([]) }, 'codex');
     await followup(f, 'unique message'); await confirming(f);
-    echoed = true;
+    // P15-FIX3: the later tick is confirmed by the notify payload of Codex (an exact source), not by an echo on the screen.
+    await handleEvent(f.ctx, new Alerts(f.ctx, { notify: async () => {} }), { task: 'T1', agent: 'codex', payload: { type: 'agent-turn-complete', 'thread-id': 'th-1', 'input-messages': ['unique message'], 'last-assistant-message': 'ok' } });
     await watchTick(f.ctx, new WatchMemory(), { notify: async () => {} });
     const record = f.record();
     assert.equal(record.deliveryResult, 'delivered');
@@ -309,7 +332,7 @@ describe('E7 / R7: every result of a delivery reaches the journal and the events
   });
   it('E7 send, watch and enter-only write the same kind of entry for queued, not delivered and delivered', async () => {
     const { f } = await swallowed('e7-all', 'FIRST LINE\nORIGINAL BODY', ['FIRST LINE', 'ORIGINAL BODY']);
-    await submitDraft(f.ctx, 't1');
+    await enterOnly(f);
     const texts = readJournal(f.config).filter(e => e.kind === 'delivery').map(e => e.text);
     assert.ok(texts.some(t => /nie dostarczono/.test(t)), texts.join(' | '));
     assert.ok(texts.some(t => /send --enter-only/.test(t) && /\[dostawa [0-9a-f]{8}\]/.test(t)), 'the Enter pressed by hand is written down with the delivery id');
@@ -344,16 +367,14 @@ describe('E9 / R9: the message about an open Codex question names the question',
 });
 
 describe('E10 / R10: after the last Enter there is no promise of another one', () => {
-  it('E10 six presses later the note names the manual step and does not say watch will press Enter', async () => {
+  it('E10 (P15-FIX3: there is only the one call that pastes) the note names the manual step, never says watch will press Enter, and no Enter follows', async () => {
     const { f } = await swallowed('e10', 'FIRST LINE\nORIGINAL BODY', ['FIRST LINE', 'ORIGINAL BODY']);
-    for (let i = 0; i < 4 && (f.record().deliveryEnters ?? 0) < MAX_ENTERS; i++) { await retryPause(f); await deliverPendingPrompt(f.ctx, 't1'); }
-    assert.equal(f.record().deliveryEnters, MAX_ENTERS);
-    await retryPause(f);
+    for (let i = 0; i < 3; i++) { await retryPause(f); await deliverPendingPrompt(f.ctx, 't1'); }
     assert.equal(await deliverPendingPrompt(f.ctx, 't1'), 'needs-attention');
     const note = deliveryNote(f.record())!;
     assert.match(note, /nie dostarczono – tekst w polu wpisywania/);
-    assert.doesNotMatch(note, /watch ponowi Enter/);
+    assert.doesNotMatch(note, /ponowi/); assert.match(note, /nie naciśnie już Enter sam/);
     assert.match(note, /send --enter-only T1/);
-    assert.equal(f.seen.enters, MAX_ENTERS);
+    assert.equal(f.seen.enters, 3);
   });
 });

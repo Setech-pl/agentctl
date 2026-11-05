@@ -107,13 +107,18 @@ async function openQuestion(ctx: Context, window: string, record: NonNullable<Re
   return asked ? `agent ma otwarte pytanie lub okno dialogowe: ${asked}` : 'agent ma otwarte pytanie lub okno dialogowe';
 }
 
-/** `send --enter-only TASK`: press Enter for the text our own paste left in the input field; refuses anything else. With `preview` nothing is pressed. */
-export async function submitDrafts(ctx: Context, items: { task: string; window: string }[], options: { preview?: boolean } = {}): Promise<{ task: string; message: string; outcome: SubmitDraftResult['outcome']; keySent: boolean; deliveryId?: string | undefined; warning?: string; refused?: boolean }[]> {
-  const results: { task: string; message: string; outcome: SubmitDraftResult['outcome']; keySent: boolean; deliveryId?: string | undefined; warning?: string; refused?: boolean }[] = [];
+export interface DraftResult { task: string; message: string; outcome: SubmitDraftResult['outcome']; keySent: boolean; deliveryId?: string | undefined; field?: string[] | undefined; screenState?: SubmitDraftResult['screenState']; token?: string | undefined; warning?: string; refused?: boolean }
+
+/**
+ * `send --enter-only TASK`: press Enter for the text our own paste left in the input field. Without a token it only shows the exact text of the
+ * field, the state of the screen and a token; with that token it presses Enter if the field is still exactly that text. Refuses anything else.
+ */
+export async function submitDrafts(ctx: Context, items: { task: string; window: string }[], options: { token?: string } = {}): Promise<DraftResult[]> {
+  const results: DraftResult[] = [];
   for (const item of items) {
     const done = ctx.runner.dryRun ? await submitDraft(ctx, item.window, options) : await withStartLock(ctx, () => submitDraft(ctx, item.window, options));
     if (done.outcome !== 'refused') ctx.info(`${item.task}: ${done.message}`);
-    results.push({ task: item.task, message: done.message, outcome: done.outcome, keySent: done.keySent === true, deliveryId: done.deliveryId, ...(done.outcome === 'submitted' || done.outcome === 'ready' ? {} : { warning: done.message }), ...(done.outcome === 'refused' ? { refused: true } : {}) });
+    results.push({ task: item.task, message: done.message, outcome: done.outcome, keySent: done.keySent === true, deliveryId: done.deliveryId, field: done.field, screenState: done.screenState, token: done.token, ...(done.outcome === 'submitted' || done.outcome === 'ready' ? {} : { warning: done.message }), ...(done.outcome === 'refused' ? { refused: true } : {}) });
   }
   return results;
 }

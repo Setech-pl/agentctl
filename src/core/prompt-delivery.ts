@@ -8,18 +8,20 @@ import type { AgentSettings } from './config.ts';
 import type { Context } from './context.ts';
 import { withFileLock } from './file-lock.ts';
 import { classifyScreen, inputVisible } from './state.ts';
-import { compact, fieldIsOurs, fieldSignature, inputFieldLines, ownPasteSignature } from './input-field.ts';
+import { areaKey, fieldArea, fieldText, pasteImage, readsAs } from './input-field.ts';
+import { eol } from './paste-wrapper.ts';
 import { recordJournal } from './journal.ts';
 import type { ScreenState } from './state.ts';
 import { screenMetadata } from './tmux.ts';
 import type { Capture } from './tmux.ts';
 import { readTaskRecord, setHeaderFields, taskFile } from './taskstore.ts';
 import type { TaskRecord } from './taskstore.ts';
+import { transcriptMessage } from './transcript.ts';
 import { errorMessage } from './util.ts';
 
 /** Persist before waiting for trust, so a watcher can finish the same delivery after new returns. */
 export async function queuePrompt(ctx: Context, record: TaskRecord, text: string, delivery: 'launching' | 'pending' = 'pending', options: { kind?: 'followup'; id?: string } = {}): Promise<void> {
-  await setHeaderFields(ctx.runner, taskFile(ctx.config, record.window), { pending_prompt: text, prompt_delivery: delivery, prompt_error: null, prompt_sent_at: null, delivery_id: options.id ?? randomUUID(), prompt_kind: options.kind ?? 'initial', delivery_was_busy: null, delivery_started_at: null, delivery_report_baseline: reportFingerprint(record.report), delivery_result: null, delivery_field: null, delivery_enters: null, delivery_enter_at: null, delivery_echo_baseline: null, delivery_queue_sign: null });
+  await setHeaderFields(ctx.runner, taskFile(ctx.config, record.window), { pending_prompt: text, prompt_delivery: delivery, prompt_error: null, prompt_sent_at: null, delivery_id: options.id ?? randomUUID(), prompt_kind: options.kind ?? 'initial', delivery_was_busy: null, delivery_started_at: null, delivery_report_baseline: reportFingerprint(record.report), delivery_result: null, delivery_field: null, delivery_source: null, delivery_enters: null, delivery_enter_at: null, delivery_echo_baseline: null, delivery_queue_sign: null });
 }
 
 const outputFingerprint = (screen: string, pattern: string) => createHash('sha256').update(screen.split('\n').filter(line => new RegExp(pattern, PATTERN_FLAGS).test(line)).join('\n')).digest('hex');
@@ -27,20 +29,18 @@ const outputFingerprint = (screen: string, pattern: string) => createHash('sha25
 export const DELIVERY_WARNING = 'dostarczenie niepotwierdzone – sprawdzam';
 /** The paste stands in the input field and no Enter took it. */
 export const NOT_DELIVERED = 'nie dostarczono – tekst w polu wpisywania';
-/** The agent took the message into its own queue while it works. */
-export const QUEUED_IN_AGENT = 'w kolejce agenta – agent weźmie wiadomość w trakcie tury';
-/** Enter presses of one delivery: PASTE_ENTERS right after the paste, the rest from `watch`, ENTER_RETRY_S apart. */
-export const MAX_ENTERS = 6;
-export const ENTER_RETRY_S = 8;
+/** The screen shows the message in the agent's queue; no hook and no transcript has said so. It is a classification, not a confirmation. */
+export const QUEUED_IN_AGENT = 'w kolejce agenta – niepotwierdzone';
+/** Enters of one delivery: all in the call that pasted. After it agentctl presses Enter only when a human confirms the exact text (`send --enter-only`). */
 const PASTE_ENTERS = 3;
 
-export type DeliveryProof = 'delivered' | 'queued-in-agent';
+export type DeliveryProof = 'delivered';
 
 /**
  * What an agent shows while a message waits in its own queue (recorded from the real CLIs: tests/fixtures/screen-claude-busy-queued*.txt).
  * Claude Code 2.1.311 puts a dim "Press up to edit queued messages" in the empty field, and during thinking shows the queued message with
  * "ctrl+x ctrl+s to send now" on a line of its own. Codex has no such sign: Enter steers the running turn and the echo of the message follows at once.
- * The sign is never an acknowledgement by itself (an older queue, a quoted answer or another message show it too): see `queueSignProof`.
+ * The sign classifies a message as "queued, not confirmed" (an older queue, a quoted answer or another message show it too); it confirms nothing.
  */
 const QUEUE_SIGNS: Partial<Record<'claude' | 'codex', RegExp>> = { claude: /^\s*(?:Press up to edit queued messages|ctrl\+x ctrl\+s to send now)\s*$/i };
 
@@ -50,65 +50,83 @@ export function queueSignShown(agent: TaskRecord['agent'], screen: string, dimIn
   return Boolean(sign && (sign.test(dimInput) || screen.split('\n').some(line => sign.test(line))));
 }
 
+/** The agent's marker in front of what the user sent. */
+const markerOf = (record: TaskRecord) => record.agent === 'claude' ? '❯' : '›';
+
 /**
- * The echo of `prompt` in the transcript: a line that starts with the agent's prompt marker plus the lines that continue it (the TUI wraps
- * long lines and indents the rest), as one block. The block must hold the whole prompt: neither a start of it nor a longer message with the
- * same start counts. White space is the TUI's own (wrapping, indentation) and is not compared. Counts the blocks above the input field.
+ * The echo of `prompt` in the transcript of the screen: a line that starts with the agent's prompt marker plus the rows that continue it (the TUI
+ * wraps long lines and indents the rest), read back to exactly the prompt - nothing squeezed, nothing left out. Counts the blocks above the input field.
  */
-export function echoLines(screen: string, marker: string, prompt: string | undefined): number {
-  const want = compact(prompt ?? '');
-  if (!want) return 0;
-  const lines = screen.split('\n');
+export function echoLines(screen: string, marker: string, prompt: string | undefined, agent?: 'claude' | 'codex' | 'unknown'): number {
+  if (!prompt?.trim()) return 0;
+  const lines = screen.split('\n').map(line => line.trimEnd());
   const isMarker = (line: string) => line.trimStart().startsWith(marker);
   const field = lines.findLastIndex(isMarker);
   let count = 0;
   for (let i = 0; i < field; i++) {
     if (!isMarker(lines[i]!)) continue;
-    let block = lines[i]!.trimStart().slice(marker.length);
-    for (let j = i + 1; j < field && (lines[j]!.trim() === '' || (/^\s{2,}\S/.test(lines[j]!) && !isMarker(lines[j]!))); j++) block += lines[j]!;
-    if (compact(block) === want) count++;
+    const rows = [lines[i]!.trimStart().slice(marker.length).replace(/^ /, '')];
+    for (let j = i + 1; j < field && (lines[j] === '' || (/^\s{2,}\S/.test(lines[j]!) && !isMarker(lines[j]!))); j++) rows.push(lines[j]!.replace(/^ {1,2}/, ''));
+    while (rows.length > 1 && rows.at(-1) === '') rows.pop();
+    if (readsAs(rows, prompt, agent, true)) count++;
   }
   return count;
 }
 
-/** The agent's marker in front of what the user sent. */
-const markerOf = (record: TaskRecord) => record.agent === 'claude' ? '❯' : '›';
-
 /**
- * The queue sign classifies an acknowledgement that is already correlated with this message; it is not one by itself. All of it must hold:
- * agentctl pasted for this delivery (a recorded field signature), pressed Enter for it, the sign was NOT on the screen just before that Enter,
- * and now the field no longer holds our paste while the sign is there.
+ * The screen only classifies. The agent shows the message in its own queue (Claude: the queue sign, correlated as below; Codex: the echo of the
+ * steered message): "queued in the agent, not confirmed". The sign needs a recorded paste, an Enter of ours and a sign that was not there before it.
  */
-function queueSignProof(record: TaskRecord, screen: string, dimInput: string): boolean {
-  return Boolean(record.deliveryWasBusy && record.deliveryStartedAt && record.deliveryField && (record.deliveryEnters ?? 0) >= 1 && record.deliveryQueueSign === false
-    && !screenMetadata(screen).draft_input && queueSignShown(record.agent, screen, dimInput));
+export function deliveryClass(record: TaskRecord, screen: string, dimInput = ''): 'queued-in-agent' | null {
+  if (!record.deliveryStartedAt || !record.deliveryWasBusy || !record.deliveryField || (record.deliveryEnters ?? 0) < 1 || screenMetadata(screen).draft_input) return null;
+  if (record.deliveryQueueSign === false && queueSignShown(record.agent, screen, dimInput)) return 'queued-in-agent';
+  if (record.agent === 'codex' && echoLines(screen, markerOf(record), record.pendingPrompt, record.agent) > (record.deliveryEchoBaseline ?? 0)) return 'queued-in-agent';
+  return null;
 }
 
 /**
- * Hooks are checked first; screen evidence is adapter-specific and never an input draft. The answer says how the message arrived:
- * `delivered` (the agent took it up) or `queued-in-agent` (it waits in the agent's own queue); null while nothing proves either.
+ * The rows under a "Queued follow-up inputs" / "Queued messages" heading, down to the input field, read back to exactly `prompt`.
  */
-export function deliveryProof(ctx: Context, record: TaskRecord, screen: string, dimInput = ''): DeliveryProof | null {
-  const draft = screenMetadata(screen).draft_input;
-  if (draft) return null;
-  // The queue sign comes first: the hook fires when the message is submitted, queued or not, and a message that waits is not yet read.
-  if (queueSignProof(record, screen, dimInput)) return 'queued-in-agent';
+function queuedListShows(screen: string, prompt: string, agent: TaskRecord['agent']): boolean {
+  const lines = screen.split('\n').map(line => line.trimEnd());
+  const heading = lines.findLastIndex(line => /Queued follow-up inputs|Queued messages?/i.test(line));
+  if (heading < 0) return false;
+  const rows: string[] = [];
+  for (let i = heading + 1; i < lines.length && !/^\s*[❯›>](?:\s|$)/.test(lines[i]!); i++) rows.push(lines[i]!.replace(/^ {1,2}/, ''));
+  while (rows.length && rows.at(-1) === '') rows.pop();
+  return rows.length > 0 && readsAs(rows, prompt, agent, true);
+}
+
+/**
+ * What proves that the agent took this message: its hook (the exact prompt) and its transcript (the exact message, written after the delivery began).
+ * Both are exact and neither is a screen. The older signs stay for the cases that the first prompt of every task has always used and that older tests pin,
+ * each as exact as the text allows (no white space squeezed, the whole message): an idle agent started its turn, the canonical report changed, the message
+ * echoed whole above an empty composer, a queue list that shows the whole message. The screen of a busy agent otherwise proves nothing (see `deliveryClass`).
+ * Returns where the proof came from; null while nothing proves it. A draft in the composer holds every proof back: the message is not yet out of it.
+ */
+function proofSource(ctx: Context, record: TaskRecord, screen: string): string | null {
+  if (screenMetadata(screen).draft_input) return null;
   try {
     const evidence = JSON.parse(fs.readFileSync(path.join(ctx.config.stateDir, record.window, 'delivery-evidence.json'), 'utf8'));
-    if (record.deliveryId && evidence.accepted === true && evidence.deliveryId === record.deliveryId && Date.parse(evidence.at) >= Date.parse(record.deliveryStartedAt ?? '')) return 'delivered';
+    if (record.deliveryId && evidence.accepted === true && evidence.deliveryId === record.deliveryId && Date.parse(evidence.at) >= Date.parse(record.deliveryStartedAt ?? '')) return 'hook';
   } catch { /* no current hook acknowledgement */ }
+  if (record.pendingPrompt && record.deliveryStartedAt) {
+    const seen = transcriptMessage(ctx, record, record.pendingPrompt, Date.parse(record.deliveryStartedAt));
+    if (seen) return seen.kind === 'queued' ? 'transcript-queue' : 'transcript';
+  }
   const report = inspectReport(ctx.config, record, ctx.runner.now(), false);
-  if (report.ready && (!record.deliveryStartedAt || report.signature !== record.deliveryReportBaseline)) return 'delivered';
+  if (report.ready && (!record.deliveryStartedAt || report.signature !== record.deliveryReportBaseline)) return 'report';
   if (record.agent === 'unknown') return null;
   const settings = ctx.config.agents[record.agent], state = classifyScreen(screen, settings);
-  if ((state === 'working' || state === 'background') && !record.deliveryWasBusy) return 'delivered';
-  // Only output from after this delivery started can acknowledge a fast completed turn.
+  if ((state === 'working' || state === 'background') && !record.deliveryWasBusy) return 'screen';
   if (!record.deliveryStartedAt) return null;
-  // A question or idle notification alone can belong to the previous turn; the queued message must be shown whole.
-  if (record.deliveryWasBusy && /Queued follow-up inputs|Queued messages?/i.test(screen) && record.pendingPrompt && compact(screen).includes(compact(record.pendingPrompt))) return 'delivered';
-  if (!record.deliveryWasBusy && new RegExp(settings.deliveryPattern, PATTERN_FLAGS).test(screen) && outputFingerprint(screen, settings.deliveryPattern) !== record.deliveryOutputBaseline) return 'delivered';
-  // A submitted user line followed by an empty composer is a transcript echo, not a draft.
-  return echoLines(screen, markerOf(record), record.pendingPrompt) > (record.deliveryEchoBaseline ?? 0) ? 'delivered' : null;
+  if (record.deliveryWasBusy) return record.pendingPrompt && queuedListShows(screen, record.pendingPrompt, record.agent) ? 'screen' : null;
+  if (new RegExp(settings.deliveryPattern, PATTERN_FLAGS).test(screen) && outputFingerprint(screen, settings.deliveryPattern) !== record.deliveryOutputBaseline) return 'screen';
+  return echoLines(screen, markerOf(record), record.pendingPrompt, record.agent) > (record.deliveryEchoBaseline ?? 0) ? 'screen' : null;
+}
+
+export function deliveryProof(ctx: Context, record: TaskRecord, screen: string, _dimInput = ''): DeliveryProof | null {
+  return proofSource(ctx, record, screen) ? 'delivered' : null;
 }
 
 export function deliveryEvidence(ctx: Context, record: TaskRecord, screen: string, dimInput = ''): boolean {
@@ -116,28 +134,27 @@ export function deliveryEvidence(ctx: Context, record: TaskRecord, screen: strin
 }
 
 /** May Enter be pressed with this screen state: an idle agent, or a working one that takes a follow-up into its queue. */
-const mayPressEnter = (state: ScreenState, record: TaskRecord, settings: Pick<AgentSettings, 'acceptsBusyPrompt'>) =>
+const mayPressEnter = (state: ScreenState, record: Pick<TaskRecord, 'promptKind'>, settings: Pick<AgentSettings, 'acceptsBusyPrompt'>) =>
   state === 'idle' || (['working', 'background'].includes(state) && record.promptKind === 'followup' && settings.acceptsBusyPrompt !== false);
 
-/** Will `watch` still press Enter for this delivery? */
-const retriesLeft = (record: TaskRecord) => Boolean(record.deliveryField) && record.promptDelivery !== 'needs-attention' && (record.deliveryEnters ?? 0) < MAX_ENTERS;
+const SOURCES: Record<string, string> = { hook: 'hook UserPromptSubmit', transcript: 'transkrypt sesji', 'transcript-queue': 'transkrypt sesji: agent zapisał wiadomość w swojej kolejce', screen: 'agent bezczynny zaczął turę', report: 'zmieniony raport' };
 
 /** What `send` says when the delivery is not simply done. */
 export function deliveryNote(record: TaskRecord | undefined): string | undefined {
   if (!record) return undefined;
   if (record.deliveryResult === 'not-delivered-in-field' && record.promptDelivery !== 'sent') {
-    const why = record.promptError ? ` (${record.promptError.replace(/^[^:]*:\s*/, '')})` : '';
-    // Without the recorded signature of our paste neither watch nor --enter-only may press Enter: only the window is left.
-    if (!record.deliveryField) return `${NOT_DELIVERED}${why}; watch nie ponowi Enter – wciśnij go w oknie (attach)`;
-    return `${NOT_DELIVERED}${why}; ${retriesLeft(record) ? 'watch ponowi Enter, albo' : 'watch nie ponowi już Enter – wciśnij go w oknie (attach) albo'}: agentctl send --enter-only ${record.task}`;
+    const why = record.promptError ? ` (${record.promptError.replace(/^[^:]*:\s*/, '').split('. ')[0]})` : '';
+    // Without the recorded image of our paste `--enter-only` has nothing to compare with: only the window is left.
+    if (!record.deliveryField) return `${NOT_DELIVERED}${why}; agentctl nie naciśnie już Enter – wciśnij go w oknie (attach)`;
+    return `${NOT_DELIVERED}${why}; agentctl nie naciśnie już Enter sam – wciśnij go w oknie (attach) albo: agentctl send --enter-only ${record.task} (pokaże dokładny tekst i token do potwierdzenia)`;
   }
-  if (record.deliveryResult === 'queued-in-agent' && record.promptDelivery === 'sent') return `wklejono; ${QUEUED_IN_AGENT}`;
+  if (record.deliveryResult === 'queued-in-agent' && record.promptDelivery !== 'sent') return `wklejono; ${QUEUED_IN_AGENT} (czekam na hook lub transkrypt; wiadomość zostaje zapisana w TASK.md)`;
   return undefined;
 }
 
 /** One line for the journal: every result of a delivery, `delivered` included. */
 function deliveryText(record: TaskRecord): string | undefined {
-  if (record.deliveryResult === 'delivered' && record.promptDelivery === 'sent') return 'dostarczono – agent przyjął wiadomość';
+  if (record.deliveryResult === 'delivered' && record.promptDelivery === 'sent') return `dostarczono – agent przyjął wiadomość${record.deliverySource ? ` (${SOURCES[record.deliverySource] ?? record.deliverySource})` : ''}`;
   return deliveryNote(record);
 }
 
@@ -152,27 +169,18 @@ async function recordDelivery(ctx: Context, window: string, before: { id?: strin
 }
 
 /**
- * The one place that presses Enter for a delivery after its paste. Persists the count first (a crash must not double an Enter), looks at the
- * field once more right before the key, and presses nothing unless the field has the signature recorded after our paste. `verified`: the
- * caller has just checked the field of `screen` itself (the Enters right after the paste). Also records whether the queue sign was already on
- * the screen: then it proves nothing later.
+ * The one place that presses Enter after the paste of a delivery. `last` is the capture the caller has just checked (the area of the field and the
+ * state of the screen): the key follows that very capture. The count is persisted first (a crash must not double an Enter), and whether the queue sign
+ * was already on the screen is recorded: then it classifies nothing later.
  */
-async function enterForOurPaste(ctx: Context, record: TaskRecord, file: string, window: string, settings: AgentSettings, options: { verified: boolean; screen?: Capture }): Promise<{ pressed: true; result: Awaited<ReturnType<Context['tmux']['pressEnter']>> } | { pressed: false; why: string }> {
-  const count = (record.deliveryEnters ?? 0) + 1, previous = { enters: record.deliveryEnters, at: record.deliveryEnterAt };
-  await setHeaderFields(ctx.runner, file, { delivery_enters: count, delivery_enter_at: new Date(ctx.runner.now()).toISOString() });
-  const last = options.screen ?? await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
-  const ours = last.code === 0 && (options.verified || fieldIsOurs(last.stdout, settings.footerPatterns, record.deliveryField));
-  if (!ours) {
-    await setHeaderFields(ctx.runner, file, { delivery_enters: previous.enters ?? 0, delivery_enter_at: previous.at ?? null });
-    return { pressed: false, why: last.code !== 0 ? 'the pane cannot be read' : 'the input no longer shows exactly our paste' };
-  }
-  record.deliveryEnters = count;
+async function pressEnterAfter(ctx: Context, record: TaskRecord, file: string, window: string, last: Capture): Promise<Awaited<ReturnType<Context['tmux']['pressEnter']>>> {
+  record.deliveryEnters = (record.deliveryEnters ?? 0) + 1;
   record.deliveryQueueSign = queueSignShown(record.agent, last.stdout, last.dimInput);
-  await setHeaderFields(ctx.runner, file, { delivery_queue_sign: record.deliveryQueueSign });
-  return { pressed: true, result: await ctx.tmux.pressEnter(window) };
+  await setHeaderFields(ctx.runner, file, { delivery_enters: record.deliveryEnters, delivery_enter_at: new Date(ctx.runner.now()).toISOString(), delivery_queue_sign: record.deliveryQueueSign });
+  return ctx.tmux.pressEnter(window);
 }
 
-/** Initial prompts and resume instructions are pasted once. Only Enter can be retried, and only while the field shows nothing but our paste. */
+/** Initial prompts and resume instructions are pasted once and get their Enters in that call. Later agentctl only looks (hook, transcript, screen) and never presses Enter by itself. */
 export async function deliverPendingPrompt(ctx: Context, window: string): Promise<'sent' | 'pending' | 'confirming' | 'needs-attention'> {
   if (ctx.runner.dryRun) return 'sent';
   const was = readTaskRecord(ctx.config, window), before = { id: was?.deliveryId, result: was?.deliveryResult };
@@ -188,13 +196,15 @@ async function deliverOnce(ctx: Context, window: string): Promise<'sent' | 'pend
     if (record.promptDelivery === 'sent') return 'sent';
     const file = taskFile(ctx.config, window);
     if (stateWriteFailure(file)) return 'needs-attention';
-    const attention = async (why: string) => {
-      const field = record.deliveryResult === 'not-delivered-in-field';
-      await setHeaderFields(ctx.runner, file, { prompt_delivery: 'needs-attention', prompt_error: field ? `${NOT_DELIVERED}: ${why}. The text is in the input of ${record.task}: attach and press Enter${record.deliveryField ? `, or run "agentctl send --enter-only ${record.task}"` : ''}. agentctl does not paste it again.` : `Prompt delivery not confirmed: ${why}. Inspect ${record.task} with peek/attach; the prompt remains in TASK.md. agentctl will not silently retry or leave this as waiting.` });
+    const attention = async (why: string, inField = false) => {
+      const field = inField || record.deliveryResult === 'not-delivered-in-field';
+      await setHeaderFields(ctx.runner, file, field
+        ? { prompt_delivery: 'needs-attention', delivery_result: 'not-delivered-in-field', prompt_error: `${NOT_DELIVERED}: ${why}. The text is in the input of ${record.task}: attach and press Enter${record.deliveryField ? `, or run "agentctl send --enter-only ${record.task}" (it shows the exact text and a token; --confirm <token> presses Enter)` : ''}. agentctl does not paste it again and presses no Enter by itself.` }
+        : { prompt_delivery: 'needs-attention', prompt_error: `Prompt delivery not confirmed: ${why}. Inspect ${record.task} with peek/attach; the prompt remains in TASK.md. agentctl will not silently retry or leave this as waiting.` });
       return 'needs-attention' as const;
     };
-    const uncertain = async (why: string) => {
-      await setHeaderFields(ctx.runner, file, { prompt_delivery: 'confirming', prompt_error: `${DELIVERY_WARNING}: ${why}` });
+    const uncertain = async (why: string, result: 'queued-in-agent' | null = null) => {
+      await setHeaderFields(ctx.runner, file, { prompt_delivery: 'confirming', delivery_result: result, prompt_error: `${DELIVERY_WARNING}: ${why}` });
       return 'confirming' as const;
     };
     /** The paste stands in the field (or the field changed under it) and no Enter has taken it. */
@@ -202,38 +212,29 @@ async function deliverOnce(ctx: Context, window: string): Promise<'sent' | 'pend
       await setHeaderFields(ctx.runner, file, { prompt_delivery: 'confirming', delivery_result: 'not-delivered-in-field', prompt_error: `${NOT_DELIVERED}: ${why}` });
       return 'confirming' as const;
     };
-    const sent = async (proof: DeliveryProof = 'delivered') => {
-      await setHeaderFields(ctx.runner, file, { delivery_id: record.deliveryId ?? randomUUID(), prompt_delivery: 'sent', pending_prompt: null, prompt_error: null, delivery_result: proof, prompt_sent_at: new Date(ctx.runner.now()).toISOString() });
+    const sent = async (source: string) => {
+      await setHeaderFields(ctx.runner, file, { delivery_id: record.deliveryId ?? randomUUID(), prompt_delivery: 'sent', pending_prompt: null, prompt_error: null, delivery_result: 'delivered', delivery_source: source, prompt_sent_at: new Date(ctx.runner.now()).toISOString() });
       return 'sent' as const;
     };
+    const proofOf = (screen: string) => record.agent === 'unknown' ? null : proofSource(ctx, record, screen);
     if (['sending', 'confirming', 'needs-attention'].includes(record.promptDelivery ?? '')) {
       const screen = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
       const text = screen.code === 0 ? screen.stdout : '';
-      const proof = deliveryProof(ctx, record, text, screen.dimInput);
-      if (proof) return sent(proof);
-      // Our paste still stands in an input field that shows exactly what the paste left there (not a line less, not a line more): press Enter again, a few times, spaced out.
-      if (record.deliveryResult === 'not-delivered-in-field' && record.deliveryField && record.agent !== 'unknown' && screen.code === 0) {
-        const settings = ctx.config.agents[record.agent];
-        const left = (record.deliveryEnters ?? 0) < MAX_ENTERS;
-        const due = ctx.runner.now() - Date.parse(record.deliveryEnterAt ?? record.deliveryStartedAt ?? record.started) >= ENTER_RETRY_S * 1000;
-        if (fieldIsOurs(text, settings.footerPatterns, record.deliveryField) && mayPressEnter(classifyScreen(text, settings), record, settings)) {
-          if (left && due) {
-            const enter = await enterForOurPaste(ctx, record, file, window, settings, { verified: false });
-            if (!enter.pressed) return notDelivered(`${enter.why}; no Enter was sent`);
-            if (enter.result.code !== 0) return notDelivered(`Enter failed: ${enter.result.stderr}`);
-            for (let poll = 0; poll < 8; poll++) {
-              await ctx.runner.sleep(150);
-              const pane = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
-              const again = pane.code === 0 ? deliveryProof(ctx, record, pane.stdout !== text ? pane.stdout : '', pane.dimInput) : null;
-              if (again) return sent(again);
-            }
-          }
-          if (!left && due && record.promptDelivery !== 'needs-attention') return attention(`Enter pressed ${record.deliveryEnters} times and the text is still in the field`);
+      const source = proofOf(text);
+      if (source) return sent(source);
+      if (screen.code === 0 && record.agent !== 'unknown') {
+        const settings = ctx.config.agents[record.agent], area = fieldArea(text, settings.footerPatterns);
+        // The text of our paste still stands in the field and nothing presses Enter for it any more: say so, with the way out.
+        if (record.deliveryField && area.length && areaKey(area) === record.deliveryField) {
+          return record.promptDelivery === 'needs-attention' && record.deliveryResult === 'not-delivered-in-field' ? 'needs-attention' : attention('the paste of agentctl still stands in the input and no Enter is sent for it any more', true);
         }
+        if (record.deliveryResult === 'not-delivered-in-field' && area.length && record.promptDelivery !== 'needs-attention') return attention('the input changed since our paste', true);
+        const queued = deliveryClass(record, text, screen.dimInput);
+        if (queued && record.deliveryResult !== 'queued-in-agent') await setHeaderFields(ctx.runner, file, { delivery_result: 'queued-in-agent', prompt_error: `${DELIVERY_WARNING}: ${QUEUED_IN_AGENT}` });
       }
       if (record.promptDelivery === 'needs-attention') return 'needs-attention';
-      if (ctx.runner.now() - Date.parse(record.deliveryStartedAt ?? record.started) >= ctx.config.deliveryConfirmS * 1000) return attention('no acknowledgement before delivery_confirm_s elapsed');
-      return record.deliveryResult === 'not-delivered-in-field' ? 'confirming' : uncertain('awaiting hook, working screen, transcript echo or canonical report');
+      if (ctx.runner.now() - Date.parse(record.deliveryStartedAt ?? record.started) >= ctx.config.deliveryConfirmS * 1000) return attention('no acknowledgement (hook, transcript) before delivery_confirm_s elapsed');
+      return record.deliveryResult === 'not-delivered-in-field' ? 'confirming' : uncertain('awaiting hook or transcript', record.deliveryResult === 'queued-in-agent' ? 'queued-in-agent' : null);
     }
     if (!record.pendingPrompt || record.agent === 'unknown') return 'needs-attention';
     const settings = ctx.config.agents[record.agent], text = record.pendingPrompt;
@@ -246,60 +247,68 @@ async function deliverOnce(ctx: Context, window: string): Promise<'sent' | 'pend
     record.deliveryWasBusy = busyFollowup;
     record.deliveryStartedAt = new Date(ctx.runner.now()).toISOString();
     record.deliveryOutputBaseline = outputFingerprint(before.stdout, settings.deliveryPattern);
-    record.deliveryEchoBaseline = echoLines(before.stdout, markerOf(record), text);
+    record.deliveryEchoBaseline = echoLines(before.stdout, markerOf(record), text, record.agent);
     await setHeaderFields(ctx.runner, file, { prompt_delivery: 'sending', delivery_was_busy: busyFollowup, delivery_started_at: record.deliveryStartedAt, delivery_output_baseline: record.deliveryOutputBaseline, delivery_echo_baseline: record.deliveryEchoBaseline, delivery_enters: 0 });
     record.deliveryEnters = 0;
     if (screenMetadata(before.stdout).draft_input) return uncertain('the input already contains a draft; it was not overwritten');
-    // The Enters right after the paste (same call, well under a second later) accept what the TUI shows of the paste: the text, its first line or a placeholder.
-    // Later Enters (watch, send --enter-only) need more: the whole field with the signature recorded below.
-    const ownsDraft = (draft: string) => text.startsWith(draft) || draft.startsWith(text.split('\n')[0]!) || /\[Pasted|pasted (?:text|content)/i.test(draft);
     try {
-      await ctx.tmux.pasteText(window, text);
+      // tmux turns a CR into the Enter of the TUI; \r\n would make two of it. Line endings are the one thing normalised, here and in every comparison.
+      await ctx.tmux.pasteText(window, eol(text));
       await ctx.runner.sleep(400);
+      /** The area of the field as the first capture after our paste shows it: it must be our paste, and every later Enter needs the same bytes. */
+      let image: string[] | undefined;
       for (let attempt = 0; attempt < PASTE_ENTERS; attempt++) {
         if (attempt > 0) await ctx.runner.sleep(400);
         const ready = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
-        const currentState = classifyScreen(ready.stdout, settings), field = inputFieldLines(ready.stdout, settings.footerPatterns);
-        const proof = deliveryProof(ctx, record, ready.stdout !== before.stdout ? ready.stdout : '', ready.stdout !== before.stdout ? ready.dimInput : '');
-        if (proof) return sent(proof);
-        const currentDraft = screenMetadata(ready.stdout).draft_input;
-        if (currentDraft && !ownsDraft(currentDraft)) return notDelivered('the input changed before Enter; no Enter was sent');
-        // The paste is strictly ours when the field shows all of it (or the one placeholder that stands for it). That signature is also the proof that agentctl pasted for this delivery.
-        const signature = ownPasteSignature(field, text);
-        if (record.deliveryField && field.length && fieldSignature(field) !== record.deliveryField) return notDelivered('the input changed since our paste; no Enter was sent');
+        const currentState = classifyScreen(ready.stdout, settings), area = fieldArea(ready.stdout, settings.footerPatterns);
+        const source = proofOf(ready.stdout !== before.stdout ? ready.stdout : '');
+        if (source) return sent(source);
         if (ready.code !== 0) return uncertain('the pane cannot be read');
         // The screen of a working agent can look idle for a moment before the paste: what counts is the state with our paste in the field.
         if (attempt === 0 && !record.deliveryWasBusy && ['working', 'background'].includes(currentState) && record.promptKind === 'followup') {
           record.deliveryWasBusy = true;
           await setHeaderFields(ctx.runner, file, { delivery_was_busy: true });
         }
-        if (signature && record.deliveryField !== signature) {
-          record.deliveryField = signature;
-          await setHeaderFields(ctx.runner, file, { delivery_field: signature });
+        if (area.length) {
+          if (!image) {
+            if (!pasteImage(area, text, record.agent)) return notDelivered('the input shows something other than our paste; no Enter was sent');
+            image = area;
+            record.deliveryField = areaKey(area);
+            await setHeaderFields(ctx.runner, file, { delivery_field: record.deliveryField });
+          } else if (areaKey(area) !== areaKey(image)) return notDelivered('the input changed since our paste; no Enter was sent');
         }
         if (!mayPressEnter(currentState, record, settings)) return notDelivered(`the agent shows ${currentState}; no Enter was sent`);
-        const enter = await enterForOurPaste(ctx, record, file, window, settings, { verified: true, screen: ready });
-        if (!enter.pressed) return notDelivered(`${enter.why}; no Enter was sent`);
-        if (enter.result.code !== 0) return notDelivered(`Enter failed: ${enter.result.stderr}`);
+        const pressed = await pressEnterAfter(ctx, record, file, window, ready);
+        if (pressed.code !== 0) return notDelivered(`Enter failed: ${pressed.stderr}`);
         let ourDraft = false;
         for (let poll = 0; poll < 8; poll++) {
           await ctx.runner.sleep(150);
           const pane = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
           if (pane.code !== 0) return uncertain('the pane cannot be read');
-          const state = classifyScreen(pane.stdout, settings), draft = screenMetadata(pane.stdout).draft_input;
+          const state = classifyScreen(pane.stdout, settings), shown = fieldArea(pane.stdout, settings.footerPatterns);
           // A quick completed turn can finish between polls; require new assistant output as its acknowledgement.
           const seen = pane.stdout !== before.stdout;
-          const again = deliveryProof(ctx, record, seen ? pane.stdout : '', seen ? pane.dimInput : '');
+          const again = proofOf(seen ? pane.stdout : '');
           if (again) return sent(again);
           if (state !== 'idle' && !(record.deliveryWasBusy && ['working', 'background'].includes(state))) return uncertain(`the agent shows ${state}; no further key was sent`);
-          ourDraft = Boolean(draft && ownsDraft(draft));
-          if (draft && !ourDraft) return notDelivered('the input changed to another draft');
-          if (record.deliveryField && draft && fieldSignature(inputFieldLines(pane.stdout, settings.footerPatterns)) !== record.deliveryField) return notDelivered('the input changed to another draft');
+          ourDraft = shown.length > 0;
+          if (shown.length) {
+            if (!image) {
+              if (!pasteImage(shown, text, record.agent)) return notDelivered('the input changed to another draft');
+              image = shown;
+              record.deliveryField = areaKey(shown);
+              await setHeaderFields(ctx.runner, file, { delivery_field: record.deliveryField });
+            } else if (areaKey(shown) !== areaKey(image)) return notDelivered('the input changed to another draft');
+          }
         }
         // Never send another Enter into an empty input: the first submission may already have been accepted.
-        if (!ourDraft) return uncertain('no working state, queue sign or completed-turn acknowledgement was observed');
+        if (!ourDraft) {
+          const last = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
+          const queued = last.code === 0 ? deliveryClass(record, last.stdout, last.dimInput) : null;
+          return uncertain(queued ? QUEUED_IN_AGENT : 'no hook or transcript line for this message yet', queued);
+        }
       }
-      return notDelivered(`the pasted prompt is still in the input after Enter and two retries; watch tries again every ${ENTER_RETRY_S} s`);
+      return notDelivered('the pasted prompt is still in the input after Enter and two retries; agentctl presses no further Enter by itself');
     } catch (e) { return uncertain(errorMessage(e)); }
   });
 }
@@ -307,22 +316,31 @@ async function deliverOnce(ctx: Context, window: string): Promise<'sent' | 'pend
 export interface SubmitDraftResult {
   /**
    * `submitted`: Enter went in and the agent took the message; `pending`: Enter went in, nothing proves it yet; `not-delivered`: Enter went in
-   * and the text still stands in the field; `refused`: no key was pressed; `ready`: preview only, Enter would be pressed.
+   * and the text still stands in the field; `failed`: the key could not be sent; `refused`: no key was pressed; `ready`: preview only, with the
+   * exact text and the token that confirms it.
    */
-  outcome: 'submitted' | 'pending' | 'not-delivered' | 'refused' | 'ready';
+  outcome: 'submitted' | 'pending' | 'not-delivered' | 'failed' | 'refused' | 'ready';
   message: string;
   /** An Enter key was sent (submitted, pending, not-delivered). */
   keySent?: boolean;
   deliveryId?: string | undefined;
+  /** Preview: the exact text of the field, line by line, and the state of the screen. */
+  field?: string[] | undefined;
+  screenState?: ScreenState | undefined;
+  /** Preview: confirm with this token; it belongs to this delivery and to exactly this text. */
+  token?: string | undefined;
 }
 
+const tokenOf = (deliveryId: string, area: string[]) => createHash('sha256').update(`${deliveryId}\n${area.join('\n')}`).digest('hex').slice(0, 16);
+
 /**
- * `send --enter-only`: press Enter for the text that our own paste left in the input field. Needs the persisted origin (agentctl pasted for
- * this delivery) and the whole field to have the signature recorded after that paste. Anybody else's draft, a partial or changed paste, an
- * empty field or an open dialog is refused with no key. `preview` only checks.
+ * `send --enter-only`: press Enter for the text that our own paste left in the input field. Two steps. Without a token it only shows: the exact
+ * text of the field, the state of the screen and a token that belongs to this delivery and to those bytes. With the token it captures again and
+ * presses Enter only when the area is, byte for byte, what the preview showed and what was recorded right after our paste (so agentctl did paste
+ * for this delivery) and the screen shows no dialog. Anything else is refused with the reason and no key.
  */
-export async function submitDraft(ctx: Context, window: string, options: { preview?: boolean } = {}): Promise<SubmitDraftResult> {
-  if (ctx.runner.dryRun) return { outcome: options.preview ? 'ready' : 'submitted', message: 'dry run: Enter would be pressed' };
+export async function submitDraft(ctx: Context, window: string, options: { preview?: boolean; token?: string } = {}): Promise<SubmitDraftResult> {
+  if (ctx.runner.dryRun) return { outcome: options.token ? 'submitted' : 'ready', message: 'dry run: Enter would be pressed' };
   const done = await submitOnce(ctx, window, options);
   // Every Enter that was pressed for a delivery is written down, whether or not it changed the result.
   if (done.keySent) {
@@ -332,44 +350,46 @@ export async function submitDraft(ctx: Context, window: string, options: { previ
   return done;
 }
 
-async function submitOnce(ctx: Context, window: string, options: { preview?: boolean }): Promise<SubmitDraftResult> {
+async function submitOnce(ctx: Context, window: string, options: { preview?: boolean; token?: string }): Promise<SubmitDraftResult> {
   return withFileLock(path.join(ctx.config.stateDir, window, 'prompt-delivery.lock'), async () => {
-    const refused = (message: string, record?: TaskRecord): SubmitDraftResult => ({ outcome: 'refused', message, deliveryId: record?.deliveryId });
+    const refused = (message: string, record?: TaskRecord, area?: string[]): SubmitDraftResult => ({ outcome: 'refused', message, deliveryId: record?.deliveryId, ...(area?.length ? { field: fieldText(area).split('\n') } : {}) });
     const record = readTaskRecord(ctx.config, window);
     if (!record || record.agent === 'unknown') return refused('nie ma stanu zadania tego okna – nic nie zatwierdzam');
     const file = taskFile(ctx.config, window), settings = ctx.config.agents[record.agent];
     const screen = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
     if (screen.code !== 0) return refused(`okno ${window} nie daje się odczytać – nic nie zatwierdzam`, record);
-    const field = inputFieldLines(screen.stdout, settings.footerPatterns);
-    if (!field.length) return refused('pole wpisywania jest puste – nie ma czego zatwierdzić', record);
-    if (record.promptDelivery === 'sent' || !record.deliveryId || !record.deliveryField) return refused('agentctl nie wkleił w to pole tekstu żadnej oczekującej wiadomości (brak śladu wklejki dla tej dostawy) – nie zatwierdzam; sprawdź peek albo attach', record);
-    if (!fieldIsOurs(screen.stdout, settings.footerPatterns, record.deliveryField)) return refused(`w polu jest co innego niż to, co agentctl wkleił („${field.join(' ').slice(0, 60)}”) – nie zatwierdzam cudzego ani zmienionego szkicu; sprawdź peek albo attach`, record);
+    const area = fieldArea(screen.stdout, settings.footerPatterns);
+    if (!area.length) return refused('pole wpisywania jest puste – nie ma czego zatwierdzić', record);
+    if (record.promptDelivery === 'sent' || !record.deliveryId || !record.deliveryField) return refused('agentctl nie wkleił w to pole tekstu żadnej oczekującej wiadomości (brak śladu wklejki dla tej dostawy) – nie zatwierdzam; sprawdź peek albo attach', record, area);
+    if (areaKey(area) !== record.deliveryField) return refused(`pole wpisywania różni się od tego, co agentctl wkleił i zapisał po wklejce („${fieldText(area).replace(/\s+/g, ' ').slice(0, 60)}”) – nie zatwierdzam; sprawdź peek albo attach i wciśnij Enter w oknie, jeśli to ma pójść`, record, area);
     const state = classifyScreen(screen.stdout, settings);
-    if (!mayPressEnter(state, { ...record, promptKind: 'followup' }, settings)) return refused(`agent pokazuje ${state} – nie wciskam Enter; odpowiedz w oknie (attach)`, record);
-    if (options.preview) return { outcome: 'ready', message: `w polu stoi dokładnie wklejka agentctl (${field.join(' ').slice(0, 60)}); Enter zostanie wciśnięty`, deliveryId: record.deliveryId };
+    if (!mayPressEnter(state, { promptKind: 'followup' }, settings)) return refused(`agent pokazuje ${state} – nie wciskam Enter; odpowiedz w oknie (attach)`, record, area);
+    const token = tokenOf(record.deliveryId, area);
+    if (!options.token) return { outcome: 'ready', message: `w polu stoi dokładnie wklejka agentctl dla dostawy ${record.deliveryId.slice(0, 8)}; stan ekranu: ${state}; Enter zostanie wciśnięty dopiero z tokenem ${token}`, deliveryId: record.deliveryId, field: fieldText(area).split('\n'), screenState: state, token };
+    if (options.token !== token) return refused(`token nie pasuje do bieżącej treści pola (podgląd był dla innego tekstu albo innej dostawy) – zrób podgląd jeszcze raz`, record, area);
     const busy = ['working', 'background'].includes(state);
     if (record.deliveryWasBusy === undefined) { record.deliveryWasBusy = busy; await setHeaderFields(ctx.runner, file, { delivery_was_busy: busy }); }
-    const enter = await enterForOurPaste(ctx, record, file, window, settings, { verified: false });
-    if (!enter.pressed) return refused(`${enter.why} – nic nie zatwierdzam`, record);
+    const pressed = await pressEnterAfter(ctx, record, file, window, screen);
     const keySent = { keySent: true as const, deliveryId: record.deliveryId };
-    if (enter.result.code !== 0) return { outcome: 'not-delivered', message: `Enter nie poszedł: ${enter.result.stderr.trim()}`, keySent: false, deliveryId: record.deliveryId };
+    if (pressed.code !== 0) return { outcome: 'failed', message: `Enter nie poszedł: ${pressed.stderr.trim()}`, keySent: false, deliveryId: record.deliveryId };
     for (let poll = 0; poll < 10; poll++) {
       await ctx.runner.sleep(150);
       const pane = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
       if (pane.code !== 0) break;
-      const proof = deliveryProof(ctx, record, pane.stdout !== screen.stdout ? pane.stdout : '', pane.dimInput);
-      if (proof) {
-        await setHeaderFields(ctx.runner, file, { prompt_delivery: 'sent', pending_prompt: null, prompt_error: null, delivery_result: proof, prompt_sent_at: new Date(ctx.runner.now()).toISOString() });
-        return { outcome: 'submitted', message: proof === 'queued-in-agent' ? `zatwierdzono Enter; ${QUEUED_IN_AGENT}` : 'zatwierdzono Enter; agent przyjął wiadomość', ...keySent };
+      const source = proofSource(ctx, record, pane.stdout !== screen.stdout ? pane.stdout : '');
+      if (source) {
+        await setHeaderFields(ctx.runner, file, { prompt_delivery: 'sent', pending_prompt: null, prompt_error: null, delivery_result: 'delivered', delivery_source: source, prompt_sent_at: new Date(ctx.runner.now()).toISOString() });
+        return { outcome: 'submitted', message: `zatwierdzono Enter; agent przyjął wiadomość (${SOURCES[source] ?? source})`, ...keySent };
       }
-      if (!fieldIsOurs(pane.stdout, settings.footerPatterns, record.deliveryField)) break;
+      if (areaKey(fieldArea(pane.stdout, settings.footerPatterns)) !== record.deliveryField) break;
     }
     const after = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
-    if (after.code === 0 && fieldIsOurs(after.stdout, settings.footerPatterns, record.deliveryField)) {
+    if (after.code === 0 && areaKey(fieldArea(after.stdout, settings.footerPatterns)) === record.deliveryField) {
       await setHeaderFields(ctx.runner, file, { prompt_delivery: 'confirming', delivery_result: 'not-delivered-in-field', prompt_error: `${NOT_DELIVERED}: Enter was pressed and the text is still in the field` });
       return { outcome: 'not-delivered', message: `${NOT_DELIVERED}; Enter poszedł, ale tekst nadal stoi w polu – wciśnij Enter w oknie (attach)`, ...keySent };
     }
-    await setHeaderFields(ctx.runner, file, { prompt_delivery: 'confirming', delivery_result: null, prompt_error: `${DELIVERY_WARNING}: Enter pressed by send --enter-only` });
-    return { outcome: 'pending', message: `zatwierdzono Enter; ${DELIVERY_WARNING} (watch)`, ...keySent };
+    const queued = after.code === 0 ? deliveryClass(record, after.stdout, after.dimInput) : null;
+    await setHeaderFields(ctx.runner, file, { prompt_delivery: 'confirming', delivery_result: queued, prompt_error: queued ? `${DELIVERY_WARNING}: ${QUEUED_IN_AGENT}` : `${DELIVERY_WARNING}: Enter pressed by send --enter-only` });
+    return { outcome: 'pending', message: queued ? `zatwierdzono Enter; ${QUEUED_IN_AGENT}` : `zatwierdzono Enter; ${DELIVERY_WARNING} (watch)`, ...keySent };
   });
 }

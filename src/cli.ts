@@ -687,15 +687,22 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('--dry-run', 'print the commands that would run, execute nothing')
     .option('--clip', 'read the prompt from the clipboard; shows a summary and asks y/N first')
     .option('-y, --yes', 'with --clip: do not ask')
-    .option('--enter-only <task>', 'paste nothing: press Enter for the text that an earlier send left in the input field of the task ("nie dostarczono – tekst w polu wpisywania"); refuses any other text')
+    .option('--enter-only <task>', 'paste nothing: show the exact text that an earlier send left in the input field of the task ("nie dostarczono – tekst w polu wpisywania") with a token; refuses any other text')
+    .option('--confirm <token>', 'with --enter-only: press Enter if the field is still exactly the text the preview showed')
     .action(
-      guarded(async (file: string | undefined, opts: { clip?: boolean; yes?: boolean; dryRun?: boolean; enterOnly?: string }) => {
+      guarded(async (file: string | undefined, opts: { clip?: boolean; yes?: boolean; dryRun?: boolean; enterOnly?: string; confirm?: string }) => {
         const ctx = contextFor(Boolean(opts.dryRun));
+        if (opts.confirm !== undefined && opts.enterOnly === undefined) throw new AgentctlError('--confirm belongs to --enter-only');
         if (opts.enterOnly !== undefined) {
           if (file !== undefined || opts.clip) throw new AgentctlError('--enter-only takes a task and nothing else: no file, no --clip');
           const target = await resolveRunningTask(ctx, opts.enterOnly);
-          const [done] = await submitDrafts(ctx, [{ task: target.task, window: target.window }]);
-          if (done?.refused || done?.outcome === 'not-delivered') throw new AgentctlError(`${target.task}: ${done.message}`);
+          const [done] = await submitDrafts(ctx, [{ task: target.task, window: target.window }], opts.confirm ? { token: opts.confirm } : {});
+          if (done?.refused || done?.outcome === 'not-delivered' || done?.outcome === 'failed') throw new AgentctlError(`${target.task}: ${done.message}${done.field ? `\nText in the field:\n${done.field.join('\n')}` : ''}`);
+          if (done?.outcome === 'ready') {
+            line(`Text in the field of ${target.task} (exactly):`);
+            for (const text of done.field ?? []) line(`  │ ${text}`);
+            line(`Screen: ${done.screenState}. Nothing was pressed. To press Enter for exactly this text: agentctl send --enter-only ${target.task} --confirm ${done.token}`);
+          }
           return;
         }
         const items = splitSpecs(await readSpecSource(file, opts.clip), opts.clip ? 'clipboard' : (file ?? 'stdin')).map(resolveSendSpec);

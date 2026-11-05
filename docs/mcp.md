@@ -249,7 +249,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 | `stats` | read | `cohort?`, `since?` |
 | `overlap` | read | `task?` |
 | `resume` | write | `tasks?`, `all?`, `confirm?`, `preview_token?` |
-| `send` | write | `task`, `text?`, `enter_only?`, `confirm?` |
+| `send` | write | `task`, `text?`, `enter_only?`, `confirm?`, `token?` |
 | `new` | write | `spec`, `agent?`, `reuse?`, `no_agent?`, `cohort?`, `wait_trust?`, `confirm?`, `preview_token?` |
 | `queue` | write | `spec`, `cohort?`, `agent?`, `confirm?`, `preview_token?` |
 | `queue_rm` | write | `task`, `confirm?`, `preview_token?` |
@@ -299,7 +299,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 - `cohort show`: `--json`
 - `cohort archive`: `--older-than &lt;age&gt;`, `--yes`
 - `overlap`: `--json`
-- `send`: `--dry-run`, `--clip`, `-y, --yes`, `--enter-only &lt;task&gt;`
+- `send`: `--dry-run`, `--clip`, `-y, --yes`, `--enter-only &lt;task&gt;`, `--confirm &lt;token&gt;`
 - `status`: `--json`, `--clip`, `--tmux-line`, `--all`, `--cohort &lt;name&gt;`
 - `limits show`: `--json`
 - `limits set`: `-y, --yes`, `--dry-run`

@@ -3,10 +3,10 @@ import fs from 'node:fs';
 import { describe, it } from 'node:test';
 import { DEFAULT_AGENT_SETTINGS } from '../src/core/config.ts';
 import { Context } from '../src/core/context.ts';
-import { fieldIsOurs, fieldSignature, inputFieldLines, ownPasteSignature } from '../src/core/input-field.ts';
+import { areaKey, fieldArea, fieldText, pasteImage } from '../src/core/input-field.ts';
 import { readJournal } from '../src/core/journal.ts';
 import { hookPromptMatches, unwrapPastedContent } from '../src/core/paste-wrapper.ts';
-import { deliveryNote, deliveryProof, deliverPendingPrompt, echoLines, queuePrompt, queueSignShown } from '../src/core/prompt-delivery.ts';
+import { deliveryClass, deliveryNote, deliveryProof, deliverPendingPrompt, echoLines, queuePrompt, queueSignShown } from '../src/core/prompt-delivery.ts';
 import { classifyScreen, starSpinnerActive } from '../src/core/state.ts';
 import { readTaskRecord, setHeaderFields, taskFile } from '../src/core/taskstore.ts';
 import { DiskRunner, makeConfig, seedTask, useScratch } from './helpers.ts';
@@ -16,49 +16,59 @@ const scratch = useScratch();
 const fx = (name: string) => fs.readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
 const claudeFooters = DEFAULT_AGENT_SETTINGS.claude.footerPatterns, codexFooters = DEFAULT_AGENT_SETTINGS.codex.footerPatterns;
 
-describe('input field (R1, R2)', () => {
-  it('reads the placeholder of a recorded collapsed paste as the whole field', () => {
-    assert.deepEqual(inputFieldLines(fx('screen-claude-busy-paste.txt'), claudeFooters), ['[Pasted text #1 +7 lines]']);
-    assert.deepEqual(inputFieldLines(fx('screen-claude-busy-paste-single.txt'), claudeFooters), ['[Pasted text #2]']);
+describe('input field area (R1, R2; rewritten in P15-FIX3: the area is exact, nothing is squeezed)', () => {
+  it('is the marker line of a recorded collapsed paste and nothing else', () => {
+    assert.deepEqual(fieldArea(fx('screen-claude-busy-paste.txt'), claudeFooters), ['❯\u00a0[Pasted text #1 +7 lines]'], 'the marker is followed by a no-break space in the real capture');
+    assert.deepEqual(fieldArea(fx('screen-claude-busy-paste-single.txt'), claudeFooters), ['❯\u00a0[Pasted text #2]']);
+    assert.equal(fieldText(fieldArea(fx('screen-claude-busy-paste.txt'), claudeFooters)), '[Pasted text #1 +7 lines]');
   });
-  it('reads every line of a text the TUI shows whole, down to the border (Claude) or the footer (Codex)', () => {
-    assert.deepEqual(inputFieldLines('x\n────\n❯ one\n  two\n  three\n────\n  paste again to expand\n', claudeFooters), ['one', 'two', 'three']);
-    assert.deepEqual(inputFieldLines('• Working\n› one\n  two\n  GPT-6.1-Sol low · ~/work\n  tab to queue message\n', codexFooters), ['one', 'two']);
-    assert.deepEqual(inputFieldLines(fx('screen-codex-question-pasted.txt'), codexFooters), ['MANUAL-Q2: this text was pasted into the field while a question is open.']);
+  it('runs from the marker down to the border, the footer or a hint, empty lines inside kept (F2)', () => {
+    assert.deepEqual(fieldArea('x\n────\n❯ one\n  two\n\n  three\n────\n  paste again to expand\n', claudeFooters), ['❯ one', '  two', '', '  three']);
+    assert.deepEqual(fieldArea('x\n────\n❯ [Pasted text #2 +1 lines]\n\n  USER ADDED SECRET\n────\n', claudeFooters), ['❯ [Pasted text #2 +1 lines]', '', '  USER ADDED SECRET']);
+    assert.deepEqual(fieldArea('• Working\n› one\n  two\n  GPT-6.1-Sol low · ~/work\n  tab to queue message\n', codexFooters), ['› one', '  two']);
+    assert.deepEqual(fieldArea(fx('screen-codex-question-pasted.txt'), codexFooters), ['› MANUAL-Q2: this text was pasted into the field while a question is open.']);
+    assert.deepEqual(fieldArea('❯ one\n  two\n\n\n', claudeFooters), ['❯ one', '  two'], 'empty lines at the end are the screen, not the field');
   });
-  it('an empty field, a suggestion and the Codex placeholder are no field', () => {
-    assert.deepEqual(inputFieldLines('x\n❯\n', claudeFooters), []);
-    assert.deepEqual(inputFieldLines('x\n❯ Try "fix the bug"\n', claudeFooters), []);
-    assert.deepEqual(inputFieldLines(fx('screen-codex-busy-steered.txt'), codexFooters), []);
-    assert.deepEqual(inputFieldLines('no prompt here\n', claudeFooters), []);
+  it('a line of hyphens in the field is text, not a border', () => {
+    assert.deepEqual(fieldArea('────\n❯ one\n  ---------\n  two\n────\n', claudeFooters), ['❯ one', '  ---------', '  two']);
   });
-  it('the signature is the placeholder as drawn, or the text of all lines without the TUI’s white space', () => {
-    assert.equal(fieldSignature(['[Pasted text #2 +7 lines]']), 'collapsed:[Pasted text #2 +7 lines]');
-    assert.equal(fieldSignature([]), null);
-    assert.equal(fieldSignature(['one', 'two']), fieldSignature(['one two']));
-    assert.equal(fieldSignature(['on', 'e two']), fieldSignature(['one', 'two']), 'a break inside a word is the TUI’s');
-    assert.notEqual(fieldSignature(['one', 'two']), fieldSignature(['one', 'twp']));
-    assert.notEqual(fieldSignature(['one', 'two']), fieldSignature(['one']));
-    assert.notEqual(fieldSignature(['[Pasted text #2 +7 lines]']), fieldSignature(['[Pasted text #3 +7 lines]']));
-    assert.notEqual(fieldSignature(['[Pasted text #2 +7 lines]']), fieldSignature(['[Pasted text #2 +7 lines]', 'more']));
+  it('is empty for an empty field, a suggestion, an idle Codex field and a screen without a marker', () => {
+    assert.deepEqual(fieldArea('x\n❯\n', claudeFooters), []);
+    assert.deepEqual(fieldArea('x\n❯ Try "fix the bug"\n', claudeFooters), []);
+    assert.deepEqual(fieldArea(fx('screen-codex-busy-steered.txt'), codexFooters), []);
+    assert.deepEqual(fieldArea('no prompt here\n', claudeFooters), []);
   });
-  it('our paste is a placeholder or all of the text; a part of it, or more than it, is not', () => {
+  it('areaKey is the same for the same bytes only: a space, a blank line or another number changes it (F1, F2)', () => {
+    const base = ['❯ Use key "AB CD"'];
+    assert.equal(areaKey(base), areaKey(['❯ Use key "AB CD"']));
+    assert.notEqual(areaKey(base), areaKey(['❯ Use key "ABCD"']));
+    assert.notEqual(areaKey(base), areaKey(['❯ Use key "AB  CD"']));
+    assert.notEqual(areaKey(['❯ one', '  two']), areaKey(['❯ one', '', '  two']));
+    assert.notEqual(areaKey(['❯ [Pasted text #2 +1 lines]']), areaKey(['❯ [Pasted text #3 +1 lines]']));
+    assert.equal(areaKey([]), '');
+  });
+  it('fieldText reads the area as a person does: marker and indentation off, blank lines kept', () => {
+    assert.equal(fieldText(['❯ one', '  two', '', '  three']), 'one\ntwo\n\nthree');
+  });
+  it('pasteImage: our paste is one placeholder, or the lines of the prompt, or their start; never another line (a)', () => {
     const text = 'FIRST LINE\nORIGINAL BODY';
-    assert.ok(ownPasteSignature(['FIRST LINE', 'ORIGINAL BODY'], text));
-    assert.ok(ownPasteSignature(['FIRST LINE ORIGINAL', 'BODY'], text), 'wrapped differently by the TUI');
-    assert.equal(ownPasteSignature(['FIRST LINE'], text), null);
-    assert.equal(ownPasteSignature(['FIRST LINE', 'ORIGINAL BODY', 'AND MORE'], text), null);
-    assert.equal(ownPasteSignature([], text), null);
-    assert.equal(ownPasteSignature(['[Pasted Content 1004 chars]'], text), 'collapsed:[Pasted Content 1004 chars]');
+    assert.ok(pasteImage(['❯ FIRST LINE', '  ORIGINAL BODY'], text));
+    assert.ok(pasteImage(['❯ FIRST LINE'], text), 'a TUI that shows only the start');
+    assert.ok(!pasteImage(['❯ FIRST LINE', '  USER REPLACED BODY'], text), 'a changed second line');
+    assert.ok(!pasteImage(['❯ FIRST LINE', '  ORIGINAL BODY', '  AND MORE'], text));
+    assert.ok(!pasteImage(['❯ FIRST LINE', '', '  ORIGINAL BODY'], text), 'an extra empty line');
+    assert.ok(pasteImage(['❯ [Pasted text #2 +1 lines]'], text));
+    assert.ok(pasteImage(['› [Pasted Content 1004 chars]'], text));
+    assert.ok(!pasteImage([], text));
   });
-  it('fieldIsOurs compares the whole field of a screen with the recorded signature', () => {
-    const screen = fx('screen-claude-busy-paste.txt');
-    const recorded = fieldSignature(['[Pasted text #1 +7 lines]'])!;
-    assert.ok(fieldIsOurs(screen, claudeFooters, recorded));
-    assert.ok(!fieldIsOurs(screen.replace('#1', '#4'), claudeFooters, recorded));
-    assert.ok(!fieldIsOurs(screen.replace('lines]\n', 'lines]\n  typed after it\n'), claudeFooters, recorded));
-    assert.ok(!fieldIsOurs(screen, claudeFooters, undefined));
-    assert.ok(!fieldIsOurs(screen, claudeFooters, 'FIRST LINE'), 'a record of the older format proves nothing');
+  it('pasteImage: a wrapped line reads back to its line, only the swallowed space may differ (F1 at a wrap)', () => {
+    assert.ok(pasteImage(['❯ Use the key', '  AB CD to log in'], 'Use the key AB CD to log in'));
+    assert.ok(!pasteImage(['❯ Use the key', '  ABCD to log in'], 'Use the key AB CD to log in'));
+    assert.ok(!pasteImage(['❯ Use key "ABCD"'], 'Use key "AB CD"'));
+  });
+  it('a tab is what Claude Code stores of it: four spaces', () => {
+    assert.ok(pasteImage(['❯ a    b'], 'a\tb', 'claude'));
+    assert.ok(!pasteImage(['❯ a    b'], 'a\tb', 'codex'));
   });
 });
 
@@ -115,23 +125,26 @@ describe('queue sign (R3)', () => {
   });
 });
 
-describe('queue sign needs a correlated Enter (R3)', () => {
-  const proofFor = async (name: string, extra: Record<string, unknown>) => {
+describe('queue sign needs a correlated Enter (R3; since P15-FIX3 it classifies, it never confirms)', () => {
+  const recordFor = async (name: string, extra: Record<string, unknown>) => {
     const config = makeConfig(scratch.sub(name), 'capacity: {snapshot: false, codex_refresh: false}\n');
     const runner = new DiskRunner({ dryRun: false, startTime: Date.now() + 1000 });
     const ctx = new Context(runner, config, () => {});
     seedTask(config, 'T1', { agent: 'claude', windowId: '@1' });
     await queuePrompt(ctx, readTaskRecord(config, 't1')!, 'SECOND', 'pending', { kind: 'followup' });
     await setHeaderFields(runner, taskFile(config, 't1'), { prompt_delivery: 'confirming', delivery_was_busy: true, delivery_started_at: new Date(runner.now() - 1000).toISOString(), ...extra });
-    return deliveryProof(ctx, readTaskRecord(config, 't1')!, '⏺ x\n  ctrl+x ctrl+s to send now\n✻ Cooking… (3s · ↓ 1 tokens)\n❯\n');
+    return { ctx, record: readTaskRecord(config, 't1')! };
   };
-  const ours = { delivery_field: 'collapsed:[Pasted text #2 +1 lines]', delivery_enters: 1 };
-  it('queued-in-agent only with the recorded paste, an Enter of ours and a sign that was not there before it', async () => {
-    assert.equal(await proofFor('q-ok', { ...ours, delivery_queue_sign: false }), 'queued-in-agent');
-    assert.equal(await proofFor('q-before', { ...ours, delivery_queue_sign: true }), null, 'the sign was on the screen before our Enter');
-    assert.equal(await proofFor('q-unknown', { ...ours }), null, 'no baseline recorded');
-    assert.equal(await proofFor('q-no-enter', { ...ours, delivery_enters: 0, delivery_queue_sign: false }), null, 'we pressed no Enter');
-    assert.equal(await proofFor('q-no-paste', { delivery_enters: 1, delivery_queue_sign: false }), null, 'agentctl pasted nothing for this delivery');
+  const screen = '⏺ x\n  ctrl+x ctrl+s to send now\n✻ Cooking… (3s · ↓ 1 tokens)\n❯\n';
+  const ours = { delivery_field: 'image:0123456789abcdef01234567', delivery_enters: 1 };
+  it('queued-in-agent (not confirmed) only with the recorded paste, an Enter of ours and a sign that was not there before it', async () => {
+    const classes: Record<string, unknown> = {};
+    for (const [name, extra] of [['q-ok', { ...ours, delivery_queue_sign: false }], ['q-before', { ...ours, delivery_queue_sign: true }], ['q-unknown', { ...ours }], ['q-no-enter', { ...ours, delivery_enters: 0, delivery_queue_sign: false }], ['q-no-paste', { delivery_enters: 1, delivery_queue_sign: false }]] as const) {
+      const { ctx, record } = await recordFor(name, extra);
+      classes[name] = deliveryClass(record, screen);
+      assert.equal(deliveryProof(ctx, record, screen), null, `${name}: the screen confirms nothing`);
+    }
+    assert.deepEqual(classes, { 'q-ok': 'queued-in-agent', 'q-before': null, 'q-unknown': null, 'q-no-enter': null, 'q-no-paste': null });
   });
 });
 
@@ -149,15 +162,20 @@ describe('echo (R4)', () => {
   });
 });
 
-describe('the note after the last Enter (R10) and the permission send_enter', () => {
-  it('promises a retry only while one is left', () => {
-    const base = { task: 'T1', deliveryResult: 'not-delivered-in-field', promptDelivery: 'confirming', deliveryField: 'collapsed:[Pasted text #1]', deliveryEnters: 3 } as never;
-    assert.match(deliveryNote(base)!, /watch ponowi Enter, albo: agentctl send --enter-only T1/);
-    assert.doesNotMatch(deliveryNote({ ...(base as object), deliveryEnters: 6 } as never)!, /watch ponowi/);
-    assert.doesNotMatch(deliveryNote({ ...(base as object), promptDelivery: 'needs-attention' } as never)!, /watch ponowi/);
+describe('the note after the last Enter (R10) and the permission send_enter (P15-FIX3: no Enter is ever retried by watch)', () => {
+  it('never promises a retry; names the two ways out while the record of the paste is there', () => {
+    const base = { task: 'T1', deliveryResult: 'not-delivered-in-field', promptDelivery: 'confirming', deliveryField: 'image:0123456789abcdef01234567', deliveryEnters: 3 } as never;
+    for (const promptDelivery of ['confirming', 'needs-attention']) {
+      const note = deliveryNote({ ...(base as object), promptDelivery } as never)!;
+      assert.doesNotMatch(note, /ponowi/); assert.match(note, /nie naciśnie już Enter sam/); assert.match(note, /agentctl send --enter-only T1/); assert.match(note, /attach/);
+    }
     const noTrace = deliveryNote({ ...(base as object), deliveryField: undefined } as never)!;
-    assert.doesNotMatch(noTrace, /watch ponowi/); assert.doesNotMatch(noTrace, /enter-only/); assert.match(noTrace, /attach/);
-    assert.match(deliveryNote({ ...(base as object), deliveryEnters: 6 } as never)!, /wciśnij go w oknie \(attach\) albo: agentctl send --enter-only T1/);
+    assert.doesNotMatch(noTrace, /enter-only/); assert.match(noTrace, /attach/);
+  });
+  it('the screen-only class says "queued, not confirmed" and keeps the message', () => {
+    const note = deliveryNote({ task: 'T1', deliveryResult: 'queued-in-agent', promptDelivery: 'confirming' } as never)!;
+    assert.match(note, /w kolejce agenta – niepotwierdzone/); assert.match(note, /TASK\.md/);
+    assert.equal(deliveryNote({ task: 'T1', deliveryResult: 'queued-in-agent', promptDelivery: 'sent' } as never), undefined);
   });
   it('mcp.allow accepts send_enter, and an unknown name is still reported with the old wording', () => {
     const config = makeConfig(scratch.sub('allow'), 'mcp: {allow: [send, send_enter, merge]}\n');

@@ -697,7 +697,7 @@ export function auditPath(config: Pick<GlobalConfig, 'path'>): string {
 export interface AuditEntry {
   tool: string;
   task?: string | undefined;
-  outcome: 'requested' | 'done' | 'error' | 'denied' | 'preview';
+  outcome: 'requested' | 'done' | 'error' | 'failed' | 'denied' | 'preview';
   detail?: string | undefined;
 }
 
@@ -723,7 +723,7 @@ async function writeTool(
   deps: McpDeps,
   tool: McpPermission,
   label: { task?: string | undefined; detail?: string | undefined },
-  body: (ctx: Context, lines: string[]) => Promise<{ text: string; executed: boolean; announce: string; /** Nothing was done and the answer is an error (a refusal). */ error?: boolean; /** What the audit line says about the result. */ detail?: string; data?: unknown }>,
+  body: (ctx: Context, lines: string[]) => Promise<{ text: string; executed: boolean; announce: string; /** Nothing was done and the answer is an error (a refusal). */ error?: boolean; /** The action was tried and failed (a transport error): the audit says `failed`. */ failed?: boolean; /** What the audit line says about the result. */ detail?: string; data?: unknown }>,
 ): Promise<ToolResult> {
   const lines: string[] = [];
   const ctx = deps.context((l) => lines.push(l));
@@ -737,7 +737,7 @@ async function writeTool(
   audit(ctx, { tool, task: label.task, outcome: 'requested', detail: label.detail });
   try {
     const result = await body(ctx, lines);
-    audit(ctx, { tool, task: label.task, outcome: result.executed ? 'done' : result.error ? 'error' : 'preview', ...(result.detail ? { detail: result.detail } : {}) });
+    audit(ctx, { tool, task: label.task, outcome: result.executed ? 'done' : result.failed ? 'failed' : result.error ? 'error' : 'preview', ...(result.detail ? { detail: result.detail } : {}) });
     if (result.executed) {
       lastPreviewMutation.set(deps, tool as McpWriteTool);
       await recordJournal(ctx, { kind: 'mcp-write', text: `${tool}: ${result.announce}` });
@@ -750,22 +750,28 @@ async function writeTool(
   }
 }
 
-async function runSend(deps: McpDeps, args: { task: string; text?: string; enter_only?: boolean; confirm?: boolean }): Promise<ToolResult> {
+async function runSend(deps: McpDeps, args: { task: string; text?: string; enter_only?: boolean; confirm?: boolean; token?: string }): Promise<ToolResult> {
   if (args.enter_only) {
     if (args.text !== undefined && args.text !== '') return fail('enter_only presses Enter only: do not give text');
     // Its own permission (send_enter): pressing Enter for a text that stands in a field is not pasting, and needs a preview and a confirm.
     return writeTool(deps, 'send_enter', { task: args.task, detail: `enter_only confirm=${Boolean(args.confirm)}` }, async (ctx) => {
+      if (args.confirm && !args.token) return { text: 'enter_only with confirm needs the token from the preview: call enter_only without confirm first, show the user the exact text, then call again with confirm: true and that token. Nothing was pressed.', executed: false, error: true, announce: '', detail: 'refused: no token' };
       const target = await resolveRunningTask(ctx, args.task);
-      const [done] = await submitDrafts(ctx, [{ task: target.task, window: target.window }], { preview: !args.confirm });
+      const [done] = await submitDrafts(ctx, [{ task: target.task, window: target.window }], args.confirm ? { token: args.token! } : {});
       if (!done || done.outcome === 'refused') {
         const why = done?.message ?? 'nic nie zatwierdzono';
-        return { text: `${target.task}: odmowa, żaden klawisz nie poszedł – ${why}`, executed: false, error: true, announce: '', detail: `refused: ${why}` };
+        return { text: `${target.task}: odmowa, żaden klawisz nie poszedł – ${why}${done?.field ? `\nTekst w polu:\n${done.field.join('\n')}` : ''}`, executed: false, error: true, announce: '', detail: `refused: ${why}` };
       }
-      if (done.outcome === 'ready') return { text: `${target.task}: ${done.message}.\nNie wciśnięto nic. Pokaż to użytkownikowi; za jego zgodą wywołaj send ponownie z enter_only: true i confirm: true.`, executed: false, announce: '' };
+      if (done.outcome === 'failed') return { text: `${target.task}: Enter nie poszedł (błąd tmux send-keys) – ${done.message}. Nic nie zatwierdzono.`, executed: false, error: true, failed: true, announce: '', detail: `failed: ${done.message}`, data: { key_sent: false, delivery: 'not-delivered-in-field', delivery_id: done.deliveryId ?? null } };
+      if (done.outcome === 'ready') return {
+        text: `${target.task}: ${done.message}.\nTekst w polu (dokładnie):\n${done.field!.join('\n')}\nNie wciśnięto nic. Pokaż to użytkownikowi; za jego zgodą wywołaj send ponownie z enter_only: true, confirm: true i token: "${done.token}". Token działa tylko dla tego tekstu.`,
+        executed: false, announce: '',
+        data: { key_sent: false, field: done.field, screen_state: done.screenState, token: done.token, delivery_id: done.deliveryId ?? null },
+      };
       const confirmed = done.outcome === 'submitted' ? 'tak' : done.outcome === 'pending' ? 'jeszcze nie (watch sprawdza)' : 'nie – tekst nadal stoi w polu';
       return {
         text: `${target.task}: Enter wysłany: tak; dostarczenie potwierdzone: ${confirmed} – ${done.message}`,
-        executed: true,
+        executed: done.keySent === true,
         announce: `send ${target.task} (Enter)`,
         detail: `enter-sent; delivery ${done.outcome}${done.deliveryId ? ` ${done.deliveryId.slice(0, 8)}` : ''}`,
         data: { key_sent: done.keySent === true, delivery: done.outcome === 'submitted' ? 'confirmed' : done.outcome === 'pending' ? 'unconfirmed' : 'not-delivered-in-field', delivery_id: done.deliveryId ?? null },
@@ -1167,12 +1173,12 @@ export const MCP_TOOLS: McpToolDef[] = [
     kind: 'write',
     description:
       `WRITE, off unless the user put "send" in mcp.allow. Pastes a follow-up prompt (up to ${MAX_SEND_CHARS} characters) into the window of a running task, as if the user typed it, and presses Enter. ` +
-      'To a working agent the message goes into the agent\'s own queue; the answer says delivered, "w kolejce agenta" (queued in the agent) or "nie dostarczono – tekst w polu wpisywania" (the paste stands in the input field). ' +
-      'In the last case enter_only: true (no text) presses Enter for that text. It needs its own permission, send_enter, in mcp.allow; the first call (no confirm) only previews, show it to the user, then call again with confirm: true. It refuses (an error, no key) any other, changed or partial text in the field. The answer keeps "Enter sent" apart from "delivery confirmed". An agent with an open question gets nothing pasted. ' +
+      'To a working agent the message goes into the agent\'s own queue. "Delivered" is said only on exact proof (the hook of the agent or its session transcript holds exactly this message); the answer is otherwise "w kolejce agenta – niepotwierdzone" (the screen shows it queued, nothing confirms it) or "nie dostarczono – tekst w polu wpisywania" (the paste stands in the input field). agentctl presses Enter only in the call that pastes, never later by itself. ' +
+      'In the last case enter_only: true (no text) presses Enter for that text. It needs its own permission, send_enter, in mcp.allow. The first call (no confirm) only previews: it returns the exact text of the field, the screen state and a token for those bytes; show the text to the user, then call again with confirm: true and that token. It refuses (an error, no key) when the field is not byte for byte what agentctl pasted and what the preview showed, or a dialog is open. The answer keeps "Enter sent" apart from "delivery confirmed". An agent with an open question gets nothing pasted. ' +
       'Use it only when the user asked you to instruct an agent; say what you will send first. The user gets a desktop notification.',
-    input: { task: taskArg, text: z.string().min(1).max(MAX_SEND_CHARS).optional().describe('The prompt for the agent. Required unless enter_only is true.'), enter_only: z.boolean().optional().describe('true: paste nothing, press Enter for the text that an earlier send left in the input field (only that text, only while the whole field is exactly our paste). Needs send_enter in mcp.allow; without confirm it only previews.'), confirm: z.boolean().optional().describe('With enter_only: true presses Enter after a preview; without it nothing is pressed.') },
+    input: { task: taskArg, text: z.string().min(1).max(MAX_SEND_CHARS).optional().describe('The prompt for the agent. Required unless enter_only is true.'), enter_only: z.boolean().optional().describe('true: paste nothing, press Enter for the text that an earlier send left in the input field (only that text, only while the whole field is exactly our paste). Needs send_enter in mcp.allow; without confirm it only previews.'), confirm: z.boolean().optional().describe('With enter_only: true presses Enter after a preview (needs token); without it nothing is pressed.'), token: z.string().min(1).max(64).optional().describe('With enter_only and confirm: the token that the preview returned for the exact text of the field.') },
     annotations: { title: 'Send a prompt to a running task', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-    run: (deps, args) => guarded(() => runSend(deps, args as { task: string; text?: string; enter_only?: boolean; confirm?: boolean })),
+    run: (deps, args) => guarded(() => runSend(deps, args as { task: string; text?: string; enter_only?: boolean; confirm?: boolean; token?: string })),
   }),
   def({
     name: 'new',

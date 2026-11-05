@@ -9,7 +9,7 @@ import { Alerts } from './alert.ts';
 import type { AgentName } from './config.ts';
 import type { Context } from './context.ts';
 import { extractQuestion, parseClaudeEvent, parseCodexEvent } from './events.ts';
-import { hookPromptMatches } from './paste-wrapper.ts';
+import { hookPromptMatches, sameMessage } from './paste-wrapper.ts';
 import type { AgentEvent, ClaudeKind } from './events.ts';
 import { classifyScreen } from './state.ts';
 import type { EventKind } from './state.ts';
@@ -159,8 +159,8 @@ export async function handleEvent(ctx: Context, alerts: Alerts, input: EventInpu
     // In particular, never wait for the sender's prompt-delivery lock here.
     // Claude Code wraps a collapsed paste for the hook in <pasted_content id="…">: the wrapper comes off the hook's text only (paste-wrapper.ts), the pending prompt is compared as written.
     const pending = record.pendingPrompt ?? '';
-    const submitted = input.kind === 'user-prompt-submit' && isObject(input.payload) && typeof input.payload.prompt === 'string' && hookPromptMatches(input.payload.prompt, pending);
-    const codexInput = input.agent === 'codex' && isObject(input.payload) && Array.isArray(input.payload['input-messages']) && input.payload['input-messages'].some(text => typeof text === 'string' && text.replace(/\r\n?/g, '\n').trim() === pending.replace(/\r\n?/g, '\n').trim());
+    const submitted = input.kind === 'user-prompt-submit' && isObject(input.payload) && typeof input.payload.prompt === 'string' && hookPromptMatches(input.payload.prompt, pending, 'claude');
+    const codexInput = input.agent === 'codex' && isObject(input.payload) && Array.isArray(input.payload['input-messages']) && input.payload['input-messages'].some(text => typeof text === 'string' && sameMessage(text, pending, 'codex'));
     if (record.deliveryId && record.deliveryStartedAt && now >= Date.parse(record.deliveryStartedAt) && (submitted || codexInput)) {
       await runner.writeFile(path.join(taskDir(ctx.config, record.window), 'delivery-evidence.json'), JSON.stringify({ deliveryId: record.deliveryId, at: new Date(now).toISOString(), type: event.type, accepted: true }));
     }

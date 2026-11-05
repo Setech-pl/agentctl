@@ -28,11 +28,32 @@ export function unwrapPastedContent(text: string): string | null {
   return start >= 0 ? null : out + text.slice(last);
 }
 
-const plain = (text: string) => text.replace(/\r\n?/g, '\n').trim();
+/** Line endings are the one thing normalised: \r\n and \r are \n. */
+export const eol = (text: string) => text.replace(/\r\n?/g, '\n');
 
-/** Does the prompt of the hook say the same as the pending prompt? As written, or with the hook's own wrappers taken off; never with tags taken out of the pending prompt. */
-export function hookPromptMatches(hookPrompt: string, pending: string): boolean {
-  if (plain(hookPrompt) === plain(pending)) return true;
-  const unwrapped = unwrapPastedContent(hookPrompt);
-  return unwrapped !== null && plain(unwrapped) === plain(pending);
+/**
+ * What an agent keeps of a message that was pasted into it, recorded from the real CLIs (Claude Code 2.1.311, codex-cli 0.166.0): the
+ * white space at the end of the message is dropped, the newlines in front of a collapsed paste are the wrapper's own padding, and Claude Code
+ * stores a tab as four spaces. Nothing inside the message is compared loosely: no run of white space is squeezed or removed.
+ */
+export function storedForm(text: string, agent?: 'claude' | 'codex' | 'unknown'): string {
+  const lines = eol(text);
+  return (agent === 'claude' ? lines.replace(/\t/g, '    ') : lines).replace(/^\n+/, '').trimEnd();
+}
+
+/**
+ * Does the text of a hook or a transcript say exactly what was pasted? As written, or with the wrappers of the agent taken off; never with tags
+ * taken out of the pending prompt.
+ */
+export function sameMessage(seen: string, pending: string, agent?: 'claude' | 'codex' | 'unknown'): boolean {
+  const want = storedForm(pending, agent);
+  if (want === '') return false;
+  if (storedForm(seen) === want) return true;
+  const unwrapped = unwrapPastedContent(seen);
+  return unwrapped !== null && storedForm(unwrapped) === want;
+}
+
+/** Kept for the hook: the prompt of the hook against the pending prompt. */
+export function hookPromptMatches(hookPrompt: string, pending: string, agent?: 'claude' | 'codex' | 'unknown'): boolean {
+  return sameMessage(hookPrompt, pending, agent);
 }
