@@ -27,6 +27,8 @@ export interface TranscriptMessage {
 }
 
 const TAIL_BYTES = 4 * 1024 * 1024;
+/** Transcripts that were read and did not hold the message, by file, delivery and the size and time they had then. */
+const unchanged = new Map<string, string>();
 
 function readTail(file: string): string {
   const fd = fs.openSync(file, 'r');
@@ -135,10 +137,17 @@ export function transcriptMessage(ctx: Context, record: TaskRecord, pending: str
   const files = record.agent === 'claude' ? claudeFiles(ctx, record, sinceMs) : codexFiles(ctx, record, sinceMs);
   for (const file of files) {
     let text: string;
-    try { text = readTail(file); } catch { continue; }
+    try {
+      // A transcript that was not written to since the delivery began cannot hold the message; one that did not change since the last look at it is not read again.
+      const st = fs.statSync(file), key = `${file}|${sinceMs}|${pending.length}`, version = `${st.size}:${st.mtimeMs}`;
+      if (st.mtimeMs < sinceMs || unchanged.get(key) === version) continue;
+      text = readTail(file);
+      unchanged.set(key, version);
+      if (unchanged.size > 256) unchanged.delete(unchanged.keys().next().value!);
+    } catch { continue; }
     const rows = record.agent === 'claude' ? claudeMessages(text) : codexMessages(text);
     const hit = rows.filter(row => row.at >= sinceMs && sameMessage(row.text, pending, record.agent)).sort((a, b) => a.at - b.at)[0];
-    if (hit) return hit;
+    if (hit) { unchanged.delete(`${file}|${sinceMs}|${pending.length}`); return hit; }
   }
   return undefined;
 }
