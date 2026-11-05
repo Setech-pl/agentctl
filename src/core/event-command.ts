@@ -11,7 +11,6 @@ import { Alerts } from './alert.ts';
 import type { AgentName } from './config.ts';
 import type { Context } from './context.ts';
 import { extractQuestion, parseClaudeEvent, parseCodexEvent } from './events.ts';
-import { hookPromptMatches, sameMessage } from './paste-wrapper.ts';
 import type { AgentEvent, ClaudeKind } from './events.ts';
 import { classifyScreen } from './state.ts';
 import type { EventKind } from './state.ts';

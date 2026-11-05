@@ -90,7 +90,7 @@ export function deliveryClass(record: TaskRecord, screen: string, dimInput = '')
  */
 function queuedListShows(screen: string, prompt: string, agent: TaskRecord['agent']): boolean {
   const lines = screen.split('\n').map(line => line.trimEnd());
-  const composer = inspectField(screen);
+  const composer = inspectField(screen, agent);
   if (!composer.readable || composer.top === undefined) return false;
   const heading = lines.findLastIndex((line, i) => i < composer.top! && /Queued follow-up inputs|Queued messages?/i.test(line));
   if (heading < 0) return false;
@@ -102,13 +102,13 @@ function queuedListShows(screen: string, prompt: string, agent: TaskRecord['agen
 
 /**
  * What proves that the agent took this message: its hook (the exact prompt) and its transcript (the exact message, written after the delivery began).
- * Both are exact and neither is a screen. The older signs stay for the cases that the first prompt of every task has always used and that older tests pin,
+ * Both are exact and neither is a screen. The older signs stay only for the cases that the first prompt of every task has always used and that older tests pin,
  * each as exact as the text allows (no white space squeezed, the whole message): an idle agent started its turn, the canonical report changed, the message
  * echoed whole above an empty composer, a queue list that shows the whole message. The screen of a busy agent otherwise proves nothing (see `deliveryClass`).
  * Returns where the proof came from; null while nothing proves it. A draft in the composer holds every proof back: the message is not yet out of it.
  */
 function proofSource(ctx: Context, record: TaskRecord, screen: string): string | null {
-  if (inspectField(screen).area.length || (record.agent !== 'unknown' ? provider(record.agent).screen.draft?.(screen) : undefined) || screenMetadata(screen).draft_input) return null;
+  if (inspectField(screen, record.agent).area.length || (record.agent !== 'unknown' ? provider(record.agent).screen.draft?.(screen) : undefined) || screenMetadata(screen).draft_input) return null;
   try {
     const evidence = JSON.parse(fs.readFileSync(path.join(ctx.config.stateDir, record.window, 'delivery-evidence.json'), 'utf8'));
     if (record.deliveryId && evidence.accepted === true && evidence.deliveryId === record.deliveryId && Date.parse(evidence.at) >= Date.parse(record.deliveryStartedAt ?? '')) return 'hook';
@@ -118,6 +118,10 @@ function proofSource(ctx: Context, record: TaskRecord, screen: string): string |
     if (seen?.kind === 'user') return 'transcript';
     if (seen) return null; // Queue acceptance and ambiguous/old injection must not fall through to legacy screen signs.
   }
+  // Follow-ups require current hook/wire evidence or exact user transcript injection.
+  // Reports and screen queues describe the running turn; neither proves this message was taken.
+  if (record.promptKind === 'followup') return null;
+  // Initial-prompt compatibility only.
   if (record.deliveryResult === 'queued-in-agent-confirmed') return null;
   const report = inspectReport(ctx.config, record, ctx.runner.now(), false);
   if (report.ready && (!record.deliveryStartedAt || report.signature !== record.deliveryReportBaseline)) return 'report';
@@ -196,7 +200,9 @@ async function pressEnterAfter(ctx: Context, record: TaskRecord, file: string, w
   record.deliveryEnters = (record.deliveryEnters ?? 0) + 1;
   record.deliveryQueueSign = queueSignShown(record.agent, last.stdout, last.dimInput);
   await setHeaderFields(ctx.runner, file, { delivery_enters: record.deliveryEnters, delivery_enter_at: new Date(ctx.runner.now()).toISOString(), delivery_queue_sign: record.deliveryQueueSign });
-  return ctx.tmux.pressEnter(window);
+  return record.agent === 'kimi'
+    ? ctx.runner.exec('tmux', ['send-keys', '-t', await ctx.tmux.targetFor(window), 'C-m'])
+    : ctx.tmux.pressEnter(window);
 }
 
 /** Initial prompts and resume instructions are pasted once and get their Enters in that call. Later agentctl only looks (hook, transcript, screen) and never presses Enter by itself. */
@@ -243,7 +249,7 @@ async function deliverOnce(ctx: Context, window: string): Promise<'sent' | 'pend
       if (source) return sent(source);
       if (await keepConfirmedQueue(ctx, record)) return 'confirming';
       if (screen.code === 0 && record.agent !== 'unknown') {
-        const settings = ctx.config.agents[record.agent], area = fieldArea(text, settings.footerPatterns);
+        const settings = ctx.config.agents[record.agent], area = fieldArea(text, settings.footerPatterns, record.agent);
         // The text of our paste still stands in the field and nothing presses Enter for it any more: say so, with the way out.
         if (record.deliveryField && area.length && areaKey(area) === record.deliveryField) {
           return record.promptDelivery === 'needs-attention' && record.deliveryResult === 'not-delivered-in-field' ? 'needs-attention' : attention('the paste of agentctl still stands in the input and no Enter is sent for it any more', true);
@@ -265,9 +271,8 @@ async function deliverOnce(ctx: Context, window: string): Promise<'sent' | 'pend
     if (before.code !== 0 || !inputVisible(before.stdout, settings) || (!busyFollowup && beforeState !== 'idle')) return 'pending';
 
     const profile = provider(record.agent).screen;
-    const draftOf = (screen: string) => profile.draft ? profile.draft(screen) : screenMetadata(screen).draft_input;
-    const ownsDraft = (draft: string) => (profile.stablePaste && /\[paste #\d+/.test(draft)) || text.startsWith(draft) || draft.startsWith(text.split('\n')[0]!) || /\[Pasted|pasted (?:text|content)/i.test(draft);
-    if (record.promptKind === 'initial' && !profile.stablePaste && !inspectField(before.stdout).readable) {
+    const draftOf = (screen: string) => record.agent === 'kimi' ? fieldText(inspectField(screen, record.agent).area) : screenMetadata(screen).draft_input;
+    if (record.promptKind === 'initial' && !inspectField(before.stdout, record.agent).readable) {
       await setHeaderFields(ctx.runner, file, { prompt_delivery: 'needs-attention', prompt_error: 'Composer is not structurally ready; initial prompt was not pasted and remains in TASK.md' });
       return 'needs-attention';
     }
@@ -278,42 +283,6 @@ async function deliverOnce(ctx: Context, window: string): Promise<'sent' | 'pend
     await setHeaderFields(ctx.runner, file, { prompt_delivery: 'sending', delivery_was_busy: busyFollowup, delivery_started_at: record.deliveryStartedAt, delivery_output_baseline: record.deliveryOutputBaseline, delivery_echo_baseline: record.deliveryEchoBaseline, delivery_enters: 0 });
     record.deliveryEnters = 0;
     if (draftOf(before.stdout)) return uncertain('the input already contains a draft; it was not overwritten');
-    if (profile.stablePaste) {
-      try {
-        await ctx.tmux.pasteText(window, eol(text));
-        await ctx.runner.sleep(400);
-        for (let attempt = 0; attempt < PASTE_ENTERS; attempt++) {
-          if (attempt > 0) await ctx.runner.sleep(400);
-          const ready = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
-          const currentState = classifyScreen(ready.stdout, settings), currentDraft = draftOf(ready.stdout);
-          const stableSource = proofOf(ready.stdout !== before.stdout ? ready.stdout : '');
-          if (stableSource) return sent(stableSource);
-          if (currentDraft && !ownsDraft(currentDraft)) return uncertain('the input changed before Enter');
-          if (ready.code !== 0 || (currentState !== 'idle' && !(busyFollowup && ['working', 'background'].includes(currentState)))) return uncertain('the agent is no longer idle before Enter');
-          await ctx.runner.sleep(200);
-          const stable = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
-          if (stable.code !== 0 || stable.stdout !== ready.stdout) return uncertain('Kimi screen is not stable before Enter');
-          const enter = await ctx.runner.exec('tmux', ['send-keys', '-t', await ctx.tmux.targetFor(window), 'C-m']);
-          if (enter.code !== 0) return uncertain(`Enter failed: ${enter.stderr}`);
-          let ourDraft = false;
-          for (let poll = 0; poll < 8; poll++) {
-            await ctx.runner.sleep(150);
-            const pane = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
-            if (pane.code !== 0) return uncertain('the pane cannot be read');
-            const state = classifyScreen(pane.stdout, settings), draft = draftOf(pane.stdout);
-            // A quick completed turn can finish between polls; require new assistant output as its acknowledgement.
-            const againSource = proofOf(pane.stdout !== before.stdout ? pane.stdout : '');
-            if (againSource) return sent(againSource);
-            if (state !== 'idle' && !(busyFollowup && ['working', 'background'].includes(state))) return uncertain(`the agent shows ${state}; no further key was sent`);
-            ourDraft = Boolean(draft && ownsDraft(draft));
-            if (draft && !ourDraft) return uncertain('the input changed to another draft');
-          }
-          // Never send another Enter into an empty input: the first submission may already have been accepted.
-          if (!ourDraft) return uncertain('no working state or completed-turn acknowledgement was observed');
-        }
-        return uncertain('the pasted prompt is still in the input after Enter and two retries');
-      } catch (e) { return uncertain(errorMessage(e)); }
-    }
     try {
       // tmux turns a CR into the Enter of the TUI; \r\n would make two of it. Line endings are the one thing normalised, here and in every comparison.
       await ctx.tmux.pasteText(window, eol(text));
@@ -323,7 +292,7 @@ async function deliverOnce(ctx: Context, window: string): Promise<'sent' | 'pend
       for (let attempt = 0; attempt < PASTE_ENTERS; attempt++) {
         if (attempt > 0) await ctx.runner.sleep(400);
         const ready = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
-        const currentState = classifyScreen(ready.stdout, settings), field = inspectField(ready.stdout), area = field.area;
+        const currentState = classifyScreen(ready.stdout, settings), field = inspectField(ready.stdout, record.agent), area = field.area;
         const source = proofOf(ready.stdout !== before.stdout ? ready.stdout : '');
         if (source) return sent(source);
         if (await keepConfirmedQueue(ctx, record)) return 'confirming';
@@ -343,6 +312,12 @@ async function deliverOnce(ctx: Context, window: string): Promise<'sent' | 'pend
           } else if (areaKey(area) !== areaKey(image)) return notDelivered('the input changed since our paste; no Enter was sent');
         }
         if (!mayPressEnter(currentState, record, settings)) return notDelivered(`the agent shows ${currentState}; no Enter was sent`);
+        if (profile.stablePaste) {
+          if (!area.length || !image) return uncertain('no owned Kimi draft before Enter');
+          await ctx.runner.sleep(200);
+          const stable = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
+          if (stable.code !== 0 || stable.stdout !== ready.stdout || areaKey(inspectField(stable.stdout, record.agent).area) !== record.deliveryField) return notDelivered('Kimi screen is not stable before Enter');
+        }
         const pressed = await pressEnterAfter(ctx, record, file, window, ready);
         if (pressed.code !== 0) return notDelivered(`Enter failed: ${pressed.stderr}`);
         let ourDraft = false;
@@ -350,7 +325,7 @@ async function deliverOnce(ctx: Context, window: string): Promise<'sent' | 'pend
           await ctx.runner.sleep(150);
           const pane = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
           if (pane.code !== 0) return uncertain('the pane cannot be read');
-          const state = classifyScreen(pane.stdout, settings), shown = fieldArea(pane.stdout, settings.footerPatterns);
+          const state = classifyScreen(pane.stdout, settings), shown = fieldArea(pane.stdout, settings.footerPatterns, record.agent);
           // A quick completed turn can finish between polls; require new assistant output as its acknowledgement.
           const seen = pane.stdout !== before.stdout;
           const again = proofOf(seen ? pane.stdout : '');
@@ -424,7 +399,7 @@ async function submitOnce(ctx: Context, window: string, options: { preview?: boo
     const file = taskFile(ctx.config, window), settings = ctx.config.agents[record.agent];
     const screen = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
     if (screen.code !== 0) return refused(`okno ${window} nie daje się odczytać – nic nie zatwierdzam`, record);
-    const field = inspectField(screen.stdout), area = field.area;
+    const field = inspectField(screen.stdout, record.agent), area = field.area;
     if (!field.readable) return refused(`${field.reason} – nie wciskam Enter; sprawdź attach`, record);
     if (!area.length) return refused('pole wpisywania jest puste – nie ma czego zatwierdzić', record);
     if (record.deliveryResult === 'queued-in-agent-confirmed') return refused('wiadomość jest już w kolejce agenta – potwierdzone; czekam na wstrzyknięcie albo hook, nie wysyłam kolejnego Enter', record, area);
@@ -437,6 +412,11 @@ async function submitOnce(ctx: Context, window: string, options: { preview?: boo
     if (options.token !== token) return refused(`token nie pasuje do bieżącej treści pola (podgląd był dla innego tekstu albo innej dostawy) – zrób podgląd jeszcze raz`, record, area);
     const busy = ['working', 'background'].includes(state);
     if (record.deliveryWasBusy === undefined) { record.deliveryWasBusy = busy; await setHeaderFields(ctx.runner, file, { delivery_was_busy: busy }); }
+    if (provider(record.agent).screen.stablePaste) {
+      await ctx.runner.sleep(200);
+      const stable = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
+      if (stable.code !== 0 || stable.stdout !== screen.stdout || areaKey(inspectField(stable.stdout, record.agent).area) !== record.deliveryField) return refused('ekran Kimi zmienił się przed Enter – zrób podgląd ponownie', record);
+    }
     const pressed = await pressEnterAfter(ctx, record, file, window, screen);
     const keySent = { keySent: true as const, deliveryId: record.deliveryId };
     if (pressed.code !== 0) return { outcome: 'failed', message: `Enter nie poszedł: ${pressed.stderr.trim()}`, keySent: false, deliveryId: record.deliveryId };
@@ -450,10 +430,10 @@ async function submitOnce(ctx: Context, window: string, options: { preview?: boo
         return { outcome: 'submitted', message: `zatwierdzono Enter; agent przyjął wiadomość (${SOURCES[source] ?? source})`, ...keySent };
       }
       if (await keepConfirmedQueue(ctx, record)) return { outcome: 'pending', message: deliveryNote(record)!, ...keySent };
-      if (areaKey(fieldArea(pane.stdout, settings.footerPatterns)) !== record.deliveryField) break;
+      if (areaKey(fieldArea(pane.stdout, settings.footerPatterns, record.agent)) !== record.deliveryField) break;
     }
     const after = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
-    if (after.code === 0 && areaKey(fieldArea(after.stdout, settings.footerPatterns)) === record.deliveryField) {
+    if (after.code === 0 && areaKey(fieldArea(after.stdout, settings.footerPatterns, record.agent)) === record.deliveryField) {
       await setHeaderFields(ctx.runner, file, { prompt_delivery: 'confirming', delivery_result: 'not-delivered-in-field', prompt_error: `${NOT_DELIVERED}: Enter was pressed and the text is still in the field` });
       return { outcome: 'not-delivered', message: `${NOT_DELIVERED}; Enter poszedł, ale tekst nadal stoi w polu – wciśnij Enter w oknie (attach)`, ...keySent };
     }

@@ -1,3 +1,4 @@
+import { readTaskRecord } from '../src/core/taskstore.ts';
 import { composerFixture } from './composer-fixture.ts';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
@@ -375,7 +376,8 @@ describe('board: running effects', () => {
   it('send pastes into the window (found by ID despite the icon) and logs it in TASK.md', async () => {
     const { runner, config } = setup('ef2');
     const notice = await runBoardEffect(runner, config, { type: 'send', task: 'NC-1', window: 'nc-1', text: 'please add a test' }, { insideTmux: true });
-    assert.deepEqual(notice, { level: 'info', text: 'NC-1: wklejono (prompt sent)' });
+    assert.deepEqual(notice, { level: 'info', text: 'NC-1: wklejono; dostarczenie niepotwierdzone – sprawdzam (watch)' });
+    assert.equal(readTaskRecord(config, 'nc-1')?.pendingPrompt, 'please add a test');
     assert.ok(plain(runner).includes('tmux paste-buffer -p -d -b agentctl-nc-1 -t @1'));
     assert.equal(runner.calls.find((c) => c.line.includes('load-buffer'))?.input, 'please add a test');
     assert.match(runner.appended.get(`${config.stateDir}/nc-1/TASK.md`) ?? '', /please add a test/);

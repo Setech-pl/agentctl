@@ -315,10 +315,11 @@ describe('mcp: the write tools', () => {
     seedTask(t.config, 'NC-1');
     t.tmux.add('nc-1', IDLE);
     const r = await t.call('send', { task: 'nc-1', text: 'dopisz test' });
-    assert.match(r.text, /^NC-1: wklejono \(prompt sent\) \(11 characters\)/);
+    assert.match(r.text, /^NC-1: wklejono; dostarczenie niepotwierdzone – sprawdzam \(watch\) \(11 characters\)/);
+    assert.equal(readTaskRecord(t.config, 'nc-1')?.pendingPrompt, 'dopisz test');
     assert.ok(t.runner.commands.some((c) => c.startsWith('tmux paste-buffer')));
     assert.ok(t.runner.commands.some((c) => c.includes('send-keys') && c.includes('Enter')));
-    assert.match(fs.readFileSync(taskFile(t.config, 'nc-1'), 'utf8'), /## Follow-up queued .*\n\ndopisz test[\s\S]*## Follow-up sent /);
+    assert.match(fs.readFileSync(taskFile(t.config, 'nc-1'), 'utf8'), /## Follow-up queued .*\n\ndopisz test[\s\S]*## Follow-up pasted, unconfirmed /);
     assert.deepEqual(t.audit().map((a) => [a.tool, a.task, a.outcome]), [['send', 'nc-1', 'requested'], ['send', 'nc-1', 'done']]);
     assert.equal(t.audit()[0]?.detail, 'dopisz test');
     assert.deepEqual(t.notified, ['czat zlecił: send NC-1']);

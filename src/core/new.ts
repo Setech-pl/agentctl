@@ -21,6 +21,7 @@ import { recordFromSpec, renderTaskMd, readTaskRecord, setHeaderField, setHeader
 import { assertAgentSpawnAllowed, openAgentWindow } from './window-guard.ts';
 import { AgentctlError } from './util.ts';
 import { recordJournal } from './journal.ts';
+import { secretRedactor } from './secret-redaction.ts';
 import { writeSetupProgress } from './setup-progress.ts';
 import type { SetupProgress } from './setup-progress.ts';
 
@@ -71,27 +72,29 @@ async function runSetup(ctx: Context, spec: ResolvedSpec, track?: (step: Omit<Se
   const logFile = path.join(taskDir(config, spec.window), 'setup.log');
   const todo = spec.repos.filter((r) => (r.setup?.length ?? 0) > 0);
   if (todo.length === 0) return;
+  const redact = secretRedactor([config, spec.env, process.env, todo.map(repo => repo.setup)]);
   if (!runner.dryRun) await runner.writeFile(logFile, '');
   for (const [repoIndex, repo] of todo.entries()) {
     const name = path.basename(repo.path), commands = repo.setup!;
     for (const [i, command] of commands.entries()) {
-      ctx.info(`${spec.task}: setup ${name} ${i + 1}/${commands.length}: ${command}`);
-      await track?.({ phase: 'setup', repo: name, repoIndex: repoIndex + 1, repoCount: todo.length, command, commandIndex: i + 1, commandCount: commands.length, log: logFile });
-      const setup = { repo: name, repoIndex: repoIndex + 1, repoCount: todo.length, command, commandIndex: i + 1, commandCount: commands.length, log: logFile };
-      if (track) await recordJournal(ctx, { kind: 'setup-started', task: spec.task, setup, text: `${spec.task}: setup rozpoczęty w ${name} (repo ${repoIndex + 1}/${todo.length}, command ${i + 1}/${commands.length}): ${command}; log: ${logFile}` });
-      const r = await runner.exec('sh', ['-c', command], { cwd: repo.worktree, timeoutMs: ctx.config.git.timeoutS * 1000, async: true });
+      const label = redact(command);
+      ctx.info(`${spec.task}: setup ${name} ${i + 1}/${commands.length}: ${label}`);
+      await track?.({ phase: 'setup', repo: name, repoIndex: repoIndex + 1, repoCount: todo.length, command: label, commandIndex: i + 1, commandCount: commands.length, log: logFile });
+      const setup = { repo: name, repoIndex: repoIndex + 1, repoCount: todo.length, command: label, commandIndex: i + 1, commandCount: commands.length, log: logFile };
+      if (track) await recordJournal(ctx, { kind: 'setup-started', task: spec.task, setup, text: `${spec.task}: setup rozpoczęty w ${name} (repo ${repoIndex + 1}/${todo.length}, command ${i + 1}/${commands.length}): ${label}; log: ${logFile}` });
+      const r = await runner.exec('sh', label === command ? ['-c', command] : ['-s'], { cwd: repo.worktree, ...(label === command ? {} : { input: command }), timeoutMs: ctx.config.git.timeoutS * 1000, async: true });
       if (runner.dryRun) continue;
-      const output = `${r.stdout}${r.stderr}`;
-      await runner.appendFile(logFile, `[${name}] $ ${command}\n${output}${output.endsWith('\n') || output === '' ? '' : '\n'}[exit ${r.code}]\n\n`);
+      const output = redact(`${r.stdout}${r.stderr}`);
+      await runner.appendFile(logFile, `[${name}] $ ${label}\n${output}${output.endsWith('\n') || output === '' ? '' : '\n'}[exit ${r.code}]\n\n`);
       if (r.code !== 0) {
-        if (track) await recordJournal(ctx, { kind: 'setup-failed', task: spec.task, setup: { ...setup, exitCode: r.code }, text: `${spec.task}: setup nie powiódł się w ${name} (exit ${r.code}): ${command}; log: ${logFile}; worktree zostaje` });
+        if (track) await recordJournal(ctx, { kind: 'setup-failed', task: spec.task, setup: { ...setup, exitCode: r.code }, text: `${spec.task}: setup nie powiódł się w ${name} (exit ${r.code}): ${label}; log: ${logFile}; worktree zostaje` });
         const tail = output.trimEnd().split('\n').slice(-SETUP_TAIL_LINES).join('\n');
         throw new AgentctlError(
-          `${spec.task}: setup command failed in ${name}${/ETIMEDOUT/i.test(r.stderr) ? ` after ${config.git.timeoutS}s (git.timeout_s; check disk/I/O or increase the timeout)` : ''} (exit ${r.code}): ${command}\n${tail}`,
+          `${spec.task}: setup command failed in ${name}${/ETIMEDOUT/i.test(r.stderr) ? ` after ${config.git.timeoutS}s (git.timeout_s; check disk/I/O or increase the timeout)` : ''} (exit ${r.code}): ${label}\n${tail}`,
           `Full output: ${logFile}. The worktree ${repo.worktree} was kept and no window was started; fix the cause and run "agentctl new --reuse" again.`,
         );
       }
-      if (track) await recordJournal(ctx, { kind: 'setup-finished', task: spec.task, setup: { ...setup, exitCode: r.code }, text: `${spec.task}: setup zakończony w ${name} (exit ${r.code}): ${command}; log: ${logFile}` });
+      if (track) await recordJournal(ctx, { kind: 'setup-finished', task: spec.task, setup: { ...setup, exitCode: r.code }, text: `${spec.task}: setup zakończony w ${name} (exit ${r.code}): ${label}; log: ${logFile}` });
     }
   }
   ctx.info(`${spec.task}: setup done (${todo.map((r) => path.basename(r.path)).join(', ')}), output in ${logFile}`);

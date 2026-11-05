@@ -177,3 +177,25 @@ describe('P19 FIX2: accepted starts retain their complete scope', () => {
     console.log('R6', JSON.stringify(events));
   });
 });
+
+it('ACTL-0181-D M3: setup secrets stay out of progress, journal, output, queue_list and events_since', async () => {
+  const sentinel = 'actl0181d-sentinel-718203';
+  const command = `NPM_TOKEN='${sentinel}' sh -c 'printf "%s\\n" "$NPM_TOKEN"; sleep 1; exit 7'`;
+  const e = environment('redaction', command); await e.tick();
+  const spec = e.spec('SECRET-1'); await e.call('new', { spec }); await e.call('new', { spec, confirm: true });
+  await e.tick(false);
+  await until(() => readSetupProgress(e.config, 'SECRET-1')?.phase === 'setup', 'setup progress');
+  const safe = (name: string, value: unknown) => { const text = typeof value === 'string' ? value : JSON.stringify(value); assert.ok(!text.includes(sentinel), `${name} leaked the sentinel`); assert.ok(text.includes('***'), `${name} contains a redacted label`); };
+  safe('persisted progress', fs.readFileSync(setupProgressFile(e.config, 'secret-1'), 'utf8'));
+  await until(() => readJournal(e.config).some(event => event.kind === 'setup-started'), 'setup journal');
+  safe('persisted journal', readJournal(e.config));
+  safe('queue_list', text(await e.call('queue_list')));
+  safe('events_since', text(await e.call('events_since', { since: '1h', keep: true })));
+  await e.memory.idle();
+  safe('setup output', fs.readFileSync(path.join(taskDir(e.config, 'secret-1'), 'setup.log'), 'utf8'));
+  safe('failed journal', readJournal(e.config));
+  safe('failed queue and error', text(await e.call('queue_list')));
+  safe('failed events_since', text(await e.call('events_since', { since: '1h', keep: true })));
+  assert.equal(readQueue(e.config)[0]?.status, 'failed');
+  assert.ok(e.runner.calls.filter(c => c.line.startsWith('sh ')).every(c => !c.line.includes(sentinel)), 'inline secret is never in shell argv');
+});

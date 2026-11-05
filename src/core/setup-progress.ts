@@ -1,3 +1,4 @@
+import { secretRedactor } from './secret-redaction.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { GlobalConfig } from './config.ts';
@@ -37,7 +38,7 @@ export async function writeSetupProgress(ctx: Context, window: string, progress:
   if (ctx.runner.dryRun) return;
   try {
     await ctx.runner.mkdir(taskDir(ctx.config, window));
-    await ctx.runner.writeFile(setupProgressFile(ctx.config, window), `${JSON.stringify(progress)}\n`);
+    await ctx.runner.writeFile(setupProgressFile(ctx.config, window), `${JSON.stringify(secretRedactor([ctx.config, process.env, progress])(progress))}\n`);
   } catch { /* progress is for the eyes; it never stops the start */ }
 }
 
