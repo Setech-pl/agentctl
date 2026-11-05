@@ -71,7 +71,7 @@ export async function refreshCodexCapacity(ctx: Context): Promise<string | null>
   } catch { return `Codex live reading unavailable (${r.code === 127 ? 'CLI missing' : 'RPC failed or timed out'}); using latest session reading if present`; }
 }
 
-export async function collectCapacity(ctx: Context) {
+export async function collectCapacity(ctx: Context, opts: { diskBudgetMs?: number } = {}) {
   const refreshNote = await refreshCodexCapacity(ctx);
   const now = ctx.runner.now();
   const reader = openReader(ctx.config);
@@ -85,7 +85,7 @@ export async function collectCapacity(ctx: Context) {
   const stats = computeStats(selectHistory(ctx, { since: '7d' }));
   return {
     at: new Date(now).toISOString(),
-    disk: await collectDisk(ctx),
+    disk: await collectDisk(ctx, undefined, opts.diskBudgetMs === undefined ? {} : { budgetMs: opts.diskBudgetMs }),
     note: 'n/d = null. Plan percentages include use outside agentctl. Estimates are not provider token quotas.',
     providers: AGENT_NAMES.map((provider) => {
       const plan = plans[provider];
