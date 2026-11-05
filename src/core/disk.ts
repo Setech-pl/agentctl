@@ -18,7 +18,7 @@ export const DISK_INTERVAL_MS = 5 * 60_000;
 type SizeReading = { at: number; bytes: number | null; worktrees?: { path: string; bytes: number }[] };
 const sizes = new Map<string, SizeReading>();
 /** The measurements under way, one per configuration and set of worktrees: a second reader joins it instead of walking the same trees again. */
-const measuring = new Map<string, Promise<SizeReading>>();
+const measuring = new Map<string, { job: Promise<SizeReading>; startedAt: number }>();
 /** The last reading of this configuration whatever the set of worktrees was (a new task changes the set, and that must not blank the report). */
 const lastReading = new Map<string, SizeReading>();
 export function diskLevel(bytes: number | null, warnGb: number, criticalGb: number): DiskLevel {
@@ -89,10 +89,10 @@ export async function collectDisk(ctx: Context, statfs = fs.promises.statfs, opt
   let pending = false;
   if (!size || ctx.runner.now() - size.at >= DISK_INTERVAL_MS) {
     const known = lastReading.get(ctx.config.path);
-    let job = measuring.get(key);
-    if (!job) {
+    let running = measuring.get(key);
+    if (!running) {
       const fresh = new Map((known?.worktrees ?? []).filter(() => ctx.runner.now() - (known?.at ?? 0) < DISK_INTERVAL_MS).map((w) => [w.path, w.bytes]));
-      job = (async (): Promise<SizeReading> => {
+      const job = (async (): Promise<SizeReading> => {
         let reading: SizeReading;
         try {
           // A worktree measured less than an interval ago keeps its size: a new task adds one tree to measure, not all of them again.
@@ -107,12 +107,17 @@ export async function collectDisk(ctx: Context, statfs = fs.promises.statfs, opt
         if (sizes.size > 32) sizes.delete(sizes.keys().next().value!);
         return reading;
       })().finally(() => measuring.delete(key));
-      measuring.set(key, job);
+      running = { job, startedAt: Date.now() };
+      measuring.set(key, running);
     }
+    const { job, startedAt } = running;
     if (opts.budgetMs === undefined) size = await job;
     else {
       let timer: NodeJS.Timeout | undefined;
-      const late = new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), opts.budgetMs); });
+      // The budget counts from the start of the measurement, so the second call of one status does not wait again; with an earlier reading to show
+      // a measurement in progress gets only a moment (a few small trees are done by then).
+      const wait = Math.max(0, (known || size ? Math.min(opts.budgetMs, 250) : opts.budgetMs) - (Date.now() - startedAt));
+      const late = new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), wait); });
       const done = await Promise.race([job, late]);
       clearTimeout(timer);
       if (done) size = done;

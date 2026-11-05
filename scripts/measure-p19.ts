@@ -22,7 +22,7 @@ const cache = defaultCacheRoot('agentctl-p19');
 const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const out: Record<string, unknown> = { label, setupSeconds: seconds };
 
-await withHarness({ name: 'p19-measure', cacheRoot: cache, config: `capacity: {snapshot: false, codex_refresh: false}\nmcp: {allow: [new, queue]}\n` }, async (h) => {
+await withHarness({ name: 'p19-measure', cacheRoot: cache, config: `capacity: {snapshot: false, codex_refresh: false}\nmcp: {allow: [new, queue]}\n${process.env.P19_WATCH ? 'watch: {interval: 2}\n' : ''}` }, async (h) => {
   const git = (cwd: string, args: string[]) => { const r = spawnSync('git', ['-C', cwd, ...args], { env: h.env, encoding: 'utf8' }); if (r.status !== 0) throw new Error(r.stderr); return r.stdout.trim(); };
   const repos = ['alpha', 'beta'].map((n) => {
     const p = path.join(h.root, n);
@@ -52,6 +52,7 @@ await withHarness({ name: 'p19-measure', cacheRoot: cache, config: `capacity: {s
     await client.connect(new StdioClientTransport({ command: process.execPath, args: ['--experimental-strip-types', '--no-warnings', path.resolve('bin/agentctl.ts'), 'mcp'], env: { ...(h.env as Record<string, string>), ...(process.env.LAGPROBE_LOG ? { LAGPROBE_LOG: process.env.LAGPROBE_LOG, NODE_OPTIONS: `--import ${process.env.LAGPROBE_PRELOAD}` } : {}) }, stderr: 'pipe' }));
     return client;
   };
+  if (process.env.P19_WATCH) { h.spawnAgentctl(['watch'], path.join(h.root, 'watch.log')); await pause(3000); }
   const a = await connect('chat-a'), b = await connect('chat-b');
   const call = async (c: Client, name: string, args: Record<string, unknown> = {}) => {
     const t0 = Date.now();
@@ -85,6 +86,27 @@ await withHarness({ name: 'p19-measure', cacheRoot: cache, config: `capacity: {s
     }
     const result = await confirm;
     out.confirmMs = Date.now() - confirmStart;
+    // With a watcher the confirm is back at once and the setup goes on in the watcher: keep reading until the task is up (the queue entry is gone).
+    const queueDir = path.join(h.agentctlHome, 'queue');
+    const entries = () => (fs.existsSync(queueDir) ? fs.readdirSync(queueDir).filter((f) => f.endsWith('.json')).length : 0);
+    const setupReads: { at: number; client: string; tool: string; ms: number }[] = [];
+    if (process.env.P19_WATCH) {
+      while (entries() > 0 && Date.now() - confirmStart < 240_000) {
+        for (const [client, c] of [['same', a], ['other', b]] as const) {
+          for (const [tool, args] of [['status', {}], ['events_since', {}], ['peek', { task: 'SLOW-1' }], ['queue_list', {}], ['version', {}]] as const) {
+            const r = await call(c, tool, args as Record<string, unknown>);
+            setupReads.push({ at: Date.now() - confirmStart, client, tool, ms: r.ms });
+          }
+        }
+        await pause(1000);
+      }
+      out.startedAfterMs = Date.now() - confirmStart;
+      out.entryGone = entries() === 0;
+      out.readsDuringSetup = setupReads.length;
+      out.setupReadMaxMs = Math.max(0, ...setupReads.map((r) => r.ms));
+      out.setupReadMedianMs = setupReads.map((r) => r.ms).sort((x, y) => x - y)[Math.floor(setupReads.length / 2)] ?? null;
+      reads.push(...setupReads);
+    }
     out.confirmError = result.error;
     out.confirmText = result.text.slice(0, 600);
     out.readsDuringConfirm = reads.length;
