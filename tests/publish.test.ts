@@ -16,7 +16,7 @@ describe('0.17 OIDC publishing prerequisites', () => {
     const steps = workflow.jobs.publish.steps;
     assert.ok(steps.some((s: { run?: string }) => s.run === 'npm publish --provenance --access public'));
     const guard = steps.find((s: { env?: { RELEASE_TAG?: string } }) => s.env?.RELEASE_TAG).run.split('\n')[0];
-    for (const [tag, expected] of [['v0.17.4', 0], ['v0.16.0', 1], ['0.17.4', 1]] as const) {
+    for (const [tag, expected] of [['v0.18.0', 0], ['v0.16.0', 1], ['0.18.0', 1]] as const) {
       const r = spawnSync('/bin/sh', ['-c', guard], { cwd: REPO_ROOT, env: { ...process.env, RELEASE_TAG: tag }, encoding: 'utf8' });
       assert.equal(r.status, expected, tag);
     }
@@ -24,7 +24,7 @@ describe('0.17 OIDC publishing prerequisites', () => {
   for (const mode of ['absent', 'present', 'unavailable'] as const) it(`registry ${mode}: publish decision is explicit and bootstrap 0.17 is never republished`, () => {
     const dir = scratch.sub(mode); const bin = path.join(dir, 'bin'); fs.mkdirSync(bin);
     fs.symlinkSync(process.execPath, path.join(bin, 'node'));
-    fs.writeFileSync(path.join(bin, 'npm'), mode === 'present' ? '#!/bin/sh\necho \'"0.17.4"\'\n' : `#!/bin/sh\necho '${mode === 'absent' ? 'E404 not found' : 'E503 unavailable'}' >&2\nexit 1\n`, { mode: 0o755 });
+    fs.writeFileSync(path.join(bin, 'npm'), mode === 'present' ? '#!/bin/sh\necho \'"0.18.0"\'\n' : `#!/bin/sh\necho '${mode === 'absent' ? 'E404 not found' : 'E503 unavailable'}' >&2\nexit 1\n`, { mode: 0o755 });
     const output = path.join(dir, 'output');
     const result = spawnSync(process.execPath, [path.join(REPO_ROOT, 'scripts/release-version.mjs')], { cwd: REPO_ROOT, env: { ...process.env, PATH: `${bin}:/usr/bin:/bin`, GITHUB_OUTPUT: output }, encoding: 'utf8' });
     assert.equal(result.status, mode === 'unavailable' ? 1 : 0);
