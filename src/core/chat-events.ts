@@ -10,6 +10,7 @@ import type { GlobalConfig } from './config.ts';
 import type { Context } from './context.ts';
 import { awayView } from './away.ts';
 import type { AwayView } from './away.ts';
+import { secretRedactor } from './secret-redaction.ts';
 import { readJournal } from './journal.ts';
 import type { JournalEntry } from './journal.ts';
 import { readQueue, waiting } from './queue.ts';
@@ -100,7 +101,8 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
   const since = parseSince(opts.since, opts.client, config, now);
   const cohort = opts.cohort === undefined ? null : findCohort(config, opts.cohort).name;
   for (const record of listTaskRecords(config)) await journalOutputs(ctx, record);
-  const all = readJournal(config, -1);
+  const journal = readJournal(config, -1);
+  const all = secretRedactor([config, process.env, journal], new Set(listTaskRecords(config).map(r => r.task)))(journal);
   const key = cohort === null ? opts.client : `${opts.client}|cohort:${cohortKey(cohort)}`;
   const saved = opts.cursor ?? ((!opts.since || opts.since === 'last') ? (readMarkers(config)[key] ?? (opts.client.startsWith('mcp:') && readMarkers(config).mcp?.startsWith('e2:') ? readMarkers(config).mcp : undefined)) : undefined);
   let position = saved?.startsWith('e2:') ? decodeCursor(saved) : { index: all.findIndex(e => Date.parse(e.at) > (saved ? Date.parse(saved) : since.ms)), offset: 0 };

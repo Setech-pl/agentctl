@@ -1,9 +1,10 @@
+import { secretRedactor } from './secret-redaction.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { GlobalConfig } from './config.ts';
 import type { Context } from './context.ts';
 import { notifyPhone } from './phone-send.ts';
-import { readTaskRecord } from './taskstore.ts';
+import { listTaskRecords, readTaskRecord } from './taskstore.ts';
 import { isObject, windowName } from './util.ts';
 
 /*
@@ -43,7 +44,7 @@ export const journalPath = (config: Pick<GlobalConfig, 'path'>): string => path.
 /** Append an event. A journal that cannot be written never stops the work it describes. */
 export async function recordJournal(ctx: Context, entry: Omit<JournalEntry, 'at'>): Promise<void> {
   const cohort = entry.cohort ?? (entry.task ? readTaskRecord(ctx.config, windowName(entry.task))?.cohort : undefined);
-  const full: JournalEntry = { at: new Date(ctx.runner.now()).toISOString(), ...entry, ...(cohort ? { cohort } : {}) };
+  const full: JournalEntry = secretRedactor([ctx.config, process.env, entry], new Set(listTaskRecords(ctx.config).map(r => r.task)))({ at: new Date(ctx.runner.now()).toISOString(), ...entry, ...(cohort ? { cohort } : {}) });
   // The phone gets what was announced on the Mac (this is written once per announcement), and the entry says whether it went.
   const phone = await notifyPhone(ctx, full).catch(() => undefined);
   if (phone) full.phone = phone;
