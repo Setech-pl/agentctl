@@ -391,6 +391,8 @@ export interface ReplaySpec {
   swallow: number;
   /** Claude: run the UserPromptSubmit hook of --settings with the payload Claude Code really sends (a collapsed paste wrapped in <pasted_content>). */
   hook: boolean;
+  /** Show the paste whole in the field (all its lines) instead of a placeholder: a human can then change one line of it. */
+  plain?: boolean;
 }
 
 /**
@@ -415,7 +417,7 @@ const draw=name=>{let s=spec().screens[name];const marker='${agent === 'claude' 
  if(name==='pasted')s=s.replace(PLACEHOLDER,(_m,mk)=>mk+'\\u00a0'+text);
  if(name==='ready')s=s+(text?marker+' '+text+'\\n':'');
  shown=name;out('\\x1b[2J\\x1b[H'+s);};
-const label=()=>{const lines=pasted.split('\\n').length;return lines>1?'[Pasted text #'+count+' +'+lines+' lines]':pasted.length>200?'[Pasted text #'+count+']':pasted;};
+const label=()=>{if(spec().plain)return pasted.replace(/\\r\\n?/g,'\\n');const lines=pasted.split('\\n').length;return lines>1?'[Pasted text #'+count+' +'+lines+' lines]':pasted.length>200?'[Pasted text #'+count+']':pasted;};
 const hook=text=>{if(!spec().hook||${JSON.stringify(agent)}!=='claude')return;const i=args.indexOf('--settings');if(i<0)return;
  const settings=JSON.parse(fs.readFileSync(args[i+1],'utf8')),prompt=text.split('\\n').length>1||text.length>200?'<pasted_content id="80b3">\\n'+text+'\\n</pasted_content id="80b3">':text;
  const child=spawn(settings.hooks.UserPromptSubmit[0].hooks[0].command,{shell:true,stdio:['pipe','ignore','ignore']});child.stdin.end(JSON.stringify({hook_event_name:'UserPromptSubmit',prompt}));};
