@@ -133,7 +133,7 @@ export interface GlobalConfig extends Layer {
   /** Token usage and plan limits: warning thresholds, the hold of the queue, the tmux status line, where the agents keep their logs. */
   usage: UsageSettings;
   guideLang: 'en' | 'pl';
-  disk: { warnGb: number; criticalGb: number };
+  disk: { warnGb: number; criticalGb: number; workers: number; measurementTimeoutS: number };
   git: { timeoutS: number };
   capacity: { snapshot: boolean; staleMinutes: number; sampleLimit: number; thresholds: number[]; codexRefresh: boolean };
   /** Set by a long-running process (watch, MCP) when the file on disk does not load and the previous settings stay in force. */
@@ -1151,10 +1151,10 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
     if (typeof raw.report.settle_s === 'number' && Number.isFinite(raw.report.settle_s) && raw.report.settle_s >= 0) reportSettleS = raw.report.settle_s;
     else p.add('config.report.settle_s must be a nonnegative number');
   }
-  const disk = { warnGb: 50, criticalGb: 20 };
+  const disk = { warnGb: 50, criticalGb: 20, workers: 2, measurementTimeoutS: 600 };
   const git = { timeoutS: 600 };
   for (const [section, target, fields] of [
-    ['disk', disk, { warn_gb: 'warnGb', critical_gb: 'criticalGb' }],
+    ['disk', disk, { warn_gb: 'warnGb', critical_gb: 'criticalGb', workers: 'workers', measurement_timeout_s: 'measurementTimeoutS' }],
     ['git', git, { timeout_s: 'timeoutS' }],
   ] as const) {
     const value = raw[section];
@@ -1167,6 +1167,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
       else (target as unknown as Record<string, number>)[field] = value[key];
     }
   }
+  if (!Number.isInteger(disk.workers) || disk.workers < 1 || disk.workers > 8) p.add('config.disk.workers must be an integer from 1 to 8');
   if (disk.criticalGb > disk.warnGb) p.add('config.disk.critical_gb must not exceed warn_gb');
   const cohort = { doneGraceS: 300 };
   if (raw.cohort !== undefined) {

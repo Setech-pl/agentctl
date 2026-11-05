@@ -311,6 +311,8 @@ The guide ships in npm `docs/dispatcher*.md`, with no dependency on a developmen
 | `disk` | mapping | Disk thresholds, in GiB (1024³ bytes). |
 | `disk.warn_gb` | `50` | Warn below this available space on any known filesystem. |
 | `disk.critical_gb` | `20` | Critical below this space; must not exceed warn_gb. |
+| `disk.workers` | `2` | Process-wide tree-measurement worker cap shared by disk facts, capacity, previews and GC; integer 1–8. A lower reloaded cap admits no new work until existing workers drain below it. |
+| `disk.measurement_timeout_s` | `600` | Maximum execution time of a tree measurement. A timed-out worker is terminated and frees its slot; reads retain the last known value and report a measurement error. |
 | `git` | mapping | Worktree checkout and setup limits. |
 | `git.timeout_s` | `600` | Positive timeout in seconds for worktree add (including checkout) and each setup command. |
 

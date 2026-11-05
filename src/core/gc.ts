@@ -1,7 +1,8 @@
 import { knownLinkReferences, linkUsers } from './links.ts';
 import fs from 'node:fs';
 import path from 'node:path';
-import { Worker } from 'node:worker_threads';
+import { configureMeasurements, sizeOf, newestMtime } from './fs-measure.ts';
+export { sizeOf, newestMtime } from './fs-measure.ts';
 import { parseAge } from './archive.ts';
 import { findCohort } from './cohort.ts';
 import type { Context } from './context.ts';
@@ -64,113 +65,6 @@ export interface GcOptions {
 export const DEFAULT_OLDER_THAN = '7d';
 const PROTECTED = new Set(['main', 'master']);
 
-/*
- * The size and the age of a folder tree. A worktree with a full node_modules is hundreds of thousands of entries: walked on the main thread, even
- * with asynchronous calls, it takes the event loop from a chat that waits for `status`, and walked synchronously it froze the MCP server outright.
- * The walk therefore runs in a worker thread (plain synchronous calls there, nobody to block); if no worker can be made, bounded asynchronous calls
- * on the main thread do the same.
- */
-const WALKER = `
-const { parentPort, workerData } = require('node:worker_threads');
-const fs = require('node:fs');
-const path = require('node:path');
-const vanished = (e) => e.code === 'ENOENT' || e.code === 'ENOTDIR';
-function names(dir) { try { return fs.readdirSync(dir); } catch (e) { if (vanished(e)) return []; throw e; } }
-function size(target) {
-  let st; try { st = fs.lstatSync(target); } catch { return 0; }
-  if (!st.isDirectory()) return st.size;
-  let total = 0;
-  for (const name of names(target)) total += size(path.join(target, name));
-  return total;
-}
-function newest(target) {
-  let st; try { st = fs.lstatSync(target); } catch { return 0; }
-  if (!st.isDirectory()) return st.mtimeMs;
-  const list = names(target);
-  return list.length === 0 ? st.mtimeMs : Math.max(...list.map((name) => newest(path.join(target, name))));
-}
-try { parentPort.postMessage({ value: workerData.mode === 'size' ? size(workerData.target) : newest(workerData.target) }); }
-catch (e) { parentPort.postMessage({ failure: String(e && e.message || e) }); }
-`;
-
-function walkInWorker(mode: 'size' | 'newest', target: string): Promise<number> {
-  return new Promise<number>((resolve, reject) => {
-    let worker: Worker;
-    try { worker = new Worker(WALKER, { eval: true, workerData: { mode, target } }); } catch (e) { reject(new WorkerUnavailable(e)); return; }
-    // A long walk must not keep a process alive that has nothing else to do (the MCP server whose app was quit).
-    worker.unref();
-    let answered = false;
-    worker.once('message', (m: { value?: number; failure?: string }) => {
-      answered = true;
-      if (m.failure !== undefined) reject(new Error(m.failure)); else resolve(m.value ?? 0);
-    });
-    worker.once('error', (e) => { if (!answered) reject(new WorkerUnavailable(e)); });
-    worker.once('exit', () => { if (!answered) reject(new WorkerUnavailable(new Error('the worker ended without an answer'))); });
-  });
-}
-class WorkerUnavailable extends Error {
-  constructor(cause: unknown) { super(`no worker thread: ${cause instanceof Error ? cause.message : String(cause)}`); }
-}
-
-/** At most this many calls of the fallback walkers are in flight at once. */
-const WALK_PARALLEL = 32;
-let walking = 0;
-const walkQueue: (() => void)[] = [];
-async function walkSlot<T>(call: () => Promise<T>): Promise<T> {
-  while (walking >= WALK_PARALLEL) await new Promise<void>((resolve) => walkQueue.push(resolve));
-  walking++;
-  try { return await call(); } finally { walking--; walkQueue.shift()?.(); }
-}
-const vanished = (e: unknown): boolean => ['ENOENT', 'ENOTDIR'].includes((e as NodeJS.ErrnoException).code ?? '');
-
-async function sizeOfOnMainThread(target: string): Promise<number> {
-  let st: fs.Stats;
-  try {
-    st = await walkSlot(() => fs.promises.lstat(target));
-  } catch {
-    return 0;
-  }
-  if (!st.isDirectory()) return st.size;
-  let names: string[];
-  try {
-    names = await walkSlot(() => fs.promises.readdir(target));
-  } catch (e) {
-    if (vanished(e)) return 0;
-    throw e;
-  }
-  let total = 0;
-  for (const bytes of await Promise.all(names.map((name) => sizeOfOnMainThread(path.join(target, name))))) total += bytes;
-  return total;
-}
-
-async function newestOnMainThread(target: string): Promise<number> {
-  let st: fs.Stats;
-  try {
-    st = await walkSlot(() => fs.promises.lstat(target));
-  } catch {
-    return 0;
-  }
-  if (!st.isDirectory()) return st.mtimeMs;
-  let names: string[];
-  try {
-    names = await walkSlot(() => fs.promises.readdir(target));
-  } catch (e) {
-    if (vanished(e)) return 0;
-    throw e;
-  }
-  return names.length === 0 ? st.mtimeMs : Math.max(...(await Promise.all(names.map((name) => newestOnMainThread(path.join(target, name))))));
-}
-
-/** Bytes of a file or folder (links are not followed). Never holds the event loop. */
-export async function sizeOf(target: string): Promise<number> {
-  try { return await walkInWorker('size', target); } catch (e) { if (e instanceof WorkerUnavailable) return sizeOfOnMainThread(target); throw e; }
-}
-
-/** The newest modification time (ms) of a file, or of anything inside a folder (a folder is as old as the newest thing in it). Never holds the event loop. */
-export async function newestMtime(target: string): Promise<number> {
-  try { return await walkInWorker('newest', target); } catch (e) { if (e instanceof WorkerUnavailable) return newestOnMainThread(target); throw e; }
-}
-
 const same = (a: string, b: string): boolean => path.resolve(a) === path.resolve(b);
 
 async function git(ctx: Context, args: string[]): Promise<{ code: number; out: string; err: string }> {
@@ -200,6 +94,7 @@ async function listWorktrees(ctx: Context, repo: string): Promise<WorktreeListin
 /** What `gc` would do now. Reads (files, git), changes nothing. */
 export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan> {
   const { config, runner } = ctx;
+  configureMeasurements(config.disk);
   const olderThanMs = parseAge(opts.olderThan ?? DEFAULT_OLDER_THAN);
   const cohort = opts.cohort === undefined ? undefined : findCohort(config, opts.cohort).name;
   const archived = new Set(listArchivedRecords(config).map((r) => r.window));
@@ -392,6 +287,7 @@ export async function applyGc(ctx: Context, plan: GcPlan): Promise<GcResult> {
           const r = await runner.exec('git', ['-C', item.repo as string, 'worktree', 'remove', item.target], { timeoutMs: config.git.timeoutS * 1000 });
           if (r.code !== 0) throw new Error(r.stderr.trim().split('\n')[0] || `git exit ${r.code}`);
         } else if (kind === 'cache') {
+          if (runner.now() - await newestMtime(item.target, { fresh: true, now: () => runner.now() }) < plan.olderThanMs) throw new Error('cache contents changed since the plan; kept because they are too recent');
           await runner.remove(item.target);
         } else if (kind === 'archive') {
           await runner.rename(item.target, path.join(archiveDir(config), path.basename(item.target)));

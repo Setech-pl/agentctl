@@ -3,6 +3,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { MCP_TOOLS } from '../core/mcp-tools.ts';
 import type { McpDeps } from '../core/mcp-tools.ts';
+import { shutdownMeasurements } from '../core/fs-measure.ts';
 import { FIRST_LOOK_MS, readMarkers } from '../core/chat-events.ts';
 
 /*
@@ -39,8 +40,15 @@ export async function runMcpServer(deps: McpDeps, version: string, transport: Tr
   const closed = new Promise<void>((resolve) => {
     server.server.onclose = () => resolve();
   });
-  await server.connect(transport);
   // The SDK transport does not notice that its input ended; the app that started us is gone then.
-  stdin?.once('end', () => void server.close());
-  await closed;
+  const stop = () => { void server.close(); };
+  const signals = stdin === process.stdin ? ['SIGINT', 'SIGTERM', 'SIGHUP'] as const : [];
+  stdin?.once('end', stop);
+  for (const signal of signals) process.once(signal, stop);
+  try { await server.connect(transport); await closed; }
+  finally {
+    stdin?.removeListener('end', stop);
+    for (const signal of signals) process.removeListener(signal, stop);
+    await shutdownMeasurements();
+  }
 }

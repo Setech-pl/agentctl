@@ -5,7 +5,8 @@ import path from 'node:path';
 import { loadProjectConfig } from './config.ts';
 import type { Context } from './context.ts';
 import { listTaskRecords, listArchivedRecords } from './taskstore.ts';
-import { sizeOf } from './gc.ts';
+import { cachedMeasurement, configureMeasurements, requestMeasurement, restoreMeasurements } from './fs-measure.ts';
+import type { PathMeasurement } from './fs-measure.ts';
 import { resolvePath } from './util.ts';
 import { recordJournal } from './journal.ts';
 import type { Notifier } from './notify.ts';
@@ -13,14 +14,10 @@ import { withFileLock } from './file-lock.ts';
 
 export type DiskLevel = 'ok' | 'warn' | 'critical' | 'unknown';
 export interface DiskVolume { device: string | null; paths: string[]; availableBytes: number | null; totalBytes: number | null; level: DiskLevel; error?: string }
-export interface DiskReport { /** The sizes below are the last ones measured (or none yet): a measurement is still running in the background. */ measuring?: boolean; worktreeCount?: number; largestWorktrees?: { path: string; bytes: number }[]; pathsTotal?: number; pathsOffset?: number; pathsNextOffset?: number | null; volumes: DiskVolume[]; worktreeBytes: number | null; measuredAt: string; level: DiskLevel }
+export interface DiskReport { measurementError?: string; /** The sizes below are the last ones measured (or none yet): a measurement is still running in the background. */ measuring?: boolean; worktreeCount?: number; largestWorktrees?: { path: string; bytes: number }[]; pathsTotal?: number; pathsOffset?: number; pathsNextOffset?: number | null; volumes: DiskVolume[]; worktreeBytes: number | null; measuredAt: string; level: DiskLevel }
 export const DISK_INTERVAL_MS = 5 * 60_000;
-type SizeReading = { at: number; bytes: number | null; worktrees?: { path: string; bytes: number }[] };
-const sizes = new Map<string, SizeReading>();
-/** The measurements under way, one per configuration and set of worktrees: a second reader joins it instead of walking the same trees again. */
-const measuring = new Map<string, { job: Promise<SizeReading>; startedAt: number }>();
-/** The last reading of this configuration whatever the set of worktrees was (a new task changes the set, and that must not blank the report). */
-const lastReading = new Map<string, SizeReading>();
+const inventories = new Map<string, { id: string; signature?: string }>();
+const restored = new Set<string>();
 export function diskLevel(bytes: number | null, warnGb: number, criticalGb: number): DiskLevel {
   return bytes === null ? 'unknown' : bytes < criticalGb * 1024 ** 3 ? 'critical' : bytes < warnGb * 1024 ** 3 ? 'warn' : 'ok';
 }
@@ -35,6 +32,7 @@ function existingAncestor(target: string): string {
  * reading, or with "n/d" and `measuring: true` when there is none yet. Without a budget the call waits for the measurement.
  */
 export async function collectDisk(ctx: Context, statfs = fs.promises.statfs, opts: { detail?: boolean; offset?: number; limit?: number; budgetMs?: number } = {}): Promise<DiskReport> {
+  configureMeasurements(ctx.config.disk);
   const records = [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)];
   const targets = new Set([ctx.config.cache, ctx.config.stateDir]);
   if (ctx.config.worktreeRoot) targets.add(resolvePath(ctx.config.worktreeRoot));
@@ -73,65 +71,67 @@ export async function collectDisk(ctx: Context, statfs = fs.promises.statfs, opt
     volumes.set(key, { device, paths: [target], availableBytes, totalBytes, level: diskLevel(availableBytes, ctx.config.disk.warnGb, ctx.config.disk.criticalGb), ...(error ? { error } : {}) });
   }
   const worktrees = [...new Set(records.flatMap((r) => r.repos.map((r) => r.worktree)))].sort();
-  const key = `${ctx.config.path}:${JSON.stringify(worktrees)}`;
   const sizeFile = path.join(path.dirname(ctx.config.path), 'disk-sizes.json');
-  const read = (): SizeReading | undefined => {
-    let size = sizes.get(key);
-    if (!size) {
-      try {
-        const cached = JSON.parse(fs.readFileSync(sizeFile, 'utf8'));
-        if (cached.key === key && Array.isArray(cached.worktrees) && typeof cached.at === 'number' && (cached.bytes === null || typeof cached.bytes === 'number') && ctx.runner.now() >= cached.at && ctx.runner.now() - cached.at < DISK_INTERVAL_MS) size = { at: cached.at, bytes: cached.bytes, worktrees: cached.worktrees };
-      } catch { /* first read or torn cache */ }
-    }
-    return size;
-  };
-  let size = read();
-  let pending = false;
-  if (!size || ctx.runner.now() - size.at >= DISK_INTERVAL_MS) {
-    const known = lastReading.get(ctx.config.path);
-    let running = measuring.get(key);
-    if (!running) {
-      const fresh = new Map((known?.worktrees ?? []).filter(() => ctx.runner.now() - (known?.at ?? 0) < DISK_INTERVAL_MS).map((w) => [w.path, w.bytes]));
-      const job = (async (): Promise<SizeReading> => {
-        let reading: SizeReading;
-        try {
-          // A worktree measured less than an interval ago keeps its size: a new task adds one tree to measure, not all of them again.
-          const entries: { path: string; bytes: number }[] = [];
-          for (const wt of worktrees) entries.push({ path: wt, bytes: fresh.get(wt) ?? await sizeOf(wt) });
-          entries.sort((a, b) => b.bytes - a.bytes || a.path.localeCompare(b.path));
-          reading = { at: ctx.runner.now(), bytes: entries.reduce((n, wt) => n + wt.bytes, 0), worktrees: entries };
-        } catch { reading = { at: ctx.runner.now(), bytes: null }; }
-        try { await ctx.runner.writeFile(sizeFile, JSON.stringify({ key, ...reading })); } catch { /* cache cannot make a read fail */ }
-        sizes.set(key, reading);
-        lastReading.set(ctx.config.path, reading);
-        if (sizes.size > 32) sizes.delete(sizes.keys().next().value!);
-        return reading;
-      })().finally(() => measuring.delete(key));
-      running = { job, startedAt: Date.now() };
-      measuring.set(key, running);
-    }
-    const { job, startedAt } = running;
-    if (opts.budgetMs === undefined) size = await job;
-    else {
-      let timer: NodeJS.Timeout | undefined;
-      // The budget counts from the start of the measurement, so the second call of one status does not wait again; with an earlier reading to show
-      // a measurement in progress gets only a moment (a few small trees are done by then).
-      const wait = Math.max(0, (known || size ? Math.min(opts.budgetMs, 250) : opts.budgetMs) - (Date.now() - startedAt));
-      const late = new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), wait); });
-      const done = await Promise.race([job, late]);
-      clearTimeout(timer);
-      if (done) size = done;
-      else { size = known ?? size ?? { at: ctx.runner.now(), bytes: null }; pending = true; }
-    }
+  if (!restored.has(sizeFile)) {
+    restored.add(sizeFile);
+    try {
+      const stored = JSON.parse(fs.readFileSync(sizeFile, 'utf8'));
+      // Old aggregate timestamps cannot establish the ages of individual paths.
+      if (stored.version === 2) restoreMeasurements(stored.entries, ctx.runner.now());
+    } catch { /* first reading, torn or incompatible cache */ }
   }
+  const id = JSON.stringify(worktrees);
+  let inventory = inventories.get(ctx.config.path);
+  if (!inventory || inventory.id !== id) { inventory = { id }; inventories.set(ctx.config.path, inventory); }
+  const current = inventory;
+  const leases = worktrees.map(wt => {
+    try { return requestMeasurement(wt, { background: opts.budgetMs !== undefined, now: () => ctx.runner.now() }); }
+    catch (error) { return { promise: Promise.reject<PathMeasurement>(error), startedAt: Date.now(), release() {} }; }
+  });
+  const done = Promise.allSettled(leases.map(l => l.promise)).then(results => {
+    for (const lease of leases) lease.release();
+    return results;
+  });
+  const entries = (): PathMeasurement[] => worktrees.flatMap(wt => {
+    try { const m = cachedMeasurement(wt); return m ? [m] : []; } catch { return []; }
+  });
+  // Persist only the current inventory. Older consumers join path jobs; they never publish a superseded aggregate.
+  void done.then(async results => {
+    if (results.some(r => r.status === 'rejected') || inventories.get(ctx.config.path) !== current) return;
+    const values = entries();
+    const signature = JSON.stringify(values);
+    if (current.signature === signature) return;
+    current.signature = signature;
+    try { await ctx.runner.writeFile(sizeFile, JSON.stringify({ version: 2, entries: values })); }
+    catch { if (current.signature === signature) current.signature = undefined; }
+  }).catch(() => undefined);
+  let pending = false;
+  let completed: Awaited<typeof done> | undefined;
+  if (opts.budgetMs === undefined) completed = await done;
+  else {
+    const known = entries().length > 0;
+    const startedAt = Math.min(Date.now(), ...leases.map(l => l.startedAt));
+    const wait = Math.max(0, (known ? Math.min(opts.budgetMs, 250) : opts.budgetMs) - (Date.now() - startedAt));
+    let timer: NodeJS.Timeout | undefined;
+    completed = await Promise.race([done, new Promise<undefined>(resolve => { timer = setTimeout(() => resolve(undefined), wait); })]);
+    clearTimeout(timer);
+    pending = completed === undefined;
+  }
+  const values = entries();
+  const failures = completed?.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+  const measurementError = failures?.length ? String(failures[0]!.reason instanceof Error ? failures[0]!.reason.message : failures[0]!.reason) : undefined;
+  const measuredAt = values.length ? Math.min(...values.map(m => m.at)) : ctx.runner.now();
+  const worktreeBytes = values.length || worktrees.length === 0 ? values.reduce((n, m) => n + m.bytes, 0) : null;
+  const largestWorktrees = values.map(m => ({ path: m.target, bytes: m.bytes })).sort((a, b) => b.bytes - a.bytes || a.path.localeCompare(b.path)).slice(0, 5);
+  if (!measurementError && values.length < worktrees.length) pending = true;
   const all = [...volumes.values()];
   const level = (['critical', 'warn', 'unknown', 'ok'] as const).find((l) => all.some((v) => v.level === l)) ?? 'unknown';
   const offset = opts.offset ?? 0, limit = Math.min(opts.limit ?? 20, 100);
   const paths = all.flatMap(v => v.paths), page = new Set(opts.detail ? paths.slice(offset, offset + limit) : []);
-  return { worktreeCount: worktrees.length, largestWorktrees: size.worktrees?.slice(0, 5) ?? [], pathsTotal: paths.length, pathsOffset: offset, pathsNextOffset: opts.detail && offset + limit < paths.length ? offset + limit : null, volumes: all.map(v => ({ ...v, pathCount: v.paths.length, paths: v.paths.filter(p => page.has(p)) })), worktreeBytes: size.bytes, measuredAt: new Date(size.at).toISOString(), level, ...(pending ? { measuring: true } : {}) };
+  return { worktreeCount: worktrees.length, largestWorktrees, pathsTotal: paths.length, pathsOffset: offset, pathsNextOffset: opts.detail && offset + limit < paths.length ? offset + limit : null, volumes: all.map(v => ({ ...v, pathCount: v.paths.length, paths: v.paths.filter(p => page.has(p)) })), worktreeBytes, measuredAt: new Date(measuredAt).toISOString(), level, ...(pending ? { measuring: true } : {}), ...(measurementError ? { measurementError } : {}) };
 }
 export function diskLine(disk: DiskReport): string {
-  return `Disk: ${disk.level}; free ${disk.volumes.map((v) => v.availableBytes === null ? 'n/d' : `${(v.availableBytes / 1024 ** 3).toFixed(1)} GiB`).join(' / ')}; agentctl worktrees ${disk.worktreeBytes === null ? 'n/d' : `${(disk.worktreeBytes / 1024 ** 3).toFixed(1)} GiB`}${disk.measuring ? ' (measuring, last reading)' : ''}${disk.level === 'critical' || disk.level === 'warn' ? '; inspect gc_preview / agentctl gc' : ''}`;
+  return `Disk: ${disk.level}; free ${disk.volumes.map((v) => v.availableBytes === null ? 'n/d' : `${(v.availableBytes / 1024 ** 3).toFixed(1)} GiB`).join(' / ')}; agentctl worktrees ${disk.worktreeBytes === null ? 'n/d' : `${(disk.worktreeBytes / 1024 ** 3).toFixed(1)} GiB`}${disk.measuring ? ' (measuring, last reading)' : disk.measurementError ? ' (measurement failed, last reading)' : ''}${disk.level === 'critical' || disk.level === 'warn' ? '; inspect gc_preview / agentctl gc' : ''}`;
 }
 const sampled = new Map<string, number>();
 export async function diskTick(ctx: Context, notifier: Notifier): Promise<void> {
