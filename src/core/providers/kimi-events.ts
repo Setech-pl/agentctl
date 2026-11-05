@@ -77,7 +77,8 @@ export const kimiEvents: EventSupport = {
         if (event?.type === 'llm.request' && ms !== null && ms >= Date.parse(record.attemptStarted ?? record.started)) {
           const stats = emptyStats('kimi'); stats.kimi = { protocol: cursor.protocol }; feedKimiLine(stats, line);
           if (stats.observed) {
-            record.observed = stats.observed;
+            // 2.5.1 dropped cli_version from llm.request; the version read at task start is the fallback.
+            record.observed = stats.observed.cliVersion === 'unknown' && record.agentCliVersion ? { ...stats.observed, cliVersion: record.agentCliVersion } : stats.observed;
             record.observedWarning = observationWarning(record, stats.observed);
             await setHeaderFields(ctx.runner, taskFile(ctx.config, record.window), { observed: record.observed, observed_warning: record.observedWarning ?? null });
           }

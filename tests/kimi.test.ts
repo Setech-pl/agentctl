@@ -172,6 +172,19 @@ it('polls synthetic wire incrementally, persists matching delivery evidence and 
   assert.equal(JSON.parse(fs.readFileSync(path.join(state, 'kimi-wire-status.json'), 'utf8')).supported, false);
   assert.equal(fs.existsSync(path.join(state, 'event.json')), false);
 });
+it('records the start-time CLI version when the 2.5.1 wire omits cli_version, else keeps unknown', async () => {
+  for (const [name, agentCliVersion, expected] of [['with-version', '2.5.1', '2.5.1'], ['without-version', undefined, 'unknown']] as const) {
+    const w = world(name), wt = path.join(w.root, 'wt'); fs.mkdirSync(wt);
+    const now = Date.now(), record = seedTask(w.config, 'CLIVER', { agent: 'kimi', model: 'k3', effort: 'high', ...(agentCliVersion ? { agentCliVersion } : {}), repos: [{ path: w.root, worktree: wt }], started: new Date(now - 1000).toISOString() });
+    const dir = path.join(w.home, 'sessions', 'workspace', 'session_S', 'agents', 'main'); fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'wire.jsonl'), [
+      { type: 'metadata', protocol_version: '1.5', cwd: wt, session_id: 'S', time: now },
+      { type: 'llm.request', model: 'k3', modelAlias: 'kimi-code/k3', thinkingEffort: 'high', time: now },
+    ].map(r => JSON.stringify(r)).join('\n') + '\n');
+    await kimi.events.poll!(makeContext(w.config).ctx, record);
+    assert.deepEqual(record.observed, { model: 'kimi-code/k3', effort: 'high', cliVersion: expected });
+  }
+});
 it('extends MCP provider fields only when Kimi is active', async () => {
   const { MCP_TOOLS, providerToolInput } = await import('../src/core/mcp-tools.ts');
   const { z } = await import('zod');
