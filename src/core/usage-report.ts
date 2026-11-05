@@ -39,6 +39,8 @@ export interface TaskUsageRow {
   fresh: number;
   /** null: no session log found. */
   known: boolean;
+  observed?: TaskUsage['observed'];
+  warning?: string;
 }
 
 export interface CohortUsage {
@@ -109,7 +111,7 @@ export async function collectUsage(ctx: Context, opts: UsageOptions = {}): Promi
     // A task that neither worked in the window nor holds a window of its own is not listed.
     const active = row ? ACTIVE.has(row.state) && !row.closed && !row.cancelled && row.window === 'alive' : false;
     if (known && freshTokens(inWindow) === 0 && !active) continue;
-    tasks.push({ task: record.task, agent: record.agent, model: record.model, cohort: record.cohort ?? null, state, active, sessions: u.sessions, tokens: inWindow, fresh: freshTokens(inWindow), known });
+    tasks.push({ task: record.task, agent: record.agent, model: record.model, cohort: record.cohort ?? null, state, active, sessions: u.sessions, tokens: inWindow, fresh: freshTokens(inWindow), known, ...(u.observed ? { observed: u.observed } : {}), ...(u.warning ? { warning: u.warning } : {}) });
     if (record.cohort !== undefined && known) {
       const c = cohorts.get(cohortKey(record.cohort)) ?? { cohort: record.cohort, tasks: 0, tokens: zeroTokens(), fresh: 0 };
       c.tasks++;
@@ -163,6 +165,7 @@ export function renderUsage(report: UsageReport): string[] {
   }
   lines.push('Tokens = input + output + cache writes of the tasks agentctl started (cache reads are not counted; see "agentctl usage --json").');
 
+  for (const t of report.tasks) if (t.warning) lines.push(`Warning ${t.task}: ${t.warning}; observed ${t.observed?.model}/${t.observed?.effort}`);
   const active = report.tasks.filter((t) => t.active);
   if (active.length > 0) {
     lines.push('', 'Active tasks:');

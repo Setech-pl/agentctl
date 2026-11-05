@@ -70,6 +70,8 @@ export interface TaskRecord {
   summaryDelivered?: string;
   /** The order as written in the spec; agent/model/effort above are what actually runs. */
   requested: Order;
+  observed?: { model: string; effort: string; cliVersion: string };
+  observedWarning?: string;
   switchedBy?: 'flag' | 'limit';
   /** ISO timestamp of the last `pull --ready` that took the report. */
   pulled?: string;
@@ -154,6 +156,8 @@ export function renderTaskMd(record: TaskRecord, prompt: string): string {
     model: record.model,
     effort: record.effort,
     requested: record.requested,
+    ...(record.observed ? { observed: record.observed } : {}),
+    ...(record.observedWarning ? { observed_warning: record.observedWarning } : {}),
     repos: record.repos,
     links: record.links,
     env: record.env,
@@ -252,6 +256,8 @@ export function parseTaskRecord(text: string): TaskRecord | undefined {
     model: record.model,
     effort: record.effort === 'unknown' ? 'high' : record.effort,
   };
+  if (isObject(data.observed) && typeof data.observed.model === 'string' && typeof data.observed.effort === 'string' && typeof data.observed.cliVersion === 'string') record.observed = data.observed as TaskRecord['observed'];
+  if (typeof data.observed_warning === 'string') record.observedWarning = data.observed_warning;
   for (const [key, field] of [['delivery_output_baseline', 'deliveryOutputBaseline'], ['delivery_id', 'deliveryId'], ['delivery_started_at', 'deliveryStartedAt'], ['delivery_report_baseline', 'deliveryReportBaseline'], ['report_confirmed', 'reportConfirmed'], ['pending_prompt', 'pendingPrompt'], ['prompt_sent_at', 'promptSentAt'], ['prompt_error', 'promptError']] as const) if (typeof data[key] === 'string') record[field] = data[key];
   if (['launching', 'pending', 'sending', 'confirming', 'sent', 'needs-attention'].includes(String(data.prompt_delivery))) record.promptDelivery = data.prompt_delivery as TaskRecord['promptDelivery'];
   if (data.prompt_kind === 'initial' || data.prompt_kind === 'followup') record.promptKind = data.prompt_kind;
@@ -344,7 +350,7 @@ export async function setHeaderField(runner: Runner, file: string, key: string, 
 }
 
 /** Set several keys of the header in one write; `null` removes the key. */
-export async function setHeaderFields(runner: Runner, file: string, fields: Record<string, string | number | boolean | null>): Promise<boolean> {
+export async function setHeaderFields(runner: Runner, file: string, fields: Record<string, string | number | boolean | null | NonNullable<TaskRecord['observed']>>): Promise<boolean> {
   let entered = false;
   const change = async () => {
   entered = true;

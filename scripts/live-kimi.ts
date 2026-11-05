@@ -85,9 +85,9 @@ await withHarness({ name: 'ki', cacheRoot: cache, config: 'providers: [claude, c
   check('Kimi orphan without role option is discovered', rows().some((r: { task: string; state: string }) => r.task === 'KIMI-ORPHAN' && r.state === 'orphan'));
   h.tmux(['kill-window', '-t', `=${h.session}:kimi-orphan`]);
   check('no task /usage was sent', events().filter(e => e.start).filter(e => !e.cwd.endsWith('kimi-usage-probe')).every(e => e.env.AGENTCTL_TASK !== 'usage-probe'));
-  fs.writeFileSync(path.join(h.env.KIMI_CODE_HOME!, 'config.toml'), `default_permission_mode='yolo'\n`);
-  const denied = newTask('KI-AUTO'); check('yolo config refuses start before any window', denied.code !== 0 && /default_permission_mode=yolo/.test(denied.stderr) && !h.tmux(['list-windows', '-t', `=${h.session}`, '-F', '#{window_name}']).stdout.includes('ki-auto'));
-  const doctor = h.agentctl(['doctor']); check('doctor reports forbidden permission mode', /default_permission_mode=yolo/.test(doctor.stdout + doctor.stderr));
+  fs.writeFileSync(path.join(h.env.KIMI_CODE_HOME!, 'config.toml'), `default_permission_mode='auto'\n`);
+  const denied = newTask('KI-AUTO'); check('auto config refuses start before any window', denied.code !== 0 && /default_permission_mode=auto/.test(denied.stderr) && !h.tmux(['list-windows', '-t', `=${h.session}`, '-F', '#{window_name}']).stdout.includes('ki-auto'));
+  const doctor = h.agentctl(['doctor']); check('doctor reports forbidden permission mode', /default_permission_mode=auto/.test(doctor.stdout + doctor.stderr));
   fs.writeFileSync(path.join(h.env.KIMI_CODE_HOME!, 'config.toml'), `default_permission_mode='manual'\n`);
   fs.rmSync(log + '.mode', { force: true }); installPromptAgent(h, 'kimi', 'trust', log);
   const trust = newTask('KI-TRUST'); check('trust is never answered automatically', trust.code !== 0 && /trust/.test(trust.stderr) && !events().some(e => e.trustKey));

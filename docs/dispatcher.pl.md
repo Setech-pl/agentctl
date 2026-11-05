@@ -133,7 +133,7 @@ Podglądy MCP mają niezależne `preview_token`, ważne dziesięć minut, i odma
 
 Dobieraj spośród aktywnych `providers`: Claude i Codex są obowiązkowe, Kimi opcjonalny. Equivalents według klas modeli to mapowania do przydziału pracy; sprawdź aktualne capacity i miejsca. Przy trzech dostawcach move wymaga jawnego `--agent`. Automatyczny review kieruje się `review.prefer` lub kolejnością providers, pomija autora, niedostępne CLI i cele bez mapowania.
 
-Kimi Code 2.5.0 nie ma sandboxa CLI. Ręczne reguły zgód określają pytania narzędzi; Write może przejść bez dialogu. Trust/login/update rozstrzyga człowiek. Effort low/high/max działa wyłącznie według `support_efforts` modelu z configu; bez danych katalogu nie wymuszamy env effort. Nazwy wyświetlane i aliasy bez wersji są dynamiczne. Manager i Remote Control pozostają Claude-only.
+Kimi Code 2.5.0 nie ma sandboxa CLI. Start dopuszcza `manual` (Always Ask) lub `yolo` (Ask When Needed) wyłącznie z `permission.dangerous_command_guard=true`; `auto` (Never Ask) i wyłączony guard w config/env powodują odmowę. Rzeczywiste 2.5.0 w trybie manual pyta także dla dokładnej reguły Bash allow; yolo stosuje te reguły. Doctor pokazuje tryb, guard i reguły, bez zapisu configu. Write może przejść bez dialogu. Trust/login/update rozstrzyga człowiek. Effort low/high/max działa wyłącznie według `support_efforts` modelu z configu; bez danych katalogu nie wymuszamy env effort. Nazwy wyświetlane i aliasy bez wersji są dynamiczne. Manager i Remote Control pozostają Claude-only.
 
 Capacity planu Kimi to n/d bez `capacity.kimi_usage_probe`; neutralna sesja wymaga ręcznego trust. Limitowana sonda `/usage` odczytuje TUI, bez credentials/OAuth ani API, nigdy w oknie zadania. Uwzględniaj 5h/Weekly/Monthly wyłącznie, gdy występują. Prompt, odczytane pliki, wyniki poleceń i diffy trafiają do Moonshot AI; domyślne wyłączenie telemetrii nie zatrzymuje przesyłania danych zadania. Guide projektu może jawnie zakazać Kimi w danym repo.
 
@@ -148,4 +148,6 @@ repos: [{path: /path/to/repo, worktree: /path/to/worktree, branch: task/example}
 Zapisz kryteria odbioru, ograniczenia i wymagania raportu.
 ```
 
-Wzorce auth/limit/overload/background Kimi, stopka kolejki w trakcie pracy, ścieżki sesji i interakcje wire są hipotezami z syntetycznymi fixture; nie opisuj ich jako potwierdzonego działania prawdziwej wersji 2.5.0.
+Wzorce auth/limit/overload/background Kimi, stopka kolejki w trakcie pracy, pozostałe interakcje wire są hipotezami z syntetycznymi fixture; nie opisuj ich jako potwierdzonego działania prawdziwej wersji 2.5.0.
+
+Rzeczywisty model/effort Kimi 2.5.0 pochodzi z pasywnego `llm.request.modelAlias/thinkingEffort`, obok zamówienia w TASK.md i status JSON. Stopka może pokazywać `high`, gdy wire potwierdza `low`; rozbieżność z zamówieniem daje ostrzeżenie. Sesje wiążemy przez `state.json` i indeks sesji; tokeny pochodzą z `usage.record`.

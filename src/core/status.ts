@@ -23,6 +23,7 @@ import { taskProgress } from './progress.ts';
 import type { Progress } from './progress.ts';
 import { screenMetadata, lastContentLine } from './tmux.ts';
 import { listArchivedRecords, listTaskRecords } from './taskstore.ts';
+import type { TaskRecord } from './taskstore.ts';
 import { attachCollisions } from './collisions.ts';
 import type { Collide } from './collisions.ts';
 import { BOARD_WINDOW, MANAGER_WINDOW } from './windows.ts';
@@ -55,6 +56,8 @@ export interface StatusRow {
   effort: string;
   /** "agent model/effort" as ordered in the spec, and as it runs. They differ after --agent or a limit switch. */
   requested: string;
+  observed?: TaskRecord['observed'];
+  observedWarning?: string;
   effective: string;
   switchedBy: 'flag' | 'limit' | null;
   state: TaskState;
@@ -233,6 +236,8 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       model: record.model,
       effort: record.effort,
       requested: `${record.requested.agent} ${formatModelEffort(record.requested)}`,
+      ...(record.observed ? { observed: record.observed } : {}),
+      ...(record.observedWarning ? { observedWarning: record.observedWarning } : {}),
       effective: `${record.agent} ${record.model}/${record.effort}`,
       switchedBy: record.switchedBy ?? null,
       state,

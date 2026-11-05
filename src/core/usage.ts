@@ -174,6 +174,10 @@ function candidates(config: GlobalConfig, reader: UsageReader, record: TaskRecor
   return out;
 }
 
+export function observationWarning(record: TaskRecord, observed: NonNullable<TaskUsage['observed']>): string | undefined {
+  const normalize = (model: string) => record.agent === 'kimi' ? model.replace(/^kimi-code\//, '') : model;
+  return (observed.model !== 'unknown' && record.requested.model !== 'default' && normalize(observed.model) !== normalize(record.requested.model)) || (observed.effort !== 'unknown' && observed.effort !== record.requested.effort) ? 'observed differs from requested' : undefined;
+}
 /**
  * Tokens per task. A session goes to one task: of those that could own it (same provider, same worktree), the one that started last
  * before the session did - and only when the session began before that task ended.
@@ -208,7 +212,7 @@ export function collectTaskUsage(config: GlobalConfig, reader: UsageReader, reco
       counted = true;
       if (file === candidate.file && stats.observed) {
         u.observed = stats.observed;
-        if ((stats.observed.model !== 'unknown' && record.requested.model !== 'default' && stats.observed.model !== record.requested.model) || (stats.observed.effort !== 'unknown' && stats.observed.effort !== record.requested.effort)) u.warning = 'observed differs from requested';
+        u.warning = observationWarning(record, stats.observed);
       }
       for (const [key, t] of Object.entries(stats.buckets)) u.buckets[key] = addTokens(u.buckets[key] ?? zeroTokens(), t);
       u.total = addTokens(u.total, sumBuckets(stats.buckets));

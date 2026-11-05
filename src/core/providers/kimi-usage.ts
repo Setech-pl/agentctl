@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { UsageSupport, UsageCandidate, SessionRef } from './types.ts';
 import type { GlobalConfig } from '../config.ts';
-import type { UsageReader } from '../usage-sources.ts';
+import type { UsageReader, SessionMeta } from '../usage-sources.ts';
 import type { TaskRecord } from '../taskstore.ts';
 import type { SessionStats, PlanSnapshot, PlanWindow } from '../usage-parse.ts';
 import { num, str, timeOf, touch, addToBucket } from '../usage-parse.ts';
@@ -23,9 +23,16 @@ export function readKimiSnapshot(config: Pick<GlobalConfig, 'path'>): PlanSnapsh
   } catch { return undefined; }
 }
 
-/** [hypothesis] Session layout from the design; only under sessions/, never credentials. */
-export function kimiSessions(reader: UsageReader, home: string, record: TaskRecord, worktrees: string[], known: SessionRef[]): UsageCandidate[] {
+/** 2.5.0 session metadata supplies identity/cwd; wire contains neither. Never read credentials. */
+export function kimiSessions(reader: UsageReader, home: string, record: TaskRecord, worktrees: string[], known: SessionRef[]): (UsageCandidate & { id?: string })[] {
   const root = path.join(home, 'sessions'), candidates: string[] = [];
+  const index = new Map<string, { id: string; cwd: string }>();
+  try {
+    for (const line of fs.readFileSync(path.join(home, 'session_index.jsonl'), 'utf8').split('\n')) {
+      const entry = wireObject(line);
+      if (entry && typeof entry.sessionDir === 'string' && typeof entry.sessionId === 'string' && typeof entry.workDir === 'string' && within(path.resolve(entry.sessionDir), root) && path.basename(entry.sessionDir) === entry.sessionId) index.set(path.join(entry.sessionDir, 'agents/main/wire.jsonl'), { id: entry.sessionId, cwd: entry.workDir });
+    }
+  } catch { /* state.json is authoritative; index can be missing/rebuilt */ }
   for (const workspace of reader.list(root)) {
     const dir = path.join(root, workspace);
     for (const session of reader.list(dir)) {
@@ -36,10 +43,19 @@ export function kimiSessions(reader: UsageReader, home: string, record: TaskReco
   }
   const ids = new Set(known.map(s => s.id));
   return candidates.flatMap(file => {
-    const meta = reader.meta(file, 'kimi');
+    let meta: SessionMeta | undefined;
+    try {
+      const state: unknown = JSON.parse(fs.readFileSync(path.join(path.dirname(file), '../..', 'state.json'), 'utf8'));
+      if (isObject(state) && typeof state.id === 'string' && typeof state.cwd === 'string') meta = { id: state.id, cwd: state.cwd, firstAt: typeof state.createdAt === 'number' ? state.createdAt : reader.meta(file, 'kimi')?.firstAt ?? null };
+    } catch { /* synthetic/legacy logs can carry metadata in wire */ }
+    if (!meta) {
+      meta = reader.meta(file, 'kimi');
+      const indexed = index.get(file);
+      if (indexed) meta = { ...indexed, firstAt: meta?.firstAt ?? null };
+    }
     if (!meta) return [];
     const explicit = meta.id !== null && ids.has(meta.id);
-    return explicit || (meta.cwd && worktrees.some(w => within(meta.cwd!, w))) ? [{ file, firstAt: meta.firstAt, explicit }] : [];
+    return explicit || (meta.cwd && worktrees.some(w => within(meta.cwd!, w))) ? [{ file, firstAt: meta.firstAt, explicit, ...(meta.id ? { id: meta.id } : {}) }] : [];
   });
 }
 
@@ -47,7 +63,11 @@ export function wireObject(line: string): Record<string, unknown> | undefined {
   try { const o: unknown = JSON.parse(line); return isObject(o) ? o : undefined; } catch { return undefined; }
 }
 export function wirePayload(o: Record<string, unknown>): Record<string, unknown> {
-  return isObject(o.event) ? o.event : o;
+  return typeof o.type !== 'string' && isObject(o.event) ? o.event : o;
+}
+export function wireTime(o: Record<string, unknown>): number | null {
+  const event = wirePayload(o), value = o.time ?? o.timestamp ?? event.time ?? event.timestamp ?? o.created_at;
+  return typeof value === 'number' && Number.isFinite(value) ? value : timeOf(value);
 }
 export function wireProtocol(o: Record<string, unknown>): string | undefined {
   const meta = isObject(o.metadata) ? o.metadata : o;
@@ -58,16 +78,16 @@ export function feedKimiLine(stats: SessionStats, line: string): void {
   const o = wireObject(line);
   if (!o) return;
   const protocol = wireProtocol(o);
-  if (protocol !== undefined) stats.kimi = { protocol };
+  if (protocol !== undefined) stats.kimi = { protocol, parserVersion: 2 };
   const event = wirePayload(o), data = isObject(event.data) ? event.data : event;
-  const ms = timeOf(o.timestamp ?? event.timestamp);
+  const ms = wireTime(o);
   const metadata = isObject(o.metadata) ? o.metadata : o;
   if (typeof metadata.session_id === 'string') stats.id = metadata.session_id;
   if (typeof metadata.cwd === 'string') stats.cwd = metadata.cwd;
   touch(stats, ms);
   if (stats.kimi?.protocol !== '1.5') return;
   const type = str(event.type);
-  if (type === 'llm.request') stats.observed = { model: str(data.model) || stats.observed?.model || 'unknown', effort: str(data.effort) || stats.observed?.effort || 'unknown', cliVersion: str(data.cli_version) || stats.observed?.cliVersion || 'unknown' };
+  if (type === 'llm.request') stats.observed = { model: str(data.modelAlias ?? data.model) || stats.observed?.model || 'unknown', effort: str(data.thinkingEffort ?? data.effort) || stats.observed?.effort || 'unknown', cliVersion: str(data.cli_version) || stats.observed?.cliVersion || 'unknown' };
   if (type !== 'usage.record') return; // token_counting.* describes context, not billable usage
   const u = isObject(data.usage) ? data.usage : data;
   const id = str(event.id ?? data.id);

@@ -23,14 +23,17 @@ export function inspectReport(config: Pick<GlobalConfig, 'reportSettleS'> & Part
     const signature = createHash('sha256').update(text).digest('hex');
     if (record.deliveryStartedAt && signature === record.deliveryReportBaseline && (record.promptDelivery !== 'sent' || record.promptKind === 'followup')) return { ready: false, exists: true, mtime: st.mtimeMs, signature, reason: 'unchanged before prompt delivery' };
     if (record.attemptReportBaseline && signature === record.attemptReportBaseline) return { ready: false, exists: true, mtime: st.mtimeMs, signature, reason: 'unchanged from previous attempt' };
-    let fence: string | null = null, declaredAttempt: string | undefined, lastDirective = '';
+    let fence: string | null = null, lastDirective = '';
+    const declaredAttempts = new Set<string>();
     for (const line of text.split('\n')) {
       const marker = /^\s{0,3}(`{3,}|~{3,})/.exec(line)?.[1];
       if (marker) { if (!fence) fence = marker; else if (marker[0] === fence[0] && marker.length >= fence.length) fence = null; if (line.trim()) lastDirective = ''; continue; }
       if (line.trim()) lastDirective = fence ? '' : line.trim();
-      if (!fence) declaredAttempt = /^<!-- agentctl:attempt ([^>]+) -->$/.exec(line.trim())?.[1] ?? declaredAttempt;
+      if (!fence) { const attempt = /^<!-- agentctl:attempt ([^>]+) -->$/.exec(line.trim())?.[1]; if (attempt) declaredAttempts.add(attempt); }
     }
-    if (declaredAttempt && declaredAttempt !== record.attemptId) return { ready: false, exists: true, mtime: st.mtimeMs, signature, reason: 'different report attempt' };
+    // In-place revisions can retain an older directive after the current one.
+    // A previous-attempt-only report remains ineligible, regardless of mtime.
+    if (declaredAttempts.size && (!record.attemptId || !declaredAttempts.has(record.attemptId))) return { ready: false, exists: true, mtime: st.mtimeMs, signature, reason: 'different report attempt' };
     const sentinel = lastDirective === REPORT_END;
     const copiedComplete = file === record.report && signature === record.reportCompleteHash;
     const ended = turnEnded || (!!record.turnEndedAt && Date.parse(record.turnEndedAt) >= (Number.isFinite(start) ? start : 0) && (config.reportSettleS === 0 || Date.parse(record.turnEndedAt) >= Math.floor(st.mtimeMs)));

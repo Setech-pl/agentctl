@@ -125,7 +125,7 @@ export class UsageReader {
       feedText(probe, `${line}\n`);
       if (probe.cwd !== null && probe.id !== null && probe.firstAt !== null) break;
     }
-    if (probe.cwd === null && probe.id === null) return undefined;
+    if (probe.cwd === null && probe.id === null && !(provider === 'kimi' && probe.firstAt !== null)) return undefined;
     const meta: SessionMeta = { id: probe.id, cwd: probe.cwd, firstAt: probe.firstAt };
     this.data.meta[file] = meta;
     this.dirty = true;
@@ -145,6 +145,7 @@ export class UsageReader {
       return undefined;
     }
     let entry: CachedFile | undefined = this.data.files[file];
+    if (provider === 'kimi' && entry?.stats.kimi?.parserVersion !== 2) entry = undefined; // reparse pre-FIX3 cached zero usage
     if (entry && (size < entry.size || entry.stats.provider !== provider)) entry = undefined; // rewritten or shorter: read again from the start
     if (!entry) entry = { size: 0, offset: 0, stats: emptyStats(provider) };
     if (size > entry.offset) {

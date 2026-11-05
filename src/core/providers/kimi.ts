@@ -4,7 +4,7 @@ import { kimiProbeDir } from './kimi-probe.ts';
 import { readKimiSnapshot } from './kimi-usage.ts';
 import type { ProviderAdapter, DoctorLine } from './types.ts';
 import { kimiSettings } from './kimi-settings.ts';
-import { configuredModel, kimiConfigProblem, kimiEnvironmentProblem, resolvedKimiHome, qualifiedModel, readKimiConfig } from './kimi-config.ts';
+import { configuredModel, kimiEnvironmentProblem, resolvedKimiHome, qualifiedModel, readKimiConfig } from './kimi-config.ts';
 import { kimiEvents } from './kimi-events.ts';
 import { kimiUsage } from './kimi-usage.ts';
 import { interactiveTokens } from './process.ts';
@@ -24,12 +24,12 @@ export const kimi: ProviderAdapter = {
     if (detection.version && detection.version.localeCompare('2.5.0', undefined, { numeric: true }) > 0) lines.push({ name: 'kimi version', level: 'warn', text: `${detection.version} is newer than tested 2.5.0` });
     env = { ...env, ...globalConfig?.agents.kimi?.env };
     if (globalConfig) env.KIMI_CODE_HOME = resolvedKimiHome(globalConfig, env);
-    const config = readKimiConfig(env), problem = kimiConfigProblem(config);
+    const config = readKimiConfig(env), problem = kimiEnvironmentProblem(env);
     lines.push({ name: 'kimi home', level: 'ok', text: path.dirname(config.file) });
-    lines.push({ name: 'kimi permissions', level: problem ? 'fail' : 'ok', text: problem ?? `default_permission_mode=${config.mode}; dangerous_command_guard=${config.guard}; rules=${JSON.stringify(config.rules)}` });
+    lines.push({ name: 'kimi permissions', level: problem ? 'fail' : 'ok', text: `default_permission_mode=${config.mode}; dangerous_command_guard=${config.guard && !/^(false|0|off|no)$/i.test(env.KIMI_CODE_DANGEROUS_COMMAND_GUARD ?? '')}; rules=${JSON.stringify(config.rules)}; ${problem ?? 'manual=Always Ask (allow rules still ask); yolo=Ask When Needed with guard; auto=Never Ask is refused; agentctl never edits Kimi config'}` });
     if (!config.guard || /^(false|0|off|no)$/i.test(env.KIMI_CODE_DANGEROUS_COMMAND_GUARD ?? '')) lines.push({ name: 'kimi guard', level: 'warn', text: 'dangerous_command_guard is disabled; it is a separate AST guard, not an allow-list' });
     if (env.KIMI_CODE_TRUST_WORKSPACE !== undefined) lines.push({ name: 'kimi trust', level: 'fail', text: 'KIMI_CODE_TRUST_WORKSPACE bypass is forbidden; trust must be manual' });
-    lines.push({ name: 'kimi protocol', level: 'warn', text: 'wire protocol 1.5; session paths/interactions are hypotheses; unknown protocol uses screen only' });
+    lines.push({ name: 'kimi protocol', level: 'warn', text: 'wire protocol 1.5; state.json binds sessions; llm.request records effective effort (footer may show profile default); unknown protocol uses screen only' });
     lines.push({ name: 'kimi models', level: 'ok', text: `Aliases are server-managed/dynamic: ${config.models.map(m => `${m.id}: ${m.displayName} [${m.efforts.join(',')}]`).join('; ') || 'catalog not available; effort will not be forced'}` });
     if (globalConfig) {
       if (globalConfig.capacity.kimiUsageProbe && !readKimiSnapshot(globalConfig)) lines.push({ name: 'kimi usage probe', level: 'warn', text: `No reading yet. Neutral folder needs manual trust: run kimi in ${kimiProbeDir(globalConfig)}; never /usage in task windows` });
@@ -42,6 +42,7 @@ export const kimi: ProviderAdapter = {
     return lines;
   },
   argv(order, settings, extra) { return ['kimi', ...(order.model === 'default' ? [] : ['-m', qualifiedModel(order.model)]), ...settings.effortArgs.map(a => a.replaceAll('{effort}', order.effort)), ...settings.flags, ...extra]; },
+  // 2.5.0 applies this forced effort to llm.request; the TUI footer may retain the profile default.
   launchEnv(order, settings, env) {
     const config = readKimiConfig({ ...process.env, ...env }), model = configuredModel(config, order.model);
     return { KIMI_CODE_NO_AUTO_UPDATE: '1', KIMI_DISABLE_TELEMETRY: settings.env?.KIMI_DISABLE_TELEMETRY ?? '1', AGENTCTL_TASK: order.task, ...(model?.efforts.includes(order.effort) ? { KIMI_MODEL_THINKING_EFFORT: order.effort } : {}) };

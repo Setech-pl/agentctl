@@ -66,7 +66,8 @@ export function configuredModel(config: KimiConfig, name: string): KimiModel | u
 }
 export function kimiConfigProblem(config: KimiConfig): string | undefined {
   if (config.error) return config.error;
-  if (['yolo', 'auto'].includes(config.mode)) return `default_permission_mode=${config.mode} in ${config.file} enables auto-accept; use manual (agentctl never edits Kimi config)`;
-  if (config.mode !== 'manual') return `unknown default_permission_mode=${config.mode}; cannot verify manual permissions`;
+  if (config.mode === 'auto') return `default_permission_mode=auto in ${config.file} enables Never Ask; use manual or yolo with dangerous_command_guard=true (agentctl never edits Kimi config)`;
+  if (!['manual', 'yolo'].includes(config.mode)) return `unknown default_permission_mode=${config.mode}; cannot verify permissions`;
+  if (!config.guard) return `permission.dangerous_command_guard=false in ${config.file} is forbidden`;
   return undefined;
 }

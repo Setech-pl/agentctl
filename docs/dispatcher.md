@@ -133,7 +133,7 @@ MCP previews have independent `preview_token` values, expire after ten minutes a
 
 Choose among the active `providers` in config: Claude and Codex are required; Kimi is optional. Use equivalents by model class as dispatch mappings, then check current capacity and slots. With three providers, move requires an explicit `--agent`; auto review follows `review.prefer` or provider order and skips the author, unavailable CLIs and unmapped targets.
 
-Kimi Code 2.5.0 has no CLI sandbox. Its manual permission rules determine which tools ask, and Write may proceed without a dialog. Trust/login/update decisions belong to the human. Efforts are low/high/max only when the configured model's `support_efforts` permits them; without catalog evidence no effort env is forced. Display names and unversioned aliases are dynamic. Manager and Remote Control remain Claude-only.
+Kimi Code 2.5.0 has no CLI sandbox. Start accepts `manual` (Always Ask) or `yolo` (Ask When Needed) only with `permission.dangerous_command_guard=true`; `auto` (Never Ask) and a disabled guard in config/env are refused. Real 2.5.0 still asks for exact Bash allow rules in manual mode; yolo uses those rules. Doctor shows mode, guard and rules without editing config. Write may proceed without a dialog. Trust/login/update decisions belong to the human. Efforts are low/high/max only when the configured model's `support_efforts` permits them; without catalog evidence no effort env is forced. Display names and unversioned aliases are dynamic. Manager and Remote Control remain Claude-only.
 
 Kimi plan capacity is n/d unless `capacity.kimi_usage_probe` is enabled; the neutral session needs manual trust. The rate-limited `/usage` probe reads only the TUI, never credentials/OAuth or an API, and never uses a task window. Observe 5h/Weekly/Monthly only when present. Prompts, files read, command results and diffs go to Moonshot AI; telemetry defaults off, which does not stop task data transmission. A project guide can explicitly prohibit Kimi for that repository.
 
@@ -148,4 +148,6 @@ repos: [{path: /path/to/repo, worktree: /path/to/worktree, branch: task/example}
 State the acceptance criteria, constraints and report requirements here.
 ```
 
-Kimi screen auth/limit/overload/background patterns, busy queue footer, session paths and wire interactions are hypotheses backed by synthetic fixtures; do not describe them as verified real 2.5.0 behavior.
+Kimi screen auth/limit/overload/background patterns, busy queue footer, other wire interactions are hypotheses backed by synthetic fixtures; do not describe them as verified real 2.5.0 behavior.
+
+Kimi 2.5.0 effective model/effort comes from passive `llm.request.modelAlias/thinkingEffort`, recorded beside requested settings in TASK.md and status JSON. The footer can retain `high` while the effective wire effort is `low`; a wire mismatch warns. Sessions bind via `sessions/<workspace>/<session>/state.json` (session index fallback); `usage.record` supplies input/output/cache tokens and numeric `time`.

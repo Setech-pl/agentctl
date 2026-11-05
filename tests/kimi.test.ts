@@ -72,10 +72,10 @@ it('rejects target Kimi extra flags when moving from Claude before any new windo
   assert.ok(!runner.calls.some(c => /new-window|new-session/.test(c.line)));
 });
 it('reads TOML with quoted model aliases, arrays and permission rules without writing it', () => {
-  const w = world('toml', `default_permission_mode = 'manual'\ndefault_model='kimi-code/k3'\n[models."kimi-code/k3"]\ndisplay_name='K3.1 Pro'\nsupport_efforts=[\n 'high', # catalog\n 'max'\n]\n[permission]\ndangerous_command_guard=false\n[[permission.rules]]\ndecision='allow'\npattern='Bash(git status)'\nreason='read'\n`);
+  const w = world('toml', `default_permission_mode = 'manual'\ndefault_model='kimi-code/k3'\n[models."kimi-code/k3"]\ndisplay_name='K3.1 Pro'\nsupport_efforts=[\n 'high', # catalog\n 'max'\n]\n[permission]\ndangerous_command_guard=true\n[[permission.rules]]\ndecision='allow'\npattern='Bash(git status)'\nreason='read'\n`);
   const before = fs.readFileSync(path.join(w.home, 'config.toml'), 'utf8');
   const config = readKimiConfig({ KIMI_CODE_HOME: w.home });
-  assert.equal(config.guard, false); assert.deepEqual(config.models[0]?.efforts, ['high', 'max']);
+  assert.equal(config.guard, true); assert.deepEqual(config.models[0]?.efforts, ['high', 'max']);
   assert.equal(config.rules[0]?.pattern, 'Bash(git status)');
   const env = launchEnvironment(w.config, order, {});
   assert.equal(env.KIMI_CODE_NO_AUTO_UPDATE, '1'); assert.equal(env.KIMI_DISABLE_TELEMETRY, '1');
@@ -87,9 +87,9 @@ it('reads TOML with quoted model aliases, arrays and permission rules without wr
   assert.deepEqual(buildResumeArgv(order, settings, [], 'S'), ['kimi', '--session', 'S']);
   assert.deepEqual(buildResumeArgv(order, settings), ['kimi', '--continue']);
 });
-for (const mode of ['yolo', 'auto']) it(`refuses config ${mode} in launch and doctor`, () => {
+for (const mode of ['auto']) it(`refuses config ${mode} in launch and doctor`, () => {
   const w = world(`mode-${mode}`, `default_permission_mode="${mode}"`);
-  assert.throws(() => launchEnvironment(w.config, order, {}), /default_permission_mode=.*auto-accept/);
+  assert.throws(() => launchEnvironment(w.config, order, {}), /default_permission_mode=.*Never Ask/);
   const lines = kimi.doctor({ found: true, version: '2.6.0', raw: '2.6.0', features: {} }, { KIMI_CODE_HOME: w.home });
   assert.ok(lines.some(l => l.name === 'kimi permissions' && l.level === 'fail'));
   assert.ok(lines.some(l => l.name === 'kimi version' && l.level === 'warn'));

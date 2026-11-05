@@ -1,0 +1,96 @@
+[
+  {
+    "type": "metadata",
+    "protocol_version": "1.5",
+    "created_at": 1793891418590
+  },
+  {
+    "type": "permission.set_mode",
+    "agentId": "main",
+    "mode": "yolo",
+    "time": 1793891418603
+  },
+  {
+    "type": "turn.prompt",
+    "agentId": "main",
+    "input": [
+      {
+        "type": "text",
+        "text": "Use Bash to run exactly git status (no extra arguments), then stop. Do not use other tools."
+      }
+    ],
+    "origin": {
+      "kind": "user"
+    },
+    "promptId": "msg_01M6P45GG1JA6PX35PMF35WE0J",
+    "turnId": 0,
+    "time": 1793891418630
+  },
+  {
+    "type": "llm.request",
+    "agentId": "main",
+    "kind": "loop",
+    "provider": "openai",
+    "model": "k3",
+    "modelAlias": "kimi-code/k3",
+    "thinkingEffort": "low",
+    "thinkingKeep": "all",
+    "toolSelect": false,
+    "systemPromptHash": "e28154463342372550c167df68c4bd037319dcd716486e63747d4776d36bd57e",
+    "toolsHash": "1db03b8e46db6c158950fc8a86d0c305cb91bccf2864fa772dd1c2d62eaedd18",
+    "messageCount": 2,
+    "turnStep": "0.1",
+    "time": 1793891418640
+  },
+  {
+    "type": "usage.record",
+    "agentId": "main",
+    "model": "kimi-code/k3",
+    "usage": {
+      "inputOther": 0,
+      "output": 54,
+      "inputCacheRead": 13042,
+      "inputCacheCreation": 0
+    },
+    "usageScope": "turn",
+    "time": 1793891422842
+  },
+  {
+    "type": "llm.request",
+    "agentId": "main",
+    "kind": "loop",
+    "provider": "openai",
+    "model": "k3",
+    "modelAlias": "kimi-code/k3",
+    "thinkingEffort": "low",
+    "thinkingKeep": "all",
+    "toolSelect": false,
+    "systemPromptHash": "e28154463342372550c167df68c4bd037319dcd716486e63747d4776d36bd57e",
+    "toolsHash": "1db03b8e46db6c158950fc8a86d0c305cb91bccf2864fa772dd1c2d62eaedd18",
+    "messageCount": 4,
+    "turnStep": "0.2",
+    "time": 1793891422880
+  },
+  {
+    "type": "usage.record",
+    "agentId": "main",
+    "model": "kimi-code/k3",
+    "usage": {
+      "inputOther": 376,
+      "output": 61,
+      "inputCacheRead": 12800,
+      "inputCacheCreation": 0
+    },
+    "usageScope": "turn",
+    "time": 1793891426756
+  },
+  {
+    "type": "turn.ended",
+    "agentId": "main",
+    "turnId": 0,
+    "reason": "completed",
+    "durationMs": 8131,
+    "requestId": "c72273cc001491eb67f0a56891545fe2",
+    "time": 1793891426761
+  }
+]

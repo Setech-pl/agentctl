@@ -1,0 +1,5 @@
+{
+  "after": "Verdict: PASS\n<!-- agentctl:attempt fix3-current -->\nInitial report.\n<!-- agentctl:attempt fix3-old -->\nFollow-up verified.\n```agentctl-outputs\nversion: 1\nverdict: PASS\n```\n<!-- agentctl:report-end -->\n",
+  "expectedBeforeReady": false,
+  "expectedAfterReady": true
+}
