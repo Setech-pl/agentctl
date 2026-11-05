@@ -22,12 +22,12 @@ describe('input field area (R1, R2; rewritten in P15-FIX3: the area is exact, no
     assert.deepEqual(fieldArea(fx('screen-claude-busy-paste-single.txt'), claudeFooters), ['❯\u00a0[Pasted text #2]']);
     assert.equal(fieldText(fieldArea(fx('screen-claude-busy-paste.txt'), claudeFooters)), '[Pasted text #1 +7 lines]');
   });
-  it('runs from the marker down to the border, the footer or a hint, empty lines inside kept (F2)', () => {
+  it('runs from the marker down to the structural border or recorded Codex footer, empty lines inside kept (F2)', () => {
     assert.deepEqual(fieldArea('x\n────\n❯ one\n  two\n\n  three\n────\n  paste again to expand\n', claudeFooters), ['❯ one', '  two', '', '  three']);
     assert.deepEqual(fieldArea('x\n────\n❯ [Pasted text #2 +1 lines]\n\n  USER ADDED SECRET\n────\n', claudeFooters), ['❯ [Pasted text #2 +1 lines]', '', '  USER ADDED SECRET']);
     assert.deepEqual(fieldArea('• Working\n› one\n  two\n  GPT-6.1-Sol low · ~/work\n  tab to queue message\n', codexFooters), ['› one', '  two']);
     assert.deepEqual(fieldArea(fx('screen-codex-question-pasted.txt'), codexFooters), ['› MANUAL-Q2: this text was pasted into the field while a question is open.']);
-    assert.deepEqual(fieldArea('❯ one\n  two\n\n\n', claudeFooters), ['❯ one', '  two'], 'empty lines at the end are the screen, not the field');
+    assert.deepEqual(fieldArea('────\n❯ one\n  two\n\n\n────\n', claudeFooters), ['❯ one', '  two'], 'blank padding at the bottom of the framed field');
   });
   it('a line of hyphens in the field is text, not a border', () => {
     assert.deepEqual(fieldArea('────\n❯ one\n  ---------\n  two\n────\n', claudeFooters), ['❯ one', '  ---------', '  two']);
@@ -188,7 +188,7 @@ describe('journal (R7)', () => {
   const run = async (name: string, kind: 'initial' | 'followup') => {
     const config = makeConfig(scratch.sub(name), 'capacity: {snapshot: false, codex_refresh: false}\n');
     let ok = false;
-    const runner = new DiskRunner({ dryRun: false, startTime: Date.now() + 1000, respond: (cmd, args) => cmd !== 'tmux' ? undefined : args[0] === 'list-windows' ? { stdout: '@1\tt1\ttask' } : args[0] === 'send-keys' ? (ok = true, {}) : args[0] === 'capture-pane' ? { stdout: ok ? 'Working (esc to interrupt)\n❯\n' : '❯ Try "x"\n' } : {} });
+    const runner = new DiskRunner({ dryRun: false, startTime: Date.now() + 1000, respond: (cmd, args) => cmd !== 'tmux' ? undefined : args[0] === 'list-windows' ? { stdout: '@1\tt1\ttask' } : args[0] === 'send-keys' ? (ok = true, {}) : args[0] === 'capture-pane' ? { stdout: ok ? 'Working (esc to interrupt)\n❯\n' : '────\n❯ Try "x"\n────\n' } : {} });
     const ctx = new Context(runner, config, () => {});
     seedTask(config, 'T1', { agent: 'claude', windowId: '@1' });
     await queuePrompt(ctx, readTaskRecord(config, 't1')!, 'hello', 'pending', kind === 'followup' ? { kind } : {});

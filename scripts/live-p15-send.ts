@@ -30,8 +30,9 @@ const codexBusy = codexSteered.replace(/^› FOLLOWUP-CX-LONG[^\n]*\n(?:  [^\n]*
 const TX = (delayMs: number) => ({ claudeLogs: '', codexHome: '', delayMs });
 const codexSpec = (extra: Partial<ReplaySpec> = {}): ReplaySpec => ({ agent: 'codex', screens: { ready: '› Ask Codex to do anything\n', busy: codexBusy, pasted: codexBusy.replace(/^› Ask Codex to do anything$/m, '› [Pasted text #1 +8 lines]'), accepted: codexSteered, question: fx('screen-codex-question-collapsed.txt') }, state: 'ready', swallow: 0, hook: false, ...extra });
 
+let serial = 0;
 async function scenario(name: string, agent: 'claude' | 'codex', spec: ReplaySpec, body: (s: { h: Harness; log: () => any[]; record: () => string; run: (...a: string[]) => { code: number; stdout: string; stderr: string }; sendFile: (text: string) => string; mcp: (tool: string, args?: Record<string, unknown>) => Promise<string>; mcpCall: (tool: string, args?: Record<string, unknown>) => Promise<{ isError: boolean; text: string }>; audit: () => { tool: string; outcome: string; detail?: string }[]; state: (patch: Partial<ReplaySpec>) => void; json: (key: string) => string }) => Promise<void>) {
-  await withHarness({ name, cacheRoot: cache, config: 'capacity: {snapshot: false, codex_refresh: false}\nwatch: {interval: 1}\nmcp: {allow: [send, send_enter]}\n' }, async (h) => {
+  await withHarness({ name: String(++serial), cacheRoot: cache, config: 'capacity: {snapshot: false, codex_refresh: false}\nwatch: {interval: 1}\nmcp: {allow: [send, send_enter]}\n' }, async (h) => {
     h.tmux(['set-option', '-g', 'default-size', '200x50']);
     const log = path.join(h.root, 'replay.jsonl');
     // P15-FIX3: a spec may ask the fake agent to write its transcript the way the real CLI does; the paths are the harness’s own.
@@ -82,17 +83,18 @@ await scenario('cl-queued', 'claude', claudeSpec(), async ({ h, log, record, run
   } finally { watcher.kill('SIGTERM'); }
 });
 
-// P15-FIX3: no hook; the queue sign classifies at once, the transcript line (queue-operation/enqueue, written 6 s later) is what delivers.
-await scenario('cl-queue-tx', 'claude', claudeSpec({ hook: false, transcript: TX(6000) }), async ({ h, log, record, run, sendFile, json }) => {
+// FIX4: enqueue confirms queue acceptance only; a later correlated user/queued delivers.
+await scenario('cl-queue-tx', 'claude', claudeSpec({ hook: false, transcript: { ...TX(6000), injectionDelayMs: 6000 } }), async ({ h, log, record, run, sendFile, json }) => {
   const sent = run('send', sendFile(LONG), '-y');
   check('FIX3 Claude queue: right after Enter send says "w kolejce agenta – niepotwierdzone" (the sign classifies, nothing confirms)', /w kolejce agenta – niepotwierdzone/.test(sent.stdout));
   check('FIX3 Claude queue: TASK.md is confirming / queued-in-agent and the message stays', /prompt_delivery: confirming/.test(record()) && /delivery_result: queued-in-agent/.test(record()) && /pending_prompt/.test(record()));
   const watcher = h.spawnAgentctl(['watch'], path.join(h.root, 'watch.log'));
   try {
-    check('FIX3 Claude queue: the transcript line confirms it later: sent / delivered, source transcript-queue', await until(() => /prompt_delivery: sent/.test(record()), 30000) && /delivery_result: delivered/.test(record()) && /delivery_source: transcript-queue/.test(record()) && json('deliveryResult') === 'delivered');
+    check('FIX4 Claude queue: enqueue confirms queue acceptance, pending remains', await until(() => /delivery_result: queued-in-agent-confirmed/.test(record()), 30000) && /pending_prompt/.test(record()) && /prompt_delivery: confirming/.test(record()) && json('deliveryResult') === 'queued-in-agent-confirmed');
+    check('FIX4 Claude queue: injection delivers, source transcript', await until(() => /prompt_delivery: sent/.test(record()), 30000) && /delivery_result: delivered/.test(record()) && /delivery_source: transcript\n/.test(record()) && json('deliveryResult') === 'delivered');
     check('FIX3 Claude queue: still one paste and one Enter', log().filter(e => e.paste && e.state === 'busy').length === 1 && log().filter(e => e.enter && e.state === 'busy').length === 1);
     const journal = fs.readFileSync(path.join(h.agentctlHome, 'journal.jsonl'), 'utf8');
-    check('FIX3 Claude queue: the journal has both changes with the delivery id (queued, then delivered)', /"kind":"delivery"[^\n]*niepotwierdzone[^\n]*\[dostawa [0-9a-f]{8}\]/.test(journal) && /"kind":"delivery"[^\n]*dostarczono[^\n]*transkrypt[^\n]*\[dostawa [0-9a-f]{8}\]/.test(journal));
+    check('FIX4 Claude queue: journal has unconfirmed, confirmed queue and delivered with the delivery id', /"kind":"delivery"[^\n]*niepotwierdzone[^\n]*\[dostawa [0-9a-f]{8}\]/.test(journal) && /"kind":"delivery"[^\n]*w kolejce agenta – potwierdzone[^\n]*\[dostawa [0-9a-f]{8}\]/.test(journal) && /"kind":"delivery"[^\n]*dostarczono[^\n]*transkrypt[^\n]*\[dostawa [0-9a-f]{8}\]/.test(journal));
   } finally { watcher.kill('SIGTERM'); }
 });
 

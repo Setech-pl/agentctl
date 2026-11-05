@@ -85,6 +85,7 @@ async function world(name: string, agent: AgentName, pending: string, options: {
   await setHeaderFields(runner, taskFile(config, 't1'), { prompt_delivery: 'confirming', delivery_was_busy: true, delivery_started_at: new Date(started).toISOString() });
   const claudeFile = path.join(claudeDir, 'projects', 'p', 'sess-1.jsonl'), codexFile = path.join(codexDir, 'sessions', ...new Date(started).toLocaleDateString('sv').split('-'), 'rollout-2026-11-05T07-56-48-sess-1.jsonl');
   fs.mkdirSync(path.dirname(claudeFile), { recursive: true }); fs.mkdirSync(path.dirname(codexFile), { recursive: true });
+  fs.writeFileSync(claudeFile, ''); fs.writeFileSync(codexFile, '');
   if (options.link !== 'none') await rememberSession(runner, config, 't1', agent, agent === 'claude' ? { id: 'sess-1', transcript: claudeFile } : { id: 'sess-1' });
   const iso = (ms: number) => new Date(ms).toISOString();
   const write = (rows: object[], file = agent === 'claude' ? claudeFile : codexFile) => fs.writeFileSync(file, rows.map(r => JSON.stringify(r)).join('\n') + '\n');
@@ -95,14 +96,14 @@ async function world(name: string, agent: AgentName, pending: string, options: {
 }
 
 describe('delivered from the transcript of the task', () => {
-  it('Claude: the queue-operation of the queued message (written at submit time) confirms it, with its source in the journal', async () => {
+  it('Claude: enqueue confirms the queue only, keeps pending, and records the source in the journal', async () => {
     const w = await world('tx-queue', 'claude', 'QUEUED-B1: also reply ACK-B1.\tTabbed  and  double spaced   ');
     assert.equal(await deliverPendingPrompt(w.ctx, 't1'), 'confirming', 'nothing in the transcript yet');
     w.write([w.claudeEnqueue('QUEUED-B1: also reply ACK-B1.    Tabbed  and  double spaced', w.started + 500)]);
-    assert.equal(await deliverPendingPrompt(w.ctx, 't1'), 'sent');
-    assert.equal(w.record().deliveryResult, 'delivered'); assert.equal(w.record().deliverySource, 'transcript-queue'); assert.equal(w.record().pendingPrompt, undefined);
+    assert.equal(await deliverPendingPrompt(w.ctx, 't1'), 'confirming');
+    assert.equal(w.record().deliveryResult, 'queued-in-agent-confirmed'); assert.equal(w.record().deliverySource, 'transcript-queue'); assert.ok(w.record().pendingPrompt);
     const entry = readJournal(w.config).find(e => e.kind === 'delivery')!;
-    assert.match(entry.text, /dostarczono – agent przyjął wiadomość \(transkrypt sesji: agent zapisał wiadomość w swojej kolejce\)/); assert.match(entry.text, /\[dostawa [0-9a-f]{8}\]/);
+    assert.match(entry.text, /w kolejce agenta – potwierdzone/); assert.match(entry.text, /\[dostawa [0-9a-f]{8}\]/);
   });
   it('Claude: a typed message (a collapsed paste with its padding) confirms it', async () => {
     const text = 'Reply with exactly ACK-C1.\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\n';
@@ -115,10 +116,11 @@ describe('delivered from the transcript of the task', () => {
     w.write([w.codexItem('QUEUED-B1: reply ACK-B1.\tTabbed  and  double spaced', w.started + 400)]);
     assert.equal(await deliverPendingPrompt(w.ctx, 't1'), 'sent'); assert.equal(w.record().deliverySource, 'transcript');
   });
-  it('Codex: found by the id the notify hook recorded, or by the working directory when exactly one new rollout belongs to the worktree', async () => {
+  it('Codex: a single rollout in the worktree without a recorded task session never confirms', async () => {
     const w = await world('tx-codex-cwd', 'codex', 'steer me', { link: 'none' });
     fs.writeFileSync(w.codexFile.replace('sess-1', 'other'), [{ timestamp: new Date(w.started).toISOString(), type: 'session_meta', payload: { cwd: w.worktree } }, w.codexItem('steer me', w.started + 300)].map(r => JSON.stringify(r)).join('\n') + '\n');
-    assert.equal(await deliverPendingPrompt(w.ctx, 't1'), 'sent');
+    assert.equal(await deliverPendingPrompt(w.ctx, 't1'), 'confirming');
+    assert.equal(w.record().pendingPrompt, 'steer me');
   });
 });
 
@@ -144,7 +146,8 @@ describe('not delivered from a transcript', () => {
     for (const id of ['one', 'two']) fs.writeFileSync(path.join(dir, `${id}.jsonl`), JSON.stringify(w.claudeUser('secret of another session', w.started + 300)) + '\n');
     assert.equal(await deliverPendingPrompt(w.ctx, 't1'), 'confirming');
     fs.unlinkSync(path.join(dir, 'two.jsonl'));
-    assert.equal(await deliverPendingPrompt(w.ctx, 't1'), 'sent', 'exactly one new transcript in the worktree of the task');
+    assert.equal(await deliverPendingPrompt(w.ctx, 't1'), 'confirming', 'even one foreign transcript cannot identify a task session');
+    assert.equal(w.record().pendingPrompt, 'secret of another session');
   });
   it('Claude: a transcript of the session recorded for ANOTHER task is not read', async () => {
     const w = await world('tx-other-task', 'claude', 'only for the other task', { link: 'none' });

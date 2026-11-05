@@ -118,11 +118,11 @@ case "$1" in
   --version) echo "${name === 'claude' ? '2.1.309 (Claude Code, fake)' : 'codex-cli 0.166.0 (fake)'}"; exit 0;;
   --help) ${name === 'claude' ? `echo "  --effort <level>"; echo "  --remote-control [name]               Start an interactive session with Remote Control enabled"; echo "  --append-system-prompt <prompt>       Append a system prompt (--bare: --append-system-prompt[-file])"` : `echo "  -c, --config <key=value>"`}; exit 0;;
 esac
-${name === 'claude' ? `printf '❯ Try "fake"\\n'` : `printf '› Ask Codex to do anything\\n'`}
+${name === 'claude' ? `printf '────────────────────\\n❯ Try "fake"\\n────────────────────\\n'` : `printf '› Ask Codex to do anything\\n  GPT-6.1-Sol low · ~/fake\\n  ? for shortcuts\\n'`}
 ${name === 'claude' ? `case " $* " in *" --remote-control "*) printf '  /rc active\\n';; esac` : ''}
 while IFS= read -r line; do
   printf '● got: %s\\n' "$line"
-  ${name === 'claude' ? `printf '❯ Try "fake"\\n'` : `printf '› Ask Codex to do anything\\n'`}
+  ${name === 'claude' ? `printf '────────────────────\\n❯ Try "fake"\\n────────────────────\\n'` : `printf '› Ask Codex to do anything\\n  GPT-6.1-Sol low · ~/fake\\n  ? for shortcuts\\n'`}
 done
 `;
 
@@ -398,7 +398,7 @@ export interface ReplaySpec {
    * (else a `user` line) under `<claudeLogs>/projects/<cwd>/<id>.jsonl`; Codex `response_item` + `item_completed` in a rollout under `<codexHome>/sessions/Y/M/D/`.
    * `delayMs`: after that long (the screen shows the message first and the transcript later).
    */
-  transcript?: { claudeLogs: string; codexHome: string; delayMs: number };
+  transcript?: { claudeLogs: string; codexHome: string; delayMs: number; injectionDelayMs?: number };
 }
 
 /**
@@ -418,24 +418,30 @@ const spec=()=>JSON.parse(fs.readFileSync(SPEC,'utf8')), note=v=>fs.appendFileSy
 let state=spec().state, field='', pasted='', enters=0, count=0, stream='', shown='';
 const PLACEHOLDER=/^(❯|›)(\\s)(?:\\[Pasted text #\\d+(?: \\+\\d+ lines)?\\]|Press up to edit queued messages)\\s*$/m;
 const out=t=>process.stdout.write(t.replace(/\\n/g,'\\r\\n'));
+const composer=s=>{const lines=s.trimEnd().split('\\n'),at=lines.findLastIndex(l=>/^[❯›](?:\\s|$)/.test(l));if(at<0)return s;
+ if(${JSON.stringify(agent)}==='claude'){if(at>0&&/^[─]{3,}$/.test(lines[at-1])&&lines.slice(at+1).some(l=>l===lines[at-1]))return s;return [...lines.slice(0,at),'────────────────────',...lines.slice(at),'────────────────────'].join('\\n')+'\\n';}
+ if(lines.some(l=>/^  [\\w.-]+ (?:low|medium|high|xhigh) · /.test(l)))return s;return s.trimEnd()+'\\n  GPT-6.1-Sol low · ~/fake\\n  ? for shortcuts\\n';};
 const draw=name=>{let s=spec().screens[name];const marker='${agent === 'claude' ? '❯' : '›'}';
  const text=name==='pasted'||name==='ready'?field:'';
  if(name==='pasted')s=s.replace(PLACEHOLDER,(_m,mk)=>mk+'\\u00a0'+text);
  if(name==='ready')s=s+(text?marker+' '+text+'\\n':'');
- shown=name;out('\\x1b[2J\\x1b[H'+s);};
+ shown=name;out('\\x1b[2J\\x1b[H'+composer(s));};
 const label=()=>{if(spec().plain)return pasted.replace(/\\r\\n?/g,'\\n');const lines=pasted.split('\\n').length;return lines>1?'[Pasted text #'+count+' +'+lines+' lines]':pasted.length>200?'[Pasted text #'+count+']':pasted;};
 const hook=text=>{if(!spec().hook||${JSON.stringify(agent)}!=='claude')return;const i=args.indexOf('--settings');if(i<0)return;
  const settings=JSON.parse(fs.readFileSync(args[i+1],'utf8')),prompt=text.split('\\n').length>1||text.length>200?'<pasted_content id="80b3">\\n'+text+'\\n</pasted_content id="80b3">':text;
  const child=spawn(settings.hooks.UserPromptSubmit[0].hooks[0].command,{shell:true,stdio:['pipe','ignore','ignore']});child.stdin.end(JSON.stringify({hook_event_name:'UserPromptSubmit',prompt}));};
 const sid='replay-'+process.pid;
+const sessionKnown=file=>{let child;if(${JSON.stringify(agent)}==='claude'){const i=args.indexOf('--settings');if(i<0)return;const settings=JSON.parse(fs.readFileSync(args[i+1],'utf8'));child=spawn(settings.hooks.Notification[0].hooks[0].command,{shell:true,stdio:['pipe','ignore','ignore']});child.stdin.end(JSON.stringify({session_id:sid,transcript_path:file,notification_type:'idle_prompt'}));}
+ else{const raw=args.find(a=>a.startsWith('notify='));if(!raw)return;const notify=JSON.parse(raw.slice(7));spawn(notify[0],[...notify.slice(1),JSON.stringify({type:'session-known','thread-id':sid})],{stdio:'ignore'});}};
 const wrapped=text=>text.split('\\n').length>1||text.length>200?'<pasted_content id="c996">\\n'+text+'\\n</pasted_content id="c996">':text;
 const transcript=(text,busy)=>{const t=spec().transcript;if(!t)return;setTimeout(()=>{const stored=text.replace(/\\r\\n?/g,'\\n').replace(/\\t/g,${JSON.stringify(agent)}==='claude'?'    ':'\\t').replace(/\\s+$/,''),now=()=>new Date().toISOString();
  if(${JSON.stringify(agent)}==='claude'){const dir=t.claudeLogs+'/projects/'+process.cwd().replace(/[^A-Za-z0-9]/g,'-');fs.mkdirSync(dir,{recursive:true});
   const row=busy?{type:'queue-operation',operation:'enqueue',timestamp:now(),sessionId:sid,content:wrapped(stored)}:{type:'user',timestamp:now(),message:{role:'user',content:wrapped(stored)},promptSource:'typed',sessionId:sid};
-  fs.appendFileSync(dir+'/'+sid+'.jsonl',JSON.stringify(row)+'\\n');}
+  const file=dir+'/'+sid+'.jsonl';fs.appendFileSync(file,JSON.stringify(row)+'\\n');sessionKnown(file);
+  if(busy&&t.injectionDelayMs!==undefined)setTimeout(()=>{fs.appendFileSync(file,JSON.stringify({type:'user',timestamp:now(),message:{role:'user',content:wrapped(stored)},promptSource:'queued',sessionId:sid})+'\\n');},t.injectionDelayMs);}
  else{const d=new Date(),dir=t.codexHome+'/sessions/'+d.getFullYear()+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+String(d.getDate()).padStart(2,'0'),file=dir+'/rollout-replay-'+sid+'.jsonl';fs.mkdirSync(dir,{recursive:true});
   if(!fs.existsSync(file))fs.writeFileSync(file,JSON.stringify({timestamp:now(),type:'session_meta',payload:{id:sid,cwd:process.cwd()}})+'\\n');
-  fs.appendFileSync(file,JSON.stringify({timestamp:now(),type:'response_item',payload:{type:'message',role:'user',content:[{type:'input_text',text:stored}]}})+'\\n'+JSON.stringify({timestamp:now(),type:'event_msg',payload:{type:'item_completed',item:{type:'UserMessage',content:[{type:'text',text:stored}]}}})+'\\n');}
+  fs.appendFileSync(file,JSON.stringify({timestamp:now(),type:'response_item',payload:{type:'message',role:'user',content:[{type:'input_text',text:stored}]}})+'\\n'+JSON.stringify({timestamp:now(),type:'event_msg',payload:{type:'item_completed',item:{type:'UserMessage',content:[{type:'text',text:stored}]}}})+'\\n');sessionKnown(file);}
  },t.delayMs);};
 process.stdout.write('\\x1b[?2004h');process.stdin.setRawMode(true);process.stdin.resume();draw(state);
 let seenSpec=spec().state;setInterval(()=>{const s=spec().state;if(s!==seenSpec){seenSpec=s;state=s;draw(state==='ready'?'ready':state==='busy'?'busy':'question');}},100);

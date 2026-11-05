@@ -185,11 +185,11 @@ export function claudeSettingsPath(config: GlobalConfig, window: string): string
 const shellWord = (s: string): string => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`);
 
 /** The settings file for one Claude window: the event hooks, merged by Claude with the user's and the project's own. */
-export function buildClaudeSettings(task: string, self: SelfArgv, statusLine?: Record<string, unknown>): Record<string, unknown> {
+export function buildClaudeSettings(task: string, self: SelfArgv, statusLine?: Record<string, unknown>, attempt?: string): Record<string, unknown> {
   self = stableSelfArgv(self);
   const hooks: Record<string, unknown> = {};
   for (const kind of CLAUDE_KINDS) {
-    const command = [...self, ...eventArgs(task, 'claude', kind)].map(shellWord).join(' ');
+    const command = [...self, ...eventArgs(task, 'claude', kind), ...(attempt ? ['--attempt', attempt] : [])].map(shellWord).join(' ');
     hooks[CLAUDE_HOOK_NAME[kind]] = [{ hooks: [{ type: 'command', command, timeout: 15 }] }];
   }
   // Claude Code shows a dim suggestion of the next prompt in the empty field; it is not the human's text, so it is switched off for the tasks agentctl starts.
@@ -200,9 +200,9 @@ const tomlString = (s: string): string => `"${s.replace(/\\/g, '\\\\').replace(/
 export const tomlArray = (items: string[]): string => `[${items.map(tomlString).join(', ')}]`;
 
 /** Codex's `-c notify=[…]` value: this agentctl's `event` command, and the notify command the user already has (run by `event` afterwards). */
-export function buildCodexNotify(task: string, self: SelfArgv, forward: string[] | undefined): string[] {
+export function buildCodexNotify(task: string, self: SelfArgv, forward: string[] | undefined, attempt?: string): string[] {
   self = stableSelfArgv(self);
-  return [...self, ...eventArgs(task, 'codex'), ...(forward && forward.length > 0 ? ['--forward', JSON.stringify(forward)] : [])];
+  return [...self, ...eventArgs(task, 'codex'), ...(attempt ? ['--attempt', attempt] : []), ...(forward && forward.length > 0 ? ['--forward', JSON.stringify(forward)] : [])];
 }
 
 /**
@@ -287,6 +287,7 @@ export interface EventWiring {
 }
 
 export interface WiringInput {
+  attempt?: string | undefined;
   agent: AgentName;
   task: string;
   window: string;
@@ -308,16 +309,16 @@ export interface WiringInput {
 export function planEventWiring(input: WiringInput): EventWiring {
   if (input.agent === 'claude') {
     const file = claudeSettingsPath(input.config, input.window);
-    const statusLine = buildTapStatusLine(input.task, input.self, input.config, input.worktree, input.env);
+    const statusLine = buildTapStatusLine(input.task, input.self, input.config, input.worktree, input.env, input.attempt);
     return {
       args: ['--settings', file],
-      files: [{ path: file, content: `${JSON.stringify(buildClaudeSettings(input.task, input.self, statusLine), null, 2)}\n` }],
+      files: [{ path: file, content: `${JSON.stringify(buildClaudeSettings(input.task, input.self, statusLine, input.attempt), null, 2)}\n` }],
       note: `events: Claude hooks UserPromptSubmit, Notification, Stop and StopFailure${statusLine ? ', statusLine (usage-tap)' : ''} in ${file}`,
     };
   }
   const forward = userCodexNotify(input.env, input.readConfig);
   return {
-    args: ['-c', `notify=${tomlArray(buildCodexNotify(input.task, input.self, forward))}`],
+    args: ['-c', `notify=${tomlArray(buildCodexNotify(input.task, input.self, forward, input.attempt))}`],
     files: [],
     note: `events: Codex notify -> agentctl event${forward ? ` (then ${forward[0]}, your own notify)` : ''}`,
   };

@@ -1373,11 +1373,12 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .command('event')
     .description('Called by the agents themselves (hooks that "new" sets up): records the event, updates the task state and notifies at once. Always exits 0.')
     .requiredOption('--task <task>', 'task ID')
+    .option('--attempt <id>', 'attempt that owns this hook/session')
     .addOption(new Option('--agent <agent>', 'the agent that reports').choices(['claude', 'codex']).makeOptionMandatory())
     .addOption(new Option('--kind <kind>', 'claude: which hook called').choices([...CLAUDE_KINDS]))
     .option('--forward <json>', 'codex: JSON list, the notify command the user had; run with the same JSON after this one')
     .argument('[payload]', 'the event as JSON (codex puts it here; claude sends it on stdin)')
-    .action(async (payload: string | undefined, opts: { task: string; agent: 'claude' | 'codex'; kind?: ClaudeKind; forward?: string }) => {
+    .action(async (payload: string | undefined, opts: { task: string; attempt?: string; agent: 'claude' | 'codex'; kind?: ClaudeKind; forward?: string }) => {
       // A hook must never break the agent: whatever happens, the exit code stays 0.
       try {
         const config = deps.loadConfig();
@@ -1388,6 +1389,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         const self = deps.selfArgv?.();
         await handleEvent(ctx, new Alerts(ctx, notifier, { self }), {
           task: opts.task,
+          attempt: opts.attempt,
           agent: opts.agent,
           kind: opts.kind,
           payload: parseJson(raw),
@@ -1403,14 +1405,15 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .command('usage-tap')
     .description('Called by Claude Code as the statusLine of a task window (set up by "new"): keeps the plan limits that Claude gives only to a statusLine, remembers the session, then runs your own statusLine command with the same input and prints its output. Always exits 0.')
     .requiredOption('--task <task>', 'task ID')
+    .option('--attempt <id>', 'attempt that owns this statusLine session')
     .option('--forward <command>', 'your own statusLine command: run with the same input after this one')
-    .action(async (opts: { task: string; forward?: string }) => {
+    .action(async (opts: { task: string; attempt?: string; forward?: string }) => {
       // A status line must never break the agent: whatever happens, the exit code stays 0.
       try {
         const config = deps.loadConfig();
         const runner = deps.makeRunner(false, () => {});
         const raw = deps.stdinIsTTY ? '' : deps.readStdin();
-        const result = await handleTap(runner, config, { task: opts.task, window: windowName(opts.task), raw, ...(opts.forward ? { forward: opts.forward } : {}) });
+        const result = await handleTap(runner, config, { task: opts.task, attempt: opts.attempt, window: windowName(opts.task), raw, ...(opts.forward ? { forward: opts.forward } : {}) });
         if (result.output !== '') deps.stdout(result.output);
       } catch (e) {
         deps.stderr(`agentctl usage-tap: ${errorMessage(e)}\n`);

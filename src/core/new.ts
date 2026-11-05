@@ -167,7 +167,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
     await runner.mkdir(path.dirname(spec.report));
 
     // 4b. the agent reports its own events (question, end of turn, limit) to `agentctl event`
-    const wiring = config.notify.events && opts.self ? planEventWiring({ agent: spec.agent, task: spec.task, window: spec.window, config, self: opts.self, env: spec.env, worktree: primary }) : undefined;
+    const wiring = config.notify.events && opts.self ? planEventWiring({ attempt: record.attemptId, agent: spec.agent, task: spec.task, window: spec.window, config, self: opts.self, env: spec.env, worktree: primary }) : undefined;
     for (const file of wiring?.files ?? []) await runner.writeFile(file.path, file.content);
 
     // 5. window + agent

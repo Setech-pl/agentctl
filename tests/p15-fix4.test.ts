@@ -138,6 +138,9 @@ describe('FIX4 N3: structural composer boundary, all interior lines are content'
     const exec = w.runner.exec.bind(w.runner); w.runner.exec = async (c, a, o) => c === 'tmux' && a[0] === 'capture-pane' ? { code: 0, stdout: 'Working (esc to interrupt)\n❯ ORIGINAL\n', stderr: '' } : exec(c, a, o);
     const done = await submitDraft(w.ctx, 't1', { token: preview.token }); assert.equal(done.outcome, 'refused'); assert.equal(w.keys.length, n); assert.match(done.message, /granic|struktur/);
   });
+  it('an old framed composer never supplies the boundary of a newer unframed input', () => {
+    assert.deepEqual(fieldArea(pane('ORIGINAL') + '❯ CURRENT FOREIGN DRAFT\n'), []);
+  });
   for (const name of ['screen-claude-busy-paste.txt', 'screen-codex-busy-steered.txt']) it(`real fixture lower boundary: ${name}`, () => {
     const screen = fs.readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8').replace(/^› Ask Codex to do anything$/m, '› ORIGINAL'); const area = fieldArea(screen);
     assert.ok(area.length); assert.ok(!fieldText(area).includes('? for shortcuts')); assert.ok(!fieldText(area).includes('GPT-6.1-Sol'));

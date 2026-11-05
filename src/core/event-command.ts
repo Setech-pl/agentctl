@@ -76,9 +76,9 @@ async function noteSession(ctx: Context, record: TaskRecord, input: EventInput):
     const data = isObject(input.payload) ? input.payload : {};
     if (input.agent === 'claude') {
       const session = sessionOfStatusLine(data);
-      if (session) await rememberSession(ctx.runner, ctx.config, record.window, 'claude', session);
+      if (session) await rememberSession(ctx.runner, ctx.config, record.window, 'claude', session, input.attempt ?? '');
     } else if (typeof data['thread-id'] === 'string' && data['thread-id'] !== '') {
-      await rememberSession(ctx.runner, ctx.config, record.window, 'codex', { id: data['thread-id'] });
+      await rememberSession(ctx.runner, ctx.config, record.window, 'codex', { id: data['thread-id'] }, input.attempt ?? '');
     }
   } catch {
     // counting tokens must not break an event
@@ -86,6 +86,7 @@ async function noteSession(ctx: Context, record: TaskRecord, input: EventInput):
 }
 
 export interface EventInput {
+  attempt?: string | undefined;
   task: string;
   agent: AgentName;
   /** Claude: which hook (the JSON on stdin is `payload`). Codex: absent (the JSON argument is `payload`). */
@@ -155,6 +156,7 @@ export async function handleEvent(ctx: Context, alerts: Alerts, input: EventInpu
       await runner.appendFile(eventsLogPath(ctx), logLine(now, input.task, input.agent, event.type, 'unknown task, ignored'));
       return { task: input.task, event, note: 'unknown task' };
     }
+    if (input.attempt && input.attempt !== record.attemptId) return { task: input.task, event, note: 'stale attempt, ignored' };
     // Separate evidence avoids a TASK.md lock in synchronous UserPromptSubmit hooks.
     // In particular, never wait for the sender's prompt-delivery lock here.
     // Claude Code wraps a collapsed paste for the hook in <pasted_content id="…">: the wrapper comes off the hook's text only (paste-wrapper.ts), the pending prompt is compared as written.

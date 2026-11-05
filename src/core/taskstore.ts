@@ -46,8 +46,8 @@ export interface TaskRecord {
   promptKind?: 'initial' | 'followup';
   deliveryWasBusy?: boolean;
   promptDelivery?: 'launching' | 'pending' | 'sending' | 'confirming' | 'sent' | 'needs-attention';
-  /** How the last delivery ended, in the words of `send`: reached the agent / waits in the agent's own queue / our paste stands in the input field. */
-  deliveryResult?: 'delivered' | 'queued-in-agent' | 'not-delivered-in-field';
+  /** Delivery result: delivered, unconfirmed screen queue, confirmed transcript queue (pending until injection), or paste still in the field. */
+  deliveryResult?: 'delivered' | 'queued-in-agent' | 'queued-in-agent-confirmed' | 'not-delivered-in-field';
   /** Identity of the input-field area right after our paste ("image:<digest>", see input-field.ts). It is also the record that agentctl pasted for this delivery: `send --enter-only` presses Enter only for an area that is, byte for byte, this one. */
   deliveryField?: string;
   /** What confirmed the delivery: hook, transcript, transcript-queue (Claude took it into its queue), screen (an idle agent started working) or report. */
@@ -267,7 +267,7 @@ export function parseTaskRecord(text: string): TaskRecord | undefined {
     effort: record.effort === 'unknown' ? 'high' : record.effort,
   };
   for (const [key, field] of [['delivery_output_baseline', 'deliveryOutputBaseline'], ['delivery_id', 'deliveryId'], ['delivery_started_at', 'deliveryStartedAt'], ['delivery_report_baseline', 'deliveryReportBaseline'], ['report_confirmed', 'reportConfirmed'], ['pending_prompt', 'pendingPrompt'], ['prompt_sent_at', 'promptSentAt'], ['prompt_error', 'promptError'], ['delivery_field', 'deliveryField'], ['delivery_source', 'deliverySource'], ['delivery_enter_at', 'deliveryEnterAt']] as const) if (typeof data[key] === 'string') record[field] = data[key];
-  if (['delivered', 'queued-in-agent', 'not-delivered-in-field'].includes(String(data.delivery_result))) record.deliveryResult = data.delivery_result as TaskRecord['deliveryResult'];
+  if (['delivered', 'queued-in-agent', 'queued-in-agent-confirmed', 'not-delivered-in-field'].includes(String(data.delivery_result))) record.deliveryResult = data.delivery_result as TaskRecord['deliveryResult'];
   for (const [key, field] of [['delivery_enters', 'deliveryEnters'], ['delivery_echo_baseline', 'deliveryEchoBaseline']] as const) if (typeof data[key] === 'number') record[field] = data[key];
   if (['launching', 'pending', 'sending', 'confirming', 'sent', 'needs-attention'].includes(String(data.prompt_delivery))) record.promptDelivery = data.prompt_delivery as TaskRecord['promptDelivery'];
   if (data.prompt_kind === 'initial' || data.prompt_kind === 'followup') record.promptKind = data.prompt_kind;

@@ -1,20 +1,18 @@
 import { createHash } from 'node:crypto';
-import { PATTERN_FLAGS } from './config.ts';
 import { storedForm } from './paste-wrapper.ts';
 
 /*
- * The input field of the agent as an exact area of the screen: from the line of its marker down to the first border, footer or hint line,
+ * The input field of the agent as an exact area of the screen: from its structural upper edge to its structural lower edge,
  * with every line in between (empty lines included). agentctl does not infer from it whose text it is. It only asks two things:
  *  - right after our own paste: does the area show this paste (`pasteImage`), and is it the same, byte for byte, before every Enter;
  *  - for `send --enter-only`: is the area, byte for byte, what the human was shown in the preview and what was recorded after our paste.
  * A difference, an unreadable area or an unrecognised shape means: no Enter.
  */
 
-const MARKER = /^\s*[❯›>](?:\s|$)/;
-/** Lines that end the field when a footer pattern of the agent does not know them. */
-const FIELD_END = [/^\s*tab to queue message\s*$/i, /^\s*paste again to expand\s*$/i, /^\s*ctrl\+x ctrl\+s to send now\s*$/i];
-/** The border of the composer: a run of box-drawing characters, or the corner of a box. Not a line of hyphens: that is text. */
-const BORDER = /^\s*(?:[─━═╌╍┄┅┈┉]{3,}|[╭╰┌└][─━═╌╍┄┅┈┉]*[╮╯┐┘]?)\s*$/u;
+/** Structural border: its column and width must match the composer's top border. */
+const BORDER = /^[─━═╌╍┄┅┈┉]{3,}$/u;
+const CODEX_MODEL = /^  [\w.-]+ (?:low|medium|high|xhigh|minimal|none) · .+$/;
+const CODEX_HINT = /^  (?:← for agents · )?(?:\? for shortcuts(?:\s+.*)?|tab to queue message)$/;
 /** A paste the TUI folded into one placeholder: "[Pasted text #2 +7 lines]" (Claude Code), "[Pasted Content 1004 chars]" (Codex). */
 const PLACEHOLDER = /^\[Pasted (?:text|content)\b[^\]\n]*\]$/i;
 /** What an agent shows in an empty field (a suggestion, the placeholder) and the options of a dialog: not a draft (see screenMetadata). */
@@ -22,25 +20,37 @@ const NOT_A_DRAFT = /^Try\s|^Ask Codex to do anything$|^\d+\./;
 
 const digest = (text: string) => createHash('sha256').update(text).digest('hex').slice(0, 24);
 
-/**
- * The area of the input field, line by line as the screen shows it (only the end of each line is trimmed: tmux does that itself). Empty array:
- * the field is empty (no marker, a suggestion, nothing after the marker). Lines inside stay, empty ones too; empty lines at its end do not.
- */
-export function fieldArea(screen: string, footerPatterns: string[] = []): string[] {
+export interface FieldCapture { area: string[]; readable: boolean; reason?: string }
+
+/** Read the composer by its geometry, never by a footer-like line in its body. */
+export function inspectField(screen: string): FieldCapture {
   const lines = screen.split('\n').map(line => line.trimEnd());
-  const at = lines.findLastIndex(line => MARKER.test(line));
-  if (at < 0) return [];
-  const footers = footerPatterns.map(p => new RegExp(p, PATTERN_FLAGS));
-  const area = [lines[at]!];
-  for (let i = at + 1; i < lines.length; i++) {
-    const line = lines[i]!;
-    if (BORDER.test(line) || FIELD_END.some(re => re.test(line)) || footers.some(re => re.test(line))) break;
-    area.push(line);
+  const lastMarker = lines.findLastIndex(line => /^[❯›>](?:\s|$)/.test(line));
+  const areaOf = (start: number, end: number): FieldCapture => {
+    const area = lines.slice(start, end);
+    while (area.length > 1 && area.at(-1) === '') area.pop();
+    const empty = area.length === 1 && (stripMarker(area[0]!).trim() === '' || NOT_A_DRAFT.test(stripMarker(area[0]!).trim()));
+    return { readable: true, area: empty ? [] : area };
+  };
+  // Claude: the marker immediately follows the upper border. Continuation rows (including markers or footer text typed by the user) are body.
+  for (let top = lines.length - 2; top >= 0; top--) {
+    if (top + 1 !== lastMarker || !BORDER.test(lines[top]!)) continue;
+    const bottom = lines.findLastIndex((line, i) => i > top + 1 && line === lines[top]);
+    if (bottom > top + 1) return areaOf(top + 1, bottom);
+    return { area: [], readable: false, reason: 'brak dolnej ramki composera (ucięty ekran albo inna szerokość)' };
   }
-  while (area.length > 1 && area.at(-1) === '') area.pop();
-  if (area.length === 1 && NOT_A_DRAFT.test(stripMarker(area[0]!).trim())) return [];
-  return stripMarker(area[0]!).trim() === '' && area.length === 1 ? [] : area;
+  // Codex 0.166.0 has no box: its two-row model/hints footer is a separate bottom region (recorded fixtures).
+  // Pick the LAST complete footer at the bottom, so identical user text higher up stays inside the field.
+  for (let model = lines.length - 2; model >= 0; model--) {
+    if (!CODEX_MODEL.test(lines[model]!) || !CODEX_HINT.test(lines[model + 1]!) || lines.slice(model + 2).some(line => line !== '')) continue;
+    const start = lastMarker < model && /^›(?:\s|$)/.test(lines[lastMarker] ?? '') ? lastMarker : -1;
+    if (start >= 0 && lines.slice(start + 1, model).every(line => line === '' || line.startsWith('  '))) return areaOf(start, model);
+  }
+  return { area: [], readable: false, reason: 'nie można jednoznacznie ustalić strukturalnych granic composera; brak pełnej ramki lub stopki Codexa' };
 }
+
+/** Compatibility API: an unreadable area is never an owned field. Call inspectField before any Enter to distinguish it from empty. */
+export function fieldArea(screen: string, _footerPatterns: string[] = []): string[] { return inspectField(screen).area; }
 
 /** The marker and the one space (or no-break space) after it; Claude Code draws a no-break space. */
 const stripMarker = (line: string) => line.replace(/^\s*[❯›>][ \u00a0]?/, '');
