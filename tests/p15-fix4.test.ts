@@ -112,6 +112,12 @@ describe('FIX4 N2: correlate queued injection, retain confirmed queue', () => {
     w.write('ours', [...(mode === 'missing-enqueue' ? [] : [w.enqueue(w.started - 5000), w.enqueue(w.started + 100)]), w.user('SAME MESSAGE', w.started + 200, { promptSource: 'queued' })]);
     assert.notEqual(await deliverPendingPrompt(w.ctx, 't1'), 'sent'); assert.equal(w.record().pendingPrompt, 'SAME MESSAGE'); assert.notEqual(w.record().deliveryResult, 'queued-in-agent-confirmed');
   });
+  it('an uncertain queued transcript cannot fall through to a legacy queue-list screen ACK', async () => {
+    const w = await world(); w.write('ours', []); await w.link('t1', 'ours'); await w.awaiting();
+    w.write('ours', [w.user('SAME MESSAGE', w.started + 200, { promptSource: 'queued' })]);
+    const exec = w.runner.exec.bind(w.runner); w.runner.exec = async (c, a, o) => c === 'tmux' && a[0] === 'capture-pane' ? { code: 0, stdout: 'Working (esc to interrupt)\nQueued messages\nSAME MESSAGE\n❯ \n', stderr: '' } : exec(c, a, o);
+    assert.notEqual(await deliverPendingPrompt(w.ctx, 't1'), 'sent'); assert.equal(w.record().pendingPrompt, 'SAME MESSAGE');
+  });
   it('an earlier injection consumes its enqueue before the next delivery', async () => {
     const w = await world(); w.write('ours', []); await w.link('t1', 'ours'); await w.awaiting();
     w.write('ours', [w.enqueue(w.started - 5000), w.user('SAME MESSAGE', w.started - 4000, { promptSource: 'queued' }), w.enqueue(w.started + 100), w.user('SAME MESSAGE', w.started + 200, { promptSource: 'queued' })]);

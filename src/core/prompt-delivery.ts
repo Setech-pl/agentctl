@@ -113,7 +113,7 @@ function proofSource(ctx: Context, record: TaskRecord, screen: string): string |
   if (record.pendingPrompt && record.deliveryStartedAt) {
     const seen = transcriptMessage(ctx, record, record.pendingPrompt, Date.parse(record.deliveryStartedAt));
     if (seen?.kind === 'user') return 'transcript';
-    if (seen?.kind === 'queued') return null;
+    if (seen) return null; // Queue acceptance and ambiguous/old injection must not fall through to legacy screen signs.
   }
   if (record.deliveryResult === 'queued-in-agent-confirmed') return null;
   const report = inspectReport(ctx.config, record, ctx.runner.now(), false);

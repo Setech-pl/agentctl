@@ -27,7 +27,7 @@ export interface TranscriptMessage {
   at: number;
   text: string;
   /** `queued`: Claude took it into its queue (not yet run). */
-  kind: 'user' | 'queued';
+  kind: 'user' | 'queued' | 'uncertain-queue';
   /** queued injection inherits the time of its unique, unconsumed enqueue. */
   enqueuedAt?: number;
   consumed?: boolean;
@@ -80,7 +80,7 @@ export function claudeMessages(jsonl: string): TranscriptMessage[] {
     const candidates = out.filter(r => r.kind === 'queued' && !r.consumed && r.at <= at && sameMessage(r.text, text, 'claude'));
     // Never guess which duplicate crossed a delivery boundary. Consume the nearest one, but mark both the enqueue and injection ambiguous.
     const nearest = candidates.at(-1);
-    if (!nearest) continue;
+    if (!nearest) { out.push({ at, text, kind: 'uncertain-queue' }); continue; }
     if (candidates.length !== 1) for (const candidate of candidates) candidate.ambiguous = true;
     nearest.consumed = true;
     out.push({ at, text, kind: 'user', enqueuedAt: nearest.at, ambiguous: candidates.length !== 1 || nearest.ambiguous === true });
@@ -164,7 +164,7 @@ function selectedFile(ctx: Context, record: TaskRecord): SelectedSession | undef
 }
 
 /**
- * The first message of the human in this task's own transcript, written at or after `sinceMs`, that says exactly what was pasted; undefined when
+ * The first message of the human in this task's own transcript, written at or after `sinceMs`, that says exactly what was pasted; uncertain-queue when queue provenance is ambiguous; undefined when
  * there is none (or no transcript of this task can be told apart). `queued`: Claude only took it into its queue so far.
  */
 export function transcriptMessage(ctx: Context, record: TaskRecord, pending: string, sinceMs: number): TranscriptMessage | undefined {
@@ -182,8 +182,9 @@ export function transcriptMessage(ctx: Context, record: TaskRecord, pending: str
       if (unchanged.size > 256) unchanged.delete(unchanged.keys().next().value!);
     } catch { continue; }
     const rows = record.agent === 'claude' ? claudeMessages(text) : codexMessages(text);
-    const hits = rows.filter(row => row.at >= sinceMs && !row.ambiguous && !row.consumed && (row.enqueuedAt === undefined || row.enqueuedAt >= sinceMs) && sameMessage(row.text, pending, record.agent));
-    const hit = hits.find(row => row.kind === 'user') ?? hits.find(row => row.kind === 'queued');
+    const hits = rows.filter(row => row.kind !== 'uncertain-queue' && row.at >= sinceMs && !row.ambiguous && !row.consumed && (row.enqueuedAt === undefined || row.enqueuedAt >= sinceMs) && sameMessage(row.text, pending, record.agent));
+    const uncertain = rows.find(row => row.at >= sinceMs && sameMessage(row.text, pending, record.agent) && (row.kind === 'uncertain-queue' || row.ambiguous || (row.enqueuedAt !== undefined && row.enqueuedAt < sinceMs)));
+    const hit = hits.find(row => row.kind === 'user') ?? hits.find(row => row.kind === 'queued') ?? (uncertain ? { ...uncertain, kind: 'uncertain-queue' as const } : undefined);
     if (hit) { unchanged.delete(`${file}|${record.deliveryId ?? sinceMs}|${pending}`); return hit; }
   }
   return undefined;
