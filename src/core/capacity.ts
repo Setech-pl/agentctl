@@ -54,7 +54,7 @@ export function capacityTrend(samples: UsageSample[], provider: AgentName, windo
 
 export { refreshCodexCapacity } from './providers/codex-usage.ts';
 
-export async function collectCapacity(ctx: Context) {
+export async function collectCapacity(ctx: Context, opts: { diskBudgetMs?: number } = {}) {
   const refreshNotes = perProvider(activeProviders(ctx.config), () => null as string | null);
   for (const id of activeProviders(ctx.config)) refreshNotes[id] = await adapter(id).usage.refreshPlan?.(ctx) ?? null;
   const now = ctx.runner.now();
@@ -69,7 +69,7 @@ export async function collectCapacity(ctx: Context) {
   const stats = computeStats(selectHistory(ctx, { since: '7d' }));
   return {
     at: new Date(now).toISOString(),
-    disk: await collectDisk(ctx),
+    disk: await collectDisk(ctx, undefined, opts.diskBudgetMs === undefined ? {} : { budgetMs: opts.diskBudgetMs }),
     note: 'n/d = null. Plan percentages include use outside agentctl. Estimates are not provider token quotas.',
     providers: activeProviders(ctx.config).map((provider) => {
       const plan = providerValue(plans, provider);

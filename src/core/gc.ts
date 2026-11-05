@@ -1,6 +1,8 @@
 import { knownLinkReferences, linkUsers } from './links.ts';
 import fs from 'node:fs';
 import path from 'node:path';
+import { configureMeasurements, sizeOf, newestMtime } from './fs-measure.ts';
+export { sizeOf, newestMtime } from './fs-measure.ts';
 import { parseAge } from './archive.ts';
 import { findCohort } from './cohort.ts';
 import type { Context } from './context.ts';
@@ -63,34 +65,6 @@ export interface GcOptions {
 export const DEFAULT_OLDER_THAN = '7d';
 const PROTECTED = new Set(['main', 'master']);
 
-/** Bytes of a file or folder (links are not followed). */
-export function sizeOf(target: string): number {
-  let st: fs.Stats;
-  try {
-    st = fs.lstatSync(target);
-  } catch {
-    return 0;
-  }
-  if (!st.isDirectory()) return st.size;
-  let total = 0;
-  for (const name of fs.readdirSync(target)) total += sizeOf(path.join(target, name));
-  return total;
-}
-
-/** The newest modification time (ms) of a file, or of anything inside a folder. */
-export function newestMtime(target: string): number {
-  let st: fs.Stats;
-  try {
-    st = fs.lstatSync(target);
-  } catch {
-    return 0;
-  }
-  if (!st.isDirectory()) return st.mtimeMs;
-  // A folder is as old as the newest thing in it (its own time only moves when an entry is added or removed).
-  const names = fs.readdirSync(target);
-  return names.length === 0 ? st.mtimeMs : Math.max(...names.map((name) => newestMtime(path.join(target, name))));
-}
-
 const same = (a: string, b: string): boolean => path.resolve(a) === path.resolve(b);
 
 async function git(ctx: Context, args: string[]): Promise<{ code: number; out: string; err: string }> {
@@ -120,6 +94,7 @@ async function listWorktrees(ctx: Context, repo: string): Promise<WorktreeListin
 /** What `gc` would do now. Reads (files, git), changes nothing. */
 export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan> {
   const { config, runner } = ctx;
+  configureMeasurements(config.disk);
   const olderThanMs = parseAge(opts.olderThan ?? DEFAULT_OLDER_THAN);
   const cohort = opts.cohort === undefined ? undefined : findCohort(config, opts.cohort).name;
   const archived = new Set(listArchivedRecords(config).map((r) => r.window));
@@ -155,7 +130,7 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
       }
       const users = linkUsers(wt, references);
       if (users.length && !opts.forceLinks) {
-        skipped.push({ task: record.task, kind: 'worktree', target: wt, bytes: sizeOf(wt), reason: `links target used by ${users.join(', ')}; CLI --force-links overrides` });
+        skipped.push({ task: record.task, kind: 'worktree', target: wt, bytes: await sizeOf(wt), reason: `links target used by ${users.join(', ')}; CLI --force-links overrides` });
         continue;
       }
       const head = await git(ctx, ['-C', wt, 'rev-parse', '--abbrev-ref', 'HEAD']);
@@ -172,7 +147,7 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
         skipped.push({ task: record.task, kind: 'worktree', target: wt, reason: `uncommitted changes (${status.out.split('\n').length} file${status.out.split('\n').length === 1 ? '' : 's'})` });
         continue;
       }
-      const bytes = sizeOf(wt);
+      const bytes = await sizeOf(wt);
       items.push({ kind: 'worktree', task: record.task, target: wt, bytes, detail: `${record.cancelled ? 'cancelled' : 'closed'} task, no uncommitted changes`, repo: repo.path });
       removing.add(key);
     }
@@ -210,12 +185,12 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
     for (const name of names.sort()) {
       if (/\.md$/i.test(name)) continue;
       const target = path.join(dir, name);
-      const age = runner.now() - newestMtime(target);
+      const age = runner.now() - await newestMtime(target);
       if (age < olderThanMs) {
-        skipped.push({ task: record.task, kind: 'cache', target, bytes: sizeOf(target), reason: `newer than ${opts.olderThan ?? DEFAULT_OLDER_THAN}` });
+        skipped.push({ task: record.task, kind: 'cache', target, bytes: await sizeOf(target), reason: `newer than ${opts.olderThan ?? DEFAULT_OLDER_THAN}` });
         continue;
       }
-      items.push({ kind: 'cache', task: record.task, target, bytes: sizeOf(target), detail: `older than ${opts.olderThan ?? DEFAULT_OLDER_THAN}, no active task` });
+      items.push({ kind: 'cache', task: record.task, target, bytes: await sizeOf(target), detail: `older than ${opts.olderThan ?? DEFAULT_OLDER_THAN}, no active task` });
     }
   }
   const taskNames = new Set(all.map((r) => r.window));
@@ -285,7 +260,7 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
   for (const item of [...items, ...skipped]) {
     const record = all.find(r => r.task === item.task);
     if (record?.cohort) item.cohort = record.cohort;
-    if (item.bytes === undefined) item.bytes = item.kind === 'branch' || item.kind === 'worktree-foreign' ? 0 : sizeOf(item.target);
+    if (item.bytes === undefined) item.bytes = item.kind === 'branch' || item.kind === 'worktree-foreign' ? 0 : await sizeOf(item.target);
   }
   const freeBytes = items.reduce((n, i) => n + i.bytes, 0);
   const foreignWorktrees = skipped.filter(s => s.kind === 'worktree-foreign').length;
@@ -309,9 +284,10 @@ export async function applyGc(ctx: Context, plan: GcPlan): Promise<GcResult> {
         if (kind === 'worktree') {
           const users = linkUsers(item.target, knownLinkReferences(config));
           if (users.length && !plan.forceLinks) throw new Error(`links target used by ${users.join(', ')}`);
-          const r = await runner.exec('git', ['-C', item.repo as string, 'worktree', 'remove', item.target]);
+          const r = await runner.exec('git', ['-C', item.repo as string, 'worktree', 'remove', item.target], { timeoutMs: config.git.timeoutS * 1000 });
           if (r.code !== 0) throw new Error(r.stderr.trim().split('\n')[0] || `git exit ${r.code}`);
         } else if (kind === 'cache') {
+          if (runner.now() - await newestMtime(item.target, { fresh: true, now: () => runner.now() }) < plan.olderThanMs) throw new Error('cache contents changed since the plan; kept because they are too recent');
           await runner.remove(item.target);
         } else if (kind === 'archive') {
           await runner.rename(item.target, path.join(archiveDir(config), path.basename(item.target)));
