@@ -9,6 +9,7 @@ import { Alerts } from './alert.ts';
 import type { AgentName } from './config.ts';
 import type { Context } from './context.ts';
 import { extractQuestion, parseClaudeEvent, parseCodexEvent } from './events.ts';
+import { hookPromptMatches } from './paste-wrapper.ts';
 import type { AgentEvent, ClaudeKind } from './events.ts';
 import { classifyScreen } from './state.ts';
 import type { EventKind } from './state.ts';
@@ -156,10 +157,10 @@ export async function handleEvent(ctx: Context, alerts: Alerts, input: EventInpu
     }
     // Separate evidence avoids a TASK.md lock in synchronous UserPromptSubmit hooks.
     // In particular, never wait for the sender's prompt-delivery lock here.
-    // Claude Code hands a collapsed paste to the hook wrapped in <pasted_content id="…">…</pasted_content id="…"> (tests/fixtures/claude-user-prompt-submit-pasted.json).
-    const normalizePrompt = (text: string) => text.replace(/\r\n?/g, '\n').replace(/<pasted_content(?: id="[^"]*")?>\n?([\s\S]*?)\n?<\/pasted_content(?: id="[^"]*")?>/g, '$1').trim();
-    const submitted = input.kind === 'user-prompt-submit' && isObject(input.payload) && typeof input.payload.prompt === 'string' && normalizePrompt(input.payload.prompt) === normalizePrompt(record.pendingPrompt ?? '');
-    const codexInput = input.agent === 'codex' && isObject(input.payload) && Array.isArray(input.payload['input-messages']) && input.payload['input-messages'].some(text => typeof text === 'string' && normalizePrompt(text) === normalizePrompt(record.pendingPrompt ?? ''));
+    // Claude Code wraps a collapsed paste for the hook in <pasted_content id="…">: the wrapper comes off the hook's text only (paste-wrapper.ts), the pending prompt is compared as written.
+    const pending = record.pendingPrompt ?? '';
+    const submitted = input.kind === 'user-prompt-submit' && isObject(input.payload) && typeof input.payload.prompt === 'string' && hookPromptMatches(input.payload.prompt, pending);
+    const codexInput = input.agent === 'codex' && isObject(input.payload) && Array.isArray(input.payload['input-messages']) && input.payload['input-messages'].some(text => typeof text === 'string' && text.replace(/\r\n?/g, '\n').trim() === pending.replace(/\r\n?/g, '\n').trim());
     if (record.deliveryId && record.deliveryStartedAt && now >= Date.parse(record.deliveryStartedAt) && (submitted || codexInput)) {
       await runner.writeFile(path.join(taskDir(ctx.config, record.window), 'delivery-evidence.json'), JSON.stringify({ deliveryId: record.deliveryId, at: new Date(now).toISOString(), type: event.type, accepted: true }));
     }

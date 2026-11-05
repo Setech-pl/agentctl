@@ -150,6 +150,9 @@ export type NotifyBackend = (typeof NOTIFY_BACKENDS)[number];
 /** Write tools of the MCP server; each one must be listed in `mcp.allow` to work. */
 export const MCP_WRITE_TOOLS = ['send', 'new', 'interrupt', 'close', 'move', 'queue', 'queue_rm', 'cancel', 'mark', 'set_limits', 'reserve', 'resume', 'away', 'queue_retry', 'queue_up', 'queue_pause', 'queue_resume', 'unblock', 'cohort_add', 'cohort_remove', 'cohort_note', 'cohort_archive', 'hide', 'unhide', 'archive', 'adopt', 'report_from', 'limits_release', 'manager_start', 'manager_stop', 'notify_test', 'gc'] as const;
 export type McpWriteTool = (typeof MCP_WRITE_TOOLS)[number];
+/** Permissions of `mcp.allow` that are not a tool of their own: `send_enter` lets `send` with `enter_only` press Enter for the text that a send left in an input field (it does not allow pasting). */
+export const MCP_EXTRA_PERMISSIONS = ['send_enter'] as const;
+export type McpPermission = McpWriteTool | (typeof MCP_EXTRA_PERMISSIONS)[number];
 
 /** Explicit group names avoid broadening existing single-tool permissions. */
 export const MCP_ALLOW_GROUPS: Record<string, readonly McpWriteTool[]> = {
@@ -219,7 +222,7 @@ export interface McpSettings {
   maxResponseKb: number;
   client?: string;
   /** Write tools the chat may call; empty (the default): the server only reads. */
-  allow: McpWriteTool[];
+  allow: McpPermission[];
   /** `close` and `cancel` may also remove the git worktree (never with --force, never the main checkout). */
   allowRmWorktree: boolean;
   /**
@@ -330,7 +333,7 @@ export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
     readyTimeout: 60,
     trustTimeout: 600,
     trustPattern: 'Quick safety check|Yes, I trust this folder',
-    workingPattern: 'esc to interrupt|^\\s*(?:⏺\\s+)?Running(?:\\s|…|\\.\\.\\.)|^\\s*[✶✻✽✢✳·*]\\s+[^\\n]+(?:…|\\.\\.\\.)\\s*\\([^\\n]*(?:\\d+(?:\\.\\d+)?s\\s*·|thinking|tokens)[^\\n]*\\)',
+    workingPattern: 'esc to interrupt|^\\s*(?:⏺\\s+)?Running(?:\\s|…|\\.\\.\\.)|^\\s*[✶✻✽✢·*]\\s+[^\\n]+(?:…|\\.\\.\\.)\\s*\\([^\\n]*(?:\\d+(?:\\.\\d+)?s\\s*·|thinking|tokens)[^\\n]*\\)',
     deliveryPattern: '^\\s*⏺|● got:',
     interruptKey: 'Escape',
     footerPatterns: [
@@ -893,8 +896,8 @@ function parseMcp(v: unknown): McpSettings {
   for (const name of allow) {
     if (MCP_ALLOW_GROUPS[name]) {
       for (const tool of MCP_ALLOW_GROUPS[name]) if (!mcp.allow.includes(tool)) mcp.allow.push(tool);
-    } else if (!(MCP_WRITE_TOOLS as readonly string[]).includes(name)) mcp.warnings.push(`config.mcp.allow: "${name}" is not a write tool of this version, ignored (allowed: ${MCP_WRITE_TOOLS.join(', ')})`);
-    else if (!mcp.allow.includes(name as McpWriteTool)) mcp.allow.push(name as McpWriteTool);
+    } else if (!([...MCP_WRITE_TOOLS, ...MCP_EXTRA_PERMISSIONS] as readonly string[]).includes(name)) mcp.warnings.push(`config.mcp.allow: "${name}" is not a write tool of this version, ignored (allowed: ${MCP_WRITE_TOOLS.join(', ')})`);
+    else if (!mcp.allow.includes(name as McpPermission)) mcp.allow.push(name as McpPermission);
   }
   if (v.allow_rm_worktree !== undefined) {
     if (typeof v.allow_rm_worktree === 'boolean') mcp.allowRmWorktree = v.allow_rm_worktree;

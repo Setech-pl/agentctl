@@ -60,7 +60,7 @@ function pane(model: Model) {
 }
 
 function fixture(name: string, model: Model, agent: AgentName = 'claude', extra = '') {
-  const root = scratch.sub(name), config = makeConfig(root, `capacity: {snapshot: false, codex_refresh: false}\nmcp: {allow: [send]}\n${extra}`);
+  const root = scratch.sub(name), config = makeConfig(root, `capacity: {snapshot: false, codex_refresh: false}\nmcp: {allow: [send, send_enter]}\n${extra}`);
   const p = pane(model);
   const runner = new DiskRunner({ dryRun: false, startTime: Date.now() + 1000, respond: p.respond });
   const ctx = new Context(runner, config, () => {}), notified: string[] = [];
@@ -90,10 +90,10 @@ describe('P15b: Claude takes a collapsed paste into its queue while it works', (
     const plain = busyQueued.replace(/^  ctrl\+x ctrl\+s to send now\n/m, '');
     assert.equal(screenMetadata(plain).draft_input, 'Press up to edit queued messages');
     assert.equal(dimInputText(plain, busyQueuedAnsi), plain.split('\n').length === busyQueuedAnsi.split('\n').length ? 'Press up to edit queued messages' : '');
-    let state: 'busy' | 'queued' = 'busy';
+    let state: 'busy' | 'pasted' | 'queued' = 'busy';
     // Only the placeholder in the field: the sign must come from dimInput, because the dim text is taken out of the screen.
     const dim = busyQueuedAnsi.split('\n').filter(l => !/ctrl\+x ctrl\+s/.test(l)).join('\n');
-    const f = fixture('p15b-dim', { screen: () => state === 'busy' ? emptied(busyPaste, /^❯ \[Pasted text #1 \+7 lines\]$/m) : plain, styled: () => state === 'queued' ? dim : undefined, paste: () => { state = 'queued'; }, enter: () => { state = 'queued'; } });
+    const f = fixture('p15b-dim', { screen: () => state === 'busy' ? emptied(busyPaste, /^❯ \[Pasted text #1 \+7 lines\]$/m) : state === 'pasted' ? busyPaste : plain, styled: () => state === 'queued' ? dim : undefined, paste: () => { state = 'pasted'; }, enter: () => { state = 'queued'; } });
     await followup(f, LONG);
     const record0 = f.record(); assert.equal(record0.promptDelivery, 'pending');
     assert.equal(await deliverPendingPrompt(f.ctx, 't1'), 'sent');
@@ -106,7 +106,7 @@ describe('P15b: Claude takes a collapsed paste into its queue while it works', (
     await followup(f, LONG.replace(/\n/g, ' ').slice(0, 970));
     assert.equal(await deliverPendingPrompt(f.ctx, 't1'), 'sent');
     assert.equal(f.record().deliveryResult, 'queued-in-agent');
-    assert.equal(f.record().deliveryField, '[Pasted text #2]');
+    assert.equal(f.record().deliveryField, 'collapsed:[Pasted text #2]');
   });
   it('queued while the agent thinks: the queued message with "ctrl+x ctrl+s to send now" is the sign, not a draft', async () => {
     let state: 'busy' | 'pasted' | 'queued' = 'busy';
@@ -156,10 +156,11 @@ describe('P15b: Claude takes a collapsed paste into its queue while it works', (
 describe('P15: the paste must not stay in the field', () => {
   // A real capture (sonnet/high, 2026-11-04): the spinner is on its "✳" frame, the footer "esc to interrupt" is not drawn (a paste was made a moment ago).
   const star = fx('screen-claude-spinner-star-no-footer.txt');
-  const oldPattern = { ...DEFAULT_AGENT_SETTINGS.claude, workingPattern: DEFAULT_AGENT_SETTINGS.claude.workingPattern.replace('✳', '') };
+  // The "✳" frame is not in the configured pattern (a quoted spinner line would match it anywhere): the status area above the input box decides (state.ts).
+  const noStarPattern = { ...DEFAULT_AGENT_SETTINGS.claude, workingPattern: DEFAULT_AGENT_SETTINGS.claude.workingPattern.replace(/✳/g, '') };
   it('every spinner frame of Claude Code is a working screen, "✳" too (58 of 554 recorded spinner lines); before, that frame read as idle without the footer', () => {
     assert.ok(!/esc to interrupt/.test(star));
-    assert.equal(classifyScreen(star, oldPattern), 'idle');
+    assert.equal(classifyScreen(star.replace(/^✳.*$/m, ''), noStarPattern), 'idle');
     for (const glyph of ['·', '✢', '✳', '✶', '✻', '✽']) assert.equal(classifyScreen(star.replace('✳', glyph), DEFAULT_AGENT_SETTINGS.claude), 'working', glyph);
   });
   it('the frame that used to read as idle: a follow-up is a busy follow-up (queued in the agent), one paste, one Enter', async () => {
@@ -170,10 +171,9 @@ describe('P15: the paste must not stay in the field', () => {
     assert.deepEqual([f.seen.pastes, f.seen.enters], [1, 1]);
     assert.equal(f.record().deliveryWasBusy, true);
   });
-  it('the agent read as idle before the paste (a pattern without the "✳" frame) and working after it: Enter is still pressed, as it was not before the fix', async () => {
+  it('the agent read as idle before the paste (the spinner line was not drawn yet) and working after it: Enter is still pressed, as it was not before the fix', async () => {
     let state: 'before' | 'pasted' | 'queued' = 'before';
-    const f = fixture('p15-old-pattern', { screen: () => state === 'before' ? star : state === 'pasted' ? star.replace(/^❯\s*$/m, '❯\u00a0[Pasted text #2]').replace('✳', '✶') : busyQueued, styled: () => state === 'queued' ? busyQueuedAnsi : undefined, paste: () => { state = 'pasted'; }, enter: () => { state = 'queued'; } },
-      'claude', `agents:\n  claude:\n    working_pattern: ${JSON.stringify(oldPattern.workingPattern)}\n`);
+    const f = fixture('p15-old-pattern', { screen: () => state === 'before' ? star.replace(/^✳.*$/m, '') : state === 'pasted' ? star.replace(/^❯\s*$/m, '❯\u00a0[Pasted text #2]').replace('✳', '✶') : busyQueued, styled: () => state === 'queued' ? busyQueuedAnsi : undefined, paste: () => { state = 'pasted'; }, enter: () => { state = 'queued'; } });
     await followup(f, LONG.replace(/\n/g, ' ').slice(0, 970));
     assert.equal(await deliverPendingPrompt(f.ctx, 't1'), 'sent');
     assert.deepEqual([f.seen.pastes, f.seen.enters], [1, 1]);
@@ -234,7 +234,7 @@ describe('P15: the paste must not stay in the field', () => {
     const f = fixture('p15-retry-foreign', { screen: () => field ? withField(busyPaste, field) : idle, paste: () => { field = '[Pasted text #1 +7 lines]'; } });
     await followup(f, LONG);
     assert.equal(await deliverPendingPrompt(f.ctx, 't1'), 'confirming');
-    assert.equal(f.record().deliveryField, '[Pasted text #1 +7 lines]');
+    assert.equal(f.record().deliveryField, 'collapsed:[Pasted text #1 +7 lines]');
     await f.runner.sleep(ENTER_RETRY_S * 1000 + 100);
     field = '[Pasted text #1 +7 lines] and a word of the human';
     await deliverPendingPrompt(f.ctx, 't1');
@@ -243,14 +243,14 @@ describe('P15: the paste must not stay in the field', () => {
     const dialog = busyPaste + '\nEnter to select · ↑/↓ to navigate · Esc to cancel\n';
     const g = fixture('p15-retry-dialog', { screen: () => withField(dialog, field) });
     await followup(g, LONG);
-    await setHeaderFields(g.runner, taskFile(g.config, 't1'), { prompt_delivery: 'confirming', delivery_result: 'not-delivered-in-field', delivery_field: '[Pasted text #1 +7 lines]', delivery_enters: 3, delivery_enter_at: new Date(g.runner.now() - 20000).toISOString(), delivery_started_at: new Date(g.runner.now() - 20000).toISOString() });
+    await setHeaderFields(g.runner, taskFile(g.config, 't1'), { prompt_delivery: 'confirming', delivery_result: 'not-delivered-in-field', delivery_field: 'collapsed:[Pasted text #1 +7 lines]', delivery_enters: 3, delivery_enter_at: new Date(g.runner.now() - 20000).toISOString(), delivery_started_at: new Date(g.runner.now() - 20000).toISOString() });
     await deliverPendingPrompt(g.ctx, 't1');
     assert.equal(g.seen.enters, 0, 'an open dialog gets no Enter');
   });
   it(`after ${MAX_ENTERS} Enter presses the text is still there: needs-attention with the words "nie dostarczono – tekst w polu wpisywania"`, async () => {
     const f = fixture('p15-exhausted', { screen: () => busyPaste, paste: () => {} });
     await followup(f, LONG);
-    await setHeaderFields(f.runner, taskFile(f.config, 't1'), { prompt_delivery: 'confirming', delivery_result: 'not-delivered-in-field', delivery_field: '[Pasted text #1 +7 lines]', delivery_enters: MAX_ENTERS, delivery_enter_at: new Date(f.runner.now() - 20000).toISOString(), delivery_started_at: new Date(f.runner.now() - 20000).toISOString() });
+    await setHeaderFields(f.runner, taskFile(f.config, 't1'), { prompt_delivery: 'confirming', delivery_result: 'not-delivered-in-field', delivery_field: 'collapsed:[Pasted text #1 +7 lines]', delivery_enters: MAX_ENTERS, delivery_enter_at: new Date(f.runner.now() - 20000).toISOString(), delivery_started_at: new Date(f.runner.now() - 20000).toISOString() });
     assert.equal(await deliverPendingPrompt(f.ctx, 't1'), 'needs-attention');
     assert.match(f.record().promptError!, /^nie dostarczono – tekst w polu wpisywania/);
     assert.match(f.record().promptError!, /send --enter-only T1/);
@@ -276,7 +276,7 @@ describe('submitDraft (send --enter-only)', () => {
     let text = field, taken = false;
     const f = fixture(name, { screen: () => taken ? busyQueued : screenOf(text), styled: () => taken ? busyQueuedAnsi : undefined, enter: () => { taken = true; text = ''; } });
     await followup(f, LONG);
-    await setHeaderFields(f.runner, taskFile(f.config, 't1'), { prompt_delivery: 'confirming', delivery_was_busy: true, delivery_result: 'not-delivered-in-field', delivery_field: '[Pasted text #1 +7 lines]', delivery_started_at: new Date(f.runner.now()).toISOString() });
+    await setHeaderFields(f.runner, taskFile(f.config, 't1'), { prompt_delivery: 'confirming', delivery_was_busy: true, delivery_result: 'not-delivered-in-field', delivery_field: 'collapsed:[Pasted text #1 +7 lines]', delivery_started_at: new Date(f.runner.now()).toISOString() });
     return f;
   };
   it('presses Enter for the text our paste left and records the result', async () => {
@@ -289,7 +289,7 @@ describe('submitDraft (send --enter-only)', () => {
   it('refuses somebody else’s draft, an empty field and an open dialog; nothing is pressed', async () => {
     const other = await stuck('submit-other', 'my own unfinished sentence');
     const a = await submitDraft(other.ctx, 't1');
-    assert.equal(a.outcome, 'refused'); assert.match(a.message, /którego agentctl nie wkleił/); assert.equal(other.seen.enters, 0);
+    assert.equal(a.outcome, 'refused'); assert.match(a.message, /co innego niż to, co agentctl wkleił/); assert.equal(other.seen.enters, 0);
     const empty = await stuck('submit-empty', '');
     const b = await submitDraft(empty.ctx, 't1');
     assert.equal(b.outcome, 'refused'); assert.match(b.message, /puste/); assert.equal(empty.seen.enters, 0);
@@ -309,8 +309,11 @@ describe('submitDraft (send --enter-only)', () => {
     const none = await f.call('send', { task: 'T1' });
     assert.equal(none.isError, true); assert.match(none.text, /text is required/);
     assert.equal(f.seen.enters, 0);
-    const r = await f.call('send', { task: 'T1', enter_only: true });
-    assert.ok(!r.isError, r.text); assert.match(r.text, /^T1: zatwierdzono Enter/);
+    const preview = await f.call('send', { task: 'T1', enter_only: true });
+    assert.ok(!preview.isError, preview.text); assert.match(preview.text, /Nie wciśnięto nic/);
+    assert.equal(f.seen.enters, 0, 'without confirm nothing is pressed');
+    const r = await f.call('send', { task: 'T1', enter_only: true, confirm: true });
+    assert.ok(!r.isError, r.text); assert.match(r.text, /^T1: Enter wysłany: tak; dostarczenie potwierdzone: tak/);
     assert.equal(f.seen.enters, 1);
   });
 });
@@ -331,7 +334,7 @@ describe('P16: Codex', () => {
     const f = fixture('p16-question', { screen: () => codexQuestion }, 'codex');
     const results = await sendPrompts(f.ctx, [{ task: 'T1', window: 't1', prompt: 'SHORT-Q1: also add EXTRA' }]);
     assert.equal(f.seen.pastes, 0); assert.equal(f.seen.enters, 0);
-    assert.match(results[0]!.message, /^w kolejce 1; Codex ma otwarte pytanie \(zwinięte, 1\) – wiadomość nie jest wklejana w pole pytania/);
+    assert.match(results[0]!.message, /^w kolejce 1; Codex ma otwarte pytanie „Which colour: red or blue\?” \(zwinięte, 1\) – wiadomość nie jest wklejana w pole pytania/);
     assert.equal(f.record().promptDelivery, 'pending');
   });
   it('the question appears after the paste: no Enter, the text is reported as left in the field', async () => {

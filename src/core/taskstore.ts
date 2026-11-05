@@ -48,8 +48,10 @@ export interface TaskRecord {
   promptDelivery?: 'launching' | 'pending' | 'sending' | 'confirming' | 'sent' | 'needs-attention';
   /** How the last delivery ended, in the words of `send`: reached the agent / waits in the agent's own queue / our paste stands in the input field. */
   deliveryResult?: 'delivered' | 'queued-in-agent' | 'not-delivered-in-field';
-  /** What the input field showed right after our paste (the text, or "[Pasted text #2]"): only a field that still shows exactly this may get another Enter. */
+  /** Signature of the whole input field right after our paste ("collapsed:[Pasted text #2 +7 lines]" or "text:<digest>", see input-field.ts). It is also the proof that agentctl pasted for this delivery: only a field that still has exactly this signature may get another Enter. */
   deliveryField?: string;
+  /** The agent's queue sign was on the screen just before our last Enter: then it proves nothing about the message that Enter sent. */
+  deliveryQueueSign?: boolean;
   /** Enter presses of this delivery and the time of the last one. */
   deliveryEnters?: number;
   deliveryEnterAt?: string;
@@ -175,6 +177,7 @@ export function renderTaskMd(record: TaskRecord, prompt: string): string {
   for (const [key, value] of Object.entries({ delivery_output_baseline: record.deliveryOutputBaseline, delivery_id: record.deliveryId, delivery_started_at: record.deliveryStartedAt, delivery_report_baseline: record.deliveryReportBaseline, report_confirmed: record.reportConfirmed, pending_prompt: record.pendingPrompt, prompt_delivery: record.promptDelivery, prompt_sent_at: record.promptSentAt, prompt_error: record.promptError, delivery_result: record.deliveryResult, delivery_field: record.deliveryField, delivery_enters: record.deliveryEnters, delivery_enter_at: record.deliveryEnterAt, delivery_echo_baseline: record.deliveryEchoBaseline })) if (value !== undefined) header[key] = value;
   if (record.promptKind) header.prompt_kind = record.promptKind;
   if (record.deliveryWasBusy !== undefined) header.delivery_was_busy = record.deliveryWasBusy;
+  if (record.deliveryQueueSign !== undefined) header.delivery_queue_sign = record.deliveryQueueSign;
   header.report = record.report;
   if (record.reportAlt && record.reportAlt.length > 0) header.report_alt = record.reportAlt;
   if (record.agentCliVersion) header.agent_cli_version = record.agentCliVersion;
@@ -267,6 +270,7 @@ export function parseTaskRecord(text: string): TaskRecord | undefined {
   if (['launching', 'pending', 'sending', 'confirming', 'sent', 'needs-attention'].includes(String(data.prompt_delivery))) record.promptDelivery = data.prompt_delivery as TaskRecord['promptDelivery'];
   if (data.prompt_kind === 'initial' || data.prompt_kind === 'followup') record.promptKind = data.prompt_kind;
   if (typeof data.delivery_was_busy === 'boolean') record.deliveryWasBusy = data.delivery_was_busy;
+  if (typeof data.delivery_queue_sign === 'boolean') record.deliveryQueueSign = data.delivery_queue_sign;
   if (typeof data.attempt === 'number') record.attempt = data.attempt;
   if (typeof data.outputs_protocol === 'number') record.outputsProtocol = data.outputs_protocol;
   for (const [key, field] of [['attempt_id', 'attemptId'], ['attempt_started', 'attemptStarted'], ['attempt_report_baseline', 'attemptReportBaseline'], ['turn_ended_at', 'turnEndedAt'], ['summary_delivered', 'summaryDelivered']] as const) if (typeof data[key] === 'string') record[field] = data[key];

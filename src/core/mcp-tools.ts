@@ -42,8 +42,8 @@ import { collectOverlaps, collideText } from './collisions.ts';
 import { commitQueueAdd, describeQueue, planQueueAdd, readQueue, removeFromQueue, waiting } from './queue.ts';
 import { liveWindows, planBatch } from './plan.ts';
 import { awayReport, renderAway, setAway } from './away.ts';
-import { MCP_WRITE_TOOLS } from './config.ts';
-import type { GlobalConfig, McpWriteTool } from './config.ts';
+import { MCP_EXTRA_PERMISSIONS, MCP_WRITE_TOOLS } from './config.ts';
+import type { GlobalConfig, McpPermission, McpWriteTool } from './config.ts';
 import type { Context } from './context.ts';
 import type { SelfArgv } from './events.ts';
 import { describeMove, moveTask, planMove } from './move.ts';
@@ -721,9 +721,9 @@ const clipText = (s: string, n = 200): string => (s.length <= n ? s : `${s.slice
  */
 async function writeTool(
   deps: McpDeps,
-  tool: McpWriteTool,
+  tool: McpPermission,
   label: { task?: string | undefined; detail?: string | undefined },
-  body: (ctx: Context, lines: string[]) => Promise<{ text: string; executed: boolean; announce: string }>,
+  body: (ctx: Context, lines: string[]) => Promise<{ text: string; executed: boolean; announce: string; /** Nothing was done and the answer is an error (a refusal). */ error?: boolean; /** What the audit line says about the result. */ detail?: string; data?: unknown }>,
 ): Promise<ToolResult> {
   const lines: string[] = [];
   const ctx = deps.context((l) => lines.push(l));
@@ -731,32 +731,45 @@ async function writeTool(
     audit(ctx, { tool, task: label.task, outcome: 'denied', detail: 'not in mcp.allow' });
     return fail(
       `Writing is off for "${tool}": it is not in mcp.allow. Nothing was done. ` +
-        `The user can allow it in ${ctx.config.path} with: mcp: {allow: [${tool}]} (allowed names: ${MCP_WRITE_TOOLS.join(', ')}).`,
+        `The user can allow it in ${ctx.config.path} with: mcp: {allow: [${tool}]} (allowed names: ${[...MCP_WRITE_TOOLS, ...MCP_EXTRA_PERMISSIONS].join(', ')}).`,
     );
   }
   audit(ctx, { tool, task: label.task, outcome: 'requested', detail: label.detail });
   try {
     const result = await body(ctx, lines);
-    audit(ctx, { tool, task: label.task, outcome: result.executed ? 'done' : 'preview' });
+    audit(ctx, { tool, task: label.task, outcome: result.executed ? 'done' : result.error ? 'error' : 'preview', ...(result.detail ? { detail: result.detail } : {}) });
     if (result.executed) {
-      lastPreviewMutation.set(deps, tool);
+      lastPreviewMutation.set(deps, tool as McpWriteTool);
       await recordJournal(ctx, { kind: 'mcp-write', text: `${tool}: ${result.announce}` });
       await mcpWriteNotice(ctx, deps.notify.bind(deps), result.announce);
     }
-    return ok(result.text);
+    return { ...(result.error ? fail(result.text) : ok(result.text)), ...(result.data !== undefined ? { data: result.data } : {}) };
   } catch (e) {
     audit(ctx, { tool, task: label.task, outcome: 'error', detail: errorMessage(e).split('\n')[0] });
     throw e;
   }
 }
 
-async function runSend(deps: McpDeps, args: { task: string; text?: string; enter_only?: boolean }): Promise<ToolResult> {
+async function runSend(deps: McpDeps, args: { task: string; text?: string; enter_only?: boolean; confirm?: boolean }): Promise<ToolResult> {
   if (args.enter_only) {
     if (args.text !== undefined && args.text !== '') return fail('enter_only presses Enter only: do not give text');
-    return writeTool(deps, 'send', { task: args.task, detail: 'enter_only' }, async (ctx) => {
+    // Its own permission (send_enter): pressing Enter for a text that stands in a field is not pasting, and needs a preview and a confirm.
+    return writeTool(deps, 'send_enter', { task: args.task, detail: `enter_only confirm=${Boolean(args.confirm)}` }, async (ctx) => {
       const target = await resolveRunningTask(ctx, args.task);
-      const [done] = await submitDrafts(ctx, [{ task: target.task, window: target.window }]);
-      return { text: `${target.task}: ${done?.message ?? 'nic nie zatwierdzono'}`, executed: !done?.warning, announce: `send ${target.task} (Enter)` };
+      const [done] = await submitDrafts(ctx, [{ task: target.task, window: target.window }], { preview: !args.confirm });
+      if (!done || done.outcome === 'refused') {
+        const why = done?.message ?? 'nic nie zatwierdzono';
+        return { text: `${target.task}: odmowa, żaden klawisz nie poszedł – ${why}`, executed: false, error: true, announce: '', detail: `refused: ${why}` };
+      }
+      if (done.outcome === 'ready') return { text: `${target.task}: ${done.message}.\nNie wciśnięto nic. Pokaż to użytkownikowi; za jego zgodą wywołaj send ponownie z enter_only: true i confirm: true.`, executed: false, announce: '' };
+      const confirmed = done.outcome === 'submitted' ? 'tak' : done.outcome === 'pending' ? 'jeszcze nie (watch sprawdza)' : 'nie – tekst nadal stoi w polu';
+      return {
+        text: `${target.task}: Enter wysłany: tak; dostarczenie potwierdzone: ${confirmed} – ${done.message}`,
+        executed: true,
+        announce: `send ${target.task} (Enter)`,
+        detail: `enter-sent; delivery ${done.outcome}${done.deliveryId ? ` ${done.deliveryId.slice(0, 8)}` : ''}`,
+        data: { key_sent: done.keySent === true, delivery: done.outcome === 'submitted' ? 'confirmed' : done.outcome === 'pending' ? 'unconfirmed' : 'not-delivered-in-field', delivery_id: done.deliveryId ?? null },
+      };
     });
   }
   if (args.text === undefined) return fail('text is required (or enter_only: true to press Enter for the text a send left in the input field)');
@@ -1155,11 +1168,11 @@ export const MCP_TOOLS: McpToolDef[] = [
     description:
       `WRITE, off unless the user put "send" in mcp.allow. Pastes a follow-up prompt (up to ${MAX_SEND_CHARS} characters) into the window of a running task, as if the user typed it, and presses Enter. ` +
       'To a working agent the message goes into the agent\'s own queue; the answer says delivered, "w kolejce agenta" (queued in the agent) or "nie dostarczono – tekst w polu wpisywania" (the paste stands in the input field). ' +
-      'In the last case give enter_only: true (no text) to press Enter for that text; it refuses any other text in the field. An agent with an open question gets nothing pasted. ' +
+      'In the last case enter_only: true (no text) presses Enter for that text. It needs its own permission, send_enter, in mcp.allow; the first call (no confirm) only previews, show it to the user, then call again with confirm: true. It refuses (an error, no key) any other, changed or partial text in the field. The answer keeps "Enter sent" apart from "delivery confirmed". An agent with an open question gets nothing pasted. ' +
       'Use it only when the user asked you to instruct an agent; say what you will send first. The user gets a desktop notification.',
-    input: { task: taskArg, text: z.string().min(1).max(MAX_SEND_CHARS).optional().describe('The prompt for the agent. Required unless enter_only is true.'), enter_only: z.boolean().optional().describe('true: paste nothing, press Enter for the text that an earlier send left in the input field (only that text).') },
+    input: { task: taskArg, text: z.string().min(1).max(MAX_SEND_CHARS).optional().describe('The prompt for the agent. Required unless enter_only is true.'), enter_only: z.boolean().optional().describe('true: paste nothing, press Enter for the text that an earlier send left in the input field (only that text, only while the whole field is exactly our paste). Needs send_enter in mcp.allow; without confirm it only previews.'), confirm: z.boolean().optional().describe('With enter_only: true presses Enter after a preview; without it nothing is pressed.') },
     annotations: { title: 'Send a prompt to a running task', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-    run: (deps, args) => guarded(() => runSend(deps, args as { task: string; text?: string; enter_only?: boolean })),
+    run: (deps, args) => guarded(() => runSend(deps, args as { task: string; text?: string; enter_only?: boolean; confirm?: boolean })),
   }),
   def({
     name: 'new',

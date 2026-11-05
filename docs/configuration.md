@@ -183,7 +183,7 @@ Queued tasks live in `<config dir>/queue/` (one JSON file each, with the spec te
 | `agents.<agent>.ready_timeout` | seconds | `60` | g | How long `new` waits for `ready_pattern`. |
 | `agents.<agent>.trust_pattern` | regex | see below | g | The agent shows its folder-trust dialog. agentctl never answers it. |
 | `agents.<agent>.trust_timeout` | seconds | `600` | g | How long `new` waits for you to answer the trust dialog. |
-| `agents.<agent>.working_pattern` | regex | see below | g | A turn is running, including Claude 2.1.x spinner progress. |
+| `agents.<agent>.working_pattern` | regex | see below | g | A turn is running, including Claude 2.1.x spinner progress. The spinner frame `✳` is not in the pattern: it counts only as a spinner line (word, `…`, a bracket that starts with the elapsed time) right above the input box, never in the transcript, whatever the pattern says. |
 | `agents.<agent>.delivery_pattern` | regex | see below | g | New adapter assistant output acknowledges a submitted prompt; input drafts never count. |
 | `preview` | mapping | `{ttl_s: 600}` | g | MCP preview token lifetime and argument identity. |
 | `preview.ttl_s` | positive seconds | `600` | g | Lifetime measured from preview creation; responses include TTL and expiry. Canonical YAML key order/formatting and trailing prompt whitespace are ignored. Read tools and unrelated starts do not invalidate previews. Destructive target changes still require a fresh preview; refusals identify TTL, changed fields, session or invalidation. |
@@ -201,7 +201,7 @@ claude:
   effort_args: ['--effort', '{effort}']
   ready_pattern: '^\s*❯\s(?!\d+\.)'
   trust_pattern: 'Quick safety check|Yes, I trust this folder'
-  working_pattern: 'esc to interrupt|^\s*(?:⏺\s+)?Running(?:\s|…|\.\.\.)|^\s*[✶✻✽✢✳·*]\s+[^\n]+(?:…|\.\.\.)\s*\([^\n]*(?:\d+(?:\.\d+)?s\s*·|thinking|tokens)[^\n]*\)'
+  working_pattern: 'esc to interrupt|^\s*(?:⏺\s+)?Running(?:\s|…|\.\.\.)|^\s*[✶✻✽✢·*]\s+[^\n]+(?:…|\.\.\.)\s*\([^\n]*(?:\d+(?:\.\d+)?s\s*·|thinking|tokens)[^\n]*\)'
   delivery_pattern: '^\s*⏺|● got:'
   question_pattern: 'Enter to select\b.*Esc to cancel|Esc to cancel · Tab to amend'
   footer_patterns:

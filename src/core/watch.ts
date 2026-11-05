@@ -3,7 +3,7 @@ import { drainPromptQueue } from './prompt-queue.ts';
 import { mcpWriteNotice } from './mcp-notify.ts';
 import { reviewTick } from './review.ts';
 import { journalOutputs } from './outputs.ts';
-import { deliverPendingPrompt, deliveryNote } from './prompt-delivery.ts';
+import { deliverPendingPrompt } from './prompt-delivery.ts';
 import { overloadTick } from './overload.ts';
 import { diskTick } from './disk.ts';
 import fs from 'node:fs';
@@ -206,8 +206,6 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
     if (record && ['pending', 'sending', 'confirming', 'needs-attention'].includes(record.promptDelivery ?? '')) {
       if (record.promptDelivery === 'pending' && row.window !== 'alive') continue;
       const result = await deliverPendingPrompt(ctx, row.windowName);
-      const settled = readTaskRecord(ctx.config, row.windowName), note = settled && settled.deliveryResult !== record.deliveryResult && settled.deliveryResult !== 'delivered' ? deliveryNote(settled) : undefined;
-      if (note) await recordJournal(ctx, { kind: 'delivery', task: row.task, text: `${row.task}: ${note}` });
       // The baseline tick has no transition notifier yet; later deadlines use NOTIFY_ON below.
       if (result === 'needs-attention' && record.promptDelivery !== 'needs-attention' && !memory.started) {
         const updated = readTaskRecord(ctx.config, row.windowName);

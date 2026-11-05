@@ -5,9 +5,10 @@ import fs from 'node:fs';
 import type { Context } from './context.ts';
 import { enqueuePrompt, drainPromptQueue, readPromptQueue } from './prompt-queue.ts';
 import { deliveryNote, submitDraft } from './prompt-delivery.ts';
+import type { SubmitDraftResult } from './prompt-delivery.ts';
 import { classifyScreen } from './state.ts';
-import { recordJournal } from './journal.ts';
-import { collapsedQuestion } from './events.ts';
+import { collapsedQuestion, extractQuestion } from './events.ts';
+import { sessionQuestion } from './codex-question.ts';
 import { readTaskRecord, renderFollowUp, taskFile } from './taskstore.ts';
 import { AgentctlError, Problems } from './util.ts';
 
@@ -59,19 +60,15 @@ async function sendPromptsUnlocked(ctx: Context, items: SendItem[]): Promise<{ t
       const position = waiting.findIndex(p => p.id === queued.id);
       if (position >= 0 || (fresh?.deliveryId === queued.id && fresh.promptDelivery === 'pending')) {
         const n = position >= 0 ? position + 1 + (fresh?.pendingPrompt ? 1 : 0) : 1;
-        const question = await openQuestion(ctx, item.window, record.agent);
+        const question = await openQuestion(ctx, item.window, record);
         message = warning = question
           ? `w kolejce ${n}; ${question} – wiadomość nie jest wklejana w pole pytania (to nie byłaby odpowiedź); odpowiedz w oknie (attach), watch wyśle ją po pytaniu`
           : `w kolejce ${n}; watch wysyła FIFO po bezczynności lub potwierdzeniu poprzedniej wiadomości`;
       } else if (fresh?.deliveryId === queued.id) {
+        // The journal entry for the result is written where the result is decided (prompt-delivery.ts).
         const note = deliveryNote(fresh);
-        if (fresh.promptDelivery !== 'sent') {
-          message = warning = note ?? 'wklejono; dostarczenie niepotwierdzone – sprawdzam (watch)';
-          if (note) await recordJournal(ctx, { kind: 'delivery', task: item.task, text: `${item.task}: ${note}` });
-        } else if (note) {
-          message = note;
-          await recordJournal(ctx, { kind: 'delivery', task: item.task, text: `${item.task}: ${note}` });
-        }
+        if (fresh.promptDelivery !== 'sent') message = warning = note ?? 'wklejono; dostarczenie niepotwierdzone – sprawdzam (watch)';
+        else if (note) message = note;
       }
     } else {
       await tmux.submitPrompt(item.window, item.prompt);
@@ -84,23 +81,39 @@ async function sendPromptsUnlocked(ctx: Context, items: SendItem[]): Promise<{ t
   return results;
 }
 
-/** The agent has a dialog or a question open that a pasted message would land in: what it says, in a few words; undefined when there is none. */
-async function openQuestion(ctx: Context, window: string, agent: string): Promise<string | undefined> {
+/** The question of a collapsed Codex question on the screen: "? Which colour: red or blue?" above its options (not the "? 1 question" marker). */
+function collapsedQuestionText(screen: string): string | undefined {
+  const lines = screen.split('\n');
+  const marker = lines.findLastIndex(l => /^\s*\?\s+\d+ questions?\b/i.test(l));
+  for (let i = (marker < 0 ? lines.length : marker) - 1; i >= Math.max(0, marker - 12); i--) {
+    const text = /^\s*\?\s+(?!\d+ questions?\b)(.+\S)\s*$/i.exec(lines[i]!)?.[1];
+    if (text) return text.length > 120 ? `${text.slice(0, 117)}…` : text;
+  }
+  return undefined;
+}
+
+/** The agent has a dialog or a question open that a pasted message would land in: what it asks and how many, in a few words; undefined when there is none. */
+async function openQuestion(ctx: Context, window: string, record: NonNullable<ReturnType<typeof readTaskRecord>>): Promise<string | undefined> {
+  const agent = record.agent;
   if (agent !== 'claude' && agent !== 'codex') return undefined;
   const screen = await ctx.tmux.capture(window, undefined, undefined, undefined, true);
   if (screen.code !== 0 || classifyScreen(screen.stdout, ctx.config.agents[agent]) !== 'needs-input') return undefined;
   const collapsed = collapsedQuestion(screen.stdout);
-  return collapsed ? `${agent === 'codex' ? 'Codex' : 'agent'} ma otwarte pytanie (zwinięte, ${collapsed.count})` : 'agent ma otwarte pytanie lub okno dialogowe';
+  if (collapsed) {
+    const text = sessionQuestion(ctx.config, record) ?? collapsedQuestionText(screen.stdout);
+    return `${agent === 'codex' ? 'Codex' : 'agent'} ma otwarte pytanie${text ? ` „${text}”` : ''} (zwinięte, ${collapsed.count})`;
+  }
+  const asked = extractQuestion(screen.stdout);
+  return asked ? `agent ma otwarte pytanie lub okno dialogowe: ${asked}` : 'agent ma otwarte pytanie lub okno dialogowe';
 }
 
-/** `send --enter-only TASK`: press Enter for the text our own paste left in the input field; refuses anything else. */
-export async function submitDrafts(ctx: Context, items: { task: string; window: string }[]): Promise<{ task: string; message: string; warning?: string; refused?: boolean }[]> {
-  const results: { task: string; message: string; warning?: string; refused?: boolean }[] = [];
+/** `send --enter-only TASK`: press Enter for the text our own paste left in the input field; refuses anything else. With `preview` nothing is pressed. */
+export async function submitDrafts(ctx: Context, items: { task: string; window: string }[], options: { preview?: boolean } = {}): Promise<{ task: string; message: string; outcome: SubmitDraftResult['outcome']; keySent: boolean; deliveryId?: string | undefined; warning?: string; refused?: boolean }[]> {
+  const results: { task: string; message: string; outcome: SubmitDraftResult['outcome']; keySent: boolean; deliveryId?: string | undefined; warning?: string; refused?: boolean }[] = [];
   for (const item of items) {
-    const done = ctx.runner.dryRun ? await submitDraft(ctx, item.window) : await withStartLock(ctx, () => submitDraft(ctx, item.window));
-    if (!ctx.runner.dryRun && done.outcome === 'submitted') await recordJournal(ctx, { kind: 'delivery', task: item.task, text: `${item.task}: ${done.message}` });
+    const done = ctx.runner.dryRun ? await submitDraft(ctx, item.window, options) : await withStartLock(ctx, () => submitDraft(ctx, item.window, options));
     if (done.outcome !== 'refused') ctx.info(`${item.task}: ${done.message}`);
-    results.push({ task: item.task, message: done.message, ...(done.outcome === 'submitted' ? {} : { warning: done.message }), ...(done.outcome === 'refused' ? { refused: true } : {}) });
+    results.push({ task: item.task, message: done.message, outcome: done.outcome, keySent: done.keySent === true, deliveryId: done.deliveryId, ...(done.outcome === 'submitted' || done.outcome === 'ready' ? {} : { warning: done.message }), ...(done.outcome === 'refused' ? { refused: true } : {}) });
   }
   return results;
 }
