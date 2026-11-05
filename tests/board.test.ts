@@ -1,3 +1,4 @@
+import { composerFixture } from './composer-fixture.ts';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { main } from '../src/cli.ts';
@@ -353,7 +354,7 @@ describe('board: running effects', () => {
     const config = makeConfig(scratch.sub(name));
     seedTask(config, 'NC-1');
     const tmux = new FakeTmux();
-    tmux.add(windowName, '● idle\n❯ \n');
+    tmux.add(windowName, composerFixture('● idle\n❯ \n'));
     const made = makeContext(config, { respond: tmux.respond });
     return { config, tmux, ...made };
   }

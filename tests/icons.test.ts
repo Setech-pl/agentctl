@@ -1,3 +1,4 @@
+import { composerFixture } from './composer-fixture.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { describe, it } from 'node:test';
@@ -19,7 +20,7 @@ import { DiskRunner, FakeTmux, makeConfig, makeContext, seedTask, useScratch } f
 const scratch = useScratch();
 const notifier: Notifier = { notify: async () => {} };
 
-const IDLE = '● done\n❯ \n  ? for shortcuts\n';
+const IDLE = composerFixture('● done\n❯ \n  ? for shortcuts\n');
 const WORKING = '● reading\n  ⏵⏵ auto mode (shift+tab to cycle) · esc to interrupt\n';
 const QUESTION = '? Tea or coffee?\n  Enter to select · Esc to cancel\n';
 const TRUST = 'Quick safety check: do you trust this folder?\n❯ 1. Yes, I trust this folder';

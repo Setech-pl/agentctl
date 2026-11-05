@@ -1,3 +1,4 @@
+import { composerFixture } from './composer-fixture.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -26,7 +27,7 @@ function fixture(name: string, agent: 'claude' | 'codex' = 'claude', extra = '')
     if (cmd === 'tmux' && args[0] === 'capture-pane') { const target = args[args.indexOf('-t') + 1] ?? ''; const pane = tmux.windows.find(w => w.id === target || target.endsWith(':' + w.name)); return pane ? { stdout: pane.screen } : { code: 1 }; }
     return tmux.respond(cmd, args, opts);
   } });
-  const pane = tmux.add('t1', agent === 'claude' ? '❯ Try "fake"\n' : '› Ask Codex to do anything\n');
+  const pane = tmux.add('t1', composerFixture(agent === 'claude' ? '❯ Try "fake"\n' : '› Ask Codex to do anything\n'));
   const ctx = new Context(runner, config, () => {}), notified: string[] = [];
   const notifier = { notify: async (_title: string, text: string) => { notified.push(text); } };
   seedTask(config, 'T1', { agent, cohort: 'P', windowId: pane.id });

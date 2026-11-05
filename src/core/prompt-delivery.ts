@@ -89,10 +89,12 @@ export function deliveryClass(record: TaskRecord, screen: string, dimInput = '')
  */
 function queuedListShows(screen: string, prompt: string, agent: TaskRecord['agent']): boolean {
   const lines = screen.split('\n').map(line => line.trimEnd());
-  const heading = lines.findLastIndex(line => /Queued follow-up inputs|Queued messages?/i.test(line));
+  const composer = inspectField(screen);
+  if (!composer.readable || composer.top === undefined) return false;
+  const heading = lines.findLastIndex((line, i) => i < composer.top! && /Queued follow-up inputs|Queued messages?/i.test(line));
   if (heading < 0) return false;
-  const rows: string[] = [];
-  for (let i = heading + 1; i < lines.length && !/^\s*[❯›>](?:\s|$)/.test(lines[i]!); i++) rows.push(lines[i]!.replace(/^ {1,2}/, ''));
+  // The exact same structural edge as fieldArea: a border-like row in the queued text itself stays text.
+  const rows = lines.slice(heading + 1, composer.top).map(line => line.replace(/^ {1,2}/, ''));
   while (rows.length && rows.at(-1) === '') rows.pop();
   return rows.length > 0 && readsAs(rows, prompt, agent, true);
 }

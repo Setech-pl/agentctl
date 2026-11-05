@@ -1,3 +1,4 @@
+import { composerFixture } from './composer-fixture.ts';
 import { completedRecordFromSpec as recordFromSpec } from './helpers.ts';
 import assert from 'node:assert/strict';
 import { formatLocalTime } from '../src/core/util.ts';
@@ -74,7 +75,7 @@ env: {NEON_CITY_TASK: NC-1}
 First line.
 Second line.
 `;
-    const { ctx, runner } = makeContext(config, { respond: freshMachine('loading...', 'Welcome\n❯ Try "x"') });
+    const { ctx, runner } = makeContext(config, { respond: freshMachine('loading...', composerFixture('Welcome\n❯ Try "x"')) });
     await newTasks(ctx, resolveAll(config, text));
 
     const cache = path.join(config.cache, 'nc-1');
@@ -196,7 +197,7 @@ describe('send', () => {
     const [spec] = resolveAll(config, `---\ntask: NC-1\nagent: claude\nrepos:\n  - {path: ${repo}, worktree: ${repo}-wt}\n---\nOriginal.\n`);
     seedTask(config, spec!, 0);
     const { ctx, runner } = makeContext(config, {
-      respond: (cmd, args) => (cmd === 'tmux' && args[0] === 'list-windows' ? { stdout: 'nc-1\n' } : cmd === 'tmux' && args[0] === 'capture-pane' ? { stdout: '❯ Try \"fake\"\n' } : undefined),
+      respond: (cmd, args) => (cmd === 'tmux' && args[0] === 'list-windows' ? { stdout: 'nc-1\n' } : cmd === 'tmux' && args[0] === 'capture-pane' ? { stdout: composerFixture('❯ Try \"fake\"\n') } : undefined),
     });
     await sendPrompts(ctx, [item]);
     assert.deepEqual(runner.commands.filter(c => c.startsWith('tmux ')), [

@@ -1,3 +1,4 @@
+import { composerFixture } from './composer-fixture.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -260,7 +261,7 @@ describe('0.17.4 delivery evidence and FIFO', () => {
       if (cmd !== 'tmux') return;
       if (args[0] === 'load-buffer') pasted = opts.input?.toString() ?? '';
       if (args[0] === 'send-keys' && args.at(-1) === 'Enter' && pasted) submitted = true;
-      if (args[0] === 'capture-pane') return { stdout: `Working (esc to interrupt)\n${submitted ? `Queued follow-up inputs\n${pasted}\n` : ''}${agent === 'claude' ? '❯' : '›'} \n` };
+      if (args[0] === 'capture-pane') return { stdout: composerFixture(`Working (esc to interrupt)\n${submitted ? `Queued follow-up inputs\n${pasted}\n` : ''}${agent === 'claude' ? '❯' : '›'} \n`) };
     });
     const pane = f.tmux.add('t1'); seedTask(f.config, 'T1', { agent, windowId: pane.id });
     let result = await sendPrompts(f.ctx, [{ task: 'T1', window: 't1', prompt: 'FIRST' }]); assert.match(result[0]!.message, /wklejono/); assert.equal(result[0]!.warning, undefined);
@@ -271,7 +272,7 @@ describe('0.17.4 delivery evidence and FIFO', () => {
     const first = await sendPrompts(f.ctx, [{ task: 'T1', window: 't1', prompt: 'FIRST' }]), second = await sendPrompts(f.ctx, [{ task: 'T1', window: 't1', prompt: 'SECOND' }]);
     assert.match(first[0]!.message, /w kolejce 1/); assert.match(second[0]!.message, /w kolejce 2/); assert.equal((await status(f.ctx))[0]!.promptQueue?.length, 2); assert.equal((await peekTask(f.ctx, 'T1')).promptQueue?.length, 2);
     assert.equal(f.runner.calls.filter(c => c.line.startsWith('tmux paste-buffer')).length, 0);
-    pane.screen = '❯ Try "fake"\n'; await drainPromptQueue(f.ctx, 't1'); await drainPromptQueue(f.ctx, 't1');
+    pane.screen = composerFixture('❯ Try "fake"\n'); await drainPromptQueue(f.ctx, 't1'); await drainPromptQueue(f.ctx, 't1');
     assert.deepEqual(f.runner.calls.filter(c => c.line.startsWith('tmux load-buffer')).map(c => c.input), ['FIRST', 'SECOND']); assert.equal(promptQueueView(f.ctx, 't1').length, 0);
   });
   it('stuck draft + idle_prompt/Stop cannot confirm delivery; a matching submit still requires the composer to clear', async () => {
@@ -536,7 +537,7 @@ describe('0.17.4 fix 1: UAT polish (U-a … U-f)', () => {
     assert.deepEqual(readJournal(f.config).filter(e => e.kind === 'gc_suggest').map(e => e.cohort), ['NEWC']);
   });
   it('U-f: the send answer says "wklejono" once', async () => {
-    const f = fixture('u-send'); f.config.mcp.allow.push('send'); seedTask(f.config, 'SENDER', { repos: [] }); f.tmux.add('sender', '❯ \n');
+    const f = fixture('u-send'); f.config.mcp.allow.push('send'); seedTask(f.config, 'SENDER', { repos: [] }); f.tmux.add('sender', composerFixture('❯ \n'));
     const tool = MCP_TOOLS.find(t => t.name === 'send')!, deps = { ...f.deps, context: (log: (line: string) => void) => new Context(f.runner, f.config, log) };
     const r = await tool.run(deps as never, z.object(tool.input).parse({ task: 'SENDER', text: 'hello there' })); assert.ok(!r.isError, r.text);
     assert.equal((r.text.match(/wklejono|w kolejce/g) ?? []).length, 1, r.text);

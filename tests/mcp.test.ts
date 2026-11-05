@@ -1,3 +1,4 @@
+import { composerFixture } from './composer-fixture.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -14,7 +15,7 @@ import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helper
 const scratch = useScratch();
 const SELF = ['/usr/bin/env', 'AGENTCTL_HOME=/h', '/opt/node/bin/node', '--experimental-strip-types', '--no-warnings', '/opt/agentctl/bin/agentctl.ts'];
 const WORKING = '● Reading src/menu.ts\n  esc to interrupt\n';
-const IDLE = 'Welcome\n❯ \n  ⏵⏵ auto mode on';
+const IDLE = composerFixture('Welcome\n❯ \n  ⏵⏵ auto mode on');
 
 const tool = (name: string): McpToolDef => MCP_TOOLS.find((t) => t.name === name) as McpToolDef;
 const schemaOf = (name: string) => z.object(tool(name).input);

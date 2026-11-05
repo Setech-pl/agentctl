@@ -4,8 +4,10 @@ import path from 'node:path';
 import { describe, it } from 'node:test';
 import { Alerts } from '../src/core/alert.ts';
 import { handleEvent } from '../src/core/event-command.ts';
+import { withoutDimInput } from '../src/core/tmux.ts';
+import { CLAUDE_COMPOSER_BORDER } from './composer-fixture.ts';
 import { Context } from '../src/core/context.ts';
-import { deliveryNote, deliverPendingPrompt, queuePrompt, submitDraft } from '../src/core/prompt-delivery.ts';
+import { deliveryNote, deliveryProof, deliverPendingPrompt, queuePrompt, submitDraft } from '../src/core/prompt-delivery.ts';
 import { fieldArea, fieldText } from '../src/core/input-field.ts';
 import { claudeProjectName } from '../src/core/usage-sources.ts';
 import { rememberSession } from '../src/core/usage-tap.ts';
@@ -144,6 +146,20 @@ describe('FIX4 N3: structural composer boundary, all interior lines are content'
     const exec = w.runner.exec.bind(w.runner); w.runner.exec = async (c, a, o) => c === 'tmux' && a[0] === 'capture-pane' ? { code: 0, stdout: 'Working (esc to interrupt)\n❯ ORIGINAL\n', stderr: '' } : exec(c, a, o);
     const done = await submitDraft(w.ctx, 't1', { token: preview.token }); assert.equal(done.outcome, 'refused'); assert.equal(w.keys.length, n); assert.match(done.message, /granic|struktur/);
   });
+  it('unframed input in the paste call gets no Enter and is explicitly not delivered in the field', async () => {
+    const w = await world('claude', 'ORIGINAL');
+    const exec = w.runner.exec.bind(w.runner); let pasted = false;
+    w.runner.exec = async (c, a, o) => {
+      if (c === 'tmux' && a[0] === 'paste-buffer') pasted = true;
+      if (c === 'tmux' && a[0] === 'capture-pane') return { code: 0, stdout: `Working (esc to interrupt)\n❯ ${pasted ? 'ORIGINAL' : ''}\n`, stderr: '' };
+      return exec(c, a, o);
+    };
+    await deliverPendingPrompt(w.ctx, 't1');
+    assert.deepEqual(w.keys, []);
+    assert.equal(w.record().deliveryResult, 'not-delivered-in-field');
+    assert.equal(w.record().pendingPrompt, 'ORIGINAL');
+    assert.match(deliveryNote(w.record()) ?? '', /nie dostarczono – tekst w polu wpisywania/);
+  });
   it('an old framed composer never supplies the boundary of a newer unframed input', () => {
     assert.deepEqual(fieldArea(pane('ORIGINAL') + '❯ CURRENT FOREIGN DRAFT\n'), []);
   });
@@ -151,5 +167,27 @@ describe('FIX4 N3: structural composer boundary, all interior lines are content'
     const screen = fs.readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8').replace(/^› Ask Codex to do anything$/m, '› ORIGINAL'); const area = fieldArea(screen);
     assert.ok(area.length); assert.ok(!fieldText(area).includes('? for shortcuts')); assert.ok(!fieldText(area).includes('GPT-6.1-Sol'));
     if (name.includes('claude')) assert.match(fieldText(area), /^\[Pasted text/);
+  });
+});
+
+describe('FIX4: literal queued-list ACK ends at the structural composer edge', () => {
+  const read = (name: string) => fs.readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
+  const real = withoutDimInput(read('screen-claude-busy-queued-shown.txt'), read('screen-claude-busy-queued-shown-ansi.txt'));
+  const composer = real.slice(real.lastIndexOf(`${CLAUDE_COMPOSER_BORDER}\n❯`));
+  const screen = (message: string) => `Working (esc to interrupt)\nQueued follow-up inputs\n${message}\n${composer}`;
+  it('the real Claude composer border separates the whole queued message from the marker', async () => {
+    const w = await world(); await w.awaiting();
+    assert.equal(deliveryProof(w.ctx, w.record(), screen('SAME MESSAGE')), 'delivered');
+    assert.equal(deliveryProof(w.ctx, w.record(), screen('SAME MESSAGE EXTRA')), null);
+  });
+  for (const line of ['│ box-drawing text │', CLAUDE_COMPOSER_BORDER]) it(`a queued message containing ${line.startsWith('│') ? 'box characters' : 'a border-like line'} stays literal`, async () => {
+    const message = `FIRST\n${line}\nLAST`, w = await world('claude', message); await w.awaiting();
+    assert.equal(deliveryProof(w.ctx, w.record(), screen(message)), 'delivered');
+    assert.equal(deliveryProof(w.ctx, { ...w.record(), pendingPrompt: 'FIRST\nLAST' }, screen(message)), null);
+    assert.equal(deliveryProof(w.ctx, { ...w.record(), pendingPrompt: `FIRST\n${line}\nOTHER` }, screen(message)), null);
+  });
+  it('a composer border without a queued list is never a queued-message ACK', async () => {
+    const w = await world(); await w.awaiting();
+    assert.equal(deliveryProof(w.ctx, w.record(), `Working (esc to interrupt)\n${composer}`), null);
   });
 });

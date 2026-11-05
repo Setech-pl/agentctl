@@ -20,23 +20,24 @@ const NOT_A_DRAFT = /^Try\s|^Ask Codex to do anything$|^\d+\./;
 
 const digest = (text: string) => createHash('sha256').update(text).digest('hex').slice(0, 24);
 
-export interface FieldCapture { area: string[]; readable: boolean; reason?: string }
+/** top is the structural upper edge: Claude border, or Codex prompt row. */
+export interface FieldCapture { area: string[]; readable: boolean; top?: number; reason?: string }
 
 /** Read the composer by its geometry, never by a footer-like line in its body. */
 export function inspectField(screen: string): FieldCapture {
   const lines = screen.split('\n').map(line => line.trimEnd());
   const lastMarker = lines.findLastIndex(line => /^[❯›>](?:\s|$)/.test(line));
-  const areaOf = (start: number, end: number): FieldCapture => {
+  const areaOf = (start: number, end: number, top = start): FieldCapture => {
     const area = lines.slice(start, end);
     while (area.length > 1 && area.at(-1) === '') area.pop();
     const empty = area.length === 1 && (stripMarker(area[0]!).trim() === '' || NOT_A_DRAFT.test(stripMarker(area[0]!).trim()));
-    return { readable: true, area: empty ? [] : area };
+    return { readable: true, area: empty ? [] : area, top };
   };
   // Claude: the marker immediately follows the upper border. Continuation rows (including markers or footer text typed by the user) are body.
   for (let top = lines.length - 2; top >= 0; top--) {
     if (top + 1 !== lastMarker || !BORDER.test(lines[top]!)) continue;
     const bottom = lines.findLastIndex((line, i) => i > top + 1 && line === lines[top]);
-    if (bottom > top + 1) return areaOf(top + 1, bottom);
+    if (bottom > top + 1) return areaOf(top + 1, bottom, top);
     return { area: [], readable: false, reason: 'brak dolnej ramki composera (ucięty ekran albo inna szerokość)' };
   }
   // Codex 0.166.0 has no box: its two-row model/hints footer is a separate bottom region (recorded fixtures).
