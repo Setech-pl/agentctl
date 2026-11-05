@@ -65,7 +65,7 @@ describe('new: waiting for folder trust', () => {
     assert.ok(out.includes('NC-1: prompt sent'));
     // Only the agent start command (+ its Enter) and the prompt paste (+ its Enter) were typed: the dialog was never answered.
     const keys = runner.commands.filter((c) => c.startsWith('tmux send-keys'));
-    assert.deepEqual(keys, ["tmux send-keys -t '=agentctl:nc-1' -l -- 'claude --effort high'", 'tmux send-keys -t \'=agentctl:nc-1\' Enter', 'tmux send-keys -t \'=agentctl:nc-1\' Enter']);
+    assert.deepEqual(keys, [`tmux send-keys -t '=agentctl:nc-1' -l -- 'exec sh ${config.stateDir}/nc-1/start.sh'`, 'tmux send-keys -t \'=agentctl:nc-1\' Enter', 'tmux send-keys -t \'=agentctl:nc-1\' Enter']);
     assert.ok(runner.commands.indexOf(pastes(runner.commands)[0]!) > runner.commands.findIndex((c) => c.includes("'claude")));
   });
 

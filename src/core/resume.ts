@@ -1,3 +1,4 @@
+import { writeLaunchScript } from './launch-script.ts';
 import { validateLaunch, launchEnvironment } from './safety.ts';
 import { provider, isActive } from './providers/registry.ts';
 import { withStartLock, reserveStarts, releaseStarts } from './start-lock.ts';
@@ -5,7 +6,7 @@ import { queuePrompt, deliverPendingPrompt } from './prompt-delivery.ts';
 import { waitForReady } from './ready.ts';
 import { attemptFields } from './report-state.ts';
 import fs from 'node:fs';
-import { agentCommandLine, buildResumeArgv, reportInstructions } from './agents.ts';
+import { buildResumeArgv, reportInstructions } from './agents.ts';
 import { checkWindowLimit } from './checks.ts';
 import type { LiveWindow } from './checks.ts';
 import type { AgentName } from './config.ts';
@@ -16,7 +17,7 @@ import { liveWindows } from './plan.ts';
 import { matchTask } from './resolve.ts';
 import { collectStatus } from './status.ts';
 import type { StatusRow } from './status.ts';
-import { readTaskRecord, setHeaderField, setHeaderFields, taskFile } from './taskstore.ts';
+import { readTaskRecord, setHeaderField, setHeaderFields, taskDir, taskFile } from './taskstore.ts';
 import type { TaskRecord } from './taskstore.ts';
 import { readTaskSessions } from './usage.ts';
 import { assertAgentSpawnAllowed, openAgentWindow } from './window-guard.ts';
@@ -133,20 +134,27 @@ async function startResumed(ctx: Context, plan: ResumePlan, opts: { self?: SelfA
     Object.assign(record, attempt);
     await withStartLock(ctx, () => setHeaderFields(runner, taskFile(config, c.window), { attempt: attempt.attempt, attempt_id: attempt.attemptId, attempt_started: attempt.attemptStarted, attempt_report_baseline: attempt.attemptReportBaseline, observed: null, observed_warning: null, turn_ended_at: null, report_candidate: null, pulled: null, summary_delivered: null, report_complete_hash: null }));
     const wiring = config.notify.events && opts.self ? planEventWiring({ attempt: record.attemptId, agent: c.agent, task: c.task, window: c.window, config, self: opts.self, env: record.env, worktree: c.worktree }) : undefined;
-    for (const file of wiring?.files ?? []) await runner.writeFile(file.path, file.content);
-    const started = await openAgentWindow(ctx, { task: c.task, window: c.window, cwd: c.worktree, env: launchEnvironment(config, order, record.env), report: record.report, repos: record.repos, reviewOf: record.reviewOf, autoReview: record.autoReview, origin: 'resume', sessionUp });
+    for (const file of wiring?.files ?? []) {
+      await runner.writeFile(file.path, file.content);
+      if (file.path.endsWith('.sh')) {
+        const protectedFile = await runner.exec('chmod', ['0700', file.path]);
+        if (protectedFile.code !== 0) throw new Error(`Cannot protect event script: ${file.path}`);
+      }
+    }
+    const command = await writeLaunchScript(runner, taskDir(config, c.window), buildResumeArgv({ agent: c.agent, model: c.model, effort: c.effort as never, task: c.task, remoteControl: record.remoteControl }, config.agents[c.agent], wiring?.args, c.sessionId), launchEnvironment(config, order, record.env));
+    const started = await openAgentWindow(ctx, { task: c.task, window: c.window, cwd: c.worktree, env: {}, report: record.report, repos: record.repos, reviewOf: record.reviewOf, autoReview: record.autoReview, origin: 'resume', sessionUp });
     if (started.code !== 0) throw new AgentctlError(`${c.task}: tmux could not make the window: ${started.stderr.trim() || `exit ${started.code}`}`, results.length > 0 ? `Resumed before it: ${results.map((r) => r.task).join(', ')}.` : undefined);
     sessionUp = true;
     const windowId = (await tmux.windows()).find((w) => w.plain === c.window)?.id;
     if (windowId) await setHeaderField(runner, taskFile(config, c.window), 'window_id', windowId);
-    const command = agentCommandLine(buildResumeArgv({ agent: c.agent, model: c.model, effort: c.effort as never, task: c.task, remoteControl: record.remoteControl }, config.agents[c.agent], wiring?.args, c.sessionId));
+
     await runner.exec('tmux', ['set-option', '-w', '-t', windowId || tmux.target(c.window), '@agentctl-role', 'task']);
     await tmux.typeCommand(c.window, command);
     const settings = config.agents[c.agent], note = reportInstructions(attempt.attemptId, record.report);
     const ready = await waitForReady(runner, tmux, c.window, { pattern: settings.readyPattern, emptyInput: true, trustPattern: settings.trustPattern, timeoutMs: Math.min(5000, settings.readyTimeout * 1000) });
     await queuePrompt(ctx, record, note);
     if (!ready.ready || await deliverPendingPrompt(ctx, c.window) !== 'sent') ctx.info(`${c.task}: report instructions pending until idle: ${note}`);
-    ctx.info(`${c.task}: window ${config.session}:${c.window} running ${command}`);
+    ctx.info(`${c.task}: window ${config.session}:${c.window} running ${c.agent} (model ${c.model}, effort ${c.effort}) via ${command}`);
     results.push({ task: c.task, command });
   }
   return results;

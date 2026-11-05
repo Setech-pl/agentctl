@@ -92,14 +92,17 @@ Second line.
         `ln -sfn ${pkgs}/sim ${wt('1')}/node_modules/@nc/sim`,
         `mkdir -p ${state}`,
         `mkdir -p ${cache}`,
-        `tmux new-session -d -s agentctl -n nc-1 -c ${wt('1')} -e NEON_CITY_TASK=NC-1`,
-        `tmux send-keys -t '=agentctl:nc-1' -l -- 'claude --model opus --effort medium --verbose'`,
+        `chmod 0700 ${state}/start.sh`,
+        `tmux new-session -d -s agentctl -n nc-1 -c ${wt('1')}`,
+        `tmux send-keys -t '=agentctl:nc-1' -l -- 'exec sh ${state}/start.sh'`,
         'tmux send-keys -t \'=agentctl:nc-1\' Enter',
         'tmux load-buffer -b agentctl-nc-1 -',
         'tmux paste-buffer -p -d -b agentctl-nc-1 -t \'=agentctl:nc-1\'',
         'tmux send-keys -t \'=agentctl:nc-1\' Enter',
       ],
     );
+    assert.match(runner.written.get(`${state}/start.sh`)!, /export NEON_CITY_TASK=NC-1/);
+    assert.match(runner.written.get(`${state}/start.sh`)!, /exec claude --model opus --effort medium --verbose/);
     const paste = runner.calls.find((c) => c.line.startsWith('tmux load-buffer'));
     assert.ok(paste?.input?.startsWith('Model: opus · effort medium\n\nFirst line.\nSecond line.\n\nReport protocol:'));
     assert.match(paste!.input!, /agentctl:report-end/);
@@ -139,9 +142,11 @@ Go too.
     const c = runner.commands.filter((l) => !l.startsWith('write ') && !l.startsWith('mkdir'));
     assert.equal(c[0], `git -C ${repoA} worktree add ${wt('2')} nc-2`);
     assert.ok(c.includes(`tmux new-window -d -t '=agentctl:' -n nc-2 -c ${wt('2')}`));
-    assert.ok(c.includes(`tmux send-keys -t '=agentctl:nc-2' -l -- 'codex --sandbox danger-full-access -m gpt-6.1-sol -c model_reasoning_effort=high'`));
+    assert.ok(c.includes(`tmux send-keys -t '=agentctl:nc-2' -l -- 'exec sh ${config.stateDir}/nc-2/start.sh'`));
+    assert.ok(runner.written.get(path.join(config.stateDir, 'nc-2/start.sh'))!.includes('exec codex --sandbox danger-full-access -m gpt-6.1-sol -c model_reasoning_effort=high'));
     // default model: no -m
-    assert.ok(c.includes(`tmux send-keys -t '=agentctl:nc-3' -l -- 'codex --sandbox danger-full-access -c model_reasoning_effort=high'`));
+    assert.ok(c.includes(`tmux send-keys -t '=agentctl:nc-3' -l -- 'exec sh ${config.stateDir}/nc-3/start.sh'`));
+    assert.ok(runner.written.get(path.join(config.stateDir, 'nc-3/start.sh'))!.includes('exec codex --sandbox danger-full-access -c model_reasoning_effort=high'));
     assert.ok(!c.some((l) => l.includes('new-session')));
   });
 

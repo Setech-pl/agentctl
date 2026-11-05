@@ -1383,15 +1383,16 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('--attempt <id>', 'attempt that owns this hook/session')
     .addOption(new Option('--agent <agent>', 'the agent that reports').choices([...cliProviders]).makeOptionMandatory())
     .addOption(new Option('--kind <kind>', 'claude: which hook called').choices(PROVIDER_IDS.flatMap(id => [...provider(id).events.kinds])))
+    .option('--forward-file <path>', 'codex: private JSON file containing the original notify command')
     .option('--forward <json>', 'codex: JSON list, the notify command the user had; run with the same JSON after this one')
     .argument('[payload]', 'the event as JSON (codex puts it here; claude sends it on stdin)')
-    .action(async (payload: string | undefined, opts: { task: string; attempt?: string; agent: AgentName; kind?: ClaudeKind; forward?: string }) => {
+    .action(async (payload: string | undefined, opts: { task: string; attempt?: string; agent: AgentName; kind?: ClaudeKind; forward?: string; forwardFile?: string }) => {
       // A hook must never break the agent: whatever happens, the exit code stays 0.
       try {
         const config = deps.loadConfig();
         const ctx = new Context(deps.makeRunner(false, line), config, () => {}, deps.confirm);
         const raw = payload ?? (provider(opts.agent).events.payloadFrom === 'stdin' && !deps.stdinIsTTY ? deps.readStdin() : '');
-        const forward = opts.forward ? parseJson(opts.forward) : undefined;
+        const forward = opts.forwardFile ? parseJson(fs.readFileSync(opts.forwardFile, 'utf8')) : opts.forward ? parseJson(opts.forward) : undefined;
         const notifier = await makeNotifier(ctx);
         const self = deps.selfArgv?.();
         await handleEvent(ctx, new Alerts(ctx, notifier, { self }), {

@@ -1,3 +1,5 @@
+import { launchScript } from '../launch-script.ts';
+import { taskDir } from '../taskstore.ts';
 import type { AgentEvent, EventOutcome, SelfArgv } from '../events.ts';
 import { clip, firstLine, eventArgs, MAX_QUESTION } from '../events.ts';
 import { stableSelfArgv } from '../mcp-install.ts';
@@ -36,7 +38,7 @@ export function parseCodexEvent(input: unknown): AgentEvent {
   return { agent: 'codex', outcome: 'ignored', type, text: '' };
 }
 
-const tomlString = (s: string): string => `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+const tomlString = (s: string): string => JSON.stringify(s);
 export const tomlArray = (items: string[]): string => `[${items.map(tomlString).join(', ')}]`;
 
 /** Codex's `-c notify=[…]` value: this agentctl's `event` command, and the notify command the user already has (run by `event` afterwards). */
@@ -120,9 +122,16 @@ function readIfExists(file: string): string | undefined {
 
 export function planCodexEvents(input: EventWiringInput): EventWiring {
   const forward = userCodexNotify(input.env, input.readConfig);
+  const dir = taskDir(input.config, input.window);
+  const script = path.join(dir, 'codex-notify.sh');
+  const forwardFile = path.join(dir, 'codex-forward.json');
+  const argv = [...buildCodexNotify(input.task, input.self, undefined, input.attempt), ...(forward?.length ? ['--forward-file', forwardFile] : [])];
   return {
-    args: ['-c', `notify=${tomlArray(buildCodexNotify(input.task, input.self, forward, input.attempt))}`],
-    files: [],
-    note: `events: Codex notify -> agentctl event${forward ? ` (then ${forward[0]}, your own notify)` : ''}`,
+    args: ['-c', `notify=${tomlArray(['sh', script])}`],
+    files: [
+      { path: script, content: launchScript(argv).replace(/\n$/, ' "$@"\n') },
+      ...(forward?.length ? [{ path: forwardFile, content: JSON.stringify(forward) + '\n' }] : []),
+    ],
+    note: `events: Codex notify -> agentctl event${forward?.length ? ' (then your own notify)' : ''}`,
   };
 }
