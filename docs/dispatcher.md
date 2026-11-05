@@ -44,7 +44,7 @@ Implement the bounded API change. Test the acceptance criteria. Write the report
 ```
 
 - `task`: unique task ID. `cohort`: optional group for status, reports and completion.
-- `agent`, `model`, `effort`: explicit requested order. Providers are `claude` and `codex`; supported effort values are low, medium, high, xhigh, max, subject to provider validation. See capacity's equivalents. `pin: true` prevents provider translation and move.
+- `agent`, `model`, `effort`: explicit requested order. Choose an active provider: `claude`, `codex`, or `kimi` (when enabled); supported effort values are low, medium, high, xhigh, max, subject to provider validation. See capacity's equivalents. `pin: true` prevents provider translation and move.
 - `repos`: list of repositories. Each `path` is the source repo; `worktree` is its isolated checkout; optional `base` is the start ref; optional `branch` creates a branch (without a branch, a detached checkout is possible). Follow project rules on branch and worktree ownership.
 - `report`: list of paths/globs; first is canonical, the rest are detection alternatives relative to the worktree or absolute. The report's first line must be `Werdykt: PASS`, `Werdykt: PARTIAL` or `Werdykt: FAIL`, then findings, commits, validation and limitations. A verdict is not a user-assigned stats result: `mark` records that judgment.
 - `review_of`: task being reviewed; use another model/provider. `after`: list of tasks whose reports must exist before start. These dependencies belong in the queue.

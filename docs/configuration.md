@@ -27,7 +27,7 @@ Column "Layers": **g** global config, **p** project config, **s** spec.
 | `report` | path or list | `{cache}/{task}/{TASK}.md` | g p s | Where the agent writes its report. Used by `status`, `pull` and the notifications. A list: the first entry is the canonical path, the others are places to look (paths and globs `*`, `?`, `**`; absolute, `~/` or relative to the worktree; `{task}` and `{TASK}` work), e.g. `[~/workspace/cache/{task}/{TASK}.md, docs/reports/*{task}*.md, docs/reports/*{TASK}*.md]`. Fresh alternatives bearing the task ID become candidate flags (see [Report detection](details.md#report-detection)); copying requires explicit `report --from` / `report_from`. |
 | `setup` | list of strings | `[]` | g p s | Shell commands run after `git worktree add` and before the links; a failing command stops `new`. Every repository runs its own setup in its own worktree: `repos[].setup` in the spec, else the `setup` of that repository's `.agentctl.yaml`. The top-level spec `setup` and the global one belong to the first repository only (compatible with single-repo specs). The preview lists them per repository (`backend 1/1, client 1/1`). The chat (MCP) cannot send `setup`, top-level or per repo; project config setup still runs. |
 | `defaults` | mapping | `{}` | g p | Values for a spec that leaves them out: `agent`, `model`, `effort`. |
-| `defaults.agent` | `claude` or `codex` | none | g p | Agent when the spec has no `agent`. |
+| `defaults.agent` | active `claude`, `codex` or `kimi` | none | g p | Agent when the spec has no `agent`. |
 | `defaults.model` | string | `default` | g p | Model when the spec has none. `default` passes no model flag. |
 | `defaults.effort` | `low` `medium` `high` `xhigh` `max` | `high` | g p | Effort when the spec has none. |
 | `defaults.remote_control` | boolean | `false` | g p | `true`: Claude tasks start with Remote Control (see the spec key `remote_control`) unless the spec says `remote_control: false`. A Codex task is not affected. |
@@ -44,9 +44,9 @@ Column "Layers": **g** global config, **p** project config, **s** spec.
 | `limits.claude` | positive integer | unlimited | g | Cap for Claude windows (agentctl windows + reserved places + external sessions when counted). `agentctl limits set claude=3` changes it. |
 | `limits.codex` | positive integer | unlimited | g | Cap for Codex windows. |
 | `limits.count_report_ready` | boolean | `false` | g | Idle windows with a complete report do not occupy provider slots by default. Capacity/limits separate working windows and reports awaiting collection. A follow-up counts again; send warns and refuses to resume it when the provider is full. |
-| `limits.count_external` | boolean | `false` | g | Terminal sessions of `claude` / `codex` outside the windows of agentctl (found with `ps`, not MCP servers, headless runs or agentctl itself) count against the limit and show as "external" in `agentctl limits`. Places for agents you start by hand can also be held with `agentctl limits reserve`. |
-| `agents` | mapping | see below | g | Settings per agent: `agents.claude`, `agents.codex`. |
-| `equivalents` | list | `[]` | g | Extra Claude and Codex pairs, `{claude: "opus/medium", codex: "gpt-6-astra/low"}`, consulted before the built-in table. Both sides are `model/effort`. |
+| `limits.count_external` | boolean | `false` | g | Terminal sessions of active providers (`claude`, `codex`, `kimi` when enabled) outside the windows of agentctl (found with `ps`, not MCP servers, headless runs or agentctl itself) count against the limit and show as "external" in `agentctl limits`. Places for agents you start by hand can also be held with `agentctl limits reserve`. |
+| `agents` | mapping | see below | g | Settings per provider: `agents.claude`, `agents.codex`, `agents.kimi` (when enabled). |
+| `equivalents` | list | `[]` | g | Extra equivalents for active providers, e.g. `{claude: "opus/medium", codex: "gpt-6-astra/low", kimi: "kimi-for-coding/high"}`, consulted before the built-in table. Each provider column is `model/effort`. |
 | `mirror_dir` | path | none (off) | g | `status` and `pull` copy reports and `status.json` there. |
 | `watch` | mapping | see below | g | `agentctl watch` and the window icons. |
 | `notify` | mapping | see below | g | Notifications and the events of the agents. |
@@ -160,7 +160,7 @@ Queued tasks live in `<config dir>/queue/` (one JSON file each, with the spec te
 
 ### `usage`
 
-`agentctl usage`, the board and the tmux status line show the tokens of the tasks and the state of the plans of Claude and Codex ([how it works](details.md#usage-and-limits)). A percentage here is `80` (both providers) or `{claude: 80, codex: 70}` (per provider).
+`agentctl usage`, the board and the tmux status line show the tokens of the tasks and the plan limits of active providers (Claude, Codex and Kimi when enabled) ([how it works](details.md#usage-and-limits)). A percentage here is `80` (all active providers) or `{claude: 80, codex: 70, kimi: 80}` (per provider).
 
 | Key | Type | Default | Layers | Meaning |
 |---|---|---|---|---|

@@ -49,7 +49,7 @@ export function readStoredEvent(config: Context['config'], record: Pick<TaskReco
     const data: unknown = JSON.parse(fs.readFileSync(path.join(taskDir(config, record.window), 'event.json'), 'utf8'));
     if (!isObject(data) || typeof data.at !== 'string') return undefined;
     const outcome = data.outcome;
-    if (outcome !== 'needs-input' && outcome !== 'turn-complete' && outcome !== 'limited' && outcome !== 'overloaded') return undefined;
+    if (outcome !== 'error' && outcome !== 'needs-input' && outcome !== 'turn-complete' && outcome !== 'limited' && outcome !== 'overloaded') return undefined;
     const startedMs = Date.parse(record.attemptStarted ?? record.started);
     if (!Number.isNaN(startedMs) && Date.parse(data.at) < startedMs) return undefined;
     return { outcome, at: data.at, type: typeof data.type === 'string' ? data.type : '', text: typeof data.text === 'string' ? data.text : '' };

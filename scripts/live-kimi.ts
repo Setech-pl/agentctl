@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { withHarness, defaultCacheRoot, installPromptAgent } from './live-harness.ts';
 const cache = defaultCacheRoot('agentctl-018');
 const checks: string[] = [];
@@ -34,6 +35,13 @@ await withHarness({ name: 'ki', cacheRoot: cache, config: 'providers: [claude, c
   h.tmux(['send-keys', '-t', `=${h.session}:ki-1`, 'Escape']); await sleep(150);
   check('Escape interrupts', events().some(e => e.interrupted));
   for (const [value, expected] of [['background', 'background'], ['limit', 'limited'], ['overloaded', 'overloaded']] as const) { await mode(value); check(`synthetic ${value}`, state() === expected); }
+  for (const [value, outcome, expected] of [['wire-quota', 'limited', 'limited'], ['wire-overloaded', 'overloaded', 'overloaded'], ['wire-error', 'error', 'needs-attention'], ['wire-shape', undefined, 'waiting']] as const) {
+    await mode(value);
+    const actual = state();
+    const file = path.join(h.root, 'state', 'ki-1', 'event.json');
+    const stored = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')).outcome : undefined;
+    check(`synthetic ${value} uses passive wire without turn-complete`, stored === outcome && actual === expected, `${stored}/${actual}`);
+  }
   await mode('complete');
   check('capacity uses isolated /usage probe', (() => { const r = h.agentctl(['capacity', '--json']); return r.code === 0 && r.stdout.includes('kimi-usage-probe') && r.stdout.includes('26'); })());
   check('/usage only in neutral directory and exits', events().some(e => e.usage) && events().filter(e => e.start).some(e => e.cwd.endsWith('kimi-usage-probe')) && events().some(e => e.exit));
@@ -46,6 +54,15 @@ await withHarness({ name: 'ki', cacheRoot: cache, config: 'providers: [claude, c
   check('current-attempt report completes after end of turn', rows().find((r: { task: string }) => r.task === 'KI-1')?.state === 'report-ready');
   h.tmux(['kill-window', '-t', `=${h.session}:ki-1`]);
   const resumed = h.agentctl(['resume', 'KI-1', '--all', '-y']); check('resume selects recorded session without model override', resumed.code === 0 && events().some(e => e.start?.includes('--session') && !e.start.includes('-m')), resumed.stderr);
+  const startsBeforeRetry = events().filter(e => e.start).length;
+  const guardCode = `import {checkRetryWorktrees} from ${JSON.stringify(path.resolve('src/core/git.ts'))}; import {RealRunner} from ${JSON.stringify(path.resolve('src/core/runner.ts'))}; try { await checkRetryWorktrees(new RealRunner(), [${JSON.stringify({ path: repo, worktree: repo + '-ki-1', branch: 'ki-1' })}]); process.exitCode = 2; } catch(e) { console.log(e.message); process.exitCode = /unsafe start residue.*process still running/.test(e.message) ? 0 : 3; }`;
+  const guard = spawnSync(process.execPath, ['--experimental-strip-types', '--no-warnings', '--input-type=module', '-e', guardCode], { env: h.env, encoding: 'utf8' });
+  check('live Kimi worktree refuses retry before another agent starts', guard.status === 0 && events().filter(e => e.start).length === startsBeforeRetry, guard.stdout + guard.stderr);
+  h.tmux(['new-window', '-d', '-t', `=${h.session}:`, '-n', 'kimi-orphan', path.join(h.fakeBin, 'kimi')]);
+  await sleep(300);
+  h.tmux(['set-window-option', '-u', '-t', `=${h.session}:kimi-orphan`, '@agentctl-role']);
+  check('Kimi orphan without role option is discovered', rows().some((r: { task: string; state: string }) => r.task === 'KIMI-ORPHAN' && r.state === 'orphan'));
+  h.tmux(['kill-window', '-t', `=${h.session}:kimi-orphan`]);
   check('no task /usage was sent', events().filter(e => e.start).filter(e => !e.cwd.endsWith('kimi-usage-probe')).every(e => e.env.AGENTCTL_TASK !== 'usage-probe'));
   fs.writeFileSync(path.join(h.env.KIMI_CODE_HOME!, 'config.toml'), `default_permission_mode='yolo'\n`);
   const denied = newTask('KI-AUTO'); check('yolo config refuses start before any window', denied.code !== 0 && /default_permission_mode=yolo/.test(denied.stderr) && !h.tmux(['list-windows', '-t', `=${h.session}`, '-F', '#{window_name}']).stdout.includes('ki-auto'));

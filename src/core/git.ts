@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { matchesProviderCommand } from './providers/registry.ts';
 import path from 'node:path';
 import type { Runner } from './runner.ts';
 import type { ResolvedRepo } from './spec.ts';
@@ -38,7 +39,7 @@ export async function checkRetryWorktrees(runner: Runner, repos: ResolvedRepo[])
     if (processes.code !== 0) unsafe('cannot inspect task processes');
     for (const line of processes.stdout.split('\n')) {
       const match = /^\s*(\d+)\s+(.+)$/.exec(line);
-      if (!match || !/(?:^|[\s/])(?:git|claude|codex)(?:\s|$)/.test(match[2]!)) continue;
+      if (!match || !(/(?:^|[\s/])git(?:\s|$)/.test(match[2]!) || matchesProviderCommand(match[2]!, 'args'))) continue;
       if (match[2]!.includes(repo.worktree)) unsafe('task/git process still running');
       const cwd = await runner.exec(process.platform === 'darwin' ? '/usr/sbin/lsof' : 'lsof', ['-a', '-p', match[1]!, '-d', 'cwd', '-Fn'], { readOnly: true });
       if (cwd.code !== 0) {

@@ -22,6 +22,7 @@ import type { ProviderAdapter, DoctorLine } from './types.ts';
 /** Initially delegates to the 0.17.4 implementation; subsequent steps move each responsibility here. */
 export const claude: ProviderAdapter = {
   id: 'claude', displayName: 'Claude', boardLabel: 'cl', letter: 'C', command: 'claude',
+  processCommands: { args: /(?:^|[\s/])claude(?:\s|$)/, pane: /^claude(?:\s|$)/ },
   installHint: 'Install Claude Code: https://docs.claude.com/en/docs/claude-code (npm i -g @anthropic-ai/claude-code).',
   capabilities: { remoteControl: true, statusLineTap: true, mcpInstall: true, busyPrompt: true },
   defaultSettings: () => defaultSettings('claude'),

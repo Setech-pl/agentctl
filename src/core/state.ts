@@ -49,7 +49,7 @@ export function inputVisible(screen: string, settings: Pick<AgentSettings, 'read
 }
 
 /** What the agent itself reported last (see events.ts); it fills in what the screen cannot show. */
-export type EventKind = 'overloaded' | 'needs-input' | 'turn-complete' | 'limited';
+export type EventKind = 'error' | 'overloaded' | 'needs-input' | 'turn-complete' | 'limited';
 
 export interface StateInput {
   alive: boolean;
@@ -77,6 +77,7 @@ export function taskState(input: StateInput): TaskState {
   if (screen === 'background') return 'background';
   if (input.event === 'needs-input' && !inputVisible(input.screen, input.settings)) return 'needs-input';
   // An old hook cannot override the current visible screen after autonomous recovery.
+  if (input.event === 'error') return 'needs-attention';
   if (input.event === 'limited') return 'limited';
   return input.reportReady ? 'report-ready' : 'waiting';
 }

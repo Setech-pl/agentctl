@@ -127,6 +127,8 @@ export interface ProviderAdapter {
   readonly boardLabel: string;    // 'cl' | 'cx' | 'ki'
   readonly letter: string;        // 'C' | 'X' | 'K'  (linia tmux, planStatusLine)
   readonly command: string;       // 'claude' | 'codex' | 'kimi'
+  /** Command forms for worktree process guards and unlabelled tmux panes. */
+  readonly processCommands: Readonly<{ args: RegExp; pane: RegExp; launcher?: RegExp }>;
   readonly installHint: string;
   readonly capabilities: Readonly<{ remoteControl: boolean; statusLineTap: boolean; mcpInstall: boolean; busyPrompt: boolean }>;
   defaultSettings(): AgentSettings;

@@ -44,7 +44,7 @@ Wprowadź zmianę API, sprawdź kryteria odbioru i zapisz raport.
 ```
 
 - `task`: unikalny identyfikator. `cohort`: opcjonalna grupa do statusu, raportów i zakończenia całości.
-- `agent`, `model`, `effort`: żądany dostawca i ustawienia. Dostawcy: claude, codex. Poziomy effort: low, medium, high, xhigh, max, z walidacją zależną od dostawcy. Zobacz równoważniki w capacity. `pin: true` blokuje tłumaczenie dostawcy i move.
+- `agent`, `model`, `effort`: żądany dostawca i ustawienia. Wybierz aktywnego dostawcę: claude, codex lub kimi (po włączeniu). Poziomy effort: low, medium, high, xhigh, max, z walidacją zależną od dostawcy. Zobacz równoważniki w capacity. `pin: true` blokuje tłumaczenie dostawcy i move.
 - `repos`: lista repozytoriów; `path` wskazuje repo źródłowe, `worktree` izolowany checkout, `base` ref bazowy, `branch` nową gałąź. Bez branch możliwy jest detached checkout. Przestrzegaj zasad projektu dotyczących gałęzi i własności worktree.
 - `report`: lista ścieżek lub globów; pierwsza jest kanoniczna, pozostałe służą wykrywaniu raportu. Ścieżki mogą być bezwzględne lub względne do worktree. Pierwsza linia raportu: `Werdykt: PASS`, `Werdykt: PARTIAL` albo `Werdykt: FAIL`; dalej ustalenia, commity, walidacja i ograniczenia. Werdykt nie zastępuje oceny użytkownika zapisywanej przez `mark`.
 - `review_of`: przeglądane zadanie; użyj innego modelu/dostawcy. `after`: lista zadań, których raporty muszą istnieć przed startem. Zależności obsługuje kolejka.

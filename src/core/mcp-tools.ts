@@ -952,7 +952,7 @@ export const MCP_TOOLS: McpToolDef[] = [
     title: 'Limits of simultaneous agents',
     kind: 'read',
     description:
-      'The limit of simultaneous agents per provider (claude, codex), what uses it up (windows of agentctl, places the user reserved for agents started by hand, external sessions if counted) and how many places are free; also the tasks waiting in the queue per provider. ' +
+      'The limit of simultaneous agents per active provider (Claude, Codex, Kimi when enabled), what uses it up (windows of agentctl, places the user reserved for agents started by hand, external sessions if counted) and how many places are free; also the tasks waiting in the queue per provider. ' +
       'Use it before proposing to start or queue tasks, and when the user says they changed the parity.',
     input: {},
     annotations: readOnly('Limits of simultaneous agents'),
@@ -1091,7 +1091,7 @@ export const MCP_TOOLS: McpToolDef[] = [
     title: 'Token usage and plan limits',
     kind: 'read',
     description:
-      'How many tokens the tasks used and how close the plans are to their limits. Per provider (claude, codex): the 5 hour and the weekly window with the percentage used and when it resets (windows: [] and available: false means n/d - the provider did not say; never guess a number), the tokens today and in the period; ' +
+      'How many tokens the tasks used and how close the plans are to their limits. Per active provider (Claude, Codex, Kimi when enabled): the available plan windows (5 hour, weekly or monthly) with the percentage used and when it resets (windows: [] and available: false means n/d - the provider did not say; never guess a number), the tokens today and in the period; ' +
       'per task (the active ones first) and per cohort the tokens; per model and per day. Use it BEFORE the user orders more tasks ("do we have room?"), when they ask what a task cost, or which provider has room. since: how far back the token columns go (12h, 7d, 2w; default 7d); cohort limits it to one cohort.',
     input: { cohort: cohortArg.optional(), since: z.string().min(2).max(10).optional().describe('Age such as 12h, 7d, 2w. Default 7d.') },
     annotations: readOnly('Token usage and plan limits'),
@@ -1256,7 +1256,7 @@ export const MCP_TOOLS: McpToolDef[] = [
     title: 'Move a task to the other provider',
     kind: 'write',
     description:
-      'WRITE, off unless the user put "move" in mcp.allow. Hands a task that hit its usage limit to the other provider (Claude <-> Codex): a new window in the same worktree with the original prompt and a note to continue. ' +
+      'WRITE, off unless the user put "move" in mcp.allow. Hands a task that hit its usage limit to another active provider (Claude, Codex, Kimi when enabled; choose a target when more than two are active): a new window in the same worktree with the original prompt and a note to continue. ' +
       'The FIRST call (confirm omitted) only describes the move; ask the user, then call again with confirm: true.',
     input: {
       task: taskArg,
@@ -1282,7 +1282,7 @@ MCP_TOOLS.push(
   extraRead('mcp_check', 'mcp check', 'Inspect stale MCP server processes without stopping them', {}, async (ctx) => ({ stale: staleProcesses(await findMcpProcesses(ctx.runner), stableScript()) })),
   extraRead('spec_example', 'spec example', 'Read an example spec before writing a new order', {}, async () => EXAMPLE_SPEC),
   extraRead('doctor', 'doctor', 'Diagnose the installation, permissions and disk', { project: optionalText }, async (ctx, a) => runDoctor(ctx.runner, () => ctx.config, a.project as string ?? null)),
-  extraRead('equivalents', 'capacity', 'Read the Claude/Codex equivalents table', {}, async (ctx) => ctx.config.equivalents),
+  extraRead('equivalents', 'capacity', 'Read the equivalents table for active providers, including Kimi when enabled', {}, async (ctx) => ctx.config.equivalents),
   extraRead('config_show', 'doctor', 'Read effective configuration with secrets masked', {}, async (ctx) => redactConfig(ctx.config)),
   extraRead('manager_status', 'manager --url', 'Inspect the manager session', {}, async (ctx) => managerView(ctx)),
   extraRead('away_status', 'away status', 'Inspect away mode', {}, async (ctx) => awayReport(ctx.config)),
@@ -1303,7 +1303,7 @@ MCP_TOOLS.push(
   extraWrite('archive', 'archive [--older-than <AGE>]', 'Archive the state of closed tasks', { older_than: optionalText, cohort: cohortArg.optional() }, async (ctx, a) => archiveClosed(ctx, { cohort: a.cohort, olderThanMs: a.older_than ? parseAge(a.older_than) : undefined })),
   extraWrite('adopt', 'adopt <TASK> --report <PATH>', 'Restore missing task metadata from facts supplied by the user', { task: taskArg, report: z.string().min(1), window: optionalText, worktree: optionalText, agent: z.enum(DEFAULT_PROVIDERS).optional(), model: optionalText, effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional() }, async (ctx, a) => { await adoptTask(ctx, a.task, a); return { task: a.task, adopted: true }; }),
   extraWrite('report_from', 'report <TASK> --from <FILE> [--force]', 'Copy a regular report from task worktrees or cache to its canonical location; force only overwrites, never permits outside or symlink sources', { task: taskArg, from: z.string().min(1), force: z.boolean().optional() }, async (ctx, a) => { const info = await reportInfo(ctx, a.task, { from: a.from, force: a.force, sourcePolicy: 'mcp' }); if (info.result?.action === 'kept' || (info.result?.action === 'none' && info.result.note)) throw new AgentctlError(info.result.note ?? 'report was not copied', 'Preview again with force: true only if replacing the canonical file is intended.'); return info; }),
-  extraWrite('limits_release', 'limits release [claude=N codex=N]', 'Release reserved provider places', perProvider(DEFAULT_PROVIDERS, () => limitArg), async (ctx, a) => releasePlaces(ctx, Object.fromEntries(PROVIDER_IDS.filter(id => a[id] !== undefined).map(id => [id, a[id]])))),
+  extraWrite('limits_release', 'limits release [provider=N ...]', 'Release reserved provider places', perProvider(DEFAULT_PROVIDERS, () => limitArg), async (ctx, a) => releasePlaces(ctx, Object.fromEntries(PROVIDER_IDS.filter(id => a[id] !== undefined).map(id => [id, a[id]])))),
   extraWrite('manager_start', 'manager', 'Start the supervising manager session', { project: optionalText, name: optionalText, model: optionalText, effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional() }, async (ctx, a, deps) => { if (!deps.self) throw new AgentctlError('this server has no self command for the manager'); return startManager(ctx, { ...a, self: deps.self, noWait: true }); }),
   extraWrite('manager_stop', 'manager stop', 'Stop the manager session', {}, async (ctx) => ({ state: await stopManager(ctx) })),
   extraWrite('notify_test', 'notify-test [--phone]', 'Test desktop notifications; phone true explicitly sends to ntfy', { phone: z.boolean().optional() }, async (ctx, a, deps) => { if (a.phone) return sendPhoneTest(ctx); await deps.notify('agentctl notification test'); return { local: true }; }),

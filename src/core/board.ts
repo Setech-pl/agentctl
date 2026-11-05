@@ -1065,7 +1065,7 @@ export const KEY_HINTS = 'm M move i int c/r pull x close X cancel k cohort h hi
 
 export const HELP_LINES: string[] = [
   'agentctl board',
-  '  AGENT: cl = claude, cx = codex; S 6.1 XH = model family/version/effort',
+  '  AGENT: cl=claude, cx=codex, ki=kimi; S 6.1 XH = model family/version/effort',
   '  Effort: MN minimal, LO low, MD medium, HI high, XH xhigh, MX max, NO none',
   '          – = unknown; full selected model and effort appear above',
   '',
@@ -1075,7 +1075,7 @@ export const HELP_LINES: string[] = [
   '              🧭 line = the manager (the session you open from the phone):',
   '              ↑ from the first task selects it, Enter goes to its window',
   '  m           type a message and send it to the agent (Enter sends, Esc cancels)',
-  '  M           move the task to the other provider after a limit (asks first)',
+  '  M           move to another active provider after a limit (asks first)',
   '  i           interrupt the current turn (asks first; the window stays open)',
   '  c           copy the report of the task to the clipboard',
   '  r           copy all new reports to the clipboard (pull --ready)',

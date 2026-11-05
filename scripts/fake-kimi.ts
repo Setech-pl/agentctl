@@ -64,7 +64,11 @@ process.stdin.on('data', data => {
 setInterval(() => {
  try {
   const next = fs.readFileSync(log + '.mode', 'utf8').trim();
-  if (next !== lastControl) { lastControl = next; mode = next; if (mode === 'complete') { endTurn(); submitted = true; } draw(); }
+  if (next !== lastControl) { lastControl = next; mode = next; if (mode === 'complete') { endTurn(); submitted = true; }
+  if (mode.startsWith('wire-')) {
+   const errors = { 'wire-quota': { name: 'APIProviderQuotaExhaustedError' }, 'wire-overloaded': { name: 'APIProviderOverloadedError' }, 'wire-error': { name: 'SyntheticUnknownError' }, 'wire-shape': { unknown: true } };
+   wire({ type: 'turn.ended', reason: 'failed', error: errors[mode] });
+  } draw(); }
  } catch { /* no steering */ }
 }, 80).unref();
 draw();

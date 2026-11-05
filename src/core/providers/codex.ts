@@ -20,6 +20,7 @@ import type { ProviderAdapter, DoctorLine } from './types.ts';
 /** Initially delegates to the 0.17.4 implementation; subsequent steps move each responsibility here. */
 export const codex: ProviderAdapter = {
   id: 'codex', displayName: 'Codex', boardLabel: 'cx', letter: 'X', command: 'codex',
+  processCommands: { args: /(?:^|[\s/])codex(?:\s|$)/, pane: /^codex(?:\s|$)/ },
   installHint: 'Install Codex CLI: npm i -g @openai/codex (https://github.com/openai/codex).',
   capabilities: { remoteControl: false, statusLineTap: false, mcpInstall: false, busyPrompt: true },
   defaultSettings: () => defaultSettings('codex'),

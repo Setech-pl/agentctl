@@ -22,3 +22,12 @@ export function get<T>(map: ProviderMap<T>, id: ProviderId): T {
 
 /** Original providers are mandatory; optional registered providers may be inactive. */
 export type ProviderValues<T> = Record<typeof DEFAULT_PROVIDERS[number], T> & Partial<Record<ProviderId, T>>;
+
+/** Includes inactive registered providers: a running process still owns its checkout/window. */
+export function matchesProviderCommand(command: string, source: 'args' | 'pane'): boolean {
+  return PROVIDER_IDS.some(id => provider(id).processCommands[source].test(command));
+}
+
+export function isProviderLauncher(command: string): boolean {
+  return PROVIDER_IDS.some(id => provider(id).processCommands.launcher?.test(command));
+}

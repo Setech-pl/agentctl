@@ -1,4 +1,4 @@
-import { provider } from './providers/registry.ts';
+import { provider, matchesProviderCommand, isProviderLauncher } from './providers/registry.ts';
 import { atomicWriteFile, stateWriteFailure } from './atomic-file.ts';
 import { tryFileLock } from './file-lock.ts';
 import { promptQueueView } from './prompt-queue.ts';
@@ -195,6 +195,8 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     const writeFailure = stateWriteFailure(path.join(config.stateDir, record.window, 'TASK.md'));
     const unconfirmed = record.promptDelivery === 'needs-attention' && !reportReady && !deliveryEvidence(ctx, record, screenText);
     let state: TaskState = cancelled ? 'cancelled' : closed ? 'closed' : record.supersededBy ? 'superseded' : writeFailure ? 'needs-attention' : deliveryReport ? 'report-ready' : unconfirmed ? 'needs-attention' : taskState({ alive, screen: screenText, settings, reportReady, event: stored?.outcome });
+    // Passive wire failures fill an idle screen; legacy hook recovery keeps its existing precedence.
+    if (state === 'waiting' && stored?.outcome === 'overloaded' && record.agent !== 'unknown' && provider(record.agent).events.payloadFrom === 'wire') state = 'overloaded';
     const observationKey = `${config.stateDir}:${record.window}`;
     if (idleObservations.size > 2000) idleObservations.delete(idleObservations.keys().next().value!);
     const identity = `${record.attemptId ?? record.started}:${record.deliveryStartedAt ?? ''}:${record.windowId ?? ''}`;
@@ -276,7 +278,16 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     const screenText = screen.code === 0 ? screen.stdout : '';
     const info = tmux.resolve(window, infos);
     const command = await ctx.runner.exec('tmux', ['display-message', '-p', '-t', info?.id || tmux.target(window), '#{pane_current_command}'], { readOnly: true });
-    if (info?.role !== 'task' && !/^(?:claude|codex)(?:\s|$)/.test(command.stdout.trim())) continue;
+    let providerCommand = matchesProviderCommand(command.stdout.trim(), 'pane');
+    if (info?.role !== 'task' && !providerCommand && isProviderLauncher(command.stdout.trim())) {
+      // tmux names a Node launcher rather than the provider: inspect only this pane's process.
+      const pid = await ctx.runner.exec('tmux', ['display-message', '-p', '-t', info?.id || tmux.target(window), '#{pane_pid}'], { readOnly: true });
+      if (/^\d+$/.test(pid.stdout.trim())) {
+        const process = await ctx.runner.exec('ps', ['-p', pid.stdout.trim(), '-o', 'args='], { readOnly: true });
+        providerCommand = process.code === 0 && matchesProviderCommand(process.stdout.trim(), 'args');
+      }
+    }
+    if (info?.role !== 'task' && !providerCommand) continue;
     const agent = guessAgent(screenText);
     const task = window.toUpperCase();
     rows.push({
@@ -297,7 +308,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       report: 'missing',
       reportPath: '',
       pulled: null,
-      lastLine: lastContentLine(screenText, config.agents[agent].footerPatterns),
+      lastLine: lastContentLine(screenText, (config.agents[agent] ?? provider(agent).defaultSettings()).footerPatterns),
       progress: null,
       collide: [],
       hint: orphanHint(ctx, window),

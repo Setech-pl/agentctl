@@ -11,6 +11,7 @@ import { interactiveTokens } from './process.ts';
 
 export const kimi: ProviderAdapter = {
   id: 'kimi', displayName: 'Kimi', boardLabel: 'ki', letter: 'K', command: 'kimi',
+  processCommands: { launcher: /^(?:node|nodejs)$/, args: /(?:^|[\s/])kimi(?:\s|$)|(?:^|[\s/])node(?:js)?\s+\S*\/kimi-code\/dist\/main\.mjs(?:\s|$)/, pane: /^(?:\S*\/)?kimi(?:\s|$)|^(?:\S*\/)?node(?:js)?\s+\S*\/kimi-code\/dist\/main\.mjs(?:\s|$)/ },
   installHint: 'Install Kimi Code CLI: npm i -g @moonshot-ai/kimi-code@2.5.0.',
   capabilities: { remoteControl: false, statusLineTap: false, mcpInstall: false, busyPrompt: false },
   defaultSettings: kimiSettings,

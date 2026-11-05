@@ -18,7 +18,7 @@ export { parseCodexEvent, tomlArray, buildCodexNotify, parseTomlNotify, userCode
 export const MAX_QUESTION = 120;
 const MAX_SNIPPET = 100;
 
-export type EventOutcome = 'overloaded' | 'needs-input' | 'turn-complete' | 'limited' | 'idle' | 'ignored';
+export type EventOutcome = 'error' | 'overloaded' | 'needs-input' | 'turn-complete' | 'limited' | 'idle' | 'ignored';
 
 /** One event of an agent, normalised. */
 export interface AgentEvent {

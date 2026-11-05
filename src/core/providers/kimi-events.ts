@@ -9,6 +9,14 @@ import { kimiHome } from './kimi-config.ts';
 import { readTaskSessions, sessionsFile } from '../usage.ts';
 import { setHeaderField, taskDir, taskFile } from '../taskstore.ts';
 
+/** Only supported name/message wrappers count as an error; unknown shapes use the screen. */
+function errorText(value: unknown, depth = 0): string | undefined {
+  if (typeof value === 'string') return value.trim() || undefined;
+  if (!isObject(value) || depth > 4) return undefined;
+  const parts = ['name', 'message', 'error', 'cause'].map(key => errorText(value[key], depth + 1)).filter(Boolean);
+  return parts.length ? parts.join(' ') : undefined;
+}
+
 /** Event names/protocol from bundle; interaction shape and session layout are synthetic hypotheses. */
 export function parseKimiEvent(e: RawEvent): AgentEvent | undefined {
   if (!isObject(e.payload)) return undefined;
@@ -16,9 +24,12 @@ export function parseKimiEvent(e: RawEvent): AgentEvent | undefined {
   let outcome: AgentEvent['outcome'] = 'ignored';
   if (type === 'interaction.request') outcome = 'needs-input';
   if (type === 'interaction.resolved') outcome = 'idle';
-  if (type === 'turn.ended') outcome = 'turn-complete';
-  if (type === 'turn.ended' && /quota|rate_limit/.test(String(data.error ?? ''))) outcome = 'limited';
-  if (type === 'turn.ended' && /overloaded/.test(String(data.error ?? ''))) outcome = 'overloaded';
+  if (type === 'turn.ended') {
+    const error = errorText(data.error);
+    outcome = data.error != null ? (error ? 'error' : 'ignored') : data.reason === 'failed' ? 'error' : 'turn-complete';
+    if (error && /quota|rate[_ -]?limit/i.test(error)) outcome = 'limited';
+    if (error && /overloaded/i.test(error)) outcome = 'overloaded';
+  }
   return { agent: 'kimi', type, outcome, text: '' };
 }
 export const kimiEvents: EventSupport = {
@@ -61,7 +72,8 @@ export const kimiEvents: EventSupport = {
         const at = typeof o.timestamp === 'string' ? o.timestamp : '';
         if (!event || !Number.isFinite(Date.parse(at)) || Date.parse(at) < Date.parse(record.attemptStarted ?? record.started)) continue;
         if (event.outcome !== 'ignored') await ctx.runner.writeFile(path.join(dir, 'event.json'), JSON.stringify({ outcome: event.outcome === 'idle' ? 'turn-complete' : event.outcome, type: event.type, at, text: '' }));
-        if (event.type === 'turn.ended') await setHeaderField(ctx.runner, taskFile(ctx.config, record.window), 'turn_ended_at', at);
+        if (event.type === 'turn.ended' && event.outcome === 'ignored') await ctx.runner.remove(path.join(dir, 'event.json'));
+        if (event.type === 'turn.ended') await setHeaderField(ctx.runner, taskFile(ctx.config, record.window), 'turn_ended_at', event.outcome === 'turn-complete' ? at : null);
         if (record.deliveryId && record.deliveryStartedAt && Date.parse(at) >= Date.parse(record.deliveryStartedAt) && kimiEvents.acknowledgesPrompt?.({ payload: o, prompt: record.pendingPrompt ?? '' })) await ctx.runner.writeFile(path.join(dir, 'delivery-evidence.json'), JSON.stringify({ deliveryId: record.deliveryId, at, accepted: true, type: 'turn.prompt' }));
         const ref = kimiEvents.session({ payload: o });
         if (ref && !(sessions.kimi ?? []).some(s => s.id === ref.id)) { (sessions.kimi ??= []).push(ref); await ctx.runner.writeFile(sessionsFile(ctx.config, record.window), JSON.stringify(sessions)); }
