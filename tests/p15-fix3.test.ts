@@ -143,4 +143,3 @@ describe('F5: a failed key is a failure', () => {
     assert.equal(f.keys.length, n, 'no key went in');
   });
 });
-
