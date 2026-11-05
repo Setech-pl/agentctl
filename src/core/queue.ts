@@ -298,7 +298,7 @@ export function watchAlive(config: Pick<GlobalConfig, 'stateDir' | 'watch' | 'qu
   if (!config.queue.enabled) return false;
   try {
     const beat = JSON.parse(fs.readFileSync(workerFile(config), 'utf8')) as { pid?: unknown; at?: unknown };
-    if (typeof beat.pid !== 'number' || typeof beat.at !== 'number' || nowMs - beat.at > Math.max(60_000, config.watch.interval * 4000)) return false;
+    if (typeof beat.pid !== 'number' || typeof beat.at !== 'number' || nowMs - beat.at > Math.max(180_000, config.watch.interval * 8000)) return false;
     process.kill(beat.pid, 0);
     return true;
   } catch (error) {
