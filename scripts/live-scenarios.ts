@@ -1,3 +1,4 @@
+import { providerDispatchCases } from './provider-live-cases.ts';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -177,6 +178,8 @@ async function main(): Promise<number> {
       check(`${run.name} threw`, false, e instanceof Error ? (e.stack ?? e.message) : String(e));
     }
   }
+  current = 'providers';
+  try { for (const name of await providerDispatchCases(defaultCacheRoot(), 'pscen')) check(name, true); } catch (e) { check('provider cases', false, String(e)); }
   const failed = checks.filter((c) => !c.ok);
   fs.writeFileSync(path.join(defaultCacheRoot(), 'live-results.json'), `${JSON.stringify({ at: new Date().toISOString(), passed: checks.length - failed.length, failed: failed.length, checks }, null, 2)}\n`);
   console.log(`\n${checks.length - failed.length}/${checks.length} checks passed`);

@@ -1,3 +1,5 @@
+import { createRequire } from 'node:module';
+import { FONT_STACK, parseAnsi, renderSvg } from './render-ansi.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -11,7 +13,7 @@ const root = defaultCacheRoot('agentctl-economy');
 const checks: string[] = [];
 const check = (name: string, ok: unknown) => { assert.ok(ok, name); checks.push(name); console.log(`PASS ${name}`); };
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
-await withHarness({ name: 'board-models', cacheRoot: root, config: 'board: {model_versions: {opus: "5.5"}}\ncapacity: {codex_refresh: false}\n' }, async h => {
+await withHarness({ name: 'board-models', cacheRoot: root, config: 'providers: [claude, codex, kimi]\nboard: {model_versions: {opus: "5.5"}}\ncapacity: {codex_refresh: false}\n' }, async h => {
   const config = loadGlobalConfig(h.agentctlHome);
   const pane = path.join(h.root, 'pane.mjs');
   fs.writeFileSync(pane, "console.log('Working (esc to interrupt)'); setInterval(()=>{},1000);");
@@ -19,12 +21,13 @@ await withHarness({ name: 'board-models', cacheRoot: root, config: 'board: {mode
   for (const [i, task, agent, model, effort] of [
     ['0', 'NEON-BACKEND-TASK-12', 'codex', 'gpt-6.1-sol', 'xhigh'],
     ['1', 'NEON-CITY-REVIEW-12', 'claude', 'opus', 'high'],
+    ['2', 'ZZ-KIMI-TASK-12', 'kimi', 'k3', 'high'],
   ]) {
     const window = task!.toLowerCase();
     const command = `${node} ${shellQuote(pane)}`;
     const args = i === '0' ? ['new-session', '-d', '-s', h.session, '-n', window, '-x', '160', '-y', '30', command] : ['new-window', '-d', '-t', `=${h.session}:`, '-n', window, command];
     assert.equal(h.tmux(args).code, 0);
-    const record: TaskRecord = { task: task!, window, session: h.session, agent: agent as 'claude' | 'codex', model: model!, effort: effort!, repos: [], links: [], env: {}, report: path.join(config.cache, task! + '.md'), started: new Date(Date.now() - 60000).toISOString(), requested: { agent: agent as 'claude' | 'codex', model: model!, effort: effort! } };
+    const record: TaskRecord = { task: task!, window, session: h.session, agent: agent as 'claude' | 'codex' | 'kimi', model: model!, effort: effort!, repos: [], links: [], env: {}, report: path.join(config.cache, task! + '.md'), started: new Date(Date.now() - 60000).toISOString(), requested: { agent: agent as 'claude' | 'codex' | 'kimi', model: model!, effort: effort! } };
     fs.mkdirSync(path.join(config.stateDir, window), { recursive: true });
     fs.writeFileSync(path.join(config.stateDir, window, 'TASK.md'), renderTaskMd(record, 'Isolated board fixture'));
   }
@@ -40,6 +43,12 @@ await withHarness({ name: 'board-models', cacheRoot: root, config: 'board: {mode
   const wide = await until(/NEON-BACKEND-TASK-12\s+cx S 6\.1 XH/);
   check('wide real tmux list keeps full task and compact model/effort', wide.includes('NEON-CITY-REVIEW-12') && wide.includes('cl O 5.5 HI'));
   check('wide real tmux includes all columns and full selected model in preview', /TASK\s+AGENT\s+STATE\s+TIME\s+TOKENS\s+PROGRESS\s+REPORT/.test(wide) && /model: gpt-6.1-sol.*effort: xhigh/.test(wide));
+  check('third provider row has Kimi model/effort', /KIMI-TASK-12\s+ki K 3 HI/.test(wide));
+  const ansi = h.tmux(['capture-pane', '-e', '-p', '-t', target]).stdout;
+  const svg = renderSvg(parseAnsi(ansi, 160), { title: 'agentctl three providers' });
+  const require = createRequire(import.meta.url), { Resvg } = require('@resvg/resvg-js');
+  const fonts = path.join(path.dirname(require.resolve('dejavu-fonts-ttf/package.json')), 'ttf');
+  fs.writeFileSync(path.join(root, 'board-three-providers.png'), new Resvg(svg.replaceAll(FONT_STACK, "'DejaVu Sans Mono'"), { font: { fontFiles: ['DejaVuSansMono.ttf', 'DejaVuSansMono-Bold.ttf', 'DejaVuSans.ttf'].map(f => path.join(fonts, f)), loadSystemFonts: false } }).render().asPng());
   const version = (JSON.parse(fs.readFileSync(path.resolve(import.meta.dirname, '../package.json'), 'utf8')) as { version: string }).version;
   check('the header names the version', wide.includes(`agentctl ${version} board`));
   check('the pane title is the OSC 2 title of the board', h.tmux(['display-message', '-p', '-t', target, '#{pane_title}']).stdout.trim() === `agentctl ${version} · board`);

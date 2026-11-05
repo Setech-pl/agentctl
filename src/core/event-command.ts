@@ -68,6 +68,7 @@ const otherAgent = (a: string, ids: readonly AgentName[]): string => (PROVIDER_I
 export function limitText(record: { task: string; agent: string; pin?: boolean | undefined }, ids: readonly AgentName[] = DEFAULT_PROVIDERS): string {
   const base = `${record.task}: ${record.agent} wyczerpał limit użycia`;
   if (record.pin) return `${base} (zadanie przypięte – pin: true – move go nie przeniesie)`;
+  if (ids.length > 2) return `${base} – agentctl move ${record.task} --agent <${ids.filter(id => id !== record.agent).join('|')}> przeniesie zadanie (${otherAgent(record.agent, ids)})`;
   return `${base} – agentctl move ${record.task} przeniesie zadanie na ${otherAgent(record.agent, ids)}`;
 }
 

@@ -10,7 +10,7 @@ MCP mode: call `guide` with `{ "project": "/path/to/repo", "lang": "en" }`, then
 
 ## Decide what to allocate
 
-Compare both plan windows (5 h and week): remaining percent, reading age, stale flag, consumption percent per hour, projected exhaustion and time to reset. A stale reading or `null` means n/d, not zero or free capacity. Percent includes use outside agentctl. Estimates are explicitly under `estimate` with a basis and confidence; they are not provider quotas or promises. A projection does not predict how the provider will change its limits.
+Compare the plan windows actually reported (5 h, week or month): remaining percent, reading age, stale flag, consumption percent per hour, projected exhaustion and time to reset. A stale reading or `null` means n/d, not zero or free capacity. Percent includes use outside agentctl. Estimates are explicitly under `estimate` with a basis and confidence; they are not provider quotas or promises. A projection does not predict how the provider will change its limits.
 
 Check free slots, reservations, limits and the next queued task. No configured slot limit means unbounded, not a measured number of free slots. Check seven-day model × effort stats: count, marked ok/partial/fail, unmarked count, median duration and tokens. Small samples and different task sizes limit comparisons. The equivalents table is a configured correspondence, not a provider entitlement check.
 
@@ -128,3 +128,24 @@ A provider limit emits one notice per episode with the known reset (otherwise `n
 `agentctl mark --cohort NC ok --note "reviewed"` previews its exact range; `--yes` confirms. MCP accepts `task`, `tasks` or `cohort`; more than one task requires preview/confirm. With a cohort filter, board `o/p/f` previews its IDs before marking. Agentctl records the user's result. Closing every cohort task emits `gc_suggest` with that cohort's protected cleanup preview; it never deletes automatically.
 
 MCP previews have independent `preview_token` values, expire after ten minutes and refuse a changed range. Pass the token and identical arguments with `confirm: true`; omitting a token uses the latest matching preview for compatibility. `gc_preview` with a cohort gives only the count of foreign worktrees; confirmed `gc` returns its results without repeating the plan. `notify.mcp_writes` defaults to `summary`, at most once per 60 seconds; `all` and `off` are explicit alternatives. Audit remains complete. F12 returns to the board of the current configured session, including a parallel dev session. Duration includes checkout/setup before the agent starts; stale plan notices are once per reading.
+
+## Active providers and Kimi
+
+Choose among the active `providers` in config: Claude and Codex are required; Kimi is optional. Use equivalents by model class as dispatch mappings, then check current capacity and slots. With three providers, move requires an explicit `--agent`; auto review follows `review.prefer` or provider order and skips the author, unavailable CLIs and unmapped targets.
+
+Kimi Code 2.5.0 has no CLI sandbox. Its manual permission rules determine which tools ask, and Write may proceed without a dialog. Trust/login/update decisions belong to the human. Efforts are low/high/max only when the configured model's `support_efforts` permits them; without catalog evidence no effort env is forced. Display names and unversioned aliases are dynamic. Manager and Remote Control remain Claude-only.
+
+Kimi plan capacity is n/d unless `capacity.kimi_usage_probe` is enabled; the neutral session needs manual trust. The rate-limited `/usage` probe reads only the TUI, never credentials/OAuth or an API, and never uses a task window. Observe 5h/Weekly/Monthly only when present. Prompts, files read, command results and diffs go to Moonshot AI; telemetry defaults off, which does not stop task data transmission. A project guide can explicitly prohibit Kimi for that repository.
+
+```yaml
+---
+task: EXAMPLE-KIMI
+agent: kimi
+model: k3
+effort: high
+repos: [{path: /path/to/repo, worktree: /path/to/worktree, branch: task/example}]
+---
+State the acceptance criteria, constraints and report requirements here.
+```
+
+Kimi screen auth/limit/overload/background patterns, busy queue footer, session paths and wire interactions are hypotheses backed by synthetic fixtures; do not describe them as verified real 2.5.0 behavior.

@@ -126,6 +126,7 @@ export function shownRows<T extends Pick<StatusRow, 'hidden'>>(rows: T[], all: b
 
 /** For a task whose agent is unknown: guess it from the screen (Codex draws "›" prompts and "OpenAI Codex"). */
 export function guessAgent(screen: string): AgentName {
+  if (/Welcome to Kimi Code!|Kimi Code updated|^\s*│\s*>/m.test(screen)) return 'kimi';
   return /OpenAI Codex|^\s*›/m.test(screen) ? 'codex' : 'claude';
 }
 

@@ -80,7 +80,7 @@ export const claude: ProviderAdapter = {
     related: (reader, file) => reader.claudeSubagents(file),
     feedLine: feedClaudeLine,
     readPlan: readClaudePlan,
-    
+
     planSources: ['claude-statusline'],
   },
   models: { get equivalents() { const rows = DEFAULT_EQUIVALENTS.map(row => row.claude); return { light: rows.slice(0, 2), medium: rows.slice(2, 4), strong: rows.slice(4) }; }, label: modelLabel },

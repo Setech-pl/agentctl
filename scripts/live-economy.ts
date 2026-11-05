@@ -1,3 +1,4 @@
+import { providerMcpCases } from './provider-live-cases.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -150,4 +151,5 @@ await withHarness({ name: 'economy', cacheRoot: cache, config: 'mcp: {max_respon
   check('W8: real partial registered checkout is refused before another agent starts', retried.code !== 0 && /incomplete|modified/.test(retried.stderr));
 
 });
+for (const name of await providerMcpCases(cache)) check(name, true);
 fs.writeFileSync(path.join(cache, 'live-economy-results.json'), JSON.stringify({ passed: checks.length, failed: 0, checks }, null, 2));

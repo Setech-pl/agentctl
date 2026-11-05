@@ -21,4 +21,3 @@ export function modelLabel(model: string | null | undefined, effort: string | nu
   const letter = [...selected.family][0]?.toUpperCase() ?? '–';
   return `${letter}${version ? ` ${version}` : ''} ${e}`;
 }
-

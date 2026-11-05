@@ -1,5 +1,8 @@
+import { collectLimits } from './limits.ts';
+import { liveWindows } from './plan.ts';
+import { openReader, readPlans } from './usage.ts';
 import { validateLaunch } from './safety.ts';
-import { alternatives } from './providers/registry.ts';
+import { alternatives, isActive } from './providers/registry.ts';
 import { confirmAction } from './clipboard.ts';
 import type { AgentName } from './config.ts';
 import type { Context } from './context.ts';
@@ -68,8 +71,13 @@ export async function planMove(ctx: Context, taskArg: string, opts: MoveOptions 
   if (from.pin) throw new AgentctlError(`${from.task} is pinned (pin: true): it is never moved to the other provider`, 'Wait for the limit to reset, or remove the pin from the spec and start the task again.');
   if (from.agent === 'unknown') throw new AgentctlError(`the agent of ${from.task} is unknown (adopted without --agent), so its model cannot be translated`, 'Start the task again on the provider you want, with "agentctl new --agent <agent>".');
   const others = alternatives(config, from.agent);
-  if (!opts.agent && others.length > 1) throw new AgentctlError(`wybierz dostawcę: --agent ${others.join('|')}`);
+  if (!opts.agent && others.length > 1) {
+    const loads = collectLimits(config, await liveWindows(ctx)), reader = openReader(config), plans = readPlans(config, reader, ctx.runner.now()); reader.save();
+    const choices = others.map(id => { const load = loads.providers.find(p => p.agent === id); const plan = plans[id]; return `${id}: free slots ${load?.free ?? 'unbounded'}, usage ${plan?.maxPercent === null || !plan ? 'n/d' : `${Math.round(plan.maxPercent)}%`}`; });
+    throw new AgentctlError(`wybierz dostawcę: --agent ${others.join('|')} (${choices.join('; ')})`);
+  }
   const target = opts.agent ?? others[0]!;
+  if (!isActive(config, target)) throw new AgentctlError(`provider ${target} is not enabled; add it to providers: [claude, codex, kimi]`);
   if (target === from.agent) throw new AgentctlError(`${from.task} already runs on ${from.agent}`, `Pick the other provider: agentctl move ${from.task} --agent ${others.join('|')}`);
 
   const t = translate({ agent: from.agent, model: from.model, effort: from.effort === 'unknown' ? 'high' : from.effort }, target, config.equivalents);

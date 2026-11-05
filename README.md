@@ -4,7 +4,7 @@
 
 Polski: [README.pl.md](README.pl.md)
 
-**One chat orders and supervises the work of many CLI coding agents – Claude Code and Codex today, Google Gemini (Antigravity CLI) in the next release – from one queue, under one set of rules.**
+**One chat orders and supervises the work of many CLI coding agents – Claude Code, Codex and optional Kimi Code – from one queue, under one set of rules.**
 
 agentctl turns a short spec into a git worktree, a tmux window and a running agent with the model and reasoning effort you chose. It watches every agent for you, tells you when one asks a question or finishes, and hands the reports back to your chat. You stay the one who decides and merges.
 
@@ -246,7 +246,7 @@ flowchart TB
     subgraph world [Outside]
         TMUX[tmux session agentctl]
         GIT[git worktrees]
-        AG[Claude Code and Codex]
+        AG[Claude Code, Codex, optional Kimi Code]
         NOTE[terminal-notifier / osascript]
         PHONE["ntfy server -> phone"]
         MGR["window manager: claude --remote-control + MCP, role from ~/.agentctl/manager/"]
@@ -268,6 +268,15 @@ flowchart TB
     CLI --> CORE
     BOARD --> CORE
     MCP --> CORE
+    subgraph providers [Provider adapters]
+        REG["registry: registered vs active providers"]
+        CL["Claude: argv, hooks, usage, safety"]
+        CX["Codex: argv, notify, usage, safety"]
+        KI["Kimi 2.5.0: TOML, passive wire, usage probe, safety"]
+    end
+    CORE --> REG
+    REG --> CL & CX & KI
+    CL & CX & KI --> RUN
     CORE --> RUN
     RUN --> TMUX
     RUN --> GIT
@@ -941,3 +950,23 @@ A provider limit emits one notice per episode with the known reset (otherwise `n
 `agentctl mark --cohort NC ok --note "reviewed"` previews its exact range; `--yes` confirms. MCP accepts `task`, `tasks` or `cohort`; more than one task requires preview/confirm. With a cohort filter, board `o/p/f` previews its IDs before marking. Agentctl records the user's result. Closing every cohort task emits `gc_suggest` with that cohort's protected cleanup preview; it never deletes automatically.
 
 MCP previews have independent `preview_token` values, expire after ten minutes and refuse a changed range. Pass the token and identical arguments with `confirm: true`; omitting a token uses the latest matching preview for compatibility. `gc_preview` with a cohort gives only the count of foreign worktrees; confirmed `gc` returns its results without repeating the plan. `notify.mcp_writes` defaults to `summary`, at most once per 60 seconds; `all` and `off` are explicit alternatives. Audit remains complete. F12 returns to the board of the current configured session, including a parallel dev session. Duration includes checkout/setup before the agent starts; stale plan notices are once per reading.
+
+
+## Providers and Kimi Code 2.5.0
+
+The default active providers are `claude` and `codex` (both required). Enable Kimi explicitly in the config:
+
+```yaml
+providers: [claude, codex, kimi]
+limits: {claude: 3, codex: 3, kimi: 1}
+capacity: {kimi_usage_probe: false}
+review: {prefer: [codex, kimi, claude]}
+```
+
+`agent: kimi` starts interactive `kimi`; an unqualified model alias gets `kimi-code/`, while `model: default` omits the model flag. Models, `display_name` and `support_efforts` come from Kimi's TOML config. Levels are `low/high/max`, subject to the selected model catalog; without catalog evidence agentctl does not force effort. Unversioned aliases are server-managed and dynamic. Manager and Remote Control remain Claude-only.
+
+Kimi has no CLI sandbox. Its permission rules are not an isolation boundary, and file writes may proceed without approval. Trust, login and update dialogs require a human. Agentctl rejects auto-accept flags and `yolo/auto` modes, sets `KIMI_CODE_NO_AUTO_UPDATE=1` per process and defaults to `KIMI_DISABLE_TELEMETRY=1`. Prompts, files read, command results and diffs go to Moonshot AI, including for private repositories. Disabling telemetry does not prevent transmission of task data.
+
+Plan limits remain `n/d` until `capacity.kimi_usage_probe` is enabled. The probe opens a separate short session in a neutral directory, requires manual trust, runs `/usage`, parses 5h/Weekly/Monthly and closes with `/exit`; it never reads credentials/OAuth or calls the provider API. `/usage` is never sent to task windows. Probes are limited to one attempt per five minutes. See [configuration](docs/configuration.md#kimi-code-250) for exact-match Bash permission examples.
+
+With three active providers, `move TASK` requires `--agent` and lists free slots and observed percentages. `review: auto` chooses the first active, installed and mappable provider other than the author, using `review.prefer` or `providers` order. Board, usage, capacity, limits and MCP include Kimi only when enabled.

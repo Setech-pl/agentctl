@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/) while it is below 1.0 (minor versions may change behaviour).
 
+## [0.18.0] - 2026-11-05
+
+### Added
+- Provider registry and adapters for Claude Code, Codex and opt-in Kimi Code CLI 2.5.0. Default active providers remain Claude and Codex; both stay required.
+- Kimi interactive launch/resume, dynamic TOML model/effort catalog and read-only permission diagnostics, screen fixtures, passive protocol-1.5 wire and usage.record token accounting. Unknown protocols use screen fallback; unverified session paths/interactions and missing screen states remain documented hypotheses.
+- Optional rate-limited Kimi `/usage` probe in a neutral manually trusted session; no task-window probe, credentials, OAuth or provider API calls. Three-provider capacity, limits, reservations, usage, board, alerts, queue holds and MCP schemas.
+- `review.prefer` for active installed mappable reviewers; explicit move target with slot/percentage information when three providers are active.
+
+### Safety and compatibility
+- Safety rules apply per target provider, including after move/translation. Claude/Codex retain 0.17.4 results. Kimi rejects auto-accept/non-interactive prompt flags, trust bypass env and unsafe permission modes, disables updates per process and defaults telemetry off.
+- Manager and Remote Control remain Claude-only. Kimi config is never written, and trust/login/update dialogs are never answered. Kimi task data still goes to Moonshot AI; Kimi permissions provide no sandbox.
+
 ## [0.17.4] - 2026-11-04
 
 - P12: the board's `k` choice lists the `board.cohorts_recent` (10) most recently active cohorts plus those with work, folds older quiet ones into `starsze…` and scrolls with ↑↓/PgUp/PgDn; `agentctl cohort archive <name>… | --older-than <age>` (preview, `--yes`) and MCP `cohort_archive` (preview + confirm, add it to `mcp.allow`) hide finished cohorts from the choice and the default `cohort list` (`--all`); tasks, reports and history stay, a new task in the cohort brings it back.

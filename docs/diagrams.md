@@ -137,7 +137,7 @@ flowchart TB
     subgraph world [Outside]
         TMUX[tmux session agentctl]
         GIT[git worktrees]
-        AG[Claude Code and Codex]
+        AG[Claude Code, Codex, optional Kimi Code]
         NOTE[terminal-notifier / osascript]
         PHONE["ntfy server -> phone"]
         MGR["window manager: claude --remote-control + MCP, role from ~/.agentctl/manager/"]
@@ -159,6 +159,15 @@ flowchart TB
     CLI --> CORE
     BOARD --> CORE
     MCP --> CORE
+    subgraph providers [Provider adapters]
+        REG["registry: registered vs active providers"]
+        CL["Claude: argv, hooks, usage, safety"]
+        CX["Codex: argv, notify, usage, safety"]
+        KI["Kimi 2.5.0: TOML, passive wire, usage probe, safety"]
+    end
+    CORE --> REG
+    REG --> CL & CX & KI
+    CL & CX & KI --> RUN
     CORE --> RUN
     RUN --> TMUX
     RUN --> GIT

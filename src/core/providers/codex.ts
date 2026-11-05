@@ -59,7 +59,7 @@ export const codex: ProviderAdapter = {
       const data = isObject(e.payload) ? e.payload : {};
       return Array.isArray(data['input-messages']) && data['input-messages'].some(text => typeof text === 'string' && normalize(text) === normalize(e.prompt ?? ''));
     },
-    
+
   },
   usage: {
     home: codexHome, homeEnv: 'CODEX_HOME',
@@ -72,7 +72,7 @@ export const codex: ProviderAdapter = {
         return explicit || (meta.cwd && worktrees.some(w => within(meta.cwd!, w))) ? [{ file, firstAt: meta.firstAt, explicit }] : [];
       });
     },
-    
+
     feedLine: feedCodexLine,
     readPlan: readCodexPlan,
     refreshPlan: refreshCodexCapacity,

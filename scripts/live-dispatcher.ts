@@ -1,3 +1,4 @@
+import { providerDispatchCases } from './provider-live-cases.ts';
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -50,6 +51,7 @@ async function trial(id: number, parallel: boolean, retry = false, fallback = fa
 for (let id = 1; id <= 3; id++) await trial(id, false);
 for (let round = 0; round < 3; round++) await Promise.all(Array.from({ length: 4 }, (_, i) => trial(4 + round * 4 + i, true)));
 await trial(16, false, true, true);
+for (const name of await providerDispatchCases(CACHE, 'pdisp')) results.push({ name, ok: true });
 const failed = results.filter((r) => !(r as { ok: boolean }).ok).length;
 fs.writeFileSync(path.join(CACHE, 'live-dispatcher-results.json'), JSON.stringify({ passed: results.length - failed, failed, results }, null, 2) + '\n');
 process.exitCode = failed ? 1 : 0;

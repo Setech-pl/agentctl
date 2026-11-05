@@ -138,6 +138,8 @@ export async function runDoctor(
     for (const check of adapter.doctor(detection, env, config)) add(check.name, check.level, check.text);
   }
 
+  for (const warning of config?.warnings ?? []) add('providers', 'warn', warning);
+
   const gh = await runner.exec('gh', ['--version'], { readOnly: true });
   if (gh.code === 0) add('gh', 'ok', firstLine(gh.stdout));
   else add('gh', 'warn', 'not found (optional; used by humans for PRs, never by agentctl)');

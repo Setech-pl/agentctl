@@ -1,7 +1,7 @@
 {
   "name": "@setech-pl/agentctl",
-  "version": "0.17.4",
-  "description": "Dispatcher of work orders for CLI coding agents (Claude Code, Codex): a spec file becomes a git worktree, symlinks, env and a tmux window with the agent running, watched for you.",
+  "version": "0.18.0",
+  "description": "Dispatcher of work orders for CLI coding agents (Claude Code, Codex, Kimi Code): a spec file becomes a git worktree, symlinks, env and a tmux window with the agent running, watched for you.",
   "type": "module",
   "license": "MIT",
   "author": "Marcin Krzetowski",

@@ -35,4 +35,3 @@ export function feedClaudeLine(stats: SessionStats, line: string): void {
     while (stats.seenOrder.length > SEEN_MAX) delete stats.seen[stats.seenOrder.shift() as string];
   }
 }
-

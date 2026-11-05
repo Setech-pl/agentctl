@@ -498,3 +498,71 @@ MCP new/queue validate canonical and alternative report paths during preview: on
 | `agents.<agent>.env` | Global | `{}` | Per-provider environment; task env overrides it. Kimi telemetry is disabled by default; trust bypass and disabled dangerous-command guard are rejected. |
 
 | `agents.<agent>.approval_pattern` | Global | Adapter default | Separate approval dialog regex; Kimi approvals and question Submit are distinct panels. |
+
+## Kimi Code 2.5.0
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `agents.kimi` | mapping | adapter defaults | Interactive Kimi settings; registered always, active only in `providers`. |
+| `limits.kimi` | positive integer | unlimited | Simultaneous Kimi task windows, reservations and optional external sessions. |
+| `usage.kimi_dir` | path/null | `$KIMI_CODE_HOME`, else `~/.kimi-code` | Kimi data/config home. Only config.toml and candidate session logs are read. |
+| `capacity.kimi_usage_probe` | boolean | false | On-demand hidden TUI `/usage` probe in `<agentctl home>/kimi-usage-probe`; at most once per five minutes. |
+| `review.prefer` | provider IDs | `providers` order | First active installed mappable provider other than the author. Inactive IDs are skipped. |
+
+Claude and Codex stay mandatory. Inactive Kimi settings produce a warning; `agent: kimi` is refused until Kimi is enabled. MCP provider enums/count fields follow active providers when the server starts; restart MCP after enabling another provider. `limits set kimi=2`, `limits reserve kimi=1`, `limits release kimi` work when active. The tmux line can show `C 62% · X 18% · K 40%`.
+
+```yaml
+providers: [claude, codex, kimi]
+agents:
+  kimi:
+    flags: []
+    effort_args: []
+    env: {KIMI_DISABLE_TELEMETRY: '1'}
+usage:
+  kimi_dir: null
+  warn: {claude: 80, codex: 80, kimi: 80}
+  critical: 95
+  queue_hold: {kimi: 90}
+capacity: {kimi_usage_probe: false}
+review: {prefer: [codex, kimi, claude]}
+equivalents:
+  - {claude: sonnet/high, codex: gpt-6.1-sol/high, kimi: k3/high, class: medium}
+```
+
+Equivalents may contain two or three active provider columns and optional `class: light|medium|strong`. Translation requires both source and target columns. Built-in Kimi proposals are `k3/low` (light), `k3/high` (medium), `k3.1-pro/high`, `k3.1-pro/max`, `kimi-for-coding/max` (strong); they describe a dispatch mapping, not a quality guarantee. Aliases are dynamic on the server. `display_name` and `support_efforts` in Kimi's TOML catalog determine display version and permitted effort; no medium/xhigh. A model without levels gets no forced effort. `model: default` omits `-m`; resume uses `--session ID` or `--continue` without a model override because `-m` plus session has not been verified in 2.5.0. Board versions can be explicitly supplied in `board.model_versions`; unversioned aliases never get a guessed version.
+
+Safety is per target provider, including after `move` or equivalents translation. Claude/Codex retain their 0.17.4 safety results. Kimi forbids `-y`, `--yolo`, `--yes`, `--auto-approve`, `--auto`, `-p`, `--prompt`, including long `--flag=value` forms, `KIMI_CODE_TRUST_WORKSPACE`, and a false `KIMI_CODE_DANGEROUS_COMMAND_GUARD` in task/provider env. `default_permission_mode=yolo|auto` refuses start/resume and fails doctor. Invalid TOML is refused rather than interpreted. Agentctl never edits Kimi's config. Update checks are disabled per process; telemetry defaults off and may be explicitly overridden by `agents.kimi.env`. Task prompts, files read, command results and diffs still go to Moonshot AI.
+
+Kimi permissions have no sandbox boundary. Doctor shows the active manual mode, guard and permission rules read-only. `permission.dangerous_command_guard` is a separate AST guard; disabling it warns in doctor. File Write does not always ask. Bash rules match the entire command string, including operators. Use exact commands; an unrestricted wildcard may also match compound commands. Add each extra argument variant as its own reviewed literal rule:
+
+```toml
+default_permission_mode = "manual"
+
+[[permission.rules]]
+decision = "allow"
+pattern = "Bash(git status)"
+
+[[permission.rules]]
+decision = "allow"
+pattern = "Bash(git diff)"
+
+[[permission.rules]]
+decision = "allow"
+pattern = "Bash(git log)"
+
+[[permission.rules]]
+decision = "allow"
+pattern = "Bash(npm test)"
+
+[[permission.rules]]
+decision = "allow"
+pattern = "Bash(npm run build)"
+
+[[permission.rules]]
+decision = "allow"
+pattern = "Bash(node --test)"
+```
+
+The probe never uses task windows, reads credentials or calls an API; trust/login is manual (doctor gives the neutral directory). Only parsed percentages and reset times are saved in `usage/kimi-plan.json`. No transcript is added to MCP/watch logs. Missing windows are n/d, including Weekly when only 5h and Monthly were observed.
+
+Screen fixtures are from user captures of 2.5.0. Approval and question/Submit are separate panels; the editor stays visible while working. Prompt delivery uses bracketed paste, stable screen and a separate `C-m`; collapsed `[paste #N ...]` is a draft. Busy delivery defaults off because Kimi's queue footer is unverified. Passive wire supports protocol 1.5 with screen fallback and a doctor note for unknown versions. Auth/limit/overload/background patterns, queue footer, session paths, wire interaction records and `-m` plus `--session` remain hypotheses; synthetic tests are labeled separately. Tokens come only from `usage.record`, never `token_counting.*`.

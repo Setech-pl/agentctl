@@ -2,7 +2,7 @@
 
 English: [README.md](README.md)
 
-**Jeden czat zleca i nadzoruje pracę wielu agentów CLI – dziś Claude Code i Codexa, w następnym wydaniu także Google Gemini (Antigravity CLI) – z jednej kolejki i według tych samych zasad.**
+**Jeden czat zleca i nadzoruje pracę wielu agentów CLI – Claude Code, Codexa i opcjonalnego Kimi Code – z jednej kolejki i według tych samych zasad.**
 
 agentctl zamienia krótki opis zadania w gitowy worktree, okno tmux i działającego agenta z wybranym przez Ciebie modelem i poziomem rozumowania. Pilnuje każdego agenta, informuje, gdy któryś zada pytanie lub skończy, i oddaje raporty Twojemu czatowi. Decyzja i scalanie zostają po Twojej stronie.
 
@@ -244,7 +244,7 @@ flowchart TB
     subgraph world [Na zewnątrz]
         TMUX[sesja tmux agentctl]
         GIT[worktree gita]
-        AG[Claude Code i Codex]
+        AG[Claude Code, Codex, opcjonalny Kimi Code]
         NOTE[terminal-notifier / osascript]
         PHONE["ntfy server -> phone"]
         MGR["window manager: claude --remote-control + MCP, role from ~/.agentctl/manager/"]
@@ -265,6 +265,15 @@ flowchart TB
     CLI --> CORE
     BOARD --> CORE
     MCP --> CORE
+    subgraph providers [Provider adapters]
+        REG["registry: registered vs active providers"]
+        CL["Claude: argv, hooks, usage, safety"]
+        CX["Codex: argv, notify, usage, safety"]
+        KI["Kimi 2.5.0: TOML, passive wire, usage probe, safety"]
+    end
+    CORE --> REG
+    REG --> CL & CX & KI
+    CL & CX & KI --> RUN
     CORE --> RUN
     RUN --> TMUX
     RUN --> GIT
@@ -941,3 +950,23 @@ Limit dostawcy daje jedno powiadomienie na epizod, z czasem resetu albo `n/d`. �
 `agentctl mark --cohort NC ok --note "sprawdzone"` pokazuje dokładny zakres; `--yes` go potwierdza. MCP przyjmuje `task`, `tasks` lub `cohort`; więcej niż jedno zadanie wymaga podglądu/potwierdzenia. Przy filtrze kohorty board `o/p/f` pokazuje ID przed oceną. Agentctl zapisuje wynik podany przez człowieka. Zamknięcie wszystkich zadań kohorty daje `gc_suggest` z chronionym planem sprzątania tej kohorty, bez automatycznego usuwania.
 
 Podglądy MCP mają niezależne `preview_token`, ważne dziesięć minut, i odmawiają wykonania po zmianie zakresu. Przekaż token oraz identyczne argumenty z `confirm: true`; bez tokena działa ostatni pasujący podgląd. `gc_preview` dla kohorty podaje tylko liczbę obcych worktree; potwierdzone `gc` zwraca wyniki bez powtarzania planu. `notify.mcp_writes` domyślnie ma `summary`, najwyżej raz na 60 sekund; dostępne też `all` i `off`. Audyt pozostaje pełny. F12 wraca do boarda własnej sesji, także przy równoległym dev. Czas obejmuje checkout/setup przed uruchomieniem agenta; ostrzeżenie o starym odczycie planu pojawia się raz na odczyt.
+
+
+## Dostawcy i Kimi Code 2.5.0
+
+Domyślnie aktywni są `claude` i `codex` (oba obowiązkowe). Kimi włączysz jawnie w configu:
+
+```yaml
+providers: [claude, codex, kimi]
+limits: {claude: 3, codex: 3, kimi: 1}
+capacity: {kimi_usage_probe: false}
+review: {prefer: [codex, kimi, claude]}
+```
+
+`agent: kimi` uruchamia interaktywny `kimi`; alias bez prefiksu dostaje `kimi-code/`, a `model: default` pomija flagę modelu. Katalog modeli, `display_name` i `support_efforts` pochodzą z configu TOML Kimi. Obsługiwane poziomy to `low/high/max`, wyłącznie zgodnie z katalogiem wybranego modelu; bez danych agentctl nie wymusza effort. Aliasy bez wersji są dynamiczne po stronie serwera. Manager i Remote Control pozostają Claude-only.
+
+Kimi nie ma sandboxa CLI. Zgody zależą od reguł Kimi i nie zapewniają izolacji; zapis pliku może przejść bez pytania. Trust, login i dialogi aktualizacji obsługuje człowiek. Agentctl odrzuca flagi auto-akceptacji i tryby `yolo/auto`, ustawia per proces `KIMI_CODE_NO_AUTO_UPDATE=1` oraz domyślnie `KIMI_DISABLE_TELEMETRY=1`. Kimi przesyła prompt, odczytane pliki, wyniki poleceń i diffy do Moonshot AI także dla prywatnego repo. Wyłączenie telemetrii nie wyłącza tego przesyłania danych zadania.
+
+Limity planu to `n/d`, dopóki nie włączysz `capacity.kimi_usage_probe`. Sonda otwiera osobną krótką sesję w neutralnym katalogu, wymaga ręcznego trust, wykonuje `/usage`, parsuje 5h/Weekly/Monthly i zamyka się przez `/exit`; nie czyta credentials ani OAuth i nie woła API dostawcy. `/usage` nigdy nie trafia do okna zadania. Sonda jest ograniczona do jednej próby na pięć minut. Szczegóły i przykłady dokładnych reguł Bash: [configuration](docs/configuration.md#kimi-code-250).
+
+Przy trzech aktywnych dostawcach `move TASK` wymaga `--agent`; komunikat podaje miejsca i odczytane procenty. `review: auto` szuka pierwszego aktywnego, zainstalowanego i mapowalnego dostawcy innego niż autor według `review.prefer` albo kolejności `providers`. Board, usage, capacity, limity i MCP pokazują Kimi tylko po aktywacji.

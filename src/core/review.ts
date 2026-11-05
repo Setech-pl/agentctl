@@ -1,4 +1,4 @@
-import { alternatives } from './providers/registry.ts';
+import { alternatives, isActive, activeProviders } from './providers/registry.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Context } from './context.ts';
@@ -22,16 +22,16 @@ export { DEFAULT_REVIEW_TEMPLATE };
 /** Prefer a different installed provider. Fallback uses only an explicitly configured, different model. */
 export async function reviewOrder(ctx: Context, author: TaskRecord, review: ReviewSettings): Promise<{ order: Order; rule: string }> {
   if (author.agent === 'unknown') throw new AgentctlError(`${author.task}: review author provider is n/d`);
-  const other = alternatives(ctx.config, author.agent)[0]!;
-  const target = review.agent ?? other;
-  const available = async (agent: AgentName) => (await ctx.runner.exec(agent, ['--version'], { readOnly: true })).code === 0;
-  if (await available(target)) {
+  const candidates = review.agent ? [review.agent] : (review.prefer ?? ctx.config.review?.prefer ?? activeProviders(ctx.config)).filter(id => id !== author.agent && isActive(ctx.config, id));
+  const target = candidates[0] ?? alternatives(ctx.config, author.agent)[0]!;
+  const available = async (agent: AgentName) => isActive(ctx.config, agent) && (await ctx.runner.exec(agent, ['--version'], { readOnly: true })).code === 0;
+  for (const target of candidates) if (await available(target)) {
     const mapped = translate({ agent: author.agent, model: author.model, effort: author.effort === 'unknown' ? 'high' : author.effort }, target, ctx.config.equivalents);
     const model = review.model ?? (mapped.ok ? mapped.order.model : undefined);
     const effort = review.effort ?? (mapped.ok ? mapped.order.effort : undefined);
-    if (model && effort && (target !== author.agent || model !== author.model)) return { order: { agent: target, model, effort }, rule: target !== author.agent ? 'different provider' : 'explicit different model' };
+    if (model && effort && (target !== author.agent || model !== author.model)) return { order: { agent: target, model, effort }, rule: target !== author.agent ? activeProviders(ctx.config).length > 2 ? `different provider (${target})` : 'different provider' : 'explicit different model' };
   }
-  const fallback = review.model && review.model !== author.model && review.agent === author.agent ? { model: review.model, effort: review.effort ?? (author.effort === 'unknown' ? 'high' : author.effort) } : ctx.config.equivalents.map(e => e[author.agent as AgentName]).find(m => m.model !== author.model);
+  const fallback = review.model && review.model !== author.model && review.agent === author.agent ? { model: review.model, effort: review.effort ?? (author.effort === 'unknown' ? 'high' : author.effort) } : ctx.config.equivalents.map(e => e[author.agent as AgentName]).find(m => m && m.model !== author.model);
   if (fallback && await available(author.agent)) return { order: { agent: author.agent, ...fallback }, rule: `${target} unavailable or unmapped; different configured model on ${author.agent}` };
   throw new AgentctlError(`${author.task}: no available different review provider/model; configure review.agent/model/effort or equivalents`);
 }

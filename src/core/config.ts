@@ -36,6 +36,7 @@ export interface Defaults {
 /** The part of the configuration that exists in every layer (global, project, spec). Values are unexpanded. */
 export interface ReviewSettings {
   default?: 'auto' | false;
+  prefer?: AgentName[];
   agent?: AgentName;
   model?: string;
   effort?: Effort;
@@ -97,6 +98,7 @@ export interface AgentSettings {
 
 export interface GlobalConfig extends Layer {
   providers: ProviderId[];
+  warnings?: string[];
   /** Absolute path of the directory that holds per-task cache folders: only the reports the agents write. */
   cache: string;
   /** Where agentctl keeps its own state per task (`<stateDir>/<window>/TASK.md`, setup.log, markers), out of reach of the agents. */
@@ -465,8 +467,12 @@ export function parseReview(value: unknown, where: string, p: Problems): ReviewS
   if (value === 'auto' || value === true) return { default: 'auto' };
   if (value === false) return { default: false };
   if (!isObject(value)) { p.add(`${where} must be auto, false or a mapping`); return undefined; }
-  checkKeys(value, ['default', 'agent', 'model', 'effort', 'prompt_template', 'template', 'rerun'], where, p);
+  checkKeys(value, ['default', 'agent', 'model', 'effort', 'prompt_template', 'template', 'rerun', 'prefer'], where, p);
   const review: ReviewSettings = {};
+  if (value.prefer !== undefined) {
+    if (!Array.isArray(value.prefer) || value.prefer.some(id => !(AGENT_NAMES as readonly unknown[]).includes(id)) || new Set(value.prefer).size !== value.prefer.length) p.add(`${where}.prefer must be a list of distinct registered provider IDs`);
+    else review.prefer = [...value.prefer] as AgentName[];
+  }
   if (value.default !== undefined) {
     if (value.default === 'auto' || value.default === false) review.default = value.default;
     else p.add(`${where}.default must be auto or false`);
@@ -1124,8 +1130,15 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   const deliveryConfirmS = raw.delivery_confirm_s ?? 60;
   if (typeof deliveryConfirmS !== 'number' || !Number.isFinite(deliveryConfirmS) || deliveryConfirmS <= 0) p.add('config.delivery_confirm_s must be a positive number');
   p.throwIfAny(`Invalid config ${file}:`, 'Fix the listed keys; see the README section "Configuration".');
+  const warnings: string[] = [];
+  const usageMap = isObject(raw.usage) ? raw.usage : {};
+  for (const id of PROVIDER_IDS.filter(id => !providers.includes(id))) {
+    const configuredUsage = usageMap[`${id}_dir`] !== undefined || ['warn', 'critical', 'queue_hold'].some(k => { const values = usageMap[k]; return isObject(values) && values[id] !== undefined; });
+    if (agentMap[id] !== undefined || (isObject(raw.limits) && raw.limits[id] !== undefined) || configuredUsage) warnings.push(`${id} is not in providers; its agent/limit/usage settings are inactive`);
+  }
   const config: GlobalConfig = { ...layer, providers, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, deliveryConfirmS: deliveryConfirmS as number, limits, countExternal, countReportReady, preview, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, cohort, overload, limited, collisions, cancel, usage, guideLang, capacity, disk, git, path: file, loaded: exists };
   if (mirror) config.mirrorDir = resolvePath(mirror);
+  if (warnings.length) config.warnings = warnings;
   return config;
 }
 

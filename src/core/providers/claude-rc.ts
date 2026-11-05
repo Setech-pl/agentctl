@@ -41,4 +41,3 @@ export const RC_BLOCKING_ENV = [
 export function blockingEnv(env: NodeJS.ProcessEnv): string[] {
   return RC_BLOCKING_ENV.filter((name) => (env[name] ?? '') !== '');
 }
-

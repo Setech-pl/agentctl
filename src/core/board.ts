@@ -1,3 +1,4 @@
+import { provider as providerAdapter, PROVIDERS } from './providers/registry.ts';
 import { get as providerValue } from './providers/registry.ts';
 import type { ProviderValues } from './providers/registry.ts';
 import { markTasks } from './mark.ts';
@@ -898,7 +899,7 @@ export function rowCells(row: StatusRow, selected: boolean, cols: BoardColumns, 
   const cells: BoardCell[] = [
     { key: 'marker', text: selected ? '▸' : row.collide.length > 0 ? '⚠' : row.hidden ? '·' : '', width: cols.marker, bold: true, ...(!selected && row.collide.length > 0 ? { color: 'yellow' } : {}) },
     { key: 'task', text: row.task, width: cols.task, bold: selected },
-    { key: 'who', text: `${providerLabel(row.agent)} ${modelLabel(row.model, row.effort, row.tokens?.observed?.model, versions)}`, width: cols.who },
+    { key: 'who', text: `${providerLabel(row.agent)} ${(PROVIDERS[row.agent as keyof typeof PROVIDERS]?.models.label ?? modelLabel)(row.model, row.effort, row.tokens?.observed?.model, versions)}`, width: cols.who },
     { key: 'state', text: `${icon} ${row.state}${row.question?.includes("zwinięte") ? " (zw.)" : ""}`, width: cols.state, color: STATE_COLOR[row.state] },
     { key: 'time', text: row.duration, width: cols.time },
     ...(cols.tokens ? [{ key: 'tokens', text: row.tokens ? formatTokens(row.tokens.fresh) : 'n/d', width: cols.tokens, ...(row.tokens ? {} : { dim: true }) }] : []),
@@ -986,7 +987,7 @@ export function queueCells(view: QueueView, selected: boolean, cols: BoardColumn
   const cells: BoardCell[] = [
     { key: 'marker', text: selected ? '▸' : '', width: cols.marker, bold: true },
     { key: 'task', text: e.task, width: cols.task, bold: selected },
-    { key: 'who', text: `${providerLabel(e.agent)} ${modelLabel(e.model, e.effort, undefined, versions)}`, width: cols.who },
+    { key: 'who', text: `${providerLabel(e.agent)} ${providerAdapter(e.agent).models.label(e.model, e.effort, undefined, versions)}`, width: cols.who },
     { key: 'report', text, width: wide, ...(e.status === 'failed' ? { color: 'red' } : view.condition.kind === 'blocked' ? { color: 'yellow' } : { dim: true }) },
   ];
   return selected ? cells.map((c) => ({ ...c, bold: true, ...(!process.env.NO_COLOR && !c.color ? { color: selectedColor } : {}) })) : cells;

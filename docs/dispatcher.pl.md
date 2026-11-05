@@ -10,7 +10,7 @@ Tryb MCP: wywołaj `guide({project: "/sciezka/do/repo", lang: "pl"})`, potem `ca
 
 ## Dobór dostawcy, modelu i effortu
 
-Porównaj oba okna planu (5 h i tydzień): pozostały procent, wiek odczytu, stale, tempo %/h, przewidywany moment wyczerpania i czas do resetu. Stary odczyt lub `null` oznacza n/d, a nie zero zużycia. Procent obejmuje też pracę poza agentctl. Szacunki znajdują się wyłącznie w `estimate`, z podstawą i pewnością; nie są limitem tokenów od dostawcy. Projekcja nie przewiduje zmian zasad planu.
+Porównaj odczytane okna planu (5 h, tydzień lub miesiąc): pozostały procent, wiek odczytu, stale, tempo %/h, przewidywany moment wyczerpania i czas do resetu. Stary odczyt lub `null` oznacza n/d, a nie zero zużycia. Procent obejmuje też pracę poza agentctl. Szacunki znajdują się wyłącznie w `estimate`, z podstawą i pewnością; nie są limitem tokenów od dostawcy. Projekcja nie przewiduje zmian zasad planu.
 
 Sprawdź wolne sloty, limit, rezerwę i najbliższe zadanie kolejki. Brak limitu slotów oznacza brak ograniczenia konfiguracyjnego, nie zmierzoną liczbę wolnych miejsc. Zobacz stats model × effort z 7 dni: liczebność, ok/partial/fail, nieocenione, medianę czasu i tokenów. Małe próbki i różna trudność zadań ograniczają porównania. Tabela równoważników to konfiguracja, nie potwierdzenie uprawnień dostawcy.
 
@@ -128,3 +128,24 @@ Limit dostawcy daje jedno powiadomienie na epizod, z czasem resetu albo `n/d`. �
 `agentctl mark --cohort NC ok --note "sprawdzone"` pokazuje dokładny zakres; `--yes` go potwierdza. MCP przyjmuje `task`, `tasks` lub `cohort`; więcej niż jedno zadanie wymaga podglądu/potwierdzenia. Przy filtrze kohorty board `o/p/f` pokazuje ID przed oceną. Agentctl zapisuje wynik podany przez człowieka. Zamknięcie wszystkich zadań kohorty daje `gc_suggest` z chronionym planem sprzątania tej kohorty, bez automatycznego usuwania.
 
 Podglądy MCP mają niezależne `preview_token`, ważne dziesięć minut, i odmawiają wykonania po zmianie zakresu. Przekaż token oraz identyczne argumenty z `confirm: true`; bez tokena działa ostatni pasujący podgląd. `gc_preview` dla kohorty podaje tylko liczbę obcych worktree; potwierdzone `gc` zwraca wyniki bez powtarzania planu. `notify.mcp_writes` domyślnie ma `summary`, najwyżej raz na 60 sekund; dostępne też `all` i `off`. Audyt pozostaje pełny. F12 wraca do boarda własnej sesji, także przy równoległym dev. Czas obejmuje checkout/setup przed uruchomieniem agenta; ostrzeżenie o starym odczycie planu pojawia się raz na odczyt.
+
+## Aktywni dostawcy i Kimi
+
+Dobieraj spośród aktywnych `providers`: Claude i Codex są obowiązkowe, Kimi opcjonalny. Equivalents według klas modeli to mapowania do przydziału pracy; sprawdź aktualne capacity i miejsca. Przy trzech dostawcach move wymaga jawnego `--agent`. Automatyczny review kieruje się `review.prefer` lub kolejnością providers, pomija autora, niedostępne CLI i cele bez mapowania.
+
+Kimi Code 2.5.0 nie ma sandboxa CLI. Ręczne reguły zgód określają pytania narzędzi; Write może przejść bez dialogu. Trust/login/update rozstrzyga człowiek. Effort low/high/max działa wyłącznie według `support_efforts` modelu z configu; bez danych katalogu nie wymuszamy env effort. Nazwy wyświetlane i aliasy bez wersji są dynamiczne. Manager i Remote Control pozostają Claude-only.
+
+Capacity planu Kimi to n/d bez `capacity.kimi_usage_probe`; neutralna sesja wymaga ręcznego trust. Limitowana sonda `/usage` odczytuje TUI, bez credentials/OAuth ani API, nigdy w oknie zadania. Uwzględniaj 5h/Weekly/Monthly wyłącznie, gdy występują. Prompt, odczytane pliki, wyniki poleceń i diffy trafiają do Moonshot AI; domyślne wyłączenie telemetrii nie zatrzymuje przesyłania danych zadania. Guide projektu może jawnie zakazać Kimi w danym repo.
+
+```yaml
+---
+task: EXAMPLE-KIMI
+agent: kimi
+model: k3
+effort: high
+repos: [{path: /path/to/repo, worktree: /path/to/worktree, branch: task/example}]
+---
+Zapisz kryteria odbioru, ograniczenia i wymagania raportu.
+```
+
+Wzorce auth/limit/overload/background Kimi, stopka kolejki w trakcie pracy, ścieżki sesji i interakcje wire są hipotezami z syntetycznymi fixture; nie opisuj ich jako potwierdzonego działania prawdziwej wersji 2.5.0.

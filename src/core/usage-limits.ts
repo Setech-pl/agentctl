@@ -90,6 +90,10 @@ export function alertText(config: Pick<GlobalConfig, 'usage'>, plans: ProviderVa
   const when = alert.window.resetsAt === null ? '' : ` (reset ${formatReset(alert.window.resetsAt, now)})`;
   const base = `${adapter(alert.provider).displayName}: ${Math.round(alert.percent)}% limitu ${alert.window.label}${when} – ${alert.level === 'critical' ? 'limit prawie wyczerpany' : 'blisko limitu'}`;
   const other = othersOf(plans, alert.provider).find(id => providerValue(plans, id).available && providerValue(plans, id).maxPercent !== null && providerValue(plans, id).maxPercent! < providerValue(config.usage.warn, id))!;
+  if (planIds(plans).length > 2) {
+    const spare = othersOf(plans, alert.provider).map(id => providerValue(plans, id)).filter(p => p.available && p.maxPercent !== null && p.maxPercent < providerValue(config.usage.warn, p.provider));
+    return base + (spare.length ? `; ${spare.map(p => `${p.provider} ma zapas (${Math.round(p.maxPercent!)}%)`).join(', ')}` : '');
+  }
   return providerHint(config, plans, alert.provider) ? `${base}; ${other} ma zapas (${Math.round(providerValue(plans, other).maxPercent as number)}%)` : base;
 }
 

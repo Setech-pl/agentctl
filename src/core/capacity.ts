@@ -87,7 +87,7 @@ export async function collectCapacity(ctx: Context) {
         limited: rows.some((r) => r.agent === provider && r.window === 'alive' && r.state === 'limited') || (windows.length > 0 ? windows.some((w) => w.usedPercent >= 100) : null),
         slots: { starting: load.starting, active: load.working.length, reportReady: load.reportReady.length, used: load.used, limit: load.limit, reserved: load.reserved, external: load.external.length, free: load.free },
         queue: { count: load.queued, next: queue.find((q) => q.agent === provider)?.task ?? null },
-        models: [...new Map(ctx.config.equivalents.map((e) => [`${e[provider].model}/${e[provider].effort}`, e[provider]])).values()],
+        models: [...new Map(ctx.config.equivalents.flatMap((e) => e[provider] ? [[`${e[provider].model}/${e[provider].effort}`, e[provider]] as const] : [])).values()],
         stats: stats.filter((s) => s.agent === provider), hints, note: [plan.note, refreshNotes[provider]].filter(Boolean).join('; '),
       };
     }),

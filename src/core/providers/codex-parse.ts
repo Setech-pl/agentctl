@@ -56,4 +56,3 @@ export function feedCodexLine(stats: SessionStats, line: string): void {
   stats.codex.total = total;
   addToBucket(stats, ms, stats.codex.model ?? 'unknown', delta);
 }
-
