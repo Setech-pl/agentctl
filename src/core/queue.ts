@@ -34,6 +34,7 @@ import { listArchivedRecords, listTaskRecords, recordFromSpec, renderTaskMd, tas
 import type { CancelSource, TaskRecord } from './taskstore.ts';
 import { queueHolds, usageSummaryLines } from './usage-limits.ts';
 import { AgentctlError, cohortKey, errorMessage, formatLocalTime, plural, windowName } from './util.ts';
+import { clearSetupProgress, readSetupProgress, startProgressText } from './setup-progress.ts';
 
 /*
  * The task queue. A queued task is a spec file in <AGENTCTL_HOME>/queue/ (one JSON file per task: the spec text and what the queue
@@ -68,6 +69,13 @@ export interface QueueEntry {
   cohort?: string;
   /** Start again over a worktree that is already there (`queue retry`). */
   reuse?: boolean;
+  /**
+   * An explicit start (the MCP `new` with setup): the chat does not wait for the checkout and the setup, the watcher does them. Unlike a queued
+   * task it does not wait for `after`, for a paused queue or for `usage.queue_hold`; it still waits for a free window of its provider.
+   */
+  direct?: boolean;
+  /** `direct` with `no_agent`: stop after the worktree, the setup and the links. */
+  noAgent?: boolean;
   /** `status: starting`: ISO time the watcher began the start. */
   startingAt?: string;
   startingPid?: number;
@@ -180,7 +188,7 @@ export interface QueueAddPlan {
  * Validate specs for the queue the way `new` does (review_of, pin, `--agent` mapping, codex efforts, duplicates, repositories), except that a
  * full provider is not an error: that is what the queue is for. Throws one error listing every problem; nothing is written.
  */
-export async function planQueueAdd(ctx: Context, raws: RawSpec[], opts: { agent?: AgentName } = {}): Promise<QueueAddPlan> {
+export async function planQueueAdd(ctx: Context, raws: RawSpec[], opts: { agent?: AgentName; diskBudgetMs?: number } = {}): Promise<QueueAddPlan> {
   const { config } = ctx;
   const resolved = raws.map((raw) => resolveSpec(raw, { config }));
   const entries = readQueue(config);
@@ -194,7 +202,7 @@ export async function planQueueAdd(ctx: Context, raws: RawSpec[], opts: { agent?
   const items = specs.map((spec, i) => ({ raw: raws[i] as RawSpec, spec }));
   const rows = await collectStatus(ctx, { progress: false, archived: true });
   const warnings = [...await touchWarnings(ctx, specs), ...specs.flatMap(s => reportPathWarnings(ctx.config, s).map(w => `${s.task}: ${w}`)), ...specs.flatMap(s => missingLinkTargets(s.links, s.repos[0]?.worktree).map(w => `${s.task}: ${w}`))];
-  const capacity = config.capacity.snapshot && !ctx.runner.dryRun ? capacitySnapshot(await collectCapacity(ctx), specs.map((s) => s.agent)) : undefined;
+  const capacity = config.capacity.snapshot && !ctx.runner.dryRun ? capacitySnapshot(await collectCapacity(ctx, opts.diskBudgetMs === undefined ? {} : { diskBudgetMs: opts.diskBudgetMs }), specs.map((s) => s.agent)) : undefined;
   return { items, warnings, ...(capacity ? { capacity } : {}), summary: [...describeQueueAdd(ctx, specs, entries, await liveWindows(ctx), rows), ...usageSummaryLines(config, specs, ctx.runner.now()), ...(capacity ? snapshotLines(capacity) : []), ...warnings.map((w) => `⚠ ${w}`)] };
 }
 
@@ -240,9 +248,10 @@ export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: Q
 }
 
 /** Write the entries (one per spec). Returns them in the order they were added. */
-export async function commitQueueAdd(ctx: Context, items: QueueAddItem[], opts: { agent?: AgentName; reuse?: boolean; autoReview?: AutoReviewSource } = {}): Promise<QueueEntry[]> {
+export async function commitQueueAdd(ctx: Context, items: QueueAddItem[], opts: { agent?: AgentName; reuse?: boolean; autoReview?: AutoReviewSource; direct?: { noAgent: boolean } } = {}): Promise<QueueEntry[]> {
   const { config, runner } = ctx;
-  for (const { spec } of items) checkLinkTargets(spec.links, spec.task);
+  // A link into the task's own worktree cannot exist before the start made it (the same exception `new` makes).
+  for (const { spec } of items) checkLinkTargets(opts.direct ? spec.links.filter((l) => !spec.repos.some((r) => l.to === r.worktree || l.to.startsWith(`${r.worktree}/`))) : spec.links, spec.task);
   const existing = readQueue(config);
   let seq = existing.reduce((n, e) => Math.max(n, e.seq), 0);
   const added: QueueEntry[] = [];
@@ -253,8 +262,9 @@ export async function commitQueueAdd(ctx: Context, items: QueueAddItem[], opts: 
       task: spec.task,
       ...(opts.reuse ? { reuse: true } : {}),
       ...(opts.autoReview ? { autoReview: opts.autoReview } : {}),
+      ...(opts.direct ? { direct: true, ...(opts.direct.noAgent ? { noAgent: true } : {}) } : {}),
       order: seq,
-      priority: spec.priority,
+      priority: opts.direct ? 'high' : spec.priority,
       status: 'queued',
       queuedAt: new Date(runner.now()).toISOString(),
       agent: spec.agent,
@@ -271,6 +281,56 @@ export async function commitQueueAdd(ctx: Context, items: QueueAddItem[], opts: 
     added.push(entry);
   }
   return added;
+}
+
+// ---- explicit starts handed to the watcher
+
+const workerFile = (config: Pick<GlobalConfig, 'stateDir'>): string => path.join(config.stateDir, 'queue-worker.json');
+
+/** Every tick of the watcher says it is there: the MCP `new` only hands a start over to a watcher that is alive. */
+async function touchWorker(ctx: Context): Promise<void> {
+  if (ctx.runner.dryRun) return;
+  try { await ctx.runner.writeFile(workerFile(ctx.config), JSON.stringify({ pid: process.pid, at: ctx.runner.now(), interval: ctx.config.watch.interval })); } catch { /* the heartbeat is not worth a failed tick */ }
+}
+
+/** The watcher (its queue tick) has run recently and its process is alive. */
+export function watchAlive(config: Pick<GlobalConfig, 'stateDir' | 'watch' | 'queue'>, nowMs: number): boolean {
+  if (!config.queue.enabled) return false;
+  try {
+    const beat = JSON.parse(fs.readFileSync(workerFile(config), 'utf8')) as { pid?: unknown; at?: unknown };
+    if (typeof beat.pid !== 'number' || typeof beat.at !== 'number' || nowMs - beat.at > Math.max(60_000, config.watch.interval * 4000)) return false;
+    process.kill(beat.pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+/** The start of `task` that is already handed to the watcher (any state), if there is one. */
+export function findDirectStart(config: Pick<GlobalConfig, 'path'>, task: string): QueueEntry | undefined {
+  return readQueue(config).find((e) => e.direct && e.task.toLowerCase() === task.toLowerCase());
+}
+
+/** What a repeated `new` of the same task is told: where the start stands, and that nothing was started a second time. */
+export function directStartText(config: Pick<GlobalConfig, 'path' | 'stateDir'>, entry: QueueEntry, nowMs: number): string {
+  if (entry.status === 'failed') {
+    return `${entry.task}: the start failed – ${firstLine(entry.error ?? 'n/d')}. The worktrees were kept. Read queue_list, fix the cause, then queue_retry ${entry.task} (new is refused for a task that is in the queue). Nothing was started again.`;
+  }
+  return `${entry.task}: ${startProgressText(entry.status === 'starting' ? readSetupProgress(config, entry.task) : undefined, nowMs).replace(/^uruchamiane – /, 'already being started – ')}. Nothing was started a second time. Follow it with events_since (SETUP / START / BŁĄD STARTU) and status or queue_list.`;
+}
+
+/**
+ * The MCP `new` for a task with setup: write the start as an entry the watcher picks up at its next tick, and return. The checkout, the setup
+ * commands and the window are the watcher's (the same path as a queued task), so they outlive the chat and its MCP server. Under the start lock,
+ * so two calls for the same task make one entry.
+ */
+export async function registerDirectStart(ctx: Context, items: QueueAddItem[], opts: { agent?: AgentName; reuse?: boolean; noAgent?: boolean } = {}): Promise<{ added: QueueEntry[]; existing: QueueEntry[] }> {
+  return withStartLock(ctx, async () => {
+    const existing = items.map(({ spec }) => findDirectStart(ctx.config, spec.task)).filter((e): e is QueueEntry => e !== undefined);
+    if (existing.length > 0) return { added: [], existing };
+    const added = await commitQueueAdd(ctx, items, { ...(opts.agent ? { agent: opts.agent } : {}), ...(opts.reuse ? { reuse: true } : {}), direct: { noAgent: Boolean(opts.noAgent) } });
+    return { added, existing: [] };
+  });
 }
 
 // ---- managing
@@ -448,8 +508,12 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
   let position = 0;
   return entries.map((entry): QueueView => {
     if (entry.status === 'failed') return { position: null, entry, condition: { kind: 'failed', text: `failed: ${(entry.error ?? '').split('\n')[0] ?? ''}` }, since: entry.failedAt ?? entry.queuedAt };
-    if (entry.status === 'starting') return { position: null, entry, condition: { kind: 'starting', text: 'starting' }, since: entry.startingAt ?? entry.queuedAt };
+    if (entry.status === 'starting') return { position: null, entry, condition: { kind: 'starting', text: entry.direct || readSetupProgress(config, entry.task) ? startProgressText(readSetupProgress(config, entry.task), nowMs) : 'starting' }, since: entry.startingAt ?? entry.queuedAt };
     position++;
+    if (entry.direct && !(entry.retryAt && Date.parse(entry.retryAt) > nowMs) && !(config.limits[entry.agent] !== undefined && used[entry.agent] >= (config.limits[entry.agent] as number))) {
+      used[entry.agent]++;
+      return { position, entry, condition: { kind: 'ready', text: config.queue.enabled ? 'uruchamiane – czeka na najbliższy tick watch' : 'queue.enabled is false; the watcher does not start it' }, since: entry.queuedAt };
+    }
     const stuck = blocked.get(entry.task);
     if (stuck) return { position, entry, condition: { kind: 'blocked', text: blockedText(stuck), blockers: stuck }, since: entry.queuedAt };
     if (paused) return { position, entry, condition: { kind: 'paused', text: reason }, since: entry.queuedAt };
@@ -541,9 +605,12 @@ const firstLine = (s: string): string => s.split('\n')[0] ?? s;
  */
 export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Notifier, opts: QueueTickOptions = {}): Promise<string[]> {
   const { config } = ctx;
-  if (!config.queue.enabled || isPaused(config)) return [];
+  await touchWorker(ctx);
+  if (!config.queue.enabled) return [];
+  // A paused queue starts nothing that waits in line; an explicit start (`direct`) is not in the line.
+  const paused = isPaused(config);
   let entries = readQueue(config);
-  if (entries.length === 0) return [];
+  if (entries.length === 0 || (paused && !entries.some((e) => e.direct))) return [];
   const records = new Set([...listTaskRecords(config), ...listArchivedRecords(config)].map((r) => r.task));
   // A start that died with its watcher: the entry says "starting" and nothing here is doing it. Its task exists (the window is up,
   // the prompt may be missing) or not: either way it goes to "failed", where a human decides.
@@ -567,8 +634,16 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   const holds = queueHolds(config, ctx.runner.now());
   const stillHeld = new Set<string>();
   for (let entry of waiting(entries)) {
+    if (paused && !entry.direct) continue;
     if (entry.retryAt && Date.parse(entry.retryAt) > ctx.runner.now()) continue;
     if (memory.inflight.size >= config.queue.parallelStarts) break;
+    if (entry.direct) {
+      const room = config.limits[entry.agent];
+      if (room !== undefined && used[entry.agent] >= room) continue;
+      used[entry.agent]++;
+      if (await beginStart(ctx, memory, notifier, entry, opts)) began.push(entry.task);
+      continue;
+    }
     if (entry.autoReview) {
       // A review of an author who was closed or cancelled without a finished report cannot happen by itself: a terminal state, not an endless wait.
       const terminal = authorTerminal(config, entry.autoReview, rows, ctx.runner.now());
@@ -686,6 +761,8 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
         noSwitch: true,
         skipAfter: true,
         reuse: Boolean(entry.reuse),
+        ...(entry.noAgent ? { noAgent: true } : {}),
+        trackStart: true,
         waitTrust: true,
         ...(opts.self ? { self: opts.self } : {}),
         ...(opts.signal ? { signal: opts.signal } : {}),
@@ -693,12 +770,14 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
       fs.rmSync(entryFile(config, starting), { force: true });
       fs.rmSync(queueLogFile(config, starting), { force: true });
       await opts.log?.(`queue: ${entry.task} started`);
-      await notifyPlain(ctx, notifier, entry.task, `Uruchomiono ${entry.task} z kolejki`, opts.self);
-      await recordJournal(ctx, { kind: 'queue-start', task: entry.task, text: `Uruchomiono ${entry.task} z kolejki (${entry.agent})`, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
+      const done = entry.noAgent ? `Przygotowano ${entry.task} (worktree, setup i linki, bez agenta)` : entry.direct ? `Uruchomiono ${entry.task} (MCP new, setup zakończony)` : `Uruchomiono ${entry.task} z kolejki`;
+      await notifyPlain(ctx, notifier, entry.task, done, opts.self);
+      await recordJournal(ctx, { kind: 'queue-start', task: entry.task, text: `${done} (${entry.agent})`, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
     } catch (e) {
       if (/window limit for .* reached/.test(errorMessage(e))) { await writeEntry(ctx, { ...entry, status: 'queued' }); return; }
       await failEntry(ctx, starting, e instanceof AgentctlError && e.hint ? `${e.message}\nHint: ${e.hint}` : errorMessage(e), notifier, opts, !opts.signal?.aborted, log).catch(() => undefined);
     } finally {
+      clearSetupProgress(config, entry.task);
       memory.inflight.delete(entry.task);
     }
   };

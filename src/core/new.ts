@@ -18,6 +18,9 @@ import type { ResolvedSpec } from './spec.ts';
 import { recordFromSpec, renderTaskMd, readTaskRecord, setHeaderField, setHeaderFields, taskDir, taskFile } from './taskstore.ts';
 import { assertAgentSpawnAllowed, openAgentWindow } from './window-guard.ts';
 import { AgentctlError } from './util.ts';
+import { recordJournal } from './journal.ts';
+import { writeSetupProgress } from './setup-progress.ts';
+import type { SetupProgress } from './setup-progress.ts';
 
 const guardRequest = (spec: ResolvedSpec) => ({ task: spec.task, window: spec.window, report: spec.report, reportAlt: spec.reportAlt, repos: spec.repos, reviewOf: spec.reviewOf, autoReview: spec.autoReview });
 
@@ -32,6 +35,8 @@ export interface NewOptions extends PlanOptions {
   self?: SelfArgv | undefined;
   /** Who asks for the window; `move` makes a refusal of an old review record say so. */
   origin?: 'move';
+  /** A start nobody waits for (the watcher's): write the progress (`setup.json`) for status and queue_list and journal "setup started" / "setup failed". */
+  trackStart?: boolean;
 }
 
 export interface NewResult {
@@ -59,21 +64,24 @@ const SETUP_TAIL_LINES = 15;
  * Run the `setup` commands of every repository in its own worktree (the spec's `repos[].setup`, else the repository's .agentctl.yaml; the first
  * repository also takes the spec's/global `setup`), logging to `<state_dir>/<task>/setup.log`. A failure stops `new`.
  */
-async function runSetup(ctx: Context, spec: ResolvedSpec): Promise<void> {
+async function runSetup(ctx: Context, spec: ResolvedSpec, track?: (step: Omit<SetupProgress, 'task' | 'startedAt' | 'stepAt'>) => Promise<void>): Promise<void> {
   const { runner, config } = ctx;
   const logFile = path.join(taskDir(config, spec.window), 'setup.log');
   const todo = spec.repos.filter((r) => (r.setup?.length ?? 0) > 0);
   if (todo.length === 0) return;
   if (!runner.dryRun) await runner.writeFile(logFile, '');
-  for (const repo of todo) {
+  if (track) await recordJournal(ctx, { kind: 'setup-started', task: spec.task, text: `${spec.task}: setup rozpoczęty (${todo.map((r) => path.basename(r.path)).join(', ')}); log: ${logFile}` });
+  for (const [repoIndex, repo] of todo.entries()) {
     const name = path.basename(repo.path), commands = repo.setup!;
     for (const [i, command] of commands.entries()) {
       ctx.info(`${spec.task}: setup ${name} ${i + 1}/${commands.length}: ${command}`);
+      await track?.({ phase: 'setup', repo: name, repoIndex: repoIndex + 1, repoCount: todo.length, command, commandIndex: i + 1, commandCount: commands.length, log: logFile });
       const r = await runner.exec('sh', ['-c', command], { cwd: repo.worktree, timeoutMs: ctx.config.git.timeoutS * 1000, async: true });
       if (runner.dryRun) continue;
       const output = `${r.stdout}${r.stderr}`;
       await runner.appendFile(logFile, `[${name}] $ ${command}\n${output}${output.endsWith('\n') || output === '' ? '' : '\n'}[exit ${r.code}]\n\n`);
       if (r.code !== 0) {
+        if (track) await recordJournal(ctx, { kind: 'setup-failed', task: spec.task, text: `${spec.task}: setup nie powiódł się w ${name} (exit ${r.code}): ${command}; log: ${logFile}; worktree zostaje` });
         const tail = output.trimEnd().split('\n').slice(-SETUP_TAIL_LINES).join('\n');
         throw new AgentctlError(
           `${spec.task}: setup command failed in ${name}${/ETIMEDOUT/i.test(r.stderr) ? ` after ${config.git.timeoutS}s (git.timeout_s; check disk/I/O or increase the timeout)` : ''} (exit ${r.code}): ${command}\n${tail}`,
@@ -120,7 +128,13 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
     const taskStartedMs = runner.now();
     const primary = spec.repos[0]!.worktree;
 
+    const startedAt = new Date(taskStartedMs).toISOString();
+    const track = opts.trackStart && !runner.dryRun
+      ? (step: Omit<SetupProgress, 'task' | 'startedAt' | 'stepAt'>) => writeSetupProgress(ctx, spec.window, { task: spec.task, startedAt, stepAt: new Date(runner.now()).toISOString(), ...step })
+      : undefined;
+
     // 1. worktrees
+    await track?.({ phase: 'worktree' });
     for (const repo of spec.repos) {
       if (opts.reuse && fs.existsSync(repo.worktree)) ctx.info(`${spec.task}: reusing worktree ${repo.worktree}`);
       else {
@@ -130,7 +144,8 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
     }
 
     // 2. setup commands (per repository, in its own worktree; an install may wipe node_modules, so this comes before the links)
-    await runSetup(ctx, spec);
+    await runSetup(ctx, spec, track);
+    await track?.({ phase: 'launching' });
 
     // 3. symlinks (in the primary worktree)
     checkLinkTargets(spec.links, spec.task);

@@ -15,7 +15,8 @@ import { findMcpProcesses, staleProcesses } from './mcp-processes.ts';
 import { EXAMPLE_SPEC } from './example.ts';
 import { checkRetryWorktrees } from './git.ts';
 import { createHash } from 'node:crypto';
-import { collectDisk, diskLine } from './disk.ts';
+import { collectDisk as collectDiskFull, diskLine } from './disk.ts';
+import type { DiskReport } from './disk.ts';
 import { retryEntry, moveToFront, setPaused, unblockEntry, findEntry, rebuildAutoReview } from './queue.ts';
 import { touchCohort, setCohortOf, setNote, planCohortArchive, applyCohortArchive } from './cohort.ts';
 import { setHidden } from './hide.ts';
@@ -28,7 +29,7 @@ import { sendPhoneTest } from './phone.ts';
 import { recordJournal } from './journal.ts';
 import type { GcPlan } from './gc.ts';
 import { applyGc } from './gc.ts';
-import { collectCapacity, capacitySnapshot, snapshotLines } from './capacity.ts';
+import { collectCapacity as collectCapacityFull, capacitySnapshot, snapshotLines } from './capacity.ts';
 import { collectGuide } from './guide.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -39,7 +40,8 @@ import { stableScript } from './mcp-install.ts';
 import { closeTask, closeTasks, planClose } from './close.ts';
 import { cohortEntries, cohortRows, findCohort, openCohortTasks, summarizeCohorts } from './cohort.ts';
 import { collectOverlaps, collideText } from './collisions.ts';
-import { commitQueueAdd, describeQueue, planQueueAdd, readQueue, removeFromQueue, waiting } from './queue.ts';
+import { commitQueueAdd, describeQueue, directStartText, findDirectStart, planQueueAdd, readQueue, registerDirectStart, removeFromQueue, waiting, watchAlive } from './queue.ts';
+import { readSetupProgress } from './setup-progress.ts';
 import { liveWindows, planBatch } from './plan.ts';
 import { awayReport, renderAway, setAway } from './away.ts';
 import { MCP_WRITE_TOOLS } from './config.ts';
@@ -54,6 +56,7 @@ import { joinReports, markPulled, noReadyMessage, selectReady } from './pull.ts'
 import { describeTargets, listTargets, matchTask, resolveRunningTask } from './resolve.ts';
 import { sendPrompts } from './send.ts';
 import { resolveSpec, splitSpecs } from './spec.ts';
+import type { RawSpec } from './spec.ts';
 import { collectStatus, shownRows } from './status.ts';
 import type { StatusRow } from './status.ts';
 import { summarizeSpecs } from './summary.ts';
@@ -143,6 +146,14 @@ const ok = (text: string): ToolResult => ({ text });
 const fail = (text: string): ToolResult => ({ text, isError: true });
 
 /** Run a tool body; an error of agentctl (unknown task, no window …) becomes a tool error with its hint, anything else too. */
+/**
+ * How long a tool of the chat may wait for the size of the worktrees. The walk of dozens of worktrees with node_modules takes minutes, and no read
+ * may wait for it: it runs in the background and the answer carries the last reading (or n/d and "measuring").
+ */
+const DISK_BUDGET_MS = 1000;
+const collectDisk = (ctx: Context, statfs?: undefined, opts: { detail?: boolean; offset?: number; limit?: number } = {}): Promise<DiskReport> => collectDiskFull(ctx, statfs, { ...opts, budgetMs: DISK_BUDGET_MS });
+const collectCapacity = (ctx: Context) => collectCapacityFull(ctx, { diskBudgetMs: DISK_BUDGET_MS });
+
 async function guarded(body: () => Promise<ToolResult>): Promise<ToolResult> {
   try {
     return await body();
@@ -494,6 +505,8 @@ async function runQueueList(deps: McpDeps, args: { cohort?: string | undefined }
     queuedLocal: formatLocalTime(v.entry.queuedAt),
     error: v.entry.error ?? null,
     cohort: v.entry.cohort ?? null,
+    direct: v.entry.direct ?? false,
+    setup: v.entry.status === 'starting' ? readSetupProgress(ctx.config, v.entry.task) ?? null : null,
     retryHint: v.entry.status === 'failed' ? `Read error, inspect residue, then queue_retry task=${v.entry.task}` : null,
     blocked: v.condition.kind === 'blocked',
   }));
@@ -831,9 +844,35 @@ async function runNew(deps: McpDeps, args: NewMcpArgs): Promise<ToolResult> {
     const cap = !args.confirm && ctx.config.capacity.snapshot ? capacitySnapshot(await collectCapacity(ctx), specs.map((s) => s.agent)) : undefined;
     const disk = await collectDisk(ctx);
     const readyCount = (await liveWindows(ctx)).filter(w => w.reportReady).length;
-    const summary = summarizeSpecs(specs, [...(!cap && readyCount ? [`${readyCount} ${plural(readyCount, 'okno', 'okna', 'okien')} report-ready – close zwolni okna`] : []), ...(cap ? snapshotLines(cap) : []), ...(disk.level === 'critical' ? [`WARNING: ${diskLine(disk)}`] : [])]).join('\n');
+    // A start with setup commands (an install per repository takes minutes) is not done inside this call: the watcher does it, see below.
+    const setupRepos = specs.flatMap((s) => s.repos.filter((r) => (r.setup?.length ?? 0) > 0).map((r) => `${s.task}/${path.basename(r.path)}`));
+    const handOver = setupRepos.length > 0;
+    const watching = !handOver || watchAlive(ctx.config, ctx.runner.now());
+    const summary = summarizeSpecs(specs, [
+      ...(!cap && readyCount ? [`${readyCount} ${plural(readyCount, 'okno', 'okna', 'okien')} report-ready – close zwolni okna`] : []),
+      ...(cap ? snapshotLines(cap) : []),
+      ...(disk.level === 'critical' ? [`WARNING: ${diskLine(disk)}`] : []),
+      ...(handOver && watching ? [`Start: asynchronous – confirm returns at once; the watcher does the checkout and the setup of ${setupRepos.join(', ')} within about ${ctx.config.watch.interval} s and the task then shows in status/queue_list as "uruchamiane – setup w toku". Follow it with events_since.`] : []),
+      ...(handOver && !watching ? [`WARNING: the setup of ${setupRepos.join(', ')} would take minutes and the watcher is not running (or the queue is disabled): confirm will be refused. Start it with "agentctl watch --tmux".`] : []),
+    ]).join('\n');
     if (!args.confirm) {
       return { text: `${summary}\n\nNot started yet. Show this to the user and ask; if they agree, call new again with the same spec and confirm: true.`, executed: false, announce: '' };
+    }
+    if (handOver) {
+      if (!watching) {
+        throw new AgentctlError(
+          `${specs.map((s) => s.task).join(', ')}: the setup of ${setupRepos.join(', ')} takes minutes and the watcher that would run it is not running`,
+          'Nothing was started. Start the watcher ("agentctl watch --tmux" in a terminal, or from the board), then call new again with a fresh preview. A start from the terminal ("agentctl new") runs the setup in place.',
+        );
+      }
+      const { added, existing } = await registerDirectStart(ctx, specs.map((spec, i) => ({ raw: raws[i] as RawSpec, spec })), { reuse: Boolean(args.reuse), noAgent: Boolean(args.no_agent), ...(args.agent ? { agent: args.agent } : {}) });
+      if (existing.length > 0) return { text: existing.map((e) => directStartText(ctx.config, e, ctx.runner.now())).join('\n'), executed: false, announce: '' };
+      return {
+        text: `Registered: ${added.map((e) => `${e.task} (${e.agent} ${e.model}/${e.effort})`).join('; ')}. The ${args.no_agent ? 'worktrees are prepared' : 'task starts'} in the watcher, not in this call: checkout and setup of ${setupRepos.join(', ')} run there and survive a restart of this server or of the app. ` +
+          `Follow it with events_since (SETUP, START, BŁĄD STARTU) and status/queue_list ("uruchamiane – setup w toku (repo 1/2 …)"). A failed setup leaves the task failed with its reason and the worktrees; queue_retry tries again. Calling new again for the same task does not start it twice.`,
+        executed: true,
+        announce: `new ${added.map((e) => e.task).join(', ')}`,
+      };
     }
     // The chat cannot answer a folder-trust dialog: stop at it (the error says so) instead of waiting for a person.
     const results = await newTasks(ctx, specs, { waitTrust: args.wait_trust ?? false, noSwitch: true, reuse: Boolean(args.reuse), noAgent: Boolean(args.no_agent), ...(args.agent ? { agent: args.agent } : {}), ...(deps.self ? { self: deps.self } : {}) });
@@ -859,7 +898,7 @@ async function runQueue(deps: McpDeps, args: { spec: string; agent?: 'claude' | 
       }
     }
     const opts = args.agent ? { agent: args.agent } : {};
-    const plan = await planQueueAdd(ctx, raws, opts);
+    const plan = await planQueueAdd(ctx, raws, { ...opts, diskBudgetMs: DISK_BUDGET_MS });
     if (!args.confirm) {
       return { text: `${plan.summary.join('\n')}\n${diskLine(await collectDisk(ctx))}\n\nNot queued yet. Show this to the user and ask; if they agree, call queue again with the same spec and confirm: true.`, executed: false, announce: '' };
     }
@@ -1155,7 +1194,7 @@ export const MCP_TOOLS: McpToolDef[] = [
     description:
       'WRITE, off unless the user put "new" in mcp.allow. Starts agent tasks from a spec: a YAML header between --- lines (task, agent, model, effort, repos …) followed by the prompt, the same format as the agentctl CLI. ' +
       'The FIRST call (confirm omitted) validates the spec and returns a summary of what would start; show it to the user. Only when they agree, call again with the same spec and confirm: true. ' +
-      '"setup" commands (shell) are not accepted from the chat.',
+      '"setup" commands (shell) are not accepted from the chat. A repository whose .agentctl.yaml has setup (an install takes minutes) is not set up inside this call: confirm registers the start and returns at once, and the watcher (it must be running, else the confirm is refused) does the checkout, the setup and the window; follow it with events_since (SETUP, START, BŁĄD STARTU) and status or queue_list ("uruchamiane – setup w toku (repo 1/2 …)"). new again for a task that is being started returns its state and starts nothing twice; a failed setup leaves the task failed with its reason and the worktrees, and queue_retry tries again.',
     input: { spec: z.string().min(1).max(100_000).describe('The spec text: ---, YAML header, ---, prompt. Several specs may follow each other.'), agent: z.enum(AGENT_NAMES).optional(), reuse: z.boolean().optional(), no_agent: z.boolean().optional(), cohort: cohortArg.optional(), wait_trust: z.boolean().optional(), confirm: z.boolean().optional().describe('true only after the user agreed to the summary.') },
     annotations: { title: 'Start tasks from a spec', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     run: (deps, args) => guarded(() => runNew(deps, args as NewMcpArgs)),
@@ -1441,6 +1480,12 @@ for (const tool of MCP_TOOLS) {
     const ctx = deps.context(() => {});
     if (!ctx.config.mcp.allow.includes(tool.name as McpWriteTool)) return writeTool(deps, tool.name as McpWriteTool, {}, async () => { throw new Error('unreachable'); });
     if (tool.name === 'mark' && planMark(ctx, args as MarkSelection).length === 1) return original(deps, args);
+    if (tool.name === 'new') {
+      // A task that was handed to the watcher is being started (or failed to): a second preview or confirm, with or without a token, reports that state and starts nothing.
+      let known: ReturnType<typeof findDirectStart>[] = [];
+      try { known = splitSpecs(String(args.spec), 'the spec from the chat').map((raw) => findDirectStart(ctx.config, String(raw.header.task ?? ''))).filter((e) => e !== undefined); } catch { /* the normal path reports a bad spec */ }
+      if (known.length > 0) return writeTool(deps, 'new', { task: known.map((e) => e!.task).join(', '), detail: 'repeated new for a start in progress' }, async () => ({ text: known.map((e) => directStartText(ctx.config, e!, ctx.runner.now())).join('\n'), executed: false, announce: '' }));
+    }
     const { confirm, preview_token, ...input } = args;
     const { detail: _detail, offset: _offset, limit: _limit, ...identityInput } = input;
     const arguments_ = previewArguments(tool.name === 'gc' ? identityInput : input);

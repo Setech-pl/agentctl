@@ -54,7 +54,7 @@ mcp:
 | Tool | Arguments | What it does |
 |---|---|---|
 | `send` | `task`, `text` (up to 20,000 characters) | Pastes a prompt into the window of a running task and presses Enter. |
-| `new` | `spec`, `confirm?` | Starts tasks from a spec text, validated like the CLI. The first call only returns the summary; tasks start only when it is called again with `confirm: true`. A spec with `setup` (shell commands) is refused, because a chat must not choose shell commands. It never waits for a folder-trust dialog (a human answers it in the window) and never switches provider. |
+| `new` | `spec`, `confirm?` | Starts tasks from a spec text, validated like the CLI. The first call only returns the summary; tasks start only when it is called again with `confirm: true`. A spec with `setup` (shell commands) is refused, because a chat must not choose shell commands. A repository whose own `.agentctl.yaml` has `setup` is not set up inside the call: `confirm` registers the start and returns at once, the watcher does the checkout, the setup and the window (see "A start with setup" below). It never waits for a folder-trust dialog in the call (a human answers it in the window) and never switches provider. |
 | `interrupt` | `task` | Sends the agent its interrupt key; the window stays open. |
 | `close` | `task`, `remove_worktree?` | Closes the window and marks the task closed. The worktree and the branch stay, unless `remove_worktree: true` and `mcp.allow_rm_worktree` is set (`git worktree remove`, never forced). |
 | `queue` | `spec`, `agent?`, `confirm?` | Puts the tasks of a spec text in the queue (`priority`, `after` and `touches` work as in the CLI). The first call only returns the summary (where each task will stand, the review hint, `touches` warnings); the tasks are queued when it is called again with `confirm: true`. `setup` is refused, as in `new`. They start by themselves while `agentctl watch` runs. |
@@ -425,6 +425,19 @@ Begin work discussion with `events_since`; no separate status is required. Use p
 PL: Dostarczenie skrótu, pełne pobranie i ocena mark to trzy różne fakty. Skrót zostawia raport do przeczytania. ack jest jawnym potwierdzeniem pełnego odczytu inną drogą. Strony events_since nie przesuwają kursora za niedostarczone dane, a get_report podaje oba offsety i oznacza pobranie dopiero po ciągłym odczycie całości. queue_show przez MCP zawsze redaguje sekrety.
 
 PL: Równoległe sesje MCP tej samej nazwy otrzymują niezależnie wszystkie nowe zdarzenia. Nowa sesja zaczyna od najwyższej pozycji dostarczonej poprzednim sesjom tego klienta. Parametr `client` lub `mcp.client` wymusza współdzielony kursor, więc używaj go tylko świadomie.
+
+## A start with setup (0.17.5)
+
+An install (`npm ci` in two repositories) takes minutes; the chat gives a tool call about a minute, and while the call was held the whole server was held with it. Since 0.17.5 `new` with `confirm: true` for a task whose repositories have `setup` does not run it in the MCP server:
+
+- **Hand-over.** The confirm writes an explicit start into the queue directory (`direct`: it does not wait for `after`, a paused queue or `usage.queue_hold`, but still for a free window of its provider and for `queue.parallel_starts`) and returns "Registered: …" within a second. The `MCP new` line is in the journal at once. `agentctl watch` picks the entry up at its next tick (`watch.interval`, 15 s by default) and does the same as for a queued task: worktrees, setup, links, TASK.md, window, prompt. Because the watcher owns it, the setup survives the end of the MCP server (the app quit with ⌘Q).
+- **Watcher required.** The watcher leaves a heartbeat every tick. When it is not running (or `queue.enabled` is false) the confirm is refused before anything is created, with "agentctl watch --tmux" as the remedy; the preview already warns. A start from the terminal (`agentctl new`) is unchanged and runs the setup in place, printing its output.
+- **Progress.** `status` and `queue_list` show the start as `uruchamiane – setup w toku (repo 1/2 backend: npm ci, 12 s); log: …/setup.log` (the phase before and after: `tworzenie worktree`, `okno i agent`). `events_since` carries `SETUP` when it begins, `BŁĄD SETUPU` (repository, command, exit code, log path; the worktree stays) and `START` when the task is up; the state file is `<state_dir>/<task>/setup.json` while it lasts.
+- **Failure.** A failed setup leaves the entry `failed` with the reason (`queue_list`), the worktrees where they are, and `queue_retry` starts it again over them (a transient error such as a timeout is retried by the watcher itself, three times).
+- **Repeated calls.** `new` (preview or confirm, with or without the token) for a task whose start is in progress or failed answers with its state ("already being started – setup w toku …", or the failure) and starts nothing a second time.
+- **No_agent.** With `no_agent: true` the watcher prepares the worktrees and runs the setup and links, and starts no agent.
+
+Reads do not wait for any of this, or for each other: tmux and git queries are asynchronous child processes, and the size of the worktrees in `status`, `capacity`, `new` and `queue` previews is measured in the background (about one second of waiting at most). When a measurement is still running the answer carries the last reading marked `measuring` ("agentctl worktrees 31.2 GiB (measuring, last reading)"), or n/d the very first time. `gc` and `close` with a worktree removal give `git worktree remove` the `git.timeout_s` allowance instead of 30 s.
 
 ## Bounded responses (0.17.3)
 
