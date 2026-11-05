@@ -76,6 +76,9 @@ export interface QueueEntry {
   direct?: boolean;
   /** Author admitted alongside this direct start (or already registered): its TASK.md must exist before reviewer revalidation. */
   directAuthor?: string;
+  /** Accepted effective author order, used only for no-agent preparation (which deliberately creates no TASK.md). */
+  directAuthorOrder?: AgentModel;
+  authorPrepared?: boolean;
   /** `direct` with `no_agent`: stop after the worktree, the setup and the links. */
   noAgent?: boolean;
   /** `status: starting`: ISO time the watcher began the start. */
@@ -259,13 +262,14 @@ export async function commitQueueAdd(ctx: Context, items: QueueAddItem[], opts: 
   const added: QueueEntry[] = [];
   for (const { raw, spec } of items) {
     seq++;
+    const author = spec.reviewOf ? items.find(i => i.spec.task === spec.reviewOf)?.spec ?? existing.find(e => e.direct && e.task === spec.reviewOf) : undefined;
     const entry: QueueEntry = {
       seq,
       task: spec.task,
       ...(opts.reuse ? { reuse: true } : {}),
       ...(opts.autoReview ? { autoReview: opts.autoReview } : {}),
       ...(opts.direct ? { direct: true, ...(opts.direct.noAgent ? { noAgent: true } : {}) } : {}),
-      ...(opts.direct && spec.reviewOf && [...items.map(i => i.spec), ...existing.filter(e => e.direct)].some(a => a.task === spec.reviewOf) ? { directAuthor: spec.reviewOf } : {}),
+      ...(opts.direct && author ? { directAuthor: author.task, directAuthorOrder: { agent: author.agent, model: author.model } } : {}),
       order: seq,
       priority: opts.direct ? 'high' : spec.priority,
       status: 'queued',
@@ -345,6 +349,7 @@ function directAuthorState(config: GlobalConfig, entry: QueueEntry, entries: Que
   const author = entries.find(e => e.task === entry.directAuthor);
   if (author?.status === 'failed') return { failed: `author ${author.task} start failed: ${author.error ?? 'unknown reason'}. Fix and retry the author, then queue_retry ${entry.task}.` };
   if (findRecordAnywhere(config, entry.directAuthor)) return {};
+  if (entry.noAgent && entry.authorPrepared && entry.directAuthorOrder) return {};
   if (author) return { waiting: `waiting for author ${entry.directAuthor}: setup in progress` };
   return { failed: `author ${entry.directAuthor} has no task record and its registered start was removed. Restore the author, then queue_retry ${entry.task}.` };
 }
@@ -785,13 +790,19 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
         noSwitch: true,
         skipAfter: true,
         reuse: Boolean(entry.reuse),
-        ...(entry.noAgent ? { noAgent: true } : {}),
+        ...(entry.noAgent ? { noAgent: true, knownAuthors: entry.directAuthor && entry.directAuthorOrder ? new Map([[entry.directAuthor, entry.directAuthorOrder]]) : new Map<string, AgentModel>() } : {}),
         trackStart: true,
         waitTrust: true,
         ...(opts.self ? { self: opts.self } : {}),
         ...(opts.signal ? { signal: opts.signal } : {}),
       });
-      fs.rmSync(entryFile(config, starting), { force: true });
+      // no_agent intentionally writes no TASK.md. Commit its successful preparation and dependent metadata under the admission lock.
+      await withStartLock(ctx, async () => {
+        if (entry.noAgent) for (const dependent of readQueue(config)) {
+          if (dependent.noAgent && dependent.directAuthor === entry.task) await writeEntry(ctx, { ...dependent, authorPrepared: true });
+        }
+        fs.rmSync(entryFile(config, starting), { force: true });
+      });
       fs.rmSync(queueLogFile(config, starting), { force: true });
       await opts.log?.(`queue: ${entry.task} started`);
       const done = entry.noAgent ? `Przygotowano ${entry.task} (worktree, setup i linki, bez agenta)` : entry.direct ? `Uruchomiono ${entry.task} (MCP new, setup zakończony)` : `Uruchomiono ${entry.task} z kolejki`;
