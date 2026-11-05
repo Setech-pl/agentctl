@@ -45,6 +45,7 @@ describe('up: the manager', () => {
     assert.deepEqual(w.tmux.windows.map((x) => x.name).sort(), ['board', 'manager', 'watch']);
     assert.match(first.stdout, /Manager: started in window agentctl:manager, in .*up-2-project\. The first time, answer the folder trust and "Enable Remote Control"/);
     assert.ok(w.runner.commands.some((c) => c.includes('send-keys') && c.includes('exec sh')), 'the command was typed');
+    assert.match(fs.readFileSync(`${managerFiles(w.config).dir}/start.sh`, 'utf8'), /exec claude .*--remote-control/);
     assert.equal(w.runner.queries.filter((q) => q.includes('capture-pane')).length, 0, 'nothing was waited for: no screen was read');
     assert.ok(fs.existsSync(managerFiles(w.config).role));
     const second = await up(w);

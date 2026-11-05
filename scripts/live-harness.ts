@@ -1,5 +1,6 @@
 import { DEFAULT_PROVIDERS, PROVIDER_IDS } from '../src/core/providers/types.ts';
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import type { ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -193,7 +194,12 @@ export class Harness {
     this.options = options;
     this.repoRoot = repoRoot;
     const cacheRoot = options.cacheRoot ?? defaultCacheRoot();
-    this.root = path.join(cacheRoot, `live-${options.name}`);
+    if (!/^[a-z0-9-]+$/.test(options.name)) throw new HarnessRefusal(`invalid sandbox name: ${options.name}`);
+    const socketAt = (root: string) => path.join(root, 'tmx', `tmux-${process.getuid?.() ?? 0}`, 'default');
+    const namedRoot = path.join(cacheRoot, `live-${options.name}`);
+    // Keep long task-owned roots usable without escaping to a shared /tmp socket.
+    this.root = Buffer.byteLength(socketAt(namedRoot)) <= 100 ? namedRoot
+      : path.join(cacheRoot, `live-${createHash('sha256').update(options.name).digest('hex').slice(0, 12)}`);
     this.fakeBin = path.join(this.root, 'fakebin');
     this.home = path.join(this.root, 'home');
     this.agentctlHome = path.join(this.root, 'agentctl-home');
@@ -245,6 +251,8 @@ export class Harness {
   start(): this {
     // A sandbox is made new every time (its own folder `live-<name>`, nothing else is ever removed).
     if (!/^live-[a-z0-9-]+$/.test(path.basename(this.root))) throw new HarnessRefusal(`${this.root} is not a sandbox folder`);
+    const socket = path.join(this.tmuxDir, `tmux-${process.getuid?.() ?? 0}`, 'default');
+    if (Buffer.byteLength(socket) > 100) throw new HarnessRefusal(`task-owned tmux socket path is too long: ${socket}`);
     fs.rmSync(this.root, { recursive: true, force: true });
     for (const dir of [this.root, this.fakeBin, this.home, this.agentctlHome, this.codexHome, this.tmuxDir, this.env.CLAUDE_CONFIG_DIR as string, this.env.KIMI_CODE_HOME as string, this.env.TMPDIR as string]) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(this.root, 'gitconfig'), '[user]\n\tname = Harness\n\temail = harness@example.invalid\n[init]\n\tdefaultBranch = main\n');

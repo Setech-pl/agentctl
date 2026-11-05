@@ -8,6 +8,23 @@ import { REPO_ROOT, useScratch } from './helpers.ts';
 
 const scratch = useScratch();
 
+it('shortens long sandbox names inside the requested root and refuses an oversized root before reset', () => {
+  const cacheRoot = '/Users/marcinkrzetowski/Projects/cache-dev/agentctl-0181/e2/x';
+  const name = 'fix-claude-swallow-first';
+  const h = new Harness({ name, cacheRoot }, REPO_ROOT);
+  assert.equal(path.dirname(h.root), cacheRoot);
+  assert.equal(h.root, new Harness({ name, cacheRoot }, REPO_ROOT).root);
+  assert.notEqual(h.root, new Harness({ name: `${name}-other`, cacheRoot }, REPO_ROOT).root);
+  assert.ok(Buffer.byteLength(path.join(h.tmuxDir, `tmux-${process.getuid?.() ?? 0}`, 'default')) <= 100);
+  assert.throws(() => new Harness({ name: '../escape', cacheRoot }, REPO_ROOT), /invalid sandbox name/);
+  const oversized = scratch.sub('oversized-' + 'x'.repeat(100));
+  const refused = new Harness({ name, cacheRoot: oversized }, REPO_ROOT);
+  fs.mkdirSync(refused.root);
+  const sentinel = path.join(refused.root, 'sentinel'); fs.writeFileSync(sentinel, 'keep');
+  assert.throws(() => refused.start(), /socket path is too long/);
+  assert.equal(fs.readFileSync(sentinel, 'utf8'), 'keep');
+});
+
 /** A sandbox on disk with fakes in fakeBin and a resolver that finds only what the test says. */
 function input(name: string, over: Partial<SafetyInput> & { found?: Record<string, string> } = {}): SafetyInput {
   const root = scratch.sub(name);
