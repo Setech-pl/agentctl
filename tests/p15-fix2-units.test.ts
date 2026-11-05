@@ -6,9 +6,9 @@ import { Context } from '../src/core/context.ts';
 import { fieldIsOurs, fieldSignature, inputFieldLines, ownPasteSignature } from '../src/core/input-field.ts';
 import { readJournal } from '../src/core/journal.ts';
 import { hookPromptMatches, unwrapPastedContent } from '../src/core/paste-wrapper.ts';
-import { deliveryNote, deliverPendingPrompt, echoLines, queuePrompt, queueSignShown } from '../src/core/prompt-delivery.ts';
+import { deliveryNote, deliveryProof, deliverPendingPrompt, echoLines, queuePrompt, queueSignShown } from '../src/core/prompt-delivery.ts';
 import { classifyScreen, starSpinnerActive } from '../src/core/state.ts';
-import { readTaskRecord } from '../src/core/taskstore.ts';
+import { readTaskRecord, setHeaderFields, taskFile } from '../src/core/taskstore.ts';
 import { DiskRunner, makeConfig, seedTask, useScratch } from './helpers.ts';
 
 /* P15-FIX2: the pieces behind R1-R10, one by one. The counterexamples themselves are in p15-fix2.test.ts. */
@@ -112,6 +112,26 @@ describe('queue sign (R3)', () => {
     assert.ok(!queueSignShown('claude', '● Documentation: ctrl+x ctrl+s to send now\n❯\n'));
     assert.ok(!queueSignShown('claude', 'x\n❯\n', 'Press up to edit queued messages for the team'));
     assert.ok(!queueSignShown('codex', 'x\n  ctrl+x ctrl+s to send now\n› \n'));
+  });
+});
+
+describe('queue sign needs a correlated Enter (R3)', () => {
+  const proofFor = async (name: string, extra: Record<string, unknown>) => {
+    const config = makeConfig(scratch.sub(name), 'capacity: {snapshot: false, codex_refresh: false}\n');
+    const runner = new DiskRunner({ dryRun: false, startTime: Date.now() + 1000 });
+    const ctx = new Context(runner, config, () => {});
+    seedTask(config, 'T1', { agent: 'claude', windowId: '@1' });
+    await queuePrompt(ctx, readTaskRecord(config, 't1')!, 'SECOND', 'pending', { kind: 'followup' });
+    await setHeaderFields(runner, taskFile(config, 't1'), { prompt_delivery: 'confirming', delivery_was_busy: true, delivery_started_at: new Date(runner.now() - 1000).toISOString(), ...extra });
+    return deliveryProof(ctx, readTaskRecord(config, 't1')!, '⏺ x\n  ctrl+x ctrl+s to send now\n✻ Cooking… (3s · ↓ 1 tokens)\n❯\n');
+  };
+  const ours = { delivery_field: 'collapsed:[Pasted text #2 +1 lines]', delivery_enters: 1 };
+  it('queued-in-agent only with the recorded paste, an Enter of ours and a sign that was not there before it', async () => {
+    assert.equal(await proofFor('q-ok', { ...ours, delivery_queue_sign: false }), 'queued-in-agent');
+    assert.equal(await proofFor('q-before', { ...ours, delivery_queue_sign: true }), null, 'the sign was on the screen before our Enter');
+    assert.equal(await proofFor('q-unknown', { ...ours }), null, 'no baseline recorded');
+    assert.equal(await proofFor('q-no-enter', { ...ours, delivery_enters: 0, delivery_queue_sign: false }), null, 'we pressed no Enter');
+    assert.equal(await proofFor('q-no-paste', { delivery_enters: 1, delivery_queue_sign: false }), null, 'agentctl pasted nothing for this delivery');
   });
 });
 
