@@ -13,7 +13,7 @@ import type { Harness, ReplaySpec } from './live-harness.ts';
  */
 const cache = defaultCacheRoot('agentctl-p15'), results: { name: string; ok: boolean }[] = [];
 const check = (name: string, ok: unknown) => { results.push({ name, ok: Boolean(ok) }); console.log(`${ok ? 'PASS' : 'FAIL'} ${name}`); assert.ok(ok, name); };
-const ENTER_RETRY_WAIT_MS = 11000;
+const NO_RETRY_WAIT_MS = 11000;
 const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const until = async (condition: () => boolean, ms = 20000) => { const end = Date.now() + ms; while (Date.now() < end) { if (condition()) return true; await pause(100); } return condition(); };
 const fx = (name: string) => fs.readFileSync(path.resolve(import.meta.dirname, '../tests/fixtures', name), 'utf8');
@@ -27,12 +27,15 @@ const claudeBusy = claudeBusyPasted.replace(PLACEHOLDER, '$1 ');
 const claudeSpec = (extra: Partial<ReplaySpec> = {}): ReplaySpec => ({ agent: 'claude', screens: { ready: '❯ Try "fake"\n', busy: claudeBusy, pasted: claudeBusyPasted, accepted: fx('screen-claude-busy-queued-ansi.txt'), question: '' }, state: 'ready', swallow: 0, hook: true, ...extra });
 const codexSteered = fx('screen-codex-busy-steered.txt');
 const codexBusy = codexSteered.replace(/^› FOLLOWUP-CX-LONG[^\n]*\n(?:  [^\n]*\n)*?(?=• Working)/m, '');
+const TX = (delayMs: number) => ({ claudeLogs: '', codexHome: '', delayMs });
 const codexSpec = (extra: Partial<ReplaySpec> = {}): ReplaySpec => ({ agent: 'codex', screens: { ready: '› Ask Codex to do anything\n', busy: codexBusy, pasted: codexBusy.replace(/^› Ask Codex to do anything$/m, '› [Pasted text #1 +8 lines]'), accepted: codexSteered, question: fx('screen-codex-question-collapsed.txt') }, state: 'ready', swallow: 0, hook: false, ...extra });
 
 async function scenario(name: string, agent: 'claude' | 'codex', spec: ReplaySpec, body: (s: { h: Harness; log: () => any[]; record: () => string; run: (...a: string[]) => { code: number; stdout: string; stderr: string }; sendFile: (text: string) => string; mcp: (tool: string, args?: Record<string, unknown>) => Promise<string>; mcpCall: (tool: string, args?: Record<string, unknown>) => Promise<{ isError: boolean; text: string }>; audit: () => { tool: string; outcome: string; detail?: string }[]; state: (patch: Partial<ReplaySpec>) => void; json: (key: string) => string }) => Promise<void>) {
   await withHarness({ name, cacheRoot: cache, config: 'capacity: {snapshot: false, codex_refresh: false}\nwatch: {interval: 1}\nmcp: {allow: [send, send_enter]}\n' }, async (h) => {
     h.tmux(['set-option', '-g', 'default-size', '200x50']);
     const log = path.join(h.root, 'replay.jsonl');
+    // P15-FIX3: a spec may ask the fake agent to write its transcript the way the real CLI does; the paths are the harness’s own.
+    if (spec.transcript) spec = { ...spec, transcript: { ...spec.transcript, claudeLogs: path.join(h.root, 'claude-logs'), codexHome: h.codexHome } };
     installReplayAgent(h, agent, log); writeReplaySpec(h, spec);
     const repo = path.join(h.root, 'repo'); fs.mkdirSync(repo);
     for (const args of [['init', '-qb', 'main'], ['commit', '--allow-empty', '-qm', 'fixture']]) assert.equal(spawnSync('git', args, { cwd: repo, env: h.env }).status, 0);
@@ -65,67 +68,90 @@ async function scenario(name: string, agent: 'claude' | 'codex', spec: ReplaySpe
   });
 }
 
-await scenario('claude-queued', 'claude', claudeSpec(), async ({ h, log, record, run, sendFile, json }) => {
+await scenario('cl-queued', 'claude', claudeSpec(), async ({ h, log, record, run, sendFile, json }) => {
   const sent = run('send', sendFile(LONG), '-y');
   const watcher = h.spawnAgentctl(['watch'], path.join(h.root, 'watch.log'));
   try {
-    check('P15b Claude busy: send says the message waits in the agent’s queue', /w kolejce agenta/.test(sent.stdout) && !/niepotwierdzone/.test(sent.stdout));
+    check('P15b Claude busy: send says the message went in (pasted; the hook may already have confirmed it)', /wklejono/.test(sent.stdout));
     check('P15b Claude busy: one paste, one Enter', log().filter(e => e.paste && e.state === 'busy').length === 1 && log().filter(e => e.enter && e.state === 'busy').length === 1);
-    check('P15b Claude busy: TASK.md says sent / queued-in-agent, no pending state', /prompt_delivery: sent/.test(record()) && /delivery_result: queued-in-agent/.test(record()) && !/pending_prompt/.test(record()));
-    check('P15b Claude busy: status says it too', json('promptDelivery') === 'sent' && json('deliveryResult') === 'queued-in-agent');
+    check('P15b Claude busy: the hook with <pasted_content> confirms it: TASK.md sent / delivered from the hook, no pending state', await until(() => /prompt_delivery: sent/.test(record()), 10000) && /delivery_result: delivered/.test(record()) && /delivery_source: hook/.test(record()) && !/pending_prompt/.test(record()));
+    check('P15b Claude busy: status says it too', json('promptDelivery') === 'sent' && json('deliveryResult') === 'delivered');
     await pause(3500);
-    check('P15b Claude busy: nothing flips back to confirming or needs-attention later (the hook with <pasted_content> arrived)', /prompt_delivery: sent/.test(record()) && json('state') !== 'needs-attention');
+    check('P15b Claude busy: nothing flips back to confirming or needs-attention later', /prompt_delivery: sent/.test(record()) && json('state') !== 'needs-attention');
     check('P15b Claude busy: a "delivery" event is in the journal', /"kind":"delivery"/.test(fs.readFileSync(path.join(h.agentctlHome, 'journal.jsonl'), 'utf8')));
   } finally { watcher.kill('SIGTERM'); }
 });
 
-await scenario('claude-swallowed-watch', 'claude', claudeSpec({ swallow: 3 }), async ({ h, log, record, run, sendFile, json }) => {
+// P15-FIX3: no hook; the queue sign classifies at once, the transcript line (queue-operation/enqueue, written 6 s later) is what delivers.
+await scenario('cl-queue-tx', 'claude', claudeSpec({ hook: false, transcript: TX(6000) }), async ({ h, log, record, run, sendFile, json }) => {
   const sent = run('send', sendFile(LONG), '-y');
-  check('P15 swallowed Enter: send says "nie dostarczono – tekst w polu wpisywania" and how to go on', /nie dostarczono – tekst w polu wpisywania/.test(sent.stdout) && /send --enter-only T1/.test(sent.stdout));
+  check('FIX3 Claude queue: right after Enter send says "w kolejce agenta – niepotwierdzone" (the sign classifies, nothing confirms)', /w kolejce agenta – niepotwierdzone/.test(sent.stdout));
+  check('FIX3 Claude queue: TASK.md is confirming / queued-in-agent and the message stays', /prompt_delivery: confirming/.test(record()) && /delivery_result: queued-in-agent/.test(record()) && /pending_prompt/.test(record()));
+  const watcher = h.spawnAgentctl(['watch'], path.join(h.root, 'watch.log'));
+  try {
+    check('FIX3 Claude queue: the transcript line confirms it later: sent / delivered, source transcript-queue', await until(() => /prompt_delivery: sent/.test(record()), 30000) && /delivery_result: delivered/.test(record()) && /delivery_source: transcript-queue/.test(record()) && json('deliveryResult') === 'delivered');
+    check('FIX3 Claude queue: still one paste and one Enter', log().filter(e => e.paste && e.state === 'busy').length === 1 && log().filter(e => e.enter && e.state === 'busy').length === 1);
+    const journal = fs.readFileSync(path.join(h.agentctlHome, 'journal.jsonl'), 'utf8');
+    check('FIX3 Claude queue: the journal has both changes with the delivery id (queued, then delivered)', /"kind":"delivery"[^\n]*niepotwierdzone[^\n]*\[dostawa [0-9a-f]{8}\]/.test(journal) && /"kind":"delivery"[^\n]*dostarczono[^\n]*transkrypt[^\n]*\[dostawa [0-9a-f]{8}\]/.test(journal));
+  } finally { watcher.kill('SIGTERM'); }
+});
+
+await scenario('cl-swallow', 'claude', claudeSpec({ swallow: 3 }), async ({ h, log, record, run, sendFile, json }) => {
+  const sent = run('send', sendFile(LONG), '-y');
+  check('P15 swallowed Enter: send says "nie dostarczono – tekst w polu wpisywania" and how to go on', /nie dostarczono – tekst w polu wpisywania/.test(sent.stdout) && /send --enter-only T1/.test(sent.stdout) && !/ponowi/.test(sent.stdout));
   check('P15 swallowed Enter: three Enter presses, ONE paste', log().filter(e => e.paste && e.state === 'busy').length === 1 && log().filter(e => e.enter && e.state === 'busy').length === 3);
   check('P15 swallowed Enter: TASK.md and status carry delivery_result not-delivered-in-field', /delivery_result: not-delivered-in-field/.test(record()) && json('deliveryResult') === 'not-delivered-in-field');
   const watcher = h.spawnAgentctl(['watch'], path.join(h.root, 'watch.log'));
   try {
-    check('P15 swallowed Enter: watch presses Enter again (still one paste) and the delivery ends sent', await until(() => /prompt_delivery: sent/.test(record()), 30000) && log().filter(e => e.paste && e.state === 'busy').length === 1 && log().filter(e => e.enter && e.state === 'busy').length === 4);
-    check('P15 swallowed Enter: it ends as queued-in-agent', /delivery_result: queued-in-agent/.test(record()));
+    check('FIX3 swallowed Enter: watch ends it as needs-attention and presses NO Enter, however long it runs', await until(() => /prompt_delivery: needs-attention/.test(record()), 15000) && (await pause(NO_RETRY_WAIT_MS), log().filter(e => e.enter && e.state === 'busy').length === 3 && log().filter(e => e.paste).length === 2));
+    check('FIX3 swallowed Enter: the text is still marked not delivered with the two ways out', /delivery_result: not-delivered-in-field/.test(record()) && /send --enter-only T1/.test(record().replace(/\s+/g, ' ')) && /presses no Enter by itself/.test(record().replace(/\s+/g, ' ')));
   } finally { watcher.kill('SIGTERM'); }
 });
 
-await scenario('claude-enter-only', 'claude', claudeSpec({ swallow: 99 }), async ({ h, log, record, run, sendFile, mcp, state, json }) => {
+await scenario('cl-enter-only', 'claude', claudeSpec({ swallow: 99 }), async ({ h, log, record, run, sendFile, mcp, state, json }) => {
   run('send', sendFile(LONG), '-y');
   check('enter-only: the text stands in the field (swallowed)', /delivery_result: not-delivered-in-field/.test(record()));
-  const stuck = run('send', '--enter-only', 'T1');
-  check('enter-only: Enter pressed, still swallowed: says so, exit code 1', /nie dostarczono – tekst w polu wpisywania/.test(stuck.stdout + stuck.stderr) && stuck.code === 1);
+  const enters = () => log().filter(e => e.enter).length, before0 = enters();
+  const peek = run('send', '--enter-only', 'T1');
+  const token = /--confirm ([0-9a-f]{16})/.exec(peek.stdout)?.[1];
+  check('enter-only: without --confirm the CLI shows the exact text of the field and a token, presses nothing, exit 0', peek.code === 0 && /Text in the field of T1 \(exactly\)/.test(peek.stdout) && /\[Pasted text #\d+(?: \+\d+ lines)?\]/.test(peek.stdout) && Boolean(token) && enters() === before0);
+  const stuck = run('send', '--enter-only', 'T1', '--confirm', token ?? 'none');
+  check('enter-only: --confirm TOKEN presses Enter once; still swallowed: says so, exit code 1', /nie dostarczono – tekst w polu wpisywania/.test(stuck.stdout + stuck.stderr) && stuck.code === 1 && enters() === before0 + 1);
   h.tmux(['send-keys', '-t', `=${h.session}:t1`, 'x']);
   await until(() => log().some(e => e.typed === 'x'), 5000);
   const foreign = run('send', '--enter-only', 'T1');
-  check('enter-only: a draft that is not our paste is refused, nothing pressed', /co innego niż to, co agentctl wkleił/.test(foreign.stdout + foreign.stderr) && foreign.code === 1);
-  const before = log().filter(e => e.enter).length;
-  check('enter-only: nothing was pressed by the refusal', log().filter(e => e.enter).length === before);
+  check('enter-only: a draft that is not our paste is refused (exact text shown), nothing pressed', /różni się od tego, co agentctl wkleił/.test(foreign.stdout + foreign.stderr) && foreign.code === 1 && enters() === before0 + 1);
   state({ swallow: 0 }); await pause(300);
   h.tmux(['send-keys', '-t', `=${h.session}:t1`, 'BSpace']);
   await until(() => log().some(e => e.backspace), 5000);
   const refused = await mcp('send', { task: 'T1', text: 'x', enter_only: true });
   check('enter-only (MCP): text next to enter_only is an error', /do not give text/.test(refused));
   const preview = await mcp('send', { task: 'T1', enter_only: true });
-  check('enter-only (MCP): without confirm it only previews, nothing is pressed', /Nie wciśnięto nic/.test(preview) && log().filter(e => e.enter).length === before);
-  const done = await mcp('send', { task: 'T1', enter_only: true, confirm: true });
-  check('enter-only (MCP): Enter for our own paste is taken, the answer says it is in the agent’s queue', /^T1: Enter wysłany: tak; dostarczenie potwierdzone: tak – zatwierdzono Enter; w kolejce agenta/.test(done));
-  check('enter-only: TASK.md ends sent / queued-in-agent, still one paste', /prompt_delivery: sent/.test(record()) && /delivery_result: queued-in-agent/.test(record()) && log().filter(e => e.paste && e.state === 'busy').length === 1 && json('promptDelivery') === 'sent');
+  const mcpToken = /token: "([0-9a-f]{16})"/.exec(preview)?.[1];
+  check('enter-only (MCP): without confirm it only previews (exact text, token), nothing is pressed', /Nie wciśnięto nic/.test(preview) && Boolean(mcpToken) && enters() === before0 + 1);
+  const noToken = await mcp('send', { task: 'T1', enter_only: true, confirm: true });
+  check('enter-only (MCP): confirm without the token presses nothing', /needs the token/.test(noToken) && enters() === before0 + 1);
+  const done = await mcp('send', { task: 'T1', enter_only: true, confirm: true, token: mcpToken });
+  check('enter-only (MCP): Enter for our own paste is taken; the answer keeps "Enter sent" apart from "confirmed"', /^T1: Enter wysłany: tak; dostarczenie potwierdzone: (tak|jeszcze nie)/.test(done) && enters() === before0 + 2);
+  const watcher = h.spawnAgentctl(['watch'], path.join(h.root, 'watch.log'));
+  try {
+    check('enter-only: the hook confirms it afterwards (watch sees the evidence): TASK.md sent / delivered, still one paste', await until(() => /prompt_delivery: sent/.test(record()), 15000) && /delivery_result: delivered/.test(record()) && log().filter(e => e.paste && e.state === 'busy').length === 1 && json('promptDelivery') === 'sent');
+  } finally { watcher.kill('SIGTERM'); }
 });
 
-await scenario('codex-steer', 'codex', codexSpec(), async ({ h, log, record, run, sendFile, json }) => {
+await scenario('cx-steer', 'codex', codexSpec({ transcript: TX(5000) }), async ({ h, log, record, run, sendFile, json }) => {
   const sent = run('send', sendFile(CODEX_LONG), '-y');
   const watcher = h.spawnAgentctl(['watch'], path.join(h.root, 'watch.log'));
   try {
-    check('P16 Codex busy: the echo of the steered message confirms it at once, send says "wklejono (prompt sent)"', /wklejono \(prompt sent\)/.test(sent.stdout) && !/niepotwierdzone/.test(sent.stdout));
-    check('P16 Codex busy: one paste, one Enter; TASK.md sent / delivered', log().filter(e => e.paste && e.state === 'busy').length === 1 && log().filter(e => e.enter && e.state === 'busy').length === 1 && /prompt_delivery: sent/.test(record()) && /delivery_result: delivered/.test(record()));
-    await pause(3000);
+    check('P16 Codex busy: the echo of the steered message only classifies: send says "w kolejce agenta – niepotwierdzone"', /w kolejce agenta – niepotwierdzone/.test(sent.stdout) && !/prompt sent/.test(sent.stdout));
+    check('P16 Codex busy: one paste, one Enter; TASK.md confirming / queued-in-agent, the message stays', log().filter(e => e.paste && e.state === 'busy').length === 1 && log().filter(e => e.enter && e.state === 'busy').length === 1 && /prompt_delivery: confirming/.test(record()) && /delivery_result: queued-in-agent/.test(record()) && /pending_prompt/.test(record()));
+    check('P16 Codex busy: the rollout line of the steered message confirms it: sent / delivered, source transcript', await until(() => /prompt_delivery: sent/.test(record()), 30000) && /delivery_result: delivered/.test(record()) && /delivery_source: transcript/.test(record()));
+    await pause(2000);
     check('P16 Codex busy: it stays sent, no needs-attention', json('promptDelivery') === 'sent' && json('state') !== 'needs-attention');
   } finally { watcher.kill('SIGTERM'); }
 });
 
-await scenario('codex-question', 'codex', codexSpec(), async ({ h, log, record, run, sendFile, state }) => {
+await scenario('cx-question', 'codex', codexSpec({ transcript: TX(1500) }), async ({ h, log, record, run, sendFile, state }) => {
   state({ state: 'question' }); await pause(500);
   const pastesBefore = log().filter(e => e.paste).length;
   const sent = run('send', sendFile(CODEX_LONG), '-y');
@@ -136,13 +162,13 @@ await scenario('codex-question', 'codex', codexSpec(), async ({ h, log, record, 
     await pause(3500);
     check('P16 Codex question: watch keeps holding it while the question is open (still pending, still no paste)', /prompt_delivery: pending/.test(record()) && log().filter(e => e.paste).length === pastesBefore);
     state({ state: 'busy' });
-    check('P16 Codex question: once the question is gone the message is delivered (one paste)', await until(() => /prompt_delivery: sent/.test(record()), 20000) && log().filter(e => e.paste).length === pastesBefore + 1);
+    check('P16 Codex question: once the question is gone the message is pasted once and the rollout line of the steered message delivers it', await until(() => /prompt_delivery: sent/.test(record()), 30000) && log().filter(e => e.paste).length === pastesBefore + 1);
   } finally { watcher.kill('SIGTERM'); }
 });
 
 // P15-FIX2 (cross review): a field that a human changed gets no Enter, enter_only needs the origin, MCP tells refusal from sent key, the old queue sign proves nothing.
 const claudePlain = (extra: Partial<ReplaySpec> = {}) => claudeSpec({ plain: true, ...extra });
-await scenario('claude-changed-field', 'claude', claudePlain({ swallow: 99 }), async ({ h, log, record, run, sendFile, mcpCall, audit }) => {
+await scenario('cl-changed', 'claude', claudePlain({ swallow: 99 }), async ({ h, log, record, run, sendFile, mcpCall, audit }) => {
   const enters = () => log().filter(e => e.enter && e.state === 'busy').length;
   run('send', sendFile(LONG), '-y');
   check('E1 live: the whole paste stands in the field, three Enter presses were swallowed', /delivery_result: not-delivered-in-field/.test(record()) && enters() === 3);
@@ -150,20 +176,21 @@ await scenario('claude-changed-field', 'claude', claudePlain({ swallow: 99 }), a
   await until(() => log().some(e => e.typed === 'x'), 5000);
   const watcher = h.spawnAgentctl(['watch'], path.join(h.root, 'watch.log'));
   try {
-    await pause(ENTER_RETRY_WAIT_MS);
-    check('E1 live: watch does not press Enter into a field a human added to (retry interval passed, still 3)', enters() === 3 && /delivery_result: not-delivered-in-field/.test(record()));
+    await pause(NO_RETRY_WAIT_MS);
+    check('E1 live: watch does not press Enter into a field a human added to (still 3), and says the input changed', enters() === 3 && /delivery_result: not-delivered-in-field/.test(record()) && /prompt_delivery: needs-attention/.test(record()));
   } finally { watcher.kill('SIGTERM'); await pause(300); }
   const foreign = run('send', '--enter-only', 'T1');
-  check('E2 live: --enter-only refuses the changed field, exit 1, no key', foreign.code === 1 && /co innego niż to, co agentctl wkleił/.test(foreign.stdout + foreign.stderr) && enters() === 3);
-  const refused = await mcpCall('send', { task: 'T1', enter_only: true, confirm: true });
+  check('E2 live: --enter-only refuses the changed field, exit 1, no key', foreign.code === 1 && /różni się od tego, co agentctl wkleił/.test(foreign.stdout + foreign.stderr) && enters() === 3);
+  const refused = await mcpCall('send', { task: 'T1', enter_only: true });
   check('E6 live (stdio client): the refusal is an isError with its reason and no key', refused.isError && /odmowa, żaden klawisz nie poszedł/.test(refused.text) && enters() === 3);
   const last = audit().at(-1)!;
   check('E6 live: the audit records the refusal as an error with its reason', last.tool === 'send_enter' && last.outcome === 'error' && /^refused:/.test(last.detail ?? ''));
   h.tmux(['send-keys', '-t', `=${h.session}:t1`, 'BSpace']);
   await until(() => log().some(e => e.backspace), 5000);
   const preview = await mcpCall('send', { task: 'T1', enter_only: true });
-  check('E6 live: without confirm only a preview, no key', !preview.isError && /Nie wciśnięto nic/.test(preview.text) && enters() === 3 && audit().at(-1)!.outcome === 'preview');
-  const pressed = await mcpCall('send', { task: 'T1', enter_only: true, confirm: true });
+  const token = /token: "([0-9a-f]{16})"/.exec(preview.text)?.[1];
+  check('E6 live: without confirm only a preview with the exact text and a token, no key', !preview.isError && /Nie wciśnięto nic/.test(preview.text) && Boolean(token) && enters() === 3 && audit().at(-1)!.outcome === 'preview');
+  const pressed = await mcpCall('send', { task: 'T1', enter_only: true, confirm: true, token });
   check('E6 live: a pressed but swallowed Enter is not an error; the answer says key sent: yes, delivery confirmed: no', !pressed.isError && /Enter wysłany: tak/.test(pressed.text) && /potwierdzone: nie/.test(pressed.text) && enters() === 4);
   const done = audit().at(-1)!;
   check('E6 live: the audit records the executed Enter with its result', done.tool === 'send_enter' && done.outcome === 'done' && /enter-sent/.test(done.detail ?? ''));
@@ -171,7 +198,7 @@ await scenario('claude-changed-field', 'claude', claudePlain({ swallow: 99 }), a
 });
 
 const staleBusy = fx('screen-claude-busy-queued-shown.txt').replace(/^❯\s*Press up to edit queued messages$/m, '❯ ');
-await scenario('claude-stale-queue-sign', 'claude', claudeSpec({ swallow: 0, plain: true, hook: false, screens: { ready: '❯ Try "fake"\n', busy: staleBusy, pasted: staleBusy, accepted: staleBusy, question: '' } }), async ({ h, log, record, run, sendFile }) => {
+await scenario('cl-stale', 'claude', claudeSpec({ swallow: 0, plain: true, hook: false, screens: { ready: '❯ Try "fake"\n', busy: staleBusy, pasted: staleBusy, accepted: staleBusy, question: '' } }), async ({ h, log, record, run, sendFile }) => {
   check('E3 live: the busy screen already shows a queued message (ctrl+x ctrl+s to send now)', /ctrl\+x ctrl\+s to send now/.test(staleBusy));
   run('send', sendFile('SECOND MESSAGE: please also add the empty case.'), '-y');
   const watcher = h.spawnAgentctl(['watch'], path.join(h.root, 'watch.log'));

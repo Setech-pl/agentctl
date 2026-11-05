@@ -393,6 +393,12 @@ export interface ReplaySpec {
   hook: boolean;
   /** Show the paste whole in the field (all its lines) instead of a placeholder: a human can then change one line of it. */
   plain?: boolean;
+  /**
+   * Write the message into the session transcript the way the real CLI does (P15-FIX3, recorded 2026-11-05): Claude `queue-operation`/`enqueue` while a turn runs
+   * (else a `user` line) under `<claudeLogs>/projects/<cwd>/<id>.jsonl`; Codex `response_item` + `item_completed` in a rollout under `<codexHome>/sessions/Y/M/D/`.
+   * `delayMs`: after that long (the screen shows the message first and the transcript later).
+   */
+  transcript?: { claudeLogs: string; codexHome: string; delayMs: number };
 }
 
 /**
@@ -421,6 +427,16 @@ const label=()=>{if(spec().plain)return pasted.replace(/\\r\\n?/g,'\\n');const l
 const hook=text=>{if(!spec().hook||${JSON.stringify(agent)}!=='claude')return;const i=args.indexOf('--settings');if(i<0)return;
  const settings=JSON.parse(fs.readFileSync(args[i+1],'utf8')),prompt=text.split('\\n').length>1||text.length>200?'<pasted_content id="80b3">\\n'+text+'\\n</pasted_content id="80b3">':text;
  const child=spawn(settings.hooks.UserPromptSubmit[0].hooks[0].command,{shell:true,stdio:['pipe','ignore','ignore']});child.stdin.end(JSON.stringify({hook_event_name:'UserPromptSubmit',prompt}));};
+const sid='replay-'+process.pid;
+const wrapped=text=>text.split('\\n').length>1||text.length>200?'<pasted_content id="c996">\\n'+text+'\\n</pasted_content id="c996">':text;
+const transcript=(text,busy)=>{const t=spec().transcript;if(!t)return;setTimeout(()=>{const stored=text.replace(/\\r\\n?/g,'\\n').replace(/\\t/g,${JSON.stringify(agent)}==='claude'?'    ':'\\t').replace(/\\s+$/,''),now=()=>new Date().toISOString();
+ if(${JSON.stringify(agent)}==='claude'){const dir=t.claudeLogs+'/projects/'+process.cwd().replace(/[^A-Za-z0-9]/g,'-');fs.mkdirSync(dir,{recursive:true});
+  const row=busy?{type:'queue-operation',operation:'enqueue',timestamp:now(),sessionId:sid,content:wrapped(stored)}:{type:'user',timestamp:now(),message:{role:'user',content:wrapped(stored)},promptSource:'typed',sessionId:sid};
+  fs.appendFileSync(dir+'/'+sid+'.jsonl',JSON.stringify(row)+'\\n');}
+ else{const d=new Date(),dir=t.codexHome+'/sessions/'+d.getFullYear()+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+String(d.getDate()).padStart(2,'0'),file=dir+'/rollout-replay-'+sid+'.jsonl';fs.mkdirSync(dir,{recursive:true});
+  if(!fs.existsSync(file))fs.writeFileSync(file,JSON.stringify({timestamp:now(),type:'session_meta',payload:{id:sid,cwd:process.cwd()}})+'\\n');
+  fs.appendFileSync(file,JSON.stringify({timestamp:now(),type:'response_item',payload:{type:'message',role:'user',content:[{type:'input_text',text:stored}]}})+'\\n'+JSON.stringify({timestamp:now(),type:'event_msg',payload:{type:'item_completed',item:{type:'UserMessage',content:[{type:'text',text:stored}]}}})+'\\n');}
+ },t.delayMs);};
 process.stdout.write('\\x1b[?2004h');process.stdin.setRawMode(true);process.stdin.resume();draw(state);
 let seenSpec=spec().state;setInterval(()=>{const s=spec().state;if(s!==seenSpec){seenSpec=s;state=s;draw(state==='ready'?'ready':state==='busy'?'busy':'question');}},100);
 process.stdin.on('data',data=>{stream+=data.toString();for(;;){
@@ -430,9 +446,9 @@ process.stdin.on('data',data=>{stream+=data.toString();for(;;){
  if(stream.startsWith('\\x1b') && stream.length<6)return;
  const c=stream[0];stream=stream.slice(1);
  if(c==='\\r'||c==='\\n'){if(!field||state==='question')continue;enters++;note({enter:enters,state});
-  if(state==='ready'){field='';state='busy';draw('busy');hook(pasted);continue;}
+  if(state==='ready'){field='';state='busy';draw('busy');hook(pasted);transcript(pasted,false);continue;}
   if(enters<=spec().swallow){draw('pasted');continue;}
-  field='';draw('accepted');note({accepted:true});hook(pasted);continue;}
+  field='';draw('accepted');note({accepted:true});hook(pasted);transcript(pasted,true);continue;}
  if(state!=='question'){if(c==='\\x7f'){field=field.slice(0,-1);note({backspace:true});}else{field+=c;note({typed:c});}draw(state==='ready'?'ready':'pasted');}
 }});
 `;
