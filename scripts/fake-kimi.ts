@@ -18,7 +18,7 @@ wire({ type: 'metadata', protocol_version: '1.5', cwd: process.cwd(), synthetic:
 fs.appendFileSync(path.join(home, 'session_index.jsonl'), JSON.stringify({ id, cwd: process.cwd(), synthetic: true }) + '\n');
 fs.writeFileSync(path.join(session, 'state.json'), JSON.stringify({ id, cwd: process.cwd(), synthetic: true }));
 note({ start: args, cwd: process.cwd(), env: { KIMI_CODE_NO_AUTO_UPDATE: process.env.KIMI_CODE_NO_AUTO_UPDATE, KIMI_DISABLE_TELEMETRY: process.env.KIMI_DISABLE_TELEMETRY, AGENTCTL_TASK: process.env.AGENTCTL_TASK, KIMI_MODEL_THINKING_EFFORT: process.env.KIMI_MODEL_THINKING_EFFORT } });
-const editor = () => '│ > ' + (draft ? '[paste #1 +' + draft.split('\n').length + ' lines]' : '') + '                 │\n';
+const editor = () => ' ╭' + '─'.repeat(76) + '╮\n' + (' │ > ' + (draft ? '[paste #1 +' + draft.split('\n').length + ' lines]' : '')).padEnd(78) + '│\n ╰' + '─'.repeat(76) + '╯\n';
 const draw = () => {
  let body = '';
  if (!trusted) body = 'Trust this folder?\n❯ Trust and continue\nExit\n';

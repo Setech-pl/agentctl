@@ -25,8 +25,22 @@ const digest = (text: string) => createHash('sha256').update(text).digest('hex')
 export interface FieldCapture { area: string[]; readable: boolean; top?: number; reason?: string }
 
 /** Read the composer by its geometry, never by a footer-like line in its body. */
-export function inspectField(screen: string): FieldCapture {
+export function inspectField(screen: string, agent?: 'claude' | 'codex' | 'kimi' | 'unknown'): FieldCapture {
   const lines = screen.split('\n').map(line => line.trimEnd());
+  if (agent === 'kimi') {
+    const marker = lines.findLastIndex(line => /^\s*│ >(?:\s|│)/u.test(line));
+    const top = marker - 1, border = /^(\s*)╭(─{3,})╮$/u.exec(lines[top] ?? '');
+    if (marker < 0 || !border) return { area: [], readable: false, reason: 'brak pełnej ramki composera Kimi' };
+    const bottom = `${border[1]}╰${border[2]}╯`;
+    const end = lines.indexOf(bottom, marker + 1);
+    const prefix = `${border[1]}│ `;
+    const rows = lines.slice(marker, end);
+    if (end < 0 || rows.some(line => !line.startsWith(prefix) || !line.endsWith(' │') || line.length !== lines[top]!.length)) {
+      return { area: [], readable: false, reason: 'niepełne granice composera Kimi' };
+    }
+    const empty = rows.length === 1 && fieldText(rows).trim() === '';
+    return { area: empty ? [] : rows, readable: true, top };
+  }
   const lastMarker = lines.findLastIndex(line => /^[❯›>](?:\s|$)/.test(line));
   const areaOf = (start: number, end: number, top = start): FieldCapture => {
     const area = lines.slice(start, end);
@@ -63,13 +77,14 @@ export function inspectField(screen: string): FieldCapture {
 }
 
 /** Compatibility API: an unreadable area is never an owned field. Call inspectField before any Enter to distinguish it from empty. */
-export function fieldArea(screen: string, _footerPatterns: string[] = []): string[] { return inspectField(screen).area; }
+export function fieldArea(screen: string, _footerPatterns: string[] = [], agent?: 'claude' | 'codex' | 'kimi' | 'unknown'): string[] { return inspectField(screen, agent).area; }
 
 /** The marker and the one space (or no-break space) after it; Claude Code draws a no-break space. */
 const stripMarker = (line: string) => line.replace(/^\s*[❯›>][ \u00a0]?/, '');
 
 /** The text the area shows, without marker and indentation, as a person would read it. */
 export function fieldText(area: string[]): string {
+  if (/^\s*│ >/.test(area[0] ?? '')) return area.map((line, i) => line.replace(i === 0 ? /^\s*│ > ?/ : /^\s*│ {1,3}/, '').replace(/\s*│$/, '').trimEnd()).join('\n');
   return area.map((line, i) => i === 0 ? stripMarker(line) : line.replace(/^ {1,2}/, '')).join('\n');
 }
 
@@ -108,6 +123,7 @@ export function readsAs(shown: string[], text: string, agent: 'claude' | 'codex'
 export function pasteImage(area: string[], prompt: string, agent?: 'claude' | 'codex' | 'kimi' | 'unknown'): boolean {
   if (!area.length) return false;
   const shown = fieldText(area).split('\n');
+  if (agent === 'kimi' && shown.length === 1 && /^\[paste #\d+[^\]\n]*\]$/i.test(shown[0]!)) return true;
   if (shown.length === 1 && PLACEHOLDER.test(shown[0]!.trim())) return true;
-  return readsAs(shown, prompt, agent, false);
+  return readsAs(shown, prompt, agent, agent === 'kimi');
 }
