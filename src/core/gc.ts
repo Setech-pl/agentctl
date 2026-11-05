@@ -327,20 +327,45 @@ export function gcView(plan: GcPlan, opts: GcViewOptions = {}) {
     more: 'Full list: detail: true / --verbose; offset/limit paginate details and grouped summaries.' };
 }
 
+const DONE_WORD: Record<GcKind, string> = { worktree: 'removed worktrees', cache: 'removed cache entries', archive: 'archived state folders', branch: 'deleted merged branches' };
+
 export function renderGc(plan: GcPlan, opts: GcViewOptions & { applied?: GcResult | undefined } = {}): string[] {
   const view = gcView(plan, opts);
   const lines = [`Could free ${formatBytes(plan.freeBytes)}; ${view.summary}. History and reports (*.md) stay.`, ...view.categories.map(c => `${c.category}: ${c.count}, ${c.bytes} bytes`), `Skipped: ${view.skipped.count}, ${view.skipped.bytes} bytes`];
-  lines.push(opts.applied ? 'Cleaned up:' : 'Would clean up (a dry run; --apply does it, after a y/N):');
+  if (!opts.applied) {
+    lines.push('Would clean up (a dry run; --apply does it, after a y/N):');
+    if (!plan.items.length) lines.push('Nothing to clean up.');
+    for (const reason of view.skipped.reasons.items) lines.push(`  ${reason.reason}: ${reason.count}, ${reason.bytes} bytes`);
+    for (const c of view.cohorts.items) lines.push(`cohort ${c.cohort}: ${c.count}, ${c.bytes} bytes; skipped ${c.skipped}, ${c.skippedBytes} bytes`);
+    for (const n of view.newer.items) lines.push(`  ${n.task}: ${n.reason}, ${n.files} files, ${n.bytes} bytes`);
+    for (const i of view.details?.items ?? []) lines.push(`  ${i.action} ${KIND_WORD[i.kind as GcKind] ?? i.kind} ${i.task} ${i.target} (${('reason' in i ? i.reason : i.detail)})`);
+    for (const [label, page] of [['cohorts', view.cohorts], ['newer', view.newer], ['reasons', view.skipped.reasons], ['details', view.details]] as const) if (page?.next_offset !== null && page?.next_offset !== undefined) lines.push(`${label}: next offset ${page.next_offset} of ${page.total}`);
+    if (plan.foreignWorktrees) lines.push(`${plan.foreignWorktrees} foreign worktrees: not touched.`);
+    if (plan.unknownCacheDirs) lines.push(`${plan.unknownCacheDirs} folder${plan.unknownCacheDirs === 1 ? '' : 's'} in the cache belong to no task of agentctl: not touched.`);
+    lines.push('Preview only; --apply executes. Full list: --verbose --offset N --limit N.');
+    return lines;
+  }
+  // The result decides what is listed: done is removed, failed is named, skipped stays visibly out of "Cleaned up".
+  const applied = opts.applied;
+  lines.push('Cleaned up:');
   if (!plan.items.length) lines.push('Nothing to clean up.');
-  for (const reason of view.skipped.reasons.items) lines.push(`  ${reason.reason}: ${reason.count}, ${reason.bytes} bytes`);
-  for (const c of view.cohorts.items) lines.push(`cohort ${c.cohort}: ${c.count}, ${c.bytes} bytes; skipped ${c.skipped}, ${c.skippedBytes} bytes`);
-  for (const n of view.newer.items) lines.push(`  ${n.task}: ${n.reason}, ${n.files} files, ${n.bytes} bytes`);
-  for (const i of view.details?.items ?? []) lines.push(`  ${i.action} ${KIND_WORD[i.kind as GcKind] ?? i.kind} ${i.task} ${i.target} (${('reason' in i ? i.reason : i.detail)})`);
-  for (const [label, page] of [['cohorts', view.cohorts], ['newer', view.newer], ['reasons', view.skipped.reasons], ['details', view.details]] as const) if (page?.next_offset !== null && page?.next_offset !== undefined) lines.push(`${label}: next offset ${page.next_offset} of ${page.total}`);
+  for (const kind of ['worktree', 'cache', 'archive', 'branch'] as const) {
+    const done = applied.done.filter(i => i.kind === kind);
+    if (done.length) lines.push(`  ${DONE_WORD[kind]}: ${done.length}, ${done.reduce((n, i) => n + i.bytes, 0)} bytes`);
+  }
+  for (const f of applied.failed) lines.push(`  failed: ${f.item.target}: ${f.reason}`);
+  lines.push(`Freed ${formatBytes(applied.freedBytes)} (removed ${applied.done.length}, failed ${applied.failed.length}; skipped entries were left in place).`);
+  if (plan.skipped.length) {
+    lines.push(`Skipped (left in place): ${plan.skipped.length}, ${view.skipped.bytes} bytes`);
+    for (const reason of view.skipped.reasons.items) lines.push(`  skipped: ${reason.reason}: ${reason.count}, ${reason.bytes} bytes`);
+  }
+  if (opts.detail) {
+    for (const i of applied.done) lines.push(`  removed ${KIND_WORD[i.kind]} ${i.task} ${i.target} (${i.detail})`);
+    for (const f of applied.failed) lines.push(`  failed ${KIND_WORD[f.item.kind]} ${f.item.task} ${f.item.target} (${f.reason})`);
+    for (const s of plan.skipped) lines.push(`  skipped ${s.kind === 'worktree-foreign' ? 'worktree-foreign' : KIND_WORD[s.kind as GcKind]} ${s.task} ${s.target} (${s.reason})`);
+  }
   if (plan.foreignWorktrees) lines.push(`${plan.foreignWorktrees} foreign worktrees: not touched.`);
   if (plan.unknownCacheDirs) lines.push(`${plan.unknownCacheDirs} folder${plan.unknownCacheDirs === 1 ? '' : 's'} in the cache belong to no task of agentctl: not touched.`);
-  if (opts.applied) { lines.push(`Freed ${formatBytes(opts.applied.freedBytes)} (${opts.applied.done.length} done, ${opts.applied.failed.length} failed).`); for (const f of opts.applied.failed) lines.push(`failed: ${f.item.target}: ${f.reason}`); }
-  else lines.push('Preview only; --apply executes. Full list: --verbose --offset N --limit N.');
   return lines;
 }
 

@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { handleKey, initialBoardState, loadViewLines } from '../src/core/board.ts';
 import { Context } from '../src/core/context.ts';
 import { applyGc, planGc, renderGc } from '../src/core/gc.ts';
+import { formatBytes } from '../src/core/pull.ts';
 import { MCP_TOOLS } from '../src/core/mcp-tools.ts';
 import type { McpDeps } from '../src/core/mcp-tools.ts';
 import { loadGlobalConfig } from '../src/core/config.ts';
@@ -182,6 +183,31 @@ describe('gc: --apply', () => {
     assert.ok(result.freedBytes >= 1000 + 500 + 500);
     // history and the report stay: a second plan has nothing left but the removal of the (fake) worktree dir
     assert.match(renderGc(plan, { applied: result }).join('\n'), /Freed/);
+  });
+
+  it('the --apply report separates removed from skipped and frees only what went away (P26)', async () => {
+    const w = world('apply-output');
+    task(w, 'NC-1', { closed: true, closedAt: '2026-10-01T10:00:00.000Z' }, { 'old.log': 20, 'fresh.log': 1 });
+    const wt2 = task(w, 'NC-2', { closed: true });
+    w.dirty.add(wt2);
+    const plan = await planGc(w.ctx, {});
+    const result = await applyGc(w.ctx, plan);
+    assert.deepEqual(result.failed, []);
+    const out = renderGc(plan, { applied: result }).join('\n');
+    const cleaned = out.split('Cleaned up:')[1]!.split('Skipped (left in place)')[0]!;
+    // removed entries only under "Cleaned up", skipped entries only under their own heading
+    assert.match(cleaned, /removed worktrees: 1, \d+ bytes/);
+    assert.match(cleaned, /removed cache entries: 1, \d+ bytes/);
+    assert.doesNotMatch(cleaned, /uncommitted changes|newer than/);
+    const skipped = out.split('Skipped (left in place)')[1]!;
+    assert.match(skipped, /uncommitted changes/);
+    assert.match(skipped, /newer than 7d/);
+    // only the removed worktree, the old file and the archive move are done; nothing skipped is counted as freed
+    assert.deepEqual(result.done.map(i => `${i.kind}:${i.task}`).sort(), ['archive:NC-1', 'archive:NC-2', 'cache:NC-1', 'worktree:NC-1']);
+    const freed = /Freed ([\d.]+ [KMG]?B)/.exec(out)?.[1];
+    assert.equal(freed, formatBytes(result.freedBytes));
+    assert.equal(result.freedBytes, result.done.reduce((n, i) => n + i.bytes, 0));
+    assert.ok(!result.done.some(i => (i.kind === 'worktree' && i.task === 'NC-2') || i.target.endsWith('fresh.log')));
   });
 
   it('a git failure is reported per item, the rest goes on', async () => {

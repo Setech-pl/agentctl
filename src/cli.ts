@@ -1008,7 +1008,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         if (!(await confirmAction(ctx, renderGc(plan), 'Clean up?', Boolean(opts.yes)))) return;
         const result = await applyGc(ctx, plan);
         if (opts.json) return line(JSON.stringify({ plan, ...result }, null, 2));
-        for (const l of renderGc(plan, { applied: result })) line(l);
+        for (const l of renderGc(plan, { ...view, applied: result })) line(l);
         if (result.failed.length > 0) exitCode = 1;
       }),
     );
