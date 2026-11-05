@@ -154,11 +154,11 @@ function selectedFile(ctx: Context, record: TaskRecord): SelectedSession | undef
     selected = value as unknown as SelectedSession;
   } catch { return undefined; }
   if (selected.attempt !== attemptOf(record) || selected.agent !== record.agent || !selected.file || !selected.identity) return undefined;
-  const own = readTaskSessions(ctx.config, record.window)[selected.agent];
+  const own = readTaskSessions(ctx.config, record.window)[selected.agent] ?? [];
   if (!own.some(s => s.id === selected.id)) return undefined;
   // A session named for another task is ambiguous, including when both tasks share a worktree.
   try { for (const task of fs.readdirSync(ctx.config.stateDir)) {
-    if (task !== record.window && readTaskSessions(ctx.config, task)[selected.agent].some(s => s.id === selected.id || ('transcript' in s && s.transcript === selected.file))) return undefined;
+    if (task !== record.window && (readTaskSessions(ctx.config, task)[selected.agent] ?? []).some(s => s.id === selected.id || ('transcript' in s && s.transcript === selected.file))) return undefined;
   } } catch { return undefined; }
   try { return identityOf(selected.file) === selected.identity ? selected : undefined; } catch { return undefined; }
 }

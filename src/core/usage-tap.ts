@@ -47,7 +47,7 @@ export function sessionOfStatusLine(input: unknown): { id: string; transcript?: 
 export async function rememberSession(runner: Runner, config: GlobalConfig, window: string, agent: AgentName, session: { id: string; transcript?: string }, attempt?: string): Promise<void> {
   const file = sessionsFile(config, window);
   if (!fs.existsSync(path.dirname(file))) return; // an orphan window has no state folder
-  await selectTranscriptSession(runner, config, window, agent, session, attempt);
+  if (agent === 'claude' || agent === 'codex') await selectTranscriptSession(runner, config, window, agent, session, attempt);
   const known = readTaskSessions(config, window);
   const entries = known[agent] ??= [];
   if (provider(agent).capabilities.statusLineTap) {

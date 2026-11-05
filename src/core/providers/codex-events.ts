@@ -40,9 +40,9 @@ const tomlString = (s: string): string => `"${s.replace(/\\/g, '\\\\').replace(/
 export const tomlArray = (items: string[]): string => `[${items.map(tomlString).join(', ')}]`;
 
 /** Codex's `-c notify=[…]` value: this agentctl's `event` command, and the notify command the user already has (run by `event` afterwards). */
-export function buildCodexNotify(task: string, self: SelfArgv, forward: string[] | undefined): string[] {
+export function buildCodexNotify(task: string, self: SelfArgv, forward: string[] | undefined, attempt?: string): string[] {
   self = stableSelfArgv(self);
-  return [...self, ...eventArgs(task, 'codex'), ...(forward && forward.length > 0 ? ['--forward', JSON.stringify(forward)] : [])];
+  return [...self, ...eventArgs(task, 'codex'), ...(attempt ? ['--attempt', attempt] : []), ...(forward && forward.length > 0 ? ['--forward', JSON.stringify(forward)] : [])];
 }
 
 /**
@@ -121,7 +121,7 @@ function readIfExists(file: string): string | undefined {
 export function planCodexEvents(input: EventWiringInput): EventWiring {
   const forward = userCodexNotify(input.env, input.readConfig);
   return {
-    args: ['-c', `notify=${tomlArray(buildCodexNotify(input.task, input.self, forward))}`],
+    args: ['-c', `notify=${tomlArray(buildCodexNotify(input.task, input.self, forward, input.attempt))}`],
     files: [],
     note: `events: Codex notify -> agentctl event${forward ? ` (then ${forward[0]}, your own notify)` : ''}`,
   };

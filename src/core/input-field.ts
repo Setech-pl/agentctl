@@ -82,7 +82,7 @@ export function areaKey(area: string[]): string {
  * Do the rows the TUI shows read back as exactly this text? Each logical line of the text is shown as one row, or as several when the TUI wrapped it:
  * then the space the wrap swallows is the only difference allowed. With `whole` false the TUI may show only the first lines of the text.
  */
-export function readsAs(shown: string[], text: string, agent: 'claude' | 'codex' | 'unknown' | undefined, whole: boolean): boolean {
+export function readsAs(shown: string[], text: string, agent: 'claude' | 'codex' | 'kimi' | 'unknown' | undefined, whole: boolean): boolean {
   const want = storedForm(text, agent).split('\n');
   let row = 0;
   for (const line of want) {
@@ -105,7 +105,7 @@ export function readsAs(shown: string[], text: string, agent: 'claude' | 'codex'
  * Does the area, right after our paste, show this paste? One placeholder, or the lines of the prompt - possibly fewer than all of them (a TUI
  * may show only the start), but each shown line exactly as written. A changed, extra or other line is not our paste.
  */
-export function pasteImage(area: string[], prompt: string, agent?: 'claude' | 'codex' | 'unknown'): boolean {
+export function pasteImage(area: string[], prompt: string, agent?: 'claude' | 'codex' | 'kimi' | 'unknown'): boolean {
   if (!area.length) return false;
   const shown = fieldText(area).split('\n');
   if (shown.length === 1 && PLACEHOLDER.test(shown[0]!.trim())) return true;

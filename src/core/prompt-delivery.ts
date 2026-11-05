@@ -47,7 +47,7 @@ const QUEUE_SIGNS: Partial<Record<'claude' | 'codex', RegExp>> = { claude: /^\s*
 
 /** Is a queue sign on the screen: a line of its own, or the dim text of the input field? */
 export function queueSignShown(agent: TaskRecord['agent'], screen: string, dimInput = ''): boolean {
-  const sign = agent === 'unknown' ? undefined : QUEUE_SIGNS[agent];
+  const sign = agent === 'claude' || agent === 'codex' ? QUEUE_SIGNS[agent] : undefined;
   return Boolean(sign && (sign.test(dimInput) || screen.split('\n').some(line => sign.test(line))));
 }
 
@@ -58,7 +58,7 @@ const markerOf = (record: TaskRecord) => record.agent === 'unknown' ? '❯' : pr
  * The echo of `prompt` in the transcript of the screen: a line that starts with the agent's prompt marker plus the rows that continue it (the TUI
  * wraps long lines and indents the rest), read back to exactly the prompt - nothing squeezed, nothing left out. Counts the blocks above the input field.
  */
-export function echoLines(screen: string, marker: string, prompt: string | undefined, agent?: 'claude' | 'codex' | 'unknown'): number {
+export function echoLines(screen: string, marker: string, prompt: string | undefined, agent?: 'claude' | 'codex' | 'kimi' | 'unknown'): number {
   if (!prompt?.trim()) return 0;
   const lines = screen.split('\n').map(line => line.trimEnd());
   const isMarker = (line: string) => line.trimStart().startsWith(marker);
@@ -108,7 +108,7 @@ function queuedListShows(screen: string, prompt: string, agent: TaskRecord['agen
  * Returns where the proof came from; null while nothing proves it. A draft in the composer holds every proof back: the message is not yet out of it.
  */
 function proofSource(ctx: Context, record: TaskRecord, screen: string): string | null {
-  if (inspectField(screen).area.length || screenMetadata(screen).draft_input) return null;
+  if (inspectField(screen).area.length || (record.agent !== 'unknown' ? provider(record.agent).screen.draft?.(screen) : undefined) || screenMetadata(screen).draft_input) return null;
   try {
     const evidence = JSON.parse(fs.readFileSync(path.join(ctx.config.stateDir, record.window, 'delivery-evidence.json'), 'utf8'));
     if (record.deliveryId && evidence.accepted === true && evidence.deliveryId === record.deliveryId && Date.parse(evidence.at) >= Date.parse(record.deliveryStartedAt ?? '')) return 'hook';

@@ -6,6 +6,7 @@ import { defaultSettings } from './settings.ts';
 
 import { CLAUDE_KINDS, parseClaudeEvent, planClaudeEvents } from './claude-events.ts';
 import type { ClaudeKind } from '../events.ts';
+import { hookPromptMatches } from '../paste-wrapper.ts';
 import { sessionOfStatusLine } from '../usage-tap.ts';
 import { readClaudePlan, claudeHome } from './claude-usage.ts';
 import { agentHomes } from '../usage-sources.ts';
@@ -66,9 +67,8 @@ export const claude: ProviderAdapter = {
     parse: e => e.kind ? parseClaudeEvent(e.kind as ClaudeKind, e.payload) : undefined,
     session(e) { return sessionOfStatusLine(isObject(e.payload) ? e.payload : {}); },
     acknowledgesPrompt(e) {
-      const normalize = (s: string) => s.replace(/\r\n?/g, '\n').trim();
       const data = isObject(e.payload) ? e.payload : {};
-      return e.kind === 'user-prompt-submit' && typeof data.prompt === 'string' && normalize(data.prompt) === normalize(e.prompt ?? '');
+      return e.kind === 'user-prompt-submit' && typeof data.prompt === 'string' && hookPromptMatches(data.prompt, e.prompt ?? '', 'claude');
     },
   },
   usage: {

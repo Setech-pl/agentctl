@@ -13,6 +13,7 @@ import { addWorktree } from './git.ts';
 import { applyLinks, checkLinkTargets, planLinks } from './links.ts';
 import { planBatch } from './plan.ts';
 import type { PlanOptions } from './plan.ts';
+import { provider } from './providers/registry.ts';
 import { waitForReady } from './ready.ts';
 import { RC_CONFIRM, RC_FIRST_TIME } from './remote-control.ts';
 import type { ResolvedSpec } from './spec.ts';
@@ -211,7 +212,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
     const ready = await waitForReady(runner, tmux, spec.window, {
       pattern: settings.readyPattern,
       emptyInput: true,
-      structuralComposer: true,
+      structuralComposer: !provider(spec.agent).screen.stablePaste,
       trustPattern: remote ? `${settings.trustPattern}|${RC_CONFIRM}` : settings.trustPattern,
       timeoutMs: settings.readyTimeout * 1000,
       ...(opts.signal ? { signal: opts.signal } : {}),

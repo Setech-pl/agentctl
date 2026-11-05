@@ -60,6 +60,7 @@ export interface SessionRef { id: string; transcript?: string }
 export interface RawEvent { kind?: string; payload: unknown; raw?: string; prompt?: string }
 
 export interface EventWiringInput {
+  attempt?: string;                    // attempt that owns the hooks/session (p15: --attempt)
   task: string; window: string; config: GlobalConfig;
   self: string[];                       // stableSelfArgv
   env: Record<string, string>;          // env specu (CODEX_HOME, KIMI_CODE_HOME…)

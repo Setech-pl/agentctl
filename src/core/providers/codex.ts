@@ -4,6 +4,7 @@ import { defaultSettings } from './settings.ts';
 
 import { parseCodexEvent, planCodexEvents } from './codex-events.ts';
 import type { ClaudeKind } from '../events.ts';
+import { sameMessage } from '../paste-wrapper.ts';
 import { sessionOfStatusLine } from '../usage-tap.ts';
 import { readCodexPlan, codexHome } from './codex-usage.ts';
 import { agentHomes } from '../usage-sources.ts';
@@ -56,9 +57,8 @@ export const codex: ProviderAdapter = {
     parse: e => parseCodexEvent(e.payload),
     session(e) { const data = isObject(e.payload) ? e.payload : {}; return typeof data['thread-id'] === 'string' && data['thread-id'] !== '' ? { id: data['thread-id'] } : undefined; },
     acknowledgesPrompt(e) {
-      const normalize = (s: string) => s.replace(/\r\n?/g, '\n').trim();
       const data = isObject(e.payload) ? e.payload : {};
-      return Array.isArray(data['input-messages']) && data['input-messages'].some(text => typeof text === 'string' && normalize(text) === normalize(e.prompt ?? ''));
+      return Array.isArray(data['input-messages']) && data['input-messages'].some(text => typeof text === 'string' && sameMessage(text, e.prompt ?? '', 'codex'));
     },
 
   },

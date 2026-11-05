@@ -381,7 +381,10 @@ const acknowledge=(prompt)=>{
   note({hook:result.status,stderr:result.stderr});
  },2200);
 };
-const draw=()=>process.stdout.write('\\x1b[2J\\x1b[H'+(!trusted?'Do you trust this folder?\\n❯ No, exit\\nYes, I trust this folder\\n':submitted?${JSON.stringify(mode === 'claude-spinner' ? '✶ Transmogrifying… (5s · ↓ 816 tokens · thinking with low effort)\n\n❯ \n○ low · /effort\npaste again to expand\n' : mode === 'hook' || mode === 'silent' ? (agent === 'claude' ? '❯ \n' : '› \n') : 'Working (esc to interrupt)\n')}:'Heads up, you have less than 25% of your weekly limit left\\n${agent === 'codex' ? '›' : '❯'} '+(pasted?'[Pasted Content '+pasted.length+' chars]':'${agent === 'codex' ? 'Ask Codex to do anything' : 'Try "fake"'}')+'\\n'));
+const composer=s=>{const lines=s.trimEnd().split('\\n'),at=lines.findLastIndex(l=>/^[❯›](?:\\s|$)/.test(l));if(at<0)return s;
+ if(${JSON.stringify(agent)}==='claude'){if(at>0&&/^[─]{3,}$/.test(lines[at-1])&&lines.slice(at+1).some(l=>l===lines[at-1]))return s;return [...lines.slice(0,at),'────────────────────',...lines.slice(at),'────────────────────'].join('\\n')+'\\n';}
+ if(lines.some(l=>/^  [\\w.-]+ (?:low|medium|high|xhigh) · /.test(l)))return s;return s.trimEnd()+'\\n  GPT-6.1-Sol low · ~/fake\\n  ? for shortcuts\\n';};
+const draw=()=>process.stdout.write('\\x1b[2J\\x1b[H'+(!trusted?'Do you trust this folder?\\n❯ No, exit\\nYes, I trust this folder\\n':submitted?${JSON.stringify(mode === 'claude-spinner' ? '✶ Transmogrifying… (5s · ↓ 816 tokens · thinking with low effort)\n\n❯ \n○ low · /effort\npaste again to expand\n' : mode === 'hook' || mode === 'silent' ? (agent === 'claude' ? '❯ \n' : '› \n') : 'Working (esc to interrupt)\n')}:composer('Heads up, you have less than 25% of your weekly limit left\\n${agent === 'codex' ? '›' : '❯'} '+(pasted?'[Pasted Content '+pasted.length+' chars]':'${agent === 'codex' ? 'Ask Codex to do anything' : 'Try "fake"'}')+'\\n')));
 process.stdout.write('\\x1b[?2004h');process.stdin.setRawMode(true);process.stdin.resume();
 process.stdin.on('data',data=>{stream+=data.toString();for(;;){
  if(stream.startsWith('\\x1b[200~')){const end=stream.indexOf('\\x1b[201~');if(end<0)return;pasted=stream.slice(6,end);stream=stream.slice(end+6);submitted=false;note({paste:pasted});draw();continue;}
