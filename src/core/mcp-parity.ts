@@ -14,6 +14,8 @@ export const CLI_MCP: Record<string, string[]> = {
   report: ['report', 'report_from'], away: ['away_status', 'away'], 'away status': ['away_status'], 'away on': ['away'], 'away off': ['away'], manager: ['manager_start', 'manager_status'], 'manager stop': ['manager_stop'], 'notify-test': ['notify_test'], adopt: ['adopt'], interrupt: ['interrupt'], move: ['move'], peek: ['peek'], doctor: ['doctor'],
 };
 export const CLI_MCP_EXCEPTIONS: Record<string, string> = {
+  dataset: 'Local dataset command group; CLI only.',
+  'dataset export': 'Owner-only local benchmark export; CLI only, no MCP tool.',
   up: 'Interactive terminal orchestration: opens watch/board and optionally manager; use the CLI.',
   watch: 'Long-running terminal watcher, started and supervised locally.',
   board: 'Interactive terminal UI.',

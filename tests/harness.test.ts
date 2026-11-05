@@ -25,6 +25,13 @@ it('shortens long sandbox names inside the requested root and refuses an oversiz
   assert.equal(fs.readFileSync(sentinel, 'utf8'), 'keep');
 });
 
+it('keeps package smoke sockets inside the required dataset root within the limit', () => {
+  const root = '/Users/marcinkrzetowski/Projects/cache-dev/agentctl-0181/dataset';
+  const h = new Harness({ name: 'smoke-node22', cacheRoot: root }, REPO_ROOT);
+  assert.equal(path.dirname(h.root), root);
+  assert.ok(Buffer.byteLength(path.join(h.tmuxDir, `tmux-${process.getuid?.() ?? 0}`, 'default')) <= 100);
+});
+
 /** A sandbox on disk with fakes in fakeBin and a resolver that finds only what the test says. */
 function input(name: string, over: Partial<SafetyInput> & { found?: Record<string, string> } = {}): SafetyInput {
   const root = scratch.sub(name);

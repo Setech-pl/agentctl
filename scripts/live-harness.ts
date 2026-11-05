@@ -199,7 +199,7 @@ export class Harness {
     const namedRoot = path.join(cacheRoot, `live-${options.name}`);
     // Keep long task-owned roots usable without escaping to a shared /tmp socket.
     this.root = Buffer.byteLength(socketAt(namedRoot)) <= 100 ? namedRoot
-      : path.join(cacheRoot, `live-${createHash('sha256').update(options.name).digest('hex').slice(0, 12)}`);
+      : path.join(cacheRoot, `live-${createHash('sha256').update(options.name).digest('hex').slice(0, 9)}`);
     this.fakeBin = path.join(this.root, 'fakebin');
     this.home = path.join(this.root, 'home');
     this.agentctlHome = path.join(this.root, 'agentctl-home');

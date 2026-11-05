@@ -42,6 +42,8 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`resume`](#agentctl-resume) | After a restart (the Mac, the tmux server): make the window again for active tasks that have a worktree and no window, and start the agent in resume mode - Claude with --resume \<session> or --continue, Codex with "resume \<session>" or "resume --last" - with the same model, effort, flags, event hooks and usage tap, without pasting the prompt again. Tasks whose report is ready are left alone unless --all. Shows the list and asks y/N first. |
 | [`up`](#agentctl-up) | Start of the day: make sure the watcher and the board run in the agentctl session (never a second copy; with manager.autostart the manager too), say which tasks can be resumed, and go to the board (attach, or switch inside tmux). Without a terminal it only prints the command to attach. |
 | [`mark`](#agentctl-mark) | Record the result the user judged. Multiple tasks require a preview and confirmation. |
+| [`dataset`](#agentctl-dataset) | Read-only benchmark datasets |
+| [`dataset export`](#agentctl-dataset-export) | Export one record per known task attempt; no content by default |
 | [`log`](#agentctl-log) | The history of the tasks: when, agent/model/effort, how long, tokens, progress, the result you marked and the verdict of the report. One line per task, newest first. |
 | [`stats`](#agentctl-stats) | Which model and effort work: the tasks of the history grouped by agent/model/effort - how many, median time and tokens, the share of ok, partial and fail (agentctl mark), cancelled ones and tasks moved to the other provider after a limit. |
 | [`gc`](#agentctl-gc) | Bez flag = podgląd, --apply wykonuje. Take back disk space from finished tasks: the git worktrees of closed, cancelled and archived tasks without uncommitted changes, the files next to their reports that are older than --older-than (the *.md reports stay), their state folders (moved to the archive), and with --branches their branches merged into the base (git branch -d, never -D, never main/master or the current branch). A dry run with sizes unless --apply. History and reports stay; uncommitted work, foreign worktrees and unmerged branches are only listed as skipped. |
@@ -779,6 +781,43 @@ Examples:
 agentctl mark TASK-42 ok
 agentctl mark TASK-42 partial --note "missed the edge case"
 agentctl mark TASK-42 fail
+```
+
+## agentctl dataset
+
+Read-only benchmark datasets
+
+Subcommands: `dataset export`.
+
+```
+agentctl dataset [options] [command]
+```
+
+## agentctl dataset export
+
+Export one record per known task attempt; no content by default
+
+```
+agentctl dataset export [options]
+```
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--since <time>` | inclusive attempt start: ISO time or age (7d) |  |
+| `--until <time>` | inclusive attempt start: ISO time or age |  |
+| `--cohort <name>` | cohort filter |  |
+| `--agent <provider>` | resolved provider filter |  |
+| `--out <file>` | create a new export file (never overwrite existing files) |  |
+| `--format <format>` | jsonl or csv | default `jsonl` |
+| `--include-prompts` | include redacted prompt text (JSONL only) |  |
+| `--include-reports` | include redacted report text (JSONL only) |  |
+
+Examples:
+
+```sh
+agentctl dataset export --out attempts.jsonl
+agentctl dataset export --format csv --since 30d
+agentctl dataset export --include-prompts --include-reports --out content.jsonl
 ```
 
 ## agentctl log

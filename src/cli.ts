@@ -1,3 +1,5 @@
+import { exportDataset } from './core/dataset.ts';
+import type { DatasetOptions } from './core/dataset.ts';
 import { DEFAULT_PROVIDERS } from './core/providers/types.ts';
 import type { AgentName } from './core/config.ts';
 import { provider, PROVIDER_IDS, activeProviders } from './core/providers/registry.ts';
@@ -924,6 +926,24 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         if (!opts.yes && (!ctx.confirm || !await ctx.confirm('Apply these marks? [y/N] '))) { line('Not executed. Re-run with --yes to confirm this batch.'); return; }
       }
       for (const r of await markTasks(ctx, tasks, result, opts.note)) line(`${r.task}: ${r.result}${r.previous && r.previous !== r.result ? ` (was ${r.previous})` : ''}`);
+    }));
+
+  program.command('dataset').description('Read-only benchmark datasets').command('export')
+    .description('Export one record per known task attempt; no content by default')
+    .option('--since <time>', 'inclusive attempt start: ISO time or age (7d)')
+    .option('--until <time>', 'inclusive attempt start: ISO time or age')
+    .option('--cohort <name>', 'cohort filter')
+    .option('--agent <provider>', 'resolved provider filter')
+    .option('--out <file>', 'create a new export file (never overwrite existing files)')
+    .option('--format <format>', 'jsonl or csv', 'jsonl')
+    .option('--include-prompts', 'include redacted prompt text (JSONL only)')
+    .option('--include-reports', 'include redacted report text (JSONL only)')
+    .action(guarded(async (opts: DatasetOptions) => {
+      const ctx = contextFor(false, { migrate: false, silent: true });
+      // Exclusive creation protects state/history/report files, including symlink aliases.
+      const fd = opts.out ? fs.openSync(opts.out, 'wx', 0o600) : undefined;
+      try { await exportDataset(ctx, opts, chunk => { if (fd !== undefined) fs.writeSync(fd, chunk); else deps.stdout(chunk); }); }
+      finally { if (fd !== undefined) fs.closeSync(fd); }
     }));
 
   program

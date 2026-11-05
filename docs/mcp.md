@@ -187,6 +187,8 @@ Both are always readable without mcp.allow. New/queue previews and executed resp
 | `resume` | `resume` |  |
 | `up` | — | Interactive terminal orchestration: opens watch/board and optionally manager; use the CLI. |
 | `mark` | `mark` |  |
+| `dataset` | — | Local dataset command group; CLI only. |
+| `dataset export` | — | Owner-only local benchmark export; CLI only, no MCP tool. |
 | `log` | `log` |  |
 | `stats` | `stats` |  |
 | `gc` | `gc_preview`, `gc` |  |
@@ -309,6 +311,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 - `resume`: `--all`, `-y, --yes`, `--dry-run`
 - `up`: `--no-attach`
 - `mark`: `--cohort &lt;name&gt;`, `--note &lt;text&gt;`, `-y, --yes`
+- `dataset export`: `--since &lt;time&gt;`, `--until &lt;time&gt;`, `--cohort &lt;name&gt;`, `--agent &lt;provider&gt;`, `--out &lt;file&gt;`, `--format &lt;format&gt;`, `--include-prompts`, `--include-reports`
 - `log`: `--since &lt;age&gt;`, `--cohort &lt;name&gt;`, `--json`, `--clip`
 - `stats`: `--since &lt;age&gt;`, `--cohort &lt;name&gt;`, `--json`, `--clip`
 - `gc`: `--preview`, `--dry-run`, `--verbose`, `--offset &lt;n&gt;`, `--limit &lt;n&gt;`, `--force-links`, `--apply`, `--older-than &lt;age&gt;`, `--branches`, `--cohort &lt;name&gt;`, `-y, --yes`, `--json`
