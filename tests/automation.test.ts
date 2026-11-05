@@ -1,3 +1,4 @@
+import { composerFixture } from './composer-fixture.ts';
 import { acknowledgingRespond } from './helpers.ts';
 import { completedRecordFromSpec as recordFromSpec } from './helpers.ts';
 import assert from 'node:assert/strict';
@@ -43,7 +44,7 @@ function makeContext(config: Config, options: RecordingOptions = {}, confirm?: (
 type Config = ReturnType<typeof makeConfig>;
 type Respond = (cmd: string, args: string[], opts: ExecOptions) => Partial<ExecResult> | undefined;
 
-const IDLE = 'Welcome\n❯ Try "x"';
+const IDLE = composerFixture('Welcome\n❯ Try "x"');
 const WORKING = 'Thinking…\nesc to interrupt';
 const TRUST = 'Quick safety check: do you trust this folder?\n❯ 1. Yes, I trust this folder';
 
@@ -211,7 +212,7 @@ describe('new --clip / send --clip through the CLI', () => {
 
   it('send --clip asks, then pastes the prompt (-y skips the question)', async () => {
     const send = `---\ntask: NC-1\n---\nFollow up please.\n`;
-    const respond = acknowledgingRespond((cmd, args) => (cmd === 'tmux' && args[0] === 'list-windows' ? { stdout: 'nc-1\n' } : cmd === 'tmux' && args[0] === 'capture-pane' ? { stdout: '❯ Try \"fake\"\n' } : undefined));
+    const respond = acknowledgingRespond((cmd, args) => (cmd === 'tmux' && args[0] === 'list-windows' ? { stdout: 'nc-1\n' } : cmd === 'tmux' && args[0] === 'capture-pane' ? { stdout: composerFixture('❯ Try \"fake\"\n') } : undefined));
     const declined = await run(['send', '--clip'], send, false, new RecordingRunner({ dryRun: false, respond }));
     assert.deepEqual(declined.runner.commands, []);
     assert.match(declined.stdout, /NC-1  ->  window agentctl:nc-1, 17 characters: Follow up please\./);

@@ -1,0 +1,10 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000000",
+  "transcript_path": "/home/user/.claude/projects/-x/00000000-0000-4000-8000-000000000000.jsonl",
+  "cwd": "/home/user/work",
+  "scratchpad_dir": "/tmp/claude/scratchpad",
+  "prompt_id": "157d30f0-97e6-4708-af77-a653e1f5f3b8",
+  "permission_mode": "auto",
+  "hook_event_name": "UserPromptSubmit",
+  "prompt": "<pasted_content id=\"80b3\">\nLine 1: the quick brown fox jumps over the lazy dog, again and again, to pad the message out to about one thousand characters.\nLine 2: the quick brown fox jumps over the lazy dog, again and again, to pad the message out to about one thousand characters.\nLine 3: the quick brown fox jumps over the lazy dog, again and again, to pad the message out to about one thousand characters.\nLine 4: the quick brown fox jumps over the lazy dog, again and again, to pad the message out to about one thousand characters.\nLine 5: the quick brown fox jumps over the lazy dog, again and again, to pad the message out to about one thousand characters.\nLine 6: the quick brown fox jumps over the lazy dog, again and again, to pad the message out to about one thousand characters.\nLine 7: the quick brown fox jumps over the lazy dog, again and again, to pad the message out to about one thousand characters.\n</pasted_content id=\"80b3\">"
+}

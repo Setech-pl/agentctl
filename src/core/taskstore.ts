@@ -46,6 +46,19 @@ export interface TaskRecord {
   promptKind?: 'initial' | 'followup';
   deliveryWasBusy?: boolean;
   promptDelivery?: 'launching' | 'pending' | 'sending' | 'confirming' | 'sent' | 'needs-attention';
+  /** Delivery result: delivered, unconfirmed screen queue, confirmed transcript queue (pending until injection), or paste still in the field. */
+  deliveryResult?: 'delivered' | 'queued-in-agent' | 'queued-in-agent-confirmed' | 'not-delivered-in-field';
+  /** Identity of the input-field area right after our paste ("image:<digest>", see input-field.ts). It is also the record that agentctl pasted for this delivery: `send --enter-only` presses Enter only for an area that is, byte for byte, this one. */
+  deliveryField?: string;
+  /** What confirmed the delivery: hook, transcript, transcript-queue (Claude took it into its queue), screen (an idle agent started working) or report. */
+  deliverySource?: string;
+  /** The agent's queue sign was on the screen just before our last Enter: then it proves nothing about the message that Enter sent. */
+  deliveryQueueSign?: boolean;
+  /** Enter presses of this delivery and the time of the last one. */
+  deliveryEnters?: number;
+  deliveryEnterAt?: string;
+  /** How many lines of the screen already echoed the start of the prompt when the delivery began. */
+  deliveryEchoBaseline?: number;
   deliveryId?: string;
   deliveryStartedAt?: string;
   deliveryReportBaseline?: string;
@@ -167,9 +180,10 @@ export function renderTaskMd(record: TaskRecord, prompt: string): string {
   if (record.autoReview) header.auto_review = record.autoReview;
   if (record.switchedBy) header.switched_by = record.switchedBy;
   if (record.cohort) header.cohort = record.cohort;
-  for (const [key, value] of Object.entries({ delivery_output_baseline: record.deliveryOutputBaseline, delivery_id: record.deliveryId, delivery_started_at: record.deliveryStartedAt, delivery_report_baseline: record.deliveryReportBaseline, report_confirmed: record.reportConfirmed, pending_prompt: record.pendingPrompt, prompt_delivery: record.promptDelivery, prompt_sent_at: record.promptSentAt, prompt_error: record.promptError })) if (value !== undefined) header[key] = value;
+  for (const [key, value] of Object.entries({ delivery_output_baseline: record.deliveryOutputBaseline, delivery_id: record.deliveryId, delivery_started_at: record.deliveryStartedAt, delivery_report_baseline: record.deliveryReportBaseline, report_confirmed: record.reportConfirmed, pending_prompt: record.pendingPrompt, prompt_delivery: record.promptDelivery, prompt_sent_at: record.promptSentAt, prompt_error: record.promptError, delivery_result: record.deliveryResult, delivery_field: record.deliveryField, delivery_source: record.deliverySource, delivery_enters: record.deliveryEnters, delivery_enter_at: record.deliveryEnterAt, delivery_echo_baseline: record.deliveryEchoBaseline })) if (value !== undefined) header[key] = value;
   if (record.promptKind) header.prompt_kind = record.promptKind;
   if (record.deliveryWasBusy !== undefined) header.delivery_was_busy = record.deliveryWasBusy;
+  if (record.deliveryQueueSign !== undefined) header.delivery_queue_sign = record.deliveryQueueSign;
   header.report = record.report;
   if (record.reportAlt && record.reportAlt.length > 0) header.report_alt = record.reportAlt;
   if (record.agentCliVersion) header.agent_cli_version = record.agentCliVersion;
@@ -258,10 +272,13 @@ export function parseTaskRecord(text: string): TaskRecord | undefined {
   };
   if (isObject(data.observed) && typeof data.observed.model === 'string' && typeof data.observed.effort === 'string' && typeof data.observed.cliVersion === 'string') record.observed = data.observed as TaskRecord['observed'];
   if (typeof data.observed_warning === 'string') record.observedWarning = data.observed_warning;
-  for (const [key, field] of [['delivery_output_baseline', 'deliveryOutputBaseline'], ['delivery_id', 'deliveryId'], ['delivery_started_at', 'deliveryStartedAt'], ['delivery_report_baseline', 'deliveryReportBaseline'], ['report_confirmed', 'reportConfirmed'], ['pending_prompt', 'pendingPrompt'], ['prompt_sent_at', 'promptSentAt'], ['prompt_error', 'promptError']] as const) if (typeof data[key] === 'string') record[field] = data[key];
+  for (const [key, field] of [['delivery_output_baseline', 'deliveryOutputBaseline'], ['delivery_id', 'deliveryId'], ['delivery_started_at', 'deliveryStartedAt'], ['delivery_report_baseline', 'deliveryReportBaseline'], ['report_confirmed', 'reportConfirmed'], ['pending_prompt', 'pendingPrompt'], ['prompt_sent_at', 'promptSentAt'], ['prompt_error', 'promptError'], ['delivery_field', 'deliveryField'], ['delivery_source', 'deliverySource'], ['delivery_enter_at', 'deliveryEnterAt']] as const) if (typeof data[key] === 'string') record[field] = data[key];
+  if (['delivered', 'queued-in-agent', 'queued-in-agent-confirmed', 'not-delivered-in-field'].includes(String(data.delivery_result))) record.deliveryResult = data.delivery_result as TaskRecord['deliveryResult'];
+  for (const [key, field] of [['delivery_enters', 'deliveryEnters'], ['delivery_echo_baseline', 'deliveryEchoBaseline']] as const) if (typeof data[key] === 'number') record[field] = data[key];
   if (['launching', 'pending', 'sending', 'confirming', 'sent', 'needs-attention'].includes(String(data.prompt_delivery))) record.promptDelivery = data.prompt_delivery as TaskRecord['promptDelivery'];
   if (data.prompt_kind === 'initial' || data.prompt_kind === 'followup') record.promptKind = data.prompt_kind;
   if (typeof data.delivery_was_busy === 'boolean') record.deliveryWasBusy = data.delivery_was_busy;
+  if (typeof data.delivery_queue_sign === 'boolean') record.deliveryQueueSign = data.delivery_queue_sign;
   if (typeof data.attempt === 'number') record.attempt = data.attempt;
   if (typeof data.outputs_protocol === 'number') record.outputsProtocol = data.outputs_protocol;
   for (const [key, field] of [['attempt_id', 'attemptId'], ['attempt_started', 'attemptStarted'], ['attempt_report_baseline', 'attemptReportBaseline'], ['turn_ended_at', 'turnEndedAt'], ['summary_delivered', 'summaryDelivered']] as const) if (typeof data[key] === 'string') record[field] = data[key];

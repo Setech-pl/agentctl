@@ -523,6 +523,8 @@ agentctl send [options] [file]
 | `--dry-run` | print the commands that would run, execute nothing |  |
 | `--clip` | read the prompt from the clipboard; shows a summary and asks y/N first |  |
 | `-y, --yes` | with --clip: do not ask |  |
+| `--enter-only <task>` | paste nothing: show the exact text that an earlier send left in the input field of the task ("nie dostarczono – tekst w polu wpisywania") with a token; refuses any other text |  |
+| `--confirm <token>` | with --enter-only: press Enter if the field is still exactly the text the preview showed |  |
 
 Examples:
 
@@ -1301,6 +1303,7 @@ agentctl event [options] [payload]
 | Option | Meaning | Notes |
 |---|---|---|
 | `--task <task>` | task ID | required |
+| `--attempt <id>` | attempt that owns this hook/session |  |
 | `--agent <agent>` | the agent that reports | one of `claude`, `codex`; required |
 | `--kind <kind>` | claude: which hook called | one of `notification`, `stop`, `stop-failure`, `user-prompt-submit` |
 | `--forward <json>` | codex: JSON list, the notify command the user had; run with the same JSON after this one |  |
@@ -1316,6 +1319,7 @@ agentctl usage-tap [options]
 | Option | Meaning | Notes |
 |---|---|---|
 | `--task <task>` | task ID | required |
+| `--attempt <id>` | attempt that owns this statusLine session |  |
 | `--forward <command>` | your own statusLine command: run with the same input after this one |  |
 
 Examples:

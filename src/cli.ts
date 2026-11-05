@@ -56,7 +56,8 @@ import { collectOverlaps, renderOverlaps, touchWarnings } from './core/collision
 import type { NewOptions, NewResult } from './core/new.ts';
 import { pullReady, pullTask } from './core/pull.ts';
 import { reportInfo, shortPath } from './core/report-detect.ts';
-import { sendPrompts } from './core/send.ts';
+import { sendPrompts, submitDrafts } from './core/send.ts';
+import { resolveRunningTask } from './core/resolve.ts';
 import { collectStatus, reportStatus, shownRows, statusMarkdown } from './core/status.ts';
 import { summarizeSpecs } from './core/summary.ts';
 import { DesktopNotifier, NOTIFIER_MEMORY_MS, notifierOptionsFor } from './core/notify.ts';
@@ -693,9 +694,24 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('--dry-run', 'print the commands that would run, execute nothing')
     .option('--clip', 'read the prompt from the clipboard; shows a summary and asks y/N first')
     .option('-y, --yes', 'with --clip: do not ask')
+    .option('--enter-only <task>', 'paste nothing: show the exact text that an earlier send left in the input field of the task ("nie dostarczono – tekst w polu wpisywania") with a token; refuses any other text')
+    .option('--confirm <token>', 'with --enter-only: press Enter if the field is still exactly the text the preview showed')
     .action(
-      guarded(async (file: string | undefined, opts: { clip?: boolean; yes?: boolean; dryRun?: boolean }) => {
+      guarded(async (file: string | undefined, opts: { clip?: boolean; yes?: boolean; dryRun?: boolean; enterOnly?: string; confirm?: string }) => {
         const ctx = contextFor(Boolean(opts.dryRun));
+        if (opts.confirm !== undefined && opts.enterOnly === undefined) throw new AgentctlError('--confirm belongs to --enter-only');
+        if (opts.enterOnly !== undefined) {
+          if (file !== undefined || opts.clip) throw new AgentctlError('--enter-only takes a task and nothing else: no file, no --clip');
+          const target = await resolveRunningTask(ctx, opts.enterOnly);
+          const [done] = await submitDrafts(ctx, [{ task: target.task, window: target.window }], opts.confirm ? { token: opts.confirm } : {});
+          if (done?.refused || done?.outcome === 'not-delivered' || done?.outcome === 'failed') throw new AgentctlError(`${target.task}: ${done.message}${done.field ? `\nText in the field:\n${done.field.join('\n')}` : ''}`);
+          if (done?.outcome === 'ready') {
+            line(`Text in the field of ${target.task} (exactly):`);
+            for (const text of done.field ?? []) line(`  │ ${text}`);
+            line(`Screen: ${done.screenState}. Nothing was pressed. To press Enter for exactly this text: agentctl send --enter-only ${target.task} --confirm ${done.token}`);
+          }
+          return;
+        }
         const items = splitSpecs(await readSpecSource(file, opts.clip), opts.clip ? 'clipboard' : (file ?? 'stdin')).map(resolveSendSpec);
         const summary = items.map((i) => `${i.task}  ->  window ${ctx.config.session}:${i.window}, ${i.prompt.length} characters: ${i.prompt.split('\n')[0]!.slice(0, 80)}`);
         if (opts.clip && !(await confirmAction(ctx, summary, 'Send?', Boolean(opts.yes) || Boolean(opts.dryRun)))) return;
@@ -1364,11 +1380,12 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .command('event')
     .description('Called by the agents themselves (hooks that "new" sets up): records the event, updates the task state and notifies at once. Always exits 0.')
     .requiredOption('--task <task>', 'task ID')
+    .option('--attempt <id>', 'attempt that owns this hook/session')
     .addOption(new Option('--agent <agent>', 'the agent that reports').choices([...cliProviders]).makeOptionMandatory())
     .addOption(new Option('--kind <kind>', 'claude: which hook called').choices(PROVIDER_IDS.flatMap(id => [...provider(id).events.kinds])))
     .option('--forward <json>', 'codex: JSON list, the notify command the user had; run with the same JSON after this one')
     .argument('[payload]', 'the event as JSON (codex puts it here; claude sends it on stdin)')
-    .action(async (payload: string | undefined, opts: { task: string; agent: AgentName; kind?: ClaudeKind; forward?: string }) => {
+    .action(async (payload: string | undefined, opts: { task: string; attempt?: string; agent: AgentName; kind?: ClaudeKind; forward?: string }) => {
       // A hook must never break the agent: whatever happens, the exit code stays 0.
       try {
         const config = deps.loadConfig();
@@ -1379,6 +1396,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         const self = deps.selfArgv?.();
         await handleEvent(ctx, new Alerts(ctx, notifier, { self }), {
           task: opts.task,
+          attempt: opts.attempt,
           agent: opts.agent,
           kind: opts.kind,
           payload: parseJson(raw),
@@ -1394,14 +1412,15 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .command('usage-tap')
     .description('Called by Claude Code as the statusLine of a task window (set up by "new"): keeps the plan limits that Claude gives only to a statusLine, remembers the session, then runs your own statusLine command with the same input and prints its output. Always exits 0.')
     .requiredOption('--task <task>', 'task ID')
+    .option('--attempt <id>', 'attempt that owns this statusLine session')
     .option('--forward <command>', 'your own statusLine command: run with the same input after this one')
-    .action(async (opts: { task: string; forward?: string }) => {
+    .action(async (opts: { task: string; attempt?: string; forward?: string }) => {
       // A status line must never break the agent: whatever happens, the exit code stays 0.
       try {
         const config = deps.loadConfig();
         const runner = deps.makeRunner(false, () => {});
         const raw = deps.stdinIsTTY ? '' : deps.readStdin();
-        const result = await handleTap(runner, config, { task: opts.task, window: windowName(opts.task), raw, ...(opts.forward ? { forward: opts.forward } : {}) });
+        const result = await handleTap(runner, config, { task: opts.task, attempt: opts.attempt, window: windowName(opts.task), raw, ...(opts.forward ? { forward: opts.forward } : {}) });
         if (result.output !== '') deps.stdout(result.output);
       } catch (e) {
         deps.stderr(`agentctl usage-tap: ${errorMessage(e)}\n`);

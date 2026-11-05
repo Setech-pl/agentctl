@@ -11,6 +11,7 @@ import { Alerts } from './alert.ts';
 import type { AgentName } from './config.ts';
 import type { Context } from './context.ts';
 import { extractQuestion, parseClaudeEvent, parseCodexEvent } from './events.ts';
+import { hookPromptMatches, sameMessage } from './paste-wrapper.ts';
 import type { AgentEvent, ClaudeKind } from './events.ts';
 import { classifyScreen } from './state.ts';
 import type { EventKind } from './state.ts';
@@ -76,13 +77,14 @@ export function limitText(record: { task: string; agent: string; pin?: boolean |
 async function noteSession(ctx: Context, record: TaskRecord, input: EventInput): Promise<void> {
   try {
     const session = provider(input.agent).events.session({ kind: input.kind, payload: input.payload });
-    if (session) await rememberSession(ctx.runner, ctx.config, record.window, input.agent, session);
+    if (session) await rememberSession(ctx.runner, ctx.config, record.window, input.agent, session, input.attempt ?? '');
   } catch {
     // counting tokens must not break an event
   }
 }
 
 export interface EventInput {
+  attempt?: string | undefined;
   task: string;
   agent: AgentName;
   /** Claude: which hook (the JSON on stdin is `payload`). Codex: absent (the JSON argument is `payload`). */
@@ -152,6 +154,7 @@ export async function handleEvent(ctx: Context, alerts: Alerts, input: EventInpu
       await runner.appendFile(eventsLogPath(ctx), logLine(now, input.task, input.agent, event.type, 'unknown task, ignored'));
       return { task: input.task, event, note: 'unknown task' };
     }
+    if (input.attempt && input.attempt !== record.attemptId) return { task: input.task, event, note: 'stale attempt, ignored' };
     // Separate evidence avoids a TASK.md lock in synchronous UserPromptSubmit hooks.
     // In particular, never wait for the sender's prompt-delivery lock here.
     const accepted = provider(input.agent).events.acknowledgesPrompt?.({ kind: input.kind, payload: input.payload, prompt: record.pendingPrompt ?? '' });

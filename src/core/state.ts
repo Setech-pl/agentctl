@@ -34,13 +34,34 @@ export function classifyScreen(
   if (matches(settings.trustPattern, screen)) return 'needs-trust';
   if (settings.approvalPattern && matches(settings.approvalPattern, screen)) return 'needs-input';
   if (matches(settings.questionPattern, screen)) return 'needs-input';
-  if (matches(settings.workingPattern, screen)) return 'working';
+  if (matches(settings.workingPattern, screen) || starSpinnerActive(screen)) return 'working';
   if (settings.approvalPattern && settings.overloadPatterns?.some(p => matches(p, screen))) return 'overloaded';
   if (isOverloaded(screen, settings.overloadPatterns)) return 'overloaded';
   if (settings.limitPatterns.some((p) => matches(p, screen))) return 'limited';
   if ((settings.backgroundPatterns ?? []).some((p) => matches(p, screen))) return 'background';
   if (settings.idleRequiresInput && (!settings.readyPattern || !matches(settings.readyPattern, screen) || /^\s*(?:[■●]\s*)?Error:/im.test(screen))) return 'needs-input';
   return 'idle';
+}
+
+const PROMPT_LINE = /^\s*[❯›>](?:\s|$)/;
+/** "✳ Fluttering… (2s · thinking with high effort)": the glyph, a word, "…" and a bracket that starts with the elapsed time. */
+const STAR_SPINNER = /^\s*✳\s+[^\s…][^…\n]*…\s*\((?:\d+m\s*)?\d+s\b[^)\n]*\)/;
+const SPINNER_NEIGHBOUR = /^[\s─━═-]*$|^\s*⎿/u;
+
+/**
+ * Claude Code 2.1.311 cycles its spinner through ✳ as well; with the footer "esc to interrupt" hidden by a paste placeholder that frame is the only
+ * sign of a running turn. It counts only where the TUI draws the spinner: the line right above the input box (a tip, an empty line or the border
+ * may stand between), never a spinner line quoted further up in a report or an answer.
+ */
+export function starSpinnerActive(screen: string): boolean {
+  const lines = screen.split('\n');
+  let at = -1;
+  for (let i = lines.length - 1; i >= 0; i--) if (PROMPT_LINE.test(lines[i]!)) { at = i; break; }
+  for (let i = at - 1; at >= 0 && i >= 0; i--) {
+    if (SPINNER_NEIGHBOUR.test(lines[i]!)) continue;
+    return STAR_SPINNER.test(lines[i]!);
+  }
+  return false;
 }
 
 /** The agent's input box is on the screen: no dialog (permission, question) covers it. */

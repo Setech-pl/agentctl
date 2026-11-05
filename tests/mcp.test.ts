@@ -1,3 +1,4 @@
+import { composerFixture } from './composer-fixture.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -14,7 +15,7 @@ import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helper
 const scratch = useScratch();
 const SELF = ['/usr/bin/env', 'AGENTCTL_HOME=/h', '/opt/node/bin/node', '--experimental-strip-types', '--no-warnings', '/opt/agentctl/bin/agentctl.ts'];
 const WORKING = '● Reading src/menu.ts\n  esc to interrupt\n';
-const IDLE = 'Welcome\n❯ \n  ⏵⏵ auto mode on';
+const IDLE = composerFixture('Welcome\n❯ \n  ⏵⏵ auto mode on');
 
 const tool = (name: string): McpToolDef => MCP_TOOLS.find((t) => t.name === name) as McpToolDef;
 const schemaOf = (name: string) => z.object(tool(name).input);
@@ -412,7 +413,7 @@ describe('mcp: the write tools', () => {
 
   it('move: the first call describes it, confirm: true hands the task over', async () => {
     const t = setup('m1', 'mcp: {allow: [move]}\n');
-    t.tmux.newWindowScreen = '› Ask Codex to do anything\n';
+    t.tmux.newWindowScreen = composerFixture('› Ask Codex to do anything\n');
     seedTask(t.config, 'NC-1', { repos: [{ path: scratch.sub('m1/app'), worktree: scratch.sub('m1/app-wt') }], requested: { agent: 'claude', model: 'opus', effort: 'high' } });
     t.tmux.add('nc-1', "  ⎿  You've hit your session limit · resets 3pm\n❯ ");
     const preview = await t.call('move', { task: 'NC-1' });

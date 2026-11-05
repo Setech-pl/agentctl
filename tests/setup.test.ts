@@ -1,3 +1,4 @@
+import { composerFixture } from './composer-fixture.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -14,7 +15,7 @@ import type { ResolvedSpec } from '../src/core/spec.ts';
 import { acknowledgingRespond, DiskRunner, makeConfig, makeContext, useScratch } from './helpers.ts';
 
 const scratch = useScratch();
-const IDLE = '❯ Try "how does <filepath> work?"\n› Ask Codex to do anything\n? for shortcuts';
+const IDLE = composerFixture('❯ Try "how does <filepath> work?"\n› Ask Codex to do anything');
 
 type Respond = (cmd: string, args: string[], opts: ExecOptions) => Partial<ExecResult> | undefined;
 

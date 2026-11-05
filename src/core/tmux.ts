@@ -5,6 +5,11 @@ import type { ExecResult, Runner } from './runner.ts';
 /** Pause between pasting a prompt and pressing Enter, so the TUI has consumed the bracketed paste. */
 export const PASTE_SETTLE_MS = 300;
 
+/** A captured screen; `dimInput` is the dim text of the input field that `stdout` no longer holds. */
+export interface Capture extends ExecResult {
+  dimInput?: string;
+}
+
 /** A window of the session as tmux reports it. */
 export interface WindowInfo {
   /** tmux's window ID ("@12"); empty when the listing did not carry one. */
@@ -186,15 +191,20 @@ export class Tmux {
     return true;
   }
 
-  /** Visible screen (or the last `lines` lines of scrollback + screen) of the window. */
-  async capture(window: string, lines?: number, infos?: WindowInfo[], hintId?: string, join?: boolean): Promise<ExecResult> {
+  /**
+   * Visible screen (or the last `lines` lines of scrollback + screen) of the window. The dim text of the input field (a suggestion, or
+   * "Press up to edit queued messages") is taken out of `stdout` and returned as `dimInput`: it is not a draft, but it is a sign.
+   */
+  async capture(window: string, lines?: number, infos?: WindowInfo[], hintId?: string, join?: boolean): Promise<Capture> {
     const args = ['capture-pane', '-p', ...(join ? ['-J'] : []), '-t', await this.targetFor(window, infos, hintId)];
     if (lines !== undefined) args.push('-S', `-${lines}`);
     const plain = await this.runner.exec('tmux', args, { readOnly: true });
     if (plain.code !== 0 || !screenMetadata(plain.stdout).draft_input) return plain;
     // Text in the input field: a draft of the human, or the dim suggestion of the next prompt that Claude Code shows in an empty field. Only the colour tells them apart.
     const styled = await this.runner.exec('tmux', ['capture-pane', '-p', '-e', ...args.slice(2)], { readOnly: true });
-    return styled.code === 0 ? { ...plain, stdout: withoutDimInput(plain.stdout, styled.stdout) } : plain;
+    if (styled.code !== 0) return plain;
+    const dimInput = dimInputText(plain.stdout, styled.stdout);
+    return { ...plain, stdout: withoutDimInput(plain.stdout, styled.stdout), ...(dimInput ? { dimInput } : {}) };
   }
 
   /** Make `window` the current window of the session (what a client attached to the session then shows). */
@@ -298,14 +308,27 @@ export function inputIsDim(styledLine: string): boolean {
   return seen;
 }
 
-/** The screen with the dim text of the last prompt line taken out: what is left is what a human typed. `styled` is the same screen from `capture-pane -e`. */
-export function withoutDimInput(plain: string, styled: string): string {
+/** The line of the dim input (index in `plain`), or -1: the last prompt line, when everything after its marker is dim. */
+function dimInputLine(plain: string, styled: string): number {
   const lines = plain.split('\n'), styledLines = styled.split('\n');
   let at = -1;
   for (let i = lines.length - 1; i >= 0; i--) if (PROMPT_LINE.test(lines[i]!)) { at = i; break; }
-  if (at < 0 || styledLines.length !== lines.length || !inputIsDim(styledLines[at]!)) return plain;
+  return at < 0 || styledLines.length !== lines.length || !inputIsDim(styledLines[at]!) ? -1 : at;
+}
+
+/** The screen with the dim text of the last prompt line taken out: what is left is what a human typed. `styled` is the same screen from `capture-pane -e`. */
+export function withoutDimInput(plain: string, styled: string): string {
+  const at = dimInputLine(plain, styled);
+  if (at < 0) return plain;
+  const lines = plain.split('\n');
   lines[at] = lines[at]!.replace(/^(\s*[❯›>]).*$/, '$1');
   return lines.join('\n');
+}
+
+/** The dim text that `withoutDimInput` takes out ('' when there is none): an agent's suggestion, or Claude Code's "Press up to edit queued messages". */
+export function dimInputText(plain: string, styled: string): string {
+  const at = dimInputLine(plain, styled);
+  return at < 0 ? '' : plain.split('\n')[at]!.replace(/^\s*[❯›>]\s*/, '').trim();
 }
 
 /** A line made only of box-drawing characters and spaces: borders and separators around the input field. */

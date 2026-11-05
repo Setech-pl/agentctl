@@ -1,0 +1,29 @@
+› FOLLOWUP-CX-LONG: when your current work is finished, reply with the single line ACK-CX-LONG and nothing else. This padding makes the message long enough for the terminal UI to treat it as a large…
+• 2
+• Ran sleep 12
+  └ (no output)
+• 3
+• Ran sleep 12
+  └ (no output)
+• 4
+• Ran sleep 12
+  └ (no output)
+• 5
+• Ran sleep 12
+  └ (no output)
+• 6
+• DONE-CX1
+• ACK-CX-LONG
+  Worked for 1m 27s • 22:52
+› Use the request_user_input tool right now to ask me ONE question: "Which colour: red or blue?" with the two options red and blue. Wait for my answer, then reply with the single line
+  COLOUR-<answer>.
+? Which colour: red or blue?
+  • red
+  • blue
+• Working (27s • esc to interrupt)
+• Queued follow-up inputs
+  ? 1 question · 8s
+    ⇧← to answer
+› Ask Codex to do anything
+  GPT-6.1-Sol low · ~/work/sandbox · Generate READY-CX report
+  ? for shortcuts                                                                                                                                                              ⚠ 1 warning · f2 to view

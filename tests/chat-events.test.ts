@@ -1,3 +1,4 @@
+import { composerFixture } from './composer-fixture.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -116,7 +117,7 @@ describe('events: what writes the journal', () => {
     assert.equal(kinds.filter((k) => k === 'report-ready:NC-1').length, 1, 'once');
     assert.equal(readJournal(w.config).find((e) => e.kind === 'report-ready')?.verdict, 'Werdykt: PASS – all done');
     // a task from the queue starts, another is cancelled
-    w.tmux.newWindowScreen = '› Ask Codex to do anything\n';
+    w.tmux.newWindowScreen = composerFixture('› Ask Codex to do anything\n');
     const repo = scratch.sub('sources/app');
     const spec = `---\ntask: NC-9\nagent: codex\nrepos:\n  - path: ${repo}\n    worktree: ${repo}-nc-9\n---\nGo.\n`;
     const plan = await planQueueAdd(w.ctx, splitSpecs(spec, 't'), {});

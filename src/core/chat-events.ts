@@ -204,6 +204,7 @@ const KIND_LABEL: Record<JournalEntry['kind'], string> = {
   usage: 'UŻYCIE',
   'limits-changed': 'LIMITY',
   'report-detected': 'RAPORT WYKRYTY',
+  delivery: 'WIADOMOŚĆ',
 };
 
 export function summaryLine(s: EventsSummary): string {

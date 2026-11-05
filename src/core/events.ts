@@ -131,6 +131,7 @@ export interface EventWiring {
 }
 
 export interface WiringInput {
+  attempt?: string | undefined;
   agent: AgentName;
   task: string;
   window: string;

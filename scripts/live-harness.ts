@@ -123,11 +123,11 @@ case "$1" in
   --version) echo "${name === 'claude' ? '2.1.309 (Claude Code, fake)' : name === 'kimi' ? 'kimi 2.5.0 (fake)' : 'codex-cli 0.166.0 (fake)'}"; exit 0;;
   --help) ${name === 'claude' ? `echo "  --effort <level>"; echo "  --remote-control [name]               Start an interactive session with Remote Control enabled"; echo "  --append-system-prompt <prompt>       Append a system prompt (--bare: --append-system-prompt[-file])"` : `echo "  -c, --config <key=value>"`}; exit 0;;
 esac
-${name === 'claude' ? `printf '❯ Try "fake"\\n'` : `printf '› Ask Codex to do anything\\n'`}
+${name === 'claude' ? `printf '────────────────────\\n❯ Try "fake"\\n────────────────────\\n'` : `printf '› Ask Codex to do anything\\n  GPT-6.1-Sol low · ~/fake\\n  ? for shortcuts\\n'`}
 ${name === 'claude' ? `case " $* " in *" --remote-control "*) printf '  /rc active\\n';; esac` : ''}
 while IFS= read -r line; do
   printf '● got: %s\\n' "$line"
-  ${name === 'claude' ? `printf '❯ Try "fake"\\n'` : `printf '› Ask Codex to do anything\\n'`}
+  ${name === 'claude' ? `printf '────────────────────\\n❯ Try "fake"\\n────────────────────\\n'` : `printf '› Ask Codex to do anything\\n  GPT-6.1-Sol low · ~/fake\\n  ? for shortcuts\\n'`}
 done
 `;
 
@@ -393,4 +393,89 @@ process.stdin.on('data',data=>{stream+=data.toString();for(;;){
 }});draw();
 `;
   fs.writeFileSync(path.join(h.fakeBin, agent), program, { mode: 0o755 });
+}
+
+export interface ReplaySpec {
+  agent: 'claude' | 'codex';
+  /** Recorded screens (tests/fixtures/screen-*): ready, busy (a turn runs), pasted (the paste stands in the field), accepted (Enter was taken), question. */
+  screens: Record<'ready' | 'busy' | 'pasted' | 'accepted' | 'question', string>;
+  /** The state to show now; the double redraws when it changes. */
+  state: 'ready' | 'busy' | 'question';
+  /** How many Enter presses after a paste it ignores (the swallowed Enter of P15). */
+  swallow: number;
+  /** Claude: run the UserPromptSubmit hook of --settings with the payload Claude Code really sends (a collapsed paste wrapped in <pasted_content>). */
+  hook: boolean;
+  /** Show the paste whole in the field (all its lines) instead of a placeholder: a human can then change one line of it. */
+  plain?: boolean;
+  /**
+   * Write the message into the session transcript the way the real CLI does (P15-FIX3, recorded 2026-11-05): Claude `queue-operation`/`enqueue` while a turn runs
+   * (else a `user` line) under `<claudeLogs>/projects/<cwd>/<id>.jsonl`; Codex `response_item` + `item_completed` in a rollout under `<codexHome>/sessions/Y/M/D/`.
+   * `delayMs`: after that long (the screen shows the message first and the transcript later).
+   */
+  transcript?: { claudeLogs: string; codexHome: string; delayMs: number; injectionDelayMs?: number };
+}
+
+/**
+ * A fake agent that replays RECORDED screens in the real tmux of the harness and logs every paste and Enter to `log`. It reads `<root>/replay-spec.json`
+ * on every action, so a scenario can change what it does between steps (`writeReplaySpec`). Replaces only a fake inside this harness.
+ */
+export function installReplayAgent(h: Harness, agent: 'claude' | 'codex', log: string): void {
+  h.check();
+  const program = `#!${process.execPath}
+import fs from 'node:fs';
+import { spawn } from 'node:child_process';
+const args=process.argv.slice(2);
+if(args.includes('--version')){console.log('${agent} ${agent === 'claude' ? '2.1.311' : '0.166.0'} (replay)');process.exit(0);}
+if(args.includes('--help')){console.log('--effort --remote-control --append-system-prompt');process.exit(0);}
+const SPEC=${JSON.stringify(path.join(h.root, 'replay-spec.json'))}, LOG=${JSON.stringify(log)};
+const spec=()=>JSON.parse(fs.readFileSync(SPEC,'utf8')), note=v=>fs.appendFileSync(LOG,JSON.stringify(v)+'\\n');
+let state=spec().state, field='', pasted='', enters=0, count=0, stream='', shown='';
+const PLACEHOLDER=/^(❯|›)(\\s)(?:\\[Pasted text #\\d+(?: \\+\\d+ lines)?\\]|Press up to edit queued messages)\\s*$/m;
+const out=t=>process.stdout.write(t.replace(/\\n/g,'\\r\\n'));
+const composer=s=>{const lines=s.trimEnd().split('\\n'),at=lines.findLastIndex(l=>/^[❯›](?:\\s|$)/.test(l));if(at<0)return s;
+ if(${JSON.stringify(agent)}==='claude'){if(at>0&&/^[─]{3,}$/.test(lines[at-1])&&lines.slice(at+1).some(l=>l===lines[at-1]))return s;return [...lines.slice(0,at),'────────────────────',...lines.slice(at),'────────────────────'].join('\\n')+'\\n';}
+ if(lines.some(l=>/^  [\\w.-]+ (?:low|medium|high|xhigh) · /.test(l)))return s;return s.trimEnd()+'\\n  GPT-6.1-Sol low · ~/fake\\n  ? for shortcuts\\n';};
+const draw=name=>{let s=spec().screens[name];const marker='${agent === 'claude' ? '❯' : '›'}';
+ const text=name==='pasted'||name==='ready'?field:'';
+ if(name==='pasted')s=s.replace(PLACEHOLDER,(_m,mk)=>mk+'\\u00a0'+text);
+ if(name==='ready')s=s+(text?marker+' '+text+'\\n':'');
+ shown=name;out('\\x1b[2J\\x1b[H'+composer(s));};
+const label=()=>{if(spec().plain)return pasted.replace(/\\r\\n?/g,'\\n');const lines=pasted.split('\\n').length;return lines>1?'[Pasted text #'+count+' +'+lines+' lines]':pasted.length>200?'[Pasted text #'+count+']':pasted;};
+const hook=text=>{if(!spec().hook||${JSON.stringify(agent)}!=='claude')return;const i=args.indexOf('--settings');if(i<0)return;
+ const settings=JSON.parse(fs.readFileSync(args[i+1],'utf8')),prompt=text.split('\\n').length>1||text.length>200?'<pasted_content id="80b3">\\n'+text+'\\n</pasted_content id="80b3">':text;
+ const child=spawn(settings.hooks.UserPromptSubmit[0].hooks[0].command,{shell:true,stdio:['pipe','ignore','ignore']});child.stdin.end(JSON.stringify({hook_event_name:'UserPromptSubmit',prompt}));};
+const sid='replay-'+process.pid;
+const sessionKnown=file=>{let child;if(${JSON.stringify(agent)}==='claude'){const i=args.indexOf('--settings');if(i<0)return;const settings=JSON.parse(fs.readFileSync(args[i+1],'utf8'));child=spawn(settings.hooks.Notification[0].hooks[0].command,{shell:true,stdio:['pipe','ignore','ignore']});child.stdin.end(JSON.stringify({session_id:sid,transcript_path:file,notification_type:'idle_prompt'}));}
+ else{const raw=args.find(a=>a.startsWith('notify='));if(!raw)return;const notify=JSON.parse(raw.slice(7));spawn(notify[0],[...notify.slice(1),JSON.stringify({type:'session-known','thread-id':sid})],{stdio:'ignore'});}};
+const wrapped=text=>text.split('\\n').length>1||text.length>200?'<pasted_content id="c996">\\n'+text+'\\n</pasted_content id="c996">':text;
+const transcript=(text,busy)=>{const t=spec().transcript;if(!t)return;setTimeout(()=>{const stored=text.replace(/\\r\\n?/g,'\\n').replace(/\\t/g,${JSON.stringify(agent)}==='claude'?'    ':'\\t').replace(/\\s+$/,''),now=()=>new Date().toISOString();
+ if(${JSON.stringify(agent)}==='claude'){const dir=t.claudeLogs+'/projects/'+process.cwd().replace(/[^A-Za-z0-9]/g,'-');fs.mkdirSync(dir,{recursive:true});
+  const row=busy?{type:'queue-operation',operation:'enqueue',timestamp:now(),sessionId:sid,content:wrapped(stored)}:{type:'user',timestamp:now(),message:{role:'user',content:wrapped(stored)},promptSource:'typed',sessionId:sid};
+  const file=dir+'/'+sid+'.jsonl';fs.appendFileSync(file,JSON.stringify(row)+'\\n');sessionKnown(file);
+  if(busy&&t.injectionDelayMs!==undefined)setTimeout(()=>{fs.appendFileSync(file,JSON.stringify({type:'user',timestamp:now(),message:{role:'user',content:wrapped(stored)},promptSource:'queued',sessionId:sid})+'\\n');},t.injectionDelayMs);}
+ else{const d=new Date(),dir=t.codexHome+'/sessions/'+d.getFullYear()+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+String(d.getDate()).padStart(2,'0'),file=dir+'/rollout-replay-'+sid+'.jsonl';fs.mkdirSync(dir,{recursive:true});
+  if(!fs.existsSync(file))fs.writeFileSync(file,JSON.stringify({timestamp:now(),type:'session_meta',payload:{id:sid,cwd:process.cwd()}})+'\\n');
+  fs.appendFileSync(file,JSON.stringify({timestamp:now(),type:'response_item',payload:{type:'message',role:'user',content:[{type:'input_text',text:stored}]}})+'\\n'+JSON.stringify({timestamp:now(),type:'event_msg',payload:{type:'item_completed',item:{type:'UserMessage',content:[{type:'text',text:stored}]}}})+'\\n');sessionKnown(file);}
+ },t.delayMs);};
+process.stdout.write('\\x1b[?2004h');process.stdin.setRawMode(true);process.stdin.resume();draw(state);
+let seenSpec=spec().state;setInterval(()=>{const s=spec().state;if(s!==seenSpec){seenSpec=s;state=s;draw(state==='ready'?'ready':state==='busy'?'busy':'question');}},100);
+process.stdin.on('data',data=>{stream+=data.toString();for(;;){
+ if(stream.startsWith('\\x1b[200~')){const end=stream.indexOf('\\x1b[201~');if(end<0)return;pasted=stream.slice(6,end);stream=stream.slice(end+6);count++;enters=0;note({paste:pasted,state});
+  if(state==='question')continue;field=label();draw(state==='ready'?'ready':'pasted');continue;}
+ if(!stream.length)return;
+ if(stream.startsWith('\\x1b') && stream.length<6)return;
+ const c=stream[0];stream=stream.slice(1);
+ if(c==='\\r'||c==='\\n'){if(!field||state==='question')continue;enters++;note({enter:enters,state});
+  if(state==='ready'){field='';state='busy';draw('busy');hook(pasted);transcript(pasted,false);continue;}
+  if(enters<=spec().swallow){draw('pasted');continue;}
+  field='';draw('accepted');note({accepted:true});hook(pasted);transcript(pasted,true);continue;}
+ if(state!=='question'){if(c==='\\x7f'){field=field.slice(0,-1);note({backspace:true});}else{field+=c;note({typed:c});}draw(state==='ready'?'ready':'pasted');}
+}});
+`;
+  fs.writeFileSync(path.join(h.fakeBin, agent), program, { mode: 0o755 });
+}
+
+/** (Re)write the spec of the replay agent; it picks the change up within 100 ms. */
+export function writeReplaySpec(h: Harness, spec: ReplaySpec): void {
+  fs.writeFileSync(path.join(h.root, 'replay-spec.json'), JSON.stringify(spec));
 }

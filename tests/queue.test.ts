@@ -1,3 +1,4 @@
+import { composerFixture } from './composer-fixture.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -311,7 +312,7 @@ describe('new with a full limit proposes the queue', () => {
 
   it('with a terminal: "add to the queue?" y queues it, the other tasks of the file still start', async () => {
     const s = setup('new-y');
-    s.tmux.newWindowScreen = '❯ \n› \n';
+    s.tmux.newWindowScreen = composerFixture('❯ \n› \n');
     s.tmux.add('nc-9');
     seedTask(s.config, 'NC-9', { agent: 'claude' });
     const questions: string[] = [];

@@ -1,3 +1,4 @@
+import { composerFixture } from './composer-fixture.ts';
 import { acknowledgingRespond } from './helpers.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -210,7 +211,7 @@ describe('state_dir', () => {
     const runner = new DiskRunner({
       dryRun: false,
       startTime: Date.now(),
-      respond: acknowledgingRespond((cmd, args) => (cmd === 'tmux' && args[0] === 'capture-pane' ? { stdout: 'Welcome\n❯ Try "x"' } : cmd === 'tmux' && args[0] === 'has-session' ? { code: 1 } : undefined)),
+      respond: acknowledgingRespond((cmd, args) => (cmd === 'tmux' && args[0] === 'capture-pane' ? { stdout: composerFixture('Welcome\n❯ Try "x"') } : cmd === 'tmux' && args[0] === 'has-session' ? { code: 1 } : undefined)),
     });
     await newTasks(new Context(runner, config, () => {}), [spec], { reuse: true });
     assert.ok(fs.existsSync(path.join(config.stateDir, 'nc-1', 'TASK.md')));

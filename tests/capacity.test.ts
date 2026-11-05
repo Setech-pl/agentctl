@@ -1,3 +1,4 @@
+import { composerFixture } from './composer-fixture.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -225,7 +226,7 @@ describe('capacity: scheduling evidence', () => {
     const spec = specText({ task: 'APP-1', agent: 'claude', model: 'sonnet', effort: 'medium' }, repo);
     const fresh = new DiskRunner({ dryRun: false, startTime: NOW, respond: acknowledgingRespond((cmd, args, opts) => {
       if (cmd === 'git' && args.includes('--verify')) return { code: 1 };
-      if (cmd === 'tmux') return args[0] === 'capture-pane' ? { stdout: '❯ Try "fake"' } : (args[0] === 'has-session' || args[0] === 'list-windows' ? { code: 1 } : {});
+      if (cmd === 'tmux') return args[0] === 'capture-pane' ? { stdout: composerFixture('❯ Try "fake"') } : (args[0] === 'has-session' || args[0] === 'list-windows' ? { code: 1 } : {});
       if (cmd === 'codex') return { code: 127 };
       return {};
     }) });

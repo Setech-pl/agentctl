@@ -1,3 +1,4 @@
+import { composerFixture } from './composer-fixture.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -136,7 +137,7 @@ describe('ordering a provider: --agent, limits, pin, review_of', () => {
     const { ctx, runner } = makeContext(config, {
       respond: (cmd, args) => {
         if (cmd === 'tmux' && (args[0] === 'has-session' || args[0] === 'list-windows')) return { code: 1 };
-        if (cmd === 'tmux' && args[0] === 'capture-pane') return { stdout: '› Ask Codex to do anything' };
+        if (cmd === 'tmux' && args[0] === 'capture-pane') return { stdout: composerFixture('› Ask Codex to do anything') };
         return undefined;
       },
     });

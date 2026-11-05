@@ -1,3 +1,4 @@
+import { inspectField } from './input-field.ts';
 import { screenMetadata } from './tmux.ts';
 import { PATTERN_FLAGS } from './config.ts';
 import type { Runner } from './runner.ts';
@@ -14,6 +15,7 @@ export interface TrustWait {
 export interface ReadyOptions {
   pattern: string;
   emptyInput?: boolean;
+  structuralComposer?: boolean;
   /** If the screen matches this (folder-trust dialog), the human has to answer it: stop waiting, or wait for them (`waitTrust`). */
   trustPattern?: string;
   timeoutMs: number;
@@ -72,7 +74,7 @@ export async function waitForReady(runner: Runner, tmux: Tmux, window: string, o
           inTrust = false;
           deadline = runner.now() + opts.timeoutMs;
         }
-        if (regex.test(screen) && (!opts.emptyInput || !screenMetadata(screen).draft_input)) return { ready: true, trust: false, screen };
+        if ((!opts.structuralComposer || inspectField(screen).readable) && regex.test(screen) && (!opts.emptyInput || !screenMetadata(screen).draft_input)) return { ready: true, trust: false, screen };
       }
     }
     if (runner.now() >= deadline) return { ready: false, trust: inTrust, screen };

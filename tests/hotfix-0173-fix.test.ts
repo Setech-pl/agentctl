@@ -1,3 +1,4 @@
+import { composerFixture } from './composer-fixture.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -32,7 +33,7 @@ for (const agent of ['codex', 'claude'] as const) for (const swallowed of [1, 9]
       if (args[0] === 'load-buffer') payload = opts.input ?? '';
       if (args[0] === 'paste-buffer') { pastes++; draft = payload.split('\n')[0]!; }
       if (args[0] === 'send-keys' && args.at(-1) === 'Enter') { enters++; if (enters > swallowed) draft = ''; }
-      if (args[0] === 'capture-pane') return { stdout: draft ? `Heads up, you have less than 25% of your weekly limit left\n${agent === 'codex' ? '›' : '❯'} ${draft}\n` : enters > swallowed ? 'Working (esc to interrupt)\n' : `${agent === 'codex' ? '› Ask Codex to do anything' : '❯ Try "x"'}\n` };
+      if (args[0] === 'capture-pane') return { stdout: composerFixture(draft ? `Heads up, you have less than 25% of your weekly limit left\n${agent === 'codex' ? '›' : '❯'} ${draft}\n` : enters > swallowed ? 'Working (esc to interrupt)\n' : `${agent === 'codex' ? '› Ask Codex to do anything' : '❯ Try "x"'}\n`) };
       return {};
     });
     const r = seedTask(f.config, 'T1', { agent, windowId: '@1' });
@@ -52,7 +53,7 @@ it('0173-FIX-B/C: canonical absolute report path survives pending trust; competi
   assert.ok(reportInstructions('attempt-2', r.report).includes(r.report));
   await queuePrompt(f.ctx, r, text); assert.equal(await deliverPendingPrompt(f.ctx, 't1'), 'pending');
   assert.equal(f.runner.commands.filter(c => c.includes('paste-buffer')).length, 0);
-  pane.screen = '❯ Try "x"\n';
+  pane.screen = composerFixture('❯ Try "x"\n');
   const result = await Promise.all([deliverPendingPrompt(f.ctx, 't1'), watchTick(f.ctx, new WatchMemory(), { notify: async () => {} })]);
   assert.equal(result[0], 'sent'); assert.equal(f.runner.commands.filter(c => c.includes('paste-buffer')).length, 1);
   assert.equal(f.runner.calls.find(c => c.line.includes('load-buffer'))!.input, text);

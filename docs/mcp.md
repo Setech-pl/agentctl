@@ -47,13 +47,13 @@ Off until you list them in `~/.agentctl/config.yaml`. The list is read again on 
 
 ```yaml
 mcp:
-  allow: [send, interrupt]     # any of: send, new, interrupt, close, move, queue, queue_rm, cancel, mark, set_limits, reserve, resume, away
+  allow: [send, interrupt]     # any of: send, new, interrupt, close, move, queue, queue_rm, cancel, mark, set_limits, reserve, resume, away, send_enter
   allow_rm_worktree: false     # close may also remove the git worktree
 ```
 
 | Tool | Arguments | What it does |
 |---|---|---|
-| `send` | `task`, `text` (up to 20,000 characters) | Pastes a prompt into the window of a running task and presses Enter. |
+| `send` | `task`, `text` (up to 20,000 characters) | Pastes a prompt into the window of a running task and presses Enter. With `enter_only: true` (no text) it pastes nothing and presses Enter for the text that an earlier send left in the input field; that needs `send_enter` in `mcp.allow` (a permission of its own). The first call shows the exact text of the field, the screen state and a `token` for those bytes and presses nothing; Enter goes in only with `confirm: true` and that `token`, when the field is still byte for byte that text and what agentctl pasted. |
 | `new` | `spec`, `confirm?` | Starts tasks from a spec text, validated like the CLI. The first call only returns the summary; tasks start only when it is called again with `confirm: true`. A spec with `setup` (shell commands) is refused, because a chat must not choose shell commands. It never waits for a folder-trust dialog (a human answers it in the window) and never switches provider. |
 | `interrupt` | `task` | Sends the agent its interrupt key; the window stays open. |
 | `close` | `task`, `remove_worktree?` | Closes the window and marks the task closed. The worktree and the branch stay, unless `remove_worktree: true` and `mcp.allow_rm_worktree` is set (`git worktree remove`, never forced). |
@@ -249,7 +249,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 | `stats` | read | `cohort?`, `since?` |
 | `overlap` | read | `task?` |
 | `resume` | write | `tasks?`, `all?`, `confirm?`, `preview_token?` |
-| `send` | write | `task`, `text` |
+| `send` | write | `task`, `text?`, `enter_only?`, `confirm?`, `token?` |
 | `new` | write | `spec`, `agent?`, `reuse?`, `no_agent?`, `cohort?`, `wait_trust?`, `confirm?`, `preview_token?` |
 | `queue` | write | `spec`, `cohort?`, `agent?`, `confirm?`, `preview_token?` |
 | `queue_rm` | write | `task`, `confirm?`, `preview_token?` |
@@ -299,7 +299,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 - `cohort show`: `--json`
 - `cohort archive`: `--older-than &lt;age&gt;`, `--yes`
 - `overlap`: `--json`
-- `send`: `--dry-run`, `--clip`, `-y, --yes`
+- `send`: `--dry-run`, `--clip`, `-y, --yes`, `--enter-only &lt;task&gt;`, `--confirm &lt;token&gt;`
 - `status`: `--json`, `--clip`, `--tmux-line`, `--all`, `--cohort &lt;name&gt;`
 - `limits show`: `--json`
 - `limits set`: `-y, --yes`, `--dry-run`
@@ -326,8 +326,8 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 - `adopt`: `--report &lt;path&gt;`, `--window &lt;name&gt;`, `--worktree &lt;path&gt;`, `--agent &lt;agent&gt;`, `--model &lt;model&gt;`, `--effort &lt;effort&gt;`, `--dry-run`
 - `interrupt`: `--dry-run`
 - `attach`: `--switch-client`
-- `event`: `--task &lt;task&gt;`, `--agent &lt;agent&gt;`, `--kind &lt;kind&gt;`, `--forward &lt;json&gt;`
-- `usage-tap`: `--task &lt;task&gt;`, `--forward &lt;command&gt;`
+- `event`: `--task &lt;task&gt;`, `--attempt &lt;id&gt;`, `--agent &lt;agent&gt;`, `--kind &lt;kind&gt;`, `--forward &lt;json&gt;`
+- `usage-tap`: `--task &lt;task&gt;`, `--attempt &lt;id&gt;`, `--forward &lt;command&gt;`
 - `move`: `--agent &lt;agent&gt;`, `-y, --yes`
 - `peek`: `-n, --lines &lt;n&gt;`
 - `mcp install`: `--desktop`, `--claude-code`, `--config &lt;file&gt;`, `--dry-run`, `-y, --yes`
@@ -490,6 +490,8 @@ Automatic review adds `TASK-REV` after the author report, on the author branch a
 `base: "@TASK"` resolves at start to that task's output commit, otherwise its branch HEAD; specify `:repo-name` for multiple repositories. The resolved commit is shown in the new preview and stored in TASK.md. Missing or ambiguous sources block start. A verdict condition blocks on another verdict or `brak werdyktu`; ordinary `after: TASK` still waits only for a complete report.
 
 `send` pastes a follow-up immediately while Claude/Codex work. Delivery is confirmed from submission, a new working state, transcript/queued-message echo or a new complete report. `idle_prompt` and a late Stop alone do not confirm it; a stuck composer becomes `needs-attention` after `delivery_confirm_s`. An idle-only adapter (`accepts_busy_prompt: false`), or an unconfirmed previous message, keeps later messages in a durable FIFO. Status/peek show the queue; the response says pasted, queued position, or unconfirmed. The watcher drains it in order.
+
+The answer of `send` and `delivery_result` (TASK.md, `status --json`, MCP `status`) say what happened, in three states: delivered (`delivered`, with its source), `w kolejce agenta – niepotwierdzone` (queued-in-agent: the screen shows the message in the agent’s queue, nothing has confirmed it) or `nie dostarczono – tekst w polu wpisywania` (not-delivered-in-field: the paste stands in the input field). **Delivered is said only on an exact source**, compared literally (line ends are the one normalisation; no run of white space is squeezed): the UserPromptSubmit hook (its prompt for a collapsed paste is wrapped in `<pasted_content id=…>`; the wrapper is taken off the hook’s text only, by pairs of ids, and nested, mismatching or stray tags are ambiguous = no proof; the pending prompt is compared as written), the notify payload of Codex, or the session transcript of the task itself (Claude Code: the `queue-operation`/`enqueue` line, written the moment a message is submitted while a turn runs, or the `user` line; Codex: the `response_item` / `item_completed` line, or `user_message` in older versions) holding a message written after the delivery began that is exactly the pending one (for a collapsed paste the full text, not the label). Only the transcript files of the task’s own sessions are read: the ids its hooks recorded, else the single new transcript of its worktree. What the agents themselves do to a message is not part of it: the white space at its end is dropped, the newlines around a collapsed paste are the wrapper’s padding, Claude Code stores a tab as four spaces. The screen confirms nothing for a working agent: an echo of Codex or the queue sign of Claude Code (the dim “Press up to edit queued messages”, the queued message with “ctrl+x ctrl+s to send now”) only classifies the state as `w kolejce agenta – niepotwierdzone` (the sign only when it was not on the screen just before our own Enter and appeared after it with our paste gone from the field); the pending prompt stays, and the delivery goes on to wait for the hook or the transcript. For an idle agent that was pasted into, the older signs of the first prompt of every task remain (the turn started, the canonical report changed, the message echoed whole above an empty composer). **agentctl presses Enter only in the call that pastes**: up to three times, and before each one it captures the screen and compares the whole area of the input field, byte for byte (empty lines inside included), with the image taken right after the paste, which must itself be our paste (one placeholder, or the lines of the text); the same capture must show no dialog. A difference, a changed first image or an open dialog means no Enter and `nie dostarczono – tekst w polu wpisywania` (needs-attention at the next watch tick, with the two ways out). `watch` never presses Enter. `agentctl send --enter-only TASK` shows the exact text of the field, the screen state and a token for those bytes; `agentctl send --enter-only TASK --confirm TOKEN` captures again and presses Enter only if the area is still byte for byte the previewed text and the image recorded after our paste (so agentctl pasted it for this delivery) and the screen shows no dialog; anything else is refused with the reason. MCP: `send` with `enter_only: true` and no text needs its own permission `send_enter` in `mcp.allow` (`send` alone does not allow it); without `confirm: true` it only previews (text, state, `token`), with `confirm: true` and that `token` it presses; a refusal and a failed key (tmux `send-keys` error) are `isError` answers with the reason, the failed key is audited `failed` and never announced as sent, a pressed Enter is audited as executed (`enter-sent`, with the delivery) and announced, and the answer keeps “Enter sent” apart from “delivery confirmed”. With an open Codex question nothing is pasted: the answer names the question (“Codex ma otwarte pytanie „…” (zwinięte, N)”) and the message stays in the FIFO. The journal (`events_since`, kind WIADOMOŚĆ) records every change of the result of a follow-up with its delivery id: queued, not delivered, delivered (the first prompt of a task: only the first two).
 
 A provider limit emits one notice per episode with the known reset (otherwise `n/d`). Fresh remaining capacity above `limited.resume_above_percent` (5 by default), or an elapsed known reset, permits `limited.message` (`kontynuuj`) to the idle empty window. The overload guards check again before paste and Enter; attempts and limits survive restarts. `limited.auto_resume: false` disables sending. Provider and model stay the same.
 

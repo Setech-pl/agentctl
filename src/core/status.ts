@@ -15,7 +15,7 @@ import { formatModelEffort } from './equivalents.ts';
 import { syncMirror } from './mirror.ts';
 import type { MirrorResult } from './mirror.ts';
 import { classifyScreen, taskState } from './state.ts';
-import { deliveryEvidence } from './prompt-delivery.ts';
+import { deliveryEvidence, deliveryNote } from './prompt-delivery.ts';
 import { readStoredEvent } from './event-command.ts';
 import { extractQuestion } from './events.ts';
 import type { TaskState } from './state.ts';
@@ -46,6 +46,8 @@ export interface StatusRow {
   actionsCount?: number;
   promptQueue?: ReturnType<typeof promptQueueView>;
   promptDelivery?: string;
+  /** How the last message reached the agent: delivered / queued-in-agent / not-delivered-in-field. */
+  deliveryResult?: string;
 
   attempt?: number;
   attemptId?: string;
@@ -229,6 +231,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       task: record.task,
       promptQueue: promptQueueView(ctx, record.window),
       promptDelivery: record.promptDelivery,
+      ...(record.deliveryResult ? { deliveryResult: record.deliveryResult } : {}),
       attempt: record.attempt,
       attemptId: record.attemptId,
       summaryDelivered: record.summaryDelivered ?? null,
@@ -258,7 +261,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       lastLine: lastContentLine(screenText, settings.footerPatterns),
       progress: opts.progress === false || record.repos.length === 0 ? null : await taskProgress(runner, record.repos),
       collide: [],
-      hint: [writeFailure ? `State write failed: ${writeFailure.reason}; old TASK.md preserved` : unconfirmed ? record.promptError : record.promptDelivery === 'confirming' || record.promptDelivery === 'sending' ? 'dostarczenie niepotwierdzone – sprawdzam; watch confirms within delivery_confirm_s' : record.promptDelivery === 'pending' ? 'original prompt pending; watch sends it once after folder trust and empty ready input' : stateHint(record.task, state, record.pin === true, record.supersededBy), !record.reportConfirmed && record.reportSource && path.normalize(record.reportSource) !== path.normalize(record.report) ? `raport pochodzi z kopii ${record.reportSource} – sprawdź` : null].filter(Boolean).join('; ') || null,
+      hint: [writeFailure ? `State write failed: ${writeFailure.reason}; old TASK.md preserved` : unconfirmed ? record.promptError : record.promptDelivery === 'confirming' || record.promptDelivery === 'sending' ? (deliveryNote(record) ?? 'dostarczenie niepotwierdzone – sprawdzam; watch confirms within delivery_confirm_s') : record.promptDelivery === 'pending' ? 'original prompt pending; watch sends it once after folder trust and empty ready input' : stateHint(record.task, state, record.pin === true, record.supersededBy), !record.reportConfirmed && record.reportSource && path.normalize(record.reportSource) !== path.normalize(record.report) ? `raport pochodzi z kopii ${record.reportSource} – sprawdź` : null].filter(Boolean).join('; ') || null,
       question: state === 'needs-input' ? ((collapsedQuestion(screenText) ? sessionQuestion(config, record) : undefined) ?? extractQuestion(screenText) ?? (stored?.outcome === 'needs-input' && stored.text !== '' ? stored.text : null)) : null,
       pin: record.pin === true,
       finished: !alive || state === 'superseded',
