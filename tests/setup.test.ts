@@ -119,7 +119,7 @@ describe('new: worktree -> setup -> links -> window', () => {
     const r2 = new DiskRunner({ dryRun: false, respond: acknowledgingRespond(machine((_c, _a) => undefined)) });
     const code2 = await main(['new', '--agent', 'codex', file], { ...deps, makeRunner: () => r2 });
     assert.equal(code2, 0, err.join(''));
-    assert.ok(r2.commands.some((c) => c.includes('codex --sandbox')), `--agent codex is not read as --no-agent: ${r2.commands.join(' | ')}`);
+    assert.ok([...r2.written.values()].some((c) => c.includes('codex --sandbox')), `--agent codex is not read as --no-agent: ${r2.commands.join(' | ')}`);
   });
 });
 

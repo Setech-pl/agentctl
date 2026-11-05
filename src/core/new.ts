@@ -1,9 +1,10 @@
+import { writeLaunchScript } from './launch-script.ts';
 import { launchEnvironment } from './safety.ts';
 import { withStartLock, reserveStarts, releaseStarts } from './start-lock.ts';
 import { queuePrompt, deliverPendingPrompt, DELIVERY_WARNING } from './prompt-delivery.ts';
 import fs from 'node:fs';
 import path from 'node:path';
-import { agentCommandLine, buildAgentArgv, INSTALL_HINTS, promptWithHeader } from './agents.ts';
+import { buildAgentArgv, INSTALL_HINTS, promptWithHeader } from './agents.ts';
 import type { Context } from './context.ts';
 import type { Order } from './equivalents.ts';
 import { touchCohort } from './cohort.ts';
@@ -187,13 +188,22 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
 
     // 4b. the agent reports its own events (question, end of turn, limit) to `agentctl event`
     const wiring = config.notify.events && opts.self ? planEventWiring({ attempt: record.attemptId, agent: spec.agent, task: spec.task, window: spec.window, config, self: opts.self, env: spec.env, worktree: primary }) : undefined;
-    for (const file of wiring?.files ?? []) await runner.writeFile(file.path, file.content);
+    for (const file of wiring?.files ?? []) {
+      await runner.writeFile(file.path, file.content);
+      if (file.path.endsWith('.sh')) {
+        const protectedFile = await runner.exec('chmod', ['0700', file.path]);
+        if (protectedFile.code !== 0) throw new Error(`Cannot protect event script: ${file.path}`);
+      }
+    }
 
-    // 5. window + agent
-    await openAgentWindow(ctx, { ...guardRequest(spec), cwd: primary, env: launchEnvironment(config, spec, spec.env), origin: opts.origin ?? (spec.autoReview ? 'start' : 'new'), sessionUp });
-    sessionUp = true;
+    const launchEnv = launchEnvironment(config, spec, spec.env);
+
     const settings = config.agents[spec.agent];
-    const commandLine = agentCommandLine(buildAgentArgv(spec, settings, wiring?.args));
+    const commandLine = await writeLaunchScript(runner, taskDir(config, spec.window), buildAgentArgv(spec, settings, wiring?.args), launchEnv);
+    // 5. window + agent
+    await openAgentWindow(ctx, { ...guardRequest(spec), cwd: primary, env: {}, origin: opts.origin ?? (spec.autoReview ? 'start' : 'new'), sessionUp });
+    sessionUp = true;
+
     if (wiring) ctx.info(`${spec.task}: ${wiring.note}`);
     const remote = spec.remoteControl === true;
     // Remote Control asks once to be switched on; like the folder trust that is a dialog for the human.
@@ -204,7 +214,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
     if (windowId) await setHeaderField(runner, taskFile(config, spec.window), 'window_id', windowId);
     await runner.exec('tmux', ['set-option', '-w', '-t', windowId || tmux.target(spec.window), '@agentctl-role', 'task']);
     await tmux.typeCommand(spec.window, commandLine);
-    ctx.info(`${spec.task}: window ${config.session}:${spec.window} running ${commandLine}`);
+    ctx.info(`${spec.task}: window ${config.session}:${spec.window} running ${spec.agent} (model ${spec.model}, effort ${spec.effort}) via ${commandLine}`);
 
     // 6. wait for the agent; never answer a trust dialog (wait for the human to do it); then paste the prompt and press Enter
     const waitTrust = opts.waitTrust !== false;

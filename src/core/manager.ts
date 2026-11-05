@@ -1,3 +1,4 @@
+import { writeLaunchScript } from './launch-script.ts';
 import { remoteControlSupport, blockingEnv } from './providers/claude-rc.ts';
 export { remoteControlSupport, blockingEnv, RC_BLOCKING_ENV } from './providers/claude-rc.ts';
 import { collectGuide, dispatcherGuide } from './guide.ts';
@@ -307,11 +308,13 @@ export async function startManager(ctx: Context, opts: ManagerOptions): Promise<
   await runner.writeFile(files.settings, managerSettingsJson());
   await runner.writeFile(files.mcp, managerMcpJson(mcpEntryFrom(opts.self)));
 
+  const startCommand = await writeLaunchScript(runner, files.dir, buildManagerArgv(launch, config.agents.claude), {});
   const sessionUp = await tmux.hasSession();
   const made = sessionUp ? await tmux.newWindow(MANAGER_WINDOW, project, {}) : await tmux.newSession(MANAGER_WINDOW, project, {});
   if (made.code !== 0) throw new AgentctlError(`tmux could not make the window "${MANAGER_WINDOW}": ${made.stderr.trim() || `exit ${made.code}`}`);
-  await tmux.typeCommand(MANAGER_WINDOW, command);
-  ctx.info(`manager: window ${config.session}:${MANAGER_WINDOW} in ${project} running ${command}`);
+
+  await tmux.typeCommand(MANAGER_WINDOW, startCommand);
+  ctx.info(`manager: window ${config.session}:${MANAGER_WINDOW} in ${project} running Claude (model ${launch.model}, effort ${launch.effort}) via ${startCommand}`);
   if (opts.noWait || runner.dryRun) return { action: 'started', window: MANAGER_WINDOW, name, project, command, state: 'starting', files };
 
   const settings = config.agents.claude;

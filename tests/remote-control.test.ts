@@ -1,3 +1,4 @@
+import path from 'node:path';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { agentCommandLine, buildAgentArgv, buildResumeArgv } from '../src/core/agents.ts';
@@ -106,8 +107,8 @@ describe('remote control: starting a task', () => {
     const w = world('new-1', [IDLE]);
     const spec = resolve(w.config, 'agent: claude\nmodel: opus\nremote_control: true\n', w.repo);
     const [result] = await newTasks(w.ctx, [spec], { self: ['/usr/bin/node', '/x/agentctl.ts'] });
-    assert.match(result!.agentCommand, /^claude --model opus --effort high --remote-control NC-1 --settings /);
-    const typed = w.runner.commands.find((c) => c.includes('send-keys') && c.includes('--remote-control'));
+    assert.match(w.runner.written.get(path.join(w.config.stateDir, 'nc-1/start.sh'))!, /exec claude --model opus --effort high --remote-control NC-1 --settings /);
+    const typed = w.runner.commands.find((c) => c.includes('send-keys') && c.includes('exec sh'));
     assert.ok(typed, 'the line was typed into the window');
     assert.match(w.out.join('\n'), /NC-1: Remote Control on: the session "NC-1" appears in the Claude app \(Code\)/);
     const written = w.runner.written.get(taskFile(w.config, 'nc-1')) ?? '';

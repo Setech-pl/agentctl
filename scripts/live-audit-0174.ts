@@ -30,6 +30,8 @@ await withHarness({ name: 'audit-0174', cacheRoot: root, config: 'limits: {claud
     await pause(100);
   }
   check('W4 reservation is visible before the first tmux window', sawReservation); check('W4 watch + retry never use more than one slot', max === 1 && windows.length === 1);
+  // A window exists before its launch finishes; wait for the queue commit before stopping its watcher.
+  for (let n = 0; n < 100 && fs.readdirSync(queueDir).filter(name => name.endsWith('.json') && !name.includes('error')).length !== 1; n++) await pause(100);
   for (const watcher of [one, two]) { if (watcher.exitCode === null) { const closed = new Promise(resolve => watcher.once('close', resolve)); watcher.kill('SIGTERM'); await closed; } }
   const records = ['a', 'b'].map(w => readTaskRecord(config, w)).filter(r => r !== undefined); check('W4 exactly one task started; the other stays queued', records.length === 1 && fs.readdirSync(queueDir).filter(n => n.endsWith('.json') && !n.includes('error')).length === 1);
   const record = records[0]!, file = taskFile(config, record.window);

@@ -3575,18 +3575,32 @@ const GOLDEN = {
     {
       "args": [
         "-c",
-        "notify=[\"node\", \"/fixture/agentctl.ts\", \"event\", \"--task\", \"GOLD-1\", \"--agent\", \"codex\"]"
+        "notify=[\"sh\", \"<ROOT>/state/gold-1/codex-notify.sh\"]"
       ],
-      "files": [],
+      "files": [
+        {
+          "path": "<ROOT>/state/gold-1/codex-notify.sh",
+          "content": "#!/bin/sh\n\nexec node /fixture/agentctl.ts event --task GOLD-1 --agent codex \"$@\"\n"
+        }
+      ],
       "note": "events: Codex notify -> agentctl event"
     },
     {
       "args": [
         "-c",
-        "notify=[\"node\", \"/fixture/agentctl.ts\", \"event\", \"--task\", \"GOLD-1\", \"--agent\", \"codex\", \"--forward\", \"[\\\"user-hook\\\",\\\"with spaces\\\"]\"]"
+        "notify=[\"sh\", \"<ROOT>/state/gold-1/codex-notify.sh\"]"
       ],
-      "files": [],
-      "note": "events: Codex notify -> agentctl event (then user-hook, your own notify)"
+      "files": [
+        {
+          "path": "<ROOT>/state/gold-1/codex-notify.sh",
+          "content": "#!/bin/sh\n\nexec node /fixture/agentctl.ts event --task GOLD-1 --agent codex --forward-file <ROOT>/state/gold-1/codex-forward.json \"$@\"\n"
+        },
+        {
+          "path": "<ROOT>/state/gold-1/codex-forward.json",
+          "content": "[\"user-hook\",\"with spaces\"]\n"
+        }
+      ],
+      "note": "events: Codex notify -> agentctl event (then your own notify)"
     }
   ],
   "settings": "{\"claude\":{\"acceptsBusyPrompt\":true,\"flags\":[],\"effortArgs\":[\"--effort\",\"{effort}\"],\"readyPattern\":\"^\\\\s*❯\\\\s(?!\\\\d+\\\\.)\",\"readyTimeout\":60,\"trustTimeout\":600,\"trustPattern\":\"Quick safety check|Yes, I trust this folder\",\"workingPattern\":\"esc to interrupt|^\\\\s*(?:⏺\\\\s+)?Running(?:\\\\s|…|\\\\.\\\\.\\\\.)|^\\\\s*[✶✻✽✢·*]\\\\s+[^\\\\n]+(?:…|\\\\.\\\\.\\\\.)\\\\s*\\\\([^\\\\n]*(?:\\\\d+(?:\\\\.\\\\d+)?s\\\\s*·|thinking|tokens)[^\\\\n]*\\\\)\",\"deliveryPattern\":\"^\\\\s*⏺|● got:\",\"interruptKey\":\"Escape\",\"footerPatterns\":[\"\\\\? for shortcuts\",\"^\\\\s*(⏵⏵|⏸)\",\"shift\\\\+tab to cycle\",\"^\\\\s*[❯>]\\\\s*(Try \\\".*\\\")?$\"],\"questionPattern\":\"Enter to select\\\\b.*Esc to cancel|Esc to cancel · Tab to amend\",\"limitPatterns\":[\"^[\\\\s⎿●•■⚠!*>-]*You.ve hit your .{0,60}limit\",\"^[\\\\s⎿●•■⚠!*>-]*Usage limit reached\",\"^[\\\\s⎿●•■⚠!*>-]*You.re out of extra usage\",\"^[\\\\s⎿●•■⚠!*>-]*(?:API Error: )?Request rejected \\\\(429\\\\)\"],\"overloadPatterns\":[\"^\\\\s*⎿\\\\s*API Error:\\\\s*529(?:\\\\s|$)\",\"^\\\\s*⎿\\\\s*(?:API Error:\\\\s*)?Overloaded(?:[.:]|$)\"],\"backgroundPatterns\":[\"^\\\\s*\\\\d+ (?:monitors?|shells?)(?:, \\\\d+ (?:monitors?|shells?))? still running\\\\b\",\"[·⏵].*\\\\b\\\\d+ (?:shells?|monitors?)\\\\b(?: still running)?\",\"[·⏵].*\\\\b\\\\d+ background\\\\b\"]},\"codex\":{\"acceptsBusyPrompt\":true,\"flags\":[],\"effortArgs\":[\"-c\",\"model_reasoning_effort={effort}\"],\"readyPattern\":\"^›\\\\s(?!\\\\d+\\\\.)|\\\\? for shortcuts\",\"readyTimeout\":60,\"trustTimeout\":600,\"trustPattern\":\"Trust this folder\\\\?|Folder settings can run code automatically\",\"workingPattern\":\"esc to interrupt\",\"deliveryPattern\":\"^\\\\s*[•■]|● got:\",\"interruptKey\":\"Escape\",\"footerPatterns\":[\"\\\\? for shortcuts\",\"⚠ \\\\d+ warnings?\",\"f2 to view\",\"^\\\\s*[\\\\w.-]+ (low|medium|high|xhigh|minimal|none) · \",\"^\\\\s*›\\\\s*(Ask Codex to do anything)?\\\\s*$\",\"Queued follow-up inputs|⇧.? (edit last queued message|to answer)\"],\"questionPattern\":\"Waiting for your answer|^\\\\s*\\\\?\\\\s+\\\\d+ questions?\\\\b|to answer\\\\s*$|Press enter to confirm or esc to cancel\",\"limitPatterns\":[\"^[\\\\s⎿●•■⚠!*>-]*You.ve hit your usage limit\",\"^[\\\\s⎿●•■⚠!*>-]*Usage limit reached\",\"^[\\\\s⎿●•■⚠!*>-]*You.re out of credits\",\"^[\\\\s⎿●•■⚠!*>-]*Your workspace is out of credits\",\"^[\\\\s⎿●•■⚠!*>-]*You hit your spend cap\"],\"overloadPatterns\":[\"^\\\\s*■\\\\s*Selected model is at capacity(?:\\\\.|$)\"],\"backgroundPatterns\":[\"\\\\b\\\\d+ background terminals?\\\\b\"]}}",

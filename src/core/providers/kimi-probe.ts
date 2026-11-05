@@ -1,3 +1,4 @@
+import { writeLaunchScript } from '../launch-script.ts';
 import { openAgentWindow } from '../window-guard.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -32,7 +33,7 @@ export function parseKimiUsage(screen: string, now: number): PlanSnapshot | unde
 export const kimiProbeDir = (config: Context['config']): string => path.join(homeDir(config), 'kimi-usage-probe');
 
 /** Slash-command-only process: no task effort validation or inherited thinking override. */
-export function kimiProbeLaunch(config: Context['config'], processEnv: Record<string, string | undefined> = process.env): { env: Record<string, string>; command: string } {
+export function kimiProbeLaunch(config: Context['config'], processEnv: Record<string, string | undefined> = process.env): { env: Record<string, string>; command: string; argv: string[] } {
   const settings = config.agents.kimi;
   const env = { ...settings.env, KIMI_CODE_HOME: resolvedKimiHome(config, processEnv), KIMI_CODE_NO_AUTO_UPDATE: '1', KIMI_DISABLE_TELEMETRY: '1', AGENTCTL_TASK: 'usage-probe' };
   const problem = kimiEnvironmentProblem({ ...processEnv, ...env });
@@ -42,7 +43,8 @@ export function kimiProbeLaunch(config: Context['config'], processEnv: Record<st
   assertSafeArgs('kimi', args);
   // env -u also removes an override inherited by the tmux server, not just settings.env.
   delete (env as Record<string, string>).KIMI_MODEL_THINKING_EFFORT;
-  return { env, command: `exec ${shellLine('env', ['-u', 'KIMI_MODEL_THINKING_EFFORT', 'kimi', ...args])}` };
+  const argv = ['env', '-u', 'KIMI_MODEL_THINKING_EFFORT', 'kimi', ...args];
+  return { env, command: `exec ${shellLine(argv[0]!, argv.slice(1))}`, argv };
 }
 
 /** No API/OAuth/credentials, no task window and no model turn. Every exit path kills its own session. */
@@ -54,7 +56,7 @@ export async function refreshKimiPlan(ctx: Context): Promise<string | null> {
     if (cached && now - cached.at < 300_000) return null;
     const stamp = path.join(homeDir(ctx.config), 'usage', 'kimi-probe-at.json');
     try { if (now - JSON.parse(fs.readFileSync(stamp, 'utf8')).at < 300_000) return 'Kimi probe rate-limited (5 minutes)'; } catch { /* first probe */ }
-    const { env, command } = kimiProbeLaunch(ctx.config);
+    const { env, argv } = kimiProbeLaunch(ctx.config);
     const dir = kimiProbeDir(ctx.config), settings = kimiSettings();
     await ctx.runner.mkdir(dir);
     await ctx.runner.writeFile(stamp, JSON.stringify({ at: now }));
@@ -62,8 +64,9 @@ export async function refreshKimiPlan(ctx: Context): Promise<string | null> {
     const tmux = probeCtx.tmux;
     let created = false;
     try {
-      // Start the process directly: no prompt or Enter is ever typed into an unready shell.
-      const start = await openAgentWindow(probeCtx, { task: 'usage-probe', window: 'usage', cwd: dir, env, report: file, repos: [], origin: 'new', sessionUp: false, command });
+      // The neutral probe uses the same private script as task launches (and no typed prompt).
+      const command = await writeLaunchScript(ctx.runner, dir, argv, env);
+      const start = await openAgentWindow(probeCtx, { task: 'usage-probe', window: 'usage', cwd: dir, env: {}, report: file, repos: [], origin: 'new', sessionUp: false, command });
       if (start.code !== 0) return 'Kimi probe could not start';
       created = true;
       let ready = false;

@@ -93,8 +93,8 @@ describe('resume: starting the agents', () => {
     const results = await resumeTasks(w.ctx, plan, { self: SELF as never });
     assert.deepEqual(results.map((r) => r.task), ['NC-1', 'NC-2']);
     assert.deepEqual(w.tmux.windows.map((x) => x.name), ['nc-1', 'nc-2']);
-    assert.match(results[0]?.command ?? '', /^claude --model opus --effort high --settings \S+claude-settings\.json --resume aaaa-bbbb$/);
-    assert.match(results[1]?.command ?? '', /^codex resume --last --sandbox danger-full-access -m gpt-6\.1-sol -c model_reasoning_effort=high -c 'notify=/);
+    assert.match(fs.readFileSync(path.join(w.config.stateDir, 'nc-1/start.sh'), 'utf8'), /exec claude --model opus --effort high --settings \S+claude-settings\.json --resume aaaa-bbbb\n$/);
+    assert.match(fs.readFileSync(path.join(w.config.stateDir, 'nc-2/start.sh'), 'utf8'), /exec codex resume --last --sandbox danger-full-access -m gpt-6\.1-sol -c model_reasoning_effort=high -c 'notify=/);
     const cmds = w.runner.commands.join('\n');
     assert.ok(w.runner.calls.filter(c => c.line.includes('load-buffer')).every(c => c.input?.startsWith('Report protocol:')), 'only new attempt instructions, not the original task prompt');
     for (const id of ['nc-1','nc-2']) assert.ok(w.runner.calls.some(c => c.line.includes('load-buffer') && c.input?.includes(readTaskRecord(w.config, id)!.report)), '0173-FIX-B resume canonical path');
@@ -109,7 +109,8 @@ describe('resume: starting the agents', () => {
     const w = world('start-noevents', 'notify:\n  events: false\n');
     w.task('NC-1');
     const results = await resumeTasks(w.ctx, await planResume(w.ctx, []), { self: SELF as never });
-    assert.equal(results[0]?.command, 'claude --model opus --effort high --continue');
+    assert.match(results[0]!.command, /^exec sh .*start\.sh$/);
+    assert.match(fs.readFileSync(path.join(w.config.stateDir, 'nc-1/start.sh'), 'utf8'), /exec claude --model opus --effort high --continue\n$/);
   });
 });
 

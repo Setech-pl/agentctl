@@ -116,7 +116,7 @@ async function managerScenario(): Promise<void> {
     check('manager stop closes the window', stop.code === 0 && /stopped/.test(stop.stdout) && !windows(h).includes('manager'), stop.stdout + windows(h).join());
     check('manager stop again says it is not running', /not running/.test(h.agentctl(['manager', 'stop']).stdout));
     const dry = h.agentctl(['manager', '--project', project, '--dry-run']);
-    check('--dry-run changes nothing', dry.code === 0 && /remote-control/.test(dry.stdout) && !windows(h).includes('manager'), dry.stdout + dry.stderr);
+    check('--dry-run changes nothing', dry.code === 0 && /exec sh .*manager\/start\.sh/.test(dry.stdout) && !windows(h).includes('manager'), dry.stdout + dry.stderr);
   });
 }
 
