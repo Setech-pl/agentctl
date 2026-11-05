@@ -1,3 +1,4 @@
+import { claudeProbeFile } from './claude-probe.ts';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -13,12 +14,18 @@ export function claudePlanFile(config: Pick<GlobalConfig, 'path'>): string {
 }
 
 export function readClaudeSnapshot(config: Pick<GlobalConfig, 'path'>): PlanSnapshot | undefined {
+  return readSnapshot(claudePlanFile(config));
+}
+export function readClaudeProbeSnapshot(config: Pick<GlobalConfig, 'path'>): PlanSnapshot | undefined {
+  return readSnapshot(claudeProbeFile(config));
+}
+function readSnapshot(file: string): PlanSnapshot | undefined {
   try {
-    const data: unknown = JSON.parse(fs.readFileSync(claudePlanFile(config), 'utf8'));
-    if (!isObject(data) || typeof data.at !== 'number' || !Array.isArray(data.windows)) return undefined;
+    const data: unknown = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (!isObject(data) || typeof data.at !== 'number' || !Number.isFinite(data.at) || !Array.isArray(data.windows)) return undefined;
     const windows: PlanWindow[] = [];
     for (const w of data.windows) {
-      if (!isObject(w) || typeof w.usedPercent !== 'number') continue;
+      if (!isObject(w) || typeof w.usedPercent !== 'number' || !Number.isFinite(w.usedPercent) || w.usedPercent < 0 || w.usedPercent > 100) continue;
       const minutes = typeof w.minutes === 'number' ? w.minutes : null;
       windows.push({ kind: windowKind(minutes), minutes, usedPercent: w.usedPercent, resetsAt: typeof w.resetsAt === 'number' ? w.resetsAt : null });
     }
@@ -29,8 +36,11 @@ export function readClaudeSnapshot(config: Pick<GlobalConfig, 'path'>): PlanSnap
 }
 
 export function readClaudePlan(config: GlobalConfig, reader: UsageReader, now: number) {
-  const plan = planState('claude', readClaudeSnapshot(config), now, config.usage.claudeTap ? 'no reading yet: Claude Code reports its limits only to a statusLine, which starts with the next task window (see "agentctl usage --help")' : 'usage.claude_tap is off: Claude Code gives its limits only to a statusLine');
-  plan.source = 'claude-statusline';
+  const status = readClaudeSnapshot(config), probe = config.capacity.claudeUsageProbe ? readClaudeProbeSnapshot(config) : undefined;
+  const useProbe = probe !== undefined && (!status || probe.at >= status.at);
+  const plan = planState('claude', useProbe ? probe : status, now, config.usage.claudeTap ? 'no reading yet: Claude Code reports its limits only to a statusLine, which starts with the next task window (see "agentctl usage --help")' : 'usage.claude_tap is off: Claude Code gives its limits only to a statusLine');
+  plan.source = useProbe ? 'claude-usage-probe' : 'claude-statusline';
+  if (!plan.available && config.capacity.claudeUsageProbe) plan.note += '; Claude /usage probe enabled: neutral folder may need one-time manual trust';
   return plan;
 }
 export function claudeHome(config: Pick<GlobalConfig, 'usage'>, env: Record<string, string | undefined> = process.env): string { return config.usage.claudeDir ?? env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), '.claude'); }

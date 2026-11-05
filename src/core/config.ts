@@ -147,7 +147,7 @@ export interface GlobalConfig extends Layer {
   guideLang: 'en' | 'pl';
   disk: { warnGb: number; criticalGb: number; workers: number; measurementTimeoutS: number };
   git: { timeoutS: number };
-  capacity: { snapshot: boolean; staleMinutes: number; sampleLimit: number; thresholds: number[]; codexRefresh: boolean; kimiUsageProbe?: boolean; kimiUsageProbeModel?: string };
+  capacity: { snapshot: boolean; staleMinutes: number; sampleLimit: number; thresholds: number[]; codexRefresh: boolean; claudeUsageProbe: boolean; claudeUsageProbeIntervalMinutes: number; kimiUsageProbe?: boolean; kimiUsageProbeModel?: string };
   /** Set by a long-running process (watch, MCP) when the file on disk does not load and the previous settings stay in force. */
   reloadWarning?: string;
   /** Where the config was (or would be) read from. */
@@ -1041,7 +1041,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
     if (raw.guide.lang === 'en' || raw.guide.lang === 'pl') guideLang = raw.guide.lang;
     else if (raw.guide.lang !== undefined) p.add('config.guide.lang must be en or pl');
   } else if (raw.guide !== undefined) p.add('config.guide must be a mapping like {lang: en}');
-  const capacity = { snapshot: true, staleMinutes: 30, sampleLimit: 2048, thresholds: [80, 95], codexRefresh: true };
+  const capacity = { snapshot: true, staleMinutes: 30, sampleLimit: 2048, thresholds: [80, 95], codexRefresh: true, claudeUsageProbe: false, claudeUsageProbeIntervalMinutes: 15 };
   if (raw.capacity !== undefined) {
     if (!isObject(raw.capacity)) p.add('config.capacity must be a mapping');
     else {
@@ -1053,12 +1053,12 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
         if (typeof raw.capacity.kimi_usage_probe_model === 'string' && /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(raw.capacity.kimi_usage_probe_model)) Object.assign(capacity, { kimiUsageProbeModel: raw.capacity.kimi_usage_probe_model });
         else p.add('config.capacity.kimi_usage_probe_model must be a model alias or default');
       }
-      checkKeys(raw.capacity, ['snapshot', 'stale_minutes', 'sample_limit', 'thresholds', 'codex_refresh', 'kimi_usage_probe', 'kimi_usage_probe_model'], 'config.capacity', p);
-      for (const [key, field] of [['snapshot', 'snapshot'], ['codex_refresh', 'codexRefresh']] as const) {
+      checkKeys(raw.capacity, ['snapshot', 'stale_minutes', 'sample_limit', 'thresholds', 'codex_refresh', 'kimi_usage_probe', 'kimi_usage_probe_model', 'claude_usage_probe', 'claude_usage_probe_interval_minutes'], 'config.capacity', p);
+      for (const [key, field] of [['snapshot', 'snapshot'], ['codex_refresh', 'codexRefresh'], ['claude_usage_probe', 'claudeUsageProbe']] as const) {
         if (typeof raw.capacity[key] === 'boolean') capacity[field] = raw.capacity[key];
         else if (raw.capacity[key] !== undefined) p.add(`config.capacity.${key} must be boolean`);
       }
-      for (const [key, field, min, max] of [['stale_minutes', 'staleMinutes', 1, 10080], ['sample_limit', 'sampleLimit', 2, 10000]] as const) {
+      for (const [key, field, min, max] of [['stale_minutes', 'staleMinutes', 1, 10080], ['sample_limit', 'sampleLimit', 2, 10000], ['claude_usage_probe_interval_minutes', 'claudeUsageProbeIntervalMinutes', 15, 10080]] as const) {
         const value = raw.capacity[key];
         if (typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max) capacity[field] = value;
         else if (value !== undefined) p.add(`config.capacity.${key} must be an integer from ${min} to ${max}`);

@@ -573,3 +573,19 @@ The probe never uses task windows, reads credentials or calls an API; trust/logi
 Screen fixtures are from user captures of 2.5.0. Approval and question/Submit are separate panels; the editor stays visible while working. Prompt delivery uses bracketed paste, stable screen and a separate `C-m`; collapsed `[paste #N ...]` is a draft. Busy delivery defaults off because Kimi's queue footer is unverified. Passive wire supports protocol 1.5 with screen fallback and a doctor note for unknown versions. Auth/limit/overload/background patterns, queue footer, other wire interaction records and `-m` plus `--session` remain hypotheses; synthetic tests are labeled separately. Tokens come only from `usage.record`, never `token_counting.*`.
 
 Kimi 2.5.0 effective model/effort comes from passive `llm.request.modelAlias/thinkingEffort`, recorded beside requested settings in TASK.md and status JSON. The footer can retain `high` while the effective wire effort is `low`; a wire mismatch warns. Sessions bind via `sessions/<workspace>/<session>/state.json` (session index fallback); `usage.record` supplies input/output/cache tokens and numeric `time`.
+
+### Claude plan usage probe
+
+The optional neutral `/usage` probe refreshes Claude plan capacity without waiting for a task's statusline:
+
+```yaml
+capacity:
+  claude_usage_probe: false # opt in with true
+  claude_usage_probe_interval_minutes: 15 # integer 15–10080; attempts never run more often
+```
+
+Both `capacity` and `usage` refresh on demand when enabled; this is not a background timer. Attempts (including failed/trust-blocked attempts) are serialized and rate-limited across processes. The probe uses `<agentctl home>/claude-usage-probe`, its own detached temporary tmux session, the P27 private launch script, and fixed slash-command-only argv. It never targets task windows, inherits task flags, or submits a model prompt. Hooks and statusline commands are disabled for this session. `/usage` is a local CLI command and consumes no model tokens (the captured 2.1.311 fixture reports zero input/output/cache tokens). Only `/usage` is submitted; the probe session is then terminated, including on failure.
+
+If trust/login is required, agentctl reports a **one-time wait for Marcin**. Run `claude` manually in the printed neutral directory, complete the dialog yourself, then exit. Agentctl never answers dialogs; it also checks the idle slash-command composer again before Enter. `doctor` shows off/enabled, interval, missing reading/manual trust, and the last reading's age/staleness. Doctor itself does not run a probe.
+
+The parser uses the real Claude Code 2.1.311 panel: `Current session` (5 h) and `Current week (all models)`, percentage used, and `Resets … (IANA timezone)`. Model-specific weeks and usage credits are excluded from these all-model windows. Unsupported reset formats remain unknown rather than guessed. A weekly panel is required before replacing a reading. Only percentages, reset timestamps and the capture timestamp are stored in `usage/claude-usage-probe.json`, exposed as `source: claude-usage-probe`. The newer of the probe and existing statusline reading wins; disabling the probe restores statusline-only reads. Old readings retain the existing `capacity.stale_minutes` marking, and expired windows are dropped. CLI layout changes or unsupported localized reset text may prevent refresh or leave reset unknown; a failed refresh retains the previous reading.
