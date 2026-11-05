@@ -1,3 +1,5 @@
+import { get as providerValue } from './providers/registry.ts';
+import type { ProviderValues } from './providers/registry.ts';
 import { parseAge } from './archive.ts';
 import { provider as adapter, activeProviders } from './providers/registry.ts';
 import type { AgentName } from './config.ts';
@@ -52,7 +54,7 @@ export interface UsageReport {
   since: string;
   sinceDay: string;
   today: string;
-  plans: Record<AgentName, PlanState>;
+  plans: ProviderValues<PlanState>;
   providers: Record<AgentName, ProviderUsage>;
   tasks: TaskUsageRow[];
   cohorts: CohortUsage[];
@@ -148,12 +150,12 @@ export function table(header: string[], body: string[][]): string[] {
 export function renderUsage(report: UsageReport): string[] {
   const lines: string[] = [];
   const n = report.now;
-  const hasWeek = (Object.keys(report.plans) as AgentName[]).some((p) => report.plans[p].windows.some((w) => w.kind === 'week'));
+  const hasWeek = (Object.keys(report.plans) as AgentName[]).some((p) => providerValue(report.plans, p).windows.some((w) => w.kind === 'week'));
   const header = ['PROVIDER', '5H LIMIT', ...(hasWeek ? ['WEEK LIMIT'] : []), 'TODAY', report.since.toUpperCase()];
-  const body = (Object.keys(report.plans) as AgentName[]).map((p) => [p, windowText(report.plans[p], 'session', n), ...(hasWeek ? [windowText(report.plans[p], 'week', n)] : []), fresh(report.providers[p].today), fresh(report.providers[p].window)]);
+  const body = (Object.keys(report.plans) as AgentName[]).map((p) => [p, windowText(providerValue(report.plans, p), 'session', n), ...(hasWeek ? [windowText(providerValue(report.plans, p), 'week', n)] : []), fresh(report.providers[p].today), fresh(report.providers[p].window)]);
   lines.push(...table(header, body));
   for (const p of (Object.keys(report.plans) as AgentName[])) {
-    const s = report.plans[p];
+    const s = providerValue(report.plans, p);
     const others = s.windows.filter((w) => w.kind === 'other');
     if (others.length > 0) lines.push(`${p}: ${others.map((w) => `${w.label} ${Math.round(w.usedPercent)}%${w.resetsAt === null ? '' : ` ↻ ${formatReset(w.resetsAt, n)}`}`).join(' · ')}`);
     if (!s.available) lines.push(`${p}: limit n/d – ${s.note}`);
@@ -186,7 +188,7 @@ export function renderUsage(report: UsageReport): string[] {
 /** Markdown for `usage --clip`. */
 export function usageMarkdown(report: UsageReport): string {
   const lines = ['| provider | 5h limit | week limit | today | ' + report.since + ' |', '|---|---|---|---|---|'];
-  for (const p of (Object.keys(report.plans) as AgentName[])) lines.push(`| ${p} | ${windowText(report.plans[p], 'session', report.now)} | ${windowText(report.plans[p], 'week', report.now)} | ${fresh(report.providers[p].today)} | ${fresh(report.providers[p].window)} |`);
+  for (const p of (Object.keys(report.plans) as AgentName[])) lines.push(`| ${p} | ${windowText(providerValue(report.plans, p), 'session', report.now)} | ${windowText(providerValue(report.plans, p), 'week', report.now)} | ${fresh(report.providers[p].today)} | ${fresh(report.providers[p].window)} |`);
   if (report.tasks.length > 0) {
     lines.push('', '| task | agent/model | state | tokens |', '|---|---|---|---|');
     for (const t of report.tasks) lines.push(`| ${t.task} | ${t.agent}/${t.model} | ${t.state} | ${t.known ? formatTokens(t.fresh) : 'n/d'} |`);
@@ -199,6 +201,6 @@ export function usageMarkdown(report: UsageReport): string {
 }
 
 /** "C 62% · X 18%" for the tmux status line: the highest window of each provider, a provider with no reading left out. */
-export function planStatusLine(plans: Record<AgentName, PlanState>): string {
-  return (Object.keys(plans) as AgentName[]).filter(p => plans[p].available && plans[p].maxPercent !== null).map(p => `${adapter(p).letter} ${Math.round(plans[p].maxPercent as number)}%`).join(' · ');
+export function planStatusLine(plans: ProviderValues<PlanState>): string {
+  return (Object.keys(plans) as AgentName[]).filter(p => providerValue(plans, p).available && providerValue(plans, p).maxPercent !== null).map(p => `${adapter(p).letter} ${Math.round(providerValue(plans, p).maxPercent as number)}%`).join(' · ');
 }

@@ -1,3 +1,5 @@
+import { get as providerValue } from './providers/registry.ts';
+import type { ProviderValues } from './providers/registry.ts';
 import { markTasks } from './mark.ts';
 import { collectDisk } from './disk.ts';
 import type { DiskReport } from './disk.ts';
@@ -135,7 +137,7 @@ export interface BoardState {
   folded: string[];
   /** The plans of Claude and Codex for the panel on top; null before the first refresh. */
   disk: DiskReport | null;
-  plans: Record<AgentName, PlanState> | null;
+  plans: ProviderValues<PlanState> | null;
   /** Tasks that can be resumed (active, a worktree, no window): the section "Do wznowienia", key R. */
   resumable: string[];
   /** Away mode (the phone gets the notifications); null before the first refresh. */
@@ -599,7 +601,7 @@ export interface BoardSnapshot {
   queue?: QueueView[];
   queuePaused?: boolean;
   /** Absent: no panel (older callers). */
-  plans?: Record<AgentName, PlanState>;
+  plans?: ProviderValues<PlanState>;
   resumable?: string[];
   away?: AwayView;
   manager?: ManagerView;
@@ -935,15 +937,15 @@ export interface PanelLine {
 }
 
 /** The two lines under the header: per provider the windows as a bar with the percentage and the reset, or n/d. */
-export function usagePanel(plans: Record<AgentName, PlanState> | null, usage: UsageSettings, now: number): PanelLine[] {
+export function usagePanel(plans: ProviderValues<PlanState> | null, usage: UsageSettings, now: number): PanelLine[] {
   if (plans === null) return [];
   return (Object.keys(plans) as AgentName[]).map((provider): PanelLine => {
-    const plan = plans[provider];
+    const plan = providerValue(plans, provider);
     const name = provider.padEnd(6);
     if (!plan.available) return { provider, text: `${name} n/d${plan.note ? ` – ${plan.note}` : ''}` };
     const parts = plan.windows.map((w) => `${w.label} ${usageBar(w.usedPercent)} ${Math.round(w.usedPercent)}%${w.resetsAt === null ? '' : ` ↻${formatReset(w.resetsAt, now)}`}`);
     const worst = plan.maxPercent ?? 0;
-    return { provider, text: `${name} ${parts.join('  ')}${plan.stale ? ' (old)' : ''}`, color: worst >= usage.critical[provider] ? 'red' : worst >= usage.warn[provider] ? 'yellow' : 'green' };
+    return { provider, text: `${name} ${parts.join('  ')}${plan.stale ? ' (old)' : ''}`, color: worst >= providerValue(usage.critical, provider) ? 'red' : worst >= providerValue(usage.warn, provider) ? 'yellow' : 'green' };
   });
 }
 

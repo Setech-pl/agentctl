@@ -7,7 +7,7 @@ import type { PlanState } from '../usage.ts';
 import type { SessionStats } from '../usage-parse.ts';
 import type { UsageReader } from '../usage-sources.ts';
 
-export const PROVIDER_IDS = ['claude', 'codex'] as const;
+export const PROVIDER_IDS = ['claude', 'codex', 'kimi'] as const;
 export const DEFAULT_PROVIDERS = ['claude', 'codex'] as const;
 export type ProviderId = (typeof PROVIDER_IDS)[number];      // config.ts: export type AgentName = ProviderId
 
@@ -48,6 +48,8 @@ export interface EffortSupport {
 export interface ScreenProfile {
   /** Znak, którym transkrypt zaczyna wysłaną linię użytkownika ('❯' Claude, '›' Codex, '❯' Kimi): echo w prompt-delivery. */
   echoMarker: string;
+  draft?(screen: string): string | null;
+  stablePaste?: boolean;
   /** Dodatkowe wyciąganie pytania (Codex: zwinięte „? N questions”); undefined = tylko ogólne extractQuestion. */
   question?(screen: string): string | undefined;
   /** Pytanie z logu sesji (dziś sessionQuestion tylko dla Codexa). */
@@ -74,6 +76,7 @@ export interface EventSupport {
   /** Skąd czytać ładunek: 'stdin' (hooki Claude), 'argv' (notify Codexa). */
   payloadFrom: 'stdin' | 'argv' | 'wire';
   plan(input: EventWiringInput): EventWiring;
+  poll?(ctx: Context, record: TaskRecord): Promise<void>;
   parse(e: RawEvent): AgentEvent | undefined;
   /** Sesja nazwana przez zdarzenie (rememberSession). */
   session(e: RawEvent): SessionRef | undefined;
@@ -115,6 +118,7 @@ export interface SafetyRules {
   forbiddenFlags: readonly string[];
   /** Kontrole z wartością (claude --permission-mode bypassPermissions…, codex -a never, -c approval_policy=never, …). */
   check(args: string[]): string | undefined;
+  validate?(order: LaunchOrder, settings: AgentSettings, env: Record<string, string>): string | undefined;
 }
 
 export interface ProviderAdapter {
@@ -127,11 +131,11 @@ export interface ProviderAdapter {
   readonly capabilities: Readonly<{ remoteControl: boolean; statusLineTap: boolean; mcpInstall: boolean; busyPrompt: boolean }>;
   defaultSettings(): AgentSettings;
   detect(runner: Runner): Promise<ProviderDetection>;
-  doctor(d: ProviderDetection, env: NodeJS.ProcessEnv): DoctorLine[];
+  doctor(d: ProviderDetection, env: NodeJS.ProcessEnv, config?: GlobalConfig): DoctorLine[];
   argv(order: LaunchOrder, settings: AgentSettings, extra: string[]): string[];
   /** Zmienne okna wymagane przez sam start (Kimi: KIMI_MODEL_THINKING_EFFORT, KIMI_CODE_NO_AUTO_UPDATE, AGENTCTL_TASK); doklejane do spec.env w new/resume
    *  niezależnie od notify.events (planEventWiring jest dziś warunkowe: new.ts:141). Claude/Codex: {}. */
-  launchEnv(order: LaunchOrder, settings: AgentSettings): Record<string, string>;
+  launchEnv(order: LaunchOrder, settings: AgentSettings, env?: Record<string, string>): Record<string, string>;
   resumeArgv(order: LaunchOrder, settings: AgentSettings, extra: string[], sessionId?: string): string[];
   /** Tekst do `resume --list`: '--continue' / 'resume --last' / '--continue (kimi)'. */
   resumeLabel(sessionId?: string): string;

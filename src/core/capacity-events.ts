@@ -1,3 +1,5 @@
+import { get as providerValue } from './providers/registry.ts';
+import type { ProviderValues } from './providers/registry.ts';
 import { activeProviders, PROVIDER_IDS } from './providers/registry.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -9,7 +11,7 @@ import { liveWindows } from './plan.ts';
 import { recordJournal } from './journal.ts';
 
 /** Staleness is worth an event only while this provider actually has a task window. */
-export async function recordStaleCapacity(ctx: Context, plans: Record<AgentName, PlanState>): Promise<void> {
+export async function recordStaleCapacity(ctx: Context, plans: ProviderValues<PlanState>): Promise<void> {
   if (ctx.runner.dryRun) return;
   const live = await liveWindows(ctx);
   const file = path.join(path.dirname(ctx.config.path), 'capacity-stale.json');
@@ -17,7 +19,7 @@ export async function recordStaleCapacity(ctx: Context, plans: Record<AgentName,
     let state: Partial<Record<AgentName, string>> = {};
     try { state = JSON.parse(fs.readFileSync(file, 'utf8')) as typeof state; } catch { /* first look */ }
     for (const provider of activeProviders(ctx.config)) {
-      const plan = plans[provider];
+      const plan = providerValue(plans, provider);
       const active = live.some((w) => w.agent === provider && w.kind === undefined);
       const stale = active && plan.readAt !== null && ctx.runner.now() - plan.readAt > ctx.config.capacity.staleMinutes * 60_000;
       const key = String(plan.readAt);

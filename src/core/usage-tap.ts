@@ -47,13 +47,14 @@ export async function rememberSession(runner: Runner, config: Pick<GlobalConfig,
   const file = sessionsFile(config, window);
   if (!fs.existsSync(path.dirname(file))) return; // an orphan window has no state folder
   const known = readTaskSessions(config, window);
+  const entries = known[agent] ??= [];
   if (provider(agent).capabilities.statusLineTap) {
-    const have = known[agent].find((s) => s.id === session.id) as { id: string; transcript?: string } | undefined;
+    const have = entries.find((s) => s.id === session.id) as { id: string; transcript?: string } | undefined;
     if (have && (have.transcript !== undefined || session.transcript === undefined)) return;
-    known[agent] = [...known[agent].filter((s) => s.id !== session.id), session];
+    known[agent] = [...entries.filter((s) => s.id !== session.id), session];
   } else {
-    if (known[agent].some((s) => s.id === session.id)) return;
-    known[agent].push({ id: session.id });
+    if (entries.some((s) => s.id === session.id)) return;
+    entries.push({ id: session.id });
   }
   await runner.writeFile(file, `${JSON.stringify(known, null, 2)}\n`);
 }

@@ -1,3 +1,4 @@
+import { launchEnvironment } from './safety.ts';
 import { withStartLock, reserveStarts, releaseStarts } from './start-lock.ts';
 import { queuePrompt, deliverPendingPrompt, DELIVERY_WARNING } from './prompt-delivery.ts';
 import fs from 'node:fs';
@@ -171,7 +172,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
     for (const file of wiring?.files ?? []) await runner.writeFile(file.path, file.content);
 
     // 5. window + agent
-    await openAgentWindow(ctx, { ...guardRequest(spec), cwd: primary, env: spec.env, origin: opts.origin ?? (spec.autoReview ? 'start' : 'new'), sessionUp });
+    await openAgentWindow(ctx, { ...guardRequest(spec), cwd: primary, env: launchEnvironment(config, spec, spec.env), origin: opts.origin ?? (spec.autoReview ? 'start' : 'new'), sessionUp });
     sessionUp = true;
     const settings = config.agents[spec.agent];
     const commandLine = agentCommandLine(buildAgentArgv(spec, settings, wiring?.args));

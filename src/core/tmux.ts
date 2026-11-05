@@ -105,13 +105,13 @@ export class Tmux {
   }
 
   /** Create the session with its first window. */
-  newSession(window: string, cwd: string, env: Record<string, string>): Promise<ExecResult> {
-    return this.runner.exec('tmux', ['new-session', '-d', '-s', this.session, '-n', window, '-c', cwd, ...this.envArgs(env)]);
+  newSession(window: string, cwd: string, env: Record<string, string>, command?: string): Promise<ExecResult> {
+    return this.runner.exec('tmux', ['new-session', '-d', '-s', this.session, '-n', window, '-c', cwd, ...this.envArgs(env), ...(command ? [command] : [])]);
   }
 
   /** Add a window to an existing session without switching to it. */
-  newWindow(window: string, cwd: string, env: Record<string, string>): Promise<ExecResult> {
-    return this.runner.exec('tmux', ['new-window', '-d', '-t', `=${this.session}:`, '-n', window, '-c', cwd, ...this.envArgs(env)]);
+  newWindow(window: string, cwd: string, env: Record<string, string>, command?: string): Promise<ExecResult> {
+    return this.runner.exec('tmux', ['new-window', '-d', '-t', `=${this.session}:`, '-n', window, '-c', cwd, ...this.envArgs(env), ...(command ? [command] : [])]);
   }
 
   /**

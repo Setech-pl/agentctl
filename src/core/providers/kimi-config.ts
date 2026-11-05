@@ -1,0 +1,61 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { parse } from 'smol-toml';
+import type { Effort } from '../config.ts';
+import { isObject, resolvePath } from '../util.ts';
+
+export interface KimiModel { id: string; displayName: string; efforts: Effort[] }
+export interface KimiConfig {
+  file: string;
+  mode: string;
+  guard: boolean;
+  rules: { decision: string; pattern: string; scope: string; reason: string }[];
+  models: KimiModel[];
+  defaultModel?: string;
+  error?: string;
+}
+export const kimiHome = (env: Record<string, string | undefined> = process.env): string => resolvePath(env.KIMI_CODE_HOME ?? path.join(os.homedir(), '.kimi-code'));
+
+/** Read config.toml only. Never open credentials, OAuth, device IDs or write this file. */
+export function readKimiConfig(env: Record<string, string | undefined> = process.env): KimiConfig {
+  const file = path.join(kimiHome(env), 'config.toml');
+  const result: KimiConfig = { file, mode: 'manual', guard: true, rules: [], models: [] };
+  let text: string;
+  try { text = fs.readFileSync(file, 'utf8'); }
+  catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') result.error = 'cannot read Kimi config.toml'; return result; }
+  let data: Record<string, unknown>;
+  try { data = parse(text) as Record<string, unknown>; }
+  catch { result.error = 'invalid TOML in Kimi config.toml; permissions and models were not interpreted'; return result; }
+  if (typeof data.default_permission_mode === 'string') result.mode = data.default_permission_mode;
+  if (typeof data.default_model === 'string') result.defaultModel = data.default_model;
+  if (isObject(data.permission)) {
+    result.guard = data.permission.dangerous_command_guard !== false;
+    if (Array.isArray(data.permission.rules)) for (const rule of data.permission.rules) {
+      if (!isObject(rule) || !['allow', 'deny', 'ask'].includes(String(rule.decision)) || typeof rule.pattern !== 'string') continue;
+      result.rules.push({ decision: String(rule.decision), pattern: rule.pattern, scope: typeof rule.scope === 'string' ? rule.scope : 'user', reason: typeof rule.reason === 'string' ? rule.reason : '' });
+    }
+  }
+  // Configured catalogs may be top-level or nested under a provider. Aliases are server-managed.
+  const collect = (value: unknown, prefix = '') => {
+    if (!isObject(value)) return;
+    for (const [key, model] of Object.entries(value)) if (isObject(model)) {
+      const efforts = Array.isArray(model.support_efforts) ? model.support_efforts.filter((e): e is Effort => ['low', 'high', 'max'].includes(String(e))) : [];
+      result.models.push({ id: key.includes('/') ? key : `${prefix}${key}`, displayName: typeof model.display_name === 'string' ? model.display_name : key, efforts });
+    }
+  };
+  collect(data.models, 'kimi-code/');
+  if (isObject(data.providers)) for (const [id, entry] of Object.entries(data.providers)) if (isObject(entry)) collect(entry.models, `${id}/`);
+  return result;
+}
+export const qualifiedModel = (model: string): string => model.includes('/') ? model : `kimi-code/${model}`;
+export function configuredModel(config: KimiConfig, name: string): KimiModel | undefined {
+  const id = name === 'default' ? config.defaultModel : name;
+  return id ? config.models.find(m => m.id === qualifiedModel(id)) : undefined;
+}
+export function kimiConfigProblem(config: KimiConfig): string | undefined {
+  if (config.error) return config.error;
+  if (['yolo', 'auto'].includes(config.mode)) return `default_permission_mode=${config.mode} in ${config.file} enables auto-accept; use manual (agentctl never edits Kimi config)`;
+  if (config.mode !== 'manual') return `unknown default_permission_mode=${config.mode}; cannot verify manual permissions`;
+  return undefined;
+}

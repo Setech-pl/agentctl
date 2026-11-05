@@ -1,3 +1,4 @@
+import { validateLaunch } from './safety.ts';
 import { provider, alternatives } from './providers/registry.ts';
 import { pendingStarts } from './start-lock.ts';
 import { inspectReport } from './report-state.ts';
@@ -118,6 +119,8 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
       p.add(`${at} ${spec.agent} has no effort "${spec.effort}" (use ${provider(spec.agent).effort.accepted.join(', ')})`);
     }
 
+    try { validateLaunch(config, spec, spec.env); } catch (e) { p.add((e as Error).message); }
+
     // 2. duplicates and existing windows
     if (seen.has(spec.window)) p.add(`${at} the task appears twice in this file`);
     seen.add(spec.window);
@@ -171,6 +174,7 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
         );
       }
     }
+    try { validateLaunch(config, spec, spec.env); } catch (e) { p.add((e as Error).message); }
     planned.push({ window: spec.window, agent: spec.agent });
 
     // 4. worktrees

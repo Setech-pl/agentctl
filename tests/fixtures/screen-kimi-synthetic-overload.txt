@@ -1,0 +1,3 @@
+SYNTHETIC [hypothesis] Kimi 2.5.0 overload
+Error: [provider.overloaded]
+│ >                 │

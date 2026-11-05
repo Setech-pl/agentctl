@@ -1,10 +1,12 @@
+import { get as providerValue } from './providers/registry.ts';
+import type { ProviderValues } from './providers/registry.ts';
 import { activeProviders, perProvider } from './providers/registry.ts';
 import { defaultSettings } from './providers/settings.ts';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import YAML from 'yaml';
-import { DEFAULT_EQUIVALENTS, parseEquivalents } from './equivalents.ts';
+import { DEFAULT_EQUIVALENTS, defaultEquivalents, parseEquivalents } from './equivalents.ts';
 import type { Equivalent } from './equivalents.ts';
 import { DEFAULT_WINDOW_ICONS, TASK_STATES } from './icons.ts';
 import { findAutoAcceptFlag } from './safety.ts';
@@ -57,6 +59,7 @@ export interface Layer {
 }
 
 export interface AgentSettings {
+  env?: Record<string, string>;
   /** Extra flags appended to the agent command line. */
   flags: string[];
   acceptsBusyPrompt?: boolean;
@@ -80,6 +83,8 @@ export interface AgentSettings {
   footerPatterns: string[];
   /** Regex: the agent asks the user a question and waits for the answer (state needs-input). */
   questionPattern: string;
+  approvalPattern?: string;
+  idleRequiresInput?: boolean;
   /** Regexes (any one matches a line of the screen): the agent says its usage limit is used up or it is rate limited (state limited). */
   limitPatterns: string[];
   /**
@@ -140,7 +145,7 @@ export interface GlobalConfig extends Layer {
   guideLang: 'en' | 'pl';
   disk: { warnGb: number; criticalGb: number };
   git: { timeoutS: number };
-  capacity: { snapshot: boolean; staleMinutes: number; sampleLimit: number; thresholds: number[]; codexRefresh: boolean };
+  capacity: { snapshot: boolean; staleMinutes: number; sampleLimit: number; thresholds: number[]; codexRefresh: boolean; kimiUsageProbe?: boolean };
   /** Set by a long-running process (watch, MCP) when the file on disk does not load and the previous settings stay in force. */
   reloadWarning?: string;
   /** Where the config was (or would be) read from. */
@@ -194,9 +199,9 @@ export interface CancelSettings {
 
 export interface UsageSettings {
   /** Percent of a plan window (per provider) from which `watch` warns, once per window. */
-  warn: Record<AgentName, number>;
+  warn: ProviderValues<number>;
   /** Percent from which it warns again, louder. */
-  critical: Record<AgentName, number>;
+  critical: ProviderValues<number>;
   /** Percent above which the queue does not start a task of that provider by itself. A provider missing here is never held. */
   queueHold: Partial<Record<AgentName, number>>;
   /** The plan percentages in the tmux status line ("C 62% · X 18%"). */
@@ -207,6 +212,7 @@ export interface UsageSettings {
   claudeDir: string | null;
   /** Codex's home (holds `sessions/`); null: `$CODEX_HOME`, else ~/.codex. */
   codexDir: string | null;
+  kimiDir?: string | null;
 }
 
 export interface CollisionSettings {
@@ -320,7 +326,7 @@ export interface ManagerSettings {
 
 export const DEFAULT_MANAGER_NAME = 'agentctl manager';
 
-export const DEFAULT_AGENT_SETTINGS = Object.fromEntries(PROVIDER_IDS.map(id => [id, defaultSettings(id)])) as Record<ProviderId, AgentSettings>;
+export const DEFAULT_AGENT_SETTINGS = Object.fromEntries(DEFAULT_PROVIDERS.map(id => [id, defaultSettings(id)])) as Record<ProviderId, AgentSettings>;
 
 /** The keys accepted in every layer: the global config, `.agentctl.yaml` and (with a few of its own) a spec. docs/configuration.md describes each one. */
 export const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'setup', 'defaults', 'guide', 'review'];
@@ -328,7 +334,7 @@ export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'limited', 'cache', 'stat
 export const LIMITS_KEYS = [...AGENT_NAMES, 'count_external', 'count_report_ready'];
 export const DEFAULTS_KEYS = ['agent', 'model', 'effort', 'remote_control'];
 export const LINK_KEYS = ['from', 'to'];
-export const AGENT_KEYS = ['accepts_busy_prompt', 'flags', 'effort_args', 'ready_pattern', 'ready_timeout', 'trust_timeout', 'trust_pattern', 'working_pattern', 'delivery_pattern', 'interrupt_key', 'footer_patterns', 'question_pattern', 'limit_patterns', 'background_patterns', 'overload_patterns'];
+export const AGENT_KEYS = ['env', 'accepts_busy_prompt', 'flags', 'effort_args', 'ready_pattern', 'ready_timeout', 'trust_timeout', 'trust_pattern', 'working_pattern', 'delivery_pattern', 'interrupt_key', 'footer_patterns', 'question_pattern', 'approval_pattern', 'limit_patterns', 'background_patterns', 'overload_patterns'];
 export const WATCH_KEYS = ['interval', 'waiting_after', 'window_icons', 'status_line', 'idle_confirm_ticks'];
 export const NOTIFY_KEYS = ['backend', 'events', 'turn_end', 'terminal_app', 'verdict_pattern', 'ntfy', 'mcp_writes', 'mcp_writes_interval_s'];
 export const NTFY_KEYS = ['server', 'topic', 'token', 'events', 'priority', 'include_verdict', 'include_question', 'click_url', 'always'];
@@ -497,13 +503,14 @@ function parseLayer(obj: Record<string, unknown>, where: string, p: Problems): L
 }
 
 function parseAgentSettings(name: AgentName, v: unknown, where: string, p: Problems): AgentSettings {
-  const settings: AgentSettings = { ...DEFAULT_AGENT_SETTINGS[name] };
+  const settings: AgentSettings = defaultSettings(name);
   if (v === undefined || v === null) return settings;
   if (!isObject(v)) {
     p.add(`${where} must be a mapping`);
     return settings;
   }
   checkKeys(v, AGENT_KEYS, where, p);
+  if (v.env !== undefined) settings.env = parseEnv(v.env, `${where}.env`, p);
   if (v.accepts_busy_prompt !== undefined) {
     if (typeof v.accepts_busy_prompt === 'boolean') settings.acceptsBusyPrompt = v.accepts_busy_prompt;
     else p.add(`${where}.accepts_busy_prompt must be boolean`);
@@ -511,10 +518,10 @@ function parseAgentSettings(name: AgentName, v: unknown, where: string, p: Probl
   if (v.flags !== undefined) settings.flags = parseStringList(v.flags, `${where}.flags`, p);
   if (v.effort_args !== undefined) settings.effortArgs = parseStringList(v.effort_args, `${where}.effort_args`, p);
   for (const [key, list] of [['flags', settings.flags], ['effort_args', settings.effortArgs]] as const) {
-    const bad = findAutoAcceptFlag(list);
+    const bad = findAutoAcceptFlag(list, name);
     if (bad) p.add(`${where}.${key}: "${bad}" enables auto-accept, which agentctl never allows`);
   }
-  for (const [key, field] of [['ready_pattern', 'readyPattern'], ['trust_pattern', 'trustPattern'], ['working_pattern', 'workingPattern'], ['delivery_pattern', 'deliveryPattern'], ['question_pattern', 'questionPattern']] as const) {
+  for (const [key, field] of [['ready_pattern', 'readyPattern'], ['trust_pattern', 'trustPattern'], ['working_pattern', 'workingPattern'], ['delivery_pattern', 'deliveryPattern'], ['question_pattern', 'questionPattern'], ['approval_pattern', 'approvalPattern']] as const) {
     const pattern = parseString(v[key], `${where}.${key}`, p);
     if (!pattern) continue;
     try {
@@ -894,7 +901,7 @@ function parseUsage(v: unknown, p: Problems, ids: readonly ProviderId[]): UsageS
   checkKeys(v, USAGE_KEYS, 'config.usage', p);
   if (v.warn !== undefined) Object.assign(usage.warn, parsePercent(v.warn, 'config.usage.warn', p, usage.warn, ids));
   if (v.critical !== undefined) Object.assign(usage.critical, parsePercent(v.critical, 'config.usage.critical', p, usage.critical, ids));
-  for (const name of ids) if (usage.critical[name] < usage.warn[name]) p.add(`config.usage: critical (${usage.critical[name]}) for ${name} is below warn (${usage.warn[name]})`);
+  for (const name of ids) if (providerValue(usage.critical, name) < providerValue(usage.warn, name)) p.add(`config.usage: critical (${providerValue(usage.critical, name)}) for ${name} is below warn (${providerValue(usage.warn, name)})`);
   if (v.queue_hold !== undefined && v.queue_hold !== false) usage.queueHold = parsePercent(v.queue_hold, 'config.usage.queue_hold', p, {}, ids);
   for (const [key, field] of [['status_line', 'statusLine'], ['claude_tap', 'claudeTap']] as const) {
     if (v[key] === undefined) continue;
@@ -903,7 +910,7 @@ function parseUsage(v: unknown, p: Problems, ids: readonly ProviderId[]): UsageS
   }
   for (const id of PROVIDER_IDS) {
     const key = `${id}_dir`;
-    const field = `${id}Dir` as 'claudeDir' | 'codexDir';
+    const field = `${id}Dir` as 'claudeDir' | 'codexDir' | 'kimiDir';
     const dir = parseString(v[key], `config.usage.${key}`, p);
     if (dir) usage[field] = resolvePath(dir);
   }
@@ -1007,7 +1014,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   checkKeys(agentMap, [...AGENT_NAMES], 'config.agents', p);
   for (const name of activeProviders({ providers })) agents[name] = parseAgentSettings(name, agentMap[name], `config.agents.${name}`, p);
 
-  const equivalents = [...parseEquivalents(raw.equivalents, 'config.equivalents', p), ...parseEquivalents(DEFAULT_EQUIVALENTS, 'defaults', p)];
+  const equivalents = [...parseEquivalents(raw.equivalents, 'config.equivalents', p, providers), ...defaultEquivalents(providers)];
   const mirror = parseString(raw.mirror_dir, 'config.mirror_dir', p);
   const watch = parseWatch(raw.watch, p);
   const notify = parseNotify(raw.notify, p);
@@ -1029,7 +1036,11 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   if (raw.capacity !== undefined) {
     if (!isObject(raw.capacity)) p.add('config.capacity must be a mapping');
     else {
-      checkKeys(raw.capacity, ['snapshot', 'stale_minutes', 'sample_limit', 'thresholds', 'codex_refresh'], 'config.capacity', p);
+      if (raw.capacity.kimi_usage_probe !== undefined) {
+        if (typeof raw.capacity.kimi_usage_probe === 'boolean') Object.assign(capacity, { kimiUsageProbe: raw.capacity.kimi_usage_probe });
+        else p.add('config.capacity.kimi_usage_probe must be boolean');
+      }
+      checkKeys(raw.capacity, ['snapshot', 'stale_minutes', 'sample_limit', 'thresholds', 'codex_refresh', 'kimi_usage_probe'], 'config.capacity', p);
       for (const [key, field] of [['snapshot', 'snapshot'], ['codex_refresh', 'codexRefresh']] as const) {
         if (typeof raw.capacity[key] === 'boolean') capacity[field] = raw.capacity[key];
         else if (raw.capacity[key] !== undefined) p.add(`config.capacity.${key} must be boolean`);

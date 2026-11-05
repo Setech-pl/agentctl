@@ -1,4 +1,5 @@
-import { provider, isActive } from './providers/registry.ts';
+import { validateLaunch } from './safety.ts';
+import { provider, isActive, activeProviders } from './providers/registry.ts';
 import { VERDICTS } from './outputs.ts';
 import type { OutputVerdict } from './outputs.ts';
 import path from 'node:path';
@@ -215,7 +216,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
 
   checkKeys(h, SPEC_KEYS, where, p);
   const task = checkTask(raw, p);
-  const specAgent = parseEnumValue(h.agent, AGENT_NAMES, 'agent', p);
+  const specAgent = (typeof h.agent === 'string' && (AGENT_NAMES as readonly string[]).includes(h.agent) ? h.agent as AgentName : parseEnumValue(h.agent, activeProviders(config), 'agent', p));
   const specEffort = parseEnumValue(h.effort, EFFORTS, 'effort', p);
   let specModel: string | undefined;
   if (h.model !== undefined && h.model !== null) {
@@ -322,7 +323,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   const review = reviewEnabled ? { ...inheritedReview, ...explicitReview, default: 'auto' as const } : undefined;
   const agent = specAgent ?? project?.defaults.agent ?? config.defaults.agent;
   if (!agent && h.agent === undefined) {
-    p.add(`missing "agent" (one of ${AGENT_NAMES.join(', ')}); or set defaults.agent in .agentctl.yaml or ${config.path}`);
+    p.add(`missing "agent" (one of ${activeProviders(config).join(', ')}); or set defaults.agent in .agentctl.yaml or ${config.path}`);
   }
   const model = specModel ?? project?.defaults.model ?? config.defaults.model ?? 'default';
   const effort = specEffort ?? project?.defaults.effort ?? config.defaults.effort ?? 'high';
@@ -331,7 +332,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   // applies to Claude tasks.
   const remoteDefault = project?.defaults.remoteControl ?? config.defaults.remoteControl ?? false;
   const remote = agent ? provider(agent).capabilities.remoteControl : false;
-  if (agent && !isActive(config, agent)) p.add(`provider ${agent} is not enabled; add it to providers in ${config.path}`);
+  if (agent && !isActive(config, agent)) p.add(`provider ${agent} is not enabled; add it to providers: [claude, codex, kimi] in ${config.path}`);
   if (specRemote === true && agent && !remote) p.add(`remote_control: true works for Claude only (${provider(agent).displayName} has no Remote Control); drop the key or use agent: claude`);
   if (agent && remote && (specRemote === true || (specRemote === undefined && remoteDefault))) {
     const flags = config.agents[agent].flags;
@@ -440,5 +441,6 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   if (agent && remote && (specRemote ?? remoteDefault)) spec.remoteControl = true;
   if (cohort) spec.cohort = cohort;
   if (reportAlt.length > 0) spec.reportAlt = reportAlt;
+  validateLaunch(config, spec, spec.env);
   return spec;
 }

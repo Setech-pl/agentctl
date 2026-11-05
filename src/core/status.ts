@@ -1,3 +1,4 @@
+import { provider } from './providers/registry.ts';
 import { atomicWriteFile, stateWriteFailure } from './atomic-file.ts';
 import { tryFileLock } from './file-lock.ts';
 import { promptQueueView } from './prompt-queue.ts';
@@ -175,7 +176,8 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       if (screen.code === 0) { screenText = screen.stdout; screenRead = true; }
     }
     const screenAgent = record.agent === 'unknown' ? guessAgent(screenText) : record.agent;
-    const settings = config.agents[screenAgent];
+    const settings = config.agents[screenAgent] ?? provider(screenAgent).defaultSettings();
+    await provider(screenAgent).events.poll?.(ctx, record);
     const stored = readStoredEvent(config, record);
     const reportState = inspectReport(config, { ...record, ...(stored?.outcome === 'turn-complete' ? { turnEndedAt: stored.at } : {}) }, runner.now(), !record.attemptId && (!alive || (config.reportSettleS === 0 && classifyScreen(screenText, settings) === 'idle')));
     reportReady = reportState.ready;

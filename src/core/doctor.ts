@@ -132,9 +132,10 @@ export async function runDoctor(
 
   for (const id of PROVIDER_IDS) {
     const adapter = provider(id);
+    if (config && !isActive(config, id)) continue;
     const detection = await adapter.detect(runner);
     if (config && !isActive(config, id) && !detection.found) continue;
-    for (const check of adapter.doctor(detection, env)) add(check.name, check.level, check.text);
+    for (const check of adapter.doctor(detection, env, config)) add(check.name, check.level, check.text);
   }
 
   const gh = await runner.exec('gh', ['--version'], { readOnly: true });

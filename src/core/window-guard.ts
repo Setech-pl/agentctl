@@ -25,6 +25,8 @@ export interface AgentWindowRequest {
   /** Where the request comes from: the refusal for a record written before the own-checkout rule differs (a queue entry is removed, a record is closed). */
   origin: 'start' | 'new' | 'resume' | 'move';
   sessionUp: boolean;
+  /** Optional direct process for a neutral usage probe, still through the same door. */
+  command?: string;
 }
 
 /** Throws when a review would run in its author's checkout or write the author's report. A task that reviews nothing passes. */
@@ -47,5 +49,5 @@ export function assertAgentSpawnAllowed(ctx: Context, req: Omit<AgentWindowReque
 /** Make the window of an agent (and the session, when it is not up). The only caller of tmux new-window/new-session for a task. */
 export async function openAgentWindow(ctx: Context, req: AgentWindowRequest): Promise<ExecResult> {
   assertAgentSpawnAllowed(ctx, req);
-  return req.sessionUp ? ctx.tmux.newWindow(req.window, req.cwd, req.env) : ctx.tmux.newSession(req.window, req.cwd, req.env);
+  return req.sessionUp ? ctx.tmux.newWindow(req.window, req.cwd, req.env, req.command) : ctx.tmux.newSession(req.window, req.cwd, req.env, req.command);
 }

@@ -1,3 +1,4 @@
+import { validateLaunch, launchEnvironment } from './safety.ts';
 import { provider, isActive } from './providers/registry.ts';
 import { withStartLock, reserveStarts, releaseStarts } from './start-lock.ts';
 import { queuePrompt, deliverPendingPrompt } from './prompt-delivery.ts';
@@ -53,7 +54,7 @@ export async function findResumable(ctx: Context, opts: { all?: boolean; rows?: 
     const hasReport = row.report === 'yes';
     if (hasReport && !opts.all) continue;
     const sessions = readTaskSessions(ctx.config, record.window);
-    const sessionId = sessions[record.agent].at(-1)?.id;
+    const sessionId = (sessions[record.agent] ?? []).at(-1)?.id;
     out.push({ task: row.task, window: record.window, agent: record.agent, model: record.model, effort: record.effort, worktree, ...(sessionId ? { sessionId } : {}), hasReport });
   }
   return out;
@@ -126,12 +127,14 @@ async function startResumed(ctx: Context, plan: ResumePlan, opts: { self?: SelfA
     const record = readTaskRecord(config, c.window) as TaskRecord;
     // Before the attempt is written into the record: a refused resume leaves it as it was.
     assertAgentSpawnAllowed(ctx, { task: c.task, report: record.report, repos: record.repos, reviewOf: record.reviewOf, autoReview: record.autoReview, origin: 'resume' });
+    const order = { agent: c.agent, model: c.model, effort: c.effort as import('./config.ts').Effort, task: c.task };
+    validateLaunch(config, order, record.env);
     const attempt = attemptFields(record, runner.now());
     Object.assign(record, attempt);
     await withStartLock(ctx, () => setHeaderFields(runner, taskFile(config, c.window), { attempt: attempt.attempt, attempt_id: attempt.attemptId, attempt_started: attempt.attemptStarted, attempt_report_baseline: attempt.attemptReportBaseline, turn_ended_at: null, report_candidate: null, pulled: null, summary_delivered: null, report_complete_hash: null }));
     const wiring = config.notify.events && opts.self ? planEventWiring({ agent: c.agent, task: c.task, window: c.window, config, self: opts.self, env: record.env, worktree: c.worktree }) : undefined;
     for (const file of wiring?.files ?? []) await runner.writeFile(file.path, file.content);
-    const started = await openAgentWindow(ctx, { task: c.task, window: c.window, cwd: c.worktree, env: record.env, report: record.report, repos: record.repos, reviewOf: record.reviewOf, autoReview: record.autoReview, origin: 'resume', sessionUp });
+    const started = await openAgentWindow(ctx, { task: c.task, window: c.window, cwd: c.worktree, env: launchEnvironment(config, order, record.env), report: record.report, repos: record.repos, reviewOf: record.reviewOf, autoReview: record.autoReview, origin: 'resume', sessionUp });
     if (started.code !== 0) throw new AgentctlError(`${c.task}: tmux could not make the window: ${started.stderr.trim() || `exit ${started.code}`}`, results.length > 0 ? `Resumed before it: ${results.map((r) => r.task).join(', ')}.` : undefined);
     sessionUp = true;
     const windowId = (await tmux.windows()).find((w) => w.plain === c.window)?.id;

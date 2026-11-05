@@ -1,4 +1,6 @@
+import type { ProviderValues } from './providers/registry.ts';
 import { provider as adapter, activeProviders, perProvider, PROVIDER_IDS } from './providers/registry.ts';
+import { DEFAULT_PROVIDERS } from './providers/types.ts';
 import fs from 'node:fs';
 import { recordSamples } from './usage-samples.ts';
 import path from 'node:path';
@@ -85,7 +87,7 @@ export function formatReset(ms: number, now: number): string {
 export { claudePlanFile, readClaudeSnapshot } from './providers/claude-usage.ts';
 
 /** Both plans. Reads one file for Claude and the tail of the newest Codex logs. */
-export function readPlans(config: GlobalConfig, reader: UsageReader, now: number): Record<AgentName, PlanState> {
+export function readPlans(config: GlobalConfig, reader: UsageReader, now: number): ProviderValues<PlanState> {
   const ids = activeProviders(config);
   const plans = perProvider(ids, id => adapter(id).usage.readPlan(config, reader, now));
   for (const id of ids) { const p = plans[id]; p.stale = p.readAt !== null && now - p.readAt > config.capacity.staleMinutes * 60_000; }
@@ -100,17 +102,18 @@ export { codexPlanFile } from './providers/codex-usage.ts';
 // ---- tokens per task
 
 /** `<state_dir>/<task>/sessions.json`: the sessions the agent's own events named (transcript paths of Claude, thread ids of Codex). */
-export type TaskSessions = Record<AgentName, { id: string; transcript?: string }[]>;
+export type TaskSessions = Record<'claude' | 'codex', { id: string; transcript?: string }[]> & { kimi?: { id: string; transcript?: string }[] };
 
 export const sessionsFile = (config: Pick<GlobalConfig, 'stateDir'>, window: string): string => path.join(config.stateDir, window, 'sessions.json');
 
 export function readTaskSessions(config: Pick<GlobalConfig, 'stateDir'>, window: string): TaskSessions {
-  const out: TaskSessions = perProvider(PROVIDER_IDS, () => []);
+  const out: TaskSessions = perProvider(DEFAULT_PROVIDERS, () => []);
   try {
     const data: unknown = JSON.parse(fs.readFileSync(sessionsFile(config, window), 'utf8'));
     if (!isObject(data)) return out;
+    if (Array.isArray(data.kimi)) out.kimi = [];
     for (const id of PROVIDER_IDS) {
-      for (const c of Array.isArray(data[id]) ? data[id] : []) if (isObject(c) && typeof c.id === 'string') out[id].push({ id: c.id, ...(adapter(id).capabilities.statusLineTap && typeof c.transcript === 'string' ? { transcript: c.transcript } : {}) });
+      for (const c of Array.isArray(data[id]) ? data[id] : []) if (isObject(c) && typeof c.id === 'string') (out[id] ??= []).push({ id: c.id, ...(adapter(id).capabilities.statusLineTap && typeof c.transcript === 'string' ? { transcript: c.transcript } : {}) });
     }
   } catch {
     // none recorded
@@ -166,7 +169,7 @@ function candidates(config: GlobalConfig, reader: UsageReader, record: TaskRecor
     const usage = adapter(id).usage;
     const override = usage.homeEnv ? record.env[usage.homeEnv] : undefined;
     const home = override ? path.resolve(override) : usage.home(config);
-    for (const candidate of usage.sessions(reader, home, record, worktrees, sessions[id], now)) out.push({ ...candidate, provider: id });
+    for (const candidate of usage.sessions(reader, home, record, worktrees, sessions[id] ?? [], now)) out.push({ ...candidate, provider: id });
   }
   return out;
 }

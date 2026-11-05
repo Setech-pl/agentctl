@@ -1,3 +1,4 @@
+import { assertSafeArgs } from './safety.ts';
 import { provider, PROVIDER_IDS } from './providers/registry.ts';
 import { OUTPUT_PROTOCOL } from './outputs.ts';
 import type { AgentSettings } from './config.ts';
@@ -20,7 +21,9 @@ export const DEFAULT_MODEL = 'default';
  * `extra` (event wiring: `--settings <file>` for Claude, `-c notify=[…]` for Codex) goes last.
  */
 export function buildAgentArgv(spec: Pick<ResolvedSpec, 'agent' | 'model' | 'effort'> & { remoteControl?: boolean | undefined; task?: string | undefined }, settings: AgentSettings, extra: string[] = []): string[] {
-  return provider(spec.agent).argv({ ...spec, task: spec.task ?? '' }, settings, extra);
+  const argv = provider(spec.agent).argv({ ...spec, task: spec.task ?? '' }, settings, extra);
+  assertSafeArgs(spec.agent, argv);
+  return argv;
 }
 
 /**
@@ -32,7 +35,9 @@ export function buildAgentArgv(spec: Pick<ResolvedSpec, 'agent' | 'model' | 'eff
  * - codex:  `codex resume <session id> …` or `codex resume --last …` (the most recent session of the worktree); the flags follow `resume`.
  */
 export function buildResumeArgv(spec: Pick<ResolvedSpec, 'agent' | 'model' | 'effort'> & { remoteControl?: boolean | undefined; task?: string | undefined }, settings: AgentSettings, extra: string[] = [], sessionId?: string): string[] {
-  return provider(spec.agent).resumeArgv({ ...spec, task: spec.task ?? '' }, settings, extra, sessionId);
+  const argv = provider(spec.agent).resumeArgv({ ...spec, task: spec.task ?? '' }, settings, extra, sessionId);
+  assertSafeArgs(spec.agent, argv);
+  return argv;
 }
 
 export function agentCommandLine(argv: string[]): string {

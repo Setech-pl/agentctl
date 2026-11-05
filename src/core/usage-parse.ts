@@ -79,6 +79,7 @@ export function windowKind(minutes: number | null): PlanWindow['kind'] {
 /** Everything one session file adds up to; `seen`, `codex` and the like are the parser's memory, kept so a file can be read on from an offset. */
 export interface SessionStats {
   provider: AgentName;
+  kimi?: { protocol: string };
   observed?: { model: string; effort: string; cliVersion: string };
   id: string | null;
   cwd: string | null;

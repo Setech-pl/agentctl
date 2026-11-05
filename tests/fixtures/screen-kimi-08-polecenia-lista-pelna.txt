@@ -1,0 +1,147 @@
+=== scroll 1
+     /add-dir                            Add or list an additional workspace directory
+     /auto                               Never Ask mode: everything runs and is decided automatically; only plans in Plan mode wait for your review.
+     /btw                                Ask a forked side agent a question
+     /check-kimi-code-docs               Answer questions about the Kimi Code product using the official documentation — CLI usage, configuration, slash commands, features, membership and quota, A...
+     /compact                            Compact the conversation context
+     /copy                               Copy the last assistant message to the clipboard
+     /custom-theme                       Create or edit a kimi-code custom color theme — a JSON file under the resolved KIMI_CODE_HOME data directory that recolors the TUI. Use when the user wants...
+     /desktop (/install-desktop)         Open the Kimi Code desktop app page in your browser
+     /editor                             Set the external editor for Ctrl-G
+     /effort (/thinking)                 Switch thinking effort
+     /exit (/quit, /q)                   Exit the application
+     /experiments (/experimental)        Manage experimental features
+     /export-debug-zip                   Export current session as a debug ZIP archive
+     /export-md (/export)                Export current session as a Markdown file
+     /feedback (/bug)                    Send feedback to make Kimi Code better
+     /fork                               Fork the current session into a copy without switching to it
+     /goal                               Start or manage an autonomous goal
+  showing 11-34 of 70
+=== scroll 2
+     /check-kimi-code-docs               Answer questions about the Kimi Code product using the official documentation — CLI usage, configuration, slash commands, features, membership and quota, A...
+     /compact                            Compact the conversation context
+     /copy                               Copy the last assistant message to the clipboard
+     /custom-theme                       Create or edit a kimi-code custom color theme — a JSON file under the resolved KIMI_CODE_HOME data directory that recolors the TUI. Use when the user wants...
+     /desktop (/install-desktop)         Open the Kimi Code desktop app page in your browser
+     /editor                             Set the external editor for Ctrl-G
+     /effort (/thinking)                 Switch thinking effort
+     /exit (/quit, /q)                   Exit the application
+     /experiments (/experimental)        Manage experimental features
+     /export-debug-zip                   Export current session as a debug ZIP archive
+     /export-md (/export)                Export current session as a Markdown file
+     /feedback (/bug)                    Send feedback to make Kimi Code better
+     /fork                               Fork the current session into a copy without switching to it
+     /goal                               Start or manage an autonomous goal
+     /help (/h, /?)                      Show available commands and shortcuts
+     /import-from-cc-codex               Import Claude Code and Codex instructions, skills, and MCP settings into Kimi Code.
+     /import-sessions                    Import recent Claude Code and Codex sessions
+     /init                               Analyze the codebase and generate AGENTS.md
+     /login                              Select a platform and authenticate
+     /logout (/disconnect)               Log out of a configured provider
+     /mcp                                Show MCP server status
+     /mcp-config                         Configure MCP servers and handle MCP OAuth login.
+     /model                              Switch LLM model
+     /new (/clear)                       Start a fresh session in the current environment
+  showing 21-44 of 70
+=== scroll 3
+     /export-md (/export)                Export current session as a Markdown file
+     /feedback (/bug)                    Send feedback to make Kimi Code better
+     /fork                               Fork the current session into a copy without switching to it
+     /goal                               Start or manage an autonomous goal
+     /help (/h, /?)                      Show available commands and shortcuts
+     /import-from-cc-codex               Import Claude Code and Codex instructions, skills, and MCP settings into Kimi Code.
+     /import-sessions                    Import recent Claude Code and Codex sessions
+     /init                               Analyze the codebase and generate AGENTS.md
+     /login                              Select a platform and authenticate
+     /logout (/disconnect)               Log out of a configured provider
+     /mcp                                Show MCP server status
+     /mcp-config                         Configure MCP servers and handle MCP OAuth login.
+     /model                              Switch LLM model
+     /new (/clear)                       Start a fresh session in the current environment
+     /permission                         Select permission mode
+     /plan                               Toggle plan mode
+     /plugins                            Manage plugins
+     /provider (/providers)              Manage AI providers (add / delete / refresh)
+     /reload                             Reload session and apply config.toml settings plus tui.toml UI preferences
+     /reload-tui                         Reload only tui.toml UI preferences
+     /remote-control (/rc)               Open the current session through Kimi Remote Control
+     /secondary-model (/subagent-model)  Configure the secondary model for subagents
+     /sessions (/resume)                 Browse and resume sessions
+     /settings (/config)                 Open TUI settings
+  showing 31-54 of 70
+=== scroll 4
+     /mcp                                Show MCP server status
+     /mcp-config                         Configure MCP servers and handle MCP OAuth login.
+     /model                              Switch LLM model
+     /new (/clear)                       Start a fresh session in the current environment
+     /permission                         Select permission mode
+     /plan                               Toggle plan mode
+     /plugins                            Manage plugins
+     /provider (/providers)              Manage AI providers (add / delete / refresh)
+     /reload                             Reload session and apply config.toml settings plus tui.toml UI preferences
+     /reload-tui                         Reload only tui.toml UI preferences
+     /remote-control (/rc)               Open the current session through Kimi Remote Control
+     /secondary-model (/subagent-model)  Configure the secondary model for subagents
+     /sessions (/resume)                 Browse and resume sessions
+     /settings (/config)                 Open TUI settings
+     /status                             Show current session and runtime status
+     /sub-skill                          Discover and reorganize the skill inventory into hierarchical sub-skill bundles. Use when the user asks to review, group, or consolidate skills into a pare...
+     /sub-skill.consolidate              Apply an approved sub-skill grouping by moving user-specified skills into a parent bundle, with timestamped backups of every modified directory.
+     /sub-skill.review                   Analyze the available skill set and recommend candidate groups that could be consolidated into sub-skill bundles. Read-only — proposes a plan, does not mov...
+     /swarm                              Toggle swarm mode or run one task in swarm mode
+     /tasks (/task)                      Browse background tasks
+     /theme                              Set the terminal UI theme
+     /title (/rename)                    Set or show session title
+     /undo                               Withdraw the last prompt from the transcript
+     /update-config                      Inspect or edit kimi-code's own config — `config.toml` (model, provider, permission, hooks) and `tui.toml` (theme, editor, notifications, auto-update). Use...
+  showing 41-64 of 70
+=== scroll 5
+     /plugins                            Manage plugins
+     /provider (/providers)              Manage AI providers (add / delete / refresh)
+     /reload                             Reload session and apply config.toml settings plus tui.toml UI preferences
+     /reload-tui                         Reload only tui.toml UI preferences
+     /remote-control (/rc)               Open the current session through Kimi Remote Control
+     /secondary-model (/subagent-model)  Configure the secondary model for subagents
+     /sessions (/resume)                 Browse and resume sessions
+     /settings (/config)                 Open TUI settings
+     /status                             Show current session and runtime status
+     /sub-skill                          Discover and reorganize the skill inventory into hierarchical sub-skill bundles. Use when the user asks to review, group, or consolidate skills into a pare...
+     /sub-skill.consolidate              Apply an approved sub-skill grouping by moving user-specified skills into a parent bundle, with timestamped backups of every modified directory.
+     /sub-skill.review                   Analyze the available skill set and recommend candidate groups that could be consolidated into sub-skill bundles. Read-only — proposes a plan, does not mov...
+     /swarm                              Toggle swarm mode or run one task in swarm mode
+     /tasks (/task)                      Browse background tasks
+     /theme                              Set the terminal UI theme
+     /title (/rename)                    Set or show session title
+     /undo                               Withdraw the last prompt from the transcript
+     /update-config                      Inspect or edit kimi-code's own config — `config.toml` (model, provider, permission, hooks) and `tui.toml` (theme, editor, notifications, auto-update). Use...
+     /usage                              Show session tokens + context window + plan quotas
+     /version                            Show version information
+     /web                                Open the current session in the Web UI by starting a new server
+     /write-goal                         Help the user craft a well-specified `/goal` objective for goal mode — turn a rough intention into a completion contract with a clear finish line, proof, b...
+     /yolo (/yes)                        Ask When Needed mode: routine edits and commands run automatically; risky actions, questions, and plans still ask.
+  showing 47-70 of 70
+=== scroll 6
+     /plugins                            Manage plugins
+     /provider (/providers)              Manage AI providers (add / delete / refresh)
+     /reload                             Reload session and apply config.toml settings plus tui.toml UI preferences
+     /reload-tui                         Reload only tui.toml UI preferences
+     /remote-control (/rc)               Open the current session through Kimi Remote Control
+     /secondary-model (/subagent-model)  Configure the secondary model for subagents
+     /sessions (/resume)                 Browse and resume sessions
+     /settings (/config)                 Open TUI settings
+     /status                             Show current session and runtime status
+     /sub-skill                          Discover and reorganize the skill inventory into hierarchical sub-skill bundles. Use when the user asks to review, group, or consolidate skills into a pare...
+     /sub-skill.consolidate              Apply an approved sub-skill grouping by moving user-specified skills into a parent bundle, with timestamped backups of every modified directory.
+     /sub-skill.review                   Analyze the available skill set and recommend candidate groups that could be consolidated into sub-skill bundles. Read-only — proposes a plan, does not mov...
+     /swarm                              Toggle swarm mode or run one task in swarm mode
+     /tasks (/task)                      Browse background tasks
+     /theme                              Set the terminal UI theme
+     /title (/rename)                    Set or show session title
+     /undo                               Withdraw the last prompt from the transcript
+     /update-config                      Inspect or edit kimi-code's own config — `config.toml` (model, provider, permission, hooks) and `tui.toml` (theme, editor, notifications, auto-update). Use...
+     /usage                              Show session tokens + context window + plan quotas
+     /version                            Show version information
+     /web                                Open the current session in the Web UI by starting a new server
+     /write-goal                         Help the user craft a well-specified `/goal` objective for goal mode — turn a rough intention into a completion contract with a clear finish line, proof, b...
+     /yolo (/yes)                        Ask When Needed mode: routine edits and commands run automatically; risky actions, questions, and plans still ask.
+  showing 47-70 of 70

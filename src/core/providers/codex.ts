@@ -11,7 +11,7 @@ import { feedCodexLine } from './codex-parse.ts';
 import { refreshCodexCapacity } from './codex-usage.ts';
 import { DEFAULT_EQUIVALENTS } from './equivalents.ts';
 import { modelLabel } from './model-label.ts';
-import { splitFlag } from './safety.ts';
+import { legacySafety } from './safety.ts';
 import { interactiveTokens } from './process.ts';
 import { sessionQuestion } from './codex-question.ts';
 import { isObject } from '../util.ts';
@@ -79,12 +79,6 @@ export const codex: ProviderAdapter = {
     planSources: ['codex-session-log', 'codex-app-server:account/rateLimits/read'],
   },
   models: { get equivalents() { const rows = DEFAULT_EQUIVALENTS.map(row => row.codex); return { light: rows.slice(0, 2), medium: rows.slice(2, 4), strong: rows.slice(4) }; }, label: modelLabel },
-  safety: { forbiddenFlags: ['--dangerously-bypass-approvals-and-sandbox', '--yolo', '--full-auto', '--approve-for-me'], check(args) {
-      const [arg, next] = args; if (!arg) return undefined;
-      const [flag, inlineValue] = splitFlag(arg); const value = inlineValue ?? next;
-      if ((flag === '-a' || flag === '--ask-for-approval') && value === 'never') return `${flag} ${value}`;
-      if ((flag === '-c' || flag === '--config') && value !== undefined && /^approval_policy\s*=\s*["']?never/.test(value)) return `${flag} ${value}`;
-      return undefined;
-    } },
+  safety: legacySafety,
   isExternalSession(tokens) { const first = path.basename(tokens[0] ?? ''); return (first === 'codex' || (/^node(js)?$/.test(first) && /@openai\/codex\/\S*\.js$/.test(tokens[1] ?? ''))) && interactiveTokens(tokens); },
 };

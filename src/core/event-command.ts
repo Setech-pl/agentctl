@@ -1,3 +1,4 @@
+import { DEFAULT_PROVIDERS } from './providers/types.ts';
 import { provider, alternatives, PROVIDER_IDS } from './providers/registry.ts';
 import { limitedTick } from './limited.ts';
 import { collectStatus } from './status.ts';
@@ -62,12 +63,12 @@ export function reportReadyText(task: string, verdict: string | undefined): stri
   return verdict ? `${task}: raport gotowy – ${verdict}` : `${task}: raport gotowy`;
 }
 
-const otherAgent = (a: string): string => (PROVIDER_IDS as readonly string[]).includes(a) ? alternatives({ providers: [...PROVIDER_IDS] }, a as AgentName).join(', ') : 'drugiego dostawcę';
+const otherAgent = (a: string, ids: readonly AgentName[]): string => (PROVIDER_IDS as readonly string[]).includes(a) ? alternatives({ providers: [...ids] }, a as AgentName).join(', ') : 'drugiego dostawcę';
 
-export function limitText(record: { task: string; agent: string; pin?: boolean | undefined }): string {
+export function limitText(record: { task: string; agent: string; pin?: boolean | undefined }, ids: readonly AgentName[] = DEFAULT_PROVIDERS): string {
   const base = `${record.task}: ${record.agent} wyczerpał limit użycia`;
   if (record.pin) return `${base} (zadanie przypięte – pin: true – move go nie przeniesie)`;
-  return `${base} – agentctl move ${record.task} przeniesie zadanie na ${otherAgent(record.agent)}`;
+  return `${base} – agentctl move ${record.task} przeniesie zadanie na ${otherAgent(record.agent, ids)}`;
 }
 
 /** The session the event came from belongs to the task: `usage` counts its tokens for it. */

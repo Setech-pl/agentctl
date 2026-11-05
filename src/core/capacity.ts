@@ -1,3 +1,4 @@
+import { get as providerValue } from './providers/registry.ts';
 import { provider as adapter, activeProviders, perProvider } from './providers/registry.ts';
 import { collectDisk, diskLine } from './disk.ts';
 import { collectStatus } from './status.ts';
@@ -71,7 +72,7 @@ export async function collectCapacity(ctx: Context) {
     disk: await collectDisk(ctx),
     note: 'n/d = null. Plan percentages include use outside agentctl. Estimates are not provider token quotas.',
     providers: activeProviders(ctx.config).map((provider) => {
-      const plan = plans[provider];
+      const plan = providerValue(plans, provider);
       const load = loads.providers.find((p) => p.agent === provider)!;
       const windows = plan.windows.map((w) => ({ ...w, remainingPercent: 100 - w.usedPercent, resetsInMinutes: w.resetsAt === null ? null : Math.max(0, Math.ceil((w.resetsAt - now) / 60_000)), ...capacityTrend(samples, provider, w) }));
       const hints: string[] = [];

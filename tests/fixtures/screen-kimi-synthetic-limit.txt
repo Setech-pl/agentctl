@@ -1,0 +1,3 @@
+SYNTHETIC [hypothesis] Kimi 2.5.0 limit
+Error: [provider.rate_limit]
+│ >                 │

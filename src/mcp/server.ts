@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
-import { MCP_TOOLS } from '../core/mcp-tools.ts';
+import { MCP_TOOLS, providerToolInput } from '../core/mcp-tools.ts';
 import type { McpDeps } from '../core/mcp-tools.ts';
 import { FIRST_LOOK_MS, readMarkers } from '../core/chat-events.ts';
 
@@ -25,7 +25,7 @@ export function buildMcpServer(deps: McpDeps, version: string): McpServer {
     sessionDeps.eventsSession = { markers: readMarkers(ctx.config), cursors: {}, initialSince: new Date(ctx.runner.now() - FIRST_LOOK_MS).toISOString() };
   };
   for (const tool of MCP_TOOLS) {
-    server.registerTool(tool.name, { title: tool.title, description: tool.description, inputSchema: tool.input, annotations: tool.annotations }, async (args: Record<string, unknown>) => {
+    server.registerTool(tool.name, { title: tool.title, description: tool.description, inputSchema: providerToolInput(tool, deps.context(() => {}).config), annotations: tool.annotations }, async (args: Record<string, unknown>) => {
       const result = await tool.run(sessionDeps, args as never);
       return { content: [{ type: 'text' as const, text: result.text }], ...(result.isError ? { isError: true } : {}) };
     });

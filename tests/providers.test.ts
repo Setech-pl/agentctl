@@ -5,8 +5,8 @@ import { DEFAULT_AGENT_SETTINGS } from '../src/core/config.ts';
 import { makeConfig, useScratch } from './helpers.ts';
 const scratch = useScratch();
 it('registers the original providers and returns isolated default settings', () => {
-  assert.deepEqual(PROVIDER_IDS, ['claude', 'codex']);
-  for (const id of PROVIDER_IDS) {
+  assert.deepEqual(PROVIDER_IDS, ['claude', 'codex', 'kimi']);
+  for (const id of ['claude', 'codex'] as const) {
     const settings = provider(id).defaultSettings();
     assert.deepEqual(settings, DEFAULT_AGENT_SETTINGS[id]);
     settings.flags.push('--local');
@@ -26,4 +26,11 @@ it('defaults to both providers and rejects unknown, duplicate and incomplete pro
   for (const [i, value] of ['[claude]', '[codex]', '[claude, codex, claude]', '[claude, unknown]', 'claude'].entries()) {
     assert.throws(() => makeConfig(scratch.sub(`bad-${i}`), `providers: ${value}\n`), /config.providers/);
   }
+});
+
+it('keeps Kimi registered but inactive in the default configuration', () => {
+  const config = makeConfig(scratch.sub('active-default'));
+  assert.deepEqual(activeProviders(config), ['claude', 'codex']);
+  assert.equal(isActive(config, 'kimi'), false);
+  assert.equal(provider('kimi').id, 'kimi');
 });

@@ -1,3 +1,5 @@
+import { get as providerValue } from './providers/registry.ts';
+import type { ProviderValues } from './providers/registry.ts';
 import { activeProviders, PROVIDER_IDS } from './providers/registry.ts';
 import { atomicWriteFile, atomicAppendFile } from './atomic-file.ts';
 import fs from 'node:fs';
@@ -39,7 +41,7 @@ export function isWindowReset(old: PlanWindowView, cur: PlanWindowView, now: num
 }
 
 /** Synchronous, short critical section; competing readers leave sampling to the owner, never block a usage query. */
-export function recordSamples(config: GlobalConfig, plans: Record<AgentName, PlanState>, totals: Record<AgentName, number>, now: number): void {
+export function recordSamples(config: GlobalConfig, plans: ProviderValues<PlanState>, totals: ProviderValues<number>, now: number): void {
   const file = samplesPath(config);
   const lock = `${file}.lock`;
   let release: (() => void) | undefined;
@@ -68,7 +70,7 @@ export function recordSamples(config: GlobalConfig, plans: Record<AgentName, Pla
       changed = true;
     };
     for (const provider of activeProviders(config)) {
-      const p = plans[provider];
+      const p = providerValue(plans, provider);
       const previous = samples.filter((s) => s.provider === provider).at(-1);
       // A stale source: the old deadline passed a while ago and the usage did not grow since, so the window is over even if nobody re-read it.
       for (const w of previous?.windows ?? []) {
@@ -85,7 +87,7 @@ export function recordSamples(config: GlobalConfig, plans: Record<AgentName, Pla
         const old = previous?.windows.find((x) => x.kind === w.kind);
         if (old && isWindowReset(old, w, now)) emitReset(provider, w.kind, old.resetsAt, `${provider} ${w.label}: window reset; current usage ${w.usedPercent}%`);
       }
-      samples.push({ provider, at: p.readAt, capturedAt: now, windows: p.windows, taskTokens: totals[provider] });
+      samples.push({ provider, at: p.readAt, capturedAt: now, windows: p.windows, taskTokens: providerValue(totals, provider) });
     }
     if (samples.length > before) {
       if (samples.length <= config.capacity.sampleLimit) atomicAppendFile(file, samples.slice(before).map((s) => JSON.stringify(s)).join('\n') + '\n');

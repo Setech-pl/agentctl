@@ -1,3 +1,5 @@
+import { get as providerValue } from './providers/registry.ts';
+import type { ProviderValues } from './providers/registry.ts';
 import { activeProviders, PROVIDER_IDS } from './providers/registry.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -20,7 +22,7 @@ export function limitedRecovered(ctx: Context, plan: PlanState, episode: Pick<Ep
   return (episode.reset !== null && ctx.runner.now() >= episode.reset) || (plan.available && !plan.stale && plan.readAt !== null && plan.readAt >= episode.since && plan.maxPercent !== null && 100 - plan.maxPercent > ctx.config.limited.resumeAbovePercent);
 }
 /** Once per provider episode, with durable per-task retry counts. Never changes the model/provider. */
-export async function limitedTick(ctx: Context, rows: StatusRow[], notifier: Notifier, supplied?: Record<AgentName, PlanState>): Promise<void> {
+export async function limitedTick(ctx: Context, rows: StatusRow[], notifier: Notifier, supplied?: ProviderValues<PlanState>): Promise<void> {
   if (ctx.runner.dryRun) return;
   const file = path.join(path.dirname(ctx.config.path), 'limited-retries.json');
   await withFileLock(`${file}.lock`, async () => {
@@ -30,7 +32,7 @@ export async function limitedTick(ctx: Context, rows: StatusRow[], notifier: Not
     for (const provider of activeProviders(ctx.config)) {
       const mine = rows.filter(r => r.agent === provider && !r.closed && !r.cancelled && r.window === 'alive' && r.report !== 'yes' && !r.finished);
       const limited = mine.filter(r => r.state === 'limited');
-      const exhausted = plans[provider].windows.filter(w => w.usedPercent >= 100);
+      const exhausted = providerValue(plans, provider).windows.filter(w => w.usedPercent >= 100);
       if (!state[provider] && !limited.length) continue;
       const reset = exhausted.length && exhausted.every(w => w.resetsAt !== null) ? Math.max(...exhausted.map(w => w.resetsAt!)) : null;
       const episode = state[provider] ??= { since: now, reset, notified: false, tasks: {} };
@@ -51,7 +53,7 @@ export async function limitedTick(ctx: Context, rows: StatusRow[], notifier: Not
       }
       for (const row of limited) {
         const retry = episode.tasks[row.task] ??= { firstAt: 0, since: 0, attempts: 0 };
-        if (!settings.autoResume || !limitedRecovered(ctx, plans[provider], episode)) continue;
+        if (!settings.autoResume || !limitedRecovered(ctx, providerValue(plans, provider), episode)) continue;
         if (retry.attempts >= ctx.config.overload.maxRetries || (retry.firstAt > 0 && now - retry.firstAt >= ctx.config.overload.giveUpAfter * 1000)) {
           if (!retry.attention) {
             retry.attention = true; await persist();
@@ -62,7 +64,7 @@ export async function limitedTick(ctx: Context, rows: StatusRow[], notifier: Not
           continue;
         }
         if (retry.attempts && now - retry.since < ctx.config.overload.retryAfter * 1000) continue;
-        const guard = async (phase: 'before-paste' | 'before-enter') => limitedRecovered(ctx, (supplied ?? plansNow(ctx))[provider], episode) && await recoveryGuard(ctx, row, ['limited', 'waiting'], ['limited', 'idle'], settings.message, phase);
+        const guard = async (phase: 'before-paste' | 'before-enter') => limitedRecovered(ctx, providerValue(supplied ?? plansNow(ctx), provider), episode) && await recoveryGuard(ctx, row, ['limited', 'waiting'], ['limited', 'idle'], settings.message, phase);
         try {
           if (!await guard('before-paste')) continue;
           retry.firstAt ||= now; retry.attempts++; retry.since = now; await persist();

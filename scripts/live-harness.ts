@@ -1,4 +1,4 @@
-import { PROVIDER_IDS } from '../src/core/providers/types.ts';
+import { DEFAULT_PROVIDERS, PROVIDER_IDS } from '../src/core/providers/types.ts';
 import { spawn, spawnSync } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
@@ -68,7 +68,7 @@ export function checkHarnessSafety(input: SafetyInput): void {
       throw new HarnessRefusal(`"${name}" resolves to ${found}, outside the fake bin directory ${input.fakeBin}. Remove its directory from PATH.`);
     }
   }
-  for (const name of PROVIDER_IDS) {
+  for (const name of DEFAULT_PROVIDERS) {
     if (input.resolve(name, input.pathEnv) === undefined) throw new HarnessRefusal(`the fake "${name}" is not found on PATH (${input.pathEnv})`);
   }
   for (const dir of input.pathEnv.split(path.delimiter).filter(Boolean)) {
@@ -110,7 +110,7 @@ export function commandV(name: string, pathEnv: string): string | undefined {
 
 // ---- the fakes
 
-const FAKE_AGENT = (name: 'claude' | 'codex'): string => `#!/bin/bash
+const FAKE_AGENT = (name: 'claude' | 'codex' | 'kimi'): string => `#!/bin/bash
 # A fake ${name} for live tests: answers --version and --help, prints an idle screen, echoes what it is given. Every start is logged.
 echo "${name} $*" >> "\${HARNESS_AGENT_LOG:-/dev/null}"
 case "$1" in
@@ -120,7 +120,7 @@ case "$1" in
       *'"id":2'*) printf '%s\\n' '{"id":2,"result":{"rateLimits":{}}}';;
     esac
   done; exit 0;;
-  --version) echo "${name === 'claude' ? '2.1.309 (Claude Code, fake)' : 'codex-cli 0.166.0 (fake)'}"; exit 0;;
+  --version) echo "${name === 'claude' ? '2.1.309 (Claude Code, fake)' : name === 'kimi' ? 'kimi 2.5.0 (fake)' : 'codex-cli 0.166.0 (fake)'}"; exit 0;;
   --help) ${name === 'claude' ? `echo "  --effort <level>"; echo "  --remote-control [name]               Start an interactive session with Remote Control enabled"; echo "  --append-system-prompt <prompt>       Append a system prompt (--bare: --append-system-prompt[-file])"` : `echo "  -c, --config <key=value>"`}; exit 0;;
 esac
 ${name === 'claude' ? `printf '❯ Try "fake"\\n'` : `printf '› Ask Codex to do anything\\n'`}
@@ -139,7 +139,7 @@ exit 0
 const FAKES: Record<string, string> = {
   claude: FAKE_AGENT('claude'),
   codex: FAKE_AGENT('codex'),
-  kimi: '#!/bin/sh\nexit 1\n',
+  kimi: FAKE_AGENT('kimi'),
   pbcopy: '#!/bin/bash\ncat > "${HARNESS_CLIPBOARD:?}"\n',
   pbpaste: '#!/bin/bash\ncat "${HARNESS_CLIPBOARD:?}" 2>/dev/null\n',
   'wl-copy': '#!/bin/bash\ncat > "${HARNESS_CLIPBOARD:?}"\n',
@@ -355,8 +355,13 @@ export async function withHarness<T>(options: HarnessOptions, fn: (h: Harness) =
 }
 
 /** Raw-TTY double for paste acknowledgements; replaces only a fake inside this harness. */
-export function installPromptAgent(h: Harness, agent: 'claude' | 'codex', mode: 'swallow-first' | 'swallow-all' | 'trust' | 'claude-spinner' | 'hook' | 'silent', log: string): void {
+export function installPromptAgent(h: Harness, agent: 'claude' | 'codex' | 'kimi', mode: 'swallow-first' | 'swallow-all' | 'trust' | 'claude-spinner' | 'hook' | 'silent' | 'idle' | 'working' | 'approval' | 'question' | 'question-submit' | 'background' | 'complete' | 'limit' | 'overloaded' | 'interrupted' | 'auth' | 'usage', log: string): void {
   h.check();
+  if (agent === 'kimi') {
+    const source = fs.readFileSync(new URL('./fake-kimi.ts', import.meta.url), 'utf8').replace("'__KIMI_LOG__'", JSON.stringify(log)).replace("'__KIMI_MODE__'", JSON.stringify(mode));
+    fs.writeFileSync(path.join(h.fakeBin, 'kimi'), `#!${process.execPath}\n${source}`, { mode: 0o755 });
+    return;
+  }
   const program = `#!${process.execPath}
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';

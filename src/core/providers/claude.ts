@@ -13,7 +13,7 @@ import { feedClaudeLine } from './claude-parse.ts';
 import { refreshCodexCapacity } from '../capacity.ts';
 import { DEFAULT_EQUIVALENTS } from './equivalents.ts';
 import { modelLabel } from './model-label.ts';
-import { splitFlag } from './safety.ts';
+import { legacySafety } from './safety.ts';
 import { interactiveTokens } from './process.ts';
 import { sessionQuestion } from '../codex-question.ts';
 import { isObject } from '../util.ts';
@@ -84,11 +84,6 @@ export const claude: ProviderAdapter = {
     planSources: ['claude-statusline'],
   },
   models: { get equivalents() { const rows = DEFAULT_EQUIVALENTS.map(row => row.claude); return { light: rows.slice(0, 2), medium: rows.slice(2, 4), strong: rows.slice(4) }; }, label: modelLabel },
-  safety: { forbiddenFlags: ['--dangerously-skip-permissions', '--allow-dangerously-skip-permissions'], check(args) {
-      const [arg, next] = args; if (!arg) return undefined;
-      const [flag, inlineValue] = splitFlag(arg); const value = inlineValue ?? next;
-      if (flag === '--permission-mode' && value !== undefined && ['bypassPermissions', 'acceptEdits', 'auto', 'dontAsk'].includes(value)) return `${flag} ${value}`;
-      return undefined;
-    } },
+  safety: legacySafety,
   isExternalSession(tokens) { const first = path.basename(tokens[0] ?? ''); return (first === 'claude' || (/^node(js)?$/.test(first) && /claude-code\/\S*\.js$/.test(tokens[1] ?? ''))) && interactiveTokens(tokens); },
 };

@@ -1,3 +1,4 @@
+import { DEFAULT_PROVIDERS } from './core/providers/types.ts';
 import type { AgentName } from './core/config.ts';
 import { provider, PROVIDER_IDS, activeProviders } from './core/providers/registry.ts';
 import { reportPathWarnings } from './core/report-path.ts';
@@ -239,6 +240,10 @@ const realOrSelf = (p: string): string => {
 export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promise<number> {
   const line = (text: string): void => deps.stdout(`${text}\n`);
   let exitCode = 0;
+  let cliProviders: readonly import('./core/config.ts').AgentName[] = DEFAULT_PROVIDERS;
+  if (!argv.includes('--version')) {
+    try { cliProviders = activeProviders(deps.loadConfig()); } catch { /* the command reports invalid config when needed */ }
+  }
 
   /** Spec text from the clipboard (`--clip`), a file, or stdin. */
   const readSpecSource = async (file: string | undefined, clip: boolean | undefined): Promise<string> => {
@@ -421,7 +426,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('--dry-run', 'print the commands that would run, execute nothing')
     .option('--json', 'machine-readable results and capacity snapshot')
     .option('--reuse', 'use worktrees that already exist instead of failing')
-    .addOption(new Option('--agent <agent>', 'run every spec on this provider, translated through the equivalents table').choices([...PROVIDER_IDS]))
+    .addOption(new Option('--agent <agent>', 'run every spec on this provider, translated through the equivalents table').choices([...cliProviders]))
     .option('--no-switch', 'never offer to move a task to the other provider when its limit is full')
     .option('--no-agent', 'only create the worktree, run setup and links; no TASK.md, window or agent')
     .option('--no-wait-trust', 'stop at the folder-trust dialog instead of waiting for you to confirm it (the old behaviour)')
@@ -485,7 +490,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .description('Put the tasks of a spec file in the queue: they start by themselves (while "agentctl watch" runs) when a window of their provider is free. Shows a summary and asks y/N first.')
     .argument('[file]', 'spec file, or "-" for stdin')
     .option('--clip', 'read the spec from the clipboard')
-    .addOption(new Option('--agent <agent>', 'run every spec on this provider, translated through the equivalents table (the queue never switches provider by itself)').choices([...PROVIDER_IDS]))
+    .addOption(new Option('--agent <agent>', 'run every spec on this provider, translated through the equivalents table (the queue never switches provider by itself)').choices([...cliProviders]))
     .option('-y, --yes', 'do not ask')
     .option('--json', 'machine-readable queued entries and capacity snapshot')
     .option('--cohort <name>', 'put every task of the file in this cohort (overrides "cohort:" in a spec); without it a task has a cohort only if its spec names one')
@@ -1317,7 +1322,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .requiredOption('--report <path>', 'path of the task report')
     .option('--window <name>', 'tmux window of the task (default: the lowercase task ID)')
     .option('--worktree <path>', 'worktree of the task, so "close --rm-worktree" knows it')
-    .addOption(new Option('--agent <agent>', 'agent running in the window').choices([...PROVIDER_IDS]))
+    .addOption(new Option('--agent <agent>', 'agent running in the window').choices([...cliProviders]))
     .option('--model <model>', 'model of the task')
     .addOption(new Option('--effort <effort>', 'effort of the task').choices(['low', 'medium', 'high', 'xhigh', 'max']))
     .option('--dry-run', 'print what would be written, write nothing')
@@ -1359,7 +1364,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .command('event')
     .description('Called by the agents themselves (hooks that "new" sets up): records the event, updates the task state and notifies at once. Always exits 0.')
     .requiredOption('--task <task>', 'task ID')
-    .addOption(new Option('--agent <agent>', 'the agent that reports').choices([...PROVIDER_IDS]).makeOptionMandatory())
+    .addOption(new Option('--agent <agent>', 'the agent that reports').choices([...cliProviders]).makeOptionMandatory())
     .addOption(new Option('--kind <kind>', 'claude: which hook called').choices(PROVIDER_IDS.flatMap(id => [...provider(id).events.kinds])))
     .option('--forward <json>', 'codex: JSON list, the notify command the user had; run with the same JSON after this one')
     .argument('[payload]', 'the event as JSON (codex puts it here; claude sends it on stdin)')
@@ -1407,7 +1412,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .command('move')
     .description('Hand a task that hit its usage limit to the other provider: new window <task>-2 in the same worktree, the original prompt plus a note to continue. Asks y/N.')
     .argument('<task>', 'task ID')
-    .addOption(new Option('--agent <agent>', 'move to this provider (default: the other one)').choices([...PROVIDER_IDS]))
+    .addOption(new Option('--agent <agent>', 'move to this provider (default: the other one)').choices([...cliProviders]))
     .option('-y, --yes', 'do not ask')
     .action(
       guarded(async (task: string, opts: { agent?: AgentName; yes?: boolean }) => {

@@ -1,3 +1,4 @@
+import { validateLaunch } from './safety.ts';
 import { alternatives } from './providers/registry.ts';
 import { confirmAction } from './clipboard.ts';
 import type { AgentName } from './config.ts';
@@ -73,6 +74,7 @@ export async function planMove(ctx: Context, taskArg: string, opts: MoveOptions 
 
   const t = translate({ agent: from.agent, model: from.model, effort: from.effort === 'unknown' ? 'high' : from.effort }, target, config.equivalents);
   if (!t.ok) throw new AgentctlError(`${from.task}: ${t.message}`, t.hint);
+  validateLaunch(config, { task: from.task, ...t.order }, from.env);
   if (from.repos.length === 0) throw new AgentctlError(`${from.task} has no worktree recorded, so there is nothing for the new agent to continue from`, 'Start a new task by hand.');
 
   const original = readTaskPrompt(config, from.window);

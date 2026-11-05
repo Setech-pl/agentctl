@@ -24,7 +24,7 @@ export const DELIVERY_WARNING = 'dostarczenie niepotwierdzone – sprawdzam';
 
 /** Hooks are checked first; screen evidence is adapter-specific and never an input draft. */
 export function deliveryEvidence(ctx: Context, record: TaskRecord, screen: string): boolean {
-  const draft = screenMetadata(screen).draft_input;
+  const draft = (record.agent !== 'unknown' ? provider(record.agent).screen.draft?.(screen) : undefined) ?? screenMetadata(screen).draft_input;
   if (draft) return false;
   try {
     const evidence = JSON.parse(fs.readFileSync(path.join(ctx.config.stateDir, record.window, 'delivery-evidence.json'), 'utf8'));
@@ -83,30 +83,39 @@ export async function deliverPendingPrompt(ctx: Context, window: string): Promis
     const busyFollowup = record.promptKind === 'followup' && settings.acceptsBusyPrompt !== false && ['working', 'background'].includes(beforeState);
     if (before.code !== 0 || !inputVisible(before.stdout, settings) || (!busyFollowup && beforeState !== 'idle')) return 'pending';
 
-    const ownsDraft = (draft: string) => text.startsWith(draft) || draft.startsWith(text.split('\n')[0]!) || /\[Pasted|pasted (?:text|content)/i.test(draft);
+    const profile = provider(record.agent).screen;
+    const draftOf = (screen: string) => profile.draft ? profile.draft(screen) : screenMetadata(screen).draft_input;
+    const ownsDraft = (draft: string) => (profile.stablePaste && /\[paste #\d+/.test(draft)) || text.startsWith(draft) || draft.startsWith(text.split('\n')[0]!) || /\[Pasted|pasted (?:text|content)/i.test(draft);
     record.deliveryWasBusy = busyFollowup;
     record.deliveryStartedAt = new Date(ctx.runner.now()).toISOString();
     record.deliveryOutputBaseline = outputFingerprint(before.stdout, settings.deliveryPattern);
     await setHeaderFields(ctx.runner, file, { prompt_delivery: 'sending', delivery_was_busy: busyFollowup, delivery_started_at: record.deliveryStartedAt, delivery_output_baseline: record.deliveryOutputBaseline });
-    if (screenMetadata(before.stdout).draft_input) return uncertain('the input already contains a draft; it was not overwritten');
+    if (draftOf(before.stdout)) return uncertain('the input already contains a draft; it was not overwritten');
     try {
       await ctx.tmux.pasteText(window, text);
       await ctx.runner.sleep(400);
       for (let attempt = 0; attempt < 3; attempt++) {
         if (attempt > 0) await ctx.runner.sleep(400);
         const ready = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
-        const currentState = classifyScreen(ready.stdout, settings), currentDraft = screenMetadata(ready.stdout).draft_input;
+        const currentState = classifyScreen(ready.stdout, settings), currentDraft = draftOf(ready.stdout);
         if (deliveryEvidence(ctx, record, ready.stdout !== before.stdout ? ready.stdout : '')) return sent();
         if (currentDraft && !ownsDraft(currentDraft)) return uncertain('the input changed before Enter');
         if (ready.code !== 0 || (currentState !== 'idle' && !(busyFollowup && ['working', 'background'].includes(currentState)))) return uncertain('the agent is no longer idle before Enter');
-        const enter = await ctx.tmux.pressEnter(window);
+        if (profile.stablePaste) {
+          await ctx.runner.sleep(200);
+          const stable = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
+          if (stable.code !== 0 || stable.stdout !== ready.stdout) return uncertain('Kimi screen is not stable before Enter');
+        }
+        const enter = profile.stablePaste
+          ? await ctx.runner.exec('tmux', ['send-keys', '-t', await ctx.tmux.targetFor(window), 'C-m'])
+          : await ctx.tmux.pressEnter(window);
         if (enter.code !== 0) return uncertain(`Enter failed: ${enter.stderr}`);
         let ourDraft = false;
         for (let poll = 0; poll < 8; poll++) {
           await ctx.runner.sleep(150);
           const pane = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
           if (pane.code !== 0) return uncertain('the pane cannot be read');
-          const state = classifyScreen(pane.stdout, settings), draft = screenMetadata(pane.stdout).draft_input;
+          const state = classifyScreen(pane.stdout, settings), draft = draftOf(pane.stdout);
           // A quick completed turn can finish between polls; require new assistant output as its acknowledgement.
           if (deliveryEvidence(ctx, record, pane.stdout !== before.stdout ? pane.stdout : '')) return sent();
           if (state !== 'idle' && !(busyFollowup && ['working', 'background'].includes(state))) return uncertain(`the agent shows ${state}; no further key was sent`);

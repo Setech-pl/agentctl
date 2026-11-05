@@ -1,4 +1,5 @@
 import type { AgentSettings } from '../config.ts';
+import { kimiSettings } from './kimi-settings.ts';
 import type { ProviderId } from './types.ts';
 
 /** The mark that opens the line an agent prints for an error: bullets, tree corners, warning signs. */
@@ -40,6 +41,7 @@ const SETTINGS: Record<ProviderId, AgentSettings> = {
     overloadPatterns: ['^\\s*⎿\\s*API Error:\\s*529(?:\\s|$)', '^\\s*⎿\\s*(?:API Error:\\s*)?Overloaded(?:[.:]|$)'],
     backgroundPatterns: ['^\\s*\\d+ (?:monitors?|shells?)(?:, \\d+ (?:monitors?|shells?))? still running\\b', BACKGROUND_CLAUDE, '[·⏵].*\\b\\d+ background\\b'],
   },
+  kimi: kimiSettings(),
   codex: {
     acceptsBusyPrompt: true,
     flags: [],

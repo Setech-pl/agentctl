@@ -1,0 +1,108 @@
+Kimi Code updated to v2.5.0
+Changelog: https://moonshotai.github.io/kimi-code/en/release-notes/changelog.html
+
+ [38;2;79;168;255m╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮[39m
+ [38;2;79;168;255m│[39m                                                                                                                                                                                                    [38;2;79;168;255m│[39m
+ [38;2;79;168;255m│[39m  [38;2;79;168;255m▐█▛█▛█▌[39m  [1m[38;2;79;168;255mWelcome to Kimi Code![0m                                                                                                                                                                    [38;2;79;168;255m│[39m
+ [38;2;79;168;255m│[39m  [38;2;79;168;255m▐█████▌[39m  [38;2;136;136;136mSend /help for help information.[39m                                                                                                                                                         [38;2;79;168;255m│[39m
+ [38;2;79;168;255m│[39m                                                                                                                                                                                                    [38;2;79;168;255m│[39m
+ [38;2;79;168;255m│[39m  [1m[38;2;136;136;136mDirectory: [0m/Users/marcinkrzetowski/Projects/wt-dev/sandbox-kimi-shots-1                                                                                                                           [38;2;79;168;255m│[39m
+ [38;2;79;168;255m│[39m  [1m[38;2;136;136;136mSession:   [0msession_9be20a83-be41-4ac3-9d44-3b53917c3a48                                                                                                                                           [38;2;79;168;255m│[39m
+ [38;2;79;168;255m│[39m  [1m[38;2;136;136;136mModel:     [0mK2.7 Code Highspeed                                                                                                                                                                    [38;2;79;168;255m│[39m
+ [38;2;79;168;255m│[39m  [1m[38;2;136;136;136mVersion:   [0m2.5.0                                                                                                                                                                                  [38;2;79;168;255m│[39m
+ [38;2;79;168;255m│[39m                                                                                                                                                                                                    [38;2;79;168;255m│[39m
+ [38;2;79;168;255m╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯[39m
+
+ [1m[38;2;79;168;255m✦ Kimi K3.1 Pro is ready[0m [1m[38;2;245;245;245m- use the model in a fresh session for the best results[0m
+   [38;2;136;136;136mStandard: Plus/Moderato and above; Highspeed: Pro/Allegretto and above[39m
+
+   [38;2;136;136;136mNo session yet — one will be created on your first message.[39m
+   [38;2;232;168;56mtmux extended-keys is off. Modified Enter keys may not work. Add `set -g extended-keys on` to ~/.tmux.conf and restart tmux.[39m
+
+ [1m[38;2;255;203;107m❯ Przeczytaj wszystkie pliki w tym repo, opisz strukturę i zaproponuj trzy usprawnienia.[0m
+
+ [38;2;136;136;136m● [3mThe user asks in Polish: "Read all files in this repo, describe the structure and propose three improvements." We need read all files. Repo has README.md and sum.js. Also .agentctl.yaml maybe.    [0m
+   [3m[38;2;136;136;136mNeed read. Use Read. Then describe structure and propose three improvements. Since simple, no need TodoList. Read files in parallel.[0m
+
+ [38;2;78;200;126m● [1m[38;2;79;168;255mRead 3 files[0;2m · 5 lines[0m
+
+ [38;2;136;136;136m● [3mNeed answer in Polish. Repo structure: .agentctl.yaml, README.md, sum.js. README title. sum.js exports sum arrow function. .agentctl.yaml config. Propose three improvements. Since trivial repo    [0m
+   [3m[38;2;136;136;136mmaybe: 1) add tests (jest/node test runner), 2) add input validation/type checking for a,b numbers, 3) add package.json with scripts, metadata, module info, linting, CI. Or README usage. Need keep[0m
+   [3m[38;2;136;136;136mbrief. Also mention files.[0m
+
+ [38;2;224;224;224m● [39mPrzeczytałem wszystkie pliki w repozytorium.
+
+   [1m[38;2;224;224;224mStruktura repo[0m
+
+   [38;2;107;107;107m```[39m
+     sandbox-kimi-shots-1/
+     ├── .agentctl.yaml   # konfiguracja agentctl
+     ├── README.md        # krótki tytuł: „agentctl dev sandbox”
+     └── sum.js           # eksportuje funkcję sum(a, b)
+   [38;2;107;107;107m```[39m
+
+   [38;2;79;168;255msum.js[39m zawiera jedynie:
+
+   [38;2;107;107;107m```js[39m
+     [34mexport[39m [34mconst[39m sum = [33m(a, b) =>[39m a + b;
+   [38;2;107;107;107m```[39m
+
+   Plik [38;2;79;168;255m.agentctl.yaml[39m wskazuje katalog roboczy [38;2;79;168;255m~/Projects/wt-dev[39m i ścieżkę raportów.
+
+   [1m[38;2;224;224;224mTrzy proponowane usprawnienia[0m
+
+   [38;2;224;224;224m1. [1m[39mDodaj testy[0m
+      Repozytorium nie ma żadnych testów. Warto dodać chociaż podstawowy zestaw dla [38;2;79;168;255msum[39m, np. z użyciem wbudowanego w Node.js test runnera ([38;2;79;168;255mnode --test[39m) lub Jesta, aby umożliwić weryfikację przy
+      przyszłych zmianach.
+
+   [38;2;224;224;224m2. [1m[39mWaliduj argumenty funkcji [38;2;79;168;255msum[0m
+      Obecnie [38;2;79;168;255msum("1", "2")[39m zwróci [38;2;79;168;255m"12"[39m zamiast błędu. Można dodać sprawdzenie, czy [38;2;79;168;255ma[39m i [38;2;79;168;255mb[39m są liczbami, i wyrzucić wyjątek lub zwrócić [38;2;79;168;255mNaN[39m przy niepoprawnych danych.
+
+   [38;2;224;224;224m3. [1m[39mUtwórz [38;2;79;168;255mpackage.json[39m i rozbuduj README[0m
+      Dodaj [38;2;79;168;255mpackage.json[39m z metadanymi projektu, skryptami ([38;2;79;168;255mtest[39m, [38;2;79;168;255mlint[39m) oraz opcjonalnie konfigurację ESLint/Prettier. README powinien zawierać opis, przykład użycia i instrukcję uruchomienia testów.
+      To ułatwi start nowym osobom i uczyni projekt bardziej profesjonalnym.
+
+ [1m[38;2;255;203;107m❯ Przeczytaj ponownie wszystkie pliki w tym repo, opisz strukturę i zaproponuj trzy usprawnienia.[0m
+
+ [38;2;136;136;136m● [3mUser asks again in Polish: "Read all files in this repo again, describe the structure and propose three improvements." Need read again maybe files changed. We'll read all.[0m
+
+ [38;2;78;200;126m● [1m[38;2;79;168;255mRead 3 files[0;2m · 5 lines[0m
+
+ [38;2;136;136;136m● [3mFiles unchanged. Answer in Polish. Could propose slightly different improvements. Need mention all files. Keep concise.[0m
+
+ [38;2;224;224;224m● [39mPrzeczytałem wszystkie pliki jeszcze raz – zawartość się nie zmieniła.
+
+   [1m[38;2;224;224;224mStruktura repo[0m
+
+   [38;2;107;107;107m```[39m
+     sandbox-kimi-shots-1/
+     ├── .agentctl.yaml   # konfiguracja agentctl
+     ├── README.md        # tytuł: „agentctl dev sandbox”
+     └── sum.js           # moduł eksportujący funkcję sum
+   [38;2;107;107;107m```[39m
+
+   W [38;2;79;168;255msum.js[39m znajduje się tylko:
+
+   [38;2;107;107;107m```js[39m
+     [34mexport[39m [34mconst[39m sum = [33m(a, b) =>[39m a + b;
+   [38;2;107;107;107m```[39m
+
+   Plik [38;2;79;168;255m.agentctl.yaml[39m określa katalog roboczy [38;2;79;168;255m~/Projects/wt-dev[39m oraz lokalizację raportów.
+
+   [1m[38;2;224;224;224mTrzy proponowane usprawnienia[0m
+
+   [38;2;224;224;224m1. [1m[39mDodaj obsługę większej liczby argumentów[0m
+      Rozszerz [38;2;79;168;255msum[39m, aby akceptowała dowolną liczbę operandów, np. [38;2;79;168;255msum(1, 2, 3)[39m lub [38;2;79;168;255msum(...numbers)[39m. To zwiększy elastyczność funkcji.
+
+   [38;2;224;224;224m2. [1m[39mWprowadź walidację typów z czytelnym błędem[0m
+      Funkcja powinna sprawdzać, czy wszystkie argumenty są liczbami. Przy niepoprawnym typie warto rzucić wyjątek z jasnym komunikatem, np. [38;2;79;168;255mnew TypeError('Arguments must be numbers')[39m.
+
+   [38;2;224;224;224m3. [1m[39mDodaj testy i skonfiguruj projekt[0m
+      Utwórz [38;2;79;168;255mpackage.json[39m z typem modułu ESM, skryptem testowym oraz przykładowymi testami (Node.js test runner / Jest / Vitest). Rozbuduj też [38;2;79;168;255mREADME.md[39m o opis, przykłady użycia i instrukcję
+      uruchomienia testów.
+
+ [38;2;90;90;90m╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮[39m
+ [38;2;90;90;90m│[39m > [7m [0m                                                                                                                                                                                                [38;2;90;90;90m│[39m
+ [38;2;90;90;90m╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯[39m
+ [38;2;224;224;224mK2.7 Code Highspeed thinking[39m  [38;2;136;136;136m…/Projects/wt-dev/sandbox-kimi-shots-1[39m  [38;2;136;136;136mkimi-shots-1[39m                                                         [38;2;136;136;136mctrl+o expand[38;2;107;107;107m | @: mention files | ! to run a shell command[39m
+                                                                                                                                                                               [38;2;224;224;224mcontext: 6% (13.2k/256k)[39m

@@ -29,14 +29,17 @@ const matches = (pattern: string, screen: string): boolean => new RegExp(pattern
  */
 export function classifyScreen(
   screen: string,
-  settings: Pick<AgentSettings, 'trustPattern' | 'workingPattern' | 'questionPattern' | 'limitPatterns'> & Partial<Pick<AgentSettings, 'backgroundPatterns' | 'overloadPatterns'>>,
+  settings: Pick<AgentSettings, 'trustPattern' | 'workingPattern' | 'questionPattern' | 'limitPatterns'> & Partial<Pick<AgentSettings, 'backgroundPatterns' | 'overloadPatterns' | 'approvalPattern' | 'idleRequiresInput' | 'readyPattern'>>,
 ): ScreenState {
   if (matches(settings.trustPattern, screen)) return 'needs-trust';
+  if (settings.approvalPattern && matches(settings.approvalPattern, screen)) return 'needs-input';
   if (matches(settings.questionPattern, screen)) return 'needs-input';
   if (matches(settings.workingPattern, screen)) return 'working';
+  if (settings.approvalPattern && settings.overloadPatterns?.some(p => matches(p, screen))) return 'overloaded';
   if (isOverloaded(screen, settings.overloadPatterns)) return 'overloaded';
   if (settings.limitPatterns.some((p) => matches(p, screen))) return 'limited';
   if ((settings.backgroundPatterns ?? []).some((p) => matches(p, screen))) return 'background';
+  if (settings.idleRequiresInput && (!settings.readyPattern || !matches(settings.readyPattern, screen) || /^\s*(?:[■●]\s*)?Error:/im.test(screen))) return 'needs-input';
   return 'idle';
 }
 
@@ -52,7 +55,7 @@ export interface StateInput {
   alive: boolean;
   /** Screen of the window; ignored when the window is gone. */
   screen: string;
-  settings: Pick<AgentSettings, 'trustPattern' | 'workingPattern' | 'questionPattern' | 'limitPatterns' | 'readyPattern'> & Partial<Pick<AgentSettings, 'backgroundPatterns' | 'overloadPatterns'>>;
+  settings: Pick<AgentSettings, 'trustPattern' | 'workingPattern' | 'questionPattern' | 'limitPatterns' | 'readyPattern'> & Partial<Pick<AgentSettings, 'backgroundPatterns' | 'overloadPatterns' | 'approvalPattern' | 'idleRequiresInput' | 'readyPattern'>>;
   /** The report file exists and was written after the task started. */
   reportReady: boolean;
   /** The last event the agent sent, if any. */

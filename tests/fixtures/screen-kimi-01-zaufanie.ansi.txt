@@ -1,0 +1,50 @@
+Kimi Code updated to v2.5.0
+Changelog: https://moonshotai.github.io/kimi-code/en/release-notes/changelog.html
+ [38;2;79;168;255m──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[39m
+ [1m[38;2;79;168;255m Trust this folder?[0m
+ [38;2;107;107;107m ↑↓ navigate · Enter select · Esc exit[39m
+
+  [38;2;245;245;245m/Users/marcinkrzetowski/Projects/wt-dev/sandbox-kimi-shots-1[39m
+
+  [38;2;107;107;107mNo project integrations or instructions to activate.[39m
+
+  [38;2;107;107;107mTrust is remembered for this folder, including future project config changes.[39m
+  [38;2;107;107;107mTool approvals follow your permission settings.[39m
+
+ [38;2;79;168;255m  ❯ [1mTrust and continue[0m
+ [38;2;136;136;136m    [38;2;224;224;224mExit[39m
+ [38;2;79;168;255m──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[39m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
