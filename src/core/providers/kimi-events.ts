@@ -51,6 +51,11 @@ export const kimiEvents: EventSupport = {
     const dir = taskDir(ctx.config, record.window), cursorFile = path.join(dir, 'kimi-wire-cursor.json');
     let cursors: Record<string, { offset: number; protocol?: string; parserVersion?: number }> = {};
     try { cursors = JSON.parse(fs.readFileSync(cursorFile, 'utf8')); } catch { /* first poll */ }
+    // Repair observations already consumed by an earlier poll, even with no new wire bytes.
+    if (record.observed?.cliVersion === 'unknown' && record.agentCliVersion) {
+      record.observed = { ...record.observed, cliVersion: record.agentCliVersion };
+      await setHeaderFields(ctx.runner, taskFile(ctx.config, record.window), { observed: record.observed });
+    }
     const sessions = readTaskSessions(ctx.config, record.window);
     const home = resolvedKimiHome(ctx.config, { ...process.env, ...record.env });
     const files = kimiSessions(new UsageReader(undefined), home, record, record.repos.map(r => r.worktree), sessions.kimi ?? []);
@@ -77,7 +82,8 @@ export const kimiEvents: EventSupport = {
         if (event?.type === 'llm.request' && ms !== null && ms >= Date.parse(record.attemptStarted ?? record.started)) {
           const stats = emptyStats('kimi'); stats.kimi = { protocol: cursor.protocol }; feedKimiLine(stats, line);
           if (stats.observed) {
-            record.observed = stats.observed;
+            // 2.5.1 dropped cli_version from llm.request; the version read at task start is the fallback.
+            record.observed = stats.observed.cliVersion === 'unknown' && record.agentCliVersion ? { ...stats.observed, cliVersion: record.agentCliVersion } : stats.observed;
             record.observedWarning = observationWarning(record, stats.observed);
             await setHeaderFields(ctx.runner, taskFile(ctx.config, record.window), { observed: record.observed, observed_warning: record.observedWarning ?? null });
           }

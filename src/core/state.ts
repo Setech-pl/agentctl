@@ -23,6 +23,24 @@ export type ScreenState = 'overloaded' | 'needs-trust' | 'needs-input' | 'limite
 
 const matches = (pattern: string, screen: string): boolean => new RegExp(pattern, PATTERN_FLAGS).test(screen);
 
+const ERROR_BANNER = /^\s*(?:[■●]\s*)?Error:/;
+/** A turn that goes on after an error (re-login resumes the queued task): input echo, an action, a success line. */
+const RESUMED_AFTER_ERROR = /^\s*(?:❯|✓|●\s+(?!Error:))/;
+/**
+ * An error banner pins idle to needs-input only while it is the last thing that happened. A stale banner left in the pane
+ * (the token was rejected, the human authorized the device, the queued task then ran to its report) must not block the transition.
+ */
+function errorAwaitingInput(screen: string, readyPattern: string | undefined): boolean {
+  const lines = screen.split('\n');
+  let end = lines.length;
+  if (readyPattern) for (let i = lines.length - 1; i >= 0; i--) if (matches(readyPattern, lines[i]!)) { end = i; break; }
+  let error = -1;
+  for (let i = end - 1; i >= 0; i--) if (ERROR_BANNER.test(lines[i]!)) { error = i; break; }
+  if (error < 0) return false;
+  for (let i = error + 1; i < end; i++) if (RESUMED_AFTER_ERROR.test(lines[i]!)) return false;
+  return true;
+}
+
 /**
  * Classify a `tmux capture-pane` screen with the agent's configured patterns. Trust beats a pending question, which beats
  * working; a limit message only counts when the agent is not working (a retry after the reset may leave the old message on screen).
@@ -39,7 +57,7 @@ export function classifyScreen(
   if (isOverloaded(screen, settings.overloadPatterns)) return 'overloaded';
   if (settings.limitPatterns.some((p) => matches(p, screen))) return 'limited';
   if ((settings.backgroundPatterns ?? []).some((p) => matches(p, screen))) return 'background';
-  if (settings.idleRequiresInput && (!settings.readyPattern || !matches(settings.readyPattern, screen) || /^\s*(?:[■●]\s*)?Error:/im.test(screen))) return 'needs-input';
+  if (settings.idleRequiresInput && (!settings.readyPattern || !matches(settings.readyPattern, screen) || errorAwaitingInput(screen, settings.readyPattern))) return 'needs-input';
   return 'idle';
 }
 

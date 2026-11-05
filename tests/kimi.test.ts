@@ -6,7 +6,7 @@ import { provider, activeProviders } from '../src/core/providers/registry.ts';
 import { buildAgentArgv, buildResumeArgv } from '../src/core/agents.ts';
 import { findAutoAcceptFlag, launchEnvironment, validateLaunch } from '../src/core/safety.ts';
 import { readKimiConfig } from '../src/core/providers/kimi-config.ts';
-import { classifyScreen } from '../src/core/state.ts';
+import { classifyScreen, taskState } from '../src/core/state.ts';
 import { parseKimiUsage } from '../src/core/providers/kimi-probe.ts';
 import { feedKimiLine, kimiPlanFile } from '../src/core/providers/kimi-usage.ts';
 import { emptyStats, sumBuckets } from '../src/core/usage-parse.ts';
@@ -113,6 +113,13 @@ it('never infers idle from an editor while working, retrying, asking, or showing
   assert.equal(classifyScreen('', settings), 'needs-input');
   assert.equal(kimi.screen.draft?.('│ > [paste #2 +16 lines]        │'), '[paste #2 +16 lines]');
 });
+it('treats an error banner as stale once the turn resumed after a re-login (P28)', () => {
+  const screen = fixture('synthetic-relogin-idle');
+  assert.equal(classifyScreen(screen, settings), 'idle');
+  assert.equal(taskState({ alive: true, screen, settings, reportReady: true }), 'report-ready');
+  // Nothing but the banner and its continuation before the input box: still waiting for the human.
+  assert.equal(classifyScreen('● Error: [internal] Stored token rejected; re-login required.\n   If this persists, run `/export-debug-zip`.\n│ > │', settings), 'needs-input');
+});
 it('parses only screen plan windows (5h, weekly, monthly) with no fabricated week', () => {
   const now = Date.now(), parsed = parseKimiUsage(fixture('08-usage'), now)!;
   assert.equal(parsed.windows.length, 2);
@@ -136,10 +143,16 @@ it('gates synthetic wire by protocol and counts usage.record only once', () => {
   assert.deepEqual(sumBuckets(stats.buckets), { input: 10, output: 20, cacheRead: 30, cacheWrite: 40 });
   assert.equal(stats.observed?.effort, 'high');
 });
-it('translates sparse user columns and server-managed strong aliases without disturbing the original default table', () => {
+it('translates sparse user columns and the light/medium/strong Kimi defaults without disturbing the legacy table', () => {
   assert.equal(defaultEquivalents().length, 6);
   const table = defaultEquivalents(['claude', 'codex', 'kimi']);
-  assert.ok(table.some(row => row.kimi.model === 'kimi-for-coding' && row.class === 'strong'));
+  assert.deepEqual(table.map(row => `${row.kimi.model}/${row.kimi.effort}`), ['k3-256k/low', 'k3-256k/low', 'k3/high', 'k3/high', 'k3/max', 'k3/max']);
+  for (const row of table) {
+    for (const source of ['claude', 'codex'] as const) assert.deepEqual(translate({ agent: source, ...row[source] }, 'kimi', table), { ok: true, order: { agent: 'kimi', ...row.kimi } });
+    assert.equal(translate({ agent: 'kimi', ...row.kimi }, 'claude', table).ok, true);
+  }
+  assert.equal(translate({ agent: 'kimi', model: 'k3.1-pro', effort: 'max' }, 'claude', table).ok, false);
+  assert.deepEqual(kimi.models.equivalents, { light: ['k3-256k/low'], medium: ['k3/high'], strong: ['k3/max'] });
   assert.deepEqual(translate({ agent: 'claude', model: 'sonnet', effort: 'high' }, 'kimi', table), { ok: true, order: { agent: 'kimi', model: 'k3', effort: 'high' } });
   const p = new Problems(), custom = parseEquivalents([{ claude: 'special/high', kimi: 'k3/high' }], 'pairs', p, ['claude', 'codex', 'kimi']);
   p.throwIfAny('bad');
@@ -164,6 +177,19 @@ it('polls synthetic wire incrementally, persists matching delivery evidence and 
   await kimi.events.poll!(ctx, record);
   assert.equal(JSON.parse(fs.readFileSync(path.join(state, 'kimi-wire-status.json'), 'utf8')).supported, false);
   assert.equal(fs.existsSync(path.join(state, 'event.json')), false);
+});
+it('records the start-time CLI version when the 2.5.1 wire omits cli_version, else keeps unknown', async () => {
+  for (const [name, agentCliVersion, expected] of [['with-version', '2.5.1', '2.5.1'], ['without-version', undefined, 'unknown']] as const) {
+    const w = world(name), wt = path.join(w.root, 'wt'); fs.mkdirSync(wt);
+    const now = Date.now(), record = seedTask(w.config, 'CLIVER', { agent: 'kimi', model: 'k3', effort: 'high', ...(agentCliVersion ? { agentCliVersion } : {}), repos: [{ path: w.root, worktree: wt }], started: new Date(now - 1000).toISOString() });
+    const dir = path.join(w.home, 'sessions', 'workspace', 'session_S', 'agents', 'main'); fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'wire.jsonl'), [
+      { type: 'metadata', protocol_version: '1.5', cwd: wt, session_id: 'S', time: now },
+      { type: 'llm.request', model: 'k3', modelAlias: 'kimi-code/k3', thinkingEffort: 'high', time: now },
+    ].map(r => JSON.stringify(r)).join('\n') + '\n');
+    await kimi.events.poll!(makeContext(w.config).ctx, record);
+    assert.deepEqual(record.observed, { model: 'kimi-code/k3', effort: 'high', cliVersion: expected });
+  }
 });
 it('extends MCP provider fields only when Kimi is active', async () => {
   const { MCP_TOOLS, providerToolInput } = await import('../src/core/mcp-tools.ts');

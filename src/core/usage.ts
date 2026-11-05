@@ -211,7 +211,7 @@ export function collectTaskUsage(config: GlobalConfig, reader: UsageReader, reco
       if (!stats) continue;
       counted = true;
       if (file === candidate.file && stats.observed) {
-        u.observed = stats.observed;
+        u.observed = candidate.provider === 'kimi' && stats.observed.cliVersion === 'unknown' && record.agentCliVersion ? { ...stats.observed, cliVersion: record.agentCliVersion } : stats.observed;
         u.warning = observationWarning(record, stats.observed);
       }
       for (const [key, t] of Object.entries(stats.buckets)) u.buckets[key] = addTokens(u.buckets[key] ?? zeroTokens(), t);
