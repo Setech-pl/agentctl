@@ -281,6 +281,8 @@ export async function applyGc(ctx: Context, plan: GcPlan): Promise<GcResult> {
   for (const kind of order) {
     for (const item of plan.items.filter((i) => i.kind === kind)) {
       try {
+        // The plan may be old; only successfully removed bytes belong in the result.
+        const bytes = kind === 'worktree' || kind === 'cache' ? await sizeOf(item.target, { fresh: true, now: () => runner.now() }) : 0;
         if (kind === 'worktree') {
           const users = linkUsers(item.target, knownLinkReferences(config));
           if (users.length && !plan.forceLinks) throw new Error(`links target used by ${users.join(', ')}`);
@@ -295,8 +297,8 @@ export async function applyGc(ctx: Context, plan: GcPlan): Promise<GcResult> {
           const r = await runner.exec('git', ['-C', item.repo as string, 'branch', '-d', item.branch as string]);
           if (r.code !== 0) throw new Error(r.stderr.trim().split('\n')[0] || `git exit ${r.code}`);
         }
-        result.done.push(item);
-        result.freedBytes += item.bytes;
+        result.done.push({ ...item, bytes });
+        result.freedBytes += bytes;
       } catch (e) {
         result.failed.push({ item, reason: errorMessage(e) });
       }
@@ -331,7 +333,7 @@ const DONE_WORD: Record<GcKind, string> = { worktree: 'removed worktrees', cache
 
 export function renderGc(plan: GcPlan, opts: GcViewOptions & { applied?: GcResult | undefined } = {}): string[] {
   const view = gcView(plan, opts);
-  const lines = [`Could free ${formatBytes(plan.freeBytes)}; ${view.summary}. History and reports (*.md) stay.`, ...view.categories.map(c => `${c.category}: ${c.count}, ${c.bytes} bytes`), `Skipped: ${view.skipped.count}, ${view.skipped.bytes} bytes`];
+  const lines = opts.applied ? ['History and reports (*.md) stay.'] : [`Could free ${formatBytes(plan.freeBytes)}; ${view.summary}. History and reports (*.md) stay.`, ...view.categories.map(c => `${c.category}: ${c.count}, ${c.bytes} bytes`), `Skipped: ${view.skipped.count}, ${view.skipped.bytes} bytes`];
   if (!opts.applied) {
     lines.push('Would clean up (a dry run; --apply does it, after a y/N):');
     if (!plan.items.length) lines.push('Nothing to clean up.');
@@ -348,7 +350,7 @@ export function renderGc(plan: GcPlan, opts: GcViewOptions & { applied?: GcResul
   // The result decides what is listed: done is removed, failed is named, skipped stays visibly out of "Cleaned up".
   const applied = opts.applied;
   lines.push('Cleaned up:');
-  if (!plan.items.length) lines.push('Nothing to clean up.');
+  if (!applied.done.length) lines.push('Nothing was cleaned up.');
   for (const kind of ['worktree', 'cache', 'archive', 'branch'] as const) {
     const done = applied.done.filter(i => i.kind === kind);
     if (done.length) lines.push(`  ${DONE_WORD[kind]}: ${done.length}, ${done.reduce((n, i) => n + i.bytes, 0)} bytes`);

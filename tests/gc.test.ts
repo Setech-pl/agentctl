@@ -210,6 +210,23 @@ describe('gc: --apply', () => {
     assert.ok(!result.done.some(i => (i.kind === 'worktree' && i.task === 'NC-2') || i.target.endsWith('fresh.log')));
   });
 
+  it('reports current removed bytes after an old plan, excluding failed and skipped entries', async () => {
+    const w = world('apply-current-bytes');
+    task(w, 'NC-1', { closed: true }, { 'old.log': 20 });
+    const plan = await planGc(w.ctx, {});
+    const file = path.join(w.config.cache, 'nc-1', 'old.log');
+    fs.writeFileSync(file, 'x'.repeat(47));
+    fs.utimesSync(file, new Date('2026-01-01'), new Date('2026-01-01'));
+    const failing = new DiskRunner({ dryRun: false, startTime: NOW, respond: (cmd, args, opts) => cmd === 'git' && args.includes('remove') ? { code: 1, stderr: 'kept' } : w.respond?.(cmd, args, opts) });
+    const result = await applyGc(new Context(failing, w.config, () => {}), plan);
+    assert.equal(result.freedBytes, 47);
+    assert.equal(result.failed.length, 1);
+    const out = renderGc(plan, { applied: result }).join('\n');
+    assert.match(out, /Freed 47 B/);
+    assert.doesNotMatch(out, /Could free|removed worktrees/);
+    assert.match(out, /failed:.*kept/);
+  });
+
   it('a git failure is reported per item, the rest goes on', async () => {
     const w = world('apply-fail');
     task(w, 'NC-1', { closed: true }, { 'old.log': 20 });

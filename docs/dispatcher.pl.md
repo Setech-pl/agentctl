@@ -135,6 +135,8 @@ Podglądy MCP mają niezależne `preview_token`, ważne dziesięć minut, i odma
 
 Dobieraj spośród aktywnych `providers`: Claude i Codex są obowiązkowe, Kimi opcjonalny. Equivalents według klas modeli to mapowania do przydziału pracy; sprawdź aktualne capacity i miejsca. Przy trzech dostawcach move wymaga jawnego `--agent`. Automatyczny review kieruje się `review.prefer` lub kolejnością providers, pomija autora, niedostępne CLI i cele bez mapowania.
 
+Odpowiedniki Kimi: light → `k3-256k/low`, medium → `k3/high`, strong → `k3/max`. Używaj `k3.1-pro` tylko na wyraźne żądanie; zużywa około 10× limitu planu.
+
 Kimi Code 2.5.0 nie ma sandboxa CLI. Start dopuszcza `manual` (Always Ask) lub `yolo` (Ask When Needed) wyłącznie z `permission.dangerous_command_guard=true`; `auto` (Never Ask) i wyłączony guard w config/env powodują odmowę. Rzeczywiste 2.5.0 w trybie manual pyta także dla dokładnej reguły Bash allow; yolo stosuje te reguły. Doctor pokazuje tryb, guard i reguły, bez zapisu configu. Write może przejść bez dialogu. Trust/login/update rozstrzyga człowiek. Effort low/high/max działa wyłącznie według `support_efforts` modelu z configu; bez danych katalogu nie wymuszamy env effort. Nazwy wyświetlane i aliasy bez wersji są dynamiczne. Manager i Remote Control pozostają Claude-only.
 
 Capacity planu Kimi to n/d bez `capacity.kimi_usage_probe`; neutralna sesja wymaga ręcznego trust. Limitowana sonda `/usage` odczytuje TUI, bez credentials/OAuth ani API, nigdy w oknie zadania. Uwzględniaj 5h/Weekly/Monthly wyłącznie, gdy występują. Prompt, odczytane pliki, wyniki poleceń i diffy trafiają do Moonshot AI; domyślne wyłączenie telemetrii nie zatrzymuje przesyłania danych zadania. Guide projektu może jawnie zakazać Kimi w danym repo.

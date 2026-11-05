@@ -77,9 +77,8 @@ export function defaultEquivalents(ids: readonly AgentName[] = DEFAULT_PROVIDERS
   const p = new Problems();
   const table = parseEquivalents(DEFAULT_EQUIVALENTS, 'DEFAULT_EQUIVALENTS', p);
   if (!ids.includes('kimi')) return table;
-  const models = ['k3/low', 'k3/low', 'k3/high', 'k3/high', 'k3.1-pro/high', 'k3.1-pro/max'];
-  return [...table.map((row, i) => ({ ...row, kimi: parseModelEffort(models[i], 'kimi', p)!, class: (i < 2 ? 'light' : i < 4 ? 'medium' : 'strong') as NonNullable<Equivalent['class']> })),
-    { ...table[4]!, kimi: { model: 'kimi-for-coding', effort: 'max' }, class: 'strong' }];
+  const models = ['k3-256k/low', 'k3-256k/low', 'k3/high', 'k3/high', 'k3/max', 'k3/max'];
+  return [...table.map((row, i) => ({ ...row, kimi: parseModelEffort(models[i], 'kimi', p)!, class: (i < 2 ? 'light' : i < 4 ? 'medium' : 'strong') as NonNullable<Equivalent['class']> }))];
 }
 
 export type Translation = { ok: true; order: Order } | { ok: false; message: string; hint: string };

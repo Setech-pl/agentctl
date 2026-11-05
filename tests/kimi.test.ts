@@ -143,10 +143,16 @@ it('gates synthetic wire by protocol and counts usage.record only once', () => {
   assert.deepEqual(sumBuckets(stats.buckets), { input: 10, output: 20, cacheRead: 30, cacheWrite: 40 });
   assert.equal(stats.observed?.effort, 'high');
 });
-it('translates sparse user columns and server-managed strong aliases without disturbing the original default table', () => {
+it('translates sparse user columns and the light/medium/strong Kimi defaults without disturbing the legacy table', () => {
   assert.equal(defaultEquivalents().length, 6);
   const table = defaultEquivalents(['claude', 'codex', 'kimi']);
-  assert.ok(table.some(row => row.kimi.model === 'kimi-for-coding' && row.class === 'strong'));
+  assert.deepEqual(table.map(row => `${row.kimi.model}/${row.kimi.effort}`), ['k3-256k/low', 'k3-256k/low', 'k3/high', 'k3/high', 'k3/max', 'k3/max']);
+  for (const row of table) {
+    for (const source of ['claude', 'codex'] as const) assert.deepEqual(translate({ agent: source, ...row[source] }, 'kimi', table), { ok: true, order: { agent: 'kimi', ...row.kimi } });
+    assert.equal(translate({ agent: 'kimi', ...row.kimi }, 'claude', table).ok, true);
+  }
+  assert.equal(translate({ agent: 'kimi', model: 'k3.1-pro', effort: 'max' }, 'claude', table).ok, false);
+  assert.deepEqual(kimi.models.equivalents, { light: ['k3-256k/low'], medium: ['k3/high'], strong: ['k3/max'] });
   assert.deepEqual(translate({ agent: 'claude', model: 'sonnet', effort: 'high' }, 'kimi', table), { ok: true, order: { agent: 'kimi', model: 'k3', effort: 'high' } });
   const p = new Problems(), custom = parseEquivalents([{ claude: 'special/high', kimi: 'k3/high' }], 'pairs', p, ['claude', 'codex', 'kimi']);
   p.throwIfAny('bad');
