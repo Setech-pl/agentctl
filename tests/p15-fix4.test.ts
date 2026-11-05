@@ -170,24 +170,46 @@ describe('FIX4 N3: structural composer boundary, all interior lines are content'
   });
 });
 
-describe('FIX4: literal queued-list ACK ends at the structural composer edge', () => {
+describe('FIX4: literal queued-list classification cannot ACK a follow-up', () => {
   const read = (name: string) => fs.readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
   const real = withoutDimInput(read('screen-claude-busy-queued-shown.txt'), read('screen-claude-busy-queued-shown-ansi.txt'));
   const composer = real.slice(real.lastIndexOf(`${CLAUDE_COMPOSER_BORDER}\n❯`));
   const screen = (message: string) => `Working (esc to interrupt)\nQueued follow-up inputs\n${message}\n${composer}`;
   it('the real Claude composer border separates the whole queued message from the marker', async () => {
     const w = await world(); await w.awaiting();
-    assert.equal(deliveryProof(w.ctx, w.record(), screen('SAME MESSAGE')), 'delivered');
+    assert.equal(deliveryProof(w.ctx, w.record(), screen('SAME MESSAGE')), null);
+    assert.equal(deliveryProof(w.ctx, { ...w.record(), promptKind: 'initial' }, screen('SAME MESSAGE')), 'delivered');
     assert.equal(deliveryProof(w.ctx, w.record(), screen('SAME MESSAGE EXTRA')), null);
+    assert.equal(deliveryProof(w.ctx, { ...w.record(), promptKind: 'initial' }, screen('SAME MESSAGE EXTRA')), null);
   });
   for (const line of ['│ box-drawing text │', CLAUDE_COMPOSER_BORDER]) it(`a queued message containing ${line.startsWith('│') ? 'box characters' : 'a border-like line'} stays literal`, async () => {
     const message = `FIRST\n${line}\nLAST`, w = await world('claude', message); await w.awaiting();
-    assert.equal(deliveryProof(w.ctx, w.record(), screen(message)), 'delivered');
+    assert.equal(deliveryProof(w.ctx, w.record(), screen(message)), null);
+    assert.equal(deliveryProof(w.ctx, { ...w.record(), promptKind: 'initial' }, screen(message)), 'delivered');
     assert.equal(deliveryProof(w.ctx, { ...w.record(), pendingPrompt: 'FIRST\nLAST' }, screen(message)), null);
+    assert.equal(deliveryProof(w.ctx, { ...w.record(), promptKind: 'initial', pendingPrompt: 'FIRST\nLAST' }, screen(message)), null);
     assert.equal(deliveryProof(w.ctx, { ...w.record(), pendingPrompt: `FIRST\n${line}\nOTHER` }, screen(message)), null);
+    assert.equal(deliveryProof(w.ctx, { ...w.record(), promptKind: 'initial', pendingPrompt: `FIRST\n${line}\nOTHER` }, screen(message)), null);
   });
   it('a composer border without a queued list is never a queued-message ACK', async () => {
     const w = await world(); await w.awaiting();
     assert.equal(deliveryProof(w.ctx, w.record(), `Working (esc to interrupt)\n${composer}`), null);
+  });
+});
+
+
+describe('ACTL-0181-D M2: follow-up proof without a selected transcript', () => {
+  for (const evidence of ['changed-report', 'matching-queue']) it(`${evidence} retains the busy follow-up`, async () => {
+    const w = await world(); await w.awaiting();
+    if (evidence === 'changed-report') {
+      fs.mkdirSync(path.dirname(w.record().report), { recursive: true });
+      fs.writeFileSync(w.record().report, 'Verdict: PASS\n<!-- agentctl:report-end -->\n');
+    }
+    const screen = `Working (esc to interrupt)\n${evidence === 'matching-queue' ? 'Queued messages\nSAME MESSAGE\n' : ''}${CLAUDE_COMPOSER_BORDER}\n❯ \n${CLAUDE_COMPOSER_BORDER}\n`;
+    const exec = w.runner.exec.bind(w.runner);
+    w.runner.exec = async (c, a, o) => c === 'tmux' && a[0] === 'capture-pane' ? { code: 0, stdout: screen, stderr: '' } : exec(c, a, o);
+    assert.equal(deliveryProof(w.ctx, { ...w.record(), promptKind: 'initial' }, screen), 'delivered', 'initial-only compatibility evidence is valid');
+    assert.equal(await deliverPendingPrompt(w.ctx, 't1'), 'confirming');
+    assert.equal(w.record().pendingPrompt, 'SAME MESSAGE'); assert.notEqual(w.record().deliveryResult, 'delivered'); assert.deepEqual(w.keys, []);
   });
 });

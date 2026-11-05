@@ -1,3 +1,5 @@
+import { handleEvent } from '../src/core/event-command.ts';
+import { Alerts } from '../src/core/alert.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { describe, it } from 'node:test';
@@ -192,6 +194,11 @@ describe('journal (R7)', () => {
     const ctx = new Context(runner, config, () => {});
     seedTask(config, 'T1', { agent: 'claude', windowId: '@1' });
     await queuePrompt(ctx, readTaskRecord(config, 't1')!, 'hello', 'pending', kind === 'followup' ? { kind } : {});
+    if (kind === 'followup') {
+      assert.equal(await deliverPendingPrompt(ctx, 't1'), 'confirming');
+      assert.equal(readTaskRecord(config, 't1')!.pendingPrompt, 'hello');
+      await handleEvent(ctx, new Alerts(ctx, { notify: async () => {} }), { task: 'T1', agent: 'claude', kind: 'user-prompt-submit', payload: { prompt: 'hello' } });
+    }
     assert.equal(await deliverPendingPrompt(ctx, 't1'), 'sent');
     return { config, entries: readJournal(config).filter(e => e.kind === 'delivery'), record: readTaskRecord(config, 't1')! };
   };

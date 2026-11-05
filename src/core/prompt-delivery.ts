@@ -102,7 +102,7 @@ function queuedListShows(screen: string, prompt: string, agent: TaskRecord['agen
 
 /**
  * What proves that the agent took this message: its hook (the exact prompt) and its transcript (the exact message, written after the delivery began).
- * Both are exact and neither is a screen. The older signs stay for the cases that the first prompt of every task has always used and that older tests pin,
+ * Both are exact and neither is a screen. The older signs stay only for the cases that the first prompt of every task has always used and that older tests pin,
  * each as exact as the text allows (no white space squeezed, the whole message): an idle agent started its turn, the canonical report changed, the message
  * echoed whole above an empty composer, a queue list that shows the whole message. The screen of a busy agent otherwise proves nothing (see `deliveryClass`).
  * Returns where the proof came from; null while nothing proves it. A draft in the composer holds every proof back: the message is not yet out of it.
@@ -118,6 +118,10 @@ function proofSource(ctx: Context, record: TaskRecord, screen: string): string |
     if (seen?.kind === 'user') return 'transcript';
     if (seen) return null; // Queue acceptance and ambiguous/old injection must not fall through to legacy screen signs.
   }
+  // Follow-ups require current hook/wire evidence or exact user transcript injection.
+  // Reports and screen queues describe the running turn; neither proves this message was taken.
+  if (record.promptKind === 'followup') return null;
+  // Initial-prompt compatibility only.
   if (record.deliveryResult === 'queued-in-agent-confirmed') return null;
   const report = inspectReport(ctx.config, record, ctx.runner.now(), false);
   if (report.ready && (!record.deliveryStartedAt || report.signature !== record.deliveryReportBaseline)) return 'report';

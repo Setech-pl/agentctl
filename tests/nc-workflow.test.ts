@@ -255,7 +255,7 @@ describe('0.17.4 shared preview scope, marks and GC suggestion', () => {
 });
 
 describe('0.17.4 delivery evidence and FIFO', () => {
-  for (const agent of ['claude', 'codex'] as const) it(`${agent}: send during work pastes immediately, confirms from echo/queue, and never rejects a second send`, async () => {
+  for (const agent of ['claude', 'codex'] as const) it(`${agent}: send during work pastes immediately, confirms from matching hook, and never rejects a second send`, async () => {
     let pasted = '', submitted = false;
     const f = fixture(`busy-${agent}`, '', (cmd, args, opts) => {
       if (cmd !== 'tmux') return;
@@ -264,6 +264,12 @@ describe('0.17.4 delivery evidence and FIFO', () => {
       if (args[0] === 'capture-pane') return { stdout: composerFixture(`Working (esc to interrupt)\n${submitted ? `Queued follow-up inputs\n${pasted}\n` : ''}${agent === 'claude' ? '❯' : '›'} \n`) };
     });
     const pane = f.tmux.add('t1'); seedTask(f.config, 'T1', { agent, windowId: pane.id });
+    const exec = f.runner.exec.bind(f.runner);
+    f.runner.exec = async (cmd, args, opts) => {
+      const result = await exec(cmd, args, opts);
+      if (cmd === 'tmux' && args[0] === 'send-keys' && args.at(-1) === 'Enter') await handleEvent(f.ctx, new Alerts(f.ctx, f.notifier), { task: 'T1', agent, kind: agent === 'claude' ? 'user-prompt-submit' : undefined, payload: agent === 'claude' ? { prompt: pasted } : { type: 'agent-turn-complete', 'input-messages': [pasted] } });
+      return result;
+    };
     let result = await sendPrompts(f.ctx, [{ task: 'T1', window: 't1', prompt: 'FIRST' }]); assert.match(result[0]!.message, /wklejono/); assert.equal(result[0]!.warning, undefined);
     submitted = false; result = await sendPrompts(f.ctx, [{ task: 'T1', window: 't1', prompt: 'SECOND' }]); assert.equal(result[0]!.warning, undefined); assert.equal(f.runner.calls.filter(c => c.line.startsWith('tmux paste-buffer')).length, 2);
   });
@@ -272,7 +278,12 @@ describe('0.17.4 delivery evidence and FIFO', () => {
     const first = await sendPrompts(f.ctx, [{ task: 'T1', window: 't1', prompt: 'FIRST' }]), second = await sendPrompts(f.ctx, [{ task: 'T1', window: 't1', prompt: 'SECOND' }]);
     assert.match(first[0]!.message, /w kolejce 1/); assert.match(second[0]!.message, /w kolejce 2/); assert.equal((await status(f.ctx))[0]!.promptQueue?.length, 2); assert.equal((await peekTask(f.ctx, 'T1')).promptQueue?.length, 2);
     assert.equal(f.runner.calls.filter(c => c.line.startsWith('tmux paste-buffer')).length, 0);
-    pane.screen = composerFixture('❯ Try "fake"\n'); await drainPromptQueue(f.ctx, 't1'); await drainPromptQueue(f.ctx, 't1');
+    pane.screen = composerFixture('❯ Try "fake"\n'); await drainPromptQueue(f.ctx, 't1');
+    assert.equal(readTaskRecord(f.config, 't1')!.pendingPrompt, 'FIRST');
+    await handleEvent(f.ctx, new Alerts(f.ctx, f.notifier), { task: 'T1', agent: 'claude', kind: 'user-prompt-submit', payload: { prompt: 'FIRST' } });
+    await drainPromptQueue(f.ctx, 't1');
+    await handleEvent(f.ctx, new Alerts(f.ctx, f.notifier), { task: 'T1', agent: 'claude', kind: 'user-prompt-submit', payload: { prompt: 'SECOND' } });
+    await drainPromptQueue(f.ctx, 't1');
     assert.deepEqual(f.runner.calls.filter(c => c.line.startsWith('tmux load-buffer')).map(c => c.input), ['FIRST', 'SECOND']); assert.equal(promptQueueView(f.ctx, 't1').length, 0);
   });
   it('stuck draft + idle_prompt/Stop cannot confirm delivery; a matching submit still requires the composer to clear', async () => {

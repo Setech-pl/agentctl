@@ -77,7 +77,7 @@ it('0173-P2: later canonical PASS report beats needs-attention and reaches event
   await cohortTick(f.ctx, f.notifier, await collectStatus(f.ctx));
   assert.ok(readJournal(f.config).some(e => e.kind === 'cohort-done'));
 });
-for (const agent of ['claude','codex'] as const) it(`0173-P3/P4 ${agent}: send succeeds with warning, watch deadline notifies once, later work clears attention without another paste`, async () => {
+for (const agent of ['claude','codex'] as const) it(`0173-P3/P4 ${agent}: send succeeds with warning, watch deadline notifies once, later work requires matching evidence to clear attention without another paste`, async () => {
   const f = fixture(`send-${agent}`, agent), memory = new WatchMemory();
   // FakeTmux keeps the input idle: no hook, echo or working acknowledgement.
   const [sent] = await sendPrompts(f.ctx, [{ task: 'T1', window: 't1', prompt: 'Original prompt' }]);
@@ -89,6 +89,9 @@ for (const agent of ['claude','codex'] as const) it(`0173-P3/P4 ${agent}: send s
   assert.equal(f.notified.filter(t => t.includes('Prompt delivery')).length, 1);
   await watchTick(f.ctx, memory, f.notifier); assert.equal(f.notified.filter(t => t.includes('Prompt delivery')).length, 1);
   f.pane.screen = agent === 'claude' ? working : 'Working (esc to interrupt)\n';
+  assert.equal((await collectStatus(f.ctx))[0]!.state, 'needs-attention');
+  assert.equal(f.record().pendingPrompt, 'Original prompt');
+  await handleEvent(f.ctx, new Alerts(f.ctx, f.notifier), { task: 'T1', agent, kind: agent === 'claude' ? 'user-prompt-submit' : undefined, payload: agent === 'claude' ? { prompt: 'Original prompt' } : { type: 'agent-turn-complete', 'input-messages': ['Original prompt'] } });
   assert.equal((await collectStatus(f.ctx))[0]!.state, 'working');
   await watchTick(f.ctx, memory, f.notifier); assert.equal(f.record().promptDelivery, 'sent');
   assert.equal(f.runner.commands.filter(c => c.includes('paste-buffer')).length, 1);
