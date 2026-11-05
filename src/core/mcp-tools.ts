@@ -840,7 +840,8 @@ async function runNew(deps: McpDeps, args: NewMcpArgs): Promise<ToolResult> {
         throw new AgentctlError(`${String(raw.header.task ?? 'a task')}: "setup" runs shell commands and is not accepted from the chat`, 'Put setup commands in the .agentctl.yaml of the repository, or start the task from the terminal.');
       }
     }
-    const specs = await planBatch(ctx, raws.map((raw) => resolveSpec(raw, { config: ctx.config })), { noSwitch: true, reuse: Boolean(args.reuse), ...(args.agent ? { agent: args.agent } : {}) });
+    const knownAuthors = new Map(readQueue(ctx.config).filter(e => e.direct).map(e => [e.task, { agent: e.agent, model: e.model }]));
+    const specs = await planBatch(ctx, raws.map((raw) => resolveSpec(raw, { config: ctx.config })), { noSwitch: true, reuse: Boolean(args.reuse), knownAuthors, ...(args.agent ? { agent: args.agent } : {}) });
     const cap = !args.confirm && ctx.config.capacity.snapshot ? capacitySnapshot(await collectCapacity(ctx), specs.map((s) => s.agent)) : undefined;
     const disk = await collectDisk(ctx);
     const readyCount = (await liveWindows(ctx)).filter(w => w.reportReady).length;
@@ -1420,7 +1421,8 @@ async function confirmationScope(ctx: Context, name: string, args: Record<string
     const rawSpecs = splitSpecs(args.spec as string, 'MCP preview');
     if (args.cohort) for (const raw of rawSpecs) raw.header.cohort = args.cohort;
     for (const raw of rawSpecs) if (chatSetup(raw.header)) throw new AgentctlError(`${String(raw.header.task ?? 'a task')}: \"setup\" runs shell commands and is not accepted from the chat`);
-    const specs = await planBatch(ctx, rawSpecs.map(raw => resolveSpec(raw, { config: ctx.config })), { noSwitch: true, reuse: Boolean(args.reuse), ...(args.agent ? { agent: args.agent as 'claude' | 'codex' } : {}), ignoreLimits: name === 'queue', deferBases: name === 'queue', skipAfter: name === 'queue' });
+    const knownAuthors = new Map(readQueue(ctx.config).filter(e => name === 'queue' || e.direct).map(e => [e.task, { agent: e.agent, model: e.model }]));
+    const specs = await planBatch(ctx, rawSpecs.map(raw => resolveSpec(raw, { config: ctx.config })), { noSwitch: true, reuse: Boolean(args.reuse), knownAuthors, ...(args.agent ? { agent: args.agent as 'claude' | 'codex' } : {}), ignoreLimits: name === 'queue', deferBases: name === 'queue', skipAfter: name === 'queue' });
     for (const spec of specs) { const warnings = reportPathWarnings(ctx.config, spec); if (warnings.length) throw new AgentctlError(`${spec.task}: ${warnings.join('; ')}`); }
     return { specs };
   }
@@ -1483,7 +1485,13 @@ for (const tool of MCP_TOOLS) {
     if (tool.name === 'new') {
       // A task that was handed to the watcher is being started (or failed to): a second preview or confirm, with or without a token, reports that state and starts nothing.
       let known: ReturnType<typeof findDirectStart>[] = [];
-      try { known = splitSpecs(String(args.spec), 'the spec from the chat').map((raw) => findDirectStart(ctx.config, String(raw.header.task ?? ''))).filter((e) => e !== undefined); } catch { /* the normal path reports a bad spec */ }
+      let requested = 0;
+      try {
+        const raws = splitSpecs(String(args.spec), 'the spec from the chat');
+        requested = raws.length;
+        known = raws.map((raw) => findDirectStart(ctx.config, String(raw.header.task ?? ''))).filter((e) => e !== undefined);
+      } catch { /* the normal path reports a bad spec */ }
+      if (known.length > 0 && known.length !== requested) return writeTool(deps, 'new', {}, async () => { throw new AgentctlError(`Mixed new batch: already registered tasks: ${known.map(e => e!.task).join(', ')}`, 'Nothing was added. Preview only the new tasks separately.'); });
       if (known.length > 0) return writeTool(deps, 'new', { task: known.map((e) => e!.task).join(', '), detail: 'repeated new for a start in progress' }, async () => ({ text: known.map((e) => directStartText(ctx.config, e!, ctx.runner.now())).join('\n'), executed: false, announce: '' }));
     }
     const { confirm, preview_token, ...input } = args;

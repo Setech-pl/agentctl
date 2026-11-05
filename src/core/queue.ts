@@ -30,7 +30,7 @@ import { collectStatus } from './status.ts';
 import type { StatusRow } from './status.ts';
 import { resolveSpec, splitSpecs } from './spec.ts';
 import type { RawSpec, ResolvedSpec, AutoReviewSource } from './spec.ts';
-import { listArchivedRecords, listTaskRecords, recordFromSpec, renderTaskMd, taskDir, taskFile } from './taskstore.ts';
+import { findRecordAnywhere, listArchivedRecords, listTaskRecords, recordFromSpec, renderTaskMd, taskDir, taskFile } from './taskstore.ts';
 import type { CancelSource, TaskRecord } from './taskstore.ts';
 import { queueHolds, usageSummaryLines } from './usage-limits.ts';
 import { AgentctlError, cohortKey, errorMessage, formatLocalTime, plural, windowName } from './util.ts';
@@ -74,6 +74,8 @@ export interface QueueEntry {
    * task it does not wait for `after`, for a paused queue or for `usage.queue_hold`; it still waits for a free window of its provider.
    */
   direct?: boolean;
+  /** Author admitted alongside this direct start (or already registered): its TASK.md must exist before reviewer revalidation. */
+  directAuthor?: string;
   /** `direct` with `no_agent`: stop after the worktree, the setup and the links. */
   noAgent?: boolean;
   /** `status: starting`: ISO time the watcher began the start. */
@@ -263,6 +265,7 @@ export async function commitQueueAdd(ctx: Context, items: QueueAddItem[], opts: 
       ...(opts.reuse ? { reuse: true } : {}),
       ...(opts.autoReview ? { autoReview: opts.autoReview } : {}),
       ...(opts.direct ? { direct: true, ...(opts.direct.noAgent ? { noAgent: true } : {}) } : {}),
+      ...(opts.direct && spec.reviewOf && [...items.map(i => i.spec), ...existing.filter(e => e.direct)].some(a => a.task === spec.reviewOf) ? { directAuthor: spec.reviewOf } : {}),
       order: seq,
       priority: opts.direct ? 'high' : spec.priority,
       status: 'queued',
@@ -327,10 +330,23 @@ export function directStartText(config: Pick<GlobalConfig, 'path' | 'stateDir'>,
 export async function registerDirectStart(ctx: Context, items: QueueAddItem[], opts: { agent?: AgentName; reuse?: boolean; noAgent?: boolean } = {}): Promise<{ added: QueueEntry[]; existing: QueueEntry[] }> {
   return withStartLock(ctx, async () => {
     const existing = items.map(({ spec }) => findDirectStart(ctx.config, spec.task)).filter((e): e is QueueEntry => e !== undefined);
-    if (existing.length > 0) return { added: [], existing };
+    if (existing.length > 0) {
+      if (existing.length !== items.length) throw new AgentctlError(`Mixed new batch: already registered tasks: ${existing.map(e => e.task).join(', ')}`, 'Nothing was added. Preview only the new tasks separately.');
+      return { added: [], existing };
+    }
     const added = await commitQueueAdd(ctx, items, { ...(opts.agent ? { agent: opts.agent } : {}), ...(opts.reuse ? { reuse: true } : {}), direct: { noAgent: Boolean(opts.noAgent) } });
     return { added, existing: [] };
   });
+}
+
+/** Registration preserves the author relationship, but only the eventual TASK.md can validate the effective provider/model. */
+function directAuthorState(config: GlobalConfig, entry: QueueEntry, entries: QueueEntry[]): { waiting?: string; failed?: string } {
+  if (!entry.directAuthor) return {};
+  const author = entries.find(e => e.task === entry.directAuthor);
+  if (author?.status === 'failed') return { failed: `author ${author.task} start failed: ${author.error ?? 'unknown reason'}. Fix and retry the author, then queue_retry ${entry.task}.` };
+  if (findRecordAnywhere(config, entry.directAuthor)) return {};
+  if (author) return { waiting: `waiting for author ${entry.directAuthor}: setup in progress` };
+  return { failed: `author ${entry.directAuthor} has no task record and its registered start was removed. Restore the author, then queue_retry ${entry.task}.` };
 }
 
 // ---- managing
@@ -510,6 +526,8 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
     if (entry.status === 'failed') return { position: null, entry, condition: { kind: 'failed', text: `failed: ${(entry.error ?? '').split('\n')[0] ?? ''}` }, since: entry.failedAt ?? entry.queuedAt };
     if (entry.status === 'starting') return { position: null, entry, condition: { kind: 'starting', text: entry.direct || readSetupProgress(config, entry.task) ? startProgressText(readSetupProgress(config, entry.task), nowMs) : 'starting' }, since: entry.startingAt ?? entry.queuedAt };
     position++;
+    const author = directAuthorState(config, entry, entries);
+    if (author.waiting || author.failed) return { position, entry, condition: { kind: 'after', text: author.waiting ?? author.failed! }, since: entry.queuedAt };
     if (entry.direct && !(entry.retryAt && Date.parse(entry.retryAt) > nowMs) && !(config.limits[entry.agent] !== undefined && used[entry.agent] >= (config.limits[entry.agent] as number))) {
       used[entry.agent]++;
       return { position, entry, condition: { kind: 'ready', text: config.queue.enabled ? 'uruchamiane – czeka na najbliższy tick watch' : 'queue.enabled is false; the watcher does not start it' }, since: entry.queuedAt };
@@ -636,6 +654,9 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   for (let entry of waiting(entries)) {
     if (paused && !entry.direct) continue;
     if (entry.retryAt && Date.parse(entry.retryAt) > ctx.runner.now()) continue;
+    const author = directAuthorState(config, entry, readQueue(config));
+    if (author.failed) { await failEntry(ctx, entry, author.failed, notifier, opts, true); continue; }
+    if (author.waiting) continue;
     if (memory.inflight.size >= config.queue.parallelStarts) break;
     if (entry.direct) {
       const room = config.limits[entry.agent];
@@ -721,6 +742,9 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
   const claimed = await withStartLock(ctx, async () => {
     const fresh = readQueue(config).find(e => e.seq === entry.seq && e.task === entry.task);
     if (!fresh || fresh.status !== 'queued') return false;
+    const author = directAuthorState(config, fresh, readQueue(config));
+    if (author.failed) { await failEntry(ctx, fresh, author.failed, notifier, opts, true); return false; }
+    if (author.waiting) return false;
     if (!fresh.autoReview) return claim(fresh);
     // The review starts on the author's state as it is NOW: under the lock that send/enqueuePrompt takes, a follow-up cannot slip in between the check and the claim.
     const authorWindow = findAuthorRecord(config, fresh.autoReview.author)?.window ?? windowName(fresh.autoReview.author);

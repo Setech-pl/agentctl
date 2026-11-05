@@ -6,7 +6,7 @@ const SECRET_KEY = /TOKEN|KEY|SECRET|PASSWORD|PASS|AUTH|COOKIE/i;
 /** Env fields are always masked. Global text substitution applies to secrets, not common nonsecret env settings. */
 export function redactQueue(entry: QueueEntry, config: GlobalConfig): unknown {
   const secrets = new Set<string>();
-  const taskIds = new Set([entry.task, ...(entry.after ?? [])]);
+  const taskIds = new Set([entry.task, entry.reviewOf, entry.directAuthor, ...(entry.after ?? [])].filter((id): id is string => id !== undefined));
   const collect = (value: unknown, key = ''): void => {
     if (typeof value === 'string' && SECRET_KEY.test(key) && value) secrets.add(value);
     else if (value && typeof value === 'object') for (const [k, v] of Object.entries(value)) collect(v, k);

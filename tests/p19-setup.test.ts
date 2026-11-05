@@ -151,7 +151,7 @@ describe('P19: MCP new with setup is handed to the watcher', () => {
     const log = fs.readFileSync(path.join(taskDir(e.config, 'slow-2'), 'setup.log'), 'utf8');
     assert.match(log, /\[alpha\] \$ sleep 1; echo installed[\s\S]*\[beta\] \$ sleep 1; echo installed/);
     assert.ok(e.tmux.windows.some((w) => w.name === 'slow-2'), 'the window exists');
-    assert.deepEqual(kinds(e.config).filter((k) => k !== 'mcp-write'), ['setup-started', 'queue-start']);
+    assert.deepEqual(kinds(e.config).filter((k) => k !== 'mcp-write'), ['setup-started', 'setup-finished', 'setup-started', 'setup-finished', 'queue-start']);
     assert.equal(e.runner.shells.length, 2);
   });
 

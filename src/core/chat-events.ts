@@ -194,6 +194,7 @@ const KIND_LABEL: Record<JournalEntry['kind'], string> = {
   'queue-start': 'START',
   'queue-failed': 'BŁĄD STARTU',
   'setup-started': 'SETUP',
+  'setup-finished': 'SETUP OK',
   'setup-failed': 'BŁĄD SETUPU',
   'needs-input': 'PYTANIE',
   'needs-trust': 'ZAUFANIE',
