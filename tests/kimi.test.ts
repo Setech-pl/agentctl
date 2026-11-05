@@ -6,7 +6,7 @@ import { provider, activeProviders } from '../src/core/providers/registry.ts';
 import { buildAgentArgv, buildResumeArgv } from '../src/core/agents.ts';
 import { findAutoAcceptFlag, launchEnvironment, validateLaunch } from '../src/core/safety.ts';
 import { readKimiConfig } from '../src/core/providers/kimi-config.ts';
-import { classifyScreen } from '../src/core/state.ts';
+import { classifyScreen, taskState } from '../src/core/state.ts';
 import { parseKimiUsage } from '../src/core/providers/kimi-probe.ts';
 import { feedKimiLine, kimiPlanFile } from '../src/core/providers/kimi-usage.ts';
 import { emptyStats, sumBuckets } from '../src/core/usage-parse.ts';
@@ -112,6 +112,13 @@ it('never infers idle from an editor while working, retrying, asking, or showing
   assert.equal(classifyScreen('Error: unknown failure\n│ > │', settings), 'needs-input');
   assert.equal(classifyScreen('', settings), 'needs-input');
   assert.equal(kimi.screen.draft?.('│ > [paste #2 +16 lines]        │'), '[paste #2 +16 lines]');
+});
+it('treats an error banner as stale once the turn resumed after a re-login (P28)', () => {
+  const screen = fixture('synthetic-relogin-idle');
+  assert.equal(classifyScreen(screen, settings), 'idle');
+  assert.equal(taskState({ alive: true, screen, settings, reportReady: true }), 'report-ready');
+  // Nothing but the banner and its continuation before the input box: still waiting for the human.
+  assert.equal(classifyScreen('● Error: [internal] Stored token rejected; re-login required.\n   If this persists, run `/export-debug-zip`.\n│ > │', settings), 'needs-input');
 });
 it('parses only screen plan windows (5h, weekly, monthly) with no fabricated week', () => {
   const now = Date.now(), parsed = parseKimiUsage(fixture('08-usage'), now)!;
