@@ -3,13 +3,31 @@ import path from 'node:path';
 import type { EventSupport, RawEvent } from './types.ts';
 import type { AgentEvent } from '../events.ts';
 import { isObject } from '../util.ts';
-import { UsageReader, readRange } from '../usage-sources.ts';
+import { UsageReader } from '../usage-sources.ts';
 import { kimiSessions, wireObject, wirePayload, wireProtocol, wireTime, feedKimiLine } from './kimi-usage.ts';
 import { emptyStats } from '../usage-parse.ts';
 import { observationWarning } from '../usage.ts';
 import { resolvedKimiHome } from './kimi-config.ts';
 import { readTaskSessions, sessionsFile } from '../usage.ts';
 import { setHeaderField, setHeaderFields, taskDir, taskFile } from '../taskstore.ts';
+
+/** Keep the usual poll bounded, but never strand the cursor inside a large JSONL record. */
+function wireChunk(file: string, offset: number, size: number): Buffer {
+  const fd = fs.openSync(file, 'r'), chunks: Buffer[] = [];
+  try {
+    while (offset < size) {
+      const buf = Buffer.alloc(Math.min(size - offset, 512 * 1024));
+      const n = fs.readSync(fd, buf, 0, buf.length, offset);
+      if (!n) break;
+      const end = buf.subarray(0, n).lastIndexOf(10);
+      chunks.push(buf.subarray(0, end < 0 ? n : end + 1));
+      if (end >= 0) return Buffer.concat(chunks);
+      offset += n;
+    }
+    // The producer has not finished this line. Retry from the same byte next tick.
+    return Buffer.alloc(0);
+  } finally { fs.closeSync(fd); }
+}
 
 /** Only supported name/message wrappers count as an error; unknown shapes use the screen. */
 function errorText(value: unknown, depth = 0): string | undefined {
@@ -64,10 +82,9 @@ export const kimiEvents: EventSupport = {
       if (!explicit && (firstAt === null || firstAt < Date.parse(record.started) - 60_000)) continue;
       let size: number; try { size = fs.statSync(file).size; } catch { continue; }
       const cursor = cursors[file]?.parserVersion === 2 && cursors[file]!.offset <= size ? cursors[file]! : { offset: 0, parserVersion: 2 };
-      const text = readRange(file, cursor.offset, Math.min(size - cursor.offset, 512 * 1024));
-      const end = text.lastIndexOf('\n');
-      if (end < 0) continue;
-      for (const line of text.slice(0, end).split('\n')) {
+      const bytes = wireChunk(file, cursor.offset, size);
+      if (!bytes.length) continue;
+      for (const line of bytes.toString('utf8').slice(0, -1).split('\n')) {
         const o = wireObject(line);
         if (!o) continue;
         const protocol = wireProtocol(o);
@@ -96,7 +113,7 @@ export const kimiEvents: EventSupport = {
         const ref = id ? { id } : kimiEvents.session({ payload: o });
         if (ref && !(sessions.kimi ?? []).some(s => s.id === ref.id)) { (sessions.kimi ??= []).push(ref); await ctx.runner.writeFile(sessionsFile(ctx.config, record.window), JSON.stringify(sessions)); }
       }
-      cursor.offset += Buffer.byteLength(text.slice(0, end + 1)); cursors[file] = cursor; dirty = true;
+      cursor.offset += bytes.length; cursors[file] = cursor; dirty = true;
     }
     if (dirty) await ctx.runner.writeFile(cursorFile, JSON.stringify(cursors));
   },
