@@ -505,7 +505,8 @@ MCP new/queue validate canonical and alternative report paths during preview: on
 |---|---|---|---|
 | `agents.kimi` | mapping | adapter defaults | Interactive Kimi settings; registered always, active only in `providers`. |
 | `limits.kimi` | positive integer | unlimited | Simultaneous Kimi task windows, reservations and optional external sessions. |
-| `usage.kimi_dir` | path/null | `$KIMI_CODE_HOME`, else `~/.kimi-code` | Kimi data/config home. Only config.toml and candidate session logs are read. |
+| `usage.kimi_dir` | path/null | `$KIMI_CODE_HOME`, else `~/.kimi-code` | Legacy Kimi home fallback. `agents.kimi.env.KIMI_CODE_HOME` takes precedence, then this explicit setting, then process `KIMI_CODE_HOME`, then `~/.kimi-code`. Task windows, doctor and passive reads share this resolver. Only config.toml and candidate session logs are read. |
+| `capacity.kimi_usage_probe_model` | string | `k3` | Model alias for the slash-command-only probe; configurable, including `default`. The default never selects Highspeed. No thinking effort is set or inherited; no model turn is submitted. |
 | `capacity.kimi_usage_probe` | boolean | false | On-demand hidden TUI `/usage` probe in `<agentctl home>/kimi-usage-probe`; at most once per five minutes. |
 | `review.prefer` | provider IDs | `providers` order | First active installed mappable provider other than the author. Inactive IDs are skipped. |
 

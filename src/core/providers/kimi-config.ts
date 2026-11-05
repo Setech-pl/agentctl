@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { parse } from 'smol-toml';
-import type { Effort } from '../config.ts';
+import type { GlobalConfig, Effort } from '../config.ts';
 import { isObject, resolvePath } from '../util.ts';
 
 export interface KimiModel { id: string; displayName: string; efforts: Effort[] }
@@ -16,6 +16,17 @@ export interface KimiConfig {
   error?: string;
 }
 export const kimiHome = (env: Record<string, string | undefined> = process.env): string => resolvePath(env.KIMI_CODE_HOME ?? path.join(os.homedir(), '.kimi-code'));
+
+/** Agent home wins; usage.kimi_dir remains a legacy explicit config fallback. */
+export function resolvedKimiHome(config: Pick<GlobalConfig, 'usage'> & Partial<Pick<GlobalConfig, 'agents'>>, env: Record<string, string | undefined> = process.env): string {
+  return kimiHome({ ...env, KIMI_CODE_HOME: config.agents?.kimi?.env?.KIMI_CODE_HOME ?? config.usage.kimiDir ?? env.KIMI_CODE_HOME });
+}
+
+export function kimiEnvironmentProblem(env: Record<string, string | undefined>): string | undefined {
+  if (env.KIMI_CODE_TRUST_WORKSPACE !== undefined) return 'KIMI_CODE_TRUST_WORKSPACE is forbidden; trust must be manual';
+  if (/^(false|0|off|no)$/i.test(env.KIMI_CODE_DANGEROUS_COMMAND_GUARD ?? '')) return 'KIMI_CODE_DANGEROUS_COMMAND_GUARD=false is forbidden';
+  return kimiConfigProblem(readKimiConfig(env));
+}
 
 /** Read config.toml only. Never open credentials, OAuth, device IDs or write this file. */
 export function readKimiConfig(env: Record<string, string | undefined> = process.env): KimiConfig {

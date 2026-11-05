@@ -147,7 +147,7 @@ export interface GlobalConfig extends Layer {
   guideLang: 'en' | 'pl';
   disk: { warnGb: number; criticalGb: number };
   git: { timeoutS: number };
-  capacity: { snapshot: boolean; staleMinutes: number; sampleLimit: number; thresholds: number[]; codexRefresh: boolean; kimiUsageProbe?: boolean };
+  capacity: { snapshot: boolean; staleMinutes: number; sampleLimit: number; thresholds: number[]; codexRefresh: boolean; kimiUsageProbe?: boolean; kimiUsageProbeModel?: string };
   /** Set by a long-running process (watch, MCP) when the file on disk does not load and the previous settings stay in force. */
   reloadWarning?: string;
   /** Where the config was (or would be) read from. */
@@ -1046,7 +1046,11 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
         if (typeof raw.capacity.kimi_usage_probe === 'boolean') Object.assign(capacity, { kimiUsageProbe: raw.capacity.kimi_usage_probe });
         else p.add('config.capacity.kimi_usage_probe must be boolean');
       }
-      checkKeys(raw.capacity, ['snapshot', 'stale_minutes', 'sample_limit', 'thresholds', 'codex_refresh', 'kimi_usage_probe'], 'config.capacity', p);
+      if (raw.capacity.kimi_usage_probe_model !== undefined) {
+        if (typeof raw.capacity.kimi_usage_probe_model === 'string' && /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(raw.capacity.kimi_usage_probe_model)) Object.assign(capacity, { kimiUsageProbeModel: raw.capacity.kimi_usage_probe_model });
+        else p.add('config.capacity.kimi_usage_probe_model must be a model alias or default');
+      }
+      checkKeys(raw.capacity, ['snapshot', 'stale_minutes', 'sample_limit', 'thresholds', 'codex_refresh', 'kimi_usage_probe', 'kimi_usage_probe_model'], 'config.capacity', p);
       for (const [key, field] of [['snapshot', 'snapshot'], ['codex_refresh', 'codexRefresh']] as const) {
         if (typeof raw.capacity[key] === 'boolean') capacity[field] = raw.capacity[key];
         else if (raw.capacity[key] !== undefined) p.add(`config.capacity.${key} must be boolean`);

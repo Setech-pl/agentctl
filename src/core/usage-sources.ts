@@ -16,7 +16,7 @@ import { isObject } from './util.ts';
  */
 
 /** Claude's config directory and Codex's home: the config, else the environment, else the default. */
-export function agentHomes(config: Pick<GlobalConfig, 'usage'>, env: Record<string, string | undefined> = process.env): Record<AgentName, string> {
+export function agentHomes(config: Pick<GlobalConfig, 'usage'> & Partial<Pick<GlobalConfig, 'agents'>>, env: Record<string, string | undefined> = process.env): Record<AgentName, string> {
   return perProvider(PROVIDER_IDS, id => adapter(id).usage.home(config, env));
 }
 

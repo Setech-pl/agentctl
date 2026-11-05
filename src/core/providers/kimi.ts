@@ -4,7 +4,7 @@ import { kimiProbeDir } from './kimi-probe.ts';
 import { readKimiSnapshot } from './kimi-usage.ts';
 import type { ProviderAdapter, DoctorLine } from './types.ts';
 import { kimiSettings } from './kimi-settings.ts';
-import { configuredModel, kimiConfigProblem, qualifiedModel, readKimiConfig } from './kimi-config.ts';
+import { configuredModel, kimiConfigProblem, kimiEnvironmentProblem, resolvedKimiHome, qualifiedModel, readKimiConfig } from './kimi-config.ts';
 import { kimiEvents } from './kimi-events.ts';
 import { kimiUsage } from './kimi-usage.ts';
 import { interactiveTokens } from './process.ts';
@@ -22,7 +22,10 @@ export const kimi: ProviderAdapter = {
   doctor(detection, env, globalConfig) {
     const lines: DoctorLine[] = [{ name: 'kimi', level: detection.found ? 'ok' : 'warn', text: detection.found ? detection.raw : `not found. ${this.installHint}` }];
     if (detection.version && detection.version.localeCompare('2.5.0', undefined, { numeric: true }) > 0) lines.push({ name: 'kimi version', level: 'warn', text: `${detection.version} is newer than tested 2.5.0` });
-    const config = readKimiConfig({ ...env, ...(globalConfig?.usage.kimiDir ? { KIMI_CODE_HOME: globalConfig.usage.kimiDir } : {}) }), problem = kimiConfigProblem(config);
+    env = { ...env, ...globalConfig?.agents.kimi?.env };
+    if (globalConfig) env.KIMI_CODE_HOME = resolvedKimiHome(globalConfig, env);
+    const config = readKimiConfig(env), problem = kimiConfigProblem(config);
+    lines.push({ name: 'kimi home', level: 'ok', text: path.dirname(config.file) });
     lines.push({ name: 'kimi permissions', level: problem ? 'fail' : 'ok', text: problem ?? `default_permission_mode=${config.mode}; dangerous_command_guard=${config.guard}; rules=${JSON.stringify(config.rules)}` });
     if (!config.guard || /^(false|0|off|no)$/i.test(env.KIMI_CODE_DANGEROUS_COMMAND_GUARD ?? '')) lines.push({ name: 'kimi guard', level: 'warn', text: 'dangerous_command_guard is disabled; it is a separate AST guard, not an allow-list' });
     if (env.KIMI_CODE_TRUST_WORKSPACE !== undefined) lines.push({ name: 'kimi trust', level: 'fail', text: 'KIMI_CODE_TRUST_WORKSPACE bypass is forbidden; trust must be manual' });
@@ -69,10 +72,9 @@ export const kimi: ProviderAdapter = {
     forbiddenFlags: ['-y', '--yolo', '--yes', '--auto-approve', '--auto', '-p', '--prompt'],
     check: () => undefined,
     validate(order, _settings, env) {
-      if (env.KIMI_CODE_TRUST_WORKSPACE !== undefined) return 'KIMI_CODE_TRUST_WORKSPACE is forbidden; trust must be manual';
-      if (/^(false|0|off|no)$/i.test(env.KIMI_CODE_DANGEROUS_COMMAND_GUARD ?? '')) return 'KIMI_CODE_DANGEROUS_COMMAND_GUARD=false is forbidden';
-      const config = readKimiConfig(env), problem = kimiConfigProblem(config);
+      const problem = kimiEnvironmentProblem(env);
       if (problem) return problem;
+      const config = readKimiConfig(env);
       const model = configuredModel(config, order.model);
       if (model?.efforts.length && !model.efforts.includes(order.effort)) return `${model.id} does not support effort ${order.effort}; use ${model.efforts.join(', ')}`;
       return undefined;

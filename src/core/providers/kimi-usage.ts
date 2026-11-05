@@ -8,7 +8,7 @@ import type { SessionStats, PlanSnapshot, PlanWindow } from '../usage-parse.ts';
 import { num, str, timeOf, touch, addToBucket } from '../usage-parse.ts';
 import { planState } from '../usage.ts';
 import { homeDir } from '../usage-sources.ts';
-import { kimiHome } from './kimi-config.ts';
+import { resolvedKimiHome } from './kimi-config.ts';
 import { isObject } from '../util.ts';
 import { within } from './usage-shared.ts';
 import { refreshKimiPlan } from './kimi-probe.ts';
@@ -77,7 +77,7 @@ export function feedKimiLine(stats: SessionStats, line: string): void {
   if (id) { stats.seen[id] = tokens; stats.seenOrder.push(id); while (stats.seenOrder.length > 256) delete stats.seen[stats.seenOrder.shift()!]; }
 }
 export const kimiUsage: UsageSupport = {
-  home: (config, env = process.env) => config.usage.kimiDir ?? kimiHome(env), homeEnv: 'KIMI_CODE_HOME',
+  home: resolvedKimiHome, taskHome: resolvedKimiHome, homeEnv: 'KIMI_CODE_HOME',
   sessions: (reader, home, record, worktrees, known) => kimiSessions(reader, home, record, worktrees, known),
   feedLine: feedKimiLine,
   readPlan(config, _reader, now) {

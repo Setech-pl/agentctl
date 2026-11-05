@@ -89,9 +89,11 @@ export interface UsageCandidate { file: string; firstAt: number | null; explicit
 /** Zużycie i limity. */
 export interface UsageSupport {
   /** Katalog domowy dostawcy: config.usage.<id>_dir ?? env[homeEnv] ?? domyślny. */
-  home(config: Pick<GlobalConfig, 'usage'>, env?: Record<string, string | undefined>): string;
+  home(config: Pick<GlobalConfig, 'usage'> & Partial<Pick<GlobalConfig, 'agents'>>, env?: Record<string, string | undefined>): string;
   /** Zmienna środowiska przenosząca katalog (CLAUDE_CONFIG_DIR, CODEX_HOME, KIMI_CODE_HOME) – także dla tests/isolation.ts i live-harness. */
   homeEnv: string | null;
+  /** Optional shared resolver for task-specific passive reads. */
+  taskHome?(config: GlobalConfig, env: Record<string, string | undefined>): string;
   /** Logi sesji zadania: najpierw jawnie nazwane sesje (sessions.json), potem po cwd w worktree. */
   sessions(reader: UsageReader, home: string, record: TaskRecord, worktrees: string[], known: SessionRef[], now: number): UsageCandidate[];
   /** Dodatkowe pliki dołączone do kandydata (Claude: subagents/agent-*.jsonl). */

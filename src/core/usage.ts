@@ -168,7 +168,7 @@ function candidates(config: GlobalConfig, reader: UsageReader, record: TaskRecor
   for (const id of ids) {
     const usage = adapter(id).usage;
     const override = usage.homeEnv ? record.env[usage.homeEnv] : undefined;
-    const home = override ? path.resolve(override) : usage.home(config);
+    const home = usage.taskHome ? usage.taskHome(config, { ...process.env, ...record.env }) : override ? path.resolve(override) : usage.home(config);
     for (const candidate of usage.sessions(reader, home, record, worktrees, sessions[id] ?? [], now)) out.push({ ...candidate, provider: id });
   }
   return out;

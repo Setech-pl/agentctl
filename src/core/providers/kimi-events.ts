@@ -5,7 +5,7 @@ import type { AgentEvent } from '../events.ts';
 import { isObject } from '../util.ts';
 import { UsageReader, readRange } from '../usage-sources.ts';
 import { kimiSessions, wireObject, wirePayload, wireProtocol } from './kimi-usage.ts';
-import { kimiHome } from './kimi-config.ts';
+import { resolvedKimiHome } from './kimi-config.ts';
 import { readTaskSessions, sessionsFile } from '../usage.ts';
 import { setHeaderField, taskDir, taskFile } from '../taskstore.ts';
 
@@ -49,7 +49,7 @@ export const kimiEvents: EventSupport = {
     let cursors: Record<string, { offset: number; protocol?: string }> = {};
     try { cursors = JSON.parse(fs.readFileSync(cursorFile, 'utf8')); } catch { /* first poll */ }
     const sessions = readTaskSessions(ctx.config, record.window);
-    const home = ctx.config.usage.kimiDir ?? kimiHome({ ...process.env, ...record.env });
+    const home = resolvedKimiHome(ctx.config, { ...process.env, ...record.env });
     const files = kimiSessions(new UsageReader(undefined), home, record, record.repos.map(r => r.worktree), sessions.kimi ?? []);
     let dirty = false;
     for (const { file } of files.sort((a, b) => (a.firstAt ?? 0) - (b.firstAt ?? 0))) {

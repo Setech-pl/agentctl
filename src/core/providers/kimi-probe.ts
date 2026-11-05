@@ -9,7 +9,9 @@ import { kimiPlanFile, readKimiSnapshot } from './kimi-usage.ts';
 import { Tmux } from '../tmux.ts';
 import { kimiSettings } from './kimi-settings.ts';
 import { classifyScreen, inputVisible } from '../state.ts';
-import { launchEnvironment } from '../safety.ts';
+import { assertSafeArgs } from '../safety.ts';
+import { kimiEnvironmentProblem, qualifiedModel, resolvedKimiHome } from './kimi-config.ts';
+import { AgentctlError, shellLine } from '../util.ts';
 import { withFileLock } from '../file-lock.ts';
 
 /** Real 2.5.0 /usage text. Only percentages and reset times are persisted. */
@@ -29,6 +31,20 @@ export function parseKimiUsage(screen: string, now: number): PlanSnapshot | unde
 
 export const kimiProbeDir = (config: Context['config']): string => path.join(homeDir(config), 'kimi-usage-probe');
 
+/** Slash-command-only process: no task effort validation or inherited thinking override. */
+export function kimiProbeLaunch(config: Context['config'], processEnv: Record<string, string | undefined> = process.env): { env: Record<string, string>; command: string } {
+  const settings = config.agents.kimi;
+  const env = { ...settings.env, KIMI_CODE_HOME: resolvedKimiHome(config, processEnv), KIMI_CODE_NO_AUTO_UPDATE: '1', KIMI_DISABLE_TELEMETRY: '1', AGENTCTL_TASK: 'usage-probe' };
+  const problem = kimiEnvironmentProblem({ ...processEnv, ...env });
+  if (problem) throw new AgentctlError(`usage-probe: kimi: ${problem}`);
+  const model = config.capacity.kimiUsageProbeModel ?? 'k3';
+  const args = [...(model === 'default' ? [] : ['-m', qualifiedModel(model)]), ...settings.flags];
+  assertSafeArgs('kimi', args);
+  // env -u also removes an override inherited by the tmux server, not just settings.env.
+  delete (env as Record<string, string>).KIMI_MODEL_THINKING_EFFORT;
+  return { env, command: `exec ${shellLine('env', ['-u', 'KIMI_MODEL_THINKING_EFFORT', 'kimi', ...args])}` };
+}
+
 /** No API/OAuth/credentials, no task window and no model turn. Every exit path kills its own session. */
 export async function refreshKimiPlan(ctx: Context): Promise<string | null> {
   if (!ctx.config.capacity.kimiUsageProbe || ctx.runner.dryRun) return null;
@@ -38,7 +54,7 @@ export async function refreshKimiPlan(ctx: Context): Promise<string | null> {
     if (cached && now - cached.at < 300_000) return null;
     const stamp = path.join(homeDir(ctx.config), 'usage', 'kimi-probe-at.json');
     try { if (now - JSON.parse(fs.readFileSync(stamp, 'utf8')).at < 300_000) return 'Kimi probe rate-limited (5 minutes)'; } catch { /* first probe */ }
-    const env = launchEnvironment(ctx.config, { agent: 'kimi', model: 'default', effort: 'high', task: 'usage-probe' }, {});
+    const { env, command } = kimiProbeLaunch(ctx.config);
     const dir = kimiProbeDir(ctx.config), settings = kimiSettings();
     await ctx.runner.mkdir(dir);
     await ctx.runner.writeFile(stamp, JSON.stringify({ at: now }));
@@ -47,7 +63,7 @@ export async function refreshKimiPlan(ctx: Context): Promise<string | null> {
     let created = false;
     try {
       // Start the process directly: no prompt or Enter is ever typed into an unready shell.
-      const start = await openAgentWindow(probeCtx, { task: 'usage-probe', window: 'usage', cwd: dir, env, report: file, repos: [], origin: 'new', sessionUp: false, command: 'exec kimi' });
+      const start = await openAgentWindow(probeCtx, { task: 'usage-probe', window: 'usage', cwd: dir, env, report: file, repos: [], origin: 'new', sessionUp: false, command });
       if (start.code !== 0) return 'Kimi probe could not start';
       created = true;
       let ready = false;
