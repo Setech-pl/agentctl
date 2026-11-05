@@ -193,6 +193,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
     const ready = await waitForReady(runner, tmux, spec.window, {
       pattern: settings.readyPattern,
       emptyInput: true,
+      structuralComposer: true,
       trustPattern: remote ? `${settings.trustPattern}|${RC_CONFIRM}` : settings.trustPattern,
       timeoutMs: settings.readyTimeout * 1000,
       ...(opts.signal ? { signal: opts.signal } : {}),
@@ -234,7 +235,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
       throw new AgentctlError(
         `${spec.task}: ${spec.agent} did not show its input prompt within ${settings.readyTimeout}s (pattern /${settings.readyPattern}/)`,
         `The window is still open: "tmux attach -t ${config.session}". Once the agent is ready, send the prompt with "agentctl send"; ` +
-          `if the prompt looks normal, adjust agents.${spec.agent}.ready_pattern / ready_timeout in ${config.path}.`,
+          `a recognized structural composer is required before any paste; if the prompt looks normal, adjust agents.${spec.agent}.ready_pattern / ready_timeout in ${config.path}.`,
       );
     }
     if (runner.dryRun) await tmux.submitPrompt(spec.window, promptWithHeader(spec, record.attemptId));

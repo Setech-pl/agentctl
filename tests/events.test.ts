@@ -1,3 +1,4 @@
+import { composerFixture } from './composer-fixture.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -228,7 +229,7 @@ describe('new: starts the agents with the event wiring', () => {
   it('Codex: -c notify=[…] on the command line, and nothing written', async () => {
     const config = makeConfig(scratch.sub('newwire-x'));
     const fake = new FakeTmux();
-    fake.newWindowScreen = '› Ask Codex to do anything\n';
+    fake.newWindowScreen = composerFixture('› Ask Codex to do anything\n');
     const { ctx, runner } = makeContext(config, { respond: fake.respond });
     await newTasks(ctx, specs(config, 'codex', `env: {CODEX_HOME: ${scratch.sub('newwire-x-home')}}\n`), { self: SELF });
     const typed = runner.commands.find((c) => c.includes('send-keys') && c.includes(' -l -- ')) as string;

@@ -413,7 +413,7 @@ describe('mcp: the write tools', () => {
 
   it('move: the first call describes it, confirm: true hands the task over', async () => {
     const t = setup('m1', 'mcp: {allow: [move]}\n');
-    t.tmux.newWindowScreen = '› Ask Codex to do anything\n';
+    t.tmux.newWindowScreen = composerFixture('› Ask Codex to do anything\n');
     seedTask(t.config, 'NC-1', { repos: [{ path: scratch.sub('m1/app'), worktree: scratch.sub('m1/app-wt') }], requested: { agent: 'claude', model: 'opus', effort: 'high' } });
     t.tmux.add('nc-1', "  ⎿  You've hit your session limit · resets 3pm\n❯ ");
     const preview = await t.call('move', { task: 'NC-1' });

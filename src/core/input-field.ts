@@ -12,6 +12,7 @@ import { storedForm } from './paste-wrapper.ts';
 /** Structural border: its column and width must match the composer's top border. */
 const BORDER = /^[─━═╌╍┄┅┈┉]{3,}$/u;
 const CODEX_MODEL = /^  [\w.-]+ (?:low|medium|high|xhigh|minimal|none) · .+$/;
+const CODEX_STATUS = /^ *(?:⚠ \d+ warnings? · f2 to view)?$/;
 const CODEX_HINT = /^  (?:← for agents · )?(?:\? for shortcuts(?:\s+.*)?|tab to queue message)$/;
 /** A paste the TUI folded into one placeholder: "[Pasted text #2 +7 lines]" (Claude Code), "[Pasted Content 1004 chars]" (Codex). */
 const PLACEHOLDER = /^\[Pasted (?:text|content)\b[^\]\n]*\]$/i;
@@ -43,9 +44,20 @@ export function inspectField(screen: string): FieldCapture {
   // Codex 0.166.0 has no box: its two-row model/hints footer is a separate bottom region (recorded fixtures).
   // Pick the LAST complete footer at the bottom, so identical user text higher up stays inside the field.
   for (let model = lines.length - 2; model >= 0; model--) {
-    if (!CODEX_MODEL.test(lines[model]!) || !CODEX_HINT.test(lines[model + 1]!) || lines.slice(model + 2).some(line => line !== '')) continue;
+    if (!CODEX_MODEL.test(lines[model]!) || !(CODEX_HINT.test(lines[model + 1]!) || CODEX_STATUS.test(lines[model + 1]!)) || lines.slice(model + 2).some(line => line !== '')) continue;
     const start = lastMarker < model && /^›(?:\s|$)/.test(lines[lastMarker] ?? '') ? lastMarker : -1;
     if (start >= 0 && lines.slice(start + 1, model).every(line => line === '' || line.startsWith('  '))) return areaOf(start, model);
+  }
+  // Compact startup screen: the banner, cwd and permissions precede the bottom composer.
+  // No conversation/dialog rows are allowed in this startup-only shape.
+  const banner = lines.findIndex(line => /^  >_ OpenAI Codex \(v0\.166\.0\)$/.test(line));
+  if (banner >= 0 && /^     \S.*$/.test(lines[banner + 1] ?? '') &&
+      /^  permissions: .+$/.test(lines[banner + 2] ?? '') && lastMarker > banner + 2 &&
+      /^›(?:\s|$)/.test(lines[lastMarker]!) &&
+      lines.slice(0, banner).every(line => line === '') &&
+      lines.slice(banner + 3, lastMarker).every(line => line === '') &&
+      lines.slice(lastMarker + 1).every(line => line === '' || line.startsWith('  '))) {
+    return areaOf(lastMarker, lines.length);
   }
   return { area: [], readable: false, reason: 'nie można jednoznacznie ustalić strukturalnych granic composera; brak pełnej ramki lub stopki Codexa' };
 }

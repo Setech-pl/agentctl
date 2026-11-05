@@ -1,3 +1,4 @@
+import { composerFixture } from './composer-fixture.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { after } from 'node:test';
@@ -113,7 +114,7 @@ export class FakeTmux {
   private pasted = new Set<string>();
   private ack = new Set<string>();
   /** The screen of windows created by new-window and new-session: an idle Claude prompt. */
-  newWindowScreen = '❯ \n';
+  newWindowScreen = composerFixture('❯ \n');
   /** Every tmux command seen, as "subcommand target". */
   readonly seen: string[] = [];
   /** Clients attached to the session (`list-clients`): name and last activity. */
@@ -183,7 +184,7 @@ export class FakeTmux {
         return {};
       }
       case 'paste-buffer': { const w = this.find(target); if (w) this.pasted.add(w.id); return w ? {} : { code: 1 }; }
-      case 'send-keys': { const w = this.find(target); if (w && w.screen === '❯ \n' && args.includes('-l') && args.at(-1)?.startsWith('codex ')) w.screen = '› Ask Codex to do anything\n'; if (w && args.at(-1) === 'Enter' && this.pasted.delete(w.id)) this.ack.add(w.id); return w ? {} : { code: 1 }; }
+      case 'send-keys': { const w = this.find(target); if (w && w.screen === composerFixture('❯ \n') && args.includes('-l') && args.at(-1)?.startsWith('codex ')) w.screen = composerFixture('› Ask Codex to do anything\n'); if (w && args.at(-1) === 'Enter' && this.pasted.delete(w.id)) this.ack.add(w.id); return w ? {} : { code: 1 }; }
       case 'select-window':
         return this.find(target) ? {} : { code: 1, stderr: `can't find window: ${target}` };
       default:

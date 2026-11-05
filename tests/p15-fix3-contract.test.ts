@@ -1,3 +1,4 @@
+import { composerFixture } from './composer-fixture.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -166,7 +167,7 @@ describe('the paste goes in with plain line ends', () => {
   it('CRLF in a prompt is pasted as LF (tmux turns each CR into an Enter: CRLF would be two)', async () => {
     const config = makeConfig(scratch.sub('crlf'), 'capacity: {snapshot: false, codex_refresh: false}\n');
     let payload = '';
-    const runner = new DiskRunner({ dryRun: false, startTime: Date.now() + 1000, respond: (cmd, args, opts) => { if (cmd !== 'tmux') return undefined; if (args[0] === 'list-windows') return { stdout: '@1\tt1\ttask' }; if (args[0] === 'load-buffer') payload = opts?.input ?? ''; if (args[0] === 'capture-pane') return { stdout: '❯ \n' }; return {}; } });
+    const runner = new DiskRunner({ dryRun: false, startTime: Date.now() + 1000, respond: (cmd, args, opts) => { if (cmd !== 'tmux') return undefined; if (args[0] === 'list-windows') return { stdout: '@1\tt1\ttask' }; if (args[0] === 'load-buffer') payload = opts?.input ?? ''; if (args[0] === 'capture-pane') return { stdout: composerFixture('❯ \n') }; return {}; } });
     const ctx = new Context(runner, config, () => {});
     seedTask(config, 'T1', { agent: 'claude', windowId: '@1' });
     await queuePrompt(ctx, readTaskRecord(config, 't1')!, 'line 1\r\nline 2\r\n');

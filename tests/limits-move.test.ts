@@ -1,3 +1,4 @@
+import { composerFixture } from './composer-fixture.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -126,7 +127,7 @@ describe('move', () => {
   function setup(name: string, yaml = '', extra: Parameters<typeof seedTask>[2] = {}, confirm?: (q: string) => Promise<boolean>) {
     const config = makeConfig(scratch.sub(name), yaml);
     const fake = new FakeTmux();
-    fake.newWindowScreen = '› Ask Codex to do anything\n';
+    fake.newWindowScreen = composerFixture('› Ask Codex to do anything\n');
     const runner = new DiskRunner({ dryRun: false, respond: fake.respond, startTime: Date.now() });
     const out: string[] = [];
     const ctx = new Context(runner, config, (l) => out.push(l), confirm);
@@ -316,7 +317,7 @@ describe('board: M moves a task', () => {
   it('the effect moves the task with the core function and reports the new one', async () => {
     const config = makeConfig(scratch.sub('bm1'));
     const fake = new FakeTmux();
-    fake.newWindowScreen = '› Ask Codex to do anything\n';
+    fake.newWindowScreen = composerFixture('› Ask Codex to do anything\n');
     const runner = new DiskRunner({ dryRun: false, respond: fake.respond, startTime: Date.now() });
     seedTask(config, 'NC-1', { repos: [{ path: scratch.sub('bm1/app'), worktree: scratch.sub('bm1/app-wt') }] });
     fake.add('nc-1', IDLE);

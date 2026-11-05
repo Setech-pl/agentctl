@@ -1,0 +1,40 @@
+
+❯ Run sleep 8 using your shell tool, then reply DONE.
+
+  Ran 1 shell command
+
+⏺ DONE
+
+✻ Cogitated for 12s · done 2:38 PM
+
+❯ Run sleep 15 using your shell tool, then reply DONE.
+
+  Ran 1 shell command
+
+❯ After this turn reply FOLLOWUP.
+
+⏺ DONE
+
+  FOLLOWUP
+
+✻ Cogitated for 19s · done 2:39 PM
+
+❯ Ask me which color I prefer, then wait for my answer.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ☐ Color
+
+Which color do you prefer?
+
+❯ 1. Blue
+     A cool, calm blue
+  2. Green
+     A fresh, natural green
+  3. Red
+     A bold, energetic red
+  4. Purple
+     A rich, creative purple
+  5. Type something.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  6. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel

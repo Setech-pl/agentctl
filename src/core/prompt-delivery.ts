@@ -263,6 +263,10 @@ async function deliverOnce(ctx: Context, window: string): Promise<'sent' | 'pend
     const busyFollowup = record.promptKind === 'followup' && settings.acceptsBusyPrompt !== false && ['working', 'background'].includes(beforeState);
     if (before.code !== 0 || !inputVisible(before.stdout, settings) || (!busyFollowup && beforeState !== 'idle')) return 'pending';
 
+    if (record.promptKind === 'initial' && !inspectField(before.stdout).readable) {
+      await setHeaderFields(ctx.runner, file, { prompt_delivery: 'needs-attention', prompt_error: 'Composer is not structurally ready; initial prompt was not pasted and remains in TASK.md' });
+      return 'needs-attention';
+    }
     record.deliveryWasBusy = busyFollowup;
     record.deliveryStartedAt = new Date(ctx.runner.now()).toISOString();
     record.deliveryOutputBaseline = outputFingerprint(before.stdout, settings.deliveryPattern);
