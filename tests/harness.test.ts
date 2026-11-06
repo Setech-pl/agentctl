@@ -1,15 +1,23 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { describe, it } from 'node:test';
+import { afterEach, beforeEach, describe, it } from 'node:test';
 import { checkHarnessSafety, commandV, Harness, HarnessRefusal } from '../scripts/live-harness.ts';
+import { liveCacheRoot, historicalCacheRoots } from '../scripts/live-cache.ts';
 import type { SafetyInput } from '../scripts/live-harness.ts';
 import { REPO_ROOT, useScratch } from './helpers.ts';
 
 const scratch = useScratch();
+let liveCache: string | undefined;
+beforeEach(() => { liveCache = process.env.AGENTCTL_LIVE_CACHE; process.env.AGENTCTL_LIVE_CACHE = scratch.dir; });
+afterEach(() => {
+  if (liveCache === undefined) delete process.env.AGENTCTL_LIVE_CACHE;
+  else process.env.AGENTCTL_LIVE_CACHE = liveCache;
+});
 
 it('shortens long sandbox names inside the requested root and refuses an oversized root before reset', () => {
   const cacheRoot = '/Users/marcinkrzetowski/Projects/cache-dev/agentctl-0181/e2/x';
+  process.env.AGENTCTL_LIVE_CACHE = cacheRoot;
   const name = 'fix-claude-swallow-first';
   const h = new Harness({ name, cacheRoot }, REPO_ROOT);
   assert.equal(path.dirname(h.root), cacheRoot);
@@ -18,6 +26,7 @@ it('shortens long sandbox names inside the requested root and refuses an oversiz
   assert.ok(Buffer.byteLength(path.join(h.tmuxDir, `tmux-${process.getuid?.() ?? 0}`, 'default')) <= 100);
   assert.throws(() => new Harness({ name: '../escape', cacheRoot }, REPO_ROOT), /invalid sandbox name/);
   const oversized = scratch.sub('oversized-' + 'x'.repeat(100));
+  process.env.AGENTCTL_LIVE_CACHE = oversized;
   const refused = new Harness({ name, cacheRoot: oversized }, REPO_ROOT);
   fs.mkdirSync(refused.root);
   const sentinel = path.join(refused.root, 'sentinel'); fs.writeFileSync(sentinel, 'keep');
@@ -27,6 +36,7 @@ it('shortens long sandbox names inside the requested root and refuses an oversiz
 
 it('keeps package smoke sockets inside the required dataset root within the limit', () => {
   const root = '/Users/marcinkrzetowski/Projects/cache-dev/agentctl-0181/dataset';
+  process.env.AGENTCTL_LIVE_CACHE = root;
   const h = new Harness({ name: 'smoke-node22', cacheRoot: root }, REPO_ROOT);
   assert.equal(path.dirname(h.root), root);
   assert.ok(Buffer.byteLength(path.join(h.tmuxDir, `tmux-${process.getuid?.() ?? 0}`, 'default')) <= 100);
@@ -123,4 +133,65 @@ it('refuses a real kimi resolver and any PATH directory containing a real kimi',
 it('refuses KIMI_CODE_HOME outside the live sandbox', () => {
   const base = input('kimi-home-safety');
   assert.throws(() => checkHarnessSafety({ ...base, kimiHome: '/outside/kimi-home' }), /KIMI_CODE_HOME .* not inside the sandbox/);
+});
+
+
+describe('live cache root fails closed before filesystem changes', () => {
+  it('refuses unset, empty, relative and historical roots without creating anything', (t) => {
+    const writes: string[] = [];
+    for (const method of ['mkdirSync', 'rmSync', 'writeFileSync'] as const) {
+      t.mock.method(fs, method, () => { writes.push(method); throw new Error(`unexpected filesystem mutation: ${method}`); });
+    }
+    const before = fs.readdirSync(scratch.dir);
+    for (const root of [undefined, '', 'relative/task', ...historicalCacheRoots(), ...historicalCacheRoots().map(p => path.join(p, 'nested'))]) {
+      if (root === undefined) delete process.env.AGENTCTL_LIVE_CACHE;
+      else process.env.AGENTCTL_LIVE_CACHE = root;
+      assert.throws(() => liveCacheRoot(), /AGENTCTL_LIVE_CACHE.*Example:/);
+      assert.throws(() => new Harness({ name: 'refused', cacheRoot: scratch.dir }, REPO_ROOT), HarnessRefusal);
+      assert.deepEqual(fs.readdirSync(scratch.dir), before);
+      assert.deepEqual(writes, [], 'refusal must not attempt any filesystem mutation');
+    }
+  });
+
+  it('accepts an explicit absolute root without creating it and confines cacheRoot', () => {
+    const root = path.join(scratch.dir, 'absent');
+    process.env.AGENTCTL_LIVE_CACHE = root;
+    assert.equal(liveCacheRoot(), root);
+    const h = new Harness({ name: 'valid' }, REPO_ROOT);
+    assert.equal(path.dirname(h.root), root);
+    assert.equal(fs.existsSync(root), false);
+    assert.throws(() => new Harness({ name: 'escape', cacheRoot: scratch.dir }, REPO_ROOT), /inside/);
+    assert.throws(() => liveCacheRoot('relative'), /absolute/);
+    assert.equal(fs.existsSync(root), false);
+  });
+
+  it('resolves dangling symlinks before checking containment without creating their target', () => {
+    const root = scratch.sub('dangling-confined');
+    const target = path.join(scratch.dir, 'missing-outside');
+    const alias = path.join(root, 'alias');
+    fs.symlinkSync(target, alias);
+    process.env.AGENTCTL_LIVE_CACHE = root;
+    assert.throws(() => liveCacheRoot(alias), /inside/);
+    assert.equal(fs.existsSync(target), false);
+  });
+
+  it('rejects historical aliases and parents and symlink escapes before reset', () => {
+    for (const historical of historicalCacheRoots()) {
+      const alias = path.join(scratch.dir, 'historical-alias');
+      fs.symlinkSync(historical, alias);
+      process.env.AGENTCTL_LIVE_CACHE = alias;
+      assert.throws(() => liveCacheRoot(), /historical shared sandbox/);
+      fs.unlinkSync(alias);
+      process.env.AGENTCTL_LIVE_CACHE = path.dirname(historical);
+      assert.throws(() => liveCacheRoot(), /historical shared sandbox/);
+    }
+    process.env.AGENTCTL_LIVE_CACHE = scratch.sub('confined');
+    const h = new Harness({ name: 'escape' }, REPO_ROOT);
+    const outside = scratch.sub('outside');
+    const sentinel = path.join(outside, 'sentinel'); fs.writeFileSync(sentinel, 'keep');
+    fs.symlinkSync(outside, h.root);
+    assert.throws(() => h.start(), /inside/);
+    assert.equal(fs.readFileSync(sentinel, 'utf8'), 'keep');
+    assert.deepEqual(fs.readdirSync(outside), ['sentinel']);
+  });
 });

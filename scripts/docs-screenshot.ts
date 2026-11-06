@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { defaultCacheRoot } from './live-harness.ts';
 import { captureBoard, captureChat, COLUMNS } from './demo-board.ts';
 import { FONT_STACK, parseAnsi, renderSvg } from './render-ansi.ts';
 import { boardTitle } from '../src/core/title.ts';
@@ -14,7 +15,7 @@ import { packageVersion } from '../src/core/version.ts';
  * Nothing real is touched: own tmux server, fake agents, own AGENTCTL_HOME under .cache/ (or AGENTCTL_LIVE_CACHE).
  */
 const root = path.resolve(import.meta.dirname, '..');
-const cache = process.env.AGENTCTL_LIVE_CACHE ?? path.join(root, '.cache', 'demo-board');
+const cache = defaultCacheRoot();
 fs.mkdirSync(cache, { recursive: true });
 
 const board = await captureBoard(cache);

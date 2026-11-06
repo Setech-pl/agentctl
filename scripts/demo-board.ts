@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { withHarness } from './live-harness.ts';
+import { withHarness, defaultCacheRoot } from './live-harness.ts';
 import type { Harness } from './live-harness.ts';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -526,9 +526,9 @@ export async function captureChat(cacheRoot: string): Promise<{ events: string; 
 if (import.meta.main) {
   const out = process.argv[2];
   if (!out) throw new Error('usage: demo-board.ts <out-dir>');
+  const cache = defaultCacheRoot();
   const dir = path.resolve(out);
   fs.mkdirSync(dir, { recursive: true });
-  const cache = process.env.AGENTCTL_LIVE_CACHE ?? path.resolve(import.meta.dirname, '../.cache/demo-board');
   const cap = { ...(await captureBoard(cache)), ...(await captureChat(cache)) };
   fs.writeFileSync(path.join(dir, 'board.ansi'), cap.ansi);
   fs.writeFileSync(path.join(dir, 'board.txt'), cap.plain);
