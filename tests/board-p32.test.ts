@@ -42,42 +42,60 @@ function archiveTask(config: ReturnType<typeof makeConfig>, task: string, extra:
 
 describe('p32: record scan cache', () => {
   it('parses each TASK.md once; an unchanged scan parses nothing again', async () => {
-    const config = makeConfig(scratch.sub('rc1'));
+    const root = scratch.sub('rc1');
+    const config = makeConfig(root);
     seedTask(config, 'RC-1');
     seedTask(config, 'RC-2');
     archiveTask(config, 'RC-3');
-    const first = await snapshotRecords(config);
-    assert.equal(first.parsed, 3);
-    assert.deepEqual(first.current.map((r) => r.task), ['RC-1', 'RC-2']);
-    assert.deepEqual(first.archived.map((r) => r.task), ['RC-3']);
-    assert.deepEqual(first.all.map((r) => r.task), ['RC-1', 'RC-2', 'RC-3']);
-    const second = await snapshotRecords(config);
-    assert.equal(second.parsed, 0, 'no TASK.md changed: nothing is read or parsed again');
-    assert.deepEqual(second.all.map((r) => r.task), ['RC-1', 'RC-2', 'RC-3']);
+    const counter = installFsCounter(root);
+    try {
+      const first = await snapshotRecords(config);
+      assert.equal(counter.snap().taskMdReads, 3);
+      assert.deepEqual(first.current.map((r) => r.task), ['RC-1', 'RC-2']);
+      assert.deepEqual(first.archived.map((r) => r.task), ['RC-3']);
+      assert.deepEqual(first.all.map((r) => r.task), ['RC-1', 'RC-2', 'RC-3']);
+      counter.reset();
+      const second = await snapshotRecords(config);
+      assert.equal(counter.snap().taskMdReads, 0, 'unchanged: no reads or parses');
+      assert.deepEqual(second.all.map((r) => r.task), ['RC-1', 'RC-2', 'RC-3']);
+    } finally { counter.restore(); }
   });
 
   it('re-parses only the TASK.md that changed, and drops removed tasks', async () => {
-    const config = makeConfig(scratch.sub('rc2'));
+    const root = scratch.sub('rc2');
+    const config = makeConfig(root);
     seedTask(config, 'RC-1');
     seedTask(config, 'RC-2');
-    const first = await snapshotRecords(config);
-    assert.equal(first.parsed, 2);
-    // A different size makes the change visible even inside one mtime tick.
-    const file = path.join(taskDir(config, 'rc-1'), 'TASK.md');
-    fs.appendFileSync(file, '\nmore prompt text\n');
-    const second = await snapshotRecords(config);
-    assert.equal(second.parsed, 1, 'only the appended TASK.md is read again');
-    fs.rmSync(taskDir(config, 'rc-2'), { recursive: true, force: true });
-    const third = await snapshotRecords(config);
-    assert.equal(third.parsed, 0);
-    assert.deepEqual(third.all.map((r) => r.task), ['RC-1'], 'the removed task leaves the snapshot');
+    const counter = installFsCounter(root);
+    try {
+      await snapshotRecords(config);
+      assert.equal(counter.snap().taskMdReads, 2);
+      const file = path.join(taskDir(config, 'rc-1'), 'TASK.md');
+      fs.appendFileSync(file, '\nmore prompt text\n');
+      counter.reset();
+      await snapshotRecords(config);
+      assert.equal(counter.snap().taskMdReads, 1, 'only the changed TASK.md is read');
+      fs.rmSync(taskDir(config, 'rc-2'), { recursive: true, force: true });
+      counter.reset();
+      const third = await snapshotRecords(config);
+      assert.equal(counter.snap().taskMdReads, 0);
+      assert.deepEqual(third.all.map((r) => r.task), ['RC-1']);
+    } finally { counter.restore(); }
   });
 
-  it('the scan says how much it parsed, per call', async () => {
-    const config = makeConfig(scratch.sub('rc3'));
+  it('F9: the production scan contains records only; counts stay in test instrumentation', async () => {
+    const root = scratch.sub('rc3');
+    const config = makeConfig(root);
     seedTask(config, 'RC-1');
-    assert.equal((await snapshotRecords(config)).parsed, 1);
-    assert.equal((await snapshotRecords(config)).parsed, 0, 'cached: no further parses');
+    const counter = installFsCounter(root);
+    try {
+      const first = await snapshotRecords(config);
+      assert.equal(Object.hasOwn(first, 'parsed'), false);
+      assert.equal(counter.snap().taskMdReads, 1);
+      counter.reset();
+      await snapshotRecords(config);
+      assert.equal(counter.snap().taskMdReads, 0);
+    } finally { counter.restore(); }
   });
 });
 

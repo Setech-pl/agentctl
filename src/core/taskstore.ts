@@ -356,13 +356,11 @@ export function listArchivedRecords(config: GlobalConfig): TaskRecord[] {
   return recordsIn(archiveDir(config));
 }
 
-/** One scan of both record stores, and what it had to do for it. */
+/** One scan of both record stores. */
 export interface RecordScan {
   current: TaskRecord[];
   archived: TaskRecord[];
   all: TaskRecord[];
-  /** TASK.md files read and parsed in this call; 0 when nothing changed since the last scan of the same home. */
-  parsed: number;
 }
 
 interface CachedRecordFile {
@@ -376,7 +374,7 @@ const recordScanCache = new Map<string, Map<string, CachedRecordFile>>();
 /** Yield every 25 folders so a long scan does not block the event loop (the board shares it with key handling). */
 const SCAN_CHUNK = 25;
 
-async function scanRecordsIn(dir: string): Promise<{ records: TaskRecord[]; parsed: number }> {
+async function scanRecordsIn(dir: string): Promise<TaskRecord[]> {
   let files = recordScanCache.get(dir);
   if (!files) {
     files = new Map();
@@ -391,7 +389,6 @@ async function scanRecordsIn(dir: string): Promise<{ records: TaskRecord[]; pars
   const prefix = `${dir}${path.sep}`;
   const seen = new Set<string>();
   const records: TaskRecord[] = [];
-  let parsed = 0;
   let done = 0;
   for (const name of names) {
     const file = path.join(dir, name, 'TASK.md');
@@ -415,14 +412,13 @@ async function scanRecordsIn(dir: string): Promise<{ records: TaskRecord[]; pars
           record = undefined;
         }
         files.set(file, { version, record });
-        parsed++;
         if (record) records.push(record);
       }
     }
     if (++done % SCAN_CHUNK === 0) await new Promise((resolve) => setImmediate(resolve));
   }
   for (const key of files.keys()) if (key.startsWith(prefix) && !seen.has(key)) files.delete(key);
-  return { records, parsed };
+  return records;
 }
 
 /**
@@ -433,7 +429,7 @@ async function scanRecordsIn(dir: string): Promise<{ records: TaskRecord[]; pars
 export async function snapshotRecords(config: GlobalConfig): Promise<RecordScan> {
   const current = await scanRecordsIn(config.stateDir);
   const archived = await scanRecordsIn(archiveDir(config));
-  return { current: current.records, archived: archived.records, all: [...current.records, ...archived.records], parsed: current.parsed + archived.parsed };
+  return { current, archived, all: [...current, ...archived] };
 }
 
 /** A task by its ID (any case), current first, else in the archive: one lookup for everything that needs "the record of that task". */

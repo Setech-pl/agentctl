@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- P32 F9: remove the production per-scan parse counter; tests count fixture file operations only.
+
 - P32 F6: expanding hidden/closed sections always requests a deep refresh, including when an active row remains selected or a shallow refresh is in flight.
 
 - P32 F5: an immediate watch refresh cancels a superseded trailing timer, preventing duplicate ticks under event-loop delay.
