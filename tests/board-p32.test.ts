@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { inspectReport, reportDigestStats } from '../src/core/report-state.ts';
+import { DISK_INTERVAL_MS } from '../src/core/disk.ts';
 import { collectStatus } from '../src/core/status.ts';
 import { archiveDir, readTaskRecord, renderTaskMd, snapshotRecords, taskDir, recordScanStats } from '../src/core/taskstore.ts';
 import type { TaskRecord } from '../src/core/taskstore.ts';
@@ -191,5 +192,22 @@ describe('p32: one usage reader per board process', () => {
     await loadBoard(ctx, null, new ProgressCache());
     const after = fs.existsSync(cacheFile) ? fs.statSync(cacheFile).mtimeMs : null;
     assert.equal(after, before, 'the second tick leaves the cache file untouched');
+  });
+});
+
+describe('p32: disk report off the tick', () => {
+  it('the disk report is re-collected on its own cadence, not on every tick', async () => {
+    const config = makeConfig(scratch.sub('dk1'));
+    seedTask(config, 'DK-1');
+    const { ctx, runner } = makeContext(config, { respond: new FakeTmux().respond });
+    const cache = new ProgressCache();
+    const first = await loadBoard(ctx, null, cache);
+    assert.ok(first.disk);
+    const second = await loadBoard(ctx, null, cache);
+    assert.equal(second.disk, first.disk, 'within the cadence the last report is kept');
+    await runner.sleep(DISK_INTERVAL_MS + 1);
+    const third = await loadBoard(ctx, null, cache);
+    assert.ok(third.disk);
+    assert.notEqual(third.disk, first.disk, 'after the cadence it is collected again');
   });
 });
