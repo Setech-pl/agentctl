@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- P32 F4: token collection uses the effective row and its shallow predicate, retaining tokens for live closed/cancelled tasks and current rows with archive duplicates.
+
 - P32 F3: current task repositories and worktrees take precedence over archive duplicates on the board.
 
 - P32 F2: TASK.md and report caches detect atomic replacement and equal-size rewrites with dev/inode and nanosecond mtime/ctime; coarse change times force a reread.

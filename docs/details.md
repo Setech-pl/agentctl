@@ -766,3 +766,5 @@ Report digest reuse always revalidates the current task owner, allowed roots and
 TASK.md and report cache versions include device, inode, size and nanosecond modification/change times. Coarse (millisecond-aligned) change times disable reuse; known header writes and report copies explicitly invalidate their entries.
 
 When a task ID exists in current state and the archive, board progress and worktrees use the current record.
+
+Live board rows always retain token details, even with closed/cancelled flags or an archived duplicate. Token collection skips only the same nonlive shallow rows that skip outputs and prompt queues.

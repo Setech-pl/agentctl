@@ -764,3 +764,5 @@ Ponowne użycie skrótu raportu zawsze sprawdza bieżącego właściciela zadani
 Wersje cache TASK.md i raportów obejmują urządzenie, inode, rozmiar oraz nanosekundowy czas modyfikacji i zmiany metadanych. Niska rozdzielczość czasu zmian (wyrównanie do milisekundy) wyłącza ponowne użycie; zapis nagłówka i kopiowanie raportu jawnie unieważniają wpisy.
 
 Jeśli identyfikator zadania istnieje w bieżącym stanie i archiwum, postęp oraz worktree na tablicy pochodzą z bieżącego rekordu.
+
+Żywe wiersze tablicy zawsze zachowują dane o tokenach, także z flagą zamknięcia/anulowania lub kopią w archiwum. Zbieranie tokenów pomija wyłącznie te same nieaktywne, skrócone wiersze, które pomijają wyniki i kolejki promptów.

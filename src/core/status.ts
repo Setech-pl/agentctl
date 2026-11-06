@@ -33,7 +33,7 @@ import type { AgentName } from './config.ts';
 import { taskTokenMap } from './usage.ts';
 import type { TaskTokens } from './usage.ts';
 import type { UsageReader } from './usage-sources.ts';
-import { allRecords, openReader } from './usage.ts';
+import { openReader } from './usage.ts';
 import { formatTokens } from './usage-parse.ts';
 
 export interface StatusRow {
@@ -174,6 +174,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     const current = new Set(records.map((r) => r.record.window));
     for (const record of scanned.archived) if (!current.has(record.window) && !live.has(record.window)) records.push({ record: { ...record }, archived: true });
   }
+  const tokenRecords: TaskRecord[] = [];
   let sinceYield = 0;
   for (const { record, archived } of records) {
     // The synchronous sections of this loop are long with hundreds of archived tasks; yield so keys interleave.
@@ -186,6 +187,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     // Closed, cancelled or archived and not live: the board only counts them (unless a section is expanded), so the
     // prompt queue, the outputs and the tokens are not collected for them. Everything that decides the state stays.
     const shallow = opts.shallowClosed === true && !alive && (archived || record.closed === true || record.cancelled === true);
+    if (opts.tokens && !shallow) tokenRecords.push(record);
     const startedMs = Date.parse(record.started);
     let reportMtime: number | undefined;
     try {
@@ -362,11 +364,6 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     });
   }
   if (opts.tokens) {
-    let tokenRecords = opts.records ? [...opts.records.current, ...opts.records.archived] : allRecords(config);
-    if (opts.shallowClosed) {
-      const archivedWindows = new Set((opts.records?.archived ?? []).map((r) => r.window));
-      tokenRecords = tokenRecords.filter((r) => r.closed !== true && r.cancelled !== true && !archivedWindows.has(r.window));
-    }
     const tokens = taskTokenMap(config, runner.now(), tokenRecords, opts.reader ?? openReader(config));
     for (const row of rows) row.tokens = tokens.get(row.task) ?? null;
   }
