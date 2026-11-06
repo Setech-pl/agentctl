@@ -768,3 +768,5 @@ TASK.md and report cache versions include device, inode, size and nanosecond mod
 When a task ID exists in current state and the archive, board progress and worktrees use the current record.
 
 Live board rows always retain token details, even with closed/cancelled flags or an archived duplicate. Token collection skips only the same nonlive shallow rows that skip outputs and prompt queues.
+
+Expanding hidden/closed sections with `a` requests full row details immediately, even if the active selection does not change; an in-flight refresh queues the deep follow-up.

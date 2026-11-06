@@ -402,7 +402,7 @@ function listKey(state: BoardState, input: string, key: KeyPress): KeyResult {
   }
   if (input === 'a') {
     const next = keepSelection({ ...state, notice: null, showHidden: !state.showHidden });
-    return stay(withNotice(next, 'info', next.showHidden ? 'Hidden tasks are listed too (dimmed). a hides them again.' : 'Hidden tasks are not listed.'), next.selected !== state.selected ? [{ type: 'refresh' }] : []);
+    return stay(withNotice(next, 'info', next.showHidden ? 'Hidden tasks are listed too (dimmed). a hides them again.' : 'Hidden tasks are not listed.'), next.showHidden || next.selected !== state.selected ? [{ type: 'refresh' }] : []);
   }
   if (input === 'r') return stay(withNotice(state, 'info', 'Collecting the new reports…'), [{ type: 'pull-ready' }]);
   if (input === 'k') {
