@@ -208,3 +208,10 @@ it('extends MCP provider fields only when Kimi is active', async () => {
     assert.equal(z.object(providerToolInput(tool, w.config)).safeParse({ kimi: 2 }).success, true);
   }
 });
+
+it('R2 N4: an error below the last ready line still awaits input', () => {
+  const screen = fixture('synthetic-error-after-ready');
+  assert.equal(classifyScreen(screen, settings), 'needs-input');
+  assert.equal(taskState({ alive: true, screen, settings, reportReady: true }), 'needs-input');
+  assert.equal(classifyScreen(fixture('synthetic-relogin-idle'), settings), 'idle');
+});

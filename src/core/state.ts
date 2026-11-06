@@ -32,12 +32,13 @@ const RESUMED_AFTER_ERROR = /^\s*(?:❯|✓|●\s+(?!Error:))/;
  */
 function errorAwaitingInput(screen: string, readyPattern: string | undefined): boolean {
   const lines = screen.split('\n');
-  let end = lines.length;
-  if (readyPattern) for (let i = lines.length - 1; i >= 0; i--) if (matches(readyPattern, lines[i]!)) { end = i; break; }
   let error = -1;
-  for (let i = end - 1; i >= 0; i--) if (ERROR_BANNER.test(lines[i]!)) { error = i; break; }
+  for (let i = lines.length - 1; i >= 0; i--) if (ERROR_BANNER.test(lines[i]!)) { error = i; break; }
   if (error < 0) return false;
-  for (let i = error + 1; i < end; i++) if (RESUMED_AFTER_ERROR.test(lines[i]!)) return false;
+  for (let i = error + 1; i < lines.length; i++) {
+    if (readyPattern && matches(readyPattern, lines[i]!)) continue;
+    if (RESUMED_AFTER_ERROR.test(lines[i]!)) return false;
+  }
   return true;
 }
 
