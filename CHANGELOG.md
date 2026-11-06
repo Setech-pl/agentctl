@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- P43 validation: mark cohort journal fixtures as historical closed tasks so the filter test does not create unrelated loss events. Test filtrowania kohort używa zamkniętych zadań historycznych.
+
 - Document dedicated dev tmux servers and migration/recovery in English and Polish, with exact session targets and copyable shell commands. Dokumentacja EN/PL osobnego serwera dev, migracji i odzyskiwania zadań.
 
 - P43: lost tmux tasks remain visible as needs-attention with one durable loss event and recovery guidance; Claude SessionStart saves the conversation ID before the first prompt. Utracone zadania pozostają widoczne ze wskazówką odzyskania; identyfikator sesji Claude zapisujemy przy starcie.
