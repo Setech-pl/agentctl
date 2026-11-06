@@ -477,6 +477,9 @@ Play a notification sound when a background task finishes.
 | `cohort` | nie | Nazwa grupy, do której należy zadanie (`--cohort` przy `new` i `queue` ją nadpisuje). Bez niej zadanie nie należy do żadnej kohorty. |
 | `report` | nie | Gdzie agent zapisuje raport (domyślnie `<cache>/<task>/<TASK>.md`). |
 
+Podgląd odrzuca linki wskazujące na siebie oraz link wewnątrz jego celu lub cel wewnątrz linku, także po rozwiązaniu symlinków w ścieżce. Brak bezwzględnej ścieżki `links.from` powoduje ostrzeżenie; `from` musi pozostać wewnątrz głównego worktree.
+
+
 W ścieżkach działają placeholdery `{task}`, `{TASK}` i `{cache}`. Wszystkie klucze, typy i wartości domyślne: [docs/configuration.md](docs/configuration.md#spec-keys) (po angielsku). Błędy są zgłaszane wszystkie naraz, zwykłymi słowami, z podpowiedzią.
 
 ## Konfiguracja

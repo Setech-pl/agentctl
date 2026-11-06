@@ -479,6 +479,9 @@ Play a notification sound when a background task finishes.
 | `cohort` | no | Name of the group the task belongs to (`--cohort` on `new` and `queue` overrides it). Without it the task is in no cohort. |
 | `report` | no | Where the agent writes its report (default `<cache>/<task>/<TASK>.md`). |
 
+Links that point to themselves or place a link inside its target (or its target inside the link) are rejected during preview, including paths resolved through symlink parents. A missing absolute `links.from` path produces a warning; `from` must stay inside the primary worktree.
+
+
 `{task}`, `{TASK}` and `{cache}` work as placeholders in paths. All keys, types and defaults: [docs/configuration.md](docs/configuration.md#spec-keys). Mistakes are reported all at once, in plain words, with a hint.
 
 ## Configuration
