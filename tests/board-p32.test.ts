@@ -6,6 +6,8 @@ import { inspectReport, reportDigestStats } from '../src/core/report-state.ts';
 import { collectStatus } from '../src/core/status.ts';
 import { archiveDir, readTaskRecord, renderTaskMd, snapshotRecords, taskDir, recordScanStats } from '../src/core/taskstore.ts';
 import type { TaskRecord } from '../src/core/taskstore.ts';
+import { sharedReader } from '../src/core/usage.ts';
+import { loadBoard, ProgressCache } from '../src/core/board.ts';
 import { FakeTmux, makeConfig, makeContext, seedTask, useScratch } from './helpers.ts';
 
 const scratch = useScratch();
@@ -156,5 +158,38 @@ describe('p32: cheap rows for closed tasks', () => {
     assert.equal(row.window, 'alive');
     assert.equal(row.promptQueue?.length, 1);
     assert.ok(row.outputs);
+  });
+});
+
+describe('p32: one usage reader per board process', () => {
+  it('sharedReader is one instance per agentctl home', () => {
+    const one = makeConfig(scratch.sub('ur1'));
+    const two = makeConfig(scratch.sub('ur2'));
+    assert.equal(sharedReader(one), sharedReader(one), 'same home: the same reader');
+    assert.notEqual(sharedReader(one), sharedReader(two), 'another home: another reader');
+  });
+
+  it('a long-lived reader still sees new session logs after dropListings', () => {
+    const config = makeConfig(scratch.sub('ur3'));
+    const reader = sharedReader(config);
+    const dir = scratch.sub('ur3/logs');
+    fs.writeFileSync(path.join(dir, 'a.jsonl'), '{}\n');
+    assert.deepEqual(reader.list(dir, '.jsonl'), ['a.jsonl']);
+    fs.writeFileSync(path.join(dir, 'b.jsonl'), '{}\n');
+    assert.deepEqual(reader.list(dir, '.jsonl'), ['a.jsonl'], 'listings are cached within a tick');
+    reader.dropListings();
+    assert.deepEqual(reader.list(dir, '.jsonl'), ['a.jsonl', 'b.jsonl'], 'the next tick lists again');
+  });
+
+  it('a tick that read nothing new does not rewrite usage-cache.json', async () => {
+    const config = makeConfig(scratch.sub('ur4'));
+    seedTask(config, 'UR-1');
+    const { ctx } = makeContext(config, { respond: new FakeTmux().respond });
+    const cacheFile = path.join(path.dirname(config.path), 'usage-cache.json');
+    await loadBoard(ctx, null, new ProgressCache());
+    const before = fs.existsSync(cacheFile) ? fs.statSync(cacheFile).mtimeMs : null;
+    await loadBoard(ctx, null, new ProgressCache());
+    const after = fs.existsSync(cacheFile) ? fs.statSync(cacheFile).mtimeMs : null;
+    assert.equal(after, before, 'the second tick leaves the cache file untouched');
   });
 });

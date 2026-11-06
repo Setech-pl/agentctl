@@ -91,6 +91,11 @@ export class UsageReader {
     }
   }
 
+  /** Forget the cached directory listings: a long-lived reader (the board) calls this once per tick so new session logs show up. */
+  dropListings(): void {
+    this.listings.clear();
+  }
+
   /** Names in a directory (files only when `ext` is given), cached for this run; empty when it is not there. */
   list(dir: string, ext?: string): string[] {
     const key = `${dir}|${ext ?? ''}`;

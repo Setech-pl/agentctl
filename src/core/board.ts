@@ -38,7 +38,7 @@ import type { StatusRow } from './status.ts';
 import { snapshotRecords } from './taskstore.ts';
 import { logLines, markTask } from './history.ts';
 import type { Result } from './history.ts';
-import { openReader, readPlans } from './usage.ts';
+import { readPlans, sharedReader } from './usage.ts';
 import type { PlanState } from './usage.ts';
 import { formatTokens } from './usage-parse.ts';
 import { formatReset } from './usage.ts';
@@ -656,10 +656,11 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
   const { runner, config } = ctx;
   // One scan of the record stores per tick (cached: unchanged TASK.md files are not read again), shared by every consumer.
   const scan = await snapshotRecords(config);
-  const statusRows = await collectStatus(ctx, { progress: false, archived: true, tokens: true, records: scan, shallowClosed: opts.deepClosed !== true });
+  const reader = sharedReader(config);
+  reader.dropListings(); // directory listings are per tick, the parsed cache persists
+  const statusRows = await collectStatus(ctx, { progress: false, archived: true, tokens: true, records: scan, reader, shallowClosed: opts.deepClosed !== true });
   const records = new Map(scan.all.map((r) => [r.task, r]));
   const now = runner.now();
-  const reader = openReader(config);
   const plans = readPlans(config, reader, now, scan.all);
   const disk = await collectDisk(ctx, fs.promises.statfs, { records: scan.all });
   reader.save();

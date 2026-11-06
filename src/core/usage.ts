@@ -230,6 +230,23 @@ export const allRecords = (config: GlobalConfig): TaskRecord[] => [...listTaskRe
 /** A reader on the cache of this agentctl home. */
 export const openReader = (config: GlobalConfig): UsageReader => new UsageReader(cachePath(config));
 
+/** One reader per agentctl home for the long-lived board process: the (large) usage cache file is parsed once, not per tick. */
+const sharedReaders = new Map<string, UsageReader>();
+
+/**
+ * The board's reader. One-shot commands use openReader (a fresh reader each run); the board shares one so the usage cache
+ * is read at startup and `save()` writes only when a tick actually read new bytes (it already checks the dirty flag).
+ */
+export function sharedReader(config: GlobalConfig): UsageReader {
+  const key = cachePath(config);
+  let reader = sharedReaders.get(key);
+  if (!reader) {
+    reader = openReader(config);
+    sharedReaders.set(key, reader);
+  }
+  return reader;
+}
+
 export interface TaskTokens {
   observed?: TaskUsage['observed'];
   /** input + output + cache writes: the number shown as TOKENS. */
