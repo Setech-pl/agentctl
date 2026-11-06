@@ -988,3 +988,9 @@ With three active providers, `move TASK` requires `--agent` and lists free slots
 Kimi 2.5.0 effective model/effort comes from passive `llm.request.modelAlias/thinkingEffort`, recorded beside requested settings in TASK.md and status JSON. The footer can retain `high` while the effective wire effort is `low`; a wire mismatch warns. Sessions bind via `sessions/<workspace>/<session>/state.json` (session index fallback); `usage.record` supplies input/output/cache tokens and numeric `time`.
 
 Claude plan capacity can optionally refresh without an active task: set `capacity.claude_usage_probe: true` (default off). `capacity` and `usage` run a neutral, isolated `/usage` probe at most every 15 minutes, with no prompt/model tokens and no task-window interaction. `capacity.claude_usage_probe_interval_minutes` can increase that interval. Folder trust/login is a one-time manual wait for Marcin; agentctl never answers dialogs. See [configuration](docs/configuration.md#claude-plan-usage-probe) for sources, staleness and parser limits.
+
+Machine awareness: `capacity` (also JSON) and `status --detail` show load averages
+for 1/5/15 minutes and free memory in bytes. `capacity.load_threshold` sets the
+1-minute load warning threshold (default: 3 × logical CPUs). Watch records one
+`machine-load-high` event when exceeded and `machine-load-recovered` on return;
+these observations do not block task starts.

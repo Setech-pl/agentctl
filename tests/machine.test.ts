@@ -1,0 +1,20 @@
+import assert from 'node:assert/strict';
+import { it } from 'node:test';
+import { collectMachine, recordMachineLoad, machineLine } from '../src/core/machine.ts';
+import { Context } from '../src/core/context.ts';
+import { readJournal } from '../src/core/journal.ts';
+import { DiskRunner, makeConfig, useScratch } from './helpers.ts';
+const scratch = useScratch();
+it('machine metrics and threshold transitions persist and deduplicate across reads', async () => {
+  const config = makeConfig(scratch.sub('machine'), 'capacity: {load_threshold: 6}\n');
+  const ctx = new Context(new DiskRunner({dryRun: false}), config, () => {});
+  const sample = collectMachine(config, {loadavg: () => [7, 4, 2], freemem: () => 1024, cpus: () => Array(2)});
+  assert.equal(sample.threshold, 6); assert.deepEqual(sample.loadAverage, [7, 4, 2]); assert.equal(sample.freeMemoryBytes, 1024);
+  assert.match(machineLine(sample), /7.*4.*2.*free memory/);
+  await recordMachineLoad(ctx, {...sample, overloaded: false});
+  await recordMachineLoad(ctx, sample); await recordMachineLoad(ctx, sample);
+  await recordMachineLoad(ctx, {...sample, overloaded: false});
+  assert.deepEqual(readJournal(config).filter(e => e.kind.startsWith('machine-load')).map(e => e.kind), ['machine-load-high', 'machine-load-recovered']);
+  assert.equal(collectMachine(makeConfig(scratch.sub('default')), {loadavg: () => [6, 0, 0], freemem: () => 1, cpus: () => Array(2)}).threshold, 6);
+  assert.throws(() => makeConfig(scratch.sub('bad'), 'capacity: {load_threshold: -1}\n'), /load_threshold/);
+});

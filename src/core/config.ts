@@ -147,7 +147,7 @@ export interface GlobalConfig extends Layer {
   guideLang: 'en' | 'pl';
   disk: { warnGb: number; criticalGb: number; workers: number; measurementTimeoutS: number };
   git: { timeoutS: number };
-  capacity: { snapshot: boolean; staleMinutes: number; sampleLimit: number; thresholds: number[]; codexRefresh: boolean; claudeUsageProbe: boolean; claudeUsageProbeIntervalMinutes: number; kimiUsageProbe?: boolean; kimiUsageProbeModel?: string };
+  capacity: { loadThreshold?: number; snapshot: boolean; staleMinutes: number; sampleLimit: number; thresholds: number[]; codexRefresh: boolean; claudeUsageProbe: boolean; claudeUsageProbeIntervalMinutes: number; kimiUsageProbe?: boolean; kimiUsageProbeModel?: string };
   /** Set by a long-running process (watch, MCP) when the file on disk does not load and the previous settings stay in force. */
   reloadWarning?: string;
   /** Where the config was (or would be) read from. */
@@ -1053,7 +1053,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
         if (typeof raw.capacity.kimi_usage_probe_model === 'string' && /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(raw.capacity.kimi_usage_probe_model)) Object.assign(capacity, { kimiUsageProbeModel: raw.capacity.kimi_usage_probe_model });
         else p.add('config.capacity.kimi_usage_probe_model must be a model alias or default');
       }
-      checkKeys(raw.capacity, ['snapshot', 'stale_minutes', 'sample_limit', 'thresholds', 'codex_refresh', 'kimi_usage_probe', 'kimi_usage_probe_model', 'claude_usage_probe', 'claude_usage_probe_interval_minutes'], 'config.capacity', p);
+      checkKeys(raw.capacity, ['load_threshold', 'snapshot', 'stale_minutes', 'sample_limit', 'thresholds', 'codex_refresh', 'kimi_usage_probe', 'kimi_usage_probe_model', 'claude_usage_probe', 'claude_usage_probe_interval_minutes'], 'config.capacity', p);
       for (const [key, field] of [['snapshot', 'snapshot'], ['codex_refresh', 'codexRefresh'], ['claude_usage_probe', 'claudeUsageProbe']] as const) {
         if (typeof raw.capacity[key] === 'boolean') capacity[field] = raw.capacity[key];
         else if (raw.capacity[key] !== undefined) p.add(`config.capacity.${key} must be boolean`);
@@ -1062,6 +1062,10 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
         const value = raw.capacity[key];
         if (typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max) capacity[field] = value;
         else if (value !== undefined) p.add(`config.capacity.${key} must be an integer from ${min} to ${max}`);
+      }
+      if (raw.capacity.load_threshold !== undefined) {
+        if (typeof raw.capacity.load_threshold === 'number' && Number.isFinite(raw.capacity.load_threshold) && raw.capacity.load_threshold > 0) Object.assign(capacity, { loadThreshold: raw.capacity.load_threshold });
+        else p.add('config.capacity.load_threshold must be positive');
       }
       if (raw.capacity.thresholds !== undefined) {
         if (Array.isArray(raw.capacity.thresholds) && raw.capacity.thresholds.length <= 20 && raw.capacity.thresholds.every((x) => typeof x === 'number' && x > 0 && x <= 100)) capacity.thresholds = [...new Set(raw.capacity.thresholds as number[])].sort((a, b) => a - b);

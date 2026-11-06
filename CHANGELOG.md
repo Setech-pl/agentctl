@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Show machine load/free memory in capacity and status detail; record configurable load threshold crossings.
+
 - P32 F8: regression coverage sends real Ink/stdin arrow keys on populated rows independently during record scanning and status collection, and checks selection/preview effects without latency thresholds.
 
 - P32 F7: all board refresh sources cancel the old deadline and re-arm only after the shared load completes, including failures; exit cancels pending refreshes.
@@ -195,6 +197,8 @@ Versions 0.1.0 to 0.7.0 correspond to pull requests #1 to #7; their dates are th
 - Keep phone and manager live suites separate; add collapsed-question live checks through the isolated harness.
 
 ## [Unreleased]
+
+- Show machine load/free memory in capacity and status detail; record configurable load threshold crossings.
 
 - Claude `/usage` probe is opt-in (`capacity.claude_usage_probe: true`); it reads plan windows in an isolated neutral session and never starts automatically by default.
 - `dataset export` streams a read-only benchmark dataset as JSONL or CSV, with attempt identities, provenance and explicit redacted prompt/report content opt-ins.

@@ -988,3 +988,9 @@ Przy trzech aktywnych dostawcach `move TASK` wymaga `--agent`; komunikat podaje 
 Rzeczywisty model/effort Kimi 2.5.0 pochodzi z pasywnego `llm.request.modelAlias/thinkingEffort`, obok zamówienia w TASK.md i status JSON. Stopka może pokazywać `high`, gdy wire potwierdza `low`; rozbieżność z zamówieniem daje ostrzeżenie. Sesje wiążemy przez `state.json` i indeks sesji; tokeny pochodzą z `usage.record`.
 
 Capacity planu Claude może opcjonalnie odświeżać się bez aktywnego zadania: ustaw `capacity.claude_usage_probe: true` (domyślnie wyłączone). `capacity` i `usage` uruchamiają `/usage` w neutralnej, osobnej sesji najwyżej co 15 minut, bez promptu, tokenów modelu i dotykania okien zadań. `capacity.claude_usage_probe_interval_minutes` pozwala wydłużyć odstęp. Trust/login katalogu wymaga jednorazowej ręcznej akcji Marcina; agentctl nigdy nie odpowiada na dialogi. Szczegóły źródeł, nieaktualności i ograniczeń parsera: [configuration](docs/configuration.md#claude-plan-usage-probe).
+
+Obciążenie maszyny: `capacity` (również JSON) i `status --detail` pokazują średnie
+obciążenie z 1/5/15 minut oraz wolną pamięć w bajtach. `capacity.load_threshold`
+ustawia próg dla 1 minuty (domyślnie 3 × liczba logicznych CPU). Watch zapisuje
+zdarzenia `machine-load-high` i `machine-load-recovered` przy przekroczeniu progu
+i powrocie. Odczyty nie blokują uruchamiania zadań.
