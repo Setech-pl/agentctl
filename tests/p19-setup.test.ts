@@ -161,20 +161,29 @@ describe('P19: MCP new with setup is handed to the watcher', () => {
     assert.match(text(preview), /WARNING: .*watcher is not running/);
     const refused = await e.call('new', { spec: e.spec('LONE-1'), confirm: true });
     assert.equal(refused.isError, true);
-    assert.match(text(refused), /watcher that would run it is not running[\s\S]*Nothing was started[\s\S]*agentctl watch --tmux/);
+    assert.match(text(refused), /every start goes through the watcher .* it is not running[\s\S]*Nothing was started[\s\S]*agentctl watch --tmux/);
     assert.deepEqual(readQueue(e.config), []);
     assert.deepEqual(e.runner.worktrees, []);
     assert.deepEqual(kinds(e.config), []);
   });
 
-  it('a start without setup stays in place: Started, window, no entry', async () => {
+  it('a start without setup is also handed to the watcher: Registered, then the watcher opens the window', async () => {
     const e = environment('nosetup', 'true');
     for (const r of e.repos) fs.writeFileSync(path.join(r, '.agentctl.yaml'), 'env: {X: "1"}\n');
+    await e.tick(); // the watcher is there (its tick leaves a heartbeat)
     const preview = await e.call('new', { spec: e.spec('PLAIN-1') });
     assert.ok(!preview.isError, text(preview));
+    assert.match(text(preview), /Start: asynchronous/);
     const done = await e.call('new', { spec: e.spec('PLAIN-1'), confirm: true });
-    assert.match(text(done), /^Started: PLAIN-1/);
+    assert.match(text(done), /^Registered: PLAIN-1/);
+    assert.equal(readTaskRecord(e.config, 'plain-1'), undefined, 'no TASK.md yet: the watcher has not begun');
+    const [entry] = readQueue(e.config);
+    assert.deepEqual([entry?.task, entry?.status, entry?.direct], ['PLAIN-1', 'queued', true]);
+    await e.tick();
+    assert.ok(readTaskRecord(e.config, 'plain-1'), 'the watcher started it');
+    assert.ok(e.tmux.windows.some((w) => w.name === 'plain-1'), 'the window exists');
     assert.deepEqual(readQueue(e.config), []);
+    assert.ok(kinds(e.config).includes('queue-start'));
   });
 
   it('a repeated new, with the token or without, while the start is in progress reports its state and starts nothing twice', async () => {

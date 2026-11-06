@@ -38,12 +38,14 @@ export const codex: ProviderAdapter = {
       ? 'effort: via -c model_reasoning_effort=<effort>'
       : 'effort: no -c/--config flag in this version; set agents.codex.effort_args: [] (the prompt header still carries the effort)';
     add('codex', 'ok', `${d.raw}; ${effort}`);
+    if (d.features.config) add('codex', 'ok', 'startup update check: disabled for task windows (-c check_for_update_on_startup=false); the "Update available" dialog is reported as needs-input and never answered by agentctl');
     return lines;
   },
   argv(spec, settings, extra) {
   const hasModel = spec.model !== 'default';
   const effortArgs = settings.effortArgs.map((a) => a.replaceAll('{effort}', spec.effort));
-  return ['codex', '--sandbox', 'danger-full-access', ...(hasModel ? ['-m', spec.model] : []), ...effortArgs, ...settings.flags, ...extra];
+  // The "Update available" modal blocks the input prompt of a fresh window; the key is inert on Codex versions that lack it (no --strict-config). User flags come last: a deliberate override wins.
+  return ['codex', '--sandbox', 'danger-full-access', ...(hasModel ? ['-m', spec.model] : []), ...effortArgs, '-c', 'check_for_update_on_startup=false', ...settings.flags, ...extra];
   },
   launchEnv: () => ({}),
   resumeArgv(order, settings, extra, sessionId) { const [cmd, ...rest] = this.argv(order, settings, extra) as [string, ...string[]]; return [cmd, 'resume', ...(sessionId ? [sessionId] : ['--last']), ...rest]; },

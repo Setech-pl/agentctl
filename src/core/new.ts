@@ -228,6 +228,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
       emptyInput: true,
       structuralComposer: !provider(spec.agent).screen.stablePaste,
       trustPattern: remote ? `${settings.trustPattern}|${RC_CONFIRM}` : settings.trustPattern,
+      ...(settings.dialogPattern ? { dialogPattern: settings.dialogPattern } : {}),
       timeoutMs: settings.readyTimeout * 1000,
       ...(opts.signal ? { signal: opts.signal } : {}),
       ...(waitTrust
@@ -261,6 +262,15 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
       throw new AgentctlError(
         `${spec.task}: agent waits for ${dialog} – attach: ${attachHint(config)}, confirm, then agentctl status`,
         `agentctl never answers that dialog. The prompt was not sent; once the agent shows its input, watch will automatically deliver it once ready: ${sendHint}`,
+      );
+    }
+    if (ready.dialog) {
+      const which = spec.agent === 'codex' ? ' ("Update available": choose "Skip until next version")' : '';
+      await setHeaderFields(runner, taskFile(config, spec.window), { prompt_delivery: 'needs-attention', prompt_error: `${spec.agent} shows a startup dialog${which}; original prompt remains in TASK.md` });
+      throw new AgentctlError(
+        `${spec.task}: ${spec.agent} shows a startup dialog${which} – attach: ${attachHint(config)}, answer it in window ${spec.window}`,
+        `agentctl never answers that dialog. The window stays open and the prompt was not sent; once the agent shows its input, watch will automatically deliver it once ready: ${sendHint}. ` +
+          (spec.agent === 'codex' ? 'Task windows start with the startup update check disabled (-c check_for_update_on_startup=false), so a current Codex does not show it.' : ''),
       );
     }
     if (!ready.ready) {

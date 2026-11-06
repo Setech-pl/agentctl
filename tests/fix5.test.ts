@@ -162,7 +162,7 @@ describe('FIX5 E1: the dim suggestion of Claude Code is not a draft; text somebo
   });
 });
 
-describe('FIX5 E3: events_since with HH:MM is a moment of today, local time', () => {
+describe('FIX5 E3 + P37: events_since with HH:MM is the most recent past occurrence, local time', () => {
   const at = (h: number, m: number, s = 0) => new Date(2026, 10, 4, h, m, s).getTime();
   const journalAt = (f: ReturnType<typeof fixture>, entries: [number, string][]) => {
     fs.writeFileSync(path.join(path.dirname(f.config.path), 'journal.jsonl'), entries.map(([ms, text]) => JSON.stringify({ at: new Date(ms).toISOString(), kind: 'queue-start', text })).join('\n') + '\n');
@@ -178,15 +178,17 @@ describe('FIX5 E3: events_since with HH:MM is a moment of today, local time', ()
     assert.deepEqual(report.events.map(e => e.text), ['inside', 'later']);
     assert.equal(report.has_more, false); assert.equal(report.note, undefined);
   });
-  it('a minute that has not come yet gives an empty list with a note, never the last 24 hours', async () => {
+  it('a minute that has not come yet means yesterday at that minute (P37), never an empty list with a note', async () => {
     const report = await run(at(19, 21, 40), '19:22', old);
-    assert.deepEqual(report.events, []); assert.match(report.note ?? '', /w przyszłości/); assert.equal(report.has_more, false);
+    assert.deepEqual(report.events.map(e => e.text), ['morning', 'before', 'inside', 'later'], 'all of today is after yesterday 19:22');
+    assert.equal(report.note, undefined); assert.equal(report.sinceLabel, 'od 19:22 (wczoraj)'); assert.equal(report.has_more, false);
   });
-  it('midnight: 00:00 at 00:00:30 is today since 00:00:00; 23:59 is later today and has no events yet', async () => {
+  it('midnight: 00:00 at 00:00:30 is today since 00:00:00; 23:59 is yesterday evening (P37)', async () => {
     const entries: [number, string][] = [[new Date(2026, 10, 3, 23, 59, 50).getTime(), 'yesterday'], [at(0, 0, 10), 'just after midnight']];
     assert.deepEqual((await run(at(0, 0, 30), '00:00', entries)).events.map(e => e.text), ['just after midnight']);
-    const future = await run(at(0, 0, 30), '23:59', entries);
-    assert.deepEqual(future.events, []); assert.match(future.note ?? '', /w przyszłości/);
+    const yesterday = await run(at(0, 0, 30), '23:59', entries);
+    assert.deepEqual(yesterday.events.map(e => e.text), ['yesterday', 'just after midnight']);
+    assert.equal(yesterday.note, undefined); assert.equal(yesterday.sinceLabel, 'od 23:59 (wczoraj)');
   });
 });
 

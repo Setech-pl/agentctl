@@ -671,7 +671,7 @@ agentctl events [options]
 
 | Option | Meaning | Notes |
 |---|---|---|
-| `--since <time>` | last (default: since this client looked), an age (30m, 2h, 1d), HH:MM or an ISO time |  |
+| `--since <time>` | last (default: since this client looked), an age (30m, 2h, 1d), HH:MM (the latest past occurrence; still ahead today means yesterday) or an ISO time |  |
 | `--cohort <name>` | only the events and tasks of this cohort |  |
 | `--keep` | do not move the "last" marker of the cli client |  |
 | `--json` | machine-readable output |  |

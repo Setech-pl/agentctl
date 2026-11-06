@@ -1739,6 +1739,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=low",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "resume": [
@@ -1749,6 +1751,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=low",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "session": [
@@ -1759,6 +1763,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=low",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ]
     },
@@ -1780,6 +1786,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=low",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -1792,6 +1800,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=low",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -1804,6 +1814,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=low",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -1824,6 +1836,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=low",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "resume": [
@@ -1834,6 +1848,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=low",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "session": [
@@ -1844,6 +1860,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=low",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ]
     },
@@ -1865,6 +1883,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=low",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -1877,6 +1897,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=low",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -1889,6 +1911,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=low",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -1909,6 +1933,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=medium",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "resume": [
@@ -1919,6 +1945,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=medium",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "session": [
@@ -1929,6 +1957,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=medium",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ]
     },
@@ -1950,6 +1980,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=medium",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -1962,6 +1994,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=medium",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -1974,6 +2008,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=medium",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -1994,6 +2030,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=medium",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "resume": [
@@ -2004,6 +2042,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=medium",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "session": [
@@ -2014,6 +2054,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=medium",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ]
     },
@@ -2035,6 +2077,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=medium",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -2047,6 +2091,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=medium",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -2059,6 +2105,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=medium",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -2079,6 +2127,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=high",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "resume": [
@@ -2089,6 +2139,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=high",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "session": [
@@ -2099,6 +2151,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=high",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ]
     },
@@ -2120,6 +2174,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=high",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -2132,6 +2188,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=high",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -2144,6 +2202,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=high",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -2164,6 +2224,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=high",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "resume": [
@@ -2174,6 +2236,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=high",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "session": [
@@ -2184,6 +2248,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=high",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ]
     },
@@ -2205,6 +2271,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=high",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -2217,6 +2285,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=high",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -2229,6 +2299,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=high",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -2249,6 +2321,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=xhigh",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "resume": [
@@ -2259,6 +2333,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=xhigh",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "session": [
@@ -2269,6 +2345,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=xhigh",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ]
     },
@@ -2290,6 +2368,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=xhigh",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -2302,6 +2382,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=xhigh",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -2314,6 +2396,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=xhigh",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -2334,6 +2418,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=xhigh",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "resume": [
@@ -2344,6 +2430,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=xhigh",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "session": [
@@ -2354,6 +2442,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=xhigh",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ]
     },
@@ -2375,6 +2465,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=xhigh",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -2387,6 +2479,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=xhigh",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -2399,6 +2493,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=xhigh",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -2419,6 +2515,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=max",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "resume": [
@@ -2429,6 +2527,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=max",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "session": [
@@ -2439,6 +2539,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=max",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ]
     },
@@ -2460,6 +2562,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=max",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -2472,6 +2576,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=max",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -2484,6 +2590,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=max",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -2504,6 +2612,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=max",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "resume": [
@@ -2514,6 +2624,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=max",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "session": [
@@ -2524,6 +2636,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=max",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ]
     },
@@ -2545,6 +2659,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=max",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -2557,6 +2673,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=max",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -2569,6 +2687,8 @@ const GOLDEN = {
         "danger-full-access",
         "-c",
         "model_reasoning_effort=max",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -2591,6 +2711,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=low",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "resume": [
@@ -2603,6 +2725,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=low",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "session": [
@@ -2615,6 +2739,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=low",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ]
     },
@@ -2638,6 +2764,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=low",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -2652,6 +2780,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=low",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -2666,6 +2796,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=low",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -2688,6 +2820,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=low",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "resume": [
@@ -2700,6 +2834,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=low",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "session": [
@@ -2712,6 +2848,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=low",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ]
     },
@@ -2735,6 +2873,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=low",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -2749,6 +2889,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=low",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -2763,6 +2905,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=low",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -2785,6 +2929,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=medium",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "resume": [
@@ -2797,6 +2943,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=medium",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "session": [
@@ -2809,6 +2957,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=medium",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ]
     },
@@ -2832,6 +2982,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=medium",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -2846,6 +2998,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=medium",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -2860,6 +3014,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=medium",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -2882,6 +3038,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=medium",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "resume": [
@@ -2894,6 +3052,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=medium",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "session": [
@@ -2906,6 +3066,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=medium",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ]
     },
@@ -2929,6 +3091,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=medium",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -2943,6 +3107,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=medium",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -2957,6 +3123,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=medium",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -2979,6 +3147,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=high",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "resume": [
@@ -2991,6 +3161,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=high",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "session": [
@@ -3003,6 +3175,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=high",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ]
     },
@@ -3026,6 +3200,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=high",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -3040,6 +3216,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=high",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -3054,6 +3232,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=high",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -3076,6 +3256,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=high",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "resume": [
@@ -3088,6 +3270,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=high",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "session": [
@@ -3100,6 +3284,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=high",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ]
     },
@@ -3123,6 +3309,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=high",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -3137,6 +3325,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=high",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -3151,6 +3341,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=high",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -3173,6 +3365,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=xhigh",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "resume": [
@@ -3185,6 +3379,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=xhigh",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "session": [
@@ -3197,6 +3393,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=xhigh",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ]
     },
@@ -3220,6 +3418,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=xhigh",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -3234,6 +3434,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=xhigh",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -3248,6 +3450,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=xhigh",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -3270,6 +3474,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=xhigh",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "resume": [
@@ -3282,6 +3488,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=xhigh",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "session": [
@@ -3294,6 +3502,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=xhigh",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ]
     },
@@ -3317,6 +3527,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=xhigh",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -3331,6 +3543,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=xhigh",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -3345,6 +3559,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=xhigh",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -3367,6 +3583,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=max",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "resume": [
@@ -3379,6 +3597,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=max",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "session": [
@@ -3391,6 +3611,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=max",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ]
     },
@@ -3414,6 +3636,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=max",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -3428,6 +3652,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=max",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -3442,6 +3668,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=max",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -3464,6 +3692,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=max",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "resume": [
@@ -3476,6 +3706,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=max",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ],
       "session": [
@@ -3488,6 +3720,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=max",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag"
       ]
     },
@@ -3511,6 +3745,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=max",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -3525,6 +3761,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=max",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -3539,6 +3777,8 @@ const GOLDEN = {
         "gpt-6-astra",
         "-c",
         "model_reasoning_effort=max",
+        "-c",
+        "check_for_update_on_startup=false",
         "--fixture-flag",
         "--fixture",
         "value with spaces"
@@ -3603,7 +3843,7 @@ const GOLDEN = {
       "note": "events: Codex notify -> agentctl event (then your own notify)"
     }
   ],
-  "settings": "{\"claude\":{\"acceptsBusyPrompt\":true,\"flags\":[],\"effortArgs\":[\"--effort\",\"{effort}\"],\"readyPattern\":\"^\\\\s*❯\\\\s(?!\\\\d+\\\\.)\",\"readyTimeout\":60,\"trustTimeout\":600,\"trustPattern\":\"Quick safety check|Yes, I trust this folder\",\"workingPattern\":\"esc to interrupt|^\\\\s*(?:⏺\\\\s+)?Running(?:\\\\s|…|\\\\.\\\\.\\\\.)|^\\\\s*[✶✻✽✢·*]\\\\s+[^\\\\n]+(?:…|\\\\.\\\\.\\\\.)\\\\s*\\\\([^\\\\n]*(?:\\\\d+(?:\\\\.\\\\d+)?s\\\\s*·|thinking|tokens)[^\\\\n]*\\\\)\",\"deliveryPattern\":\"^\\\\s*⏺|● got:\",\"interruptKey\":\"Escape\",\"footerPatterns\":[\"\\\\? for shortcuts\",\"^\\\\s*(⏵⏵|⏸)\",\"shift\\\\+tab to cycle\",\"^\\\\s*[❯>]\\\\s*(Try \\\".*\\\")?$\"],\"questionPattern\":\"Enter to select\\\\b.*Esc to cancel|Esc to cancel · Tab to amend\",\"limitPatterns\":[\"^[\\\\s⎿●•■⚠!*>-]*You.ve hit your .{0,60}limit\",\"^[\\\\s⎿●•■⚠!*>-]*Usage limit reached\",\"^[\\\\s⎿●•■⚠!*>-]*You.re out of extra usage\",\"^[\\\\s⎿●•■⚠!*>-]*(?:API Error: )?Request rejected \\\\(429\\\\)\"],\"overloadPatterns\":[\"^\\\\s*⎿\\\\s*API Error:\\\\s*529(?:\\\\s|$)\",\"^\\\\s*⎿\\\\s*(?:API Error:\\\\s*)?Overloaded(?:[.:]|$)\"],\"backgroundPatterns\":[\"^\\\\s*\\\\d+ (?:monitors?|shells?)(?:, \\\\d+ (?:monitors?|shells?))? still running\\\\b\",\"[·⏵].*\\\\b\\\\d+ (?:shells?|monitors?)\\\\b(?: still running)?\",\"[·⏵].*\\\\b\\\\d+ background\\\\b\"]},\"codex\":{\"acceptsBusyPrompt\":true,\"flags\":[],\"effortArgs\":[\"-c\",\"model_reasoning_effort={effort}\"],\"readyPattern\":\"^›\\\\s(?!\\\\d+\\\\.)|\\\\? for shortcuts\",\"readyTimeout\":60,\"trustTimeout\":600,\"trustPattern\":\"Trust this folder\\\\?|Folder settings can run code automatically\",\"workingPattern\":\"esc to interrupt\",\"deliveryPattern\":\"^\\\\s*[•■]|● got:\",\"interruptKey\":\"Escape\",\"footerPatterns\":[\"\\\\? for shortcuts\",\"⚠ \\\\d+ warnings?\",\"f2 to view\",\"^\\\\s*[\\\\w.-]+ (low|medium|high|xhigh|minimal|none) · \",\"^\\\\s*›\\\\s*(Ask Codex to do anything)?\\\\s*$\",\"Queued follow-up inputs|⇧.? (edit last queued message|to answer)\"],\"questionPattern\":\"Waiting for your answer|^\\\\s*\\\\?\\\\s+\\\\d+ questions?\\\\b|to answer\\\\s*$|Press enter to confirm or esc to cancel\",\"limitPatterns\":[\"^[\\\\s⎿●•■⚠!*>-]*You.ve hit your usage limit\",\"^[\\\\s⎿●•■⚠!*>-]*Usage limit reached\",\"^[\\\\s⎿●•■⚠!*>-]*You.re out of credits\",\"^[\\\\s⎿●•■⚠!*>-]*Your workspace is out of credits\",\"^[\\\\s⎿●•■⚠!*>-]*You hit your spend cap\"],\"overloadPatterns\":[\"^\\\\s*■\\\\s*Selected model is at capacity(?:\\\\.|$)\"],\"backgroundPatterns\":[\"\\\\b\\\\d+ background terminals?\\\\b\"]}}",
+  "settings": "{\"claude\":{\"acceptsBusyPrompt\":true,\"flags\":[],\"effortArgs\":[\"--effort\",\"{effort}\"],\"readyPattern\":\"^\\\\s*❯\\\\s(?!\\\\d+\\\\.)\",\"readyTimeout\":60,\"trustTimeout\":600,\"trustPattern\":\"Quick safety check|Yes, I trust this folder\",\"workingPattern\":\"esc to interrupt|^\\\\s*(?:⏺\\\\s+)?Running(?:\\\\s|…|\\\\.\\\\.\\\\.)|^\\\\s*[✶✻✽✢·*]\\\\s+[^\\\\n]+(?:…|\\\\.\\\\.\\\\.)\\\\s*\\\\([^\\\\n]*(?:\\\\d+(?:\\\\.\\\\d+)?s\\\\s*·|thinking|tokens)[^\\\\n]*\\\\)\",\"deliveryPattern\":\"^\\\\s*⏺|● got:\",\"interruptKey\":\"Escape\",\"footerPatterns\":[\"\\\\? for shortcuts\",\"^\\\\s*(⏵⏵|⏸)\",\"shift\\\\+tab to cycle\",\"^\\\\s*[❯>]\\\\s*(Try \\\".*\\\")?$\"],\"questionPattern\":\"Enter to select\\\\b.*Esc to cancel|Esc to cancel · Tab to amend\",\"limitPatterns\":[\"^[\\\\s⎿●•■⚠!*>-]*You.ve hit your .{0,60}limit\",\"^[\\\\s⎿●•■⚠!*>-]*Usage limit reached\",\"^[\\\\s⎿●•■⚠!*>-]*You.re out of extra usage\",\"^[\\\\s⎿●•■⚠!*>-]*(?:API Error: )?Request rejected \\\\(429\\\\)\"],\"overloadPatterns\":[\"^\\\\s*⎿\\\\s*API Error:\\\\s*529(?:\\\\s|$)\",\"^\\\\s*⎿\\\\s*(?:API Error:\\\\s*)?Overloaded(?:[.:]|$)\"],\"backgroundPatterns\":[\"^\\\\s*\\\\d+ (?:monitors?|shells?)(?:, \\\\d+ (?:monitors?|shells?))? still running\\\\b\",\"[·⏵].*\\\\b\\\\d+ (?:shells?|monitors?)\\\\b(?: still running)?\",\"[·⏵].*\\\\b\\\\d+ background\\\\b\"]},\"codex\":{\"acceptsBusyPrompt\":true,\"flags\":[],\"effortArgs\":[\"-c\",\"model_reasoning_effort={effort}\"],\"readyPattern\":\"^›\\\\s(?!\\\\d+\\\\.)|\\\\? for shortcuts\",\"readyTimeout\":60,\"trustTimeout\":600,\"trustPattern\":\"Trust this folder\\\\?|Folder settings can run code automatically\",\"dialogPattern\":\"Update available|Skip until next version\",\"workingPattern\":\"esc to interrupt\",\"deliveryPattern\":\"^\\\\s*[•■]|● got:\",\"interruptKey\":\"Escape\",\"footerPatterns\":[\"\\\\? for shortcuts\",\"⚠ \\\\d+ warnings?\",\"f2 to view\",\"^\\\\s*[\\\\w.-]+ (low|medium|high|xhigh|minimal|none) · \",\"^\\\\s*›\\\\s*(Ask Codex to do anything)?\\\\s*$\",\"Queued follow-up inputs|⇧.? (edit last queued message|to answer)\"],\"questionPattern\":\"Waiting for your answer|^\\\\s*\\\\?\\\\s+\\\\d+ questions?\\\\b|to answer\\\\s*$|Press enter to confirm or esc to cancel\",\"limitPatterns\":[\"^[\\\\s⎿●•■⚠!*>-]*You.ve hit your usage limit\",\"^[\\\\s⎿●•■⚠!*>-]*Usage limit reached\",\"^[\\\\s⎿●•■⚠!*>-]*You.re out of credits\",\"^[\\\\s⎿●•■⚠!*>-]*Your workspace is out of credits\",\"^[\\\\s⎿●•■⚠!*>-]*You hit your spend cap\"],\"overloadPatterns\":[\"^\\\\s*■\\\\s*Selected model is at capacity(?:\\\\.|$)\"],\"backgroundPatterns\":[\"\\\\b\\\\d+ background terminals?\\\\b\"]}}",
   "flags": [
     {
       "args": [],

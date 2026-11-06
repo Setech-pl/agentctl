@@ -114,10 +114,14 @@ for (const tool of ['new','queue'] as const) it(`0173-P3 ${tool}: uncertain deli
   const f = fixture(`mcp-${tool}`), repo = path.join(f.root, 'repo'); fs.mkdirSync(repo);
   f.tmux.windows.length = 0;
   const spec = `---\ntask: T2\nagent: claude\nrepos:\n  - {path: ${repo}, worktree: ${repo}-wt}\n---\nOriginal prompt\n`;
+  const primer = new WatchMemory(); await watchTick(f.ctx, primer, f.notifier); // the watcher heartbeat; every chat start goes through it now
   const preview = await f.call(tool, { spec }); assert.ok(!preview.isError, preview.text);
   const result = await f.call(tool, { spec, confirm: true }); assert.ok(!result.isError, result.text);
-  if (tool === 'new') { assert.match(result.text, /Started: T2/); assert.match(result.text, /dostarczenie niepotwierdzone/); assert.equal(readTaskRecord(f.config, 't2')!.promptDelivery, 'confirming'); }
-  else { const memory = new WatchMemory(); await watchTick(f.ctx, memory, f.notifier); await memory.queue.idle(); assert.equal(readTaskRecord(f.config, 't2')!.promptDelivery, 'confirming'); assert.deepEqual(readQueue(f.config), []); assert.ok(readJournal(f.config).some(e => e.kind === 'queue-start' && e.task === 'T2')); }
+  if (tool === 'new') assert.match(result.text, /Registered: T2/);
+  const memory = new WatchMemory(); await watchTick(f.ctx, memory, f.notifier); await memory.queue.idle();
+  assert.equal(readTaskRecord(f.config, 't2')!.promptDelivery, 'confirming');
+  assert.deepEqual(readQueue(f.config), []);
+  if (tool === 'queue') assert.ok(readJournal(f.config).some(e => e.kind === 'queue-start' && e.task === 'T2'));
 });
 
 it('0173-P3: an old canonical report and unchanged assistant output cannot acknowledge a new send', async () => {

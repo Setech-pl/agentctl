@@ -190,6 +190,20 @@ Go too.
     assert.ok(!runner.commands.some((l) => l.includes('load-buffer')), 'the prompt must not be pasted');
     assert.ok(!runner.commands.some((l) => l.includes('kill-window')));
   });
+
+  it('recognizes the Codex "Update available" modal at once instead of burning the 60 s ready timeout', async () => {
+    const modal = fs.readFileSync(new URL('./fixtures/screen-codex-update-modal.txt', import.meta.url), 'utf8');
+    const text = `---\ntask: NC-8\nagent: codex\nrepos:\n  - {path: ${repoA}, worktree: ${wt('8')}}\n---\nGo.\n`;
+    const { ctx, runner } = makeContext(config, { respond: freshMachine(modal) });
+    await assert.rejects(newTasks(ctx, resolveAll(config, text)), (e: Error & { hint?: string }) => {
+      assert.match(e.message, /NC-8: codex shows a startup dialog \("Update available": choose "Skip until next version"\)/);
+      assert.doesNotMatch(e.message, /did not show its input prompt/);
+      assert.match(e.hint ?? '', /never answers that dialog[\s\S]*check_for_update_on_startup=false/);
+      return true;
+    });
+    assert.ok(!runner.commands.some((l) => l.includes('load-buffer')), 'the prompt must not be pasted');
+    assert.ok(!runner.commands.some((l) => l.includes('kill-window')), 'the CLI keeps the window for the human');
+  });
 });
 
 describe('send', () => {

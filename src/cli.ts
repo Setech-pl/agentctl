@@ -823,7 +823,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
   program
     .command('events')
     .description('What changed since the last time: reports that became ready (with the verdict), starts from the queue, questions, folder trust, blocked, cancelled and limited tasks, finished cohorts, plan thresholds, changed limits - then a line with the state now. Needs "agentctl watch" for what it sees (the journal is written by watch and by the commands). Each client (cli, mcp) has its own "last" marker.')
-    .option('--since <time>', 'last (default: since this client looked), an age (30m, 2h, 1d), HH:MM or an ISO time')
+    .option('--since <time>', 'last (default: since this client looked), an age (30m, 2h, 1d), HH:MM (the latest past occurrence; still ahead today means yesterday) or an ISO time')
     .option('--cohort <name>', 'only the events and tasks of this cohort')
     .option('--keep', 'do not move the "last" marker of the cli client')
     .option('--json', 'machine-readable output')

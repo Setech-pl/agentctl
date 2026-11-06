@@ -45,7 +45,7 @@ describe('resume: argv per agent', () => {
     assert.deepEqual(buildResumeArgv({ agent: 'claude', model: 'default', effort: 'low' }, claude), ['claude', '--effort', 'low', '--continue']);
   });
   it('codex: resume <session> or resume --last, then the same flags; the sandbox stays', () => {
-    assert.deepEqual(buildResumeArgv({ agent: 'codex', model: 'gpt-6.1-sol', effort: 'medium' }, codex, ['-c', 'notify=["x"]'], 'sess-9'), ['codex', 'resume', 'sess-9', '--sandbox', 'danger-full-access', '-m', 'gpt-6.1-sol', '-c', 'model_reasoning_effort=medium', '-c', 'notify=["x"]']);
+    assert.deepEqual(buildResumeArgv({ agent: 'codex', model: 'gpt-6.1-sol', effort: 'medium' }, codex, ['-c', 'notify=["x"]'], 'sess-9'), ['codex', 'resume', 'sess-9', '--sandbox', 'danger-full-access', '-m', 'gpt-6.1-sol', '-c', 'model_reasoning_effort=medium', '-c', 'check_for_update_on_startup=false', '-c', 'notify=["x"]']);
     assert.deepEqual(buildResumeArgv({ agent: 'codex', model: 'default', effort: 'high' }, codex).slice(0, 3), ['codex', 'resume', '--last']);
   });
 });
@@ -94,7 +94,7 @@ describe('resume: starting the agents', () => {
     assert.deepEqual(results.map((r) => r.task), ['NC-1', 'NC-2']);
     assert.deepEqual(w.tmux.windows.map((x) => x.name), ['nc-1', 'nc-2']);
     assert.match(fs.readFileSync(path.join(w.config.stateDir, 'nc-1/start.sh'), 'utf8'), /exec claude --model opus --effort high --settings \S+claude-settings\.json --resume aaaa-bbbb\n$/);
-    assert.match(fs.readFileSync(path.join(w.config.stateDir, 'nc-2/start.sh'), 'utf8'), /exec codex resume --last --sandbox danger-full-access -m gpt-6\.1-sol -c model_reasoning_effort=high -c 'notify=/);
+    assert.match(fs.readFileSync(path.join(w.config.stateDir, 'nc-2/start.sh'), 'utf8'), /exec codex resume --last --sandbox danger-full-access -m gpt-6\.1-sol -c model_reasoning_effort=high -c check_for_update_on_startup=false -c 'notify=/);
     const cmds = w.runner.commands.join('\n');
     assert.ok(w.runner.calls.filter(c => c.line.includes('load-buffer')).every(c => c.input?.startsWith('Report protocol:')), 'only new attempt instructions, not the original task prompt');
     for (const id of ['nc-1','nc-2']) assert.ok(w.runner.calls.some(c => c.line.includes('load-buffer') && c.input?.includes(readTaskRecord(w.config, id)!.report)), '0173-FIX-B resume canonical path');

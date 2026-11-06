@@ -32,7 +32,7 @@ import { collectStatus } from './status.ts';
 import type { StatusRow } from './status.ts';
 import { resolveSpec, splitSpecs } from './spec.ts';
 import type { RawSpec, ResolvedSpec, AutoReviewSource } from './spec.ts';
-import { findRecordAnywhere, listArchivedRecords, listTaskRecords, recordFromSpec, renderTaskMd, taskDir, taskFile } from './taskstore.ts';
+import { findRecordAnywhere, listArchivedRecords, listTaskRecords, readTaskRecord, recordFromSpec, renderTaskMd, taskDir, taskFile } from './taskstore.ts';
 import type { CancelSource, TaskRecord } from './taskstore.ts';
 import { queueHolds, usageSummaryLines } from './usage-limits.ts';
 import { AgentctlError, cohortKey, errorMessage, formatLocalTime, plural, windowName } from './util.ts';
@@ -419,6 +419,14 @@ export async function removeFromQueue(ctx: Context, input: string, opts: { reaso
   const entry = findEntry(ctx.config, input);
   if (entry.status === 'starting') throw new AgentctlError(`${entry.task} is being started right now`, 'Wait for it to finish; it then shows as a task in "agentctl status".');
   await writeCancelledRecord(ctx, entry, opts);
+  // A leftover live window of the cancelled task (a start that failed before the agent became ready) would mask the
+  // cancelled state in status — an idle prompt reads as "waiting". It is the cancelled task's window: it goes too.
+  const record = readTaskRecord(ctx.config, windowName(entry.task));
+  if (record && (await ctx.tmux.windows()).some((w) => w.plain === record.window)) {
+    if ((await ctx.tmux.killWindow(record.window)).code === 0) {
+      await recordJournal(ctx, { kind: 'cancelled', task: entry.task, text: `${entry.task}: removed from the queue (cancelled); the leftover window of the start was closed`, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
+    }
+  }
   await dropEntry(ctx, entry);
   return entry;
 }
@@ -644,6 +652,19 @@ export interface QueueTickOptions {
 const firstLine = (s: string): string => s.split('\n')[0] ?? s;
 
 /**
+ * A start that died before the agent showed its input (readiness timeout, a startup dialog, the watcher stopped mid-wait) leaves a window
+ * nobody watches and a prompt that was never pasted. Close that window — it is untrusted state — so it cannot hold a provider slot; the
+ * record keeps its worktree, so the task lands in "to resume". A window waiting for folder trust (prompt_delivery: pending) is kept:
+ * a human may be answering it and the next watch serves it.
+ */
+async function closeNeverReadyWindow(ctx: Context, task: string): Promise<boolean> {
+  const record = readTaskRecord(ctx.config, windowName(task));
+  if (!record || (record.promptDelivery !== 'needs-attention' && record.promptDelivery !== 'launching') || record.deliveryStartedAt) return false;
+  if (!(await ctx.tmux.windows()).some((w) => w.plain === record.window)) return false;
+  return (await ctx.tmux.killWindow(record.window)).code === 0;
+}
+
+/**
  * One look at the queue: start every waiting entry whose provider has a free window, in turn order. The starts run in the background
  * (a start waits for a human to answer the folder-trust dialog, and the queue must not stand still meanwhile), at most
  * `queue.parallel_starts` at a time. Returns the tasks whose start began. Never changes the provider of a task.
@@ -663,8 +684,12 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
     if (entry.status !== 'starting' || memory.inflight.has(entry.task)) continue;
     if (entry.startingPid) { try { process.kill(entry.startingPid, 0); continue; } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') continue; } }
     if (records.has(entry.task)) {
+      // The record and the queue must not disagree: the entry goes away with the record in place, a leftover never-ready
+      // window is closed, and the task (worktree kept) lands in "to resume" like its siblings.
+      const closed = await closeNeverReadyWindow(ctx, entry.task).catch(() => false);
       fs.rmSync(entryFile(config, entry), { force: true });
       fs.rmSync(queueLogFile(config, entry), { force: true });
+      await recordJournal(ctx, { kind: 'queue-failed', task: entry.task, text: `${entry.task}: the start was interrupted (the watcher stopped before it finished); ${closed ? 'the never-ready window was closed, t' : 't'}he worktree stays – to resume: agentctl resume ${entry.task}`, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
     } else await failEntry(ctx, entry, 'the start was interrupted (the watcher stopped before it finished)', notifier, opts, false);
   }
   entries = readQueue(config);
@@ -832,7 +857,18 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
       await recordJournal(ctx, { kind: 'queue-start', task: entry.task, text: `${done} (${entry.agent})`, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
     } catch (e) {
       if (/window limit for .* reached/.test(errorMessage(e))) { await writeEntry(ctx, { ...entry, status: 'queued' }); return; }
-      await failEntry(ctx, starting, e instanceof AgentctlError && e.hint ? `${e.message}\nHint: ${e.hint}` : errorMessage(e), notifier, opts, !opts.signal?.aborted, log).catch(() => undefined);
+      // A never-ready window is untrusted state nobody watches: close it so it cannot hold a slot (the record and its worktree stay).
+      const closedLeftover = await closeNeverReadyWindow(ctx, entry.task).catch(() => false);
+      if (opts.signal?.aborted && readTaskRecord(config, windowName(entry.task))) {
+        // The watcher itself stopped mid-wait: not a failure of the task. Record and queue must agree — drop the entry;
+        // with its window closed the task lands in "to resume", a window waiting for trust is served by the next watch.
+        fs.rmSync(entryFile(config, starting), { force: true });
+        fs.rmSync(queueLogFile(config, starting), { force: true });
+        await opts.log?.(`queue: ${entry.task} start interrupted (the watcher stopped) – the task is to resume`);
+        await recordJournal(ctx, { kind: 'queue-failed', task: entry.task, text: `${entry.task}: the start was interrupted (the watcher stopped before it finished); ${closedLeftover ? 'the never-ready window was closed, t' : 't'}he worktree stays – to resume: agentctl resume ${entry.task}`, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
+        return;
+      }
+      await failEntry(ctx, starting, `${e instanceof AgentctlError && e.hint ? `${e.message}\nHint: ${e.hint}` : errorMessage(e)}${closedLeftover ? '\nThe window that never became ready was closed; the worktree stays. queue_retry starts a fresh window over it.' : ''}`, notifier, opts, !opts.signal?.aborted, log).catch(() => undefined);
     } finally {
       clearSetupProgress(config, entry.task);
       memory.inflight.delete(entry.task);

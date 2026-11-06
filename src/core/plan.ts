@@ -49,12 +49,18 @@ export async function liveWindows(ctx: Context): Promise<LiveWindow[]> {
   const agentByWindow = new Map<string, AgentName>();
   for (const record of listTaskRecords(ctx.config)) if (record.agent !== 'unknown') agentByWindow.set(record.window, record.agent);
   const records = listTaskRecords(ctx.config);
+  const recordByWindow = new Map(records.map((r) => [r.window, r]));
+  // A start that failed before any paste (never ready, a startup dialog): the open window is evidence for a human, not a running agent — it holds no slot.
+  const neverReady = (window: string): boolean => {
+    const r = recordByWindow.get(window);
+    return Boolean(r?.pendingPrompt && r.promptDelivery === 'needs-attention' && !r.deliveryStartedAt);
+  };
   const candidates = records.some(r => inspectReport(ctx.config, r, ctx.runner.now(), !r.attemptId).ready);
   const rows = candidates ? await collectStatus(ctx, { progress: false }) : [];
   const windows = names.map((window): LiveWindow => {
     const agent = agentByWindow.get(window);
     const reportReady = rows.some(r => r.windowName === window && r.state === 'report-ready');
-    return agent ? { window, agent, ...(reportReady ? { reportReady: true, counted: configCountsReady(ctx) } : {}) } : { window };
+    return agent ? { window, agent, ...(neverReady(window) ? { counted: false } : reportReady ? { reportReady: true, counted: configCountsReady(ctx) } : {}) } : { window };
   });
   // Places held by the user (`limits reserve`) and sessions outside agentctl count against the limit like its own windows.
   return [...windows, ...pendingStarts(ctx.config).filter(r => !names.includes(r.window)).map(r => ({ window: r.window, agent: r.agent, kind: 'starting' as const })), ...(await slotHolders(ctx))];
