@@ -561,3 +561,29 @@ describe('P33: a start whose window never became ready', () => {
     assert.ok((await findResumable(s.ctx)).some((c) => c.task === 'STALE-1'));
   });
 });
+
+
+describe('P36: queue_rm over a leftover live window', () => {
+  it('kills the cancelled task\'s window, and status shows cancelled instead of waiting', async () => {
+    const s = setup('rm-window');
+    await add(s, specOf(s.repo, 'RM-1'));
+    // The leftover of a failed start: a live window and a record whose prompt never went out.
+    seedTask(s.config, 'RM-1', { repos: [{ path: s.repo, worktree: `${s.repo}-rm-1` }], promptDelivery: 'needs-attention', pendingPrompt: 'Prompt of RM-1.' });
+    s.tmux.add('rm-1', composerFixture('❯ \n'));
+    await removeFromQueue(s.ctx, 'RM-1');
+    assert.deepEqual(readQueue(s.config), []);
+    assert.ok(!s.tmux.windows.some((w) => w.name === 'rm-1'), 'the leftover window was killed');
+    assert.ok(readJournal(s.config).some((e) => e.kind === 'cancelled' && e.task === 'RM-1' && /leftover window/.test(e.text)));
+    const row = (await collectStatus(s.ctx, { progress: false, archived: true })).find((r) => r.task === 'RM-1');
+    assert.equal(row?.state, 'cancelled', 'not "waiting" from the idle screen of a leftover window');
+  });
+
+  it('queue_rm of a task without a window works as before (no kill attempted)', async () => {
+    const s = setup('rm-plain');
+    await add(s, specOf(s.repo, 'RM-2'));
+    await removeFromQueue(s.ctx, 'RM-2');
+    assert.deepEqual(readQueue(s.config), []);
+    assert.equal(readTaskRecord(s.config, 'rm-2')?.cancelled, true);
+    assert.ok(!s.runner.commands.some((c) => c.includes('kill-window')));
+  });
+});

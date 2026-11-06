@@ -419,6 +419,14 @@ export async function removeFromQueue(ctx: Context, input: string, opts: { reaso
   const entry = findEntry(ctx.config, input);
   if (entry.status === 'starting') throw new AgentctlError(`${entry.task} is being started right now`, 'Wait for it to finish; it then shows as a task in "agentctl status".');
   await writeCancelledRecord(ctx, entry, opts);
+  // A leftover live window of the cancelled task (a start that failed before the agent became ready) would mask the
+  // cancelled state in status — an idle prompt reads as "waiting". It is the cancelled task's window: it goes too.
+  const record = readTaskRecord(ctx.config, windowName(entry.task));
+  if (record && (await ctx.tmux.windows()).some((w) => w.plain === record.window)) {
+    if ((await ctx.tmux.killWindow(record.window)).code === 0) {
+      await recordJournal(ctx, { kind: 'cancelled', task: entry.task, text: `${entry.task}: removed from the queue (cancelled); the leftover window of the start was closed`, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
+    }
+  }
   await dropEntry(ctx, entry);
   return entry;
 }
