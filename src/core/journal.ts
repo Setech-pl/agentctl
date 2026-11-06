@@ -45,6 +45,9 @@ export const journalPath = (config: Pick<GlobalConfig, 'path'>): string => path.
 export async function recordJournal(ctx: Context, entry: Omit<JournalEntry, 'at'>): Promise<void> {
   const cohort = entry.cohort ?? (entry.task ? readTaskRecord(ctx.config, windowName(entry.task))?.cohort : undefined);
   const full: JournalEntry = secretRedactor([ctx.config, process.env, entry], new Set(listTaskRecords(ctx.config).map(r => r.task)))({ at: new Date(ctx.runner.now()).toISOString(), ...entry, ...(cohort ? { cohort } : {}) });
+  // Belt and braces: a bulky payload once flooded events_since with JSON fragments for days (a gc_suggest carrying a whole
+  // GC plan). Known bulky fields are replaced by a pointer past a bound; the text always stays.
+  if (full.gc_preview !== undefined && Buffer.byteLength(JSON.stringify(full)) > 4000) full.gc_preview = { dropped: 'oversized payload; details via gc_preview / agentctl gc' };
   // The phone gets what was announced on the Mac (this is written once per announcement), and the entry says whether it went.
   const phone = await notifyPhone(ctx, full).catch(() => undefined);
   if (phone) full.phone = phone;

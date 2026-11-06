@@ -1,4 +1,5 @@
 import { planGc } from './gc.ts';
+import { formatBytes } from './pull.ts';
 import { recordJournal } from './journal.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -339,8 +340,11 @@ export async function cohortTick(ctx: Context, notifier: Notifier, rows: readonl
       await saveCohort(ctx, meta);
     }
     if (allClosed && meta.gcSuggested !== closure) {
-      const gc_preview = await planGc(ctx, { cohort: meta.name });
-      await recordJournal(ctx, { kind: 'gc_suggest', cohort: meta.name, text: `kohorta ${meta.name}: zamknięta; gc_preview gotowy, bez automatycznego usuwania`, gc_preview });
+      const plan = await planGc(ctx, { cohort: meta.name });
+      // Only a summary goes to the journal (a full plan is hundreds of entries of raw JSON and flooded events_since);
+      // the plan itself stays available via gc_preview / agentctl gc --cohort.
+      const gc_preview = { items: plan.items.length, freeBytes: plan.freeBytes, top: plan.items.slice(0, 5).map((i) => ({ task: i.task, kind: i.kind, bytes: i.bytes })) };
+      await recordJournal(ctx, { kind: 'gc_suggest', cohort: meta.name, text: `kohorta ${meta.name}: zamknięta; gc_preview gotowy (${plan.items.length} pozycji, ${formatBytes(plan.freeBytes)}; szczegóły: agentctl gc --cohort ${meta.name}), bez automatycznego usuwania`, gc_preview });
       meta.gcSuggested = closure;
       await saveCohort(ctx, meta);
     }
