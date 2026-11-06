@@ -6,6 +6,7 @@ import type { Command } from 'commander';
  */
 export const COMMAND_EXAMPLES: Record<string, string[]> = {
   version: ['agentctl version'],
+  'dataset export': ['agentctl dataset export --out attempts.jsonl', 'agentctl dataset export --format csv --since 30d', 'agentctl dataset export --include-prompts --include-reports --out content.jsonl'],
   guide: ['agentctl guide --project /path/to/repo --lang en --clip', 'agentctl guide --lang pl'],
   capacity: ['agentctl capacity --json', 'agentctl capacity --clip'],
   new: [

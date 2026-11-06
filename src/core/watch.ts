@@ -293,7 +293,7 @@ export async function reloadConfig(ctx: Context, store: ConfigStore, by = 'watch
     const text = limitsDiffText(before.limits, r.config.limits);
     if (text) await recordJournalOnce(ctx, { kind: 'limits-changed', text });
   }
-  if (r.error || r.changed || before.reloadWarning) noteConfigState(configStatePath(r.config), by, ctx.runner.now(), r.error);
+  if (r.error || r.changed || before.reloadWarning) noteConfigState(configStatePath(r.config), by, ctx.runner.now(), r.error ?? r.config.reloadWarning);
   return r;
 }
 

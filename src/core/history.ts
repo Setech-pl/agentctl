@@ -1,3 +1,4 @@
+import { packageVersion } from './version.ts';
 import { inspectReport } from './report-state.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -35,6 +36,11 @@ export interface HistoryTokens {
 
 export interface HistoryRecord {
   v: 1;
+  attempt_id?: string;
+  attempt?: number;
+  attempt_started?: string;
+  review_of?: string;
+  agentctl_version?: string;
   event: HistoryEvent;
   /** ISO time of the event. */
   at: string;
@@ -97,6 +103,11 @@ export async function snapshot(ctx: Context, record: TaskRecord, event: HistoryE
   const verdict = record.report ? readVerdict(record.report, config.notify.verdictPattern) : undefined;
   return {
     v: 1,
+    agentctl_version: packageVersion(),
+    attempt_id: record.attemptId,
+    attempt: record.attempt,
+    attempt_started: record.attemptStarted,
+    review_of: record.reviewOf,
     event,
     at: new Date(now).toISOString(),
     task: record.task,

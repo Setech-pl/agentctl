@@ -6,7 +6,7 @@ import { describe, it } from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import YAML from 'yaml';
-import { Harness } from '../scripts/live-harness.ts';
+import { Harness, defaultCacheRoot } from '../scripts/live-harness.ts';
 import { REPO_ROOT } from './helpers.ts';
 
 /*
@@ -16,12 +16,9 @@ import { REPO_ROOT } from './helpers.ts';
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-// A short path: the socket of the sandbox's tmux must fit the 104 characters of a unix socket name.
-const sandboxRoot = [process.env.AGENTCTL_LIVE_CACHE, path.resolve(REPO_ROOT, '..', '..', 'cache', 'agentctl-p19')].find((dir) => dir !== undefined && fs.existsSync(path.dirname(dir)) && `${dir}/live-p19-stdio/tmx/tmux-${process.getuid?.() ?? 0}/default`.length <= 100);
-
 describe('P19 over stdio: the MCP server is never held by a setup', () => {
-  it('confirm returns in seconds, every read answers during the setup, the setup survives the death of the MCP server and finishes in the watcher', { skip: sandboxRoot === undefined && 'no short directory for the sandbox socket (set AGENTCTL_LIVE_CACHE)' }, async () => {
-    const cache = sandboxRoot!;
+  it('confirm returns in seconds, every read answers during the setup, the setup survives the death of the MCP server and finishes in the watcher', async () => {
+    const cache = defaultCacheRoot();
     const h = new Harness({ name: 'p19-stdio', cacheRoot: cache, config: 'capacity: {snapshot: false, codex_refresh: false}\nmcp: {allow: [new]}\nwatch: {interval: 1}\n' }, REPO_ROOT);
     // tests/isolation.ts replaced tmux on the PATH of this process with a stub; the harness links the real tools into its fake bin directory.
     const isolatedPath = process.env.PATH;

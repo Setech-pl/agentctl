@@ -1,3 +1,5 @@
+import { HarnessRefusal, liveCacheRoot } from './live-cache.ts';
+export { HarnessRefusal } from './live-cache.ts';
 import { DEFAULT_PROVIDERS, PROVIDER_IDS } from '../src/core/providers/types.ts';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -8,18 +10,11 @@ import path from 'node:path';
 
 /*
  * The harness every live test goes through (CONTRIBUTING.md, "Testing against the real tools"). It builds a sandbox under
- * ~/Projects/cache/<task>/: an isolated tmux server, its own AGENTCTL_HOME / CODEX_HOME / CLAUDE_CONFIG_DIR / HOME, and a PATH whose
+ * the explicit AGENTCTL_LIVE_CACHE root: an isolated tmux server, its own AGENTCTL_HOME / CODEX_HOME / CLAUDE_CONFIG_DIR / HOME, and a PATH whose
  * only agents, clipboard tools and notifiers are fakes. Before anything is started it checks where `claude`, `codex` and the
  * socket of tmux really point, and refuses when the real thing would be reached. Earlier live tests started the real Claude Code
  * twice, ran the notify program of the real Codex config once and overwrote the real clipboard once.
  */
-
-export class HarnessRefusal extends Error {
-  constructor(message: string) {
-    super(`live harness refuses to start: ${message}`);
-    this.name = 'HarnessRefusal';
-  }
-}
 
 /** Commands that must resolve to a fake in the sandbox, never to the real binary. */
 const SAFETY_AGENTS = [...new Set<string>([...PROVIDER_IDS, 'kimi'])];
@@ -151,12 +146,12 @@ const FAKES: Record<string, string> = {
   'notify-send': FAKE_LOGGER('notify-send'),
 };
 
-export const defaultCacheRoot = (task = 'agentctl-15'): string => process.env.AGENTCTL_LIVE_CACHE ?? path.join(os.homedir(), 'Projects', 'cache', task);
+export const defaultCacheRoot = (_task?: string): string => liveCacheRoot();
 
 export interface HarnessOptions {
   /** Directory name under the cache root (one sandbox per scenario). */
   name: string;
-  /** The task's cache directory; default ~/Projects/cache/agentctl-12. */
+  /** A directory inside the required AGENTCTL_LIVE_CACHE root; defaults to that root. */
   cacheRoot?: string;
   /** Text of the sandbox's config.yaml after `cache` / `state_dir` / `usage` (which the harness always sets). */
   config?: string;
@@ -193,13 +188,13 @@ export class Harness {
   constructor(options: HarnessOptions, repoRoot: string) {
     this.options = options;
     this.repoRoot = repoRoot;
-    const cacheRoot = options.cacheRoot ?? defaultCacheRoot();
+    const cacheRoot = liveCacheRoot(options.cacheRoot);
     if (!/^[a-z0-9-]+$/.test(options.name)) throw new HarnessRefusal(`invalid sandbox name: ${options.name}`);
     const socketAt = (root: string) => path.join(root, 'tmx', `tmux-${process.getuid?.() ?? 0}`, 'default');
     const namedRoot = path.join(cacheRoot, `live-${options.name}`);
     // Keep long task-owned roots usable without escaping to a shared /tmp socket.
     this.root = Buffer.byteLength(socketAt(namedRoot)) <= 100 ? namedRoot
-      : path.join(cacheRoot, `live-${createHash('sha256').update(options.name).digest('hex').slice(0, 12)}`);
+      : path.join(cacheRoot, `live-${createHash('sha256').update(options.name).digest('hex').slice(0, 9)}`);
     this.fakeBin = path.join(this.root, 'fakebin');
     this.home = path.join(this.root, 'home');
     this.agentctlHome = path.join(this.root, 'agentctl-home');
@@ -249,6 +244,8 @@ export class Harness {
 
   /** Build the sandbox, check it, and start the isolated tmux server. Nothing is created in the tmux before every check passed. */
   start(): this {
+    // Recheck before any reset: the environment or a symlink may have changed since construction.
+    liveCacheRoot(this.root);
     // A sandbox is made new every time (its own folder `live-<name>`, nothing else is ever removed).
     if (!/^live-[a-z0-9-]+$/.test(path.basename(this.root))) throw new HarnessRefusal(`${this.root} is not a sandbox folder`);
     const socket = path.join(this.tmuxDir, `tmux-${process.getuid?.() ?? 0}`, 'default');

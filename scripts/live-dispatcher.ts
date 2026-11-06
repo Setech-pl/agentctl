@@ -4,9 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import net from 'node:net';
 import assert from 'node:assert/strict';
-import { withHarness } from './live-harness.ts';
-const CACHE = process.env.AGENTCTL_LIVE_CACHE;
-if (!CACHE) throw new Error('Set AGENTCTL_LIVE_CACHE to this task cache');
+import { withHarness, defaultCacheRoot } from './live-harness.ts';
+const CACHE = defaultCacheRoot();
 const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const SERVER = `const http=require('node:http'),fs=require('node:fs'); let failures=Number(process.argv[3]); http.createServer((req,res)=>{let body='';req.on('data',c=>body+=c);req.on('end',()=>{const status=failures-->0?503:200;fs.appendFileSync(process.argv[2],JSON.stringify({at:Date.now(),body,status})+'\\n');res.writeHead(status);res.end('{}')})}).listen(Number(process.argv[1]),'127.0.0.1')`;
 async function freePort(): Promise<number> { return new Promise((resolve) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const port = (s.address() as net.AddressInfo).port; s.close(() => resolve(port)); }); }); }
