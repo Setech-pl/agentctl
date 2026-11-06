@@ -1,3 +1,4 @@
+import { RefreshScheduler } from './refresh-scheduler.ts';
 import { diskLine } from '../core/disk.ts';
 import fs from 'node:fs';
 import React, { useEffect, useRef, useState } from 'react';
@@ -151,40 +152,18 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
 
   useEffect(() => {
     let stopped = false;
-    let running = false;
-    let again = false;
-    let timer: NodeJS.Timeout | undefined;
-    const tick = async (): Promise<void> => {
-      if (running) {
-        again = true;
-        return;
-      }
-      running = true;
-      try {
-        do {
-          again = false;
-          try {
-            // Closed/cancelled rows are detailed only while their section is listed (the `a` key).
-            const snap = await loadBoard(ctx, current.current.selected, cache.current, PREVIEW_LINES, { deepClosed: current.current.showHidden });
-            if (!stopped) update((s) => applySnapshot(s, snap));
-          } catch (e) {
-            if (!stopped) update((s) => withLoadError(s, errorMessage(e).split('\n')[0] as string));
-          }
-        } while (again && !stopped);
-      } finally {
-        running = false;
-      }
-    };
-    // The next tick is armed when the previous one finished, never on a fixed interval: a slow tick cannot stack up.
-    const arm = (): void => {
-      if (stopped) return;
-      timer = setTimeout(() => void tick().then(arm), boardRefreshMs(current.current.rows));
-    };
-    refreshNow.current = () => void tick();
-    void tick().then(arm);
+    const scheduler = new RefreshScheduler(async () => {
+      // Closed/cancelled rows are detailed only while their section is listed (the `a` key).
+      const snap = await loadBoard(ctx, current.current.selected, cache.current, PREVIEW_LINES, { deepClosed: current.current.showHidden });
+      if (!stopped) update((s) => applySnapshot(s, snap));
+    }, () => boardRefreshMs(current.current.rows), (e) => {
+      if (!stopped) update((s) => withLoadError(s, errorMessage(e).split('\n')[0] as string));
+    });
+    refreshNow.current = () => scheduler.request();
+    scheduler.start();
     // An agent's own event (agentctl event writes <state_dir>/<task>/event.json) shows at once, not at the next refresh;
     // a storm of events (one per agent hook) is coalesced to at most one extra tick per WATCH_TICK_MIN_MS.
-    const gate = new TickGate(WATCH_TICK_MIN_MS, () => void tick());
+    const gate = new TickGate(WATCH_TICK_MIN_MS, () => scheduler.request());
     let watcher: fs.FSWatcher | undefined;
     try {
       watcher = fs.watch(ctx.config.stateDir, { recursive: true }, (_type, name) => {
@@ -196,7 +175,8 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
     }
     return () => {
       stopped = true;
-      if (timer) clearTimeout(timer);
+      scheduler.stop();
+      refreshNow.current = () => {};
       gate.stop();
       watcher?.close();
     };

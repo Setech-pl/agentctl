@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- P32 F7: all board refresh sources cancel the old deadline and re-arm only after the shared load completes, including failures; exit cancels pending refreshes.
+
 - P23: accept task worktree directory names as output repository aliases and normalize accepted refs to repository names.
 
 - P22: suggest explicit report_from for plausible nearby reports in status, board and events; never adopt automatically.

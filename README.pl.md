@@ -519,6 +519,8 @@ Każdy klucz z typem, wartością domyślną i znaczeniem: [docs/configuration.m
 
 `agentctl board` to pełnoekranowy przegląd wszystkich zadań, odświeżany co 2 sekundy. `agentctl board --tmux` otwiera go w oknie `board` sesji agentctl. Od 110 kolumn po prawej widać ostatnie linie wybranego okna; poniżej lista zajmuje całą szerokość.
 
+Każde odświeżenie planszy — okresowe, po zdarzeniu lub ręczne — anuluje poprzedni termin. Następne uruchamia się po zakończeniu wspólnego odczytu (także po błędzie): po 2 sekundach przy niedokończonych zadaniach, po 5 sekundach, gdy wszystkie są zakończone. Wyjście anuluje timer i oczekujące ponowienie.
+
 ```text
 agentctl 0.17.2 board · agentctl-test · 2 tasks · 06:54:51 · Disk: ok; free 307.4 GiB; agentctl worktrees 0.0 GiB
   TASK                 AGENT          STATE               TIME    TOKENS  PROGRESS REPORT   │ NEON-BACKEND-TASK-12 · last 1 lines

@@ -521,6 +521,8 @@ Every key with type, default and meaning: [docs/configuration.md](docs/configura
 
 `agentctl board` is a full-screen overview of all tasks, refreshed every 2 seconds. `agentctl board --tmux` opens it in window `board` of the agentctl session. From 110 columns it shows the last lines of the selected window on the right; below that the list takes the whole width.
 
+Every periodic, watch or manual board refresh cancels the previous deadline. The next refresh is armed after the shared load completes (also after an error): 2 seconds with unfinished tasks, 5 seconds when all tasks are done. Exit cancels the timer and queued follow-up.
+
 ```text
 agentctl 0.17.2 board · agentctl-test · 2 tasks · 06:54:51 · Disk: ok; free 307.4 GiB; agentctl worktrees 0.0 GiB
   TASK                 AGENT          STATE               TIME    TOKENS  PROGRESS REPORT   │ NEON-BACKEND-TASK-12 · last 1 lines
