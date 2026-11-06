@@ -127,8 +127,8 @@ describe('mcp: reading', () => {
     const t = setup('r3');
     withReport(t.config, 'NC-42', '# NC-42\nWerdykt: PASS\n');
     withReport(t.config, 'OLD-7', '# old\n', { closed: true });
-    assert.ok((await t.call('get_report', { task: 'nc-4' })).text.startsWith('=== NC-42 (claude opus/high) ===\n# NC-42\nWerdykt: PASS'));
-    assert.match((await t.call('get_report', { task: 'OLD-7' })).text, /# old/);
+    assert.ok((await t.call('get_report', { task: 'nc-4', detail: true })).text.startsWith('=== NC-42 (claude opus/high) ===\n# NC-42\nWerdykt: PASS'));
+    assert.match((await t.call('get_report', { task: 'OLD-7', detail: true })).text, /# old/);
     assert.ok(readTaskRecord(t.config, 'nc-42')?.pulled);
   });
 
@@ -164,7 +164,7 @@ describe('mcp: reading', () => {
     const t = setup('r6');
     const big = 'x'.repeat(MAX_TEXT_BYTES + 5000);
     withReport(t.config, 'NC-1', big);
-    const r = await t.call('get_report', { task: 'NC-1' });
+    const r = await t.call('get_report', { task: 'NC-1', detail: true });
     assert.ok(Buffer.byteLength(r.text) < MAX_TEXT_BYTES + 400);
     assert.equal(JSON.parse(r.text.split('--- page ---\n')[1]!).has_more, true);
     seedTask(t.config, 'NC-2');

@@ -238,8 +238,8 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 | `version` | read |  |
 | `peek` | read | `task`, `lines?` |
 | `list_reports` | read | `all?` |
-| `get_report` | read | `task`, `section?`, `byte_offset?`, `offset?`, `limit?` |
-| `pull_ready` | read | `cohort?`, `all?`, `mode?`, `ack?`, `cursor?`, `offset?`, `limit?` |
+| `get_report` | read | `task`, `detail?`, `mode?`, `section?`, `byte_offset?`, `offset?`, `limit?` |
+| `pull_ready` | read | `cohort?`, `all?`, `detail?`, `mode?`, `ack?`, `cursor?`, `offset?`, `limit?` |
 | `task_spec` | read | `task` |
 | `queue_list` | read | `cohort?`, `format?`, `detail?` |
 | `cohort_list` | read | `all?` |
@@ -520,3 +520,9 @@ MCP previews have independent `preview_token` values, expire after ten minutes a
 A direct reviewer registered with its author, or while that author is in setup, waits with `waiting for author TASK: setup in progress` until the author's TASK.md exists. The reviewer is then checked against that record's effective provider/model. An author start failure fails the reviewer with the author's name and reason; fix/retry the author, then retry the reviewer. Waiting reviewers do not consume a provider slot or a parallel start. For no_agent batches, successful author preparation is committed durably with the admitted author order; dependent preparation uses that context without inventing TASK.md records or agent windows. Provider limits and the existing direct-start priority policy still apply.
 
 The idempotent `new` state response applies only when every requested task is already registered. Mixed batches are refused with the already-registered task names; preview the fresh tasks separately. `SETUP` is recorded for each repository command, and `SETUP OK` / `BŁĄD SETUPU` records its exit code; all include the command and setup log path.
+
+### Concise reports / Zwięzłe raporty
+
+EN: `get_report` and `pull_ready` default to verdict, decisions, actions and the final Polish summary. Checks and parsed outputs require `detail: true` or `mode: full`. A concise receipt does not mark the report pulled. Explicit section/line/byte pagination reads report text; parsed outputs appear only on its first page with detail/full. `response_page` continues cached fragments without repeating metadata or executing again. CLI `pull` is unchanged.
+
+PL: `get_report` i `pull_ready` domyślnie zwracają werdykt, decyzje, akcje i końcowe polskie podsumowanie. Pełne kontrole i sparsowane outputs wymagają `detail: true` lub `mode: full`. Zwięzły odbiór nie oznacza raportu jako przeczytanego. Jawne stronicowanie sekcji/wierszy/bajtów czyta tekst raportu; sparsowane outputs są tylko na pierwszej stronie w trybie detail/full. `response_page` kontynuuje zapisane fragmenty bez powtarzania metadanych i operacji. CLI `pull` pozostaje bez zmian.

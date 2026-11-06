@@ -37,6 +37,13 @@ describe('MCP parity guard', () => {
     assert.deepEqual(parityErrors(program), ['future: no MCP mapping or exception']);
     assert.ok(CLI_MCP['queue retry'].includes('queue_retry'));
   });
+  it('report detail is an MCP opt-in and CLI pull stays mapped', () => {
+    for (const name of ['get_report', 'pull_ready']) {
+      const input = MCP_TOOLS.find(t => t.name === name)!.input;
+      assert.equal(z.object(input).parse({ ...(name === 'get_report' ? { task: 'A' } : {}), detail: true }).detail, true);
+    }
+    assert.deepEqual(CLI_MCP.pull, ['get_report', 'pull_ready']);
+  });
   it('explicit groups expand; existing names retain exactly their prior permissions', () => {
     const old = 'new, queue, send, close, cancel, set_limits, reserve';
     assert.deepEqual(makeConfig(scratch.sub('legacy'), `mcp: {allow: [${old}]}\n`).mcp.allow, old.split(', '));
