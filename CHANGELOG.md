@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Resolve cross-task `links.to` placeholders `{task:TASK-ID,repo:REPO-NAME}` against recorded worktrees, with clear preview errors and existing link validation.
+
 - P32 F8: regression coverage sends real Ink/stdin arrow keys on populated rows independently during record scanning and status collection, and checks selection/preview effects without latency thresholds.
 
 - P32 F7: all board refresh sources cancel the old deadline and re-arm only after the shared load completes, including failures; exit cancels pending refreshes.

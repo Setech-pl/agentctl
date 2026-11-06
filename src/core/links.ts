@@ -146,6 +146,26 @@ export function missingLinkTargets(links: Link[], primary?: string): string[] {
   });
 }
 
+/** Cross-task link targets use recorded worktrees, including retained closed/archived ones. */
+export function fillTaskLinkTargets(text: string, config: GlobalConfig): string {
+  return text.replace(/\{task:([^,{}]+),repo:([^{}]+)\}/g, (_match, task: string, repo: string) => {
+    const wanted = task.toLowerCase();
+    const record = listTaskRecords(config).find(r => r.task.toLowerCase() === wanted)
+      ?? listArchivedRecords(config).filter(r => r.task.toLowerCase() === wanted).map(r => ({ ...r, closed: true }))[0];
+    if (!record) throw new AgentctlError(`links: ${task}: unknown task`);
+    const state = record.closed || record.cancelled ? 'closed task' : 'task';
+    if (!record.repos.length) throw new AgentctlError(`links: ${task}: ${state} has no recorded worktree`);
+    const matches = record.repos.filter(r => path.basename(r.path) === repo);
+    if (matches.length > 1) throw new AgentctlError(`links: ${task}: ambiguous repository "${repo}"`);
+    const match = matches[0];
+    if (!match) throw new AgentctlError(`links: ${task}: no repository "${repo}" in recorded worktrees`);
+    if ((record.closed || record.cancelled) && !fs.existsSync(match.worktree)) {
+      throw new AgentctlError(`links: ${task}: ${state} worktree ${match.worktree} does not exist`);
+    }
+    return match.worktree;
+  });
+}
+
 export function projectLinks(repo: string, task = '', cache = repo): Link[] {
   return (loadProjectConfig(repo)?.links ?? []).map(link => ({ ...link, to: resolvePath(fillPlaceholders(link.to, { task, cache }), repo) }));
 }

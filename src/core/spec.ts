@@ -1,4 +1,4 @@
-import { validateLink, missingLinkTargets } from './links.ts';
+import { validateLink, missingLinkTargets, fillTaskLinkTargets } from './links.ts';
 import { validateLaunch } from './safety.ts';
 import { provider, isActive, activeProviders } from './providers/registry.ts';
 import { VERDICTS } from './outputs.ts';
@@ -385,23 +385,24 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   p.throwIfAny(`${label(raw)} is invalid:`, 'Run "agentctl spec example" to see the format.');
 
   const basicFill = fill;
-  fill = (text: string): string => basicFill(text.replace(/\{worktree:([^{}|]+)(?:\|([^{}]+))?\}/g, (_match, name: string, fallback: string | undefined) => {
+  fill = (text: string): string => basicFill(text.replace(/\{worktree:([^{}|]+)(?:\|((?:[^{}]|\{task:[^{}]+\})+))?\}/g, (_match, name: string, fallback: string | undefined) => {
     const matches = repos.filter(r => path.basename(r.path) === name);
     if (matches.length > 1) throw new AgentctlError(`${taskId}: ambiguous worktree repository "${name}"`);
     if (matches[0]) return matches[0].worktree;
-    if (fallback) return resolvePath(basicFill(fallback));
+    if (fallback) return resolvePath(basicFill(fillTaskLinkTargets(fallback, config)));
     throw new AgentctlError(`${taskId}: no repository "${name}" for {worktree:${name}}; add it to repos or provide {worktree:${name}|~/fallback}`);
   }));
   for (const r of repos) if (r.setup) r.setup = r.setup.map(fill);
   // Links: later layers win for the same `from`.
   const linkByFrom = new Map<string, Link>();
   for (const link of [...config.links, ...(project?.links ?? []), ...specLinks]) {
+    const target = pathOf(fillTaskLinkTargets(fill(link.to), config));
     const expanded = fill(link.from);
     const from = path.isAbsolute(expanded) ? path.relative(repos[0]!.worktree, expanded) : expanded;
-    if (path.isAbsolute(expanded) && !from.startsWith('../')) validateLink(from, pathOf(link.to), repos[0]!.worktree);
-    if (!from || from === '.' || from.startsWith('../')) throw new AgentctlError(`${taskId}: link from must stay inside the primary worktree: ${expanded}`, missingLinkTargets([{ from: expanded, to: pathOf(link.to) }]).join('; ') || undefined);
-    validateLink(from, pathOf(link.to), repos[0]!.worktree);
-    linkByFrom.set(from, { from, to: pathOf(link.to) });
+    if (path.isAbsolute(expanded) && !from.startsWith('../')) validateLink(from, target, repos[0]!.worktree);
+    if (!from || from === '.' || from.startsWith('../')) throw new AgentctlError(`${taskId}: link from must stay inside the primary worktree: ${expanded}`, missingLinkTargets([{ from: expanded, to: target }]).join('; ') || undefined);
+    validateLink(from, target, repos[0]!.worktree);
+    linkByFrom.set(from, { from, to: target });
   }
 
   // Env: spec > project > global.
