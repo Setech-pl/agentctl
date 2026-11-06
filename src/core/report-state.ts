@@ -23,14 +23,10 @@ interface ReportDigest {
 /** Digests per report path, valid while lstat (dev, ino, mtime, size) is unchanged: the body is not read or hashed again. */
 const reportDigests = new Map<string, { dev: number; ino: number; mtimeMs: number; size: number; digest: ReportDigest }>();
 
-/** Cumulative count of report bodies read for the digests, for tests that assert a tick reads nothing. */
-export const reportDigestStats = { reads: 0 };
-
 function digestReport(config: Pick<GlobalConfig, 'reportSettleS'> & Partial<Pick<GlobalConfig, 'cache'>>, record: TaskRecord, file: string, st: fs.Stats): ReportDigest {
   const hit = reportDigests.get(file);
   if (hit && hit.dev === st.dev && hit.ino === st.ino && hit.mtimeMs === st.mtimeMs && hit.size === st.size) return hit.digest;
   const text = config.cache ? readReportText({ cache: config.cache }, record, file) : fs.readFileSync(file, 'utf8');
-  reportDigestStats.reads++;
   let fence: string | null = null, lastDirective = '';
   const declaredAttempts = new Set<string>();
   for (const line of text.split('\n')) {

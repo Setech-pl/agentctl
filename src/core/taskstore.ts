@@ -373,9 +373,6 @@ interface CachedRecordFile {
 /** Parsed TASK.md files per scanned directory; an unchanged file (same lstat mtime and size) is not read again. */
 const recordScanCache = new Map<string, Map<string, CachedRecordFile>>();
 
-/** Cumulative count of TASK.md parses, for tests that assert a tick parses nothing. */
-export const recordScanStats = { parsed: 0 };
-
 /** Yield every 25 folders so a long scan does not block the event loop (the board shares it with key handling). */
 const SCAN_CHUNK = 25;
 
@@ -418,7 +415,6 @@ async function scanRecordsIn(dir: string): Promise<{ records: TaskRecord[]; pars
         }
         files.set(file, { mtimeMs: st.mtimeMs, size: st.size, record });
         parsed++;
-        recordScanStats.parsed++;
         if (record) records.push(record);
       }
     }

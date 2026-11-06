@@ -2,13 +2,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
-import { inspectReport, reportDigestStats } from '../src/core/report-state.ts';
+import { inspectReport } from '../src/core/report-state.ts';
 import { DISK_INTERVAL_MS } from '../src/core/disk.ts';
 import { collectStatus } from '../src/core/status.ts';
-import { archiveDir, readTaskRecord, renderTaskMd, snapshotRecords, taskDir, recordScanStats } from '../src/core/taskstore.ts';
+import { archiveDir, readTaskRecord, renderTaskMd, snapshotRecords, taskDir } from '../src/core/taskstore.ts';
 import type { TaskRecord } from '../src/core/taskstore.ts';
 import { sharedReader } from '../src/core/usage.ts';
 import { boardRefreshMs, BOARD_IDLE_REFRESH_MS, BOARD_REFRESH_MS, handleKey, initialBoardState, loadBoard, ProgressCache, TickGate } from '../src/core/board.ts';
+import { installFsCounter } from './fs-counter.ts';
 import { FakeTmux, makeConfig, makeContext, seedTask, useScratch } from './helpers.ts';
 
 const scratch = useScratch();
@@ -72,14 +73,11 @@ describe('p32: record scan cache', () => {
     assert.deepEqual(third.all.map((r) => r.task), ['RC-1'], 'the removed task leaves the snapshot');
   });
 
-  it('counts the parses cumulatively for the tick regression assertions', async () => {
+  it('the scan says how much it parsed, per call', async () => {
     const config = makeConfig(scratch.sub('rc3'));
     seedTask(config, 'RC-1');
-    const before = recordScanStats.parsed;
-    await snapshotRecords(config);
-    assert.equal(recordScanStats.parsed, before + 1);
-    await snapshotRecords(config);
-    assert.equal(recordScanStats.parsed, before + 1, 'cached: no further parses');
+    assert.equal((await snapshotRecords(config)).parsed, 1);
+    assert.equal((await snapshotRecords(config)).parsed, 0, 'cached: no further parses');
   });
 });
 
@@ -105,23 +103,28 @@ const REPORT_WITH_OUTPUTS = [
 
 describe('p32: cheap rows for closed tasks', () => {
   it('a report body is read and hashed once per report version (dev/ino/mtime/size)', () => {
-    const config = makeConfig(scratch.sub('cr1'));
+    const root = scratch.sub('cr1');
+    const config = makeConfig(root);
     seedTask(config, 'CR-1');
     const record = readTaskRecord(config, 'cr-1')!;
     fs.mkdirSync(path.dirname(record.report), { recursive: true });
     fs.writeFileSync(record.report, REPORT_WITH_OUTPUTS);
-    const before = reportDigestStats.reads;
-    const first = inspectReport(config, record, Date.now(), true);
-    assert.equal(first.ready, true);
-    assert.equal(reportDigestStats.reads, before + 1);
-    const second = inspectReport(config, record, Date.now(), true);
-    assert.equal(second.ready, true);
-    assert.equal(second.signature, first.signature);
-    assert.equal(reportDigestStats.reads, before + 1, 'unchanged report: the body is not read again');
-    fs.appendFileSync(record.report, 'late addition\n');
-    const third = inspectReport(config, record, Date.now(), true);
-    assert.equal(reportDigestStats.reads, before + 2, 'a changed report is read again');
-    assert.notEqual(third.signature, first.signature);
+    const counter = installFsCounter(root);
+    try {
+      const first = inspectReport(config, record, Date.now(), true);
+      assert.equal(first.ready, true);
+      assert.equal(counter.snap().reportReads, 1);
+      const second = inspectReport(config, record, Date.now(), true);
+      assert.equal(second.ready, true);
+      assert.equal(second.signature, first.signature);
+      assert.equal(counter.snap().reportReads, 1, 'unchanged report: the body is not read again');
+      fs.appendFileSync(record.report, 'late addition\n');
+      const third = inspectReport(config, record, Date.now(), true);
+      assert.equal(counter.snap().reportReads, 2, 'a changed report is read again');
+      assert.notEqual(third.signature, first.signature);
+    } finally {
+      counter.restore();
+    }
   });
 
   it('shallowClosed skips the prompt queue and the outputs of closed rows, keeps the report state', async () => {
@@ -269,19 +272,25 @@ function fixture(name: string, count: number): ReturnType<typeof makeConfig> {
 describe('p32: regression on 230 archived tasks', () => {
   it('the second tick parses no TASK.md and reads no report body, and stays under 100 ms', async () => {
     const config = fixture('p32-fixture-230', 230);
+    const root = path.dirname(config.stateDir);
     const { ctx } = makeContext(config, { respond: new FakeTmux().respond });
     const cache = new ProgressCache();
-    const first = await loadBoard(ctx, null, cache);
-    assert.equal(first.rows.length, 230);
-    const parsedBefore = recordScanStats.parsed;
-    const readsBefore = reportDigestStats.reads;
-    const at = performance.now();
-    const second = await loadBoard(ctx, null, cache);
-    const ms = performance.now() - at;
-    assert.equal(second.rows.length, 230);
-    assert.equal(recordScanStats.parsed, parsedBefore, 'no TASK.md is parsed on the second tick');
-    assert.equal(reportDigestStats.reads, readsBefore, 'no report body is read on the second tick');
-    assert.ok(ms < 100, `second tick took ${ms.toFixed(1)} ms`);
+    const counter = installFsCounter(root);
+    try {
+      const first = await loadBoard(ctx, null, cache);
+      assert.equal(first.rows.length, 230);
+      counter.reset();
+      const at = performance.now();
+      const second = await loadBoard(ctx, null, cache);
+      const ms = performance.now() - at;
+      assert.equal(second.rows.length, 230);
+      const counts = counter.snap();
+      assert.equal(counts.taskMdReads, 0, 'no TASK.md is parsed on the second tick');
+      assert.equal(counts.reportReads, 0, 'no report body is read on the second tick');
+      assert.ok(ms < 100, `second tick took ${ms.toFixed(1)} ms`);
+    } finally {
+      counter.restore();
+    }
   });
 
   it('50 arrow keys are each handled within 150 ms while a cold tick runs', async () => {
