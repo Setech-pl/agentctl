@@ -1,3 +1,4 @@
+import { attachHint } from './tmux-socket.ts';
 import type { Context } from './context.ts';
 import { describeTargets, listTargets, resolveRunningTask } from './resolve.ts';
 import type { TaskTarget } from './resolve.ts';
@@ -58,7 +59,7 @@ export async function switchAttachedClient(ctx: Context, taskArg: string): Promi
   const target = await resolveRunningTask(ctx, taskArg);
   const clients = await tmux.clients();
   if (clients.length === 0) {
-    throw new AgentctlError(`no tmux client is attached to session "${config.session}"`, `Attach one: tmux attach -t ${config.session}, or run "agentctl attach ${target.task}" in a terminal.`);
+    throw new AgentctlError(`no tmux client is attached to session "${config.session}"`, `Attach one: ${attachHint(config)}, or run "agentctl attach ${target.task}" in a terminal.`);
   }
   const select = await tmux.selectWindow(target.window);
   if (select.code !== 0) throw new AgentctlError(`cannot select window "${target.window}": ${select.stderr.trim() || `tmux exit ${select.code}`}`);

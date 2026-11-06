@@ -1,3 +1,4 @@
+import { attachHint } from './tmux-socket.ts';
 import { writeLaunchScript } from './launch-script.ts';
 import { launchEnvironment } from './safety.ts';
 import { withStartLock, reserveStarts, releaseStarts } from './start-lock.ts';
@@ -233,7 +234,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
         ? {
             waitTrust: {
               timeoutMs: settings.trustTimeout * 1000,
-              onWaiting: async () => { await setHeaderField(runner, taskFile(config, spec.window), 'prompt_delivery', 'pending'); ctx.info(`${spec.task}: agent waits for ${dialog} – attach: tmux attach -t ${config.session}, confirm in window ${spec.window}`); },
+              onWaiting: async () => { await setHeaderField(runner, taskFile(config, spec.window), 'prompt_delivery', 'pending'); ctx.info(`${spec.task}: agent waits for ${dialog} – attach: ${attachHint(config)}, confirm in window ${spec.window}`); },
             },
           }
         : {}),
@@ -251,14 +252,14 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
     }
     if (ready.trust && waitTrust) {
       throw new AgentctlError(
-        `${spec.task}: agent still waits for ${dialog} after ${settings.trustTimeout}s – attach: tmux attach -t ${config.session}, confirm in window ${spec.window}`,
+        `${spec.task}: agent still waits for ${dialog} after ${settings.trustTimeout}s – attach: ${attachHint(config)}, confirm in window ${spec.window}`,
         `agentctl never answers that dialog. The window stays open and the prompt was not sent; once the agent shows its input, watch will automatically deliver it once ready: ${sendHint}. ` +
           `To wait longer, raise agents.${spec.agent}.trust_timeout in ${config.path}.`,
       );
     }
     if (ready.trust) {
       throw new AgentctlError(
-        `${spec.task}: agent waits for ${dialog} – attach: tmux attach -t ${config.session}, confirm, then agentctl status`,
+        `${spec.task}: agent waits for ${dialog} – attach: ${attachHint(config)}, confirm, then agentctl status`,
         `agentctl never answers that dialog. The prompt was not sent; once the agent shows its input, watch will automatically deliver it once ready: ${sendHint}`,
       );
     }
@@ -266,7 +267,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
       await setHeaderFields(runner, taskFile(config, spec.window), { prompt_delivery: 'needs-attention', prompt_error: `${spec.agent} did not become ready; original prompt remains in TASK.md` });
       throw new AgentctlError(
         `${spec.task}: ${spec.agent} did not show its input prompt within ${settings.readyTimeout}s (pattern /${settings.readyPattern}/)`,
-        `The window is still open: "tmux attach -t ${config.session}". Once the agent is ready, send the prompt with "agentctl send"; ` +
+        `The window is still open: "${attachHint(config)}". Once the agent is ready, send the prompt with "agentctl send"; ` +
           `a recognized structural composer is required before any paste; if the prompt looks normal, adjust agents.${spec.agent}.ready_pattern / ready_timeout in ${config.path}.`,
       );
     }
@@ -287,6 +288,6 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
     if (spec.switchedBy) result.switchedBy = spec.switchedBy;
     results.push(result);
   }
-  if (!opts.noAgent) ctx.info(`attach with: tmux attach -t ${config.session}`);
+  if (!opts.noAgent) ctx.info(`attach with: ${attachHint(config)}`);
   return results;
 }

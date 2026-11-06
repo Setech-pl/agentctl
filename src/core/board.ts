@@ -1,3 +1,4 @@
+import { attachHint } from './tmux-socket.ts';
 import { provider as providerAdapter, PROVIDERS } from './providers/registry.ts';
 import { get as providerValue } from './providers/registry.ts';
 import type { ProviderValues } from './providers/registry.ts';
@@ -803,7 +804,7 @@ export async function runBoardEffect(runner: Runner, config: GlobalConfig, effec
   try {
     switch (effect.type) {
       case 'switch':
-        if (!env.insideTmux) return { level: 'error', text: effect.window === MANAGER_WINDOW ? `Not inside tmux: tmux attach -t ${config.session} \\; select-window -t ${MANAGER_WINDOW}` : `Not inside tmux: run "agentctl attach ${effect.task}".` };
+        if (!env.insideTmux) return { level: 'error', text: effect.window === MANAGER_WINDOW ? `Not inside tmux: ${attachHint(config)} \\; select-window -t ${MANAGER_WINDOW}` : `Not inside tmux: run "agentctl attach ${effect.task}".` };
         await showWindow(ctx, effect.window, true);
         return { level: 'info', text: `Switched to ${effect.task}. Back to the board: ${config.board.returnKey ?? 'Ctrl-b l'}` };
       case 'send':

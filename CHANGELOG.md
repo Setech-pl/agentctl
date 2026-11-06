@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- P10/P44: optional `tmux.socket` scopes all tmux commands; exact attach hints and doctor checks prevent dev/server confusion. Opcjonalny osobny serwer tmux, dokładne wskazówki attach i kontrola AGENTCTL_HOME w doctor.
+
 - P32 F8: regression coverage sends real Ink/stdin arrow keys on populated rows independently during record scanning and status collection, and checks selection/preview effects without latency thresholds.
 
 - P32 F7: all board refresh sources cancel the old deadline and re-arm only after the shared load completes, including failures; exit cancels pending refreshes.

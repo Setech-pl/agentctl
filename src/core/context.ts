@@ -1,3 +1,4 @@
+import { socketRunner } from './tmux-socket.ts';
 import type { GlobalConfig } from './config.ts';
 import type { FetchLike } from './phone.ts';
 import type { Runner } from './runner.ts';
@@ -18,9 +19,9 @@ export class Context {
 
   constructor(runner: Runner, config: GlobalConfig, out: (line: string) => void, confirm?: (question: string) => Promise<boolean>) {
     this.confirm = confirm;
-    this.runner = runner;
+    this.runner = socketRunner(runner, () => this.current.tmux?.socket);
     this.current = config;
-    this.tmuxClient = Context.tmuxFor(runner, config);
+    this.tmuxClient = Context.tmuxFor(this.runner, config);
     this.sink = out;
   }
 

@@ -1,3 +1,4 @@
+import { attachHint } from './tmux-socket.ts';
 import { writeLaunchScript } from './launch-script.ts';
 import { remoteControlSupport, blockingEnv } from './providers/claude-rc.ts';
 export { remoteControlSupport, blockingEnv, RC_BLOCKING_ENV } from './providers/claude-rc.ts';
@@ -337,7 +338,7 @@ export async function startManager(ctx: Context, opts: ManagerOptions): Promise<
 /** What to tell you after a start: where the one-time confirmations are, or that the session is up. */
 export function managerAdvice(ctx: Pick<Context, 'config'>, result: ManagerStartResult): string[] {
   const { session } = ctx.config;
-  const attach = `tmux attach -t ${session} \\; select-window -t ${MANAGER_WINDOW}`;
+  const attach = `${attachHint(ctx.config)} \\; select-window -t ${MANAGER_WINDOW}`;
   switch (result.state) {
     case 'connected':
       return [`The manager "${result.name}" is connected. Open the Claude app on the phone, tap Code, and pick the session with a computer icon and a green dot.`];
