@@ -6,9 +6,12 @@ import { describe, it } from 'node:test';
 import { Context } from '../src/core/context.ts';
 import type { Notifier } from '../src/core/notify.ts';
 import { liveWindows } from '../src/core/plan.ts';
-import { commitQueueAdd, describeQueue, findEntry, isPaused, moveToFront, planQueueAdd, queueDir, queueLogFile, queueTick, QueueMemory, readQueue, removeFromQueue, renderQueueList, retryEntry, setPaused, waiting } from '../src/core/queue.ts';
+import { commitQueueAdd, describeQueue, findEntry, isPaused, moveToFront, planQueueAdd, queueDir, queueLogFile, queueTick, QueueMemory, readQueue, removeFromQueue, renderQueueList, retryEntry, saveEntry, setPaused, waiting } from '../src/core/queue.ts';
 import { splitSpecs } from '../src/core/spec.ts';
 import { collectStatus } from '../src/core/status.ts';
+import { checkWindowLimit } from '../src/core/checks.ts';
+import { readJournal } from '../src/core/journal.ts';
+import { findResumable } from '../src/core/resume.ts';
 import { readTaskRecord } from '../src/core/taskstore.ts';
 import { WatchMemory, watchLogPath, watchTick } from '../src/core/watch.ts';
 import { DiskRunner, FakeTmux, makeConfig, runCli, seedTask, useScratch } from './helpers.ts';
@@ -504,5 +507,57 @@ describe('after: dependencies', () => {
     await add(s, specOf(s.repo, 'G-2', { after: 'G-1' }));
     const r = await runCli(s.config, s.runner, ['status']);
     assert.match(r.stdout, /Queue \(1\): agentctl queue list\n {2}1\. G-2 {2}czeka na G-1/);
+  });
+});
+
+
+describe('P33: a start whose window never became ready', () => {
+  const MODAL = fs.readFileSync(new URL('./fixtures/screen-codex-update-modal.txt', import.meta.url), 'utf8');
+
+  it('the watcher fails the entry at once, closes the never-ready window and frees the slot', async () => {
+    const s = setup('modal-start', 'limits: {codex: 1}\n');
+    s.tmux.newWindowScreen = MODAL;
+    await add(s, specOf(s.repo, 'UPD-1', { agent: 'codex' }));
+    const began = await s.tick();
+    assert.deepEqual(began, ['UPD-1']);
+    const [entry] = readQueue(s.config);
+    assert.equal(entry?.status, 'failed');
+    assert.match(entry?.error ?? '', /codex shows a startup dialog \("Update available"/);
+    assert.match(entry?.error ?? '', /window that never became ready was closed/);
+    assert.ok(!s.tmux.windows.some((w) => w.name === 'upd-1'), 'the never-ready window was closed');
+    assert.equal(readTaskRecord(s.config, 'upd-1')?.promptDelivery, 'needs-attention');
+    assert.ok(readJournal(s.config).some((e) => e.kind === 'queue-failed' && e.task === 'UPD-1'));
+    assert.equal(checkWindowLimit('codex', 1, await liveWindows(s.ctx), s.config.session), undefined, 'the slot is free although the record stays');
+  });
+
+  it('a watcher stopped mid-wait (Ctrl-C): the entry is dropped, the window closed, the task is to resume', async () => {
+    const s = setup('abort-start');
+    await add(s, specOf(s.repo, 'INT-1'));
+    const controller = new AbortController();
+    controller.abort();
+    const began = await queueTick(s.ctx, s.memory, s.notifier, { signal: controller.signal });
+    await s.memory.idle();
+    assert.deepEqual(began, ['INT-1']);
+    assert.deepEqual(readQueue(s.config), [], 'the entry is gone: record and queue agree');
+    assert.ok(!s.tmux.windows.some((w) => w.name === 'int-1'), 'the never-ready window was closed');
+    assert.ok(readTaskRecord(s.config, 'int-1'), 'the record stays');
+    assert.ok(readJournal(s.config).some((e) => e.kind === 'queue-failed' && e.task === 'INT-1' && /interrupted/.test(e.text)));
+    fs.mkdirSync(`${s.repo}-int-1`, { recursive: true }); // the worktree the start made
+    assert.ok((await findResumable(s.ctx)).some((c) => c.task === 'INT-1'), 'the task lands in "to resume"');
+  });
+
+  it('a stale "starting" entry of a dead watcher: the never-ready window is closed and the task is to resume', async () => {
+    const s = setup('stale-start');
+    await add(s, specOf(s.repo, 'STALE-1'));
+    const entry = readQueue(s.config)[0]!;
+    seedTask(s.config, 'STALE-1', { repos: [{ path: s.repo, worktree: `${s.repo}-stale-1` }], promptDelivery: 'launching', pendingPrompt: 'Prompt of STALE-1.' });
+    fs.mkdirSync(`${s.repo}-stale-1`, { recursive: true });
+    s.tmux.add('stale-1', ''); // the window is up, the agent never showed its input
+    await saveEntry(s.ctx, { ...entry, status: 'starting', startingPid: 99999999, startingAt: new Date().toISOString() });
+    await s.tick();
+    assert.deepEqual(readQueue(s.config), [], 'the entry is dropped, not failed: the record exists');
+    assert.ok(!s.tmux.windows.some((w) => w.name === 'stale-1'), 'the leftover window was closed');
+    assert.ok(readJournal(s.config).some((e) => e.kind === 'queue-failed' && e.task === 'STALE-1' && /interrupted/.test(e.text)));
+    assert.ok((await findResumable(s.ctx)).some((c) => c.task === 'STALE-1'));
   });
 });

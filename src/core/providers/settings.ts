@@ -51,6 +51,8 @@ const SETTINGS: Record<ProviderId, AgentSettings> = {
     readyTimeout: 60,
     trustTimeout: 600,
     trustPattern: 'Trust this folder\\?|Folder settings can run code automatically',
+    // The "Update available" modal (a numbered menu, so deliberately not the ready pattern): a human answers it, agentctl never does.
+    dialogPattern: 'Update available|Skip until next version',
     workingPattern: 'esc to interrupt',
     deliveryPattern: '^\\s*[•■]|● got:',
     interruptKey: 'Escape',

@@ -126,9 +126,11 @@ function proofSource(ctx: Context, record: TaskRecord, screen: string): string |
   const report = inspectReport(ctx.config, record, ctx.runner.now(), false);
   if (report.ready && (!record.deliveryStartedAt || report.signature !== record.deliveryReportBaseline)) return 'report';
   if (record.agent === 'unknown') return null;
+  // A screen sign proves something only about a prompt that was actually pasted: without a recorded paste a "working"
+  // screen is the agent's own doing (a human answered a dialog, a turn started by hand), never proof of this delivery.
+  if (!record.deliveryStartedAt) return null;
   const settings = ctx.config.agents[record.agent], state = classifyScreen(screen, settings);
   if ((state === 'working' || state === 'background') && !record.deliveryWasBusy) return 'screen';
-  if (!record.deliveryStartedAt) return null;
   if (record.deliveryWasBusy) return record.pendingPrompt && queuedListShows(screen, record.pendingPrompt, record.agent) ? 'screen' : null;
   if (new RegExp(settings.deliveryPattern, PATTERN_FLAGS).test(screen) && outputFingerprint(screen, settings.deliveryPattern) !== record.deliveryOutputBaseline) return 'screen';
   return echoLines(screen, markerOf(record), record.pendingPrompt, record.agent) > (record.deliveryEchoBaseline ?? 0) ? 'screen' : null;
