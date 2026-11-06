@@ -6,7 +6,7 @@ import { it } from 'node:test';
 import YAML from 'yaml';
 import { z } from 'zod';
 import { Context } from '../src/core/context.ts';
-import { makeConfig, seedTask, useScratch, FakeTmux, DiskRunner, runCli } from './helpers.ts';
+import { makeConfig, seedTask, useScratch, FakeTmux, DiskRunner, fakeWatcher, runCli } from './helpers.ts';
 import { collectStatus } from '../src/core/status.ts';
 import { classifyScreen } from '../src/core/state.ts';
 import { DEFAULT_AGENT_SETTINGS } from '../src/core/config.ts';
@@ -26,6 +26,7 @@ import { runDoctor } from '../src/core/doctor.ts';
 const scratch = useScratch();
 function fixture(name: string, yaml = '') {
   const root = scratch.sub(name), config = makeConfig(root, `capacity: {snapshot: false, codex_refresh: false}\nmcp: {allow: [new, queue, gc, send, close]}\n${yaml}`);
+  fakeWatcher(config);
   const tmux = new FakeTmux();
   const runner = new DiskRunner({ dryRun: false, startTime: Date.now(), respond: (cmd, args, opts) => {
     if (cmd === 'git') return args.includes('--porcelain') ? { stdout: '' } : args.includes('rev-parse') ? { stdout: args.includes('--abbrev-ref') ? 'feature\n' : 'a'.repeat(40) + '\n' } : { code: 0 };

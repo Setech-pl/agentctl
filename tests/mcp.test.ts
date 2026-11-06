@@ -10,7 +10,8 @@ import { Context } from '../src/core/context.ts';
 import { auditPath, MAX_PEEK_LINES, MAX_SEND_CHARS, MAX_TEXT_BYTES, MCP_TOOL_NAMES, MCP_TOOLS, readReportFile, statusLine } from '../src/core/mcp-tools.ts';
 import type { McpDeps, McpToolDef, ToolResult } from '../src/core/mcp-tools.ts';
 import { readTaskPrompt, readTaskRecord, taskFile } from '../src/core/taskstore.ts';
-import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helpers.ts';
+import { readQueue } from '../src/core/queue.ts';
+import { DiskRunner, FakeTmux, fakeWatcher, makeConfig, seedTask, useScratch } from './helpers.ts';
 
 const scratch = useScratch();
 const SELF = ['/usr/bin/env', 'AGENTCTL_HOME=/h', '/opt/node/bin/node', '--experimental-strip-types', '--no-warnings', '/opt/agentctl/bin/agentctl.ts'];
@@ -381,20 +382,32 @@ describe('mcp: the write tools', () => {
     assert.ok(!git.some((c) => /--force|\bpush\b|\bmerge\b|\brebase\b|branch -[dD]/.test(c)));
   });
 
-  it('new: the first call only summarizes, the second with confirm: true starts the task', async () => {
+  it('new: the first call only summarizes; confirm never starts in the server – it registers the start for the watcher', async () => {
     const t = setup('n1', 'mcp: {allow: [new]}\n');
     const repo = scratch.sub('n1/app');
     const spec = `---\ntask: NC-9\nagent: claude\nrepos:\n  - path: ${repo}\n    worktree: ${repo}-wt\n---\nZrób NC-9.\n`;
     const preview = await t.call('new', { spec });
     assert.match(preview.text, /^NC-9 {2}claude\/default\/high\n {2}worktree: .*app-wt[\s\S]*Not started yet\. Show this to the user and ask; if they agree, call new again with the same spec and confirm: true\.\npreview_ttl_s: [^\n]+\npreview_token: [0-9a-f-]+$/);
+    assert.match(preview.text, /WARNING: the watcher is not running .* confirm will be refused/);
     assert.deepEqual(t.runner.commands.filter((c) => !c.startsWith('write ') && !c.startsWith('append ')), [], 'nothing ran');
     assert.deepEqual(t.notified, []);
     assert.deepEqual(t.audit().map((a) => a.outcome), ['requested', 'preview']);
+    // Without a running watcher the confirm is refused and nothing is registered.
+    const refused = await t.call('new', { spec, confirm: true });
+    assert.equal(refused.isError, true);
+    assert.match(refused.text, /every start goes through the watcher .* it is not running[\s\S]*agentctl watch --tmux/);
+    assert.deepEqual(readQueue(t.config), []);
+    // With the watcher alive the confirm returns at once with the registration; checkout and window are the watcher's.
+    fakeWatcher(t.config);
+    const again = await t.call('new', { spec });
+    assert.match(again.text, /Start: asynchronous/);
     const done = await t.call('new', { spec, confirm: true });
-    assert.match(done.text, /^Started: NC-9 \(window nc-9, claude default\/high\)/);
-    assert.ok(t.runner.commands.some((c) => c.startsWith('git') && c.includes('worktree add')));
-    assert.ok(t.runner.commands.some((c) => c.includes('new-window') || c.includes('new-session')));
-    assert.ok(readTaskRecord(t.config, 'nc-9'));
+    assert.match(done.text, /^Registered: NC-9 \(claude default\/high\)/);
+    assert.ok(!t.runner.commands.some((c) => c.startsWith('git') && c.includes('worktree add')), 'no checkout in the server');
+    assert.ok(!t.runner.commands.some((c) => c.includes('new-window') || c.includes('new-session')), 'no window in the server');
+    assert.equal(readTaskRecord(t.config, 'nc-9'), undefined, 'no TASK.md yet: the watcher has not begun');
+    const [entry] = readQueue(t.config);
+    assert.deepEqual([entry?.task, entry?.status, entry?.direct], ['NC-9', 'queued', true]);
     assert.deepEqual(t.notified, ['czat zlecił: new NC-9']);
   });
 
@@ -432,6 +445,7 @@ describe('mcp: the write tools', () => {
     const t = setup('x1', 'mcp: {allow: [send, new, interrupt, close, move], allow_rm_worktree: true}\n');
     const repo = scratch.sub('x1/app');
     seedTask(t.config, 'NC-1', { repos: [{ path: repo, worktree: `${repo}-wt` }] });
+    fs.mkdirSync(`${repo}-wt`, { recursive: true }); // the worktree exists, so close really removes it
     t.tmux.add('nc-1', IDLE);
     await t.call('send', { task: 'NC-1', text: 'git push --force origin main; rm -rf /' });
     await t.call('interrupt', { task: 'NC-1' });

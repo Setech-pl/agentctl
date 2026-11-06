@@ -55,6 +55,12 @@ export function acknowledgingRespond(respond?: RecordingOptions['respond']): Rec
   };
 }
 
+/** The watcher heartbeat that watchAlive accepts: a chat `new` confirm is refused without it. */
+export function fakeWatcher(config: GlobalConfig): void {
+  fs.mkdirSync(config.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(config.stateDir, 'queue-worker.json'), JSON.stringify({ pid: process.pid, at: Date.now(), interval: config.watch.interval }));
+}
+
 export function makeContext(
   config: GlobalConfig,
   options: RecordingOptions = {},

@@ -9,7 +9,7 @@ import { MCP_ALLOW_GROUPS, MCP_WRITE_TOOLS } from '../src/core/config.ts';
 import { Context } from '../src/core/context.ts';
 import { MCP_TOOLS, auditPath } from '../src/core/mcp-tools.ts';
 import type { McpDeps } from '../src/core/mcp-tools.ts';
-import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helpers.ts';
+import { DiskRunner, FakeTmux, fakeWatcher, makeConfig, seedTask, useScratch } from './helpers.ts';
 import { readQueue, saveEntry } from '../src/core/queue.ts';
 import { touchCohort } from '../src/core/cohort.ts';
 import { readJournal } from '../src/core/journal.ts';
@@ -113,8 +113,9 @@ describe('MCP parity guard', () => {
       assert.ok(readJournal(f.config).some((e) => e.kind === 'mcp-write' && e.text.startsWith(name)));
     });
   }
-  it('new previews the effective provider and supports no_agent without starting a provider', async () => {
+  it('new previews the effective provider and registers no_agent without starting a provider', async () => {
     const f = fixture('new-options', 'new');
+    fakeWatcher(f.config);
     const repo = scratch.sub('new-options/repo');
     const spec = `---\ntask: OPT-1\nagent: claude\nmodel: sonnet\neffort: medium\nrepos:\n  - path: ${repo}\n    worktree: ${repo}-wt\n---\nFake.\n`;
     const args = { spec, agent: 'codex', no_agent: true, cohort: 'Batch' };
@@ -123,7 +124,7 @@ describe('MCP parity guard', () => {
     assert.match(preview.text, /OPT-1  codex/);
     const done = await f.call('new', { ...args, confirm: true });
     assert.equal(done.isError, undefined, done.text);
-    assert.match(done.text, /no agent started/);
+    assert.match(done.text, /^Registered: OPT-1 \(codex \S+\/medium\)\. The worktrees are prepared in the watcher/);
     assert.ok(!f.runner.commands.some((line) => /tmux new|claude --|codex -/.test(line)));
   });
   it('all added reads remain available without allow', async () => {
