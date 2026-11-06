@@ -113,7 +113,7 @@ it('D9: an ended pane alone cannot confirm a current-attempt report without a co
   const record = seedTask(f.config, 'CRASH-1', { attemptId: 'current', attemptStarted: new Date(f.runner.now() - 60000).toISOString(), turnEndedAt: undefined });
   fs.mkdirSync(path.dirname(record.report), { recursive: true }); fs.writeFileSync(record.report, 'Werdykt: PASS\npartial or complete: unknown');
   const time = (f.runner.now() - 31000) / 1000; fs.utimesSync(record.report, time, time);
-  assert.equal((await collectStatus(f.ctx, { progress: false }))[0]!.state, 'dead');
+  assert.equal((await collectStatus(f.ctx, { progress: false }))[0]!.state, 'needs-attention');
   fs.appendFileSync(record.report, '\n' + REPORT_END);
   assert.equal((await collectStatus(f.ctx, { progress: false }))[0]!.state, 'report-ready');
 });

@@ -151,7 +151,7 @@ describe('resume: CLI, watch, up', () => {
     const names = w.tmux.windows.map((x) => x.name).sort();
     assert.deepEqual(names, ['board', 'watch']);
     assert.match(first.stdout, /1 task to resume \(NC-1\): agentctl resume/);
-    assert.match(first.stdout, /Open the board: tmux attach -t agentctl \\; select-window -t board/);
+    assert.match(first.stdout, /Open the board: tmux attach -t '=agentctl' \\; select-window -t board/);
     const second = await runCli(w.config, w.runner, ['up']);
     assert.match(second.stdout, /Window agentctl:watch already exists, left alone/);
     assert.match(second.stdout, /Window agentctl:board already exists, left alone/);

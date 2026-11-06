@@ -134,7 +134,7 @@ describe('status states from mocked capture-pane', () => {
         ['NC-2', 'waiting'],
         ['NC-3', 'needs-trust'],
         ['NC-4', 'report-ready'], // window alive and idle, fresh report
-        ['NC-5', 'dead'], // window gone, no report
+        ['NC-5', 'needs-attention'], // window gone, no report
         ['NC-6', 'waiting'], // an old report from before the start does not count
       ],
     );
@@ -145,7 +145,7 @@ describe('status states from mocked capture-pane', () => {
     const { ctx } = makeContext(config, { respond: (cmd, args) => (cmd === 'tmux' && args[0] === 'list-windows' ? { stdout: 'other\n' } : undefined) });
     const rows = await collectStatus(ctx);
     assert.equal(rows.find((r) => r.task === 'NC-4')?.state, 'report-ready');
-    assert.equal(rows.find((r) => r.task === 'NC-1')?.state, 'dead');
+    assert.equal(rows.find((r) => r.task === 'NC-1')?.state, 'needs-attention');
   });
 });
 
@@ -167,7 +167,7 @@ describe('new --no-wait-trust: folder-trust dialog', () => {
       });
       const t0 = runner.now();
       await assert.rejects(newTasks(ctx, [spec!], { waitTrust: false }), (e: Error & { hint?: string }) => {
-        assert.equal(e.message, `${spec!.task}: agent waits for folder trust – attach: tmux attach -t agentctl, confirm, then agentctl status`);
+        assert.equal(e.message, `${spec!.task}: agent waits for folder trust – attach: tmux attach -t '=agentctl', confirm, then agentctl status`);
         assert.match(e.hint ?? '', /never answers that dialog.*agentctl watch --tmux .*.*TASK\.md/);
         return true;
       });

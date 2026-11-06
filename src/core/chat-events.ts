@@ -178,6 +178,7 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
 const PHONE_MARK = ' 📱';
 const hhmm = (iso: string): string => formatLocalTime(iso).slice(-5);
 const KIND_LABEL: Record<JournalEntry['kind'], string> = {
+  'tmux-lost': 'TMUX UTRACONY',
   'report-outputs': 'WYNIKI RAPORTU',
   'review-added': 'DODANO PRZEGLĄD',
   'review-repinned': 'PRZEGLĄD PRZYPIĘTY',

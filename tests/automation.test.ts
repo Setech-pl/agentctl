@@ -235,7 +235,7 @@ describe('watch', () => {
     return { config, m, ctx, runner, out, root };
   };
 
-  it('notifies once per transition: report-ready, needs-trust, dead; the first tick is only a baseline', async () => {
+  it('notifies once per transition: report-ready, needs-trust, tmux loss; the first tick is only a baseline', async () => {
     const { config, m, ctx, runner } = setup('watch1');
     const [a, b, c] = ['NC-1', 'NC-2', 'NC-3'].map((t) => specFor(config, t)) as [ResolvedSpec, ResolvedSpec, ResolvedSpec];
     for (const s of [a, b, c]) seed(config, s, runner.now() - 1000);
@@ -253,7 +253,8 @@ describe('watch', () => {
     m.windows.set('nc-2', TRUST);
     m.windows.delete('nc-3');
     await watchTick(ctx, memory, n);
-    assert.deepEqual(n.sent.sort(), ['NC-1: raport gotowy', 'NC-2 czeka na zaufanie folderu (trust)', 'NC-3: okno zniknęło bez raportu'].sort());
+    assert.deepEqual((n.sent as string[]).filter(text => !text.startsWith('NC-3')).sort(), ['NC-1: raport gotowy', 'NC-2 czeka na zaufanie folderu (trust)'].sort());
+    assert.match((n.sent as string[]).find(text => text.startsWith('NC-3'))!, /tmux server\/session lost/);
 
     // nothing changed: no new notifications
     await watchTick(ctx, memory, n);
@@ -579,7 +580,7 @@ describe('status --clip', () => {
       '|---|---|---|---|---|---|---|',
       `| NC-1 | claude/opus/high | report-ready | 1h 02m | ?c 0f | yes | yes (${formatLocalTime(new Date(runner.now()).toISOString())}) |`,
       '| NC-2 | codex/gpt-6/high | working | 1m 10s | ?c 0f | missing | - |',
-      '| NC-3 | claude/opus/high | dead | - | ?c 0f | missing | - |',
+      '| NC-3 | claude/opus/high | needs-attention | - | ?c 0f | missing | - |',
       '',
     ].join('\n'));
 

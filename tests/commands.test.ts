@@ -184,7 +184,7 @@ Go too.
     const { ctx, runner } = makeContext(config, { respond: freshMachine('Do you trust this folder?') });
     await assert.rejects(newTasks(ctx, resolveAll(config, text)), (e: Error & { hint?: string }) => {
       assert.match(e.message, /did not show its input prompt within 60s/);
-      assert.match(e.hint ?? '', /tmux attach -t agentctl/);
+      assert.match(e.hint ?? '', /tmux attach -t '=agentctl'/);
       return true;
     });
     assert.ok(!runner.commands.some((l) => l.includes('load-buffer')), 'the prompt must not be pasted');

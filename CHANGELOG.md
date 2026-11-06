@@ -7,6 +7,13 @@ All notable changes to this project are documented here. The format follows [Kee
 - P47: MCP task responses omit plans/capacity/disk footers unless detail/capacity is requested or a session threshold changes; config warnings appear once per session. / MCP pomija stopkę planów/pojemności/dysku poza jawnym żądaniem lub zmianą progu; ostrzeżenia konfiguracji pojawiają się raz na sesję.
 
 - P45: MCP report reads default to verdict, decisions, actions and the final Polish summary; full checks/outputs require detail/full, with parsed outputs on the first page only. CLI reads are unchanged. / MCP domyślnie zwraca werdykt, decyzje, akcje i końcowe polskie podsumowanie; pełne kontrole/outputs są na żądanie, metadane tylko na pierwszej stronie.
+- P43 validation: mark cohort journal fixtures as historical closed tasks so the filter test does not create unrelated loss events. Test filtrowania kohort używa zamkniętych zadań historycznych.
+
+- Document dedicated dev tmux servers and migration/recovery in English and Polish, with exact session targets and copyable shell commands. Dokumentacja EN/PL osobnego serwera dev, migracji i odzyskiwania zadań.
+
+- P43: lost tmux tasks remain visible as needs-attention with one durable loss event and recovery guidance; Claude SessionStart saves the conversation ID before the first prompt. Utracone zadania pozostają widoczne ze wskazówką odzyskania; identyfikator sesji Claude zapisujemy przy starcie.
+
+- P10/P44: optional `tmux.socket` scopes all tmux commands; exact attach hints and doctor checks prevent dev/server confusion. Opcjonalny osobny serwer tmux, dokładne wskazówki attach i kontrola AGENTCTL_HOME w doctor.
 
 - P32 F8: regression coverage sends real Ink/stdin arrow keys on populated rows independently during record scanning and status collection, and checks selection/preview effects without latency thresholds.
 

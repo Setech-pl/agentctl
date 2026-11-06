@@ -1,3 +1,4 @@
+import { attachHint, tmuxCommand } from './core/tmux-socket.ts';
 import { exportDataset, validateDatasetOptions } from './core/dataset.ts';
 import type { DatasetOptions } from './core/dataset.ts';
 import { DEFAULT_PROVIDERS } from './core/providers/types.ts';
@@ -331,7 +332,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
   const startWatchWindow = async (ctx: Context, statusLine: boolean): Promise<'created' | 'exists'> => {
     const result = await ensureWatchWindow(ctx, deps.watchCommand(), process.cwd());
     if (result === 'exists') line(`Window ${ctx.config.session}:${WATCH_WINDOW} already exists, left alone.`);
-    else line(`${result === 'restarted' ? 'Started again (its process had ended)' : 'Started'} the watcher in window ${ctx.config.session}:${WATCH_WINDOW}${result === 'session-created' ? ' (session created)' : ''}. Attach: tmux attach -t ${ctx.config.session}. If it fails to start, the window stays with the error; ${startLogPath(ctx.config, 'watch')} has it too.`);
+    else line(`${result === 'restarted' ? 'Started again (its process had ended)' : 'Started'} the watcher in window ${ctx.config.session}:${WATCH_WINDOW}${result === 'session-created' ? ' (session created)' : ''}. Attach: ${attachHint(ctx.config)}. If it fails to start, the window stays with the error; ${startLogPath(ctx.config, 'watch')} has it too.`);
     for (const l of describeNavigation(await applyNavigation(ctx), ctx.config.session)) line(l);
     if (statusLine && ctx.config.watch.statusLine) {
       const shown = await applyStatusLine(ctx, deps.statusLineCommand?.() ?? 'agentctl status --tmux-line');
@@ -886,7 +887,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         }
         if (!(await confirmAction(ctx, plan.summary, 'Resume?', Boolean(opts.yes) || Boolean(opts.dryRun)))) return;
         await resumeTasks(ctx, plan, { self: deps.selfArgv?.() });
-        line(`attach with: tmux attach -t ${ctx.config.session}`);
+        line(`attach with: ${attachHint(ctx.config)}`);
       }),
     );
 
@@ -902,7 +903,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         if (ctx.config.manager.autostart) await startManagerForUp(ctx);
         const resumable = await findResumable(ctx);
         if (resumable.length > 0) line(`${resumable.length} task${resumable.length === 1 ? '' : 's'} to resume (${resumable.map((r) => r.task).join(', ')}): agentctl resume`);
-        const command = `tmux attach -t ${ctx.config.session} \\; select-window -t ${BOARD_WINDOW}`;
+        const command = `${attachHint(ctx.config)} \\; select-window -t ${BOARD_WINDOW}`;
         if (opts.attach === false || !deps.stdinIsTTY) return line(`Open the board: ${command}`);
         await showWindow(ctx, BOARD_WINDOW, deps.insideTmux ?? false);
       }),
@@ -1172,7 +1173,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         if (opts.tmux) {
           if (opts.restart) await ctx.tmux.killRole('board');
           await startBoardWindow(ctx);
-          line(`Open it: tmux attach -t ${ctx.config.session} \\; select-window -t ${BOARD_WINDOW}   (inside tmux: tmux select-window -t ${ctx.config.session}:${BOARD_WINDOW})`);
+          line(`Open it: ${attachHint(ctx.config)} \\; select-window -t ${BOARD_WINDOW}   (inside tmux: ${tmuxCommand(ctx.config, ['select-window', '-t', `=${ctx.config.session}:${BOARD_WINDOW}`])})`);
           return;
         }
         const runBoard = deps.runBoard;

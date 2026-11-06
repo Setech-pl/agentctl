@@ -39,6 +39,8 @@ Column "Layers": **g** global config, **p** project config, **s** spec.
 | `providers` | global | `[claude, codex]` | Active providers in order; both claude and codex are required, without duplicates. |
 | `cache` | path | `~/workspace/cache` | g | Directory with one folder per task, `<cache>/<task>/`: the only place the agents write to (reports). |
 | `state_dir` | path | `<config dir>/tasks` | g | agentctl's own state per task (`TASK.md`, `setup.log`, `event.json`, `notified.json`), out of the agents' reach. Closed tasks are archived next to it, in `archive/`. |
+| `tmux` | mapping | socket unset | g | Optional dedicated tmux server. |
+| `tmux.socket` | string | unset | g | Server name passed to `tmux -L` for every invocation; letters, digits, `_` and `-`. Default: existing server selection. Doctor checks server/session AGENTCTL_HOME. |
 | `session` | string | `agentctl` | g | Name of the tmux session. Letters, digits, `_` and `-`. |
 | `limits` | mapping | none | g | Most simultaneous windows per provider. |
 | `limits.claude` | positive integer | unlimited | g | Cap for Claude windows (agentctl windows + reserved places + external sessions when counted). `agentctl limits set claude=3` changes it. |

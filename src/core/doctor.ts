@@ -1,3 +1,4 @@
+import { socketRunner } from './tmux-socket.ts';
 import { provider, PROVIDER_IDS, isActive } from './providers/registry.ts';
 import { collectStatus } from './status.ts';
 import { inspectReport } from './report-state.ts';
@@ -122,6 +123,8 @@ export async function runDoctor(
     add('config', 'fail', `${errorMessage(e).split('\n').join(' ')}${state && !state.ok ? ` – the ${state.by} keeps the previous settings (since ${state.at})` : ''}`);
   }
 
+  runner = socketRunner(runner, () => config?.tmux?.socket);
+  add('tmux socket', 'ok', config?.tmux?.socket ?? 'default (unset)');
   const tmuxVersion = await runner.exec('tmux', ['-V'], { readOnly: true });
   if (tmuxVersion.code !== 0) add('tmux', 'fail', `not found. ${INSTALL_HINTS.tmux}`);
   else {
@@ -271,6 +274,14 @@ export async function runDoctor(
     if (tmuxVersion.code === 0) {
       const tmux = new Tmux(runner, config.session);
       const up = await tmux.hasSession();
+      const expectedHome = env.AGENTCTL_HOME ?? path.dirname(config.path);
+      const differences: string[] = [];
+      for (const scope of [['-g'], ['-t', `=${config.session}`]]) {
+        const result = await runner.exec('tmux', ['show-environment', ...scope, 'AGENTCTL_HOME'], { readOnly: true, dryResult: { code: 1 } });
+        const value = /^AGENTCTL_HOME=(.*)$/m.exec(result.stdout)?.[1];
+        if (result.code === 0 && value !== undefined && value !== expectedHome) differences.push(`${scope[0] === '-g' ? 'global' : 'session'} AGENTCTL_HOME=${value}`);
+      }
+      add('tmux home', differences.length ? 'warn' : 'ok', differences.length ? `${differences.join('; ')}; current AGENTCTL_HOME=${expectedHome}; use a dedicated tmux.socket for dev` : `AGENTCTL_HOME=${expectedHome}; no conflicting server/session value`);
       add('session', 'ok', up ? `"${config.session}" is running` : `"${config.session}" not running yet (created by "agentctl new")`);
     }
     await managerChecks(runner, config, tmuxVersion.code === 0, add);

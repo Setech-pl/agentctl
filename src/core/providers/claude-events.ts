@@ -11,10 +11,10 @@ const str = (v: unknown): string => typeof v === 'string' ? v : '';
 import { taskDir } from '../taskstore.ts';
 import { buildTapStatusLine } from '../usage-tap.ts';
 /** The `--kind` of `agentctl event` for Claude hooks. */
-export const CLAUDE_KINDS = ['notification', 'stop', 'stop-failure', 'user-prompt-submit'] as const;
+export const CLAUDE_KINDS = ['notification', 'stop', 'stop-failure', 'user-prompt-submit', 'session-start'] as const;
 export type ClaudeKind = (typeof CLAUDE_KINDS)[number];
 
-const CLAUDE_HOOK_NAME: Record<ClaudeKind, string> = { notification: 'Notification', stop: 'Stop', 'stop-failure': 'StopFailure', 'user-prompt-submit': 'UserPromptSubmit' };
+const CLAUDE_HOOK_NAME: Record<ClaudeKind, string> = { 'session-start': 'SessionStart', notification: 'Notification', stop: 'Stop', 'stop-failure': 'StopFailure', 'user-prompt-submit': 'UserPromptSubmit' };
 
 /** Claude `Notification` types that mean "a human has to answer". `idle_prompt` ("Claude is waiting for your input") follows a Stop; it is not a new question. */
 const CLAUDE_ASKING = new Set(['permission_prompt', 'elicitation_dialog', 'elicitation_url_dialog', 'agent_needs_input', 'worker_permission_prompt']);
@@ -23,6 +23,7 @@ const CLAUDE_LIMIT_ERRORS = new Set(['rate_limit', 'billing_error']);
 
 export function parseClaudeEvent(kind: ClaudeKind, input: unknown): AgentEvent {
   const data = isObject(input) ? input : {};
+  if (kind === 'session-start') return { agent: 'claude', outcome: 'ignored', type: kind, text: '' };
   if (kind === 'user-prompt-submit') return { agent: 'claude', outcome: 'ignored', type: kind, text: '' };
   if (kind === 'notification') {
     const type = str(data.notification_type);
@@ -60,6 +61,6 @@ export function planClaudeEvents(input: EventWiringInput): EventWiring {
     return {
       args: ['--settings', file],
       files: [{ path: file, content: `${JSON.stringify(buildClaudeSettings(input.task, input.self, statusLine, input.attempt), null, 2)}\n` }],
-      note: `events: Claude hooks UserPromptSubmit, Notification, Stop and StopFailure${statusLine ? ', statusLine (usage-tap)' : ''} in ${file}`,
+      note: `events: Claude hooks SessionStart, UserPromptSubmit, Notification, Stop and StopFailure${statusLine ? ', statusLine (usage-tap)' : ''} in ${file}`,
     };
 }

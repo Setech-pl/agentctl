@@ -119,7 +119,7 @@ const JOURNALED: Partial<Record<TaskState, JournalKind>> = { 'needs-attention': 
 /** The transition goes to the journal that `events` reads (the notification only reaches the desktop). */
 async function journalTransition(ctx: Context, row: StatusRow, e: WatchEvent): Promise<void> {
   const kind = JOURNALED[e.to];
-  if (!kind) return;
+  if (!kind || row.tmuxLost) return;
   const verdict = kind === 'report-ready' ? readVerdict(row.reportPath, ctx.config.notify.verdictPattern) : undefined;
   await recordJournal(ctx, { kind, task: row.task, text: e.notification ?? e.to, ...(verdict ? { verdict } : {}) });
 }
@@ -203,6 +203,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   let allRows = await collectStatus(ctx, { progress: false, archived: true });
   for (const row of allRows) {
     const record = !row.closed && !row.cancelled ? readTaskRecord(ctx.config, row.windowName) : undefined;
+    if (row.tmuxLost) continue;
     if (record && ['pending', 'sending', 'confirming', 'needs-attention'].includes(record.promptDelivery ?? '')) {
       if (record.promptDelivery === 'pending' && row.window !== 'alive') continue;
       const result = await deliverPendingPrompt(ctx, row.windowName);

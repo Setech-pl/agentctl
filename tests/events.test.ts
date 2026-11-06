@@ -132,7 +132,7 @@ describe('events: what `new` hands to the agents', () => {
 
   it('Claude: a settings file with the four hooks, each calling agentctl event with the task', () => {
     const settings = buildClaudeSettings('NC-1', SELF) as { hooks: Record<string, { hooks: { type: string; command: string; timeout: number }[] }[]> };
-    assert.deepEqual(Object.keys(settings.hooks), ['Notification', 'Stop', 'StopFailure', 'UserPromptSubmit']);
+    assert.deepEqual(Object.keys(settings.hooks), ['Notification', 'Stop', 'StopFailure', 'UserPromptSubmit', 'SessionStart']);
     for (const [name, kind] of [['Notification', 'notification'], ['Stop', 'stop'], ['StopFailure', 'stop-failure'], ['UserPromptSubmit', 'user-prompt-submit']] as const) {
       const hook = settings.hooks[name]?.[0]?.hooks[0];
       assert.equal(hook?.type, 'command');

@@ -406,6 +406,58 @@ agentctl doctor                # tmux, node, git, claude, codex, gh, katalog cac
 
 Paczka npm uruchamia skompilowany JavaScript z `dist/`. Rozwój i testy mogą uruchamiać źródła TypeScript bezpośrednio przez wycinanie typów w Node.
 
+<!-- tmux-dev-start -->
+### Osobny serwer tmux dla developmentu
+
+Używaj osobnego katalogu konfiguracji **i** serwera: sama inna nazwa sesji nadal współdzieli środowisko serwera, skróty klawiszowe i bufory. W katalogu checkoutu deweloperskiego ustaw home i edytuj istniejącą konfigurację, zachowując pozostałe ustawienia:
+
+```sh
+export AGENTCTL_HOME="$HOME/.agentctl-dev"
+mkdir -p "$AGENTCTL_HOME"
+${EDITOR:-vi} "$AGENTCTL_HOME/config.yaml"
+```
+
+Dodaj albo zmień te klucze najwyższego poziomu:
+
+```yaml
+session: agentctl-dev
+tmux:
+  socket: agentctl-dev
+```
+
+`tmux.socket` jest nazwą przekazywaną do `tmux -L`, a nie ścieżką gniazda. Pominięcie klucza zachowuje dotychczasowy wybór serwera. Watch, board, zadania, peek, send, close, attach i doctor używają tego serwera, także przy bezpośrednich wywołaniach tmux. Wskazówki attach cytują dokładny cel, więc `agentctl` nie wybierze prefiksem sesji `agentctl-dev`. Doctor pokazuje gniazdo i ostrzega o innym `AGENTCTL_HOME` w globalnym środowisku serwera lub środowisku sesji.
+
+Uruchom z terminala poza tmux:
+
+```sh
+node --experimental-strip-types --no-warnings bin/agentctl.ts up --no-attach
+node --experimental-strip-types --no-warnings bin/agentctl.ts doctor
+tmux -L agentctl-dev attach -t '=agentctl-dev'
+```
+
+Aby przenieść istniejącą **sesję dev o nazwie agentctl-dev na domyślnym serwerze**, najpierw zachowaj starą konfigurację bez socket, sprawdź status i okna, a potem pozwól agentom skończyć lub zapisać rozmowy. Poniższe usunięcie starej sesji dev kończy jej procesy; wykonaj je dopiero po zapisaniu pracy i sprawdzeniu zapisów identyfikatorów sesji w stanie zadań dev. Nie zabijaj całego domyślnego serwera: może zawierać sesję produkcyjną.
+
+```sh
+export AGENTCTL_HOME="$HOME/.agentctl-dev"
+node --experimental-strip-types --no-warnings bin/agentctl.ts status --json
+tmux list-windows -t '=agentctl-dev'
+tmux kill-session -t '=agentctl-dev'
+${EDITOR:-vi} "$AGENTCTL_HOME/config.yaml"
+```
+
+Teraz dodaj powyższe klucze YAML, pozostaw stare worktree i stan zadań, a procesy dev uruchom ponownie, aby wczytały socket. Zrestartuj również proces MCP dev. tmux nie przenosi działających procesów agentów między serwerami; resume odtworzy ich okna na nowym serwerze.
+
+```sh
+node --experimental-strip-types --no-warnings bin/agentctl.ts up --no-attach
+node --experimental-strip-types --no-warnings bin/agentctl.ts status
+node --experimental-strip-types --no-warnings bin/agentctl.ts resume
+node --experimental-strip-types --no-warnings bin/agentctl.ts doctor
+tmux -L agentctl-dev attach -t '=agentctl-dev'
+```
+
+Po utracie serwera/sesji niedokończone zadania pokazują `needs-attention`, wskazówkę odzyskania i jedno zdarzenie `tmux-lost` w dzienniku na epizod utraty. Claude zapisuje identyfikator przy `SessionStart`; zapisy pozostałych dostawców zachowujemy od razu po otrzymaniu. Jeśli istnieje zapisana sesja, po sprawdzeniu listy użyj wskazanego `agentctl resume TASK`. Bez niej przygotuj spec z **nowym ID zadania**, skieruj repozytoria na stare worktree i uruchom zadanie zastępcze przez `agentctl new --reuse recovery.md`; nie zakładaj, że `--continue` lub `--last` wskaże utraconą rozmowę. Gotowe raporty oraz zadania zamknięte i anulowane zachowują dotychczasowy stan.
+<!-- tmux-dev-end -->
+
 Pierwsze zadanie:
 
 ```sh
