@@ -39,7 +39,8 @@ it('lock is exclusive, reports its owner, waits and releases only after acquisit
   let waited = 0, printed = '';
   const release2 = await acquireLock(lock, owner => { printed = owner; }, async () => { waited++; assert.ok(fs.existsSync(lock)); release(); });
   assert.equal(waited, 1); assert.equal(JSON.parse(printed).pid, process.pid); assert.ok(fs.existsSync(lock));
-  release2(); assert.equal(fs.existsSync(lock), false);
+  release(); assert.ok(fs.existsSync(lock), 'old release cannot remove a new owner');
+  release2(); release2(); assert.equal(fs.existsSync(lock), false);
 });
 it('checks cached runtime version and archive checksum with fakes and no network', () => {
   assert.equal(checkRuntime('/fake/node', '22.14.0', () => 'v22.14.0'), 'v22.14.0');

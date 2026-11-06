@@ -89,7 +89,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   let stopChild: (() => void) | undefined;
   const interrupt = () => { interrupted = true; stopChild?.(); };
   process.on('SIGTERM', interrupt); process.on('SIGINT', interrupt);
-  const env: NodeJS.ProcessEnv & { TMPDIR: string; AGENTCTL_TEST_TMP: string } = { ...process.env, TMPDIR: path.join(work, 'tmp'), AGENTCTL_TEST_TMP: path.join(work, 'tests'), npm_config_cache: path.join(work, 'npm-cache') };
+  const env: NodeJS.ProcessEnv & { TMPDIR: string; AGENTCTL_TEST_TMP: string } = { ...process.env, TMPDIR: path.join(work, 'tmp'), AGENTCTL_TEST_TMP: path.join(work, 'tests'), npm_config_cache: path.join(work, 'npm-cache'), NODE_COMPILE_CACHE: path.join(work, 'compile-cache'), XDG_CACHE_HOME: path.join(work, 'cache') };
   for (const key of ['AGENTCTL_REAL_CODEX', 'AGENTCTL_REAL_CLAUDE', 'AGENTCTL_REAL_KIMI', 'AGENTCTL_BASELINE_ROOT']) delete env[key as keyof typeof env];
   async function run(name: string, command: string, argv: string[], extra: NodeJS.ProcessEnv = {}, required = true): Promise<{ code: number; text: string }> {
     const log = path.join(path.dirname(output), `${opts.tier}-${runId}-${result.steps.length}-${name.replace(/[^a-z0-9-]/gi, '-')}.log`);
@@ -140,7 +140,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   }
   try {
     assertClean(opts, dirty);
-    if (opts.dryRun) { console.log(JSON.stringify({ ...result, runtimes: [node22Path(), 'Homebrew Node 26'], loadPolicy: 'nice -n 10; macOS taskpolicy -b; no load waiting', lock: path.join(runtimesDir(), '.gate.lock') }, null, 2)); result.status = 'PASS'; return; }
+    if (opts.dryRun) { result.status = 'PASS'; console.log(JSON.stringify({ ...result, runtimes: [node22Path(), 'Homebrew Node 26'], loadPolicy: 'nice -n 10; macOS taskpolicy -b; no load waiting', lock: path.join(runtimesDir(), '.gate.lock') }, null, 2)); result.status = 'PASS'; return; }
     fs.mkdirSync(env.TMPDIR, { recursive: true }); fs.mkdirSync(env.AGENTCTL_TEST_TMP, { recursive: true });
     if (opts.tier !== 'quick') release = await acquireLock(path.join(runtimesDir(), '.gate.lock'), undefined, async () => {
       if (interrupted) throw new Error('Gate interrupted while waiting for lock');
