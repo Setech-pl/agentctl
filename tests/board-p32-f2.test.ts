@@ -55,8 +55,13 @@ it('F2: coarse change timestamps fall back to reading TASK.md and report bodies'
   const file = taskFile(config, record.window);
   fs.utimesSync(file, time, time);
   fs.utimesSync(record.report, time, time);
-  const native = fs.lstatSync;
+  const native = fs.lstatSync, nativeFstat = fs.fstatSync;
   try {
+    fs.fstatSync = ((...args: Parameters<typeof fs.fstatSync>) => {
+      const st = nativeFstat(...args);
+      if (typeof st.ctimeMs === 'bigint') return Object.assign(st, { ctimeMs: BigInt(time.getTime()), ctimeNs: BigInt(time.getTime()) * 1_000_000n });
+      return Object.assign(st, { ctimeMs: time.getTime() });
+    }) as typeof fs.fstatSync;
     // Model a filesystem whose ctime cannot distinguish equal-size writes within one tick.
     fs.lstatSync = ((...args: Parameters<typeof fs.lstatSync>) => {
       const st = native(...args);
@@ -74,5 +79,5 @@ it('F2: coarse change timestamps fall back to reading TASK.md and report bodies'
     fs.utimesSync(record.report, time, time);
     assert.equal((await snapshotRecords(config)).current[0]!.model, 'oops');
     assert.equal(inspectReport(config, record, Date.now(), false).ready, false);
-  } finally { fs.lstatSync = native; }
+  } finally { fs.lstatSync = native; fs.fstatSync = nativeFstat; }
 });
