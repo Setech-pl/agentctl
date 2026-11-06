@@ -4,6 +4,11 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Claude `/usage` probe is opt-in (`capacity.claude_usage_probe: true`); it reads plan windows in an isolated neutral session and never starts automatically by default.
+- `dataset export` streams a read-only benchmark dataset as JSONL or CSV, with attempt identities, provenance and explicit redacted prompt/report content opt-ins.
+- P29: live harnesses and package smoke checks require an explicit absolute `AGENTCTL_LIVE_CACHE` task root; missing roots, shared historical sandboxes and escaping paths are refused before writes.
+- P30: preserve rejected config reload state across reads and clear the receipt only after a corrected configuration is accepted; live retry checks synchronize on the persisted rejection/recovery state.
+
 - P27: launch providers through private task-local scripts, keeping tmux commands short even with long PATH and Codex notify arguments. Codex forwards the original notify through a private JSON file (`event --forward-file`); start, resume, move and queued starts share the launch path.
 - Review fixes M1–M3: require the complete owned Kimi composer before Enter and support token-confirmed recovery; follow-ups require current hook/wire or exact transcript injection evidence; redact setup diagnostics, persisted events and MCP output.
 - P28: recover Kimi status after successful re-login despite stale error banners. Fall back to the startup CLI version when wire records omit it. Default economical equivalents are k3-256k/low, k3/high and k3/max; pro remains explicit-only. GC completion reports successful current removals and bytes separately from failures and skipped entries.
@@ -161,6 +166,11 @@ Versions 0.1.0 to 0.7.0 correspond to pull requests #1 to #7; their dates are th
 - Keep phone and manager live suites separate; add collapsed-question live checks through the isolated harness.
 
 ## [Unreleased]
+
+- Claude `/usage` probe is opt-in (`capacity.claude_usage_probe: true`); it reads plan windows in an isolated neutral session and never starts automatically by default.
+- `dataset export` streams a read-only benchmark dataset as JSONL or CSV, with attempt identities, provenance and explicit redacted prompt/report content opt-ins.
+- P29: live harnesses and package smoke checks require an explicit absolute `AGENTCTL_LIVE_CACHE` task root; missing roots, shared historical sandboxes and escaping paths are refused before writes.
+- P30: preserve rejected config reload state across reads and clear the receipt only after a corrected configuration is accepted; live retry checks synchronize on the persisted rejection/recovery state.
 
 Nothing yet.
 
