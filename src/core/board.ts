@@ -58,6 +58,49 @@ import { cohortKey, errorMessage } from './util.ts';
  */
 
 export const BOARD_REFRESH_MS = 2000;
+/** The refresh slows to this when nothing is alive or unfinished any more. */
+export const BOARD_IDLE_REFRESH_MS = 5000;
+/** Ticks fired by the fs.watch of the state dir are at least this far apart (agent events write event.json on every hook). */
+export const WATCH_TICK_MIN_MS = 500;
+
+/** The refresh cadence for the rows on the board: fast while anything runs, slow when every task is done. */
+export function boardRefreshMs(rows: readonly Pick<BoardRow, 'closed' | 'cancelled' | 'finished'>[]): number {
+  return rows.some((r) => !r.closed && !r.cancelled && !r.finished) ? BOARD_REFRESH_MS : BOARD_IDLE_REFRESH_MS;
+}
+
+/** Trailing debounce for the fs.watch events: the first event fires right away, bursts coalesce to one tick per window. */
+export class TickGate {
+  private readonly minMs: number;
+  private readonly fire: () => void;
+  private last = 0;
+  private pending: NodeJS.Timeout | undefined;
+
+  constructor(minMs: number, fire: () => void) {
+    this.minMs = minMs;
+    this.fire = fire;
+  }
+
+  ping(now: number): void {
+    const wait = this.minMs - (now - this.last);
+    if (wait <= 0) {
+      this.last = now;
+      this.fire();
+      return;
+    }
+    if (this.pending) return;
+    this.pending = setTimeout(() => {
+      this.pending = undefined;
+      this.last = Date.now();
+      this.fire();
+    }, wait);
+    this.pending.unref?.();
+  }
+
+  stop(): void {
+    if (this.pending) clearTimeout(this.pending);
+    this.pending = undefined;
+  }
+}
 /** Lines of the selected window shown in the preview. */
 export const PREVIEW_LINES = 30;
 /** git is asked for the progress of a task at most this often. */
@@ -1130,8 +1173,8 @@ export const HELP_LINES: string[] = [
   '  ⚠           first column: another active task changes the same files',
   '  q           leave the board; the agents keep running',
   '',
-  'The list refreshes every 2 s. The preview of the selected window shows',
-  'from 110 columns on.',
+  'The list refreshes every 2 s, or every 5 s when nothing runs.',
+  'The preview of the selected window shows from 110 columns on.',
   'Press any key to go back.',
 ];
 

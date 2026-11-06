@@ -8,7 +8,7 @@ import { collectStatus } from '../src/core/status.ts';
 import { archiveDir, readTaskRecord, renderTaskMd, snapshotRecords, taskDir, recordScanStats } from '../src/core/taskstore.ts';
 import type { TaskRecord } from '../src/core/taskstore.ts';
 import { sharedReader } from '../src/core/usage.ts';
-import { loadBoard, ProgressCache } from '../src/core/board.ts';
+import { boardRefreshMs, BOARD_IDLE_REFRESH_MS, BOARD_REFRESH_MS, loadBoard, ProgressCache, TickGate } from '../src/core/board.ts';
 import { FakeTmux, makeConfig, makeContext, seedTask, useScratch } from './helpers.ts';
 
 const scratch = useScratch();
@@ -209,5 +209,33 @@ describe('p32: disk report off the tick', () => {
     const third = await loadBoard(ctx, null, cache);
     assert.ok(third.disk);
     assert.notEqual(third.disk, first.disk, 'after the cadence it is collected again');
+  });
+});
+
+describe('p32: adaptive refresh and the watch debounce', () => {
+  it('fast while any task is alive or unfinished, slow when everything is closed', () => {
+    const active = { closed: false, cancelled: false, finished: false };
+    assert.equal(boardRefreshMs([active]), BOARD_REFRESH_MS);
+    assert.equal(boardRefreshMs([{ ...active, finished: true }]), BOARD_IDLE_REFRESH_MS);
+    assert.equal(boardRefreshMs([{ ...active, closed: true }]), BOARD_IDLE_REFRESH_MS);
+    assert.equal(boardRefreshMs([{ ...active, cancelled: true }]), BOARD_IDLE_REFRESH_MS);
+    assert.equal(boardRefreshMs([{ ...active, finished: true }, active]), BOARD_REFRESH_MS, 'one active task is enough');
+    assert.equal(boardRefreshMs([]), BOARD_IDLE_REFRESH_MS);
+  });
+
+  it('watch events tick at once, then at most one trailing tick per window', async () => {
+    let fired = 0;
+    const gate = new TickGate(80, () => fired++);
+    gate.ping(Date.now());
+    assert.equal(fired, 1, 'the first event fires right away');
+    gate.ping(Date.now());
+    gate.ping(Date.now());
+    assert.equal(fired, 1, 'events inside the window are coalesced');
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    assert.equal(fired, 2, 'exactly one trailing tick after the window');
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    gate.ping(Date.now());
+    assert.equal(fired, 3, 'past the window the next event fires right away again');
+    gate.stop();
   });
 });
