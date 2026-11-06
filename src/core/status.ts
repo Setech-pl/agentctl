@@ -1,3 +1,4 @@
+import { tmuxLoss } from './tmux-loss.ts';
 import { provider, matchesProviderCommand, isProviderLauncher } from './providers/registry.ts';
 import { atomicWriteFile, stateWriteFailure } from './atomic-file.ts';
 import { tryFileLock } from './file-lock.ts';
@@ -65,6 +66,8 @@ export interface StatusRow {
   effective: string;
   switchedBy: 'flag' | 'limit' | null;
   state: TaskState;
+  /** A launched tmux window disappeared before completion; recovery is in hint. */
+  tmuxLost?: boolean;
   window: 'alive' | 'gone';
   /** The tmux window name of the task without any state icon, and tmux's ID of the window while it exists. */
   windowName: string;
@@ -222,11 +225,13 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     // Cancelled wins over closed: the task was abandoned, not finished.
     const cancelled = record.cancelled === true && !alive;
     const closed = !cancelled && (archived || (record.closed === true && !alive));
-    const hiddenBy: StatusRow['hiddenBy'] = cancelled ? 'cancelled' : closed ? 'closed' : record.hidden === true ? 'user' : record.hidden === undefined && config.board.autoHidePulledDead && !alive && pulled !== null ? 'auto' : null;
+    let hiddenBy: StatusRow['hiddenBy'] = cancelled ? 'cancelled' : closed ? 'closed' : record.hidden === true ? 'user' : record.hidden === undefined && config.board.autoHidePulledDead && !alive && pulled !== null ? 'auto' : null;
     const deliveryReport = reportReady && (record.promptDelivery === 'needs-attention' || (record.deliveryId && reportState.signature !== record.deliveryReportBaseline)) && (!alive || classifyScreen(screenText, settings) === 'idle');
     const writeFailure = stateWriteFailure(path.join(config.stateDir, record.window, 'TASK.md'));
     const unconfirmed = record.promptDelivery === 'needs-attention' && !reportReady && !deliveryEvidence(ctx, record, screenText);
-    let state: TaskState = cancelled ? 'cancelled' : closed ? 'closed' : record.supersededBy ? 'superseded' : writeFailure ? 'needs-attention' : deliveryReport ? 'report-ready' : unconfirmed ? 'needs-attention' : taskState({ alive, screen: screenText, settings, reportReady, event: stored?.outcome });
+    const lossHint = await tmuxLoss(ctx, record, alive, reportReady || cancelled || closed || archived || !!record.supersededBy);
+    if (lossHint && hiddenBy === 'auto') hiddenBy = null;
+    let state: TaskState = cancelled ? 'cancelled' : closed ? 'closed' : record.supersededBy ? 'superseded' : lossHint ? 'needs-attention' : writeFailure ? 'needs-attention' : deliveryReport ? 'report-ready' : unconfirmed ? 'needs-attention' : taskState({ alive, screen: screenText, settings, reportReady, event: stored?.outcome });
     // Passive wire failures fill an idle screen; legacy hook recovery keeps its existing precedence.
     if (state === 'waiting' && stored?.outcome === 'overloaded' && record.agent !== 'unknown' && provider(record.agent).events.payloadFrom === 'wire') state = 'overloaded';
     const observationKey = `${config.stateDir}:${record.window}`;
@@ -272,6 +277,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       effective: `${record.agent} ${record.model}/${record.effort}`,
       switchedBy: record.switchedBy ?? null,
       state,
+      ...(lossHint ? { tmuxLost: true } : {}),
       ...(record.reportCandidate && !reportReady ? { reportCandidate: record.reportCandidate } : {}),
       ...screenMetadata(screenText),
       window: alive ? 'alive' : 'gone',
@@ -289,10 +295,10 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       lastLine: lastContentLine(screenText, settings.footerPatterns),
       progress: opts.progress === false || record.repos.length === 0 ? null : await taskProgress(runner, record.repos),
       collide: [],
-      hint: [record.reportCandidate && record.reportCandidate !== record.report && !reportState.exists ? `Raport poza ścieżką kanoniczną; użyj report_from ze ścieżką ${record.reportCandidate}` : null, writeFailure ? `State write failed: ${writeFailure.reason}; old TASK.md preserved` : unconfirmed ? record.promptError : record.promptDelivery === 'confirming' || record.promptDelivery === 'sending' ? (deliveryNote(record) ?? 'dostarczenie niepotwierdzone – sprawdzam; watch confirms within delivery_confirm_s') : record.promptDelivery === 'pending' ? 'original prompt pending; watch sends it once after folder trust and empty ready input' : stateHint(record.task, state, record.pin === true, record.supersededBy), !record.reportConfirmed && record.reportSource && path.normalize(record.reportSource) !== path.normalize(record.report) ? `raport pochodzi z kopii ${record.reportSource} – sprawdź` : null].filter(Boolean).join('; ') || null,
+      hint: [lossHint, record.reportCandidate && record.reportCandidate !== record.report && !reportState.exists ? `Raport poza ścieżką kanoniczną; użyj report_from ze ścieżką ${record.reportCandidate}` : null, writeFailure ? `State write failed: ${writeFailure.reason}; old TASK.md preserved` : unconfirmed ? record.promptError : record.promptDelivery === 'confirming' || record.promptDelivery === 'sending' ? (deliveryNote(record) ?? 'dostarczenie niepotwierdzone – sprawdzam; watch confirms within delivery_confirm_s') : record.promptDelivery === 'pending' ? 'original prompt pending; watch sends it once after folder trust and empty ready input' : stateHint(record.task, state, record.pin === true, record.supersededBy), !record.reportConfirmed && record.reportSource && path.normalize(record.reportSource) !== path.normalize(record.report) ? `raport pochodzi z kopii ${record.reportSource} – sprawdź` : null].filter(Boolean).join('; ') || null,
       question: state === 'needs-input' ? ((collapsedQuestion(screenText) ? sessionQuestion(config, record) : undefined) ?? extractQuestion(screenText) ?? (stored?.outcome === 'needs-input' && stored.text !== '' ? stored.text : null)) : null,
       pin: record.pin === true,
-      finished: !alive || state === 'superseded',
+      finished: (!alive && !lossHint) || state === 'superseded',
       hidden: hiddenBy !== null,
       hiddenBy,
       closed,

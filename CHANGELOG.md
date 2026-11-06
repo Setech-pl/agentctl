@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- P43: lost tmux tasks remain visible as needs-attention with one durable loss event and recovery guidance; Claude SessionStart saves the conversation ID before the first prompt. Utracone zadania pozostają widoczne ze wskazówką odzyskania; identyfikator sesji Claude zapisujemy przy starcie.
+
 - P10/P44: optional `tmux.socket` scopes all tmux commands; exact attach hints and doctor checks prevent dev/server confusion. Opcjonalny osobny serwer tmux, dokładne wskazówki attach i kontrola AGENTCTL_HOME w doctor.
 
 - P32 F8: regression coverage sends real Ink/stdin arrow keys on populated rows independently during record scanning and status collection, and checks selection/preview effects without latency thresholds.
