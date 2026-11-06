@@ -85,3 +85,15 @@ it('CLI never migrates legacy state or overwrites an existing --out file', async
   const result2 = await runCli(s.config, s.runner, ['dataset', 'export', '--out', historyPath(s.config)]); assert.notEqual(result2.code, 0); assert.deepEqual(hashes(s.root), before);
   const out = path.join(s.root, 'export.jsonl'); assert.equal((await runCli(s.config, s.runner, ['dataset', 'export', '--out', out])).code, 0); assert.equal(fs.statSync(out).mode & 0o777, 0o600);
 });
+
+it('R2 N2: invalid dataset export options never create an --out file', async () => {
+  const s = setup('invalid-out');
+  const options = [['--format', 'xml'], ['--since', 'nonsense'], ['--until', 'nonsense'], ['--since', '2026-12-01', '--until', '2026-10-01'], ['--format', 'csv', '--include-reports'], ['--format', 'csv', '--include-prompts']];
+  for (const [i, args] of options.entries()) {
+    const out = path.join(s.root, `invalid-${i}.jsonl`), before = hashes(s.root);
+    const result = await runCli(s.config, s.runner, ['dataset', 'export', '--out', out, ...args]);
+    assert.notEqual(result.code, 0, args.join(' '));
+    assert.equal(fs.existsSync(out), false, args.join(' '));
+    assert.deepEqual(hashes(s.root), before);
+  }
+});

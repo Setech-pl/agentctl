@@ -1,4 +1,4 @@
-import { exportDataset } from './core/dataset.ts';
+import { exportDataset, validateDatasetOptions } from './core/dataset.ts';
 import type { DatasetOptions } from './core/dataset.ts';
 import { DEFAULT_PROVIDERS } from './core/providers/types.ts';
 import type { AgentName } from './core/config.ts';
@@ -940,6 +940,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('--include-reports', 'include redacted report text (JSONL only)')
     .action(guarded(async (opts: DatasetOptions) => {
       const ctx = contextFor(false, { migrate: false, silent: true });
+      validateDatasetOptions(opts, ctx.runner.now());
       // Exclusive creation protects state/history/report files, including symlink aliases.
       const fd = opts.out ? fs.openSync(opts.out, 'wx', 0o600) : undefined;
       try { await exportDataset(ctx, opts, chunk => { if (fd !== undefined) fs.writeSync(fd, chunk); else deps.stdout(chunk); }); }

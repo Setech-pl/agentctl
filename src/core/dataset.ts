@@ -144,13 +144,18 @@ export async function* datasetRecords(ctx: Context, opts: DatasetOptions = {}): 
 
 export const CSV_COLUMNS = ['dataset_schema', 'instance_id', 'project', 'task', 'attempt_id', 'attempt', 'cohort', 'repo_label', 'relation.continues', 'relation.continued_by', 'relation.review_of', 'requested.provider', 'requested.model', 'requested.effort', 'resolved.provider', 'resolved.model', 'resolved.effort', 'observed.provider', 'observed.model', 'observed.effort', 'cli_versions.agent', 'cli_versions.agentctl', 'started_at', 'ended_at', 'duration_ms', 'tokens.input', 'tokens.output', 'tokens.cache_read', 'tokens.cache_write', 'tokens.reasoning', 'self_verdict', 'human_mark.result', 'cancellation.cancelled', 'move.moved', 'outputs.valid', 'unknown'];
 const csv = (v: unknown): string => v === null || v === undefined ? '' : `"${String(v).replace(/"/g, '""')}"`;
-export async function exportDataset(ctx: Context, opts: DatasetOptions, write: (chunk: string) => void | Promise<void>): Promise<void> {
+/** Validate before opening an output file or emitting any content. */
+export function validateDatasetOptions(opts: DatasetOptions, now: number): string {
   const format = opts.format ?? 'jsonl';
   if (!['jsonl', 'csv'].includes(format)) throw new AgentctlError('--format must be jsonl or csv');
   if (format === 'csv' && (opts.includePrompts || opts.includeReports)) throw new AgentctlError('CSV is content-free; use JSONL for content');
   // Validate filters before emitting a header.
-  const since = boundary(opts.since, ctx.runner.now()), until = boundary(opts.until, ctx.runner.now());
+  const since = boundary(opts.since, now), until = boundary(opts.until, now);
   if (since !== undefined && until !== undefined && since > until) throw new AgentctlError('--since must be before --until');
+  return format;
+}
+export async function exportDataset(ctx: Context, opts: DatasetOptions, write: (chunk: string) => void | Promise<void>): Promise<void> {
+  const format = validateDatasetOptions(opts, ctx.runner.now());
   await write(format === 'csv' ? `${CSV_COLUMNS.join(',')}\r\n` : `${JSON.stringify({ dataset_schema: 1, type: 'header', content_included: { prompts: !!opts.includePrompts, reports: !!opts.includeReports }, redaction: 'shared secret redactor; review before sharing' })}\n`);
   for await (const row of datasetRecords(ctx, opts)) {
     if (format === 'jsonl') await write(`${JSON.stringify(row)}\n`);
