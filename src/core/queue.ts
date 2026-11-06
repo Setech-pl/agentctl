@@ -1,3 +1,4 @@
+import { secretRedactor } from './secret-redaction.ts';
 import { activeProviders, perProvider, isActive } from './providers/registry.ts';
 import { withStartLock } from './start-lock.ts';
 import { authorCheckoutBusy, authorTerminal, authorWaitReason, effectiveAfter, findAuthorRecord, repinReview, syncReviewLedger } from './review-gate.ts';
@@ -319,12 +320,22 @@ export function findDirectStart(config: Pick<GlobalConfig, 'path'>, task: string
   return readQueue(config).find((e) => e.direct && e.task.toLowerCase() === task.toLowerCase());
 }
 
+/** Legacy diagnostics can contain bare values supplied only by a queued spec's environment. */
+export function queueDiagnosticSources(entries: QueueEntry[]): unknown[] {
+  return [entries, ...entries.flatMap(entry => {
+    try { return splitSpecs(entry.spec, 'queue diagnostic redaction').map(spec => spec.header); }
+    catch { return []; } // The raw entry still supplies assignments from malformed legacy specs.
+  })];
+}
+
 /** What a repeated `new` of the same task is told: where the start stands, and that nothing was started a second time. */
 export function directStartText(config: Pick<GlobalConfig, 'path' | 'stateDir'>, entry: QueueEntry, nowMs: number): string {
+  const entries = readQueue(config);
+  const redact = secretRedactor([config, process.env, ...queueDiagnosticSources([...entries, entry])]);
   if (entry.status === 'failed') {
-    return `${entry.task}: the start failed – ${firstLine(entry.error ?? 'n/d')}. The worktrees were kept. Read queue_list, fix the cause, then queue_retry ${entry.task} (new is refused for a task that is in the queue). Nothing was started again.`;
+    return `${entry.task}: the start failed – ${firstLine(redact(entry.error ?? 'n/d'))}. The worktrees were kept. Read queue_list, fix the cause, then queue_retry ${entry.task} (new is refused for a task that is in the queue). Nothing was started again.`;
   }
-  return `${entry.task}: ${startProgressText(entry.status === 'starting' ? readSetupProgress(config, entry.task) : undefined, nowMs).replace(/^uruchamiane – /, 'already being started – ')}. Nothing was started a second time. Follow it with events_since (SETUP / START / BŁĄD STARTU) and status or queue_list.`;
+  return `${entry.task}: ${startProgressText(entry.status === 'starting' ? readSetupProgress(config, entry.task, queueDiagnosticSources(entries)) : undefined, nowMs).replace(/^uruchamiane – /, 'already being started – ')}. Nothing was started a second time. Follow it with events_since (SETUP / START / BŁĄD STARTU) and status or queue_list.`;
 }
 
 /**
@@ -518,6 +529,7 @@ export interface QueueView {
  * provider, so the answer matches what `watch` does. `inflight` are the tasks this very process is starting.
  */
 export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live: { agent?: AgentName; counted?: boolean }[], rows: StatusRow[] = [], nowMs: number = Date.now()): QueueView[] {
+  const redact = secretRedactor([config, process.env, ...queueDiagnosticSources(entries)]);
   const failed = new Set(entries.filter((e) => e.status === 'failed').map((e) => e.task));
   const used: Record<AgentName, number> = perProvider(activeProviders(config), () => 0);
   for (const w of live) if (w.agent && w.counted !== false) used[w.agent]++;
@@ -530,7 +542,7 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
   let position = 0;
   return entries.map((entry): QueueView => {
     if (entry.status === 'failed') return { position: null, entry, condition: { kind: 'failed', text: `failed: ${(entry.error ?? '').split('\n')[0] ?? ''}` }, since: entry.failedAt ?? entry.queuedAt };
-    if (entry.status === 'starting') return { position: null, entry, condition: { kind: 'starting', text: entry.direct || readSetupProgress(config, entry.task) ? startProgressText(readSetupProgress(config, entry.task), nowMs) : 'starting' }, since: entry.startingAt ?? entry.queuedAt };
+    if (entry.status === 'starting') return { position: null, entry, condition: { kind: 'starting', text: entry.direct || readSetupProgress(config, entry.task, queueDiagnosticSources(entries)) ? startProgressText(readSetupProgress(config, entry.task, queueDiagnosticSources(entries)), nowMs) : 'starting' }, since: entry.startingAt ?? entry.queuedAt };
     position++;
     const author = directAuthorState(config, entry, entries);
     if (author.waiting || author.failed) return { position, entry, condition: { kind: 'after', text: author.waiting ?? author.failed! }, since: entry.queuedAt };
@@ -554,7 +566,7 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
     }
     used[entry.agent]++;
     return { position, entry, condition: { kind: 'ready', text: 'wolne miejsce – start przy najbliższym ticku watch' }, since: entry.queuedAt };
-  });
+  }).map(view => ({ ...view, condition: { ...view.condition, text: redact(view.condition.text) } }));
 }
 
 /** What `status` prints under its table: the waiting tasks and what each one waits for; nothing when the queue is empty. */

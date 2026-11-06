@@ -46,10 +46,10 @@ export function clearSetupProgress(config: Pick<GlobalConfig, 'stateDir'>, task:
   fs.rmSync(setupProgressFile(config, windowName(task)), { force: true });
 }
 
-export function readSetupProgress(config: Pick<GlobalConfig, 'stateDir'>, task: string): SetupProgress | undefined {
+export function readSetupProgress(config: Pick<GlobalConfig, 'stateDir'>, task: string, sources: unknown[] = []): SetupProgress | undefined {
   try {
     const data: unknown = JSON.parse(fs.readFileSync(setupProgressFile(config, windowName(task)), 'utf8'));
-    return isObject(data) && typeof data.phase === 'string' && typeof data.stepAt === 'string' ? (data as unknown as SetupProgress) : undefined;
+    return isObject(data) && typeof data.phase === 'string' && typeof data.stepAt === 'string' ? (secretRedactor([config, process.env, ...sources, data])(data) as unknown as SetupProgress) : undefined;
   } catch {
     return undefined;
   }

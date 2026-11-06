@@ -1,3 +1,4 @@
+import { queueDiagnosticSources } from './queue.ts';
 import { DEFAULT_PROVIDERS } from './providers/types.ts';
 import { get as providerValue } from './providers/registry.ts';
 import type { AgentName } from './config.ts';
@@ -13,7 +14,6 @@ import type { MarkSelection } from './mark.ts';
 import { readOutputs, aggregateOutputs } from './outputs.ts';
 import { developmentEnvironment } from './installation.ts';
 import { withFileLock as withReportLock } from './file-lock.ts';
-import { secretRedactor } from './secret-redaction.ts';
 import { redactQueue } from './mcp-redact.ts';
 import { reportFingerprint } from './report-state.ts';
 import { findMcpProcesses, staleProcesses } from './mcp-processes.ts';
@@ -512,7 +512,7 @@ async function runQueueList(deps: McpDeps, args: { cohort?: string | undefined }
     error: v.entry.error ?? null,
     cohort: v.entry.cohort ?? null,
     direct: v.entry.direct ?? false,
-    setup: v.entry.status === 'starting' ? secretRedactor([ctx.config, process.env, readQueue(ctx.config)])(readSetupProgress(ctx.config, v.entry.task) ?? null) : null,
+    setup: v.entry.status === 'starting' ? readSetupProgress(ctx.config, v.entry.task, queueDiagnosticSources(readQueue(ctx.config))) ?? null : null,
     retryHint: v.entry.status === 'failed' ? `Read error, inspect residue, then queue_retry task=${v.entry.task}` : null,
     blocked: v.condition.kind === 'blocked',
   }));

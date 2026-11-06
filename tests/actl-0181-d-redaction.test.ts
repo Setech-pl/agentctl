@@ -6,8 +6,8 @@ import { recordJournal, journalPath } from '../src/core/journal.ts';
 import { collectEvents } from '../src/core/chat-events.ts';
 import { MCP_TOOLS } from '../src/core/mcp-tools.ts';
 import { secretRedactor } from '../src/core/secret-redaction.ts';
-import { queueDir } from '../src/core/queue.ts';
-import { setupProgressFile, writeSetupProgress } from '../src/core/setup-progress.ts';
+import { queueDir, queueDiagnosticSources, readQueue, describeQueue, directStartText } from '../src/core/queue.ts';
+import { setupProgressFile, writeSetupProgress, readSetupProgress } from '../src/core/setup-progress.ts';
 import { DiskRunner, makeConfig, useScratch } from './helpers.ts';
 const scratch = useScratch();
 it('shared redaction masks quoted assignments, URL secrets and bare known output values', () => {
@@ -34,4 +34,34 @@ it('persistence and MCP reads sanitize legacy raw setup objects and journal even
   const tool = MCP_TOOLS.find(t => t.name === 'queue_list')!;
   const result = await tool.run({ context: () => ctx, notify: async () => {} }, {} as never);
   assert.ok(!result.text.includes('legacy-sentinel')); assert.ok(result.text.includes('NPM_TOKEN=***'));
+});
+
+it('R2 N1: legacy setup and queue diagnostics redact at read time for every view', () => {
+  const config = makeConfig(scratch.sub('r2-n1'), 'env: {CONFIG_TOKEN: config-only-sentinel}\n');
+  const now = new Date().toISOString();
+  const progress = { task: 'LEGACY', phase: 'setup', command: 'NPM_TOKEN=legacy-command-sentinel npm ci; echo config-only-sentinel process-only-sentinel queue-only-sentinel', startedAt: now, stepAt: now };
+  fs.mkdirSync(`${config.stateDir}/legacy`, { recursive: true });
+  const file = setupProgressFile(config, 'legacy');
+  fs.writeFileSync(file, JSON.stringify(progress));
+  fs.mkdirSync(queueDir(config), { recursive: true });
+  const entryFile = `${queueDir(config)}/0001-legacy.json`;
+  const raw = { seq: 1, task: 'LEGACY', order: 1, priority: 'normal', status: 'starting', queuedAt: now, agent: 'claude', model: 'sonnet', effort: 'high', direct: true, after: [], spec: '---\ntask: LEGACY\nenv: {API_TOKEN: queue-only-sentinel}\n---\nWork' };
+  fs.writeFileSync(entryFile, JSON.stringify(raw));
+  const previous = process.env.R2_SECRET;
+  process.env.R2_SECRET = 'process-only-sentinel';
+  try {
+    const entries = readQueue(config), entry = entries[0]!;
+    const texts = [readSetupProgress(config, 'LEGACY', queueDiagnosticSources(entries)), directStartText(config, entry, Date.now()), describeQueue(config, entries, [])[0]!.condition.text];
+    for (const value of texts) {
+      assert.doesNotMatch(JSON.stringify(value), /legacy-command-sentinel|config-only-sentinel|process-only-sentinel|queue-only-sentinel/);
+      assert.match(JSON.stringify(value), /NPM_TOKEN=\*\*\*/);
+    }
+    for (const status of ['failed', 'queued'] as const) {
+      fs.writeFileSync(entryFile, JSON.stringify({ ...raw, status, retryAt: new Date(Date.now() + 60000).toISOString(), error: 'failed config-only-sentinel process-only-sentinel queue-only-sentinel NPM_TOKEN=legacy-command-sentinel\nsecond line' }));
+      const failed = readQueue(config);
+      const text = JSON.stringify([directStartText(config, failed[0]!, Date.now()), describeQueue(config, failed, [])[0]!.condition.text]);
+      assert.doesNotMatch(text, /legacy-command-sentinel|config-only-sentinel|process-only-sentinel|queue-only-sentinel/);
+    }
+    assert.equal(fs.readFileSync(file, 'utf8'), JSON.stringify(progress), 'read must not rewrite legacy data');
+  } finally { if (previous === undefined) delete process.env.R2_SECRET; else process.env.R2_SECRET = previous; }
 });
