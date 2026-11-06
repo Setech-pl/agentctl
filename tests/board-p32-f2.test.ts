@@ -60,7 +60,7 @@ it('F2: coarse change timestamps fall back to reading TASK.md and report bodies'
     // Model a filesystem whose ctime cannot distinguish equal-size writes within one tick.
     fs.lstatSync = ((...args: Parameters<typeof fs.lstatSync>) => {
       const st = native(...args);
-      if (args[0] === file || args[0] === record.report) {
+      if (st && (args[0] === file || args[0] === record.report)) {
         if (typeof st.ctimeMs === 'bigint') return Object.assign(st, { ctimeMs: BigInt(time.getTime()), ctimeNs: BigInt(time.getTime()) * 1_000_000n });
         return Object.assign(st, { ctimeMs: time.getTime() });
       }
