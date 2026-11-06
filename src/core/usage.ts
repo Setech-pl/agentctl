@@ -87,12 +87,12 @@ export function formatReset(ms: number, now: number): string {
 export { claudePlanFile, readClaudeSnapshot } from './providers/claude-usage.ts';
 
 /** Both plans. Reads one file for Claude and the tail of the newest Codex logs. */
-export function readPlans(config: GlobalConfig, reader: UsageReader, now: number): ProviderValues<PlanState> {
+export function readPlans(config: GlobalConfig, reader: UsageReader, now: number, records: readonly TaskRecord[] = allRecords(config)): ProviderValues<PlanState> {
   const ids = activeProviders(config);
   const plans = perProvider(ids, id => adapter(id).usage.readPlan(config, reader, now));
   for (const id of ids) { const p = plans[id]; p.stale = p.readAt !== null && now - p.readAt > config.capacity.staleMinutes * 60_000; }
   const totals = perProvider(ids, () => 0);
-  for (const u of collectTaskUsage(config, reader, allRecords(config), now).values()) if ((ids as string[]).includes(u.agent)) totals[u.agent as AgentName] += freshTokens(u.total);
+  for (const u of collectTaskUsage(config, reader, records, now).values()) if ((ids as string[]).includes(u.agent)) totals[u.agent as AgentName] += freshTokens(u.total);
   recordSamples(config, plans, totals, now);
   return plans;
 }

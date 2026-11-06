@@ -32,6 +32,8 @@ import { formatDuration, formatLocalTime, shellQuote } from './util.ts';
 import type { AgentName } from './config.ts';
 import { taskTokenMap } from './usage.ts';
 import type { TaskTokens } from './usage.ts';
+import type { UsageReader } from './usage-sources.ts';
+import { allRecords, openReader } from './usage.ts';
 import { formatTokens } from './usage-parse.ts';
 
 export interface StatusRow {
@@ -142,6 +144,10 @@ export interface CollectOptions {
   archived?: boolean;
   /** Add the tokens of each task (reads the session logs of the agents, incrementally). */
   tokens?: boolean;
+  /** Records the caller already scanned (snapshotRecords): collectStatus does not scan the stores again. */
+  records?: { current: TaskRecord[]; archived: TaskRecord[] };
+  /** The usage reader for the tokens (default: a fresh one for this call). */
+  reader?: UsageReader;
 }
 
 const idleObservations = new Map<string, { working: boolean; idle: number; attempt: string; observedWork: boolean; workStopAt?: string }>();
@@ -152,11 +158,13 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
   const live = new Set(infos.map((w) => w.plain));
   const rows: StatusRow[] = [];
   const knownWindows = new Set<string>();
-  const records = listTaskRecords(config).map((record) => ({ record, archived: false }));
+  // The records are copied: the loop annotates them (reportCandidate), and the caller's scan cache must stay pristine.
+  const scanned = opts.records ?? { current: listTaskRecords(config), archived: opts.archived ? listArchivedRecords(config) : [] };
+  const records = scanned.current.map((record) => ({ record: { ...record }, archived: false }));
   if (opts.archived) {
     // A folder in the archive counts as closed. A live window or a current state folder of the same name wins over it.
     const current = new Set(records.map((r) => r.record.window));
-    for (const record of listArchivedRecords(config)) if (!current.has(record.window) && !live.has(record.window)) records.push({ record, archived: true });
+    for (const record of scanned.archived) if (!current.has(record.window) && !live.has(record.window)) records.push({ record: { ...record }, archived: true });
   }
   for (const { record, archived } of records) {
     if (!archived) knownWindows.add(record.window);
@@ -337,7 +345,8 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     });
   }
   if (opts.tokens) {
-    const tokens = taskTokenMap(config, runner.now());
+    const tokenRecords = opts.records ? [...opts.records.current, ...opts.records.archived] : allRecords(config);
+    const tokens = taskTokenMap(config, runner.now(), tokenRecords, opts.reader ?? openReader(config));
     for (const row of rows) row.tokens = tokens.get(row.task) ?? null;
   }
   attachCollisions(rows, config.collisions.ignore, config.collisions.enabled);

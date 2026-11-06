@@ -355,6 +355,90 @@ export function listArchivedRecords(config: GlobalConfig): TaskRecord[] {
   return recordsIn(archiveDir(config));
 }
 
+/** One scan of both record stores, and what it had to do for it. */
+export interface RecordScan {
+  current: TaskRecord[];
+  archived: TaskRecord[];
+  all: TaskRecord[];
+  /** TASK.md files read and parsed in this call; 0 when nothing changed since the last scan of the same home. */
+  parsed: number;
+}
+
+interface CachedRecordFile {
+  mtimeMs: number;
+  size: number;
+  record: TaskRecord | undefined;
+}
+
+/** Parsed TASK.md files per scanned directory; an unchanged file (same lstat mtime and size) is not read again. */
+const recordScanCache = new Map<string, Map<string, CachedRecordFile>>();
+
+/** Cumulative count of TASK.md parses, for tests that assert a tick parses nothing. */
+export const recordScanStats = { parsed: 0 };
+
+/** Yield every 25 folders so a long scan does not block the event loop (the board shares it with key handling). */
+const SCAN_CHUNK = 25;
+
+async function scanRecordsIn(dir: string): Promise<{ records: TaskRecord[]; parsed: number }> {
+  let files = recordScanCache.get(dir);
+  if (!files) {
+    files = new Map();
+    recordScanCache.set(dir, files);
+  }
+  let names: string[] = [];
+  try {
+    names = fs.readdirSync(dir).sort();
+  } catch {
+    names = [];
+  }
+  const prefix = `${dir}${path.sep}`;
+  const seen = new Set<string>();
+  const records: TaskRecord[] = [];
+  let parsed = 0;
+  let done = 0;
+  for (const name of names) {
+    const file = path.join(dir, name, 'TASK.md');
+    seen.add(file);
+    let st: fs.Stats | undefined;
+    try {
+      st = fs.lstatSync(file);
+    } catch {
+      files.delete(file);
+    }
+    if (st) {
+      const hit = files.get(file);
+      if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) {
+        if (hit.record) records.push(hit.record);
+      } else {
+        let record: TaskRecord | undefined;
+        try {
+          record = parseTaskRecord(fs.readFileSync(file, 'utf8'));
+        } catch {
+          record = undefined;
+        }
+        files.set(file, { mtimeMs: st.mtimeMs, size: st.size, record });
+        parsed++;
+        recordScanStats.parsed++;
+        if (record) records.push(record);
+      }
+    }
+    if (++done % SCAN_CHUNK === 0) await new Promise((resolve) => setImmediate(resolve));
+  }
+  for (const key of files.keys()) if (key.startsWith(prefix) && !seen.has(key)) files.delete(key);
+  return { records, parsed };
+}
+
+/**
+ * The records of both stores with an in-process cache: unchanged TASK.md files are not read or parsed again. The board calls
+ * this on every refresh and hands the one list to every consumer; one-shot commands keep listTaskRecords/listArchivedRecords.
+ * Callers must not mutate the returned records: they are the cache (collectStatus works on copies).
+ */
+export async function snapshotRecords(config: GlobalConfig): Promise<RecordScan> {
+  const current = await scanRecordsIn(config.stateDir);
+  const archived = await scanRecordsIn(archiveDir(config));
+  return { current: current.records, archived: archived.records, all: [...current.records, ...archived.records], parsed: current.parsed + archived.parsed };
+}
+
 /** A task by its ID (any case), current first, else in the archive: one lookup for everything that needs "the record of that task". */
 export function findRecordAnywhere(config: GlobalConfig, task: string): TaskRecord | undefined {
   const wanted = task.toLowerCase();

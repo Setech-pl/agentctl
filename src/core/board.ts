@@ -8,6 +8,7 @@ import { collectCapacity, renderCapacity } from './capacity.ts';
 import { shortPath } from './report-detect.ts';
 import { modelLabel, providerLabel } from './model-label.ts';
 import path from 'node:path';
+import fs from 'node:fs';
 import { attachCollisions, collideText } from './collisions.ts';
 import { cancelTasks, planCancel } from './cancel.ts';
 import { countsLine, lastActivity, listCohorts } from './cohort.ts';
@@ -34,7 +35,7 @@ import { sendPrompts } from './send.ts';
 import type { TaskState } from './state.ts';
 import { collectStatus } from './status.ts';
 import type { StatusRow } from './status.ts';
-import { listArchivedRecords, listTaskRecords } from './taskstore.ts';
+import { snapshotRecords } from './taskstore.ts';
 import { logLines, markTask } from './history.ts';
 import type { Result } from './history.ts';
 import { openReader, readPlans } from './usage.ts';
@@ -648,12 +649,14 @@ const clock = (ms: number): string => {
 /** One refresh from the core: the rows (with cached progress) and the preview of the selected task. */
 export async function loadBoard(ctx: Context, selected: string | null, cache: ProgressCache, previewLines: number = PREVIEW_LINES): Promise<BoardSnapshot> {
   const { runner, config } = ctx;
-  const statusRows = await collectStatus(ctx, { progress: false, archived: true, tokens: true });
-  const records = new Map([...listArchivedRecords(config), ...listTaskRecords(config)].map((r) => [r.task, r]));
+  // One scan of the record stores per tick (cached: unchanged TASK.md files are not read again), shared by every consumer.
+  const scan = await snapshotRecords(config);
+  const statusRows = await collectStatus(ctx, { progress: false, archived: true, tokens: true, records: scan });
+  const records = new Map(scan.all.map((r) => [r.task, r]));
   const now = runner.now();
   const reader = openReader(config);
-  const plans = readPlans(config, reader, now);
-  const disk = await collectDisk(ctx);
+  const plans = readPlans(config, reader, now, scan.all);
+  const disk = await collectDisk(ctx, fs.promises.statfs, { records: scan.all });
   reader.save();
   const rows: BoardRow[] = [];
   for (const row of statusRows) {
