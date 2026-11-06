@@ -252,8 +252,8 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 | `overlap` | read | `task?` |
 | `resume` | write | `tasks?`, `all?`, `confirm?`, `preview_token?` |
 | `send` | write | `task`, `text?`, `enter_only?`, `confirm?`, `token?` |
-| `new` | write | `spec`, `agent?`, `reuse?`, `no_agent?`, `cohort?`, `wait_trust?`, `confirm?`, `preview_token?` |
-| `queue` | write | `spec`, `cohort?`, `agent?`, `confirm?`, `preview_token?` |
+| `new` | write | `spec?`, `agent?`, `reuse?`, `no_agent?`, `cohort?`, `wait_trust?`, `confirm?`, `preview_token?` |
+| `queue` | write | `spec?`, `cohort?`, `agent?`, `confirm?`, `preview_token?` |
 | `queue_rm` | write | `task`, `confirm?`, `preview_token?` |
 | `cancel` | write | `task?`, `tasks?`, `cohort?`, `reason?`, `remove_worktree?`, `confirm?`, `preview_token?` |
 | `mark` | write | `task?`, `tasks?`, `cohort?`, `result`, `note?`, `confirm?`, `preview_token?` |

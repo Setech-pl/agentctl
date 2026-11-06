@@ -20,7 +20,7 @@ import { collectLimits } from '../src/core/limits.ts';
 import { sendPrompts } from '../src/core/send.ts';
 import { capacitySnapshot, collectCapacity, snapshotLines } from '../src/core/capacity.ts';
 import { taskFile, setHeaderFields } from '../src/core/taskstore.ts';
-import { planQueueAdd, commitQueueAdd } from '../src/core/queue.ts';
+import { planQueueAdd, commitQueueAdd, readQueue } from '../src/core/queue.ts';
 import { splitSpecs } from '../src/core/spec.ts';
 import { runDoctor } from '../src/core/doctor.ts';
 const scratch = useScratch();
@@ -64,6 +64,28 @@ for (const mode of ['fresh', 'guide', 'parallel'] as const) it(`P3 ${mode}: iden
   if (mode === 'parallel') { await Promise.all([f.call('capacity'), f.call('status'), (async () => { const other = { spec: f.spec('OTHER'), no_agent: true }; await f.call('new', other); assert.equal((await f.call('new', { ...other, confirm: true })).isError, undefined); })()]); }
   const raws = splitSpecs(args.spec); const canonicalVariant = `---\n${YAML.stringify(Object.fromEntries(Object.entries(raws[0]!.header).reverse()))}---\n\nDo the work.  \r\n`;
   const result = await f.call('new', { ...args, spec: canonicalVariant, confirm: true, preview_token: token(preview.text) }); assert.equal(result.isError, undefined, result.text);
+});
+it('P39: a confirm with preview_token only executes the stored arguments; the spec need not be resent', async () => {
+  const f = fixture('token-only');
+  const args = { spec: f.spec('TOK-1'), no_agent: true };
+  const preview = await f.call('new', args); assert.equal(preview.isError, undefined, preview.text);
+  const preview_token = token(preview.text);
+  // A token with changed arguments is refused as before, and the token survives the mismatch.
+  const changed = await f.call('new', { ...args, no_agent: false, preview_token, confirm: true });
+  assert.match(changed.text, /different argument hash: no_agent/);
+  const done = await f.call('new', { preview_token, confirm: true });
+  assert.equal(done.isError, undefined, done.text);
+  assert.match(done.text, /Registered: TOK-1/);
+  assert.deepEqual(readQueue(f.config).map((e) => [e.task, e.noAgent]), [['TOK-1', true]]);
+  // queue likewise: token-only confirm queues the stored spec
+  const qpreview = await f.call('queue', { spec: f.spec('TOK-2') }); assert.equal(qpreview.isError, undefined, qpreview.text);
+  const qdone = await f.call('queue', { preview_token: token(qpreview.text), confirm: true });
+  assert.equal(qdone.isError, undefined, qdone.text);
+  assert.match(qdone.text, /Queued: TOK-2/);
+  assert.deepEqual(readQueue(f.config).map((e) => e.task), ['TOK-1', 'TOK-2']);
+  // Without a token, spec stays required.
+  const bare = await f.call('new', { confirm: true });
+  assert.match(bare.text, /missing preview|needs the spec/);
 });
 it('P3 gives precise TTL, argument field and session errors; failed mismatch keeps the valid token usable', async () => {
   const f = fixture('confirm-errors', 'preview: {ttl_s: 2}\n');

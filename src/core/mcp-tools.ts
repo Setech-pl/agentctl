@@ -855,17 +855,18 @@ async function runMove(deps: McpDeps, args: { task: string; agent?: AgentName | 
 /** `setup` runs shell commands: neither the top-level key nor `repos[].setup` is accepted from the chat (a repository's .agentctl.yaml setup still runs). */
 const chatSetup = (header: Record<string, unknown>): boolean => 'setup' in header || (Array.isArray(header.repos) && header.repos.some((r) => typeof r === 'object' && r !== null && 'setup' in r));
 
-interface NewMcpArgs { spec: string; confirm?: boolean | undefined; agent?: AgentName | undefined; reuse?: boolean | undefined; no_agent?: boolean | undefined; cohort?: string | undefined; wait_trust?: boolean | undefined }
+interface NewMcpArgs { spec?: string | undefined; confirm?: boolean | undefined; agent?: AgentName | undefined; reuse?: boolean | undefined; no_agent?: boolean | undefined; cohort?: string | undefined; wait_trust?: boolean | undefined }
 async function runNew(deps: McpDeps, args: NewMcpArgs): Promise<ToolResult> {
   const probe = (): { tasks: string } => {
     // Only for the audit line: the task IDs named in the spec, without resolving anything.
     try {
-      return { tasks: splitSpecs(args.spec, 'mcp').map((s) => String(s.header.task ?? '?')).join(', ') };
+      return { tasks: splitSpecs(args.spec ?? '', 'mcp').map((s) => String(s.header.task ?? '?')).join(', ') };
     } catch {
       return { tasks: '?' };
     }
   };
-  return writeTool(deps, 'new', { task: probe().tasks, detail: `${clipText(args.spec, 120)} confirm=${Boolean(args.confirm)}` }, async (ctx) => {
+  return writeTool(deps, 'new', { task: probe().tasks, detail: `${clipText(args.spec ?? '', 120)} confirm=${Boolean(args.confirm)}` }, async (ctx) => {
+    if (!args.spec) throw new AgentctlError('new needs the spec text', 'Give the spec, or confirm a preview with preview_token only: the stored spec then executes.');
     const raws = splitSpecs(args.spec, 'the spec from the chat');
     if (args.cohort) for (const raw of raws) raw.header.cohort = args.cohort;
     for (const raw of raws) {
@@ -909,14 +910,15 @@ async function runNew(deps: McpDeps, args: NewMcpArgs): Promise<ToolResult> {
   });
 }
 
-async function runQueue(deps: McpDeps, args: { spec: string; agent?: AgentName | undefined; cohort?: string | undefined; confirm?: boolean | undefined }): Promise<ToolResult> {
+async function runQueue(deps: McpDeps, args: { spec?: string | undefined; agent?: AgentName | undefined; cohort?: string | undefined; confirm?: boolean | undefined }): Promise<ToolResult> {
   let tasks = '?';
   try {
-    tasks = splitSpecs(args.spec, 'mcp').map((s) => String(s.header.task ?? '?')).join(', ');
+    tasks = splitSpecs(args.spec ?? '', 'mcp').map((s) => String(s.header.task ?? '?')).join(', ');
   } catch {
     // only for the audit line
   }
-  return writeTool(deps, 'queue', { task: tasks, detail: `${clipText(args.spec, 120)} confirm=${Boolean(args.confirm)}` }, async (ctx) => {
+  return writeTool(deps, 'queue', { task: tasks, detail: `${clipText(args.spec ?? '', 120)} confirm=${Boolean(args.confirm)}` }, async (ctx) => {
+    if (!args.spec) throw new AgentctlError('queue needs the spec text', 'Give the spec, or confirm a preview with preview_token only: the stored spec then executes.');
     const raws = splitSpecs(args.spec, 'the spec from the chat');
     if (args.cohort) for (const raw of raws) raw.header.cohort = args.cohort;
     for (const raw of raws) {
@@ -1224,7 +1226,7 @@ export const MCP_TOOLS: McpToolDef[] = [
       'WRITE, off unless the user put "new" in mcp.allow. Starts agent tasks from a spec: a YAML header between --- lines (task, agent, model, effort, repos …) followed by the prompt, the same format as the agentctl CLI. ' +
       'The FIRST call (confirm omitted) validates the spec and returns a summary of what would start; show it to the user. Only when they agree, call again with the same spec and confirm: true. ' +
       '"setup" commands (shell) are not accepted from the chat. Every start is asynchronous: confirm registers it and returns at once, and the watcher (it must be running, else the confirm is refused) does the checkout, the setup, the window and the wait for the agent; follow it with events_since (SETUP, START, BŁĄD STARTU) and status or queue_list. new again for a task that is being started returns its state and starts nothing twice; a failed start leaves the task failed with its reason and the worktrees, and queue_retry tries again.',
-    input: { spec: z.string().min(1).max(100_000).describe('The spec text: ---, YAML header, ---, prompt. Several specs may follow each other.'), agent: z.enum(DEFAULT_PROVIDERS).optional(), reuse: z.boolean().optional(), no_agent: z.boolean().optional(), cohort: cohortArg.optional(), wait_trust: z.boolean().optional().describe('Ignored: every start is asynchronous and the watcher always waits for a human to answer the trust dialog.'), confirm: z.boolean().optional().describe('true only after the user agreed to the summary.') },
+    input: { spec: z.string().min(1).max(100_000).optional().describe('The spec text: ---, YAML header, ---, prompt. Several specs may follow each other. Optional only when confirming with preview_token: the stored spec then executes.'), agent: z.enum(DEFAULT_PROVIDERS).optional(), reuse: z.boolean().optional(), no_agent: z.boolean().optional(), cohort: cohortArg.optional(), wait_trust: z.boolean().optional().describe('Ignored: every start is asynchronous and the watcher always waits for a human to answer the trust dialog.'), confirm: z.boolean().optional().describe('true only after the user agreed to the summary.') },
     annotations: { title: 'Start tasks from a spec', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     run: (deps, args) => guarded(() => runNew(deps, args as NewMcpArgs)),
   }),
@@ -1236,7 +1238,7 @@ export const MCP_TOOLS: McpToolDef[] = [
       'WRITE, off unless the user put "queue" in mcp.allow. Puts the tasks of a spec in the queue (same spec format as new, plus priority: high|normal, after: <TASK or list>, touches: [globs]): each starts by itself when a window of its provider is free and its `after` tasks have a report. ' +
       'The FIRST call (confirm omitted) validates the spec and returns a summary (where each task will stand, hints, touches warnings); show it to the user. Only when they agree, call again with the same spec and confirm: true. "setup" is not accepted from the chat.',
     input: {
-      spec: z.string().min(1).max(100_000).describe('The spec text: ---, YAML header, ---, prompt. Several specs may follow each other.'),
+      spec: z.string().min(1).max(100_000).optional().describe('The spec text: ---, YAML header, ---, prompt. Several specs may follow each other. Optional only when confirming with preview_token: the stored spec then executes.'),
       cohort: cohortArg.optional(),
       agent: z.enum(DEFAULT_PROVIDERS).optional().describe('Run the specs on this provider, translated through the equivalents table. The queue never switches provider by itself.'),
       confirm: z.boolean().optional().describe('true only after the user agreed to the summary.'),
@@ -1386,7 +1388,7 @@ function redactConfig(config: GlobalConfig): unknown {
 }
 
 const confirmedTools = new Set(['mark', 'new', 'queue', 'cancel', 'resume', 'move', 'interrupt', 'close', 'queue_rm', ...MCP_TOOLS.filter((t) => t.kind === 'write' && !['send', 'mark', 'away', 'set_limits', 'reserve'].includes(t.name)).map((t) => t.name)]);
-const previews = new WeakMap<McpDeps, Map<string, { key: string; arguments: Record<string, unknown>; scope: string; at: number; ttlS: number }>>();
+const previews = new WeakMap<McpDeps, Map<string, { key: string; arguments: Record<string, unknown>; /** The arguments as they came in (the spec text, not its canonical form): a token-only confirm executes these. */ raw: Record<string, unknown>; scope: string; at: number; ttlS: number }>>();
 const lastPreviewMutation = new WeakMap<McpDeps, string>();
 const previewSessions = new WeakMap<McpDeps, string>();
 const issuedPreviewTokens = new Map<string, { session: string; state: string }>();
@@ -1503,8 +1505,8 @@ for (const tool of MCP_TOOLS) {
   const cli = ({ queue_list: 'queue list', queue_rm: 'queue rm', queue_retry: 'queue retry', queue_up: 'queue up', queue_pause: 'queue pause', queue_resume: 'queue resume', cohort_list: 'cohort list', cohort_show: 'cohort show', list_reports: 'status', get_report: 'pull <TASK>', pull_ready: 'pull --ready', task_spec: 'peek <TASK>', gc_preview: 'gc', events_since: 'events', set_limits: 'limits set', reserve: 'limits reserve' } as Record<string, string>)[tool.name] ?? tool.name.replaceAll('_', ' ');
   if (!tool.description.includes('CLI:')) tool.description += ` Use when the user needs this operation. CLI: agentctl ${cli}.`;
   if (!confirmedTools.has(tool.name)) continue;
-  tool.input = { ...tool.input, confirm: confirmArg, preview_token: z.string().optional().describe('Token returned by this preview. Independent previews can be confirmed in any order if their scope is unchanged.') };
-  tool.description += ' Two steps are mandatory: preview, then confirm: true with identical arguments. A changed scope requires a new preview.';
+  tool.input = { ...tool.input, confirm: confirmArg, preview_token: z.string().optional().describe('Token returned by this preview. Independent previews can be confirmed in any order if their scope is unchanged. A confirm may carry only this token: the stored arguments then execute.') };
+  tool.description += ' Two steps are mandatory: preview, then confirm: true with identical arguments — or with preview_token only, which executes the stored arguments (for new/queue the spec need not be resent). A changed scope requires a new preview.';
   const original = tool.run;
   tool.run = (deps, args) => guarded(async () => {
     const ctx = deps.context(() => {});
@@ -1536,20 +1538,24 @@ for (const tool of MCP_TOOLS) {
     if (!pending) { pending = new Map(); previews.set(deps, pending); }
     const token = typeof preview_token === 'string' ? preview_token : ([...pending].reverse().find(([, entry]) => entry.key === key) ?? [...pending].reverse().find(([, entry]) => entry.key.startsWith(`${tool.name}:`)))?.[0];
     const preview = token ? pending.get(token) : undefined;
+    // A confirm may carry only the token: the token binds the scope, so the stored preview arguments execute
+    // (for new/queue the chat then does not resend the whole spec). A confirm that also sends arguments must match the hash as before.
+    const tokenOnly = Boolean(confirm && typeof preview_token === 'string' && Object.keys(input).length === 0);
+    const effective = tokenOnly && preview ? preview.raw : input;
     const deny = (reason: string) => { audit(ctx, { tool: tool.name, outcome: 'denied', detail: reason }); return fail(`Confirmation refused: ${reason}. Call again without confirm to recalculate the scope. Nothing was done.`); };
     if (confirm) {
       if (!preview) {
         const issued = token ? issuedPreviewTokens.get(token) : undefined;
         return deny(issued ? issued.session !== session ? 'different session' : `invalidated by ${issued.state}` : 'missing preview in this session (unknown token or restarted session)');
       }
-      if (preview.key !== key) {
+      if (!tokenOnly && preview.key !== key) {
         const fields = [...new Set([...Object.keys(preview.arguments), ...Object.keys(arguments_)])].filter(k => JSON.stringify(preview.arguments[k]) !== JSON.stringify(arguments_[k]));
         return deny(`different argument hash: ${fields.join(', ') || 'operation'}`);
       }
       if (ctx.runner.now() - preview.at > preview.ttlS * 1000) return deny(`TTL expired (${preview.ttlS}s since preview)`);
     }
     let scope: unknown;
-    try { scope = await confirmationScope(ctx, tool.name, input); }
+    try { scope = await confirmationScope(ctx, tool.name, effective); }
     catch (e) { audit(ctx, { tool: tool.name, outcome: 'error', detail: errorMessage(e) }); throw e; }
     // Argument identity is independent of mutable runtime facts. Destructive scopes are checked separately.
     const scopeIdentity = JSON.stringify(canonical(confirmationTargets(tool.name, scope)));
@@ -1563,7 +1569,7 @@ for (const tool of MCP_TOOLS) {
       if (!result.isError) {
         const token = crypto.randomUUID();
         if (pending.size >= 100) { const evicted = pending.keys().next().value!; pending.delete(evicted); issuedPreviewTokens.set(evicted, { session, state: 'preview capacity eviction' }); }
-        pending.set(token, { key, arguments: arguments_, scope: scopeIdentity, at: ctx.runner.now(), ttlS: ctx.config.preview.ttlS });
+        pending.set(token, { key, arguments: arguments_, raw: input, scope: scopeIdentity, at: ctx.runner.now(), ttlS: ctx.config.preview.ttlS });
         issuedPreviewTokens.set(token, { session, state: 'pending' });
         if (issuedPreviewTokens.size > 10000) issuedPreviewTokens.delete(issuedPreviewTokens.keys().next().value!);
         result.text += `\npreview_ttl_s: ${ctx.config.preview.ttlS}; expires_at: ${new Date(ctx.runner.now() + ctx.config.preview.ttlS * 1000).toISOString()}\npreview_token: ${token}`;
@@ -1581,7 +1587,7 @@ for (const tool of MCP_TOOLS) {
       const result = await applyGc(fresh, plan);
       return { text: JSON.stringify(result, null, 2), executed: true, announce: `gc: ${result.done.length} items, ${result.freedBytes} bytes` };
     });
-    return original(deps, args);
+    return original(deps, tokenOnly ? { ...effective, confirm: true } : args);
   });
 }
 
