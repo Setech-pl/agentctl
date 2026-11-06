@@ -1,4 +1,4 @@
-import { validateLink, missingLinkTargets, fillTaskLinkTargets } from './links.ts';
+import { validateLink, missingLinkTargets, fillTaskLinkTargets, staleProjectLinkWarnings } from './links.ts';
 import { validateLaunch } from './safety.ts';
 import { provider, isActive, activeProviders } from './providers/registry.ts';
 import { VERDICTS } from './outputs.ts';
@@ -59,6 +59,8 @@ export interface ResolvedSpec {
   effort: Effort;
   repos: ResolvedRepo[];
   links: Link[];
+  /** Preview diagnostics for inherited project links; not persisted as task links. */
+  linkWarnings?: string[];
   /** Shell commands for the first worktree: after `git worktree add`, before the links. */
   setup: string[];
   env: Record<string, string>;
@@ -395,6 +397,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   for (const r of repos) if (r.setup) r.setup = r.setup.map(fill);
   // Links: later layers win for the same `from`.
   const linkByFrom = new Map<string, Link>();
+  const projectLinkByFrom = new Map<string, Link>();
   for (const link of [...config.links, ...(project?.links ?? []), ...specLinks]) {
     const target = pathOf(fillTaskLinkTargets(fill(link.to), config));
     const expanded = fill(link.from);
@@ -402,8 +405,13 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     if (path.isAbsolute(expanded) && !from.startsWith('../')) validateLink(from, target, repos[0]!.worktree);
     if (!from || from === '.' || from.startsWith('../')) throw new AgentctlError(`${taskId}: link from must stay inside the primary worktree: ${expanded}`, missingLinkTargets([{ from: expanded, to: target }]).join('; ') || undefined);
     validateLink(from, target, repos[0]!.worktree);
-    linkByFrom.set(from, { from, to: target });
+    const resolvedLink = { from, to: target };
+    linkByFrom.set(from, resolvedLink);
+    if (project?.links?.includes(link)) projectLinkByFrom.set(from, resolvedLink);
+    else projectLinkByFrom.delete(from);
   }
+
+  const linkWarnings = specLinks.length === 0 ? staleProjectLinkWarnings([...projectLinkByFrom.values()], config) : [];
 
   // Env: spec > project > global.
   const env: Record<string, string> = {};
@@ -429,6 +437,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     effort,
     repos,
     links: [...linkByFrom.values()],
+    ...(linkWarnings.length ? { linkWarnings } : {}),
     setup: repos[0]?.setup ?? [],
     env,
     report: pathOf(reportTemplate),

@@ -343,6 +343,8 @@ In links `to`, links `from` (inside the primary worktree only) and env use `{wor
 
 In `links.to`, `{task:TASK-ID,repo:REPO-NAME}/sub/path` resolves to that task's recorded worktree for the repository basename, independent of this spec's `repos`. Current records take precedence over archived records. Unknown tasks, absent or ambiguous repositories, and closed/archived tasks without a retained worktree produce preview errors. A retained closed worktree is allowed when explicitly referenced. This composes with `{worktree:repo|fallback}` (including a task placeholder in the fallback); P18 recursion checks and missing-target validation still apply. Example: `to: "{task:BACK-12,repo:backend}/packages/sim"`.
 
+When the spec has no links of its own, new/queue previews warn about inherited project default links whose targets are missing or belong to closed/cancelled/archived tasks, even if the old worktree still exists. The warning names the resolved stale target and suggests `{task:TASK-ID,repo:REPO-NAME}/sub/path` or `{worktree:repo|fallback}`; defaults are never silently retargeted. Existing missing-target checks still block creation when the target is absent.
+
 MCP od 0.17.2 domyślnie zwraca zwięzły tekst dla events_since/status/queue_list/cohort_show/limits/capacity; pełne dane przez `format: "json"` lub `detail: true`. `pull_ready` daje skrót (1500 znaków/raport, 16000 bajtów razem), pełny tekst przez `mode: "full"` (200 KiB), offset/limit paginują raporty. `get_report` section wybiera nagłówek Markdown, offset/limit paginują linie od zera, limit odpowiedzi 200 KiB. `usage_hint` i `draft_input` są metadanymi ekranu, a lastLine pokazuje pracę agenta.
 
 Additional Claude background pattern (fixture-tested; current runtime wording unverified):

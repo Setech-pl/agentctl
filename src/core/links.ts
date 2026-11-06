@@ -166,6 +166,23 @@ export function fillTaskLinkTargets(text: string, config: GlobalConfig): string 
   });
 }
 
+/** Preview inherited project defaults explicitly: retained closed worktrees are stale too. */
+export function staleProjectLinkWarnings(links: Link[], config: GlobalConfig): string[] {
+  if (!links.length) return [];
+  const current = listTaskRecords(config);
+  const records = [...current, ...listArchivedRecords(config).filter(r => !current.some(c => c.task === r.task)).map(r => ({ ...r, closed: true }))];
+  return links.flatMap(({ from, to }) => {
+    const target = to.endsWith('/*') ? path.dirname(to) : to;
+    const resolved = resolvedLocation(target);
+    const owners = records.filter(r => (r.closed || r.cancelled) && r.repos.some(repo => {
+      const root = resolvedLocation(repo.worktree);
+      return resolved === root || resolved.startsWith(`${root}${path.sep}`);
+    }));
+    const reasons = [...(!fs.existsSync(target) ? ['target does not exist'] : []), ...owners.map(r => `target belongs to closed task ${r.task}`)];
+    return reasons.length ? [`stale project link ${from} -> ${to}: ${reasons.join('; ')}. Set links explicitly using {task:TASK-ID,repo:REPO-NAME}/sub/path or {worktree:repo|fallback}; check the target before starting.`] : [];
+  });
+}
+
 export function projectLinks(repo: string, task = '', cache = repo): Link[] {
   return (loadProjectConfig(repo)?.links ?? []).map(link => ({ ...link, to: resolvePath(fillPlaceholders(link.to, { task, cache }), repo) }));
 }
