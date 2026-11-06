@@ -764,7 +764,7 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
         lines = [`(cannot read the window: ${errorMessage(e)})`];
       }
     }
-    const notes = [...(target.collide.length > 0 ? [collideText(target.collide)] : []), ...(target.reportSource ? [`report from ${shortPath(target.reportSource)}`] : []), ...(target.reportCandidate && target.report !== 'yes' ? [`report-candidate ${shortPath(target.reportCandidate)}`] : []), ...(target.usage_hint ? [`usage_hint: ${target.usage_hint}`] : []), ...(target.draft_input ? [`draft_input: ${target.draft_input}`] : [])];
+    const notes = [...(target.collide.length > 0 ? [collideText(target.collide)] : []), ...(target.reportSource ? [`report from ${shortPath(target.reportSource)}`] : []), ...(target.reportCandidate && target.report !== 'yes' ? [`report-candidate ${shortPath(target.reportCandidate)}; użyj report_from ze ścieżką ${shortPath(target.reportCandidate)}`] : []), ...(target.usage_hint ? [`usage_hint: ${target.usage_hint}`] : []), ...(target.draft_input ? [`draft_input: ${target.draft_input}`] : [])];
     if (target.report === 'yes') notes.push(`decisions ${target.decisionsCount ?? 0}, actions ${target.actionsCount ?? 0}`);
     if (target.promptQueue?.length) notes.push(`${target.promptQueue.length} messages (${target.promptDelivery ?? 'queued'})`);
     preview = { task: target.task, model: `${target.agent} · model: ${target.model} · effort: ${target.effort}`, lines, ...(notes.length > 0 ? { note: notes.join(' · ') } : {}) };

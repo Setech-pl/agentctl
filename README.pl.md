@@ -148,6 +148,8 @@ agentctl powstał i jest używany przy prawdziwym projekcie: codziennie równole
 
 Board pokazuje m.in. stany `needs-attention`, `overloaded`, `working`, `waiting`, `needs-input`, `needs-trust`, `limited`, `report-ready`, `background`, `queued`, `blocked`, `dead`, `orphan`, `closed`, `cancelled`, `superseded` i `start-failed`. `report-candidate` to osobna flaga raportu, bez zmiany stanu. Szczegóły opisuje [dokumentacja stanów zadań](docs/details.pl.md#stany-zadań).
 
+Gdy brakuje raportu kanonicznego, status, board i events podpowiadają `report_from` dla świeżego pliku Markdown pasującego do ID zadania lub nazwy raportu. Wyszukiwanie obejmuje katalog raportu i worktree zadania (z limitem głębokości i liczby plików, bez zależności); nigdy nie importuje pliku automatycznie.
+
 ### Architektura i przebieg pracy
 
 ```mermaid

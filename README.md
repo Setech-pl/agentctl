@@ -150,6 +150,8 @@ agentctl is built for and used on a real project: cohorts of tasks run every day
 
 The board tracks `needs-attention`, `overloaded`, `working`, `waiting`, `needs-input`, `needs-trust`, `limited`, `report-ready`, `background`, `queued`, `blocked`, `dead`, `orphan`, `closed`, `cancelled`, `superseded` and `start-failed`. A `report-candidate` flag keeps the current task state. See [task states and details](docs/details.md#task-states).
 
+When the canonical report is missing, status, board and events suggest `report_from` for a fresh nearby Markdown file matching the task ID or canonical filename. Discovery checks the report directory and task worktrees (bounded depth and file budget, excluding dependencies); it never adopts a file automatically.
+
 ### Architecture and flow
 
 ```mermaid
