@@ -281,3 +281,16 @@ describe('gc: CLI, board and MCP', () => {
     assert.equal(MCP_TOOLS.find((t) => t.name === 'gc')?.kind, 'write');
   });
 });
+
+it('R2 N5: applied verbose GC uses accurate archive and branch verbs', async () => {
+  const w = world('r2-verbs');
+  task(w, 'NC-1', { closed: true }, { 'old.log': 20 });
+  w.merged.add('agent/nc-1');
+  const result = await runCli(w.config, w.runner, ['gc', '--apply', '--verbose', '--branches', '-y']);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /  archived state NC-1 /);
+  assert.match(result.stdout, /  deleted branch NC-1 /);
+  assert.match(result.stdout, /  removed worktree NC-1 /);
+  assert.match(result.stdout, /  removed cache NC-1 /);
+  assert.doesNotMatch(result.stdout, /removed archive|removed branch/);
+});

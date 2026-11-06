@@ -362,7 +362,7 @@ export function renderGc(plan: GcPlan, opts: GcViewOptions & { applied?: GcResul
     for (const reason of view.skipped.reasons.items) lines.push(`  skipped: ${reason.reason}: ${reason.count}, ${reason.bytes} bytes`);
   }
   if (opts.detail) {
-    for (const i of applied.done) lines.push(`  removed ${KIND_WORD[i.kind]} ${i.task} ${i.target} (${i.detail})`);
+    for (const i of applied.done) lines.push(`  ${i.kind === 'archive' ? 'archived state' : i.kind === 'branch' ? 'deleted branch' : `removed ${KIND_WORD[i.kind]}`} ${i.task} ${i.target} (${i.detail})`);
     for (const f of applied.failed) lines.push(`  failed ${KIND_WORD[f.item.kind]} ${f.item.task} ${f.item.target} (${f.reason})`);
     for (const s of plan.skipped) lines.push(`  skipped ${s.kind === 'worktree-foreign' ? 'worktree-foreign' : KIND_WORD[s.kind as GcKind]} ${s.task} ${s.target} (${s.reason})`);
   }
