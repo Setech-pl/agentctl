@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Development gates: `npm run gate -- quick|full|release` centralizes affected tests, sequential shared Node runtimes, package/doctor/live checks, low-priority execution, a cross-task lock and JSON evidence; standing agent rules are in AGENTS.md.
+
 - Claude `/usage` probe is opt-in (`capacity.claude_usage_probe: true`); it reads plan windows in an isolated neutral session and never starts automatically by default.
 - `dataset export` streams a read-only benchmark dataset as JSONL or CSV, with attempt identities, provenance and explicit redacted prompt/report content opt-ins.
 - P29: live harnesses and package smoke checks require an explicit absolute `AGENTCTL_LIVE_CACHE` task root; missing roots, shared historical sandboxes and escaping paths are refused before writes.
