@@ -651,6 +651,13 @@ export interface QueueTickOptions {
 
 const firstLine = (s: string): string => s.split('\n')[0] ?? s;
 
+/** Once a live task is pending trust or delivering, watch owns it; a failed queue entry must not offer a second start. */
+async function liveStartedRecord(ctx: Context, task: string): Promise<TaskRecord | undefined> {
+  const record = readTaskRecord(ctx.config, windowName(task));
+  if (!record || !['pending', 'sending', 'confirming', 'sent'].includes(record.promptDelivery ?? '')) return undefined;
+  return (await ctx.tmux.windows()).some(w => w.plain === record.window) ? record : undefined;
+}
+
 /**
  * A start that died before the agent showed its input (readiness timeout, a startup dialog, the watcher stopped mid-wait) leaves a window
  * nobody watches and a prompt that was never pasted. Close that window — it is untrusted state — so it cannot hold a provider slot; the
@@ -676,7 +683,14 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   // A paused queue starts nothing that waits in line; an explicit start (`direct`) is not in the line.
   const paused = isPaused(config);
   let entries = readQueue(config);
-  if (entries.length === 0 || (paused && !entries.some((e) => e.direct))) return [];
+  if (entries.length === 0) return [];
+  // Recover the same live-task/failed-entry disagreement left by older watcher versions, even while starts are paused.
+  for (const entry of entries) {
+    if (entry.status !== 'failed' || !await liveStartedRecord(ctx, entry.task)) continue;
+    await dropEntry(ctx, entry);
+    await recordJournal(ctx, { kind: 'queue-start', task: entry.task, text: `${entry.task}: usunięto nieaktualny błąd startu z kolejki; okno zadania działa, watch obsługuje oczekujący prompt`, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
+  }
+  entries = readQueue(config);
   const records = new Set([...listTaskRecords(config), ...listArchivedRecords(config)].map((r) => r.task));
   // A start that died with its watcher: the entry says "starting" and nothing here is doing it. Its task exists (the window is up,
   // the prompt may be missing) or not: either way it goes to "failed", where a human decides.
@@ -693,6 +707,7 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
     } else await failEntry(ctx, entry, 'the start was interrupted (the watcher stopped before it finished)', notifier, opts, false);
   }
   entries = readQueue(config);
+  if (paused && !entries.some(e => e.direct)) return [];
   const live = await liveWindows(ctx);
   const rows = opts.rows ?? (await collectStatus(ctx, { progress: false, archived: true }));
   const used: Record<AgentName, number> = perProvider(activeProviders(config), () => 0);
@@ -859,6 +874,14 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
       if (/window limit for .* reached/.test(errorMessage(e))) { await writeEntry(ctx, { ...entry, status: 'queued' }); return; }
       // A never-ready window is untrusted state nobody watches: close it so it cannot hold a slot (the record and its worktree stay).
       const closedLeftover = await closeNeverReadyWindow(ctx, entry.task).catch(() => false);
+      if (await liveStartedRecord(ctx, entry.task)) {
+        // A trust timeout leaves a live pending task, not a failed start. The ordinary watch delivery path continues it.
+        await dropEntry(ctx, starting);
+        const text = `${entry.task}: okno zadania działa; watch obsługuje oczekujący prompt po potwierdzeniu dialogu i gotowości agenta`;
+        await opts.log?.(`queue: ${text}`);
+        await recordJournal(ctx, { kind: 'queue-start', task: entry.task, text, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
+        return;
+      }
       if (opts.signal?.aborted && readTaskRecord(config, windowName(entry.task))) {
         // The watcher itself stopped mid-wait: not a failure of the task. Record and queue must agree — drop the entry;
         // with its window closed the task lands in "to resume", a window waiting for trust is served by the next watch.

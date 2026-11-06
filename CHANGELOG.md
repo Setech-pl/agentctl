@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- INT4: trust wait expiry leaves the live pending task with watch, without a failed queue entry; queue ticks also reconcile older failed entries for live tasks, including while paused. / Po wygaśnięciu oczekiwania na zaufanie żywe zadanie pozostaje pod opieką watch, bez błędu w kolejce; tick usuwa też wcześniejsze nieaktualne błędy żywych zadań, również podczas pauzy.
+
 - INT4: token-only MCP confirmations remain bound to the previewed tool; a refused cross-tool use preserves the original preview. / Potwierdzenie MCP samym tokenem dotyczy wyłącznie narzędzia z podglądu; odmowa użycia w innym narzędziu zachowuje pierwotny podgląd.
 
 - P47: MCP task responses omit plans/capacity/disk footers unless detail/capacity is requested or a session threshold changes; config warnings appear once per session. / MCP pomija stopkę planów/pojemności/dysku poza jawnym żądaniem lub zmianą progu; ostrzeżenia konfiguracji pojawiają się raz na sesję.

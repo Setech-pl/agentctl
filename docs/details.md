@@ -439,6 +439,8 @@ agentctl queue retry NC-42       # a failed start, once more
 - **A failed start** (setup failed, repository gone, agent not ready) puts the task at the end of the line as `failed`, with the error in `queue list` and the log of the attempt in `<config dir>/queue/<n>-<TASK>.log`, and sends a notification. It is not tried again by itself; `queue retry` is your decision (it reuses a worktree the failed start left). A window whose agent never showed its input (a startup dialog such as the Codex "Update available" modal, or a readiness timeout) is closed by the watcher, so it holds no provider slot; with the worktree kept, the task then also shows in "to resume" (`agentctl resume`). The same reconciliation applies to a start interrupted by a watcher restart: the record and the queue entry never disagree.
 - The queue only moves while `agentctl watch` runs (`watch --tmux`); `watch` reads the config again when the file changes ([live limits](#live-limits-and-the-config-reload)), so a changed `limits` needs no restart. `queue.enabled: false` in the config switches starting off; `queue.parallel_starts` bounds the starts in progress ([configuration](configuration.md#queue)).
 
+A trust wait that expires keeps the live task and its pending prompt under watch; it does not leave a failed queue entry. After you answer the dialog, watch delivers the original prompt once. Queue ticks also remove stale failed entries belonging to live tasks already waiting or delivering, even while the queue is paused.
+
 ### Dependencies: `after`
 
 ```yaml

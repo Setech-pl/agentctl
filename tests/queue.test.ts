@@ -530,6 +530,54 @@ describe('P33: a start whose window never became ready', () => {
     assert.equal(checkWindowLimit('codex', 1, await liveWindows(s.ctx), s.config.session), undefined, 'the slot is free although the record stays');
   });
 
+  it('INT4: a trust timeout keeps a live task pending without a failed queue entry; watch delivers once after trust', async () => {
+    const s = setup('trust-timeout', 'limits: {claude: 1}\nagents: {claude: {trust_timeout: 1}}\n');
+    s.tmux.newWindowScreen = 'Quick safety check\n ❯ 1. Yes, I trust this folder';
+    await add(s, specOf(s.repo, 'TRUST-1'));
+    await s.tick();
+    const pane = s.tmux.windows.find(w => w.name === 'trust-1');
+    assert.ok(pane, 'a human can still answer trust');
+    assert.equal(readTaskRecord(s.config, 'trust-1')?.promptDelivery, 'pending');
+    assert.deepEqual(readQueue(s.config), [], 'the live pending task must not also be failed in the queue');
+    assert.ok(!readJournal(s.config).some(e => e.task === 'TRUST-1' && e.kind === 'queue-failed'));
+    pane.screen = composerFixture('❯ \n');
+    const memory = new WatchMemory();
+    await watchTick(s.ctx, memory, s.notifier);
+    await watchTick(s.ctx, memory, s.notifier);
+    assert.equal(readTaskRecord(s.config, 'trust-1')?.promptDelivery, 'sent');
+    assert.equal(s.runner.commands.filter(c => c.includes('paste-buffer')).length, 1);
+    assert.deepEqual(readQueue(s.config), []);
+  });
+
+  it('INT4: an existing failed entry is reconciled with its live pending task even while the queue is paused', async () => {
+    const s = setup('failed-live-trust');
+    await add(s, specOf(s.repo, 'LIVE-1'));
+    const entry = readQueue(s.config)[0]!;
+    seedTask(s.config, 'LIVE-1', { promptDelivery: 'pending', pendingPrompt: 'Original prompt' });
+    s.tmux.add('live-1', 'Quick safety check\n ❯ 1. Yes, I trust this folder');
+    await saveEntry(s.ctx, { ...entry, status: 'failed', error: 'trust timed out' });
+    await setPaused(s.ctx, true);
+    await s.tick();
+    assert.deepEqual(readQueue(s.config), []);
+    assert.equal(readTaskRecord(s.config, 'live-1')?.pendingPrompt, 'Original prompt');
+    assert.ok(s.tmux.windows.some(w => w.name === 'live-1'));
+  });
+
+  it('INT4: interruption after entering trust preserves the pending live task without a failed queue entry', async () => {
+    const s = setup('abort-trust');
+    s.tmux.newWindowScreen = 'Quick safety check\n ❯ 1. Yes, I trust this folder';
+    await add(s, specOf(s.repo, 'TRUST-INT'));
+    const controller = new AbortController();
+    const sleep = s.runner.sleep.bind(s.runner);
+    s.runner.sleep = async ms => { controller.abort(); await sleep(ms); };
+    await queueTick(s.ctx, s.memory, s.notifier, { signal: controller.signal });
+    await s.memory.idle();
+    assert.deepEqual(readQueue(s.config), []);
+    assert.equal(readTaskRecord(s.config, 'trust-int')?.promptDelivery, 'pending');
+    assert.ok(s.tmux.windows.some(w => w.name === 'trust-int'));
+    assert.equal(s.runner.commands.filter(c => c.includes('paste-buffer')).length, 0);
+  });
+
   it('a watcher stopped mid-wait (Ctrl-C): the entry is dropped, the window closed, the task is to resume', async () => {
     const s = setup('abort-start');
     await add(s, specOf(s.repo, 'INT-1'));

@@ -439,6 +439,8 @@ agentctl queue retry NC-42       # nieudany start, jeszcze raz
 - **Nieudany start** (setup się nie udał, repozytorium zniknęło, agent nie jest gotowy) odkłada zadanie na koniec kolejki jako `failed`, z błędem w `queue list` i logiem próby w `<config dir>/queue/<n>-<TASK>.log`, i wysyła powiadomienie. Nie jest ponawiany sam; `queue retry` to Twoja decyzja (używa ponownie worktree, który zostawił nieudany start). Okno, którego agent nigdy nie pokazał promptu (dialog startowy jak modal „Update available" Codexa albo timeout gotowości), jest zamykane przez obserwatora, więc nie zajmuje slotu providera; z zachowanym worktree zadanie trafia też na listę „do wznowienia" (`agentctl resume`). Ta sama reconciliacja dotyczy startu przerwanego restartem obserwatora: rekord zadania i wpis kolejki nigdy się nie rozjeżdżają.
 - Kolejka rusza tylko, gdy działa `agentctl watch` (`watch --tmux`); `watch` wczytuje config ponownie, gdy plik się zmieni ([limity na żywo](#limity-na-żywo-i-przeładowanie-konfiguracji)), więc zmiana `limits` nie wymaga restartu. `queue.enabled: false` w configu wyłącza starty; `queue.parallel_starts` ogranicza liczbę startów w toku ([konfiguracja](configuration.md#queue), po angielsku).
 
+Po upływie czasu oczekiwania na zaufanie żywe zadanie i jego oczekujący prompt pozostają pod opieką watch, bez błędu w kolejce. Gdy odpowiesz na dialog, watch dostarczy pierwotny prompt jeden raz. Tick kolejki usuwa też nieaktualne wpisy błędów dla żywych zadań, które już oczekują lub dostarczają prompt, również podczas pauzy kolejki.
+
 ### Zależności: `after`
 
 ```yaml
