@@ -121,6 +121,26 @@ describe('watch reloads the config', () => {
     assert.equal(readConfigState(configStatePath(s.config))?.ok, true);
   });
 
+  it('keeps the rejection receipt across repeated notifications and ticks until valid text is loaded', async () => {
+    const s = watched('watch-rejection-receipt', 'limits: {claude: 1}\n');
+    const store = new ConfigStore(loader(s.config), s.config);
+    const valid = fs.readFileSync(s.config.path, 'utf8');
+    fs.appendFileSync(s.config.path, 'queue: [broken\n');
+    await reloadConfig(s.ctx, store);
+    const rejected = fs.readFileSync(configStatePath(s.config), 'utf8');
+    assert.equal(JSON.parse(rejected).ok, false);
+    for (let i = 0; i < 3; i++) {
+      const repeated = await reloadConfig(s.ctx, store);
+      assert.equal(repeated.error, undefined, 'the same warning is logged only once');
+      assert.match(repeated.config.reloadWarning ?? '', /Cannot parse/);
+      assert.equal(fs.readFileSync(configStatePath(s.config), 'utf8'), rejected, 'an unchanged broken config must keep its rejection receipt');
+    }
+    assert.equal(s.out.filter(line => /previous settings stay in force/.test(line)).length, 1);
+    fs.writeFileSync(s.config.path, valid);
+    await reloadConfig(s.ctx, store);
+    assert.equal(readConfigState(configStatePath(s.config))?.ok, true);
+  });
+
   it('every section is reloaded: the poll interval, mcp.allow and notify reach the process in force', async () => {
     const s = watched('watch-all', 'watch:\n  interval: 5\nmcp:\n  allow: [mark]\n');
     const store = new ConfigStore(loader(s.config), s.config);

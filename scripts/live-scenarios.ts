@@ -90,7 +90,7 @@ async function limitsAndEvents(): Promise<void> {
       try { return JSON.parse(fs.readFileSync(path.join(h.agentctlHome, 'config-state.json'), 'utf8')).ok === false; } catch { return false; }
     }, 5000);
     const doctor = h.agentctl(['doctor']);
-    check('doctor reports the config problem', configRejected && doctor.code !== 0 && /✗ config\s+Cannot parse/.test(doctor.stdout), doctor.stdout);
+    check('doctor reports the config problem', configRejected && doctor.code !== 0 && /✗ config\s+Cannot parse/.test(doctor.stdout), JSON.stringify({ configRejected, code: doctor.code, stdout: doctor.stdout, stderr: doctor.stderr, receipt: fs.existsSync(path.join(h.agentctlHome, 'config-state.json')) ? fs.readFileSync(path.join(h.agentctlHome, 'config-state.json'), 'utf8') : null }));
     fs.copyFileSync(path.join(h.agentctlHome, 'config.yaml.keep'), path.join(h.agentctlHome, 'config.yaml'));
     // events
     const ev = h.agentctl(['events', '--json', '--keep']);
