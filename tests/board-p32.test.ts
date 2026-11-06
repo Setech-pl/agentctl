@@ -8,7 +8,7 @@ import { collectStatus } from '../src/core/status.ts';
 import { archiveDir, readTaskRecord, renderTaskMd, snapshotRecords, taskDir, recordScanStats } from '../src/core/taskstore.ts';
 import type { TaskRecord } from '../src/core/taskstore.ts';
 import { sharedReader } from '../src/core/usage.ts';
-import { boardRefreshMs, BOARD_IDLE_REFRESH_MS, BOARD_REFRESH_MS, loadBoard, ProgressCache, TickGate } from '../src/core/board.ts';
+import { boardRefreshMs, BOARD_IDLE_REFRESH_MS, BOARD_REFRESH_MS, handleKey, initialBoardState, loadBoard, ProgressCache, TickGate } from '../src/core/board.ts';
 import { FakeTmux, makeConfig, makeContext, seedTask, useScratch } from './helpers.ts';
 
 const scratch = useScratch();
@@ -237,5 +237,89 @@ describe('p32: adaptive refresh and the watch debounce', () => {
     gate.ping(Date.now());
     assert.equal(fired, 3, 'past the window the next event fires right away again');
     gate.stop();
+  });
+});
+
+// ---- the 230-archived-tasks regression fixture (generated under AGENTCTL_LIVE_CACHE when set, else the scratch dir)
+
+function buildFixture(root: string, count: number): ReturnType<typeof makeConfig> {
+  const config = makeConfig(root);
+  for (let i = 0; i < count; i++) {
+    const task = `P32-${String(i + 1).padStart(3, '0')}`;
+    const window = task.toLowerCase();
+    const report = path.join(config.cache, window, `${task}.md`);
+    fs.mkdirSync(path.dirname(report), { recursive: true });
+    fs.writeFileSync(report, REPORT_WITH_OUTPUTS);
+    archiveTask(config, task);
+  }
+  return config;
+}
+
+const fixtures = new Map<string, ReturnType<typeof makeConfig>>();
+function fixture(name: string, count: number): ReturnType<typeof makeConfig> {
+  let config = fixtures.get(name);
+  if (!config) {
+    const base = process.env.AGENTCTL_LIVE_CACHE ?? scratch.dir;
+    config = buildFixture(path.join(base, name), count);
+    fixtures.set(name, config);
+  }
+  return config;
+}
+
+describe('p32: regression on 230 archived tasks', () => {
+  it('the second tick parses no TASK.md and reads no report body, and stays under 100 ms', async () => {
+    const config = fixture('p32-fixture-230', 230);
+    const { ctx } = makeContext(config, { respond: new FakeTmux().respond });
+    const cache = new ProgressCache();
+    const first = await loadBoard(ctx, null, cache);
+    assert.equal(first.rows.length, 230);
+    const parsedBefore = recordScanStats.parsed;
+    const readsBefore = reportDigestStats.reads;
+    const at = performance.now();
+    const second = await loadBoard(ctx, null, cache);
+    const ms = performance.now() - at;
+    assert.equal(second.rows.length, 230);
+    assert.equal(recordScanStats.parsed, parsedBefore, 'no TASK.md is parsed on the second tick');
+    assert.equal(reportDigestStats.reads, readsBefore, 'no report body is read on the second tick');
+    assert.ok(ms < 100, `second tick took ${ms.toFixed(1)} ms`);
+  });
+
+  it('50 arrow keys are each handled within 150 ms while a cold tick runs', async () => {
+    const config = fixture('p32-fixture-latency-230', 230);
+    const { ctx } = makeContext(config, { respond: new FakeTmux().respond });
+    const pending = loadBoard(ctx, null, new ProgressCache());
+    let state = initialBoardState(100, 30);
+    let worst = 0;
+    for (let i = 0; i < 50; i++) {
+      const at = performance.now();
+      await new Promise<void>((resolve) => {
+        setImmediate(() => {
+          state = handleKey(state, '', { downArrow: true }).state;
+          worst = Math.max(worst, performance.now() - at);
+          resolve();
+        });
+      });
+    }
+    await pending;
+    assert.ok(worst < 150, `worst key latency ${worst.toFixed(1)} ms`);
+  });
+
+  it('an idle board stays under 2% of one core over 60 s', { skip: process.env.AGENTCTL_P32_PERF !== '1' }, async () => {
+    const config = fixture('p32-fixture-230', 230);
+    const { ctx } = makeContext(config, { respond: new FakeTmux().respond });
+    const cache = new ProgressCache();
+    await loadBoard(ctx, null, cache); // warm, as a long-running board is
+    const cpuStart = process.cpuUsage();
+    const started = Date.now();
+    let ticks = 0;
+    while (Date.now() - started < 60_000) {
+      await loadBoard(ctx, null, cache);
+      ticks++;
+      const wait = started + ticks * BOARD_IDLE_REFRESH_MS - Date.now();
+      if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+    }
+    const cpu = process.cpuUsage(cpuStart);
+    const pct = ((cpu.user + cpu.system) / 1000 / (Date.now() - started)) * 100;
+    assert.ok(pct < 2, `idle board used ${pct.toFixed(2)}% of one core over ${ticks} ticks`);
   });
 });

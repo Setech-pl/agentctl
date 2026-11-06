@@ -157,6 +157,9 @@ export interface CollectOptions {
 
 const idleObservations = new Map<string, { working: boolean; idle: number; attempt: string; observedWork: boolean; workStopAt?: string }>();
 
+/** The per-record loop yields to the event loop every this many records, so board ticks and key presses interleave. */
+export const STATUS_CHUNK = 25;
+
 export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Promise<StatusRow[]> {
   const { runner, tmux, config } = ctx;
   const infos = await tmux.windows();
@@ -171,7 +174,13 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     const current = new Set(records.map((r) => r.record.window));
     for (const record of scanned.archived) if (!current.has(record.window) && !live.has(record.window)) records.push({ record: { ...record }, archived: true });
   }
+  let sinceYield = 0;
   for (const { record, archived } of records) {
+    // The synchronous sections of this loop are long with hundreds of archived tasks; yield so keys interleave.
+    if (++sinceYield >= STATUS_CHUNK) {
+      sinceYield = 0;
+      await new Promise((resolve) => setImmediate(resolve));
+    }
     if (!archived) knownWindows.add(record.window);
     const alive = live.has(record.window);
     // Closed, cancelled or archived and not live: the board only counts them (unless a section is expanded), so the
