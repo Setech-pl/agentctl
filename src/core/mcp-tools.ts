@@ -209,7 +209,9 @@ function conciseReport(text: string, data: OutputData): string {
   const verdict = outputs?.verdict ?? prose.split('\n').find(l => /(?:Verdict|Werdykt):/i.test(l)) ?? prose.split('\n')[0] ?? 'n/d';
   const decisions = outputs?.decisions.join('; ') || section(/^(decisions|decyzje)$/i) || 'n/d';
   const actions = outputs?.actions.map(a => `${a.title}: ${a.shell}`).join('; ') || section(/^(actions|akcje)$/i) || 'n/d';
-  const summary = section(/^(summary|streszczenie|podsumowanie)(?:.*)$/i) || prose.split(/\n\s*\n/).at(-1) || '';
+  const lastOutputs = [...text.matchAll(/^ {0,3}(`{3,}|~{3,})agentctl-outputs\s*\n[\s\S]*?^ {0,3}\1\s*$/gm)].at(-1);
+  const finalSummary = lastOutputs ? text.slice(lastOutputs.index! + lastOutputs[0].length).replace(/<!--[^]*?-->/g, '').trim() : '';
+  const summary = finalSummary || section(/^(summary|streszczenie|podsumowanie)(?:.*)$/i) || prose.split(/\n\s*\n/).at(-1) || '';
   // Legacy reports can end inside a checks section; do not return that list as a summary.
   const lastHeading = markdownHeadings(summary).at(-1);
   const safeSummary = lastHeading && /check|test|gate|walidac/i.test(lastHeading.title) ? '' : summary;
@@ -307,7 +309,7 @@ export function statusLine(shown: StatusRow[], hiddenCount: number): string {
   return hiddenCount > 0 ? `${base} (${hiddenCount} hidden or closed not shown; all: true lists them)` : base;
 }
 
-async function runStatus(deps: McpDeps, args: { all?: boolean | undefined; cohort?: string | undefined; detail?: boolean; offset?: number; limit?: number }): Promise<ToolResult> {
+async function runStatus(deps: McpDeps, args: { all?: boolean | undefined; cohort?: string | undefined; detail?: boolean; capacity?: boolean; offset?: number; limit?: number }): Promise<ToolResult> {
   const ctx = deps.context(() => {});
   const all = Boolean(args.all);
   const cohort = args.cohort === undefined ? undefined : findCohort(ctx.config, args.cohort).name;
@@ -322,12 +324,10 @@ async function runStatus(deps: McpDeps, args: { all?: boolean | undefined; cohor
     extra.push(`Queue (${views.length}): ${views.map((v) => `${v.entry.task} – ${v.condition.text}`).join('; ')}. queue_list has the detail.`);
   }
   extra.push(...serverLines(deps, ctx));
-  extra.push(planSummary(ctx));
   const colliding = shown.filter((r) => r.collide.length > 0);
   if (colliding.length > 0) extra.push(`⚠${colliding.length} tasks overlap; overlap has details.`);
   extra.push(awayLine(ctx));
-  extra.push(diskLine(await collectDisk(ctx)));
-  return { text: [statusLine(shown, rows.length - shown.length), ...extra, ...shown.map(compactStatus)].join('\n'), data: { disk: await collectDisk(ctx, undefined, args), tasks: shown.map(statusRowForChat) } };
+  return { text: [statusLine(shown, rows.length - shown.length), ...extra, ...shown.map(compactStatus)].join('\n'), data: { ...(args.detail || args.capacity ? { disk: await collectDisk(ctx, undefined, args) } : {}), tasks: shown.map(statusRowForChat) } };
 }
 
 /** "Away: on since …; the phone gets the notifications" - what the chat should know about the phone. */
@@ -461,8 +461,6 @@ function serverLines(deps: McpDeps, ctx: Context): string[] {
     const dev = developmentEnvironment(ctx.config.path, deps.server.script, stableScript());
     lines.push(`MCP server: agentctl ${deps.server.version} (${deps.server.script}, pid ${deps.server.pid}, started ${deps.server.started})${dev ? ' – środowisko dev' : stable && stable !== deps.server.version ? ` – the stable copy on disk is ${stable}: ${staleNote}` : ''}`);
   }
-  for (const w of ctx.config.mcp.warnings) lines.push(`Config warning: ${w}`);
-  if (ctx.config.reloadWarning) lines.push(`Config warning: ${ctx.config.reloadWarning}`);
   return lines;
 }
 
@@ -481,7 +479,7 @@ async function runVersion(deps: McpDeps): Promise<ToolResult> {
     stableCopyVersion: stableVersion ?? null,
     older: !dev && deps.server !== undefined && stableVersion !== undefined && stableVersion !== deps.server.version,
     writeToolsAllowed: ctx.config.mcp.allow,
-    configWarnings: [...ctx.config.mcp.warnings, ...(ctx.config.reloadWarning ? [ctx.config.reloadWarning] : [])],
+    configWarnings: sessionWarnings(deps, ctx),
   };
   const note = info.older ? `\n\nThis server runs ${info.version}, the stable copy on disk is ${stableVersion}: ${staleNote}.` : '';
   return ok(`${JSON.stringify(info, null, 2)}${note}`);
@@ -1623,6 +1621,61 @@ for (const tool of MCP_TOOLS.filter(t => ['status', 'events_since', 'queue_list'
       if (Array.isArray(data)) return ok(data.map(r => `${r.task} ${r.agent}/${r.model}/${r.effort}: ${r.startCondition}`).join('\n') || 'The queue is empty.');
       return ok(compactFacts(data));
     } catch { return ok(at >= 0 ? result.text.slice(0, at) : result.text); }
+  };
+}
+
+const warned = new WeakMap<McpDeps, Set<string>>();
+function sessionWarnings(deps: McpDeps, ctx: Context): string[] {
+  let seen = warned.get(deps); if (!seen) { seen = new Set(); warned.set(deps, seen); }
+  return [...new Set([...ctx.config.mcp.warnings, ...(ctx.config.reloadWarning ? [ctx.config.reloadWarning] : [])])].filter(w => {
+    if (seen.has(w)) return false;
+    seen.add(w); return true;
+  });
+}
+
+const capacitySessions = new WeakMap<McpDeps, Record<string, string>>();
+/** Read threshold bands, not changing percentages/timestamps, so unchanged calls stay quiet. */
+async function capacityFooter(deps: McpDeps, ctx: Context, explicit: boolean): Promise<string[]> {
+  const reader = openReader(ctx.config);
+  const plans = readPlans(ctx.config, reader, ctx.runner.now()); reader.save();
+  const disk = await collectDisk(ctx);
+  const limits = collectLimits(ctx.config, await liveWindows(ctx));
+  const bands: Record<string, string> = {};
+  for (const p of activeProviders(ctx.config)) {
+    for (const w of providerValue(plans, p).windows) {
+      bands[`${p}/${w.kind}/${w.minutes}`] = String(Math.max(0, ...ctx.config.capacity.thresholds.filter(t => w.usedPercent >= t)));
+    }
+  }
+  for (const p of limits.providers) bands[`${p.agent}/slots`] = p.free === 0 ? 'full' : 'available';
+  for (const v of disk.volumes) bands[`disk/${v.device ?? v.paths.join(',')}`] = v.level;
+  const previous = capacitySessions.get(deps);
+  capacitySessions.set(deps, bands);
+  if (explicit) return [planSummary(ctx), diskLine(disk), ...snapshotLines(capacitySnapshot(await collectCapacity(ctx)))];
+  const changes = previous ? [...new Set([...Object.keys(previous), ...Object.keys(bands)])]
+    .filter(k => previous[k] !== bands[k] && bands[k] !== undefined && (previous[k] !== undefined || !['0', 'ok', 'available'].includes(bands[k]!)))
+    .map(k => `${k}: ${previous[k] ?? 'n/d'} -> ${bands[k] ?? 'n/d'}`) : [];
+  return changes.length ? [`Capacity changed: ${changes.join('; ')}`] : [];
+}
+
+// Formatting only: keep shared CLI bodies and confirmation/start semantics intact.
+const capacityCarriers = new Set(['status', 'new', 'queue', 'close']);
+for (const tool of MCP_TOOLS.filter(t => capacityCarriers.has(t.name))) {
+  tool.input = { ...tool.input, detail: z.boolean().optional(), capacity: z.boolean().optional() };
+  tool.description += ' Plans/capacity/disk footer is omitted by default; detail: true or capacity: true opts in. A threshold transition since this session last called a capacity-carrying tool emits one line once.';
+  const run = tool.run;
+  tool.run = async (deps, args) => {
+    const result = await run(deps, args);
+    if (result.isError) return result;
+    const ctx = deps.context(() => {});
+    const warnings = sessionWarnings(deps, ctx).map(w => `Config warning: ${w}`);
+    const footer = await capacityFooter(deps, ctx, args.detail === true || args.capacity === true);
+    // Core new/queue helpers also serve the CLI. Remove only their display footer here.
+    const text = result.text.split('\n').filter(l => !/^(?:Plans:|plan:\s|capacity:|(?:WARNING: )?Disk:)/.test(l)).join('\n');
+    if ((args.format === 'json' || args.detail === true && tool.name === 'status') && /^[{[]/.test(text)) {
+      const data = JSON.parse(text);
+      return { ...result, text: JSON.stringify({ ...data, ...(footer.length ? { capacity: footer } : {}), ...(warnings.length ? { configWarnings: warnings } : {}) }, null, 2) };
+    }
+    return { ...result, text: [text, ...warnings, ...footer].join('\n') };
   };
 }
 

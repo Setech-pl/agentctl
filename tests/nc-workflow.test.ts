@@ -77,7 +77,7 @@ describe('0.17.4 outputs are facts, independent of report readiness', () => {
     report(r, { commits: [{ repo: 'repo', branch: 't1', sha: A }], integrate: [{ repo: 'repo', branch: 't1', sha: A, note: 'proposed' }], decisions: ['Choose deployment time'], actions: [{ title: 'Deploy', shell: 'echo proposed' }], checks: ['unit: PASS'], preview: 'https://example.invalid/demo' });
     const data = await readOutputs(f.ctx, r); assert.equal(data.outputs_valid, true); assert.equal(data.outputs?.verdict, 'PASS');
     const row = (await collectStatus(f.ctx))[0]!; assert.equal(row.report, 'yes'); assert.equal(row.decisionsCount, 1); assert.equal(row.actionsCount, 1); assert.equal(row.verdict, 'PASS');
-    assert.match((await f.full('pull_ready')).text, /"outputs_valid":true/);
+    assert.match((await f.full('pull_ready')).text, /decisions: Choose deployment time/);
     assert.match((await f.full('get_report', { task: 'T1', detail: true })).text, /"outputs":/);
     const cohort = JSON.parse((await f.full('cohort_show', { cohort: 'NC', format: 'json' })).text); assert.equal(cohort.actions[0].task, 'T1'); assert.equal(cohort.integrate[0].sha, A); assert.equal(cohort.checks[0].task, 'T1');
     assert.equal(f.runner.calls.some(c => /^sh /.test(c.line)), false, 'actions are data, never shell execution');

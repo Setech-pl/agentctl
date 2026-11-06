@@ -24,9 +24,9 @@ These always work.
 | `peek` | `task`, `lines?` (1 to 200, default 40) | The last lines of a running task's window without the agent's footer. |
 | `list_reports` | `all?` | Which tasks have a report: size, `modified` (UTC) and `modifiedLocal`, whether it was pulled, and `source` (where the agent wrote the report when the file is a copy, else `null`). |
 | `get_report` | `task`, `section?`, `offset?`, `limit?` | A selected Markdown section or line/byte page, bounded by mcp.max_response_kb. It reads only the file that the task's `TASK.md` names, never a path from the chat, and refuses a report that is a symbolic link. A contiguous whole-file read marks it pulled only at EOF; sections do not. |
-| `pull_ready` | `cohort?`, `mode?`, `offset?`, `limit?` | Summary by default: task/path/size/SHA, small reports whole or bounded excerpts. mode: full returns complete bodies through response_page fragments. Only mode full or explicit ack marks fully delivered reports as pulled. This is the only read tool that changes anything, and only in agentctl's own state. A chat should call it at the start of discussing finished work. |
+| `pull_ready` | `cohort?`, `mode?`, `offset?`, `limit?` | Summary by default: task/path/size/SHA, verdict, decisions, actions and the final Polish summary. mode: full returns complete bodies through response_page fragments. Only mode full or explicit ack marks fully delivered reports as pulled. This is the only read tool that changes anything, and only in agentctl's own state. A chat should call it at the start of discussing finished work. |
 | `queue_list` | none | The task queue: position, agent/model/effort, priority, `after`, what each task waits for (`startCondition`: `czeka na miejsce: claude 2/2`, `czeka na NC-42`, paused), since when, and the error of a start that failed. |
-| `usage` | `cohort?`, `since?` | Token usage and the plan limits: per provider the 5 hour and weekly window (percentage used, reset time; `available: false` when the provider did not say, shown as n/d) and the tokens today and in the period, per task, cohort, model and day. `since` is an age such as `12h`, `7d`, `2w` (default `7d`). A chat should call it before the user orders more tasks. `status` carries a one-line `Plans:` summary. |
+| `usage` | `cohort?`, `since?` | Token usage and the plan limits: per provider the 5 hour and weekly window (percentage used, reset time; `available: false` when the provider did not say, shown as n/d) and the tokens today and in the period, per task, cohort, model and day. `since` is an age such as `12h`, `7d`, `2w` (default `7d`). A chat should call it before the user orders more tasks. `status` includes `Plans:` only with `detail: true` or `capacity: true`. |
 | `log` | `cohort?`, `since?` | The history of the tasks, newest first: agent/model/effort, start, report, duration, tokens (null: n/d), commits and files, the verdict line, cancel reason, move, and the result the user marked. |
 | `stats` | `cohort?`, `since?` | The history grouped by agent/model/effort: tasks, median time and tokens, how many were marked ok, partial or fail, cancelled, and moved to the other provider after a limit. |
 | `events_since` | `since?`, `cohort?`, `peek?` | What changed since the previous call of this client (or since a time: an age like `2h`, `HH:MM`, an ISO time): reports ready with the verdict, starts from the queue, questions, folder trust, blocked, cancelled and limited tasks, finished cohorts, plan thresholds, changed limits - and one line with the state now. **A chat should call it at the start of every answer about the agents' work**: it gets no notifications. The marker is kept per initialized MCP client identity or explicit client fallback (CLI has its own cursor); the first call looks back 24 hours; `peek: true` leaves the marker. Events are recorded while `agentctl watch` runs. |
@@ -148,7 +148,7 @@ In 0.15.0, installed runtime commands use `dist/bin/agentctl.js`. Status `questi
 | `guide` | optional project repository path, lang en/pl | Shared dispatcher manual plus the trusted project guide from .agentctl.yaml; a missing overlay warns. This tool explicitly permits reading the configured overlay of the requested project. |
 | `capacity` | none | Current windows/age/stale, pace/projection, labeled token estimates, slots, queue, equivalents and seven-day stats; null is n/d. |
 
-Both are always readable without mcp.allow. New/queue previews and executed responses append capacity snapshots without removing existing result fields; disable with capacity.snapshot: false. Start an ordering chat with guide then capacity, and use events_since → status → pull_ready → get_report as work proceeds. See [dispatcher guide](dispatcher.md) and [Polish](dispatcher.pl.md).
+Both are always readable without mcp.allow. MCP new/queue responses omit capacity footers by default; request them with detail: true or capacity: true. Start an ordering chat with guide then capacity, and use events_since → status → pull_ready → get_report as work proceeds. See [dispatcher guide](dispatcher.md) and [Polish](dispatcher.pl.md).
 
 <!-- BEGIN GENERATED MCP PARITY -->
 
@@ -229,7 +229,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 
 | Tool | Kind | Arguments |
 |---|---|---|
-| `status` | read | `all?`, `cohort?`, `format?`, `detail?`, `offset?`, `limit?` |
+| `status` | read | `all?`, `cohort?`, `format?`, `detail?`, `offset?`, `limit?`, `capacity?` |
 | `events_since` | read | `cursor?`, `limit?`, `client?`, `since?`, `cohort?`, `peek?`, `format?`, `detail?` |
 | `gc_preview` | read | `detail?`, `offset?`, `limit?`, `older_than?`, `merged?`, `cohort?` |
 | `limits` | read | `format?`, `detail?` |
@@ -252,14 +252,14 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 | `overlap` | read | `task?` |
 | `resume` | write | `tasks?`, `all?`, `confirm?`, `preview_token?` |
 | `send` | write | `task`, `text?`, `enter_only?`, `confirm?`, `token?` |
-| `new` | write | `spec`, `agent?`, `reuse?`, `no_agent?`, `cohort?`, `wait_trust?`, `confirm?`, `preview_token?` |
-| `queue` | write | `spec`, `cohort?`, `agent?`, `confirm?`, `preview_token?` |
+| `new` | write | `spec`, `agent?`, `reuse?`, `no_agent?`, `cohort?`, `wait_trust?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` |
+| `queue` | write | `spec`, `cohort?`, `agent?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` |
 | `queue_rm` | write | `task`, `confirm?`, `preview_token?` |
 | `cancel` | write | `task?`, `tasks?`, `cohort?`, `reason?`, `remove_worktree?`, `confirm?`, `preview_token?` |
 | `mark` | write | `task?`, `tasks?`, `cohort?`, `result`, `note?`, `confirm?`, `preview_token?` |
 | `away` | write | `on` |
 | `interrupt` | write | `task`, `confirm?`, `preview_token?` |
-| `close` | write | `task?`, `tasks?`, `cohort?`, `remove_worktree?`, `confirm?`, `preview_token?` |
+| `close` | write | `task?`, `tasks?`, `cohort?`, `remove_worktree?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` |
 | `move` | write | `task`, `agent?`, `confirm?`, `preview_token?` |
 | `queue_show` | read | `task` |
 | `mcp_check` | read |  |
@@ -487,7 +487,7 @@ preview: https://example.invalid/preview
 notes: []
 ```
 
-`outputs`, `outputs_valid` and `outputs_errors` are shared facts. Branches and SHAs must exist in task repositories. Missing/invalid data warns without making a complete report incomplete. Actions are proposed text; agentctl never runs their shell commands, judges a result, or merges. `status` counts decisions/actions; `pull_ready` and `get_report` include the data. `cohort_show` aggregates integration refs (duplicate/conflicting branch tips flagged), decisions, actions and checks with task IDs. `events_since` includes new decisions/actions in `needYou`, once per report hash. Validation is per section and per entry: a bad entry is dropped with a warning in `outputs_errors`, the valid rest stays in `outputs` (`outputs_partial: true`, `outputs_valid: false`), and `status`/`cohort_show` count the kept decisions and actions. Only a wrong `version`/`verdict` refuses the whole block. `checks` entries are `{name, result: PASS|FAIL|WARN|SKIP, note?}` (the standard form); a plain text (`"unit: PASS"`) or a one-key map (`- unit: PASS`, which is what unquoted YAML gives) is accepted and normalized to it, in any letter case.
+`outputs`, `outputs_valid` and `outputs_errors` are shared facts. Branches and SHAs must exist in task repositories. Missing/invalid data warns without making a complete report incomplete. Actions are proposed text; agentctl never runs their shell commands, judges a result, or merges. `status` counts decisions/actions; `pull_ready` and `get_report` show concise facts by default; full data requires detail/full. `cohort_show` aggregates integration refs (duplicate/conflicting branch tips flagged), decisions, actions and checks with task IDs. `events_since` includes new decisions/actions in `needYou`, once per report hash. Validation is per section and per entry: a bad entry is dropped with a warning in `outputs_errors`, the valid rest stays in `outputs` (`outputs_partial: true`, `outputs_valid: false`), and `status`/`cohort_show` count the kept decisions and actions. Only a wrong `version`/`verdict` refuses the whole block. `checks` entries are `{name, result: PASS|FAIL|WARN|SKIP, note?}` (the standard form); a plain text (`"unit: PASS"`) or a one-key map (`- unit: PASS`, which is what unquoted YAML gives) is accepted and normalized to it, in any letter case.
 
 ```yaml
 review: auto
@@ -526,3 +526,9 @@ The idempotent `new` state response applies only when every requested task is al
 EN: `get_report` and `pull_ready` default to verdict, decisions, actions and the final Polish summary. Checks and parsed outputs require `detail: true` or `mode: full`. A concise receipt does not mark the report pulled. Explicit section/line/byte pagination reads report text; parsed outputs appear only on its first page with detail/full. `response_page` continues cached fragments without repeating metadata or executing again. CLI `pull` is unchanged.
 
 PL: `get_report` i `pull_ready` domyślnie zwracają werdykt, decyzje, akcje i końcowe polskie podsumowanie. Pełne kontrole i sparsowane outputs wymagają `detail: true` lub `mode: full`. Zwięzły odbiór nie oznacza raportu jako przeczytanego. Jawne stronicowanie sekcji/wierszy/bajtów czyta tekst raportu; sparsowane outputs są tylko na pierwszej stronie w trybie detail/full. `response_page` kontynuuje zapisane fragmenty bez powtarzania metadanych i operacji. CLI `pull` pozostaje bez zmian.
+
+### Optional capacity footer / Stopka pojemności na żądanie
+
+EN: MCP `status`, `new`, `queue` and `close` omit the plans/capacity/disk footer by default. Use `detail: true` or `capacity: true` to include it (`status` detail remains JSON). `format: json` alone does not request the disk/footer. Within one MCP session, provider usage crossing configured `capacity.thresholds`, configured slots becoming full/free, or a disk warning/critical band change emits one `Capacity changed:` line on the next carrier response; unchanged readings stay quiet. The first call establishes the baseline. Each distinct config warning appears at most once per session, including `version`. The dedicated `capacity` tool remains an explicit capacity read. CLI output and preview/confirm/start rules are unchanged.
+
+PL: MCP `status`, `new`, `queue` i `close` domyślnie pomijają stopkę planów/pojemności/dysku. Dodaj `detail: true` lub `capacity: true`, aby ją otrzymać (`status` z detail nadal zwraca JSON). Samo `format: json` nie zamawia danych dysku/stopki. W jednej sesji MCP przekroczenie progów `capacity.thresholds`, zapełnienie/zwolnienie limitu okien albo zmiana poziomu ostrzeżenia dysku daje jedną linię `Capacity changed:` przy następnym takim wywołaniu; niezmienione odczyty milczą. Pierwsze wywołanie ustala punkt odniesienia. Każde odrębne ostrzeżenie konfiguracji pojawia się najwyżej raz na sesję, także w `version`. Narzędzie `capacity` nadal jawnie zamawia dane pojemności. CLI i zasady podglądu/potwierdzenia/startu pozostają bez zmian.

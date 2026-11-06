@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { it } from 'node:test';
 import { z } from 'zod';
+import { setClaudePlan } from './usage-world.ts';
 import { Context } from '../src/core/context.ts';
 import { MCP_TOOLS, responseWireBytes, type McpDeps } from '../src/core/mcp-tools.ts';
 import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helpers.ts';
@@ -13,12 +14,12 @@ function fixture(name: string) {
   const runner = new DiskRunner({ dryRun: false, respond: tmux.respond });
   const deps: McpDeps = { context: out => new Context(runner, config, out), notify: async () => {} };
   const call = (name: string, args = {}) => { const tool = MCP_TOOLS.find(t => t.name === name)!; return tool.run(deps, z.object(tool.input).parse(args)); };
-  return { config, deps, call };
+  return { config, deps, runner, tmux, call };
 }
 it('P45: concise reports keep decisions/actions/final Polish summary; full metadata occurs only on the first page', async () => {
   const f = fixture('p45');
   const r = seedTask(f.config, 'E-1');
-  const text = `Verdict: PASS\n## Checks\n${'Verbose check evidence.\n'.repeat(40)}\n\`\`\`agentctl-outputs\nversion: 1\nverdict: PASS\ndecisions: [Keep concise]\nactions: [{title: Review, shell: git status}]\nchecks: [{name: unique-check, result: PASS}]\n\`\`\`\nMarcinie, zadanie gotowe. Testy przeszły. Można scalać.\n<!-- agentctl:report-end -->\n`;
+  const text = `Verdict: PASS\n## Summary\nEarlier English overview.\n## Checks\n${'Verbose check evidence.\n'.repeat(40)}\n\`\`\`agentctl-outputs\nversion: 1\nverdict: PASS\ndecisions: [Keep concise]\nactions: [{title: Review, shell: git status}]\nchecks: [{name: unique-check, result: PASS}]\n\`\`\`\nMarcinie, zadanie gotowe. Testy przeszły. Można scalać.\n<!-- agentctl:report-end -->\n`;
   fs.mkdirSync(path.dirname(r.report), { recursive: true }); fs.writeFileSync(r.report, text);
   const concise = await f.call('get_report', { task: 'E-1' });
   assert.match(concise.text, /Keep concise/); assert.match(concise.text, /git status/);
@@ -34,4 +35,61 @@ it('P45: concise reports keep decisions/actions/final Polish summary; full metad
   const verbose = await f.call('get_report', { task: 'E-1', mode: 'full' });
   assert.ok(responseWireBytes(concise) < responseWireBytes(verbose) / 2);
   console.log('P45 bytes', JSON.stringify({ before: responseWireBytes(verbose), after: responseWireBytes(concise) }));
+});
+it('P47: omit unchanged footers, opt in explicitly, warn once and report threshold transitions once per session', async () => {
+  const f = fixture('p47');
+  f.config.mcp.warnings.push('economy fixture warning');
+  const first = await f.call('status');
+  console.log('P47 default wire bytes', responseWireBytes(await f.call('status')));
+  assert.match(first.text, /Config warning: economy fixture warning/);
+  assert.doesNotMatch(first.text, /Plans:|capacity:|Disk:/);
+  const repeat = await f.call('status');
+  assert.doesNotMatch(repeat.text, /Config warning:|Plans:|capacity:|Disk:/);
+  const explicit = await f.call('status', { capacity: true });
+  assert.match(explicit.text, /capacity:|Plans:/); assert.match(explicit.text, /Disk:/);
+  assert.ok(responseWireBytes(repeat) < responseWireBytes(explicit) / 2);
+  console.log('P47 bytes', JSON.stringify({ before: responseWireBytes(explicit), after: responseWireBytes(repeat) }));
+  f.config.disk.warnGb = Number.MAX_SAFE_INTEGER;
+  const transition = await f.call('status');
+  assert.equal(transition.text.split('\n').filter(l => /Capacity changed:/.test(l)).length, 1);
+  assert.match(transition.text, /disk/);
+  assert.doesNotMatch((await f.call('status')).text, /Capacity changed:/);
+  f.config.disk.warnGb = 0; f.config.disk.criticalGb = 0;
+  assert.match((await f.call('status')).text, /Capacity changed:/);
+  assert.doesNotMatch((await f.call('status')).text, /Capacity changed:/);
+  const other = { ...f.deps };
+  const tool = MCP_TOOLS.find(t => t.name === 'status')!;
+  const otherResult = await tool.run(other, {});
+  assert.match(otherResult.text, /Config warning:/); assert.doesNotMatch(otherResult.text, /Capacity changed:/);
+  setClaudePlan(f.config.path, f.runner.now(), { session: 50, week: 10 });
+  await f.call('status'); // establish a known usage band
+  setClaudePlan(f.config.path, f.runner.now(), { session: 85, week: 10 });
+  assert.match((await f.call('status')).text, /Capacity changed:.*claude\/session\/300: 0 -> 80/);
+  setClaudePlan(f.config.path, f.runner.now(), { session: 86, week: 10 });
+  assert.doesNotMatch((await f.call('status')).text, /Capacity changed:/);
+  setClaudePlan(f.config.path, f.runner.now(), { session: 20, week: 10 });
+  assert.match((await f.call('status')).text, /Capacity changed:.*80 -> 0/);
+  f.config.limits.claude = 1;
+  seedTask(f.config, 'S-1'); f.tmux.add('s-1', 'Working (esc to interrupt)');
+  assert.match((await f.call('status')).text, /Capacity changed:.*claude\/slots: available -> full/);
+  f.config.mcp.allow = ['queue', 'new', 'close'];
+  f.tmux.windows = [];
+  delete f.config.limits.claude;
+  const repo = scratch.sub('p47/repo');
+  const spec = `---\ntask: Q-1\nagent: claude\nrepos:\n  - path: ${repo}\n    worktree: ${repo}-wt\n---\nFake.\n`;
+  for (const name of ['queue', 'new']) {
+    const preview = await f.call(name, { spec });
+    assert.ok(!preview.isError, preview.text);
+    assert.doesNotMatch(preview.text, /Plans:|plan:|capacity:|Disk:/);
+    const detail = await f.call(name, { spec, capacity: true });
+    assert.match(detail.text, /capacity:/); assert.match(detail.text, /Disk:/);
+  }
+  seedTask(f.config, 'C-1');
+  const queued = await f.call('queue', { spec, confirm: true });
+  assert.ok(!queued.isError, queued.text);
+  assert.doesNotMatch(queued.text, /Plans:|plan:|capacity:|Disk:/);
+  const close = await f.call('close', { task: 'C-1', detail: true });
+  assert.match(close.text, /capacity:/);
+  const closed = await f.call('close', { task: 'C-1', detail: true, confirm: true });
+  assert.ok(!closed.isError, closed.text); assert.match(closed.text, /capacity:/);
 });
