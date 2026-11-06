@@ -67,6 +67,19 @@ describe('events: the journal and the markers', () => {
     assert.throws(() => parseSince('yesterday-ish', 'cli', w.config, min(0)), /cannot read the time/);
   });
 
+  it('P37: HH:MM is the most recent past occurrence: 23:50 at 06:19 means yesterday, 05:00 means today', async () => {
+    const config = makeConfig(scratch.sub('since-hm'));
+    const now = new Date(2026, 10, 6, 6, 19).getTime(); // 06:19 local, any timezone
+    const at = (hm: string) => new Date(parseSince(hm, 'cli', config, now).ms);
+    const morning = at('05:00');
+    assert.deepEqual([morning.getFullYear(), morning.getMonth(), morning.getDate(), morning.getHours(), morning.getMinutes()], [2026, 10, 6, 5, 0], '05:00 today');
+    assert.equal(parseSince('05:00', 'cli', config, now).label, 'od 05:00');
+    const late = at('23:50');
+    assert.deepEqual([late.getFullYear(), late.getMonth(), late.getDate(), late.getHours(), late.getMinutes()], [2026, 10, 5, 23, 50], '23:50 is still in the future today: it means yesterday');
+    assert.equal(parseSince('23:50', 'cli', config, now).label, 'od 23:50 (wczoraj)');
+    assert.equal(parseSince('23:50', 'cli', config, now).note, undefined, 'no more "in the future" note');
+  });
+
   it('--cohort keeps the events of the cohort (a task of it, or the cohort itself) and the summary of its tasks', async () => {
     const w = world('cohort');
     seedTask(w.config, 'NC-1', { cohort: 'Sprint' });

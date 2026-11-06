@@ -42,7 +42,7 @@ export function readMarkers(config: Pick<GlobalConfig, 'path'>): Partial<Record<
   }
 }
 
-/** "last", an age (30m, 2h, 1d), an ISO time, or HH:MM today (local); returns ms. */
+/** "last", an age (30m, 2h, 1d), an ISO time, or HH:MM — the most recent past occurrence within 24 h (local); returns ms. */
 export function parseSince(text: string | undefined, client: EventClient, config: Pick<GlobalConfig, 'path'>, now: number): { ms: number; label: string; note?: string } {
   const t = (text ?? 'last').trim();
   if (t === '' || t === 'last') {
@@ -56,9 +56,10 @@ export function parseSince(text: string | undefined, client: EventClient, config
   if (hm) {
     const d = new Date(now);
     d.setHours(Number(hm[1]), Number(hm[2]), 0, 0);
-    // HH:MM is today, local time. A moment that has not come yet has no events: never a fallback to the last 24 hours.
-    const future = d.getTime() > now;
-    return { ms: d.getTime(), label: `od ${t}`, ...(future ? { note: `${t} jest dziś w przyszłości (teraz ${formatLocalTime(new Date(now).toISOString()).slice(11)}): brak zdarzeń. Podaj wiek (np. 30m) albo pełny czas ISO, by sięgnąć do wczoraj.` } : {}) };
+    // A time still in the future today means yesterday evening, not an empty window.
+    const yesterday = d.getTime() > now;
+    if (yesterday) d.setDate(d.getDate() - 1);
+    return { ms: d.getTime(), label: `od ${t}${yesterday ? ' (wczoraj)' : ''}` };
   }
   const ms = Date.parse(t);
   if (Number.isNaN(ms)) throw new AgentctlError(`cannot read the time "${t}"`, 'Use last, an age (30m, 2h, 1d), HH:MM or an ISO time like 2026-11-02T10:00.');
