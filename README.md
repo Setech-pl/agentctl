@@ -1002,3 +1002,12 @@ provider slots. Queue preview/list explain the heavy-slot wait. Closing the
 window frees its heavy slot; report-ready windows still count. Immediate `new`
 is outside queue admission. MCP structured spec-field exposure is a follow-up;
 raw spec text already accepts the field.
+
+Disk hints: `disk.worktree_share_percent` (default 20, in (0, 100]) warns when
+known task worktrees exceed that share of their own filesystem. Existing
+`disk.warn_gb`/`critical_gb` free-space thresholds also trigger the hint in
+status, doctor and disk transition events: run `agentctl gc --preview`, with
+reclaimable bytes from the same safe default GC plan (dirty/shared/live
+worktrees are excluded). Budgeted readers report reclaimable size as `n/d`;
+run the full preview to measure it. Missing/pending measurements remain marked.
+`close` reports the retained task worktree size, or size before requested removal.

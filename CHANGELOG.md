@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- P24: warn on configurable per-filesystem worktree share/free space with safe GC preview reclaimable bytes; report worktree size on close.
+
 - Support weight: heavy task specs with a cross-provider limits.heavy queue cap (default 1) and waiting reasons.
 
 - Show machine load/free memory in capacity and status detail; record configurable load threshold crossings.
@@ -199,6 +201,8 @@ Versions 0.1.0 to 0.7.0 correspond to pull requests #1 to #7; their dates are th
 - Keep phone and manager live suites separate; add collapsed-question live checks through the isolated harness.
 
 ## [Unreleased]
+
+- P24: warn on configurable per-filesystem worktree share/free space with safe GC preview reclaimable bytes; report worktree size on close.
 
 - Support weight: heavy task specs with a cross-provider limits.heavy queue cap (default 1) and waiting reasons.
 

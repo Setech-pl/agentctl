@@ -1,3 +1,4 @@
+import { planGc } from './gc.ts';
 import { readQueue } from './queue.ts';
 import { resolveSpec, splitSpecs } from './spec.ts';
 import fs from 'node:fs';
@@ -15,7 +16,7 @@ import { withFileLock } from './file-lock.ts';
 
 export type DiskLevel = 'ok' | 'warn' | 'critical' | 'unknown';
 export interface DiskVolume { device: string | null; paths: string[]; availableBytes: number | null; totalBytes: number | null; level: DiskLevel; error?: string }
-export interface DiskReport { measurementError?: string; /** The sizes below are the last ones measured (or none yet): a measurement is still running in the background. */ measuring?: boolean; worktreeCount?: number; largestWorktrees?: { path: string; bytes: number }[]; pathsTotal?: number; pathsOffset?: number; pathsNextOffset?: number | null; volumes: DiskVolume[]; worktreeBytes: number | null; measuredAt: string; level: DiskLevel }
+export interface DiskReport { reclaimableBytes?: number | null; gcHint?: boolean; measurementError?: string; /** The sizes below are the last ones measured (or none yet): a measurement is still running in the background. */ measuring?: boolean; worktreeCount?: number; largestWorktrees?: { path: string; bytes: number }[]; pathsTotal?: number; pathsOffset?: number; pathsNextOffset?: number | null; volumes: DiskVolume[]; worktreeBytes: number | null; measuredAt: string; level: DiskLevel }
 export const DISK_INTERVAL_MS = 5 * 60_000;
 const inventories = new Map<string, { id: string; signature?: string }>();
 const restored = new Set<string>();
@@ -125,14 +126,29 @@ export async function collectDisk(ctx: Context, statfs = fs.promises.statfs, opt
   const worktreeBytes = values.length || worktrees.length === 0 ? values.reduce((n, m) => n + m.bytes, 0) : null;
   const largestWorktrees = values.map(m => ({ path: m.target, bytes: m.bytes })).sort((a, b) => b.bytes - a.bytes || a.path.localeCompare(b.path)).slice(0, 5);
   if (!measurementError && values.length < worktrees.length) pending = true;
+  // Compare sizes only with their own filesystem; do not charge one disk for another's worktrees.
+  const byDevice = new Map<string, number>();
+  for (const measurement of values) {
+    try {
+      const device = String(fs.statSync(measurement.target).dev);
+      byDevice.set(device, (byDevice.get(device) ?? 0) + measurement.bytes);
+    } catch { /* disappeared since measurement */ }
+  }
+  for (const volume of volumes.values()) {
+    const bytes = byDevice.get(volume.device ?? '') ?? 0;
+    if (volume.totalBytes && bytes / volume.totalBytes * 100 > ctx.config.disk.worktreeSharePercent && volume.level !== 'critical') volume.level = 'warn';
+  }
+  const gcHint = [...volumes.values()].some(v => v.level === 'warn' || v.level === 'critical');
+  // Budgeted status consumers keep their response bound; a full preview resolves n/d explicitly.
+  const reclaimableBytes = gcHint && opts.budgetMs === undefined ? await planGc(ctx).then(p => p.freeBytes).catch(() => null) : null;
   const all = [...volumes.values()];
   const level = (['critical', 'warn', 'unknown', 'ok'] as const).find((l) => all.some((v) => v.level === l)) ?? 'unknown';
   const offset = opts.offset ?? 0, limit = Math.min(opts.limit ?? 20, 100);
   const paths = all.flatMap(v => v.paths), page = new Set(opts.detail ? paths.slice(offset, offset + limit) : []);
-  return { worktreeCount: worktrees.length, largestWorktrees, pathsTotal: paths.length, pathsOffset: offset, pathsNextOffset: opts.detail && offset + limit < paths.length ? offset + limit : null, volumes: all.map(v => ({ ...v, pathCount: v.paths.length, paths: v.paths.filter(p => page.has(p)) })), worktreeBytes, measuredAt: new Date(measuredAt).toISOString(), level, ...(pending ? { measuring: true } : {}), ...(measurementError ? { measurementError } : {}) };
+  return { gcHint, reclaimableBytes, worktreeCount: worktrees.length, largestWorktrees, pathsTotal: paths.length, pathsOffset: offset, pathsNextOffset: opts.detail && offset + limit < paths.length ? offset + limit : null, volumes: all.map(v => ({ ...v, pathCount: v.paths.length, paths: v.paths.filter(p => page.has(p)) })), worktreeBytes, measuredAt: new Date(measuredAt).toISOString(), level, ...(pending ? { measuring: true } : {}), ...(measurementError ? { measurementError } : {}) };
 }
 export function diskLine(disk: DiskReport): string {
-  return `Disk: ${disk.level}; free ${disk.volumes.map((v) => v.availableBytes === null ? 'n/d' : `${(v.availableBytes / 1024 ** 3).toFixed(1)} GiB`).join(' / ')}; agentctl worktrees ${disk.worktreeBytes === null ? 'n/d' : `${(disk.worktreeBytes / 1024 ** 3).toFixed(1)} GiB`}${disk.measuring ? ' (measuring, last reading)' : disk.measurementError ? ' (measurement failed, last reading)' : ''}${disk.level === 'critical' || disk.level === 'warn' ? '; inspect gc_preview / agentctl gc' : ''}`;
+  return `Disk: ${disk.level}; free ${disk.volumes.map((v) => v.availableBytes === null ? 'n/d' : `${(v.availableBytes / 1024 ** 3).toFixed(1)} GiB`).join(' / ')}; agentctl worktrees ${disk.worktreeBytes === null ? 'n/d' : `${(disk.worktreeBytes / 1024 ** 3).toFixed(1)} GiB`}${disk.measuring ? ' (measuring, last reading)' : disk.measurementError ? ' (measurement failed, last reading)' : ''}${disk.level === 'critical' || disk.level === 'warn' ? `; run agentctl gc --preview (gc_preview); reclaimable ${disk.reclaimableBytes ?? 'n/d'} bytes` : ''}`;
 }
 const sampled = new Map<string, number>();
 export async function diskTick(ctx: Context, notifier: Notifier): Promise<void> {

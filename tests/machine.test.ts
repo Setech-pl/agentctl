@@ -3,7 +3,7 @@ import { it } from 'node:test';
 import { collectMachine, recordMachineLoad, machineLine } from '../src/core/machine.ts';
 import { Context } from '../src/core/context.ts';
 import { readJournal } from '../src/core/journal.ts';
-import { DiskRunner, makeConfig, useScratch } from './helpers.ts';
+import { DiskRunner, makeConfig, runCli, useScratch } from './helpers.ts';
 const scratch = useScratch();
 it('machine metrics and threshold transitions persist and deduplicate across reads', async () => {
   const config = makeConfig(scratch.sub('machine'), 'capacity: {load_threshold: 6}\n');
@@ -16,5 +16,12 @@ it('machine metrics and threshold transitions persist and deduplicate across rea
   await recordMachineLoad(ctx, {...sample, overloaded: false});
   assert.deepEqual(readJournal(config).filter(e => e.kind.startsWith('machine-load')).map(e => e.kind), ['machine-load-high', 'machine-load-recovered']);
   assert.equal(collectMachine(makeConfig(scratch.sub('default')), {loadavg: () => [6, 0, 0], freemem: () => 1, cpus: () => Array(2)}).threshold, 6);
+  assert.equal(collectMachine(config, {loadavg: () => [6, 9, 9], freemem: () => 1, cpus: () => Array(2)}).overloaded, false);
+  const cli = await runCli(config, ctx.runner, ['status', '--detail']);
+  assert.equal(cli.code, 0, cli.stderr);
+  assert.match(cli.stdout, /load \(1\/5\/15 min\).*free memory/);
+  const capacity = await runCli(config, ctx.runner, ['capacity', '--json']);
+  assert.equal(capacity.code, 0, capacity.stderr);
+  assert.equal(JSON.parse(capacity.stdout).machine.loadAverage.length, 3);
   assert.throws(() => makeConfig(scratch.sub('bad'), 'capacity: {load_threshold: -1}\n'), /load_threshold/);
 });

@@ -1002,3 +1002,12 @@ Zwykłe zadania korzystają z limitów dostawcy. Podgląd i lista kolejki podaj�
 powód oczekiwania. Zamknięcie okna zwalnia miejsce; okna report-ready nadal się
 liczą. Natychmiastowe `new` pozostaje poza kontrolą kolejki. Udostępnienie pola
 w strukturalnym schemacie MCP jest osobnym zadaniem; tekst specyfikacji już je obsługuje.
+
+Wskazówki dyskowe: `disk.worktree_share_percent` (domyślnie 20, zakres (0, 100])
+ostrzega, gdy znane worktree zadań przekroczą tę część swojego systemu plików.
+Progi wolnego miejsca `disk.warn_gb`/`critical_gb` również wywołują wskazówkę
+w statusie, doctor i zdarzeniach dyskowych: `agentctl gc --preview`, wraz z liczbą
+bajtów możliwych do odzyskania według bezpiecznego planu GC. Worktree z lokalnymi
+zmianami, współdzielone i aktywne są pomijane. Odczyty z budżetem czasu pokazują
+rozmiar odzysku jako `n/d`; pełny podgląd go mierzy. Brakujące i trwające pomiary
+są oznaczone. `close` podaje rozmiar worktree pozostawionego lub przed usunięciem.

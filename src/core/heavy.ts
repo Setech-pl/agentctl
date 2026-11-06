@@ -19,3 +19,8 @@ export function heavyWait(config: GlobalConfig, heavy: boolean, used: number): s
   const limit = config.limits.heavy ?? 1;
   return heavy && used >= limit ? `czeka na heavy slot: heavy ${used}/${limit} (across providers)` : undefined;
 }
+
+export function heavyPreviewUsed(config: GlobalConfig, entries: QueueEntry[], live: {window?: string}[]): number {
+  const active = heavyBudget(config, entries, live).size;
+  return Math.max(active, Math.min(config.limits.heavy ?? 1, active + entries.filter(e => e.status === 'queued' && isHeavy(e)).length));
+}

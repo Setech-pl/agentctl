@@ -545,6 +545,7 @@ agentctl status [options]
 
 | Option | Meaning | Notes |
 |---|---|---|
+| `--detail` | include machine load and free memory |  |
 | `--json` | machine-readable output |  |
 | `--clip` | copy a compact Markdown table to the clipboard (to paste at the start of a chat session) |  |
 | `--tmux-line` | one short line for the tmux status bar, like "2⚙ 1✓ 1? 3⧗" (tasks per state, then the tasks in the queue) |  |

@@ -145,7 +145,7 @@ export interface GlobalConfig extends Layer {
   /** Token usage and plan limits: warning thresholds, the hold of the queue, the tmux status line, where the agents keep their logs. */
   usage: UsageSettings;
   guideLang: 'en' | 'pl';
-  disk: { warnGb: number; criticalGb: number; workers: number; measurementTimeoutS: number };
+  disk: { worktreeSharePercent: number; warnGb: number; criticalGb: number; workers: number; measurementTimeoutS: number };
   git: { timeoutS: number };
   capacity: { loadThreshold?: number; snapshot: boolean; staleMinutes: number; sampleLimit: number; thresholds: number[]; codexRefresh: boolean; claudeUsageProbe: boolean; claudeUsageProbeIntervalMinutes: number; kimiUsageProbe?: boolean; kimiUsageProbeModel?: string };
   /** Set by a long-running process (watch, MCP) when the file on disk does not load and the previous settings stay in force. */
@@ -981,7 +981,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   const session = parseString(raw.session, 'config.session', p) ?? 'agentctl';
   if (!/^[A-Za-z0-9_-]+$/.test(session)) p.add('config.session may only contain letters, digits, "_" and "-"');
 
-  const limits: GlobalConfig['limits'] = { heavy: 1 };
+  const limits: GlobalConfig['limits'] = {};
   let countExternal = false;
   let countReportReady = false;
   const preview = { ttlS: 600 };
@@ -1110,10 +1110,10 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
     if (typeof raw.report.settle_s === 'number' && Number.isFinite(raw.report.settle_s) && raw.report.settle_s >= 0) reportSettleS = raw.report.settle_s;
     else p.add('config.report.settle_s must be a nonnegative number');
   }
-  const disk = { warnGb: 50, criticalGb: 20, workers: 2, measurementTimeoutS: 600 };
+  const disk = { worktreeSharePercent: 20, warnGb: 50, criticalGb: 20, workers: 2, measurementTimeoutS: 600 };
   const git = { timeoutS: 600 };
   for (const [section, target, fields] of [
-    ['disk', disk, { warn_gb: 'warnGb', critical_gb: 'criticalGb', workers: 'workers', measurement_timeout_s: 'measurementTimeoutS' }],
+    ['disk', disk, { worktree_share_percent: 'worktreeSharePercent', warn_gb: 'warnGb', critical_gb: 'criticalGb', workers: 'workers', measurement_timeout_s: 'measurementTimeoutS' }],
     ['git', git, { timeout_s: 'timeoutS' }],
   ] as const) {
     const value = raw[section];
@@ -1126,6 +1126,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
       else (target as unknown as Record<string, number>)[field] = value[key];
     }
   }
+  if (disk.worktreeSharePercent > 100) p.add('config.disk.worktree_share_percent must not exceed 100');
   if (!Number.isInteger(disk.workers) || disk.workers < 1 || disk.workers > 8) p.add('config.disk.workers must be an integer from 1 to 8');
   if (disk.criticalGb > disk.warnGb) p.add('config.disk.critical_gb must not exceed warn_gb');
   const cohort = { doneGraceS: 300 };

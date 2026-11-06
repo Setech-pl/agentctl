@@ -732,7 +732,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('--all', 'also the hidden, the closed and the cancelled tasks (see "agentctl hide", "agentctl close", "agentctl cancel"), archived ones included')
     .option('--cohort <name>', 'only the tasks of this cohort (also with --json and --clip)')
     .action(
-      guarded(async (opts: { json?: boolean; clip?: boolean; tmuxLine?: boolean; all?: boolean; cohort?: string }) => {
+      guarded(async (opts: { detail?: boolean; json?: boolean; clip?: boolean; tmuxLine?: boolean; all?: boolean; cohort?: string }) => {
         if ([opts.json, opts.clip, opts.tmuxLine].filter(Boolean).length > 1) throw new AgentctlError('--json, --clip and --tmux-line exclude each other');
         if (opts.tmuxLine) return line(await statusTmuxLine(contextFor(false, { migrate: false })));
         const ctx = contextFor(false);

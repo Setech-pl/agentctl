@@ -1,4 +1,4 @@
-import { heavyBudget, heavyWait, isHeavy } from './heavy.ts';
+import { heavyBudget, heavyPreviewUsed, heavyWait, isHeavy } from './heavy.ts';
 import { secretRedactor } from './secret-redaction.ts';
 import { activeProviders, perProvider, isActive } from './providers/registry.ts';
 import { withStartLock } from './start-lock.ts';
@@ -215,7 +215,7 @@ export async function planQueueAdd(ctx: Context, raws: RawSpec[], opts: { agent?
 }
 
 /** Per spec: the order and where it will stand ("starts at once" or "waits: claude 2/2, 1 ahead"). */
-export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: QueueEntry[], live: { agent?: AgentName; counted?: boolean }[], rows: StatusRow[] = []): string[] {
+export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: QueueEntry[], live: { window?: string; agent?: AgentName; counted?: boolean }[], rows: StatusRow[] = []): string[] {
   const { config } = ctx;
   const load: Record<AgentName, number> = perProvider(activeProviders(config), () => 0);
   for (const w of live) if (w.agent && w.counted !== false) load[w.agent]++;
@@ -223,7 +223,7 @@ export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: Q
   for (const e of waiting(entries)) ahead[e.agent]++;
   const readyCount = rows.filter(r => r.state === 'report-ready' && r.window === 'alive').length;
   const lines: string[] = readyCount ? [`${readyCount} ${plural(readyCount, 'okno', 'okna', 'okien')} report-ready – close zwolni okna`] : [];
-  let heavyUsed = Math.max(heavyBudget(config, entries, live).size, Math.min(config.limits.heavy ?? 1, heavyBudget(config, entries, live).size + waiting(entries).filter(isHeavy).length));
+  let heavyUsed = heavyPreviewUsed(config, entries, live);
   for (const spec of specs) {
     const heavyReason = heavyWait(config, spec.weight === 'heavy', heavyUsed);
     if (spec.weight === 'heavy') heavyUsed++;
@@ -541,7 +541,7 @@ export interface QueueView {
  * For every entry: what it waits for. Entries are walked in turn order, each one that will start in the next tick uses up a window of its
  * provider, so the answer matches what `watch` does. `inflight` are the tasks this very process is starting.
  */
-export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live: { agent?: AgentName; counted?: boolean }[], rows: StatusRow[] = [], nowMs: number = Date.now()): QueueView[] {
+export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live: { window?: string; agent?: AgentName; counted?: boolean }[], rows: StatusRow[] = [], nowMs: number = Date.now()): QueueView[] {
   const redact = secretRedactor([config, process.env, ...queueDiagnosticSources(entries)]);
   const failed = new Set(entries.filter((e) => e.status === 'failed').map((e) => e.task));
   const used: Record<AgentName, number> = perProvider(activeProviders(config), () => 0);
@@ -697,8 +697,7 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
     if (entry.direct) {
       const room = config.limits[entry.agent];
       if (room !== undefined && used[entry.agent] >= room) continue;
-      used[entry.agent]++;
-      if (await beginStart(ctx, memory, notifier, entry, opts)) began.push(entry.task);
+      if (await beginStart(ctx, memory, notifier, entry, opts)) { used[entry.agent]++; began.push(entry.task); }
       continue;
     }
     if (entry.autoReview) {
@@ -728,8 +727,7 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
     }
     const limit = config.limits[entry.agent];
     if (limit !== undefined && used[entry.agent] >= limit) continue;
-    used[entry.agent]++;
-    if (await beginStart(ctx, memory, notifier, entry, opts)) began.push(entry.task);
+    if (await beginStart(ctx, memory, notifier, entry, opts)) { used[entry.agent]++; began.push(entry.task); }
   }
   for (const task of [...memory.held.keys()]) if (!stillHeld.has(task)) memory.held.delete(task);
   return began;

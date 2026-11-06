@@ -302,7 +302,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 - `cohort archive`: `--older-than &lt;age&gt;`, `--yes`
 - `overlap`: `--json`
 - `send`: `--dry-run`, `--clip`, `-y, --yes`, `--enter-only &lt;task&gt;`, `--confirm &lt;token&gt;`
-- `status`: `--json`, `--clip`, `--tmux-line`, `--all`, `--cohort &lt;name&gt;`
+- `status`: `--detail`, `--json`, `--clip`, `--tmux-line`, `--all`, `--cohort &lt;name&gt;`
 - `limits show`: `--json`
 - `limits set`: `-y, --yes`, `--dry-run`
 - `limits reserve`: `--note &lt;text&gt;`
