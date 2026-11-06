@@ -5,6 +5,7 @@ import path from 'node:path';
 import { loadProjectConfig } from './config.ts';
 import type { Context } from './context.ts';
 import { listTaskRecords, listArchivedRecords } from './taskstore.ts';
+import type { TaskRecord } from './taskstore.ts';
 import { cachedMeasurement, configureMeasurements, requestMeasurement, restoreMeasurements } from './fs-measure.ts';
 import type { PathMeasurement } from './fs-measure.ts';
 import { resolvePath } from './util.ts';
@@ -31,9 +32,9 @@ function existingAncestor(target: string): string {
  * with node_modules takes minutes; it continues in the background (asynchronously, never on the event loop) and the call answers with the last
  * reading, or with "n/d" and `measuring: true` when there is none yet. Without a budget the call waits for the measurement.
  */
-export async function collectDisk(ctx: Context, statfs = fs.promises.statfs, opts: { detail?: boolean; offset?: number; limit?: number; budgetMs?: number } = {}): Promise<DiskReport> {
+export async function collectDisk(ctx: Context, statfs = fs.promises.statfs, opts: { detail?: boolean; offset?: number; limit?: number; budgetMs?: number; records?: TaskRecord[] } = {}): Promise<DiskReport> {
   configureMeasurements(ctx.config.disk);
-  const records = [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)];
+  const records = opts.records ?? [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)];
   const targets = new Set([ctx.config.cache, ctx.config.stateDir]);
   if (ctx.config.worktreeRoot) targets.add(resolvePath(ctx.config.worktreeRoot));
   const queuedRepos = readQueue(ctx.config).flatMap((entry) => {

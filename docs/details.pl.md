@@ -470,7 +470,7 @@ Dwa zadania zmieniające te same pliki w tym samym repozytorium spotkają się w
 
 ## Board
 
-`agentctl board` to pełnoekranowy przegląd wszystkich zadań, odświeżany co 2 sekundy. `agentctl board --tmux` otwiera go w oknie `board` sesji agentctl
+`agentctl board` to pełnoekranowy przegląd wszystkich zadań, odświeżany co 2 sekundy (co 5 sekund, gdy nic już nie działa). `agentctl board --tmux` otwiera go w oknie `board` sesji agentctl
 (tworzonym, jeśli go brak, nigdy dwukrotnie); okna boardu i watcha nie są zadaniami.
 
 ```

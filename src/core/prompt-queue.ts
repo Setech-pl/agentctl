@@ -53,8 +53,8 @@ export async function drainPromptQueue(ctx: Context, window: string): Promise<vo
   }));
 }
 
-export function promptQueueView(ctx: Context, window: string) {
-  const record = readTaskRecord(ctx.config, window);
-  const active = record?.pendingPrompt && record.promptDelivery !== 'sent' ? [{ id: record.deliveryId ?? 'legacy', text: record.pendingPrompt, state: record.promptDelivery ?? 'pending' }] : [];
-  return [...active, ...readPromptQueue(ctx, window).filter(p => p.id !== record?.deliveryId).map(p => ({ ...p, state: 'queued' }))];
+export function promptQueueView(ctx: Context, window: string, record?: ReturnType<typeof readTaskRecord>) {
+  const known = record ?? readTaskRecord(ctx.config, window);
+  const active = known?.pendingPrompt && known.promptDelivery !== 'sent' ? [{ id: known.deliveryId ?? 'legacy', text: known.pendingPrompt, state: known.promptDelivery ?? 'pending' }] : [];
+  return [...active, ...readPromptQueue(ctx, window).filter(p => p.id !== known?.deliveryId).map(p => ({ ...p, state: 'queued' }))];
 }

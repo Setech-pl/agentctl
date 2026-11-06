@@ -470,7 +470,7 @@ Two tasks that change the same files in the same repository will meet in a merge
 
 ## Board
 
-`agentctl board` is a full-screen overview of all tasks, refreshed every 2 seconds. `agentctl board --tmux` opens it in window `board` of the agentctl session
+`agentctl board` is a full-screen overview of all tasks, refreshed every 2 seconds (every 5 seconds when nothing is running any more). `agentctl board --tmux` opens it in window `board` of the agentctl session
 (created if missing, never twice); the board and watch windows are not tasks.
 
 ```

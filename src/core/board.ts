@@ -2,12 +2,13 @@ import { provider as providerAdapter, PROVIDERS } from './providers/registry.ts'
 import { get as providerValue } from './providers/registry.ts';
 import type { ProviderValues } from './providers/registry.ts';
 import { markTasks } from './mark.ts';
-import { collectDisk } from './disk.ts';
+import { collectDisk, DISK_INTERVAL_MS } from './disk.ts';
 import type { DiskReport } from './disk.ts';
 import { collectCapacity, renderCapacity } from './capacity.ts';
 import { shortPath } from './report-detect.ts';
 import { modelLabel, providerLabel } from './model-label.ts';
 import path from 'node:path';
+import fs from 'node:fs';
 import { attachCollisions, collideText } from './collisions.ts';
 import { cancelTasks, planCancel } from './cancel.ts';
 import { countsLine, lastActivity, listCohorts } from './cohort.ts';
@@ -34,10 +35,11 @@ import { sendPrompts } from './send.ts';
 import type { TaskState } from './state.ts';
 import { collectStatus } from './status.ts';
 import type { StatusRow } from './status.ts';
-import { listArchivedRecords, listTaskRecords } from './taskstore.ts';
+import { snapshotRecords } from './taskstore.ts';
+import type { TaskRecord } from './taskstore.ts';
 import { logLines, markTask } from './history.ts';
 import type { Result } from './history.ts';
-import { openReader, readPlans } from './usage.ts';
+import { readPlans, sharedReader } from './usage.ts';
 import type { PlanState } from './usage.ts';
 import { formatTokens } from './usage-parse.ts';
 import { formatReset } from './usage.ts';
@@ -56,6 +58,49 @@ import { cohortKey, errorMessage } from './util.ts';
  */
 
 export const BOARD_REFRESH_MS = 2000;
+/** The refresh slows to this when nothing is alive or unfinished any more. */
+export const BOARD_IDLE_REFRESH_MS = 5000;
+/** Ticks fired by the fs.watch of the state dir are at least this far apart (agent events write event.json on every hook). */
+export const WATCH_TICK_MIN_MS = 500;
+
+/** The refresh cadence for the rows on the board: fast while anything runs, slow when every task is done. */
+export function boardRefreshMs(rows: readonly Pick<BoardRow, 'closed' | 'cancelled' | 'finished'>[]): number {
+  return rows.some((r) => !r.closed && !r.cancelled && !r.finished) ? BOARD_REFRESH_MS : BOARD_IDLE_REFRESH_MS;
+}
+
+/** Trailing debounce for the fs.watch events: the first event fires right away, bursts coalesce to one tick per window. */
+export class TickGate {
+  private readonly minMs: number;
+  private readonly fire: () => void;
+  private last = 0;
+  private pending: NodeJS.Timeout | undefined;
+
+  constructor(minMs: number, fire: () => void) {
+    this.minMs = minMs;
+    this.fire = fire;
+  }
+
+  ping(now: number): void {
+    const wait = this.minMs - (now - this.last);
+    if (wait <= 0) {
+      this.last = now;
+      this.fire();
+      return;
+    }
+    if (this.pending) return;
+    this.pending = setTimeout(() => {
+      this.pending = undefined;
+      this.last = Date.now();
+      this.fire();
+    }, wait);
+    this.pending.unref?.();
+  }
+
+  stop(): void {
+    if (this.pending) clearTimeout(this.pending);
+    this.pending = undefined;
+  }
+}
 /** Lines of the selected window shown in the preview. */
 export const PREVIEW_LINES = 30;
 /** git is asked for the progress of a task at most this often. */
@@ -645,15 +690,38 @@ const clock = (ms: number): string => {
   return [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':');
 };
 
+/** The last disk report per agentctl home: collected on its own cadence, shown from the cache on the other ticks. */
+const diskReadings = new Map<string, { at: number; report: DiskReport }>();
+
+/** The disk reading of this tick: the last report while it is fresh (volumes and worktree sizes change slowly). */
+async function boardDisk(ctx: Context, records: TaskRecord[]): Promise<DiskReport> {
+  const key = ctx.config.path;
+  const now = ctx.runner.now();
+  const hit = diskReadings.get(key);
+  if (hit && now - hit.at < DISK_INTERVAL_MS) return hit.report;
+  // A bounded budget: the sizes of the worktrees keep measuring in the background, the tick shows the last reading.
+  const report = await collectDisk(ctx, fs.promises.statfs, { budgetMs: 250, records });
+  diskReadings.set(key, { at: now, report });
+  return report;
+}
+
+export interface LoadBoardOptions {
+  /** Full detail (prompt queue, outputs, tokens) also for closed/cancelled/archived rows: their section is expanded. */
+  deepClosed?: boolean;
+}
+
 /** One refresh from the core: the rows (with cached progress) and the preview of the selected task. */
-export async function loadBoard(ctx: Context, selected: string | null, cache: ProgressCache, previewLines: number = PREVIEW_LINES): Promise<BoardSnapshot> {
+export async function loadBoard(ctx: Context, selected: string | null, cache: ProgressCache, previewLines: number = PREVIEW_LINES, opts: LoadBoardOptions = {}): Promise<BoardSnapshot> {
   const { runner, config } = ctx;
-  const statusRows = await collectStatus(ctx, { progress: false, archived: true, tokens: true });
-  const records = new Map([...listArchivedRecords(config), ...listTaskRecords(config)].map((r) => [r.task, r]));
+  // One scan of the record stores per tick (cached: unchanged TASK.md files are not read again), shared by every consumer.
+  const scan = await snapshotRecords(config);
+  const reader = sharedReader(config);
+  reader.dropListings(); // directory listings are per tick, the parsed cache persists
+  const statusRows = await collectStatus(ctx, { progress: false, archived: true, tokens: true, records: scan, reader, shallowClosed: opts.deepClosed !== true });
+  const records = new Map(scan.all.map((r) => [r.task, r]));
   const now = runner.now();
-  const reader = openReader(config);
-  const plans = readPlans(config, reader, now);
-  const disk = await collectDisk(ctx);
+  const plans = readPlans(config, reader, now, scan.all);
+  const disk = await boardDisk(ctx, scan.all);
   reader.save();
   const rows: BoardRow[] = [];
   for (const row of statusRows) {
@@ -1105,8 +1173,8 @@ export const HELP_LINES: string[] = [
   '  ⚠           first column: another active task changes the same files',
   '  q           leave the board; the agents keep running',
   '',
-  'The list refreshes every 2 s. The preview of the selected window shows',
-  'from 110 columns on.',
+  'The list refreshes every 2 s, or every 5 s when nothing runs.',
+  'The preview of the selected window shows from 110 columns on.',
   'Press any key to go back.',
 ];
 

@@ -87,12 +87,12 @@ export function formatReset(ms: number, now: number): string {
 export { claudePlanFile, readClaudeSnapshot } from './providers/claude-usage.ts';
 
 /** Both plans. Reads one file for Claude and the tail of the newest Codex logs. */
-export function readPlans(config: GlobalConfig, reader: UsageReader, now: number): ProviderValues<PlanState> {
+export function readPlans(config: GlobalConfig, reader: UsageReader, now: number, records: readonly TaskRecord[] = allRecords(config)): ProviderValues<PlanState> {
   const ids = activeProviders(config);
   const plans = perProvider(ids, id => adapter(id).usage.readPlan(config, reader, now));
   for (const id of ids) { const p = plans[id]; p.stale = p.readAt !== null && now - p.readAt > config.capacity.staleMinutes * 60_000; }
   const totals = perProvider(ids, () => 0);
-  for (const u of collectTaskUsage(config, reader, allRecords(config), now).values()) if ((ids as string[]).includes(u.agent)) totals[u.agent as AgentName] += freshTokens(u.total);
+  for (const u of collectTaskUsage(config, reader, records, now).values()) if ((ids as string[]).includes(u.agent)) totals[u.agent as AgentName] += freshTokens(u.total);
   recordSamples(config, plans, totals, now);
   return plans;
 }
@@ -229,6 +229,23 @@ export const allRecords = (config: GlobalConfig): TaskRecord[] => [...listTaskRe
 
 /** A reader on the cache of this agentctl home. */
 export const openReader = (config: GlobalConfig): UsageReader => new UsageReader(cachePath(config));
+
+/** One reader per agentctl home for the long-lived board process: the (large) usage cache file is parsed once, not per tick. */
+const sharedReaders = new Map<string, UsageReader>();
+
+/**
+ * The board's reader. One-shot commands use openReader (a fresh reader each run); the board shares one so the usage cache
+ * is read at startup and `save()` writes only when a tick actually read new bytes (it already checks the dirty flag).
+ */
+export function sharedReader(config: GlobalConfig): UsageReader {
+  const key = cachePath(config);
+  let reader = sharedReaders.get(key);
+  if (!reader) {
+    reader = openReader(config);
+    sharedReaders.set(key, reader);
+  }
+  return reader;
+}
 
 export interface TaskTokens {
   observed?: TaskUsage['observed'];

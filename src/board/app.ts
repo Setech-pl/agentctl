@@ -11,7 +11,7 @@ import {
   cohortLabel,
   finishedTitle,
   groupTitle,
-  BOARD_REFRESH_MS,
+  boardRefreshMs,
   clearNotice,
   handleKey,
   HELP_LINES,
@@ -23,6 +23,7 @@ import {
   managerLine,
   modelHelp,
   loadLogLines,
+  PREVIEW_LINES,
   ProgressCache,
   promptText,
   queueCells,
@@ -30,11 +31,13 @@ import {
   resumeTitle,
   rowCells,
   runBoardEffect,
+  TickGate,
   usagePanel,
   loadViewLines,
   VIEW_TITLES,
   showNotice,
   visibleItems,
+  WATCH_TICK_MIN_MS,
   withBusy,
   withLoadError,
   withSize,
@@ -150,6 +153,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
     let stopped = false;
     let running = false;
     let again = false;
+    let timer: NodeJS.Timeout | undefined;
     const tick = async (): Promise<void> => {
       if (running) {
         again = true;
@@ -160,7 +164,8 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
         do {
           again = false;
           try {
-            const snap = await loadBoard(ctx, current.current.selected, cache.current);
+            // Closed/cancelled rows are detailed only while their section is listed (the `a` key).
+            const snap = await loadBoard(ctx, current.current.selected, cache.current, PREVIEW_LINES, { deepClosed: current.current.showHidden });
             if (!stopped) update((s) => applySnapshot(s, snap));
           } catch (e) {
             if (!stopped) update((s) => withLoadError(s, errorMessage(e).split('\n')[0] as string));
@@ -170,22 +175,29 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
         running = false;
       }
     };
+    // The next tick is armed when the previous one finished, never on a fixed interval: a slow tick cannot stack up.
+    const arm = (): void => {
+      if (stopped) return;
+      timer = setTimeout(() => void tick().then(arm), boardRefreshMs(current.current.rows));
+    };
     refreshNow.current = () => void tick();
-    void tick();
-    const timer = setInterval(() => void tick(), BOARD_REFRESH_MS);
-    // An agent's own event (agentctl event writes <state_dir>/<task>/event.json) shows at once, not at the next refresh.
+    void tick().then(arm);
+    // An agent's own event (agentctl event writes <state_dir>/<task>/event.json) shows at once, not at the next refresh;
+    // a storm of events (one per agent hook) is coalesced to at most one extra tick per WATCH_TICK_MIN_MS.
+    const gate = new TickGate(WATCH_TICK_MIN_MS, () => void tick());
     let watcher: fs.FSWatcher | undefined;
     try {
       watcher = fs.watch(ctx.config.stateDir, { recursive: true }, (_type, name) => {
-        if (name && /event\.json$/.test(name)) void tick();
+        if (name && /event\.json$/.test(name)) gate.ping(Date.now());
       });
       watcher.on('error', () => watcher?.close());
     } catch {
-      // no state folder yet, or no recursive watching here: the 2 s refresh still shows it
+      // no state folder yet, or no recursive watching here: the regular refresh still shows it
     }
     return () => {
       stopped = true;
-      clearInterval(timer);
+      if (timer) clearTimeout(timer);
+      gate.stop();
       watcher?.close();
     };
   }, []);
