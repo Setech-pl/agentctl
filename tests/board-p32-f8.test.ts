@@ -70,14 +70,14 @@ for (const phase of ['scan', 'status'] as const) it(`F8: real Ink/stdin arrows c
     await terminal.until(() => /▸\s+KEY-001/.test(terminal.frame) && terminal.frame.includes('KEY-001 · last'));
     // Force a cold parse in the scan case; keep the cache warm for the independent status case.
     if (phase === 'scan') for (const file of tasks) fs.appendFileSync(file, '\nchanged prompt\n');
-    fs.readFileSync = ((file, ...args) => {
+    fs.readFileSync = ((file: unknown, ...args: unknown[]) => {
       if (armed && tasks.includes(String(file))) {
         taskReads++;
         if (phase === 'scan') recordVisited(String(file));
       }
       return Reflect.apply(originalRead, fs, [file, ...args]);
     }) as typeof fs.readFileSync;
-    fs.statSync = ((file, ...args) => {
+    fs.statSync = ((file: unknown, ...args: unknown[]) => {
       const name = String(file);
       if (armed && phase === 'status' && reports.has(name) && !visited.has(name)) {
         if (visited.size === 0) scanReads = taskReads;

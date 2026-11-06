@@ -75,7 +75,7 @@ it('F7: exit during an in-flight refresh discards follow-up and never re-arms', 
   const clock = new Clock();
   let complete!: () => void;
   let calls = 0;
-  const scheduler = new RefreshScheduler(() => { calls++; return new Promise<void>(r => { complete = r; }); }, () => 2000, assert.fail, clock);
+  const scheduler = new RefreshScheduler(() => { calls++; return new Promise<void>(r => { complete = r; }); }, () => 2000, error => assert.fail(String(error)), clock);
   scheduler.start(); scheduler.request(); scheduler.stop(); complete(); await settle();
   clock.advance(10000);
   assert.equal(calls, 1);
