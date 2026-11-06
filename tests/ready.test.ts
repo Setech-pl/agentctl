@@ -65,14 +65,14 @@ describe('agent command lines', () => {
     assert.equal(agentCommandLine(buildAgentArgv({ agent: 'claude', model: 'default', effort: 'low' }, claude)), 'claude --effort low');
   });
 
-  it('codex: danger-full-access sandbox, -m only for a non-default model, effort through -c', () => {
+  it('codex: danger-full-access sandbox, -m only for a non-default model, effort through -c, startup update check off', () => {
     assert.equal(
       agentCommandLine(buildAgentArgv({ agent: 'codex', model: 'gpt-6.1-sol', effort: 'medium' }, codex)),
-      'codex --sandbox danger-full-access -m gpt-6.1-sol -c model_reasoning_effort=medium',
+      'codex --sandbox danger-full-access -m gpt-6.1-sol -c model_reasoning_effort=medium -c check_for_update_on_startup=false',
     );
     assert.equal(
       agentCommandLine(buildAgentArgv({ agent: 'codex', model: 'default', effort: 'high' }, codex)),
-      'codex --sandbox danger-full-access -c model_reasoning_effort=high',
+      'codex --sandbox danger-full-access -c model_reasoning_effort=high -c check_for_update_on_startup=false',
     );
   });
 

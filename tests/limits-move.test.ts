@@ -211,7 +211,7 @@ describe('move', () => {
 
     const typed = t.runner.commands.find((c) => c.includes(' -l -- ') && c.includes('exec sh')) as string;
     assert.ok(typed.includes('exec sh'));
-    assert.match(t.runner.written.get(path.join(t.config.stateDir, 'nc-1-2/start.sh'))!, /exec codex --sandbox danger-full-access -m gpt-6-astra -c model_reasoning_effort=medium -c 'notify=\[/);
+    assert.match(t.runner.written.get(path.join(t.config.stateDir, 'nc-1-2/start.sh'))!, /exec codex --sandbox danger-full-access -m gpt-6-astra -c model_reasoning_effort=medium -c check_for_update_on_startup=false -c 'notify=\[/);
     assert.ok(t.runner.commands.some((c) => c.startsWith('tmux new-window') && c.includes('-n nc-1-2') && c.includes(`-c ${t.worktree}`)), 'the same worktree');
     assert.ok(!t.runner.commands.some((c) => c.includes('worktree add')), 'no new worktree');
     const pasted = t.runner.calls.find((c) => c.line.startsWith('tmux load-buffer') && c.input?.includes('Poprzedni agent'));
