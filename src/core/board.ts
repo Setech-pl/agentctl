@@ -718,7 +718,7 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
   const reader = sharedReader(config);
   reader.dropListings(); // directory listings are per tick, the parsed cache persists
   const statusRows = await collectStatus(ctx, { progress: false, archived: true, tokens: true, records: scan, reader, shallowClosed: opts.deepClosed !== true });
-  const records = new Map(scan.all.map((r) => [r.task, r]));
+  const records = new Map([...scan.archived, ...scan.current].map((r) => [r.task, r]));
   const now = runner.now();
   const plans = readPlans(config, reader, now, scan.all);
   const disk = await boardDisk(ctx, scan.all);

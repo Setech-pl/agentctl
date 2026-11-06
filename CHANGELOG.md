@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- P32 F3: current task repositories and worktrees take precedence over archive duplicates on the board.
+
 - P32 F2: TASK.md and report caches detect atomic replacement and equal-size rewrites with dev/inode and nanosecond mtime/ctime; coarse change times force a reread.
 
 - P32 F1: cached report digests revalidate the current owner, allowed roots and symlink components on every inspection.

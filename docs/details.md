@@ -764,3 +764,5 @@ Results and logs are under `$AGENTCTL_LIVE_CACHE/gate-results/<sha>/`; `<tier>.j
 Report digest reuse always revalidates the current task owner, allowed roots and every symlink component; authorization is never cached.
 
 TASK.md and report cache versions include device, inode, size and nanosecond modification/change times. Coarse (millisecond-aligned) change times disable reuse; known header writes and report copies explicitly invalidate their entries.
+
+When a task ID exists in current state and the archive, board progress and worktrees use the current record.

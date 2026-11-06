@@ -762,3 +762,5 @@ Wyniki i logi trafiają do `$AGENTCTL_LIVE_CACHE/gate-results/<sha>/`. `<tier>.j
 Ponowne użycie skrótu raportu zawsze sprawdza bieżącego właściciela zadania, dozwolone katalogi i dowiązania symboliczne w ścieżce; autoryzacja nie jest buforowana.
 
 Wersje cache TASK.md i raportów obejmują urządzenie, inode, rozmiar oraz nanosekundowy czas modyfikacji i zmiany metadanych. Niska rozdzielczość czasu zmian (wyrównanie do milisekundy) wyłącza ponowne użycie; zapis nagłówka i kopiowanie raportu jawnie unieważniają wpisy.
+
+Jeśli identyfikator zadania istnieje w bieżącym stanie i archiwum, postęp oraz worktree na tablicy pochodzą z bieżącego rekordu.
