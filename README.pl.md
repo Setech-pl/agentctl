@@ -96,6 +96,8 @@ None.
 
 None.
 
+Pole `repo` w `agentctl-outputs` przyjmuje nazwę lub ścieżkę repozytorium oraz nazwę katalogu lub ścieżkę worktree zadania. Akceptowane aliasy są normalizowane do nazwy repozytorium; nazwy niejednoznaczne są odrzucane.
+
 ```agentctl-outputs
 version: 1
 verdict: PASS

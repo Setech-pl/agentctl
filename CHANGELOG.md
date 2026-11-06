@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- P23: accept task worktree directory names as output repository aliases and normalize accepted refs to repository names.
+
 - P22: suggest explicit report_from for plausible nearby reports in status, board and events; never adopt automatically.
 
 - P18: reject recursive/self links during preview and warn about missing absolute link sources.

@@ -117,12 +117,12 @@ const samePath = (a: string, b: string): boolean => { try { return fs.realpathSy
 export interface RepoResolution { repo?: TaskRecord['repos'][number]; allowed: string[]; problem?: 'missing' | 'ambiguous' }
 /**
  * What the `repo` field of commits/integrate may say: the repo's name (basename of its path), the path of the repository, or the path of
- * the task's worktree. A review may also use the author's worktree, the author's repository path or the author's branch. `allowed` lists
+ * the task's worktree (path or directory name). A review may also use the author's worktree, the author's repository path or the author's branch. `allowed` lists
  * every accepted spelling for the error message.
  */
 export function resolveOutputRepo(record: Pick<TaskRecord, 'repos'>, name: string, author?: Pick<TaskRecord, 'repos'> | undefined): RepoResolution {
   const ids = new Map<TaskRecord['repos'][number], { names: string[]; paths: string[] }>();
-  for (const r of record.repos) ids.set(r, { names: [path.basename(r.path)], paths: [r.path, r.worktree] });
+  for (const r of record.repos) ids.set(r, { names: [path.basename(r.path), ...(r.worktree ? [path.basename(r.worktree)] : [])], paths: [r.path, r.worktree] });
   // The author's checkout and branch lead to the reviewer's repo of the same repository.
   for (const a of author?.repos ?? []) {
     const mine = record.repos.find((r) => samePath(r.path, a.path));
@@ -165,6 +165,7 @@ export async function readOutputs(ctx: Context, record: TaskRecord): Promise<Out
     const found = resolveRefRepo(ctx, record, ref.repo);
     if (!found.repo) { note(`repo ${ref.repo}: ${found.problem === 'ambiguous' ? 'ambiguous' : 'not'} in the task repos; write one of: ${found.allowed.join(', ')}`); continue; }
     const repo = found.repo;
+    ref.repo = path.basename(repo.path);
     const git = async (args: string[]) => ctx.runner.exec('git', ['-C', repo.path, ...args], { readOnly: true });
     if ((await git(['show-ref', '--verify', '--quiet', `refs/heads/${ref.branch}`])).code !== 0) note(`${ref.repo}: branch ${ref.branch} does not exist`);
     if ((await git(['rev-parse', '--verify', '--end-of-options', `${ref.sha}^{commit}`])).code !== 0) note(`${ref.repo}: commit ${ref.sha} does not exist`);
