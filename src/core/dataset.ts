@@ -136,7 +136,7 @@ export async function* datasetRecords(ctx: Context, opts: DatasetOptions = {}): 
     if (repoLabels.length === 0) unknown.push('repo_labels');
     // Redact text leaves, not field names such as tokens/cache_write (the shared object walker treats those as secrets).
     const strings = (v: unknown): string[] => typeof v === 'string' ? [v] : Array.isArray(v) ? v.flatMap(strings) : isObject(v) ? Object.values(v).flatMap(strings) : [];
-    const redact = secretRedactor([r?.env ?? {}, prompt, report, strings(row)], new Set([String(h.task)]));
+    const redact = secretRedactor([ctx.config, process.env, r?.env ?? {}, prompt, report, strings(row)], new Set([String(h.task)]));
     const clean = (v: unknown): unknown => typeof v === 'string' ? redact(v) : Array.isArray(v) ? v.map(clean) : isObject(v) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, clean(x)])) : v;
     yield { ...clean(row) as Data, provenance: row.provenance, unknown: row.unknown };
   }

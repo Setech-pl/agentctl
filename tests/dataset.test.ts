@@ -97,3 +97,19 @@ it('R2 N2: invalid dataset export options never create an --out file', async () 
     assert.deepEqual(hashes(s.root), before);
   }
 });
+
+it('R2 N3: dataset report text redacts bare config-only and process-only secrets', async () => {
+  const s = setup('config-secret', []);
+  s.config.env.CONFIG_TOKEN = 'dataset-config-only-sentinel';
+  const r = seedTask(s.config, 'SECRET', { attempt: 1, attemptId: 'secret-attempt' });
+  fs.mkdirSync(path.dirname(r.report), { recursive: true });
+  fs.writeFileSync(r.report, 'Verdict: PASS\n<!-- agentctl:attempt secret-attempt -->\nAnswer dataset-config-only-sentinel dataset-process-only-sentinel\n<!-- agentctl:report-end -->\n');
+  const previous = process.env.R2_DATASET_SECRET;
+  process.env.R2_DATASET_SECRET = 'dataset-process-only-sentinel';
+  try {
+    const [row] = await collect(s.ctx, { includeReports: true });
+    assert.match(row!.report_text, /Answer \*\*\* \*\*\*/);
+    assert.doesNotMatch(JSON.stringify(row), /dataset-config-only-sentinel|dataset-process-only-sentinel/);
+    assert.deepEqual(row!.tokens, { input: null, output: null, cache_read: null, cache_write: null, reasoning: null });
+  } finally { if (previous === undefined) delete process.env.R2_DATASET_SECRET; else process.env.R2_DATASET_SECRET = previous; }
+});
