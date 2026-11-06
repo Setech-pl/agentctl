@@ -153,7 +153,7 @@ describe('mcp: reading', () => {
     fs.symlinkSync(secret, record.report);
     const r = await t.call('get_report', { task: 'NC-1' });
     assert.equal(r.isError, true);
-    assert.match(r.text, /not a regular file; refusing/);
+    assert.match(r.text, /Report path contains a symlink/);
     assert.ok(!r.text.includes('TOP SECRET'));
     fs.rmSync(record.report);
     fs.mkdirSync(record.report);
