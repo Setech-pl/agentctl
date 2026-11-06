@@ -10,7 +10,7 @@ import { readTaskRecord, setHeaderFields, taskFile } from './taskstore.ts';
 import type { TaskRecord } from './taskstore.ts';
 import { AgentctlError, expandHome, windowName } from './util.ts';
 
-/* Only fresh configured report alternatives bearing the task ID are candidates.
+/* Fresh configured alternatives and bounded nearby Markdown files are candidates.
  * Copying to the canonical path always requires an explicit --from / report_from. */
 
 const QUOTED_MD = /(["'`])((?:~\/|\/|\.{1,2}\/)?[^"'`\n]*?\.md)\1/g;
@@ -106,13 +106,13 @@ function absolutes(raw: string, worktrees: string[]): string[] {
 export interface ReportCandidate {
   file: string;
   mtimeMs: number;
-  /** The configured report alternatives are the only discovery source. */
-  why: 'configured';
+  /** Discovery is a hint only; a candidate never becomes canonical automatically. */
+  why: 'configured' | 'nearby';
 }
 
 const startedOf = (record: Pick<TaskRecord, 'started' | 'attemptStarted'>): number => Date.parse(record.attemptStarted ?? record.started);
 
-/** Fresh regular files from report alternatives, newest first; prompt text is never evidence. */
+/** Fresh regular files from alternatives and nearby paths, newest first; prompt text is never evidence. */
 export function findCandidates(ctx: Context, record: TaskRecord): ReportCandidate[] {
   const worktrees = worktreesOf(record);
   const canonical = path.normalize(record.report);
@@ -127,7 +127,7 @@ export function findCandidates(ctx: Context, record: TaskRecord): ReportCandidat
     } catch {
       return;
     }
-    if (mtimeMs <= startedOf(record) || !path.basename(file).toLowerCase().includes(record.task.toLowerCase())) return;
+    if (mtimeMs <= startedOf(record) || !(path.basename(file).toLowerCase().includes(record.task.toLowerCase()) || (why === 'nearby' && path.basename(file).toLowerCase() === path.basename(canonical).toLowerCase()))) return;
     seen.add(file);
     out.push({ file, mtimeMs, why });
   };
@@ -137,7 +137,20 @@ export function findCandidates(ctx: Context, record: TaskRecord): ReportCandidat
   const fresh = (files: string[]): string[] => files.filter((f) => f !== canonical && isFile(f)).sort((a, b) => mtime(b) - mtime(a));
   for (const f of fresh(configured)) add(f, 'configured');
 
-  return out;
+  // Bounded discovery: no symlink directories, dependency trees or state files.
+  let budget = 2000;
+  const walk = (dir: string, depth: number): void => {
+    if (budget <= 0) return;
+    for (const entry of safeDir(dir).sort((a, b) => a.name.localeCompare(b.name))) {
+      if (--budget < 0) break;
+      const file = path.join(dir, entry.name);
+      if (entry.isFile() && /\.md$/i.test(entry.name)) add(file, 'nearby');
+      else if (depth > 0 && entry.isDirectory() && !entry.name.startsWith('.') && !['node_modules', 'dist', 'vendor'].includes(entry.name)) walk(file, depth - 1);
+    }
+  };
+  walk(path.dirname(canonical), 0);
+  for (const worktree of worktrees) walk(worktree, 3);
+  return out.sort((a, b) => b.mtimeMs - a.mtimeMs || a.file.localeCompare(b.file));
 }
 
 function mtime(file: string): number {
@@ -194,7 +207,7 @@ async function syncReportLocked(ctx: Context, record: TaskRecord, opts: SyncOpti
     if (candidate !== record.reportCandidate && !opts.dryRun) {
       record.reportCandidate = candidate;
       await setHeaderFields(runner, file, { report_candidate: candidate ?? null });
-      if (candidate) await recordJournal(ctx, { kind: 'report-candidate', task: record.task, text: `${record.task}: report-candidate ${candidate}` });
+      if (candidate) await recordJournal(ctx, { kind: 'report-candidate', task: record.task, text: `${record.task}: report-candidate ${candidate}; użyj report_from ze ścieżką ${candidate}` });
     }
   }
   if (!source) return { action: 'none' };

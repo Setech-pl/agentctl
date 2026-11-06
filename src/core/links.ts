@@ -28,6 +28,25 @@ function isWholeSegmentStar(p: string): boolean {
   return path.basename(p) === '*' && !path.dirname(p).includes('*');
 }
 
+/** Resolve existing parents too, so aliases cannot hide recursive links before creation. */
+function resolvedLocation(file: string): string {
+  const absolute = path.resolve(file);
+  try { return fs.realpathSync(absolute); } catch {
+    const parent = path.dirname(absolute);
+    return parent === absolute ? absolute : path.join(resolvedLocation(parent), path.basename(absolute));
+  }
+}
+
+export function validateLink(from: string, to: string, worktree: string): void {
+  const absoluteSource = path.resolve(worktree, from);
+  const source = path.join(resolvedLocation(path.dirname(absoluteSource)), path.basename(absoluteSource));
+  const target = resolvedLocation(to);
+  const inside = (child: string, parent: string): boolean => child === parent || child.startsWith(`${parent}${path.sep}`);
+  if (inside(source, target) || inside(target, source)) {
+    throw new AgentctlError(`links: recursive self-link ${source} -> ${target}`, 'Choose a target outside the link and its ancestors. Nothing was started.');
+  }
+}
+
 /**
  * Expand `links` into concrete symlink operations for one worktree.
  *
@@ -43,6 +62,7 @@ export function planLinks(links: Link[], worktree: string): { ops: LinkOp[]; war
     if (path.isAbsolute(from)) {
       throw new AgentctlError(`links: "from" must be relative to the worktree, got ${from}`, 'Use e.g. from: node_modules/@scope/*');
     }
+    validateLink(from, to, worktree);
     if (to.includes('*')) {
       if (!isWholeSegmentStar(to) || !isWholeSegmentStar(from)) {
         throw new AgentctlError(
@@ -60,6 +80,7 @@ export function planLinks(links: Link[], worktree: string): { ops: LinkOp[]; war
       if (names.length === 0) warnings.push(`link ${from} -> ${to}: nothing found in ${targetDir}`);
       for (const name of names) {
         const link = path.join(worktree, path.dirname(from), name);
+        validateLink(link, path.join(targetDir, name), worktree);
         ops.push({ link, target: path.join(targetDir, name), existing: lstatKind(link) });
       }
       continue;
@@ -78,6 +99,7 @@ export function planLinks(links: Link[], worktree: string): { ops: LinkOp[]; war
     }
     for (const match of matches) {
       const link = path.join(worktree, match);
+      validateLink(link, to, worktree);
       ops.push({ link, target: to, existing: lstatKind(link) });
     }
   }
@@ -114,12 +136,13 @@ export async function applyLinks(runner: Runner, ops: LinkOp[]): Promise<void> {
 export function missingLinkTargets(links: Link[], primary?: string): string[] {
   return links.flatMap(({ from, to }) => {
     const target = path.resolve(to.endsWith('/*') ? path.dirname(to) : to);
-    if (fs.existsSync(target)) return [];
+    const warnings = path.isAbsolute(from) && !fs.existsSync(from.endsWith('/*') ? path.dirname(from) : from) ? [`links.from ${from} does not exist; check the source worktree path`] : [];
+    if (fs.existsSync(target)) return warnings;
     let missing = target;
     // The first path component that is not there: the thing to create or to fix.
     for (let dir = path.dirname(missing); !fs.existsSync(dir) && dir !== path.dirname(dir); dir = path.dirname(dir)) missing = dir;
     const place = primary ? path.join(primary, from) : from;
-    return [`link ${place} -> ${target}: links.to points at a path that does not exist (first missing: ${missing}); create/check out ${missing === target ? 'it' : 'that directory'} first, or correct links.to (the link side, links.from, is created for you)`];
+    return [...warnings, `link ${place} -> ${target}: links.to points at a path that does not exist (first missing: ${missing}); create/check out ${missing === target ? 'it' : 'that directory'} first, or correct links.to (the link side, links.from, is created for you)`];
   });
 }
 

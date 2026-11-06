@@ -114,6 +114,9 @@ notes: []
 next_cursor: 8b1e4d93-0a7c-42f5-b6d8-2e9f1c3a7d60:1; has_more: false
 ```
 
+
+The `repo` field in `agentctl-outputs` accepts the repository name or path and the task worktree directory name or path. Accepted aliases normalize to the repository name; ambiguous names are rejected.
+
 ## How it works
 
 1. Write a spec (or let your planning chat write it): task, agent, model, effort, repos, report path.
@@ -149,6 +152,8 @@ agentctl is built for and used on a real project: cohorts of tasks run every day
 ## Task states
 
 The board tracks `needs-attention`, `overloaded`, `working`, `waiting`, `needs-input`, `needs-trust`, `limited`, `report-ready`, `background`, `queued`, `blocked`, `dead`, `orphan`, `closed`, `cancelled`, `superseded` and `start-failed`. A `report-candidate` flag keeps the current task state. See [task states and details](docs/details.md#task-states).
+
+When the canonical report is missing, status, board and events suggest `report_from` for a fresh nearby Markdown file matching the task ID or canonical filename. Discovery checks the report directory and task worktrees (bounded depth and file budget, excluding dependencies); it never adopts a file automatically.
 
 ### Architecture and flow
 
@@ -478,6 +483,9 @@ Play a notification sound when a background task finishes.
 | `touches` | no | Globs of the files the task will change: a warning when an active task already changes them. |
 | `cohort` | no | Name of the group the task belongs to (`--cohort` on `new` and `queue` overrides it). Without it the task is in no cohort. |
 | `report` | no | Where the agent writes its report (default `<cache>/<task>/<TASK>.md`). |
+
+Links that point to themselves or place a link inside its target (or its target inside the link) are rejected during preview, including paths resolved through symlink parents. A missing absolute `links.from` path produces a warning; `from` must stay inside the primary worktree.
+
 
 `{task}`, `{TASK}` and `{cache}` work as placeholders in paths. All keys, types and defaults: [docs/configuration.md](docs/configuration.md#spec-keys). Mistakes are reported all at once, in plain words, with a hint.
 

@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- P23: accept task worktree directory names as output repository aliases and normalize accepted refs to repository names.
+
+- P22: suggest explicit report_from for plausible nearby reports in status, board and events; never adopt automatically.
+
+- P18: reject recursive/self links during preview and warn about missing absolute link sources.
+
 - P32 validation: default gates assert warm-tick file counts; the host-sensitive 100 ms assertion uses the existing AGENTCTL_P32_PERF opt-in.
 
 - P32 F9: remove the production per-scan parse counter; tests count fixture file operations only.

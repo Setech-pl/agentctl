@@ -112,6 +112,9 @@ notes: []
 next_cursor: 8b1e4d93-0a7c-42f5-b6d8-2e9f1c3a7d60:1; has_more: false
 ```
 
+
+Pole `repo` w `agentctl-outputs` przyjmuje nazwę lub ścieżkę repozytorium oraz nazwę katalogu lub ścieżkę worktree zadania. Akceptowane aliasy są normalizowane do nazwy repozytorium; nazwy niejednoznaczne są odrzucane.
+
 ## Jak to działa
 
 1. Przygotuj spec (albo poproś o niego czat planujący): zadanie, agenta, model, effort, repozytoria i ścieżkę raportu.
@@ -147,6 +150,8 @@ agentctl powstał i jest używany przy prawdziwym projekcie: codziennie równole
 ## Stany zadań
 
 Board pokazuje m.in. stany `needs-attention`, `overloaded`, `working`, `waiting`, `needs-input`, `needs-trust`, `limited`, `report-ready`, `background`, `queued`, `blocked`, `dead`, `orphan`, `closed`, `cancelled`, `superseded` i `start-failed`. `report-candidate` to osobna flaga raportu, bez zmiany stanu. Szczegóły opisuje [dokumentacja stanów zadań](docs/details.pl.md#stany-zadań).
+
+Gdy brakuje raportu kanonicznego, status, board i events podpowiadają `report_from` dla świeżego pliku Markdown pasującego do ID zadania lub nazwy raportu. Wyszukiwanie obejmuje katalog raportu i worktree zadania (z limitem głębokości i liczby plików, bez zależności); nigdy nie importuje pliku automatycznie.
 
 ### Architektura i przebieg pracy
 
@@ -476,6 +481,9 @@ Play a notification sound when a background task finishes.
 | `touches` | nie | Globy plików, które zadanie zmieni: ostrzeżenie, gdy aktywne zadanie już je zmienia. |
 | `cohort` | nie | Nazwa grupy, do której należy zadanie (`--cohort` przy `new` i `queue` ją nadpisuje). Bez niej zadanie nie należy do żadnej kohorty. |
 | `report` | nie | Gdzie agent zapisuje raport (domyślnie `<cache>/<task>/<TASK>.md`). |
+
+Podgląd odrzuca linki wskazujące na siebie oraz link wewnątrz jego celu lub cel wewnątrz linku, także po rozwiązaniu symlinków w ścieżce. Brak bezwzględnej ścieżki `links.from` powoduje ostrzeżenie; `from` musi pozostać wewnątrz głównego worktree.
+
 
 W ścieżkach działają placeholdery `{task}`, `{TASK}` i `{cache}`. Wszystkie klucze, typy i wartości domyślne: [docs/configuration.md](docs/configuration.md#spec-keys) (po angielsku). Błędy są zgłaszane wszystkie naraz, zwykłymi słowami, z podpowiedzią.
 
