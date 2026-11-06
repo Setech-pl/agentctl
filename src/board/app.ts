@@ -23,6 +23,7 @@ import {
   managerLine,
   modelHelp,
   loadLogLines,
+  PREVIEW_LINES,
   ProgressCache,
   promptText,
   queueCells,
@@ -160,7 +161,8 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
         do {
           again = false;
           try {
-            const snap = await loadBoard(ctx, current.current.selected, cache.current);
+            // Closed/cancelled rows are detailed only while their section is listed (the `a` key).
+            const snap = await loadBoard(ctx, current.current.selected, cache.current, PREVIEW_LINES, { deepClosed: current.current.showHidden });
             if (!stopped) update((s) => applySnapshot(s, snap));
           } catch (e) {
             if (!stopped) update((s) => withLoadError(s, errorMessage(e).split('\n')[0] as string));

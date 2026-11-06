@@ -646,12 +646,17 @@ const clock = (ms: number): string => {
   return [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':');
 };
 
+export interface LoadBoardOptions {
+  /** Full detail (prompt queue, outputs, tokens) also for closed/cancelled/archived rows: their section is expanded. */
+  deepClosed?: boolean;
+}
+
 /** One refresh from the core: the rows (with cached progress) and the preview of the selected task. */
-export async function loadBoard(ctx: Context, selected: string | null, cache: ProgressCache, previewLines: number = PREVIEW_LINES): Promise<BoardSnapshot> {
+export async function loadBoard(ctx: Context, selected: string | null, cache: ProgressCache, previewLines: number = PREVIEW_LINES, opts: LoadBoardOptions = {}): Promise<BoardSnapshot> {
   const { runner, config } = ctx;
   // One scan of the record stores per tick (cached: unchanged TASK.md files are not read again), shared by every consumer.
   const scan = await snapshotRecords(config);
-  const statusRows = await collectStatus(ctx, { progress: false, archived: true, tokens: true, records: scan });
+  const statusRows = await collectStatus(ctx, { progress: false, archived: true, tokens: true, records: scan, shallowClosed: opts.deepClosed !== true });
   const records = new Map(scan.all.map((r) => [r.task, r]));
   const now = runner.now();
   const reader = openReader(config);

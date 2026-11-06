@@ -148,6 +148,11 @@ export interface CollectOptions {
   records?: { current: TaskRecord[]; archived: TaskRecord[] };
   /** The usage reader for the tokens (default: a fresh one for this call). */
   reader?: UsageReader;
+  /**
+   * Cheap rows for closed/cancelled/archived tasks: skip the prompt queue, the outputs of a ready report and the token
+   * collection for them (the board shows only their count unless the section is expanded). Their state and report stay exact.
+   */
+  shallowClosed?: boolean;
 }
 
 const idleObservations = new Map<string, { working: boolean; idle: number; attempt: string; observedWork: boolean; workStopAt?: string }>();
@@ -169,6 +174,9 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
   for (const { record, archived } of records) {
     if (!archived) knownWindows.add(record.window);
     const alive = live.has(record.window);
+    // Closed, cancelled or archived and not live: the board only counts them (unless a section is expanded), so the
+    // prompt queue, the outputs and the tokens are not collected for them. Everything that decides the state stays.
+    const shallow = opts.shallowClosed === true && !alive && (archived || record.closed === true || record.cancelled === true);
     const startedMs = Date.parse(record.started);
     let reportMtime: number | undefined;
     try {
@@ -231,13 +239,13 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     idleObservations.set(observationKey, observation);
     if (release) { try { atomicWriteFile(observationFile, JSON.stringify(observation)); } catch { /* observation persistence is best effort */ } finally { release(); } }
     // Still being written (no report-end yet, or not settled): readOutputs says `outputs_pending` and judges nothing.
-    const outputData = reportReady ? await readOutputs(ctx, record) : undefined;
+    const outputData = !shallow && reportReady ? await readOutputs(ctx, record) : undefined;
     let verdict: OutputVerdict | undefined;
-    if (reportReady) { try { verdict = dependencyVerdict(fs.readFileSync(record.report, 'utf8')); } catch { /* absent */ } }
+    if (!shallow && reportReady) { try { verdict = dependencyVerdict(fs.readFileSync(record.report, 'utf8')); } catch { /* absent */ } }
     rows.push({
       ...(outputData ? { ...outputData, verdict, decisionsCount: outputData.outputs?.decisions.length ?? 0, actionsCount: outputData.outputs?.actions.length ?? 0 } : {}),
       task: record.task,
-      promptQueue: promptQueueView(ctx, record.window),
+      promptQueue: shallow ? [] : promptQueueView(ctx, record.window, record),
       promptDelivery: record.promptDelivery,
       ...(record.deliveryResult ? { deliveryResult: record.deliveryResult } : {}),
       attempt: record.attempt,
@@ -345,7 +353,11 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     });
   }
   if (opts.tokens) {
-    const tokenRecords = opts.records ? [...opts.records.current, ...opts.records.archived] : allRecords(config);
+    let tokenRecords = opts.records ? [...opts.records.current, ...opts.records.archived] : allRecords(config);
+    if (opts.shallowClosed) {
+      const archivedWindows = new Set((opts.records?.archived ?? []).map((r) => r.window));
+      tokenRecords = tokenRecords.filter((r) => r.closed !== true && r.cancelled !== true && !archivedWindows.has(r.window));
+    }
     const tokens = taskTokenMap(config, runner.now(), tokenRecords, opts.reader ?? openReader(config));
     for (const row of rows) row.tokens = tokens.get(row.task) ?? null;
   }

@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
-import { archiveDir, renderTaskMd, snapshotRecords, taskDir, recordScanStats } from '../src/core/taskstore.ts';
+import { inspectReport, reportDigestStats } from '../src/core/report-state.ts';
+import { collectStatus } from '../src/core/status.ts';
+import { archiveDir, readTaskRecord, renderTaskMd, snapshotRecords, taskDir, recordScanStats } from '../src/core/taskstore.ts';
 import type { TaskRecord } from '../src/core/taskstore.ts';
-import { makeConfig, seedTask, useScratch } from './helpers.ts';
+import { FakeTmux, makeConfig, makeContext, seedTask, useScratch } from './helpers.ts';
 
 const scratch = useScratch();
 
@@ -75,5 +77,84 @@ describe('p32: record scan cache', () => {
     assert.equal(recordScanStats.parsed, before + 1);
     await snapshotRecords(config);
     assert.equal(recordScanStats.parsed, before + 1, 'cached: no further parses');
+  });
+});
+
+const REPORT_WITH_OUTPUTS = [
+  '# Report',
+  '',
+  'Done.',
+  '',
+  '```agentctl-outputs',
+  'version: 1',
+  'verdict: PASS',
+  'commits: []',
+  'integrate: []',
+  'decisions: []',
+  'actions: []',
+  'checks: []',
+  'notes: []',
+  '```',
+  '',
+  '<!-- agentctl:report-end -->',
+  '',
+].join('\n');
+
+describe('p32: cheap rows for closed tasks', () => {
+  it('a report body is read and hashed once per report version (dev/ino/mtime/size)', () => {
+    const config = makeConfig(scratch.sub('cr1'));
+    seedTask(config, 'CR-1');
+    const record = readTaskRecord(config, 'cr-1')!;
+    fs.mkdirSync(path.dirname(record.report), { recursive: true });
+    fs.writeFileSync(record.report, REPORT_WITH_OUTPUTS);
+    const before = reportDigestStats.reads;
+    const first = inspectReport(config, record, Date.now(), true);
+    assert.equal(first.ready, true);
+    assert.equal(reportDigestStats.reads, before + 1);
+    const second = inspectReport(config, record, Date.now(), true);
+    assert.equal(second.ready, true);
+    assert.equal(second.signature, first.signature);
+    assert.equal(reportDigestStats.reads, before + 1, 'unchanged report: the body is not read again');
+    fs.appendFileSync(record.report, 'late addition\n');
+    const third = inspectReport(config, record, Date.now(), true);
+    assert.equal(reportDigestStats.reads, before + 2, 'a changed report is read again');
+    assert.notEqual(third.signature, first.signature);
+  });
+
+  it('shallowClosed skips the prompt queue and the outputs of closed rows, keeps the report state', async () => {
+    const config = makeConfig(scratch.sub('cr2'));
+    seedTask(config, 'CR-1', { closed: true, closedAt: new Date().toISOString() });
+    const record = readTaskRecord(config, 'cr-1')!;
+    fs.mkdirSync(path.dirname(record.report), { recursive: true });
+    fs.writeFileSync(record.report, REPORT_WITH_OUTPUTS);
+    fs.writeFileSync(path.join(taskDir(config, 'cr-1'), 'prompt-queue.json'), JSON.stringify([{ id: 'q1', text: 'hello', queuedAt: new Date().toISOString() }]));
+    const { ctx } = makeContext(config, { respond: new FakeTmux().respond });
+    const fullRow = (await collectStatus(ctx, { archived: true })).find((r) => r.task === 'CR-1')!;
+    assert.equal(fullRow.closed, true);
+    assert.equal(fullRow.report, 'yes');
+    assert.equal(fullRow.promptQueue?.length, 1, 'the deep row sees the queued prompt');
+    assert.ok(fullRow.outputs, 'the deep row carries the outputs of a ready report');
+    const shallowRow = (await collectStatus(ctx, { archived: true, shallowClosed: true })).find((r) => r.task === 'CR-1')!;
+    assert.equal(shallowRow.closed, true);
+    assert.equal(shallowRow.report, 'yes', 'the report state itself stays');
+    assert.deepEqual(shallowRow.promptQueue, []);
+    assert.equal(shallowRow.outputs, undefined);
+    assert.equal(shallowRow.decisionsCount, undefined);
+  });
+
+  it('shallowClosed leaves active rows fully detailed', async () => {
+    const config = makeConfig(scratch.sub('cr3'));
+    seedTask(config, 'CR-1');
+    const record = readTaskRecord(config, 'cr-1')!;
+    fs.mkdirSync(path.dirname(record.report), { recursive: true });
+    fs.writeFileSync(record.report, REPORT_WITH_OUTPUTS);
+    fs.writeFileSync(path.join(taskDir(config, 'cr-1'), 'prompt-queue.json'), JSON.stringify([{ id: 'q1', text: 'hello', queuedAt: new Date().toISOString() }]));
+    const tmux = new FakeTmux();
+    tmux.add('cr-1', '● idle\n❯ \n');
+    const { ctx } = makeContext(config, { respond: tmux.respond });
+    const row = (await collectStatus(ctx, { archived: true, shallowClosed: true })).find((r) => r.task === 'CR-1')!;
+    assert.equal(row.window, 'alive');
+    assert.equal(row.promptQueue?.length, 1);
+    assert.ok(row.outputs);
   });
 });
