@@ -37,6 +37,19 @@ describe('MCP parity guard', () => {
     assert.deepEqual(parityErrors(program), ['future: no MCP mapping or exception']);
     assert.ok(CLI_MCP['queue retry'].includes('queue_retry'));
   });
+  it('capacity footers are opt-in on MCP carriers', () => {
+    for (const name of ['status', 'new', 'queue', 'close']) {
+      const input = MCP_TOOLS.find(t => t.name === name)!.input;
+      assert.ok(input.capacity && input.detail, name);
+    }
+  });
+  it('report detail is an MCP opt-in and CLI pull stays mapped', () => {
+    for (const name of ['get_report', 'pull_ready']) {
+      const input = MCP_TOOLS.find(t => t.name === name)!.input;
+      assert.equal(z.object(input).parse({ ...(name === 'get_report' ? { task: 'A' } : {}), detail: true }).detail, true);
+    }
+    assert.deepEqual(CLI_MCP.pull, ['get_report', 'pull_ready']);
+  });
   it('explicit groups expand; existing names retain exactly their prior permissions', () => {
     const old = 'new, queue, send, close, cancel, set_limits, reserve';
     assert.deepEqual(makeConfig(scratch.sub('legacy'), `mcp: {allow: [${old}]}\n`).mcp.allow, old.split(', '));
@@ -164,7 +177,7 @@ describe('MCP parity guard', () => {
   });
   it('status exposes disk and tasks together; all tool descriptions name the CLI', async () => {
     const f = fixture('status-disk');
-    const result = await f.call('status', { format: 'json' });
+    const result = await f.call('status', { format: 'json', detail: true });
     const data = JSON.parse(result.text.split('\n\n').at(-1)!);
     assert.ok(data.disk.volumes.length > 0);
     assert.deepEqual(data.tasks, []);

@@ -207,7 +207,7 @@ describe('mcp: cohorts', () => {
     assert.match(spec.text, /"cohort": "Sprint-1"/);
     assert.match(spec.text, /"cancelled": true/);
     assert.match(spec.text, /"cancel_reason": "x"/);
-    assert.match((await t.call('get_report', { task: 'A-1' })).text, /# partial/);
+    assert.match((await t.call('get_report', { task: 'A-1', detail: true })).text, /# partial/);
     assert.match((await t.call('pull_ready')).text, /^No reports ready\./, 'a cancelled task is not handed over');
   });
 });
