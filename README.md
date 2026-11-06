@@ -410,6 +410,58 @@ agentctl doctor                # tmux, node, git, claude, codex, gh, cache direc
 
 The npm package runs compiled JavaScript in `dist/`. Development and tests may run the TypeScript sources directly with Node type stripping.
 
+<!-- tmux-dev-start -->
+### Dedicated tmux server for development
+
+Use a separate config home **and** server: a different session name alone still shares the server environment, key bindings and buffers. From the development checkout, set the home and edit its existing config (keep its other settings):
+
+```sh
+export AGENTCTL_HOME="$HOME/.agentctl-dev"
+mkdir -p "$AGENTCTL_HOME"
+${EDITOR:-vi} "$AGENTCTL_HOME/config.yaml"
+```
+
+Add or update these top-level keys:
+
+```yaml
+session: agentctl-dev
+tmux:
+  socket: agentctl-dev
+```
+
+`tmux.socket` is the name passed to `tmux -L`, not a socket path. Omit it to keep the default tmux server selection. Watch, board, tasks, peek, send, close, attach and doctor all use this server, including direct tmux calls. Attach hints quote exact targets so `agentctl` cannot select `agentctl-dev` by prefix. Doctor displays the selected socket and warns about a different `AGENTCTL_HOME` in that server's global or session environment.
+
+Start from a terminal outside tmux:
+
+```sh
+node --experimental-strip-types --no-warnings bin/agentctl.ts up --no-attach
+node --experimental-strip-types --no-warnings bin/agentctl.ts doctor
+tmux -L agentctl-dev attach -t '=agentctl-dev'
+```
+
+To migrate an existing **dev session named agentctl-dev on the default server**, first keep the old config (socket unset), inspect status and the old windows, and let agents finish or save their conversations. Killing the old dev session below terminates its processes; do this only after saving work and checking session receipts in the dev task state. Do not kill the default server: the production session may share it.
+
+```sh
+export AGENTCTL_HOME="$HOME/.agentctl-dev"
+node --experimental-strip-types --no-warnings bin/agentctl.ts status --json
+tmux list-windows -t '=agentctl-dev'
+tmux kill-session -t '=agentctl-dev'
+${EDITOR:-vi} "$AGENTCTL_HOME/config.yaml"
+```
+
+Now add the YAML keys above, leave the old worktrees and task state in place, and restart dev processes so they reload the socket. Restart any dev MCP process as well. tmux cannot transfer running agent processes between servers; resume recreates their windows on the new server.
+
+```sh
+node --experimental-strip-types --no-warnings bin/agentctl.ts up --no-attach
+node --experimental-strip-types --no-warnings bin/agentctl.ts status
+node --experimental-strip-types --no-warnings bin/agentctl.ts resume
+node --experimental-strip-types --no-warnings bin/agentctl.ts doctor
+tmux -L agentctl-dev attach -t '=agentctl-dev'
+```
+
+After server/session loss, unfinished tasks show `needs-attention` with a recovery hint and one `tmux-lost` journal event per loss. Claude records the session ID at `SessionStart`; other provider receipts are retained as soon as received. If a saved session exists, use the suggested `agentctl resume TASK` after reviewing the list. Without one, create a spec with a **new task ID**, point its repositories at the old worktree, and use `agentctl new --reuse recovery.md` to start a replacement task; do not assume that `--continue` or `--last` identifies the lost conversation. Finished reports, closed and cancelled tasks keep their existing state.
+<!-- tmux-dev-end -->
+
 Your first task:
 
 ```sh

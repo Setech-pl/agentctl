@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Document dedicated dev tmux servers and migration/recovery in English and Polish, with exact session targets and copyable shell commands. Dokumentacja EN/PL osobnego serwera dev, migracji i odzyskiwania zadań.
+
 - P43: lost tmux tasks remain visible as needs-attention with one durable loss event and recovery guidance; Claude SessionStart saves the conversation ID before the first prompt. Utracone zadania pozostają widoczne ze wskazówką odzyskania; identyfikator sesji Claude zapisujemy przy starcie.
 
 - P10/P44: optional `tmux.socket` scopes all tmux commands; exact attach hints and doctor checks prevent dev/server confusion. Opcjonalny osobny serwer tmux, dokładne wskazówki attach i kontrola AGENTCTL_HOME w doctor.

@@ -1344,7 +1344,7 @@ agentctl event [options] [payload]
 | `--task <task>` | task ID | required |
 | `--attempt <id>` | attempt that owns this hook/session |  |
 | `--agent <agent>` | the agent that reports | one of `claude`, `codex`; required |
-| `--kind <kind>` | claude: which hook called | one of `notification`, `stop`, `stop-failure`, `user-prompt-submit` |
+| `--kind <kind>` | claude: which hook called | one of `notification`, `stop`, `stop-failure`, `user-prompt-submit`, `session-start` |
 | `--forward-file <path>` | codex: private JSON file containing the original notify command |  |
 | `--forward <json>` | codex: JSON list, the notify command the user had; run with the same JSON after this one |  |
 
