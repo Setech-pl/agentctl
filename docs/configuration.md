@@ -183,6 +183,7 @@ Queued tasks live in `<config dir>/queue/` (one JSON file each, with the spec te
 | `agents.<agent>.ready_pattern` | regex | see below | g | The agent shows its input box. |
 | `agents.<agent>.ready_timeout` | seconds | `60` | g | How long `new` waits for `ready_pattern`. |
 | `agents.<agent>.trust_pattern` | regex | see below | g | The agent shows its folder-trust dialog. agentctl never answers it. |
+| `agents.<agent>.dialog_pattern` | regex | codex `'Update available\|Skip until next version'` | g | Another startup dialog a human must answer (the Codex "Update available" modal): `new` stops at it at once as needs-input instead of waiting out `ready_timeout`. agentctl never answers it. Codex task windows also start with `-c check_for_update_on_startup=false`, so a current Codex does not show the modal at all. |
 | `agents.<agent>.trust_timeout` | seconds | `600` | g | How long `new` waits for you to answer the trust dialog. |
 | `agents.<agent>.working_pattern` | regex | see below | g | A turn is running, including Claude 2.1.x spinner progress. The spinner frame `✳` is not in the pattern: it counts only as a spinner line (word, `…`, a bracket that starts with the elapsed time) right above the input box, never in the transcript, whatever the pattern says. |
 | `agents.<agent>.delivery_pattern` | regex | see below | g | New adapter assistant output acknowledges a submitted prompt; input drafts never count. |
@@ -222,6 +223,7 @@ codex:
   effort_args: ['-c', 'model_reasoning_effort={effort}']
   ready_pattern: '^›\s(?!\d+\.)|\? for shortcuts'
   trust_pattern: 'Trust this folder\?|Folder settings can run code automatically'
+  dialog_pattern: 'Update available|Skip until next version'
   working_pattern: 'esc to interrupt'
   delivery_pattern: '^\s*[•■]|● got:'
   question_pattern: 'Waiting for your answer|^\s*\?\s+\d+ questions?\b|to answer\s*$|Press enter to confirm or esc to cancel'

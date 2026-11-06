@@ -855,7 +855,7 @@ Czego agentctl nigdy nie robi:
 
 - **Żadnego merge, rebase ani push.** `git` jest wołany tylko z `worktree add`, `worktree remove`, zapytaniami tylko do odczytu i, dla `gc --branches`, `branch -d` (tylko scalone gałęzie, nigdy `-D`). Bez `--force`; worktree z wyciągniętym `main` lub `master` nigdy nie jest usuwany.
 - **Żadnego auto-accept.** Nie dodaje takiej flagi, a config, który próbuje (`--dangerously-skip-permissions`, `--yolo`, `--full-auto`, `-a never`, …), jest nieprawidłowy. Agent dalej pyta Cię o zgodę. Codex działa z `--sandbox danger-full-access`, jak zlecono, ale z nietkniętą polityką zatwierdzeń.
-- **Nigdy nie odpowiada na dialog za Ciebie.** Dialog zaufania do folderu w świeżym worktree potwierdza człowiek; `new` na to czeka.
+- **Nigdy nie odpowiada na dialog za Ciebie.** Dialog zaufania do folderu w świeżym worktree potwierdza człowiek; `new` na to czeka. Modal „Update available" Codexa też jest Twój (okna zadań startują z `-c check_for_update_on_startup=false`, więc aktualny Codex go nie pokazuje); jeśli starszy Codex i tak go pokaże, start zatrzymuje się od razu jako needs-input zamiast czekać do timeoutu gotowości.
 - **Żadnych werdyktów.** Ocena raportu należy do Ciebie (albo Twojego czatu).
 - **Mały ślad.** Pliki trafiają tylko do folderu stanu i folderu cache, nigdy do `~/.claude` ani `/tmp`. Czat może tylko to, co wymienia `mcp.allow`.
 
