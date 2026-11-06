@@ -1,3 +1,4 @@
+import { heavyBudget, heavyWait, isHeavy } from './heavy.ts';
 import { secretRedactor } from './secret-redaction.ts';
 import { activeProviders, perProvider, isActive } from './providers/registry.ts';
 import { withStartLock } from './start-lock.ts';
@@ -222,7 +223,10 @@ export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: Q
   for (const e of waiting(entries)) ahead[e.agent]++;
   const readyCount = rows.filter(r => r.state === 'report-ready' && r.window === 'alive').length;
   const lines: string[] = readyCount ? [`${readyCount} ${plural(readyCount, 'okno', 'okna', 'okien')} report-ready – close zwolni okna`] : [];
+  let heavyUsed = Math.max(heavyBudget(config, entries, live).size, Math.min(config.limits.heavy ?? 1, heavyBudget(config, entries, live).size + waiting(entries).filter(isHeavy).length));
   for (const spec of specs) {
+    const heavyReason = heavyWait(config, spec.weight === 'heavy', heavyUsed);
+    if (spec.weight === 'heavy') heavyUsed++;
     const limit = config.limits[spec.agent];
     const used = load[spec.agent] + ahead[spec.agent];
     const full = limit !== undefined && used >= limit;
@@ -235,7 +239,7 @@ export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: Q
     const unmetNow = unmetAfter(spec.after, rows, spec.afterVerdicts);
     lines.push(
       `  start:    ${
-        isPaused(config) ? 'queue paused; starts after queue_resume (agentctl queue resume)' : !config.queue.enabled ? 'queue.enabled is false; enable the queue first' : unmetNow.length > 0
+        isPaused(config) ? 'queue paused; starts after queue_resume (agentctl queue resume)' : !config.queue.enabled ? 'queue.enabled is false; enable the queue first' : heavyReason ? heavyReason : unmetNow.length > 0
           ? `when ${unmetNow.join(', ')} ${unmetNow.length === 1 ? 'has' : 'have'} a report${full ? ` and a ${spec.agent} window is free` : ''}`
           : full
           ? `waits for a free ${spec.agent} window (${load[spec.agent]} running${ahead[spec.agent] > 0 ? `, ${ahead[spec.agent]} queued ahead` : ''}, limit ${limit})`
@@ -548,15 +552,19 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
   const cancelled = cancelledTasks(rows);
   // `usage.queue_hold`: a provider whose plan is above the limit starts nothing (off by default).
   const holds = queueHolds(config, nowMs);
+  const heavy = heavyBudget(config, entries, live);
   let position = 0;
   return entries.map((entry): QueueView => {
     if (entry.status === 'failed') return { position: null, entry, condition: { kind: 'failed', text: `failed: ${(entry.error ?? '').split('\n')[0] ?? ''}` }, since: entry.failedAt ?? entry.queuedAt };
     if (entry.status === 'starting') return { position: null, entry, condition: { kind: 'starting', text: entry.direct || readSetupProgress(config, entry.task, queueDiagnosticSources(entries)) ? startProgressText(readSetupProgress(config, entry.task, queueDiagnosticSources(entries)), nowMs) : 'starting' }, since: entry.startingAt ?? entry.queuedAt };
     position++;
+    const heavyReason = heavyWait(config, isHeavy(entry), heavy.size);
+    if (heavyReason) return { position, entry, condition: { kind: 'slot', text: heavyReason }, since: entry.queuedAt };
     const author = directAuthorState(config, entry, entries);
     if (author.waiting || author.failed) return { position, entry, condition: { kind: 'after', text: author.waiting ?? author.failed! }, since: entry.queuedAt };
     if (entry.direct && !(entry.retryAt && Date.parse(entry.retryAt) > nowMs) && !(config.limits[entry.agent] !== undefined && used[entry.agent] >= (config.limits[entry.agent] as number))) {
       used[entry.agent]++;
+      if (isHeavy(entry)) heavy.add(entry.task);
       return { position, entry, condition: { kind: 'ready', text: config.queue.enabled ? 'uruchamiane – czeka na najbliższy tick watch' : 'queue.enabled is false; the watcher does not start it' }, since: entry.queuedAt };
     }
     const stuck = blocked.get(entry.task);
@@ -574,6 +582,7 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
       return { position, entry, condition: { kind: 'slot', text: `czeka na miejsce: ${entry.agent} ${used[entry.agent]}/${limit}` }, since: entry.queuedAt };
     }
     used[entry.agent]++;
+    if (isHeavy(entry)) heavy.add(entry.task);
     return { position, entry, condition: { kind: 'ready', text: 'wolne miejsce – start przy najbliższym ticku watch' }, since: entry.queuedAt };
   }).map(view => ({ ...view, condition: { ...view.condition, text: redact(view.condition.text) } }));
 }
@@ -762,6 +771,7 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
   const { config } = ctx;
   let entry = initial;
   const claim = async (fresh: QueueEntry): Promise<boolean> => {
+    if (heavyWait(config, isHeavy(fresh), heavyBudget(config, readQueue(config), await liveWindows(ctx)).size)) return false;
     await writeEntry(ctx, { ...fresh, status: 'starting', startingPid: process.pid, startingAt: new Date(ctx.runner.now()).toISOString() });
     entry = fresh;
     return true;

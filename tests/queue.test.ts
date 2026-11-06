@@ -506,3 +506,18 @@ describe('after: dependencies', () => {
     assert.match(r.stdout, /Queue \(1\): agentctl queue list\n {2}1\. G-2 {2}czeka na G-1/);
   });
 });
+
+it('heavy admission is shared across providers, visible in preview, and releases after close', async () => {
+  const s = setup('heavy', 'limits: {claude: 4, codex: 4, heavy: 1}\nqueue: {parallel_starts: 4}\n');
+  await add(s, specOf(s.repo, 'HV-1', {weight: 'heavy'}) + specOf(s.repo, 'HV-2', {weight: 'heavy', agent: 'codex'}) + specOf(s.repo, 'HV-3'));
+  const views = describeQueue(s.config, readQueue(s.config), []);
+  assert.match(views[1]!.condition.text, /heavy.*1\/1/);
+  assert.equal(views[2]!.condition.kind, 'ready');
+  const began = await s.tick();
+  assert.deepEqual(began, ['HV-1', 'HV-3']);
+  assert.equal(readTaskRecord(s.config, 'hv-1')?.weight, 'heavy');
+  const preview = await planQueueAdd(s.ctx, splitSpecs(specOf(s.repo, 'HV-4', {weight: 'heavy'}), 'test'));
+  assert.match(preview.summary.join('\n'), /heavy.*1\/1/);
+  s.tmux.windows = s.tmux.windows.filter(w => w.name !== 'hv-1');
+  assert.deepEqual(await s.tick(), ['HV-2']);
+});

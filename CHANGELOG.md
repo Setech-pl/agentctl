@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Support weight: heavy task specs with a cross-provider limits.heavy queue cap (default 1) and waiting reasons.
+
 - Show machine load/free memory in capacity and status detail; record configurable load threshold crossings.
 
 - P32 F8: regression coverage sends real Ink/stdin arrow keys on populated rows independently during record scanning and status collection, and checks selection/preview effects without latency thresholds.
@@ -197,6 +199,8 @@ Versions 0.1.0 to 0.7.0 correspond to pull requests #1 to #7; their dates are th
 - Keep phone and manager live suites separate; add collapsed-question live checks through the isolated harness.
 
 ## [Unreleased]
+
+- Support weight: heavy task specs with a cross-provider limits.heavy queue cap (default 1) and waiting reasons.
 
 - Show machine load/free memory in capacity and status detail; record configurable load threshold crossings.
 

@@ -994,3 +994,11 @@ obciążenie z 1/5/15 minut oraz wolną pamięć w bajtach. `capacity.load_thres
 ustawia próg dla 1 minuty (domyślnie 3 × liczba logicznych CPU). Watch zapisuje
 zdarzenia `machine-load-high` i `machine-load-recovered` przy przekroczeniu progu
 i powrocie. Odczyty nie blokują uruchamiania zadań.
+
+Dla kosztownych zadań dodaj `weight: heavy` w nagłówku. Kolejka dopuszcza najwyżej
+`limits.heavy` ciężkich zadań łącznie u wszystkich dostawców (domyślnie 1,
+dodatnia liczba całkowita), uwzględniając trwające starty i żywe okna zadań.
+Zwykłe zadania korzystają z limitów dostawcy. Podgląd i lista kolejki podają
+powód oczekiwania. Zamknięcie okna zwalnia miejsce; okna report-ready nadal się
+liczą. Natychmiastowe `new` pozostaje poza kontrolą kolejki. Udostępnienie pola
+w strukturalnym schemacie MCP jest osobnym zadaniem; tekst specyfikacji już je obsługuje.

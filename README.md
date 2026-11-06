@@ -994,3 +994,11 @@ for 1/5/15 minutes and free memory in bytes. `capacity.load_threshold` sets the
 1-minute load warning threshold (default: 3 × logical CPUs). Watch records one
 `machine-load-high` event when exceeded and `machine-load-recovered` on return;
 these observations do not block task starts.
+
+Use `weight: heavy` in a task header for costly work. The queue admits at most
+`limits.heavy` heavy tasks across all providers (default 1, positive integer),
+including starts in progress and live task windows. Normal tasks keep using
+provider slots. Queue preview/list explain the heavy-slot wait. Closing the
+window frees its heavy slot; report-ready windows still count. Immediate `new`
+is outside queue admission. MCP structured spec-field exposure is a follow-up;
+raw spec text already accepts the field.

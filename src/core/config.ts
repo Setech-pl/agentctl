@@ -107,7 +107,7 @@ export interface GlobalConfig extends Layer {
   /** Seconds watch allows for asynchronous prompt acknowledgement. */
   deliveryConfirmS: number;
   /** Max simultaneous windows per provider (agent). Missing = unlimited. */
-  limits: Partial<Record<AgentName, number>>;
+  limits: Partial<Record<AgentName, number>> & { heavy?: number };
   /** `limits.count_external`: claude/codex terminal sessions outside agentctl's windows count against the limit (detected with ps). */
   countExternal: boolean;
   countReportReady: boolean;
@@ -336,7 +336,7 @@ export const DEFAULT_AGENT_SETTINGS = Object.fromEntries(DEFAULT_PROVIDERS.map(i
 /** The keys accepted in every layer: the global config, `.agentctl.yaml` and (with a few of its own) a spec. docs/configuration.md describes each one. */
 export const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'setup', 'defaults', 'guide', 'review'];
 export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'limited', 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git', 'cohort', 'delivery_confirm_s', 'preview', 'providers'];
-export const LIMITS_KEYS = [...AGENT_NAMES, 'count_external', 'count_report_ready'];
+export const LIMITS_KEYS = [...AGENT_NAMES, 'count_external', 'count_report_ready', 'heavy'];
 export const DEFAULTS_KEYS = ['agent', 'model', 'effort', 'remote_control'];
 export const LINK_KEYS = ['from', 'to'];
 export const AGENT_KEYS = ['env', 'accepts_busy_prompt', 'flags', 'effort_args', 'ready_pattern', 'ready_timeout', 'trust_timeout', 'trust_pattern', 'working_pattern', 'delivery_pattern', 'interrupt_key', 'footer_patterns', 'question_pattern', 'approval_pattern', 'limit_patterns', 'background_patterns', 'overload_patterns'];
@@ -981,7 +981,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   const session = parseString(raw.session, 'config.session', p) ?? 'agentctl';
   if (!/^[A-Za-z0-9_-]+$/.test(session)) p.add('config.session may only contain letters, digits, "_" and "-"');
 
-  const limits: GlobalConfig['limits'] = {};
+  const limits: GlobalConfig['limits'] = { heavy: 1 };
   let countExternal = false;
   let countReportReady = false;
   const preview = { ttlS: 600 };
@@ -1007,7 +1007,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
         if (typeof raw.limits.count_report_ready === "boolean") countReportReady = raw.limits.count_report_ready;
         else p.add("config.limits.count_report_ready must be true or false");
       }
-      for (const name of activeProviders({ providers })) {
+      for (const name of [...activeProviders({ providers }), 'heavy'] as const) {
         const value = raw.limits[name];
         if (value === undefined) continue;
         if (typeof value === 'number' && Number.isInteger(value) && value > 0) limits[name] = value;
