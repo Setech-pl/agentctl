@@ -98,8 +98,6 @@ None.
 
 None.
 
-The `repo` field in `agentctl-outputs` accepts the repository name or path and the task worktree directory name or path. Accepted aliases normalize to the repository name; ambiguous names are rejected.
-
 ```agentctl-outputs
 version: 1
 verdict: PASS
@@ -115,6 +113,9 @@ notes: []
 
 next_cursor: 8b1e4d93-0a7c-42f5-b6d8-2e9f1c3a7d60:1; has_more: false
 ```
+
+
+The `repo` field in `agentctl-outputs` accepts the repository name or path and the task worktree directory name or path. Accepted aliases normalize to the repository name; ambiguous names are rejected.
 
 ## How it works
 
