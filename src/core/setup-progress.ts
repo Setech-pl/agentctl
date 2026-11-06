@@ -38,7 +38,7 @@ export async function writeSetupProgress(ctx: Context, window: string, progress:
   if (ctx.runner.dryRun) return;
   try {
     await ctx.runner.mkdir(taskDir(ctx.config, window));
-    await ctx.runner.writeFile(setupProgressFile(ctx.config, window), `${JSON.stringify(secretRedactor([ctx.config, process.env, progress])(progress))}\n`);
+    await ctx.runner.writeFile(setupProgressFile(ctx.config, window), `${JSON.stringify(secretRedactor([ctx.config, process.env, progress.command])(progress))}\n`);
   } catch { /* progress is for the eyes; it never stops the start */ }
 }
 
@@ -49,7 +49,7 @@ export function clearSetupProgress(config: Pick<GlobalConfig, 'stateDir'>, task:
 export function readSetupProgress(config: Pick<GlobalConfig, 'stateDir'>, task: string, sources: unknown[] = []): SetupProgress | undefined {
   try {
     const data: unknown = JSON.parse(fs.readFileSync(setupProgressFile(config, windowName(task)), 'utf8'));
-    return isObject(data) && typeof data.phase === 'string' && typeof data.stepAt === 'string' ? (secretRedactor([config, process.env, ...sources, data])(data) as unknown as SetupProgress) : undefined;
+    return isObject(data) && typeof data.phase === 'string' && typeof data.stepAt === 'string' ? (secretRedactor([config, process.env, ...sources, data.command])(data) as unknown as SetupProgress) : undefined;
   } catch {
     return undefined;
   }

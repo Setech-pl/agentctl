@@ -1,6 +1,7 @@
 /** Shared value, assignment and URL redaction for persisted diagnostics and MCP output. */
-export const SECRET_KEY = /TOKEN|KEY|SECRET|PASSWORD|PASS|AUTH|COOKIE/i;
+export const SECRET_KEY = /TOKEN|KEY|SECRET|PASSWORD|PASS|COOKIE|(?:^|[^a-z0-9])(?:AUTH(?:ORIZATION)?|OAUTH)(?=$|[^a-z0-9])/i;
 const ASSIGNMENT = /([\w.-]*(?:TOKEN|KEY|SECRET|PASSWORD|PASS|AUTH|COOKIE)[\w.-]*\s*[:=]\s*)("(?:\\.|[^"\\])*"|'[^']*'|[^\s,;]+)/gi;
+const assignmentKey = (prefix: string): string => prefix.trim().replace(/[:=]$/, '').trim();
 const URL_TEXT = /https?:\/\/[^\s"'<>]+/g;
 
 export function secretRedactor(sources: unknown[], taskIds = new Set<string>()): <T>(value: T) => T {
@@ -17,7 +18,7 @@ export function secretRedactor(sources: unknown[], taskIds = new Set<string>()):
     if (typeof value === 'string') {
       if (SECRET_KEY.test(key) && value) secrets.add(value);
       for (const match of value.matchAll(ASSIGNMENT)) {
-        if (taskIds.has(match[1]!.trim().replace(/[:=]$/, '').trim())) continue;
+        if (!SECRET_KEY.test(assignmentKey(match[1]!)) || taskIds.has(assignmentKey(match[1]!))) continue;
         const literal = match[2]!.replace(/^(['"])(.*)\1$/s, '$2');
         if (literal && literal !== '***' && !literal.includes('$')) secrets.add(literal);
       }
@@ -42,7 +43,7 @@ export function secretRedactor(sources: unknown[], taskIds = new Set<string>()):
         for (const key of [...url.searchParams.keys()]) if (SECRET_KEY.test(key)) url.searchParams.set(key, '***');
         return url.toString();
       } catch { return raw; }
-    }).replace(ASSIGNMENT, (all, prefix: string, value: string) => taskIds.has(prefix.trim().replace(/[:=]$/, '').trim()) || value.includes('***') ? all : `${prefix}***`);
+    }).replace(ASSIGNMENT, (all, prefix: string, value: string) => !SECRET_KEY.test(assignmentKey(prefix)) || taskIds.has(assignmentKey(prefix)) || value.includes('***') ? all : `${prefix}***`);
   };
   const walk = (value: unknown, key = ''): unknown => {
     if (SECRET_KEY.test(key) && !taskIds.has(key)) return '***';

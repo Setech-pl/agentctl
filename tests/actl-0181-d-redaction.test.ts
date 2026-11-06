@@ -5,11 +5,51 @@ import { Context } from '../src/core/context.ts';
 import { recordJournal, journalPath } from '../src/core/journal.ts';
 import { collectEvents } from '../src/core/chat-events.ts';
 import { MCP_TOOLS } from '../src/core/mcp-tools.ts';
-import { secretRedactor } from '../src/core/secret-redaction.ts';
+import { SECRET_KEY, secretRedactor } from '../src/core/secret-redaction.ts';
 import { queueDir, queueDiagnosticSources, readQueue, describeQueue, directStartText } from '../src/core/queue.ts';
 import { setupProgressFile, writeSetupProgress, readSetupProgress } from '../src/core/setup-progress.ts';
 import { DiskRunner, makeConfig, useScratch } from './helpers.ts';
 const scratch = useScratch();
+it('AUTH tokens remain secret keys without treating author metadata as credentials', () => {
+  for (const key of ['AUTH', 'AUTH_TOKEN', 'X_AUTH', 'AUTHORIZATION', 'X_AUTHORIZATION', 'OAUTH', 'API_KEY', 'PASSWORD', 'COOKIE', 'CLIENT_SECRET']) {
+    assert.ok(SECRET_KEY.test(key), key);
+    const clean = secretRedactor([{ [key]: `credential-${key}` }]);
+    assert.equal(clean(`credential-${key}`), '***', key);
+    assert.equal(secretRedactor([])(`${key}=private-value`), `${key}=***`, key);
+  }
+  const metadata = { author: 'AUTHOR', AUTHORS: 'AUTHOR-LIST', directAuthor: 'AUTHOR-2', authorizationAuthor: 'NAME' };
+  for (const key of Object.keys(metadata)) assert.ok(!SECRET_KEY.test(key), key);
+  const clean = secretRedactor([metadata, 'author=AUTHOR AUTHORS=AUTHOR-LIST directAuthor=AUTHOR-2']);
+  assert.deepEqual(clean(metadata), metadata);
+  assert.equal(clean('author=AUTHOR AUTHORS=AUTHOR-LIST directAuthor=AUTHOR-2'), 'author=AUTHOR AUTHORS=AUTHOR-LIST directAuthor=AUTHOR-2');
+});
+
+it('queue and view author references survive legacy command and error redaction', async () => {
+  const config = makeConfig(scratch.sub('author-diagnostics'));
+  const now = new Date().toISOString();
+  fs.mkdirSync(queueDir(config), { recursive: true });
+  const base = { seq: 1, order: 1, priority: 'normal', queuedAt: now, agent: 'claude', model: 'sonnet', effort: 'high', direct: true, after: [] };
+  const author = { ...base, task: 'AUTHOR', status: 'starting', spec: '---\ntask: AUTHOR\nauthor: HEADER-AUTHOR\nsetup: ["X_AUTH=legacy-auth-secret npm ci"]\n---\nPrompt API_KEY=prompt-is-not-a-diagnostic' };
+  const reviewer = { ...base, seq: 2, order: 2, task: 'REVIEW', status: 'queued', directAuthor: 'AUTHOR', spec: '---\ntask: REVIEW\nreview_of: AUTHOR\n---\nReview' };
+  const failed = { ...base, seq: 3, order: 3, task: 'FAILED', status: 'failed', error: 'AUTHOR: legacy-auth-secret AUTHORIZATION=legacy-error-secret', spec: '---\ntask: FAILED\n---\nWork' };
+  for (const entry of [author, reviewer, failed]) fs.writeFileSync(`${queueDir(config)}/${entry.seq}-${entry.task}.json`, JSON.stringify(entry));
+  fs.mkdirSync(`${config.stateDir}/author`, { recursive: true });
+  fs.writeFileSync(setupProgressFile(config, 'author'), JSON.stringify({ task: 'AUTHOR', phase: 'setup', command: 'X_AUTH=legacy-auth-secret npm ci', startedAt: now, stepAt: now }));
+  const entries = readQueue(config);
+  const sources = queueDiagnosticSources(entries);
+  assert.ok(sources.every(source => typeof source === 'string'), 'only diagnostic strings, never records or headers');
+  assert.doesNotMatch(JSON.stringify(sources), /HEADER-AUTHOR|prompt-is-not-a-diagnostic|review_of|directAuthor/);
+  const views = describeQueue(config, entries, []);
+  assert.match(views.find(view => view.entry.task === 'REVIEW')!.condition.text, /waiting for author AUTHOR: setup in progress/);
+  const ctx = new Context(new DiskRunner({ dryRun: false }), config, () => {});
+  const result = await MCP_TOOLS.find(tool => tool.name === 'queue_list')!.run({ context: () => ctx, notify: async () => {} }, {} as never);
+  assert.match(result.text, /waiting for author AUTHOR: setup in progress/);
+  const text = JSON.stringify([views.map(view => view.condition.text), result.text, directStartText(config, entries.find(entry => entry.task === 'FAILED')!, Date.now())]);
+  assert.doesNotMatch(text, /legacy-auth-secret|legacy-error-secret/);
+  assert.match(text, /X_AUTH=\*\*\*/);
+  assert.match(text, /AUTHOR: \*\*\* AUTHORIZATION=\*\*\*/);
+});
+
 it('shared redaction masks quoted assignments, URL secrets and bare known output values', () => {
   const clean = secretRedactor([{ env: { NPM_TOKEN: 'sentinel-known' } }, "PASSWORD='sentinel with spaces'", 'https://sentinel-user:sentinel-pass@host/path?token=sentinel-query']);
   const result = clean({ command: "PASSWORD='sentinel with spaces' npm ci", output: 'sentinel-known sentinel with spaces sentinel-user sentinel-pass sentinel-query', url: 'https://alice:anotherpass@host/?api_key=anotherkey' });

@@ -320,12 +320,21 @@ export function findDirectStart(config: Pick<GlobalConfig, 'path'>, task: string
   return readQueue(config).find((e) => e.direct && e.task.toLowerCase() === task.toLowerCase());
 }
 
-/** Legacy diagnostics can contain bare values supplied only by a queued spec's environment. */
-export function queueDiagnosticSources(entries: QueueEntry[]): unknown[] {
-  return [entries, ...entries.flatMap(entry => {
-    try { return splitSpecs(entry.spec, 'queue diagnostic redaction').map(spec => spec.header); }
-    catch { return []; } // The raw entry still supplies assignments from malformed legacy specs.
-  })];
+/** Only legacy command/error text and its environment assignments supply diagnostic secrets, never task metadata or prompts. */
+export function queueDiagnosticSources(entries: QueueEntry[]): string[] {
+  return entries.flatMap(entry => {
+    const sources = entry.error ? [entry.error] : [];
+    try {
+      for (const { header } of splitSpecs(entry.spec, 'queue diagnostic redaction')) {
+        if (header.env && typeof header.env === 'object') {
+          for (const [key, value] of Object.entries(header.env)) if (typeof value === 'string') sources.push(`${key}=${JSON.stringify(value)}`);
+        }
+        const commands = [header.setup, ...(Array.isArray(header.repos) ? header.repos.map(repo => repo && typeof repo === 'object' ? repo.setup : undefined) : [])];
+        for (const setup of commands) if (Array.isArray(setup)) for (const command of setup) if (typeof command === 'string') sources.push(command);
+      }
+    } catch { /* Malformed legacy specs cannot supply structured setup commands; error text still can. */ }
+    return sources;
+  });
 }
 
 /** What a repeated `new` of the same task is told: where the start stands, and that nothing was started a second time. */
