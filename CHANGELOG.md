@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- P32 F5: an immediate watch refresh cancels a superseded trailing timer, preventing duplicate ticks under event-loop delay.
+
 - P32 F4: token collection uses the effective row and its shallow predicate, retaining tokens for live closed/cancelled tasks and current rows with archive duplicates.
 
 - P32 F3: current task repositories and worktrees take precedence over archive duplicates on the board.

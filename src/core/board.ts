@@ -83,6 +83,7 @@ export class TickGate {
   ping(now: number): void {
     const wait = this.minMs - (now - this.last);
     if (wait <= 0) {
+      this.stop(); // A due but delayed trailing callback is superseded by this immediate fire.
       this.last = now;
       this.fire();
       return;
