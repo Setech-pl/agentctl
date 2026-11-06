@@ -293,24 +293,38 @@ describe('p32: regression on 230 archived tasks', () => {
     }
   });
 
-  it('50 arrow keys are each handled within 150 ms while a cold tick runs', async () => {
+  it('50 arrow keys interleave with a cold tick instead of queueing behind it', async () => {
+    // Deterministic (load-proof): a key is "handled" at the number of TASK.md reads done so far. Without the chunk
+    // yields the first key would be handled only after the whole parse storm (230 reads); with them it lands mid-storm.
     const config = fixture('p32-fixture-latency-230', 230);
+    const root = path.dirname(config.stateDir);
     const { ctx } = makeContext(config, { respond: new FakeTmux().respond });
-    const pending = loadBoard(ctx, null, new ProgressCache());
-    let state = initialBoardState(100, 30);
-    let worst = 0;
-    for (let i = 0; i < 50; i++) {
-      const at = performance.now();
-      await new Promise<void>((resolve) => {
-        setImmediate(() => {
-          state = handleKey(state, '', { downArrow: true }).state;
-          worst = Math.max(worst, performance.now() - at);
-          resolve();
+    const counter = installFsCounter(root);
+    try {
+      const pending = loadBoard(ctx, null, new ProgressCache());
+      let state = initialBoardState(100, 30);
+      const readsAtKey: number[] = [];
+      let worst = 0;
+      for (let i = 0; i < 50; i++) {
+        const at = performance.now();
+        await new Promise<void>((resolve) => {
+          setImmediate(() => {
+            state = handleKey(state, '', { downArrow: true }).state;
+            worst = Math.max(worst, performance.now() - at);
+            readsAtKey.push(counter.snap().taskMdReads);
+            resolve();
+          });
         });
-      });
+      }
+      const totalReads = counter.snap().taskMdReads;
+      await pending;
+      console.log(`  keys handled at TASK.md reads ${readsAtKey[0]} … ${readsAtKey.at(-1)} of ${totalReads}; worst wall-clock latency ${worst.toFixed(1)} ms under the current load`);
+      assert.equal(totalReads, 230, 'the cold tick really parses the fixture');
+      assert.ok((readsAtKey[0] as number) <= 75, `the first key is handled mid-parse (at ${readsAtKey[0]} of 230 reads), not after the storm`);
+      for (let i = 1; i < readsAtKey.length; i++) assert.ok((readsAtKey[i] as number) >= (readsAtKey[i - 1] as number), 'keys keep being handled as the tick progresses');
+    } finally {
+      counter.restore();
     }
-    await pending;
-    assert.ok(worst < 150, `worst key latency ${worst.toFixed(1)} ms`);
   });
 
   it('an idle board stays under 2% of one core over 60 s', { skip: process.env.AGENTCTL_P32_PERF !== '1' }, async () => {
