@@ -1,19 +1,13 @@
-import { writeLaunchScript } from '../launch-script.ts';
-import { openAgentWindow } from '../window-guard.ts';
-import fs from 'node:fs';
+import { refreshUsageProbe } from './usage-probe.ts';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
 import { Context } from '../context.ts';
 import type { PlanSnapshot, PlanWindow } from '../usage-parse.ts';
 import { homeDir } from '../usage-sources.ts';
 import { kimiPlanFile, readKimiSnapshot } from './kimi-usage.ts';
-import { Tmux } from '../tmux.ts';
 import { kimiSettings } from './kimi-settings.ts';
-import { classifyScreen, inputVisible } from '../state.ts';
 import { assertSafeArgs } from '../safety.ts';
 import { kimiEnvironmentProblem, qualifiedModel, resolvedKimiHome } from './kimi-config.ts';
 import { AgentctlError, shellLine } from '../util.ts';
-import { withFileLock } from '../file-lock.ts';
 
 /** Real 2.5.0 /usage text. Only percentages and reset times are persisted. */
 export function parseKimiUsage(screen: string, now: number): PlanSnapshot | undefined {
@@ -47,55 +41,12 @@ export function kimiProbeLaunch(config: Context['config'], processEnv: Record<st
   return { env, command: `exec ${shellLine(argv[0]!, argv.slice(1))}`, argv };
 }
 
-/** No API/OAuth/credentials, no task window and no model turn. Every exit path kills its own session. */
+/** Opt-in behaviour and five-minute cadence remain unchanged. */
 export async function refreshKimiPlan(ctx: Context): Promise<string | null> {
   if (!ctx.config.capacity.kimiUsageProbe || ctx.runner.dryRun) return null;
-  const file = kimiPlanFile(ctx.config);
-  return withFileLock(`${file}.probe.lock`, async () => {
-    const now = ctx.runner.now(), cached = readKimiSnapshot(ctx.config);
-    if (cached && now - cached.at < 300_000) return null;
-    const stamp = path.join(homeDir(ctx.config), 'usage', 'kimi-probe-at.json');
-    try { if (now - JSON.parse(fs.readFileSync(stamp, 'utf8')).at < 300_000) return 'Kimi probe rate-limited (5 minutes)'; } catch { /* first probe */ }
-    const { env, argv } = kimiProbeLaunch(ctx.config);
-    const dir = kimiProbeDir(ctx.config), settings = kimiSettings();
-    await ctx.runner.mkdir(dir);
-    await ctx.runner.writeFile(stamp, JSON.stringify({ at: now }));
-    const probeCtx = new Context(ctx.runner, { ...ctx.config, session: `agentctl-kimi-probe-${randomUUID().slice(0, 8)}` }, () => {});
-    const tmux = probeCtx.tmux;
-    let created = false;
-    try {
-      // The neutral probe uses the same private script as task launches (and no typed prompt).
-      const command = await writeLaunchScript(ctx.runner, dir, argv, env);
-      const start = await openAgentWindow(probeCtx, { task: 'usage-probe', window: 'usage', cwd: dir, env: {}, report: file, repos: [], origin: 'new', sessionUp: false, command });
-      if (start.code !== 0) return 'Kimi probe could not start';
-      created = true;
-      let ready = false;
-      for (let i = 0; i < 20; i++) {
-        await ctx.runner.sleep(250);
-        const pane = await tmux.capture('usage');
-        const state = classifyScreen(pane.stdout, settings);
-        if (state === 'needs-trust') return `Kimi probe needs manual trust/login: run kimi in ${dir}; agentctl never answers the dialog`;
-        if (state === 'idle' && inputVisible(pane.stdout, settings)) { ready = true; break; }
-      }
-      if (!ready) return 'Kimi probe did not become idle';
-      await tmux.pasteText('usage', '/usage');
-      await ctx.runner.sleep(400);
-      await ctx.runner.exec('tmux', ['send-keys', '-t', tmux.target('usage'), 'C-m']);
-      for (let i = 0; i < 20; i++) {
-        await ctx.runner.sleep(250);
-        const pane = await tmux.capture('usage');
-        if (classifyScreen(pane.stdout, settings) !== 'idle') continue;
-        const snapshot = parseKimiUsage(pane.stdout, ctx.runner.now());
-        if (!snapshot) continue;
-        await ctx.runner.writeFile(file, JSON.stringify(snapshot));
-        await tmux.pasteText('usage', '/exit');
-        await ctx.runner.sleep(400);
-        await ctx.runner.exec('tmux', ['send-keys', '-t', tmux.target('usage'), 'C-m']);
-        return null;
-      }
-      return 'Kimi /usage probe returned no plan percentages';
-    } finally {
-      if (created) await ctx.runner.exec('tmux', ['kill-session', '-t', `=${tmux.session}`]).catch(() => undefined);
-    }
+  return refreshUsageProbe(ctx, {
+    id: 'kimi', label: 'Kimi', file: kimiPlanFile(ctx.config), dir: kimiProbeDir(ctx.config),
+    intervalMs: 300_000, settings: kimiSettings(), readSnapshot: () => readKimiSnapshot(ctx.config),
+    parse: parseKimiUsage, launch: () => kimiProbeLaunch(ctx.config),
   });
 }

@@ -1,3 +1,4 @@
+import { refreshClaudePlan } from './providers/claude-probe.ts';
 import { get as providerValue } from './providers/registry.ts';
 import type { ProviderValues } from './providers/registry.ts';
 import { parseAge } from './archive.ts';
@@ -74,6 +75,7 @@ export interface UsageOptions {
 
 export async function collectUsage(ctx: Context, opts: UsageOptions = {}): Promise<UsageReport> {
   const { config } = ctx;
+  const probeNote = activeProviders(config).includes('claude') ? await refreshClaudePlan(ctx) : null;
   const now = ctx.runner.now();
   const since = opts.since ?? '7d';
   const sinceDay = localDay(now - parseAge(since));
@@ -83,6 +85,7 @@ export async function collectUsage(ctx: Context, opts: UsageOptions = {}): Promi
   const usage = collectTaskUsage(config, reader, records, now);
   const rows = new Map((opts.rows ?? (await collectStatus(ctx, { progress: false, archived: true }))).map((r) => [r.task, r] as const));
   const plans = readPlans(config, reader, now);
+  if (probeNote && plans.claude) plans.claude.note = [plans.claude.note, probeNote].filter(Boolean).join('; ');
   reader.save();
 
   const providers = {} as Record<AgentName, ProviderUsage>;

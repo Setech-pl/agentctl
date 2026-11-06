@@ -1,3 +1,5 @@
+import { claudeProbeDir, refreshClaudePlan } from './claude-probe.ts';
+import { readClaudeProbeSnapshot } from './claude-usage.ts';
 import { blockingEnv } from './claude-rc.ts';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -32,7 +34,7 @@ export const claude: ProviderAdapter = {
     const help = version.code === 0 ? await runner.exec('claude', ['--help'], { readOnly: true }) : { stdout: '' };
     return { found: version.code === 0, version: /\d+\.\d+\.\d+/.exec(version.stdout)?.[0] ?? null, raw: version.stdout.split('\n').map(line => line.trim()).find(Boolean) ?? '', features: { effortFlag: /--effort\b/.test(help.stdout), config: /-c, --config/.test(help.stdout), remoteControl: /--remote-control\b/.test(help.stdout), appendSystemPromptFile: /--append-system-prompt(?:-file\b|\[-file\])/.test(help.stdout) } };
   },
-  doctor(d, env) {
+  doctor(d, env, config) {
     if (!d.found) return [{ name: 'claude', level: 'warn', text: `not found (only needed for agent: claude). ${this.installHint}` }];
     const lines: DoctorLine[] = [];
     const add = (name: string, level: DoctorLine['level'], text: string) => lines.push({ name, level, text });
@@ -47,6 +49,12 @@ export const claude: ProviderAdapter = {
     else if (!support.roleFile) add('claude remote control', 'warn', 'has --remote-control, but no --append-system-prompt-file: agentctl manager cannot give the manager its role (claude update)');
     else if (blocking.length > 0) add('claude remote control', 'warn', `has --remote-control, but ${blocking.join(', ')} ${blocking.length === 1 ? 'is' : 'are'} set here: Claude Code then refuses Remote Control (it needs a claude.ai login, not an API key or a gateway). A tmux server started from this shell has them too`);
     else add('claude remote control', 'ok', 'has --remote-control and --append-system-prompt-file (the login is not checked: claude auth status)');
+    if (config) {
+      const reading = readClaudeProbeSnapshot(config);
+      add('claude usage probe', config.capacity.claudeUsageProbe && !reading ? 'warn' : 'ok',
+        !config.capacity.claudeUsageProbe ? 'off (capacity.claude_usage_probe)' :
+        `enabled; interval ${config.capacity.claudeUsageProbeIntervalMinutes} min; ${reading ? `last read ${new Date(reading.at).toISOString()}${Date.now() - reading.at > config.capacity.staleMinutes * 60_000 ? ' (stale)' : ''}` : `one-time wait for Marcin: run claude in ${claudeProbeDir(config)} to trust/login; agentctl never answers dialogs`}`);
+    }
     return lines;
   },
   argv(spec, settings, extra) {
@@ -82,7 +90,8 @@ export const claude: ProviderAdapter = {
     feedLine: feedClaudeLine,
     readPlan: readClaudePlan,
 
-    planSources: ['claude-statusline'],
+    refreshPlan: refreshClaudePlan,
+    planSources: ['claude-statusline', 'claude-usage-probe'],
   },
   models: { get equivalents() { const rows = DEFAULT_EQUIVALENTS.map(row => row.claude); return { light: rows.slice(0, 2), medium: rows.slice(2, 4), strong: rows.slice(4) }; }, label: modelLabel },
   safety: legacySafety,
