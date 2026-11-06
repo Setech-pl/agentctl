@@ -521,6 +521,8 @@ Każdy klucz z typem, wartością domyślną i znaczeniem: [docs/configuration.m
 
 Każde odświeżenie planszy — okresowe, po zdarzeniu lub ręczne — anuluje poprzedni termin. Następne uruchamia się po zakończeniu wspólnego odczytu (także po błędzie): po 2 sekundach przy niedokończonych zadaniach, po 5 sekundach, gdy wszystkie są zakończone. Wyjście anuluje timer i oczekujące ponowienie.
 
+Strzałki działają podczas skanowania zadań i zbierania statusów; zmiana zaznaczenia zleca nowy podgląd i pozostaje zachowana po zakończeniu starszego odświeżenia.
+
 ```text
 agentctl 0.17.2 board · agentctl-test · 2 tasks · 06:54:51 · Disk: ok; free 307.4 GiB; agentctl worktrees 0.0 GiB
   TASK                 AGENT          STATE               TIME    TOKENS  PROGRESS REPORT   │ NEON-BACKEND-TASK-12 · last 1 lines

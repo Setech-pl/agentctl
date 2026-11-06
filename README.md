@@ -523,6 +523,8 @@ Every key with type, default and meaning: [docs/configuration.md](docs/configura
 
 Every periodic, watch or manual board refresh cancels the previous deadline. The next refresh is armed after the shared load completes (also after an error): 2 seconds with unfinished tasks, 5 seconds when all tasks are done. Exit cancels the timer and queued follow-up.
 
+Arrow keys remain usable during both record scanning and status collection; selection changes request a fresh preview and survive completion of an older refresh.
+
 ```text
 agentctl 0.17.2 board · agentctl-test · 2 tasks · 06:54:51 · Disk: ok; free 307.4 GiB; agentctl worktrees 0.0 GiB
   TASK                 AGENT          STATE               TIME    TOKENS  PROGRESS REPORT   │ NEON-BACKEND-TASK-12 · last 1 lines
