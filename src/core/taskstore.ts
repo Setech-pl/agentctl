@@ -1,3 +1,4 @@
+import { fileVersion } from './file-version.ts';
 import { withFileLock, withFileLockSync, taskLock } from './file-lock.ts';
 import { noteStateWriteFailure, atomicWriteFile } from './atomic-file.ts';
 import { attemptFields } from './report-state.ts';
@@ -365,12 +366,11 @@ export interface RecordScan {
 }
 
 interface CachedRecordFile {
-  mtimeMs: number;
-  size: number;
+  version: string | undefined;
   record: TaskRecord | undefined;
 }
 
-/** Parsed TASK.md files per scanned directory; an unchanged file (same lstat mtime and size) is not read again. */
+/** Parsed TASK.md files per scanned directory; an unchanged file (same reusable high-resolution file version) is not read again. */
 const recordScanCache = new Map<string, Map<string, CachedRecordFile>>();
 
 /** Yield every 25 folders so a long scan does not block the event loop (the board shares it with key handling). */
@@ -396,15 +396,16 @@ async function scanRecordsIn(dir: string): Promise<{ records: TaskRecord[]; pars
   for (const name of names) {
     const file = path.join(dir, name, 'TASK.md');
     seen.add(file);
-    let st: fs.Stats | undefined;
+    let st: fs.BigIntStats | undefined;
     try {
-      st = fs.lstatSync(file);
+      st = fs.lstatSync(file, { bigint: true });
     } catch {
       files.delete(file);
     }
     if (st) {
+      const version = fileVersion(st);
       const hit = files.get(file);
-      if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) {
+      if (version !== undefined && hit?.version === version) {
         if (hit.record) records.push(hit.record);
       } else {
         let record: TaskRecord | undefined;
@@ -413,7 +414,7 @@ async function scanRecordsIn(dir: string): Promise<{ records: TaskRecord[]; pars
         } catch {
           record = undefined;
         }
-        files.set(file, { mtimeMs: st.mtimeMs, size: st.size, record });
+        files.set(file, { version, record });
         parsed++;
         if (record) records.push(record);
       }
@@ -465,6 +466,8 @@ export async function setHeaderFields(runner: Runner, file: string, fields: Reco
     else doc.set(key, value);
   }
   const rest = text.replace(/\r\n/g, '\n').slice(match[0].length);
+  // Known writes invalidate even if a filesystem preserves its metadata tuple.
+  recordScanCache.get(path.dirname(path.dirname(file)))?.delete(file);
   try { await runner.writeFile(file, `---\n${doc.toString().trimEnd()}\n---${rest}`); }
   catch (error) { noteStateWriteFailure(file, error); throw error; }
   return true;

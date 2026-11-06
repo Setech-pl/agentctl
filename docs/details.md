@@ -762,3 +762,5 @@ Export the prompt's absolute `AGENTCTL_LIVE_CACHE` before any other shell comman
 Results and logs are under `$AGENTCTL_LIVE_CACHE/gate-results/<sha>/`; `<tier>.json` records SHA, dirty/exception flags, Node versions, counts, retries and duration. Failed test files run once more; both attempts remain in the logs and result steps. A passing retry can recover the gate while original failure counts remain visible. Dry runs are marked explicitly and do not count as executed gates. Task scratch is removed automatically; retain evidence and shared runtimes.
 
 Report digest reuse always revalidates the current task owner, allowed roots and every symlink component; authorization is never cached.
+
+TASK.md and report cache versions include device, inode, size and nanosecond modification/change times. Coarse (millisecond-aligned) change times disable reuse; known header writes and report copies explicitly invalidate their entries.

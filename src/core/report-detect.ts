@@ -1,7 +1,7 @@
 import { noteStateWriteFailure } from './atomic-file.ts';
 import { withFileLock, taskLock } from './file-lock.ts';
 import { checkReportPath, readReportText } from './report-path.ts';
-import { inspectReport } from './report-state.ts';
+import { inspectReport, invalidateReportDigest } from './report-state.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Context } from './context.ts';
@@ -212,6 +212,7 @@ async function syncReportLocked(ctx: Context, record: TaskRecord, opts: SyncOpti
     const allowOutside = opts.sourcePolicy !== 'mcp' && opts.force;
     checkReportPath(ctx.config, record, record.report, { allowOutside });
     const content = readReportText(ctx.config, record, source, { allowOutside });
+    invalidateReportDigest(record.report);
     await runner.writeFile(record.report, content);
   } catch (error) { noteStateWriteFailure(file, error); throw error; }
   // The modification time of the copy itself (the clock of a test run is not the clock of the file system).

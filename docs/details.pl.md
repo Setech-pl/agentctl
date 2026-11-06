@@ -760,3 +760,5 @@ Pierwszym poleceniem powłoki wyeksportuj bezwzględny `AGENTCTL_LIVE_CACHE` z p
 Wyniki i logi trafiają do `$AGENTCTL_LIVE_CACHE/gate-results/<sha>/`. `<tier>.json` zawiera SHA, stan drzewa i wyjątek, wersje Node, liczniki, ponowienia i czas. Każdy nieudany plik testów jest powtarzany raz; obie próby pozostają w logach i krokach wyniku. Udane ponowienie może zaliczyć bramkę, ale pierwotne błędy pozostają w licznikach. Plan jest jawnie oznaczony i nie zastępuje wykonanej bramki. Pliki robocze są usuwane automatycznie; dowody i wspólne runtime zostają.
 
 Ponowne użycie skrótu raportu zawsze sprawdza bieżącego właściciela zadania, dozwolone katalogi i dowiązania symboliczne w ścieżce; autoryzacja nie jest buforowana.
+
+Wersje cache TASK.md i raportów obejmują urządzenie, inode, rozmiar oraz nanosekundowy czas modyfikacji i zmiany metadanych. Niska rozdzielczość czasu zmian (wyrównanie do milisekundy) wyłącza ponowne użycie; zapis nagłówka i kopiowanie raportu jawnie unieważniają wpisy.

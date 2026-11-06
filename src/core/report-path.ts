@@ -38,11 +38,11 @@ export function readReportText(config: Pick<GlobalConfig, 'cache'>, owner: Repor
   const approved = checkReportPath(config, owner, file, { ...opts, existing: true });
   const fd = fs.openSync(approved, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
   try {
-    const opened = fs.fstatSync(fd);
+    const opened = fs.fstatSync(fd, { bigint: true });
     const verify = () => {
       checkReportPath(config, owner, file, { ...opts, existing: true });
-      const current = fs.lstatSync(approved);
-      if (!opened.isFile() || current.ino !== opened.ino || current.dev !== opened.dev || current.size !== opened.size || current.mtimeMs !== opened.mtimeMs) throw new AgentctlError(`Report path changed while reading: ${file}`);
+      const current = fs.lstatSync(approved, { bigint: true });
+      if (!opened.isFile() || current.ino !== opened.ino || current.dev !== opened.dev || current.size !== opened.size || current.mtimeNs !== opened.mtimeNs || current.ctimeNs !== opened.ctimeNs) throw new AgentctlError(`Report path changed while reading: ${file}`);
     };
     verify();
     const text = fs.readFileSync(fd, 'utf8');
