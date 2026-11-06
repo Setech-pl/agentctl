@@ -260,7 +260,19 @@ async function deliverOnce(ctx: Context, window: string): Promise<'sent' | 'pend
         const queued = deliveryClass(record, text, screen.dimInput);
         if (queued && record.deliveryResult !== 'queued-in-agent') await setHeaderFields(ctx.runner, file, { delivery_result: 'queued-in-agent', prompt_error: `${DELIVERY_WARNING}: ${QUEUED_IN_AGENT}` });
       }
-      if (record.promptDelivery === 'needs-attention') return 'needs-attention';
+      if (record.promptDelivery === 'needs-attention') {
+        // An initial prompt that was never pasted (a start that failed before any paste; a window that became ready
+        // late) can be re-armed without duplicating anything: the normal paste path serves it on the next pass.
+        const neverPasted = !record.deliveryStartedAt && record.promptKind !== 'followup' && record.pendingPrompt;
+        if (neverPasted && screen.code === 0 && record.agent !== 'unknown') {
+          const settings = ctx.config.agents[record.agent];
+          if (classifyScreen(text, settings) === 'idle' && inputVisible(text, settings) && inspectField(text, record.agent).readable) {
+            await setHeaderFields(ctx.runner, file, { prompt_delivery: 'pending', prompt_error: null });
+            return 'pending';
+          }
+        }
+        return 'needs-attention';
+      }
       if (ctx.runner.now() - Date.parse(record.deliveryStartedAt ?? record.started) >= ctx.config.deliveryConfirmS * 1000) return attention('no acknowledgement (hook, transcript) before delivery_confirm_s elapsed');
       return record.deliveryResult === 'not-delivered-in-field' ? 'confirming' : uncertain('awaiting hook or transcript', record.deliveryResult === 'queued-in-agent' ? 'queued-in-agent' : null);
     }
