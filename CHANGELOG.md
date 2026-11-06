@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- INT4: token-only MCP confirmations remain bound to the previewed tool; a refused cross-tool use preserves the original preview. / Potwierdzenie MCP samym tokenem dotyczy wyłącznie narzędzia z podglądu; odmowa użycia w innym narzędziu zachowuje pierwotny podgląd.
+
 - P47: MCP task responses omit plans/capacity/disk footers unless detail/capacity is requested or a session threshold changes; config warnings appear once per session. / MCP pomija stopkę planów/pojemności/dysku poza jawnym żądaniem lub zmianą progu; ostrzeżenia konfiguracji pojawiają się raz na sesję.
 
 - P45: MCP report reads default to verdict, decisions, actions and the final Polish summary; full checks/outputs require detail/full, with parsed outputs on the first page only. CLI reads are unchanged. / MCP domyślnie zwraca werdykt, decyzje, akcje i końcowe polskie podsumowanie; pełne kontrole/outputs są na żądanie, metadane tylko na pierwszej stronie.

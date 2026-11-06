@@ -87,6 +87,21 @@ it('P39: a confirm with preview_token only executes the stored arguments; the sp
   const bare = await f.call('new', { confirm: true });
   assert.match(bare.text, /missing preview|needs the spec/);
 });
+for (const from of ['new', 'queue']) it(`INT4: a ${from} preview token cannot confirm another tool`, async () => {
+  const f = fixture(`token-tool-${from}`);
+  const args = { spec: f.spec('CROSS-TOOL'), ...(from === 'new' ? { no_agent: true } : {}) };
+  const preview = await f.call(from, args);
+  assert.equal(preview.isError, undefined, preview.text);
+  const preview_token = token(preview.text);
+  const other = from === 'new' ? 'queue' : 'new';
+  const refused = await f.call(other, { confirm: true, preview_token });
+  assert.equal(refused.isError, true, refused.text);
+  assert.match(refused.text, /different (?:tool|operation)/);
+  assert.deepEqual(readQueue(f.config), [], 'the other operation must not execute');
+  const accepted = await f.call(from, { confirm: true, preview_token });
+  assert.equal(accepted.isError, undefined, accepted.text);
+  assert.equal(readQueue(f.config).length, 1, 'a refused cross-tool use keeps the original preview valid');
+});
 it('P3 gives precise TTL, argument field and session errors; failed mismatch keeps the valid token usable', async () => {
   const f = fixture('confirm-errors', 'preview: {ttl_s: 2}\n');
   const args = { spec: f.spec('P3'), no_agent: true }, preview = await f.call('new', args), preview_token = token(preview.text);

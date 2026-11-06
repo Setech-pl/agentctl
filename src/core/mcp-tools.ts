@@ -1555,6 +1555,7 @@ for (const tool of MCP_TOOLS) {
         const issued = token ? issuedPreviewTokens.get(token) : undefined;
         return deny(issued ? issued.session !== session ? 'different session' : `invalidated by ${issued.state}` : 'missing preview in this session (unknown token or restarted session)');
       }
+      if (!preview.key.startsWith(`${tool.name}:`)) return deny('different tool: this preview belongs to another operation');
       if (!tokenOnly && preview.key !== key) {
         const fields = [...new Set([...Object.keys(preview.arguments), ...Object.keys(arguments_)])].filter(k => JSON.stringify(preview.arguments[k]) !== JSON.stringify(arguments_[k]));
         return deny(`different argument hash: ${fields.join(', ') || 'operation'}`);
