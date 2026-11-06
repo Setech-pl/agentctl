@@ -1,4 +1,4 @@
-import { readReportText } from './report-path.ts';
+import { checkReportPath, readReportText } from './report-path.ts';
 import fs from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import type { GlobalConfig } from './config.ts';
@@ -44,6 +44,8 @@ function digestReport(config: Pick<GlobalConfig, 'reportSettleS'> & Partial<Pick
 /** Single report readiness rule for status, hooks, history, cohorts and dependency consumers. */
 export function inspectReport(config: Pick<GlobalConfig, 'reportSettleS'> & Partial<Pick<GlobalConfig, 'cache'>>, record: TaskRecord, now: number, turnEnded: boolean, file = record.report): ReportState {
   try {
+    // Authorization is never cached: owners, roots and ancestor components can change.
+    if (config.cache) checkReportPath({ cache: config.cache }, record, file, { existing: true });
     const st = fs.lstatSync(file);
     if (!st.isFile() || st.isSymbolicLink()) return { ready: false, exists: true, reason: 'not a regular report' };
     const start = Date.parse(record.attemptStarted ?? record.started);

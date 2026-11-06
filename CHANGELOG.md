@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- P32 F1: cached report digests revalidate the current owner, allowed roots and symlink components on every inspection.
+
 - P32: the board tick no longer scales with the archive. Task records are scanned once per tick and re-parsed only when a TASK.md changes (previously 5-6 full scans of every record, archived included, per 2 s tick); report bodies are hashed and scanned once per version (cached by dev/ino/mtime/size); closed/cancelled/archived rows skip the prompt queue, outputs and token collection unless their section is expanded; one UsageReader per board process replaces the per-tick ~1 MB usage-cache parse; the disk report is collected on its own 5 min cadence with a bounded budget; the refresh runs every 2 s only while a task is alive (5 s when everything is done, armed after the previous tick, never stacked) and fs.watch event ticks are debounced to one per 500 ms; the per-record loop yields every 25 records so keys interleave with a tick.
 - Development gates: `npm run gate -- quick|full|release` centralizes affected tests, sequential shared Node runtimes, package/doctor/live checks, low-priority execution, a cross-task lock and JSON evidence; standing agent rules are in AGENTS.md.
 
