@@ -31,6 +31,23 @@ export const FIRST_LOOK_MS = 24 * 3_600_000;
 
 export const markersPath = (config: Pick<GlobalConfig, 'path'>): string => path.join(path.dirname(config.path), 'events-seen.json');
 
+const GC_PREVIEW_KEY = '"gc_preview":';
+const GC_PREVIEW_DROPPED = { dropped: 'oversized payload; details via gc_preview / agentctl gc' };
+
+/**
+ * The write-time bound of recordJournal (journal.ts) postdates many journals: an old gc_suggest can still carry a whole GC plan and would
+ * occupy page after page of JSON fragments. Summarize such a legacy entry on read (same replacement as at write time, every other field kept).
+ * The returned prefix is the length of the byte-identical head of the old and the new JSON: a fragment cursor at or before it continues
+ * seamlessly, a cursor past it pointed into the dropped payload and the entry counts as delivered.
+ */
+function summarizeLegacyGc(entry: JournalEntry): { entry: JournalEntry; prefix: number } | null {
+  if (entry.gc_preview === undefined) return null;
+  const raw = JSON.stringify(entry);
+  if (Buffer.byteLength(raw) <= 4000) return null;
+  const key = raw.indexOf(GC_PREVIEW_KEY);
+  return { entry: { ...entry, gc_preview: GC_PREVIEW_DROPPED }, prefix: key < 0 ? 0 : key + GC_PREVIEW_KEY.length };
+}
+
 export function readMarkers(config: Pick<GlobalConfig, 'path'>): Partial<Record<EventClient, string>> {
   try {
     const d: unknown = JSON.parse(fs.readFileSync(markersPath(config), 'utf8'));
@@ -103,7 +120,9 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
   const cohort = opts.cohort === undefined ? null : findCohort(config, opts.cohort).name;
   for (const record of listTaskRecords(config)) await journalOutputs(ctx, record);
   const journal = readJournal(config, -1);
-  const all = secretRedactor([config, process.env, journal], new Set(listTaskRecords(config).map(r => r.task)))(journal);
+  const redacted = secretRedactor([config, process.env, journal], new Set(listTaskRecords(config).map(r => r.task)))(journal);
+  const legacyGc = redacted.map(summarizeLegacyGc);
+  const all = redacted.map((e, i) => legacyGc[i]?.entry ?? e);
   const key = cohort === null ? opts.client : `${opts.client}|cohort:${cohortKey(cohort)}`;
   const saved = opts.cursor ?? ((!opts.since || opts.since === 'last') ? (readMarkers(config)[key] ?? (opts.client.startsWith('mcp:') && readMarkers(config).mcp?.startsWith('e2:') ? readMarkers(config).mcp : undefined)) : undefined);
   let position = saved?.startsWith('e2:') ? decodeCursor(saved) : { index: all.findIndex(e => Date.parse(e.at) > (saved ? Date.parse(saved) : since.ms)), offset: 0 };
@@ -133,6 +152,13 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
     const event = all[position.index]!;
     if (cohort !== null && (!event.cohort || cohortKey(event.cohort) !== cohortKey(cohort))) { position = { index: position.index + 1, offset: 0 }; continue; }
     const raw = JSON.stringify(event);
+    const prefix = legacyGc[position.index]?.prefix;
+    if (position.offset > 0 && ((prefix !== undefined && position.offset > prefix) || position.offset >= raw.length)) {
+      // A mid-fragment cursor of an entry that has since shrunk (a legacy gc_preview summarized on read): the undelivered rest
+      // was the dropped payload (or its shifted suffix); the entry counts as delivered, the next one is served whole.
+      position = { index: position.index + 1, offset: 0 };
+      continue;
+    }
     const previous = { ...position };
     if (position.offset === 0) {
       events.push(event); position.index++;
