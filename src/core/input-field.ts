@@ -55,7 +55,7 @@ export function inspectField(screen: string, agent?: 'claude' | 'codex' | 'kimi'
     if (bottom > top + 1) return areaOf(top + 1, bottom, top);
     return { area: [], readable: false, reason: 'brak dolnej ramki composera (ucięty ekran albo inna szerokość)' };
   }
-  // Codex 0.166.0 has no box: its two-row model/hints footer is a separate bottom region (recorded fixtures).
+  // Codex 0.166/0.167 has no box: its two-row model/hints footer is a separate bottom region (recorded fixtures).
   // Pick the LAST complete footer at the bottom, so identical user text higher up stays inside the field.
   for (let model = lines.length - 2; model >= 0; model--) {
     if (!CODEX_MODEL.test(lines[model]!) || !(CODEX_HINT.test(lines[model + 1]!) || CODEX_STATUS.test(lines[model + 1]!)) || lines.slice(model + 2).some(line => line !== '')) continue;
@@ -64,7 +64,7 @@ export function inspectField(screen: string, agent?: 'claude' | 'codex' | 'kimi'
   }
   // Compact startup screen: the banner, cwd and permissions precede the bottom composer.
   // No conversation/dialog rows are allowed in this startup-only shape.
-  const banner = lines.findIndex(line => /^  >_ OpenAI Codex \(v0\.166\.0\)$/.test(line));
+  const banner = lines.findIndex(line => /^  >_ OpenAI Codex \(v0\.(?:166|167)\.0\)$/.test(line));
   if (banner >= 0 && /^     \S.*$/.test(lines[banner + 1] ?? '') &&
       /^  permissions: .+$/.test(lines[banner + 2] ?? '') && lastMarker > banner + 2 &&
       /^›(?:\s|$)/.test(lines[lastMarker]!) &&
@@ -99,21 +99,25 @@ export function areaKey(area: string[]): string {
  */
 export function readsAs(shown: string[], text: string, agent: 'claude' | 'codex' | 'kimi' | 'unknown' | undefined, whole: boolean): boolean {
   const want = storedForm(text, agent).split('\n');
-  let row = 0;
-  for (const line of want) {
-    if (row >= shown.length) return !whole;
-    let pos = 0;
-    for (;;) {
-      const part = shown[row]!;
-      if ((part === '' && line !== '') || !line.startsWith(part, pos)) return false;
-      pos += part.length;
-      row++;
-      if (pos >= line.length) break;
-      if (line[pos] === ' ') pos++;
-      if (row >= shown.length) return !whole;
+  // A soft wrap may retain the separating space on the next row or swallow it.
+  // Try both exact boundaries; greedily swallowing it rejects a valid retained-space wrap.
+  const memo = new Map<string, boolean>();
+  const match = (logical: number, pos: number, row: number): boolean => {
+    if (logical === want.length) return row === shown.length;
+    if (row === shown.length) return !whole;
+    const key = `${logical}:${pos}:${row}`;
+    if (memo.has(key)) return memo.get(key)!;
+    const line = want[logical]!, part = shown[row]!;
+    let ok = false;
+    if ((part !== '' || line === '') && line.startsWith(part, pos)) {
+      const next = pos + part.length;
+      ok = next === line.length ? match(logical + 1, 0, row + 1)
+        : match(logical, next, row + 1) || (line[next] === ' ' && !shown[row + 1]?.startsWith(' ') && match(logical, next + 1, row + 1));
     }
-  }
-  return row >= shown.length;
+    memo.set(key, ok);
+    return ok;
+  };
+  return match(0, 0, 0);
 }
 
 /**
@@ -126,4 +130,12 @@ export function pasteImage(area: string[], prompt: string, agent?: 'claude' | 'c
   if (agent === 'kimi' && shown.length === 1 && /^\[paste #\d+[^\]\n]*\]$/i.test(shown[0]!)) return true;
   if (shown.length === 1 && PLACEHOLDER.test(shown[0]!.trim())) return true;
   return readsAs(shown, prompt, agent, agent === 'kimi');
+}
+
+/** Only the separate, structurally validated footer advertises a queue key; composer text cannot select it. */
+export function codexQueueKey(screen: string): 'Tab' | 'Enter' {
+  const field = inspectField(screen, 'codex');
+  if (!field.readable) return 'Enter';
+  const lines = screen.trimEnd().split('\n');
+  return /^  tab to queue message\s*$/.test(lines.at(-1) ?? '') ? 'Tab' : 'Enter';
 }

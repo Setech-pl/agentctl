@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- P49: working Codex uses the advertised Tab queue key; wrapped pastes accept retained or swallowed wrap separators and delivery still requires exact session evidence. Idle Codex, Claude and Kimi retain their submission keys. / Pracujący Codex używa reklamowanego Tab do kolejki; zawinięty tekst zachowuje kontrolę zgodności, a dostawę potwierdza transkrypt. Klawisze bezczynnego Codexa, Claude i Kimi pozostają bez zmian.
+
 - Gate: `full --node26-only` explicitly records the production Node 26 scope without provisioning Node 22. / Bramka full może jawnie sprawdzić wyłącznie produkcyjny Node 26 bez instalowania Node 22.
 
 - P50: requeuing a removed task ID creates a fresh record; prior attempt state is retained under state/.history and no longer cancels its new dependents. / Ponowne dodanie ID po queue rm tworzy świeży rekord; poprzednia próba zostaje w state/.history i nie blokuje nowych zależności jako anulowana.

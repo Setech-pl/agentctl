@@ -9,7 +9,7 @@ import type { AgentSettings } from './config.ts';
 import type { Context } from './context.ts';
 import { withFileLock } from './file-lock.ts';
 import { classifyScreen, inputVisible } from './state.ts';
-import { areaKey, fieldArea, fieldText, inspectField, pasteImage, readsAs } from './input-field.ts';
+import { codexQueueKey, areaKey, fieldArea, fieldText, inspectField, pasteImage, readsAs } from './input-field.ts';
 import { eol } from './paste-wrapper.ts';
 import { recordJournal } from './journal.ts';
 import type { ScreenState } from './state.ts';
@@ -40,7 +40,7 @@ export type DeliveryProof = 'delivered';
 /**
  * What an agent shows while a message waits in its own queue (recorded from the real CLIs: tests/fixtures/screen-claude-busy-queued*.txt).
  * Claude Code 2.1.311 puts a dim "Press up to edit queued messages" in the empty field, and during thinking shows the queued message with
- * "ctrl+x ctrl+s to send now" on a line of its own. Codex has no such sign: Enter steers the running turn and the echo of the message follows at once.
+ * "ctrl+x ctrl+s to send now" on a line of its own. Codex advertises Tab to queue while working; older Enter submissions steer and echo the message.
  * The sign classifies a message as "queued, not confirmed" (an older queue, a quoted answer or another message show it too); it confirms nothing.
  */
 const QUEUE_SIGNS: Partial<Record<'claude' | 'codex', RegExp>> = { claude: /^\s*(?:Press up to edit queued messages|ctrl\+x ctrl\+s to send now)\s*$/i };
@@ -206,6 +206,7 @@ async function pressEnterAfter(ctx: Context, record: TaskRecord, file: string, w
   record.deliveryEnters = (record.deliveryEnters ?? 0) + 1;
   record.deliveryQueueSign = queueSignShown(record.agent, last.stdout, last.dimInput);
   await setHeaderFields(ctx.runner, file, { delivery_enters: record.deliveryEnters, delivery_enter_at: new Date(ctx.runner.now()).toISOString(), delivery_queue_sign: record.deliveryQueueSign });
+  if (record.agent === 'codex' && record.promptKind === 'followup' && record.deliveryWasBusy && ['working', 'background'].includes(classifyScreen(last.stdout, ctx.config.agents.codex)) && codexQueueKey(last.stdout) === 'Tab') return ctx.tmux.sendKey(window, 'Tab');
   return record.agent === 'kimi'
     ? ctx.runner.exec('tmux', ['send-keys', '-t', await ctx.tmux.targetFor(window), 'C-m'])
     : ctx.tmux.pressEnter(window);
