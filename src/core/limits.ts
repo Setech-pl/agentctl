@@ -185,8 +185,8 @@ export async function slotHolders(ctx: Context): Promise<LiveWindow[]> {
 
 export interface ProviderLoad {
   agent: AgentName;
-  /** null: no limit. */
-  limit: number | null;
+  /** null: no limit; 'off': the provider is disabled. */
+  limit: number | 'off' | null;
   /** Windows of agentctl. */
   windows: string[];
   starting: number;
@@ -225,7 +225,7 @@ export function collectLimits(config: GlobalConfig, live: readonly LiveWindow[])
       const external = mine.filter((w) => w.kind === 'external').map((w) => ({ pid: w.pid ?? 0, cwd: w.cwd ?? null }));
       const limit = config.limits[agent] ?? null;
       const used = mine.filter(w => w.kind === undefined && w.counted !== false).length + starting + reserved + external.length;
-      return { agent, limit, windows, starting, working, reportReady, reserved, reservedNote: reservations[agent]?.note ?? null, external, used, free: limit === null ? null : Math.max(0, limit - used), queued: queue.filter((e) => e.agent === agent).length };
+      return { agent, limit, windows, starting, working, reportReady, reserved, reservedNote: reservations[agent]?.note ?? null, external, used, free: limit === 'off' ? 0 : limit === null ? null : Math.max(0, limit - used), queued: queue.filter((e) => e.agent === agent).length };
     }),
   };
 }
@@ -250,19 +250,19 @@ export function renderLimits(report: LimitsReport): string[] {
 
 // ---- changing the limits
 
-export type LimitAssignments = Partial<Record<AgentName, number | null>>;
+export type LimitAssignments = Partial<Record<AgentName, number | 'off' | null>>;
 
-/** `claude=3 codex=off`: a number, or off / none to remove the limit. */
+/** `claude=3 codex=off`: a number, `off` to disable the provider, or 0 / none to remove the limit. */
 export function parseAssignments(args: string[], ids: readonly AgentName[] = DEFAULT_PROVIDERS): LimitAssignments {
-  if (args.length === 0) throw new AgentctlError('give the new limits, e.g. claude=3 codex=5', 'off removes a limit: codex=off.');
+  if (args.length === 0) throw new AgentctlError('give the new limits, e.g. claude=3 codex=5', 'off disables a provider; 0 or none removes a limit: codex=0.');
   const out: LimitAssignments = {};
   for (const arg of args) {
     const m = /^([a-z]+)=(\d+|off|none)$/.exec(arg.trim());
     const agent = m?.[1] as AgentName | undefined;
-    if (!m || !agent || !(ids as readonly string[]).includes(agent)) throw new AgentctlError(`"${arg}" is not ${ids.map(id => `${id}=N`).join(' or ')}`, 'N is a whole number from 1, or off for no limit.');
+    if (!m || !agent || !(ids as readonly string[]).includes(agent)) throw new AgentctlError(`"${arg}" is not ${ids.map(id => `${id}=N`).join(' or ')}`, 'N is a whole number from 1, off disables the provider, 0 or none removes the limit.');
     const value = m[2] as string;
-    if (value === 'off' || value === 'none') out[agent] = null;
-    else if (Number(value) < 1) throw new AgentctlError(`${arg}: the limit must be 1 or more (off removes it)`);
+    if (value === 'off') out[agent] = 'off';
+    else if (value === 'none' || Number(value) === 0) out[agent] = null;
     else out[agent] = Number(value);
   }
   return out;
@@ -276,8 +276,8 @@ export function limitsDiffText(from: GlobalConfig['limits'], to: GlobalConfig['l
 
 export interface LimitsChange {
   agent: AgentName;
-  from: number | null;
-  to: number | null;
+  from: number | 'off' | null;
+  to: number | 'off' | null;
 }
 
 export interface LimitsPlan {
@@ -302,7 +302,7 @@ export function planSetLimits(config: GlobalConfig, assignments: LimitAssignment
       changes.push({ agent, from, to });
     }
   });
-  const show = (n: number | null): string => (n === null ? 'no limit' : String(n));
+  const show = (n: number | 'off' | null): string => (n === null ? 'no limit' : n === 'off' ? 'off (disabled)' : String(n));
   return {
     file,
     changes,

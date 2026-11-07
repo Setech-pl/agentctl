@@ -801,7 +801,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
   limits
     .command('set')
     .description('Change the limits in config.yaml (comments and the order of the keys stay; the old file is kept as config.yaml.bak). A running watch and the MCP server pick it up at once; waiting tasks of the queue start at the next tick.')
-    .argument('<limits...>', 'claude=3 codex=5; off removes a limit (codex=off)')
+    .argument('<limits...>', 'claude=3 codex=5; off disables a provider (codex=off: no windows of it start), 0 or none removes a limit (codex=0)')
     .option('-y, --yes', 'do not ask')
     .option('--dry-run', 'print what would be written, change nothing')
     .action(

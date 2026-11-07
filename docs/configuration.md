@@ -45,8 +45,8 @@ Column "Layers": **g** global config, **p** project config, **s** spec.
 | `ui` | mapping | `{}` | g | Instance labels for the board, tmux status-left and board/watch terminal titles. |
 | `ui.instance_name` | string | automatic | g | Override `agentctl` (prod) or `agentctl-dev` (doctor/version dev detection). 1–64 letters/digits/spaces/dots/underscores/hyphens. Applied at board/watch/status-bar startup; restart those views after changing it. |
 | `limits` | mapping | none | g | Most simultaneous windows per provider. |
-| `limits.claude` | positive integer | unlimited | g | Cap for Claude windows (agentctl windows + reserved places + external sessions when counted). `agentctl limits set claude=3` changes it. |
-| `limits.codex` | positive integer | unlimited | g | Cap for Codex windows. |
+| `limits.claude` | positive integer, `0` or `off` | unlimited | g | Cap for Claude windows (agentctl windows + reserved places + external sessions when counted). `agentctl limits set claude=3` changes it. `0` means no limit (kept for compatibility); `off` disables the provider: no Claude window starts. |
+| `limits.codex` | positive integer, `0` or `off` | unlimited | g | Cap for Codex windows. `0` = no limit, `off` = disabled. |
 | `limits.heavy` | positive integer | `1` | g | Maximum queued heavy tasks running or starting across providers; previews explain waits. |
 | `limits.count_report_ready` | boolean | `false` | g | Idle windows with a complete report do not occupy provider slots by default. Capacity/limits separate working windows and reports awaiting collection. A follow-up counts again; send warns and refuses to resume it when the provider is full. |
 | `limits.count_external` | boolean | `false` | g | Terminal sessions of active providers (`claude`, `codex`, `kimi` when enabled) outside the windows of agentctl (found with `ps`, not MCP servers, headless runs or agentctl itself) count against the limit and show as "external" in `agentctl limits`. Places for agents you start by hand can also be held with `agentctl limits reserve`. |

@@ -609,7 +609,7 @@ agentctl limits set [options] <limits...>
 
 | Argument | Meaning |
 |---|---|
-| `<limits...>` | claude=3 codex=5; off removes a limit (codex=off) |
+| `<limits...>` | claude=3 codex=5; off disables a provider (codex=off: no windows of it start), 0 or none removes a limit (codex=0) |
 
 | Option | Meaning | Notes |
 |---|---|---|
@@ -620,7 +620,8 @@ Examples:
 
 ```sh
 agentctl limits set claude=3 codex=5     # summary, y/N, takes effect at once
-agentctl limits set codex=off -y         # no limit for Codex, no question
+agentctl limits set codex=off -y         # Codex is disabled, no question
+agentctl limits set codex=0 -y           # no limit for Codex again
 ```
 
 ## agentctl limits reserve

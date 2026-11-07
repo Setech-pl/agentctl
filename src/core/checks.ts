@@ -42,11 +42,17 @@ export interface LiveWindow {
   cwd?: string;
 }
 
-/** Provider limit: counts windows already running for the agent and refuses one more past the limit. */
-export function checkWindowLimit(agent: AgentName, limit: number | undefined, live: LiveWindow[], session: string): string | undefined {
+/** Provider limit: counts windows already running for the agent and refuses one more past the limit. `off` disables the provider outright. */
+export function checkWindowLimit(agent: AgentName, limit: number | 'off' | undefined, live: LiveWindow[], session: string): string | undefined {
+  if (limit === 'off') return `window limit for ${agent} reached: the provider is disabled (limits.${agent}: off) in session "${session}"`;
   if (limit === undefined) return undefined;
   const running = live.filter((w) => w.agent === agent && w.counted !== false);
   if (running.length < limit) return undefined;
   const list = running.map((w) => w.window).join(', ');
   return `window limit for ${agent} reached: ${running.length} of ${limit} in session "${session}" (${list}).`;
+}
+
+/** True when one more window of the provider would go past the limit (`off` always; a number at the cap). */
+export function overProviderLimit(limit: number | 'off' | undefined, used: number): boolean {
+  return limit === 'off' || (limit !== undefined && used >= limit);
 }

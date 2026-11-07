@@ -843,7 +843,7 @@ The parity changes during the day (today 3 Claude, 5 Codex)? Change it without r
 
 ```sh
 agentctl limits                              # per provider: limit, used, free; the windows, the reserved and the external ones; the queue
-agentctl limits set claude=3 codex=5         # summary, y/N (-y skips it); codex=off removes a limit
+agentctl limits set claude=3 codex=5         # summary, y/N (-y skips it); codex=off disables a provider, codex=0 removes a limit
 agentctl limits reserve claude=1 --note "my own session"   # a place for an agent you start by hand
 agentctl limits release claude               # give the places back
 ```

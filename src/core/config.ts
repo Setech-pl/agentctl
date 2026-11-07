@@ -110,8 +110,8 @@ export interface GlobalConfig extends Layer {
   tmux?: { socket?: string };
   /** Seconds watch allows for asynchronous prompt acknowledgement. */
   deliveryConfirmS: number;
-  /** Max simultaneous windows per provider (agent). Missing = unlimited. */
-  limits: Partial<Record<AgentName, number>> & { heavy?: number };
+  /** Max simultaneous windows per provider (agent). Missing or 0 = unlimited; `off` = the provider is disabled. */
+  limits: Partial<Record<AgentName, number | 'off'>> & { heavy?: number };
   /** `limits.count_external`: claude/codex terminal sessions outside agentctl's windows count against the limit (detected with ps). */
   countExternal: boolean;
   countReportReady: boolean;
@@ -1036,8 +1036,10 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
       for (const name of [...activeProviders({ providers }), 'heavy'] as const) {
         const value = raw.limits[name];
         if (value === undefined) continue;
-        if (typeof value === 'number' && Number.isInteger(value) && value > 0) limits[name] = value;
-        else p.add(`config.limits.${name} must be a positive integer`);
+        if (name !== 'heavy' && value === 'off') { limits[name] = 'off'; continue; }
+        // 0 is the historic spelling of "no limit": accepted, and nothing is stored.
+        if (typeof value === 'number' && Number.isInteger(value) && value >= 0) { if (value > 0) limits[name] = value; }
+        else p.add(`config.limits.${name} must be a positive integer, 0 (no limit)${name === 'heavy' ? '' : ' or off (the provider is disabled)'}`);
       }
     }
   }

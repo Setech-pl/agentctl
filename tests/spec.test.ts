@@ -223,13 +223,13 @@ describe('global config', () => {
     const dir = scratch.sub('bad-config');
     fs.writeFileSync(
       path.join(dir, 'config.yaml'),
-      'limits: {claude: 0}\nagents:\n  codex:\n    flags: [--full-auto]\n  claude:\n    flags: [--permission-mode, bypassPermissions]\nsesion: x\n',
+      'limits: {claude: -1}\nagents:\n  codex:\n    flags: [--full-auto]\n  claude:\n    flags: [--permission-mode, bypassPermissions]\nsesion: x\n',
     );
     assert.throws(
       () => loadGlobalConfig(dir),
       (e: Error) => {
         assert.match(e.message, /unknown key "sesion"/);
-        assert.match(e.message, /limits\.claude must be a positive integer/);
+        assert.match(e.message, /limits\.claude must be a positive integer, 0 \(no limit\) or off/);
         assert.match(e.message, /"--full-auto" enables auto-accept/);
         assert.match(e.message, /"--permission-mode bypassPermissions" enables auto-accept/);
         return true;

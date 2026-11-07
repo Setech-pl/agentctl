@@ -16,6 +16,7 @@ import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import YAML from 'yaml';
+import { overProviderLimit } from './checks.ts';
 import type { AgentModel } from './checks.ts';
 import { Alerts } from './alert.ts';
 import { recordJournal } from './journal.ts';
@@ -231,7 +232,7 @@ export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: Q
     if (spec.weight === 'heavy') heavyUsed++;
     const limit = config.limits[spec.agent];
     const used = load[spec.agent] + ahead[spec.agent];
-    const full = limit !== undefined && used >= limit;
+    const full = overProviderLimit(limit, used);
     lines.push(`${spec.task}  ${spec.agent}/${spec.model}/${spec.effort}  priority ${spec.priority}${spec.switchedBy ? ` (ordered ${spec.requested.agent} ${spec.requested.model}/${spec.requested.effort})` : ''}`);
     lines.push(`  repos:    ${spec.repos.map((r) => r.path).join(', ')}`);
     if (spec.after.length > 0) {
@@ -241,7 +242,7 @@ export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: Q
     const unmetNow = unmetAfter(spec.after, rows, spec.afterVerdicts);
     lines.push(
       `  start:    ${
-        isPaused(config) ? 'queue paused; starts after queue_resume (agentctl queue resume)' : !config.queue.enabled ? 'queue.enabled is false; enable the queue first' : heavyReason ? heavyReason : unmetNow.length > 0
+        isPaused(config) ? 'queue paused; starts after queue_resume (agentctl queue resume)' : !config.queue.enabled ? 'queue.enabled is false; enable the queue first' : limit === 'off' ? `${spec.agent} is disabled (limits.${spec.agent}: off); no windows start` : heavyReason ? heavyReason : unmetNow.length > 0
           ? `when ${unmetNow.join(', ')} ${unmetNow.length === 1 ? 'has' : 'have'} a report${full ? ` and a ${spec.agent} window is free` : ''}`
           : full
           ? `waits for a free ${spec.agent} window (${load[spec.agent]} running${ahead[spec.agent] > 0 ? `, ${ahead[spec.agent]} queued ahead` : ''}, limit ${limit})`
@@ -589,7 +590,7 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
     }
     const author = directAuthorState(config, entry, entries);
     if (author.waiting || author.failed) return { position, entry, condition: { kind: 'after', text: author.waiting ?? author.failed! }, since: entry.queuedAt };
-    if (entry.direct && !(entry.retryAt && Date.parse(entry.retryAt) > nowMs) && !(config.limits[entry.agent] !== undefined && used[entry.agent] >= (config.limits[entry.agent] as number))) {
+    if (entry.direct && !(entry.retryAt && Date.parse(entry.retryAt) > nowMs) && !overProviderLimit(config.limits[entry.agent], used[entry.agent])) {
       used[entry.agent]++;
       if (isHeavy(entry)) heavy.add(entry.task);
       return { position, entry, condition: { kind: 'ready', text: config.queue.enabled ? 'uruchamiane – czeka na najbliższy tick watch' : 'queue.enabled is false; the watcher does not start it' }, since: entry.queuedAt };
@@ -605,8 +606,9 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
     const held = holds[entry.agent];
     if (held) return { position, entry, condition: { kind: 'hold', text: held }, since: entry.queuedAt };
     const limit = config.limits[entry.agent];
-    if (limit !== undefined && used[entry.agent] >= limit) {
-      return { position, entry, condition: { kind: 'slot', text: `czeka na miejsce: ${entry.agent} ${used[entry.agent]}/${limit}` }, since: entry.queuedAt };
+    if (overProviderLimit(limit, used[entry.agent])) {
+      const text = limit === 'off' ? `${entry.agent} jest wyłączony (limits.${entry.agent}: off)` : `czeka na miejsce: ${entry.agent} ${used[entry.agent]}/${limit}`;
+      return { position, entry, condition: { kind: 'slot', text }, since: entry.queuedAt };
     }
     used[entry.agent]++;
     if (isHeavy(entry)) heavy.add(entry.task);
@@ -757,7 +759,7 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
     if (memory.inflight.size >= config.queue.parallelStarts) break;
     if (entry.direct) {
       const room = config.limits[entry.agent];
-      if (room !== undefined && used[entry.agent] >= room) continue;
+      if (overProviderLimit(room, used[entry.agent])) continue;
       // A claim that did not begin consumes no provider slot: a heavy-blocked or raced entry must not starve its provider for this tick.
       // Starts run in the background, so a broken setup can fail several entries of one tick — bounded by queue.parallel_starts, each failed once.
       if (await beginStart(ctx, memory, notifier, entry, opts)) { used[entry.agent]++; began.push(entry.task); }
@@ -789,7 +791,7 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
       continue;
     }
     const limit = config.limits[entry.agent];
-    if (limit !== undefined && used[entry.agent] >= limit) continue;
+    if (overProviderLimit(limit, used[entry.agent])) continue;
     if (await beginStart(ctx, memory, notifier, entry, opts)) { used[entry.agent]++; began.push(entry.task); }
   }
   for (const task of [...memory.held.keys()]) if (!stillHeld.has(task)) memory.held.delete(task);

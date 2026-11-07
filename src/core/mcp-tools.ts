@@ -425,12 +425,14 @@ async function runLimits(deps: McpDeps): Promise<ToolResult> {
 }
 
 const limitArg = z.number().int().min(0).max(50).optional();
+/** set_limits additionally accepts "off": the provider is disabled (no windows of it start). */
+const setLimitArg = z.union([z.number().int().min(0).max(50), z.literal('off')]).optional();
 
-async function runSetLimits(deps: McpDeps, args: Partial<Record<AgentName, number>> & { confirm?: boolean | undefined }): Promise<ToolResult> {
+async function runSetLimits(deps: McpDeps, args: Partial<Record<AgentName, number | 'off'>> & { confirm?: boolean | undefined }): Promise<ToolResult> {
   return writeTool(deps, 'set_limits', { detail: `${PROVIDER_IDS.map(id => `${id}=${args[id] ?? '-'}`).join(' ')} confirm=${Boolean(args.confirm)}` }, async (ctx) => {
     const assignments: LimitAssignments = {};
-    for (const agent of activeProviders(ctx.config)) if (args[agent] !== undefined) assignments[agent] = args[agent] === 0 ? null : (args[agent] as number);
-    if (Object.keys(assignments).length === 0) throw new AgentctlError(`give ${activeProviders(ctx.config).join(' and/or ')}`,  '0 removes a limit.');
+    for (const agent of activeProviders(ctx.config)) if (args[agent] !== undefined) assignments[agent] = args[agent] === 0 ? null : (args[agent] as number | 'off');
+    if (Object.keys(assignments).length === 0) throw new AgentctlError(`give ${activeProviders(ctx.config).join(' and/or ')}`,  '0 removes a limit, "off" disables the provider.');
     const plan = planSetLimits(ctx.config, assignments);
     if (!args.confirm) return { text: `${plan.summary.join('\n')}\n\nNot changed yet. Show this to the user and ask; if they agree, call set_limits again with the same numbers and confirm: true.`, executed: false, announce: '' };
     await applySetLimits(ctx, plan);
@@ -1046,9 +1048,9 @@ export const MCP_TOOLS: McpToolDef[] = [
     title: 'Change the limits',
     kind: 'write',
     description:
-      'WRITE, off unless the user put "set_limits" in mcp.allow. Sets the most simultaneous agents per provider in config.yaml (0 removes a limit); comments in the file stay, a copy is kept as config.yaml.bak. It takes effect at once, without restarting watch. ' +
+      'WRITE, off unless the user put "set_limits" in mcp.allow. Sets the most simultaneous agents per provider in config.yaml (0 removes a limit, "off" disables the provider: no windows of it start); comments in the file stay, a copy is kept as config.yaml.bak. It takes effect at once, without restarting watch. ' +
       'The FIRST call (confirm omitted) only describes the change; show it to the user, then call again with confirm: true.',
-    input: { ...perProvider(DEFAULT_PROVIDERS, id => limitArg.describe(`New limit for ${provider(id).displayName}; 0 = no limit. Omit to leave it.`)), confirm: z.boolean().optional().describe('true only after the user agreed to the described change.') },
+    input: { ...perProvider(DEFAULT_PROVIDERS, id => setLimitArg.describe(`New limit for ${provider(id).displayName}; 0 = no limit, "off" = disabled. Omit to leave it.`)), confirm: z.boolean().optional().describe('true only after the user agreed to the described change.') },
     annotations: { title: 'Change the limits', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     run: (deps, args) => guarded(() => runSetLimits(deps, args as { claude?: number; codex?: number; confirm?: boolean })),
   }),

@@ -841,7 +841,7 @@ Parytet zmienia się w ciągu dnia (dziś 3 Claude, 5 Codex)? Zmień go bez rest
 
 ```sh
 agentctl limits                              # per dostawca: limit, zajęte, wolne; okna, rezerwacje i zewnętrzne; kolejka
-agentctl limits set claude=3 codex=5         # podsumowanie, y/N (-y pomija pytanie); codex=off zdejmuje limit
+agentctl limits set claude=3 codex=5         # podsumowanie, y/N (-y pomija pytanie); codex=off wyłącza dostawcę, codex=0 zdejmuje limit
 agentctl limits reserve claude=1 --note "moja sesja"   # miejsce dla agenta uruchomionego ręcznie
 agentctl limits release claude               # oddaj miejsca
 ```

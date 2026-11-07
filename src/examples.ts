@@ -36,7 +36,7 @@ export const COMMAND_EXAMPLES: Record<string, string[]> = {
   events: ['agentctl events                           # since the last call of the cli', 'agentctl events --since 2h --cohort sprint-1', 'agentctl events --clip                    # to paste at the start of a chat (does not move the marker)'],
   limits: ['agentctl limits                           # the same as limits show'],
   'limits show': ['agentctl limits show', 'agentctl limits show --json'],
-  'limits set': ['agentctl limits set claude=3 codex=5     # summary, y/N, takes effect at once', 'agentctl limits set codex=off -y         # no limit for Codex, no question'],
+  'limits set': ['agentctl limits set claude=3 codex=5     # summary, y/N, takes effect at once', 'agentctl limits set codex=off -y         # Codex is disabled, no question', 'agentctl limits set codex=0 -y           # no limit for Codex again'],
   'limits reserve': ['agentctl limits reserve claude=1 --note "my own session"   # a place for an agent you start by hand'],
   'limits release': ['agentctl limits release claude=1', 'agentctl limits release claude        # all reserved places of Claude'],
   cohort: ['agentctl cohort                           # the same as cohort list'],
