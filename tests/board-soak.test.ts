@@ -78,7 +78,7 @@ it('eight-hour Ink soak keeps timers, watchers, listeners, caches and tick work 
   const { ctx, runner } = makeContext(config, { dryRun: true, respond: tmux.respond });
   t.mock.method(runner, 'now', () => clock.now);
   const term = new Terminal(), keys = new Keyboard();
-  let ticks = 0, progressEntries = 0, queries = 0, watchers = 0, fileOps = 0, boardRenders = 0;
+  let ticks = 0, progressEntries = 0, queries = 0, watchers = 0, fileOps = 0, boardRenders = 0, refreshDuration = 0;
   let overlap = 0, maxOverlap = 0;
   // Count actual fake-provider calls without retaining the RecordingRunner's query history.
   const exec = runner.exec.bind(runner);
@@ -107,7 +107,7 @@ it('eight-hour Ink soak keeps timers, watchers, listeners, caches and tick work 
     return w;
   });
   const done = runBoardApp(ctx, false, { stdout: term as unknown as NodeJS.WriteStream, stdin: keys as unknown as NodeJS.ReadStream }, undefined, {
-    clock, now: () => clock.now, rendered: () => { boardRenders++; }, refreshed: count => { ticks++; progressEntries = count; },
+    clock, now: () => clock.now, rendered: () => { boardRenders++; }, refreshed: (count, duration) => { ticks++; progressEntries = count; refreshDuration += duration; },
   });
   const hooks = [globalThis.setTimeout, globalThis.clearTimeout, globalThis.setInterval, globalThis.clearInterval, Date.now, runner.now, runner.exec, fs.watch] as unknown as { mock: { resetCalls(): void } }[];
   const metrics: Record<string, number>[] = [];
@@ -117,7 +117,7 @@ it('eight-hour Ink soak keeps timers, watchers, listeners, caches and tick work 
     await settleLoad(() => [...clock.timers.values()].some(timer => timer.at > clock.now + 1000));
     for (let hour = 1; hour <= 8; hour++) {
       let tickMs = 0, work = 0, ioWork = 0;
-      const beforeRenders = boardRenders, beforeWrites = term.writes, beforeTicks = ticks;
+      const beforeRenders = boardRenders, beforeWrites = term.writes, beforeTicks = ticks, beforeDuration = refreshDuration;
       // 120 refreshes/hour with 30-second suspended/resumed clock steps, plus real watch storms.
       for (let step = 0; step < 120; step++) {
         const started = performance.now(), beforeQueries = queries, beforeIO = fileOps, before = ticks;
@@ -153,8 +153,8 @@ it('eight-hour Ink soak keeps timers, watchers, listeners, caches and tick work 
       clock.advance(500); await turn();
       await settleLoad(() => overlap === 0 && [...clock.timers.values()].some(timer => timer.at > clock.now + 1000));
       clock.advance(50); for (let n = 0; n < 5; n++) await turn();
-      const keyAt = clock.now; let latency = -1;
-      term.onWrite = () => { if (latency < 0 && term.last.includes('leave the board')) latency = clock.now - keyAt; };
+      const keyAt = clock.now, keyWallAt = performance.now(); let latency = -1, wallLatency = -1;
+      term.onWrite = () => { if (latency < 0 && term.last.includes('leave the board')) { latency = clock.now - keyAt; wallLatency = performance.now() - keyWallAt; } };
       keys.write('?'); await turn(); clock.advance(50); await turn();
       await drain(() => latency >= 0);
       term.onWrite = undefined;
@@ -169,8 +169,8 @@ it('eight-hour Ink soak keeps timers, watchers, listeners, caches and tick work 
         intervals: [...clock.timers.values()].filter(t => t.interval).length,
         handles: process.getActiveResourcesInfo().filter(n => n !== 'Immediate').length,
         watchers, listeners, progressEntries, usageEntries: sizes.reduce((a, b) => a + b, 0),
-        tickMs: tickMs / (ticks - beforeTicks), tickWork: work / (ticks - beforeTicks), fileOps: ioWork / (ticks - beforeTicks), cacheBytes: fs.statSync(cacheFile).size, renders: boardRenders - beforeRenders, writes: term.writes - beforeWrites,
-        ticks: ticks - beforeTicks, keyToRenderMs: latency, maxOverlap });
+        tickMs: (refreshDuration - beforeDuration) / (ticks - beforeTicks), cycleMs: tickMs / (ticks - beforeTicks), tickWork: work / (ticks - beforeTicks), fileOps: ioWork / (ticks - beforeTicks), cacheBytes: fs.statSync(cacheFile).size, renders: boardRenders - beforeRenders, writes: term.writes - beforeWrites,
+        ticks: ticks - beforeTicks, keyToRenderMs: latency, keyToRenderWallMs: wallLatency, maxOverlap });
       if (process.env.AGENTCTL_SOAK_OUTPUT) fs.writeFileSync(process.env.AGENTCTL_SOAK_OUTPUT, JSON.stringify({ clockStepMs: 30000, records: 230, workingWindows: 8, metrics }, null, 2));
     }
   } finally {

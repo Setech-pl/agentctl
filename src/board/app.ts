@@ -139,7 +139,7 @@ function Footer(props: { state: BoardState; hint: string }): React.ReactElement 
 export interface BoardRuntime {
   clock: RefreshClock;
   now(): number;
-  refreshed?(progressEntries: number): void;
+  refreshed?(progressEntries: number, durationMs: number): void;
   rendered?(): void;
 }
 
@@ -176,9 +176,10 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
   useEffect(() => {
     let stopped = false;
     const scheduler = new RefreshScheduler(async () => {
+      const started = props.runtime ? performance.now() : 0;
       // Closed/cancelled rows are detailed only while their section is listed (the `a` key).
       const snap = await loadBoard(ctx, current.current.selected, cache.current, PREVIEW_LINES, { deepClosed: current.current.showHidden });
-      if (!stopped) { update((s) => applySnapshot(s, snap)); props.runtime?.refreshed?.(cache.current.size); }
+      if (!stopped) { update((s) => applySnapshot(s, snap)); props.runtime?.refreshed?.(cache.current.size, performance.now() - started); }
     }, () => boardRefreshMs(current.current.rows), (e) => {
       if (!stopped) update((s) => withLoadError(s, errorMessage(e).split('\n')[0] as string));
     }, props.runtime?.clock);
