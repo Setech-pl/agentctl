@@ -112,3 +112,9 @@ it('provisions a missing runtime once, verifies before extraction and never dele
   assert.equal(fs.readFileSync(node22Path(dir), 'utf8'), 'cached'); assert.deepEqual(fs.readdirSync(work), []);
   await assert.rejects(ensureNode22(work, { ...io, dir: scratch.sub('bad-runtime'), download: async () => data, extract: () => assert.fail('unverified extraction') }), /SHA256/);
 });
+
+it('full can explicitly record Node 26 only without provisioning Node 22', () => {
+  assert.equal(parseArgs(['full', '--node26-only']).node26Only, true);
+  assert.deepEqual(planTier('full', [], [], false, true), ['tests Node 26 (full)']);
+  for (const tier of ['quick', 'release']) assert.throws(() => parseArgs([tier, '--node26-only']), /belongs to full/);
+});

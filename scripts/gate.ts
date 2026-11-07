@@ -10,10 +10,10 @@ import { acquireLock } from './gate-lock.ts';
 export { acquireLock } from './gate-lock.ts';
 
 export type Tier = 'quick' | 'full' | 'release';
-export interface Options { tier: Tier; base?: string; dryRun: boolean; allowDirty: boolean; skipLive: boolean }
+export interface Options { tier: Tier; base?: string; dryRun: boolean; allowDirty: boolean; skipLive: boolean; node26Only?: boolean }
 export function parseArgs(args: string[]): Options {
   const tier = args.shift();
-  if (!['quick', 'full', 'release'].includes(tier ?? '')) throw new Error('Usage: npm run gate -- <quick|full|release> [--base ref] [--dry-run] [--allow-dirty] [--skip-live]');
+  if (!['quick', 'full', 'release'].includes(tier ?? '')) throw new Error('Usage: npm run gate -- <quick|full|release> [--base ref] [--dry-run] [--allow-dirty] [--skip-live] [--node26-only]');
   const opts: Options = { tier: tier as Tier, dryRun: false, allowDirty: false, skipLive: false };
   while (args.length) {
     const arg = args.shift();
@@ -21,16 +21,18 @@ export function parseArgs(args: string[]): Options {
     else if (arg === '--dry-run') opts.dryRun = true;
     else if (arg === '--allow-dirty') opts.allowDirty = true;
     else if (arg === '--skip-live') opts.skipLive = true;
+    else if (arg === '--node26-only') opts.node26Only = true;
     else throw new Error(`Unknown gate option: ${arg}`);
   }
+  if (opts.node26Only && tier !== 'full') throw new Error('--node26-only belongs to full');
   return opts;
 }
 export function assertClean(opts: Options, dirty: boolean): void {
   if (opts.tier !== 'quick' && dirty && !opts.allowDirty) throw new Error(`${opts.tier} refuses a dirty tree; use --allow-dirty to record the exception`);
 }
-export function planTier(tier: Tier, tests: string[], live: string[], skipLive = false): string[] {
+export function planTier(tier: Tier, tests: string[], live: string[], skipLive = false, node26Only = false): string[] {
   if (tier === 'quick') return ['typecheck', 'build', 'git diff --check', `tests current: ${tests.join(' ') || '(none)'}`];
-  if (tier === 'full') return ['tests Node 22.14.0 (full)', 'tests Node 26 (full)'];
+  if (tier === 'full') return [...(node26Only ? [] : ['tests Node 22.14.0 (full)']), 'tests Node 26 (full)'];
   return ['build', 'pack', 'installed-tarball smoke Node 22.14.0', 'doctor 10-case matrix Node 22.14.0', 'installed-tarball smoke Node 26', 'doctor 10-case matrix Node 26', ...(skipLive ? ['SKIP live entries'] : live)];
 }
 /** Static relative import closure plus exact test naming. Unknown inputs always widen to the full suite. */
@@ -76,8 +78,8 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   const changed = [...new Set([...git('diff', '--name-only', base, '--').split('\n'), ...git('ls-files', '--others', '--exclude-standard').split('\n')].filter(Boolean))];
   const sources = Object.fromEntries([...filesUnder('src'), ...filesUnder('tests')].filter(f => f.endsWith('.ts')).map(f => [f, fs.readFileSync(f, 'utf8')]));
   const affected = affectedTests(changed, sources, tests);
-  const plan = planTier(opts.tier, affected.tests, live, opts.skipLive);
-  const result: any = { sha, dirty, allowDirty: opts.allowDirty, tier: opts.tier, base, dryRun: opts.dryRun, uncertainMapping: affected.uncertain, plan, nodeVersions: {}, counts: { pass: 0, fail: 0, skip: 0 }, retriedFiles: [], steps: [], status: 'FAIL', durationMs: 0 };
+  const plan = planTier(opts.tier, affected.tests, live, opts.skipLive, opts.node26Only);
+  const result: any = { sha, dirty, allowDirty: opts.allowDirty, tier: opts.tier, node26Only: Boolean(opts.node26Only), base, dryRun: opts.dryRun, uncertainMapping: affected.uncertain, plan, nodeVersions: {}, counts: { pass: 0, fail: 0, skip: 0 }, retriedFiles: [], steps: [], status: 'FAIL', durationMs: 0 };
   const started = Date.now();
   const runId = `${started}-${process.pid}`;
   result.runId = runId;
@@ -154,10 +156,10 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       await run('diff-check', 'git', ['diff', '--check']);
       await testSuite(process.execPath, 'current', affected.tests);
     } else {
-      await run('runtime-node22', process.execPath, ['--experimental-strip-types', '--no-warnings', 'scripts/runtime.ts', work]);
+      if (!opts.node26Only) await run('runtime-node22', process.execPath, ['--experimental-strip-types', '--no-warnings', 'scripts/runtime.ts', work]);
       const node22 = node22Path(), node26 = homebrewNode26();
-      result.nodeVersions = { node22: checkRuntime(node22, '22.14.0'), node26: checkRuntime(node26, '26.') };
-      if (opts.tier === 'full') { await testSuite(node22, 'node22', tests); await testSuite(node26, 'node26', tests); }
+      result.nodeVersions = { ...(!opts.node26Only ? { node22: checkRuntime(node22, '22.14.0') } : {}), node26: checkRuntime(node26, '26.') };
+      if (opts.tier === 'full') { if (!opts.node26Only) await testSuite(node22, 'node22', tests); await testSuite(node26, 'node26', tests); }
       else {
         await run('build', node26, ['node_modules/typescript/bin/tsc', '-p', 'tsconfig.build.json', '--outDir', path.join(work, 'dist')]);
         await run('finish-build', node26, ['scripts/finish-build.js', path.join(work, 'dist')]);
