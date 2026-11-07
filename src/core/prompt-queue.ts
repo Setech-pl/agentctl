@@ -80,9 +80,19 @@ export async function withdrawPrompt(ctx: Context, window: string, idPrefix: str
     if (!record) throw new AgentctlError(`no task state for window ${window}`);
     const now = new Date(ctx.runner.now()).toISOString();
     const note = (text: string) => ctx.runner.appendFile(taskFile(ctx.config, window), `\n\n## Follow-up withdrawn ${now} (${text})\n`);
+    // Match the prefix against the active delivery and the FIFO together, before anything changes: a prefix that names both
+    // is ambiguous across the two, not "the active one wins".
+    const queue = readPromptQueue(ctx, window);
+    const matches = queue.filter((p) => p.id === idPrefix || p.id.startsWith(idPrefix));
+    const activeId = record.pendingPrompt && record.promptDelivery !== 'sent' ? record.deliveryId : undefined;
+    const activeMatch = activeId !== undefined && (activeId === idPrefix || activeId.startsWith(idPrefix));
+    if (activeMatch && matches.length > 0) throw new AgentctlError(
+      `${record.task}: ${idPrefix} matches the message being delivered and ${matches.length} queued message${matches.length === 1 ? '' : 's'}`,
+      `Choose a longer prefix: ${activeId.slice(0, 8)} (being delivered), ${matches.map((p) => `${p.id.slice(0, 8)} (queued)`).join(', ')}.`,
+    );
     // The active pending prompt first.
-    if (record.pendingPrompt && record.promptDelivery !== 'sent' && record.deliveryId && (record.deliveryId === idPrefix || record.deliveryId.startsWith(idPrefix))) {
-      const id = record.deliveryId;
+    if (activeMatch) {
+      const id = activeId;
       if (record.deliveryStartedAt) {
         await setHeaderFields(ctx.runner, taskFile(ctx.config, window), { delivery_result: 'stale', prompt_error: `wiadomość wycofana (${now}) po rozpoczęciu dostarczania – agent może już nad nią pracować` });
         await note(`${id}, stale`);
@@ -96,8 +106,6 @@ export async function withdrawPrompt(ctx: Context, window: string, idPrefix: str
     }
     if (record.deliveryId === idPrefix && record.promptDelivery === 'sent') throw new AgentctlError(`${record.task}: the message ${idPrefix} is already delivered`, 'Only a waiting message can be withdrawn; prompt_queue in peek/status lists them.');
     // A FIFO entry.
-    const queue = readPromptQueue(ctx, window);
-    const matches = queue.filter((p) => p.id === idPrefix || p.id.startsWith(idPrefix));
     if (matches.length > 1) throw new AgentctlError(`${record.task}: ${idPrefix} matches ${matches.length} queued messages`, `Choose one: ${matches.map((p) => p.id.slice(0, 8)).join(', ')}.`);
     const entry = matches[0];
     if (!entry) throw new AgentctlError(`${record.task}: no waiting message ${idPrefix}`, 'prompt_queue in peek/status lists the waiting messages with their ids.');

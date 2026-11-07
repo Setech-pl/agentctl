@@ -85,6 +85,22 @@ describe('P48: withdrawing a waiting message', () => {
     assert.equal(readPromptQueue(w.ctx, 'w-4').length, 2, 'nothing left the queue');
   });
 
+  it('F1: a prefix shared by the active delivery and a FIFO entry is refused as ambiguous, nothing changes', async () => {
+    const w = world('cross-ambiguous');
+    const record = seedTask(w.config, 'W-8');
+    await queuePrompt(w.ctx, record, 'Pending original prompt');
+    const activeId = readTaskRecord(w.config, 'w-8')!.deliveryId!;
+    const queued = { id: `${activeId.slice(0, 8)}ffff-4000-8000-000000000099`, text: 'queued follow-up', queuedAt: new Date().toISOString() };
+    fs.writeFileSync(queueFile(w.ctx, 'w-8'), JSON.stringify([queued]));
+    await assert.rejects(withdrawPrompt(w.ctx, 'w-8', activeId.slice(0, 8)), /being delivered and 1 queued message/);
+    const after = readTaskRecord(w.config, 'w-8')!;
+    assert.equal(after.pendingPrompt, 'Pending original prompt', 'the active delivery is untouched');
+    assert.deepEqual(readPromptQueue(w.ctx, 'w-8').map((p) => p.id), [queued.id], 'the FIFO is untouched');
+    // a longer prefix still withdraws the active one alone
+    const done = await withdrawPrompt(w.ctx, 'w-8', activeId.slice(0, 9));
+    assert.equal(done.outcome, 'withdrawn');
+  });
+
   it('MCP send with withdraw (send in mcp.allow); without the permission nothing is done', async () => {
     const w = world('mcp', 'mcp: {allow: [send]}\n');
     seedTask(w.config, 'W-5');
