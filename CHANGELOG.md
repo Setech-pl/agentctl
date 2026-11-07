@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Validation: live-production-0174 runs the watcher for MCP `new` confirms and polls for the asynchronously prepared worktrees (P34). / Live-production-0174 uruchamia watcha dla confirm MCP `new` i czeka na asynchronicznie tworzone worktree (P34).
+
 - Validation: live-nc-workflow starts tasks with the in-place CLI `new`, since its sandbox drives ticks in process with the queue off and MCP confirm requires the watcher since P34. / Live-nc-workflow uruchamia zadania przez CLI `new` na miejscu — piaskownica steruje tickami w procesie z wyłączoną kolejką, a confirm MCP od P34 wymaga watcha.
 
 - Validation: live-hotfix-0173-p follows the P34 start contract — the watcher runs before MCP `new`, confirm returns `Registered:`, and delivery checks poll the asynchronous start. / Live-hotfix-0173-p za kontraktem P34: watch działa przed MCP `new`, confirm zwraca `Registered:`, a kontrole dostarczenia czekają na asynchroniczny start.
