@@ -28,8 +28,31 @@ export async function acquireLock(file: string, onWait = (owner: string) => cons
         let dead = false;
         try { process.kill(pid, 0); } catch (e) { dead = (e as NodeJS.ErrnoException).code === 'ESRCH'; } // EPERM: someone else's live process — wait.
         if (dead) {
-          try { if (fs.readFileSync(file, 'utf8') === holder) fs.unlinkSync(file); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
-          console.log(`gate lock of dead pid ${pid} removed`);
+          // F2: serialize reclamation through a reclaim lock. The verifying re-read and the unlink happen under it, so a
+          // second reclaimer cannot unlink the live successor lock the winner of the first reclamation just created.
+          const reclaim = `${file}.reclaim`;
+          let fd: number | undefined;
+          try {
+            fd = fs.openSync(reclaim, 'wx');
+            fs.writeFileSync(fd, String(process.pid));
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+            // Another reclaimer is at it. Its lock outliving its pid means it died inside the synchronous section below:
+            // that section either never ran or already finished, so breaking the reclaim lock cannot lose an unlink.
+            let rpid = NaN;
+            try { rpid = Number(fs.readFileSync(reclaim, 'utf8')); } catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') continue; throw e; }
+            let rdead = false;
+            if (Number.isSafeInteger(rpid) && rpid > 0) { try { process.kill(rpid, 0); } catch (e) { rdead = (e as NodeJS.ErrnoException).code === 'ESRCH'; } }
+            if (rdead) { try { fs.unlinkSync(reclaim); } catch { /* raced away */ } }
+            await wait();
+            continue;
+          }
+          try {
+            // Under the reclaim lock the lock file cannot change: only a reclaimer unlinks it, creation needs it gone.
+            const current = fs.readFileSync(file, 'utf8');
+            if (current === holder) { fs.unlinkSync(file); console.log(`gate lock of dead pid ${pid} removed`); }
+          } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+          finally { fs.closeSync(fd); try { fs.unlinkSync(reclaim); } catch { /* already gone */ } }
           continue;
         }
       }

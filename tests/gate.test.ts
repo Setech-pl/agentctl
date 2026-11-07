@@ -82,6 +82,37 @@ it('takes over the actual lock of a SIGKILLed owner (R2)', async () => {
     assert.equal(fs.existsSync(lock), false);
   } finally { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); }
 });
+it('F2: reclamation is serialized; a second reclaimer cannot unlink the live successor lock', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const lock = path.join(scratch.dir, 'runtimes/.gate-f2.lock');
+  const dead = spawnSync('true', []).pid!;
+  assert.throws(() => process.kill(dead, 0), { code: 'ESRCH' });
+  fs.mkdirSync(path.dirname(lock), { recursive: true });
+  fs.writeFileSync(lock, JSON.stringify({ token: 'STALE', pid: dead, cwd: '/tmp', started: new Date().toISOString() }));
+  // Contender A is mid-reclaim: it holds the reclaim lock (a live pid: this process stands in for it).
+  fs.writeFileSync(`${lock}.reclaim`, String(process.pid));
+  let waits = 0;
+  const release = await acquireLock(lock, () => {}, async () => {
+    waits++;
+    if (waits === 1) {
+      // A finishes: the stale lock is gone and a live successor already holds the lock before contender B looks again.
+      fs.unlinkSync(lock);
+      fs.writeFileSync(lock, JSON.stringify({ token: 'SUCCESSOR', pid: process.pid, cwd: '/tmp', started: new Date().toISOString() }));
+      fs.unlinkSync(`${lock}.reclaim`);
+      return;
+    }
+    if (waits === 2) {
+      assert.equal(JSON.parse(fs.readFileSync(lock, 'utf8')).token, 'SUCCESSOR', 'the reclaimer must not unlink the live successor lock');
+      fs.unlinkSync(lock); // the successor releases
+      return;
+    }
+    throw new Error('contender B should have acquired after the successor released');
+  });
+  assert.equal(waits, 2);
+  release();
+  assert.equal(fs.existsSync(lock), false);
+  assert.equal(fs.existsSync(`${lock}.reclaim`), false, 'no reclaim lock is left behind');
+});
 it('checks cached runtime version and archive checksum with fakes and no network', () => {
   assert.equal(checkRuntime('/fake/node', '22.14.0', () => 'v22.14.0'), 'v22.14.0');
   assert.equal(checkRuntime('/fake/node', '26.', () => 'v26.13.0'), 'v26.13.0');
