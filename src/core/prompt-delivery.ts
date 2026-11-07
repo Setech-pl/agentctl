@@ -108,7 +108,10 @@ function queuedListShows(screen: string, prompt: string, agent: TaskRecord['agen
  * Returns where the proof came from; null while nothing proves it. A draft in the composer holds every proof back: the message is not yet out of it.
  */
 function proofSource(ctx: Context, record: TaskRecord, screen: string): string | null {
-  if (inspectField(screen, record.agent).area.length || (record.agent !== 'unknown' ? provider(record.agent).screen.draft?.(screen) : undefined) || screenMetadata(screen).draft_input) return null;
+  // Kimi's composer is its own box (screen.draft / the field area); its ❯ lines are echoes and dialog options — the generic
+  // draft reading (screenMetadata) would mistake an answered "❯ Trust and continue" or a prompt echo for a draft and block every proof.
+  const genericDraft = record.agent === 'kimi' ? null : screenMetadata(screen).draft_input;
+  if (inspectField(screen, record.agent).area.length || (record.agent !== 'unknown' ? provider(record.agent).screen.draft?.(screen) : undefined) || genericDraft) return null;
   try {
     const evidence = JSON.parse(fs.readFileSync(path.join(ctx.config.stateDir, record.window, 'delivery-evidence.json'), 'utf8'));
     if (record.deliveryId && evidence.accepted === true && evidence.deliveryId === record.deliveryId && Date.parse(evidence.at) >= Date.parse(record.deliveryStartedAt ?? '')) return 'hook';
