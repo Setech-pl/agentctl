@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- MCP `set_limits` accepts `"off"` for an optional provider (Kimi) in the registered schema, the same as for Claude and Codex; `reserve` stays numeric-only (review X4). / MCP `set_limits` przyjmuje `"off"` dla opcjonalnego dostawcy (Kimi) w zarejestrowanym schemacie, tak samo jak dla Claude i Codexa; `reserve` pozostaje tylko liczbowe (przegląd X4).
+
 - Withdraw: an interrupted FIFO→active transfer leaves the same id in both stores; withdrawing it (full id or a prefix naming only that one message) now removes both copies as one message instead of being refused as ambiguous, so the message is never redelivered (review X3). / Wycofanie: przerwany trwały transfer zostawiał ten sam id w kolejce FIFO i w aktywnej dostawie; wycofanie go (pełnym id lub prefiksem wskazującym tylko tę jedną wiadomość) usuwa teraz obie kopie jako jedną wiadomość zamiast odrzucać jako niejednoznaczne, więc wiadomość nigdy nie zostanie dostarczona ponownie (przegląd X3).
 
 - Gate: a reclaimer never unlinks a reclaim lock it did not verify this iteration — the sidecar carries a unique token and a fresh re-read must show the exact bytes seen as dead, so a stale read can no longer delete the live reclaim lock a successor installed (review X1). / Bramka: przejmujący nigdy nie usuwa blokady reclaim, której nie zweryfikował w tej iteracji — sidecar niesie unikalny token, a świeży odczyt musi pokazać dokładnie te same bajty, więc nieaktualny odczyt nie usunie już żywej blokady następcy (przegląd X1).
