@@ -36,9 +36,9 @@ class Clock implements RefreshClock {
 }
 class Terminal extends EventEmitter {
   columns = 120; rows = 30; isTTY = true;
-  renders = 0; last = ''; onWrite?: () => void;
+  writes = 0; last = ''; onWrite?: () => void;
   write(chunk: string, ...args: unknown[]): boolean {
-    this.last = String(chunk); this.renders++; this.onWrite?.();
+    this.last = String(chunk); this.writes++; this.onWrite?.();
     (args.find(a => typeof a === 'function') as (() => void) | undefined)?.();
     return true;
   }
@@ -78,7 +78,7 @@ it('eight-hour Ink soak keeps timers, watchers, listeners, caches and tick work 
   const { ctx, runner } = makeContext(config, { dryRun: true, respond: tmux.respond });
   t.mock.method(runner, 'now', () => clock.now);
   const term = new Terminal(), keys = new Keyboard();
-  let ticks = 0, progressEntries = 0, queries = 0, watchers = 0, fileOps = 0;
+  let ticks = 0, progressEntries = 0, queries = 0, watchers = 0, fileOps = 0, boardRenders = 0;
   let overlap = 0, maxOverlap = 0;
   // Count actual fake-provider calls without retaining the RecordingRunner's query history.
   const exec = runner.exec.bind(runner);
@@ -107,7 +107,7 @@ it('eight-hour Ink soak keeps timers, watchers, listeners, caches and tick work 
     return w;
   });
   const done = runBoardApp(ctx, false, { stdout: term as unknown as NodeJS.WriteStream, stdin: keys as unknown as NodeJS.ReadStream }, undefined, {
-    clock, now: () => clock.now, refreshed: count => { ticks++; progressEntries = count; },
+    clock, now: () => clock.now, rendered: () => { boardRenders++; }, refreshed: count => { ticks++; progressEntries = count; },
   });
   const hooks = [globalThis.setTimeout, globalThis.clearTimeout, globalThis.setInterval, globalThis.clearInterval, Date.now, runner.now, runner.exec, fs.watch] as unknown as { mock: { resetCalls(): void } }[];
   const metrics: Record<string, number>[] = [];
@@ -117,7 +117,7 @@ it('eight-hour Ink soak keeps timers, watchers, listeners, caches and tick work 
     await settleLoad(() => [...clock.timers.values()].some(timer => timer.at > clock.now + 1000));
     for (let hour = 1; hour <= 8; hour++) {
       let tickMs = 0, work = 0, ioWork = 0;
-      const beforeRenders = term.renders, beforeTicks = ticks;
+      const beforeRenders = boardRenders, beforeWrites = term.writes, beforeTicks = ticks;
       // 120 refreshes/hour with 30-second suspended/resumed clock steps, plus real watch storms.
       for (let step = 0; step < 120; step++) {
         const started = performance.now(), beforeQueries = queries, beforeIO = fileOps, before = ticks;
@@ -169,7 +169,7 @@ it('eight-hour Ink soak keeps timers, watchers, listeners, caches and tick work 
         intervals: [...clock.timers.values()].filter(t => t.interval).length,
         handles: process.getActiveResourcesInfo().filter(n => n !== 'Immediate').length,
         watchers, listeners, progressEntries, usageEntries: sizes.reduce((a, b) => a + b, 0),
-        tickMs: tickMs / (ticks - beforeTicks), tickWork: work / (ticks - beforeTicks), fileOps: ioWork / (ticks - beforeTicks), cacheBytes: fs.statSync(cacheFile).size, renders: term.renders - beforeRenders,
+        tickMs: tickMs / (ticks - beforeTicks), tickWork: work / (ticks - beforeTicks), fileOps: ioWork / (ticks - beforeTicks), cacheBytes: fs.statSync(cacheFile).size, renders: boardRenders - beforeRenders, writes: term.writes - beforeWrites,
         ticks: ticks - beforeTicks, keyToRenderMs: latency, maxOverlap });
       if (process.env.AGENTCTL_SOAK_OUTPUT) fs.writeFileSync(process.env.AGENTCTL_SOAK_OUTPUT, JSON.stringify({ clockStepMs: 30000, records: 230, workingWindows: 8, metrics }, null, 2));
     }
@@ -186,7 +186,7 @@ it('eight-hour Ink soak keeps timers, watchers, listeners, caches and tick work 
     assert.ok(sample.tickWork! <= first.tickWork! + 10, 'provider work per tick stays bounded');
     assert.ok(sample.cacheBytes! <= first.cacheBytes! + 32768, 'serialized cache work stays bounded');
     assert.ok(sample.fileOps! <= first.fileOps! + 50, 'filesystem work per tick stays bounded');
-    assert.ok(sample.renders! / sample.ticks! <= first.renders! / first.ticks! + 0.25, 'render work per completed refresh stays bounded');
+    assert.ok(sample.renders! <= sample.ticks! + 4, 'at most one board render per refresh plus the hourly key probes');
     assert.equal(sample.maxOverlap, 1);
     if ((globalThis as typeof globalThis & { gc?: () => void }).gc) assert.ok(sample.heapUsed! <= first.heapUsed! + 8 * 1024 ** 2, 'post-GC heap stays within an 8 MiB warm-up allowance');
     assert.ok(sample.keyToRenderMs! <= 50, 'key renders in one virtual render quantum');

@@ -140,10 +140,12 @@ export interface BoardRuntime {
   clock: RefreshClock;
   now(): number;
   refreshed?(progressEntries: number): void;
+  rendered?(): void;
 }
 
 export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArgv | undefined; runtime?: BoardRuntime | undefined }): React.ReactElement {
   const { ctx, insideTmux, self } = props;
+  props.runtime?.rendered?.();
   const { exit } = useApp();
   const [instance] = useState(() => instanceName(ctx.config));
   const size = useWindowSize();
