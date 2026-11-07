@@ -2,15 +2,15 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { it } from 'node:test';
 
-it('R2 N6: the current release documents the integrated opt-ins and harness/config fixes', () => {
+it('R2 N6: the 0.18.2 release documents the integrated opt-ins and harness/config fixes', () => {
   const changelog = fs.readFileSync(new URL('../CHANGELOG.md', import.meta.url), 'utf8');
-  const { version } = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   assert.equal(changelog.split('## [Unreleased]').length, 2, 'one Unreleased section');
-  const unreleased = changelog.split(`## [${version}]`)[1]!.split('\n## [')[0]!;
-  assert.match(unreleased, /Claude.*`\/usage`.*opt-in/);
-  assert.match(unreleased, /`dataset export`/);
-  assert.match(unreleased, /P29:.*explicit.*`AGENTCTL_LIVE_CACHE`/);
-  assert.match(unreleased, /P30:.*config reload.*receipt/);
+  // These items shipped in 0.18.2; the section that documents them stays pinned so they are never dropped in a consolidation.
+  const section = changelog.split('## [0.18.2]')[1]!.split('\n## [')[0]!;
+  assert.match(section, /Claude.*`\/usage`.*opt-in/);
+  assert.match(section, /`dataset export`/);
+  assert.match(section, /P29:.*explicit.*`AGENTCTL_LIVE_CACHE`/);
+  assert.match(section, /P30:.*config reload.*receipt/);
 });
 
 it('R2 N7: the Polish follow-up summary requires exact hook/wire or transcript proof', () => {

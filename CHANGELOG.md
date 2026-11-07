@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.18.3] - 2026-11-07
+
 - P24: warn on configurable per-filesystem worktree share/free space with safe GC preview reclaimable bytes; report worktree size on close.
 
 - Support weight: heavy task specs with a cross-provider limits.heavy queue cap (default 1) and waiting reasons.
@@ -13,6 +15,16 @@ All notable changes to this project are documented here. The format follows [Kee
 - P17: warn in new/queue previews when inherited project links point to missing paths or closed task worktrees, naming the stale target and suggesting placeholders.
 
 - Resolve cross-task `links.to` placeholders `{task:TASK-ID,repo:REPO-NAME}` against recorded worktrees, with clear preview errors and existing link validation.
+
+- Limits: `limits.<provider>: off` explicitly disables a provider — no window of it starts, the queue waits with the reason, and `limits`/board and the MCP `set_limits` show and accept it. `limits.<provider>: 0` still means "no limit" (backward compatible), as do `limits set <provider>=0` and `=none`; `=off` now disables instead of removing. / `limits.<provider>: off` jawnie wyłącza dostawcę — żadne jego okno nie wystartuje, kolejka czeka z podanym powodem, a `limits`/plansza i MCP `set_limits` pokazują i przyjmują tę wartość. `0` nadal znaczy „bez limitu" (zgodność wsteczna), podobnie `limits set <dostawca>=0` i `=none`; `=off` wyłącza zamiast usuwać.
+
+- MCP `queue_list` and `task_spec` expose the spec `weight` (`normal`/`heavy`) as a structured field. / MCP `queue_list` i `task_spec` pokazują pole `weight` (`normal`/`heavy`).
+
+- Withdraw: an id prefix shared by the active delivery and a queued message is refused as ambiguous before anything changes. / Wycofanie: prefiks id wspólny dla dostarczanej i kolejkowanej wiadomości jest odrzucany jako niejednoznaczny, zanim cokolwiek się zmieni.
+
+- Gate: reclamation of a stale gate lock is serialized through a reclaim lock, so a second reclaimer cannot unlink a live successor lock. / Bramka: przejęcie nieaktualnej blokady jest szeregowane blokadą reclaim, więc drugi przejmujący nie usunie żywiej blokady następcy.
+
+- Internals: the machine-load state file is written only on a change, not every watch tick; heavies waiting for a heavy slot stack their count in queue previews (1/1, 2/1, …); an unrelated spec link no longer silences stale project-link warnings (only an override of the same `from` does); a negative `disk.worktree_share_percent` is rejected (pinned by a test). / Wewnętrzne: plik stanu obciążenia jest zapisywany tylko przy zmianie, nie co tick; oczekujące ciężkie zadania zwiększają licznik w podglądach kolejki; niezależny link w spec nie wycisza już ostrzeżeń o nieaktualnych linkach projektu; ujemny `disk.worktree_share_percent` jest odrzucany (test).
 
 ## [0.18.2] - 2026-11-07
 
