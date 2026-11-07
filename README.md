@@ -133,6 +133,8 @@ Capacity shows current windows, reading age, pace, reset, slots, queue, equivale
 
 Board: `C` opens capacity. Start without attaching: `agentctl up --no-attach`. Restart by stable role: `agentctl watch --tmux --restart` / `agentctl board --tmux --restart`; renamed windows are supported. `agentctl version` is an alias of `--version`.
 
+The board bounds its session cache and drops progress for removed tasks during long runs. While an action is running, repeated action keys are ignored; navigation, refresh and quit remain available.
+
 ```mermaid
 sequenceDiagram
     autonumber

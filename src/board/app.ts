@@ -1,3 +1,4 @@
+import type { RefreshClock } from './refresh-scheduler.ts';
 import { RefreshScheduler } from './refresh-scheduler.ts';
 import { diskLine } from '../core/disk.ts';
 import fs from 'node:fs';
@@ -133,7 +134,14 @@ function Footer(props: { state: BoardState; hint: string }): React.ReactElement 
   );
 }
 
-export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArgv | undefined }): React.ReactElement {
+/** Optional clock/observer used by the accelerated board soak; production uses native timers. */
+export interface BoardRuntime {
+  clock: RefreshClock;
+  now(): number;
+  refreshed?(progressEntries: number): void;
+}
+
+export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArgv | undefined; runtime?: BoardRuntime | undefined }): React.ReactElement {
   const { ctx, insideTmux, self } = props;
   const { exit } = useApp();
   const size = useWindowSize();
@@ -144,9 +152,20 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
     setState(current.current);
   };
   const cache = useRef(new ProgressCache());
-  const queue = useRef<Promise<void>>(Promise.resolve());
+  const actionRunning = useRef(false);
+  const viewRunning = useRef(false);
+  const pendingView = useRef<Extract<BoardEffect, { type: 'view' }> | null>(null);
+  const mounted = useRef(true);
   const refreshNow = useRef<() => void>(() => {});
-  const noticeTimer = useRef<NodeJS.Timeout | undefined>(undefined);
+  const timers = props.runtime?.clock ?? {
+    set: (callback: () => void, delay: number) => setTimeout(callback, delay),
+    clear: (timer: unknown) => clearTimeout(timer as NodeJS.Timeout),
+  };
+  const noticeTimer = useRef<unknown>(undefined);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; pendingView.current = null; if (noticeTimer.current !== undefined) timers.clear(noticeTimer.current); };
+  }, []);
 
   useEffect(() => update((s) => withSize(s, size.columns, size.rows)), [size.columns, size.rows]);
 
@@ -155,19 +174,19 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
     const scheduler = new RefreshScheduler(async () => {
       // Closed/cancelled rows are detailed only while their section is listed (the `a` key).
       const snap = await loadBoard(ctx, current.current.selected, cache.current, PREVIEW_LINES, { deepClosed: current.current.showHidden });
-      if (!stopped) update((s) => applySnapshot(s, snap));
+      if (!stopped) { update((s) => applySnapshot(s, snap)); props.runtime?.refreshed?.(cache.current.size); }
     }, () => boardRefreshMs(current.current.rows), (e) => {
       if (!stopped) update((s) => withLoadError(s, errorMessage(e).split('\n')[0] as string));
-    });
+    }, props.runtime?.clock);
     refreshNow.current = () => scheduler.request();
     scheduler.start();
     // An agent's own event (agentctl event writes <state_dir>/<task>/event.json) shows at once, not at the next refresh;
     // a storm of events (one per agent hook) is coalesced to at most one extra tick per WATCH_TICK_MIN_MS.
-    const gate = new TickGate(WATCH_TICK_MIN_MS, () => scheduler.request());
+    const gate = new TickGate(WATCH_TICK_MIN_MS, () => scheduler.request(), props.runtime?.clock, props.runtime?.now);
     let watcher: fs.FSWatcher | undefined;
     try {
       watcher = fs.watch(ctx.config.stateDir, { recursive: true }, (_type, name) => {
-        if (name && /event\.json$/.test(name)) gate.ping(Date.now());
+        if (name && /event\.json$/.test(name)) gate.ping(props.runtime?.now() ?? Date.now());
       });
       watcher.on('error', () => watcher?.close());
     } catch {
@@ -195,20 +214,38 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
       return update((s) => (s.mode.kind === 'log' ? { ...s, mode: { kind: 'log', lines, offset: 0 } } : s));
     }
     if (effect.type === 'view') {
-      return void loadViewLines(ctx, effect.what).catch((e: unknown) => [`cannot load: ${errorMessage(e)}`]).then((lines) => update((s) => (s.mode.kind === 'view' && s.mode.what === effect.what ? { ...s, mode: { kind: 'view', what: effect.what, lines, offset: 0 } } : s)));
+      pendingView.current = effect;
+      if (viewRunning.current) return;
+      viewRunning.current = true;
+      void (async () => {
+        while (pendingView.current && mounted.current) {
+          const request = pendingView.current;
+          pendingView.current = null;
+          const lines = await loadViewLines(ctx, request.what).catch((e: unknown) => [`cannot load: ${errorMessage(e)}`]);
+          if (mounted.current && !pendingView.current) update((s) => (s.mode.kind === 'view' && s.mode.what === request.what ? { ...s, mode: { kind: 'view', what: request.what, lines, offset: 0 } } : s));
+        }
+      })().finally(() => { viewRunning.current = false; });
+      return;
     }
-    queue.current = queue.current.then(async () => {
+    // A held key must not accumulate closures and stale commands behind a slow action.
+    if (actionRunning.current) return;
+    actionRunning.current = true;
+    void (async () => {
       update((s) => withBusy(s, 'working…'));
       const notice = await runBoardEffect(ctx.runner, ctx.config, effect, { insideTmux, self });
+      if (!mounted.current) return;
       update((s) => withBusy(showNotice(s, notice), null));
-      clearTimeout(noticeTimer.current);
-      noticeTimer.current = setTimeout(() => update(clearNotice), NOTICE_MS);
+      if (noticeTimer.current !== undefined) timers.clear(noticeTimer.current);
+      noticeTimer.current = timers.set(() => { noticeTimer.current = undefined; update(clearNotice); }, NOTICE_MS);
       refreshNow.current();
-    });
+    })().catch((error: unknown) => {
+      if (mounted.current) update((s) => withBusy(showNotice(s, { level: 'error', text: errorMessage(error) }), null));
+    }).finally(() => { actionRunning.current = false; });
   };
 
   useInput((input, key) => {
     const result = handleKey(current.current, input, key);
+    if (actionRunning.current && result.effects.some(e => !['quit', 'refresh', 'view', 'log'].includes(e.type))) return;
     update(() => result.state);
     for (const effect of result.effects) runEffect(effect);
   });
@@ -249,7 +286,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
 }
 
 /** Show the board until the user quits; resolves when it is gone. Needs a terminal. */
-export async function runBoardApp(ctx: Context, insideTmux: boolean, streams: { stdout?: NodeJS.WriteStream; stdin?: NodeJS.ReadStream } = {}, self?: SelfArgv): Promise<void> {
+export async function runBoardApp(ctx: Context, insideTmux: boolean, streams: { stdout?: NodeJS.WriteStream; stdin?: NodeJS.ReadStream } = {}, self?: SelfArgv, runtime?: BoardRuntime): Promise<void> {
   const out = streams.stdout ?? process.stdout;
   const titled = ctx.config.board.windowTitle;
   const version = packageVersion();
@@ -263,7 +300,7 @@ export async function runBoardApp(ctx: Context, insideTmux: boolean, streams: { 
   }
   try {
     // interactive: true - Ink draws nothing in a "CI" environment (a CI or BUILD_* variable in the tmux server's environment), but the board only runs in a terminal.
-    const app = render(h(Board, { ctx, insideTmux, self }), { alternateScreen: true, exitOnCtrlC: false, interactive: true, ...streams });
+    const app = render(h(Board, { ctx, insideTmux, self, runtime }), { alternateScreen: true, exitOnCtrlC: false, interactive: true, ...streams });
     await app.waitUntilExit();
   } finally {
     if (titled) out.write(titleEnd());

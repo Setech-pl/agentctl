@@ -1,3 +1,4 @@
+import type { RefreshClock } from '../board/refresh-scheduler.ts';
 import { attachHint } from './tmux-socket.ts';
 import { provider as providerAdapter, PROVIDERS } from './providers/registry.ts';
 import { get as providerValue } from './providers/registry.ts';
@@ -74,11 +75,18 @@ export class TickGate {
   private readonly minMs: number;
   private readonly fire: () => void;
   private last = 0;
-  private pending: NodeJS.Timeout | undefined;
+  private pending: unknown;
+  private readonly timerClock: RefreshClock;
+  private readonly now: () => number;
 
-  constructor(minMs: number, fire: () => void) {
+  constructor(minMs: number, fire: () => void, timerClock: RefreshClock = {
+    set: (callback, delay) => setTimeout(callback, delay),
+    clear: timer => clearTimeout(timer as NodeJS.Timeout),
+  }, now: () => number = Date.now) {
     this.minMs = minMs;
     this.fire = fire;
+    this.timerClock = timerClock;
+    this.now = now;
   }
 
   ping(now: number): void {
@@ -89,17 +97,17 @@ export class TickGate {
       this.fire();
       return;
     }
-    if (this.pending) return;
-    this.pending = setTimeout(() => {
+    if (this.pending !== undefined) return;
+    this.pending = this.timerClock.set(() => {
       this.pending = undefined;
-      this.last = Date.now();
+      this.last = this.now();
       this.fire();
     }, wait);
-    this.pending.unref?.();
+    (this.pending as { unref?: () => void })?.unref?.();
   }
 
   stop(): void {
-    if (this.pending) clearTimeout(this.pending);
+    if (this.pending !== undefined) this.timerClock.clear(this.pending);
     this.pending = undefined;
   }
 }
@@ -678,6 +686,14 @@ export const showNotice = (state: BoardState, notice: Notice): BoardState => ({ 
 export class ProgressCache {
   private readonly entries = new Map<string, { at: number; value: StatusRow['progress'] }>();
 
+  /** Forget tasks removed from the current inventory, including their repository paths. */
+  retain(tasks: Iterable<string>): void {
+    const current = new Set(tasks);
+    for (const task of this.entries.keys()) if (!current.has(task)) this.entries.delete(task);
+  }
+
+  get size(): number { return this.entries.size; }
+
   async get(runner: Runner, task: string, repos: Parameters<typeof taskProgress>[1], now: number): Promise<StatusRow['progress']> {
     const hit = this.entries.get(task);
     if (hit && now - hit.at < PROGRESS_TTL_MS) return hit.value;
@@ -721,6 +737,7 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
   reader.dropListings(); // directory listings are per tick, the parsed cache persists
   const statusRows = await collectStatus(ctx, { progress: false, archived: true, tokens: true, records: scan, reader, shallowClosed: opts.deepClosed !== true });
   const records = new Map([...scan.archived, ...scan.current].map((r) => [r.task, r]));
+  cache.retain(records.keys());
   const now = runner.now();
   const plans = readPlans(config, reader, now, scan.all);
   const disk = await boardDisk(ctx, scan.all);
