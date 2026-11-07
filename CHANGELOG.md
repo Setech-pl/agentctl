@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Validation: live-nc-workflow starts tasks with the in-place CLI `new`, since its sandbox drives ticks in process with the queue off and MCP confirm requires the watcher since P34. / Live-nc-workflow uruchamia zadania przez CLI `new` na miejscu — piaskownica steruje tickami w procesie z wyłączoną kolejką, a confirm MCP od P34 wymaga watcha.
+
 - Validation: live-hotfix-0173-p follows the P34 start contract — the watcher runs before MCP `new`, confirm returns `Registered:`, and delivery checks poll the asynchronous start. / Live-hotfix-0173-p za kontraktem P34: watch działa przed MCP `new`, confirm zwraca `Registered:`, a kontrole dostarczenia czekają na asynchroniczny start.
 
 - Gate: the release pack step parses the leading JSON array of `npm pack --json`, so an npm update notice can no longer break tarball resolution; the notifier stays disabled. / Krok pack bramki release parsuje wiodącą tablicę JSON z `npm pack --json`, więc komunikat o aktualizacji npm nie psuje już nazwy tarballa; notyfikator pozostaje wyłączony.

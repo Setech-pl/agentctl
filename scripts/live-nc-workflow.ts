@@ -68,7 +68,8 @@ await withHarness({ name: 'nc-workflow', cacheRoot: cache, config: 'watch: {inte
   };
   const attached: ReturnType<typeof spawn>[] = [];
   try {
-    const order = spec('AUTHOR', { review: { rerun: true } }); await call('new', { spec: order }); const started = await call('new', { spec: order, confirm: true }); check('author with auto review starts on fake agent', !started.error && started.text.includes('Started: AUTHOR'));
+    // P34: MCP confirm only registers with the watcher and this sandbox drives ticks in process with the queue off; starts use the in-place CLI new.
+    const order = spec('AUTHOR', { review: { rerun: true } }); await call('new', { spec: order }); const started = h.agentctl(['new', '-', '--json'], { input: order }); check('author with auto review starts on fake agent', started.code === 0 && JSON.parse(started.stdout).results.some((r: { task: string; agentStarted: boolean }) => r.task === 'AUTHOR' && r.agentStarted));
     check('author TASK.md freezes initial base before work', record('AUTHOR').repos[0]?.base === base);
     const wt = record('AUTHOR').repos[0]!.worktree; git(wt, ['commit', '--allow-empty', '-qm', 'author result']); const first = git(wt, ['rev-parse', 'HEAD']); writeReport('AUTHOR', first);
     const event = h.agentctl(['event', '--task', 'AUTHOR', '--agent', 'claude', '--kind', 'stop'], { input: '{}' }); check('real hook creates automatic review', event.code === 0 && readQueue(config).some(e => e.task === 'AUTHOR-REV'));
@@ -84,7 +85,7 @@ await withHarness({ name: 'nc-workflow', cacheRoot: cache, config: 'watch: {inte
     check('verdict condition blocks despite a complete author report', (await call('queue_list')).text.includes('werdykt PASS'));
     const unblock = await call('unblock', { task: 'DEPENDENT' }); check('unblock preview states blocked and exact dependency', !unblock.error && unblock.text.includes('"state": "blocked"') && unblock.text.includes('AUTHOR'));
     const baseSpec = spec('FROM-AUTHOR', { repos: [{ path: repo, worktree: path.join(h.root, 'wt/from-author'), branch: 'from-author', base: '@AUTHOR:repo' }] }); const basePreview = await call('new', { spec: baseSpec }); check('base reference preview resolves exact output commit', basePreview.text.includes(first) && basePreview.text.includes('@AUTHOR:repo'));
-    check('base reference start succeeds', !(await call('new', { spec: baseSpec, confirm: true })).error); check('base reference saved in TASK.md', record('FROM-AUTHOR').repos[0]?.base === first);
+    check('base reference start succeeds', h.agentctl(['new', '-', '--json'], { input: baseSpec }).code === 0); check('base reference saved in TASK.md', record('FROM-AUTHOR').repos[0]?.base === first);
     git(wt, ['commit', '--allow-empty', '-qm', 'author followup']); const second = git(wt, ['rev-parse', 'HEAD']); writeReport('AUTHOR', second, { notes: ['second report'] }); h.agentctl(['event', '--task', 'AUTHOR', '--agent', 'claude', '--kind', 'stop'], { input: '{}' });
     const rev2 = readQueue(config).find(e => e.task === 'AUTHOR-REV2'); check('new report queues REV2 with previous review SHA as delta base', rev2?.spec.includes(first) && rev2.spec.includes(second));
     const p1 = await call('hide', { tasks: ['AUTHOR'] }), p2 = await call('hide', { tasks: ['FROM-AUTHOR'] });
