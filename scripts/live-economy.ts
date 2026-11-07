@@ -23,7 +23,7 @@ await withHarness({ name: 'economy', cacheRoot: cache, config: 'mcp: {max_respon
   for (let i = 1; i <= 6; i++) {
     fs.appendFileSync(path.join(h.agentctlHome, 'history.jsonl'), JSON.stringify({ v: 1, event: 'report', at: new Date().toISOString(), task: `NC-${i}`, reportAt: new Date().toISOString(), result: null }) + '\n');
     const report = path.join(config.cache, `NC-${i}.md`); seed(`NC-${i}`, report);
-    fs.writeFileSync(report, `Werdykt: PASS\nSHA: abc123; branch: economy\n## Summary\nResult ${i}\n## Evidence\n${'x'.repeat(20000)}\n<!-- agentctl:report-end -->`);
+    fs.writeFileSync(report, `Werdykt: PASS\nSHA: abc1234; branch: economy\n## Summary\nResult ${i}\n## Evidence\n${'x'.repeat(20000)}\n<!-- agentctl:report-end -->`);
   }
   fs.writeFileSync(path.join(h.agentctlHome, 'journal.jsonl'), JSON.stringify({ at: new Date(Date.now() - 5000).toISOString(), kind: 'report-ready', task: 'NC-1', text: 'fixture ready' }) + '\n');
   seed('OVER-1', path.join(config.cache, 'OVER-1.md'));
@@ -64,7 +64,7 @@ await withHarness({ name: 'economy', cacheRoot: cache, config: 'mcp: {max_respon
     check('W4: summary receipt leaves all six reports unread', receipts.filter((r: { task: string }) => r.task.startsWith('NC-')).every((r: { reportPulled: boolean; summary_delivered: string }) => !r.reportPulled && r.summary_delivered));
     const full = await call(clients[0]!, 'pull_ready', { mode: 'full', all: true });
     check('six full reports exceed 120KB; summaries under 16KB', Buffer.byteLength(full) > 120000 && Buffer.byteLength(summary) < 16000);
-    check('summary includes path bytes verdict SHA branch and six decisions', /bytes:/.test(summary) && /path:/.test(summary) && /Werdykt: PASS/.test(summary) && /abc123/.test(summary) && summary.includes('Result 6'));
+    check('summary includes path bytes verdict SHA branch and six decisions', /bytes:/.test(summary) && /path:/.test(summary) && /Werdykt: PASS/.test(summary) && /abc1234/.test(summary) && summary.includes('Result 6'));
     const section = await call(clients[0]!, 'get_report', { task: 'NC-1', section: 'Summary', offset: 1, limit: 1 });
     check('section and pagination return only requested lines', section.includes('Result 1') && !section.includes('Evidence'));
     check('events remind about unmarked tasks after pull', (await call(clients[0]!, 'events_since')).includes('bez oceny'));

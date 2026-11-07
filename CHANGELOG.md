@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Validation: live-economy report fixtures carry a 7-hex SHA, matching the extraction rule in force since 0.17.3. / Fixtury raportów live-economy używają 7-znakowego SHA, zgodnie z regułą ekstrakcji obowiązującą od 0.17.3.
+
 ## [0.18.2] - 2026-11-07
 
 - Validation: release fixtures follow the current manifest version; soak counters include trailing refresh work in the same interval as their tick divisor. Existing resource bounds stay unchanged. / Testy wydania używają bieżącej wersji manifestu; liczniki soak obejmują pełen interwał wraz z odświeżeniami końcowymi, bez zmiany limitów.
