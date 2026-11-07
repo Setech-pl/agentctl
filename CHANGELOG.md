@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.18.2] - 2026-11-07
 
+- Validation: release fixtures follow the current manifest version; soak counters include trailing refresh work in the same interval as their tick divisor. Existing resource bounds stay unchanged. / Testy wydania używają bieżącej wersji manifestu; liczniki soak obejmują pełen interwał wraz z odświeżeniami końcowymi, bez zmiany limitów.
+
 Release candidate: includes the 0.18.1 rc1 baseline and all merged P10–P50 work below (items absent from this history are not claimed). / Kandydat do wydania obejmuje bazę 0.18.1 rc1 i wszystkie scalone zmiany P10–P50 opisane poniżej.
 
 - P49: working Codex uses the advertised Tab queue key; wrapped pastes accept retained or swallowed wrap separators and delivery still requires exact session evidence. Idle Codex, Claude and Kimi retain their submission keys. / Pracujący Codex używa reklamowanego Tab do kolejki; zawinięty tekst zachowuje kontrolę zgodności, a dostawę potwierdza transkrypt. Klawisze bezczynnego Codexa, Claude i Kimi pozostają bez zmian.

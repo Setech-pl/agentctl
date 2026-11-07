@@ -116,11 +116,12 @@ it('eight-hour Ink soak keeps timers, watchers, listeners, caches and tick work 
     await settleLoad(() => ticks > 0);
     await settleLoad(() => [...clock.timers.values()].some(timer => timer.at > clock.now + 1000));
     for (let hour = 1; hour <= 8; hour++) {
-      let tickMs = 0, work = 0, ioWork = 0;
+      let tickMs = 0;
+      const hourQueries = queries, hourIO = fileOps;
       const beforeRenders = boardRenders, beforeWrites = term.writes, beforeTicks = ticks, beforeDuration = refreshDuration;
       // 120 refreshes/hour with 30-second suspended/resumed clock steps, plus real watch storms.
       for (let step = 0; step < 120; step++) {
-        const started = performance.now(), beforeQueries = queries, beforeIO = fileOps, before = ticks;
+        const started = performance.now(), before = ticks;
         clock.advance(29_950);
         const previous = records[7]!;
         fs.rmSync(path.join(config.stateDir, previous.window), { recursive: true });
@@ -147,7 +148,7 @@ it('eight-hour Ink soak keeps timers, watchers, listeners, caches and tick work 
         // scheduler completion/re-arm before jumping time or replacing fixture folders.
         await settleLoad(() => [...clock.timers.values()].some(timer => timer.at > clock.now + 1000));
         for (const hook of hooks) hook.mock.resetCalls();
-        tickMs += performance.now() - started; work += queries - beforeQueries; ioWork += fileOps - beforeIO;
+        tickMs += performance.now() - started;
       }
       // Let the coalesced trailing refresh settle before sampling a resource plateau.
       clock.advance(500); await turn();
@@ -165,11 +166,12 @@ it('eight-hour Ink soak keeps timers, watchers, listeners, caches and tick work 
       const listeners = ([process, term, keys, ...liveWatchers] as EventEmitter[]).reduce((sum, emitter) => sum + emitter.eventNames().reduce((n, event) => n + emitter.listenerCount(event), 0), 0);
       for (const hook of hooks) hook.mock.resetCalls();
       (globalThis as typeof globalThis & { gc?: () => void }).gc?.();
+      // Count complete hourly intervals: trailing watch refreshes belong in both numerator and tick divisor.
       metrics.push({ hour, heapUsed: process.memoryUsage().heapUsed, timers: clock.timers.size,
         intervals: [...clock.timers.values()].filter(t => t.interval).length,
         handles: process.getActiveResourcesInfo().filter(n => n !== 'Immediate').length,
         watchers, listeners, progressEntries, usageEntries: sizes.reduce((a, b) => a + b, 0),
-        tickMs: (refreshDuration - beforeDuration) / (ticks - beforeTicks), cycleMs: tickMs / (ticks - beforeTicks), tickWork: work / (ticks - beforeTicks), fileOps: ioWork / (ticks - beforeTicks), cacheBytes: fs.statSync(cacheFile).size, renders: boardRenders - beforeRenders, writes: term.writes - beforeWrites,
+        tickMs: (refreshDuration - beforeDuration) / (ticks - beforeTicks), cycleMs: tickMs / (ticks - beforeTicks), tickWork: (queries - hourQueries) / (ticks - beforeTicks), fileOps: (fileOps - hourIO) / (ticks - beforeTicks), cacheBytes: fs.statSync(cacheFile).size, renders: boardRenders - beforeRenders, writes: term.writes - beforeWrites,
         ticks: ticks - beforeTicks, keyToRenderMs: latency, keyToRenderWallMs: wallLatency, maxOverlap });
       if (process.env.AGENTCTL_SOAK_OUTPUT) fs.writeFileSync(process.env.AGENTCTL_SOAK_OUTPUT, JSON.stringify({ clockStepMs: 30000, records: 230, workingWindows: 8, metrics }, null, 2));
     }
@@ -179,6 +181,7 @@ it('eight-hour Ink soak keeps timers, watchers, listeners, caches and tick work 
     for (let n = 0; n < 5; n++) { clock.advance(100); await turn(); }
     if (process.env.AGENTCTL_SOAK_OUTPUT) fs.writeFileSync(process.env.AGENTCTL_SOAK_OUTPUT, JSON.stringify({ clockStepMs: 30000, records: 230, workingWindows: 8, metrics, teardown: { timers: clock.timers.size, watchers, keyboardListeners: keys.listenerCount('readable') } }, null, 2) + '\n');
   }
+  console.log('SOAK_METRICS ' + JSON.stringify({ metrics, watchers, timers: clock.timers.size }));
   assert.equal(metrics.length, 8);
   const first = metrics[0]!;
   for (const sample of metrics.slice(1)) {
