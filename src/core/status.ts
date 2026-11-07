@@ -231,7 +231,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     const unconfirmed = record.promptDelivery === 'needs-attention' && !reportReady && !deliveryEvidence(ctx, record, screenText);
     // A startup dialog `new` stopped at (prompt_delivery: needs-input) is a question to the human, not a delivery failure.
     const startupDialog = record.promptDelivery === 'needs-input' && !reportReady;
-    const lossHint = await tmuxLoss(ctx, record, alive, reportReady || cancelled || closed || archived || !!record.supersededBy);
+    const lossHint = await tmuxLoss(ctx, record, alive, reportReady || cancelled || closed || archived || !!record.supersededBy, infos.length > 0);
     if (lossHint && hiddenBy === 'auto') hiddenBy = null;
     let state: TaskState = cancelled ? 'cancelled' : closed ? 'closed' : record.supersededBy ? 'superseded' : lossHint ? 'needs-attention' : writeFailure ? 'needs-attention' : deliveryReport ? 'report-ready' : startupDialog ? 'needs-input' : unconfirmed ? 'needs-attention' : taskState({ alive, screen: screenText, settings, reportReady, event: stored?.outcome });
     // Passive wire failures fill an idle screen; legacy hook recovery keeps its existing precedence.

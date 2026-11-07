@@ -3,6 +3,7 @@ import { activeProviders, perProvider, isActive } from './providers/registry.ts'
 import { withStartLock } from './start-lock.ts';
 import { authorCheckoutBusy, authorTerminal, authorWaitReason, effectiveAfter, findAuthorRecord, repinReview, syncReviewLedger } from './review-gate.ts';
 import { queueFile as promptQueueFile } from './prompt-queue.ts';
+import { expectedCloseFile } from './tmux-loss.ts';
 import { withFileLock } from './file-lock.ts';
 import { reportPathWarnings } from './report-path.ts';
 import { missingLinkTargets, checkLinkTargets } from './links.ts';
@@ -668,6 +669,8 @@ async function closeNeverReadyWindow(ctx: Context, task: string): Promise<boolea
   const record = readTaskRecord(ctx.config, windowName(task));
   if (!record || (record.promptDelivery !== 'needs-attention' && record.promptDelivery !== 'launching') || record.deliveryStartedAt) return false;
   if (!(await ctx.tmux.windows()).some((w) => w.plain === record.window)) return false;
+  // Record the intentional closure first: the missing window must not surface as a false tmux loss (tmux-loss.ts).
+  if (!ctx.runner.dryRun) await ctx.runner.writeFile(expectedCloseFile(ctx.config, record.window), JSON.stringify({ identity: `${record.attemptId ?? record.started}:${record.windowId ?? ''}`, at: new Date(ctx.runner.now()).toISOString() }));
   return (await ctx.tmux.killWindow(record.window)).code === 0;
 }
 

@@ -254,7 +254,7 @@ describe('watch', () => {
     m.windows.delete('nc-3');
     await watchTick(ctx, memory, n);
     assert.deepEqual((n.sent as string[]).filter(text => !text.startsWith('NC-3')).sort(), ['NC-1: raport gotowy', 'NC-2 czeka na zaufanie folderu (trust)'].sort());
-    assert.match((n.sent as string[]).find(text => text.startsWith('NC-3'))!, /tmux server\/session lost/);
+    assert.match((n.sent as string[]).find(text => text.startsWith('NC-3'))!, /the task window is gone; the tmux server lives/, 'the session lives on (nc-1, nc-2): only the window died');
 
     // nothing changed: no new notifications
     await watchTick(ctx, memory, n);
