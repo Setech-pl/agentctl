@@ -204,7 +204,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   for (const row of allRows) {
     const record = !row.closed && !row.cancelled ? readTaskRecord(ctx.config, row.windowName) : undefined;
     if (row.tmuxLost) continue;
-    if (record && ['pending', 'sending', 'confirming', 'needs-attention'].includes(record.promptDelivery ?? '')) {
+    if (record && ['pending', 'sending', 'confirming', 'needs-attention', 'needs-input'].includes(record.promptDelivery ?? '')) {
       if (record.promptDelivery === 'pending' && row.window !== 'alive') continue;
       const result = await deliverPendingPrompt(ctx, row.windowName);
       // The baseline tick has no transition notifier yet; later deadlines use NOTIFY_ON below.

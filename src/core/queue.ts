@@ -651,18 +651,18 @@ export interface QueueTickOptions {
 
 const firstLine = (s: string): string => s.split('\n')[0] ?? s;
 
-/** Once a live task is pending trust or delivering, watch owns it; a failed queue entry must not offer a second start. */
+/** Once a live task is pending trust or a startup dialog, delivering, or sent, watch owns it; a failed queue entry must not offer a second start. */
 async function liveStartedRecord(ctx: Context, task: string): Promise<TaskRecord | undefined> {
   const record = readTaskRecord(ctx.config, windowName(task));
-  if (!record || !['pending', 'sending', 'confirming', 'sent'].includes(record.promptDelivery ?? '')) return undefined;
+  if (!record || !['pending', 'sending', 'confirming', 'sent', 'needs-input'].includes(record.promptDelivery ?? '')) return undefined;
   return (await ctx.tmux.windows()).some(w => w.plain === record.window) ? record : undefined;
 }
 
 /**
  * A start that died before the agent showed its input (readiness timeout, a startup dialog, the watcher stopped mid-wait) leaves a window
  * nobody watches and a prompt that was never pasted. Close that window — it is untrusted state — so it cannot hold a provider slot; the
- * record keeps its worktree, so the task lands in "to resume". A window waiting for folder trust (prompt_delivery: pending) is kept:
- * a human may be answering it and the next watch serves it.
+ * record keeps its worktree, so the task lands in "to resume". A window waiting for a human (folder trust, prompt_delivery: pending;
+ * a startup dialog, prompt_delivery: needs-input) is kept: a human may be answering it and the next watch serves it.
  */
 async function closeNeverReadyWindow(ctx: Context, task: string): Promise<boolean> {
   const record = readTaskRecord(ctx.config, windowName(task));
