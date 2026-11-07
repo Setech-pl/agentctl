@@ -741,7 +741,7 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
   const now = runner.now();
   const plans = readPlans(config, reader, now, scan.all);
   const disk = await boardDisk(ctx, scan.all);
-  reader.save();
+  await reader.saveAsync();
   const rows: BoardRow[] = [];
   for (const row of statusRows) {
     const record = records.get(row.task);

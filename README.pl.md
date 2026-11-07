@@ -151,7 +151,7 @@ agentctl powstał i jest używany przy prawdziwym projekcie: codziennie równole
 
 Board pokazuje m.in. stany `needs-attention`, `overloaded`, `working`, `waiting`, `needs-input`, `needs-trust`, `limited`, `report-ready`, `background`, `queued`, `blocked`, `dead`, `orphan`, `closed`, `cancelled`, `superseded` i `start-failed`. `report-candidate` to osobna flaga raportu, bez zmiany stanu. Szczegóły opisuje [dokumentacja stanów zadań](docs/details.pl.md#stany-zadań).
 
-Plansza ogranicza pamięć podręczną sesji i usuwa postęp zadań usuniętych podczas długiej pracy. Podczas wykonywania akcji powtórzone klawisze akcji są ignorowane; nawigacja, odświeżanie i wyjście pozostają dostępne.
+Plansza ogranicza pamięć podręczną sesji i usuwa postęp zadań usuniętych podczas długiej pracy. Podczas wykonywania akcji powtórzone klawisze akcji są ignorowane; nawigacja, odświeżanie i wyjście pozostają dostępne. Zapis pamięci sesji jest asynchroniczny i ma jednego wykonawcę, dzięki czemu operacje dyskowe oddają sterowanie obsłudze klawiszy.
 
 Nagłówek planszy, status-left tmux i tytuły terminala board/watch pokazują `agentctl` lub `agentctl-dev` według wykrywania środowiska z doctor/version. Etykietę można nadpisać przez `ui: {instance_name: staging}`; przy wyjściu tytuł jest przywracany w terminalach obsługujących stos tytułów xterm.
 

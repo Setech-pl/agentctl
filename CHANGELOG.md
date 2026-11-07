@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- SOAK persistence: defer intermediate token saves and serialize asynchronous board usage-cache writes so synchronous fsync cannot stall input. / Odroczono pośrednie zapisy tokenów; plansza zapisuje pamięć sesji asynchronicznie, jednym writerem, bez blokowania klawiszy przez fsync.
+
 - UI instance labels: identify prod/dev in the board, tmux status-left and board/watch terminal titles; support `ui.instance_name` and restore prior titles on exit. / Nazwa instancji prod/dev na planszy, pasku tmux i w tytułach board/watch; nadpisanie przez `ui.instance_name` i przywracanie poprzedniego tytułu.
 
 - SOAK: bound session parser caches, discard removed-task progress, and prevent held action keys from queuing stale commands; exit releases notice timers. Add an eight-hour accelerated Ink/resource regression. / Ograniczenie pamięci sesji, usuwanie postępu usuniętych zadań i blokada kolejki powtarzanych akcji; wyjście usuwa timer komunikatu. Dodano przyspieszony test ośmiu godzin planszy.

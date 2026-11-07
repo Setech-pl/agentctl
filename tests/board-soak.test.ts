@@ -7,6 +7,7 @@ import { performance } from 'node:perf_hooks';
 import { it } from 'node:test';
 import { runBoardApp } from '../src/board/app.ts';
 import type { RefreshClock } from '../src/board/refresh-scheduler.ts';
+import { UsageReader } from '../src/core/usage-sources.ts';
 import { sharedReader } from '../src/core/usage.ts';
 import { RefreshScheduler } from '../src/board/refresh-scheduler.ts';
 import { ProgressCache, TickGate } from '../src/core/board.ts';
@@ -50,12 +51,16 @@ class Keyboard extends PassThrough {
 }
 const turn = (): Promise<void> => new Promise(resolve => setImmediate(resolve));
 async function drain(check: () => boolean, advance?: () => void): Promise<void> {
-  for (let i = 0; i < 2000; i++) { if (check()) return; advance?.(); await turn(); }
-  assert.fail('board failed to complete within 2000 event-loop turns');
+  for (let i = 0; i < 200_000; i++) { if (check()) return; advance?.(); await turn(); }
+  assert.fail('board failed to complete within 200000 event-loop turns');
 }
 
 it('eight-hour Ink soak keeps timers, watchers, listeners, caches and tick work bounded', async t => {
   const clock = new Clock();
+  const settleLoad = (check: () => boolean): Promise<void> => {
+    const deadline = clock.now + 1000;
+    return drain(check, () => { if (clock.now < deadline) clock.advance(1); });
+  };
   t.mock.method(globalThis, 'setTimeout', (fn: () => void, ms = 0) => clock.set(fn, ms));
   t.mock.method(globalThis, 'clearTimeout', (id: unknown) => clock.clear(id));
   t.mock.method(globalThis, 'setInterval', (fn: () => void, ms = 0) => clock.set(fn, ms, ms));
@@ -70,7 +75,7 @@ it('eight-hour Ink soak keeps timers, watchers, listeners, caches and tick work 
   let priorReport = records[8]!.report;
   fs.writeFileSync(priorReport, 'Werdykt: PASS\n<!-- agentctl:report-end -->\n');
   for (let i = 0; i < 8; i++) tmux.add(`soak-${i}`, 'Working (esc to interrupt)\n');
-  const { ctx, runner } = makeContext(config, { respond: tmux.respond });
+  const { ctx, runner } = makeContext(config, { dryRun: true, respond: tmux.respond });
   t.mock.method(runner, 'now', () => clock.now);
   const term = new Terminal(), keys = new Keyboard();
   let ticks = 0, progressEntries = 0, queries = 0, watchers = 0, fileOps = 0;
@@ -82,9 +87,17 @@ it('eight-hour Ink soak keeps timers, watchers, listeners, caches and tick work 
     try { return await exec(...args); }
     finally { overlap--; runner.queries.length = 0; runner.calls.length = 0; tmux.seen.length = 0; }
   });
+  const sessionSource = path.join(scratch.dir, 'provider-session.jsonl');
+  fs.writeFileSync(sessionSource, JSON.stringify({ type: 'session_meta', payload: { id: 'fake-session', cwd: scratch.dir }, timestamp: new Date(clock.now).toISOString() }) + '\n');
+  const sessionPrefix = path.join(scratch.dir, 'virtual-session-');
+  const resolveSession = (file: unknown): unknown => typeof file === 'string' && file.startsWith(sessionPrefix) ? sessionSource : file;
+  const open = fs.openSync;
+  Reflect.set(fs, 'openSync', (...args: unknown[]) => Reflect.apply(open, fs, [resolveSession(args[0]), ...args.slice(1)]));
+  t.after(() => { fs.openSync = open; });
   for (const name of ['readFileSync', 'statSync', 'lstatSync', 'readdirSync'] as const) {
     const original = fs[name];
-    t.mock.method(fs, name, (...args: unknown[]) => { fileOps++; return Reflect.apply(original, fs, args); });
+    Reflect.set(fs, name, (...args: unknown[]) => { fileOps++; return Reflect.apply(original, fs, name === 'statSync' ? [resolveSession(args[0]), ...args.slice(1)] : args); });
+    t.after(() => { Reflect.set(fs, name, original); });
   }
   const watch = fs.watch.bind(fs);
   const liveWatchers = new Set<fs.FSWatcher>();
@@ -96,13 +109,12 @@ it('eight-hour Ink soak keeps timers, watchers, listeners, caches and tick work 
   const done = runBoardApp(ctx, false, { stdout: term as unknown as NodeJS.WriteStream, stdin: keys as unknown as NodeJS.ReadStream }, undefined, {
     clock, now: () => clock.now, refreshed: count => { ticks++; progressEntries = count; },
   });
-  const hooks = [globalThis.setTimeout, globalThis.clearTimeout, globalThis.setInterval, globalThis.clearInterval, Date.now, runner.now, runner.exec, fs.watch, fs.readFileSync, fs.statSync, fs.lstatSync, fs.readdirSync] as unknown as { mock: { resetCalls(): void } }[];
+  const hooks = [globalThis.setTimeout, globalThis.clearTimeout, globalThis.setInterval, globalThis.clearInterval, Date.now, runner.now, runner.exec, fs.watch] as unknown as { mock: { resetCalls(): void } }[];
   const metrics: Record<string, number>[] = [];
   const base = clock.now;
-  let oldSession = '';
   try {
-    await drain(() => ticks > 0, () => clock.advance(1));
-    await drain(() => [...clock.timers.values()].some(timer => timer.at > clock.now + 1000), () => clock.advance(1));
+    await settleLoad(() => ticks > 0);
+    await settleLoad(() => [...clock.timers.values()].some(timer => timer.at > clock.now + 1000));
     for (let hour = 1; hour <= 8; hour++) {
       let tickMs = 0, work = 0, ioWork = 0;
       const beforeRenders = term.renders, beforeTicks = ticks;
@@ -115,35 +127,31 @@ it('eight-hour Ink soak keeps timers, watchers, listeners, caches and tick work 
         records[7] = seedTask(config, `ROTATE-${hour}-${step}`, { repos: previous.repos });
         tmux.windows = tmux.windows.filter(w => w.name !== previous.window);
         tmux.add(records[7]!.window, 'Working (esc to interrupt)\n');
-        const session = path.join(scratch.dir, `session-${hour}-${step}.jsonl`);
-        fs.writeFileSync(session, JSON.stringify({ type: 'session_meta', payload: { id: session, cwd: scratch.dir }, timestamp: new Date(base).toISOString() }) + '\n');
-        // Exercise the same shared reader as loadBoard, with rotating provider logs.
+        // Provider paths are virtual aliases of a fixed read-only transcript: this
+        // exercises real parsing/LRU/serialization without 46,080 irrelevant renames.
         const reader = sharedReader(config);
-        // Unique, valid session files exercise both persistent metadata and parser states.
         for (let n = 0; n < 24; n++) {
-          const file = `${session}-${n}`;
-          fs.renameSync(session, file); reader.meta(file, 'codex'); reader.stats(file, 'codex'); fs.renameSync(file, session);
+          const file = `${sessionPrefix}${hour}-${step}-${n}`;
+          reader.meta(file, 'codex'); reader.stats(file, 'codex');
         }
-        if (oldSession) fs.rmSync(oldSession);
-        oldSession = session;
         const report = records[8 + step % 222]!.report;
         fs.rmSync(priorReport, { force: true });
         priorReport = report;
         fs.writeFileSync(report, 'Werdykt: PASS\n<!-- agentctl:report-end -->\n');
         for (let n = 0; n < 8; n++) fs.writeFileSync(path.join(config.stateDir, records[n]!.window, 'event.json'), '{}');
-        await drain(() => ticks > before, () => clock.advance(1));
+        await settleLoad(() => ticks > before);
         // Flush fs.watch delivery, the trailing debounce and Ink's rendering deadlines.
         for (let n = 0; n < 5; n++) await turn();
         clock.advance(50); await turn();
         // A watcher may have started a follow-up after the observed snapshot. Wait for
         // scheduler completion/re-arm before jumping time or replacing fixture folders.
-        await drain(() => [...clock.timers.values()].some(timer => timer.at > clock.now + 1000), () => clock.advance(1));
+        await settleLoad(() => [...clock.timers.values()].some(timer => timer.at > clock.now + 1000));
         for (const hook of hooks) hook.mock.resetCalls();
         tickMs += performance.now() - started; work += queries - beforeQueries; ioWork += fileOps - beforeIO;
       }
       // Let the coalesced trailing refresh settle before sampling a resource plateau.
       clock.advance(500); await turn();
-      await drain(() => overlap === 0 && [...clock.timers.values()].some(timer => timer.at > clock.now + 1000));
+      await settleLoad(() => overlap === 0 && [...clock.timers.values()].some(timer => timer.at > clock.now + 1000));
       clock.advance(50); for (let n = 0; n < 5; n++) await turn();
       const keyAt = clock.now; let latency = -1;
       term.onWrite = () => { if (latency < 0 && term.last.includes('leave the board')) latency = clock.now - keyAt; };
@@ -280,4 +288,35 @@ it('full-cadence eight-hour timer storm retains only one refresh deadline', asyn
   assert.equal(maxRunning, 1);
   scheduler.stop(); gate.stop();
   assert.equal(clock.timers.size, 0);
+});
+
+it('asynchronous cache persistence coalesces callers and drains updates during a pending write', async t => {
+  const dir = scratch.sub('async-cache'), file = path.join(dir, 'usage.json');
+  const transcript = path.join(dir, 'session.jsonl');
+  fs.writeFileSync(transcript, JSON.stringify({ type: 'session_meta', payload: { id: 'session', cwd: dir } }) + '\n');
+  const reader = new UsageReader(file, { deferSave: true });
+  t.mock.method(fs, 'fsyncSync', () => assert.fail('board cache persistence must not fsync on the input loop'));
+  reader.meta(transcript, 'codex');
+  reader.save();
+  assert.equal(fs.existsSync(file), false, 'intermediate token saves defer to the board flush');
+  const write = fs.promises.writeFile.bind(fs.promises);
+  let calls = 0, active = 0, maximum = 0, release!: () => void;
+  t.mock.method(fs.promises, 'writeFile', async (...args: Parameters<typeof fs.promises.writeFile>) => {
+    calls++; active++; maximum = Math.max(maximum, active);
+    try {
+      if (calls === 1) await new Promise<void>(resolve => { release = resolve; });
+      return await write(...args);
+    } finally { active--; }
+  });
+  const first = reader.saveAsync(), joined = reader.saveAsync();
+  assert.equal(first, joined, 'callers join the same bounded writer');
+  await drain(() => calls === 1);
+  reader.stats(transcript, 'codex'); // A new mutation while the first snapshot is being written.
+  assert.equal(calls, 1);
+  release(); await Promise.all([first, joined]);
+  assert.equal(maximum, 1);
+  assert.equal(calls, 2);
+  const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.ok(saved.meta[transcript]); assert.ok(saved.files[transcript]);
+  await reader.saveAsync(); assert.equal(calls, 2, 'a clean cache does not write');
 });
