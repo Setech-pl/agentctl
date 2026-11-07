@@ -60,8 +60,27 @@ it('a lock whose holder pid is dead (SIGKILLed gate) is broken, not waited on (R
   fs.writeFileSync(lock, 'not json');
   let waits = 0;
   const acquired = acquireLock(lock, () => {}, async () => { if (++waits === 2) fs.unlinkSync(lock); });
-  await acquired;
+  (await acquired)();
   assert.equal(waits, 2, 'an unparseable lock file is waited on, never broken');
+});
+it('takes over the actual lock of a SIGKILLed owner (R2)', async () => {
+  const { spawn } = await import('node:child_process');
+  const { once } = await import('node:events');
+  const lock = path.join(scratch.dir, 'sigkill/.gate.lock');
+  const module = new URL('../scripts/gate-lock.ts', import.meta.url).href;
+  const child = spawn(process.execPath, ['--experimental-strip-types', '--no-warnings', '--input-type=module', '-e',
+    `import { acquireLock } from ${JSON.stringify(module)}; await acquireLock(${JSON.stringify(lock)}); console.log('ready'); setInterval(() => {}, 1000);`], { stdio: ['ignore', 'pipe', 'pipe'] });
+  try {
+    await once(child.stdout, 'data');
+    assert.equal(JSON.parse(fs.readFileSync(lock, 'utf8')).pid, child.pid);
+    const exited = once(child, 'exit');
+    child.kill('SIGKILL');
+    await exited;
+    const release = await acquireLock(lock, () => {}, async () => { throw new Error('waited on SIGKILLed owner'); });
+    assert.equal(JSON.parse(fs.readFileSync(lock, 'utf8')).pid, process.pid);
+    release();
+    assert.equal(fs.existsSync(lock), false);
+  } finally { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); }
 });
 it('checks cached runtime version and archive checksum with fakes and no network', () => {
   assert.equal(checkRuntime('/fake/node', '22.14.0', () => 'v22.14.0'), 'v22.14.0');

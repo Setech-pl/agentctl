@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- R2: recover the gate lock after its owner is SIGKILLed; reject invalid owner PIDs. / Bramka odzyskuje blokadę po SIGKILL właściciela; niepoprawny PID nie jest uznawany za martwego właściciela.
+
 - FIX1: oversized legacy `gc_preview` chat events are summarized on read, so old large garbage-collection entries no longer occupy whole event pages. / Przestarzałe duże wpisy `gc_preview` są skracane przy odczycie i nie zajmują już całych stron zdarzeń czatu.
 
 - FIX1: `doctor` judges the effective Codex update check — the last `-c check_for_update_on_startup=` of the user wins — and warns when the installed Codex has no `-c`. / `doctor` ocenia efektywną kontrolę aktualizacji Codexa (liczy się ostatnia flaga użytkownika) i ostrzega, gdy Codex nie zna `-c`.
