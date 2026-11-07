@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Gate: the release pack step parses the leading JSON array of `npm pack --json`, so an npm update notice can no longer break tarball resolution; the notifier stays disabled. / Krok pack bramki release parsuje wiodącą tablicę JSON z `npm pack --json`, więc komunikat o aktualizacji npm nie psuje już nazwy tarballa; notyfikator pozostaje wyłączony.
+
 - Validation: live-economy expects the P43 loss state — `needs-attention` with `tmuxLost` — for a task whose tmux window disappeared. / Live-economy oczekuje stanu utraty z P43: `needs-attention` z `tmuxLost` dla zadania, którego okno tmux zniknęło.
 
 - Validation: live-economy report fixtures carry a 7-hex SHA, matching the extraction rule in force since 0.17.3. / Fixtury raportów live-economy używają 7-znakowego SHA, zgodnie z regułą ekstrakcji obowiązującą od 0.17.3.

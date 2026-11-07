@@ -171,8 +171,10 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
           const source = file === 'dist' ? path.join(work, 'dist') : file;
           fs.cpSync(source, path.join(staging, file), { recursive: true });
         }
-        const packed = await run('pack', node26, [npm, 'pack', staging, '--ignore-scripts', '--json', '--pack-destination', work]);
-        const tarball = path.join(work, JSON.parse(packed.text)[0].filename);
+        const packed = await run('pack', node26, [npm, 'pack', staging, '--ignore-scripts', '--json', '--pack-destination', work], { npm_config_update_notifier: 'false' });
+        const start = packed.text.indexOf('['), end = packed.text.lastIndexOf(']');
+        if (start < 0 || end <= start) throw new Error(`pack did not print JSON; see ${packed.text.slice(0, 200)}`);
+        const tarball = path.join(work, JSON.parse(packed.text.slice(start, end + 1))[0].filename);
         for (const [label, node] of [['node22', node22], ['node26', node26]]) {
           const runtimeEnv = { AGENTCTL_SMOKE_NODE: label, AGENTCTL_SMOKE_TARBALL: tarball, AGENTCTL_NODE22: node22, AGENTCTL_NODE26: node26, AGENTCTL_NPM26: npm, PATH: `${path.dirname(node)}:${env.PATH}` };
           await run(`smoke-${label}`, node!, ['--experimental-strip-types', '--no-warnings', 'scripts/smoke-package.ts'], runtimeEnv);
