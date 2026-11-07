@@ -36,8 +36,8 @@ class Keyboard extends PassThrough {
 
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function run(name: string, yaml: string, insideTmux: boolean) {
-  const config = makeConfig(scratch.sub(name), yaml);
+async function run(name: string, yaml: string, insideTmux: boolean, instance: string | null = 'agentctl') {
+  const config = makeConfig(scratch.sub(name), `${instance === null ? '' : `ui: {instance_name: ${instance}}\n`}${yaml}`);
   seedTask(config, 'NC-1', { repos: [] });
   const tmux = new FakeTmux();
   tmux.add('nc-1', '● Reading\n  esc to interrupt\n');
@@ -71,6 +71,13 @@ describe('board: the version in the header and the window title', () => {
     await done;
   });
 
+  it('an isolated dev home labels both the header and terminal title', async () => {
+    const { term, keys, done } = await run('dev-label', '', false, null);
+    assert.ok(term.frames.some(frame => frame.includes(`agentctl-dev ${version} board`)));
+    assert.equal(term.frames[0], titleStart(version, 'agentctl-dev'));
+    keys.write('q'); await done;
+  });
+
   it('OSC 2 sets the title at start and the saved title comes back when the board ends', async () => {
     const { term, keys, done } = await run('t2', '', false);
     assert.equal(term.frames[0], titleStart(version));
@@ -86,7 +93,7 @@ describe('board: the version in the header and the window title', () => {
     keys.write('q');
     await done;
     const sets = runner.commands.filter((c) => c.includes('set-option')).map((c) => c.replace(/^tmux /, '').replaceAll("'", ''));
-    assert.deepEqual(sets, ['set-option -t =agentctl: set-titles on', `set-option -t =agentctl: set-titles-string agentctl ${version} · #W`]);
+    assert.deepEqual(sets, ['set-option -t =agentctl: status-left agentctl ', 'set-option -t =agentctl: status-left-length 20', 'set-option -t =agentctl: set-titles on', `set-option -t =agentctl: set-titles-string agentctl ${version} · #W`, 'set-option -u -t =agentctl: set-titles-string', 'set-option -u -t =agentctl: set-titles']);
     assert.ok(!runner.commands.some((c) => /\s-g\b/.test(c)), 'no global option');
   });
 

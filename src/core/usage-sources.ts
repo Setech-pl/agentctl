@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { codexLogPlan, codexSessions } from './providers/codex-usage.ts';
 import { claudeSessions, claudeSubagents } from './providers/claude-usage.ts';
 import { provider as adapter, perProvider, PROVIDER_IDS } from './providers/registry.ts';
@@ -50,6 +51,9 @@ interface CacheData {
   plans: Record<string, CachedPlan>;
 }
 
+/** Bounded per-reader working set; evicted sessions are re-read on demand. */
+export const USAGE_CACHE_LIMIT = 2048;
+
 const CHUNK = 16 * 1024 * 1024;
 const META_BYTES = 512 * 1024;
 const TAIL_BYTES = 256 * 1024;
@@ -76,11 +80,30 @@ export class UsageReader {
   private readonly file: string | undefined;
   private data: CacheData;
   private dirty = false;
+  private saving: Promise<void> | undefined;
+  private readonly deferSave: boolean;
+  private readonly order = { meta: new Map<string, true>(), files: new Map<string, true>(), plans: new Map<string, true>() };
+
+  private remember<K extends 'meta' | 'files' | 'plans'>(kind: K, key: string, value: CacheData[K][string]): void {
+    this.data[kind][key] = value;
+    const order = this.order[kind];
+    order.delete(key); order.set(key, true);
+    while (order.size > USAGE_CACHE_LIMIT) {
+      const oldest = order.keys().next().value!;
+      order.delete(oldest); delete this.data[kind][oldest];
+      this.dirty = true;
+    }
+  }
+
+  get cacheSizes(): { meta: number; files: number; plans: number; listings: number } {
+    return { meta: this.order.meta.size, files: this.order.files.size, plans: this.order.plans.size, listings: this.listings.size };
+  }
   /** Directory listings of this run: the same folder is asked for by several tasks. */
   private readonly listings = new Map<string, string[]>();
 
-  constructor(file: string | undefined) {
+  constructor(file: string | undefined, options: { deferSave?: boolean } = {}) {
     this.file = file;
+    this.deferSave = options.deferSave === true;
     this.data = emptyCache();
     if (!file) return;
     try {
@@ -88,6 +111,9 @@ export class UsageReader {
       if (isObject(parsed) && parsed.v === 2 && isObject(parsed.meta) && isObject(parsed.files) && isObject(parsed.plans)) this.data = parsed as unknown as CacheData;
     } catch {
       // no cache yet, or an unreadable one: it is made again
+    }
+    for (const kind of ['meta', 'files', 'plans'] as const) {
+      for (const key of Object.keys(this.data[kind])) this.remember(kind, key, this.data[kind][key]!);
     }
   }
 
@@ -114,7 +140,7 @@ export class UsageReader {
   /** Session id, working directory and start of a session log, read from its first lines once. */
   meta(file: string, provider: AgentName): SessionMeta | undefined {
     const cached = this.data.meta[file];
-    if (cached) return cached;
+    if (cached) { this.remember('meta', file, cached); return cached; }
     let text: string;
     try {
       text = readRange(file, 0, META_BYTES);
@@ -132,7 +158,7 @@ export class UsageReader {
     }
     if (probe.cwd === null && probe.id === null && !(provider === 'kimi' && probe.firstAt !== null)) return undefined;
     const meta: SessionMeta = { id: probe.id, cwd: probe.cwd, firstAt: probe.firstAt };
-    this.data.meta[file] = meta;
+    this.remember('meta', file, meta);
     this.dirty = true;
     return meta;
   }
@@ -144,12 +170,13 @@ export class UsageReader {
       size = fs.statSync(file).size;
     } catch {
       if (this.data.files[file]) {
-        delete this.data.files[file];
+        delete this.data.files[file]; this.order.files.delete(file);
         this.dirty = true;
       }
       return undefined;
     }
     let entry: CachedFile | undefined = this.data.files[file];
+    if (entry) this.remember('files', file, entry);
     if (provider === 'kimi' && entry?.stats.kimi?.parserVersion !== 2) entry = undefined; // reparse pre-FIX3 cached zero usage
     if (entry && (size < entry.size || entry.stats.provider !== provider)) entry = undefined; // rewritten or shorter: read again from the start
     if (!entry) entry = { size: 0, offset: 0, stats: emptyStats(provider) };
@@ -163,10 +190,10 @@ export class UsageReader {
       }
       entry.offset = offset;
       entry.size = size;
-      this.data.files[file] = entry;
+      this.remember('files', file, entry);
       this.dirty = true;
     } else if (!this.data.files[file]) {
-      this.data.files[file] = entry;
+      this.remember('files', file, entry);
       this.dirty = true;
     }
     return entry.stats;
@@ -177,8 +204,8 @@ export class UsageReader {
 
   cachedPlan(key: string, signature: string, read: () => PlanSnapshot | undefined): PlanSnapshot | undefined {
     const cached = this.data.plans[key];
-    if (cached && cached.signature === signature) return cached.snapshot ?? undefined;
-    const snapshot = read(); this.data.plans[key] = { signature, snapshot: snapshot ?? null }; this.dirty = true; return snapshot;
+    if (cached && cached.signature === signature) { this.remember('plans', key, cached); return cached.snapshot ?? undefined; }
+    const snapshot = read(); this.remember('plans', key, { signature, snapshot: snapshot ?? null }); this.dirty = true; return snapshot;
   }
 
   /** Session logs of Codex written on or after the day of `sinceMs`. */
@@ -190,7 +217,35 @@ export class UsageReader {
   /** The logs of the subagents of a Claude session: `<transcript without .jsonl>/subagents/agent-*.jsonl`. */
   claudeSubagents(file: string): string[] { return claudeSubagents(this, file); }
 
+  /** Board persistence yields during I/O; one writer drains later mutations without queued snapshots.
+   * This is disposable cache data: atomic rename is sufficient, without a blocking fsync on the input loop.
+   */
+  saveAsync(): Promise<void> {
+    if (!this.file || (!this.dirty && !this.saving)) return Promise.resolve();
+    if (!this.saving) this.saving = this.flushAsync().finally(() => { this.saving = undefined; });
+    return this.saving;
+  }
+
+  private async flushAsync(): Promise<void> {
+    while (this.dirty) {
+      this.dirty = false;
+      const tmp = `${this.file}.${process.pid}.${randomUUID()}.async.tmp`;
+      try {
+        const text = JSON.stringify(this.data);
+        await fs.promises.mkdir(path.dirname(this.file!), { recursive: true });
+        await fs.promises.writeFile(tmp, text, { flag: 'wx', mode: 0o600 });
+        await fs.promises.rename(tmp, this.file!);
+      } catch {
+        this.dirty = true; // Retry on the next refresh, never spin on an unwritable cache.
+        return;
+      } finally {
+        await fs.promises.unlink(tmp).catch(() => undefined);
+      }
+    }
+  }
+
   save(): void {
+    if (this.deferSave) return; // The board flushes once, asynchronously, after tokens and plans.
     if (!this.file || !this.dirty) return;
     try {
       fs.mkdirSync(path.dirname(this.file), { recursive: true });

@@ -1167,7 +1167,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
           const note = await loggedRun(startLogPath(ctx.config, 'watch'), 'watch', async () => {
             const notifier = await makeNotifier(ctx);
             const self = deps.selfArgv?.();
-            await runWatch(ctx, notifier, { ...(interrupt ? { signal: interrupt.signal } : {}), ...(self ? { self } : {}), configStore: new ConfigStore(deps.loadConfig, ctx.config), remakeNotifier: () => makeNotifier(ctx) });
+            await runWatch(ctx, notifier, { insideTmux: deps.insideTmux, ...(interrupt ? { signal: interrupt.signal } : {}), ...(self ? { self } : {}), configStore: new ConfigStore(deps.loadConfig, ctx.config), remakeNotifier: () => makeNotifier(ctx) });
           });
           if (note && !interrupt?.signal.aborted) throw new AgentctlError(note);
         } catch (e) {

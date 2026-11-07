@@ -235,13 +235,13 @@ const sharedReaders = new Map<string, UsageReader>();
 
 /**
  * The board's reader. One-shot commands use openReader (a fresh reader each run); the board shares one so the usage cache
- * is read at startup and `save()` writes only when a tick actually read new bytes (it already checks the dirty flag).
+ * is read at startup. Intermediate token saves are deferred; loadBoard awaits one asynchronous flush after plans.
  */
 export function sharedReader(config: GlobalConfig): UsageReader {
   const key = cachePath(config);
   let reader = sharedReaders.get(key);
   if (!reader) {
-    reader = openReader(config);
+    reader = new UsageReader(key, { deferSave: true });
     sharedReaders.set(key, reader);
   }
   return reader;
