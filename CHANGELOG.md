@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Validation: live-economy expects the P43 loss state — `needs-attention` with `tmuxLost` — for a task whose tmux window disappeared. / Live-economy oczekuje stanu utraty z P43: `needs-attention` z `tmuxLost` dla zadania, którego okno tmux zniknęło.
+
 - Validation: live-economy report fixtures carry a 7-hex SHA, matching the extraction rule in force since 0.17.3. / Fixtury raportów live-economy używają 7-znakowego SHA, zgodnie z regułą ekstrakcji obowiązującą od 0.17.3.
 
 ## [0.18.2] - 2026-11-07

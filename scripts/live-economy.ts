@@ -102,10 +102,10 @@ await withHarness({ name: 'economy', cacheRoot: cache, config: 'mcp: {max_respon
   const canonical = path.join(config.cache, 'canonical-integration.md');
   seed('integration-12', canonical, { reportAlt: [path.join(candidateDir, '*.md')], cohort: 'candidate-fixture' });
   const watcher = h.spawnAgentctl(['watch'], path.join(h.root, 'candidate-watch.log'));
-  const rows = () => JSON.parse(h.agentctl(['status', '--all', '--json']).stdout) as { task: string; state: string; reportCandidate?: string }[];
+  const rows = () => JSON.parse(h.agentctl(['status', '--all', '--json']).stdout) as { task: string; state: string; tmuxLost?: boolean; reportCandidate?: string }[];
   let end = Date.now() + 10000;
   while (!rows().find(r => r.task === 'integration-12')?.reportCandidate && Date.now() < end) await delay(200);
-  check('live only configured ID file is a candidate flag, canonical absent', !fs.existsSync(canonical) && rows().some(r => r.task === 'integration-12' && r.state === 'dead' && r.reportCandidate));
+  check('live only configured ID file is a candidate flag, canonical absent', !fs.existsSync(canonical) && rows().some(r => r.task === 'integration-12' && r.state === 'needs-attention' && r.tmuxLost && r.reportCandidate));
   check('candidate cohort never announces done', !fs.readFileSync(path.join(h.agentctlHome, 'journal.jsonl'), 'utf8').split('\n').some(l => l.includes('"kind":"cohort-done"') && l.includes('candidate-fixture')));
   fs.writeFileSync(path.join(candidateDir, 'integration-12-good.md'), 'Werdykt: PASS\n## Summary\nConfirmed\n<!-- agentctl:report-end -->');
   end = Date.now() + 10000;
