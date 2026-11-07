@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- FIX1: oversized legacy `gc_preview` chat events are summarized on read, so old large garbage-collection entries no longer occupy whole event pages. / Przestarzałe duże wpisy `gc_preview` są skracane przy odczycie i nie zajmują już całych stron zdarzeń czatu.
+
+- FIX1: `doctor` judges the effective Codex update check — the last `-c check_for_update_on_startup=` of the user wins — and warns when the installed Codex has no `-c`. / `doctor` ocenia efektywną kontrolę aktualizacji Codexa (liczy się ostatnia flaga użytkownika) i ostrzega, gdy Codex nie zna `-c`.
+
+- FIX1: a start held back by a startup dialog (trust, login) is `needs-input` with the dialog as the question, no longer `needs-attention`. / Start zatrzymany dialogiem początkowym to `needs-input` z treścią dialogu, nie `needs-attention`.
+
+- FIX1: closing a start window that never became ready on purpose raises no tmux-loss event; a gone window of a live tmux session says the server lives. / Celowe zamknięcie okna startu, które nie zdążyło się uaktywnić, nie zgłasza utraty tmux; zniknięte okno żywej sesji mówi, że serwer działa.
+
+- FIX1: the Kimi trust dialog is classified by its position on the screen — a ready prompt below it means trust is answered — and Kimi delivery proofs ignore echo lines mistaken for drafts, so a delivered-after-timeout prompt no longer stays needs-attention. / Dialog zaufania Kimi oceniany po kolejności na ekranie (gotowe pole pod dialogiem = zaufanie załatwione), a dowody dostarczenia pomijają echo brane za szkic — prompt dostarczony po limicie nie zostaje needs-attention.
+
+- FIX1: `agentctl send --withdraw TASK [--entry ID]` and the MCP `send` tool (`withdraw`) take back a waiting message: a FIFO entry is removed, a pending prompt is cleared before its delivery begins and marked `stale` once agentctl started delivering it. / Wycofanie oczekującej wiadomości przez CLI i MCP: wpis kolejki znika, oczekujący prompt jest czyszczony przed dostawą, a po jej rozpoczęciu dostaje znacznik `stale`.
+
+- FIX1 internals: a gate lock whose holder pid is dead is broken instead of waited on; status discovers report candidates once per task per collect and keeps the candidate on the row; an absolute in-worktree link is validated once; the invalid-event hint lists the real kinds of the agent. / Wewnętrzne: zamek gate'a martwego procesu jest zrywany; status szuka kandydatów raportu raz na zadanie i trzyma kandydata w wierszu; absolutny link w worktree jest walidowany raz; podpowiedź o błędnym zdarzeniu wymienia prawdziwe rodzaje agenta.
+
 - INT4: trust wait expiry leaves the live pending task with watch, without a failed queue entry; queue ticks also reconcile older failed entries for live tasks, including while paused. / Po wygaśnięciu oczekiwania na zaufanie żywe zadanie pozostaje pod opieką watch, bez błędu w kolejce; tick usuwa też wcześniejsze nieaktualne błędy żywych zadań, również podczas pauzy.
 
 - INT4: token-only MCP confirmations remain bound to the previewed tool; a refused cross-tool use preserves the original preview. / Potwierdzenie MCP samym tokenem dotyczy wyłącznie narzędzia z podglądu; odmowa użycia w innym narzędziu zachowuje pierwotny podgląd.
