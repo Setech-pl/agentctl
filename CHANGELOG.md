@@ -10,6 +10,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - Show machine load/free memory in capacity and status detail; record configurable load threshold crossings.
 
+- P17: warn in new/queue previews when inherited project links point to missing paths or closed task worktrees, naming the stale target and suggesting placeholders.
+
+- Resolve cross-task `links.to` placeholders `{task:TASK-ID,repo:REPO-NAME}` against recorded worktrees, with clear preview errors and existing link validation.
+
 ## [0.18.2] - 2026-11-07
 
 - Validation: release fixtures follow the current manifest version; soak counters include trailing refresh work in the same interval as their tick divisor. Existing resource bounds stay unchanged. / Testy wydania używają bieżącej wersji manifestu; liczniki soak obejmują pełen interwał wraz z odświeżeniami końcowymi, bez zmiany limitów.

@@ -146,6 +146,43 @@ export function missingLinkTargets(links: Link[], primary?: string): string[] {
   });
 }
 
+/** Cross-task link targets use recorded worktrees, including retained closed/archived ones. */
+export function fillTaskLinkTargets(text: string, config: GlobalConfig): string {
+  return text.replace(/\{task:([^,{}]+),repo:([^{}]+)\}/g, (_match, task: string, repo: string) => {
+    const wanted = task.toLowerCase();
+    const record = listTaskRecords(config).find(r => r.task.toLowerCase() === wanted)
+      ?? listArchivedRecords(config).filter(r => r.task.toLowerCase() === wanted).map(r => ({ ...r, closed: true }))[0];
+    if (!record) throw new AgentctlError(`links: ${task}: unknown task`);
+    const state = record.closed || record.cancelled ? 'closed task' : 'task';
+    if (!record.repos.length) throw new AgentctlError(`links: ${task}: ${state} has no recorded worktree`);
+    const matches = record.repos.filter(r => path.basename(r.path) === repo);
+    if (matches.length > 1) throw new AgentctlError(`links: ${task}: ambiguous repository "${repo}"`);
+    const match = matches[0];
+    if (!match) throw new AgentctlError(`links: ${task}: no repository "${repo}" in recorded worktrees`);
+    if ((record.closed || record.cancelled) && !fs.existsSync(match.worktree)) {
+      throw new AgentctlError(`links: ${task}: ${state} worktree ${match.worktree} does not exist`);
+    }
+    return match.worktree;
+  });
+}
+
+/** Preview inherited project defaults explicitly: retained closed worktrees are stale too. */
+export function staleProjectLinkWarnings(links: Link[], config: GlobalConfig): string[] {
+  if (!links.length) return [];
+  const current = listTaskRecords(config);
+  const records = [...current, ...listArchivedRecords(config).filter(r => !current.some(c => c.task === r.task)).map(r => ({ ...r, closed: true }))];
+  return links.flatMap(({ from, to }) => {
+    const target = to.endsWith('/*') ? path.dirname(to) : to;
+    const resolved = resolvedLocation(target);
+    const owners = records.filter(r => (r.closed || r.cancelled) && r.repos.some(repo => {
+      const root = resolvedLocation(repo.worktree);
+      return resolved === root || resolved.startsWith(`${root}${path.sep}`);
+    }));
+    const reasons = [...(!fs.existsSync(target) ? ['target does not exist'] : []), ...owners.map(r => `target belongs to closed task ${r.task}`)];
+    return reasons.length ? [`stale project link ${from} -> ${to}: ${reasons.join('; ')}. Set links explicitly using {task:TASK-ID,repo:REPO-NAME}/sub/path or {worktree:repo|fallback}; check the target before starting.`] : [];
+  });
+}
+
 export function projectLinks(repo: string, task = '', cache = repo): Link[] {
   return (loadProjectConfig(repo)?.links ?? []).map(link => ({ ...link, to: resolvePath(fillPlaceholders(link.to, { task, cache }), repo) }));
 }
