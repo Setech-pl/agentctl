@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.18.2] - 2026-11-07
+
+Release candidate: includes the 0.18.1 rc1 baseline and all merged P10–P50 work below (items absent from this history are not claimed). / Kandydat do wydania obejmuje bazę 0.18.1 rc1 i wszystkie scalone zmiany P10–P50 opisane poniżej.
+
 - P49: working Codex uses the advertised Tab queue key; wrapped pastes accept retained or swallowed wrap separators and delivery still requires exact session evidence. Idle Codex, Claude and Kimi retain their submission keys. / Pracujący Codex używa reklamowanego Tab do kolejki; zawinięty tekst zachowuje kontrolę zgodności, a dostawę potwierdza transkrypt. Klawisze bezczynnego Codexa, Claude i Kimi pozostają bez zmian.
 
 - Gate: `full --node26-only` explicitly records the production Node 26 scope without provisioning Node 22. / Bramka full może jawnie sprawdzić wyłącznie produkcyjny Node 26 bez instalowania Node 22.
@@ -75,7 +79,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - P32: the board tick no longer scales with the archive. Task records are scanned once per tick and re-parsed only when a TASK.md changes (previously 5-6 full scans of every record, archived included, per 2 s tick); report bodies are hashed and scanned once per version (cached by dev/ino/mtime/size); closed/cancelled/archived rows skip the prompt queue, outputs and token collection unless their section is expanded; one UsageReader per board process replaces the per-tick ~1 MB usage-cache parse; the disk report is collected on its own 5 min cadence with a bounded budget; the refresh runs every 2 s only while a task is alive (5 s when everything is done, armed after the previous tick, never stacked) and fs.watch event ticks are debounced to one per 500 ms; the per-record loop yields every 25 records so keys interleave with a tick.
 - Development gates: `npm run gate -- quick|full|release` centralizes affected tests, sequential shared Node runtimes, package/doctor/live checks, low-priority execution, a cross-task lock and JSON evidence; standing agent rules are in AGENTS.md.
 - P34: every MCP `new` start is registered and run by the watcher — `confirm` always returns at once ("Registered: …") and the server never waits for a checkout, a setup or a window's input prompt (previously only starts with setup were handed over; a plain start could hold the server for minutes). Without a running watcher the confirm is refused; `wait_trust` is accepted but ignored (the watcher always waits for a human); `agentctl new` in a terminal is unchanged.
-- P33: the Codex "Update available" modal no longer blocks a start for the full 60 s ready timeout: task windows start with `-c check_for_update_on_startup=false` (verified in the Codex 0.167.0 binary schema; inert on older versions, user `flags` come last and win), the modal is a `waitForReady` class of its own (`agents.codex.dialog_pattern`) that fails the start at once as needs-input with "choose Skip until next version" (agentctl never answers it), and `doctor` reports the disabled update check. A window that never became ready is closed by the watcher so it cannot hold a provider slot; a leftover window of a CLI start keeps the evidence but does not count against `limits` either. An interrupted start (the watcher stopped while waiting for the agent) drops its queue entry instead of failing it, so the task record and the queue never disagree, and the task lands in "to resume" (`agentctl resume`).
+- P33: the Codex "Update available" modal no longer blocks a start for the full 60 s ready timeout: task windows start with `-c check_for_update_on_startup=false` (verified in the Codex 0.167.0 binary schema; inert on older versions, user `flags` come last and win), the modal is a `waitForReady` class of its own (`agents.codex.dialog_pattern`) that fails the start at once as needs-input with "choose Skip until next version" (agentctl never answers it), and `doctor` reports the disabled update check. A modal/trust-blocked window stays open and owns its slot for the human; the watcher closes only other never-ready failed starts; a leftover window of a CLI start keeps the evidence but does not count against `limits` either. An interrupted start (the watcher stopped while waiting for the agent) drops its queue entry instead of failing it, so the task record and the queue never disagree, and the task lands in "to resume" (`agentctl resume`).
 - P35: `prompt_delivery: sent` requires positive evidence — a screen proof (a working-looking screen, an echo, a queue list) counts only for a delivery with a recorded paste (`delivery_started_at`); a start that failed before any paste can no longer be flipped to "sent" by a human answering a dialog. A needs-attention initial prompt that was never pasted is re-armed to `pending` when the window is alive, idle and readable, so the watcher delivers it with the usual Enter discipline; a pasted-but-unconfirmed delivery stays terminal.
 - P36: `queue rm` closes a leftover live window of the cancelled task's failed start, so the cancelled state is not masked as "waiting" by the idle screen.
 - P37: `events --since HH:MM` (and MCP `events_since`) means the most recent past occurrence within 24 h: 23:50 asked at 06:19 is yesterday 23:50 (the label says "wczoraj"), not an empty "in the future today" window.
@@ -242,15 +246,6 @@ Versions 0.1.0 to 0.7.0 correspond to pull requests #1 to #7; their dates are th
 - Keep question content local by default: `notify.ntfy.include_question: false` sends only opening instructions and manager/Remote Control hints to ntfy. Explicit `true` enables clipped question text. Live config reload also redacts queued question retries; local notifications, board, peek and status/MCP retain their content.
 - Compile a distributable JavaScript package into dist; update runtime self commands, package version lookup, MCP process detection and the updater build step.
 - Keep phone and manager live suites separate; add collapsed-question live checks through the isolated harness.
-
-## [Unreleased]
-
-- Claude `/usage` probe is opt-in (`capacity.claude_usage_probe: true`); it reads plan windows in an isolated neutral session and never starts automatically by default.
-- `dataset export` streams a read-only benchmark dataset as JSONL or CSV, with attempt identities, provenance and explicit redacted prompt/report content opt-ins.
-- P29: live harnesses and package smoke checks require an explicit absolute `AGENTCTL_LIVE_CACHE` task root; missing roots, shared historical sandboxes and escaping paths are refused before writes.
-- P30: preserve rejected config reload state across reads and clear the receipt only after a corrected configuration is accepted; live retry checks synchronize on the persisted rejection/recovery state.
-
-Nothing yet.
 
 ## [0.14.0] - 2026-11-02
 
@@ -512,7 +507,8 @@ Pull request #1: iteration 1, core and CLI.
 - Task states (`working`, `waiting`, `needs-trust`, `report-ready`, `dead`) and folder-trust detection.
 - Per-provider window limits, the `review_of` cross-review rule, an optional mirror of the reports.
 
-[Unreleased]: https://github.com/Setech-pl/agentctl/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/Setech-pl/agentctl/compare/v0.18.2...HEAD
+[0.18.2]: https://github.com/Setech-pl/agentctl/compare/v0.18.0...v0.18.2
 [0.11.0]: https://github.com/Setech-pl/agentctl/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/Setech-pl/agentctl/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/Setech-pl/agentctl/compare/v0.8.0...v0.9.0
