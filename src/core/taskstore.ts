@@ -18,6 +18,7 @@ export type RecordEffort = Effort | 'unknown';
 
 /** What agentctl remembers about a task: the YAML header of `<state_dir>/<task>/TASK.md`. */
 export interface TaskRecord {
+  weight?: 'normal' | 'heavy';
   autoReview?: AutoReviewSource;
   task: string;
   window: string;
@@ -133,6 +134,7 @@ export function taskFile(config: GlobalConfig, window: string): string {
 
 export function recordFromSpec(spec: ResolvedSpec, config: GlobalConfig, startedMs: number): TaskRecord {
   const record: TaskRecord = {
+    weight: spec.weight,
     task: spec.task,
     window: spec.window,
     session: config.session,
@@ -176,6 +178,7 @@ export function renderTaskMd(record: TaskRecord, prompt: string): string {
     links: record.links,
     env: record.env,
   };
+  if (record.weight) header.weight = record.weight;
   if (record.reviewOf) header.review_of = record.reviewOf;
   if (record.review) header.review = record.review;
   if (record.autoReview) header.auto_review = record.autoReview;
@@ -299,6 +302,7 @@ export function parseTaskRecord(text: string): TaskRecord | undefined {
   if (typeof data.pulled === 'string') record.pulled = data.pulled;
   if (typeof data.adopted === 'string') record.adopted = data.adopted;
   if (data.pin === true) record.pin = true;
+  if (data.weight === 'heavy' || data.weight === 'normal') record.weight = data.weight;
   if (data.remote_control === true) record.remoteControl = true;
   if (typeof data.superseded_by === 'string') record.supersededBy = data.superseded_by;
   if (typeof data.continues === 'string') record.continues = data.continues;

@@ -1,6 +1,7 @@
 import { applyInstanceLabel } from './instance.ts';
 import { beginTitle } from './title.ts';
 import { packageVersion } from './version.ts';
+import { recordMachineLoad } from './machine.ts';
 import { limitedTick } from './limited.ts';
 import { drainPromptQueue } from './prompt-queue.ts';
 import { mcpWriteNotice } from './mcp-notify.ts';
@@ -242,6 +243,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   await announceBlocked(ctx, notifier, allRows, { self: options.self, log: startLog }).catch((e: unknown) => startLog(`queue: ${errorMessage(e)}`));
   await cohortTick(ctx, notifier, allRows, startLog).catch((e: unknown) => startLog(`cohort: ${errorMessage(e)}`));
   await collisionTick(ctx, memory.collisions, notifier, startLog).catch((e: unknown) => startLog(`collisions: ${errorMessage(e)}`));
+  await recordMachineLoad(ctx).catch((e: unknown) => startLog(`machine: ${errorMessage(e)}`));
   await diskTick(ctx, notifier).catch((e: unknown) => startLog(`disk: ${errorMessage(e)}`));
   await mcpWriteNotice(ctx, async text => { await notifier.notify('agentctl', text); }).catch((e: unknown) => startLog(`mcp notices: ${errorMessage(e)}`));
   await usageTick(ctx, notifier, startLog).catch((e: unknown) => startLog(`usage: ${errorMessage(e)}`));

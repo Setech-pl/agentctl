@@ -1,4 +1,5 @@
 import { attachHint, tmuxCommand } from './core/tmux-socket.ts';
+import { collectMachine, machineLine } from './core/machine.ts';
 import { exportDataset, validateDatasetOptions } from './core/dataset.ts';
 import type { DatasetOptions } from './core/dataset.ts';
 import { DEFAULT_PROVIDERS } from './core/providers/types.ts';
@@ -741,6 +742,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
 
   program
     .command('status')
+    .option('--detail', 'include machine load and free memory')
     .description('Table of tasks: window state, running time, report, last output line.')
     .option('--json', 'machine-readable output')
     .option('--clip', 'copy a compact Markdown table to the clipboard (to paste at the start of a chat session)')
@@ -748,7 +750,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('--all', 'also the hidden, the closed and the cancelled tasks (see "agentctl hide", "agentctl close", "agentctl cancel"), archived ones included')
     .option('--cohort <name>', 'only the tasks of this cohort (also with --json and --clip)')
     .action(
-      guarded(async (opts: { json?: boolean; clip?: boolean; tmuxLine?: boolean; all?: boolean; cohort?: string }) => {
+      guarded(async (opts: { detail?: boolean; json?: boolean; clip?: boolean; tmuxLine?: boolean; all?: boolean; cohort?: string }) => {
         if ([opts.json, opts.clip, opts.tmuxLine].filter(Boolean).length > 1) throw new AgentctlError('--json, --clip and --tmux-line exclude each other');
         if (opts.tmuxLine) return line(await statusTmuxLine(contextFor(false, { migrate: false })));
         const ctx = contextFor(false);
@@ -765,6 +767,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
           return deps.stdout(md);
         }
         if (opts.json) return line(JSON.stringify(rows, null, 2));
+        if (opts.detail) line(machineLine(collectMachine(ctx.config)));
         line(diskLine(await collectDisk(ctx)));
         if (rows.length === 0) {
           line(hiddenCount > 0 ? `No visible tasks${cohort ? ` in cohort ${cohort}` : ''}; ${hiddenCount} hidden (see "agentctl status --all").` : cohort ? `No tasks in cohort ${cohort}.` : `No tasks yet in ${ctx.config.stateDir}. Start one with "agentctl new <spec>".`);

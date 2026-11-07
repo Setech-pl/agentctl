@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- P24: warn on configurable per-filesystem worktree share/free space with safe GC preview reclaimable bytes; report worktree size on close.
+
+- Support weight: heavy task specs with a cross-provider limits.heavy queue cap (default 1) and waiting reasons.
+
+- Show machine load/free memory in capacity and status detail; record configurable load threshold crossings.
+
 ## [0.18.2] - 2026-11-07
 
 - Validation: release fixtures follow the current manifest version; soak counters include trailing refresh work in the same interval as their tick divisor. Existing resource bounds stay unchanged. / Testy wydania używają bieżącej wersji manifestu; liczniki soak obejmują pełen interwał wraz z odświeżeniami końcowymi, bez zmiany limitów.
@@ -51,7 +57,6 @@ Release candidate: includes the 0.18.1 rc1 baseline and all merged P10–P50 wor
 - P43: lost tmux tasks remain visible as needs-attention with one durable loss event and recovery guidance; Claude SessionStart saves the conversation ID before the first prompt. Utracone zadania pozostają widoczne ze wskazówką odzyskania; identyfikator sesji Claude zapisujemy przy starcie.
 
 - P10/P44: optional `tmux.socket` scopes all tmux commands; exact attach hints and doctor checks prevent dev/server confusion. Opcjonalny osobny serwer tmux, dokładne wskazówki attach i kontrola AGENTCTL_HOME w doctor.
-
 - P32 F8: regression coverage sends real Ink/stdin arrow keys on populated rows independently during record scanning and status collection, and checks selection/preview effects without latency thresholds.
 
 - P32 F7: all board refresh sources cancel the old deadline and re-arm only after the shared load completes, including failures; exit cancels pending refreshes.

@@ -73,6 +73,7 @@ export interface ResolvedSpec {
   /** `remote_control: true` (Claude only): the agent starts with `--remote-control <TASK>`, so the task can be answered from the Claude app. Absent: off. */
   remoteControl?: boolean;
   /** Queue order: `high` starts before every `normal` task (FIFO inside each class). Only the queue looks at it. */
+  weight?: 'normal' | 'heavy';
   priority: 'high' | 'normal';
   /** Tasks that must have a report before this one starts (queue). `new` refuses to start a task whose `after` is not met. */
   after: string[];
@@ -170,7 +171,7 @@ export interface ResolveContext {
 /** Task IDs whose window name is one agentctl uses for itself (`watch`, `board`, `manager`). */
 export const RESERVED_TASK_IDS = ['WATCH', 'BOARD', 'MANAGER'];
 
-export const SPEC_KEYS = ['task', 'agent', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'review', 'report', 'pin', 'remote_control', 'priority', 'after', 'touches', 'cohort'];
+export const SPEC_KEYS = ['task', 'agent', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'review', 'report', 'pin', 'remote_control', 'weight', 'priority', 'after', 'touches', 'cohort'];
 export const REPO_KEYS = ['path', 'worktree', 'base', 'branch', 'setup'];
 
 function label(raw: RawSpec): string {
@@ -303,6 +304,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     if (problem) p.add(problem);
     else cohort = (h.cohort as string).normalize('NFC');
   }
+  const weight = parseEnumValue(h.weight, ['normal', 'heavy'] as const, 'weight', p) ?? 'normal';
   const priority = parseEnumValue(h.priority, PRIORITIES, 'priority', p) ?? 'normal';
   if (raw.prompt === '') p.add('the prompt is empty (write it below the closing "---" of the header)');
 
@@ -433,6 +435,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     prompt: raw.prompt,
     pin,
     priority,
+    weight,
     after,
     ...(Object.keys(afterVerdicts).length ? { afterVerdicts } : {}),
     touches,

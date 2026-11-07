@@ -47,6 +47,7 @@ Column "Layers": **g** global config, **p** project config, **s** spec.
 | `limits` | mapping | none | g | Most simultaneous windows per provider. |
 | `limits.claude` | positive integer | unlimited | g | Cap for Claude windows (agentctl windows + reserved places + external sessions when counted). `agentctl limits set claude=3` changes it. |
 | `limits.codex` | positive integer | unlimited | g | Cap for Codex windows. |
+| `limits.heavy` | positive integer | `1` | g | Maximum queued heavy tasks running or starting across providers; previews explain waits. |
 | `limits.count_report_ready` | boolean | `false` | g | Idle windows with a complete report do not occupy provider slots by default. Capacity/limits separate working windows and reports awaiting collection. A follow-up counts again; send warns and refuses to resume it when the provider is full. |
 | `limits.count_external` | boolean | `false` | g | Terminal sessions of active providers (`claude`, `codex`, `kimi` when enabled) outside the windows of agentctl (found with `ps`, not MCP servers, headless runs or agentctl itself) count against the limit and show as "external" in `agentctl limits`. Places for agents you start by hand can also be held with `agentctl limits reserve`. |
 | `agents` | mapping | see below | g | Settings per provider: `agents.claude`, `agents.codex`, `agents.kimi` (when enabled). |
@@ -274,6 +275,7 @@ The header of a spec file, between `---` lines, followed by the prompt. Several 
 | `after` | task ID or list | none | s | The task starts only when every named task has a report (`report-ready`, or closed with a report). Meant for the queue; `new` refuses a task whose `after` is not met. Unknown tasks and circles are errors. |
 | `touches` | glob or list of globs | none | s | Files the task will change. `queue` and `new` warn (and ask y/N) when an active task of the same repository already changes matching files. |
 | `cohort` | name | none | s | The cohort of the task: letters, digits, `-`, `_` and `.` (at most 40 characters), compared without regard to case and shown as it was first written. The cohort is made by its first task; its file is `<config dir>/cohorts/<name>.json`. Without the key the task belongs to no cohort (there is no default one). `new --cohort` and `queue --cohort` override it for the whole file. See [cohorts](details.md#cohorts). |
+| `weight` | `normal` or `heavy` | `normal` | s | Heavy tasks share the queue cap across providers; starting tasks and live task windows count, including report-ready. Immediate new is outside queue admission. |
 | `priority` | `high` or `normal` | `normal` | s | Queue order: `high` tasks start before every `normal` one (first come, first served inside each class). `new` ignores it. |
 
 ## Environment variables
@@ -293,6 +295,7 @@ In 0.15.0, installed runtime commands use `dist/bin/agentctl.js`. Status `questi
 | `guide` | mapping (global), path (project) | `{lang: en}` globally | g, p | Global guide settings; project `.agentctl.yaml` uses `guide: docs/agent-dispatch.md` (repository-relative or `~/…`) as a trusted project overlay. A missing file warns in guide and doctor, and does not fail an order. |
 | `guide.lang` | en or pl | en | g | Default language for CLI, MCP and manager shared guide. |
 | `capacity` | mapping | see below | g | Dispatcher capacity settings. |
+| `capacity.load_threshold` | positive number | 3 × logical CPUs | g | Watch emits machine-load-high and machine-load-recovered on 1-minute load crossings. Capacity JSON/text and status --detail include load (1/5/15 min) and free memory bytes. |
 | `capacity.snapshot` | boolean | true | g | Add both providers' capacity to new and queue responses. |
 | `capacity.stale_minutes` | integer 1–10080 | 30 | g | Reading age that sets stale; emits one event per reading while that provider has active task windows. |
 | `capacity.sample_limit` | integer 2–10000 | 2048 | g | Maximum combined provider samples in `usage-samples.jsonl` (under 10 MB even at maximum). Each distinct usage reading is sampled; repeated timestamps do not create samples. |
@@ -316,6 +319,7 @@ The guide ships in npm `docs/dispatcher*.md`, with no dependency on a developmen
 | Key | Default | Meaning |
 |---|---|---|
 | `disk` | mapping | Disk thresholds, in GiB (1024³ bytes). |
+| `disk.worktree_share_percent` | `20` | Warn when known worktrees exceed this percentage of their own filesystem; positive and at most 100. Status/doctor/disk events suggest agentctl gc --preview with safe reclaimable bytes. Budgeted reads show n/d; close reports task worktree bytes. |
 | `disk.warn_gb` | `50` | Warn below this available space on any known filesystem. |
 | `disk.critical_gb` | `20` | Critical below this space; must not exceed warn_gb. |
 | `disk.workers` | `2` | Process-wide tree-measurement worker cap shared by disk facts, capacity, previews and GC; integer 1–8. A lower reloaded cap admits no new work until existing workers drain below it. |

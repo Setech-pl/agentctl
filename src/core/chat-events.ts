@@ -206,6 +206,8 @@ const PHONE_MARK = ' 📱';
 const hhmm = (iso: string): string => formatLocalTime(iso).slice(-5);
 const KIND_LABEL: Record<JournalEntry['kind'], string> = {
   'tmux-lost': 'TMUX UTRACONY',
+  'machine-load-high': 'OBCIĄŻENIE',
+  'machine-load-recovered': 'OBCIĄŻENIE OK',
   'report-outputs': 'WYNIKI RAPORTU',
   'review-added': 'DODANO PRZEGLĄD',
   'review-repinned': 'PRZEGLĄD PRZYPIĘTY',

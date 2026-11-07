@@ -111,7 +111,7 @@ export interface GlobalConfig extends Layer {
   /** Seconds watch allows for asynchronous prompt acknowledgement. */
   deliveryConfirmS: number;
   /** Max simultaneous windows per provider (agent). Missing = unlimited. */
-  limits: Partial<Record<AgentName, number>>;
+  limits: Partial<Record<AgentName, number>> & { heavy?: number };
   /** `limits.count_external`: claude/codex terminal sessions outside agentctl's windows count against the limit (detected with ps). */
   countExternal: boolean;
   countReportReady: boolean;
@@ -149,9 +149,9 @@ export interface GlobalConfig extends Layer {
   /** Token usage and plan limits: warning thresholds, the hold of the queue, the tmux status line, where the agents keep their logs. */
   usage: UsageSettings;
   guideLang: 'en' | 'pl';
-  disk: { warnGb: number; criticalGb: number; workers: number; measurementTimeoutS: number };
+  disk: { worktreeSharePercent: number; warnGb: number; criticalGb: number; workers: number; measurementTimeoutS: number };
   git: { timeoutS: number };
-  capacity: { snapshot: boolean; staleMinutes: number; sampleLimit: number; thresholds: number[]; codexRefresh: boolean; claudeUsageProbe: boolean; claudeUsageProbeIntervalMinutes: number; kimiUsageProbe?: boolean; kimiUsageProbeModel?: string };
+  capacity: { loadThreshold?: number; snapshot: boolean; staleMinutes: number; sampleLimit: number; thresholds: number[]; codexRefresh: boolean; claudeUsageProbe: boolean; claudeUsageProbeIntervalMinutes: number; kimiUsageProbe?: boolean; kimiUsageProbeModel?: string };
   /** Set by a long-running process (watch, MCP) when the file on disk does not load and the previous settings stay in force. */
   reloadWarning?: string;
   /** Where the config was (or would be) read from. */
@@ -340,7 +340,7 @@ export const DEFAULT_AGENT_SETTINGS = Object.fromEntries(DEFAULT_PROVIDERS.map(i
 /** The keys accepted in every layer: the global config, `.agentctl.yaml` and (with a few of its own) a spec. docs/configuration.md describes each one. */
 export const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'setup', 'defaults', 'guide', 'review'];
 export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'limited', 'cache', 'state_dir', 'session', 'ui', 'tmux', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git', 'cohort', 'delivery_confirm_s', 'preview', 'providers'];
-export const LIMITS_KEYS = [...AGENT_NAMES, 'count_external', 'count_report_ready'];
+export const LIMITS_KEYS = [...AGENT_NAMES, 'count_external', 'count_report_ready', 'heavy'];
 export const DEFAULTS_KEYS = ['agent', 'model', 'effort', 'remote_control'];
 export const LINK_KEYS = ['from', 'to'];
 export const AGENT_KEYS = ['env', 'accepts_busy_prompt', 'flags', 'effort_args', 'ready_pattern', 'ready_timeout', 'trust_timeout', 'trust_pattern', 'dialog_pattern', 'working_pattern', 'delivery_pattern', 'interrupt_key', 'footer_patterns', 'question_pattern', 'approval_pattern', 'limit_patterns', 'background_patterns', 'overload_patterns'];
@@ -1033,7 +1033,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
         if (typeof raw.limits.count_report_ready === "boolean") countReportReady = raw.limits.count_report_ready;
         else p.add("config.limits.count_report_ready must be true or false");
       }
-      for (const name of activeProviders({ providers })) {
+      for (const name of [...activeProviders({ providers }), 'heavy'] as const) {
         const value = raw.limits[name];
         if (value === undefined) continue;
         if (typeof value === 'number' && Number.isInteger(value) && value > 0) limits[name] = value;
@@ -1079,7 +1079,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
         if (typeof raw.capacity.kimi_usage_probe_model === 'string' && /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(raw.capacity.kimi_usage_probe_model)) Object.assign(capacity, { kimiUsageProbeModel: raw.capacity.kimi_usage_probe_model });
         else p.add('config.capacity.kimi_usage_probe_model must be a model alias or default');
       }
-      checkKeys(raw.capacity, ['snapshot', 'stale_minutes', 'sample_limit', 'thresholds', 'codex_refresh', 'kimi_usage_probe', 'kimi_usage_probe_model', 'claude_usage_probe', 'claude_usage_probe_interval_minutes'], 'config.capacity', p);
+      checkKeys(raw.capacity, ['load_threshold', 'snapshot', 'stale_minutes', 'sample_limit', 'thresholds', 'codex_refresh', 'kimi_usage_probe', 'kimi_usage_probe_model', 'claude_usage_probe', 'claude_usage_probe_interval_minutes'], 'config.capacity', p);
       for (const [key, field] of [['snapshot', 'snapshot'], ['codex_refresh', 'codexRefresh'], ['claude_usage_probe', 'claudeUsageProbe']] as const) {
         if (typeof raw.capacity[key] === 'boolean') capacity[field] = raw.capacity[key];
         else if (raw.capacity[key] !== undefined) p.add(`config.capacity.${key} must be boolean`);
@@ -1088,6 +1088,10 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
         const value = raw.capacity[key];
         if (typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max) capacity[field] = value;
         else if (value !== undefined) p.add(`config.capacity.${key} must be an integer from ${min} to ${max}`);
+      }
+      if (raw.capacity.load_threshold !== undefined) {
+        if (typeof raw.capacity.load_threshold === 'number' && Number.isFinite(raw.capacity.load_threshold) && raw.capacity.load_threshold > 0) Object.assign(capacity, { loadThreshold: raw.capacity.load_threshold });
+        else p.add('config.capacity.load_threshold must be positive');
       }
       if (raw.capacity.thresholds !== undefined) {
         if (Array.isArray(raw.capacity.thresholds) && raw.capacity.thresholds.length <= 20 && raw.capacity.thresholds.every((x) => typeof x === 'number' && x > 0 && x <= 100)) capacity.thresholds = [...new Set(raw.capacity.thresholds as number[])].sort((a, b) => a - b);
@@ -1132,10 +1136,10 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
     if (typeof raw.report.settle_s === 'number' && Number.isFinite(raw.report.settle_s) && raw.report.settle_s >= 0) reportSettleS = raw.report.settle_s;
     else p.add('config.report.settle_s must be a nonnegative number');
   }
-  const disk = { warnGb: 50, criticalGb: 20, workers: 2, measurementTimeoutS: 600 };
+  const disk = { worktreeSharePercent: 20, warnGb: 50, criticalGb: 20, workers: 2, measurementTimeoutS: 600 };
   const git = { timeoutS: 600 };
   for (const [section, target, fields] of [
-    ['disk', disk, { warn_gb: 'warnGb', critical_gb: 'criticalGb', workers: 'workers', measurement_timeout_s: 'measurementTimeoutS' }],
+    ['disk', disk, { worktree_share_percent: 'worktreeSharePercent', warn_gb: 'warnGb', critical_gb: 'criticalGb', workers: 'workers', measurement_timeout_s: 'measurementTimeoutS' }],
     ['git', git, { timeout_s: 'timeoutS' }],
   ] as const) {
     const value = raw[section];
@@ -1148,6 +1152,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
       else (target as unknown as Record<string, number>)[field] = value[key];
     }
   }
+  if (disk.worktreeSharePercent > 100) p.add('config.disk.worktree_share_percent must not exceed 100');
   if (!Number.isInteger(disk.workers) || disk.workers < 1 || disk.workers > 8) p.add('config.disk.workers must be an integer from 1 to 8');
   if (disk.criticalGb > disk.warnGb) p.add('config.disk.critical_gb must not exceed warn_gb');
   const cohort = { doneGraceS: 300 };

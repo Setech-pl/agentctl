@@ -1046,3 +1046,25 @@ Kimi 2.5.0 effective model/effort comes from passive `llm.request.modelAlias/thi
 Claude plan capacity can optionally refresh without an active task: set `capacity.claude_usage_probe: true` (default off). `capacity` and `usage` run a neutral, isolated `/usage` probe at most every 15 minutes, with no prompt/model tokens and no task-window interaction. `capacity.claude_usage_probe_interval_minutes` can increase that interval. Folder trust/login is a one-time manual wait for Marcin; agentctl never answers dialogs. See [configuration](docs/configuration.md#claude-plan-usage-probe) for sources, staleness and parser limits.
 
 Codex CLI 0.167 follow-ups: while Codex is working, `send` uses Tab when its footer advertises "tab to queue message"; idle Codex submits with Enter. Wrapped input is checked against the pasted text, and a follow-up is confirmed only by the task session transcript or hook. Claude Code keeps Enter and Kimi keeps C-m. Requeuing an ID after `queue rm` starts fresh; the prior cancelled attempt is preserved under `state/.history`.
+Machine awareness: `capacity` (also JSON) and `status --detail` show load averages
+for 1/5/15 minutes and free memory in bytes. `capacity.load_threshold` sets the
+1-minute load warning threshold (default: 3 × logical CPUs). Watch records one
+`machine-load-high` event when exceeded and `machine-load-recovered` on return;
+these observations do not block task starts.
+
+Use `weight: heavy` in a task header for costly work. The queue admits at most
+`limits.heavy` heavy tasks across all providers (default 1, positive integer),
+including starts in progress and live task windows. Normal tasks keep using
+provider slots. Queue preview/list explain the heavy-slot wait. Closing the
+window frees its heavy slot; report-ready windows still count. Immediate `new`
+is outside queue admission. MCP structured spec-field exposure is a follow-up;
+raw spec text already accepts the field.
+
+Disk hints: `disk.worktree_share_percent` (default 20, in (0, 100]) warns when
+known task worktrees exceed that share of their own filesystem. Existing
+`disk.warn_gb`/`critical_gb` free-space thresholds also trigger the hint in
+status, doctor and disk transition events: run `agentctl gc --preview`, with
+reclaimable bytes from the same safe default GC plan (dirty/shared/live
+worktrees are excluded). Budgeted readers report reclaimable size as `n/d`;
+run the full preview to measure it. Missing/pending measurements remain marked.
+`close` reports the retained task worktree size, or size before requested removal.

@@ -1,3 +1,4 @@
+import { configureMeasurements, sizeOf } from './fs-measure.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Context } from './context.ts';
@@ -45,6 +46,11 @@ export async function closeTask(ctx: Context, taskArg: string, opts: CloseOption
     if (closed) await recordEvent(ctx, closed, 'closed');
   }
 
+  if (record) {
+    configureMeasurements(config.disk);
+    const sizes = await Promise.all([...new Set(record.repos.filter(r => path.resolve(r.worktree) !== path.resolve(r.path)).map(r => r.worktree))].map(wt => sizeOf(wt, { fresh: true, now: () => runner.now() }).catch(() => null)));
+    ctx.info(`${taskArg}: worktree size: ${sizes.some(n => n === null) ? 'n/d' : sizes.reduce<number>((sum, n) => sum + (n ?? 0), 0)} bytes${opts.rmWorktree ? ' before removal' : ' retained; inspect agentctl gc --preview'}`);
+  }
   if (!opts.rmWorktree || !record) return;
   await removeWorktrees(ctx, taskArg, record.repos);
 }

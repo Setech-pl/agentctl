@@ -1046,3 +1046,25 @@ Rzeczywisty model/effort Kimi 2.5.0 pochodzi z pasywnego `llm.request.modelAlias
 Capacity planu Claude może opcjonalnie odświeżać się bez aktywnego zadania: ustaw `capacity.claude_usage_probe: true` (domyślnie wyłączone). `capacity` i `usage` uruchamiają `/usage` w neutralnej, osobnej sesji najwyżej co 15 minut, bez promptu, tokenów modelu i dotykania okien zadań. `capacity.claude_usage_probe_interval_minutes` pozwala wydłużyć odstęp. Trust/login katalogu wymaga jednorazowej ręcznej akcji Marcina; agentctl nigdy nie odpowiada na dialogi. Szczegóły źródeł, nieaktualności i ograniczeń parsera: [configuration](docs/configuration.md#claude-plan-usage-probe).
 
 Wiadomości do Codex CLI 0.167: gdy Codex pracuje, `send` używa Tab, jeśli stopka pokazuje „tab to queue message”; bezczynny Codex przyjmuje Enter. Zawinięty tekst jest porównywany z wklejoną wiadomością, a dostawę potwierdza tylko transkrypt sesji zadania lub hook. Claude Code zachowuje Enter, Kimi zachowuje C-m. Ponowne dodanie ID po `queue rm` zaczyna świeżą próbę; poprzednia anulowana próba zostaje w `state/.history`.
+Obciążenie maszyny: `capacity` (również JSON) i `status --detail` pokazują średnie
+obciążenie z 1/5/15 minut oraz wolną pamięć w bajtach. `capacity.load_threshold`
+ustawia próg dla 1 minuty (domyślnie 3 × liczba logicznych CPU). Watch zapisuje
+zdarzenia `machine-load-high` i `machine-load-recovered` przy przekroczeniu progu
+i powrocie. Odczyty nie blokują uruchamiania zadań.
+
+Dla kosztownych zadań dodaj `weight: heavy` w nagłówku. Kolejka dopuszcza najwyżej
+`limits.heavy` ciężkich zadań łącznie u wszystkich dostawców (domyślnie 1,
+dodatnia liczba całkowita), uwzględniając trwające starty i żywe okna zadań.
+Zwykłe zadania korzystają z limitów dostawcy. Podgląd i lista kolejki podają
+powód oczekiwania. Zamknięcie okna zwalnia miejsce; okna report-ready nadal się
+liczą. Natychmiastowe `new` pozostaje poza kontrolą kolejki. Udostępnienie pola
+w strukturalnym schemacie MCP jest osobnym zadaniem; tekst specyfikacji już je obsługuje.
+
+Wskazówki dyskowe: `disk.worktree_share_percent` (domyślnie 20, zakres (0, 100])
+ostrzega, gdy znane worktree zadań przekroczą tę część swojego systemu plików.
+Progi wolnego miejsca `disk.warn_gb`/`critical_gb` również wywołują wskazówkę
+w statusie, doctor i zdarzeniach dyskowych: `agentctl gc --preview`, wraz z liczbą
+bajtów możliwych do odzyskania według bezpiecznego planu GC. Worktree z lokalnymi
+zmianami, współdzielone i aktywne są pomijane. Odczyty z budżetem czasu pokazują
+rozmiar odzysku jako `n/d`; pełny podgląd go mierzy. Brakujące i trwające pomiary
+są oznaczone. `close` podaje rozmiar worktree pozostawionego lub przed usunięciem.
