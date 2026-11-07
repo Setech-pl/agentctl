@@ -1,3 +1,4 @@
+import { instanceName } from './instance.ts';
 import type { Context } from './context.ts';
 import { DEFAULT_WINDOW_ICONS } from './icons.ts';
 import type { StatusRow } from './status.ts';
@@ -70,7 +71,7 @@ export async function applyStatusLine(ctx: Context, command: string): Promise<St
   const format = statusRightFormat(command);
   if (!format) return 'unsupported-command';
   if (!(await ctx.tmux.hasSession())) return 'no-session';
-  for (const [option, value] of [['status-right', format], ['status-interval', String(STATUS_INTERVAL)]] as const) {
+  for (const [option, value] of [['status-right', format], ['status-interval', String(STATUS_INTERVAL)], ['status-left', `${instanceName(ctx.config)} `], ['status-left-length', String(Math.max(20, instanceName(ctx.config).length + 1))]] as const) {
     const r = await ctx.tmux.setSessionOption(option, value);
     if (r.code !== 0) return { failed: `tmux set-option ${option}: ${r.stderr.trim() || `exit ${r.code}`}` };
   }

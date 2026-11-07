@@ -106,6 +106,7 @@ export interface GlobalConfig extends Layer {
   /** Where agentctl keeps its own state per task (`<stateDir>/<window>/TASK.md`, setup.log, markers), out of reach of the agents. */
   stateDir: string;
   session: string;
+  ui?: { instanceName?: string };
   tmux?: { socket?: string };
   /** Seconds watch allows for asynchronous prompt acknowledgement. */
   deliveryConfirmS: number;
@@ -178,7 +179,7 @@ export const MCP_ALLOW_GROUPS: Record<string, readonly McpWriteTool[]> = {
 
 export interface BoardSettings {
   modelVersions: Record<string, string>;
-  /** The board names its terminal window "agentctl <version> · board" (OSC 2) and the agentctl tmux session titles the outer terminal (this session only). */
+  /** The board names its terminal window "<instance> <version> · board" (OSC 2) and the agentctl tmux session titles the outer terminal (this session only). */
   windowTitle: boolean;
   /** How many of the most recently active cohorts the board's `k` choice lists; older quiet ones fold into "starsze…". */
   cohortsRecent: number;
@@ -338,7 +339,7 @@ export const DEFAULT_AGENT_SETTINGS = Object.fromEntries(DEFAULT_PROVIDERS.map(i
 
 /** The keys accepted in every layer: the global config, `.agentctl.yaml` and (with a few of its own) a spec. docs/configuration.md describes each one. */
 export const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'setup', 'defaults', 'guide', 'review'];
-export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'limited', 'cache', 'state_dir', 'session', 'tmux', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git', 'cohort', 'delivery_confirm_s', 'preview', 'providers'];
+export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'limited', 'cache', 'state_dir', 'session', 'ui', 'tmux', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git', 'cohort', 'delivery_confirm_s', 'preview', 'providers'];
 export const LIMITS_KEYS = [...AGENT_NAMES, 'count_external', 'count_report_ready'];
 export const DEFAULTS_KEYS = ['agent', 'model', 'effort', 'remote_control'];
 export const LINK_KEYS = ['from', 'to'];
@@ -984,6 +985,17 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   const session = parseString(raw.session, 'config.session', p) ?? 'agentctl';
   if (!/^[A-Za-z0-9_-]+$/.test(session)) p.add('config.session may only contain letters, digits, "_" and "-"');
 
+  let ui: GlobalConfig['ui'];
+  if (raw.ui !== undefined) {
+    if (!isObject(raw.ui)) p.add('config.ui must be a mapping');
+    else {
+      checkKeys(raw.ui, ['instance_name'], 'config.ui', p);
+      const instanceName = parseString(raw.ui.instance_name, 'config.ui.instance_name', p);
+      if (instanceName !== undefined && !/^[\p{L}\p{N}][\p{L}\p{N} ._-]{0,63}$/u.test(instanceName)) p.add('config.ui.instance_name must be 1–64 letters, digits, spaces, dots, underscores or hyphens');
+      ui = instanceName === undefined ? {} : { instanceName };
+    }
+  }
+
   let tmux: GlobalConfig['tmux'];
   if (raw.tmux !== undefined) {
     if (!isObject(raw.tmux)) p.add('config.tmux must be a mapping');
@@ -1158,7 +1170,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
     const configuredUsage = usageMap[`${id}_dir`] !== undefined || ['warn', 'critical', 'queue_hold'].some(k => { const values = usageMap[k]; return isObject(values) && values[id] !== undefined; });
     if (agentMap[id] !== undefined || (isObject(raw.limits) && raw.limits[id] !== undefined) || configuredUsage) warnings.push(`${id} is not in providers; its agent/limit/usage settings are inactive`);
   }
-  const config: GlobalConfig = { ...layer, providers, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, ...(tmux ? { tmux } : {}), deliveryConfirmS: deliveryConfirmS as number, limits, countExternal, countReportReady, preview, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, cohort, overload, limited, collisions, cancel, usage, guideLang, capacity, disk, git, path: file, loaded: exists };
+  const config: GlobalConfig = { ...layer, providers, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, ...(ui ? { ui } : {}), ...(tmux ? { tmux } : {}), deliveryConfirmS: deliveryConfirmS as number, limits, countExternal, countReportReady, preview, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, cohort, overload, limited, collisions, cancel, usage, guideLang, capacity, disk, git, path: file, loaded: exists };
   if (mirror) config.mirrorDir = resolvePath(mirror);
   if (warnings.length) config.warnings = warnings;
   return config;

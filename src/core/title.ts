@@ -1,17 +1,31 @@
-/*
- * The title of the terminal window that shows the board (`board.window_title`). The board writes it with OSC 2 and, where the terminal knows
- * the xterm title stack (CSI 22/23 t), puts the previous title back when it leaves. In the agentctl tmux session the outer terminal's title is
- * set through the session options set-titles and set-titles-string (this session only, never -g).
- */
+import type { Context } from './context.ts';
+import { instanceName } from './instance.ts';
 
-/** "agentctl 0.17.2 · board" */
-export const boardTitle = (version: string): string => `agentctl ${version} · board`;
-
-/** The tmux value of `set-titles-string`: the window name is tmux's own format. */
-export const tmuxTitleString = (version: string): string => `agentctl ${version} · #W`;
-
-/** Save the current title on the terminal's stack, then set ours. */
-export const titleStart = (version: string): string => `\u001b[22;0t\u001b]2;${boardTitle(version)}\u0007`;
-
-/** Put the saved title back. */
+export const boardTitle = (version: string, instance = 'agentctl', role = 'board'): string => `${instance} ${version} · ${role}`;
+export const tmuxTitleString = (version: string, instance = 'agentctl'): string => `${instance} ${version} · #W`;
+/** Save both icon/window titles, then set the window title (OSC 2). */
+export const titleStart = (version: string, instance = 'agentctl', role = 'board'): string => `\u001b[22;0t\u001b]2;${boardTitle(version, instance, role)}\u0007`;
 export const titleEnd = (): string => '\u001b[23;0t';
+
+/** Restore tmux's previous effective title options before popping the terminal title stack. */
+export async function beginTitle(ctx: Context, out: { write(text: string): unknown }, version: string, role: string, insideTmux: boolean): Promise<() => Promise<void>> {
+  const instance = instanceName(ctx.config);
+  const previous = new Map<string, string | undefined>();
+  out.write(titleStart(version, instance, role));
+  if (insideTmux) {
+    for (const [option, value] of [['set-titles', 'on'], ['set-titles-string', tmuxTitleString(version, instance)]]) {
+      const old = await ctx.runner.exec('tmux', ['show-options', '-qv', '-t', `=${ctx.config.session}:`, option!], { readOnly: true }).catch(() => undefined);
+      previous.set(option!, old?.code === 0 && old.stdout.length > 0 ? old.stdout.replace(/\r?\n$/, '') : undefined);
+      await ctx.tmux.setSessionOption(option!, value!).catch(() => undefined);
+    }
+  }
+  let restored = false;
+  return async () => {
+    if (restored) return; restored = true;
+    for (const [option, value] of [...previous].reverse()) {
+      if (value !== undefined) await ctx.tmux.setSessionOption(option, value).catch(() => undefined);
+      else await ctx.runner.exec('tmux', ['set-option', '-u', '-t', `=${ctx.config.session}:`, option]).catch(() => undefined);
+    }
+    out.write(titleEnd());
+  };
+}

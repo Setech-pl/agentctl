@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- UI instance labels: identify prod/dev in the board, tmux status-left and board/watch terminal titles; support `ui.instance_name` and restore prior titles on exit. / Nazwa instancji prod/dev na planszy, pasku tmux i w tytułach board/watch; nadpisanie przez `ui.instance_name` i przywracanie poprzedniego tytułu.
+
 - SOAK: bound session parser caches, discard removed-task progress, and prevent held action keys from queuing stale commands; exit releases notice timers. Add an eight-hour accelerated Ink/resource regression. / Ograniczenie pamięci sesji, usuwanie postępu usuniętych zadań i blokada kolejki powtarzanych akcji; wyjście usuwa timer komunikatu. Dodano przyspieszony test ośmiu godzin planszy.
 
 - INT4: trust wait expiry leaves the live pending task with watch, without a failed queue entry; queue ticks also reconcile older failed entries for live tasks, including while paused. / Po wygaśnięciu oczekiwania na zaufanie żywe zadanie pozostaje pod opieką watch, bez błędu w kolejce; tick usuwa też wcześniejsze nieaktualne błędy żywych zadań, również podczas pauzy.

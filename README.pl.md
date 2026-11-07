@@ -153,6 +153,8 @@ Board pokazuje m.in. stany `needs-attention`, `overloaded`, `working`, `waiting`
 
 Plansza ogranicza pamięć podręczną sesji i usuwa postęp zadań usuniętych podczas długiej pracy. Podczas wykonywania akcji powtórzone klawisze akcji są ignorowane; nawigacja, odświeżanie i wyjście pozostają dostępne.
 
+Nagłówek planszy, status-left tmux i tytuły terminala board/watch pokazują `agentctl` lub `agentctl-dev` według wykrywania środowiska z doctor/version. Etykietę można nadpisać przez `ui: {instance_name: staging}`; przy wyjściu tytuł jest przywracany w terminalach obsługujących stos tytułów xterm.
+
 Gdy brakuje raportu kanonicznego, status, board i events podpowiadają `report_from` dla świeżego pliku Markdown pasującego do ID zadania lub nazwy raportu. Wyszukiwanie obejmuje katalog raportu i worktree zadania (z limitem głębokości i liczby plików, bez zależności); nigdy nie importuje pliku automatycznie.
 
 ### Architektura i przebieg pracy

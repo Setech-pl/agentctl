@@ -52,7 +52,7 @@ await withHarness({ name: 'board-models', cacheRoot: root, config: 'providers: [
   const version = (JSON.parse(fs.readFileSync(path.resolve(import.meta.dirname, '../package.json'), 'utf8')) as { version: string }).version;
   check('the header names the version', wide.includes(`agentctl ${version} board`));
   check('the pane title is the OSC 2 title of the board', h.tmux(['display-message', '-p', '-t', target, '#{pane_title}']).stdout.trim() === `agentctl ${version} · board`);
-  check('set-titles is set for the agentctl session only', h.tmux(['show-options', '-v', '-t', `=${h.session}:`, 'set-titles-string']).stdout.trim() === `agentctl ${version} · #W` && h.tmux(['show-options', '-gv', 'set-titles']).stdout.trim() === 'off' && h.tmux(['show-options', '-gv', 'set-titles-string']).stdout.trim() !== `agentctl ${version} · #W`);
+  check('set-titles is set for the agentctl session only', h.tmux(['show-options', '-v', '-t', `=${h.session}:`, 'set-titles-string']).stdout.trim() === `agentctl-dev ${version} · #W` && h.tmux(['show-options', '-gv', 'set-titles']).stdout.trim() === 'off' && h.tmux(['show-options', '-gv', 'set-titles-string']).stdout.trim() !== `agentctl-dev ${version} · #W`);
   h.tmux(['resize-window', '-t', target, '-x', '80', '-y', '30']);
   const narrow = await until(/cx S 6\.1 XH/);
   check('narrow list remains usable without preview', !narrow.includes('model: gpt-6.1-sol'));

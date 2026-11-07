@@ -1,3 +1,6 @@
+import { applyInstanceLabel } from './instance.ts';
+import { beginTitle } from './title.ts';
+import { packageVersion } from './version.ts';
 import { limitedTick } from './limited.ts';
 import { drainPromptQueue } from './prompt-queue.ts';
 import { mcpWriteNotice } from './mcp-notify.ts';
@@ -263,6 +266,8 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
 }
 
 export interface WatchOptions {
+  titleOutput?: { write(text: string): unknown };
+  insideTmux?: boolean;
   /** Where the configuration is read again from; default: config.yaml next to the one this run started with. */
   configStore?: ConfigStore;
   /** Makes the notifier again when the `notify` section changed. */
@@ -311,6 +316,15 @@ export async function announceResumable(ctx: Context, notifier: Notifier): Promi
 
 /** Foreground loop: tick every `watch.interval` seconds until aborted. */
 export async function runWatch(ctx: Context, notifier: Notifier, opts: WatchOptions = {}): Promise<void> {
+  const insideTmux = opts.insideTmux ?? Boolean(process.env.TMUX);
+  if (insideTmux) await applyInstanceLabel(ctx).catch(() => undefined);
+  const titleOut = opts.titleOutput ?? (process.stdout.isTTY && !ctx.runner.dryRun ? process.stdout : undefined);
+  const restoreTitle = titleOut ? await beginTitle(ctx, titleOut, packageVersion(), 'watch', insideTmux) : undefined;
+  try { await watchLoop(ctx, notifier, opts); }
+  finally { await restoreTitle?.(); }
+}
+
+async function watchLoop(ctx: Context, notifier: Notifier, opts: WatchOptions): Promise<void> {
   const memory = new WatchMemory();
   const store = opts.configStore ?? new ConfigStore(() => loadGlobalConfig(path.dirname(ctx.config.path)), ctx.config);
   let current = notifier;
