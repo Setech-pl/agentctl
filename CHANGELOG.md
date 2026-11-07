@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - Gate: a reclaimer never unlinks a reclaim lock it did not verify this iteration — the sidecar carries a unique token and a fresh re-read must show the exact bytes seen as dead, so a stale read can no longer delete the live reclaim lock a successor installed (review X1). / Bramka: przejmujący nigdy nie usuwa blokady reclaim, której nie zweryfikował w tej iteracji — sidecar niesie unikalny token, a świeży odczyt musi pokazać dokładnie te same bajty, więc nieaktualny odczyt nie usunie już żywej blokady następcy (przegląd X1).
 
+- Gate: the reclaim sidecar is published atomically (a complete temp file hard-linked into place), so a SIGKILL between create and write can no longer leave an empty `.reclaim` file that recovery would wait on forever; an empty or unparsable sidecar counts as dead only past a short grace (review X2). / Bramka: blokada reclaim jest publikowana atomowo (kompletny plik tymczasowy linkowany na miejsce), więc SIGKILL między utworzeniem a zapisem nie zostawia pustego pliku `.reclaim`, na który recovery czekałoby bez końca; pusty lub nieczytelny sidecar uznaje się za martwy dopiero po krótkim okresie gracji (przegląd X2).
+
 ## [0.18.3] - 2026-11-07
 
 - P24: warn on configurable per-filesystem worktree share/free space with safe GC preview reclaimable bytes; report worktree size on close.

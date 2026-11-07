@@ -2,6 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
+/** A reclaim sidecar without a readable owner counts as dead only past this age: its creator may still be writing it. */
+export const RECLAIM_GRACE_MS = 10_000;
+
 /** The owner pid of a reclaim sidecar, whether the current JSON form or a legacy bare pid; null when unreadable. */
 function reclaimPid(sidecar: string): number | null {
   try {
@@ -44,12 +47,15 @@ export async function acquireLock(file: string, onWait = (owner: string) => cons
           // process verified — never a lock a live successor installed since a stale read.
           const reclaim = `${file}.reclaim`;
           const own = JSON.stringify({ token: randomUUID(), pid: process.pid, started: new Date().toISOString() });
-          let fd: number | undefined;
-          try {
-            fd = fs.openSync(reclaim, 'wx');
-            fs.writeFileSync(fd, own);
-          } catch (error) {
-            if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+          // Publish ownership atomically: a complete temp file hard-linked into place. A SIGKILL can no longer leave an
+          // empty sidecar at the lock path — only a temp orphan nobody reads.
+          const tmp = `${reclaim}.${process.pid}.${randomUUID()}.tmp`;
+          fs.writeFileSync(tmp, own);
+          let acquired = false;
+          try { fs.linkSync(tmp, reclaim); acquired = true; }
+          catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+          finally { try { fs.unlinkSync(tmp); } catch { /* raced away */ } }
+          if (!acquired) {
             // Another reclaimer is at it. Its lock outliving its pid means it died inside the synchronous section below:
             // that section either never ran or already finished, so breaking the reclaim lock cannot lose an unlink.
             let sidecar: string;
@@ -57,11 +63,16 @@ export async function acquireLock(file: string, onWait = (owner: string) => cons
             const rpid = reclaimPid(sidecar);
             let rdead = false;
             if (rpid !== null) { try { process.kill(rpid, 0); } catch (e) { rdead = (e as NodeJS.ErrnoException).code === 'ESRCH'; } }
+            else {
+              // An empty or unparsable sidecar is a crashed publish by an older build; dead only past the grace.
+              try { rdead = Date.now() - fs.statSync(reclaim).mtimeMs > RECLAIM_GRACE_MS; } catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') continue; throw e; }
+            }
             if (rdead) {
               // A live successor may have replaced the sidecar since the read above: re-read and delete only those exact bytes.
               let current: string | null = null;
               try { current = fs.readFileSync(reclaim, 'utf8'); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
               if (current === sidecar) { try { fs.unlinkSync(reclaim); } catch { /* raced away */ } }
+              continue;
             }
             await wait();
             continue;
@@ -72,7 +83,6 @@ export async function acquireLock(file: string, onWait = (owner: string) => cons
             if (current === holder) { fs.unlinkSync(file); console.log(`gate lock of dead pid ${pid} removed`); }
           } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
           finally {
-            fs.closeSync(fd);
             // Release only the sidecar this process published: a stolen or replaced one belongs to someone else.
             try { if (fs.readFileSync(reclaim, 'utf8') === own) fs.unlinkSync(reclaim); } catch { /* already gone */ }
           }

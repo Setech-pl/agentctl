@@ -163,6 +163,34 @@ it('X1: a reclaimer never unlinks a reclaim lock a live successor installed sinc
     assert.equal(fs.existsSync(reclaim), false, 'no reclaim lock is left behind');
   } finally { process.kill = originalKill; }
 });
+it('X2: a reclaim sidecar left empty by a SIGKILL mid-publish is reclaimed after the grace, a fresh one is waited on', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const { RECLAIM_GRACE_MS } = await import('../scripts/gate-lock.ts');
+  const lock = path.join(scratch.dir, 'runtimes/.gate-x2.lock');
+  const reclaim = `${lock}.reclaim`;
+  const dead = spawnSync('true', []).pid!;
+  assert.throws(() => process.kill(dead, 0), { code: 'ESRCH' });
+  fs.mkdirSync(path.dirname(lock), { recursive: true });
+  fs.writeFileSync(lock, JSON.stringify({ token: 'STALE', pid: dead, cwd: '/tmp', started: new Date().toISOString() }));
+  // The crash window: the reclaimer was SIGKILLed between the exclusive create and the pid write.
+  fs.writeFileSync(reclaim, '');
+  let waits = 0;
+  const release = await acquireLock(lock, () => {}, async () => {
+    waits++;
+    if (waits === 1) {
+      assert.ok(fs.existsSync(reclaim), 'a fresh unparsable sidecar is inside its grace: waited on, not broken');
+      const old = new Date(Date.now() - RECLAIM_GRACE_MS - 60_000);
+      fs.utimesSync(reclaim, old, old);
+      return;
+    }
+    if (waits > 4) throw new Error('the sidecar of a reclaimer killed mid-publish was never reclaimed');
+  });
+  assert.equal(waits, 1, 'waited out the grace, then reclaimed without another wait');
+  assert.equal(JSON.parse(fs.readFileSync(lock, 'utf8')).pid, process.pid);
+  release();
+  assert.equal(fs.existsSync(lock), false);
+  assert.equal(fs.existsSync(reclaim), false, 'no reclaim lock is left behind');
+});
 it('checks cached runtime version and archive checksum with fakes and no network', () => {
   assert.equal(checkRuntime('/fake/node', '22.14.0', () => 'v22.14.0'), 'v22.14.0');
   assert.equal(checkRuntime('/fake/node', '26.', () => 'v26.13.0'), 'v26.13.0');
