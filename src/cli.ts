@@ -61,6 +61,7 @@ import { pullReady, pullTask } from './core/pull.ts';
 import { reportInfo, shortPath } from './core/report-detect.ts';
 import { sendPrompts, submitDrafts } from './core/send.ts';
 import { resolveRunningTask } from './core/resolve.ts';
+import { promptQueueView, withdrawPrompt } from './core/prompt-queue.ts';
 import { collectStatus, reportStatus, shownRows, statusMarkdown } from './core/status.ts';
 import { summarizeSpecs } from './core/summary.ts';
 import { DesktopNotifier, NOTIFIER_MEMORY_MS, notifierOptionsFor } from './core/notify.ts';
@@ -699,10 +700,26 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('-y, --yes', 'with --clip: do not ask')
     .option('--enter-only <task>', 'paste nothing: show the exact text that an earlier send left in the input field of the task ("nie dostarczono – tekst w polu wpisywania") with a token; refuses any other text')
     .option('--confirm <token>', 'with --enter-only: press Enter if the field is still exactly the text the preview showed')
+    .option('--withdraw <task>', 'take back a waiting message of the task: a queued one is removed, one whose delivery already began is marked stale (the agent may already work on it)')
+    .option('--entry <id>', 'with --withdraw: the id of the message (a unique prefix is enough; peek lists prompt_queue)')
     .action(
-      guarded(async (file: string | undefined, opts: { clip?: boolean; yes?: boolean; dryRun?: boolean; enterOnly?: string; confirm?: string }) => {
+      guarded(async (file: string | undefined, opts: { clip?: boolean; yes?: boolean; dryRun?: boolean; enterOnly?: string; confirm?: string; withdraw?: string; entry?: string }) => {
         const ctx = contextFor(Boolean(opts.dryRun));
         if (opts.confirm !== undefined && opts.enterOnly === undefined) throw new AgentctlError('--confirm belongs to --enter-only');
+        if (opts.entry !== undefined && opts.withdraw === undefined) throw new AgentctlError('--entry belongs to --withdraw');
+        if (opts.withdraw !== undefined) {
+          if (file !== undefined || opts.clip || opts.enterOnly) throw new AgentctlError('--withdraw takes a task and nothing else: no file, no --clip, no --enter-only');
+          const target = await resolveRunningTask(ctx, opts.withdraw);
+          let id = opts.entry;
+          if (!id) {
+            const waitingFor = promptQueueView(ctx, target.window);
+            if (waitingFor.length === 0) throw new AgentctlError(`${target.task}: nothing waits to be withdrawn`, 'prompt_queue in peek/status lists the waiting messages.');
+            if (waitingFor.length > 1) throw new AgentctlError(`${target.task}: ${waitingFor.length} messages wait`, `Choose one with --entry: ${waitingFor.map((p) => `${p.id.slice(0, 8)} (${p.state})`).join(', ')}.`);
+            id = waitingFor[0]!.id;
+          }
+          line((await withdrawPrompt(ctx, target.window, id)).message);
+          return;
+        }
         if (opts.enterOnly !== undefined) {
           if (file !== undefined || opts.clip) throw new AgentctlError('--enter-only takes a task and nothing else: no file, no --clip');
           const target = await resolveRunningTask(ctx, opts.enterOnly);

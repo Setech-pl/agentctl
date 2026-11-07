@@ -166,6 +166,7 @@ const SOURCES: Record<string, string> = { hook: 'hook UserPromptSubmit', transcr
 /** What `send` says when the delivery is not simply done. */
 export function deliveryNote(record: TaskRecord | undefined): string | undefined {
   if (!record) return undefined;
+  if (record.deliveryResult === 'stale' && record.promptDelivery !== 'sent') return 'wycofana po rozpoczęciu dostarczania (stale) – agent może już nad nią pracować';
   if (record.deliveryResult === 'not-delivered-in-field' && record.promptDelivery !== 'sent') {
     const why = record.promptError ? ` (${record.promptError.replace(/^[^:]*:\s*/, '').split('. ')[0]})` : '';
     // Without the recorded image of our paste `--enter-only` has nothing to compare with: only the window is left.

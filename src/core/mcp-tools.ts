@@ -60,6 +60,7 @@ import { peekTask } from './peek.ts';
 import { joinReports, markPulled, noReadyMessage, selectReady } from './pull.ts';
 import { describeTargets, listTargets, matchTask, resolveRunningTask } from './resolve.ts';
 import { sendPrompts, submitDrafts } from './send.ts';
+import { withdrawPrompt } from './prompt-queue.ts';
 import { resolveSpec, splitSpecs } from './spec.ts';
 import type { RawSpec } from './spec.ts';
 import { collectStatus, shownRows } from './status.ts';
@@ -774,7 +775,15 @@ async function writeTool(
   }
 }
 
-async function runSend(deps: McpDeps, args: { task: string; text?: string; enter_only?: boolean; confirm?: boolean; token?: string }): Promise<ToolResult> {
+async function runSend(deps: McpDeps, args: { task: string; text?: string; enter_only?: boolean; confirm?: boolean; token?: string; withdraw?: string }): Promise<ToolResult> {
+  if (args.withdraw !== undefined) {
+    if (args.text !== undefined && args.text !== '') return fail('withdraw takes no text');
+    return writeTool(deps, 'send', { task: args.task, detail: `withdraw ${args.withdraw}` }, async (ctx) => {
+      const target = await resolveRunningTask(ctx, args.task);
+      const done = await withdrawPrompt(ctx, target.window, args.withdraw!);
+      return { text: done.message, executed: true, announce: `send ${target.task} (withdraw ${done.id.slice(0, 8)})`, detail: `withdraw ${done.outcome} ${done.id.slice(0, 8)}`, data: { outcome: done.outcome, id: done.id } };
+    });
+  }
   if (args.enter_only) {
     if (args.text !== undefined && args.text !== '') return fail('enter_only presses Enter only: do not give text');
     // Its own permission (send_enter): pressing Enter for a text that stands in a field is not pasting, and needs a preview and a confirm.
@@ -1220,8 +1229,9 @@ export const MCP_TOOLS: McpToolDef[] = [
       `WRITE, off unless the user put "send" in mcp.allow. Pastes a follow-up prompt (up to ${MAX_SEND_CHARS} characters) into the window of a running task, as if the user typed it, and presses Enter. ` +
       'To a working agent the message goes into the agent\'s own queue. "Delivered" is said only on exact proof (the hook of the agent or its session transcript holds exactly this message); the answer is otherwise "w kolejce agenta – niepotwierdzone" (the screen shows it queued, nothing confirms it) or "nie dostarczono – tekst w polu wpisywania" (the paste stands in the input field). agentctl presses Enter only in the call that pastes, never later by itself. ' +
       'In the last case enter_only: true (no text) presses Enter for that text. It needs its own permission, send_enter, in mcp.allow. The first call (no confirm) only previews: it returns the exact text of the field, the screen state and a token for those bytes; show the text to the user, then call again with confirm: true and that token. It refuses (an error, no key) when the field is not byte for byte what agentctl pasted and what the preview showed, or a dialog is open. The answer keeps "Enter sent" apart from "delivery confirmed". An agent with an open question gets nothing pasted. ' +
+      'withdraw: "<id>" (no text; peek lists prompt_queue with ids) takes back a waiting message: a queued one is removed, one whose delivery already began is marked stale instead (the agent may already work on it). ' +
       'Use it only when the user asked you to instruct an agent; say what you will send first. The user gets a desktop notification.',
-    input: { task: taskArg, text: z.string().min(1).max(MAX_SEND_CHARS).optional().describe('The prompt for the agent. Required unless enter_only is true.'), enter_only: z.boolean().optional().describe('true: paste nothing, press Enter for the text that an earlier send left in the input field (only that text, only while the whole field is exactly our paste). Needs send_enter in mcp.allow; without confirm it only previews.'), confirm: z.boolean().optional().describe('With enter_only: true presses Enter after a preview (needs token); without it nothing is pressed.'), token: z.string().min(1).max(64).optional().describe('With enter_only and confirm: the token that the preview returned for the exact text of the field.') },
+    input: { task: taskArg, text: z.string().min(1).max(MAX_SEND_CHARS).optional().describe('The prompt for the agent. Required unless enter_only is true or withdraw is set.'), enter_only: z.boolean().optional().describe('true: paste nothing, press Enter for the text that an earlier send left in the input field (only that text, only while the whole field is exactly our paste). Needs send_enter in mcp.allow; without confirm it only previews.'), confirm: z.boolean().optional().describe('With enter_only: true presses Enter after a preview (needs token); without it nothing is pressed.'), token: z.string().min(1).max(64).optional().describe('With enter_only and confirm: the token that the preview returned for the exact text of the field.'), withdraw: z.string().min(1).max(64).optional().describe('Take back a waiting message: its id (a unique prefix is enough). A queued one is removed; one whose delivery began is marked stale. No text then.') },
     annotations: { title: 'Send a prompt to a running task', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     run: (deps, args) => guarded(() => runSend(deps, args as { task: string; text?: string; enter_only?: boolean; confirm?: boolean; token?: string })),
   }),
