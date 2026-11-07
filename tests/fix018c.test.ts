@@ -1,0 +1,98 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { it } from 'node:test';
+import { provider } from '../src/core/providers/registry.ts';
+import { launchEnvironment, validateLaunch } from '../src/core/safety.ts';
+import { collectTaskUsage, readTaskSessions } from '../src/core/usage.ts';
+import { UsageReader } from '../src/core/usage-sources.ts';
+import { emptyStats, sumBuckets } from '../src/core/usage-parse.ts';
+import { feedKimiLine, kimiSessions } from '../src/core/providers/kimi-usage.ts';
+import { inspectReport, REPORT_END, reportFingerprint } from '../src/core/report-state.ts';
+import { readTaskRecord, renderTaskMd } from '../src/core/taskstore.ts';
+import { makeConfig, makeContext, seedTask, useScratch, REPO_ROOT } from './helpers.ts';
+const scratch = useScratch(), kimi = provider('kimi');
+let worldCount = 0;
+const capture = (effort: string): Record<string, any>[] => JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'tests/fixtures/kimi-250-fix3', `${effort}.json`), 'utf8'));
+function world(effort: 'low' | 'high') {
+  const root = scratch.sub(`${effort}-${++worldCount}`), home = path.join(root, 'kimi'), wt = path.join(root, 'wt');
+  fs.mkdirSync(home); fs.mkdirSync(wt);
+  fs.writeFileSync(path.join(home, 'config.toml'), `default_permission_mode='yolo'\n[permission]\ndangerous_command_guard=true\n[models.'kimi-code/k3']\nsupport_efforts=['low','high','max']\n`);
+  const rows = capture(effort), started = rows[0]!.created_at;
+  const config = makeConfig(root, `providers: [claude, codex, kimi]\nagents:\n  kimi:\n    env: {KIMI_CODE_HOME: ${home}, KIMI_MODEL_THINKING_EFFORT: max}\n`);
+  const record = seedTask(config, `REAL-${effort}`, { agent: 'kimi', model: 'k3', effort, requested: { agent: 'kimi', model: 'k3', effort }, started: new Date(started - 1000).toISOString(), repos: [{ path: wt, worktree: wt }], deliveryId: 'capture', deliveryStartedAt: new Date(started - 500).toISOString(), pendingPrompt: rows.find(o => o.type === 'turn.prompt')!.input[0].text });
+  const dir = path.join(home, 'sessions', 'workspace', `session_${effort}`), file = path.join(dir, 'agents/main/wire.jsonl');
+  fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, rows.map(o => JSON.stringify(o)).join('\n') + '\n');
+  fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({ id: `session_${effort}`, cwd: wt, createdAt: started }));
+  fs.writeFileSync(path.join(home, 'session_index.jsonl'), JSON.stringify({ sessionId: `session_${effort}`, sessionDir: dir, workDir: wt }) + '\n');
+  return { config, record, home, dir, file, rows };
+}
+for (const effort of ['low', 'high'] as const) it(`FIX3 real ${effort}: launch overrides stale env, binds session, parses wire usage and persists effective observation`, async () => {
+  const w = world(effort), reader = new UsageReader(undefined);
+  assert.equal(launchEnvironment(w.config, { agent: 'kimi', model: w.record.model, task: w.record.task, effort }, { KIMI_MODEL_THINKING_EFFORT: 'high' }).KIMI_MODEL_THINKING_EFFORT, effort);
+  assert.equal(kimiSessions(reader, w.home, w.record, w.record.repos.map(r => r.worktree), []).length, 1);
+  const totals = w.rows.filter(o => o.type === 'usage.record').reduce((a, o) => ({ input: a.input + o.usage.inputOther, output: a.output + o.usage.output, cacheRead: a.cacheRead + o.usage.inputCacheRead, cacheWrite: a.cacheWrite + o.usage.inputCacheCreation }), { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+  const usage = collectTaskUsage(w.config, reader, [w.record], Date.now()).get(w.record.task)!;
+  assert.equal(usage.sessions, 1); assert.deepEqual(usage.total, totals); assert.ok(usage.total.input > 0 && usage.total.output > 0 && usage.total.cacheRead > 0);
+  assert.equal(usage.observed?.effort, effort); assert.equal(usage.observed?.model, 'kimi-code/k3'); assert.equal(usage.warning, undefined);
+  assert.deepEqual(collectTaskUsage(w.config, reader, [w.record], Date.now()).get(w.record.task)!.total, totals, 'incremental reread does not duplicate usage');
+  const { ctx } = makeContext(w.config);
+  await kimi.events.poll!(ctx, w.record);
+  assert.equal(readTaskRecord(w.config, w.record.window)?.observed?.effort, effort);
+  assert.equal(readTaskRecord(w.config, w.record.window)?.observedWarning, undefined);
+  assert.equal(readTaskSessions(w.config, w.record.window).kimi?.[0]?.id, `session_${effort}`);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(w.config.stateDir, w.record.window, 'event.json'), 'utf8')).outcome, 'turn-complete');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(w.config.stateDir, w.record.window, 'delivery-evidence.json'), 'utf8')).accepted, true);
+  fs.rmSync(path.join(w.dir, 'state.json'));
+  assert.equal(kimiSessions(new UsageReader(undefined), w.home, w.record, w.record.repos.map(r => r.worktree), [])[0]?.id, `session_${effort}`, 'index fallback');
+});
+it('FIX3 effective mismatch warns, unknown protocol contributes no tokens, nested loop events do not replace the outer type', async () => {
+  const w = world('low'); w.record.requested.effort = 'high';
+  const { ctx } = makeContext(w.config); await kimi.events.poll!(ctx, w.record);
+  const stored = readTaskRecord(w.config, w.record.window)!;
+  assert.equal(stored.observedWarning, 'observed differs from requested');
+  assert.match(renderTaskMd(stored, 'test'), /requested:[\s\S]*observed:/);
+  assert.equal(collectTaskUsage(w.config, new UsageReader(undefined), [w.record], Date.now()).get(w.record.task)?.warning, 'observed differs from requested');
+  const stats = emptyStats('kimi');
+  for (const row of [{ type: 'metadata', protocol_version: '99.0' }, ...capture('low').slice(1)]) feedKimiLine(stats, JSON.stringify(row));
+  assert.deepEqual(sumBuckets(stats.buckets), { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+});
+for (const mode of ['manual', 'yolo', 'auto', 'unknown']) for (const guard of [true, false]) it(`FIX3 permissions ${mode}, guard ${guard}: launch and doctor agree without writing config`, () => {
+  const root = scratch.sub(`perm-${mode}-${guard}`), home = path.join(root, 'kimi'); fs.mkdirSync(home);
+  const file = path.join(home, 'config.toml'), original = `default_permission_mode='${mode}'\n[permission]\ndangerous_command_guard=${guard}\n[[permission.rules]]\ndecision='allow'\npattern='Bash(git status)'\n`;
+  fs.writeFileSync(file, original);
+  const config = makeConfig(root, `providers: [claude, codex, kimi]\nagents:\n  kimi:\n    env: {KIMI_CODE_HOME: ${home}}\n`), order = { agent: 'kimi' as const, task: 'P', model: 'k3', effort: 'low' as const };
+  const allowed = ['manual', 'yolo'].includes(mode) && guard;
+  if (allowed) assert.doesNotThrow(() => validateLaunch(config, order, {})); else assert.throws(() => validateLaunch(config, order, {}));
+  const line = kimi.doctor({ found: true, version: '2.5.0', raw: '2.5.0', features: {} }, {}, config).find(l => l.name === 'kimi permissions')!;
+  assert.equal(line.level, allowed ? 'ok' : 'fail'); assert.match(line.text, /Bash\(git status\)/);
+  for (const value of ['false', '0', 'off', 'no']) { assert.throws(() => validateLaunch(config, order, { KIMI_CODE_DANGEROUS_COMMAND_GUARD: value })); assert.equal(kimi.doctor({ found: true, version: '2.5.0', raw: '', features: {} }, { KIMI_CODE_DANGEROUS_COMMAND_GUARD: value }, config).find(l => l.name === 'kimi permissions')?.level, 'fail'); }
+  assert.equal(fs.readFileSync(file, 'utf8'), original);
+});
+it('FIX3 in-place follow-ups: current marker survives duplicated stale directives; unchanged, stale-only and non-final markers remain unready', () => {
+  const config = makeConfig(scratch.sub('report')), r = seedTask(config, 'REPORT', { attemptId: 'current', turnEndedAt: undefined });
+  fs.mkdirSync(path.dirname(r.report), { recursive: true });
+  const edited = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'tests/fixtures/kimi-250-fix3/report-edit.json'), 'utf8')).after as string;
+  const text = edited.replace('fix3-current', 'current').replace('Follow-up verified.', 'Follow-up added in place') + REPORT_END + '\n';
+  fs.writeFileSync(r.report, text);
+  assert.equal(inspectReport(config, r, Date.now(), false).ready, true);
+  r.deliveryStartedAt = new Date().toISOString(); r.promptKind = 'followup'; r.deliveryReportBaseline = reportFingerprint(r.report);
+  assert.equal(inspectReport(config, r, Date.now(), false).ready, false);
+  fs.writeFileSync(r.report, text.replace('added', 'updated')); assert.equal(inspectReport(config, r, Date.now(), false).ready, true);
+  fs.writeFileSync(r.report, text.replace('<!-- agentctl:attempt current -->\n', '')); assert.equal(inspectReport(config, r, Date.now(), false).ready, false);
+  fs.writeFileSync(r.report, text + 'Still writing\n'); assert.equal(inspectReport(config, r, Date.now(), false).ready, false);
+});
+it('FIX3 reparses cached pre-fix zero usage and real permission captures distinguish manual from yolo', () => {
+  const w = world('low'), cache = path.join(w.home, 'old-cache.json'), stats = emptyStats('kimi');
+  stats.kimi = { protocol: '1.5' };
+  const size = fs.statSync(w.file).size;
+  fs.writeFileSync(cache, JSON.stringify({ v: 2, meta: {}, files: { [w.file]: { size, offset: size, stats } }, plans: {} }));
+  const reader = new UsageReader(cache);
+  assert.ok(sumBuckets(reader.stats(w.file, 'kimi')!.buckets).input > 0);
+  const captured = (mode: string): Record<string, any>[] => JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'tests/fixtures/kimi-250-fix3', `permission-${mode}.json`), 'utf8'));
+  const manual = captured('manual'), yolo = captured('yolo');
+  assert.equal(manual.find(o => o.type === 'interaction.request')?.request.display.command, 'git status');
+  assert.ok(yolo.some(o => o.type === 'permission.set_mode' && o.mode === 'yolo'));
+  assert.ok(!yolo.some(o => o.type === 'interaction.request'));
+  assert.ok(yolo.some(o => o.type === 'turn.ended' && o.reason === 'completed'));
+});

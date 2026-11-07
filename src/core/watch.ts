@@ -1,3 +1,11 @@
+import { applyInstanceLabel } from './instance.ts';
+import { beginTitle } from './title.ts';
+import { packageVersion } from './version.ts';
+import { limitedTick } from './limited.ts';
+import { drainPromptQueue } from './prompt-queue.ts';
+import { mcpWriteNotice } from './mcp-notify.ts';
+import { reviewTick } from './review.ts';
+import { journalOutputs } from './outputs.ts';
 import { deliverPendingPrompt } from './prompt-delivery.ts';
 import { overloadTick } from './overload.ts';
 import { diskTick } from './disk.ts';
@@ -15,7 +23,7 @@ import { Alerts } from './alert.ts';
 import { awayTick } from './away.ts';
 import { phoneTick } from './phone-send.ts';
 import type { Notifier } from './notify.ts';
-import { limitText, reportReadyText } from './event-command.ts';
+import { reportReadyText } from './event-command.ts';
 import type { SelfArgv } from './events.ts';
 import { readVerdict } from './verdict.ts';
 import { collectStatus } from './status.ts';
@@ -72,7 +80,7 @@ const NOTIFY_ON: Partial<Record<TaskState, (row: StatusRow) => string>> = {
   'needs-trust': (r) => `${r.task} czeka na zaufanie folderu (trust)`,
   'needs-input': (r) => (r.question ? `${r.task}: ${r.question}` : `${r.task} zadaje pytanie i czeka na odpowiedź`),
   overloaded: r => `${r.task}: dostawca przeciążony (overloaded)`,
-  limited: (r) => limitText(r),
+  // Limited notifications use a durable provider episode, shared with hooks.
   dead: (r) => `${r.task}: okno zniknęło bez raportu`,
   orphan: (r) => `${r.task}: okno bez pliku stanu (orphan) – agentctl adopt ${r.task} --report <ścieżka>`,
 };
@@ -106,7 +114,7 @@ export function detectTransitions(memory: WatchMemory, rows: StatusRow[], nowMs:
 /** The history gets a record when a report is ready (`history.jsonl`); the same report is recorded once. */
 async function recordReport(ctx: Context, task: string): Promise<void> {
   const record = listTaskRecords(ctx.config).find((r) => r.task === task);
-  if (record) await recordEvent(ctx, record, 'report');
+  if (record) { await recordEvent(ctx, record, 'report'); await journalOutputs(ctx, record); }
 }
 
 const JOURNALED: Partial<Record<TaskState, JournalKind>> = { 'needs-attention': 'needs-attention', overloaded: 'overloaded', 'report-ready': 'report-ready', 'needs-trust': 'needs-trust', 'needs-input': 'needs-input', limited: 'limited', dead: 'dead', orphan: 'orphan' };
@@ -114,7 +122,7 @@ const JOURNALED: Partial<Record<TaskState, JournalKind>> = { 'needs-attention': 
 /** The transition goes to the journal that `events` reads (the notification only reaches the desktop). */
 async function journalTransition(ctx: Context, row: StatusRow, e: WatchEvent): Promise<void> {
   const kind = JOURNALED[e.to];
-  if (!kind) return;
+  if (!kind || row.tmuxLost) return;
   const verdict = kind === 'report-ready' ? readVerdict(row.reportPath, ctx.config.notify.verdictPattern) : undefined;
   await recordJournal(ctx, { kind, task: row.task, text: e.notification ?? e.to, ...(verdict ? { verdict } : {}) });
 }
@@ -198,9 +206,11 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   let allRows = await collectStatus(ctx, { progress: false, archived: true });
   for (const row of allRows) {
     const record = !row.closed && !row.cancelled ? readTaskRecord(ctx.config, row.windowName) : undefined;
-    if (record && ['pending', 'sending', 'confirming', 'needs-attention'].includes(record.promptDelivery ?? '')) {
+    if (row.tmuxLost) continue;
+    if (record && ['pending', 'sending', 'confirming', 'needs-attention', 'needs-input'].includes(record.promptDelivery ?? '')) {
       if (record.promptDelivery === 'pending' && row.window !== 'alive') continue;
       const result = await deliverPendingPrompt(ctx, row.windowName);
+      // The baseline tick has no transition notifier yet; later deadlines use NOTIFY_ON below.
       if (result === 'needs-attention' && record.promptDelivery !== 'needs-attention' && !memory.started) {
         const updated = readTaskRecord(ctx.config, row.windowName);
         const text = `${row.task}: ${updated?.promptError}`;
@@ -210,9 +220,12 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
       if (result !== 'pending') allRows = await collectStatus(ctx, { progress: false, archived: true });
     }
   }
+  for (const record of listTaskRecords(ctx.config)) if (!record.closed && !record.cancelled) await drainPromptQueue(ctx, record.window);
   // A waiting agent may have written its report somewhere else than the spec says: record a candidate without changing the execution state.
   if (await syncWaitingReports(ctx, allRows)) allRows = await collectStatus(ctx, { progress: false, archived: true });
+  for (const record of listTaskRecords(ctx.config)) await journalOutputs(ctx, record);
   const rows = allRows.filter((r) => !r.closed && !r.cancelled);
+  await limitedTick(ctx, rows, notifier).catch(e => ctx.out(`limited recovery: ${errorMessage(e)}`));
   await overloadTick(ctx, rows, notifier).catch(e => ctx.out(`overload recovery: ${errorMessage(e)}`));
   await decorateWindows(ctx, memory, rows);
   const now = ctx.runner.now();
@@ -224,11 +237,13 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
     await ctx.runner.appendFile(watchLogPath(ctx), `${new Date(ctx.runner.now()).toISOString()}  ${text}\n`);
     ctx.out(text);
   };
+  await reviewTick(ctx).catch((e: unknown) => startLog(`review: ${errorMessage(e)}`));
   await queueTick(ctx, memory.queue, notifier, { self: options.self, signal: options.signal, rows: allRows, log: startLog });
   await announceBlocked(ctx, notifier, allRows, { self: options.self, log: startLog }).catch((e: unknown) => startLog(`queue: ${errorMessage(e)}`));
   await cohortTick(ctx, notifier, allRows, startLog).catch((e: unknown) => startLog(`cohort: ${errorMessage(e)}`));
   await collisionTick(ctx, memory.collisions, notifier, startLog).catch((e: unknown) => startLog(`collisions: ${errorMessage(e)}`));
   await diskTick(ctx, notifier).catch((e: unknown) => startLog(`disk: ${errorMessage(e)}`));
+  await mcpWriteNotice(ctx, async text => { await notifier.notify('agentctl', text); }).catch((e: unknown) => startLog(`mcp notices: ${errorMessage(e)}`));
   await usageTick(ctx, notifier, startLog).catch((e: unknown) => startLog(`usage: ${errorMessage(e)}`));
   // The phone: requests that failed before are tried again (a network error never stops the watcher).
   for (const l of await phoneTick(ctx).catch((e: unknown) => [`phone: ${errorMessage(e)}`])) await startLog(l);
@@ -251,6 +266,8 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
 }
 
 export interface WatchOptions {
+  titleOutput?: { write(text: string): unknown };
+  insideTmux?: boolean;
   /** Where the configuration is read again from; default: config.yaml next to the one this run started with. */
   configStore?: ConfigStore;
   /** Makes the notifier again when the `notify` section changed. */
@@ -282,7 +299,7 @@ export async function reloadConfig(ctx: Context, store: ConfigStore, by = 'watch
     const text = limitsDiffText(before.limits, r.config.limits);
     if (text) await recordJournalOnce(ctx, { kind: 'limits-changed', text });
   }
-  if (r.error || r.changed || before.reloadWarning) noteConfigState(configStatePath(r.config), by, ctx.runner.now(), r.error);
+  if (r.error || r.changed || before.reloadWarning) noteConfigState(configStatePath(r.config), by, ctx.runner.now(), r.error ?? r.config.reloadWarning);
   return r;
 }
 
@@ -299,6 +316,15 @@ export async function announceResumable(ctx: Context, notifier: Notifier): Promi
 
 /** Foreground loop: tick every `watch.interval` seconds until aborted. */
 export async function runWatch(ctx: Context, notifier: Notifier, opts: WatchOptions = {}): Promise<void> {
+  const insideTmux = opts.insideTmux ?? Boolean(process.env.TMUX);
+  if (insideTmux) await applyInstanceLabel(ctx).catch(() => undefined);
+  const titleOut = opts.titleOutput ?? (process.stdout.isTTY && !ctx.runner.dryRun ? process.stdout : undefined);
+  const restoreTitle = titleOut ? await beginTitle(ctx, titleOut, packageVersion(), 'watch', insideTmux) : undefined;
+  try { await watchLoop(ctx, notifier, opts); }
+  finally { await restoreTitle?.(); }
+}
+
+async function watchLoop(ctx: Context, notifier: Notifier, opts: WatchOptions): Promise<void> {
   const memory = new WatchMemory();
   const store = opts.configStore ?? new ConfigStore(() => loadGlobalConfig(path.dirname(ctx.config.path)), ctx.config);
   let current = notifier;

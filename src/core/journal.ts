@@ -1,9 +1,10 @@
+import { secretRedactor } from './secret-redaction.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { GlobalConfig } from './config.ts';
 import type { Context } from './context.ts';
 import { notifyPhone } from './phone-send.ts';
-import { readTaskRecord } from './taskstore.ts';
+import { listTaskRecords, readTaskRecord } from './taskstore.ts';
 import { isObject, windowName } from './util.ts';
 
 /*
@@ -11,7 +12,7 @@ import { isObject, windowName } from './util.ts';
  * the limits commands write it; `agentctl events` and the MCP tool `events_since` read it for a chat that gets no notifications.
  */
 
-export const JOURNAL_KINDS = ['needs-attention', 'report-candidate', 'overloaded', 'overload-retry', 'queue-retry', 'mcp-write', 'disk-warn', 'disk-critical', 'disk-ok', 'report-ready', 'queue-start', 'queue-failed', 'needs-input', 'needs-trust', 'blocked', 'cancelled', 'limited', 'dead', 'orphan', 'cohort-done', 'usage', 'limits-changed', 'report-detected'] as const;
+export const JOURNAL_KINDS = ['tmux-lost', 'report-outputs', 'review-added', 'review-repinned', 'gc_suggest', 'limited-resume', 'needs-attention', 'report-candidate', 'overloaded', 'overload-retry', 'queue-retry', 'mcp-write', 'disk-warn', 'disk-critical', 'disk-ok', 'report-ready', 'queue-start', 'queue-failed', 'setup-started', 'setup-finished', 'setup-failed', 'needs-input', 'needs-trust', 'blocked', 'cancelled', 'limited', 'dead', 'orphan', 'cohort-done', 'usage', 'limits-changed', 'report-detected', 'delivery'] as const;
 export type JournalKind = (typeof JOURNAL_KINDS)[number];
 
 export interface JournalEntry {
@@ -22,8 +23,16 @@ export interface JournalEntry {
   cohort?: string;
   /** What the notification said, or a short statement of the event. */
   text: string;
+  /** One repository command, with a result code only after it exits. */
+  setup?: { repo: string; repoIndex: number; repoCount: number; command: string; commandIndex: number; commandCount: number; log: string; exitCode?: number };
   /** The verdict line of a report that became ready. */
   verdict?: string;
+  reportHash?: string;
+  /** `report-outputs` of an automatic/manual review: the task it reviews, so its decisions are shown as the reviewer's. */
+  reviewOf?: string;
+  decisions?: string[];
+  actions?: Array<{ title: string; shell: string }>;
+  gc_preview?: unknown;
   /** `usage` only: how far the plan is (`critical` is what goes to the phone). */
   level?: 'warn' | 'critical';
   /** The event went to the phone: `sent`, or `queued` when the first request failed and the watcher retries. Absent: not sent (away off, event not chosen, no phone). */
@@ -35,7 +44,10 @@ export const journalPath = (config: Pick<GlobalConfig, 'path'>): string => path.
 /** Append an event. A journal that cannot be written never stops the work it describes. */
 export async function recordJournal(ctx: Context, entry: Omit<JournalEntry, 'at'>): Promise<void> {
   const cohort = entry.cohort ?? (entry.task ? readTaskRecord(ctx.config, windowName(entry.task))?.cohort : undefined);
-  const full: JournalEntry = { at: new Date(ctx.runner.now()).toISOString(), ...entry, ...(cohort ? { cohort } : {}) };
+  const full: JournalEntry = secretRedactor([ctx.config, process.env, entry], new Set(listTaskRecords(ctx.config).map(r => r.task)))({ at: new Date(ctx.runner.now()).toISOString(), ...entry, ...(cohort ? { cohort } : {}) });
+  // Belt and braces: a bulky payload once flooded events_since with JSON fragments for days (a gc_suggest carrying a whole
+  // GC plan). Known bulky fields are replaced by a pointer past a bound; the text always stays.
+  if (full.gc_preview !== undefined && Buffer.byteLength(JSON.stringify(full)) > 4000) full.gc_preview = { dropped: 'oversized payload; details via gc_preview / agentctl gc' };
   // The phone gets what was announced on the Mac (this is written once per announcement), and the entry says whether it went.
   const phone = await notifyPhone(ctx, full).catch(() => undefined);
   if (phone) full.phone = phone;

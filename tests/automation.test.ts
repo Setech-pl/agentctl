@@ -1,3 +1,4 @@
+import { composerFixture } from './composer-fixture.ts';
 import { acknowledgingRespond } from './helpers.ts';
 import { completedRecordFromSpec as recordFromSpec } from './helpers.ts';
 import assert from 'node:assert/strict';
@@ -43,7 +44,7 @@ function makeContext(config: Config, options: RecordingOptions = {}, confirm?: (
 type Config = ReturnType<typeof makeConfig>;
 type Respond = (cmd: string, args: string[], opts: ExecOptions) => Partial<ExecResult> | undefined;
 
-const IDLE = 'Welcome\n❯ Try "x"';
+const IDLE = composerFixture('Welcome\n❯ Try "x"');
 const WORKING = 'Thinking…\nesc to interrupt';
 const TRUST = 'Quick safety check: do you trust this folder?\n❯ 1. Yes, I trust this folder';
 
@@ -73,7 +74,7 @@ class Machine {
 
 function specFor(config: Config, task: string, extra = '', agent = 'claude', model = 'opus'): ResolvedSpec {
   const dir = path.dirname(config.cache);
-  const text = `---\ntask: ${task}\nagent: ${agent}\nmodel: ${model}\neffort: high\nreport: ${dir}/${task}.md\n${extra}repos:\n  - {path: ${dir}/app, worktree: ${dir}/app-${task}, branch: ${task.toLowerCase()}}\n---\nDo ${task}.\n`;
+  const text = `---\ntask: ${task}\nagent: ${agent}\nmodel: ${model}\neffort: high\nreport: ${config.cache}/${task}.md\n${extra}repos:\n  - {path: ${dir}/app, worktree: ${dir}/app-${task}, branch: ${task.toLowerCase()}}\n---\nDo ${task}.\n`;
   return resolveSpec(splitSpecs(text)[0]!, { config, loadProject: () => undefined });
 }
 
@@ -82,7 +83,7 @@ function seed(config: Config, spec: ResolvedSpec, startedMs: number): void {
   fs.writeFileSync(taskFile(config, spec.window), renderTaskMd(recordFromSpec(spec, config, startedMs), spec.prompt));
 }
 
-const writeReport = (spec: ResolvedSpec, text: string): void => fs.writeFileSync(spec.report, text);
+const writeReport = (spec: ResolvedSpec, text: string): void => { fs.mkdirSync(path.dirname(spec.report), { recursive: true }); fs.writeFileSync(spec.report, text); };
 
 describe('clipboard input', () => {
   it('reads pbpaste on macOS and falls back from wl-paste to xclip on Linux', async () => {
@@ -173,7 +174,7 @@ describe('new --clip / send --clip through the CLI', () => {
   it('new --clip prints the summary (task, agent/model/effort, worktree, branch, setup, links) and does nothing on N', async () => {
     const r = await run(['new', '--clip'], specText, false);
     assert.equal(r.code, 0);
-    for (const part of ['NC-1  claude/opus/medium', `worktree: ${root}/app-wt`, 'branch:   nc-1  from main', 'setup:    npm ci', `links:    node_modules/x -> ${root}/x`]) {
+    for (const part of ['NC-1  claude/opus/medium', `worktree: ${root}/app-wt`, 'branch:   nc-1  from main', 'setup:    npm ci', `links:    ${root}/app-wt/node_modules/x -> ${root}/x`]) {
       assert.ok(r.stdout.includes(part), `missing "${part}" in:\n${r.stdout}`);
     }
     assert.deepEqual(r.asked, ['Start? [y/N] ']);
@@ -211,7 +212,7 @@ describe('new --clip / send --clip through the CLI', () => {
 
   it('send --clip asks, then pastes the prompt (-y skips the question)', async () => {
     const send = `---\ntask: NC-1\n---\nFollow up please.\n`;
-    const respond = acknowledgingRespond((cmd, args) => (cmd === 'tmux' && args[0] === 'list-windows' ? { stdout: 'nc-1\n' } : cmd === 'tmux' && args[0] === 'capture-pane' ? { stdout: '❯ Try \"fake\"\n' } : undefined));
+    const respond = acknowledgingRespond((cmd, args) => (cmd === 'tmux' && args[0] === 'list-windows' ? { stdout: 'nc-1\n' } : cmd === 'tmux' && args[0] === 'capture-pane' ? { stdout: composerFixture('❯ Try \"fake\"\n') } : undefined));
     const declined = await run(['send', '--clip'], send, false, new RecordingRunner({ dryRun: false, respond }));
     assert.deepEqual(declined.runner.commands, []);
     assert.match(declined.stdout, /NC-1  ->  window agentctl:nc-1, 17 characters: Follow up please\./);
@@ -234,7 +235,7 @@ describe('watch', () => {
     return { config, m, ctx, runner, out, root };
   };
 
-  it('notifies once per transition: report-ready, needs-trust, dead; the first tick is only a baseline', async () => {
+  it('notifies once per transition: report-ready, needs-trust, tmux loss; the first tick is only a baseline', async () => {
     const { config, m, ctx, runner } = setup('watch1');
     const [a, b, c] = ['NC-1', 'NC-2', 'NC-3'].map((t) => specFor(config, t)) as [ResolvedSpec, ResolvedSpec, ResolvedSpec];
     for (const s of [a, b, c]) seed(config, s, runner.now() - 1000);
@@ -252,7 +253,8 @@ describe('watch', () => {
     m.windows.set('nc-2', TRUST);
     m.windows.delete('nc-3');
     await watchTick(ctx, memory, n);
-    assert.deepEqual(n.sent.sort(), ['NC-1: raport gotowy – done', 'NC-2 czeka na zaufanie folderu (trust)', 'NC-3: okno zniknęło bez raportu'].sort());
+    assert.deepEqual((n.sent as string[]).filter(text => !text.startsWith('NC-3')).sort(), ['NC-1: raport gotowy', 'NC-2 czeka na zaufanie folderu (trust)'].sort());
+    assert.match((n.sent as string[]).find(text => text.startsWith('NC-3'))!, /the task window is gone; the tmux server lives/, 'the session lives on (nc-1, nc-2): only the window died');
 
     // nothing changed: no new notifications
     await watchTick(ctx, memory, n);
@@ -276,7 +278,8 @@ describe('watch', () => {
     const memory = new WatchMemory();
     await watchTick(ctx, memory, n);
     m.windows.set('nc-1', IDLE);
-    await watchTick(ctx, memory, n); // enters waiting at t0
+    await watchTick(ctx, memory, n); // first idle reading is still working
+    await watchTick(ctx, memory, n); // second idle reading enters waiting at t0
     await runner.sleep(119_000);
     await watchTick(ctx, memory, n);
     assert.deepEqual(n.sent, []);
@@ -290,6 +293,7 @@ describe('watch', () => {
     m.windows.set('nc-1', WORKING);
     await watchTick(ctx, memory, n);
     m.windows.set('nc-1', IDLE);
+    await watchTick(ctx, memory, n);
     await watchTick(ctx, memory, n);
     await runner.sleep(121_000);
     await watchTick(ctx, memory, n);
@@ -333,17 +337,17 @@ describe('watch', () => {
     };
     await runWatch(ctx, n, { maxTicks: 4 });
     assert.equal(runner.now() - start, 3 * 20_000);
-    assert.deepEqual(n.sent, ['NC-1: raport gotowy – done']);
+    assert.deepEqual(n.sent, ['NC-1: raport gotowy']);
     const log = runner.appended.get(watchLogPath(ctx)) ?? '';
     assert.equal(watchLogPath(ctx), path.join(config.cache, 'agentctl-watch.log'));
     assert.match(log, /NC-1 {2}baseline working\n/);
-    assert.match(log, /NC-1 {2}\w+ -> report-ready {2}\[notified: NC-1: raport gotowy – done\]\n/);
+    assert.match(log, /NC-1 {2}\w+ -> report-ready {2}\[notified: NC-1: raport gotowy\]\n/);
   });
 
   it('config: defaults 15 s / 120 s, overridable, validated', () => {
     const root = scratch.sub('watchcfg');
-    assert.deepEqual(makeConfig(root).watch, { interval: 15, waitingAfter: 120, windowIcons: DEFAULT_WINDOW_ICONS, statusLine: true });
-    assert.deepEqual(makeConfig(root, 'watch: {interval: 5, waiting_after: 30}\n').watch, { interval: 5, waitingAfter: 30, windowIcons: DEFAULT_WINDOW_ICONS, statusLine: true });
+    assert.deepEqual(makeConfig(root).watch, { interval: 15, waitingAfter: 120, idleConfirmTicks: 2, windowIcons: DEFAULT_WINDOW_ICONS, statusLine: true });
+    assert.deepEqual(makeConfig(root, 'watch: {interval: 5, waiting_after: 30}\n').watch, { interval: 5, waitingAfter: 30, idleConfirmTicks: 2, windowIcons: DEFAULT_WINDOW_ICONS, statusLine: true });
     assert.throws(() => makeConfig(root, 'watch: {interval: 0}\n'), /watch.interval must be a positive number/);
     assert.throws(() => makeConfig(root, 'watch: {every: 3}\n'), /unknown key "every"/);
   });
@@ -576,7 +580,7 @@ describe('status --clip', () => {
       '|---|---|---|---|---|---|---|',
       `| NC-1 | claude/opus/high | report-ready | 1h 02m | ?c 0f | yes | yes (${formatLocalTime(new Date(runner.now()).toISOString())}) |`,
       '| NC-2 | codex/gpt-6/high | working | 1m 10s | ?c 0f | missing | - |',
-      '| NC-3 | claude/opus/high | dead | - | ?c 0f | missing | - |',
+      '| NC-3 | claude/opus/high | needs-attention | - | ?c 0f | missing | - |',
       '',
     ].join('\n'));
 

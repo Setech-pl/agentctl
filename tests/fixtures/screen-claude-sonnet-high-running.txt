@@ -1,0 +1,6 @@
+Claude Code · sonnet · high
+⏺ Ran 7 shell commands (ctrl+o to expand)
+⏺ Running npm test…
+✽ Zigzagging… (3m 11s · still thinking with high effort)
+
+❯

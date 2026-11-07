@@ -32,8 +32,9 @@ function machine(script: Record<string, string[]>, onCapture?: (window: string, 
     if (a[0] === 'has-session' || a[0] === 'list-windows') return { code: 1 };
     if (a[0] !== 'capture-pane') return undefined;
     const window = a[a.indexOf('-t') + 1]!.split(':').pop()!;
-    const n = (seen[window] = (seen[window] ?? 0) + 1);
-    onCapture?.(window, n);
+    // capture -e re-reads the screen just captured (for the colours); it is not another step of the script.
+    const n = a.includes('-e') ? (seen[window] ?? 1) : (seen[window] = (seen[window] ?? 0) + 1);
+    if (!a.includes('-e')) onCapture?.(window, n);
     const screens = script[window] ?? [IDLE];
     return { stdout: screens[Math.min(n - 1, screens.length - 1)] as string };
   };
@@ -58,14 +59,16 @@ describe('new: waiting for folder trust', () => {
     const results = await newTasks(ctx, specsFor(config, repo, ['NC-1']));
     assert.equal(results.length, 1);
     const hints = out.filter((l) => l.includes('waits for folder trust'));
-    assert.deepEqual(hints, ['NC-1: agent waits for folder trust – attach: tmux attach -t agentctl, confirm in window nc-1']);
+    assert.deepEqual(hints, ['NC-1: agent waits for folder trust – attach: tmux attach -t \'=agentctl\', confirm in window nc-1']);
     assert.ok(runner.now() - t0 >= 2500, 'it slept 500ms between captures instead of giving up');
     assert.equal(pastes(runner.commands).length, 1);
     assert.ok(out.includes('NC-1: prompt sent'));
     // Only the agent start command (+ its Enter) and the prompt paste (+ its Enter) were typed: the dialog was never answered.
     const keys = runner.commands.filter((c) => c.startsWith('tmux send-keys'));
-    assert.deepEqual(keys, ["tmux send-keys -t '=agentctl:nc-1' -l -- 'claude --effort high'", 'tmux send-keys -t \'=agentctl:nc-1\' Enter', 'tmux send-keys -t \'=agentctl:nc-1\' Enter']);
-    assert.ok(runner.commands.indexOf(pastes(runner.commands)[0]!) > runner.commands.findIndex((c) => c.includes("'claude")));
+    assert.deepEqual(keys, [`tmux send-keys -t '=agentctl:nc-1' -l -- 'exec sh ${config.stateDir}/nc-1/start.sh'`, 'tmux send-keys -t \'=agentctl:nc-1\' Enter', 'tmux send-keys -t \'=agentctl:nc-1\' Enter']);
+    const launch = runner.commands.findIndex((c) => c.includes(' -l -- ') && c.includes('exec sh '));
+    assert.ok(launch >= 0, 'the private launch command exists before the paste');
+    assert.ok(runner.commands.indexOf(pastes(runner.commands)[0]!) > launch);
   });
 
   it('gives the agent its ready timeout again once the dialog is answered', async () => {
@@ -90,7 +93,7 @@ describe('new: waiting for folder trust', () => {
     const { ctx, runner } = makeContext(config, { respond: machine({ 'nc-1': [TRUST] }) });
     const t0 = runner.now();
     await assert.rejects(newTasks(ctx, specsFor(config, repo, ['NC-1'])), (e: Error & { hint?: string }) => {
-      assert.equal(e.message, 'NC-1: agent still waits for folder trust after 3s – attach: tmux attach -t agentctl, confirm in window nc-1');
+      assert.equal(e.message, 'NC-1: agent still waits for folder trust after 3s – attach: tmux attach -t \'=agentctl\', confirm in window nc-1');
       assert.match(e.hint ?? '', /never answers that dialog/);
       assert.match(e.hint ?? '', new RegExp(`agentctl watch --tmux .*${path.join(config.stateDir, 'nc-1', 'TASK.md')}`));
       assert.match(e.hint ?? '', /raise agents\.claude\.trust_timeout/);
@@ -107,7 +110,7 @@ describe('new: waiting for folder trust', () => {
     const config = makeConfig(root);
     const { ctx, runner, out } = makeContext(config, { respond: machine({ 'nc-1': [TRUST, TRUST, IDLE] }) });
     const t0 = runner.now();
-    await assert.rejects(newTasks(ctx, specsFor(config, repo, ['NC-1']), { waitTrust: false }), (e: Error) => e.message === 'NC-1: agent waits for folder trust – attach: tmux attach -t agentctl, confirm, then agentctl status');
+    await assert.rejects(newTasks(ctx, specsFor(config, repo, ['NC-1']), { waitTrust: false }), (e: Error) => e.message === 'NC-1: agent waits for folder trust – attach: tmux attach -t \'=agentctl\', confirm, then agentctl status');
     assert.equal(runner.now() - t0, 0);
     assert.equal(pastes(runner.commands).length, 0);
     assert.deepEqual(out.filter((l) => l.includes('confirm in window')), []);
@@ -140,8 +143,8 @@ describe('new: waiting for folder trust', () => {
     const results = await newTasks(ctx, specsFor(config, repo, ['NC-1', 'NC-2', 'NC-3']));
     assert.deepEqual(results.map((r) => r.task), ['NC-1', 'NC-2', 'NC-3']);
     assert.deepEqual(out.filter((l) => l.includes('confirm in window')), [
-      'NC-1: agent waits for folder trust – attach: tmux attach -t agentctl, confirm in window nc-1',
-      'NC-3: agent waits for folder trust – attach: tmux attach -t agentctl, confirm in window nc-3',
+      'NC-1: agent waits for folder trust – attach: tmux attach -t \'=agentctl\', confirm in window nc-1',
+      'NC-3: agent waits for folder trust – attach: tmux attach -t \'=agentctl\', confirm in window nc-3',
     ]);
     assert.ok(order.indexOf('nc-1#3') < order.indexOf('nc-2#1'));
     assert.ok(order.indexOf('nc-2#1') < order.indexOf('nc-3#1'));
@@ -208,13 +211,13 @@ describe('agentctl new: --no-wait-trust and Ctrl-C through the CLI', () => {
     const waiting = new DiskRunner({ dryRun: false, respond: acknowledgingRespond(machine({ 'nc-1': [TRUST, IDLE] })) });
     const a = await run(['new', spec], {}, waiting, config);
     assert.equal(a.code, 0, a.stderr);
-    assert.match(a.stdout, /NC-1: agent waits for folder trust – attach: tmux attach -t agentctl, confirm in window nc-1/);
+    assert.match(a.stdout, /NC-1: agent waits for folder trust – attach: tmux attach -t '=agentctl', confirm in window nc-1/);
     assert.equal(pastes(waiting.commands).length, 1);
 
     const stopping = new DiskRunner({ dryRun: false, respond: acknowledgingRespond(machine({ 'nc-1': [TRUST, IDLE] })) });
     const b = await run(['new', '--no-wait-trust', spec], {}, stopping, config);
     assert.equal(b.code, 1);
-    assert.match(b.stderr, /agent waits for folder trust – attach: tmux attach -t agentctl, confirm, then agentctl status/);
+    assert.match(b.stderr, /agent waits for folder trust – attach: tmux attach -t '=agentctl', confirm, then agentctl status/);
     assert.equal(pastes(stopping.commands).length, 0);
   });
 

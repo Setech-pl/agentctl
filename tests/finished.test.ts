@@ -234,7 +234,7 @@ describe('board.auto_hide_pulled_dead', () => {
     const by = (t: string) => rows.find((r) => r.task === t)!;
     assert.deepEqual([by('NC-1').state, by('NC-1').hidden, by('NC-1').hiddenBy], ['report-ready', true, 'auto']);
     assert.deepEqual([by('NC-2').hidden, by('NC-2').finished], [false, true]);
-    assert.deepEqual([by('NC-3').state, by('NC-3').hidden, by('NC-3').finished], ['dead', false, true]);
+    assert.deepEqual([by('NC-3').state, by('NC-3').hidden, by('NC-3').finished], ['needs-attention', false, false]);
     assert.deepEqual(shownRows(rows, false).map((r) => r.task), ['NC-2', 'NC-3']);
   });
 

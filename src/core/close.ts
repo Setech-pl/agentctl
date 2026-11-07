@@ -69,7 +69,7 @@ export async function removeWorktrees(ctx: Context, taskArg: string, repos: Task
         'agentctl never touches main/master. Switch that worktree to another branch first, or remove it by hand.',
       );
     }
-    const r = await runner.exec('git', ['-C', repo.path, 'worktree', 'remove', repo.worktree]);
+    const r = await runner.exec('git', ['-C', repo.path, 'worktree', 'remove', repo.worktree], { timeoutMs: ctx.config.git.timeoutS * 1000 });
     if (r.code !== 0) {
       throw gitFailure(
         `git worktree remove failed for ${repo.worktree}`,

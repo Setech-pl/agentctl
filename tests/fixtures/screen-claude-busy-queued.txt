@@ -1,0 +1,22 @@
+ ▐▛███▛█   Claude Code v2.1.311
+▝▜██████▀  Haiku 5.5 with low effort · Claude Ultra
+ ▝▝   ▝▝   ~/work/sandbox
+❯ Run exactly 8 separate Bash tool calls, strictly one after another, each one being: python3 -c "import time; time.sleep(20)". After each call write only its number. After the 8th, write DONE-TURN1.
+⏺ 1
+  Ran 1 shell command
+⏺
+❯ FOLLOWUP-LONG-A: when your current work is finished, reply with the single line ACK-LONG-A and nothing else. Context padding follows so that this message is long enough to be collapsed by the
+  terminal UI into a pasted text placeholder instead of being shown inline.
+  Line 1: the quick brown fox jumps over the lazy dog, again and again, to pad the message out to about one thousand characters.
+  Line 2: the quick brown fox jumps over the lazy dog, again and again, to pad the message out to about one thousand characters.
+  Line 3: the quick brown fox jumps over the lazy dog, again and again, to pad the message out to about one thousand characters.
+  Line 4: the quick brown fox jumps over the lazy dog, again and again, to pad the message out to about one thousand characters.
+  Line 5: the quick brown fox jumps over the lazy dog, again and again, to pad the message out to about one thousand characters.
+  Line 6: the quick brown fox jumps over the lazy dog, again and again, to pad the message out to about one thousand characters.
+  Line 7: the quick brown fox jumps over the lazy dog, again and again, to pad the message out to about one thousand characters.
+  ctrl+x ctrl+s to send now
+✢ Clauding… (27s · ↓ 105 tokens)
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ Press up to edit queued messages
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  paste again to expand

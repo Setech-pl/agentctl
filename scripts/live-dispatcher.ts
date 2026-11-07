@@ -1,11 +1,11 @@
+import { providerDispatchCases } from './provider-live-cases.ts';
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import net from 'node:net';
 import assert from 'node:assert/strict';
-import { withHarness } from './live-harness.ts';
-const CACHE = process.env.AGENTCTL_LIVE_CACHE;
-if (!CACHE) throw new Error('Set AGENTCTL_LIVE_CACHE to this task cache');
+import { withHarness, defaultCacheRoot } from './live-harness.ts';
+const CACHE = defaultCacheRoot();
 const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const SERVER = `const http=require('node:http'),fs=require('node:fs'); let failures=Number(process.argv[3]); http.createServer((req,res)=>{let body='';req.on('data',c=>body+=c);req.on('end',()=>{const status=failures-->0?503:200;fs.appendFileSync(process.argv[2],JSON.stringify({at:Date.now(),body,status})+'\\n');res.writeHead(status);res.end('{}')})}).listen(Number(process.argv[1]),'127.0.0.1')`;
 async function freePort(): Promise<number> { return new Promise((resolve) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const port = (s.address() as net.AddressInfo).port; s.close(() => resolve(port)); }); }); }
@@ -50,6 +50,7 @@ async function trial(id: number, parallel: boolean, retry = false, fallback = fa
 for (let id = 1; id <= 3; id++) await trial(id, false);
 for (let round = 0; round < 3; round++) await Promise.all(Array.from({ length: 4 }, (_, i) => trial(4 + round * 4 + i, true)));
 await trial(16, false, true, true);
+for (const name of await providerDispatchCases(CACHE, 'pdisp')) results.push({ name, ok: true });
 const failed = results.filter((r) => !(r as { ok: boolean }).ok).length;
 fs.writeFileSync(path.join(CACHE, 'live-dispatcher-results.json'), JSON.stringify({ passed: results.length - failed, failed, results }, null, 2) + '\n');
 process.exitCode = failed ? 1 : 0;

@@ -7,7 +7,7 @@ The npm runtime is JavaScript emitted into `dist/` by `npm run build`, with `.ts
 ## Setup
 
 `setup` is a list of shell commands (spec > project `.agentctl.yaml` > global config; the first layer that sets it wins, `setup: []` switches it off).
-`new` runs them in the first worktree, one `sh -c` each, in this order: `git worktree add` → **setup** → links → TASK.md → window → agent.
+`new` runs them (per repository, each in its own worktree: `repos[].setup`, else that repository's `.agentctl.yaml`; the spec/global `setup` is the first repository's), one `sh -c` each, in this order: `git worktree add` → **setup** → links → TASK.md → window → agent.
 
 - Output goes to `<state_dir>/<task>/setup.log`.
 - A failing command stops `new` with its exit code and the last 15 lines of output. The worktree stays, no window is created; fix the cause and run `agentctl new --reuse` (setup runs again).
@@ -194,8 +194,8 @@ Without terminal-notifier the notification is the old `osascript` one (`notify-s
 **Backend and fallback (`notify.backend`).** `auto` (the default) tries terminal-notifier first. terminal-notifier 3.x can exit with `Could not request notification permission: Notifications are not allowed for this application`, and that permission cannot be granted from the command line: when it exits non-zero or prints that message, the same notification goes out through `osascript` (no click action), and terminal-notifier is left alone for an hour (`<config dir>/notifier.json`, so that the watcher and the hooks all see it); the one-line warning is in `<config dir>/notifier.log`. `terminal-notifier` or `osascript` use only that channel (no fallback, nothing remembered).
 `agentctl notify-test` sends one notification and tells you which channel carried it, tries terminal-notifier again even if it is remembered as broken, and exits 1 when no channel worked. To get click-to-window back: System Settings > Notifications > terminal-notifier > Allow Notifications, alert style Banners; if terminal-notifier is not on that list, set `notify: {backend: osascript}`. `doctor` shows this state and the steps.
 
-**Verdict.** The `report-ready` notification quotes the first meaningful line of the report, markdown removed, at most 100 characters, in this order: the first line `notify.verdict_pattern` matches (a regex; its first group, else the whole line),
-a line that starts with `Werdykt`, `Verdict` or `Status` (`**Werdykt:** PASS`; as a heading on its own the line under it follows), else the first line of text after the heading (front matter, rules and table rows skipped).
+**Verdict.** The `report-ready` notification quotes the verdict of the report, markdown removed, at most 100 characters, in this order: the `verdict` of the `agentctl-outputs` block, the first line `notify.verdict_pattern` matches (a regex; its first group, else the whole line),
+then a verdict line in the header of the report (before the first `##` heading, code block or line of prose; fenced blocks and quotes are skipped): `Werdykt`, `Verdict` or `Status` after `:`, `-`, `–` or `—` (`**Werdykt:** PASS`; as a label on its own the next line is the value). Never an arbitrary line of text.
 
 ## Phone notifications
 
@@ -325,7 +325,7 @@ Three different things, from the lightest:
 Work is sometimes abandoned half way. `agentctl cancel <TASK…> [--reason "…"] [--rm-worktree] [-y]` (board: `X`; MCP: `cancel`) shows the list and asks y/N, then:
 
 - **A task at work:** the agent's interrupt key is sent (like `interrupt`), agentctl waits `cancel.grace` seconds (default 5, once for all the tasks of one command), then the window is closed. `TASK.md` gets `cancelled: true`, `cancelled_at`, `cancel_reason` (if one was given) and `cancel_source` (`cli`, `board` or `mcp`).
-- **A task in the queue:** it is taken out of the queue (`queue rm` is the same without a reason) and gets a `TASK.md` of its own with the same fields, so that it shows in `status --all` and the tasks that wait for it can see that it is gone.
+- **A task in the queue:** it is taken out of the queue (`queue rm` is the same without a reason) and gets a `TASK.md` of its own with the same fields, so that it shows in `status --all` and the tasks that wait for it can see that it is gone. A leftover live window of its failed start is closed with it, so the cancelled task does not read as "waiting".
 - **A task you moved** (`agentctl move`): the old task (`superseded`) and its successor are one piece of work, so both are cancelled, after the one question.
 - **The worktree and the branch stay**, because partial work is often worth keeping. `--rm-worktree` runs `git worktree remove` (never `--force`; an unclean worktree is reported and left); a branch is never deleted.
 
@@ -405,7 +405,7 @@ Which model and effort work for what is only visible over many tasks. agentctl a
 
 `agentctl mark <TASK> ok|partial|fail [--note "…"]` records your judgement; the last mark wins. `agentctl log [--since 7d] [--cohort X] [--json] [--clip]` folds the records to one line per task, newest first (a later empty value never wipes one that was known). `agentctl stats [--since 30d] [--cohort X] [--json] [--clip]` groups the tasks by agent/model/effort: tasks, median time and median tokens (n/d without any), the share of ok, partial and fail **among the marked ones**, unmarked, cancelled, and moved (tasks of the group that hit a limit and were handed to the other provider). A history is as good as the marks: an unmarked task counts as unmarked, never as ok.
 
-On the board **`l`** opens the log (`↑↓` scroll, `Esc` back) and **`o`** / **`p`** / **`f`** mark the selected finished task (a task without a window, a closed or cancelled one, or one with a report ready); `p` keeps pausing the queue while no finished task is selected. The menu of a finished task (`Enter`) offers the same marks. The MCP server has `log`, `stats` and `usage` (read) and `mark` (write; `mcp.allow`, audited, no confirm step: it changes nothing but the history).
+On the board **`l`** opens the log (`↑↓` scroll, `Esc` back) and **`o`** / **`p`** / **`f`** mark the selected finished task (a task without a window, a closed or cancelled one, or one with a report ready); `p` keeps pausing the queue while no finished task is selected. The menu of a finished task (`Enter`) offers the same marks. The MCP server has `log`, `stats` and `usage` (read) and `mark` (write; `mcp.allow`, audited, single-task marks are immediate; multiple tasks require a scope preview/confirmation).
 
 ## Navigation
 
@@ -436,8 +436,10 @@ agentctl queue retry NC-42       # a failed start, once more
 - **Order**: `priority: high` before `priority: normal`, first come, first served inside a class; `queue up` puts a task first in its class. A task whose provider is full does not hold back a task of the other provider.
 - **Never switches provider.** The queue starts a task on the agent and model it was ordered on (or on the `--agent` given when it was queued). Moving to the other provider stays an explicit act: `--agent`, `agentctl move`.
 - **Starting** is the same path as `new` (worktree, `setup`, links, TASK.md, window, wait for the agent, prompt) and runs in the background of the watcher. When the agent waits for the folder-trust dialog, `needs-trust` is notified as usual and the rest of the queue goes on; the prompt follows once you confirm. A notification says "Uruchomiono TASK z kolejki".
-- **A failed start** (setup failed, repository gone, agent not ready) puts the task at the end of the line as `failed`, with the error in `queue list` and the log of the attempt in `<config dir>/queue/<n>-<TASK>.log`, and sends a notification. It is not tried again by itself; `queue retry` is your decision (it reuses a worktree the failed start left).
+- **A failed start** (setup failed, repository gone, agent not ready) puts the task at the end of the line as `failed`, with the error in `queue list` and the log of the attempt in `<config dir>/queue/<n>-<TASK>.log`, and sends a notification. It is not tried again by itself; `queue retry` is your decision (it reuses a worktree the failed start left). A window whose agent never showed its input (a startup dialog such as the Codex "Update available" modal, or a readiness timeout) is closed by the watcher, so it holds no provider slot; with the worktree kept, the task then also shows in "to resume" (`agentctl resume`). The same reconciliation applies to a start interrupted by a watcher restart: the record and the queue entry never disagree.
 - The queue only moves while `agentctl watch` runs (`watch --tmux`); `watch` reads the config again when the file changes ([live limits](#live-limits-and-the-config-reload)), so a changed `limits` needs no restart. `queue.enabled: false` in the config switches starting off; `queue.parallel_starts` bounds the starts in progress ([configuration](configuration.md#queue)).
+
+A trust wait that expires keeps the live task and its pending prompt under watch; it does not leave a failed queue entry. After you answer the dialog, watch delivers the original prompt once. Queue ticks also remove stale failed entries belonging to live tasks already waiting or delivering, even while the queue is paused.
 
 ### Dependencies: `after`
 
@@ -470,7 +472,7 @@ Two tasks that change the same files in the same repository will meet in a merge
 
 ## Board
 
-`agentctl board` is a full-screen overview of all tasks, refreshed every 2 seconds. `agentctl board --tmux` opens it in window `board` of the agentctl session
+`agentctl board` is a full-screen overview of all tasks, refreshed every 2 seconds (every 5 seconds when nothing is running any more). `agentctl board --tmux` opens it in window `board` of the agentctl session
 (created if missing, never twice); the board and watch windows are not tasks.
 
 ```
@@ -698,3 +700,75 @@ Since 0.17.3 cohort completion waits 300 seconds after the last membership/state
 Initial prompts (also from queue/move) and resume instructions name the absolute canonical report file. TASK.md persists pending_prompt, prompt_delivery and prompt_sent_at. After folder trust, new/watch sends the saved prompt once under a process-shared lock. The adapter pastes once, checks only the visible screen, and retries Enter at most twice while its own draft remains. Working or new assistant output acknowledges delivery; otherwise start/send succeeds with “dostarczenie niepotwierdzone – sprawdzam”. Watch checks for up to delivery_confirm_s (default 60 s) from the paste, then emits needs-attention once if no evidence arrives. A later hook, working screen, completed turn or current canonical report clears attention automatically; a completed canonical report remains available to events_since, pull_ready, after and cohorts. Claude UserPromptSubmit (matching the current prompt), Stop and Notification and Codex notify are checked before screens. Delivery generations reject old acknowledgements. Adapter working_pattern recognizes Claude 2.1.x spinner progress without requiring “esc to interrupt”; delivery_pattern recognizes new assistant output. A submitted transcript echo followed by an empty composer also confirms delivery. Dialogs are never answered automatically.
 
 Explicit report_from records report_confirmed; detail retains the source while the historical-copy warning disappears. Report candidates generate no local/phone notification: journal/status/board retain the flag so it does not compete with a question. Large pull_ready full responses continue through response_page and are not marked pulled until contiguous delivery completes. Plain shells are not orphans; an agent process or task role is required.
+
+## NC workflow: reports, reviews and follow-ups
+
+A complete report requests a versioned YAML data block before `<!-- agentctl:report-end -->`:
+
+```agentctl-outputs
+version: 1
+verdict: PASS
+commits: [{repo: app, branch: feature, sha: aaaaaaa}]
+integrate: [{repo: app, branch: feature, sha: aaaaaaa, note: proposed integration}]
+decisions: [Choose a deployment time]
+actions: [{title: Deploy after approval, shell: "echo proposed command"}]
+checks: [{name: unit tests, result: PASS}]
+preview: https://example.invalid/preview
+notes: []
+```
+
+`outputs`, `outputs_valid` and `outputs_errors` are shared facts. Branches and SHAs must exist in task repositories. Missing/invalid data warns without making a complete report incomplete. Actions are proposed text; agentctl never runs their shell commands, judges a result, or merges. `status` counts decisions/actions; `pull_ready` and `get_report` include the data. `cohort_show` aggregates integration refs (duplicate/conflicting branch tips flagged), decisions, actions and checks with task IDs. `events_since` includes new decisions/actions in `needYou`, once per report hash. Validation is per section and per entry: a bad entry is dropped with a warning in `outputs_errors`, the valid rest stays in `outputs` (`outputs_partial: true`, `outputs_valid: false`), and `status`/`cohort_show` count the kept decisions and actions. Only a wrong `version`/`verdict` refuses the whole block. `checks` entries are `{name, result: PASS|FAIL|WARN|SKIP, note?}` (the standard form); a plain text (`"unit: PASS"`) or a one-key map (`- unit: PASS`, which is what unquoted YAML gives) is accepted and normalized to it, in any letter case.
+
+```yaml
+review: auto
+# Or in .agentctl.yaml:
+# review: {default: auto, rerun: true, template: review.md}
+after: [{task: IMPLEMENT, verdict: [PASS, PARTIAL]}]
+repos:
+  - path: ~/code/app
+    worktree: ~/work/app-check
+    branch: check
+    base: "@IMPLEMENT:app"
+```
+
+Automatic review adds `TASK-REV` after the author report, on the author branch and in the same cohort. It prefers another available provider, using `review.*` or `equivalents`; otherwise it needs another configured model. No valid pairing leaves a visible pending review error. The reviewer gets its own detached worktree (`<worktree_root>/<repo>-<task>-rev`, one per repository of the author, pinned to the author's commit) and writes its own report at `cache/<task-rev>/<TASK-REV>.md`; it never shares the author's checkout or branch. It starts only after the author's turn is over (report-end, report settle time, no follow-up queued or unconfirmed, no draft, no git running in the author's checkout); until then the queue shows `czeka na autora …`. If the author commits again before the review starts, the review is re-pinned to the new SHA (delta and heads updated, journal `review-repinned`). `review.rerun: true` schedules `REV2` for a new report, with the previous review's scheduled SHA as the delta base. The first base is the author's recorded base. See the review template in `docs/examples/` and the configuration reference for overrides.
+
+`base: "@TASK"` resolves at start to that task's output commit, otherwise its branch HEAD; specify `:repo-name` for multiple repositories. The resolved commit is shown in the new preview and stored in TASK.md. Missing or ambiguous sources block start. A verdict condition blocks on another verdict or `brak werdyktu`; ordinary `after: TASK` still waits only for a complete report.
+
+`send` pastes a follow-up immediately while Claude/Codex work. Delivery is confirmed from submission, a new working state, transcript/queued-message echo or a new complete report. `idle_prompt` and a late Stop alone do not confirm it; a stuck composer becomes `needs-attention` after `delivery_confirm_s`. An idle-only adapter (`accepts_busy_prompt: false`), or an unconfirmed previous message, keeps later messages in a durable FIFO. Status/peek show the queue; the response says pasted, queued position, or unconfirmed. The watcher drains it in order.
+
+The answer of `send` and `delivery_result` (TASK.md, `status --json`, MCP `status`) say what happened: delivered (`delivered`, with its source), `w kolejce agenta – niepotwierdzone` (queued-in-agent: the screen shows the message in the agent’s queue, nothing has confirmed it) , `w kolejce agenta – potwierdzone` (`queued-in-agent-confirmed`: an exact enqueue is recorded, pending stays until injection) or `nie dostarczono – tekst w polu wpisywania` (not-delivered-in-field: the paste stands in the input field). **Delivered is said only on an exact source**, compared literally (line ends are the one normalisation; no run of white space is squeezed): the UserPromptSubmit hook (its prompt for a collapsed paste is wrapped in `<pasted_content id=…>`; the wrapper is taken off the hook’s text only, by pairs of ids, and nested, mismatching or stray tags are ambiguous = no proof; the pending prompt is compared as written), the notify payload of Codex, or the session transcript of the task itself (Claude Code: the `user` line; for `promptSource:"queued"`, it must correlate uniquely with an unconsumed enqueue from after delivery started; Codex: the `response_item` / `item_completed` line, or `user_message` in older versions) holding a message written after the delivery began that is exactly the pending one (for a collapsed paste the full text, not the label). Only the transcript files of the task’s own sessions are read: the session named by its hook/statusLine/notify for this attempt, with one pinned file identity. Missing, replaced or rotated files never fall back to another session. An enqueue alone confirms only the agent queue; pending stays even after the turn or timeout, with an explicit note until injection or a matching hook. What the agents themselves do to a message is not part of it: the white space at its end is dropped, the newlines around a collapsed paste are the wrapper’s padding, Claude Code stores a tab as four spaces. The screen confirms nothing for a working agent: an echo of Codex or the queue sign of Claude Code (the dim “Press up to edit queued messages”, the queued message with “ctrl+x ctrl+s to send now”) only classifies the state as `w kolejce agenta – niepotwierdzone` (the sign only when it was not on the screen just before our own Enter and appeared after it with our paste gone from the field); the pending prompt stays, and the delivery goes on to wait for the hook or the transcript. For an idle agent that was pasted into, the older signs of the first prompt of every task remain (the turn started, the canonical report changed, the message echoed whole above an empty composer). **agentctl presses Enter only in the call that pastes**: up to three times, and before each one it captures the screen and compares the whole area of the input field, byte for byte (empty lines inside included), with the image taken right after the paste, which must itself be our paste (one placeholder, or the lines of the text); the same capture must show no dialog. The area ends at a structural composer boundary (Claude borders or the recorded Codex model/hints region), never at footer-like text inside the field; an unreadable or truncated structure refuses Enter. A difference, a changed first image or an open dialog means no Enter and `nie dostarczono – tekst w polu wpisywania` (needs-attention at the next watch tick, with the two ways out). `watch` never presses Enter. `agentctl send --enter-only TASK` shows the exact text of the field, the screen state and a token for those bytes; `agentctl send --enter-only TASK --confirm TOKEN` captures again and presses Enter only if the area is still byte for byte the previewed text and the image recorded after our paste (so agentctl pasted it for this delivery) and the screen shows no dialog; anything else is refused with the reason. MCP: `send` with `enter_only: true` and no text needs its own permission `send_enter` in `mcp.allow` (`send` alone does not allow it); without `confirm: true` it only previews (text, state, `token`), with `confirm: true` and that `token` it presses; a refusal and a failed key (tmux `send-keys` error) are `isError` answers with the reason, the failed key is audited `failed` and never announced as sent, a pressed Enter is audited as executed (`enter-sent`, with the delivery) and announced, and the answer keeps “Enter sent” apart from “delivery confirmed”. With an open Codex question nothing is pasted: the answer names the question (“Codex ma otwarte pytanie „…” (zwinięte, N)”) and the message stays in the FIFO. The journal (`events_since`, kind WIADOMOŚĆ) records every change of the result of a follow-up with its delivery id: queued, not delivered, delivered (the first prompt of a task: only the first two).
+
+A provider limit emits one notice per episode with the known reset (otherwise `n/d`). Fresh remaining capacity above `limited.resume_above_percent` (5 by default), or an elapsed known reset, permits `limited.message` (`kontynuuj`) to the idle empty window. The overload guards check again before paste and Enter; attempts and limits survive restarts. `limited.auto_resume: false` disables sending. Provider and model stay the same.
+
+`agentctl mark --cohort NC ok --note "reviewed"` previews its exact range; `--yes` confirms. MCP accepts `task`, `tasks` or `cohort`; more than one task requires preview/confirm. With a cohort filter, board `o/p/f` previews its IDs before marking. Agentctl records the user's result. Closing every cohort task emits `gc_suggest` with that cohort's protected cleanup preview; it never deletes automatically.
+
+MCP previews have independent `preview_token` values, expire after ten minutes and refuse a changed range. Pass the token and identical arguments with `confirm: true` — or the token alone, which executes the stored arguments (for `new`/`queue` the spec need not be resent); omitting a token uses the latest matching preview for compatibility. `gc_preview` with a cohort gives only the count of foreign worktrees; confirmed `gc` returns its results without repeating the plan. `notify.mcp_writes` defaults to `summary`, at most once per 60 seconds; `all` and `off` are explicit alternatives. Audit remains complete. F12 returns to the board of the current configured session, including a parallel dev session. Duration includes checkout/setup before the agent starts; stale plan notices are once per reading.
+
+## Provider adapters
+
+The registry separates registered IDs from active `providers`. Claude/Codex are required and preserve their 0.17.4 behavior. Optional Kimi Code 2.5.0 owns launch/resume, TOML model/permission metadata, screen patterns, passive wire protocol 1.5 and usage parsing. Unknown protocol falls back to screen classification and a doctor warning. Kimi log/session locations and wire interaction records remain hypotheses.
+
+With Kimi active, limits/reservations, capacity, usage, stats, alerts, queue holds, board and MCP include its third column. `move` requires `--agent` when more than two providers are active; choices include free places and known percentages. `review.prefer` or provider order selects the first active installed mappable reviewer other than the author. Model labels use catalog display names and explicit version overrides, never guessed versions of server-managed aliases.
+
+Kimi has no sandbox. Agentctl never edits its config, answers trust/login/update dialogs or enables auto-accept. It disables updates per process and defaults telemetry off. Task data (prompt, files, command output, diffs) still goes to Moonshot AI. Permission rules match the whole Bash command string; see exact-match examples in configuration.md. The optional `/usage` probe uses a neutral session with manual trust and `/exit`, never a task window, credentials or API. Missing plan data is n/d.
+
+## Development gates
+
+Export the prompt's absolute `AGENTCTL_LIVE_CACHE` before any other shell command, then use `npm run gate -- quick` for fixes/features and reviews, `full` for integration merges, and `release` for release candidates. Do not invent runners or repeat a recorded PASS for the same SHA and scope.
+
+`quick` runs typecheck, build, diff whitespace checks and affected tests on the current Node. `--base <ref>` overrides the default merge-base with `agentctl-0181-rc1`; relative import closure and exact test names select tests, with a full single-Node fallback whenever mapping is uncertain. `full` runs all tests on Node 22.14.0 then Homebrew Node 26, sequentially. `release` builds and packs, runs installed-tarball smoke (12 checks) and the isolated doctor matrix (10 cases) on each Node, then runs every `scripts/live-*.ts` entry sequentially, stopping on failure; `--skip-live` records skipped entries. Real provider inference still requires explicit permission.
+
+`--dry-run` prints the plan without provisioning runtimes or executing checks. Full/release refuse dirty trees unless `--allow-dirty` is recorded. Heavy commands use `nice -n 10` and macOS `taskpolicy -b`; there is no load polling. Full/release wait for `~/Projects/cache-dev/runtimes/.gate.lock`, printing its owner. `AGENTCTL_RUNTIMES_DIR` overrides that shared directory. Node 22.14.0 (darwin-arm64) is downloaded only when absent, checked against nodejs.org SHASUMS256, and retained; Node 26 comes from Homebrew. A stale lock requires verifying its owner has stopped before removing it.
+
+Results and logs are under `$AGENTCTL_LIVE_CACHE/gate-results/<sha>/`; `<tier>.json` records SHA, dirty/exception flags, Node versions, counts, retries and duration. Failed test files run once more; both attempts remain in the logs and result steps. A passing retry can recover the gate while original failure counts remain visible. Dry runs are marked explicitly and do not count as executed gates. Task scratch is removed automatically; retain evidence and shared runtimes.
+
+Report digest reuse always revalidates the current task owner, allowed roots and every symlink component; authorization is never cached.
+
+TASK.md and report cache versions include device, inode, size and nanosecond modification/change times. Coarse (millisecond-aligned) change times disable reuse; known header writes and report copies explicitly invalidate their entries.
+
+When a task ID exists in current state and the archive, board progress and worktrees use the current record.
+
+Live board rows always retain token details, even with closed/cancelled flags or an archived duplicate. Token collection skips only the same nonlive shallow rows that skip outputs and prompt queues.
+
+Expanding hidden/closed sections with `a` requests full row details immediately, even if the active selection does not change; an in-flight refresh queues the deep follow-up.

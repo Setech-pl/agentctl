@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { withHarness } from './live-harness.ts';
+import { withHarness, defaultCacheRoot } from './live-harness.ts';
 
-const cache = process.env.AGENTCTL_LIVE_CACHE;
+const cache = defaultCacheRoot();
 const prefix = process.env.AGENTCTL_SMOKE_PREFIX;
 if (!cache || !prefix) throw new Error('Set AGENTCTL_LIVE_CACHE and AGENTCTL_SMOKE_PREFIX to isolated task directories');
 const executable = path.join(prefix, 'bin', 'agentctl');

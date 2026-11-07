@@ -1,3 +1,4 @@
+import { composerFixture } from './composer-fixture.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { after } from 'node:test';
@@ -54,6 +55,12 @@ export function acknowledgingRespond(respond?: RecordingOptions['respond']): Rec
   };
 }
 
+/** The watcher heartbeat that watchAlive accepts: a chat `new` confirm is refused without it. */
+export function fakeWatcher(config: GlobalConfig): void {
+  fs.mkdirSync(config.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(config.stateDir, 'queue-worker.json'), JSON.stringify({ pid: process.pid, at: Date.now(), interval: config.watch.interval }));
+}
+
 export function makeContext(
   config: GlobalConfig,
   options: RecordingOptions = {},
@@ -97,6 +104,8 @@ export interface FakeWindow {
   id: string;
   name: string;
   screen: string;
+  /** The screen as `capture-pane -e` shows it (ANSI colours); absent: the same as `screen`. */
+  styled?: string;
   role?: string;
 }
 
@@ -111,7 +120,7 @@ export class FakeTmux {
   private pasted = new Set<string>();
   private ack = new Set<string>();
   /** The screen of windows created by new-window and new-session: an idle Claude prompt. */
-  newWindowScreen = '❯ \n';
+  newWindowScreen = composerFixture('❯ \n');
   /** Every tmux command seen, as "subcommand target". */
   readonly seen: string[] = [];
   /** Clients attached to the session (`list-clients`): name and last activity. */
@@ -160,7 +169,7 @@ export class FakeTmux {
       case 'capture-pane': {
         const w = this.find(target);
         if (w && args.includes('-J') && this.ack.delete(w.id)) return { stdout: 'Working (esc to interrupt)\n' };
-        return w ? { stdout: w.screen } : { code: 1, stderr: `can't find window: ${target}` };
+        return w ? { stdout: args.includes('-e') ? (w.styled ?? w.screen) : w.screen } : { code: 1, stderr: `can't find window: ${target}` };
       }
       case 'rename-window': {
         const w = this.find(target);
@@ -181,7 +190,7 @@ export class FakeTmux {
         return {};
       }
       case 'paste-buffer': { const w = this.find(target); if (w) this.pasted.add(w.id); return w ? {} : { code: 1 }; }
-      case 'send-keys': { const w = this.find(target); if (w && w.screen === '❯ \n' && args.includes('-l') && args.at(-1)?.startsWith('codex ')) w.screen = '› Ask Codex to do anything\n'; if (w && args.at(-1) === 'Enter' && this.pasted.delete(w.id)) this.ack.add(w.id); return w ? {} : { code: 1 }; }
+      case 'send-keys': { const w = this.find(target); if (w && w.screen === composerFixture('❯ \n') && args.includes('-l') && (args.at(-1)?.startsWith('codex ') || (args.at(-1)?.startsWith('exec sh ') && /\nexec codex /.test(fs.readFileSync(args.at(-1)!.slice(8), 'utf8'))))) w.screen = composerFixture('› Ask Codex to do anything\n'); if (w && args.at(-1) === 'Enter' && this.pasted.delete(w.id)) this.ack.add(w.id); return w ? {} : { code: 1 }; }
       case 'select-window':
         return this.find(target) ? {} : { code: 1, stderr: `can't find window: ${target}` };
       default:

@@ -100,7 +100,8 @@ describe('close: the task is marked closed and leaves every list', () => {
     tmux.windows = tmux.windows.filter((w) => !w.name.endsWith('nc-2')); // control: this one vanishes without close
     const events = await watchTick(ctx, memory, notifier);
     assert.deepEqual(events.map((e) => e.task), ['NC-2']);
-    assert.deepEqual(sent, ['NC-2: okno zniknęło bez raportu']);
+    assert.equal(sent.length, 1);
+    assert.match(sent[0]!, /NC-2: .*tmux server\/session lost/);
   });
 
   it('a closed task without a window does not make a task prefix ambiguous', async () => {

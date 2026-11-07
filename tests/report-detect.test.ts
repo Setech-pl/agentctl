@@ -12,7 +12,7 @@ import type { Notifier } from '../src/core/notify.ts';
 import { extractMdPaths, findCandidates, globFiles, reportInfo, syncReport } from '../src/core/report-detect.ts';
 import { resolveSpec, splitSpecs } from '../src/core/spec.ts';
 import { collectStatus, statusMarkdown } from '../src/core/status.ts';
-import { readTaskRecord } from '../src/core/taskstore.ts';
+import { readTaskRecord, setHeaderFields, taskFile } from '../src/core/taskstore.ts';
 import { watchTick, WatchMemory } from '../src/core/watch.ts';
 import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helpers.ts';
 
@@ -274,5 +274,29 @@ describe('report: as a list in the spec and the project', () => {
   it('rejects an empty list and non-strings', () => {
     assert.throws(() => resolve('report: []\n'), /report must be a path, or a list/);
     assert.throws(() => resolve('report: [1]\n'), /report must be a path, or a list/);
+  });
+});
+
+describe('status: the report candidate of a row (R3)', () => {
+  it('discovers candidates once per task per collect and drops a stale persisted candidate', async () => {
+    const s = setup('r3');
+    s.fake.windows.length = 0; // the window is gone: the row keeps looking for a report
+    const stale = path.join(s.root, 'gone', 'NC-1-old.md');
+    await setHeaderFields(s.runner, taskFile(s.config, 'nc-1'), { report_candidate: stale });
+    const dir = path.dirname(s.record.report);
+    const real = fs.readdirSync;
+    let walks = 0;
+    (fs as { readdirSync: unknown }).readdirSync = (p: fs.PathLike, o?: object) => {
+      if (String(p) === dir) walks++;
+      return (real as (d: fs.PathLike, o?: object) => unknown)(p, o);
+    };
+    let row;
+    try {
+      row = (await collectStatus(s.ctx, { progress: false })).find((r) => r.task === 'NC-1');
+    } finally {
+      fs.readdirSync = real;
+    }
+    assert.equal(row?.reportCandidate, undefined, 'a stale persisted candidate does not reach the row');
+    assert.equal(walks, 1, 'one bounded discovery walk per task per collect');
   });
 });

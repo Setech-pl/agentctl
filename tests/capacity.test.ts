@@ -1,3 +1,4 @@
+import { composerFixture } from './composer-fixture.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -109,6 +110,22 @@ describe('capacity: current facts and bounded history', () => {
     assert.equal(readSamples(t.config).length, 3);
     assert.ok(fs.statSync(samplesPath(t.config)).size < 5000);
   });
+  it('U-e: a jittering reset boundary next to a threshold crossing is not a reset; a real new window is, once', () => {
+    const t = world('reset-jitter');
+    const plan = (at: number, percent: number, weekReset: number) => {
+      setClaudePlan(t.config.path, at, { session: 10, week: percent }, 0);
+      const file = path.join(path.dirname(t.config.path), 'usage/claude-plan.json');
+      const raw = JSON.parse(fs.readFileSync(file, 'utf8')); raw.windows[0].resetsAt = (NOW + 7200000) / 1000; raw.windows[1].resetsAt = weekReset / 1000;
+      fs.writeFileSync(file, JSON.stringify(raw));
+      const r = openReader(t.config); const p = readPlans(t.config, r, at); r.save(); return p;
+    };
+    const week = NOW + 4 * 86400000, resets = () => readJournal(t.config).filter((e) => /week: window reset/.test(e.text)).length;
+    plan(NOW, 79, week); plan(NOW + 60_000, 81, week + 45_000); plan(NOW + 90_000, 81, week - 30_000); plan(NOW + 120_000, 82, week + 90_000);
+    assert.equal(readJournal(t.config).filter((e) => /crossed 80/.test(e.text)).length >= 1, true);
+    assert.equal(resets(), 0, 'boundary jitter and a rising percentage are not a reset');
+    plan(NOW + 180_000, 3, week + 7 * 86400000); plan(NOW + 240_000, 3, week + 7 * 86400000);
+    assert.equal(resets(), 1, 'the new window is announced once');
+  });
   it('invalid/torn samples are ignored', () => {
     const t = world('corrupt');
     fs.writeFileSync(samplesPath(t.config), '{bad\n{}\n');
@@ -188,7 +205,7 @@ describe('capacity: scheduling evidence', () => {
     const history = { v: 1, task: 'OLD-1', event: 'mark', at: new Date(NOW - 1000).toISOString(), effective: { agent: 'claude', model: 'sonnet', effort: 'medium' }, durationMs: 60000, tokens: { fresh: 5000 }, result: 'ok' };
     fs.writeFileSync(historyPath(t.config), JSON.stringify(history) + '\n');
     const p = (await collectCapacity(t.ctx)).providers[0]!;
-    assert.deepEqual(p.slots, { active: 1, limit: 4, reserved: 1, external: 0, free: 2 });
+    assert.deepEqual(p.slots, { starting: 0, active: 1, reportReady: 0, used: 2, limit: 4, reserved: 1, external: 0, free: 2 });
     assert.deepEqual(p.queue, { count: 2, next: 'APP-3' });
     assert.equal(p.stats[0]!.medianDurationMs, 60000); assert.equal(p.stats[0]!.medianTokens, 5000); assert.equal(p.stats[0]!.ok, 1);
     assert.ok(!('tasks' in p));
@@ -209,7 +226,7 @@ describe('capacity: scheduling evidence', () => {
     const spec = specText({ task: 'APP-1', agent: 'claude', model: 'sonnet', effort: 'medium' }, repo);
     const fresh = new DiskRunner({ dryRun: false, startTime: NOW, respond: acknowledgingRespond((cmd, args, opts) => {
       if (cmd === 'git' && args.includes('--verify')) return { code: 1 };
-      if (cmd === 'tmux') return args[0] === 'capture-pane' ? { stdout: '❯ Try "fake"' } : (args[0] === 'has-session' || args[0] === 'list-windows' ? { code: 1 } : {});
+      if (cmd === 'tmux') return args[0] === 'capture-pane' ? { stdout: composerFixture('❯ Try "fake"') } : (args[0] === 'has-session' || args[0] === 'list-windows' ? { code: 1 } : {});
       if (cmd === 'codex') return { code: 127 };
       return {};
     }) });

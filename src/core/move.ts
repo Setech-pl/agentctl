@@ -1,3 +1,8 @@
+import { collectLimits } from './limits.ts';
+import { liveWindows } from './plan.ts';
+import { openReader, readPlans } from './usage.ts';
+import { validateLaunch } from './safety.ts';
+import { alternatives, isActive } from './providers/registry.ts';
 import { confirmAction } from './clipboard.ts';
 import type { AgentName } from './config.ts';
 import type { Context } from './context.ts';
@@ -11,6 +16,7 @@ import { listTargets, matchTask, describeTargets } from './resolve.ts';
 import type { ResolvedSpec } from './spec.ts';
 import { readTaskPrompt, readTaskRecord, setHeaderField, taskFile } from './taskstore.ts';
 import type { TaskRecord } from './taskstore.ts';
+import { assertAgentSpawnAllowed } from './window-guard.ts';
 import { AgentctlError, windowName } from './util.ts';
 
 export interface MoveOptions {
@@ -31,7 +37,7 @@ export interface MovePlan {
   prompt: string;
 }
 
-const otherAgent = (a: AgentName): AgentName => (a === 'claude' ? 'codex' : 'claude');
+
 const label = (o: Order): string => `${o.agent} ${formatModelEffort(o)}`;
 
 /** The text added to the original prompt for the agent that takes over. */
@@ -64,16 +70,26 @@ export async function planMove(ctx: Context, taskArg: string, opts: MoveOptions 
   if (from.supersededBy) throw new AgentctlError(`${from.task} was already moved to ${from.supersededBy}`, `Close the old window when you are done: agentctl close ${from.task}`);
   if (from.pin) throw new AgentctlError(`${from.task} is pinned (pin: true): it is never moved to the other provider`, 'Wait for the limit to reset, or remove the pin from the spec and start the task again.');
   if (from.agent === 'unknown') throw new AgentctlError(`the agent of ${from.task} is unknown (adopted without --agent), so its model cannot be translated`, 'Start the task again on the provider you want, with "agentctl new --agent <agent>".');
-  const target = opts.agent ?? otherAgent(from.agent);
-  if (target === from.agent) throw new AgentctlError(`${from.task} already runs on ${from.agent}`, `Pick the other provider: agentctl move ${from.task} --agent ${otherAgent(from.agent)}`);
+  const others = alternatives(config, from.agent);
+  if (!opts.agent && others.length > 1) {
+    const loads = collectLimits(config, await liveWindows(ctx)), reader = openReader(config), plans = readPlans(config, reader, ctx.runner.now()); reader.save();
+    const choices = others.map(id => { const load = loads.providers.find(p => p.agent === id); const plan = plans[id]; return `${id}: free slots ${load?.free ?? 'unbounded'}, usage ${plan?.maxPercent === null || !plan ? 'n/d' : `${Math.round(plan.maxPercent)}%`}`; });
+    throw new AgentctlError(`wybierz dostawcę: --agent ${others.join('|')} (${choices.join('; ')})`);
+  }
+  const target = opts.agent ?? others[0]!;
+  if (!isActive(config, target)) throw new AgentctlError(`provider ${target} is not enabled; add it to providers: [claude, codex, kimi]`);
+  if (target === from.agent) throw new AgentctlError(`${from.task} already runs on ${from.agent}`, `Pick the other provider: agentctl move ${from.task} --agent ${others.join('|')}`);
 
   const t = translate({ agent: from.agent, model: from.model, effort: from.effort === 'unknown' ? 'high' : from.effort }, target, config.equivalents);
   if (!t.ok) throw new AgentctlError(`${from.task}: ${t.message}`, t.hint);
+  validateLaunch(config, { task: from.task, ...t.order }, from.env);
   if (from.repos.length === 0) throw new AgentctlError(`${from.task} has no worktree recorded, so there is nothing for the new agent to continue from`, 'Start a new task by hand.');
 
   const original = readTaskPrompt(config, from.window);
   if (!original) throw new AgentctlError(`cannot read the prompt of ${from.task} from ${taskFile(config, from.window)}`);
 
+  // A review record from before the own-checkout rule never moves: the new window would open in the author's checkout.
+  assertAgentSpawnAllowed(ctx, { task: from.task, report: from.report, repos: from.repos, reviewOf: from.reviewOf, autoReview: from.autoReview, origin: 'move' });
   const used = new Set([...targets.map((x) => x.window), ...targets.map((x) => x.task.toLowerCase())]);
   const task = nextTaskId(from.task, (candidate) => used.has(windowName(candidate)) || used.has(candidate.toLowerCase()));
   return { from, to: t.order, task, window: windowName(task), prompt: `${original}\n\n${continuationNote(from)}` };
@@ -113,6 +129,7 @@ export async function moveTask(ctx: Context, taskArg: string, opts: MoveOptions 
     setup: [],
     env: from.env,
     ...(from.reviewOf ? { reviewOf: from.reviewOf } : {}),
+    ...(from.autoReview ? { autoReview: from.autoReview } : {}),
     report: from.report,
     prompt: plan.prompt,
     pin: false,
@@ -122,7 +139,8 @@ export async function moveTask(ctx: Context, taskArg: string, opts: MoveOptions 
     requested: from.requested,
     switchedBy: 'limit',
   };
-  const [result] = await newTasks(ctx, [spec], { reuse: true, noSwitch: true, ...(opts.self ? { self: opts.self } : {}), ...(opts.signal ? { signal: opts.signal } : {}) });
+  // origin 'move': a review record written before the own-checkout rule is refused before anything is made.
+  const [result] = await newTasks(ctx, [spec], { reuse: true, noSwitch: true, origin: 'move', ...(opts.self ? { self: opts.self } : {}), ...(opts.signal ? { signal: opts.signal } : {}) });
   await setHeaderField(ctx.runner, taskFile(ctx.config, plan.window), 'continues', from.task);
   await setHeaderField(ctx.runner, taskFile(ctx.config, from.window), 'superseded_by', plan.task);
   const moved = readTaskRecord(ctx.config, from.window);

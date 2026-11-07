@@ -1,5 +1,8 @@
+import { knownLinkReferences, linkUsers } from './links.ts';
 import fs from 'node:fs';
 import path from 'node:path';
+import { configureMeasurements, sizeOf, newestMtime } from './fs-measure.ts';
+export { sizeOf, newestMtime } from './fs-measure.ts';
 import { parseAge } from './archive.ts';
 import { findCohort } from './cohort.ts';
 import type { Context } from './context.ts';
@@ -25,6 +28,7 @@ export interface GcItem {
   bytes: number;
   detail: string;
   /** Branches: the repository to run git in. */
+  cohort?: string;
   repo?: string;
   branch?: string;
 }
@@ -34,6 +38,8 @@ export interface GcSkip {
   kind: GcKind | 'worktree-foreign';
   target: string;
   reason: string;
+  bytes?: number;
+  cohort?: string;
 }
 
 export interface GcPlan {
@@ -43,6 +49,8 @@ export interface GcPlan {
   olderThanMs: number;
   /** Folders of the cache that belong to no task of agentctl (not touched, not listed one by one). */
   unknownCacheDirs: number;
+  foreignWorktrees?: number;
+  forceLinks?: boolean;
 }
 
 export interface GcOptions {
@@ -50,38 +58,12 @@ export interface GcOptions {
   olderThan?: string | undefined;
   branches?: boolean | undefined;
   cohort?: string | undefined;
+  /** CLI-only override for link references, never dirty/active/protected worktrees. */
+  forceLinks?: boolean;
 }
 
 export const DEFAULT_OLDER_THAN = '7d';
 const PROTECTED = new Set(['main', 'master']);
-
-/** Bytes of a file or folder (links are not followed). */
-export function sizeOf(target: string): number {
-  let st: fs.Stats;
-  try {
-    st = fs.lstatSync(target);
-  } catch {
-    return 0;
-  }
-  if (!st.isDirectory()) return st.size;
-  let total = 0;
-  for (const name of fs.readdirSync(target)) total += sizeOf(path.join(target, name));
-  return total;
-}
-
-/** The newest modification time (ms) of a file, or of anything inside a folder. */
-export function newestMtime(target: string): number {
-  let st: fs.Stats;
-  try {
-    st = fs.lstatSync(target);
-  } catch {
-    return 0;
-  }
-  if (!st.isDirectory()) return st.mtimeMs;
-  // A folder is as old as the newest thing in it (its own time only moves when an entry is added or removed).
-  const names = fs.readdirSync(target);
-  return names.length === 0 ? st.mtimeMs : Math.max(...names.map((name) => newestMtime(path.join(target, name))));
-}
 
 const same = (a: string, b: string): boolean => path.resolve(a) === path.resolve(b);
 
@@ -112,6 +94,7 @@ async function listWorktrees(ctx: Context, repo: string): Promise<WorktreeListin
 /** What `gc` would do now. Reads (files, git), changes nothing. */
 export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan> {
   const { config, runner } = ctx;
+  configureMeasurements(config.disk);
   const olderThanMs = parseAge(opts.olderThan ?? DEFAULT_OLDER_THAN);
   const cohort = opts.cohort === undefined ? undefined : findCohort(config, opts.cohort).name;
   const archived = new Set(listArchivedRecords(config).map((r) => r.window));
@@ -122,6 +105,7 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
   const skipped: GcSkip[] = [];
   const mine = all.filter((r) => finished(r) && (cohort === undefined || (r.cohort !== undefined && cohortKey(r.cohort) === cohortKey(cohort))));
   const others = all.filter((r) => !finished(r));
+  const references = knownLinkReferences(config);
   const removing = new Set<string>();
   const seenWorktrees = new Set<string>();
   const listings = new Map<string, WorktreeListing[] | undefined>();
@@ -144,6 +128,11 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
         skipped.push({ task: record.task, kind: 'worktree', target: wt, reason: `also used by ${user.task}, which is not finished` });
         continue;
       }
+      const users = linkUsers(wt, references);
+      if (users.length && !opts.forceLinks) {
+        skipped.push({ task: record.task, kind: 'worktree', target: wt, bytes: await sizeOf(wt), reason: `links target used by ${users.join(', ')}; CLI --force-links overrides` });
+        continue;
+      }
       const head = await git(ctx, ['-C', wt, 'rev-parse', '--abbrev-ref', 'HEAD']);
       if (PROTECTED.has(head.out)) {
         skipped.push({ task: record.task, kind: 'worktree', target: wt, reason: `has ${head.out} checked out` });
@@ -158,7 +147,7 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
         skipped.push({ task: record.task, kind: 'worktree', target: wt, reason: `uncommitted changes (${status.out.split('\n').length} file${status.out.split('\n').length === 1 ? '' : 's'})` });
         continue;
       }
-      const bytes = sizeOf(wt);
+      const bytes = await sizeOf(wt);
       items.push({ kind: 'worktree', task: record.task, target: wt, bytes, detail: `${record.cancelled ? 'cancelled' : 'closed'} task, no uncommitted changes`, repo: repo.path });
       removing.add(key);
     }
@@ -196,12 +185,12 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
     for (const name of names.sort()) {
       if (/\.md$/i.test(name)) continue;
       const target = path.join(dir, name);
-      const age = runner.now() - newestMtime(target);
+      const age = runner.now() - await newestMtime(target);
       if (age < olderThanMs) {
-        skipped.push({ task: record.task, kind: 'cache', target, reason: `newer than ${opts.olderThan ?? DEFAULT_OLDER_THAN}` });
+        skipped.push({ task: record.task, kind: 'cache', target, bytes: await sizeOf(target), reason: `newer than ${opts.olderThan ?? DEFAULT_OLDER_THAN}` });
         continue;
       }
-      items.push({ kind: 'cache', task: record.task, target, bytes: sizeOf(target), detail: `older than ${opts.olderThan ?? DEFAULT_OLDER_THAN}, no active task` });
+      items.push({ kind: 'cache', task: record.task, target, bytes: await sizeOf(target), detail: `older than ${opts.olderThan ?? DEFAULT_OLDER_THAN}, no active task` });
     }
   }
   const taskNames = new Set(all.map((r) => r.window));
@@ -268,8 +257,14 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
     }
   }
 
+  for (const item of [...items, ...skipped]) {
+    const record = all.find(r => r.task === item.task);
+    if (record?.cohort) item.cohort = record.cohort;
+    if (item.bytes === undefined) item.bytes = item.kind === 'branch' || item.kind === 'worktree-foreign' ? 0 : await sizeOf(item.target);
+  }
   const freeBytes = items.reduce((n, i) => n + i.bytes, 0);
-  return { items, skipped, freeBytes, olderThanMs, unknownCacheDirs };
+  const foreignWorktrees = skipped.filter(s => s.kind === 'worktree-foreign').length;
+  return { ...(opts.forceLinks ? { forceLinks: true } : {}), items, skipped: cohort === undefined ? skipped : skipped.filter(s => s.kind !== 'worktree-foreign'), freeBytes, olderThanMs, unknownCacheDirs, ...(cohort !== undefined ? { foreignWorktrees } : {}) };
 }
 
 export interface GcResult {
@@ -286,10 +281,15 @@ export async function applyGc(ctx: Context, plan: GcPlan): Promise<GcResult> {
   for (const kind of order) {
     for (const item of plan.items.filter((i) => i.kind === kind)) {
       try {
+        // The plan may be old; only successfully removed bytes belong in the result.
+        const bytes = kind === 'worktree' || kind === 'cache' ? await sizeOf(item.target, { fresh: true, now: () => runner.now() }) : 0;
         if (kind === 'worktree') {
-          const r = await runner.exec('git', ['-C', item.repo as string, 'worktree', 'remove', item.target]);
+          const users = linkUsers(item.target, knownLinkReferences(config));
+          if (users.length && !plan.forceLinks) throw new Error(`links target used by ${users.join(', ')}`);
+          const r = await runner.exec('git', ['-C', item.repo as string, 'worktree', 'remove', item.target], { timeoutMs: config.git.timeoutS * 1000 });
           if (r.code !== 0) throw new Error(r.stderr.trim().split('\n')[0] || `git exit ${r.code}`);
         } else if (kind === 'cache') {
+          if (runner.now() - await newestMtime(item.target, { fresh: true, now: () => runner.now() }) < plan.olderThanMs) throw new Error('cache contents changed since the plan; kept because they are too recent');
           await runner.remove(item.target);
         } else if (kind === 'archive') {
           await runner.rename(item.target, path.join(archiveDir(config), path.basename(item.target)));
@@ -297,8 +297,8 @@ export async function applyGc(ctx: Context, plan: GcPlan): Promise<GcResult> {
           const r = await runner.exec('git', ['-C', item.repo as string, 'branch', '-d', item.branch as string]);
           if (r.code !== 0) throw new Error(r.stderr.trim().split('\n')[0] || `git exit ${r.code}`);
         }
-        result.done.push(item);
-        result.freedBytes += item.bytes;
+        result.done.push({ ...item, bytes });
+        result.freedBytes += bytes;
       } catch (e) {
         result.failed.push({ item, reason: errorMessage(e) });
       }
@@ -309,22 +309,65 @@ export async function applyGc(ctx: Context, plan: GcPlan): Promise<GcResult> {
 
 const KIND_WORD: Record<GcKind, string> = { worktree: 'worktree', cache: 'cache', archive: 'archive', branch: 'branch' };
 
-export function renderGc(plan: GcPlan, opts: { applied?: GcResult | undefined } = {}): string[] {
-  const lines: string[] = [];
-  if (plan.items.length === 0) lines.push('Nothing to clean up.');
-  else {
-    lines.push(opts.applied ? 'Cleaned up:' : 'Would clean up (a dry run; --apply does it, after a y/N):');
-    for (const i of plan.items) lines.push(`  ${KIND_WORD[i.kind].padEnd(8)} ${i.task.padEnd(12)} ${i.target}${i.bytes > 0 ? `  ${formatBytes(i.bytes)}` : ''}  (${i.detail})`);
+export interface GcViewOptions { detail?: boolean; offset?: number; limit?: number }
+/** Bounded, aggregate-first representation; full paths are opt-in and paginated. */
+export function gcView(plan: GcPlan, opts: GcViewOptions = {}) {
+  const offset = opts.offset ?? 0, limit = Math.min(100, opts.limit ?? 10);
+  const categories = (['worktree', 'archive', 'cache', 'branch'] as const).map(kind => ({ category: kind === 'branch' ? 'merged branches' : kind, count: plan.items.filter(i => i.kind === kind).length, bytes: plan.items.filter(i => i.kind === kind).reduce((n, i) => n + i.bytes, 0) }));
+  const reasons = new Map<string, { reason: string; count: number; bytes: number }>();
+  for (const s of plan.skipped) { const key = s.reason.startsWith('newer than ') ? s.reason : s.reason.startsWith('links target ') ? 'links target in use (see detail)' : s.reason.replace(/also used by .*/, 'also used by unfinished task'); const group = reasons.get(key) ?? { reason: key, count: 0, bytes: 0 }; group.count++; group.bytes += s.bytes ?? 0; reasons.set(key, group); }
+  const cohorts = new Map<string, { cohort: string; count: number; bytes: number; skipped: number; skippedBytes: number }>();
+  for (const i of plan.items) { const key = i.cohort ?? '(none)', group = cohorts.get(key) ?? { cohort: key, count: 0, bytes: 0, skipped: 0, skippedBytes: 0 }; group.count++; group.bytes += i.bytes; cohorts.set(key, group); }
+  for (const i of plan.skipped) { const key = i.cohort ?? '(none)', group = cohorts.get(key) ?? { cohort: key, count: 0, bytes: 0, skipped: 0, skippedBytes: 0 }; group.skipped++; group.skippedBytes += i.bytes ?? 0; cohorts.set(key, group); }
+  const newer = new Map<string, { task: string; files: number; bytes: number; reason: string }>();
+  for (const s of plan.skipped.filter(s => s.reason.startsWith('newer than '))) { const group = newer.get(s.task) ?? { task: s.task, files: 0, bytes: 0, reason: s.reason }; group.files++; group.bytes += s.bytes ?? 0; newer.set(s.task, group); }
+  const page = <T>(items: T[]) => ({ total: items.length, offset, next_offset: offset + limit < items.length ? offset + limit : null, items: items.slice(offset, offset + limit) });
+  return { freeBytes: plan.freeBytes, summary: `można zwolnić ${(plan.freeBytes / 1e9).toFixed(3)} GB (${plan.freeBytes} bytes)`, categories,
+    skipped: { count: plan.skipped.length, bytes: plan.skipped.reduce((n, s) => n + (s.bytes ?? 0), 0), reasons: page([...reasons.values()]) },
+    cohorts: page([...cohorts.values()]), newer: page([...newer.values()]), unknownCacheDirs: plan.unknownCacheDirs, foreignWorktrees: plan.foreignWorktrees ?? 0,
+    ...(opts.detail ? { details: page([...plan.items.map(i => ({ ...i, action: 'remove/archive' })), ...plan.skipped.map(s => ({ ...s, action: 'skip' }))]) } : {}),
+    more: 'Full list: detail: true / --verbose; offset/limit paginate details and grouped summaries.' };
+}
+
+const DONE_WORD: Record<GcKind, string> = { worktree: 'removed worktrees', cache: 'removed cache entries', archive: 'archived state folders', branch: 'deleted merged branches' };
+
+export function renderGc(plan: GcPlan, opts: GcViewOptions & { applied?: GcResult | undefined } = {}): string[] {
+  const view = gcView(plan, opts);
+  const lines = opts.applied ? ['History and reports (*.md) stay.'] : [`Could free ${formatBytes(plan.freeBytes)}; ${view.summary}. History and reports (*.md) stay.`, ...view.categories.map(c => `${c.category}: ${c.count}, ${c.bytes} bytes`), `Skipped: ${view.skipped.count}, ${view.skipped.bytes} bytes`];
+  if (!opts.applied) {
+    lines.push('Would clean up (a dry run; --apply does it, after a y/N):');
+    if (!plan.items.length) lines.push('Nothing to clean up.');
+    for (const reason of view.skipped.reasons.items) lines.push(`  ${reason.reason}: ${reason.count}, ${reason.bytes} bytes`);
+    for (const c of view.cohorts.items) lines.push(`cohort ${c.cohort}: ${c.count}, ${c.bytes} bytes; skipped ${c.skipped}, ${c.skippedBytes} bytes`);
+    for (const n of view.newer.items) lines.push(`  ${n.task}: ${n.reason}, ${n.files} files, ${n.bytes} bytes`);
+    for (const i of view.details?.items ?? []) lines.push(`  ${i.action} ${KIND_WORD[i.kind as GcKind] ?? i.kind} ${i.task} ${i.target} (${('reason' in i ? i.reason : i.detail)})`);
+    for (const [label, page] of [['cohorts', view.cohorts], ['newer', view.newer], ['reasons', view.skipped.reasons], ['details', view.details]] as const) if (page?.next_offset !== null && page?.next_offset !== undefined) lines.push(`${label}: next offset ${page.next_offset} of ${page.total}`);
+    if (plan.foreignWorktrees) lines.push(`${plan.foreignWorktrees} foreign worktrees: not touched.`);
+    if (plan.unknownCacheDirs) lines.push(`${plan.unknownCacheDirs} folder${plan.unknownCacheDirs === 1 ? '' : 's'} in the cache belong to no task of agentctl: not touched.`);
+    lines.push('Preview only; --apply executes. Full list: --verbose --offset N --limit N.');
+    return lines;
   }
-  if (plan.skipped.length > 0) {
-    lines.push('Skipped (reason):');
-    for (const s of plan.skipped) lines.push(`  ${s.kind === 'worktree-foreign' ? 'worktree' : s.kind.padEnd(8)} ${s.task.padEnd(12)} ${s.target}  (${s.reason})`);
+  // The result decides what is listed: done is removed, failed is named, skipped stays visibly out of "Cleaned up".
+  const applied = opts.applied;
+  lines.push('Cleaned up:');
+  if (!applied.done.length) lines.push('Nothing was cleaned up.');
+  for (const kind of ['worktree', 'cache', 'archive', 'branch'] as const) {
+    const done = applied.done.filter(i => i.kind === kind);
+    if (done.length) lines.push(`  ${DONE_WORD[kind]}: ${done.length}, ${done.reduce((n, i) => n + i.bytes, 0)} bytes`);
   }
-  if (plan.unknownCacheDirs > 0) lines.push(`${plan.unknownCacheDirs} folder${plan.unknownCacheDirs === 1 ? '' : 's'} in the cache belong to no task of agentctl: not touched.`);
-  if (opts.applied) {
-    lines.push(`Freed ${formatBytes(opts.applied.freedBytes)} (${opts.applied.done.length} done${opts.applied.failed.length > 0 ? `, ${opts.applied.failed.length} failed` : ''}).`);
-    for (const f of opts.applied.failed) lines.push(`  failed: ${f.item.kind} ${f.item.target}: ${f.reason}`);
-  } else lines.push(`Could free ${formatBytes(plan.freeBytes)}. History and reports (*.md) stay.`);
+  for (const f of applied.failed) lines.push(`  failed: ${f.item.target}: ${f.reason}`);
+  lines.push(`Freed ${formatBytes(applied.freedBytes)} (removed ${applied.done.length}, failed ${applied.failed.length}; skipped entries were left in place).`);
+  if (plan.skipped.length) {
+    lines.push(`Skipped (left in place): ${plan.skipped.length}, ${view.skipped.bytes} bytes`);
+    for (const reason of view.skipped.reasons.items) lines.push(`  skipped: ${reason.reason}: ${reason.count}, ${reason.bytes} bytes`);
+  }
+  if (opts.detail) {
+    for (const i of applied.done) lines.push(`  ${i.kind === 'archive' ? 'archived state' : i.kind === 'branch' ? 'deleted branch' : `removed ${KIND_WORD[i.kind]}`} ${i.task} ${i.target} (${i.detail})`);
+    for (const f of applied.failed) lines.push(`  failed ${KIND_WORD[f.item.kind]} ${f.item.task} ${f.item.target} (${f.reason})`);
+    for (const s of plan.skipped) lines.push(`  skipped ${s.kind === 'worktree-foreign' ? 'worktree-foreign' : KIND_WORD[s.kind as GcKind]} ${s.task} ${s.target} (${s.reason})`);
+  }
+  if (plan.foreignWorktrees) lines.push(`${plan.foreignWorktrees} foreign worktrees: not touched.`);
+  if (plan.unknownCacheDirs) lines.push(`${plan.unknownCacheDirs} folder${plan.unknownCacheDirs === 1 ? '' : 's'} in the cache belong to no task of agentctl: not touched.`);
   return lines;
 }
 

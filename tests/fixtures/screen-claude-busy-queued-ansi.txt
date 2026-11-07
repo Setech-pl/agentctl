@@ -1,0 +1,22 @@
+[38;5;174m ▐[48;5;16m▛███▛█[39m[49m   [1mClaude Code[0m [38;5;246mv2.1.311
+[38;5;174m▝▜[48;5;16m█████[49m█▀[39m  [38;5;246mHaiku 5.5 with low effort · Claude Ultra
+[38;5;174m ▝▝   ▝▝ [39m  [38;5;246m~/work/sandbox
+[48;5;237m❯ [38;5;231mRun exactly 8 separate Bash tool calls, strictly one after another, each one being: python3 -c "import time; time.sleep(20)". After each call write only its number. After the 8th, write DONE-TURN1.[39m
+[38;5;231m[49m⏺[39m 1
+  [38;5;246mRan [1m1[0m[38;5;246m shell command [39m
+[38;5;231m⏺[39m
+[38;5;246m[48;5;237m❯ FOLLOWUP-LONG-A: when your current work is finished, reply with the single line ACK-LONG-A and nothing else. Context padding follows so that this message is long enough to be collapsed by the [39m
+  [38;5;246mterminal UI into a pasted text placeholder instead of being shown inline.[39m
+  [38;5;246mLine 1: the quick brown fox jumps over the lazy dog, again and again, to pad the message out to about one thousand characters.[39m
+  [38;5;246mLine 2: the quick brown fox jumps over the lazy dog, again and again, to pad the message out to about one thousand characters.[39m
+  [38;5;246mLine 3: the quick brown fox jumps over the lazy dog, again and again, to pad the message out to about one thousand characters.[39m
+  [38;5;246mLine 4: the quick brown fox jumps over the lazy dog, again and again, to pad the message out to about one thousand characters.[39m
+  [38;5;246mLine 5: the quick brown fox jumps over the lazy dog, again and again, to pad the message out to about one thousand characters.[39m
+  [38;5;246mLine 6: the quick brown fox jumps over the lazy dog, again and again, to pad the message out to about one thousand characters.[39m
+  [38;5;246mLine 7: the quick brown fox jumps over the lazy dog, again and again, to pad the message out to about one thousand characters.[39m
+[49m  [38;5;246mctrl+x ctrl+s to send now
+[38;5;174m✢[39m [38;5;174mClauding… [38;5;246m(27s · ↓[39m [38;5;246m105 tokens)[39m
+[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[38;5;246m❯ [2m[39mPress up to edit queued messages
+[0m[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[39m  [38;5;246mpaste again to expand[39m

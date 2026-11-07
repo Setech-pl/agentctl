@@ -1,6 +1,6 @@
 import type { AgentName, GlobalConfig } from './config.ts';
 import type { ResolvedSpec } from './spec.ts';
-import { readTaskRecord } from './taskstore.ts';
+import { findRecordAnywhere } from './taskstore.ts';
 
 export interface AgentModel {
   agent: AgentName;
@@ -26,7 +26,7 @@ export function checkReviewer(spec: Pick<ResolvedSpec, 'task' | 'agent' | 'model
 export function findAuthor(task: string, batch: ResolvedSpec[], config: GlobalConfig): AgentModel | undefined {
   const inBatch = batch.find((s) => s.task === task);
   if (inBatch) return { agent: inBatch.agent, model: inBatch.model };
-  const record = readTaskRecord(config, task.toLowerCase());
+  const record = findRecordAnywhere(config, task);
   return record && record.agent !== 'unknown' ? { agent: record.agent, model: record.model } : undefined;
 }
 
@@ -35,7 +35,9 @@ export interface LiveWindow {
   /** Unknown when the window was not created through agentctl. */
   agent?: AgentName;
   /** Absent: a window of agentctl. `reserved`: a place held with `limits reserve`; `external`: a session found outside (limits.count_external). */
-  kind?: 'reserved' | 'external';
+  kind?: 'reserved' | 'external' | 'starting';
+  reportReady?: boolean;
+  counted?: boolean;
   pid?: number;
   cwd?: string;
 }
@@ -43,7 +45,7 @@ export interface LiveWindow {
 /** Provider limit: counts windows already running for the agent and refuses one more past the limit. */
 export function checkWindowLimit(agent: AgentName, limit: number | undefined, live: LiveWindow[], session: string): string | undefined {
   if (limit === undefined) return undefined;
-  const running = live.filter((w) => w.agent === agent);
+  const running = live.filter((w) => w.agent === agent && w.counted !== false);
   if (running.length < limit) return undefined;
   const list = running.map((w) => w.window).join(', ');
   return `window limit for ${agent} reached: ${running.length} of ${limit} in session "${session}" (${list}).`;

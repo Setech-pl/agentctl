@@ -17,7 +17,8 @@ function setup(name: string, mirrorYaml: string) {
   const root = scratch.sub(name);
   const repo = scratch.sub(`${name}/app`);
   const config = makeConfig(root, mirrorYaml.replace('MIRROR', path.join(root, 'mirror')));
-  const report = path.join(root, 'NC-1.md');
+  fs.mkdirSync(config.cache, { recursive: true });
+  const report = path.join(config.cache, 'NC-1.md');
   const [spec] = splitSpecs(`---\ntask: NC-1\nagent: claude\nreport: ${report}\nrepos:\n  - {path: ${repo}, worktree: ${repo}-1}\n---\nGo\n`).map((raw) =>
     resolveSpec(raw, { config, loadProject: () => undefined }),
   );
@@ -45,7 +46,7 @@ describe('mirror', () => {
     const result = await reportStatus(ctx);
     assert.deepEqual(runner.commands, [
       `mkdir -p ${mirror}/nc-1`,
-      `cp ${report} ${mirror}/nc-1/NC-1.md`,
+      expectBytes(runner.written.get(`${mirror}/nc-1/NC-1.md`) as string, `${mirror}/nc-1/NC-1.md`),
       `mkdir -p ${mirror}`,
       expectBytes(runner.written.get(`${mirror}/status.json`) as string, `${mirror}/status.json`),
     ]);
@@ -79,7 +80,7 @@ describe('mirror', () => {
     const { ctx, runner } = makeContext(config, { respond: windows });
     const result = await syncMirror(ctx, await collectStatus(ctx));
     assert.deepEqual(result?.copied, []);
-    assert.deepEqual(runner.commands.filter((c) => c.startsWith('cp ')), []);
+    assert.deepEqual(runner.commands.filter((c) => c.includes('/nc-1/NC-1.md (')), []);
     assert.ok(runner.written.has(`${mirror}/status.json`));
   });
 
@@ -88,7 +89,7 @@ describe('mirror', () => {
     fs.writeFileSync(report, '# Report');
     const { ctx, runner } = makeContext(config, { respond: (cmd, args) => (cmd === 'sh' ? { code: 0 } : windows(cmd, args)) });
     await pullTask(ctx, 'NC-1', 'darwin');
-    assert.ok(runner.commands.includes(`cp ${report} ${mirror}/nc-1/NC-1.md`));
+    assert.equal(runner.written.get(`${mirror}/nc-1/NC-1.md`), '# Report');
     assert.ok(runner.commands.includes('pbcopy'));
   });
 

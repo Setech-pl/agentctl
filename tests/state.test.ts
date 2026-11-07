@@ -101,7 +101,7 @@ describe('status states from mocked capture-pane', () => {
   const config = makeConfig(root);
   const start = Date.UTC(2026, 9, 31, 10, 0, 0);
   const headers = ['NC-1', 'NC-2', 'NC-3', 'NC-4', 'NC-5', 'NC-6'].map((t, i) => {
-    const report = path.join(root, `${t}.md`);
+    const report = path.join(config.cache, `${t}.md`);
     return `---\ntask: ${t}\nagent: ${i === 2 ? 'codex' : 'claude'}\nreport: ${report}\nrepos:\n  - {path: ${repo}, worktree: ${repo}-${i}}\n---\nGo\n`;
   });
   const specs: ResolvedSpec[] = splitSpecs(headers.join('')).map((raw) => resolveSpec(raw, { config, loadProject: () => undefined }));
@@ -109,10 +109,11 @@ describe('status states from mocked capture-pane', () => {
     fs.mkdirSync(path.dirname(taskFile(config, s.window)), { recursive: true });
     fs.writeFileSync(taskFile(config, s.window), renderTaskMd(recordFromSpec(s, config, start), 'Go'));
   }
-  fs.writeFileSync(path.join(root, 'NC-4.md'), 'done');
-  fs.utimesSync(path.join(root, 'NC-4.md'), new Date(start + 60_000), new Date(start + 60_000));
-  fs.writeFileSync(path.join(root, 'NC-6.md'), 'left over from an earlier run');
-  fs.utimesSync(path.join(root, 'NC-6.md'), new Date(start - 3_600_000), new Date(start - 3_600_000));
+  fs.mkdirSync(config.cache, { recursive: true });
+  fs.writeFileSync(path.join(config.cache, 'NC-4.md'), 'done');
+  fs.utimesSync(path.join(config.cache, 'NC-4.md'), new Date(start + 60_000), new Date(start + 60_000));
+  fs.writeFileSync(path.join(config.cache, 'NC-6.md'), 'left over from an earlier run');
+  fs.utimesSync(path.join(config.cache, 'NC-6.md'), new Date(start - 3_600_000), new Date(start - 3_600_000));
 
   it('reports working / waiting / needs-trust / report-ready / dead', async () => {
     const screens: Record<string, string> = { 'nc-1': WORKING, 'nc-2': CLAUDE_IDLE, 'nc-3': CODEX_TRUST, 'nc-4': CLAUDE_IDLE };
@@ -133,7 +134,7 @@ describe('status states from mocked capture-pane', () => {
         ['NC-2', 'waiting'],
         ['NC-3', 'needs-trust'],
         ['NC-4', 'report-ready'], // window alive and idle, fresh report
-        ['NC-5', 'dead'], // window gone, no report
+        ['NC-5', 'needs-attention'], // window gone, no report
         ['NC-6', 'waiting'], // an old report from before the start does not count
       ],
     );
@@ -144,7 +145,7 @@ describe('status states from mocked capture-pane', () => {
     const { ctx } = makeContext(config, { respond: (cmd, args) => (cmd === 'tmux' && args[0] === 'list-windows' ? { stdout: 'other\n' } : undefined) });
     const rows = await collectStatus(ctx);
     assert.equal(rows.find((r) => r.task === 'NC-4')?.state, 'report-ready');
-    assert.equal(rows.find((r) => r.task === 'NC-1')?.state, 'dead');
+    assert.equal(rows.find((r) => r.task === 'NC-1')?.state, 'needs-attention');
   });
 });
 
@@ -166,7 +167,7 @@ describe('new --no-wait-trust: folder-trust dialog', () => {
       });
       const t0 = runner.now();
       await assert.rejects(newTasks(ctx, [spec!], { waitTrust: false }), (e: Error & { hint?: string }) => {
-        assert.equal(e.message, `${spec!.task}: agent waits for folder trust – attach: tmux attach -t agentctl, confirm, then agentctl status`);
+        assert.equal(e.message, `${spec!.task}: agent waits for folder trust – attach: tmux attach -t '=agentctl', confirm, then agentctl status`);
         assert.match(e.hint ?? '', /never answers that dialog.*agentctl watch --tmux .*.*TASK\.md/);
         return true;
       });

@@ -1,3 +1,4 @@
+import { composerFixture } from './composer-fixture.ts';
 import { completedRecordFromSpec as recordFromSpec } from './helpers.ts';
 import assert from 'node:assert/strict';
 import { formatLocalTime } from '../src/core/util.ts';
@@ -74,12 +75,12 @@ env: {NEON_CITY_TASK: NC-1}
 First line.
 Second line.
 `;
-    const { ctx, runner } = makeContext(config, { respond: freshMachine('loading...', 'Welcome\n❯ Try "x"') });
+    const { ctx, runner } = makeContext(config, { respond: freshMachine('loading...', composerFixture('Welcome\n❯ Try "x"')) });
     await newTasks(ctx, resolveAll(config, text));
 
     const cache = path.join(config.cache, 'nc-1');
     const state = path.join(config.stateDir, 'nc-1');
-    const taskMd = runner.commands.find((c) => c.startsWith('write '));
+    const taskMd = runner.commands.find((c) => c.startsWith('write ') && c.includes('/TASK.md '));
     assert.match(taskMd ?? '', new RegExp(`^write ${state}/TASK.md \\(\\d+ bytes\\)$`));
     assert.deepEqual(
       runner.commands.filter((c) => !c.startsWith('write ') && !c.includes('@agentctl-role')),
@@ -91,14 +92,17 @@ Second line.
         `ln -sfn ${pkgs}/sim ${wt('1')}/node_modules/@nc/sim`,
         `mkdir -p ${state}`,
         `mkdir -p ${cache}`,
-        `tmux new-session -d -s agentctl -n nc-1 -c ${wt('1')} -e NEON_CITY_TASK=NC-1`,
-        `tmux send-keys -t '=agentctl:nc-1' -l -- 'claude --model opus --effort medium --verbose'`,
+        `chmod 0700 ${state}/start.sh`,
+        `tmux new-session -d -s agentctl -n nc-1 -c ${wt('1')}`,
+        `tmux send-keys -t '=agentctl:nc-1' -l -- 'exec sh ${state}/start.sh'`,
         'tmux send-keys -t \'=agentctl:nc-1\' Enter',
         'tmux load-buffer -b agentctl-nc-1 -',
         'tmux paste-buffer -p -d -b agentctl-nc-1 -t \'=agentctl:nc-1\'',
         'tmux send-keys -t \'=agentctl:nc-1\' Enter',
       ],
     );
+    assert.match(runner.written.get(`${state}/start.sh`)!, /export NEON_CITY_TASK=NC-1/);
+    assert.match(runner.written.get(`${state}/start.sh`)!, /exec claude --model opus --effort medium --verbose/);
     const paste = runner.calls.find((c) => c.line.startsWith('tmux load-buffer'));
     assert.ok(paste?.input?.startsWith('Model: opus · effort medium\n\nFirst line.\nSecond line.\n\nReport protocol:'));
     assert.match(paste!.input!, /agentctl:report-end/);
@@ -131,22 +135,24 @@ Go too.
         if (cmd === 'tmux' && args[0] === 'has-session') return { code: 0 };
         if (cmd === 'tmux' && args[0] === 'list-windows') return { stdout: 'other\n' };
         if (cmd === 'git' && args.includes('--verify')) return { code: 0 }; // nc-2 branch already exists
-        return screens('› Ask Codex to do anything')(cmd, args, opts);
+        return screens(composerFixture('› Ask Codex to do anything'))(cmd, args, opts);
       },
     });
     await newTasks(ctx, resolveAll(config, text));
     const c = runner.commands.filter((l) => !l.startsWith('write ') && !l.startsWith('mkdir'));
     assert.equal(c[0], `git -C ${repoA} worktree add ${wt('2')} nc-2`);
     assert.ok(c.includes(`tmux new-window -d -t '=agentctl:' -n nc-2 -c ${wt('2')}`));
-    assert.ok(c.includes(`tmux send-keys -t '=agentctl:nc-2' -l -- 'codex --sandbox danger-full-access -m gpt-6.1-sol -c model_reasoning_effort=high'`));
+    assert.ok(c.includes(`tmux send-keys -t '=agentctl:nc-2' -l -- 'exec sh ${config.stateDir}/nc-2/start.sh'`));
+    assert.ok(runner.written.get(path.join(config.stateDir, 'nc-2/start.sh'))!.includes('exec codex --sandbox danger-full-access -m gpt-6.1-sol -c model_reasoning_effort=high'));
     // default model: no -m
-    assert.ok(c.includes(`tmux send-keys -t '=agentctl:nc-3' -l -- 'codex --sandbox danger-full-access -c model_reasoning_effort=high'`));
+    assert.ok(c.includes(`tmux send-keys -t '=agentctl:nc-3' -l -- 'exec sh ${config.stateDir}/nc-3/start.sh'`));
+    assert.ok(runner.written.get(path.join(config.stateDir, 'nc-3/start.sh'))!.includes('exec codex --sandbox danger-full-access -c model_reasoning_effort=high'));
     assert.ok(!c.some((l) => l.includes('new-session')));
   });
 
   it('fails when a worktree exists unless --reuse is given', async () => {
     const text = `---\ntask: NC-4\nagent: claude\nrepos:\n  - {path: ${repoA}, worktree: ${repoB}}\n---\nGo.\n`;
-    const { ctx, runner } = makeContext(config, { respond: freshMachine('❯ Try "x"') });
+    const { ctx, runner } = makeContext(config, { respond: freshMachine(composerFixture('❯ Try "x"')) });
     await assert.rejects(newTasks(ctx, resolveAll(config, text)), /worktree .* already exists \(pass --reuse/);
     assert.equal(runner.commands.length, 0);
 
@@ -159,7 +165,7 @@ Go too.
     const wtDir = scratch.sub('new/real-wt');
     scratch.sub('new/real-wt/node_modules/@nc/protocol'); // a real directory, not a symlink
     const text = `---\ntask: NC-5\nagent: claude\nrepos:\n  - {path: ${repoA}, worktree: ${wtDir}}\nlinks:\n  - {from: "node_modules/@nc/*", to: "${pkgs}/*"}\n---\nGo.\n`;
-    const { ctx } = makeContext(config, { respond: freshMachine('❯ Try "x"') });
+    const { ctx } = makeContext(config, { respond: freshMachine(composerFixture('❯ Try "x"')) });
     await assert.rejects(newTasks(ctx, resolveAll(config, text), { reuse: true }), /is not a symlink/);
   });
 
@@ -178,11 +184,25 @@ Go too.
     const { ctx, runner } = makeContext(config, { respond: freshMachine('Do you trust this folder?') });
     await assert.rejects(newTasks(ctx, resolveAll(config, text)), (e: Error & { hint?: string }) => {
       assert.match(e.message, /did not show its input prompt within 60s/);
-      assert.match(e.hint ?? '', /tmux attach -t agentctl/);
+      assert.match(e.hint ?? '', /tmux attach -t '=agentctl'/);
       return true;
     });
     assert.ok(!runner.commands.some((l) => l.includes('load-buffer')), 'the prompt must not be pasted');
     assert.ok(!runner.commands.some((l) => l.includes('kill-window')));
+  });
+
+  it('recognizes the Codex "Update available" modal at once instead of burning the 60 s ready timeout', async () => {
+    const modal = fs.readFileSync(new URL('./fixtures/screen-codex-update-modal.txt', import.meta.url), 'utf8');
+    const text = `---\ntask: NC-8\nagent: codex\nrepos:\n  - {path: ${repoA}, worktree: ${wt('8')}}\n---\nGo.\n`;
+    const { ctx, runner } = makeContext(config, { respond: freshMachine(modal) });
+    await assert.rejects(newTasks(ctx, resolveAll(config, text)), (e: Error & { hint?: string }) => {
+      assert.match(e.message, /NC-8: codex shows a startup dialog \("Update available": choose "Skip until next version"\)/);
+      assert.doesNotMatch(e.message, /did not show its input prompt/);
+      assert.match(e.hint ?? '', /never answers that dialog[\s\S]*check_for_update_on_startup=false/);
+      return true;
+    });
+    assert.ok(!runner.commands.some((l) => l.includes('load-buffer')), 'the prompt must not be pasted');
+    assert.ok(!runner.commands.some((l) => l.includes('kill-window')), 'the CLI keeps the window for the human');
   });
 });
 
@@ -196,7 +216,7 @@ describe('send', () => {
     const [spec] = resolveAll(config, `---\ntask: NC-1\nagent: claude\nrepos:\n  - {path: ${repo}, worktree: ${repo}-wt}\n---\nOriginal.\n`);
     seedTask(config, spec!, 0);
     const { ctx, runner } = makeContext(config, {
-      respond: (cmd, args) => (cmd === 'tmux' && args[0] === 'list-windows' ? { stdout: 'nc-1\n' } : cmd === 'tmux' && args[0] === 'capture-pane' ? { stdout: '❯ Try \"fake\"\n' } : undefined),
+      respond: (cmd, args) => (cmd === 'tmux' && args[0] === 'list-windows' ? { stdout: 'nc-1\n' } : cmd === 'tmux' && args[0] === 'capture-pane' ? { stdout: composerFixture('❯ Try \"fake\"\n') } : undefined),
     });
     await sendPrompts(ctx, [item]);
     assert.deepEqual(runner.commands.filter(c => c.startsWith('tmux ')), [
@@ -283,7 +303,8 @@ describe('status', () => {
   const start = Date.UTC(2026, 9, 31, 10, 0, 0);
 
   it('builds a table from TASK.md files and mocked tmux output', async () => {
-    const report = path.join(root, 'r2.md');
+    fs.mkdirSync(config.cache, { recursive: true });
+    const report = path.join(config.cache, 'r2.md');
     const specs = resolveAll(
       config,
       `---\ntask: NC-1\nagent: claude\nmodel: opus\neffort: high\nrepos:\n  - {path: ${repo}, worktree: ${repo}-1}\n---\nA\n---\ntask: NC-2\nagent: codex\nreport: ${report}\nrepos:\n  - {path: ${repo}, worktree: ${repo}-2}\n---\nB\n`,
@@ -312,8 +333,8 @@ describe('status', () => {
       ],
     );
     const table = renderStatusTable(rows);
-    assert.match(table[0] as string, /^TASK\s+AGENT\/MODEL\/EFFORT\s+STATE\s+WINDOW\s+STARTED\s+DURATION\s+PROGRESS\s+REPORT\s+LAST LINE$/);
-    assert.match(table[1] as string, new RegExp(`^NC-1\\s+claude/opus/high\\s+waiting\\s+alive\\s+${formatLocalTime('2026-10-31T10:00:00.000Z')}\\s+2h 05m\\s+\\?c 0f\\s+missing\\s+Reading src/a\\.ts$`));
+    assert.match(table[0] as string, /^TASK\s+AGENT\/MODEL\/EFFORT\s+STATE\s+WINDOW\s+STARTED\s+DURATION\s+PROGRESS\s+REPORT\s+DECISIONS\s+ACTIONS\s+MESSAGES\s+LAST LINE$/);
+    assert.match(table[1] as string, new RegExp(`^NC-1\\s+claude/opus/high\\s+waiting\\s+alive\\s+${formatLocalTime('2026-10-31T10:00:00.000Z')}\\s+2h 05m\\s+\\?c 0f\\s+no\\s+0\\s+0\\s+0\\s+Reading src/a\\.ts$`));
     assert.equal(table.length, 3);
   });
 });
@@ -322,7 +343,8 @@ describe('pull', () => {
   const root = scratch.sub('pull');
   const repo = scratch.sub('pull/app');
   const config = makeConfig(root);
-  const report = path.join(root, 'REPORT.md');
+  fs.mkdirSync(config.cache, { recursive: true });
+  const report = path.join(config.cache, 'REPORT.md');
   const [spec] = resolveAll(config, `---\ntask: NC-1\nagent: claude\nreport: ${report}\nrepos:\n  - {path: ${repo}, worktree: ${repo}-1}\n---\nA\n`);
   seedTask(config, spec!, 0);
   const hasClipboard = (name: string): Respond => (cmd, args) => (cmd === 'sh' && args.at(-1) === name ? { code: 0 } : cmd === 'sh' ? { code: 1 } : undefined);

@@ -1,3 +1,5 @@
+import { journalOutputs } from './outputs.ts';
+import { listTaskRecords } from './taskstore.ts';
 import { withFileLock } from './file-lock.ts';
 import fs from 'node:fs';
 import { foldHistory, readHistory } from './history.ts';
@@ -8,12 +10,13 @@ import type { GlobalConfig } from './config.ts';
 import type { Context } from './context.ts';
 import { awayView } from './away.ts';
 import type { AwayView } from './away.ts';
+import { secretRedactor } from './secret-redaction.ts';
 import { readJournal } from './journal.ts';
 import type { JournalEntry } from './journal.ts';
 import { readQueue, waiting } from './queue.ts';
 import { selectReady } from './pull.ts';
 import { collectStatus } from './status.ts';
-import { AgentctlError, cohortKey, formatLocalTime, isObject } from './util.ts';
+import { AgentctlError, cohortKey, formatLocalTime, isObject, plural } from './util.ts';
 
 /*
  * What changed since the last look, for a chat that gets no notifications: the journal of events (watch, the queue, cancel, the limits)
@@ -28,6 +31,23 @@ export const FIRST_LOOK_MS = 24 * 3_600_000;
 
 export const markersPath = (config: Pick<GlobalConfig, 'path'>): string => path.join(path.dirname(config.path), 'events-seen.json');
 
+const GC_PREVIEW_KEY = '"gc_preview":';
+const GC_PREVIEW_DROPPED = { dropped: 'oversized payload; details via gc_preview / agentctl gc' };
+
+/**
+ * The write-time bound of recordJournal (journal.ts) postdates many journals: an old gc_suggest can still carry a whole GC plan and would
+ * occupy page after page of JSON fragments. Summarize such a legacy entry on read (same replacement as at write time, every other field kept).
+ * The returned prefix is the length of the byte-identical head of the old and the new JSON: a fragment cursor at or before it continues
+ * seamlessly, a cursor past it pointed into the dropped payload and the entry counts as delivered.
+ */
+function summarizeLegacyGc(entry: JournalEntry): { entry: JournalEntry; prefix: number } | null {
+  if (entry.gc_preview === undefined) return null;
+  const raw = JSON.stringify(entry);
+  if (Buffer.byteLength(raw) <= 4000) return null;
+  const key = raw.indexOf(GC_PREVIEW_KEY);
+  return { entry: { ...entry, gc_preview: GC_PREVIEW_DROPPED }, prefix: key < 0 ? 0 : key + GC_PREVIEW_KEY.length };
+}
+
 export function readMarkers(config: Pick<GlobalConfig, 'path'>): Partial<Record<EventClient, string>> {
   try {
     const d: unknown = JSON.parse(fs.readFileSync(markersPath(config), 'utf8'));
@@ -39,8 +59,8 @@ export function readMarkers(config: Pick<GlobalConfig, 'path'>): Partial<Record<
   }
 }
 
-/** "last", an age (30m, 2h, 1d), an ISO time, or HH:MM today (local); returns ms. */
-export function parseSince(text: string | undefined, client: EventClient, config: Pick<GlobalConfig, 'path'>, now: number): { ms: number; label: string } {
+/** "last", an age (30m, 2h, 1d), an ISO time, or HH:MM — the most recent past occurrence within 24 h (local); returns ms. */
+export function parseSince(text: string | undefined, client: EventClient, config: Pick<GlobalConfig, 'path'>, now: number): { ms: number; label: string; note?: string } {
   const t = (text ?? 'last').trim();
   if (t === '' || t === 'last') {
     const marker = readMarkers(config)[client];
@@ -53,8 +73,10 @@ export function parseSince(text: string | undefined, client: EventClient, config
   if (hm) {
     const d = new Date(now);
     d.setHours(Number(hm[1]), Number(hm[2]), 0, 0);
-    const ms = d.getTime() > now ? d.getTime() - 86_400_000 : d.getTime();
-    return { ms, label: `od ${t}` };
+    // A time still in the future today means yesterday evening, not an empty window.
+    const yesterday = d.getTime() > now;
+    if (yesterday) d.setDate(d.getDate() - 1);
+    return { ms: d.getTime(), label: `od ${t}${yesterday ? ' (wczoraj)' : ''}` };
   }
   const ms = Date.parse(t);
   if (Number.isNaN(ms)) throw new AgentctlError(`cannot read the time "${t}"`, 'Use last, an age (30m, 2h, 1d), HH:MM or an ISO time like 2026-11-02T10:00.');
@@ -78,6 +100,8 @@ export interface EventsReport {
   /** ISO time the events start after. */
   since: string;
   sinceLabel: string;
+  /** Why the list is empty although a time was asked for (HH:MM later today). */
+  note?: string;
   cohort: string | null;
   events: JournalEntry[];
   summary: EventsSummary;
@@ -94,7 +118,11 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
   const now = runner.now();
   const since = parseSince(opts.since, opts.client, config, now);
   const cohort = opts.cohort === undefined ? null : findCohort(config, opts.cohort).name;
-  const all = readJournal(config, -1);
+  for (const record of listTaskRecords(config)) await journalOutputs(ctx, record);
+  const journal = readJournal(config, -1);
+  const redacted = secretRedactor([config, process.env, journal], new Set(listTaskRecords(config).map(r => r.task)))(journal);
+  const legacyGc = redacted.map(summarizeLegacyGc);
+  const all = redacted.map((e, i) => legacyGc[i]?.entry ?? e);
   const key = cohort === null ? opts.client : `${opts.client}|cohort:${cohortKey(cohort)}`;
   const saved = opts.cursor ?? ((!opts.since || opts.since === 'last') ? (readMarkers(config)[key] ?? (opts.client.startsWith('mcp:') && readMarkers(config).mcp?.startsWith('e2:') ? readMarkers(config).mcp : undefined)) : undefined);
   let position = saved?.startsWith('e2:') ? decodeCursor(saved) : { index: all.findIndex(e => Date.parse(e.at) > (saved ? Date.parse(saved) : since.ms)), offset: 0 };
@@ -109,19 +137,28 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
     active: alive.length,
     unmarked: foldHistory(readHistory(config)).filter(r => r.reportAt && !r.result).length,
     working: alive.filter((r) => r.state === 'working' || r.state === 'background').length,
-    needYou: alive.filter((r) => r.state === 'needs-attention' || r.state === 'needs-input' || r.state === 'needs-trust' || r.state === 'waiting').map((r) => `${r.task} (${r.state})${r.question ? `: ${r.question}` : r.state === 'needs-attention' ? `: ${r.hint}` : ''}`),
+    needYou: open.filter((r) => r.state === 'needs-attention' || r.state === 'needs-input' || r.state === 'needs-trust' || r.state === 'waiting' || (r.reportCandidate && r.report !== 'yes')).map((r) => `${r.task} (${r.state})${r.question ? `: ${r.question}` : r.state === 'needs-attention' || (r.reportCandidate && r.report !== 'yes') ? `: ${r.hint}` : ''}`),
     queued: queue.length,
     reportsToPull: selectReady(open, false).map((r) => r.task).slice(0, 10),
   };
   // Bound the complete JSON and text forms before advancing the persistent cursor.
-  const report: EventsReport = { client: opts.client, since: new Date(since.ms).toISOString(), sinceLabel: since.label, cohort, events, summary, away: awayView(config), markerMoved: false, has_more: false, next_cursor: '' };
+  const report: EventsReport = { client: opts.client, since: new Date(since.ms).toISOString(), sinceLabel: since.label, ...(since.note ? { note: since.note } : {}), cohort, events, summary, away: awayView(config), markerMoved: false, has_more: false, next_cursor: '' };
   const encode = () => `e2:${position.index}:${position.offset}`;
-  const fits = () => Math.max(Buffer.byteLength(JSON.stringify(report, null, 2)), Buffer.byteLength(renderEvents(report).join('\n'))) <= (opts.maxBytes ?? 16000);
+  const baseNeedYou = [...summary.needYou];
+  const updateNeedYou = () => { report.summary.needYou = [...baseNeedYou, ...events.filter(e => !('fragment' in e) && e.kind === 'report-outputs').flatMap(e => [...(e.decisions ?? []).map(text => `${e.reviewOf ? 'przegląd ' : ''}${e.task}: decision: ${text}`), ...(e.actions ?? []).map(a => `${e.reviewOf ? 'przegląd ' : ''}${e.task}: action: ${a.title} (${a.shell})`)])]; };
+  const fits = () => { updateNeedYou(); return Math.max(Buffer.byteLength(JSON.stringify(report, null, 2)), Buffer.byteLength(renderEvents(report).join('\n'))) <= (opts.maxBytes ?? 16000); };
   const limit = Math.max(1, Math.min(200, opts.limit ?? 100));
   while (position.index < all.length && events.length < limit) {
     const event = all[position.index]!;
     if (cohort !== null && (!event.cohort || cohortKey(event.cohort) !== cohortKey(cohort))) { position = { index: position.index + 1, offset: 0 }; continue; }
     const raw = JSON.stringify(event);
+    const prefix = legacyGc[position.index]?.prefix;
+    if (position.offset > 0 && ((prefix !== undefined && position.offset > prefix) || position.offset >= raw.length)) {
+      // A mid-fragment cursor of an entry that has since shrunk (a legacy gc_preview summarized on read): the undelivered rest
+      // was the dropped payload (or its shifted suffix); the entry counts as delivered, the next one is served whole.
+      position = { index: position.index + 1, offset: 0 };
+      continue;
+    }
     const previous = { ...position };
     if (position.offset === 0) {
       events.push(event); position.index++;
@@ -144,6 +181,7 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
     if (position.offset >= raw.length) position = { index: position.index + 1, offset: 0 };
     break;
   }
+  updateNeedYou();
   report.has_more = position.index < all.length;
   report.next_cursor = encode();
   if (!opts.keep && !runner.dryRun) {
@@ -167,6 +205,12 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
 const PHONE_MARK = ' 📱';
 const hhmm = (iso: string): string => formatLocalTime(iso).slice(-5);
 const KIND_LABEL: Record<JournalEntry['kind'], string> = {
+  'tmux-lost': 'TMUX UTRACONY',
+  'report-outputs': 'WYNIKI RAPORTU',
+  'review-added': 'DODANO PRZEGLĄD',
+  'review-repinned': 'PRZEGLĄD PRZYPIĘTY',
+  gc_suggest: 'SUGESTIA GC',
+  'limited-resume': 'WZNOWIENIE',
   'needs-attention': 'WYMAGA UWAGI',
   'report-candidate': 'KANDYDAT',
   overloaded: 'PRZECIĄŻENIE',
@@ -179,6 +223,9 @@ const KIND_LABEL: Record<JournalEntry['kind'], string> = {
   'report-ready': 'RAPORT',
   'queue-start': 'START',
   'queue-failed': 'BŁĄD STARTU',
+  'setup-started': 'SETUP',
+  'setup-finished': 'SETUP OK',
+  'setup-failed': 'BŁĄD SETUPU',
   'needs-input': 'PYTANIE',
   'needs-trust': 'ZAUFANIE',
   blocked: 'ZABLOKOWANE',
@@ -190,11 +237,12 @@ const KIND_LABEL: Record<JournalEntry['kind'], string> = {
   usage: 'UŻYCIE',
   'limits-changed': 'LIMITY',
   'report-detected': 'RAPORT WYKRYTY',
+  delivery: 'WIADOMOŚĆ',
 };
 
 export function summaryLine(s: EventsSummary): string {
-  const parts = [`${s.active} aktywne${s.working > 0 ? ` (${s.working} pracuje)` : ''}`, `${s.queued} w kolejce`, s.reportsToPull.length > 0 ? `${s.reportsToPull.length} raport${s.reportsToPull.length === 1 ? '' : 'y'} do pobrania (${s.reportsToPull.join(', ')})` : 'brak raportów do pobrania'];
-  if (s.unmarked) parts.push(`${s.unmarked} zadań bez oceny`);
+  const parts = [`${s.active} aktywne${s.working > 0 ? ` (${s.working} pracuje)` : ''}`, `${s.queued} w kolejce`, s.reportsToPull.length > 0 ? `${s.reportsToPull.length} ${plural(s.reportsToPull.length, 'raport', 'raporty', 'raportów')} do pobrania (${s.reportsToPull.join(', ')})` : 'brak raportów do pobrania'];
+  if (s.unmarked) parts.push(`${s.unmarked} ${plural(s.unmarked, 'zadanie', 'zadania', 'zadań')} bez oceny`);
   if (s.needYou.length > 0) parts.push(`czeka na Ciebie: ${s.needYou.join(', ')}`);
   return `Teraz: ${parts.join(' · ')}.`;
 }
@@ -203,6 +251,7 @@ export function renderEvents(report: EventsReport): string[] {
   const head = `Zdarzenia ${report.sinceLabel}${report.cohort ? `, kohorta ${report.cohort}` : ''}: ${report.events.length === 0 ? 'brak zmian' : String(report.events.length)}`;
   return [
     head,
+    ...(report.note ? [report.note] : []),
     ...report.events.map((e) => `${hhmm(e.at)}  ${KIND_LABEL[e.kind]}${e.task ? `  ${e.task}` : ''}  ${e.verdict ? `${e.verdict}` : e.text}${e.phone ? PHONE_MARK : ''}`),
     summaryLine(report.summary),
     `has_more: ${report.has_more}; next_cursor: ${report.next_cursor}`,

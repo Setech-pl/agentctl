@@ -27,6 +27,7 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`cohort show`](#agentctl-cohort-show) | The tasks of one cohort as in "status" (closed and cancelled ones too) and its queued tasks. |
 | [`cohort add`](#agentctl-cohort-add) | Put existing tasks (running, finished or queued) into a cohort; it is created if it is new. A task that was in another cohort moves. |
 | [`cohort remove`](#agentctl-cohort-remove) | Take tasks out of their cohort (they then belong to none). |
+| [`cohort archive`](#agentctl-cohort-archive) | Hide finished cohorts from the board choice and the default list; their tasks, reports and history stay. Cohorts with active or queued work are never archived. Shows the plan; --yes does it. |
 | [`cohort note`](#agentctl-cohort-note) | Write the description of a cohort (an empty text removes it). |
 | [`overlap`](#agentctl-overlap) | Which active tasks of one repository changed the same files (git diff of each worktree against its base, plus uncommitted files). Without a task: every pair. |
 | [`send`](#agentctl-send) | Paste a follow-up prompt into the existing window of each task in the file. |
@@ -40,10 +41,12 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`usage`](#agentctl-usage) | Token usage of the tasks and the state of the plans: per provider the limit used (5 h and weekly window, with the reset) and the tokens today and in the period, the active tasks with their tokens, the cohorts. What a provider does not tell is n/d. |
 | [`resume`](#agentctl-resume) | After a restart (the Mac, the tmux server): make the window again for active tasks that have a worktree and no window, and start the agent in resume mode - Claude with --resume \<session> or --continue, Codex with "resume \<session>" or "resume --last" - with the same model, effort, flags, event hooks and usage tap, without pasting the prompt again. Tasks whose report is ready are left alone unless --all. Shows the list and asks y/N first. |
 | [`up`](#agentctl-up) | Start of the day: make sure the watcher and the board run in the agentctl session (never a second copy; with manager.autostart the manager too), say which tasks can be resumed, and go to the board (attach, or switch inside tmux). Without a terminal it only prints the command to attach. |
-| [`mark`](#agentctl-mark) | Say how a task turned out: ok, partial or fail (the result you judge, with an optional note). It goes to the history that "log" and "stats" read; the last mark of a task wins. |
+| [`mark`](#agentctl-mark) | Record the result the user judged. Multiple tasks require a preview and confirmation. |
+| [`dataset`](#agentctl-dataset) | Read-only benchmark datasets |
+| [`dataset export`](#agentctl-dataset-export) | Export one record per known task attempt; no content by default |
 | [`log`](#agentctl-log) | The history of the tasks: when, agent/model/effort, how long, tokens, progress, the result you marked and the verdict of the report. One line per task, newest first. |
 | [`stats`](#agentctl-stats) | Which model and effort work: the tasks of the history grouped by agent/model/effort - how many, median time and tokens, the share of ok, partial and fail (agentctl mark), cancelled ones and tasks moved to the other provider after a limit. |
-| [`gc`](#agentctl-gc) | Take back disk space from finished tasks: the git worktrees of closed, cancelled and archived tasks without uncommitted changes, the files next to their reports that are older than --older-than (the *.md reports stay), their state folders (moved to the archive), and with --branches their branches merged into the base (git branch -d, never -D, never main/master or the current branch). A dry run with sizes unless --apply. History and reports stay; uncommitted work, foreign worktrees and unmerged branches are only listed as skipped. |
+| [`gc`](#agentctl-gc) | Bez flag = podgląd, --apply wykonuje. Take back disk space from finished tasks: the git worktrees of closed, cancelled and archived tasks without uncommitted changes, the files next to their reports that are older than --older-than (the *.md reports stay), their state folders (moved to the archive), and with --branches their branches merged into the base (git branch -d, never -D, never main/master or the current branch). A dry run with sizes unless --apply. History and reports stay; uncommitted work, foreign worktrees and unmerged branches are only listed as skipped. |
 | [`archive`](#agentctl-archive) | Move the state of closed tasks (agentctl close) to the archive folder next to the state folder. Reports and worktrees are not touched. |
 | [`hide`](#agentctl-hide) | Take tasks off the board and "status" (they stay in "status --all" and on the board under "a"). Does not close the task or touch its worktree. |
 | [`unhide`](#agentctl-unhide) | Show hidden tasks again on the board and in "status". A task shown on purpose is not hidden again by board.auto_hide_pulled_dead. |
@@ -348,7 +351,7 @@ agentctl unblock TASK-43 --drop-after TASK-42        # drop only this one
 
 Cohorts: tasks grouped under a name you chose ("cohort: \<name>" in a spec, or --cohort). A task without a name belongs to no cohort. Without a subcommand: list.
 
-Subcommands: `cohort list`, `cohort show`, `cohort add`, `cohort remove`, `cohort note`. Without a subcommand: `list`.
+Subcommands: `cohort list`, `cohort show`, `cohort add`, `cohort remove`, `cohort archive`, `cohort note`. Without a subcommand: `list`.
 
 ```
 agentctl cohort [options] [command]
@@ -371,6 +374,7 @@ agentctl cohort list [options]
 | Option | Meaning | Notes |
 |---|---|---|
 | `--json` | machine-readable output |  |
+| `--all` | include archived cohorts |  |
 
 Examples:
 
@@ -438,6 +442,30 @@ Examples:
 agentctl cohort remove TASK-42
 ```
 
+## agentctl cohort archive
+
+Hide finished cohorts from the board choice and the default list; their tasks, reports and history stay. Cohorts with active or queued work are never archived. Shows the plan; --yes does it.
+
+```
+agentctl cohort archive [options] [names...]
+```
+
+| Argument | Meaning |
+|---|---|
+| `[names...]` | cohort names; case does not matter |
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--older-than <age>` | every inactive cohort whose last activity is older, like 7d, 12h, 2w |  |
+| `--yes` | archive without asking |  |
+
+Examples:
+
+```sh
+agentctl cohort archive sprint-1            # preview: hide a finished cohort from the board choice
+agentctl cohort archive --older-than 7d --yes   # every inactive cohort whose last activity is older
+```
+
 ## agentctl cohort note
 
 Write the description of a cohort (an empty text removes it).
@@ -497,6 +525,10 @@ agentctl send [options] [file]
 | `--dry-run` | print the commands that would run, execute nothing |  |
 | `--clip` | read the prompt from the clipboard; shows a summary and asks y/N first |  |
 | `-y, --yes` | with --clip: do not ask |  |
+| `--enter-only <task>` | paste nothing: show the exact text that an earlier send left in the input field of the task ("nie dostarczono – tekst w polu wpisywania") with a token; refuses any other text |  |
+| `--confirm <token>` | with --enter-only: press Enter if the field is still exactly the text the preview showed |  |
+| `--withdraw <task>` | take back a waiting message of the task: a queued one is removed, one whose delivery already began is marked stale (the agent may already work on it) |  |
+| `--entry <id>` | with --withdraw: the id of the message (a unique prefix is enough; peek lists prompt_queue) |  |
 
 Examples:
 
@@ -641,7 +673,7 @@ agentctl events [options]
 
 | Option | Meaning | Notes |
 |---|---|---|
-| `--since <time>` | last (default: since this client looked), an age (30m, 2h, 1d), HH:MM or an ISO time |  |
+| `--since <time>` | last (default: since this client looked), an age (30m, 2h, 1d), HH:MM (the latest past occurrence; still ahead today means yesterday) or an ISO time |  |
 | `--cohort <name>` | only the events and tasks of this cohort |  |
 | `--keep` | do not move the "last" marker of the cli client |  |
 | `--json` | machine-readable output |  |
@@ -728,20 +760,22 @@ agentctl up --no-attach                   # only print the command to open the b
 
 ## agentctl mark
 
-Say how a task turned out: ok, partial or fail (the result you judge, with an optional note). It goes to the history that "log" and "stats" read; the last mark of a task wins.
+Record the result the user judged. Multiple tasks require a preview and confirmation.
 
 ```
-agentctl mark [options] <task> <result>
+agentctl mark [options] <taskOrResult> [result]
 ```
 
 | Argument | Meaning |
 |---|---|
-| `<task>` | task ID; case does not matter and a unique prefix is enough |
-| `<result>` | how it turned out |
+| `<taskOrResult>` | task ID, or result when --cohort is used |
+| `[result]` | ok, partial or fail |
 
 | Option | Meaning | Notes |
 |---|---|---|
+| `--cohort <name>` | mark every task in this cohort |  |
 | `--note <text>` | why (optional) |  |
+| `-y, --yes` | confirm the displayed batch |  |
 
 Examples:
 
@@ -749,6 +783,43 @@ Examples:
 agentctl mark TASK-42 ok
 agentctl mark TASK-42 partial --note "missed the edge case"
 agentctl mark TASK-42 fail
+```
+
+## agentctl dataset
+
+Read-only benchmark datasets
+
+Subcommands: `dataset export`.
+
+```
+agentctl dataset [options] [command]
+```
+
+## agentctl dataset export
+
+Export one record per known task attempt; no content by default
+
+```
+agentctl dataset export [options]
+```
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--since <time>` | inclusive attempt start: ISO time or age (7d) |  |
+| `--until <time>` | inclusive attempt start: ISO time or age |  |
+| `--cohort <name>` | cohort filter |  |
+| `--agent <provider>` | resolved provider filter |  |
+| `--out <file>` | create a new export file (never overwrite existing files) |  |
+| `--format <format>` | jsonl or csv | default `jsonl` |
+| `--include-prompts` | include redacted prompt text (JSONL only) |  |
+| `--include-reports` | include redacted report text (JSONL only) |  |
+
+Examples:
+
+```sh
+agentctl dataset export --out attempts.jsonl
+agentctl dataset export --format csv --since 30d
+agentctl dataset export --include-prompts --include-reports --out content.jsonl
 ```
 
 ## agentctl log
@@ -801,7 +872,7 @@ agentctl stats --clip
 
 ## agentctl gc
 
-Take back disk space from finished tasks: the git worktrees of closed, cancelled and archived tasks without uncommitted changes, the files next to their reports that are older than --older-than (the *.md reports stay), their state folders (moved to the archive), and with --branches their branches merged into the base (git branch -d, never -D, never main/master or the current branch). A dry run with sizes unless --apply. History and reports stay; uncommitted work, foreign worktrees and unmerged branches are only listed as skipped.
+Bez flag = podgląd, --apply wykonuje. Take back disk space from finished tasks: the git worktrees of closed, cancelled and archived tasks without uncommitted changes, the files next to their reports that are older than --older-than (the *.md reports stay), their state folders (moved to the archive), and with --branches their branches merged into the base (git branch -d, never -D, never main/master or the current branch). A dry run with sizes unless --apply. History and reports stay; uncommitted work, foreign worktrees and unmerged branches are only listed as skipped.
 
 ```
 agentctl gc [options]
@@ -809,6 +880,12 @@ agentctl gc [options]
 
 | Option | Meaning | Notes |
 |---|---|---|
+| `--preview` | alias of the default preview; changes nothing |  |
+| `--dry-run` | alias of the default preview; changes nothing |  |
+| `--verbose` | full details, paginated with --offset/--limit |  |
+| `--offset <n>` | page offset | default `0` |
+| `--limit <n>` | page size (1–100) | default `10` |
+| `--force-links` | CLI only: allow removing a worktree referenced by links (other protections stay) |  |
 | `--apply` | do it (after showing the list and asking y/N); without it nothing is changed |  |
 | `--older-than <age>` | age of the files next to the reports before they go: 12h, 7d, 2w (default 7d) |  |
 | `--branches` | also delete the branches of finished tasks that are merged into the base (git branch -d) |  |
@@ -1267,8 +1344,10 @@ agentctl event [options] [payload]
 | Option | Meaning | Notes |
 |---|---|---|
 | `--task <task>` | task ID | required |
+| `--attempt <id>` | attempt that owns this hook/session |  |
 | `--agent <agent>` | the agent that reports | one of `claude`, `codex`; required |
-| `--kind <kind>` | claude: which hook called | one of `notification`, `stop`, `stop-failure`, `user-prompt-submit` |
+| `--kind <kind>` | claude: which hook called | one of `notification`, `stop`, `stop-failure`, `user-prompt-submit`, `session-start` |
+| `--forward-file <path>` | codex: private JSON file containing the original notify command |  |
 | `--forward <json>` | codex: JSON list, the notify command the user had; run with the same JSON after this one |  |
 
 ## agentctl usage-tap
@@ -1282,6 +1361,7 @@ agentctl usage-tap [options]
 | Option | Meaning | Notes |
 |---|---|---|
 | `--task <task>` | task ID | required |
+| `--attempt <id>` | attempt that owns this statusLine session |  |
 | `--forward <command>` | your own statusLine command: run with the same input after this one |  |
 
 Examples:

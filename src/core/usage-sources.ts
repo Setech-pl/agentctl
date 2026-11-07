@@ -1,3 +1,8 @@
+import { randomUUID } from 'node:crypto';
+import { codexLogPlan, codexSessions } from './providers/codex-usage.ts';
+import { claudeSessions, claudeSubagents } from './providers/claude-usage.ts';
+import { provider as adapter, perProvider, PROVIDER_IDS } from './providers/registry.ts';
+import { atomicWriteFile } from './atomic-file.ts';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -12,18 +17,15 @@ import { isObject } from './util.ts';
  */
 
 /** Claude's config directory and Codex's home: the config, else the environment, else the default. */
-export function agentHomes(config: Pick<GlobalConfig, 'usage'>, env: Record<string, string | undefined> = process.env): Record<AgentName, string> {
-  return {
-    claude: config.usage.claudeDir ?? env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), '.claude'),
-    codex: config.usage.codexDir ?? env.CODEX_HOME ?? path.join(os.homedir(), '.codex'),
-  };
+export function agentHomes(config: Pick<GlobalConfig, 'usage'> & Partial<Pick<GlobalConfig, 'agents'>>, env: Record<string, string | undefined> = process.env): Record<AgentName, string> {
+  return perProvider(PROVIDER_IDS, id => adapter(id).usage.home(config, env));
 }
 
 /** The directory of agentctl's own files (`config.yaml` sits in it). */
 export const homeDir = (config: Pick<GlobalConfig, 'path'>): string => path.dirname(config.path);
 
 /** How Claude names the folder of a working directory under `projects/`: every character that is not a letter or a digit becomes "-". */
-export const claudeProjectName = (cwd: string): string => cwd.replace(/[^A-Za-z0-9]/g, '-');
+export { claudeProjectName } from './providers/claude-usage.ts';
 
 export interface SessionMeta {
   id: string | null;
@@ -49,6 +51,9 @@ interface CacheData {
   plans: Record<string, CachedPlan>;
 }
 
+/** Bounded per-reader working set; evicted sessions are re-read on demand. */
+export const USAGE_CACHE_LIMIT = 2048;
+
 const CHUNK = 16 * 1024 * 1024;
 const META_BYTES = 512 * 1024;
 const TAIL_BYTES = 256 * 1024;
@@ -59,7 +64,7 @@ export function cachePath(config: Pick<GlobalConfig, 'path'>): string {
   return path.join(homeDir(config), 'usage-cache.json');
 }
 
-function readRange(file: string, from: number, length: number): string {
+export function readRange(file: string, from: number, length: number): string {
   const fd = fs.openSync(file, 'r');
   try {
     const buf = Buffer.alloc(length);
@@ -75,11 +80,30 @@ export class UsageReader {
   private readonly file: string | undefined;
   private data: CacheData;
   private dirty = false;
+  private saving: Promise<void> | undefined;
+  private readonly deferSave: boolean;
+  private readonly order = { meta: new Map<string, true>(), files: new Map<string, true>(), plans: new Map<string, true>() };
+
+  private remember<K extends 'meta' | 'files' | 'plans'>(kind: K, key: string, value: CacheData[K][string]): void {
+    this.data[kind][key] = value;
+    const order = this.order[kind];
+    order.delete(key); order.set(key, true);
+    while (order.size > USAGE_CACHE_LIMIT) {
+      const oldest = order.keys().next().value!;
+      order.delete(oldest); delete this.data[kind][oldest];
+      this.dirty = true;
+    }
+  }
+
+  get cacheSizes(): { meta: number; files: number; plans: number; listings: number } {
+    return { meta: this.order.meta.size, files: this.order.files.size, plans: this.order.plans.size, listings: this.listings.size };
+  }
   /** Directory listings of this run: the same folder is asked for by several tasks. */
   private readonly listings = new Map<string, string[]>();
 
-  constructor(file: string | undefined) {
+  constructor(file: string | undefined, options: { deferSave?: boolean } = {}) {
     this.file = file;
+    this.deferSave = options.deferSave === true;
     this.data = emptyCache();
     if (!file) return;
     try {
@@ -88,6 +112,14 @@ export class UsageReader {
     } catch {
       // no cache yet, or an unreadable one: it is made again
     }
+    for (const kind of ['meta', 'files', 'plans'] as const) {
+      for (const key of Object.keys(this.data[kind])) this.remember(kind, key, this.data[kind][key]!);
+    }
+  }
+
+  /** Forget the cached directory listings: a long-lived reader (the board) calls this once per tick so new session logs show up. */
+  dropListings(): void {
+    this.listings.clear();
   }
 
   /** Names in a directory (files only when `ext` is given), cached for this run; empty when it is not there. */
@@ -108,7 +140,7 @@ export class UsageReader {
   /** Session id, working directory and start of a session log, read from its first lines once. */
   meta(file: string, provider: AgentName): SessionMeta | undefined {
     const cached = this.data.meta[file];
-    if (cached) return cached;
+    if (cached) { this.remember('meta', file, cached); return cached; }
     let text: string;
     try {
       text = readRange(file, 0, META_BYTES);
@@ -124,9 +156,9 @@ export class UsageReader {
       feedText(probe, `${line}\n`);
       if (probe.cwd !== null && probe.id !== null && probe.firstAt !== null) break;
     }
-    if (probe.cwd === null && probe.id === null) return undefined;
+    if (probe.cwd === null && probe.id === null && !(provider === 'kimi' && probe.firstAt !== null)) return undefined;
     const meta: SessionMeta = { id: probe.id, cwd: probe.cwd, firstAt: probe.firstAt };
-    this.data.meta[file] = meta;
+    this.remember('meta', file, meta);
     this.dirty = true;
     return meta;
   }
@@ -138,12 +170,14 @@ export class UsageReader {
       size = fs.statSync(file).size;
     } catch {
       if (this.data.files[file]) {
-        delete this.data.files[file];
+        delete this.data.files[file]; this.order.files.delete(file);
         this.dirty = true;
       }
       return undefined;
     }
     let entry: CachedFile | undefined = this.data.files[file];
+    if (entry) this.remember('files', file, entry);
+    if (provider === 'kimi' && entry?.stats.kimi?.parserVersion !== 2) entry = undefined; // reparse pre-FIX3 cached zero usage
     if (entry && (size < entry.size || entry.stats.provider !== provider)) entry = undefined; // rewritten or shorter: read again from the start
     if (!entry) entry = { size: 0, offset: 0, stats: emptyStats(provider) };
     if (size > entry.offset) {
@@ -156,95 +190,67 @@ export class UsageReader {
       }
       entry.offset = offset;
       entry.size = size;
-      this.data.files[file] = entry;
+      this.remember('files', file, entry);
       this.dirty = true;
     } else if (!this.data.files[file]) {
-      this.data.files[file] = entry;
+      this.remember('files', file, entry);
       this.dirty = true;
     }
     return entry.stats;
   }
 
-  /** The newest plan state in the tail of the most recently written Codex session logs; undefined when none says anything. */
-  codexPlan(codexHome: string, now: number): PlanSnapshot | undefined {
-    const files = this.recentCodexFiles(codexHome, now, 12);
-    const signature = files.map((f) => `${f.file}:${f.size}:${Math.floor(f.mtimeMs)}`).join('|');
-    const cached = this.data.plans[codexHome];
-    if (cached && cached.signature === signature) return cached.snapshot ?? undefined;
-    let best: PlanSnapshot | null = null;
-    for (const f of files) {
-      const probe = emptyStats('codex');
-      try {
-        const from = Math.max(0, f.size - TAIL_BYTES);
-        const text = readRange(f.file, from, Math.min(TAIL_BYTES, f.size));
-        feedText(probe, from > 0 ? text.slice(text.indexOf('\n') + 1) : text);
-      } catch {
-        continue;
-      }
-      if (probe.plan && (best === null || probe.plan.at > best.at)) best = probe.plan;
-    }
-    this.data.plans[codexHome] = { signature, snapshot: best };
-    this.dirty = true;
-    return best ?? undefined;
-  }
+  /** Compatibility wrapper; provider owns the log layout and parsing. */
+  codexPlan(home: string, now: number): PlanSnapshot | undefined { return codexLogPlan(this, home, now); }
 
-  private recentCodexFiles(codexHome: string, now: number, count: number): { file: string; size: number; mtimeMs: number }[] {
-    const found: { file: string; size: number; mtimeMs: number }[] = [];
-    // The last three days are enough: a plan reading older than that says nothing about the window now.
-    for (let back = 0; back < 3; back++) {
-      const d = localDay(now - back * 86_400_000).split('-');
-      const dir = path.join(codexHome, 'sessions', ...d);
-      for (const name of this.list(dir, '.jsonl')) {
-        if (!name.startsWith('rollout-')) continue;
-        const file = path.join(dir, name);
-        try {
-          const st = fs.statSync(file);
-          found.push({ file, size: st.size, mtimeMs: st.mtimeMs });
-        } catch {
-          // gone meanwhile
-        }
-      }
-    }
-    return found.sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, count);
+  cachedPlan(key: string, signature: string, read: () => PlanSnapshot | undefined): PlanSnapshot | undefined {
+    const cached = this.data.plans[key];
+    if (cached && cached.signature === signature) { this.remember('plans', key, cached); return cached.snapshot ?? undefined; }
+    const snapshot = read(); this.remember('plans', key, { signature, snapshot: snapshot ?? null }); this.dirty = true; return snapshot;
   }
 
   /** Session logs of Codex written on or after the day of `sinceMs`. */
-  codexSessions(codexHome: string, sinceMs: number, now: number): string[] {
-    const out: string[] = [];
-    const days = Math.max(1, Math.min(120, Math.ceil((now - sinceMs) / 86_400_000) + 1));
-    for (let back = 0; back < days; back++) {
-      const d = localDay(now - back * 86_400_000).split('-');
-      const dir = path.join(codexHome, 'sessions', ...d);
-      for (const name of this.list(dir, '.jsonl')) if (name.startsWith('rollout-')) out.push(path.join(dir, name));
-    }
-    return out;
-  }
+  codexSessions(home: string, since: number, now: number): string[] { return codexSessions(this, home, since, now); }
 
   /** Transcripts of Claude whose folder under `projects/` belongs to the working directory `cwd` or to a folder below it. */
-  claudeSessions(claudeHome: string, cwd: string): string[] {
-    const projects = path.join(claudeHome, 'projects');
-    const wanted = claudeProjectName(cwd);
-    const out: string[] = [];
-    for (const name of this.list(projects)) {
-      if (name !== wanted && !name.startsWith(`${wanted}-`)) continue;
-      const dir = path.join(projects, name);
-      for (const f of this.list(dir, '.jsonl')) out.push(path.join(dir, f));
-    }
-    return out;
-  }
+  claudeSessions(home: string, cwd: string): string[] { return claudeSessions(this, home, cwd); }
 
   /** The logs of the subagents of a Claude session: `<transcript without .jsonl>/subagents/agent-*.jsonl`. */
-  claudeSubagents(transcript: string): string[] {
-    const dir = path.join(transcript.replace(/\.jsonl$/, ''), 'subagents');
-    return this.list(dir, '.jsonl').map((f) => path.join(dir, f));
+  claudeSubagents(file: string): string[] { return claudeSubagents(this, file); }
+
+  /** Board persistence yields during I/O; one writer drains later mutations without queued snapshots.
+   * This is disposable cache data: atomic rename is sufficient, without a blocking fsync on the input loop.
+   */
+  saveAsync(): Promise<void> {
+    if (!this.file || (!this.dirty && !this.saving)) return Promise.resolve();
+    if (!this.saving) this.saving = this.flushAsync().finally(() => { this.saving = undefined; });
+    return this.saving;
+  }
+
+  private async flushAsync(): Promise<void> {
+    while (this.dirty) {
+      this.dirty = false;
+      const tmp = `${this.file}.${process.pid}.${randomUUID()}.async.tmp`;
+      try {
+        const text = JSON.stringify(this.data);
+        await fs.promises.mkdir(path.dirname(this.file!), { recursive: true });
+        await fs.promises.writeFile(tmp, text, { flag: 'wx', mode: 0o600 });
+        await fs.promises.rename(tmp, this.file!);
+      } catch {
+        this.dirty = true; // Retry on the next refresh, never spin on an unwritable cache.
+        return;
+      } finally {
+        await fs.promises.unlink(tmp).catch(() => undefined);
+      }
+    }
   }
 
   save(): void {
+    if (this.deferSave) return; // The board flushes once, asynchronously, after tokens and plans.
     if (!this.file || !this.dirty) return;
     try {
       fs.mkdirSync(path.dirname(this.file), { recursive: true });
       const tmp = `${this.file}.${process.pid}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify(this.data));
+      atomicWriteFile(tmp, JSON.stringify(this.data));
       fs.renameSync(tmp, this.file);
       this.dirty = false;
     } catch {

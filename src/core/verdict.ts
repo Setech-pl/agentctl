@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { PATTERN_FLAGS } from './config.ts';
 import { clip, stripMarkdown } from './events.ts';
+import { parseOutputs } from './outputs.ts';
 
 /** Longest verdict in a notification. */
 export const MAX_VERDICT = 100;
@@ -46,10 +47,64 @@ export function reportVerdict(report: string, pattern?: string): string | undefi
   return undefined;
 }
 
+const VERDICT_WORD = /^(PASS|PARTIAL|FAIL|BLOCKED)\b/i;
+
+/**
+ * The header of a report: its title and its metadata lines ("Label: value"), up to the first section heading (## …), the first fenced code
+ * block or the first line of prose. A fenced block (``` or ~~~) and a quote are examples, never the verdict of the report; the boundary is the
+ * structure of the text, not a number of lines.
+ */
+export function headerLines(text: string): string[] {
+  const out: string[] = [];
+  let bare = false; // the previous line was a label with no value: its value is the next line
+  for (const line of text.split('\n')) {
+    const plain = stripMarkdown(line);
+    const verdictLabel = LABEL.exec(plain); // "Werdykt – PASS", "Verdict:", "# Werdykt": a verdict label in any of its forms keeps the header going
+    if (/^\s{0,3}(?:`{3,}|~{3,})/.test(line) || (/^\s{0,3}#{2,6}\s/.test(line) && !verdictLabel)) break;
+    if (/^\s{0,3}>/.test(line) || line.trim() === '') continue;
+    const label = verdictLabel ?? /^\s*(?:[-*]\s+)?(?:\*\*|__)?[^:：\n]{1,40}[:：]\s*(?:\*\*|__)?\s*(.*)$/.exec(line);
+    const isTitle = /^\s{0,3}#\s/.test(line);
+    if (!label && !isTitle && !bare) break;
+    bare = Boolean(label) && (label![1] ?? '').trim() === '';
+    out.push(line);
+  }
+  return out;
+}
+
+/**
+ * The verdict a notification shows. First the declared `agentctl-outputs` verdict; then the user's `notify.verdict_pattern`; then a
+ * "Werdykt:"/"Verdict:"/"Status:" line in the header of the report (its first lines). Never a sentence from the body. A declared or
+ * recognised verdict is always written "Werdykt: PASS", whatever label the report used.
+ */
+export function eventVerdict(report: string, pattern?: string): string | undefined {
+  const declared = parseOutputs(report).outputs?.verdict;
+  if (declared) return `Werdykt: ${declared}`;
+  const text = report.replace(/\r\n/g, '\n').replace(FRONT_MATTER, '');
+  const clean = text.split('\n').map(stripMarkdown);
+  if (pattern) {
+    const re = new RegExp(pattern, PATTERN_FLAGS);
+    for (const line of clean) {
+      const m = re.exec(line);
+      const hit = m ? (m[1] ?? line).trim() : '';
+      if (hit !== '') return clip(hit, MAX_VERDICT);
+    }
+  }
+  const head = headerLines(text).map(stripMarkdown);
+  for (const [i, line] of head.entries()) {
+    const m = LABEL.exec(line);
+    if (!m) continue;
+    const label = /^[^\s:：–—-]+/.exec(line)?.[0] ?? line;
+    const value = m[1] && hasWords(m[1]) ? m[1].trim() : head.slice(i + 1).find((l) => hasWords(l));
+    if (!value) continue;
+    return VERDICT_WORD.test(value) ? clip(`Werdykt: ${value.replace(VERDICT_WORD, (w) => w.toUpperCase())}`, MAX_VERDICT) : clip(`${label}: ${value}`, MAX_VERDICT);
+  }
+  return undefined;
+}
+
 /** The verdict of the report file; undefined when it cannot be read or says nothing. */
 export function readVerdict(file: string, pattern?: string): string | undefined {
   try {
-    return reportVerdict(fs.readFileSync(file, 'utf8'), pattern);
+    return eventVerdict(fs.readFileSync(file, 'utf8'), pattern);
   } catch {
     return undefined;
   }

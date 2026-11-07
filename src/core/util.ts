@@ -47,6 +47,13 @@ export function fillPlaceholders(template: string, vars: { task: string; cache: 
   });
 }
 
+/** Polish noun after a number: 1 okno, 2–4 okna, 5+ okien (and 12–14, 22–24 … follow the same rule as their last digit, except 12–14 which are "many"). */
+export function plural(n: number, one: string, few: string, many: string): string {
+  if (n === 1) return one;
+  const last = n % 10, tens = n % 100;
+  return last >= 2 && last <= 4 && !(tens >= 12 && tens <= 14) ? few : many;
+}
+
 export const TASK_ID = /^[A-Z][A-Z0-9_-]{0,39}$/;
 
 /**

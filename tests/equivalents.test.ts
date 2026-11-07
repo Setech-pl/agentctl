@@ -1,3 +1,4 @@
+import { composerFixture } from './composer-fixture.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -136,12 +137,13 @@ describe('ordering a provider: --agent, limits, pin, review_of', () => {
     const { ctx, runner } = makeContext(config, {
       respond: (cmd, args) => {
         if (cmd === 'tmux' && (args[0] === 'has-session' || args[0] === 'list-windows')) return { code: 1 };
-        if (cmd === 'tmux' && args[0] === 'capture-pane') return { stdout: '› Ask Codex to do anything' };
+        if (cmd === 'tmux' && args[0] === 'capture-pane') return { stdout: composerFixture('› Ask Codex to do anything') };
         return undefined;
       },
     });
     const [res] = await newTasks(ctx, specs, { agent: 'codex' });
-    assert.ok(runner.commands.includes(`tmux send-keys -t '=agentctl:nc-2' -l -- 'codex --sandbox danger-full-access -m gpt-6.1-sol -c model_reasoning_effort=high'`));
+    assert.ok(runner.commands.includes(`tmux send-keys -t '=agentctl:nc-2' -l -- 'exec sh ${config.stateDir}/nc-2/start.sh'`));
+    assert.match(runner.written.get(path.join(config.stateDir, 'nc-2/start.sh'))!, /exec codex --sandbox danger-full-access -m gpt-6.1-sol -c model_reasoning_effort=high/);
     assert.deepEqual(res?.requested, { agent: 'claude', model: 'sonnet', effort: 'high' });
     assert.deepEqual(res?.effective, { agent: 'codex', model: 'gpt-6.1-sol', effort: 'high' });
     assert.equal(res?.switchedBy, 'flag');

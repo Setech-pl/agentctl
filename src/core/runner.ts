@@ -1,3 +1,5 @@
+import { atomicWriteFile, atomicAppendFile, noteStateWriteFailure } from './atomic-file.ts';
+import { withFileLock, taskLock } from './file-lock.ts';
 import { readRateLimits } from './readonly-rpc.ts';
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -21,7 +23,7 @@ export interface ExecOptions {
   /** What a dry run pretends a read-only query returned. */
   dryResult?: Partial<ExecResult>;
   timeoutMs?: number;
-  /** Release the event loop while an independent repository checkout or setup runs. */
+  /** Kept for callers that say so; every command except `interactive` runs without blocking the event loop (the MCP server answers other calls meanwhile). */
   async?: boolean;
   /** Hand the terminal to the command (stdin, stdout and stderr are inherited, no timeout): `tmux attach-session`. */
   interactive?: boolean;
@@ -73,7 +75,7 @@ export class RealRunner implements Runner {
       if (r.error) return { code: (r.error as NodeJS.ErrnoException).code === 'ENOENT' ? 127 : 1, stdout: '', stderr: r.error.message };
       return { code: r.status ?? 1, stdout: '', stderr: '' };
     }
-    if (opts.async) return new Promise<ExecResult>((resolve) => {
+    return new Promise<ExecResult>((resolve) => {
       let timedOut = false;
       let failure: NodeJS.ErrnoException | undefined;
       let size = 0;
@@ -110,38 +112,30 @@ export class RealRunner implements Runner {
       child.stdin.on('error', () => { /* a child that exits before reading stdin may close the pipe */ });
       child.stdin.end(opts.input);
     });
-    const r = spawnSync(cmd, args, {
-      cwd: opts.cwd,
-      env,
-      input: opts.input,
-      encoding: 'utf8',
-      timeout: opts.timeoutMs ?? 30_000,
-      maxBuffer: 64 * 1024 * 1024,
-    });
-    if (r.error) {
-      const missing = (r.error as NodeJS.ErrnoException).code === 'ENOENT';
-      return { code: missing ? 127 : 1, stdout: '', stderr: r.error.message };
-    }
-    return { code: r.status ?? 1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
   }
 
   async mkdir(dir: string): Promise<void> {
     fs.mkdirSync(dir, { recursive: true });
   }
 
+  private async writeLocked(file: string, operation: () => void): Promise<void> {
+    let entered = false;
+    try { await withFileLock(path.basename(file) === 'TASK.md' ? taskLock(file) : `${file}.write.lock`, async () => {
+      entered = true;
+      try { operation(); } catch (error) { noteStateWriteFailure(file, error); throw error; }
+    }); } catch (error) { if (!entered) noteStateWriteFailure(file, error); throw error; }
+  }
+
   async writeFile(file: string, content: string): Promise<void> {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, content);
+    await this.writeLocked(file, () => atomicWriteFile(file, content));
   }
 
   async appendFile(file: string, content: string): Promise<void> {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.appendFileSync(file, content);
+    await this.writeLocked(file, () => atomicAppendFile(file, content));
   }
 
   async copyFile(src: string, dest: string): Promise<void> {
-    fs.mkdirSync(path.dirname(dest), { recursive: true });
-    fs.copyFileSync(src, dest);
+    await this.writeLocked(dest, () => atomicWriteFile(dest, fs.readFileSync(src)));
   }
 
   async rename(from: string, to: string): Promise<void> {
@@ -150,7 +144,7 @@ export class RealRunner implements Runner {
   }
 
   async remove(target: string): Promise<void> {
-    fs.rmSync(target, { recursive: true, force: true });
+    await fs.promises.rm(target, { recursive: true, force: true });
   }
 
   async symlink(target: string, linkPath: string): Promise<void> {

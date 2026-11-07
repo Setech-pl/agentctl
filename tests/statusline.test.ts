@@ -60,6 +60,8 @@ describe('applyStatusLine', () => {
     assert.deepEqual(runner.commands.map((c) => c.replaceAll("'", '')), [
       'tmux set-option -t =agentctl: status-right #(agentctl status --tmux-line)',
       'tmux set-option -t =agentctl: status-interval 10',
+      'tmux set-option -t =agentctl: status-left agentctl-dev ',
+      'tmux set-option -t =agentctl: status-left-length 20',
     ]);
     assert.ok(!runner.commands.some((c) => /\s-g\b/.test(c)), 'never global');
   });

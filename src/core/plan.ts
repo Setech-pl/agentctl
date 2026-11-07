@@ -1,3 +1,8 @@
+import { validateLaunch } from './safety.ts';
+import { provider, alternatives } from './providers/registry.ts';
+import { pendingStarts } from './start-lock.ts';
+import { inspectReport } from './report-state.ts';
+import { resolveTaskBases } from './base-ref.ts';
 import fs from 'node:fs';
 import { checkReviewer, checkWindowLimit, findAuthor } from './checks.ts';
 import type { AgentModel, LiveWindow } from './checks.ts';
@@ -10,7 +15,7 @@ import { cancelledTasks, unmetAfter, waitingText } from './depends.ts';
 import { slotHolders } from './limits.ts';
 import { collectStatus } from './status.ts';
 import { listTaskRecords } from './taskstore.ts';
-import { Problems } from './util.ts';
+import { AgentctlError, Problems } from './util.ts';
 
 export interface PlanOptions {
   /** `--agent`: run every spec on this provider, translating through the equivalents table. */
@@ -29,12 +34,13 @@ export interface PlanOptions {
    * agreed to queue land here instead of being an error. Without a terminal the error names `agentctl queue`.
    */
   overflow?: { queued: ResolvedSpec[] };
+  deferBases?: boolean;
 }
 
 /** Codex reasoning efforts; `max` is Claude-only. */
-const CODEX_EFFORTS = ['low', 'medium', 'high', 'xhigh'];
 
-const otherAgent = (a: AgentName): AgentName => (a === 'claude' ? 'codex' : 'claude');
+
+
 const label = (o: Order): string => `${o.agent} ${formatModelEffort(o)}`;
 
 /** Windows currently in the session, each tagged with the agent that agentctl started in it, then the places held by reservations and external sessions. */
@@ -42,13 +48,25 @@ export async function liveWindows(ctx: Context): Promise<LiveWindow[]> {
   const names = await ctx.tmux.listWindows();
   const agentByWindow = new Map<string, AgentName>();
   for (const record of listTaskRecords(ctx.config)) if (record.agent !== 'unknown') agentByWindow.set(record.window, record.agent);
+  const records = listTaskRecords(ctx.config);
+  const recordByWindow = new Map(records.map((r) => [r.window, r]));
+  // A start that failed before any paste (never ready, a startup dialog): the open window is evidence for a human, not a running agent — it holds no slot.
+  const neverReady = (window: string): boolean => {
+    const r = recordByWindow.get(window);
+    return Boolean(r?.pendingPrompt && r.promptDelivery === 'needs-attention' && !r.deliveryStartedAt);
+  };
+  const candidates = records.some(r => inspectReport(ctx.config, r, ctx.runner.now(), !r.attemptId).ready);
+  const rows = candidates ? await collectStatus(ctx, { progress: false }) : [];
   const windows = names.map((window): LiveWindow => {
     const agent = agentByWindow.get(window);
-    return agent ? { window, agent } : { window };
+    const reportReady = rows.some(r => r.windowName === window && r.state === 'report-ready');
+    return agent ? { window, agent, ...(neverReady(window) ? { counted: false } : reportReady ? { reportReady: true, counted: configCountsReady(ctx) } : {}) } : { window };
   });
   // Places held by the user (`limits reserve`) and sessions outside agentctl count against the limit like its own windows.
-  return [...windows, ...(await slotHolders(ctx))];
+  return [...windows, ...pendingStarts(ctx.config).filter(r => !names.includes(r.window)).map(r => ({ window: r.window, agent: r.agent, kind: 'starting' as const })), ...(await slotHolders(ctx))];
 }
+
+function configCountsReady(ctx: Context): boolean { return ctx.config.countReportReady; }
 
 function switchTo(spec: ResolvedSpec, to: Order, by: 'flag' | 'limit'): ResolvedSpec {
   // Remote Control is Claude only: a task that goes to Codex loses it (a switch always changes the provider).
@@ -69,7 +87,7 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
   if (!opts.skipAfter && !ctx.runner.dryRun && specs.some((s) => s.after.length > 0)) {
     const rows = await collectStatus(ctx, { progress: false, archived: true });
     for (const spec of specs) {
-      const unmet = unmetAfter(spec.after, rows);
+      const unmet = unmetAfter(spec.after, rows, spec.afterVerdicts);
       const gone = cancelledTasks(rows);
       if (unmet.some((t) => gone.has(t))) p.add(`${spec.task}: after ${spec.after.join(', ')}: ${unmet.filter((t) => gone.has(t)).join(', ')} was cancelled, so it never gets a report. Remove it from "after".`);
       else if (unmet.length > 0) p.add(`${spec.task}: after ${spec.after.join(', ')}: ${waitingText(unmet)} (no report yet). "agentctl queue" starts the task by itself once they have one.`);
@@ -80,6 +98,17 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
   const result: ResolvedSpec[] = [];
 
   for (let spec of specs) {
+    if (!opts.deferBases) spec = await resolveTaskBases(ctx, spec);
+    if (spec.review) {
+      const repos = [];
+      for (const repo of spec.repos) {
+        if (!repo.branch) throw new AgentctlError(`${spec.task}: review: auto requires an explicit author repos[].branch`);
+        const r = await ctx.runner.exec('git', ['-C', repo.path, 'rev-parse', '--verify', '--end-of-options', `${repo.base ?? 'HEAD'}^{commit}`], { readOnly: true });
+        if (r.code !== 0 || !/^[a-f0-9]{40}$/i.test(r.stdout.trim())) throw new AgentctlError(`${spec.task}: cannot freeze author base for auto review in ${repo.path}`);
+        repos.push({ ...repo, base: r.stdout.trim() });
+      }
+      spec = { ...spec, repos };
+    }
     const at = `${spec.task}:`;
 
     // 1. --agent: explicit, so no question asked.
@@ -92,9 +121,11 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
         else p.add(`${at} ${t.message}. ${t.hint}`);
       }
     }
-    if (spec.agent === 'codex' && !CODEX_EFFORTS.includes(spec.effort)) {
-      p.add(`${at} codex has no effort "${spec.effort}" (use ${CODEX_EFFORTS.join(', ')})`);
+    if (!provider(spec.agent).effort.accepted.includes(spec.effort)) {
+      p.add(`${at} ${spec.agent} has no effort "${spec.effort}" (use ${provider(spec.agent).effort.accepted.join(', ')})`);
     }
+
+    try { validateLaunch(config, spec, spec.env); } catch (e) { p.add((e as Error).message); }
 
     // 2. duplicates and existing windows
     if (seen.has(spec.window)) p.add(`${at} the task appears twice in this file`);
@@ -107,12 +138,13 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
     const occupied = (): LiveWindow[] => [...live, ...planned];
     let limitProblem = opts.ignoreLimits ? undefined : checkWindowLimit(spec.agent, config.limits[spec.agent], occupied(), config.session);
     if (limitProblem) {
-      const other = otherAgent(spec.agent);
+      const others = alternatives(config, spec.agent);
       const current: Order = { agent: spec.agent, model: spec.model, effort: spec.effort };
       let offered = false;
       if (spec.pin) {
         limitProblem += ' The task is pinned (pin: true), so it will not be moved to the other provider.';
-      } else if (checkWindowLimit(other, config.limits[other], occupied(), config.session)) {
+      } else for (const other of others) {
+      if (checkWindowLimit(other, config.limits[other], occupied(), config.session)) {
         limitProblem += ` ${other} is full too.`;
       } else {
         const t = translate(current, other, config.equivalents);
@@ -128,8 +160,10 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
             spec = switchTo(spec, t.order, 'limit');
             ctx.info(`${spec.task}: switched ${label(current)} -> ${label(t.order)} (limit)`);
             limitProblem = undefined;
+            break;
           }
         }
+      }
       }
       if (limitProblem && opts.overflow && ctx.confirm) {
         const yes = await ctx.confirm(`${spec.task}: ${limitProblem}${offered ? ' (switch declined)' : ''}\n  Add it to the queue (it starts by itself when a ${spec.agent} window is free)? [y/N] `);
@@ -146,6 +180,7 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
         );
       }
     }
+    try { validateLaunch(config, spec, spec.env); } catch (e) { p.add((e as Error).message); }
     planned.push({ window: spec.window, agent: spec.agent });
 
     // 4. worktrees

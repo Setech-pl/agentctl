@@ -11,15 +11,15 @@ import type { TaskRecord } from '../src/core/taskstore.ts';
 const checks: { name: string; ok: boolean }[] = [], sizes: Record<string, Record<string, number>> = {};
 const check = (name: string, ok: boolean) => { checks.push({ name, ok }); console.log(`${ok ? 'PASS' : 'FAIL'} ${name}`); assert.ok(ok, name); };
 await withHarness({ name: 'hotfix-0173', cacheRoot: defaultCacheRoot('agentctl-0173'), config: 'report: {settle_s: 0}\nwatch: {interval: 1}\ncapacity: {codex_refresh: false}\nmcp: {allow: [queue_pause, queue_resume, queue_rm, interrupt, report_from, new, queue]}\n' }, async h => {
-  const config = loadGlobalConfig(h.agentctlHome), repo = path.join(h.root, 'repo'); fs.mkdirSync(repo);
+  const config = loadGlobalConfig(h.agentctlHome); fs.mkdirSync(config.cache, { recursive: true }); const repo = path.join(h.root, 'repo'); fs.mkdirSync(repo);
   for (const args of [['init', '-q', '-b', 'main'], ['commit', '--allow-empty', '-qm', 'fixture']]) assert.equal(spawnSync('git', args, { cwd: repo, env: h.env }).status, 0);
-  fs.writeFileSync(path.join(repo, '.agentctl.yaml'), 'guide: rules.md\ndefaults: {model: sonnet, effort: low}\nreport: ["' + path.join(h.root, 'canonical/{TASK}.md') + '", "*{TASK}*.md"]\n');
+  fs.writeFileSync(path.join(repo, '.agentctl.yaml'), 'guide: rules.md\ndefaults: {model: sonnet, effort: low}\nreport: ["' + path.join(config.cache, 'canonical/{TASK}.md') + '", "*{TASK}*.md"]\n');
   fs.writeFileSync(path.join(repo, 'rules.md'), 'NC-PROJECT-OVERLAY');
   fs.writeFileSync(path.join(repo, 'README.md'), 'Read this file, not a report.');
   const records: TaskRecord[] = [];
   for (let i = 0; i < 160; i++) {
     const task = i === 1 ? 'T2' : `TASK-${i}`, window = task.toLowerCase();
-    const record: TaskRecord = { task, window, session: h.session, agent: 'claude', model: 'sonnet', effort: 'medium', started: new Date(Date.now() - 60000).toISOString(), turnEndedAt: new Date().toISOString(), requested: { agent: 'claude', model: 'sonnet', effort: 'medium' }, repos: Array.from({ length: i < 30 ? 2 : 1 }, (_, n) => ({ path: repo, worktree: path.join(h.root, `wt-${i}-${n}`) })), env: {}, links: [], report: path.join(h.root, 'canonical', `${task}.md`), cohort: 'NC', ...(i >= 10 ? { closed: true } : {}), ...(i === 1 ? { reportAlt: [path.join(repo, '*T2*.md')] } : {}) };
+    const record: TaskRecord = { task, window, session: h.session, agent: 'claude', model: 'sonnet', effort: 'medium', started: new Date(Date.now() - 60000).toISOString(), turnEndedAt: new Date().toISOString(), requested: { agent: 'claude', model: 'sonnet', effort: 'medium' }, repos: Array.from({ length: i < 30 ? 2 : 1 }, (_, n) => ({ path: repo, worktree: path.join(h.root, `wt-${i}-${n}`) })), env: {}, links: [], report: path.join(config.cache, 'canonical', `${task}.md`), cohort: 'NC', ...(i >= 10 ? { closed: true } : {}), ...(i === 1 ? { reportAlt: [path.join(config.cache, '*T2*.md')] } : {}) };
     records.push(record); fs.mkdirSync(path.join(config.stateDir, window), { recursive: true }); fs.writeFileSync(path.join(config.stateDir, window, 'TASK.md'), renderTaskMd(record, 'Read README.md, CHANGELOG.md, CLAUDE.md and docs/integration-12.md. Ask before continuing.'));
   }
   const fake = path.join(h.root, 'question.mjs'); fs.writeFileSync(fake, "process.stdout.write('Which option?\\n❯ 1. First\\n  2. Second\\nEnter to select · Esc to cancel\\n'); process.stdin.resume();");
@@ -41,6 +41,10 @@ await withHarness({ name: 'hotfix-0173', cacheRoot: defaultCacheRoot('agentctl-0
       if (!current) continue;
       const guide = await full('guide', { project: repo }); check('0173-8: guide overlay from project with MCP cwd=/', guide.includes('NC-PROJECT-OVERLAY'));
       const doctor = await full('doctor'); check('0173-8: doctor without project reports bez projektu', doctor.includes('bez projektu') && !doctor.includes('no .agentctl.yaml in /'));
+      // P34: every chat start goes through the watcher, so it must run before any `new` confirm.
+      const watch = h.spawnAgentctl(['watch'], path.join(h.root, 'watch.log'));
+      const beat = path.join(config.stateDir, 'queue-worker.json'), beatEnd = Date.now() + 10000;
+      while (!fs.existsSync(beat) && Date.now() < beatEnd) await new Promise(r => setTimeout(r, 150));
       for (const name of ['new', 'queue']) {
         const args = { spec: spec(`CONFIG-${name.toUpperCase()}`), ...(name === 'new' ? { no_agent: true } : {}) };
         const preview = await full(name, args); check(`0173-8: ${name} first repo project defaults from cwd=/`, preview.includes('sonnet/low'));
@@ -48,14 +52,13 @@ await withHarness({ name: 'hotfix-0173', cacheRoot: defaultCacheRoot('agentctl-0
       }
       let rows = JSON.parse(await full('status', { format: 'json', cohort: 'NC' })).tasks;
       check('0173-2/3: T2 question wins, README mention is not a candidate', rows.some((r: any) => r.task === 'T2' && r.state === 'needs-input' && r.question && !r.reportCandidate));
-      fs.writeFileSync(path.join(repo, 'T2-report.md'), 'Werdykt: PASS\n<!-- agentctl:report-end -->');
-      const watch = h.spawnAgentctl(['watch'], path.join(h.root, 'watch.log'));
+      fs.writeFileSync(path.join(config.cache, 'T2-report.md'), 'Werdykt: PASS\n<!-- agentctl:report-end -->');
       try {
         const until = Date.now() + 10000; do { rows = JSON.parse(await full('status', { format: 'json', cohort: 'NC' })).tasks; if (rows.find((r: any) => r.task === 'T2')?.reportCandidate) break; await new Promise(r => setTimeout(r, 200)); } while (Date.now() < until);
         check('0173-3: configured candidate remains a flag beside needs-input', rows.some((r: any) => r.task === 'T2' && r.reportCandidate && r.state === 'needs-input' && r.question));
         check('0173-2: watcher never copies the candidate', !fs.existsSync(records[1]!.report));
         check('0173-3: events_since includes current question', (await full('events_since')).includes('Which option'));
-        await full('report_from', { task: 'T2', from: path.join(repo, 'T2-report.md') }); await full('report_from', { task: 'T2', from: path.join(repo, 'T2-report.md'), confirm: true });
+        await full('report_from', { task: 'T2', from: path.join(config.cache, 'T2-report.md') }); await full('report_from', { task: 'T2', from: path.join(config.cache, 'T2-report.md'), confirm: true });
         check('0173-2: explicit report_from confirms canonical file', fs.existsSync(records[1]!.report));
       } finally { watch.kill('SIGTERM'); await new Promise(r => watch.once('close', r)); }
     } finally { await client.close(); }

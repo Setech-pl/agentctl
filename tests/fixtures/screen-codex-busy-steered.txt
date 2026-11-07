@@ -1,0 +1,32 @@
+  permissions: YOLO mode
+› Model: gpt-6.1-sol · effort low
+  Reply with the single line READY-CX and nothing else. Do not use tools.
+  Report protocol: write the report to the canonical absolute path /home/user/work/P16-CX.md (filename: P16-CX.md) for attempt 09512b35-1dc8-46cc-8a73-
+  8fb4af998483. Include <!-- agentctl:attempt 09512b35-1dc8-46cc-8a73-8fb4af998483 --> and append <!-- agentctl:report-end --> as the final line only after the entire report is written.
+  Before report-end write exactly one fenced ```agentctl-outputs YAML block (schema version: 1).
+  Fields: version: 1; verdict: PASS|PARTIAL|FAIL|BLOCKED; commits: [{repo, branch, sha}]; integrate: [{repo, branch, sha, note?}]; decisions: [text]; actions: [{title, shell}]; checks: [{name,
+  result: PASS|FAIL|WARN|SKIP, note?}]; preview: URL (optional); notes: [text].
+  Write each check as a mapping, for example `- {name: "unit tests", result: PASS}`. A one-key mapping (`- unit tests: PASS`), a plain text and a lower-case result (`pass`) are also accepted and
+  normalized by agentctl; they are not format errors, do not report them as such.
+  `repo` is the name of the repository: the last part of its path (for example `sandbox` for ~/code/sandbox). The repository path or the path of your worktree are accepted too. Example: `commits:
+  [{repo: sandbox, branch: dev-u1, sha: 3db6b8d}]`. A reviewer writes the repo of the code it reviews the same way.
+  Use existing branches and commit SHAs in the task repositories. Use empty lists for no items; omit unknown preview. These are reported facts and proposed actions; agentctl never executes actions or
+  merges.
+• READY-CX
+  Worked for 6s • 22:51
+› Run exactly 6 separate shell commands, strictly one after another, each: sleep 12. After each one write only its number. After the 6th write DONE-CX1. Do not write the report file.
+• Ran sleep 12
+  └ (no output)
+› FOLLOWUP-CX-LONG: when your current work is finished, reply with the single line ACK-CX-LONG and nothing else. This padding makes the message long enough for the terminal UI to treat it as a large
+  paste.
+  Line 1: the quick brown fox jumps over the lazy dog, again and again, to pad the message out to about one thousand characters.
+  Line 2: the quick brown fox jumps over the lazy dog, again and again, to pad the message out to about one thousand characters.
+  Line 3: the quick brown fox jumps over the lazy dog, again and again, to pad the message out to about one thousand characters.
+  Line 4: the quick brown fox jumps over the lazy dog, again and again, to pad the message out to about one thousand characters.
+  Line 5: the quick brown fox jumps over the lazy dog, again and again, to pad the message out to about one thousand characters.
+  Line 6: the quick brown fox jumps over the lazy dog, again and again, to pad the message out to about one thousand characters.
+  Line 7: the quick brown fox jumps over the lazy dog, again and again, to pad the message out to about one thousand characters.
+• Working (16s • esc to interrupt)
+› Ask Codex to do anything
+  GPT-6.1-Sol low · ~/work/sandbox · Generate READY-CX report
+  ? for shortcuts                                                                                                                                                              ⚠ 1 warning · f2 to view

@@ -1,3 +1,4 @@
+import { promptQueueView } from './prompt-queue.ts';
 import { sessionQuestion } from './codex-question.ts';
 import { collapsedQuestion } from './events.ts';
 import { extractQuestion } from './events.ts';
@@ -17,6 +18,8 @@ export interface PeekResult {
   task: string;
   window: string;
   lines: string[];
+  promptQueue?: ReturnType<typeof promptQueueView>;
+  promptDelivery?: string;
   usage_hint?: string | null;
   draft_input?: string | null;
 }
@@ -40,5 +43,5 @@ export async function peekTask(ctx: Context, taskArg: string, count: number = PE
   const record = readTaskRecord(ctx.config, target.window);
   const agent = record && record.agent !== 'unknown' ? record.agent : guessAgent(screen.stdout);
   const question = (record && collapsedQuestion(screen.stdout) ? sessionQuestion(ctx.config, record) : undefined) ?? extractQuestion(screen.stdout);
-  return { task: target.task, window: target.window, ...screenMetadata(screen.stdout), lines: [...(question ? [question] : []), ...contentLines(screen.stdout, ctx.config.agents[agent].footerPatterns, count)] };
+  return { task: target.task, window: target.window, promptQueue: promptQueueView(ctx, target.window), promptDelivery: record?.promptDelivery, ...screenMetadata(screen.stdout), lines: [...(question ? [question] : []), ...contentLines(screen.stdout, ctx.config.agents[agent].footerPatterns, count)] };
 }

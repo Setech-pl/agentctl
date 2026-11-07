@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { cancelTasks, planCancel } from '../src/core/cancel.ts';
-import { cohortDoneText, cohortTick, listCohorts, readCohort, summarizeCohorts } from '../src/core/cohort.ts';
+import { cohortDoneText, cohortTick, listCohorts, readCohort, summarizeCohorts, touchCohort } from '../src/core/cohort.ts';
+import { readJournal, recordJournal } from '../src/core/journal.ts';
 import { Context } from '../src/core/context.ts';
 import type { Notifier } from '../src/core/notify.ts';
 import { newTasks } from '../src/core/new.ts';
@@ -149,8 +150,8 @@ describe('cohort list, show, add, remove, note', () => {
     assert.match(lines.find((l) => l.startsWith('other')) ?? '', /^other\s+1\s+0\s+0\s+0\s+0\s+-$/);
     assert.match(lines.find((l) => l.startsWith('Sprint-1')) ?? '', /^Sprint-1\s+1\s+1\s+1\s+1\s+1\s+\d{4}-\d\d-\d\d \d\d:\d\d$/);
     assert.equal(r.stdout.includes('C-1'), false);
-    const json = JSON.parse((await runCli(s.config, s.runner, ['cohort', 'list', '--json'])).stdout) as { name: string; created: string; active: number; queued: number; reports: number; closed: number; cancelled: number; total: number }[];
-    assert.deepEqual(json.find((c) => c.name === 'Sprint-1'), { name: 'Sprint-1', created: json.find((c) => c.name === 'Sprint-1')?.created, note: null, active: 1, queued: 1, reports: 1, closed: 1, cancelled: 1, total: 5 });
+    const json = JSON.parse((await runCli(s.config, s.runner, ['cohort', 'list', '--json'])).stdout) as { name: string; created: string; last: string; active: number; queued: number; reports: number; closed: number; cancelled: number; total: number }[];
+    assert.deepEqual(json.find((c) => c.name === 'Sprint-1'), { name: 'Sprint-1', created: json.find((c) => c.name === 'Sprint-1')?.created, note: null, archived: null, last: json.find((c) => c.name === 'Sprint-1')?.last, active: 1, queued: 1, reports: 1, closed: 1, cancelled: 1, total: 5 });
     assert.match((await runCli(s.config, s.runner, ['cohort'])).stdout, /^COHORT/, 'cohort alone is cohort list');
     assert.match((await runCli(setup('list-empty').config, s.runner, ['cohort', 'list'])).stdout, /No cohorts\./);
   });
@@ -394,5 +395,39 @@ describe('cohort: "all reports ready"', () => {
     await cancelTasks(s.ctx, await planCancel(s.ctx, ['Q-1']));
     assert.deepEqual(await cohortTick(s.ctx, s.notifier, await rows(s)), []);
     assert.deepEqual((await summarizeCohorts(s.ctx)).map((c) => [c.name, c.cancelled, c.total]), [['Sprint-1', 2, 2]]);
+  });
+});
+
+
+describe('P38: gc_suggest journal entries stay small', () => {
+  it('the suggestion carries a bounded summary (counts, bytes, top items), never the whole plan', async () => {
+    const s = setup('gc-summary');
+    await touchCohort(s.ctx, 'GCX');
+    const rec = seedTask(s.config, 'G-1', { cohort: 'GCX', repos: [{ path: s.repo, worktree: `${s.repo}-g-1` }] });
+    fs.mkdirSync(`${s.repo}-g-1`, { recursive: true });
+    fs.writeFileSync(path.join(`${s.repo}-g-1`, 'f.txt'), 'x'.repeat(5000));
+    void rec;
+    const rows = () => collectStatus(s.ctx, { progress: false, archived: true });
+    await cohortTick(s.ctx, s.notifier, await rows()); // first sight of the cohort: no suggestion wave yet
+    seedTask(s.config, 'G-1', { cohort: 'GCX', closed: true, closedAt: new Date().toISOString(), repos: [{ path: s.repo, worktree: `${s.repo}-g-1` }] });
+    await cohortTick(s.ctx, s.notifier, await rows());
+    await cohortTick(s.ctx, s.notifier, await rows());
+    const entry = readJournal(s.config).find((e) => e.kind === 'gc_suggest');
+    assert.ok(entry, 'a closed cohort suggests gc once');
+    assert.match(entry.text, /gc_preview gotowy \(\d+ pozycji, [\s\S]*szczegóły: agentctl gc --cohort GCX/);
+    const preview = entry.gc_preview as { items?: unknown; freeBytes?: unknown; top?: unknown };
+    assert.equal(typeof preview.items, 'number');
+    assert.equal(typeof preview.freeBytes, 'number');
+    assert.ok(Array.isArray(preview.top) && preview.top.length <= 5);
+    assert.ok(Buffer.byteLength(JSON.stringify(entry)) < 2000, 'one bounded event: no fragment drip-feed in events_since');
+  });
+
+  it('recordJournal drops an oversized gc_preview payload instead of storing it', async () => {
+    const s = setup('gc-bound');
+    const huge = { items: Array.from({ length: 500 }, (_, i) => ({ task: `T-${i}`, kind: 'worktree', target: `/wt/${i}`, bytes: 1000, detail: 'closed' })) };
+    await recordJournal(s.ctx, { kind: 'gc_suggest', cohort: 'BIG', text: 'kohorta BIG: zamknięta; gc_preview gotowy', gc_preview: huge });
+    const entry = readJournal(s.config).find((e) => e.kind === 'gc_suggest')!;
+    assert.deepEqual(entry.gc_preview, { dropped: 'oversized payload; details via gc_preview / agentctl gc' });
+    assert.ok(Buffer.byteLength(JSON.stringify(entry)) < 4000);
   });
 });

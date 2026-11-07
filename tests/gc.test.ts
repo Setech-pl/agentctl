@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { handleKey, initialBoardState, loadViewLines } from '../src/core/board.ts';
 import { Context } from '../src/core/context.ts';
 import { applyGc, planGc, renderGc } from '../src/core/gc.ts';
+import { formatBytes } from '../src/core/pull.ts';
 import { MCP_TOOLS } from '../src/core/mcp-tools.ts';
 import type { McpDeps } from '../src/core/mcp-tools.ts';
 import { loadGlobalConfig } from '../src/core/config.ts';
@@ -184,6 +185,48 @@ describe('gc: --apply', () => {
     assert.match(renderGc(plan, { applied: result }).join('\n'), /Freed/);
   });
 
+  it('the --apply report separates removed from skipped and frees only what went away (P26)', async () => {
+    const w = world('apply-output');
+    task(w, 'NC-1', { closed: true, closedAt: '2026-10-01T10:00:00.000Z' }, { 'old.log': 20, 'fresh.log': 1 });
+    const wt2 = task(w, 'NC-2', { closed: true });
+    w.dirty.add(wt2);
+    const plan = await planGc(w.ctx, {});
+    const result = await applyGc(w.ctx, plan);
+    assert.deepEqual(result.failed, []);
+    const out = renderGc(plan, { applied: result }).join('\n');
+    const cleaned = out.split('Cleaned up:')[1]!.split('Skipped (left in place)')[0]!;
+    // removed entries only under "Cleaned up", skipped entries only under their own heading
+    assert.match(cleaned, /removed worktrees: 1, \d+ bytes/);
+    assert.match(cleaned, /removed cache entries: 1, \d+ bytes/);
+    assert.doesNotMatch(cleaned, /uncommitted changes|newer than/);
+    const skipped = out.split('Skipped (left in place)')[1]!;
+    assert.match(skipped, /uncommitted changes/);
+    assert.match(skipped, /newer than 7d/);
+    // only the removed worktree, the old file and the archive move are done; nothing skipped is counted as freed
+    assert.deepEqual(result.done.map(i => `${i.kind}:${i.task}`).sort(), ['archive:NC-1', 'archive:NC-2', 'cache:NC-1', 'worktree:NC-1']);
+    const freed = /Freed ([\d.]+ [KMG]?B)/.exec(out)?.[1];
+    assert.equal(freed, formatBytes(result.freedBytes));
+    assert.equal(result.freedBytes, result.done.reduce((n, i) => n + i.bytes, 0));
+    assert.ok(!result.done.some(i => (i.kind === 'worktree' && i.task === 'NC-2') || i.target.endsWith('fresh.log')));
+  });
+
+  it('reports current removed bytes after an old plan, excluding failed and skipped entries', async () => {
+    const w = world('apply-current-bytes');
+    task(w, 'NC-1', { closed: true }, { 'old.log': 20 });
+    const plan = await planGc(w.ctx, {});
+    const file = path.join(w.config.cache, 'nc-1', 'old.log');
+    fs.writeFileSync(file, 'x'.repeat(47));
+    fs.utimesSync(file, new Date('2026-01-01'), new Date('2026-01-01'));
+    const failing = new DiskRunner({ dryRun: false, startTime: NOW, respond: (cmd, args, opts) => cmd === 'git' && args.includes('remove') ? { code: 1, stderr: 'kept' } : w.respond?.(cmd, args, opts) });
+    const result = await applyGc(new Context(failing, w.config, () => {}), plan);
+    assert.equal(result.freedBytes, 47);
+    assert.equal(result.failed.length, 1);
+    const out = renderGc(plan, { applied: result }).join('\n');
+    assert.match(out, /Freed 47 B/);
+    assert.doesNotMatch(out, /Could free|removed worktrees/);
+    assert.match(out, /failed:.*kept/);
+  });
+
   it('a git failure is reported per item, the rest goes on', async () => {
     const w = world('apply-fail');
     task(w, 'NC-1', { closed: true }, { 'old.log': 20 });
@@ -204,7 +247,7 @@ describe('gc: CLI, board and MCP', () => {
     assert.equal(dry.code, 0, dry.stderr);
     assert.match(dry.stdout, /Would clean up \(a dry run/);
     assert.ok(fs.existsSync(path.join(w.config.cache, 'nc-1', 'old.log')));
-    assert.equal(JSON.parse((await runCli(w.config, w.runner, ['gc', '--json'])).stdout).items.length > 0, true);
+    assert.equal(JSON.parse((await runCli(w.config, w.runner, ['gc', '--json', '--verbose'])).stdout).details.items.length > 0, true);
     const noTty = await runCli(w.config, w.runner, ['gc', '--apply']);
     assert.equal(noTty.code, 1);
     assert.match(noTty.stderr, /no terminal to ask on/);
@@ -230,9 +273,24 @@ describe('gc: CLI, board and MCP', () => {
     const tool = MCP_TOOLS.find((t) => t.name === 'gc_preview')!;
     assert.equal(tool.kind, 'read');
     const res = await tool.run(deps, z.object(tool.input).parse({}) as never);
-    assert.match(res.text, /preview only/);
-    assert.match(res.text, /old\.log/);
+    assert.match(res.text, /"preview":true/);
+    assert.doesNotMatch(res.text, /old\.log/);
+    const detailed = await tool.run(deps, { detail: true });
+    assert.match(detailed.text, /old\.log/);
     assert.ok(fs.existsSync(path.join(w.config.cache, 'nc-1', 'old.log')), 'a preview deletes nothing');
     assert.equal(MCP_TOOLS.find((t) => t.name === 'gc')?.kind, 'write');
   });
+});
+
+it('R2 N5: applied verbose GC uses accurate archive and branch verbs', async () => {
+  const w = world('r2-verbs');
+  task(w, 'NC-1', { closed: true }, { 'old.log': 20 });
+  w.merged.add('agent/nc-1');
+  const result = await runCli(w.config, w.runner, ['gc', '--apply', '--verbose', '--branches', '-y']);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /  archived state NC-1 /);
+  assert.match(result.stdout, /  deleted branch NC-1 /);
+  assert.match(result.stdout, /  removed worktree NC-1 /);
+  assert.match(result.stdout, /  removed cache NC-1 /);
+  assert.doesNotMatch(result.stdout, /removed archive|removed branch/);
 });

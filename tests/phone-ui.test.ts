@@ -110,7 +110,7 @@ describe('phone: MCP', () => {
     const tmux = new FakeTmux();
     const runner = new DiskRunner({ dryRun: false, respond: tmux.respond });
     const notified: string[] = [];
-    const deps: McpDeps = { context: (out) => new Context(runner, loadGlobalConfig(path.dirname(config.path)), out), notify: async (m) => void notified.push(m), self: ['/usr/bin/env', '/opt/node/bin/node', '/opt/agentctl/bin/agentctl.ts'] as never };
+    const deps: McpDeps = { context: (out) => new Context(runner, { ...loadGlobalConfig(path.dirname(config.path)), notify: { ...loadGlobalConfig(path.dirname(config.path)).notify, mcpWrites: 'all' } }, out), notify: async (m) => void notified.push(m), self: ['/usr/bin/env', '/opt/node/bin/node', '/opt/agentctl/bin/agentctl.ts'] as never };
     const call = (tool: string, args: Record<string, unknown> = {}) => {
       const t = MCP_TOOLS.find((x) => x.name === tool) as McpToolDef;
       return t.run(deps, z.object(t.input).parse(args) as never);

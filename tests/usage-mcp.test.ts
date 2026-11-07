@@ -70,7 +70,7 @@ describe('mcp: usage, log and stats are read tools', () => {
   it('status carries a one-line summary of the plans', async () => {
     const t = setup('status');
     setClaudePlan(t.config.path, NOW, { session: 62, week: 41 });
-    const lines = (await t.call('status')).text.split('\n');
+    const lines = (await t.call('status', { capacity: true })).text.split('\n');
     const plans = lines.find((l) => l.startsWith('Plans:'));
     assert.match(plans ?? '', /^Plans: claude 5h 62% ↻ .* \| codex n\/d \(.*\)\. usage has the tokens\.$/);
   });

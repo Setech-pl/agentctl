@@ -25,9 +25,9 @@ Column "Layers": **g** global config, **p** project config, **s** spec.
 | `links[].to` | path | required | g p s | What it points at. Must exist. `from` and `to` ending in `/*` make one link per entry of the directory. |
 | `env` | mapping | `{}` | g p s | Environment variables of the tmux window (strings, numbers or booleans). |
 | `report` | path or list | `{cache}/{task}/{TASK}.md` | g p s | Where the agent writes its report. Used by `status`, `pull` and the notifications. A list: the first entry is the canonical path, the others are places to look (paths and globs `*`, `?`, `**`; absolute, `~/` or relative to the worktree; `{task}` and `{TASK}` work), e.g. `[~/workspace/cache/{task}/{TASK}.md, docs/reports/*{task}*.md, docs/reports/*{TASK}*.md]`. Fresh alternatives bearing the task ID become candidate flags (see [Report detection](details.md#report-detection)); copying requires explicit `report --from` / `report_from`. |
-| `setup` | list of strings | `[]` | g p s | Shell commands run in the first worktree after `git worktree add` and before the links. A failing command stops `new`. |
+| `setup` | list of strings | `[]` | g p s | Shell commands run after `git worktree add` and before the links; a failing command stops `new`. Every repository runs its own setup in its own worktree: `repos[].setup` in the spec, else the `setup` of that repository's `.agentctl.yaml`. The top-level spec `setup` and the global one belong to the first repository only (compatible with single-repo specs). The preview lists them per repository (`backend 1/1, client 1/1`). The chat (MCP) cannot send `setup`, top-level or per repo; project config setup still runs. |
 | `defaults` | mapping | `{}` | g p | Values for a spec that leaves them out: `agent`, `model`, `effort`. |
-| `defaults.agent` | `claude` or `codex` | none | g p | Agent when the spec has no `agent`. |
+| `defaults.agent` | active `claude`, `codex` or `kimi` | none | g p | Agent when the spec has no `agent`. |
 | `defaults.model` | string | `default` | g p | Model when the spec has none. `default` passes no model flag. |
 | `defaults.effort` | `low` `medium` `high` `xhigh` `max` | `high` | g p | Effort when the spec has none. |
 | `defaults.remote_control` | boolean | `false` | g p | `true`: Claude tasks start with Remote Control (see the spec key `remote_control`) unless the spec says `remote_control: false`. A Codex task is not affected. |
@@ -36,15 +36,21 @@ Column "Layers": **g** global config, **p** project config, **s** spec.
 
 | Key | Type | Default | Layers | Meaning |
 |---|---|---|---|---|
+| `providers` | global | `[claude, codex]` | Active providers in order; both claude and codex are required, without duplicates. |
 | `cache` | path | `~/workspace/cache` | g | Directory with one folder per task, `<cache>/<task>/`: the only place the agents write to (reports). |
 | `state_dir` | path | `<config dir>/tasks` | g | agentctl's own state per task (`TASK.md`, `setup.log`, `event.json`, `notified.json`), out of the agents' reach. Closed tasks are archived next to it, in `archive/`. |
+| `tmux` | mapping | socket unset | g | Optional dedicated tmux server. |
+| `tmux.socket` | string | unset | g | Server name passed to `tmux -L` for every invocation; letters, digits, `_` and `-`. Default: existing server selection. Doctor checks server/session AGENTCTL_HOME. |
 | `session` | string | `agentctl` | g | Name of the tmux session. Letters, digits, `_` and `-`. |
+| `ui` | mapping | `{}` | g | Instance labels for the board, tmux status-left and board/watch terminal titles. |
+| `ui.instance_name` | string | automatic | g | Override `agentctl` (prod) or `agentctl-dev` (doctor/version dev detection). 1–64 letters/digits/spaces/dots/underscores/hyphens. Applied at board/watch/status-bar startup; restart those views after changing it. |
 | `limits` | mapping | none | g | Most simultaneous windows per provider. |
 | `limits.claude` | positive integer | unlimited | g | Cap for Claude windows (agentctl windows + reserved places + external sessions when counted). `agentctl limits set claude=3` changes it. |
 | `limits.codex` | positive integer | unlimited | g | Cap for Codex windows. |
-| `limits.count_external` | boolean | `false` | g | Terminal sessions of `claude` / `codex` outside the windows of agentctl (found with `ps`, not MCP servers, headless runs or agentctl itself) count against the limit and show as "external" in `agentctl limits`. Places for agents you start by hand can also be held with `agentctl limits reserve`. |
-| `agents` | mapping | see below | g | Settings per agent: `agents.claude`, `agents.codex`. |
-| `equivalents` | list | `[]` | g | Extra Claude and Codex pairs, `{claude: "opus/medium", codex: "gpt-6-astra/low"}`, consulted before the built-in table. Both sides are `model/effort`. |
+| `limits.count_report_ready` | boolean | `false` | g | Idle windows with a complete report do not occupy provider slots by default. Capacity/limits separate working windows and reports awaiting collection. A follow-up counts again; send warns and refuses to resume it when the provider is full. |
+| `limits.count_external` | boolean | `false` | g | Terminal sessions of active providers (`claude`, `codex`, `kimi` when enabled) outside the windows of agentctl (found with `ps`, not MCP servers, headless runs or agentctl itself) count against the limit and show as "external" in `agentctl limits`. Places for agents you start by hand can also be held with `agentctl limits reserve`. |
+| `agents` | mapping | see below | g | Settings per provider: `agents.claude`, `agents.codex`, `agents.kimi` (when enabled). |
+| `equivalents` | list | `[]` | g | Extra equivalents for active providers, e.g. `{claude: "opus/medium", codex: "gpt-6-astra/low", kimi: "kimi-for-coding/high"}`, consulted before the built-in table. Each provider column is `model/effort`. |
 | `mirror_dir` | path | none (off) | g | `status` and `pull` copy reports and `status.json` there. |
 | `watch` | mapping | see below | g | `agentctl watch` and the window icons. |
 | `notify` | mapping | see below | g | Notifications and the events of the agents. |
@@ -62,6 +68,7 @@ Column "Layers": **g** global config, **p** project config, **s** spec.
 | Key | Type | Default | Layers | Meaning |
 |---|---|---|---|---|
 | `watch.interval` | seconds | `15` | g | Time between two polls of the watcher. |
+| `watch.idle_confirm_ticks` | positive integer | `2` | g | Consecutive idle reads required after visible work before waiting. Working resets the counter. Stop may end an idle turn immediately; running tools/spinners always win over Stop. |
 | `watch.waiting_after` | seconds | `120` | g | How long an idle task may wait before it is worth a notification. |
 | `watch.window_icons` | `true`, `false` or mapping | `true` | g | State icon in front of tmux window names. A mapping replaces single icons by state name (`{working: "▶", needs-input: "❓"}`); `false` leaves the names alone. |
 | `watch.status_line` | boolean | `true` | g | `watch --tmux` shows the task counts in the status bar of the agentctl session. |
@@ -76,7 +83,7 @@ Default icons: `working` ⚙, `background` ⏳, `waiting` ⏸, `needs-input` ?, 
 | `notify.events` | boolean | `true` | g | The agents report questions, end of turn and limits to `agentctl event` (Claude hooks, Codex `notify`). `false`: screen reading only. |
 | `notify.turn_end` | boolean | `true` | g | A notification when a turn ends and the agent waits. `false`: only questions, reports and limits. |
 | `notify.terminal_app` | bundle ID | detected | g | The terminal app a click on a notification brings to the front, for example `com.apple.Terminal`. |
-| `notify.verdict_pattern` | regex | none | g | Picks the report line quoted in the "report ready" notification; its first group, else the whole line. Without it a line starting with `Werdykt`, `Verdict` or `Status`, else the first line of text. |
+| `notify.verdict_pattern` | regex | none | g | Picks the report line quoted in the "report ready" notification; its first group, else the whole line. Without it: the `verdict` of the report's `agentctl-outputs` block, else a verdict line in the report header (`Werdykt: PASS`, `Verdict - FAIL`, or `# Werdykt` with the value on the next line); never an arbitrary line of text. |
 | `notify.ntfy` | mapping | none | g | Notifications to a phone through [ntfy](https://ntfy.sh); the keys below. Without `topic` nothing is sent. `agentctl ntfy-setup` writes it for you. |
 | `notify.ntfy.server` | URL | `https://ntfy.sh` | g | The ntfy server; your own for a private one. |
 | `notify.ntfy.topic` | text | none | g | The topic the phone subscribes to (letters, digits, `_`, `-`). On the public server its name is the only protection: keep it long and random. |
@@ -116,6 +123,8 @@ The session started by `agentctl manager`: Claude Code with [Remote Control](htt
 | `board.return_key` | tmux key name or `false` | `F12` | g | Key (no prefix) that goes back to the board from any window of the session. `false`: none. |
 | `board.model_versions` | alias → quoted version mapping | `{}` | g | Fallback versions for aliases after observed session model; never guessed. |
 | `board.list_width` | integer >=64 or percentage string | automatic | g | List width with preview; 92+ at 140+ terminal columns by default, at least 32 columns left for preview. |
+| `board.cohorts_recent` | integer >= 1 | `10` | g | How many of the most recently active cohorts the board's `k` choice lists (cohorts with active or queued work always show). Older quiet cohorts fold into `starsze… (n)`; ↑↓ PgUp/PgDn scroll the choice. `agentctl cohort archive` removes finished cohorts from it altogether. |
+| `board.window_title` | boolean | `true` | g | The board names its terminal window `<instance> <version> · board` (OSC 2 with xterm title-stack restoration) and temporarily sets this session’s `set-titles` / `set-titles-string` (`<instance> <version> · #W`). Previous title settings are restored on exit. `false` disables board title changes; the instance label in status-left remains. |
 | `board.selected_color` | Ink color name | `blue` | g | Color for the selected board row, manager line and queue entry. State and result cells keep their own colors. `NO_COLOR` disables color; the selection stays bold (manager line uses inverse video). |
 
 ### `mcp`
@@ -155,7 +164,7 @@ Queued tasks live in `<config dir>/queue/` (one JSON file each, with the spec te
 
 ### `usage`
 
-`agentctl usage`, the board and the tmux status line show the tokens of the tasks and the state of the plans of Claude and Codex ([how it works](details.md#usage-and-limits)). A percentage here is `80` (both providers) or `{claude: 80, codex: 70}` (per provider).
+`agentctl usage`, the board and the tmux status line show the tokens of the tasks and the plan limits of active providers (Claude, Codex and Kimi when enabled) ([how it works](details.md#usage-and-limits)). A percentage here is `80` (all active providers) or `{claude: 80, codex: 70, kimi: 80}` (per provider).
 
 | Key | Type | Default | Layers | Meaning |
 |---|---|---|---|---|
@@ -178,9 +187,12 @@ Queued tasks live in `<config dir>/queue/` (one JSON file each, with the spec te
 | `agents.<agent>.ready_pattern` | regex | see below | g | The agent shows its input box. |
 | `agents.<agent>.ready_timeout` | seconds | `60` | g | How long `new` waits for `ready_pattern`. |
 | `agents.<agent>.trust_pattern` | regex | see below | g | The agent shows its folder-trust dialog. agentctl never answers it. |
+| `agents.<agent>.dialog_pattern` | regex | codex `'Update available\|Skip until next version'` | g | Another startup dialog a human must answer (the Codex "Update available" modal): `new` stops at it at once as needs-input instead of waiting out `ready_timeout`. agentctl never answers it. Codex task windows also start with `-c check_for_update_on_startup=false`, so a current Codex does not show the modal at all. |
 | `agents.<agent>.trust_timeout` | seconds | `600` | g | How long `new` waits for you to answer the trust dialog. |
-| `agents.<agent>.working_pattern` | regex | see below | g | A turn is running, including Claude 2.1.x spinner progress. |
+| `agents.<agent>.working_pattern` | regex | see below | g | A turn is running, including Claude 2.1.x spinner progress. The spinner frame `✳` is not in the pattern: it counts only as a spinner line (word, `…`, a bracket that starts with the elapsed time) right above the input box, never in the transcript, whatever the pattern says. |
 | `agents.<agent>.delivery_pattern` | regex | see below | g | New adapter assistant output acknowledges a submitted prompt; input drafts never count. |
+| `preview` | mapping | `{ttl_s: 600}` | g | MCP preview token lifetime and argument identity. |
+| `preview.ttl_s` | positive seconds | `600` | g | Lifetime measured from preview creation; responses include TTL and expiry. Canonical YAML key order/formatting and trailing prompt whitespace are ignored. Read tools and unrelated starts do not invalidate previews. Destructive target changes still require a fresh preview; refusals identify TTL, changed fields, session or invalidation. |
 | `delivery_confirm_s` | seconds | `60` | g | Watch deadline for uncertain prompt delivery; positive number. Start/send succeeds with a warning while checking; no evidence by the deadline produces needs-attention. |
 | `agents.<agent>.interrupt_key` | tmux key name | `Escape` | g | Key sent by `agentctl interrupt`. |
 | `agents.<agent>.footer_patterns` | list of regexes | see below | g | Lines of TUI chrome that `status` and `peek` skip. |
@@ -195,7 +207,7 @@ claude:
   effort_args: ['--effort', '{effort}']
   ready_pattern: '^\s*❯\s(?!\d+\.)'
   trust_pattern: 'Quick safety check|Yes, I trust this folder'
-  working_pattern: 'esc to interrupt|^\s*[✶✻✽✢·*]\s+[^\n]+(?:…|\.\.\.)\s*\([^\n]*(?:\d+(?:\.\d+)?s\s*·|thinking|tokens)[^\n]*\)'
+  working_pattern: 'esc to interrupt|^\s*(?:⏺\s+)?Running(?:\s|…|\.\.\.)|^\s*[✶✻✽✢·*]\s+[^\n]+(?:…|\.\.\.)\s*\([^\n]*(?:\d+(?:\.\d+)?s\s*·|thinking|tokens)[^\n]*\)'
   delivery_pattern: '^\s*⏺|● got:'
   question_pattern: 'Enter to select\b.*Esc to cancel|Esc to cancel · Tab to amend'
   footer_patterns:
@@ -215,6 +227,7 @@ codex:
   effort_args: ['-c', 'model_reasoning_effort={effort}']
   ready_pattern: '^›\s(?!\d+\.)|\? for shortcuts'
   trust_pattern: 'Trust this folder\?|Folder settings can run code automatically'
+  dialog_pattern: 'Update available|Skip until next version'
   working_pattern: 'esc to interrupt'
   delivery_pattern: '^\s*[•■]|● got:'
   question_pattern: 'Waiting for your answer|^\s*\?\s+\d+ questions?\b|to answer\s*$|Press enter to confirm or esc to cancel'
@@ -248,6 +261,7 @@ The header of a spec file, between `---` lines, followed by the prompt. Several 
 | `repos` | list | required | s | At least one repository. The agent starts in the worktree of the first one. |
 | `repos[].path` | path | required | s | The existing checkout. |
 | `repos[].worktree` | path | `<worktree_root>/<repo>-<task>` | s | Where the new worktree goes. Must differ from `path`. |
+| `repos[].setup` | list of strings | none | s | Shell commands for this repository's own worktree (see `setup`). The chat cannot send it. |
 | `repos[].base` | git ref | none | s | Start point of the worktree. |
 | `repos[].branch` | string | none | s | Branch to create (or reuse). Without it the worktree is detached. |
 | `links` | list | `[]` | s | Same as in the other layers; added to theirs. |
@@ -304,6 +318,8 @@ The guide ships in npm `docs/dispatcher*.md`, with no dependency on a developmen
 | `disk` | mapping | Disk thresholds, in GiB (1024³ bytes). |
 | `disk.warn_gb` | `50` | Warn below this available space on any known filesystem. |
 | `disk.critical_gb` | `20` | Critical below this space; must not exceed warn_gb. |
+| `disk.workers` | `2` | Process-wide tree-measurement worker cap shared by disk facts, capacity, previews and GC; integer 1–8. A lower reloaded cap admits no new work until existing workers drain below it. |
+| `disk.measurement_timeout_s` | `600` | Maximum execution time of a tree measurement. A timed-out worker is terminated and frees its slot; reads retain the last known value and report a measurement error. |
 | `git` | mapping | Worktree checkout and setup limits. |
 | `git.timeout_s` | `600` | Positive timeout in seconds for worktree add (including checkout) and each setup command. |
 
@@ -366,6 +382,7 @@ Each write needs its exact name in `mcp.allow` (or the listed group). No wildcar
 | `cohort_add` | `cohort_add` | `cohort` |
 | `cohort_remove` | `cohort_remove` | `cohort` |
 | `cohort_note` | `cohort_note` | `cohort` |
+| `cohort_archive` | `cohort_archive` | `cohort` |
 | `hide` | `hide` | — |
 | `unhide` | `unhide` | — |
 | `archive` | `archive` | — |
@@ -377,7 +394,7 @@ Each write needs its exact name in `mcp.allow` (or the listed group). No wildcar
 | `notify_test` | `notify_test` | — |
 | `gc` | `gc` | — |
 
-Groups: `queue:*` = `queue`, `queue_rm`, `queue_retry`, `queue_up`, `queue_pause`, `queue_resume`; `cohort` = `cohort_add`, `cohort_remove`, `cohort_note`; `manager:*` = `manager_start`, `manager_stop`. `queue:*` includes `queue_retry`; retry is technical and retains the same provider.
+Groups: `queue:*` = `queue`, `queue_rm`, `queue_retry`, `queue_up`, `queue_pause`, `queue_resume`; `cohort` = `cohort_add`, `cohort_remove`, `cohort_note`, `cohort_archive`; `manager:*` = `manager_start`, `manager_stop`. `queue:*` includes `queue_retry`; retry is technical and retains the same provider.
 
 ## Review corrections: delivery, attempts and overload safety
 
@@ -434,10 +451,147 @@ board:
 
 `board.list_width` accepts an integer >=64 columns or a percentage string from `"1%"` to `"100%"`. With a preview it is clamped to at least 64 columns and at most terminal width minus 32. Below 110 columns the preview stays hidden and the list uses the whole terminal; the override has no effect there. Without an override, 110–139 columns retains the 71-column list; at >=140 columns use max(92, floor(45% of terminal width)), preserving at least 32 columns for preview. Large model/version strings may still truncate in constrained lists; full names remain in preview/help. Queue rows use the same abbreviations and fallback mapping. The manager line shows connection state rather than a model, so it retains its existing form.
 
-PL: `model_versions` to opcjonalna mapa wersji aliasów, bez domyślnych zgadywanych wartości. `list_width` przyjmuje kolumny lub procent; ograniczenia chronią miejsce na listę i podgląd. Zaznaczenie nadal bold/niebieskie, kolory stanów oraz NO_COLOR zachowują poprzednie zachowanie.
+PL: `ui.instance_name` nadpisuje automatyczną etykietę `agentctl` / `agentctl-dev` w nagłówku, status-left i tytułach board/watch; po zmianie uruchom te widoki ponownie. `board.window_title` (domyślnie `true`) ustawia tytuł okna i sesji boarda; `false` wyłącza zmiany tytułu, ale zachowuje etykietę status-left. `model_versions` to opcjonalna mapa wersji aliasów, bez domyślnych zgadywanych wartości. `list_width` przyjmuje kolumny lub procent; ograniczenia chronią miejsce na listę i podgląd. Zaznaczenie nadal bold/niebieskie, kolory stanów oraz NO_COLOR zachowują poprzednie zachowanie.
 
 | Key | Default | Meaning |
 |---|---|---|
 | `mcp.max_response_kb` | `8` | Limit of each serialized MCP tool result in KiB (1–1024). Larger results return fragments through `response_page`; continuation never repeats the operation. |
 | `cohort` | `{done_grace_s: 300}` | Global cohort completion settings. |
 | `cohort.done_grace_s` | `300` | Wait after the last observed membership or task-state change before announcing all reports ready. Adding work cancels the pending completion; persisted across watcher restarts. `0` restores immediate notices. |
+
+## NC workflow (0.17.4)
+
+| Key | Default | Layers | Meaning |
+|---|---|---|---|
+| `review` | disabled | global, project, spec | Automatic review settings. In a spec: `auto`, `false`, or `{agent, model, effort, prompt_template}`. |
+| `review.default` | `false` | global, project | `auto` schedules a review after a complete author report. Explicit spec `false` disables it. |
+| `review.agent` | other provider | global, project, spec | Explicit reviewer provider. Prefer a different installed provider; if unavailable or unmapped, use a different configured model on the author provider. |
+| `review.model` | equivalents | global, project, spec | Reviewer model; no guessed models. A same-provider reviewer must use another model. |
+| `review.effort` | equivalents | global, project, spec | Reviewer effort, validated against the selected provider. |
+| `review.template` | built-in | global, project | Path to a review prompt. Alias of `prompt_template`; relative paths use the author repository. Default example: [review-template.md](examples/review-template.md). |
+| `review.prompt_template` | built-in | global, project, spec | Template path. Placeholders: `{task}`, `{report}`, `{delta}`. |
+| `review.rerun` | `false` | global, project, spec | A new author report schedules `TASK-REV2`, then `REV3`, etc.; the previous scheduled review SHA becomes the next delta base. |
+| `limited` | see below | global | Recovery of windows stopped at a provider usage limit; never changes provider or model. |
+| `limited.auto_resume` | `true` | global | Send `limited.message` after confirmed recovery at an idle, empty composer. |
+| `limited.resume_above_percent` | `5` | global | Remaining percentage must be strictly above this threshold (0–<100), from a fresh reading since the episode; a known elapsed reset also permits recovery. Unknown/stale readings do not imply recovery. |
+| `limited.message` | `kontynuuj` | global | Recovery message. Uses overload retry delay, maximum attempts, give-up interval and sustained recovery duration. |
+| `agents.<agent>.accepts_busy_prompt` | `true` | global | Claude/Codex accept follow-ups while working. Set `false` for an adapter that needs idle; messages remain in a durable FIFO, visible in status/peek. |
+| `notify.mcp_writes` | `summary` | global | `all`, `summary`, `off`. Audit and journal still record every write. Summary emits at most once per interval; watch flushes pending summaries. |
+| `notify.mcp_writes_interval_s` | `60` | global | Positive seconds between write summaries, persisted over restarts. |
+
+`after` accepts existing task IDs and conditions, for example `after: [BUILD, {task: TEST, verdict: [PASS, PARTIAL]}]`. A complete report with another verdict blocks the task with the observed/required values; no verdict says `brak werdyktu`. The data block's verdict wins; an explicit `Werdykt:` / `Verdict:` line is the legacy fallback. `unblock` previews which dependency it removes.
+
+`repos[].base: "@TASK"` uses that task's output commit, otherwise its branch HEAD. `"@TASK:repo-name"` selects one repository. Resolution happens at start; the exact existing commit and original reference are saved in TASK.md and displayed in the new preview. Queue entries retain the reference until start. Missing tasks, commits, branches and ambiguous repositories block start.
+
+Automatic review requires an explicit author `repos[].branch`. The review shares the author's worktree/branch, uses `review_of` and `after`, and is prompted to read only and write its separate report. Start validates that the shared checkout is clean. A missing provider/model/template/base leaves the author report ready and records a visible review error. Defaults come from `equivalents`, not model guesses. An explicit same-provider model is allowed only when different from the author.
+
+PL: `outputs` to fakty autora, bez wykonywania `actions.shell` i bez scalania. Błędny/brakujący blok ostrzega, ale raport nadal jest gotowy. `after` może wymagać konkretnego werdyktu. `review: auto` tworzy przegląd po raporcie, `rerun` włącza przeglądy delty. `limited` wznawia wyłącznie na tym samym dostawcy/modelu, z pustym polem i kontrolą przed Enterem. Zbiorczy `mark` zapisuje ocenę podaną przez użytkownika, po podglądzie zakresu. F12 wraca do boarda własnej sesji, także przy równoległym `agentctl-dev`.
+
+## Production fixes before 0.17.4 UAT
+
+`new` and `queue` previews warn for each missing target in resolved project/spec links. Confirmation refuses with repair instructions before writing task state. `doctor --project <path>` checks project link targets; known task repositories are checked as well. GC treats any target inside a finished worktree as a reference, including `dir/*` and real paths through symlinks. Project configs from current/archived task repositories and spec links of active tasks protect the target. Only local CLI `--force-links` overrides link protection; dirty, active, foreign and protected worktrees retain their guards.
+
+`gc`, `gc --preview` and `gc --dry-run` show the same summary; `--apply` executes. Totals come first: reclaimable GB/bytes and counts/bytes for worktrees, archive moves, cache, merged branches and skipped reasons. Cohort totals and newer-than-7d skips grouped by task are paginated. `--verbose --offset 0 --limit 10` adds detailed entries; MCP uses `detail: true`, `offset`, `limit`. JSON preview uses the same bounded summary. Archive moves and branch deletion have zero reclaimable bytes.
+
+Canonical report readiness is shared by doctor, status, list_reports, get_report and pull_ready. Historical copy metadata cannot imply that a displaced report still exists. Stale capacity facts keep their meaning and include elapsed hours and the local time of the reading.
+
+## State and report boundaries (Kimi audit, 0.17.4)
+
+State snapshots use a temporary file in the destination directory, fsync and atomic rename. TASK.md header changes, complete replacements and body appends share the task's prompt-delivery lock. Report metadata is committed together. ENOSPC or a failed write preserves the old state and returns an error; a per-file diagnostic marks an affected task needs-attention. Each task reserves 8 KiB for emergency diagnostics; if the filesystem also refuses the diagnostic, the active process retains the error and the operation still fails. A later successful repair clears the diagnostic. An interrupted pre-rename write leaves the old snapshot readable.
+
+MCP new/queue validate canonical and alternative report paths during preview: only `config.cache` and task worktrees are allowed. Relative alternatives are resolved in task worktrees. Outside paths, including boundary escapes and symlink components, are refused. CLI previews warn about outside report paths. `report_from` in MCP never permits an outside or symlink source, even with `force: true`; force only allows replacing the canonical report. Local CLI `report --from ... --force` can explicitly select an outside regular file, but cannot follow symlinks. get_report/pull_ready and mirror copies verify the approved path and the opened regular file around the actual read; legacy outside reports remain unreadable through those consumers.
+
+`<state_dir>/start.lock` protects fresh limit checks and the first durable start reservation. Pending starts occupy slots before checkout or setup and stop counting twice once their window appears. New, queue/retry, resume and move share this admission path; follow-ups use the same admission lock. Workers retain the existing repository checkout locks and can check out independent repositories concurrently. Dead owner PIDs release stale reservations on the next admission; live queue claims are not mistaken for interrupted starts by another watcher.
+
+| `agents.<agent>.env` | Global | `{}` | Per-provider environment; task env overrides it. Kimi telemetry is disabled by default; trust bypass and disabled dangerous-command guard are rejected. |
+
+| `agents.<agent>.approval_pattern` | Global | Adapter default | Separate approval dialog regex; Kimi approvals and question Submit are distinct panels. |
+
+## Kimi Code 2.5.0
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `agents.kimi` | mapping | adapter defaults | Interactive Kimi settings; registered always, active only in `providers`. |
+| `limits.kimi` | positive integer | unlimited | Simultaneous Kimi task windows, reservations and optional external sessions. |
+| `usage.kimi_dir` | path/null | `$KIMI_CODE_HOME`, else `~/.kimi-code` | Legacy Kimi home fallback. `agents.kimi.env.KIMI_CODE_HOME` takes precedence, then this explicit setting, then process `KIMI_CODE_HOME`, then `~/.kimi-code`. Task windows, doctor and passive reads share this resolver. Only config.toml and candidate session logs are read. |
+| `capacity.kimi_usage_probe_model` | string | `k3` | Model alias for the slash-command-only probe; configurable, including `default`. The default never selects Highspeed. No thinking effort is set or inherited; no model turn is submitted. |
+| `capacity.kimi_usage_probe` | boolean | false | On-demand hidden TUI `/usage` probe in `<agentctl home>/kimi-usage-probe`; at most once per five minutes. |
+| `review.prefer` | provider IDs | `providers` order | First active installed mappable provider other than the author. Inactive IDs are skipped. |
+
+Claude and Codex stay mandatory. Inactive Kimi settings produce a warning; `agent: kimi` is refused until Kimi is enabled. MCP provider enums/count fields follow active providers when the server starts; restart MCP after enabling another provider. `limits set kimi=2`, `limits reserve kimi=1`, `limits release kimi` work when active. The tmux line can show `C 62% · X 18% · K 40%`.
+
+```yaml
+providers: [claude, codex, kimi]
+agents:
+  kimi:
+    flags: []
+    effort_args: []
+    env: {KIMI_DISABLE_TELEMETRY: '1'}
+usage:
+  kimi_dir: null
+  warn: {claude: 80, codex: 80, kimi: 80}
+  critical: 95
+  queue_hold: {kimi: 90}
+capacity: {kimi_usage_probe: false}
+review: {prefer: [codex, kimi, claude]}
+equivalents:
+  - {claude: sonnet/high, codex: gpt-6.1-sol/high, kimi: k3/high, class: medium}
+```
+
+Equivalents may contain two or three active provider columns and optional `class: light|medium|strong`. Translation requires both source and target columns. Built-in Kimi proposals are `k3-256k/low` (light), `k3/high` (medium), `k3/max` (strong); they describe a dispatch mapping, not a quality guarantee. `k3.1-pro` is used only on explicit request because it consumes about 10× the plan limit. Aliases are dynamic on the server. `display_name` and `support_efforts` in Kimi's TOML catalog determine display version and permitted effort; no medium/xhigh. A model without levels gets no forced effort. `model: default` omits `-m`; resume uses `--session ID` or `--continue` without a model override because `-m` plus session has not been verified in 2.5.0. Board versions can be explicitly supplied in `board.model_versions`; unversioned aliases never get a guessed version.
+
+Safety is per target provider, including after `move` or equivalents translation. Claude/Codex retain their 0.17.4 safety results. Kimi forbids `-y`, `--yolo`, `--yes`, `--auto-approve`, `--auto`, `-p`, `--prompt`, including long `--flag=value` forms, `KIMI_CODE_TRUST_WORKSPACE`, and a false `KIMI_CODE_DANGEROUS_COMMAND_GUARD` in task/provider env. `default_permission_mode=auto` (Never Ask) refuses start/resume and fails doctor. `manual` (Always Ask) and `yolo` (Ask When Needed) are accepted only with `permission.dangerous_command_guard=true`; false in config or env refuses start and fails doctor. Invalid TOML is refused rather than interpreted. Agentctl never edits Kimi's config. Update checks are disabled per process; telemetry defaults off and may be explicitly overridden by `agents.kimi.env`. Task prompts, files read, command results and diffs still go to Moonshot AI.
+
+Kimi permissions have no sandbox boundary. Doctor shows the active mode, guard and permission rules read-only. Real Kimi 2.5.0 still asks for `git status` in manual mode despite an exact allow rule; yolo with the guard runs that routine command without a dialog. `permission.dangerous_command_guard` is a separate AST guard; disabling it fails doctor. File Write does not always ask. Bash rules match the entire command string, including operators. Use exact commands; an unrestricted wildcard may also match compound commands. Add each extra argument variant as its own reviewed literal rule:
+
+```toml
+default_permission_mode = "yolo"
+[permission]
+dangerous_command_guard = true
+
+[[permission.rules]]
+decision = "allow"
+pattern = "Bash(git status)"
+
+[[permission.rules]]
+decision = "allow"
+pattern = "Bash(git diff)"
+
+[[permission.rules]]
+decision = "allow"
+pattern = "Bash(git log)"
+
+[[permission.rules]]
+decision = "allow"
+pattern = "Bash(npm test)"
+
+[[permission.rules]]
+decision = "allow"
+pattern = "Bash(npm run build)"
+
+[[permission.rules]]
+decision = "allow"
+pattern = "Bash(node --test)"
+```
+
+The probe never uses task windows, reads credentials or calls an API; trust/login is manual (doctor gives the neutral directory). Only parsed percentages and reset times are saved in `usage/kimi-plan.json`. No transcript is added to MCP/watch logs. Missing windows are n/d, including Weekly when only 5h and Monthly were observed.
+
+Screen fixtures are from user captures of 2.5.0. Approval and question/Submit are separate panels; the editor stays visible while working. Prompt delivery uses bracketed paste, stable screen and a separate `C-m`; collapsed `[paste #N ...]` is a draft. Busy delivery defaults off because Kimi's queue footer is unverified. Passive wire supports protocol 1.5 with screen fallback and a doctor note for unknown versions. Auth/limit/overload/background patterns, queue footer, other wire interaction records and `-m` plus `--session` remain hypotheses; synthetic tests are labeled separately. Tokens come only from `usage.record`, never `token_counting.*`.
+
+Kimi 2.5.0 effective model/effort comes from passive `llm.request.modelAlias/thinkingEffort`, recorded beside requested settings in TASK.md and status JSON. The footer can retain `high` while the effective wire effort is `low`; a wire mismatch warns. Sessions bind via `sessions/<workspace>/<session>/state.json` (session index fallback); `usage.record` supplies input/output/cache tokens and numeric `time`.
+
+### Claude plan usage probe
+
+The optional neutral `/usage` probe refreshes Claude plan capacity without waiting for a task's statusline:
+
+```yaml
+capacity:
+  claude_usage_probe: false # opt in with true
+  claude_usage_probe_interval_minutes: 15 # integer 15–10080; attempts never run more often
+```
+
+Both `capacity` and `usage` refresh on demand when enabled; this is not a background timer. Attempts (including failed/trust-blocked attempts) are serialized and rate-limited across processes. The probe uses `<agentctl home>/claude-usage-probe`, its own detached temporary tmux session, the P27 private launch script, and fixed slash-command-only argv. It never targets task windows, inherits task flags, or submits a model prompt. Hooks and statusline commands are disabled for this session. `/usage` is a local CLI command and consumes no model tokens (the captured 2.1.311 fixture reports zero input/output/cache tokens). Only `/usage` is submitted; the probe session is then terminated, including on failure.
+
+If trust/login is required, agentctl reports a **one-time wait for Marcin**. Run `claude` manually in the printed neutral directory, complete the dialog yourself, then exit. Agentctl never answers dialogs; it also checks the idle slash-command composer again before Enter. `doctor` shows off/enabled, interval, missing reading/manual trust, and the last reading's age/staleness. Doctor itself does not run a probe.
+
+The parser uses the real Claude Code 2.1.311 panel: `Current session` (5 h) and `Current week (all models)`, percentage used, and `Resets … (IANA timezone)`. Model-specific weeks and usage credits are excluded from these all-model windows. Unsupported reset formats remain unknown rather than guessed. A weekly panel is required before replacing a reading. Only percentages, reset timestamps and the capture timestamp are stored in `usage/claude-usage-probe.json`, exposed as `source: claude-usage-probe`. The newer of the probe and existing statusline reading wins; disabling the probe restores statusline-only reads. Old readings retain the existing `capacity.stale_minutes` marking, and expired windows are dropped. CLI layout changes or unsupported localized reset text may prevent refresh or leave reset unknown; a failed refresh retains the previous reading.

@@ -1,3 +1,4 @@
+import { composerFixture } from './composer-fixture.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -9,12 +10,13 @@ import { Context } from '../src/core/context.ts';
 import { auditPath, MAX_PEEK_LINES, MAX_SEND_CHARS, MAX_TEXT_BYTES, MCP_TOOL_NAMES, MCP_TOOLS, readReportFile, statusLine } from '../src/core/mcp-tools.ts';
 import type { McpDeps, McpToolDef, ToolResult } from '../src/core/mcp-tools.ts';
 import { readTaskPrompt, readTaskRecord, taskFile } from '../src/core/taskstore.ts';
-import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helpers.ts';
+import { readQueue } from '../src/core/queue.ts';
+import { DiskRunner, FakeTmux, fakeWatcher, makeConfig, seedTask, useScratch } from './helpers.ts';
 
 const scratch = useScratch();
 const SELF = ['/usr/bin/env', 'AGENTCTL_HOME=/h', '/opt/node/bin/node', '--experimental-strip-types', '--no-warnings', '/opt/agentctl/bin/agentctl.ts'];
 const WORKING = '● Reading src/menu.ts\n  esc to interrupt\n';
-const IDLE = 'Welcome\n❯ \n  ⏵⏵ auto mode on';
+const IDLE = composerFixture('Welcome\n❯ \n  ⏵⏵ auto mode on');
 
 const tool = (name: string): McpToolDef => MCP_TOOLS.find((t) => t.name === name) as McpToolDef;
 const schemaOf = (name: string) => z.object(tool(name).input);
@@ -32,7 +34,7 @@ function setup(name: string, extraYaml = '') {
   const outLines: string[] = [];
   let notifyFails = false;
   const deps: McpDeps = {
-    context: (out) => new Context(runner, loadGlobalConfig(path.dirname(config.path)), (l) => (out(l), outLines.push(l))),
+    context: (out) => new Context(runner, { ...loadGlobalConfig(path.dirname(config.path)), notify: { ...loadGlobalConfig(path.dirname(config.path)).notify, mcpWrites: 'all' } }, (l) => (out(l), outLines.push(l))),
     notify: async (m) => {
       if (notifyFails) throw new Error('no notifier');
       notified.push(m);
@@ -55,7 +57,7 @@ function withReport(config: GlobalConfig, task: string, text = `# ${task}\nWerdy
 describe('mcp: the registry', () => {
   it('has the nineteen read tools and thirteen write tools, with unique short names', () => {
     assert.deepEqual(MCP_TOOLS.filter((t) => t.kind === 'read').map((t) => t.name), ['status', 'events_since', 'gc_preview', 'limits', 'version', 'peek', 'list_reports', 'get_report', 'pull_ready', 'task_spec', 'queue_list', 'cohort_list', 'cohort_show', 'guide', 'capacity', 'usage', 'log', 'stats', 'overlap', 'queue_show', 'mcp_check', 'spec_example', 'doctor', 'equivalents', 'config_show', 'manager_status', 'away_status', 'report', 'response_page']);
-    assert.deepEqual(MCP_TOOLS.filter((t) => t.kind === 'write').map((t) => t.name), ['set_limits', 'reserve', 'resume', 'send', 'new', 'queue', 'queue_rm', 'cancel', 'mark', 'away', 'interrupt', 'close', 'move', 'queue_retry', 'queue_up', 'queue_pause', 'queue_resume', 'unblock', 'cohort_add', 'cohort_remove', 'cohort_note', 'hide', 'unhide', 'archive', 'adopt', 'report_from', 'limits_release', 'manager_start', 'manager_stop', 'notify_test', 'gc']);
+    assert.deepEqual(MCP_TOOLS.filter((t) => t.kind === 'write').map((t) => t.name), ['set_limits', 'reserve', 'resume', 'send', 'new', 'queue', 'queue_rm', 'cancel', 'mark', 'away', 'interrupt', 'close', 'move', 'queue_retry', 'queue_up', 'queue_pause', 'queue_resume', 'unblock', 'cohort_add', 'cohort_remove', 'cohort_archive', 'cohort_note', 'hide', 'unhide', 'archive', 'adopt', 'report_from', 'limits_release', 'manager_start', 'manager_stop', 'notify_test', 'gc']);
     assert.equal(new Set(MCP_TOOL_NAMES).size, MCP_TOOL_NAMES.length);
     for (const t of MCP_TOOLS) assert.ok(t.name.length <= 64 && /^[a-z_]+$/.test(t.name), t.name);
   });
@@ -116,7 +118,7 @@ describe('mcp: reading', () => {
     seedTask(t.config, 'NC-2');
     t.tmux.add('nc-1', `line one\nline two\nline three\n  ⏵⏵ auto mode on (shift+tab to cycle)\n❯ `);
     const r = await t.call('peek', { task: 'nc-1', lines: 2 });
-    assert.match(r.text, /^NC-1: last 2 lines of its window \(agent footer removed\)\n\nline two\nline three\nusage_hint: n\/d\ndraft_input: n\/d$/);
+    assert.match(r.text, /^NC-1: last 2 lines of its window \(agent footer removed\)\n\nline two\nline three\nusage_hint: n\/d\ndraft_input: n\/d\nprompt_delivery: n\/d\nprompt_queue: \[\]$/);
     const gone = await t.call('peek', { task: 'NC-2' });
     assert.equal(gone.isError, true);
     assert.match(gone.text, /NC-2 has no tmux window/);
@@ -126,8 +128,8 @@ describe('mcp: reading', () => {
     const t = setup('r3');
     withReport(t.config, 'NC-42', '# NC-42\nWerdykt: PASS\n');
     withReport(t.config, 'OLD-7', '# old\n', { closed: true });
-    assert.ok((await t.call('get_report', { task: 'nc-4' })).text.startsWith('=== NC-42 (claude opus/high) ===\n# NC-42\nWerdykt: PASS'));
-    assert.match((await t.call('get_report', { task: 'OLD-7' })).text, /# old/);
+    assert.ok((await t.call('get_report', { task: 'nc-4', detail: true })).text.startsWith('=== NC-42 (claude opus/high) ===\n# NC-42\nWerdykt: PASS'));
+    assert.match((await t.call('get_report', { task: 'OLD-7', detail: true })).text, /# old/);
     assert.ok(readTaskRecord(t.config, 'nc-42')?.pulled);
   });
 
@@ -152,7 +154,7 @@ describe('mcp: reading', () => {
     fs.symlinkSync(secret, record.report);
     const r = await t.call('get_report', { task: 'NC-1' });
     assert.equal(r.isError, true);
-    assert.match(r.text, /not a regular file; refusing/);
+    assert.match(r.text, /Report path contains a symlink/);
     assert.ok(!r.text.includes('TOP SECRET'));
     fs.rmSync(record.report);
     fs.mkdirSync(record.report);
@@ -163,7 +165,7 @@ describe('mcp: reading', () => {
     const t = setup('r6');
     const big = 'x'.repeat(MAX_TEXT_BYTES + 5000);
     withReport(t.config, 'NC-1', big);
-    const r = await t.call('get_report', { task: 'NC-1' });
+    const r = await t.call('get_report', { task: 'NC-1', detail: true });
     assert.ok(Buffer.byteLength(r.text) < MAX_TEXT_BYTES + 400);
     assert.equal(JSON.parse(r.text.split('--- page ---\n')[1]!).has_more, true);
     seedTask(t.config, 'NC-2');
@@ -314,10 +316,11 @@ describe('mcp: the write tools', () => {
     seedTask(t.config, 'NC-1');
     t.tmux.add('nc-1', IDLE);
     const r = await t.call('send', { task: 'nc-1', text: 'dopisz test' });
-    assert.match(r.text, /^NC-1: prompt sent \(11 characters\)/);
+    assert.match(r.text, /^NC-1: wklejono; dostarczenie niepotwierdzone – sprawdzam \(watch\) \(11 characters\)/);
+    assert.equal(readTaskRecord(t.config, 'nc-1')?.pendingPrompt, 'dopisz test');
     assert.ok(t.runner.commands.some((c) => c.startsWith('tmux paste-buffer')));
     assert.ok(t.runner.commands.some((c) => c.includes('send-keys') && c.includes('Enter')));
-    assert.match(fs.readFileSync(taskFile(t.config, 'nc-1'), 'utf8'), /## Follow-up sent .*\n\ndopisz test/);
+    assert.match(fs.readFileSync(taskFile(t.config, 'nc-1'), 'utf8'), /## Follow-up queued .*\n\ndopisz test[\s\S]*## Follow-up pasted, unconfirmed /);
     assert.deepEqual(t.audit().map((a) => [a.tool, a.task, a.outcome]), [['send', 'nc-1', 'requested'], ['send', 'nc-1', 'done']]);
     assert.equal(t.audit()[0]?.detail, 'dopisz test');
     assert.deepEqual(t.notified, ['czat zlecił: send NC-1']);
@@ -379,20 +382,32 @@ describe('mcp: the write tools', () => {
     assert.ok(!git.some((c) => /--force|\bpush\b|\bmerge\b|\brebase\b|branch -[dD]/.test(c)));
   });
 
-  it('new: the first call only summarizes, the second with confirm: true starts the task', async () => {
+  it('new: the first call only summarizes; confirm never starts in the server – it registers the start for the watcher', async () => {
     const t = setup('n1', 'mcp: {allow: [new]}\n');
     const repo = scratch.sub('n1/app');
     const spec = `---\ntask: NC-9\nagent: claude\nrepos:\n  - path: ${repo}\n    worktree: ${repo}-wt\n---\nZrób NC-9.\n`;
     const preview = await t.call('new', { spec });
-    assert.match(preview.text, /^NC-9 {2}claude\/default\/high\n {2}worktree: .*app-wt[\s\S]*Not started yet\. Show this to the user and ask; if they agree, call new again with the same spec and confirm: true\.$/);
+    assert.match(preview.text, /^NC-9 {2}claude\/default\/high\n {2}worktree: .*app-wt[\s\S]*Not started yet\. Show this to the user and ask; if they agree, call new again with the same spec and confirm: true\.\npreview_ttl_s: [^\n]+\npreview_token: [0-9a-f-]+$/);
+    assert.match(preview.text, /WARNING: the watcher is not running .* confirm will be refused/);
     assert.deepEqual(t.runner.commands.filter((c) => !c.startsWith('write ') && !c.startsWith('append ')), [], 'nothing ran');
     assert.deepEqual(t.notified, []);
     assert.deepEqual(t.audit().map((a) => a.outcome), ['requested', 'preview']);
+    // Without a running watcher the confirm is refused and nothing is registered.
+    const refused = await t.call('new', { spec, confirm: true });
+    assert.equal(refused.isError, true);
+    assert.match(refused.text, /every start goes through the watcher .* it is not running[\s\S]*agentctl watch --tmux/);
+    assert.deepEqual(readQueue(t.config), []);
+    // With the watcher alive the confirm returns at once with the registration; checkout and window are the watcher's.
+    fakeWatcher(t.config);
+    const again = await t.call('new', { spec });
+    assert.match(again.text, /Start: asynchronous/);
     const done = await t.call('new', { spec, confirm: true });
-    assert.match(done.text, /^Started: NC-9 \(window nc-9, claude default\/high\)/);
-    assert.ok(t.runner.commands.some((c) => c.startsWith('git') && c.includes('worktree add')));
-    assert.ok(t.runner.commands.some((c) => c.includes('new-window') || c.includes('new-session')));
-    assert.ok(readTaskRecord(t.config, 'nc-9'));
+    assert.match(done.text, /^Registered: NC-9 \(claude default\/high\)/);
+    assert.ok(!t.runner.commands.some((c) => c.startsWith('git') && c.includes('worktree add')), 'no checkout in the server');
+    assert.ok(!t.runner.commands.some((c) => c.includes('new-window') || c.includes('new-session')), 'no window in the server');
+    assert.equal(readTaskRecord(t.config, 'nc-9'), undefined, 'no TASK.md yet: the watcher has not begun');
+    const [entry] = readQueue(t.config);
+    assert.deepEqual([entry?.task, entry?.status, entry?.direct], ['NC-9', 'queued', true]);
     assert.deepEqual(t.notified, ['czat zlecił: new NC-9']);
   });
 
@@ -404,7 +419,7 @@ describe('mcp: the write tools', () => {
     const noAgent = await t.call('new', { spec: `---\ntask: nc-9\nrepos:\n  - path: ${repo}\n---\nx\n`, confirm: true });
     assert.equal(noAgent.isError, true);
     const withSetup = await t.call('new', { spec: `---\ntask: NC-9\nagent: claude\nsetup: ["touch /tmp/x"]\nrepos:\n  - path: ${repo}\n---\nx\n`, confirm: true });
-    assert.match(withSetup.text, /NC-9: "setup" runs shell commands and is not accepted from the chat/);
+    assert.match(withSetup.text, /Confirmation refused: missing preview/);
     assert.ok(!t.runner.commands.some((c) => c.startsWith('sh ') || c.includes('touch')), 'no shell ran');
     assert.ok(!t.runner.commands.some((c) => c.startsWith('git')));
     assert.deepEqual(t.notified, []);
@@ -412,11 +427,11 @@ describe('mcp: the write tools', () => {
 
   it('move: the first call describes it, confirm: true hands the task over', async () => {
     const t = setup('m1', 'mcp: {allow: [move]}\n');
-    t.tmux.newWindowScreen = '› Ask Codex to do anything\n';
+    t.tmux.newWindowScreen = composerFixture('› Ask Codex to do anything\n');
     seedTask(t.config, 'NC-1', { repos: [{ path: scratch.sub('m1/app'), worktree: scratch.sub('m1/app-wt') }], requested: { agent: 'claude', model: 'opus', effort: 'high' } });
     t.tmux.add('nc-1', "  ⎿  You've hit your session limit · resets 3pm\n❯ ");
     const preview = await t.call('move', { task: 'NC-1' });
-    assert.match(preview.text, /^Move NC-1 \(claude opus\/high\) -> NC-1-2 \(codex .*\)[\s\S]*Not moved yet\. Ask the user, then call move again with confirm: true\.$/);
+    assert.match(preview.text, /^Move NC-1 \(claude opus\/high\) -> NC-1-2 \(codex .*\)[\s\S]*Not moved yet\. Ask the user, then call move again with confirm: true\.\npreview_ttl_s: [^\n]+\npreview_token: [0-9a-f-]+$/);
     assert.ok(!t.tmux.windows.some((w) => w.name === 'nc-1-2'));
     assert.deepEqual(t.notified, []);
     const done = await t.call('move', { task: 'NC-1', confirm: true });
@@ -430,6 +445,7 @@ describe('mcp: the write tools', () => {
     const t = setup('x1', 'mcp: {allow: [send, new, interrupt, close, move], allow_rm_worktree: true}\n');
     const repo = scratch.sub('x1/app');
     seedTask(t.config, 'NC-1', { repos: [{ path: repo, worktree: `${repo}-wt` }] });
+    fs.mkdirSync(`${repo}-wt`, { recursive: true }); // the worktree exists, so close really removes it
     t.tmux.add('nc-1', IDLE);
     await t.call('send', { task: 'NC-1', text: 'git push --force origin main; rm -rf /' });
     await t.call('interrupt', { task: 'NC-1' });

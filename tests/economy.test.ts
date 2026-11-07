@@ -74,7 +74,7 @@ it('economy: concise reads never duplicate JSON; explicit format JSON contains f
     assert.doesNotThrow(() => JSON.parse(b.text), b.text);
     assert.doesNotMatch(a.text, /"tasks":|"providers":|"summary":/);
   }
-  assert.match((await f.call('status')).text, /NC-1 claude\/opus\/high waiting .*cohort=n\/d report=brak/);
+  assert.match((await f.call('status')).text, /NC-1 claude\/opus\/high waiting .*cohort=n\/d report=no/);
 });
 
 it('economy: independent MCP clients and conservative migration preserve events', async () => {

@@ -1,5 +1,8 @@
+import { refreshClaudePlan } from './providers/claude-probe.ts';
+import { get as providerValue } from './providers/registry.ts';
+import type { ProviderValues } from './providers/registry.ts';
 import { parseAge } from './archive.ts';
-import { AGENT_NAMES } from './config.ts';
+import { provider as adapter, activeProviders } from './providers/registry.ts';
 import type { AgentName } from './config.ts';
 import type { Context } from './context.ts';
 import { collectStatus } from './status.ts';
@@ -37,6 +40,8 @@ export interface TaskUsageRow {
   fresh: number;
   /** null: no session log found. */
   known: boolean;
+  observed?: TaskUsage['observed'];
+  warning?: string;
 }
 
 export interface CohortUsage {
@@ -52,7 +57,7 @@ export interface UsageReport {
   since: string;
   sinceDay: string;
   today: string;
-  plans: Record<AgentName, PlanState>;
+  plans: ProviderValues<PlanState>;
   providers: Record<AgentName, ProviderUsage>;
   tasks: TaskUsageRow[];
   cohorts: CohortUsage[];
@@ -70,6 +75,7 @@ export interface UsageOptions {
 
 export async function collectUsage(ctx: Context, opts: UsageOptions = {}): Promise<UsageReport> {
   const { config } = ctx;
+  const probeNote = activeProviders(config).includes('claude') ? await refreshClaudePlan(ctx) : null;
   const now = ctx.runner.now();
   const since = opts.since ?? '7d';
   const sinceDay = localDay(now - parseAge(since));
@@ -79,10 +85,11 @@ export async function collectUsage(ctx: Context, opts: UsageOptions = {}): Promi
   const usage = collectTaskUsage(config, reader, records, now);
   const rows = new Map((opts.rows ?? (await collectStatus(ctx, { progress: false, archived: true }))).map((r) => [r.task, r] as const));
   const plans = readPlans(config, reader, now);
+  if (probeNote && plans.claude) plans.claude.note = [plans.claude.note, probeNote].filter(Boolean).join('; ');
   reader.save();
 
   const providers = {} as Record<AgentName, ProviderUsage>;
-  for (const p of AGENT_NAMES) providers[p] = { provider: p, today: zeroTokens(), window: zeroTokens(), byModel: {}, byDay: {} };
+  for (const p of activeProviders(config)) providers[p] = { provider: p, today: zeroTokens(), window: zeroTokens(), byModel: {}, byDay: {} };
   const wanted = opts.cohort === undefined ? undefined : cohortKey(opts.cohort);
   const tasks: TaskUsageRow[] = [];
   const cohorts = new Map<string, CohortUsage>();
@@ -107,7 +114,7 @@ export async function collectUsage(ctx: Context, opts: UsageOptions = {}): Promi
     // A task that neither worked in the window nor holds a window of its own is not listed.
     const active = row ? ACTIVE.has(row.state) && !row.closed && !row.cancelled && row.window === 'alive' : false;
     if (known && freshTokens(inWindow) === 0 && !active) continue;
-    tasks.push({ task: record.task, agent: record.agent, model: record.model, cohort: record.cohort ?? null, state, active, sessions: u.sessions, tokens: inWindow, fresh: freshTokens(inWindow), known });
+    tasks.push({ task: record.task, agent: record.agent, model: record.model, cohort: record.cohort ?? null, state, active, sessions: u.sessions, tokens: inWindow, fresh: freshTokens(inWindow), known, ...(u.observed ? { observed: u.observed } : {}), ...(u.warning ? { warning: u.warning } : {}) });
     if (record.cohort !== undefined && known) {
       const c = cohorts.get(cohortKey(record.cohort)) ?? { cohort: record.cohort, tasks: 0, tokens: zeroTokens(), fresh: 0 };
       c.tasks++;
@@ -148,12 +155,12 @@ export function table(header: string[], body: string[][]): string[] {
 export function renderUsage(report: UsageReport): string[] {
   const lines: string[] = [];
   const n = report.now;
-  const hasWeek = AGENT_NAMES.some((p) => report.plans[p].windows.some((w) => w.kind === 'week'));
+  const hasWeek = (Object.keys(report.plans) as AgentName[]).some((p) => providerValue(report.plans, p).windows.some((w) => w.kind === 'week'));
   const header = ['PROVIDER', '5H LIMIT', ...(hasWeek ? ['WEEK LIMIT'] : []), 'TODAY', report.since.toUpperCase()];
-  const body = AGENT_NAMES.map((p) => [p, windowText(report.plans[p], 'session', n), ...(hasWeek ? [windowText(report.plans[p], 'week', n)] : []), fresh(report.providers[p].today), fresh(report.providers[p].window)]);
+  const body = (Object.keys(report.plans) as AgentName[]).map((p) => [p, windowText(providerValue(report.plans, p), 'session', n), ...(hasWeek ? [windowText(providerValue(report.plans, p), 'week', n)] : []), fresh(report.providers[p].today), fresh(report.providers[p].window)]);
   lines.push(...table(header, body));
-  for (const p of AGENT_NAMES) {
-    const s = report.plans[p];
+  for (const p of (Object.keys(report.plans) as AgentName[])) {
+    const s = providerValue(report.plans, p);
     const others = s.windows.filter((w) => w.kind === 'other');
     if (others.length > 0) lines.push(`${p}: ${others.map((w) => `${w.label} ${Math.round(w.usedPercent)}%${w.resetsAt === null ? '' : ` ↻ ${formatReset(w.resetsAt, n)}`}`).join(' · ')}`);
     if (!s.available) lines.push(`${p}: limit n/d – ${s.note}`);
@@ -161,6 +168,7 @@ export function renderUsage(report: UsageReport): string[] {
   }
   lines.push('Tokens = input + output + cache writes of the tasks agentctl started (cache reads are not counted; see "agentctl usage --json").');
 
+  for (const t of report.tasks) if (t.warning) lines.push(`Warning ${t.task}: ${t.warning}; observed ${t.observed?.model}/${t.observed?.effort}`);
   const active = report.tasks.filter((t) => t.active);
   if (active.length > 0) {
     lines.push('', 'Active tasks:');
@@ -175,7 +183,7 @@ export function renderUsage(report: UsageReport): string[] {
     lines.push('', 'Cohorts:');
     lines.push(...table(['COHORT', 'TASKS', 'TOKENS'], report.cohorts.map((c) => [c.cohort, String(c.tasks), formatTokens(c.fresh)])));
   }
-  const models = AGENT_NAMES.flatMap((p) => Object.entries(report.providers[p].byModel).map(([m, t]) => [p, m, formatTokens(freshTokens(t)), formatTokens(t.cacheRead)]));
+  const models = (Object.keys(report.plans) as AgentName[]).flatMap((p) => Object.entries(report.providers[p].byModel).map(([m, t]) => [p, m, formatTokens(freshTokens(t)), formatTokens(t.cacheRead)]));
   if (models.length > 0) {
     lines.push('', 'By model:');
     lines.push(...table(['PROVIDER', 'MODEL', 'TOKENS', 'CACHE READ'], models));
@@ -186,7 +194,7 @@ export function renderUsage(report: UsageReport): string[] {
 /** Markdown for `usage --clip`. */
 export function usageMarkdown(report: UsageReport): string {
   const lines = ['| provider | 5h limit | week limit | today | ' + report.since + ' |', '|---|---|---|---|---|'];
-  for (const p of AGENT_NAMES) lines.push(`| ${p} | ${windowText(report.plans[p], 'session', report.now)} | ${windowText(report.plans[p], 'week', report.now)} | ${fresh(report.providers[p].today)} | ${fresh(report.providers[p].window)} |`);
+  for (const p of (Object.keys(report.plans) as AgentName[])) lines.push(`| ${p} | ${windowText(providerValue(report.plans, p), 'session', report.now)} | ${windowText(providerValue(report.plans, p), 'week', report.now)} | ${fresh(report.providers[p].today)} | ${fresh(report.providers[p].window)} |`);
   if (report.tasks.length > 0) {
     lines.push('', '| task | agent/model | state | tokens |', '|---|---|---|---|');
     for (const t of report.tasks) lines.push(`| ${t.task} | ${t.agent}/${t.model} | ${t.state} | ${t.known ? formatTokens(t.fresh) : 'n/d'} |`);
@@ -199,7 +207,6 @@ export function usageMarkdown(report: UsageReport): string {
 }
 
 /** "C 62% · X 18%" for the tmux status line: the highest window of each provider, a provider with no reading left out. */
-export function planStatusLine(plans: Record<AgentName, PlanState>): string {
-  const letter: Record<AgentName, string> = { claude: 'C', codex: 'X' };
-  return AGENT_NAMES.filter((p) => plans[p].available && plans[p].maxPercent !== null).map((p) => `${letter[p]} ${Math.round(plans[p].maxPercent as number)}%`).join(' · ');
+export function planStatusLine(plans: ProviderValues<PlanState>): string {
+  return (Object.keys(plans) as AgentName[]).filter(p => providerValue(plans, p).available && providerValue(plans, p).maxPercent !== null).map(p => `${adapter(p).letter} ${Math.round(providerValue(plans, p).maxPercent as number)}%`).join(' · ');
 }

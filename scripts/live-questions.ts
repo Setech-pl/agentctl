@@ -63,11 +63,11 @@ case "$1" in
  --version) echo 'codex-cli 0.166.0 (fake)'; exit 0;;
  --help) echo '-c, --config <key=value>'; exit 0;;
 esac
-printf '› Ask Codex to do anything\\n'
+printf '› Ask Codex to do anything\\n  GPT-6.1-Sol low · ~/fake\\n  ? for shortcuts\\n'
 while IFS= read -r line; do
  printf '\\033[2J\\033[H'
  case "$line" in
-  *ANSWER*) printf '› Ask Codex to do anything\\n';;
+  *ANSWER*) printf '› Ask Codex to do anything\\n  GPT-6.1-Sol low · ~/fake\\n  ? for shortcuts\\n';;
   *) printf 'Working (esc to interrupt)\\nQueued follow-up inputs\\n? 2 questions\\n  ⇧↑ to answer\\n';;
  esac
 done
@@ -119,14 +119,14 @@ case "$1" in
  --version) echo 'codex-cli 0.166.0 (fake)'; exit 0;;
  --help) echo '-c, --config <key=value>'; exit 0;;
 esac
-printf '› Ask Codex to do anything\\n'
+printf '› Ask Codex to do anything\\n  GPT-6.1-Sol low · ~/fake\\n  ? for shortcuts\\n'
 while IFS= read -r line; do
  printf '\\033[2J\\033[H'
  case "$line" in
   *OPTIN*) printf 'Czy ujawnić opt-in hunter2-private-question?\\n  1. Yes\\n  2. No\\n  Press enter to confirm or esc to cancel\\n';;
   *EXPANDED*) printf 'Czy ujawnić hunter2-private-question?\\n  1. Yes\\n  2. No\\n  Press enter to confirm or esc to cancel\\n';;
   *COLLAPSED*) printf 'Working (esc to interrupt)\\n? 2 questions\\n  ⇧↑ to answer\\n';;
-  *) printf '● got: prompt accepted\\n› Ask Codex to do anything\\n';;
+  *) printf '● got: prompt accepted\\n› Ask Codex to do anything\\n  GPT-6.1-Sol low · ~/fake\\n  ? for shortcuts\\n';;
  esac
 done
 `);

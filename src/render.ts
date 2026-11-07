@@ -10,7 +10,7 @@ export function renderStatusTable(rows: StatusRow[], maxLast = 60, opts: { cohor
   const cohort = opts.cohort !== false && rows.some((r) => r.cohort !== null);
   // TOKENS is there when some task has a session log to count (a task without one says n/d).
   const tokens = rows.some((r) => Boolean(r.tokens));
-  const header = ['TASK', ...(cohort ? ['COHORT'] : []), 'AGENT/MODEL/EFFORT', 'STATE', 'WINDOW', 'STARTED', 'DURATION', ...(tokens ? ['TOKENS'] : []), 'PROGRESS', ...(collide ? ['COLLIDE'] : []), 'REPORT', 'LAST LINE'];
+  const header = ['TASK', ...(cohort ? ['COHORT'] : []), 'AGENT/MODEL/EFFORT', 'STATE', 'WINDOW', 'STARTED', 'DURATION', ...(tokens ? ['TOKENS'] : []), 'PROGRESS', ...(collide ? ['COLLIDE'] : []), 'REPORT', 'DECISIONS', 'ACTIONS', 'MESSAGES', 'LAST LINE'];
   const body = rows.map((r) => [
     r.archived ? `${r.task} (archived)` : r.cancelled ? `${r.task} (cancelled)` : r.closed ? `${r.task} (closed)` : r.hidden ? `${r.task} (hidden)` : r.task,
     ...(cohort ? [r.cohort ?? '-'] : []),
@@ -22,7 +22,10 @@ export function renderStatusTable(rows: StatusRow[], maxLast = 60, opts: { cohor
     ...(tokens ? [r.tokens ? formatTokens(r.tokens.fresh) : 'n/d'] : []),
     r.progress?.text ?? '-',
     ...(collide ? [collideText(r.collide) || '-'] : []),
-    r.report,
+    r.report === 'yes' ? 'yes' : r.reportCandidate ? 'candidate' : 'no',
+    String(r.decisionsCount ?? 0),
+    String(r.actionsCount ?? 0),
+    String(r.promptQueue?.length ?? 0),
     r.lastLine.length > maxLast ? `${r.lastLine.slice(0, maxLast - 1)}…` : r.lastLine,
   ]);
   const widths = header.map((h, i) => Math.max(h.length, ...body.map((row) => (row[i] as string).length)));

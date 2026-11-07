@@ -1,3 +1,4 @@
+import { providerMcpCases } from './provider-live-cases.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -13,7 +14,7 @@ const cache = defaultCacheRoot('agentctl-economy');
 const checks: string[] = [];
 const check = (name: string, ok: unknown) => { assert.ok(ok, name); checks.push(name); console.log(`PASS ${name}`); };
 await withHarness({ name: 'economy', cacheRoot: cache, config: 'mcp: {max_response_kb: 256}\nwatch: {interval: 1}\noverload: {retry_after: 1, max_retries: 2}\ncapacity: {codex_refresh: false}\n' }, async h => {
-  const config = loadGlobalConfig(h.agentctlHome);
+  const config = loadGlobalConfig(h.agentctlHome); fs.mkdirSync(config.cache, { recursive: true });
   const seed = (task: string, report: string, extra: Partial<TaskRecord> = {}) => {
     const record: TaskRecord = { task, window: task.toLowerCase(), session: h.session, agent: 'claude', model: 'sonnet', effort: 'medium', repos: [], links: [], env: {}, report, started: new Date(Date.now() - 60000).toISOString(), requested: { agent: 'claude', model: 'sonnet', effort: 'medium' }, ...extra };
     const dir = path.join(config.stateDir, record.window); fs.mkdirSync(dir, { recursive: true });
@@ -21,11 +22,11 @@ await withHarness({ name: 'economy', cacheRoot: cache, config: 'mcp: {max_respon
   };
   for (let i = 1; i <= 6; i++) {
     fs.appendFileSync(path.join(h.agentctlHome, 'history.jsonl'), JSON.stringify({ v: 1, event: 'report', at: new Date().toISOString(), task: `NC-${i}`, reportAt: new Date().toISOString(), result: null }) + '\n');
-    const report = path.join(h.root, `NC-${i}.md`); seed(`NC-${i}`, report);
-    fs.writeFileSync(report, `Werdykt: PASS\nSHA: abc123; branch: economy\n## Summary\nResult ${i}\n## Evidence\n${'x'.repeat(20000)}\n<!-- agentctl:report-end -->`);
+    const report = path.join(config.cache, `NC-${i}.md`); seed(`NC-${i}`, report);
+    fs.writeFileSync(report, `Werdykt: PASS\nSHA: abc1234; branch: economy\n## Summary\nResult ${i}\n## Evidence\n${'x'.repeat(20000)}\n<!-- agentctl:report-end -->`);
   }
   fs.writeFileSync(path.join(h.agentctlHome, 'journal.jsonl'), JSON.stringify({ at: new Date(Date.now() - 5000).toISOString(), kind: 'report-ready', task: 'NC-1', text: 'fixture ready' }) + '\n');
-  seed('OVER-1', path.join(h.root, 'OVER-1.md'));
+  seed('OVER-1', path.join(config.cache, 'OVER-1.md'));
   const control = path.join(h.root, 'screen-mode'); fs.writeFileSync(control, 'draft');
   const fake = path.join(h.root, 'fake-pane.mjs');
   fs.writeFileSync(fake, `import fs from 'node:fs'; let mode='',draft=''; const draw=()=>process.stdout.write('\\x1b[2J\\x1b[H'+(mode==='busy'?'Working (esc to interrupt)\\n':mode==='background'?'3 monitors still running\\n':'⏺ Request failed.\\n  ⎿ API Error: 529 Overloaded\\n')+'────────────────\\n❯ '+(mode==='draft'?'unsent draft':draft)); const render=()=>{const m=fs.readFileSync(${JSON.stringify(control)},'utf8');if(m!==mode){mode=m;draft='';draw();}};process.stdin.setRawMode(true);process.stdin.resume();process.stdin.on('data',b=>{const s=b.toString().replace(/\\x1b\\[20[01]~/g,'');if(/[\\r\\n]/.test(s)){draft='';draw();}else{draft+=s;draw();}});setInterval(render,100);render();`);
@@ -63,7 +64,7 @@ await withHarness({ name: 'economy', cacheRoot: cache, config: 'mcp: {max_respon
     check('W4: summary receipt leaves all six reports unread', receipts.filter((r: { task: string }) => r.task.startsWith('NC-')).every((r: { reportPulled: boolean; summary_delivered: string }) => !r.reportPulled && r.summary_delivered));
     const full = await call(clients[0]!, 'pull_ready', { mode: 'full', all: true });
     check('six full reports exceed 120KB; summaries under 16KB', Buffer.byteLength(full) > 120000 && Buffer.byteLength(summary) < 16000);
-    check('summary includes path bytes verdict SHA branch and six decisions', /bytes:/.test(summary) && /path:/.test(summary) && /Werdykt: PASS/.test(summary) && /abc123/.test(summary) && summary.includes('Result 6'));
+    check('summary includes path bytes verdict SHA branch and six decisions', /bytes:/.test(summary) && /path:/.test(summary) && /Werdykt: PASS/.test(summary) && /abc1234/.test(summary) && summary.includes('Result 6'));
     const section = await call(clients[0]!, 'get_report', { task: 'NC-1', section: 'Summary', offset: 1, limit: 1 });
     check('section and pagination return only requested lines', section.includes('Result 1') && !section.includes('Evidence'));
     check('events remind about unmarked tasks after pull', (await call(clients[0]!, 'events_since')).includes('bez oceny'));
@@ -96,15 +97,15 @@ await withHarness({ name: 'economy', cacheRoot: cache, config: 'mcp: {max_respon
     check('W6: owner CLI still reads original queued values', h.agentctl(['queue', 'show', 'Q-SECRET']).stdout.includes('LIVE_SECRET'));
 
   } finally { for (const c of clients) await c.close(); }
-  const candidateDir = path.join(h.root, 'candidates'); fs.mkdirSync(candidateDir);
+  const candidateDir = path.join(config.cache, 'candidates'); fs.mkdirSync(candidateDir);
   for (const name of ['CLAUDE.md', 'README.md', 'integration-12.md']) fs.writeFileSync(path.join(candidateDir, name), name === 'integration-12.md' ? '# Missing verdict' : 'Werdykt: PASS');
-  const canonical = path.join(h.root, 'canonical-integration.md');
+  const canonical = path.join(config.cache, 'canonical-integration.md');
   seed('integration-12', canonical, { reportAlt: [path.join(candidateDir, '*.md')], cohort: 'candidate-fixture' });
   const watcher = h.spawnAgentctl(['watch'], path.join(h.root, 'candidate-watch.log'));
-  const rows = () => JSON.parse(h.agentctl(['status', '--all', '--json']).stdout) as { task: string; state: string; reportCandidate?: string }[];
+  const rows = () => JSON.parse(h.agentctl(['status', '--all', '--json']).stdout) as { task: string; state: string; tmuxLost?: boolean; reportCandidate?: string }[];
   let end = Date.now() + 10000;
   while (!rows().find(r => r.task === 'integration-12')?.reportCandidate && Date.now() < end) await delay(200);
-  check('live only configured ID file is a candidate flag, canonical absent', !fs.existsSync(canonical) && rows().some(r => r.task === 'integration-12' && r.state === 'dead' && r.reportCandidate));
+  check('live only configured ID file is a candidate flag, canonical absent', !fs.existsSync(canonical) && rows().some(r => r.task === 'integration-12' && r.state === 'needs-attention' && r.tmuxLost && r.reportCandidate));
   check('candidate cohort never announces done', !fs.readFileSync(path.join(h.agentctlHome, 'journal.jsonl'), 'utf8').split('\n').some(l => l.includes('"kind":"cohort-done"') && l.includes('candidate-fixture')));
   fs.writeFileSync(path.join(candidateDir, 'integration-12-good.md'), 'Werdykt: PASS\n## Summary\nConfirmed\n<!-- agentctl:report-end -->');
   end = Date.now() + 10000;
@@ -134,7 +135,7 @@ await withHarness({ name: 'economy', cacheRoot: cache, config: 'mcp: {max_respon
   const refusal = h.agentctl(['new', missing, '--no-agent', '-y']);
   check('live missing worktree without fallback has clear error', refusal.code !== 0 && /no repository "back"/.test(refusal.stderr));
 
-  const attemptReport = path.join(h.root, 'RESTART-1.md');
+  const attemptReport = path.join(config.cache, 'RESTART-1.md');
   fs.writeFileSync(attemptReport, 'Werdykt: PASS\n<!-- agentctl:report-end -->');
   seed('RESTART-1', attemptReport, { repos: [{ path: path.join(h.root, 'front'), worktree: path.join(h.root, 'TWO-front') }] });
   const resume = h.agentctl(['resume', 'RESTART-1', '-y']);
@@ -150,4 +151,5 @@ await withHarness({ name: 'economy', cacheRoot: cache, config: 'mcp: {max_respon
   check('W8: real partial registered checkout is refused before another agent starts', retried.code !== 0 && /incomplete|modified/.test(retried.stderr));
 
 });
+for (const name of await providerMcpCases(cache)) check(name, true);
 fs.writeFileSync(path.join(cache, 'live-economy-results.json'), JSON.stringify({ passed: checks.length, failed: 0, checks }, null, 2));

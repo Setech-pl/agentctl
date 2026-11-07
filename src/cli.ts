@@ -1,4 +1,14 @@
+import { attachHint, tmuxCommand } from './core/tmux-socket.ts';
+import { exportDataset, validateDatasetOptions } from './core/dataset.ts';
+import type { DatasetOptions } from './core/dataset.ts';
+import { DEFAULT_PROVIDERS } from './core/providers/types.ts';
+import type { AgentName } from './core/config.ts';
+import { provider, PROVIDER_IDS, activeProviders } from './core/providers/registry.ts';
+import { reportPathWarnings } from './core/report-path.ts';
+import { planMark, markTasks } from './core/mark.ts';
+import { aggregateOutputs } from './core/outputs.ts';
 import { stableNodePath } from './core/mcp-install.ts';
+import { packageVersion } from './core/version.ts';
 import { findEntry } from './core/queue.ts';
 import { collectDisk, diskLine, confirmDiskStart } from './core/disk.ts';
 import { collectCapacity, capacitySnapshot, renderCapacity, snapshotLines } from './core/capacity.ts';
@@ -9,6 +19,7 @@ import { createInterface } from 'node:readline/promises';
 import { Argument, Command, CommanderError, Option } from 'commander';
 import { cancelTasks, planCancel } from './core/cancel.ts';
 import { touchCohort } from './core/cohort.ts';
+import { applyCohortArchive, planCohortArchive } from './core/cohort.ts';
 import { cohortEntries, cohortRows, findCohort, listCohorts, openCohortTasks, renderCohortList, setCohortOf, setNote, summarizeCohorts } from './core/cohort.ts';
 import { closeTasks, planClose } from './core/close.ts';
 import { confirmAction, readClipboard, specFromClipboard, writeClipboard } from './core/clipboard.ts';
@@ -36,7 +47,7 @@ import { migrateLegacyState } from './core/taskstore.ts';
 import { newTasks } from './core/new.ts';
 import { commitQueueAdd, describeQueue, isPaused, moveToFront, planQueueAdd, readQueue, queueStatusLines, removeFromQueue, renderQueueList, retryEntry, setPaused, unblockEntry, waiting } from './core/queue.ts';
 import { liveWindows } from './core/plan.ts';
-import { applyGc, planGc, renderGc } from './core/gc.ts';
+import { applyGc, planGc, renderGc, gcView } from './core/gc.ts';
 import { collectEvents, eventsMarkdown, renderEvents } from './core/chat-events.ts';
 import { planNtfySetup, renderQr, setupInstructions, subscriptionLink } from './core/ntfy-setup.ts';
 import { writeConfigText } from './core/config-edit.ts';
@@ -48,7 +59,9 @@ import { collectOverlaps, renderOverlaps, touchWarnings } from './core/collision
 import type { NewOptions, NewResult } from './core/new.ts';
 import { pullReady, pullTask } from './core/pull.ts';
 import { reportInfo, shortPath } from './core/report-detect.ts';
-import { sendPrompts } from './core/send.ts';
+import { sendPrompts, submitDrafts } from './core/send.ts';
+import { resolveRunningTask } from './core/resolve.ts';
+import { promptQueueView, withdrawPrompt } from './core/prompt-queue.ts';
 import { collectStatus, reportStatus, shownRows, statusMarkdown } from './core/status.ts';
 import { summarizeSpecs } from './core/summary.ts';
 import { DesktopNotifier, NOTIFIER_MEMORY_MS, notifierOptionsFor } from './core/notify.ts';
@@ -59,7 +72,7 @@ import { MANAGER_STATE_TEXT, MANAGER_WINDOW, managerAddress, managerAdvice, star
 import { BOARD_WINDOW, ensureWindow } from './core/windows.ts';
 import { interruptTask } from './core/interrupt.ts';
 import { handleTap } from './core/usage-tap.ts';
-import { computeStats, logMarkdown, markTask, RESULTS, renderLog, renderStats, selectHistory, statsMarkdown } from './core/history.ts';
+import { computeStats, logMarkdown, markTask, parseResult, RESULTS, renderLog, renderStats, selectHistory, statsMarkdown } from './core/history.ts';
 import type { Result } from './core/history.ts';
 import { usageSummaryLines } from './core/usage-limits.ts';
 import { collectUsage, renderUsage, usageMarkdown } from './core/usage-report.ts';
@@ -228,19 +241,14 @@ const realOrSelf = (p: string): string => {
   }
 };
 
-function packageVersion(): string {
-  try {
-    const pkg = JSON.parse(fs.readFileSync(new URL(import.meta.url.endsWith('.ts') ? '../package.json' : '../../package.json', import.meta.url), 'utf8')) as { version: string };
-    return pkg.version;
-  } catch {
-    return '0.0.0';
-  }
-}
-
 /** Run the CLI; returns the process exit code. */
 export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promise<number> {
   const line = (text: string): void => deps.stdout(`${text}\n`);
   let exitCode = 0;
+  let cliProviders: readonly import('./core/config.ts').AgentName[] = DEFAULT_PROVIDERS;
+  if (!argv.includes('--version')) {
+    try { cliProviders = activeProviders(deps.loadConfig()); } catch { /* the command reports invalid config when needed */ }
+  }
 
   /** Spec text from the clipboard (`--clip`), a file, or stdin. */
   const readSpecSource = async (file: string | undefined, clip: boolean | undefined): Promise<string> => {
@@ -325,7 +333,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
   const startWatchWindow = async (ctx: Context, statusLine: boolean): Promise<'created' | 'exists'> => {
     const result = await ensureWatchWindow(ctx, deps.watchCommand(), process.cwd());
     if (result === 'exists') line(`Window ${ctx.config.session}:${WATCH_WINDOW} already exists, left alone.`);
-    else line(`${result === 'restarted' ? 'Started again (its process had ended)' : 'Started'} the watcher in window ${ctx.config.session}:${WATCH_WINDOW}${result === 'session-created' ? ' (session created)' : ''}. Attach: tmux attach -t ${ctx.config.session}. If it fails to start, the window stays with the error; ${startLogPath(ctx.config, 'watch')} has it too.`);
+    else line(`${result === 'restarted' ? 'Started again (its process had ended)' : 'Started'} the watcher in window ${ctx.config.session}:${WATCH_WINDOW}${result === 'session-created' ? ' (session created)' : ''}. Attach: ${attachHint(ctx.config)}. If it fails to start, the window stays with the error; ${startLogPath(ctx.config, 'watch')} has it too.`);
     for (const l of describeNavigation(await applyNavigation(ctx), ctx.config.session)) line(l);
     if (statusLine && ctx.config.watch.statusLine) {
       const shown = await applyStatusLine(ctx, deps.statusLineCommand?.() ?? 'agentctl status --tmux-line');
@@ -423,7 +431,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('--dry-run', 'print the commands that would run, execute nothing')
     .option('--json', 'machine-readable results and capacity snapshot')
     .option('--reuse', 'use worktrees that already exist instead of failing')
-    .addOption(new Option('--agent <agent>', 'run every spec on this provider, translated through the equivalents table').choices(['claude', 'codex']))
+    .addOption(new Option('--agent <agent>', 'run every spec on this provider, translated through the equivalents table').choices([...cliProviders]))
     .option('--no-switch', 'never offer to move a task to the other provider when its limit is full')
     .option('--no-agent', 'only create the worktree, run setup and links; no TASK.md, window or agent')
     .option('--no-wait-trust', 'stop at the folder-trust dialog instead of waiting for you to confirm it (the old behaviour)')
@@ -431,7 +439,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('-y, --yes', 'with --clip: do not ask; also skips the question after a "touches" warning')
     .option('--cohort <name>', 'put every task of the file in this cohort (overrides "cohort:" in a spec); without it a task has a cohort only if its spec names one')
     .action(
-      guarded(async (file: string | undefined, opts: { clip?: boolean; yes?: boolean; dryRun?: boolean; reuse?: boolean; agent?: 'claude' | 'codex' | false; switch?: boolean; waitTrust?: boolean; cohort?: string; json?: boolean }) => {
+      guarded(async (file: string | undefined, opts: { clip?: boolean; yes?: boolean; dryRun?: boolean; reuse?: boolean; agent?: AgentName | false; switch?: boolean; waitTrust?: boolean; cohort?: string; json?: boolean }) => {
         const ctx = contextFor(Boolean(opts.dryRun), { silent: Boolean(opts.json) });
         if (!opts.dryRun && !(await confirmDiskStart(ctx, Boolean(opts.yes)))) return;
         const source = opts.clip ? 'clipboard' : (file ?? 'stdin');
@@ -439,6 +447,8 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         applyCohortFlag(raws, opts.cohort);
         const specs = raws.map((raw) => resolveSpec(raw, { config: ctx.config }));
         // The state of the plan of each provider the tasks run on, and the hint when the other one has room (it only says so: nothing is switched).
+        const pathWarnings = specs.flatMap(spec => reportPathWarnings(ctx.config, spec).map(warning => `WARNING ${spec.task}: ${warning}`));
+        if (!opts.json) for (const warning of pathWarnings) line(warning);
         const planLines = opts.dryRun || opts.agent === false ? [] : usageSummaryLines(ctx.config, specs.map((s) => (opts.agent && !s.pin ? { ...s, agent: opts.agent } : s)), ctx.runner.now());
         if (opts.clip && !(await confirmAction(ctx, summarizeSpecs(specs, planLines), 'Start?', Boolean(opts.yes) || Boolean(opts.dryRun)))) return;
         // Without the summary of --clip: only what there is to say (a plan that is n/d is not worth a line before every start).
@@ -485,12 +495,12 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .description('Put the tasks of a spec file in the queue: they start by themselves (while "agentctl watch" runs) when a window of their provider is free. Shows a summary and asks y/N first.')
     .argument('[file]', 'spec file, or "-" for stdin')
     .option('--clip', 'read the spec from the clipboard')
-    .addOption(new Option('--agent <agent>', 'run every spec on this provider, translated through the equivalents table (the queue never switches provider by itself)').choices(['claude', 'codex']))
+    .addOption(new Option('--agent <agent>', 'run every spec on this provider, translated through the equivalents table (the queue never switches provider by itself)').choices([...cliProviders]))
     .option('-y, --yes', 'do not ask')
     .option('--json', 'machine-readable queued entries and capacity snapshot')
     .option('--cohort <name>', 'put every task of the file in this cohort (overrides "cohort:" in a spec); without it a task has a cohort only if its spec names one')
     .action(
-      guarded(async (file: string | undefined, opts: { clip?: boolean; yes?: boolean; agent?: 'claude' | 'codex'; cohort?: string; json?: boolean }) => {
+      guarded(async (file: string | undefined, opts: { clip?: boolean; yes?: boolean; agent?: AgentName; cohort?: string; json?: boolean }) => {
         const ctx = contextFor(false, { silent: Boolean(opts.json) });
         const raws = splitSpecs(await readSpecSource(file, opts.clip), opts.clip ? 'clipboard' : (file ?? 'stdin'));
         applyCohortFlag(raws, opts.cohort);
@@ -581,9 +591,10 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .command('list', { isDefault: true })
     .description('The cohorts: how many tasks each has by state (active, queued, reports, closed, cancelled) and since when.')
     .option('--json', 'machine-readable output')
+    .option('--all', 'include archived cohorts')
     .action(
-      guarded(async (opts: { json?: boolean }) => {
-        const list = await summarizeCohorts(contextFor(false, { migrate: false }));
+      guarded(async (opts: { json?: boolean; all?: boolean }) => {
+        const list = (await summarizeCohorts(contextFor(false, { migrate: false }))).filter((c) => opts.all || !c.archived);
         if (opts.json) return line(JSON.stringify(list, null, 2));
         for (const l of renderCohortList(list)) line(l);
       }),
@@ -600,12 +611,14 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         const meta = findCohort(ctx.config, name);
         const { rows } = await reportStatus(ctx, { archived: true });
         const mine = cohortRows(rows, meta.name);
-        if (opts.json) return line(JSON.stringify({ cohort: meta.name, created: meta.created || null, note: meta.note ?? null, tasks: mine, queued: cohortEntries(readQueue(ctx.config), meta.name).map((e) => e.task) }, null, 2));
+        const outputs = aggregateOutputs(mine.filter(r => r.report === 'yes').map(r => ({ task: r.task, reviewOf: r.reviewOf, data: { outputs: r.outputs ?? null, outputs_valid: r.outputs_valid ?? false, outputs_partial: r.outputs_partial ?? false, outputs_errors: r.outputs_errors ?? [] } })));
+        if (opts.json) return line(JSON.stringify({ ...outputs, cohort: meta.name, created: meta.created || null, note: meta.note ?? null, tasks: mine, queued: cohortEntries(readQueue(ctx.config), meta.name).map((e) => e.task) }, null, 2));
         line(`Cohort ${meta.name}${meta.created ? ` (since ${formatLocalTime(meta.created)})` : ''}${meta.note ? `: ${meta.note}` : ''}`);
         if (mine.length > 0) for (const l of renderStatusTable(mine, 60, { cohort: false })) line(l);
         const queued = await queueStatusLines(ctx, meta.name);
         for (const l of queued) line(l);
         if (mine.length === 0 && queued.length === 0) line('No tasks in it.');
+        line(`outputs: ${JSON.stringify(outputs)}`);
       }),
     );
 
@@ -629,6 +642,25 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .action(
       guarded(async (tasks: string[]) => {
         for (const c of await setCohortOf(contextFor(false), tasks, undefined)) line(c.was === null ? `${c.task}: was in no cohort` : `${c.task}: left cohort ${c.was}`);
+      }),
+    );
+
+  cohort
+    .command('archive')
+    .description('Hide finished cohorts from the board choice and the default list; their tasks, reports and history stay. Cohorts with active or queued work are never archived. Shows the plan; --yes does it.')
+    .argument('[names...]', 'cohort names; case does not matter')
+    .option('--older-than <age>', 'every inactive cohort whose last activity is older, like 7d, 12h, 2w')
+    .option('--yes', 'archive without asking')
+    .action(
+      guarded(async (names: string[], opts: { olderThan?: string; yes?: boolean }) => {
+        if (names.length === 0 && !opts.olderThan) throw new AgentctlError('name the cohorts to archive, or give --older-than <age> (for example 7d)');
+        const ctx = contextFor(false);
+        const plan = await planCohortArchive(ctx, { ...(names.length ? { names } : {}), ...(opts.olderThan ? { olderThanMs: parseAge(opts.olderThan) } : {}) });
+        for (const a of plan.archive) line(`archive ${a.name} (${a.tasks} task${a.tasks === 1 ? '' : 's'}, last activity ${a.last ? formatLocalTime(a.last) : 'n/d'})`);
+        for (const s of plan.skipped) line(`skip ${s.name}: ${s.reason}`);
+        if (plan.archive.length === 0) return line('Nothing to archive.');
+        if (!opts.yes) return line('Not executed. Run again with --yes to archive; tasks, reports and history stay.');
+        line(`Archived: ${(await applyCohortArchive(ctx, plan)).join(', ')}`);
       }),
     );
 
@@ -666,9 +698,40 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('--dry-run', 'print the commands that would run, execute nothing')
     .option('--clip', 'read the prompt from the clipboard; shows a summary and asks y/N first')
     .option('-y, --yes', 'with --clip: do not ask')
+    .option('--enter-only <task>', 'paste nothing: show the exact text that an earlier send left in the input field of the task ("nie dostarczono – tekst w polu wpisywania") with a token; refuses any other text')
+    .option('--confirm <token>', 'with --enter-only: press Enter if the field is still exactly the text the preview showed')
+    .option('--withdraw <task>', 'take back a waiting message of the task: a queued one is removed, one whose delivery already began is marked stale (the agent may already work on it)')
+    .option('--entry <id>', 'with --withdraw: the id of the message (a unique prefix is enough; peek lists prompt_queue)')
     .action(
-      guarded(async (file: string | undefined, opts: { clip?: boolean; yes?: boolean; dryRun?: boolean }) => {
+      guarded(async (file: string | undefined, opts: { clip?: boolean; yes?: boolean; dryRun?: boolean; enterOnly?: string; confirm?: string; withdraw?: string; entry?: string }) => {
         const ctx = contextFor(Boolean(opts.dryRun));
+        if (opts.confirm !== undefined && opts.enterOnly === undefined) throw new AgentctlError('--confirm belongs to --enter-only');
+        if (opts.entry !== undefined && opts.withdraw === undefined) throw new AgentctlError('--entry belongs to --withdraw');
+        if (opts.withdraw !== undefined) {
+          if (file !== undefined || opts.clip || opts.enterOnly) throw new AgentctlError('--withdraw takes a task and nothing else: no file, no --clip, no --enter-only');
+          const target = await resolveRunningTask(ctx, opts.withdraw);
+          let id = opts.entry;
+          if (!id) {
+            const waitingFor = promptQueueView(ctx, target.window);
+            if (waitingFor.length === 0) throw new AgentctlError(`${target.task}: nothing waits to be withdrawn`, 'prompt_queue in peek/status lists the waiting messages.');
+            if (waitingFor.length > 1) throw new AgentctlError(`${target.task}: ${waitingFor.length} messages wait`, `Choose one with --entry: ${waitingFor.map((p) => `${p.id.slice(0, 8)} (${p.state})`).join(', ')}.`);
+            id = waitingFor[0]!.id;
+          }
+          line((await withdrawPrompt(ctx, target.window, id)).message);
+          return;
+        }
+        if (opts.enterOnly !== undefined) {
+          if (file !== undefined || opts.clip) throw new AgentctlError('--enter-only takes a task and nothing else: no file, no --clip');
+          const target = await resolveRunningTask(ctx, opts.enterOnly);
+          const [done] = await submitDrafts(ctx, [{ task: target.task, window: target.window }], opts.confirm ? { token: opts.confirm } : {});
+          if (done?.refused || done?.outcome === 'not-delivered' || done?.outcome === 'failed') throw new AgentctlError(`${target.task}: ${done.message}${done.field ? `\nText in the field:\n${done.field.join('\n')}` : ''}`);
+          if (done?.outcome === 'ready') {
+            line(`Text in the field of ${target.task} (exactly):`);
+            for (const text of done.field ?? []) line(`  │ ${text}`);
+            line(`Screen: ${done.screenState}. Nothing was pressed. To press Enter for exactly this text: agentctl send --enter-only ${target.task} --confirm ${done.token}`);
+          }
+          return;
+        }
         const items = splitSpecs(await readSpecSource(file, opts.clip), opts.clip ? 'clipboard' : (file ?? 'stdin')).map(resolveSendSpec);
         const summary = items.map((i) => `${i.task}  ->  window ${ctx.config.session}:${i.window}, ${i.prompt.length} characters: ${i.prompt.split('\n')[0]!.slice(0, 80)}`);
         if (opts.clip && !(await confirmAction(ctx, summary, 'Send?', Boolean(opts.yes) || Boolean(opts.dryRun)))) return;
@@ -741,7 +804,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .action(
       guarded(async (assignments: string[], opts: { yes?: boolean; dryRun?: boolean }) => {
         const ctx = contextFor(Boolean(opts.dryRun), { migrate: false });
-        const plan = planSetLimits(ctx.config, parseAssignments(assignments));
+        const plan = planSetLimits(ctx.config, parseAssignments(assignments, activeProviders(ctx.config)));
         if (!(await confirmAction(ctx, plan.summary, 'Write it?', Boolean(opts.yes) || Boolean(opts.dryRun)))) return;
         await applySetLimits(ctx, plan);
         if (!opts.dryRun) line('Done. The limits are in force now.');
@@ -756,7 +819,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .action(
       guarded(async (places: string[], opts: { note?: string }) => {
         const ctx = contextFor(false, { migrate: false });
-        const reservations = await reservePlaces(ctx, parseCounts(places, 1), opts.note);
+        const reservations = await reservePlaces(ctx, parseCounts(places, 1, activeProviders(ctx.config)), opts.note);
         line(`Reserved: ${Object.entries(reservations).map(([a, r]) => `${a} ${r.count}${r.note ? ` (${r.note})` : ''}`).join(', ')}`);
       }),
     );
@@ -768,7 +831,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .action(
       guarded(async (places: string[]) => {
         const ctx = contextFor(false, { migrate: false });
-        const reservations = await releasePlaces(ctx, parseCounts(places, undefined));
+        const reservations = await releasePlaces(ctx, parseCounts(places, undefined, activeProviders(ctx.config)));
         const left = Object.entries(reservations).map(([a, r]) => `${a} ${r.count}`).join(', ');
         line(left === '' ? 'Nothing is reserved now.' : `Still reserved: ${left}`);
       }),
@@ -777,7 +840,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
   program
     .command('events')
     .description('What changed since the last time: reports that became ready (with the verdict), starts from the queue, questions, folder trust, blocked, cancelled and limited tasks, finished cohorts, plan thresholds, changed limits - then a line with the state now. Needs "agentctl watch" for what it sees (the journal is written by watch and by the commands). Each client (cli, mcp) has its own "last" marker.')
-    .option('--since <time>', 'last (default: since this client looked), an age (30m, 2h, 1d), HH:MM or an ISO time')
+    .option('--since <time>', 'last (default: since this client looked), an age (30m, 2h, 1d), HH:MM (the latest past occurrence; still ahead today means yesterday) or an ISO time')
     .option('--cohort <name>', 'only the events and tasks of this cohort')
     .option('--keep', 'do not move the "last" marker of the cli client')
     .option('--json', 'machine-readable output')
@@ -841,7 +904,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         }
         if (!(await confirmAction(ctx, plan.summary, 'Resume?', Boolean(opts.yes) || Boolean(opts.dryRun)))) return;
         await resumeTasks(ctx, plan, { self: deps.selfArgv?.() });
-        line(`attach with: tmux attach -t ${ctx.config.session}`);
+        line(`attach with: ${attachHint(ctx.config)}`);
       }),
     );
 
@@ -857,7 +920,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         if (ctx.config.manager.autostart) await startManagerForUp(ctx);
         const resumable = await findResumable(ctx);
         if (resumable.length > 0) line(`${resumable.length} task${resumable.length === 1 ? '' : 's'} to resume (${resumable.map((r) => r.task).join(', ')}): agentctl resume`);
-        const command = `tmux attach -t ${ctx.config.session} \\; select-window -t ${BOARD_WINDOW}`;
+        const command = `${attachHint(ctx.config)} \\; select-window -t ${BOARD_WINDOW}`;
         if (opts.attach === false || !deps.stdinIsTTY) return line(`Open the board: ${command}`);
         await showWindow(ctx, BOARD_WINDOW, deps.insideTmux ?? false);
       }),
@@ -865,16 +928,42 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
 
   program
     .command('mark')
-    .description('Say how a task turned out: ok, partial or fail (the result you judge, with an optional note). It goes to the history that "log" and "stats" read; the last mark of a task wins.')
-    .argument('<task>', 'task ID; case does not matter and a unique prefix is enough')
-    .addArgument(new Argument('<result>', 'how it turned out').choices([...RESULTS]))
+    .description('Record the result the user judged. Multiple tasks require a preview and confirmation.')
+    .argument('<taskOrResult>', 'task ID, or result when --cohort is used')
+    .argument('[result]', 'ok, partial or fail')
+    .option('--cohort <name>', 'mark every task in this cohort')
     .option('--note <text>', 'why (optional)')
-    .action(
-      guarded(async (task: string, result: Result, opts: { note?: string }) => {
-        const marked = await markTask(contextFor(false, { migrate: false }), task, result, opts.note);
-        line(`${marked.task}: ${marked.result}${marked.previous && marked.previous !== marked.result ? ` (was ${marked.previous})` : ''}`);
-      }),
-    );
+    .option('-y, --yes', 'confirm the displayed batch')
+    .action(guarded(async (taskOrResult: string, value: string | undefined, opts: { cohort?: string; note?: string; yes?: boolean }) => {
+      const ctx = contextFor(false, { migrate: false });
+      const result = parseResult(opts.cohort ? taskOrResult : value ?? '');
+      if (opts.cohort && value) throw new AgentctlError('with --cohort give only the result');
+      const tasks = planMark(ctx, opts.cohort ? { cohort: opts.cohort } : { task: taskOrResult });
+      if (tasks.length > 1) {
+        line(`Would mark ${tasks.join(', ')}: ${result}${opts.note ? ` – ${opts.note}` : ''}`);
+        if (!opts.yes && (!ctx.confirm || !await ctx.confirm('Apply these marks? [y/N] '))) { line('Not executed. Re-run with --yes to confirm this batch.'); return; }
+      }
+      for (const r of await markTasks(ctx, tasks, result, opts.note)) line(`${r.task}: ${r.result}${r.previous && r.previous !== r.result ? ` (was ${r.previous})` : ''}`);
+    }));
+
+  program.command('dataset').description('Read-only benchmark datasets').command('export')
+    .description('Export one record per known task attempt; no content by default')
+    .option('--since <time>', 'inclusive attempt start: ISO time or age (7d)')
+    .option('--until <time>', 'inclusive attempt start: ISO time or age')
+    .option('--cohort <name>', 'cohort filter')
+    .option('--agent <provider>', 'resolved provider filter')
+    .option('--out <file>', 'create a new export file (never overwrite existing files)')
+    .option('--format <format>', 'jsonl or csv', 'jsonl')
+    .option('--include-prompts', 'include redacted prompt text (JSONL only)')
+    .option('--include-reports', 'include redacted report text (JSONL only)')
+    .action(guarded(async (opts: DatasetOptions) => {
+      const ctx = contextFor(false, { migrate: false, silent: true });
+      validateDatasetOptions(opts, ctx.runner.now());
+      // Exclusive creation protects state/history/report files, including symlink aliases.
+      const fd = opts.out ? fs.openSync(opts.out, 'wx', 0o600) : undefined;
+      try { await exportDataset(ctx, opts, chunk => { if (fd !== undefined) fs.writeSync(fd, chunk); else deps.stdout(chunk); }); }
+      finally { if (fd !== undefined) fs.closeSync(fd); }
+    }));
 
   program
     .command('log')
@@ -929,7 +1018,13 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
 
   program
     .command('gc')
-    .description('Take back disk space from finished tasks: the git worktrees of closed, cancelled and archived tasks without uncommitted changes, the files next to their reports that are older than --older-than (the *.md reports stay), their state folders (moved to the archive), and with --branches their branches merged into the base (git branch -d, never -D, never main/master or the current branch). A dry run with sizes unless --apply. History and reports stay; uncommitted work, foreign worktrees and unmerged branches are only listed as skipped.')
+    .description('Bez flag = podgląd, --apply wykonuje. Take back disk space from finished tasks: the git worktrees of closed, cancelled and archived tasks without uncommitted changes, the files next to their reports that are older than --older-than (the *.md reports stay), their state folders (moved to the archive), and with --branches their branches merged into the base (git branch -d, never -D, never main/master or the current branch). A dry run with sizes unless --apply. History and reports stay; uncommitted work, foreign worktrees and unmerged branches are only listed as skipped.')
+    .option('--preview', 'alias of the default preview; changes nothing')
+    .option('--dry-run', 'alias of the default preview; changes nothing')
+    .option('--verbose', 'full details, paginated with --offset/--limit')
+    .option('--offset <n>', 'page offset', '0')
+    .option('--limit <n>', 'page size (1–100)', '10')
+    .option('--force-links', 'CLI only: allow removing a worktree referenced by links (other protections stay)')
     .option('--apply', 'do it (after showing the list and asking y/N); without it nothing is changed')
     .option('--older-than <age>', 'age of the files next to the reports before they go: 12h, 7d, 2w (default 7d)')
     .option('--branches', 'also delete the branches of finished tasks that are merged into the base (git branch -d)')
@@ -937,19 +1032,22 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('-y, --yes', 'with --apply: do not ask')
     .option('--json', 'machine-readable output (the plan, or the result with --apply)')
     .action(
-      guarded(async (opts: { apply?: boolean; olderThan?: string; branches?: boolean; cohort?: string; yes?: boolean; json?: boolean }) => {
+      guarded(async (opts: { preview?: boolean; dryRun?: boolean; verbose?: boolean; offset: string; limit: string; forceLinks?: boolean; apply?: boolean; olderThan?: string; branches?: boolean; cohort?: string; yes?: boolean; json?: boolean }) => {
         const ctx = contextFor(false, { migrate: false });
-        const plan = await planGc(ctx, { olderThan: opts.olderThan, branches: opts.branches, cohort: opts.cohort });
+        if (opts.apply && (opts.preview || opts.dryRun)) throw new AgentctlError("--apply cannot be combined with --preview or --dry-run");
+        const view = { detail: Boolean(opts.verbose), offset: Number(opts.offset), limit: Number(opts.limit) };
+        if (!Number.isInteger(view.offset) || view.offset < 0 || !Number.isInteger(view.limit) || view.limit < 1 || view.limit > 100) throw new AgentctlError("offset must be >=0 and limit must be 1–100");
+        const plan = await planGc(ctx, { olderThan: opts.olderThan, branches: opts.branches, cohort: opts.cohort, forceLinks: opts.forceLinks });
         if (!opts.apply) {
-          if (opts.json) return line(JSON.stringify(plan, null, 2));
-          for (const l of renderGc(plan)) line(l);
+          if (opts.json) return line(JSON.stringify(gcView(plan, view), null, 2));
+          for (const l of renderGc(plan, view)) line(l);
           return;
         }
         if (plan.items.length === 0) return opts.json ? line(JSON.stringify({ plan, done: [], failed: [], freedBytes: 0 }, null, 2)) : void renderGc(plan).forEach(line);
         if (!(await confirmAction(ctx, renderGc(plan), 'Clean up?', Boolean(opts.yes)))) return;
         const result = await applyGc(ctx, plan);
         if (opts.json) return line(JSON.stringify({ plan, ...result }, null, 2));
-        for (const l of renderGc(plan, { applied: result })) line(l);
+        for (const l of renderGc(plan, { ...view, applied: result })) line(l);
         if (result.failed.length > 0) exitCode = 1;
       }),
     );
@@ -1069,7 +1167,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
           const note = await loggedRun(startLogPath(ctx.config, 'watch'), 'watch', async () => {
             const notifier = await makeNotifier(ctx);
             const self = deps.selfArgv?.();
-            await runWatch(ctx, notifier, { ...(interrupt ? { signal: interrupt.signal } : {}), ...(self ? { self } : {}), configStore: new ConfigStore(deps.loadConfig, ctx.config), remakeNotifier: () => makeNotifier(ctx) });
+            await runWatch(ctx, notifier, { insideTmux: deps.insideTmux, ...(interrupt ? { signal: interrupt.signal } : {}), ...(self ? { self } : {}), configStore: new ConfigStore(deps.loadConfig, ctx.config), remakeNotifier: () => makeNotifier(ctx) });
           });
           if (note && !interrupt?.signal.aborted) throw new AgentctlError(note);
         } catch (e) {
@@ -1092,7 +1190,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         if (opts.tmux) {
           if (opts.restart) await ctx.tmux.killRole('board');
           await startBoardWindow(ctx);
-          line(`Open it: tmux attach -t ${ctx.config.session} \\; select-window -t ${BOARD_WINDOW}   (inside tmux: tmux select-window -t ${ctx.config.session}:${BOARD_WINDOW})`);
+          line(`Open it: ${attachHint(ctx.config)} \\; select-window -t ${BOARD_WINDOW}   (inside tmux: ${tmuxCommand(ctx.config, ['select-window', '-t', `=${ctx.config.session}:${BOARD_WINDOW}`])})`);
           return;
         }
         const runBoard = deps.runBoard;
@@ -1279,12 +1377,12 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .requiredOption('--report <path>', 'path of the task report')
     .option('--window <name>', 'tmux window of the task (default: the lowercase task ID)')
     .option('--worktree <path>', 'worktree of the task, so "close --rm-worktree" knows it')
-    .addOption(new Option('--agent <agent>', 'agent running in the window').choices(['claude', 'codex']))
+    .addOption(new Option('--agent <agent>', 'agent running in the window').choices([...cliProviders]))
     .option('--model <model>', 'model of the task')
     .addOption(new Option('--effort <effort>', 'effort of the task').choices(['low', 'medium', 'high', 'xhigh', 'max']))
     .option('--dry-run', 'print what would be written, write nothing')
     .action(
-      guarded(async (task: string, opts: { report: string; window?: string; worktree?: string; agent?: 'claude' | 'codex'; model?: string; effort?: Effort; dryRun?: boolean }) => {
+      guarded(async (task: string, opts: { report: string; window?: string; worktree?: string; agent?: AgentName; model?: string; effort?: Effort; dryRun?: boolean }) => {
         await adoptTask(contextFor(Boolean(opts.dryRun)), task, opts);
       }),
     );
@@ -1321,25 +1419,28 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .command('event')
     .description('Called by the agents themselves (hooks that "new" sets up): records the event, updates the task state and notifies at once. Always exits 0.')
     .requiredOption('--task <task>', 'task ID')
-    .addOption(new Option('--agent <agent>', 'the agent that reports').choices(['claude', 'codex']).makeOptionMandatory())
-    .addOption(new Option('--kind <kind>', 'claude: which hook called').choices([...CLAUDE_KINDS]))
+    .option('--attempt <id>', 'attempt that owns this hook/session')
+    .addOption(new Option('--agent <agent>', 'the agent that reports').choices([...cliProviders]).makeOptionMandatory())
+    .addOption(new Option('--kind <kind>', 'claude: which hook called').choices(PROVIDER_IDS.flatMap(id => [...provider(id).events.kinds])))
+    .option('--forward-file <path>', 'codex: private JSON file containing the original notify command')
     .option('--forward <json>', 'codex: JSON list, the notify command the user had; run with the same JSON after this one')
     .argument('[payload]', 'the event as JSON (codex puts it here; claude sends it on stdin)')
-    .action(async (payload: string | undefined, opts: { task: string; agent: 'claude' | 'codex'; kind?: ClaudeKind; forward?: string }) => {
+    .action(async (payload: string | undefined, opts: { task: string; attempt?: string; agent: AgentName; kind?: ClaudeKind; forward?: string; forwardFile?: string }) => {
       // A hook must never break the agent: whatever happens, the exit code stays 0.
       try {
         const config = deps.loadConfig();
         const ctx = new Context(deps.makeRunner(false, line), config, () => {}, deps.confirm);
-        const raw = payload ?? (opts.agent === 'claude' && !deps.stdinIsTTY ? deps.readStdin() : '');
-        const forward = opts.forward ? parseJson(opts.forward) : undefined;
+        const raw = payload ?? (provider(opts.agent).events.payloadFrom === 'stdin' && !deps.stdinIsTTY ? deps.readStdin() : '');
+        const forward = opts.forwardFile ? parseJson(fs.readFileSync(opts.forwardFile, 'utf8')) : opts.forward ? parseJson(opts.forward) : undefined;
         const notifier = await makeNotifier(ctx);
         const self = deps.selfArgv?.();
         await handleEvent(ctx, new Alerts(ctx, notifier, { self }), {
           task: opts.task,
+          attempt: opts.attempt,
           agent: opts.agent,
           kind: opts.kind,
           payload: parseJson(raw),
-          rawPayload: opts.agent === 'codex' ? raw : undefined,
+          rawPayload: provider(opts.agent).events.payloadFrom === 'argv' ? raw : undefined,
           forward: Array.isArray(forward) && forward.every((x) => typeof x === 'string') ? (forward as string[]) : undefined,
         });
       } catch (e) {
@@ -1351,14 +1452,15 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .command('usage-tap')
     .description('Called by Claude Code as the statusLine of a task window (set up by "new"): keeps the plan limits that Claude gives only to a statusLine, remembers the session, then runs your own statusLine command with the same input and prints its output. Always exits 0.')
     .requiredOption('--task <task>', 'task ID')
+    .option('--attempt <id>', 'attempt that owns this statusLine session')
     .option('--forward <command>', 'your own statusLine command: run with the same input after this one')
-    .action(async (opts: { task: string; forward?: string }) => {
+    .action(async (opts: { task: string; attempt?: string; forward?: string }) => {
       // A status line must never break the agent: whatever happens, the exit code stays 0.
       try {
         const config = deps.loadConfig();
         const runner = deps.makeRunner(false, () => {});
         const raw = deps.stdinIsTTY ? '' : deps.readStdin();
-        const result = await handleTap(runner, config, { task: opts.task, window: windowName(opts.task), raw, ...(opts.forward ? { forward: opts.forward } : {}) });
+        const result = await handleTap(runner, config, { task: opts.task, attempt: opts.attempt, window: windowName(opts.task), raw, ...(opts.forward ? { forward: opts.forward } : {}) });
         if (result.output !== '') deps.stdout(result.output);
       } catch (e) {
         deps.stderr(`agentctl usage-tap: ${errorMessage(e)}\n`);
@@ -1369,10 +1471,10 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .command('move')
     .description('Hand a task that hit its usage limit to the other provider: new window <task>-2 in the same worktree, the original prompt plus a note to continue. Asks y/N.')
     .argument('<task>', 'task ID')
-    .addOption(new Option('--agent <agent>', 'move to this provider (default: the other one)').choices(['claude', 'codex']))
+    .addOption(new Option('--agent <agent>', 'move to this provider (default: the other one)').choices([...cliProviders]))
     .option('-y, --yes', 'do not ask')
     .action(
-      guarded(async (task: string, opts: { agent?: 'claude' | 'codex'; yes?: boolean }) => {
+      guarded(async (task: string, opts: { agent?: AgentName; yes?: boolean }) => {
         const ctx = contextFor(false);
         const self = deps.selfArgv?.();
         const interrupt = deps.interruptSignal?.();

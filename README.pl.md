@@ -2,17 +2,118 @@
 
 English: [README.md](README.md)
 
-**Uruchamiaj Claude Code i Codex równolegle – z jednej kolejki i według tych samych zasad.**
+**Jeden czat zleca i nadzoruje pracę wielu agentów CLI – Claude Code, Codexa i opcjonalnego Kimi Code – z jednej kolejki i według tych samych zasad.**
 
-agentctl zamienia krótki opis zadania w gitowy worktree, okno tmux i działającego agenta kodującego – Claude Code albo Codexa, z wybranym przez Ciebie modelem i poziomem rozumowania. Pilnuje pracy agentów, informuje, gdy któryś zada pytanie lub skończy, i zbiera raporty. Decyzja i scalanie zostają po Twojej stronie.
+agentctl zamienia krótki opis zadania w gitowy worktree, okno tmux i działającego agenta z wybranym przez Ciebie modelem i poziomem rozumowania. Pilnuje każdego agenta, informuje, gdy któryś zada pytanie lub skończy, i oddaje raporty Twojemu czatowi. Decyzja i scalanie zostają po Twojej stronie.
 
-## Po co korzystać z dwóch dostawców
+![Board agentctl w sesji demo: sześć działających zadań w dwóch kohortach, gotowy raport, pytanie czekające na odpowiedź, dwie recenzje w kolejce, ostrzeżenie o kolizji i zużycie planów obu dostawców](docs/img/board.svg)
 
-- **Większa przepustowość i mniej przestojów.** Plany Claude i Codexa mają osobne limity. Gdy jeden z dostawców osiągnie limit, możesz przenieść pracę do drugiego. agentctl pokazuje użycie obu planów, czas resetu i dostępne miejsca ([zużycie i limity](docs/details.pl.md#użycie-i-limity)).
-- **Model dobrany do zadania.** Spec może określać agenta, model i effort. Lżejsze modele sprawdzą się przy rutynowych pracach, mocniejsze przy trudniejszych; [tabela odpowiedników](docs/details.pl.md#odpowiedniki-modeli) pomaga dobrać model po przeniesieniu zadania do drugiego dostawcy.
-- **Recenzja innym modelem.** Reguła `review_of` wymaga, by recenzent użył innego agenta lub modelu niż autor ([recenzja krzyżowa](docs/details.pl.md#limity-okien-i-cross-review)). Drugi model może wnieść inną perspektywę.
-- **Zmiana dostawcy w razie potrzeby.** Obaj agenci korzystają z tych samych speców i formatu raportów, a zadania widać na tym samym boardzie. `agentctl move` jednym poleceniem przekazuje zadanie po osiągnięciu limitu drugiemu dostawcy ([limity i przenoszenie](docs/details.pl.md#limity-i-move)).
-- **Jeden panel pracy.** [Terminalowy board](docs/details.pl.md#board) pokazuje zadania obu dostawców: kto pracuje, kto potrzebuje Twojej uwagi i które raporty są gotowe. Powiadomienia mogą trafiać na Maca i opcjonalnie na telefon.
+*Board sesji demo na atrapach agentów: dwie kohorty, pytanie czekające na Ciebie, gotowy raport, łańcuch recenzji w kolejce, ostrzeżenie o kolizji (⚠) i zużycie planów obu dostawców. Generuje go `npm run docs:screenshot`; część napisów produktu (np. „czeka na”) jest dziś po polsku.*
+
+## Dlaczego agentctl
+
+- **Jeden czat, wielu wykonawców.** Planujesz w czacie ([serwer MCP](docs/mcp.md) albo schowek), a zadania trafiają do Claude Code i Codexa – Gemini dojdzie wkrótce – każde z modelem i poziomem rozumowania wybranym osobno.
+- **Więcej pojemności.** Każdy plan ma własne limity. agentctl pokazuje oba plany z czasem resetu i wolne sloty okien, `capacity` podaje wiek każdego odczytu, praca czeka w [kolejce](#kolejka) zamiast przekraczać limit, a `agentctl move` przekazuje zadanie, które wyczerpało limit, drugiemu dostawcy ([zużycie i limity](docs/details.pl.md#użycie-i-limity)).
+- **Mniej tokenów w czacie.** Odpowiedzi MCP są domyślnie zwięzłe, a raporty przychodzą jako streszczenia – sekcje i pełny tekst na żądanie. Na zestawie atrap (sześć raportów po ok. 20 KB, `pull_ready` z `all: true`, 0.17.1 kontra 0.17.2) odpowiedź skurczyła się ze 120 762 do 1 522 bajtów – to pomiar na atrapach, nie obietnica dla Twojej pracy. `defaults.effort` ustawia effort raz, a `peek` pokazuje okno bez wklejania logów do czatu.
+- **Statystyki.** Tokeny na zadanie, kohortę, model i effort pochodzą z logów samych agentów. Twoja ocena `mark` (ok / partial / fail) i linia werdyktu z raportu agenta dają skuteczność per model × effort, więc widać, który model opłaca się do jakiej pracy ([historia i statystyki](#historia-i-statystyki)).
+- **Recenzja innym modelem i kolejka z zależnościami.** `review_of` nie pozwala, by ten sam agent i model oceniał własną pracę, a `after` trzyma zadanie w kolejce, dopóki nie powstanie raport, od którego zależy – recenzja startuje więc sama po raporcie autora ([kolejka](#kolejka), [zależności](#zależności)).
+- **Nadzór bez pilnowania.** Board i powiadomienia (Mac oraz telefon przez ntfy) mówią o pytaniach, oknach zaufania, przeciążeniach, limitach, kolizjach i wolnym miejscu na dysku. Po przeciążeniu dostawcy agentctl wysyła „kontynuuj” – tylko do bezczynnego okna z pustym promptem i kilka razy – a przejściowy błąd startu ponawia po 1, 5 i 15 minutach.
+- **Bezpieczeństwo z założenia.** Osobny git worktree na zadanie. agentctl nigdy nie scala, nie pushuje, nie używa `--force` i nie akceptuje za Ciebie zgód ani okien zaufania ([model bezpieczeństwa](#model-bezpieczeństwa)).
+- **Otwarte i lokalne.** Licencja MIT, działa na Twoim Macu, nie ma własnego serwera; serwer MCP to lokalny proces uruchomiony jako Ty.
+
+## Automatyczny przepływ
+
+Czat rozmawia z agentctl, agentctl z agentami. Między Twoimi odpowiedziami większość dzieje się sama:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Czat
+    participant A as agentctl
+    participant G as Okno agenta
+    C->>A: new lub queue (odpowiedź niesie migawkę capacity)
+    A->>G: worktree, okno, prompt
+    G->>A: zadaje pytanie
+    C->>A: events_since (needs-input)
+    C->>A: send (Twoja odpowiedź)
+    A->>G: odpowiedź
+    G->>A: raport gotowy
+    C->>A: events_since (report-ready)
+    C->>A: pull_ready (werdykt, SHA, blokery)
+    C->>A: get_report (jedna sekcja, na żądanie)
+    C->>A: mark ok
+    A->>G: zadanie z after (recenzja) startuje z kolejki
+    G->>A: raport recenzji
+    Note over A,G: W tle: przeciążenie daje automatyczne „kontynuuj” tylko bezczynnemu oknu, przejściowy błąd startu jest ponawiany, próg dysku lub planu staje się zdarzeniem
+```
+
+Co widzi czat w sesji demo ze zrzutu (wyjście narzędzi jest dziś po polsku). `events_since` po pracy agentów:
+
+```text
+Zdarzenia z ostatnich 1d: 7
+10:37  UŻYCIE  codex week: usage crossed 80% (83%)
+10:38  WYNIKI RAPORTU  API-AUTH-1  API-AUTH-1: 1 decisions, 0 actions
+10:39  RAPORT  API-AUTH-1  Verdict: PASS – refresh rotates the session id, logout revokes the whole token family.
+10:40  PYTANIE  UI-CART-2  UI-CART-2: Compute the cart total on the server or the client?
+10:41  WYNIKI RAPORTU  DOCS-SEARCH-1  DOCS-SEARCH-1: 0 decisions, 0 actions
+10:42  RAPORT  DOCS-SEARCH-1  Verdict: PASS – search guide and API reference written, the index rebuild finished.
+10:43  START  REVIEW-DOCS-SEARCH-1  Uruchomiono REVIEW-DOCS-SEARCH-1 z kolejki (claude)
+Teraz: 7 aktywne (3 pracuje) · 1 w kolejce · 2 raporty do pobrania (API-AUTH-1, DOCS-SEARCH-1) · 2 zadań bez oceny · czeka na Ciebie: REVIEW-DOCS-SEARCH-1 (waiting), UI-CART-2 (needs-input): Compute the cart total on the server or the client?, API-AUTH-1: decision: Choose the rollout window.
+has_more: false; next_cursor: e2:7:0
+```
+
+`pull_ready` w domyślnym trybie streszczeń, z jedynym gotowym raportem:
+
+```text
+1 report summary delivered (full reports not marked as pulled): API-AUTH-1. Omitted (remain new): none.
+
+=== API-AUTH-1 ===
+attempt: 3f9c2a7e-51d4-4b86-9e0a-7c1d6b2f8a45
+path: /home/demo/agentctl/cache/api-auth-1/API-AUTH-1.md
+bytes: 965
+{"outputs":{"version":1,"verdict":"PASS","commits":[{"repo":"shop","branch":"agent/api-auth-1","sha":"41c39c35c2118f44d822a4be08d5c20aa2f7c153"}],"integrate":[{"repo":"shop","branch":"agent/api-auth-1","sha":"41c39c35c2118f44d822a4be08d5c20aa2f7c153","note":"ready for human integration"}],"decisions":["Choose the rollout window"],"actions":[],"checks":[{"name":"auth tests","result":"PASS","note":"18 passed"}],"notes":[]},"outputs_valid":true,"outputs_errors":[]}
+sha: 41c39c35c2118f44d822a4be08d5c20aa2f7c153
+truncated: false
+Verdict: PASS – refresh rotates the session id, logout revokes the whole token family.
+
+- Branch: agent/api-auth-1
+- SHA: 41c39c35c2118f44d822a4be08d5c20aa2f7c153
+- Tests: 18 passed, 0 failed
+
+## Summary
+
+Refresh tokens are single-use and belong to a family (`src/auth/token.ts`). The session id rotates on every refresh (`src/auth/session.ts`) and a revoked family answers 401 (`src/auth/middleware.ts`).
+
+## Blockers
+
+None.
+
+## Decisions
+
+- Revoking one token revokes its whole family: a replayed refresh token is treated as theft.
+
+## Open points
+
+None.
+
+```agentctl-outputs
+version: 1
+verdict: PASS
+commits: [{repo: shop, branch: agent/api-auth-1, sha: 41c39c35c2118f44d822a4be08d5c20aa2f7c153}]
+integrate: [{repo: shop, branch: agent/api-auth-1, sha: 41c39c35c2118f44d822a4be08d5c20aa2f7c153, note: ready for human integration}]
+decisions: [Choose the rollout window]
+actions: []
+checks: [{name: auth tests, result: PASS, note: 18 passed}]
+notes: []
+```
+
+<!-- agentctl:report-end -->
+
+next_cursor: 8b1e4d93-0a7c-42f5-b6d8-2e9f1c3a7d60:1; has_more: false
+```
+
+
+Pole `repo` w `agentctl-outputs` przyjmuje nazwę lub ścieżkę repozytorium oraz nazwę katalogu lub ścieżkę worktree zadania. Akceptowane aliasy są normalizowane do nazwy repozytorium; nazwy niejednoznaczne są odrzucane.
 
 ## Jak to działa
 
@@ -46,11 +147,15 @@ sequenceDiagram
 <!-- Numbers from agentctl stats on the author's machine – verify before publishing -->
 agentctl powstał i jest używany przy prawdziwym projekcie: codziennie równolegle działają kohorty zadań Claude Code i Codexa, a przed scaleniem każdy wynik przechodzi recenzję innym modelem.
 
-> agentctl to niezależne narzędzie open source, niepowiązane z Anthropic ani OpenAI. Claude Code i Codex są ich produktami.
-
 ## Stany zadań
 
 Board pokazuje m.in. stany `needs-attention`, `overloaded`, `working`, `waiting`, `needs-input`, `needs-trust`, `limited`, `report-ready`, `background`, `queued`, `blocked`, `dead`, `orphan`, `closed`, `cancelled`, `superseded` i `start-failed`. `report-candidate` to osobna flaga raportu, bez zmiany stanu. Szczegóły opisuje [dokumentacja stanów zadań](docs/details.pl.md#stany-zadań).
+
+Plansza ogranicza pamięć podręczną sesji i usuwa postęp zadań usuniętych podczas długiej pracy. Podczas wykonywania akcji powtórzone klawisze akcji są ignorowane; nawigacja, odświeżanie i wyjście pozostają dostępne. Zapis pamięci sesji jest asynchroniczny i ma jednego wykonawcę, dzięki czemu operacje dyskowe oddają sterowanie obsłudze klawiszy.
+
+Nagłówek planszy, status-left tmux i tytuły terminala board/watch pokazują `agentctl` lub `agentctl-dev` według wykrywania środowiska z doctor/version. Etykietę można nadpisać przez `ui: {instance_name: staging}`; przy wyjściu tytuł jest przywracany w terminalach obsługujących stos tytułów xterm.
+
+Gdy brakuje raportu kanonicznego, status, board i events podpowiadają `report_from` dla świeżego pliku Markdown pasującego do ID zadania lub nazwy raportu. Wyszukiwanie obejmuje katalog raportu i worktree zadania (z limitem głębokości i liczby plików, bez zależności); nigdy nie importuje pliku automatycznie.
 
 ### Architektura i przebieg pracy
 
@@ -148,7 +253,7 @@ flowchart TB
     subgraph world [Na zewnątrz]
         TMUX[sesja tmux agentctl]
         GIT[worktree gita]
-        AG[Claude Code i Codex]
+        AG[Claude Code, Codex, opcjonalny Kimi Code]
         NOTE[terminal-notifier / osascript]
         PHONE["ntfy server -> phone"]
         MGR["window manager: claude --remote-control + MCP, role from ~/.agentctl/manager/"]
@@ -169,6 +274,15 @@ flowchart TB
     CLI --> CORE
     BOARD --> CORE
     MCP --> CORE
+    subgraph providers [Provider adapters]
+        REG["registry: registered vs active providers"]
+        CL["Claude: argv, hooks, usage, safety"]
+        CX["Codex: argv, notify, usage, safety"]
+        KI["Kimi 2.5.0: TOML, passive wire, usage probe, safety"]
+    end
+    CORE --> REG
+    REG --> CL & CX & KI
+    CL & CX & KI --> RUN
     CORE --> RUN
     RUN --> TMUX
     RUN --> GIT
@@ -296,6 +410,58 @@ agentctl doctor                # tmux, node, git, claude, codex, gh, katalog cac
 
 Paczka npm uruchamia skompilowany JavaScript z `dist/`. Rozwój i testy mogą uruchamiać źródła TypeScript bezpośrednio przez wycinanie typów w Node.
 
+<!-- tmux-dev-start -->
+### Osobny serwer tmux dla developmentu
+
+Używaj osobnego katalogu konfiguracji **i** serwera: sama inna nazwa sesji nadal współdzieli środowisko serwera, skróty klawiszowe i bufory. W katalogu checkoutu deweloperskiego ustaw home i edytuj istniejącą konfigurację, zachowując pozostałe ustawienia:
+
+```sh
+export AGENTCTL_HOME="$HOME/.agentctl-dev"
+mkdir -p "$AGENTCTL_HOME"
+${EDITOR:-vi} "$AGENTCTL_HOME/config.yaml"
+```
+
+Dodaj albo zmień te klucze najwyższego poziomu:
+
+```yaml
+session: agentctl-dev
+tmux:
+  socket: agentctl-dev
+```
+
+`tmux.socket` jest nazwą przekazywaną do `tmux -L`, a nie ścieżką gniazda. Pominięcie klucza zachowuje dotychczasowy wybór serwera. Watch, board, zadania, peek, send, close, attach i doctor używają tego serwera, także przy bezpośrednich wywołaniach tmux. Wskazówki attach cytują dokładny cel, więc `agentctl` nie wybierze prefiksem sesji `agentctl-dev`. Doctor pokazuje gniazdo i ostrzega o innym `AGENTCTL_HOME` w globalnym środowisku serwera lub środowisku sesji.
+
+Uruchom z terminala poza tmux:
+
+```sh
+node --experimental-strip-types --no-warnings bin/agentctl.ts up --no-attach
+node --experimental-strip-types --no-warnings bin/agentctl.ts doctor
+tmux -L agentctl-dev attach -t '=agentctl-dev'
+```
+
+Aby przenieść istniejącą **sesję dev o nazwie agentctl-dev na domyślnym serwerze**, najpierw zachowaj starą konfigurację bez socket, sprawdź status i okna, a potem pozwól agentom skończyć lub zapisać rozmowy. Poniższe usunięcie starej sesji dev kończy jej procesy; wykonaj je dopiero po zapisaniu pracy i sprawdzeniu zapisów identyfikatorów sesji w stanie zadań dev. Nie zabijaj całego domyślnego serwera: może zawierać sesję produkcyjną.
+
+```sh
+export AGENTCTL_HOME="$HOME/.agentctl-dev"
+node --experimental-strip-types --no-warnings bin/agentctl.ts status --json
+tmux list-windows -t '=agentctl-dev'
+tmux kill-session -t '=agentctl-dev'
+${EDITOR:-vi} "$AGENTCTL_HOME/config.yaml"
+```
+
+Teraz dodaj powyższe klucze YAML, pozostaw stare worktree i stan zadań, a procesy dev uruchom ponownie, aby wczytały socket. Zrestartuj również proces MCP dev. tmux nie przenosi działających procesów agentów między serwerami; resume odtworzy ich okna na nowym serwerze.
+
+```sh
+node --experimental-strip-types --no-warnings bin/agentctl.ts up --no-attach
+node --experimental-strip-types --no-warnings bin/agentctl.ts status
+node --experimental-strip-types --no-warnings bin/agentctl.ts resume
+node --experimental-strip-types --no-warnings bin/agentctl.ts doctor
+tmux -L agentctl-dev attach -t '=agentctl-dev'
+```
+
+Po utracie serwera/sesji niedokończone zadania pokazują `needs-attention`, wskazówkę odzyskania i jedno zdarzenie `tmux-lost` w dzienniku na epizod utraty. Claude zapisuje identyfikator przy `SessionStart`; zapisy pozostałych dostawców zachowujemy od razu po otrzymaniu. Jeśli istnieje zapisana sesja, po sprawdzeniu listy użyj wskazanego `agentctl resume TASK`. Bez niej przygotuj spec z **nowym ID zadania**, skieruj repozytoria na stare worktree i uruchom zadanie zastępcze przez `agentctl new --reuse recovery.md`; nie zakładaj, że `--continue` lub `--last` wskaże utraconą rozmowę. Gotowe raporty oraz zadania zamknięte i anulowane zachowują dotychczasowy stan.
+<!-- tmux-dev-end -->
+
 Pierwsze zadanie:
 
 ```sh
@@ -361,7 +527,7 @@ Play a notification sound when a background task finishes.
 | `model` | nie | Nazwa modelu przekazana agentowi; pominięta lub `default`: domyślny model agenta. |
 | `effort` | nie | `low`, `medium`, `high` (domyślnie), `xhigh`, `max` (nie dla Codexa). |
 | `repos[]` | tak | Co najmniej jeden `{path, worktree, base, branch}`. Agent startuje w pierwszym worktree. |
-| `setup` | nie | Komendy shell uruchamiane w pierwszym worktree po `git worktree add` i przed linkami. |
+| `setup` | nie | Komendy shell uruchamiane po `git worktree add` i przed linkami, per repozytorium w jego własnym worktree: `repos[].setup` wpisu, w razie braku `setup` z `.agentctl.yaml` tego repo. `setup` z najwyższego poziomu specu (i globalny) należy tylko do pierwszego repo. Z czatu niedozwolone. |
 | `links[]` | nie | Symlinki `{from, to}` w pierwszym worktree, np. żeby podłączyć klienta do testowanego backendu. |
 | `env` | nie | Zmienne środowiskowe okna tmux. |
 | `review_of` | nie | ID recenzowanego zadania; recenzent musi użyć innego agenta lub innego modelu niż autor. |
@@ -371,6 +537,9 @@ Play a notification sound when a background task finishes.
 | `touches` | nie | Globy plików, które zadanie zmieni: ostrzeżenie, gdy aktywne zadanie już je zmienia. |
 | `cohort` | nie | Nazwa grupy, do której należy zadanie (`--cohort` przy `new` i `queue` ją nadpisuje). Bez niej zadanie nie należy do żadnej kohorty. |
 | `report` | nie | Gdzie agent zapisuje raport (domyślnie `<cache>/<task>/<TASK>.md`). |
+
+Podgląd odrzuca linki wskazujące na siebie oraz link wewnątrz jego celu lub cel wewnątrz linku, także po rozwiązaniu symlinków w ścieżce. Brak bezwzględnej ścieżki `links.from` powoduje ostrzeżenie; `from` musi pozostać wewnątrz głównego worktree.
+
 
 W ścieżkach działają placeholdery `{task}`, `{TASK}` i `{cache}`. Wszystkie klucze, typy i wartości domyślne: [docs/configuration.md](docs/configuration.md#spec-keys) (po angielsku). Błędy są zgłaszane wszystkie naraz, zwykłymi słowami, z podpowiedzią.
 
@@ -406,8 +575,12 @@ Każdy klucz z typem, wartością domyślną i znaczeniem: [docs/configuration.m
 
 `agentctl board` to pełnoekranowy przegląd wszystkich zadań, odświeżany co 2 sekundy. `agentctl board --tmux` otwiera go w oknie `board` sesji agentctl. Od 110 kolumn po prawej widać ostatnie linie wybranego okna; poniżej lista zajmuje całą szerokość.
 
+Każde odświeżenie planszy — okresowe, po zdarzeniu lub ręczne — anuluje poprzedni termin. Następne uruchamia się po zakończeniu wspólnego odczytu (także po błędzie): po 2 sekundach przy niedokończonych zadaniach, po 5 sekundach, gdy wszystkie są zakończone. Wyjście anuluje timer i oczekujące ponowienie.
+
+Strzałki działają podczas skanowania zadań i zbierania statusów; zmiana zaznaczenia zleca nowy podgląd i pozostaje zachowana po zakończeniu starszego odświeżenia.
+
 ```text
-agentctl board  agentctl-test · 2 tasks · 06:54:51 · Disk: ok; free 307.4 GiB; agentctl worktrees 0.0 GiB
+agentctl 0.17.2 board · agentctl-test · 2 tasks · 06:54:51 · Disk: ok; free 307.4 GiB; agentctl worktrees 0.0 GiB
   TASK                 AGENT          STATE               TIME    TOKENS  PROGRESS REPORT   │ NEON-BACKEND-TASK-12 · last 1 lines
 ▸ NEON-BACKEND-TASK-12 cx S 6.1 XH    ⚙ working           1m 00s  n/d     -        -        │ codex · model: gpt-6.1-sol · effort: xhigh
   NEON-CITY-REVIEW-12  cl O 5.5 HI    ⚙ working           1m 00s  n/d     -        -        │ Working (esc to interrupt)
@@ -458,7 +631,7 @@ W sesji tmux agentctl włączona jest mysz (klik w nazwę okna w pasku stanu), a
 Czytanie ekranu co 15 sekund to zgadywanie, więc `agentctl new` prosi też każdego agenta, żeby zgłaszał się sam: Claude Code przez hooki (`Notification`, `Stop`, `StopFailure`), Codex przez komendę `notify`. `agentctl event` (nigdy nie wpisywane ręcznie) zapisuje wiadomość, od razu aktualizuje stan zadania i powiadamia. Obserwator zostaje jako rezerwa, a jedna zmiana stanu jest ogłaszana raz.
 
 - Powiadomienia idą przez `terminal-notifier`, jeśli jest zainstalowany (kliknięcie uruchamia `agentctl attach <task> --switch-client` i wysuwa terminal na wierzch), w przeciwnym razie przez `osascript` (`notify-send` na Linuksie). Kanał wybiera `notify.backend`; `agentctl notify-test` mówi, którym kanałem poszła wiadomość testowa.
-- Teksty: `NC-42: <pytanie>`, `NC-42: raport gotowy – <werdykt>` (werdykt to pierwsza sensowna linia raportu albo linia pasująca do `notify.verdict_pattern`), limit użycia, zadanie czekające dłużej niż 120 sekund, zniknięte okno. Teksty są na razie po polsku.
+- Teksty: `NC-42: <pytanie>`, `NC-42: raport gotowy – <werdykt>` (werdykt to `verdict` bloku outputs, linia pasująca do `notify.verdict_pattern` albo linia werdyktu w nagłówku raportu), limit użycia, zadanie czekające dłużej niż 120 sekund, zniknięte okno. Teksty są na razie po polsku.
 - Stany: [diagram wyżej](#stany-zadań). Szczegóły, tabele zdarzeń i to, co sprawdzono na Claude Code 2.1.309 i Codex 0.166.0: [docs/details.pl.md](docs/details.pl.md#zdarzenia).
 
 
@@ -658,7 +831,7 @@ agentctl stats --since 30d             # per agent/model/effort: zadania, median
 
 - Rekord ma zadanie, kohortę, projekt, zlecenie i to, co faktycznie działało, start, raport, zamknięcie lub anulowanie (z powodem), czas, tokeny (wejście, wyjście, cache; `null`, gdy nie znaleziono logu), commity i pliki, pierwszą linię werdyktu i przeniesienie. Ten sam raport jest zapisywany raz.
 - Udziały ok, partial i fail w `stats` liczą się od zadań, które oznaczyłeś; zadania przeniesione po limicie do drugiego dostawcy liczą się w grupie, która go osiągnęła.
-- Board: **`l`** pokazuje log, **`o`** / **`p`** / **`f`** oznaczają zaznaczone zakończone zadanie jako ok / partial / fail (`p` nadal wstrzymuje kolejkę, gdy nie zaznaczono zakończonego zadania). MCP: `usage`, `log`, `stats` (odczyt) i `mark` (zapis, za `mcp.allow`, bez kroku confirm).
+- Board: **`l`** pokazuje log, **`o`** / **`p`** / **`f`** oznaczają zaznaczone zakończone zadanie jako ok / partial / fail (`p` nadal wstrzymuje kolejkę, gdy nie zaznaczono zakończonego zadania). MCP: `usage`, `log`, `stats` (odczyt) i `mark` (zapis, za `mcp.allow`, zbiorczo po podglądzie/confirm).
 
 Szczegóły: [docs/details.pl.md](docs/details.pl.md#historia-i-statystyki).
 
@@ -723,7 +896,7 @@ agentctl up                                # start dnia
 `agentctl mcp` to lokalny serwer MCP na stdio. Aplikacja Claude, Claude Code i VS Code uruchamiają go same; nic nie nasłuchuje na porcie.
 
 - **Narzędzia odczytu** (zawsze włączone): `status`, `events_since`, `peek`, `list_reports`, `get_report`, `pull_ready`, `task_spec`, `queue_list`, `cohort_list`, `cohort_show`, `overlap`, `usage`, `log`, `stats`, `limits`, `gc_preview`, `version`.
-- **Narzędzia zapisu** (wyłączone, dopóki nie wpiszesz ich w `mcp.allow`): `send`, `new`, `queue`, `queue_rm`, `cancel`, `interrupt`, `close`, `move`, `mark`, `set_limits`, `reserve`, `resume`. `new`, `queue`, `cancel`, `move`, `set_limits`, `reserve` i `resume` nic nie zmieniają, dopóki nie zostaną wywołane ponownie z `confirm: true`; `mark` tylko zapisuje w historii wynik, który podałeś, więc nie ma kroku confirm. Każdy zapis trafia do audytu w `~/.agentctl/mcp-audit.log` i jest ogłaszany na pulpicie.
+- **Narzędzia zapisu** (wyłączone, dopóki nie wpiszesz ich w `mcp.allow`): `send`, `new`, `queue`, `queue_rm`, `cancel`, `interrupt`, `close`, `move`, `mark`, `set_limits`, `reserve`, `resume`. `new`, `queue`, `cancel`, `move`, `set_limits`, `reserve` i `resume` nic nie zmieniają, dopóki nie zostaną wywołane ponownie z `confirm: true`; `mark` zapisuje wynik, który podałeś; wiele zadań wymaga podglądu/confirm. Każdy zapis trafia do audytu w `~/.agentctl/mcp-audit.log` a powiadomienia o zapisach są domyślnie grupowane.
 - Żadne narzędzie nie scala, nie pushuje, nie robi rebase, nie usuwa gałęzi, nie sprząta (`gc_preview` tylko patrzy), nie uruchamia komend shell i nie przyjmuje ścieżki.
 
 ```sh
@@ -750,7 +923,7 @@ Czego agentctl nigdy nie robi:
 
 - **Żadnego merge, rebase ani push.** `git` jest wołany tylko z `worktree add`, `worktree remove`, zapytaniami tylko do odczytu i, dla `gc --branches`, `branch -d` (tylko scalone gałęzie, nigdy `-D`). Bez `--force`; worktree z wyciągniętym `main` lub `master` nigdy nie jest usuwany.
 - **Żadnego auto-accept.** Nie dodaje takiej flagi, a config, który próbuje (`--dangerously-skip-permissions`, `--yolo`, `--full-auto`, `-a never`, …), jest nieprawidłowy. Agent dalej pyta Cię o zgodę. Codex działa z `--sandbox danger-full-access`, jak zlecono, ale z nietkniętą polityką zatwierdzeń.
-- **Nigdy nie odpowiada na dialog za Ciebie.** Dialog zaufania do folderu w świeżym worktree potwierdza człowiek; `new` na to czeka.
+- **Nigdy nie odpowiada na dialog za Ciebie.** Dialog zaufania do folderu w świeżym worktree potwierdza człowiek; `new` na to czeka. Modal „Update available" Codexa też jest Twój (okna zadań startują z `-c check_for_update_on_startup=false`, więc aktualny Codex go nie pokazuje); jeśli starszy Codex i tak go pokaże, start zatrzymuje się od razu jako needs-input zamiast czekać do timeoutu gotowości.
 - **Żadnych werdyktów.** Ocena raportu należy do Ciebie (albo Twojego czatu).
 - **Mały ślad.** Pliki trafiają tylko do folderu stanu i folderu cache, nigdy do `~/.claude` ani `/tmp`. Czat może tylko to, co wymienia `mcp.allow`.
 
@@ -771,11 +944,15 @@ Czego agentctl nigdy nie robi:
 - Serwer MCP jest lokalny i działa jako Ty. To decyzja zaufania wobec czatu, nie piaskownica.
 - Testowane na macOS; Linux jest obsługiwany dla schowka i `notify-send`, ale rzadziej używany.
 
+## Niezależność
+
+agentctl to niezależne narzędzie open source. Nie jest powiązane z Anthropic, OpenAI ani Google, nie jest przez nie wspierane ani sponsorowane. Claude Code, Codex i Gemini są produktami i znakami towarowymi ich właścicieli.
+
 ## Plan rozwoju
 
 Pomysły, nie obietnice:
 
-1. Więcej dostawców przez warstwę providerów – następny: Google Antigravity CLI.
+1. Google Antigravity CLI (Gemini) jako następny dostawca, przez warstwę providerów.
 2. Publikacja npm (paczka jest przygotowana).
 3. Poprawki wynikające z codziennego użycia.
 
@@ -799,3 +976,73 @@ Od 0.17.1 MCP udostępnia ponawianie i sterowanie kolejką, kohorty, sprzątanie
 W 0.17.2 odczyty MCP domyślnie zwracają zwięzły tekst, a `pull_ready` skróty raportów. Pełne dane: `format: "json"`, `mode: "full"` lub sekcja `get_report`. `report-candidate` nie spełnia zależności; `overloaded` ponawia tylko przy pustym, bezczynnym promptcie. Szczegóły w [konfiguracji](docs/configuration.md).
 
 Skrót raportu oznacza dostarczenie skrótu; pełne pobranie i ocena mark są odrębne. Raport kończy znacznik `<!-- agentctl:report-end -->` albo zakończona tura i report.settle_s (30 s), w bieżącej próbie.
+
+## Workflow NC: raporty, przeglądy i wiadomości
+
+Protokół kompletnego raportu prosi o wersjonowany blok YAML przed `<!-- agentctl:report-end -->`:
+
+```agentctl-outputs
+version: 1
+verdict: PASS
+commits: [{repo: app, branch: feature, sha: aaaaaaa}]
+integrate: [{repo: app, branch: feature, sha: aaaaaaa, note: propozycja integracji}]
+decisions: [Wybierz termin wdrożenia]
+actions: [{title: Wdrożenie po zgodzie, shell: "echo proponowana komenda"}]
+checks: [{name: unit tests, result: PASS}]
+preview: https://example.invalid/preview
+notes: []
+```
+
+`outputs`, `outputs_valid` i `outputs_errors` opisują fakty. Gałęzie i SHA muszą istnieć w repozytoriach zadania. Brak/błąd danych ostrzega, lecz kompletny raport nadal jest gotowy. Akcje są propozycjami; agentctl nie wykonuje ich komend, nie ocenia wyniku i nie scala. `status` liczy decyzje/akcje; `pull_ready` i `get_report` pokazują dane. `cohort_show` zbiera propozycje integracji (oznacza duplikaty i różne SHA tej samej gałęzi), decyzje, akcje i sprawdzenia z ID zadań. `events_since` dodaje nowe decyzje/akcje do `needYou` raz na hash raportu. Walidacja jest per sekcja i per wpis: zły wpis odpada z ostrzeżeniem w `outputs_errors`, poprawna reszta zostaje w `outputs` (`outputs_partial: true`, `outputs_valid: false`), a `status` i `cohort_show` liczą zachowane decyzje i akcje. Cały blok odrzuca tylko zła `version`/`verdict`. Wpisy `checks` mają postać `{name, result: PASS|FAIL|WARN|SKIP, note?}` (forma standardowa); sam tekst (`"unit: PASS"`) lub mapa z jednym kluczem (`- unit: PASS`, tak YAML czyta niecytowany zapis) są przyjmowane i normalizowane, bez względu na wielkość liter.
+
+```yaml
+review: auto
+# Lub w .agentctl.yaml:
+# review: {default: auto, rerun: true, template: review.md}
+after: [{task: IMPLEMENT, verdict: [PASS, PARTIAL]}]
+repos:
+  - path: ~/code/app
+    worktree: ~/work/app-check
+    branch: check
+    base: "@IMPLEMENT:app"
+```
+
+Automatyczny przegląd dodaje `TASK-REV` po raporcie autora, na jego gałęzi i w tej samej kohorcie. Preferuje innego dostępnego dostawcę z `review.*` lub `equivalents`; w razie niedostępności wymaga innego skonfigurowanego modelu. Brak poprawnej pary daje jawny wpis o oczekującym przeglądzie. Recenzent dostaje własny odłączony worktree (`<worktree_root>/<repo>-<task>-rev`, po jednym na repozytorium autora, przypięty do commita autora) i pisze raport pod `cache/<task-rev>/<TASK-REV>.md`; nigdy nie dzieli checkoutu ani gałęzi z autorem. Startuje dopiero po zakończonej turze autora (report-end, czas settle raportu, brak follow-upu w kolejce lub niepotwierdzonego, brak szkicu, brak git w checkoucie autora); do tego czasu kolejka pokazuje `czeka na autora …`. Jeśli autor zrobi nowy commit przed startem, przegląd przypina się do nowego SHA (delta i heads zaktualizowane, wpis `review-repinned`). `review.rerun: true` tworzy `REV2` po nowym raporcie, z SHA zapisanym dla poprzedniego przeglądu jako bazą delty. Pierwszą bazą jest zapisana baza autora. Szablon znajduje się w `docs/examples/`, a ustawienia opisuje dokument konfiguracji.
+
+`base: "@TASK"` przy starcie wybiera commit z outputs tego zadania, a bez niego HEAD jego gałęzi; przy wielu repozytoriach podaj `:repo-name`. Konkretny commit widać w podglądzie new i w TASK.md. Brak lub niejednoznaczność blokuje start. Warunkowe `after` blokuje przy innym werdykcie albo z powodem `brak werdyktu`; zwykłe `after: TASK` nadal czeka wyłącznie na kompletny raport.
+
+`send` od razu wkleja follow-up pracującemu Claude/Codexowi. Potwierdzenie wymaga przyjęcia, nowego stanu pracy, echa transkryptu/kolejki lub nowego kompletnego raportu. Sam `idle_prompt` ani spóźniony Stop nie potwierdza dostarczenia; zablokowane pole daje `needs-attention` po `delivery_confirm_s`. Adapter wymagający bezczynności (`accepts_busy_prompt: false`) lub niepotwierdzona poprzednia wiadomość zatrzymuje kolejne w trwałej kolejce FIFO. Status/peek pokazują kolejkę, odpowiedź mówi „wklejono”, pozycję w kolejce albo „niepotwierdzone”. Watch wysyła po kolei.
+
+Odpowiedź `send` i `delivery_result` (TASK.md, `status --json`, MCP `status`) mówią, co się stało, w stanach: dostarczono (`delivered`, ze źródłem), `w kolejce agenta – niepotwierdzone` (queued-in-agent: ekran pokazuje wiadomość w kolejce agenta, nic jej nie potwierdziło) , `w kolejce agenta – potwierdzone` (`queued-in-agent-confirmed`: dokładny enqueue, pending zostaje do wstrzyknięcia) albo `nie dostarczono – tekst w polu wpisywania` (not-delivered-in-field: wklejka stoi w polu). **„Dostarczono” padnie tylko z dokładnego źródła**, porównanego dosłownie (jedyna normalizacja to końce linii; żaden ciąg białych znaków nie jest ściskany): hook UserPromptSubmit (jego prompt dla zwiniętej wklejki jest owinięty w `<pasted_content id=…>`; wrapper zdejmuje się tylko z tekstu hooka, parami identyfikatorów, a zagnieżdżone, niezgodne lub luźne znaczniki są niejednoznaczne = brak dowodu; oczekujący prompt porównuje się dosłownie), payload notify Codexa albo transkrypt sesji samego zadania (Claude Code: linia `user`; dla `promptSource:"queued"` wymagana jest jednoznaczna korelacja z nieskonsumowanym enqueue po starcie dostawy; Codex: linia `response_item` / `item_completed`, w starszych wersjach `user_message`) z wiadomością zapisaną po rozpoczęciu dostawy, dokładnie równą oczekującej (dla zwiniętej wklejki pełna treść, nie etykieta). Czytane są tylko pliki transkryptów własnych sesji zadania: sesja wskazana przez hook/statusLine/notify tego attemptu, z przypiętą tożsamością jednego pliku. Brak, podmiana lub rotacja pliku nie przełącza na inną sesję. Sam enqueue potwierdza tylko kolejkę agenta; pending zostaje także po końcu tury i upływie limitu, z jawną notą do chwili wstrzyknięcia albo zgodnego hooka. Tego, co agent sam robi z wiadomością, nie liczy się do treści: białe znaki na końcu są obcinane, nowe linie wokół zwiniętej wklejki to dopełnienie wrappera, Claude Code zapisuje tabulator jako cztery spacje. Ekran nie potwierdza niczego u pracującego agenta: echo Codexa i znak kolejki Claude Code (przyciemnione „Press up to edit queued messages”, wiadomość w kolejce z „ctrl+x ctrl+s to send now”) tylko klasyfikują stan jako `w kolejce agenta – niepotwierdzone` (znak – tylko gdy nie było go na ekranie tuż przed naszym Enter i pojawił się po nim, a nasza wklejka zniknęła z pola); oczekujący prompt zostaje, a dostawa czeka dalej na hook lub transkrypt. Dla bezczynnego agenta, w którego wklejono, zostają starsze sygnały pierwszego promptu każdego zadania (tura ruszyła, zmienił się kanoniczny raport, wiadomość w całości w echu nad pustym polem). **agentctl naciska Enter tylko w wywołaniu, które wkleja**: do trzech razy, a przed każdym robi capture i porównuje cały obszar pola wpisywania bajt w bajt (z pustymi liniami w środku) z obrazem zrobionym zaraz po wklejce, który sam musi być naszą wklejką (jeden placeholder albo linie tekstu); na tym samym capture nie może być dialogu. Pole kończy się na strukturalnej granicy composera (ramki Claude albo znany obszar modelu i skrótów Codexa), nigdy na tekście podobnym do stopki wewnątrz pola; nieczytelna lub ucięta struktura oznacza odmowę Enter. Różnica, zmieniony pierwszy obraz albo otwarty dialog oznaczają brak Enter i `nie dostarczono – tekst w polu wpisywania` (needs-attention przy najbliższym ticku watch, z dwiema drogami wyjścia). `watch` nigdy nie naciska Enter. `agentctl send --enter-only TASK` pokazuje dokładną treść pola, stan ekranu i token dla tych bajtów; `agentctl send --enter-only TASK --confirm TOKEN` robi nowy capture i naciska Enter tylko, gdy obszar jest nadal bajt w bajt tekstem z podglądu i obrazem zapisanym po naszej wklejce (czyli agentctl wkleił go dla tej dostawy), a na ekranie nie ma dialogu; w przeciwnym razie odmawia z przyczyną. MCP: `send` z `enter_only: true`, bez tekstu, wymaga osobnej zgody `send_enter` w `mcp.allow` (samo `send` jej nie daje); bez `confirm: true` tylko pokazuje podgląd (tekst, stan, `token`), z `confirm: true` i tym `token` naciska; odmowa i nieudany klawisz (błąd tmux `send-keys`) to odpowiedzi `isError` z przyczyną, nieudany klawisz trafia do audytu jako `failed` i nigdy nie jest ogłaszany jako wysłany, wciśnięty Enter trafia do audytu jako wykonany (`enter-sent`, z dostawą) i jest ogłaszany, a odpowiedź rozdziela „Enter wysłany” od „dostarczenie potwierdzone”. Przy otwartym pytaniu Codexa nic nie jest wklejane: odpowiedź podaje treść pytania („Codex ma otwarte pytanie „…” (zwinięte, N)”), a wiadomość czeka w kolejce FIFO. Dziennik (`events_since`, rodzaj WIADOMOŚĆ) zapisuje każdą zmianę wyniku wiadomości z id dostawy: w kolejce, nie dostarczono, dostarczono (pierwszy prompt zadania: tylko dwa pierwsze). Oczekującą wiadomość można wycofać: `agentctl send --withdraw TASK` (opcjonalnie `--entry ID`, wystarczy unikalny prefiks; `peek` i `status` wypisują `prompt_queue`) usuwa wpis FIFO albo czyści oczekujący prompt przed rozpoczęciem dostawy; gdy dostawa już ruszyła, agent może nad nią pracować, więc wiadomość dostaje znacznik `stale` zamiast zniknąć. MCP: `send` z `withdraw: "<id>"` (ta sama zgoda `send`).
+
+Limit dostawcy daje jedno powiadomienie na epizod, z czasem resetu albo `n/d`. Świeży odczyt wolnego limitu powyżej `limited.resume_above_percent` (domyślnie 5) lub upłynięcie znanego resetu dopuszcza wysłanie `limited.message` (`kontynuuj`) do bezczynnego okna z pustym polem. Zabezpieczenia overload sprawdzają warunki przed wklejeniem i Enterem; licznik prób i ograniczenia przeżywają restart. `limited.auto_resume: false` wyłącza wysyłanie. Dostawca i model pozostają te same.
+
+`agentctl mark --cohort NC ok --note "sprawdzone"` pokazuje dokładny zakres; `--yes` go potwierdza. MCP przyjmuje `task`, `tasks` lub `cohort`; więcej niż jedno zadanie wymaga podglądu/potwierdzenia. Przy filtrze kohorty board `o/p/f` pokazuje ID przed oceną. Agentctl zapisuje wynik podany przez człowieka. Zamknięcie wszystkich zadań kohorty daje `gc_suggest` z chronionym planem sprzątania tej kohorty, bez automatycznego usuwania.
+
+Podglądy MCP mają niezależne `preview_token`, ważne dziesięć minut, i odmawiają wykonania po zmianie zakresu. Przekaż token oraz identyczne argumenty z `confirm: true`; bez tokena działa ostatni pasujący podgląd. `gc_preview` dla kohorty podaje tylko liczbę obcych worktree; potwierdzone `gc` zwraca wyniki bez powtarzania planu. `notify.mcp_writes` domyślnie ma `summary`, najwyżej raz na 60 sekund; dostępne też `all` i `off`. Audyt pozostaje pełny. F12 wraca do boarda własnej sesji, także przy równoległym dev. Czas obejmuje checkout/setup przed uruchomieniem agenta; ostrzeżenie o starym odczycie planu pojawia się raz na odczyt.
+
+
+## Dostawcy i Kimi Code 2.5.0
+
+Domyślnie aktywni są `claude` i `codex` (oba obowiązkowe). Kimi włączysz jawnie w configu:
+
+```yaml
+providers: [claude, codex, kimi]
+limits: {claude: 3, codex: 3, kimi: 1}
+capacity: {kimi_usage_probe: false}
+review: {prefer: [codex, kimi, claude]}
+```
+
+`agent: kimi` uruchamia interaktywny `kimi`; alias bez prefiksu dostaje `kimi-code/`, a `model: default` pomija flagę modelu. Katalog modeli, `display_name` i `support_efforts` pochodzą z configu TOML Kimi. Obsługiwane poziomy to `low/high/max`, wyłącznie zgodnie z katalogiem wybranego modelu; bez danych agentctl nie wymusza effort. Aliasy bez wersji są dynamiczne po stronie serwera. Manager i Remote Control pozostają Claude-only.
+
+Kimi nie ma sandboxa CLI. Zgody zależą od reguł Kimi i nie zapewniają izolacji; zapis pliku może przejść bez pytania. Trust, login i dialogi aktualizacji obsługuje człowiek. Agentctl odrzuca flagi auto-akceptacji oraz `auto` (Never Ask); `manual` (Always Ask) i `yolo` (Ask When Needed) wymagają `permission.dangerous_command_guard=true`. Agentctl ustawia per proces `KIMI_CODE_NO_AUTO_UPDATE=1` oraz domyślnie `KIMI_DISABLE_TELEMETRY=1`. W rzeczywistym 2.5.0 pasująca reguła Bash allow nadal pyta w `manual`; Ask When Needed wymaga `yolo` ze strażnikiem. Agentctl nigdy nie zapisuje configu Kimi. Kimi przesyła prompt, odczytane pliki, wyniki poleceń i diffy do Moonshot AI także dla prywatnego repo. Wyłączenie telemetrii nie wyłącza tego przesyłania danych zadania.
+
+Limity planu to `n/d`, dopóki nie włączysz `capacity.kimi_usage_probe`. Sonda otwiera osobną krótką sesję w neutralnym katalogu, wymaga ręcznego trust, wykonuje `/usage`, parsuje 5h/Weekly/Monthly i zamyka się przez `/exit`; nie czyta credentials ani OAuth i nie woła API dostawcy. `/usage` nigdy nie trafia do okna zadania. Sonda jest ograniczona do jednej próby na pięć minut. Szczegóły i przykłady dokładnych reguł Bash: [configuration](docs/configuration.md#kimi-code-250).
+
+Przy trzech aktywnych dostawcach `move TASK` wymaga `--agent`; komunikat podaje miejsca i odczytane procenty. `review: auto` szuka pierwszego aktywnego, zainstalowanego i mapowalnego dostawcy innego niż autor według `review.prefer` albo kolejności `providers`. Board, usage, capacity, limity i MCP pokazują Kimi tylko po aktywacji.
+
+Rzeczywisty model/effort Kimi 2.5.0 pochodzi z pasywnego `llm.request.modelAlias/thinkingEffort`, obok zamówienia w TASK.md i status JSON. Stopka może pokazywać `high`, gdy wire potwierdza `low`; rozbieżność z zamówieniem daje ostrzeżenie. Sesje wiążemy przez `state.json` i indeks sesji; tokeny pochodzą z `usage.record`.
+
+Capacity planu Claude może opcjonalnie odświeżać się bez aktywnego zadania: ustaw `capacity.claude_usage_probe: true` (domyślnie wyłączone). `capacity` i `usage` uruchamiają `/usage` w neutralnej, osobnej sesji najwyżej co 15 minut, bez promptu, tokenów modelu i dotykania okien zadań. `capacity.claude_usage_probe_interval_minutes` pozwala wydłużyć odstęp. Trust/login katalogu wymaga jednorazowej ręcznej akcji Marcina; agentctl nigdy nie odpowiada na dialogi. Szczegóły źródeł, nieaktualności i ograniczeń parsera: [configuration](docs/configuration.md#claude-plan-usage-probe).
+
+Wiadomości do Codex CLI 0.167: gdy Codex pracuje, `send` używa Tab, jeśli stopka pokazuje „tab to queue message”; bezczynny Codex przyjmuje Enter. Zawinięty tekst jest porównywany z wklejoną wiadomością, a dostawę potwierdza tylko transkrypt sesji zadania lub hook. Claude Code zachowuje Enter, Kimi zachowuje C-m. Ponowne dodanie ID po `queue rm` zaczyna świeżą próbę; poprzednia anulowana próba zostaje w `state/.history`.

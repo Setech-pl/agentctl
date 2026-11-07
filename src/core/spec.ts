@@ -1,3 +1,8 @@
+import { validateLink, missingLinkTargets } from './links.ts';
+import { validateLaunch } from './safety.ts';
+import { provider, isActive, activeProviders } from './providers/registry.ts';
+import { VERDICTS } from './outputs.ts';
+import type { OutputVerdict } from './outputs.ts';
 import path from 'node:path';
 import YAML from 'yaml';
 import {
@@ -8,9 +13,10 @@ import {
   parseEnumValue,
   parseEnv,
   parseLinks,
+  parseReview,
 } from './config.ts';
 import { parseReportPaths } from './config.ts';
-import type { AgentName, Effort, GlobalConfig, Layer, Link } from './config.ts';
+import type { AgentName, Effort, GlobalConfig, Layer, Link, ReviewSettings } from './config.ts';
 import type { Order } from './equivalents.ts';
 import { AgentctlError, Problems, TASK_ID, cohortNameProblem, errorMessage, fillPlaceholders, isObject, resolvePath, windowName } from './util.ts';
 
@@ -26,10 +32,25 @@ export interface ResolvedRepo {
   path: string;
   worktree: string;
   base?: string;
+  baseTask?: string;
   branch?: string;
+  /** Shell commands for this repository's worktree: the spec's `repos[].setup`, else the repository's own .agentctl.yaml (the first repository also takes the spec/global `setup`). */
+  setup?: string[];
+}
+
+export interface AutoReviewSource {
+  author: string;
+  hash: string;
+  /** The author's commit per repository that the review is pinned to (its own checkout is detached there). */
+  heads: Record<string, string>;
+  /** The start of the reviewed delta per repository, and the delta text in the prompt (to re-pin when the author commits again). */
+  bases?: Record<string, string>;
+  delta?: string;
 }
 
 export interface ResolvedSpec {
+  /** Internal queue provenance, never accepted from spec YAML. */
+  autoReview?: AutoReviewSource;
   index: number;
   task: string;
   window: string;
@@ -42,6 +63,7 @@ export interface ResolvedSpec {
   setup: string[];
   env: Record<string, string>;
   reviewOf?: string;
+  review?: ReviewSettings;
   report: string;
   /** Other places the report may be (paths and globs, placeholders filled; a relative one is relative to the worktree). */
   reportAlt?: string[];
@@ -54,6 +76,7 @@ export interface ResolvedSpec {
   priority: 'high' | 'normal';
   /** Tasks that must have a report before this one starts (queue). `new` refuses to start a task whose `after` is not met. */
   after: string[];
+  afterVerdicts?: Record<string, OutputVerdict[]>;
   /** Globs of the files the task will change: `queue` and `new` warn when an active task already changes matching files. */
   touches: string[];
   /** The cohort the task belongs to, as written. Absent: no cohort (there is no default one). */
@@ -147,8 +170,8 @@ export interface ResolveContext {
 /** Task IDs whose window name is one agentctl uses for itself (`watch`, `board`, `manager`). */
 export const RESERVED_TASK_IDS = ['WATCH', 'BOARD', 'MANAGER'];
 
-export const SPEC_KEYS = ['task', 'agent', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'report', 'pin', 'remote_control', 'priority', 'after', 'touches', 'cohort'];
-export const REPO_KEYS = ['path', 'worktree', 'base', 'branch'];
+export const SPEC_KEYS = ['task', 'agent', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'review', 'report', 'pin', 'remote_control', 'priority', 'after', 'touches', 'cohort'];
+export const REPO_KEYS = ['path', 'worktree', 'base', 'branch', 'setup'];
 
 function label(raw: RawSpec): string {
   const task = raw.header.task;
@@ -194,7 +217,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
 
   checkKeys(h, SPEC_KEYS, where, p);
   const task = checkTask(raw, p);
-  const specAgent = parseEnumValue(h.agent, AGENT_NAMES, 'agent', p);
+  const specAgent = (typeof h.agent === 'string' && (AGENT_NAMES as readonly string[]).includes(h.agent) ? h.agent as AgentName : parseEnumValue(h.agent, activeProviders(config), 'agent', p));
   const specEffort = parseEnumValue(h.effort, EFFORTS, 'effort', p);
   let specModel: string | undefined;
   if (h.model !== undefined && h.model !== null) {
@@ -203,7 +226,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   }
 
   // Repos
-  const rawRepos: { path: string; worktree?: string; base?: string; branch?: string }[] = [];
+  const rawRepos: { path: string; worktree?: string; base?: string; branch?: string; setup?: string[] }[] = [];
   if (!Array.isArray(h.repos) || h.repos.length === 0) {
     p.add('"repos" must list at least one repository: repos: [{path: ~/code/app, worktree: ~/wt/app-task}]');
   } else {
@@ -218,6 +241,10 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
         if (value === undefined || value === null) continue;
         if (typeof value === 'string' && value.trim() !== '') repo[key] = value.trim();
         else p.add(`${at}.${key} must be a non-empty string`);
+      }
+      if (entry.setup !== undefined && entry.setup !== null) {
+        if (Array.isArray(entry.setup) && entry.setup.every((c: unknown) => typeof c === 'string' && c.trim() !== '')) repo.setup = entry.setup as string[];
+        else p.add(`${at}.setup must be a list of non-empty shell commands`);
       }
       rawRepos.push(repo);
     });
@@ -247,11 +274,18 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     else p.add('remote_control must be true or false');
   }
   const after: string[] = [];
+  const afterVerdicts: Record<string, OutputVerdict[]> = {};
   if (h.after !== undefined && h.after !== null) {
     const list = Array.isArray(h.after) ? h.after : [h.after];
     for (const dep of list) {
       if (typeof dep === 'string' && TASK_ID.test(dep)) {
         if (!after.includes(dep)) after.push(dep);
+      } else if (isObject(dep) && typeof dep.task === 'string' && TASK_ID.test(dep.task)) {
+        checkKeys(dep, ['task', 'verdict'], 'after', p);
+        const values = Array.isArray(dep.verdict) ? dep.verdict : [dep.verdict];
+        if (!values.length || !values.every(v => (VERDICTS as readonly unknown[]).includes(v))) p.add('after.verdict must be PASS, PARTIAL, FAIL, BLOCKED or a non-empty list of them');
+        else if (after.includes(dep.task)) p.add(`duplicate after task ${dep.task}`);
+        else { after.push(dep.task); afterVerdicts[dep.task] = values as OutputVerdict[]; }
       } else p.add(`after must be a task ID or a list of task IDs (e.g. NC-12), got ${JSON.stringify(dep)}`);
     }
   }
@@ -284,9 +318,13 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     }
   }
 
+  const inheritedReview = { ...config.review, ...project?.review };
+  const explicitReview = h.review !== undefined ? parseReview(h.review, 'spec.review', p) : undefined;
+  const reviewEnabled = h.review === false ? false : h.review !== undefined || inheritedReview.default === 'auto';
+  const review = reviewEnabled ? { ...inheritedReview, ...explicitReview, default: 'auto' as const } : undefined;
   const agent = specAgent ?? project?.defaults.agent ?? config.defaults.agent;
   if (!agent && h.agent === undefined) {
-    p.add(`missing "agent" (one of ${AGENT_NAMES.join(', ')}); or set defaults.agent in .agentctl.yaml or ${config.path}`);
+    p.add(`missing "agent" (one of ${activeProviders(config).join(', ')}); or set defaults.agent in .agentctl.yaml or ${config.path}`);
   }
   const model = specModel ?? project?.defaults.model ?? config.defaults.model ?? 'default';
   const effort = specEffort ?? project?.defaults.effort ?? config.defaults.effort ?? 'high';
@@ -294,11 +332,13 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   // Remote Control is a Claude Code feature. In the spec it is an order (a codex task that asks for it is an error); as a default it only
   // applies to Claude tasks.
   const remoteDefault = project?.defaults.remoteControl ?? config.defaults.remoteControl ?? false;
-  if (specRemote === true && agent === 'codex') p.add('remote_control: true works for Claude only (Codex has no Remote Control); drop the key or use agent: claude');
-  if (specRemote === true || (specRemote === undefined && remoteDefault && agent === 'claude')) {
-    const flags = config.agents.claude.flags;
+  const remote = agent ? provider(agent).capabilities.remoteControl : false;
+  if (agent && !isActive(config, agent)) p.add(`provider ${agent} is not enabled; add it to providers: [claude, codex, kimi] in ${config.path}`);
+  if (specRemote === true && agent && !remote) p.add(`remote_control: true works for Claude only (${provider(agent).displayName} has no Remote Control); drop the key or use agent: claude`);
+  if (agent && remote && (specRemote === true || (specRemote === undefined && remoteDefault))) {
+    const flags = config.agents[agent].flags;
     const own = flags.find((f) => f === '--remote-control' || f === '--rc' || f === 'remote-control');
-    if (agent !== 'codex' && own) p.add(`remote_control: true, but agents.claude.flags in ${config.path} already has ${own}: use one of them (the server mode "remote-control" refuses the settings of the event hooks)`);
+    if (own) p.add(`remote_control: true, but agents.claude.flags in ${config.path} already has ${own}: use one of them (the server mode "remote-control" refuses the settings of the event hooks)`);
   }
 
   p.throwIfAny(`${label(raw)} is invalid:`, 'Run "agentctl spec example" to see the format.');
@@ -333,6 +373,9 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     const resolved: ResolvedRepo = { path: repoPath, worktree };
     if (repo.base) resolved.base = repo.base;
     if (repo.branch) resolved.branch = repo.branch;
+    // Own setup of this repository: its spec entry, then (first repository) the spec's top-level setup, then the repository's own project config.
+    const own = repo.setup ?? (repo === firstRepo ? specSetup : undefined) ?? projectOfRepo?.setup ?? (repo === firstRepo ? config.setup : undefined);
+    if (own && own.length > 0) resolved.setup = own.map(c => c);
     repos.push(resolved);
   }
   for (let i = 0; i < repos.length; i++) {
@@ -349,12 +392,14 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     if (fallback) return resolvePath(basicFill(fallback));
     throw new AgentctlError(`${taskId}: no repository "${name}" for {worktree:${name}}; add it to repos or provide {worktree:${name}|~/fallback}`);
   }));
+  for (const r of repos) if (r.setup) r.setup = r.setup.map(fill);
   // Links: later layers win for the same `from`.
   const linkByFrom = new Map<string, Link>();
   for (const link of [...config.links, ...(project?.links ?? []), ...specLinks]) {
     const expanded = fill(link.from);
     const from = path.isAbsolute(expanded) ? path.relative(repos[0]!.worktree, expanded) : expanded;
-    if (!from || from === '.' || from.startsWith('../')) throw new AgentctlError(`${taskId}: link from must stay inside the primary worktree: ${expanded}`);
+    if (!from || from === '.' || from.startsWith('../')) throw new AgentctlError(`${taskId}: link from must stay inside the primary worktree: ${expanded}`, missingLinkTargets([{ from: expanded, to: pathOf(link.to) }]).join('; ') || undefined);
+    validateLink(from, pathOf(link.to), repos[0]!.worktree);
     linkByFrom.set(from, { from, to: pathOf(link.to) });
   }
 
@@ -382,19 +427,22 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     effort,
     repos,
     links: [...linkByFrom.values()],
-    setup: (specSetup ?? project?.setup ?? config.setup ?? []).map(fill),
+    setup: repos[0]?.setup ?? [],
     env,
     report: pathOf(reportTemplate),
     prompt: raw.prompt,
     pin,
     priority,
     after,
+    ...(Object.keys(afterVerdicts).length ? { afterVerdicts } : {}),
     touches,
     requested: { agent: agent as AgentName, model, effort },
   };
   if (reviewOf) spec.reviewOf = reviewOf;
-  if (agent === 'claude' && (specRemote ?? remoteDefault)) spec.remoteControl = true;
+  if (review) spec.review = review;
+  if (agent && remote && (specRemote ?? remoteDefault)) spec.remoteControl = true;
   if (cohort) spec.cohort = cohort;
   if (reportAlt.length > 0) spec.reportAlt = reportAlt;
+  validateLaunch(config, spec, spec.env);
   return spec;
 }

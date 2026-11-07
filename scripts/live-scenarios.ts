@@ -1,3 +1,4 @@
+import { providerDispatchCases } from './provider-live-cases.ts';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -72,7 +73,7 @@ async function limitsAndEvents(): Promise<void> {
     await sleep(5000);
     check('LV-2 still waits while the limit is 1', !windows(h).includes('lv-2'));
     const lim = h.agentctl(['limits']);
-    check('limits shows 1/1 used and one queued', /claude\s+1\s+1\s+0\s+1\s+0\s+off\s+1/.test(lim.stdout), lim.stdout);
+    check('limits shows 1/1 used and one queued', /claude\s+1\s+1\s+0\s+1\s+1\s+0\s+0\s+off\s+1/.test(lim.stdout), lim.stdout);
     const set = h.agentctl(['limits', 'set', 'claude=2', '-y']);
     check('limits set claude=2 writes the config and keeps a .bak', set.code === 0 && fs.existsSync(path.join(h.agentctlHome, 'config.yaml.bak')), set.stdout + set.stderr);
     const started = await until('LV-2 starts', () => windows(h).includes('lv-2'));
@@ -89,7 +90,7 @@ async function limitsAndEvents(): Promise<void> {
       try { return JSON.parse(fs.readFileSync(path.join(h.agentctlHome, 'config-state.json'), 'utf8')).ok === false; } catch { return false; }
     }, 5000);
     const doctor = h.agentctl(['doctor']);
-    check('doctor reports the config problem', configRejected && doctor.code !== 0 && /✗ config\s+Cannot parse/.test(doctor.stdout), doctor.stdout);
+    check('doctor reports the config problem', configRejected && doctor.code !== 0 && /✗ config\s+Cannot parse/.test(doctor.stdout), JSON.stringify({ configRejected, code: doctor.code, stdout: doctor.stdout, stderr: doctor.stderr, receipt: fs.existsSync(path.join(h.agentctlHome, 'config-state.json')) ? fs.readFileSync(path.join(h.agentctlHome, 'config-state.json'), 'utf8') : null }));
     fs.copyFileSync(path.join(h.agentctlHome, 'config.yaml.keep'), path.join(h.agentctlHome, 'config.yaml'));
     // events
     const ev = h.agentctl(['events', '--json', '--keep']);
@@ -121,7 +122,7 @@ async function gcScenario(): Promise<void> {
     fs.writeFileSync(shots, 'old output');
     const old = new Date(Date.now() - 20 * 86_400_000);
     fs.utimesSync(shots, old, old);
-    const dry = h.agentctl(['gc', '--branches']);
+    const dry = h.agentctl(['gc', '--branches', '--verbose', '--limit', '100']);
     check('dry run lists the worktree of LG-1', new RegExp(`worktree\\s+LG-1\\s+${wt1}`).test(dry.stdout), dry.stdout);
     check('dry run skips LG-2 with "uncommitted changes"', /LG-2.*uncommitted changes/.test(dry.stdout), dry.stdout);
     check('dry run lists the old file, the archive move and the merged branch', /cache\s+LG-1.*shots\.log/.test(dry.stdout) && /archive\s+LG-1/.test(dry.stdout) && /branch\s+LG-1.*agent\/lg-1/.test(dry.stdout), dry.stdout);
@@ -151,7 +152,8 @@ async function resumeScenario(): Promise<void> {
     h.restartServer();
     check('no window is left after the restart', windows(h).length === 0);
     const status = h.agentctl(['status']);
-    check('status shows both as dead (no window)', /LR-1.*dead/.test(status.stdout) && /LR-2.*dead/.test(status.stdout), status.stdout);
+    // P43: a lost tmux server is needs-attention with the tmux-lost hint, no longer dead; resume picks the tasks up from there.
+    check('status shows both as needs-attention (tmux lost)', /LR-1.*needs-attention/.test(status.stdout) && /LR-2.*needs-attention/.test(status.stdout) && status.stdout.includes('tmux server/session lost'), status.stdout);
     const dry = h.agentctl(['resume', '--dry-run']);
     check('resume --dry-run lists both and starts nothing', /Resume 2 tasks/.test(dry.stdout) && windows(h).length === 0, dry.stdout);
     const r = h.agentctl(['resume', '-y']);
@@ -177,6 +179,8 @@ async function main(): Promise<number> {
       check(`${run.name} threw`, false, e instanceof Error ? (e.stack ?? e.message) : String(e));
     }
   }
+  current = 'providers';
+  try { for (const name of await providerDispatchCases(defaultCacheRoot(), 'pscen')) check(name, true); } catch (e) { check('provider cases', false, String(e)); }
   const failed = checks.filter((c) => !c.ok);
   fs.writeFileSync(path.join(defaultCacheRoot(), 'live-results.json'), `${JSON.stringify({ at: new Date().toISOString(), passed: checks.length - failed.length, failed: failed.length, checks }, null, 2)}\n`);
   console.log(`\n${checks.length - failed.length}/${checks.length} checks passed`);

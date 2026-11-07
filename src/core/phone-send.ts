@@ -1,3 +1,4 @@
+import { provider } from './providers/registry.ts';
 import fs from 'node:fs';
 import { withFileLock } from './file-lock.ts';
 import path from 'node:path';
@@ -133,7 +134,7 @@ export async function notifyPhone(ctx: Context, entry: Pick<JournalEntry, 'kind'
   const input: PhoneInput = { task: entry.task, cohort: entry.cohort, verdict: entry.verdict, usage: entry.text, text: entry.text, hint: await phoneHint(ctx, event, entry.task) };
   if (event === 'needs-input' && entry.task) {
     const record = readTaskRecord(ctx.config, windowName(entry.task));
-    if (record?.agent === 'codex') {
+    if (record && record.agent !== 'unknown' && provider(record.agent).screen.sessionQuestion) {
       const screen = await ctx.tmux.capture(record.window).catch(() => undefined);
       if (screen?.code === 0) input.collapsed = collapsedQuestion(screen.stdout);
     }

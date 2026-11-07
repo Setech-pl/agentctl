@@ -1,3 +1,4 @@
+import { composerFixture } from './composer-fixture.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -126,7 +127,7 @@ describe('move', () => {
   function setup(name: string, yaml = '', extra: Parameters<typeof seedTask>[2] = {}, confirm?: (q: string) => Promise<boolean>) {
     const config = makeConfig(scratch.sub(name), yaml);
     const fake = new FakeTmux();
-    fake.newWindowScreen = '› Ask Codex to do anything\n';
+    fake.newWindowScreen = composerFixture('› Ask Codex to do anything\n');
     const runner = new DiskRunner({ dryRun: false, respond: fake.respond, startTime: Date.now() });
     const out: string[] = [];
     const ctx = new Context(runner, config, (l) => out.push(l), confirm);
@@ -208,8 +209,9 @@ describe('move', () => {
     const result = await moveTask(t.ctx, 'NC-1', { yes: true, self: SELF });
     assert.equal(result?.plan.task, 'NC-1-2');
 
-    const typed = t.runner.commands.find((c) => c.includes(' -l -- ') && c.includes('codex')) as string;
-    assert.match(typed, /codex --sandbox danger-full-access -m gpt-6-astra -c model_reasoning_effort=medium -c '\\''notify=\[/);
+    const typed = t.runner.commands.find((c) => c.includes(' -l -- ') && c.includes('exec sh')) as string;
+    assert.ok(typed.includes('exec sh'));
+    assert.match(t.runner.written.get(path.join(t.config.stateDir, 'nc-1-2/start.sh'))!, /exec codex --sandbox danger-full-access -m gpt-6-astra -c model_reasoning_effort=medium -c check_for_update_on_startup=false -c 'notify=\[/);
     assert.ok(t.runner.commands.some((c) => c.startsWith('tmux new-window') && c.includes('-n nc-1-2') && c.includes(`-c ${t.worktree}`)), 'the same worktree');
     assert.ok(!t.runner.commands.some((c) => c.includes('worktree add')), 'no new worktree');
     const pasted = t.runner.calls.find((c) => c.line.startsWith('tmux load-buffer') && c.input?.includes('Poprzedni agent'));
@@ -234,6 +236,7 @@ describe('move', () => {
   it('status and the board: the old row is superseded (no notification), the new one runs', async () => {
     const t = setup('mv8');
     await moveTask(t.ctx, 'NC-1', { yes: true, self: SELF });
+    await collectStatus(t.ctx); // confirm idle on the next sample
     const rows = await collectStatus(t.ctx, { progress: false });
     assert.deepEqual(rows.map((r) => `${r.task}:${r.state}`), ['NC-1:superseded', 'NC-1-2:waiting']);
     assert.equal(rows[0]?.hint, 'moved to NC-1-2; close this window when you are done: agentctl close NC-1');
@@ -315,7 +318,7 @@ describe('board: M moves a task', () => {
   it('the effect moves the task with the core function and reports the new one', async () => {
     const config = makeConfig(scratch.sub('bm1'));
     const fake = new FakeTmux();
-    fake.newWindowScreen = '› Ask Codex to do anything\n';
+    fake.newWindowScreen = composerFixture('› Ask Codex to do anything\n');
     const runner = new DiskRunner({ dryRun: false, respond: fake.respond, startTime: Date.now() });
     seedTask(config, 'NC-1', { repos: [{ path: scratch.sub('bm1/app'), worktree: scratch.sub('bm1/app-wt') }] });
     fake.add('nc-1', IDLE);

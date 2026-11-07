@@ -35,6 +35,16 @@ Every milestone is closed in this order:
 
 ## Testing against the real tools
 
+Before running tests or live scripts, set an explicit absolute task directory, for example:
+
+```sh
+export AGENTCTL_LIVE_CACHE="$HOME/Projects/cache/my-task"
+```
+
+The live harness refuses missing or relative roots, roots overlapping the historical
+`~/Projects/cache/agentctl-p19` sandbox, and cache roots outside the given directory.
+It never falls back to a shared sandbox. The P19 stdio test uses this same guard.
+
 `npm test` preloads `tests/isolation.ts`: each test process gets disposable HOME,
 AGENTCTL_HOME, CODEX_HOME, CLAUDE_CONFIG_DIR and tmux/temp directories, plus a PATH
 with inert agent, tmux, clipboard and notification commands. Scratch files live
@@ -43,7 +53,7 @@ tool behavior supply their own fakes; they require no installed coding agents.
 
 Tests never touch your tmux or your agents. When you try a change live (a real tmux, real git, a started task), do it only through `scripts/live-harness.ts`; never by hand in your own `agentctl` session, and never against your own tasks. Earlier hand-made attempts started the real Claude Code twice, ran the real `notify` program of a Codex config once and overwrote the clipboard once.
 
-The harness builds a sandbox under `~/Projects/cache/<task>/live-<name>/` and gives every process under test:
+The harness builds a sandbox under `$AGENTCTL_LIVE_CACHE/live-<name>/` and gives every process under test:
 
 - an isolated tmux server (`TMUX` unset, its own `TMUX_TMPDIR`, a `tmux.conf` with `exit-empty off` and a `default-command` that sets PATH explicitly, so a window's shell cannot find the real agents);
 - its own `AGENTCTL_HOME`, `CODEX_HOME` (no `notify` chain), `CLAUDE_CONFIG_DIR` and `HOME`;

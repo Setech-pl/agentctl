@@ -1,3 +1,4 @@
+import { composerFixture } from './composer-fixture.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -248,7 +249,7 @@ describe('collisions: touches', () => {
     assert.match(r.stdout, /⚠ N-1 touches src\/menu\/\*\* and A-1 already changes|⚠ N-1 touches src\/menu\/\*\*, and A-1 already changes/);
     assert.deepEqual(asked, ['Add to the queue anyway? [y/N] ']);
     asked.length = 0;
-    s.tmux.newWindowScreen = '❯ \n';
+    s.tmux.newWindowScreen = composerFixture('❯ \n');
     r = await runCli(s.config, s.runner, ['new', '-'], { readStdin: () => specText(s, 'src/menu/**'), confirm: async (q) => (asked.push(q), false) });
     assert.match(r.stdout, /⚠ N-1 touches/);
     assert.match(r.stdout, /Aborted, nothing was done\./);

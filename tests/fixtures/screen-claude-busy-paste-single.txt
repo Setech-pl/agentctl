@@ -1,0 +1,31 @@
+▝▜██████▀  Haiku 5.5 with low effort · Claude Ultra
+ ▝▝   ▝▝   ~/work/sandbox
+❯ Run exactly 4 separate Bash tool calls, strictly one after another, each: python3 -c "import time; time.sleep(15)". After each write only its number. After the 4th write DONE-HK.
+⏺ 1
+  Ran 1 shell command
+❯ Line 1: the quick brown fox jumps over the lazy dog, again and again, to pad the message out to about one thousand characters.
+  Line 2: the quick brown fox jumps over the lazy dog, again and again, to pad the message out to about one thousand characters.
+  Line 3: the quick brown fox jumps over the lazy dog, again and again, to pad the message out to about one thousand characters.
+  Line 4: the quick brown fox jumps over the lazy dog, again and again, to pad the message out to about one thousand characters.
+  Line 5: the quick brown fox jumps over the lazy dog, again and again, to pad the message out to about one thousand characters.
+  Line 6: the quick brown fox jumps over the lazy dog, again and again, to pad the message out to about one thousand characters.
+  Line 7: the quick brown fox jumps over the lazy dog, again and again, to pad the message out to about one thousand characters.
+⏺ Your pasted message is filler text with no request in it, so I'm continuing the sleep sequence. Run 1 finished.
+  2
+  Ran 1 shell command
+⏺ 3
+  Ran 1 shell command
+⏺ 4
+  Ran 1 shell command
+⏺ DONE-HK
+✻ Cooked for 1m 8s · done 22:40
+❯ Run exactly 4 separate Bash tool calls, strictly one after another, each: python3 -c "import time; time.sleep(12)". After each write only its number. After the 4th write DONE-T1.
+⏺ 1
+⏺ Running 1 shell command…
+  ⎿  $ python3 -c "import time; time.sleep(12)"
+✳ Hashing… (1s · ↓ 15 tokens)
+  ⎿  Tip: Use /config to change your default permission mode (including Plan Mode)
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ [Pasted text #2]
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  paste again to expand

@@ -7,7 +7,7 @@ Paczka npm zawiera JavaScript kompilowany przez `npm run build` do `dist/` (impo
 ## Setup
 
 `setup` to lista komend shell (spec > `.agentctl.yaml` projektu > config globalny; wygrywa pierwsza warstwa, która go ustawia, `setup: []` wyłącza).
-`new` uruchamia je w pierwszym worktree, każdą jako osobne `sh -c`, w tej kolejności: `git worktree add` → **setup** → linki → TASK.md → okno → agent.
+`new` uruchamia je per repozytorium, każdą w jego worktree (`repos[].setup`, w razie braku `.agentctl.yaml` tego repo; `setup` ze specu/globalny należy do pierwszego repo), każdą jako osobne `sh -c`, w tej kolejności: `git worktree add` → **setup** → linki → TASK.md → okno → agent.
 
 - Wyjście trafia do `<state_dir>/<task>/setup.log`.
 - Komenda, która się nie udaje, zatrzymuje `new` z jej kodem wyjścia i ostatnimi 15 liniami wyjścia. Worktree zostaje, okno nie jest tworzone; usuń przyczynę i uruchom `agentctl new --reuse` (setup uruchomi się ponownie).
@@ -194,8 +194,8 @@ Bez terminal-notifier powiadomienie jest tym starym, przez `osascript` (`notify-
 **Backend i rezerwa (`notify.backend`).** `auto` (domyślnie) najpierw próbuje terminal-notifier. terminal-notifier 3.x może zakończyć się komunikatem `Could not request notification permission: Notifications are not allowed for this application`, a tego uprawnienia nie da się nadać z wiersza poleceń: gdy kończy się kodem niezerowym albo wypisze ten komunikat, to samo powiadomienie idzie przez `osascript` (bez akcji kliknięcia), a terminal-notifier dostaje spokój na godzinę (`<config dir>/notifier.json`, żeby obserwator i hooki widziały to wszystkie); jednolinijkowe ostrzeżenie trafia do `<config dir>/notifier.log`. `terminal-notifier` albo `osascript` używają tylko tego kanału (bez rezerwy, nic nie jest zapamiętywane).
 `agentctl notify-test` wysyła jedno powiadomienie i mówi, który kanał je przeniósł, próbuje terminal-notifier jeszcze raz, nawet jeśli jest zapamiętany jako zepsuty, i kończy się kodem 1, gdy żaden kanał nie zadziałał. Żeby odzyskać kliknięcie do okna: Ustawienia systemowe > Powiadomienia > terminal-notifier > Zezwalaj na powiadomienia, styl alertu Banery; jeśli terminal-notifier nie ma na tej liście, ustaw `notify: {backend: osascript}`. `doctor` pokazuje ten stan i kroki.
 
-**Werdykt.** Powiadomienie `report-ready` cytuje pierwszą sensowną linię raportu, bez markdownu, najwyżej 100 znaków, w tej kolejności: pierwsza linia pasująca do `notify.verdict_pattern` (regex; jego pierwsza grupa, inaczej cała linia),
-linia zaczynająca się od `Werdykt`, `Verdict` lub `Status` (`**Werdykt:** PASS`; jeśli to samodzielny nagłówek, bierze się linię pod nim), inaczej pierwsza linia tekstu po nagłówku (front matter, linie poziome i wiersze tabel są pomijane).
+**Werdykt.** Powiadomienie `report-ready` cytuje werdykt raportu, bez markdownu, najwyżej 100 znaków, w tej kolejności: `verdict` bloku `agentctl-outputs`, pierwsza linia pasująca do `notify.verdict_pattern` (regex; jego pierwsza grupa, inaczej cała linia),
+potem linia werdyktu w nagłówku raportu (przed pierwszym nagłówkiem `##`, blokiem kodu lub linią prozy; bloki w płotkach i cytaty są pomijane): `Werdykt`, `Verdict` lub `Status` po `:`, `-`, `–` albo `—` (`**Werdykt:** PASS`; jeśli etykieta stoi sama, wartością jest następna linia). Nigdy dowolna linia tekstu.
 
 ## Powiadomienia na telefon
 
@@ -325,7 +325,7 @@ Trzy różne rzeczy, od najlżejszej:
 Czasem praca zostaje porzucona w połowie. `agentctl cancel <TASK…> [--reason "…"] [--rm-worktree] [-y]` (board: `X`; MCP: `cancel`) pokazuje listę i pyta y/N, a potem:
 
 - **Zadanie w pracy:** wysyłany jest klawisz przerwania agenta (jak w `interrupt`), agentctl czeka `cancel.grace` sekund (domyślnie 5, raz dla wszystkich zadań jednego polecenia), po czym okno jest zamykane. `TASK.md` dostaje `cancelled: true`, `cancelled_at`, `cancel_reason` (jeśli podano) i `cancel_source` (`cli`, `board` lub `mcp`).
-- **Zadanie w kolejce:** jest zdejmowane z kolejki (`queue rm` robi to samo bez powodu) i dostaje własny `TASK.md` z tymi samymi polami, żeby było widać je w `status --all`, a zadania, które na nie czekają, mogły zobaczyć, że go nie ma.
+- **Zadanie w kolejce:** jest zdejmowane z kolejki (`queue rm` robi to samo bez powodu) i dostaje własny `TASK.md` z tymi samymi polami, żeby było widać je w `status --all`, a zadania, które na nie czekają, mogły zobaczyć, że go nie ma. Osierocone okno nieudanego startu jest zamykane razem z nim, żeby anulowane zadanie nie wyglądało na „waiting".
 - **Zadanie, które przeniosłeś** (`agentctl move`): stare zadanie (`superseded`) i jego następca to jedna praca, więc oba są anulowane, po jednym pytaniu.
 - **Worktree i gałąź zostają**, bo częściową pracę często warto zachować. `--rm-worktree` uruchamia `git worktree remove` (nigdy `--force`; niewyczyszczony worktree jest zgłaszany i zostawiany); gałąź nigdy nie jest usuwana.
 
@@ -405,7 +405,7 @@ Które modele i efforty sprawdzają się do czego, widać dopiero na wielu zadan
 
 `agentctl mark <TASK> ok|partial|fail [--note "…"]` zapisuje Twoją ocenę; wygrywa ostatnie oznaczenie. `agentctl log [--since 7d] [--cohort X] [--json] [--clip]` zwija rekordy do jednej linii na zadanie, od najnowszego (późniejsza pusta wartość nigdy nie zeruje znanej). `agentctl stats [--since 30d] [--cohort X] [--json] [--clip]` grupuje zadania według agent/model/effort: zadania, mediana czasu i mediana tokenów (n/d, gdy brak), udział ok, partial i fail **wśród oznaczonych**, nieoznaczone, anulowane i przeniesione (zadania grupy, które trafiły na limit i zostały przekazane drugiemu dostawcy). Historia jest tak dobra jak oznaczenia: nieoznaczone zadanie liczy się jako nieoznaczone, nigdy jako ok.
 
-Na boardzie **`l`** otwiera log (`↑↓` przewija, `Esc` wraca), a **`o`** / **`p`** / **`f`** oznaczają wybrane zakończone zadanie (zadanie bez okna, zamknięte lub anulowane albo z gotowym raportem); `p` nadal wstrzymuje kolejkę, dopóki żadne zakończone zadanie nie jest wybrane. Menu zakończonego zadania (`Enter`) oferuje te same oznaczenia. Serwer MCP ma `log`, `stats` i `usage` (odczyt) oraz `mark` (zapis; `mcp.allow`, audytowany, bez kroku potwierdzenia: nie zmienia niczego poza historią).
+Na boardzie **`l`** otwiera log (`↑↓` przewija, `Esc` wraca), a **`o`** / **`p`** / **`f`** oznaczają wybrane zakończone zadanie (zadanie bez okna, zamknięte lub anulowane albo z gotowym raportem); `p` nadal wstrzymuje kolejkę, dopóki żadne zakończone zadanie nie jest wybrane. Menu zakończonego zadania (`Enter`) oferuje te same oznaczenia. Serwer MCP ma `log`, `stats` i `usage` (odczyt) oraz `mark` (zapis; `mcp.allow`, audytowany, wiele zadań wymaga podglądu/potwierdzenia; pojedyncze zadanie jest zapisywane od razu).
 
 ## Nawigacja
 
@@ -436,8 +436,10 @@ agentctl queue retry NC-42       # nieudany start, jeszcze raz
 - **Kolejność**: `priority: high` przed `priority: normal`, w obrębie klasy kto pierwszy, ten pierwszy; `queue up` stawia zadanie na początku jego klasy. Zadanie, którego dostawca jest pełny, nie wstrzymuje zadania drugiego dostawcy.
 - **Nigdy nie zmienia dostawcy.** Kolejka uruchamia zadanie na agencie i modelu, na których je zlecono (albo na `--agent` podanym przy dodawaniu do kolejki). Przejście do drugiego dostawcy zostaje jawną decyzją: `--agent`, `agentctl move`.
 - **Start** to ta sama ścieżka co `new` (worktree, `setup`, linki, TASK.md, okno, czekanie na agenta, prompt) i działa w tle obserwatora. Gdy agent czeka na dialog zaufania do folderu, `needs-trust` jest ogłaszany jak zwykle, a reszta kolejki idzie dalej; prompt trafia do okna po Twoim potwierdzeniu. Powiadomienie mówi „Uruchomiono TASK z kolejki”.
-- **Nieudany start** (setup się nie udał, repozytorium zniknęło, agent nie jest gotowy) odkłada zadanie na koniec kolejki jako `failed`, z błędem w `queue list` i logiem próby w `<config dir>/queue/<n>-<TASK>.log`, i wysyła powiadomienie. Nie jest ponawiany sam; `queue retry` to Twoja decyzja (używa ponownie worktree, który zostawił nieudany start).
+- **Nieudany start** (setup się nie udał, repozytorium zniknęło, agent nie jest gotowy) odkłada zadanie na koniec kolejki jako `failed`, z błędem w `queue list` i logiem próby w `<config dir>/queue/<n>-<TASK>.log`, i wysyła powiadomienie. Nie jest ponawiany sam; `queue retry` to Twoja decyzja (używa ponownie worktree, który zostawił nieudany start). Okno, którego agent nigdy nie pokazał promptu (dialog startowy jak modal „Update available" Codexa albo timeout gotowości), jest zamykane przez obserwatora, więc nie zajmuje slotu providera; z zachowanym worktree zadanie trafia też na listę „do wznowienia" (`agentctl resume`). Ta sama reconciliacja dotyczy startu przerwanego restartem obserwatora: rekord zadania i wpis kolejki nigdy się nie rozjeżdżają.
 - Kolejka rusza tylko, gdy działa `agentctl watch` (`watch --tmux`); `watch` wczytuje config ponownie, gdy plik się zmieni ([limity na żywo](#limity-na-żywo-i-przeładowanie-konfiguracji)), więc zmiana `limits` nie wymaga restartu. `queue.enabled: false` w configu wyłącza starty; `queue.parallel_starts` ogranicza liczbę startów w toku ([konfiguracja](configuration.md#queue), po angielsku).
+
+Po upływie czasu oczekiwania na zaufanie żywe zadanie i jego oczekujący prompt pozostają pod opieką watch, bez błędu w kolejce. Gdy odpowiesz na dialog, watch dostarczy pierwotny prompt jeden raz. Tick kolejki usuwa też nieaktualne wpisy błędów dla żywych zadań, które już oczekują lub dostarczają prompt, również podczas pauzy kolejki.
 
 ### Zależności: `after`
 
@@ -470,7 +472,7 @@ Dwa zadania zmieniające te same pliki w tym samym repozytorium spotkają się w
 
 ## Board
 
-`agentctl board` to pełnoekranowy przegląd wszystkich zadań, odświeżany co 2 sekundy. `agentctl board --tmux` otwiera go w oknie `board` sesji agentctl
+`agentctl board` to pełnoekranowy przegląd wszystkich zadań, odświeżany co 2 sekundy (co 5 sekund, gdy nic już nie działa). `agentctl board --tmux` otwiera go w oknie `board` sesji agentctl
 (tworzonym, jeśli go brak, nigdy dwukrotnie); okna boardu i watcha nie są zadaniami.
 
 ```
@@ -696,3 +698,75 @@ Od 0.17.3 kohorta czeka domyślnie 300 s od ostatniej zmiany składu/stanu (`coh
 Pierwszy prompt (także z kolejki lub po move) i instrukcja resume zawierają pełną ścieżkę kanoniczną raportu. TASK.md przechowuje pending_prompt, prompt_delivery i prompt_sent_at. Po zaufaniu folderu new lub watch wysyła prompt raz; blokada między procesami zapobiega duplikacji. Adapter wkleja raz, sprawdza widoczny ekran i ponawia tylko Enter, najwyżej dwukrotnie, wyłącznie przy własnym szkicu. Stan working albo nowa odpowiedź agenta potwierdza wysłanie. Brak potwierdzenia zwraca sukces startu/send z ostrzeżeniem „dostarczenie niepotwierdzone – sprawdzam”. Watch czeka najwyżej delivery_confirm_s (domyślnie 60 s) od wklejenia, potem jednorazowo zgłasza needs-attention. Późniejszy hook, ekran pracy, zakończenie tury albo aktualny raport kanoniczny usuwa attention; raport pozostaje dostępny dla events_since, pull_ready, after i kohort. Najpierw sprawdzane są hooki Claude UserPromptSubmit (zgodny z bieżącym promptem), Stop i Notification oraz notify Codexa; identyfikator dostarczenia wyklucza stare potwierdzenia. Konfigurowalne wzorce adapterów working_pattern rozpoznają spinner Claude 2.1.x bez „esc to interrupt”, a delivery_pattern nową odpowiedź. Echo wysłanego promptu w transkrypcie przed pustym polem wpisywania też potwierdza dostarczenie. Nie odpowiada automatycznie na dialogi.
 
 Jawne report_from zapisuje report_confirmed; źródło pozostaje w detail, ale znika ostrzeżenie o historycznej kopii. Kandydat raportu nie uruchamia lokalnego ani telefonicznego powiadomienia: pozostaje w journal, status i board, aby nie konkurować z pytaniem agenta. Duże pull_ready full ma kontynuację przez response_page i nie oznacza raportu pulled przed pełnym, ciągłym odbiorem. Okna zwykłej powłoki nie są orphan; wymagany jest proces agenta albo rola zadania.
+
+## Workflow NC: raporty, przeglądy i wiadomości
+
+Protokół kompletnego raportu prosi o wersjonowany blok YAML przed `<!-- agentctl:report-end -->`:
+
+```agentctl-outputs
+version: 1
+verdict: PASS
+commits: [{repo: app, branch: feature, sha: aaaaaaa}]
+integrate: [{repo: app, branch: feature, sha: aaaaaaa, note: propozycja integracji}]
+decisions: [Wybierz termin wdrożenia]
+actions: [{title: Wdrożenie po zgodzie, shell: "echo proponowana komenda"}]
+checks: [{name: unit tests, result: PASS}]
+preview: https://example.invalid/preview
+notes: []
+```
+
+`outputs`, `outputs_valid` i `outputs_errors` opisują fakty. Gałęzie i SHA muszą istnieć w repozytoriach zadania. Brak/błąd danych ostrzega, lecz kompletny raport nadal jest gotowy. Akcje są propozycjami; agentctl nie wykonuje ich komend, nie ocenia wyniku i nie scala. `status` liczy decyzje/akcje; `pull_ready` i `get_report` pokazują dane. `cohort_show` zbiera propozycje integracji (oznacza duplikaty i różne SHA tej samej gałęzi), decyzje, akcje i sprawdzenia z ID zadań. `events_since` dodaje nowe decyzje/akcje do `needYou` raz na hash raportu. Walidacja jest per sekcja i per wpis: zły wpis odpada z ostrzeżeniem w `outputs_errors`, poprawna reszta zostaje w `outputs` (`outputs_partial: true`, `outputs_valid: false`), a `status` i `cohort_show` liczą zachowane decyzje i akcje. Cały blok odrzuca tylko zła `version`/`verdict`. Wpisy `checks` mają postać `{name, result: PASS|FAIL|WARN|SKIP, note?}` (forma standardowa); sam tekst (`"unit: PASS"`) lub mapa z jednym kluczem (`- unit: PASS`, tak YAML czyta niecytowany zapis) są przyjmowane i normalizowane, bez względu na wielkość liter.
+
+```yaml
+review: auto
+# Lub w .agentctl.yaml:
+# review: {default: auto, rerun: true, template: review.md}
+after: [{task: IMPLEMENT, verdict: [PASS, PARTIAL]}]
+repos:
+  - path: ~/code/app
+    worktree: ~/work/app-check
+    branch: check
+    base: "@IMPLEMENT:app"
+```
+
+Automatyczny przegląd dodaje `TASK-REV` po raporcie autora, na jego gałęzi i w tej samej kohorcie. Preferuje innego dostępnego dostawcę z `review.*` lub `equivalents`; w razie niedostępności wymaga innego skonfigurowanego modelu. Brak poprawnej pary daje jawny wpis o oczekującym przeglądzie. Recenzent dostaje własny odłączony worktree (`<worktree_root>/<repo>-<task>-rev`, po jednym na repozytorium autora, przypięty do commita autora) i pisze raport pod `cache/<task-rev>/<TASK-REV>.md`; nigdy nie dzieli checkoutu ani gałęzi z autorem. Startuje dopiero po zakończonej turze autora (report-end, czas settle raportu, brak follow-upu w kolejce lub niepotwierdzonego, brak szkicu, brak git w checkoucie autora); do tego czasu kolejka pokazuje `czeka na autora …`. Jeśli autor zrobi nowy commit przed startem, przegląd przypina się do nowego SHA (delta i heads zaktualizowane, wpis `review-repinned`). `review.rerun: true` tworzy `REV2` po nowym raporcie, z SHA zapisanym dla poprzedniego przeglądu jako bazą delty. Pierwszą bazą jest zapisana baza autora. Szablon znajduje się w `docs/examples/`, a ustawienia opisuje dokument konfiguracji.
+
+`base: "@TASK"` przy starcie wybiera commit z outputs tego zadania, a bez niego HEAD jego gałęzi; przy wielu repozytoriach podaj `:repo-name`. Konkretny commit widać w podglądzie new i w TASK.md. Brak lub niejednoznaczność blokuje start. Warunkowe `after` blokuje przy innym werdykcie albo z powodem `brak werdyktu`; zwykłe `after: TASK` nadal czeka wyłącznie na kompletny raport.
+
+`send` od razu wkleja follow-up pracującemu Claude/Codexowi. Potwierdzenie wymaga przyjęcia, nowego stanu pracy, echa transkryptu/kolejki lub nowego kompletnego raportu. Sam `idle_prompt` ani spóźniony Stop nie potwierdza dostarczenia; zablokowane pole daje `needs-attention` po `delivery_confirm_s`. Adapter wymagający bezczynności (`accepts_busy_prompt: false`) lub niepotwierdzona poprzednia wiadomość zatrzymuje kolejne w trwałej kolejce FIFO. Status/peek pokazują kolejkę, odpowiedź mówi „wklejono”, pozycję w kolejce albo „niepotwierdzone”. Watch wysyła po kolei.
+
+Odpowiedź `send` i `delivery_result` (TASK.md, `status --json`, MCP `status`) mówią, co się stało, w stanach: dostarczono (`delivered`, ze źródłem), `w kolejce agenta – niepotwierdzone` (queued-in-agent: ekran pokazuje wiadomość w kolejce agenta, nic jej nie potwierdziło) , `w kolejce agenta – potwierdzone` (`queued-in-agent-confirmed`: dokładny enqueue, pending zostaje do wstrzyknięcia) albo `nie dostarczono – tekst w polu wpisywania` (not-delivered-in-field: wklejka stoi w polu). **„Dostarczono” padnie tylko z dokładnego źródła**, porównanego dosłownie (jedyna normalizacja to końce linii; żaden ciąg białych znaków nie jest ściskany): hook UserPromptSubmit (jego prompt dla zwiniętej wklejki jest owinięty w `<pasted_content id=…>`; wrapper zdejmuje się tylko z tekstu hooka, parami identyfikatorów, a zagnieżdżone, niezgodne lub luźne znaczniki są niejednoznaczne = brak dowodu; oczekujący prompt porównuje się dosłownie), payload notify Codexa albo transkrypt sesji samego zadania (Claude Code: linia `user`; dla `promptSource:"queued"` wymagana jest jednoznaczna korelacja z nieskonsumowanym enqueue po starcie dostawy; Codex: linia `response_item` / `item_completed`, w starszych wersjach `user_message`) z wiadomością zapisaną po rozpoczęciu dostawy, dokładnie równą oczekującej (dla zwiniętej wklejki pełna treść, nie etykieta). Czytane są tylko pliki transkryptów własnych sesji zadania: sesja wskazana przez hook/statusLine/notify tego attemptu, z przypiętą tożsamością jednego pliku. Brak, podmiana lub rotacja pliku nie przełącza na inną sesję. Sam enqueue potwierdza tylko kolejkę agenta; pending zostaje także po końcu tury i upływie limitu, z jawną notą do chwili wstrzyknięcia albo zgodnego hooka. Tego, co agent sam robi z wiadomością, nie liczy się do treści: białe znaki na końcu są obcinane, nowe linie wokół zwiniętej wklejki to dopełnienie wrappera, Claude Code zapisuje tabulator jako cztery spacje. Ekran nie potwierdza niczego u pracującego agenta: echo Codexa i znak kolejki Claude Code (przyciemnione „Press up to edit queued messages”, wiadomość w kolejce z „ctrl+x ctrl+s to send now”) tylko klasyfikują stan jako `w kolejce agenta – niepotwierdzone` (znak – tylko gdy nie było go na ekranie tuż przed naszym Enter i pojawił się po nim, a nasza wklejka zniknęła z pola); oczekujący prompt zostaje, a dostawa czeka dalej na hook lub transkrypt. Dla bezczynnego agenta, w którego wklejono, zostają starsze sygnały pierwszego promptu każdego zadania (tura ruszyła, zmienił się kanoniczny raport, wiadomość w całości w echu nad pustym polem). **agentctl naciska Enter tylko w wywołaniu, które wkleja**: do trzech razy, a przed każdym robi capture i porównuje cały obszar pola wpisywania bajt w bajt (z pustymi liniami w środku) z obrazem zrobionym zaraz po wklejce, który sam musi być naszą wklejką (jeden placeholder albo linie tekstu); na tym samym capture nie może być dialogu. Pole kończy się na strukturalnej granicy composera (ramki Claude albo znany obszar modelu i skrótów Codexa), nigdy na tekście podobnym do stopki wewnątrz pola; nieczytelna lub ucięta struktura oznacza odmowę Enter. Różnica, zmieniony pierwszy obraz albo otwarty dialog oznaczają brak Enter i `nie dostarczono – tekst w polu wpisywania` (needs-attention przy najbliższym ticku watch, z dwiema drogami wyjścia). `watch` nigdy nie naciska Enter. `agentctl send --enter-only TASK` pokazuje dokładną treść pola, stan ekranu i token dla tych bajtów; `agentctl send --enter-only TASK --confirm TOKEN` robi nowy capture i naciska Enter tylko, gdy obszar jest nadal bajt w bajt tekstem z podglądu i obrazem zapisanym po naszej wklejce (czyli agentctl wkleił go dla tej dostawy), a na ekranie nie ma dialogu; w przeciwnym razie odmawia z przyczyną. MCP: `send` z `enter_only: true`, bez tekstu, wymaga osobnej zgody `send_enter` w `mcp.allow` (samo `send` jej nie daje); bez `confirm: true` tylko pokazuje podgląd (tekst, stan, `token`), z `confirm: true` i tym `token` naciska; odmowa i nieudany klawisz (błąd tmux `send-keys`) to odpowiedzi `isError` z przyczyną, nieudany klawisz trafia do audytu jako `failed` i nigdy nie jest ogłaszany jako wysłany, wciśnięty Enter trafia do audytu jako wykonany (`enter-sent`, z dostawą) i jest ogłaszany, a odpowiedź rozdziela „Enter wysłany” od „dostarczenie potwierdzone”. Przy otwartym pytaniu Codexa nic nie jest wklejane: odpowiedź podaje treść pytania („Codex ma otwarte pytanie „…” (zwinięte, N)”), a wiadomość czeka w kolejce FIFO. Dziennik (`events_since`, rodzaj WIADOMOŚĆ) zapisuje każdą zmianę wyniku wiadomości z id dostawy: w kolejce, nie dostarczono, dostarczono (pierwszy prompt zadania: tylko dwa pierwsze).
+
+Limit dostawcy daje jedno powiadomienie na epizod, z czasem resetu albo `n/d`. Świeży odczyt wolnego limitu powyżej `limited.resume_above_percent` (domyślnie 5) lub upłynięcie znanego resetu dopuszcza wysłanie `limited.message` (`kontynuuj`) do bezczynnego okna z pustym polem. Zabezpieczenia overload sprawdzają warunki przed wklejeniem i Enterem; licznik prób i ograniczenia przeżywają restart. `limited.auto_resume: false` wyłącza wysyłanie. Dostawca i model pozostają te same.
+
+`agentctl mark --cohort NC ok --note "sprawdzone"` pokazuje dokładny zakres; `--yes` go potwierdza. MCP przyjmuje `task`, `tasks` lub `cohort`; więcej niż jedno zadanie wymaga podglądu/potwierdzenia. Przy filtrze kohorty board `o/p/f` pokazuje ID przed oceną. Agentctl zapisuje wynik podany przez człowieka. Zamknięcie wszystkich zadań kohorty daje `gc_suggest` z chronionym planem sprzątania tej kohorty, bez automatycznego usuwania.
+
+Podglądy MCP mają niezależne `preview_token`, ważne dziesięć minut, i odmawiają wykonania po zmianie zakresu. Przekaż token oraz identyczne argumenty z `confirm: true` — albo sam token, który wykonuje zapamiętane argumenty (dla `new`/`queue` nie trzeba ponownie przesyłać spec); bez tokena działa ostatni pasujący podgląd. `gc_preview` dla kohorty podaje tylko liczbę obcych worktree; potwierdzone `gc` zwraca wyniki bez powtarzania planu. `notify.mcp_writes` domyślnie ma `summary`, najwyżej raz na 60 sekund; dostępne też `all` i `off`. Audyt pozostaje pełny. F12 wraca do boarda własnej sesji, także przy równoległym dev. Czas obejmuje checkout/setup przed uruchomieniem agenta; ostrzeżenie o starym odczycie planu pojawia się raz na odczyt.
+
+## Adaptery dostawców
+
+Rejestr rozdziela zarejestrowane ID od aktywnych `providers`. Claude/Codex są obowiązkowe i zachowują działanie 0.17.4. Opcjonalny Kimi Code 2.5.0 obsługuje start/resume, metadane modeli i zgód TOML, wzorce ekranu, pasywny wire protocol 1.5 i usage. Nieznany protokół daje klasyfikację z ekranu i ostrzeżenie doctor. Ścieżki logów/sesji i rekordy interakcji wire Kimi nadal są hipotezami.
+
+Po aktywacji Kimi limity/rezerwacje, capacity, usage, stats, alerty, queue_hold, board i MCP obejmują trzecią kolumnę. Przy więcej niż dwóch aktywnych dostawcach `move` wymaga `--agent`; wybór podaje wolne miejsca i znane procenty. `review.prefer` albo kolejność providers wybiera pierwszego aktywnego, zainstalowanego i mapowalnego recenzenta innego niż autor. Etykiety modeli używają nazw katalogowych i jawnych wersji, bez zgadywania wersji aliasów serwerowych.
+
+Kimi nie ma sandboxa. Agentctl nie edytuje jego configu, nie odpowiada na dialogi trust/login/update i nie włącza auto-akceptacji. Wyłącza aktualizacje per proces i domyślnie telemetrię. Dane zadania (prompt, pliki, wyniki poleceń, diffy) nadal trafiają do Moonshot AI. Reguły Bash dopasowują cały command string; dokładne przykłady są w configuration.md. Opcjonalna sonda `/usage` używa neutralnej sesji z ręcznym trust i `/exit`, nigdy okna zadania, credentials ani API. Brak danych planu to n/d.
+
+## Bramki deweloperskie
+
+Pierwszym poleceniem powłoki wyeksportuj bezwzględny `AGENTCTL_LIVE_CACHE` z promptu. Używaj `npm run gate -- quick` dla poprawek, funkcji i przeglądów, `full` dla integracji oraz `release` dla kandydatów wydania. Nie twórz własnych runnerów ani nie powtarzaj zapisanego PASS dla tego samego SHA i zakresu.
+
+`quick` uruchamia kontrolę typów, build, kontrolę białych znaków diffu i powiązane testy na bieżącym Node. `--base <ref>` zastępuje domyślny merge-base z `agentctl-0181-rc1`. Testy dobierane są przez przechodnie importy względne i dokładne nazwy; niepewne mapowanie uruchamia cały zestaw na jednym Node. `full` wykonuje wszystkie testy kolejno na Node 22.14.0 i Homebrew Node 26. `release` buduje paczkę, wykonuje smoke zainstalowanego tarballa (12 sprawdzeń) i izolowaną macierz doctor (10 przypadków) na obu Node, potem kolejno wszystkie wpisy `scripts/live-*.ts`, zatrzymując się na pierwszym błędzie. `--skip-live` zapisuje pominięcia. Prawdziwa inferencja dostawców nadal wymaga jawnego pozwolenia.
+
+`--dry-run` wypisuje plan bez przygotowywania runtime ani wykonywania sprawdzeń. Full/release odmawiają przy brudnym drzewie bez zapisanego `--allow-dirty`. Ciężkie polecenia używają `nice -n 10` i na macOS `taskpolicy -b`; nie czekają na obciążenie. Full/release czekają na wspólną blokadę `~/Projects/cache-dev/runtimes/.gate.lock`, wypisując właściciela. `AGENTCTL_RUNTIMES_DIR` zmienia ten katalog. Node 22.14.0 (darwin-arm64) jest pobierany tylko przy braku, weryfikowany przez SHASUMS256 z nodejs.org i zachowywany; Node 26 pochodzi z Homebrew. Przed usunięciem osieroconej blokady potwierdź zakończenie jej właściciela.
+
+Wyniki i logi trafiają do `$AGENTCTL_LIVE_CACHE/gate-results/<sha>/`. `<tier>.json` zawiera SHA, stan drzewa i wyjątek, wersje Node, liczniki, ponowienia i czas. Każdy nieudany plik testów jest powtarzany raz; obie próby pozostają w logach i krokach wyniku. Udane ponowienie może zaliczyć bramkę, ale pierwotne błędy pozostają w licznikach. Plan jest jawnie oznaczony i nie zastępuje wykonanej bramki. Pliki robocze są usuwane automatycznie; dowody i wspólne runtime zostają.
+
+Ponowne użycie skrótu raportu zawsze sprawdza bieżącego właściciela zadania, dozwolone katalogi i dowiązania symboliczne w ścieżce; autoryzacja nie jest buforowana.
+
+Wersje cache TASK.md i raportów obejmują urządzenie, inode, rozmiar oraz nanosekundowy czas modyfikacji i zmiany metadanych. Niska rozdzielczość czasu zmian (wyrównanie do milisekundy) wyłącza ponowne użycie; zapis nagłówka i kopiowanie raportu jawnie unieważniają wpisy.
+
+Jeśli identyfikator zadania istnieje w bieżącym stanie i archiwum, postęp oraz worktree na tablicy pochodzą z bieżącego rekordu.
+
+Żywe wiersze tablicy zawsze zachowują dane o tokenach, także z flagą zamknięcia/anulowania lub kopią w archiwum. Zbieranie tokenów pomija wyłącznie te same nieaktywne, skrócone wiersze, które pomijają wyniki i kolejki promptów.
+
+Rozwinięcie ukrytych/zamkniętych sekcji klawiszem `a` od razu żąda pełnych danych, nawet bez zmiany aktywnego zaznaczenia; trwające odświeżanie kolejkuje pełne odświeżenie po swoim zakończeniu.

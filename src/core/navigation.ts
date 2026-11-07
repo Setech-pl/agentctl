@@ -31,11 +31,25 @@ export async function applyNavigation(ctx: Context): Promise<NavigationResult> {
     mouse = r.code === 0 ? 'on' : { failed: r.stderr.trim() || `exit ${r.code}` };
   }
   const name = config.board.returnKey;
-  if (!name) return { session: true, mouse, key: null };
-  const condition = returnKeyCondition(config.session);
+  if (!name) {
+    const previous = await ctx.runner.exec('tmux', ['show-option', '-qv', '-t', `=${config.session}:`, '@agentctl-return-key'], { readOnly: true });
+    if (previous.stdout.trim()) await tmux.setSessionOption('@agentctl-return-key', 'off');
+    return { session: true, mouse, key: null };
+  }
+  let condition = `#{==:#{@agentctl-return-key},${name}}`;
   const existing = await tmux.rootBinding(name);
-  if (existing !== '' && !existing.includes(condition)) return { session: true, mouse, key: { name, state: 'taken' } };
-  const r = await tmux.bindRootKey(name, condition, `select-window -t '=${config.session}:${BOARD_WINDOW}'`, `send-keys ${name}`);
+  const legacy = /if-shell -F.*#\{==:#\{session_name\},[A-Za-z0-9_-]+\}.*select-window.*:board.*send-keys/.test(existing);
+  const owned = existing.includes('@agentctl-return-key') || legacy;
+  if (existing !== '' && !owned) return { session: true, mouse, key: { name, state: 'taken' } };
+  const priorCondition = /if-shell\s+-F\s+["']([^"']+)["']/.exec(existing)?.[1];
+  if (existing.includes('@agentctl-return-key') && priorCondition) condition = priorCondition;
+  else if (legacy) {
+    const priorSession = /#\{==:#\{session_name\},([A-Za-z0-9_-]+)\}/.exec(existing)?.[1];
+    if (priorSession) condition = `#{?#{@agentctl-return-key},${condition},${returnKeyCondition(priorSession)}}`;
+  }
+  const local = await tmux.setSessionOption('@agentctl-return-key', name);
+  if (local.code !== 0) return { session: true, mouse, key: { name, state: { failed: local.stderr.trim() || `exit ${local.code}` } } };
+  const r = await tmux.bindRootKey(name, condition, `select-window -t ':${BOARD_WINDOW}'`, `send-keys ${name}`);
   return { session: true, mouse, key: { name, state: r.code === 0 ? 'bound' : { failed: r.stderr.trim() || `exit ${r.code}` } } };
 }
 

@@ -3,9 +3,8 @@ import type { ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
-import os from 'node:os';
 import path from 'node:path';
-import { withHarness } from './live-harness.ts';
+import { withHarness, defaultCacheRoot } from './live-harness.ts';
 import type { Harness } from './live-harness.ts';
 
 /*
@@ -18,7 +17,7 @@ import type { Harness } from './live-harness.ts';
  * Run: node --experimental-strip-types --no-warnings scripts/live-phone.ts   Results: ~/Projects/cache/agentctl-15/live-phone-results.json
  */
 
-const CACHE = process.env.AGENTCTL_LIVE_CACHE ?? path.join(os.homedir(), 'Projects', 'cache', 'agentctl-15');
+const CACHE = defaultCacheRoot();
 
 interface Check {
   scenario: string;

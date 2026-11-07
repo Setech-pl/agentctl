@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import path from 'node:path';
 import { describe, it } from 'node:test';
 import { checkWindowLimit } from '../src/core/checks.ts';
 import { DEFAULT_AGENT_SETTINGS } from '../src/core/config.ts';
@@ -158,9 +159,9 @@ describe('manager: start, look, stop', () => {
     assert.equal(JSON.parse(fs.readFileSync(files.settings, 'utf8')).permissions.allow.includes('mcp__agentctl__status'), true);
     const created = w.runner.commands.find((c) => c.includes('new-session'));
     assert.match(created ?? '', new RegExp(`-n manager -c ${w.project}`));
-    const typed = w.runner.commands.find((c) => c.includes('send-keys') && c.includes('--remote-control'));
-    // the recorded line is quoted once more, as tmux gets it
-    assert.match(typed ?? '', /claude --model sonnet --effort medium --mcp-config .*manager\/mcp\.json --remote-control '\\''agentctl manager'\\'' --settings .*settings\.json --append-system-prompt-file .*role\.md/);
+    const typed = w.runner.commands.find((c) => c.includes('send-keys') && c.includes('exec sh'));
+    assert.ok(typed?.includes(`${files.dir}/start.sh`));
+    assert.match(w.runner.written.get(path.join(files.dir, 'start.sh'))!, /exec claude --model sonnet --effort medium --mcp-config .*manager\/mcp\.json --remote-control 'agentctl manager' --settings .*settings\.json --append-system-prompt-file .*role\.md/);
     assert.match(managerAdvice(w.ctx, result).join('\n'), /connected.*tap Code/);
   });
 
@@ -303,7 +304,7 @@ describe('manager: the command', () => {
     const runner = new RecordingRunner({ dryRun: true, emit: () => {} });
     const r = await runCli(w.config, runner, ['manager', '--project', w.project, '--dry-run'], { selfArgv: () => SELF, makeRunner: () => runner });
     assert.equal(r.code, 0, r.stderr);
-    assert.ok(runner.commands.some((c) => c.includes('--remote-control')));
+    assert.ok([...runner.written.values()].some((c) => c.includes('--remote-control')));
     assert.equal(w.tmux.windows.length, 0);
   });
 });
