@@ -9,7 +9,7 @@ import { withFileLock } from './file-lock.ts';
 import { recordJournal } from './journal.ts';
 
 /** Where the queue records the intentional closure of a never-ready start window, so it is not later reported as a tmux loss. */
-export const expectedCloseFile = (config: Pick<GlobalConfig, 'stateDir'>, window: string): string => path.join(taskDir(config, window), 'window-close.json');
+export const expectedCloseFile = (config: GlobalConfig, window: string): string => path.join(taskDir(config, window), 'window-close.json');
 
 /** A missing launched window is recoverable work, even after watch recreates the server/session. */
 export async function tmuxLoss(ctx: Context, record: TaskRecord, alive: boolean, complete: boolean, sessionAlive = false): Promise<string | undefined> {
