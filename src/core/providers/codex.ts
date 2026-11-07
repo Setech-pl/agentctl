@@ -30,7 +30,7 @@ export const codex: ProviderAdapter = {
     const help = version.code === 0 ? await runner.exec('codex', ['--help'], { readOnly: true }) : { stdout: '' };
     return { found: version.code === 0, version: /\d+\.\d+\.\d+/.exec(version.stdout)?.[0] ?? null, raw: version.stdout.split('\n').map(line => line.trim()).find(Boolean) ?? '', features: { effortFlag: /--effort\b/.test(help.stdout), config: /-c, --config/.test(help.stdout), remoteControl: /--remote-control\b/.test(help.stdout), appendSystemPromptFile: /--append-system-prompt(?:-file\b|\[-file\])/.test(help.stdout) } };
   },
-  doctor(d, env) {
+  doctor(d, env, config) {
     if (!d.found) return [{ name: 'codex', level: 'warn', text: `not found (only needed for agent: codex). ${this.installHint}` }];
     const lines: DoctorLine[] = [];
     const add = (name: string, level: DoctorLine['level'], text: string) => lines.push({ name, level, text });
@@ -38,7 +38,14 @@ export const codex: ProviderAdapter = {
       ? 'effort: via -c model_reasoning_effort=<effort>'
       : 'effort: no -c/--config flag in this version; set agents.codex.effort_args: [] (the prompt header still carries the effort)';
     add('codex', 'ok', `${d.raw}; ${effort}`);
-    if (d.features.config) add('codex', 'ok', 'startup update check: disabled for task windows (-c check_for_update_on_startup=false); the "Update available" dialog is reported as needs-input and never answered by agentctl');
+    if (d.features.config) {
+      // User flags come last in argv (see argv): a check_for_update_on_startup they carry wins over the default false.
+      const update = (config?.agents.codex.flags ?? []).flatMap((a, i, all) => (a === '-c' || a === '--config' ? [all[i + 1] ?? ''] : [a])).filter((a) => a.startsWith('check_for_update_on_startup=')).at(-1);
+      if (update === undefined || update === 'check_for_update_on_startup=false') add('codex', 'ok', 'startup update check: disabled for task windows (-c check_for_update_on_startup=false); the "Update available" dialog is reported as needs-input and never answered by agentctl');
+      else add('codex', 'warn', `startup update check: agents.codex.flags sets ${update} (user flags come last and win), so the "Update available" dialog can appear; the start then stops as needs-input and a human answers it (agentctl never does)`);
+    } else {
+      add('codex', 'warn', 'this Codex has no -c/--config flag: the startup update check cannot be disabled for task windows; an "Update available" dialog stops the start as needs-input (a human answers it, agentctl never does)');
+    }
     return lines;
   },
   argv(spec, settings, extra) {

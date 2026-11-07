@@ -61,7 +61,17 @@ describe('P33: Codex update modal', () => {
     const lines = codex.doctor({ found: true, version: '0.167.0', raw: 'codex 0.167.0', features: { config: true } }, {}, config);
     assert.ok(lines.some((l) => l.name === 'codex' && l.level === 'ok' && /check_for_update_on_startup=false/.test(l.text)));
     const old = codex.doctor({ found: true, version: '0.100.0', raw: 'codex 0.100.0', features: {} }, {}, config);
-    assert.ok(!old.some((l) => /check_for_update_on_startup/.test(l.text)), 'an old Codex without -c is already covered by the effort warning');
+    assert.ok(old.some((l) => l.name === 'codex' && l.level === 'warn' && /no -c\/--config flag/.test(l.text) && /Update available/.test(l.text)), 'an old Codex without -c gets an explicit update-check warning');
+  });
+
+  it('doctor reflects a user override of the startup update check (user flags come last and win)', () => {
+    const on = makeConfig(scratch.sub('doctor-on'), 'agents:\n  codex:\n    flags: [-c, check_for_update_on_startup=true]\n');
+    const lines = codex.doctor({ found: true, version: '0.167.0', raw: 'codex 0.167.0', features: { config: true } }, {}, on);
+    assert.ok(!lines.some((l) => /check_for_update_on_startup=false/.test(l.text)), 'no "disabled" claim against the user override');
+    assert.ok(lines.some((l) => l.name === 'codex' && l.level === 'warn' && /check_for_update_on_startup=true/.test(l.text) && /user flags come last and win/.test(l.text)));
+    const off = makeConfig(scratch.sub('doctor-off'), 'agents:\n  codex:\n    flags: [-c, check_for_update_on_startup=true, -c, check_for_update_on_startup=false]\n');
+    const last = codex.doctor({ found: true, version: '0.167.0', raw: 'codex 0.167.0', features: { config: true } }, {}, off);
+    assert.ok(last.some((l) => l.level === 'ok' && /check_for_update_on_startup=false/.test(l.text)), 'the last occurrence wins, as in argv');
   });
 
   it('a live window that never became ready (prompt never pasted) holds no provider slot', async () => {
