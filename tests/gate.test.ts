@@ -113,6 +113,56 @@ it('F2: reclamation is serialized; a second reclaimer cannot unlink the live suc
   assert.equal(fs.existsSync(lock), false);
   assert.equal(fs.existsSync(`${lock}.reclaim`), false, 'no reclaim lock is left behind');
 });
+it('X1: a reclaimer never unlinks a reclaim lock a live successor installed since its stale read (A/B/C)', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const lock = path.join(scratch.dir, 'runtimes/.gate-x1.lock');
+  const reclaim = `${lock}.reclaim`;
+  const deadHolder = spawnSync('true', []).pid!;
+  const deadReclaimer = spawnSync('true', []).pid!;
+  assert.throws(() => process.kill(deadHolder, 0), { code: 'ESRCH' });
+  assert.throws(() => process.kill(deadReclaimer, 0), { code: 'ESRCH' });
+  fs.mkdirSync(path.dirname(lock), { recursive: true });
+  fs.writeFileSync(lock, JSON.stringify({ token: 'STALE', pid: deadHolder, cwd: '/tmp', started: new Date().toISOString() }));
+  fs.writeFileSync(reclaim, String(deadReclaimer));
+  // The A/B/C interleaving from the review reproduction: contender B read the reclaim lock of a dead reclaimer; before
+  // B unlinks it, A breaks it and installs its own live reclaim lock (the liveness check is B's last scheduling point
+  // before the unlink). A then finishes and a live successor takes the main lock; C may contend only after that.
+  const originalKill = process.kill.bind(process);
+  let installed = false;
+  process.kill = ((pid: number, signal?: NodeJS.Signals | 0) => {
+    if (signal === 0 && pid === deadReclaimer && !installed) {
+      installed = true;
+      fs.writeFileSync(reclaim, JSON.stringify({ token: 'A-LIVE', pid: process.pid, started: new Date().toISOString() }));
+    }
+    return originalKill(pid, signal as NodeJS.Signals);
+  }) as typeof process.kill;
+  try {
+    let waits = 0;
+    const release = await acquireLock(lock, () => {}, async () => {
+      waits++;
+      if (waits === 1) {
+        assert.ok(fs.existsSync(reclaim), 'B must not unlink the live reclaim lock A installed since B read the stale sidecar');
+        assert.equal(JSON.parse(fs.readFileSync(reclaim, 'utf8')).token, 'A-LIVE');
+        // A finishes: the dead main lock and A's reclaim lock go away, a live successor holds the main lock.
+        fs.unlinkSync(lock);
+        fs.unlinkSync(reclaim);
+        fs.writeFileSync(lock, JSON.stringify({ token: 'SUCCESSOR', pid: process.pid, cwd: '/tmp', started: new Date().toISOString() }));
+        return;
+      }
+      if (waits === 2) {
+        assert.equal(JSON.parse(fs.readFileSync(lock, 'utf8')).token, 'SUCCESSOR', 'no reclaimer unlinked the live successor lock');
+        fs.unlinkSync(lock); // the successor releases
+        return;
+      }
+      throw new Error('contender B should have acquired after the successor released');
+    });
+    assert.equal(waits, 2);
+    assert.ok(installed, 'the interleaving fired');
+    release();
+    assert.equal(fs.existsSync(lock), false);
+    assert.equal(fs.existsSync(reclaim), false, 'no reclaim lock is left behind');
+  } finally { process.kill = originalKill; }
+});
 it('checks cached runtime version and archive checksum with fakes and no network', () => {
   assert.equal(checkRuntime('/fake/node', '22.14.0', () => 'v22.14.0'), 'v22.14.0');
   assert.equal(checkRuntime('/fake/node', '26.', () => 'v26.13.0'), 'v26.13.0');
