@@ -101,6 +101,24 @@ describe('P48: withdrawing a waiting message', () => {
     assert.equal(done.outcome, 'withdrawn');
   });
 
+  it('X3: an id left in both the FIFO and the active delivery by an interrupted transfer withdraws as one message and is never redelivered', async () => {
+    const w = world('transfer-crash');
+    const record = seedTask(w.config, 'W-9');
+    await queuePrompt(w.ctx, record, 'Transferred when the crash hit');
+    const id = readTaskRecord(w.config, 'w-9')!.deliveryId!;
+    // The injected crash: the durable transfer wrote the active side, then died before the FIFO-removal write.
+    fs.writeFileSync(queueFile(w.ctx, 'w-9'), JSON.stringify([{ id, text: 'Transferred when the crash hit', queuedAt: new Date().toISOString() }]));
+    assert.equal(promptQueueView(w.ctx, 'w-9').length, 1, 'the user sees one message');
+    const done = await withdrawPrompt(w.ctx, 'w-9', id);
+    assert.equal(done.outcome, 'withdrawn');
+    assert.deepEqual(readPromptQueue(w.ctx, 'w-9'), [], 'the FIFO copy is gone too');
+    const after = readTaskRecord(w.config, 'w-9')!;
+    assert.equal(after.pendingPrompt, undefined);
+    assert.equal(after.deliveryId, undefined);
+    assert.deepEqual(promptQueueView(w.ctx, 'w-9'), [], 'nothing can be redelivered');
+    await assert.rejects(withdrawPrompt(w.ctx, 'w-9', id), /no waiting message/);
+  });
+
   it('MCP send with withdraw (send in mcp.allow); without the permission nothing is done', async () => {
     const w = world('mcp', 'mcp: {allow: [send]}\n');
     seedTask(w.config, 'W-5');
