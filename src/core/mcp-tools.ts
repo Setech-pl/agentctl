@@ -1,4 +1,5 @@
 import { queueDiagnosticSources } from './queue.ts';
+import { isHeavy } from './heavy.ts';
 import { DEFAULT_PROVIDERS } from './providers/types.ts';
 import { get as providerValue } from './providers/registry.ts';
 import type { AgentName } from './config.ts';
@@ -509,6 +510,7 @@ async function runQueueList(deps: McpDeps, args: { cohort?: string | undefined }
     model: v.entry.model,
     effort: v.entry.effort,
     priority: v.entry.priority,
+    weight: isHeavy(v.entry) ? 'heavy' : 'normal',
     after: v.entry.after,
     startCondition: v.condition.text,
     queued: v.entry.queuedAt,
@@ -696,6 +698,7 @@ async function runTaskSpec(deps: McpDeps, args: { task: string }): Promise<ToolR
     pulled: record.pulled ?? null,
     pulledLocal: record.pulled ? formatLocalTime(record.pulled) : null,
     review_of: record.reviewOf ?? null,
+    weight: record.weight ?? 'normal',
     continues: record.continues ?? null,
     superseded_by: record.supersededBy ?? null,
     pin: record.pin === true,
@@ -1117,7 +1120,7 @@ export const MCP_TOOLS: McpToolDef[] = [
     name: 'task_spec',
     title: 'Header and prompt of a task',
     kind: 'read',
-    description: 'What a task was ordered to do: its header (agent, model, effort, repositories and worktrees, report path, start time, links to a task it continues or was moved to) and the prompt text from TASK.md. Use it to review or continue a task. Environment values are not shown.',
+    description: 'What a task was ordered to do: its header (agent, model, effort, weight, repositories and worktrees, report path, start time, links to a task it continues or was moved to) and the prompt text from TASK.md. Use it to review or continue a task. Environment values are not shown.',
     input: { task: taskArg },
     annotations: readOnly('Header and prompt of a task'),
     run: (deps, args) => guarded(() => runTaskSpec(deps, args as { task: string })),
@@ -1127,7 +1130,7 @@ export const MCP_TOOLS: McpToolDef[] = [
     title: 'The task queue',
     kind: 'read',
     description:
-      'The queue of tasks that wait for a free window of their provider (or for another task\'s report, `after`): position, agent/model/effort, priority, what each waits for (startCondition), since when, and the error of a start that failed. ' +
+      'The queue of tasks that wait for a free window of their provider (or for another task\'s report, `after`): position, agent/model/effort, priority, weight, what each waits for (startCondition), since when, and the error of a start that failed. ' +
       'Use it when the user asks what is queued, why something has not started, or what runs next.',
     input: { cohort: cohortArg.optional() },
     annotations: readOnly('The task queue'),

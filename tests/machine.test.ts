@@ -25,3 +25,26 @@ it('machine metrics and threshold transitions persist and deduplicate across rea
   assert.equal(JSON.parse(capacity.stdout).machine.loadAverage.length, 3);
   assert.throws(() => makeConfig(scratch.sub('bad'), 'capacity: {load_threshold: -1}\n'), /load_threshold/);
 });
+
+it('R4: an unchanged machine-load state is not rewritten on every tick; a crossing writes once', async () => {
+  const config = makeConfig(scratch.sub('machine-r4'), 'capacity: {load_threshold: 6}\n');
+  const runner = new class extends DiskRunner {
+    writes = 0;
+    override async writeFile(file: string, content: string): Promise<void> {
+      if (file.endsWith('machine-load.json')) this.writes++;
+      await super.writeFile(file, content);
+    }
+  }({ dryRun: false });
+  const ctx = new Context(runner, config, () => {});
+  const calm = { loadAverage: [1, 1, 1], freeMemoryBytes: 1, cpuCount: 2, threshold: 6, overloaded: false };
+  await recordMachineLoad(ctx, calm);
+  await recordMachineLoad(ctx, calm);
+  await recordMachineLoad(ctx, calm);
+  assert.equal(runner.writes, 1, 'only the first observation writes the state file');
+  const hot = { ...calm, overloaded: true };
+  await recordMachineLoad(ctx, hot);
+  await recordMachineLoad(ctx, hot);
+  assert.equal(runner.writes, 2, 'a crossing writes once');
+  await recordMachineLoad(ctx, calm);
+  assert.equal(runner.writes, 3, 'the return below the threshold writes once');
+});

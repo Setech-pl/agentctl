@@ -20,9 +20,12 @@ export async function recordMachineLoad(ctx: Context, sample = collectMachine(ct
   if (ctx.runner.dryRun) return;
   const file = path.join(path.dirname(ctx.config.path), 'machine-load.json');
   await withFileLock(`${file}.lock`, async () => {
-    let previous = false;
+    let previous: boolean | undefined;
     try { previous = JSON.parse(fs.readFileSync(file, 'utf8')).overloaded === true; } catch { /* first observation */ }
-    if (previous !== sample.overloaded) await recordJournal(ctx, { kind: sample.overloaded ? 'machine-load-high' : 'machine-load-recovered', text: `${sample.overloaded ? 'Machine load crossed threshold' : 'Machine load fell back'}: ${machineLine(sample)}` });
+    // An unchanged state is neither an event nor a reason to rewrite the file on every tick.
+    if (previous === sample.overloaded) return;
+    // The first quiet observation only seeds the file; a first observation above the threshold is a crossing.
+    if (previous !== undefined || sample.overloaded) await recordJournal(ctx, { kind: sample.overloaded ? 'machine-load-high' : 'machine-load-recovered', text: `${sample.overloaded ? 'Machine load crossed threshold' : 'Machine load fell back'}: ${machineLine(sample)}` });
     await ctx.runner.writeFile(file, JSON.stringify({ overloaded: sample.overloaded }));
   });
 }

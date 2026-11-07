@@ -706,3 +706,12 @@ it('heavy admission is shared across providers, visible in preview, and releases
   s.tmux.windows = s.tmux.windows.filter(w => w.name !== 'hv-1' && w.name !== 'hv-3');
   assert.deepEqual(await s.tick(), ['HV-2']);
 });
+
+it('R5: heavies waiting for a heavy slot stack their count instead of all showing the same', async () => {
+  const s = setup('heavy-r5', 'limits: {claude: 4, heavy: 1}\nqueue: {parallel_starts: 4}\n');
+  await add(s, specOf(s.repo, 'HW-1', {weight: 'heavy'}) + specOf(s.repo, 'HW-2', {weight: 'heavy'}) + specOf(s.repo, 'HW-3', {weight: 'heavy'}));
+  const views = describeQueue(s.config, readQueue(s.config), []);
+  assert.equal(views[0]!.condition.kind, 'ready');
+  assert.match(views[1]!.condition.text, /heavy.*1\/1/);
+  assert.match(views[2]!.condition.text, /heavy.*2\/1/);
+});

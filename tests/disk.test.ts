@@ -104,4 +104,5 @@ it('P24 warns on per-volume worktree share, gives safe reclaim size and close si
   config.disk.worktreeSharePercent = 30;
   assert.equal((await collectDisk(ctx, fake)).level, 'ok');
   assert.throws(() => makeConfig(scratch.sub('p24-bad'), 'disk: {worktree_share_percent: 101}\n'), /worktree_share_percent/);
+  assert.throws(() => makeConfig(scratch.sub('p24-neg'), 'disk: {worktree_share_percent: -5}\n'), /worktree_share_percent/, 'R8: a negative share is rejected, not a permanent warn');
 });

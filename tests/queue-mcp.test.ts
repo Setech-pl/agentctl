@@ -74,6 +74,18 @@ describe('mcp: queue read tools', () => {
     assert.deepEqual(list.map((x) => [x.task, x.position, x.startCondition, x.after]), [['Q-1', 1, 'czeka na miejsce: claude 1/1', []], ['Q-2', 2, 'czeka na Q-1', ['Q-1']]]);
   });
 
+  it('queue_list and task_spec expose the spec weight as a structured field', async () => {
+    const t = setup('qw', 'mcp: {allow: [queue]}\n');
+    await t.call('queue', { spec: t.spec('HV-1', 'weight: heavy\n') });
+    assert.equal((await t.call('queue', { spec: t.spec('HV-1', 'weight: heavy\n'), confirm: true })).isError, undefined);
+    const list = JSON.parse((await t.call('queue_list', { format: 'json' })).text) as { task: string; weight: string }[];
+    assert.deepEqual(list.map((x) => [x.task, x.weight]), [['HV-1', 'heavy']]);
+    seedTask(t.config, 'HV-2', { weight: 'heavy' });
+    assert.match((await t.call('task_spec', { task: 'HV-2' })).text, /"weight": "heavy"/);
+    seedTask(t.config, 'NM-1');
+    assert.match((await t.call('task_spec', { task: 'NM-1' })).text, /"weight": "normal"/);
+  });
+
   it('overlap lists the pairs and the files; with a task only its pairs; an unknown task is an error', async () => {
     const t = setup('ov');
     t.running('A-1', ['x.ts', 'y.ts']);

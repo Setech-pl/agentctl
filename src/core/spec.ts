@@ -412,7 +412,8 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     else projectLinkByFrom.delete(from);
   }
 
-  const linkWarnings = specLinks.length === 0 ? staleProjectLinkWarnings([...projectLinkByFrom.values()], config) : [];
+  // projectLinkByFrom holds exactly the inherited project links no spec link overrode; each stale one warns, whatever else the spec links.
+  const linkWarnings = staleProjectLinkWarnings([...projectLinkByFrom.values()], config);
 
   // Env: spec > project > global.
   const env: Record<string, string> = {};

@@ -1057,8 +1057,8 @@ Dla kosztownych zadań dodaj `weight: heavy` w nagłówku. Kolejka dopuszcza naj
 dodatnia liczba całkowita), uwzględniając trwające starty i żywe okna zadań.
 Zwykłe zadania korzystają z limitów dostawcy. Podgląd i lista kolejki podają
 powód oczekiwania. Zamknięcie okna zwalnia miejsce; okna report-ready nadal się
-liczą. Natychmiastowe `new` pozostaje poza kontrolą kolejki. Udostępnienie pola
-w strukturalnym schemacie MCP jest osobnym zadaniem; tekst specyfikacji już je obsługuje.
+liczą. Natychmiastowe `new` pozostaje poza kontrolą kolejki. MCP pokazuje pole
+w `queue_list` i `task_spec`; tekst specyfikacji obsługuje je wszędzie.
 
 Wskazówki dyskowe: `disk.worktree_share_percent` (domyślnie 20, zakres (0, 100])
 ostrzega, gdy znane worktree zadań przekroczą tę część swojego systemu plików.

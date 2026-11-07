@@ -27,6 +27,17 @@ it('P17 new and queue previews name stale project defaults and suggest placehold
     assert.doesNotMatch(summarizeSpecs([resolveSpec(raw, { config })]).join('\n'), /stale project link/);
   }
 });
+it('R6: an unrelated spec link does not silence stale project-link warnings; overriding the same from does', () => {
+  const root = scratch.sub('stale-r6'), config = makeConfig(root), repo = scratch.sub('stale-r6/app');
+  const target = path.join(root, 'missing-target');
+  fs.writeFileSync(path.join(repo, '.agentctl.yaml'), `links:\n  - {from: pkg, to: ${target}}\n`);
+  const raw = splitSpecs(specText({ task: 'FRONT', agent: 'claude' }, repo))[0]!;
+  raw.header.links = [{ from: 'other', to: scratch.sub('stale-r6/elsewhere') }];
+  assert.ok(summarizeSpecs([resolveSpec(raw, { config })]).join('\n').includes(`stale project link pkg -> ${target}`), 'an unrelated spec link keeps the project-link warning');
+  raw.header.links = [{ from: 'pkg', to: scratch.sub('stale-r6/override') }];
+  assert.doesNotMatch(summarizeSpecs([resolveSpec(raw, { config })]).join('\n'), /stale project link/, 'an override of the same from silences it');
+});
+
 it('P17 healthy inherited project links do not warn', () => {
   const root = scratch.sub('healthy'), config = makeConfig(root), repo = scratch.sub('healthy/app'), target = scratch.sub('healthy/backend');
   fs.writeFileSync(path.join(repo, '.agentctl.yaml'), `links:\n  - {from: pkg, to: ${target}}\n`);

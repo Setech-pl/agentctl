@@ -582,7 +582,11 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
     if (entry.status === 'starting') return { position: null, entry, condition: { kind: 'starting', text: entry.direct || readSetupProgress(config, entry.task, queueDiagnosticSources(entries)) ? startProgressText(readSetupProgress(config, entry.task, queueDiagnosticSources(entries)), nowMs) : 'starting' }, since: entry.startingAt ?? entry.queuedAt };
     position++;
     const heavyReason = heavyWait(config, isHeavy(entry), heavy.size);
-    if (heavyReason) return { position, entry, condition: { kind: 'slot', text: heavyReason }, since: entry.queuedAt };
+    if (heavyReason) {
+      // A waiting heavy also stands in line for a heavy slot: the next heavy must see it in the count.
+      heavy.add(entry.task);
+      return { position, entry, condition: { kind: 'slot', text: heavyReason }, since: entry.queuedAt };
+    }
     const author = directAuthorState(config, entry, entries);
     if (author.waiting || author.failed) return { position, entry, condition: { kind: 'after', text: author.waiting ?? author.failed! }, since: entry.queuedAt };
     if (entry.direct && !(entry.retryAt && Date.parse(entry.retryAt) > nowMs) && !(config.limits[entry.agent] !== undefined && used[entry.agent] >= (config.limits[entry.agent] as number))) {
@@ -754,6 +758,8 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
     if (entry.direct) {
       const room = config.limits[entry.agent];
       if (room !== undefined && used[entry.agent] >= room) continue;
+      // A claim that did not begin consumes no provider slot: a heavy-blocked or raced entry must not starve its provider for this tick.
+      // Starts run in the background, so a broken setup can fail several entries of one tick — bounded by queue.parallel_starts, each failed once.
       if (await beginStart(ctx, memory, notifier, entry, opts)) { used[entry.agent]++; began.push(entry.task); }
       continue;
     }

@@ -1057,8 +1057,8 @@ Use `weight: heavy` in a task header for costly work. The queue admits at most
 including starts in progress and live task windows. Normal tasks keep using
 provider slots. Queue preview/list explain the heavy-slot wait. Closing the
 window frees its heavy slot; report-ready windows still count. Immediate `new`
-is outside queue admission. MCP structured spec-field exposure is a follow-up;
-raw spec text already accepts the field.
+is outside queue admission. MCP exposes the field in `queue_list` and
+`task_spec`; the spec text accepts it everywhere.
 
 Disk hints: `disk.worktree_share_percent` (default 20, in (0, 100]) warns when
 known task worktrees exceed that share of their own filesystem. Existing
