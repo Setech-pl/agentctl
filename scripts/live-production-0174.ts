@@ -22,7 +22,7 @@ const cache = defaultCacheRoot('agentctl-0174');
 const results: { name: string; ok: boolean }[] = [];
 const check = (name: string, value: unknown) => { results.push({ name, ok: !!value }); console.log(`${value ? 'PASS' : 'FAIL'} ${name}`); assert.ok(value, name); };
 const pause = (ms: number) => new Promise(r => setTimeout(r, ms));
-await withHarness({ name: 'prod-0174', cacheRoot: cache, config: 'capacity: {snapshot: false, codex_refresh: false}\nlimits: {claude: 1}\nwatch: {idle_confirm_ticks: 2}\nmcp: {allow: [new, queue, gc, send]}\n' }, async h => {
+await withHarness({ name: 'prod-0174', cacheRoot: cache, config: 'capacity: {snapshot: false, codex_refresh: false}\nlimits: {claude: 1}\nwatch: {interval: 1, idle_confirm_ticks: 2}\nmcp: {allow: [new, queue, gc, send]}\n' }, async h => {
   class SandboxRunner extends RealRunner { override exec(cmd: string, args: string[], opts: ExecOptions = {}) { h.check(); return super.exec(cmd, args, { ...opts, env: h.env }); } }
   const runner = new SandboxRunner(), config = loadGlobalConfig(h.agentctlHome), ctx = new Context(runner, config, () => {});
   const mode = path.join(h.root, 'mode'); fs.writeFileSync(mode, 'busy');
