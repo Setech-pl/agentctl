@@ -152,7 +152,8 @@ async function resumeScenario(): Promise<void> {
     h.restartServer();
     check('no window is left after the restart', windows(h).length === 0);
     const status = h.agentctl(['status']);
-    check('status shows both as dead (no window)', /LR-1.*dead/.test(status.stdout) && /LR-2.*dead/.test(status.stdout), status.stdout);
+    // P43: a lost tmux server is needs-attention with the tmux-lost hint, no longer dead; resume picks the tasks up from there.
+    check('status shows both as needs-attention (tmux lost)', /LR-1.*needs-attention/.test(status.stdout) && /LR-2.*needs-attention/.test(status.stdout) && status.stdout.includes('tmux server/session lost'), status.stdout);
     const dry = h.agentctl(['resume', '--dry-run']);
     check('resume --dry-run lists both and starts nothing', /Resume 2 tasks/.test(dry.stdout) && windows(h).length === 0, dry.stdout);
     const r = h.agentctl(['resume', '-y']);

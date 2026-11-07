@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Validation: live-scenarios resume checks the P43 tmux-loss state — `needs-attention` with the tmux-lost hint — instead of `dead`. / Live-scenarios resume sprawdza stan utraty tmux z P43: `needs-attention` z podpowiedzią tmux-lost, zamiast `dead`.
+
 - Validation: live-hotfix-0173 starts the watcher before the MCP `new`/`queue` confirms, as P34 requires for every chat start. / Live-hotfix-0173 uruchamia watcha przed confirm MCP `new`/`queue`, zgodnie z wymogiem P34 dla każdego startu z czatu.
 
 - Validation: live-production-0174 runs the watcher for MCP `new` confirms and polls for the asynchronously prepared worktrees (P34). / Live-production-0174 uruchamia watcha dla confirm MCP `new` i czeka na asynchronicznie tworzone worktree (P34).
