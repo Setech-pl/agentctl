@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- P50: requeuing a removed task ID creates a fresh record; prior attempt state is retained under state/.history and no longer cancels its new dependents. / Ponowne dodanie ID po queue rm tworzy świeży rekord; poprzednia próba zostaje w state/.history i nie blokuje nowych zależności jako anulowana.
+
 - R2: recover the gate lock after its owner is SIGKILLed; reject invalid owner PIDs. / Bramka odzyskuje blokadę po SIGKILL właściciela; niepoprawny PID nie jest uznawany za martwego właściciela.
 
 - FIX1: oversized legacy `gc_preview` chat events are summarized on read, so old large garbage-collection entries no longer occupy whole event pages. / Przestarzałe duże wpisy `gc_preview` są skracane przy odczycie i nie zajmują już całych stron zdarzeń czatu.

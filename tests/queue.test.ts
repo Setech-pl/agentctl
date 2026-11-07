@@ -660,3 +660,34 @@ describe('P36: queue_rm over a leftover live window', () => {
     assert.ok(!s.runner.commands.some((c) => c.includes('kill-window')));
   });
 });
+
+describe('P50: a requeued ID starts a fresh attempt', () => {
+  it('clears cancellation and old delivery/session state, unblocking existing and new dependents', async () => {
+    const s = setup('p50-fresh');
+    await add(s, specOf(s.repo, 'OLD-1') + specOf(s.repo, 'DEP-1', { after: 'OLD-1' }));
+    await removeFromQueue(s.ctx, 'OLD-1');
+    const dir = path.join(s.config.stateDir, 'old-1');
+    fs.writeFileSync(path.join(dir, 'prompt-queue.json'), '[{"id":"old","text":"do not send","queuedAt":"old"}]');
+    fs.writeFileSync(path.join(dir, 'sessions.json'), '{"codex":["old-session"]}');
+    assert.match(renderQueueList(await describeQueue(s.ctx)), /anulowane/);
+    await add(s, specOf(s.repo, 'OLD-1', {}, 'Fresh prompt'));
+    const fresh = readTaskRecord(s.config, 'old-1')!;
+    assert.equal(fresh.cancelled, undefined);
+    assert.equal(fresh.cancelledAt, undefined);
+    assert.equal(fresh.deliveryId, undefined);
+    assert.equal(fresh.pendingPrompt, undefined);
+    assert.equal(fresh.started, '');
+    assert.equal(fs.existsSync(path.join(dir, 'prompt-queue.json')), false);
+    assert.equal(fs.existsSync(path.join(dir, 'sessions.json')), false);
+    await add(s, specOf(s.repo, 'DEP-2', { after: 'OLD-1' }));
+    const listing = renderQueueList(await describeQueue(s.ctx));
+    assert.doesNotMatch(listing, /anulowane|zablokowane/);
+    assert.match(listing, /czeka na OLD-1/);
+    assert.equal((await collectStatus(s.ctx)).find(r => r.task === 'OLD-1')?.tmuxLost, undefined);
+    const histories = fs.readdirSync(path.join(s.config.stateDir, '.history'));
+    assert.equal(histories.length, 1);
+    assert.match(fs.readFileSync(path.join(s.config.stateDir, '.history', histories[0]!, 'TASK.md'), 'utf8'), /cancelled: true/);
+    await removeFromQueue(s.ctx, 'OLD-1');
+    assert.match(renderQueueList(await describeQueue(s.ctx)), /anulowane/, 'a new cancellation still blocks dependents');
+  });
+});

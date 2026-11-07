@@ -12,6 +12,7 @@ import { redactQueue } from './mcp-redact.ts';
 import { checkRetryWorktrees } from './git.ts';
 import { collectCapacity, capacitySnapshot, snapshotLines } from './capacity.ts';
 import fs from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import YAML from 'yaml';
 import type { AgentModel } from './checks.ts';
@@ -287,6 +288,19 @@ export async function commitQueueAdd(ctx: Context, items: QueueAddItem[], opts: 
     if (opts.agent) entry.agentOverride = opts.agent;
     if (spec.reviewOf) entry.reviewOf = spec.reviewOf;
     if (spec.cohort) entry.cohort = (await touchCohort(ctx, spec.cohort)).name;
+    // A removed entry may have left a cancellation record and delivery/session sidecars.
+    // Keep that attempt as history, then install a fresh, never-launched record before publishing the queue entry.
+    const previous = readTaskRecord(config, spec.window);
+    if (previous?.cancelled) {
+      const history = path.join(config.stateDir, '.history');
+      await runner.mkdir(history);
+      await runner.rename(taskDir(config, spec.window), path.join(history, `${spec.window}-${randomUUID()}`));
+      const fresh = recordFromSpec(spec, config, runner.now());
+      fresh.started = '';
+      fresh.promptDelivery = 'launching';
+      await runner.mkdir(taskDir(config, spec.window));
+      await runner.writeFile(taskFile(config, spec.window), renderTaskMd(fresh, spec.prompt));
+    }
     await writeEntry(ctx, entry);
     added.push(entry);
   }
