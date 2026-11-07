@@ -50,8 +50,8 @@ await withHarness({ name: 'board-models', cacheRoot: root, config: 'providers: [
   const fonts = path.join(path.dirname(require.resolve('dejavu-fonts-ttf/package.json')), 'ttf');
   fs.writeFileSync(path.join(root, 'board-three-providers.png'), new Resvg(svg.replaceAll(FONT_STACK, "'DejaVu Sans Mono'"), { font: { fontFiles: ['DejaVuSansMono.ttf', 'DejaVuSansMono-Bold.ttf', 'DejaVuSans.ttf'].map(f => path.join(fonts, f)), loadSystemFonts: false } }).render().asPng());
   const version = (JSON.parse(fs.readFileSync(path.resolve(import.meta.dirname, '../package.json'), 'utf8')) as { version: string }).version;
-  check('the header names the version', wide.includes(`agentctl ${version} board`));
-  check('the pane title is the OSC 2 title of the board', h.tmux(['display-message', '-p', '-t', target, '#{pane_title}']).stdout.trim() === `agentctl ${version} · board`);
+  check('the header names the version', wide.includes(`agentctl-dev ${version} board`));
+  check('the pane title is the OSC 2 title of the board', h.tmux(['display-message', '-p', '-t', target, '#{pane_title}']).stdout.trim() === `agentctl-dev ${version} · board`);
   check('set-titles is set for the agentctl session only', h.tmux(['show-options', '-v', '-t', `=${h.session}:`, 'set-titles-string']).stdout.trim() === `agentctl-dev ${version} · #W` && h.tmux(['show-options', '-gv', 'set-titles']).stdout.trim() === 'off' && h.tmux(['show-options', '-gv', 'set-titles-string']).stdout.trim() !== `agentctl-dev ${version} · #W`);
   h.tmux(['resize-window', '-t', target, '-x', '80', '-y', '30']);
   const narrow = await until(/cx S 6\.1 XH/);
