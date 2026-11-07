@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { cancelTasks, planCancel } from '../src/core/cancel.ts';
 import { collectEvents, eventsMarkdown, markersPath, parseSince, readMarkers, renderEvents } from '../src/core/chat-events.ts';
 import { Context } from '../src/core/context.ts';
-import { recordJournal, readJournal } from '../src/core/journal.ts';
+import { journalPath, recordJournal, readJournal } from '../src/core/journal.ts';
 import { MCP_TOOLS } from '../src/core/mcp-tools.ts';
 import type { McpDeps, McpToolDef } from '../src/core/mcp-tools.ts';
 import type { Notifier } from '../src/core/notify.ts';
@@ -185,5 +185,55 @@ describe('events: the CLI and the MCP tool', () => {
     assert.match(second.text, /brak zmian/);
     assert.match((await call({ format: 'json' })).text, /"client": "mcp:/);
     assert.equal((await call({ since: 'soon' })).isError, true);
+  });
+});
+
+describe('events: legacy oversized gc_suggest entries', () => {
+  // A journal written before the write-time bound of recordJournal: a gc_suggest with a whole GC plan, then a normal event.
+  const legacyGc = (w: ReturnType<typeof world>) => {
+    const plan = { items: Array.from({ length: 400 }, (_, i) => ({ task: `OLD-${i}`, kind: 'worktree', bytes: 123456789, note: 'x'.repeat(40) })) };
+    const entry = { at: new Date(min(1)).toISOString(), kind: 'gc_suggest', text: 'kohorta Old: gc_preview gotowy (400 pozycji)', cohort: 'Old', gc_preview: plan };
+    fs.writeFileSync(journalPath(w.config), `${JSON.stringify(entry)}\n${JSON.stringify({ at: new Date(min(2)).toISOString(), kind: 'limits-changed', text: 'limity: claude 3 → 4' })}\n`);
+    return entry;
+  };
+  const markerAt = (w: ReturnType<typeof world>, cursor: string) => fs.writeFileSync(markersPath(w.config), JSON.stringify({ cli: cursor }));
+
+  it('summarized on read: one page carries it (with its other fields) and the event that follows, no fragments', async () => {
+    const w = world('gc-legacy');
+    legacyGc(w);
+    w.at(min(5));
+    const page = await collectEvents(w.ctx, { client: 'cli', keep: true });
+    assert.deepEqual(page.events.map((e) => e.kind), ['gc_suggest', 'limits-changed']);
+    const gc = page.events[0]!;
+    assert.equal('fragment' in gc, false, 'no JSON fragments for a legacy gc_suggest');
+    assert.equal(gc.text, 'kohorta Old: gc_preview gotowy (400 pozycji)', 'unrelated fields survive the summary');
+    assert.deepEqual(gc.gc_preview, { dropped: 'oversized payload; details via gc_preview / agentctl gc' });
+    assert.equal(page.has_more, false);
+  });
+
+  it('a mid-fragment cursor into the dropped payload counts the entry as delivered; the next event is served whole', async () => {
+    const w = world('gc-cursor-past');
+    const entry = legacyGc(w);
+    w.at(min(5));
+    const offset = JSON.stringify(entry).length - 50;
+    markerAt(w, `e2:0:${offset}`);
+    const page = await collectEvents(w.ctx, { client: 'cli', keep: true });
+    assert.deepEqual(page.events.map((e) => e.kind), ['limits-changed'], 'no stale fragments of the dropped payload');
+    assert.equal(page.has_more, false);
+  });
+
+  it('a fragment cursor before the gc_preview value continues seamlessly on the summarized entry', async () => {
+    const w = world('gc-cursor-prefix');
+    const entry = legacyGc(w);
+    w.at(min(5));
+    markerAt(w, 'e2:0:20');
+    const page = await collectEvents(w.ctx, { client: 'cli', keep: true });
+    const summarized = JSON.stringify({ ...entry, gc_preview: { dropped: 'oversized payload; details via gc_preview / agentctl gc' } });
+    const first = page.events[0]!;
+    assert.equal(first.kind, 'gc_suggest');
+    const fragment = (first as { fragment?: { offset: number; total: number } }).fragment;
+    assert.equal(fragment?.offset, 20);
+    assert.equal(fragment?.total, summarized.length);
+    assert.equal(first.text, summarized.slice(20), 'the prefix before gc_preview is byte-identical, the delivery continues there');
   });
 });

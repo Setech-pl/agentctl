@@ -48,6 +48,24 @@ test('lost server/session stays visible with recovery, one durable event per los
   await collectStatus(ctx, { progress: false });
   assert.equal(readJournal(config).filter(e => e.kind === 'tmux-lost' && e.task === 'LOST').length, 2);
 });
+test('a dead window of a living session says the window is gone, not "server/session lost"', async () => {
+  const config = makeConfig(scratch.sub('pane-death'));
+  const fake = new FakeTmux();
+  const { ctx } = makeContext(config, { respond: fake.respond });
+  const wt = scratch.sub('pane-worktree');
+  seedTask(config, 'PANE', { windowId: '@9', repos: [{ path: wt, worktree: wt }] });
+  fs.writeFileSync(sessionsFile(config, 'pane'), JSON.stringify({ claude: [{ id: 'pane-session' }] }));
+  fake.add('pane', 'Working');
+  await collectStatus(ctx, { progress: false });
+  fake.windows = fake.windows.filter((w) => w.name !== 'pane');
+  fake.add('watch'); // the session lives; only the task window died
+  const row = (await collectStatus(ctx, { progress: false })).find((r) => r.task === 'PANE')!;
+  assert.equal(row.state, 'needs-attention');
+  assert.match(row.hint!, /serwer\/sesja tmux działa|server lives/);
+  assert.doesNotMatch(row.hint!, /Utracono serwer\/sesję/);
+  assert.match(row.hint!, /agentctl resume PANE/);
+  assert.equal(readJournal(config).filter((e) => e.kind === 'tmux-lost' && e.task === 'PANE').length, 1, 'a dead window of a living session is still one durable event');
+});
 test('SessionStart remembers session before the first prompt and is available to resume', async () => {
   const config = makeConfig(scratch.sub('early'));
   const { ctx } = makeContext(config);

@@ -527,6 +527,8 @@ agentctl send [options] [file]
 | `-y, --yes` | with --clip: do not ask |  |
 | `--enter-only <task>` | paste nothing: show the exact text that an earlier send left in the input field of the task ("nie dostarczono – tekst w polu wpisywania") with a token; refuses any other text |  |
 | `--confirm <token>` | with --enter-only: press Enter if the field is still exactly the text the preview showed |  |
+| `--withdraw <task>` | take back a waiting message of the task: a queued one is removed, one whose delivery already began is marked stale (the agent may already work on it) |  |
+| `--entry <id>` | with --withdraw: the id of the message (a unique prefix is enough; peek lists prompt_queue) |  |
 
 Examples:
 

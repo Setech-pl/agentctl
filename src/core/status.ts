@@ -217,8 +217,12 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     const stored = readStoredEvent(config, record);
     const reportState = inspectReport(config, { ...record, ...(stored?.outcome === 'turn-complete' ? { turnEndedAt: stored.at } : {}) }, runner.now(), !record.attemptId && (!alive || (config.reportSettleS === 0 && classifyScreen(screenText, settings) === 'idle')));
     reportReady = reportState.ready;
-    if (record.reportCandidate && record.reportCandidate !== record.report && !findCandidates(ctx, record).some(c => c.file === record.reportCandidate)) delete record.reportCandidate;
-    if (reportState.exists && !reportReady && !record.reportCandidate) record.reportCandidate = record.report;
+    // The candidate lives on the row, not on the record copy: one bounded discovery walk per task per collect (R3).
+    let reportCandidate = record.reportCandidate;
+    let candidatesCache: ReturnType<typeof findCandidates> | undefined;
+    const candidates = () => (candidatesCache ??= findCandidates(ctx, record));
+    if (reportCandidate && reportCandidate !== record.report && !candidates().some(c => c.file === reportCandidate)) reportCandidate = undefined;
+    if (reportState.exists && !reportReady && !reportCandidate) reportCandidate = record.report;
     if (reportReady && !alive && reportState.mtime !== undefined && !Number.isNaN(startedMs)) duration = formatDuration(reportState.mtime - startedMs);
     // mtimeMs has a fraction, the stored time only whole milliseconds: a pull in the same millisecond as the report still counts.
     const pulled = record.pulled && reportMtime !== undefined && Date.parse(record.pulled) >= Math.floor(reportMtime) ? record.pulled : null;
@@ -229,9 +233,11 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     const deliveryReport = reportReady && (record.promptDelivery === 'needs-attention' || (record.deliveryId && reportState.signature !== record.deliveryReportBaseline)) && (!alive || classifyScreen(screenText, settings) === 'idle');
     const writeFailure = stateWriteFailure(path.join(config.stateDir, record.window, 'TASK.md'));
     const unconfirmed = record.promptDelivery === 'needs-attention' && !reportReady && !deliveryEvidence(ctx, record, screenText);
-    const lossHint = await tmuxLoss(ctx, record, alive, reportReady || cancelled || closed || archived || !!record.supersededBy);
+    // A startup dialog `new` stopped at (prompt_delivery: needs-input) is a question to the human, not a delivery failure.
+    const startupDialog = record.promptDelivery === 'needs-input' && !reportReady;
+    const lossHint = await tmuxLoss(ctx, record, alive, reportReady || cancelled || closed || archived || !!record.supersededBy, infos.length > 0);
     if (lossHint && hiddenBy === 'auto') hiddenBy = null;
-    let state: TaskState = cancelled ? 'cancelled' : closed ? 'closed' : record.supersededBy ? 'superseded' : lossHint ? 'needs-attention' : writeFailure ? 'needs-attention' : deliveryReport ? 'report-ready' : unconfirmed ? 'needs-attention' : taskState({ alive, screen: screenText, settings, reportReady, event: stored?.outcome });
+    let state: TaskState = cancelled ? 'cancelled' : closed ? 'closed' : record.supersededBy ? 'superseded' : lossHint ? 'needs-attention' : writeFailure ? 'needs-attention' : deliveryReport ? 'report-ready' : startupDialog ? 'needs-input' : unconfirmed ? 'needs-attention' : taskState({ alive, screen: screenText, settings, reportReady, event: stored?.outcome });
     // Passive wire failures fill an idle screen; legacy hook recovery keeps its existing precedence.
     if (state === 'waiting' && stored?.outcome === 'overloaded' && record.agent !== 'unknown' && provider(record.agent).events.payloadFrom === 'wire') state = 'overloaded';
     const observationKey = `${config.stateDir}:${record.window}`;
@@ -252,7 +258,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       if (!stop && observation.idle < config.watch.idleConfirmTicks) state = 'working';
       else observation.working = false;
     } else { observation.working = false; observation.idle = 0; }
-    if (!reportState.exists && (state === 'waiting' || !alive)) record.reportCandidate = findCandidates(ctx, record)[0]?.file;
+    if (!reportState.exists && (state === 'waiting' || !alive)) reportCandidate = candidates()[0]?.file;
     idleObservations.set(observationKey, observation);
     if (release) { try { atomicWriteFile(observationFile, JSON.stringify(observation)); } catch { /* observation persistence is best effort */ } finally { release(); } }
     // Still being written (no report-end yet, or not settled): readOutputs says `outputs_pending` and judges nothing.
@@ -278,7 +284,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       switchedBy: record.switchedBy ?? null,
       state,
       ...(lossHint ? { tmuxLost: true } : {}),
-      ...(record.reportCandidate && !reportReady ? { reportCandidate: record.reportCandidate } : {}),
+      ...(reportCandidate && !reportReady ? { reportCandidate } : {}),
       ...screenMetadata(screenText),
       window: alive ? 'alive' : 'gone',
       windowName: record.window,
@@ -295,7 +301,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       lastLine: lastContentLine(screenText, settings.footerPatterns),
       progress: opts.progress === false || record.repos.length === 0 ? null : await taskProgress(runner, record.repos),
       collide: [],
-      hint: [lossHint, record.reportCandidate && record.reportCandidate !== record.report && !reportState.exists ? `Raport poza ścieżką kanoniczną; użyj report_from ze ścieżką ${record.reportCandidate}` : null, writeFailure ? `State write failed: ${writeFailure.reason}; old TASK.md preserved` : unconfirmed ? record.promptError : record.promptDelivery === 'confirming' || record.promptDelivery === 'sending' ? (deliveryNote(record) ?? 'dostarczenie niepotwierdzone – sprawdzam; watch confirms within delivery_confirm_s') : record.promptDelivery === 'pending' ? 'original prompt pending; watch sends it once after folder trust and empty ready input' : stateHint(record.task, state, record.pin === true, record.supersededBy), !record.reportConfirmed && record.reportSource && path.normalize(record.reportSource) !== path.normalize(record.report) ? `raport pochodzi z kopii ${record.reportSource} – sprawdź` : null].filter(Boolean).join('; ') || null,
+      hint: [lossHint, reportCandidate && reportCandidate !== record.report && !reportState.exists ? `Raport poza ścieżką kanoniczną; użyj report_from ze ścieżką ${reportCandidate}` : null, writeFailure ? `State write failed: ${writeFailure.reason}; old TASK.md preserved` : startupDialog ? record.promptError : unconfirmed ? record.promptError : record.promptDelivery === 'confirming' || record.promptDelivery === 'sending' ? (deliveryNote(record) ?? 'dostarczenie niepotwierdzone – sprawdzam; watch confirms within delivery_confirm_s') : record.promptDelivery === 'pending' ? 'original prompt pending; watch sends it once after folder trust and empty ready input' : stateHint(record.task, state, record.pin === true, record.supersededBy), !record.reportConfirmed && record.reportSource && path.normalize(record.reportSource) !== path.normalize(record.report) ? `raport pochodzi z kopii ${record.reportSource} – sprawdź` : null].filter(Boolean).join('; ') || null,
       question: state === 'needs-input' ? ((collapsedQuestion(screenText) ? sessionQuestion(config, record) : undefined) ?? extractQuestion(screenText) ?? (stored?.outcome === 'needs-input' && stored.text !== '' ? stored.text : null)) : null,
       pin: record.pin === true,
       finished: (!alive && !lossHint) || state === 'superseded',

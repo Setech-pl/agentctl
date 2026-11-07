@@ -266,7 +266,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
     }
     if (ready.dialog) {
       const which = spec.agent === 'codex' ? ' ("Update available": choose "Skip until next version")' : '';
-      await setHeaderFields(runner, taskFile(config, spec.window), { prompt_delivery: 'needs-attention', prompt_error: `${spec.agent} shows a startup dialog${which}; original prompt remains in TASK.md` });
+      await setHeaderFields(runner, taskFile(config, spec.window), { prompt_delivery: 'needs-input', prompt_error: `${spec.agent} shows a startup dialog${which}; original prompt remains in TASK.md` });
       throw new AgentctlError(
         `${spec.task}: ${spec.agent} shows a startup dialog${which} – attach: ${attachHint(config)}, answer it in window ${spec.window}`,
         `agentctl never answers that dialog. The window stays open and the prompt was not sent; once the agent shows its input, watch will automatically deliver it once ready: ${sendHint}. ` +

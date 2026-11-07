@@ -42,6 +42,27 @@ it('lock is exclusive, reports its owner, waits and releases only after acquisit
   release(); assert.ok(fs.existsSync(lock), 'old release cannot remove a new owner');
   release2(); release2(); assert.equal(fs.existsSync(lock), false);
 });
+it('a lock whose holder pid is dead (SIGKILLed gate) is broken, not waited on (R2)', async () => {
+  const lock = path.join(scratch.dir, 'runtimes/.gate-stale.lock');
+  // A process that already exited: its pid answers ESRCH.
+  const { spawnSync } = await import('node:child_process');
+  const dead = spawnSync('true', []).pid!;
+  assert.throws(() => process.kill(dead, 0), { code: 'ESRCH' });
+  fs.mkdirSync(path.dirname(lock), { recursive: true });
+  fs.writeFileSync(lock, JSON.stringify({ token: 'stale', pid: dead, cwd: '/tmp', started: new Date().toISOString() }));
+  let waited = 0;
+  const release = await acquireLock(lock, () => {}, async () => { if (++waited > 3) throw new Error('waited on a dead holder'); });
+  assert.equal(waited, 0, 'no waiting on a dead holder');
+  assert.ok(fs.existsSync(lock), 'the live acquisition holds the lock now');
+  release();
+  assert.equal(fs.existsSync(lock), false);
+  // A live holder is still waited on (the existing test), an unparseable holder too.
+  fs.writeFileSync(lock, 'not json');
+  let waits = 0;
+  const acquired = acquireLock(lock, () => {}, async () => { if (++waits === 2) fs.unlinkSync(lock); });
+  await acquired;
+  assert.equal(waits, 2, 'an unparseable lock file is waited on, never broken');
+});
 it('checks cached runtime version and archive checksum with fakes and no network', () => {
   assert.equal(checkRuntime('/fake/node', '22.14.0', () => 'v22.14.0'), 'v22.14.0');
   assert.equal(checkRuntime('/fake/node', '26.', () => 'v26.13.0'), 'v26.13.0');

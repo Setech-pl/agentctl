@@ -23,6 +23,17 @@ export type ScreenState = 'overloaded' | 'needs-trust' | 'needs-input' | 'limite
 
 const matches = (pattern: string, screen: string): boolean => new RegExp(pattern, PATTERN_FLAGS).test(screen);
 
+/** The offset of the last match of pattern in screen (-1: none). */
+const lastMatchIndex = (pattern: string, screen: string): number => {
+  const re = new RegExp(pattern, `${PATTERN_FLAGS}g`);
+  let last = -1;
+  for (let m = re.exec(screen); m !== null; m = re.exec(screen)) {
+    last = m.index;
+    if (re.lastIndex === m.index) break; // a zero-width match must not loop
+  }
+  return last;
+};
+
 const ERROR_BANNER = /^\s*(?:[■●]\s*)?Error:/;
 /** A turn that goes on after an error (re-login resumes the queued task): input echo, an action, a success line. */
 const RESUMED_AFTER_ERROR = /^\s*(?:❯|✓|●\s+(?!Error:))/;
@@ -45,12 +56,17 @@ function errorAwaitingInput(screen: string, readyPattern: string | undefined): b
 /**
  * Classify a `tmux capture-pane` screen with the agent's configured patterns. Trust beats a pending question, which beats
  * working; a limit message only counts when the agent is not working (a retry after the reset may leave the old message on screen).
+ * Trust counts only while the dialog is the newest thing on the screen: a tall pane keeps an answered dialog above the fresh
+ * input box, and a capture with scrollback carries it too — a ready line below the last trace of the dialog means it is history.
  */
 export function classifyScreen(
   screen: string,
   settings: Pick<AgentSettings, 'trustPattern' | 'workingPattern' | 'questionPattern' | 'limitPatterns'> & Partial<Pick<AgentSettings, 'backgroundPatterns' | 'overloadPatterns' | 'approvalPattern' | 'idleRequiresInput' | 'readyPattern'>>,
 ): ScreenState {
-  if (matches(settings.trustPattern, screen)) return 'needs-trust';
+  if (matches(settings.trustPattern, screen)) {
+    const ready = settings.readyPattern ? lastMatchIndex(settings.readyPattern, screen) : -1;
+    if (!(ready > lastMatchIndex(settings.trustPattern, screen))) return 'needs-trust';
+  }
   if (settings.approvalPattern && matches(settings.approvalPattern, screen)) return 'needs-input';
   if (matches(settings.questionPattern, screen)) return 'needs-input';
   if (matches(settings.workingPattern, screen) || starSpinnerActive(screen)) return 'working';

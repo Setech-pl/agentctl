@@ -514,20 +514,23 @@ describe('after: dependencies', () => {
 describe('P33: a start whose window never became ready', () => {
   const MODAL = fs.readFileSync(new URL('./fixtures/screen-codex-update-modal.txt', import.meta.url), 'utf8');
 
-  it('the watcher fails the entry at once, closes the never-ready window and frees the slot', async () => {
+  it('a start stopped at the modal is owned by watch like a trust wait: the entry is dropped, the window and slot stay for the human', async () => {
     const s = setup('modal-start', 'limits: {codex: 1}\n');
     s.tmux.newWindowScreen = MODAL;
     await add(s, specOf(s.repo, 'UPD-1', { agent: 'codex' }));
     const began = await s.tick();
     assert.deepEqual(began, ['UPD-1']);
-    const [entry] = readQueue(s.config);
-    assert.equal(entry?.status, 'failed');
-    assert.match(entry?.error ?? '', /codex shows a startup dialog \("Update available"/);
-    assert.match(entry?.error ?? '', /window that never became ready was closed/);
-    assert.ok(!s.tmux.windows.some((w) => w.name === 'upd-1'), 'the never-ready window was closed');
-    assert.equal(readTaskRecord(s.config, 'upd-1')?.promptDelivery, 'needs-attention');
-    assert.ok(readJournal(s.config).some((e) => e.kind === 'queue-failed' && e.task === 'UPD-1'));
-    assert.equal(checkWindowLimit('codex', 1, await liveWindows(s.ctx), s.config.session), undefined, 'the slot is free although the record stays');
+    assert.deepEqual(readQueue(s.config), [], 'the live task waiting at the dialog must not also be failed in the queue');
+    assert.equal(readTaskRecord(s.config, 'upd-1')?.promptDelivery, 'needs-input');
+    assert.ok(s.tmux.windows.some((w) => w.name === 'upd-1'), 'a human may be answering the modal: the window stays');
+    assert.ok(readJournal(s.config).some((e) => e.kind === 'queue-start' && e.task === 'UPD-1' && /watch obsługuje/.test(e.text)));
+    assert.ok(!readJournal(s.config).some((e) => e.kind === 'queue-failed' && e.task === 'UPD-1'));
+    assert.match(checkWindowLimit('codex', 1, await liveWindows(s.ctx), s.config.session) ?? '', /window limit for codex reached/, 'a window waiting for a human holds its slot (like a trust wait)');
+    // The human answers the modal; watch delivers the pending prompt by itself and the slot frees on its own.
+    s.tmux.windows.find((w) => w.name === 'upd-1')!.screen = composerFixture('› Ask Codex to do anything\n');
+    const memory = new WatchMemory();
+    await watchTick(s.ctx, memory, s.notifier);
+    assert.equal(readTaskRecord(s.config, 'upd-1')?.promptDelivery, 'sent');
   });
 
   it('INT4: a trust timeout keeps a live task pending without a failed queue entry; watch delivers once after trust', async () => {
@@ -607,6 +610,28 @@ describe('P33: a start whose window never became ready', () => {
     assert.ok(!s.tmux.windows.some((w) => w.name === 'stale-1'), 'the leftover window was closed');
     assert.ok(readJournal(s.config).some((e) => e.kind === 'queue-failed' && e.task === 'STALE-1' && /interrupted/.test(e.text)));
     assert.ok((await findResumable(s.ctx)).some((c) => c.task === 'STALE-1'));
+  });
+
+  it('the intentional close of a never-ready start window is no tmux loss; a later genuine loss of the attempt still is', async () => {
+    const s = setup('expected-close');
+    await add(s, specOf(s.repo, 'NVR-1'));
+    const entry = readQueue(s.config)[0]!;
+    seedTask(s.config, 'NVR-1', { repos: [{ path: s.repo, worktree: `${s.repo}-nvr-1` }], promptDelivery: 'needs-attention', pendingPrompt: 'Prompt of NVR-1.', windowId: '@77', attemptId: 'att-1' });
+    fs.mkdirSync(`${s.repo}-nvr-1`, { recursive: true });
+    s.tmux.add('nvr-1', '', '@77'); // the window is up, the agent never showed its input
+    await saveEntry(s.ctx, { ...entry, status: 'starting', startingPid: 99999999, startingAt: new Date().toISOString() });
+    await s.tick();
+    assert.ok(!s.tmux.windows.some((w) => w.name === 'nvr-1'), 'the never-ready window was closed');
+    const row = (await collectStatus(s.ctx, { progress: false })).find((r) => r.task === 'NVR-1')!;
+    assert.equal(row.tmuxLost ?? false, false, 'the expected closure is not a loss');
+    assert.doesNotMatch(row.hint ?? '', /tmux|Utracono/i, 'no loss hint for the intentional close');
+    assert.equal(readJournal(s.config).filter((e) => e.kind === 'tmux-lost' && e.task === 'NVR-1').length, 0, 'no false TMUX-lost event');
+    // The same attempt loses its (reopened) window later for real: that is a loss again.
+    s.tmux.add('nvr-1', '', '@77');
+    await collectStatus(s.ctx, { progress: false });
+    s.tmux.windows = s.tmux.windows.filter((w) => w.name !== 'nvr-1');
+    await collectStatus(s.ctx, { progress: false });
+    assert.equal(readJournal(s.config).filter((e) => e.kind === 'tmux-lost' && e.task === 'NVR-1').length, 1, 'a genuine loss of the same attempt is still an event');
   });
 });
 

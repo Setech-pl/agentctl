@@ -8,6 +8,8 @@ import { findAutoAcceptFlag, launchEnvironment, validateLaunch } from '../src/co
 import { readKimiConfig } from '../src/core/providers/kimi-config.ts';
 import { classifyScreen, taskState } from '../src/core/state.ts';
 import { parseKimiUsage } from '../src/core/providers/kimi-probe.ts';
+import { deliverPendingPrompt } from '../src/core/prompt-delivery.ts';
+import { readTaskRecord } from '../src/core/taskstore.ts';
 import { feedKimiLine, kimiPlanFile } from '../src/core/providers/kimi-usage.ts';
 import { emptyStats, sumBuckets } from '../src/core/usage-parse.ts';
 import { resolveSpec } from '../src/core/spec.ts';
@@ -214,4 +216,24 @@ it('R2 N4: an error below the last ready line still awaits input', () => {
   assert.equal(classifyScreen(screen, settings), 'needs-input');
   assert.equal(taskState({ alive: true, screen, settings, reportReady: true }), 'needs-input');
   assert.equal(classifyScreen(fixture('synthetic-relogin-idle'), settings), 'idle');
+});
+
+it('P48: a trust dialog with a fresh input box below its last trace is history, not needs-trust', () => {
+  assert.equal(classifyScreen(fixture('01-zaufanie'), settings), 'needs-trust', 'the open dialog still wins');
+  assert.equal(classifyScreen(`${fixture('01-zaufanie')}\n${fixture('02-bezczynny')}`, settings), 'idle', 'answered: the idle screen follows the dialog');
+  assert.equal(classifyScreen(`${fixture('01-zaufanie')}\n${fixture('03-praca-1')}`, settings), 'working', 'answered: work follows the dialog');
+  // Claude's own dialog keeps its ❯ options above the last trust line: the order rule must not open it.
+  const claude = provider('claude').defaultSettings();
+  assert.equal(classifyScreen('Quick safety check: Is this a project you created or one you trust?\n ❯ No, exit\n   Yes, I trust this folder\n Enter to confirm', claude), 'needs-trust');
+});
+
+it('P48 (07.11 dev case): after a trust timeout a stuck not-delivered recovers to sent once Kimi verifiably works, stale dialog text on the frame notwithstanding', async () => {
+  const w = world('trust-history');
+  const stale = `${fixture('01-zaufanie')}\n  🌑 · Tip: @: mention files\n${fixture('02-bezczynny')}`;
+  const record = seedTask(w.config, 'DEVCASE', { agent: 'kimi', model: 'k3', pendingPrompt: 'Original prompt', promptDelivery: 'needs-attention', deliveryResult: 'not-delivered-in-field', deliveryStartedAt: new Date(Date.now() - 60_000).toISOString(), deliveryId: 'D1' });
+  const tmux = new FakeTmux(w.config.session);
+  tmux.add(record.window, stale);
+  const { ctx } = makeContext(w.config, { respond: tmux.respond });
+  assert.equal(await deliverPendingPrompt(ctx, record.window), 'sent', 'the working agent below the answered dialog proves the delivery');
+  assert.equal(readTaskRecord(w.config, record.window)?.promptDelivery, 'sent');
 });
