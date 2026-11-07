@@ -398,7 +398,6 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   for (const link of [...config.links, ...(project?.links ?? []), ...specLinks]) {
     const expanded = fill(link.from);
     const from = path.isAbsolute(expanded) ? path.relative(repos[0]!.worktree, expanded) : expanded;
-    if (path.isAbsolute(expanded) && !from.startsWith('../')) validateLink(from, pathOf(link.to), repos[0]!.worktree);
     if (!from || from === '.' || from.startsWith('../')) throw new AgentctlError(`${taskId}: link from must stay inside the primary worktree: ${expanded}`, missingLinkTargets([{ from: expanded, to: pathOf(link.to) }]).join('; ') || undefined);
     validateLink(from, pathOf(link.to), repos[0]!.worktree);
     linkByFrom.set(from, { from, to: pathOf(link.to) });

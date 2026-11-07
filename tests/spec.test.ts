@@ -97,6 +97,24 @@ describe('resolveSpec', () => {
     assert.equal(spec.report, path.join(config.cache, 'ab-7', 'AB-7.md'));
   });
 
+  it('an absolute in-worktree link is validated once, not twice (R10)', () => {
+    const wt = path.join(os.homedir(), 'wt', 'app-nc-1');
+    const sourceDir = path.join(wt, 'sub');
+    const real = fs.realpathSync;
+    let checks = 0;
+    (fs as { realpathSync: unknown }).realpathSync = (p: fs.PathLike, o?: object) => {
+      if (String(p) === sourceDir) checks++;
+      return (real as (d: fs.PathLike, o?: object) => unknown)(p, o);
+    };
+    try {
+      const [spec] = resolve(`---\ntask: NC-1\nagent: claude\nrepos:\n  - path: ~/code/app\nlinks:\n  - from: ${path.join(sourceDir, 'file')}\n    to: ~/shared-target\n---\nHi\n`);
+      assert.deepEqual(spec?.links, [{ from: 'sub/file', to: path.join(os.homedir(), 'shared-target') }]);
+    } finally {
+      fs.realpathSync = real;
+    }
+    assert.equal(checks, 1);
+  });
+
   it('reports every validation problem with a readable message', () => {
     const bad = '---\ntask: nc-3\nagent: gemini\neffort: extreme\nefort: low\n---\n';
     assert.throws(

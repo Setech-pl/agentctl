@@ -203,6 +203,7 @@ describe('agentctl event: limits, bad input, the notify of the user', () => {
     await t.send({ kind: 'stop', payload: 'not json' });
     assert.match(logOf(t.ctx), /NOPE-1 {2}claude {2}stop {2}unknown task, ignored\n/);
     assert.match(logOf(t.ctx), /invalid {2}claude events need --kind/);
+    assert.match(logOf(t.ctx), /--kind notification\|stop\|stop-failure\|user-prompt-submit\|session-start/, 'the hint lists every claude kind (R11)');
   });
 
   it('Codex: the notify the user already had runs afterwards with the very same JSON, also when ours finds nothing to do', async () => {

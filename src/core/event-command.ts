@@ -155,7 +155,8 @@ export async function handleEvent(ctx: Context, alerts: Alerts, input: EventInpu
   const record = findRecord(ctx, input.task);
   try {
     if (!event) {
-      await runner.appendFile(eventsLogPath(ctx), logLine(now, input.task, input.agent, 'invalid', 'claude events need --kind notification|stop|stop-failure'));
+      const kinds = provider(input.agent).events.kinds.join('|');
+      await runner.appendFile(eventsLogPath(ctx), logLine(now, input.task, input.agent, 'invalid', kinds ? `${input.agent} events need --kind ${kinds}` : 'event not understood'));
       return { task: input.task, event, note: 'no --kind' };
     }
     if (!record) {
