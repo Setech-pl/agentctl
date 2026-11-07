@@ -669,7 +669,8 @@ describe('P50: a requeued ID starts a fresh attempt', () => {
     const dir = path.join(s.config.stateDir, 'old-1');
     fs.writeFileSync(path.join(dir, 'prompt-queue.json'), '[{"id":"old","text":"do not send","queuedAt":"old"}]');
     fs.writeFileSync(path.join(dir, 'sessions.json'), '{"codex":["old-session"]}');
-    assert.match(renderQueueList(await describeQueue(s.ctx)), /anulowane/);
+    const listingNow = async () => renderQueueList(describeQueue(s.config, readQueue(s.config), await liveWindows(s.ctx), await collectStatus(s.ctx)), s.runner.now()).join('\n');
+    assert.match(await listingNow(), /anulowane/);
     await add(s, specOf(s.repo, 'OLD-1', {}, 'Fresh prompt'));
     const fresh = readTaskRecord(s.config, 'old-1')!;
     assert.equal(fresh.cancelled, undefined);
@@ -680,7 +681,7 @@ describe('P50: a requeued ID starts a fresh attempt', () => {
     assert.equal(fs.existsSync(path.join(dir, 'prompt-queue.json')), false);
     assert.equal(fs.existsSync(path.join(dir, 'sessions.json')), false);
     await add(s, specOf(s.repo, 'DEP-2', { after: 'OLD-1' }));
-    const listing = renderQueueList(await describeQueue(s.ctx));
+    const listing = await listingNow();
     assert.doesNotMatch(listing, /anulowane|zablokowane/);
     assert.match(listing, /czeka na OLD-1/);
     assert.equal((await collectStatus(s.ctx)).find(r => r.task === 'OLD-1')?.tmuxLost, undefined);
@@ -688,6 +689,6 @@ describe('P50: a requeued ID starts a fresh attempt', () => {
     assert.equal(histories.length, 1);
     assert.match(fs.readFileSync(path.join(s.config.stateDir, '.history', histories[0]!, 'TASK.md'), 'utf8'), /cancelled: true/);
     await removeFromQueue(s.ctx, 'OLD-1');
-    assert.match(renderQueueList(await describeQueue(s.ctx)), /anulowane/, 'a new cancellation still blocks dependents');
+    assert.match(await listingNow(), /anulowane/, 'a new cancellation still blocks dependents');
   });
 });
