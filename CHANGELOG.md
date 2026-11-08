@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- doctor: the tested Kimi version is 2.5.2 (production ran Kimi 2.5.2 tasks successfully since 07.11); only newer versions warn. / doctor: przetestowana wersja Kimi to 2.5.2 (produkcja z powodzeniem robiła zadania na Kimi 2.5.2 od 07.11); ostrzegają dopiero nowsze wersje.
+
 - docs: `send` no longer claims that an open Codex question always blocks pasting — only the open question of a WAITING agent does (the message stays in the FIFO); a collapsed asynchronous question of a working Codex blocks nothing since 0.19 (P65). / docs: `send` nie twierdzi już, że otwarte pytanie Codexa zawsze blokuje wklejanie — blokuje je tylko otwarte pytanie CZEKAJĄCEGO agenta (wiadomość zostaje w FIFO); zwinięte asynchroniczne pytanie pracującego Codexa niczego nie blokuje od 0.19 (P65).
 
 - L1 (gate lock): reclamation verifies ownership again after the rename and rolls a displaced lock back when its owner is live (published or revived since the verified read), and a contender never takes the freed lock path while a live-owned tombstone of that lock exists — a third gate entering mid-reclaim can no longer own the public lock while the displaced live owner sits in a tombstone. / L1 (kłódka gate): przejęcie weryfikuje właściciela ponownie po rename i cofa przesuniętą kłódkę, gdy jej właściciel żyje (opublikował się albo pid ożył od odczytu), a rywal nigdy nie zajmuje zwolnionej ścieżki, póki istnieje tombstone tej kłódki z żywym właścicielem — trzeci gate wchodzący w trakcie przejęcia nie może już mieć kłódki, gdy żywy właściciel siedzi w tombstone.
