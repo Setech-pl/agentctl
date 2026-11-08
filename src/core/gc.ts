@@ -1,7 +1,7 @@
 import { knownLinkReferences, linkUsers } from './links.ts';
 import fs from 'node:fs';
 import path from 'node:path';
-import { configureMeasurements, sizeOf, newestMtime } from './fs-measure.ts';
+import { configureMeasurements, sizeOf, newestMtime, cachedMeasurement, requestMeasurement } from './fs-measure.ts';
 export { sizeOf, newestMtime } from './fs-measure.ts';
 import { parseAge } from './archive.ts';
 import { findCohort } from './cohort.ts';
@@ -54,6 +54,8 @@ export interface GcPlan {
 }
 
 export interface GcOptions {
+  /** MCP estimates never wait for recursive size walks. */
+  cachedSizes?: boolean;
   /** Age of the files next to the reports before they go; default 7 days. */
   olderThan?: string | undefined;
   branches?: boolean | undefined;
@@ -95,6 +97,14 @@ async function listWorktrees(ctx: Context, repo: string): Promise<WorktreeListin
 export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan> {
   const { config, runner } = ctx;
   configureMeasurements(config.disk);
+  const measurement = (target: string) => {
+    const cached = cachedMeasurement(target);
+    const lease = requestMeasurement(target, { background: true });
+    void lease.promise.catch(() => undefined).finally(() => lease.release());
+    return cached;
+  };
+  const size = (target: string) => opts.cachedSizes ? Promise.resolve(measurement(target)?.bytes ?? 0) : sizeOf(target);
+  const newest = (target: string) => opts.cachedSizes ? Promise.resolve(measurement(target)?.newest ?? runner.now()) : newestMtime(target);
   const olderThanMs = parseAge(opts.olderThan ?? DEFAULT_OLDER_THAN);
   const cohort = opts.cohort === undefined ? undefined : findCohort(config, opts.cohort).name;
   const archived = new Set(listArchivedRecords(config).map((r) => r.window));
@@ -130,7 +140,7 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
       }
       const users = linkUsers(wt, references);
       if (users.length && !opts.forceLinks) {
-        skipped.push({ task: record.task, kind: 'worktree', target: wt, bytes: await sizeOf(wt), reason: `links target used by ${users.join(', ')}; CLI --force-links overrides` });
+        skipped.push({ task: record.task, kind: 'worktree', target: wt, bytes: await size(wt), reason: `links target used by ${users.join(', ')}; CLI --force-links overrides` });
         continue;
       }
       const head = await git(ctx, ['-C', wt, 'rev-parse', '--abbrev-ref', 'HEAD']);
@@ -147,7 +157,7 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
         skipped.push({ task: record.task, kind: 'worktree', target: wt, reason: `uncommitted changes (${status.out.split('\n').length} file${status.out.split('\n').length === 1 ? '' : 's'})` });
         continue;
       }
-      const bytes = await sizeOf(wt);
+      const bytes = await size(wt);
       items.push({ kind: 'worktree', task: record.task, target: wt, bytes, detail: `${record.cancelled ? 'cancelled' : 'closed'} task, no uncommitted changes`, repo: repo.path });
       removing.add(key);
     }
@@ -185,12 +195,12 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
     for (const name of names.sort()) {
       if (/\.md$/i.test(name)) continue;
       const target = path.join(dir, name);
-      const age = runner.now() - await newestMtime(target);
+      const age = runner.now() - await newest(target);
       if (age < olderThanMs) {
-        skipped.push({ task: record.task, kind: 'cache', target, bytes: await sizeOf(target), reason: `newer than ${opts.olderThan ?? DEFAULT_OLDER_THAN}` });
+        skipped.push({ task: record.task, kind: 'cache', target, bytes: await size(target), reason: `newer than ${opts.olderThan ?? DEFAULT_OLDER_THAN}` });
         continue;
       }
-      items.push({ kind: 'cache', task: record.task, target, bytes: await sizeOf(target), detail: `older than ${opts.olderThan ?? DEFAULT_OLDER_THAN}, no active task` });
+      items.push({ kind: 'cache', task: record.task, target, bytes: await size(target), detail: `older than ${opts.olderThan ?? DEFAULT_OLDER_THAN}, no active task` });
     }
   }
   const taskNames = new Set(all.map((r) => r.window));
@@ -260,7 +270,7 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
   for (const item of [...items, ...skipped]) {
     const record = all.find(r => r.task === item.task);
     if (record?.cohort) item.cohort = record.cohort;
-    if (item.bytes === undefined) item.bytes = item.kind === 'branch' || item.kind === 'worktree-foreign' ? 0 : await sizeOf(item.target);
+    if (item.bytes === undefined) item.bytes = item.kind === 'branch' || item.kind === 'worktree-foreign' ? 0 : await size(item.target);
   }
   const freeBytes = items.reduce((n, i) => n + i.bytes, 0);
   const foreignWorktrees = skipped.filter(s => s.kind === 'worktree-foreign').length;

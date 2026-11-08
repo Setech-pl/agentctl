@@ -49,7 +49,10 @@ import { clearSetupProgress, readSetupProgress, startProgressText } from './setu
 
 export type QueueStatus = 'queued' | 'starting' | 'failed';
 
+export interface QueueConfirmation { token: string; key: string; tool: string; tasks: string[] }
 export interface QueueEntry {
+  /** Durable idempotency identity installed with the queue entry. */
+  confirmation?: QueueConfirmation;
   autoReview?: AutoReviewSource;
   /** The number in the file name; the next entry gets the highest + 1. */
   seq: number;
@@ -262,7 +265,7 @@ export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: Q
 }
 
 /** Write the entries (one per spec). Returns them in the order they were added. */
-export async function commitQueueAdd(ctx: Context, items: QueueAddItem[], opts: { agent?: AgentName; reuse?: boolean; autoReview?: AutoReviewSource; direct?: { noAgent: boolean } } = {}): Promise<QueueEntry[]> {
+export async function commitQueueAdd(ctx: Context, items: QueueAddItem[], opts: { agent?: AgentName; reuse?: boolean; autoReview?: AutoReviewSource; confirmation?: QueueConfirmation; direct?: { noAgent: boolean } } = {}): Promise<QueueEntry[]> {
   const { config, runner } = ctx;
   // A link into the task's own worktree cannot exist before the start made it (the same exception `new` makes).
   for (const { spec } of items) checkLinkTargets(opts.direct ? spec.links.filter((l) => !spec.repos.some((r) => l.to === r.worktree || l.to.startsWith(`${r.worktree}/`))) : spec.links, spec.task);
@@ -274,6 +277,7 @@ export async function commitQueueAdd(ctx: Context, items: QueueAddItem[], opts: 
     const author = spec.reviewOf ? items.find(i => i.spec.task === spec.reviewOf)?.spec ?? existing.find(e => e.direct && e.task === spec.reviewOf) : undefined;
     const entry: QueueEntry = {
       seq,
+      ...(opts.confirmation ? { confirmation: opts.confirmation } : {}),
       task: spec.task,
       ...(opts.reuse ? { reuse: true } : {}),
       ...(opts.autoReview ? { autoReview: opts.autoReview } : {}),
@@ -372,14 +376,14 @@ export function directStartText(config: Pick<GlobalConfig, 'path' | 'stateDir'>,
  * commands and the window are the watcher's (the same path as a queued task), so they outlive the chat and its MCP server. Under the start lock,
  * so two calls for the same task make one entry.
  */
-export async function registerDirectStart(ctx: Context, items: QueueAddItem[], opts: { agent?: AgentName; reuse?: boolean; noAgent?: boolean } = {}): Promise<{ added: QueueEntry[]; existing: QueueEntry[] }> {
+export async function registerDirectStart(ctx: Context, items: QueueAddItem[], opts: { agent?: AgentName; reuse?: boolean; noAgent?: boolean; confirmation?: QueueConfirmation } = {}): Promise<{ added: QueueEntry[]; existing: QueueEntry[] }> {
   return withStartLock(ctx, async () => {
     const existing = items.map(({ spec }) => findDirectStart(ctx.config, spec.task)).filter((e): e is QueueEntry => e !== undefined);
     if (existing.length > 0) {
       if (existing.length !== items.length) throw new AgentctlError(`Mixed new batch: already registered tasks: ${existing.map(e => e.task).join(', ')}`, 'Nothing was added. Preview only the new tasks separately.');
       return { added: [], existing };
     }
-    const added = await commitQueueAdd(ctx, items, { ...(opts.agent ? { agent: opts.agent } : {}), ...(opts.reuse ? { reuse: true } : {}), direct: { noAgent: Boolean(opts.noAgent) } });
+    const added = await commitQueueAdd(ctx, items, { ...(opts.agent ? { agent: opts.agent } : {}), ...(opts.reuse ? { reuse: true } : {}), direct: { noAgent: Boolean(opts.noAgent) }, ...(opts.confirmation ? { confirmation: opts.confirmation } : {}) });
     return { added, existing: [] };
   });
 }

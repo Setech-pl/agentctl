@@ -1,6 +1,7 @@
 import { tmuxLoss } from './tmux-loss.ts';
 import { provider, matchesProviderCommand, isProviderLauncher } from './providers/registry.ts';
 import { atomicWriteFile, stateWriteFailure } from './atomic-file.ts';
+import { cachedRequest } from './response-budget.ts';
 import { tryFileLock } from './file-lock.ts';
 import { promptQueueView } from './prompt-queue.ts';
 import { readOutputs, dependencyVerdict, outputsPending } from './outputs.ts';
@@ -213,7 +214,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     }
     const screenAgent = record.agent === 'unknown' ? guessAgent(screenText) : record.agent;
     const settings = config.agents[screenAgent] ?? provider(screenAgent).defaultSettings();
-    await provider(screenAgent).events.poll?.(ctx, record);
+    if (!cachedRequest()) await provider(screenAgent).events.poll?.(ctx, record);
     const stored = readStoredEvent(config, record);
     const reportState = inspectReport(config, { ...record, ...(stored?.outcome === 'turn-complete' ? { turnEndedAt: stored.at } : {}) }, runner.now(), !record.attemptId && (!alive || (config.reportSettleS === 0 && classifyScreen(screenText, settings) === 'idle')));
     reportReady = reportState.ready;

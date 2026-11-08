@@ -1,3 +1,4 @@
+import { checkResponseBudget } from './response-budget.ts';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -41,12 +42,13 @@ export async function withFileLock<T>(file: string, action: () => Promise<T>, ti
   const deadline = Date.now() + timeoutMs;
   let release: (() => void) | undefined;
   while (!(release = tryFileLock(file))) {
+    checkResponseBudget();
     if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${file}`);
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   const lease = { active: true };
   const owned = new Map(ownership.getStore()); owned.set(file, lease);
-  try { return await ownership.run(owned, action); } finally { lease.active = false; release(); }
+  try { checkResponseBudget(); return await ownership.run(owned, action); } finally { lease.active = false; release(); }
 }
 
 /** Synchronous state migration uses the same per-task lock as asynchronous writers. */
@@ -56,9 +58,10 @@ export function withFileLockSync<T>(file: string, action: () => T, timeoutMs = 2
   const deadline = Date.now() + timeoutMs;
   let release: (() => void) | undefined;
   while (!(release = tryFileLock(file))) {
+    checkResponseBudget();
     if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${file}`);
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
   }
   const lease = { active: true }, owned = new Map(ownership.getStore()); owned.set(file, lease);
-  try { return ownership.run(owned, action); } finally { lease.active = false; release(); }
+  try { checkResponseBudget(); return ownership.run(owned, action); } finally { lease.active = false; release(); }
 }
