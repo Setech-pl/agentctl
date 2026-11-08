@@ -29,6 +29,13 @@ export function parseArgs(args: string[]): Options {
   if (opts.node26Only && tier !== 'full') throw new Error('--node26-only belongs to full');
   return opts;
 }
+/** The JSON array of `npm pack --json`; trailing npm notices (update available, changelog) on the merged stream are ignored. */
+export function packJson(text: string): { filename: string }[] {
+  const start = text.indexOf('[');
+  const end = text.lastIndexOf(']');
+  if (start < 0 || end <= start) throw new Error('npm pack printed no JSON array');
+  return JSON.parse(text.slice(start, end + 1));
+}
 export function assertClean(opts: Options, dirty: boolean): void {
   if (opts.tier !== 'quick' && dirty && !opts.allowDirty) throw new Error(`${opts.tier} refuses a dirty tree; use --allow-dirty to record the exception`);
 }
@@ -183,8 +190,8 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
           const source = file === 'dist' ? path.join(work, 'dist') : file;
           fs.cpSync(source, path.join(staging, file), { recursive: true });
         }
-        const packed = await run('pack', node26, [npm, 'pack', staging, '--ignore-scripts', '--json', '--pack-destination', work]);
-        const tarball = path.join(work, JSON.parse(packed.text)[0].filename);
+        const packed = await run('pack', node26, [npm, 'pack', staging, '--ignore-scripts', '--json', '--pack-destination', work], { npm_config_update_notifier: 'false' });
+        const tarball = path.join(work, packJson(packed.text)[0]!.filename);
         for (const [label, node] of [['node22', node22], ['node26', node26]]) {
           const runtimeEnv = { AGENTCTL_SMOKE_NODE: label, AGENTCTL_SMOKE_TARBALL: tarball, AGENTCTL_NODE22: node22, AGENTCTL_NODE26: node26, AGENTCTL_NPM26: npm, PATH: `${path.dirname(node)}:${env.PATH}` };
           await run(`smoke-${label}`, node!, ['--experimental-strip-types', '--no-warnings', 'scripts/smoke-package.ts'], runtimeEnv);

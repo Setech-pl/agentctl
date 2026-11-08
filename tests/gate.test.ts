@@ -3,7 +3,7 @@ import { it } from 'node:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { parseArgs, planTier, affectedTests, assertClean, acquireLock, heavyCommand } from '../scripts/gate.ts';
+import { parseArgs, planTier, affectedTests, assertClean, acquireLock, heavyCommand, packJson } from '../scripts/gate.ts';
 import { checkRuntime, verifyArchive, node22Path, ensureNode22 } from '../scripts/runtime.ts';
 import { useScratch } from './helpers.ts';
 const scratch = useScratch();
@@ -227,4 +227,11 @@ it('full can explicitly record Node 26 only without provisioning Node 22', () =>
   assert.equal(parseArgs(['full', '--', '--node26-only']).node26Only, true);
   assert.deepEqual(planTier('full', [], [], false, true), ['tests Node 26 (full)']);
   for (const tier of ['quick', 'release']) assert.throws(() => parseArgs([tier, '--node26-only']), /belongs to full/);
+});
+
+it('packJson reads the npm pack array and ignores trailing notices', () => {
+  assert.deepEqual(packJson('[{"filename":"agentctl-0.19.0.tgz"}]'), [{ filename: 'agentctl-0.19.0.tgz' }]);
+  const noticed = '[{"filename":"a.tgz"}]\nnpm notice\nnpm notice New major version of npm available! 11.20.0 -> 12.2.2\nnpm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.2\nnpm notice\n';
+  assert.deepEqual(packJson(noticed), [{ filename: 'a.tgz' }]);
+  assert.throws(() => packJson('npm notice only, no json'), /no JSON array/);
 });
