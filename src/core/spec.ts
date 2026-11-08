@@ -67,6 +67,8 @@ export interface ResolvedSpec {
   setup: string[];
   env: Record<string, string>;
   reviewOf?: string;
+  /** Every reviewed task (review_of may be a list); reviewOf is the first of them. */
+  reviewOfAll?: string[];
   review?: ReviewSettings;
   report: string;
   /** Other places the report may be (paths and globs, placeholders filled; a relative one is relative to the worktree). */
@@ -270,11 +272,17 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     if (Array.isArray(h.setup) && h.setup.every((c: unknown) => typeof c === 'string' && c.trim() !== '')) specSetup = h.setup as string[];
     else p.add('setup must be a list of non-empty shell commands');
   }
-  let reviewOf: string | undefined;
+  const reviewOfList: string[] = [];
   if (h.review_of !== undefined && h.review_of !== null) {
-    if (typeof h.review_of === 'string' && TASK_ID.test(h.review_of)) reviewOf = h.review_of;
-    else p.add(`review_of must be the task ID of the work under review (e.g. NC-12), got ${JSON.stringify(h.review_of)}`);
+    const list = Array.isArray(h.review_of) ? h.review_of : [h.review_of];
+    if (list.length === 0) p.add('review_of: the list is empty');
+    for (const dep of list) {
+      if (typeof dep === 'string' && TASK_ID.test(dep)) {
+        if (!reviewOfList.includes(dep)) reviewOfList.push(dep);
+      } else p.add(`review_of must be a task ID or a list of task IDs (e.g. [NC-12, NC-13]), got ${JSON.stringify(dep)}`);
+    }
   }
+  const reviewOf = reviewOfList[0];
   let specReport: string[] = [];
   if (h.report !== undefined && h.report !== null) specReport = parseReportPaths(h.report, 'report', p);
   let pin = false;
@@ -482,6 +490,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   if (specClass) spec.class = specClass;
   if (classWarnings.length > 0) spec.warnings = classWarnings;
   if (reviewOf) spec.reviewOf = reviewOf;
+  if (reviewOfList.length > 0) spec.reviewOfAll = reviewOfList;
   if (review) spec.review = review;
   if (agent && remote && (specRemote ?? remoteDefault)) spec.remoteControl = true;
   if (cohort) spec.cohort = cohort;

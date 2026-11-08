@@ -21,6 +21,8 @@ export interface AgentWindowRequest {
   reportAlt?: string[] | undefined;
   repos: { worktree: string }[];
   reviewOf?: string | undefined;
+  /** review_of may be a list: the isolation invariant holds for every listed author, not only the first. */
+  reviewOfAll?: string[] | undefined;
   autoReview?: AutoReviewSource | undefined;
   /** Where the request comes from: the refusal for a record written before the own-checkout rule differs (a queue entry is removed, a record is closed). */
   origin: 'start' | 'new' | 'resume' | 'move';
@@ -31,18 +33,19 @@ export interface AgentWindowRequest {
 
 /** Throws when a review would run in its author's checkout or write the author's report. A task that reviews nothing passes. */
 export function assertAgentSpawnAllowed(ctx: Context, req: Omit<AgentWindowRequest, 'sessionUp' | 'cwd' | 'env' | 'window'>): void {
-  const authorTask = req.autoReview?.author ?? req.reviewOf;
-  if (!authorTask) return;
-  const hint = req.origin === 'resume' || req.origin === 'move' ? LEGACY_RECORD_HINT : LEGACY_REVIEW_HINT;
-  const author = findAuthorRecord(ctx.config, authorTask);
-  if (!author) {
-    if (req.autoReview) throw new AgentctlError(`${req.task}: no record of the author ${authorTask}, not even in the archive`, hint);
-    return;
-  }
-  try { assertReviewIsolated(req, author); }
-  catch (e) {
-    if (req.origin === 'resume' || req.origin === 'move') throw new AgentctlError(`${req.task}: ${LEGACY_RECORD_HINT} (${e instanceof AgentctlError ? e.message.replace(/^[^:]+: /, '') : String(e)})`, hint);
-    throw e;
+  const authorTasks = req.autoReview ? [req.autoReview.author] : (req.reviewOfAll ?? (req.reviewOf ? [req.reviewOf] : []));
+  for (const authorTask of authorTasks) {
+    const hint = req.origin === 'resume' || req.origin === 'move' ? LEGACY_RECORD_HINT : LEGACY_REVIEW_HINT;
+    const author = findAuthorRecord(ctx.config, authorTask);
+    if (!author) {
+      if (req.autoReview) throw new AgentctlError(`${req.task}: no record of the author ${authorTask}, not even in the archive`, hint);
+      continue;
+    }
+    try { assertReviewIsolated(req, author); }
+    catch (e) {
+      if (req.origin === 'resume' || req.origin === 'move') throw new AgentctlError(`${req.task}: ${LEGACY_RECORD_HINT} (${e instanceof AgentctlError ? e.message.replace(/^[^:]+: /, '') : String(e)})`, hint);
+      throw e;
+    }
   }
 }
 

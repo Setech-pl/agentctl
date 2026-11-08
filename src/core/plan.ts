@@ -199,9 +199,22 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
   }
 
   // 5. cross-review on the effective values (after any mapping or switch)
-  for (const spec of result) {
-    const problem = checkReviewer(spec, spec.reviewOf ? (findAuthor(spec.reviewOf, [...result, ...(opts.overflow?.queued ?? [])], config) ?? opts.knownAuthors?.get(spec.reviewOf)) : undefined);
-    if (problem) p.add(`${spec.task}: ${problem}`);
+  for (const [i, spec] of result.entries()) {
+    const reviewed = spec.reviewOfAll ?? (spec.reviewOf ? [spec.reviewOf] : []);
+    const warnings: string[] = [];
+    for (const reviewedTask of reviewed) {
+      const author = findAuthor(reviewedTask, [...result, ...(opts.overflow?.queued ?? [])], config) ?? opts.knownAuthors?.get(reviewedTask);
+      const problem = checkReviewer({ ...spec, reviewOf: reviewedTask }, author);
+      if (problem) {
+        p.add(`${spec.task}: ${problem}`);
+      } else if (author && author.agent === spec.agent) {
+        warnings.push(`reviewer provider ${spec.agent} equals the author provider of ${reviewedTask} (author ${author.model}, reviewer ${spec.model}): a different provider reviews better`);
+      }
+    }
+    if (warnings.length > 0) {
+      for (const w of warnings) ctx.info(`${spec.task}: WARNING: ${w}`);
+      result[i] = { ...spec, warnings: [...(spec.warnings ?? []), ...warnings] };
+    }
   }
   p.throwIfAny('Cannot start the tasks:');
   return result;
