@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Review R1: restore camelCase credential and passwd masking in diagnostics, assignments and URL queries. / Przegląd R1: przywrócono maskowanie sekretów camelCase i passwd w diagnostyce, przypisaniach i parametrach URL.
+
 - P52 follow-up: report alerts dedupe by attempt, allowing a completed new attempt even inside the old 90-second cross-source window. / Powiadomienia raportów są deduplikowane według próby; nowa zakończona próba jest ogłaszana także w dawnym 90-sekundowym oknie między źródłami.
 
 - P62 follow-up: partial responses put fresh queue registrations before cached content, so output limits cannot hide new orders; queued/starting status overrides older task rows. / Wynik częściowy umieszcza świeże rejestracje przed treścią z cache, aby limit odpowiedzi nie ukrywał nowych zleceń; stan kolejki ma pierwszeństwo nad starszym wierszem zadania.

@@ -1,6 +1,8 @@
 /** Shared value, assignment and URL redaction for persisted diagnostics and MCP output. */
-export const SECRET_KEY = /(?:^|[^a-z0-9])(?:TOKEN|KEY|SECRET|PASSWORD|PASS|COOKIE|AUTH(?:ORIZATION)?|OAUTH)(?=$|[^a-z0-9])/i;
-const ASSIGNMENT = /([\w.-]*(?:TOKEN|KEY|SECRET|PASSWORD|PASS|AUTH|COOKIE)[\w.-]*\s*[:=]\s*)("(?:\\.|[^"\\])*"|'[^']*'|[^\s,;]+)/gi;
+const SECRET_WORD = /(?:^|[^a-z0-9])(?:TOKEN|KEY|SECRET|PASSWORD|PASSWD|PASS|COOKIE|AUTH(?:ORIZATION)?|OAUTH)(?=$|[^a-z0-9])/i;
+/** Split case boundaries before matching, while keeping ordinary words such as monkey and bypass intact. */
+export const SECRET_KEY = { test: (key: string): boolean => SECRET_WORD.test(key.replace(/([a-z0-9])([A-Z])/g, '$1_$2')) };
+const ASSIGNMENT = /([\w.-]*(?:TOKEN|KEY|SECRET|PASSWORD|PASSWD|PASS|AUTH|COOKIE)[\w.-]*\s*[:=]\s*)("(?:\\.|[^"\\])*"|'[^']*'|[^\s,;]+)/gi;
 const assignmentKey = (prefix: string): string => prefix.trim().replace(/[:=]$/, '').trim();
 const URL_TEXT = /https?:\/\/[^\s"'<>]+/g;
 

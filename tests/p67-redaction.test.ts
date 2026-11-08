@@ -14,3 +14,14 @@ it('P67: long secrets are replaced only as complete values and secret field name
   assert.equal(clean('prefixprivate-credentialsuffix'), 'prefixprivate-credentialsuffix');
   assert.deepEqual(clean({ monkey: 'economy', bypass: 'no' }), { monkey: 'economy', bypass: 'no' });
 });
+it('R1: camelCase credentials and passwd are masked in fields, text and URLs', () => {
+  const fields = { accessToken: 'access-secret-123', apiKey: 'api-secret-456', refreshToken: 'refresh-secret-789', passwd: 'password-secret-123' };
+  const clean = secretRedactor([fields]);
+  assert.deepEqual(clean(fields), Object.fromEntries(Object.keys(fields).map(k => [k, '***'])));
+  for (const [key, value] of Object.entries(fields)) {
+    assert.equal(clean(`${key}=${value}`), `${key}=***`);
+    assert.equal(clean(`credential ${value}`), 'credential ***');
+    assert.equal(new URL(clean(`https://example.test/?${key}=${value}`)).searchParams.get(key), '***');
+  }
+  assert.deepEqual(clean({ monkey: 'ordinary', bypass: 'ordinary', keyboard: 'ordinary', tokensCount: 3 }), { monkey: 'ordinary', bypass: 'ordinary', keyboard: 'ordinary', tokensCount: 3 });
+});
