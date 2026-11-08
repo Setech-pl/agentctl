@@ -1,6 +1,6 @@
 import { assertSafeArgs } from './safety.ts';
 import { provider, PROVIDER_IDS } from './providers/registry.ts';
-import { OUTPUT_PROTOCOL } from './outputs.ts';
+import { OUTPUT_PROTOCOL, REVIEW_OUTPUT_PROTOCOL } from './outputs.ts';
 import type { AgentSettings } from './config.ts';
 import type { ResolvedSpec } from './spec.ts';
 import path from 'node:path';
@@ -45,11 +45,11 @@ export function agentCommandLine(argv: string[]): string {
   return shellLine(cmd as string, args);
 }
 
-/** Every prompt agentctl delivers starts with this line, whatever flags the agent took. */
-export const reportInstructions = (attemptId = 'current', report?: string) => `Report protocol: write the report${report ? ` to the canonical absolute path ${resolvePath(report)} (filename: ${path.basename(report)})` : ''} for attempt ${attemptId}. Include <!-- agentctl:attempt ${attemptId} --> and append <!-- agentctl:report-end --> as the final line only after the entire report is written.\n${OUTPUT_PROTOCOL}`;
+/** Every prompt agentctl delivers starts with this line, whatever flags the agent took. A review (review_of) gets the review verdict protocol. */
+export const reportInstructions = (attemptId = 'current', report?: string, review = false) => `Report protocol: write the report${report ? ` to the canonical absolute path ${resolvePath(report)} (filename: ${path.basename(report)})` : ''} for attempt ${attemptId}. Include <!-- agentctl:attempt ${attemptId} --> and append <!-- agentctl:report-end --> as the final line only after the entire report is written.\n${review ? REVIEW_OUTPUT_PROTOCOL : OUTPUT_PROTOCOL}`;
 
-export function promptWithHeader(spec: Pick<ResolvedSpec, 'model' | 'effort' | 'prompt'> & { report?: string }, attemptId?: string): string {
-  return `Model: ${spec.model} · effort ${spec.effort}\n\n${spec.prompt}\n\n${reportInstructions(attemptId, spec.report)}`;
+export function promptWithHeader(spec: Pick<ResolvedSpec, 'model' | 'effort' | 'prompt' | 'reviewOf'> & { report?: string }, attemptId?: string): string {
+  return `Model: ${spec.model} · effort ${spec.effort}\n\n${spec.prompt}\n\n${reportInstructions(attemptId, spec.report, spec.reviewOf != null)}`;
 }
 
 export const INSTALL_HINTS: Record<string, string> = Object.defineProperties({

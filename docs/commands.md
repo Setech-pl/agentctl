@@ -71,7 +71,7 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`event`](#agentctl-event) | Called by the agents themselves (hooks that "new" sets up): records the event, updates the task state and notifies at once. Always exits 0. |
 | [`usage-tap`](#agentctl-usage-tap) | Called by Claude Code as the statusLine of a task window (set up by "new"): keeps the plan limits that Claude gives only to a statusLine, remembers the session, then runs your own statusLine command with the same input and prints its output. Always exits 0. |
 | [`move`](#agentctl-move) | Hand a task that hit its usage limit to the other provider: new window \<task>-2 in the same worktree, the original prompt plus a note to continue. Asks y/N. |
-| [`peek`](#agentctl-peek) | Print the last lines of the task window (without the agent footer), to read along without attaching. |
+| [`peek`](#agentctl-peek) | Print the last lines of the task window (without the agent footer), to read along without attaching. A collapsed Codex question is named with its text (from the session log or the captured expanded view). |
 | [`mcp`](#agentctl-mcp) | Local MCP server on stdio: lets a chat (the Claude app, Claude Code, VS Code) read status, window previews and reports. "mcp install" registers it; writing is off until mcp.allow says otherwise. |
 | [`mcp serve`](#agentctl-mcp-serve) | Serve the tools on stdin/stdout (this is what the app or Claude Code starts). Nothing else is ever printed to stdout. |
 | [`mcp check`](#agentctl-mcp-check) | Look for MCP server processes ("agentctl … mcp", started by the Claude app) that run older code than the stable copy: after "agentctl-update" the app keeps the old process until it is quit (⌘Q) and opened again. Prints a warning; stops nothing. |
@@ -1424,7 +1424,7 @@ agentctl move TASK-42 --agent codex -y
 
 ## agentctl peek
 
-Print the last lines of the task window (without the agent footer), to read along without attaching.
+Print the last lines of the task window (without the agent footer), to read along without attaching. A collapsed Codex question is named with its text (from the session log or the captured expanded view).
 
 ```
 agentctl peek [options] <task>

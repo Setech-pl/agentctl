@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { PATTERN_FLAGS } from './config.ts';
 import { clip, stripMarkdown } from './events.ts';
-import { parseOutputs } from './outputs.ts';
+import { parseOutputs, reviewVerdict } from './outputs.ts';
 
 /** Longest verdict in a notification. */
 export const MAX_VERDICT = 100;
@@ -72,12 +72,18 @@ export function headerLines(text: string): string[] {
 }
 
 /**
- * The verdict a notification shows. First the declared `agentctl-outputs` verdict; then the user's `notify.verdict_pattern`; then a
- * "Werdykt:"/"Verdict:"/"Status:" line in the header of the report (its first lines). Never a sentence from the body. A declared or
+ * The verdict a notification shows. For a review report (`review`): the FIRST line (GO / GO-WITH-CHANGES / NO-GO; PASS /
+ * PASS with findings / FAIL accepted), with the declared outputs verdict alongside when the two disagree. Otherwise: first
+ * the declared `agentctl-outputs` verdict; then the user's `notify.verdict_pattern`; then a "Werdykt:"/"Verdict:"/"Status:"
+ * line in the header of the report (its first lines). Never a sentence from the body. A declared or
  * recognised verdict is always written "Werdykt: PASS", whatever label the report used.
  */
-export function eventVerdict(report: string, pattern?: string): string | undefined {
-  const declared = parseOutputs(report).outputs?.verdict;
+export function eventVerdict(report: string, pattern?: string, review = false): string | undefined {
+  if (review) {
+    const rv = reviewVerdict(report);
+    if (rv) return clip(`Werdykt: ${rv.first}${rv.detail}${rv.inconsistent ? ` (outputs: ${rv.declared})` : ''}`, MAX_VERDICT);
+  }
+  const declared = parseOutputs(report, { review }).outputs?.verdict;
   if (declared) return `Werdykt: ${declared}`;
   const text = report.replace(/\r\n/g, '\n').replace(FRONT_MATTER, '');
   const clean = text.split('\n').map(stripMarkdown);
@@ -102,9 +108,9 @@ export function eventVerdict(report: string, pattern?: string): string | undefin
 }
 
 /** The verdict of the report file; undefined when it cannot be read or says nothing. */
-export function readVerdict(file: string, pattern?: string): string | undefined {
+export function readVerdict(file: string, pattern?: string, review = false): string | undefined {
   try {
-    return eventVerdict(fs.readFileSync(file, 'utf8'), pattern);
+    return eventVerdict(fs.readFileSync(file, 'utf8'), pattern, review);
   } catch {
     return undefined;
   }

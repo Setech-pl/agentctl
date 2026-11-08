@@ -22,7 +22,7 @@ export const kimi: ProviderAdapter = {
   },
   doctor(detection, env, globalConfig) {
     const lines: DoctorLine[] = [{ name: 'kimi', level: detection.found ? 'ok' : 'warn', text: detection.found ? detection.raw : `not found. ${this.installHint}` }];
-    if (detection.version && detection.version.localeCompare('2.5.0', undefined, { numeric: true }) > 0) lines.push({ name: 'kimi version', level: 'warn', text: `${detection.version} is newer than tested 2.5.0` });
+    if (detection.version && detection.version.localeCompare('2.5.2', undefined, { numeric: true }) > 0) lines.push({ name: 'kimi version', level: 'warn', text: `${detection.version} is newer than tested 2.5.2` });
     env = { ...env, ...globalConfig?.agents.kimi?.env };
     if (globalConfig) env.KIMI_CODE_HOME = resolvedKimiHome(globalConfig, env);
     const config = readKimiConfig(env), problem = kimiEnvironmentProblem(env);

@@ -7,7 +7,7 @@ import { enqueuePrompt, drainPromptQueue, readPromptQueue } from './prompt-queue
 import { deliveryNote, submitDraft } from './prompt-delivery.ts';
 import type { SubmitDraftResult } from './prompt-delivery.ts';
 import { classifyScreen } from './state.ts';
-import { collapsedQuestion, extractQuestion } from './events.ts';
+import { collapsedQuestion, collapsedQuestionText, extractQuestion } from './events.ts';
 import { sessionQuestion } from './codex-question.ts';
 import { readTaskRecord, renderFollowUp, taskFile } from './taskstore.ts';
 import { AgentctlError, Problems } from './util.ts';
@@ -79,17 +79,6 @@ async function sendPromptsUnlocked(ctx: Context, items: SendItem[]): Promise<{ t
     ctx.info(`${item.task}: ${message}`);
   }
   return results;
-}
-
-/** The question of a collapsed Codex question on the screen: "? Which colour: red or blue?" above its options (not the "? 1 question" marker). */
-function collapsedQuestionText(screen: string): string | undefined {
-  const lines = screen.split('\n');
-  const marker = lines.findLastIndex(l => /^\s*\?\s+\d+ questions?\b/i.test(l));
-  for (let i = (marker < 0 ? lines.length : marker) - 1; i >= Math.max(0, marker - 12); i--) {
-    const text = /^\s*\?\s+(?!\d+ questions?\b)(.+\S)\s*$/i.exec(lines[i]!)?.[1];
-    if (text) return text.length > 120 ? `${text.slice(0, 117)}…` : text;
-  }
-  return undefined;
 }
 
 /** The agent has a dialog or a question open that a pasted message would land in: what it asks and how many, in a few words; undefined when there is none. */

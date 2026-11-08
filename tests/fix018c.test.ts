@@ -69,6 +69,13 @@ for (const mode of ['manual', 'yolo', 'auto', 'unknown']) for (const guard of [t
   for (const value of ['false', '0', 'off', 'no']) { assert.throws(() => validateLaunch(config, order, { KIMI_CODE_DANGEROUS_COMMAND_GUARD: value })); assert.equal(kimi.doctor({ found: true, version: '2.5.0', raw: '', features: {} }, { KIMI_CODE_DANGEROUS_COMMAND_GUARD: value }, config).find(l => l.name === 'kimi permissions')?.level, 'fail'); }
   assert.equal(fs.readFileSync(file, 'utf8'), original);
 });
+it('doctor: Kimi 2.5.2 is the tested version (production ran 2.5.2 tasks since 07.11); newer still warns', () => {
+  const config = makeConfig(scratch.sub('kimi-tested-version'), 'providers: [claude, codex, kimi]\n');
+  const versionLine = (version: string) => kimi.doctor({ found: true, version, raw: version, features: {} }, {}, config).find((l) => l.name === 'kimi version');
+  assert.equal(versionLine('2.5.2'), undefined, '2.5.2 is tested, no warning');
+  assert.equal(versionLine('2.5.3')?.level, 'warn');
+  assert.match(versionLine('2.5.3')?.text ?? '', /newer than tested 2\.5\.2/);
+});
 it('FIX3 in-place follow-ups: current marker survives duplicated stale directives; unchanged, stale-only and non-final markers remain unready', () => {
   const config = makeConfig(scratch.sub('report')), r = seedTask(config, 'REPORT', { attemptId: 'current', turnEndedAt: undefined });
   fs.mkdirSync(path.dirname(r.report), { recursive: true });
