@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- L1 review blocker: publish a nonempty lock directory atomically and recheck displaced live owners before entering; waiters can complete rollback after a prechecked contender withdraws. / Bloker przeglądu L1: publikacja niepustej kłódki jest atomowa i ponownie sprawdza przesuniętych żywych właścicieli; oczekujący kończą cofanie po wycofaniu rywala.
+
 - F1: automatic .cache cleanup requires a current turn-end covering the report and skips worktrees shared by other open tasks. / Automatyczne sprzątanie .cache wymaga zakończenia bieżącej tury obejmującego raport i pomija worktree innych otwartych zadań.
 
 - doctor: the tested Kimi version is 2.5.2 (production ran Kimi 2.5.2 tasks successfully since 07.11); only newer versions warn. / doctor: przetestowana wersja Kimi to 2.5.2 (produkcja z powodzeniem robiła zadania na Kimi 2.5.2 od 07.11); ostrzegają dopiero nowsze wersje.

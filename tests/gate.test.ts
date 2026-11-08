@@ -280,3 +280,41 @@ it('packJson reads the npm pack array and ignores trailing notices', () => {
   assert.deepEqual(packJson(noticed), [{ filename: 'a.tgz' }]);
   assert.throws(() => packJson('npm notice only, no json'), /no JSON array/);
 });
+
+it('L1 prechecked contender: publication must not admit C while A is displaced', async () => {
+  const lock = path.join(scratch.sub('prechecked'), '.gate.lock');
+  const live = JSON.stringify({ token: 'A-LIVE', pid: process.pid, started: new Date().toISOString() });
+  const mkdir = fs.mkdirSync, rename = fs.renameSync;
+  let displaced = false;
+  // C has passed liveTombstone; suspend it immediately before atomic acquisition.
+  fs.mkdirSync = function (target: fs.PathLike, ...args: unknown[]) {
+    if (target === lock && !displaced) {
+      displaced = true;
+      mkdir.call(fs, lock);
+      fs.writeFileSync(path.join(lock, 'owner'), live);
+      rename.call(fs, lock, `${lock}.tombstone-b`);
+    }
+    return (mkdir as (...a: unknown[]) => unknown).call(fs, target, ...args);
+  } as typeof fs.mkdirSync;
+  try {
+    let waits = 0;
+    fs.renameSync = function (from: fs.PathLike, to: fs.PathLike) {
+      if (to === lock && !displaced) {
+        displaced = true;
+        mkdir.call(fs, lock);
+        fs.writeFileSync(path.join(lock, 'owner'), live);
+        rename.call(fs, lock, `${lock}.tombstone-b`);
+      }
+      rename.call(fs, from, to);
+    } as typeof fs.renameSync;
+    const release = await acquireLock(lock, () => {}, async () => {
+      waits++;
+      // B can roll A back only after C withdraws its speculative publication.
+      if (!fs.existsSync(lock)) rename.call(fs, `${lock}.tombstone-b`, lock);
+      assert.equal(fs.readFileSync(path.join(lock, 'owner'), 'utf8'), live);
+      fs.rmSync(lock, { recursive: true }); // A finishes.
+    });
+    release();
+    assert.ok(waits > 0, 'C must wait for A; pre-acquisition tombstone check alone is insufficient');
+  } finally { fs.mkdirSync = mkdir; fs.renameSync = rename; }
+});

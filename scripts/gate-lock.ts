@@ -68,7 +68,8 @@ function reclaim(file: string, verified: LockState): boolean {
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
   // Ownership is verified again after the rename: a lock whose owner was published (or whose pid came back) since the
   // verified read is LIVE and goes back — removing it would strand a running gate in a tombstone.
-  const taken = lockState(tombstone)!;
+  const taken = lockState(tombstone);
+  if (!taken) return false; // another waiter already restored the live directory
   const displacedLive = taken.owner !== null && alive(taken.owner.pid);
   if (taken.legacyFile !== verified.legacyFile || taken.raw !== verified.raw || displacedLive) {
     try { fs.renameSync(tombstone, file); } catch { /* a newcomer took the slot in between: the tombstone stays for its live owner's recovery */ }
@@ -84,11 +85,25 @@ export async function acquireLock(file: string, onWait = (owner: string) => cons
   let printed = '';
   for (;;) {
     // A live-owned tombstone of this very lock: its reclaimer is rolling a live owner back — wait, never take the freed path.
-    if (liveTombstone(file)) { await wait(); continue; }
+    const displaced = liveTombstone(file);
+    if (displaced) {
+      // A prechecked contender may have occupied the path during rollback. Once
+      // it withdraws, any waiter can restore the displaced live owner's directory.
+      try { fs.renameSync(path.join(path.dirname(file), displaced), file); }
+      catch (error) { if (!['ENOENT', 'EEXIST', 'ENOTEMPTY'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error; }
+      await wait(); continue;
+    }
+    // Publish a nonempty directory atomically. Rollback must never overwrite an
+    // empty directory in the gap between mkdir and publishing its owner.
+    const candidate = `${file}.candidate-${process.pid}-${randomUUID()}`;
+    fs.mkdirSync(candidate);
+    fs.writeFileSync(path.join(candidate, OWNER), own);
     try {
-      fs.mkdirSync(file); // atomic acquisition: the lock directory either appears for us or not
+      if (fs.existsSync(file)) throw Object.assign(new Error('lock exists'), { code: 'EEXIST' });
+      fs.renameSync(candidate, file);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      fs.rmSync(candidate, { recursive: true, force: true });
+      if (!['EEXIST', 'ENOTEMPTY', 'ENOTDIR', 'EISDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
       const state = lockState(file);
       if (state === undefined) continue; // it raced away: try to create it again
       // A gate that was SIGKILLed never releases its lock: a lock whose holder pid is gone is broken, not waited on.
@@ -108,18 +123,22 @@ export async function acquireLock(file: string, onWait = (owner: string) => cons
       if (reclaim(file, state)) console.log(`gate lock of dead pid ${state.owner?.pid ?? '(never published)'} removed`);
       continue;
     }
-    // Ownership is published atomically: a complete temp file renamed into place inside the lock directory. A SIGKILL
-    // can leave an ownerless directory or a temp orphan (both reclaimed past the grace), never a torn owner file.
-    const tmp = path.join(file, `.owner-${process.pid}-${randomUUID()}.tmp`);
-    fs.writeFileSync(tmp, own);
-    fs.renameSync(tmp, path.join(file, OWNER));
+    // A contender can pass the initial scan before another reclaimer displaces
+    // a live owner. Withdraw before entering the gate if that happened.
+    if (liveTombstone(file)) {
+      if (lockState(file)?.raw === own) fs.rmSync(file, { recursive: true, force: true });
+      continue;
+    }
     let released = false;
     return () => {
       if (released) return;
       released = true;
       // Only the directory whose owner is still exactly this process's record is removed — never a successor's.
-      try { if (fs.readFileSync(path.join(file, OWNER), 'utf8') === own) fs.rmSync(file, { recursive: true, force: true }); }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+      const locations = [file, ...fs.readdirSync(path.dirname(file)).filter(name => name.startsWith(`${path.basename(file)}.tombstone-`)).map(name => path.join(path.dirname(file), name))];
+      for (const location of locations) {
+        try { if (lockState(location)?.raw === own) fs.rmSync(location, { recursive: true, force: true }); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+      }
     };
   }
 }
