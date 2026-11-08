@@ -1,6 +1,5 @@
 import { promptQueueView } from './prompt-queue.ts';
 import { sessionQuestion } from './codex-question.ts';
-import { collapsedQuestion } from './events.ts';
 import { extractQuestion } from './events.ts';
 import type { Context } from './context.ts';
 import { resolveRunningTask } from './resolve.ts';
@@ -30,7 +29,7 @@ export async function peekWindow(ctx: Context, window: string, count: number): P
   if (screen.code !== 0) throw new AgentctlError(`cannot read window "${window}": ${screen.stderr.trim() || `tmux exit ${screen.code}`}`);
   const record = readTaskRecord(ctx.config, window);
   const agent: AgentName = record && record.agent !== 'unknown' ? record.agent : guessAgent(screen.stdout);
-  const question = (record && collapsedQuestion(screen.stdout) ? sessionQuestion(ctx.config, record) : undefined) ?? extractQuestion(screen.stdout);
+  const question = (record && record.agent === 'codex' ? sessionQuestion(ctx.config, record) : undefined) ?? extractQuestion(screen.stdout);
   return [...(question ? [question] : []), ...contentLines(screen.stdout, ctx.config.agents[agent].footerPatterns, count)];
 }
 
@@ -42,6 +41,6 @@ export async function peekTask(ctx: Context, taskArg: string, count: number = PE
   if (screen.code !== 0) throw new AgentctlError(`cannot read window ${target.window}`);
   const record = readTaskRecord(ctx.config, target.window);
   const agent = record && record.agent !== 'unknown' ? record.agent : guessAgent(screen.stdout);
-  const question = (record && collapsedQuestion(screen.stdout) ? sessionQuestion(ctx.config, record) : undefined) ?? extractQuestion(screen.stdout);
+  const question = (record && record.agent === 'codex' ? sessionQuestion(ctx.config, record) : undefined) ?? extractQuestion(screen.stdout);
   return { task: target.task, window: target.window, promptQueue: promptQueueView(ctx, target.window), promptDelivery: record?.promptDelivery, ...screenMetadata(screen.stdout), lines: [...(question ? [question] : []), ...contentLines(screen.stdout, ctx.config.agents[agent].footerPatterns, count)] };
 }

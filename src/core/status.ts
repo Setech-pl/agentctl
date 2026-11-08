@@ -8,7 +8,6 @@ import type { OutputData, OutputVerdict } from './outputs.ts';
 import path from 'node:path';
 import { inspectReport } from './report-state.ts';
 import { sessionQuestion } from './codex-question.ts';
-import { collapsedQuestion } from './events.ts';
 import { findCandidates, shortPath } from './report-detect.ts';
 import fs from 'node:fs';
 import type { Context } from './context.ts';
@@ -302,7 +301,9 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       progress: opts.progress === false || record.repos.length === 0 ? null : await taskProgress(runner, record.repos),
       collide: [],
       hint: [lossHint, reportCandidate && reportCandidate !== record.report && !reportState.exists ? `Raport poza ścieżką kanoniczną; użyj report_from ze ścieżką ${reportCandidate}` : null, writeFailure ? `State write failed: ${writeFailure.reason}; old TASK.md preserved` : startupDialog ? record.promptError : unconfirmed ? record.promptError : record.promptDelivery === 'confirming' || record.promptDelivery === 'sending' ? (deliveryNote(record) ?? 'dostarczenie niepotwierdzone – sprawdzam; watch confirms within delivery_confirm_s') : record.promptDelivery === 'pending' ? 'original prompt pending; watch sends it once after folder trust and empty ready input' : stateHint(record.task, state, record.pin === true, record.supersededBy), !record.reportConfirmed && record.reportSource && path.normalize(record.reportSource) !== path.normalize(record.report) ? `raport pochodzi z kopii ${record.reportSource} – sprawdź` : null].filter(Boolean).join('; ') || null,
-      question: state === 'needs-input' ? ((collapsedQuestion(screenText) ? sessionQuestion(config, record) : undefined) ?? extractQuestion(screenText) ?? (stored?.outcome === 'needs-input' && stored.text !== '' ? stored.text : null)) : null,
+      // Codex: the session log names a pending request_user_input question exactly (the text of the expanded view),
+      // for a collapsed one and for a waiting one alike; the screen reader covers every other dialog.
+      question: state === 'needs-input' ? ((record.agent === 'codex' ? sessionQuestion(config, record) : undefined) ?? extractQuestion(screenText) ?? (stored?.outcome === 'needs-input' && stored.text !== '' ? stored.text : null)) : null,
       pin: record.pin === true,
       finished: (!alive && !lossHint) || state === 'superseded',
       hidden: hiddenBy !== null,

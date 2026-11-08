@@ -372,23 +372,24 @@ describe('P16: Codex', () => {
     assert.equal(await deliverPendingPrompt(f.ctx, 't1'), 'sent');
     assert.equal(f.record().deliveryResult, 'delivered'); assert.equal(f.record().deliverySource, 'hook');
   });
-  it('an open (collapsed) question: nothing is pasted, and send says why in plain words', async () => {
+  it('a collapsed question of a WORKING Codex is no wait (P65): the send is a normal busy delivery', async () => {
     assert.equal(screenMetadata(codexQuestion).draft_input, null);
     const f = fixture('p16-question', { screen: () => codexQuestion }, 'codex');
     const results = await sendPrompts(f.ctx, [{ task: 'T1', window: 't1', prompt: 'SHORT-Q1: also add EXTRA' }]);
-    assert.equal(f.seen.pastes, 0); assert.equal(f.seen.enters, 0);
-    assert.match(results[0]!.message, /^w kolejce 1; Codex ma otwarte pytanie „Which colour: red or blue\?” \(zwinięte, 1\) – wiadomość nie jest wklejana w pole pytania/);
-    assert.equal(f.record().promptDelivery, 'pending');
+    assert.equal(f.seen.pastes, 1); assert.equal(f.seen.enters, 1);
+    assert.match(results[0]!.message, /^wklejono/);
+    assert.doesNotMatch(results[0]!.message, /zwinięte/, 'an asynchronous question of a working agent blocks nothing');
+    assert.equal(f.record().promptDelivery, 'confirming');
   });
-  it('the question appears after the paste: no Enter, the text is reported as left in the field', async () => {
+  it('a collapsed question after the paste blocks no queue key (P65): the text staying in the field is reported', async () => {
     let state: 'idle' | 'pasted' = 'idle';
     const idle = codexSteered.replace(/^• Working[^\n]*\n/m, '').replace(/^• Queued follow-up inputs\n(?:  [^\n]*\n)*/m, '');
     const asked = codexQuestionPasted;
     const f = fixture('p16-late-question', { screen: () => state === 'idle' ? idle : asked, paste: () => { state = 'pasted'; } }, 'codex');
     await followup(f, 'MANUAL-Q2: this text was pasted into the field while a question is open.');
     const result = await deliverPendingPrompt(f.ctx, 't1');
-    assert.equal(result, 'confirming'); assert.equal(f.seen.enters, 0);
+    assert.equal(result, 'confirming');
     assert.equal(f.record().deliveryResult, 'not-delivered-in-field');
-    assert.match(f.record().promptError!, /needs-input; no Enter was sent/);
+    assert.match(f.record().promptError!, /the pasted prompt is still in the input after Enter and two retries/);
   });
 });

@@ -442,7 +442,8 @@ describe('needs-input', () => {
     m.windows.set('nc-2', CODEX_QUESTION);
     await watchTick(ctx, memory, n);
     await watchTick(ctx, memory, n);
-    assert.deepEqual(n.sent, ['NC-2 zadaje pytanie i czeka na odpowiedź']);
+    // P65: the notification names the question of the expanded view instead of a generic "asks a question".
+    assert.deepEqual(n.sent, ['NC-2: Tea or coffee?']);
   });
 
   it('detectTransitions: needs-input and orphan carry a notification text', () => {

@@ -356,12 +356,21 @@ describe('E8 / R8: "✳" counts only as the spinner of the status area', () => {
 });
 
 describe('E9 / R9: the message about an open Codex question names the question', () => {
-  it('E9 send says what the question asks', async () => {
+  it('E9 a collapsed question of a WORKING Codex is no wait (P65): the send is a normal busy delivery', async () => {
     const f = fixture('e9', { screen: () => fx('screen-codex-question-collapsed.txt') }, 'codex');
+    const results = await sendPrompts(f.ctx, [{ task: 'T1', window: 't1', prompt: 'QUEUED FOLLOWUP' }]);
+    assert.equal(f.seen.pastes, 1); assert.equal(f.seen.enters, 1);
+    assert.doesNotMatch(results[0]!.message, /zwinięte/, 'an asynchronous question of a working agent blocks nothing');
+    assert.equal(f.record().promptDelivery, 'confirming');
+  });
+  it('E9 a question Codex really waits on (expanded view): nothing is pasted, and send says what it asks', async () => {
+    const waiting = fx('screen-codex-question-collapsed.txt')
+      .replace(/^• Working \(27s • esc to interrupt\)\n/m, '• Waiting for your answer\n')
+      .replace(/^• Queued follow-up inputs\n  \? 1 question · 8s\n    ⇧← to answer\n/m, '');
+    const f = fixture('e9-waiting', { screen: () => waiting }, 'codex');
     const results = await sendPrompts(f.ctx, [{ task: 'T1', window: 't1', prompt: 'QUEUED FOLLOWUP' }]);
     assert.equal(f.seen.pastes, 0); assert.equal(f.seen.enters, 0);
     assert.match(results[0]!.message, /Which colour: red or blue\?/);
-    assert.match(results[0]!.message, /zwinięte, 1/);
     assert.equal(f.record().promptDelivery, 'pending');
   });
 });

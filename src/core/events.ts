@@ -70,6 +70,16 @@ const OPTION = /^\s*[❯›>▸]?\s*\d+[.)]\s+\S/u;
 /** A question that is only the frame of the real content: the command or the file is in the lines around it. */
 const GENERIC_QUESTION = /^(?:do you want|would you like|allow|proceed|continue)\b/i;
 
+/** A Codex question waiting expanded: "? <text>?" directly followed by bullet options ("  • red"); the text of the expanded view (P65). */
+function expandedBulletQuestion(screen: string, max: number): string | undefined {
+  const lines = screen.split('\n');
+  for (let i = lines.length - 2; i >= 0; i--) {
+    const q = /^\s*\?\s+(?!\d+ questions?\b)(.+\?)\s*$/i.exec(lines[i]!)?.[1];
+    if (q && /^\s+•\s+\S/.test(lines[i + 1]!)) return clip(stripMarkdown(q), max);
+  }
+  return undefined;
+}
+
 /**
  * The question a dialog on the screen asks: the last line ending with "?" above the numbered options, as a short text.
  * A generic question ("Do you want to proceed?", "Would you like to run the following command?") gets what it is about:
@@ -92,7 +102,9 @@ export function extractQuestion(screen: string, max: number = MAX_QUESTION): str
   }
   if (first < 0) {
     const collapsed = collapsedQuestion(screen);
-    return collapsed ? clip(`Codex ma pytanie (zwinięte, ${collapsed.count}) – Enter → okno agenta, potem ${collapsed.shortcut ?? 'skrót przy „to answer” na ekranie'}`, max) : undefined;
+    if (collapsed) return clip(`Codex ma pytanie (zwinięte, ${collapsed.count}) – Enter → okno agenta, potem ${collapsed.shortcut ?? 'skrót przy „to answer” na ekranie'}`, max);
+    // No numbered option list: a Codex question waiting expanded shows bullet options ("? Which colour…?" + "  • red").
+    return expandedBulletQuestion(screen, max);
   }
   // Lines above the options that end with "?": the generic frame ("Would you like to run…?") wins over a "?" in the reason that
   // follows it, otherwise the one nearest to the options.

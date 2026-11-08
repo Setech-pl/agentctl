@@ -61,7 +61,7 @@ function errorAwaitingInput(screen: string, readyPattern: string | undefined): b
  */
 export function classifyScreen(
   screen: string,
-  settings: Pick<AgentSettings, 'trustPattern' | 'workingPattern' | 'questionPattern' | 'limitPatterns'> & Partial<Pick<AgentSettings, 'backgroundPatterns' | 'overloadPatterns' | 'approvalPattern' | 'idleRequiresInput' | 'readyPattern'>>,
+  settings: Pick<AgentSettings, 'trustPattern' | 'workingPattern' | 'questionPattern' | 'limitPatterns'> & Partial<Pick<AgentSettings, 'backgroundPatterns' | 'overloadPatterns' | 'approvalPattern' | 'asyncQuestionPattern' | 'idleRequiresInput' | 'readyPattern'>>,
 ): ScreenState {
   if (matches(settings.trustPattern, screen)) {
     const ready = settings.readyPattern ? lastMatchIndex(settings.readyPattern, screen) : -1;
@@ -69,7 +69,11 @@ export function classifyScreen(
   }
   if (settings.approvalPattern && matches(settings.approvalPattern, screen)) return 'needs-input';
   if (matches(settings.questionPattern, screen)) return 'needs-input';
-  if (matches(settings.workingPattern, screen) || starSpinnerActive(screen)) return 'working';
+  const working = matches(settings.workingPattern, screen) || starSpinnerActive(screen);
+  // A collapsed asynchronous question ("? 1 question · … to answer") next to a running turn is no wait: the agent goes
+  // on and may finish without an answer (P65: DEV-MARK-1, 2026-11-07). Only an idle agent still showing it waits.
+  if (settings.asyncQuestionPattern && !working && matches(settings.asyncQuestionPattern, screen)) return 'needs-input';
+  if (working) return 'working';
   if (settings.approvalPattern && settings.overloadPatterns?.some(p => matches(p, screen))) return 'overloaded';
   if (isOverloaded(screen, settings.overloadPatterns)) return 'overloaded';
   if (settings.limitPatterns.some((p) => matches(p, screen))) return 'limited';
@@ -111,7 +115,7 @@ export interface StateInput {
   alive: boolean;
   /** Screen of the window; ignored when the window is gone. */
   screen: string;
-  settings: Pick<AgentSettings, 'trustPattern' | 'workingPattern' | 'questionPattern' | 'limitPatterns' | 'readyPattern'> & Partial<Pick<AgentSettings, 'backgroundPatterns' | 'overloadPatterns' | 'approvalPattern' | 'idleRequiresInput' | 'readyPattern'>>;
+  settings: Pick<AgentSettings, 'trustPattern' | 'workingPattern' | 'questionPattern' | 'limitPatterns' | 'readyPattern'> & Partial<Pick<AgentSettings, 'backgroundPatterns' | 'overloadPatterns' | 'approvalPattern' | 'asyncQuestionPattern' | 'idleRequiresInput' | 'readyPattern'>>;
   /** The report file exists and was written after the task started. */
   reportReady: boolean;
   /** The last event the agent sent, if any. */
