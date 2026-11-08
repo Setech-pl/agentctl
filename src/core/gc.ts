@@ -1,3 +1,4 @@
+import { worktreeCacheFreed } from './worktree-cache.ts';
 import { knownLinkReferences, linkUsers } from './links.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -43,6 +44,7 @@ export interface GcSkip {
 }
 
 export interface GcPlan {
+  autoCacheFreedBytes?: number;
   items: GcItem[];
   skipped: GcSkip[];
   freeBytes: number;
@@ -274,7 +276,7 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
   }
   const freeBytes = items.reduce((n, i) => n + i.bytes, 0);
   const foreignWorktrees = skipped.filter(s => s.kind === 'worktree-foreign').length;
-  return { ...(opts.forceLinks ? { forceLinks: true } : {}), items, skipped: cohort === undefined ? skipped : skipped.filter(s => s.kind !== 'worktree-foreign'), freeBytes, olderThanMs, unknownCacheDirs, ...(cohort !== undefined ? { foreignWorktrees } : {}) };
+  return { autoCacheFreedBytes: all.filter(r => cohort === undefined || (r.cohort && cohortKey(r.cohort) === cohortKey(cohort))).reduce((sum, r) => sum + worktreeCacheFreed(ctx, r), 0), ...(opts.forceLinks ? { forceLinks: true } : {}), items, skipped: cohort === undefined ? skipped : skipped.filter(s => s.kind !== 'worktree-foreign'), freeBytes, olderThanMs, unknownCacheDirs, ...(cohort !== undefined ? { foreignWorktrees } : {}) };
 }
 
 export interface GcResult {
@@ -332,7 +334,7 @@ export function gcView(plan: GcPlan, opts: GcViewOptions = {}) {
   const newer = new Map<string, { task: string; files: number; bytes: number; reason: string }>();
   for (const s of plan.skipped.filter(s => s.reason.startsWith('newer than '))) { const group = newer.get(s.task) ?? { task: s.task, files: 0, bytes: 0, reason: s.reason }; group.files++; group.bytes += s.bytes ?? 0; newer.set(s.task, group); }
   const page = <T>(items: T[]) => ({ total: items.length, offset, next_offset: offset + limit < items.length ? offset + limit : null, items: items.slice(offset, offset + limit) });
-  return { freeBytes: plan.freeBytes, summary: `można zwolnić ${(plan.freeBytes / 1e9).toFixed(3)} GB (${plan.freeBytes} bytes)`, categories,
+  return { autoCacheFreedBytes: plan.autoCacheFreedBytes ?? 0, freeBytes: plan.freeBytes, summary: `można zwolnić ${(plan.freeBytes / 1e9).toFixed(3)} GB (${plan.freeBytes} bytes)`, categories,
     skipped: { count: plan.skipped.length, bytes: plan.skipped.reduce((n, s) => n + (s.bytes ?? 0), 0), reasons: page([...reasons.values()]) },
     cohorts: page([...cohorts.values()]), newer: page([...newer.values()]), unknownCacheDirs: plan.unknownCacheDirs, foreignWorktrees: plan.foreignWorktrees ?? 0,
     ...(opts.detail ? { details: page([...plan.items.map(i => ({ ...i, action: 'remove/archive' })), ...plan.skipped.map(s => ({ ...s, action: 'skip' }))]) } : {}),
@@ -344,6 +346,7 @@ const DONE_WORD: Record<GcKind, string> = { worktree: 'removed worktrees', cache
 export function renderGc(plan: GcPlan, opts: GcViewOptions & { applied?: GcResult | undefined } = {}): string[] {
   const view = gcView(plan, opts);
   const lines = opts.applied ? ['History and reports (*.md) stay.'] : [`Could free ${formatBytes(plan.freeBytes)}; ${view.summary}. History and reports (*.md) stay.`, ...view.categories.map(c => `${c.category}: ${c.count}, ${c.bytes} bytes`), `Skipped: ${view.skipped.count}, ${view.skipped.bytes} bytes`];
+  lines.push(`Automatic .cache cleanup: ${plan.autoCacheFreedBytes ?? 0} bytes freed previously.`);
   if (!opts.applied) {
     lines.push('Would clean up (a dry run; --apply does it, after a y/N):');
     if (!plan.items.length) lines.push('Nothing to clean up.');
