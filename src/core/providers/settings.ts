@@ -65,9 +65,12 @@ const SETTINGS: Record<ProviderId, AgentSettings> = {
       '^\\s*›\\s*(Ask Codex to do anything)?\\s*$',
       'Queued follow-up inputs|⇧.? (edit last queued message|to answer)',
     ],
-    // A pending request_user_input question: "? Which color…" with options, then "• Waiting for your answer."; and the footer of an
-    // approval dialog ("Would you like to run the following command?" … "Press enter to confirm or esc to cancel").
-    questionPattern: 'Waiting for your answer|^\\s*\\?\\s+\\d+ questions?\\b|to answer\\s*$|Press enter to confirm or esc to cancel',
+    // A pending request_user_input question the agent waits on: "? Which color…" with options, then "• Waiting for your answer.";
+    // and the footer of an approval dialog ("Would you like to run the following command?" … "Press enter to confirm or esc to cancel").
+    questionPattern: 'Waiting for your answer|Press enter to confirm or esc to cancel',
+    // A collapsed request_user_input_async question ("? 1 question · 8s / ⇧← to answer"): the turn runs on and may finish
+    // without an answer (P65: DEV-MARK-1, 2026-11-07), so it is a wait only once the agent is no longer working.
+    asyncQuestionPattern: '^\\s*\\?\\s+\\d+ questions?\\b|to answer\\s*$',
     // Strings of the 0.166.0 binary (the apostrophe there is U+2019): "You've hit your usage limit. …", "Usage limit reached",
     // "You're out of credits", "Your workspace is out of credits", "You hit your spend cap …".
     limitPatterns: [

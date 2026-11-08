@@ -1,0 +1,33 @@
+
+  >_ OpenAI Codex (v0.167.0)
+     ~/Projects/wt/neon-city-demo-bug-1
+  permissions: YOLO mode
+
+
+› Diagnose each finding with evidence, fix what is a defect, and say clearly what is intended behaviour.
+
+
+• Ran npm test -- waves
+  └ 42 passed
+• Checked the live demo API for seed 4
+  └ 6 of 7 places fail with tiles 404
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+• Working (14m 2s • esc to interrupt)
+↳ Additional owner findings from the demo smoke (add to your report, same rules): main cities do not open on demo either, only one
+  place works; check every official place on the live demo API.
+› Ask Codex to do anything
+  GPT-6.1-Sol medium · ~/Projects/wt/neon-city-demo-bug-1 · DEMO-BUG-1 owner smoke
+  ? for shortcuts

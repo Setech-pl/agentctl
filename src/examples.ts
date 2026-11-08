@@ -52,6 +52,10 @@ export const COMMAND_EXAMPLES: Record<string, string[]> = {
     'agentctl send follow-up.md             # header: only "task:"; the prompt below it is pasted',
     'agentctl send --clip -y                # follow-up from the clipboard, no question',
   ],
+  answer: [
+    'agentctl answer TASK-41 1              # preview of the menu options with a token, nothing is pressed',
+    'agentctl answer TASK-41 1 --confirm <token>   # sends the digit for exactly the previewed menu',
+  ],
   status: [
     'agentctl status',
     'agentctl status --json                 # rows with started (UTC) and startedLocal',

@@ -198,6 +198,7 @@ Queued tasks live in `<config dir>/queue/` (one JSON file each, with the spec te
 | `agents.<agent>.interrupt_key` | tmux key name | `Escape` | g | Key sent by `agentctl interrupt`. |
 | `agents.<agent>.footer_patterns` | list of regexes | see below | g | Lines of TUI chrome that `status` and `peek` skip. |
 | `agents.<agent>.question_pattern` | regex | see below | g | The agent asks you something and waits (state `needs-input`). |
+| `agents.<agent>.async_question_pattern` | regex | see below | g | An asynchronous question the agent is not waiting on while it works (Codex's collapsed "? N question · … to answer"); `needs-input` only once the agent is no longer working. |
 | `agents.<agent>.limit_patterns` | list of regexes | see below | g | The usage limit is used up (state `limited`). A message has to open its line, so a diff or a quoted sentence is not taken for one. |
 | `agents.<agent>.background_patterns` | list of regexes | see below | g | The agent waits for its own shells or monitors (state `background`). |
 
@@ -231,7 +232,8 @@ codex:
   dialog_pattern: 'Update available|Skip until next version'
   working_pattern: 'esc to interrupt'
   delivery_pattern: '^\s*[•■]|● got:'
-  question_pattern: 'Waiting for your answer|^\s*\?\s+\d+ questions?\b|to answer\s*$|Press enter to confirm or esc to cancel'
+  question_pattern: 'Waiting for your answer|Press enter to confirm or esc to cancel'
+  async_question_pattern: '^\s*\?\s+\d+ questions?\b|to answer\s*$'
   footer_patterns:
     - '\? for shortcuts'
     - '⚠ \d+ warnings?'

@@ -86,6 +86,11 @@ export interface AgentSettings {
   footerPatterns: string[];
   /** Regex: the agent asks the user a question and waits for the answer (state needs-input). */
   questionPattern: string;
+  /**
+   * Regex: an asynchronous question the agent is NOT waiting on while its turn runs (Codex's collapsed "? N question ·
+   * … to answer" footer of request_user_input_async). Counts as needs-input only when the agent is not working.
+   */
+  asyncQuestionPattern?: string;
   approvalPattern?: string;
   idleRequiresInput?: boolean;
   /** Regexes (any one matches a line of the screen): the agent says its usage limit is used up or it is rate limited (state limited). */
@@ -164,7 +169,7 @@ export const NOTIFY_BACKENDS = ['auto', 'terminal-notifier', 'osascript'] as con
 export type NotifyBackend = (typeof NOTIFY_BACKENDS)[number];
 
 /** Write tools of the MCP server; each one must be listed in `mcp.allow` to work. */
-export const MCP_WRITE_TOOLS = ['send', 'new', 'interrupt', 'close', 'move', 'queue', 'queue_rm', 'cancel', 'mark', 'set_limits', 'reserve', 'resume', 'away', 'queue_retry', 'queue_up', 'queue_pause', 'queue_resume', 'unblock', 'cohort_add', 'cohort_remove', 'cohort_note', 'cohort_archive', 'hide', 'unhide', 'archive', 'adopt', 'report_from', 'limits_release', 'manager_start', 'manager_stop', 'notify_test', 'gc'] as const;
+export const MCP_WRITE_TOOLS = ['send', 'answer', 'new', 'interrupt', 'close', 'move', 'queue', 'queue_rm', 'cancel', 'mark', 'set_limits', 'reserve', 'resume', 'away', 'queue_retry', 'queue_up', 'queue_pause', 'queue_resume', 'unblock', 'cohort_add', 'cohort_remove', 'cohort_note', 'cohort_archive', 'hide', 'unhide', 'archive', 'adopt', 'report_from', 'limits_release', 'manager_start', 'manager_stop', 'notify_test', 'gc'] as const;
 export type McpWriteTool = (typeof MCP_WRITE_TOOLS)[number];
 /** Permissions of `mcp.allow` that are not a tool of their own: `send_enter` lets `send` with `enter_only` press Enter for the text that a send left in an input field (it does not allow pasting). */
 export const MCP_EXTRA_PERMISSIONS = ['send_enter'] as const;
@@ -343,7 +348,7 @@ export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'limited', 'cache', 'stat
 export const LIMITS_KEYS = [...AGENT_NAMES, 'count_external', 'count_report_ready', 'heavy'];
 export const DEFAULTS_KEYS = ['agent', 'model', 'effort', 'remote_control'];
 export const LINK_KEYS = ['from', 'to'];
-export const AGENT_KEYS = ['env', 'accepts_busy_prompt', 'flags', 'effort_args', 'ready_pattern', 'ready_timeout', 'trust_timeout', 'trust_pattern', 'dialog_pattern', 'working_pattern', 'delivery_pattern', 'interrupt_key', 'footer_patterns', 'question_pattern', 'approval_pattern', 'limit_patterns', 'background_patterns', 'overload_patterns'];
+export const AGENT_KEYS = ['env', 'accepts_busy_prompt', 'flags', 'effort_args', 'ready_pattern', 'ready_timeout', 'trust_timeout', 'trust_pattern', 'dialog_pattern', 'working_pattern', 'delivery_pattern', 'interrupt_key', 'footer_patterns', 'question_pattern', 'async_question_pattern', 'approval_pattern', 'limit_patterns', 'background_patterns', 'overload_patterns'];
 export const WATCH_KEYS = ['interval', 'waiting_after', 'window_icons', 'status_line', 'idle_confirm_ticks'];
 export const NOTIFY_KEYS = ['backend', 'events', 'turn_end', 'terminal_app', 'verdict_pattern', 'ntfy', 'mcp_writes', 'mcp_writes_interval_s'];
 export const NTFY_KEYS = ['server', 'topic', 'token', 'events', 'priority', 'include_verdict', 'include_question', 'click_url', 'always'];
@@ -534,7 +539,7 @@ function parseAgentSettings(name: AgentName, v: unknown, where: string, p: Probl
     const bad = findAutoAcceptFlag(list, name);
     if (bad) p.add(`${where}.${key}: "${bad}" enables auto-accept, which agentctl never allows`);
   }
-  for (const [key, field] of [['ready_pattern', 'readyPattern'], ['trust_pattern', 'trustPattern'], ['dialog_pattern', 'dialogPattern'], ['working_pattern', 'workingPattern'], ['delivery_pattern', 'deliveryPattern'], ['question_pattern', 'questionPattern'], ['approval_pattern', 'approvalPattern']] as const) {
+  for (const [key, field] of [['ready_pattern', 'readyPattern'], ['trust_pattern', 'trustPattern'], ['dialog_pattern', 'dialogPattern'], ['working_pattern', 'workingPattern'], ['delivery_pattern', 'deliveryPattern'], ['question_pattern', 'questionPattern'], ['async_question_pattern', 'asyncQuestionPattern'], ['approval_pattern', 'approvalPattern']] as const) {
     const pattern = parseString(v[key], `${where}.${key}`, p);
     if (!pattern) continue;
     try {

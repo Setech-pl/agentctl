@@ -47,13 +47,14 @@ Off until you list them in `~/.agentctl/config.yaml`. The list is read again on 
 
 ```yaml
 mcp:
-  allow: [send, interrupt]     # any of: send, new, interrupt, close, move, queue, queue_rm, cancel, mark, set_limits, reserve, resume, away, send_enter
+  allow: [send, interrupt]     # any of: send, answer, new, interrupt, close, move, queue, queue_rm, cancel, mark, set_limits, reserve, resume, away, send_enter
   allow_rm_worktree: false     # close may also remove the git worktree
 ```
 
 | Tool | Arguments | What it does |
 |---|---|---|
 | `send` | `task`, `text` (up to 20,000 characters) | Pastes a prompt into the window of a running task and presses Enter. With `enter_only: true` (no text) it pastes nothing and presses Enter for the text that an earlier send left in the input field; that needs `send_enter` in `mcp.allow` (a permission of its own). The first call shows the exact text of the field, the screen state and a `token` for those bytes and presses nothing; Enter goes in only with `confirm: true` and that `token`, when the field is still byte for byte that text and what agentctl pasted. |
+| `answer` | `task`, `option`, `confirm?`, `token?` | Chooses a numbered option of the menu the agent shows in its current frame (Kimi "Run this command? 1. Approve once …", numbered dialogs of Codex and Claude); a permission of its own (`answer` in `mcp.allow`). The first call only previews: options, question, screen state and a `token` for exactly that menu and option; the digit goes in only with `confirm: true` and that `token`. Refuses (no key) when no menu waits, the option does not exist or the menu changed. `status` lists the options of a needs-input menu (`menuOptions`). |
 | `new` | `spec` (`spec?` when confirming with `preview_token` only), `confirm?` | Starts tasks from a spec text, validated like the CLI. The first call only returns the summary; tasks start only when it is called again with `confirm: true`. A spec with `setup` (shell commands) is refused, because a chat must not choose shell commands. Every start is registered and run by the watcher — `confirm` always returns at once and never waits for a checkout, a setup, a window's input prompt or a folder-trust dialog (see "A start with setup" below); without a running watcher the confirm is refused. It never switches provider. |
 | `interrupt` | `task` | Sends the agent its interrupt key; the window stays open. |
 | `close` | `task`, `remove_worktree?` | Closes the window and marks the task closed. The worktree and the branch stay, unless `remove_worktree: true` and `mcp.allow_rm_worktree` is set (`git worktree remove`, never forced). |
@@ -176,6 +177,7 @@ Both are always readable without mcp.allow. MCP new/queue responses omit capacit
 | `cohort note` | `cohort_note` |  |
 | `overlap` | `overlap` |  |
 | `send` | `send` |  |
+| `answer` | `answer` |  |
 | `status` | `status` |  |
 | `limits` | `limits` |  |
 | `limits show` | `limits` |  |
@@ -251,6 +253,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 | `stats` | read | `cohort?`, `since?` |
 | `overlap` | read | `task?` |
 | `resume` | write | `tasks?`, `all?`, `confirm?`, `preview_token?` |
+| `answer` | write | `task`, `option`, `confirm?`, `token?` |
 | `send` | write | `task`, `text?`, `enter_only?`, `confirm?`, `token?`, `withdraw?` |
 | `new` | write | `spec?`, `agent?`, `reuse?`, `no_agent?`, `cohort?`, `wait_trust?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` |
 | `queue` | write | `spec?`, `cohort?`, `agent?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` |
@@ -302,6 +305,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 - `cohort archive`: `--older-than &lt;age&gt;`, `--yes`
 - `overlap`: `--json`
 - `send`: `--dry-run`, `--clip`, `-y, --yes`, `--enter-only &lt;task&gt;`, `--confirm &lt;token&gt;`, `--withdraw &lt;task&gt;`, `--entry &lt;id&gt;`
+- `answer`: `--confirm &lt;token&gt;`, `--dry-run`
 - `status`: `--detail`, `--json`, `--clip`, `--tmux-line`, `--all`, `--cohort &lt;name&gt;`
 - `limits show`: `--json`
 - `limits set`: `-y, --yes`, `--dry-run`

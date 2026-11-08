@@ -30,6 +30,7 @@ import {
   promptText,
   queueCells,
   queueTitle,
+  queueViews,
   resumeTitle,
   rowCells,
   runBoardEffect,
@@ -266,7 +267,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
     Box,
     { width: state.width },
     h(Text, { bold: true, wrap: 'truncate-end' }, `${instance} ${packageVersion()} board`),
-    h(Text, { dimColor: true, wrap: 'truncate-end' }, ` · ${ctx.config.session} · ${active} task${active === 1 ? '' : 's'}${state.queue.length > 0 ? ` · ${state.queue.length} queued` : ''}${state.cohortFilter !== null ? ` · cohort: ${cohortLabel(state)}` : ''}${hiddenCount > 0 ? ` · ${hiddenCount} hidden (a)` : ''}${state.refreshedAt ? ` · ${state.refreshedAt}` : ''}`),
+    h(Text, { dimColor: true, wrap: 'truncate-end' }, ` · ${ctx.config.session} · ${active} task${active === 1 ? '' : 's'}${queueViews(state).length > 0 ? ` · ${queueViews(state).length} queued` : ''}${state.cohortFilter !== null ? ` · cohort: ${cohortLabel(state)}` : ''}${hiddenCount > 0 ? ` · ${hiddenCount} hidden (a)` : ''}${state.refreshedAt ? ` · ${state.refreshedAt}` : ''}`),
     state.disk ? h(Text, { color: state.disk.level === 'critical' ? 'red' : state.disk.level === 'warn' ? 'yellow' : 'green', wrap: 'truncate-end' }, ` · ${diskLine(state.disk)}`) : null,
     away ? h(Text, { wrap: 'truncate-end', ...(away.dim ? { dimColor: true } : { color: 'cyan', bold: true }) }, ` · ${away.text}`) : null,
   );

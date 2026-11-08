@@ -64,6 +64,7 @@ import { peekTask } from './peek.ts';
 import { joinReports, markPulled, noReadyMessage, selectReady } from './pull.ts';
 import { describeTargets, listTargets, matchTask, resolveRunningTask } from './resolve.ts';
 import { sendPrompts, submitDrafts } from './send.ts';
+import { answerMenu } from './answer.ts';
 import { withdrawPrompt } from './prompt-queue.ts';
 import { resolveSpec, splitSpecs } from './spec.ts';
 import type { RawSpec } from './spec.ts';
@@ -789,6 +790,28 @@ async function writeTool(
   }
 }
 
+async function runAnswer(deps: McpDeps, args: { task: string; option: number; confirm?: boolean; token?: string }): Promise<ToolResult> {
+  return writeTool(deps, 'answer', { task: args.task, detail: `option ${args.option} confirm=${Boolean(args.confirm)}` }, async (ctx) => {
+    if (args.confirm && !args.token) return { text: 'answer with confirm needs the token from the preview: call answer without confirm first, show the user the options, then call again with confirm: true and that token. Nothing was pressed.', executed: false, error: true, announce: '', detail: 'refused: no token' };
+    const target = await resolveRunningTask(ctx, args.task);
+    const done = await answerMenu(ctx, target.window, args.option, args.confirm ? { token: args.token! } : {});
+    if (done.outcome === 'refused') return { text: `${target.task}: odmowa, żaden klawisz nie poszedł – ${done.message}`, executed: false, error: true, announce: '', detail: `refused: ${done.message.split('\n')[0]}` };
+    if (done.outcome === 'failed') return { text: `${target.task}: klawisz nie poszedł (błąd tmux send-keys) – ${done.message}. Nic nie zatwierdzono.`, executed: false, error: true, failed: true, announce: '', detail: `failed: ${done.message}` };
+    if (done.outcome === 'ready') return {
+      text: `${done.message}\nNie wciśnięto nic. Pokaż opcje użytkownikowi; za jego zgodą wywołaj answer ponownie z confirm: true i token: "${done.token}". Token działa tylko dla tego menu i tej opcji.`,
+      executed: false, announce: '',
+      data: { key_sent: false, menu: done.menu, question: done.question ?? null, screen_state: done.screenState, token: done.token },
+    };
+    return {
+      text: `${target.task}: ${done.message}`,
+      executed: done.keySent === true,
+      announce: `answer ${target.task} (opcja ${args.option})`,
+      detail: `answer-${done.outcome}; option ${args.option}`,
+      data: { key_sent: done.keySent === true, outcome: done.outcome, menu: done.menu },
+    };
+  });
+}
+
 async function runSend(deps: McpDeps, args: { task: string; text?: string; enter_only?: boolean; confirm?: boolean; token?: string; withdraw?: string }): Promise<ToolResult> {
   if (args.withdraw !== undefined) {
     if (args.text !== undefined && args.text !== '') return fail('withdraw takes no text');
@@ -1236,6 +1259,17 @@ export const MCP_TOOLS: McpToolDef[] = [
     run: (deps, args) => guarded(() => runResume(deps, args as { tasks?: string[]; all?: boolean; confirm?: boolean })),
   }),
   def({
+    name: 'answer',
+    title: 'Answer a numbered menu of an agent',
+    kind: 'write',
+    description:
+      'WRITE, off unless the user put "answer" in mcp.allow. Chooses a numbered option of the menu the agent shows in its current frame (Kimi "Run this command? 1. Approve once …", numbered dialogs of Codex and Claude) — the answer to a menu is this key, never a send of "1" (that would queue as a message). ' +
+      'The FIRST call (no confirm) only previews: it returns the options, the question, the screen state and a token for exactly that menu and option; show them to the user, then call again with confirm: true and that token. It refuses (an error, no key) when no menu waits (state is not needs-input/needs-trust), the option does not exist or the menu changed since the preview. status lists the options of a needs-input menu (menuOptions).',
+    input: { task: taskArg, option: z.number().int().min(1).max(99).describe('The number of the menu option to choose.'), confirm: z.boolean().optional().describe('true sends the key after a preview (needs token); without it nothing is pressed.'), token: z.string().min(1).max(64).optional().describe('With confirm: the token that the preview returned for exactly this menu and option.') },
+    annotations: { title: 'Answer a numbered menu of an agent', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    run: (deps, args) => guarded(() => runAnswer(deps, args as { task: string; option: number; confirm?: boolean; token?: string })),
+  }),
+  def({
     name: 'send',
     title: 'Send a prompt to a running task',
     kind: 'write',
@@ -1418,7 +1452,7 @@ function redactConfig(config: GlobalConfig): unknown {
   return copy;
 }
 
-const confirmedTools = new Set(['mark', 'new', 'queue', 'cancel', 'resume', 'move', 'interrupt', 'close', 'queue_rm', ...MCP_TOOLS.filter((t) => t.kind === 'write' && !['send', 'mark', 'away', 'set_limits', 'reserve'].includes(t.name)).map((t) => t.name)]);
+const confirmedTools = new Set(['mark', 'new', 'queue', 'cancel', 'resume', 'move', 'interrupt', 'close', 'queue_rm', ...MCP_TOOLS.filter((t) => t.kind === 'write' && !['send', 'answer', 'mark', 'away', 'set_limits', 'reserve'].includes(t.name)).map((t) => t.name)]);
 const previews = new WeakMap<McpDeps, Map<string, { key: string; arguments: Record<string, unknown>; /** The arguments as they came in (the spec text, not its canonical form): a token-only confirm executes these. */ raw: Record<string, unknown>; scope: string; at: number; ttlS: number }>>();
 const lastPreviewMutation = new WeakMap<McpDeps, string>();
 const previewSessions = new WeakMap<McpDeps, string>();

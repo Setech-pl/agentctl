@@ -303,9 +303,10 @@ export function reachableRows(state: BoardState): BoardRow[] {
   return activeAll(state).filter((r) => !state.folded.includes(groupOf(r.cohort)));
 }
 
-/** The queue as the board lists it: the cohort filter applies. */
+/** The queue as the board lists it: the cohort filter applies; a task that already has a window (its start waits on a dialog) has its task row and no separate queue row (P42). */
 export function queueViews(state: BoardState): QueueView[] {
-  return state.queue.filter((v) => passes(state, v.entry.cohort));
+  const windowed = new Set(state.rows.filter((r) => r.window === 'alive').map((r) => r.task));
+  return state.queue.filter((v) => passes(state, v.entry.cohort) && !windowed.has(v.entry.task));
 }
 
 /** Tasks without a window (or moved to the other provider) that were not closed: the "Finished" section. */
@@ -469,7 +470,12 @@ function listKey(state: BoardState, input: string, key: KeyPress): KeyResult {
   const row = selectedRow(state);
   const needsTask = key.return || input === 'm' || input === 'M' || input === 'i' || input === 'c' || input === 'x' || input === 'h';
   if (!needsTask) return stay();
-  if (queued) return stay(withNotice(state, 'error', `${queued.entry.task} is in the queue and has no window yet (u front, d remove, p pause).`));
+  if (queued) {
+    // A queue row of a task that already has a window (a refresh in flight can leave the cursor on it): Enter opens the window (P42).
+    const live = key.return ? state.rows.find((r) => r.task === queued.entry.task && r.window === 'alive') : undefined;
+    if (live) return stay(state, [{ type: 'switch', task: live.task, window: live.windowName }]);
+    return stay(withNotice(state, 'error', `${queued.entry.task} is in the queue and has no window yet (u front, d remove, p pause).`));
+  }
   if (!row) return stay(withNotice(state, 'error', 'No task selected.'));
 
   if (input === 'c') return stay(withNotice(state, 'info', `${row.task}: copying the report…`), [{ type: 'pull', task: row.task }]);
