@@ -41,6 +41,10 @@ await withHarness({ name: 'hotfix-0173', cacheRoot: defaultCacheRoot('agentctl-0
       if (!current) continue;
       const guide = await full('guide', { project: repo }); check('0173-8: guide overlay from project with MCP cwd=/', guide.includes('NC-PROJECT-OVERLAY'));
       const doctor = await full('doctor'); check('0173-8: doctor without project reports bez projektu', doctor.includes('bez projektu') && !doctor.includes('no .agentctl.yaml in /'));
+      // P34: every chat start goes through the watcher, so it must run before any `new` confirm.
+      const watch = h.spawnAgentctl(['watch'], path.join(h.root, 'watch.log'));
+      const beat = path.join(config.stateDir, 'queue-worker.json'), beatEnd = Date.now() + 10000;
+      while (!fs.existsSync(beat) && Date.now() < beatEnd) await new Promise(r => setTimeout(r, 150));
       for (const name of ['new', 'queue']) {
         const args = { spec: spec(`CONFIG-${name.toUpperCase()}`), ...(name === 'new' ? { no_agent: true } : {}) };
         const preview = await full(name, args); check(`0173-8: ${name} first repo project defaults from cwd=/`, preview.includes('sonnet/low'));
@@ -49,7 +53,6 @@ await withHarness({ name: 'hotfix-0173', cacheRoot: defaultCacheRoot('agentctl-0
       let rows = JSON.parse(await full('status', { format: 'json', cohort: 'NC' })).tasks;
       check('0173-2/3: T2 question wins, README mention is not a candidate', rows.some((r: any) => r.task === 'T2' && r.state === 'needs-input' && r.question && !r.reportCandidate));
       fs.writeFileSync(path.join(config.cache, 'T2-report.md'), 'Werdykt: PASS\n<!-- agentctl:report-end -->');
-      const watch = h.spawnAgentctl(['watch'], path.join(h.root, 'watch.log'));
       try {
         const until = Date.now() + 10000; do { rows = JSON.parse(await full('status', { format: 'json', cohort: 'NC' })).tasks; if (rows.find((r: any) => r.task === 'T2')?.reportCandidate) break; await new Promise(r => setTimeout(r, 200)); } while (Date.now() < until);
         check('0173-3: configured candidate remains a flag beside needs-input', rows.some((r: any) => r.task === 'T2' && r.reportCandidate && r.state === 'needs-input' && r.question));
