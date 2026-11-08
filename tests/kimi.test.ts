@@ -211,6 +211,18 @@ it('extends MCP provider fields only when Kimi is active', async () => {
   }
 });
 
+it('X4: set_limits accepts "off" for an optional provider in the registered schema; reserve stays numeric-only', async () => {
+  const { MCP_TOOLS, providerToolInput } = await import('../src/core/mcp-tools.ts');
+  const { z } = await import('zod');
+  const w = world('set-limits-off'); // providers: [claude, codex, kimi]
+  const setLimits = z.object(providerToolInput(MCP_TOOLS.find(t => t.name === 'set_limits')!, w.config));
+  assert.equal(setLimits.safeParse({ kimi: 'off' }).success, true);
+  assert.equal(setLimits.safeParse({ kimi: 0 }).success, true);
+  assert.equal(setLimits.safeParse({ kimi: 3 }).success, true);
+  assert.equal(setLimits.safeParse({ claude: 'off' }).success, true);
+  const reserve = z.object(providerToolInput(MCP_TOOLS.find(t => t.name === 'reserve')!, w.config));
+  assert.equal(reserve.safeParse({ kimi: 'off' }).success, false, 'reserve takes numbers only');
+});
 it('R2 N4: an error below the last ready line still awaits input', () => {
   const screen = fixture('synthetic-error-after-ready');
   assert.equal(classifyScreen(screen, settings), 'needs-input');

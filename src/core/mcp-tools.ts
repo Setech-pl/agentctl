@@ -1750,7 +1750,10 @@ export function providerToolInput(tool: McpToolDef, config: GlobalConfig): z.Zod
   const input = { ...tool.input };
   if (['new', 'queue', 'move', 'adopt'].includes(tool.name)) input.agent = z.enum(ids as [AgentName, ...AgentName[]]).optional();
   if (['set_limits', 'reserve', 'limits_release'].includes(tool.name)) for (const id of ids) {
-    if (!(id in input)) input[id] = limitArg.describe(`Places of ${provider(id).displayName}.`);
+    // set_limits accepts "off" for every active provider, an optional one included; reserve stays numeric.
+    if (!(id in input)) input[id] = (tool.name === 'set_limits'
+      ? setLimitArg.describe(`New limit for ${provider(id).displayName}; 0 = no limit, "off" = disabled. Omit to leave it.`)
+      : limitArg.describe(`Places of ${provider(id).displayName}.`));
   }
   return input;
 }

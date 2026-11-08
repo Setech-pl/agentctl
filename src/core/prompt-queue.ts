@@ -86,20 +86,27 @@ export async function withdrawPrompt(ctx: Context, window: string, idPrefix: str
     const matches = queue.filter((p) => p.id === idPrefix || p.id.startsWith(idPrefix));
     const activeId = record.pendingPrompt && record.promptDelivery !== 'sent' ? record.deliveryId : undefined;
     const activeMatch = activeId !== undefined && (activeId === idPrefix || activeId.startsWith(idPrefix));
-    if (activeMatch && matches.length > 0) throw new AgentctlError(
-      `${record.task}: ${idPrefix} matches the message being delivered and ${matches.length} queued message${matches.length === 1 ? '' : 's'}`,
-      `Choose a longer prefix: ${activeId.slice(0, 8)} (being delivered), ${matches.map((p) => `${p.id.slice(0, 8)} (queued)`).join(', ')}.`,
+    // An interrupted durable transfer leaves the same id in the FIFO and the active delivery: it is one message
+    // (prompt_queue shows it once), so matching copies of the active id reconcile instead of reading as ambiguous.
+    const duplicates = activeId === undefined ? [] : queue.filter((p) => p.id === activeId);
+    const others = matches.filter((p) => p.id !== activeId);
+    if (activeMatch && others.length > 0) throw new AgentctlError(
+      `${record.task}: ${idPrefix} matches the message being delivered and ${others.length} queued message${others.length === 1 ? '' : 's'}`,
+      `Choose a longer prefix: ${activeId.slice(0, 8)} (being delivered), ${others.map((p) => `${p.id.slice(0, 8)} (queued)`).join(', ')}.`,
     );
     // The active pending prompt first.
     if (activeMatch) {
       const id = activeId;
+      const dropDuplicates = async () => { if (duplicates.length > 0) await ctx.runner.writeFile(queueFile(ctx, window), JSON.stringify(queue.filter((p) => p.id !== id))); };
       if (record.deliveryStartedAt) {
         await setHeaderFields(ctx.runner, taskFile(ctx.config, window), { delivery_result: 'stale', prompt_error: `wiadomość wycofana (${now}) po rozpoczęciu dostarczania – agent może już nad nią pracować` });
+        await dropDuplicates();
         await note(`${id}, stale`);
         await recordJournal(ctx, { kind: 'delivery', task: record.task, text: `${record.task}: wycofano wiadomość po rozpoczęciu dostarczania (stale); agent może już nad nią pracować [dostawa ${id.slice(0, 8)}]` });
         return { outcome: 'stale', id, message: `${record.task}: dostarczanie już się zaczęło – wiadomość oznaczona jako wycofana (stale), agent może już nad nią pracować; nic nie jest wycofywane z okna` };
       }
       await setHeaderFields(ctx.runner, taskFile(ctx.config, window), { pending_prompt: null, prompt_delivery: null, prompt_error: null, delivery_id: null, delivery_result: null });
+      await dropDuplicates();
       await note(id);
       await recordJournal(ctx, { kind: 'delivery', task: record.task, text: `${record.task}: wycofano oczekującą wiadomość przed rozpoczęciem dostarczania [dostawa ${id.slice(0, 8)}]` });
       return { outcome: 'withdrawn', id, message: `${record.task}: wycofano oczekującą wiadomość (${id.slice(0, 8)}) – nie zostanie wysłana` };
