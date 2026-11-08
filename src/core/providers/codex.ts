@@ -89,6 +89,12 @@ export const codex: ProviderAdapter = {
     planSources: ['codex-session-log', 'codex-app-server:account/rateLimits/read'],
   },
   models: { get equivalents() { return deriveTierModels('codex'); }, label: modelLabel },
-  safety: legacySafety,
+  safety: {
+    ...legacySafety,
+    validate(order) {
+      if (order.effort === 'low') return 'effort "low" is refused (it silently degrades to an unreviewed quick pass); use medium, high or xhigh';
+      return undefined;
+    },
+  },
   isExternalSession(tokens) { const first = path.basename(tokens[0] ?? ''); return (first === 'codex' || (/^node(js)?$/.test(first) && /@openai\/codex\/\S*\.js$/.test(tokens[1] ?? ''))) && interactiveTokens(tokens); },
 };

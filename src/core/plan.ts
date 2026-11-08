@@ -12,6 +12,7 @@ import { formatModelEffort, translate } from './equivalents.ts';
 import type { Order } from './equivalents.ts';
 import type { ResolvedSpec } from './spec.ts';
 import { cancelledTasks, unmetAfter, waitingText } from './depends.ts';
+import { explicitOnlyModel } from './matrix.ts';
 import { slotHolders } from './limits.ts';
 import { collectStatus } from './status.ts';
 import { listTaskRecords } from './taskstore.ts';
@@ -181,6 +182,9 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
       }
     }
     try { validateLaunch(config, spec, spec.env); } catch (e) { p.add((e as Error).message); }
+    if (spec.switchedBy && explicitOnlyModel(spec.agent, spec.model)) {
+      p.add(`${at} the switch landed on the restricted ${spec.agent} ${spec.model}: k3.1-pro* and gpt-6-astra never come from a translation; order such a model with an explicit model: in the spec, or with an explicit-only class (visual, escalate)`);
+    }
     planned.push({ window: spec.window, agent: spec.agent });
 
     // 4. worktrees

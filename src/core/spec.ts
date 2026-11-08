@@ -2,7 +2,7 @@ import { validateLink, missingLinkTargets, fillTaskLinkTargets, staleProjectLink
 import { validateLaunch } from './safety.ts';
 import { provider, isActive, activeProviders } from './providers/registry.ts';
 import { PROVIDER_IDS } from './providers/types.ts';
-import { classNames, matrixClass } from './matrix.ts';
+import { classNames, matrixClass, explicitOnlyModel } from './matrix.ts';
 import { VERDICTS } from './outputs.ts';
 import type { OutputVerdict } from './outputs.ts';
 import path from 'node:path';
@@ -354,6 +354,11 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   }
   const model = specModel ?? classCell?.model ?? project?.defaults.model ?? config.defaults.model ?? 'default';
   const effort = specEffort ?? classCell?.effort ?? project?.defaults.effort ?? config.defaults.effort ?? 'high';
+  // Restricted models (k3.1-pro*, gpt-6-astra): an explicit `model:` or an explicit-only class, never a default.
+  if (agent && specModel === undefined && explicitOnlyModel(agent, model)) {
+    const fromExplicitClass = matrixEntry?.explicit === true && classCell?.model === model;
+    if (!fromExplicitClass) p.add(`${agent} ${model} runs only with an explicit model: in the spec, or from an explicit-only class (${classNames().filter((n) => matrixClass(n)?.explicit).join(', ')}); it came from ${matrixEntry ? `class ${matrixEntry.name}` : 'the configured defaults'}`);
+  }
 
   // Remote Control is a Claude Code feature. In the spec it is an order (a codex task that asks for it is an error); as a default it only
   // applies to Claude tasks.

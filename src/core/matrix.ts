@@ -122,3 +122,13 @@ export function deriveTierModels(provider: ProviderId, matrix: MatrixClass[] = m
 export function matrixKimiModels(matrix: MatrixClass[] = modelMatrix()): string[] {
   return [...new Set(matrix.flatMap((cls) => (cls.cells.kimi ? [cls.cells.kimi.model] : [])))];
 }
+
+/**
+ * Restricted models: they run only when the spec orders them with an explicit `model:`, or when they come from a
+ * class the matrix marks explicit-only (visual, escalate) — never from configured defaults or a translation.
+ */
+export function explicitOnlyModel(agent: ProviderId, model: string): boolean {
+  if (agent === 'kimi') return model.replace(/^kimi-code\//, '').startsWith('k3.1-pro');
+  if (agent === 'codex') return model === 'gpt-6-astra';
+  return false;
+}
