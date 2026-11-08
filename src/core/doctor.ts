@@ -24,7 +24,7 @@ import { blockingEnv, managerFiles, managerView, readManagerMcp, remoteControlSu
 import { isPublicServer, weakTopic } from './ntfy-setup.ts';
 import { findTerminalNotifier, notifierMemoryPath, readNotifierMemory } from './notify.ts';
 import { Tmux } from './tmux.ts';
-import { errorMessage } from './util.ts';
+import { errorMessage, safeCwd } from './util.ts';
 
 export interface Check {
   name: string;
@@ -87,12 +87,13 @@ async function managerChecks(runner: Runner, config: GlobalConfig, tmuxOk: boole
 export async function runDoctor(
   runner: Runner,
   loadConfig: () => GlobalConfig = loadGlobalConfig,
-  cwd: string | null = process.cwd(),
+  cwd: string | null | undefined = undefined,
   nodeVersion: string = process.versions.node,
   platform: string = os.platform(),
   home: string = os.homedir(),
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<Check[]> {
+  cwd = cwd === undefined ? safeCwd() : cwd;
   const checks: Check[] = [];
   const add = (name: string, status: Check['status'], detail: string): void => {
     checks.push({ name, status, detail });

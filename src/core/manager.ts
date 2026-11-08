@@ -14,7 +14,7 @@ import type { McpEntry } from './mcp-install.ts';
 import { MCP_TOOLS } from './mcp-tools.ts';
 import { waitForReady } from './ready.ts';
 import { RC_CONFIRM, RC_CONNECTED, RC_FAILED, RC_FIRST_TIME } from './remote-control.ts';
-import { AgentctlError, expandHome } from './util.ts';
+import { AgentctlError, expandHome, safeCwd } from './util.ts';
 import type { SelfArgv } from './events.ts';
 import { MANAGER_WINDOW } from './windows.ts';
 
@@ -256,8 +256,8 @@ export interface ManagerStartResult {
 }
 
 /** The directory the manager runs in: `--project`, else `manager.project`, else where agentctl is run. Must exist. */
-export function managerProject(config: Pick<GlobalConfig, 'manager'>, project: string | undefined, cwd: string = process.cwd()): string {
-  const dir = project ? path.resolve(cwd, expandHome(project)) : (config.manager.project ?? cwd);
+export function managerProject(config: Pick<GlobalConfig, 'manager'>, project: string | undefined, cwd?: string): string {
+  const dir = project ? path.resolve(cwd ?? safeCwd(), expandHome(project)) : (config.manager.project ?? cwd ?? safeCwd());
   let ok = false;
   try {
     ok = fs.statSync(dir).isDirectory();

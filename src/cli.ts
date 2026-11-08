@@ -87,7 +87,7 @@ import { RealRunner, RecordingRunner } from './core/runner.ts';
 import type { Runner } from './core/runner.ts';
 import { resolveSendSpec, resolveSpec, splitSpecs } from './core/spec.ts';
 import type { RawSpec } from './core/spec.ts';
-import { AgentctlError, cohortKey, cohortNameProblem, errorMessage, formatLocalTime, resolvePath, shellQuote, windowName } from './core/util.ts';
+import { AgentctlError, cohortKey, cohortNameProblem, errorMessage, formatLocalTime, resolvePath, safeCwd, shellQuote, windowName } from './core/util.ts';
 
 export interface CliDeps {
   stdout: (text: string) => void;
@@ -332,7 +332,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
 
   /** `watch --tmux`: window "watch" in the agentctl session (never a second one), the navigation key and the task counts in the status bar. */
   const startWatchWindow = async (ctx: Context, statusLine: boolean): Promise<'created' | 'exists'> => {
-    const result = await ensureWatchWindow(ctx, deps.watchCommand(), process.cwd());
+    const result = await ensureWatchWindow(ctx, deps.watchCommand(), safeCwd());
     if (result === 'exists') line(`Window ${ctx.config.session}:${WATCH_WINDOW} already exists, left alone.`);
     else line(`${result === 'restarted' ? 'Started again (its process had ended)' : 'Started'} the watcher in window ${ctx.config.session}:${WATCH_WINDOW}${result === 'session-created' ? ' (session created)' : ''}. Attach: ${attachHint(ctx.config)}. If it fails to start, the window stays with the error; ${startLogPath(ctx.config, 'watch')} has it too.`);
     for (const l of describeNavigation(await applyNavigation(ctx), ctx.config.session)) line(l);
@@ -347,7 +347,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
 
   /** `board --tmux`: window "board" in the agentctl session (never a second one). */
   const startBoardWindow = async (ctx: Context): Promise<'created' | 'exists'> => {
-    const result = await ensureWindow(ctx, BOARD_WINDOW, deps.boardCommand?.() ?? 'agentctl board', process.cwd());
+    const result = await ensureWindow(ctx, BOARD_WINDOW, deps.boardCommand?.() ?? 'agentctl board', safeCwd());
     if (result === 'exists') line(`Window ${ctx.config.session}:${BOARD_WINDOW} already exists, left alone.`);
     else line(`${result === 'restarted' ? 'Started again (its process had ended)' : 'Started'} the board in window ${ctx.config.session}:${BOARD_WINDOW}${result === 'session-created' ? ' (session created)' : ''}. If it fails to start, the window stays with the error; ${startLogPath(ctx.config, 'board')} has it too.`);
     for (const l of describeNavigation(await applyNavigation(ctx), ctx.config.session)) line(l);
