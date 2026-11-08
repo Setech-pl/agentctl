@@ -801,3 +801,5 @@ Rozwinięcie ukrytych/zamkniętych sekcji klawiszem `a` od razu żąda pełnych 
 Potwierdzenie answer jest jednorazowe i wygasa po `preview.ttl_s`. Wiąże pełną bieżącą ramkę, w tym polecenie i cwd, oraz tożsamość zadania/okna. Każda zmiana ramki wymaga nowego podglądu.
 
 Gate clean sprawdza rozwiązaną ścieżkę socketu przed zatrzymaniem serwera, także przy zagnieżdżonych symlinkach i brakujących plikach. Socket poza piaskownicą przerywa całe sprzątanie.
+
+Znane ustalenie MAJOR L1: podczas odzyskiwania blokady gate trzeci uczestnik może przejąć publiczną ścieżkę, gdy żywy właściciel jest chwilowo przesunięty do nagrobka. Ten scenariusz nadal narusza wzajemne wykluczanie; poprawiono tylko wcześniejsze scenariusze REVIEW2.

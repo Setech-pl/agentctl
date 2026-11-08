@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-11-08
+
+Includes the 0.18.3 baseline plus P42, P51, P52, P54, the P55 feasibility outcome, and P60–P69. / Obejmuje bazę 0.18.3 oraz P42, P51, P52, P54, wynik wykonalności P55 i P60–P69.
+
 - Integration: gate accepts the npm forwarding separator in `npm run gate -- full -- --node26-only`. / Integracja: gate przyjmuje separator npm w `npm run gate -- full -- --node26-only`.
 
 - R1 follow-up: camelCase secret matching preserves authorizationAuthor and other author metadata. / Uzupełnienie R1: dopasowanie sekretów camelCase zachowuje authorizationAuthor i pozostałe metadane autorów.
@@ -52,7 +56,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - Withdraw: the FIFO copy of a message is removed before the active identity is cleared, so a crash between the two writes leaves the message as the active delivery instead of an eligible queued duplicate that recovery would deliver again (review X3-R2). / Wycofanie: kopia wiadomości w kolejce FIFO jest usuwana przed wyczyszczeniem aktywnej tożsamości, więc awaria między tymi zapisami zostawia wiadomość jako aktywną dostawę zamiast gotowego duplikatu w kolejce, który recovery dostarczyłoby ponownie (przegląd X3-R2).
 
-- Gate: lock ownership is atomic end to end — the lock is a directory created with `mkdir`, its owner file is published by a temp-file rename inside it, and a stale lock is reclaimed by renaming it to a unique tombstone that is removed only when it still holds the exact verified owner; a live successor installed since that read is put back untouched, so a preempted reclaimer can no longer unlink a successor's live lock (review X1-R2). / Bramka: własność blokady jest w pełni atomowa — blokada to katalog tworzony przez `mkdir`, plik właściciela publikowany zmianą nazwy pliku tymczasowego wewnątrz niego, a nieaktualna blokada jest przejmowana zmianą nazwy na unikalny nagrobek usuwany tylko wtedy, gdy nadal trzyma dokładnie zweryfikowanego właściciela; żywy następca zainstalowany od tego odczytu jest odkładany nietknięty, więc wywłaszczony przejmujący nie usunie już żywej blokady następcy (przegląd X1-R2).
+- Gate: directory acquisition and owner publication are atomic; stale recovery uses a tombstone rename. The original REVIEW2 schedule is mitigated, but a third contender can still enter while a live successor is displaced (open MAJOR L1). / Bramka: utworzenie katalogu i publikacja właściciela są atomowe; odzyskiwanie przenosi blokadę do nagrobka. Oryginalny scenariusz REVIEW2 jest ograniczony, lecz trzeci uczestnik nadal może wejść podczas przesunięcia żywego właściciela (otwarte MAJOR L1).
 
 - MCP `set_limits` accepts `"off"` for an optional provider (Kimi) in the registered schema, the same as for Claude and Codex; `reserve` stays numeric-only (review X4). / MCP `set_limits` przyjmuje `"off"` dla opcjonalnego dostawcy (Kimi) w zarejestrowanym schemacie, tak samo jak dla Claude i Codexa; `reserve` pozostaje tylko liczbowe (przegląd X4).
 
@@ -61,6 +65,28 @@ All notable changes to this project are documented here. The format follows [Kee
 - Gate: a reclaimer never unlinks a reclaim lock it did not verify this iteration — the sidecar carries a unique token and a fresh re-read must show the exact bytes seen as dead, so a stale read can no longer delete the live reclaim lock a successor installed (review X1). / Bramka: przejmujący nigdy nie usuwa blokady reclaim, której nie zweryfikował w tej iteracji — sidecar niesie unikalny token, a świeży odczyt musi pokazać dokładnie te same bajty, więc nieaktualny odczyt nie usunie już żywej blokady następcy (przegląd X1).
 
 - Gate: the reclaim sidecar is published atomically (a complete temp file hard-linked into place), so a SIGKILL between create and write can no longer leave an empty `.reclaim` file that recovery would wait on forever; an empty or unparsable sidecar counts as dead only past a short grace (review X2). / Bramka: blokada reclaim jest publikowana atomowo (kompletny plik tymczasowy linkowany na miejsce), więc SIGKILL między utworzeniem a zapisem nie zostawia pustego pliku `.reclaim`, na który recovery czekałoby bez końca; pusty lub nieczytelny sidecar uznaje się za martwy dopiero po krótkim okresie gracji (przegląd X2).
+
+### Included 0.18.3 baseline / Dołączona baza 0.18.3
+
+- P24: warn on configurable per-filesystem worktree share/free space with safe GC preview reclaimable bytes; report worktree size on close.
+
+- Support weight: heavy task specs with a cross-provider limits.heavy queue cap (default 1) and waiting reasons.
+
+- Show machine load/free memory in capacity and status detail; record configurable load threshold crossings.
+
+- P17: warn in new/queue previews when inherited project links point to missing paths or closed task worktrees, naming the stale target and suggesting placeholders.
+
+- Resolve cross-task `links.to` placeholders `{task:TASK-ID,repo:REPO-NAME}` against recorded worktrees, with clear preview errors and existing link validation.
+
+- Limits: `limits.<provider>: off` explicitly disables a provider — no window of it starts, the queue waits with the reason, and `limits`/board and the MCP `set_limits` show and accept it. `limits.<provider>: 0` still means "no limit" (backward compatible), as do `limits set <provider>=0` and `=none`; `=off` now disables instead of removing. / `limits.<provider>: off` jawnie wyłącza dostawcę — żadne jego okno nie wystartuje, kolejka czeka z podanym powodem, a `limits`/plansza i MCP `set_limits` pokazują i przyjmują tę wartość. `0` nadal znaczy „bez limitu" (zgodność wsteczna), podobnie `limits set <dostawca>=0` i `=none`; `=off` wyłącza zamiast usuwać.
+
+- MCP `queue_list` and `task_spec` expose the spec `weight` (`normal`/`heavy`) as a structured field. / MCP `queue_list` i `task_spec` pokazują pole `weight` (`normal`/`heavy`).
+
+- Withdraw: an id prefix shared by the active delivery and a queued message is refused as ambiguous before anything changes. / Wycofanie: prefiks id wspólny dla dostarczanej i kolejkowanej wiadomości jest odrzucany jako niejednoznaczny, zanim cokolwiek się zmieni.
+
+- Gate: reclamation of a stale gate lock is serialized through a reclaim lock, so a second reclaimer cannot unlink a live successor lock. / Bramka: przejęcie nieaktualnej blokady jest szeregowane blokadą reclaim, więc drugi przejmujący nie usunie żywiej blokady następcy.
+
+- Internals: the machine-load state file is written only on a change, not every watch tick; heavies waiting for a heavy slot stack their count in queue previews (1/1, 2/1, …); an unrelated spec link no longer silences stale project-link warnings (only an override of the same `from` does); a negative `disk.worktree_share_percent` is rejected (pinned by a test). / Wewnętrzne: plik stanu obciążenia jest zapisywany tylko przy zmianie, nie co tick; oczekujące ciężkie zadania zwiększają licznik w podglądach kolejki; niezależny link w spec nie wycisza już ostrzeżeń o nieaktualnych linkach projektu; ujemny `disk.worktree_share_percent` jest odrzucany (test).
 
 ## [0.18.3] - 2026-11-07
 
