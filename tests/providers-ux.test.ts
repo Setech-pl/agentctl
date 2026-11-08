@@ -22,13 +22,13 @@ function setup(name: string, extra = '') {
 }
 it('selects the first installed mapped reviewer using prefer or active order, skipping the author', async () => {
   const { config } = setup('review', 'review: {prefer: [codex, kimi, claude]}\n');
-  const author = seedTask(config, 'AUTHOR', { agent: 'claude', model: 'sonnet', effort: 'high' });
+  const author = seedTask(config, 'AUTHOR', { agent: 'claude', model: 'claude-sonnet-5-5', effort: 'high' });
   const { ctx } = makeContext(config, { respond: cmd => cmd === 'codex' ? { code: 1 } : undefined });
   assert.deepEqual(await reviewOrder(ctx, author, {}), { order: { agent: 'kimi', model: 'k3', effort: 'high' }, rule: 'different provider (kimi)' });
   const all = makeContext(config).ctx;
   assert.equal((await reviewOrder(all, author, { prefer: ['claude', 'kimi', 'codex'] })).order.agent, 'kimi');
   assert.equal((await reviewOrder(all, author, { prefer: ['codex', 'kimi'] })).order.agent, 'codex');
-  config.equivalents.unshift({ claude: { model: 'sonnet', effort: 'high' }, kimi: { model: 'k3', effort: 'high' } } as typeof config.equivalents[number]);
+  config.equivalents.unshift({ claude: { model: 'claude-sonnet-5-5', effort: 'high' }, kimi: { model: 'k3', effort: 'high' } } as typeof config.equivalents[number]);
   config.equivalents = config.equivalents.filter(e => !e.codex || e.codex.model !== 'gpt-6.1-sol');
   assert.equal((await reviewOrder(all, author, { prefer: ['codex', 'kimi'] })).order.agent, 'kimi');
 });
@@ -40,7 +40,7 @@ it('warns about inactive provider settings and validates review preferences', ()
 it('requires an explicit move target among three providers and shows slots and percentages', async () => {
   const { config, dir } = setup('move', 'limits: {codex: 2, kimi: 1}\n');
   const wt = path.join(dir, 'wt'); fs.mkdirSync(wt);
-  const author = seedTask(config, 'MOVE', { agent: 'claude', model: 'sonnet', effort: 'high', repos: [{ path: dir, worktree: wt }] });
+  const author = seedTask(config, 'MOVE', { agent: 'claude', model: 'claude-sonnet-5-5', effort: 'high', repos: [{ path: dir, worktree: wt }] });
   const tmux = new FakeTmux(config.session), { ctx } = makeContext(config, { respond: tmux.respond });
   await assert.rejects(planMove(ctx, author.task), /wybierz dostawcę: --agent codex\|kimi.*free slots 2.*usage n\/d.*free slots 1/);
   assert.equal((await planMove(ctx, author.task, { agent: 'kimi' })).to.agent, 'kimi');

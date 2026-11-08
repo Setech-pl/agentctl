@@ -502,7 +502,7 @@ A spec is a YAML header between `---` lines, followed by the prompt. Several spe
 ---
 task: TASK-42
 agent: claude
-model: opus
+model: claude-opus-5-5
 effort: high
 repos:
   - path: ~/src/sample-app

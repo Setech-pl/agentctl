@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { kimiProbeDir } from './kimi-probe.ts';
 import { readKimiSnapshot } from './kimi-usage.ts';
+import { deriveTierModels } from '../matrix.ts';
 import type { ProviderAdapter, DoctorLine } from './types.ts';
 import { kimiSettings } from './kimi-settings.ts';
 import { configuredModel, kimiEnvironmentProblem, resolvedKimiHome, qualifiedModel, readKimiConfig } from './kimi-config.ts';
@@ -31,7 +32,8 @@ export const kimi: ProviderAdapter = {
     if (env.KIMI_CODE_TRUST_WORKSPACE !== undefined) lines.push({ name: 'kimi trust', level: 'fail', text: 'KIMI_CODE_TRUST_WORKSPACE bypass is forbidden; trust must be manual' });
     lines.push({ name: 'kimi protocol', level: 'warn', text: 'wire protocol 1.5; state.json binds sessions; llm.request records effective effort (footer may show profile default); unknown protocol uses screen only' });
     lines.push({ name: 'kimi models', level: 'ok', text: `Aliases are server-managed/dynamic: ${config.models.map(m => `${m.id}: ${m.displayName} [${m.efforts.join(',')}]`).join('; ') || 'catalog not available; effort will not be forced'}` });
-    lines.push({ name: 'kimi equivalents', level: 'ok', text: 'light: k3-256k/low; medium: k3/high; strong: k3/max. k3.1-pro requires an explicit request (about 10× the plan limit).' });
+    const tiers = deriveTierModels('kimi');
+    lines.push({ name: 'kimi equivalents', level: 'ok', text: `light: ${tiers.light.join(', ')}; medium: ${tiers.medium.join(', ')}; strong: ${tiers.strong.join(', ')} (from data/model-matrix.yaml). k3.1-pro requires an explicit request (about 10× the plan limit).` });
     if (globalConfig) {
       if (globalConfig.capacity.kimiUsageProbe && !readKimiSnapshot(globalConfig)) lines.push({ name: 'kimi usage probe', level: 'warn', text: `No reading yet. Neutral folder needs manual trust: run kimi in ${kimiProbeDir(globalConfig)}; never /usage in task windows` });
       try {
@@ -60,7 +62,7 @@ export const kimi: ProviderAdapter = {
   events: kimiEvents,
   usage: kimiUsage,
   models: {
-    equivalents: { light: ['k3-256k/low'], medium: ['k3/high'], strong: ['k3/max'] },
+    get equivalents() { return deriveTierModels('kimi'); },
     label(model, effort, observed, versions) {
       const name = observed && observed !== 'unknown' ? observed : model ?? '';
       const configured = configuredModel(readKimiConfig(), name);

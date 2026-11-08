@@ -56,7 +56,7 @@ it('uses target-provider rules for config flags, spec env, queue planning and ex
   const raw = { index: 1, header: { task: 'K', agent: 'kimi', model: 'k3', repos: [{ path: w.root, worktree: `${w.root}/wt` }] }, prompt: 'Work' };
   for (const env of [{ KIMI_CODE_TRUST_WORKSPACE: '0' }, { KIMI_CODE_DANGEROUS_COMMAND_GUARD: 'false' }]) {
     assert.throws(() => resolveSpec({ ...raw, header: { ...raw.header, env } }, { config: w.config }), /forbidden/);
-    const claude = resolveSpec({ ...raw, header: { ...raw.header, agent: 'claude', model: 'sonnet', env } }, { config: w.config });
+    const claude = resolveSpec({ ...raw, header: { ...raw.header, agent: 'claude', model: 'claude-sonnet-5-5', env } }, { config: w.config });
     await assert.rejects(planBatch(makeContext(w.config, { dryRun: true }).ctx, [claude], { agent: 'kimi', ignoreLimits: true }), /forbidden/);
   }
   assert.doesNotThrow(() => makeConfig(scratch.sub('legal-claude'), 'agents:\n  claude: {flags: [-y, --prompt, x]}\n'));
@@ -64,7 +64,7 @@ it('uses target-provider rules for config flags, spec env, queue planning and ex
 });
 it('rejects target Kimi extra flags when moving from Claude before any new window', async () => {
   const w = world('move'); const worktree = path.join(w.root, 'wt'); fs.mkdirSync(worktree);
-  const from = seedTask(w.config, 'SOURCE', { agent: 'claude', model: 'sonnet', effort: 'high', repos: [{ path: w.root, worktree }] });
+  const from = seedTask(w.config, 'SOURCE', { agent: 'claude', model: 'claude-sonnet-5-5', effort: 'high', repos: [{ path: w.root, worktree }] });
   const tmux = new FakeTmux(w.config.session), { ctx, runner } = makeContext(w.config, { respond: tmux.respond });
   const plan = await planMove(ctx, from.task, { agent: 'kimi' });
   assert.equal(plan.to.agent, 'kimi');
@@ -145,17 +145,20 @@ it('gates synthetic wire by protocol and counts usage.record only once', () => {
   assert.deepEqual(sumBuckets(stats.buckets), { input: 10, output: 20, cacheRead: 30, cacheWrite: 40 });
   assert.equal(stats.observed?.effort, 'high');
 });
-it('translates sparse user columns and the light/medium/strong Kimi defaults without disturbing the legacy table', () => {
-  assert.equal(defaultEquivalents().length, 6);
+it('translates the matrix-derived Kimi defaults and keeps sparse user columns working', () => {
+  assert.equal(defaultEquivalents().length, 8);
   const table = defaultEquivalents(['claude', 'codex', 'kimi']);
-  assert.deepEqual(table.map(row => `${row.kimi.model}/${row.kimi.effort}`), ['k3-256k/low', 'k3-256k/low', 'k3/high', 'k3/high', 'k3/max', 'k3/max']);
+  assert.deepEqual(table.map(row => row.kimi ? `${row.kimi.model}/${row.kimi.effort}` : '-'), ['k3-256k/low', 'k3-256k/low', 'k3/high', 'k3/high', 'k3/high', 'k3/max', 'k3/high', '-']);
   for (const row of table) {
-    for (const source of ['claude', 'codex'] as const) assert.deepEqual(translate({ agent: source, ...row[source] }, 'kimi', table), { ok: true, order: { agent: 'kimi', ...row.kimi } });
-    assert.equal(translate({ agent: 'kimi', ...row.kimi }, 'claude', table).ok, true);
+    if (!row.kimi) continue;
+    assert.equal(translate({ agent: 'kimi', model: row.kimi.model, effort: row.kimi.effort }, 'claude', table).ok, true);
+    assert.equal(translate({ agent: 'kimi', model: row.kimi.model, effort: row.kimi.effort }, 'codex', table).ok, true);
   }
   assert.equal(translate({ agent: 'kimi', model: 'k3.1-pro', effort: 'max' }, 'claude', table).ok, false);
-  assert.deepEqual(kimi.models.equivalents, { light: ['k3-256k/low'], medium: ['k3/high'], strong: ['k3/max'] });
-  assert.deepEqual(translate({ agent: 'claude', model: 'sonnet', effort: 'high' }, 'kimi', table), { ok: true, order: { agent: 'kimi', model: 'k3', effort: 'high' } });
+  assert.deepEqual(kimi.models.equivalents, { light: ['k3-256k/low', 'k3/high'], medium: ['k3/high'], strong: ['k3/max'] });
+  // first matching row wins: claude-sonnet-5-5/medium starts in the light rows, /high is the bugfix row
+  assert.deepEqual(translate({ agent: 'claude', model: 'claude-sonnet-5-5', effort: 'medium' }, 'kimi', table), { ok: true, order: { agent: 'kimi', model: 'k3-256k', effort: 'low' } });
+  assert.deepEqual(translate({ agent: 'claude', model: 'claude-sonnet-5-5', effort: 'high' }, 'kimi', table), { ok: true, order: { agent: 'kimi', model: 'k3', effort: 'high' } });
   const p = new Problems(), custom = parseEquivalents([{ claude: 'special/high', kimi: 'k3/high' }], 'pairs', p, ['claude', 'codex', 'kimi']);
   p.throwIfAny('bad');
   assert.equal(translate({ agent: 'claude', model: 'special', effort: 'high' }, 'codex', custom).ok, false);

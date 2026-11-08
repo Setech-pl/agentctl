@@ -92,7 +92,7 @@ function authorCase(name: string, yaml = '', respond?: Respond) {
   const tick = async (opts: Parameters<typeof queueTick>[3] = {}) => { const memory = new QueueMemory(); const began = await queueTick(f.ctx, memory, { clickable: false, notify: async () => {} } as never, opts); await memory.idle(); return began; };
   return { f, author, tick };
 }
-const legacyRaw = (f: ReturnType<typeof fixture>, author: ReturnType<typeof seedTask>) => f.raw('AUTHOR-REV', { agent: 'codex', model: 'gpt-6-astra', effort: 'medium', review_of: 'AUTHOR', review: false, after: ['AUTHOR'], repos: author.repos.map(r => ({ path: r.path, worktree: r.worktree, branch: r.branch, base: r.base })) });
+const legacyRaw = (f: ReturnType<typeof fixture>, author: ReturnType<typeof seedTask>) => f.raw('AUTHOR-REV', { agent: 'codex', model: 'gpt-6.1-sol', effort: 'medium', review_of: 'AUTHOR', review: false, after: ['AUTHOR'], repos: author.repos.map(r => ({ path: r.path, worktree: r.worktree, branch: r.branch, base: r.base })) });
 async function queueLegacy(f: ReturnType<typeof fixture>, author: ReturnType<typeof seedTask>, heads?: Record<string, string>) {
   const raw = legacyRaw(f, author), spec = resolveSpec(raw, { config: f.config });
   await commitQueueAdd(f.ctx, [{ raw, spec }], { reuse: true, autoReview: { author: 'AUTHOR', hash: 'h', heads: heads ?? { [f.repo]: A } } });
@@ -104,7 +104,7 @@ const renderRecord = (r: Parameters<typeof renderTaskMd>[0]) => renderTaskMd(r, 
 
 /** A review record written before the own-checkout rule: the author's worktree, the author's report. */
 function legacyStarted(f: ReturnType<typeof fixture>, author: ReturnType<typeof seedTask>, live = false) {
-  const r = seedTask(f.config, 'AUTHOR-REV', { agent: 'codex', model: 'gpt-6-astra', effort: 'medium', reviewOf: 'AUTHOR', autoReview: { author: 'AUTHOR', hash: 'old', heads: { [f.repo]: A } }, repos: author.repos, report: author.report });
+  const r = seedTask(f.config, 'AUTHOR-REV', { agent: 'codex', model: 'gpt-6.1-sol', effort: 'medium', reviewOf: 'AUTHOR', autoReview: { author: 'AUTHOR', hash: 'old', heads: { [f.repo]: A } }, repos: author.repos, report: author.report });
   if (live) f.tmux.add('author-rev', 'Usage limit reached\n› \n');
   return r;
 }
@@ -127,7 +127,7 @@ describe('FIX3 N1: the invariant of a review holds at every agent window', () =>
   it('move keeps the provenance (review_of, auto_review) of a review that has its own checkout', async () => {
     const { f, author } = authorCase('f3-move-ok'); await f.ctx.tmux.killWindow('author'); await setHeaderFields(f.runner, taskFile(f.config, 'author'), { closed: true, model: 'sonnet' });
     const own = { path: f.repo, worktree: `${f.repo}-author-rev`, base: A };
-    const rev = seedTask(f.config, 'AUTHOR-REV', { agent: 'codex', model: 'gpt-6-astra', effort: 'medium', reviewOf: 'AUTHOR', autoReview: { author: 'AUTHOR', hash: 'h', heads: { [f.repo]: A }, bases: { [f.repo]: B }, delta: 'd' }, repos: [own], report: path.join(path.dirname(author.report), 'AUTHOR-REV.md') });
+    const rev = seedTask(f.config, 'AUTHOR-REV', { agent: 'codex', model: 'gpt-6.1-sol', effort: 'medium', reviewOf: 'AUTHOR', autoReview: { author: 'AUTHOR', hash: 'h', heads: { [f.repo]: A }, bases: { [f.repo]: B }, delta: 'd' }, repos: [own], report: path.join(path.dirname(author.report), 'AUTHOR-REV.md') });
     fs.mkdirSync(own.worktree); f.tmux.add('author-rev', 'Usage limit reached\n› \n');
     await moveTask(f.ctx, 'AUTHOR-REV', { yes: true, agent: 'claude' });
     const moved = readTaskRecord(f.config, 'author-rev-2');

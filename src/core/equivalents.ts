@@ -1,5 +1,6 @@
 import { DEFAULT_PROVIDERS, PROVIDER_IDS } from './providers/types.ts';
-import { DEFAULT_EQUIVALENTS } from './providers/equivalents.ts';
+import { deriveEquivalentRows } from './matrix.ts';
+import type { EquivalentRow } from './matrix.ts';
 import { EFFORTS } from './config.ts';
 import type { AgentName, Effort } from './config.ts';
 import { Problems, isObject } from './util.ts';
@@ -10,11 +11,11 @@ export interface ModelEffort {
   effort: Effort;
 }
 
-/** A pair of settings considered interchangeable between the two providers. */
+/** A pair of settings considered interchangeable between the providers. */
 export interface Equivalent {
   claude: ModelEffort;
   codex: ModelEffort;
-  kimi: ModelEffort;
+  kimi?: ModelEffort;
   class?: 'light' | 'medium' | 'strong';
 }
 
@@ -23,8 +24,13 @@ export interface Order extends ModelEffort {
   agent: AgentName;
 }
 
-/** Built-in table. Fable and effort `max` are deliberately absent: they have no counterpart. */
-export { DEFAULT_EQUIVALENTS } from './providers/equivalents.ts';
+/**
+ * The built-in table: derived from data/model-matrix.yaml (src/core/matrix.ts), one row per non-explicit class.
+ * Fable and restricted models (gpt-6-astra, k3.1-pro*) are deliberately absent: they have no counterpart.
+ */
+export function defaultEquivalentRows(): EquivalentRow[] {
+  return deriveEquivalentRows();
+}
 
 export function formatModelEffort(m: ModelEffort): string {
   return `${m.model}/${m.effort}`;
@@ -75,10 +81,12 @@ export function parseEquivalents(v: unknown, where: string, p: Problems, ids: re
 
 export function defaultEquivalents(ids: readonly AgentName[] = DEFAULT_PROVIDERS): Equivalent[] {
   const p = new Problems();
-  const table = parseEquivalents(DEFAULT_EQUIVALENTS, 'DEFAULT_EQUIVALENTS', p);
-  if (!ids.includes('kimi')) return table;
-  const models = ['k3-256k/low', 'k3-256k/low', 'k3/high', 'k3/high', 'k3/max', 'k3/max'];
-  return [...table.map((row, i) => ({ ...row, kimi: parseModelEffort(models[i], 'kimi', p)!, class: (i < 2 ? 'light' : i < 4 ? 'medium' : 'strong') as NonNullable<Equivalent['class']> }))];
+  const table = parseEquivalents(deriveEquivalentRows(), 'DEFAULT_EQUIVALENTS', p, PROVIDER_IDS);
+  if (ids.includes('kimi')) return table;
+  return table.map((row) => {
+    const { kimi: _kimi, ...rest } = row;
+    return rest as Equivalent;
+  });
 }
 
 export type Translation = { ok: true; order: Order } | { ok: false; message: string; hint: string };
@@ -93,7 +101,7 @@ export function translate(order: Order, target: AgentName, table: Equivalent[]):
   const pair = table.find((e) => e[order.agent] && e[target] && formatModelEffort(e[order.agent]!) === here);
   if (pair) return { ok: true, order: { agent: target, ...pair[target]! } };
 
-  if (order.model === 'fable' || order.effort === 'max') {
+  if (order.model.includes('fable') || order.effort === 'max') {
     return {
       ok: false,
       message: `${order.agent} ${here} has no equivalent in ${target}: fable and effort max are not mapped between providers`,

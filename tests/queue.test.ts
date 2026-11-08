@@ -110,9 +110,9 @@ describe('queue: adding', () => {
 
   it('--agent maps the order through the equivalents table and remembers it for the start', async () => {
     const s = setup('map');
-    await add(s, specOf(s.repo, 'NC-1', { model: 'opus', effort: 'high' }), { agent: 'codex' });
+    await add(s, specOf(s.repo, 'NC-1', { model: 'claude-opus-5-5', effort: 'high' }), { agent: 'codex' });
     const [entry] = readQueue(s.config);
-    assert.deepEqual([entry!.agent, entry!.model, entry!.effort, entry!.agentOverride], ['codex', 'gpt-6-astra', 'medium', 'codex']);
+    assert.deepEqual([entry!.agent, entry!.model, entry!.effort, entry!.agentOverride], ['codex', 'gpt-6.1-sol', 'high', 'codex']);
   });
 
   it('priority must be high or normal', async () => {
