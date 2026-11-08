@@ -174,3 +174,14 @@ export function collapsedQuestion(screen: string): { count: number; shortcut: st
   const shortcut = /^\s*(.+?)\s+to answer\s*$/im.exec(tail)?.[1]?.trim() ?? null;
   return { count: Number(marker[1]), shortcut };
 }
+
+/** The question of a collapsed Codex question: "? Which colour: red or blue?" above the marker, from the expanded view the capture holds (never from keys sent to the agent). */
+export function collapsedQuestionText(screen: string): string | undefined {
+  const lines = screen.split('\n');
+  const marker = lines.findLastIndex(l => /^\s*\?\s+\d+ questions?\b/i.test(l));
+  for (let i = (marker < 0 ? lines.length : marker) - 1; i >= Math.max(0, marker - 12); i--) {
+    const text = /^\s*\?\s+(?!\d+ questions?\b)(.+\S)\s*$/i.exec(lines[i]!)?.[1];
+    if (text) return text.length > 120 ? `${text.slice(0, 117)}…` : text;
+  }
+  return undefined;
+}

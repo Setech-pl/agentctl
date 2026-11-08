@@ -1116,6 +1116,7 @@ export const MCP_TOOLS: McpToolDef[] = [
     kind: 'read',
     description:
       'The last lines of what an agent window shows, without its footer, to read along without attaching. Use it when the user asks what a task is doing right now, why it waits, or what the agent asked. ' +
+      'A collapsed Codex question ("? N questions · … to answer") is named with its text, from the session log or the captured expanded view; no key is ever sent to the agent. ' +
       'Works only for a task that still has a tmux window; a task that is finished has a report instead (get_report).',
     input: { task: taskArg, lines: z.number().int().min(1).max(MAX_PEEK_LINES).optional().describe(`How many lines, 1 to ${MAX_PEEK_LINES}. Default 40.`) },
     annotations: readOnly('Look into a task window'),

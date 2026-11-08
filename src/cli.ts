@@ -1521,7 +1521,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
 
   program
     .command('peek')
-    .description('Print the last lines of the task window (without the agent footer), to read along without attaching.')
+    .description('Print the last lines of the task window (without the agent footer), to read along without attaching. A collapsed Codex question is named with its text (from the session log or the captured expanded view).')
     .argument('<task>', 'task ID; case does not matter and a unique prefix is enough')
     .option('-n, --lines <n>', 'number of lines', String(PEEK_LINES))
     .action(
