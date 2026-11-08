@@ -14,7 +14,7 @@ import { readClaudePlan, claudeHome } from './claude-usage.ts';
 import { agentHomes } from '../usage-sources.ts';
 import { feedClaudeLine } from './claude-parse.ts';
 import { refreshCodexCapacity } from '../capacity.ts';
-import { DEFAULT_EQUIVALENTS } from './equivalents.ts';
+import { deriveTierModels } from '../matrix.ts';
 import { modelLabel } from './model-label.ts';
 import { legacySafety } from './safety.ts';
 import { interactiveTokens } from './process.ts';
@@ -93,7 +93,7 @@ export const claude: ProviderAdapter = {
     refreshPlan: refreshClaudePlan,
     planSources: ['claude-statusline', 'claude-usage-probe'],
   },
-  models: { get equivalents() { const rows = DEFAULT_EQUIVALENTS.map(row => row.claude); return { light: rows.slice(0, 2), medium: rows.slice(2, 4), strong: rows.slice(4) }; }, label: modelLabel },
+  models: { get equivalents() { return deriveTierModels('claude'); }, label: modelLabel },
   safety: legacySafety,
   isExternalSession(tokens) { const first = path.basename(tokens[0] ?? ''); return (first === 'claude' || (/^node(js)?$/.test(first) && /claude-code\/\S*\.js$/.test(tokens[1] ?? ''))) && interactiveTokens(tokens); },
 };

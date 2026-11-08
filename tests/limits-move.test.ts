@@ -137,7 +137,8 @@ describe('move', () => {
       repos: [{ path: repo, worktree }],
       links: [{ from: 'node_modules/x', to: '/somewhere/x' }],
       env: { NEON_CITY_TASK: 'NC-1' },
-      requested: { agent: 'claude', model: 'opus', effort: 'high' },
+      model: 'claude-opus-5-5',
+      requested: { agent: 'claude', model: 'claude-opus-5-5', effort: 'high' },
       ...extra,
     });
     fake.add('nc-1', "  ⎿  You've hit your session limit · resets 3pm\n❯ ");
@@ -155,16 +156,16 @@ describe('move', () => {
   it('the plan: the other provider through the equivalents table, a free task ID, the original prompt plus the note', async () => {
     const t = setup('mv1');
     const plan = await planMove(t.ctx, 'nc-1');
-    assert.deepEqual(plan.to, { agent: 'codex', model: 'gpt-6-astra', effort: 'medium' });
+    assert.deepEqual(plan.to, { agent: 'codex', model: 'gpt-6.1-sol', effort: 'high' });
     assert.equal(plan.task, 'NC-1-2');
     assert.equal(plan.window, 'nc-1-2');
     assert.equal(plan.prompt, `Do NC-1.\n\n${continuationNote(t.record)}`);
-    assert.match(describeMove(plan).join('\n'), /Move NC-1 \(claude opus\/high\) -> NC-1-2 \(codex gpt-6-astra\/medium\)[\s\S]*the same one[\s\S]*superseded/);
+    assert.match(describeMove(plan).join('\n'), /Move NC-1 \(claude claude-opus-5-5\/high\) -> NC-1-2 \(codex gpt-6.1-sol\/high\)[\s\S]*the same one[\s\S]*superseded/);
   });
 
   it('--agent picks the provider; the other direction maps too; same provider is an error', async () => {
     const t = setup('mv2', '', { agent: 'codex', model: 'gpt-6.1-sol', effort: 'high', requested: { agent: 'codex', model: 'gpt-6.1-sol', effort: 'high' } });
-    assert.deepEqual((await planMove(t.ctx, 'NC-1')).to, { agent: 'claude', model: 'sonnet', effort: 'high' });
+    assert.deepEqual((await planMove(t.ctx, 'NC-1')).to, { agent: 'claude', model: 'claude-opus-5-5', effort: 'high' });
     await assert.rejects(planMove(t.ctx, 'NC-1', { agent: 'codex' }), /already runs on codex/);
   });
 
@@ -179,7 +180,7 @@ describe('move', () => {
   });
 
   it('a user pair in equivalents is used', async () => {
-    const t = setup('mv4', 'equivalents:\n  - {claude: "opus/high", codex: "gpt-6.1-sol/xhigh"}\n');
+    const t = setup('mv4', 'equivalents:\n  - {claude: "claude-opus-5-5/high", codex: "gpt-6.1-sol/xhigh"}\n');
     assert.deepEqual((await planMove(t.ctx, 'NC-1')).to, { agent: 'codex', model: 'gpt-6.1-sol', effort: 'xhigh' });
   });
 
@@ -211,26 +212,26 @@ describe('move', () => {
 
     const typed = t.runner.commands.find((c) => c.includes(' -l -- ') && c.includes('exec sh')) as string;
     assert.ok(typed.includes('exec sh'));
-    assert.match(t.runner.written.get(path.join(t.config.stateDir, 'nc-1-2/start.sh'))!, /exec codex --sandbox danger-full-access -m gpt-6-astra -c model_reasoning_effort=medium -c check_for_update_on_startup=false -c 'notify=\[/);
+    assert.match(t.runner.written.get(path.join(t.config.stateDir, 'nc-1-2/start.sh'))!, /exec codex --sandbox danger-full-access -m gpt-6.1-sol -c model_reasoning_effort=high -c check_for_update_on_startup=false -c 'notify=\[/);
     assert.ok(t.runner.commands.some((c) => c.startsWith('tmux new-window') && c.includes('-n nc-1-2') && c.includes(`-c ${t.worktree}`)), 'the same worktree');
     assert.ok(!t.runner.commands.some((c) => c.includes('worktree add')), 'no new worktree');
     const pasted = t.runner.calls.find((c) => c.line.startsWith('tmux load-buffer') && c.input?.includes('Poprzedni agent'));
     assert.ok(pasted?.input?.includes(result!.plan.from.report), '0173-FIX-B move canonical path');
-    assert.ok(pasted?.input?.startsWith(`Model: gpt-6-astra · effort medium\n\nDo NC-1.\n\n${continuationNote(t.record)}`));
+    assert.ok(pasted?.input?.startsWith(`Model: gpt-6.1-sol · effort high\n\nDo NC-1.\n\n${continuationNote(t.record)}`));
     assert.match(pasted!.input!, /agentctl:report-end/);
 
     const fresh = readTaskRecord(t.config, 'nc-1-2');
     assert.equal(fresh?.agent, 'codex');
-    assert.equal(fresh?.model, 'gpt-6-astra');
+    assert.equal(fresh?.model, 'gpt-6.1-sol');
     assert.deepEqual(fresh?.repos, t.record.repos);
     assert.equal(fresh?.report, t.record.report);
     assert.deepEqual(fresh?.env, { NEON_CITY_TASK: 'NC-1' });
     assert.equal(fresh?.continues, 'NC-1');
     assert.equal(fresh?.switchedBy, 'limit');
-    assert.deepEqual(fresh?.requested, { agent: 'claude', model: 'opus', effort: 'high' });
+    assert.deepEqual(fresh?.requested, { agent: 'claude', model: 'claude-opus-5-5', effort: 'high' });
     assert.equal(readTaskRecord(t.config, 'nc-1')?.supersededBy, 'NC-1-2');
     assert.equal(readTaskPrompt(t.config, 'nc-1'), 'Do NC-1.', 'the old prompt is untouched');
-    assert.match(t.out.join('\n'), /NC-1 -> NC-1-2: running on codex gpt-6-astra\/medium\. The old window nc-1 stays open \(superseded\)\./);
+    assert.match(t.out.join('\n'), /NC-1 -> NC-1-2: running on codex gpt-6.1-sol\/high\. The old window nc-1 stays open \(superseded\)\./);
   });
 
   it('status and the board: the old row is superseded (no notification), the new one runs', async () => {
@@ -320,7 +321,7 @@ describe('board: M moves a task', () => {
     const fake = new FakeTmux();
     fake.newWindowScreen = composerFixture('› Ask Codex to do anything\n');
     const runner = new DiskRunner({ dryRun: false, respond: fake.respond, startTime: Date.now() });
-    seedTask(config, 'NC-1', { repos: [{ path: scratch.sub('bm1/app'), worktree: scratch.sub('bm1/app-wt') }] });
+    seedTask(config, 'NC-1', { model: 'claude-opus-5-5', repos: [{ path: scratch.sub('bm1/app'), worktree: scratch.sub('bm1/app-wt') }] });
     fake.add('nc-1', IDLE);
     const notice = await runBoardEffect(runner, config, { type: 'move', task: 'NC-1' }, { insideTmux: false, self: SELF_FOR_BOARD });
     assert.deepEqual(notice, { level: 'info', text: 'NC-1 -> NC-1-2 (codex); the old window stays open' });

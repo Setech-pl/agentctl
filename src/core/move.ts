@@ -7,6 +7,7 @@ import { confirmAction } from './clipboard.ts';
 import type { AgentName } from './config.ts';
 import type { Context } from './context.ts';
 import { formatModelEffort, translate } from './equivalents.ts';
+import { explicitOnlyModel } from './matrix.ts';
 import { recordEvent } from './history.ts';
 import type { Order } from './equivalents.ts';
 import type { SelfArgv } from './events.ts';
@@ -82,6 +83,7 @@ export async function planMove(ctx: Context, taskArg: string, opts: MoveOptions 
 
   const t = translate({ agent: from.agent, model: from.model, effort: from.effort === 'unknown' ? 'high' : from.effort }, target, config.equivalents);
   if (!t.ok) throw new AgentctlError(`${from.task}: ${t.message}`, t.hint);
+  if (explicitOnlyModel(t.order.agent, t.order.model)) throw new AgentctlError(`${from.task}: the move would land on the restricted ${t.order.agent} ${t.order.model}: k3.1-pro* and gpt-6-astra never come from a translation`, 'Start a new task with an explicit model: (or an explicit-only class: visual, escalate) instead.');
   validateLaunch(config, { task: from.task, ...t.order }, from.env);
   if (from.repos.length === 0) throw new AgentctlError(`${from.task} has no worktree recorded, so there is nothing for the new agent to continue from`, 'Start a new task by hand.');
 

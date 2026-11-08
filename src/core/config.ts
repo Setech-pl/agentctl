@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import YAML from 'yaml';
-import { DEFAULT_EQUIVALENTS, defaultEquivalents, parseEquivalents } from './equivalents.ts';
+import { defaultEquivalents, parseEquivalents } from './equivalents.ts';
 import type { Equivalent } from './equivalents.ts';
 import { DEFAULT_WINDOW_ICONS, TASK_STATES } from './icons.ts';
 import { findAutoAcceptFlag } from './safety.ts';

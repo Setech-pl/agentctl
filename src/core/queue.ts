@@ -215,7 +215,7 @@ export async function planQueueAdd(ctx: Context, raws: RawSpec[], opts: { agent?
   checkAfter(ctx, specs, entries);
   const items = specs.map((spec, i) => ({ raw: raws[i] as RawSpec, spec }));
   const rows = await collectStatus(ctx, { progress: false, archived: true });
-  const warnings = [...await touchWarnings(ctx, specs), ...specs.flatMap(s => reportPathWarnings(ctx.config, s).map(w => `${s.task}: ${w}`)), ...specs.flatMap(s => [...(s.linkWarnings ?? []), ...missingLinkTargets(s.links, s.repos[0]?.worktree)].map(w => `${s.task}: ${w}`))];
+  const warnings = [...await touchWarnings(ctx, specs), ...specs.flatMap(s => reportPathWarnings(ctx.config, s).map(w => `${s.task}: ${w}`)), ...specs.flatMap(s => [...(s.linkWarnings ?? []), ...(s.warnings ?? []), ...missingLinkTargets(s.links, s.repos[0]?.worktree)].map(w => `${s.task}: ${w}`))];
   const capacity = config.capacity.snapshot && !ctx.runner.dryRun ? capacitySnapshot(await collectCapacity(ctx, opts.diskBudgetMs === undefined ? {} : { diskBudgetMs: opts.diskBudgetMs }), specs.map((s) => s.agent)) : undefined;
   return { items, warnings, ...(capacity ? { capacity } : {}), summary: [...describeQueueAdd(ctx, specs, entries, await liveWindows(ctx), rows), ...usageSummaryLines(config, specs, ctx.runner.now()), ...(capacity ? snapshotLines(capacity) : []), ...warnings.map((w) => `⚠ ${w}`)] };
 }
@@ -254,8 +254,10 @@ export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: Q
     );
     if (spec.review) lines.push(`  review:   auto -> ${spec.task}-REV after the confirmed author report; another provider, else another configured model; rerun=${Boolean(spec.review.rerun)}`);
     lines.push(`  prompt:   ${spec.prompt.length} characters`);
-    if (spec.reviewOf && spec.after.length === 0 && !hasReport(rows.find((r) => r.task === spec.reviewOf))) {
-      lines.push(`  hint:     ${spec.task} reviews ${spec.reviewOf}, which has no report yet: add "after: ${spec.reviewOf}" to the header so the review starts when the author's report is ready`);
+    const reviewedTasks = spec.reviewOfAll ?? (spec.reviewOf ? [spec.reviewOf] : []);
+    const withoutReport = reviewedTasks.filter((t) => !hasReport(rows.find((r) => r.task === t)));
+    if (withoutReport.length > 0 && spec.after.length === 0) {
+      lines.push(`  hint:     ${spec.task} reviews ${withoutReport.join(', ')}, which has no report yet: add "after: ${withoutReport.join(', ')}" to the header so the review starts when the author's report is ready`);
     }
     if (spec.remoteControl) lines.push('  remote:   Remote Control on: the session is named after the task in the Claude app');
     if (spec.pin) lines.push('  pin:      stays on this provider (it is never switched by the queue either)');

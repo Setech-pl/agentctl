@@ -1,6 +1,8 @@
 import { validateLink, missingLinkTargets, fillTaskLinkTargets, staleProjectLinkWarnings } from './links.ts';
 import { validateLaunch } from './safety.ts';
 import { provider, isActive, activeProviders } from './providers/registry.ts';
+import { PROVIDER_IDS } from './providers/types.ts';
+import { classNames, matrixClass, explicitOnlyModel } from './matrix.ts';
 import { VERDICTS } from './outputs.ts';
 import type { OutputVerdict } from './outputs.ts';
 import path from 'node:path';
@@ -65,6 +67,8 @@ export interface ResolvedSpec {
   setup: string[];
   env: Record<string, string>;
   reviewOf?: string;
+  /** Every reviewed task (review_of may be a list); reviewOf is the first of them. */
+  reviewOfAll?: string[];
   review?: ReviewSettings;
   report: string;
   /** Other places the report may be (paths and globs, placeholders filled; a relative one is relative to the worktree). */
@@ -88,6 +92,10 @@ export interface ResolvedSpec {
   requested: Order;
   /** Why the effective order differs from the requested one. */
   switchedBy?: 'flag' | 'limit';
+  /** The task class (data/model-matrix.yaml) the model/effort came from. */
+  class?: string;
+  /** Non-fatal diagnostics shown in the preview (a class overridden by an explicit model/effort, a same-provider reviewer, …). */
+  warnings?: string[];
 }
 
 export const PRIORITIES = ['high', 'normal'] as const;
@@ -173,7 +181,7 @@ export interface ResolveContext {
 /** Task IDs whose window name is one agentctl uses for itself (`watch`, `board`, `manager`). */
 export const RESERVED_TASK_IDS = ['WATCH', 'BOARD', 'MANAGER'];
 
-export const SPEC_KEYS = ['task', 'agent', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'review', 'report', 'pin', 'remote_control', 'weight', 'priority', 'after', 'touches', 'cohort'];
+export const SPEC_KEYS = ['task', 'agent', 'class', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'review', 'report', 'pin', 'remote_control', 'weight', 'priority', 'after', 'touches', 'cohort'];
 export const REPO_KEYS = ['path', 'worktree', 'base', 'branch', 'setup'];
 
 function label(raw: RawSpec): string {
@@ -222,6 +230,11 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   const task = checkTask(raw, p);
   const specAgent = (typeof h.agent === 'string' && (AGENT_NAMES as readonly string[]).includes(h.agent) ? h.agent as AgentName : parseEnumValue(h.agent, activeProviders(config), 'agent', p));
   const specEffort = parseEnumValue(h.effort, EFFORTS, 'effort', p);
+  let specClass: string | undefined;
+  if (h.class !== undefined && h.class !== null) {
+    if (typeof h.class === 'string' && matrixClass(h.class)) specClass = h.class;
+    else p.add(`unknown class ${JSON.stringify(h.class)}: class must be one of: ${classNames().join(', ')}`);
+  }
   let specModel: string | undefined;
   if (h.model !== undefined && h.model !== null) {
     if (typeof h.model === 'string' && h.model.trim() !== '') specModel = h.model.trim();
@@ -259,11 +272,17 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     if (Array.isArray(h.setup) && h.setup.every((c: unknown) => typeof c === 'string' && c.trim() !== '')) specSetup = h.setup as string[];
     else p.add('setup must be a list of non-empty shell commands');
   }
-  let reviewOf: string | undefined;
+  const reviewOfList: string[] = [];
   if (h.review_of !== undefined && h.review_of !== null) {
-    if (typeof h.review_of === 'string' && TASK_ID.test(h.review_of)) reviewOf = h.review_of;
-    else p.add(`review_of must be the task ID of the work under review (e.g. NC-12), got ${JSON.stringify(h.review_of)}`);
+    const list = Array.isArray(h.review_of) ? h.review_of : [h.review_of];
+    if (list.length === 0) p.add('review_of: the list is empty');
+    for (const dep of list) {
+      if (typeof dep === 'string' && TASK_ID.test(dep)) {
+        if (!reviewOfList.includes(dep)) reviewOfList.push(dep);
+      } else p.add(`review_of must be a task ID or a list of task IDs (e.g. [NC-12, NC-13]), got ${JSON.stringify(dep)}`);
+    }
   }
+  const reviewOf = reviewOfList[0];
   let specReport: string[] = [];
   if (h.report !== undefined && h.report !== null) specReport = parseReportPaths(h.report, 'report', p);
   let pin = false;
@@ -330,8 +349,24 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   if (!agent && h.agent === undefined) {
     p.add(`missing "agent" (one of ${activeProviders(config).join(', ')}); or set defaults.agent in .agentctl.yaml or ${config.path}`);
   }
-  const model = specModel ?? project?.defaults.model ?? config.defaults.model ?? 'default';
-  const effort = specEffort ?? project?.defaults.effort ?? config.defaults.effort ?? 'high';
+  // class: the model/effort come from the matrix (data/model-matrix.yaml); an explicit model/effort wins but warns.
+  const matrixEntry = specClass ? matrixClass(specClass) : undefined;
+  const classCell = agent && matrixEntry ? matrixEntry.cells[agent] : undefined;
+  if (matrixEntry && agent && !classCell) {
+    p.add(`class ${matrixEntry.name} has no ${agent} model (the matrix says none); use agent: ${PROVIDER_IDS.filter((id) => matrixEntry.cells[id]).join(' or ')} or another class`);
+  }
+  const classWarnings: string[] = [];
+  if (matrixEntry && agent && classCell) {
+    if (specModel && specModel !== classCell.model) classWarnings.push(`class ${matrixEntry.name} gives ${agent} ${classCell.model}/${classCell.effort}, but the spec sets model: ${specModel} — the explicit value wins`);
+    if (specEffort && specEffort !== classCell.effort) classWarnings.push(`class ${matrixEntry.name} gives ${agent} ${classCell.model}/${classCell.effort}, but the spec sets effort: ${specEffort} — the explicit value wins`);
+  }
+  const model = specModel ?? classCell?.model ?? project?.defaults.model ?? config.defaults.model ?? 'default';
+  const effort = specEffort ?? classCell?.effort ?? project?.defaults.effort ?? config.defaults.effort ?? 'high';
+  // Restricted models (k3.1-pro*, gpt-6-astra): an explicit `model:` or an explicit-only class, never a default.
+  if (agent && specModel === undefined && explicitOnlyModel(agent, model)) {
+    const fromExplicitClass = matrixEntry?.explicit === true && classCell?.model === model;
+    if (!fromExplicitClass) p.add(`${agent} ${model} runs only with an explicit model: in the spec, or from an explicit-only class (${classNames().filter((n) => matrixClass(n)?.explicit).join(', ')}); it came from ${matrixEntry ? `class ${matrixEntry.name}` : 'the configured defaults'}`);
+  }
 
   // Remote Control is a Claude Code feature. In the spec it is an order (a codex task that asks for it is an error); as a default it only
   // applies to Claude tasks.
@@ -452,7 +487,10 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     touches,
     requested: { agent: agent as AgentName, model, effort },
   };
+  if (specClass) spec.class = specClass;
+  if (classWarnings.length > 0) spec.warnings = classWarnings;
   if (reviewOf) spec.reviewOf = reviewOf;
+  if (reviewOfList.length > 0) spec.reviewOfAll = reviewOfList;
   if (review) spec.review = review;
   if (agent && remote && (specRemote ?? remoteDefault)) spec.remoteControl = true;
   if (cohort) spec.cohort = cohort;

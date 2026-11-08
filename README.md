@@ -502,7 +502,7 @@ A spec is a YAML header between `---` lines, followed by the prompt. Several spe
 ---
 task: TASK-42
 agent: claude
-model: opus
+model: claude-opus-5-5
 effort: high
 repos:
   - path: ~/src/sample-app
@@ -698,13 +698,13 @@ Details: [docs/details.md](docs/details.md#remote-control-and-the-manager).
 
 ## Model equivalents and move
 
-Claude and Codex models do not map one to one, so agentctl keeps a table of pairs you consider equivalent (usable both ways), for example `opus/high` and `gpt-6-astra/medium`. Add your own under `equivalents:`; they win over the built-in ones. Fable and effort `max` are deliberately not mapped.
+Claude and Codex models do not map one to one, so agentctl keeps a table of pairs you consider equivalent (usable both ways), for example `claude-opus-5-5/high` and `gpt-6.1-sol/high`. The built-in table is derived from the task-class matrix in [data/model-matrix.yaml](data/model-matrix.yaml), which also feeds the spec key `class:` (`class: bugfix` sets the model and effort of the agent for you). Add your own under `equivalents:`; they win over the built-in ones. Fable and effort `max` are deliberately not mapped.
 
 - `agentctl new --agent codex spec.md` runs the specs on Codex through the table.
 - When the window limit of the ordered provider is full and the other has room, `new` asks before it switches. It never switches silently; `pin: true` forbids it.
 - `agentctl move NC-42` hands a task that hit its usage limit to the other provider: a new window `nc-42-2` in the same worktree, with the original prompt and a note to continue from `git log` and `git diff`. The old window stays as `superseded` and you close it yourself.
 
-The built-in table and the rules for limits: [docs/details.md](docs/details.md#model-equivalents).
+The built-in table and the rules for limits: [docs/details.md](docs/details.md#model-equivalents-and-task-classes).
 
 ## Queue
 

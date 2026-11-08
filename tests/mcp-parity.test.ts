@@ -130,7 +130,7 @@ describe('MCP parity guard', () => {
     const f = fixture('new-options', 'new');
     fakeWatcher(f.config);
     const repo = scratch.sub('new-options/repo');
-    const spec = `---\ntask: OPT-1\nagent: claude\nmodel: sonnet\neffort: medium\nrepos:\n  - path: ${repo}\n    worktree: ${repo}-wt\n---\nFake.\n`;
+    const spec = `---\ntask: OPT-1\nagent: claude\nmodel: claude-sonnet-5-5\neffort: medium\nrepos:\n  - path: ${repo}\n    worktree: ${repo}-wt\n---\nFake.\n`;
     const args = { spec, agent: 'codex', no_agent: true, cohort: 'Batch' };
     const preview = await f.call('new', args);
     assert.equal(preview.isError, undefined, preview.text);

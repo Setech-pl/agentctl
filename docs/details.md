@@ -48,33 +48,54 @@ in its footer although `~/.codex/config.toml` says `high`. Claude's `--effort lo
 If a future version changes this, set `agents.<name>.effort_args` (`[]` to pass nothing). `agentctl doctor` shows which
 mechanism it detects.
 
-## Model equivalents
+## Model equivalents and task classes
 
-Claude and Codex models are not interchangeable one to one, so agentctl keeps a table of pairs you consider equivalent
-(`config.equivalents`, usable in both directions). The built-in table:
+The one source of truth for models is [data/model-matrix.yaml](../data/model-matrix.yaml): each **task class** maps to
+the model/effort of every provider. The built-in equivalents table (`config.equivalents`, usable in both directions) is
+derived from it — one row per class, skipping the explicit-only ones — and a test fails when the shipped defaults and
+the YAML disagree (`npm run gen:matrix` regenerates `src/core/model-matrix.ts` after an edit).
 
-| Claude (`model/effort`) | Codex (`model/effort`) |
-|---|---|
-| `haiku/low` | `gpt-6-luna/medium` |
-| `haiku/medium` | `gpt-6-luna/high` |
-| `sonnet/medium` | `gpt-6.1-sol/medium` |
-| `sonnet/high` | `gpt-6.1-sol/high` |
-| `opus/high` | `gpt-6-astra/medium` |
-| `opus/xhigh` | `gpt-6-astra/xhigh` |
+A spec may name a class instead of a model: with `class` and `agent`, the model and effort come from the matrix
+(`class: bugfix` on Claude is `claude-sonnet-5-5/high`). An explicit `model:`/`effort:` in the spec still wins, with a
+preview warning when it contradicts the matrix. An unknown class is an error listing the classes. A class whose cell is
+`none` (`creative` on Kimi) refuses that agent. The classes `visual` and `escalate` are explicit-only: they dispatch the
+restricted models (`k3.1-pro`, `gpt-6-astra`) and naming the class in the spec IS the explicit request — those models
+are otherwise accepted only with an explicit `model:`, never from configured defaults or a translation.
+
+The built-in table:
+
+| Claude (`model/effort`) | Codex (`model/effort`) | Kimi (`model/effort`) | Tier |
+|---|---|---|---|
+| `claude-haiku-5-5/low` | `gpt-6-luna/medium` | `k3-256k/low` | light |
+| `claude-sonnet-5-5/medium` | `gpt-6-luna/medium` | `k3-256k/low` | light |
+| `claude-sonnet-5-5/medium` | `gpt-6-luna/medium` | `k3/high` | light |
+| `claude-sonnet-5-5/medium` | `gpt-6.1-sol/medium` | `k3/high` | medium |
+| `claude-sonnet-5-5/high` | `gpt-6.1-sol/medium` | `k3/high` | medium |
+| `claude-opus-5-5/high` | `gpt-6.1-sol/high` | `k3/max` | strong |
+| `claude-opus-5-5/medium` | `gpt-6.1-sol/medium` | `k3/high` | medium |
+| `claude-opus-5-5/medium` | `gpt-6.1-sol/medium` | – | medium |
+
+The first matching row wins, so `claude-sonnet-5-5/medium` translates to Codex `gpt-6-luna/medium`. The tier is a
+dispatch hint for doctor and capacity, not a quality guarantee.
 
 Add your own pairs in `~/.agentctl/config.yaml`; they are consulted before the built-in ones:
 
 ```yaml
 equivalents:
-  - {claude: "opus/medium", codex: "gpt-6-astra/low"}
+  - {claude: "claude-opus-5-5/xhigh", codex: "gpt-6.1-sol/xhigh"}
 ```
 
 `fable` and effort `max` are deliberately not mapped. Where the table has no pair you get an error that tells you the line to add.
 
+The preview (and every start) also refuses: an unknown Kimi model (a typo would silently fall back to K2.8 Preview —
+known are the matrix IDs and the `[models]` catalog of Kimi's config.toml), any Kimi `*-highspeed` model, effort
+`off`/`none` for Kimi, Codex effort `low`, and a restricted model (`k3.1-pro*`, `gpt-6-astra`) that did not come from
+an explicit `model:` or an explicit-only class.
+
 - `agentctl new --agent codex spec.md` runs every spec on Codex, translating `model/effort` through the table
-  (`opus/high` becomes `gpt-6-astra/medium`). It is an explicit order, so nothing is asked.
+  (`claude-opus-5-5/high` becomes `gpt-6.1-sol/high`). It is an explicit order, so nothing is asked.
 - When the window limit of the ordered provider is full and the other provider has room, `new` **asks** whether to switch
-  (`... Switch to codex gpt-6-astra/medium (equivalent of claude opus/high)? [y/N]`). Without a terminal, or with
+  (`... Switch to codex gpt-6.1-sol/high (equivalent of claude claude-opus-5-5/high)? [y/N]`). Without a terminal, or with
   `--no-switch`, it fails with the list of live windows instead. It never switches silently.
 - `pin: true` in a spec forbids every switch (limit or `--agent`).
 - `TASK.md` and `status` keep both the **requested** and the **effective** agent/model/effort. `review_of` is checked on the
@@ -266,7 +287,7 @@ The defaults are the strings found in the installed binaries; I did not trigger 
 
 **`agentctl move <task> [--agent claude|codex] [-y]`** moves the task to the other provider (or the one in `--agent`):
 
-- the model and effort come from the [equivalents table](#model-equivalents) (`claude opus/high` → `codex gpt-6-astra/medium`); no pair (Fable, `max`) is an error with a hint;
+- the model and effort come from the [equivalents table](#model-equivalents-and-task-classes) (`claude claude-opus-5-5/high` → `codex gpt-6.1-sol/high`); no pair (Fable, `max`) is an error with a hint;
 - `pin: true` in the spec (kept in `TASK.md` since this version; older tasks count as not pinned) is an error: pinned tasks never change provider;
 - a new window `<task>-2` (`-3`, … if taken) starts in the **same worktree** with the same env and report path; its prompt is the original one from `TASK.md` plus
   `Poprzedni agent (<agent> <model>) przerwał przez limit. Kontynuuj od bieżącego stanu worktree: przeczytaj git log i git diff względem bazy, nie powtarzaj zrobionej pracy. Raport zapisz do <report>.`;
@@ -620,7 +641,7 @@ when you call `status` or `pull`.
 ## Window limits and cross-review
 
 - `limits.<agent>` caps simultaneous tmux windows per provider; the error lists the live windows. Windows are attributed to a provider through their `TASK.md`. Reserved places and (with `limits.count_external`) external sessions count too ([live limits](#live-limits-and-the-config-reload)).
-- `review_of: NC-6` looks up the author in `<state_dir>/nc-6/TASK.md` (or in the same file) and requires a different agent **or** a different model. `default` counts as a model name of its own.
+- `review_of: NC-6` (or a list, `review_of: [NC-6, NC-7]`) looks up each author in `<state_dir>/nc-6/TASK.md` (or in the same file) and requires a different agent **or** a different model for every one. `default` counts as a model name of its own. The preview warns when the reviewer's provider equals the author's provider of any reviewed task; the first listed task stays the primary one for TASK.md and the queue.
 
 ## Stable install and updates
 

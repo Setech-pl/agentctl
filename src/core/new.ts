@@ -27,7 +27,7 @@ import { secretRedactor } from './secret-redaction.ts';
 import { writeSetupProgress } from './setup-progress.ts';
 import type { SetupProgress } from './setup-progress.ts';
 
-const guardRequest = (spec: ResolvedSpec) => ({ task: spec.task, window: spec.window, report: spec.report, reportAlt: spec.reportAlt, repos: spec.repos, reviewOf: spec.reviewOf, autoReview: spec.autoReview });
+const guardRequest = (spec: ResolvedSpec) => ({ task: spec.task, window: spec.window, report: spec.report, reportAlt: spec.reportAlt, repos: spec.repos, reviewOf: spec.reviewOf, reviewOfAll: spec.reviewOfAll, autoReview: spec.autoReview });
 
 export interface NewOptions extends PlanOptions {
   /** Wait for a human to answer the folder-trust dialog (default). `false` (--no-wait-trust): stop at the dialog. */

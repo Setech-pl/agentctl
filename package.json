@@ -45,6 +45,7 @@
     "typecheck": "tsc --noEmit",
     "agentctl": "node --experimental-strip-types --no-warnings bin/agentctl.ts",
     "docs": "node --experimental-strip-types --no-warnings scripts/gen-docs.ts",
+    "gen:matrix": "node --experimental-strip-types --no-warnings scripts/gen-model-matrix.ts",
     "build": "tsc -p tsconfig.build.json && node scripts/finish-build.js",
     "prepack": "npm run build",
     "prepublishOnly": "npm test && npm run typecheck",

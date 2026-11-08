@@ -138,11 +138,11 @@ describe('0.17.4 automatic reviews and pinned task bases', () => {
   it('enqueues REV once after a confirmed report with author cohort/branch/base, then REV2 reviews the delta', async () => {
     let tip = A;
     const f = fixture('reviews', '', (cmd, args) => cmd === 'git' && args.includes('refs/heads/author^{commit}') ? { stdout: tip } : undefined);
-    const author = seedTask(f.config, 'AUTHOR', { cohort: 'NC', review: { default: 'auto', rerun: true }, repos: [{ path: f.repo, worktree: `${f.repo}-author`, branch: 'author', base: B }] });
+    const author = seedTask(f.config, 'AUTHOR', { cohort: 'NC', model: 'claude-opus-5-5', review: { default: 'auto', rerun: true }, repos: [{ path: f.repo, worktree: `${f.repo}-author`, branch: 'author', base: B }] });
     fs.mkdirSync(`${f.repo}-author`); report(author, { verdict: 'PASS' });
     assert.deepEqual(await reviewTick(f.ctx), ['AUTHOR-REV']); assert.deepEqual(await reviewTick(f.ctx), []);
     let entry = readQueue(f.config)[0]!; let spec = resolveSpec(splitSpecs(entry.spec)[0]!, { config: f.config });
-    assert.equal(spec.agent, 'codex'); assert.equal(spec.model, 'gpt-6-astra'); assert.equal(spec.effort, 'medium'); assert.equal(spec.cohort, 'NC'); assert.equal(spec.reviewOf, 'AUTHOR'); assert.equal(spec.repos[0]?.branch, undefined, 'detached review checkout, no author branch'); assert.equal(spec.repos[0]?.base, A, 'pinned to the author head'); assert.equal(entry.reuse, undefined); assert.deepEqual(entry.after, ['AUTHOR']);
+    assert.equal(spec.agent, 'codex'); assert.equal(spec.model, 'gpt-6.1-sol'); assert.equal(spec.effort, 'high'); assert.equal(spec.cohort, 'NC'); assert.equal(spec.reviewOf, 'AUTHOR'); assert.equal(spec.repos[0]?.branch, undefined, 'detached review checkout, no author branch'); assert.equal(spec.repos[0]?.base, A, 'pinned to the author head'); assert.equal(entry.reuse, undefined); assert.deepEqual(entry.after, ['AUTHOR']);
     tip = B; report(author, { verdict: 'PARTIAL', notes: ['second report'] }); assert.deepEqual(await reviewTick(f.ctx), ['AUTHOR-REV2']);
     entry = readQueue(f.config).find(e => e.task === 'AUTHOR-REV2')!; assert.match(entry.spec, new RegExp(`${A}\\.\\.${B}`));
     assert.equal(readJournal(f.config).filter(e => e.kind === 'review-added').length, 2);

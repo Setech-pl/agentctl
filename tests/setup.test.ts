@@ -106,7 +106,7 @@ describe('new: worktree -> setup -> links -> window', () => {
   });
 
   it('--no-agent through the CLI', async () => {
-    const text = specText('NC-6', 'model: opus\nsetup: [echo ok]\n');
+    const text = specText('NC-6', 'model: claude-opus-5-5\nsetup: [echo ok]\n');
     const file = path.join(base, 'noagent.md');
     fs.writeFileSync(file, text);
     const runner = new RecordingRunner({ dryRun: false, respond: machine() });

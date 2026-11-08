@@ -12,6 +12,7 @@ import { formatModelEffort, translate } from './equivalents.ts';
 import type { Order } from './equivalents.ts';
 import type { ResolvedSpec } from './spec.ts';
 import { cancelledTasks, unmetAfter, waitingText } from './depends.ts';
+import { explicitOnlyModel } from './matrix.ts';
 import { slotHolders } from './limits.ts';
 import { collectStatus } from './status.ts';
 import { listTaskRecords } from './taskstore.ts';
@@ -181,6 +182,9 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
       }
     }
     try { validateLaunch(config, spec, spec.env); } catch (e) { p.add((e as Error).message); }
+    if (spec.switchedBy && explicitOnlyModel(spec.agent, spec.model)) {
+      p.add(`${at} the switch landed on the restricted ${spec.agent} ${spec.model}: k3.1-pro* and gpt-6-astra never come from a translation; order such a model with an explicit model: in the spec, or with an explicit-only class (visual, escalate)`);
+    }
     planned.push({ window: spec.window, agent: spec.agent });
 
     // 4. worktrees
@@ -195,9 +199,22 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
   }
 
   // 5. cross-review on the effective values (after any mapping or switch)
-  for (const spec of result) {
-    const problem = checkReviewer(spec, spec.reviewOf ? (findAuthor(spec.reviewOf, [...result, ...(opts.overflow?.queued ?? [])], config) ?? opts.knownAuthors?.get(spec.reviewOf)) : undefined);
-    if (problem) p.add(`${spec.task}: ${problem}`);
+  for (const [i, spec] of result.entries()) {
+    const reviewed = spec.reviewOfAll ?? (spec.reviewOf ? [spec.reviewOf] : []);
+    const warnings: string[] = [];
+    for (const reviewedTask of reviewed) {
+      const author = findAuthor(reviewedTask, [...result, ...(opts.overflow?.queued ?? [])], config) ?? opts.knownAuthors?.get(reviewedTask);
+      const problem = checkReviewer({ ...spec, reviewOf: reviewedTask }, author);
+      if (problem) {
+        p.add(`${spec.task}: ${problem}`);
+      } else if (author && author.agent === spec.agent) {
+        warnings.push(`reviewer provider ${spec.agent} equals the author provider of ${reviewedTask} (author ${author.model}, reviewer ${spec.model}): a different provider reviews better`);
+      }
+    }
+    if (warnings.length > 0) {
+      for (const w of warnings) ctx.info(`${spec.task}: WARNING: ${w}`);
+      result[i] = { ...spec, warnings: [...(spec.warnings ?? []), ...warnings] };
+    }
   }
   p.throwIfAny('Cannot start the tasks:');
   return result;

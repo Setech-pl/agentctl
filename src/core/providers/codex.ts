@@ -10,7 +10,7 @@ import { readCodexPlan, codexHome } from './codex-usage.ts';
 import { agentHomes } from '../usage-sources.ts';
 import { feedCodexLine } from './codex-parse.ts';
 import { refreshCodexCapacity } from './codex-usage.ts';
-import { DEFAULT_EQUIVALENTS } from './equivalents.ts';
+import { deriveTierModels } from '../matrix.ts';
 import { modelLabel } from './model-label.ts';
 import { legacySafety } from './safety.ts';
 import { interactiveTokens } from './process.ts';
@@ -88,7 +88,13 @@ export const codex: ProviderAdapter = {
     refreshPlan: refreshCodexCapacity,
     planSources: ['codex-session-log', 'codex-app-server:account/rateLimits/read'],
   },
-  models: { get equivalents() { const rows = DEFAULT_EQUIVALENTS.map(row => row.codex); return { light: rows.slice(0, 2), medium: rows.slice(2, 4), strong: rows.slice(4) }; }, label: modelLabel },
-  safety: legacySafety,
+  models: { get equivalents() { return deriveTierModels('codex'); }, label: modelLabel },
+  safety: {
+    ...legacySafety,
+    validate(order) {
+      if (order.effort === 'low') return 'effort "low" is refused (it silently degrades to an unreviewed quick pass); use medium, high or xhigh';
+      return undefined;
+    },
+  },
   isExternalSession(tokens) { const first = path.basename(tokens[0] ?? ''); return (first === 'codex' || (/^node(js)?$/.test(first) && /@openai\/codex\/\S*\.js$/.test(tokens[1] ?? ''))) && interactiveTokens(tokens); },
 };

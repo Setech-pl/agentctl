@@ -36,7 +36,7 @@ async function capture(): Promise<Record<string, unknown>> {
   }
   const wiring = ids.flatMap(agent => [false, true].map(forward => planEventWiring({ agent, task: 'GOLD-1', window: 'gold-1', config: w.config, self: ['node', '/fixture/agentctl.ts'], env: { CODEX_HOME: '/fixture/codex', CLAUDE_CONFIG_DIR: '/fixture/claude' }, readConfig: () => forward ? 'notify = ["user-hook", "with spaces"]' : undefined })));
   const table = defaultEquivalents();
-  const translations = table.flatMap(row => ids.map(agent => translate({ agent, ...row[agent] }, agent === 'claude' ? 'codex' : 'claude', table)));
+  const translations = table.flatMap(row => ids.map(agent => translate({ agent, ...row[agent]! }, agent === 'claude' ? 'codex' : 'claude', table)));
   translations.push(...ids.flatMap(agent => ['fable', 'unmapped'].map(model => translate({ agent, model, effort: 'high' }, agent === 'claude' ? 'codex' : 'claude', table))));
   const flags = [[], ['--dangerously-skip-permissions'], ['--allow-dangerously-skip-permissions'], ['--dangerously-bypass-approvals-and-sandbox'], ['--yolo'], ['--yolo=1'], ['--full-auto'], ['--approve-for-me'], ['--permission-mode', 'bypassPermissions'], ['--permission-mode=acceptEdits'], ['--permission-mode', 'auto'], ['--permission-mode=dontAsk'], ['--permission-mode', 'default'], ['-a', 'never'], ['--ask-for-approval=never'], ['-c', 'approval_policy="never"'], ['--config=approval_policy=never'], ['-a', 'on-request'], ['--plan'], ['-y'], ['--prompt', 'x']];
   const labels = ['default', '', 'unknown', 'opus', 'claude-sonnet-5-5-20261001', 'gpt-6.1-sol', 'haiku', 'gpt-6-astra', 'other-model'].flatMap(model => [undefined, ...EFFORTS].map(effort => ({ model, effort, label: modelLabel(model, effort, model === 'opus' ? 'claude-opus-5-5' : undefined, { haiku: '5.1' }) })));
@@ -54,7 +54,7 @@ async function capture(): Promise<Record<string, unknown>> {
   const { ctx } = makeContext(w.config, { respond: tmux.respond, startTime: now });
   const orders = [];
   for (const agent of ids) {
-    const author = w.task(`GOLD-${agent}`, wt, { agent, turnEndedAt: '2026-11-01T12:00:00.000Z', model: agent === 'claude' ? 'opus' : 'gpt-6-astra', effort: agent === 'claude' ? 'high' : 'medium' });
+    const author = w.task(`GOLD-${agent}`, wt, { agent, turnEndedAt: '2026-11-01T12:00:00.000Z', model: agent === 'claude' ? 'claude-opus-5-5' : 'gpt-6.1-sol', effort: agent === 'claude' ? 'high' : 'medium' });
     orders.push({ review: await reviewOrder(ctx, author, {}), move: await planMove(ctx, author.task) });
   }
   const data = { argv, wiring, settings: JSON.stringify(DEFAULT_AGENT_SETTINGS), flags: flags.map(args => ({ args, result: findAutoAcceptFlag(args) ?? null })), translations, labels, providers: ['claude', 'codex', 'gemini'].map(providerLabel), plans, texts, counts, specs, orders };
@@ -3990,7 +3990,7 @@ const GOLDEN = {
       "ok": true,
       "order": {
         "agent": "claude",
-        "model": "haiku",
+        "model": "claude-haiku-5-5",
         "effort": "low"
       }
     },
@@ -3999,14 +3999,46 @@ const GOLDEN = {
       "order": {
         "agent": "codex",
         "model": "gpt-6-luna",
-        "effort": "high"
+        "effort": "medium"
       }
     },
     {
       "ok": true,
       "order": {
         "agent": "claude",
-        "model": "haiku",
+        "model": "claude-haiku-5-5",
+        "effort": "low"
+      }
+    },
+    {
+      "ok": true,
+      "order": {
+        "agent": "codex",
+        "model": "gpt-6-luna",
+        "effort": "medium"
+      }
+    },
+    {
+      "ok": true,
+      "order": {
+        "agent": "claude",
+        "model": "claude-haiku-5-5",
+        "effort": "low"
+      }
+    },
+    {
+      "ok": true,
+      "order": {
+        "agent": "codex",
+        "model": "gpt-6-luna",
+        "effort": "medium"
+      }
+    },
+    {
+      "ok": true,
+      "order": {
+        "agent": "claude",
+        "model": "claude-sonnet-5-5",
         "effort": "medium"
       }
     },
@@ -4022,7 +4054,7 @@ const GOLDEN = {
       "ok": true,
       "order": {
         "agent": "claude",
-        "model": "sonnet",
+        "model": "claude-sonnet-5-5",
         "effort": "medium"
       }
     },
@@ -4038,7 +4070,7 @@ const GOLDEN = {
       "ok": true,
       "order": {
         "agent": "claude",
-        "model": "sonnet",
+        "model": "claude-opus-5-5",
         "effort": "high"
       }
     },
@@ -4046,7 +4078,7 @@ const GOLDEN = {
       "ok": true,
       "order": {
         "agent": "codex",
-        "model": "gpt-6-astra",
+        "model": "gpt-6.1-sol",
         "effort": "medium"
       }
     },
@@ -4054,24 +4086,24 @@ const GOLDEN = {
       "ok": true,
       "order": {
         "agent": "claude",
-        "model": "opus",
-        "effort": "high"
+        "model": "claude-sonnet-5-5",
+        "effort": "medium"
       }
     },
     {
       "ok": true,
       "order": {
         "agent": "codex",
-        "model": "gpt-6-astra",
-        "effort": "xhigh"
+        "model": "gpt-6.1-sol",
+        "effort": "medium"
       }
     },
     {
       "ok": true,
       "order": {
         "agent": "claude",
-        "model": "opus",
-        "effort": "xhigh"
+        "model": "claude-sonnet-5-5",
+        "effort": "medium"
       }
     },
     {
@@ -4470,8 +4502,8 @@ const GOLDEN = {
       "review": {
         "order": {
           "agent": "codex",
-          "model": "gpt-6-astra",
-          "effort": "medium"
+          "model": "gpt-6.1-sol",
+          "effort": "high"
         },
         "rule": "different provider"
       },
@@ -4481,7 +4513,7 @@ const GOLDEN = {
           "window": "gold-claude",
           "session": "agentctl",
           "agent": "claude",
-          "model": "opus",
+          "model": "claude-opus-5-5",
           "effort": "high",
           "repos": [
             {
@@ -4502,20 +4534,20 @@ const GOLDEN = {
         },
         "to": {
           "agent": "codex",
-          "model": "gpt-6-astra",
-          "effort": "medium"
+          "model": "gpt-6.1-sol",
+          "effort": "high"
         },
         "task": "GOLD-claude-2",
         "window": "gold-claude-2",
-        "prompt": "Do GOLD-claude.\n\nPoprzedni agent (claude opus) przerwał przez limit. Kontynuuj od bieżącego stanu worktree: przeczytaj git log i git diff względem bazy, nie powtarzaj zrobionej pracy. Raport zapisz do <ROOT>/cache/gold-claude/GOLD-claude.md."
+        "prompt": "Do GOLD-claude.\n\nPoprzedni agent (claude claude-opus-5-5) przerwał przez limit. Kontynuuj od bieżącego stanu worktree: przeczytaj git log i git diff względem bazy, nie powtarzaj zrobionej pracy. Raport zapisz do <ROOT>/cache/gold-claude/GOLD-claude.md."
       }
     },
     {
       "review": {
         "order": {
           "agent": "claude",
-          "model": "opus",
-          "effort": "high"
+          "model": "claude-sonnet-5-5",
+          "effort": "medium"
         },
         "rule": "different provider"
       },
@@ -4525,7 +4557,7 @@ const GOLDEN = {
           "window": "gold-codex",
           "session": "agentctl",
           "agent": "codex",
-          "model": "gpt-6-astra",
+          "model": "gpt-6.1-sol",
           "effort": "medium",
           "repos": [
             {
@@ -4546,16 +4578,16 @@ const GOLDEN = {
         },
         "to": {
           "agent": "claude",
-          "model": "opus",
-          "effort": "high"
+          "model": "claude-sonnet-5-5",
+          "effort": "medium"
         },
         "task": "GOLD-codex-2",
         "window": "gold-codex-2",
-        "prompt": "Do GOLD-codex.\n\nPoprzedni agent (codex gpt-6-astra) przerwał przez limit. Kontynuuj od bieżącego stanu worktree: przeczytaj git log i git diff względem bazy, nie powtarzaj zrobionej pracy. Raport zapisz do <ROOT>/cache/gold-codex/GOLD-codex.md."
+        "prompt": "Do GOLD-codex.\n\nPoprzedni agent (codex gpt-6.1-sol) przerwał przez limit. Kontynuuj od bieżącego stanu worktree: przeczytaj git log i git diff względem bazy, nie powtarzaj zrobionej pracy. Raport zapisz do <ROOT>/cache/gold-codex/GOLD-codex.md."
       }
     }
   ]
-};
+}
 
 it("preserves the complete two-provider 0.17.4 contract", async () => {
   assert.deepEqual(await capture(), GOLDEN);

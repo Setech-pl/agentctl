@@ -48,33 +48,54 @@ w stopce, choć `~/.codex/config.toml` mówi `high`. `--effort low` w Claude pok
 Jeśli przyszła wersja to zmieni, ustaw `agents.<name>.effort_args` (`[]`, żeby nie przekazywać niczego). `agentctl doctor` pokazuje, który
 mechanizm wykrywa.
 
-## Odpowiedniki modeli
+## Odpowiedniki modeli i klasy zadań
 
-Modele Claude i Codexa nie odpowiadają sobie jeden do jednego, więc agentctl trzyma tabelę par, które uznajesz za równoważne
-(`config.equivalents`, działa w obie strony). Wbudowana tabela:
+Jedynym źródłem prawdy o modelach jest [data/model-matrix.yaml](../data/model-matrix.yaml): każda **klasa zadania**
+wskazuje model/effort każdego dostawcy. Wbudowana tabela odpowiedników (`config.equivalents`, działa w obie strony)
+jest z niej wyprowadzona — po jednym wierszu na klasę, z pominięciem klas explicit-only — a test pada, gdy dostarczone
+domyślne wartości i YAML się rozjeżdżają (`npm run gen:matrix` odtwarza `src/core/model-matrix.ts` po edycji).
 
-| Claude (`model/effort`) | Codex (`model/effort`) |
-|---|---|
-| `haiku/low` | `gpt-6-luna/medium` |
-| `haiku/medium` | `gpt-6-luna/high` |
-| `sonnet/medium` | `gpt-6.1-sol/medium` |
-| `sonnet/high` | `gpt-6.1-sol/high` |
-| `opus/high` | `gpt-6-astra/medium` |
-| `opus/xhigh` | `gpt-6-astra/xhigh` |
+Spec może nazwać klasę zamiast modelu: z `class` i `agent` model i effort pochodzą z macierzy (`class: bugfix` na
+Claude to `claude-sonnet-5-5/high`). Jawne `model:`/`effort:` w specu wygrywa, z ostrzeżeniem w podglądzie, gdy jest
+sprzeczne z macierzą. Nieznana klasa to błąd wymieniający klasy. Klasa z komórką `none` (`creative` dla Kimi) odrzuca
+tego agenta. Klasy `visual` i `escalate` są explicit-only: dyspozytują modele objęte ograniczeniem (`k3.1-pro`,
+`gpt-6-astra`) i napisanie klasy w specu JEST jawnym żądaniem — poza tym te modele są akceptowane tylko z jawnym
+`model:`, nigdy z konfigurowanych domyślnych ani z tłumaczenia.
+
+Wbudowana tabela:
+
+| Claude (`model/effort`) | Codex (`model/effort`) | Kimi (`model/effort`) | Poziom |
+|---|---|---|---|
+| `claude-haiku-5-5/low` | `gpt-6-luna/medium` | `k3-256k/low` | light |
+| `claude-sonnet-5-5/medium` | `gpt-6-luna/medium` | `k3-256k/low` | light |
+| `claude-sonnet-5-5/medium` | `gpt-6-luna/medium` | `k3/high` | light |
+| `claude-sonnet-5-5/medium` | `gpt-6.1-sol/medium` | `k3/high` | medium |
+| `claude-sonnet-5-5/high` | `gpt-6.1-sol/medium` | `k3/high` | medium |
+| `claude-opus-5-5/high` | `gpt-6.1-sol/high` | `k3/max` | strong |
+| `claude-opus-5-5/medium` | `gpt-6.1-sol/medium` | `k3/high` | medium |
+| `claude-opus-5-5/medium` | `gpt-6.1-sol/medium` | – | medium |
+
+Wygrywa pierwszy pasujący wiersz, więc `claude-sonnet-5-5/medium` tłumaczy się na Codex `gpt-6-luna/medium`. Poziom
+to wskazówka dyspozycyjna dla doctor i capacity, nie gwarancja jakości.
 
 Własne pary dodajesz w `~/.agentctl/config.yaml`; mają pierwszeństwo przed wbudowanymi:
 
 ```yaml
 equivalents:
-  - {claude: "opus/medium", codex: "gpt-6-astra/low"}
+  - {claude: "claude-opus-5-5/xhigh", codex: "gpt-6.1-sol/xhigh"}
 ```
 
 `fable` i effort `max` są celowo niemapowane. Tam, gdzie tabela nie ma pary, dostajesz błąd z linią do dodania.
 
+Podgląd (i każdy start) odrzuca ponadto: nieznany model Kimi (literówka po cichu wracałaby do K2.8 Preview — znane są
+ID z macierzy i katalog `[models]` w config.toml Kimi), każdy model Kimi `*-highspeed`, effort `off`/`none` dla Kimi,
+effort `low` dla Codexa oraz model objęty ograniczeniem (`k3.1-pro*`, `gpt-6-astra`), który nie pochodzi z jawnego
+`model:` ani z klasy explicit-only.
+
 - `agentctl new --agent codex spec.md` uruchamia każdy spec na Codexie, tłumacząc `model/effort` przez tabelę
-  (`opus/high` staje się `gpt-6-astra/medium`). To jawne polecenie, więc o nic nie pyta.
+  (`claude-opus-5-5/high` staje się `gpt-6.1-sol/high`). To jawne polecenie, więc o nic nie pyta.
 - Gdy limit okien wskazanego dostawcy jest pełny, a drugi ma miejsce, `new` **pyta**, czy zmienić
-  (`... Switch to codex gpt-6-astra/medium (equivalent of claude opus/high)? [y/N]`). Bez terminala albo z
+  (`... Switch to codex gpt-6.1-sol/high (equivalent of claude claude-opus-5-5/high)? [y/N]`). Bez terminala albo z
   `--no-switch` kończy się błędem z listą żywych okien. Nigdy nie zmienia po cichu.
 - `pin: true` w specu zakazuje każdej zmiany (przez limit lub `--agent`).
 - `TASK.md` i `status` trzymają zarówno **żądanego**, jak i **faktycznego** agenta/model/effort. `review_of` jest sprawdzane na
@@ -266,7 +287,7 @@ Domyślne wzorce to ciągi znalezione w zainstalowanych binarkach; nie wywołał
 
 **`agentctl move <task> [--agent claude|codex] [-y]`** przenosi zadanie do drugiego dostawcy (albo do tego z `--agent`):
 
-- model i effort pochodzą z [tabeli odpowiedników](#odpowiedniki-modeli) (`claude opus/high` → `codex gpt-6-astra/medium`); brak pary (Fable, `max`) to błąd z podpowiedzią;
+- model i effort pochodzą z [tabeli odpowiedników](#odpowiedniki-modeli-i-klasy-zadań) (`claude claude-opus-5-5/high` → `codex gpt-6.1-sol/high`); brak pary (Fable, `max`) to błąd z podpowiedzią;
 - `pin: true` w specu (od tej wersji zapisywane w `TASK.md`; starsze zadania liczą się jako nieprzypięte) to błąd: przypięte zadania nigdy nie zmieniają dostawcy;
 - nowe okno `<task>-2` (`-3`, … jeśli zajęte) startuje w **tym samym worktree** z tym samym env i ścieżką raportu; jego prompt to oryginalny z `TASK.md` plus
   `Poprzedni agent (<agent> <model>) przerwał przez limit. Kontynuuj od bieżącego stanu worktree: przeczytaj git log i git diff względem bazy, nie powtarzaj zrobionej pracy. Raport zapisz do <report>.`;
@@ -620,7 +641,7 @@ gdy wywołasz `status` lub `pull`.
 ## Limity okien i cross-review
 
 - `limits.<agent>` ogranicza jednoczesne okna tmux na dostawcę; błąd wymienia żywe okna. Okna są przypisywane do dostawcy przez ich `TASK.md`. Zarezerwowane miejsca i (z `limits.count_external`) sesje zewnętrzne też się liczą ([limity na żywo](#limity-na-żywo-i-przeładowanie-konfiguracji)).
-- `review_of: NC-6` szuka autora w `<state_dir>/nc-6/TASK.md` (albo w tym samym pliku) i wymaga innego agenta **albo** innego modelu. `default` liczy się jako osobna nazwa modelu.
+- `review_of: NC-6` (albo lista, `review_of: [NC-6, NC-7]`) szuka każdego autora w `<state_dir>/nc-6/TASK.md` (albo w tym samym pliku) i wymaga innego agenta **albo** innego modelu dla każdego z nich. `default` liczy się jako osobna nazwa modelu. Podgląd ostrzega, gdy dostawca recenzenta jest taki sam jak dostawca autora któregokolwiek przeglądanego zadania; pierwsze z listy pozostaje głównym przeglądanym zadaniem dla TASK.md i kolejki.
 
 ## Stabilna instalacja i aktualizacje
 

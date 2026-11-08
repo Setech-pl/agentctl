@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { loadGlobalConfig } from '../src/core/config.ts';
-import { DEFAULT_EQUIVALENTS, defaultEquivalents, translate } from '../src/core/equivalents.ts';
+import { defaultEquivalents, defaultEquivalentRows, translate } from '../src/core/equivalents.ts';
 import type { Order } from '../src/core/equivalents.ts';
 import { newTasks } from '../src/core/new.ts';
 import { planBatch } from '../src/core/plan.ts';
@@ -17,25 +17,29 @@ const scratch = useScratch();
 const table = defaultEquivalents();
 
 describe('equivalents table', () => {
-  it('translates every default pair in both directions', () => {
-    for (const pair of DEFAULT_EQUIVALENTS) {
-      const [cm, ce] = pair.claude.split('/') as [string, never];
-      const [xm, xe] = pair.codex.split('/') as [string, never];
-      const toCodex = translate({ agent: 'claude', model: cm, effort: ce }, 'codex', table);
-      assert.deepEqual(toCodex.ok && toCodex.order, { agent: 'codex', model: xm, effort: xe }, pair.claude);
-      const toClaude = translate({ agent: 'codex', model: xm, effort: xe }, 'claude', table);
-      assert.deepEqual(toClaude.ok && toClaude.order, { agent: 'claude', model: cm, effort: ce }, pair.codex);
+  it('translates every default row between its providers (first matching row wins)', () => {
+    const full = defaultEquivalents(['claude', 'codex', 'kimi']);
+    for (const row of full) {
+      for (const [source, target] of [['claude', 'codex'], ['codex', 'claude'], ['claude', 'kimi'], ['codex', 'kimi'], ['kimi', 'claude'], ['kimi', 'codex']] as const) {
+        const from = row[source], to = row[target];
+        if (!from || !to) continue;
+        const first = full.find((e) => e[source] && e[target] && e[source]!.model === from.model && e[source]!.effort === from.effort);
+        const expected = first?.[target];
+        assert.deepEqual(translate({ agent: source, ...from }, target, full), { ok: true, order: { agent: target, ...expected } }, `${source} ${from.model}/${from.effort} -> ${target}`);
+      }
     }
   });
 
-  it('has exactly the documented defaults', () => {
-    assert.deepEqual(DEFAULT_EQUIVALENTS, [
-      { claude: 'haiku/low', codex: 'gpt-6-luna/medium' },
-      { claude: 'haiku/medium', codex: 'gpt-6-luna/high' },
-      { claude: 'sonnet/medium', codex: 'gpt-6.1-sol/medium' },
-      { claude: 'sonnet/high', codex: 'gpt-6.1-sol/high' },
-      { claude: 'opus/high', codex: 'gpt-6-astra/medium' },
-      { claude: 'opus/xhigh', codex: 'gpt-6-astra/xhigh' },
+  it('has exactly the defaults derived from data/model-matrix.yaml', () => {
+    assert.deepEqual(defaultEquivalentRows(), [
+      { claude: 'claude-haiku-5-5/low', codex: 'gpt-6-luna/medium', kimi: 'k3-256k/low', class: 'light' },
+      { claude: 'claude-sonnet-5-5/medium', codex: 'gpt-6-luna/medium', kimi: 'k3-256k/low', class: 'light' },
+      { claude: 'claude-sonnet-5-5/medium', codex: 'gpt-6-luna/medium', kimi: 'k3/high', class: 'light' },
+      { claude: 'claude-sonnet-5-5/medium', codex: 'gpt-6.1-sol/medium', kimi: 'k3/high', class: 'medium' },
+      { claude: 'claude-sonnet-5-5/high', codex: 'gpt-6.1-sol/medium', kimi: 'k3/high', class: 'medium' },
+      { claude: 'claude-opus-5-5/high', codex: 'gpt-6.1-sol/high', kimi: 'k3/max', class: 'strong' },
+      { claude: 'claude-opus-5-5/medium', codex: 'gpt-6.1-sol/medium', kimi: 'k3/high', class: 'medium' },
+      { claude: 'claude-opus-5-5/medium', codex: 'gpt-6.1-sol/medium', class: 'medium' },
     ]);
   });
 
@@ -57,7 +61,8 @@ describe('equivalents table', () => {
   it('fable and effort max are not mapped, with their own hint', () => {
     for (const order of [
       { agent: 'claude', model: 'fable', effort: 'high' },
-      { agent: 'claude', model: 'opus', effort: 'max' },
+      { agent: 'claude', model: 'claude-fable-5-1', effort: 'medium' },
+      { agent: 'claude', model: 'claude-opus-5-5', effort: 'max' },
     ] as Order[]) {
       const r = translate(order, 'codex', table);
       assert.ok(!r.ok);
@@ -78,7 +83,7 @@ describe('equivalents table', () => {
     const b = translate({ agent: 'codex', model: 'my-big', effort: 'xhigh' }, 'claude', config.equivalents);
     assert.deepEqual(b.ok && b.order, { agent: 'claude', model: 'fable', effort: 'max' });
     // the rest of the defaults is still there
-    const c = translate({ agent: 'claude', model: 'haiku', effort: 'low' }, 'codex', config.equivalents);
+    const c = translate({ agent: 'claude', model: 'claude-haiku-5-5', effort: 'low' }, 'codex', config.equivalents);
     assert.deepEqual(c.ok && c.order.model, 'gpt-6-luna');
   });
 
@@ -106,18 +111,18 @@ describe('ordering a provider: --agent, limits, pin, review_of', () => {
 
   /** Pretend NC-99 (claude) is already running in tmux, so claude's limit of 1 is used up. */
   function claudeBusy() {
-    const [busy] = resolve({ task: 'NC-99', agent: 'claude', model: 'sonnet', effort: 'high' }, 'busy');
+    const [busy] = resolve({ task: 'NC-99', agent: 'claude', model: 'claude-sonnet-5-5', effort: 'high' }, 'busy');
     fs.mkdirSync(path.dirname(taskFile(config, 'nc-99')), { recursive: true });
     fs.writeFileSync(taskFile(config, 'nc-99'), renderTaskMd(recordFromSpec(busy!, config, 0), 'x'));
     return (cmd: string, args: string[]) => (cmd === 'tmux' && args[0] === 'list-windows' ? { stdout: 'nc-99\n' } : undefined);
   }
 
   it('--agent translates the order and keeps requested next to effective', async () => {
-    const specs = resolve({ task: 'NC-1', agent: 'claude', model: 'opus', effort: 'high' }, 'a');
+    const specs = resolve({ task: 'NC-1', agent: 'claude', model: 'claude-opus-5-5', effort: 'high' }, 'a');
     const { ctx } = makeContext(config);
     const [planned] = await planBatch(ctx, specs, { agent: 'codex' });
-    assert.deepEqual([planned?.agent, planned?.model, planned?.effort, planned?.switchedBy], ['codex', 'gpt-6-astra', 'medium', 'flag']);
-    assert.deepEqual(planned?.requested, { agent: 'claude', model: 'opus', effort: 'high' });
+    assert.deepEqual([planned?.agent, planned?.model, planned?.effort, planned?.switchedBy], ['codex', 'gpt-6.1-sol', 'high', 'flag']);
+    assert.deepEqual(planned?.requested, { agent: 'claude', model: 'claude-opus-5-5', effort: 'high' });
     assert.equal(specs[0]?.agent, 'claude', 'the input is not mutated');
   });
 
@@ -133,7 +138,7 @@ describe('ordering a provider: --agent, limits, pin, review_of', () => {
   });
 
   it('newTasks starts the translated agent and records requested and effective in TASK.md data', async () => {
-    const specs = resolve({ task: 'NC-2', agent: 'claude', model: 'sonnet', effort: 'high' }, 'c');
+    const specs = resolve({ task: 'NC-2', agent: 'claude', model: 'claude-sonnet-5-5', effort: 'high' }, 'c');
     const { ctx, runner } = makeContext(config, {
       respond: (cmd, args) => {
         if (cmd === 'tmux' && (args[0] === 'has-session' || args[0] === 'list-windows')) return { code: 1 };
@@ -143,26 +148,26 @@ describe('ordering a provider: --agent, limits, pin, review_of', () => {
     });
     const [res] = await newTasks(ctx, specs, { agent: 'codex' });
     assert.ok(runner.commands.includes(`tmux send-keys -t '=agentctl:nc-2' -l -- 'exec sh ${config.stateDir}/nc-2/start.sh'`));
-    assert.match(runner.written.get(path.join(config.stateDir, 'nc-2/start.sh'))!, /exec codex --sandbox danger-full-access -m gpt-6.1-sol -c model_reasoning_effort=high/);
-    assert.deepEqual(res?.requested, { agent: 'claude', model: 'sonnet', effort: 'high' });
-    assert.deepEqual(res?.effective, { agent: 'codex', model: 'gpt-6.1-sol', effort: 'high' });
+    assert.match(runner.written.get(path.join(config.stateDir, 'nc-2/start.sh'))!, /exec codex --sandbox danger-full-access -m gpt-6.1-sol -c model_reasoning_effort=medium/);
+    assert.deepEqual(res?.requested, { agent: 'claude', model: 'claude-sonnet-5-5', effort: 'high' });
+    assert.deepEqual(res?.effective, { agent: 'codex', model: 'gpt-6.1-sol', effort: 'medium' });
     assert.equal(res?.switchedBy, 'flag');
-    assert.equal(runner.calls.find((c) => c.line.startsWith('tmux load-buffer'))?.input?.split('\n')[0], 'Model: gpt-6.1-sol · effort high');
+    assert.equal(runner.calls.find((c) => c.line.startsWith('tmux load-buffer'))?.input?.split('\n')[0], 'Model: gpt-6.1-sol · effort medium');
   });
 
   it('TASK.md round-trips requested and effective', () => {
     const [spec] = resolve({ task: 'NC-3', agent: 'codex', model: 'gpt-6-astra', effort: 'medium' }, 'd');
-    const switched: ResolvedSpec = { ...spec!, agent: 'claude', model: 'opus', effort: 'high', switchedBy: 'limit' };
+    const switched: ResolvedSpec = { ...spec!, agent: 'claude', model: 'claude-opus-5-5', effort: 'high', switchedBy: 'limit' };
     fs.mkdirSync(path.dirname(taskFile(config, 'nc-3')), { recursive: true });
     fs.writeFileSync(taskFile(config, 'nc-3'), renderTaskMd(recordFromSpec(switched, config, 0), 'p'));
     const record = readTaskRecord(config, 'nc-3');
-    assert.deepEqual([record?.agent, record?.model, record?.effort, record?.switchedBy], ['claude', 'opus', 'high', 'limit']);
+    assert.deepEqual([record?.agent, record?.model, record?.effort, record?.switchedBy], ['claude', 'claude-opus-5-5', 'high', 'limit']);
     assert.deepEqual(record?.requested, { agent: 'codex', model: 'gpt-6-astra', effort: 'medium' });
   });
 
   describe('when the limit of the ordered provider is full', () => {
     const order = (name: string, extra: Record<string, string> = {}) =>
-      resolve({ task: 'NC-10', agent: 'claude', model: 'opus', effort: 'high', ...extra }, name);
+      resolve({ task: 'NC-10', agent: 'claude', model: 'claude-opus-5-5', effort: 'high', ...extra }, name);
 
     it('asks y/n and switches only on "y"', async () => {
       const respond = claudeBusy();
@@ -171,9 +176,9 @@ describe('ordering a provider: --agent, limits, pin, review_of', () => {
       const [planned] = await planBatch(yes.ctx, order('y'), {});
       assert.equal(questions.length, 1);
       assert.match(questions[0] as string, /claude is full|window limit for claude reached: 1 of 1.*\(nc-99\)/);
-      assert.match(questions[0] as string, /Switch to codex gpt-6-astra\/medium \(equivalent of claude opus\/high\)\? \[y\/N\]/);
-      assert.deepEqual([planned?.agent, planned?.model, planned?.effort, planned?.switchedBy], ['codex', 'gpt-6-astra', 'medium', 'limit']);
-      assert.deepEqual(planned?.requested, { agent: 'claude', model: 'opus', effort: 'high' });
+      assert.match(questions[0] as string, /Switch to codex gpt-6.1-sol\/high \(equivalent of claude claude-opus-5-5\/high\)\? \[y\/N\]/);
+      assert.deepEqual([planned?.agent, planned?.model, planned?.effort, planned?.switchedBy], ['codex', 'gpt-6.1-sol', 'high', 'limit']);
+      assert.deepEqual(planned?.requested, { agent: 'claude', model: 'claude-opus-5-5', effort: 'high' });
 
       const no = makeContext(config, { respond }, async () => false);
       await assert.rejects(planBatch(no.ctx, order('n'), {}), /window limit for claude reached: 1 of 1 in session "agentctl" \(nc-99\).*\(switch declined\)/);
@@ -220,21 +225,21 @@ describe('ordering a provider: --agent, limits, pin, review_of', () => {
         { respond: (c, a) => (c === 'tmux' && a[0] === 'list-windows' ? { stdout: 'nc-98\nnc-99\n' } : respond(c, a)) },
         async () => ((asked = true), true),
       );
-      const spec = splitSpecs(specText({ task: 'NC-12', agent: 'claude', model: 'opus', effort: 'high' }, repo('tt'))).map((raw) => resolveSpec(raw, { config: tight, loadProject: () => undefined }));
+      const spec = splitSpecs(specText({ task: 'NC-12', agent: 'claude', model: 'claude-opus-5-5', effort: 'high' }, repo('tt'))).map((raw) => resolveSpec(raw, { config: tight, loadProject: () => undefined }));
       await assert.rejects(planBatch(ctx, spec, {}), /codex is full too/);
       assert.equal(asked, false);
     });
   });
 
   it('review_of is judged on effective values, after mapping', async () => {
-    const [author] = resolve({ task: 'NC-20', agent: 'claude', model: 'opus', effort: 'high' }, 'auth');
+    const [author] = resolve({ task: 'NC-20', agent: 'claude', model: 'claude-opus-5-5', effort: 'high' }, 'auth');
     fs.mkdirSync(path.dirname(taskFile(config, 'nc-20')), { recursive: true });
     fs.writeFileSync(taskFile(config, 'nc-20'), renderTaskMd(recordFromSpec(author!, config, 0), 'x'));
-    const reviewer = resolve({ task: 'NC-21', agent: 'codex', model: 'gpt-6-astra', effort: 'medium', review_of: 'NC-20' }, 'rev');
+    const reviewer = resolve({ task: 'NC-21', agent: 'codex', model: 'gpt-6.1-sol', effort: 'high', review_of: 'NC-20' }, 'rev');
     const { ctx } = makeContext(config);
     // as ordered: a different provider, fine
     await planBatch(ctx, reviewer, {});
-    // forced onto claude it becomes claude opus/high, the author's own setting: refused
-    await assert.rejects(planBatch(ctx, reviewer, { agent: 'claude' }), /NC-21 reviews NC-20 but uses the same agent and model \(claude, opus\)/);
+    // forced onto claude it becomes claude-opus-5-5/high, the author's own setting: refused
+    await assert.rejects(planBatch(ctx, reviewer, { agent: 'claude' }), /NC-21 reviews NC-20 but uses the same agent and model \(claude, claude-opus-5-5\)/);
   });
 });

@@ -138,7 +138,7 @@ describe('spec example', () => {
     assert.ok(readme.includes(EXAMPLE_SPEC), 'README must contain the example spec verbatim (see src/example.ts)');
   });
 
-  it('the example on codex: new --dry-run --agent codex translates opus/high to gpt-6-astra/medium', () => {
+  it('the example on codex: new --dry-run --agent codex translates claude-opus-5-5/high to gpt-6.1-sol/high', () => {
     const f = path.join(scratch.dir, 'example-codex.md');
     fs.writeFileSync(f, EXAMPLE_SPEC);
     const none = path.join(scratch.dir, 'none');
@@ -146,9 +146,9 @@ describe('spec example', () => {
     assert.equal(r.code, 0, r.stderr);
     const commands = r.stdout.split('\n').filter((l) => l && !l.startsWith('#') && !l.includes('@agentctl-role')).map((l) => l.replace(/^(write \S+) \(\d+ bytes\)$/, '$1'));
     assert.ok(commands.some((c) => c.startsWith("tmux send-keys -t '=agentctl:task-42' -l -- 'exec sh ") && c.endsWith("/start.sh'")));
-    assert.match(r.stdout, /running codex \(model gpt-6-astra, effort medium\)/);
+    assert.match(r.stdout, /running codex \(model gpt-6.1-sol, effort high\)/);
     assert.ok(!commands.some((c) => c.includes('claude')));
-    assert.ok(r.stdout.includes('#   Model: gpt-6-astra · effort medium'));
+    assert.ok(r.stdout.includes('#   Model: gpt-6.1-sol · effort high'));
     assert.ok(commands.some((c) => c.startsWith('git -C ') && c.includes('branch task-42-notification-sound')));
 
     const bad = agentctl(['new', '--dry-run', '--agent', 'gemini', f], { AGENTCTL_HOME: none });

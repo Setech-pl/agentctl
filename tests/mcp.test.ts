@@ -428,10 +428,10 @@ describe('mcp: the write tools', () => {
   it('move: the first call describes it, confirm: true hands the task over', async () => {
     const t = setup('m1', 'mcp: {allow: [move]}\n');
     t.tmux.newWindowScreen = composerFixture('› Ask Codex to do anything\n');
-    seedTask(t.config, 'NC-1', { repos: [{ path: scratch.sub('m1/app'), worktree: scratch.sub('m1/app-wt') }], requested: { agent: 'claude', model: 'opus', effort: 'high' } });
+    seedTask(t.config, 'NC-1', { repos: [{ path: scratch.sub('m1/app'), worktree: scratch.sub('m1/app-wt') }], model: 'claude-opus-5-5', requested: { agent: 'claude', model: 'claude-opus-5-5', effort: 'high' } });
     t.tmux.add('nc-1', "  ⎿  You've hit your session limit · resets 3pm\n❯ ");
     const preview = await t.call('move', { task: 'NC-1' });
-    assert.match(preview.text, /^Move NC-1 \(claude opus\/high\) -> NC-1-2 \(codex .*\)[\s\S]*Not moved yet\. Ask the user, then call move again with confirm: true\.\npreview_ttl_s: [^\n]+\npreview_token: [0-9a-f-]+$/);
+    assert.match(preview.text, /^Move NC-1 \(claude claude-opus-5-5\/high\) -> NC-1-2 \(codex .*\)[\s\S]*Not moved yet\. Ask the user, then call move again with confirm: true\.\npreview_ttl_s: [^\n]+\npreview_token: [0-9a-f-]+$/);
     assert.ok(!t.tmux.windows.some((w) => w.name === 'nc-1-2'));
     assert.deepEqual(t.notified, []);
     const done = await t.call('move', { task: 'NC-1', confirm: true });
