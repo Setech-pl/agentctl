@@ -108,7 +108,7 @@ export class Alerts {
     if (identity) {
       try { if (JSON.parse(fs.readFileSync(reportLedger, 'utf8')).attempt === identity) return 'duplicate'; } catch { /* first report */ }
     }
-    if (this.isDuplicate(target, state, source)) return 'duplicate';
+    if (!identity && this.isDuplicate(target, state, source)) return 'duplicate';
     const { click, text: message } = await this.clickFor(target, text);
     const result = await this.notifier.notify(ALERT_TITLE, message, click);
     if (result && !result.ok) this.ctx.out(`warning: local notification failed (${result.error ?? result.channel}); phone delivery follows independently`);

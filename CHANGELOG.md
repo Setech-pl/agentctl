@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- P52 follow-up: report alerts dedupe by attempt, allowing a completed new attempt even inside the old 90-second cross-source window. / Powiadomienia raportów są deduplikowane według próby; nowa zakończona próba jest ogłaszana także w dawnym 90-sekundowym oknie między źródłami.
+
 - P62 follow-up: partial responses put fresh queue registrations before cached content, so output limits cannot hide new orders; queued/starting status overrides older task rows. / Wynik częściowy umieszcza świeże rejestracje przed treścią z cache, aby limit odpowiedzi nie ukrywał nowych zleceń; stan kolejki ma pierwszeństwo nad starszym wierszem zadania.
 
 - P62 follow-up: cloned worker/probe contexts preserve a single tmux socket scope; CLI/watch runner calls retain their original scheduling outside MCP requests. / Konteksty workera i sond zachowują pojedynczy wybór socketu tmux; wywołania CLI/watch poza MCP zachowują dotychczasowe planowanie.

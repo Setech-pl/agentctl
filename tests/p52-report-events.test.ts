@@ -24,3 +24,15 @@ it('P52: repeated report writes emit once per attempt and legacy summaries dedup
   const events = await collectEvents(ctx, { client: 'mcp', since: '1h', keep: true });
   assert.equal(events.summary.needYou.filter(s => s.includes('decision: D1')).length, 1);
 });
+it('P52: a completed new attempt is announced even inside the previous cross-source dedupe window', async () => {
+  const { Alerts } = await import('../src/core/alert.ts');
+  const config = makeConfig(scratch.sub('new-attempt-alert'));
+  const ctx = new Context(new DiskRunner({ dryRun: false }), config, () => {});
+  const alerts = new Alerts(ctx, { notify: async () => {} });
+  const target = { task: 'P52', window: 'p52' };
+  seedTask(config, 'P52', { attemptId: 'first' });
+  assert.equal(await alerts.send(target, 'report-ready', 'First report', 'event'), 'sent');
+  seedTask(config, 'P52', { attemptId: 'second' });
+  assert.equal(await alerts.send(target, 'report-ready', 'Second report', 'watch'), 'sent');
+  assert.equal(await alerts.send(target, 'report-ready', 'Second report edited', 'event'), 'duplicate');
+});
