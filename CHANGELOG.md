@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Review R2: queue/new confirmation replay, registration and durable receipts share start.lock across MCP processes. / Przegląd R2: ponowienia potwierdzeń queue/new, rejestracja i trwałe potwierdzenia używają start.lock między procesami MCP.
+
 - Review R1: restore camelCase credential and passwd masking in diagnostics, assignments and URL queries. / Przegląd R1: przywrócono maskowanie sekretów camelCase i passwd w diagnostyce, przypisaniach i parametrach URL.
 
 - P52 follow-up: report alerts dedupe by attempt, allowing a completed new attempt even inside the old 90-second cross-source window. / Powiadomienia raportów są deduplikowane według próby; nowa zakończona próba jest ogłaszana także w dawnym 90-sekundowym oknie między źródłami.

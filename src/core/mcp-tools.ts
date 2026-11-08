@@ -1,3 +1,4 @@
+import { withStartLock } from './start-lock.ts';
 import { withResponseBudget } from './response-budget.ts';
 import type { BudgetClock } from './response-budget.ts';
 import type { QueueConfirmation } from './queue.ts';
@@ -1618,7 +1619,8 @@ for (const tool of MCP_TOOLS) {
       return result.isError ? result : { ...result, text: `already executed: ${receipt.tasks}\n${result.text}` };
     };
     if (confirm && token && receipts.has(token)) return (await replay())!;
-    if (confirm && token && /^[a-f0-9-]{36}$/.test(token) && ['queue', 'new'].includes(tool.name)) {
+    const durableReplay = (): ToolResult | undefined => {
+      if (!token || !/^[a-f0-9-]{36}$/.test(token) || !['queue', 'new'].includes(tool.name)) return undefined;
       let durable: QueueConfirmation | undefined;
       try { durable = JSON.parse(fs.readFileSync(path.join(path.dirname(ctx.config.path), 'mcp-confirmations', `${token}.json`), 'utf8')); } catch { /* may have died after queue write */ }
       const registered = readQueue(ctx.config).filter(e => e.confirmation?.token === token);
@@ -1632,7 +1634,9 @@ for (const tool of MCP_TOOLS) {
         if (durable.tool !== tool.name || (!tokenOnly && durable.key !== key)) return deny('different tool or arguments for an executed token');
         return ok(`already executed: ${durable.tasks.join(', ')}. Check status/queue_list for registration and start progress.`);
       }
-    }
+      return undefined;
+    };
+    if (confirm) { const done = durableReplay(); if (done) return done; }
     if (confirm) {
       const repeated = await replay();
       if (repeated) return repeated;
@@ -1675,6 +1679,18 @@ for (const tool of MCP_TOOLS) {
     const taskIds = typeof effective.spec === 'string' ? splitSpecs(effective.spec, 'confirmation').map(s => String(s.header.task)) : [String(effective.task ?? tool.name)];
     const registration: QueueConfirmation | undefined = token && ['queue', 'new'].includes(tool.name) ? { token, key: preview!.key, tool: tool.name, tasks: taskIds } : undefined;
     const execute = async (): Promise<ToolResult> => {
+      if (registration) return withStartLock(ctx, async () => {
+        // Cross-process replay and publication share the same lock as queue registration.
+        const repeated = durableReplay();
+        if (repeated) return repeated;
+        const done = await original(deps, { ...(tokenOnly ? { ...effective, confirm: true } : args), _confirmation: registration });
+        if (!done.isError) {
+          const directory = path.join(path.dirname(ctx.config.path), 'mcp-confirmations');
+          fs.mkdirSync(directory, { recursive: true });
+          atomicWriteFile(path.join(directory, `${registration.token}.json`), JSON.stringify(registration));
+        }
+        return done;
+      });
       if (tool.name === 'archive') return writeTool(deps, 'archive', {}, async (fresh) => {
         await applyArchive(fresh, scope as Awaited<ReturnType<typeof archiveClosed>>);
         return { text: JSON.stringify(scope, null, 2), executed: true, announce: 'archive closed task state' };
@@ -1694,11 +1710,6 @@ for (const tool of MCP_TOOLS) {
     const done = await result;
     if (done.isError) { if (token) receipts.delete(token); }
     else if (token) {
-      if (registration) {
-        const directory = path.join(path.dirname(ctx.config.path), 'mcp-confirmations');
-        fs.mkdirSync(directory, { recursive: true });
-        atomicWriteFile(path.join(directory, `${token}.json`), JSON.stringify(registration));
-      }
       if (receipts.size > 1000) receipts.delete(receipts.keys().next().value!); pending.delete(token); issuedPreviewTokens.set(token, { session, state: `${tool.name} confirmation already executed` }); }
     return done;
   });
