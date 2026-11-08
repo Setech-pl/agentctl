@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- P52: publish report/results once per completed attempt; repeated report edits and duplicate decisions/actions stay quiet. / Raport i wyniki są ogłaszane raz na zakończoną próbę; kolejne edycje oraz powtórzone decyzje i akcje nie mnożą wpisów.
+
 - P51: limit notifications and events list all configured providers, including unchanged optional providers. / Powiadomienia i zdarzenia limitów wymieniają wszystkich skonfigurowanych dostawców, także opcjonalnych bez zmiany limitu.
 
 - P67: mask recognised credentials without replacing short substrings, ordinary field names or task IDs. / Maskowanie rozpoznanych sekretów nie uszkadza krótkich fragmentów tekstu, zwykłych nazw pól ani identyfikatorów zadań.

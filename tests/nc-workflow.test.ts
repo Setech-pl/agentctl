@@ -102,12 +102,12 @@ describe('0.17.4 outputs are facts, independent of report readiness', () => {
     const agg = aggregateOutputs([{ task: 'T1', data: data(A) }, { task: 'T2', data: data(A) }, { task: 'T3', data: data(B) }]);
     assert.equal(agg.integrate[0]?.duplicate, true); assert.ok(agg.integrate.every(r => r.conflict)); assert.equal(agg.integrate[2]?.task, 'T3');
   });
-  it('events_since needYou includes new decisions/actions once per report, including after restart', async () => {
+  it('events_since needYou includes new decisions/actions once per attempt, including after restart', async () => {
     const f = fixture('outputs-events'), r = seedTask(f.config, 'T1'); report(r, { decisions: ['D1'], actions: [{ title: 'A1', shell: 'echo A1' }] });
     const first = await collectEvents(f.ctx, { client: 'nc' }); assert.ok(first.summary.needYou.some(s => s.includes('D1'))); assert.ok(first.summary.needYou.some(s => s.includes('A1')));
     await journalOutputs(f.ctx, r); const second = await collectEvents(f.ctx, { client: 'nc' }); assert.equal(second.summary.needYou.some(s => /D1|A1/.test(s)), false);
     assert.equal(readJournal(f.config).filter(e => e.kind === 'report-outputs').length, 1);
-    report(r, { decisions: ['D2'] }); const third = await collectEvents(f.ctx, { client: 'nc' }); assert.ok(third.summary.needYou.some(s => s.includes('D2')));
+    report(r, { decisions: ['D2'] }); const third = await collectEvents(f.ctx, { client: 'nc' }); assert.equal(third.summary.needYou.some(s => s.includes('D2')), false);
   });
 });
 

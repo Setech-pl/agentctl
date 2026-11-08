@@ -5,7 +5,7 @@ import type { Context } from './context.ts';
 import { terminalAppFor } from './notify.ts';
 import type { Notifier, NotifyClick } from './notify.ts';
 import type { SelfArgv } from './events.ts';
-import { taskDir, taskFile } from './taskstore.ts';
+import { readTaskRecord, taskDir, taskFile } from './taskstore.ts';
 import { isObject, shellLine } from './util.ts';
 
 /** Title of every notification. */
@@ -102,6 +102,12 @@ export class Alerts {
   }
 
   private async deliver(target: AlertTarget, state: string, text: string, source: AlertSource): Promise<'sent' | 'duplicate'> {
+    const record = state === 'report-ready' ? readTaskRecord(this.ctx.config, target.window) : undefined;
+    const identity = record ? record.attemptId ?? record.started : undefined;
+    const reportLedger = path.join(taskDir(this.ctx.config, target.window), 'report-notified.json');
+    if (identity) {
+      try { if (JSON.parse(fs.readFileSync(reportLedger, 'utf8')).attempt === identity) return 'duplicate'; } catch { /* first report */ }
+    }
     if (this.isDuplicate(target, state, source)) return 'duplicate';
     const { click, text: message } = await this.clickFor(target, text);
     const result = await this.notifier.notify(ALERT_TITLE, message, click);
@@ -111,6 +117,7 @@ export class Alerts {
       const ledger: Ledger = { state, source, at: this.ctx.runner.now() };
       await this.ctx.runner.writeFile(ledgerPath(this.ctx, target.window), `${JSON.stringify(ledger)}\n`);
     }
+    if (identity) await this.ctx.runner.writeFile(reportLedger, JSON.stringify({ attempt: identity }));
     return 'sent';
   }
 }

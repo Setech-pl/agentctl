@@ -1,3 +1,5 @@
+import { withFileLock } from './file-lock.ts';
+import { inspectReport } from './report-state.ts';
 import { secretRedactor } from './secret-redaction.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -28,6 +30,7 @@ export interface JournalEntry {
   /** The verdict line of a report that became ready. */
   verdict?: string;
   reportHash?: string;
+  reportAttempt?: string;
   /** `report-outputs` of an automatic/manual review: the task it reviews, so its decisions are shown as the reviewer's. */
   reviewOf?: string;
   decisions?: string[];
@@ -43,6 +46,21 @@ export const journalPath = (config: Pick<GlobalConfig, 'path'>): string => path.
 
 /** Append an event. A journal that cannot be written never stops the work it describes. */
 export async function recordJournal(ctx: Context, entry: Omit<JournalEntry, 'at'>): Promise<void> {
+  if (entry.kind === 'report-ready' && entry.task) {
+    const record = readTaskRecord(ctx.config, windowName(entry.task));
+    if (record) {
+      const report = inspectReport(ctx.config, record, ctx.runner.now(), !record.attemptId);
+      if (!report.ready || (record.attemptId && !report.sentinel)) return;
+      const identity = record.attemptId ? `attempt:${record.attemptId}` : `started:${record.started}`;
+      return withFileLock(`${journalPath(ctx.config)}.reports.lock`, async () => {
+        if (readJournal(ctx.config, -1).some(e => e.kind === entry.kind && e.task === entry.task && e.reportAttempt === identity)) return;
+        await appendJournal(ctx, { ...entry, reportAttempt: identity });
+      });
+    }
+  }
+  return appendJournal(ctx, entry);
+}
+async function appendJournal(ctx: Context, entry: Omit<JournalEntry, 'at'>): Promise<void> {
   const cohort = entry.cohort ?? (entry.task ? readTaskRecord(ctx.config, windowName(entry.task))?.cohort : undefined);
   const full: JournalEntry = secretRedactor([ctx.config, process.env, entry], new Set(listTaskRecords(ctx.config).map(r => r.task)))({ at: new Date(ctx.runner.now()).toISOString(), ...entry, ...(cohort ? { cohort } : {}) });
   // Belt and braces: a bulky payload once flooded events_since with JSON fragments for days (a gc_suggest carrying a whole
