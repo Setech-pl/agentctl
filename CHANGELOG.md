@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.19.0] - 2026-11-08
 
+- RC: nc-workflow waits for the cohort records to close before the cohort tick; under gate load the MCP close confirm can return a budget partial while the close still applies. / RC: nc-workflow czeka na zamknięcie rekordów kohorty przed tickiem kohorty; pod obciążeniem gate potwierdzenie close przez MCP może zwrócić wynik częściowy, gdy zamknięcie jeszcze trwa.
+
 - RC: live-p28b's fixture report carries the report-end sentinel; 0.19 requires it for attempt-scoped readiness. / RC: raport fixture w live-p28b ma znacznik końca raportu; 0.19 wymaga go dla gotowości wiązanej z attemptem.
 
 - RC: live-p15-send's Codex question scenario shows a waiting Codex (no Working line); a collapsed question of a working Codex blocks nothing since P65. / RC: scenariusz pytania Codexa w live-p15-send pokazuje czekającego Codexa (bez linii Working); zwinięte pytanie pracującego Codexa niczego nie blokuje od P65.

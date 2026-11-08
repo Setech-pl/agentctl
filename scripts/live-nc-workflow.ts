@@ -99,6 +99,9 @@ await withHarness({ name: 'nc-workflow', cacheRoot: cache, config: 'watch: {inte
     for (const e of readQueue(config)) { await call('queue_rm', { task: e.task }); await call('queue_rm', { task: e.task, confirm: true }); }
     await cohortTick(ctx, notifier, await collectStatus(ctx, { archived: true })); // the cohort is seen open first: only cohorts closing afterwards get a suggestion
     await call('close', { cohort: 'NC' }); await call('close', { cohort: 'NC', confirm: true });
+    // Under gate load the confirm can return a budget partial while the close is still applying; wait for the records before the tick.
+    const closedEnd = Date.now() + 15000;
+    while (Date.now() < closedEnd && (await collectStatus(ctx, { archived: true })).some(r => r.cohort === 'NC' && !r.closed && !r.cancelled)) await pause(200);
     await cohortTick(ctx, notifier, await collectStatus(ctx, { archived: true })); await cohortTick(ctx, notifier, await collectStatus(ctx, { archived: true }));
     check('closed cohort suggests GC once and never deletes automatically', readJournal(config).filter(e => e.kind === 'gc_suggest').length === 1 && fs.existsSync(wt));
     const foreign = path.join(h.root, 'foreign-checkout'); git(repo, ['worktree', 'add', '--detach', foreign, 'main']); const scoped = await call('gc_preview', { cohort: 'NC' }); check('scoped GC reports foreign worktrees by count only', scoped.text.includes('foreignWorktrees') && !scoped.text.includes(foreign));
