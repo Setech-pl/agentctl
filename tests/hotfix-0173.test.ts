@@ -46,7 +46,8 @@ it('0173-1: every MCP tool default is bounded with 160 tasks and 190 worktrees; 
   let page = JSON.parse(large.text), joined = page.fragment;
   assert.equal(page.truncated, true);
   while (page.has_more) { const next = await f.call('response_page', { response_id: page.response_id, response_offset: page.next_response_offset }); assert.ok(responseWireBytes(next) <= 8192); page = JSON.parse(next.text); joined += page.fragment; }
-  assert.equal(JSON.parse(joined).tasks.length, 160);
+  assert.equal(JSON.parse(joined).tasks.length, 161);
+  assert.equal(JSON.parse(joined).tasks.find((task: {task: string}) => task.task === 'Q1').state, 'registered');
   assert.equal((await f.call('response_page', { response_id: 'unknown', response_offset: 0 })).isError, true);
 });
 it('0173-2/3: mentioned README is ignored; glob candidate is a flag beside needs-input; explicit report_from confirms', async () => {
