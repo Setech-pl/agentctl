@@ -498,7 +498,7 @@ Spec to nagłówek YAML między liniami `---`, a po nim prompt. Kilka specyfikac
 ---
 task: TASK-42
 agent: claude
-model: opus
+model: claude-opus-5-5
 effort: high
 repos:
   - path: ~/src/sample-app
@@ -696,13 +696,13 @@ Szczegóły: [docs/details.pl.md](docs/details.pl.md#zdalne-sterowanie-i-manager
 
 ## Odpowiedniki modeli i move
 
-Modele Claude i Codexa nie odpowiadają sobie jeden do jednego, więc agentctl trzyma tabelę par, które uznajesz za równoważne (działa w obie strony), na przykład `opus/high` i `gpt-6-astra/medium`. Własne pary dodajesz w `equivalents:`; mają pierwszeństwo przed wbudowanymi. Fable i effort `max` są celowo niemapowane.
+Modele Claude i Codexa nie odpowiadają sobie jeden do jednego, więc agentctl trzyma tabelę par, które uznajesz za równoważne (działa w obie strony), na przykład `claude-opus-5-5/high` i `gpt-6.1-sol/high`. Wbudowana tabela pochodzi z macierzy klas zadań w [data/model-matrix.yaml](data/model-matrix.yaml), która zasila też klucz speca `class:` (`class: bugfix` sam ustawia model i effort agenta). Własne pary dodajesz w `equivalents:`; mają pierwszeństwo przed wbudowanymi. Fable i effort `max` są celowo niemapowane.
 
 - `agentctl new --agent codex spec.md` uruchamia specyfikacje na Codexie przez tabelę.
 - Gdy limit okien wskazanego dostawcy jest pełny, a drugi ma miejsce, `new` pyta przed zmianą. Nigdy nie zmienia po cichu; `pin: true` to zakazuje.
 - `agentctl move NC-42` przekazuje zadanie, które trafiło na limit użycia, drugiemu dostawcy: nowe okno `nc-42-2` w tym samym worktree, z oryginalnym promptem i notatką, żeby kontynuować na podstawie `git log` i `git diff`. Stare okno zostaje jako `superseded` i zamykasz je sam.
 
-Wbudowana tabela i zasady limitów: [docs/details.pl.md](docs/details.pl.md#odpowiedniki-modeli).
+Wbudowana tabela i zasady limitów: [docs/details.pl.md](docs/details.pl.md#odpowiedniki-modeli-i-klasy-zadań).
 
 ## Kolejka
 
