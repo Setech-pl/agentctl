@@ -147,8 +147,29 @@ export async function collectDisk(ctx: Context, statfs = fs.promises.statfs, opt
   const paths = all.flatMap(v => v.paths), page = new Set(opts.detail ? paths.slice(offset, offset + limit) : []);
   return { gcHint, reclaimableBytes, worktreeCount: worktrees.length, largestWorktrees, pathsTotal: paths.length, pathsOffset: offset, pathsNextOffset: opts.detail && offset + limit < paths.length ? offset + limit : null, volumes: all.map(v => ({ ...v, pathCount: v.paths.length, paths: v.paths.filter(p => page.has(p)) })), worktreeBytes, measuredAt: new Date(measuredAt).toISOString(), level, ...(pending ? { measuring: true } : {}), ...(measurementError ? { measurementError } : {}) };
 }
-export function diskLine(disk: DiskReport): string {
-  return `Disk: ${disk.level}; free ${disk.volumes.map((v) => v.availableBytes === null ? 'n/d' : `${(v.availableBytes / 1024 ** 3).toFixed(1)} GiB`).join(' / ')}; agentctl worktrees ${disk.worktreeBytes === null ? 'n/d' : `${(disk.worktreeBytes / 1024 ** 3).toFixed(1)} GiB`}${disk.measuring ? ' (measuring, last reading)' : disk.measurementError ? ' (measurement failed, last reading)' : ''}${disk.level === 'critical' || disk.level === 'warn' ? `; run agentctl gc --preview (gc_preview); reclaimable ${disk.reclaimableBytes ?? 'n/d'} bytes` : ''}`;
+/** A reading older than this is shown with its age next to the number (a gc or a quiet minute can make it stale). */
+export const READING_AGE_WARN_MS = 10 * 60_000;
+function readingAge(ageMs: number): string {
+  const minutes = Math.round(ageMs / 60_000);
+  return minutes < 120 ? `${minutes} min` : `${Math.round(minutes / 60)} h`;
+}
+export function diskLine(disk: DiskReport, now: number = Date.now()): string {
+  const age = Math.max(0, now - Date.parse(disk.measuredAt)) > READING_AGE_WARN_MS ? `, ${readingAge(now - Date.parse(disk.measuredAt))} old` : '';
+  const note = disk.measuring ? ` (measuring, last reading${age})` : disk.measurementError ? ` (measurement failed, last reading${age})` : age ? ` (last reading${age})` : '';
+  return `Disk: ${disk.level}; free ${disk.volumes.map((v) => v.availableBytes === null ? 'n/d' : `${(v.availableBytes / 1024 ** 3).toFixed(1)} GiB`).join(' / ')}; agentctl worktrees ${disk.worktreeBytes === null ? 'n/d' : `${(disk.worktreeBytes / 1024 ** 3).toFixed(1)} GiB`}${note}${disk.level === 'critical' || disk.level === 'warn' ? `; run agentctl gc --preview (gc_preview); reclaimable ${disk.reclaimableBytes ?? 'n/d'} bytes` : ''}`;
+}
+
+/**
+ * After `gc --apply`: re-measure at once — the board can show a cached reading for minutes (P69: it went on showing the
+ * worktrees gc had just removed) — and record what changed, so status, the board and the events agree with the disk again.
+ */
+export async function refreshDiskAfterGc(ctx: Context, freedBytes: number): Promise<string | null> {
+  if (ctx.runner.dryRun) return null;
+  const disk = await collectDisk(ctx);
+  const free = disk.volumes.map((v) => v.availableBytes === null ? 'n/d' : `${(v.availableBytes / 1024 ** 3).toFixed(1)} GiB`).join(' / ');
+  const text = `gc freed ${(freedBytes / 1024 ** 3).toFixed(1)} GiB, free now ${free}`;
+  await recordJournal(ctx, { kind: 'gc-freed', text });
+  return text;
 }
 const sampled = new Map<string, number>();
 export async function diskTick(ctx: Context, notifier: Notifier): Promise<void> {

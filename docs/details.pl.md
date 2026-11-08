@@ -695,7 +695,7 @@ Gdy spec nie ma własnych linków, podgląd new/queue ostrzega o odziedziczonych
 
 Krótka praca lub waiting nie zeruje epizodu overload. Budżet resetuje dopiero 600 s ciągłej pracy (overload.reset_after_s) albo zakończenie/raport. Baner Claude wymaga prefiksu i sąsiedztwa bloku CLI. Sesje MCP mają niezależne kursory; kolejna sesja dziedziczy zapisaną pozycję klienta, jawny client wymusza współdzielenie. Awaria okna sama nie potwierdza kompletności raportu.
 
-Od 0.17.3 kohorta czeka domyślnie 300 s od ostatniej zmiany składu/stanu (`cohort.done_grace_s`). Dodanie zadania anuluje oczekujące powiadomienie. Odpowiedzi MCP: domyślnie 8 KiB (`mcp.max_response_kb`), dalsze fragmenty przez `response_page`. Disk pokazuje sumę, liczbę i największe 5 worktree; pełne ścieżki wymagają detail i stronicowania. Updater restartuje watch i board według roli, także po zmianie nazwy okna. Generowane hooki i notify używają stabilnej ścieżki Node.
+Od 0.17.3 kohorta czeka domyślnie 300 s od ostatniej zmiany składu/stanu (`cohort.done_grace_s`). Dodanie zadania anuluje oczekujące powiadomienie. Odpowiedzi MCP: domyślnie 8 KiB (`mcp.max_response_kb`), dalsze fragmenty przez `response_page`. Disk pokazuje sumę, liczbę i największe 5 worktree; pełne ścieżki wymagają detail i stronicowania. Odczyt starszy niż 10 minut pokazuje swój wiek przy liczbie („(last reading, 47 min old)”), a po `gc --apply` dysk jest mierzony od razu, a dziennik zapisuje zdarzenie „gc freed X GiB, free now Y”, więc board, status i zdarzenia zgadzają się znów z dyskiem. Updater restartuje watch i board według roli, także po zmianie nazwy okna. Generowane hooki i notify używają stabilnej ścieżki Node.
 
 ## Poprawki po teście na żywo 0.17.3
 

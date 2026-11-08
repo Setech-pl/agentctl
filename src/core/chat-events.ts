@@ -212,6 +212,7 @@ const KIND_LABEL: Record<JournalEntry['kind'], string> = {
   'review-added': 'DODANO PRZEGLĄD',
   'review-repinned': 'PRZEGLĄD PRZYPIĘTY',
   gc_suggest: 'SUGESTIA GC',
+  'gc-freed': 'GC',
   'limited-resume': 'WZNOWIENIE',
   'needs-attention': 'WYMAGA UWAGI',
   'report-candidate': 'KANDYDAT',

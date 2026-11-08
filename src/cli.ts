@@ -11,7 +11,7 @@ import { aggregateOutputs } from './core/outputs.ts';
 import { stableNodePath } from './core/mcp-install.ts';
 import { packageVersion } from './core/version.ts';
 import { findEntry } from './core/queue.ts';
-import { collectDisk, diskLine, confirmDiskStart } from './core/disk.ts';
+import { collectDisk, diskLine, confirmDiskStart, refreshDiskAfterGc } from './core/disk.ts';
 import { collectCapacity, capacitySnapshot, renderCapacity, snapshotLines } from './core/capacity.ts';
 import { collectGuide } from './core/guide.ts';
 import fs from 'node:fs';
@@ -1049,8 +1049,10 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         if (plan.items.length === 0) return opts.json ? line(JSON.stringify({ plan, done: [], failed: [], freedBytes: 0 }, null, 2)) : void renderGc(plan).forEach(line);
         if (!(await confirmAction(ctx, renderGc(plan), 'Clean up?', Boolean(opts.yes)))) return;
         const result = await applyGc(ctx, plan);
+        const freed = await refreshDiskAfterGc(ctx, result.freedBytes);
         if (opts.json) return line(JSON.stringify({ plan, ...result }, null, 2));
         for (const l of renderGc(plan, { ...view, applied: result })) line(l);
+        if (freed) line(freed);
         if (result.failed.length > 0) exitCode = 1;
       }),
     );

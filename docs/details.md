@@ -697,7 +697,7 @@ Verified sources: [Anthropic API errors](https://platform.claude.com/docs/en/api
 
 Overload episodes survive short working/waiting transitions; only 600 s continuous work (overload.reset_after_s) or completion/report resets the budget. Claude requires a prefixed error directly below its block. Default MCP sessions consume events independently; successors inherit the saved client high-water mark, while explicit client intentionally shares. A crashed pane alone does not confirm report completeness.
 
-Since 0.17.3 cohort completion waits 300 seconds after the last membership/state change (`cohort.done_grace_s`); adding a task cancels the pending notice. MCP responses default to 8 KiB (`mcp.max_response_kb`) with continuation through `response_page`. Disk shows totals, count and the five largest worktrees; full paths require detail and pagination. The updater restarts watch and board by role even after window renames. Generated hooks and notify use stable Node paths.
+Since 0.17.3 cohort completion waits 300 seconds after the last membership/state change (`cohort.done_grace_s`); adding a task cancels the pending notice. MCP responses default to 8 KiB (`mcp.max_response_kb`) with continuation through `response_page`. Disk shows totals, count and the five largest worktrees; full paths require detail and pagination. A reading older than 10 minutes shows its age next to the number ("(last reading, 47 min old)"), and after `gc --apply` the disk is re-measured at once and the journal records "gc freed X GiB, free now Y", so the board, status and events agree with the disk again. The updater restarts watch and board by role even after window renames. Generated hooks and notify use stable Node paths.
 
 ## Post-live fixes in 0.17.3
 
