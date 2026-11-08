@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Integration: gate accepts the npm forwarding separator in `npm run gate -- full -- --node26-only`. / Integracja: gate przyjmuje separator npm w `npm run gate -- full -- --node26-only`.
+
 - R1 follow-up: camelCase secret matching preserves authorizationAuthor and other author metadata. / Uzupełnienie R1: dopasowanie sekretów camelCase zachowuje authorizationAuthor i pozostałe metadane autorów.
 
 - Integration B2: gate clean resolves dangling-link ancestors and sandbox sockets before any deletion or tmux stop; redirected sockets refuse the whole cleanup. / Integracja B2: gate clean sprawdza przodków wiszących linków i sockety przed usuwaniem lub zatrzymaniem tmux; przekierowany socket przerywa całe sprzątanie.

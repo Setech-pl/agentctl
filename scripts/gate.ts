@@ -18,6 +18,7 @@ export function parseArgs(args: string[]): Options {
   const opts: Options = { tier: tier as Tier, dryRun: false, allowDirty: false, skipLive: false };
   while (args.length) {
     const arg = args.shift();
+    if (arg === '--') continue; // npm forwarding separator, e.g. gate -- full -- --node26-only
     if (arg === '--base') { opts.base = args.shift(); if (!opts.base || opts.base.startsWith('-')) throw new Error('--base needs a ref'); }
     else if (arg === '--dry-run') opts.dryRun = true;
     else if (arg === '--allow-dirty') opts.allowDirty = true;

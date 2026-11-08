@@ -224,6 +224,7 @@ it('provisions a missing runtime once, verifies before extraction and never dele
 
 it('full can explicitly record Node 26 only without provisioning Node 22', () => {
   assert.equal(parseArgs(['full', '--node26-only']).node26Only, true);
+  assert.equal(parseArgs(['full', '--', '--node26-only']).node26Only, true);
   assert.deepEqual(planTier('full', [], [], false, true), ['tests Node 26 (full)']);
   for (const tier of ['quick', 'release']) assert.throws(() => parseArgs([tier, '--node26-only']), /belongs to full/);
 });
