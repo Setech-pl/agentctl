@@ -3,9 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { planBatch } from '../src/core/plan.ts';
+import { planMove } from '../src/core/move.ts';
 import { resolveSpec, splitSpecs } from '../src/core/spec.ts';
 import type { RawSpec } from '../src/core/spec.ts';
-import { makeConfig, makeContext, specText, useScratch } from './helpers.ts';
+import { makeConfig, makeContext, seedTask, specText, useScratch } from './helpers.ts';
 
 const scratch = useScratch();
 const config = makeConfig(scratch.sub('policy'), 'providers: [claude, codex, kimi]\n');
@@ -78,5 +79,8 @@ describe('preview validation: model and effort policy', () => {
     const mapped = makeConfig(scratch.sub('policy-astra-map'), 'equivalents:\n  - {claude: "claude-opus-5-5/high", codex: "gpt-6-astra/high"}\n');
     const spec = resolve({ task: 'P-6', agent: 'claude', model: 'claude-opus-5-5', effort: 'high' }, mapped);
     await assert.rejects(planBatch(makeContext(mapped).ctx, [spec], { agent: 'codex' }), /gpt-6-astra.*never come from a translation/);
+    // a move is a translation too: the preview refuses it before anything starts
+    const author = seedTask(mapped, 'P-7', { agent: 'claude', model: 'claude-opus-5-5', effort: 'high', repos: [{ path: repo, worktree: `${repo}-wt7` }] });
+    await assert.rejects(planMove(makeContext(mapped).ctx, author.task), /gpt-6-astra.*never come from a translation/);
   });
 });
