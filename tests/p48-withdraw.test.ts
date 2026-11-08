@@ -119,6 +119,48 @@ describe('P48: withdrawing a waiting message', () => {
     await assert.rejects(withdrawPrompt(w.ctx, 'w-9', id), /no waiting message/);
   });
 
+  it('X3-R2: the FIFO copy goes before the active identity is cleared; an interruption between the two writes never leaves an eligible duplicate', async () => {
+    const w = world('x3-r2');
+    const record = seedTask(w.config, 'W-10');
+    await queuePrompt(w.ctx, record, 'one logical message');
+    const id = readTaskRecord(w.config, 'w-10')!.deliveryId!;
+    // The interrupted durable transfer left the same id in the FIFO and the active delivery.
+    const fifo = queueFile(w.ctx, 'w-10');
+    fs.writeFileSync(fifo, JSON.stringify([{ id, text: 'one logical message', queuedAt: new Date().toISOString() }]));
+    // Crash on the FIFO write: nothing may change — the active identity and the FIFO copy both stay.
+    const write = w.runner.writeFile.bind(w.runner);
+    w.runner.writeFile = async (file: string, content: string) => {
+      if (file === fifo) throw new Error('injected crash on the FIFO write');
+      return write(file, content);
+    };
+    await assert.rejects(withdrawPrompt(w.ctx, 'w-10', id), /injected crash/);
+    let after = readTaskRecord(w.config, 'w-10')!;
+    assert.equal(after.deliveryId, id, 'the active identity survives a failed FIFO write');
+    assert.equal(after.pendingPrompt, 'one logical message');
+    assert.equal(readPromptQueue(w.ctx, 'w-10')[0]?.id, id);
+    assert.equal(promptQueueView(w.ctx, 'w-10').length, 1, 'still one message, seen as the active delivery');
+    // Crash on the header write, after the FIFO copy already left: recovery sees the active delivery, never a queued duplicate.
+    w.runner.writeFile = async (file: string, content: string) => {
+      if (file === taskFile(w.config, 'w-10')) throw new Error('injected crash on the header write');
+      return write(file, content);
+    };
+    await assert.rejects(withdrawPrompt(w.ctx, 'w-10', id), /injected crash/);
+    after = readTaskRecord(w.config, 'w-10')!;
+    assert.equal(after.deliveryId, id, 'the active identity is cleared only after the FIFO copy is gone');
+    assert.equal(after.pendingPrompt, 'one logical message');
+    assert.deepEqual(readPromptQueue(w.ctx, 'w-10'), [], 'the FIFO copy left first');
+    assert.deepEqual(promptQueueView(w.ctx, 'w-10').map((p) => p.state), ['pending'], 'the message waits as the active delivery, never again as eligible');
+    // Undisturbed, the withdrawal removes the FIFO copy first and then clears the active identity.
+    fs.writeFileSync(fifo, JSON.stringify([{ id, text: 'one logical message', queuedAt: new Date().toISOString() }]));
+    w.runner.writeFile = write;
+    const order: string[] = [];
+    w.runner.writeFile = async (file: string, content: string) => { order.push(file); return write(file, content); };
+    const done = await withdrawPrompt(w.ctx, 'w-10', id);
+    assert.equal(done.outcome, 'withdrawn');
+    assert.ok(order.indexOf(fifo) !== -1 && order.indexOf(fifo) < order.indexOf(taskFile(w.config, 'w-10')), 'the FIFO write precedes the header write');
+    assert.deepEqual(promptQueueView(w.ctx, 'w-10'), []);
+  });
+
   it('MCP send with withdraw (send in mcp.allow); without the permission nothing is done', async () => {
     const w = world('mcp', 'mcp: {allow: [send]}\n');
     seedTask(w.config, 'W-5');
