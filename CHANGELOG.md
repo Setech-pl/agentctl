@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.19.1] - 2026-11-08
+
+- Release integration: package and lockfile versions are 0.19.1; includes P65-b, P70, P71, P72, P73-a, L1, doctor and documentation fixes below. P59 tracking: the supplied branches/reports contain no mapping for this identifier; no additional P59 behavior is claimed. / Integracja wydania: wersje pakietu i lockfile to 0.19.1; obejmuje poniższe poprawki P65-b, P70, P71, P72, P73-a, L1, doctor i dokumentacji. Identyfikator P59 nie ma mapowania w dostarczonych gałęziach/raportach; nie deklarujemy dodatkowej zmiany zachowania P59.
+
 - L1 review blocker: publish a nonempty lock directory atomically and recheck displaced live owners before entering; waiters can complete rollback after a prechecked contender withdraws. / Bloker przeglądu L1: publikacja niepustej kłódki jest atomowa i ponownie sprawdza przesuniętych żywych właścicieli; oczekujący kończą cofanie po wycofaniu rywala.
 
 - F1: automatic .cache cleanup requires a current turn-end covering the report and skips worktrees shared by other open tasks. / Automatyczne sprzątanie .cache wymaga zakończenia bieżącej tury obejmującego raport i pomija worktree innych otwartych zadań.
@@ -657,7 +661,8 @@ Pull request #1: iteration 1, core and CLI.
 - Task states (`working`, `waiting`, `needs-trust`, `report-ready`, `dead`) and folder-trust detection.
 - Per-provider window limits, the `review_of` cross-review rule, an optional mirror of the reports.
 
-[Unreleased]: https://github.com/Setech-pl/agentctl/compare/v0.18.2...HEAD
+[Unreleased]: https://github.com/Setech-pl/agentctl/compare/v0.19.1...HEAD
+[0.19.1]: https://github.com/Setech-pl/agentctl/compare/v0.19.0...v0.19.1
 [0.18.2]: https://github.com/Setech-pl/agentctl/compare/v0.18.0...v0.18.2
 [0.11.0]: https://github.com/Setech-pl/agentctl/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/Setech-pl/agentctl/compare/v0.9.0...v0.10.0
