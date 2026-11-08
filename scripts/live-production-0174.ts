@@ -41,7 +41,8 @@ process.stdin.setRawMode(true);process.stdin.resume();process.stdin.on('data',()
     const r: TaskRecord = { task, window: task.toLowerCase(), session: h.session, agent: 'claude', model: 'sonnet', effort: 'high', links: [], env: {}, repos: [{ path: repo, worktree: repo }], report: path.join(config.cache, task.toLowerCase(), `${task}.md`), started: new Date(Date.now() - 1000).toISOString(), turnEndedAt: new Date().toISOString(), requested: { agent: 'claude', model: 'sonnet', effort: 'high' }, ...extra };
     fs.mkdirSync(path.dirname(taskFile(config, r.window)), { recursive: true }); fs.writeFileSync(taskFile(config, r.window), renderTaskMd(r, 'Live fixture.')); return r;
   };
-  const ready = record('READY'); const spawned = h.tmux(['new-session', '-d', '-s', h.session, '-n', ready.window, path.join(h.fakeBin, 'claude')]); check('isolated real tmux starts only fake Claude', spawned.code === 0); await pause(300);
+  // promptDelivery 'sent': the record stands for an already-delivered task, so the watcher (needed below for P34 MCP starts) never pastes the seed prompt.
+  const ready = record('READY', { promptDelivery: 'sent' }); const spawned = h.tmux(['new-session', '-d', '-s', h.session, '-n', ready.window, path.join(h.fakeBin, 'claude')]); check('isolated real tmux starts only fake Claude', spawned.code === 0); await pause(300);
   for (let i = 0; i < 50; i++) { const pane = await ctx.tmux.capture(ready.window); if (pane.stdout.includes('Zigzagging')) break; await pause(100); }
   const firstRows = await collectStatus(ctx);
   check(`P1 production pane remains working: ${JSON.stringify(firstRows.map(r => ({ task: r.task, state: r.state, lastLine: r.lastLine })))}`, firstRows[0]?.state === 'working');
@@ -57,7 +58,7 @@ process.stdin.setRawMode(true);process.stdin.resume();process.stdin.on('data',()
   const client = new Client({ name: 'prod-0174', version: '1' }); await client.connect(new StdioClientTransport({ command: process.execPath, args: ['--experimental-strip-types', '--no-warnings', path.resolve('bin/agentctl.ts'), 'mcp'], env: h.env as Record<string, string>, stderr: 'pipe' }));
   const call = async (name: string, args = {}) => { const result = await client.callTool({ name, arguments: args }); return { error: result.isError, text: (result.content as { text: string }[]).map(c => c.text).join('\n') }; };
   // P34: every chat start goes through the watcher; confirm only registers and the watcher prepares the worktree.
-  const watcher = h.spawnAgentctl(['watch'], path.join(h.root, 'watch.log'));
+  let watcher: ReturnType<typeof h.spawnAgentctl> | undefined = h.spawnAgentctl(['watch'], path.join(h.root, 'watch.log'));
   try {
     const beat = path.join(config.stateDir, 'queue-worker.json'), beatEnd = Date.now() + 10000;
     while (!fs.existsSync(beat) && Date.now() < beatEnd) await pause(150);
@@ -72,6 +73,8 @@ process.stdin.setRawMode(true);process.stdin.resume();process.stdin.on('data',()
     }
     const missing = path.join(h.root, 'missing-target'), linked = { spec: spec('LINKED', { links: [{ from: 'dep', to: missing }] }) };
     const preview = await call('queue', linked); check('P2 missing link warns in MCP preview', !preview.error && preview.text.includes(missing)); const denied = await call('queue', { ...linked, confirm: true }); check('P2 missing link blocks confirmation', denied.error && denied.text.includes('link targets are missing'));
+    // The remaining checks drive ticks in process and own the seeded panes; the watcher would deliver their pending seed prompts.
+    watcher.kill('SIGTERM'); await new Promise(r => watcher!.once('close', r)); watcher = undefined;
     const wt = path.join(h.root, 'finished'); await runGit(repo, ['worktree', 'add', '-b', 'finished', wt]); record('FINISHED', { closed: true, repos: [{ path: repo, worktree: wt, branch: 'finished' }] });
     fs.writeFileSync(path.join(repo, '.agentctl.yaml'), YAML.stringify({ links: [{ from: 'dep', to: wt }] }));
     const plan = await planGc(ctx); check('P2 GC protects real worktree referenced by project', plan.skipped.some(s => s.target === wt && s.reason.includes('links target'))); const applied = await applyGc(ctx, plan); check('P2 GC apply leaves referenced worktree', !applied.failed.length && fs.existsSync(wt));
@@ -85,7 +88,7 @@ process.stdin.setRawMode(true);process.stdin.resume();process.stdin.on('data',()
     const sent = await sendPrompts(ctx, [{ task: ready.task, window: ready.window, prompt: 'continue' }]); check('P10 send warns without exceeding the full limit', sent[0]?.warning?.includes('limit') && collectLimits(config, await liveWindows(ctx)).providers[0]?.used === 1);
     const aliases = ['gc', 'gc --preview', 'gc --dry-run'].map(command => h.agentctl([...command.split(' '), '--json'])); check('P8 all real CLI aliases share one preview', aliases.every(r => r.code === 0 && r.stdout === aliases[0]?.stdout));
     const summary = gcView(await planGc(ctx)); fs.writeFileSync(path.join(cache, 'fix-production-gc.json'), JSON.stringify(summary, null, 2));
-  } finally { watcher.kill('SIGTERM'); await new Promise(r => watcher.once('close', r)); await client.close(); }
+  } finally { if (watcher) { watcher.kill('SIGTERM'); await new Promise(r => watcher!.once('close', r)); } await client.close(); }
 });
 fs.writeFileSync(path.join(cache, 'fix-production-live-results.json'), JSON.stringify({ passed: results.filter(r => r.ok).length, failed: results.filter(r => !r.ok).length, results }, null, 2));
 console.log(`${results.length}/${results.length} production live checks passed`);
