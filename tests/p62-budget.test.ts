@@ -138,3 +138,19 @@ it('P62: cloned contexts apply the selected tmux socket exactly once', async () 
   assert.deepEqual(seen[0]?.slice(0, 3), ['-L', 'p62-test', 'has-session']);
   assert.equal(seen[0]?.filter(arg => arg === '-L').length, 1);
 });
+it('P62: fresh registrations survive a partial response with a large cached payload', async () => {
+  const f = fixture('cached-partial');
+  const preview = await f.call('queue', { spec: f.spec });
+  const token = /preview_token: (\S+)/.exec(preview.text)![1]!;
+  f.config.mcp.maxResponseKb = 1;
+  await f.call('status', { format: 'json' });
+  const confirmed = await f.call('queue', { confirm: true, preview_token: token });
+  assert.ok(!confirmed.isError, confirmed.text);
+  f.hold();
+  const pending = f.call('status', { format: 'json' });
+  await drain(); f.clock.advance(8000);
+  const partial = await pending;
+  f.release(); await drain();
+  assert.match(partial.text, /P62: registered/);
+  assert.ok(Buffer.byteLength(partial.text) <= 1024);
+});

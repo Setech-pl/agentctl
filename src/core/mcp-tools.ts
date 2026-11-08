@@ -333,7 +333,7 @@ async function runStatus(deps: McpDeps, args: { all?: boolean | undefined; cohor
   const colliding = shown.filter((r) => r.collide.length > 0);
   if (colliding.length > 0) extra.push(`⚠${colliding.length} tasks overlap; overlap has details.`);
   extra.push(awayLine(ctx));
-  return { text: [statusLine(shown, rows.length - shown.length), ...extra, ...shown.map(compactStatus)].join('\n'), data: { ...(args.detail || args.capacity ? { disk: await collectDisk(ctx, undefined, args) } : {}), tasks: [...shown.map(statusRowForChat), ...views.filter(v => !shown.some(r => r.task === v.entry.task)).map(v => ({ task: v.entry.task, agent: v.entry.agent, state: v.entry.status === 'queued' ? 'registered' : v.entry.status, startCondition: v.condition.text }))] } };
+  return { text: [statusLine(shown, rows.length - shown.length), ...extra, ...shown.map(compactStatus)].join('\n'), data: { ...(args.detail || args.capacity ? { disk: await collectDisk(ctx, undefined, args) } : {}), tasks: [...shown.map(row => { const entry = views.find(v => v.entry.task === row.task)?.entry; return { ...statusRowForChat(row), ...(entry ? { state: entry.status === 'queued' ? 'registered' : entry.status } : {}) }; }), ...views.filter(v => !shown.some(r => r.task === v.entry.task)).map(v => ({ task: v.entry.task, agent: v.entry.agent, state: v.entry.status === 'queued' ? 'registered' : v.entry.status, startCondition: v.condition.text }))] } };
 }
 
 /** "Away: on since …; the phone gets the notifications" - what the chat should know about the phone. */
@@ -1590,6 +1590,7 @@ for (const tool of MCP_TOOLS) {
       const registered = readQueue(ctx.config).filter(e => e.confirmation?.token === token);
       if (!durable && registered.length) {
         const identity = registered[0]!.confirmation!;
+        if (identity.tool !== tool.name || (!tokenOnly && identity.key !== key)) return deny('different tool or arguments for an executed token');
         if (registered.length < identity.tasks.length) return ok(`already executed: ${registered.map(e => e.task).join(', ')}\nPartial result: ${registered.length}/${identity.tasks.length} tasks registered before interruption; inspect queue_list and preview only missing tasks.`);
         durable = identity;
       }
@@ -1812,7 +1813,7 @@ for (const tool of MCP_TOOLS) {
       const cached = saved.get(key);
       const prefix = `Partial result: 8 s response budget exhausted; ${cached ? 'last cached response follows' : 'durable queue snapshot follows'}. Retry reads; retry a confirm only with the same preview_token.\n`;
       const limit = Math.max(256, ctx.config.mcp.maxResponseKb * 1024 - 1024);
-      return { text: prefix + Buffer.from([cached?.text, queue].filter(Boolean).join('\n')).subarray(0, limit).toString('utf8') };
+      return { text: prefix + Buffer.from([queue, cached?.text].filter(Boolean).join('\n')).subarray(0, limit).toString('utf8') };
     }, deps.budgetClock);
   };
 }
