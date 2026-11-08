@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- RC: live-economy expects the unrated count once per client session (P71) and checks the after-pull reminder on a fresh client session; the manager session had already consumed its one show. / RC: live-economy oczekuje licznika bez oceny raz na sesję klienta (P71) i sprawdza przypomnienie po pobraniu na świeżej sesji klienta; sesja managera już zużyła swoje jedno pokazanie.
+
 ## [0.19.1] - 2026-11-08
 
 - Release integration: package and lockfile versions are 0.19.1; includes P65-b, P70, P71, P72, P73-a, L1, doctor and documentation fixes below. P59 tracking: the supplied branches/reports contain no mapping for this identifier; no additional P59 behavior is claimed. / Integracja wydania: wersje pakietu i lockfile to 0.19.1; obejmuje poniższe poprawki P65-b, P70, P71, P72, P73-a, L1, doctor i dokumentacji. Identyfikator P59 nie ma mapowania w dostarczonych gałęziach/raportach; nie deklarujemy dodatkowej zmiany zachowania P59.
