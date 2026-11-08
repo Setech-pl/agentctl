@@ -12,7 +12,7 @@ export async function providerDispatchCases(cache: string, name: string): Promis
     const log = path.join(h.root, 'kimi.jsonl'); installPromptAgent(h, 'kimi', 'idle', log);
     const repo = path.join(h.root, 'repo'); fs.mkdirSync(repo);
     for (const args of [['init', '-q', repo], ['-C', repo, 'commit', '--allow-empty', '-qm', 'init']]) assert.equal(spawnSync('git', args, { env: h.env }).status, 0);
-    const spec = `---\ntask: SOURCE\nagent: claude\nmodel: sonnet\neffort: high\nrepos: [{path: ${repo}, worktree: ${repo}-source, branch: source}]\n---\nContinue this synthetic task.\n`;
+    const spec = `---\ntask: SOURCE\nagent: claude\nmodel: claude-sonnet-5-5\neffort: high\nrepos: [{path: ${repo}, worktree: ${repo}-source, branch: source}]\n---\nContinue this synthetic task.\n`;
     const started = h.agentctl(['new', '-', '--no-switch'], { input: spec }); assert.equal(started.code, 0, started.stderr);
     const module = path.join(h.root, 'review.mjs'), src = path.resolve(import.meta.dirname, '../src/core');
     fs.writeFileSync(module, `import {loadGlobalConfig} from ${JSON.stringify(`${src}/config.ts`)}; import {Context} from ${JSON.stringify(`${src}/context.ts`)}; import {RealRunner} from ${JSON.stringify(`${src}/runner.ts`)}; import {readTaskRecord} from ${JSON.stringify(`${src}/taskstore.ts`)}; import {reviewOrder} from ${JSON.stringify(`${src}/review.ts`)}; const config=loadGlobalConfig(); console.log(JSON.stringify(await reviewOrder(new Context(new RealRunner(),config,()=>{}),readTaskRecord(config,'source'),{})));`);
@@ -22,7 +22,7 @@ export async function providerDispatchCases(cache: string, name: string): Promis
     check('three-provider move requires a target and shows free slots/usage', refused.code !== 0 && /--agent codex\|kimi.*free slots.*usage/.test(refused.stderr), refused.stderr);
     const moved = h.agentctl(['move', 'SOURCE', '--agent', 'kimi', '-y']);
     check('explicit Claude to Kimi move preserves worktree', moved.code === 0 && moved.stdout.includes('SOURCE-2') && fs.readFileSync(log, 'utf8').includes(`${repo}-source`), moved.stderr);
-    const queued = h.agentctl(['queue', '-', '-y'], { input: spec.replaceAll('SOURCE', 'QUEUED').replaceAll('source', 'queued').replace('agent: claude', 'agent: kimi').replace('model: sonnet', 'model: k3') });
+    const queued = h.agentctl(['queue', '-', '-y'], { input: spec.replaceAll('SOURCE', 'QUEUED').replaceAll('source', 'queued').replace('agent: claude', 'agent: kimi').replace('model: claude-sonnet-5-5', 'model: k3') });
     check('Kimi can wait in the queue', queued.code === 0 && h.agentctl(['queue', 'list', '--json']).stdout.includes('kimi'), queued.stderr);
   });
   return passed;

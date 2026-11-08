@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.19.0] - 2026-11-08
 
+- RC: live provider cases pin the versioned claude-sonnet-5-5 of the model matrix; the 0.18 alias sonnet has no built-in equivalent since the matrix table. / RC: scenariusze live providerów używają wersjonowanego claude-sonnet-5-5 z macierzy modeli; alias sonnet z 0.18 nie ma wbudowanego odpowiednika od czasu tabeli z macierzy.
+
 - RC: gate pack ignores trailing npm notices (update available) after the JSON and disables the update notifier for the pack call. / RC: gate pack pomija końcowe powiadomienia npm (dostępna aktualizacja) za JSON-em i wyłącza powiadamianie o aktualizacjach dla wywołania pack.
 
 - B1 follow-up: a fresh boxed Kimi composer below an old menu makes it history; answer refuses without sending a key. / Uzupełnienie B1: świeży edytor Kimi w ramce pod starym menu oznacza historię; answer odmawia bez wysyłania klawisza.
