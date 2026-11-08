@@ -8,6 +8,7 @@ import type { OutputData, OutputVerdict } from './outputs.ts';
 import path from 'node:path';
 import { inspectReport } from './report-state.ts';
 import { sessionQuestion } from './codex-question.ts';
+import { menuOptionLines } from './answer.ts';
 import { findCandidates, shortPath } from './report-detect.ts';
 import fs from 'node:fs';
 import type { Context } from './context.ts';
@@ -98,6 +99,8 @@ export interface StatusRow {
   hint: string | null;
   /** The question the agent waits on (state needs-input), from the screen or from its event; null otherwise. */
   question: string | null;
+  /** The numbered options of the menu a needs-input/needs-trust frame shows ("1. Approve once", …); absent otherwise. */
+  menuOptions?: string[];
   /** `pin: true` in the spec: the task is never moved to the other provider. */
   pin: boolean;
   /** The task has no tmux window any more (or was moved to the other provider): it is done, whatever it left behind. Shown under "Finished" on the board. */
@@ -304,6 +307,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       // Codex: the session log names a pending request_user_input question exactly (the text of the expanded view),
       // for a collapsed one and for a waiting one alike; the screen reader covers every other dialog.
       question: state === 'needs-input' ? ((record.agent === 'codex' ? sessionQuestion(config, record) : undefined) ?? extractQuestion(screenText) ?? (stored?.outcome === 'needs-input' && stored.text !== '' ? stored.text : null)) : null,
+      ...((state === 'needs-input' || state === 'needs-trust') && alive ? { menuOptions: menuOptionLines(screenText) } : {}),
       pin: record.pin === true,
       finished: (!alive && !lossHint) || state === 'superseded',
       hidden: hiddenBy !== null,

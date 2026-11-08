@@ -31,6 +31,7 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`cohort note`](#agentctl-cohort-note) | Write the description of a cohort (an empty text removes it). |
 | [`overlap`](#agentctl-overlap) | Which active tasks of one repository changed the same files (git diff of each worktree against its base, plus uncommitted files). Without a task: every pair. |
 | [`send`](#agentctl-send) | Paste a follow-up prompt into the existing window of each task in the file. |
+| [`answer`](#agentctl-answer) | Choose a numbered option of the menu the agent shows in its window (e.g. Kimi "Run this command? 1. Approve once …"): first a preview of the options with a token, then --confirm with that token sends the digit. |
 | [`status`](#agentctl-status) | Table of tasks: window state, running time, report, last output line. |
 | [`limits`](#agentctl-limits) | The limits of simultaneous agents per provider and what uses them up: agentctl windows, places reserved for agents you started by hand, and (limits.count_external) claude/codex sessions found in other terminals. Without a subcommand: show. |
 | [`limits show`](#agentctl-limits-show) | Per provider: limit, places used, free places, the windows of agentctl, the reserved and the external ones, and the tasks waiting in the queue. |
@@ -535,6 +536,31 @@ Examples:
 ```sh
 agentctl send follow-up.md             # header: only "task:"; the prompt below it is pasted
 agentctl send --clip -y                # follow-up from the clipboard, no question
+```
+
+## agentctl answer
+
+Choose a numbered option of the menu the agent shows in its window (e.g. Kimi "Run this command? 1. Approve once …"): first a preview of the options with a token, then --confirm with that token sends the digit.
+
+```
+agentctl answer [options] <task> <option>
+```
+
+| Argument | Meaning |
+|---|---|
+| `<task>` | task ID |
+| `<option>` | number of the menu option |
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--confirm <token>` | send the digit; the token comes from the preview (without it nothing is pressed) |  |
+| `--dry-run` | print what would happen, send nothing |  |
+
+Examples:
+
+```sh
+agentctl answer TASK-41 1              # preview of the menu options with a token, nothing is pressed
+agentctl answer TASK-41 1 --confirm <token>   # sends the digit for exactly the previewed menu
 ```
 
 ## agentctl status

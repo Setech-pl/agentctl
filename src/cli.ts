@@ -62,6 +62,7 @@ import { pullReady, pullTask } from './core/pull.ts';
 import { reportInfo, shortPath } from './core/report-detect.ts';
 import { sendPrompts, submitDrafts } from './core/send.ts';
 import { resolveRunningTask } from './core/resolve.ts';
+import { answerMenu } from './core/answer.ts';
 import { promptQueueView, withdrawPrompt } from './core/prompt-queue.ts';
 import { collectStatus, reportStatus, shownRows, statusMarkdown } from './core/status.ts';
 import { summarizeSpecs } from './core/summary.ts';
@@ -737,6 +738,32 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         const summary = items.map((i) => `${i.task}  ->  window ${ctx.config.session}:${i.window}, ${i.prompt.length} characters: ${i.prompt.split('\n')[0]!.slice(0, 80)}`);
         if (opts.clip && !(await confirmAction(ctx, summary, 'Send?', Boolean(opts.yes) || Boolean(opts.dryRun)))) return;
         await sendPrompts(ctx, items);
+      }),
+    );
+
+  program
+    .command('answer')
+    .description('Choose a numbered option of the menu the agent shows in its window (e.g. Kimi "Run this command? 1. Approve once …"): first a preview of the options with a token, then --confirm with that token sends the digit.')
+    .argument('<task>', 'task ID')
+    .argument('<option>', 'number of the menu option', (v: string) => {
+      const n = Number(v);
+      if (!Number.isInteger(n) || n < 1 || n > 99) throw new AgentctlError(`option must be a whole number 1-99 (got "${v}")`);
+      return n;
+    })
+    .option('--confirm <token>', 'send the digit; the token comes from the preview (without it nothing is pressed)')
+    .option('--dry-run', 'print what would happen, send nothing')
+    .action(
+      guarded(async (task: string, option: number, opts: { confirm?: string; dryRun?: boolean }) => {
+        const ctx = contextFor(Boolean(opts.dryRun));
+        const target = await resolveRunningTask(ctx, task);
+        const done = await answerMenu(ctx, target.window, option, opts.confirm ? { token: opts.confirm } : {});
+        if (done.outcome === 'refused' || done.outcome === 'failed') throw new AgentctlError(`${target.task}: ${done.message}`);
+        if (done.outcome === 'ready') {
+          for (const l of done.message.split('\n')) line(l);
+          line(`Nothing was pressed. To send ${option} for exactly this menu: agentctl answer ${target.task} ${option} --confirm ${done.token}`);
+          return;
+        }
+        line(`${target.task}: ${done.message}`);
       }),
     );
 
