@@ -17,6 +17,7 @@ export function summarizeSpecs(specs: ResolvedSpec[], extra: string[] = []): str
     lines.push(`  setup:    ${withSetup.length === 0 ? '-' : withSetup.length === 1 && spec.repos.length === 1 ? withSetup[0]!.setup!.join(' && ') : withSetup.map((r) => `${path.basename(r.path)} ${r.setup!.length}/${r.setup!.length} (${r.setup!.join(' && ')})`).join(', ')}`);
     lines.push(`  links:    ${spec.links.length ? spec.links.map((l) => `${spec.repos[0] ? path.join(spec.repos[0].worktree, l.from) : l.from} -> ${l.to}`).join(', ') : '-'}`);
     lines.push(...(spec.linkWarnings ?? []).map(w => `  WARNING: ${w}`));
+    lines.push(...(spec.warnings ?? []).map(w => `  WARNING: ${w}`));
     lines.push(...missingLinkTargets(spec.links, primary?.worktree).map(w => `  WARNING: ${w}`));
     lines.push(`  prompt:   ${spec.prompt.length} characters`);
   }
