@@ -270,7 +270,7 @@ export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: Q
 export async function commitQueueAdd(ctx: Context, items: QueueAddItem[], opts: { agent?: AgentName; reuse?: boolean; autoReview?: AutoReviewSource; confirmation?: QueueConfirmation; direct?: { noAgent: boolean } } = {}): Promise<QueueEntry[]> {
   const { config, runner } = ctx;
   // A link into the task's own worktree cannot exist before the start made it (the same exception `new` makes).
-  for (const { spec } of items) checkLinkTargets(opts.direct ? spec.links.filter((l) => !spec.repos.some((r) => l.to === r.worktree || l.to.startsWith(`${r.worktree}/`))) : spec.links, spec.task);
+  for (const { spec } of items) checkLinkTargets(spec.links.filter((l) => !spec.repos.some((r) => l.to === r.worktree || l.to.startsWith(`${r.worktree}/`))), spec.task);
   const existing = readQueue(config);
   let seq = existing.reduce((n, e) => Math.max(n, e.seq), 0);
   const added: QueueEntry[] = [];

@@ -1070,3 +1070,5 @@ rozmiar odzysku jako `n/d`; pełny podgląd go mierzy. Brakujące i trwające po
 są oznaczone. `close` podaje rozmiar worktree pozostawionego lub przed usunięciem.
 
 `events_since` zachowuje historię zdarzeń, ale usuwa decyzje i akcje zamkniętych lub pobranych zadań z podsumowania oczekujących spraw. Licznik zadań bez oceny pojawia się raz na sesję klienta.
+
+Dla pakietów backendu budowanych z zadaniem klienta ustaw np. `- {from: node_modules/@neon-city/sim, to: "{worktree:neon-city-backend}/packages/sim"}` i dodaj `neon-city-backend` do `repos` specyfikacji z własnym `base` i nowym `worktree`. Setup wykonuje się przed linkowaniem; wymagane budowanie i testy wpisz w `repos[].setup`. Dotychczasowe `{task:ID,repo:NAME}` nadal wybiera zapisany worktree. Podglądy new/queue i doctor ostrzegają o brakujących celach; gdy repozytorium celu ma bazę w specyfikacji/rekordzie, porównują merge-base z HEAD celu i ostrzegają o starszym lub rozbieżnym worktree. Doctor sprawdza rozwiązane linki aktywnych rekordów; szablony projektu wymagające kontekstu zadania sprawdza podgląd.

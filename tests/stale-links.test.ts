@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -5,7 +6,8 @@ import { it } from 'node:test';
 import { resolveSpec, splitSpecs } from '../src/core/spec.ts';
 import { summarizeSpecs } from '../src/core/summary.ts';
 import { archiveDir, taskDir } from '../src/core/taskstore.ts';
-import { planQueueAdd } from '../src/core/queue.ts';
+import { runDoctor } from '../src/core/doctor.ts';
+import { commitQueueAdd, planQueueAdd } from '../src/core/queue.ts';
 import { makeConfig, makeContext, seedTask, specText, useScratch } from './helpers.ts';
 const scratch = useScratch();
 it('P17 new and queue previews name stale project defaults and suggest placeholders', async () => {
@@ -58,4 +60,32 @@ it('P17 finds archived owners through symlink aliases without matching sibling p
   fs.mkdirSync(`${wt}-other`);
   fs.writeFileSync(path.join(repo, '.agentctl.yaml'), `links:\n  - {from: pkg, to: ${wt}-other}\n`);
   assert.doesNotMatch(summarizeSpecs([resolveSpec(raw, { config })]).join('\n'), /WARNING/);
+});
+
+
+it('P72 spec-derived backend links and previews compare target HEAD with its repository base', async () => {
+  const root = scratch.sub('p72'), config = makeConfig(root), app = scratch.sub('p72/app'), backend = scratch.sub('p72/backend');
+  const git = (...args: string[]) => execFileSync('git', ['-C', backend, ...args], { encoding: 'utf8' }).trim();
+  git('init', '-b', 'trunk'); git('config', 'user.email', 'test@example.com'); git('config', 'user.name', 'Test');
+  git('commit', '--allow-empty', '-m', 'old');
+  const old = git('rev-parse', 'HEAD'), target = path.join(root, 'backend-old');
+  git('worktree', 'add', '--detach', target, old);
+  fs.mkdirSync(path.join(target, 'packages/sim'), { recursive: true });
+  git('commit', '--allow-empty', '-m', 'base');
+  const base = git('rev-parse', 'HEAD');
+  fs.writeFileSync(path.join(app, '.agentctl.yaml'), `links:\n  - {from: pkg, to: '${target}/packages/sim'}\n`);
+  const raw = splitSpecs(specText({ task: 'FRONT', agent: 'claude' }, app))[0]!;
+  raw.header.repos = [{ path: app, worktree: `${app}-wt` }, { path: backend, worktree: `${backend}-new`, base }];
+  const spec = resolveSpec(raw, { config });
+  assert.match(summarizeSpecs([spec]).join('\n'), /older than task base/);
+  const { ctx } = makeContext(config, { dryRun: true });
+  assert.ok((await planQueueAdd(ctx, [raw])).warnings.some(w => w.includes('older than task base')));
+  seedTask(config, 'ACTIVE', { repos: spec.repos, links: spec.links });
+  const checks = await runDoctor(ctx.runner, () => config, app);
+  assert.ok(checks.some(c => c.name === 'task links ACTIVE' && c.detail.includes('older than task base')));
+  git('-C', target, 'checkout', '--detach', base);
+  assert.doesNotMatch(summarizeSpecs([resolveSpec(raw, { config })]).join('\n'), /older than task base/);
+  fs.writeFileSync(path.join(app, '.agentctl.yaml'), "links:\n  - {from: pkg, to: '{worktree:backend}/packages/sim'}\n");
+  assert.equal(resolveSpec(raw, { config }).links[0]?.to, `${backend}-new/packages/sim`);
+  await commitQueueAdd(ctx, (await planQueueAdd(ctx, [raw])).items, {});
 });

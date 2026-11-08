@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- P72: reuse spec repository worktree placeholders for backend links; warn on missing or base-stale targets in previews/doctor. Queue accepts targets created by its own task. / Linki backendu korzystają z worktree repozytoriów specyfikacji; podglądy i doctor ostrzegają o brakujących i starszych celach. Kolejka akceptuje cele tworzone przez zadanie.
+
 - P71: attention summaries omit closed/pulled outputs; show unrated count once per client session. / Podsumowanie pomija wyniki zamkniętych/pobranych zadań; licznik bez oceny pokazuje raz na sesję klienta.
 
 ## [0.19.0] - 2026-11-08

@@ -1,3 +1,5 @@
+import { spawnSync } from 'node:child_process';
+import type { ResolvedRepo } from './spec.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { loadProjectConfig } from './config.ts';
@@ -183,8 +185,30 @@ export function staleProjectLinkWarnings(links: Link[], config: GlobalConfig): s
   });
 }
 
+/** Compare only repositories sharing Git's common directory; never compare unrelated SHAs. */
+export function linkBaseWarnings(links: Link[], repos: ResolvedRepo[]): string[] {
+  const git = (cwd: string, ...args: string[]): string | undefined => {
+    const r = spawnSync('git', ['-C', cwd, ...args], { encoding: 'utf8', timeout: 5000 });
+    return r.status === 0 ? r.stdout.trim() : undefined;
+  };
+  return links.flatMap(({ from, to }) => {
+    let dir = to.endsWith('/*') ? path.dirname(to) : to;
+    while (!fs.existsSync(dir) && path.dirname(dir) !== dir) dir = path.dirname(dir);
+    if (!fs.statSync(dir).isDirectory()) dir = path.dirname(dir);
+    const common = git(dir, 'rev-parse', '--path-format=absolute', '--git-common-dir');
+    if (!common) return [];
+    const repo = repos.find(r => r.base && git(r.path, 'rev-parse', '--path-format=absolute', '--git-common-dir') === common);
+    if (!repo?.base) return [];
+    const base = git(repo.path, 'rev-parse', '--verify', `${repo.base}^{commit}`);
+    const head = git(dir, 'rev-parse', 'HEAD');
+    if (!base || !head) return [`link ${from} -> ${to}: cannot compare target with task base ${repo.base}`];
+    const ancestor = git(repo.path, 'merge-base', head, base);
+    return ancestor === base ? [] : [`link ${from} -> ${to}: target worktree is older than task base ${repo.base} or diverged (merge-base ${ancestor ?? 'none'}); use {worktree:${path.basename(repo.path)}} or update the target`];
+  });
+}
+
 export function projectLinks(repo: string, task = '', cache = repo): Link[] {
-  return (loadProjectConfig(repo)?.links ?? []).map(link => ({ ...link, to: resolvePath(fillPlaceholders(link.to, { task, cache }), repo) }));
+  return (loadProjectConfig(repo)?.links ?? []).filter(link => !/\{(?:worktree:|task:[^}]*,repo:)/.test(link.to)).map(link => ({ ...link, to: resolvePath(fillPlaceholders(link.to, { task, cache }), repo) }));
 }
 
 /** Known projects come from current and archived task records; active tasks can also supply spec-only links. */
