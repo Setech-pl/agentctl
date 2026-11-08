@@ -56,12 +56,19 @@ process.stdin.setRawMode(true);process.stdin.resume();process.stdin.on('data',()
   const spec = (task: string, extra: Record<string, unknown> = {}) => `---\n${YAML.stringify({ task, agent: 'claude', model: 'sonnet', effort: 'high', repos: [{ path: repo, worktree: `${repo}-${task}`, branch: task, base: sha }], ...extra })}---\nImplement fixture.\n`;
   const client = new Client({ name: 'prod-0174', version: '1' }); await client.connect(new StdioClientTransport({ command: process.execPath, args: ['--experimental-strip-types', '--no-warnings', path.resolve('bin/agentctl.ts'), 'mcp'], env: h.env as Record<string, string>, stderr: 'pipe' }));
   const call = async (name: string, args = {}) => { const result = await client.callTool({ name, arguments: args }); return { error: result.isError, text: (result.content as { text: string }[]).map(c => c.text).join('\n') }; };
+  // P34: every chat start goes through the watcher; confirm only registers and the watcher prepares the worktree.
+  const watcher = h.spawnAgentctl(['watch'], path.join(h.root, 'watch.log'));
   try {
+    const beat = path.join(config.stateDir, 'queue-worker.json'), beatEnd = Date.now() + 10000;
+    while (!fs.existsSync(beat) && Date.now() < beatEnd) await pause(150);
     for (const scenario of ['fresh', 'guide', 'parallel']) {
       const args = { spec: spec(`NEW-${scenario.toUpperCase()}`), no_agent: true }, preview = await call('new', args); check(`P3 ${scenario} preview: ${preview.error ? preview.text : "ok"}`, !preview.error);
       if (scenario === 'guide') await call('guide');
       if (scenario === 'parallel') { const other = { spec: spec('UNRELATED'), no_agent: true }; await call('new', other); await Promise.all([call('status'), call('new', { ...other, confirm: true })]); }
-      const confirmed = await call('new', { ...args, confirm: true }); check(`P3 ${scenario} confirm on real git/MCP`, !confirmed.error && fs.existsSync(`${repo}-NEW-${scenario.toUpperCase()}`));
+      const confirmed = await call('new', { ...args, confirm: true });
+      const worktree = `${repo}-NEW-${scenario.toUpperCase()}`, up = Date.now() + 20000;
+      while (!confirmed.error && !fs.existsSync(worktree) && Date.now() < up) await pause(200);
+      check(`P3 ${scenario} confirm on real git/MCP`, !confirmed.error && fs.existsSync(worktree));
     }
     const missing = path.join(h.root, 'missing-target'), linked = { spec: spec('LINKED', { links: [{ from: 'dep', to: missing }] }) };
     const preview = await call('queue', linked); check('P2 missing link warns in MCP preview', !preview.error && preview.text.includes(missing)); const denied = await call('queue', { ...linked, confirm: true }); check('P2 missing link blocks confirmation', denied.error && denied.text.includes('link targets are missing'));
@@ -78,7 +85,7 @@ process.stdin.setRawMode(true);process.stdin.resume();process.stdin.on('data',()
     const sent = await sendPrompts(ctx, [{ task: ready.task, window: ready.window, prompt: 'continue' }]); check('P10 send warns without exceeding the full limit', sent[0]?.warning?.includes('limit') && collectLimits(config, await liveWindows(ctx)).providers[0]?.used === 1);
     const aliases = ['gc', 'gc --preview', 'gc --dry-run'].map(command => h.agentctl([...command.split(' '), '--json'])); check('P8 all real CLI aliases share one preview', aliases.every(r => r.code === 0 && r.stdout === aliases[0]?.stdout));
     const summary = gcView(await planGc(ctx)); fs.writeFileSync(path.join(cache, 'fix-production-gc.json'), JSON.stringify(summary, null, 2));
-  } finally { await client.close(); }
+  } finally { watcher.kill('SIGTERM'); await new Promise(r => watcher.once('close', r)); await client.close(); }
 });
 fs.writeFileSync(path.join(cache, 'fix-production-live-results.json'), JSON.stringify({ passed: results.filter(r => r.ok).length, failed: results.filter(r => !r.ok).length, results }, null, 2));
 console.log(`${results.length}/${results.length} production live checks passed`);
