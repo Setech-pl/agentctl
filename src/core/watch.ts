@@ -298,7 +298,7 @@ export async function reloadConfig(ctx: Context, store: ConfigStore, by = 'watch
   if (r.error) await log(`config: ${r.error}`);
   else if (r.changed) {
     await log(`config: reloaded (${r.keys.join(', ')})`);
-    const text = limitsDiffText(before.limits, r.config.limits);
+    const text = limitsDiffText(before.limits, r.config.limits, r.config.providers);
     if (text) await recordJournalOnce(ctx, { kind: 'limits-changed', text });
   }
   if (r.error || r.changed || before.reloadWarning) noteConfigState(configStatePath(r.config), by, ctx.runner.now(), r.error ?? r.config.reloadWarning);

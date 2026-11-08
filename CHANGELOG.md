@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- P51: limit notifications and events list all configured providers, including unchanged optional providers. / Powiadomienia i zdarzenia limitów wymieniają wszystkich skonfigurowanych dostawców, także opcjonalnych bez zmiany limitu.
+
 - P67: mask recognised credentials without replacing short substrings, ordinary field names or task IDs. / Maskowanie rozpoznanych sekretów nie uszkadza krótkich fragmentów tekstu, zwykłych nazw pól ani identyfikatorów zadań.
 
 - MCP `set_limits` accepts `"off"` for an optional provider (Kimi) in the registered schema, the same as for Claude and Codex; `reserve` stays numeric-only (review X4). / MCP `set_limits` przyjmuje `"off"` dla opcjonalnego dostawcy (Kimi) w zarejestrowanym schemacie, tak samo jak dla Claude i Codexa; `reserve` pozostaje tylko liczbowe (przegląd X4).
