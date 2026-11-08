@@ -16,7 +16,7 @@ for (const gone of [false, true]) await withHarness({ name: gone ? 'p28b-gone' :
   const watcher = h.spawnAgentctl(['watch'], path.join(cache, `p28b-${gone ? 'gone' : 'alive'}-watch.log`));
   await new Promise(r => setTimeout(r, 1500));
   const report = path.join(h.root, 'cache/p28b/P28B.md'); fs.mkdirSync(path.dirname(report), { recursive: true });
-  fs.writeFileSync(report, `Verdict: PASS\n<!-- agentctl:attempt ${attempt} -->\n`);
+  fs.writeFileSync(report, `Verdict: PASS\n<!-- agentctl:attempt ${attempt} -->\n<!-- agentctl:report-end -->\n`);
   const files = fs.readdirSync(path.join(h.env.KIMI_CODE_HOME!, 'sessions'), { recursive: true }).map(String).filter(p => p.endsWith('wire.jsonl'));
   assert.equal(files.length, 1);
   const wire = path.join(h.env.KIMI_CODE_HOME!, 'sessions', files[0]!);

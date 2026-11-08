@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.19.0] - 2026-11-08
 
+- RC: live-p28b's fixture report carries the report-end sentinel; 0.19 requires it for attempt-scoped readiness. / RC: raport fixture w live-p28b ma znacznik końca raportu; 0.19 wymaga go dla gotowości wiązanej z attemptem.
+
 - RC: live-p15-send's Codex question scenario shows a waiting Codex (no Working line); a collapsed question of a working Codex blocks nothing since P65. / RC: scenariusz pytania Codexa w live-p15-send pokazuje czekającego Codexa (bez linii Working); zwinięte pytanie pracującego Codexa niczego nie blokuje od P65.
 
 - RC: nc-workflow author pins the versioned claude-sonnet-5-5 so the automatic review translates to Codex through the matrix table. / RC: autor w nc-workflow używa wersjonowanego claude-sonnet-5-5, aby automatyczny przegląd tłumaczył się na Codex przez tabelę z macierzy.
