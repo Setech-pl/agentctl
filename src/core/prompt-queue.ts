@@ -98,15 +98,17 @@ export async function withdrawPrompt(ctx: Context, window: string, idPrefix: str
     if (activeMatch) {
       const id = activeId;
       const dropDuplicates = async () => { if (duplicates.length > 0) await ctx.runner.writeFile(queueFile(ctx, window), JSON.stringify(queue.filter((p) => p.id !== id))); };
+      // The FIFO copy goes first, the active identity only after it: an interruption between the two writes leaves the
+      // message as the active delivery, never as an eligible queued duplicate (recovery would deliver it again).
       if (record.deliveryStartedAt) {
-        await setHeaderFields(ctx.runner, taskFile(ctx.config, window), { delivery_result: 'stale', prompt_error: `wiadomość wycofana (${now}) po rozpoczęciu dostarczania – agent może już nad nią pracować` });
         await dropDuplicates();
+        await setHeaderFields(ctx.runner, taskFile(ctx.config, window), { delivery_result: 'stale', prompt_error: `wiadomość wycofana (${now}) po rozpoczęciu dostarczania – agent może już nad nią pracować` });
         await note(`${id}, stale`);
         await recordJournal(ctx, { kind: 'delivery', task: record.task, text: `${record.task}: wycofano wiadomość po rozpoczęciu dostarczania (stale); agent może już nad nią pracować [dostawa ${id.slice(0, 8)}]` });
         return { outcome: 'stale', id, message: `${record.task}: dostarczanie już się zaczęło – wiadomość oznaczona jako wycofana (stale), agent może już nad nią pracować; nic nie jest wycofywane z okna` };
       }
-      await setHeaderFields(ctx.runner, taskFile(ctx.config, window), { pending_prompt: null, prompt_delivery: null, prompt_error: null, delivery_id: null, delivery_result: null });
       await dropDuplicates();
+      await setHeaderFields(ctx.runner, taskFile(ctx.config, window), { pending_prompt: null, prompt_delivery: null, prompt_error: null, delivery_id: null, delivery_result: null });
       await note(id);
       await recordJournal(ctx, { kind: 'delivery', task: record.task, text: `${record.task}: wycofano oczekującą wiadomość przed rozpoczęciem dostarczania [dostawa ${id.slice(0, 8)}]` });
       return { outcome: 'withdrawn', id, message: `${record.task}: wycofano oczekującą wiadomość (${id.slice(0, 8)}) – nie zostanie wysłana` };

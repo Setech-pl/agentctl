@@ -72,124 +72,124 @@ it('takes over the actual lock of a SIGKILLed owner (R2)', async () => {
     `import { acquireLock } from ${JSON.stringify(module)}; await acquireLock(${JSON.stringify(lock)}); console.log('ready'); setInterval(() => {}, 1000);`], { stdio: ['ignore', 'pipe', 'pipe'] });
   try {
     await once(child.stdout, 'data');
-    assert.equal(JSON.parse(fs.readFileSync(lock, 'utf8')).pid, child.pid);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(lock, 'owner'), 'utf8')).pid, child.pid);
     const exited = once(child, 'exit');
     child.kill('SIGKILL');
     await exited;
     const release = await acquireLock(lock, () => {}, async () => { throw new Error('waited on SIGKILLed owner'); });
-    assert.equal(JSON.parse(fs.readFileSync(lock, 'utf8')).pid, process.pid);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(lock, 'owner'), 'utf8')).pid, process.pid);
     release();
     assert.equal(fs.existsSync(lock), false);
   } finally { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); }
 });
-it('F2: reclamation is serialized; a second reclaimer cannot unlink the live successor lock', async () => {
+it('F2: reclamation is a single atomic rename; a reclaimer preempted inside it never disturbs the live successor lock', async () => {
   const { spawnSync } = await import('node:child_process');
   const lock = path.join(scratch.dir, 'runtimes/.gate-f2.lock');
   const dead = spawnSync('true', []).pid!;
   assert.throws(() => process.kill(dead, 0), { code: 'ESRCH' });
-  fs.mkdirSync(path.dirname(lock), { recursive: true });
-  fs.writeFileSync(lock, JSON.stringify({ token: 'STALE', pid: dead, cwd: '/tmp', started: new Date().toISOString() }));
-  // Contender A is mid-reclaim: it holds the reclaim lock (a live pid: this process stands in for it).
-  fs.writeFileSync(`${lock}.reclaim`, String(process.pid));
-  let waits = 0;
-  const release = await acquireLock(lock, () => {}, async () => {
-    waits++;
-    if (waits === 1) {
-      // A finishes: the stale lock is gone and a live successor already holds the lock before contender B looks again.
-      fs.unlinkSync(lock);
-      fs.writeFileSync(lock, JSON.stringify({ token: 'SUCCESSOR', pid: process.pid, cwd: '/tmp', started: new Date().toISOString() }));
-      fs.unlinkSync(`${lock}.reclaim`);
-      return;
+  fs.mkdirSync(lock, { recursive: true });
+  fs.writeFileSync(path.join(lock, 'owner'), JSON.stringify({ token: 'STALE', pid: dead, cwd: '/tmp', started: new Date().toISOString() }));
+  // Contender B is preempted at its reclaim rename: A finishes the whole reclamation and a live successor already holds
+  // the lock before B's rename runs. B's rename then moves the successor's directory — and must put it back untouched.
+  const successor = JSON.stringify({ token: 'SUCCESSOR', pid: process.pid, cwd: '/tmp', started: new Date().toISOString() });
+  const rename = fs.renameSync;
+  let fired = false;
+  fs.renameSync = function (from: fs.PathLike, to: fs.PathLike): void {
+    if (from === lock && !fired) {
+      fired = true;
+      const tomb = `${lock}.tombstone-a`;
+      rename.call(fs, lock, tomb);
+      fs.rmSync(tomb, { recursive: true, force: true });
+      fs.mkdirSync(lock);
+      const tmp = path.join(lock, '.owner-a.tmp');
+      fs.writeFileSync(tmp, successor);
+      rename.call(fs, tmp, path.join(lock, 'owner'));
     }
-    if (waits === 2) {
-      assert.equal(JSON.parse(fs.readFileSync(lock, 'utf8')).token, 'SUCCESSOR', 'the reclaimer must not unlink the live successor lock');
-      fs.unlinkSync(lock); // the successor releases
-      return;
-    }
-    throw new Error('contender B should have acquired after the successor released');
-  });
-  assert.equal(waits, 2);
-  release();
-  assert.equal(fs.existsSync(lock), false);
-  assert.equal(fs.existsSync(`${lock}.reclaim`), false, 'no reclaim lock is left behind');
-});
-it('X1: a reclaimer never unlinks a reclaim lock a live successor installed since its stale read (A/B/C)', async () => {
-  const { spawnSync } = await import('node:child_process');
-  const lock = path.join(scratch.dir, 'runtimes/.gate-x1.lock');
-  const reclaim = `${lock}.reclaim`;
-  const deadHolder = spawnSync('true', []).pid!;
-  const deadReclaimer = spawnSync('true', []).pid!;
-  assert.throws(() => process.kill(deadHolder, 0), { code: 'ESRCH' });
-  assert.throws(() => process.kill(deadReclaimer, 0), { code: 'ESRCH' });
-  fs.mkdirSync(path.dirname(lock), { recursive: true });
-  fs.writeFileSync(lock, JSON.stringify({ token: 'STALE', pid: deadHolder, cwd: '/tmp', started: new Date().toISOString() }));
-  fs.writeFileSync(reclaim, String(deadReclaimer));
-  // The A/B/C interleaving from the review reproduction: contender B read the reclaim lock of a dead reclaimer; before
-  // B unlinks it, A breaks it and installs its own live reclaim lock (the liveness check is B's last scheduling point
-  // before the unlink). A then finishes and a live successor takes the main lock; C may contend only after that.
-  const originalKill = process.kill.bind(process);
-  let installed = false;
-  process.kill = ((pid: number, signal?: NodeJS.Signals | 0) => {
-    if (signal === 0 && pid === deadReclaimer && !installed) {
-      installed = true;
-      fs.writeFileSync(reclaim, JSON.stringify({ token: 'A-LIVE', pid: process.pid, started: new Date().toISOString() }));
-    }
-    return originalKill(pid, signal as NodeJS.Signals);
-  }) as typeof process.kill;
+    rename.call(fs, from, to);
+  } as typeof fs.renameSync;
   try {
     let waits = 0;
     const release = await acquireLock(lock, () => {}, async () => {
       waits++;
       if (waits === 1) {
-        assert.ok(fs.existsSync(reclaim), 'B must not unlink the live reclaim lock A installed since B read the stale sidecar');
-        assert.equal(JSON.parse(fs.readFileSync(reclaim, 'utf8')).token, 'A-LIVE');
-        // A finishes: the dead main lock and A's reclaim lock go away, a live successor holds the main lock.
-        fs.unlinkSync(lock);
-        fs.unlinkSync(reclaim);
-        fs.writeFileSync(lock, JSON.stringify({ token: 'SUCCESSOR', pid: process.pid, cwd: '/tmp', started: new Date().toISOString() }));
-        return;
-      }
-      if (waits === 2) {
-        assert.equal(JSON.parse(fs.readFileSync(lock, 'utf8')).token, 'SUCCESSOR', 'no reclaimer unlinked the live successor lock');
-        fs.unlinkSync(lock); // the successor releases
+        assert.equal(fs.readFileSync(path.join(lock, 'owner'), 'utf8'), successor, 'the losing reclaimer must not unlink the live successor lock');
+        fs.rmSync(lock, { recursive: true }); // the successor releases
         return;
       }
       throw new Error('contender B should have acquired after the successor released');
     });
-    assert.equal(waits, 2);
-    assert.ok(installed, 'the interleaving fired');
+    assert.equal(fired, true);
+    assert.equal(waits, 1);
     release();
-    assert.equal(fs.existsSync(lock), false);
-    assert.equal(fs.existsSync(reclaim), false, 'no reclaim lock is left behind');
-  } finally { process.kill = originalKill; }
+  } finally { fs.renameSync = rename; }
+  assert.equal(fs.existsSync(lock), false);
+  assert.deepEqual(fs.readdirSync(path.dirname(lock)).filter((n) => n.includes('tombstone')), [], 'no tombstone is left behind');
 });
-it('X2: a reclaim sidecar left empty by a SIGKILL mid-publish is reclaimed after the grace, a fresh one is waited on', async () => {
+it('X1-R2: a reclaimer preempted after its final verified read cannot destroy the live ownership a successor installed', async () => {
   const { spawnSync } = await import('node:child_process');
-  const { RECLAIM_GRACE_MS } = await import('../scripts/gate-lock.ts');
-  const lock = path.join(scratch.dir, 'runtimes/.gate-x2.lock');
-  const reclaim = `${lock}.reclaim`;
+  const lock = path.join(scratch.dir, 'runtimes/.gate-x1.lock');
   const dead = spawnSync('true', []).pid!;
   assert.throws(() => process.kill(dead, 0), { code: 'ESRCH' });
-  fs.mkdirSync(path.dirname(lock), { recursive: true });
-  fs.writeFileSync(lock, JSON.stringify({ token: 'STALE', pid: dead, cwd: '/tmp', started: new Date().toISOString() }));
-  // The crash window: the reclaimer was SIGKILLed between the exclusive create and the pid write.
-  fs.writeFileSync(reclaim, '');
+  fs.mkdirSync(lock, { recursive: true });
+  const stale = JSON.stringify({ token: 'OLD', pid: dead, started: new Date().toISOString() });
+  fs.writeFileSync(path.join(lock, 'owner'), stale);
+  // The reviewer's deterministic preemption (review2/reproductions.log): B read OLD and is descheduled immediately
+  // after the read; A reclaims OLD and publishes its own live ownership before B resumes.
+  const live = JSON.stringify({ token: 'A-LIVE', pid: process.pid, started: new Date().toISOString() });
+  const read = fs.readFileSync;
+  let fired = false;
+  fs.readFileSync = function (target: fs.PathOrFileDescriptor, ...args: unknown[]) {
+    const result = (read as (...a: unknown[]) => unknown).call(fs, target, ...args);
+    if (target === path.join(lock, 'owner') && !fired) {
+      fired = true;
+      const tomb = `${lock}.tombstone-a`;
+      fs.renameSync(lock, tomb);
+      fs.rmSync(tomb, { recursive: true, force: true });
+      fs.mkdirSync(lock);
+      const tmp = path.join(lock, '.owner-a.tmp');
+      fs.writeFileSync(tmp, live);
+      fs.renameSync(tmp, path.join(lock, 'owner'));
+    }
+    return result;
+  } as typeof fs.readFileSync;
+  try {
+    let waits = 0;
+    const release = await acquireLock(lock, () => {}, async () => {
+      waits++;
+      if (waits === 1) {
+        assert.equal(fs.readFileSync(path.join(lock, 'owner'), 'utf8'), live, 'B must not destroy the live ownership A installed since B read the stale owner');
+        fs.rmSync(lock, { recursive: true }); // A releases
+        return;
+      }
+      throw new Error('contender B should have acquired once A released');
+    });
+    assert.equal(fired, true);
+    assert.equal(waits, 1);
+    release();
+  } finally { fs.readFileSync = read; }
+  assert.equal(fs.existsSync(lock), false);
+  assert.deepEqual(fs.readdirSync(path.dirname(lock)).filter((n) => n.includes('tombstone')), [], 'no tombstone is left behind');
+});
+it('X2: a lock directory left without an owner by a SIGKILL mid-publish is reclaimed after the grace, a fresh one is waited on', async () => {
+  const { RECLAIM_GRACE_MS } = await import('../scripts/gate-lock.ts');
+  const lock = path.join(scratch.dir, 'runtimes/.gate-x2.lock');
+  // The crash window: the holder was SIGKILLed between the atomic mkdir and the owner rename.
+  fs.mkdirSync(lock, { recursive: true });
   let waits = 0;
   const release = await acquireLock(lock, () => {}, async () => {
     waits++;
     if (waits === 1) {
-      assert.ok(fs.existsSync(reclaim), 'a fresh unparsable sidecar is inside its grace: waited on, not broken');
+      assert.ok(fs.existsSync(lock), 'a fresh ownerless directory is inside its grace: waited on, not broken');
       const old = new Date(Date.now() - RECLAIM_GRACE_MS - 60_000);
-      fs.utimesSync(reclaim, old, old);
+      fs.utimesSync(lock, old, old);
       return;
     }
-    if (waits > 4) throw new Error('the sidecar of a reclaimer killed mid-publish was never reclaimed');
+    throw new Error('an ownerless lock past its grace should be reclaimed without another wait');
   });
   assert.equal(waits, 1, 'waited out the grace, then reclaimed without another wait');
-  assert.equal(JSON.parse(fs.readFileSync(lock, 'utf8')).pid, process.pid);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(lock, 'owner'), 'utf8')).pid, process.pid);
   release();
   assert.equal(fs.existsSync(lock), false);
-  assert.equal(fs.existsSync(reclaim), false, 'no reclaim lock is left behind');
 });
 it('checks cached runtime version and archive checksum with fakes and no network', () => {
   assert.equal(checkRuntime('/fake/node', '22.14.0', () => 'v22.14.0'), 'v22.14.0');

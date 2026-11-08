@@ -25,7 +25,7 @@ import { findMcpProcesses, staleProcesses } from './mcp-processes.ts';
 import { EXAMPLE_SPEC } from './example.ts';
 import { checkRetryWorktrees } from './git.ts';
 import { createHash } from 'node:crypto';
-import { collectDisk as collectDiskFull, diskLine } from './disk.ts';
+import { collectDisk as collectDiskFull, diskLine, refreshDiskAfterGc } from './disk.ts';
 import type { DiskReport } from './disk.ts';
 import { retryEntry, moveToFront, setPaused, unblockEntry, findEntry, rebuildAutoReview } from './queue.ts';
 import { touchCohort, setCohortOf, setNote, planCohortArchive, applyCohortArchive } from './cohort.ts';
@@ -1438,7 +1438,7 @@ MCP_TOOLS.push(
   extraWrite('manager_start', 'manager', 'Start the supervising manager session', { project: optionalText, name: optionalText, model: optionalText, effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional() }, async (ctx, a, deps) => { if (!deps.self) throw new AgentctlError('this server has no self command for the manager'); return startManager(ctx, { ...a, self: deps.self, noWait: true }); }),
   extraWrite('manager_stop', 'manager stop', 'Stop the manager session', {}, async (ctx) => ({ state: await stopManager(ctx) })),
   extraWrite('notify_test', 'notify-test [--phone]', 'Test desktop notifications; phone true explicitly sends to ntfy', { phone: z.boolean().optional() }, async (ctx, a, deps) => { if (a.phone) return sendPhoneTest(ctx); await deps.notify('agentctl notification test'); return { local: true }; }),
-  extraWrite('gc', 'gc --apply [--cohort <NAME>] [--older-than <AGE>] [--branches]', 'Reclaim disk space from finished tasks using the same protected plan as gc_preview', { detail: z.boolean().optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional(), cohort: cohortArg.optional(), older_than: optionalText, branches: z.boolean().optional() }, async (ctx, a) => { const plan = await planGc(ctx, { cohort: a.cohort, olderThan: a.older_than, branches: a.branches ?? false }); return { plan, result: await applyGc(ctx, plan) }; }),
+  extraWrite('gc', 'gc --apply [--cohort <NAME>] [--older-than <AGE>] [--branches]', 'Reclaim disk space from finished tasks using the same protected plan as gc_preview', { detail: z.boolean().optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional(), cohort: cohortArg.optional(), older_than: optionalText, branches: z.boolean().optional() }, async (ctx, a) => { const plan = await planGc(ctx, { cohort: a.cohort, olderThan: a.older_than, branches: a.branches ?? false }); const result = await applyGc(ctx, plan); const freed = await refreshDiskAfterGc(ctx, result.freedBytes); return { plan, result, ...(freed ? { note: freed } : {}) }; }),
 );
 
 /** Do not expose environment values or credential-bearing ntfy URLs as well as token/topic. */
@@ -1682,7 +1682,8 @@ for (const tool of MCP_TOOLS) {
       if (tool.name === 'gc') return writeTool(deps, 'gc', {}, async (fresh) => {
         const plan = scope as GcPlan;
         const result = await applyGc(fresh, plan);
-        return { text: JSON.stringify(result, null, 2), executed: true, announce: `gc: ${result.done.length} items, ${result.freedBytes} bytes` };
+        const freed = await refreshDiskAfterGc(fresh, result.freedBytes);
+        return { text: JSON.stringify({ ...result, ...(freed ? { note: freed } : {}) }, null, 2), executed: true, announce: `gc: ${result.done.length} items, ${result.freedBytes} bytes` };
       });
       return original(deps, { ...(tokenOnly ? { ...effective, confirm: true } : args), ...(registration ? { _confirmation: registration } : {}) });
     };

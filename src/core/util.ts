@@ -33,9 +33,19 @@ export function expandHome(p: string, home: string = os.homedir()): string {
   return p;
 }
 
-/** Expand `~` and make the path absolute. */
-export function resolvePath(p: string, base: string = process.cwd()): string {
-  return path.resolve(base, expandHome(p));
+/** The process working directory, or a user-facing explanation when it was deleted underneath us (gc removes worktrees). */
+export function safeCwd(): string {
+  try {
+    return process.cwd();
+  } catch {
+    throw new AgentctlError('current directory no longer exists (removed by gc?) – cd elsewhere, e.g. cd ~');
+  }
+}
+
+/** Expand `~` and make the path absolute. The cwd is consulted only for a relative path: it may have been deleted. */
+export function resolvePath(p: string, base?: string): string {
+  const expanded = expandHome(p);
+  return path.isAbsolute(expanded) ? path.normalize(expanded) : path.resolve(base ?? safeCwd(), expanded);
 }
 
 /** Replace the known placeholders {task}, {TASK}, {cache}; leave everything else (e.g. glob braces) alone. */
