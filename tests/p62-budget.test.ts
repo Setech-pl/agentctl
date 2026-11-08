@@ -125,3 +125,16 @@ it('P62: GC returns unknown sizes immediately and reuses a completed background 
     assert.equal(JSON.parse(second.text).freeBytes, 12345);
   } finally { await shutdownMeasurements(); }
 });
+it('P62: cloned contexts apply the selected tmux socket exactly once', async () => {
+  const config = makeConfig(scratch.sub('clone-socket'), 'tmux: {socket: p62-test}\n');
+  const seen: string[][] = [];
+  const runner = new DiskRunner({ dryRun: false, respond: (cmd, args) => {
+    if (cmd === 'tmux') seen.push(args);
+    return { code: 0 };
+  } });
+  const first = new Context(runner, config, () => {});
+  const clone = new Context(first.runner, config, () => {});
+  await clone.tmux.hasSession();
+  assert.deepEqual(seen[0]?.slice(0, 3), ['-L', 'p62-test', 'has-session']);
+  assert.equal(seen[0]?.filter(arg => arg === '-L').length, 1);
+});

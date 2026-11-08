@@ -28,13 +28,18 @@ export async function withResponseBudget<T>(body: () => Promise<T>, partial: () 
     }), expired])); }
   finally { cancel(); }
 }
+const originals = new WeakMap<Runner, Runner>();
+export const unwrapBudgetRunner = (runner: Runner): Runner => originals.get(runner) ?? runner;
+
 /** Contexts can outlive a request; consult async-local ownership on every operation. */
 export function budgetRunner(runner: Runner): Runner {
-  return new Proxy(runner, { get(target, key) {
+  const scoped = new Proxy(runner, { get(target, key) {
     const value = Reflect.get(target, key);
     if (typeof value !== 'function') return value;
     if (key === 'now' || key === 'note') return value.bind(target);
-    return async (...args: unknown[]) => {
+    return (...args: unknown[]) => {
+      if (!requests.getStore()) return value.apply(target, args);
+      return (async () => {
       checkResponseBudget();
       if (key === 'exec' && requests.getStore()) {
         const request = requests.getStore()!;
@@ -44,6 +49,9 @@ export function budgetRunner(runner: Runner): Runner {
       const result = await value.apply(target, args);
       checkResponseBudget();
       return result;
+      })();
     };
   } });
+  originals.set(scoped, runner);
+  return scoped;
 }

@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- P62 follow-up: cloned worker/probe contexts preserve a single tmux socket scope; CLI/watch runner calls retain their original scheduling outside MCP requests. / Konteksty workera i sond zachowują pojedynczy wybór socketu tmux; wywołania CLI/watch poza MCP zachowują dotychczasowe planowanie.
+
 - P62: bound all MCP responses to 8 seconds with explicit partial results; durable queue/new token receipts prevent duplicate orders, status exposes registrations, provider reads avoid watcher polling locks, and GC sizes refresh in the background. / Odpowiedzi MCP mają budżet 8 sekund i jawny wynik częściowy; trwałe potwierdzenia tokenów queue/new chronią przed podwójnymi zleceniami, status pokazuje rejestracje, odczyty nie czekają na polling watch, a rozmiary GC odświeżają się w tle.
 
 - P52: publish report/results once per completed attempt; repeated report edits and duplicate decisions/actions stay quiet. / Raport i wyniki są ogłaszane raz na zakończoną próbę; kolejne edycje oraz powtórzone decyzje i akcje nie mnożą wpisów.
