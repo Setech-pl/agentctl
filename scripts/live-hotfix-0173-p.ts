@@ -14,7 +14,7 @@ for (const [agent, mode] of [['claude','claude-spinner'],['claude','hook'],['cod
   const repo = path.join(h.root, 'repo'); fs.mkdirSync(repo);
   for (const args of [['init','-qb','main'],['commit','--allow-empty','-qm','fixture']]) assert.equal(spawnSync('git',args,{cwd:repo,env:h.env}).status,0);
   const report = path.join(h.root,'cache/t1/T1.md');
-  const spec = `---\ntask: T1\nagent: ${agent}\nmodel: ${agent === 'claude' ? 'haiku' : 'gpt-6-luna'}\neffort: low\ncohort: P\nreport: ${report}\nrepos:\n  - {path: ${repo}, worktree: ${repo}-wt}\n---\nOriginal prompt\n`;
+  const spec = `---\ntask: T1\nagent: ${agent}\nmodel: ${agent === 'claude' ? 'haiku' : 'gpt-6-luna'}\neffort: ${agent === 'codex' ? 'medium' : 'low'}\ncohort: P\nreport: ${report}\nrepos:\n  - {path: ${repo}, worktree: ${repo}-wt}\n---\nOriginal prompt\n`;
   const client = new Client({ name: 'fix2-p', version: '1' });
   await client.connect(new StdioClientTransport({ command: process.execPath, args: ['--experimental-strip-types','--no-warnings',path.resolve(import.meta.dirname,'../bin/agentctl.ts'),'mcp'], env: h.env as Record<string,string>, cwd: '/', stderr: 'pipe' }));
   const call = async (name: string, args: Record<string,unknown> = {}) => { const r = await client.callTool({ name, arguments: args }); return { error: r.isError, text: (r.content as {text:string}[]).map(c=>c.text).join('\n') }; };

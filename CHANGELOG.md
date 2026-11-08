@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.19.0] - 2026-11-08
 
+- RC: live delivery scenarios (hotfix-0173-fix, hotfix-0173-p, p15-send) use codex effort medium; 0.19 refuses codex low (b854731 effort policy). / RC: scenariusze live dostarczania (hotfix-0173-fix, hotfix-0173-p, p15-send) używają dla codex effort medium; 0.19 odrzuca low dla codex (polityka effort z b854731).
+
 - RC: live scenarios port the 0.18.2 RC3 fixes (watcher-mediated start in hotfix-0173/-p, in-place CLI new in nc-workflow, watcher and async polling in production-0174, tmux-lost hint in resume); the 0.19 line forked before them. / RC: scenariusze live przenoszą poprawki RC3 z 0.18.2 (start przez watchera w hotfix-0173/-p, start CLI na miejscu w nc-workflow, watcher i asynchroniczne odpytywanie w production-0174, wskazówka tmux-lost w resume); linia 0.19 rozwidliła się przed nimi.
 
 - RC: live-economy ports the 0.18.2 RC fixes RC2-1 (7-hex SHA fixture) and RC2-2 (lost window is needs-attention with tmuxLost, not dead); the 0.19 line forked before them. / RC: live-economy przenosi poprawki RC 0.18.2: RC2-1 (SHA z 7 znaków hex w fixture) i RC2-2 (utracone okno to needs-attention z tmuxLost, nie dead); linia 0.19 rozwidliła się przed nimi.

@@ -41,7 +41,7 @@ async function scenario(name: string, agent: 'claude' | 'codex', spec: ReplaySpe
     const repo = path.join(h.root, 'repo'); fs.mkdirSync(repo);
     for (const args of [['init', '-qb', 'main'], ['commit', '--allow-empty', '-qm', 'fixture']]) assert.equal(spawnSync('git', args, { cwd: repo, env: h.env }).status, 0);
     const specFile = path.join(h.root, 't1.md');
-    fs.writeFileSync(specFile, `---\ntask: T1\nagent: ${agent}\nmodel: ${agent === 'claude' ? 'haiku' : 'gpt-6-luna'}\neffort: low\nreport: ${path.join(h.root, 'cache/t1/T1.md')}\nrepos:\n  - {path: ${repo}, worktree: ${repo}-wt}\n---\nOriginal prompt\n`);
+    fs.writeFileSync(specFile, `---\ntask: T1\nagent: ${agent}\nmodel: ${agent === 'claude' ? 'haiku' : 'gpt-6-luna'}\neffort: ${agent === 'codex' ? 'medium' : 'low'}\nreport: ${path.join(h.root, 'cache/t1/T1.md')}\nrepos:\n  - {path: ${repo}, worktree: ${repo}-wt}\n---\nOriginal prompt\n`);
     const started = h.agentctl(['new', specFile, '-y']);
     assert.equal(started.code, 0, started.stdout + started.stderr);
     const entries = () => fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map(l => JSON.parse(l)) : [];

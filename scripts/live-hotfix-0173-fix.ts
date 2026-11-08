@@ -11,7 +11,7 @@ for (const agent of ['codex','claude'] as const) for (const mode of ['swallow-fi
   const repo=path.join(h.root,'repo');fs.mkdirSync(repo);
   for(const args of [['init','-qb','main'],['commit','--allow-empty','-qm','fixture']])assert.equal(spawnSync('git',args,{cwd:repo,env:h.env}).status,0);
   const report=path.join(h.root,'cache/t1/T1.md'),spec=path.join(h.root,'spec.md');
-  fs.writeFileSync(spec,`---\ntask: T1\nagent: ${agent}\nmodel: ${agent === 'codex' ? 'gpt-6-luna' : 'haiku'}\neffort: low\nreport: ${report}\nrepos:\n  - path: ${repo}\n    worktree: ${repo}-wt\n---\n${'Original prompt '.repeat(75)}\n`);
+  fs.writeFileSync(spec,`---\ntask: T1\nagent: ${agent}\nmodel: ${agent === 'codex' ? 'gpt-6-luna' : 'haiku'}\neffort: ${agent === 'codex' ? 'medium' : 'low'}\nreport: ${report}\nrepos:\n  - path: ${repo}\n    worktree: ${repo}-wt\n---\n${'Original prompt '.repeat(75)}\n`);
   const result=h.agentctl(['new',spec,'-y',...(mode==='trust'?['--no-wait-trust']:[])],{timeoutMs:30000});
   const entries=()=>fs.existsSync(log)?fs.readFileSync(log,'utf8').trim().split('\n').filter(Boolean).map(l=>JSON.parse(l)):[];
   if(mode==='trust') {
