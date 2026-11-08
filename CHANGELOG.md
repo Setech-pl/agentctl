@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.19.0] - 2026-11-08
 
+- RC: live-questions raises the collapsed Codex question on an idle agent via an explicit trigger (P65: a working Codex's collapsed question is no wait), and the answer-clearing check polls instead of a fixed sleep. / RC: live-questions pokazuje zwinięte pytanie Codexa na bezczynnym agencie przez jawną komendę (P65: zwinięte pytanie pracującego Codexa nie jest oczekiwaniem), a sprawdzenie odpowiedzi odpytuje zamiast sztywnego sleep.
+
 - RC: nc-workflow waits for the cohort records to close before the cohort tick; under gate load the MCP close confirm can return a budget partial while the close still applies. / RC: nc-workflow czeka na zamknięcie rekordów kohorty przed tickiem kohorty; pod obciążeniem gate potwierdzenie close przez MCP może zwrócić wynik częściowy, gdy zamknięcie jeszcze trwa.
 
 - RC: live-p28b's fixture report carries the report-end sentinel; 0.19 requires it for attempt-scoped readiness. / RC: raport fixture w live-p28b ma znacznik końca raportu; 0.19 wymaga go dla gotowości wiązanej z attemptem.

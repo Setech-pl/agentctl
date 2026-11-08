@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import net from 'node:net';
 import { defaultCacheRoot, withHarness } from './live-harness.ts';
+import { loadGlobalConfig } from '../src/core/config.ts';
 import type { Harness } from './live-harness.ts';
 
 /* Live question checks through live-harness.ts: isolated tmux, fake agents and localhost ntfy. */
@@ -68,7 +69,8 @@ while IFS= read -r line; do
  printf '\\033[2J\\033[H'
  case "$line" in
   *ANSWER*) printf '› Ask Codex to do anything\\n  GPT-6.1-Sol low · ~/fake\\n  ? for shortcuts\\n';;
-  *) printf 'Working (esc to interrupt)\\nQueued follow-up inputs\\n? 2 questions\\n  ⇧↑ to answer\\n';;
+  *RAISEQ*) printf 'Queued follow-up inputs\\n? 2 questions\\n  ⇧↑ to answer\\n› Ask Codex to do anything\\n  GPT-6.1-Sol low · ~/fake\\n  ? for shortcuts\\n';;
+  *) printf '● got: prompt accepted\\n› Ask Codex to do anything\\n  GPT-6.1-Sol low · ~/fake\\n  ? for shortcuts\\n';;
  esac
 done
 `);
@@ -77,15 +79,17 @@ done
     fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('agent: claude', 'agent: codex').replace('model: opus', 'model: gpt-5.4'));
     check('Codex fake starts', h.agentctl(['new', file, '-y']).code === 0);
     await sleep(1000);
+    check('initial prompt delivered before the question appears', /prompt_delivery: sent|prompt_delivery: confirming/.test(fs.readFileSync(path.join(loadGlobalConfig(h.agentctlHome).stateDir, 'lq-1', 'TASK.md'), 'utf8')));
+    h.tmux(['send-keys', '-t', `=${h.session}:lq-1`, 'RAISEQ', 'Enter']);
+    check('question screen up', await until(() => /needs-input/.test(h.agentctl(['status', '--json']).stdout)));
     const status = h.agentctl(['status', '--json']);
-    check('working plus question is needs-input', /needs-input/.test(status.stdout), status.stdout);
+    check('idle collapsed question is needs-input (P65: only a waiting Codex counts)', /needs-input/.test(status.stdout), status.stdout);
     check('status has count and shortcut', /zwinięte, 2/.test(status.stdout) && /⇧↑/.test(status.stdout), status.stdout);
     const peek = h.agentctl(['peek', 'LQ-1']);
     check('peek explains how to open', /Enter → okno agenta, potem ⇧↑/.test(peek.stdout), JSON.stringify(peek));
     check('repeated reads keep needs-input', [1,2,3].every(() => /needs-input/.test(h.agentctl(['status', '--json']).stdout)));
     h.tmux(['send-keys', '-t', `=${h.session}:lq-1`, 'ANSWER', 'Enter']);
-    await sleep(500);
-    check('answered question clears', !/needs-input/.test(h.agentctl(['status', '--json']).stdout));
+    check('answered question clears', await until(() => !/needs-input/.test(h.agentctl(['status', '--json']).stdout)), h.agentctl(['status', '--json']).stdout);
     const doctor = h.agentctl(['doctor']);
     check('repo doctor exits zero in isolated harness', doctor.code === 0, doctor.stdout + doctor.stderr);
   });
@@ -125,7 +129,7 @@ while IFS= read -r line; do
  case "$line" in
   *OPTIN*) printf 'Czy ujawnić opt-in hunter2-private-question?\\n  1. Yes\\n  2. No\\n  Press enter to confirm or esc to cancel\\n';;
   *EXPANDED*) printf 'Czy ujawnić hunter2-private-question?\\n  1. Yes\\n  2. No\\n  Press enter to confirm or esc to cancel\\n';;
-  *COLLAPSED*) printf 'Working (esc to interrupt)\\n? 2 questions\\n  ⇧↑ to answer\\n';;
+  *COLLAPSED*) printf '? 2 questions\\n  ⇧↑ to answer\\n› Ask Codex to do anything\\n  GPT-6.1-Sol low · ~/fake\\n  ? for shortcuts\\n';;
   *) printf '● got: prompt accepted\\n› Ask Codex to do anything\\n  GPT-6.1-Sol low · ~/fake\\n  ? for shortcuts\\n';;
  esac
 done
