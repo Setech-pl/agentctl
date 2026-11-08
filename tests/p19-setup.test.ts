@@ -197,8 +197,11 @@ describe('P19: MCP new with setup is handed to the watcher', () => {
     for (const args of [{ confirm: true, preview_token: token }, { confirm: true }, {}]) {
       const again = await e.call('new', { spec: e.spec('TWICE-1'), ...args });
       assert.ok(!again.isError, text(again));
-      assert.match(text(again), /TWICE-1: already being started/);
-      assert.match(text(again), /Nothing was started a second time/);
+      if ('preview_token' in args) assert.match(text(again), /already executed: TWICE-1/);
+      else {
+        assert.match(text(again), /TWICE-1: already being started/);
+        assert.match(text(again), /Nothing was started a second time/);
+      }
     }
     assert.equal(readQueue(e.config).length, 1);
     await e.tick(false);

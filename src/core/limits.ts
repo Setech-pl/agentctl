@@ -269,9 +269,9 @@ export function parseAssignments(args: string[], ids: readonly AgentName[] = DEF
 }
 
 /** "limity: claude 3 → 4, codex 5 → -": the same words whoever changed the file, so that the journal says it once. */
-export function limitsDiffText(from: GlobalConfig['limits'], to: GlobalConfig['limits']): string | undefined {
+export function limitsDiffText(from: GlobalConfig['limits'], to: GlobalConfig['limits'], ids: readonly AgentName[] = PROVIDER_IDS.filter(id => id in from || id in to)): string | undefined {
   const parts = AGENT_NAMES.filter((a) => (from[a] ?? null) !== (to[a] ?? null)).map((a) => `${a} ${from[a] ?? '-'} → ${to[a] ?? '-'}`);
-  return parts.length === 0 ? undefined : `limity: ${parts.join(', ')}`;
+  return parts.length === 0 ? undefined : `limity: ${parts.join(', ')}; providers: ${ids.map(id => `${id}=${to[id] ?? '-'}`).join(', ')}`;
 }
 
 export interface LimitsChange {
@@ -319,6 +319,6 @@ export async function applySetLimits(ctx: Context, plan: LimitsPlan): Promise<vo
     if (c.to === null) delete after[c.agent];
     else after[c.agent] = c.to;
   }
-  const text = limitsDiffText(ctx.config.limits, after);
+  const text = limitsDiffText(ctx.config.limits, after, activeProviders(ctx.config));
   if (text) await recordJournalOnce(ctx, { kind: 'limits-changed', text });
 }

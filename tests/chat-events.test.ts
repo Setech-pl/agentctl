@@ -83,8 +83,10 @@ describe('events: the journal and the markers', () => {
   it('--cohort keeps the events of the cohort (a task of it, or the cohort itself) and the summary of its tasks', async () => {
     const w = world('cohort');
     // Historical closed tasks: this test filters recorded events, rather than discovering a new tmux loss.
-    seedTask(w.config, 'NC-1', { cohort: 'Sprint', closed: true });
-    seedTask(w.config, 'NC-2', { closed: true });
+    for (const record of [seedTask(w.config, 'NC-1', { cohort: 'Sprint', closed: true }), seedTask(w.config, 'NC-2', { closed: true })]) {
+      fs.mkdirSync(path.dirname(record.report), { recursive: true });
+      fs.writeFileSync(record.report, 'Werdykt: PASS\n<!-- agentctl:report-end -->\n');
+    }
     w.at(min(1));
     await recordJournal(w.ctx, { kind: 'report-ready', task: 'NC-1', text: 'NC-1 raport gotowy', verdict: 'PASS' });
     await recordJournal(w.ctx, { kind: 'report-ready', task: 'NC-2', text: 'NC-2 raport gotowy' });

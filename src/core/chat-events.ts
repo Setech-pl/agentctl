@@ -145,7 +145,7 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
   const report: EventsReport = { client: opts.client, since: new Date(since.ms).toISOString(), sinceLabel: since.label, ...(since.note ? { note: since.note } : {}), cohort, events, summary, away: awayView(config), markerMoved: false, has_more: false, next_cursor: '' };
   const encode = () => `e2:${position.index}:${position.offset}`;
   const baseNeedYou = [...summary.needYou];
-  const updateNeedYou = () => { report.summary.needYou = [...baseNeedYou, ...events.filter(e => !('fragment' in e) && e.kind === 'report-outputs').flatMap(e => [...(e.decisions ?? []).map(text => `${e.reviewOf ? 'przegląd ' : ''}${e.task}: decision: ${text}`), ...(e.actions ?? []).map(a => `${e.reviewOf ? 'przegląd ' : ''}${e.task}: action: ${a.title} (${a.shell})`)])]; };
+  const updateNeedYou = () => { report.summary.needYou = [...new Set([...baseNeedYou, ...events.filter(e => !('fragment' in e) && e.kind === 'report-outputs').flatMap(e => [...(e.decisions ?? []).map(text => `${e.reviewOf ? 'przegląd ' : ''}${e.task}: decision: ${text}`), ...(e.actions ?? []).map(a => `${e.reviewOf ? 'przegląd ' : ''}${e.task}: action: ${a.title} (${a.shell})`)])])]; };
   const fits = () => { updateNeedYou(); return Math.max(Buffer.byteLength(JSON.stringify(report, null, 2)), Buffer.byteLength(renderEvents(report).join('\n'))) <= (opts.maxBytes ?? 16000); };
   const limit = Math.max(1, Math.min(200, opts.limit ?? 100));
   while (position.index < all.length && events.length < limit) {

@@ -202,25 +202,26 @@ export function outputsPending(config: Pick<Context['config'], 'reportSettleS'>,
   return config.reportSettleS > 0 && report.mtime !== undefined && nowMs - report.mtime < config.reportSettleS * 1000;
 }
 
-/** Once per completed report hash, also across hooks and watcher restarts. */
+/** Once per completed attempt, also across report edits, hooks and watcher restarts. */
 export async function journalOutputs(ctx: Context, record: TaskRecord): Promise<void> {
   if (ctx.runner.dryRun) return;
   const report = inspectReport(ctx.config, record, ctx.runner.now(), !record.attemptId);
-  if (!report.ready || !report.signature) return;
+  if (!report.ready || !report.signature || (record.attemptId && !report.sentinel)) return;
+  const identity = record.attemptId ? `attempt:${record.attemptId}` : `started:${record.started}`;
   if (outputsPending(ctx.config, record, report, ctx.runner.now())) return;
   const file = path.join(ctx.config.stateDir, record.window, 'outputs-seen.json');
   await withFileLock(`${file}.lock`, async () => {
     let seen: string[] = [];
     try { seen = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* first report */ }
-    if (seen.includes(report.signature!)) return;
+    if (seen.includes(identity)) return;
     const data = await readOutputs(ctx, record);
     // A closed task from before the protocol was never asked for the block: its absence is not a warning (a block it has is still journaled).
-    if (!record.outputsProtocol && !data.outputs) { await ctx.runner.writeFile(file, JSON.stringify([...seen, report.signature])); return; }
+    if (!record.outputsProtocol && !data.outputs) { await ctx.runner.writeFile(file, JSON.stringify([...seen, identity])); return; }
     // Journal is also the recovery ledger if a process died before writing outputs-seen.
-    if (!readJournal(ctx.config, -1).some(e => e.kind === 'report-outputs' && e.task === record.task && e.reportHash === report.signature)) {
-      await recordJournal(ctx, { kind: 'report-outputs', task: record.task, ...(record.reviewOf ? { reviewOf: record.reviewOf } : {}), reportHash: report.signature, decisions: data.outputs?.decisions ?? [], actions: data.outputs?.actions ?? [], text: data.outputs_valid ? `${record.task}: ${countText(data.outputs!.decisions.length, 'decyzja', 'decyzje', 'decyzji')}, ${countText(data.outputs!.actions.length, 'akcja', 'akcje', 'akcji')}` : `${record.task}: outputs warning: ${data.outputs_errors.join('; ')}` });
+    if (!readJournal(ctx.config, -1).some(e => e.kind === 'report-outputs' && e.task === record.task && (e.reportAttempt === identity || (!e.reportAttempt && e.reportHash === report.signature)))) {
+      await recordJournal(ctx, { kind: 'report-outputs', task: record.task, ...(record.reviewOf ? { reviewOf: record.reviewOf } : {}), reportHash: report.signature, reportAttempt: identity, decisions: data.outputs?.decisions ?? [], actions: data.outputs?.actions ?? [], text: data.outputs_valid ? `${record.task}: ${countText(data.outputs!.decisions.length, 'decyzja', 'decyzje', 'decyzji')}, ${countText(data.outputs!.actions.length, 'akcja', 'akcje', 'akcji')}` : `${record.task}: outputs warning: ${data.outputs_errors.join('; ')}` });
     }
-    await ctx.runner.writeFile(file, JSON.stringify([...seen, report.signature]));
+    await ctx.runner.writeFile(file, JSON.stringify([...seen, identity]));
   });
 }
 

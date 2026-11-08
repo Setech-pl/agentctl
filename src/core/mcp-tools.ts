@@ -1,3 +1,6 @@
+import { withResponseBudget } from './response-budget.ts';
+import type { BudgetClock } from './response-budget.ts';
+import type { QueueConfirmation } from './queue.ts';
 import { queueDiagnosticSources } from './queue.ts';
 import { isHeavy } from './heavy.ts';
 import { DEFAULT_PROVIDERS } from './providers/types.ts';
@@ -5,7 +8,7 @@ import { get as providerValue } from './providers/registry.ts';
 import type { AgentName } from './config.ts';
 import { provider, activeProviders, perProvider, PROVIDER_IDS } from './providers/registry.ts';
 import { checkReportPath, readReportText, reportPathWarnings } from './report-path.ts';
-import { atomicAppendFile } from './atomic-file.ts';
+import { atomicAppendFile, atomicWriteFile } from './atomic-file.ts';
 import { missingLinkTargets, checkLinkTargets } from './links.ts';
 import { inspectReport } from './report-state.ts';
 import { findBlocked } from './depends.ts';
@@ -114,6 +117,8 @@ export interface McpDeps {
   /** What this server process is: the version it loaded, its script, its pid and when it started. Shown by `version` and `status`. */
   server?: ServerInfo | undefined;
   clientId?: string;
+  /** Deterministic deadline injection for load tests. */
+  budgetClock?: BudgetClock;
   /** Each initialized transport snapshots the client's high-water marks, then consumes independently. */
   eventsSession?: { initialSince: string; markers: Partial<Record<string, string>>; cursors: Partial<Record<string, string>> };
 }
@@ -328,7 +333,7 @@ async function runStatus(deps: McpDeps, args: { all?: boolean | undefined; cohor
   const colliding = shown.filter((r) => r.collide.length > 0);
   if (colliding.length > 0) extra.push(`⚠${colliding.length} tasks overlap; overlap has details.`);
   extra.push(awayLine(ctx));
-  return { text: [statusLine(shown, rows.length - shown.length), ...extra, ...shown.map(compactStatus)].join('\n'), data: { ...(args.detail || args.capacity ? { disk: await collectDisk(ctx, undefined, args) } : {}), tasks: shown.map(statusRowForChat) } };
+  return { text: [statusLine(shown, rows.length - shown.length), ...extra, ...shown.map(compactStatus)].join('\n'), data: { ...(args.detail || args.capacity ? { disk: await collectDisk(ctx, undefined, args) } : {}), tasks: [...shown.map(row => { const entry = views.find(v => v.entry.task === row.task)?.entry; return { ...statusRowForChat(row), ...(entry ? { state: entry.status === 'queued' ? 'registered' : entry.status } : {}) }; }), ...views.filter(v => !shown.some(r => r.task === v.entry.task)).map(v => ({ task: v.entry.task, agent: v.entry.agent, state: v.entry.status === 'queued' ? 'registered' : v.entry.status, startCondition: v.condition.text }))] } };
 }
 
 /** "Away: on since …; the phone gets the notifications" - what the chat should know about the phone. */
@@ -401,8 +406,8 @@ async function runEventsSince(deps: McpDeps, args: { since?: string | undefined;
 
 async function runGcPreview(deps: McpDeps, args: { older_than?: string | undefined; merged?: boolean | undefined; cohort?: string | undefined; detail?: boolean; offset?: number; limit?: number }): Promise<ToolResult> {
   const ctx = deps.context(() => {});
-  const plan = await planGc(ctx, { olderThan: args.older_than, branches: args.merged, cohort: args.cohort });
-  return ok(JSON.stringify({ ...gcView(plan, args), preview: true, execution: ctx.config.mcp.allow.includes('gc') ? 'gc preview then confirm' : 'requires gc in mcp.allow or CLI --apply' }));
+  const plan = await planGc(ctx, { olderThan: args.older_than, branches: args.merged, cohort: args.cohort, cachedSizes: true });
+  return ok(JSON.stringify({ ...gcView(plan, args), partial_result: 'Partial result: sizes are cached or measuring (unknown sizes count as 0); repeat for updated estimates.', preview: true, execution: ctx.config.mcp.allow.includes('gc') ? 'gc preview then confirm' : 'requires gc in mcp.allow or CLI --apply' }));
 }
 
 async function runResume(deps: McpDeps, args: { tasks?: string[] | undefined; all?: boolean | undefined; confirm?: boolean | undefined }): Promise<ToolResult> {
@@ -436,7 +441,7 @@ async function runSetLimits(deps: McpDeps, args: Partial<Record<AgentName, numbe
     const plan = planSetLimits(ctx.config, assignments);
     if (!args.confirm) return { text: `${plan.summary.join('\n')}\n\nNot changed yet. Show this to the user and ask; if they agree, call set_limits again with the same numbers and confirm: true.`, executed: false, announce: '' };
     await applySetLimits(ctx, plan);
-    return { text: `Limits changed (${plan.changes.map((c) => `${c.agent} ${c.from ?? '-'} -> ${c.to ?? '-'}`).join(', ')}). They are in force now: a running watch picks the file up and starts waiting tasks at its next tick.`, executed: true, announce: `limity ${plan.changes.map((c) => `${c.agent}=${c.to ?? 'brak'}`).join(' ')}` };
+    return { text: `Limits changed (${plan.changes.map((c) => `${c.agent} ${c.from ?? '-'} -> ${c.to ?? '-'}`).join(', ')}). They are in force now: a running watch picks the file up and starts waiting tasks at its next tick.`, executed: true, announce: `limity ${activeProviders(ctx.config).map(id => `${id}=${plan.changes.some(c => c.agent === id) ? plan.changes.find(c => c.agent === id)!.to ?? 'brak' : ctx.config.limits[id] ?? 'brak'}`).join(' ')}` };
   });
 }
 
@@ -770,8 +775,12 @@ async function writeTool(
     audit(ctx, { tool, task: label.task, outcome: result.executed ? 'done' : result.failed ? 'failed' : result.error ? 'error' : 'preview', ...(result.detail ? { detail: result.detail } : {}) });
     if (result.executed) {
       lastPreviewMutation.set(deps, tool as McpWriteTool);
-      await recordJournal(ctx, { kind: 'mcp-write', text: `${tool}: ${result.announce}` });
-      await mcpWriteNotice(ctx, deps.notify.bind(deps), result.announce);
+      const announce = async () => {
+        await recordJournal(ctx, { kind: 'mcp-write', text: `${tool}: ${result.announce}` });
+        await mcpWriteNotice(ctx, deps.notify.bind(deps), result.announce);
+      };
+      if (tool === 'queue' || tool === 'new') void announce().catch(() => undefined);
+      else await announce();
     }
     return { ...(result.error ? fail(result.text) : ok(result.text)), ...(result.data !== undefined ? { data: result.data } : {}) };
   } catch (e) {
@@ -876,7 +885,7 @@ async function runMove(deps: McpDeps, args: { task: string; agent?: AgentName | 
 /** `setup` runs shell commands: neither the top-level key nor `repos[].setup` is accepted from the chat (a repository's .agentctl.yaml setup still runs). */
 const chatSetup = (header: Record<string, unknown>): boolean => 'setup' in header || (Array.isArray(header.repos) && header.repos.some((r) => typeof r === 'object' && r !== null && 'setup' in r));
 
-interface NewMcpArgs { spec?: string | undefined; confirm?: boolean | undefined; agent?: AgentName | undefined; reuse?: boolean | undefined; no_agent?: boolean | undefined; cohort?: string | undefined; wait_trust?: boolean | undefined }
+interface NewMcpArgs { _confirmation?: QueueConfirmation; spec?: string | undefined; confirm?: boolean | undefined; agent?: AgentName | undefined; reuse?: boolean | undefined; no_agent?: boolean | undefined; cohort?: string | undefined; wait_trust?: boolean | undefined }
 async function runNew(deps: McpDeps, args: NewMcpArgs): Promise<ToolResult> {
   const probe = (): { tasks: string } => {
     // Only for the audit line: the task IDs named in the spec, without resolving anything.
@@ -920,7 +929,7 @@ async function runNew(deps: McpDeps, args: NewMcpArgs): Promise<ToolResult> {
         'Nothing was started. Start the watcher ("agentctl watch --tmux" in a terminal, or from the board), then call new again with a fresh preview. A start from the terminal ("agentctl new") runs in place.',
       );
     }
-    const { added, existing } = await registerDirectStart(ctx, specs.map((spec, i) => ({ raw: raws[i] as RawSpec, spec })), { reuse: Boolean(args.reuse), noAgent: Boolean(args.no_agent), ...(args.agent ? { agent: args.agent } : {}) });
+    const { added, existing } = await registerDirectStart(ctx, specs.map((spec, i) => ({ raw: raws[i] as RawSpec, spec })), { reuse: Boolean(args.reuse), noAgent: Boolean(args.no_agent), ...(args._confirmation ? { confirmation: args._confirmation } : {}), ...(args.agent ? { agent: args.agent } : {}) });
     if (existing.length > 0) return { text: existing.map((e) => directStartText(ctx.config, e, ctx.runner.now())).join('\n'), executed: false, announce: '' };
     return {
       text: `Registered: ${added.map((e) => `${e.task} (${e.agent} ${e.model}/${e.effort})`).join('; ')}. The ${args.no_agent ? 'worktrees are prepared' : 'task starts'} in the watcher, not in this call: ${[...['checkout'], ...(setupRepos.length > 0 ? [`setup of ${setupRepos.join(', ')}`] : []), ...(args.no_agent ? [] : ['the window'])].join(', ')} ${args.no_agent ? 'runs' : 'run'} there and survive a restart of this server or of the app. ` +
@@ -931,7 +940,7 @@ async function runNew(deps: McpDeps, args: NewMcpArgs): Promise<ToolResult> {
   });
 }
 
-async function runQueue(deps: McpDeps, args: { spec?: string | undefined; agent?: AgentName | undefined; cohort?: string | undefined; confirm?: boolean | undefined }): Promise<ToolResult> {
+async function runQueue(deps: McpDeps, args: { _confirmation?: QueueConfirmation; spec?: string | undefined; agent?: AgentName | undefined; cohort?: string | undefined; confirm?: boolean | undefined }): Promise<ToolResult> {
   let tasks = '?';
   try {
     tasks = splitSpecs(args.spec ?? '', 'mcp').map((s) => String(s.header.task ?? '?')).join(', ');
@@ -952,8 +961,8 @@ async function runQueue(deps: McpDeps, args: { spec?: string | undefined; agent?
     if (!args.confirm) {
       return { text: `${plan.summary.join('\n')}\n${diskLine(await collectDisk(ctx))}\n\nNot queued yet. Show this to the user and ask; if they agree, call queue again with the same spec and confirm: true.`, executed: false, announce: '' };
     }
-    const added = await commitQueueAdd(ctx, plan.items, opts);
-    const capacity = ctx.config.capacity.snapshot ? snapshotLines(capacitySnapshot(await collectCapacity(ctx), added.map((e) => e.agent))).join('\n') : '';
+    const added = await commitQueueAdd(ctx, plan.items, { ...opts, ...(args._confirmation ? { confirmation: args._confirmation } : {}) });
+    const capacity = ''; // Durable registration is the response boundary; watch owns starting and capacity sampling.
     return { text: `Queued: ${added.map((e) => e.task).join(', ')}. They start by themselves while "agentctl watch" runs, when a window of their provider is free (queue_list shows the line).${capacity ? `\n${capacity}` : ''}`, executed: true, announce: `queue ${added.map((e) => e.task).join(', ')}` };
   });
 }
@@ -1413,6 +1422,7 @@ const confirmedTools = new Set(['mark', 'new', 'queue', 'cancel', 'resume', 'mov
 const previews = new WeakMap<McpDeps, Map<string, { key: string; arguments: Record<string, unknown>; /** The arguments as they came in (the spec text, not its canonical form): a token-only confirm executes these. */ raw: Record<string, unknown>; scope: string; at: number; ttlS: number }>>();
 const lastPreviewMutation = new WeakMap<McpDeps, string>();
 const previewSessions = new WeakMap<McpDeps, string>();
+const confirmations = new WeakMap<McpDeps, Map<string, { name: string; key: string; tasks: string; result: Promise<ToolResult> }>>();
 const issuedPreviewTokens = new Map<string, { session: string; state: string }>();
 function canonical(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonical);
@@ -1534,7 +1544,7 @@ for (const tool of MCP_TOOLS) {
     const ctx = deps.context(() => {});
     if (!ctx.config.mcp.allow.includes(tool.name as McpWriteTool)) return writeTool(deps, tool.name as McpWriteTool, {}, async () => { throw new Error('unreachable'); });
     if (tool.name === 'mark' && planMark(ctx, args as MarkSelection).length === 1) return original(deps, args);
-    if (tool.name === 'new') {
+    if (tool.name === 'new' && !(args.confirm && args.preview_token)) {
       // A task that was handed to the watcher is being started (or failed to): a second preview or confirm, with or without a token, reports that state and starts nothing.
       let known: ReturnType<typeof findDirectStart>[] = [];
       let requested = 0;
@@ -1565,7 +1575,33 @@ for (const tool of MCP_TOOLS) {
     const tokenOnly = Boolean(confirm && typeof preview_token === 'string' && Object.keys(input).length === 0);
     const effective = tokenOnly && preview ? preview.raw : input;
     const deny = (reason: string) => { audit(ctx, { tool: tool.name, outcome: 'denied', detail: reason }); return fail(`Confirmation refused: ${reason}. Call again without confirm to recalculate the scope. Nothing was done.`); };
+    const receipts = confirmations.get(deps) ?? new Map(); confirmations.set(deps, receipts);
+    const replay = async (): Promise<ToolResult | undefined> => {
+      const receipt = token ? receipts.get(token) : undefined;
+      if (!receipt) return undefined;
+      if (receipt.name !== tool.name || (!tokenOnly && receipt.key !== key)) return deny('different tool or arguments for an executed token');
+      const result = await receipt.result;
+      return result.isError ? result : { ...result, text: `already executed: ${receipt.tasks}\n${result.text}` };
+    };
+    if (confirm && token && receipts.has(token)) return (await replay())!;
+    if (confirm && token && /^[a-f0-9-]{36}$/.test(token) && ['queue', 'new'].includes(tool.name)) {
+      let durable: QueueConfirmation | undefined;
+      try { durable = JSON.parse(fs.readFileSync(path.join(path.dirname(ctx.config.path), 'mcp-confirmations', `${token}.json`), 'utf8')); } catch { /* may have died after queue write */ }
+      const registered = readQueue(ctx.config).filter(e => e.confirmation?.token === token);
+      if (!durable && registered.length) {
+        const identity = registered[0]!.confirmation!;
+        if (identity.tool !== tool.name || (!tokenOnly && identity.key !== key)) return deny('different tool or arguments for an executed token');
+        if (registered.length < identity.tasks.length) return ok(`already executed: ${registered.map(e => e.task).join(', ')}\nPartial result: ${registered.length}/${identity.tasks.length} tasks registered before interruption; inspect queue_list and preview only missing tasks.`);
+        durable = identity;
+      }
+      if (durable) {
+        if (durable.tool !== tool.name || (!tokenOnly && durable.key !== key)) return deny('different tool or arguments for an executed token');
+        return ok(`already executed: ${durable.tasks.join(', ')}. Check status/queue_list for registration and start progress.`);
+      }
+    }
     if (confirm) {
+      const repeated = await replay();
+      if (repeated) return repeated;
       if (!preview) {
         const issued = token ? issuedPreviewTokens.get(token) : undefined;
         return deny(issued ? issued.session !== session ? 'different session' : `invalidated by ${issued.state}` : 'missing preview in this session (unknown token or restarted session)');
@@ -1600,17 +1636,36 @@ for (const tool of MCP_TOOLS) {
       return result;
     }
     if (preview!.scope !== scopeIdentity) return deny(`changed preview: invalidated by ${lastPreviewMutation.get(deps) ?? 'external operation'} (${tool.name} target scope changed)`);
-    if (token) { pending.delete(token); issuedPreviewTokens.set(token, { session, state: `${tool.name} confirmation already consumed` }); }
-    if (tool.name === 'archive') return writeTool(deps, 'archive', {}, async (fresh) => {
-      await applyArchive(fresh, scope as Awaited<ReturnType<typeof archiveClosed>>);
-      return { text: JSON.stringify(scope, null, 2), executed: true, announce: 'archive closed task state' };
-    });
-    if (tool.name === 'gc') return writeTool(deps, 'gc', {}, async (fresh) => {
-      const plan = scope as GcPlan;
-      const result = await applyGc(fresh, plan);
-      return { text: JSON.stringify(result, null, 2), executed: true, announce: `gc: ${result.done.length} items, ${result.freedBytes} bytes` };
-    });
-    return original(deps, tokenOnly ? { ...effective, confirm: true } : args);
+    // Another confirm may have completed while this one checked the scope.
+    if (token && receipts.has(token)) return (await replay())!;
+    const taskIds = typeof effective.spec === 'string' ? splitSpecs(effective.spec, 'confirmation').map(s => String(s.header.task)) : [String(effective.task ?? tool.name)];
+    const registration: QueueConfirmation | undefined = token && ['queue', 'new'].includes(tool.name) ? { token, key: preview!.key, tool: tool.name, tasks: taskIds } : undefined;
+    const execute = async (): Promise<ToolResult> => {
+      if (tool.name === 'archive') return writeTool(deps, 'archive', {}, async (fresh) => {
+        await applyArchive(fresh, scope as Awaited<ReturnType<typeof archiveClosed>>);
+        return { text: JSON.stringify(scope, null, 2), executed: true, announce: 'archive closed task state' };
+      });
+      if (tool.name === 'gc') return writeTool(deps, 'gc', {}, async (fresh) => {
+        const plan = scope as GcPlan;
+        const result = await applyGc(fresh, plan);
+        return { text: JSON.stringify(result, null, 2), executed: true, announce: `gc: ${result.done.length} items, ${result.freedBytes} bytes` };
+      });
+      return original(deps, { ...(tokenOnly ? { ...effective, confirm: true } : args), ...(registration ? { _confirmation: registration } : {}) });
+    };
+    const tasks = typeof effective.spec === 'string' ? splitSpecs(effective.spec, 'confirmation').map(s => String(s.header.task)).join(', ') : String(effective.task ?? effective.tasks ?? tool.name);
+    // Publish the promise before executing; simultaneous retries share one execution.
+    const result = Promise.resolve().then(execute);
+    if (token) receipts.set(token, { name: tool.name, key: preview!.key, tasks, result });
+    const done = await result;
+    if (done.isError) { if (token) receipts.delete(token); }
+    else if (token) {
+      if (registration) {
+        const directory = path.join(path.dirname(ctx.config.path), 'mcp-confirmations');
+        fs.mkdirSync(directory, { recursive: true });
+        atomicWriteFile(path.join(directory, `${token}.json`), JSON.stringify(registration));
+      }
+      if (receipts.size > 1000) receipts.delete(receipts.keys().next().value!); pending.delete(token); issuedPreviewTokens.set(token, { session, state: `${tool.name} confirmation already executed` }); }
+    return done;
   });
 }
 
@@ -1681,7 +1736,7 @@ for (const tool of MCP_TOOLS.filter(t => capacityCarriers.has(t.name))) {
     if (result.isError) return result;
     const ctx = deps.context(() => {});
     const warnings = sessionWarnings(deps, ctx).map(w => `Config warning: ${w}`);
-    const footer = await capacityFooter(deps, ctx, args.detail === true || args.capacity === true);
+    const footer = args.confirm && ['new', 'queue'].includes(tool.name) ? [] : await capacityFooter(deps, ctx, args.detail === true || args.capacity === true);
     // Core new/queue helpers also serve the CLI. Remove only their display footer here.
     const text = result.text.split('\n').filter(l => !/^(?:Plans:|plan:\s|capacity:|(?:WARNING: )?Disk:)/.test(l)).join('\n');
     if ((args.format === 'json' || args.detail === true && tool.name === 'status') && /^[{[]/.test(text)) {
@@ -1738,6 +1793,29 @@ for (const tool of MCP_TOOLS) {
     if (saved.covered === saved.text.length && saved.onDelivered) { await saved.onDelivered(); delete saved.onDelivered; }
     return page(lo);
   });
+}
+
+/** Deadline also covers formatting, capacity footers and notification work. */
+const lastReads = new WeakMap<McpDeps, Map<string, ToolResult>>();
+for (const tool of MCP_TOOLS) {
+  const run = tool.run;
+  tool.run = async (deps, args) => {
+    const key = `${tool.name}:${JSON.stringify(args)}`;
+    const saved = lastReads.get(deps) ?? new Map<string, ToolResult>(); lastReads.set(deps, saved);
+    return withResponseBudget(async () => {
+      const result = await run(deps, args);
+      if (tool.kind === 'read' && !result.isError) { if (saved.size >= 100) saved.delete(saved.keys().next().value!); saved.set(key, result); }
+      return result;
+    }, () => {
+      const ctx = deps.context(() => {});
+      const entries = readQueue(ctx.config);
+      const queue = `Durable queue (${entries.length}; first 20):\n` + entries.slice(0, 20).map(e => `${e.task}: ${e.status === 'queued' ? 'registered' : e.status}`).join('\n');
+      const cached = saved.get(key);
+      const prefix = `Partial result: 8 s response budget exhausted; ${cached ? 'last cached response follows' : 'durable queue snapshot follows'}. Retry reads; retry a confirm only with the same preview_token.\n`;
+      const limit = Math.max(256, ctx.config.mcp.maxResponseKb * 1024 - 1024);
+      return { text: prefix + Buffer.from([queue, cached?.text].filter(Boolean).join('\n')).subarray(0, limit).toString('utf8') };
+    }, deps.budgetClock);
+  };
 }
 
 /** Names of the tools, read first. */

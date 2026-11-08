@@ -1,5 +1,5 @@
 /** Shared value, assignment and URL redaction for persisted diagnostics and MCP output. */
-export const SECRET_KEY = /TOKEN|KEY|SECRET|PASSWORD|PASS|COOKIE|(?:^|[^a-z0-9])(?:AUTH(?:ORIZATION)?|OAUTH)(?=$|[^a-z0-9])/i;
+export const SECRET_KEY = /(?:^|[^a-z0-9])(?:TOKEN|KEY|SECRET|PASSWORD|PASS|COOKIE|AUTH(?:ORIZATION)?|OAUTH)(?=$|[^a-z0-9])/i;
 const ASSIGNMENT = /([\w.-]*(?:TOKEN|KEY|SECRET|PASSWORD|PASS|AUTH|COOKIE)[\w.-]*\s*[:=]\s*)("(?:\\.|[^"\\])*"|'[^']*'|[^\s,;]+)/gi;
 const assignmentKey = (prefix: string): string => prefix.trim().replace(/[:=]$/, '').trim();
 const URL_TEXT = /https?:\/\/[^\s"'<>]+/g;
@@ -35,7 +35,12 @@ export function secretRedactor(sources: unknown[], taskIds = new Set<string>()):
   for (const source of sources) collect(source);
   const cleanText = (input: string): string => {
     let text = input;
-    for (const secret of [...secrets].sort((a, b) => b.length - a.length)) text = text.split(secret).join('***');
+    for (const secret of [...secrets].sort((a, b) => b.length - a.length)) {
+      // Short values are masked in recognised fields/assignments only. Never eat a syllable of ordinary text.
+      if (secret.length < 8 || taskIds.has(secret)) continue;
+      const escaped = secret.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      text = text.replace(new RegExp(`(?<![\\p{L}\\p{N}_-])${escaped}(?![\\p{L}\\p{N}_-])`, 'gu'), '***');
+    }
     return text.replace(URL_TEXT, raw => {
       try {
         const url = new URL(raw);

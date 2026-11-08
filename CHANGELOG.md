@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- P52 follow-up: report alerts dedupe by attempt, allowing a completed new attempt even inside the old 90-second cross-source window. / Powiadomienia raportów są deduplikowane według próby; nowa zakończona próba jest ogłaszana także w dawnym 90-sekundowym oknie między źródłami.
+
+- P62 follow-up: partial responses put fresh queue registrations before cached content, so output limits cannot hide new orders; queued/starting status overrides older task rows. / Wynik częściowy umieszcza świeże rejestracje przed treścią z cache, aby limit odpowiedzi nie ukrywał nowych zleceń; stan kolejki ma pierwszeństwo nad starszym wierszem zadania.
+
+- P62 follow-up: cloned worker/probe contexts preserve a single tmux socket scope; CLI/watch runner calls retain their original scheduling outside MCP requests. / Konteksty workera i sond zachowują pojedynczy wybór socketu tmux; wywołania CLI/watch poza MCP zachowują dotychczasowe planowanie.
+
+- P62: bound all MCP responses to 8 seconds with explicit partial results; durable queue/new token receipts prevent duplicate orders, status exposes registrations, provider reads avoid watcher polling locks, and GC sizes refresh in the background. / Odpowiedzi MCP mają budżet 8 sekund i jawny wynik częściowy; trwałe potwierdzenia tokenów queue/new chronią przed podwójnymi zleceniami, status pokazuje rejestracje, odczyty nie czekają na polling watch, a rozmiary GC odświeżają się w tle.
+
+- P52: publish report/results once per completed attempt; repeated report edits and duplicate decisions/actions stay quiet. / Raport i wyniki są ogłaszane raz na zakończoną próbę; kolejne edycje oraz powtórzone decyzje i akcje nie mnożą wpisów.
+
+- P51: limit notifications and events list all configured providers, including unchanged optional providers. / Powiadomienia i zdarzenia limitów wymieniają wszystkich skonfigurowanych dostawców, także opcjonalnych bez zmiany limitu.
+
+- P67: mask recognised credentials without replacing short substrings, ordinary field names or task IDs. / Maskowanie rozpoznanych sekretów nie uszkadza krótkich fragmentów tekstu, zwykłych nazw pól ani identyfikatorów zadań.
+
 - MCP `set_limits` accepts `"off"` for an optional provider (Kimi) in the registered schema, the same as for Claude and Codex; `reserve` stays numeric-only (review X4). / MCP `set_limits` przyjmuje `"off"` dla opcjonalnego dostawcy (Kimi) w zarejestrowanym schemacie, tak samo jak dla Claude i Codexa; `reserve` pozostaje tylko liczbowe (przegląd X4).
 
 - Withdraw: an interrupted FIFO→active transfer leaves the same id in both stores; withdrawing it (full id or a prefix naming only that one message) now removes both copies as one message instead of being refused as ambiguous, so the message is never redelivered (review X3). / Wycofanie: przerwany trwały transfer zostawiał ten sam id w kolejce FIFO i w aktywnej dostawie; wycofanie go (pełnym id lub prefiksem wskazującym tylko tę jedną wiadomość) usuwa teraz obie kopie jako jedną wiadomość zamiast odrzucać jako niejednoznaczne, więc wiadomość nigdy nie zostanie dostarczona ponownie (przegląd X3).
