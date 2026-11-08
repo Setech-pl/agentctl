@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- R1 follow-up: camelCase secret matching preserves authorizationAuthor and other author metadata. / Uzupełnienie R1: dopasowanie sekretów camelCase zachowuje authorizationAuthor i pozostałe metadane autorów.
+
 - Integration B2: gate clean resolves dangling-link ancestors and sandbox sockets before any deletion or tmux stop; redirected sockets refuse the whole cleanup. / Integracja B2: gate clean sprawdza przodków wiszących linków i sockety przed usuwaniem lub zatrzymaniem tmux; przekierowany socket przerywa całe sprzątanie.
 
 - Integration B1: answer tokens are single-use, expire with preview.ttl_s and bind the complete frame and task/window identity; changed commands require a fresh preview. / Integracja B1: tokeny answer są jednorazowe, wygasają według preview.ttl_s i wiążą całą ramkę oraz tożsamość zadania/okna; zmiana polecenia wymaga nowego podglądu.

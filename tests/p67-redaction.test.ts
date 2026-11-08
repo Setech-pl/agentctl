@@ -23,5 +23,5 @@ it('R1: camelCase credentials and passwd are masked in fields, text and URLs', (
     assert.equal(clean(`credential ${value}`), 'credential ***');
     assert.equal(new URL(clean(`https://example.test/?${key}=${value}`)).searchParams.get(key), '***');
   }
-  assert.deepEqual(clean({ monkey: 'ordinary', bypass: 'ordinary', keyboard: 'ordinary', tokensCount: 3 }), { monkey: 'ordinary', bypass: 'ordinary', keyboard: 'ordinary', tokensCount: 3 });
+  assert.deepEqual(clean({ monkey: 'ordinary', bypass: 'ordinary', keyboard: 'ordinary', authorizationAuthor: 'ordinary', tokensCount: 3 }), { monkey: 'ordinary', bypass: 'ordinary', keyboard: 'ordinary', authorizationAuthor: 'ordinary', tokensCount: 3 });
 });
