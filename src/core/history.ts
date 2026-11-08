@@ -100,7 +100,7 @@ export async function snapshot(ctx: Context, record: TaskRecord, event: HistoryE
     if (p) progress = { commits: p.commits, files: p.files };
   }
   const usage = collectTaskUsage(config, openReader(config), allRecords(config), now).get(record.task);
-  const verdict = record.report ? readVerdict(record.report, config.notify.verdictPattern) : undefined;
+  const verdict = record.report ? readVerdict(record.report, config.notify.verdictPattern, record.reviewOf != null) : undefined;
   return {
     v: 1,
     agentctl_version: packageVersion(),

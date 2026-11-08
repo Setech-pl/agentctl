@@ -16,7 +16,7 @@ import { findBlocked } from './depends.ts';
 import { mcpWriteNotice } from './mcp-notify.ts';
 import { planMark, markTasks } from './mark.ts';
 import type { MarkSelection } from './mark.ts';
-import { readOutputs, aggregateOutputs } from './outputs.ts';
+import { readOutputs, aggregateOutputs, reviewVerdict } from './outputs.ts';
 import type { OutputData } from './outputs.ts';
 import { developmentEnvironment } from './installation.ts';
 import { withFileLock as withReportLock } from './file-lock.ts';
@@ -206,15 +206,16 @@ function compactStatus(r: StatusRow): string {
   return `${r.task} ${r.agent}/${r.model}/${r.effort} ${r.state} ${r.duration} cohort=${r.cohort ?? 'n/d'} report=${r.report === 'yes' ? 'yes' : r.reportCandidate ? 'candidate' : 'no'} decisions=${r.outputs_pending ? 'oczekuje' : r.decisionsCount ?? 0} actions=${r.outputs_pending ? 'oczekuje' : r.actionsCount ?? 0}${r.reviewOf ? ` review_of=${r.reviewOf} (decyzje i akcje: przegląd ${r.reviewOf})` : ''}${r.promptQueue?.length ? ` messages=${r.promptQueue.length} (${r.promptDelivery ?? 'queued'})` : ''}${r.collide.length ? ` ⚠${r.collide.length}` : ''}${r.question ? ` ? ${r.question}` : ''}${r.state === 'needs-attention' ? `; ${r.hint}` : ''}${!r.reportConfirmed && r.reportSource && path.normalize(r.reportSource) !== path.normalize(r.reportPath) ? `; raport pochodzi z kopii ${r.reportSource} – sprawdź` : ''}`;
 }
 
-/** Keep report facts once, without echoing checks or the outputs block. */
-function conciseReport(text: string, data: OutputData): string {
+/** Keep report facts once, without echoing checks or the outputs block. A review's verdict is the first line of its report (P70), with the outputs verdict alongside when they disagree. */
+function conciseReport(text: string, data: OutputData, review = false): string {
   const outputs = data.outputs;
   const prose = text.replace(/^ {0,3}(`{3,}|~{3,})agentctl-outputs\s*\n[\s\S]*?^ {0,3}\1\s*$/gm, '').replace(/<!--[^]*?-->/g, '').trim();
   const section = (pattern: RegExp) => {
     const h = markdownHeadings(prose).find(h => pattern.test(h.title));
     return h ? reportSection(prose, h.title).split('\n').slice(1).join('\n').trim() : '';
   };
-  const verdict = outputs?.verdict ?? prose.split('\n').find(l => /(?:Verdict|Werdykt):/i.test(l)) ?? prose.split('\n')[0] ?? 'n/d';
+  const rv = review ? reviewVerdict(text) : undefined;
+  const verdict = rv ? `${rv.first}${rv.inconsistent ? ` (outputs: ${rv.declared})` : ''}` : (outputs?.verdict ?? prose.split('\n').find(l => /(?:Verdict|Werdykt):/i.test(l)) ?? prose.split('\n')[0] ?? 'n/d');
   const decisions = outputs?.decisions.join('; ') || section(/^(decisions|decyzje)$/i) || 'n/d';
   const actions = outputs?.actions.map(a => `${a.title}: ${a.shell}`).join('; ') || section(/^(actions|akcje)$/i) || 'n/d';
   const lastOutputs = [...text.matchAll(/^ {0,3}(`{3,}|~{3,})agentctl-outputs\s*\n[\s\S]*?^ {0,3}\1\s*$/gm)].at(-1);
@@ -235,7 +236,7 @@ async function pullSummaries(ctx: Context, rows: StatusRow[], ack = false): Prom
     const record = findRecord(ctx, row.task);
     const text = readReportText(ctx.config, record, row.reportPath);
     const sha = /`([0-9a-f]{7,40})`/i.exec(text)?.[1] ?? /\b(?:SHA|commit)\s*[:=]?\s*`?([0-9a-f]{7,40})\b/i.exec(text)?.[1] ?? 'n/d';
-    parts.push(`=== ${row.task} ===\nattempt: ${row.attemptId ?? row.attempt ?? 'n/d (legacy)'}\npath: ${row.reportPath}\nbytes: ${Buffer.byteLength(text)}\nsha: ${sha}\ntruncated: ${Buffer.byteLength(text) > 1500}\n${conciseReport(text, await readOutputs(ctx, record))}`); taken.push(row);
+    parts.push(`=== ${row.task} ===\nattempt: ${row.attemptId ?? row.attempt ?? 'n/d (legacy)'}\npath: ${row.reportPath}\nbytes: ${Buffer.byteLength(text)}\nsha: ${sha}\ntruncated: ${Buffer.byteLength(text) > 1500}\n${conciseReport(text, await readOutputs(ctx, record), record.reviewOf != null)}`); taken.push(row);
     if (responseWireBytes(ok(response())) > ctx.config.mcp.maxResponseKb * 1024 - 512 && taken.length > 1) { parts.pop(); taken.pop(); break; }
   }
   for (const row of taken) await setHeaderField(ctx.runner, taskFile(ctx.config, row.windowName), 'summary_delivered', new Date(ctx.runner.now()).toISOString());
@@ -635,7 +636,7 @@ async function runGetReport(deps: McpDeps, args: { task: string; section?: strin
     throw new AgentctlError(state.reason === 'not a regular report' ? `the report of ${record.task} is not a regular file; refusing to read it` : `${record.task} has no report yet: ${state.reason}`, 'Use report to inspect candidates or wait for completion.');
   }
   if (!args.detail && args.mode !== 'full' && args.section === undefined && args.offset === undefined && args.byte_offset === undefined && args.limit === undefined) {
-    return ok(`=== ${record.task} (${record.agent} ${record.model}/${record.effort}) ===\n${conciseReport(readReportText(ctx.config, record, record.report), await readOutputs(ctx, record))}`);
+    return ok(`=== ${record.task} (${record.agent} ${record.model}/${record.effort}) ===\n${conciseReport(readReportText(ctx.config, record, record.report), await readOutputs(ctx, record), record.reviewOf != null)}`);
   }
   const outputs = (args.detail || args.mode === 'full') && !(args.offset ?? 0) && !(args.byte_offset ?? 0) ? await readOutputs(ctx, record) : {};
   const render = (r: ReportPage, pulled: boolean): ToolResult => {

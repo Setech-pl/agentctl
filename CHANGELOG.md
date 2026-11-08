@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- P70: a review's verdict is the first line of its report (`Werdykt: GO|GO-WITH-CHANGES|NO-GO`; PASS / PASS with findings / FAIL accepted) in events, status, get_report and pull_ready — a declared `outputs.verdict` no longer overrides it (POP-E1-REVIEW said NO-GO on the first line and PASS in the block); a disagreement raises a needs-attention event "inconsistent verdict: first line X, outputs Y" and both values are shown. The review report protocol now reads `verdict: GO|GO-WITH-CHANGES|NO-GO` (mapped GO = PASS, GO-WITH-CHANGES = PARTIAL, NO-GO = FAIL). / P70: werdykt przeglądu to pierwsza linia jego raportu (`Werdykt: GO|GO-WITH-CHANGES|NO-GO`; akceptowane też PASS / PASS with findings / FAIL) w zdarzeniach, statusie, get_report i pull_ready — zadeklarowany `outputs.verdict` nie przykrywa jej już (POP-E1-REVIEW miał NO-GO w pierwszej linii i PASS w bloku); niezgodność zgłasza zdarzenie needs-attention „inconsistent verdict: first line X, outputs Y” i pokazuje obie wartości. Protokół raportu przeglądu brzmi teraz `verdict: GO|GO-WITH-CHANGES|NO-GO` (mapowanie GO = PASS, GO-WITH-CHANGES = PARTIAL, NO-GO = FAIL).
+
 ## [0.19.0] - 2026-11-08
 
 - RC: live-questions raises the collapsed Codex question on an idle agent via an explicit trigger (P65: a working Codex's collapsed question is no wait), and the answer-clearing check polls instead of a fixed sleep. / RC: live-questions pokazuje zwinięte pytanie Codexa na bezczynnym agencie przez jawną komendę (P65: zwinięte pytanie pracującego Codexa nie jest oczekiwaniem), a sprawdzenie odpowiedzi odpytuje zamiast sztywnego sleep.
