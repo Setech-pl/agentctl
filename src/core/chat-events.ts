@@ -26,6 +26,9 @@ import { AgentctlError, cohortKey, formatLocalTime, isObject, plural } from './u
 
 export type EventClient = string;
 
+// Process lifetime is the MCP/CLI session; durable event cursors survive restarts.
+const ratingShown = new Set<string>();
+
 /** The first call of a client looks this far back. */
 export const FIRST_LOOK_MS = 24 * 3_600_000;
 
@@ -133,9 +136,10 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
   const open = rows.filter((r) => !r.closed && !r.cancelled && !r.hidden && (cohort === null || (r.cohort !== null && cohortKey(r.cohort) === cohortKey(cohort))));
   const alive = open.filter((r) => r.window === 'alive' && !r.finished);
   const queue = waiting(readQueue(config)).filter((e) => cohort === null || (e.cohort !== undefined && cohortKey(e.cohort) === cohortKey(cohort)));
+  const ratingKey = `${config.path}|${opts.client}`;
   const summary: EventsSummary = {
     active: alive.length,
-    unmarked: foldHistory(readHistory(config)).filter(r => r.reportAt && !r.result).length,
+    ...(!ratingShown.has(ratingKey) ? { unmarked: foldHistory(readHistory(config)).filter(r => r.reportAt && !r.result).length } : {}),
     working: alive.filter((r) => r.state === 'working' || r.state === 'background').length,
     needYou: open.filter((r) => r.state === 'needs-attention' || r.state === 'needs-input' || r.state === 'needs-trust' || r.state === 'waiting' || (r.reportCandidate && r.report !== 'yes')).map((r) => `${r.task} (${r.state})${r.question ? `: ${r.question}` : r.state === 'needs-attention' || (r.reportCandidate && r.report !== 'yes') ? `: ${r.hint}` : ''}`),
     queued: queue.length,
@@ -145,7 +149,8 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
   const report: EventsReport = { client: opts.client, since: new Date(since.ms).toISOString(), sinceLabel: since.label, ...(since.note ? { note: since.note } : {}), cohort, events, summary, away: awayView(config), markerMoved: false, has_more: false, next_cursor: '' };
   const encode = () => `e2:${position.index}:${position.offset}`;
   const baseNeedYou = [...summary.needYou];
-  const updateNeedYou = () => { report.summary.needYou = [...new Set([...baseNeedYou, ...events.filter(e => !('fragment' in e) && e.kind === 'report-outputs').flatMap(e => [...(e.decisions ?? []).map(text => `${e.reviewOf ? 'przegląd ' : ''}${e.task}: decision: ${text}`), ...(e.actions ?? []).map(a => `${e.reviewOf ? 'przegląd ' : ''}${e.task}: action: ${a.title} (${a.shell})`)])])]; };
+  const attentionTasks = new Set(rows.filter(r => !r.closed && !r.cancelled && !r.pulled).map(r => r.task));
+  const updateNeedYou = () => { report.summary.needYou = [...new Set([...baseNeedYou, ...events.filter(e => !('fragment' in e) && e.kind === 'report-outputs' && attentionTasks.has(e.task ?? '')).flatMap(e => [...(e.decisions ?? []).map(text => `${e.reviewOf ? 'przegląd ' : ''}${e.task}: decision: ${text}`), ...(e.actions ?? []).map(a => `${e.reviewOf ? 'przegląd ' : ''}${e.task}: action: ${a.title} (${a.shell})`)])])]; };
   const fits = () => { updateNeedYou(); return Math.max(Buffer.byteLength(JSON.stringify(report, null, 2)), Buffer.byteLength(renderEvents(report).join('\n'))) <= (opts.maxBytes ?? 16000); };
   const limit = Math.max(1, Math.min(200, opts.limit ?? 100));
   while (position.index < all.length && events.length < limit) {
@@ -196,6 +201,7 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
       while (Object.keys(markers).length > 256) delete markers[Object.keys(markers).find(k => k !== key && k !== 'cli')!];
       await runner.writeFile(markersPath(config), `${JSON.stringify(markers, null, 2)}\n`);
       report.markerMoved = true;
+      if (summary.unmarked) ratingShown.add(ratingKey);
     });
   }
   return report;

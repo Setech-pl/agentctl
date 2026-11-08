@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- P71: attention summaries omit closed/pulled outputs; show unrated count once per client session. / Podsumowanie pomija wyniki zamkniętych/pobranych zadań; licznik bez oceny pokazuje raz na sesję klienta.
+
 ## [0.19.0] - 2026-11-08
 
 - RC: live-questions raises the collapsed Codex question on an idle agent via an explicit trigger (P65: a working Codex's collapsed question is no wait), and the answer-clearing check polls instead of a fixed sleep. / RC: live-questions pokazuje zwinięte pytanie Codexa na bezczynnym agencie przez jawną komendę (P65: zwinięte pytanie pracującego Codexa nie jest oczekiwaniem), a sprawdzenie odpowiedzi odpytuje zamiast sztywnego sleep.

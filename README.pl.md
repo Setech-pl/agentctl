@@ -1068,3 +1068,5 @@ bajtów możliwych do odzyskania według bezpiecznego planu GC. Worktree z lokal
 zmianami, współdzielone i aktywne są pomijane. Odczyty z budżetem czasu pokazują
 rozmiar odzysku jako `n/d`; pełny podgląd go mierzy. Brakujące i trwające pomiary
 są oznaczone. `close` podaje rozmiar worktree pozostawionego lub przed usunięciem.
+
+`events_since` zachowuje historię zdarzeń, ale usuwa decyzje i akcje zamkniętych lub pobranych zadań z podsumowania oczekujących spraw. Licznik zadań bez oceny pojawia się raz na sesję klienta.

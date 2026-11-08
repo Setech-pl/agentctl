@@ -1068,3 +1068,5 @@ reclaimable bytes from the same safe default GC plan (dirty/shared/live
 worktrees are excluded). Budgeted readers report reclaimable size as `n/d`;
 run the full preview to measure it. Missing/pending measurements remain marked.
 `close` reports the retained task worktree size, or size before requested removal.
+
+`events_since` keeps historical events, but removes closed or pulled tasks’ decisions/actions from the attention summary. The unrated-task counter appears once per client session.
