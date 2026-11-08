@@ -20,7 +20,7 @@ for (const [agent, mode] of [['claude','claude-spinner'],['claude','hook'],['cod
   const call = async (name: string, args: Record<string,unknown> = {}) => { const r = await client.callTool({ name, arguments: args }); return { error: r.isError, text: (r.content as {text:string}[]).map(c=>c.text).join('\n') }; };
   const entries = () => fs.existsSync(log) ? fs.readFileSync(log,'utf8').trim().split('\n').filter(Boolean).map(line=>JSON.parse(line)) : [];
   const taskFile = path.join(h.root,'state/t1/TASK.md');
-  const sent = () => fs.readFileSync(taskFile,'utf8').includes('prompt_delivery: sent');
+  const sent = () => fs.existsSync(taskFile) && fs.readFileSync(taskFile,'utf8').includes('prompt_delivery: sent');
   // P34: every chat start goes through the watcher; MCP confirm only registers. Start it before `new` and wait for the heartbeat.
   const watcher = h.spawnAgentctl(['watch'],path.join(h.root,'watch.log'));
   try {
@@ -35,7 +35,7 @@ for (const [agent, mode] of [['claude','claude-spinner'],['claude','hook'],['cod
    } else {
     // Delivery is asynchronous now: the uncertainty hint opens when the watcher delivers and closes on the hook or delivery_confirm_s.
     const early=Date.now()+8000;let uncertainty=false,earlyAttention=false;
-    while(Date.now()<early){const row=JSON.parse(h.agentctl(['status','--json']).stdout)[0];if((row?.hint??'').includes('dostarczenie niepotwierdzone')){uncertainty=true;break;}if(sent())break;if(fs.readFileSync(taskFile,'utf8').includes('prompt_delivery: needs-attention')){earlyAttention=true;break;}await pause(150);}
+    while(Date.now()<early){const row=JSON.parse(h.agentctl(['status','--json']).stdout)[0];if((row?.hint??'').includes('dostarczenie niepotwierdzone')){uncertainty=true;break;}if(sent())break;if(fs.existsSync(taskFile)&&fs.readFileSync(taskFile,'utf8').includes('prompt_delivery: needs-attention')){earlyAttention=true;break;}await pause(150);}
     check(`P ${agent}/${mode}: uncertainty warning, no immediate attention`,(uncertainty||sent())&&!earlyAttention);
     if(mode==='hook') {
      const until=Date.now()+25000;while((!sent()||!entries().some(e=>e.hook===0))&&Date.now()<until)await pause(150);
@@ -45,7 +45,7 @@ for (const [agent, mode] of [['claude','claude-spinner'],['claude','hook'],['cod
      const end=Date.now()+25000;while((!sent()||entries().filter(e=>e.hook===0).length<2)&&Date.now()<end)await pause(150);
      check(`P ${agent}: send acknowledged once by current hook/notify`,sent()&&entries().filter(e=>e.paste).length===2 && entries().filter(e=>e.hook===0).length===2);
     } else {
-     const until=Date.now()+25000;while(!fs.readFileSync(taskFile,'utf8').includes('prompt_delivery: needs-attention')&&Date.now()<until)await pause(150);
+     const until=Date.now()+25000;while(!(fs.existsSync(taskFile)&&fs.readFileSync(taskFile,'utf8').includes('prompt_delivery: needs-attention'))&&Date.now()<until)await pause(150);
      check(`P ${agent}: watch resolves no evidence to attention`,JSON.parse(h.agentctl(['status','--json']).stdout)[0]?.state==='needs-attention');
      fs.mkdirSync(path.dirname(report),{recursive:true});fs.writeFileSync(report,'Werdykt: PASS\n<!-- agentctl:report-end -->\n');
      const end=Date.now()+15000;while(!sent()&&Date.now()<end)await pause(150);
