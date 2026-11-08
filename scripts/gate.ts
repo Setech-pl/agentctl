@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { liveCacheRoot } from './live-cache.ts';
+import { cleanLiveCache, humanSize } from './gate-clean.ts';
 import { checkRuntime, homebrewNode26, node22Path, runtimesDir } from './runtime.ts';
 
 import { acquireLock } from './gate-lock.ts';
@@ -68,6 +69,16 @@ function filesUnder(dir: string): string[] {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap(e => e.isDirectory() ? filesUnder(`${dir}/${e.name}`) : [`${dir}/${e.name}`]);
 }
 export async function main(args = process.argv.slice(2)): Promise<void> {
+  // P54: the only cleanup agents are allowed to run; it is not a tier and records no gate result.
+  if (args[0] === 'clean') {
+    if (args.length > 1) throw new Error('Usage: npm run gate -- clean');
+    const cache = liveCacheRoot();
+    const summary = cleanLiveCache(cache);
+    for (const socket of summary.stoppedServers) console.log(`gate clean: stopped leftover sandbox tmux server ${socket}`);
+    console.log(`gate clean: removed ${summary.removed.length ? summary.removed.join(', ') : '(nothing)'}; kept ${summary.kept.length ? summary.kept.join(', ') : '(nothing)'}`);
+    console.log(`gate clean: before ${humanSize(summary.before)} after ${humanSize(summary.after)} (${cache})`);
+    return;
+  }
   const opts = parseArgs([...args]);
   const cache = liveCacheRoot(); // P29 refusal before any writes or runtime provisioning.
   const sha = git('rev-parse', 'HEAD');

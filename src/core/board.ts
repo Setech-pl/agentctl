@@ -273,19 +273,24 @@ export function isGrouped(state: BoardState): boolean {
   return state.rows.some((r) => r.cohort !== null) || state.queue.some((v) => v.entry.cohort !== undefined);
 }
 
-/** The groups in the order they are listed: cohorts by name, "bez kohorty" ('') last. */
+/** P55: a task that waits for the human (folder trust) leads; the order of the rest is untouched. */
+const trustFirst = (rows: BoardRow[]): BoardRow[] => [...rows.filter((r) => r.state === 'needs-trust'), ...rows.filter((r) => r.state !== 'needs-trust')];
+
+/** The groups in the order they are listed: a group with a task waiting for trust leads (P55), then cohorts by name, "bez kohorty" ('') last. */
 function groupOrder(state: BoardState): { key: string; name: string | null }[] {
   const names = new Map<string, string>();
   for (const name of [...state.rows.map((r) => r.cohort), ...state.queue.map((v) => v.entry.cohort)]) if (name) names.set(cohortKey(name), names.get(cohortKey(name)) ?? name);
   const cohorts = [...names].sort((a, b) => a[0].localeCompare(b[0])).map(([key, name]) => ({ key, name: name as string | null }));
-  return [...cohorts, { key: '', name: null }];
+  const groups = [...cohorts, { key: '', name: null }];
+  const waiting = new Set(state.rows.filter((r) => r.state === 'needs-trust' && !r.closed && !r.cancelled && !r.finished).map((r) => groupOf(r.cohort)));
+  return [...groups.filter((g) => waiting.has(g.key)), ...groups.filter((g) => !waiting.has(g.key))];
 }
 
 /** The rows of the active section, in list order (grouped by cohort when there are cohorts), including the ones of folded groups. */
 function activeAll(state: BoardState): BoardRow[] {
   const rows = state.rows.filter((r) => !r.closed && !r.cancelled && !r.finished && (state.showHidden || !r.hidden) && passes(state, r.cohort));
-  if (!isGrouped(state)) return rows;
-  return groupOrder(state).flatMap((g) => rows.filter((r) => groupOf(r.cohort) === g.key));
+  if (!isGrouped(state)) return trustFirst(rows);
+  return groupOrder(state).flatMap((g) => trustFirst(rows.filter((r) => groupOf(r.cohort) === g.key)));
 }
 
 /** Tasks that still have a window, in the order of the status table (cohort by cohort when there are cohorts); hidden ones only with the `a` key. */
