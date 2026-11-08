@@ -797,3 +797,5 @@ Jeśli identyfikator zadania istnieje w bieżącym stanie i archiwum, postęp or
 Żywe wiersze tablicy zawsze zachowują dane o tokenach, także z flagą zamknięcia/anulowania lub kopią w archiwum. Zbieranie tokenów pomija wyłącznie te same nieaktywne, skrócone wiersze, które pomijają wyniki i kolejki promptów.
 
 Rozwinięcie ukrytych/zamkniętych sekcji klawiszem `a` od razu żąda pełnych danych, nawet bez zmiany aktywnego zaznaczenia; trwające odświeżanie kolejkuje pełne odświeżenie po swoim zakończeniu.
+
+Potwierdzenie answer jest jednorazowe i wygasa po `preview.ttl_s`. Wiąże pełną bieżącą ramkę, w tym polecenie i cwd, oraz tożsamość zadania/okna. Każda zmiana ramki wymaga nowego podglądu.

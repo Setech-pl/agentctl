@@ -43,7 +43,7 @@ function fakeKimi(root: string, initial: string, extraYaml = '') {
   } });
   const ctx = new Context(runner, config, () => {});
   seedTask(config, 'T1', { agent: 'kimi', model: 'k3', effort: 'high', windowId: '@1' });
-  return { ctx, config, keys, runner };
+  return { ctx, config, keys, runner, setScreen: (value: string) => { screen = value; } };
 }
 
 it('P63 preview names the options and sends no key; confirm with the token sends the digit', async () => {
@@ -96,4 +96,22 @@ it('P63 MCP answer is a write tool of its own permission and honours preview →
   const done = await tool.run(deps as never, { task: 'T1', option: 1, confirm: true, token } as never);
   assert.deepEqual(keys, ['1']);
   assert.match(String((done as { text?: string }).text ?? ''), /Approve once/);
+});
+
+it('integration: a changed command, expired token and replay never send approval', async () => {
+  const f = fakeKimi(scratch.sub('changed-command'), MENU);
+  const preview = await answerMenu(f.ctx, 't1', 1);
+  f.setScreen(MENU.replace('$ git status', '$ git diff'));
+  assert.equal((await answerMenu(f.ctx, 't1', 1, { token: preview.token! })).outcome, 'refused');
+  assert.equal(f.keys.length, 0);
+  f.setScreen(MENU);
+  const fresh = await answerMenu(f.ctx, 't1', 1);
+  assert.equal((await answerMenu(f.ctx, 't1', 1, { token: fresh.token! })).keySent, true);
+  f.setScreen(MENU);
+  assert.equal((await answerMenu(f.ctx, 't1', 1, { token: fresh.token! })).outcome, 'refused');
+  assert.deepEqual(f.keys, ['1']);
+  const expiry = await answerMenu(f.ctx, 't1', 1);
+  await f.runner.sleep((f.config.preview.ttlS + 1) * 1000);
+  assert.equal((await answerMenu(f.ctx, 't1', 1, { token: expiry.token! })).outcome, 'refused');
+  assert.deepEqual(f.keys, ['1']);
 });

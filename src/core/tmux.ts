@@ -159,8 +159,8 @@ export class Tmux {
   }
 
   /** Send one named key (e.g. Escape) to the window. */
-  async sendKey(window: string, key: string): Promise<ExecResult> {
-    return this.runner.exec('tmux', ['send-keys', '-t', await this.targetFor(window), key]);
+  async sendKey(window: string, key: string, knownId?: string): Promise<ExecResult> {
+    return this.runner.exec('tmux', ['send-keys', '-t', knownId ?? await this.targetFor(window), key]);
   }
 
   async pressEnter(window: string): Promise<ExecResult> {
