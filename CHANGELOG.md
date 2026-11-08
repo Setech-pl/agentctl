@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- P73-a compatibility: omit zero-byte cleanup totals so existing close notices stay concise. / Pomijanie zerowych sum sprzątania zachowuje zwięzłe komunikaty close.
+
 - P73-a: agentctl safely removes task worktree .cache after explicit settled report-end for every provider; global report.clean_worktree_cache opts out; close/GC retain freed-byte totals. / Agentctl bezpiecznie usuwa .cache worktree po ustabilizowaniu jawnego końca raportu dla każdego providera; globalne report.clean_worktree_cache wyłącza sprzątanie, a close/GC pokazują zwolnione bajty.
 
 - P72: reuse spec repository worktree placeholders for backend links; warn on missing or base-stale targets in previews/doctor. Queue accepts targets created by its own task. / Linki backendu korzystają z worktree repozytoriów specyfikacji; podglądy i doctor ostrzegają o brakujących i starszych celach. Kolejka akceptuje cele tworzone przez zadanie.
