@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- P64: a message queued in a working Codex (shown as "↳ …" above the composer) is recognised as queued-in-agent and stays pending as long as it is visible — no more false needs-attention "Prompt delivery not confirmed" while a long turn runs; the session transcript or the hook confirms the delivery when the turn takes the message. / P64: wiadomość w kolejce pracującego Codexa (widać ją jako „↳ …” nad polem wpisywania) jest rozpoznawana jako kolejka agenta i pozostaje oczekująca, póki jest widoczna — koniec fałszywego alarmu „Prompt delivery not confirmed” podczas długiej tury; transkrypt sesji albo hook potwierdza dostarczenie, gdy tura podejmie wiadomość.
+
 - MCP `set_limits` accepts `"off"` for an optional provider (Kimi) in the registered schema, the same as for Claude and Codex; `reserve` stays numeric-only (review X4). / MCP `set_limits` przyjmuje `"off"` dla opcjonalnego dostawcy (Kimi) w zarejestrowanym schemacie, tak samo jak dla Claude i Codexa; `reserve` pozostaje tylko liczbowe (przegląd X4).
 
 - Withdraw: an interrupted FIFO→active transfer leaves the same id in both stores; withdrawing it (full id or a prefix naming only that one message) now removes both copies as one message instead of being refused as ambiguous, so the message is never redelivered (review X3). / Wycofanie: przerwany trwały transfer zostawiał ten sam id w kolejce FIFO i w aktywnej dostawie; wycofanie go (pełnym id lub prefiksem wskazującym tylko tę jedną wiadomość) usuwa teraz obie kopie jako jedną wiadomość zamiast odrzucać jako niejednoznaczne, więc wiadomość nigdy nie zostanie dostarczona ponownie (przegląd X3).

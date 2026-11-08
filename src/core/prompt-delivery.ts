@@ -55,6 +55,23 @@ export function queueSignShown(agent: TaskRecord['agent'], screen: string, dimIn
 const markerOf = (record: TaskRecord) => record.agent === 'unknown' ? '❯' : provider(record.agent).screen.echoMarker;
 
 /**
+ * Codex 0.167 renders a message queued while a turn runs as "↳ <text>" (wrapped rows indented) right above the composer
+ * (P64: DEMO-BUG-1, 2026-11-08; tests/fixtures/screen-codex-0167-busy-queued.txt). True when such a block reads back as
+ * exactly `prompt`. The "↳" is Codex's own queue marker, not the "›" echo of a steered message.
+ */
+export function codexQueuedEcho(screen: string, prompt: string | undefined): boolean {
+  if (!prompt?.trim()) return false;
+  const lines = screen.split('\n').map(line => line.trimEnd());
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^\s*↳\s*\S/.test(lines[i]!)) continue;
+    const rows = [lines[i]!.replace(/^\s*↳\s*/, '')];
+    for (let j = i + 1; j < lines.length && /^\s{2,}\S/.test(lines[j]!) && !/^\s*↳/.test(lines[j]!); j++) rows.push(lines[j]!.replace(/^ {1,2}/, ''));
+    if (readsAs(rows, prompt, 'codex', true)) return true;
+  }
+  return false;
+}
+
+/**
  * The echo of `prompt` in the transcript of the screen: a line that starts with the agent's prompt marker plus the rows that continue it (the TUI
  * wraps long lines and indents the rest), read back to exactly the prompt - nothing squeezed, nothing left out. Counts the blocks above the input field.
  */
@@ -81,6 +98,7 @@ export function echoLines(screen: string, marker: string, prompt: string | undef
 export function deliveryClass(record: TaskRecord, screen: string, dimInput = ''): 'queued-in-agent' | null {
   if (!record.deliveryStartedAt || !record.deliveryWasBusy || !record.deliveryField || (record.deliveryEnters ?? 0) < 1 || screenMetadata(screen).draft_input) return null;
   if (record.deliveryQueueSign === false && queueSignShown(record.agent, screen, dimInput)) return 'queued-in-agent';
+  if (record.agent === 'codex' && codexQueuedEcho(screen, record.pendingPrompt)) return 'queued-in-agent';
   if (record.agent === 'codex' && echoLines(screen, markerOf(record), record.pendingPrompt, record.agent) > (record.deliveryEchoBaseline ?? 0)) return 'queued-in-agent';
   return null;
 }
@@ -255,6 +273,7 @@ async function deliverOnce(ctx: Context, window: string): Promise<'sent' | 'pend
       const source = proofOf(text);
       if (source) return sent(source);
       if (await keepConfirmedQueue(ctx, record)) return 'confirming';
+      let queued: 'queued-in-agent' | null = null;
       if (screen.code === 0 && record.agent !== 'unknown') {
         const settings = ctx.config.agents[record.agent], area = fieldArea(text, settings.footerPatterns, record.agent);
         // The text of our paste still stands in the field and nothing presses Enter for it any more: say so, with the way out.
@@ -262,7 +281,7 @@ async function deliverOnce(ctx: Context, window: string): Promise<'sent' | 'pend
           return record.promptDelivery === 'needs-attention' && record.deliveryResult === 'not-delivered-in-field' ? 'needs-attention' : attention('the paste of agentctl still stands in the input and no Enter is sent for it any more', true);
         }
         if (record.deliveryResult === 'not-delivered-in-field' && area.length && record.promptDelivery !== 'needs-attention') return attention('the input changed since our paste', true);
-        const queued = deliveryClass(record, text, screen.dimInput);
+        queued = deliveryClass(record, text, screen.dimInput);
         if (queued && record.deliveryResult !== 'queued-in-agent') await setHeaderFields(ctx.runner, file, { delivery_result: 'queued-in-agent', prompt_error: `${DELIVERY_WARNING}: ${QUEUED_IN_AGENT}` });
       }
       if (record.promptDelivery === 'needs-attention') {
@@ -278,6 +297,9 @@ async function deliverOnce(ctx: Context, window: string): Promise<'sent' | 'pend
         }
         return 'needs-attention';
       }
+      // A message the agent still shows in its own queue is pending, not lost: a turn can run far longer than
+      // delivery_confirm_s (P64: Codex held it 54 minutes). The hook or the transcript confirms when the turn takes it.
+      if (queued) return uncertain(QUEUED_IN_AGENT, 'queued-in-agent');
       if (ctx.runner.now() - Date.parse(record.deliveryStartedAt ?? record.started) >= ctx.config.deliveryConfirmS * 1000) return attention('no acknowledgement (hook, transcript) before delivery_confirm_s elapsed');
       return record.deliveryResult === 'not-delivered-in-field' ? 'confirming' : uncertain('awaiting hook or transcript', record.deliveryResult === 'queued-in-agent' ? 'queued-in-agent' : null);
     }
