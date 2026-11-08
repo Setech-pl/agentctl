@@ -803,3 +803,5 @@ Potwierdzenie answer jest jednorazowe i wygasa po `preview.ttl_s`. Wiąże pełn
 Gate clean sprawdza rozwiązaną ścieżkę socketu przed zatrzymaniem serwera, także przy zagnieżdżonych symlinkach i brakujących plikach. Socket poza piaskownicą przerywa całe sprzątanie.
 
 Znane ustalenie MAJOR L1: podczas odzyskiwania blokady gate trzeci uczestnik może przejąć publiczną ścieżkę, gdy żywy właściciel jest chwilowo przesunięty do nagrobka. Ten scenariusz nadal narusza wzajemne wykluczanie; poprawiono tylko wcześniejsze scenariusze REVIEW2.
+
+Numerowane menu nad świeżym edytorem jest historią i nie można na nie odpowiedzieć, także przy edytorze Kimi w ramce.

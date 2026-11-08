@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.19.0] - 2026-11-08
 
+- B1 follow-up: a fresh boxed Kimi composer below an old menu makes it history; answer refuses without sending a key. / Uzupełnienie B1: świeży edytor Kimi w ramce pod starym menu oznacza historię; answer odmawia bez wysyłania klawisza.
+
 Includes the 0.18.3 baseline plus P42, P51, P52, P54, the P55 feasibility outcome, and P60–P69. / Obejmuje bazę 0.18.3 oraz P42, P51, P52, P54, wynik wykonalności P55 i P60–P69.
 
 - Integration: gate accepts the npm forwarding separator in `npm run gate -- full -- --node26-only`. / Integracja: gate przyjmuje separator npm w `npm run gate -- full -- --node26-only`.

@@ -115,3 +115,14 @@ it('integration: a changed command, expired token and replay never send approval
   assert.equal((await answerMenu(f.ctx, 't1', 1, { token: expiry.token! })).outcome, 'refused');
   assert.deepEqual(f.keys, ['1']);
 });
+
+it('integration: a Kimi boxed composer below an old menu makes that menu history', async () => {
+  const stale = `${MENU}\n │ > fresh input\n`;
+  assert.equal(menuInFrame(stale), undefined);
+  const f = fakeKimi(scratch.sub('historical-menu'), stale);
+  assert.equal((await answerMenu(f.ctx, 't1', 1)).outcome, 'refused');
+  assert.deepEqual(f.keys, []);
+  f.setScreen(MENU);
+  assert.equal((await answerMenu(f.ctx, 't1', 1)).outcome, 'ready');
+  assert.deepEqual(f.keys, []);
+});

@@ -54,7 +54,7 @@ export function menuInFrame(screen: string): FrameMenu | undefined {
     options.push({ n: Number(m[2]), label: m[3]!.trim(), selected: Boolean(m[1]) });
   }
   if (options.length < 2 || !options.some(o => o.selected) || options.some((o, i) => o.n !== i + 1)) return undefined;
-  if (lines.slice(last + 1).some(l => /^\s*[❯›>](?:\s|$)/u.test(l) || /^\s*\?\s+\d+ questions?\b/i.test(l))) return undefined;
+  if (lines.slice(last + 1).some(l => /^\s*(?:│\s*)?[❯›>](?:\s|$)/u.test(l) || /^\s*\?\s+\d+ questions?\b/i.test(l))) return undefined;
   return { options, question: extractQuestion(screen) };
 }
 
