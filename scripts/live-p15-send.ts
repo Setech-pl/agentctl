@@ -153,7 +153,7 @@ await scenario('cx-steer', 'codex', codexSpec({ transcript: TX(5000) }), async (
   } finally { watcher.kill('SIGTERM'); }
 });
 
-await scenario('cx-question', 'codex', codexSpec({ transcript: TX(1500) }), async ({ h, log, record, run, sendFile, state }) => {
+await scenario('cx-question', 'codex', codexSpec({ transcript: TX(1500), screens: { ...codexSpec().screens, question: fx('screen-codex-question-collapsed.txt').replace(/^• Working \(27s • esc to interrupt\)\n/m, '• Waiting for your answer\n') } }), async ({ h, log, record, run, sendFile, state }) => {
   state({ state: 'question' }); await pause(500);
   const pastesBefore = log().filter(e => e.paste).length;
   const sent = run('send', sendFile(CODEX_LONG), '-y');
