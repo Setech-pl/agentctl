@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- RC: nc-workflow checks the needYou decision reminder before the whole-file get_report marks the author pulled; P71 omits pulled tasks' outputs from attention summaries. / RC: nc-workflow sprawdza przypomnienie o decyzji w needYou przed pełnym get_report, który oznacza autora jako pobranego; P71 pomija wyniki pobranych zadań w podsumowaniach.
+
 - RC: live-economy expects the unrated count once per client session (P71) and checks the after-pull reminder on a fresh client session; the manager session had already consumed its one show. / RC: live-economy oczekuje licznika bez oceny raz na sesję klienta (P71) i sprawdza przypomnienie po pobraniu na świeżej sesji klienta; sesja managera już zużyła swoje jedno pokazanie.
 
 ## [0.19.1] - 2026-11-08
