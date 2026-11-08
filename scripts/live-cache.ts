@@ -10,7 +10,7 @@ export class HarnessRefusal extends Error {
 }
 
 /** Resolve existing ancestors too, so an absent leaf cannot hide a symlink escape. No writes. */
-function canonical(file: string): string {
+export function canonical(file: string): string {
   try { return fs.realpathSync(file); } catch (error) {
     if (!['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
     // realpath cannot resolve a dangling symlink. Follow its recorded target before

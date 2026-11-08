@@ -91,3 +91,25 @@ it('npm run gate -- clean wires the CLI to the cache root and prints before/afte
   assert.notEqual(refused.status, 0);
   assert.match(refused.stderr, /AGENTCTL_LIVE_CACHE/);
 });
+
+it('integration B2: nested symlinks cannot redirect cleanup to an outside tmux server', () => {
+  const root = scratch.sub('nested-socket');
+  const outside = scratch.sub('outside-socket');
+  const server = path.join(outside, `tmux-${process.getuid?.() ?? 0}`);
+  fs.mkdirSync(server, { recursive: true });
+  fs.writeFileSync(path.join(server, 'default'), 'outside server');
+  fs.mkdirSync(path.join(root, 'live-escape'));
+  fs.symlinkSync(outside, path.join(root, 'live-escape', 'tmx'));
+  let killed = false;
+  assert.throws(() => cleanLiveCache(root, { killServer: () => { killed = true; } }), CleanRefusal);
+  assert.equal(killed, false);
+  assert.ok(fs.existsSync(path.join(root, 'live-escape')));
+  assert.equal(fs.readFileSync(path.join(server, 'default'), 'utf8'), 'outside server');
+});
+it('integration B2: a dangling link through an escaping ancestor refuses before any deletion', () => {
+  const root = scratch.sub('ancestor-escape');
+  fs.symlinkSync(scratch.sub('ancestor-outside'), path.join(root, 'alias'));
+  fs.symlinkSync(path.join(root, 'alias', 'missing'), path.join(root, 'live-dangling'));
+  assert.throws(() => cleanLiveCache(root), CleanRefusal);
+  assert.ok(fs.lstatSync(path.join(root, 'live-dangling')).isSymbolicLink());
+});

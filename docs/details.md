@@ -801,3 +801,5 @@ Live board rows always retain token details, even with closed/cancelled flags or
 Expanding hidden/closed sections with `a` requests full row details immediately, even if the active selection does not change; an in-flight refresh queues the deep follow-up.
 
 Answer confirmation is single-use and expires after `preview.ttl_s`. It binds the full current frame, including the command and cwd, and the task/window identity. Any frame change requires a new preview.
+
+Gate clean validates resolved sandbox socket paths before stopping servers, including nested symlinks and missing leaves. A socket outside its sandbox refuses the whole cleanup.

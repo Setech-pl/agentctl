@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { canonical } from './live-cache.ts';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
@@ -71,17 +72,16 @@ export function cleanLiveCache(root: string, deps: CleanDeps = {}): CleanSummary
   for (const name of candidates) {
     const p = path.join(canonicalRoot, name);
     const stat = fs.lstatSync(p);
-    let resolved: string;
-    try {
-      resolved = fs.realpathSync(p);
-    } catch {
-      // Dangling symlink: where it points is what matters, not that it exists.
-      resolved = stat.isSymbolicLink() ? path.resolve(path.dirname(p), fs.readlinkSync(p)) : p;
-    }
+    const resolved = canonical(p);
     if (!inside(resolved, canonicalRoot)) {
       throw new CleanRefusal(stat.isSymbolicLink()
         ? `${p} is a symlink whose target escapes the cache root ${canonicalRoot}`
         : `${p} resolves outside the cache root ${canonicalRoot}`);
+    }
+    // Nested socket-directory symlinks must never redirect kill-server outside this sandbox.
+    if (stat.isDirectory()) {
+      const socket = sandboxSocket(p);
+      if (!inside(canonical(socket), resolved)) throw new CleanRefusal(`${socket} resolves outside its sandbox ${resolved}`);
     }
   }
 
