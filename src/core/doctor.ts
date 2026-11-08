@@ -2,7 +2,7 @@ import { socketRunner } from './tmux-socket.ts';
 import { provider, PROVIDER_IDS, isActive } from './providers/registry.ts';
 import { collectStatus } from './status.ts';
 import { inspectReport } from './report-state.ts';
-import { missingLinkTargets, projectLinks } from './links.ts';
+import { linkBaseWarnings, missingLinkTargets, projectLinks } from './links.ts';
 import { listTaskRecords, listArchivedRecords } from './taskstore.ts';
 import { collectDisk, diskLine } from './disk.ts';
 import { projectGuide } from './guide.ts';
@@ -251,6 +251,7 @@ export async function runDoctor(
         if (reportRows.get(record.task)?.report !== 'yes') add(`report ${record.task}`, 'warn', `${report.ready ? 'incomplete for current turn' : report.reason}: ${record.report}${record.reportSource ? ` (previous copy: ${record.reportSource})` : ''}`);
         else if (!record.reportConfirmed && record.reportSource && path.normalize(record.reportSource) !== path.normalize(record.report)) add(`report ${record.task}`, 'warn', `raport pochodzi z kopii ${record.reportSource} – sprawdź`);
         if (record.closed || record.cancelled) continue;
+        for (const warning of [...missingLinkTargets(record.links), ...linkBaseWarnings(record.links, record.repos)]) add(`task links ${record.task}`, 'warn', warning);
         if (taskProcesses.some(command => /\/Cellar\/node(?:@[^/]+)?\//.test(command) && command.includes('--task') && command.replaceAll(/[^a-zA-Z0-9_-]+/g, ' ').split(' ').includes(record.task))) add(`task node ${record.task}`, 'warn', 'versioned Node path in active callback argv; works until Node is upgraded; regenerate task wiring when convenient');
         const dir = path.join(config.stateDir, record.window);
         for (const name of ['claude-settings.json']) {

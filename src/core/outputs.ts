@@ -1,3 +1,4 @@
+import { cleanWorktreeCache } from './worktree-cache.ts';
 import { readReportText } from './report-path.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -261,6 +262,7 @@ export async function journalOutputs(ctx: Context, record: TaskRecord): Promise<
   if (ctx.runner.dryRun) return;
   const report = inspectReport(ctx.config, record, ctx.runner.now(), !record.attemptId);
   if (!report.ready || !report.signature || (record.attemptId && !report.sentinel)) return;
+  await cleanWorktreeCache(ctx, record);
   const identity = record.attemptId ? `attempt:${record.attemptId}` : `started:${record.started}`;
   if (outputsPending(ctx.config, record, report, ctx.runner.now())) return;
   const file = path.join(ctx.config.stateDir, record.window, 'outputs-seen.json');
