@@ -40,6 +40,23 @@ function alive(pid: number): boolean {
 }
 
 /**
+ * A sibling tombstone of this lock whose owner is alive: a reclaimer has displaced a live lock and is about to roll it
+ * back. The freed path must not be taken in that window — the rollback rename lands only on a free path, and a newcomer
+ * already inside it would strand the live owner in the tombstone (L1, the three-contender interleaving).
+ */
+function liveTombstone(file: string): string | undefined {
+  const base = path.basename(file);
+  let names: string[];
+  try { names = fs.readdirSync(path.dirname(file)); } catch { return undefined; }
+  for (const name of names) {
+    if (!name.startsWith(`${base}.tombstone-`)) continue;
+    const state = lockState(path.join(path.dirname(file), name));
+    if (state?.owner && alive(state.owner.pid)) return name;
+  }
+  return undefined;
+}
+
+/**
  * Take a stale lock away, atomically: the lock (directory or legacy file) is renamed to a unique tombstone — exactly one
  * reclaimer wins a rename, and only a path this process created is ever removed. The tombstone is deleted only when it
  * still holds exactly the owner this process verified as dead; a live successor installed since that read is put back
@@ -49,8 +66,11 @@ function reclaim(file: string, verified: LockState): boolean {
   const tombstone = `${file}.tombstone-${process.pid}-${randomUUID()}`;
   try { fs.renameSync(file, tombstone); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
+  // Ownership is verified again after the rename: a lock whose owner was published (or whose pid came back) since the
+  // verified read is LIVE and goes back — removing it would strand a running gate in a tombstone.
   const taken = lockState(tombstone)!;
-  if (taken.legacyFile !== verified.legacyFile || taken.raw !== verified.raw) {
+  const displacedLive = taken.owner !== null && alive(taken.owner.pid);
+  if (taken.legacyFile !== verified.legacyFile || taken.raw !== verified.raw || displacedLive) {
     try { fs.renameSync(tombstone, file); } catch { /* a newcomer took the slot in between: the tombstone stays for its live owner's recovery */ }
     return false;
   }
@@ -63,6 +83,8 @@ export async function acquireLock(file: string, onWait = (owner: string) => cons
   const own = JSON.stringify({ token: randomUUID(), pid: process.pid, cwd: process.cwd(), started: new Date().toISOString() });
   let printed = '';
   for (;;) {
+    // A live-owned tombstone of this very lock: its reclaimer is rolling a live owner back — wait, never take the freed path.
+    if (liveTombstone(file)) { await wait(); continue; }
     try {
       fs.mkdirSync(file); // atomic acquisition: the lock directory either appears for us or not
     } catch (error) {

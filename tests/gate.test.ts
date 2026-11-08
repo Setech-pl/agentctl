@@ -170,6 +170,51 @@ it('X1-R2: a reclaimer preempted after its final verified read cannot destroy th
   assert.equal(fs.existsSync(lock), false);
   assert.deepEqual(fs.readdirSync(path.dirname(lock)).filter((n) => n.includes('tombstone')), [], 'no tombstone is left behind');
 });
+it('L1: a third contender entering while a live lock is displaced cannot take the gate; the live lock is rolled back', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const lock = path.join(scratch.dir, 'runtimes/.gate-l1.lock');
+  const dead = spawnSync('true', []).pid!;
+  assert.throws(() => process.kill(dead, 0), { code: 'ESRCH' });
+  fs.mkdirSync(lock, { recursive: true });
+  fs.writeFileSync(path.join(lock, 'owner'), JSON.stringify({ token: 'OLD', pid: dead, started: new Date().toISOString() }));
+  // The INTEG interleaving (agentctl-019 integ/review2-reproductions.log): B read OLD and is descheduled; A reclaims OLD and
+  // publishes its live ownership; B resumes and renames A-LIVE into a tombstone — and C arrives exactly in that window.
+  const live = JSON.stringify({ token: 'A-LIVE', pid: process.pid, started: new Date().toISOString() });
+  const read = fs.readFileSync, rename = fs.renameSync;
+  let replaced = false, entered = false, cWaits = 0, third: Promise<() => void> | undefined;
+  fs.readFileSync = function (file: fs.PathOrFileDescriptor, ...args: unknown[]) {
+    const result = (read as (...a: unknown[]) => unknown).call(fs, file, ...args);
+    if (file === path.join(lock, 'owner') && !replaced) { replaced = true; fs.writeFileSync(path.join(lock, 'owner'), live); }
+    return result;
+  } as typeof fs.readFileSync;
+  fs.renameSync = function (from: fs.PathLike, to: fs.PathLike) {
+    rename.call(fs, from, to);
+    if (from === lock && !entered) {
+      entered = true;
+      // B moved A-LIVE out of the public lock path. C now runs the real acquisition — it must not take the freed path.
+      third = acquireLock(lock, () => {}, async () => { cWaits++; });
+    }
+  } as typeof fs.renameSync;
+  try {
+    let waits = 0;
+    const release = await acquireLock(lock, () => {}, async () => {
+      waits++;
+      if (waits === 1) {
+        // B's reclaim rolled the live lock back: A-LIVE owns the public lock again and no tombstone strands it.
+        assert.equal(fs.readFileSync(path.join(lock, 'owner'), 'utf8'), live, 'the displaced live lock is rolled back, not left in a tombstone');
+        assert.deepEqual(fs.readdirSync(path.dirname(lock)).filter((n) => n.includes('tombstone')), [], 'no tombstone strands the live owner');
+        assert.ok(cWaits >= 1, 'the third contender waited for the rollback instead of taking the freed path');
+        fs.rmSync(lock, { recursive: true }); // A-LIVE releases
+        return;
+      }
+      (await third!)(); // C acquired only after A-LIVE released; let B finish.
+    });
+    assert.equal(entered, true);
+    release();
+    assert.equal(fs.existsSync(lock), false);
+  } finally { fs.readFileSync = read; fs.renameSync = rename; }
+  assert.deepEqual(fs.readdirSync(path.dirname(lock)).filter((n) => n.includes('tombstone')), [], 'no tombstone is left behind');
+});
 it('X2: a lock directory left without an owner by a SIGKILL mid-publish is reclaimed after the grace, a fresh one is waited on', async () => {
   const { RECLAIM_GRACE_MS } = await import('../scripts/gate-lock.ts');
   const lock = path.join(scratch.dir, 'runtimes/.gate-x2.lock');
