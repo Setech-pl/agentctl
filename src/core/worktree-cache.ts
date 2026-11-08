@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Context } from './context.ts';
-import type { TaskRecord } from './taskstore.ts';
+import { listTaskRecords, type TaskRecord } from './taskstore.ts';
 import { inspectReport } from './report-state.ts';
 import { withFileLock } from './file-lock.ts';
 
@@ -31,6 +31,11 @@ export async function cleanWorktreeCache(ctx: Context, record: TaskRecord): Prom
   if (ctx.runner.dryRun || !ctx.config.cleanWorktreeCache) return;
   const report = inspectReport(ctx.config, record, ctx.runner.now(), false);
   if (!report.ready || !report.sentinel || !report.signature || (ctx.config.reportSettleS > 0 && report.mtime !== undefined && ctx.runner.now() - report.mtime < ctx.config.reportSettleS * 1000)) return;
+  // A sentinel completes the report, not the agent's turn. Even settle_s=0 must not
+  // let an earlier stop hook authorize deleting files used by a later turn.
+  const ended = Date.parse(record.turnEndedAt ?? '');
+  if (!Number.isFinite(ended) || ended < Math.max(Math.floor(report.mtime ?? Infinity), Date.parse(record.attemptStarted ?? record.started), Date.parse(record.deliveryStartedAt ?? record.started))) return;
+  if (record.promptDelivery && record.promptDelivery !== 'sent') return;
   const file = ledgerPath(ctx, record);
   await withFileLock(`${file}.lock`, async () => {
     const saved = ledger(ctx, record);
@@ -38,6 +43,12 @@ export async function cleanWorktreeCache(ctx: Context, record: TaskRecord): Prom
       const root = path.resolve(repo.worktree), target = path.join(root, '.cache');
       const identity = `${record.attemptId ?? record.started}:${root}`;
       if (saved.cleaned.includes(identity)) continue;
+      // Another open task may still be testing in the same checkout. Treat aliases
+      // as shared too, and retain the cache if a referenced path cannot be checked.
+      const shared = listTaskRecords(ctx.config).some(other => other.window !== record.window && !other.closed && !other.cancelled && other.repos.some(repo => {
+        try { return fs.realpathSync(repo.worktree) === root; } catch { return path.resolve(repo.worktree) === root; }
+      }));
+      if (shared) continue;
       try {
         // An aliased ancestor must not turn a recorded task path into another checkout.
         if (fs.realpathSync(root) !== root || fs.realpathSync(repo.path) === root) continue;

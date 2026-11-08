@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { it } from 'node:test';
 import { closeTask } from '../src/core/close.ts';
+import { cleanWorktreeCache } from '../src/core/worktree-cache.ts';
 import { journalOutputs } from '../src/core/outputs.ts';
 import { planGc, renderGc } from '../src/core/gc.ts';
 import { makeConfig, makeContext, seedTask, useScratch } from './helpers.ts';
@@ -21,6 +22,7 @@ it('P73-a removes .cache only after report-end for every provider and records fr
     await journalOutputs(ctx, r);
     assert.ok(fs.existsSync(path.join(wt, '.cache')));
     fs.appendFileSync(r.report, '<!-- agentctl:report-end -->\n');
+    r.turnEndedAt = new Date(Math.ceil(fs.statSync(r.report).mtimeMs)).toISOString();
     await journalOutputs(ctx, r);
     assert.equal(fs.existsSync(path.join(wt, '.cache')), false);
     await closeTask(ctx, r.task);
@@ -49,6 +51,7 @@ it('P73-a opt-out, dry run and symlink escapes retain cache and external files',
     const r = seedTask(config, 'SAFE', { repos: [{ path: `${root}/repo`, worktree: wt }] });
     fs.mkdirSync(path.dirname(r.report), { recursive: true });
     fs.writeFileSync(r.report, 'Werdykt: PASS\n<!-- agentctl:report-end -->\n');
+    r.turnEndedAt = new Date(Math.ceil(fs.statSync(r.report).mtimeMs)).toISOString();
     await journalOutputs(ctx, r);
     assert.ok(fs.existsSync(path.join(actual, '.cache')), mode);
     assert.equal(fs.readFileSync(path.join(external, 'keep'), 'utf8'), 'precious');
@@ -72,8 +75,32 @@ it('P73-a protects main checkout and waits for the current attempt and settle in
   await journalOutputs(ctx, r);
   assert.ok(fs.existsSync(path.join(wt, '.cache')), 'not settled');
   runner.now = () => now + 60_000;
+  r.turnEndedAt = new Date(Math.ceil(fs.statSync(r.report).mtimeMs)).toISOString();
   await journalOutputs(ctx, { ...r, repos: [{ path: wt, worktree: wt }] });
   assert.ok(fs.existsSync(path.join(wt, '.cache')), 'main checkout');
+  await journalOutputs(ctx, r);
+  assert.equal(fs.existsSync(path.join(wt, '.cache')), false);
+});
+
+it('F1: a live turn retains cache after report-end; ended turn still waits for other open records', async () => {
+  const root = scratch.sub('live-turn'), config = makeConfig(root);
+  const wt = scratch.sub('live-turn/wt'), repo = scratch.sub('live-turn/repo');
+  const { ctx } = makeContext(config);
+  const r = seedTask(config, 'LIVE', { turnEndedAt: undefined, repos: [{ path: repo, worktree: wt }] });
+  fs.mkdirSync(path.join(wt, '.cache'));
+  fs.writeFileSync(path.join(wt, '.cache/junk'), 'in-use');
+  fs.mkdirSync(path.dirname(r.report), { recursive: true });
+  fs.writeFileSync(r.report, 'Werdykt: PASS\n<!-- agentctl:report-end -->\n');
+  await journalOutputs(ctx, r);
+  assert.ok(fs.existsSync(path.join(wt, '.cache')), 'report-end alone is not a stopped agent');
+  r.turnEndedAt = new Date(Math.floor(fs.statSync(r.report).mtimeMs) - 1).toISOString();
+  await cleanWorktreeCache(ctx, r);
+  assert.ok(fs.existsSync(path.join(wt, '.cache')), 'old stop cannot cover a new report, even at settle_s=0');
+  r.turnEndedAt = new Date(Math.ceil(fs.statSync(r.report).mtimeMs)).toISOString();
+  seedTask(config, 'OTHER', { repos: r.repos });
+  await cleanWorktreeCache(ctx, r);
+  assert.ok(fs.existsSync(path.join(wt, '.cache')), 'another open task shares this worktree');
+  seedTask(config, 'OTHER', { closed: true, repos: r.repos });
   await journalOutputs(ctx, r);
   assert.equal(fs.existsSync(path.join(wt, '.cache')), false);
 });

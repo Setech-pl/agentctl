@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- F1: automatic .cache cleanup requires a current turn-end covering the report and skips worktrees shared by other open tasks. / Automatyczne sprzątanie .cache wymaga zakończenia bieżącej tury obejmującego raport i pomija worktree innych otwartych zadań.
+
 - doctor: the tested Kimi version is 2.5.2 (production ran Kimi 2.5.2 tasks successfully since 07.11); only newer versions warn. / doctor: przetestowana wersja Kimi to 2.5.2 (produkcja z powodzeniem robiła zadania na Kimi 2.5.2 od 07.11); ostrzegają dopiero nowsze wersje.
 
 - docs: `send` no longer claims that an open Codex question always blocks pasting — only the open question of a WAITING agent does (the message stays in the FIFO); a collapsed asynchronous question of a working Codex blocks nothing since 0.19 (P65). / docs: `send` nie twierdzi już, że otwarte pytanie Codexa zawsze blokuje wklejanie — blokuje je tylko otwarte pytanie CZEKAJĄCEGO agenta (wiadomość zostaje w FIFO); zwinięte asynchroniczne pytanie pracującego Codexa niczego nie blokuje od 0.19 (P65).
