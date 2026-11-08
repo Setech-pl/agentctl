@@ -253,7 +253,7 @@ describe('watch', () => {
     m.windows.set('nc-2', TRUST);
     m.windows.delete('nc-3');
     await watchTick(ctx, memory, n);
-    assert.deepEqual((n.sent as string[]).filter(text => !text.startsWith('NC-3')).sort(), ['NC-1: raport gotowy', 'NC-2 czeka na zaufanie folderu (trust)'].sort());
+    assert.deepEqual((n.sent as string[]).filter(text => !text.startsWith('NC-3')).sort(), ['NC-1: raport gotowy', 'NC-2 czeka na zaufanie folderu (trust) – board: wiersz na górze, Enter otwiera dialog'].sort());
     assert.match((n.sent as string[]).find(text => text.startsWith('NC-3'))!, /the task window is gone; the tmux server lives/, 'the session lives on (nc-1, nc-2): only the window died');
 
     // nothing changed: no new notifications
@@ -261,12 +261,12 @@ describe('watch', () => {
     await watchTick(ctx, memory, n);
     assert.equal(n.sent.length, 3);
 
-    // leaving and re-entering a state is a new transition
+    // leaving and re-entering a state is a new transition - except needs-trust: one desktop notification per task (P55)
     m.windows.set('nc-2', WORKING);
     await watchTick(ctx, memory, n);
     m.windows.set('nc-2', TRUST);
     await watchTick(ctx, memory, n);
-    assert.equal((n.sent as string[]).filter((s) => s.startsWith('NC-2')).length, 2);
+    assert.equal((n.sent as string[]).filter((s) => s.startsWith('NC-2')).length, 1, 'P55: a re-entry into needs-trust does not notify again');
   });
 
   it('"waits for you" fires once after waiting_after, not before, and again only after a new stay', async () => {
@@ -309,7 +309,7 @@ describe('watch', () => {
     seed(config, a, runner.now());
     m.windows.set('nc-1', TRUST);
     await watchTick(ctx, memory, n);
-    assert.deepEqual(n.sent, ['NC-1 czeka na zaufanie folderu (trust)']);
+    assert.deepEqual(n.sent, ['NC-1 czeka na zaufanie folderu (trust) – board: wiersz na górze, Enter otwiera dialog']);
     m.windows.set('nc-1', WORKING);
     await watchTick(ctx, memory, n);
     m.windows.set('nc-1', IDLE);

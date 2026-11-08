@@ -600,6 +600,8 @@ W każdym przypadku prompt jest wysyłany dopiero po zniknięciu dialogu; dostar
 
 Zatem zaufanie do `worktree_root` (na przykład `~/workspace/wt`) **nie** obejmuje worktree gita, a `doctor` nie ma tu czego sprawdzać. Codex wiąże zaufanie do worktree z korzeniem repozytorium, więc zaufany główny checkout prawdopodobnie obejmuje jego worktree (niesprawdzone na żywo: wymaga to zaufanego repozytorium i nowego worktree na nim, co zmieniłoby Twój config Codexa); Claude Code zapytał także o worktree zaufanego checkoutu (iteracja 1). Stąd czekanie.
 
+**Kimi (sprawdzone 2026-11-08, Kimi Code CLI 2.5.2):** nie ma zaufania do katalogu nadrzędnego ani listy zaufanych korzeni. Rekord zaufania to dokładna ścieżka workspace w `~/.kimi-code/workspace-trust/wd_<slug>_<sha256-ścieżki>`; CLI sprawdza wyłącznie rekord dokładnej kanonicznej ścieżki (readWorkspaceTrust w wbudowanym `agent-core-v2`), więc każdy nowy worktree pyta. Udokumentowane obejścia są dla agentctl niedozwolone: `[workspace] require_trust = false` to globalna zmiana konfiguracji Kimi (agentctl nigdy jej nie edytuje), a `KIMI_CODE_TRUST_WORKSPACE=1` jest udokumentowane jako „równoważne wybraniu Trust this folder" (agentctl nigdy nie odpowiada na ten dialog). Zamiast tego czekanie jest tanie: powiadomienie na pulpit przychodzi **raz na zadanie** (pamięta je `<state_dir>/<task>/trust-notified.json`, więc powrót do stanu ani restart watcha nie powiadamiają ponownie) i mówi, co zrobić, na boardzie wiersz **skacze na górę** (kohorta z czekaniem na trust prowadzi grupy), a **Enter na nim przełącza do okna**, gdzie dialog czeka na Ciebie.
+
 ## Mirror
 
 Domyślnie wyłączony. Ustaw `mirror_dir`, a `status` i `pull` skopiują każdy raport zadania (nowy lub zmieniony) do

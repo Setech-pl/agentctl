@@ -600,6 +600,8 @@ In every case the prompt is only sent after the dialog is gone; deliver it by ha
 
 So trusting `worktree_root` (for example `~/workspace/wt`) does **not** cover git worktrees, and `doctor` has nothing to check there. Codex keys a worktree's trust to the repository root, so a trusted main checkout probably covers its worktrees (not tested live: that needs a trusted repository and a new worktree on it, which would change your Codex config); Claude Code asked for a worktree of a trusted checkout too (iteration 1). Hence the wait.
 
+**Kimi (checked 2026-11-08, Kimi Code CLI 2.5.2):** no parent-directory trust and no trusted-roots list. A trust record is an exact workspace path in `~/.kimi-code/workspace-trust/wd_<slug>_<sha256-of-path>`; the CLI checks the record of the exact canonical path only (readWorkspaceTrust in the bundled `agent-core-v2`), so every new worktree asks. The documented ways around the prompt are off-limits for agentctl: `[workspace] require_trust = false` is a global edit of the Kimi config (agentctl never edits it), and `KIMI_CODE_TRUST_WORKSPACE=1` is documented as "equivalent to choosing Trust this folder" (agentctl never answers that dialog). Instead the wait is made cheap: the desktop notification comes **once per task** (`<state_dir>/<task>/trust-notified.json` remembers it, so a re-entry or a watch restart does not notify again) and says what to do, on the board the row **jumps to the top** (a cohort with a trust wait leads the groups) and **Enter on it switches to the window**, where the dialog waits for you.
+
 ## Mirror
 
 Off by default. Set `mirror_dir` and `status` and `pull` copy every task report (new or changed) to

@@ -27,6 +27,11 @@ export function ledgerPath(ctx: Context, window: string): string {
   return path.join(taskDir(ctx.config, window), 'notified.json');
 }
 
+/** P55: the folder-trust wait is announced on the desktop once per task — durable across watch restarts and re-entries. */
+export function trustNotifiedPath(ctx: Context, window: string): string {
+  return path.join(taskDir(ctx.config, window), 'trust-notified.json');
+}
+
 export function readLedger(ctx: Context, window: string): Ledger | undefined {
   try {
     const data: unknown = JSON.parse(fs.readFileSync(ledgerPath(ctx, window), 'utf8'));
@@ -103,6 +108,8 @@ export class Alerts {
 
   private async deliver(target: AlertTarget, state: string, text: string, source: AlertSource): Promise<'sent' | 'duplicate'> {
     if (this.isDuplicate(target, state, source)) return 'duplicate';
+    // P55: trust is announced once per task, ever (the board row stays on top until the human answers).
+    if (state === 'needs-trust' && fs.existsSync(trustNotifiedPath(this.ctx, target.window))) return 'duplicate';
     const { click, text: message } = await this.clickFor(target, text);
     const result = await this.notifier.notify(ALERT_TITLE, message, click);
     if (result && !result.ok) this.ctx.out(`warning: local notification failed (${result.error ?? result.channel}); phone delivery follows independently`);
@@ -110,6 +117,7 @@ export class Alerts {
     if (fs.existsSync(taskFile(this.ctx.config, target.window))) {
       const ledger: Ledger = { state, source, at: this.ctx.runner.now() };
       await this.ctx.runner.writeFile(ledgerPath(this.ctx, target.window), `${JSON.stringify(ledger)}\n`);
+      if (state === 'needs-trust') await this.ctx.runner.writeFile(trustNotifiedPath(this.ctx, target.window), `${JSON.stringify({ at: this.ctx.runner.now() })}\n`);
     }
     return 'sent';
   }

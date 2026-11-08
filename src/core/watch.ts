@@ -75,10 +75,13 @@ export class WatchMemory {
   readonly collisions = new CollisionMemory();
 }
 
+/** P55: the one desktop notification of a trust wait points at the board, where the row is on top and Enter opens the dialog. */
+export const NOTIFY_ON_TRUST = (r: StatusRow): string => `${r.task} czeka na zaufanie folderu (trust) – board: wiersz na górze, Enter otwiera dialog`;
+
 const NOTIFY_ON: Partial<Record<TaskState, (row: StatusRow) => string>> = {
   'needs-attention': r => `${r.task}: ${r.hint ?? 'prompt delivery needs attention'}`,
   'report-ready': (r) => reportReadyText(r.task, undefined),
-  'needs-trust': (r) => `${r.task} czeka na zaufanie folderu (trust)`,
+  'needs-trust': NOTIFY_ON_TRUST,
   'needs-input': (r) => (r.question ? `${r.task}: ${r.question}` : `${r.task} zadaje pytanie i czeka na odpowiedź`),
   overloaded: r => `${r.task}: dostawca przeciążony (overloaded)`,
   // Limited notifications use a durable provider episode, shared with hooks.
