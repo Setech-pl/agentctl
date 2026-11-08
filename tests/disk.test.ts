@@ -83,3 +83,26 @@ describe('disk facts', () => {
     assert.equal(notices.length, 3);
   });
 });
+
+it('P24 warns on per-volume worktree share, gives safe reclaim size and close size', async () => {
+  const { diskLine } = await import('../src/core/disk.ts');
+  const { closeTask } = await import('../src/core/close.ts');
+  const config = makeConfig(scratch.sub('p24'), 'disk: {worktree_share_percent: 10, warn_gb: 0.000000001, critical_gb: 0.000000001}\n');
+  const repo = scratch.sub('p24/repo'), wt = scratch.sub('p24/wt');
+  fs.writeFileSync(`${wt}/data`, '12345678901234567890');
+  seedTask(config, 'P24-1', {closed: true, repos: [{path: repo, worktree: wt}]});
+  const out: string[] = [];
+  const runner = new DiskRunner({dryRun: false, respond: (cmd, args) => cmd === 'git' && args.includes('--abbrev-ref') ? {stdout: 'task-branch\n'} : cmd === 'tmux' ? {code: 1} : {stdout: ''}});
+  const ctx = new Context(runner, config, l => out.push(l));
+  const fake = (async () => ({bsize: 1, bavail: 90, blocks: 100})) as unknown as typeof fs.promises.statfs;
+  const report = await collectDisk(ctx, fake);
+  assert.equal(report.level, 'warn'); assert.equal(report.reclaimableBytes, 20);
+  assert.match(diskLine(report), /gc --preview.*20 bytes/);
+  assert.equal(fs.readFileSync(`${wt}/data`, 'utf8').length, 20);
+  await closeTask(ctx, 'P24-1');
+  assert.match(out.join('\n'), /worktree size: 20 bytes/);
+  config.disk.worktreeSharePercent = 30;
+  assert.equal((await collectDisk(ctx, fake)).level, 'ok');
+  assert.throws(() => makeConfig(scratch.sub('p24-bad'), 'disk: {worktree_share_percent: 101}\n'), /worktree_share_percent/);
+  assert.throws(() => makeConfig(scratch.sub('p24-neg'), 'disk: {worktree_share_percent: -5}\n'), /worktree_share_percent/, 'R8: a negative share is rejected, not a permanent warn');
+});

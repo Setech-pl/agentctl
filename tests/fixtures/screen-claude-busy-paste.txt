@@ -1,0 +1,13 @@
+ ▐▛███▛█   Claude Code v2.1.311
+▝▜██████▀  Haiku 5.5 with low effort · Claude Ultra
+ ▝▝   ▝▝   ~/work/sandbox
+❯ Run exactly 8 separate Bash tool calls, strictly one after another, each one being: python3 -c "import time; time.sleep(20)". After each call write only its number. After the 8th, write DONE-TURN1.
+⏺ 1
+  Sleeping 20 seconds (run 1 of 8) · 18s
+  ⎿  $ python3 -c "import time; time.sleep(20)" (15s)
+     (ctrl+b ctrl+b (twice) to run in background)
+· Clauding… (21s · ↓ 105 tokens)
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ [Pasted text #1 +7 lines]
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  paste again to expand

@@ -1,0 +1,106 @@
+[
+  {
+    "type": "metadata",
+    "protocol_version": "1.5",
+    "created_at": 1793891052066
+  },
+  {
+    "type": "turn.prompt",
+    "agentId": "main",
+    "input": [
+      {
+        "type": "text",
+        "text": "Reply with exactly OK. Do not use tools."
+      }
+    ],
+    "origin": {
+      "kind": "user"
+    },
+    "promptId": "msg_01M6P3TAHVBQ2J71B437NF989A",
+    "turnId": 0,
+    "time": 1793891052096
+  },
+  {
+    "type": "llm.request",
+    "agentId": "main",
+    "kind": "loop",
+    "provider": "openai",
+    "model": "k3",
+    "modelAlias": "kimi-code/k3",
+    "thinkingEffort": "low",
+    "thinkingKeep": "all",
+    "toolSelect": false,
+    "systemPromptHash": "e28154463342372550c167df68c4bd037319dcd716486e63747d4776d36bd57e",
+    "toolsHash": "1db03b8e46db6c158950fc8a86d0c305cb91bccf2864fa772dd1c2d62eaedd18",
+    "messageCount": 2,
+    "turnStep": "0.1",
+    "time": 1793891052106
+  },
+  {
+    "type": "usage.record",
+    "agentId": "main",
+    "model": "kimi-code/k3",
+    "usage": {
+      "inputOther": 743,
+      "output": 47,
+      "inputCacheRead": 12288,
+      "inputCacheCreation": 0
+    },
+    "usageScope": "turn",
+    "time": 1793891056956
+  },
+  {
+    "type": "turn.ended",
+    "agentId": "main",
+    "turnId": 0,
+    "reason": "completed",
+    "durationMs": 4863,
+    "requestId": "cc1c79df0ff3c62a56bf7bddbaef6c20",
+    "time": 1793891056959
+  },
+  {
+    "type": "turn.prompt",
+    "agentId": "main",
+    "input": [
+      {
+        "type": "text",
+        "text": "Use Bash to run exactly git status (no extra arguments), then stop. Do not use other tools."
+      }
+    ],
+    "origin": {
+      "kind": "user"
+    },
+    "promptId": "msg_01M6P3WCT2VJBXBC62857DEJGT",
+    "turnId": 1,
+    "time": 1793891119940
+  },
+  {
+    "type": "llm.request",
+    "agentId": "main",
+    "kind": "loop",
+    "provider": "openai",
+    "model": "k3",
+    "modelAlias": "kimi-code/k3",
+    "thinkingEffort": "low",
+    "thinkingKeep": "all",
+    "toolSelect": false,
+    "systemPromptHash": "e28154463342372550c167df68c4bd037319dcd716486e63747d4776d36bd57e",
+    "toolsHash": "1db03b8e46db6c158950fc8a86d0c305cb91bccf2864fa772dd1c2d62eaedd18",
+    "messageCount": 4,
+    "turnStep": "1.1",
+    "time": 1793891119944
+  },
+  {
+    "type": "usage.record",
+    "agentId": "main",
+    "model": "kimi-code/k3",
+    "usage": {
+      "inputOther": 317,
+      "output": 215,
+      "inputCacheRead": 12800,
+      "inputCacheCreation": 0
+    },
+    "usageScope": "turn",
+    "time": 1793891129200
+  }
+]

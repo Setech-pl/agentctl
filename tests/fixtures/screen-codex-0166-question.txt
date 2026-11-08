@@ -1,0 +1,40 @@
+› Run sleep 8 using your shell tool, then reply DONE.
+  └ (no output)
+
+• DONE
+
+  Worked for 10s • 14:38
+
+
+› Run sleep 15 using your shell tool, then reply DONE.
+
+› After this turn reply FOLLOWUP.
+
+
+• Ran sleep 15
+  └ (no output)
+
+• FOLLOWUP
+
+  Worked for 18s • 14:39
+
+
+› Ask me which color I prefer, then wait for my answer.
+
+
+? Which color do you prefer?
+
+  • Blue
+  • Green
+  • Red
+  • Other
+
+• Which color do you prefer?
+
+  Worked for 6s • 14:40
+
+
+› Ask Codex to do anything
+
+  GPT-6-Luna medium · ~/Projects/agentctl-wt/p15-send/.cache/fix5/runtime · Potwierdź odbiór
+  ? for shortcuts                                                                              ⚠ 1 warning · f2 to view

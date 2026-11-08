@@ -1,3 +1,5 @@
+import { provider as adapter, activeProviders, PROVIDER_IDS } from './providers/registry.ts';
+import { DEFAULT_PROVIDERS } from './providers/types.ts';
 import fs from 'node:fs';
 import YAML from 'yaml';
 import { AGENT_NAMES, loadGlobalConfig } from './config.ts';
@@ -33,7 +35,7 @@ export function readReservations(config: Pick<GlobalConfig, 'path'>): Reservatio
     const data: unknown = JSON.parse(fs.readFileSync(reservationsFile(config), 'utf8'));
     const out: Reservations = {};
     if (typeof data === 'object' && data !== null) {
-      for (const agent of AGENT_NAMES) {
+      for (const agent of PROVIDER_IDS) {
         const r = (data as Record<string, unknown>)[agent] as Partial<Reservation> | undefined;
         if (r && typeof r.count === 'number' && r.count > 0) out[agent] = { count: Math.floor(r.count), ...(typeof r.note === 'string' && r.note !== '' ? { note: r.note } : {}), at: typeof r.at === 'string' ? r.at : '' };
       }
@@ -49,13 +51,13 @@ async function writeReservations(ctx: Context, reservations: Reservations): Prom
 }
 
 /** Parse `claude=1 codex=2` (a bare `claude` means 1 when reserving and everything when releasing). */
-export function parseCounts(args: string[], bare: number | undefined): Partial<Record<AgentName, number | undefined>> {
+export function parseCounts(args: string[], bare: number | undefined, ids: readonly AgentName[] = DEFAULT_PROVIDERS): Partial<Record<AgentName, number | undefined>> {
   const out: Partial<Record<AgentName, number | undefined>> = {};
-  if (args.length === 0) throw new AgentctlError('give a provider, e.g. claude=1', 'The providers are claude and codex.');
+  if (args.length === 0) throw new AgentctlError('give a provider, e.g. claude=1', `The providers are ${ids.slice(0, -1).join(', ')} and ${ids.at(-1)}.`);
   for (const arg of args) {
     const m = /^([a-z]+)(?:=(\d+))?$/.exec(arg.trim());
     const agent = m?.[1] as AgentName | undefined;
-    if (!m || !agent || !(AGENT_NAMES as readonly string[]).includes(agent)) throw new AgentctlError(`"${arg}" is not claude=N or codex=N`, 'The providers are claude and codex.');
+    if (!m || !agent || !(ids as readonly string[]).includes(agent)) throw new AgentctlError(`"${arg}" is not ${ids.map(id => `${id}=N`).join(' or ')}`, `The providers are ${ids.slice(0, -1).join(', ')} and ${ids.at(-1)}.`);
     const n = m[2] === undefined ? bare : Number(m[2]);
     if (n !== undefined && n < 1) throw new AgentctlError(`${arg}: the number must be 1 or more`);
     out[agent] = n;
@@ -66,7 +68,7 @@ export function parseCounts(args: string[], bare: number | undefined): Partial<R
 export async function reservePlaces(ctx: Context, counts: Partial<Record<AgentName, number | undefined>>, note?: string): Promise<Reservations> {
   const reservations = readReservations(ctx.config);
   const at = new Date(ctx.runner.now()).toISOString();
-  for (const agent of AGENT_NAMES) {
+  for (const agent of activeProviders(ctx.config)) {
     const n = counts[agent];
     if (n === undefined) continue;
     const have = reservations[agent];
@@ -81,7 +83,7 @@ export async function reservePlaces(ctx: Context, counts: Partial<Record<AgentNa
 export async function releasePlaces(ctx: Context, counts: Partial<Record<AgentName, number | undefined>>): Promise<Reservations> {
   const reservations = readReservations(ctx.config);
   const at = new Date(ctx.runner.now()).toISOString();
-  for (const agent of AGENT_NAMES) {
+  for (const agent of activeProviders(ctx.config)) {
     if (!(agent in counts)) continue;
     const have = reservations[agent];
     if (!have) throw new AgentctlError(`nothing is reserved for ${agent}`, 'limits shows what is reserved.');
@@ -107,7 +109,7 @@ export interface ExternalAgent {
 }
 
 /** Subcommands and flags of claude/codex that are not a terminal session. */
-const NOT_A_SESSION = new Set(['mcp', 'mcp-server', 'app-server', 'exec', 'usage-tap', 'agentctl', '--print', '-p', 'doctor', 'update', 'install', 'login', 'logout', 'proto']);
+
 
 interface Proc {
   pid: number;
@@ -127,13 +129,7 @@ export function parsePs(stdout: string): Proc[] {
 /** The agent a command line starts as a terminal session; undefined for anything else (an MCP server, a headless run, agentctl itself). */
 export function sessionAgent(command: string): AgentName | undefined {
   const tokens = command.split(/\s+/);
-  const first = path.basename(tokens[0] ?? '');
-  let agent: AgentName | undefined;
-  if (first === 'claude' || first === 'codex') agent = first;
-  else if (/^node(js)?$/.test(first) && /(claude-code|@openai\/codex)\/\S*\.js$/.test(tokens[1] ?? '')) agent = (tokens[1] ?? '').includes('claude-code') ? 'claude' : 'codex';
-  if (!agent) return undefined;
-  if (tokens.slice(1).some((t) => NOT_A_SESSION.has(t) || t.includes('agentctl'))) return undefined;
-  return agent;
+  return PROVIDER_IDS.find(id => adapter(id).isExternalSession(tokens));
 }
 
 /** Terminal sessions of claude/codex that run outside the windows of the agentctl session. Read-only: ps, tmux list-panes, lsof. */
@@ -177,7 +173,7 @@ export async function detectExternal(ctx: Context): Promise<ExternalAgent[]> {
 export async function slotHolders(ctx: Context): Promise<LiveWindow[]> {
   const out: LiveWindow[] = [];
   const reservations = readReservations(ctx.config);
-  for (const agent of AGENT_NAMES) {
+  for (const agent of activeProviders(ctx.config)) {
     const r = reservations[agent];
     for (let i = 0; r && i < r.count; i++) out.push({ window: `reserved${r.note ? ` (${r.note})` : ''}`, agent, kind: 'reserved' });
   }
@@ -189,10 +185,13 @@ export async function slotHolders(ctx: Context): Promise<LiveWindow[]> {
 
 export interface ProviderLoad {
   agent: AgentName;
-  /** null: no limit. */
-  limit: number | null;
+  /** null: no limit; 'off': the provider is disabled. */
+  limit: number | 'off' | null;
   /** Windows of agentctl. */
   windows: string[];
+  starting: number;
+  working: string[];
+  reportReady: string[];
   reserved: number;
   reservedNote: string | null;
   external: { pid: number; cwd: string | null }[];
@@ -216,21 +215,24 @@ export function collectLimits(config: GlobalConfig, live: readonly LiveWindow[])
   return {
     countExternal: config.countExternal,
     config: config.path,
-    providers: AGENT_NAMES.map((agent): ProviderLoad => {
+    providers: activeProviders(config).map((agent): ProviderLoad => {
       const mine = live.filter((w) => w.agent === agent);
       const windows = mine.filter((w) => w.kind === undefined).map((w) => w.window);
+      const working = mine.filter(w => w.kind === undefined && !w.reportReady).map(w => w.window);
+      const reportReady = mine.filter(w => w.reportReady).map(w => w.window);
+      const starting = mine.filter(w => w.kind === 'starting').length;
       const reserved = mine.filter((w) => w.kind === 'reserved').length;
       const external = mine.filter((w) => w.kind === 'external').map((w) => ({ pid: w.pid ?? 0, cwd: w.cwd ?? null }));
       const limit = config.limits[agent] ?? null;
-      const used = windows.length + reserved + external.length;
-      return { agent, limit, windows, reserved, reservedNote: reservations[agent]?.note ?? null, external, used, free: limit === null ? null : Math.max(0, limit - used), queued: queue.filter((e) => e.agent === agent).length };
+      const used = mine.filter(w => w.kind === undefined && w.counted !== false).length + starting + reserved + external.length;
+      return { agent, limit, windows, starting, working, reportReady, reserved, reservedNote: reservations[agent]?.note ?? null, external, used, free: limit === 'off' ? 0 : limit === null ? null : Math.max(0, limit - used), queued: queue.filter((e) => e.agent === agent).length };
     }),
   };
 }
 
 export function renderLimits(report: LimitsReport): string[] {
-  const header = ['PROVIDER', 'LIMIT', 'USED', 'FREE', 'AGENTCTL', 'RESERVED', 'EXTERNAL', 'QUEUED'];
-  const body = report.providers.map((p) => [p.agent, p.limit === null ? '-' : String(p.limit), String(p.used), p.free === null ? '-' : String(p.free), String(p.windows.length), String(p.reserved), report.countExternal ? String(p.external.length) : 'off', String(p.queued)]);
+  const header = ['PROVIDER', 'LIMIT', 'USED', 'FREE', 'AGENTCTL', 'WORKING', 'REPORT-READY', 'RESERVED', 'EXTERNAL', 'QUEUED'];
+  const body = report.providers.map((p) => [p.agent, p.limit === null ? '-' : String(p.limit), String(p.used), p.free === null ? '-' : String(p.free), String(p.windows.length), String(p.working.length), String(p.reportReady.length), String(p.reserved), report.countExternal ? String(p.external.length) : 'off', String(p.queued)]);
   const widths = header.map((h, i) => Math.max(h.length, ...body.map((r) => (r[i] as string).length)));
   const fmt = (cells: string[]): string => cells.map((c, i) => (i === cells.length - 1 ? c : c.padEnd(widths[i] as number))).join('  ').trimEnd();
   const lines = [fmt(header), ...body.map(fmt)];
@@ -248,34 +250,34 @@ export function renderLimits(report: LimitsReport): string[] {
 
 // ---- changing the limits
 
-export type LimitAssignments = Partial<Record<AgentName, number | null>>;
+export type LimitAssignments = Partial<Record<AgentName, number | 'off' | null>>;
 
-/** `claude=3 codex=off`: a number, or off / none to remove the limit. */
-export function parseAssignments(args: string[]): LimitAssignments {
-  if (args.length === 0) throw new AgentctlError('give the new limits, e.g. claude=3 codex=5', 'off removes a limit: codex=off.');
+/** `claude=3 codex=off`: a number, `off` to disable the provider, or 0 / none to remove the limit. */
+export function parseAssignments(args: string[], ids: readonly AgentName[] = DEFAULT_PROVIDERS): LimitAssignments {
+  if (args.length === 0) throw new AgentctlError('give the new limits, e.g. claude=3 codex=5', 'off disables a provider; 0 or none removes a limit: codex=0.');
   const out: LimitAssignments = {};
   for (const arg of args) {
     const m = /^([a-z]+)=(\d+|off|none)$/.exec(arg.trim());
     const agent = m?.[1] as AgentName | undefined;
-    if (!m || !agent || !(AGENT_NAMES as readonly string[]).includes(agent)) throw new AgentctlError(`"${arg}" is not claude=N or codex=N`, 'N is a whole number from 1, or off for no limit.');
+    if (!m || !agent || !(ids as readonly string[]).includes(agent)) throw new AgentctlError(`"${arg}" is not ${ids.map(id => `${id}=N`).join(' or ')}`, 'N is a whole number from 1, off disables the provider, 0 or none removes the limit.');
     const value = m[2] as string;
-    if (value === 'off' || value === 'none') out[agent] = null;
-    else if (Number(value) < 1) throw new AgentctlError(`${arg}: the limit must be 1 or more (off removes it)`);
+    if (value === 'off') out[agent] = 'off';
+    else if (value === 'none' || Number(value) === 0) out[agent] = null;
     else out[agent] = Number(value);
   }
   return out;
 }
 
 /** "limity: claude 3 → 4, codex 5 → -": the same words whoever changed the file, so that the journal says it once. */
-export function limitsDiffText(from: GlobalConfig['limits'], to: GlobalConfig['limits']): string | undefined {
+export function limitsDiffText(from: GlobalConfig['limits'], to: GlobalConfig['limits'], ids: readonly AgentName[] = PROVIDER_IDS.filter(id => id in from || id in to)): string | undefined {
   const parts = AGENT_NAMES.filter((a) => (from[a] ?? null) !== (to[a] ?? null)).map((a) => `${a} ${from[a] ?? '-'} → ${to[a] ?? '-'}`);
-  return parts.length === 0 ? undefined : `limity: ${parts.join(', ')}`;
+  return parts.length === 0 ? undefined : `limity: ${parts.join(', ')}; providers: ${ids.map(id => `${id}=${to[id] ?? '-'}`).join(', ')}`;
 }
 
 export interface LimitsChange {
   agent: AgentName;
-  from: number | null;
-  to: number | null;
+  from: number | 'off' | null;
+  to: number | 'off' | null;
 }
 
 export interface LimitsPlan {
@@ -291,7 +293,7 @@ export function planSetLimits(config: GlobalConfig, assignments: LimitAssignment
   const file = config.path;
   const changes: LimitsChange[] = [];
   const text = editConfigText(config, (doc) => {
-    for (const agent of AGENT_NAMES) {
+    for (const agent of activeProviders(config)) {
       const to = assignments[agent];
       if (to === undefined) continue;
       const from = config.limits[agent] ?? null;
@@ -300,7 +302,7 @@ export function planSetLimits(config: GlobalConfig, assignments: LimitAssignment
       changes.push({ agent, from, to });
     }
   });
-  const show = (n: number | null): string => (n === null ? 'no limit' : String(n));
+  const show = (n: number | 'off' | null): string => (n === null ? 'no limit' : n === 'off' ? 'off (disabled)' : String(n));
   return {
     file,
     changes,
@@ -317,6 +319,6 @@ export async function applySetLimits(ctx: Context, plan: LimitsPlan): Promise<vo
     if (c.to === null) delete after[c.agent];
     else after[c.agent] = c.to;
   }
-  const text = limitsDiffText(ctx.config.limits, after);
+  const text = limitsDiffText(ctx.config.limits, after, activeProviders(ctx.config));
   if (text) await recordJournalOnce(ctx, { kind: 'limits-changed', text });
 }

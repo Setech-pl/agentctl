@@ -1,0 +1,150 @@
+   Struktura repo
+
+   ```
+     sandbox-kimi-shots-1/
+     ├── .agentctl.yaml   # konfiguracja agentctl
+     ├── README.md        # krótki tytuł: „agentctl dev sandbox”
+     └── sum.js           # eksportuje funkcję sum(a, b)
+   ```
+
+   sum.js zawiera jedynie:
+
+   ```js
+     export const sum = (a, b) => a + b;
+   ```
+
+   Plik .agentctl.yaml wskazuje katalog roboczy ~/Projects/wt-dev i ścieżkę raportów.
+
+   Trzy proponowane usprawnienia
+
+   1. Dodaj testy
+      Repozytorium nie ma żadnych testów. Warto dodać chociaż podstawowy zestaw dla sum, np. z użyciem wbudowanego w Node.js test runnera (node --test) lub Jesta, aby umożliwić weryfikację przy
+      przyszłych zmianach.
+
+   2. Waliduj argumenty funkcji sum
+      Obecnie sum("1", "2") zwróci "12" zamiast błędu. Można dodać sprawdzenie, czy a i b są liczbami, i wyrzucić wyjątek lub zwrócić NaN przy niepoprawnych danych.
+
+   3. Utwórz package.json i rozbuduj README
+      Dodaj package.json z metadanymi projektu, skryptami (test, lint) oraz opcjonalnie konfigurację ESLint/Prettier. README powinien zawierać opis, przykład użycia i instrukcję uruchomienia testów.
+      To ułatwi start nowym osobom i uczyni projekt bardziej profesjonalnym.
+
+ ❯ Przeczytaj ponownie wszystkie pliki w tym repo, opisz strukturę i zaproponuj trzy usprawnienia.
+
+ ● User asks again in Polish: "Read all files in this repo again, describe the structure and propose three improvements." Need read again maybe files changed. We'll read all.
+
+ ● Read 3 files · 5 lines
+
+ ● Files unchanged. Answer in Polish. Could propose slightly different improvements. Need mention all files. Keep concise.
+
+ ● Przeczytałem wszystkie pliki jeszcze raz – zawartość się nie zmieniła.
+
+   Struktura repo
+
+   ```
+     sandbox-kimi-shots-1/
+     ├── .agentctl.yaml   # konfiguracja agentctl
+     ├── README.md        # tytuł: „agentctl dev sandbox”
+     └── sum.js           # moduł eksportujący funkcję sum
+   ```
+
+   W sum.js znajduje się tylko:
+
+   ```js
+     export const sum = (a, b) => a + b;
+   ```
+
+   Plik .agentctl.yaml określa katalog roboczy ~/Projects/wt-dev oraz lokalizację raportów.
+
+   Trzy proponowane usprawnienia
+
+   1. Dodaj obsługę większej liczby argumentów
+      Rozszerz sum, aby akceptowała dowolną liczbę operandów, np. sum(1, 2, 3) lub sum(...numbers). To zwiększy elastyczność funkcji.
+
+   2. Wprowadź walidację typów z czytelnym błędem
+      Funkcja powinna sprawdzać, czy wszystkie argumenty są liczbami. Przy niepoprawnym typie warto rzucić wyjątek z jasnym komunikatem, np. new TypeError('Arguments must be numbers').
+
+   3. Dodaj testy i skonfiguruj projekt
+      Utwórz package.json z typem modułu ESM, skryptem testowym oraz przykładowymi testami (Node.js test runner / Jest / Vitest). Rozbuduj też README.md o opis, przykłady użycia i instrukcję
+      uruchomienia testów.
+
+ ❯ Utwórz plik kimi-test.txt z tekstem hello, a potem uruchom git status.
+
+ ● User asks in Polish: "Create file kimi-test.txt with text hello, then run git status." Need create file and run git status. Use Write then Bash.
+
+ ● Used Write (kimi-test.txt) · 1 line
+      1  hello
+
+ ● Ran a command · $ git status · 4 more lines
+   … nie dodano nic do złożenia, ale są nieśledzone pliki (użyj „git add”, aby śledzić)
+
+   Approved: Running: git status
+
+ ● Done. Answer in Polish.
+
+ ● Gotowe. Utworzyłem plik kimi-test.txt z zawartością hello.
+
+   Wynik git status:
+
+   ```
+     Na gałęzi kimi-shots-1
+     Nieśledzone pliki:
+        kimi-test.txt
+   ```
+
+   Plik jest nieśledzony i czeka na git add, jeśli chcesz go zacommitować.
+
+ ❯ Zanim cokolwiek zrobisz, zapytaj mnie, w jakim języku mam odpowiadać, i poczekaj na odpowiedź.
+
+ ● The user says: "Before you do anything, ask me what language I want you to answer in, and wait for the answer." So I need ask. They wrote in Polish, but instruction says ask. Need ask via
+   AskUserQuestion. Provide options: Polish, English, maybe Other.
+
+ ● Collected your answers
+   Q  W jakim języku mam odpowiadać?
+   →  Polski (Recommended)
+
+ ● User answered Polish. Now respond in Polish, acknowledging.
+
+ ● Rozumiem – odpowiadam po polsku. Czekam na Twoje dalsze instrukcje.
+   ╭ Usage ─────────────────────────────────────────────────────────────────────╮
+   │ Session usage                                                              │
+   │   kimi-code/kimi-for-coding-highspeed  input 103k  output 1.6k  total 105k │
+   │                                                                            │
+   │ Context window                                                             │
+   │   █░░░░░░░░░░░░░░░░░░░      6%  (13.9k / 256k)                             │
+   │                                                                            │
+   │ Plan usage                                                                 │
+   │   5h limit       █████░░░░░░░░░░░░░░░  26% used  resets in 1h 21m          │
+   │   Monthly limit  █░░░░░░░░░░░░░░░░░░░  3% used   resets in 30d 8h 38m      │
+   │                  kimi 2% · code 1%                                         │
+   ╰────────────────────────────────────────────────────────────────────────────╯
+   ╭ Status ─────────────────────────────────────────────────────────────────────╮
+   │ >_ Kimi Code (v2.5.0)                                                       │
+   │                                                                             │
+   │   Model        K2.7 Code Highspeed (thinking on)                            │
+   │   Directory    /Users/marcinkrzetowski/Projects/wt-dev/sandbox-kimi-shots-1 │
+   │   Permissions  Always Ask                                                   │
+   │   Plan mode    off                                                          │
+   │   Session      session_9be20a83-be41-4ac3-9d44-3b53917c3a48                 │
+   │   Title        Analiza struktury repo i trzy usprawnienia                   │
+   │                                                                             │
+   │ Context window                                                              │
+   │   █░░░░░░░░░░░░░░░░░░░      6%  (13.9k / 256k)                              │
+   │                                                                             │
+   │ Plan usage                                                                  │
+   │   5h limit       █████░░░░░░░░░░░░░░░  26% used  resets in 1h 20m           │
+   │   Monthly limit  █░░░░░░░░░░░░░░░░░░░  3% used   resets in 30d 8h 38m       │
+   │                  kimi 2% · code 1%                                          │
+   ╰─────────────────────────────────────────────────────────────────────────────╯
+
+ ❯ Opisz szczegółowo historię systemów kontroli wersji w 30 punktach.
+
+ ● The user wants detailed history of version control systems in 30 points. Need answer in Polish. We can provide 30 numbered points from early systems to modern DVCS/Git. Need accurate. Could use
+   web search to ensure accuracy, but general knowledge. However for detailed accuracy maybe search. Use WebSearch to verify some dates. But not necessary. Need 30 points. Let's structure. Include:
+   … (27 more lines, ctrl+o to expand)
+   Interrupted by user
+
+ ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+ │ >                                                                                                                                                                                                  │
+ ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ K2.7 Code Highspeed thinking  …/Projects/wt-dev/sandbox-kimi-shots-1  kimi-shots-1 [±]            ctrl+o expand | /tasks to check progress and status for background tasks | /init: generate AGENTS.md
+                                                                                                                                                                               context: 6% (13.9k/256k)

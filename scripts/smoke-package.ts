@@ -2,8 +2,8 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import { withHarness } from './live-harness.ts';
-const cache = process.env.AGENTCTL_LIVE_CACHE;
+import { withHarness, defaultCacheRoot } from './live-harness.ts';
+const cache = defaultCacheRoot();
 const tarball = process.env.AGENTCTL_SMOKE_TARBALL;
 const node22 = process.env.AGENTCTL_NODE22;
 const node26 = process.env.AGENTCTL_NODE26;
@@ -13,7 +13,7 @@ const results: unknown[] = [];
 for (const [name, node, npm] of [
   ['node22', node22, path.resolve(node22, '../../lib/node_modules/npm/bin/npm-cli.js')],
   ['node26', node26, process.env.AGENTCTL_NPM26 ?? fs.realpathSync(path.join(path.dirname(node26), 'npm'))],
-]) {
+].filter(([name]) => !process.env.AGENTCTL_SMOKE_NODE || name === process.env.AGENTCTL_SMOKE_NODE)) {
   await withHarness({ name: `smoke-${name}`, cacheRoot: cache }, async (h) => {
     fs.unlinkSync(path.join(h.fakeBin, 'node')); fs.symlinkSync(node!, path.join(h.fakeBin, 'node'));
     h.check();
@@ -36,10 +36,10 @@ for (const [name, node, npm] of [
     const capacity = run(['capacity', '--json']); const data = JSON.parse(capacity.stdout); check('global capacity JSON', capacity.status === 0 && data.providers.length === 2 && data.providers[0].estimate === null && !('tasks' in data));
     check('capacity clipboard', /Copied capacity/.test(run(['capacity', '--clip']).stdout));
     const dry = run(['mcp', 'install', '--desktop', '--config', path.join(h.root, 'desktop.json'), '--dry-run']); check('global MCP dry run', dry.status === 0 && !fs.existsSync(path.join(h.root, 'desktop.json')) && /Dry run/.test(dry.stdout));
-    const doctor = run(['doctor']); check('doctor uses chosen Node', doctor.status === 0 && doctor.stdout.includes(name === 'node22' ? '22.14.0' : '26.13.0'));
+    const doctor = run(['doctor']); check('doctor uses chosen Node', doctor.status === 0 && doctor.stdout.includes(spawnSync(node!, ['--version'], { encoding: 'utf8' }).stdout.trim().slice(1)));
     const starts = h.agentStarts(); check('no inference agent started', starts.every((l) => /^(?:codex app-server|(?:claude|codex) --(?:version|help)|claude mcp get agentctl)$/.test(l)));
     fs.writeFileSync(path.join(cache, `smoke-${name}.log`), `${version.stdout}${doctor.stdout}\n${JSON.stringify(checks, null, 2)}\n`);
     results.push({ node: name, version: spawnSync(node!, ['--version'], { encoding: 'utf8' }).stdout.trim(), passed: checks.length, failed: 0, checks, capacity: data, guideFirstLines: guide.stdout.split('\n').slice(0, 4) });
   });
 }
-fs.writeFileSync(path.join(cache, 'smoke-results.json'), JSON.stringify(results, null, 2) + '\n');
+fs.writeFileSync(path.join(cache, `smoke-results-${process.env.AGENTCTL_SMOKE_NODE ?? 'both'}.json`), JSON.stringify(results, null, 2) + '\n');

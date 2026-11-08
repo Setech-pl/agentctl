@@ -1,0 +1,579 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Setech-pl/agentctl/docs/dataset-schema.json",
+  "title": "agentctl dataset export v1 JSONL line",
+  "description": "The first line is the header. Each subsequent line is one known task attempt. Null means unavailable, never zero-imputed. Canonical project is separate from historical repository labels.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/header"
+    },
+    {
+      "$ref": "#/$defs/attempt"
+    }
+  ],
+  "$defs": {
+    "header": {
+      "type": "object",
+      "properties": {
+        "dataset_schema": {
+          "const": 1
+        },
+        "type": {
+          "const": "header"
+        },
+        "content_included": {
+          "type": "object",
+          "properties": {
+            "prompts": {
+              "type": "boolean"
+            },
+            "reports": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "prompts",
+            "reports"
+          ],
+          "additionalProperties": false
+        },
+        "redaction": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "dataset_schema",
+        "type",
+        "content_included",
+        "redaction"
+      ],
+      "additionalProperties": false
+    },
+    "attempt": {
+      "type": "object",
+      "properties": {
+        "dataset_schema": {
+          "const": 1
+        },
+        "instance_id": {
+          "type": "string"
+        },
+        "project": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "task": {
+          "type": "string"
+        },
+        "attempt_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "attempt": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "relation": {
+          "type": "object",
+          "properties": {
+            "continues": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "continued_by": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "review_of": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "continues",
+            "continued_by",
+            "review_of"
+          ],
+          "additionalProperties": false
+        },
+        "cohort": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "repo_label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "repo_labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "requested": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "model": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "effort": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "provider",
+            "model",
+            "effort"
+          ],
+          "additionalProperties": false
+        },
+        "resolved": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "model": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "effort": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "provider",
+            "model",
+            "effort"
+          ],
+          "additionalProperties": false
+        },
+        "observed": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "model": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "effort": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "provider",
+            "model",
+            "effort"
+          ],
+          "additionalProperties": false
+        },
+        "cli_versions": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "agentctl": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "agent",
+            "agentctl"
+          ],
+          "additionalProperties": false
+        },
+        "started_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ended_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "duration_ms": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "tokens": {
+          "type": "object",
+          "properties": {
+            "input": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "output": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "cache_read": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "cache_write": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "reasoning": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            }
+          },
+          "required": [
+            "input",
+            "output",
+            "cache_read",
+            "cache_write",
+            "reasoning"
+          ],
+          "additionalProperties": false
+        },
+        "self_verdict": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "human_mark": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "result": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "note": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "result",
+                "note",
+                "at"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "cancellation": {
+          "type": "object",
+          "properties": {
+            "cancelled": {
+              "type": "boolean"
+            },
+            "at": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "reason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "source": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "cancelled",
+            "at",
+            "reason",
+            "source"
+          ],
+          "additionalProperties": false
+        },
+        "move": {
+          "type": "object",
+          "properties": {
+            "moved": {
+              "type": "boolean"
+            },
+            "to": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "switched_by": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "moved",
+            "to",
+            "switched_by"
+          ],
+          "additionalProperties": false
+        },
+        "outputs": {
+          "type": "object",
+          "properties": {
+            "valid": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "pending": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "errors": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "checks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "result": {
+                    "type": "string"
+                  },
+                  "note": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "valid",
+            "pending",
+            "errors",
+            "checks"
+          ],
+          "additionalProperties": false
+        },
+        "commits": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "repo": {
+                "type": "string"
+              },
+              "branch": {
+                "type": "string"
+              },
+              "sha": {
+                "type": "string",
+                "pattern": "^[a-fA-F0-9]{7,40}$"
+              }
+            },
+            "required": [
+              "repo",
+              "branch",
+              "sha"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "provenance": {
+          "type": "object",
+          "properties": {
+            "sources": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "history",
+                  "state"
+                ]
+              }
+            },
+            "project": {
+              "enum": [
+                "explicit",
+                "unknown"
+              ]
+            },
+            "tokens": {
+              "enum": [
+                "history",
+                "usage",
+                "unknown"
+              ]
+            },
+            "identity": {
+              "enum": [
+                "explicit",
+                "legacy_task_started"
+              ]
+            },
+            "outputs": {
+              "enum": [
+                "report_git_validation",
+                "unknown"
+              ]
+            }
+          },
+          "required": [
+            "sources",
+            "project",
+            "tokens",
+            "identity",
+            "outputs"
+          ],
+          "additionalProperties": false
+        },
+        "unknown": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "prompt_text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "report_text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "dataset_schema",
+        "instance_id",
+        "project",
+        "task",
+        "attempt_id",
+        "attempt",
+        "relation",
+        "cohort",
+        "repo_label",
+        "repo_labels",
+        "requested",
+        "resolved",
+        "observed",
+        "cli_versions",
+        "started_at",
+        "ended_at",
+        "duration_ms",
+        "tokens",
+        "self_verdict",
+        "human_mark",
+        "cancellation",
+        "move",
+        "outputs",
+        "commits",
+        "provenance",
+        "unknown"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

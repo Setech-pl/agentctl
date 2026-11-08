@@ -25,6 +25,7 @@ jobs:
           AGENTCTL_HOME: ${{ runner.temp }}/agentctl-test/agentctl
           CODEX_HOME: ${{ runner.temp }}/agentctl-test/codex
           CLAUDE_CONFIG_DIR: ${{ runner.temp }}/agentctl-test/claude
+          AGENTCTL_LIVE_CACHE: ${{ runner.temp }}/agentctl-live
           AGENTCTL_TEST_TMP: ${{ runner.temp }}/agentctl-test/tmp
           TMPDIR: ${{ runner.temp }}/agentctl-test/tmp
         run: |

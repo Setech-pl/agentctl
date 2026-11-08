@@ -1,0 +1,17 @@
+{
+  "captureDate": "2026-11-05",
+  "cliVersion": "2.5.0",
+  "binary": "/opt/homebrew/bin/kimi",
+  "bundleSha256": "acd6894e2e2db50d37c449eefe9d3549a0177bd2d12cf17a8e1da94c60eb359f",
+  "server": "tmux -L fix018c",
+  "requestedModel": "kimi-code/k3",
+  "efforts": [
+    "low",
+    "high"
+  ],
+  "location": "~/Projects/cache/agentctl-018/fix3/",
+  "capturePolicy": "Selected unmodified wire records only; system prompts, tool catalogs, credentials and OAuth omitted. State fixtures retain identity/cwd/createdAt only.",
+  "footerObservation": "K3 thinking: high for low and high; llm.request.thinkingEffort confirms effective low/high.",
+  "permissions": "manual: matching exact Bash(git status) allow rule still asks; yolo + guard=true: exact command runs without approval (exit 128 outside git repository).",
+  "report": "Real Kimi Read/Edit inserted one follow-up in an existing report, preserving the current and stale attempt markers and final report-end."
+}

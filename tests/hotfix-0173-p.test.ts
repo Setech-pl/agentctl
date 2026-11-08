@@ -1,3 +1,4 @@
+import { composerFixture } from './composer-fixture.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -26,7 +27,7 @@ function fixture(name: string, agent: 'claude' | 'codex' = 'claude', extra = '')
     if (cmd === 'tmux' && args[0] === 'capture-pane') { const target = args[args.indexOf('-t') + 1] ?? ''; const pane = tmux.windows.find(w => w.id === target || target.endsWith(':' + w.name)); return pane ? { stdout: pane.screen } : { code: 1 }; }
     return tmux.respond(cmd, args, opts);
   } });
-  const pane = tmux.add('t1', agent === 'claude' ? '❯ Try "fake"\n' : '› Ask Codex to do anything\n');
+  const pane = tmux.add('t1', composerFixture(agent === 'claude' ? '❯ Try "fake"\n' : '› Ask Codex to do anything\n'));
   const ctx = new Context(runner, config, () => {}), notified: string[] = [];
   const notifier = { notify: async (_title: string, text: string) => { notified.push(text); } };
   seedTask(config, 'T1', { agent, cohort: 'P', windowId: pane.id });
@@ -43,7 +44,7 @@ it('0173-P1: exact Claude Code 2.1.311 haiku/low screen and all spinner glyphs a
 for (const agent of ['claude','codex'] as const) it(`0173-P1/P4 ${agent}: hook/notify is preferred to an unreadable screen; stale generation cannot confirm send`, async () => {
   const f = fixture(`hook-${agent}`, agent); await queuePrompt(f.ctx, f.record(), 'Original prompt\nSecond line');
   await setHeaderFields(f.runner, taskFile(f.config, 't1'), { prompt_delivery: 'confirming', delivery_started_at: new Date(f.runner.now()).toISOString() });
-  const event = agent === 'claude' ? { task: 'T1', agent, kind: 'user-prompt-submit' as const, payload: { prompt: 'Original prompt\rSecond line' } } : { task: 'T1', agent, payload: { type: 'agent-turn-complete', 'last-assistant-message': 'Done' } };
+  const event = agent === 'claude' ? { task: 'T1', agent, kind: 'user-prompt-submit' as const, payload: { prompt: 'Original prompt\rSecond line' } } : { task: 'T1', agent, payload: { type: 'agent-turn-complete', 'last-assistant-message': 'Done', 'input-messages': ['Original prompt\nSecond line'] } };
   await handleEvent(f.ctx, new Alerts(f.ctx, f.notifier), event);
   assert.equal(deliveryEvidence(f.ctx, f.record(), ''), true);
   assert.equal(await deliverPendingPrompt(f.ctx, 't1'), 'sent');
@@ -52,11 +53,11 @@ for (const agent of ['claude','codex'] as const) it(`0173-P1/P4 ${agent}: hook/n
   assert.equal(deliveryEvidence(f.ctx, f.record(), ''), false);
   if (agent === 'claude') { await handleEvent(f.ctx, new Alerts(f.ctx, f.notifier), event); assert.equal(deliveryEvidence(f.ctx, f.record(), ''), false); }
 });
-for (const kind of ['stop','notification'] as const) it(`0173-P1 Claude ${kind}: fresh completion/idle hook acknowledges delivery without screen`, async () => {
+for (const kind of ['stop','notification'] as const) it(`0173-P1 Claude ${kind}: completion/idle hook without submission cannot acknowledge delivery`, async () => {
   const f = fixture(kind); await queuePrompt(f.ctx, f.record(), 'Original prompt');
   await setHeaderFields(f.runner, taskFile(f.config, 't1'), { prompt_delivery: 'confirming', delivery_started_at: new Date(f.runner.now()).toISOString() });
   await handleEvent(f.ctx, new Alerts(f.ctx, f.notifier), { task: 'T1', agent: 'claude', kind, payload: { notification_type: 'idle_prompt' } });
-  assert.equal(await deliverPendingPrompt(f.ctx, 't1'), 'sent');
+  assert.equal(await deliverPendingPrompt(f.ctx, 't1'), 'confirming');
 });
 it('0173-P2: later canonical PASS report beats needs-attention and reaches events, pull_ready, after and cohort-done', async () => {
   const f = fixture('late-report'); await touchCohort(f.ctx, 'P');
@@ -64,8 +65,9 @@ it('0173-P2: later canonical PASS report beats needs-attention and reaches event
   const memory = new WatchMemory(); await watchTick(f.ctx, memory, f.notifier);
   assert.equal((await collectStatus(f.ctx))[0]!.state, 'needs-attention');
   fs.mkdirSync(path.dirname(f.record().report), { recursive: true }); fs.writeFileSync(f.record().report, 'Werdykt: PASS\n<!-- agentctl:report-end -->\n');
-  f.pane.screen = working; // the final spinner may remain painted after the report is complete
-  const row = (await collectStatus(f.ctx))[0]!; assert.equal(row.state, 'report-ready'); assert.equal(hasReport(row), true); assert.deepEqual(unmetAfter(['T1'], [row]), []);
+  f.pane.screen = working; // a complete report must not release the slot while work is visible
+  const row = (await collectStatus(f.ctx))[0]!; assert.equal(row.state, 'working'); assert.equal(row.report, 'yes'); assert.equal(hasReport(row), false); assert.deepEqual(unmetAfter(['T1'], [row]), ['T1']);
+  f.pane.screen = '❯ \n';
   await watchTick(f.ctx, memory, f.notifier);
   assert.equal(f.record().promptDelivery, 'sent'); assert.equal(f.record().promptError, undefined); assert.equal((await collectStatus(f.ctx))[0]!.state, 'report-ready');
   assert.ok(readJournal(f.config).some(e => e.kind === 'report-ready'));
@@ -75,7 +77,7 @@ it('0173-P2: later canonical PASS report beats needs-attention and reaches event
   await cohortTick(f.ctx, f.notifier, await collectStatus(f.ctx));
   assert.ok(readJournal(f.config).some(e => e.kind === 'cohort-done'));
 });
-for (const agent of ['claude','codex'] as const) it(`0173-P3/P4 ${agent}: send succeeds with warning, watch deadline notifies once, later work clears attention without another paste`, async () => {
+for (const agent of ['claude','codex'] as const) it(`0173-P3/P4 ${agent}: send succeeds with warning, watch deadline notifies once, later work requires matching evidence to clear attention without another paste`, async () => {
   const f = fixture(`send-${agent}`, agent), memory = new WatchMemory();
   // FakeTmux keeps the input idle: no hook, echo or working acknowledgement.
   const [sent] = await sendPrompts(f.ctx, [{ task: 'T1', window: 't1', prompt: 'Original prompt' }]);
@@ -87,6 +89,9 @@ for (const agent of ['claude','codex'] as const) it(`0173-P3/P4 ${agent}: send s
   assert.equal(f.notified.filter(t => t.includes('Prompt delivery')).length, 1);
   await watchTick(f.ctx, memory, f.notifier); assert.equal(f.notified.filter(t => t.includes('Prompt delivery')).length, 1);
   f.pane.screen = agent === 'claude' ? working : 'Working (esc to interrupt)\n';
+  assert.equal((await collectStatus(f.ctx))[0]!.state, 'needs-attention');
+  assert.equal(f.record().pendingPrompt, 'Original prompt');
+  await handleEvent(f.ctx, new Alerts(f.ctx, f.notifier), { task: 'T1', agent, kind: agent === 'claude' ? 'user-prompt-submit' : undefined, payload: agent === 'claude' ? { prompt: 'Original prompt' } : { type: 'agent-turn-complete', 'input-messages': ['Original prompt'] } });
   assert.equal((await collectStatus(f.ctx))[0]!.state, 'working');
   await watchTick(f.ctx, memory, f.notifier); assert.equal(f.record().promptDelivery, 'sent');
   assert.equal(f.runner.commands.filter(c => c.includes('paste-buffer')).length, 1);
@@ -109,10 +114,14 @@ for (const tool of ['new','queue'] as const) it(`0173-P3 ${tool}: uncertain deli
   const f = fixture(`mcp-${tool}`), repo = path.join(f.root, 'repo'); fs.mkdirSync(repo);
   f.tmux.windows.length = 0;
   const spec = `---\ntask: T2\nagent: claude\nrepos:\n  - {path: ${repo}, worktree: ${repo}-wt}\n---\nOriginal prompt\n`;
+  const primer = new WatchMemory(); await watchTick(f.ctx, primer, f.notifier); // the watcher heartbeat; every chat start goes through it now
   const preview = await f.call(tool, { spec }); assert.ok(!preview.isError, preview.text);
   const result = await f.call(tool, { spec, confirm: true }); assert.ok(!result.isError, result.text);
-  if (tool === 'new') { assert.match(result.text, /Started: T2/); assert.match(result.text, /dostarczenie niepotwierdzone/); assert.equal(readTaskRecord(f.config, 't2')!.promptDelivery, 'confirming'); }
-  else { const memory = new WatchMemory(); await watchTick(f.ctx, memory, f.notifier); await memory.queue.idle(); assert.equal(readTaskRecord(f.config, 't2')!.promptDelivery, 'confirming'); assert.deepEqual(readQueue(f.config), []); assert.ok(readJournal(f.config).some(e => e.kind === 'queue-start' && e.task === 'T2')); }
+  if (tool === 'new') assert.match(result.text, /Registered: T2/);
+  const memory = new WatchMemory(); await watchTick(f.ctx, memory, f.notifier); await memory.queue.idle();
+  assert.equal(readTaskRecord(f.config, 't2')!.promptDelivery, 'confirming');
+  assert.deepEqual(readQueue(f.config), []);
+  if (tool === 'queue') assert.ok(readJournal(f.config).some(e => e.kind === 'queue-start' && e.task === 'T2'));
 });
 
 it('0173-P3: an old canonical report and unchanged assistant output cannot acknowledge a new send', async () => {

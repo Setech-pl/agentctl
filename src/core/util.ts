@@ -33,9 +33,19 @@ export function expandHome(p: string, home: string = os.homedir()): string {
   return p;
 }
 
-/** Expand `~` and make the path absolute. */
-export function resolvePath(p: string, base: string = process.cwd()): string {
-  return path.resolve(base, expandHome(p));
+/** The process working directory, or a user-facing explanation when it was deleted underneath us (gc removes worktrees). */
+export function safeCwd(): string {
+  try {
+    return process.cwd();
+  } catch {
+    throw new AgentctlError('current directory no longer exists (removed by gc?) – cd elsewhere, e.g. cd ~');
+  }
+}
+
+/** Expand `~` and make the path absolute. The cwd is consulted only for a relative path: it may have been deleted. */
+export function resolvePath(p: string, base?: string): string {
+  const expanded = expandHome(p);
+  return path.isAbsolute(expanded) ? path.normalize(expanded) : path.resolve(base ?? safeCwd(), expanded);
 }
 
 /** Replace the known placeholders {task}, {TASK}, {cache}; leave everything else (e.g. glob braces) alone. */
@@ -45,6 +55,13 @@ export function fillPlaceholders(template: string, vars: { task: string; cache: 
     if (name === 'TASK') return vars.task.toUpperCase();
     return vars.cache;
   });
+}
+
+/** Polish noun after a number: 1 okno, 2–4 okna, 5+ okien (and 12–14, 22–24 … follow the same rule as their last digit, except 12–14 which are "many"). */
+export function plural(n: number, one: string, few: string, many: string): string {
+  if (n === 1) return one;
+  const last = n % 10, tens = n % 100;
+  return last >= 2 && last <= 4 && !(tens >= 12 && tens <= 14) ? few : many;
 }
 
 export const TASK_ID = /^[A-Z][A-Z0-9_-]{0,39}$/;

@@ -1,0 +1,61 @@
+[
+  {
+    "type": "metadata",
+    "protocol_version": "1.5",
+    "created_at": 1793891144794
+  },
+  {
+    "type": "turn.prompt",
+    "agentId": "main",
+    "input": [
+      {
+        "type": "text",
+        "text": "Reply with exactly OK. Do not use tools."
+      }
+    ],
+    "origin": {
+      "kind": "user"
+    },
+    "promptId": "msg_01M6P3X541P3DC2MVXCA9A0YRC",
+    "turnId": 0,
+    "time": 1793891144838
+  },
+  {
+    "type": "llm.request",
+    "agentId": "main",
+    "kind": "loop",
+    "provider": "openai",
+    "model": "k3",
+    "modelAlias": "kimi-code/k3",
+    "thinkingEffort": "high",
+    "thinkingKeep": "all",
+    "toolSelect": false,
+    "systemPromptHash": "e28154463342372550c167df68c4bd037319dcd716486e63747d4776d36bd57e",
+    "toolsHash": "1db03b8e46db6c158950fc8a86d0c305cb91bccf2864fa772dd1c2d62eaedd18",
+    "messageCount": 2,
+    "turnStep": "0.1",
+    "time": 1793891144849
+  },
+  {
+    "type": "usage.record",
+    "agentId": "main",
+    "model": "kimi-code/k3",
+    "usage": {
+      "inputOther": 743,
+      "output": 39,
+      "inputCacheRead": 12288,
+      "inputCacheCreation": 0
+    },
+    "usageScope": "turn",
+    "time": 1793891149160
+  },
+  {
+    "type": "turn.ended",
+    "agentId": "main",
+    "turnId": 0,
+    "reason": "completed",
+    "durationMs": 4325,
+    "requestId": "49a5b45214f562238a15b31fa7629864",
+    "time": 1793891149163
+  }
+]

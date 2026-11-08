@@ -8,12 +8,14 @@ import { MCP_TOOLS } from './mcp-tools.ts';
 export const CLI_MCP: Record<string, string[]> = {
   'mcp check': ['mcp_check'], spec: ['spec_example'], 'spec example': ['spec_example'], version: ['version'], guide: ['guide'], capacity: ['capacity'], new: ['new'],
   queue: ['queue'], 'queue show': ['queue_show'], 'queue list': ['queue_list'], 'queue rm': ['queue_rm'], 'queue up': ['queue_up'], 'queue retry': ['queue_retry'], 'queue pause': ['queue_pause'], 'queue resume': ['queue_resume'],
-  unblock: ['unblock'], cohort: ['cohort_list'], 'cohort list': ['cohort_list'], 'cohort show': ['cohort_show'], 'cohort add': ['cohort_add'], 'cohort remove': ['cohort_remove'], 'cohort note': ['cohort_note'],
-  overlap: ['overlap'], send: ['send'], status: ['status'], limits: ['limits'], 'limits show': ['limits'], 'limits set': ['set_limits'], 'limits reserve': ['reserve'], 'limits release': ['limits_release'],
+  unblock: ['unblock'], cohort: ['cohort_list'], 'cohort list': ['cohort_list'], 'cohort show': ['cohort_show'], 'cohort add': ['cohort_add'], 'cohort remove': ['cohort_remove'], 'cohort note': ['cohort_note'], 'cohort archive': ['cohort_archive'],
+  overlap: ['overlap'], send: ['send'], answer: ['answer'], status: ['status'], limits: ['limits'], 'limits show': ['limits'], 'limits set': ['set_limits'], 'limits reserve': ['reserve'], 'limits release': ['limits_release'],
   events: ['events_since'], usage: ['usage'], resume: ['resume'], mark: ['mark'], log: ['log'], stats: ['stats'], gc: ['gc_preview', 'gc'], archive: ['archive'], hide: ['hide'], unhide: ['unhide'], pull: ['get_report', 'pull_ready'], close: ['close'], cancel: ['cancel'],
   report: ['report', 'report_from'], away: ['away_status', 'away'], 'away status': ['away_status'], 'away on': ['away'], 'away off': ['away'], manager: ['manager_start', 'manager_status'], 'manager stop': ['manager_stop'], 'notify-test': ['notify_test'], adopt: ['adopt'], interrupt: ['interrupt'], move: ['move'], peek: ['peek'], doctor: ['doctor'],
 };
 export const CLI_MCP_EXCEPTIONS: Record<string, string> = {
+  dataset: 'Local dataset command group; CLI only.',
+  'dataset export': 'Owner-only local benchmark export; CLI only, no MCP tool.',
   up: 'Interactive terminal orchestration: opens watch/board and optionally manager; use the CLI.',
   watch: 'Long-running terminal watcher, started and supervised locally.',
   board: 'Interactive terminal UI.',

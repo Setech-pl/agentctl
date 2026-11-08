@@ -23,7 +23,7 @@ function setup(name: string, extraYaml = '') {
   const runner = new DiskRunner({ dryRun: false, startTime: Date.now() + 3_600_000, respond: tmux.respond });
   const notified: string[] = [];
   const deps: McpDeps = {
-    context: (out) => new Context(runner, loadGlobalConfig(path.dirname(config.path)), out),
+    context: (out) => new Context(runner, { ...loadGlobalConfig(path.dirname(config.path)), notify: { ...loadGlobalConfig(path.dirname(config.path)).notify, mcpWrites: 'all' } }, out),
     notify: async (m) => void notified.push(m),
   };
   const call = (n: string, args: Record<string, unknown> = {}): Promise<ToolResult> => tool(n).run(deps, z.object(tool(n).input).parse(args) as never);
@@ -207,7 +207,7 @@ describe('mcp: cohorts', () => {
     assert.match(spec.text, /"cohort": "Sprint-1"/);
     assert.match(spec.text, /"cancelled": true/);
     assert.match(spec.text, /"cancel_reason": "x"/);
-    assert.match((await t.call('get_report', { task: 'A-1' })).text, /# partial/);
+    assert.match((await t.call('get_report', { task: 'A-1', detail: true })).text, /# partial/);
     assert.match((await t.call('pull_ready')).text, /^No reports ready\./, 'a cancelled task is not handed over');
   });
 });

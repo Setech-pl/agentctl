@@ -1,3 +1,4 @@
+import { inspectField } from './input-field.ts';
 import { screenMetadata } from './tmux.ts';
 import { PATTERN_FLAGS } from './config.ts';
 import type { Runner } from './runner.ts';
@@ -14,8 +15,11 @@ export interface TrustWait {
 export interface ReadyOptions {
   pattern: string;
   emptyInput?: boolean;
+  structuralComposer?: boolean;
   /** If the screen matches this (folder-trust dialog), the human has to answer it: stop waiting, or wait for them (`waitTrust`). */
   trustPattern?: string;
+  /** If the screen matches this (another startup dialog, e.g. Codex "Update available"), stop waiting at once: a human has to answer it. */
+  dialogPattern?: string;
   timeoutMs: number;
   intervalMs?: number;
   /** Keep polling while the trust dialog is up instead of returning; the dialog is never answered. */
@@ -28,6 +32,8 @@ export interface ReadyResult {
   ready: boolean;
   /** The agent is showing its folder-trust dialog (still, when the wait ended). agentctl never answers it. */
   trust: boolean;
+  /** The agent is showing another startup dialog (e.g. "Update available"). agentctl never answers it. */
+  dialog?: boolean;
   /** The wait was aborted through `signal`. */
   aborted?: boolean;
   /** The last screen that was captured. */
@@ -51,6 +57,7 @@ export async function waitForReady(runner: Runner, tmux: Tmux, window: string, o
   }
   const regex = new RegExp(opts.pattern, PATTERN_FLAGS);
   const trust = opts.trustPattern ? new RegExp(opts.trustPattern, PATTERN_FLAGS) : undefined;
+  const dialog = opts.dialogPattern ? new RegExp(opts.dialogPattern, PATTERN_FLAGS) : undefined;
   const interval = opts.intervalMs ?? 500;
   let deadline = runner.now() + opts.timeoutMs;
   let inTrust = false;
@@ -72,7 +79,8 @@ export async function waitForReady(runner: Runner, tmux: Tmux, window: string, o
           inTrust = false;
           deadline = runner.now() + opts.timeoutMs;
         }
-        if (regex.test(screen) && (!opts.emptyInput || !screenMetadata(screen).draft_input)) return { ready: true, trust: false, screen };
+        if (dialog?.test(screen)) return { ready: false, trust: false, dialog: true, screen };
+        if ((!opts.structuralComposer || inspectField(screen).readable) && regex.test(screen) && (!opts.emptyInput || !screenMetadata(screen).draft_input)) return { ready: true, trust: false, screen };
       }
     }
     if (runner.now() >= deadline) return { ready: false, trust: inTrust, screen };

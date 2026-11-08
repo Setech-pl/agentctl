@@ -5,6 +5,11 @@ import type { ExecResult, Runner } from './runner.ts';
 /** Pause between pasting a prompt and pressing Enter, so the TUI has consumed the bracketed paste. */
 export const PASTE_SETTLE_MS = 300;
 
+/** A captured screen; `dimInput` is the dim text of the input field that `stdout` no longer holds. */
+export interface Capture extends ExecResult {
+  dimInput?: string;
+}
+
 /** A window of the session as tmux reports it. */
 export interface WindowInfo {
   /** tmux's window ID ("@12"); empty when the listing did not carry one. */
@@ -105,13 +110,13 @@ export class Tmux {
   }
 
   /** Create the session with its first window. */
-  newSession(window: string, cwd: string, env: Record<string, string>): Promise<ExecResult> {
-    return this.runner.exec('tmux', ['new-session', '-d', '-s', this.session, '-n', window, '-c', cwd, ...this.envArgs(env)]);
+  newSession(window: string, cwd: string, env: Record<string, string>, command?: string): Promise<ExecResult> {
+    return this.runner.exec('tmux', ['new-session', '-d', '-s', this.session, '-n', window, '-c', cwd, ...this.envArgs(env), ...(command ? [command] : [])]);
   }
 
   /** Add a window to an existing session without switching to it. */
-  newWindow(window: string, cwd: string, env: Record<string, string>): Promise<ExecResult> {
-    return this.runner.exec('tmux', ['new-window', '-d', '-t', `=${this.session}:`, '-n', window, '-c', cwd, ...this.envArgs(env)]);
+  newWindow(window: string, cwd: string, env: Record<string, string>, command?: string): Promise<ExecResult> {
+    return this.runner.exec('tmux', ['new-window', '-d', '-t', `=${this.session}:`, '-n', window, '-c', cwd, ...this.envArgs(env), ...(command ? [command] : [])]);
   }
 
   /**
@@ -154,8 +159,8 @@ export class Tmux {
   }
 
   /** Send one named key (e.g. Escape) to the window. */
-  async sendKey(window: string, key: string): Promise<ExecResult> {
-    return this.runner.exec('tmux', ['send-keys', '-t', await this.targetFor(window), key]);
+  async sendKey(window: string, key: string, knownId?: string): Promise<ExecResult> {
+    return this.runner.exec('tmux', ['send-keys', '-t', knownId ?? await this.targetFor(window), key]);
   }
 
   async pressEnter(window: string): Promise<ExecResult> {
@@ -186,11 +191,20 @@ export class Tmux {
     return true;
   }
 
-  /** Visible screen (or the last `lines` lines of scrollback + screen) of the window. */
-  async capture(window: string, lines?: number, infos?: WindowInfo[], hintId?: string, join?: boolean): Promise<ExecResult> {
+  /**
+   * Visible screen (or the last `lines` lines of scrollback + screen) of the window. The dim text of the input field (a suggestion, or
+   * "Press up to edit queued messages") is taken out of `stdout` and returned as `dimInput`: it is not a draft, but it is a sign.
+   */
+  async capture(window: string, lines?: number, infos?: WindowInfo[], hintId?: string, join?: boolean): Promise<Capture> {
     const args = ['capture-pane', '-p', ...(join ? ['-J'] : []), '-t', await this.targetFor(window, infos, hintId)];
     if (lines !== undefined) args.push('-S', `-${lines}`);
-    return this.runner.exec('tmux', args, { readOnly: true });
+    const plain = await this.runner.exec('tmux', args, { readOnly: true });
+    if (plain.code !== 0 || !screenMetadata(plain.stdout).draft_input) return plain;
+    // Text in the input field: a draft of the human, or the dim suggestion of the next prompt that Claude Code shows in an empty field. Only the colour tells them apart.
+    const styled = await this.runner.exec('tmux', ['capture-pane', '-p', '-e', ...args.slice(2)], { readOnly: true });
+    if (styled.code !== 0) return plain;
+    const dimInput = dimInputText(plain.stdout, styled.stdout);
+    return { ...plain, stdout: withoutDimInput(plain.stdout, styled.stdout), ...(dimInput ? { dimInput } : {}) };
   }
 
   /** Make `window` the current window of the session (what a client attached to the session then shows). */
@@ -267,6 +281,56 @@ export function lastNonEmptyLine(screen: string): string {
   return lines.length ? (lines[lines.length - 1] as string).trim() : '';
 }
 
+const PROMPT_LINE = /^\s*[❯›>](?:\s|$)/;
+/** The text after the prompt marker on the last prompt line of a screen; '' when the field is empty. */
+export function lastPromptText(screen: string): string {
+  const line = screen.split('\n').filter((l) => PROMPT_LINE.test(l)).at(-1);
+  return line ? line.replace(/^\s*[❯›>]\s*/, '').trim() : '';
+}
+
+/** Is everything the line shows after its prompt marker dim (SGR 2)? That is a suggestion the agent shows in an empty field, not text somebody typed. */
+export function inputIsDim(styledLine: string): boolean {
+  let dim = false, marker = false, seen = false;
+  for (let i = 0; i < styledLine.length; i++) {
+    const ch = styledLine[i]!;
+    if (ch === '\x1b' && styledLine[i + 1] === '[') {
+      const end = styledLine.indexOf('m', i);
+      if (end < 0) break;
+      for (const code of styledLine.slice(i + 2, end).split(';')) { if (code === '2') dim = true; else if (code === '' || code === '0' || code === '22') dim = false; }
+      i = end;
+      continue;
+    }
+    if (!marker) { if ('❯›>'.includes(ch)) marker = true; continue; }
+    if (/\s/.test(ch)) continue;
+    if (!dim) return false;
+    seen = true;
+  }
+  return seen;
+}
+
+/** The line of the dim input (index in `plain`), or -1: the last prompt line, when everything after its marker is dim. */
+function dimInputLine(plain: string, styled: string): number {
+  const lines = plain.split('\n'), styledLines = styled.split('\n');
+  let at = -1;
+  for (let i = lines.length - 1; i >= 0; i--) if (PROMPT_LINE.test(lines[i]!)) { at = i; break; }
+  return at < 0 || styledLines.length !== lines.length || !inputIsDim(styledLines[at]!) ? -1 : at;
+}
+
+/** The screen with the dim text of the last prompt line taken out: what is left is what a human typed. `styled` is the same screen from `capture-pane -e`. */
+export function withoutDimInput(plain: string, styled: string): string {
+  const at = dimInputLine(plain, styled);
+  if (at < 0) return plain;
+  const lines = plain.split('\n');
+  lines[at] = lines[at]!.replace(/^(\s*[❯›>]).*$/, '$1');
+  return lines.join('\n');
+}
+
+/** The dim text that `withoutDimInput` takes out ('' when there is none): an agent's suggestion, or Claude Code's "Press up to edit queued messages". */
+export function dimInputText(plain: string, styled: string): string {
+  const at = dimInputLine(plain, styled);
+  return at < 0 ? '' : plain.split('\n')[at]!.replace(/^\s*[❯›>]\s*/, '').trim();
+}
+
 /** A line made only of box-drawing characters and spaces: borders and separators around the input field. */
 const BORDER_LINE = /^[\s─━═│┃║╭╮╰╯┌┐└┘├┤┬┴┼╌╍┄┅┈┉-]*$/u;
 
@@ -274,7 +338,7 @@ const BORDER_LINE = /^[\s─━═│┃║╭╮╰╯┌┐└┘├┤┬┴�
 export function screenMetadata(screen: string): { usage_hint: string | null; draft_input: string | null } {
   const lines = screen.split('\n');
   const usage = lines.filter(l => /(?:weekly|session|usage|model|daily).*limit.*(?:left|remaining|%|reset)/i.test(l));
-  const prompt = lines.filter(l => /^\s*[❯›>]\s/.test(l)).at(-1);
+  const prompt = lines.filter(l => /^\s*[❯›>](?:\s|$)/.test(l)).at(-1);
   const draft = prompt?.replace(/^\s*[❯›>]\s*/, '').trim();
   return { usage_hint: usage.map(l => l.trim()).join(' | ') || null, draft_input: draft && !/^Try\s|^Ask Codex to do anything$|^\d+\./.test(draft) ? draft : null };
 }

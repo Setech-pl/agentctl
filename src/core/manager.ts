@@ -1,3 +1,7 @@
+import { attachHint } from './tmux-socket.ts';
+import { writeLaunchScript } from './launch-script.ts';
+import { remoteControlSupport, blockingEnv } from './providers/claude-rc.ts';
+export { remoteControlSupport, blockingEnv, RC_BLOCKING_ENV } from './providers/claude-rc.ts';
 import { collectGuide, dispatcherGuide } from './guide.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -10,7 +14,7 @@ import type { McpEntry } from './mcp-install.ts';
 import { MCP_TOOLS } from './mcp-tools.ts';
 import { waitForReady } from './ready.ts';
 import { RC_CONFIRM, RC_CONNECTED, RC_FAILED, RC_FIRST_TIME } from './remote-control.ts';
-import { AgentctlError, expandHome } from './util.ts';
+import { AgentctlError, expandHome, safeCwd } from './util.ts';
 import type { SelfArgv } from './events.ts';
 import { MANAGER_WINDOW } from './windows.ts';
 
@@ -190,9 +194,7 @@ export function buildManagerArgv(launch: ManagerLaunch, settings: Pick<AgentSett
 }
 
 /** What `claude --help` must list for the manager to start. */
-export function remoteControlSupport(help: string): { remoteControl: boolean; roleFile: boolean } {
-  return { remoteControl: /--remote-control\b/.test(help), roleFile: /--append-system-prompt(?:-file\b|\[-file\])/.test(help) };
-}
+
 
 // ---- looking at the window
 
@@ -254,8 +256,8 @@ export interface ManagerStartResult {
 }
 
 /** The directory the manager runs in: `--project`, else `manager.project`, else where agentctl is run. Must exist. */
-export function managerProject(config: Pick<GlobalConfig, 'manager'>, project: string | undefined, cwd: string = process.cwd()): string {
-  const dir = project ? path.resolve(cwd, expandHome(project)) : (config.manager.project ?? cwd);
+export function managerProject(config: Pick<GlobalConfig, 'manager'>, project: string | undefined, cwd?: string): string {
+  const dir = project ? path.resolve(cwd ?? safeCwd(), expandHome(project)) : (config.manager.project ?? cwd ?? safeCwd());
   let ok = false;
   try {
     ok = fs.statSync(dir).isDirectory();
@@ -307,11 +309,13 @@ export async function startManager(ctx: Context, opts: ManagerOptions): Promise<
   await runner.writeFile(files.settings, managerSettingsJson());
   await runner.writeFile(files.mcp, managerMcpJson(mcpEntryFrom(opts.self)));
 
+  const startCommand = await writeLaunchScript(runner, files.dir, buildManagerArgv(launch, config.agents.claude), {});
   const sessionUp = await tmux.hasSession();
   const made = sessionUp ? await tmux.newWindow(MANAGER_WINDOW, project, {}) : await tmux.newSession(MANAGER_WINDOW, project, {});
   if (made.code !== 0) throw new AgentctlError(`tmux could not make the window "${MANAGER_WINDOW}": ${made.stderr.trim() || `exit ${made.code}`}`);
-  await tmux.typeCommand(MANAGER_WINDOW, command);
-  ctx.info(`manager: window ${config.session}:${MANAGER_WINDOW} in ${project} running ${command}`);
+
+  await tmux.typeCommand(MANAGER_WINDOW, startCommand);
+  ctx.info(`manager: window ${config.session}:${MANAGER_WINDOW} in ${project} running Claude (model ${launch.model}, effort ${launch.effort}) via ${startCommand}`);
   if (opts.noWait || runner.dryRun) return { action: 'started', window: MANAGER_WINDOW, name, project, command, state: 'starting', files };
 
   const settings = config.agents.claude;
@@ -334,7 +338,7 @@ export async function startManager(ctx: Context, opts: ManagerOptions): Promise<
 /** What to tell you after a start: where the one-time confirmations are, or that the session is up. */
 export function managerAdvice(ctx: Pick<Context, 'config'>, result: ManagerStartResult): string[] {
   const { session } = ctx.config;
-  const attach = `tmux attach -t ${session} \\; select-window -t ${MANAGER_WINDOW}`;
+  const attach = `${attachHint(ctx.config)} \\; select-window -t ${MANAGER_WINDOW}`;
   switch (result.state) {
     case 'connected':
       return [`The manager "${result.name}" is connected. Open the Claude app on the phone, tap Code, and pick the session with a computer icon and a green dot.`];
@@ -367,23 +371,6 @@ export async function stopManager(ctx: Context): Promise<'stopped' | 'not-runnin
 // ---- doctor
 
 /** Variables that make Claude Code refuse Remote Control (an API key or a gateway instead of a claude.ai login, no feature flags). */
-export const RC_BLOCKING_ENV = [
-  'ANTHROPIC_API_KEY',
-  'ANTHROPIC_AUTH_TOKEN',
-  'ANTHROPIC_BASE_URL',
-  'CLAUDE_CODE_OAUTH_TOKEN',
-  'CLAUDE_CODE_USE_BEDROCK',
-  'CLAUDE_CODE_USE_VERTEX',
-  'CLAUDE_CODE_USE_FOUNDRY',
-  'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
-  'DISABLE_GROWTHBOOK',
-] as const;
-
-/** The variables of `env` that block Remote Control (set and not empty). */
-export function blockingEnv(env: NodeJS.ProcessEnv): string[] {
-  return RC_BLOCKING_ENV.filter((name) => (env[name] ?? '') !== '');
-}
-
 /** The script and node the manager's `mcp.json` runs, when the file is there: for doctor, which says if they still exist. */
 export function readManagerMcp(config: Pick<GlobalConfig, 'path'>): { command: string; script: string | undefined } | undefined {
   try {

@@ -2,6 +2,30 @@
 
 Generated from README.md by `npm run docs`.
 
+## Automatic flow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Chat
+    participant A as agentctl
+    participant G as Agent window
+    C->>A: new or queue (answer carries a capacity snapshot)
+    A->>G: worktree, window, prompt
+    G->>A: asks a question
+    C->>A: events_since (needs-input)
+    C->>A: send (your answer)
+    A->>G: the answer
+    G->>A: report written
+    C->>A: events_since (report-ready)
+    C->>A: pull_ready (verdict, SHA, blockers)
+    C->>A: get_report (one section, on demand)
+    C->>A: mark ok
+    A->>G: review task with after starts from the queue
+    G->>A: review report
+    Note over A,G: In the background: overload gives an automatic "continue" to an idle window only, a transient start failure is retried, a disk or plan threshold becomes an event
+```
+
 ## Dispatcher
 
 ```mermaid
@@ -113,7 +137,7 @@ flowchart TB
     subgraph world [Outside]
         TMUX[tmux session agentctl]
         GIT[git worktrees]
-        AG[Claude Code and Codex]
+        AG[Claude Code, Codex, optional Kimi Code]
         NOTE[terminal-notifier / osascript]
         PHONE["ntfy server -> phone"]
         MGR["window manager: claude --remote-control + MCP, role from ~/.agentctl/manager/"]
@@ -135,6 +159,15 @@ flowchart TB
     CLI --> CORE
     BOARD --> CORE
     MCP --> CORE
+    subgraph providers [Provider adapters]
+        REG["registry: registered vs active providers"]
+        CL["Claude: argv, hooks, usage, safety"]
+        CX["Codex: argv, notify, usage, safety"]
+        KI["Kimi 2.5.0: TOML, passive wire, usage probe, safety"]
+    end
+    CORE --> REG
+    REG --> CL & CX & KI
+    CL & CX & KI --> RUN
     CORE --> RUN
     RUN --> TMUX
     RUN --> GIT
@@ -212,6 +245,7 @@ stateDiagram-v2
     background --> ready: background work gone, report there
     waiting --> working: send, follow-up prompt
     ready --> working: send, follow-up prompt
+    working --> working: send, queued follow-up
     waiting --> dead: window gone, no report
     working --> dead: window gone, no report
     waiting --> ready: window gone, report there

@@ -1,16 +1,22 @@
+import { get as providerValue } from './providers/registry.ts';
+import type { ProviderValues } from './providers/registry.ts';
+import { activeProviders, perProvider } from './providers/registry.ts';
+import { defaultSettings } from './providers/settings.ts';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import YAML from 'yaml';
-import { DEFAULT_EQUIVALENTS, parseEquivalents } from './equivalents.ts';
+import { defaultEquivalents, parseEquivalents } from './equivalents.ts';
 import type { Equivalent } from './equivalents.ts';
 import { DEFAULT_WINDOW_ICONS, TASK_STATES } from './icons.ts';
 import { findAutoAcceptFlag } from './safety.ts';
 import type { TaskState } from './state.ts';
 import { AgentctlError, Problems, errorMessage, expandHome, isObject, resolvePath } from './util.ts';
 
-export const AGENT_NAMES = ['claude', 'codex'] as const;
-export type AgentName = (typeof AGENT_NAMES)[number];
+import { PROVIDER_IDS, DEFAULT_PROVIDERS } from './providers/types.ts';
+import type { ProviderId } from './providers/types.ts';
+export const AGENT_NAMES = PROVIDER_IDS;
+export type AgentName = ProviderId;
 export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type Effort = (typeof EFFORTS)[number];
 
@@ -28,7 +34,18 @@ export interface Defaults {
 }
 
 /** The part of the configuration that exists in every layer (global, project, spec). Values are unexpanded. */
+export interface ReviewSettings {
+  default?: 'auto' | false;
+  prefer?: AgentName[];
+  agent?: AgentName;
+  model?: string;
+  effort?: Effort;
+  promptTemplate?: string;
+  rerun?: boolean;
+}
+
 export interface Layer {
+  review?: ReviewSettings;
   /** Project guide overlay, relative to the repository or starting with ~. */
   guide?: string;
   worktreeRoot?: string;
@@ -43,8 +60,10 @@ export interface Layer {
 }
 
 export interface AgentSettings {
+  env?: Record<string, string>;
   /** Extra flags appended to the agent command line. */
   flags: string[];
+  acceptsBusyPrompt?: boolean;
   /** Flags that carry the effort level; `{effort}` is replaced. */
   effortArgs: string[];
   /** Regex matched against the tmux screen to decide the agent is ready for input. */
@@ -55,6 +74,8 @@ export interface AgentSettings {
   trustTimeout: number;
   /** Regex: the agent shows its "trust this folder?" dialog. agentctl never answers it. */
   trustPattern: string;
+  /** Regex: the agent shows another startup dialog a human must answer (Codex "Update available"). agentctl never answers it. */
+  dialogPattern?: string;
   /** Regex: the agent is busy with a turn. */
   workingPattern: string;
   /** Regex: adapter output acknowledges a submitted prompt (not the composer). */
@@ -65,6 +86,13 @@ export interface AgentSettings {
   footerPatterns: string[];
   /** Regex: the agent asks the user a question and waits for the answer (state needs-input). */
   questionPattern: string;
+  /**
+   * Regex: an asynchronous question the agent is NOT waiting on while its turn runs (Codex's collapsed "? N question ·
+   * … to answer" footer of request_user_input_async). Counts as needs-input only when the agent is not working.
+   */
+  asyncQuestionPattern?: string;
+  approvalPattern?: string;
+  idleRequiresInput?: boolean;
   /** Regexes (any one matches a line of the screen): the agent says its usage limit is used up or it is rate limited (state limited). */
   limitPatterns: string[];
   /**
@@ -76,17 +104,23 @@ export interface AgentSettings {
 }
 
 export interface GlobalConfig extends Layer {
+  providers: ProviderId[];
+  warnings?: string[];
   /** Absolute path of the directory that holds per-task cache folders: only the reports the agents write. */
   cache: string;
   /** Where agentctl keeps its own state per task (`<stateDir>/<window>/TASK.md`, setup.log, markers), out of reach of the agents. */
   stateDir: string;
   session: string;
+  ui?: { instanceName?: string };
+  tmux?: { socket?: string };
   /** Seconds watch allows for asynchronous prompt acknowledgement. */
   deliveryConfirmS: number;
-  /** Max simultaneous windows per provider (agent). Missing = unlimited. */
-  limits: Partial<Record<AgentName, number>>;
+  /** Max simultaneous windows per provider (agent). Missing or 0 = unlimited; `off` = the provider is disabled. */
+  limits: Partial<Record<AgentName, number | 'off'>> & { heavy?: number };
   /** `limits.count_external`: claude/codex terminal sessions outside agentctl's windows count against the limit (detected with ps). */
   countExternal: boolean;
+  countReportReady: boolean;
+  preview: { ttlS: number };
   agents: Record<AgentName, AgentSettings>;
   /** Claude<->Codex pairs: your `equivalents` first, then the built-in table. */
   equivalents: Equivalent[];
@@ -96,7 +130,7 @@ export interface GlobalConfig extends Layer {
    * `agentctl watch`: poll interval, how long an idle task may wait before it is worth a notification, and the state icons
    * in front of the tmux window names (`null`: the windows keep their plain names).
    */
-  watch: { interval: number; waitingAfter: number; windowIcons: Record<TaskState, string> | null; statusLine: boolean };
+  watch: { idleConfirmTicks: number; interval: number; waitingAfter: number; windowIcons: Record<TaskState, string> | null; statusLine: boolean };
   /** Notifications: events from the agents themselves, what a click on a notification does, the verdict line of a report. */
   notify: NotifySettings;
   /** Away mode: when the phone gets notifications. */
@@ -111,6 +145,7 @@ export interface GlobalConfig extends Layer {
   queue: QueueSettings;
   reportSettleS: number;
   cohort: { doneGraceS: number };
+  limited: { autoResume: boolean; resumeAbovePercent: number; message: string };
   overload: { autoRetry: boolean; retryAfter: number; maxRetries: number; giveUpAfter: number; resetAfterS: number; message: string };
   /** Collision warnings: two active tasks of one repository changing the same files. */
   collisions: CollisionSettings;
@@ -119,9 +154,9 @@ export interface GlobalConfig extends Layer {
   /** Token usage and plan limits: warning thresholds, the hold of the queue, the tmux status line, where the agents keep their logs. */
   usage: UsageSettings;
   guideLang: 'en' | 'pl';
-  disk: { warnGb: number; criticalGb: number };
+  disk: { worktreeSharePercent: number; warnGb: number; criticalGb: number; workers: number; measurementTimeoutS: number };
   git: { timeoutS: number };
-  capacity: { snapshot: boolean; staleMinutes: number; sampleLimit: number; thresholds: number[]; codexRefresh: boolean };
+  capacity: { loadThreshold?: number; snapshot: boolean; staleMinutes: number; sampleLimit: number; thresholds: number[]; codexRefresh: boolean; claudeUsageProbe: boolean; claudeUsageProbeIntervalMinutes: number; kimiUsageProbe?: boolean; kimiUsageProbeModel?: string };
   /** Set by a long-running process (watch, MCP) when the file on disk does not load and the previous settings stay in force. */
   reloadWarning?: string;
   /** Where the config was (or would be) read from. */
@@ -134,18 +169,25 @@ export const NOTIFY_BACKENDS = ['auto', 'terminal-notifier', 'osascript'] as con
 export type NotifyBackend = (typeof NOTIFY_BACKENDS)[number];
 
 /** Write tools of the MCP server; each one must be listed in `mcp.allow` to work. */
-export const MCP_WRITE_TOOLS = ['send', 'new', 'interrupt', 'close', 'move', 'queue', 'queue_rm', 'cancel', 'mark', 'set_limits', 'reserve', 'resume', 'away', 'queue_retry', 'queue_up', 'queue_pause', 'queue_resume', 'unblock', 'cohort_add', 'cohort_remove', 'cohort_note', 'hide', 'unhide', 'archive', 'adopt', 'report_from', 'limits_release', 'manager_start', 'manager_stop', 'notify_test', 'gc'] as const;
+export const MCP_WRITE_TOOLS = ['send', 'answer', 'new', 'interrupt', 'close', 'move', 'queue', 'queue_rm', 'cancel', 'mark', 'set_limits', 'reserve', 'resume', 'away', 'queue_retry', 'queue_up', 'queue_pause', 'queue_resume', 'unblock', 'cohort_add', 'cohort_remove', 'cohort_note', 'cohort_archive', 'hide', 'unhide', 'archive', 'adopt', 'report_from', 'limits_release', 'manager_start', 'manager_stop', 'notify_test', 'gc'] as const;
 export type McpWriteTool = (typeof MCP_WRITE_TOOLS)[number];
+/** Permissions of `mcp.allow` that are not a tool of their own: `send_enter` lets `send` with `enter_only` press Enter for the text that a send left in an input field (it does not allow pasting). */
+export const MCP_EXTRA_PERMISSIONS = ['send_enter'] as const;
+export type McpPermission = McpWriteTool | (typeof MCP_EXTRA_PERMISSIONS)[number];
 
 /** Explicit group names avoid broadening existing single-tool permissions. */
 export const MCP_ALLOW_GROUPS: Record<string, readonly McpWriteTool[]> = {
   'queue:*': ['queue', 'queue_rm', 'queue_retry', 'queue_up', 'queue_pause', 'queue_resume'],
-  cohort: ['cohort_add', 'cohort_remove', 'cohort_note'],
+  cohort: ['cohort_add', 'cohort_remove', 'cohort_note', 'cohort_archive'],
   'manager:*': ['manager_start', 'manager_stop'],
 };
 
 export interface BoardSettings {
   modelVersions: Record<string, string>;
+  /** The board names its terminal window "<instance> <version> · board" (OSC 2) and the agentctl tmux session titles the outer terminal (this session only). */
+  windowTitle: boolean;
+  /** How many of the most recently active cohorts the board's `k` choice lists; older quiet ones fold into "starsze…". */
+  cohortsRecent: number;
   listWidth?: number | string;
   /** A task without a window whose report was pulled hides by itself (a task without a report stays in "Finished"). */
   autoHidePulledDead: boolean;
@@ -171,9 +213,9 @@ export interface CancelSettings {
 
 export interface UsageSettings {
   /** Percent of a plan window (per provider) from which `watch` warns, once per window. */
-  warn: Record<AgentName, number>;
+  warn: ProviderValues<number>;
   /** Percent from which it warns again, louder. */
-  critical: Record<AgentName, number>;
+  critical: ProviderValues<number>;
   /** Percent above which the queue does not start a task of that provider by itself. A provider missing here is never held. */
   queueHold: Partial<Record<AgentName, number>>;
   /** The plan percentages in the tmux status line ("C 62% · X 18%"). */
@@ -184,6 +226,7 @@ export interface UsageSettings {
   claudeDir: string | null;
   /** Codex's home (holds `sessions/`); null: `$CODEX_HOME`, else ~/.codex. */
   codexDir: string | null;
+  kimiDir?: string | null;
 }
 
 export interface CollisionSettings {
@@ -201,7 +244,7 @@ export interface McpSettings {
   maxResponseKb: number;
   client?: string;
   /** Write tools the chat may call; empty (the default): the server only reads. */
-  allow: McpWriteTool[];
+  allow: McpPermission[];
   /** `close` and `cancel` may also remove the git worktree (never with --force, never the main checkout). */
   allowRmWorktree: boolean;
   /**
@@ -214,6 +257,8 @@ export interface McpSettings {
 export interface NotifySettings {
   /** Which channel sends notifications; default `auto`. */
   backend: NotifyBackend;
+  mcpWrites?: 'all' | 'summary' | 'off';
+  mcpWritesIntervalS?: number;
   /** Hooks (Claude) and `-c notify=…` (Codex) report the agents' own events to `agentctl event`. `false`: screen reading only. */
   events: boolean;
   /** A notification when a turn ends and the agent waits (not only for questions, reports and limits). */
@@ -295,100 +340,25 @@ export interface ManagerSettings {
 
 export const DEFAULT_MANAGER_NAME = 'agentctl manager';
 
-/** The mark that opens the line an agent prints for an error: bullets, tree corners, warning signs. */
-const LINE_MARK = '^[\\s⎿●•■⚠!*>-]*';
-
-const BACKGROUND_CLAUDE = '[·⏵].*\\b\\d+ (?:shells?|monitors?)\\b(?: still running)?';
-
-export const DEFAULT_AGENT_SETTINGS: Record<AgentName, AgentSettings> = {
-  claude: {
-    flags: [],
-    effortArgs: ['--effort', '{effort}'],
-    // Claude Code 2.1.309 idle screen: the input box line "❯ Try ...". The trust dialog also uses "❯", but with "1. Yes".
-    readyPattern: '^\\s*❯\\s(?!\\d+\\.)',
-    readyTimeout: 60,
-    trustTimeout: 600,
-    trustPattern: 'Quick safety check|Yes, I trust this folder',
-    workingPattern: 'esc to interrupt|^\\s*[✶✻✽✢·*]\\s+[^\\n]+(?:…|\\.\\.\\.)\\s*\\([^\\n]*(?:\\d+(?:\\.\\d+)?s\\s*·|thinking|tokens)[^\\n]*\\)',
-    deliveryPattern: '^\\s*⏺|● got:',
-    interruptKey: 'Escape',
-    footerPatterns: [
-      '\\? for shortcuts',
-      '^\\s*(⏵⏵|⏸)',
-      'shift\\+tab to cycle',
-      '^\\s*[❯>]\\s*(Try ".*")?$',
-    ],
-    // AskUserQuestion dialog footer, and the footer of a permission dialog ("Esc to cancel · Tab to amend").
-    questionPattern: 'Enter to select\\b.*Esc to cancel|Esc to cancel · Tab to amend',
-    // Strings of the 2.1.309 binary: "You've hit your session limit" / "weekly limit" / "<model> limit" / "monthly spend limit" (+ " · resets …"),
-    // "Usage limit reached", "You're out of extra usage". The 429 line is also printed for a passing capacity problem (lower confidence).
-    limitPatterns: [
-      `${LINE_MARK}You.ve hit your .{0,60}limit`,
-      `${LINE_MARK}Usage limit reached`,
-      `${LINE_MARK}You.re out of extra usage`,
-      `${LINE_MARK}(?:API Error: )?Request rejected \\(429\\)`,
-    ],
-    // Claude Code 2.1.309 footer "⏵⏵ auto mode on · 1 shell, 6 monitors" and the lines "… · 1 shell, 6 monitors still running". A "·" or "⏵⏵" on the same
-    // line keeps a sentence of the conversation ("ran 2 shells") from counting.
-    overloadPatterns: ['^\\s*⎿\\s*API Error:\\s*529(?:\\s|$)', '^\\s*⎿\\s*(?:API Error:\\s*)?Overloaded(?:[.:]|$)'],
-    backgroundPatterns: ['^\\s*\\d+ (?:monitors?|shells?)(?:, \\d+ (?:monitors?|shells?))? still running\\b', BACKGROUND_CLAUDE, '[·⏵].*\\b\\d+ background\\b'],
-  },
-  codex: {
-    flags: [],
-    effortArgs: ['-c', 'model_reasoning_effort={effort}'],
-    // Codex 0.166.0 idle screen: "› Ask Codex to do anything" and the footer "? for shortcuts".
-    readyPattern: '^›\\s(?!\\d+\\.)|\\? for shortcuts',
-    readyTimeout: 60,
-    trustTimeout: 600,
-    trustPattern: 'Trust this folder\\?|Folder settings can run code automatically',
-    workingPattern: 'esc to interrupt',
-    deliveryPattern: '^\\s*[•■]|● got:',
-    interruptKey: 'Escape',
-    // Codex 0.166.0 footer: "GPT-6.1-Sol low · <dir> · <title>" and "? for shortcuts … ⚠ 1 warning · f2 to view".
-    footerPatterns: [
-      '\\? for shortcuts',
-      '⚠ \\d+ warnings?',
-      'f2 to view',
-      '^\\s*[\\w.-]+ (low|medium|high|xhigh|minimal|none) · ',
-      '^\\s*›\\s*(Ask Codex to do anything)?\\s*$',
-      'Queued follow-up inputs|⇧.? (edit last queued message|to answer)',
-    ],
-    // A pending request_user_input question: "? Which color…" with options, then "• Waiting for your answer."; and the footer of an
-    // approval dialog ("Would you like to run the following command?" … "Press enter to confirm or esc to cancel").
-    questionPattern: 'Waiting for your answer|^\\s*\\?\\s+\\d+ questions?\\b|to answer\\s*$|Press enter to confirm or esc to cancel',
-    // Strings of the 0.166.0 binary (the apostrophe there is U+2019): "You've hit your usage limit. …", "Usage limit reached",
-    // "You're out of credits", "Your workspace is out of credits", "You hit your spend cap …".
-    limitPatterns: [
-      `${LINE_MARK}You.ve hit your usage limit`,
-      `${LINE_MARK}Usage limit reached`,
-      `${LINE_MARK}You.re out of credits`,
-      `${LINE_MARK}Your workspace is out of credits`,
-      `${LINE_MARK}You hit your spend cap`,
-    ],
-    // Codex 0.166.0 has "background terminals" (/ps lists them, /stop ends them, "Waiting for background terminal"). The exact footer text with a
-    // count was not seen on a screen: this pattern is a best guess, see the README.
-    overloadPatterns: ['^\\s*■\\s*Selected model is at capacity(?:\\.|$)'],
-    backgroundPatterns: ['\\b\\d+ background terminals?\\b'],
-  },
-};
+export const DEFAULT_AGENT_SETTINGS = Object.fromEntries(DEFAULT_PROVIDERS.map(id => [id, defaultSettings(id)])) as Record<ProviderId, AgentSettings>;
 
 /** The keys accepted in every layer: the global config, `.agentctl.yaml` and (with a few of its own) a spec. docs/configuration.md describes each one. */
-export const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'setup', 'defaults', 'guide'];
-export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'cache', 'state_dir', 'session', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git', 'cohort', 'delivery_confirm_s'];
-export const LIMITS_KEYS = [...AGENT_NAMES, 'count_external'];
+export const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'setup', 'defaults', 'guide', 'review'];
+export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'limited', 'cache', 'state_dir', 'session', 'ui', 'tmux', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git', 'cohort', 'delivery_confirm_s', 'preview', 'providers'];
+export const LIMITS_KEYS = [...AGENT_NAMES, 'count_external', 'count_report_ready', 'heavy'];
 export const DEFAULTS_KEYS = ['agent', 'model', 'effort', 'remote_control'];
 export const LINK_KEYS = ['from', 'to'];
-export const AGENT_KEYS = ['flags', 'effort_args', 'ready_pattern', 'ready_timeout', 'trust_timeout', 'trust_pattern', 'working_pattern', 'delivery_pattern', 'interrupt_key', 'footer_patterns', 'question_pattern', 'limit_patterns', 'background_patterns', 'overload_patterns'];
-export const WATCH_KEYS = ['interval', 'waiting_after', 'window_icons', 'status_line'];
-export const NOTIFY_KEYS = ['backend', 'events', 'turn_end', 'terminal_app', 'verdict_pattern', 'ntfy'];
+export const AGENT_KEYS = ['env', 'accepts_busy_prompt', 'flags', 'effort_args', 'ready_pattern', 'ready_timeout', 'trust_timeout', 'trust_pattern', 'dialog_pattern', 'working_pattern', 'delivery_pattern', 'interrupt_key', 'footer_patterns', 'question_pattern', 'async_question_pattern', 'approval_pattern', 'limit_patterns', 'background_patterns', 'overload_patterns'];
+export const WATCH_KEYS = ['interval', 'waiting_after', 'window_icons', 'status_line', 'idle_confirm_ticks'];
+export const NOTIFY_KEYS = ['backend', 'events', 'turn_end', 'terminal_app', 'verdict_pattern', 'ntfy', 'mcp_writes', 'mcp_writes_interval_s'];
 export const NTFY_KEYS = ['server', 'topic', 'token', 'events', 'priority', 'include_verdict', 'include_question', 'click_url', 'always'];
 export const AWAY_KEYS = ['auto_idle'];
 export const MANAGER_KEYS = ['project', 'name', 'model', 'effort', 'guide', 'autostart'];
-export const BOARD_KEYS = ['auto_hide_pulled_dead', 'mouse', 'return_key', 'selected_color', 'model_versions', 'list_width'];
+export const BOARD_KEYS = ['auto_hide_pulled_dead', 'mouse', 'return_key', 'selected_color', 'model_versions', 'list_width', 'window_title', 'cohorts_recent'];
 export const MCP_KEYS = ['allow', 'allow_rm_worktree', 'client', 'max_response_kb'];
 export const QUEUE_KEYS = ['enabled', 'parallel_starts'];
 export const CANCEL_KEYS = ['grace'];
-export const USAGE_KEYS = ['warn', 'critical', 'queue_hold', 'status_line', 'claude_tap', 'claude_dir', 'codex_dir'];
+export const USAGE_KEYS = ['warn', 'critical', 'queue_hold', 'status_line', 'claude_tap', ...PROVIDER_IDS.map(id => `${id}_dir`)];
 export const COLLISION_KEYS = ['enabled', 'interval', 'notify', 'ignore'];
 
 /** Screen patterns are case-insensitive and match per line. */
@@ -504,6 +474,33 @@ function parseSetup(v: unknown, where: string, p: Problems): string[] {
   return commands;
 }
 
+/** Shared review parser for global/project settings and explicit spec orders. */
+export function parseReview(value: unknown, where: string, p: Problems): ReviewSettings | undefined {
+  if (value === 'auto' || value === true) return { default: 'auto' };
+  if (value === false) return { default: false };
+  if (!isObject(value)) { p.add(`${where} must be auto, false or a mapping`); return undefined; }
+  checkKeys(value, ['default', 'agent', 'model', 'effort', 'prompt_template', 'template', 'rerun', 'prefer'], where, p);
+  const review: ReviewSettings = {};
+  if (value.prefer !== undefined) {
+    if (!Array.isArray(value.prefer) || value.prefer.some(id => !(AGENT_NAMES as readonly unknown[]).includes(id)) || new Set(value.prefer).size !== value.prefer.length) p.add(`${where}.prefer must be a list of distinct registered provider IDs`);
+    else review.prefer = [...value.prefer] as AgentName[];
+  }
+  if (value.default !== undefined) {
+    if (value.default === 'auto' || value.default === false) review.default = value.default;
+    else p.add(`${where}.default must be auto or false`);
+  }
+  review.agent = parseEnumValue(value.agent, AGENT_NAMES, `${where}.agent`, p);
+  review.effort = parseEnumValue(value.effort, EFFORTS, `${where}.effort`, p);
+  if (value.model !== undefined) review.model = parseString(value.model, `${where}.model`, p);
+  const template = value.prompt_template ?? value.template;
+  if (template !== undefined) review.promptTemplate = parseString(template, `${where}.prompt_template`, p);
+  if (value.rerun !== undefined) {
+    if (typeof value.rerun === 'boolean') review.rerun = value.rerun;
+    else p.add(`${where}.rerun must be boolean`);
+  }
+  return review;
+}
+
 function parseLayer(obj: Record<string, unknown>, where: string, p: Problems): Layer {
   const layer: Layer = {
     links: parseLinks(obj.links, `${where}.links`, p),
@@ -519,24 +516,30 @@ function parseLayer(obj: Record<string, unknown>, where: string, p: Problems): L
   if (report) layer.report = report;
   if (reports.length > 1) layer.reportAlt = reports.slice(1);
   if (obj.setup !== undefined && obj.setup !== null) layer.setup = parseSetup(obj.setup, `${where}.setup`, p);
+  if (obj.review !== undefined) layer.review = parseReview(obj.review, `${where}.review`, p);
   return layer;
 }
 
 function parseAgentSettings(name: AgentName, v: unknown, where: string, p: Problems): AgentSettings {
-  const settings: AgentSettings = { ...DEFAULT_AGENT_SETTINGS[name] };
+  const settings: AgentSettings = defaultSettings(name);
   if (v === undefined || v === null) return settings;
   if (!isObject(v)) {
     p.add(`${where} must be a mapping`);
     return settings;
   }
   checkKeys(v, AGENT_KEYS, where, p);
+  if (v.env !== undefined) settings.env = parseEnv(v.env, `${where}.env`, p);
+  if (v.accepts_busy_prompt !== undefined) {
+    if (typeof v.accepts_busy_prompt === 'boolean') settings.acceptsBusyPrompt = v.accepts_busy_prompt;
+    else p.add(`${where}.accepts_busy_prompt must be boolean`);
+  }
   if (v.flags !== undefined) settings.flags = parseStringList(v.flags, `${where}.flags`, p);
   if (v.effort_args !== undefined) settings.effortArgs = parseStringList(v.effort_args, `${where}.effort_args`, p);
   for (const [key, list] of [['flags', settings.flags], ['effort_args', settings.effortArgs]] as const) {
-    const bad = findAutoAcceptFlag(list);
+    const bad = findAutoAcceptFlag(list, name);
     if (bad) p.add(`${where}.${key}: "${bad}" enables auto-accept, which agentctl never allows`);
   }
-  for (const [key, field] of [['ready_pattern', 'readyPattern'], ['trust_pattern', 'trustPattern'], ['working_pattern', 'workingPattern'], ['delivery_pattern', 'deliveryPattern'], ['question_pattern', 'questionPattern']] as const) {
+  for (const [key, field] of [['ready_pattern', 'readyPattern'], ['trust_pattern', 'trustPattern'], ['dialog_pattern', 'dialogPattern'], ['working_pattern', 'workingPattern'], ['delivery_pattern', 'deliveryPattern'], ['question_pattern', 'questionPattern'], ['async_question_pattern', 'asyncQuestionPattern'], ['approval_pattern', 'approvalPattern']] as const) {
     const pattern = parseString(v[key], `${where}.${key}`, p);
     if (!pattern) continue;
     try {
@@ -596,7 +599,7 @@ function parseAgentSettings(name: AgentName, v: unknown, where: string, p: Probl
   return settings;
 }
 
-export const DEFAULT_WATCH = { interval: 15, waitingAfter: 120 };
+export const DEFAULT_WATCH = { interval: 15, waitingAfter: 120, idleConfirmTicks: 2 };
 
 /** `true` or absent: the default icons; `false`: none; a mapping: the default icons with those states replaced. */
 function parseWindowIcons(v: unknown, p: Problems): GlobalConfig['watch']['windowIcons'] {
@@ -626,6 +629,10 @@ function parseWatch(v: unknown, p: Problems): GlobalConfig['watch'] {
     return watch;
   }
   checkKeys(v, WATCH_KEYS, 'config.watch', p);
+  if (v.idle_confirm_ticks !== undefined) {
+    if (Number.isInteger(v.idle_confirm_ticks) && Number(v.idle_confirm_ticks) >= 1) watch.idleConfirmTicks = Number(v.idle_confirm_ticks);
+    else p.add('config.watch.idle_confirm_ticks must be a positive integer');
+  }
   watch.windowIcons = parseWindowIcons(v.window_icons, p);
   if (v.status_line !== undefined) {
     if (typeof v.status_line === 'boolean') watch.statusLine = v.status_line;
@@ -640,13 +647,18 @@ function parseWatch(v: unknown, p: Problems): GlobalConfig['watch'] {
 }
 
 function parseNotify(v: unknown, p: Problems): NotifySettings {
-  const notify: NotifySettings = { backend: 'auto', events: true, turnEnd: true };
+  const notify: NotifySettings = { backend: 'auto', events: true, turnEnd: true, mcpWrites: 'summary', mcpWritesIntervalS: 60 };
   if (v === undefined || v === null) return notify;
   if (!isObject(v)) {
     p.add('config.notify must be a mapping like {terminal_app: com.apple.Terminal, verdict_pattern: "^Verdict:"}');
     return notify;
   }
   checkKeys(v, NOTIFY_KEYS, 'config.notify', p);
+  notify.mcpWrites = parseEnumValue(v.mcp_writes, ['all', 'summary', 'off'] as const, 'config.notify.mcp_writes', p) ?? 'summary';
+  if (v.mcp_writes_interval_s !== undefined) {
+    if (typeof v.mcp_writes_interval_s === 'number' && Number.isFinite(v.mcp_writes_interval_s) && v.mcp_writes_interval_s > 0) notify.mcpWritesIntervalS = v.mcp_writes_interval_s;
+    else p.add('config.notify.mcp_writes_interval_s must be positive seconds');
+  }
   notify.backend = parseEnumValue(v.backend, NOTIFY_BACKENDS, 'config.notify.backend', p) ?? 'auto';
   for (const [key, field] of [['events', 'events'], ['turn_end', 'turnEnd']] as const) {
     if (v[key] === undefined) continue;
@@ -768,7 +780,7 @@ function parseManager(v: unknown, p: Problems): ManagerSettings {
 }
 
 function parseBoard(v: unknown, p: Problems): BoardSettings {
-  const board: BoardSettings = { autoHidePulledDead: true, mouse: true, returnKey: 'F12', selectedColor: 'blue', modelVersions: {} };
+  const board: BoardSettings = { autoHidePulledDead: true, mouse: true, returnKey: 'F12', selectedColor: 'blue', modelVersions: {}, windowTitle: true, cohortsRecent: 10 };
   if (v === undefined || v === null) return board;
   if (!isObject(v)) {
     p.add('config.board must be a mapping like {auto_hide_pulled_dead: true, mouse: true, return_key: F12}');
@@ -782,6 +794,14 @@ function parseBoard(v: unknown, p: Problems): BoardSettings {
   if (v.list_width !== undefined) {
     if ((typeof v.list_width === 'number' && Number.isInteger(v.list_width) && v.list_width >= 64) || (typeof v.list_width === 'string' && /^(?:[1-9]\d?|100)%$/.test(v.list_width))) board.listWidth = v.list_width;
     else p.add('config.board.list_width must be an integer >= 64 columns or a percentage such as "45%"');
+  }
+  if (v.window_title !== undefined) {
+    if (typeof v.window_title === 'boolean') board.windowTitle = v.window_title;
+    else p.add('config.board.window_title must be true or false');
+  }
+  if (v.cohorts_recent !== undefined) {
+    if (typeof v.cohorts_recent === 'number' && Number.isInteger(v.cohorts_recent) && v.cohorts_recent >= 1) board.cohortsRecent = v.cohorts_recent;
+    else p.add('config.board.cohorts_recent must be a positive integer');
   }
   if (v.mouse !== undefined) {
     if (typeof v.mouse === 'boolean') board.mouse = v.mouse;
@@ -826,8 +846,8 @@ function parseMcp(v: unknown): McpSettings {
   for (const name of allow) {
     if (MCP_ALLOW_GROUPS[name]) {
       for (const tool of MCP_ALLOW_GROUPS[name]) if (!mcp.allow.includes(tool)) mcp.allow.push(tool);
-    } else if (!(MCP_WRITE_TOOLS as readonly string[]).includes(name)) mcp.warnings.push(`config.mcp.allow: "${name}" is not a write tool of this version, ignored (allowed: ${MCP_WRITE_TOOLS.join(', ')})`);
-    else if (!mcp.allow.includes(name as McpWriteTool)) mcp.allow.push(name as McpWriteTool);
+    } else if (!([...MCP_WRITE_TOOLS, ...MCP_EXTRA_PERMISSIONS] as readonly string[]).includes(name)) mcp.warnings.push(`config.mcp.allow: "${name}" is not a write tool of this version, ignored (allowed: ${MCP_WRITE_TOOLS.join(', ')})`);
+    else if (!mcp.allow.includes(name as McpPermission)) mcp.allow.push(name as McpPermission);
   }
   if (v.allow_rm_worktree !== undefined) {
     if (typeof v.allow_rm_worktree === 'boolean') mcp.allowRmWorktree = v.allow_rm_worktree;
@@ -872,13 +892,13 @@ function parseCancel(v: unknown, p: Problems): CancelSettings {
 }
 
 /** A percentage for both providers (`80`) or per provider (`{claude: 80, codex: 70}`); undefined when it is not one (the problem is added). */
-function parsePercent(v: unknown, where: string, p: Problems, fallback: Partial<Record<AgentName, number>>): Partial<Record<AgentName, number>> {
+function parsePercent(v: unknown, where: string, p: Problems, fallback: Partial<Record<AgentName, number>>, ids: readonly ProviderId[]): Partial<Record<AgentName, number>> {
   const ok = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x) && x > 0 && x <= 100;
-  if (ok(v)) return { claude: v, codex: v };
+  if (ok(v)) return perProvider(ids, () => v);
   if (isObject(v)) {
     checkKeys(v, [...AGENT_NAMES], where, p);
     const out = { ...fallback };
-    for (const name of AGENT_NAMES) {
+    for (const name of ids) {
       if (v[name] === undefined) continue;
       if (ok(v[name])) out[name] = v[name];
       else p.add(`${where}.${name} must be a percentage above 0 and up to 100`);
@@ -889,24 +909,26 @@ function parsePercent(v: unknown, where: string, p: Problems, fallback: Partial<
   return fallback;
 }
 
-function parseUsage(v: unknown, p: Problems): UsageSettings {
-  const usage: UsageSettings = { warn: { claude: 80, codex: 80 }, critical: { claude: 95, codex: 95 }, queueHold: {}, statusLine: true, claudeTap: true, claudeDir: null, codexDir: null };
+function parseUsage(v: unknown, p: Problems, ids: readonly ProviderId[]): UsageSettings {
+  const usage: UsageSettings = { warn: perProvider(ids, () => 80), critical: perProvider(ids, () => 95), queueHold: {}, statusLine: true, claudeTap: true, claudeDir: null, codexDir: null };
   if (v === undefined || v === null) return usage;
   if (!isObject(v)) {
     p.add('config.usage must be a mapping like {warn: 80, critical: 95}');
     return usage;
   }
   checkKeys(v, USAGE_KEYS, 'config.usage', p);
-  if (v.warn !== undefined) Object.assign(usage.warn, parsePercent(v.warn, 'config.usage.warn', p, usage.warn));
-  if (v.critical !== undefined) Object.assign(usage.critical, parsePercent(v.critical, 'config.usage.critical', p, usage.critical));
-  for (const name of AGENT_NAMES) if (usage.critical[name] < usage.warn[name]) p.add(`config.usage: critical (${usage.critical[name]}) for ${name} is below warn (${usage.warn[name]})`);
-  if (v.queue_hold !== undefined && v.queue_hold !== false) usage.queueHold = parsePercent(v.queue_hold, 'config.usage.queue_hold', p, {});
+  if (v.warn !== undefined) Object.assign(usage.warn, parsePercent(v.warn, 'config.usage.warn', p, usage.warn, ids));
+  if (v.critical !== undefined) Object.assign(usage.critical, parsePercent(v.critical, 'config.usage.critical', p, usage.critical, ids));
+  for (const name of ids) if (providerValue(usage.critical, name) < providerValue(usage.warn, name)) p.add(`config.usage: critical (${providerValue(usage.critical, name)}) for ${name} is below warn (${providerValue(usage.warn, name)})`);
+  if (v.queue_hold !== undefined && v.queue_hold !== false) usage.queueHold = parsePercent(v.queue_hold, 'config.usage.queue_hold', p, {}, ids);
   for (const [key, field] of [['status_line', 'statusLine'], ['claude_tap', 'claudeTap']] as const) {
     if (v[key] === undefined) continue;
     if (typeof v[key] === 'boolean') usage[field] = v[key];
     else p.add(`config.usage.${key} must be true or false`);
   }
-  for (const [key, field] of [['claude_dir', 'claudeDir'], ['codex_dir', 'codexDir']] as const) {
+  for (const id of PROVIDER_IDS) {
+    const key = `${id}_dir`;
+    const field = `${id}Dir` as 'claudeDir' | 'codexDir' | 'kimiDir';
     const dir = parseString(v[key], `config.usage.${key}`, p);
     if (dir) usage[field] = resolvePath(dir);
   }
@@ -961,14 +983,49 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   if (!isObject(raw)) throw new AgentctlError(`${file}: the top level must be a mapping`);
   checkKeys(raw, GLOBAL_KEYS, 'config', p);
   const layer = parseLayer(raw, 'config', p);
+  const providers = parseProviders(raw.providers, p);
 
   const cache = parseString(raw.cache, 'config.cache', p) ?? '~/Projects/cache';
   const stateDir = parseString(raw.state_dir, 'config.state_dir', p) ?? path.join(dir, 'tasks');
   const session = parseString(raw.session, 'config.session', p) ?? 'agentctl';
   if (!/^[A-Za-z0-9_-]+$/.test(session)) p.add('config.session may only contain letters, digits, "_" and "-"');
 
+  let ui: GlobalConfig['ui'];
+  if (raw.ui !== undefined) {
+    if (!isObject(raw.ui)) p.add('config.ui must be a mapping');
+    else {
+      checkKeys(raw.ui, ['instance_name'], 'config.ui', p);
+      const instanceName = parseString(raw.ui.instance_name, 'config.ui.instance_name', p);
+      if (instanceName !== undefined && !/^[\p{L}\p{N}][\p{L}\p{N} ._-]{0,63}$/u.test(instanceName)) p.add('config.ui.instance_name must be 1–64 letters, digits, spaces, dots, underscores or hyphens');
+      ui = instanceName === undefined ? {} : { instanceName };
+    }
+  }
+
+  let tmux: GlobalConfig['tmux'];
+  if (raw.tmux !== undefined) {
+    if (!isObject(raw.tmux)) p.add('config.tmux must be a mapping');
+    else {
+      checkKeys(raw.tmux, ['socket'], 'config.tmux', p);
+      const socket = parseString(raw.tmux.socket, 'config.tmux.socket', p);
+      if (socket !== undefined && !/^[A-Za-z0-9_-]+$/.test(socket)) p.add('config.tmux.socket may only contain letters, digits, "_" and "-"');
+      tmux = socket === undefined ? {} : { socket };
+    }
+  }
+
   const limits: GlobalConfig['limits'] = {};
   let countExternal = false;
+  let countReportReady = false;
+  const preview = { ttlS: 600 };
+  if (raw.preview !== undefined) {
+    if (!isObject(raw.preview)) p.add("config.preview must be a mapping");
+    else {
+      checkKeys(raw.preview, ["ttl_s"], "config.preview", p);
+      if (raw.preview.ttl_s !== undefined) {
+        if (typeof raw.preview.ttl_s === "number" && Number.isFinite(raw.preview.ttl_s) && raw.preview.ttl_s > 0) preview.ttlS = raw.preview.ttl_s;
+        else p.add("config.preview.ttl_s must be a positive number");
+      }
+    }
+  }
   if (raw.limits !== undefined && raw.limits !== null) {
     if (!isObject(raw.limits)) p.add('config.limits must be a mapping like {claude: 3, codex: 3}');
     else {
@@ -977,11 +1034,17 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
         if (typeof raw.limits.count_external === 'boolean') countExternal = raw.limits.count_external;
         else p.add('config.limits.count_external must be true or false');
       }
-      for (const name of AGENT_NAMES) {
+      if (raw.limits.count_report_ready !== undefined) {
+        if (typeof raw.limits.count_report_ready === "boolean") countReportReady = raw.limits.count_report_ready;
+        else p.add("config.limits.count_report_ready must be true or false");
+      }
+      for (const name of [...activeProviders({ providers }), 'heavy'] as const) {
         const value = raw.limits[name];
         if (value === undefined) continue;
-        if (typeof value === 'number' && Number.isInteger(value) && value > 0) limits[name] = value;
-        else p.add(`config.limits.${name} must be a positive integer`);
+        if (name !== 'heavy' && value === 'off') { limits[name] = 'off'; continue; }
+        // 0 is the historic spelling of "no limit": accepted, and nothing is stored.
+        if (typeof value === 'number' && Number.isInteger(value) && value >= 0) { if (value > 0) limits[name] = value; }
+        else p.add(`config.limits.${name} must be a positive integer, 0 (no limit)${name === 'heavy' ? '' : ' or off (the provider is disabled)'}`);
       }
     }
   }
@@ -991,9 +1054,9 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   if (rawAgents !== undefined && rawAgents !== null && !isObject(rawAgents)) p.add('config.agents must be a mapping');
   const agentMap = isObject(rawAgents) ? rawAgents : {};
   checkKeys(agentMap, [...AGENT_NAMES], 'config.agents', p);
-  for (const name of AGENT_NAMES) agents[name] = parseAgentSettings(name, agentMap[name], `config.agents.${name}`, p);
+  for (const name of activeProviders({ providers })) agents[name] = parseAgentSettings(name, agentMap[name], `config.agents.${name}`, p);
 
-  const equivalents = [...parseEquivalents(raw.equivalents, 'config.equivalents', p), ...parseEquivalents(DEFAULT_EQUIVALENTS, 'defaults', p)];
+  const equivalents = [...parseEquivalents(raw.equivalents, 'config.equivalents', p, providers), ...defaultEquivalents(providers)];
   const mirror = parseString(raw.mirror_dir, 'config.mirror_dir', p);
   const watch = parseWatch(raw.watch, p);
   const notify = parseNotify(raw.notify, p);
@@ -1004,26 +1067,38 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   const queue = parseQueue(raw.queue, p);
   const collisions = parseCollisions(raw.collisions, p);
   const cancel = parseCancel(raw.cancel, p);
-  const usage = parseUsage(raw.usage, p);
+  const usage = parseUsage(raw.usage, p, activeProviders({ providers }));
   let guideLang: 'en' | 'pl' = 'en';
   if (isObject(raw.guide)) {
     checkKeys(raw.guide, ['lang'], 'config.guide', p);
     if (raw.guide.lang === 'en' || raw.guide.lang === 'pl') guideLang = raw.guide.lang;
     else if (raw.guide.lang !== undefined) p.add('config.guide.lang must be en or pl');
   } else if (raw.guide !== undefined) p.add('config.guide must be a mapping like {lang: en}');
-  const capacity = { snapshot: true, staleMinutes: 30, sampleLimit: 2048, thresholds: [80, 95], codexRefresh: true };
+  const capacity = { snapshot: true, staleMinutes: 30, sampleLimit: 2048, thresholds: [80, 95], codexRefresh: true, claudeUsageProbe: false, claudeUsageProbeIntervalMinutes: 15 };
   if (raw.capacity !== undefined) {
     if (!isObject(raw.capacity)) p.add('config.capacity must be a mapping');
     else {
-      checkKeys(raw.capacity, ['snapshot', 'stale_minutes', 'sample_limit', 'thresholds', 'codex_refresh'], 'config.capacity', p);
-      for (const [key, field] of [['snapshot', 'snapshot'], ['codex_refresh', 'codexRefresh']] as const) {
+      if (raw.capacity.kimi_usage_probe !== undefined) {
+        if (typeof raw.capacity.kimi_usage_probe === 'boolean') Object.assign(capacity, { kimiUsageProbe: raw.capacity.kimi_usage_probe });
+        else p.add('config.capacity.kimi_usage_probe must be boolean');
+      }
+      if (raw.capacity.kimi_usage_probe_model !== undefined) {
+        if (typeof raw.capacity.kimi_usage_probe_model === 'string' && /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(raw.capacity.kimi_usage_probe_model)) Object.assign(capacity, { kimiUsageProbeModel: raw.capacity.kimi_usage_probe_model });
+        else p.add('config.capacity.kimi_usage_probe_model must be a model alias or default');
+      }
+      checkKeys(raw.capacity, ['load_threshold', 'snapshot', 'stale_minutes', 'sample_limit', 'thresholds', 'codex_refresh', 'kimi_usage_probe', 'kimi_usage_probe_model', 'claude_usage_probe', 'claude_usage_probe_interval_minutes'], 'config.capacity', p);
+      for (const [key, field] of [['snapshot', 'snapshot'], ['codex_refresh', 'codexRefresh'], ['claude_usage_probe', 'claudeUsageProbe']] as const) {
         if (typeof raw.capacity[key] === 'boolean') capacity[field] = raw.capacity[key];
         else if (raw.capacity[key] !== undefined) p.add(`config.capacity.${key} must be boolean`);
       }
-      for (const [key, field, min, max] of [['stale_minutes', 'staleMinutes', 1, 10080], ['sample_limit', 'sampleLimit', 2, 10000]] as const) {
+      for (const [key, field, min, max] of [['stale_minutes', 'staleMinutes', 1, 10080], ['sample_limit', 'sampleLimit', 2, 10000], ['claude_usage_probe_interval_minutes', 'claudeUsageProbeIntervalMinutes', 15, 10080]] as const) {
         const value = raw.capacity[key];
         if (typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max) capacity[field] = value;
         else if (value !== undefined) p.add(`config.capacity.${key} must be an integer from ${min} to ${max}`);
+      }
+      if (raw.capacity.load_threshold !== undefined) {
+        if (typeof raw.capacity.load_threshold === 'number' && Number.isFinite(raw.capacity.load_threshold) && raw.capacity.load_threshold > 0) Object.assign(capacity, { loadThreshold: raw.capacity.load_threshold });
+        else p.add('config.capacity.load_threshold must be positive');
       }
       if (raw.capacity.thresholds !== undefined) {
         if (Array.isArray(raw.capacity.thresholds) && raw.capacity.thresholds.length <= 20 && raw.capacity.thresholds.every((x) => typeof x === 'number' && x > 0 && x <= 100)) capacity.thresholds = [...new Set(raw.capacity.thresholds as number[])].sort((a, b) => a - b);
@@ -1032,6 +1107,19 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
     }
   }
 
+  const limited = { autoResume: true, resumeAbovePercent: 5, message: 'kontynuuj' };
+  if (raw.limited !== undefined) {
+    if (!isObject(raw.limited)) p.add('config.limited must be a mapping');
+    else {
+      checkKeys(raw.limited, ['auto_resume', 'resume_above_percent', 'message'], 'config.limited', p);
+      if (typeof raw.limited.auto_resume === 'boolean') limited.autoResume = raw.limited.auto_resume;
+      else if (raw.limited.auto_resume !== undefined) p.add('config.limited.auto_resume must be boolean');
+      if (typeof raw.limited.resume_above_percent === 'number' && Number.isFinite(raw.limited.resume_above_percent) && raw.limited.resume_above_percent >= 0 && raw.limited.resume_above_percent < 100) limited.resumeAbovePercent = raw.limited.resume_above_percent;
+      else if (raw.limited.resume_above_percent !== undefined) p.add('config.limited.resume_above_percent must be >= 0 and < 100');
+      if (typeof raw.limited.message === 'string' && raw.limited.message.trim()) limited.message = raw.limited.message;
+      else if (raw.limited.message !== undefined) p.add('config.limited.message must be nonempty text');
+    }
+  }
   const overload = { autoRetry: true, retryAfter: 300, maxRetries: 3, giveUpAfter: 1800, resetAfterS: 600, message: 'kontynuuj' };
   if (raw.overload !== undefined) {
     if (!isObject(raw.overload)) p.add('config.overload must be a mapping');
@@ -1055,10 +1143,10 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
     if (typeof raw.report.settle_s === 'number' && Number.isFinite(raw.report.settle_s) && raw.report.settle_s >= 0) reportSettleS = raw.report.settle_s;
     else p.add('config.report.settle_s must be a nonnegative number');
   }
-  const disk = { warnGb: 50, criticalGb: 20 };
+  const disk = { worktreeSharePercent: 20, warnGb: 50, criticalGb: 20, workers: 2, measurementTimeoutS: 600 };
   const git = { timeoutS: 600 };
   for (const [section, target, fields] of [
-    ['disk', disk, { warn_gb: 'warnGb', critical_gb: 'criticalGb' }],
+    ['disk', disk, { worktree_share_percent: 'worktreeSharePercent', warn_gb: 'warnGb', critical_gb: 'criticalGb', workers: 'workers', measurement_timeout_s: 'measurementTimeoutS' }],
     ['git', git, { timeout_s: 'timeoutS' }],
   ] as const) {
     const value = raw[section];
@@ -1071,6 +1159,8 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
       else (target as unknown as Record<string, number>)[field] = value[key];
     }
   }
+  if (disk.worktreeSharePercent > 100) p.add('config.disk.worktree_share_percent must not exceed 100');
+  if (!Number.isInteger(disk.workers) || disk.workers < 1 || disk.workers > 8) p.add('config.disk.workers must be an integer from 1 to 8');
   if (disk.criticalGb > disk.warnGb) p.add('config.disk.critical_gb must not exceed warn_gb');
   const cohort = { doneGraceS: 300 };
   if (raw.cohort !== undefined) {
@@ -1086,8 +1176,15 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   const deliveryConfirmS = raw.delivery_confirm_s ?? 60;
   if (typeof deliveryConfirmS !== 'number' || !Number.isFinite(deliveryConfirmS) || deliveryConfirmS <= 0) p.add('config.delivery_confirm_s must be a positive number');
   p.throwIfAny(`Invalid config ${file}:`, 'Fix the listed keys; see the README section "Configuration".');
-  const config: GlobalConfig = { ...layer, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, deliveryConfirmS: deliveryConfirmS as number, limits, countExternal, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, cohort, overload, collisions, cancel, usage, guideLang, capacity, disk, git, path: file, loaded: exists };
+  const warnings: string[] = [];
+  const usageMap = isObject(raw.usage) ? raw.usage : {};
+  for (const id of PROVIDER_IDS.filter(id => !providers.includes(id))) {
+    const configuredUsage = usageMap[`${id}_dir`] !== undefined || ['warn', 'critical', 'queue_hold'].some(k => { const values = usageMap[k]; return isObject(values) && values[id] !== undefined; });
+    if (agentMap[id] !== undefined || (isObject(raw.limits) && raw.limits[id] !== undefined) || configuredUsage) warnings.push(`${id} is not in providers; its agent/limit/usage settings are inactive`);
+  }
+  const config: GlobalConfig = { ...layer, providers, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, ...(ui ? { ui } : {}), ...(tmux ? { tmux } : {}), deliveryConfirmS: deliveryConfirmS as number, limits, countExternal, countReportReady, preview, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, cohort, overload, limited, collisions, cancel, usage, guideLang, capacity, disk, git, path: file, loaded: exists };
   if (mirror) config.mirrorDir = resolvePath(mirror);
+  if (warnings.length) config.warnings = warnings;
   return config;
 }
 
@@ -1104,4 +1201,16 @@ export function loadProjectConfig(repoPath: string): (Layer & { path: string }) 
   const layer = parseLayer(raw, PROJECT_CONFIG_NAME, p);
   p.throwIfAny(`Invalid project config ${file}:`, 'Fix the listed keys; see the README section "Configuration".');
   return { ...layer, path: file };
+}
+
+/** Both original providers remain mandatory; order controls the alternatives. */
+function parseProviders(value: unknown, p: Problems): ProviderId[] {
+  if (value === undefined) return [...DEFAULT_PROVIDERS];
+  if (!Array.isArray(value) || value.some(id => typeof id !== 'string' || !(PROVIDER_IDS as readonly string[]).includes(id))) {
+    p.add(`config.providers must be a list of known providers: ${PROVIDER_IDS.join(', ')}`);
+    return [...PROVIDER_IDS];
+  }
+  if (new Set(value).size !== value.length) p.add('config.providers must not contain duplicates');
+  for (const required of DEFAULT_PROVIDERS) if (!value.includes(required)) p.add(`config.providers must include ${required}`);
+  return value as ProviderId[];
 }

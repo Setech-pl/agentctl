@@ -1,7 +1,15 @@
+import { tmuxLoss } from './tmux-loss.ts';
+import { provider, matchesProviderCommand, isProviderLauncher } from './providers/registry.ts';
+import { atomicWriteFile, stateWriteFailure } from './atomic-file.ts';
+import { cachedRequest } from './response-budget.ts';
+import { tryFileLock } from './file-lock.ts';
+import { promptQueueView } from './prompt-queue.ts';
+import { readOutputs, dependencyVerdict, outputsPending } from './outputs.ts';
+import type { OutputData, OutputVerdict } from './outputs.ts';
 import path from 'node:path';
 import { inspectReport } from './report-state.ts';
 import { sessionQuestion } from './codex-question.ts';
-import { collapsedQuestion } from './events.ts';
+import { menuOptionLines } from './answer.ts';
 import { findCandidates, shortPath } from './report-detect.ts';
 import fs from 'node:fs';
 import type { Context } from './context.ts';
@@ -9,7 +17,7 @@ import { formatModelEffort } from './equivalents.ts';
 import { syncMirror } from './mirror.ts';
 import type { MirrorResult } from './mirror.ts';
 import { classifyScreen, taskState } from './state.ts';
-import { deliveryEvidence } from './prompt-delivery.ts';
+import { deliveryEvidence, deliveryNote } from './prompt-delivery.ts';
 import { readStoredEvent } from './event-command.ts';
 import { extractQuestion } from './events.ts';
 import type { TaskState } from './state.ts';
@@ -17,6 +25,7 @@ import { taskProgress } from './progress.ts';
 import type { Progress } from './progress.ts';
 import { screenMetadata, lastContentLine } from './tmux.ts';
 import { listArchivedRecords, listTaskRecords } from './taskstore.ts';
+import type { TaskRecord } from './taskstore.ts';
 import { attachCollisions } from './collisions.ts';
 import type { Collide } from './collisions.ts';
 import { BOARD_WINDOW, MANAGER_WINDOW } from './windows.ts';
@@ -25,10 +34,25 @@ import { formatDuration, formatLocalTime, shellQuote } from './util.ts';
 import type { AgentName } from './config.ts';
 import { taskTokenMap } from './usage.ts';
 import type { TaskTokens } from './usage.ts';
+import type { UsageReader } from './usage-sources.ts';
+import { openReader } from './usage.ts';
 import { formatTokens } from './usage-parse.ts';
 
 export interface StatusRow {
   task: string;
+  outputs?: OutputData['outputs'];
+  outputs_valid?: boolean;
+  outputs_partial?: boolean;
+  outputs_pending?: boolean;
+  outputs_errors?: string[];
+  verdict?: OutputVerdict;
+  decisionsCount?: number;
+  actionsCount?: number;
+  promptQueue?: ReturnType<typeof promptQueueView>;
+  promptDelivery?: string;
+  /** How the last message reached the agent: delivered / queued-in-agent / not-delivered-in-field. */
+  deliveryResult?: string;
+
   attempt?: number;
   attemptId?: string;
   summaryDelivered?: string | null;
@@ -38,9 +62,13 @@ export interface StatusRow {
   effort: string;
   /** "agent model/effort" as ordered in the spec, and as it runs. They differ after --agent or a limit switch. */
   requested: string;
+  observed?: TaskRecord['observed'];
+  observedWarning?: string;
   effective: string;
   switchedBy: 'flag' | 'limit' | null;
   state: TaskState;
+  /** A launched tmux window disappeared before completion; recovery is in hint. */
+  tmuxLost?: boolean;
   window: 'alive' | 'gone';
   /** The tmux window name of the task without any state icon, and tmux's ID of the window while it exists. */
   windowName: string;
@@ -72,6 +100,8 @@ export interface StatusRow {
   hint: string | null;
   /** The question the agent waits on (state needs-input), from the screen or from its event; null otherwise. */
   question: string | null;
+  /** The numbered options of the menu a needs-input/needs-trust frame shows ("1. Approve once", …); absent otherwise. */
+  menuOptions?: string[];
   /** `pin: true` in the spec: the task is never moved to the other provider. */
   pin: boolean;
   /** The task has no tmux window any more (or was moved to the other provider): it is done, whatever it left behind. Shown under "Finished" on the board. */
@@ -96,6 +126,8 @@ export interface StatusRow {
   /** The task that took over after `agentctl move` (this one is then `superseded`), and the task this one continues. */
   supersededBy: string | null;
   continues: string | null;
+  /** The task whose work this one reviews (its decisions and actions are the reviewer's, not the author's). */
+  reviewOf?: string | null;
   /** Tokens of the sessions of the task (input + output + cache writes), when asked for (`CollectOptions.tokens`) and a session log was found; null otherwise (n/d). */
   tokens?: TaskTokens | null;
 }
@@ -107,6 +139,7 @@ export function shownRows<T extends Pick<StatusRow, 'hidden'>>(rows: T[], all: b
 
 /** For a task whose agent is unknown: guess it from the screen (Codex draws "›" prompts and "OpenAI Codex"). */
 export function guessAgent(screen: string): AgentName {
+  if (/Welcome to Kimi Code!|Kimi Code updated|^\s*│\s*>/m.test(screen)) return 'kimi';
   return /OpenAI Codex|^\s*›/m.test(screen) ? 'codex' : 'claude';
 }
 
@@ -117,7 +150,21 @@ export interface CollectOptions {
   archived?: boolean;
   /** Add the tokens of each task (reads the session logs of the agents, incrementally). */
   tokens?: boolean;
+  /** Records the caller already scanned (snapshotRecords): collectStatus does not scan the stores again. */
+  records?: { current: TaskRecord[]; archived: TaskRecord[] };
+  /** The usage reader for the tokens (default: a fresh one for this call). */
+  reader?: UsageReader;
+  /**
+   * Cheap rows for closed/cancelled/archived tasks: skip the prompt queue, the outputs of a ready report and the token
+   * collection for them (the board shows only their count unless the section is expanded). Their state and report stay exact.
+   */
+  shallowClosed?: boolean;
 }
+
+const idleObservations = new Map<string, { working: boolean; idle: number; attempt: string; observedWork: boolean; workStopAt?: string }>();
+
+/** The per-record loop yields to the event loop every this many records, so board ticks and key presses interleave. */
+export const STATUS_CHUNK = 25;
 
 export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Promise<StatusRow[]> {
   const { runner, tmux, config } = ctx;
@@ -125,15 +172,28 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
   const live = new Set(infos.map((w) => w.plain));
   const rows: StatusRow[] = [];
   const knownWindows = new Set<string>();
-  const records = listTaskRecords(config).map((record) => ({ record, archived: false }));
+  // The records are copied: the loop annotates them (reportCandidate), and the caller's scan cache must stay pristine.
+  const scanned = opts.records ?? { current: listTaskRecords(config), archived: opts.archived ? listArchivedRecords(config) : [] };
+  const records = scanned.current.map((record) => ({ record: { ...record }, archived: false }));
   if (opts.archived) {
     // A folder in the archive counts as closed. A live window or a current state folder of the same name wins over it.
     const current = new Set(records.map((r) => r.record.window));
-    for (const record of listArchivedRecords(config)) if (!current.has(record.window) && !live.has(record.window)) records.push({ record, archived: true });
+    for (const record of scanned.archived) if (!current.has(record.window) && !live.has(record.window)) records.push({ record: { ...record }, archived: true });
   }
+  const tokenRecords: TaskRecord[] = [];
+  let sinceYield = 0;
   for (const { record, archived } of records) {
+    // The synchronous sections of this loop are long with hundreds of archived tasks; yield so keys interleave.
+    if (++sinceYield >= STATUS_CHUNK) {
+      sinceYield = 0;
+      await new Promise((resolve) => setImmediate(resolve));
+    }
     if (!archived) knownWindows.add(record.window);
     const alive = live.has(record.window);
+    // Closed, cancelled or archived and not live: the board only counts them (unless a section is expanded), so the
+    // prompt queue, the outputs and the tokens are not collected for them. Everything that decides the state stays.
+    const shallow = opts.shallowClosed === true && !alive && (archived || record.closed === true || record.cancelled === true);
+    if (opts.tokens && !shallow) tokenRecords.push(record);
     const startedMs = Date.parse(record.started);
     let reportMtime: number | undefined;
     try {
@@ -149,29 +209,71 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       else if (reportReady && reportMtime !== undefined) duration = formatDuration(reportMtime - startedMs);
     }
     let screenText = '';
+    let screenRead = !alive;
     if (alive) {
       const screen = await tmux.capture(record.window, undefined, infos, record.windowId);
-      if (screen.code === 0) screenText = screen.stdout;
+      if (screen.code === 0) { screenText = screen.stdout; screenRead = true; }
     }
     const screenAgent = record.agent === 'unknown' ? guessAgent(screenText) : record.agent;
-    const settings = config.agents[screenAgent];
+    const settings = config.agents[screenAgent] ?? provider(screenAgent).defaultSettings();
+    if (!cachedRequest()) await provider(screenAgent).events.poll?.(ctx, record);
     const stored = readStoredEvent(config, record);
     const reportState = inspectReport(config, { ...record, ...(stored?.outcome === 'turn-complete' ? { turnEndedAt: stored.at } : {}) }, runner.now(), !record.attemptId && (!alive || (config.reportSettleS === 0 && classifyScreen(screenText, settings) === 'idle')));
-    reportReady = reportState.ready && (!record.deliveryStartedAt || reportState.signature !== record.deliveryReportBaseline || record.promptDelivery === 'sent');
-    if (record.reportCandidate && record.reportCandidate !== record.report && !findCandidates(ctx, record).some(c => c.file === record.reportCandidate)) delete record.reportCandidate;
-    if (reportState.exists && !reportReady && !record.reportCandidate) record.reportCandidate = record.report;
+    reportReady = reportState.ready;
+    // The candidate lives on the row, not on the record copy: one bounded discovery walk per task per collect (R3).
+    let reportCandidate = record.reportCandidate;
+    let candidatesCache: ReturnType<typeof findCandidates> | undefined;
+    const candidates = () => (candidatesCache ??= findCandidates(ctx, record));
+    if (reportCandidate && reportCandidate !== record.report && !candidates().some(c => c.file === reportCandidate)) reportCandidate = undefined;
+    if (reportState.exists && !reportReady && !reportCandidate) reportCandidate = record.report;
     if (reportReady && !alive && reportState.mtime !== undefined && !Number.isNaN(startedMs)) duration = formatDuration(reportState.mtime - startedMs);
     // mtimeMs has a fraction, the stored time only whole milliseconds: a pull in the same millisecond as the report still counts.
     const pulled = record.pulled && reportMtime !== undefined && Date.parse(record.pulled) >= Math.floor(reportMtime) ? record.pulled : null;
     // Cancelled wins over closed: the task was abandoned, not finished.
     const cancelled = record.cancelled === true && !alive;
     const closed = !cancelled && (archived || (record.closed === true && !alive));
-    const hiddenBy: StatusRow['hiddenBy'] = cancelled ? 'cancelled' : closed ? 'closed' : record.hidden === true ? 'user' : record.hidden === undefined && config.board.autoHidePulledDead && !alive && pulled !== null ? 'auto' : null;
-    const deliveryReport = reportReady && (record.promptDelivery === 'needs-attention' || (record.deliveryId && reportState.signature !== record.deliveryReportBaseline)) && !['needs-input', 'needs-trust'].includes(classifyScreen(screenText, settings));
+    let hiddenBy: StatusRow['hiddenBy'] = cancelled ? 'cancelled' : closed ? 'closed' : record.hidden === true ? 'user' : record.hidden === undefined && config.board.autoHidePulledDead && !alive && pulled !== null ? 'auto' : null;
+    const deliveryReport = reportReady && (record.promptDelivery === 'needs-attention' || (record.deliveryId && reportState.signature !== record.deliveryReportBaseline)) && (!alive || classifyScreen(screenText, settings) === 'idle');
+    const writeFailure = stateWriteFailure(path.join(config.stateDir, record.window, 'TASK.md'));
     const unconfirmed = record.promptDelivery === 'needs-attention' && !reportReady && !deliveryEvidence(ctx, record, screenText);
-    const state: TaskState = cancelled ? 'cancelled' : closed ? 'closed' : record.supersededBy ? 'superseded' : deliveryReport ? 'report-ready' : unconfirmed ? 'needs-attention' : taskState({ alive, screen: screenText, settings, reportReady, event: stored?.outcome });
+    // A startup dialog `new` stopped at (prompt_delivery: needs-input) is a question to the human, not a delivery failure.
+    const startupDialog = record.promptDelivery === 'needs-input' && !reportReady;
+    const lossHint = await tmuxLoss(ctx, record, alive, reportReady || cancelled || closed || archived || !!record.supersededBy, infos.length > 0);
+    if (lossHint && hiddenBy === 'auto') hiddenBy = null;
+    let state: TaskState = cancelled ? 'cancelled' : closed ? 'closed' : record.supersededBy ? 'superseded' : lossHint ? 'needs-attention' : writeFailure ? 'needs-attention' : deliveryReport ? 'report-ready' : startupDialog ? 'needs-input' : unconfirmed ? 'needs-attention' : taskState({ alive, screen: screenText, settings, reportReady, event: stored?.outcome });
+    // Passive wire failures fill an idle screen; legacy hook recovery keeps its existing precedence.
+    if (state === 'waiting' && stored?.outcome === 'overloaded' && record.agent !== 'unknown' && provider(record.agent).events.payloadFrom === 'wire') state = 'overloaded';
+    const observationKey = `${config.stateDir}:${record.window}`;
+    if (idleObservations.size > 2000) idleObservations.delete(idleObservations.keys().next().value!);
+    const identity = `${record.attemptId ?? record.started}:${record.deliveryStartedAt ?? ''}:${record.windowId ?? ''}`;
+    const observationFile = path.join(config.stateDir, record.window, 'idle-observation.json');
+    let release: (() => void) | undefined;
+    try { if (!runner.dryRun && alive && !archived) release = tryFileLock(`${observationFile}.lock`); } catch { /* read-only state: retain process-local observations */ }
+    let prev = idleObservations.get(observationKey);
+    try { const stored = JSON.parse(fs.readFileSync(observationFile, 'utf8')); if (typeof stored.attempt === 'string' && typeof stored.idle === 'number' && typeof stored.working === 'boolean' && typeof stored.observedWork === 'boolean') prev = stored; } catch { /* first observation */ }
+    const observation = prev?.attempt === identity ? prev : { working: true, idle: 0, attempt: identity, observedWork: false };
+    if (!screenRead && state === 'waiting') state = 'working';
+    if (state === 'working' || state === 'background') { observation.working = true; observation.idle = 0; observation.observedWork = true; observation.workStopAt = stored?.at ?? record.turnEndedAt; }
+    else if (state === 'waiting' && observation.working) {
+      observation.idle++;
+      const stopAt = stored?.outcome === 'turn-complete' ? stored.at : !observation.observedWork ? record.turnEndedAt : undefined;
+      const stop = !!stopAt && stopAt !== observation.workStopAt && Date.parse(stopAt) >= Date.parse(record.deliveryStartedAt ?? record.attemptStarted ?? record.started);
+      if (!stop && observation.idle < config.watch.idleConfirmTicks) state = 'working';
+      else observation.working = false;
+    } else { observation.working = false; observation.idle = 0; }
+    if (!reportState.exists && (state === 'waiting' || !alive)) reportCandidate = candidates()[0]?.file;
+    idleObservations.set(observationKey, observation);
+    if (release) { try { atomicWriteFile(observationFile, JSON.stringify(observation)); } catch { /* observation persistence is best effort */ } finally { release(); } }
+    // Still being written (no report-end yet, or not settled): readOutputs says `outputs_pending` and judges nothing.
+    const outputData = !shallow && reportReady ? await readOutputs(ctx, record) : undefined;
+    let verdict: OutputVerdict | undefined;
+    if (!shallow && reportReady) { try { verdict = dependencyVerdict(fs.readFileSync(record.report, 'utf8')); } catch { /* absent */ } }
     rows.push({
+      ...(outputData ? { ...outputData, verdict, decisionsCount: outputData.outputs?.decisions.length ?? 0, actionsCount: outputData.outputs?.actions.length ?? 0 } : {}),
       task: record.task,
+      promptQueue: shallow ? [] : promptQueueView(ctx, record.window, record),
+      promptDelivery: record.promptDelivery,
+      ...(record.deliveryResult ? { deliveryResult: record.deliveryResult } : {}),
       attempt: record.attempt,
       attemptId: record.attemptId,
       summaryDelivered: record.summaryDelivered ?? null,
@@ -179,10 +281,13 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       model: record.model,
       effort: record.effort,
       requested: `${record.requested.agent} ${formatModelEffort(record.requested)}`,
+      ...(record.observed ? { observed: record.observed } : {}),
+      ...(record.observedWarning ? { observedWarning: record.observedWarning } : {}),
       effective: `${record.agent} ${record.model}/${record.effort}`,
       switchedBy: record.switchedBy ?? null,
       state,
-      ...(record.reportCandidate && !reportReady ? { reportCandidate: record.reportCandidate } : {}),
+      ...(lossHint ? { tmuxLost: true } : {}),
+      ...(reportCandidate && !reportReady ? { reportCandidate } : {}),
       ...screenMetadata(screenText),
       window: alive ? 'alive' : 'gone',
       windowName: record.window,
@@ -199,10 +304,13 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       lastLine: lastContentLine(screenText, settings.footerPatterns),
       progress: opts.progress === false || record.repos.length === 0 ? null : await taskProgress(runner, record.repos),
       collide: [],
-      hint: [unconfirmed ? record.promptError : record.promptDelivery === 'confirming' || record.promptDelivery === 'sending' ? 'dostarczenie niepotwierdzone – sprawdzam; watch confirms within delivery_confirm_s' : record.promptDelivery === 'pending' ? 'original prompt pending; watch sends it once after folder trust and empty ready input' : stateHint(record.task, state, record.pin === true, record.supersededBy), !record.reportConfirmed && record.reportSource && path.normalize(record.reportSource) !== path.normalize(record.report) ? `raport pochodzi z kopii ${record.reportSource} – sprawdź` : null].filter(Boolean).join('; ') || null,
-      question: state === 'needs-input' ? ((collapsedQuestion(screenText) ? sessionQuestion(config, record) : undefined) ?? extractQuestion(screenText) ?? (stored?.outcome === 'needs-input' && stored.text !== '' ? stored.text : null)) : null,
+      hint: [lossHint, reportCandidate && reportCandidate !== record.report && !reportState.exists ? `Raport poza ścieżką kanoniczną; użyj report_from ze ścieżką ${reportCandidate}` : null, writeFailure ? `State write failed: ${writeFailure.reason}; old TASK.md preserved` : startupDialog ? record.promptError : unconfirmed ? record.promptError : record.promptDelivery === 'confirming' || record.promptDelivery === 'sending' ? (deliveryNote(record) ?? 'dostarczenie niepotwierdzone – sprawdzam; watch confirms within delivery_confirm_s') : record.promptDelivery === 'pending' ? 'original prompt pending; watch sends it once after folder trust and empty ready input' : stateHint(record.task, state, record.pin === true, record.supersededBy), !record.reportConfirmed && record.reportSource && path.normalize(record.reportSource) !== path.normalize(record.report) ? `raport pochodzi z kopii ${record.reportSource} – sprawdź` : null].filter(Boolean).join('; ') || null,
+      // Codex: the session log names a pending request_user_input question exactly (the text of the expanded view),
+      // for a collapsed one and for a waiting one alike; the screen reader covers every other dialog.
+      question: state === 'needs-input' ? ((record.agent === 'codex' ? sessionQuestion(config, record) : undefined) ?? extractQuestion(screenText) ?? (stored?.outcome === 'needs-input' && stored.text !== '' ? stored.text : null)) : null,
+      ...((state === 'needs-input' || state === 'needs-trust') && alive ? { menuOptions: menuOptionLines(screenText) } : {}),
       pin: record.pin === true,
-      finished: !alive || state === 'superseded',
+      finished: (!alive && !lossHint) || state === 'superseded',
       hidden: hiddenBy !== null,
       hiddenBy,
       closed,
@@ -214,6 +322,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       cohort: record.cohort ?? null,
       supersededBy: record.supersededBy ?? null,
       continues: record.continues ?? null,
+      reviewOf: record.reviewOf ?? null,
     });
   }
   // Windows of the session that agentctl has no state file for: never skipped silently.
@@ -223,7 +332,16 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     const screenText = screen.code === 0 ? screen.stdout : '';
     const info = tmux.resolve(window, infos);
     const command = await ctx.runner.exec('tmux', ['display-message', '-p', '-t', info?.id || tmux.target(window), '#{pane_current_command}'], { readOnly: true });
-    if (info?.role !== 'task' && !/^(?:claude|codex)(?:\s|$)/.test(command.stdout.trim())) continue;
+    let providerCommand = matchesProviderCommand(command.stdout.trim(), 'pane');
+    if (info?.role !== 'task' && !providerCommand && isProviderLauncher(command.stdout.trim())) {
+      // tmux names a Node launcher rather than the provider: inspect only this pane's process.
+      const pid = await ctx.runner.exec('tmux', ['display-message', '-p', '-t', info?.id || tmux.target(window), '#{pane_pid}'], { readOnly: true });
+      if (/^\d+$/.test(pid.stdout.trim())) {
+        const process = await ctx.runner.exec('ps', ['-p', pid.stdout.trim(), '-o', 'args='], { readOnly: true });
+        providerCommand = process.code === 0 && matchesProviderCommand(process.stdout.trim(), 'args');
+      }
+    }
+    if (info?.role !== 'task' && !providerCommand) continue;
     const agent = guessAgent(screenText);
     const task = window.toUpperCase();
     rows.push({
@@ -244,7 +362,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       report: 'missing',
       reportPath: '',
       pulled: null,
-      lastLine: lastContentLine(screenText, config.agents[agent].footerPatterns),
+      lastLine: lastContentLine(screenText, (config.agents[agent] ?? provider(agent).defaultSettings()).footerPatterns),
       progress: null,
       collide: [],
       hint: orphanHint(ctx, window),
@@ -265,7 +383,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     });
   }
   if (opts.tokens) {
-    const tokens = taskTokenMap(config, runner.now());
+    const tokens = taskTokenMap(config, runner.now(), tokenRecords, opts.reader ?? openReader(config));
     for (const row of rows) row.tokens = tokens.get(row.task) ?? null;
   }
   attachCollisions(rows, config.collisions.ignore, config.collisions.enabled);

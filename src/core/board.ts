@@ -1,12 +1,19 @@
-import { collectDisk } from './disk.ts';
+import type { RefreshClock } from '../board/refresh-scheduler.ts';
+import { attachHint } from './tmux-socket.ts';
+import { provider as providerAdapter, PROVIDERS } from './providers/registry.ts';
+import { get as providerValue } from './providers/registry.ts';
+import type { ProviderValues } from './providers/registry.ts';
+import { markTasks } from './mark.ts';
+import { collectDisk, DISK_INTERVAL_MS } from './disk.ts';
 import type { DiskReport } from './disk.ts';
 import { collectCapacity, renderCapacity } from './capacity.ts';
 import { shortPath } from './report-detect.ts';
 import { modelLabel, providerLabel } from './model-label.ts';
 import path from 'node:path';
+import fs from 'node:fs';
 import { attachCollisions, collideText } from './collisions.ts';
 import { cancelTasks, planCancel } from './cancel.ts';
-import { countsLine } from './cohort.ts';
+import { countsLine, lastActivity, listCohorts } from './cohort.ts';
 import { closeTask } from './close.ts';
 import { Context } from './context.ts';
 import type { GlobalConfig } from './config.ts';
@@ -18,7 +25,7 @@ import { liveWindows } from './plan.ts';
 import { collectLimits, renderLimits } from './limits.ts';
 import { planGc, renderGc } from './gc.ts';
 import { findResumable, planResume, resumeTasks } from './resume.ts';
-import { describeQueue, moveToFront, readQueue, removeFromQueue, setPaused } from './queue.ts';
+import { describeQueue, moveToFront, readQueue, removeFromQueue, setPaused, isPaused } from './queue.ts';
 import type { QueueView } from './queue.ts';
 import { peekWindow } from './peek.ts';
 import { pullReady, pullTask } from './pull.ts';
@@ -30,10 +37,11 @@ import { sendPrompts } from './send.ts';
 import type { TaskState } from './state.ts';
 import { collectStatus } from './status.ts';
 import type { StatusRow } from './status.ts';
-import { listArchivedRecords, listTaskRecords } from './taskstore.ts';
+import { snapshotRecords } from './taskstore.ts';
+import type { TaskRecord } from './taskstore.ts';
 import { logLines, markTask } from './history.ts';
 import type { Result } from './history.ts';
-import { openReader, readPlans } from './usage.ts';
+import { readPlans, sharedReader } from './usage.ts';
 import type { PlanState } from './usage.ts';
 import { formatTokens } from './usage-parse.ts';
 import { formatReset } from './usage.ts';
@@ -52,6 +60,57 @@ import { cohortKey, errorMessage } from './util.ts';
  */
 
 export const BOARD_REFRESH_MS = 2000;
+/** The refresh slows to this when nothing is alive or unfinished any more. */
+export const BOARD_IDLE_REFRESH_MS = 5000;
+/** Ticks fired by the fs.watch of the state dir are at least this far apart (agent events write event.json on every hook). */
+export const WATCH_TICK_MIN_MS = 500;
+
+/** The refresh cadence for the rows on the board: fast while anything runs, slow when every task is done. */
+export function boardRefreshMs(rows: readonly Pick<BoardRow, 'closed' | 'cancelled' | 'finished'>[]): number {
+  return rows.some((r) => !r.closed && !r.cancelled && !r.finished) ? BOARD_REFRESH_MS : BOARD_IDLE_REFRESH_MS;
+}
+
+/** Trailing debounce for the fs.watch events: the first event fires right away, bursts coalesce to one tick per window. */
+export class TickGate {
+  private readonly minMs: number;
+  private readonly fire: () => void;
+  private last = 0;
+  private pending: unknown;
+  private readonly timerClock: RefreshClock;
+  private readonly now: () => number;
+
+  constructor(minMs: number, fire: () => void, timerClock: RefreshClock = {
+    set: (callback, delay) => setTimeout(callback, delay),
+    clear: timer => clearTimeout(timer as NodeJS.Timeout),
+  }, now: () => number = Date.now) {
+    this.minMs = minMs;
+    this.fire = fire;
+    this.timerClock = timerClock;
+    this.now = now;
+  }
+
+  ping(now: number): void {
+    const wait = this.minMs - (now - this.last);
+    if (wait <= 0) {
+      this.stop(); // A due but delayed trailing callback is superseded by this immediate fire.
+      this.last = now;
+      this.fire();
+      return;
+    }
+    if (this.pending !== undefined) return;
+    this.pending = this.timerClock.set(() => {
+      this.pending = undefined;
+      this.last = this.now();
+      this.fire();
+    }, wait);
+    (this.pending as { unref?: () => void })?.unref?.();
+  }
+
+  stop(): void {
+    if (this.pending !== undefined) this.timerClock.clear(this.pending);
+    this.pending = undefined;
+  }
+}
 /** Lines of the selected window shown in the preview. */
 export const PREVIEW_LINES = 30;
 /** git is asked for the progress of a task at most this often. */
@@ -85,11 +144,11 @@ export type BoardMode =
   | { kind: 'input'; task: string; text: string }
   /** Enter on a finished task (no window): it cannot be switched to, so the choices are the ones that still make sense. */
   | { kind: 'finished'; task: string }
-  | { kind: 'confirm'; action: 'interrupt' | 'close' | 'close-worktree' | 'move' | 'queue-rm' | 'cancel' | 'resume' | 'away'; task: string; reason?: string }
+  | { kind: 'confirm'; action: 'interrupt' | 'close' | 'close-worktree' | 'move' | 'queue-rm' | 'cancel' | 'resume' | 'away' | 'mark-cohort'; task: string; reason?: string; tasks?: string[]; result?: Result }
   /** `X`: the reason for the cancellation (optional: Enter on an empty line goes on without one). */
   | { kind: 'cancel-reason'; task: string; text: string }
   /** `k`: pick the cohort to show; `value` null is every task, '' the tasks without a cohort. */
-  | { kind: 'cohort-pick'; options: CohortOption[]; index: number }
+  | { kind: 'cohort-pick'; options: CohortOption[]; index: number; expanded?: boolean }
   | { kind: 'help' }
   /** `l`: the history of the tasks (`agentctl log`), scrolled with the arrows. */
   | { kind: 'log'; lines: string[]; offset: number }
@@ -134,20 +193,24 @@ export interface BoardState {
   folded: string[];
   /** The plans of Claude and Codex for the panel on top; null before the first refresh. */
   disk: DiskReport | null;
-  plans: Record<AgentName, PlanState> | null;
+  plans: ProviderValues<PlanState> | null;
   /** Tasks that can be resumed (active, a worktree, no window): the section "Do wznowienia", key R. */
   resumable: string[];
   /** Away mode (the phone gets the notifications); null before the first refresh. */
   away: AwayView | null;
   /** The manager session (`agentctl manager`): its window and what its screen says; null before the first refresh. */
   manager: ManagerView | null;
+  /** Keys of the cohorts hidden by `cohort archive`: not in the `k` choice. */
+  archivedCohorts: string[];
+  /** `board.cohorts_recent`: how many of the most recently active cohorts the `k` choice lists before "starsze…". */
+  cohortsRecent: number;
 }
 
 /** The cursor stands on the line of the manager (it is no task: Enter goes to its window). */
 export const MANAGER_SELECT = '@manager';
 
 export function initialBoardState(width: number, height: number): BoardState {
-  return { rows: [], selected: null, mode: { kind: 'list' }, notice: null, preview: null, width, height, refreshedAt: null, busy: null, loadError: null, quit: false, showFinished: false, showHidden: false, queue: [], queuePaused: false, cohortFilter: null, folded: [], disk: null, plans: null, resumable: [], away: null, manager: null };
+  return { rows: [], selected: null, mode: { kind: 'list' }, notice: null, preview: null, width, height, refreshedAt: null, busy: null, loadError: null, quit: false, showFinished: false, showHidden: false, queue: [], queuePaused: false, cohortFilter: null, folded: [], disk: null, plans: null, resumable: [], away: null, manager: null, archivedCohorts: [], cohortsRecent: 10 };
 }
 
 /** What the front has to do after a key press. */
@@ -170,6 +233,7 @@ export type BoardEffect =
   | { type: 'away'; on: boolean }
   /** `o`, `p`, `f`: the result of a finished task, for the history (`agentctl mark`). */
   | { type: 'mark'; task: string; result: Result }
+  | { type: 'mark-cohort'; cohort: string; tasks: string[]; result: Result }
   /** `l`: load the history into the log view. */
   | { type: 'log' }
   /** `L`, `G`: load the lines of a view. */
@@ -182,6 +246,8 @@ export type BoardEffect =
 export interface KeyPress {
   upArrow?: boolean;
   downArrow?: boolean;
+  pageUp?: boolean;
+  pageDown?: boolean;
   return?: boolean;
   escape?: boolean;
   backspace?: boolean;
@@ -207,19 +273,24 @@ export function isGrouped(state: BoardState): boolean {
   return state.rows.some((r) => r.cohort !== null) || state.queue.some((v) => v.entry.cohort !== undefined);
 }
 
-/** The groups in the order they are listed: cohorts by name, "bez kohorty" ('') last. */
+/** P55: a task that waits for the human (folder trust) leads; the order of the rest is untouched. */
+const trustFirst = (rows: BoardRow[]): BoardRow[] => [...rows.filter((r) => r.state === 'needs-trust'), ...rows.filter((r) => r.state !== 'needs-trust')];
+
+/** The groups in the order they are listed: a group with a task waiting for trust leads (P55), then cohorts by name, "bez kohorty" ('') last. */
 function groupOrder(state: BoardState): { key: string; name: string | null }[] {
   const names = new Map<string, string>();
   for (const name of [...state.rows.map((r) => r.cohort), ...state.queue.map((v) => v.entry.cohort)]) if (name) names.set(cohortKey(name), names.get(cohortKey(name)) ?? name);
   const cohorts = [...names].sort((a, b) => a[0].localeCompare(b[0])).map(([key, name]) => ({ key, name: name as string | null }));
-  return [...cohorts, { key: '', name: null }];
+  const groups = [...cohorts, { key: '', name: null }];
+  const waiting = new Set(state.rows.filter((r) => r.state === 'needs-trust' && !r.closed && !r.cancelled && !r.finished).map((r) => groupOf(r.cohort)));
+  return [...groups.filter((g) => waiting.has(g.key)), ...groups.filter((g) => !waiting.has(g.key))];
 }
 
 /** The rows of the active section, in list order (grouped by cohort when there are cohorts), including the ones of folded groups. */
 function activeAll(state: BoardState): BoardRow[] {
   const rows = state.rows.filter((r) => !r.closed && !r.cancelled && !r.finished && (state.showHidden || !r.hidden) && passes(state, r.cohort));
-  if (!isGrouped(state)) return rows;
-  return groupOrder(state).flatMap((g) => rows.filter((r) => groupOf(r.cohort) === g.key));
+  if (!isGrouped(state)) return trustFirst(rows);
+  return groupOrder(state).flatMap((g) => trustFirst(rows.filter((r) => groupOf(r.cohort) === g.key)));
 }
 
 /** Tasks that still have a window, in the order of the status table (cohort by cohort when there are cohorts); hidden ones only with the `a` key. */
@@ -232,9 +303,10 @@ export function reachableRows(state: BoardState): BoardRow[] {
   return activeAll(state).filter((r) => !state.folded.includes(groupOf(r.cohort)));
 }
 
-/** The queue as the board lists it: the cohort filter applies. */
+/** The queue as the board lists it: the cohort filter applies; a task that already has a window (its start waits on a dialog) has its task row and no separate queue row (P42). */
 export function queueViews(state: BoardState): QueueView[] {
-  return state.queue.filter((v) => passes(state, v.entry.cohort));
+  const windowed = new Set(state.rows.filter((r) => r.window === 'alive').map((r) => r.task));
+  return state.queue.filter((v) => passes(state, v.entry.cohort) && !windowed.has(v.entry.task));
 }
 
 /** Tasks without a window (or moved to the other provider) that were not closed: the "Finished" section. */
@@ -321,6 +393,11 @@ function listKey(state: BoardState, input: string, key: KeyPress): KeyResult {
   // o / p / f: how a finished task turned out. `p` is also the queue's pause: it marks only while a finished task is selected.
   const result = input === 'o' ? 'ok' : input === 'p' ? 'partial' : input === 'f' ? 'fail' : null;
   if (result) {
+    if (state.cohortFilter) {
+      const tasks = state.rows.filter(r => r.cohort && cohortKey(r.cohort) === cohortKey(state.cohortFilter!)).map(r => r.task);
+      if (tasks.length > 1) return stay({ ...state, notice: null, mode: { kind: 'confirm', action: 'mark-cohort', task: state.cohortFilter, tasks, result } });
+      if (tasks.length === 1) return stay(state, [{ type: 'mark', task: tasks[0]!, result }]);
+    }
     const picked = selectedRow(state);
     const markable = picked !== undefined && selectedQueueView(state) === undefined && (picked.finished || picked.closed || picked.cancelled || picked.state === 'report-ready');
     if (markable) return stay(withNotice(state, 'info', `${picked.task}: marking it ${result}…`), [{ type: 'mark', task: picked.task, result }]);
@@ -340,7 +417,7 @@ function listKey(state: BoardState, input: string, key: KeyPress): KeyResult {
   }
   if (input === 'a') {
     const next = keepSelection({ ...state, notice: null, showHidden: !state.showHidden });
-    return stay(withNotice(next, 'info', next.showHidden ? 'Hidden tasks are listed too (dimmed). a hides them again.' : 'Hidden tasks are not listed.'), next.selected !== state.selected ? [{ type: 'refresh' }] : []);
+    return stay(withNotice(next, 'info', next.showHidden ? 'Hidden tasks are listed too (dimmed). a hides them again.' : 'Hidden tasks are not listed.'), next.showHidden || next.selected !== state.selected ? [{ type: 'refresh' }] : []);
   }
   if (input === 'r') return stay(withNotice(state, 'info', 'Collecting the new reports…'), [{ type: 'pull-ready' }]);
   if (input === 'k') {
@@ -393,7 +470,12 @@ function listKey(state: BoardState, input: string, key: KeyPress): KeyResult {
   const row = selectedRow(state);
   const needsTask = key.return || input === 'm' || input === 'M' || input === 'i' || input === 'c' || input === 'x' || input === 'h';
   if (!needsTask) return stay();
-  if (queued) return stay(withNotice(state, 'error', `${queued.entry.task} is in the queue and has no window yet (u front, d remove, p pause).`));
+  if (queued) {
+    // A queue row of a task that already has a window (a refresh in flight can leave the cursor on it): Enter opens the window (P42).
+    const live = key.return ? state.rows.find((r) => r.task === queued.entry.task && r.window === 'alive') : undefined;
+    if (live) return stay(state, [{ type: 'switch', task: live.task, window: live.windowName }]);
+    return stay(withNotice(state, 'error', `${queued.entry.task} is in the queue and has no window yet (u front, d remove, p pause).`));
+  }
   if (!row) return stay(withNotice(state, 'error', 'No task selected.'));
 
   if (input === 'c') return stay(withNotice(state, 'info', `${row.task}: copying the report…`), [{ type: 'pull', task: row.task }]);
@@ -457,10 +539,20 @@ function cancelReasonKey(state: BoardState, mode: Extract<BoardMode, { kind: 'ca
 }
 
 /** The choices of the `k` list: every task, each cohort that is in use, and the tasks without one (when there are any). */
-export function cohortOptions(state: BoardState): CohortOption[] {
-  const groups = groupOrder(state).filter((g) => g.key !== '');
+export const OLDER_COHORTS = '\u0000older';
+export function cohortOptions(state: BoardState, expanded = false): CohortOption[] {
+  const groups = groupOrder(state).filter((g) => g.key !== '' && !state.archivedCohorts.includes(g.key));
   const anyPlain = state.rows.some((r) => r.cohort === null) || state.queue.some((v) => v.entry.cohort === undefined);
-  return [{ label: 'wszystkie', value: null }, ...groups.map((g) => ({ label: g.name as string, value: g.key })), ...(anyPlain ? [{ label: 'bez kohorty', value: '' }] : [])];
+  // Cohorts with work in progress or queued always show; of the rest the `cohorts_recent` most recently active ones, the others fold into "starsze…".
+  const active = (key: string): boolean => state.queue.some((v) => groupOf(v.entry.cohort) === key) || state.rows.some((r) => groupOf(r.cohort) === key && !r.closed && !r.cancelled && !r.finished);
+  const last = (key: string): number => { const t = Date.parse(lastActivity({ created: '' }, state.rows.filter((r) => groupOf(r.cohort) === key), state.queue.filter((v) => groupOf(v.entry.cohort) === key).map((v) => v.entry))); return Number.isFinite(t) ? t : 0; };
+  const quiet = groups.filter((g) => !active(g.key)).sort((a, b) => last(b.key) - last(a.key));
+  const slots = Math.max(0, state.cohortsRecent - groups.filter((g) => active(g.key)).length);
+  const hidden = expanded ? new Set<string>() : new Set(quiet.slice(slots).map((g) => g.key));
+  // The cohort being filtered stays in the choice even when it is old.
+  if (state.cohortFilter) hidden.delete(state.cohortFilter);
+  const shown = groups.filter((g) => !hidden.has(g.key));
+  return [{ label: 'wszystkie', value: null }, ...shown.map((g) => ({ label: g.name as string, value: g.key })), ...(hidden.size > 0 ? [{ label: `starsze… (${hidden.size})`, value: OLDER_COHORTS }] : []), ...(anyPlain ? [{ label: 'bez kohorty', value: '' }] : [])];
 }
 
 function cohortPickKey(state: BoardState, mode: Extract<BoardMode, { kind: 'cohort-pick' }>, input: string, key: KeyPress): KeyResult {
@@ -468,19 +560,37 @@ function cohortPickKey(state: BoardState, mode: Extract<BoardMode, { kind: 'coho
   const last = mode.options.length - 1;
   const choose = (index: number): KeyResult => {
     const option = mode.options[index] as CohortOption;
+    if (option.value === OLDER_COHORTS) {
+      const options = cohortOptions(state, true);
+      return { state: { ...state, mode: { kind: 'cohort-pick', options, index: Math.min(options.length - 1, index), expanded: true } }, effects: [] };
+    }
     const next = keepSelection({ ...toList(state), cohortFilter: option.value, notice: null });
     return { state: withNotice(next, 'info', option.value === null ? 'All tasks are listed.' : `Only ${option.label} is listed (k picks another).`), effects: next.selected !== state.selected ? [{ type: 'refresh' }] : [] };
   };
   if (key.return) return choose(mode.index);
   if (/^[1-9]$/.test(input) && Number(input) - 1 <= last) return choose(Number(input) - 1);
-  const move = key.upArrow ? -1 : key.downArrow || input === 'j' ? 1 : 0;
+  const move = key.upArrow ? -1 : key.downArrow || input === 'j' ? 1 : key.pageUp ? -COHORT_PAGE : key.pageDown ? COHORT_PAGE : 0;
   if (move !== 0) return { state: { ...state, mode: { ...mode, index: Math.min(last, Math.max(0, mode.index + move)) } }, effects: [] };
   return { state, effects: [] };
+}
+
+const COHORT_PAGE = 7;
+/** The visible part of the `k` choice: a page around the cursor, with arrows where more is. */
+export function cohortPickWindow(options: CohortOption[], index: number): string {
+  const start = options.length <= COHORT_PAGE ? 0 : Math.min(Math.max(0, index - Math.floor(COHORT_PAGE / 2)), options.length - COHORT_PAGE);
+  const end = Math.min(options.length, start + COHORT_PAGE);
+  return `${start > 0 ? `‹${start} ` : ''}${options.slice(start, end).map((o, i) => (start + i === index ? `[${start + i + 1} ${o.label}]` : `${start + i + 1} ${o.label}`)).join('  ')}${end < options.length ? ` ${options.length - end}›` : ''}`;
 }
 
 function confirmKey(state: BoardState, mode: Extract<BoardMode, { kind: 'confirm' }>, input: string, key: KeyPress): KeyResult {
   const yes = input === 'y' || input === 'Y';
   const cancel = (): KeyResult => ({ state: withNotice(toList(state), 'info', 'Cancelled.'), effects: [] });
+  if (mode.action === 'mark-cohort') {
+    if (!yes) return cancel();
+    const tasks = state.rows.filter(r => r.cohort && cohortKey(r.cohort) === cohortKey(mode.task)).map(r => r.task);
+    if (JSON.stringify([...tasks].sort()) !== JSON.stringify([...(mode.tasks ?? [])].sort())) return { state: withNotice(toList(state), 'error', 'Cohort scope changed; preview o / p / f again.'), effects: [] };
+    return { state: toList(state), effects: [{ type: 'mark-cohort', cohort: mode.task, tasks: mode.tasks!, result: mode.result! }] };
+  }
   if (mode.action === 'interrupt') {
     return yes ? { state: withNotice(toList(state), 'info', `${mode.task}: interrupting…`), effects: [{ type: 'interrupt', task: mode.task }] } : cancel();
   }
@@ -558,17 +668,19 @@ export interface BoardSnapshot {
   queue?: QueueView[];
   queuePaused?: boolean;
   /** Absent: no panel (older callers). */
-  plans?: Record<AgentName, PlanState>;
+  plans?: ProviderValues<PlanState>;
   resumable?: string[];
   away?: AwayView;
   manager?: ManagerView;
+  archivedCohorts?: string[];
+  cohortsRecent?: number;
   preview: Preview | null;
   refreshedAt: string;
 }
 
 /** Keep the selection when the task is still there, otherwise take the first row. */
 export function applySnapshot(state: BoardState, snap: BoardSnapshot): BoardState {
-  const next: BoardState = { ...state, rows: snap.rows, queue: snap.queue ?? [], queuePaused: snap.queuePaused ?? false, disk: snap.disk ?? null, plans: snap.plans ?? null, resumable: snap.resumable ?? [], away: snap.away ?? null, manager: snap.manager ?? null, refreshedAt: snap.refreshedAt, loadError: null };
+  const next: BoardState = { ...state, rows: snap.rows, queue: snap.queue ?? [], queuePaused: snap.queuePaused ?? false, disk: snap.disk ?? null, plans: snap.plans ?? null, resumable: snap.resumable ?? [], away: snap.away ?? null, manager: snap.manager ?? null, archivedCohorts: snap.archivedCohorts ?? state.archivedCohorts, cohortsRecent: snap.cohortsRecent ?? state.cohortsRecent, refreshedAt: snap.refreshedAt, loadError: null };
   const listed = navTasks(next);
   const selected = state.selected !== null && listed.includes(state.selected) ? state.selected : firstSelectable(listed);
   const preview = snap.preview && snap.preview.task === selected ? snap.preview : selected === state.selected ? state.preview : null;
@@ -585,6 +697,14 @@ export const showNotice = (state: BoardState, notice: Notice): BoardState => ({ 
 export class ProgressCache {
   private readonly entries = new Map<string, { at: number; value: StatusRow['progress'] }>();
 
+  /** Forget tasks removed from the current inventory, including their repository paths. */
+  retain(tasks: Iterable<string>): void {
+    const current = new Set(tasks);
+    for (const task of this.entries.keys()) if (!current.has(task)) this.entries.delete(task);
+  }
+
+  get size(): number { return this.entries.size; }
+
   async get(runner: Runner, task: string, repos: Parameters<typeof taskProgress>[1], now: number): Promise<StatusRow['progress']> {
     const hit = this.entries.get(task);
     if (hit && now - hit.at < PROGRESS_TTL_MS) return hit.value;
@@ -599,16 +719,40 @@ const clock = (ms: number): string => {
   return [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':');
 };
 
+/** The last disk report per agentctl home: collected on its own cadence, shown from the cache on the other ticks. */
+const diskReadings = new Map<string, { at: number; report: DiskReport }>();
+
+/** The disk reading of this tick: the last report while it is fresh (volumes and worktree sizes change slowly). */
+async function boardDisk(ctx: Context, records: TaskRecord[]): Promise<DiskReport> {
+  const key = ctx.config.path;
+  const now = ctx.runner.now();
+  const hit = diskReadings.get(key);
+  if (hit && now - hit.at < DISK_INTERVAL_MS) return hit.report;
+  // A bounded budget: the sizes of the worktrees keep measuring in the background, the tick shows the last reading.
+  const report = await collectDisk(ctx, fs.promises.statfs, { budgetMs: 250, records });
+  diskReadings.set(key, { at: now, report });
+  return report;
+}
+
+export interface LoadBoardOptions {
+  /** Full detail (prompt queue, outputs, tokens) also for closed/cancelled/archived rows: their section is expanded. */
+  deepClosed?: boolean;
+}
+
 /** One refresh from the core: the rows (with cached progress) and the preview of the selected task. */
-export async function loadBoard(ctx: Context, selected: string | null, cache: ProgressCache, previewLines: number = PREVIEW_LINES): Promise<BoardSnapshot> {
+export async function loadBoard(ctx: Context, selected: string | null, cache: ProgressCache, previewLines: number = PREVIEW_LINES, opts: LoadBoardOptions = {}): Promise<BoardSnapshot> {
   const { runner, config } = ctx;
-  const statusRows = await collectStatus(ctx, { progress: false, archived: true, tokens: true });
-  const records = new Map([...listArchivedRecords(config), ...listTaskRecords(config)].map((r) => [r.task, r]));
+  // One scan of the record stores per tick (cached: unchanged TASK.md files are not read again), shared by every consumer.
+  const scan = await snapshotRecords(config);
+  const reader = sharedReader(config);
+  reader.dropListings(); // directory listings are per tick, the parsed cache persists
+  const statusRows = await collectStatus(ctx, { progress: false, archived: true, tokens: true, records: scan, reader, shallowClosed: opts.deepClosed !== true });
+  const records = new Map([...scan.archived, ...scan.current].map((r) => [r.task, r]));
+  cache.retain(records.keys());
   const now = runner.now();
-  const reader = openReader(config);
-  const plans = readPlans(config, reader, now);
-  const disk = await collectDisk(ctx);
-  reader.save();
+  const plans = readPlans(config, reader, now, scan.all);
+  const disk = await boardDisk(ctx, scan.all);
+  await reader.saveAsync();
   const rows: BoardRow[] = [];
   for (const row of statusRows) {
     const record = records.get(row.task);
@@ -619,9 +763,10 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
   attachCollisions(rows, config.collisions.ignore, config.collisions.enabled);
   const entries = readQueue(config);
   const queue = entries.length > 0 ? describeQueue(config, entries, await liveWindows(ctx), statusRows) : [];
-  const queuePaused = queue.some((v) => v.condition.kind === 'paused');
+  const queuePaused = isPaused(config) || !config.queue.enabled;
   const resumable = (await findResumable(ctx, { rows: statusRows })).map((c) => c.task);
   const manager = await managerView(ctx);
+  const archivedCohorts = listCohorts(config).filter((m) => m.archived).map((m) => cohortKey(m.name));
   const queued = queue.find((v) => v.entry.task === selected);
   if (selected === MANAGER_SELECT && manager.state !== 'missing') {
     let lines: string[];
@@ -630,9 +775,9 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
     } catch (e) {
       lines = [`(cannot read the window: ${errorMessage(e)})`];
     }
-    return { rows, queue, queuePaused, disk, plans, resumable, away: awayView(config), manager, preview: { task: MANAGER_SELECT, lines }, refreshedAt: clock(now) };
+    return { rows, queue, queuePaused, disk, plans, resumable, away: awayView(config), manager, archivedCohorts, cohortsRecent: config.board.cohortsRecent, preview: { task: MANAGER_SELECT, lines }, refreshedAt: clock(now) };
   }
-  if (queued) return { rows, queue, queuePaused, disk, plans, resumable, away: awayView(config), manager, preview: { task: queued.entry.task, model: `${queued.entry.agent} · model: ${queued.entry.model} · effort: ${queued.entry.effort}`, lines: queuePreview(queued) }, refreshedAt: clock(now) };
+  if (queued) return { rows, queue, queuePaused, disk, plans, resumable, away: awayView(config), manager, archivedCohorts, cohortsRecent: config.board.cohortsRecent, preview: { task: queued.entry.task, model: `${queued.entry.agent} · model: ${queued.entry.model} · effort: ${queued.entry.effort}`, lines: queuePreview(queued) }, refreshedAt: clock(now) };
   // The selected task; else the first one the list shows (not a hidden, closed or finished one).
   const target = rows.find((r) => r.task === selected) ?? rows.find((r) => !r.hidden && !r.finished) ?? rows.find((r) => !r.hidden) ?? rows[0];
   let preview: Preview | null = null;
@@ -648,10 +793,12 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
         lines = [`(cannot read the window: ${errorMessage(e)})`];
       }
     }
-    const notes = [...(target.collide.length > 0 ? [collideText(target.collide)] : []), ...(target.reportSource ? [`report from ${shortPath(target.reportSource)}`] : []), ...(target.reportCandidate && target.report !== 'yes' ? [`report-candidate ${shortPath(target.reportCandidate)}`] : []), ...(target.usage_hint ? [`usage_hint: ${target.usage_hint}`] : []), ...(target.draft_input ? [`draft_input: ${target.draft_input}`] : [])];
+    const notes = [...(target.collide.length > 0 ? [collideText(target.collide)] : []), ...(target.reportSource ? [`report from ${shortPath(target.reportSource)}`] : []), ...(target.reportCandidate && target.report !== 'yes' ? [`report-candidate ${shortPath(target.reportCandidate)}; użyj report_from ze ścieżką ${shortPath(target.reportCandidate)}`] : []), ...(target.usage_hint ? [`usage_hint: ${target.usage_hint}`] : []), ...(target.draft_input ? [`draft_input: ${target.draft_input}`] : [])];
+    if (target.report === 'yes') notes.push(`decisions ${target.decisionsCount ?? 0}, actions ${target.actionsCount ?? 0}`);
+    if (target.promptQueue?.length) notes.push(`${target.promptQueue.length} messages (${target.promptDelivery ?? 'queued'})`);
     preview = { task: target.task, model: `${target.agent} · model: ${target.model} · effort: ${target.effort}`, lines, ...(notes.length > 0 ? { note: notes.join(' · ') } : {}) };
   }
-  return { rows, queue, queuePaused, disk, plans, resumable, away: awayView(config), manager, preview, refreshedAt: clock(now) };
+  return { rows, queue, queuePaused, disk, plans, resumable, away: awayView(config), manager, archivedCohorts, cohortsRecent: config.board.cohortsRecent, preview, refreshedAt: clock(now) };
 }
 
 /** The preview of a queued task: what it will run, what it waits for, how it ends if it failed, and the start of its prompt. */
@@ -685,12 +832,12 @@ export async function runBoardEffect(runner: Runner, config: GlobalConfig, effec
   try {
     switch (effect.type) {
       case 'switch':
-        if (!env.insideTmux) return { level: 'error', text: effect.window === MANAGER_WINDOW ? `Not inside tmux: tmux attach -t ${config.session} \\; select-window -t ${MANAGER_WINDOW}` : `Not inside tmux: run "agentctl attach ${effect.task}".` };
+        if (!env.insideTmux) return { level: 'error', text: effect.window === MANAGER_WINDOW ? `Not inside tmux: ${attachHint(config)} \\; select-window -t ${MANAGER_WINDOW}` : `Not inside tmux: run "agentctl attach ${effect.task}".` };
         await showWindow(ctx, effect.window, true);
         return { level: 'info', text: `Switched to ${effect.task}. Back to the board: ${config.board.returnKey ?? 'Ctrl-b l'}` };
       case 'send':
-        await sendPrompts(ctx, [{ task: effect.task, window: effect.window, prompt: effect.text }]);
-        return { level: 'info', text: `${effect.task}: prompt sent` };
+        const sent = await sendPrompts(ctx, [{ task: effect.task, window: effect.window, prompt: effect.text }]);
+        return { level: 'info', text: `${effect.task}: ${sent[0]?.message}` };
       case 'interrupt': {
         const r = await interruptTask(ctx, effect.task);
         return { level: 'info', text: `${r.task}: interrupted (${r.key} sent), the window stays open` };
@@ -721,6 +868,10 @@ export async function runBoardEffect(runner: Runner, config: GlobalConfig, effec
         const tasks = plan.items.map((i) => i.task).join(', ');
         const blocked = [...new Set(plan.items.flatMap((i) => i.blocks))];
         return { level: 'info', text: `${tasks}: cancelled${blocked.length > 0 ? `; ⛓ blocked: ${blocked.join(', ')}` : ''}` };
+      }
+      case 'mark-cohort': {
+        const marked = await markTasks(ctx, effect.tasks, effect.result);
+        return { level: 'info', text: `${effect.cohort}: marked ${marked.map(r => r.task).join(', ')} ${effect.result}` };
       }
       case 'mark': {
         const marked = await markTask(ctx, effect.task, effect.result);
@@ -846,7 +997,7 @@ export function rowCells(row: StatusRow, selected: boolean, cols: BoardColumns, 
   const cells: BoardCell[] = [
     { key: 'marker', text: selected ? '▸' : row.collide.length > 0 ? '⚠' : row.hidden ? '·' : '', width: cols.marker, bold: true, ...(!selected && row.collide.length > 0 ? { color: 'yellow' } : {}) },
     { key: 'task', text: row.task, width: cols.task, bold: selected },
-    { key: 'who', text: `${providerLabel(row.agent)} ${modelLabel(row.model, row.effort, row.tokens?.observed?.model, versions)}`, width: cols.who },
+    { key: 'who', text: `${providerLabel(row.agent)} ${(PROVIDERS[row.agent as keyof typeof PROVIDERS]?.models.label ?? modelLabel)(row.model, row.effort, row.tokens?.observed?.model, versions)}`, width: cols.who },
     { key: 'state', text: `${icon} ${row.state}${row.question?.includes("zwinięte") ? " (zw.)" : ""}`, width: cols.state, color: STATE_COLOR[row.state] },
     { key: 'time', text: row.duration, width: cols.time },
     ...(cols.tokens ? [{ key: 'tokens', text: row.tokens ? formatTokens(row.tokens.fresh) : 'n/d', width: cols.tokens, ...(row.tokens ? {} : { dim: true }) }] : []),
@@ -885,15 +1036,15 @@ export interface PanelLine {
 }
 
 /** The two lines under the header: per provider the windows as a bar with the percentage and the reset, or n/d. */
-export function usagePanel(plans: Record<AgentName, PlanState> | null, usage: UsageSettings, now: number): PanelLine[] {
+export function usagePanel(plans: ProviderValues<PlanState> | null, usage: UsageSettings, now: number): PanelLine[] {
   if (plans === null) return [];
-  return AGENT_NAMES.map((provider): PanelLine => {
-    const plan = plans[provider];
+  return (Object.keys(plans) as AgentName[]).map((provider): PanelLine => {
+    const plan = providerValue(plans, provider);
     const name = provider.padEnd(6);
     if (!plan.available) return { provider, text: `${name} n/d${plan.note ? ` – ${plan.note}` : ''}` };
     const parts = plan.windows.map((w) => `${w.label} ${usageBar(w.usedPercent)} ${Math.round(w.usedPercent)}%${w.resetsAt === null ? '' : ` ↻${formatReset(w.resetsAt, now)}`}`);
     const worst = plan.maxPercent ?? 0;
-    return { provider, text: `${name} ${parts.join('  ')}${plan.stale ? ' (old)' : ''}`, color: worst >= usage.critical[provider] ? 'red' : worst >= usage.warn[provider] ? 'yellow' : 'green' };
+    return { provider, text: `${name} ${parts.join('  ')}${plan.stale ? ' (old)' : ''}`, color: worst >= providerValue(usage.critical, provider) ? 'red' : worst >= providerValue(usage.warn, provider) ? 'yellow' : 'green' };
   });
 }
 
@@ -934,7 +1085,7 @@ export function queueCells(view: QueueView, selected: boolean, cols: BoardColumn
   const cells: BoardCell[] = [
     { key: 'marker', text: selected ? '▸' : '', width: cols.marker, bold: true },
     { key: 'task', text: e.task, width: cols.task, bold: selected },
-    { key: 'who', text: `${providerLabel(e.agent)} ${modelLabel(e.model, e.effort, undefined, versions)}`, width: cols.who },
+    { key: 'who', text: `${providerLabel(e.agent)} ${providerAdapter(e.agent).models.label(e.model, e.effort, undefined, versions)}`, width: cols.who },
     { key: 'report', text, width: wide, ...(e.status === 'failed' ? { color: 'red' } : view.condition.kind === 'blocked' ? { color: 'yellow' } : { dim: true }) },
   ];
   return selected ? cells.map((c) => ({ ...c, bold: true, ...(!process.env.NO_COLOR && !c.color ? { color: selectedColor } : {}) })) : cells;
@@ -1012,7 +1163,7 @@ export const KEY_HINTS = 'm M move i int c/r pull x close X cancel k cohort h hi
 
 export const HELP_LINES: string[] = [
   'agentctl board',
-  '  AGENT: cl = claude, cx = codex; S 6.1 XH = model family/version/effort',
+  '  AGENT: cl=claude, cx=codex, ki=kimi; S 6.1 XH = model family/version/effort',
   '  Effort: MN minimal, LO low, MD medium, HI high, XH xhigh, MX max, NO none',
   '          – = unknown; full selected model and effort appear above',
   '',
@@ -1022,7 +1173,7 @@ export const HELP_LINES: string[] = [
   '              🧭 line = the manager (the session you open from the phone):',
   '              ↑ from the first task selects it, Enter goes to its window',
   '  m           type a message and send it to the agent (Enter sends, Esc cancels)',
-  '  M           move the task to the other provider after a limit (asks first)',
+  '  M           move to another active provider after a limit (asks first)',
   '  i           interrupt the current turn (asks first; the window stays open)',
   '  c           copy the report of the task to the clipboard',
   '  r           copy all new reports to the clipboard (pull --ready)',
@@ -1034,7 +1185,8 @@ export const HELP_LINES: string[] = [
   '  l           the history of the tasks (agentctl log): ↑↓ scroll, Esc back',
   '  o / p / f   mark a finished task ok / partial / fail (agentctl mark);',
   '              p marks only on a finished task, else it pauses the queue',
-  '  k           pick a cohort to show (↑↓ ⏎ or its number); "wszystkie" = all,',
+  '  k           pick a cohort to show (↑↓ PgUp/PgDn ⏎, number); "wszystkie" = all,',
+  '              newest first; "starsze…" opens the rest',
   '              "bez kohorty" = the tasks that are in no cohort',
   '  g / E       fold the cohort group of the selected task / open all groups',
   '  L           the limits per provider and what uses them (agentctl limits)',
@@ -1051,8 +1203,8 @@ export const HELP_LINES: string[] = [
   '  ⚠           first column: another active task changes the same files',
   '  q           leave the board; the agents keep running',
   '',
-  'The list refreshes every 2 s. The preview of the selected window shows',
-  'from 110 columns on.',
+  'The list refreshes every 2 s, or every 5 s when nothing runs.',
+  'The preview of the selected window shows from 110 columns on.',
   'Press any key to go back.',
 ];
 
@@ -1061,10 +1213,11 @@ export function promptText(state: BoardState): string | null {
   const mode = state.mode;
   if (mode.kind === 'input') return `Message to ${mode.task} (Enter sends, Esc cancels): ${mode.text}`;
   if (mode.kind === 'cancel-reason') return `Cancel ${mode.task} – reason, optional (Enter goes on, Esc stops): ${mode.text}`;
-  if (mode.kind === 'cohort-pick') return `Cohort: ${mode.options.map((o, i) => (i === mode.index ? `[${i + 1} ${o.label}]` : `${i + 1} ${o.label}`)).join('  ')}  (↑↓ ⏎ or a number, Esc)`;
+  if (mode.kind === 'cohort-pick') return `Cohort: ${cohortPickWindow(mode.options, mode.index)}  (↑↓ PgUp/PgDn ⏎ or a number, Esc)`;
   if (mode.kind === 'finished') return `${mode.task} is finished (no window): c copy report · x close · X cancel · h hide · ${state.rows.find((r) => r.task === mode.task && isAlive(r)) ? 'o open window · ' : 'o ok · '}p partial · f fail · Esc`;
   if (mode.kind !== 'confirm') return null;
   const row = state.rows.find((r) => r.task === mode.task);
+  if (mode.action === 'mark-cohort') return `Mark cohort ${mode.task}: ${(mode.tasks ?? []).join(', ')} ${mode.result}? [y/N]`;
   if (mode.action === 'queue-rm') return `Remove ${mode.task} from the queue? [y/N]`;
   if (mode.action === 'away') return mode.task === 'on' ? `Away on? The notifications go to the phone as well.${state.away && !state.away.phone ? ' (No phone is set up yet: agentctl ntfy-setup.)' : ''} [y/N]` : 'Away off? The phone is quiet again (the Mac still gets everything). [y/N]';
   if (mode.action === 'resume') return `Resume ${mode.task}? New windows, the agents continue their conversations (no prompt is pasted). [y/N]`;

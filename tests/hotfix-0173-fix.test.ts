@@ -1,3 +1,4 @@
+import { composerFixture } from './composer-fixture.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -16,7 +17,7 @@ import { cohortTick, cohortsDir } from '../src/core/cohort.ts';
 import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helpers.ts';
 const scratch = useScratch();
 function fixture(name: string, respond?: NonNullable<ConstructorParameters<typeof DiskRunner>[0]>['respond']) {
-  const root = scratch.sub(name), config = makeConfig(root, 'capacity: {codex_refresh: false}\nmcp: {allow: [close, cancel, gc, archive, report_from]}\n');
+  const root = scratch.sub(name), config = makeConfig(root, 'capacity: {codex_refresh: false}\nmcp: {allow: [mark, close, cancel, gc, archive, report_from]}\n');
   const tmux = new FakeTmux(), runner = new DiskRunner({ dryRun: false, startTime: Date.now() + 1000, respond: respond ?? tmux.respond });
   const ctx = new Context(runner, config, () => {}), deps = { context: () => ctx, notify: async () => {} };
   const call = (name: string, args: Record<string, unknown> = {}) => MCP_TOOLS.find(t => t.name === name)!.run(deps, args as never);
@@ -32,7 +33,7 @@ for (const agent of ['codex', 'claude'] as const) for (const swallowed of [1, 9]
       if (args[0] === 'load-buffer') payload = opts.input ?? '';
       if (args[0] === 'paste-buffer') { pastes++; draft = payload.split('\n')[0]!; }
       if (args[0] === 'send-keys' && args.at(-1) === 'Enter') { enters++; if (enters > swallowed) draft = ''; }
-      if (args[0] === 'capture-pane') return { stdout: draft ? `Heads up, you have less than 25% of your weekly limit left\n${agent === 'codex' ? '›' : '❯'} ${draft}\n` : enters > swallowed ? 'Working (esc to interrupt)\n' : `${agent === 'codex' ? '› Ask Codex to do anything' : '❯ Try "x"'}\n` };
+      if (args[0] === 'capture-pane') return { stdout: composerFixture(draft ? `Heads up, you have less than 25% of your weekly limit left\n${agent === 'codex' ? '›' : '❯'} ${draft}\n` : enters > swallowed ? 'Working (esc to interrupt)\n' : `${agent === 'codex' ? '› Ask Codex to do anything' : '❯ Try "x"'}\n`) };
       return {};
     });
     const r = seedTask(f.config, 'T1', { agent, windowId: '@1' });
@@ -41,7 +42,7 @@ for (const agent of ['codex', 'claude'] as const) for (const swallowed of [1, 9]
     assert.equal(await deliverPendingPrompt(f.ctx, 't1'), swallowed === 1 ? 'sent' : 'confirming');
     assert.equal(pastes, 1); assert.equal(enters, swallowed === 1 ? 2 : 3);
     assert.equal(readTaskRecord(f.config, 't1')!.promptDelivery, swallowed === 1 ? 'sent' : 'confirming');
-    if (swallowed > 1) { assert.equal((await collectStatus(f.ctx))[0]!.state, 'waiting'); assert.match(readTaskRecord(f.config, 't1')!.promptError!, /two retries/); await f.runner.sleep(60000); await watchTick(f.ctx, new WatchMemory(), { notify: async () => {} }); assert.equal((await collectStatus(f.ctx))[0]!.state, 'needs-attention'); }
+    if (swallowed > 1) { assert.equal((await collectStatus(f.ctx))[0]!.state, 'working'); assert.equal((await collectStatus(f.ctx))[0]!.state, 'waiting'); assert.match(readTaskRecord(f.config, 't1')!.promptError!, /two retries/); await f.runner.sleep(60000); await watchTick(f.ctx, new WatchMemory(), { notify: async () => {} }); assert.equal((await collectStatus(f.ctx))[0]!.state, 'needs-attention'); }
   });
 }
 it('0173-FIX-B/C: canonical absolute report path survives pending trust; competing new/watch send once', async () => {
@@ -52,7 +53,7 @@ it('0173-FIX-B/C: canonical absolute report path survives pending trust; competi
   assert.ok(reportInstructions('attempt-2', r.report).includes(r.report));
   await queuePrompt(f.ctx, r, text); assert.equal(await deliverPendingPrompt(f.ctx, 't1'), 'pending');
   assert.equal(f.runner.commands.filter(c => c.includes('paste-buffer')).length, 0);
-  pane.screen = '❯ Try "x"\n';
+  pane.screen = composerFixture('❯ Try "x"\n');
   const result = await Promise.all([deliverPendingPrompt(f.ctx, 't1'), watchTick(f.ctx, new WatchMemory(), { notify: async () => {} })]);
   assert.equal(result[0], 'sent'); assert.equal(f.runner.commands.filter(c => c.includes('paste-buffer')).length, 1);
   assert.equal(f.runner.calls.find(c => c.line.includes('load-buffer'))!.input, text);
@@ -60,7 +61,7 @@ it('0173-FIX-B/C: canonical absolute report path survives pending trust; competi
   await watchTick(f.ctx, new WatchMemory(), { notify: async () => {} }); assert.equal(f.runner.commands.filter(c => c.includes('paste-buffer')).length, 1);
 });
 it('0173-FIX-D/J: explicit report confirmation clears historical warning; preview shows source/overwrite facts and force is required', async () => {
-  const f = fixture('confirm'), source = path.join(f.root, 'T1-report.md'); fs.writeFileSync(source, 'Werdykt: PASS\n');
+  const f = fixture('confirm'); fs.mkdirSync(f.config.cache, { recursive: true }); const source = path.join(f.config.cache, 'T1-report.md'); fs.writeFileSync(source, 'Werdykt: PASS\n');
   const r = seedTask(f.config, 'T1', { reportSource: source }); fs.mkdirSync(path.dirname(r.report), { recursive: true }); fs.writeFileSync(r.report, 'original');
   assert.match((await f.call('status')).text, /sprawdź/);
   const preview = await f.full('report_from', { task: 'T1', from: source }); const scope = JSON.parse(preview.slice(0, preview.indexOf('\nNot executed.'))).scope;
@@ -90,13 +91,15 @@ it('0173-FIX-F/G/H: no stale before first reading, dev identity, shell windows i
   const rows = await collectStatus(f.ctx); assert.ok(!rows.some(r => r.task === 'SHELL')); assert.equal(rows.find(r => r.task === 'LOST')!.state, 'orphan');
   assert.match(await f.full('doctor'), /środowisko dev/);
 });
-for (const tool of ['close', 'cancel', 'archive', 'gc'] as const) it(`0173-FIX-I scope guard: ${tool} cohort preview IDs equal executed IDs (three tasks)`, async () => {
+for (const tool of ['close', 'cancel', 'archive', 'gc', 'mark'] as const) it(`0173-FIX-I scope guard: ${tool} cohort preview IDs equal executed IDs (three tasks)`, async () => {
   const f = fixture(`scope-${tool}`), closed = tool === 'archive' || tool === 'gc';
   for (const id of ['T1','T2','T3']) { seedTask(f.config, id, { cohort: 'NC', closed }); if (!closed) f.tmux.add(id.toLowerCase(), '❯ \n'); }
   seedTask(f.config, 'OTHER', { cohort: 'other', closed });
-  const preview = await f.full(tool, { cohort: 'NC' }); for (const id of ['T1','T2','T3']) assert.ok(preview.includes(id), `${tool}: ${preview}`); assert.ok(!preview.includes('OTHER'));
-  const executed = await f.full(tool, { cohort: 'NC', confirm: true });
+  const args = { cohort: 'NC', ...(tool === 'gc' ? { detail: true } : {}), ...(tool === 'mark' ? { result: 'ok' } : {}) };
+  const preview = await f.full(tool, args); for (const id of ['T1','T2','T3']) assert.ok(preview.includes(id), `${tool}: ${preview}`); assert.ok(!preview.includes('OTHER'));
+  const executed = await f.full(tool, { ...args, confirm: true });
   if (tool === 'close' || tool === 'cancel') for (const id of ['T1','T2','T3']) assert.equal(Boolean(readTaskRecord(f.config, id.toLowerCase())![tool === 'close' ? 'closed' : 'cancelled']), true);
+  else if (tool === 'mark') { for (const id of ['T1','T2','T3']) assert.ok(executed.includes(id)); assert.ok(!executed.includes('OTHER')); }
   else for (const id of ['T1','T2','T3']) { assert.ok(executed.includes(id)); assert.equal(readTaskRecord(f.config, id.toLowerCase()), undefined); }
   assert.equal(Boolean(readTaskRecord(f.config, 'other')?.cancelled), false);
 });
@@ -110,11 +113,11 @@ it('0173-FIX-M: an existing finished cohort bootstraps grace from its last task 
 
 it('0173-FIX-I guard inventory: every two-stage cohort selector has a scope-equality scenario', () => {
   const selectors = MCP_TOOLS.filter(t => t.kind === 'write' && t.input.confirm && t.input.cohort && !['new','queue','cohort_add','cohort_note'].includes(t.name));
-  assert.deepEqual(selectors.map(t => t.name).sort(), ['archive','cancel','close','gc']);
+  assert.deepEqual(selectors.map(t => t.name).sort(), ['archive','cancel','close','gc','mark']);
 });
 it('0173-FIX-J/H: missing report source is explicit; unowned real-agent process is an orphan, plain shell is not', async () => {
   const f = fixture('missing'); seedTask(f.config, 'T1');
-  const preview = await f.full('report_from', { task: 'T1', from: path.join(f.root, 'missing.md') }); assert.match(preview, /"source_exists": false/); assert.match(preview, /"source_bytes": null/);
+  const preview = await f.full('report_from', { task: 'T1', from: path.join(f.config.cache, 'missing.md') }); assert.match(preview, /"source_exists": false/); assert.match(preview, /"source_bytes": null/);
   const tmux = new FakeTmux(); tmux.add('lost-agent', '').role = '';
   const runner = new DiskRunner({ dryRun: false, respond: (cmd, args, opts) => cmd === 'tmux' && args[0] === 'display-message' ? { stdout: 'codex' } : tmux.respond(cmd, args, opts) });
   assert.equal((await collectStatus(new Context(runner, f.config, () => {}))).find(r => r.task === 'LOST-AGENT')!.state, 'orphan');

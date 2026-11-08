@@ -9,7 +9,7 @@ import { MCP_ALLOW_GROUPS, MCP_WRITE_TOOLS } from '../src/core/config.ts';
 import { Context } from '../src/core/context.ts';
 import { MCP_TOOLS, auditPath } from '../src/core/mcp-tools.ts';
 import type { McpDeps } from '../src/core/mcp-tools.ts';
-import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helpers.ts';
+import { DiskRunner, FakeTmux, fakeWatcher, makeConfig, seedTask, useScratch } from './helpers.ts';
 import { readQueue, saveEntry } from '../src/core/queue.ts';
 import { touchCohort } from '../src/core/cohort.ts';
 import { readJournal } from '../src/core/journal.ts';
@@ -17,6 +17,7 @@ const scratch = useScratch();
 const additions = MCP_WRITE_TOOLS.slice(13);
 function fixture(name: string, allow = '') {
   const config = makeConfig(scratch.sub(name), `mcp: {allow: [${allow}]}\ncapacity: {codex_refresh: false}\n`);
+  config.notify.mcpWrites = 'all';
   const tmux = new FakeTmux();
   const runner = new DiskRunner({ dryRun: false, respond: (cmd, args, opts) => cmd === 'claude' ? { code: 0, stdout: '--remote-control --append-system-prompt-file' } : tmux.respond(cmd, args, opts) });
   const notices: string[] = [];
@@ -35,6 +36,19 @@ describe('MCP parity guard', () => {
     program.command('future');
     assert.deepEqual(parityErrors(program), ['future: no MCP mapping or exception']);
     assert.ok(CLI_MCP['queue retry'].includes('queue_retry'));
+  });
+  it('capacity footers are opt-in on MCP carriers', () => {
+    for (const name of ['status', 'new', 'queue', 'close']) {
+      const input = MCP_TOOLS.find(t => t.name === name)!.input;
+      assert.ok(input.capacity && input.detail, name);
+    }
+  });
+  it('report detail is an MCP opt-in and CLI pull stays mapped', () => {
+    for (const name of ['get_report', 'pull_ready']) {
+      const input = MCP_TOOLS.find(t => t.name === name)!.input;
+      assert.equal(z.object(input).parse({ ...(name === 'get_report' ? { task: 'A' } : {}), detail: true }).detail, true);
+    }
+    assert.deepEqual(CLI_MCP.pull, ['get_report', 'pull_ready']);
   });
   it('explicit groups expand; existing names retain exactly their prior permissions', () => {
     const old = 'new, queue, send, close, cancel, set_limits, reserve';
@@ -112,17 +126,18 @@ describe('MCP parity guard', () => {
       assert.ok(readJournal(f.config).some((e) => e.kind === 'mcp-write' && e.text.startsWith(name)));
     });
   }
-  it('new previews the effective provider and supports no_agent without starting a provider', async () => {
+  it('new previews the effective provider and registers no_agent without starting a provider', async () => {
     const f = fixture('new-options', 'new');
+    fakeWatcher(f.config);
     const repo = scratch.sub('new-options/repo');
-    const spec = `---\ntask: OPT-1\nagent: claude\nmodel: sonnet\neffort: medium\nrepos:\n  - path: ${repo}\n    worktree: ${repo}-wt\n---\nFake.\n`;
+    const spec = `---\ntask: OPT-1\nagent: claude\nmodel: claude-sonnet-5-5\neffort: medium\nrepos:\n  - path: ${repo}\n    worktree: ${repo}-wt\n---\nFake.\n`;
     const args = { spec, agent: 'codex', no_agent: true, cohort: 'Batch' };
     const preview = await f.call('new', args);
     assert.equal(preview.isError, undefined, preview.text);
     assert.match(preview.text, /OPT-1  codex/);
     const done = await f.call('new', { ...args, confirm: true });
     assert.equal(done.isError, undefined, done.text);
-    assert.match(done.text, /no agent started/);
+    assert.match(done.text, /^Registered: OPT-1 \(codex \S+\/medium\)\. The worktrees are prepared in the watcher/);
     assert.ok(!f.runner.commands.some((line) => /tmux new|claude --|codex -/.test(line)));
   });
   it('all added reads remain available without allow', async () => {
@@ -163,7 +178,7 @@ describe('MCP parity guard', () => {
   });
   it('status exposes disk and tasks together; all tool descriptions name the CLI', async () => {
     const f = fixture('status-disk');
-    const result = await f.call('status', { format: 'json' });
+    const result = await f.call('status', { format: 'json', detail: true });
     const data = JSON.parse(result.text.split('\n\n').at(-1)!);
     assert.ok(data.disk.volumes.length > 0);
     assert.deepEqual(data.tasks, []);

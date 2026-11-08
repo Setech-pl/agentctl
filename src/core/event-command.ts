@@ -1,3 +1,10 @@
+import { readTaskSessions, sessionsFile } from './usage.ts';
+import { DEFAULT_PROVIDERS } from './providers/types.ts';
+import { provider, alternatives, PROVIDER_IDS } from './providers/registry.ts';
+import { limitedTick } from './limited.ts';
+import { collectStatus } from './status.ts';
+import { journalOutputs } from './outputs.ts';
+import { reviewTick } from './review.ts';
 import { inspectReport } from './report-state.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -43,7 +50,7 @@ export function readStoredEvent(config: Context['config'], record: Pick<TaskReco
     const data: unknown = JSON.parse(fs.readFileSync(path.join(taskDir(config, record.window), 'event.json'), 'utf8'));
     if (!isObject(data) || typeof data.at !== 'string') return undefined;
     const outcome = data.outcome;
-    if (outcome !== 'needs-input' && outcome !== 'turn-complete' && outcome !== 'limited' && outcome !== 'overloaded') return undefined;
+    if (outcome !== 'error' && outcome !== 'needs-input' && outcome !== 'turn-complete' && outcome !== 'limited' && outcome !== 'overloaded') return undefined;
     const startedMs = Date.parse(record.attemptStarted ?? record.started);
     if (!Number.isNaN(startedMs) && Date.parse(data.at) < startedMs) return undefined;
     return { outcome, at: data.at, type: typeof data.type === 'string' ? data.type : '', text: typeof data.text === 'string' ? data.text : '' };
@@ -57,30 +64,35 @@ export function reportReadyText(task: string, verdict: string | undefined): stri
   return verdict ? `${task}: raport gotowy – ${verdict}` : `${task}: raport gotowy`;
 }
 
-const otherAgent = (a: string): string => (a === 'claude' ? 'codex' : a === 'codex' ? 'claude' : 'drugiego dostawcę');
+const otherAgent = (a: string, ids: readonly AgentName[]): string => (PROVIDER_IDS as readonly string[]).includes(a) ? alternatives({ providers: [...ids] }, a as AgentName).join(', ') : 'drugiego dostawcę';
 
-export function limitText(record: { task: string; agent: string; pin?: boolean | undefined }): string {
+export function limitText(record: { task: string; agent: string; pin?: boolean | undefined }, ids: readonly AgentName[] = DEFAULT_PROVIDERS): string {
   const base = `${record.task}: ${record.agent} wyczerpał limit użycia`;
   if (record.pin) return `${base} (zadanie przypięte – pin: true – move go nie przeniesie)`;
-  return `${base} – agentctl move ${record.task} przeniesie zadanie na ${otherAgent(record.agent)}`;
+  if (ids.length > 2) return `${base} – agentctl move ${record.task} --agent <${ids.filter(id => id !== record.agent).join('|')}> przeniesie zadanie (${otherAgent(record.agent, ids)})`;
+  return `${base} – agentctl move ${record.task} przeniesie zadanie na ${otherAgent(record.agent, ids)}`;
 }
 
 /** The session the event came from belongs to the task: `usage` counts its tokens for it. */
 async function noteSession(ctx: Context, record: TaskRecord, input: EventInput): Promise<void> {
   try {
-    const data = isObject(input.payload) ? input.payload : {};
-    if (input.agent === 'claude') {
-      const session = sessionOfStatusLine(data);
-      if (session) await rememberSession(ctx.runner, ctx.config, record.window, 'claude', session);
-    } else if (typeof data['thread-id'] === 'string' && data['thread-id'] !== '') {
-      await rememberSession(ctx.runner, ctx.config, record.window, 'codex', { id: data['thread-id'] });
-    }
+    const session = provider(input.agent).events.session({ kind: input.kind, payload: input.payload });
+    if (session && input.agent === 'claude' && input.kind === 'session-start') {
+      // SessionStart may precede transcript creation. Save the resume ID now, but leave transcript selection
+      // to the existing prompt/statusLine receipts so an early missing file cannot pin delivery evidence as absent.
+      const known = readTaskSessions(ctx.config, record.window);
+      if (!(known.claude ?? []).some(entry => entry.id === session.id)) {
+        (known.claude ??= []).push(session);
+        await ctx.runner.writeFile(sessionsFile(ctx.config, record.window), `${JSON.stringify(known, null, 2)}\n`);
+      }
+    } else if (session) await rememberSession(ctx.runner, ctx.config, record.window, input.agent, session, input.attempt ?? '');
   } catch {
     // counting tokens must not break an event
   }
 }
 
 export interface EventInput {
+  attempt?: string | undefined;
   task: string;
   agent: AgentName;
   /** Claude: which hook (the JSON on stdin is `payload`). Codex: absent (the JSON argument is `payload`). */
@@ -124,7 +136,7 @@ async function questionOnScreen(ctx: Context, record: TaskRecord): Promise<strin
 async function backgroundOnScreen(ctx: Context, record: TaskRecord): Promise<boolean> {
   const screen = await ctx.tmux.capture(record.window, undefined, undefined, record.windowId);
   if (screen.code !== 0) return false;
-  return classifyScreen(screen.stdout, ctx.config.agents[record.agent === 'unknown' ? 'claude' : record.agent]) === 'background';
+  return ['working', 'background'].includes(classifyScreen(screen.stdout, ctx.config.agents[record.agent === 'unknown' ? 'claude' : record.agent]));
 }
 
 /** The full last message of the agent (Claude: last_assistant_message, Codex: last-assistant-message), for the search of the report path. */
@@ -139,23 +151,24 @@ function reportReady(ctx: Context, record: TaskRecord): boolean {
 export async function handleEvent(ctx: Context, alerts: Alerts, input: EventInput): Promise<EventResult> {
   const { runner } = ctx;
   const now = runner.now();
-  const event = input.agent === 'claude' ? (input.kind ? parseClaudeEvent(input.kind, input.payload) : undefined) : parseCodexEvent(input.payload);
+  const event = provider(input.agent).events.parse({ kind: input.kind, payload: input.payload });
   const record = findRecord(ctx, input.task);
   try {
     if (!event) {
-      await runner.appendFile(eventsLogPath(ctx), logLine(now, input.task, input.agent, 'invalid', 'claude events need --kind notification|stop|stop-failure'));
+      const kinds = provider(input.agent).events.kinds.join('|');
+      await runner.appendFile(eventsLogPath(ctx), logLine(now, input.task, input.agent, 'invalid', kinds ? `${input.agent} events need --kind ${kinds}` : 'event not understood'));
       return { task: input.task, event, note: 'no --kind' };
     }
     if (!record) {
       await runner.appendFile(eventsLogPath(ctx), logLine(now, input.task, input.agent, event.type, 'unknown task, ignored'));
       return { task: input.task, event, note: 'unknown task' };
     }
+    if (input.attempt && input.attempt !== record.attemptId) return { task: input.task, event, note: 'stale attempt, ignored' };
     // Separate evidence avoids a TASK.md lock in synchronous UserPromptSubmit hooks.
     // In particular, never wait for the sender's prompt-delivery lock here.
-    const normalizePrompt = (text: string) => text.replace(/\r\n?/g, '\n').trim();
-    const submitted = input.kind === 'user-prompt-submit' && isObject(input.payload) && typeof input.payload.prompt === 'string' && normalizePrompt(input.payload.prompt) === normalizePrompt(record.pendingPrompt ?? '');
-    if (record.deliveryId && (submitted || ['turn-complete', 'needs-input', 'idle'].includes(event.outcome))) {
-      await runner.writeFile(path.join(taskDir(ctx.config, record.window), 'delivery-evidence.json'), JSON.stringify({ deliveryId: record.deliveryId, at: new Date(now).toISOString(), type: event.type }));
+    const accepted = provider(input.agent).events.acknowledgesPrompt?.({ kind: input.kind, payload: input.payload, prompt: record.pendingPrompt ?? '' });
+    if (record.deliveryId && record.deliveryStartedAt && now >= Date.parse(record.deliveryStartedAt) && accepted) {
+      await runner.writeFile(path.join(taskDir(ctx.config, record.window), 'delivery-evidence.json'), JSON.stringify({ deliveryId: record.deliveryId, at: new Date(now).toISOString(), type: event.type, accepted: true }));
     }
     let announced: EventResult['announced'];
     let detail = '';
@@ -185,6 +198,8 @@ export async function handleEvent(ctx: Context, alerts: Alerts, input: EventInpu
           state = 'report-ready';
           text = reportReadyText(record.task, readVerdict(record.report, ctx.config.notify.verdictPattern));
           await recordEvent(ctx, record, 'report');
+          await journalOutputs(ctx, record);
+          await reviewTick(ctx);
         } else if (ctx.config.notify.turnEnd) {
           state = 'waiting';
           text = `${record.task}: skończył turę i czeka na Ciebie${event.text ? ` – ${event.text}` : ''}`;
@@ -194,8 +209,10 @@ export async function handleEvent(ctx: Context, alerts: Alerts, input: EventInpu
       state = 'overloaded';
       text = `${record.task}: dostawca przeciążony (overloaded)`;
     } else if (event.outcome === 'limited') {
-      state = 'limited';
-      text = limitText(record);
+      await limitedTick(ctx, await collectStatus(ctx, { progress: false }), { notify: async (_title, message) => {
+        const result = await alerts.send(target, 'limited', message, 'event');
+        announced = { state: 'limited', text: message, result };
+      } });
     }
     if (state && text) {
       const result = await alerts.send(target, state, text, 'event');

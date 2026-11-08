@@ -1,3 +1,4 @@
+import { readReportText } from './report-path.ts';
 import { reportFingerprint } from './report-state.ts';
 import fs from 'node:fs';
 import { findClipboardTool, writeClipboard } from './clipboard.ts';
@@ -27,7 +28,7 @@ export async function pullTask(ctx: Context, taskArg: string, platform?: string)
   // An agent that wrote the report elsewhere: copy it to the canonical path first.
   if (record.report && !fs.existsSync(record.report)) await syncReport(ctx, record).catch(() => undefined);
   if (record.report && fs.existsSync(record.report)) {
-    const text = fs.readFileSync(record.report, 'utf8');
+    const text = readReportText(config, record, record.report);
     const clip = await findClipboardTool(runner, 'write', platform);
     if (clip) {
       const [cmd, ...args] = clip as [string, ...string[]];
@@ -90,7 +91,7 @@ export async function pullReady(ctx: Context, opts: { all?: boolean; cohort?: st
     return empty;
   }
 
-  const { text, pulled } = joinReports(chosen);
+  const { text, pulled } = joinReports(chosen, ctx);
   const totalBytes = Buffer.byteLength(text);
 
   const copy = await writeClipboard(runner, text, platform);
@@ -119,11 +120,12 @@ export function noReadyMessage(rows: StatusRow[]): string {
 }
 
 /** The reports one after another, each under "=== NC-1 (claude opus/high) ===". */
-export function joinReports(rows: StatusRow[]): { text: string; pulled: PulledReport[] } {
+export function joinReports(rows: StatusRow[], ctx?: Context): { text: string; pulled: PulledReport[] } {
   const sections: string[] = [];
   const pulled: PulledReport[] = [];
   for (const row of rows) {
-    const body = fs.readFileSync(row.reportPath, 'utf8').trimEnd();
+    const record = ctx ? readTaskRecord(ctx.config, row.windowName) : undefined;
+    const body = (ctx ? readReportText(ctx.config, { repos: record?.repos ?? [] }, row.reportPath) : fs.readFileSync(row.reportPath, 'utf8')).trimEnd();
     sections.push(`=== ${row.task} (${row.agent} ${row.model}/${row.effort}) ===\n${body}\n`);
     pulled.push({ task: row.task, who: `${row.agent} ${row.model}/${row.effort}`, bytes: Buffer.byteLength(body) });
   }

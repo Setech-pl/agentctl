@@ -6,6 +6,7 @@ import type { Command } from 'commander';
  */
 export const COMMAND_EXAMPLES: Record<string, string[]> = {
   version: ['agentctl version'],
+  'dataset export': ['agentctl dataset export --out attempts.jsonl', 'agentctl dataset export --format csv --since 30d', 'agentctl dataset export --include-prompts --include-reports --out content.jsonl'],
   guide: ['agentctl guide --project /path/to/repo --lang en --clip', 'agentctl guide --lang pl'],
   capacity: ['agentctl capacity --json', 'agentctl capacity --clip'],
   new: [
@@ -35,7 +36,7 @@ export const COMMAND_EXAMPLES: Record<string, string[]> = {
   events: ['agentctl events                           # since the last call of the cli', 'agentctl events --since 2h --cohort sprint-1', 'agentctl events --clip                    # to paste at the start of a chat (does not move the marker)'],
   limits: ['agentctl limits                           # the same as limits show'],
   'limits show': ['agentctl limits show', 'agentctl limits show --json'],
-  'limits set': ['agentctl limits set claude=3 codex=5     # summary, y/N, takes effect at once', 'agentctl limits set codex=off -y         # no limit for Codex, no question'],
+  'limits set': ['agentctl limits set claude=3 codex=5     # summary, y/N, takes effect at once', 'agentctl limits set codex=off -y         # Codex is disabled, no question', 'agentctl limits set codex=0 -y           # no limit for Codex again'],
   'limits reserve': ['agentctl limits reserve claude=1 --note "my own session"   # a place for an agent you start by hand'],
   'limits release': ['agentctl limits release claude=1', 'agentctl limits release claude        # all reserved places of Claude'],
   cohort: ['agentctl cohort                           # the same as cohort list'],
@@ -43,12 +44,17 @@ export const COMMAND_EXAMPLES: Record<string, string[]> = {
   'cohort show': ['agentctl cohort show sprint-1'],
   'cohort add': ['agentctl cohort add sprint-1 TASK-41 TASK-42    # the cohort is made if it is new'],
   'cohort remove': ['agentctl cohort remove TASK-42'],
+  'cohort archive': ['agentctl cohort archive sprint-1            # preview: hide a finished cohort from the board choice', 'agentctl cohort archive --older-than 7d --yes   # every inactive cohort whose last activity is older'],
   'cohort note': ['agentctl cohort note sprint-1 "landing page and menu"'],
   unblock: ['agentctl unblock TASK-43                           # drop every cancelled task from its after', 'agentctl unblock TASK-43 --drop-after TASK-42        # drop only this one'],
   overlap: ['agentctl overlap                        # every pair of active tasks that changed the same files', 'agentctl overlap LANDING-QS-1           # only the pairs with this task'],
   send: [
     'agentctl send follow-up.md             # header: only "task:"; the prompt below it is pasted',
     'agentctl send --clip -y                # follow-up from the clipboard, no question',
+  ],
+  answer: [
+    'agentctl answer TASK-41 1              # preview of the menu options with a token, nothing is pressed',
+    'agentctl answer TASK-41 1 --confirm <token>   # sends the digit for exactly the previewed menu',
   ],
   status: [
     'agentctl status',

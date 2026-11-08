@@ -37,7 +37,7 @@ function setup(name: string, extraYaml = '') {
   });
   const notified: string[] = [];
   const deps: McpDeps = {
-    context: (out) => new Context(runner, loadGlobalConfig(path.dirname(config.path)), out),
+    context: (out) => new Context(runner, { ...loadGlobalConfig(path.dirname(config.path)), notify: { ...loadGlobalConfig(path.dirname(config.path)).notify, mcpWrites: 'all' } }, out),
     notify: async (m) => void notified.push(m),
   };
   const call = (n: string, args: Record<string, unknown> = {}): Promise<ToolResult> => tool(n).run(deps, z.object(tool(n).input).parse(args) as never);
@@ -74,6 +74,18 @@ describe('mcp: queue read tools', () => {
     assert.deepEqual(list.map((x) => [x.task, x.position, x.startCondition, x.after]), [['Q-1', 1, 'czeka na miejsce: claude 1/1', []], ['Q-2', 2, 'czeka na Q-1', ['Q-1']]]);
   });
 
+  it('queue_list and task_spec expose the spec weight as a structured field', async () => {
+    const t = setup('qw', 'mcp: {allow: [queue]}\n');
+    await t.call('queue', { spec: t.spec('HV-1', 'weight: heavy\n') });
+    assert.equal((await t.call('queue', { spec: t.spec('HV-1', 'weight: heavy\n'), confirm: true })).isError, undefined);
+    const list = JSON.parse((await t.call('queue_list', { format: 'json' })).text) as { task: string; weight: string }[];
+    assert.deepEqual(list.map((x) => [x.task, x.weight]), [['HV-1', 'heavy']]);
+    seedTask(t.config, 'HV-2', { weight: 'heavy' });
+    assert.match((await t.call('task_spec', { task: 'HV-2' })).text, /"weight": "heavy"/);
+    seedTask(t.config, 'NM-1');
+    assert.match((await t.call('task_spec', { task: 'NM-1' })).text, /"weight": "normal"/);
+  });
+
   it('overlap lists the pairs and the files; with a task only its pairs; an unknown task is an error', async () => {
     const t = setup('ov');
     t.running('A-1', ['x.ts', 'y.ts']);
@@ -96,8 +108,8 @@ describe('mcp: queue read tools', () => {
     const lines = r.text.split('\n');
     assert.match(lines[0]!, /^2 tasks:/);
     assert.match(lines[1]!, /^Queue \(1\): Q-1 – czeka na miejsce: claude 2\/1\. queue_list has the detail\.$/);
-    assert.match(lines[2]!, /^Plans: claude n\/d \(.*\) \| codex n\/d \(.*\)\. usage has the tokens\.$/);
-    assert.match(lines[3]!, /^⚠2 tasks overlap; overlap has details\.$/);
+    assert.doesNotMatch(r.text, /Plans:|Disk:/);
+    assert.match(lines[2]!, /^⚠2 tasks overlap; overlap has details\.$/);
     const rows = JSON.parse((await t.call('status', { format: 'json' })).text).tasks as { task: string; collisions: number; collidesWith: unknown }[];
     assert.equal(rows.find((x) => x.task === 'A-1')!.collisions, 1);
     assert.deepEqual(rows.find(x => x.task === 'A-1')!.collidesWith, [{ task: 'A-2', files: 1 }]);
@@ -122,7 +134,7 @@ describe('mcp: queue write tools', () => {
     const first = await t.call('queue', { spec: t.spec('Q-1') });
     assert.match(first.text, /Q-1 {2}claude\/default\/high {2}priority normal/);
     assert.match(first.text, /waits for a free claude window/);
-    assert.match(first.text, /Not queued yet\. Show this to the user and ask; .*confirm: true\.$/);
+    assert.match(first.text, /Not queued yet\. Show this to the user and ask; .*confirm: true\.\npreview_ttl_s: [^\n]+\npreview_token: [0-9a-f-]+$/);
     assert.deepEqual(readQueue(t.config), []);
     assert.deepEqual(t.audit().map((a) => [a.tool, a.task, a.outcome]), [['queue', 'Q-1', 'requested'], ['queue', 'Q-1', 'preview']]);
     assert.deepEqual(t.notified, []);
@@ -143,7 +155,7 @@ describe('mcp: queue write tools', () => {
     await t.call('queue', { spec: setupSpec });
     const refused = await t.call('queue', { spec: setupSpec, confirm: true });
     assert.equal(refused.isError, true);
-    assert.match(refused.text, /"setup" runs shell commands and is not accepted from the chat/);
+    assert.match(refused.text, /Confirmation refused: missing preview/);
     const warn = await t.call('queue', { spec: t.spec('Q-3', 'touches: src/menu/**\n') });
     assert.match(warn.text, /⚠ Q-3 touches src\/menu\/\*\*, and A-1 already changes 1 matching file/);
     const hint = await t.call('queue', { spec: t.spec('Q-4', 'review_of: A-1\nmodel: sonnet\n') });
@@ -162,7 +174,7 @@ describe('mcp: queue write tools', () => {
     assert.deepEqual(readQueue(t.config).map((e) => e.task), ['Q-2']);
     await t.call('queue_rm', { task: 'Q-1' });
     assert.equal((await t.call('queue_rm', { task: 'Q-1' , confirm: true })).isError, true);
-    assert.deepEqual(t.audit().filter((a) => a.tool === 'queue_rm').map((a) => a.outcome), ['requested', 'preview', 'requested', 'done', 'requested', 'preview', 'requested', 'error']);
+    assert.deepEqual(t.audit().filter((a) => a.tool === 'queue_rm').map((a) => a.outcome), ['requested', 'preview', 'requested', 'done', 'error', 'denied']);
     assert.ok(t.notified.includes('czat zlecił: queue_rm Q-1'));
   });
 });

@@ -1,3 +1,4 @@
+import { composerFixture } from './composer-fixture.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -131,7 +132,7 @@ describe('events: what `new` hands to the agents', () => {
 
   it('Claude: a settings file with the four hooks, each calling agentctl event with the task', () => {
     const settings = buildClaudeSettings('NC-1', SELF) as { hooks: Record<string, { hooks: { type: string; command: string; timeout: number }[] }[]> };
-    assert.deepEqual(Object.keys(settings.hooks), ['Notification', 'Stop', 'StopFailure', 'UserPromptSubmit']);
+    assert.deepEqual(Object.keys(settings.hooks), ['Notification', 'Stop', 'StopFailure', 'UserPromptSubmit', 'SessionStart']);
     for (const [name, kind] of [['Notification', 'notification'], ['Stop', 'stop'], ['StopFailure', 'stop-failure'], ['UserPromptSubmit', 'user-prompt-submit']] as const) {
       const hook = settings.hooks[name]?.[0]?.hooks[0];
       assert.equal(hook?.type, 'command');
@@ -143,13 +144,13 @@ describe('events: what `new` hands to the agents', () => {
     }
   });
 
-  it('Claude: --settings <state_dir>/<window>/claude-settings.json, and it adds, not replaces: only the hooks and the usage statusLine are in the file', () => {
+  it('Claude: --settings <state_dir>/<window>/claude-settings.json, and it adds, not replaces: only the hooks, the usage statusLine and promptSuggestionEnabled: false are in the file', () => {
     const w = planEventWiring({ agent: 'claude', task: 'NC-1', window: 'nc-1', config, self: SELF, env: { CLAUDE_CONFIG_DIR: path.join(config.stateDir, 'no-claude-home') } });
     const file = path.join(config.stateDir, 'nc-1', 'claude-settings.json');
     assert.equal(claudeSettingsPath(config, 'nc-1'), file);
     assert.deepEqual(w.args, ['--settings', file]);
     assert.equal(w.files[0]?.path, file);
-    assert.deepEqual(Object.keys(JSON.parse(w.files[0]?.content as string)), ['hooks', 'statusLine']);
+    assert.deepEqual(Object.keys(JSON.parse(w.files[0]?.content as string)), ['hooks', 'statusLine', 'promptSuggestionEnabled']);
     assert.match(w.note, /UserPromptSubmit, Notification, Stop and StopFailure/);
   });
 
@@ -161,11 +162,9 @@ describe('events: what `new` hands to the agents', () => {
   it('Codex: -c notify=[…] as a TOML list of strings; the JSON event is appended by Codex', () => {
     const w = planEventWiring({ agent: 'codex', task: 'NC-2', window: 'nc-2', config, self: SELF, env: { CODEX_HOME: scratch.sub('wiring-empty-codex') } });
     assert.equal(w.args[0], '-c');
-    assert.equal(
-      w.args[1],
-      'notify=["/usr/bin/env", "AGENTCTL_HOME=/home/me/.agentctl", "/opt/node/bin/node", "--experimental-strip-types", "--no-warnings", "/opt/agentctl/bin/agentctl.ts", "event", "--task", "NC-2", "--agent", "codex"]',
-    );
-    assert.deepEqual(w.files, []);
+    assert.equal(w.args[1], `notify=${tomlArray(['sh', path.join(config.stateDir, 'nc-2/codex-notify.sh')])}`);
+    assert.match(w.files[0]!.content, /exec .* event --task NC-2 --agent codex "\$@"/);
+
   });
 
   it('Codex: the notify command the user already has is kept (-c notify= would replace it) and runs after ours', () => {
@@ -173,8 +172,10 @@ describe('events: what `new` hands to the agents', () => {
     fs.writeFileSync(path.join(home, 'config.toml'), 'model = "gpt-6.1-sol"\nnotify = ["/Applications/Sky.app/client", "turn-ended"]\n\n[tui]\nx = 1\n');
     const w = planEventWiring({ agent: 'codex', task: 'NC-2', window: 'nc-2', config, self: SELF, env: { CODEX_HOME: home } });
     const value = w.args[1] as string;
-    assert.ok(value.endsWith('"--forward", "[\\"/Applications/Sky.app/client\\",\\"turn-ended\\"]"]'), value);
-    assert.match(w.note, /Sky\.app|\/Applications\/Sky\.app\/client/);
+    assert.ok(!value.includes('--forward'));
+    assert.match(w.files[0]!.content, /--forward-file/);
+    assert.deepEqual(JSON.parse(w.files[1]!.content), ['/Applications/Sky.app/client', 'turn-ended']);
+    assert.match(w.note, /then your own notify/);
     const argv = buildCodexNotify('NC-2', SELF, ['/bin/sh', '-c', 'echo "hi"']);
     assert.equal(argv.at(-2), '--forward');
     assert.deepEqual(JSON.parse(argv.at(-1) as string), ['/bin/sh', '-c', 'echo "hi"']);
@@ -222,17 +223,20 @@ describe('new: starts the agents with the event wiring', () => {
     assert.ok(runner.written.has(file));
     assert.ok(runner.commands.indexOf(`write ${file} (${Buffer.byteLength(runner.written.get(file) as string)} bytes)`) < runner.commands.findIndex((c) => c.startsWith('tmux new-session')));
     const typed = runner.commands.find((c) => c.includes('send-keys') && c.includes(' -l -- '));
-    assert.ok(typed?.includes(`claude --model opus --effort high --settings ${file}`), String(typed));
+    assert.ok(typed?.includes('exec sh '), String(typed));
+    assert.ok(runner.written.get(path.join(config.stateDir, 'nc-1/start.sh'))?.includes(`claude --model opus --effort high --settings ${file}`));
   });
 
-  it('Codex: -c notify=[…] on the command line, and nothing written', async () => {
+  it('Codex: start and notify scripts keep wiring off the typed command', async () => {
     const config = makeConfig(scratch.sub('newwire-x'));
     const fake = new FakeTmux();
-    fake.newWindowScreen = '› Ask Codex to do anything\n';
+    fake.newWindowScreen = composerFixture('› Ask Codex to do anything\n');
     const { ctx, runner } = makeContext(config, { respond: fake.respond });
     await newTasks(ctx, specs(config, 'codex', `env: {CODEX_HOME: ${scratch.sub('newwire-x-home')}}\n`), { self: SELF });
     const typed = runner.commands.find((c) => c.includes('send-keys') && c.includes(' -l -- ')) as string;
-    assert.match(typed, /^tmux send-keys -t \S+ -l -- 'codex --sandbox danger-full-access -m gpt-6.1-sol -c model_reasoning_effort=high -c '\\''notify=\["\/usr\/bin\/env"/);
+    assert.ok(typed.includes('exec sh '));
+    assert.ok(!typed.includes('notify='));
+    assert.match(runner.written.get(path.join(config.stateDir, 'nc-1/start.sh'))!, /exec codex .*notify=/);
     assert.ok(![...runner.written.keys()].some((f) => f.endsWith('claude-settings.json')));
   });
 
@@ -240,22 +244,22 @@ describe('new: starts the agents with the event wiring', () => {
     const off = makeConfig(scratch.sub('newwire-off'), 'notify: {events: false}\n');
     const a = makeContext(off, { respond: new FakeTmux().respond });
     await newTasks(a.ctx, specs(off, 'claude'), { self: SELF });
-    assert.ok(a.runner.commands.some((c) => c.endsWith("-- 'claude --model opus --effort high'")));
+    assert.match(a.runner.written.get(path.join(off.stateDir, 'nc-1/start.sh'))!, /exec claude --model opus --effort high\n$/);
     const on = makeConfig(scratch.sub('newwire-noself'));
     const b = makeContext(on, { respond: new FakeTmux().respond });
     await newTasks(b.ctx, specs(on, 'claude'));
-    assert.ok(b.runner.commands.some((c) => c.endsWith("-- 'claude --model opus --effort high'")));
+    assert.match(b.runner.written.get(path.join(on.stateDir, 'nc-1/start.sh'))!, /exec claude --model opus --effort high\n$/);
   });
 });
 
 describe('config: notify and limit_patterns', () => {
   it('defaults: events and turn_end on, no terminal app, no verdict pattern', () => {
-    assert.deepEqual(makeConfig(scratch.sub('cfg-n1')).notify, { backend: 'auto', events: true, turnEnd: true });
+    assert.deepEqual(makeConfig(scratch.sub('cfg-n1')).notify, { backend: 'auto', events: true, turnEnd: true, mcpWrites: 'summary', mcpWritesIntervalS: 60 });
   });
 
   it('reads terminal_app, verdict_pattern, events and turn_end; rejects what is wrong', () => {
     const c = makeConfig(scratch.sub('cfg-n2'), 'notify:\n  terminal_app: com.googlecode.iterm2\n  verdict_pattern: "^Result: (.*)"\n  events: false\n  turn_end: false\n');
-    assert.deepEqual(c.notify, { backend: 'auto', events: false, turnEnd: false, terminalApp: 'com.googlecode.iterm2', verdictPattern: '^Result: (.*)' });
+    assert.deepEqual(c.notify, { backend: 'auto', events: false, turnEnd: false, mcpWrites: 'summary', mcpWritesIntervalS: 60, terminalApp: 'com.googlecode.iterm2', verdictPattern: '^Result: (.*)' });
     assert.throws(() => makeConfig(scratch.sub('cfg-n3'), 'notify: {verdict_pattern: "("}\n'), /verdict_pattern is not a valid regular expression/);
     assert.throws(() => makeConfig(scratch.sub('cfg-n4'), 'notify: {events: yes please}\n'), /notify.events must be true or false/);
     assert.throws(() => makeConfig(scratch.sub('cfg-n5'), 'notify: {sound: x}\n'), /unknown key "sound"/);

@@ -136,12 +136,27 @@ describe('docs: links and versions', () => {
     assert.equal(newest, version, 'the newest released version in CHANGELOG.md must be the version in package.json');
   });
 
-  it('the English README has the diagrams of docs/diagrams.md, and the Polish one has the same four diagrams', () => {
+  it('the English README has the diagrams of docs/diagrams.md, and the Polish one has the same five diagrams', () => {
     const blocks = (text: string): string[] => [...text.matchAll(/```mermaid\n([\s\S]*?)```/g)].map((m) => m[1]!);
     const diagrams = blocks(read('docs', 'diagrams.md'));
-    assert.deepEqual(diagrams.map((d) => d.split('\n')[0]), ['sequenceDiagram', 'sequenceDiagram', 'flowchart TB', 'stateDiagram-v2']);
+    assert.deepEqual(diagrams.map((d) => d.split('\n')[0]), ['sequenceDiagram', 'sequenceDiagram', 'sequenceDiagram', 'flowchart TB', 'stateDiagram-v2']);
     assert.deepEqual(blocks(read('README.md')).sort(), [...diagrams].sort());
     assert.deepEqual(blocks(read('README.pl.md')).map((d) => d.split('\n')[0]), diagrams.map((d) => d.split('\n')[0]));
+  });
+});
+
+describe('docs: the README top (screenshot and demo output)', () => {
+  it('both READMEs show the board image and the texts that `npm run docs:screenshot` writes', () => {
+    for (const file of ['README.md', 'README.pl.md']) {
+      const readme = read(file);
+      assert.ok(readme.includes('](docs/img/board.svg)'), `${file}: no board image`);
+      for (const name of ['events_since.txt', 'pull_ready.txt']) assert.ok(readme.includes(read('docs', 'demo', name).trimEnd()), `${file}: the block of docs/demo/${name} is missing or out of date`);
+    }
+    for (const image of ['board.svg', 'board.png']) assert.ok(fs.existsSync(path.join(REPO_ROOT, 'docs', 'img', image)), `docs/img/${image} is missing`);
+  });
+
+  it('nothing of the machine is in the generated texts and images', () => {
+    for (const rel of ['img/board.svg', 'demo/events_since.txt', 'demo/pull_ready.txt']) assert.doesNotMatch(read('docs', ...rel.split('/')), /\/Users\/|\/home\/(?!demo\/)|neon/i, rel);
   });
 });
 

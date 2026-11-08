@@ -1,0 +1,50 @@
+Kimi Code updated to v2.5.0
+Changelog: https://moonshotai.github.io/kimi-code/en/release-notes/changelog.html
+
+ ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+ │                                                                                                                                                                                                    │
+ │  ▐█▛█▛█▌  Welcome to Kimi Code!                                                                                                                                                                    │
+ │  ▐█████▌  Send /help for help information.                                                                                                                                                         │
+ │                                                                                                                                                                                                    │
+ │  Directory: /Users/marcinkrzetowski/Projects/wt-dev/sandbox-kimi-shots-1                                                                                                                           │
+ │  Session:                                                                                                                                                                                          │
+ │  Model:     K2.7 Code Highspeed                                                                                                                                                                    │
+ │  Version:   2.5.0                                                                                                                                                                                  │
+ │                                                                                                                                                                                                    │
+ ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+ ✦ Kimi K3.1 Pro is ready - use the model in a fresh session for the best results
+   Standard: Plus/Moderato and above; Highspeed: Pro/Allegretto and above
+
+   No session yet — one will be created on your first message.
+   tmux extended-keys is off. Modified Enter keys may not work. Add `set -g extended-keys on` to ~/.tmux.conf and restart tmux.
+
+ ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+ │ >                                                                                                                                                                                                  │
+ ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ K2.7 Code Highspeed thinking  …/Projects/wt-dev/sandbox-kimi-shots-1  kimi-shots-1                                                                              /theme to switch the terminal UI theme
+                                                                                                                                                                                   context: 0% (0/256k)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

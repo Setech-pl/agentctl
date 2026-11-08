@@ -1,0 +1,96 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { withHarness, defaultCacheRoot, installPromptAgent } from './live-harness.ts';
+const cache = defaultCacheRoot('agentctl-018');
+const checks: string[] = [];
+const check = (name: string, ok: unknown, detail = '') => { assert.ok(ok, `${name}: ${detail}`); checks.push(name); console.log(`PASS ${name}`); };
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+await withHarness({ name: 'ki', cacheRoot: cache, config: 'providers: [claude, codex, kimi]\nwatch: {idle_confirm_ticks: 1}\ncapacity: {snapshot: false, codex_refresh: false, kimi_usage_probe: true}\nagents:\n  kimi: {ready_timeout: 3, trust_timeout: 1}\n' }, async h => {
+  const log = path.join(h.root, 'kimi.jsonl'); installPromptAgent(h, 'kimi', 'idle', log);
+  fs.writeFileSync(path.join(h.env.KIMI_CODE_HOME!, 'config.toml'), `default_permission_mode='manual'\n[models.'kimi-code/k3']\ndisplay_name='K3'\nsupport_efforts=['low','high','max']\n`);
+  const repo = path.join(h.root, 'repo'); fs.mkdirSync(repo);
+  for (const args of [['init', '-q', repo], ['-C', repo, 'commit', '--allow-empty', '-qm', 'init']]) {
+    const { spawnSync } = await import('node:child_process'); const r = spawnSync('git', args, { env: h.env, encoding: 'utf8' }); assert.equal(r.status, 0, r.stderr);
+  }
+  const spec = (task: string, agent = 'kimi', extra = '') => `---\ntask: ${task}\nagent: ${agent}\nmodel: ${agent === 'kimi' ? 'k3' : 'sonnet'}\neffort: high\nrepos: [{path: ${repo}, worktree: ${repo}-${task.toLowerCase()}, branch: ${task.toLowerCase()}}]\n${extra}---\nWork safely on ${task}.\n`;
+  const newTask = (task: string, agent = 'kimi', extra = '') => { const result = h.agentctl(['new', '-', '--no-switch', '--no-wait-trust'], { input: spec(task, agent, extra) }); return result; };
+  const events = () => { try { return fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map(s => JSON.parse(s)); } catch { return []; } };
+  const rows = () => { const r = h.agentctl(['status', '--json']); assert.equal(r.code, 0, r.stderr); return JSON.parse(r.stdout); };
+  const state = () => rows().find((r: { task: string }) => r.task === 'KI-1')?.state;
+  const mode = async (value: string) => { fs.writeFileSync(log + '.mode', value); await sleep(250); };
+  const result = newTask('KI-1'); check('Kimi start and bracketed paste with separate C-m', result.code === 0, result.stderr);
+  check('one submitted prompt, collapsed draft acknowledged', events().filter(e => e.submitted).length === 1 && events().some(e => e.paste?.includes('Work safely')));
+  check('launch env disables update and telemetry without trust bypass', events().find(e => e.start)?.env.KIMI_CODE_NO_AUTO_UPDATE === '1' && events().find(e => e.start)?.env.KIMI_DISABLE_TELEMETRY === '1' && events().find(e => e.start)?.env.KIMI_MODEL_THINKING_EFFORT === 'high');
+  check('passive wire token usage', h.agentctl(['usage', '--json']).stdout.includes('kimi-code/k3'));
+  await mode('approval'); check('approval waits for a human', state() === 'needs-input');
+  h.tmux(['send-keys', '-t', `=${h.session}:ki-1`, '1']); await sleep(150);
+  await mode('question'); check('question is separate from approval', state() === 'needs-input');
+  h.tmux(['send-keys', '-t', `=${h.session}:ki-1`, '1']); await sleep(150);
+  check('question selection still requires Submit', state() === 'needs-input' && events().some(e => e.questionSelected));
+  h.tmux(['send-keys', '-t', `=${h.session}:ki-1`, '1']); await sleep(150);
+  check('manual question Submit completes', events().some(e => e.questionSubmitted));
+  await mode('working'); check('editor visible during work is not idle', state() === 'working');
+  h.tmux(['send-keys', '-t', `=${h.session}:ki-1`, 'Escape']); await sleep(150);
+  check('Escape interrupts', events().some(e => e.interrupted));
+  for (const [value, expected] of [['background', 'background'], ['limit', 'limited'], ['overloaded', 'overloaded']] as const) { await mode(value); check(`synthetic ${value}`, state() === expected); }
+  for (const [value, outcome, expected] of [['wire-quota', 'limited', 'limited'], ['wire-overloaded', 'overloaded', 'overloaded'], ['wire-error', 'error', 'needs-attention'], ['wire-shape', undefined, 'waiting']] as const) {
+    await mode(value);
+    const actual = state();
+    const file = path.join(h.root, 'state', 'ki-1', 'event.json');
+    const stored = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')).outcome : undefined;
+    check(`synthetic ${value} uses passive wire without turn-complete`, stored === outcome && actual === expected, `${stored}/${actual}`);
+  }
+  await mode('complete');
+  check('capacity uses isolated /usage probe', (() => { const r = h.agentctl(['capacity', '--json']); return r.code === 0 && r.stdout.includes('kimi-usage-probe') && r.stdout.includes('26'); })());
+  check('/usage only in neutral directory and exits', events().some(e => e.usage) && events().filter(e => e.start).some(e => e.cwd.endsWith('kimi-usage-probe')) && events().some(e => e.exit));
+  const capacity = h.agentctl(['capacity', '--json']); check('probe rate limited after success', capacity.code === 0 && events().filter(e => e.usage).length === 1);
+  const configPath = path.join(h.agentctlHome, 'config.yaml'), originalConfig = fs.readFileSync(configPath, 'utf8');
+  const kimiConfigPath = path.join(h.env.KIMI_CODE_HOME!, 'config.toml'), originalKimiConfig = fs.readFileSync(kimiConfigPath, 'utf8');
+  h.tmux(['set-environment', '-g', 'KIMI_MODEL_THINKING_EFFORT', 'high']);
+  for (const [model, efforts] of [['k3', "['low','high','max']"], ['kimi-for-coding', "['max']"], ['kimi-for-coding-highspeed', '[]']]) {
+    fs.writeFileSync(configPath, originalConfig.replace('kimi_usage_probe: true', `kimi_usage_probe: true, kimi_usage_probe_model: ${model}`));
+    fs.writeFileSync(kimiConfigPath, `default_model='${model}'\n[models.'${model}']\nsupport_efforts=${efforts}\n`);
+    for (const file of ['kimi-plan.json', 'kimi-probe-at.json']) fs.rmSync(path.join(h.agentctlHome, 'usage', file), { force: true });
+    const before = events().filter(e => e.usage).length;
+    const result = h.agentctl(['capacity', '--json']);
+    const probe = events().filter(e => e.env?.AGENTCTL_TASK === 'usage-probe').at(-1);
+    check(`probe supports ${model} without thinking effort or model turn`, result.code === 0 && events().filter(e => e.usage).length === before + 1 && probe?.start.join(' ') === `-m kimi-code/${model}` && probe.env.KIMI_MODEL_THINKING_EFFORT === undefined, result.stderr);
+  }
+  fs.writeFileSync(configPath, originalConfig); fs.writeFileSync(kimiConfigPath, originalKimiConfig);
+  const customHome = path.join(h.root, 'custom-kimi'); fs.mkdirSync(customHome);
+  fs.writeFileSync(path.join(customHome, 'config.toml'), "default_permission_mode='auto'\n");
+  fs.writeFileSync(configPath, originalConfig.replace('kimi: {ready_timeout: 3, trust_timeout: 1}', `kimi: {ready_timeout: 3, trust_timeout: 1, env: {KIMI_CODE_HOME: ${customHome}}}`));
+  const customDoctor = h.agentctl(['doctor']);
+  check('doctor identifies configured custom home and refuses auto mode', customDoctor.code !== 0 && customDoctor.stdout.includes(customHome) && customDoctor.stdout.includes('default_permission_mode=auto'));
+  const customStart = newTask('KI-CUSTOM');
+  check('custom home auto mode refuses start before a task window', customStart.code !== 0 && /default_permission_mode=auto/.test(customStart.stderr) && !h.tmux(['list-windows', '-t', `=${h.session}`, '-F', '#{window_name}']).stdout.includes('ki-custom'));
+  fs.writeFileSync(configPath, originalConfig);
+  check('limits accepts kimi counts', h.agentctl(['limits', 'set', 'kimi=3', '-y']).code === 0 && h.agentctl(['limits', 'reserve', 'kimi=1']).code === 0 && h.agentctl(['limits', 'release', 'kimi=1']).code === 0);
+  check('usage and status expose three active providers', h.agentctl(['usage', '--json']).stdout.includes('kimi') && h.agentctl(['limits', '--json']).stdout.includes('kimi'));
+  const report = path.join(h.root, 'cache', 'ki-1', 'KI-1.md'); fs.mkdirSync(path.dirname(report), { recursive: true });
+  const taskMd = fs.readFileSync(path.join(h.root, 'state', 'ki-1', 'TASK.md'), 'utf8'); const attempt = /^attempt_id: (.+)$/m.exec(taskMd)?.[1];
+  fs.writeFileSync(report, `Werdykt: PASS\n<!-- agentctl:attempt ${attempt} -->\n<!-- agentctl:report-end -->\n`);
+  check('current-attempt report completes after end of turn', rows().find((r: { task: string }) => r.task === 'KI-1')?.state === 'report-ready');
+  h.tmux(['kill-window', '-t', `=${h.session}:ki-1`]);
+  const resumed = h.agentctl(['resume', 'KI-1', '--all', '-y']); check('resume selects recorded session without model override', resumed.code === 0 && events().some(e => e.start?.includes('--session') && !e.start.includes('-m')), resumed.stderr);
+  const startsBeforeRetry = events().filter(e => e.start).length;
+  const guardCode = `import {checkRetryWorktrees} from ${JSON.stringify(path.resolve('src/core/git.ts'))}; import {RealRunner} from ${JSON.stringify(path.resolve('src/core/runner.ts'))}; try { await checkRetryWorktrees(new RealRunner(), [${JSON.stringify({ path: repo, worktree: repo + '-ki-1', branch: 'ki-1' })}]); process.exitCode = 2; } catch(e) { console.log(e.message); process.exitCode = /unsafe start residue.*process still running/.test(e.message) ? 0 : 3; }`;
+  const guard = spawnSync(process.execPath, ['--experimental-strip-types', '--no-warnings', '--input-type=module', '-e', guardCode], { env: h.env, encoding: 'utf8' });
+  check('live Kimi worktree refuses retry before another agent starts', guard.status === 0 && events().filter(e => e.start).length === startsBeforeRetry, guard.stdout + guard.stderr);
+  h.tmux(['new-window', '-d', '-t', `=${h.session}:`, '-n', 'kimi-orphan', path.join(h.fakeBin, 'kimi')]);
+  await sleep(300);
+  h.tmux(['set-window-option', '-u', '-t', `=${h.session}:kimi-orphan`, '@agentctl-role']);
+  check('Kimi orphan without role option is discovered', rows().some((r: { task: string; state: string }) => r.task === 'KIMI-ORPHAN' && r.state === 'orphan'));
+  h.tmux(['kill-window', '-t', `=${h.session}:kimi-orphan`]);
+  check('no task /usage was sent', events().filter(e => e.start).filter(e => !e.cwd.endsWith('kimi-usage-probe')).every(e => e.env.AGENTCTL_TASK !== 'usage-probe'));
+  fs.writeFileSync(path.join(h.env.KIMI_CODE_HOME!, 'config.toml'), `default_permission_mode='auto'\n`);
+  const denied = newTask('KI-AUTO'); check('auto config refuses start before any window', denied.code !== 0 && /default_permission_mode=auto/.test(denied.stderr) && !h.tmux(['list-windows', '-t', `=${h.session}`, '-F', '#{window_name}']).stdout.includes('ki-auto'));
+  const doctor = h.agentctl(['doctor']); check('doctor reports forbidden permission mode', /default_permission_mode=auto/.test(doctor.stdout + doctor.stderr));
+  fs.writeFileSync(path.join(h.env.KIMI_CODE_HOME!, 'config.toml'), `default_permission_mode='manual'\n`);
+  fs.rmSync(log + '.mode', { force: true }); installPromptAgent(h, 'kimi', 'trust', log);
+  const trust = newTask('KI-TRUST'); check('trust is never answered automatically', trust.code !== 0 && /trust/.test(trust.stderr) && !events().some(e => e.trustKey));
+  const bypass = newTask('KI-ENV', 'kimi', 'env: {KIMI_CODE_TRUST_WORKSPACE: "1"}\n'); check('spec trust env refused', bypass.code !== 0 && /forbidden/.test(bypass.stderr));
+});
+fs.writeFileSync(path.join(cache, 'live-kimi-results.json'), JSON.stringify({ passed: checks.length, failed: 0, checks, synthetic: ['wire/session layout', 'auth', 'limit', 'overload', 'background', 'busy queue'] }, null, 2));

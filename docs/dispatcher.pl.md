@@ -10,7 +10,7 @@ Tryb MCP: wywołaj `guide({project: "/sciezka/do/repo", lang: "pl"})`, potem `ca
 
 ## Dobór dostawcy, modelu i effortu
 
-Porównaj oba okna planu (5 h i tydzień): pozostały procent, wiek odczytu, stale, tempo %/h, przewidywany moment wyczerpania i czas do resetu. Stary odczyt lub `null` oznacza n/d, a nie zero zużycia. Procent obejmuje też pracę poza agentctl. Szacunki znajdują się wyłącznie w `estimate`, z podstawą i pewnością; nie są limitem tokenów od dostawcy. Projekcja nie przewiduje zmian zasad planu.
+Porównaj odczytane okna planu (5 h, tydzień lub miesiąc): pozostały procent, wiek odczytu, stale, tempo %/h, przewidywany moment wyczerpania i czas do resetu. Stary odczyt lub `null` oznacza n/d, a nie zero zużycia. Procent obejmuje też pracę poza agentctl. Szacunki znajdują się wyłącznie w `estimate`, z podstawą i pewnością; nie są limitem tokenów od dostawcy. Projekcja nie przewiduje zmian zasad planu.
 
 Sprawdź wolne sloty, limit, rezerwę i najbliższe zadanie kolejki. Brak limitu slotów oznacza brak ograniczenia konfiguracyjnego, nie zmierzoną liczbę wolnych miejsc. Zobacz stats model × effort z 7 dni: liczebność, ok/partial/fail, nieocenione, medianę czasu i tokenów. Małe próbki i różna trudność zadań ograniczają porównania. Tabela równoważników to konfiguracja, nie potwierdzenie uprawnień dostawcy.
 
@@ -44,7 +44,7 @@ Wprowadź zmianę API, sprawdź kryteria odbioru i zapisz raport.
 ```
 
 - `task`: unikalny identyfikator. `cohort`: opcjonalna grupa do statusu, raportów i zakończenia całości.
-- `agent`, `model`, `effort`: żądany dostawca i ustawienia. Dostawcy: claude, codex. Poziomy effort: low, medium, high, xhigh, max, z walidacją zależną od dostawcy. Zobacz równoważniki w capacity. `pin: true` blokuje tłumaczenie dostawcy i move.
+- `agent`, `model`, `effort`: żądany dostawca i ustawienia. Wybierz aktywnego dostawcę: claude, codex lub kimi (po włączeniu). Poziomy effort: low, medium, high, xhigh, max, z walidacją zależną od dostawcy. Zobacz równoważniki w capacity. `pin: true` blokuje tłumaczenie dostawcy i move.
 - `repos`: lista repozytoriów; `path` wskazuje repo źródłowe, `worktree` izolowany checkout, `base` ref bazowy, `branch` nową gałąź. Bez branch możliwy jest detached checkout. Przestrzegaj zasad projektu dotyczących gałęzi i własności worktree.
 - `report`: lista ścieżek lub globów; pierwsza jest kanoniczna, pozostałe służą wykrywaniu raportu. Ścieżki mogą być bezwzględne lub względne do worktree. Pierwsza linia raportu: `Werdykt: PASS`, `Werdykt: PARTIAL` albo `Werdykt: FAIL`; dalej ustalenia, commity, walidacja i ograniczenia. Werdykt nie zastępuje oceny użytkownika zapisywanej przez `mark`.
 - `review_of`: przeglądane zadanie; użyj innego modelu/dostawcy. `after`: lista zadań, których raporty muszą istnieć przed startem. Zależności obsługuje kolejka.
@@ -86,3 +86,72 @@ Raporty pobieraj przez `pull_ready` w trybie skrótu; `get_report` tylko ze wska
 0.17.2 review correction / poprawka po przeglądzie: summary_delivered ≠ pulled ≠ mark. Use full report pages or explicit ack; reports require current attempt plus report-end or settled ended turn. Stable client event cursors and bounded pages are described in [mcp.md](mcp.md); report.settle_s and overload.give_up_after in [configuration.md](configuration.md).
 
 Nie podawaj events_since.client dla niezależnych równoległych sesji. Nowa sesja dziedziczy zapisaną pozycję klienta; client ustawiaj tylko, gdy chcesz świadomie współdzielić pobieranie zdarzeń.
+
+## Workflow NC: raporty, przeglądy i wiadomości
+
+Protokół kompletnego raportu prosi o wersjonowany blok YAML przed `<!-- agentctl:report-end -->`:
+
+```agentctl-outputs
+version: 1
+verdict: PASS
+commits: [{repo: app, branch: feature, sha: aaaaaaa}]
+integrate: [{repo: app, branch: feature, sha: aaaaaaa, note: propozycja integracji}]
+decisions: [Wybierz termin wdrożenia]
+actions: [{title: Wdrożenie po zgodzie, shell: "echo proponowana komenda"}]
+checks: [{name: unit tests, result: PASS}]
+preview: https://example.invalid/preview
+notes: []
+```
+
+`outputs`, `outputs_valid` i `outputs_errors` opisują fakty. Gałęzie i SHA muszą istnieć w repozytoriach zadania. Brak/błąd danych ostrzega, lecz kompletny raport nadal jest gotowy. Akcje są propozycjami; agentctl nie wykonuje ich komend, nie ocenia wyniku i nie scala. `status` liczy decyzje/akcje; `pull_ready` i `get_report` pokazują dane. `cohort_show` zbiera propozycje integracji (oznacza duplikaty i różne SHA tej samej gałęzi), decyzje, akcje i sprawdzenia z ID zadań. `events_since` dodaje nowe decyzje/akcje do `needYou` raz na hash raportu. Walidacja jest per sekcja i per wpis: zły wpis odpada z ostrzeżeniem w `outputs_errors`, poprawna reszta zostaje w `outputs` (`outputs_partial: true`, `outputs_valid: false`), a `status` i `cohort_show` liczą zachowane decyzje i akcje. Cały blok odrzuca tylko zła `version`/`verdict`. Wpisy `checks` mają postać `{name, result: PASS|FAIL|WARN|SKIP, note?}` (forma standardowa); sam tekst (`"unit: PASS"`) lub mapa z jednym kluczem (`- unit: PASS`, tak YAML czyta niecytowany zapis) są przyjmowane i normalizowane, bez względu na wielkość liter.
+
+```yaml
+review: auto
+# Lub w .agentctl.yaml:
+# review: {default: auto, rerun: true, template: review.md}
+after: [{task: IMPLEMENT, verdict: [PASS, PARTIAL]}]
+repos:
+  - path: ~/code/app
+    worktree: ~/work/app-check
+    branch: check
+    base: "@IMPLEMENT:app"
+```
+
+Automatyczny przegląd dodaje `TASK-REV` po raporcie autora, na jego gałęzi i w tej samej kohorcie. Preferuje innego dostępnego dostawcę z `review.*` lub `equivalents`; w razie niedostępności wymaga innego skonfigurowanego modelu. Brak poprawnej pary daje jawny wpis o oczekującym przeglądzie. Recenzent dostaje własny odłączony worktree (`<worktree_root>/<repo>-<task>-rev`, po jednym na repozytorium autora, przypięty do commita autora) i pisze raport pod `cache/<task-rev>/<TASK-REV>.md`; nigdy nie dzieli checkoutu ani gałęzi z autorem. Startuje dopiero po zakończonej turze autora (report-end, czas settle raportu, brak follow-upu w kolejce lub niepotwierdzonego, brak szkicu, brak git w checkoucie autora); do tego czasu kolejka pokazuje `czeka na autora …`. Jeśli autor zrobi nowy commit przed startem, przegląd przypina się do nowego SHA (delta i heads zaktualizowane, wpis `review-repinned`). `review.rerun: true` tworzy `REV2` po nowym raporcie, z SHA zapisanym dla poprzedniego przeglądu jako bazą delty. Pierwszą bazą jest zapisana baza autora. Szablon znajduje się w `docs/examples/`, a ustawienia opisuje dokument konfiguracji.
+
+`base: "@TASK"` przy starcie wybiera commit z outputs tego zadania, a bez niego HEAD jego gałęzi; przy wielu repozytoriach podaj `:repo-name`. Konkretny commit widać w podglądzie new i w TASK.md. Brak lub niejednoznaczność blokuje start. Warunkowe `after` blokuje przy innym werdykcie albo z powodem `brak werdyktu`; zwykłe `after: TASK` nadal czeka wyłącznie na kompletny raport.
+
+`send` od razu wkleja follow-up pracującemu Claude/Codexowi. Potwierdzenie follow-upu wymaga aktualnego dowodu hook/wire albo dokładnego wpisu użytkownika w transkrypcie sesji zadania, zgodnego z oczekującą wiadomością. Nowy stan pracy, echo ekranu, kolejka ani nowy kompletny raport nie potwierdzają follow-upu. Sam `idle_prompt` ani spóźniony Stop nie potwierdza dostarczenia; zablokowane pole daje `needs-attention` po `delivery_confirm_s`. Adapter wymagający bezczynności (`accepts_busy_prompt: false`) lub niepotwierdzona poprzednia wiadomość zatrzymuje kolejne w trwałej kolejce FIFO. Status/peek pokazują kolejkę, odpowiedź mówi „wklejono”, pozycję w kolejce albo „niepotwierdzone”. Watch wysyła po kolei.
+
+Odpowiedź `send` i `delivery_result` (TASK.md, `status --json`, MCP `status`) mówią, co się stało, w trzech stanach: dostarczono (`delivered`, ze źródłem), `w kolejce agenta – niepotwierdzone` (queued-in-agent: ekran pokazuje wiadomość w kolejce agenta, nic jej nie potwierdziło) albo `nie dostarczono – tekst w polu wpisywania` (not-delivered-in-field: wklejka stoi w polu). **„Dostarczono” padnie tylko z dokładnego źródła**, porównanego dosłownie (jedyna normalizacja to końce linii; żaden ciąg białych znaków nie jest ściskany): hook UserPromptSubmit (jego prompt dla zwiniętej wklejki jest owinięty w `<pasted_content id=…>`; wrapper zdejmuje się tylko z tekstu hooka, parami identyfikatorów, a zagnieżdżone, niezgodne lub luźne znaczniki są niejednoznaczne = brak dowodu; oczekujący prompt porównuje się dosłownie), payload notify Codexa albo transkrypt sesji samego zadania (Claude Code: linia `queue-operation`/`enqueue`, zapisywana w chwili wysłania wiadomości w trakcie tury, albo linia `user`; Codex: linia `response_item` / `item_completed`, w starszych wersjach `user_message`) z wiadomością zapisaną po rozpoczęciu dostawy, dokładnie równą oczekującej (dla zwiniętej wklejki pełna treść, nie etykieta). Czytane są tylko pliki transkryptów własnych sesji zadania: te, których id zapisały jego hooki, a bez nich jedyny nowy transkrypt jego worktree. Tego, co agent sam robi z wiadomością, nie liczy się do treści: białe znaki na końcu są obcinane, nowe linie wokół zwiniętej wklejki to dopełnienie wrappera, Claude Code zapisuje tabulator jako cztery spacje. Ekran nie potwierdza niczego u pracującego agenta: echo Codexa i znak kolejki Claude Code (przyciemnione „Press up to edit queued messages”, wiadomość w kolejce z „ctrl+x ctrl+s to send now”) tylko klasyfikują stan jako `w kolejce agenta – niepotwierdzone` (znak – tylko gdy nie było go na ekranie tuż przed naszym Enter i pojawił się po nim, a nasza wklejka zniknęła z pola); oczekujący prompt zostaje, a dostawa czeka dalej na hook lub transkrypt. Dla bezczynnego agenta, w którego wklejono, zostają starsze sygnały pierwszego promptu każdego zadania (tura ruszyła, zmienił się kanoniczny raport, wiadomość w całości w echu nad pustym polem). **agentctl naciska Enter tylko w wywołaniu, które wkleja**: do trzech razy, a przed każdym robi capture i porównuje cały obszar pola wpisywania bajt w bajt (z pustymi liniami w środku) z obrazem zrobionym zaraz po wklejce, który sam musi być naszą wklejką (jeden placeholder albo linie tekstu); na tym samym capture nie może być dialogu. Różnica, zmieniony pierwszy obraz albo otwarty dialog oznaczają brak Enter i `nie dostarczono – tekst w polu wpisywania` (needs-attention przy najbliższym ticku watch, z dwiema drogami wyjścia). `watch` nigdy nie naciska Enter. `agentctl send --enter-only TASK` pokazuje dokładną treść pola, stan ekranu i token dla tych bajtów; `agentctl send --enter-only TASK --confirm TOKEN` robi nowy capture i naciska Enter tylko, gdy obszar jest nadal bajt w bajt tekstem z podglądu i obrazem zapisanym po naszej wklejce (czyli agentctl wkleił go dla tej dostawy), a na ekranie nie ma dialogu; w przeciwnym razie odmawia z przyczyną. MCP: `send` z `enter_only: true`, bez tekstu, wymaga osobnej zgody `send_enter` w `mcp.allow` (samo `send` jej nie daje); bez `confirm: true` tylko pokazuje podgląd (tekst, stan, `token`), z `confirm: true` i tym `token` naciska; odmowa i nieudany klawisz (błąd tmux `send-keys`) to odpowiedzi `isError` z przyczyną, nieudany klawisz trafia do audytu jako `failed` i nigdy nie jest ogłaszany jako wysłany, wciśnięty Enter trafia do audytu jako wykonany (`enter-sent`, z dostawą) i jest ogłaszany, a odpowiedź rozdziela „Enter wysłany” od „dostarczenie potwierdzone”. Przy otwartym pytaniu Codexa nic nie jest wklejane: odpowiedź podaje treść pytania („Codex ma otwarte pytanie „…” (zwinięte, N)”), a wiadomość czeka w kolejce FIFO. Dziennik (`events_since`, rodzaj WIADOMOŚĆ) zapisuje każdą zmianę wyniku wiadomości z id dostawy: w kolejce, nie dostarczono, dostarczono (pierwszy prompt zadania: tylko dwa pierwsze).
+
+Limit dostawcy daje jedno powiadomienie na epizod, z czasem resetu albo `n/d`. Świeży odczyt wolnego limitu powyżej `limited.resume_above_percent` (domyślnie 5) lub upłynięcie znanego resetu dopuszcza wysłanie `limited.message` (`kontynuuj`) do bezczynnego okna z pustym polem. Zabezpieczenia overload sprawdzają warunki przed wklejeniem i Enterem; licznik prób i ograniczenia przeżywają restart. `limited.auto_resume: false` wyłącza wysyłanie. Dostawca i model pozostają te same.
+
+`agentctl mark --cohort NC ok --note "sprawdzone"` pokazuje dokładny zakres; `--yes` go potwierdza. MCP przyjmuje `task`, `tasks` lub `cohort`; więcej niż jedno zadanie wymaga podglądu/potwierdzenia. Przy filtrze kohorty board `o/p/f` pokazuje ID przed oceną. Agentctl zapisuje wynik podany przez człowieka. Zamknięcie wszystkich zadań kohorty daje `gc_suggest` z chronionym planem sprzątania tej kohorty, bez automatycznego usuwania.
+
+Podglądy MCP mają niezależne `preview_token`, ważne dziesięć minut, i odmawiają wykonania po zmianie zakresu. Przekaż token oraz identyczne argumenty z `confirm: true` — albo sam token, który wykonuje zapamiętane argumenty (dla `new`/`queue` nie trzeba ponownie przesyłać spec); bez tokena działa ostatni pasujący podgląd. `gc_preview` dla kohorty podaje tylko liczbę obcych worktree; potwierdzone `gc` zwraca wyniki bez powtarzania planu. `notify.mcp_writes` domyślnie ma `summary`, najwyżej raz na 60 sekund; dostępne też `all` i `off`. Audyt pozostaje pełny. F12 wraca do boarda własnej sesji, także przy równoległym dev. Czas obejmuje checkout/setup przed uruchomieniem agenta; ostrzeżenie o starym odczycie planu pojawia się raz na odczyt.
+
+## Aktywni dostawcy i Kimi
+
+Dobieraj spośród aktywnych `providers`: Claude i Codex są obowiązkowe, Kimi opcjonalny. Equivalents według klas modeli to mapowania do przydziału pracy; sprawdź aktualne capacity i miejsca. Przy trzech dostawcach move wymaga jawnego `--agent`. Automatyczny review kieruje się `review.prefer` lub kolejnością providers, pomija autora, niedostępne CLI i cele bez mapowania.
+
+Odpowiedniki Kimi: light → `k3-256k/low`, medium → `k3/high`, strong → `k3/max`. Używaj `k3.1-pro` tylko na wyraźne żądanie; zużywa około 10× limitu planu.
+
+Kimi Code 2.5.0 nie ma sandboxa CLI. Start dopuszcza `manual` (Always Ask) lub `yolo` (Ask When Needed) wyłącznie z `permission.dangerous_command_guard=true`; `auto` (Never Ask) i wyłączony guard w config/env powodują odmowę. Rzeczywiste 2.5.0 w trybie manual pyta także dla dokładnej reguły Bash allow; yolo stosuje te reguły. Doctor pokazuje tryb, guard i reguły, bez zapisu configu. Write może przejść bez dialogu. Trust/login/update rozstrzyga człowiek. Effort low/high/max działa wyłącznie według `support_efforts` modelu z configu; bez danych katalogu nie wymuszamy env effort. Nazwy wyświetlane i aliasy bez wersji są dynamiczne. Manager i Remote Control pozostają Claude-only.
+
+Capacity planu Kimi to n/d bez `capacity.kimi_usage_probe`; neutralna sesja wymaga ręcznego trust. Limitowana sonda `/usage` odczytuje TUI, bez credentials/OAuth ani API, nigdy w oknie zadania. Uwzględniaj 5h/Weekly/Monthly wyłącznie, gdy występują. Prompt, odczytane pliki, wyniki poleceń i diffy trafiają do Moonshot AI; domyślne wyłączenie telemetrii nie zatrzymuje przesyłania danych zadania. Guide projektu może jawnie zakazać Kimi w danym repo.
+
+```yaml
+---
+task: EXAMPLE-KIMI
+agent: kimi
+model: k3
+effort: high
+repos: [{path: /path/to/repo, worktree: /path/to/worktree, branch: task/example}]
+---
+Zapisz kryteria odbioru, ograniczenia i wymagania raportu.
+```
+
+Wzorce auth/limit/overload/background Kimi, stopka kolejki w trakcie pracy, pozostałe interakcje wire są hipotezami z syntetycznymi fixture; nie opisuj ich jako potwierdzonego działania prawdziwej wersji 2.5.0.
+
+Rzeczywisty model/effort Kimi 2.5.0 pochodzi z pasywnego `llm.request.modelAlias/thinkingEffort`, obok zamówienia w TASK.md i status JSON. Stopka może pokazywać `high`, gdy wire potwierdza `low`; rozbieżność z zamówieniem daje ostrzeżenie. Sesje wiążemy przez `state.json` i indeks sesji; tokeny pochodzą z `usage.record`.

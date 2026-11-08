@@ -5,7 +5,7 @@ import type { Context } from './context.ts';
 import { terminalAppFor } from './notify.ts';
 import type { Notifier, NotifyClick } from './notify.ts';
 import type { SelfArgv } from './events.ts';
-import { taskDir, taskFile } from './taskstore.ts';
+import { readTaskRecord, taskDir, taskFile } from './taskstore.ts';
 import { isObject, shellLine } from './util.ts';
 
 /** Title of every notification. */
@@ -25,6 +25,11 @@ interface Ledger {
 
 export function ledgerPath(ctx: Context, window: string): string {
   return path.join(taskDir(ctx.config, window), 'notified.json');
+}
+
+/** P55: the folder-trust wait is announced on the desktop once per task — durable across watch restarts and re-entries. */
+export function trustNotifiedPath(ctx: Context, window: string): string {
+  return path.join(taskDir(ctx.config, window), 'trust-notified.json');
 }
 
 export function readLedger(ctx: Context, window: string): Ledger | undefined {
@@ -102,7 +107,15 @@ export class Alerts {
   }
 
   private async deliver(target: AlertTarget, state: string, text: string, source: AlertSource): Promise<'sent' | 'duplicate'> {
-    if (this.isDuplicate(target, state, source)) return 'duplicate';
+    const record = state === 'report-ready' ? readTaskRecord(this.ctx.config, target.window) : undefined;
+    const identity = record ? record.attemptId ?? record.started : undefined;
+    const reportLedger = path.join(taskDir(this.ctx.config, target.window), 'report-notified.json');
+    if (identity) {
+      try { if (JSON.parse(fs.readFileSync(reportLedger, 'utf8')).attempt === identity) return 'duplicate'; } catch { /* first report */ }
+    }
+    if (!identity && this.isDuplicate(target, state, source)) return 'duplicate';
+    // P55: trust is announced once per task, ever (the board row stays on top until the human answers).
+    if (state === 'needs-trust' && fs.existsSync(trustNotifiedPath(this.ctx, target.window))) return 'duplicate';
     const { click, text: message } = await this.clickFor(target, text);
     const result = await this.notifier.notify(ALERT_TITLE, message, click);
     if (result && !result.ok) this.ctx.out(`warning: local notification failed (${result.error ?? result.channel}); phone delivery follows independently`);
@@ -110,7 +123,9 @@ export class Alerts {
     if (fs.existsSync(taskFile(this.ctx.config, target.window))) {
       const ledger: Ledger = { state, source, at: this.ctx.runner.now() };
       await this.ctx.runner.writeFile(ledgerPath(this.ctx, target.window), `${JSON.stringify(ledger)}\n`);
+      if (state === 'needs-trust') await this.ctx.runner.writeFile(trustNotifiedPath(this.ctx, target.window), `${JSON.stringify({ at: this.ctx.runner.now() })}\n`);
     }
+    if (identity) await this.ctx.runner.writeFile(reportLedger, JSON.stringify({ attempt: identity }));
     return 'sent';
   }
 }

@@ -141,7 +141,7 @@ describe('phone: sending from the events', () => {
     assert.equal(r?.body, 'NC-1: raport gotowy – Werdykt: PASS – 12 testów');
     assert.equal(r?.headers.Priority, 'default');
     assert.equal(r?.headers.Tags, 'white_check_mark');
-    const entries = readJournal(u.config);
+    const entries = readJournal(u.config).filter(e => e.kind === 'report-ready');
     assert.equal(entries.length, 1);
     assert.equal(entries[0]?.phone, 'sent');
     assert.match(renderEvents({ has_more: false, next_cursor: '', client: 'cli', since: '', sinceLabel: 'x', cohort: null, events: entries, summary: { active: 0, working: 0, needYou: [], queued: 0, reportsToPull: [] }, away: { on: true, phone: true, always: false }, markerMoved: false }).join('\n'), /Werdykt: PASS.* 📱/);
@@ -247,7 +247,7 @@ describe('phone: a network error', () => {
     const r = await t.stop();
     assert.equal(r.announced?.result, 'sent');
     assert.equal(t.notifier.sent.length, 1);
-    assert.equal(readJournal(t.config)[0]?.phone, 'queued');
+    assert.equal(readJournal(t.config).find(e => e.kind === 'report-ready')?.phone, 'queued');
     assert.equal(queuedForPhone(t.config), 1);
     assert.match(phoneLog(t.config), /report-ready {2}first try failed, queued: fetch failed: ECONNREFUSED/);
     await watchTick(t.ctx, new WatchMemory(), t.notifier);
@@ -299,7 +299,7 @@ describe('phone: a network error', () => {
     await t.ready();
     t.net.status = 503;
     await t.stop();
-    assert.equal(readJournal(t.config)[0]?.phone, 'queued');
+    assert.equal(readJournal(t.config).find(e => e.kind === 'report-ready')?.phone, 'queued');
     assert.match(phoneLog(t.config), /HTTP 503/);
   });
 

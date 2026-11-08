@@ -104,8 +104,9 @@ describe('background work: no end-of-turn notification, no waiting notice', () =
     assert.deepEqual(t.notifier.messages, []);
     // The background work is gone and the agent waits: the same screen without the count is `waiting`, and then the reminder applies.
     t.tmux.windows[0]!.screen = PROSE;
+    await watchTick(t.ctx, memory, t.notifier); // first idle reading retains working
     const after = await watchTick(t.ctx, memory, t.notifier);
-    assert.deepEqual(after.map((e) => [e.from, e.to]), [['background', 'waiting']]);
+    assert.deepEqual(after.map((e) => [e.from, e.to]), [['working', 'waiting']]);
     await t.runner.sleep(t.config.watch.waitingAfter * 1000);
     const later = await watchTick(t.ctx, memory, t.notifier);
     assert.deepEqual(later.map((e) => e.reason), ['waiting-too-long']);

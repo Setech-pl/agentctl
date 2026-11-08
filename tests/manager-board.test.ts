@@ -161,6 +161,6 @@ describe('board: loadBoard and the Ink front with the manager', () => {
     const w = world('out');
     const notice = await runBoardEffect(w.ctx.runner, w.config, { type: 'switch', task: 'manager', window: 'manager' }, { insideTmux: false });
     assert.equal(notice.level, 'error');
-    assert.match(notice.text, /tmux attach -t agentctl \\; select-window -t manager/);
+    assert.match(notice.text, /tmux attach -t '=agentctl' \\; select-window -t manager/);
   });
 });

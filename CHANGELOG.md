@@ -2,6 +2,281 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/) while it is below 1.0 (minor versions may change behaviour).
 
+## [Unreleased]
+
+## [0.19.0] - 2026-11-08
+
+- RC: live-questions raises the collapsed Codex question on an idle agent via an explicit trigger (P65: a working Codex's collapsed question is no wait), and the answer-clearing check polls instead of a fixed sleep. / RC: live-questions pokazuje zwinięte pytanie Codexa na bezczynnym agencie przez jawną komendę (P65: zwinięte pytanie pracującego Codexa nie jest oczekiwaniem), a sprawdzenie odpowiedzi odpytuje zamiast sztywnego sleep.
+
+- RC: nc-workflow waits for the cohort records to close before the cohort tick; under gate load the MCP close confirm can return a budget partial while the close still applies. / RC: nc-workflow czeka na zamknięcie rekordów kohorty przed tickiem kohorty; pod obciążeniem gate potwierdzenie close przez MCP może zwrócić wynik częściowy, gdy zamknięcie jeszcze trwa.
+
+- RC: live-p28b's fixture report carries the report-end sentinel; 0.19 requires it for attempt-scoped readiness. / RC: raport fixture w live-p28b ma znacznik końca raportu; 0.19 wymaga go dla gotowości wiązanej z attemptem.
+
+- RC: live-p15-send's Codex question scenario shows a waiting Codex (no Working line); a collapsed question of a working Codex blocks nothing since P65. / RC: scenariusz pytania Codexa w live-p15-send pokazuje czekającego Codexa (bez linii Working); zwinięte pytanie pracującego Codexa niczego nie blokuje od P65.
+
+- RC: nc-workflow author pins the versioned claude-sonnet-5-5 so the automatic review translates to Codex through the matrix table. / RC: autor w nc-workflow używa wersjonowanego claude-sonnet-5-5, aby automatyczny przegląd tłumaczył się na Codex przez tabelę z macierzy.
+
+- RC: live delivery scenarios (hotfix-0173-fix, hotfix-0173-p, p15-send) use codex effort medium; 0.19 refuses codex low (b854731 effort policy). / RC: scenariusze live dostarczania (hotfix-0173-fix, hotfix-0173-p, p15-send) używają dla codex effort medium; 0.19 odrzuca low dla codex (polityka effort z b854731).
+
+- RC: live scenarios port the 0.18.2 RC3 fixes (watcher-mediated start in hotfix-0173/-p, in-place CLI new in nc-workflow, watcher and async polling in production-0174, tmux-lost hint in resume); the 0.19 line forked before them. / RC: scenariusze live przenoszą poprawki RC3 z 0.18.2 (start przez watchera w hotfix-0173/-p, start CLI na miejscu w nc-workflow, watcher i asynchroniczne odpytywanie w production-0174, wskazówka tmux-lost w resume); linia 0.19 rozwidliła się przed nimi.
+
+- RC: live-economy ports the 0.18.2 RC fixes RC2-1 (7-hex SHA fixture) and RC2-2 (lost window is needs-attention with tmuxLost, not dead); the 0.19 line forked before them. / RC: live-economy przenosi poprawki RC 0.18.2: RC2-1 (SHA z 7 znaków hex w fixture) i RC2-2 (utracone okno to needs-attention z tmuxLost, nie dead); linia 0.19 rozwidliła się przed nimi.
+
+- RC: live provider cases pin the versioned claude-sonnet-5-5 of the model matrix; the 0.18 alias sonnet has no built-in equivalent since the matrix table. / RC: scenariusze live providerów używają wersjonowanego claude-sonnet-5-5 z macierzy modeli; alias sonnet z 0.18 nie ma wbudowanego odpowiednika od czasu tabeli z macierzy.
+
+- RC: gate pack ignores trailing npm notices (update available) after the JSON and disables the update notifier for the pack call. / RC: gate pack pomija końcowe powiadomienia npm (dostępna aktualizacja) za JSON-em i wyłącza powiadamianie o aktualizacjach dla wywołania pack.
+
+- B1 follow-up: a fresh boxed Kimi composer below an old menu makes it history; answer refuses without sending a key. / Uzupełnienie B1: świeży edytor Kimi w ramce pod starym menu oznacza historię; answer odmawia bez wysyłania klawisza.
+
+Includes the 0.18.3 baseline plus P42, P51, P52, P54, the P55 feasibility outcome, and P60–P69. / Obejmuje bazę 0.18.3 oraz P42, P51, P52, P54, wynik wykonalności P55 i P60–P69.
+
+- Integration: gate accepts the npm forwarding separator in `npm run gate -- full -- --node26-only`. / Integracja: gate przyjmuje separator npm w `npm run gate -- full -- --node26-only`.
+
+- R1 follow-up: camelCase secret matching preserves authorizationAuthor and other author metadata. / Uzupełnienie R1: dopasowanie sekretów camelCase zachowuje authorizationAuthor i pozostałe metadane autorów.
+
+- Integration B2: gate clean resolves dangling-link ancestors and sandbox sockets before any deletion or tmux stop; redirected sockets refuse the whole cleanup. / Integracja B2: gate clean sprawdza przodków wiszących linków i sockety przed usuwaniem lub zatrzymaniem tmux; przekierowany socket przerywa całe sprzątanie.
+
+- Integration B1: answer tokens are single-use, expire with preview.ttl_s and bind the complete frame and task/window identity; changed commands require a fresh preview. / Integracja B1: tokeny answer są jednorazowe, wygasają według preview.ttl_s i wiążą całą ramkę oraz tożsamość zadania/okna; zmiana polecenia wymaga nowego podglądu.
+
+- Review R2: queue/new confirmation replay, registration and durable receipts share start.lock across MCP processes. / Przegląd R2: ponowienia potwierdzeń queue/new, rejestracja i trwałe potwierdzenia używają start.lock między procesami MCP.
+
+- Review R1: restore camelCase credential and passwd masking in diagnostics, assignments and URL queries. / Przegląd R1: przywrócono maskowanie sekretów camelCase i passwd w diagnostyce, przypisaniach i parametrach URL.
+
+- P52 follow-up: report alerts dedupe by attempt, allowing a completed new attempt even inside the old 90-second cross-source window. / Powiadomienia raportów są deduplikowane według próby; nowa zakończona próba jest ogłaszana także w dawnym 90-sekundowym oknie między źródłami.
+
+- P62 follow-up: partial responses put fresh queue registrations before cached content, so output limits cannot hide new orders; queued/starting status overrides older task rows. / Wynik częściowy umieszcza świeże rejestracje przed treścią z cache, aby limit odpowiedzi nie ukrywał nowych zleceń; stan kolejki ma pierwszeństwo nad starszym wierszem zadania.
+
+- P62 follow-up: cloned worker/probe contexts preserve a single tmux socket scope; CLI/watch runner calls retain their original scheduling outside MCP requests. / Konteksty workera i sond zachowują pojedynczy wybór socketu tmux; wywołania CLI/watch poza MCP zachowują dotychczasowe planowanie.
+
+- P62: bound all MCP responses to 8 seconds with explicit partial results; durable queue/new token receipts prevent duplicate orders, status exposes registrations, provider reads avoid watcher polling locks, and GC sizes refresh in the background. / Odpowiedzi MCP mają budżet 8 sekund i jawny wynik częściowy; trwałe potwierdzenia tokenów queue/new chronią przed podwójnymi zleceniami, status pokazuje rejestracje, odczyty nie czekają na polling watch, a rozmiary GC odświeżają się w tle.
+
+- P52: publish report/results once per completed attempt; repeated report edits and duplicate decisions/actions stay quiet. / Raport i wyniki są ogłaszane raz na zakończoną próbę; kolejne edycje oraz powtórzone decyzje i akcje nie mnożą wpisów.
+
+- P51: limit notifications and events list all configured providers, including unchanged optional providers. / Powiadomienia i zdarzenia limitów wymieniają wszystkich skonfigurowanych dostawców, także opcjonalnych bez zmiany limitu.
+
+- P67: mask recognised credentials without replacing short substrings, ordinary field names or task IDs. / Maskowanie rozpoznanych sekretów nie uszkadza krótkich fragmentów tekstu, zwykłych nazw pól ani identyfikatorów zadań.
+- P55: Kimi Code CLI 2.5.2 has no parent-directory trust and no trusted-roots list (trust records are exact workspace paths in `~/.kimi-code/workspace-trust`, matched by the exact canonical path only; the documented escapes — `[workspace] require_trust = false` and `KIMI_CODE_TRUST_WORKSPACE=1` — are off-limits: agentctl never edits the Kimi config and never answers the trust dialog). The trust wait is cheaper instead: one desktop notification per task (durable in `<state_dir>/<task>/trust-notified.json`; a re-entry or a watch restart does not notify again), the board row of a task waiting for trust jumps to the top (its cohort leads the groups), and Enter on it switches to the window with the dialog. / P55: Kimi Code CLI 2.5.2 nie ma zaufania do katalogu nadrzędnego ani listy zaufanych korzeni (rekordy zaufania to dokładne ścieżki workspace w `~/.kimi-code/workspace-trust`, dopasowywane tylko po dokładnej kanonicznej ścieżce; udokumentowane obejścia — `[workspace] require_trust = false` i `KIMI_CODE_TRUST_WORKSPACE=1` — są niedozwolone: agentctl nigdy nie edytuje konfiguracji Kimi i nigdy nie odpowiada na dialog zaufania). Zamiast tego czekanie jest tańsze: jedno powiadomienie na pulpit na zadanie (trwałe w `<state_dir>/<task>/trust-notified.json`; powrót do stanu ani restart watcha nie powiadamia ponownie), wiersz zadania czekającego na trust skacze na górę boardu (jego kohorta prowadzi grupy), a Enter na nim przełącza do okna z dialogiem.
+
+- P54: `npm run gate -- clean` is the only permitted cache cleanup (agents never run `rm`/`rm -rf`, which Kimi's dangerous-command guard stops): it removes only what the gate itself created inside `$AGENTCTL_LIVE_CACHE` (`gate-work-*`, `live-*` sandboxes with their npm caches/prefixes/tmp; leftover sandbox tmux servers are stopped first), keeps logs and `gate-results`, refuses any path outside the cache root and symlinks escaping it, and prints the before/after size. / P54: `npm run gate -- clean` to jedyny dozwolony porządek cache (agenci nigdy nie uruchamiają `rm`/`rm -rf`, który zatrzymuje strażnik niebezpiecznych poleceń Kimi): usuwa tylko to, co bramka sama utworzyła w `$AGENTCTL_LIVE_CACHE` (`gate-work-*`, piaskownice `live-*` z ich cache npm/prefix/tmp; wcześniej zatrzymuje pozostałe serwery tmux piaskownic), zachowuje logi i `gate-results`, odmawia ścieżek poza korzeniem cache i symlinków z niego uciekających oraz wypisuje rozmiar przed/po.
+- P42: a task that already has a window (e.g. its start waits on the trust dialog or a menu) no longer shows twice on the board — the queue row "… starting" is gone, the task has only its row, and Enter on any row of it opens the window. / P42: zadanie, które ma już okno (np. jego start czeka na dialog zaufania albo menu), nie pokazuje się już dwa razy na planszy — wiersz kolejki „… starting” znika, zadanie ma tylko swój wiersz, a Enter na dowolnym jego wierszu otwiera okno.
+
+- P63: new `answer` operation (CLI `agentctl answer TASK N [--confirm TOKEN]` and MCP `answer`, its own `mcp.allow` entry): chooses a numbered option of the menu the agent shows in its current frame (e.g. Kimi "Run this command? 1. Approve once …") — a `send` of "1" queued as a message instead of answering (FACADE-S34-REVIEW). Preview names the options and the question and presses nothing; only `--confirm`/`confirm: true` with the token sends the digit, and only while the menu is unchanged. `status` lists the options of a needs-input menu (`menuOptions`). / P63: nowa operacja `answer` (CLI `agentctl answer TASK N [--confirm TOKEN]` i MCP `answer`, własny wpis `mcp.allow`): wybiera numerowaną opcję menu widocznego w bieżącej ramce agenta (np. Kimi „Run this command? 1. Approve once …”) — `send` „1” trafiał do kolejki jako wiadomość zamiast odpowiedzieć na menu (FACADE-S34-REVIEW). Podgląd pokazuje opcje i pytanie i nie naciska nic; dopiero `--confirm`/`confirm: true` z tokenem wysyła cyfrę, i tylko gdy menu jest niezmienione. `status` pokazuje opcje menu needs-input (`menuOptions`).
+
+- P65: a collapsed Codex question ("? N question · … to answer", request_user_input_async) while the agent works is no longer needs-input — the agent goes on and may finish without an answer (DEV-MARK-1 finished PASS); the collapsed footer of an idle agent still counts as needs-input, and a real question names its text (from the session log or the expanded view) in status, peek and notifications. / P65: zwinięte pytanie Codexa („? N question · … to answer”, request_user_input_async) podczas pracy agenta nie jest już needs-input — agent pracuje dalej i może skończyć bez odpowiedzi (DEV-MARK-1 zakończył PASS); zwinięta stopka bezczynnego agenta nadal daje needs-input, a prawdziwe pytanie pokazuje swój tekst (z logu sesji albo rozwiniętego widoku) w status, peek i powiadomieniach.
+
+- P64: a message queued in a working Codex (shown as "↳ …" above the composer) is recognised as queued-in-agent and stays pending as long as it is visible — no more false needs-attention "Prompt delivery not confirmed" while a long turn runs; the session transcript or the hook confirms the delivery when the turn takes the message. / P64: wiadomość w kolejce pracującego Codexa (widać ją jako „↳ …” nad polem wpisywania) jest rozpoznawana jako kolejka agenta i pozostaje oczekująca, póki jest widoczna — koniec fałszywego alarmu „Prompt delivery not confirmed” podczas długiej tury; transkrypt sesji albo hook potwierdza dostarczenie, gdy tura podejmie wiadomość.
+- Model matrix: `data/model-matrix.yaml` is the one source of truth mapping each task class (`report`, `simple`, `smoke`, `feature`, `bugfix`, `review`, `merge`, `hard`, `sim`, `visual`, `visual-compare`, `design`, `creative`, `escalate`) to the per-provider model/effort. The default `equivalents` table, the provider tier lists and the Kimi doctor line are derived from it (`npm run gen:matrix` regenerates `src/core/model-matrix.ts`), and a test fails when the shipped defaults and the matrix disagree. The default Claude entries are now full model IDs (`claude-sonnet-5-5`, …), Codex strong is `gpt-6.1-sol/high`, and `gpt-6-astra` no longer appears in the defaults (P61). / Macierz modeli: `data/model-matrix.yaml` jest jedynym źródłem prawdy przypisującym każdej klasie zadania (`report`, `simple`, `smoke`, `feature`, `bugfix`, `review`, `merge`, `hard`, `sim`, `visual`, `visual-compare`, `design`, `creative`, `escalate`) model/effort każdego dostawcy. Domyślna tabela `equivalents`, listy poziomów dostawców i linia doctor Kimi są z niej wyprowadzane (`npm run gen:matrix` odtwarza `src/core/model-matrix.ts`), a test pada, gdy dostarczone domyślne i macierz się rozjeżdżają. Domyślne wpisy Claude to teraz pełne ID modeli (`claude-sonnet-5-5`, …), mocny Codex to `gpt-6.1-sol/high`, a `gpt-6-astra` nie występuje już w domyślnych (P61).
+
+- Spec key `class:` (P60): with `class` and `agent`, the model and effort come from the matrix, before configured defaults; an explicit `model`/`effort` wins, with a preview warning when it contradicts the matrix; an unknown class is an error listing the classes; a class with `none` for the agent (`creative` on Kimi) is an error; the explicit-only classes (`visual`, `escalate`) may dispatch the restricted models. / Klucz speca `class:` (P60): z `class` i `agent` model i effort pochodzą z macierzy, przed konfigurowanymi domyślnymi; jawne `model`/`effort` wygrywa, z ostrzeżeniem w podglądzie, gdy jest sprzeczne z macierzą; nieznana klasa to błąd wymieniający klasy; klasa z `none` dla agenta (`creative` dla Kimi) to błąd; klasy explicit-only (`visual`, `escalate`) mogą dyspozytować modele objęte ograniczeniem.
+
+- Preview validation: an unknown Kimi model ID is refused (a typo silently fell back to K2.8 Preview), as are Kimi `*-highspeed` models, effort `off`/`none` for Kimi and Codex effort `low`; `k3.1-pro*` and `gpt-6-astra` run only with an explicit `model:` or an explicit-only class, never from configured defaults or an equivalents translation. / Walidacja w podglądzie: nieznany ID modelu Kimi jest odrzucany (literówka po cichu wracała do K2.8 Preview), podobnie modele Kimi `*-highspeed`, effort `off`/`none` dla Kimi i effort `low` dla Codexa; `k3.1-pro*` i `gpt-6-astra` działają tylko z jawnym `model:` albo klasą explicit-only, nigdy z konfigurowanych domyślnych ani z tłumaczenia equivalents.
+
+- `review_of` accepts a list (P66): every listed author is validated (cross-review rule, no-record error), the window-guard isolation invariant covers each of them, and the preview warns when the reviewer's provider equals the author's provider of any reviewed task. / `review_of` przyjmuje listę (P66): każdy wymieniony autor jest walidowany (zasada cross-review, błąd braku rekordu), niezmiennik izolacji strażnika okien obejmuje każdego z nich, a podgląd ostrzega, gdy dostawca recenzenta jest taki sam jak dostawca autora któregokolwiek przeglądanego zadania.
+- P69: after `gc --apply` the disk is re-measured at once and the journal records "gc freed X GiB, free now Y", so the board and status no longer keep showing the pre-gc reading for minutes; a reading older than 10 minutes now shows its age next to the number ("(last reading, 47 min old)"). / P69: po `gc --apply` dysk jest mierzony od razu, a dziennik zapisuje „gc freed X GiB, free now Y", więc board i status nie pokazują już minutami odczytu sprzed gc; odczyt starszy niż 10 minut pokazuje swój wiek przy liczbie („(last reading, 47 min old)").
+
+- P68: a command run from a deleted working directory (gc removed the worktree the shell was in) no longer crashes with a stack trace (`ENOENT … uv_cwd`): absolute and `~` paths never consult the cwd, and a command that genuinely needs it prints one line — "current directory no longer exists (removed by gc?) – cd elsewhere, e.g. cd ~" — and exits non-zero. / P68: polecenie uruchomione z usuniętego katalogu roboczego (gc usunęło worktree, w którym była powłoka) nie kończy się już śladem stosu (`ENOENT … uv_cwd`): ścieżki bezwzględne i `~` nigdy nie pytają o cwd, a polecenie, które go naprawdę potrzebuje, wypisuje jedną linię — „current directory no longer exists (removed by gc?) – cd elsewhere, e.g. cd ~" — i kończy się kodem niezerowym.
+
+- Withdraw: the FIFO copy of a message is removed before the active identity is cleared, so a crash between the two writes leaves the message as the active delivery instead of an eligible queued duplicate that recovery would deliver again (review X3-R2). / Wycofanie: kopia wiadomości w kolejce FIFO jest usuwana przed wyczyszczeniem aktywnej tożsamości, więc awaria między tymi zapisami zostawia wiadomość jako aktywną dostawę zamiast gotowego duplikatu w kolejce, który recovery dostarczyłoby ponownie (przegląd X3-R2).
+
+- Gate: directory acquisition and owner publication are atomic; stale recovery uses a tombstone rename. The original REVIEW2 schedule is mitigated, but a third contender can still enter while a live successor is displaced (open MAJOR L1). / Bramka: utworzenie katalogu i publikacja właściciela są atomowe; odzyskiwanie przenosi blokadę do nagrobka. Oryginalny scenariusz REVIEW2 jest ograniczony, lecz trzeci uczestnik nadal może wejść podczas przesunięcia żywego właściciela (otwarte MAJOR L1).
+
+- MCP `set_limits` accepts `"off"` for an optional provider (Kimi) in the registered schema, the same as for Claude and Codex; `reserve` stays numeric-only (review X4). / MCP `set_limits` przyjmuje `"off"` dla opcjonalnego dostawcy (Kimi) w zarejestrowanym schemacie, tak samo jak dla Claude i Codexa; `reserve` pozostaje tylko liczbowe (przegląd X4).
+
+- Withdraw: an interrupted FIFO→active transfer leaves the same id in both stores; withdrawing it (full id or a prefix naming only that one message) now removes both copies as one message instead of being refused as ambiguous, so the message is never redelivered (review X3). / Wycofanie: przerwany trwały transfer zostawiał ten sam id w kolejce FIFO i w aktywnej dostawie; wycofanie go (pełnym id lub prefiksem wskazującym tylko tę jedną wiadomość) usuwa teraz obie kopie jako jedną wiadomość zamiast odrzucać jako niejednoznaczne, więc wiadomość nigdy nie zostanie dostarczona ponownie (przegląd X3).
+
+- Gate: a reclaimer never unlinks a reclaim lock it did not verify this iteration — the sidecar carries a unique token and a fresh re-read must show the exact bytes seen as dead, so a stale read can no longer delete the live reclaim lock a successor installed (review X1). / Bramka: przejmujący nigdy nie usuwa blokady reclaim, której nie zweryfikował w tej iteracji — sidecar niesie unikalny token, a świeży odczyt musi pokazać dokładnie te same bajty, więc nieaktualny odczyt nie usunie już żywej blokady następcy (przegląd X1).
+
+- Gate: the reclaim sidecar is published atomically (a complete temp file hard-linked into place), so a SIGKILL between create and write can no longer leave an empty `.reclaim` file that recovery would wait on forever; an empty or unparsable sidecar counts as dead only past a short grace (review X2). / Bramka: blokada reclaim jest publikowana atomowo (kompletny plik tymczasowy linkowany na miejsce), więc SIGKILL między utworzeniem a zapisem nie zostawia pustego pliku `.reclaim`, na który recovery czekałoby bez końca; pusty lub nieczytelny sidecar uznaje się za martwy dopiero po krótkim okresie gracji (przegląd X2).
+
+### Included 0.18.3 baseline / Dołączona baza 0.18.3
+
+- P24: warn on configurable per-filesystem worktree share/free space with safe GC preview reclaimable bytes; report worktree size on close.
+
+- Support weight: heavy task specs with a cross-provider limits.heavy queue cap (default 1) and waiting reasons.
+
+- Show machine load/free memory in capacity and status detail; record configurable load threshold crossings.
+
+- P17: warn in new/queue previews when inherited project links point to missing paths or closed task worktrees, naming the stale target and suggesting placeholders.
+
+- Resolve cross-task `links.to` placeholders `{task:TASK-ID,repo:REPO-NAME}` against recorded worktrees, with clear preview errors and existing link validation.
+
+- Limits: `limits.<provider>: off` explicitly disables a provider — no window of it starts, the queue waits with the reason, and `limits`/board and the MCP `set_limits` show and accept it. `limits.<provider>: 0` still means "no limit" (backward compatible), as do `limits set <provider>=0` and `=none`; `=off` now disables instead of removing. / `limits.<provider>: off` jawnie wyłącza dostawcę — żadne jego okno nie wystartuje, kolejka czeka z podanym powodem, a `limits`/plansza i MCP `set_limits` pokazują i przyjmują tę wartość. `0` nadal znaczy „bez limitu" (zgodność wsteczna), podobnie `limits set <dostawca>=0` i `=none`; `=off` wyłącza zamiast usuwać.
+
+- MCP `queue_list` and `task_spec` expose the spec `weight` (`normal`/`heavy`) as a structured field. / MCP `queue_list` i `task_spec` pokazują pole `weight` (`normal`/`heavy`).
+
+- Withdraw: an id prefix shared by the active delivery and a queued message is refused as ambiguous before anything changes. / Wycofanie: prefiks id wspólny dla dostarczanej i kolejkowanej wiadomości jest odrzucany jako niejednoznaczny, zanim cokolwiek się zmieni.
+
+- Gate: reclamation of a stale gate lock is serialized through a reclaim lock, so a second reclaimer cannot unlink a live successor lock. / Bramka: przejęcie nieaktualnej blokady jest szeregowane blokadą reclaim, więc drugi przejmujący nie usunie żywiej blokady następcy.
+
+- Internals: the machine-load state file is written only on a change, not every watch tick; heavies waiting for a heavy slot stack their count in queue previews (1/1, 2/1, …); an unrelated spec link no longer silences stale project-link warnings (only an override of the same `from` does); a negative `disk.worktree_share_percent` is rejected (pinned by a test). / Wewnętrzne: plik stanu obciążenia jest zapisywany tylko przy zmianie, nie co tick; oczekujące ciężkie zadania zwiększają licznik w podglądach kolejki; niezależny link w spec nie wycisza już ostrzeżeń o nieaktualnych linkach projektu; ujemny `disk.worktree_share_percent` jest odrzucany (test).
+
+## [0.18.3] - 2026-11-07
+
+- P24: warn on configurable per-filesystem worktree share/free space with safe GC preview reclaimable bytes; report worktree size on close.
+
+- Support weight: heavy task specs with a cross-provider limits.heavy queue cap (default 1) and waiting reasons.
+
+- Show machine load/free memory in capacity and status detail; record configurable load threshold crossings.
+
+- P17: warn in new/queue previews when inherited project links point to missing paths or closed task worktrees, naming the stale target and suggesting placeholders.
+
+- Resolve cross-task `links.to` placeholders `{task:TASK-ID,repo:REPO-NAME}` against recorded worktrees, with clear preview errors and existing link validation.
+
+- Limits: `limits.<provider>: off` explicitly disables a provider — no window of it starts, the queue waits with the reason, and `limits`/board and the MCP `set_limits` show and accept it. `limits.<provider>: 0` still means "no limit" (backward compatible), as do `limits set <provider>=0` and `=none`; `=off` now disables instead of removing. / `limits.<provider>: off` jawnie wyłącza dostawcę — żadne jego okno nie wystartuje, kolejka czeka z podanym powodem, a `limits`/plansza i MCP `set_limits` pokazują i przyjmują tę wartość. `0` nadal znaczy „bez limitu" (zgodność wsteczna), podobnie `limits set <dostawca>=0` i `=none`; `=off` wyłącza zamiast usuwać.
+
+- MCP `queue_list` and `task_spec` expose the spec `weight` (`normal`/`heavy`) as a structured field. / MCP `queue_list` i `task_spec` pokazują pole `weight` (`normal`/`heavy`).
+
+- Withdraw: an id prefix shared by the active delivery and a queued message is refused as ambiguous before anything changes. / Wycofanie: prefiks id wspólny dla dostarczanej i kolejkowanej wiadomości jest odrzucany jako niejednoznaczny, zanim cokolwiek się zmieni.
+
+- Gate: reclamation of a stale gate lock is serialized through a reclaim lock, so a second reclaimer cannot unlink a live successor lock. / Bramka: przejęcie nieaktualnej blokady jest szeregowane blokadą reclaim, więc drugi przejmujący nie usunie żywiej blokady następcy.
+
+- Internals: the machine-load state file is written only on a change, not every watch tick; heavies waiting for a heavy slot stack their count in queue previews (1/1, 2/1, …); an unrelated spec link no longer silences stale project-link warnings (only an override of the same `from` does); a negative `disk.worktree_share_percent` is rejected (pinned by a test). / Wewnętrzne: plik stanu obciążenia jest zapisywany tylko przy zmianie, nie co tick; oczekujące ciężkie zadania zwiększają licznik w podglądach kolejki; niezależny link w spec nie wycisza już ostrzeżeń o nieaktualnych linkach projektu; ujemny `disk.worktree_share_percent` jest odrzucany (test).
+
+## [0.18.2] - 2026-11-07
+
+- Validation: release fixtures follow the current manifest version; soak counters include trailing refresh work in the same interval as their tick divisor. Existing resource bounds stay unchanged. / Testy wydania używają bieżącej wersji manifestu; liczniki soak obejmują pełen interwał wraz z odświeżeniami końcowymi, bez zmiany limitów.
+
+Release candidate: includes the 0.18.1 rc1 baseline and all merged P10–P50 work below (items absent from this history are not claimed). / Kandydat do wydania obejmuje bazę 0.18.1 rc1 i wszystkie scalone zmiany P10–P50 opisane poniżej.
+
+- P49: working Codex uses the advertised Tab queue key; wrapped pastes accept retained or swallowed wrap separators and delivery still requires exact session evidence. Idle Codex, Claude and Kimi retain their submission keys. / Pracujący Codex używa reklamowanego Tab do kolejki; zawinięty tekst zachowuje kontrolę zgodności, a dostawę potwierdza transkrypt. Klawisze bezczynnego Codexa, Claude i Kimi pozostają bez zmian.
+
+- Gate: `full --node26-only` explicitly records the production Node 26 scope without provisioning Node 22. / Bramka full może jawnie sprawdzić wyłącznie produkcyjny Node 26 bez instalowania Node 22.
+
+- P50: requeuing a removed task ID creates a fresh record; prior attempt state is retained under state/.history and no longer cancels its new dependents. / Ponowne dodanie ID po queue rm tworzy świeży rekord; poprzednia próba zostaje w state/.history i nie blokuje nowych zależności jako anulowana.
+
+- R2: recover the gate lock after its owner is SIGKILLed; reject invalid owner PIDs. / Bramka odzyskuje blokadę po SIGKILL właściciela; niepoprawny PID nie jest uznawany za martwego właściciela.
+
+- FIX1: oversized legacy `gc_preview` chat events are summarized on read, so old large garbage-collection entries no longer occupy whole event pages. / Przestarzałe duże wpisy `gc_preview` są skracane przy odczycie i nie zajmują już całych stron zdarzeń czatu.
+
+- FIX1: `doctor` judges the effective Codex update check — the last `-c check_for_update_on_startup=` of the user wins — and warns when the installed Codex has no `-c`. / `doctor` ocenia efektywną kontrolę aktualizacji Codexa (liczy się ostatnia flaga użytkownika) i ostrzega, gdy Codex nie zna `-c`.
+
+- FIX1: a start held back by a startup dialog (trust, login) is `needs-input` with the dialog as the question, no longer `needs-attention`. / Start zatrzymany dialogiem początkowym to `needs-input` z treścią dialogu, nie `needs-attention`.
+
+- FIX1: closing a start window that never became ready on purpose raises no tmux-loss event; a gone window of a live tmux session says the server lives. / Celowe zamknięcie okna startu, które nie zdążyło się uaktywnić, nie zgłasza utraty tmux; zniknięte okno żywej sesji mówi, że serwer działa.
+
+- FIX1: the Kimi trust dialog is classified by its position on the screen — a ready prompt below it means trust is answered — and Kimi delivery proofs ignore echo lines mistaken for drafts, so a delivered-after-timeout prompt no longer stays needs-attention. / Dialog zaufania Kimi oceniany po kolejności na ekranie (gotowe pole pod dialogiem = zaufanie załatwione), a dowody dostarczenia pomijają echo brane za szkic — prompt dostarczony po limicie nie zostaje needs-attention.
+
+- FIX1: `agentctl send --withdraw TASK [--entry ID]` and the MCP `send` tool (`withdraw`) take back a waiting message: a FIFO entry is removed, a pending prompt is cleared before its delivery begins and marked `stale` once agentctl started delivering it. / Wycofanie oczekującej wiadomości przez CLI i MCP: wpis kolejki znika, oczekujący prompt jest czyszczony przed dostawą, a po jej rozpoczęciu dostaje znacznik `stale`.
+
+- FIX1 internals: a gate lock whose holder pid is dead is broken instead of waited on; status discovers report candidates once per task per collect and keeps the candidate on the row; an absolute in-worktree link is validated once; the invalid-event hint lists the real kinds of the agent. / Wewnętrzne: zamek gate'a martwego procesu jest zrywany; status szuka kandydatów raportu raz na zadanie i trzyma kandydata w wierszu; absolutny link w worktree jest walidowany raz; podpowiedź o błędnym zdarzeniu wymienia prawdziwe rodzaje agenta.
+- SOAK persistence: defer intermediate token saves and serialize asynchronous board usage-cache writes so synchronous fsync cannot stall input. / Odroczono pośrednie zapisy tokenów; plansza zapisuje pamięć sesji asynchronicznie, jednym writerem, bez blokowania klawiszy przez fsync.
+
+- UI instance labels: identify prod/dev in the board, tmux status-left and board/watch terminal titles; support `ui.instance_name` and restore prior titles on exit. / Nazwa instancji prod/dev na planszy, pasku tmux i w tytułach board/watch; nadpisanie przez `ui.instance_name` i przywracanie poprzedniego tytułu.
+
+- SOAK: bound session parser caches, discard removed-task progress, and prevent held action keys from queuing stale commands; exit releases notice timers. Add an eight-hour accelerated Ink/resource regression. / Ograniczenie pamięci sesji, usuwanie postępu usuniętych zadań i blokada kolejki powtarzanych akcji; wyjście usuwa timer komunikatu. Dodano przyspieszony test ośmiu godzin planszy.
+
+- INT4: trust wait expiry leaves the live pending task with watch, without a failed queue entry; queue ticks also reconcile older failed entries for live tasks, including while paused. / Po wygaśnięciu oczekiwania na zaufanie żywe zadanie pozostaje pod opieką watch, bez błędu w kolejce; tick usuwa też wcześniejsze nieaktualne błędy żywych zadań, również podczas pauzy.
+
+- INT4: token-only MCP confirmations remain bound to the previewed tool; a refused cross-tool use preserves the original preview. / Potwierdzenie MCP samym tokenem dotyczy wyłącznie narzędzia z podglądu; odmowa użycia w innym narzędziu zachowuje pierwotny podgląd.
+
+- P47: MCP task responses omit plans/capacity/disk footers unless detail/capacity is requested or a session threshold changes; config warnings appear once per session. / MCP pomija stopkę planów/pojemności/dysku poza jawnym żądaniem lub zmianą progu; ostrzeżenia konfiguracji pojawiają się raz na sesję.
+
+- P45: MCP report reads default to verdict, decisions, actions and the final Polish summary; full checks/outputs require detail/full, with parsed outputs on the first page only. CLI reads are unchanged. / MCP domyślnie zwraca werdykt, decyzje, akcje i końcowe polskie podsumowanie; pełne kontrole/outputs są na żądanie, metadane tylko na pierwszej stronie.
+- P43 validation: mark cohort journal fixtures as historical closed tasks so the filter test does not create unrelated loss events. Test filtrowania kohort używa zamkniętych zadań historycznych.
+
+- Document dedicated dev tmux servers and migration/recovery in English and Polish, with exact session targets and copyable shell commands. Dokumentacja EN/PL osobnego serwera dev, migracji i odzyskiwania zadań.
+
+- P43: lost tmux tasks remain visible as needs-attention with one durable loss event and recovery guidance; Claude SessionStart saves the conversation ID before the first prompt. Utracone zadania pozostają widoczne ze wskazówką odzyskania; identyfikator sesji Claude zapisujemy przy starcie.
+
+- P10/P44: optional `tmux.socket` scopes all tmux commands; exact attach hints and doctor checks prevent dev/server confusion. Opcjonalny osobny serwer tmux, dokładne wskazówki attach i kontrola AGENTCTL_HOME w doctor.
+- P32 F8: regression coverage sends real Ink/stdin arrow keys on populated rows independently during record scanning and status collection, and checks selection/preview effects without latency thresholds.
+
+- P32 F7: all board refresh sources cancel the old deadline and re-arm only after the shared load completes, including failures; exit cancels pending refreshes.
+
+- P23: accept task worktree directory names as output repository aliases and normalize accepted refs to repository names.
+
+- P22: suggest explicit report_from for plausible nearby reports in status, board and events; never adopt automatically.
+
+- P18: reject recursive/self links during preview and warn about missing absolute link sources.
+
+- P32 validation: default gates assert warm-tick file counts; the host-sensitive 100 ms assertion uses the existing AGENTCTL_P32_PERF opt-in.
+
+- P32 F9: remove the production per-scan parse counter; tests count fixture file operations only.
+
+- P32 F6: expanding hidden/closed sections always requests a deep refresh, including when an active row remains selected or a shallow refresh is in flight.
+
+- P32 F5: an immediate watch refresh cancels a superseded trailing timer, preventing duplicate ticks under event-loop delay.
+
+- P32 F4: token collection uses the effective row and its shallow predicate, retaining tokens for live closed/cancelled tasks and current rows with archive duplicates.
+
+- P32 F3: current task repositories and worktrees take precedence over archive duplicates on the board.
+
+- P32 F2: TASK.md and report caches detect atomic replacement and equal-size rewrites with dev/inode and nanosecond mtime/ctime; coarse change times force a reread.
+
+- P32 F1: cached report digests revalidate the current owner, allowed roots and symlink components on every inspection.
+
+- P32: the board tick no longer scales with the archive. Task records are scanned once per tick and re-parsed only when a TASK.md changes (previously 5-6 full scans of every record, archived included, per 2 s tick); report bodies are hashed and scanned once per version (cached by dev/ino/mtime/size); closed/cancelled/archived rows skip the prompt queue, outputs and token collection unless their section is expanded; one UsageReader per board process replaces the per-tick ~1 MB usage-cache parse; the disk report is collected on its own 5 min cadence with a bounded budget; the refresh runs every 2 s only while a task is alive (5 s when everything is done, armed after the previous tick, never stacked) and fs.watch event ticks are debounced to one per 500 ms; the per-record loop yields every 25 records so keys interleave with a tick.
+- Development gates: `npm run gate -- quick|full|release` centralizes affected tests, sequential shared Node runtimes, package/doctor/live checks, low-priority execution, a cross-task lock and JSON evidence; standing agent rules are in AGENTS.md.
+- P34: every MCP `new` start is registered and run by the watcher — `confirm` always returns at once ("Registered: …") and the server never waits for a checkout, a setup or a window's input prompt (previously only starts with setup were handed over; a plain start could hold the server for minutes). Without a running watcher the confirm is refused; `wait_trust` is accepted but ignored (the watcher always waits for a human); `agentctl new` in a terminal is unchanged.
+- P33: the Codex "Update available" modal no longer blocks a start for the full 60 s ready timeout: task windows start with `-c check_for_update_on_startup=false` (verified in the Codex 0.167.0 binary schema; inert on older versions, user `flags` come last and win), the modal is a `waitForReady` class of its own (`agents.codex.dialog_pattern`) that fails the start at once as needs-input with "choose Skip until next version" (agentctl never answers it), and `doctor` reports the disabled update check. A modal/trust-blocked window stays open and owns its slot for the human; the watcher closes only other never-ready failed starts; a leftover window of a CLI start keeps the evidence but does not count against `limits` either. An interrupted start (the watcher stopped while waiting for the agent) drops its queue entry instead of failing it, so the task record and the queue never disagree, and the task lands in "to resume" (`agentctl resume`).
+- P35: `prompt_delivery: sent` requires positive evidence — a screen proof (a working-looking screen, an echo, a queue list) counts only for a delivery with a recorded paste (`delivery_started_at`); a start that failed before any paste can no longer be flipped to "sent" by a human answering a dialog. A needs-attention initial prompt that was never pasted is re-armed to `pending` when the window is alive, idle and readable, so the watcher delivers it with the usual Enter discipline; a pasted-but-unconfirmed delivery stays terminal.
+- P36: `queue rm` closes a leftover live window of the cancelled task's failed start, so the cancelled state is not masked as "waiting" by the idle screen.
+- P37: `events --since HH:MM` (and MCP `events_since`) means the most recent past occurrence within 24 h: 23:50 asked at 06:19 is yesterday 23:50 (the label says "wczoraj"), not an empty "in the future today" window.
+- P38: the `gc_suggest` journal entry of a closed cohort stores a bounded summary (counts, bytes, top 5 items) instead of the whole GC plan; the text points at `gc_preview`. `recordJournal` replaces any oversized `gc_preview` payload with a pointer as a safety net. (Before: the raw plan was drip-fed as 2000-byte JSON fragments through every `events_since` call.)
+- P39: an MCP confirm carrying only `preview_token` executes the stored preview arguments — for `new`/`queue` the whole spec no longer has to be resent (`spec` is optional in that case). A confirm that also sends arguments must still match the preview hash; TTL, scope and session checks are unchanged.
+
+- Claude `/usage` probe is opt-in (`capacity.claude_usage_probe: true`); it reads plan windows in an isolated neutral session and never starts automatically by default.
+- `dataset export` streams a read-only benchmark dataset as JSONL or CSV, with attempt identities, provenance and explicit redacted prompt/report content opt-ins.
+- P29: live harnesses and package smoke checks require an explicit absolute `AGENTCTL_LIVE_CACHE` task root; missing roots, shared historical sandboxes and escaping paths are refused before writes.
+- P30: preserve rejected config reload state across reads and clear the receipt only after a corrected configuration is accepted; live retry checks synchronize on the persisted rejection/recovery state.
+
+- P27: launch providers through private task-local scripts, keeping tmux commands short even with long PATH and Codex notify arguments. Codex forwards the original notify through a private JSON file (`event --forward-file`); start, resume, move and queued starts share the launch path.
+- Review fixes M1–M3: require the complete owned Kimi composer before Enter and support token-confirmed recovery; follow-ups require current hook/wire or exact transcript injection evidence; redact setup diagnostics, persisted events and MCP output.
+- P28: recover Kimi status after successful re-login despite stale error banners. Fall back to the startup CLI version when wire records omit it. Default economical equivalents are k3-256k/low, k3/high and k3/max; pro remains explicit-only. GC completion reports successful current removals and bytes separately from failures and skipped entries.
+
+- P15/P15b/P16, `send` to a working agent (recorded on Claude Code 2.1.311 and codex-cli 0.166.0; reworked after cross reviews, P15-FIX2–FIX4): the result is never silent: `send`, `status` (`delivery_result`, `--json`, MCP) and the journal (`WIADOMOŚĆ`, every change of the result of a follow-up with its delivery id) say delivered (with its source), `w kolejce agenta – niepotwierdzone`, `w kolejce agenta – potwierdzone` or `nie dostarczono – tekst w polu wpisywania`.
+  - **Delivered only from an exact source** (P15-FIX3): the UserPromptSubmit hook (a collapsed paste arrives wrapped in `<pasted_content id="…">`: the wrapper comes off the hook’s text only, by pairs of ids; nested, mismatching or stray tags prove nothing), the notify payload of Codex, or the session transcript of the task itself (Claude Code `user`; queued injection must correlate to a unique unconsumed enqueue after delivery started; Codex `response_item`/`item_completed`/`user_message`), holding a message written after the delivery began that is literally the pending one. Line ends are the only normalisation; no white space is squeezed (the agents’ own edits are accounted for: trailing white space dropped, Claude Code stores a tab as four spaces, the wrapper’s padding). FIX4 pins one session and file identity to the current attempt, selected by its own hook/statusLine/notify; no worktree/cwd fallback or replacement after loss/rotation. Enqueue alone confirms the queue, retains pending through the end of the turn and timeout, and never means delivered.
+  - **FIX4 composer boundaries**: Claude upper/lower borders or the recorded Codex model/hints footer delimit the whole field. Footer-like text inside is content, including `? for shortcuts` and `esc to interrupt`. Unknown/truncated structure refuses Enter; preview and confirmation use that same complete area.
+  - **The screen confirms nothing for a working agent** (P15-FIX3): the queue sign of Claude Code (dim “Press up to edit queued messages”, “ctrl+x ctrl+s to send now”; only when it was not on the screen before our own Enter) and the echo of Codex’s steered message (the whole message, read back exactly) only classify `w kolejce agenta – niepotwierdzone`; the pending prompt stays and the delivery waits for the hook or the transcript. (Before: the echo compared with white space squeezed, so `"AB CD"` was acknowledged by `"ABCD"`.)
+  - **agentctl presses Enter only in the call that pastes** (P15-FIX3): up to three times, each after a capture whose whole input-field area (empty lines inside included) is byte for byte the image taken after the paste, which must itself be our paste, and with no dialog on that capture. `watch` no longer presses Enter every 8 s (removed: the signature was space-insensitive, stopped at the first empty line and the dialog was not looked at in the last capture). A difference or an open dialog: no Enter, `nie dostarczono – tekst w polu wpisywania`, needs-attention at the next tick.
+  - `agentctl send --enter-only TASK` and MCP `send` with `enter_only: true` (permission `send_enter`) show the exact text of the field, the screen state and a token for those bytes (`--confirm TOKEN` / `confirm: true` + `token`); the confirm captures again and presses Enter only if the field is byte for byte the previewed text and the image recorded after our paste, and no dialog is open. A refusal and a failed key (tmux `send-keys` error) are errors with the reason; a failed key is audited `failed` and never announced as sent.
+  - CRLF in a prompt is pasted as LF (tmux turns each CR into an Enter).
+  - The hook gets a collapsed paste wrapped in `<pasted_content id="…">`, which never matched the pending prompt, so a message that had arrived stayed `confirming` until `needs-attention` (P15b).
+  - Claude Code’s spinner frame `✳` is a working frame, but only as a spinner line right above the input box (not in the transcript, not in a quoted report): without the footer `esc to interrupt` it read as idle in the middle of a turn. A screen that looked idle for a moment before the paste no longer leaves the paste in the field without Enter (P15).
+  - With an open Codex question nothing is pasted; `send` names the question and keeps the message in the FIFO.
+- P19-FIX2: share one bounded measurement scheduler across disk/capacity/previews/GC (disk.workers, default 2), deduplicate paths across inventory changes, keep independent path timestamps and invalidate replaced/removed roots. Background workers no longer keep an idle parent alive and are cancelled on MCP shutdown; foreground CLI measurements remain referenced, crashes have a bounded foreground fallback and timed-out workers release their slot. GC rechecks cached ages before deletion.
+
+- P19-FIX2: keep the author relationship of registered MCP batches: reviewers wait for the author record, validate its effective order, and fail retryably when the author start fails; no-agent batches retain their admitted author order and durable preparation completion without creating task records. Refuse mixed new batches instead of silently omitting fresh tasks; emit setup start/result events per repository command, with exit codes on results.
+
+- P19: the MCP server is no longer held by a task start. Cause: the disk facts (`status`, `capacity`, the previews of `new` and `queue`) added up the size of every worktree, `node_modules` included, with a synchronous walk, cached under a key made of the list of worktrees - each new task or worktree started a walk of all of them on the event loop of the server, so `status` from any chat waited for it (a dev server with a few small worktrees did not notice); queries to tmux and git were synchronous child processes as well. Now the walks are asynchronous and bounded, `collectDisk` answers within about a second with the last reading (`measuring`) while one shared background measurement runs, a worktree measured recently keeps its size when another appears, `RealRunner` runs every command except an interactive one without blocking the loop, and `git worktree remove` of `close`/`gc` has the `git.timeout_s` allowance.
+- P19: MCP `new` with `confirm: true` for a repository with setup (`.agentctl.yaml`) registers the start and returns at once (the `MCP new` journal line is written then); the watcher does the checkout, the setup and the window by the queue path, so the setup survives a restart of the MCP server or of the app. `status` and `queue_list` show `uruchamiane – setup w toku (repo 1/2 …)`; `events_since` has `SETUP` and `BŁĄD SETUPU` (repository, command, exit code, log path) next to `START`; a failed setup leaves the task failed with its reason and its worktrees, `queue_retry` starts it again. A repeated `new` for a task being started returns its state and starts nothing twice. Without a running watcher the confirm is refused before anything is created (the preview warns); `agentctl new` in a terminal is unchanged. Contract change: such a `new` no longer answers "Started: …" but "Registered: …" (see docs/mcp.md, "A start with setup").
+
+## [0.18.0] - 2026-11-05
+
+### Added
+- Provider registry and adapters for Claude Code, Codex and opt-in Kimi Code CLI 2.5.0. Default active providers remain Claude and Codex; both stay required.
+- Kimi interactive launch/resume, dynamic TOML model/effort catalog and read-only permission diagnostics, screen fixtures, passive protocol-1.5 wire and usage.record token accounting. Unknown protocols use screen fallback; unverified session paths/interactions and missing screen states remain documented hypotheses.
+- Optional rate-limited Kimi `/usage` probe in a neutral manually trusted session; no task-window probe, credentials, OAuth or provider API calls. Three-provider capacity, limits, reservations, usage, board, alerts, queue holds and MCP schemas.
+- `review.prefer` for active installed mappable reviewers; explicit move target with slot/percentage information when three providers are active.
+
+### Safety and compatibility
+- Safety rules apply per target provider, including after move/translation. Claude/Codex retain 0.17.4 results. Kimi rejects auto-accept/non-interactive prompt flags, trust bypass env and unsafe permission modes, disables updates per process and defaults telemetry off.
+- Manager and Remote Control remain Claude-only. Kimi config is never written, and trust/login/update dialogs are never answered. Kimi task data still goes to Moonshot AI; Kimi permissions provide no sandbox.
+
+## [0.17.4] - 2026-11-04
+
+- P12: the board's `k` choice lists the `board.cohorts_recent` (10) most recently active cohorts plus those with work, folds older quiet ones into `starsze…` and scrolls with ↑↓/PgUp/PgDn; `agentctl cohort archive <name>… | --older-than <age>` (preview, `--yes`) and MCP `cohort_archive` (preview + confirm, add it to `mcp.allow`) hide finished cohorts from the choice and the default `cohort list` (`--all`); tasks, reports and history stay, a new task in the cohort brings it back.
+- P14: setup runs per repository of a multi-repo spec (`repos[].setup` or the repository's own `.agentctl.yaml`), each in its own worktree; the preview lists it per repository; the chat still cannot send `setup`.
+- Fix 1 after UAT: B1 automatic reviews run in their own detached worktree (never the author's checkout), with their own report path, and start only when the author's turn is over (queue shows "czeka na autora"); a newer author commit re-pins the pending review, an entry queued by the earlier build is converted, and a residual "unsafe start residue" on a review retries. B2 `agentctl-outputs` is validated per section and entry (`outputs_partial`; one bad entry no longer voids the block) and `checks` accept text, one-key maps and `{name, result, note?}`, normalized. P13 queue previews keep an argument-only identity (regression tests). U-a/b clearer link-target warnings with resolved paths; U-c no "missing block" warning for tasks from before the outputs protocol; U-d no `gc_suggest` wave for cohorts closed before the upgrade; U-e no false "window reset" from a jittering boundary; U-f `send` says "wklejono" once.
+
+- Kimi audit K1/S3/N3: atomic state snapshots (same-directory temporary file, fsync, rename), a shared per-task lock for all TASK.md writes/appends and prompt delivery, grouped report metadata updates, preserved old state on ENOSPC/interruption and durable needs-attention diagnostics with emergency disk space.
+- Kimi audit K2/W2: restrict MCP report sources/spec paths to task worktrees and cache; reject symlinks and boundary escapes. CLI warns for outside spec paths and permits an explicit outside regular report source only with --force. Report reads validate paths and opened inode before/after reading, including pull_ready and mirrors.
+- Kimi audit W4: one global start admission lock with durable slot reservations for new, queued/retried starts, resume and move. Shared admission with report-ready follow-ups; preserve repository checkout concurrency and recover dead reservation owners. Independent watchers claim queue entries once.
+
+- Production P1: confirm idle after `watch.idle_confirm_ticks` consecutive reads (default 2). Recognize running tools and Claude spinner variants; Stop cannot announce waiting while work is visible.
+- Production P2/P3: preview all missing link targets, reject confirmation before writes, check project links in doctor, and protect GC worktrees referenced by known project/active-task links (`--force-links` is CLI-only). Preview tokens hash canonical arguments, survive reads and unrelated starts, and expose `preview.ttl_s` (600 s), expiry and precise rejection causes. Destructive target expansion still refuses.
+- Production P5: one report readiness rule across doctor, status, list/get_report and pull_ready, including missing canonical files with historical copy metadata.
+- Production P8/P9: `gc --preview`/`--dry-run` alias the default preview; `--apply` executes. Aggregate-first GC summaries include bytes/counts by category, reason and cohort, newer skips grouped by task, with opt-in paginated details (`--verbose` / `detail: true`).
+- Production P10/P11: idle report-ready windows release provider slots by default (`limits.count_report_ready: false`); capacity/limits separate working and awaiting collection. Follow-ups count again and refuse with a warning at a full limit. Stale readings explain elapsed hours and local read time.
+
+- Board: the header names the version (`agentctl 0.17.2 board · …`, the one `agentctl version` prints) and the board titles its terminal window `agentctl <version> · board` (OSC 2; the previous title is restored on exit where the terminal supports the xterm title stack). In tmux the outer terminal's title is set through the session options `set-titles` and `set-titles-string` of the agentctl session only. `board.window_title: false` turns all of it off.
+- Docs: the README leads with the dispatcher workflow, a board screenshot generated from a demo session (`npm run docs:screenshot`), the key benefits and the automatic flow with real `events_since` / `pull_ready` output from that demo.
+
+- NC workflow: version 1 report outputs with git validation, verdict-gated dependencies, automatic cross-provider reviews and repeat delta reviews, task-referenced base commits, cohort output aggregation and once-per-report decision/action events. Invalid/missing outputs warn without changing report readiness.
+- Recover limited windows on the same model/provider using persisted overload guards and retry bounds; one provider notice per episode. Closed cohorts emit protected gc_suggest plans, without deleting anything. Batch human marks share exact previews across CLI, board and MCP.
+- Independent MCP preview tokens, concrete scopes and preflight failures; scoped GC hides foreign paths and confirmed GC returns results only. Include checkout/setup in task duration; stale plan notices stay once per reading. Consistent MCP report values; grouped MCP write notices by default; F12 works across concurrent sessions.
+- REV3 F1/F2: follow-ups paste during work for Claude/Codex, idle-only adapters retain durable FIFO messages visible in status/peek, and idle/late Stop alone cannot acknowledge a stuck draft. Submission/echo/working evidence resolves delivery; timeouts become needs-attention.
+
 ## [0.17.3] - 2026-11-04
 
 - FIX2 P: recognize Claude Code 2.1.x spinner progress and submitted transcript echoes. Confirm delivery from current-generation Claude UserPromptSubmit/Stop/Notification or Codex notify before screen heuristics. New/queue/send return success with an uncertainty warning; watch resolves within delivery_confirm_s (60 s) and notifies once on timeout. Later work, turn completion or a completed canonical report clears needs-attention and unblocks report consumers. Adapter delivery/working patterns are configurable.
@@ -100,10 +375,6 @@ Versions 0.1.0 to 0.7.0 correspond to pull requests #1 to #7; their dates are th
 - Keep question content local by default: `notify.ntfy.include_question: false` sends only opening instructions and manager/Remote Control hints to ntfy. Explicit `true` enables clipped question text. Live config reload also redacts queued question retries; local notifications, board, peek and status/MCP retain their content.
 - Compile a distributable JavaScript package into dist; update runtime self commands, package version lookup, MCP process detection and the updater build step.
 - Keep phone and manager live suites separate; add collapsed-question live checks through the isolated harness.
-
-## [Unreleased]
-
-Nothing yet.
 
 ## [0.14.0] - 2026-11-02
 
@@ -365,7 +636,8 @@ Pull request #1: iteration 1, core and CLI.
 - Task states (`working`, `waiting`, `needs-trust`, `report-ready`, `dead`) and folder-trust detection.
 - Per-provider window limits, the `review_of` cross-review rule, an optional mirror of the reports.
 
-[Unreleased]: https://github.com/Setech-pl/agentctl/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/Setech-pl/agentctl/compare/v0.18.2...HEAD
+[0.18.2]: https://github.com/Setech-pl/agentctl/compare/v0.18.0...v0.18.2
 [0.11.0]: https://github.com/Setech-pl/agentctl/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/Setech-pl/agentctl/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/Setech-pl/agentctl/compare/v0.8.0...v0.9.0

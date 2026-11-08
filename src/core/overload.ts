@@ -1,13 +1,10 @@
+import { recoveryGuard } from './recovery.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Context } from './context.ts';
 import type { StatusRow } from './status.ts';
-import { collectStatus } from './status.ts';
 import type { Notifier } from './notify.ts';
-import { classifyScreen, inputVisible } from './state.ts';
-import { screenMetadata } from './tmux.ts';
 import { recordJournal } from './journal.ts';
-import { readTaskRecord } from './taskstore.ts';
 import { errorMessage } from './util.ts';
 
 interface Retry { since: number; firstAt: number; attempts: number; attention?: boolean; workingSince?: number }
@@ -43,16 +40,7 @@ export async function overloadTick(ctx: Context, rows: StatusRow[], notifier: No
       continue;
     }
     if (now - r.since < settings.retryAfter * 1000) continue;
-    const guard = async (phase: 'before-paste' | 'before-enter'): Promise<boolean> => {
-      const fresh = (await collectStatus(ctx, { progress: false })).find(t => t.task === row.task);
-      const record = readTaskRecord(ctx.config, row.windowName);
-      if (!fresh || fresh.finished || fresh.window !== 'alive' || fresh.windowId !== row.windowId || fresh.state !== 'overloaded' || fresh.report === 'yes' || fresh.reportCandidate || !record || record.reportCandidate || record.pulled || record.summaryDelivered || (record.report && fs.existsSync(record.report))) return false;
-      const captured = await ctx.tmux.capture(row.windowName, undefined, undefined, row.windowId ?? undefined);
-      if (captured.code !== 0 || !['claude', 'codex'].includes(row.agent)) return false;
-      const agent = ctx.config.agents[row.agent as 'claude' | 'codex'];
-      const draft = screenMetadata(captured.stdout).draft_input;
-      return !agent.backgroundPatterns.some(p => new RegExp(p, 'im').test(captured.stdout)) && classifyScreen(captured.stdout, agent) === 'overloaded' && inputVisible(captured.stdout, agent) && (!draft || (phase === 'before-enter' && draft === settings.message));
-    };
+    const guard = (phase: 'before-paste' | 'before-enter') => recoveryGuard(ctx, row, ['overloaded'], ['overloaded'], settings.message, phase);
     try {
       if (!await guard('before-paste')) continue;
       r.attempts++; r.since = now; await persist();

@@ -1,13 +1,16 @@
+import { fileVersion } from './file-version.ts';
+import { withFileLock, withFileLockSync, taskLock } from './file-lock.ts';
+import { noteStateWriteFailure, atomicWriteFile } from './atomic-file.ts';
 import { attemptFields } from './report-state.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import YAML from 'yaml';
 import type { Runner } from './runner.ts';
 import { AGENT_NAMES, EFFORTS } from './config.ts';
-import type { AgentName, Effort, GlobalConfig, Link } from './config.ts';
-import type { ResolvedRepo, ResolvedSpec } from './spec.ts';
+import type { AgentName, Effort, GlobalConfig, Link, ReviewSettings } from './config.ts';
+import type { ResolvedRepo, ResolvedSpec, AutoReviewSource } from './spec.ts';
 import type { Order } from './equivalents.ts';
-import { isObject } from './util.ts';
+import { isObject, windowName } from './util.ts';
 
 /** Agent, model and effort are "unknown" for a task restored with `agentctl adopt` without those flags. */
 export type RecordAgent = AgentName | 'unknown';
@@ -15,6 +18,8 @@ export type RecordEffort = Effort | 'unknown';
 
 /** What agentctl remembers about a task: the YAML header of `<state_dir>/<task>/TASK.md`. */
 export interface TaskRecord {
+  weight?: 'normal' | 'heavy';
+  autoReview?: AutoReviewSource;
   task: string;
   window: string;
   /**
@@ -30,6 +35,7 @@ export interface TaskRecord {
   links: Link[];
   env: Record<string, string>;
   reviewOf?: string;
+  review?: ReviewSettings;
   /** The cohort of the task (display name, as the cohort was first written). Absent: no cohort. */
   cohort?: string;
   report: string;
@@ -39,7 +45,22 @@ export interface TaskRecord {
   reportSource?: string;
   reportConfirmed?: string;
   pendingPrompt?: string;
-  promptDelivery?: 'launching' | 'pending' | 'sending' | 'confirming' | 'sent' | 'needs-attention';
+  promptKind?: 'initial' | 'followup';
+  deliveryWasBusy?: boolean;
+  promptDelivery?: 'launching' | 'pending' | 'sending' | 'confirming' | 'sent' | 'needs-attention' | 'needs-input';
+  /** Delivery result: delivered, unconfirmed screen queue, confirmed transcript queue (pending until injection), paste still in the field, or withdrawn after the delivery began (stale). */
+  deliveryResult?: 'delivered' | 'queued-in-agent' | 'queued-in-agent-confirmed' | 'not-delivered-in-field' | 'stale';
+  /** Identity of the input-field area right after our paste ("image:<digest>", see input-field.ts). It is also the record that agentctl pasted for this delivery: `send --enter-only` presses Enter only for an area that is, byte for byte, this one. */
+  deliveryField?: string;
+  /** What confirmed the delivery: hook, transcript, transcript-queue (Claude took it into its queue), screen (an idle agent started working) or report. */
+  deliverySource?: string;
+  /** The agent's queue sign was on the screen just before our last Enter: then it proves nothing about the message that Enter sent. */
+  deliveryQueueSign?: boolean;
+  /** Enter presses of this delivery and the time of the last one. */
+  deliveryEnters?: number;
+  deliveryEnterAt?: string;
+  /** How many lines of the screen already echoed the start of the prompt when the delivery began. */
+  deliveryEchoBaseline?: number;
   deliveryId?: string;
   deliveryStartedAt?: string;
   deliveryReportBaseline?: string;
@@ -56,12 +77,16 @@ export interface TaskRecord {
   started: string;
   attempt?: number;
   attemptId?: string;
+  /** The version of the outputs protocol that the agent of this attempt was told to follow (absent: the attempt predates it). */
+  outputsProtocol?: number;
   attemptStarted?: string;
   attemptReportBaseline?: string;
   turnEndedAt?: string;
   summaryDelivered?: string;
   /** The order as written in the spec; agent/model/effort above are what actually runs. */
   requested: Order;
+  observed?: { model: string; effort: string; cliVersion: string };
+  observedWarning?: string;
   switchedBy?: 'flag' | 'limit';
   /** ISO timestamp of the last `pull --ready` that took the report. */
   pulled?: string;
@@ -109,6 +134,7 @@ export function taskFile(config: GlobalConfig, window: string): string {
 
 export function recordFromSpec(spec: ResolvedSpec, config: GlobalConfig, startedMs: number): TaskRecord {
   const record: TaskRecord = {
+    weight: spec.weight,
     task: spec.task,
     window: spec.window,
     session: config.session,
@@ -125,6 +151,8 @@ export function recordFromSpec(spec: ResolvedSpec, config: GlobalConfig, started
   Object.assign(record, attemptFields(record, startedMs));
   if (spec.switchedBy) record.switchedBy = spec.switchedBy;
   if (spec.reviewOf) record.reviewOf = spec.reviewOf;
+  if (spec.review) record.review = spec.review;
+  if (spec.autoReview) record.autoReview = spec.autoReview;
   if (spec.pin) record.pin = true;
   if (spec.remoteControl) record.remoteControl = true;
   if (spec.cohort) record.cohort = spec.cohort;
@@ -144,14 +172,22 @@ export function renderTaskMd(record: TaskRecord, prompt: string): string {
     model: record.model,
     effort: record.effort,
     requested: record.requested,
+    ...(record.observed ? { observed: record.observed } : {}),
+    ...(record.observedWarning ? { observed_warning: record.observedWarning } : {}),
     repos: record.repos,
     links: record.links,
     env: record.env,
   };
+  if (record.weight) header.weight = record.weight;
   if (record.reviewOf) header.review_of = record.reviewOf;
+  if (record.review) header.review = record.review;
+  if (record.autoReview) header.auto_review = record.autoReview;
   if (record.switchedBy) header.switched_by = record.switchedBy;
   if (record.cohort) header.cohort = record.cohort;
-  for (const [key, value] of Object.entries({ delivery_output_baseline: record.deliveryOutputBaseline, delivery_id: record.deliveryId, delivery_started_at: record.deliveryStartedAt, delivery_report_baseline: record.deliveryReportBaseline, report_confirmed: record.reportConfirmed, pending_prompt: record.pendingPrompt, prompt_delivery: record.promptDelivery, prompt_sent_at: record.promptSentAt, prompt_error: record.promptError })) if (value !== undefined) header[key] = value;
+  for (const [key, value] of Object.entries({ delivery_output_baseline: record.deliveryOutputBaseline, delivery_id: record.deliveryId, delivery_started_at: record.deliveryStartedAt, delivery_report_baseline: record.deliveryReportBaseline, report_confirmed: record.reportConfirmed, pending_prompt: record.pendingPrompt, prompt_delivery: record.promptDelivery, prompt_sent_at: record.promptSentAt, prompt_error: record.promptError, delivery_result: record.deliveryResult, delivery_field: record.deliveryField, delivery_source: record.deliverySource, delivery_enters: record.deliveryEnters, delivery_enter_at: record.deliveryEnterAt, delivery_echo_baseline: record.deliveryEchoBaseline })) if (value !== undefined) header[key] = value;
+  if (record.promptKind) header.prompt_kind = record.promptKind;
+  if (record.deliveryWasBusy !== undefined) header.delivery_was_busy = record.deliveryWasBusy;
+  if (record.deliveryQueueSign !== undefined) header.delivery_queue_sign = record.deliveryQueueSign;
   header.report = record.report;
   if (record.reportAlt && record.reportAlt.length > 0) header.report_alt = record.reportAlt;
   if (record.agentCliVersion) header.agent_cli_version = record.agentCliVersion;
@@ -161,7 +197,7 @@ export function renderTaskMd(record: TaskRecord, prompt: string): string {
   if (record.reportCopied) header.report_copied = record.reportCopied;
   if (record.reportSourceMtime) header.report_source_mtime = record.reportSourceMtime;
   header.started = record.started;
-  for (const [key, value] of Object.entries({ attempt: record.attempt, attempt_id: record.attemptId, attempt_started: record.attemptStarted, attempt_report_baseline: record.attemptReportBaseline, turn_ended_at: record.turnEndedAt, summary_delivered: record.summaryDelivered })) if (value !== undefined) header[key] = value;
+  for (const [key, value] of Object.entries({ attempt: record.attempt, attempt_id: record.attemptId, outputs_protocol: record.outputsProtocol, attempt_started: record.attemptStarted, attempt_report_baseline: record.attemptReportBaseline, turn_ended_at: record.turnEndedAt, summary_delivered: record.summaryDelivered })) if (value !== undefined) header[key] = value;
   if (record.pulled) header.pulled = record.pulled;
   if (record.adopted) header.adopted = record.adopted;
   if (record.pin) header.pin = true;
@@ -204,7 +240,7 @@ export function readTaskPrompt(config: GlobalConfig, window: string): string | u
   const match = /^---\n[\s\S]*?\n---(?:\n|$)/.exec(text.replace(/\r\n/g, '\n'));
   if (!match) return undefined;
   const body = text.replace(/\r\n/g, '\n').slice(match[0].length);
-  return body.split(/\n\n## Follow-up sent /)[0]?.trim();
+  return body.split(/\n\n## Follow-up (?:sent|queued|pasted, unconfirmed) /)[0]?.trim();
 }
 
 export function parseTaskRecord(text: string): TaskRecord | undefined {
@@ -238,13 +274,23 @@ export function parseTaskRecord(text: string): TaskRecord | undefined {
     model: record.model,
     effort: record.effort === 'unknown' ? 'high' : record.effort,
   };
-  for (const [key, field] of [['delivery_output_baseline', 'deliveryOutputBaseline'], ['delivery_id', 'deliveryId'], ['delivery_started_at', 'deliveryStartedAt'], ['delivery_report_baseline', 'deliveryReportBaseline'], ['report_confirmed', 'reportConfirmed'], ['pending_prompt', 'pendingPrompt'], ['prompt_sent_at', 'promptSentAt'], ['prompt_error', 'promptError']] as const) if (typeof data[key] === 'string') record[field] = data[key];
-  if (['launching', 'pending', 'sending', 'confirming', 'sent', 'needs-attention'].includes(String(data.prompt_delivery))) record.promptDelivery = data.prompt_delivery as TaskRecord['promptDelivery'];
+  if (isObject(data.observed) && typeof data.observed.model === 'string' && typeof data.observed.effort === 'string' && typeof data.observed.cliVersion === 'string') record.observed = data.observed as TaskRecord['observed'];
+  if (typeof data.observed_warning === 'string') record.observedWarning = data.observed_warning;
+  for (const [key, field] of [['delivery_output_baseline', 'deliveryOutputBaseline'], ['delivery_id', 'deliveryId'], ['delivery_started_at', 'deliveryStartedAt'], ['delivery_report_baseline', 'deliveryReportBaseline'], ['report_confirmed', 'reportConfirmed'], ['pending_prompt', 'pendingPrompt'], ['prompt_sent_at', 'promptSentAt'], ['prompt_error', 'promptError'], ['delivery_field', 'deliveryField'], ['delivery_source', 'deliverySource'], ['delivery_enter_at', 'deliveryEnterAt']] as const) if (typeof data[key] === 'string') record[field] = data[key];
+  if (['delivered', 'queued-in-agent', 'queued-in-agent-confirmed', 'not-delivered-in-field', 'stale'].includes(String(data.delivery_result))) record.deliveryResult = data.delivery_result as TaskRecord['deliveryResult'];
+  for (const [key, field] of [['delivery_enters', 'deliveryEnters'], ['delivery_echo_baseline', 'deliveryEchoBaseline']] as const) if (typeof data[key] === 'number') record[field] = data[key];
+  if (['launching', 'pending', 'sending', 'confirming', 'sent', 'needs-attention', 'needs-input'].includes(String(data.prompt_delivery))) record.promptDelivery = data.prompt_delivery as TaskRecord['promptDelivery'];
+  if (data.prompt_kind === 'initial' || data.prompt_kind === 'followup') record.promptKind = data.prompt_kind;
+  if (typeof data.delivery_was_busy === 'boolean') record.deliveryWasBusy = data.delivery_was_busy;
+  if (typeof data.delivery_queue_sign === 'boolean') record.deliveryQueueSign = data.delivery_queue_sign;
   if (typeof data.attempt === 'number') record.attempt = data.attempt;
+  if (typeof data.outputs_protocol === 'number') record.outputsProtocol = data.outputs_protocol;
   for (const [key, field] of [['attempt_id', 'attemptId'], ['attempt_started', 'attemptStarted'], ['attempt_report_baseline', 'attemptReportBaseline'], ['turn_ended_at', 'turnEndedAt'], ['summary_delivered', 'summaryDelivered']] as const) if (typeof data[key] === 'string') record[field] = data[key];
   if (typeof data.window_id === 'string' && /^@\d+$/.test(data.window_id)) record.windowId = data.window_id;
   if (data.switched_by === 'flag' || data.switched_by === 'limit') record.switchedBy = data.switched_by;
   if (typeof data.review_of === 'string') record.reviewOf = data.review_of;
+  if (isObject(data.review)) record.review = data.review as ReviewSettings;
+  if (isObject(data.auto_review)) record.autoReview = data.auto_review as unknown as AutoReviewSource;
   if (typeof data.cohort === 'string' && data.cohort !== '') record.cohort = data.cohort;
   if (Array.isArray(data.report_alt) && data.report_alt.every((x: unknown) => typeof x === 'string')) record.reportAlt = data.report_alt as string[];
   if (typeof data.agent_cli_version === 'string') record.agentCliVersion = data.agent_cli_version;
@@ -256,6 +302,7 @@ export function parseTaskRecord(text: string): TaskRecord | undefined {
   if (typeof data.pulled === 'string') record.pulled = data.pulled;
   if (typeof data.adopted === 'string') record.adopted = data.adopted;
   if (data.pin === true) record.pin = true;
+  if (data.weight === 'heavy' || data.weight === 'normal') record.weight = data.weight;
   if (data.remote_control === true) record.remoteControl = true;
   if (typeof data.superseded_by === 'string') record.supersededBy = data.superseded_by;
   if (typeof data.continues === 'string') record.continues = data.continues;
@@ -313,13 +360,98 @@ export function listArchivedRecords(config: GlobalConfig): TaskRecord[] {
   return recordsIn(archiveDir(config));
 }
 
+/** One scan of both record stores. */
+export interface RecordScan {
+  current: TaskRecord[];
+  archived: TaskRecord[];
+  all: TaskRecord[];
+}
+
+interface CachedRecordFile {
+  version: string | undefined;
+  record: TaskRecord | undefined;
+}
+
+/** Parsed TASK.md files per scanned directory; an unchanged file (same reusable high-resolution file version) is not read again. */
+const recordScanCache = new Map<string, Map<string, CachedRecordFile>>();
+
+/** Yield every 25 folders so a long scan does not block the event loop (the board shares it with key handling). */
+const SCAN_CHUNK = 25;
+
+async function scanRecordsIn(dir: string): Promise<TaskRecord[]> {
+  let files = recordScanCache.get(dir);
+  if (!files) {
+    files = new Map();
+    recordScanCache.set(dir, files);
+  }
+  let names: string[] = [];
+  try {
+    names = fs.readdirSync(dir).sort();
+  } catch {
+    names = [];
+  }
+  const prefix = `${dir}${path.sep}`;
+  const seen = new Set<string>();
+  const records: TaskRecord[] = [];
+  let done = 0;
+  for (const name of names) {
+    const file = path.join(dir, name, 'TASK.md');
+    seen.add(file);
+    let st: fs.BigIntStats | undefined;
+    try {
+      st = fs.lstatSync(file, { bigint: true });
+    } catch {
+      files.delete(file);
+    }
+    if (st) {
+      const version = fileVersion(st);
+      const hit = files.get(file);
+      if (version !== undefined && hit?.version === version) {
+        if (hit.record) records.push(hit.record);
+      } else {
+        let record: TaskRecord | undefined;
+        try {
+          record = parseTaskRecord(fs.readFileSync(file, 'utf8'));
+        } catch {
+          record = undefined;
+        }
+        files.set(file, { version, record });
+        if (record) records.push(record);
+      }
+    }
+    if (++done % SCAN_CHUNK === 0) await new Promise((resolve) => setImmediate(resolve));
+  }
+  for (const key of files.keys()) if (key.startsWith(prefix) && !seen.has(key)) files.delete(key);
+  return records;
+}
+
+/**
+ * The records of both stores with an in-process cache: unchanged TASK.md files are not read or parsed again. The board calls
+ * this on every refresh and hands the one list to every consumer; one-shot commands keep listTaskRecords/listArchivedRecords.
+ * Callers must not mutate the returned records: they are the cache (collectStatus works on copies).
+ */
+export async function snapshotRecords(config: GlobalConfig): Promise<RecordScan> {
+  const current = await scanRecordsIn(config.stateDir);
+  const archived = await scanRecordsIn(archiveDir(config));
+  return { current, archived, all: [...current, ...archived] };
+}
+
+/** A task by its ID (any case), current first, else in the archive: one lookup for everything that needs "the record of that task". */
+export function findRecordAnywhere(config: GlobalConfig, task: string): TaskRecord | undefined {
+  const wanted = task.toLowerCase();
+  return readTaskRecord(config, windowName(task)) ?? listTaskRecords(config).find((r) => r.task.toLowerCase() === wanted) ?? listArchivedRecords(config).find((r) => r.task.toLowerCase() === wanted);
+}
+
 /** Set one key in the YAML header of an existing TASK.md; the body (prompt, follow-ups) and the other keys stay as they are. */
 export async function setHeaderField(runner: Runner, file: string, key: string, value: string | number | boolean | null): Promise<boolean> {
   return setHeaderFields(runner, file, { [key]: value });
 }
 
 /** Set several keys of the header in one write; `null` removes the key. */
-export async function setHeaderFields(runner: Runner, file: string, fields: Record<string, string | number | boolean | null>): Promise<boolean> {
+export async function setHeaderFields(runner: Runner, file: string, fields: Record<string, string | number | boolean | null | NonNullable<TaskRecord['observed']>>): Promise<boolean> {
+  let entered = false;
+  const change = async () => {
+  entered = true;
   let text: string;
   try {
     text = fs.readFileSync(file, 'utf8');
@@ -334,8 +466,13 @@ export async function setHeaderFields(runner: Runner, file: string, fields: Reco
     else doc.set(key, value);
   }
   const rest = text.replace(/\r\n/g, '\n').slice(match[0].length);
-  await runner.writeFile(file, `---\n${doc.toString().trimEnd()}\n---${rest}`);
+  // Known writes invalidate even if a filesystem preserves its metadata tuple.
+  recordScanCache.get(path.dirname(path.dirname(file)))?.delete(file);
+  try { await runner.writeFile(file, `---\n${doc.toString().trimEnd()}\n---${rest}`); }
+  catch (error) { noteStateWriteFailure(file, error); throw error; }
   return true;
+  };
+  try { return runner.dryRun ? await change() : await withFileLock(taskLock(file), change); } catch (error) { if (!entered) noteStateWriteFailure(file, error); throw error; }
 }
 
 /** Names of the files that are agentctl state, not agent output: moved out of the cache by the migration. */
@@ -374,13 +511,12 @@ export function migrateLegacyState(config: GlobalConfig): string[] {
       const from = path.join(legacyDir, file);
       const to = path.join(target, file);
       if (!fs.existsSync(from) || fs.existsSync(to)) continue;
-      try {
-        fs.renameSync(from, to);
-      } catch {
-        fs.copyFileSync(from, to);
-        fs.rmSync(from);
-      }
-      moved.push(file);
+      const copied = withFileLockSync(taskLock(to), () => {
+        if (!fs.existsSync(from) || fs.existsSync(to)) return false;
+        atomicWriteFile(to, fs.readFileSync(from)); fs.rmSync(from);
+        return true;
+      });
+      if (copied) moved.push(file);
     }
     messages.push(`migration: moved ${moved.join(' and ')} of ${name} from ${legacyDir} to ${target} (agentctl state now lives outside the agents' directories)`);
   }

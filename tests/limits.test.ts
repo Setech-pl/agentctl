@@ -61,19 +61,45 @@ describe('limits: editing config.yaml', () => {
     void ctx;
   });
 
-  it('adds a limits section to a config without one, and off removes a limit', async () => {
+  it('adds a limits section to a config without one, and 0 removes a limit', async () => {
     const config = makeConfig(scratch.sub('add'), '# nothing yet\n');
     const disk = new Context(new DiskRunner({ dryRun: false }), config, () => {});
     await applySetLimits(disk, planSetLimits(config, parseAssignments(['claude=4'])));
     const reloaded = loadGlobalConfig(path.dirname(config.path));
     assert.equal(reloaded.limits.claude, 4);
     assert.match(fs.readFileSync(config.path, 'utf8'), /# nothing yet/);
-    await applySetLimits(new Context(new DiskRunner({ dryRun: false }), reloaded, () => {}), planSetLimits(reloaded, parseAssignments(['claude=off'])));
+    await applySetLimits(new Context(new DiskRunner({ dryRun: false }), reloaded, () => {}), planSetLimits(reloaded, parseAssignments(['claude=0'])));
     assert.equal(loadGlobalConfig(path.dirname(config.path)).limits.claude, undefined);
   });
 
+  it('off disables a provider: written as off, shown in limits, and nothing of it starts', async () => {
+    const config = makeConfig(scratch.sub('off'), '# nothing yet\n');
+    const disk = new Context(new DiskRunner({ dryRun: false }), config, () => {});
+    await applySetLimits(disk, planSetLimits(config, parseAssignments(['claude=off'])));
+    const reloaded = loadGlobalConfig(path.dirname(config.path));
+    assert.equal(reloaded.limits.claude, 'off');
+    assert.match(fs.readFileSync(config.path, 'utf8'), /claude: off/);
+    const report = collectLimits(reloaded, []);
+    assert.equal(report.providers.find((p) => p.agent === 'claude')?.limit, 'off');
+    assert.equal(report.providers.find((p) => p.agent === 'claude')?.free, 0);
+    assert.match(renderLimits(report).join('\n'), /claude\s+off/);
+    const entry: QueueEntry = { seq: 1, task: 'NC-9', order: 1, priority: 'normal', status: 'queued', queuedAt: '', agent: 'claude', model: 'opus', effort: 'high', after: [], spec: '' };
+    const view = describeQueue(reloaded, [entry], [], [])[0];
+    assert.equal(view?.condition.kind, 'slot');
+    assert.match(view?.condition.text ?? '', /claude jest wyłączony \(limits\.claude: off\)/);
+    // 0 is the historic spelling of "no limit"; the key disappears
+    await applySetLimits(new Context(new DiskRunner({ dryRun: false }), reloaded, () => {}), planSetLimits(reloaded, parseAssignments(['claude=0'])));
+    assert.equal(loadGlobalConfig(path.dirname(config.path)).limits.claude, undefined);
+  });
+
+  it('limits.claude: 0 in config.yaml means no limit; off disables', () => {
+    assert.equal(makeConfig(scratch.sub('zero'), 'limits: {claude: 0}\n').limits.claude, undefined);
+    assert.equal(makeConfig(scratch.sub('off-yaml'), 'limits: {claude: off}\n').limits.claude, 'off');
+    assert.throws(() => makeConfig(scratch.sub('neg'), 'limits: {claude: -1}\n'), /limits\.claude/);
+  });
+
   it('refuses a bad argument and a config with broken YAML', () => {
-    assert.throws(() => parseAssignments(['claude=0']), /1 or more/);
+    assert.throws(() => parseAssignments(['claude=-1']));
     assert.throws(() => parseAssignments(['gemini=2']), /not claude=N or codex=N/);
     assert.throws(() => parseAssignments([]), /give the new limits/);
     const config = makeConfig(scratch.sub('broken'));
@@ -97,7 +123,10 @@ describe('limits: editing config.yaml', () => {
     const yes = await runCli(config, new DiskRunner({ dryRun: false }), ['limits', 'set', 'claude=1', 'codex=off', '-y']);
     assert.equal(yes.code, 0, yes.stderr);
     const now = loadGlobalConfig(path.dirname(config.path));
-    assert.deepEqual(now.limits, { claude: 1 });
+    assert.deepEqual(now.limits, { claude: 1, codex: 'off' });
+    const again = await runCli(config, new DiskRunner({ dryRun: false }), ['limits', 'set', 'codex=0', '-y']);
+    assert.equal(again.code, 0, again.stderr);
+    assert.deepEqual(loadGlobalConfig(path.dirname(config.path)).limits, { claude: 1 });
   });
 });
 
@@ -251,6 +280,18 @@ describe('limits: MCP and board', () => {
     const audit = fs.readFileSync(auditPath(s.config), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
     assert.deepEqual(audit.map((a: { tool: string; outcome: string }) => `${a.tool}:${a.outcome}`), ['set_limits:denied', 'set_limits:requested', 'set_limits:preview', 'set_limits:requested', 'set_limits:done']);
     assert.equal((await s.call('set_limits', { confirm: true })).isError, true);
+  });
+
+  it('set_limits accepts "off": the provider is disabled until the limit returns', async () => {
+    const s = mcpSetup('mcp-off', 'mcp:\n  allow: [set_limits]\nlimits:\n  claude: 3\n');
+    const preview = await s.call('set_limits', { claude: 'off' });
+    assert.match(preview.text, /limits\.claude: 3 -> off \(disabled\)/);
+    const done = await s.call('set_limits', { claude: 'off', confirm: true });
+    assert.match(done.text, /claude 3 -> off/);
+    assert.equal(loadGlobalConfig(path.dirname(s.config.path)).limits.claude, 'off');
+    const back = await s.call('set_limits', { claude: 0, confirm: true });
+    assert.equal(back.isError, undefined);
+    assert.equal(loadGlobalConfig(path.dirname(s.config.path)).limits.claude, undefined);
   });
 
   it('reserve and release go through a summary and confirm: true', async () => {

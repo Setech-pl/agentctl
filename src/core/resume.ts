@@ -1,8 +1,12 @@
+import { writeLaunchScript } from './launch-script.ts';
+import { validateLaunch, launchEnvironment } from './safety.ts';
+import { provider, isActive } from './providers/registry.ts';
+import { withStartLock, reserveStarts, releaseStarts } from './start-lock.ts';
 import { queuePrompt, deliverPendingPrompt } from './prompt-delivery.ts';
 import { waitForReady } from './ready.ts';
 import { attemptFields } from './report-state.ts';
 import fs from 'node:fs';
-import { agentCommandLine, buildResumeArgv, reportInstructions } from './agents.ts';
+import { buildResumeArgv, reportInstructions } from './agents.ts';
 import { checkWindowLimit } from './checks.ts';
 import type { LiveWindow } from './checks.ts';
 import type { AgentName } from './config.ts';
@@ -13,10 +17,11 @@ import { liveWindows } from './plan.ts';
 import { matchTask } from './resolve.ts';
 import { collectStatus } from './status.ts';
 import type { StatusRow } from './status.ts';
-import { readTaskRecord, setHeaderField, setHeaderFields, taskFile } from './taskstore.ts';
+import { readTaskRecord, setHeaderField, setHeaderFields, taskDir, taskFile } from './taskstore.ts';
 import type { TaskRecord } from './taskstore.ts';
 import { readTaskSessions } from './usage.ts';
-import { AgentctlError } from './util.ts';
+import { assertAgentSpawnAllowed, openAgentWindow } from './window-guard.ts';
+import { AgentctlError, plural } from './util.ts';
 
 /*
  * `agentctl resume`: after a restart of the Mac (or a killed tmux server) the tasks that were at work have a worktree and no window.
@@ -50,7 +55,7 @@ export async function findResumable(ctx: Context, opts: { all?: boolean; rows?: 
     const hasReport = row.report === 'yes';
     if (hasReport && !opts.all) continue;
     const sessions = readTaskSessions(ctx.config, record.window);
-    const sessionId = (record.agent === 'claude' ? sessions.claude : sessions.codex).at(-1)?.id;
+    const sessionId = (sessions[record.agent] ?? []).at(-1)?.id;
     out.push({ task: row.task, window: record.window, agent: record.agent, model: record.model, effort: record.effort, worktree, ...(sessionId ? { sessionId } : {}), hasReport });
   }
   return out;
@@ -80,6 +85,8 @@ export async function planResume(ctx: Context, typed: string[], opts: { all?: bo
   const items: ResumeCandidate[] = [];
   const occupied: LiveWindow[] = await liveWindows(ctx);
   for (const c of chosen) {
+    if (!isActive(config, c.agent)) { skipped.push({ task: c.task, reason: `provider ${c.agent} is not enabled` }); continue; }
+    if (occupied.some(w => w.window === c.window)) { skipped.push({ task: c.task, reason: 'task is already starting or running' }); continue; }
     const problem = checkWindowLimit(c.agent, config.limits[c.agent], occupied, config.session);
     if (problem) {
       skipped.push({ task: c.task, reason: problem });
@@ -90,7 +97,7 @@ export async function planResume(ctx: Context, typed: string[], opts: { all?: bo
   }
   const summary = [
     items.length === 0 ? 'Nothing to resume.' : `Resume ${items.length} task${items.length === 1 ? '' : 's'}:`,
-    ...items.map((c) => `  ${c.task}  ${c.agent}/${c.model}/${c.effort}  ${c.sessionId ? `session ${c.sessionId.slice(0, 8)}` : c.agent === 'claude' ? '--continue' : 'resume --last'}  in ${c.worktree}${c.hasReport ? '  (has a report)' : ''}`),
+    ...items.map((c) => `  ${c.task}  ${c.agent}/${c.model}/${c.effort}  ${c.sessionId ? `session ${c.sessionId.slice(0, 8)}` : provider(c.agent).resumeLabel()}  in ${c.worktree}${c.hasReport ? '  (has a report)' : ''}`),
     ...skipped.map((s) => `  skipped ${s.task}: ${s.reason}`),
   ];
   return { items, skipped, summary };
@@ -103,34 +110,55 @@ export interface ResumeResult {
 
 /** Make the windows and start the agents in resume mode. The prompt is not pasted again. Stops at the first failure and says which tasks went. */
 export async function resumeTasks(ctx: Context, plan: ResumePlan, opts: { self?: SelfArgv | undefined } = {}): Promise<ResumeResult[]> {
+  if (ctx.runner.dryRun) return startResumed(ctx, plan, opts);
+  const admission = await withStartLock(ctx, async () => {
+    const fresh = await planResume(ctx, plan.items.map(c => c.task), { all: true });
+    const wanted = new Set(plan.items.map(c => c.task));
+    fresh.items = fresh.items.filter(c => wanted.has(c.task));
+    return { plan: fresh, ids: await reserveStarts(ctx, fresh.items) };
+  });
+  try { return await startResumed(ctx, admission.plan, opts); }
+  finally { await releaseStarts(ctx, admission.ids); }
+}
+async function startResumed(ctx: Context, plan: ResumePlan, opts: { self?: SelfArgv | undefined }): Promise<ResumeResult[]> {
   const { tmux, runner, config } = ctx;
   const results: ResumeResult[] = [];
   let sessionUp = await tmux.hasSession();
   for (const c of plan.items) {
     const record = readTaskRecord(config, c.window) as TaskRecord;
+    // Before the attempt is written into the record: a refused resume leaves it as it was.
+    assertAgentSpawnAllowed(ctx, { task: c.task, report: record.report, repos: record.repos, reviewOf: record.reviewOf, autoReview: record.autoReview, origin: 'resume' });
+    const order = { agent: c.agent, model: c.model, effort: c.effort as import('./config.ts').Effort, task: c.task };
+    validateLaunch(config, order, record.env);
     const attempt = attemptFields(record, runner.now());
     Object.assign(record, attempt);
-    await setHeaderFields(runner, taskFile(config, c.window), { attempt: attempt.attempt, attempt_id: attempt.attemptId, attempt_started: attempt.attemptStarted, attempt_report_baseline: attempt.attemptReportBaseline, turn_ended_at: null, report_candidate: null, pulled: null, summary_delivered: null, report_complete_hash: null });
-    const wiring = config.notify.events && opts.self ? planEventWiring({ agent: c.agent, task: c.task, window: c.window, config, self: opts.self, env: record.env, worktree: c.worktree }) : undefined;
-    for (const file of wiring?.files ?? []) await runner.writeFile(file.path, file.content);
-    const started = sessionUp ? await tmux.newWindow(c.window, c.worktree, record.env) : await tmux.newSession(c.window, c.worktree, record.env);
+    await withStartLock(ctx, () => setHeaderFields(runner, taskFile(config, c.window), { attempt: attempt.attempt, attempt_id: attempt.attemptId, attempt_started: attempt.attemptStarted, attempt_report_baseline: attempt.attemptReportBaseline, observed: null, observed_warning: null, turn_ended_at: null, report_candidate: null, pulled: null, summary_delivered: null, report_complete_hash: null }));
+    const wiring = config.notify.events && opts.self ? planEventWiring({ attempt: record.attemptId, agent: c.agent, task: c.task, window: c.window, config, self: opts.self, env: record.env, worktree: c.worktree }) : undefined;
+    for (const file of wiring?.files ?? []) {
+      await runner.writeFile(file.path, file.content);
+      if (file.path.endsWith('.sh')) {
+        const protectedFile = await runner.exec('chmod', ['0700', file.path]);
+        if (protectedFile.code !== 0) throw new Error(`Cannot protect event script: ${file.path}`);
+      }
+    }
+    const command = await writeLaunchScript(runner, taskDir(config, c.window), buildResumeArgv({ agent: c.agent, model: c.model, effort: c.effort as never, task: c.task, remoteControl: record.remoteControl }, config.agents[c.agent], wiring?.args, c.sessionId), launchEnvironment(config, order, record.env));
+    const started = await openAgentWindow(ctx, { task: c.task, window: c.window, cwd: c.worktree, env: {}, report: record.report, repos: record.repos, reviewOf: record.reviewOf, autoReview: record.autoReview, origin: 'resume', sessionUp });
     if (started.code !== 0) throw new AgentctlError(`${c.task}: tmux could not make the window: ${started.stderr.trim() || `exit ${started.code}`}`, results.length > 0 ? `Resumed before it: ${results.map((r) => r.task).join(', ')}.` : undefined);
     sessionUp = true;
     const windowId = (await tmux.windows()).find((w) => w.plain === c.window)?.id;
     if (windowId) await setHeaderField(runner, taskFile(config, c.window), 'window_id', windowId);
-    const command = agentCommandLine(buildResumeArgv({ agent: c.agent, model: c.model, effort: c.effort as never, task: c.task, remoteControl: record.remoteControl }, config.agents[c.agent], wiring?.args, c.sessionId));
+
     await runner.exec('tmux', ['set-option', '-w', '-t', windowId || tmux.target(c.window), '@agentctl-role', 'task']);
     await tmux.typeCommand(c.window, command);
     const settings = config.agents[c.agent], note = reportInstructions(attempt.attemptId, record.report);
     const ready = await waitForReady(runner, tmux, c.window, { pattern: settings.readyPattern, emptyInput: true, trustPattern: settings.trustPattern, timeoutMs: Math.min(5000, settings.readyTimeout * 1000) });
     await queuePrompt(ctx, record, note);
     if (!ready.ready || await deliverPendingPrompt(ctx, c.window) !== 'sent') ctx.info(`${c.task}: report instructions pending until idle: ${note}`);
-    ctx.info(`${c.task}: window ${config.session}:${c.window} running ${command}`);
+    ctx.info(`${c.task}: window ${config.session}:${c.window} running ${c.agent} (model ${c.model}, effort ${c.effort}) via ${command}`);
     results.push({ task: c.task, command });
   }
   return results;
 }
 
-const plural = (n: number): string => (n === 1 ? 'zadanie' : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? 'zadania' : 'zadań');
-export const resumeText = (n: number): string => `${n} ${plural(n)} do wznowienia (agentctl resume)`;
+export const resumeText = (n: number): string => `${n} ${plural(n, 'zadanie', 'zadania', 'zadań')} do wznowienia (agentctl resume)`;
 

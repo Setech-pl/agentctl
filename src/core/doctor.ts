@@ -1,3 +1,8 @@
+import { socketRunner } from './tmux-socket.ts';
+import { provider, PROVIDER_IDS, isActive } from './providers/registry.ts';
+import { collectStatus } from './status.ts';
+import { inspectReport } from './report-state.ts';
+import { missingLinkTargets, projectLinks } from './links.ts';
 import { listTaskRecords, listArchivedRecords } from './taskstore.ts';
 import { collectDisk, diskLine } from './disk.ts';
 import { projectGuide } from './guide.ts';
@@ -19,7 +24,7 @@ import { blockingEnv, managerFiles, managerView, readManagerMcp, remoteControlSu
 import { isPublicServer, weakTopic } from './ntfy-setup.ts';
 import { findTerminalNotifier, notifierMemoryPath, readNotifierMemory } from './notify.ts';
 import { Tmux } from './tmux.ts';
-import { errorMessage } from './util.ts';
+import { errorMessage, safeCwd } from './util.ts';
 
 export interface Check {
   name: string;
@@ -82,12 +87,13 @@ async function managerChecks(runner: Runner, config: GlobalConfig, tmuxOk: boole
 export async function runDoctor(
   runner: Runner,
   loadConfig: () => GlobalConfig = loadGlobalConfig,
-  cwd: string | null = process.cwd(),
+  cwd: string | null | undefined = undefined,
   nodeVersion: string = process.versions.node,
   platform: string = os.platform(),
   home: string = os.homedir(),
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<Check[]> {
+  cwd = cwd === undefined ? safeCwd() : cwd;
   const checks: Check[] = [];
   const add = (name: string, status: Check['status'], detail: string): void => {
     checks.push({ name, status, detail });
@@ -118,6 +124,8 @@ export async function runDoctor(
     add('config', 'fail', `${errorMessage(e).split('\n').join(' ')}${state && !state.ok ? ` – the ${state.by} keeps the previous settings (since ${state.at})` : ''}`);
   }
 
+  runner = socketRunner(runner, () => config?.tmux?.socket);
+  add('tmux socket', 'ok', config?.tmux?.socket ?? 'default (unset)');
   const tmuxVersion = await runner.exec('tmux', ['-V'], { readOnly: true });
   if (tmuxVersion.code !== 0) add('tmux', 'fail', `not found. ${INSTALL_HINTS.tmux}`);
   else {
@@ -126,32 +134,15 @@ export async function runDoctor(
     else add('tmux', 'warn', `${v}: tmux ${MIN_TMUX.join('.')}+ is needed for per-window environment (new-window -e)`);
   }
 
-  const claude = await runner.exec('claude', ['--version'], { readOnly: true });
-  if (claude.code !== 0) add('claude', 'warn', `not found (only needed for agent: claude). ${INSTALL_HINTS.claude}`);
-  else {
-    const help = await runner.exec('claude', ['--help'], { readOnly: true });
-    const effort = /--effort\b/.test(help.stdout)
-      ? 'effort: native --effort flag'
-      : 'effort: no --effort flag in this version; set agents.claude.effort_args: [] (the prompt header still carries the effort)';
-    add('claude', 'ok', `${firstLine(claude.stdout)}; ${effort}`);
-    // Remote Control (the manager, and remote_control: true in a spec) needs these two flags and a claude.ai login without an API key or a gateway.
-    const support = remoteControlSupport(help.stdout);
-    const blocking = blockingEnv(env);
-    if (!support.remoteControl) add('claude remote control', 'warn', 'this Claude Code has no --remote-control flag in its help: agentctl manager and remote_control: true need it (claude update)');
-    else if (!support.roleFile) add('claude remote control', 'warn', 'has --remote-control, but no --append-system-prompt-file: agentctl manager cannot give the manager its role (claude update)');
-    else if (blocking.length > 0) add('claude remote control', 'warn', `has --remote-control, but ${blocking.join(', ')} ${blocking.length === 1 ? 'is' : 'are'} set here: Claude Code then refuses Remote Control (it needs a claude.ai login, not an API key or a gateway). A tmux server started from this shell has them too`);
-    else add('claude remote control', 'ok', 'has --remote-control and --append-system-prompt-file (the login is not checked: claude auth status)');
+  for (const id of PROVIDER_IDS) {
+    const adapter = provider(id);
+    if (config && !isActive(config, id)) continue;
+    const detection = await adapter.detect(runner);
+    if (config && !isActive(config, id) && !detection.found) continue;
+    for (const check of adapter.doctor(detection, env, config)) add(check.name, check.level, check.text);
   }
 
-  const codex = await runner.exec('codex', ['--version'], { readOnly: true });
-  if (codex.code !== 0) add('codex', 'warn', `not found (only needed for agent: codex). ${INSTALL_HINTS.codex}`);
-  else {
-    const help = await runner.exec('codex', ['--help'], { readOnly: true });
-    const effort = /-c, --config/.test(help.stdout)
-      ? 'effort: via -c model_reasoning_effort=<effort>'
-      : 'effort: no -c/--config flag in this version; set agents.codex.effort_args: [] (the prompt header still carries the effort)';
-    add('codex', 'ok', `${firstLine(codex.stdout)}; ${effort}`);
-  }
+  for (const warning of config?.warnings ?? []) add('providers', 'warn', warning);
 
   const gh = await runner.exec('gh', ['--version'], { readOnly: true });
   if (gh.code === 0) add('gh', 'ok', firstLine(gh.stdout));
@@ -253,9 +244,12 @@ export async function runDoctor(
       }
     } else add('mirror', 'ok', 'off (set mirror_dir in the config to enable)');
     try {
+      const reportRows = new Map((await collectStatus(new Context(runner, config, () => {}), { progress: false, archived: true })).map(r => [r.task, r]));
       const taskProcesses = (await runner.exec('ps', ['-axo', 'command='], { readOnly: true })).stdout.split('\n');
       for (const record of [...listTaskRecords(config), ...listArchivedRecords(config)]) {
-        if (!record.reportConfirmed && record.reportSource && path.normalize(record.reportSource) !== path.normalize(record.report)) add(`report ${record.task}`, 'warn', `raport pochodzi z kopii ${record.reportSource} – sprawdź`);
+        const report = inspectReport(config, record, runner.now(), !record.attemptId);
+        if (reportRows.get(record.task)?.report !== 'yes') add(`report ${record.task}`, 'warn', `${report.ready ? 'incomplete for current turn' : report.reason}: ${record.report}${record.reportSource ? ` (previous copy: ${record.reportSource})` : ''}`);
+        else if (!record.reportConfirmed && record.reportSource && path.normalize(record.reportSource) !== path.normalize(record.report)) add(`report ${record.task}`, 'warn', `raport pochodzi z kopii ${record.reportSource} – sprawdź`);
         if (record.closed || record.cancelled) continue;
         if (taskProcesses.some(command => /\/Cellar\/node(?:@[^/]+)?\//.test(command) && command.includes('--task') && command.replaceAll(/[^a-zA-Z0-9_-]+/g, ' ').split(' ').includes(record.task))) add(`task node ${record.task}`, 'warn', 'versioned Node path in active callback argv; works until Node is upgraded; regenerate task wiring when convenient');
         const dir = path.join(config.stateDir, record.window);
@@ -264,9 +258,15 @@ export async function runDoctor(
         }
       }
     } catch (e) { add('task diagnostics', 'warn', errorMessage(e)); }
+    for (const repo of new Set([...listTaskRecords(config), ...listArchivedRecords(config)].flatMap(r => r.repos.map(repo => repo.path)))) {
+      if (repo === cwd) continue;
+      try { for (const warning of missingLinkTargets(projectLinks(repo, '', config.cache))) add('project links', 'fail', `${repo}: ${warning}`); }
+      catch (e) { add('project links', 'fail', errorMessage(e)); }
+    }
     if (cwd === null) add('project', 'ok', 'bez projektu');
     else try {
       const project = loadProjectConfig(cwd);
+      for (const warning of missingLinkTargets(projectLinks(cwd, '', config.cache))) add('project links', 'fail', warning);
       for (const warning of projectGuide(cwd).warnings) add('project guide', 'warn', warning);
       add('project config', 'ok', project ? project.path : `no ${PROJECT_CONFIG_NAME} in ${path.resolve(cwd)} (optional)`);
     } catch (e) {
@@ -275,6 +275,14 @@ export async function runDoctor(
     if (tmuxVersion.code === 0) {
       const tmux = new Tmux(runner, config.session);
       const up = await tmux.hasSession();
+      const expectedHome = env.AGENTCTL_HOME ?? path.dirname(config.path);
+      const differences: string[] = [];
+      for (const scope of [['-g'], ['-t', `=${config.session}`]]) {
+        const result = await runner.exec('tmux', ['show-environment', ...scope, 'AGENTCTL_HOME'], { readOnly: true, dryResult: { code: 1 } });
+        const value = /^AGENTCTL_HOME=(.*)$/m.exec(result.stdout)?.[1];
+        if (result.code === 0 && value !== undefined && value !== expectedHome) differences.push(`${scope[0] === '-g' ? 'global' : 'session'} AGENTCTL_HOME=${value}`);
+      }
+      add('tmux home', differences.length ? 'warn' : 'ok', differences.length ? `${differences.join('; ')}; current AGENTCTL_HOME=${expectedHome}; use a dedicated tmux.socket for dev` : `AGENTCTL_HOME=${expectedHome}; no conflicting server/session value`);
       add('session', 'ok', up ? `"${config.session}" is running` : `"${config.session}" not running yet (created by "agentctl new")`);
     }
     await managerChecks(runner, config, tmuxVersion.code === 0, add);

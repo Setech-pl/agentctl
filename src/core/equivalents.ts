@@ -1,3 +1,6 @@
+import { DEFAULT_PROVIDERS, PROVIDER_IDS } from './providers/types.ts';
+import { deriveEquivalentRows } from './matrix.ts';
+import type { EquivalentRow } from './matrix.ts';
 import { EFFORTS } from './config.ts';
 import type { AgentName, Effort } from './config.ts';
 import { Problems, isObject } from './util.ts';
@@ -8,10 +11,12 @@ export interface ModelEffort {
   effort: Effort;
 }
 
-/** A pair of settings considered interchangeable between the two providers. */
+/** A pair of settings considered interchangeable between the providers. */
 export interface Equivalent {
   claude: ModelEffort;
   codex: ModelEffort;
+  kimi?: ModelEffort;
+  class?: 'light' | 'medium' | 'strong';
 }
 
 /** The order as written in a spec, or the result of translating it. */
@@ -19,15 +24,13 @@ export interface Order extends ModelEffort {
   agent: AgentName;
 }
 
-/** Built-in table. Fable and effort `max` are deliberately absent: they have no counterpart. */
-export const DEFAULT_EQUIVALENTS: { claude: string; codex: string }[] = [
-  { claude: 'haiku/low', codex: 'gpt-6-luna/medium' },
-  { claude: 'haiku/medium', codex: 'gpt-6-luna/high' },
-  { claude: 'sonnet/medium', codex: 'gpt-6.1-sol/medium' },
-  { claude: 'sonnet/high', codex: 'gpt-6.1-sol/high' },
-  { claude: 'opus/high', codex: 'gpt-6-astra/medium' },
-  { claude: 'opus/xhigh', codex: 'gpt-6-astra/xhigh' },
-];
+/**
+ * The built-in table: derived from data/model-matrix.yaml (src/core/matrix.ts), one row per non-explicit class.
+ * Fable and restricted models (gpt-6-astra, k3.1-pro*) are deliberately absent: they have no counterpart.
+ */
+export function defaultEquivalentRows(): EquivalentRow[] {
+  return deriveEquivalentRows();
+}
 
 export function formatModelEffort(m: ModelEffort): string {
   return `${m.model}/${m.effort}`;
@@ -53,7 +56,7 @@ export function parseModelEffort(value: unknown, where: string, p: Problems): Mo
   return { model, effort: effort as Effort };
 }
 
-export function parseEquivalents(v: unknown, where: string, p: Problems): Equivalent[] {
+export function parseEquivalents(v: unknown, where: string, p: Problems, ids: readonly AgentName[] = DEFAULT_PROVIDERS): Equivalent[] {
   if (v === undefined || v === null) return [];
   if (!Array.isArray(v)) {
     p.add(`${where} must be a list of {claude: "model/effort", codex: "model/effort"} pairs`);
@@ -64,18 +67,26 @@ export function parseEquivalents(v: unknown, where: string, p: Problems): Equiva
     const at = `${where}[${i}]`;
     if (!isObject(entry)) return p.add(`${at} must be a {claude, codex} mapping`);
     for (const key of Object.keys(entry)) {
-      if (key !== 'claude' && key !== 'codex') p.add(`${at}: unknown key "${key}" (allowed: claude, codex)`);
+      if (key !== 'class' && !(ids as readonly string[]).includes(key)) p.add(`${at}: unknown key "${key}" (allowed: ${ids.join(', ')})`);
     }
-    const claude = parseModelEffort(entry.claude, `${at}.claude`, p);
-    const codex = parseModelEffort(entry.codex, `${at}.codex`, p);
-    if (claude && codex) pairs.push({ claude, codex });
+    const present = ids.filter(id => entry[id] !== undefined);
+    const columns = ids.length === 2 ? ids : present;
+    if (present.length < 2 && ids.length > 2) p.add(`${at} requires at least two provider columns`);
+    if (entry.class !== undefined && !['light', 'medium', 'strong'].includes(String(entry.class))) p.add(`${at}.class must be light, medium or strong`);
+    const fields = columns.map(id => [id, parseModelEffort(entry[id], `${at}.${id}`, p)] as const);
+    if (fields.every(([, value]) => value)) pairs.push({ ...Object.fromEntries(fields), ...(entry.class ? { class: entry.class } : {}) } as unknown as Equivalent);
   });
   return pairs;
 }
 
-export function defaultEquivalents(): Equivalent[] {
+export function defaultEquivalents(ids: readonly AgentName[] = DEFAULT_PROVIDERS): Equivalent[] {
   const p = new Problems();
-  return parseEquivalents(DEFAULT_EQUIVALENTS, 'DEFAULT_EQUIVALENTS', p);
+  const table = parseEquivalents(deriveEquivalentRows(), 'DEFAULT_EQUIVALENTS', p, PROVIDER_IDS);
+  if (ids.includes('kimi')) return table;
+  return table.map((row) => {
+    const { kimi: _kimi, ...rest } = row;
+    return rest as Equivalent;
+  });
 }
 
 export type Translation = { ok: true; order: Order } | { ok: false; message: string; hint: string };
@@ -87,10 +98,10 @@ export type Translation = { ok: true; order: Order } | { ok: false; message: str
 export function translate(order: Order, target: AgentName, table: Equivalent[]): Translation {
   if (order.agent === target) return { ok: true, order };
   const here = formatModelEffort(order);
-  const pair = table.find((e) => formatModelEffort(e[order.agent]) === here);
-  if (pair) return { ok: true, order: { agent: target, ...pair[target] } };
+  const pair = table.find((e) => e[order.agent] && e[target] && formatModelEffort(e[order.agent]!) === here);
+  if (pair) return { ok: true, order: { agent: target, ...pair[target]! } };
 
-  if (order.model === 'fable' || order.effort === 'max') {
+  if (order.model.includes('fable') || order.effort === 'max') {
     return {
       ok: false,
       message: `${order.agent} ${here} has no equivalent in ${target}: fable and effort max are not mapped between providers`,
@@ -98,7 +109,7 @@ export function translate(order: Order, target: AgentName, table: Equivalent[]):
     };
   }
   const placeholder = '<model>/<effort>';
-  const line = order.agent === 'claude' ? `{claude: "${here}", codex: "${placeholder}"}` : `{claude: "${placeholder}", codex: "${here}"}`;
+  const line = `{${(target === 'kimi' || order.agent === 'kimi' ? PROVIDER_IDS : DEFAULT_PROVIDERS).map(id => `${id}: "${id === order.agent ? here : placeholder}"`).join(', ')}}`;
   return {
     ok: false,
     message: `no ${target} equivalent for ${order.agent} ${here}`,

@@ -1,3 +1,4 @@
+import { atomicAppendFile } from './atomic-file.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { GlobalConfig } from './config.ts';
@@ -12,7 +13,7 @@ export function startLogPath(config: Pick<GlobalConfig, 'path'>, name: 'board' |
 export function appendStartLog(file: string, text: string, now: number = Date.now()): void {
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.appendFileSync(file, `${new Date(now).toISOString()}  ${text}\n`);
+    atomicAppendFile(file, `${new Date(now).toISOString()}  ${text}\n`);
   } catch {
     // no log is better than a crash on start
   }
