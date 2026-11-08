@@ -60,7 +60,7 @@ await withHarness({ name: 'nc-workflow', cacheRoot: cache, config: 'watch: {inte
     }
     return { text, error: response.isError };
   };
-  const spec = (task: string, header: Record<string, unknown> = {}) => `---\n${YAML.stringify({ task, agent: 'claude', model: 'sonnet', effort: 'medium', cohort: 'NC', repos: [{ path: repo, worktree: path.join(h.root, 'wt', task.toLowerCase()), branch: task.toLowerCase(), base: 'main' }], ...header })}---\nFake work ${task}.\n`;
+  const spec = (task: string, header: Record<string, unknown> = {}) => `---\n${YAML.stringify({ task, agent: 'claude', model: 'claude-sonnet-5-5', effort: 'medium', cohort: 'NC', repos: [{ path: repo, worktree: path.join(h.root, 'wt', task.toLowerCase()), branch: task.toLowerCase(), base: 'main' }], ...header })}---\nFake work ${task}.\n`;
   const record = (task: string) => readTaskRecord(config, task.toLowerCase())!;
   const writeReport = (task: string, sha: string, changes = {}) => {
     const r = record(task); fs.mkdirSync(path.dirname(r.report), { recursive: true });

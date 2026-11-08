@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.19.0] - 2026-11-08
 
+- RC: nc-workflow author pins the versioned claude-sonnet-5-5 so the automatic review translates to Codex through the matrix table. / RC: autor w nc-workflow używa wersjonowanego claude-sonnet-5-5, aby automatyczny przegląd tłumaczył się na Codex przez tabelę z macierzy.
+
 - RC: live delivery scenarios (hotfix-0173-fix, hotfix-0173-p, p15-send) use codex effort medium; 0.19 refuses codex low (b854731 effort policy). / RC: scenariusze live dostarczania (hotfix-0173-fix, hotfix-0173-p, p15-send) używają dla codex effort medium; 0.19 odrzuca low dla codex (polityka effort z b854731).
 
 - RC: live scenarios port the 0.18.2 RC3 fixes (watcher-mediated start in hotfix-0173/-p, in-place CLI new in nc-workflow, watcher and async polling in production-0174, tmux-lost hint in resume); the 0.19 line forked before them. / RC: scenariusze live przenoszą poprawki RC3 z 0.18.2 (start przez watchera w hotfix-0173/-p, start CLI na miejscu w nc-workflow, watcher i asynchroniczne odpytywanie w production-0174, wskazówka tmux-lost w resume); linia 0.19 rozwidliła się przed nimi.
