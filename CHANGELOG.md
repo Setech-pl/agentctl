@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Live scripts: wider render/delivery/spawn windows for loaded hosts; live-kimi runs the wire-mode checks under a watcher because read paths no longer poll provider wires (watch owns event recording). / Skrypty live: szersze okna renderowania/dostarczania/startu na obciążone hosty; live-kimi sprawdza tryby wire pod watcherem, bo ścieżki odczytu nie odpytują już magistrali dostawców (zapis zdarzeń należy do watch).
+
 - Read-budget regression test: skipped under the gate (niced processes — read-contracts carries the deterministic proof there) and on loaded hosts via a `node --version` probe; budgets are tripwires against the pre-fix walks (status 3 s, queue list 2 s, MCP 5 s), while `doctor --timings` keeps the tight PASS/WARN budgets for production diagnosis. / Test regresji czasu odczytu: pomijany pod gate (procesy z nice — deterministyczny dowód niesie read-contracts) i na obciążonych hostach przez sondę `node --version`; progi są bezpiecznikami przeciw dawnej regresji (status 3 s, kolejka 2 s, MCP 5 s); ciasne progi PASS/WARN do diagnostyki produkcji zostają w `doctor --timings`.
 
 ## [0.19.2] - 2026-11-09

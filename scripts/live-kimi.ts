@@ -7,7 +7,7 @@ const cache = defaultCacheRoot('agentctl-018');
 const checks: string[] = [];
 const check = (name: string, ok: unknown, detail = '') => { assert.ok(ok, `${name}: ${detail}`); checks.push(name); console.log(`PASS ${name}`); };
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-await withHarness({ name: 'ki', cacheRoot: cache, config: 'providers: [claude, codex, kimi]\nwatch: {idle_confirm_ticks: 1}\ncapacity: {snapshot: false, codex_refresh: false, kimi_usage_probe: true}\nagents:\n  kimi: {ready_timeout: 3, trust_timeout: 1}\n' }, async h => {
+await withHarness({ name: 'ki', cacheRoot: cache, config: 'providers: [claude, codex, kimi]\nwatch: {idle_confirm_ticks: 1, interval: 1}\ncapacity: {snapshot: false, codex_refresh: false, kimi_usage_probe: true}\nagents:\n  kimi: {ready_timeout: 3, trust_timeout: 1}\n' }, async h => {
   const log = path.join(h.root, 'kimi.jsonl'); installPromptAgent(h, 'kimi', 'idle', log);
   fs.writeFileSync(path.join(h.env.KIMI_CODE_HOME!, 'config.toml'), `default_permission_mode='manual'\n[models.'kimi-code/k3']\ndisplay_name='K3'\nsupport_efforts=['low','high','max']\n`);
   const repo = path.join(h.root, 'repo'); fs.mkdirSync(repo);
@@ -35,13 +35,19 @@ await withHarness({ name: 'ki', cacheRoot: cache, config: 'providers: [claude, c
   h.tmux(['send-keys', '-t', `=${h.session}:ki-1`, 'Escape']); await sleep(150);
   check('Escape interrupts', events().some(e => e.interrupted));
   for (const [value, expected] of [['background', 'background'], ['limit', 'limited'], ['overloaded', 'overloaded']] as const) { await mode(value); check(`synthetic ${value}`, state() === expected); }
-  for (const [value, outcome, expected] of [['wire-quota', 'limited', 'limited'], ['wire-overloaded', 'overloaded', 'overloaded'], ['wire-error', 'error', 'needs-attention'], ['wire-shape', undefined, 'waiting']] as const) {
-    await mode(value);
-    const actual = state();
-    const file = path.join(h.root, 'state', 'ki-1', 'event.json');
-    const stored = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')).outcome : undefined;
-    check(`synthetic ${value} uses passive wire without turn-complete`, stored === outcome && actual === expected, `${stored}/${actual}`);
-  }
+  // Since 0.19.2 read paths never poll provider wires; watch owns event recording. A watcher must pick these modes up.
+  const watcher = h.spawnAgentctl(['watch'], path.join(h.root, 'watch.log'));
+  try {
+    for (const [value, outcome, expected] of [['wire-quota', 'limited', 'limited'], ['wire-overloaded', 'overloaded', 'overloaded'], ['wire-error', 'error', 'needs-attention'], ['wire-shape', undefined, 'waiting']] as const) {
+      await mode(value);
+      const file = path.join(h.root, 'state', 'ki-1', 'event.json');
+      const read = () => ({ actual: state(), stored: fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')).outcome : undefined });
+      const until = Date.now() + 60000;
+      let { actual, stored } = read();
+      while ((stored !== outcome || actual !== expected) && Date.now() < until) { await sleep(300); ({ actual, stored } = read()); }
+      check(`synthetic ${value} uses passive wire without turn-complete`, stored === outcome && actual === expected, `${stored}/${actual}`);
+    }
+  } finally { watcher.kill('SIGTERM'); await new Promise(r => watcher.once('close', r)); }
   await mode('complete');
   check('capacity uses isolated /usage probe', (() => { const r = h.agentctl(['capacity', '--json']); return r.code === 0 && r.stdout.includes('kimi-usage-probe') && r.stdout.includes('26'); })());
   check('/usage only in neutral directory and exits', events().some(e => e.usage) && events().filter(e => e.start).some(e => e.cwd.endsWith('kimi-usage-probe')) && events().some(e => e.exit));
