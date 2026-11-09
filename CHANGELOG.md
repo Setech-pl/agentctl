@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.19.2] - 2026-11-09
+
+- Hotfix release: package and lockfile versions are 0.19.2; restores fast read paths on large homes (P83 read-path regression), numeric-string MCP limits (P84/P79) and token-only two-phase confirms (P77). / Wydanie poprawkowe: wersje pakietu i lockfile to 0.19.2; przywraca szybkie odczyty na dużych katalogach (regresja ścieżek odczytu P83), liczby jako tekst w limitach MCP (P84/P79) i potwierdzenia dwuetapowe samym tokenem (P77).
+
 - P83 follow-up: bound archived/direct queue-author lookups, reuse immutable task-header parses, retain ready-slot hints and keep board queue/cohort labels visible alongside disk reading age. Legacy read tests now seed watch samples explicitly. / Uzupełnienie P83: ograniczone odczyty autorów z archiwum i zadań bezpośrednich, współdzielone niemutowalne wyniki parsowania nagłówków, zachowane podpowiedzi gotowych okien i widoczne etykiety kolejki/kohorty obok wieku pomiaru dysku. Starsze testy odczytu jawnie przygotowują pomiary watch.
 
 - Doctor --timings prints wall times and PASS/WARN read budgets for status, queue list, events and a dry queue preview without registering work. / Doctor --timings pokazuje czasy i progi PASS/WARN dla statusu, listy kolejki, zdarzeń i podglądu kolejki bez rejestrowania zadania.
