@@ -1078,3 +1078,5 @@ After an explicit report-end has settled and the current turn has ended (with a 
 Read latency: status, queue listing, events and MCP previews never measure worktrees. Sizes and progress come from watch samples (one stale worktree per tick, at most once per five seconds, with nice priority 10); the disk line includes the reading age. Until watch samples all worktrees, size is n/d. Explicit GC previews may measure sizes; after applying GC, removed bytes come from its accounting. Queue listing loads only its named task dependencies.
 
 MCP `set_limits` accepts integers or numeric strings (`2` or `"2"`), plus `"off"`, for every enabled provider. The range stays 0–50; zero removes the limit.
+
+For every MCP tool exposing `preview_token`, confirmation may send only `confirm: true` and that token; task and other arguments come from the stored preview. A new preview still requires its normal arguments.

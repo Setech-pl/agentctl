@@ -1078,3 +1078,5 @@ Po ustabilizowaniu raportu z jawnym report-end i zakończeniu bieżącej tury (z
 Czas odczytu: status, lista kolejki, zdarzenia i podglądy MCP nie mierzą worktree. Rozmiary i postęp pochodzą z pomiarów watch (jedno nieaktualne worktree na tick, najwyżej raz na pięć sekund, z priorytetem nice 10); wiersz dysku podaje wiek pomiaru. Przed pomiarem wszystkich worktree rozmiar to n/d. Jawny podgląd GC może mierzyć rozmiary; po wykonaniu GC zwolnione bajty pochodzą z jego rozliczenia. Lista kolejki wczytuje tylko wskazane zależności zadań.
 
 MCP `set_limits` przyjmuje liczby całkowite lub zapisane jako tekst (`2` lub `"2"`) oraz `"off"` dla każdego włączonego dostawcy. Zakres pozostaje 0–50; zero usuwa limit.
+
+Każde narzędzie MCP z `preview_token` można potwierdzić, wysyłając tylko `confirm: true` i token; zadanie oraz pozostałe argumenty pochodzą z zapisanego podglądu. Nowy podgląd nadal wymaga zwykłych argumentów.

@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- P77: every two-phase preview_token tool accepts confirm with the token alone, restoring its validated preview arguments; preview fields remain mandatory on new previews. / P77: każde narzędzie dwuetapowe z preview_token przyjmuje potwierdzenie samym tokenem i odtwarza sprawdzone argumenty; nowy podgląd nadal wymaga swoich pól.
+
 - P84/P79: MCP set_limits accepts numeric strings as well as integers and "off", including optional providers. / P84/P79: MCP set_limits przyjmuje liczby zapisane jako tekst, liczby całkowite i "off", również dla opcjonalnych dostawców.
 
 - P83: CLI/MCP reads use watch-cached worktree sizes with reading age, never start filesystem walks or implicit GC estimates; queue listing reads only named dependencies. GC publishes its own removal accounting. / P83: odczyty CLI/MCP korzystają z rozmiarów zapisanych przez watch wraz z wiekiem pomiaru, bez skanowania worktree i automatycznych wycen GC; kolejka czyta tylko wskazane zależności. GC publikuje własne rozliczenie usuniętych danych.

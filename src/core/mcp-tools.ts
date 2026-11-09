@@ -1579,7 +1579,8 @@ for (const tool of MCP_TOOLS) {
   const cli = ({ queue_list: 'queue list', queue_rm: 'queue rm', queue_retry: 'queue retry', queue_up: 'queue up', queue_pause: 'queue pause', queue_resume: 'queue resume', cohort_list: 'cohort list', cohort_show: 'cohort show', list_reports: 'status', get_report: 'pull <TASK>', pull_ready: 'pull --ready', task_spec: 'peek <TASK>', gc_preview: 'gc', events_since: 'events', set_limits: 'limits set', reserve: 'limits reserve' } as Record<string, string>)[tool.name] ?? tool.name.replaceAll('_', ' ');
   if (!tool.description.includes('CLI:')) tool.description += ` Use when the user needs this operation. CLI: agentctl ${cli}.`;
   if (!confirmedTools.has(tool.name)) continue;
-  tool.input = { ...tool.input, confirm: confirmArg, preview_token: z.string().optional().describe('Token returned by this preview. Independent previews can be confirmed in any order if their scope is unchanged. A confirm may carry only this token: the stored arguments then execute.') };
+  const previewInput = tool.input;
+  tool.input = { ...Object.fromEntries(Object.entries(tool.input).map(([name, schema]) => [name, schema.optional()])), confirm: confirmArg, preview_token: z.string().optional().describe('Token returned by this preview. Independent previews can be confirmed in any order if their scope is unchanged. A confirm may carry only this token: the stored arguments then execute.') };
   tool.description += ' Two steps are mandatory: preview, then confirm: true with identical arguments — or with preview_token only, which executes the stored arguments (for new/queue the spec need not be resent). A changed scope requires a new preview.';
   const original = tool.run;
   tool.run = (deps, args) => guarded(async () => {
@@ -1599,6 +1600,9 @@ for (const tool of MCP_TOOLS) {
       if (known.length > 0) return writeTool(deps, 'new', { task: known.map((e) => e!.task).join(', '), detail: 'repeated new for a start in progress' }, async () => ({ text: known.map((e) => directStartText(ctx.config, e!, ctx.runner.now())).join('\n'), executed: false, announce: '' }));
     }
     const { confirm, preview_token, ...input } = args;
+    // Required preview fields remain required for a preview or explicit-argument confirm.
+    // A token-only confirm restores the validated arguments from its session preview.
+    if (!(confirm && typeof preview_token === 'string' && Object.keys(input).length === 0)) z.object(previewInput).parse(input);
     const { detail: _detail, offset: _offset, limit: _limit, ...identityInput } = input;
     const arguments_ = previewArguments(tool.name === 'gc' ? identityInput : input);
     const key = `${tool.name}:${createHash('sha256').update(JSON.stringify(arguments_)).digest('hex')}`;
