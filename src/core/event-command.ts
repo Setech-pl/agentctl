@@ -196,7 +196,7 @@ export async function handleEvent(ctx: Context, alerts: Alerts, input: EventInpu
         await syncReport(ctx, record).catch(() => undefined);
         if (reportReady(ctx, record)) {
           state = 'report-ready';
-          text = reportReadyText(record.task, readVerdict(record.report, ctx.config.notify.verdictPattern));
+          text = reportReadyText(record.task, readVerdict(record.report, ctx.config.notify.verdictPattern, record.reviewOf != null));
           await recordEvent(ctx, record, 'report');
           await journalOutputs(ctx, record);
           await reviewTick(ctx);
@@ -219,7 +219,7 @@ export async function handleEvent(ctx: Context, alerts: Alerts, input: EventInpu
       announced = { state, text, result };
       if (result === 'sent') {
         const kind = state === 'report-ready' ? 'report-ready' : state === 'needs-input' ? 'needs-input' : state === 'limited' ? 'limited' : state === 'overloaded' ? 'overloaded' : undefined;
-        const verdict = state === 'report-ready' ? readVerdict(record.report, ctx.config.notify.verdictPattern) : undefined;
+        const verdict = state === 'report-ready' ? readVerdict(record.report, ctx.config.notify.verdictPattern, record.reviewOf != null) : undefined;
         if (kind) await recordJournal(ctx, { kind, task: record.task, text, ...(verdict ? { verdict } : {}) });
       }
       detail = `[${result === 'sent' ? 'notified' : 'duplicate, not notified'}: ${text}]`;

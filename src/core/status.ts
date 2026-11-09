@@ -4,7 +4,7 @@ import { atomicWriteFile, stateWriteFailure } from './atomic-file.ts';
 import { cachedRequest } from './response-budget.ts';
 import { tryFileLock } from './file-lock.ts';
 import { promptQueueView } from './prompt-queue.ts';
-import { readOutputs, dependencyVerdict, outputsPending } from './outputs.ts';
+import { readOutputs, dependencyVerdict, outputsPending, reviewVerdict, reviewVerdictAsOutput } from './outputs.ts';
 import type { OutputData, OutputVerdict } from './outputs.ts';
 import path from 'node:path';
 import { inspectReport } from './report-state.ts';
@@ -267,7 +267,14 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     // Still being written (no report-end yet, or not settled): readOutputs says `outputs_pending` and judges nothing.
     const outputData = !shallow && reportReady ? await readOutputs(ctx, record) : undefined;
     let verdict: OutputVerdict | undefined;
-    if (!shallow && reportReady) { try { verdict = dependencyVerdict(fs.readFileSync(record.report, 'utf8')); } catch { /* absent */ } }
+    if (!shallow && reportReady) {
+      try {
+        const reportText = fs.readFileSync(record.report, 'utf8');
+        verdict = dependencyVerdict(reportText, record.reviewOf != null);
+        // P70: a review's verdict is the FIRST line of its report ("Werdykt: NO-GO — …"), never only the outputs block.
+        if (record.reviewOf) { const rv = reviewVerdict(reportText); if (rv) verdict = reviewVerdictAsOutput(rv.first); }
+      } catch { /* absent */ }
+    }
     rows.push({
       ...(outputData ? { ...outputData, verdict, decisionsCount: outputData.outputs?.decisions.length ?? 0, actionsCount: outputData.outputs?.actions.length ?? 0 } : {}),
       task: record.task,

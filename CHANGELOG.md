@@ -4,6 +4,35 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- RC: nc-workflow checks the needYou decision reminder before the whole-file get_report marks the author pulled; P71 omits pulled tasks' outputs from attention summaries. / RC: nc-workflow sprawdza przypomnienie o decyzji w needYou przed pełnym get_report, który oznacza autora jako pobranego; P71 pomija wyniki pobranych zadań w podsumowaniach.
+
+- RC: live-economy expects the unrated count once per client session (P71) and checks the after-pull reminder on a fresh client session; the manager session had already consumed its one show. / RC: live-economy oczekuje licznika bez oceny raz na sesję klienta (P71) i sprawdza przypomnienie po pobraniu na świeżej sesji klienta; sesja managera już zużyła swoje jedno pokazanie.
+
+## [0.19.1] - 2026-11-08
+
+- Release integration: package and lockfile versions are 0.19.1; includes P65-b, P70, P71, P72, P73-a, L1, doctor and documentation fixes below. P59 tracking: the supplied branches/reports contain no mapping for this identifier; no additional P59 behavior is claimed. / Integracja wydania: wersje pakietu i lockfile to 0.19.1; obejmuje poniższe poprawki P65-b, P70, P71, P72, P73-a, L1, doctor i dokumentacji. Identyfikator P59 nie ma mapowania w dostarczonych gałęziach/raportach; nie deklarujemy dodatkowej zmiany zachowania P59.
+
+- L1 review blocker: publish a nonempty lock directory atomically and recheck displaced live owners before entering; waiters can complete rollback after a prechecked contender withdraws. / Bloker przeglądu L1: publikacja niepustej kłódki jest atomowa i ponownie sprawdza przesuniętych żywych właścicieli; oczekujący kończą cofanie po wycofaniu rywala.
+
+- F1: automatic .cache cleanup requires a current turn-end covering the report and skips worktrees shared by other open tasks. / Automatyczne sprzątanie .cache wymaga zakończenia bieżącej tury obejmującego raport i pomija worktree innych otwartych zadań.
+
+- doctor: the tested Kimi version is 2.5.2 (production ran Kimi 2.5.2 tasks successfully since 07.11); only newer versions warn. / doctor: przetestowana wersja Kimi to 2.5.2 (produkcja z powodzeniem robiła zadania na Kimi 2.5.2 od 07.11); ostrzegają dopiero nowsze wersje.
+
+- docs: `send` no longer claims that an open Codex question always blocks pasting — only the open question of a WAITING agent does (the message stays in the FIFO); a collapsed asynchronous question of a working Codex blocks nothing since 0.19 (P65). / docs: `send` nie twierdzi już, że otwarte pytanie Codexa zawsze blokuje wklejanie — blokuje je tylko otwarte pytanie CZEKAJĄCEGO agenta (wiadomość zostaje w FIFO); zwinięte asynchroniczne pytanie pracującego Codexa niczego nie blokuje od 0.19 (P65).
+
+- L1 (gate lock): reclamation verifies ownership again after the rename and rolls a displaced lock back when its owner is live (published or revived since the verified read), and a contender never takes the freed lock path while a live-owned tombstone of that lock exists — a third gate entering mid-reclaim can no longer own the public lock while the displaced live owner sits in a tombstone. / L1 (kłódka gate): przejęcie weryfikuje właściciela ponownie po rename i cofa przesuniętą kłódkę, gdy jej właściciel żyje (opublikował się albo pid ożył od odczytu), a rywal nigdy nie zajmuje zwolnionej ścieżki, póki istnieje tombstone tej kłódki z żywym właścicielem — trzeci gate wchodzący w trakcie przejęcia nie może już mieć kłódki, gdy żywy właściciel siedzi w tombstone.
+
+- P65-b: `peek` of a Codex task with a collapsed question ("? N questions · … to answer") names the question text — from the session log or from the expanded view the captured scrollback still holds; no key is ever sent to the agent. / P65-b: `peek` zadania Codexa ze zwiniętym pytaniem („? N questions · … to answer") podaje treść pytania — z logu sesji albo z rozwiniętego widoku, który wciąż jest w pobranym scrollbacku; do agenta nie idzie żaden klawisz.
+
+- P70: a review's verdict is the first line of its report (`Werdykt: GO|GO-WITH-CHANGES|NO-GO`; PASS / PASS with findings / FAIL accepted) in events, status, get_report and pull_ready — a declared `outputs.verdict` no longer overrides it (POP-E1-REVIEW said NO-GO on the first line and PASS in the block); a disagreement raises a needs-attention event "inconsistent verdict: first line X, outputs Y" and both values are shown. The review report protocol now reads `verdict: GO|GO-WITH-CHANGES|NO-GO` (mapped GO = PASS, GO-WITH-CHANGES = PARTIAL, NO-GO = FAIL). / P70: werdykt przeglądu to pierwsza linia jego raportu (`Werdykt: GO|GO-WITH-CHANGES|NO-GO`; akceptowane też PASS / PASS with findings / FAIL) w zdarzeniach, statusie, get_report i pull_ready — zadeklarowany `outputs.verdict` nie przykrywa jej już (POP-E1-REVIEW miał NO-GO w pierwszej linii i PASS w bloku); niezgodność zgłasza zdarzenie needs-attention „inconsistent verdict: first line X, outputs Y” i pokazuje obie wartości. Protokół raportu przeglądu brzmi teraz `verdict: GO|GO-WITH-CHANGES|NO-GO` (mapowanie GO = PASS, GO-WITH-CHANGES = PARTIAL, NO-GO = FAIL).
+- P73-a compatibility: omit zero-byte cleanup totals so existing close notices stay concise. / Pomijanie zerowych sum sprzątania zachowuje zwięzłe komunikaty close.
+
+- P73-a: agentctl safely removes task worktree .cache after explicit settled report-end for every provider; global report.clean_worktree_cache opts out; close/GC retain freed-byte totals. / Agentctl bezpiecznie usuwa .cache worktree po ustabilizowaniu jawnego końca raportu dla każdego providera; globalne report.clean_worktree_cache wyłącza sprzątanie, a close/GC pokazują zwolnione bajty.
+
+- P72: reuse spec repository worktree placeholders for backend links; warn on missing or base-stale targets in previews/doctor. Queue accepts targets created by its own task. / Linki backendu korzystają z worktree repozytoriów specyfikacji; podglądy i doctor ostrzegają o brakujących i starszych celach. Kolejka akceptuje cele tworzone przez zadanie.
+
+- P71: attention summaries omit closed/pulled outputs; show unrated count once per client session. / Podsumowanie pomija wyniki zamkniętych/pobranych zadań; licznik bez oceny pokazuje raz na sesję klienta.
+
 ## [0.19.0] - 2026-11-08
 
 - RC: live-questions raises the collapsed Codex question on an idle agent via an explicit trigger (P65: a working Codex's collapsed question is no wait), and the answer-clearing check polls instead of a fixed sleep. / RC: live-questions pokazuje zwinięte pytanie Codexa na bezczynnym agencie przez jawną komendę (P65: zwinięte pytanie pracującego Codexa nie jest oczekiwaniem), a sprawdzenie odpowiedzi odpytuje zamiast sztywnego sleep.
@@ -636,7 +665,8 @@ Pull request #1: iteration 1, core and CLI.
 - Task states (`working`, `waiting`, `needs-trust`, `report-ready`, `dead`) and folder-trust detection.
 - Per-provider window limits, the `review_of` cross-review rule, an optional mirror of the reports.
 
-[Unreleased]: https://github.com/Setech-pl/agentctl/compare/v0.18.2...HEAD
+[Unreleased]: https://github.com/Setech-pl/agentctl/compare/v0.19.1...HEAD
+[0.19.1]: https://github.com/Setech-pl/agentctl/compare/v0.19.0...v0.19.1
 [0.18.2]: https://github.com/Setech-pl/agentctl/compare/v0.18.0...v0.18.2
 [0.11.0]: https://github.com/Setech-pl/agentctl/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/Setech-pl/agentctl/compare/v0.9.0...v0.10.0

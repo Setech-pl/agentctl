@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { cancelTasks, planCancel } from '../src/core/cancel.ts';
 import { collectEvents, eventsMarkdown, markersPath, parseSince, readMarkers, renderEvents } from '../src/core/chat-events.ts';
 import { Context } from '../src/core/context.ts';
+import { historyPath, recordEvent } from '../src/core/history.ts';
 import { journalPath, recordJournal, readJournal } from '../src/core/journal.ts';
 import { MCP_TOOLS } from '../src/core/mcp-tools.ts';
 import type { McpDeps, McpToolDef } from '../src/core/mcp-tools.ts';
@@ -237,5 +238,32 @@ describe('events: legacy oversized gc_suggest entries', () => {
     assert.equal(fragment?.offset, 20);
     assert.equal(fragment?.total, summarized.length);
     assert.equal(first.text, summarized.slice(20), 'the prefix before gc_preview is byte-identical, the delivery continues there');
+  });
+});
+
+
+describe('P71 current attention summary', () => {
+  it('drops closed and pulled outputs while keeping historical events', async () => {
+    const w = world('p71-attention');
+    for (const [task, fields] of [['CLOSED', { closed: true }], ['PULLED', { pulled: new Date(min(20)).toISOString() }], ['OPEN', {}]] as const) {
+      const r = seedTask(w.config, task, fields);
+      fs.mkdirSync(path.dirname(r.report), { recursive: true });
+      fs.writeFileSync(r.report, 'Werdykt: PASS\n<!-- agentctl:report-end -->\n');
+      fs.utimesSync(r.report, min(1) / 1000, min(1) / 1000);
+      await recordJournal(w.ctx, { kind: 'report-outputs', task, text: task, decisions: ['choose'], actions: [{ title: 'act', shell: 'echo ok' }] });
+    }
+    w.at(min(30));
+    const report = await collectEvents(w.ctx, { client: 'cli', keep: true });
+    assert.equal(report.events.filter(e => e.kind === 'report-outputs').length, 3);
+    assert.deepEqual(report.summary.needYou, ['OPEN: decision: choose', 'OPEN: action: act (echo ok)']);
+  });
+  it('shows the unrated counter once per client session, even with explicit since', async () => {
+    const w = world('p71-rating');
+    const r = seedTask(w.config, 'DONE', { closed: true });
+    await recordEvent(w.ctx, r, 'report', { reportAt: new Date(min(1)).toISOString() });
+    assert.ok(fs.existsSync(historyPath(w.config)));
+    assert.equal((await collectEvents(w.ctx, { client: 'cli' })).summary.unmarked, 1);
+    assert.equal((await collectEvents(w.ctx, { client: 'cli', since: '24h' })).summary.unmarked, undefined);
+    assert.equal((await collectEvents(w.ctx, { client: 'other' })).summary.unmarked, 1);
   });
 });

@@ -127,7 +127,7 @@ const JOURNALED: Partial<Record<TaskState, JournalKind>> = { 'needs-attention': 
 async function journalTransition(ctx: Context, row: StatusRow, e: WatchEvent): Promise<void> {
   const kind = JOURNALED[e.to];
   if (!kind || row.tmuxLost) return;
-  const verdict = kind === 'report-ready' ? readVerdict(row.reportPath, ctx.config.notify.verdictPattern) : undefined;
+  const verdict = kind === 'report-ready' ? readVerdict(row.reportPath, ctx.config.notify.verdictPattern, row.reviewOf != null) : undefined;
   await recordJournal(ctx, { kind, task: row.task, text: e.notification ?? e.to, ...(verdict ? { verdict } : {}) });
 }
 
@@ -257,7 +257,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   for (const e of events) {
     const row = rows.find((r) => r.task === e.task);
     if (e.notification && row) {
-      if (e.to === 'report-ready' && e.reason === 'transition') e.notification = reportReadyText(e.task, readVerdict(row.reportPath, ctx.config.notify.verdictPattern));
+      if (e.to === 'report-ready' && e.reason === 'transition') e.notification = reportReadyText(e.task, readVerdict(row.reportPath, ctx.config.notify.verdictPattern, row.reviewOf != null));
       if (e.to === 'report-ready' && e.reason === 'transition') await recordReport(ctx, row.task);
       // The ledger key of a reminder differs from the state names, so it is never taken for the end-of-turn event.
       const key = e.reason === 'waiting-too-long' ? 'waiting-too-long' : e.to;

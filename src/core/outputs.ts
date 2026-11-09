@@ -1,3 +1,4 @@
+import { cleanWorktreeCache } from './worktree-cache.ts';
 import { readReportText } from './report-path.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -75,8 +76,51 @@ function takeList<T>(raw: unknown, section: string, item: z.ZodType<T>, errors: 
 
 const OUTPUT_KEYS = ['version', 'verdict', 'commits', 'integrate', 'decisions', 'actions', 'checks', 'preview', 'notes'];
 
+/** The verdict words a review report may declare; they map onto the output verdicts (GO = PASS, GO-WITH-CHANGES = PARTIAL, NO-GO = FAIL). */
+const REVIEW_VERDICT_ALIAS: Record<string, OutputVerdict> = { GO: 'PASS', 'GO-WITH-CHANGES': 'PARTIAL', 'NO-GO': 'FAIL' };
+
+/** The verdict of a review report (review_of) is the FIRST line: GO / GO-WITH-CHANGES / NO-GO (PASS / PASS with findings / FAIL accepted). */
+const REVIEW_FIRST_LINE = /^\s{0,3}(?:#{1,6}\s*)?(?:\*\*|__)?\s*(?:(?:werdykt|verdict|status)\s*[:：–—-]\s*)?(?:\*\*|__)?\s*(GO-WITH-CHANGES|NO-GO|GO|PASS(?:\s+with\s+findings)?|FAIL)\b/i;
+
+export interface ReviewVerdict {
+  /** The normalised first-line verdict: GO, GO-WITH-CHANGES, NO-GO, PASS, PASS with findings or FAIL. */
+  first: string;
+  /** The rest of the first line after the verdict token (" — the change must not be merged"), without trailing markdown. */
+  detail: string;
+  /** outputs.verdict the block declares (a review's GO/GO-WITH-CHANGES/NO-GO already mapped), when it declares one. */
+  declared: OutputVerdict | undefined;
+  /** The first line says no-go while the block says go, or the other way round. */
+  inconsistent: boolean;
+}
+
+/** The verdict a review report carries on its first line, checked against the declared outputs verdict. */
+export function reviewVerdict(report: string): ReviewVerdict | undefined {
+  const line = report.replace(/\r\n/g, '\n').split('\n').find((l) => /[\p{L}\p{N}]/u.test(l));
+  const m = line ? REVIEW_FIRST_LINE.exec(line) : null;
+  if (!m) return undefined;
+  const token = m[1]!.toUpperCase().replace(/\s+/g, ' ');
+  const first = token === 'PASS WITH FINDINGS' ? 'PASS with findings' : token;
+  const detail = line!.slice(m[0].length).replace(/(?:\*\*|__)?\s*$/, '');
+  const declared = parseOutputs(report, { review: true }).outputs?.verdict;
+  const noGo = (v: string) => /^(?:NO-GO|FAIL|BLOCKED)$/i.test(v);
+  return { first, detail, declared, inconsistent: declared !== undefined && noGo(first) !== noGo(declared) };
+}
+
+/** What a review's first-line verdict counts as (status, dependencies): NO-GO/FAIL → FAIL, GO-WITH-CHANGES / PASS with findings → PARTIAL, GO/PASS → PASS. */
+export function reviewVerdictAsOutput(first: string): OutputVerdict {
+  if (/^(?:NO-GO|FAIL)$/i.test(first)) return 'FAIL';
+  if (/^(?:GO-WITH-CHANGES|PASS with findings)$/i.test(first)) return 'PARTIAL';
+  return 'PASS';
+}
+
+/** The first line and the declared verdict of a review report disagree: both, for the needs-attention event. */
+export function inconsistentReviewVerdict(report: string): { first: string; declared: OutputVerdict } | undefined {
+  const rv = reviewVerdict(report);
+  return rv?.inconsistent && rv.declared !== undefined ? { first: rv.first, declared: rv.declared } : undefined;
+}
+
 /** Only a top-level fenced block before the report-end directive is report data. */
-export function parseOutputs(text: string): OutputData {
+export function parseOutputs(text: string, opts: { review?: boolean } = {}): OutputData {
   const blocks: string[] = [];
   let fence: string | undefined, lines: string[] = [], target = false;
   for (const line of text.replace(/\r\n/g, '\n').split('\n')) {
@@ -97,7 +141,8 @@ export function parseOutputs(text: string): OutputData {
   const d = data as Record<string, unknown>, errors: string[] = [];
   // Without a known version and verdict nothing can be interpreted (a dependent task gates on the verdict): the block is refused as a whole.
   if (d.version !== 1) errors.push(`version: expected 1, got ${JSON.stringify(d.version)}`);
-  const verdict = z.enum(VERDICTS).safeParse(d.verdict);
+  const declared = opts.review && typeof d.verdict === 'string' ? (REVIEW_VERDICT_ALIAS[d.verdict.trim().toUpperCase().replace(/\s+/g, '-')] ?? d.verdict) : d.verdict;
+  const verdict = z.enum(VERDICTS).safeParse(declared);
   if (!verdict.success) errors.push(`verdict: expected one of ${VERDICTS.join(', ')}`);
   if (errors.length) return { outputs: null, outputs_valid: false, outputs_errors: errors, outputs_partial: false };
   for (const key of Object.keys(d)) if (!OUTPUT_KEYS.includes(key)) errors.push(`${key}: unknown field (ignored)`);
@@ -155,7 +200,7 @@ export async function readOutputs(ctx: Context, record: TaskRecord): Promise<Out
   // The one gate of every consumer (status, get_report, pull_ready, cohort_show, events, base refs): a report still being written is not judged.
   if (outputsPending(ctx.config, record, inspectReport(ctx.config, record, ctx.runner.now(), !record.attemptId), ctx.runner.now())) return { outputs: null, outputs_valid: false, outputs_errors: [], outputs_partial: false, outputs_pending: true };
   let data: OutputData;
-  try { data = parseOutputs(readReportText(ctx.config, record, record.report)); }
+  try { data = parseOutputs(readReportText(ctx.config, record, record.report), { review: record.reviewOf != null }); }
   catch { return { outputs: null, outputs_valid: false, outputs_errors: ['no report'] }; }
   if (!data.outputs) return data;
   // One message per distinct problem, with the number of entries it covers.
@@ -177,19 +222,29 @@ export async function readOutputs(ctx: Context, record: TaskRecord): Promise<Out
 }
 
 /** A declared output verdict wins. Legacy fallback accepts an explicit verdict line only. */
-export function dependencyVerdict(text: string): OutputVerdict | undefined {
-  const outputs = parseOutputs(text).outputs;
+export function dependencyVerdict(text: string, review = false): OutputVerdict | undefined {
+  const outputs = parseOutputs(text, { review }).outputs;
   if (outputs) return outputs.verdict;
   const found = /^\s*(?:\*\*)?(?:Werdykt|Verdict):\s*(?:\*\*)?(PASS|PARTIAL|FAIL|BLOCKED)\b/im.exec(text)?.[1];
   return found?.toUpperCase() as OutputVerdict | undefined;
 }
 
-export const OUTPUT_PROTOCOL = [
+const OUTPUT_PROTOCOL_LINES = [
   'Before report-end write exactly one fenced ```agentctl-outputs YAML block (schema version: 1).',
   'Fields: version: 1; verdict: PASS|PARTIAL|FAIL|BLOCKED; commits: [{repo, branch, sha}]; integrate: [{repo, branch, sha, note?}]; decisions: [text]; actions: [{title, shell}]; checks: [{name, result: PASS|FAIL|WARN|SKIP, note?}]; preview: URL (optional); notes: [text].',
   'Write each check as a mapping, for example `- {name: "unit tests", result: PASS}`. A one-key mapping (`- unit tests: PASS`), a plain text and a lower-case result (`pass`) are also accepted and normalized by agentctl; they are not format errors, do not report them as such.',
   '`repo` is the name of the repository: the last part of its path (for example `sandbox` for ~/code/sandbox). The repository path or the path of your worktree are accepted too. Example: `commits: [{repo: sandbox, branch: dev-u1, sha: 3db6b8d}]`. A reviewer writes the repo of the code it reviews the same way.',
   'Use existing branches and commit SHAs in the task repositories. Use empty lists for no items; omit unknown preview. These are reported facts and proposed actions; agentctl never executes actions or merges.',
+];
+
+export const OUTPUT_PROTOCOL = OUTPUT_PROTOCOL_LINES.join('\n');
+
+/** The protocol of a review report: the FIRST line carries the verdict (events, status, get_report and pull_ready show it) and the outputs verdict must agree with it. */
+export const REVIEW_OUTPUT_PROTOCOL = [
+  'The first line of the report is the verdict: `Werdykt: GO|GO-WITH-CHANGES|NO-GO`. Events, status, get_report and pull_ready show it; a disagreement with the outputs verdict is reported as inconsistent.',
+  OUTPUT_PROTOCOL_LINES[0],
+  OUTPUT_PROTOCOL_LINES[1]!.replace('verdict: PASS|PARTIAL|FAIL|BLOCKED', 'verdict: GO|GO-WITH-CHANGES|NO-GO (GO = PASS, GO-WITH-CHANGES = PARTIAL, NO-GO = FAIL)'),
+  ...OUTPUT_PROTOCOL_LINES.slice(2),
 ].join('\n');
 
 /**
@@ -207,6 +262,7 @@ export async function journalOutputs(ctx: Context, record: TaskRecord): Promise<
   if (ctx.runner.dryRun) return;
   const report = inspectReport(ctx.config, record, ctx.runner.now(), !record.attemptId);
   if (!report.ready || !report.signature || (record.attemptId && !report.sentinel)) return;
+  await cleanWorktreeCache(ctx, record);
   const identity = record.attemptId ? `attempt:${record.attemptId}` : `started:${record.started}`;
   if (outputsPending(ctx.config, record, report, ctx.runner.now())) return;
   const file = path.join(ctx.config.stateDir, record.window, 'outputs-seen.json');
@@ -220,6 +276,16 @@ export async function journalOutputs(ctx: Context, record: TaskRecord): Promise<
     // Journal is also the recovery ledger if a process died before writing outputs-seen.
     if (!readJournal(ctx.config, -1).some(e => e.kind === 'report-outputs' && e.task === record.task && (e.reportAttempt === identity || (!e.reportAttempt && e.reportHash === report.signature)))) {
       await recordJournal(ctx, { kind: 'report-outputs', task: record.task, ...(record.reviewOf ? { reviewOf: record.reviewOf } : {}), reportHash: report.signature, reportAttempt: identity, decisions: data.outputs?.decisions ?? [], actions: data.outputs?.actions ?? [], text: data.outputs_valid ? `${record.task}: ${countText(data.outputs!.decisions.length, 'decyzja', 'decyzje', 'decyzji')}, ${countText(data.outputs!.actions.length, 'akcja', 'akcje', 'akcji')}` : `${record.task}: outputs warning: ${data.outputs_errors.join('; ')}` });
+    }
+    // A review's first line is its verdict; a block that disagrees (POP-E1: "Werdykt: NO-GO" with verdict: PASS) is flagged once per attempt.
+    if (record.reviewOf) {
+      let text = '';
+      try { text = readReportText(ctx.config, record, record.report); } catch { /* readOutputs said what there is to say */ }
+      const bad = text ? inconsistentReviewVerdict(text) : undefined;
+      const message = bad ? `${record.task}: inconsistent verdict: first line ${bad.first}, outputs ${bad.declared}` : '';
+      if (bad && !readJournal(ctx.config, -1).some(e => e.kind === 'needs-attention' && e.task === record.task && e.text === message && (e.reportAttempt === identity || (!e.reportAttempt && e.reportHash === report.signature)))) {
+        await recordJournal(ctx, { kind: 'needs-attention', task: record.task, reviewOf: record.reviewOf, reportHash: report.signature, reportAttempt: identity, text: message });
+      }
     }
     await ctx.runner.writeFile(file, JSON.stringify([...seen, identity]));
   });

@@ -1,4 +1,4 @@
-import { validateLink, missingLinkTargets, fillTaskLinkTargets, staleProjectLinkWarnings } from './links.ts';
+import { linkBaseWarnings, validateLink, missingLinkTargets, fillTaskLinkTargets, staleProjectLinkWarnings } from './links.ts';
 import { validateLaunch } from './safety.ts';
 import { provider, isActive, activeProviders } from './providers/registry.ts';
 import { PROVIDER_IDS } from './providers/types.ts';
@@ -448,7 +448,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   }
 
   // projectLinkByFrom holds exactly the inherited project links no spec link overrode; each stale one warns, whatever else the spec links.
-  const linkWarnings = staleProjectLinkWarnings([...projectLinkByFrom.values()], config);
+  const linkWarnings = [...staleProjectLinkWarnings([...projectLinkByFrom.values()], config), ...linkBaseWarnings([...linkByFrom.values()], repos)];
 
   // Env: spec > project > global.
   const env: Record<string, string> = {};

@@ -144,6 +144,7 @@ export interface GlobalConfig extends Layer {
   /** The task queue: tasks that wait for a free window of their provider and start by themselves (`agentctl queue`). */
   queue: QueueSettings;
   reportSettleS: number;
+  cleanWorktreeCache: boolean;
   cohort: { doneGraceS: number };
   limited: { autoResume: boolean; resumeAbovePercent: number; message: string };
   overload: { autoRetry: boolean; retryAfter: number; maxRetries: number; giveUpAfter: number; resetAfterS: number; message: string };
@@ -383,7 +384,7 @@ function parseString(v: unknown, where: string, p: Problems): string | undefined
 export function parseReportPaths(v: unknown, where: string, p: Problems): string[] {
   if (v === undefined || v === null) return [];
   if (isObject(v)) {
-    checkKeys(v, ['path', 'paths', 'settle_s'], where, p);
+    checkKeys(v, ['path', 'paths', 'settle_s', 'clean_worktree_cache'], where, p);
     return parseReportPaths(v.paths ?? v.path, where, p);
   }
   const list = Array.isArray(v) ? v : [v];
@@ -1138,6 +1139,11 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
       else if (raw.overload.message !== undefined) p.add('config.overload.message must be nonempty text');
     }
   }
+  let cleanWorktreeCache = true;
+  if (isObject(raw.report) && raw.report.clean_worktree_cache !== undefined) {
+    if (typeof raw.report.clean_worktree_cache === 'boolean') cleanWorktreeCache = raw.report.clean_worktree_cache;
+    else p.add('config.report.clean_worktree_cache must be a boolean');
+  }
   let reportSettleS = 30;
   if (isObject(raw.report) && raw.report.settle_s !== undefined) {
     if (typeof raw.report.settle_s === 'number' && Number.isFinite(raw.report.settle_s) && raw.report.settle_s >= 0) reportSettleS = raw.report.settle_s;
@@ -1182,7 +1188,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
     const configuredUsage = usageMap[`${id}_dir`] !== undefined || ['warn', 'critical', 'queue_hold'].some(k => { const values = usageMap[k]; return isObject(values) && values[id] !== undefined; });
     if (agentMap[id] !== undefined || (isObject(raw.limits) && raw.limits[id] !== undefined) || configuredUsage) warnings.push(`${id} is not in providers; its agent/limit/usage settings are inactive`);
   }
-  const config: GlobalConfig = { ...layer, providers, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, ...(ui ? { ui } : {}), ...(tmux ? { tmux } : {}), deliveryConfirmS: deliveryConfirmS as number, limits, countExternal, countReportReady, preview, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, cohort, overload, limited, collisions, cancel, usage, guideLang, capacity, disk, git, path: file, loaded: exists };
+  const config: GlobalConfig = { ...layer, providers, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, ...(ui ? { ui } : {}), ...(tmux ? { tmux } : {}), deliveryConfirmS: deliveryConfirmS as number, limits, countExternal, countReportReady, preview, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, cleanWorktreeCache, cohort, overload, limited, collisions, cancel, usage, guideLang, capacity, disk, git, path: file, loaded: exists };
   if (mirror) config.mirrorDir = resolvePath(mirror);
   if (warnings.length) config.warnings = warnings;
   return config;

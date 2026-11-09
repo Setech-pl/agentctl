@@ -67,7 +67,11 @@ await withHarness({ name: 'economy', cacheRoot: cache, config: 'mcp: {max_respon
     check('summary includes path bytes verdict SHA branch and six decisions', /bytes:/.test(summary) && /path:/.test(summary) && /Werdykt: PASS/.test(summary) && /abc1234/.test(summary) && summary.includes('Result 6'));
     const section = await call(clients[0]!, 'get_report', { task: 'NC-1', section: 'Summary', offset: 1, limit: 1 });
     check('section and pagination return only requested lines', section.includes('Result 1') && !section.includes('Evidence'));
-    check('events remind about unmarked tasks after pull', (await call(clients[0]!, 'events_since')).includes('bez oceny'));
+    check('P71: unrated count shows once per client session', !(await call(clients[0]!, 'events_since')).includes('bez oceny'));
+    const late = new Client({ name: 'late-reader', version: '1' });
+    await late.connect(new StdioClientTransport({ command: process.execPath, args: ['--experimental-strip-types', '--no-warnings', path.resolve(import.meta.dirname, '../bin/agentctl.ts'), 'mcp'], env: h.env as Record<string, string>, stderr: 'pipe' }));
+    clients.push(late);
+    check('events remind about unmarked tasks after pull', (await call(late, 'events_since')).includes('bez oceny'));
     const status = await call(clients[0]!, 'status'); const json = await call(clients[0]!, 'status', { all: true, format: 'json' });
     check('default status concise; JSON opt-in parses', !status.includes('"tasks":') && JSON.parse(json).tasks.filter((r: { task: string }) => r.task.startsWith('NC-')).length === 6);
     fs.writeFileSync(path.join(cache, 'live-economy-sizes.json'), JSON.stringify({ before: Buffer.byteLength(full), after: Buffer.byteLength(summary) }, null, 2));

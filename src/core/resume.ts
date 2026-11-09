@@ -150,7 +150,7 @@ async function startResumed(ctx: Context, plan: ResumePlan, opts: { self?: SelfA
 
     await runner.exec('tmux', ['set-option', '-w', '-t', windowId || tmux.target(c.window), '@agentctl-role', 'task']);
     await tmux.typeCommand(c.window, command);
-    const settings = config.agents[c.agent], note = reportInstructions(attempt.attemptId, record.report);
+    const settings = config.agents[c.agent], note = reportInstructions(attempt.attemptId, record.report, record.reviewOf != null);
     const ready = await waitForReady(runner, tmux, c.window, { pattern: settings.readyPattern, emptyInput: true, trustPattern: settings.trustPattern, timeoutMs: Math.min(5000, settings.readyTimeout * 1000) });
     await queuePrompt(ctx, record, note);
     if (!ready.ready || await deliverPendingPrompt(ctx, c.window) !== 'sent') ctx.info(`${c.task}: report instructions pending until idle: ${note}`);

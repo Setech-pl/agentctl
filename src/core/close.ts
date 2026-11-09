@@ -1,3 +1,4 @@
+import { cleanWorktreeCache, worktreeCacheFreed } from './worktree-cache.ts';
 import { configureMeasurements, sizeOf } from './fs-measure.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -47,6 +48,9 @@ export async function closeTask(ctx: Context, taskArg: string, opts: CloseOption
   }
 
   if (record) {
+    await cleanWorktreeCache(ctx, record);
+    const cacheFreed = worktreeCacheFreed(ctx, record);
+    if (cacheFreed > 0) ctx.info(`${taskArg}: .cache cleanup: ${cacheFreed} bytes freed in total`);
     configureMeasurements(config.disk);
     const sizes = await Promise.all([...new Set(record.repos.filter(r => path.resolve(r.worktree) !== path.resolve(r.path)).map(r => r.worktree))].map(wt => sizeOf(wt, { fresh: true, now: () => runner.now() }).catch(() => null)));
     ctx.info(`${taskArg}: worktree size: ${sizes.some(n => n === null) ? 'n/d' : sizes.reduce<number>((sum, n) => sum + (n ?? 0), 0)} bytes${opts.rmWorktree ? ' before removal' : ' retained; inspect agentctl gc --preview'}`);

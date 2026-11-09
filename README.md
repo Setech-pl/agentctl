@@ -1068,3 +1068,9 @@ reclaimable bytes from the same safe default GC plan (dirty/shared/live
 worktrees are excluded). Budgeted readers report reclaimable size as `n/d`;
 run the full preview to measure it. Missing/pending measurements remain marked.
 `close` reports the retained task worktree size, or size before requested removal.
+
+`events_since` keeps historical events, but removes closed or pulled tasks’ decisions/actions from the attention summary. The unrated-task counter appears once per client session.
+
+For backend packages built with a client task, use project links such as `- {from: node_modules/@neon-city/sim, to: "{worktree:neon-city-backend}/packages/sim"}` and list `neon-city-backend` in that spec's `repos` with its own `base` and new `worktree`. Setup runs before linking; include the required build/test commands in `repos[].setup`. Existing `{task:ID,repo:NAME}` links still select a recorded worktree. New/queue previews and doctor warn about missing targets; when the linked Git repository has a spec/recorded base, they compare merge-base with target HEAD and warn if it is older or diverged. Doctor checks resolved links of active task records; project templates requiring task context are checked at preview time.
+
+After an explicit report-end has settled and the current turn has ended (with a stop timestamp covering the report), agentctl removes each task worktree’s `.cache` for Claude, Codex and Kimi. It keeps the main checkout, rejects aliased worktrees and symlinks escaping the task worktree, and preserves reports inside `.cache` by skipping cleanup. Cleanup also skips worktrees referenced by another open task. Close and GC show the recorded freed bytes. Set `report: {clean_worktree_cache: false}` in the global config to retain these directories.
