@@ -436,12 +436,15 @@ async function runLimits(deps: McpDeps): Promise<ToolResult> {
 
 const limitArg = z.number().int().min(0).max(50).optional();
 /** set_limits additionally accepts "off": the provider is disabled (no windows of it start). */
-const setLimitArg = z.union([z.number().int().min(0).max(50), z.literal('off')]).optional();
+const setLimitArg = z.union([z.number().int().min(0).max(50), z.string().regex(/^(?:[0-9]|[1-4][0-9]|50)$/), z.literal('off')]).optional();
 
-async function runSetLimits(deps: McpDeps, args: Partial<Record<AgentName, number | 'off'>> & { confirm?: boolean | undefined }): Promise<ToolResult> {
+async function runSetLimits(deps: McpDeps, args: Partial<Record<AgentName, number | string>> & { confirm?: boolean | undefined }): Promise<ToolResult> {
   return writeTool(deps, 'set_limits', { detail: `${PROVIDER_IDS.map(id => `${id}=${args[id] ?? '-'}`).join(' ')} confirm=${Boolean(args.confirm)}` }, async (ctx) => {
     const assignments: LimitAssignments = {};
-    for (const agent of activeProviders(ctx.config)) if (args[agent] !== undefined) assignments[agent] = args[agent] === 0 ? null : (args[agent] as number | 'off');
+    for (const agent of activeProviders(ctx.config)) if (args[agent] !== undefined) {
+      const value = args[agent] === 'off' ? 'off' : Number(args[agent]);
+      assignments[agent] = value === 0 ? null : value;
+    }
     if (Object.keys(assignments).length === 0) throw new AgentctlError(`give ${activeProviders(ctx.config).join(' and/or ')}`,  '0 removes a limit, "off" disables the provider.');
     const plan = planSetLimits(ctx.config, assignments);
     if (!args.confirm) return { text: `${plan.summary.join('\n')}\n\nNot changed yet. Show this to the user and ask; if they agree, call set_limits again with the same numbers and confirm: true.`, executed: false, announce: '' };

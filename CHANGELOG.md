@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- P84/P79: MCP set_limits accepts numeric strings as well as integers and "off", including optional providers. / P84/P79: MCP set_limits przyjmuje liczby zapisane jako tekst, liczby całkowite i "off", również dla opcjonalnych dostawców.
+
 - P83: CLI/MCP reads use watch-cached worktree sizes with reading age, never start filesystem walks or implicit GC estimates; queue listing reads only named dependencies. GC publishes its own removal accounting. / P83: odczyty CLI/MCP korzystają z rozmiarów zapisanych przez watch wraz z wiekiem pomiaru, bez skanowania worktree i automatycznych wycen GC; kolejka czyta tylko wskazane zależności. GC publikuje własne rozliczenie usuniętych danych.
 
 - RC: nc-workflow checks the needYou decision reminder before the whole-file get_report marks the author pulled; P71 omits pulled tasks' outputs from attention summaries. / RC: nc-workflow sprawdza przypomnienie o decyzji w needYou przed pełnym get_report, który oznacza autora jako pobranego; P71 pomija wyniki pobranych zadań w podsumowaniach.
