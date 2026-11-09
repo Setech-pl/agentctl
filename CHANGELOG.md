@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
-- Read-budget regression test: wall-clock budgets are asserted on a quiet host and become observational when a `node --version` probe shows a loaded host (the gate runs niced and background-throttled); functional assertions stay. / Test regresji czasu odczytu: progi czasu sprawdzane na nieobciążonym hoście, a przy obciążeniu wykazanym sondą `node --version` stają się obserwacyjne (gate działa z nice i ograniczeniem tła); asercje funkcjonalne pozostają.
+- Read-budget regression test: wall-clock budgets are asserted on a quiet host and become observational when a `node --version` probe shows a loaded host (the gate runs niced and background-throttled); cold CLI spawns are skipped there and functional assertions stay. / Test regresji czasu odczytu: progi czasu sprawdzane na nieobciążonym hoście, a przy obciążeniu wykazanym sondą `node --version` stają się obserwacyjne (gate działa z nice i ograniczeniem tła); zimne starty CLI są wtedy pomijane, asercje funkcjonalne pozostają.
 
 ## [0.19.2] - 2026-11-09
 
