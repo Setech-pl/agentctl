@@ -6,7 +6,7 @@ import type { AutoReviewSource, RawSpec, ResolvedSpec } from './spec.ts';
 import type { QueueEntry } from './queue.ts';
 import type { StatusRow } from './status.ts';
 import type { TaskRecord } from './taskstore.ts';
-import { findRecordAnywhere } from './taskstore.ts';
+import { readTaskRecordById } from './taskstore.ts';
 import { inspectReport } from './report-state.ts';
 import { withFileLock } from './file-lock.ts';
 import { loadProjectConfig } from './config.ts';
@@ -29,7 +29,7 @@ const BUSY_STATES = new Set(['working', 'background', 'limited', 'overloaded', '
 type GateConfig = Pick<GlobalConfig, 'stateDir' | 'cache' | 'reportSettleS'>;
 
 /** The author of a review: a current task, else one in the archive. The same lookup serves migration and the `review_of` check. */
-export const findAuthorRecord = (config: GlobalConfig, task: string): TaskRecord | undefined => findRecordAnywhere(config, task);
+export const findAuthorRecord = (config: GlobalConfig, task: string): TaskRecord | undefined => readTaskRecordById(config, task);
 
 /** Has the author delivered a finished report of the current attempt: an explicit report-end directive, not only a settled turn. */
 export function authorReportEnded(config: GateConfig, author: TaskRecord, nowMs: number): { ended: boolean; reason: string; mtime?: number } {

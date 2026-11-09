@@ -54,7 +54,7 @@ export async function liveWindows(ctx: Context): Promise<LiveWindow[]> {
     const r = recordByWindow.get(window);
     return Boolean(r?.pendingPrompt && r.promptDelivery === 'needs-attention' && !r.deliveryStartedAt);
   };
-  const rows = records.length ? await collectStatus(ctx, { progress: false, cachedOnly: true, records: { current: records, archived: [] } }) : [];
+  const rows = records.some(r => inspectReport(ctx.config, r, ctx.runner.now(), !r.attemptId).ready) ? await collectStatus(ctx, { progress: false, cachedOnly: true, records: { current: records, archived: [] } }) : [];
   const windows = names.map((window): LiveWindow => {
     const agent = agentByWindow.get(window);
     const reportReady = rows.some(r => r.windowName === window && r.state === 'report-ready');

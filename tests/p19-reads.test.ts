@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { Context } from '../src/core/context.ts';
+import { sizeOf } from '../src/core/fs-measure.ts';
 import { collectDisk } from '../src/core/disk.ts';
 import { planGc } from '../src/core/gc.ts';
 import { RealRunner } from '../src/core/runner.ts';
@@ -42,6 +43,7 @@ describe('P19: nothing the chat reads waits for a long operation', () => {
     const ctx = new Context(runner, config, () => {});
     let ticks = 0;
     const timer = setInterval(() => ticks++, 20);
+    await sizeOf(wt, { now: () => runner.now() }); // explicit background-owner sample
     const disk = await collectDisk(ctx);
     const afterDisk = ticks;
     await planGc(ctx);
@@ -59,6 +61,7 @@ describe('P19: nothing the chat reads waits for a long operation', () => {
     seedTask(config, 'B-1', { repos: [{ path: root, worktree: first }] });
     const runner = new DiskRunner({ dryRun: false, startTime: Date.now() });
     const ctx = new Context(runner, config, () => {});
+    await sizeOf(first, { now: () => runner.now() });
     assert.equal((await collectDisk(ctx, undefined, { budgetMs: 2000 })).worktreeBytes, 5);
     // a second task = a new set of worktrees = a new cache key; its tree is big
     const second = path.join(root, 'wt-second');
@@ -71,7 +74,8 @@ describe('P19: nothing the chat reads waits for a long operation', () => {
     const t0 = Date.now();
     const quick = await collectDisk(ctx, undefined, { budgetMs: 1 });
     assert.ok(Date.now() - t0 < 500);
-    assert.deepEqual([quick.measuring, quick.worktreeBytes], [true, 5], 'the last reading, flagged as still measuring');
+    assert.deepEqual([quick.measuring, quick.worktreeBytes], [true, null], 'new paths remain unknown until watch samples them');
+    await sizeOf(second, { now: () => runner.now() });
     const full = await collectDisk(ctx);
     assert.equal(full.worktreeBytes, 40_005);
     assert.equal(full.measuring, undefined);

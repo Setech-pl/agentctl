@@ -81,14 +81,21 @@ it('P83: watch samples one stale worktree per rate interval; readers reload old 
   } finally { clearInterval(keepAlive); await shutdownMeasurements(); }
 });
 
-it('P83: queue listing never opens unrelated TASK.md or report files', async () => {
+for (const archived of [false, true]) it(`P83: queue listing never opens unrelated records (archived author: ${archived})`, async () => {
   const { queueViews, saveEntry } = await import('../src/core/queue.ts');
-  const config = makeConfig(scratch.sub('dependencies'));
+  const { archiveDir } = await import('../src/core/taskstore.ts');
+  const config = makeConfig(scratch.sub(`dependencies-${archived}`));
   const unrelated = seedTask(config, 'UNRELATED');
-  seedTask(config, 'DEPENDENCY');
+  const author = seedTask(config, 'DEPENDENCY', { closed: archived });
+  if (archived) {
+    fs.mkdirSync(archiveDir(config), { recursive: true });
+    fs.renameSync(path.join(config.stateDir, author.window), path.join(archiveDir(config), author.window));
+    fs.mkdirSync(path.dirname(author.report), { recursive: true });
+    fs.writeFileSync(author.report, 'Verdict: PASS\n<!-- agentctl:report-end -->\n');
+  }
   const runner = new DiskRunner({ dryRun: false, respond: cmd => cmd === 'tmux' ? { code: 1 } : {} });
   const ctx = new Context(runner, config, () => {});
-  await saveEntry(ctx, { seq: 1, order: 1, task: 'WAIT', priority: 'normal', status: 'queued', queuedAt: new Date().toISOString(), agent: 'claude', model: 'opus', effort: 'high', after: ['DEPENDENCY'], spec: '---\ntask: WAIT\n---\nWait.' });
+  await saveEntry(ctx, { seq: 1, order: 1, task: 'WAIT', priority: 'normal', status: 'queued', queuedAt: new Date().toISOString(), agent: 'claude', model: 'opus', effort: 'high', after: ['DEPENDENCY'], ...(archived ? { autoReview: { author: 'DEPENDENCY', hash: 'hash', heads: {} } } : {}), spec: '---\ntask: WAIT\n---\nWait.' });
   const read = fs.readFileSync;
   let unrelatedReads = 0;
   fs.readFileSync = ((file: fs.PathOrFileDescriptor, ...args: unknown[]) => {
@@ -97,4 +104,16 @@ it('P83: queue listing never opens unrelated TASK.md or report files', async () 
   }) as typeof fs.readFileSync;
   try { assert.equal((await queueViews(ctx)).length, 1); assert.equal(unrelatedReads, 0); }
   finally { fs.readFileSync = read; }
+});
+
+it('P83: shared record parsing isolates mutable callers and observes header edits', async () => {
+  const { readTaskRecord, renderTaskMd } = await import('../src/core/taskstore.ts');
+  const config = makeConfig(scratch.sub('record-cache'));
+  const record = seedTask(config, 'CACHE');
+  const first = readTaskRecord(config, record.window)!;
+  first.report = '/mutated'; first.env.TOKEN = 'mutable';
+  const second = readTaskRecord(config, record.window)!;
+  assert.equal(second.report, record.report); assert.equal(second.env.TOKEN, undefined);
+  fs.writeFileSync(path.join(config.stateDir, record.window, 'TASK.md'), renderTaskMd({ ...record, model: 'changed' }, 'New prompt'));
+  assert.equal(readTaskRecord(config, record.window)!.model, 'changed');
 });

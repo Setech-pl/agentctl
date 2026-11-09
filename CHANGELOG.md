@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- P83 follow-up: bound archived/direct queue-author lookups, reuse immutable task-header parses, retain ready-slot hints and keep board queue/cohort labels visible alongside disk reading age. Legacy read tests now seed watch samples explicitly. / Uzupełnienie P83: ograniczone odczyty autorów z archiwum i zadań bezpośrednich, współdzielone niemutowalne wyniki parsowania nagłówków, zachowane podpowiedzi gotowych okien i widoczne etykiety kolejki/kohorty obok wieku pomiaru dysku. Starsze testy odczytu jawnie przygotowują pomiary watch.
+
 - Doctor --timings prints wall times and PASS/WARN read budgets for status, queue list, events and a dry queue preview without registering work. / Doctor --timings pokazuje czasy i progi PASS/WARN dla statusu, listy kolejki, zdarzeń i podglądu kolejki bez rejestrowania zadania.
 
 - Read-budget regression test: 400 mixed task records, reports up to 500 KB, 300,000 worktree files; cold CLI and MCP timings are asserted. MCP and queue previews use cached provider capacity instead of synchronous refresh. / Test regresji czasu odczytu: 400 zadań w różnych stanach, raporty do 500 KB i 300 000 plików worktree; sprawdzane są zimne starty CLI oraz MCP. Podglądy MCP i kolejki używają zapisanej dostępności dostawców zamiast odświeżania jej w wywołaniu.

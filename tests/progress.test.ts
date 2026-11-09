@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { Context } from '../src/core/context.ts';
+import { DiskRunner } from './helpers.ts';
 import { describe, it } from 'node:test';
 import { main } from '../src/cli.ts';
 import type { CliDeps } from '../src/cli.ts';
@@ -139,6 +141,8 @@ describe('PROGRESS in status', () => {
       stdout: (t) => out.push(t), stderr: (t) => out.push(t), readStdin: () => '', stdinIsTTY: false, loadConfig: () => config,
       confirm: undefined, readClipboard: async () => '', watchCommand: () => '', makeRunner: () => runner,
     };
+    const sampler = new DiskRunner({ dryRun: false, respond: (cmd, args, opts) => tmux.respond(cmd, args, opts) ?? git(cmd, args) });
+    await collectStatus(new Context(sampler, config, () => {}));
     assert.equal(await main(['status', '--json'], deps), 0);
     const rows = JSON.parse(out.join('')) as { task: string; progress: { commits: number; files: number; text: string } | null }[];
     assert.deepEqual(rows[0]?.progress && { commits: rows[0].progress.commits, files: rows[0].progress.files, text: rows[0].progress.text }, { commits: 2, files: 2, text: '2c 2f' });

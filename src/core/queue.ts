@@ -36,7 +36,7 @@ import { collectStatus } from './status.ts';
 import type { StatusRow } from './status.ts';
 import { resolveSpec, splitSpecs } from './spec.ts';
 import type { RawSpec, ResolvedSpec, AutoReviewSource } from './spec.ts';
-import { archiveDir, parseTaskRecord, findRecordAnywhere, listArchivedRecords, listTaskRecords, readTaskRecord, recordFromSpec, renderTaskMd, taskDir, taskFile } from './taskstore.ts';
+import { archiveDir, parseTaskRecord, readTaskRecordById, findRecordAnywhere, listArchivedRecords, listTaskRecords, readTaskRecord, recordFromSpec, renderTaskMd, taskDir, taskFile } from './taskstore.ts';
 import type { CancelSource, TaskRecord } from './taskstore.ts';
 import { queueHolds, usageSummaryLines } from './usage-limits.ts';
 import { AgentctlError, cohortKey, errorMessage, formatLocalTime, plural, windowName } from './util.ts';
@@ -221,13 +221,13 @@ export async function planQueueAdd(ctx: Context, raws: RawSpec[], opts: { agent?
 }
 
 /** Per spec: the order and where it will stand ("starts at once" or "waits: claude 2/2, 1 ahead"). */
-export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: QueueEntry[], live: { window?: string; agent?: AgentName; counted?: boolean }[], rows: StatusRow[] = []): string[] {
+export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: QueueEntry[], live: { window?: string; agent?: AgentName; counted?: boolean; reportReady?: boolean }[], rows: StatusRow[] = []): string[] {
   const { config } = ctx;
   const load: Record<AgentName, number> = perProvider(activeProviders(config), () => 0);
   for (const w of live) if (w.agent && w.counted !== false) load[w.agent]++;
   const ahead: Record<AgentName, number> = perProvider(activeProviders(config), () => 0);
   for (const e of waiting(entries)) ahead[e.agent]++;
-  const readyCount = rows.filter(r => r.state === 'report-ready' && r.window === 'alive').length;
+  const readyCount = live.filter(w => w.reportReady).length || rows.filter(r => r.state === 'report-ready' && r.window === 'alive').length;
   const lines: string[] = readyCount ? [`${readyCount} ${plural(readyCount, 'okno', 'okna', 'okien')} report-ready – close zwolni okna`] : [];
   let heavyUsed = heavyPreviewUsed(config, entries, live);
   for (const spec of specs) {
@@ -395,7 +395,7 @@ function directAuthorState(config: GlobalConfig, entry: QueueEntry, entries: Que
   if (!entry.directAuthor) return {};
   const author = entries.find(e => e.task === entry.directAuthor);
   if (author?.status === 'failed') return { failed: `author ${author.task} start failed: ${author.error ?? 'unknown reason'}. Fix and retry the author, then queue_retry ${entry.task}.` };
-  if (findRecordAnywhere(config, entry.directAuthor)) return {};
+  if (readTaskRecordById(config, entry.directAuthor)) return {};
   if (entry.noAgent && entry.authorPrepared && entry.directAuthorOrder) return {};
   if (author) return { waiting: `waiting for author ${entry.directAuthor}: setup in progress` };
   return { failed: `author ${entry.directAuthor} has no task record and its registered start was removed. Restore the author, then queue_retry ${entry.task}.` };
