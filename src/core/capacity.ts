@@ -55,9 +55,9 @@ export function capacityTrend(samples: UsageSample[], provider: AgentName, windo
 
 export { refreshCodexCapacity } from './providers/codex-usage.ts';
 
-export async function collectCapacity(ctx: Context, opts: { diskBudgetMs?: number } = {}) {
+export async function collectCapacity(ctx: Context, opts: { diskBudgetMs?: number; cachedOnly?: boolean } = {}) {
   const refreshNotes = perProvider(activeProviders(ctx.config), () => null as string | null);
-  for (const id of activeProviders(ctx.config)) refreshNotes[id] = await adapter(id).usage.refreshPlan?.(ctx) ?? null;
+  if (!opts.cachedOnly) for (const id of activeProviders(ctx.config)) refreshNotes[id] = await adapter(id).usage.refreshPlan?.(ctx) ?? null;
   const now = ctx.runner.now();
   const reader = openReader(ctx.config);
   const plans = readPlans(ctx.config, reader, now);

@@ -168,7 +168,7 @@ const fail = (text: string): ToolResult => ({ text, isError: true });
 const collectStatus: typeof collectStatusFull = (ctx, opts = {}) => collectStatusFull(ctx, { ...opts, cachedOnly: true, shallowClosed: true });
 const DISK_BUDGET_MS = 1000;
 const collectDisk = (ctx: Context, statfs?: undefined, opts: { detail?: boolean; offset?: number; limit?: number } = {}): Promise<DiskReport> => collectDiskFull(ctx, statfs, { ...opts, budgetMs: DISK_BUDGET_MS });
-const collectCapacity = (ctx: Context) => collectCapacityFull(ctx, { diskBudgetMs: DISK_BUDGET_MS });
+const collectCapacity = (ctx: Context) => collectCapacityFull(ctx, { diskBudgetMs: DISK_BUDGET_MS, cachedOnly: true });
 
 async function guarded(body: () => Promise<ToolResult>): Promise<ToolResult> {
   try {

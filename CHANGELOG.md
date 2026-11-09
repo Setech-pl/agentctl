@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Read-budget regression test: 400 mixed task records, reports up to 500 KB, 300,000 worktree files; cold CLI and MCP timings are asserted. MCP and queue previews use cached provider capacity instead of synchronous refresh. / Test regresji czasu odczytu: 400 zadań w różnych stanach, raporty do 500 KB i 300 000 plików worktree; sprawdzane są zimne starty CLI oraz MCP. Podglądy MCP i kolejki używają zapisanej dostępności dostawców zamiast odświeżania jej w wywołaniu.
+
 - P77: every two-phase preview_token tool accepts confirm with the token alone, restoring its validated preview arguments; preview fields remain mandatory on new previews. / P77: każde narzędzie dwuetapowe z preview_token przyjmuje potwierdzenie samym tokenem i odtwarza sprawdzone argumenty; nowy podgląd nadal wymaga swoich pól.
 
 - P84/P79: MCP set_limits accepts numeric strings as well as integers and "off", including optional providers. / P84/P79: MCP set_limits przyjmuje liczby zapisane jako tekst, liczby całkowite i "off", również dla opcjonalnych dostawców.
