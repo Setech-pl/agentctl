@@ -122,7 +122,10 @@ export async function collectActiveFiles(ctx: Context): Promise<TaskFiles[]> {
   for (const record of listTaskRecords(ctx.config)) {
     if (record.closed || record.cancelled || record.supersededBy || !live.has(record.window) || record.repos.length === 0) continue;
     const progress = await taskProgress(ctx.runner, record.repos);
-    if (progress) tasks.push(filesOfProgress(record.task, progress));
+    if (progress) {
+      tasks.push(filesOfProgress(record.task, progress));
+      if (!ctx.runner.dryRun) await ctx.runner.writeFile(path.join(ctx.config.stateDir, record.window, 'progress.json'), JSON.stringify(progress)).catch(() => undefined);
+    }
   }
   return tasks;
 }

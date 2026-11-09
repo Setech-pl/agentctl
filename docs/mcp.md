@@ -257,13 +257,13 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 | `send` | write | `task`, `text?`, `enter_only?`, `confirm?`, `token?`, `withdraw?` |
 | `new` | write | `spec?`, `agent?`, `reuse?`, `no_agent?`, `cohort?`, `wait_trust?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` |
 | `queue` | write | `spec?`, `cohort?`, `agent?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` |
-| `queue_rm` | write | `task`, `confirm?`, `preview_token?` |
+| `queue_rm` | write | `task?`, `confirm?`, `preview_token?` |
 | `cancel` | write | `task?`, `tasks?`, `cohort?`, `reason?`, `remove_worktree?`, `confirm?`, `preview_token?` |
-| `mark` | write | `task?`, `tasks?`, `cohort?`, `result`, `note?`, `confirm?`, `preview_token?` |
+| `mark` | write | `task?`, `tasks?`, `cohort?`, `result?`, `note?`, `confirm?`, `preview_token?` |
 | `away` | write | `on` |
-| `interrupt` | write | `task`, `confirm?`, `preview_token?` |
+| `interrupt` | write | `task?`, `confirm?`, `preview_token?` |
 | `close` | write | `task?`, `tasks?`, `cohort?`, `remove_worktree?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` |
-| `move` | write | `task`, `agent?`, `confirm?`, `preview_token?` |
+| `move` | write | `task?`, `agent?`, `confirm?`, `preview_token?` |
 | `queue_show` | read | `task` |
 | `mcp_check` | read |  |
 | `spec_example` | read |  |
@@ -273,20 +273,20 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 | `manager_status` | read |  |
 | `away_status` | read |  |
 | `report` | read | `task` |
-| `queue_retry` | write | `task`, `confirm?`, `preview_token?` |
-| `queue_up` | write | `task`, `confirm?`, `preview_token?` |
+| `queue_retry` | write | `task?`, `confirm?`, `preview_token?` |
+| `queue_up` | write | `task?`, `confirm?`, `preview_token?` |
 | `queue_pause` | write | `confirm?`, `preview_token?` |
 | `queue_resume` | write | `confirm?`, `preview_token?` |
-| `unblock` | write | `task`, `drop_after?`, `confirm?`, `preview_token?` |
-| `cohort_add` | write | `cohort`, `tasks`, `confirm?`, `preview_token?` |
-| `cohort_remove` | write | `tasks`, `confirm?`, `preview_token?` |
+| `unblock` | write | `task?`, `drop_after?`, `confirm?`, `preview_token?` |
+| `cohort_add` | write | `cohort?`, `tasks?`, `confirm?`, `preview_token?` |
+| `cohort_remove` | write | `tasks?`, `confirm?`, `preview_token?` |
 | `cohort_archive` | write | `cohorts?`, `older_than?`, `confirm?`, `preview_token?` |
-| `cohort_note` | write | `cohort`, `text`, `confirm?`, `preview_token?` |
-| `hide` | write | `tasks`, `confirm?`, `preview_token?` |
-| `unhide` | write | `tasks`, `confirm?`, `preview_token?` |
+| `cohort_note` | write | `cohort?`, `text?`, `confirm?`, `preview_token?` |
+| `hide` | write | `tasks?`, `confirm?`, `preview_token?` |
+| `unhide` | write | `tasks?`, `confirm?`, `preview_token?` |
 | `archive` | write | `older_than?`, `cohort?`, `confirm?`, `preview_token?` |
-| `adopt` | write | `task`, `report`, `window?`, `worktree?`, `agent?`, `model?`, `effort?`, `confirm?`, `preview_token?` |
-| `report_from` | write | `task`, `from`, `force?`, `confirm?`, `preview_token?` |
+| `adopt` | write | `task?`, `report?`, `window?`, `worktree?`, `agent?`, `model?`, `effort?`, `confirm?`, `preview_token?` |
+| `report_from` | write | `task?`, `from?`, `force?`, `confirm?`, `preview_token?` |
 | `limits_release` | write | `claude?`, `codex?`, `confirm?`, `preview_token?` |
 | `manager_start` | write | `project?`, `name?`, `model?`, `effort?`, `confirm?`, `preview_token?` |
 | `manager_stop` | write | `confirm?`, `preview_token?` |
@@ -339,6 +339,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 - `peek`: `-n, --lines &lt;n&gt;`
 - `mcp install`: `--desktop`, `--claude-code`, `--config &lt;file&gt;`, `--dry-run`, `-y, --yes`
 - `mcp uninstall`: `--desktop`, `--claude-code`, `--config &lt;file&gt;`, `--dry-run`, `-y, --yes`
+- `doctor`: `--timings`
 
 <!-- END GENERATED MCP PARITY -->
 

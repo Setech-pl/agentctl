@@ -1,3 +1,4 @@
+import { collectStatus } from '../src/core/status.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -90,6 +91,7 @@ describe('mcp: queue read tools', () => {
     const t = setup('ov');
     t.running('A-1', ['x.ts', 'y.ts']);
     t.running('A-2', ['y.ts']);
+    await collectStatus(new Context(t.runner, t.config, () => {})); // watch publishes progress before the read
     t.running('A-3', ['z.ts']);
     const r = await t.call('overlap');
     assert.match(r.text, /^1 colliding pair;/);
@@ -102,6 +104,7 @@ describe('mcp: queue read tools', () => {
     const t = setup('st', 'mcp: {allow: [queue]}\n');
     t.running('A-1', ['y.ts']);
     t.running('A-2', ['y.ts']);
+    await collectStatus(new Context(t.runner, t.config, () => {})); // watch publishes progress before the read
     await t.call('queue', { spec: t.spec('Q-1') });
     await t.call('queue', { spec: t.spec('Q-1'), confirm: true });
     const r = await t.call('status');
@@ -148,6 +151,7 @@ describe('mcp: queue write tools', () => {
   it('validates like the CLI (unknown after, a circle), refuses setup, and shows touches warnings and the review hint in the summary', async () => {
     const t = setup('qv', 'mcp: {allow: [queue]}\n');
     t.running('A-1', ['src/menu/a.ts']);
+    await collectStatus(new Context(t.runner, t.config, () => {})); // cached collision sample from watch
     const bad = await t.call('queue', { spec: t.spec('Q-1', 'after: NOPE-1\n') });
     assert.equal(bad.isError, true);
     assert.match(bad.text, /after NOPE-1: there is no such task/);

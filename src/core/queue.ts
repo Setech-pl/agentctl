@@ -623,8 +623,8 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
 }
 
 /** Queue reads load only explicitly named dependencies, never every report or task record. */
-export async function queueDependencyRows(ctx: Context, entries: readonly Pick<QueueEntry, 'after' | 'autoReview'>[]): Promise<StatusRow[]> {
-  const ids = new Set(entries.flatMap(e => [...e.after, ...(e.autoReview ? [e.autoReview.author] : [])]));
+export async function queueDependencyRows(ctx: Context, entries: readonly (Pick<QueueEntry, 'after' | 'autoReview'> & { reviewOf?: string; reviewOfAll?: string[] })[]): Promise<StatusRow[]> {
+  const ids = new Set(entries.flatMap(e => [...e.after, ...(e.reviewOfAll ?? (e.reviewOf ? [e.reviewOf] : [])), ...(e.autoReview ? [e.autoReview.author] : [])]));
   if (!ids.size) return [];
   const current: TaskRecord[] = [], archived: TaskRecord[] = [];
   for (const task of ids) {

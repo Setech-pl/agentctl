@@ -1080,3 +1080,5 @@ Czas odczytu: status, lista kolejki, zdarzenia i podglądy MCP nie mierzą workt
 MCP `set_limits` przyjmuje liczby całkowite lub zapisane jako tekst (`2` lub `"2"`) oraz `"off"` dla każdego włączonego dostawcy. Zakres pozostaje 0–50; zero usuwa limit.
 
 Każde narzędzie MCP z `preview_token` można potwierdzić, wysyłając tylko `confirm: true` i token; zadanie oraz pozostałe argumenty pochodzą z zapisanego podglądu. Nowy podgląd nadal wymaga zwykłych argumentów.
+
+Po aktualizacji uruchom `agentctl doctor --timings`: czas wykonania poleceń (bez startu Node) dla statusu (<1500 ms), listy kolejki (<500 ms), zdarzeń i podglądu kolejki (<2000 ms każde), z oceną PASS/WARN. Podgląd nie rejestruje ani nie uruchamia zadania.

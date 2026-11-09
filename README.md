@@ -1080,3 +1080,5 @@ Read latency: status, queue listing, events and MCP previews never measure workt
 MCP `set_limits` accepts integers or numeric strings (`2` or `"2"`), plus `"off"`, for every enabled provider. The range stays 0–50; zero removes the limit.
 
 For every MCP tool exposing `preview_token`, confirmation may send only `confirm: true` and that token; task and other arguments come from the stored preview. A new preview still requires its normal arguments.
+
+After upgrading, run `agentctl doctor --timings`: command wall times (excluding Node startup) for status (<1500 ms), queue list (<500 ms), events and a dry queue preview (<2000 ms each), with PASS/WARN. It never registers or starts the preview task.

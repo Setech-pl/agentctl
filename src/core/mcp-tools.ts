@@ -1580,13 +1580,13 @@ for (const tool of MCP_TOOLS) {
   if (!tool.description.includes('CLI:')) tool.description += ` Use when the user needs this operation. CLI: agentctl ${cli}.`;
   if (!confirmedTools.has(tool.name)) continue;
   const previewInput = tool.input;
-  tool.input = { ...Object.fromEntries(Object.entries(tool.input).map(([name, schema]) => [name, schema.optional()])), confirm: confirmArg, preview_token: z.string().optional().describe('Token returned by this preview. Independent previews can be confirmed in any order if their scope is unchanged. A confirm may carry only this token: the stored arguments then execute.') };
+  tool.input = { ...Object.fromEntries(Object.entries(tool.input).map(([name, schema]) => [name, z.optional(schema)])), confirm: confirmArg, preview_token: z.string().optional().describe('Token returned by this preview. Independent previews can be confirmed in any order if their scope is unchanged. A confirm may carry only this token: the stored arguments then execute.') };
   tool.description += ' Two steps are mandatory: preview, then confirm: true with identical arguments — or with preview_token only, which executes the stored arguments (for new/queue the spec need not be resent). A changed scope requires a new preview.';
   const original = tool.run;
   tool.run = (deps, args) => guarded(async () => {
     const ctx = deps.context(() => {});
     if (!ctx.config.mcp.allow.includes(tool.name as McpWriteTool)) return writeTool(deps, tool.name as McpWriteTool, {}, async () => { throw new Error('unreachable'); });
-    if (tool.name === 'mark' && planMark(ctx, args as MarkSelection).length === 1) return original(deps, args);
+    if (tool.name === 'mark' && !(args.confirm && args.preview_token) && planMark(ctx, args as MarkSelection).length === 1) return original(deps, args);
     if (tool.name === 'new' && !(args.confirm && args.preview_token)) {
       // A task that was handed to the watcher is being started (or failed to): a second preview or confirm, with or without a token, reports that state and starts nothing.
       let known: ReturnType<typeof findDirectStart>[] = [];
