@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Read-budget regression test: wall-clock budgets are asserted on a quiet host and become observational when a `node --version` probe shows a loaded host (the gate runs niced and background-throttled); functional assertions stay. / Test regresji czasu odczytu: progi czasu sprawdzane na nieobciążonym hoście, a przy obciążeniu wykazanym sondą `node --version` stają się obserwacyjne (gate działa z nice i ograniczeniem tła); asercje funkcjonalne pozostają.
+
 ## [0.19.2] - 2026-11-09
 
 - Hotfix release: package and lockfile versions are 0.19.2; restores fast read paths on large homes (P83 read-path regression), numeric-string MCP limits (P84/P79) and token-only two-phase confirms (P77). / Wydanie poprawkowe: wersje pakietu i lockfile to 0.19.2; przywraca szybkie odczyty na dużych katalogach (regresja ścieżek odczytu P83), liczby jako tekst w limitach MCP (P84/P79) i potwierdzenia dwuetapowe samym tokenem (P77).
