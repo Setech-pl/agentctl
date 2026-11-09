@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- P83: CLI/MCP reads use watch-cached worktree sizes with reading age, never start filesystem walks or implicit GC estimates; queue listing reads only named dependencies. GC publishes its own removal accounting. / P83: odczyty CLI/MCP korzystają z rozmiarów zapisanych przez watch wraz z wiekiem pomiaru, bez skanowania worktree i automatycznych wycen GC; kolejka czyta tylko wskazane zależności. GC publikuje własne rozliczenie usuniętych danych.
+
 - RC: nc-workflow checks the needYou decision reminder before the whole-file get_report marks the author pulled; P71 omits pulled tasks' outputs from attention summaries. / RC: nc-workflow sprawdza przypomnienie o decyzji w needYou przed pełnym get_report, który oznacza autora jako pobranego; P71 pomija wyniki pobranych zadań w podsumowaniach.
 
 - RC: live-economy expects the unrated count once per client session (P71) and checks the after-pull reminder on a fresh client session; the manager session had already consumed its one show. / RC: live-economy oczekuje licznika bez oceny raz na sesję klienta (P71) i sprawdza przypomnienie po pobraniu na świeżej sesji klienta; sesja managera już zużyła swoje jedno pokazanie.

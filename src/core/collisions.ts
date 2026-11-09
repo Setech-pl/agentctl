@@ -150,10 +150,23 @@ export function renderOverlaps(overlaps: readonly Overlap[], limit = 20): string
  * For every spec with `touches`: the active tasks of the same repository that already change files matching its globs.
  * Returns warning lines (empty when there is nothing to say). A spec without `touches` is not checked.
  */
-export async function touchWarnings(ctx: Context, specs: readonly ResolvedSpec[]): Promise<string[]> {
+async function cachedActiveFiles(ctx: Context): Promise<TaskFiles[]> {
+  const live = new Set(await ctx.tmux.listWindows());
+  const active: TaskFiles[] = [];
+  for (const record of listTaskRecords(ctx.config)) {
+    if (!live.has(record.window) || record.closed || record.cancelled) continue;
+    try {
+      const progress = JSON.parse(fs.readFileSync(path.join(ctx.config.stateDir, record.window, 'progress.json'), 'utf8'));
+      if (progress?.repos) active.push(filesOfProgress(record.task, progress));
+    } catch { /* watch has not sampled this task yet */ }
+  }
+  return active;
+}
+
+export async function touchWarnings(ctx: Context, specs: readonly ResolvedSpec[], opts: { cachedOnly?: boolean } = {}): Promise<string[]> {
   const asking = specs.filter((s) => s.touches.length > 0);
   if (asking.length === 0 || !ctx.config.collisions.enabled) return [];
-  const active = await collectActiveFiles(ctx);
+  const active = opts.cachedOnly ? await cachedActiveFiles(ctx) : await collectActiveFiles(ctx);
   const warnings: string[] = [];
   for (const spec of asking) {
     for (const repo of spec.repos) {

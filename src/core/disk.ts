@@ -1,4 +1,3 @@
-import { planGc } from './gc.ts';
 import { readQueue } from './queue.ts';
 import { resolveSpec, splitSpecs } from './spec.ts';
 import fs from 'node:fs';
@@ -7,19 +6,19 @@ import { loadProjectConfig } from './config.ts';
 import type { Context } from './context.ts';
 import { listTaskRecords, listArchivedRecords } from './taskstore.ts';
 import type { TaskRecord } from './taskstore.ts';
-import { cachedMeasurement, configureMeasurements, requestMeasurement, restoreMeasurements } from './fs-measure.ts';
+import { cachedMeasurement, configureMeasurements, requestMeasurement, restoreMeasurements, lastMeasurement } from './fs-measure.ts';
 import type { PathMeasurement } from './fs-measure.ts';
 import { resolvePath } from './util.ts';
 import { recordJournal } from './journal.ts';
 import type { Notifier } from './notify.ts';
+import { fileVersion } from './file-version.ts';
 import { withFileLock } from './file-lock.ts';
 
 export type DiskLevel = 'ok' | 'warn' | 'critical' | 'unknown';
 export interface DiskVolume { device: string | null; paths: string[]; availableBytes: number | null; totalBytes: number | null; level: DiskLevel; error?: string }
 export interface DiskReport { reclaimableBytes?: number | null; gcHint?: boolean; measurementError?: string; /** The sizes below are the last ones measured (or none yet): a measurement is still running in the background. */ measuring?: boolean; worktreeCount?: number; largestWorktrees?: { path: string; bytes: number }[]; pathsTotal?: number; pathsOffset?: number; pathsNextOffset?: number | null; volumes: DiskVolume[]; worktreeBytes: number | null; measuredAt: string; level: DiskLevel }
 export const DISK_INTERVAL_MS = 5 * 60_000;
-const inventories = new Map<string, { id: string; signature?: string }>();
-const restored = new Set<string>();
+const restored = new Map<string, string>();
 export function diskLevel(bytes: number | null, warnGb: number, criticalGb: number): DiskLevel {
   return bytes === null ? 'unknown' : bytes < criticalGb * 1024 ** 3 ? 'critical' : bytes < warnGb * 1024 ** 3 ? 'warn' : 'ok';
 }
@@ -28,13 +27,8 @@ function existingAncestor(target: string): string {
   while (!fs.existsSync(current) && path.dirname(current) !== current) current = path.dirname(current);
   return current;
 }
-/**
- * `budgetMs`: how long this call may wait for the size of the worktrees (the MCP server passes about a second). The walk of a few dozen worktrees
- * with node_modules takes minutes; it continues in the background (asynchronously, never on the event loop) and the call answers with the last
- * reading, or with "n/d" and `measuring: true` when there is none yet. Without a budget the call waits for the measurement.
- */
+/** Read cached sizes only. Watch owns measurement jobs; no read starts a walk or writes the size cache. */
 export async function collectDisk(ctx: Context, statfs = fs.promises.statfs, opts: { detail?: boolean; offset?: number; limit?: number; budgetMs?: number; records?: TaskRecord[] } = {}): Promise<DiskReport> {
-  configureMeasurements(ctx.config.disk);
   const records = opts.records ?? [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)];
   const targets = new Set([ctx.config.cache, ctx.config.stateDir]);
   if (ctx.config.worktreeRoot) targets.add(resolvePath(ctx.config.worktreeRoot));
@@ -74,58 +68,22 @@ export async function collectDisk(ctx: Context, statfs = fs.promises.statfs, opt
   }
   const worktrees = [...new Set(records.flatMap((r) => r.repos.map((r) => r.worktree)))].sort();
   const sizeFile = path.join(path.dirname(ctx.config.path), 'disk-sizes.json');
-  if (!restored.has(sizeFile)) {
-    restored.add(sizeFile);
+  let version: string | undefined;
+  try { version = fileVersion(fs.statSync(sizeFile, { bigint: true })); } catch { /* no persisted sample yet */ }
+  if (!version || restored.get(sizeFile) !== version) {
+    if (version) restored.set(sizeFile, version);
     try {
       const stored = JSON.parse(fs.readFileSync(sizeFile, 'utf8'));
       // Old aggregate timestamps cannot establish the ages of individual paths.
       if (stored.version === 2) restoreMeasurements(stored.entries, ctx.runner.now());
     } catch { /* first reading, torn or incompatible cache */ }
   }
-  const id = JSON.stringify(worktrees);
-  let inventory = inventories.get(ctx.config.path);
-  if (!inventory || inventory.id !== id) { inventory = { id }; inventories.set(ctx.config.path, inventory); }
-  const current = inventory;
-  const leases = worktrees.map(wt => {
-    try { return requestMeasurement(wt, { background: opts.budgetMs !== undefined, now: () => ctx.runner.now() }); }
-    catch (error) { return { promise: Promise.reject<PathMeasurement>(error), startedAt: Date.now(), release() {} }; }
-  });
-  const done = Promise.allSettled(leases.map(l => l.promise)).then(results => {
-    for (const lease of leases) lease.release();
-    return results;
-  });
-  const entries = (): PathMeasurement[] => worktrees.flatMap(wt => {
-    try { const m = cachedMeasurement(wt); return m ? [m] : []; } catch { return []; }
-  });
-  // Persist only the current inventory. Older consumers join path jobs; they never publish a superseded aggregate.
-  void done.then(async results => {
-    if (results.some(r => r.status === 'rejected') || inventories.get(ctx.config.path) !== current) return;
-    const values = entries();
-    const signature = JSON.stringify(values);
-    if (current.signature === signature) return;
-    current.signature = signature;
-    try { await ctx.runner.writeFile(sizeFile, JSON.stringify({ version: 2, entries: values })); }
-    catch { if (current.signature === signature) current.signature = undefined; }
-  }).catch(() => undefined);
-  let pending = false;
-  let completed: Awaited<typeof done> | undefined;
-  if (opts.budgetMs === undefined) completed = await done;
-  else {
-    const known = entries().length > 0;
-    const startedAt = Math.min(Date.now(), ...leases.map(l => l.startedAt));
-    const wait = Math.max(0, (known ? Math.min(opts.budgetMs, 250) : opts.budgetMs) - (Date.now() - startedAt));
-    let timer: NodeJS.Timeout | undefined;
-    completed = await Promise.race([done, new Promise<undefined>(resolve => { timer = setTimeout(() => resolve(undefined), wait); })]);
-    clearTimeout(timer);
-    pending = completed === undefined;
-  }
-  const values = entries();
-  const failures = completed?.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
-  const measurementError = failures?.length ? String(failures[0]!.reason instanceof Error ? failures[0]!.reason.message : failures[0]!.reason) : undefined;
+  const values = worktrees.flatMap(wt => { const m = lastMeasurement(wt); return m ? [m] : []; });
+  const pending = values.length < worktrees.length;
+  const measurementError = undefined;
   const measuredAt = values.length ? Math.min(...values.map(m => m.at)) : ctx.runner.now();
-  const worktreeBytes = values.length || worktrees.length === 0 ? values.reduce((n, m) => n + m.bytes, 0) : null;
+  const worktreeBytes = values.length === worktrees.length ? values.reduce((n, m) => n + m.bytes, 0) : null;
   const largestWorktrees = values.map(m => ({ path: m.target, bytes: m.bytes })).sort((a, b) => b.bytes - a.bytes || a.path.localeCompare(b.path)).slice(0, 5);
-  if (!measurementError && values.length < worktrees.length) pending = true;
   // Compare sizes only with their own filesystem; do not charge one disk for another's worktrees.
   const byDevice = new Map<string, number>();
   for (const measurement of values) {
@@ -139,8 +97,8 @@ export async function collectDisk(ctx: Context, statfs = fs.promises.statfs, opt
     if (volume.totalBytes && bytes / volume.totalBytes * 100 > ctx.config.disk.worktreeSharePercent && volume.level !== 'critical') volume.level = 'warn';
   }
   const gcHint = [...volumes.values()].some(v => v.level === 'warn' || v.level === 'critical');
-  // Budgeted status consumers keep their response bound; a full preview resolves n/d explicitly.
-  const reclaimableBytes = gcHint && opts.budgetMs === undefined ? await planGc(ctx).then(p => p.freeBytes).catch(() => null) : null;
+  // A disk read never computes a GC plan; that belongs to an explicit gc preview.
+  const reclaimableBytes = null;
   const all = [...volumes.values()];
   const level = (['critical', 'warn', 'unknown', 'ok'] as const).find((l) => all.some((v) => v.level === l)) ?? 'unknown';
   const offset = opts.offset ?? 0, limit = Math.min(opts.limit ?? 20, 100);
@@ -154,25 +112,48 @@ function readingAge(ageMs: number): string {
   return minutes < 120 ? `${minutes} min` : `${Math.round(minutes / 60)} h`;
 }
 export function diskLine(disk: DiskReport, now: number = Date.now()): string {
-  const age = Math.max(0, now - Date.parse(disk.measuredAt)) > READING_AGE_WARN_MS ? `, ${readingAge(now - Date.parse(disk.measuredAt))} old` : '';
+  const age = `, ${readingAge(Math.max(0, now - Date.parse(disk.measuredAt)))} old`;
   const note = disk.measuring ? ` (measuring, last reading${age})` : disk.measurementError ? ` (measurement failed, last reading${age})` : age ? ` (last reading${age})` : '';
   return `Disk: ${disk.level}; free ${disk.volumes.map((v) => v.availableBytes === null ? 'n/d' : `${(v.availableBytes / 1024 ** 3).toFixed(1)} GiB`).join(' / ')}; agentctl worktrees ${disk.worktreeBytes === null ? 'n/d' : `${(disk.worktreeBytes / 1024 ** 3).toFixed(1)} GiB`}${note}${disk.level === 'critical' || disk.level === 'warn' ? `; run agentctl gc --preview (gc_preview); reclaimable ${disk.reclaimableBytes ?? 'n/d'} bytes` : ''}`;
 }
 
 /**
- * After `gc --apply`: re-measure at once — the board can show a cached reading for minutes (P69: it went on showing the
- * worktrees gc had just removed) — and record what changed, so status, the board and the events agree with the disk again.
+ * After gc, publish gc's own accounting. Never walk surviving worktrees to explain bytes just removed.
  */
 export async function refreshDiskAfterGc(ctx: Context, freedBytes: number): Promise<string | null> {
   if (ctx.runner.dryRun) return null;
+  await persistDiskMeasurements(ctx);
   const disk = await collectDisk(ctx);
   const free = disk.volumes.map((v) => v.availableBytes === null ? 'n/d' : `${(v.availableBytes / 1024 ** 3).toFixed(1)} GiB`).join(' / ');
   const text = `gc freed ${(freedBytes / 1024 ** 3).toFixed(1)} GiB, free now ${free}`;
   await recordJournal(ctx, { kind: 'gc-freed', text });
   return text;
 }
+async function persistDiskMeasurements(ctx: Context): Promise<void> {
+  const worktrees = [...new Set([...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)].flatMap(r => r.repos.map(r => r.worktree)))];
+  const entries = worktrees.flatMap(wt => { const m = lastMeasurement(wt); return m ? [m] : []; });
+  await ctx.runner.writeFile(path.join(path.dirname(ctx.config.path), 'disk-sizes.json'), JSON.stringify({ version: 2, entries }));
+}
+const refreshing = new Set<string>();
+const refreshed = new Map<string, number>();
+/** Incremental watch inventory: one stale worktree per tick, at most once per 5 seconds; workers run at nice 10. */
+export async function refreshDiskMeasurements(ctx: Context): Promise<void> {
+  const key = ctx.config.path, now = ctx.runner.now();
+  if (ctx.runner.dryRun || refreshing.has(key) || now - (refreshed.get(key) ?? -Infinity) < 5000) return;
+  refreshed.set(key, now);
+  await collectDisk(ctx); // restore persisted readings without scheduling any work
+  const targets = [...new Set([...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)].flatMap(r => r.repos.map(r => r.worktree)))];
+  const target = targets.sort((a, b) => (lastMeasurement(a)?.at ?? 0) - (lastMeasurement(b)?.at ?? 0)).find(wt => !cachedMeasurement(wt) || now - lastMeasurement(wt)!.at >= DISK_INTERVAL_MS);
+  if (!target) return;
+  configureMeasurements(ctx.config.disk);
+  refreshing.add(key);
+  const lease = requestMeasurement(target, { background: true, now: () => ctx.runner.now() });
+  try { await lease.promise; await persistDiskMeasurements(ctx); }
+  finally { lease.release(); refreshing.delete(key); }
+}
 const sampled = new Map<string, number>();
 export async function diskTick(ctx: Context, notifier: Notifier): Promise<void> {
+  void refreshDiskMeasurements(ctx).catch(() => undefined);
   const file = path.join(path.dirname(ctx.config.path), 'disk-state.json');
   if (ctx.runner.dryRun || ctx.runner.now() - (sampled.get(file) ?? -Infinity) < DISK_INTERVAL_MS) return;
   sampled.set(file, ctx.runner.now());

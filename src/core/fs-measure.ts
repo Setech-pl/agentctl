@@ -29,6 +29,12 @@ function identityOf(target: string): string {
   try { const st = fs.lstatSync(target); return `${st.dev}:${st.ino}:${st.birthtimeMs}:${st.mtimeMs}`; }
   catch (error) { if (['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) return 'missing'; throw error; }
 }
+/** Last reading survives TTL expiry and root changes until watch refreshes it. Reads never invalidate it. */
+export function lastMeasurement(target: string): PathMeasurement | undefined { return cache.get(path.resolve(target)); }
+export function removedMeasurement(target: string, at: number): void {
+  target = path.resolve(target);
+  remember({ target, identity: identityOf(target), at, bytes: 0, newest: 0 });
+}
 export function cachedMeasurement(target: string): PathMeasurement | undefined {
   target = path.resolve(target);
   const value = cache.get(target);
@@ -39,9 +45,9 @@ export function restoreMeasurements(values: unknown, now: number): void {
   if (!Array.isArray(values)) return;
   for (const item of values) {
     if (!item || typeof item.target !== 'string' || typeof item.identity !== 'string' || ![item.at, item.bytes, item.newest].every(n => typeof n === 'number' && Number.isFinite(n) && n >= 0)) continue;
-    if (item.at > now || now - item.at >= MEASUREMENT_TTL_MS) continue;
+    if (item.at > now) continue;
     const target = path.resolve(item.target);
-    if (!cache.has(target) && identityOf(target) === item.identity) remember({ ...item, target });
+    if (!cache.has(target) || cache.get(target)!.at <= item.at) remember({ ...item, target });
   }
 }
 function remember(value: PathMeasurement): void {
@@ -86,6 +92,7 @@ export function requestMeasurement(target: string, opts: MeasurementOptions = {}
 const WALKER = `
 const {parentPort, workerData} = require('node:worker_threads');
 const fs = require('node:fs'); const path = require('node:path');
+try { require('node:os').setPriority(0, 10); } catch {}
 function walk(target) {
  let st; try { st=fs.lstatSync(target); } catch(e) { if(['ENOENT','ENOTDIR'].includes(e.code))return {bytes:0,newest:0}; throw e; }
  if(!st.isDirectory()) return {bytes:st.size,newest:st.mtimeMs};

@@ -15,7 +15,7 @@ import { cancelledTasks, unmetAfter, waitingText } from './depends.ts';
 import { explicitOnlyModel } from './matrix.ts';
 import { slotHolders } from './limits.ts';
 import { collectStatus } from './status.ts';
-import { listTaskRecords } from './taskstore.ts';
+import { listTaskRecords, readTaskRecord } from './taskstore.ts';
 import { AgentctlError, Problems } from './util.ts';
 
 export interface PlanOptions {
@@ -47,17 +47,14 @@ const label = (o: Order): string => `${o.agent} ${formatModelEffort(o)}`;
 /** Windows currently in the session, each tagged with the agent that agentctl started in it, then the places held by reservations and external sessions. */
 export async function liveWindows(ctx: Context): Promise<LiveWindow[]> {
   const names = await ctx.tmux.listWindows();
-  const agentByWindow = new Map<string, AgentName>();
-  for (const record of listTaskRecords(ctx.config)) if (record.agent !== 'unknown') agentByWindow.set(record.window, record.agent);
-  const records = listTaskRecords(ctx.config);
-  const recordByWindow = new Map(records.map((r) => [r.window, r]));
-  // A start that failed before any paste (never ready, a startup dialog): the open window is evidence for a human, not a running agent — it holds no slot.
+  const records = names.flatMap(window => { const record = readTaskRecord(ctx.config, window); return record ? [record] : []; });
+  const agentByWindow = new Map(records.filter(r => r.agent !== 'unknown').map(r => [r.window, r.agent as AgentName]));
+  const recordByWindow = new Map(records.map(r => [r.window, r]));
   const neverReady = (window: string): boolean => {
     const r = recordByWindow.get(window);
     return Boolean(r?.pendingPrompt && r.promptDelivery === 'needs-attention' && !r.deliveryStartedAt);
   };
-  const candidates = records.some(r => inspectReport(ctx.config, r, ctx.runner.now(), !r.attemptId).ready);
-  const rows = candidates ? await collectStatus(ctx, { progress: false }) : [];
+  const rows = records.length ? await collectStatus(ctx, { progress: false, cachedOnly: true, records: { current: records, archived: [] } }) : [];
   const windows = names.map((window): LiveWindow => {
     const agent = agentByWindow.get(window);
     const reportReady = rows.some(r => r.windowName === window && r.state === 'report-ready');
@@ -86,7 +83,7 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
   const live = ctx.runner.dryRun ? [] : await liveWindows(ctx);
   // `after` belongs to the queue: `new` starts a task now, so what it waits for must be done already.
   if (!opts.skipAfter && !ctx.runner.dryRun && specs.some((s) => s.after.length > 0)) {
-    const rows = await collectStatus(ctx, { progress: false, archived: true });
+    const rows = await collectStatus(ctx, { progress: false, cachedOnly: true, archived: true });
     for (const spec of specs) {
       const unmet = unmetAfter(spec.after, rows, spec.afterVerdicts);
       const gone = cancelledTasks(rows);

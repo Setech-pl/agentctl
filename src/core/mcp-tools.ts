@@ -1,3 +1,4 @@
+import { queueViews as coreQueueViews } from './queue.ts';
 import { withStartLock } from './start-lock.ts';
 import { withResponseBudget } from './response-budget.ts';
 import type { BudgetClock } from './response-budget.ts';
@@ -69,7 +70,7 @@ import { answerMenu } from './answer.ts';
 import { withdrawPrompt } from './prompt-queue.ts';
 import { resolveSpec, splitSpecs } from './spec.ts';
 import type { RawSpec } from './spec.ts';
-import { collectStatus, shownRows } from './status.ts';
+import { collectStatus as collectStatusFull, shownRows } from './status.ts';
 import type { StatusRow } from './status.ts';
 import { summarizeSpecs } from './summary.ts';
 import { listArchivedRecords, listTaskRecords, readTaskPrompt, setHeaderField, taskFile } from './taskstore.ts';
@@ -164,6 +165,7 @@ const fail = (text: string): ToolResult => ({ text, isError: true });
  * How long a tool of the chat may wait for the size of the worktrees. The walk of dozens of worktrees with node_modules takes minutes, and no read
  * may wait for it: it runs in the background and the answer carries the last reading (or n/d and "measuring").
  */
+const collectStatus: typeof collectStatusFull = (ctx, opts = {}) => collectStatusFull(ctx, { ...opts, cachedOnly: true, shallowClosed: true });
 const DISK_BUDGET_MS = 1000;
 const collectDisk = (ctx: Context, statfs?: undefined, opts: { detail?: boolean; offset?: number; limit?: number } = {}): Promise<DiskReport> => collectDiskFull(ctx, statfs, { ...opts, budgetMs: DISK_BUDGET_MS });
 const collectCapacity = (ctx: Context) => collectCapacityFull(ctx, { diskBudgetMs: DISK_BUDGET_MS });
@@ -498,7 +500,7 @@ async function runVersion(deps: McpDeps): Promise<ToolResult> {
 
 async function queueViews(ctx: Context): Promise<ReturnType<typeof describeQueue>> {
   const entries = readQueue(ctx.config);
-  return entries.length === 0 ? [] : describeQueue(ctx.config, entries, await liveWindows(ctx), await collectStatus(ctx, { progress: false, archived: true })).map(view => {
+  return (await coreQueueViews(ctx)).map(view => {
     const safe = redactQueue(view.entry, ctx.config) as typeof view.entry;
     const condition = redactQueue({ ...view.entry, error: view.condition.text }, ctx.config) as typeof view.entry;
     return { ...view, entry: { ...view.entry, ...safe }, condition: { ...view.condition, text: condition.error ?? 'n/d' } };

@@ -258,11 +258,11 @@ export function outputsPending(config: Pick<Context['config'], 'reportSettleS'>,
 }
 
 /** Once per completed attempt, also across report edits, hooks and watcher restarts. */
-export async function journalOutputs(ctx: Context, record: TaskRecord): Promise<void> {
+export async function journalOutputs(ctx: Context, record: TaskRecord, opts: { readOnly?: boolean } = {}): Promise<void> {
   if (ctx.runner.dryRun) return;
   const report = inspectReport(ctx.config, record, ctx.runner.now(), !record.attemptId);
   if (!report.ready || !report.signature || (record.attemptId && !report.sentinel)) return;
-  await cleanWorktreeCache(ctx, record);
+  if (!opts.readOnly) await cleanWorktreeCache(ctx, record);
   const identity = record.attemptId ? `attempt:${record.attemptId}` : `started:${record.started}`;
   if (outputsPending(ctx.config, record, report, ctx.runner.now())) return;
   const file = path.join(ctx.config.stateDir, record.window, 'outputs-seen.json');

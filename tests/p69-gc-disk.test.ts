@@ -5,6 +5,7 @@ import { it } from 'node:test';
 import { Context } from '../src/core/context.ts';
 import { collectDisk, diskLine } from '../src/core/disk.ts';
 import type { DiskReport } from '../src/core/disk.ts';
+import { sizeOf } from '../src/core/fs-measure.ts';
 import { readJournal } from '../src/core/journal.ts';
 import { DiskRunner, FakeTmux, makeConfig, runCli, seedTask, useScratch } from './helpers.ts';
 
@@ -42,6 +43,7 @@ it('P69: gc --apply re-measures at once and records "gc freed X GiB, free now Y"
   fs.mkdirSync(worktree, { recursive: true });
   fs.writeFileSync(path.join(worktree, 'file.txt'), 'x'.repeat(1000));
   seedTask(w.config, 'NC-1', { closed: true, closedAt: '2026-10-01T10:00:00.000Z', repos: [{ path: w.repo, worktree, base: 'main', branch: 'agent/nc-1' }] });
+  await sizeOf(worktree, { now: () => w.runner.now() });
   const before = await collectDisk(w.ctx);
   assert.equal(before.worktreeBytes, 1000, 'the old reading counts the worktree');
   const r = await runCli(w.config, w.runner, ['gc', '--apply', '-y']);
@@ -64,6 +66,6 @@ it('P69: a reading older than 10 minutes shows its age next to the number; a fre
   assert.match(diskLine({ ...base, measuring: true }, NOW), /\(measuring, last reading, 47 min old\)/);
   assert.match(diskLine({ ...base, measurementError: 'walk failed' }, NOW), /\(measurement failed, last reading, 47 min old\)/);
   assert.match(diskLine({ ...base, measuredAt: new Date(NOW - 3 * 3_600_000).toISOString() }, NOW), /3 h old\)/);
-  assert.doesNotMatch(diskLine({ ...base, measuredAt: new Date(NOW - 5 * 60_000).toISOString() }, NOW), /old\)/);
-  assert.doesNotMatch(diskLine({ ...base, measuredAt: new Date(NOW - 60_000).toISOString(), measuring: true }, NOW), /old\)/);
+  assert.match(diskLine({ ...base, measuredAt: new Date(NOW - 5 * 60_000).toISOString() }, NOW), /old\)/);
+  assert.match(diskLine({ ...base, measuredAt: new Date(NOW - 60_000).toISOString(), measuring: true }, NOW), /old\)/);
 });

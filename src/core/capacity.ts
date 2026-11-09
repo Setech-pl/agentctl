@@ -66,7 +66,7 @@ export async function collectCapacity(ctx: Context, opts: { diskBudgetMs?: numbe
   const samples = readSamples(ctx.config);
   const loads = collectLimits(ctx.config, await liveWindows(ctx));
   const queue = waiting(readQueue(ctx.config));
-  const rows = await collectStatus(ctx, { progress: false });
+  const rows = await collectStatus(ctx, { cachedOnly: true, shallowClosed: true, progress: false });
   const stats = computeStats(selectHistory(ctx, { since: '7d' }));
   return {
     at: new Date(now).toISOString(),

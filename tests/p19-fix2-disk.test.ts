@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import threads from 'node:worker_threads';
 import { syncBuiltinESMExports } from 'node:module';
 import { describe, it } from 'node:test';
+import { listTaskRecords } from '../src/core/taskstore.ts';
 import { Context } from '../src/core/context.ts';
 import { DiskRunner, makeConfig, seedTask, useScratch } from './helpers.ts';
 
@@ -26,6 +27,11 @@ const { sizeOf, newestMtime, planGc } = await import('../src/core/gc.ts');
 const scratch = useScratch();
 const pause = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
+async function sampledDisk(ctx: Context) {
+  await Promise.all(listTaskRecords(ctx.config).flatMap(r => r.repos.map(repo => sizeOf(repo.worktree, { now: () => ctx.runner.now() }))));
+  return collectDisk(ctx);
+}
+
 describe('P19 FIX2: worktree measurement ownership and freshness', () => {
   it('R2: cold inventory churn and GC share one scan per path with at most two live workers', async () => {
     const keep = setInterval(() => {}, 100);
@@ -41,13 +47,13 @@ describe('P19 FIX2: worktree measurement ownership and freshness', () => {
       const cold = await collectDisk(ctx, undefined, { budgetMs: 1 });
       assert.equal(cold.measuring, true); assert.equal(cold.worktreeBytes, null);
       await Promise.all(Array.from({ length: 50 }, () => collectDisk(ctx, undefined, { budgetMs: 1 })));
-      const shared = Promise.all([sizeOf(tree), newestMtime(tree), planGc(ctx)]);
+      const shared = Promise.all([sizeOf(tree, { now: () => runner.now() }), newestMtime(tree, { now: () => runner.now() }), planGc(ctx)]);
       for (let i = 0; i < 8; i++) {
         const wt = path.join(root, `small-${i}`); fs.mkdirSync(wt);
         seedTask(config, `SMALL-${i}`, { repos: [{ path: root, worktree: wt }] });
         await collectDisk(ctx, undefined, { budgetMs: 0 });
       }
-      const result = await collectDisk(ctx); await shared;
+      await shared; const result = await sampledDisk(ctx);
       for (let i = 0; i < 500 && active; i++) await pause(10);
       console.log('R2', JSON.stringify({ files, peak, active, scans: Object.fromEntries(scanned), total: result.worktreeBytes }));
       assert.ok(peak <= 2, `peak ${peak} exceeds the global cap 2`);
@@ -61,17 +67,17 @@ describe('P19 FIX2: worktree measurement ownership and freshness', () => {
     const root = scratch.sub('ages'), config = makeConfig(root);
     const runner = new DiskRunner({ dryRun: false, startTime: Date.now() }); const ctx = new Context(runner, config, () => {});
     const add = (task: string) => { const wt = path.join(root, task); fs.mkdirSync(wt); fs.writeFileSync(path.join(wt, 'f'), '12345'); seedTask(config, task, { repos: [{ path: root, worktree: wt }] }); return wt; };
-    const first = add('TREE-1'); const initial = await collectDisk(ctx);
+    const first = add('TREE-1'); const initial = await sampledDisk(ctx);
     fs.writeFileSync(path.join(first, 'f'), 'x'.repeat(100));
-    await runner.sleep(240000); add('TREE-2'); const four = await collectDisk(ctx);
+    await runner.sleep(240000); add('TREE-2'); const four = await sampledDisk(ctx);
     console.log('R3 four minutes', JSON.stringify(four));
     assert.equal(four.measuredAt, initial.measuredAt, 'new paths cannot renew old path timestamps');
     assert.equal(four.worktreeBytes, 10, 'the original size is allowed only until its own TTL expires');
-    await runner.sleep(240000); add('TREE-3'); const eight = await collectDisk(ctx);
+    await runner.sleep(240000); add('TREE-3'); const eight = await sampledDisk(ctx);
     assert.equal(eight.worktreeBytes, 110); assert.equal(Date.parse(eight.measuredAt), runner.now() - 240000);
-    await runner.sleep(240000); add('TREE-4'); await collectDisk(ctx);
-    await runner.sleep(240000); add('TREE-5'); const sixteen = await collectDisk(ctx); assert.equal(sixteen.worktreeBytes, 120);
-    fs.rmSync(first, { recursive: true }); await runner.sleep(240000); add('TREE-6'); const removed = await collectDisk(ctx);
+    await runner.sleep(240000); add('TREE-4'); await sampledDisk(ctx);
+    await runner.sleep(240000); add('TREE-5'); const sixteen = await sampledDisk(ctx); assert.equal(sixteen.worktreeBytes, 120);
+    fs.rmSync(first, { recursive: true }); await runner.sleep(240000); add('TREE-6'); const removed = await sampledDisk(ctx);
     assert.equal(removed.worktreeBytes, 25); console.log('R3 final', JSON.stringify({ sixteen: sixteen.worktreeBytes, removed: removed.worktreeBytes }));
   });
 
@@ -79,10 +85,10 @@ describe('P19 FIX2: worktree measurement ownership and freshness', () => {
     const root = scratch.sub('identity'), config = makeConfig(root), wt = path.join(root, 'wt'); fs.mkdirSync(wt); fs.writeFileSync(path.join(wt, 'f'), '12345');
     seedTask(config, 'IDENTITY-1', { repos: [{ path: root, worktree: wt }] });
     const ctx = new Context(new DiskRunner({ dryRun: false, startTime: Date.now() }), config, () => {});
-    assert.equal((await collectDisk(ctx)).worktreeBytes, 5);
+    assert.equal((await sampledDisk(ctx)).worktreeBytes, 5);
     fs.renameSync(wt, `${wt}-old`); fs.mkdirSync(wt); fs.writeFileSync(path.join(wt, 'f'), '123456789');
-    assert.equal((await collectDisk(ctx)).worktreeBytes, 9);
-    fs.rmSync(wt, { recursive: true }); assert.equal((await collectDisk(ctx)).worktreeBytes, 0);
+    assert.equal((await sampledDisk(ctx)).worktreeBytes, 9);
+    fs.rmSync(wt, { recursive: true }); assert.equal((await sampledDisk(ctx)).worktreeBytes, 0);
   });
 
   it('R5: a standalone background parent exits promptly; foreground callers wait for their result', async () => {

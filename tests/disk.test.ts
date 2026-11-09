@@ -1,14 +1,21 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { describe, it } from 'node:test';
-import { collectDisk, diskLevel, diskTick, DISK_INTERVAL_MS } from '../src/core/disk.ts';
+import { collectDisk as readDisk, diskLevel, diskTick, DISK_INTERVAL_MS } from '../src/core/disk.ts';
 import { commitQueueAdd, planQueueAdd } from '../src/core/queue.ts';
 import { splitSpecs } from '../src/core/spec.ts';
 import { readJournal } from '../src/core/journal.ts';
 import { makeConfig, makeContext, useScratch, seedTask, DiskRunner } from './helpers.ts';
+import { listTaskRecords, listArchivedRecords } from '../src/core/taskstore.ts';
+import { configureMeasurements, sizeOf } from '../src/core/fs-measure.ts';
 import { Context } from '../src/core/context.ts';
 const scratch = useScratch();
 const stat = (free: number) => (async () => ({ bsize: 1024, bavail: free / 1024, blocks: 1000 * 1024 ** 2 })) as unknown as typeof fs.promises.statfs;
+const collectDisk: typeof readDisk = async (ctx, statfs, opts) => {
+  configureMeasurements(ctx.config.disk);
+  await Promise.all([...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)].flatMap(r => r.repos.map(wt => sizeOf(wt.worktree, { now: () => ctx.runner.now() }))));
+  return readDisk(ctx, statfs, opts);
+};
 describe('disk facts', () => {
   it('deduplicates devices, includes known project roots, and caches worktree size', async () => {
     const config = makeConfig(scratch.sub('disk'));
@@ -96,8 +103,8 @@ it('P24 warns on per-volume worktree share, gives safe reclaim size and close si
   const ctx = new Context(runner, config, l => out.push(l));
   const fake = (async () => ({bsize: 1, bavail: 90, blocks: 100})) as unknown as typeof fs.promises.statfs;
   const report = await collectDisk(ctx, fake);
-  assert.equal(report.level, 'warn'); assert.equal(report.reclaimableBytes, 20);
-  assert.match(diskLine(report), /gc --preview.*20 bytes/);
+  assert.equal(report.level, 'warn'); assert.equal(report.reclaimableBytes, null);
+  assert.match(diskLine(report), /gc --preview.*n\/d bytes/);
   assert.equal(fs.readFileSync(`${wt}/data`, 'utf8').length, 20);
   await closeTask(ctx, 'P24-1');
   assert.match(out.join('\n'), /worktree size: 20 bytes/);

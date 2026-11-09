@@ -121,7 +121,7 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
   const now = runner.now();
   const since = parseSince(opts.since, opts.client, config, now);
   const cohort = opts.cohort === undefined ? null : findCohort(config, opts.cohort).name;
-  for (const record of listTaskRecords(config)) await journalOutputs(ctx, record);
+  for (const record of listTaskRecords(config)) await journalOutputs(ctx, record, { readOnly: true });
   const journal = readJournal(config, -1);
   const redacted = secretRedactor([config, process.env, journal], new Set(listTaskRecords(config).map(r => r.task)))(journal);
   const legacyGc = redacted.map(summarizeLegacyGc);
@@ -132,7 +132,7 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
   if (position.index < 0) position.index = all.length;
   if (position.index > all.length) throw new AgentctlError('events cursor is beyond this journal; request an explicit since');
   const events: Array<JournalEntry & { fragment?: { offset: number; total: number; encoding: string } }> = [];
-  const rows = await collectStatus(ctx, { progress: false, archived: false });
+  const rows = await collectStatus(ctx, { progress: false, archived: false, cachedOnly: true, shallowClosed: true });
   const open = rows.filter((r) => !r.closed && !r.cancelled && !r.hidden && (cohort === null || (r.cohort !== null && cohortKey(r.cohort) === cohortKey(cohort))));
   const alive = open.filter((r) => r.window === 'alive' && !r.finished);
   const queue = waiting(readQueue(config)).filter((e) => cohort === null || (e.cohort !== undefined && cohortKey(e.cohort) === cohortKey(cohort)));

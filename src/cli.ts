@@ -1,3 +1,4 @@
+import { queueViews } from './core/queue.ts';
 import { attachHint, tmuxCommand } from './core/tmux-socket.ts';
 import { collectMachine, machineLine } from './core/machine.ts';
 import { exportDataset, validateDatasetOptions } from './core/dataset.ts';
@@ -531,7 +532,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         // `queue` has a --cohort of its own (for the file it adds): commander hands that one the flag, wherever it stands in the line.
         const wanted = opts.cohort ?? (command.optsWithGlobals() as { cohort?: string }).cohort;
         const cohort = wanted === undefined ? undefined : findCohort(ctx.config, wanted).name;
-        const all = describeQueue(ctx.config, readQueue(ctx.config), await liveWindows(ctx), await collectStatus(ctx, { progress: false, archived: true }));
+        const all = await queueViews(ctx);
         const views = cohort === undefined ? all : all.filter((v) => v.entry.cohort !== undefined && cohortKey(v.entry.cohort) === cohortKey(cohort));
         if (opts.json || (command.optsWithGlobals() as { json?: boolean }).json) return line(JSON.stringify(views.map((v) => ({ position: v.position, task: v.entry.task, cohort: v.entry.cohort ?? null, status: v.entry.status, agent: v.entry.agent, model: v.entry.model, effort: v.entry.effort, priority: v.entry.priority, condition: v.condition.text, blocked: v.condition.kind === 'blocked', after: v.entry.after, queued: v.entry.queuedAt, error: v.entry.error ?? null })), null, 2));
         for (const l of renderQueueList(views, ctx.runner.now())) line(l);
