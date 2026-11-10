@@ -1,3 +1,4 @@
+import { queueViews as coreQueueViews } from './queue.ts';
 import { withStartLock } from './start-lock.ts';
 import { withResponseBudget } from './response-budget.ts';
 import type { BudgetClock } from './response-budget.ts';
@@ -69,7 +70,7 @@ import { answerMenu } from './answer.ts';
 import { withdrawPrompt } from './prompt-queue.ts';
 import { resolveSpec, splitSpecs } from './spec.ts';
 import type { RawSpec } from './spec.ts';
-import { collectStatus, shownRows } from './status.ts';
+import { collectStatus as collectStatusFull, shownRows } from './status.ts';
 import type { StatusRow } from './status.ts';
 import { summarizeSpecs } from './summary.ts';
 import { listArchivedRecords, listTaskRecords, readTaskPrompt, setHeaderField, taskFile } from './taskstore.ts';
@@ -164,9 +165,10 @@ const fail = (text: string): ToolResult => ({ text, isError: true });
  * How long a tool of the chat may wait for the size of the worktrees. The walk of dozens of worktrees with node_modules takes minutes, and no read
  * may wait for it: it runs in the background and the answer carries the last reading (or n/d and "measuring").
  */
+const collectStatus: typeof collectStatusFull = (ctx, opts = {}) => collectStatusFull(ctx, { ...opts, cachedOnly: true, shallowClosed: true });
 const DISK_BUDGET_MS = 1000;
 const collectDisk = (ctx: Context, statfs?: undefined, opts: { detail?: boolean; offset?: number; limit?: number } = {}): Promise<DiskReport> => collectDiskFull(ctx, statfs, { ...opts, budgetMs: DISK_BUDGET_MS });
-const collectCapacity = (ctx: Context) => collectCapacityFull(ctx, { diskBudgetMs: DISK_BUDGET_MS });
+const collectCapacity = (ctx: Context) => collectCapacityFull(ctx, { diskBudgetMs: DISK_BUDGET_MS, cachedOnly: true });
 
 async function guarded(body: () => Promise<ToolResult>): Promise<ToolResult> {
   try {
@@ -434,12 +436,15 @@ async function runLimits(deps: McpDeps): Promise<ToolResult> {
 
 const limitArg = z.number().int().min(0).max(50).optional();
 /** set_limits additionally accepts "off": the provider is disabled (no windows of it start). */
-const setLimitArg = z.union([z.number().int().min(0).max(50), z.literal('off')]).optional();
+const setLimitArg = z.union([z.number().int().min(0).max(50), z.string().regex(/^(?:[0-9]|[1-4][0-9]|50)$/), z.literal('off')]).optional();
 
-async function runSetLimits(deps: McpDeps, args: Partial<Record<AgentName, number | 'off'>> & { confirm?: boolean | undefined }): Promise<ToolResult> {
+async function runSetLimits(deps: McpDeps, args: Partial<Record<AgentName, number | string>> & { confirm?: boolean | undefined }): Promise<ToolResult> {
   return writeTool(deps, 'set_limits', { detail: `${PROVIDER_IDS.map(id => `${id}=${args[id] ?? '-'}`).join(' ')} confirm=${Boolean(args.confirm)}` }, async (ctx) => {
     const assignments: LimitAssignments = {};
-    for (const agent of activeProviders(ctx.config)) if (args[agent] !== undefined) assignments[agent] = args[agent] === 0 ? null : (args[agent] as number | 'off');
+    for (const agent of activeProviders(ctx.config)) if (args[agent] !== undefined) {
+      const value = args[agent] === 'off' ? 'off' : Number(args[agent]);
+      assignments[agent] = value === 0 ? null : value;
+    }
     if (Object.keys(assignments).length === 0) throw new AgentctlError(`give ${activeProviders(ctx.config).join(' and/or ')}`,  '0 removes a limit, "off" disables the provider.');
     const plan = planSetLimits(ctx.config, assignments);
     if (!args.confirm) return { text: `${plan.summary.join('\n')}\n\nNot changed yet. Show this to the user and ask; if they agree, call set_limits again with the same numbers and confirm: true.`, executed: false, announce: '' };
@@ -498,7 +503,7 @@ async function runVersion(deps: McpDeps): Promise<ToolResult> {
 
 async function queueViews(ctx: Context): Promise<ReturnType<typeof describeQueue>> {
   const entries = readQueue(ctx.config);
-  return entries.length === 0 ? [] : describeQueue(ctx.config, entries, await liveWindows(ctx), await collectStatus(ctx, { progress: false, archived: true })).map(view => {
+  return (await coreQueueViews(ctx)).map(view => {
     const safe = redactQueue(view.entry, ctx.config) as typeof view.entry;
     const condition = redactQueue({ ...view.entry, error: view.condition.text }, ctx.config) as typeof view.entry;
     return { ...view, entry: { ...view.entry, ...safe }, condition: { ...view.condition, text: condition.error ?? 'n/d' } };
@@ -1574,13 +1579,14 @@ for (const tool of MCP_TOOLS) {
   const cli = ({ queue_list: 'queue list', queue_rm: 'queue rm', queue_retry: 'queue retry', queue_up: 'queue up', queue_pause: 'queue pause', queue_resume: 'queue resume', cohort_list: 'cohort list', cohort_show: 'cohort show', list_reports: 'status', get_report: 'pull <TASK>', pull_ready: 'pull --ready', task_spec: 'peek <TASK>', gc_preview: 'gc', events_since: 'events', set_limits: 'limits set', reserve: 'limits reserve' } as Record<string, string>)[tool.name] ?? tool.name.replaceAll('_', ' ');
   if (!tool.description.includes('CLI:')) tool.description += ` Use when the user needs this operation. CLI: agentctl ${cli}.`;
   if (!confirmedTools.has(tool.name)) continue;
-  tool.input = { ...tool.input, confirm: confirmArg, preview_token: z.string().optional().describe('Token returned by this preview. Independent previews can be confirmed in any order if their scope is unchanged. A confirm may carry only this token: the stored arguments then execute.') };
+  const previewInput = tool.input;
+  tool.input = { ...Object.fromEntries(Object.entries(tool.input).map(([name, schema]) => [name, z.optional(schema)])), confirm: confirmArg, preview_token: z.string().optional().describe('Token returned by this preview. Independent previews can be confirmed in any order if their scope is unchanged. A confirm may carry only this token: the stored arguments then execute.') };
   tool.description += ' Two steps are mandatory: preview, then confirm: true with identical arguments — or with preview_token only, which executes the stored arguments (for new/queue the spec need not be resent). A changed scope requires a new preview.';
   const original = tool.run;
   tool.run = (deps, args) => guarded(async () => {
     const ctx = deps.context(() => {});
     if (!ctx.config.mcp.allow.includes(tool.name as McpWriteTool)) return writeTool(deps, tool.name as McpWriteTool, {}, async () => { throw new Error('unreachable'); });
-    if (tool.name === 'mark' && planMark(ctx, args as MarkSelection).length === 1) return original(deps, args);
+    if (tool.name === 'mark' && !(args.confirm && args.preview_token) && planMark(ctx, args as MarkSelection).length === 1) return original(deps, args);
     if (tool.name === 'new' && !(args.confirm && args.preview_token)) {
       // A task that was handed to the watcher is being started (or failed to): a second preview or confirm, with or without a token, reports that state and starts nothing.
       let known: ReturnType<typeof findDirectStart>[] = [];
@@ -1594,6 +1600,9 @@ for (const tool of MCP_TOOLS) {
       if (known.length > 0) return writeTool(deps, 'new', { task: known.map((e) => e!.task).join(', '), detail: 'repeated new for a start in progress' }, async () => ({ text: known.map((e) => directStartText(ctx.config, e!, ctx.runner.now())).join('\n'), executed: false, announce: '' }));
     }
     const { confirm, preview_token, ...input } = args;
+    // Required preview fields remain required for a preview or explicit-argument confirm.
+    // A token-only confirm restores the validated arguments from its session preview.
+    if (!(confirm && typeof preview_token === 'string' && Object.keys(input).length === 0)) z.object(previewInput).parse(input);
     const { detail: _detail, offset: _offset, limit: _limit, ...identityInput } = input;
     const arguments_ = previewArguments(tool.name === 'gc' ? identityInput : input);
     const key = `${tool.name}:${createHash('sha256').update(JSON.stringify(arguments_)).digest('hex')}`;

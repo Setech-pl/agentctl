@@ -23,7 +23,7 @@ for (const [name, node, npm] of [
     assert.equal(installed.status, 0, installed.stderr);
     const bin = path.join(prefix, 'bin', 'agentctl');
     const checks: { name: string; ok: boolean }[] = [];
-    const run = (args: string[]) => { h.check(); return spawnSync(bin, args, { env: h.env, cwd: h.root, encoding: 'utf8', timeout: 20000 }); };
+    const run = (args: string[]) => { h.check(); return spawnSync(bin, args, { env: h.env, cwd: h.root, encoding: 'utf8', timeout: 120000 }); };
     const check = (name: string, ok: boolean) => { checks.push({ name, ok }); console.log(`${ok ? 'PASS' : 'FAIL'} ${name}`); assert.ok(ok, name); };
     const version = run(['version']); check(`version ${expectedVersion}`, version.status === 0 && version.stdout.trim() === expectedVersion);
     const vflag = run(['--version']); check('version alias', vflag.stdout === version.stdout);

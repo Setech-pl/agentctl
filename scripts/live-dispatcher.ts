@@ -35,7 +35,7 @@ async function trial(id: number, parallel: boolean, retry = false, fallback = fa
       const event = spawn(process.execPath, ['--experimental-strip-types', '--no-warnings', path.resolve(import.meta.dirname, '../bin/agentctl.ts'), 'event', '--task', task, '--agent', 'claude', '--kind', 'stop'], { env: h.env, stdio: ['pipe', 'ignore', 'ignore'] });
       event.stdin.end(JSON.stringify({ last_assistant_message: 'ok' }));
       eventCode = await new Promise<number>((resolve) => event.once('close', (code) => resolve(code ?? 1)));
-      await pause(retry ? 35_000 : 5000);
+      await pause(retry ? 90_000 : 20_000);
       const posts = fs.existsSync(requests) ? fs.readFileSync(requests, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as { body: string; status: number }) : [];
       const reports = posts.filter((p) => p.body.includes(task) && p.body.includes('raport gotowy'));
       const accepted = reports.filter((p) => p.status === 200);

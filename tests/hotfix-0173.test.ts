@@ -7,6 +7,7 @@ import { MCP_WRITE_TOOLS } from '../src/core/config.ts';
 import { MCP_TOOLS, readReportFile, reportSection, responseWireBytes } from '../src/core/mcp-tools.ts';
 import { findCandidates, syncReport } from '../src/core/report-detect.ts';
 import { collectStatus } from '../src/core/status.ts';
+import { sizeOf } from '../src/core/fs-measure.ts';
 import { collectDisk } from '../src/core/disk.ts';
 import { cohortTick, touchCohort } from '../src/core/cohort.ts';
 import { readTaskRecord } from '../src/core/taskstore.ts';
@@ -100,6 +101,7 @@ it('0173-6: small, large and section reports expose absolute end offsets and con
 it('0173-7: disk defaults show totals/count/top five; detail paths paginate, including cohort JSON status', async () => {
   const f = fixture('disk');
   for (let i = 0; i < 190; i++) seedTask(f.config, `D${i}`, { cohort: 'NC', repos: [{ path: f.root, worktree: path.join(f.root, `wt${i}`) }] });
+  await Promise.all(Array.from({ length: 190 }, (_, i) => sizeOf(path.join(f.root, `wt${i}`), { now: () => f.ctx.runner.now() })));
   const disk = await collectDisk(f.ctx); assert.equal(disk.worktreeCount, 190); assert.equal(disk.largestWorktrees!.length, 5); assert.deepEqual(disk.volumes[0]!.paths, []);
   let next: number | null = 0, count = 0; do { const page = await collectDisk(f.ctx, undefined, { detail: true, offset: next, limit: 7 }); count += page.volumes.flatMap(v => v.paths).length; next = page.pathsNextOffset!; } while (next !== null);
   assert.equal(count, disk.pathsTotal);

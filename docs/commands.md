@@ -1533,6 +1533,10 @@ Check tmux, node, claude, codex, gh, the cache directory and the configs.
 agentctl doctor [options]
 ```
 
+| Option | Meaning | Notes |
+|---|---|---|
+| `--timings` | Time status, queue list, events and a dry queue preview; PASS/WARN against read budgets (command wall time, excluding Node startup). |  |
+
 Examples:
 
 ```sh

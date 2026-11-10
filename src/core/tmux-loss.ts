@@ -12,7 +12,7 @@ import { recordJournal } from './journal.ts';
 export const expectedCloseFile = (config: GlobalConfig, window: string): string => path.join(taskDir(config, window), 'window-close.json');
 
 /** A missing launched window is recoverable work, even after watch recreates the server/session. */
-export async function tmuxLoss(ctx: Context, record: TaskRecord, alive: boolean, complete: boolean, sessionAlive = false): Promise<string | undefined> {
+export async function tmuxLoss(ctx: Context, record: TaskRecord, alive: boolean, complete: boolean, sessionAlive = false, readOnly = false): Promise<string | undefined> {
   if (complete) return undefined;
   const file = path.join(taskDir(ctx.config, record.window), 'tmux-loss.json');
   let previous: { identity?: string; active?: boolean } | undefined;
@@ -20,9 +20,9 @@ export async function tmuxLoss(ctx: Context, record: TaskRecord, alive: boolean,
   const identity = `${record.attemptId ?? record.started}:${record.windowId ?? ''}`;
   // TASK.md is written only for agent launches; legacy records may predate window IDs.
   if (alive) {
-    if (!ctx.runner.dryRun && previous?.active) await ctx.runner.writeFile(file, JSON.stringify({ identity, active: false }));
+    if (!readOnly && !ctx.runner.dryRun && previous?.active) await ctx.runner.writeFile(file, JSON.stringify({ identity, active: false }));
     // The window is back (a human reopened it): the note of the intentional close is spent.
-    if (!ctx.runner.dryRun) try { if (JSON.parse(fs.readFileSync(expectedCloseFile(ctx.config, record.window), 'utf8')).identity === identity) await ctx.runner.remove(expectedCloseFile(ctx.config, record.window)); } catch { /* no expected closure */ }
+    if (!readOnly && !ctx.runner.dryRun) try { if (JSON.parse(fs.readFileSync(expectedCloseFile(ctx.config, record.window), 'utf8')).identity === identity) await ctx.runner.remove(expectedCloseFile(ctx.config, record.window)); } catch { /* no expected closure */ }
     return undefined;
   }
   // The queue closes a window whose start never became ready on purpose (queue.ts, expectedClose): that closure is not a loss.
@@ -39,7 +39,7 @@ export async function tmuxLoss(ctx: Context, record: TaskRecord, alive: boolean,
   const hint = sessionAlive
     ? `Okno zadania zniknęło, serwer/sesja tmux działa (the task window is gone; the tmux server lives); ${recovery}`
     : `Utracono serwer/sesję tmux (tmux server/session lost); ${recovery}`;
-  if (!ctx.runner.dryRun) await withFileLock(`${file}.lock`, async () => {
+  if (!readOnly && !ctx.runner.dryRun) await withFileLock(`${file}.lock`, async () => {
     let last: typeof previous;
     try { last = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* first loss */ }
     if (last?.identity === identity && last.active) return;

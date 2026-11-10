@@ -243,7 +243,25 @@ export function readTaskPrompt(config: GlobalConfig, window: string): string | u
   return body.split(/\n\n## Follow-up (?:sent|queued|pasted, unconfirmed) /)[0]?.trim();
 }
 
+const parsedHeaders = new Map<string, TaskRecord | undefined>();
+let parsedHeaderBytes = 0;
+/** Repeated consumers share YAML parsing, never mutable records. Header content is the invalidation key. */
 export function parseTaskRecord(text: string): TaskRecord | undefined {
+  const header = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(text.replace(/\r\n/g, '\n'))?.[1];
+  if (header === undefined) return undefined;
+  if (!parsedHeaders.has(header)) {
+    const record = parseTaskRecordUncached(text);
+    parsedHeaders.set(header, record); parsedHeaderBytes += Buffer.byteLength(header);
+    while (parsedHeaders.size > 512 || parsedHeaderBytes > 8 * 1024 * 1024) {
+      const first = parsedHeaders.keys().next().value!;
+      parsedHeaderBytes -= Buffer.byteLength(first); parsedHeaders.delete(first);
+    }
+    return record ? structuredClone(record) : undefined;
+  }
+  const record = parsedHeaders.get(header);
+  return record ? structuredClone(record) : undefined;
+}
+function parseTaskRecordUncached(text: string): TaskRecord | undefined {
   const match = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(text.replace(/\r\n/g, '\n'));
   if (!match) return undefined;
   let data: unknown;
@@ -434,6 +452,15 @@ export async function snapshotRecords(config: GlobalConfig): Promise<RecordScan>
   const current = await scanRecordsIn(config.stateDir);
   const archived = await scanRecordsIn(archiveDir(config));
   return { current, archived, all: [...current, ...archived] };
+}
+
+/** Bounded full-ID lookup for queue authors: current canonical folder, then its archive folder. */
+export function readTaskRecordById(config: GlobalConfig, task: string): TaskRecord | undefined {
+  const window = windowName(task);
+  const current = readTaskRecord(config, window);
+  if (current) return current;
+  try { return parseTaskRecord(fs.readFileSync(path.join(archiveDir(config), window, 'TASK.md'), 'utf8')); }
+  catch { return undefined; }
 }
 
 /** A task by its ID (any case), current first, else in the archive: one lookup for everything that needs "the record of that task". */

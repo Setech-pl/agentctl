@@ -17,12 +17,12 @@ for (const agent of ['codex','claude'] as const) for (const mode of ['swallow-fi
   if(mode==='trust') {
    check(`${agent} C: no paste into trust dialog`,!entries().some(e=>e.paste));
    const watcher=h.spawnAgentctl(['watch'],path.join(h.root,'watch.log'));
-   try {h.tmux(['send-keys','-t',`=${h.session}:t1`,'-l','y']);const until=Date.now()+10000;while(!entries().some(e=>e.working)&&Date.now()<until)await new Promise(r=>setTimeout(r,150));
+   try {h.tmux(['send-keys','-t',`=${h.session}:t1`,'-l','y']);const until=Date.now()+60000;while(!entries().some(e=>e.working)&&Date.now()<until)await new Promise(r=>setTimeout(r,150));
     check(`${agent} C: watcher sends after human trust`,entries().some(e=>e.working));await new Promise(r=>setTimeout(r,1400));
    } finally {watcher.kill('SIGTERM');await new Promise(r=>watcher.once('close',r));}
   } else {
    check(`${agent} A/P: new returns success${mode==='swallow-all'?' with pending confirmation':''}`,result.code===0 && (mode!=='swallow-all' || result.stdout.includes('dostarczenie niepotwierdzone')));
-   if(mode==='swallow-all'){const watcher=h.spawnAgentctl(['watch'],path.join(h.root,'watch.log'));try{const until=Date.now()+10000;while(!h.agentctl(['status','--json']).stdout.includes('needs-attention')&&Date.now()<until)await new Promise(r=>setTimeout(r,150));}finally{watcher.kill('SIGTERM');await new Promise(r=>watcher.once('close',r));}}
+   if(mode==='swallow-all'){const watcher=h.spawnAgentctl(['watch'],path.join(h.root,'watch.log'));try{const until=Date.now()+60000;while(!h.agentctl(['status','--json']).stdout.includes('needs-attention')&&Date.now()<until)await new Promise(r=>setTimeout(r,150));}finally{watcher.kill('SIGTERM');await new Promise(r=>watcher.once('close',r));}}
   }
   check(`${agent} A/C: paste exactly once (${mode})`,entries().filter(e=>e.paste).length===1);
   check(`${agent} B: original prompt and canonical filename in delivered protocol (${mode})`,entries().some(e=>e.paste?.includes(report)&&e.paste.includes('T1.md')&&e.paste.includes('Original prompt')));

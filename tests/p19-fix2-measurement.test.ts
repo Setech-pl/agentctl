@@ -33,6 +33,7 @@ describe('P19 FIX2: measurement failure and lifecycle controls', () => {
     const ctx = new Context(new DiskRunner({ dryRun: false, startTime: Date.now() }), config, () => {});
     const paths = Array.from({ length: 4 }, (_, i) => { const wt = path.join(root, `wt${i}`); fs.mkdirSync(wt); fs.writeFileSync(path.join(wt, 'f'), '123'); seedTask(config, `CAP-${i}`, { repos: [{ path: root, worktree: wt }] }); return wt; });
     peak = active;
+    configureMeasurements(config.disk);
     try {
       const disk = collectDisk(ctx); await Promise.all([disk, ...paths.map(p => sizeOf(p)), ...paths.map(p => newestMtime(p))]);
       assert.equal(peak, 1); assert.equal(active, 0); console.log('configured worker cap', peak);

@@ -36,7 +36,7 @@ import { collectStatus } from './status.ts';
 import type { StatusRow } from './status.ts';
 import { resolveSpec, splitSpecs } from './spec.ts';
 import type { RawSpec, ResolvedSpec, AutoReviewSource } from './spec.ts';
-import { findRecordAnywhere, listArchivedRecords, listTaskRecords, readTaskRecord, recordFromSpec, renderTaskMd, taskDir, taskFile } from './taskstore.ts';
+import { archiveDir, parseTaskRecord, readTaskRecordById, findRecordAnywhere, listArchivedRecords, listTaskRecords, readTaskRecord, recordFromSpec, renderTaskMd, taskDir, taskFile } from './taskstore.ts';
 import type { CancelSource, TaskRecord } from './taskstore.ts';
 import { queueHolds, usageSummaryLines } from './usage-limits.ts';
 import { AgentctlError, cohortKey, errorMessage, formatLocalTime, plural, windowName } from './util.ts';
@@ -214,20 +214,20 @@ export async function planQueueAdd(ctx: Context, raws: RawSpec[], opts: { agent?
   const specs = await planBatch(ctx, resolved, { ...(opts.agent ? { agent: opts.agent } : {}), ignoreLimits: true, skipAfter: true, deferBases: true, knownAuthors });
   checkAfter(ctx, specs, entries);
   const items = specs.map((spec, i) => ({ raw: raws[i] as RawSpec, spec }));
-  const rows = await collectStatus(ctx, { progress: false, archived: true });
-  const warnings = [...await touchWarnings(ctx, specs), ...specs.flatMap(s => reportPathWarnings(ctx.config, s).map(w => `${s.task}: ${w}`)), ...specs.flatMap(s => [...(s.linkWarnings ?? []), ...(s.warnings ?? []), ...missingLinkTargets(s.links, s.repos[0]?.worktree)].map(w => `${s.task}: ${w}`))];
-  const capacity = config.capacity.snapshot && !ctx.runner.dryRun ? capacitySnapshot(await collectCapacity(ctx, opts.diskBudgetMs === undefined ? {} : { diskBudgetMs: opts.diskBudgetMs }), specs.map((s) => s.agent)) : undefined;
+  const rows = await queueDependencyRows(ctx, [...entries, ...specs]);
+  const warnings = [...await touchWarnings(ctx, specs, { cachedOnly: true }), ...specs.flatMap(s => reportPathWarnings(ctx.config, s).map(w => `${s.task}: ${w}`)), ...specs.flatMap(s => [...(s.linkWarnings ?? []), ...(s.warnings ?? []), ...missingLinkTargets(s.links, s.repos[0]?.worktree)].map(w => `${s.task}: ${w}`))];
+  const capacity = config.capacity.snapshot && !ctx.runner.dryRun ? capacitySnapshot(await collectCapacity(ctx, { cachedOnly: true, ...(opts.diskBudgetMs === undefined ? {} : { diskBudgetMs: opts.diskBudgetMs }) }), specs.map((s) => s.agent)) : undefined;
   return { items, warnings, ...(capacity ? { capacity } : {}), summary: [...describeQueueAdd(ctx, specs, entries, await liveWindows(ctx), rows), ...usageSummaryLines(config, specs, ctx.runner.now()), ...(capacity ? snapshotLines(capacity) : []), ...warnings.map((w) => `⚠ ${w}`)] };
 }
 
 /** Per spec: the order and where it will stand ("starts at once" or "waits: claude 2/2, 1 ahead"). */
-export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: QueueEntry[], live: { window?: string; agent?: AgentName; counted?: boolean }[], rows: StatusRow[] = []): string[] {
+export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: QueueEntry[], live: { window?: string; agent?: AgentName; counted?: boolean; reportReady?: boolean }[], rows: StatusRow[] = []): string[] {
   const { config } = ctx;
   const load: Record<AgentName, number> = perProvider(activeProviders(config), () => 0);
   for (const w of live) if (w.agent && w.counted !== false) load[w.agent]++;
   const ahead: Record<AgentName, number> = perProvider(activeProviders(config), () => 0);
   for (const e of waiting(entries)) ahead[e.agent]++;
-  const readyCount = rows.filter(r => r.state === 'report-ready' && r.window === 'alive').length;
+  const readyCount = live.filter(w => w.reportReady).length || rows.filter(r => r.state === 'report-ready' && r.window === 'alive').length;
   const lines: string[] = readyCount ? [`${readyCount} ${plural(readyCount, 'okno', 'okna', 'okien')} report-ready – close zwolni okna`] : [];
   let heavyUsed = heavyPreviewUsed(config, entries, live);
   for (const spec of specs) {
@@ -395,7 +395,7 @@ function directAuthorState(config: GlobalConfig, entry: QueueEntry, entries: Que
   if (!entry.directAuthor) return {};
   const author = entries.find(e => e.task === entry.directAuthor);
   if (author?.status === 'failed') return { failed: `author ${author.task} start failed: ${author.error ?? 'unknown reason'}. Fix and retry the author, then queue_retry ${entry.task}.` };
-  if (findRecordAnywhere(config, entry.directAuthor)) return {};
+  if (readTaskRecordById(config, entry.directAuthor)) return {};
   if (entry.noAgent && entry.authorPrepared && entry.directAuthorOrder) return {};
   if (author) return { waiting: `waiting for author ${entry.directAuthor}: setup in progress` };
   return { failed: `author ${entry.directAuthor} has no task record and its registered start was removed. Restore the author, then queue_retry ${entry.task}.` };
@@ -622,11 +622,33 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
   }).map(view => ({ ...view, condition: { ...view.condition, text: redact(view.condition.text) } }));
 }
 
+/** Queue reads load only explicitly named dependencies, never every report or task record. */
+export async function queueDependencyRows(ctx: Context, entries: readonly (Pick<QueueEntry, 'after' | 'autoReview'> & { reviewOf?: string; reviewOfAll?: string[] })[]): Promise<StatusRow[]> {
+  const ids = new Set(entries.flatMap(e => [...e.after, ...(e.reviewOfAll ?? (e.reviewOf ? [e.reviewOf] : [])), ...(e.autoReview ? [e.autoReview.author] : [])]));
+  if (!ids.size) return [];
+  const current: TaskRecord[] = [], archived: TaskRecord[] = [];
+  for (const task of ids) {
+    const window = windowName(task);
+    const record = readTaskRecord(ctx.config, window);
+    if (record) current.push(record);
+    else try {
+      const old = parseTaskRecord(fs.readFileSync(path.join(archiveDir(ctx.config), window, 'TASK.md'), 'utf8'));
+      if (old) archived.push(old);
+    } catch { /* dependency not registered yet */ }
+  }
+  return collectStatus(ctx, { progress: false, cachedOnly: true, archived: true, records: { current, archived } });
+}
+export async function queueViews(ctx: Context): Promise<QueueView[]> {
+  const entries = readQueue(ctx.config);
+  if (!entries.length) return [];
+  return describeQueue(ctx.config, entries, await liveWindows(ctx), await queueDependencyRows(ctx, entries));
+}
+
 /** What `status` prints under its table: the waiting tasks and what each one waits for; nothing when the queue is empty. */
 export async function queueStatusLines(ctx: Context, cohort?: string): Promise<string[]> {
   const entries = readQueue(ctx.config);
   if (entries.length === 0) return [];
-  const all = describeQueue(ctx.config, entries, await liveWindows(ctx), await collectStatus(ctx, { progress: false, archived: true }));
+  const all = await queueViews(ctx);
   // The places in line are those of the whole queue, whatever is shown.
   const views = cohort ? all.filter((v) => v.entry.cohort !== undefined && cohortKey(v.entry.cohort) === cohortKey(cohort)) : all;
   if (views.length === 0) return [];

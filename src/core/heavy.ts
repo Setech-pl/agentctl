@@ -1,7 +1,7 @@
 import type { GlobalConfig } from './config.ts';
 import type { QueueEntry } from './queue.ts';
 import { splitSpecs } from './spec.ts';
-import { listTaskRecords } from './taskstore.ts';
+import { readTaskRecord } from './taskstore.ts';
 
 export function isHeavy(entry: Pick<QueueEntry, 'spec'>): boolean {
   try { return splitSpecs(entry.spec, 'heavy admission')[0]?.header.weight === 'heavy'; }
@@ -11,7 +11,7 @@ export function isHeavy(entry: Pick<QueueEntry, 'spec'>): boolean {
 export function heavyBudget(config: GlobalConfig, entries: QueueEntry[], live: {window?: string}[]): Set<string> {
   const windows = new Set(live.map(w => w.window));
   return new Set([
-    ...listTaskRecords(config).filter(r => r.weight === 'heavy' && windows.has(r.window)).map(r => r.task),
+    ...[...windows].flatMap(window => { const r = window ? readTaskRecord(config, window) : undefined; return r?.weight === 'heavy' ? [r.task] : []; }),
     ...entries.filter(e => e.status === 'starting' && isHeavy(e)).map(e => e.task),
   ]);
 }

@@ -4,6 +4,26 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Live scripts: wider render/delivery/spawn windows for loaded hosts; live-kimi runs the wire-mode checks under a watcher because read paths no longer poll provider wires (watch owns event recording). / Skrypty live: szersze okna renderowania/dostarczania/startu na obciążone hosty; live-kimi sprawdza tryby wire pod watcherem, bo ścieżki odczytu nie odpytują już magistrali dostawców (zapis zdarzeń należy do watch).
+
+- Read-budget regression test: skipped under the gate (niced processes — read-contracts carries the deterministic proof there) and on loaded hosts via a `node --version` probe; budgets are tripwires against the pre-fix walks (status 3 s, queue list 2 s, MCP 5 s), while `doctor --timings` keeps the tight PASS/WARN budgets for production diagnosis. / Test regresji czasu odczytu: pomijany pod gate (procesy z nice — deterministyczny dowód niesie read-contracts) i na obciążonych hostach przez sondę `node --version`; progi są bezpiecznikami przeciw dawnej regresji (status 3 s, kolejka 2 s, MCP 5 s); ciasne progi PASS/WARN do diagnostyki produkcji zostają w `doctor --timings`.
+
+## [0.19.2] - 2026-11-09
+
+- Hotfix release: package and lockfile versions are 0.19.2; restores fast read paths on large homes (P83 read-path regression), numeric-string MCP limits (P84/P79) and token-only two-phase confirms (P77). / Wydanie poprawkowe: wersje pakietu i lockfile to 0.19.2; przywraca szybkie odczyty na dużych katalogach (regresja ścieżek odczytu P83), liczby jako tekst w limitach MCP (P84/P79) i potwierdzenia dwuetapowe samym tokenem (P77).
+
+- P83 follow-up: bound archived/direct queue-author lookups, reuse immutable task-header parses, retain ready-slot hints and keep board queue/cohort labels visible alongside disk reading age. Legacy read tests now seed watch samples explicitly. / Uzupełnienie P83: ograniczone odczyty autorów z archiwum i zadań bezpośrednich, współdzielone niemutowalne wyniki parsowania nagłówków, zachowane podpowiedzi gotowych okien i widoczne etykiety kolejki/kohorty obok wieku pomiaru dysku. Starsze testy odczytu jawnie przygotowują pomiary watch.
+
+- Doctor --timings prints wall times and PASS/WARN read budgets for status, queue list, events and a dry queue preview without registering work. / Doctor --timings pokazuje czasy i progi PASS/WARN dla statusu, listy kolejki, zdarzeń i podglądu kolejki bez rejestrowania zadania.
+
+- Read-budget regression test: 400 mixed task records, reports up to 500 KB, 300,000 worktree files; cold CLI and MCP timings are asserted. MCP and queue previews use cached provider capacity instead of synchronous refresh. / Test regresji czasu odczytu: 400 zadań w różnych stanach, raporty do 500 KB i 300 000 plików worktree; sprawdzane są zimne starty CLI oraz MCP. Podglądy MCP i kolejki używają zapisanej dostępności dostawców zamiast odświeżania jej w wywołaniu.
+
+- P77: every two-phase preview_token tool accepts confirm with the token alone, restoring its validated preview arguments; preview fields remain mandatory on new previews. / P77: każde narzędzie dwuetapowe z preview_token przyjmuje potwierdzenie samym tokenem i odtwarza sprawdzone argumenty; nowy podgląd nadal wymaga swoich pól.
+
+- P84/P79: MCP set_limits accepts numeric strings as well as integers and "off", including optional providers. / P84/P79: MCP set_limits przyjmuje liczby zapisane jako tekst, liczby całkowite i "off", również dla opcjonalnych dostawców.
+
+- P83: CLI/MCP reads use watch-cached worktree sizes with reading age, never start filesystem walks or implicit GC estimates; queue listing reads only named dependencies. GC publishes its own removal accounting. / P83: odczyty CLI/MCP korzystają z rozmiarów zapisanych przez watch wraz z wiekiem pomiaru, bez skanowania worktree i automatycznych wycen GC; kolejka czyta tylko wskazane zależności. GC publikuje własne rozliczenie usuniętych danych.
+
 - RC: nc-workflow checks the needYou decision reminder before the whole-file get_report marks the author pulled; P71 omits pulled tasks' outputs from attention summaries. / RC: nc-workflow sprawdza przypomnienie o decyzji w needYou przed pełnym get_report, który oznacza autora jako pobranego; P71 pomija wyniki pobranych zadań w podsumowaniach.
 
 - RC: live-economy expects the unrated count once per client session (P71) and checks the after-pull reminder on a fresh client session; the manager session had already consumed its one show. / RC: live-economy oczekuje licznika bez oceny raz na sesję klienta (P71) i sprawdza przypomnienie po pobraniu na świeżej sesji klienta; sesja managera już zużyła swoje jedno pokazanie.

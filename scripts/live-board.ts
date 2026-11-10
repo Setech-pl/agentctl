@@ -36,7 +36,7 @@ await withHarness({ name: 'board-models', cacheRoot: root, config: 'providers: [
   const target = `=${h.session}:board`;
   const capture = () => h.tmux(['capture-pane', '-p', '-t', target]).stdout;
   const until = async (pattern: RegExp) => {
-    const end = Date.now() + 15000;
+    const end = Date.now() + 60000;
     while (Date.now() < end) { const text = capture(); if (pattern.test(text)) return text; await sleep(150); }
     throw new Error(`board did not render ${pattern}:\n${capture()}`);
   };

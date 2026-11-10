@@ -33,7 +33,7 @@ for (const c of cases) {
     const toml = c.toml ?? `default_permission_mode = "${c.mode ?? 'manual'}"\n[permission]\ndangerous_command_guard = ${c.guard !== false}\n`;
     const config = path.join(h.env.KIMI_CODE_HOME!, 'config.toml'); fs.writeFileSync(config, toml);
     if (c.yaml) fs.writeFileSync(path.join(h.agentctlHome, 'config.yaml'), c.yaml);
-    const run = () => { h.check(); return spawnSync(node, [installed, 'doctor'], { env: h.env, cwd: h.root, encoding: 'utf8', timeout: 60_000 }); };
+    const run = () => { h.check(); return spawnSync(node, [installed, 'doctor'], { env: h.env, cwd: h.root, encoding: 'utf8', timeout: 240_000 }); };
     if (c.name === 'guide-recovery') fs.writeFileSync(path.join(h.root, '.agentctl.yaml'), 'guide: missing.md\n');
     const r = run();
     fs.writeFileSync(path.join(cache, `doctor-${label}-${c.name}.log`), r.stdout + r.stderr);

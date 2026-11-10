@@ -117,6 +117,7 @@ describe('collisions: status', () => {
     const s = setup('status-col');
     s.task('LANDING-QS-1', { committed: ['a.ts', 'b.ts'] });
     s.task('LANDING-BRAND-1', { committed: ['a.ts', 'b.ts'] });
+    await collectStatus(s.ctx); // watch sample
     const r = await runCli(s.config, s.runner, ['status']);
     assert.match(r.stdout.split('\n').find((line) => line.includes('PROGRESS'))!, /PROGRESS\s+COLLIDE\s+REPORT/);
     assert.match(r.stdout, /LANDING-BRAND-1[^\n]*⚠ LANDING-QS-1: 2/);
@@ -244,6 +245,7 @@ describe('collisions: touches', () => {
   it('queue shows the warning in the summary and asks "anyway"; new prints it and asks "Start anyway?"', async () => {
     const s = setup('touches-cli');
     s.task('A-1', { committed: ['src/menu/a.ts'] });
+    await collectStatus(s.ctx); // watch sample for the queue preview
     const asked: string[] = [];
     let r = await runCli(s.config, s.runner, ['queue', '-'], { readStdin: () => specText(s, 'src/menu/**'), confirm: async (q) => (asked.push(q), false) });
     assert.match(r.stdout, /⚠ N-1 touches src\/menu\/\*\* and A-1 already changes|⚠ N-1 touches src\/menu\/\*\*, and A-1 already changes/);

@@ -2,7 +2,7 @@ import { worktreeCacheFreed } from './worktree-cache.ts';
 import { knownLinkReferences, linkUsers } from './links.ts';
 import fs from 'node:fs';
 import path from 'node:path';
-import { configureMeasurements, sizeOf, newestMtime, cachedMeasurement, requestMeasurement } from './fs-measure.ts';
+import { configureMeasurements, sizeOf, newestMtime, cachedMeasurement, requestMeasurement, removedMeasurement } from './fs-measure.ts';
 export { sizeOf, newestMtime } from './fs-measure.ts';
 import { parseAge } from './archive.ts';
 import { findCohort } from './cohort.ts';
@@ -309,6 +309,7 @@ export async function applyGc(ctx: Context, plan: GcPlan): Promise<GcResult> {
           const r = await runner.exec('git', ['-C', item.repo as string, 'branch', '-d', item.branch as string]);
           if (r.code !== 0) throw new Error(r.stderr.trim().split('\n')[0] || `git exit ${r.code}`);
         }
+        if (kind === 'worktree' || kind === 'cache') removedMeasurement(item.target, runner.now());
         result.done.push({ ...item, bytes });
         result.freedBytes += bytes;
       } catch (e) {

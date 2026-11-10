@@ -146,6 +146,8 @@ export function guessAgent(screen: string): AgentName {
 export interface CollectOptions {
   /** Ask git for the progress of each worktree (default). The watcher and the close plan have no use for it. */
   progress?: boolean;
+  /** Read paths use persisted facts and never discover files or ask git to scan a worktree. */
+  cachedOnly?: boolean;
   /** Also the tasks whose state folder was moved to the archive (`status --all`, the board). */
   archived?: boolean;
   /** Add the tokens of each task (reads the session logs of the agents, incrementally). */
@@ -216,7 +218,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     }
     const screenAgent = record.agent === 'unknown' ? guessAgent(screenText) : record.agent;
     const settings = config.agents[screenAgent] ?? provider(screenAgent).defaultSettings();
-    if (!cachedRequest()) await provider(screenAgent).events.poll?.(ctx, record);
+    if (!opts.cachedOnly && !cachedRequest()) await provider(screenAgent).events.poll?.(ctx, record);
     const stored = readStoredEvent(config, record);
     const reportState = inspectReport(config, { ...record, ...(stored?.outcome === 'turn-complete' ? { turnEndedAt: stored.at } : {}) }, runner.now(), !record.attemptId && (!alive || (config.reportSettleS === 0 && classifyScreen(screenText, settings) === 'idle')));
     reportReady = reportState.ready;
@@ -224,7 +226,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     let reportCandidate = record.reportCandidate;
     let candidatesCache: ReturnType<typeof findCandidates> | undefined;
     const candidates = () => (candidatesCache ??= findCandidates(ctx, record));
-    if (reportCandidate && reportCandidate !== record.report && !candidates().some(c => c.file === reportCandidate)) reportCandidate = undefined;
+    if (!opts.cachedOnly && reportCandidate && reportCandidate !== record.report && !candidates().some(c => c.file === reportCandidate)) reportCandidate = undefined;
     if (reportState.exists && !reportReady && !reportCandidate) reportCandidate = record.report;
     if (reportReady && !alive && reportState.mtime !== undefined && !Number.isNaN(startedMs)) duration = formatDuration(reportState.mtime - startedMs);
     // mtimeMs has a fraction, the stored time only whole milliseconds: a pull in the same millisecond as the report still counts.
@@ -238,7 +240,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     const unconfirmed = record.promptDelivery === 'needs-attention' && !reportReady && !deliveryEvidence(ctx, record, screenText);
     // A startup dialog `new` stopped at (prompt_delivery: needs-input) is a question to the human, not a delivery failure.
     const startupDialog = record.promptDelivery === 'needs-input' && !reportReady;
-    const lossHint = await tmuxLoss(ctx, record, alive, reportReady || cancelled || closed || archived || !!record.supersededBy, infos.length > 0);
+    const lossHint = await tmuxLoss(ctx, record, alive, reportReady || cancelled || closed || archived || !!record.supersededBy, infos.length > 0, opts.cachedOnly);
     if (lossHint && hiddenBy === 'auto') hiddenBy = null;
     let state: TaskState = cancelled ? 'cancelled' : closed ? 'closed' : record.supersededBy ? 'superseded' : lossHint ? 'needs-attention' : writeFailure ? 'needs-attention' : deliveryReport ? 'report-ready' : startupDialog ? 'needs-input' : unconfirmed ? 'needs-attention' : taskState({ alive, screen: screenText, settings, reportReady, event: stored?.outcome });
     // Passive wire failures fill an idle screen; legacy hook recovery keeps its existing precedence.
@@ -248,7 +250,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     const identity = `${record.attemptId ?? record.started}:${record.deliveryStartedAt ?? ''}:${record.windowId ?? ''}`;
     const observationFile = path.join(config.stateDir, record.window, 'idle-observation.json');
     let release: (() => void) | undefined;
-    try { if (!runner.dryRun && alive && !archived) release = tryFileLock(`${observationFile}.lock`); } catch { /* read-only state: retain process-local observations */ }
+    try { if (!opts.cachedOnly && !runner.dryRun && alive && !archived) release = tryFileLock(`${observationFile}.lock`); } catch { /* read-only state: retain process-local observations */ }
     let prev = idleObservations.get(observationKey);
     try { const stored = JSON.parse(fs.readFileSync(observationFile, 'utf8')); if (typeof stored.attempt === 'string' && typeof stored.idle === 'number' && typeof stored.working === 'boolean' && typeof stored.observedWork === 'boolean') prev = stored; } catch { /* first observation */ }
     const observation = prev?.attempt === identity ? prev : { working: true, idle: 0, attempt: identity, observedWork: false };
@@ -261,7 +263,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       if (!stop && observation.idle < config.watch.idleConfirmTicks) state = 'working';
       else observation.working = false;
     } else { observation.working = false; observation.idle = 0; }
-    if (!reportState.exists && (state === 'waiting' || !alive)) reportCandidate = candidates()[0]?.file;
+    if (!opts.cachedOnly && !reportState.exists && (state === 'waiting' || !alive)) reportCandidate = candidates()[0]?.file;
     idleObservations.set(observationKey, observation);
     if (release) { try { atomicWriteFile(observationFile, JSON.stringify(observation)); } catch { /* observation persistence is best effort */ } finally { release(); } }
     // Still being written (no report-end yet, or not settled): readOutputs says `outputs_pending` and judges nothing.
@@ -274,6 +276,15 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
         // P70: a review's verdict is the FIRST line of its report ("Werdykt: NO-GO — …"), never only the outputs block.
         if (record.reviewOf) { const rv = reviewVerdict(reportText); if (rv) verdict = reviewVerdictAsOutput(rv.first); }
       } catch { /* absent */ }
+    }
+    let progress: Progress | null = null;
+    if (record.repos.length && opts.progress !== false) {
+      const file = path.join(config.stateDir, record.window, 'progress.json');
+      if (opts.cachedOnly) { try { progress = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* watch has not sampled yet */ } }
+      else {
+        progress = await taskProgress(runner, record.repos);
+        if (!runner.dryRun && !archived) await runner.writeFile(file, JSON.stringify(progress)).catch(() => undefined);
+      }
     }
     rows.push({
       ...(outputData ? { ...outputData, verdict, decisionsCount: outputData.outputs?.decisions.length ?? 0, actionsCount: outputData.outputs?.actions.length ?? 0 } : {}),
@@ -309,7 +320,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       ...(record.reportConfirmed ? { reportConfirmed: record.reportConfirmed } : {}),
       pulled,
       lastLine: lastContentLine(screenText, settings.footerPatterns),
-      progress: opts.progress === false || record.repos.length === 0 ? null : await taskProgress(runner, record.repos),
+      progress,
       collide: [],
       hint: [lossHint, reportCandidate && reportCandidate !== record.report && !reportState.exists ? `Raport poza ścieżką kanoniczną; użyj report_from ze ścieżką ${reportCandidate}` : null, writeFailure ? `State write failed: ${writeFailure.reason}; old TASK.md preserved` : startupDialog ? record.promptError : unconfirmed ? record.promptError : record.promptDelivery === 'confirming' || record.promptDelivery === 'sending' ? (deliveryNote(record) ?? 'dostarczenie niepotwierdzone – sprawdzam; watch confirms within delivery_confirm_s') : record.promptDelivery === 'pending' ? 'original prompt pending; watch sends it once after folder trust and empty ready input' : stateHint(record.task, state, record.pin === true, record.supersededBy), !record.reportConfirmed && record.reportSource && path.normalize(record.reportSource) !== path.normalize(record.report) ? `raport pochodzi z kopii ${record.reportSource} – sprawdź` : null].filter(Boolean).join('; ') || null,
       // Codex: the session log names a pending request_user_input question exactly (the text of the expanded view),
@@ -399,7 +410,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
 
 /** `status`: collect the rows and, when `mirror_dir` is configured, copy new reports and status.json there. */
 export async function reportStatus(ctx: Context, opts: { archived?: boolean } = {}): Promise<{ rows: StatusRow[]; mirror: MirrorResult | undefined }> {
-  const rows = await collectStatus(ctx, { archived: Boolean(opts.archived), tokens: true });
+  const rows = await collectStatus(ctx, { archived: Boolean(opts.archived), tokens: true, cachedOnly: true, shallowClosed: true });
   return { rows, mirror: await syncMirror(ctx, rows.filter((r) => !r.archived)) };
 }
 
