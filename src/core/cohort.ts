@@ -141,8 +141,8 @@ export const cohortEntries = (entries: readonly QueueEntry[], name: string): Que
  * adds the tasks that wait in the queue (cancel takes them out; close has no window to close).
  */
 export async function openCohortTasks(ctx: Context, name: string, opts: { queued: boolean }): Promise<string[]> {
-  const rows = await collectStatus(ctx, { progress: false });
-  const live = cohortRows(rows, name).filter((r) => !r.closed && !r.cancelled);
+  const windows = new Set(await ctx.tmux.listWindows());
+  const live = listTaskRecords(ctx.config).filter(r => inCohort(r.cohort, cohortKey(name)) && (!(r.closed || r.cancelled) || windows.has(r.window)));
   const queued = opts.queued ? cohortEntries(readQueue(ctx.config), name).filter((e) => !live.some((r) => r.task === e.task)) : [];
   return [...live.map((r) => r.task), ...queued.map((e) => e.task)];
 }

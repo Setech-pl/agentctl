@@ -67,17 +67,7 @@ export async function collectDisk(ctx: Context, statfs = fs.promises.statfs, opt
     volumes.set(key, { device, paths: [target], availableBytes, totalBytes, level: diskLevel(availableBytes, ctx.config.disk.warnGb, ctx.config.disk.criticalGb), ...(error ? { error } : {}) });
   }
   const worktrees = [...new Set(records.flatMap((r) => r.repos.map((r) => r.worktree)))].sort();
-  const sizeFile = path.join(path.dirname(ctx.config.path), 'disk-sizes.json');
-  let version: string | undefined;
-  try { version = fileVersion(fs.statSync(sizeFile, { bigint: true })); } catch { /* no persisted sample yet */ }
-  if (!version || restored.get(sizeFile) !== version) {
-    if (version) restored.set(sizeFile, version);
-    try {
-      const stored = JSON.parse(fs.readFileSync(sizeFile, 'utf8'));
-      // Old aggregate timestamps cannot establish the ages of individual paths.
-      if (stored.version === 2) restoreMeasurements(stored.entries, ctx.runner.now());
-    } catch { /* first reading, torn or incompatible cache */ }
-  }
+  restoreDiskMeasurements(ctx);
   const values = worktrees.flatMap(wt => { const m = lastMeasurement(wt); return m ? [m] : []; });
   const pending = values.length < worktrees.length;
   const measurementError = undefined;
@@ -104,6 +94,20 @@ export async function collectDisk(ctx: Context, statfs = fs.promises.statfs, opt
   const offset = opts.offset ?? 0, limit = Math.min(opts.limit ?? 20, 100);
   const paths = all.flatMap(v => v.paths), page = new Set(opts.detail ? paths.slice(offset, offset + limit) : []);
   return { gcHint, reclaimableBytes, worktreeCount: worktrees.length, largestWorktrees, pathsTotal: paths.length, pathsOffset: offset, pathsNextOffset: opts.detail && offset + limit < paths.length ? offset + limit : null, volumes: all.map(v => ({ ...v, pathCount: v.paths.length, paths: v.paths.filter(p => page.has(p)) })), worktreeBytes, measuredAt: new Date(measuredAt).toISOString(), level, ...(pending ? { measuring: true } : {}), ...(measurementError ? { measurementError } : {}) };
+}
+/** Restore the watch's persisted samples; never schedule or validate a recursive measurement. */
+export function restoreDiskMeasurements(ctx: Context): void {
+  const sizeFile = path.join(path.dirname(ctx.config.path), 'disk-sizes.json');
+  let version: string | undefined;
+  try { version = fileVersion(fs.statSync(sizeFile, { bigint: true })); } catch { /* no persisted sample yet */ }
+  if (!version || restored.get(sizeFile) !== version) {
+    if (version) restored.set(sizeFile, version);
+    try {
+      const stored = JSON.parse(fs.readFileSync(sizeFile, 'utf8'));
+      // Old aggregate timestamps cannot establish the ages of individual paths.
+      if (stored.version === 2) restoreMeasurements(stored.entries, ctx.runner.now());
+    } catch { /* first reading, torn or incompatible cache */ }
+  }
 }
 /** A reading older than this is shown with its age next to the number (a gc or a quiet minute can make it stale). */
 export const READING_AGE_WARN_MS = 10 * 60_000;

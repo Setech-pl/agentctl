@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { cachedRequest } from './response-budget.ts';
 import { matchesProviderCommand } from './providers/registry.ts';
 import path from 'node:path';
 import type { Runner } from './runner.ts';
@@ -25,7 +26,8 @@ export async function checkRetryWorktrees(runner: Runner, repos: ResolvedRepo[])
       throw new AgentctlError(`unsafe start residue: ${repo.worktree}`, `Inspect this directory and its git worktree registration; preserve any work, then remove only this failed start's residue before queue retry.`);
     }
     const unsafe = (reason: string): never => { throw new AgentctlError(`unsafe start residue: ${repo.worktree}: ${reason}`, 'Checkout completeness is uncertain. Preserve this directory; inspect git status, HEAD/branch and index.lock, then repair the registered checkout or remove only this failed start residue and queue retry. No agent was started.'); };
-    const status = await runner.exec('git', ['-C', repo.worktree, 'status', '--porcelain', '--untracked-files=no'], { readOnly: true });
+    // MCP only re-registers the entry. The worker repeats this check, including tracked files, before reuse.
+    const status = cachedRequest() ? { code: 0, stdout: '' } : await runner.exec('git', ['-C', repo.worktree, 'status', '--porcelain', '--untracked-files=no'], { readOnly: true });
     if (status.code !== 0 || status.stdout.trim()) unsafe('git status failed or tracked checkout is incomplete/modified');
     const lock = await runner.exec('git', ['-C', repo.worktree, 'rev-parse', '--git-path', 'index.lock'], { readOnly: true });
     if (lock.code !== 0 || !lock.stdout.trim()) unsafe('cannot locate index.lock');

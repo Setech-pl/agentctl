@@ -8,7 +8,7 @@ import path from 'node:path';
  */
 
 export interface FsCounts {
-  /** readFileSync of a TASK.md (each one is parsed right after). */
+  /** Logical TASK.md reads, including bounded fd header reads (one parse per open). */
   taskMdReads: number;
   /** readFileSync of a report body (a .md file under the fixture cache). */
   reportReads: number;
@@ -25,9 +25,11 @@ export interface FsCounter {
 export function installFsCounter(root: string): FsCounter {
   const counts: FsCounts = { taskMdReads: 0, reportReads: 0, statCalls: 0 };
   const fds = new Map<number, string>();
+  const countedFds = new Set<number>();
   const fsp = fs as unknown as Record<string, unknown>;
   const original = {
     readFileSync: fs.readFileSync,
+    readSync: fs.readSync,
     openSync: fs.openSync,
     closeSync: fs.closeSync,
     statSync: fs.statSync,
@@ -41,7 +43,7 @@ export function installFsCounter(root: string): FsCounter {
   fsp.readFileSync = function (file: unknown, ...rest: unknown[]) {
     if (typeof file === 'number') {
       const p = fds.get(file);
-      if (p) countRead(p);
+      if (p && !countedFds.has(file)) { countRead(p); countedFds.add(file); }
     } else if (own(file)) countRead(file);
     return (original.readFileSync as (...a: unknown[]) => unknown).call(fs, file, ...rest);
   };
@@ -50,8 +52,13 @@ export function installFsCounter(root: string): FsCounter {
     if (own(p)) fds.set(fd, p);
     return fd;
   };
+  fsp.readSync = function (fd: number, ...rest: unknown[]) {
+    const p = fds.get(fd);
+    if (p?.endsWith(`${path.sep}TASK.md`) && !countedFds.has(fd)) { countRead(p); countedFds.add(fd); }
+    return (original.readSync as (...a: unknown[]) => number).call(fs, fd, ...rest);
+  };
   fsp.closeSync = function (fd: number) {
-    fds.delete(fd);
+    fds.delete(fd); countedFds.delete(fd);
     return original.closeSync.call(fs, fd);
   };
   fsp.statSync = function (p: unknown, ...rest: unknown[]) {
@@ -71,6 +78,7 @@ export function installFsCounter(root: string): FsCounter {
     },
     restore(): void {
       fsp.readFileSync = original.readFileSync;
+      fsp.readSync = original.readSync;
       fsp.openSync = original.openSync;
       fsp.closeSync = original.closeSync;
       fsp.statSync = original.statSync;

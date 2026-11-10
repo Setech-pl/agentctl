@@ -1,3 +1,4 @@
+import { planClose } from './close.ts';
 import { performance } from 'node:perf_hooks';
 import { activeProviders } from './providers/registry.ts';
 import type { Context } from './context.ts';
@@ -7,7 +8,7 @@ import { splitSpecs } from './spec.ts';
 import path from 'node:path';
 
 export interface ReadTiming { name: string; ms: number; thresholdMs: number; result: 'PASS' | 'WARN'; error?: string }
-export const READ_TIMING_BUDGETS = { status: 1500, 'queue list': 500, events: 2000, 'queue preview': 2000 } as const;
+export const READ_TIMING_BUDGETS = { status: 1500, 'queue list': 500, events: 2000, 'queue preview': 2000, 'close preview': 2000 } as const;
 export async function measureReadTimings(run: (name: keyof typeof READ_TIMING_BUDGETS) => Promise<void>, now = () => performance.now()): Promise<ReadTiming[]> {
   const result: ReadTiming[] = [];
   for (const [name, thresholdMs] of Object.entries(READ_TIMING_BUDGETS)) {
@@ -27,6 +28,11 @@ export async function dryQueueTimingPreview(ctx: Context): Promise<void> {
   const task = `DOCTOR-TIMING-${process.pid}`;
   const spec = `---\ntask: ${task}\nagent: ${activeProviders(ctx.config)[0]}\nrepos:\n - path: ${JSON.stringify(repo)}\n   worktree: ${JSON.stringify(path.join(ctx.config.cache, task, 'never-created-worktree'))}\n---\nDoctor read latency preview; never registered.\n`;
   await planQueueAdd(ctx, splitSpecs(spec, 'doctor --timings'));
+}
+/** The real close planner, without token/audit writes, window kills or cleanup. */
+export async function dryCloseTimingPreview(ctx: Context): Promise<void> {
+  const task = listTaskRecords(ctx.config).find(r => !r.closed && !r.cancelled)?.task ?? `DOCTOR-TIMING-${process.pid}`;
+  await planClose(ctx, [task]);
 }
 export function renderReadTimings(rows: ReadTiming[]): string[] {
   return rows.map(r => `${r.result} ${r.name}: ${r.ms.toFixed(1)} ms (threshold < ${r.thresholdMs} ms)${r.error ? `; ${r.error}` : ''}`);

@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- P83: preserve cancel selector validation before cohort resolution; history tests seed background observations before close. / P83: walidacja wyboru cancel poprzedza rozwiązywanie kohort; testy historii zapisują obserwacje tła przed close.
+
+- P83 cohort close/cancel selection reads metadata only; nested MCP status planners inherit cached-only mode. / Wybór kohort dla close/cancel w P83 czyta tylko metadane; zagnieżdżone planery statusu MCP dziedziczą tryb zapisanych danych.
+
+- Board/Ink test instrumentation counts bounded task-header reads and keeps board fixtures in gate-owned scratch. / Licznik testowy planszy i Ink uwzględnia ograniczone odczyty nagłówków i przechowuje plansze testowe w katalogu roboczym gate.
+
+## [0.19.3] - 2026-11-10
+
+- P83: complete write-preview latency fixes; package/lockfile 0.19.3 supersedes the unpublished 0.19.2 candidate. / P83: domknięcie poprawki czasu podglądów zapisu; pakiet i lockfile 0.19.3 zastępują nieopublikowanego kandydata 0.19.2.
+
+- Doctor: `--timings` includes a dry close preview (<2000 ms) without closing tasks or issuing confirmation tokens. / Doctor: `--timings` obejmuje próbny podgląd close (<2000 ms) bez zamykania zadań i tworzenia tokenów potwierdzenia.
+
+- P83 write previews: header-only inventories, selected-task report inspection and cached close/cancel/mark history; close leaves worktree cleanup to watch and shows only aged watch size samples. MCP GC never measures or runs git status; recursive cache directories stay for CLI GC, and git checks cleanliness on removal. Retry registration leaves tracked-file scans to the worker. / Podglądy zapisu P83: indeksy z nagłówków, raporty tylko wybranych zadań i zapisane obserwacje historii close/cancel/mark; close zostawia sprzątanie watch i pokazuje wyłącznie pomiary watch z wiekiem. GC w MCP nie mierzy ani nie uruchamia git status; katalogi cache zostają dla GC w CLI, a git sprawdza czystość przy usunięciu. Kontrolę plików śledzonych przy ponowieniu wykonuje worker.
+
 - Live scripts: wider render/delivery/spawn windows for loaded hosts; live-kimi runs the wire-mode checks under a watcher because read paths no longer poll provider wires (watch owns event recording). / Skrypty live: szersze okna renderowania/dostarczania/startu na obciążone hosty; live-kimi sprawdza tryby wire pod watcherem, bo ścieżki odczytu nie odpytują już magistrali dostawców (zapis zdarzeń należy do watch).
 
 - Read-budget regression test: skipped under the gate (niced processes — read-contracts carries the deterministic proof there) and on loaded hosts via a `node --version` probe; budgets are tripwires against the pre-fix walks (status 3 s, queue list 2 s, MCP 5 s), while `doctor --timings` keeps the tight PASS/WARN budgets for production diagnosis. / Test regresji czasu odczytu: pomijany pod gate (procesy z nice — deterministyczny dowód niesie read-contracts) i na obciążonych hostach przez sondę `node --version`; progi są bezpiecznikami przeciw dawnej regresji (status 3 s, kolejka 2 s, MCP 5 s); ciasne progi PASS/WARN do diagnostyki produkcji zostają w `doctor --timings`.

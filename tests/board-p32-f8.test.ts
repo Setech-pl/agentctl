@@ -53,7 +53,7 @@ for (const phase of ['scan', 'status'] as const) it(`F8: real Ink/stdin arrows c
     debug: true, interactive: true, patchConsole: false, exitOnCtrlC: false,
   });
   const originalStat = fs.statSync;
-  const originalRead = fs.readFileSync;
+  const originalOpen = fs.openSync;
   const visited = new Set<string>();
   const handled: { task: string; records: number }[] = [];
   let taskReads = 0;
@@ -70,13 +70,15 @@ for (const phase of ['scan', 'status'] as const) it(`F8: real Ink/stdin arrows c
     await terminal.until(() => /▸\s+KEY-001/.test(terminal.frame) && terminal.frame.includes('KEY-001 · last'));
     // Force a cold parse in the scan case; keep the cache warm for the independent status case.
     if (phase === 'scan') for (const file of tasks) fs.appendFileSync(file, '\nchanged prompt\n');
-    fs.readFileSync = ((file: unknown, ...args: unknown[]) => {
+    // Header readers use bounded fd reads; opening a TASK.md marks one scan visit.
+    fs.openSync = ((file: unknown, ...args: unknown[]) => {
+      const fd = Reflect.apply(originalOpen, fs, [file, ...args]);
       if (armed && tasks.includes(String(file))) {
         taskReads++;
         if (phase === 'scan') recordVisited(String(file));
       }
-      return Reflect.apply(originalRead, fs, [file, ...args]);
-    }) as typeof fs.readFileSync;
+      return fd;
+    }) as typeof fs.openSync;
     fs.statSync = ((file: unknown, ...args: unknown[]) => {
       const name = String(file);
       if (armed && phase === 'status' && reports.has(name) && !visited.has(name)) {
@@ -101,7 +103,7 @@ for (const phase of ['scan', 'status'] as const) it(`F8: real Ink/stdin arrows c
     await app.waitUntilExit();
   } finally {
     fs.statSync = originalStat;
-    fs.readFileSync = originalRead;
+    fs.openSync = originalOpen;
     app.unmount(); app.cleanup(); stdin.destroy();
   }
 });

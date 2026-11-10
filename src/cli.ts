@@ -1,4 +1,4 @@
-import { dryQueueTimingPreview, measureReadTimings, renderReadTimings } from './core/doctor-timings.ts';
+import { dryCloseTimingPreview, dryQueueTimingPreview, measureReadTimings, renderReadTimings } from './core/doctor-timings.ts';
 import { queueViews } from './core/queue.ts';
 import { attachHint, tmuxCommand } from './core/tmux-socket.ts';
 import { collectMachine, machineLine } from './core/machine.ts';
@@ -1632,13 +1632,14 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
   program
     .command('doctor')
     .description('Check tmux, node, claude, codex, gh, the cache directory and the configs.')
-    .option('--timings', 'Time status, queue list, events and a dry queue preview; PASS/WARN against read budgets (command wall time, excluding Node startup).')
+    .option('--timings', 'Time status, queue list, events and dry queue and close previews; PASS/WARN against read budgets (command wall time, excluding Node startup).')
     .action(
       guarded(async (opts: { timings?: boolean }) => {
         if (opts.timings) {
           const ctx = contextFor(false, { migrate: false });
           const timings = await measureReadTimings(async name => {
             if (name === 'queue preview') return dryQueueTimingPreview(ctx);
+            if (name === 'close preview') return dryCloseTimingPreview(ctx);
             const args = name === 'queue list' ? ['queue', 'list'] : name === 'events' ? ['events', '--keep'] : ['status'];
             let stderr = '';
             const code = await main(args, { ...deps, stdout: () => {}, stderr: text => { stderr += text; }, inspect: undefined });
