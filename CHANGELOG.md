@@ -6,7 +6,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - P83 cohort close/cancel selection reads metadata only; nested MCP status planners inherit cached-only mode. / Wybór kohort dla close/cancel w P83 czyta tylko metadane; zagnieżdżone planery statusu MCP dziedziczą tryb zapisanych danych.
 
-- Test instrumentation counts bounded task-header reads and keeps board fixtures in gate-owned scratch. / Licznik testowy uwzględnia ograniczone odczyty nagłówków i przechowuje plansze testowe w katalogu roboczym gate.
+- Board/Ink test instrumentation counts bounded task-header reads and keeps board fixtures in gate-owned scratch. / Licznik testowy planszy i Ink uwzględnia ograniczone odczyty nagłówków i przechowuje plansze testowe w katalogu roboczym gate.
 
 ## [0.19.3] - 2026-11-10
 
