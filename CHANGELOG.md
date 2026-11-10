@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.19.3] - 2026-11-10
+
+- P83: complete write-preview latency fixes; package/lockfile 0.19.3 supersedes the unpublished 0.19.2 candidate. / P83: domknięcie poprawki czasu podglądów zapisu; pakiet i lockfile 0.19.3 zastępują nieopublikowanego kandydata 0.19.2.
+
 - Doctor: `--timings` includes a dry close preview (<2000 ms) without closing tasks or issuing confirmation tokens. / Doctor: `--timings` obejmuje próbny podgląd close (<2000 ms) bez zamykania zadań i tworzenia tokenów potwierdzenia.
 
 - P83 write previews: header-only inventories, selected-task report inspection and cached close/cancel/mark history; close leaves worktree cleanup to watch and shows only aged watch size samples. MCP GC never measures or runs git status; recursive cache directories stay for CLI GC, and git checks cleanliness on removal. Retry registration leaves tracked-file scans to the worker. / Podglądy zapisu P83: indeksy z nagłówków, raporty tylko wybranych zadań i zapisane obserwacje historii close/cancel/mark; close zostawia sprzątanie watch i pokazuje wyłącznie pomiary watch z wiekiem. GC w MCP nie mierzy ani nie uruchamia git status; katalogi cache zostają dla GC w CLI, a git sprawdza czystość przy usunięciu. Kontrolę plików śledzonych przy ponowieniu wykonuje worker.
