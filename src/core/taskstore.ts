@@ -10,7 +10,7 @@ import { AGENT_NAMES, EFFORTS } from './config.ts';
 import type { AgentName, Effort, GlobalConfig, Link, ReviewSettings } from './config.ts';
 import type { ResolvedRepo, ResolvedSpec, AutoReviewSource } from './spec.ts';
 import type { Order } from './equivalents.ts';
-import { isObject, windowName } from './util.ts';
+import { isObject, windowName, TASK_ID } from './util.ts';
 
 /** Agent, model and effort are "unknown" for a task restored with `agentctl adopt` without those flags. */
 export type RecordAgent = AgentName | 'unknown';
@@ -218,15 +218,30 @@ export function renderFollowUp(prompt: string, whenIso: string): string {
   return `\n\n## Follow-up sent ${whenIso}\n\n${prompt.trim()}\n`;
 }
 
-/** Read the header of a TASK.md; undefined when missing or not written by agentctl. */
-export function readTaskRecord(config: GlobalConfig, window: string): TaskRecord | undefined {
-  let text: string;
+/** Read only the YAML envelope, never the prompt/follow-up body (which may be megabytes). */
+export function readRecordFile(file: string): TaskRecord | undefined {
+  let fd: number | undefined;
   try {
-    text = fs.readFileSync(taskFile(config, window), 'utf8');
-  } catch {
-    return undefined;
-  }
-  return parseTaskRecord(text);
+    fd = fs.openSync(file, 'r');
+    const chunks: Buffer[] = [];
+    let length = 0;
+    // Headers contain paths/env; bound malformed input without reading an unbounded prompt.
+    while (length < 1024 * 1024) {
+      const chunk = Buffer.alloc(4096);
+      const n = fs.readSync(fd, chunk, 0, chunk.length, null);
+      if (!n) return parseTaskRecord(Buffer.concat(chunks).toString('utf8'));
+      chunks.push(chunk.subarray(0, n)); length += n;
+      const text = Buffer.concat(chunks).toString('utf8');
+      const match = /^---\r?\n[\s\S]*?\r?\n---\r?\n/.exec(text);
+      if (match) return parseTaskRecord(match[0]);
+      if (length >= 4 && !text.startsWith('---\n') && !text.startsWith('---\r\n')) return undefined;
+    }
+  } catch { /* missing/unreadable record */ }
+  finally { if (fd !== undefined) fs.closeSync(fd); }
+  return undefined;
+}
+export function readTaskRecord(config: GlobalConfig, window: string): TaskRecord | undefined {
+  return readRecordFile(taskFile(config, window));
 }
 
 /** The prompt the task started with: the text after the header, up to the first follow-up that `send` appended. */
@@ -356,13 +371,7 @@ function recordsIn(dir: string): TaskRecord[] {
   }
   const records: TaskRecord[] = [];
   for (const name of entries.sort()) {
-    let text: string;
-    try {
-      text = fs.readFileSync(path.join(dir, name, 'TASK.md'), 'utf8');
-    } catch {
-      continue;
-    }
-    const record = parseTaskRecord(text);
+    const record = readRecordFile(path.join(dir, name, 'TASK.md'));
     if (record) records.push(record);
   }
   return records;
@@ -429,7 +438,7 @@ async function scanRecordsIn(dir: string): Promise<TaskRecord[]> {
       } else {
         let record: TaskRecord | undefined;
         try {
-          record = parseTaskRecord(fs.readFileSync(file, 'utf8'));
+          record = readRecordFile(file);
         } catch {
           record = undefined;
         }
@@ -456,17 +465,18 @@ export async function snapshotRecords(config: GlobalConfig): Promise<RecordScan>
 
 /** Bounded full-ID lookup for queue authors: current canonical folder, then its archive folder. */
 export function readTaskRecordById(config: GlobalConfig, task: string): TaskRecord | undefined {
+  if (!TASK_ID.test(task.toUpperCase())) return undefined;
   const window = windowName(task);
   const current = readTaskRecord(config, window);
   if (current) return current;
-  try { return parseTaskRecord(fs.readFileSync(path.join(archiveDir(config), window, 'TASK.md'), 'utf8')); }
+  try { return readRecordFile(path.join(archiveDir(config), window, 'TASK.md')); }
   catch { return undefined; }
 }
 
 /** A task by its ID (any case), current first, else in the archive: one lookup for everything that needs "the record of that task". */
 export function findRecordAnywhere(config: GlobalConfig, task: string): TaskRecord | undefined {
   const wanted = task.toLowerCase();
-  return readTaskRecord(config, windowName(task)) ?? listTaskRecords(config).find((r) => r.task.toLowerCase() === wanted) ?? listArchivedRecords(config).find((r) => r.task.toLowerCase() === wanted);
+  return readTaskRecordById(config, task) ?? listTaskRecords(config).find((r) => r.task.toLowerCase() === wanted) ?? listArchivedRecords(config).find((r) => r.task.toLowerCase() === wanted);
 }
 
 /** Set one key in the YAML header of an existing TASK.md; the body (prompt, follow-ups) and the other keys stay as they are. */

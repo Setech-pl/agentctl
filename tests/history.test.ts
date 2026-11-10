@@ -136,9 +136,10 @@ describe('history records', () => {
     assert.equal(readHistory(s.config).filter((h) => h.event === 'report').length, 1);
   });
 
-  it('close records the task (with the progress, before --rm-worktree would take the worktree)', async () => {
+  it('close records the task with watch-cached progress before worktree removal', async () => {
     const s = setup('rec-close');
     s.writeReport();
+    fs.writeFileSync(path.join(s.config.stateDir, 'nc-1/progress.json'), JSON.stringify({ commits: 3, files: 3 }));
     await closeTask(s.ctx, 'NC-1');
     const closed = readHistory(s.config).find((h) => h.event === 'closed');
     assert.ok(closed);
@@ -150,6 +151,8 @@ describe('history records', () => {
 
   it('cancel records the reason; a task from the queue that never ran is recorded too', async () => {
     const s = setup('rec-cancel');
+    s.writeReport();
+    await recordEvent(s.ctx, s.record, 'report');
     const plan = await planCancel(s.ctx, ['NC-1'], { reason: 'wrong approach', source: 'cli' });
     await cancelTasks(s.ctx, plan, { reason: 'wrong approach', source: 'cli' });
     const c = readHistory(s.config).find((h) => h.event === 'cancelled');

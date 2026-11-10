@@ -107,7 +107,7 @@ it('P24 warns on per-volume worktree share, gives safe reclaim size and close si
   assert.match(diskLine(report), /gc --preview.*n\/d bytes/);
   assert.equal(fs.readFileSync(`${wt}/data`, 'utf8').length, 20);
   await closeTask(ctx, 'P24-1');
-  assert.match(out.join('\n'), /worktree size: 20 bytes/);
+  assert.match(out.join('\n'), /worktree size: 20 bytes.*watch reading, [0-9]+ s old/);
   config.disk.worktreeSharePercent = 30;
   assert.equal((await collectDisk(ctx, fake)).level, 'ok');
   assert.throws(() => makeConfig(scratch.sub('p24-bad'), 'disk: {worktree_share_percent: 101}\n'), /worktree_share_percent/);

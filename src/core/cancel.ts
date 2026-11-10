@@ -86,7 +86,6 @@ export async function planCancel(ctx: Context, inputs: string[], opts: CancelOpt
     ...entries.filter((e) => !records.some((r) => r.task === e.task)).map((e) => ({ task: e.task, window: e.task.toLowerCase(), alive: false })),
   ];
   const live = new Set(runner.dryRun ? [] : await tmux.listWindows());
-  const rows = new Map((await collectStatus(ctx, { progress: false })).map((r) => [r.task, r] as const));
 
   const chosen: { task: string; partnerOf?: string }[] = [];
   const add = (task: string, partnerOf?: string): void => {
@@ -101,6 +100,8 @@ export async function planCancel(ctx: Context, inputs: string[], opts: CancelOpt
     for (const other of partners(task, records)) add(other, task);
   }
 
+  const selectedRecords = records.filter(r => chosen.some(c => c.task === r.task));
+  const rows = new Map((await collectStatus(ctx, { progress: false, cachedOnly: true, records: { current: selectedRecords, archived: [] } })).map(r => [r.task, r] as const));
   const items: CancelPlanItem[] = [];
   const p = chosen.map((c) => c.task);
   for (const { task, partnerOf } of chosen) {

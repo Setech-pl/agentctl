@@ -1,8 +1,9 @@
+import { restoreDiskMeasurements } from './disk.ts';
 import { worktreeCacheFreed } from './worktree-cache.ts';
 import { knownLinkReferences, linkUsers } from './links.ts';
 import fs from 'node:fs';
 import path from 'node:path';
-import { configureMeasurements, sizeOf, newestMtime, cachedMeasurement, requestMeasurement, removedMeasurement } from './fs-measure.ts';
+import { configureMeasurements, sizeOf, newestMtime, lastMeasurement, removedMeasurement } from './fs-measure.ts';
 export { sizeOf, newestMtime } from './fs-measure.ts';
 import { parseAge } from './archive.ts';
 import { findCohort } from './cohort.ts';
@@ -44,6 +45,8 @@ export interface GcSkip {
 }
 
 export interface GcPlan {
+  /** An MCP plan uses estimates; git still refuses dirty worktree removal. */
+  cachedSizes?: boolean;
   autoCacheFreedBytes?: number;
   items: GcItem[];
   skipped: GcSkip[];
@@ -98,19 +101,17 @@ async function listWorktrees(ctx: Context, repo: string): Promise<WorktreeListin
 /** What `gc` would do now. Reads (files, git), changes nothing. */
 export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan> {
   const { config, runner } = ctx;
-  configureMeasurements(config.disk);
-  const measurement = (target: string) => {
-    const cached = cachedMeasurement(target);
-    const lease = requestMeasurement(target, { background: true });
-    void lease.promise.catch(() => undefined).finally(() => lease.release());
-    return cached;
-  };
+  if (opts.cachedSizes) restoreDiskMeasurements(ctx);
+  else configureMeasurements(config.disk);
+  const measurement = lastMeasurement;
   const size = (target: string) => opts.cachedSizes ? Promise.resolve(measurement(target)?.bytes ?? 0) : sizeOf(target);
   const newest = (target: string) => opts.cachedSizes ? Promise.resolve(measurement(target)?.newest ?? runner.now()) : newestMtime(target);
   const olderThanMs = parseAge(opts.olderThan ?? DEFAULT_OLDER_THAN);
   const cohort = opts.cohort === undefined ? undefined : findCohort(config, opts.cohort).name;
-  const archived = new Set(listArchivedRecords(config).map((r) => r.window));
-  const all: TaskRecord[] = [...listTaskRecords(config), ...listArchivedRecords(config).filter((r) => !listTaskRecords(config).some((x) => x.window === r.window))];
+  const currentRecords = listTaskRecords(config), archivedRecords = listArchivedRecords(config);
+  const archived = new Set(archivedRecords.map(r => r.window));
+  const currentNames = new Set(currentRecords.map(r => r.window));
+  const all: TaskRecord[] = [...currentRecords, ...archivedRecords.filter(r => !currentNames.has(r.window))];
   const live = new Set(await ctx.tmux.listWindows());
   const finished = (r: TaskRecord): boolean => (r.closed === true || r.cancelled === true || archived.has(r.window)) && !live.has(r.window);
   const items: GcItem[] = [];
@@ -150,7 +151,8 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
         skipped.push({ task: record.task, kind: 'worktree', target: wt, reason: `has ${head.out} checked out` });
         continue;
       }
-      const status = await git(ctx, ['-C', wt, 'status', '--porcelain']);
+      // In cached previews git worktree remove will enforce cleanliness at execution.
+      const status = opts.cachedSizes ? { code: 0, out: '', err: '' } : await git(ctx, ['-C', wt, 'status', '--porcelain']);
       if (status.code !== 0) {
         skipped.push({ task: record.task, kind: 'worktree', target: wt, reason: `git does not answer (${status.err.split('\n')[0] || `exit ${status.code}`})` });
         continue;
@@ -197,7 +199,13 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
     for (const name of names.sort()) {
       if (/\.md$/i.test(name)) continue;
       const target = path.join(dir, name);
-      const age = runner.now() - await newest(target);
+      // A directory's root mtime cannot prove the age of its descendants.
+      // Cached MCP plans leave recursive cache cleanup to explicit CLI GC.
+      if (opts.cachedSizes && fs.lstatSync(target).isDirectory()) {
+        skipped.push({ task: record.task, kind: 'cache', target, reason: 'directory age needs explicit CLI gc verification', bytes: measurement(target)?.bytes });
+        continue;
+      }
+      const age = runner.now() - (opts.cachedSizes ? fs.lstatSync(target).mtimeMs : await newest(target));
       if (age < olderThanMs) {
         skipped.push({ task: record.task, kind: 'cache', target, bytes: await size(target), reason: `newer than ${opts.olderThan ?? DEFAULT_OLDER_THAN}` });
         continue;
@@ -276,7 +284,7 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
   }
   const freeBytes = items.reduce((n, i) => n + i.bytes, 0);
   const foreignWorktrees = skipped.filter(s => s.kind === 'worktree-foreign').length;
-  return { autoCacheFreedBytes: all.filter(r => cohort === undefined || (r.cohort && cohortKey(r.cohort) === cohortKey(cohort))).reduce((sum, r) => sum + worktreeCacheFreed(ctx, r), 0), ...(opts.forceLinks ? { forceLinks: true } : {}), items, skipped: cohort === undefined ? skipped : skipped.filter(s => s.kind !== 'worktree-foreign'), freeBytes, olderThanMs, unknownCacheDirs, ...(cohort !== undefined ? { foreignWorktrees } : {}) };
+  return { ...(opts.cachedSizes ? { cachedSizes: true } : {}), autoCacheFreedBytes: all.filter(r => cohort === undefined || (r.cohort && cohortKey(r.cohort) === cohortKey(cohort))).reduce((sum, r) => sum + worktreeCacheFreed(ctx, r), 0), ...(opts.forceLinks ? { forceLinks: true } : {}), items, skipped: cohort === undefined ? skipped : skipped.filter(s => s.kind !== 'worktree-foreign'), freeBytes, olderThanMs, unknownCacheDirs, ...(cohort !== undefined ? { foreignWorktrees } : {}) };
 }
 
 export interface GcResult {
@@ -293,15 +301,17 @@ export async function applyGc(ctx: Context, plan: GcPlan): Promise<GcResult> {
   for (const kind of order) {
     for (const item of plan.items.filter((i) => i.kind === kind)) {
       try {
-        // The plan may be old; only successfully removed bytes belong in the result.
-        const bytes = kind === 'worktree' || kind === 'cache' ? await sizeOf(item.target, { fresh: true, now: () => runner.now() }) : 0;
+        // CLI measures removed bytes; MCP uses the watch estimate and never delays removal for accounting.
+        const bytes = kind === 'worktree' || kind === 'cache' ? plan.cachedSizes ? lastMeasurement(item.target)?.bytes ?? (kind === 'cache' ? fs.lstatSync(item.target).size : 0) : await sizeOf(item.target, { fresh: true, now: () => runner.now() }) : 0;
         if (kind === 'worktree') {
           const users = linkUsers(item.target, knownLinkReferences(config));
           if (users.length && !plan.forceLinks) throw new Error(`links target used by ${users.join(', ')}`);
           const r = await runner.exec('git', ['-C', item.repo as string, 'worktree', 'remove', item.target], { timeoutMs: config.git.timeoutS * 1000 });
           if (r.code !== 0) throw new Error(r.stderr.trim().split('\n')[0] || `git exit ${r.code}`);
         } else if (kind === 'cache') {
-          if (runner.now() - await newestMtime(item.target, { fresh: true, now: () => runner.now() }) < plan.olderThanMs) throw new Error('cache contents changed since the plan; kept because they are too recent');
+          const st = plan.cachedSizes ? fs.lstatSync(item.target) : undefined;
+          if (st?.isDirectory()) throw new Error('directory age needs explicit CLI gc verification');
+          if (runner.now() - (st ? st.mtimeMs : await newestMtime(item.target, { fresh: true, now: () => runner.now() })) < plan.olderThanMs) throw new Error('cache contents changed since the plan; kept because they are too recent');
           await runner.remove(item.target);
         } else if (kind === 'archive') {
           await runner.rename(item.target, path.join(archiveDir(config), path.basename(item.target)));

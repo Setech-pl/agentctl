@@ -7,7 +7,7 @@ import type { Context } from './context.ts';
 import type { Order } from './equivalents.ts';
 import { taskProgress } from './progress.ts';
 import { resolveTask } from './resolve.ts';
-import type { TaskRecord } from './taskstore.ts';
+import { readTaskRecordById, type TaskRecord } from './taskstore.ts';
 import { collectTaskUsage, openReader, allRecords, taskTokenMap } from './usage.ts';
 import { homeDir } from './usage-sources.ts';
 import { formatTokens } from './usage-parse.ts';
@@ -80,7 +80,7 @@ export const historyPath = (config: { path: string }): string => path.join(homeD
 
 const orderOf = (agent: string, model: string, effort: string): Order | null => (agent === 'unknown' ? null : ({ agent, model, effort } as Order));
 
-/** The record of a task at this moment. Reads the session logs, the report and (git) the worktree; nothing is written. */
+/** Watch observations sample usage/git; close, cancel and mark reuse their persisted facts without scanning worktrees. */
 export async function snapshot(ctx: Context, record: TaskRecord, event: HistoryEvent, extra: Partial<HistoryRecord> = {}): Promise<HistoryRecord> {
   const { config, runner } = ctx;
   const now = runner.now();
@@ -93,13 +93,17 @@ export async function snapshot(ctx: Context, record: TaskRecord, event: HistoryE
     reportMs = null;
   }
   const endMs = reportMs ?? (event === 'closed' && record.closedAt ? Date.parse(record.closedAt) : event === 'cancelled' && record.cancelledAt ? Date.parse(record.cancelledAt) : now);
-  const tokens = taskTokenMap(config, now, allRecords(config)).get(record.task);
+  const cached = ['closed', 'cancelled', 'mark'].includes(event);
+  const previous = cached ? readHistory(config).findLast(h => h.task === record.task && h.started === record.started && h.attempt_id === record.attemptId) : undefined;
+  const tokens = cached ? undefined : taskTokenMap(config, now, allRecords(config)).get(record.task);
   let progress: HistoryRecord['progress'] = null;
-  if (record.repos.length > 0) {
+  if (cached) {
+    try { const p = JSON.parse(fs.readFileSync(path.join(config.stateDir, record.window, 'progress.json'), 'utf8')); if (p) progress = { commits: p.commits, files: p.files }; } catch { progress = previous?.progress ?? null; }
+  } else if (record.repos.length > 0) {
     const p = await taskProgress(runner, record.repos).catch(() => null);
     if (p) progress = { commits: p.commits, files: p.files };
   }
-  const usage = collectTaskUsage(config, openReader(config), allRecords(config), now).get(record.task);
+  const usage = cached ? undefined : collectTaskUsage(config, openReader(config), allRecords(config), now).get(record.task);
   const verdict = record.report ? readVerdict(record.report, config.notify.verdictPattern, record.reviewOf != null) : undefined;
   return {
     v: 1,
@@ -115,9 +119,9 @@ export async function snapshot(ctx: Context, record: TaskRecord, event: HistoryE
     project: record.repos[0] ? path.basename(record.repos[0].path) : null,
     requested: record.requested,
     resolved: orderOf(record.agent, record.model, record.effort),
-    observed: { model: usage?.observed?.model ?? 'unknown', effort: usage?.observed?.effort ?? 'unknown' },
-    agent_cli_version: usage?.observed?.cliVersion && usage.observed.cliVersion !== 'unknown' ? usage.observed.cliVersion : record.agentCliVersion ?? 'unknown',
-    observation_warning: usage?.warning ?? null,
+    observed: { model: usage?.observed?.model ?? previous?.observed?.model ?? record.observed?.model ?? 'unknown', effort: usage?.observed?.effort ?? previous?.observed?.effort ?? record.observed?.effort ?? 'unknown' },
+    agent_cli_version: usage?.observed?.cliVersion && usage.observed.cliVersion !== 'unknown' ? usage.observed.cliVersion : record.agentCliVersion ?? previous?.agent_cli_version ?? 'unknown',
+    observation_warning: usage?.warning ?? previous?.observation_warning ?? null,
     self_verdict: selfVerdict(record.report),
     effective: orderOf(record.agent, record.model, record.effort),
     started: Number.isNaN(started) ? null : record.started,
@@ -126,7 +130,7 @@ export async function snapshot(ctx: Context, record: TaskRecord, event: HistoryE
     cancelledAt: record.cancelledAt ?? null,
     cancelReason: record.cancelReason ?? null,
     durationMs: Number.isNaN(started) || Number.isNaN(endMs) ? null : Math.max(0, endMs - started),
-    tokens: tokens ? { ...tokens.tokens, fresh: tokens.fresh } : null,
+    tokens: tokens ? { ...tokens.tokens, fresh: tokens.fresh } : previous?.tokens ?? null,
     progress,
     verdict: verdict ?? null,
     movedFrom: record.continues ?? null,
@@ -187,7 +191,7 @@ export function parseResult(text: string): Result {
 /** `agentctl mark <task> ok|partial|fail`: the outcome of a task as you judge it, for `log` and `stats`. The last mark wins. */
 export async function markTask(ctx: Context, taskArg: string, result: Result, note?: string): Promise<{ task: string; result: Result; previous: Result | null }> {
   const task = await resolveTask(ctx, taskArg);
-  const record = allRecords(ctx.config).find((r) => r.task === task);
+  const record = readTaskRecordById(ctx.config, task);
   if (!record) throw new AgentctlError(`${task} has no state file, so its model and effort are unknown`, 'Only tasks agentctl started can be marked.');
   const previous = [...readHistory(ctx.config)].reverse().find((h) => h.event === 'mark' && h.task === task)?.result ?? null;
   const entry = await snapshot(ctx, record, 'mark', { result, note: note && note.trim() !== '' ? note.trim() : null });

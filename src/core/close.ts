@@ -1,11 +1,12 @@
-import { cleanWorktreeCache, worktreeCacheFreed } from './worktree-cache.ts';
-import { configureMeasurements, sizeOf } from './fs-measure.ts';
+import { worktreeCacheFreed } from './worktree-cache.ts';
+import { lastMeasurement } from './fs-measure.ts';
+import { restoreDiskMeasurements } from './disk.ts';
+import { inspectReport } from './report-state.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Context } from './context.ts';
 import { gitFailure } from './git.ts';
 import { recordEvent } from './history.ts';
-import { collectStatus } from './status.ts';
 import { readTaskRecord, setHeaderFields, taskFile } from './taskstore.ts';
 import type { TaskRecord } from './taskstore.ts';
 import { AgentctlError, Problems, windowName } from './util.ts';
@@ -48,12 +49,15 @@ export async function closeTask(ctx: Context, taskArg: string, opts: CloseOption
   }
 
   if (record) {
-    await cleanWorktreeCache(ctx, record);
     const cacheFreed = worktreeCacheFreed(ctx, record);
     if (cacheFreed > 0) ctx.info(`${taskArg}: .cache cleanup: ${cacheFreed} bytes freed in total`);
-    configureMeasurements(config.disk);
-    const sizes = await Promise.all([...new Set(record.repos.filter(r => path.resolve(r.worktree) !== path.resolve(r.path)).map(r => r.worktree))].map(wt => sizeOf(wt, { fresh: true, now: () => runner.now() }).catch(() => null)));
-    ctx.info(`${taskArg}: worktree size: ${sizes.some(n => n === null) ? 'n/d' : sizes.reduce<number>((sum, n) => sum + (n ?? 0), 0)} bytes${opts.rmWorktree ? ' before removal' : ' retained; inspect agentctl gc --preview'}`);
+    restoreDiskMeasurements(ctx);
+    const sizes = [...new Set(record.repos.filter(r => path.resolve(r.worktree) !== path.resolve(r.path)).map(r => r.worktree))].map(wt => lastMeasurement(wt));
+    if (sizes.length && sizes.every(n => n !== undefined)) {
+      const bytes = sizes.reduce((sum, n) => sum + n!.bytes, 0);
+      const age = Math.max(0, Math.floor((runner.now() - Math.min(...sizes.map(n => n!.at))) / 1000));
+      ctx.info(`${taskArg}: worktree size: ${bytes} bytes (watch reading, ${age} s old)${opts.rmWorktree ? ' before removal' : ' retained; inspect agentctl gc --preview'}`);
+    }
   }
   if (!opts.rmWorktree || !record) return;
   await removeWorktrees(ctx, taskArg, record.repos);
@@ -107,12 +111,12 @@ export async function planClose(ctx: Context, tasks: string[], opts: CloseOption
   const { tmux, config, runner } = ctx;
   const unique = [...new Set(tasks.map((t) => t.toUpperCase()))];
   const live = new Set(runner.dryRun ? [] : await tmux.listWindows());
-  const rows = new Map((await collectStatus(ctx, { progress: false, cachedOnly: true })).map((r) => [r.task.toUpperCase(), r]));
   const p = new Problems();
   const items = unique.map((task): ClosePlanItem => {
     const window = windowName(task);
-    const known = readTaskRecord(config, window) !== undefined;
-    const hasReport = rows.get(task)?.report === 'yes';
+    const record = readTaskRecord(config, window);
+    const known = record !== undefined;
+    const hasReport = record ? inspectReport(config, record, runner.now(), !record.attemptId && !live.has(window)).ready : false;
     if (opts.rmWorktree && !known) p.add(`${task}: no TASK.md in ${config.stateDir}/${window} lists its worktrees`);
     const notes: string[] = [];
     if (!known) notes.push('unknown task (no TASK.md)');

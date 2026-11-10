@@ -73,7 +73,7 @@ import type { RawSpec } from './spec.ts';
 import { collectStatus as collectStatusFull, shownRows } from './status.ts';
 import type { StatusRow } from './status.ts';
 import { summarizeSpecs } from './summary.ts';
-import { listArchivedRecords, listTaskRecords, readTaskPrompt, setHeaderField, taskFile } from './taskstore.ts';
+import { listArchivedRecords, listTaskRecords, readTaskRecordById, readTaskPrompt, setHeaderField, taskFile } from './taskstore.ts';
 import type { TaskRecord } from './taskstore.ts';
 import { computeStats, markTask, parseResult, RESULTS, selectHistory } from './history.ts';
 import { collectUsage } from './usage-report.ts';
@@ -250,6 +250,8 @@ async function pullSummaries(ctx: Context, rows: StatusRow[], ack = false): Prom
 
 /** A task with a state file, also a closed or archived one: exact ID (any case) or a unique prefix. */
 function findRecord(ctx: Context, arg: string): TaskRecord {
+  const exact = readTaskRecordById(ctx.config, arg);
+  if (exact) return exact;
   const live = [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)];
   const seen = new Set<string>();
   const unique = live.filter((r) => (seen.has(r.window) ? false : (seen.add(r.window), true)));
@@ -1515,10 +1517,16 @@ async function confirmationScope(ctx: Context, name: string, args: Record<string
     const rows = await collectStatus(ctx, { progress: false, archived: true });
     return { tasks: [{ task: before.task, state: findBlocked(readQueue(ctx.config), rows).has(before.task) ? 'blocked' : before.status, blockers: findBlocked(readQueue(ctx.config), rows).get(before.task), after: before.after }], change: await unblockEntry(ctx, before.task, { dropAfter: args.drop_after as string | undefined, preview: true }) };
   }
+  if (name === 'cancel') {
+    const inputs = args.tasks as string[] | undefined ?? (typeof args.task === 'string' ? [args.task] : await openCohortTasks(ctx, findCohort(ctx.config, args.cohort as string).name, { queued: true }));
+    const plan = await planCancel(ctx, inputs, { reason: args.reason as string | undefined, rmWorktree: Boolean(args.remove_worktree), source: 'mcp' });
+    // The full move chain and dependent queue entries belong to the guarded scope too.
+    return { tasks: plan.items.map(({ task, kind, record, entry, blocks }) => ({ task, kind, record, entry, blocks })) };
+  }
   if (name === 'mark') return { tasks: planMark(ctx, args as MarkSelection).map(task => findRecord(ctx, task)), result: args.result, note: args.note };
-  if (name === 'close') { const ids = await closeInputs(ctx, args as CloseMcpArgs); return { tasks: await planClose(ctx, ids, { rmWorktree: Boolean(args.remove_worktree) }), records: listTaskRecords(ctx.config).filter(r => ids.includes(r.task)) }; }
+  if (name === 'close') { const ids = await closeInputs(ctx, args as CloseMcpArgs); return { tasks: await planClose(ctx, ids, { rmWorktree: Boolean(args.remove_worktree) }), records: ids.flatMap(id => { const r = readTaskRecordById(ctx.config, id); return r ? [r] : []; }) }; }
   if (name === 'gc') {
-    const plan = await planGc(ctx, { cohort: args.cohort as string | undefined, olderThan: args.older_than as string | undefined, branches: Boolean(args.branches) });
+    const plan = await planGc(ctx, { cohort: args.cohort as string | undefined, olderThan: args.older_than as string | undefined, branches: Boolean(args.branches), cachedSizes: true });
     return plan;
   }
   if (name === 'new' || name === 'queue') {
@@ -1536,6 +1544,7 @@ async function confirmationScope(ctx: Context, name: string, args: Record<string
     if (entry.autoReview) entry = await rebuildAutoReview(ctx, entry, { write: false });
     const spec = resolveSpec(splitSpecs(entry.spec, 'queue retry')[0]!, { config: ctx.config });
     await checkRetryWorktrees(ctx.runner, spec.repos);
+    return { queue: [entry] };
   }
   if (name === 'manager_start' || name === 'manager_stop') return { manager: await managerView(ctx) };
   if (name === 'report_from') {
@@ -1547,7 +1556,8 @@ async function confirmationScope(ctx: Context, name: string, args: Record<string
     return { record, source, sourceSignature: signature(source), destinationSignature: signature(record.report) };
   }
   if (name === 'archive') return archiveClosed(ctx, { cohort: args.cohort as string | undefined, olderThanMs: args.older_than ? parseAge(args.older_than as string) : undefined, preview: true });
-  const tasks = [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)];
+  const selectedIds = [...(Array.isArray(args.tasks) ? args.tasks as string[] : []), ...(typeof args.task === 'string' ? [args.task] : [])];
+  const tasks = selectedIds.length && !args.cohort ? selectedIds.flatMap(id => { try { return [findRecord(ctx, id)]; } catch { return []; } }) : [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)];
   const queue = readQueue(ctx.config);
   const windows = await ctx.tmux.windows();
   const selected = [...(Array.isArray(args.tasks) ? args.tasks as string[] : []), ...(typeof args.task === 'string' ? [args.task] : [])];
@@ -1566,14 +1576,11 @@ async function previewScope(ctx: Context, name: string, args: Record<string, unk
     const plan = scope as { record: TaskRecord; source: string; sourceSignature: { size: number } | null; destinationSignature: unknown };
     return { tasks: [{ task: plan.record.task }], source: plan.source, source_exists: plan.sourceSignature !== null, source_bytes: plan.sourceSignature?.size ?? null, canonical: plan.record.report, canonical_exists: plan.destinationSignature !== null, would_overwrite: plan.destinationSignature !== null, requires_force: plan.destinationSignature !== null && !args.force, execution_blocked: [...(plan.sourceSignature === null ? ['source file does not exist'] : []), ...(plan.destinationSignature !== null && !args.force ? ['force is required to overwrite the canonical report'] : [])] };
   }
-  const records = listTaskRecords(ctx.config).filter(r => !r.closed && !r.cancelled);
-  const queue = readQueue(ctx.config);
-  const selected = new Set<string>([...(Array.isArray(args.tasks) ? args.tasks as string[] : []), ...(typeof args.task === 'string' ? [args.task] : [])]);
-  const known = [...records.map(r => r.task), ...queue.map(e => e.task)];
-  const targets = new Set([...selected].flatMap(id => { const exact = known.filter(task => task.toLowerCase() === id.toLowerCase()); return exact.length ? exact : known.filter(task => task.toLowerCase().startsWith(id.toLowerCase())); }));
-  const fits = (task: string) => targets.has(task);
+  const plan = scope as { tasks?: TaskRecord[]; queue?: ReturnType<typeof readQueue> };
+  const records = (plan.tasks ?? []).filter(r => !r.closed && !r.cancelled);
+  const queue = plan.queue ?? [];
   if (name === 'queue_pause' || name === 'queue_resume') return { queued: queue.length, tasks: queue.slice(0, 5).map(e => ({ task: e.task, status: e.status })), omitted: Math.max(0, queue.length - 5), more: 'queue_list' };
-  return { tasks: records.filter(r => fits(r.task)).map(r => ({ task: r.task, window: r.window, report: r.report, repos: r.repos })), queue: queue.filter(e => fits(e.task)).map(e => ({ task: e.task, status: e.status })), ...(name === 'manager_stop' || name === 'manager_start' ? { manager: await managerView(ctx) } : {}) };
+  return { tasks: records.map(r => ({ task: r.task, window: r.window, report: r.report, repos: r.repos })), queue: queue.map(e => ({ task: e.task, status: e.status })), ...(name === 'manager_stop' || name === 'manager_start' ? { manager: await managerView(ctx) } : {}) };
 }
 for (const tool of MCP_TOOLS) {
   const cli = ({ queue_list: 'queue list', queue_rm: 'queue rm', queue_retry: 'queue retry', queue_up: 'queue up', queue_pause: 'queue pause', queue_resume: 'queue resume', cohort_list: 'cohort list', cohort_show: 'cohort show', list_reports: 'status', get_report: 'pull <TASK>', pull_ready: 'pull --ready', task_spec: 'peek <TASK>', gc_preview: 'gc', events_since: 'events', set_limits: 'limits set', reserve: 'limits reserve' } as Record<string, string>)[tool.name] ?? tool.name.replaceAll('_', ' ');
@@ -1671,7 +1678,7 @@ for (const tool of MCP_TOOLS) {
       let result: ToolResult;
       if (['new', 'queue', 'cancel', 'resume', 'move'].includes(tool.name)) result = await original(deps, args);
       else result = await writeTool(deps, tool.name as McpWriteTool, {}, async () => {
-        const detail = tool.name === 'gc' ? renderGc(await planGc(ctx, { cohort: input.cohort as string | undefined, olderThan: input.older_than as string | undefined, branches: Boolean(input.branches) }), { detail: Boolean(input.detail), offset: input.offset as number | undefined, limit: input.limit as number | undefined }).join('\n') : JSON.stringify({ operation: tool.name, arguments: input, scope: await previewScope(ctx, tool.name, input, scope) }, null, 2);
+        const detail = tool.name === 'gc' ? renderGc(scope as GcPlan, { detail: Boolean(input.detail), offset: input.offset as number | undefined, limit: input.limit as number | undefined }).join('\n') : JSON.stringify({ operation: tool.name, arguments: input, scope: await previewScope(ctx, tool.name, input, scope) }, null, 2);
         return { text: `${detail}\nNot executed. Review, then call with identical arguments and confirm: true.`, executed: false, announce: '' };
       });
       if (!result.isError) {
