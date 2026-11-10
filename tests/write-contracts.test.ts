@@ -84,3 +84,33 @@ it('P83: cached GC preview/confirm do not measure or scan; dirty deletion is ref
   assert.ok(fs.existsSync(wt));
   assert.ok(fs.existsSync(path.join(path.dirname(record.report), 'old-dir/keep')));
 });
+
+it('P83: cohort close/cancel preview and confirm never inspect unrelated reports or discover worktree files', async () => {
+  const { setHeaderField, taskFile } = await import('../src/core/taskstore.ts');
+  const { MCP_TOOLS } = await import('../src/core/mcp-tools.ts');
+  const f = await writePreviewFixture(scratch.sub('cohort-contracts'), 400, 1);
+  await setHeaderField(f.ctx.runner, taskFile(f.config, 'close'), 'cohort', 'CLOSE-GROUP');
+  await setHeaderField(f.ctx.runner, taskFile(f.config, 'cancel'), 'cohort', 'CANCEL-GROUP');
+  const read = fs.readFileSync, readdir = fs.readdirSync;
+  let reportReads = 0, walks = 0;
+  fs.readFileSync = ((file: fs.PathOrFileDescriptor, ...args: unknown[]) => {
+    if (/\/other-\d+\/OTHER-\d+\.md$/.test(String(file))) reportReads++;
+    return (read as Function)(file, ...args);
+  }) as typeof read;
+  fs.readdirSync = ((target: fs.PathLike, ...args: unknown[]) => {
+    if (String(target) === f.wt || String(target).startsWith(`${f.wt}/`)) walks++;
+    return (readdir as Function)(target, ...args);
+  }) as typeof readdir;
+  try {
+    for (const name of ['close', 'cancel']) {
+      const tool = MCP_TOOLS.find(t => t.name === name)!;
+      const p = await tool.run(f.deps, { cohort: `${name.toUpperCase()}-GROUP` });
+      assert.equal(p.isError, undefined, p.text);
+      const token = /preview_token: (\S+)/.exec(p.text)?.[1]; assert.ok(token);
+      const done = await tool.run(f.deps, { confirm: true, preview_token: token });
+      assert.equal(done.isError, undefined, done.text);
+    }
+    assert.equal(walks, 0);
+    assert.equal(reportReads, 0);
+  } finally { fs.readFileSync = read; fs.readdirSync = readdir; }
+});

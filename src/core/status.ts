@@ -169,6 +169,8 @@ const idleObservations = new Map<string, { working: boolean; idle: number; attem
 export const STATUS_CHUNK = 25;
 
 export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Promise<StatusRow[]> {
+  // Nested planners inherit the MCP request contract too, without relying on facade-local wrappers.
+  if (cachedRequest()) opts = { ...opts, cachedOnly: true };
   const { runner, tmux, config } = ctx;
   const infos = await tmux.windows();
   const live = new Set(infos.map((w) => w.plain));

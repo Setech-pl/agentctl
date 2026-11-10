@@ -890,7 +890,7 @@ async function closeInputs(ctx: Context, args: CloseMcpArgs): Promise<string[]> 
   });
   if (args.cohort) {
     const cohort = findCohort(ctx.config, args.cohort).name;
-    for (const task of selected) if (!cohortRows(await collectStatus(ctx, { archived: true }), cohort).some((r) => r.task === task)) throw new AgentctlError(`${task} does not belong to ${cohort}`);
+    for (const task of selected) if (cohortKey(readTaskRecordById(ctx.config, task)?.cohort ?? '') !== cohortKey(cohort)) throw new AgentctlError(`${task} does not belong to ${cohort}`);
   }
   return selected;
 }
