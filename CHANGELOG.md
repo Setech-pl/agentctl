@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Doctor: `--timings` includes a dry close preview (<2000 ms) without closing tasks or issuing confirmation tokens. / Doctor: `--timings` obejmuje próbny podgląd close (<2000 ms) bez zamykania zadań i tworzenia tokenów potwierdzenia.
+
 - P83 write previews: header-only inventories, selected-task report inspection and cached close/cancel/mark history; close leaves worktree cleanup to watch and shows only aged watch size samples. MCP GC never measures or runs git status; recursive cache directories stay for CLI GC, and git checks cleanliness on removal. Retry registration leaves tracked-file scans to the worker. / Podglądy zapisu P83: indeksy z nagłówków, raporty tylko wybranych zadań i zapisane obserwacje historii close/cancel/mark; close zostawia sprzątanie watch i pokazuje wyłącznie pomiary watch z wiekiem. GC w MCP nie mierzy ani nie uruchamia git status; katalogi cache zostają dla GC w CLI, a git sprawdza czystość przy usunięciu. Kontrolę plików śledzonych przy ponowieniu wykonuje worker.
 
 - Live scripts: wider render/delivery/spawn windows for loaded hosts; live-kimi runs the wire-mode checks under a watcher because read paths no longer poll provider wires (watch owns event recording). / Skrypty live: szersze okna renderowania/dostarczania/startu na obciążone hosty; live-kimi sprawdza tryby wire pod watcherem, bo ścieżki odczytu nie odpytują już magistrali dostawców (zapis zdarzeń należy do watch).

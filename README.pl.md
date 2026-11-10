@@ -1081,4 +1081,4 @@ MCP `set_limits` przyjmuje liczby całkowite lub zapisane jako tekst (`2` lub `"
 
 Każde narzędzie MCP z `preview_token` można potwierdzić, wysyłając tylko `confirm: true` i token; zadanie oraz pozostałe argumenty pochodzą z zapisanego podglądu. Nowy podgląd nadal wymaga zwykłych argumentów.
 
-Po aktualizacji uruchom `agentctl doctor --timings`: czas wykonania poleceń (bez startu Node) dla statusu (<1500 ms), listy kolejki (<500 ms), zdarzeń i podglądu kolejki (<2000 ms każde), z oceną PASS/WARN. Podgląd nie rejestruje ani nie uruchamia zadania.
+Po aktualizacji uruchom `agentctl doctor --timings`: czas wykonania poleceń (bez startu Node) dla statusu (<1500 ms), listy kolejki (<500 ms), zdarzeń oraz próbnych podglądów kolejki i close (<2000 ms każde), z oceną PASS/WARN. Podgląd nie rejestruje, nie uruchamia ani nie zamyka zadania.
