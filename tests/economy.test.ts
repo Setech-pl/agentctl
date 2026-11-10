@@ -18,7 +18,7 @@ import { transientStartError, QueueMemory, queueTick, readQueue, planQueueAdd, c
 import { resolveSpec, splitSpecs } from '../src/core/spec.ts';
 import { screenMetadata, lastContentLine } from '../src/core/tmux.ts';
 import { emptyStats, feedText, freshTokens, sumBuckets } from '../src/core/usage-parse.ts';
-import { selfVerdict, snapshot, foldHistory, computeStats } from '../src/core/history.ts';
+import { recordEvent, selfVerdict, snapshot, foldHistory, computeStats } from '../src/core/history.ts';
 import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helpers.ts';
 
 const scratch = useScratch();
@@ -187,6 +187,12 @@ it('economy: session observations, reasoning subset and self verdict remain fact
     { type: 'turn_context', payload: { model: 'observed-model', effort: 'low' } },
     { type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 10, output_tokens: 20, reasoning_output_tokens: 12 } } } },
   ].map(o => JSON.stringify({ timestamp: new Date().toISOString(), ...o })).join('\n') + '\n');
+  // Watch publishes an observation before close; close must never inspect the transcript itself.
+  const unsampled = await snapshot(f.ctx, c, 'closed');
+  assert.equal(unsampled.observed!.model, 'unknown');
+  fs.mkdirSync(path.dirname(c.report), { recursive: true });
+  fs.writeFileSync(c.report, 'Verdict: PASS\n<!-- agentctl:report-end -->\n');
+  await recordEvent(f.ctx, c, 'report');
   const observed = await snapshot(f.ctx, c, 'closed');
   assert.equal(observed.requested!.model, 'requested-model');
   assert.equal(observed.resolved!.model, 'resolved-model');

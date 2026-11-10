@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- P83: preserve cancel selector validation before cohort resolution; history tests seed background observations before close. / P83: walidacja wyboru cancel poprzedza rozwiązywanie kohort; testy historii zapisują obserwacje tła przed close.
+
 - P83 cohort close/cancel selection reads metadata only; nested MCP status planners inherit cached-only mode. / Wybór kohort dla close/cancel w P83 czyta tylko metadane; zagnieżdżone planery statusu MCP dziedziczą tryb zapisanych danych.
 
 - Board/Ink test instrumentation counts bounded task-header reads and keeps board fixtures in gate-owned scratch. / Licznik testowy planszy i Ink uwzględnia ograniczone odczyty nagłówków i przechowuje plansze testowe w katalogu roboczym gate.

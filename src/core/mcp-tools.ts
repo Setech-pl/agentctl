@@ -1518,7 +1518,10 @@ async function confirmationScope(ctx: Context, name: string, args: Record<string
     return { tasks: [{ task: before.task, state: findBlocked(readQueue(ctx.config), rows).has(before.task) ? 'blocked' : before.status, blockers: findBlocked(readQueue(ctx.config), rows).get(before.task), after: before.after }], change: await unblockEntry(ctx, before.task, { dropAfter: args.drop_after as string | undefined, preview: true }) };
   }
   if (name === 'cancel') {
-    const inputs = args.tasks as string[] | undefined ?? (typeof args.task === 'string' ? [args.task] : await openCohortTasks(ctx, findCohort(ctx.config, args.cohort as string).name, { queued: true }));
+    if ([args.task !== undefined, args.tasks !== undefined, args.cohort !== undefined].filter(Boolean).length !== 1) throw new AgentctlError('give either task or cohort', 'cancel takes one task (task) or all open tasks of a cohort (cohort), not both and not neither.');
+    const cohortName = args.cohort === undefined ? undefined : findCohort(ctx.config, args.cohort as string).name;
+    const inputs = args.tasks as string[] | undefined ?? (typeof args.task === 'string' ? [args.task] : await openCohortTasks(ctx, cohortName!, { queued: true }));
+    if (!inputs.length) throw new AgentctlError(`cohort ${cohortName} has no open tasks`, 'Call cohort_show.');
     const plan = await planCancel(ctx, inputs, { reason: args.reason as string | undefined, rmWorktree: Boolean(args.remove_worktree), source: 'mcp' });
     // The full move chain and dependent queue entries belong to the guarded scope too.
     return { tasks: plan.items.map(({ task, kind, record, entry, blocks }) => ({ task, kind, record, entry, blocks })) };
