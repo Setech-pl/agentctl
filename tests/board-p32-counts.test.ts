@@ -71,8 +71,7 @@ function buildFixture(root: string): ReturnType<typeof makeConfig> {
 
 describe('p32: per-tick file counts on 230 archived tasks', () => {
   it('cold tick, unchanged tick, tick after one TASK.md changed', async () => {
-    const base = process.env.AGENTCTL_LIVE_CACHE ?? scratch.dir;
-    const root = path.join(base, 'p32-counts-230');
+    const root = scratch.sub('p32-counts-230');
     const config = buildFixture(root);
     const { ctx } = makeContext(config, { respond: new FakeTmux().respond });
     const cache = new ProgressCache();

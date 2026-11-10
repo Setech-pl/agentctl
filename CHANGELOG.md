@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Test instrumentation counts bounded task-header reads and keeps board fixtures in gate-owned scratch. / Licznik testowy uwzględnia ograniczone odczyty nagłówków i przechowuje plansze testowe w katalogu roboczym gate.
+
 ## [0.19.3] - 2026-11-10
 
 - P83: complete write-preview latency fixes; package/lockfile 0.19.3 supersedes the unpublished 0.19.2 candidate. / P83: domknięcie poprawki czasu podglądów zapisu; pakiet i lockfile 0.19.3 zastępują nieopublikowanego kandydata 0.19.2.
