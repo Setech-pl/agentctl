@@ -1,5 +1,6 @@
 import { collectStatus } from './status.ts';
 import { classifyScreen } from './state.ts';
+import type { TaskState } from './state.ts';
 import { stateWriteFailure } from './atomic-file.ts';
 import { withStartLock } from './start-lock.ts';
 import { liveWindows } from './plan.ts';
@@ -14,7 +15,7 @@ import { queuePrompt, deliverPendingPrompt } from './prompt-delivery.ts';
 import { recordJournal } from './journal.ts';
 import { AgentctlError } from './util.ts';
 
-export interface QueuedPrompt { id: string; text: string; queuedAt: string; waitForTurnEnd?: boolean }
+export interface QueuedPrompt { id: string; text: string; queuedAt: string; waitForTurnEnd?: boolean; idleTicks?: number }
 export const queueFile = (ctx: Context, window: string) => path.join(ctx.config.stateDir, window, 'prompt-queue.json');
 export function readPromptQueue(ctx: Context, window: string): QueuedPrompt[] {
   try { const data: unknown = JSON.parse(fs.readFileSync(queueFile(ctx, window), 'utf8')); return Array.isArray(data) ? data.filter((p): p is QueuedPrompt => p && typeof p.id === 'string' && typeof p.text === 'string' && typeof p.queuedAt === 'string') : []; } catch { return []; }
@@ -30,7 +31,7 @@ export async function enqueuePrompt(ctx: Context, window: string, text: string, 
 }
 
 /** Durable FIFO. An uncertain active delivery keeps later messages queued, never discarded or repasted. */
-export async function drainPromptQueue(ctx: Context, window: string, turnReady?: boolean): Promise<void> {
+export async function drainPromptQueue(ctx: Context, window: string, turnState?: TaskState): Promise<void> {
   if (ctx.runner.dryRun) return;
   await withStartLock(ctx, () => withFileLock(`${queueFile(ctx, window)}.lock`, async () => {
     let record = readTaskRecord(ctx.config, window);
@@ -47,12 +48,29 @@ export async function drainPromptQueue(ctx: Context, window: string, turnReady?:
       }
       // Codex redraws its composer mid-turn. Keep the FIFO intact until watch observes idle.
       if (record.agent === 'codex') {
-        if (queue[0]!.waitForTurnEnd) {
-          const ready = turnReady ?? (await collectStatus(ctx, { progress: false, cachedOnly: true, records: { current: [record], archived: [] } })).some(row => row.state === 'waiting' || row.state === 'report-ready');
-          if (!ready) return;
-        }
+        const item = queue[0]!;
+        const resetIdle = async () => {
+          if (!item.idleTicks) return;
+          queue[0] = { ...item, idleTicks: 0 };
+          await ctx.runner.writeFile(queueFile(ctx, window), JSON.stringify(queue));
+        };
         const screen = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
-        if (screen.code !== 0 || classifyScreen(screen.stdout, ctx.config.agents.codex) !== 'idle') return;
+        if (screen.code !== 0 || classifyScreen(screen.stdout, ctx.config.agents.codex) !== 'idle') { await resetIdle(); return; }
+        if (item.waitForTurnEnd) {
+          const state = turnState ?? (await collectStatus(ctx, { progress: false, cachedOnly: true, records: { current: [record], archived: [] } }))[0]?.state;
+          if (state !== 'waiting' && state !== 'report-ready') { await resetIdle(); return; }
+          // report-ready bypasses status's waiting-state idle counter. An old report is
+          // not a turn-end signal for this message: confirm consecutive idle frames too.
+          const ended = Date.parse(record.turnEndedAt ?? '') > Date.parse(item.queuedAt);
+          if (state === 'report-ready' && !ended) {
+            const idleTicks = (Number.isSafeInteger(item.idleTicks) ? Math.max(0, item.idleTicks!) : 0) + 1;
+            if (idleTicks < ctx.config.watch.idleConfirmTicks) {
+              queue[0] = { ...item, idleTicks };
+              await ctx.runner.writeFile(queueFile(ctx, window), JSON.stringify(queue));
+              return;
+            }
+          }
+        }
       }
       const item = queue[0]!;
       if (record.deliveryId !== item.id) await queuePrompt(ctx, record, item.text, 'pending', { kind: 'followup', id: item.id });
@@ -63,7 +81,7 @@ export async function drainPromptQueue(ctx: Context, window: string, turnReady?:
       const fresh = readTaskRecord(ctx.config, window)!;
       if (fresh.deliveryStartedAt) await ctx.runner.appendFile(taskFile(ctx.config, window), `\n\n## Follow-up ${result === 'sent' ? 'sent' : 'pasted, unconfirmed'} ${fresh.deliveryStartedAt} (${item.id})\n`);
       if (result !== 'sent') return;
-      turnReady = false; // one queued turn per confirmed idle observation
+      turnState = 'working'; // one queued turn per confirmed idle observation
     }
   }));
 }
@@ -71,7 +89,7 @@ export async function drainPromptQueue(ctx: Context, window: string, turnReady?:
 export function promptQueueView(ctx: Context, window: string, record?: ReturnType<typeof readTaskRecord>) {
   const known = record ?? readTaskRecord(ctx.config, window);
   const active = known?.pendingPrompt && known.promptDelivery !== 'sent' ? [{ id: known.deliveryId ?? 'legacy', text: known.pendingPrompt, state: known.deliveryResult === 'stale' ? 'stale' : (known.promptDelivery ?? 'pending') }] : [];
-  return [...active, ...readPromptQueue(ctx, window).filter(p => p.id !== known?.deliveryId).map(p => ({ ...p, state: 'queued' }))];
+  return [...active, ...readPromptQueue(ctx, window).filter(p => p.id !== known?.deliveryId).map(({ idleTicks: _idleTicks, ...p }) => ({ ...p, state: 'queued' }))];
 }
 
 /** Reading a report never acknowledges a message or releases a dependent task. */

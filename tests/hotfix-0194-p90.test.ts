@@ -12,15 +12,24 @@ import { drainPromptQueue, enqueuePrompt, promptQueueView, withdrawPrompt } from
 import { readTaskRecord } from '../src/core/taskstore.ts';
 import { readJournal } from '../src/core/journal.ts';
 import { composerFixture } from './composer-fixture.ts';
-it('P90: busy Codex send stays durable, visible and withdrawable; idle drain pastes and verifies Enter once', async () => {
-  const w = world('busy');
-  seedTask(w.config, 'BUSY', { agent: 'codex' });
+for (const existingReport of [false, true]) it(`P90: busy Codex queues until confirmed turn end (existing report: ${existingReport})`, async () => {
+  const w = world(`busy-${existingReport}`);
+  const record = seedTask(w.config, 'BUSY', { agent: 'codex' });
+  if (existingReport) {
+    fs.mkdirSync(path.dirname(record.report), { recursive: true });
+    fs.writeFileSync(record.report, 'Verdict: PASS\nExisting result.\n<!-- agentctl:report-end -->\n');
+  }
   const pane = w.tmux.add('busy', composerFixture('• Working (esc to interrupt)\n› Ask Codex to do anything\n'));
   const [sent] = await sendPrompts(w.ctx, [{ task: 'BUSY', window: 'busy', prompt: 'Follow up after this turn.' }]);
   assert.match(sent!.message, /queued_until_turn_end/);
   assert.equal(w.tmux.seen.filter(s => s.startsWith('paste-buffer')).length, 0);
   const queued = promptQueueView(w.ctx, 'busy');
   assert.equal(queued.length, 1);
+  if (existingReport) {
+    const report = await w.call('get_report', { task: 'BUSY', detail: true });
+    assert.equal(report.isError, undefined, report.text);
+    assert.match(report.text, /Existing result/); assert.match(report.text, /report may predate it/);
+  }
   assert.match((await w.call('status', { all: true, detail: true })).text, new RegExp(queued[0]!.id));
   assert.ok(readJournal(w.config).some(e => e.kind === 'delivery-queued' && e.text.includes(queued[0]!.id)));
   const extra = await enqueuePrompt(w.ctx, 'busy', 'Withdraw this');
@@ -32,6 +41,11 @@ it('P90: busy Codex send stays durable, visible and withdrawable; idle drain pas
   const memory = new WatchMemory(), notifier = { notify: async () => {} };
   await watchTick(w.ctx, memory, notifier);
   assert.equal(w.tmux.seen.filter(s => s.startsWith('paste-buffer')).length, 0);
+  pane.screen = composerFixture('• Working (esc to interrupt)\n› Ask Codex to do anything\n');
+  await watchTick(w.ctx, memory, notifier);
+  pane.screen = composerFixture('› Ask Codex to do anything\n');
+  await watchTick(w.ctx, memory, notifier);
+  assert.equal(w.tmux.seen.filter(s => s.startsWith('paste-buffer')).length, 0, 'working resets the idle confirmation');
   const respond = w.runner.exec.bind(w.runner);
   w.runner.exec = async (cmd, args, opts) => {
     const result = await respond(cmd, args, opts);
