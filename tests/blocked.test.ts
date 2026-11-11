@@ -69,7 +69,7 @@ describe('blocked: a queued task whose after names a cancelled task', () => {
     const s = setup('report');
     const a = seedTask(s.config, 'A-1');
     fs.mkdirSync(path.dirname(a.report), { recursive: true });
-    fs.writeFileSync(a.report, '# half\n');
+    fs.writeFileSync(a.report, 'Verdict: PASS\n# result\n');
     await s.queueUp(s.specOf('B-2', 'after: A-1\n'));
     assert.match((await s.conditions())['B-2'] ?? '', /wolne miejsce/, 'with its report A-1 would let B-2 start');
     await cancelTasks(s.ctx, await planCancel(s.ctx, ['A-1']));
