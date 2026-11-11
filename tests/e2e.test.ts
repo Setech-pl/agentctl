@@ -127,12 +127,16 @@ Review NC-1.
 });
 
 describe('spec example', () => {
+  // The example now has a real link whose target must exist, including in a dry run.
+  const exampleHome = path.join(scratch.dir, 'user-home/src/sample-app');
+  fs.mkdirSync(exampleHome, { recursive: true });
+  fs.writeFileSync(path.join(exampleHome, '.env.local'), 'EXAMPLE=1\n');
   it('prints the example, which parses cleanly and matches the README', () => {
     const r = agentctl(['spec', 'example'], { AGENTCTL_HOME: path.join(scratch.dir, 'none') });
     assert.equal(r.code, 0);
     assert.equal(r.stdout, EXAMPLE_SPEC);
     assert.doesNotMatch(EXAMPLE_SPEC, /neon.city|~\/Projects|marcinkrzetowski/i);
-    assert.deepEqual(splitSpecs(EXAMPLE_SPEC)[0]?.header.links, []);
+    assert.deepEqual(splitSpecs(EXAMPLE_SPEC)[0]?.header.links, [{ from: '.env.local', to: '~/src/sample-app/.env.local' }]);
     assert.equal(splitSpecs(EXAMPLE_SPEC)[0]?.header.task, 'TASK-42');
     const readme = fs.readFileSync(path.join(REPO_ROOT, 'README.md'), 'utf8');
     assert.ok(readme.includes(EXAMPLE_SPEC), 'README must contain the example spec verbatim (see src/example.ts)');
