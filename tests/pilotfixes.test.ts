@@ -91,7 +91,7 @@ class DiskRunner extends RecordingRunner {
 
 function setup(name: string, extra = '') {
   const root = scratch.sub(name);
-  const config = makeConfig(root, `disk: {warn_gb: 0, critical_gb: 0}\n${extra}`);
+  const config = makeConfig(root, `disk: {warn_gb: 1, critical_gb: 1}\n${extra}`);
   const m = new Machine();
   const out: string[] = [];
   const runner = new DiskRunner({ dryRun: false, startTime: Date.now(), respond: m.respond });
