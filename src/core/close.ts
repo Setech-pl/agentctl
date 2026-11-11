@@ -44,7 +44,7 @@ export async function closeTask(ctx: Context, taskArg: string, opts: CloseOption
   // The window is gone: the task is closed, whether or not the worktree can be removed below. The state and the report stay.
   if (record) {
     const warning = reportMessageWarning(ctx, window, record);
-    await runner.writeFile(promptQueueFile(ctx, window), '[]');
+    if (fs.existsSync(promptQueueFile(ctx, window))) await runner.writeFile(promptQueueFile(ctx, window), '[]');
     await setHeaderFields(runner, taskFile(config, window), { delivery_report_baseline: null, pending_prompt: null, prompt_delivery: null, report_message_warning: warning ?? null, closed: true, closed_at: new Date(runner.now()).toISOString() });
     // Before the worktree goes: the progress is read from it.
     const closed = readTaskRecord(config, window);
