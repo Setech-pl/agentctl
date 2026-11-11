@@ -200,7 +200,7 @@ describe('manager: start, look, stop', () => {
     assert.match(advice, /Enable Remote Control/);
     assert.match(advice, /agentctl never answers/);
     assert.match(advice, /select-window -t manager/);
-    assert.equal(w.runner.commands.filter((c) => /send-keys .*(Enter|y\b)/.test(c) && !c.includes('--remote-control')).length, 1, 'only the Enter after the command line');
+    assert.equal(w.runner.commands.filter((c) => /send-keys .* (?:Enter|y)$/.test(c)).length, 1, 'only the Enter after the command line');
   });
 
   it('reports the connection that has not come yet, and a failure', async () => {

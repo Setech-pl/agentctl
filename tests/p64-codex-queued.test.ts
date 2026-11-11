@@ -4,7 +4,7 @@ import path from 'node:path';
 import { it } from 'node:test';
 import { Context } from '../src/core/context.ts';
 import { deliveryClass, deliverPendingPrompt, queuePrompt, QUEUED_IN_AGENT } from '../src/core/prompt-delivery.ts';
-import { readTaskRecord } from '../src/core/taskstore.ts';
+import { setHeaderFields, taskFile, readTaskRecord } from '../src/core/taskstore.ts';
 import type { TaskRecord } from '../src/core/taskstore.ts';
 import { rememberSession } from '../src/core/usage-tap.ts';
 import { DiskRunner, makeConfig, seedTask, useScratch } from './helpers.ts';
@@ -56,6 +56,9 @@ it('P64 a visible Codex-queued message stays pending past delivery_confirm_s; th
   fs.writeFileSync(transcript, JSON.stringify({ type: 'session_meta', payload: { id: 'p64-session', cwd: root } }) + '\n');
   await rememberSession(runner, config, 't1', 'codex', { id: 'p64-session' });
   await queuePrompt(ctx, readTaskRecord(config, 't1')!, prompt, 'pending', { kind: 'followup' });
+  // A delivery already queued in Codex by an older version must still confirm after upgrade.
+  await setHeaderFields(runner, taskFile(config, 't1'), { prompt_delivery: 'confirming', delivery_started_at: new Date(runner.now()).toISOString(), delivery_was_busy: true, delivery_enters: 1, delivery_field: 'image:pre-0194' });
+  screen = queued;
 
   assert.equal(await deliverPendingPrompt(ctx, 't1'), 'confirming');
   assert.equal(readTaskRecord(config, 't1')!.deliveryResult, 'queued-in-agent');
