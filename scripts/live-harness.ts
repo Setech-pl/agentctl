@@ -261,9 +261,11 @@ export class Harness {
       fs.rmSync(link, { force: true });
       fs.symlinkSync(real, link);
     }
+    // Keep unrelated notification scenarios independent of the shared host's 50 GiB warning threshold.
+    const diskFixture = /^disk:/m.test(this.options.config ?? '') ? '' : 'disk: {warn_gb: 1, critical_gb: 1}\n';
     fs.writeFileSync(
       path.join(this.agentctlHome, 'config.yaml'),
-      `cache: ${path.join(this.root, 'cache')}\nstate_dir: ${path.join(this.root, 'state')}\nsession: ${this.session}\nusage:\n  claude_dir: ${path.join(this.root, 'claude-logs')}\n  codex_dir: ${this.codexHome}\n${this.options.config ?? ''}`,
+      `${diskFixture}cache: ${path.join(this.root, 'cache')}\nstate_dir: ${path.join(this.root, 'state')}\nsession: ${this.session}\nusage:\n  claude_dir: ${path.join(this.root, 'claude-logs')}\n  codex_dir: ${this.codexHome}\n${this.options.config ?? ''}`,
     );
     fs.writeFileSync(
       this.tmuxConf,

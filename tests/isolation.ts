@@ -1,6 +1,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+// Unit fixtures must not gain unrelated disk alerts as other tasks consume the host volume.
+// Keep the native query (and its timing/errors); disk-specific tests can override this wrapper.
+const nativeStatfs = fs.promises.statfs;
+fs.promises.statfs = (async (...args: unknown[]) => {
+  const stats = await (nativeStatfs as Function)(...args);
+  const bigint = typeof stats.bsize === 'bigint';
+  const blocks = bigint ? (1024n ** 4n) / stats.bsize : Math.floor((1024 ** 4) / stats.bsize);
+  const available = bigint ? (256n * 1024n ** 3n) / stats.bsize : Math.floor((256 * 1024 ** 3) / stats.bsize);
+  return { ...stats, blocks, bavail: available, bfree: available };
+}) as typeof fs.promises.statfs;
+
 // Loaded before test modules, in each test process. Even a plain `npm test`
 // must never read user configuration or connect to the user's tmux server.
 const cache = process.env.AGENTCTL_TEST_TMP ?? process.env.AGENTCTL_TEST_CACHE ?? path.resolve(import.meta.dirname, '../.cache');
