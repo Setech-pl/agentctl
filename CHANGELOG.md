@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- P83: preserve cancel selector validation before cohort resolution; history tests seed background observations before close. / P83: walidacja wyboru cancel poprzedza rozwiązywanie kohort; testy historii zapisują obserwacje tła przed close.
+
+- P83 cohort close/cancel selection reads metadata only; nested MCP status planners inherit cached-only mode. / Wybór kohort dla close/cancel w P83 czyta tylko metadane; zagnieżdżone planery statusu MCP dziedziczą tryb zapisanych danych.
+
+- Board/Ink test instrumentation counts bounded task-header reads and keeps board fixtures in gate-owned scratch. / Licznik testowy planszy i Ink uwzględnia ograniczone odczyty nagłówków i przechowuje plansze testowe w katalogu roboczym gate.
+
+## [0.19.4] - 2026-11-11
+
 - P85: MCP doctor uses cached report/size reads and skips synchronous live link ancestry probes; doctor --timings identifies diagnostic section wall times. / P85: MCP doctor używa zapisanych odczytów raportów/rozmiarów i pomija synchroniczne sprawdzanie historii Git dla linków; doctor --timings podaje czas sekcji diagnostycznych.
 
 - P89: after requires PASS/PASS with findings/PARTIAL/GO on the first report line; rejected/missing verdicts hold tasks and notify. after_verdict overrides, queue up/unblock release manually. Spec example includes a real first-repo link. / P89: after wymaga PASS/PASS with findings/PARTIAL/GO w pierwszej linii raportu; inne/brak werdyktu wstrzymują zadania i powiadamiają. after_verdict nadpisuje listę, queue up/unblock zwalniają ręcznie. Przykład spec zawiera link dla pierwszego repo.
@@ -11,12 +19,6 @@ All notable changes to this project are documented here. The format follows [Kee
 - P90: busy Codex follow-ups wait durably until idle/turn end; send returns queued_until_turn_end with message_id, status/board/events expose pending messages and withdraw remains available. Claude/Kimi unchanged. / P90: follow-upy do pracującego Codexa czekają trwale na bezczynność/koniec tury; send zwraca queued_until_turn_end i message_id, status/board/events pokazują kolejkę, withdraw działa. Claude/Kimi bez zmian.
 
 - P91: pending/withdrawn messages and closed tasks no longer hide existing reports; get_report returns a message warning, withdraw/close clear stale freshness markers. / P91: wiadomości oczekujące i wycofane oraz zamknięte zadania nie ukrywają raportów; get_report zwraca ostrzeżenie, withdraw/close usuwają nieaktualne znaczniki.
-
-- P83: preserve cancel selector validation before cohort resolution; history tests seed background observations before close. / P83: walidacja wyboru cancel poprzedza rozwiązywanie kohort; testy historii zapisują obserwacje tła przed close.
-
-- P83 cohort close/cancel selection reads metadata only; nested MCP status planners inherit cached-only mode. / Wybór kohort dla close/cancel w P83 czyta tylko metadane; zagnieżdżone planery statusu MCP dziedziczą tryb zapisanych danych.
-
-- Board/Ink test instrumentation counts bounded task-header reads and keeps board fixtures in gate-owned scratch. / Licznik testowy planszy i Ink uwzględnia ograniczone odczyty nagłówków i przechowuje plansze testowe w katalogu roboczym gate.
 
 ## [0.19.3] - 2026-11-10
 
