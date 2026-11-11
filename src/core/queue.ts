@@ -510,8 +510,11 @@ export async function announceBlocked(ctx: Context, notifier: Notifier, rows: re
 
 /** `queue up`: first in the line of its priority class. */
 export async function moveToFront(ctx: Context, input: string): Promise<QueueEntry> {
-  const entry = findEntry(ctx.config, input);
+  let entry = findEntry(ctx.config, input);
   if (entry.status !== 'queued') throw new AgentctlError(`${entry.task} is ${entry.status}, not waiting`, entry.status === 'failed' ? `"agentctl queue retry ${entry.task}" puts it back in the line.` : undefined);
+  const rows = await collectStatus(ctx, { progress: false, cachedOnly: true, archived: true });
+  const rejected = findBlocked([entry], rows).get(entry.task)?.verdicts ?? [];
+  if (rejected.length) entry = (await unblockEntry(ctx, entry.task)).entry;
   const lowest = readQueue(ctx.config).reduce((n, e) => Math.min(n, e.order), entry.order);
   const moved = { ...entry, order: lowest - 1 };
   await writeEntry(ctx, moved);

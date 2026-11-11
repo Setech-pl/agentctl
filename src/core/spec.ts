@@ -3,7 +3,7 @@ import { validateLaunch } from './safety.ts';
 import { provider, isActive, activeProviders } from './providers/registry.ts';
 import { PROVIDER_IDS } from './providers/types.ts';
 import { classNames, matrixClass, explicitOnlyModel } from './matrix.ts';
-import { VERDICTS } from './outputs.ts';
+import { normalizeDependencyVerdict, VERDICTS } from './outputs.ts';
 import type { OutputVerdict } from './outputs.ts';
 import path from 'node:path';
 import YAML from 'yaml';
@@ -181,7 +181,7 @@ export interface ResolveContext {
 /** Task IDs whose window name is one agentctl uses for itself (`watch`, `board`, `manager`). */
 export const RESERVED_TASK_IDS = ['WATCH', 'BOARD', 'MANAGER'];
 
-export const SPEC_KEYS = ['task', 'agent', 'class', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'review', 'report', 'pin', 'remote_control', 'weight', 'priority', 'after', 'touches', 'cohort'];
+export const SPEC_KEYS = ['task', 'agent', 'class', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'review', 'report', 'pin', 'remote_control', 'weight', 'priority', 'after', 'after_verdict', 'touches', 'cohort'];
 export const REPO_KEYS = ['path', 'worktree', 'base', 'branch', 'setup'];
 
 function label(raw: RawSpec): string {
@@ -310,6 +310,12 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
         else { after.push(dep.task); afterVerdicts[dep.task] = values as OutputVerdict[]; }
       } else p.add(`after must be a task ID or a list of task IDs (e.g. NC-12), got ${JSON.stringify(dep)}`);
     }
+  }
+  if (h.after_verdict !== undefined) {
+    const values = Array.isArray(h.after_verdict) ? h.after_verdict : [];
+    const allowed = values.map(v => typeof v === 'string' ? normalizeDependencyVerdict(v) : undefined);
+    if (!allowed.length || allowed.some(v => v === undefined)) p.add('after_verdict must be a non-empty list of verdicts: PASS, PASS with findings, PARTIAL, GO, BLOCKED, FAIL, NO-GO');
+    else for (const task of after) afterVerdicts[task] = allowed as OutputVerdict[];
   }
   const touches: string[] = [];
   if (h.touches !== undefined && h.touches !== null) {

@@ -66,7 +66,7 @@ function fixture(name: string, yaml = '', respond?: (cmd: string, args: string[]
 }
 function report(record: ReturnType<typeof seedTask>, outputs?: Record<string, unknown>, extra = '') {
   fs.mkdirSync(path.dirname(record.report), { recursive: true });
-  const text = `Werdykt: FAIL\n${extra}\n${outputs ? '```agentctl-outputs\n' + YAML.stringify({ version: 1, verdict: 'PASS', ...outputs }) + '```\n' : ''}<!-- agentctl:report-end -->\n`;
+  const text = `Werdykt: ${outputs ? outputs.verdict ?? 'PASS' : 'FAIL'}\n${extra}\n${outputs ? '```agentctl-outputs\n' + YAML.stringify({ version: 1, verdict: 'PASS', ...outputs }) + '```\n' : ''}<!-- agentctl:report-end -->\n`;
   fs.writeFileSync(record.report, text); return text;
 }
 const plans = (now: number, used = 100, reset: number | null = now + 60000): Record<'claude' | 'codex', PlanState> => Object.fromEntries(['claude', 'codex'].map(provider => [provider, { provider, available: true, readAt: now, planType: null, windows: [{ kind: 'session', label: '5h', minutes: 300, usedPercent: used, resetsAt: reset }], maxPercent: used, note: '', stale: false }])) as Record<'claude' | 'codex', PlanState>;
@@ -124,7 +124,7 @@ describe('0.17.4 verdict dependencies', () => {
   });
   it('accepts legacy Werdykt line only as fallback and refuses guesses from arbitrary prose', () => {
     assert.equal(dependencyVerdict('Werdykt: PARTIAL – evidence'), 'PARTIAL'); assert.equal(dependencyVerdict('Looks like PASS'), undefined);
-    assert.equal(dependencyVerdict('Werdykt: FAIL\n```agentctl-outputs\nversion: 1\nverdict: PASS\n```'), 'PASS');
+    assert.equal(dependencyVerdict('Werdykt: FAIL\n```agentctl-outputs\nversion: 1\nverdict: PASS\n```'), 'FAIL');
   });
   it('persists conditions through queue list and explicit unblock without dropping unrelated conditions', async () => {
     const f = fixture('after-unblock'); seedTask(f.config, 'A'); seedTask(f.config, 'B');
@@ -340,7 +340,7 @@ it('verdict blocker for AUTHOR remains readable through MCP redaction, including
   const f = fixture('author-redaction'); f.config.queue.enabled = false;
   const r = seedTask(f.config, 'AUTHOR'); report(r, { verdict: 'PASS' });
   const plan = await planQueueAdd(f.ctx, [f.raw('NEXT', { after: [{ task: 'AUTHOR', verdict: 'FAIL' }] })]); await commitQueueAdd(f.ctx, plan.items);
-  const text = (await f.full('queue_list')).text; assert.match(text, /AUTHOR: werdykt PASS; wymagany FAIL/);
+  const text = (await f.full('queue_list')).text; assert.match(text, /waiting: AUTHOR verdict PASS/);
   const json = (await f.full('queue_show', { task: 'NEXT' })).text; assert.match(json, /"AUTHOR":/); assert.match(json, /"FAIL"/);
 });
 

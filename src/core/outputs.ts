@@ -222,11 +222,15 @@ export async function readOutputs(ctx: Context, record: TaskRecord): Promise<Out
 }
 
 /** A declared output verdict wins. Legacy fallback accepts an explicit verdict line only. */
+/** Normalise the first report line for dependency admission (never a later quoted verdict). */
+export function normalizeDependencyVerdict(value: string): OutputVerdict | undefined {
+  const token = value.trim().toUpperCase().replace(/\s+/g, ' ');
+  return ({ PASS: 'PASS', 'PASS WITH FINDINGS': 'PARTIAL', PARTIAL: 'PARTIAL', GO: 'PASS', 'GO-WITH-CHANGES': 'PARTIAL', FAIL: 'FAIL', 'NO-GO': 'FAIL', BLOCKED: 'BLOCKED' } as Record<string, OutputVerdict>)[token];
+}
 export function dependencyVerdict(text: string, review = false): OutputVerdict | undefined {
-  const outputs = parseOutputs(text, { review }).outputs;
-  if (outputs) return outputs.verdict;
-  const found = /^\s*(?:\*\*)?(?:Werdykt|Verdict):\s*(?:\*\*)?(PASS|PARTIAL|FAIL|BLOCKED)\b/im.exec(text)?.[1];
-  return found?.toUpperCase() as OutputVerdict | undefined;
+  const line = text.replace(/\r\n/g, '\n').split('\n').find(l => l.trim()) ?? '';
+  const found = /^\s*(?:#{1,6}\s*)?(?:\*\*)?(?:Werdykt|Verdict):\s*(?:\*\*)?(PASS\s+with\s+findings|GO-WITH-CHANGES|NO-GO|PASS|PARTIAL|FAIL|BLOCKED|GO)(?=$|[\s*—–.:;,])/i.exec(line)?.[1];
+  return found ? normalizeDependencyVerdict(found) : review ? reviewVerdict(text) && reviewVerdictAsOutput(reviewVerdict(text)!.first) : undefined;
 }
 
 const OUTPUT_PROTOCOL_LINES = [

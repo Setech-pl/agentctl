@@ -419,7 +419,7 @@ describe('after: dependencies', () => {
   const writeReport = (s: Setup, task: string): void => {
     const record = readTaskRecord(s.config, task.toLowerCase())!;
     fs.mkdirSync(path.dirname(record.report), { recursive: true });
-    fs.writeFileSync(record.report, `# ${task}\nVerdict: PASS\n<!-- agentctl:report-end -->`);
+    fs.writeFileSync(record.report, `Verdict: PASS\n# ${task}\n<!-- agentctl:report-end -->`);
     const time = new Date(Math.max(Date.now(), Date.parse(record.attemptStarted ?? record.started) + 1)); fs.utimesSync(record.report, time, time);
   };
 

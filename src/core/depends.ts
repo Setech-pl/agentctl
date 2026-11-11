@@ -17,8 +17,10 @@ export function hasReport(row: StatusRow | undefined): boolean {
 }
 
 /** The tasks of `after` that do not have a report yet (a task that does not exist yet, one in the queue, one still working). */
+export const DEFAULT_AFTER_VERDICTS: OutputVerdict[] = ['PASS', 'PARTIAL'];
+
 export function unmetAfter(after: readonly string[], rows: readonly StatusRow[], verdicts: Record<string, OutputVerdict[]> = {}): string[] {
-  return after.filter(task => { const row = rows.find(r => r.task === task); return !hasReport(row) || (verdicts[task] !== undefined && (!row?.verdict || !verdicts[task]!.includes(row.verdict))); });
+  return after.filter(task => { const row = rows.find(r => r.task === task); return !hasReport(row) || (!row?.verdict || !(verdicts[task] ?? DEFAULT_AFTER_VERDICTS).includes(row.verdict)); });
 }
 
 /** "czeka na NC-4, NC-5": what a waiting task is waiting for; `failed` are the ones whose start failed in the queue, `cancelled` the ones that were cancelled. */
@@ -50,9 +52,10 @@ export function findBlocked(entries: readonly Pick<QueueEntry, 'task' | 'after' 
     grew = false;
     for (const e of waiting) {
       const b: Blockers = { cancelled: e.after.filter((t) => cancelled.has(t)), blocked: e.after.filter((t) => blocked.has(t)) };
-      const verdicts = Object.entries(e.afterVerdicts ?? {}).flatMap(([task, allowed]) => {
+      const verdicts = e.after.flatMap(task => {
+        const allowed = e.afterVerdicts?.[task] ?? DEFAULT_AFTER_VERDICTS;
         const row = rows.find(r => r.task === task);
-        return hasReport(row) && (!row?.verdict || !allowed.includes(row.verdict)) ? [{ task, reason: row?.verdict ? `werdykt ${row.verdict}; wymagany ${allowed.join('|')}` : 'brak werdyktu' }] : [];
+        return hasReport(row) && (!row?.verdict || !allowed.includes(row.verdict)) ? [{ task, reason: row?.verdict ? `verdict ${row.verdict}` : 'verdict missing/unparsable (brak werdyktu)' }] : [];
       });
       if (verdicts.length) b.verdicts = verdicts;
       if (b.cancelled.length + b.blocked.length + verdicts.length === 0) continue;
@@ -67,6 +70,7 @@ export function findBlocked(entries: readonly Pick<QueueEntry, 'task' | 'after' 
 
 /** "⛓ zablokowane – NC-1 anulowane": the cause shown by `status`, `queue list` and the board. */
 export function blockedText(b: Blockers): string {
+  if (b.verdicts?.length && !b.cancelled.length && !b.blocked.length) return `waiting: ${b.verdicts.map(v => `${v.task} ${v.reason}`).join(', ')}`;
   return `${BLOCKED_ICON} zablokowane – ${[...b.cancelled.map((t) => `${t} anulowane`), ...b.blocked.map((t) => `${t} zablokowane`), ...(b.verdicts ?? []).map(v => `${v.task}: ${v.reason}`)].join(', ')}`;
 }
 

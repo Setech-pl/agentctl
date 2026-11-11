@@ -62,9 +62,9 @@ await withHarness({ name: 'nc-workflow', cacheRoot: cache, config: 'watch: {inte
   };
   const spec = (task: string, header: Record<string, unknown> = {}) => `---\n${YAML.stringify({ task, agent: 'claude', model: 'claude-sonnet-5-5', effort: 'medium', cohort: 'NC', repos: [{ path: repo, worktree: path.join(h.root, 'wt', task.toLowerCase()), branch: task.toLowerCase(), base: 'main' }], ...header })}---\nFake work ${task}.\n`;
   const record = (task: string) => readTaskRecord(config, task.toLowerCase())!;
-  const writeReport = (task: string, sha: string, changes = {}) => {
+  const writeReport = (task: string, sha: string, changes: Record<string, unknown> = {}) => {
     const r = record(task); fs.mkdirSync(path.dirname(r.report), { recursive: true });
-    fs.writeFileSync(r.report, 'Werdykt: FAIL\n```agentctl-outputs\n' + YAML.stringify({ version: 1, verdict: 'PASS', commits: [{ repo: 'repo', branch: 'author', sha }], integrate: [{ repo: 'repo', branch: 'author', sha, note: 'proposed' }], decisions: ['Choose deployment time'], actions: [{ title: 'Deploy', shell: 'echo never executed' }], checks: ['fixture: PASS'], ...changes }) + '```\n<!-- agentctl:report-end -->\n');
+    fs.writeFileSync(r.report, 'Werdykt: ' + String(changes.verdict ?? 'PASS') + '\n```agentctl-outputs\n' + YAML.stringify({ version: 1, verdict: 'PASS', commits: [{ repo: 'repo', branch: 'author', sha }], integrate: [{ repo: 'repo', branch: 'author', sha, note: 'proposed' }], decisions: ['Choose deployment time'], actions: [{ title: 'Deploy', shell: 'echo never executed' }], checks: ['fixture: PASS'], ...changes }) + '```\n<!-- agentctl:report-end -->\n');
   };
   const attached: ReturnType<typeof spawn>[] = [];
   try {
@@ -84,7 +84,7 @@ await withHarness({ name: 'nc-workflow', cacheRoot: cache, config: 'watch: {inte
     const cohort = JSON.parse((await call('cohort_show', { cohort: 'nc', format: 'json' })).text); check('cohort aggregates proposed integration/actions with source IDs', cohort.integrate[0].task === 'AUTHOR' && cohort.actions[0].task === 'AUTHOR');
     fs.writeFileSync(path.join(cache, 'nc-example-outputs.json'), JSON.stringify({ ...await readOutputs(ctx, record('AUTHOR')), cohort_show: cohort }, null, 2));
     const dependent = spec('DEPENDENT', { after: [{ task: 'AUTHOR', verdict: 'FAIL' }] }); await call('queue', { spec: dependent }); await call('queue', { spec: dependent, confirm: true });
-    check('verdict condition blocks despite a complete author report', (await call('queue_list')).text.includes('werdykt PASS'));
+    check('verdict condition blocks despite a complete author report', (await call('queue_list')).text.includes('verdict PASS'));
     const unblock = await call('unblock', { task: 'DEPENDENT' }); check('unblock preview states blocked and exact dependency', !unblock.error && unblock.text.includes('"state": "blocked"') && unblock.text.includes('AUTHOR'));
     const baseSpec = spec('FROM-AUTHOR', { repos: [{ path: repo, worktree: path.join(h.root, 'wt/from-author'), branch: 'from-author', base: '@AUTHOR:repo' }] }); const basePreview = await call('new', { spec: baseSpec }); check('base reference preview resolves exact output commit', basePreview.text.includes(first) && basePreview.text.includes('@AUTHOR:repo'));
     check('base reference start succeeds', h.agentctl(['new', '-', '--json'], { input: baseSpec }).code === 0); check('base reference saved in TASK.md', record('FROM-AUTHOR').repos[0]?.base === first);

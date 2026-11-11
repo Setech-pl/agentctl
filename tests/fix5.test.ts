@@ -76,7 +76,7 @@ function fixture(name: string, yaml = '', respond?: (cmd: string, args: string[]
 }
 function report(record: ReturnType<typeof seedTask>, outputs?: Record<string, unknown>, extra = '') {
   fs.mkdirSync(path.dirname(record.report), { recursive: true });
-  const text = `Werdykt: FAIL\n${extra}\n${outputs ? '```agentctl-outputs\n' + YAML.stringify({ version: 1, verdict: 'PASS', ...outputs }) + '```\n' : ''}<!-- agentctl:report-end -->\n`;
+  const text = `Werdykt: ${outputs ? outputs.verdict ?? 'PASS' : 'FAIL'}\n${extra}\n${outputs ? '```agentctl-outputs\n' + YAML.stringify({ version: 1, verdict: 'PASS', ...outputs }) + '```\n' : ''}<!-- agentctl:report-end -->\n`;
   fs.writeFileSync(record.report, text); return text;
 }
 const plans = (now: number, used = 100, reset: number | null = now + 60000): Record<'claude' | 'codex', PlanState> => Object.fromEntries(['claude', 'codex'].map(provider => [provider, { provider, available: true, readAt: now, planType: null, windows: [{ kind: 'session', label: '5h', minutes: 300, usedPercent: used, resetsAt: reset }], maxPercent: used, note: '', stale: false }])) as Record<'claude' | 'codex', PlanState>;
