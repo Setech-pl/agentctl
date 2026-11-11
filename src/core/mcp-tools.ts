@@ -645,7 +645,7 @@ async function runGetReport(deps: McpDeps, args: { task: string; section?: strin
     throw new AgentctlError(state.reason === 'not a regular report' ? `the report of ${record.task} is not a regular file; refusing to read it` : `${record.task} has no report yet: ${state.reason}`, 'Use report to inspect candidates or wait for completion.');
   }
   if (!args.detail && args.mode !== 'full' && args.section === undefined && args.offset === undefined && args.byte_offset === undefined && args.limit === undefined) {
-    return ok(`=== ${record.task} (${record.agent} ${record.model}/${record.effort}) ===\n${conciseReport(readReportFile(record, { config: ctx.config, maxBytes: Number.MAX_SAFE_INTEGER }).text, await readOutputs(ctx, record), record.reviewOf != null)}${warning ? `\n${JSON.stringify({ warning })}` : ''}`);
+    return ok(`=== ${record.task} (${record.agent} ${record.model}/${record.effort}) ===\n${conciseReport(readReportText(ctx.config, record, record.report), await readOutputs(ctx, record), record.reviewOf != null)}${warning ? `\n${JSON.stringify({ warning })}` : ''}`);
   }
   const outputs = (args.detail || args.mode === 'full') && !(args.offset ?? 0) && !(args.byte_offset ?? 0) ? await readOutputs(ctx, record) : {};
   const render = (r: ReportPage, pulled: boolean): ToolResult => {
