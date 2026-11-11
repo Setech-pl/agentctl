@@ -12,7 +12,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.19.4] - 2026-11-11
 
-- P85: MCP doctor uses cached report/size reads and skips synchronous live link ancestry probes; doctor --timings identifies diagnostic section wall times. / P85: MCP doctor używa zapisanych odczytów raportów/rozmiarów i pomija synchroniczne sprawdzanie historii Git dla linków; doctor --timings podaje czas sekcji diagnostycznych.
+- P85: MCP doctor reuses one inventory snapshot and cached sizes, skipping detailed per-task probes; doctor --timings identifies diagnostic section wall times. / P85: MCP doctor używa jednego indeksu i zapisanych rozmiarów, pomijając szczegółowe kontrole zadań; doctor --timings podaje czas sekcji diagnostycznych.
 
 - P89: after requires PASS/PASS with findings/PARTIAL/GO on the first report line; rejected/missing verdicts hold tasks and notify. after_verdict overrides, queue up/unblock release manually. Spec example includes a real first-repo link. / P89: after wymaga PASS/PASS with findings/PARTIAL/GO w pierwszej linii raportu; inne/brak werdyktu wstrzymują zadania i powiadamiają. after_verdict nadpisuje listę, queue up/unblock zwalniają ręcznie. Przykład spec zawiera link dla pierwszego repo.
 

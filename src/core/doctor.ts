@@ -120,9 +120,11 @@ export async function runDoctor(
 
   section('installation');
   let config: GlobalConfig | undefined;
+  let currentRecords: ReturnType<typeof listTaskRecords> = [], archivedRecords: ReturnType<typeof listArchivedRecords> = [];
   try {
     config = loadConfig();
-    const disk = await collectDisk(new Context(runner, config, () => {}));
+    currentRecords = listTaskRecords(config); archivedRecords = listArchivedRecords(config);
+    const disk = await collectDisk(new Context(runner, config, () => {}), undefined, { records: [...currentRecords, ...archivedRecords] });
     add('disk', disk.level === 'critical' ? 'fail' : disk.level === 'ok' ? 'ok' : 'warn', diskLine(disk));
     add('MCP permissions', 'ok', 'Existing queue permission still permits only queue insertion; queue:* explicitly enables the queue group. close/interrupt/queue_rm now require preview then confirm.');
   } catch (e) {
@@ -254,10 +256,11 @@ export async function runDoctor(
         add('mirror', 'fail', `${dir} is not writable`);
       }
     } else add('mirror', 'ok', 'off (set mirror_dir in the config to enable)');
-    try {
-      const reportRows = new Map((await collectStatus(new Context(runner, config, () => {}), { progress: false, archived: true, cachedOnly: true, shallowClosed: true })).map(r => [r.task, r]));
+    if (cachedOnly) add('task inventory', 'ok', `${currentRecords.length} current, ${archivedRecords.length} archived; per-task report/link/settings checks skipped in cached mode (CLI doctor runs them)`);
+    else try {
+      const reportRows = new Map((await collectStatus(new Context(runner, config, () => {}), { progress: false, archived: true, cachedOnly: true, shallowClosed: true, records: { current: currentRecords, archived: archivedRecords } })).map(r => [r.task, r]));
       const taskProcesses = (await runner.exec('ps', ['-axo', 'command='], { readOnly: true })).stdout.split('\n');
-      for (const record of [...listTaskRecords(config), ...listArchivedRecords(config)]) {
+      for (const record of [...currentRecords, ...archivedRecords]) {
         const report = inspectReport(config, record, runner.now(), !record.attemptId);
         if (reportRows.get(record.task)?.report !== 'yes') add(`report ${record.task}`, 'warn', `${report.ready ? 'incomplete for current turn' : report.reason}: ${record.report}${record.reportSource ? ` (previous copy: ${record.reportSource})` : ''}`);
         else if (!record.reportConfirmed && record.reportSource && path.normalize(record.reportSource) !== path.normalize(record.report)) add(`report ${record.task}`, 'warn', `raport pochodzi z kopii ${record.reportSource} – sprawdź`);
@@ -272,7 +275,7 @@ export async function runDoctor(
     } catch (e) { add('task diagnostics', 'warn', errorMessage(e)); }
     if (cachedOnly) add('link bases', 'ok', 'cached read: live git ancestry checks skipped; CLI doctor performs them');
     section('task diagnostics (cached reads)');
-    for (const repo of new Set([...listTaskRecords(config), ...listArchivedRecords(config)].flatMap(r => r.repos.map(repo => repo.path)))) {
+    for (const repo of new Set([...currentRecords, ...archivedRecords].flatMap(r => r.repos.map(repo => repo.path)))) {
       if (repo === cwd) continue;
       try { for (const warning of missingLinkTargets(projectLinks(repo, '', config.cache))) add('project links', 'fail', `${repo}: ${warning}`); }
       catch (e) { add('project links', 'fail', errorMessage(e)); }
