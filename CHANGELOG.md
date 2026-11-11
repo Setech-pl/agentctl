@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- P91: pending/withdrawn messages and closed tasks no longer hide existing reports; get_report returns a message warning, withdraw/close clear stale freshness markers. / P91: wiadomości oczekujące i wycofane oraz zamknięte zadania nie ukrywają raportów; get_report zwraca ostrzeżenie, withdraw/close usuwają nieaktualne znaczniki.
+
 - P83: preserve cancel selector validation before cohort resolution; history tests seed background observations before close. / P83: walidacja wyboru cancel poprzedza rozwiązywanie kohort; testy historii zapisują obserwacje tła przed close.
 
 - P83 cohort close/cancel selection reads metadata only; nested MCP status planners inherit cached-only mode. / Wybór kohort dla close/cancel w P83 czyta tylko metadane; zagnieżdżone planery statusu MCP dziedziczą tryb zapisanych danych.

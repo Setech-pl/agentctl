@@ -68,6 +68,14 @@ export interface WithdrawResult {
   message: string;
 }
 
+/** Reading a report never acknowledges a message or releases a dependent task. */
+export function reportMessageWarning(ctx: Context, window: string, record = readTaskRecord(ctx.config, window)): string | undefined {
+  const queued = readPromptQueue(ctx, window)[0];
+  if (queued) return `message ${queued.id} pending since ${queued.queuedAt} – report may predate it`;
+  if (record?.pendingPrompt && record.promptDelivery !== 'sent') return `message ${record.deliveryId ?? 'legacy'} ${record.deliveryResult === 'stale' ? 'withdrawn (stale)' : 'pending'} since ${record.deliveryStartedAt ?? record.started} – report may predate it`;
+  return record?.reportMessageWarning;
+}
+
 /**
  * `agentctl send --withdraw` / MCP `send` with `withdraw`: take a waiting message back, by id or a unique prefix of it
  * (peek/status list them in prompt_queue). A FIFO entry simply leaves the queue. The active pending prompt leaves only before
@@ -102,13 +110,13 @@ export async function withdrawPrompt(ctx: Context, window: string, idPrefix: str
       // message as the active delivery, never as an eligible queued duplicate (recovery would deliver it again).
       if (record.deliveryStartedAt) {
         await dropDuplicates();
-        await setHeaderFields(ctx.runner, taskFile(ctx.config, window), { delivery_result: 'stale', prompt_error: `wiadomość wycofana (${now}) po rozpoczęciu dostarczania – agent może już nad nią pracować` });
+        await setHeaderFields(ctx.runner, taskFile(ctx.config, window), { delivery_report_baseline: null, report_message_warning: `message ${id} withdrawn (stale) since ${now} – report may predate it`, delivery_result: 'stale', prompt_error: `wiadomość wycofana (${now}) po rozpoczęciu dostarczania – agent może już nad nią pracować` });
         await note(`${id}, stale`);
         await recordJournal(ctx, { kind: 'delivery', task: record.task, text: `${record.task}: wycofano wiadomość po rozpoczęciu dostarczania (stale); agent może już nad nią pracować [dostawa ${id.slice(0, 8)}]` });
         return { outcome: 'stale', id, message: `${record.task}: dostarczanie już się zaczęło – wiadomość oznaczona jako wycofana (stale), agent może już nad nią pracować; nic nie jest wycofywane z okna` };
       }
       await dropDuplicates();
-      await setHeaderFields(ctx.runner, taskFile(ctx.config, window), { pending_prompt: null, prompt_delivery: null, prompt_error: null, delivery_id: null, delivery_result: null });
+      await setHeaderFields(ctx.runner, taskFile(ctx.config, window), { delivery_report_baseline: null, report_message_warning: `message ${id} withdrawn since ${now} – report may predate it`, pending_prompt: null, prompt_delivery: null, prompt_error: null, delivery_id: null, delivery_result: null });
       await note(id);
       await recordJournal(ctx, { kind: 'delivery', task: record.task, text: `${record.task}: wycofano oczekującą wiadomość przed rozpoczęciem dostarczania [dostawa ${id.slice(0, 8)}]` });
       return { outcome: 'withdrawn', id, message: `${record.task}: wycofano oczekującą wiadomość (${id.slice(0, 8)}) – nie zostanie wysłana` };
@@ -124,3 +132,4 @@ export async function withdrawPrompt(ctx: Context, window: string, idPrefix: str
     return { outcome: 'withdrawn', id: entry.id, message: `${record.task}: wycofano wiadomość z kolejki (${entry.id.slice(0, 8)}) – nie zostanie wysłana` };
   }));
 }
+    await setHeaderFields(ctx.runner, taskFile(ctx.config, window), { delivery_report_baseline: null, report_message_warning: `message ${entry.id} withdrawn since ${entry.queuedAt} – report may predate it` });

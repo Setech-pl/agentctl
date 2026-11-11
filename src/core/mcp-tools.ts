@@ -1,3 +1,4 @@
+import { reportMessageWarning } from './prompt-queue.ts';
 import { queueViews as coreQueueViews } from './queue.ts';
 import { withStartLock } from './start-lock.ts';
 import { withResponseBudget } from './response-budget.ts';
@@ -638,17 +639,18 @@ async function runGetReport(deps: McpDeps, args: { task: string; section?: strin
   const ctx = deps.context(() => {});
   const record = findRecord(ctx, args.task);
   const row = (await collectStatus(ctx, { progress: false, archived: true })).find(r => r.task === record.task);
-  if (row?.report !== 'yes') {
+  const warning = reportMessageWarning(ctx, record.window, record);
+  if (row?.report !== 'yes' && !warning) {
     const state = inspectReport(ctx.config, record, ctx.runner.now(), !record.attemptId);
     throw new AgentctlError(state.reason === 'not a regular report' ? `the report of ${record.task} is not a regular file; refusing to read it` : `${record.task} has no report yet: ${state.reason}`, 'Use report to inspect candidates or wait for completion.');
   }
   if (!args.detail && args.mode !== 'full' && args.section === undefined && args.offset === undefined && args.byte_offset === undefined && args.limit === undefined) {
-    return ok(`=== ${record.task} (${record.agent} ${record.model}/${record.effort}) ===\n${conciseReport(readReportText(ctx.config, record, record.report), await readOutputs(ctx, record), record.reviewOf != null)}`);
+    return ok(`=== ${record.task} (${record.agent} ${record.model}/${record.effort}) ===\n${conciseReport(readReportFile(record, { config: ctx.config, maxBytes: Number.MAX_SAFE_INTEGER }).text, await readOutputs(ctx, record), record.reviewOf != null)}${warning ? `\n${JSON.stringify({ warning })}` : ''}`);
   }
   const outputs = (args.detail || args.mode === 'full') && !(args.offset ?? 0) && !(args.byte_offset ?? 0) ? await readOutputs(ctx, record) : {};
   const render = (r: ReportPage, pulled: boolean): ToolResult => {
     const { text, signature: _signature, ...page } = r;
-    return ok(`=== ${record.task} (${record.agent} ${record.model}/${record.effort}) ===\n${text}\n--- page ---\n${JSON.stringify({ ...page, pulled, ...outputs })}`);
+    return ok(`=== ${record.task} (${record.agent} ${record.model}/${record.effort}) ===\n${text}\n--- page ---\n${JSON.stringify({ ...page, pulled, ...outputs, ...(warning ? { warning } : {}) })}`);
   };
   let maxBytes = Math.max(4, Math.floor(ctx.config.mcp.maxResponseKb * 1024) - 800);
   let r = readReportFile(record, { ...args, maxBytes, config: ctx.config });

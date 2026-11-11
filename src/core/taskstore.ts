@@ -64,6 +64,8 @@ export interface TaskRecord {
   deliveryId?: string;
   deliveryStartedAt?: string;
   deliveryReportBaseline?: string;
+  /** Retained message history warning; never a readiness marker. */
+  reportMessageWarning?: string;
   deliveryOutputBaseline?: string;
   promptSentAt?: string;
   promptError?: string;
@@ -184,7 +186,7 @@ export function renderTaskMd(record: TaskRecord, prompt: string): string {
   if (record.autoReview) header.auto_review = record.autoReview;
   if (record.switchedBy) header.switched_by = record.switchedBy;
   if (record.cohort) header.cohort = record.cohort;
-  for (const [key, value] of Object.entries({ delivery_output_baseline: record.deliveryOutputBaseline, delivery_id: record.deliveryId, delivery_started_at: record.deliveryStartedAt, delivery_report_baseline: record.deliveryReportBaseline, report_confirmed: record.reportConfirmed, pending_prompt: record.pendingPrompt, prompt_delivery: record.promptDelivery, prompt_sent_at: record.promptSentAt, prompt_error: record.promptError, delivery_result: record.deliveryResult, delivery_field: record.deliveryField, delivery_source: record.deliverySource, delivery_enters: record.deliveryEnters, delivery_enter_at: record.deliveryEnterAt, delivery_echo_baseline: record.deliveryEchoBaseline })) if (value !== undefined) header[key] = value;
+  for (const [key, value] of Object.entries({ delivery_output_baseline: record.deliveryOutputBaseline, delivery_id: record.deliveryId, delivery_started_at: record.deliveryStartedAt, delivery_report_baseline: record.deliveryReportBaseline, report_message_warning: record.reportMessageWarning, report_confirmed: record.reportConfirmed, pending_prompt: record.pendingPrompt, prompt_delivery: record.promptDelivery, prompt_sent_at: record.promptSentAt, prompt_error: record.promptError, delivery_result: record.deliveryResult, delivery_field: record.deliveryField, delivery_source: record.deliverySource, delivery_enters: record.deliveryEnters, delivery_enter_at: record.deliveryEnterAt, delivery_echo_baseline: record.deliveryEchoBaseline })) if (value !== undefined) header[key] = value;
   if (record.promptKind) header.prompt_kind = record.promptKind;
   if (record.deliveryWasBusy !== undefined) header.delivery_was_busy = record.deliveryWasBusy;
   if (record.deliveryQueueSign !== undefined) header.delivery_queue_sign = record.deliveryQueueSign;
@@ -309,7 +311,7 @@ function parseTaskRecordUncached(text: string): TaskRecord | undefined {
   };
   if (isObject(data.observed) && typeof data.observed.model === 'string' && typeof data.observed.effort === 'string' && typeof data.observed.cliVersion === 'string') record.observed = data.observed as TaskRecord['observed'];
   if (typeof data.observed_warning === 'string') record.observedWarning = data.observed_warning;
-  for (const [key, field] of [['delivery_output_baseline', 'deliveryOutputBaseline'], ['delivery_id', 'deliveryId'], ['delivery_started_at', 'deliveryStartedAt'], ['delivery_report_baseline', 'deliveryReportBaseline'], ['report_confirmed', 'reportConfirmed'], ['pending_prompt', 'pendingPrompt'], ['prompt_sent_at', 'promptSentAt'], ['prompt_error', 'promptError'], ['delivery_field', 'deliveryField'], ['delivery_source', 'deliverySource'], ['delivery_enter_at', 'deliveryEnterAt']] as const) if (typeof data[key] === 'string') record[field] = data[key];
+  for (const [key, field] of [['delivery_output_baseline', 'deliveryOutputBaseline'], ['delivery_id', 'deliveryId'], ['delivery_started_at', 'deliveryStartedAt'], ['delivery_report_baseline', 'deliveryReportBaseline'], ['report_message_warning', 'reportMessageWarning'], ['report_confirmed', 'reportConfirmed'], ['pending_prompt', 'pendingPrompt'], ['prompt_sent_at', 'promptSentAt'], ['prompt_error', 'promptError'], ['delivery_field', 'deliveryField'], ['delivery_source', 'deliverySource'], ['delivery_enter_at', 'deliveryEnterAt']] as const) if (typeof data[key] === 'string') record[field] = data[key];
   if (['delivered', 'queued-in-agent', 'queued-in-agent-confirmed', 'not-delivered-in-field', 'stale'].includes(String(data.delivery_result))) record.deliveryResult = data.delivery_result as TaskRecord['deliveryResult'];
   for (const [key, field] of [['delivery_enters', 'deliveryEnters'], ['delivery_echo_baseline', 'deliveryEchoBaseline']] as const) if (typeof data[key] === 'number') record[field] = data[key];
   if (['launching', 'pending', 'sending', 'confirming', 'sent', 'needs-attention', 'needs-input'].includes(String(data.prompt_delivery))) record.promptDelivery = data.prompt_delivery as TaskRecord['promptDelivery'];
