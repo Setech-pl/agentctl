@@ -35,7 +35,7 @@ interface Request {
 }
 
 function setup(name: string, yaml = NTFY, { away = true }: { away?: boolean } = {}) {
-  const config = makeConfig(scratch.sub(name), yaml);
+  const config = makeConfig(scratch.sub(name), `disk: {warn_gb: 0, critical_gb: 0}\n${yaml}`);
   const fake = new FakeTmux();
   const runner = new DiskRunner({ dryRun: false, respond: fake.respond, startTime: Date.now() });
   const out: string[] = [];
