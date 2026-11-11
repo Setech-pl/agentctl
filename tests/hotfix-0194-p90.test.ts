@@ -1,0 +1,47 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { it } from 'node:test';
+import { world, scratch } from './hotfix-0194-fixture.ts';
+import { seedTask } from './helpers.ts';
+import { Alerts } from '../src/core/alert.ts';
+import { handleEvent } from '../src/core/event-command.ts';
+import { sendPrompts } from '../src/core/send.ts';
+import { drainPromptQueue, enqueuePrompt, promptQueueView, withdrawPrompt } from '../src/core/prompt-queue.ts';
+import { readTaskRecord } from '../src/core/taskstore.ts';
+import { readJournal } from '../src/core/journal.ts';
+import { composerFixture } from './composer-fixture.ts';
+it('P90: busy Codex send stays durable, visible and withdrawable; idle drain pastes and verifies Enter once', async () => {
+  const w = world('busy');
+  seedTask(w.config, 'BUSY', { agent: 'codex' });
+  const pane = w.tmux.add('busy', composerFixture('• Working (esc to interrupt)\n› Ask Codex to do anything\n'));
+  const [sent] = await sendPrompts(w.ctx, [{ task: 'BUSY', window: 'busy', prompt: 'Follow up after this turn.' }]);
+  assert.match(sent!.message, /queued_until_turn_end/);
+  assert.equal(w.tmux.seen.filter(s => s.startsWith('paste-buffer')).length, 0);
+  const queued = promptQueueView(w.ctx, 'busy');
+  assert.equal(queued.length, 1);
+  assert.match((await w.call('status', { all: true, detail: true })).text, new RegExp(queued[0]!.id));
+  assert.ok(readJournal(w.config).some(e => e.kind === 'delivery-queued' && e.text.includes(queued[0]!.id)));
+  const extra = await enqueuePrompt(w.ctx, 'busy', 'Withdraw this');
+  await withdrawPrompt(w.ctx, 'busy', extra.id);
+  await drainPromptQueue(w.ctx, 'busy');
+  assert.equal(w.tmux.seen.filter(s => s.startsWith('paste-buffer')).length, 0);
+  pane.screen = composerFixture('› Ask Codex to do anything\n');
+  const respond = w.runner.exec.bind(w.runner);
+  w.runner.exec = async (cmd, args, opts) => {
+    const result = await respond(cmd, args, opts);
+    if (cmd === 'tmux' && args[0] === 'send-keys' && args.at(-1) === 'Enter') {
+      pane.screen = composerFixture('• Working (esc to interrupt)\n› Ask Codex to do anything\n');
+      await handleEvent(w.ctx, new Alerts(w.ctx, { notify: async () => {} }), { task: 'BUSY', agent: 'codex', payload: { type: 'agent-turn-complete', 'thread-id': 'hotfix-thread', 'input-messages': ['Follow up after this turn.'], 'last-assistant-message': 'Accepted' } });
+    }
+    if (cmd === 'tmux' && args[0] === 'capture-pane' && w.tmux.seen.some(s => s.startsWith('send-keys'))) return { ...result, stdout: pane.screen };
+    return result;
+  };
+  await drainPromptQueue(w.ctx, 'busy');
+  assert.equal(readTaskRecord(w.config, 'busy')!.promptDelivery, 'sent', JSON.stringify(readTaskRecord(w.config, 'busy')));
+  assert.equal(readTaskRecord(w.config, 'busy')!.deliveryResult, 'delivered');
+  assert.equal(w.tmux.seen.filter(s => s.startsWith('paste-buffer')).length, 1);
+  assert.equal(w.tmux.seen.filter(s => s.startsWith('send-keys')).length, 1);
+  await drainPromptQueue(w.ctx, 'busy');
+  assert.equal(w.tmux.seen.filter(s => s.startsWith('send-keys')).length, 1);
+});

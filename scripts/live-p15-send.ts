@@ -141,12 +141,12 @@ await scenario('cl-enter-only', 'claude', claudeSpec({ swallow: 99 }), async ({ 
   } finally { watcher.kill('SIGTERM'); }
 });
 
-await scenario('cx-steer', 'codex', codexSpec({ transcript: TX(5000) }), async ({ h, log, record, run, sendFile, json }) => {
+await scenario('cx-steer', 'codex', codexSpec({ transcript: TX(5000) }), async ({ h, log, record, run, sendFile, json, state }) => {
   const sent = run('send', sendFile(CODEX_LONG), '-y');
   const watcher = h.spawnAgentctl(['watch'], path.join(h.root, 'watch.log'));
   try {
-    check('P16 Codex busy: the echo of the steered message only classifies: send says "w kolejce agenta – niepotwierdzone"', /w kolejce agenta – niepotwierdzone/.test(sent.stdout) && !/prompt sent/.test(sent.stdout));
-    check('P16 Codex busy: one paste, one Enter; TASK.md confirming / queued-in-agent, the message stays', log().filter(e => e.paste && e.state === 'busy').length === 1 && log().filter(e => e.enter && e.state === 'busy').length === 1 && /prompt_delivery: confirming/.test(record()) && /delivery_result: queued-in-agent/.test(record()) && /pending_prompt/.test(record()));
+    check('P90 Codex busy: durable FIFO, no paste or Enter mid-turn', /queued_until_turn_end/.test(sent.stdout) && log().filter(e => e.paste && e.state === 'busy').length === 0 && log().filter(e => e.enter && e.state === 'busy').length === 0);
+    state({ state: 'ready' });
     check('P16 Codex busy: the rollout line of the steered message confirms it: sent / delivered, source transcript', await until(() => /prompt_delivery: sent/.test(record()), 90000) && /delivery_result: delivered/.test(record()) && /delivery_source: transcript/.test(record()));
     await pause(2000);
     check('P16 Codex busy: it stays sent, no needs-attention', json('promptDelivery') === 'sent' && json('state') !== 'needs-attention');
@@ -162,8 +162,8 @@ await scenario('cx-question', 'codex', codexSpec({ transcript: TX(1500), screens
   const watcher = h.spawnAgentctl(['watch'], path.join(h.root, 'watch.log'));
   try {
     await pause(3500);
-    check('P16 Codex question: watch keeps holding it while the question is open (still pending, still no paste)', /prompt_delivery: pending/.test(record()) && log().filter(e => e.paste).length === pastesBefore);
-    state({ state: 'busy' });
+    check('P16 Codex question: watch keeps holding it while the question is open (still pending, still no paste)', fs.existsSync(path.join(h.root, 'state/t1/prompt-queue.json')) && JSON.parse(fs.readFileSync(path.join(h.root, 'state/t1/prompt-queue.json'), 'utf8')).length === 1 && log().filter(e => e.paste).length === pastesBefore);
+    state({ state: 'ready' });
     check('P16 Codex question: once the question is gone the message is pasted once and the rollout line of the steered message delivers it', await until(() => /prompt_delivery: sent/.test(record()), 90000) && log().filter(e => e.paste).length === pastesBefore + 1);
   } finally { watcher.kill('SIGTERM'); }
 });

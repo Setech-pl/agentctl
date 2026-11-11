@@ -12,6 +12,8 @@ import { sessionQuestion } from './codex-question.ts';
 import { readTaskRecord, renderFollowUp, taskFile } from './taskstore.ts';
 import { AgentctlError, Problems } from './util.ts';
 
+export interface SendResult { task: string; message: string; warning?: string; outcome?: 'queued_until_turn_end'; message_id?: string }
+
 export interface SendItem {
   task: string;
   window: string;
@@ -19,12 +21,12 @@ export interface SendItem {
 }
 
 /** Paste a follow-up prompt into existing windows and log it in TASK.md. */
-export async function sendPrompts(ctx: Context, items: SendItem[]): Promise<{ task: string; message: string; warning?: string }[]> {
+export async function sendPrompts(ctx: Context, items: SendItem[]): Promise<SendResult[]> {
   if (ctx.runner.dryRun) return sendPromptsUnlocked(ctx, items);
   return withStartLock(ctx, () => sendPromptsUnlocked(ctx, items));
 }
 
-async function sendPromptsUnlocked(ctx: Context, items: SendItem[]): Promise<{ task: string; message: string; warning?: string }[]> {
+async function sendPromptsUnlocked(ctx: Context, items: SendItem[]): Promise<SendResult[]> {
   const { runner, tmux, config } = ctx;
   if (!runner.dryRun) {
     const tool = await runner.exec('tmux', ['-V'], { readOnly: true });
@@ -39,11 +41,13 @@ async function sendPromptsUnlocked(ctx: Context, items: SendItem[]): Promise<{ t
     p.throwIfAny('Cannot send:', 'Start the task with "agentctl new", or list running tasks with "agentctl status".');
   }
 
-  const results: { task: string; message: string; warning?: string }[] = [];
+  const results: SendResult[] = [];
   for (const item of items) {
     const record = readTaskRecord(config, item.window);
     let message = 'wklejono (prompt sent)';
     let warning: string | undefined;
+    let outcome: SendResult['outcome'];
+    let messageId: string | undefined;
     if (record && record.agent !== 'unknown' && !runner.dryRun) {
       const live = await liveWindows(ctx);
       if (live.some(w => w.window === item.window && w.counted === false)) {
@@ -60,10 +64,13 @@ async function sendPromptsUnlocked(ctx: Context, items: SendItem[]): Promise<{ t
       const position = waiting.findIndex(p => p.id === queued.id);
       if (position >= 0 || (fresh?.deliveryId === queued.id && fresh.promptDelivery === 'pending')) {
         const n = position >= 0 ? position + 1 + (fresh?.pendingPrompt ? 1 : 0) : 1;
+        messageId = queued.id;
+        if (record.agent === 'codex' && position >= 0) outcome = 'queued_until_turn_end';
         const question = await openQuestion(ctx, item.window, record);
         message = warning = question
           ? `w kolejce ${n}; ${question} – wiadomość nie jest wklejana w pole pytania (to nie byłaby odpowiedź); odpowiedz w oknie (attach), watch wyśle ją po pytaniu`
           : `w kolejce ${n}; watch wysyła FIFO po bezczynności lub potwierdzeniu poprzedniej wiadomości`;
+        if (outcome) message = `${outcome} message_id=${queued.id}; ${message}`;
       } else if (fresh?.deliveryId === queued.id) {
         // The journal entry for the result is written where the result is decided (prompt-delivery.ts).
         const note = deliveryNote(fresh);
@@ -75,7 +82,7 @@ async function sendPromptsUnlocked(ctx: Context, items: SendItem[]): Promise<{ t
       const file = taskFile(config, item.window);
       if (fs.existsSync(file)) await runner.appendFile(file, renderFollowUp(item.prompt, new Date(runner.now()).toISOString()));
     }
-    results.push({ task: item.task, message, ...(warning ? { warning } : {}) });
+    results.push({ task: item.task, message, ...(warning ? { warning } : {}), ...(outcome ? { outcome, message_id: messageId } : {}) });
     ctx.info(`${item.task}: ${message}`);
   }
   return results;

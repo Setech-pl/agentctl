@@ -868,7 +868,7 @@ async function runSend(deps: McpDeps, args: { task: string; text?: string; enter
     const sent = await sendPrompts(ctx, [{ task: target.task, window: target.window, prompt: text }]);
     // sendPrompts reports the same result through ctx.info; the first line already says it.
     const message = `${target.task}: ${sent[0]?.message ?? 'wklejono'}`;
-    return { text: `${message} (${text.length} characters)\n${lines.filter(l => l !== message).join('\n')}`.trim(), executed: true, announce: `send ${target.task}` };
+    return { text: `${message} (${text.length} characters)\n${lines.filter(l => l !== message).join('\n')}`.trim(), executed: true, announce: `send ${target.task}`, data: { outcome: sent[0]?.outcome ?? 'delivery_attempted', message_id: sent[0]?.message_id ?? null } };
   });
 }
 

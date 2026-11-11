@@ -1,3 +1,4 @@
+import { classifyScreen } from './state.ts';
 import { stateWriteFailure } from './atomic-file.ts';
 import { withStartLock } from './start-lock.ts';
 import { liveWindows } from './plan.ts';
@@ -22,6 +23,7 @@ export async function enqueuePrompt(ctx: Context, window: string, text: string):
     const item = { id: randomUUID(), text, queuedAt: new Date(ctx.runner.now()).toISOString() };
     await ctx.runner.writeFile(queueFile(ctx, window), JSON.stringify([...readPromptQueue(ctx, window), item]));
     await ctx.runner.appendFile(taskFile(ctx.config, window), `\n\n## Follow-up queued ${item.queuedAt} (${item.id})\n\n${text.trim()}\n`);
+    await recordJournal(ctx, { kind: 'delivery-queued', task: readTaskRecord(ctx.config, window)?.task ?? window, text: `message ${item.id} queued since ${item.queuedAt}; waiting for idle/turn end` });
     return item;
   });
 }
@@ -42,6 +44,11 @@ export async function drainPromptQueue(ctx: Context, window: string): Promise<vo
         const live = await liveWindows(ctx);
         if (live.some(w => w.window === window && w.counted === false) && checkWindowLimit(record.agent, ctx.config.limits[record.agent], live, ctx.config.session)) return;
       }
+      // Codex redraws its composer mid-turn. Keep the FIFO intact until watch observes idle.
+      if (record.agent === 'codex') {
+        const screen = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
+        if (screen.code !== 0 || classifyScreen(screen.stdout, ctx.config.agents.codex) !== 'idle') return;
+      }
       const item = queue[0]!;
       if (record.deliveryId !== item.id) await queuePrompt(ctx, record, item.text, 'pending', { kind: 'followup', id: item.id });
       // Transfer persisted before the item leaves the FIFO. Recovery sees the same delivery ID.
@@ -61,19 +68,19 @@ export function promptQueueView(ctx: Context, window: string, record?: ReturnTyp
   return [...active, ...readPromptQueue(ctx, window).filter(p => p.id !== known?.deliveryId).map(p => ({ ...p, state: 'queued' }))];
 }
 
-export interface WithdrawResult {
-  /** withdrawn: the message left the queue before its delivery began; stale: the delivery already began, the agent may already work on it. */
-  outcome: 'withdrawn' | 'stale';
-  id: string;
-  message: string;
-}
-
 /** Reading a report never acknowledges a message or releases a dependent task. */
 export function reportMessageWarning(ctx: Context, window: string, record = readTaskRecord(ctx.config, window)): string | undefined {
   const queued = readPromptQueue(ctx, window)[0];
   if (queued) return `message ${queued.id} pending since ${queued.queuedAt} – report may predate it`;
   if (record?.pendingPrompt && record.promptDelivery !== 'sent') return `message ${record.deliveryId ?? 'legacy'} ${record.deliveryResult === 'stale' ? 'withdrawn (stale)' : 'pending'} since ${record.deliveryStartedAt ?? record.started} – report may predate it`;
   return record?.reportMessageWarning;
+}
+
+export interface WithdrawResult {
+  /** withdrawn: the message left the queue before its delivery began; stale: the delivery already began, the agent may already work on it. */
+  outcome: 'withdrawn' | 'stale';
+  id: string;
+  message: string;
 }
 
 /**
@@ -127,9 +134,9 @@ export async function withdrawPrompt(ctx: Context, window: string, idPrefix: str
     const entry = matches[0];
     if (!entry) throw new AgentctlError(`${record.task}: no waiting message ${idPrefix}`, 'prompt_queue in peek/status lists the waiting messages with their ids.');
     await ctx.runner.writeFile(queueFile(ctx, window), JSON.stringify(queue.filter((p) => p !== entry)));
+    await setHeaderFields(ctx.runner, taskFile(ctx.config, window), { delivery_report_baseline: null, report_message_warning: `message ${entry.id} withdrawn since ${entry.queuedAt} – report may predate it` });
     await note(entry.id);
     await recordJournal(ctx, { kind: 'delivery', task: record.task, text: `${record.task}: wycofano wiadomość z kolejki (${entry.id.slice(0, 8)})` });
     return { outcome: 'withdrawn', id: entry.id, message: `${record.task}: wycofano wiadomość z kolejki (${entry.id.slice(0, 8)}) – nie zostanie wysłana` };
   }));
 }
-    await setHeaderFields(ctx.runner, taskFile(ctx.config, window), { delivery_report_baseline: null, report_message_warning: `message ${entry.id} withdrawn since ${entry.queuedAt} – report may predate it` });

@@ -247,6 +247,7 @@ const KIND_LABEL: Record<JournalEntry['kind'], string> = {
   'limits-changed': 'LIMITY',
   'report-detected': 'RAPORT WYKRYTY',
   delivery: 'WIADOMOŚĆ',
+  'delivery-queued': 'WIADOMOŚĆ W KOLEJCE',
 };
 
 export function summaryLine(s: EventsSummary): string {

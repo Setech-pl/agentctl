@@ -308,7 +308,7 @@ async function deliverOnce(ctx: Context, window: string): Promise<'sent' | 'pend
     if (record.promptDelivery === 'launching') return 'pending';
     const before = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
     const beforeState = classifyScreen(before.stdout, settings);
-    const busyFollowup = record.promptKind === 'followup' && settings.acceptsBusyPrompt !== false && ['working', 'background'].includes(beforeState);
+    const busyFollowup = record.agent !== 'codex' && record.promptKind === 'followup' && settings.acceptsBusyPrompt !== false && ['working', 'background'].includes(beforeState);
     if (before.code !== 0 || !inputVisible(before.stdout, settings) || (!busyFollowup && beforeState !== 'idle')) return 'pending';
 
     const profile = provider(record.agent).screen;

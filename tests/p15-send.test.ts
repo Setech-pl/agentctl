@@ -359,27 +359,19 @@ describe('submitDraft (send --enter-only): a preview with the exact text and a t
 });
 
 describe('P16: Codex', () => {
-  it('Enter steers the running turn: the echo of a long first line (wrapped by the TUI) classifies as queued, not confirmed; the notify payload confirms it', async () => {
-    assert.equal(echoLines(codexSteered, '›', CODEX_LONG), 1);
-    let state: 'busy' | 'pasted' | 'steered' = 'busy';
-    const busy = codexSteered.replace(/^› FOLLOWUP-CX-LONG[^\n]*\n(?:  [^\n]*\n)*?(?=• Working)/m, '');
-    const f = fixture('p16-steer', { screen: () => state === 'steered' ? codexSteered : state === 'pasted' ? busy.replace(/^› Ask Codex to do anything$/m, '› [Pasted Content 1155 chars]') : busy, paste: () => { state = 'pasted'; }, enter: () => { state = 'steered'; } }, 'codex');
+  it('P90: a direct busy Codex delivery waits without a paste or Enter', async () => {
+    const f = fixture('p16-steer', { screen: () => codexSteered }, 'codex');
     await followup(f, CODEX_LONG);
-    assert.equal(await deliverPendingPrompt(f.ctx, 't1'), 'confirming');
-    assert.equal(f.seen.pastes, 1); assert.equal(f.seen.enters, 1);
-    assert.equal(f.record().deliveryResult, 'queued-in-agent'); assert.equal(f.record().pendingPrompt, CODEX_LONG);
-    await handleEvent(f.ctx, new Alerts(f.ctx, { notify: async () => {} }), { task: 'T1', agent: 'codex', payload: { type: 'agent-turn-complete', 'thread-id': 'th-1', 'input-messages': [CODEX_LONG], 'last-assistant-message': 'ACK-CX-LONG' } });
-    assert.equal(await deliverPendingPrompt(f.ctx, 't1'), 'sent');
-    assert.equal(f.record().deliveryResult, 'delivered'); assert.equal(f.record().deliverySource, 'hook');
+    assert.equal(await deliverPendingPrompt(f.ctx, 't1'), 'pending');
+    assert.equal(f.seen.pastes, 0); assert.equal(f.seen.enters, 0);
+    assert.equal(f.record().pendingPrompt, CODEX_LONG);
   });
-  it('a collapsed question of a WORKING Codex is no wait (P65): the send is a normal busy delivery', async () => {
-    assert.equal(screenMetadata(codexQuestion).draft_input, null);
+  it('P90: a collapsed asynchronous question of a working Codex keeps the follow-up in FIFO', async () => {
     const f = fixture('p16-question', { screen: () => codexQuestion }, 'codex');
     const results = await sendPrompts(f.ctx, [{ task: 'T1', window: 't1', prompt: 'SHORT-Q1: also add EXTRA' }]);
-    assert.equal(f.seen.pastes, 1); assert.equal(f.seen.enters, 1);
-    assert.match(results[0]!.message, /^wklejono/);
-    assert.doesNotMatch(results[0]!.message, /zwinięte/, 'an asynchronous question of a working agent blocks nothing');
-    assert.equal(f.record().promptDelivery, 'confirming');
+    assert.equal(f.seen.pastes, 0); assert.equal(f.seen.enters, 0);
+    assert.match(results[0]!.message, /queued_until_turn_end/);
+    assert.doesNotMatch(results[0]!.message, /zwinięte/);
   });
   it('a collapsed question after the paste blocks no queue key (P65): the text staying in the field is reported', async () => {
     let state: 'idle' | 'pasted' = 'idle';

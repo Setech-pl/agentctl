@@ -256,12 +256,12 @@ describe('0.17.4 shared preview scope, marks and GC suggestion', () => {
 
 describe('0.17.4 delivery evidence and FIFO', () => {
   for (const agent of ['claude', 'codex'] as const) it(`${agent}: send during work pastes immediately, confirms from matching hook, and never rejects a second send`, async () => {
-    let pasted = '', submitted = false;
+    let pasted = '', submitted = false, busy = true;
     const f = fixture(`busy-${agent}`, '', (cmd, args, opts) => {
       if (cmd !== 'tmux') return;
       if (args[0] === 'load-buffer') pasted = opts.input?.toString() ?? '';
       if (args[0] === 'send-keys' && args.at(-1) === 'Enter' && pasted) submitted = true;
-      if (args[0] === 'capture-pane') return { stdout: composerFixture(`Working (esc to interrupt)\n${submitted ? `Queued follow-up inputs\n${pasted}\n` : ''}${agent === 'claude' ? '❯' : '›'} \n`) };
+      if (args[0] === 'capture-pane') return { stdout: composerFixture(`${busy || submitted ? 'Working (esc to interrupt)\n' : ''}${submitted ? `Queued follow-up inputs\n${pasted}\n` : ''}${agent === 'claude' ? '❯' : '›'} \n`) };
     });
     const pane = f.tmux.add('t1'); seedTask(f.config, 'T1', { agent, windowId: pane.id });
     const exec = f.runner.exec.bind(f.runner);
@@ -270,7 +270,12 @@ describe('0.17.4 delivery evidence and FIFO', () => {
       if (cmd === 'tmux' && args[0] === 'send-keys' && args.at(-1) === 'Enter') await handleEvent(f.ctx, new Alerts(f.ctx, f.notifier), { task: 'T1', agent, kind: agent === 'claude' ? 'user-prompt-submit' : undefined, payload: agent === 'claude' ? { prompt: pasted } : { type: 'agent-turn-complete', 'input-messages': [pasted] } });
       return result;
     };
-    let result = await sendPrompts(f.ctx, [{ task: 'T1', window: 't1', prompt: 'FIRST' }]); assert.match(result[0]!.message, /wklejono/); assert.equal(result[0]!.warning, undefined);
+    let result = await sendPrompts(f.ctx, [{ task: 'T1', window: 't1', prompt: 'FIRST' }]);
+    if (agent === 'codex') {
+      assert.match(result[0]!.message, /queued_until_turn_end/); assert.equal(pasted, '');
+      busy = false; await drainPromptQueue(f.ctx, 't1');
+      assert.equal(readTaskRecord(f.config, 't1')!.promptDelivery, 'sent');
+    } else { assert.match(result[0]!.message, /wklejono/); assert.equal(result[0]!.warning, undefined); }
     submitted = false; result = await sendPrompts(f.ctx, [{ task: 'T1', window: 't1', prompt: 'SECOND' }]); assert.equal(result[0]!.warning, undefined); assert.equal(f.runner.calls.filter(c => c.line.startsWith('tmux paste-buffer')).length, 2);
   });
   it('an idle-only adapter keeps durable FIFO, visible in status/peek, then drains without losing or duplicating prompts', async () => {
