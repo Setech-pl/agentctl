@@ -24,7 +24,7 @@ it('P85: MCP doctor stays under 2 s on 400 records / 300k files and never walks 
     const start = performance.now(); const result = await w.call('doctor', {}); const ms = performance.now() - start;
     console.log(`HOTFIX_TIMING ${JSON.stringify({ name: 'MCP doctor', ms, records: 400, files: 300000 })}`);
     assert.equal(result.isError, undefined, result.text); assert.doesNotMatch(result.text, /Partial result/);
-    assert.match(result.text, /per-task report\/link\/settings checks skipped/);
+    assert.match(result.text, /per-task report\/link checks skipped/);
     assert.equal(walks, 0); assert.ok(ms < 2000, `${ms.toFixed(1)} ms >= 2000 ms`);
   } finally { fs.readdirSync = readdir; }
 });

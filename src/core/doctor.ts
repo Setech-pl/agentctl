@@ -256,21 +256,28 @@ export async function runDoctor(
         add('mirror', 'fail', `${dir} is not writable`);
       }
     } else add('mirror', 'ok', 'off (set mirror_dir in the config to enable)');
-    if (cachedOnly) add('task inventory', 'ok', `${currentRecords.length} current, ${archivedRecords.length} archived; per-task report/link/settings checks skipped in cached mode (CLI doctor runs them)`);
+    // Exact managed-state paths and one process snapshot; never discover files in worktrees.
+    try {
+      const commands = (await runner.exec('ps', ['-axo', 'command='], { readOnly: true })).stdout.split('\n');
+      const legacyTokens = new Set(commands.filter(command => /\/Cellar\/node(?:@[^/]+)?\//.test(command) && command.includes('--task')).flatMap(command => command.replaceAll(/[^a-zA-Z0-9_-]+/g, ' ').split(' ')));
+      for (const record of currentRecords.filter(record => !record.closed && !record.cancelled)) {
+        if (legacyTokens.has(record.task)) add(`task node ${record.task}`, 'warn', 'versioned Node path in active callback argv; works until Node is upgraded; regenerate task wiring when convenient');
+        const file = path.join(config.stateDir, record.window, 'claude-settings.json');
+        if (fs.existsSync(file)) try {
+          if (/\/Cellar\/node(?:@[^/]+)?\//.test(fs.readFileSync(file, 'utf8'))) add(`task node ${record.task}`, 'warn', 'versioned Node path in claude-settings.json; works until Node is upgraded; regenerate task wiring when convenient');
+        } catch { /* missing/unreadable managed wiring */ }
+      }
+    } catch (e) { add('task wiring', 'warn', errorMessage(e)); }
+    if (cachedOnly) add('task inventory', 'ok', `${currentRecords.length} current, ${archivedRecords.length} archived; per-task report/link checks skipped in cached mode; active callback wiring checked (CLI doctor runs detailed checks)`);
     else try {
       const reportRows = new Map((await collectStatus(new Context(runner, config, () => {}), { progress: false, archived: true, cachedOnly: true, shallowClosed: true, records: { current: currentRecords, archived: archivedRecords } })).map(r => [r.task, r]));
-      const taskProcesses = (await runner.exec('ps', ['-axo', 'command='], { readOnly: true })).stdout.split('\n');
       for (const record of [...currentRecords, ...archivedRecords]) {
         const report = inspectReport(config, record, runner.now(), !record.attemptId);
         if (reportRows.get(record.task)?.report !== 'yes') add(`report ${record.task}`, 'warn', `${report.ready ? 'incomplete for current turn' : report.reason}: ${record.report}${record.reportSource ? ` (previous copy: ${record.reportSource})` : ''}`);
         else if (!record.reportConfirmed && record.reportSource && path.normalize(record.reportSource) !== path.normalize(record.report)) add(`report ${record.task}`, 'warn', `raport pochodzi z kopii ${record.reportSource} – sprawdź`);
         if (record.closed || record.cancelled) continue;
         for (const warning of [...missingLinkTargets(record.links), ...(cachedOnly ? [] : linkBaseWarnings(record.links, record.repos))]) add(`task links ${record.task}`, 'warn', warning);
-        if (taskProcesses.some(command => /\/Cellar\/node(?:@[^/]+)?\//.test(command) && command.includes('--task') && command.replaceAll(/[^a-zA-Z0-9_-]+/g, ' ').split(' ').includes(record.task))) add(`task node ${record.task}`, 'warn', 'versioned Node path in active callback argv; works until Node is upgraded; regenerate task wiring when convenient');
-        const dir = path.join(config.stateDir, record.window);
-        for (const name of ['claude-settings.json']) {
-          try { if (/\/Cellar\/node(?:@[^/]+)?\//.test(fs.readFileSync(path.join(dir, name), 'utf8'))) add(`task node ${record.task}`, 'warn', `versioned Node path in ${name}; works until Node is upgraded; regenerate task wiring when convenient`); } catch { /* absent */ }
-        }
+
       }
     } catch (e) { add('task diagnostics', 'warn', errorMessage(e)); }
     if (cachedOnly) add('link bases', 'ok', 'cached read: live git ancestry checks skipped; CLI doctor performs them');
