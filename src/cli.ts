@@ -1646,6 +1646,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
             if (code !== 0) throw new Error(stderr || `${name} failed (${code})`);
           });
           for (const text of renderReadTimings(timings)) line(text);
+          await runDoctor(ctx.runner, () => ctx.config, null, undefined, undefined, undefined, undefined, { cachedOnly: true, onTiming: (name, ms) => line(`${ms < 2000 ? 'PASS' : 'WARN'} doctor ${name}: ${ms.toFixed(1)} ms (threshold < 2000 ms)`) });
           return;
         }
         const runner = deps.makeRunner(false, line);

@@ -1424,7 +1424,7 @@ MCP_TOOLS.push(
   extraRead('queue_show', 'queue show <TASK>', 'Read full queued spec, error and attempt history', { task: taskArg }, async (ctx, a) => redactQueue(findEntry(ctx.config, a.task as string), ctx.config)),
   extraRead('mcp_check', 'mcp check', 'Inspect stale MCP server processes without stopping them', {}, async (ctx) => ({ stale: staleProcesses(await findMcpProcesses(ctx.runner), stableScript()) })),
   extraRead('spec_example', 'spec example', 'Read an example spec before writing a new order', {}, async () => EXAMPLE_SPEC),
-  extraRead('doctor', 'doctor', 'Diagnose the installation, permissions and disk', { project: optionalText }, async (ctx, a) => runDoctor(ctx.runner, () => ctx.config, a.project as string ?? null)),
+  extraRead('doctor', 'doctor', 'Diagnose the installation, permissions and disk', { project: optionalText }, async (ctx, a) => runDoctor(ctx.runner, () => ctx.config, a.project as string ?? null, undefined, undefined, undefined, undefined, { cachedOnly: true })),
   extraRead('equivalents', 'capacity', 'Read the equivalents table for active providers, including Kimi when enabled', {}, async (ctx) => ctx.config.equivalents),
   extraRead('config_show', 'doctor', 'Read effective configuration with secrets masked', {}, async (ctx) => redactConfig(ctx.config)),
   extraRead('manager_status', 'manager --url', 'Inspect the manager session', {}, async (ctx) => managerView(ctx)),

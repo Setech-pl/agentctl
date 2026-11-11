@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- P85: MCP doctor uses cached report/size reads and skips synchronous live link ancestry probes; doctor --timings identifies diagnostic section wall times. / P85: MCP doctor używa zapisanych odczytów raportów/rozmiarów i pomija synchroniczne sprawdzanie historii Git dla linków; doctor --timings podaje czas sekcji diagnostycznych.
+
 - P89: after requires PASS/PASS with findings/PARTIAL/GO on the first report line; rejected/missing verdicts hold tasks and notify. after_verdict overrides, queue up/unblock release manually. Spec example includes a real first-repo link. / P89: after wymaga PASS/PASS with findings/PARTIAL/GO w pierwszej linii raportu; inne/brak werdyktu wstrzymują zadania i powiadamiają. after_verdict nadpisuje listę, queue up/unblock zwalniają ręcznie. Przykład spec zawiera link dla pierwszego repo.
 
 - P90: busy Codex follow-ups wait durably until idle/turn end; send returns queued_until_turn_end with message_id, status/board/events expose pending messages and withdraw remains available. Claude/Kimi unchanged. / P90: follow-upy do pracującego Codexa czekają trwale na bezczynność/koniec tury; send zwraca queued_until_turn_end i message_id, status/board/events pokazują kolejkę, withdraw działa. Claude/Kimi bez zmian.

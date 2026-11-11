@@ -1,3 +1,5 @@
+import { performance } from 'node:perf_hooks';
+import { cachedRequest } from './response-budget.ts';
 import { socketRunner } from './tmux-socket.ts';
 import { provider, PROVIDER_IDS, isActive } from './providers/registry.ts';
 import { collectStatus } from './status.ts';
@@ -92,8 +94,12 @@ export async function runDoctor(
   platform: string = os.platform(),
   home: string = os.homedir(),
   env: NodeJS.ProcessEnv = process.env,
+  options: { cachedOnly?: boolean; onTiming?: (name: string, ms: number) => void } = {},
 ): Promise<Check[]> {
   cwd = cwd === undefined ? safeCwd() : cwd;
+  const cachedOnly = options.cachedOnly ?? cachedRequest();
+  let sectionStarted = performance.now();
+  const section = (name: string) => { const now = performance.now(); options.onTiming?.(name, now - sectionStarted); sectionStarted = now; };
   const checks: Check[] = [];
   const add = (name: string, status: Check['status'], detail: string): void => {
     checks.push({ name, status, detail });
@@ -112,6 +118,7 @@ export async function runDoctor(
   if (git.code === 0) add('git', 'ok', firstLine(git.stdout));
   else add('git', 'fail', `not found. ${INSTALL_HINTS.git}`);
 
+  section('installation');
   let config: GlobalConfig | undefined;
   try {
     config = loadConfig();
@@ -124,6 +131,7 @@ export async function runDoctor(
     add('config', 'fail', `${errorMessage(e).split('\n').join(' ')}${state && !state.ok ? ` – the ${state.by} keeps the previous settings (since ${state.at})` : ''}`);
   }
 
+  section('disk/config (cached sizes)');
   runner = socketRunner(runner, () => config?.tmux?.socket);
   add('tmux socket', 'ok', config?.tmux?.socket ?? 'default (unset)');
   const tmuxVersion = await runner.exec('tmux', ['-V'], { readOnly: true });
@@ -148,6 +156,7 @@ export async function runDoctor(
   if (gh.code === 0) add('gh', 'ok', firstLine(gh.stdout));
   else add('gh', 'warn', 'not found (optional; used by humans for PRs, never by agentctl)');
 
+  section('tools/providers');
   const notifier = await findTerminalNotifier(runner, platform);
   if (platform === 'darwin') {
     const backend = config?.notify.backend ?? 'auto';
@@ -180,6 +189,7 @@ export async function runDoctor(
     }
   }
 
+  section('notifications/phone');
   // The chat integration is optional: every line here is ok or a warning, never a failure.
   const registrations: McpRegistration[] = [];
   if (platform === 'darwin') registrations.push(readDesktopRegistration(desktopConfigPath(home), env, home));
@@ -204,6 +214,7 @@ export async function runDoctor(
   else if (dev) add('mcp server', 'ok', 'środowisko dev; stable MCP version comparison is informational');
   else if (procs.length > 0) add('mcp server', 'ok', `${procs.length} running (pid ${procs.map((p) => p.pid).join(', ')}), none older than the stable copy`);
 
+  section('MCP registrations/processes');
   if (config) {
     if (tmuxVersion.code === 0) {
       const tmux = new Tmux(runner, config.session);
@@ -244,14 +255,14 @@ export async function runDoctor(
       }
     } else add('mirror', 'ok', 'off (set mirror_dir in the config to enable)');
     try {
-      const reportRows = new Map((await collectStatus(new Context(runner, config, () => {}), { progress: false, archived: true })).map(r => [r.task, r]));
+      const reportRows = new Map((await collectStatus(new Context(runner, config, () => {}), { progress: false, archived: true, cachedOnly: true, shallowClosed: true })).map(r => [r.task, r]));
       const taskProcesses = (await runner.exec('ps', ['-axo', 'command='], { readOnly: true })).stdout.split('\n');
       for (const record of [...listTaskRecords(config), ...listArchivedRecords(config)]) {
         const report = inspectReport(config, record, runner.now(), !record.attemptId);
         if (reportRows.get(record.task)?.report !== 'yes') add(`report ${record.task}`, 'warn', `${report.ready ? 'incomplete for current turn' : report.reason}: ${record.report}${record.reportSource ? ` (previous copy: ${record.reportSource})` : ''}`);
         else if (!record.reportConfirmed && record.reportSource && path.normalize(record.reportSource) !== path.normalize(record.report)) add(`report ${record.task}`, 'warn', `raport pochodzi z kopii ${record.reportSource} – sprawdź`);
         if (record.closed || record.cancelled) continue;
-        for (const warning of [...missingLinkTargets(record.links), ...linkBaseWarnings(record.links, record.repos)]) add(`task links ${record.task}`, 'warn', warning);
+        for (const warning of [...missingLinkTargets(record.links), ...(cachedOnly ? [] : linkBaseWarnings(record.links, record.repos))]) add(`task links ${record.task}`, 'warn', warning);
         if (taskProcesses.some(command => /\/Cellar\/node(?:@[^/]+)?\//.test(command) && command.includes('--task') && command.replaceAll(/[^a-zA-Z0-9_-]+/g, ' ').split(' ').includes(record.task))) add(`task node ${record.task}`, 'warn', 'versioned Node path in active callback argv; works until Node is upgraded; regenerate task wiring when convenient');
         const dir = path.join(config.stateDir, record.window);
         for (const name of ['claude-settings.json']) {
@@ -259,6 +270,8 @@ export async function runDoctor(
         }
       }
     } catch (e) { add('task diagnostics', 'warn', errorMessage(e)); }
+    if (cachedOnly) add('link bases', 'ok', 'cached read: live git ancestry checks skipped; CLI doctor performs them');
+    section('task diagnostics (cached reads)');
     for (const repo of new Set([...listTaskRecords(config), ...listArchivedRecords(config)].flatMap(r => r.repos.map(repo => repo.path)))) {
       if (repo === cwd) continue;
       try { for (const warning of missingLinkTargets(projectLinks(repo, '', config.cache))) add('project links', 'fail', `${repo}: ${warning}`); }
@@ -286,7 +299,9 @@ export async function runDoctor(
       add('tmux home', differences.length ? 'warn' : 'ok', differences.length ? `${differences.join('; ')}; current AGENTCTL_HOME=${expectedHome}; use a dedicated tmux.socket for dev` : `AGENTCTL_HOME=${expectedHome}; no conflicting server/session value`);
       add('session', 'ok', up ? `"${config.session}" is running` : `"${config.session}" not running yet (created by "agentctl new")`);
     }
+    section('project/session');
     await managerChecks(runner, config, tmuxVersion.code === 0, add);
   }
+  section('manager');
   return checks;
 }

@@ -13,6 +13,7 @@ it('doctor --timings reports five wall times and thresholds without registering 
   const result = await runCli(config, runner, ['doctor', '--timings']);
   assert.equal(result.code, 0, result.stderr);
   for (const [name, budget] of [['status', 1500], ['queue list', 500], ['events', 2000], ['queue preview', 2000], ['close preview', 2000]]) assert.match(result.stdout, new RegExp(`PASS ${name}: [0-9.]+ ms.*${budget} ms`));
+  for (const section of ['installation', 'disk/config', 'tools/providers', 'notifications/phone', 'MCP registrations/processes', 'task diagnostics', 'project/session', 'manager']) assert.ok(result.stdout.includes(`doctor ${section}`), section);
   assert.deepEqual(readQueue(config), []);
   assert.deepEqual(fs.readdirSync(config.stateDir), before);
 });
