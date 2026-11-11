@@ -273,7 +273,7 @@ describe('0.17.4 delivery evidence and FIFO', () => {
     let result = await sendPrompts(f.ctx, [{ task: 'T1', window: 't1', prompt: 'FIRST' }]);
     if (agent === 'codex') {
       assert.match(result[0]!.message, /queued_until_turn_end/); assert.equal(pasted, '');
-      busy = false; await drainPromptQueue(f.ctx, 't1');
+      busy = false; await drainPromptQueue(f.ctx, 't1'); await drainPromptQueue(f.ctx, 't1');
       assert.equal(readTaskRecord(f.config, 't1')!.promptDelivery, 'sent');
     } else { assert.match(result[0]!.message, /wklejono/); assert.equal(result[0]!.warning, undefined); }
     submitted = false; result = await sendPrompts(f.ctx, [{ task: 'T1', window: 't1', prompt: 'SECOND' }]); assert.equal(result[0]!.warning, undefined); assert.equal(f.runner.calls.filter(c => c.line.startsWith('tmux paste-buffer')).length, 2);

@@ -1,3 +1,4 @@
+import { watchTick, WatchMemory } from '../src/core/watch.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -27,6 +28,10 @@ it('P90: busy Codex send stays durable, visible and withdrawable; idle drain pas
   await drainPromptQueue(w.ctx, 'busy');
   assert.equal(w.tmux.seen.filter(s => s.startsWith('paste-buffer')).length, 0);
   pane.screen = composerFixture('› Ask Codex to do anything\n');
+  // One idle redraw in a busy turn is not a confirmed turn end.
+  const memory = new WatchMemory(), notifier = { notify: async () => {} };
+  await watchTick(w.ctx, memory, notifier);
+  assert.equal(w.tmux.seen.filter(s => s.startsWith('paste-buffer')).length, 0);
   const respond = w.runner.exec.bind(w.runner);
   w.runner.exec = async (cmd, args, opts) => {
     const result = await respond(cmd, args, opts);
@@ -37,11 +42,21 @@ it('P90: busy Codex send stays durable, visible and withdrawable; idle drain pas
     if (cmd === 'tmux' && args[0] === 'capture-pane' && w.tmux.seen.some(s => s.startsWith('send-keys'))) return { ...result, stdout: pane.screen };
     return result;
   };
-  await drainPromptQueue(w.ctx, 'busy');
+  await watchTick(w.ctx, memory, notifier);
   assert.equal(readTaskRecord(w.config, 'busy')!.promptDelivery, 'sent', JSON.stringify(readTaskRecord(w.config, 'busy')));
   assert.equal(readTaskRecord(w.config, 'busy')!.deliveryResult, 'delivered');
   assert.equal(w.tmux.seen.filter(s => s.startsWith('paste-buffer')).length, 1);
   assert.equal(w.tmux.seen.filter(s => s.startsWith('send-keys')).length, 1);
   await drainPromptQueue(w.ctx, 'busy');
+  assert.equal(w.tmux.seen.filter(s => s.startsWith('send-keys')).length, 1);
+});
+
+it('P90: an idle Codex still receives the paste and Enter immediately', async () => {
+  const w = world('idle');
+  seedTask(w.config, 'IDLE', { agent: 'codex' });
+  w.tmux.add('idle', composerFixture('› Ask Codex to do anything\n'));
+  const [result] = await sendPrompts(w.ctx, [{ task: 'IDLE', window: 'idle', prompt: 'Immediate follow-up' }]);
+  assert.equal(result!.outcome, undefined);
+  assert.equal(w.tmux.seen.filter(s => s.startsWith('paste-buffer')).length, 1);
   assert.equal(w.tmux.seen.filter(s => s.startsWith('send-keys')).length, 1);
 });

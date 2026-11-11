@@ -224,7 +224,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
       if (result !== 'pending') allRows = await collectStatus(ctx, { progress: false, archived: true });
     }
   }
-  for (const record of listTaskRecords(ctx.config)) if (!record.closed && !record.cancelled) await drainPromptQueue(ctx, record.window);
+  for (const record of listTaskRecords(ctx.config)) if (!record.closed && !record.cancelled) await drainPromptQueue(ctx, record.window, allRows.some(row => row.windowName === record.window && (row.state === 'waiting' || row.state === 'report-ready')));
   // A waiting agent may have written its report somewhere else than the spec says: record a candidate without changing the execution state.
   if (await syncWaitingReports(ctx, allRows)) allRows = await collectStatus(ctx, { progress: false, archived: true });
   for (const record of listTaskRecords(ctx.config)) await journalOutputs(ctx, record);

@@ -57,7 +57,9 @@ async function sendPromptsUnlocked(ctx: Context, items: SendItem[]): Promise<Sen
           results.push({ task: item.task, message: warning, warning }); ctx.info(warning); continue;
         }
       }
-      const queued = await enqueuePrompt(ctx, item.window, item.prompt);
+      const screen = record.agent === 'codex' ? await ctx.tmux.capture(item.window, undefined, undefined, record.windowId, true) : undefined;
+      const waitForTurnEnd = record.agent === 'codex' && (screen?.code !== 0 || ['working', 'background'].includes(classifyScreen(screen.stdout, config.agents.codex)) || readPromptQueue(ctx, item.window).length > 0 || Boolean(record.pendingPrompt));
+      const queued = await enqueuePrompt(ctx, item.window, item.prompt, { waitForTurnEnd });
       await drainPromptQueue(ctx, item.window);
       const fresh = readTaskRecord(config, item.window);
       const waiting = readPromptQueue(ctx, item.window);
@@ -65,7 +67,7 @@ async function sendPromptsUnlocked(ctx: Context, items: SendItem[]): Promise<Sen
       if (position >= 0 || (fresh?.deliveryId === queued.id && fresh.promptDelivery === 'pending')) {
         const n = position >= 0 ? position + 1 + (fresh?.pendingPrompt ? 1 : 0) : 1;
         messageId = queued.id;
-        if (record.agent === 'codex' && position >= 0) outcome = 'queued_until_turn_end';
+        if (record.agent === 'codex') outcome = 'queued_until_turn_end';
         const question = await openQuestion(ctx, item.window, record);
         message = warning = question
           ? `w kolejce ${n}; ${question} – wiadomość nie jest wklejana w pole pytania (to nie byłaby odpowiedź); odpowiedz w oknie (attach), watch wyśle ją po pytaniu`

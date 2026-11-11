@@ -16,7 +16,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - P89: after requires PASS/PASS with findings/PARTIAL/GO on the first report line; rejected/missing verdicts hold tasks and notify. after_verdict overrides, queue up/unblock release manually. Spec example includes a real first-repo link. / P89: after wymaga PASS/PASS with findings/PARTIAL/GO w pierwszej linii raportu; inne/brak werdyktu wstrzymują zadania i powiadamiają. after_verdict nadpisuje listę, queue up/unblock zwalniają ręcznie. Przykład spec zawiera link dla pierwszego repo.
 
-- P90: busy Codex follow-ups wait durably until idle/turn end; send returns queued_until_turn_end with message_id, status/board/events expose pending messages and withdraw remains available. Claude/Kimi unchanged. / P90: follow-upy do pracującego Codexa czekają trwale na bezczynność/koniec tury; send zwraca queued_until_turn_end i message_id, status/board/events pokazują kolejkę, withdraw działa. Claude/Kimi bez zmian.
+- P90: busy Codex follow-ups wait durably until confirmed idle/turn end; send returns queued_until_turn_end with message_id, status/board/events expose pending messages and withdraw remains available. Claude/Kimi unchanged. / P90: follow-upy do pracującego Codexa czekają trwale na potwierdzoną bezczynność/koniec tury; send zwraca queued_until_turn_end i message_id, status/board/events pokazują kolejkę, withdraw działa. Claude/Kimi bez zmian.
 
 - P91: pending/withdrawn messages and closed tasks no longer hide existing reports; get_report returns a message warning, withdraw/close clear stale freshness markers. / P91: wiadomości oczekujące i wycofane oraz zamknięte zadania nie ukrywają raportów; get_report zwraca ostrzeżenie, withdraw/close usuwają nieaktualne znaczniki.
 

@@ -1,3 +1,4 @@
+import { collectStatus } from './status.ts';
 import { classifyScreen } from './state.ts';
 import { stateWriteFailure } from './atomic-file.ts';
 import { withStartLock } from './start-lock.ts';
@@ -13,14 +14,14 @@ import { queuePrompt, deliverPendingPrompt } from './prompt-delivery.ts';
 import { recordJournal } from './journal.ts';
 import { AgentctlError } from './util.ts';
 
-export interface QueuedPrompt { id: string; text: string; queuedAt: string }
+export interface QueuedPrompt { id: string; text: string; queuedAt: string; waitForTurnEnd?: boolean }
 export const queueFile = (ctx: Context, window: string) => path.join(ctx.config.stateDir, window, 'prompt-queue.json');
 export function readPromptQueue(ctx: Context, window: string): QueuedPrompt[] {
   try { const data: unknown = JSON.parse(fs.readFileSync(queueFile(ctx, window), 'utf8')); return Array.isArray(data) ? data.filter((p): p is QueuedPrompt => p && typeof p.id === 'string' && typeof p.text === 'string' && typeof p.queuedAt === 'string') : []; } catch { return []; }
 }
-export async function enqueuePrompt(ctx: Context, window: string, text: string): Promise<QueuedPrompt> {
+export async function enqueuePrompt(ctx: Context, window: string, text: string, options: { waitForTurnEnd?: boolean } = {}): Promise<QueuedPrompt> {
   return withFileLock(`${queueFile(ctx, window)}.lock`, async () => {
-    const item = { id: randomUUID(), text, queuedAt: new Date(ctx.runner.now()).toISOString() };
+    const item = { id: randomUUID(), text, queuedAt: new Date(ctx.runner.now()).toISOString(), ...(options.waitForTurnEnd ? { waitForTurnEnd: true } : {}) };
     await ctx.runner.writeFile(queueFile(ctx, window), JSON.stringify([...readPromptQueue(ctx, window), item]));
     await ctx.runner.appendFile(taskFile(ctx.config, window), `\n\n## Follow-up queued ${item.queuedAt} (${item.id})\n\n${text.trim()}\n`);
     await recordJournal(ctx, { kind: 'delivery-queued', task: readTaskRecord(ctx.config, window)?.task ?? window, text: `message ${item.id} queued since ${item.queuedAt}; waiting for idle/turn end` });
@@ -29,7 +30,7 @@ export async function enqueuePrompt(ctx: Context, window: string, text: string):
 }
 
 /** Durable FIFO. An uncertain active delivery keeps later messages queued, never discarded or repasted. */
-export async function drainPromptQueue(ctx: Context, window: string): Promise<void> {
+export async function drainPromptQueue(ctx: Context, window: string, turnReady?: boolean): Promise<void> {
   if (ctx.runner.dryRun) return;
   await withStartLock(ctx, () => withFileLock(`${queueFile(ctx, window)}.lock`, async () => {
     let record = readTaskRecord(ctx.config, window);
@@ -46,6 +47,10 @@ export async function drainPromptQueue(ctx: Context, window: string): Promise<vo
       }
       // Codex redraws its composer mid-turn. Keep the FIFO intact until watch observes idle.
       if (record.agent === 'codex') {
+        if (queue[0]!.waitForTurnEnd) {
+          const ready = turnReady ?? (await collectStatus(ctx, { progress: false, cachedOnly: true, records: { current: [record], archived: [] } })).some(row => row.state === 'waiting' || row.state === 'report-ready');
+          if (!ready) return;
+        }
         const screen = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
         if (screen.code !== 0 || classifyScreen(screen.stdout, ctx.config.agents.codex) !== 'idle') return;
       }
@@ -58,6 +63,7 @@ export async function drainPromptQueue(ctx: Context, window: string): Promise<vo
       const fresh = readTaskRecord(ctx.config, window)!;
       if (fresh.deliveryStartedAt) await ctx.runner.appendFile(taskFile(ctx.config, window), `\n\n## Follow-up ${result === 'sent' ? 'sent' : 'pasted, unconfirmed'} ${fresh.deliveryStartedAt} (${item.id})\n`);
       if (result !== 'sent') return;
+      turnReady = false; // one queued turn per confirmed idle observation
     }
   }));
 }
