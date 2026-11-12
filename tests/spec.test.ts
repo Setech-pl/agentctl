@@ -245,3 +245,15 @@ describe('resolveSendSpec', () => {
     assert.throws(() => resolveSendSpec(splitSpecs('---\ntask: NC-1\n---\n')[0]!), /prompt is empty/);
   });
 });
+
+describe('after_verdict', () => {
+  const spec = (header: string) => `---\ntask: NC-1\nagent: claude\n${header}repos:\n  - path: ~/code/app\n---\nHi\n`;
+  it('is rejected when the spec has no after', () => {
+    assert.throws(() => resolve(spec('after_verdict: [PASS]\n')), /after_verdict needs "after"/);
+    assert.throws(() => resolve(spec('after: []\nafter_verdict: [PASS]\n')), /after_verdict needs "after"/);
+  });
+  it('overrides the accepted verdicts of the listed after tasks', () => {
+    const [parsed] = resolve(spec('after: NC-0\nafter_verdict: [PASS]\n'));
+    assert.deepEqual(parsed?.afterVerdicts, { 'NC-0': ['PASS'] });
+  });
+});

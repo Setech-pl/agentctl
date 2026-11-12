@@ -312,6 +312,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     }
   }
   if (h.after_verdict !== undefined) {
+    if (!after.length) p.add('after_verdict needs "after": it overrides the accepted verdicts of the tasks listed there, and this spec has none');
     const values = Array.isArray(h.after_verdict) ? h.after_verdict : [];
     const allowed = values.map(v => typeof v === 'string' ? normalizeDependencyVerdict(v) : undefined);
     if (!allowed.length || allowed.some(v => v === undefined)) p.add('after_verdict must be a non-empty list of verdicts: PASS, PASS with findings, PARTIAL, GO, BLOCKED, FAIL, NO-GO');
