@@ -12,5 +12,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["bin", "src", "tests", "scripts/gate.ts", "scripts/gate-reporter.ts", "scripts/runtime.ts", "scripts/doctor-matrix.ts", "scripts/smoke-package.ts"]
+  "include": ["bin", "src", "tests", "scripts/gate.ts", "scripts/gate-reporter.ts", "scripts/regression.ts", "scripts/runtime.ts", "scripts/doctor-matrix.ts", "scripts/smoke-package.ts"]
 }

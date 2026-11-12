@@ -1,0 +1,385 @@
+{
+  "B1-answer": {
+    "rev": "v0.18.2",
+    "outcome": "IMPORT-ERROR",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "tests/p63-answer.test.ts",
+      "tests/p63-answer.test.ts"
+    ]
+  },
+  "B2-clean": {
+    "rev": "v0.18.2",
+    "outcome": "IMPORT-ERROR",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "tests/gate-clean.test.ts",
+      "tests/gate-clean.test.ts"
+    ]
+  },
+  "F1": {
+    "rev": "v0.19.0",
+    "outcome": "IMPORT-ERROR",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "tests/p73-cache-clean.test.ts",
+      "tests/p73-cache-clean.test.ts"
+    ]
+  },
+  "L1": {
+    "rev": "v0.19.0",
+    "outcome": "IMPORT-ERROR",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "tests/gate.test.ts",
+      "tests/gate.test.ts"
+    ]
+  },
+  "P42": {
+    "rev": "v0.18.2",
+    "outcome": "FAILS",
+    "failed": 3,
+    "passed": 1,
+    "failing": [
+      "P42 a task with a window has no separate queue row on the board",
+      "P42 Enter on the task row opens its window (also while its start waits on a dialog)",
+      "P42 Enter on a stale queue row of a windowed task opens its window instead of an error",
+      "P42 a task with a window has no separate queue row on the board",
+      "P42 Enter on the task row opens its window (also while its start waits on a dialog)"
+    ]
+  },
+  "P51": {
+    "rev": "v0.18.2",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "P51: limit events include optional configured providers",
+      "P51: limit events include optional configured providers"
+    ]
+  },
+  "P52": {
+    "rev": "v0.18.2",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "P52: repeated report writes emit once per attempt and legacy summaries dedupe decisions",
+      "P52: a completed new attempt is announced even inside the previous cross-source dedupe window",
+      "P52: repeated report writes emit once per attempt and legacy summaries dedupe decisions",
+      "P52: a completed new attempt is announced even inside the previous cross-source dedupe window"
+    ]
+  },
+  "P62": {
+    "rev": "v0.18.2",
+    "outcome": "IMPORT-ERROR",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "tests/p62-budget.test.ts",
+      "tests/p62-budget.test.ts"
+    ]
+  },
+  "P63": {
+    "rev": "v0.18.2",
+    "outcome": "IMPORT-ERROR",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "tests/p63-answer.test.ts",
+      "tests/p63-answer.test.ts"
+    ]
+  },
+  "P64": {
+    "rev": "v0.18.2",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 1,
+    "failing": [
+      "P64 the \"↳\" echo of the exact pending prompt classifies as queued in the agent; another text does not",
+      "P64 a visible Codex-queued message stays pending past delivery_confirm_s; the transcript confirms when the turn takes it",
+      "P64 the \"↳\" echo of the exact pending prompt classifies as queued in the agent; another text does not",
+      "P64 a visible Codex-queued message stays pending past delivery_confirm_s; the transcript confirms when the turn takes it"
+    ]
+  },
+  "P65": {
+    "rev": "v0.18.2",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 4,
+    "failing": [
+      "P65 a collapsed \"? N question\" footer while Codex works is working, not needs-input",
+      "P65 the text of an expanded Codex question (bullet options) is captured",
+      "P65 a collapsed \"? N question\" footer while Codex works is working, not needs-input",
+      "P65 the text of an expanded Codex question (bullet options) is captured"
+    ]
+  },
+  "P65-b": {
+    "rev": "v0.19.0",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 1,
+    "failing": [
+      "P65-b: peek names the question of the collapsed Codex footer from the captured expanded view",
+      "P65-b: without the text on the screen the session transcript supplies it",
+      "P65-b: peek names the question of the collapsed Codex footer from the captured expanded view",
+      "P65-b: without the text on the screen the session transcript supplies it"
+    ]
+  },
+  "P67": {
+    "rev": "v0.18.2",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "P67: short credentials do not replace substrings in UI text or task ids",
+      "P67: long secrets are replaced only as complete values and secret field names are recognised",
+      "P67: short credentials do not replace substrings in UI text or task ids",
+      "P67: long secrets are replaced only as complete values and secret field names are recognised"
+    ]
+  },
+  "P68": {
+    "rev": "v0.18.2",
+    "outcome": "IMPORT-ERROR",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "tests/p68-cwd.test.ts",
+      "tests/p68-cwd.test.ts"
+    ]
+  },
+  "P69": {
+    "rev": "v0.18.2",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "P69: gc --apply re-measures at once and records \"gc freed X GiB, free now Y\"; the reading no longer counts the removed worktree",
+      "P69: a reading older than 10 minutes shows its age next to the number; a fresh one does not",
+      "P69: gc --apply re-measures at once and records \"gc freed X GiB, free now Y\"; the reading no longer counts the removed worktree",
+      "P69: a reading older than 10 minutes shows its age next to the number; a fresh one does not"
+    ]
+  },
+  "P70": {
+    "rev": "v0.19.0",
+    "outcome": "FAILS",
+    "failed": 8,
+    "passed": 2,
+    "failing": [
+      "the POP-E1 shape: first line NO-GO, outputs PASS — the first line wins and both are shown",
+      "every accepted first-line form is recognised (labelled or bare, any case)",
+      "a consistent review (GO + outputs PASS) shows the first line and flags nothing",
+      "status, get_report and pull_ready of the POP-E1 shape take the first line",
+      "the inconsistent review emits one needs-attention event per attempt"
+    ]
+  },
+  "P71": {
+    "rev": "v0.19.0",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "drops closed and pulled outputs while keeping historical events",
+      "shows the unrated counter once per client session, even with explicit since",
+      "P71 current attention summary",
+      "drops closed and pulled outputs while keeping historical events",
+      "shows the unrated counter once per client session, even with explicit since"
+    ]
+  },
+  "P72": {
+    "rev": "v0.19.0",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "P72 spec-derived backend links and previews compare target HEAD with its repository base",
+      "P72 spec-derived backend links and previews compare target HEAD with its repository base"
+    ]
+  },
+  "P73-a": {
+    "rev": "v0.19.0",
+    "outcome": "IMPORT-ERROR",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "tests/p73-cache-clean.test.ts",
+      "tests/p73-cache-clean.test.ts"
+    ]
+  },
+  "P77": {
+    "rev": "v0.19.1",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "P77: every preview_token tool schema accepts token-only confirmation",
+      "P77: queue_rm token-only confirmation executes stored task; missing preview arguments still fail",
+      "P77: every preview_token tool schema accepts token-only confirmation",
+      "P77: queue_rm token-only confirmation executes stored task; missing preview arguments still fail"
+    ]
+  },
+  "P83-read": {
+    "rev": "v0.19.1",
+    "outcome": "FAILS",
+    "failed": 4,
+    "passed": 1,
+    "failing": [
+      "P83: reads and post-GC publication never start a measurement or discover worktree files",
+      "P83: watch samples one stale worktree per rate interval; readers reload old and updated persisted samples",
+      "P83: queue listing never opens unrelated records (archived author: false)",
+      "P83: queue listing never opens unrelated records (archived author: true)",
+      "P83: reads and post-GC publication never start a measurement or discover worktree files"
+    ]
+  },
+  "P83-write": {
+    "rev": "v0.19.2",
+    "outcome": "FAILS",
+    "failed": 4,
+    "passed": 0,
+    "failing": [
+      "P83: all write previews and metadata confirms use headers/cached facts, never workers, du or worktree walks",
+      "P83: cached retry registration defers checkout scanning, worker rechecks dirty tracked files",
+      "P83: cached GC preview/confirm do not measure or scan; dirty deletion is refused by git",
+      "P83: cohort close/cancel preview and confirm never inspect unrelated reports or discover worktree files",
+      "P83: all write previews and metadata confirms use headers/cached facts, never workers, du or worktree walks"
+    ]
+  },
+  "P84": {
+    "rev": "v0.19.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "P84/P79: MCP set_limits accepts integer strings for every provider",
+      "P84/P79: MCP set_limits accepts integer strings for every provider"
+    ]
+  },
+  "P85": {
+    "rev": "v0.19.3",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "P85: MCP doctor stays under 2 s on 400 records / 300k files and never walks worktrees",
+      "P85: MCP doctor stays under 2 s on 400 records / 300k files and never walks worktrees"
+    ]
+  },
+  "P89": {
+    "rev": "v0.19.3",
+    "outcome": "FAILS",
+    "failed": 6,
+    "passed": 4,
+    "failing": [
+      "P89: after gates verdict \"BLOCKED\"",
+      "P89: after gates verdict \"FAIL\"",
+      "P89: after gates verdict \"NO-GO\"",
+      "P89: after gates verdict \"nonsense\"",
+      "P89: after gates verdict \"\""
+    ]
+  },
+  "P89-f1": {
+    "rev": "v0.19.3",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "is rejected when the spec has no after",
+      "overrides the accepted verdicts of the listed after tasks",
+      "after_verdict",
+      "is rejected when the spec has no after",
+      "overrides the accepted verdicts of the listed after tasks"
+    ]
+  },
+  "P90": {
+    "rev": "v0.19.3",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 1,
+    "failing": [
+      "P90: busy Codex queues until confirmed turn end (existing report: false)",
+      "P90: busy Codex queues until confirmed turn end (existing report: true)",
+      "P90: busy Codex queues until confirmed turn end (existing report: false)",
+      "P90: busy Codex queues until confirmed turn end (existing report: true)"
+    ]
+  },
+  "P91": {
+    "rev": "v0.19.3",
+    "outcome": "FAILS",
+    "failed": 4,
+    "passed": 0,
+    "failing": [
+      "P91: get_report returns existing content and warning with pending follow-up",
+      "P91: get_report returns existing content and warning with withdrawn follow-up",
+      "P91: get_report returns existing content and warning with stale follow-up",
+      "P91: get_report returns existing content and warning with closed follow-up",
+      "P91: get_report returns existing content and warning with pending follow-up"
+    ]
+  },
+  "P91-f1": {
+    "rev": "v0.19.3",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 1,
+    "failing": [
+      "close journals one entry per message it drops (queued FIFO items and the unsent active prompt)",
+      "close journals one entry per message it drops (queued FIFO items and the unsent active prompt)"
+    ]
+  },
+  "R1-redact": {
+    "rev": "v0.18.2",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "R1: camelCase credentials and passwd are masked in fields, text and URLs",
+      "R1: camelCase credentials and passwd are masked in fields, text and URLs"
+    ]
+  },
+  "X1": {
+    "rev": "v0.18.2",
+    "outcome": "IMPORT-ERROR",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "tests/gate.test.ts",
+      "tests/gate.test.ts"
+    ]
+  },
+  "X2": {
+    "rev": "v0.18.2",
+    "outcome": "IMPORT-ERROR",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "tests/gate.test.ts",
+      "tests/gate.test.ts"
+    ]
+  },
+  "X3": {
+    "rev": "v0.18.2",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "X3: an id left in both the FIFO and the active delivery by an interrupted transfer withdraws as one message and is never redelivered",
+      "X3-R2: the FIFO copy goes before the active identity is cleared; an interruption between the two writes never leaves an eligible duplicate",
+      "P48: withdrawing a waiting message",
+      "X3: an id left in both the FIFO and the active delivery by an interrupted transfer withdraws as one message and is never redelivered",
+      "X3-R2: the FIFO copy goes before the active identity is cleared; an interruption between the two writes never leaves an eligible duplicate"
+    ]
+  },
+  "X4": {
+    "rev": "v0.18.2",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "X4: set_limits accepts \"off\" for an optional provider in the registered schema; reserve stays numeric-only",
+      "X4: set_limits accepts \"off\" for an optional provider in the registered schema; reserve stays numeric-only"
+    ]
+  }
+}
