@@ -9,7 +9,7 @@ import { auditPath, MCP_TOOLS } from '../src/core/mcp-tools.ts';
 import type { McpDeps, McpToolDef, ToolResult } from '../src/core/mcp-tools.ts';
 import { readQueue } from '../src/core/queue.ts';
 import { readTaskRecord } from '../src/core/taskstore.ts';
-import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helpers.ts';
+import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch, watcherValidates } from './helpers.ts';
 
 const scratch = useScratch();
 const tool = (name: string): McpToolDef => MCP_TOOLS.find((t) => t.name === name) as McpToolDef;
@@ -89,6 +89,7 @@ describe('mcp: cancel', () => {
     const t = setup('queued', 'mcp: {allow: [queue, cancel]}\n');
     await t.call('queue', { spec: t.spec('Q-1') + t.spec('Q-2', 'after: Q-1\n') });
     await t.call('queue', { spec: t.spec('Q-1') + t.spec('Q-2', 'after: Q-1\n'), confirm: true });
+    await watcherValidates(t.config, t.runner);
     await t.call('cancel', { task: 'Q-1' });
     const r = await t.call('cancel', { task: 'Q-1', confirm: true });
     assert.equal(r.isError, undefined, r.text);

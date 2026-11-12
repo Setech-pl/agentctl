@@ -10,7 +10,7 @@ import { auditPath, MCP_TOOLS } from '../src/core/mcp-tools.ts';
 import type { McpDeps, McpToolDef, ToolResult } from '../src/core/mcp-tools.ts';
 import { readQueue } from '../src/core/queue.ts';
 import { readTaskRecord } from '../src/core/taskstore.ts';
-import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helpers.ts';
+import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch, watcherValidates } from './helpers.ts';
 
 const scratch = useScratch();
 const tool = (name: string): McpToolDef => MCP_TOOLS.find((t) => t.name === name) as McpToolDef;
@@ -69,6 +69,7 @@ describe('mcp: queue read tools', () => {
     t.running('NC-9', []);
     await t.call('queue', { spec: t.spec('Q-1') + t.spec('Q-2', 'after: Q-1\n') });
     assert.equal((await t.call('queue', { spec: t.spec('Q-1') + t.spec('Q-2', 'after: Q-1\n'), confirm: true })).isError, undefined);
+    await watcherValidates(t.config, t.runner);
     const r = await t.call('queue_list', { format: 'json' });
     assert.equal(JSON.parse(r.text).length, 2);
     const list = JSON.parse(r.text.slice(r.text.indexOf('['))) as { task: string; position: number; startCondition: string; after: string[] }[];
@@ -107,6 +108,7 @@ describe('mcp: queue read tools', () => {
     await collectStatus(new Context(t.runner, t.config, () => {})); // watch publishes progress before the read
     await t.call('queue', { spec: t.spec('Q-1') });
     await t.call('queue', { spec: t.spec('Q-1'), confirm: true });
+    await watcherValidates(t.config, t.runner);
     const r = await t.call('status');
     const lines = r.text.split('\n');
     assert.match(lines[0]!, /^2 tasks:/);
@@ -142,7 +144,7 @@ describe('mcp: queue write tools', () => {
     assert.deepEqual(t.audit().map((a) => [a.tool, a.task, a.outcome]), [['queue', 'Q-1', 'requested'], ['queue', 'Q-1', 'preview']]);
     assert.deepEqual(t.notified, []);
     const done = await t.call('queue', { spec: t.spec('Q-1'), confirm: true });
-    assert.match(done.text, /^Queued: Q-1\./);
+    assert.match(done.text, /^Queued: Q-1 \(accepted\)\./);
     assert.deepEqual(readQueue(t.config).map((e) => e.task), ['Q-1']);
     assert.deepEqual(t.notified, ['czat zlecił: queue Q-1']);
     assert.equal(t.audit().at(-1)!.outcome, 'done');

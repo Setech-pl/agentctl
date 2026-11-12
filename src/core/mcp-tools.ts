@@ -1,9 +1,8 @@
 import { reportMessageWarning } from './prompt-queue.ts';
 import { queueViews as coreQueueViews } from './queue.ts';
-import { withStartLock } from './start-lock.ts';
 import { withResponseBudget } from './response-budget.ts';
 import type { BudgetClock } from './response-budget.ts';
-import type { QueueConfirmation } from './queue.ts';
+import type { AcceptedOrder, QueueConfirmation } from './queue.ts';
 import { queueDiagnosticSources } from './queue.ts';
 import { isHeavy } from './heavy.ts';
 import { DEFAULT_PROVIDERS } from './providers/types.ts';
@@ -53,7 +52,7 @@ import { stableScript } from './mcp-install.ts';
 import { closeTask, closeTasks, planClose } from './close.ts';
 import { cohortEntries, cohortRows, findCohort, openCohortTasks, summarizeCohorts } from './cohort.ts';
 import { collectOverlaps, collideText } from './collisions.ts';
-import { commitQueueAdd, describeQueue, directStartText, findDirectStart, planQueueAdd, readQueue, registerDirectStart, removeFromQueue, waiting, watchAlive } from './queue.ts';
+import { ACCEPTED_TEXT, acceptSpecs, describeQueue, directStartText, findDirectStart, planQueueAdd, readQueue, removeFromQueue, waiting, watchAlive, withAcceptLock } from './queue.ts';
 import { readSetupProgress } from './setup-progress.ts';
 import { liveWindows, planBatch } from './plan.ts';
 import { awayReport, renderAway, setAway } from './away.ts';
@@ -70,7 +69,7 @@ import { sendPrompts, submitDrafts } from './send.ts';
 import { answerMenu } from './answer.ts';
 import { withdrawPrompt } from './prompt-queue.ts';
 import { resolveSpec, splitSpecs } from './spec.ts';
-import type { RawSpec } from './spec.ts';
+import type { RawSpec, ResolvedSpec } from './spec.ts';
 import { collectStatus as collectStatusFull, shownRows } from './status.ts';
 import type { StatusRow } from './status.ts';
 import { summarizeSpecs } from './summary.ts';
@@ -919,7 +918,16 @@ async function runMove(deps: McpDeps, args: { task: string; agent?: AgentName | 
 /** `setup` runs shell commands: neither the top-level key nor `repos[].setup` is accepted from the chat (a repository's .agentctl.yaml setup still runs). */
 const chatSetup = (header: Record<string, unknown>): boolean => 'setup' in header || (Array.isArray(header.repos) && header.repos.some((r) => typeof r === 'object' && r !== null && 'setup' in r));
 
-interface NewMcpArgs { _confirmation?: QueueConfirmation; spec?: string | undefined; confirm?: boolean | undefined; agent?: AgentName | undefined; reuse?: boolean | undefined; no_agent?: boolean | undefined; cohort?: string | undefined; wait_trust?: boolean | undefined }
+/** What a preview planned, as the accepted entries record it (P93); without the preview's plan the spec as written. */
+function acceptedOrders(ctx: Context, raws: RawSpec[], planned: AcceptedOrder[] | undefined): AcceptedOrder[] {
+  if (planned && planned.length === raws.length && planned.every((o, i) => o.task === String(raws[i]!.header.task ?? ''))) return planned;
+  return raws.map((raw) => plannedOrder(resolveSpec(raw, { config: ctx.config })));
+}
+export function plannedOrder(s: ResolvedSpec): AcceptedOrder {
+  return { task: s.task, agent: s.agent, model: s.model, effort: s.effort, priority: s.priority, after: s.after, ...(s.afterVerdicts ? { afterVerdicts: s.afterVerdicts } : {}), ...(s.reviewOf ? { reviewOf: s.reviewOf } : {}), ...(s.cohort ? { cohort: s.cohort } : {}) };
+}
+
+interface NewMcpArgs { _confirmation?: QueueConfirmation; /** The preview's plan (wrapper): the preview plans once; the confirm records it. */ _specs?: ResolvedSpec[]; _planned?: AcceptedOrder[]; spec?: string | undefined; confirm?: boolean | undefined; agent?: AgentName | undefined; reuse?: boolean | undefined; no_agent?: boolean | undefined; cohort?: string | undefined; wait_trust?: boolean | undefined }
 async function runNew(deps: McpDeps, args: NewMcpArgs): Promise<ToolResult> {
   const probe = (): { tasks: string } => {
     // Only for the audit line: the task IDs named in the spec, without resolving anything.
@@ -939,8 +947,27 @@ async function runNew(deps: McpDeps, args: NewMcpArgs): Promise<ToolResult> {
         throw new AgentctlError(`${String(raw.header.task ?? 'a task')}: "setup" runs shell commands and is not accepted from the chat`, 'Put setup commands in the .agentctl.yaml of the repository, or start the task from the terminal.');
       }
     }
+    if (args.confirm) {
+      // P93: the confirm answers within the response budget. It records the accepted start and returns; the spec's validation (git, tmux, every
+      // task record), the checkout, the setup and the window are the watcher's. A start the watcher cannot do is refused here, before anything is written.
+      if (!watchAlive(ctx.config, ctx.runner.now())) {
+        throw new AgentctlError(
+          `${raws.map((raw) => String(raw.header.task ?? '?')).join(', ')}: every start goes through the watcher (waiting for the window must never block this server) and it is not running`,
+          'Nothing was started. Start the watcher ("agentctl watch --tmux" in a terminal, or from the board), then call new again with a fresh preview. A start from the terminal ("agentctl new") runs in place.',
+        );
+      }
+      const { added, existing } = await acceptSpecs(ctx, raws, acceptedOrders(ctx, raws, args._planned), { direct: { noAgent: Boolean(args.no_agent) }, reuse: Boolean(args.reuse), ...(args._confirmation ? { confirmation: args._confirmation } : {}), ...(args.agent ? { agent: args.agent } : {}) });
+      if (existing.length > 0) return { text: existing.map((e) => directStartText(ctx.config, e, ctx.runner.now())).join('\n'), executed: false, announce: '' };
+      return {
+        text: `Registered: ${added.map((e) => `${e.task} (${e.agent} ${e.model}/${e.effort})`).join('; ')} – starting. The ${args.no_agent ? 'worktrees are prepared' : 'task starts'} in the watcher, not in this call: at its next tick (about ${ctx.config.watch.interval} s) it validates the spec, then the checkout, any setup${args.no_agent ? '' : ' and the window'} run there and survive a restart of this server or of the app. ` +
+          `Follow it with events_since (SETUP, START, BŁĄD STARTU) and status/queue_list. A spec the watcher refuses, or a failed start, leaves the task failed with its reason in queue_list and an event; queue_retry tries again. Calling new again for the same task does not start it twice.`,
+        executed: true,
+        announce: `new ${added.map((e) => e.task).join(', ')}`,
+        data: { tasks: added.map((e) => ({ task: e.task, state: 'starting' })) },
+      };
+    }
     const knownAuthors = new Map(readQueue(ctx.config).filter(e => e.direct).map(e => [e.task, { agent: e.agent, model: e.model }]));
-    const specs = await planBatch(ctx, raws.map((raw) => resolveSpec(raw, { config: ctx.config })), { noSwitch: true, reuse: Boolean(args.reuse), knownAuthors, ...(args.agent ? { agent: args.agent } : {}) });
+    const specs = args._specs ?? await planBatch(ctx, raws.map((raw) => resolveSpec(raw, { config: ctx.config })), { noSwitch: true, reuse: Boolean(args.reuse), knownAuthors, ...(args.agent ? { agent: args.agent } : {}) });
     const cap = !args.confirm && ctx.config.capacity.snapshot ? capacitySnapshot(await collectCapacity(ctx), specs.map((s) => s.agent)) : undefined;
     const disk = await collectDisk(ctx);
     const readyCount = (await liveWindows(ctx)).filter(w => w.reportReady).length;
@@ -954,27 +981,11 @@ async function runNew(deps: McpDeps, args: NewMcpArgs): Promise<ToolResult> {
       ...(watching ? [`Start: asynchronous – confirm returns at once; the watcher does the checkout${setupRepos.length > 0 ? `, the setup of ${setupRepos.join(', ')}` : ''} and the window within about ${ctx.config.watch.interval} s and the task then shows in status/queue_list as "uruchamiane". Follow it with events_since.`] : []),
       ...(!watching ? [`WARNING: the watcher is not running (or the queue is disabled) and every start goes through it: confirm will be refused. Start it with "agentctl watch --tmux".`] : []),
     ]).join('\n');
-    if (!args.confirm) {
-      return { text: `${summary}\n\nNot started yet. Show this to the user and ask; if they agree, call new again with the same spec and confirm: true.`, executed: false, announce: '' };
-    }
-    if (!watching) {
-      throw new AgentctlError(
-        `${specs.map((s) => s.task).join(', ')}: every start goes through the watcher (waiting for the window must never block this server) and it is not running`,
-        'Nothing was started. Start the watcher ("agentctl watch --tmux" in a terminal, or from the board), then call new again with a fresh preview. A start from the terminal ("agentctl new") runs in place.',
-      );
-    }
-    const { added, existing } = await registerDirectStart(ctx, specs.map((spec, i) => ({ raw: raws[i] as RawSpec, spec })), { reuse: Boolean(args.reuse), noAgent: Boolean(args.no_agent), ...(args._confirmation ? { confirmation: args._confirmation } : {}), ...(args.agent ? { agent: args.agent } : {}) });
-    if (existing.length > 0) return { text: existing.map((e) => directStartText(ctx.config, e, ctx.runner.now())).join('\n'), executed: false, announce: '' };
-    return {
-      text: `Registered: ${added.map((e) => `${e.task} (${e.agent} ${e.model}/${e.effort})`).join('; ')}. The ${args.no_agent ? 'worktrees are prepared' : 'task starts'} in the watcher, not in this call: ${[...['checkout'], ...(setupRepos.length > 0 ? [`setup of ${setupRepos.join(', ')}`] : []), ...(args.no_agent ? [] : ['the window'])].join(', ')} ${args.no_agent ? 'runs' : 'run'} there and survive a restart of this server or of the app. ` +
-        `Follow it with events_since (SETUP, START, BŁĄD STARTU) and status/queue_list. A failed start leaves the task failed with its reason and the worktrees; queue_retry tries again. Calling new again for the same task does not start it twice.`,
-      executed: true,
-      announce: `new ${added.map((e) => e.task).join(', ')}`,
-    };
+    return { text: `${summary}\n\nNot started yet. Show this to the user and ask; if they agree, call new again with the same spec and confirm: true.`, executed: false, announce: '' };
   });
 }
 
-async function runQueue(deps: McpDeps, args: { _confirmation?: QueueConfirmation; spec?: string | undefined; agent?: AgentName | undefined; cohort?: string | undefined; confirm?: boolean | undefined }): Promise<ToolResult> {
+async function runQueue(deps: McpDeps, args: { _confirmation?: QueueConfirmation; _specs?: ResolvedSpec[]; _planned?: AcceptedOrder[]; spec?: string | undefined; agent?: AgentName | undefined; cohort?: string | undefined; confirm?: boolean | undefined }): Promise<ToolResult> {
   let tasks = '?';
   try {
     tasks = splitSpecs(args.spec ?? '', 'mcp').map((s) => String(s.header.task ?? '?')).join(', ');
@@ -991,13 +1002,19 @@ async function runQueue(deps: McpDeps, args: { _confirmation?: QueueConfirmation
       }
     }
     const opts = args.agent ? { agent: args.agent } : {};
-    const plan = await planQueueAdd(ctx, raws, { ...opts, diskBudgetMs: DISK_BUDGET_MS });
-    if (!args.confirm) {
-      return { text: `${plan.summary.join('\n')}\n${diskLine(await collectDisk(ctx))}\n\nNot queued yet. Show this to the user and ask; if they agree, call queue again with the same spec and confirm: true.`, executed: false, announce: '' };
+    if (args.confirm) {
+      // P93: durable registration is the response boundary. The confirm records the accepted specs and answers; the watcher validates them at its
+      // next tick (git, tmux and the task records are its work), then they wait in the line; a refused spec fails with its reason and an event.
+      const { added } = await acceptSpecs(ctx, raws, acceptedOrders(ctx, raws, args._planned), { ...opts, ...(args._confirmation ? { confirmation: args._confirmation } : {}) });
+      return {
+        text: `Queued: ${added.map((e) => e.task).join(', ')} (accepted). The watcher validates the spec${added.length > 1 ? 's' : ''} at its next tick (about ${ctx.config.watch.interval} s) and then they start by themselves while "agentctl watch" runs, when a window of their provider is free. queue_list shows "${ACCEPTED_TEXT}" until then; a spec it refuses shows as failed there with its reason and an event.`,
+        executed: true,
+        announce: `queue ${added.map((e) => e.task).join(', ')}`,
+        data: { tasks: added.map((e) => ({ task: e.task, state: 'accepted' })) },
+      };
     }
-    const added = await commitQueueAdd(ctx, plan.items, { ...opts, ...(args._confirmation ? { confirmation: args._confirmation } : {}) });
-    const capacity = ''; // Durable registration is the response boundary; watch owns starting and capacity sampling.
-    return { text: `Queued: ${added.map((e) => e.task).join(', ')}. They start by themselves while "agentctl watch" runs, when a window of their provider is free (queue_list shows the line).${capacity ? `\n${capacity}` : ''}`, executed: true, announce: `queue ${added.map((e) => e.task).join(', ')}` };
+    const plan = await planQueueAdd(ctx, raws, { ...opts, diskBudgetMs: DISK_BUDGET_MS, ...(args._specs ? { specs: args._specs } : {}) });
+    return { text: `${plan.summary.join('\n')}\n${diskLine(await collectDisk(ctx))}\n\nNot queued yet. Show this to the user and ask; if they agree, call queue again with the same spec and confirm: true.`, executed: false, announce: '' };
   });
 }
 
@@ -1465,7 +1482,7 @@ function redactConfig(config: GlobalConfig): unknown {
 }
 
 const confirmedTools = new Set(['mark', 'new', 'queue', 'cancel', 'resume', 'move', 'interrupt', 'close', 'queue_rm', ...MCP_TOOLS.filter((t) => t.kind === 'write' && !['send', 'answer', 'mark', 'away', 'set_limits', 'reserve'].includes(t.name)).map((t) => t.name)]);
-const previews = new WeakMap<McpDeps, Map<string, { key: string; arguments: Record<string, unknown>; /** The arguments as they came in (the spec text, not its canonical form): a token-only confirm executes these. */ raw: Record<string, unknown>; scope: string; at: number; ttlS: number }>>();
+const previews = new WeakMap<McpDeps, Map<string, { key: string; arguments: Record<string, unknown>; /** The arguments as they came in (the spec text, not its canonical form): a token-only confirm executes these. */ raw: Record<string, unknown>; scope: string; at: number; ttlS: number; /** new/queue: what the preview planned; the confirm records it without planning again (P93). */ planned?: AcceptedOrder[] }>>();
 const lastPreviewMutation = new WeakMap<McpDeps, string>();
 const previewSessions = new WeakMap<McpDeps, string>();
 const confirmations = new WeakMap<McpDeps, Map<string, { name: string; key: string; tasks: string; result: Promise<ToolResult> }>>();
@@ -1674,14 +1691,18 @@ for (const tool of MCP_TOOLS) {
       }
       if (ctx.runner.now() - preview.at > preview.ttlS * 1000) return deny(`TTL expired (${preview.ttlS}s since preview)`);
     }
+    // P93: the confirm of new/queue does not plan again (git, tmux, every task record: seconds on a loaded host). Its scope identity is the
+    // argument hash alone (confirmationTargets), the plan is the preview's, and the watcher validates the accepted specs.
+    const accepting = Boolean(confirm) && (tool.name === 'new' || tool.name === 'queue');
     let scope: unknown;
-    try { scope = await confirmationScope(ctx, tool.name, effective); }
+    try { scope = accepting ? null : await confirmationScope(ctx, tool.name, effective); }
     catch (e) { audit(ctx, { tool: tool.name, outcome: 'error', detail: errorMessage(e) }); throw e; }
     // Argument identity is independent of mutable runtime facts. Destructive scopes are checked separately.
     const scopeIdentity = JSON.stringify(canonical(confirmationTargets(tool.name, scope)));
     if (!confirm) {
       let result: ToolResult;
-      if (['new', 'queue', 'cancel', 'resume', 'move'].includes(tool.name)) result = await original(deps, args);
+      if (tool.name === 'new' || tool.name === 'queue') result = await original(deps, { ...args, _specs: (scope as { specs: ResolvedSpec[] }).specs });
+      else if (['cancel', 'resume', 'move'].includes(tool.name)) result = await original(deps, args);
       else result = await writeTool(deps, tool.name as McpWriteTool, {}, async () => {
         const detail = tool.name === 'gc' ? renderGc(scope as GcPlan, { detail: Boolean(input.detail), offset: input.offset as number | undefined, limit: input.limit as number | undefined }).join('\n') : JSON.stringify({ operation: tool.name, arguments: input, scope: await previewScope(ctx, tool.name, input, scope) }, null, 2);
         return { text: `${detail}\nNot executed. Review, then call with identical arguments and confirm: true.`, executed: false, announce: '' };
@@ -1689,7 +1710,7 @@ for (const tool of MCP_TOOLS) {
       if (!result.isError) {
         const token = crypto.randomUUID();
         if (pending.size >= 100) { const evicted = pending.keys().next().value!; pending.delete(evicted); issuedPreviewTokens.set(evicted, { session, state: 'preview capacity eviction' }); }
-        pending.set(token, { key, arguments: arguments_, raw: input, scope: scopeIdentity, at: ctx.runner.now(), ttlS: ctx.config.preview.ttlS });
+        pending.set(token, { key, arguments: arguments_, raw: input, scope: scopeIdentity, at: ctx.runner.now(), ttlS: ctx.config.preview.ttlS, ...(tool.name === 'new' || tool.name === 'queue' ? { planned: (scope as { specs: ResolvedSpec[] }).specs.map(plannedOrder) } : {}) });
         issuedPreviewTokens.set(token, { session, state: 'pending' });
         if (issuedPreviewTokens.size > 10000) issuedPreviewTokens.delete(issuedPreviewTokens.keys().next().value!);
         result.text += `\npreview_ttl_s: ${ctx.config.preview.ttlS}; expires_at: ${new Date(ctx.runner.now() + ctx.config.preview.ttlS * 1000).toISOString()}\npreview_token: ${token}`;
@@ -1702,11 +1723,11 @@ for (const tool of MCP_TOOLS) {
     const taskIds = typeof effective.spec === 'string' ? splitSpecs(effective.spec, 'confirmation').map(s => String(s.header.task)) : [String(effective.task ?? tool.name)];
     const registration: QueueConfirmation | undefined = token && ['queue', 'new'].includes(tool.name) ? { token, key: preview!.key, tool: tool.name, tasks: taskIds } : undefined;
     const execute = async (): Promise<ToolResult> => {
-      if (registration) return withStartLock(ctx, async () => {
-        // Cross-process replay and publication share the same lock as queue registration.
+      if (registration) return withAcceptLock(ctx, async () => {
+        // Cross-process replay and publication share the short lock of queue registration (never start.lock, which a watcher holds for long).
         const repeated = durableReplay();
         if (repeated) return repeated;
-        const done = await original(deps, { ...(tokenOnly ? { ...effective, confirm: true } : args), _confirmation: registration });
+        const done = await original(deps, { ...(tokenOnly ? { ...effective, confirm: true } : args), _confirmation: registration, ...(preview?.planned ? { _planned: preview.planned } : {}) });
         if (!done.isError) {
           const directory = path.join(path.dirname(ctx.config.path), 'mcp-confirmations');
           fs.mkdirSync(directory, { recursive: true });

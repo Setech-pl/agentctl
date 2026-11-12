@@ -117,7 +117,7 @@ describe('P19: MCP new with setup is handed to the watcher', () => {
     assert.deepEqual(e.runner.worktrees, [], 'no checkout happened in the server');
     assert.equal(readTaskRecord(e.config, 'slow-1'), undefined, 'no TASK.md yet: the watcher has not begun');
     const [entry] = readQueue(e.config);
-    assert.deepEqual([entry?.task, entry?.status, entry?.direct, entry?.priority], ['SLOW-1', 'queued', true, 'high']);
+    assert.deepEqual([entry?.task, entry?.status, entry?.direct, entry?.priority], ['SLOW-1', 'accepted', true, 'high'], 'accepted: the watcher validates it at its next tick (P93)');
     assert.ok(readJournal(e.config).some((j) => j.kind === 'mcp-write' && j.text === 'new: new SLOW-1'), 'the MCP new entry is in the journal now');
     assert.match(text(await e.call('queue_list')), /uruchamiane – czeka na najbliższy tick watch/);
   });
@@ -178,7 +178,7 @@ describe('P19: MCP new with setup is handed to the watcher', () => {
     assert.match(text(done), /^Registered: PLAIN-1/);
     assert.equal(readTaskRecord(e.config, 'plain-1'), undefined, 'no TASK.md yet: the watcher has not begun');
     const [entry] = readQueue(e.config);
-    assert.deepEqual([entry?.task, entry?.status, entry?.direct], ['PLAIN-1', 'queued', true]);
+    assert.deepEqual([entry?.task, entry?.status, entry?.direct], ['PLAIN-1', 'accepted', true]);
     await e.tick();
     assert.ok(readTaskRecord(e.config, 'plain-1'), 'the watcher started it');
     assert.ok(e.tmux.windows.some((w) => w.name === 'plain-1'), 'the window exists');

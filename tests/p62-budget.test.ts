@@ -42,7 +42,7 @@ function fixture(name: string) {
   const spec = specText({ task: 'P62', agent: 'claude' }, repo);
   return { ctx, config, deps, call, spec, clock, hold: () => { slow = true; }, release };
 }
-for (const operation of ['queue preview', 'queue confirm', 'status', 'gc_preview']) it(`P62: ${operation} returns partial at the injected 8s budget under four-window load`, async () => {
+for (const operation of ['queue preview', 'queue confirm', 'status', 'gc_preview']) it(`P62: ${operation} returns ${operation === 'queue confirm' ? 'its durable registration' : 'partial'} at the injected 8s budget under four-window load`, async () => {
   const f = fixture(operation.replaceAll(' ', '-'));
   let args: Record<string, unknown> = operation.startsWith('queue') ? { spec: f.spec } : {};
   if (operation === 'queue confirm') {
@@ -58,6 +58,12 @@ for (const operation of ['queue preview', 'queue confirm', 'status', 'gc_preview
   // Release the injected work even when the baseline fails this regression.
   f.clock.advance(60001); f.release(); await pending; await drain();
   assert.ok(bounded, `${operation}: still blocked at virtual 8s (held beyond 60s)`);
+  if (operation === 'queue confirm') {
+    // P93: the confirm needs no process at all: it records the accepted spec and the watcher validates it.
+    assert.match(result!.text, /^Queued: P62 \(accepted\)/);
+    assert.deepEqual(readQueue(f.config).map(e => [e.task, e.status]), [['P62', 'accepted']]);
+    return;
+  }
   assert.match(result!.text, /Partial result:/);
   assert.equal(readQueue(f.config).length, 0, 'expired confirmation cannot register work later');
 });
@@ -82,7 +88,7 @@ it('P62: confirm retries share one durable registration, even while notification
   assert.match(replay.text, /already executed: P62/);
   const status = await f.call('status', { format: 'json' });
   assert.match(status.text, /P62/);
-  assert.match(status.text, /registered/);
+  assert.match(status.text, /"state": "accepted"/);
 });
 it('P62: concurrent confirms for one preview share exactly one execution', async () => {
   const f = fixture('concurrent');
@@ -151,6 +157,6 @@ it('P62: fresh registrations survive a partial response with a large cached payl
   await drain(); f.clock.advance(8000);
   const partial = await pending;
   f.release(); await drain();
-  assert.match(partial.text, /P62: registered/);
+  assert.match(partial.text, /P62: accepted/);
   assert.ok(Buffer.byteLength(partial.text) <= 1024);
 });

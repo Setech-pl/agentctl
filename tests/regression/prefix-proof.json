@@ -342,6 +342,19 @@
       "P92: Kimi start screen with a rotating footer tip takes the first prompt: one paste, one Enter, verified by the wire turn.prompt"
     ]
   },
+  "P93": {
+    "rev": "v0.19.4",
+    "outcome": "FAILS",
+    "failed": 4,
+    "passed": 0,
+    "failing": [
+      "P93: queue confirm with a 30 s worktree+setup and a host that runs nothing returns before any work, the watcher validates and starts it",
+      "P93: new confirm with a 30 s worktree+setup and a host that runs nothing returns before any work, the watcher validates and starts it",
+      "P93: an accepted queue spec the watcher refuses fails with its reason in queue_list, an event and a notification; queue_retry validates it again",
+      "P93: an accepted new spec the watcher refuses fails with its reason in queue_list, an event and a notification; queue_retry validates it again",
+      "P93: queue confirm with a 30 s worktree+setup and a host that runs nothing returns before any work, the watcher validates and starts it"
+    ]
+  },
   "R1-redact": {
     "rev": "v0.18.2",
     "outcome": "FAILS",

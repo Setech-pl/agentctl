@@ -47,7 +47,8 @@ import { clearSetupProgress, readSetupProgress, startProgressText } from './setu
  * knows about it). `watch` starts the next one when its provider has a free window, by the same path as `agentctl new`.
  */
 
-export type QueueStatus = 'queued' | 'starting' | 'failed';
+/** `accepted`: an MCP confirm recorded the spec and answered; the watcher has not validated it yet (P93). */
+export type QueueStatus = 'accepted' | 'queued' | 'starting' | 'failed';
 
 export interface QueueConfirmation { token: string; key: string; tool: string; tasks: string[] }
 export interface QueueEntry {
@@ -95,6 +96,8 @@ export interface QueueEntry {
   startingPid?: number;
   /** The cancelled authors of `after` that the watcher has announced as "blocked" already (once per author). */
   blockedNotified?: string[];
+  /** The spec was accepted by an MCP confirm and is not validated yet (status accepted), or its validation failed (status failed): retry validates it again. */
+  unvalidated?: boolean;
   /** `status: failed`: when and why. */
   failedAt?: string;
   error?: string;
@@ -130,7 +133,7 @@ function parseEntry(text: string): QueueEntry | undefined {
     ...(d as QueueEntry),
     order: typeof d.order === 'number' ? d.order : d.seq,
     priority: d.priority === 'high' ? 'high' : 'normal',
-    status: d.status === 'starting' || d.status === 'failed' ? d.status : 'queued',
+    status: d.status === 'starting' || d.status === 'failed' || d.status === 'accepted' ? d.status : 'queued',
     after: Array.isArray(d.after) ? d.after.filter((x): x is string => typeof x === 'string') : [],
   };
 }
@@ -153,7 +156,7 @@ export function readQueue(config: Pick<GlobalConfig, 'path'>): QueueEntry[] {
       // removed between the listing and the read
     }
   }
-  const rank = (e: QueueEntry): number => (e.status === 'queued' ? 0 : e.status === 'starting' ? 1 : 2);
+  const rank = (e: QueueEntry): number => (e.status === 'queued' || e.status === 'accepted' ? 0 : e.status === 'starting' ? 1 : 2);
   return entries.sort((a, b) => rank(a) - rank(b) || (a.status === 'queued' && b.status === 'queued' ? Number(b.priority === 'high') - Number(a.priority === 'high') : 0) || a.order - b.order || a.seq - b.seq);
 }
 
@@ -172,6 +175,14 @@ export function findEntry(config: Pick<GlobalConfig, 'path'>, input: string): Qu
 
 async function writeEntry(ctx: Context, entry: QueueEntry): Promise<void> {
   await ctx.runner.writeFile(entryFile(ctx.config, entry), `${JSON.stringify(entry, null, 2)}\n`);
+}
+
+/**
+ * The short lock of every new queue entry (its sequence number and the "already in the queue" check). It is never held across git, tmux or a
+ * start, so an MCP confirm that takes it answers within the response budget while the watcher holds start.lock for minutes (P93).
+ */
+export function withAcceptLock<T>(ctx: Context, action: () => Promise<T>): Promise<T> {
+  return ctx.runner.dryRun ? action() : withFileLock(path.join(ctx.config.stateDir, 'queue-accept.lock'), action);
 }
 
 /** Write an entry back after a change (its cohort, its `after`). */
@@ -202,22 +213,32 @@ export interface QueueAddPlan {
  * Validate specs for the queue the way `new` does (review_of, pin, `--agent` mapping, codex efforts, duplicates, repositories), except that a
  * full provider is not an error: that is what the queue is for. Throws one error listing every problem; nothing is written.
  */
-export async function planQueueAdd(ctx: Context, raws: RawSpec[], opts: { agent?: AgentName; diskBudgetMs?: number } = {}): Promise<QueueAddPlan> {
+export async function planQueueAdd(ctx: Context, raws: RawSpec[], opts: { agent?: AgentName; diskBudgetMs?: number; specs?: ResolvedSpec[] } = {}): Promise<QueueAddPlan> {
   const { config } = ctx;
-  const resolved = raws.map((raw) => resolveSpec(raw, { config }));
   const entries = readQueue(config);
-  for (const spec of resolved) {
-    const inQueue = entries.find((e) => e.task === spec.task);
-    if (inQueue) throw new AgentctlError(`${spec.task} is already in the queue (${inQueue.status})`, `"agentctl queue rm ${spec.task}" takes it out${inQueue.status === 'failed' ? `; "agentctl queue retry ${spec.task}" tries it again` : ''}.`);
-  }
-  const knownAuthors = new Map<string, AgentModel>(entries.map((e) => [e.task, { agent: e.agent, model: e.model }]));
-  const specs = await planBatch(ctx, resolved, { ...(opts.agent ? { agent: opts.agent } : {}), ignoreLimits: true, skipAfter: true, deferBases: true, knownAuthors });
-  checkAfter(ctx, specs, entries);
-  const items = specs.map((spec, i) => ({ raw: raws[i] as RawSpec, spec }));
+  const items = await validateQueueAdd(ctx, raws, entries, opts);
+  const specs = items.map((i) => i.spec);
   const rows = await queueDependencyRows(ctx, [...entries, ...specs]);
   const warnings = [...await touchWarnings(ctx, specs, { cachedOnly: true }), ...specs.flatMap(s => reportPathWarnings(ctx.config, s).map(w => `${s.task}: ${w}`)), ...specs.flatMap(s => [...(s.linkWarnings ?? []), ...(s.warnings ?? []), ...missingLinkTargets(s.links, s.repos[0]?.worktree)].map(w => `${s.task}: ${w}`))];
   const capacity = config.capacity.snapshot && !ctx.runner.dryRun ? capacitySnapshot(await collectCapacity(ctx, { cachedOnly: true, ...(opts.diskBudgetMs === undefined ? {} : { diskBudgetMs: opts.diskBudgetMs }) }), specs.map((s) => s.agent)) : undefined;
   return { items, warnings, ...(capacity ? { capacity } : {}), summary: [...describeQueueAdd(ctx, specs, entries, await liveWindows(ctx), rows), ...usageSummaryLines(config, specs, ctx.runner.now()), ...(capacity ? snapshotLines(capacity) : []), ...warnings.map((w) => `⚠ ${w}`)] };
+}
+
+function inQueueError(spec: { task: string }, entry: QueueEntry): AgentctlError {
+  return new AgentctlError(`${spec.task} is already in the queue (${entry.status})`, `"agentctl queue rm ${spec.task}" takes it out${entry.status === 'failed' ? `; "agentctl queue retry ${spec.task}" tries it again` : ''}.`);
+}
+
+/** The checks of a queue add against the other entries: not in the queue yet, the batch plan (`specs`: already planned by the preview), `after`. */
+async function validateQueueAdd(ctx: Context, raws: RawSpec[], entries: QueueEntry[], opts: { agent?: AgentName; specs?: ResolvedSpec[] }): Promise<QueueAddItem[]> {
+  const resolved = raws.map((raw) => resolveSpec(raw, { config: ctx.config }));
+  for (const spec of resolved) {
+    const inQueue = entries.find((e) => e.task === spec.task);
+    if (inQueue) throw inQueueError(spec, inQueue);
+  }
+  const knownAuthors = new Map<string, AgentModel>(entries.map((e) => [e.task, { agent: e.agent, model: e.model }]));
+  const specs = opts.specs ?? await planBatch(ctx, resolved, { ...(opts.agent ? { agent: opts.agent } : {}), ignoreLimits: true, skipAfter: true, deferBases: true, knownAuthors });
+  checkAfter(ctx, specs, entries);
+  return specs.map((spec, i) => ({ raw: raws[i] as RawSpec, spec }));
 }
 
 /** Per spec: the order and where it will stand ("starts at once" or "waits: claude 2/2, 1 ahead"). */
@@ -267,28 +288,36 @@ export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: Q
 }
 
 /** Write the entries (one per spec). Returns them in the order they were added. */
-export async function commitQueueAdd(ctx: Context, items: QueueAddItem[], opts: { agent?: AgentName; reuse?: boolean; autoReview?: AutoReviewSource; confirmation?: QueueConfirmation; direct?: { noAgent: boolean } } = {}): Promise<QueueEntry[]> {
+export async function commitQueueAdd(ctx: Context, items: QueueAddItem[], opts: { agent?: AgentName; reuse?: boolean; autoReview?: AutoReviewSource; confirmation?: QueueConfirmation; direct?: { noAgent: boolean }; /** Validated accepted entries, one per item: their file, place and confirmation stay. */ accepted?: QueueEntry[] } = {}): Promise<QueueEntry[]> {
+  for (const { spec } of items) checkOwnLinkTargets(spec);
+  return withAcceptLock(ctx, () => commitQueueAddLocked(ctx, items, opts));
+}
+/** A link into the task's own worktree cannot exist before the start made it (the same exception `new` makes); every other target must exist. */
+function checkOwnLinkTargets(spec: ResolvedSpec): void {
+  checkLinkTargets(spec.links.filter((l) => !spec.repos.some((r) => l.to === r.worktree || l.to.startsWith(`${r.worktree}/`))), spec.task);
+}
+async function commitQueueAddLocked(ctx: Context, items: QueueAddItem[], opts: Parameters<typeof commitQueueAdd>[2] & object): Promise<QueueEntry[]> {
   const { config, runner } = ctx;
-  // A link into the task's own worktree cannot exist before the start made it (the same exception `new` makes).
-  for (const { spec } of items) checkLinkTargets(spec.links.filter((l) => !spec.repos.some((r) => l.to === r.worktree || l.to.startsWith(`${r.worktree}/`))), spec.task);
   const existing = readQueue(config);
   let seq = existing.reduce((n, e) => Math.max(n, e.seq), 0);
   const added: QueueEntry[] = [];
-  for (const { raw, spec } of items) {
-    seq++;
+  for (const [index, { raw, spec }] of items.entries()) {
+    const kept = opts.accepted?.[index];
+    if (!kept) seq++;
+    const confirmation = kept?.confirmation ?? opts.confirmation;
     const author = spec.reviewOf ? items.find(i => i.spec.task === spec.reviewOf)?.spec ?? existing.find(e => e.direct && e.task === spec.reviewOf) : undefined;
     const entry: QueueEntry = {
-      seq,
-      ...(opts.confirmation ? { confirmation: opts.confirmation } : {}),
+      seq: kept?.seq ?? seq,
+      ...(confirmation ? { confirmation } : {}),
       task: spec.task,
       ...(opts.reuse ? { reuse: true } : {}),
       ...(opts.autoReview ? { autoReview: opts.autoReview } : {}),
       ...(opts.direct ? { direct: true, ...(opts.direct.noAgent ? { noAgent: true } : {}) } : {}),
       ...(opts.direct && author ? { directAuthor: author.task, directAuthorOrder: { agent: author.agent, model: author.model } } : {}),
-      order: seq,
+      order: kept?.order ?? seq,
       priority: opts.direct ? 'high' : spec.priority,
       status: 'queued',
-      queuedAt: new Date(runner.now()).toISOString(),
+      queuedAt: kept?.queuedAt ?? new Date(runner.now()).toISOString(),
       agent: spec.agent,
       model: spec.model,
       effort: spec.effort,
@@ -388,6 +417,114 @@ export async function registerDirectStart(ctx: Context, items: QueueAddItem[], o
     const added = await commitQueueAdd(ctx, items, { ...(opts.agent ? { agent: opts.agent } : {}), ...(opts.reuse ? { reuse: true } : {}), direct: { noAgent: Boolean(opts.noAgent) }, ...(opts.confirmation ? { confirmation: opts.confirmation } : {}) });
     return { added, existing: [] };
   });
+}
+
+/** What the preview planned for one spec of an accepted confirm: enough for queue_list until the watcher validates the spec. */
+export interface AcceptedOrder { task: string; agent: AgentName; model: string; effort: string; priority: 'high' | 'normal'; after: string[]; afterVerdicts?: Record<string, OutputVerdict[]>; reviewOf?: string; cohort?: string }
+
+/**
+ * P93: the confirm of MCP `queue` / `new` records the accepted specs durably (status `accepted`) and returns. It reads the queue directory and writes
+ * one file per spec under the short accept lock: no git, no tmux, no task inventory, no start.lock (a watcher holds that one across deliveries and
+ * starts). The watcher validates them at its next tick (validateAccepted). `new` returns the start already handed over instead of a second one.
+ */
+export async function acceptSpecs(ctx: Context, raws: RawSpec[], orders: AcceptedOrder[], opts: { direct?: { noAgent: boolean }; agent?: AgentName; reuse?: boolean; confirmation?: QueueConfirmation } = {}): Promise<{ added: QueueEntry[]; existing: QueueEntry[] }> {
+  // Missing link targets are refused at once, as before: the spec and its project file are read, and each target is one existence check.
+  for (const raw of raws) checkOwnLinkTargets(resolveSpec(raw, { config: ctx.config }));
+  return withAcceptLock(ctx, async () => {
+    const entries = readQueue(ctx.config);
+    if (opts.direct) {
+      const existing = orders.map((o) => entries.find((e) => e.direct && e.task.toLowerCase() === o.task.toLowerCase())).filter((e): e is QueueEntry => e !== undefined);
+      if (existing.length > 0) {
+        if (existing.length !== orders.length) throw new AgentctlError(`Mixed new batch: already registered tasks: ${existing.map(e => e.task).join(', ')}`, 'Nothing was added. Preview only the new tasks separately.');
+        return { added: [], existing };
+      }
+    }
+    for (const order of orders) {
+      const inQueue = entries.find((e) => e.task === order.task);
+      if (inQueue) throw inQueueError(order, inQueue);
+    }
+    let seq = entries.reduce((n, e) => Math.max(n, e.seq), 0);
+    const added: QueueEntry[] = [];
+    for (const [i, order] of orders.entries()) {
+      seq++;
+      const entry: QueueEntry = {
+        seq, task: order.task, order: seq, priority: opts.direct ? 'high' : order.priority, status: 'accepted', unvalidated: true,
+        queuedAt: new Date(ctx.runner.now()).toISOString(), agent: order.agent, model: order.model, effort: order.effort, after: order.after,
+        ...(order.afterVerdicts ? { afterVerdicts: order.afterVerdicts } : {}),
+        ...(order.reviewOf ? { reviewOf: order.reviewOf } : {}),
+        // The cohort exists from the confirm on (cohort_show, cancel by cohort), spelled as its first task named it.
+        ...(order.cohort ? { cohort: (await touchCohort(ctx, order.cohort)).name } : {}),
+        ...(opts.confirmation ? { confirmation: opts.confirmation } : {}),
+        ...(opts.agent ? { agentOverride: opts.agent } : {}),
+        ...(opts.reuse ? { reuse: true } : {}),
+        ...(opts.direct ? { direct: true, ...(opts.direct.noAgent ? { noAgent: true } : {}) } : {}),
+        spec: renderRawSpec(raws[i] as RawSpec),
+      };
+      await writeEntry(ctx, entry);
+      added.push(entry);
+    }
+    return { added, existing: [] };
+  });
+}
+
+/**
+ * P93, the watcher's half: validate every accepted confirm with the checks its preview made (review_of, pin, `--agent`, repositories, worktrees,
+ * windows, `after`, bases of `new`), which touch git, tmux and the task records and so cannot run inside the 8 s MCP response. One confirm is one
+ * batch (an author and its reviewer are checked together). A valid batch joins the queue in its place (a `new` becomes its direct start); an
+ * invalid one fails with the reason in queue_list, a journal event and a notification, as a failed start does.
+ */
+export async function validateAccepted(ctx: Context, notifier: Notifier, opts: QueueTickOptions = {}): Promise<void> {
+  const accepted = readQueue(ctx.config).filter((e) => e.status === 'accepted');
+  const batches = new Map<string, QueueEntry[]>();
+  for (const entry of accepted) {
+    const key = entry.confirmation?.token ?? `seq:${entry.seq}`;
+    batches.set(key, [...(batches.get(key) ?? []), entry]);
+  }
+  for (const batch of batches.values()) {
+    await withStartLock(ctx, async () => {
+      const all = readQueue(ctx.config);
+      const same = (a: QueueEntry, b: QueueEntry) => a.seq === b.seq && a.task === b.task;
+      const fresh = batch.map((e) => all.find((f) => same(e, f))).filter((e): e is QueueEntry => e?.status === 'accepted');
+      if (!fresh.length) return;
+      const others = all.filter((e) => !fresh.some((f) => same(e, f)));
+      const first = fresh[0]!;
+      try {
+        const raws = fresh.map((e) => splitSpecs(e.spec, `queue entry ${e.task}`)[0] as RawSpec);
+        const agent = first.agentOverride ? { agent: first.agentOverride } : {};
+        let items: QueueAddItem[];
+        if (first.direct) {
+          const knownAuthors = new Map(others.filter((e) => e.direct).map((e) => [e.task, { agent: e.agent, model: e.model }]));
+          // A confirmed start waits for a free window of its provider like every direct start; a full provider is not a reason to fail it.
+          const specs = await planBatch(ctx, raws.map((raw) => resolveSpec(raw, { config: ctx.config })), { ...agent, noSwitch: true, reuse: Boolean(first.reuse), knownAuthors, ignoreLimits: true });
+          for (const spec of specs) { const warnings = reportPathWarnings(ctx.config, spec); if (warnings.length) throw new AgentctlError(`${spec.task}: ${warnings.join('; ')}`); }
+          items = specs.map((spec, i) => ({ raw: raws[i] as RawSpec, spec }));
+        } else {
+          items = await validateQueueAdd(ctx, raws, others, agent);
+          for (const { spec } of items) { const warnings = reportPathWarnings(ctx.config, spec); if (warnings.length) throw new AgentctlError(`${spec.task}: ${warnings.join('; ')}`); }
+        }
+        await commitQueueAdd(ctx, items, { ...agent, ...(first.reuse ? { reuse: true } : {}), ...(first.direct ? { direct: { noAgent: Boolean(first.noAgent) } } : {}), accepted: fresh });
+        await opts.log?.(`queue: ${fresh.map((e) => e.task).join(', ')} accepted spec validated`);
+      } catch (e) {
+        const error = e instanceof AgentctlError && e.hint ? `${e.message}\nHint: ${e.hint}` : errorMessage(e);
+        for (const entry of fresh) await rejectAccepted(ctx, entry, error, notifier, opts);
+      }
+    });
+  }
+}
+
+/** An accepted spec that the watcher's validation refused: failed, with the reason; queue_retry validates it again. */
+async function rejectAccepted(ctx: Context, entry: QueueEntry, error: string, notifier: Notifier, opts: QueueTickOptions): Promise<void> {
+  const highest = readQueue(ctx.config).reduce((n, e) => Math.max(n, e.order, e.seq), 0);
+  const failed: QueueEntry = { ...entry, status: 'failed', unvalidated: true, failedAt: new Date(ctx.runner.now()).toISOString(), error, order: highest + 1 };
+  await writeEntry(ctx, failed);
+  await ctx.runner.writeFile(queueLogFile(ctx.config, failed), `error: ${error}\n`);
+  const safeError = (redactQueue({ ...entry, error }, ctx.config) as QueueEntry).error ?? 'n/d';
+  // A validation error lists its problems under a heading ("Cannot start the tasks:"): the event carries the heading and the first problem.
+  const reason = safeError.split('\n').map((line) => line.trim().replace(/^- /, '')).filter(Boolean).slice(0, 2).join(' ');
+  const text = `${entry.task}: przyjęta spec odrzucona przy sprawdzeniu w watch – ${reason}`;
+  await opts.log?.(`queue: ${text}`);
+  await recordJournal(ctx, { kind: 'queue-failed', task: entry.task, text, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
+  await notifyPlain(ctx, notifier, entry.task, `${text} (agentctl queue retry ${entry.task})`, opts.self);
 }
 
 /** Registration preserves the author relationship, but only the eventual TASK.md can validate the effective provider/model. */
@@ -530,6 +667,13 @@ async function retryEntryLocked(ctx: Context, input: string): Promise<QueueEntry
   let entry = original;
   if (entry.status !== 'failed') throw new AgentctlError(`${entry.task} is ${entry.status}, not failed`);
   // An old-format automatic review is rebuilt BEFORE any residue check: the residue it complains about is the author's checkout it must not use.
+  if (entry.unvalidated) {
+    // The spec never passed the watcher's validation (P93): it goes back to it, in its place; the watcher checks it again at its next tick.
+    const { failedAt: _f, error: _e, ...rest } = entry;
+    const again: QueueEntry = { ...rest, status: 'accepted' };
+    await writeEntry(ctx, again);
+    return again;
+  }
   if (entry.autoReview) entry = await rebuildAutoReview(ctx, entry, { write: false });
   const spec = resolveSpec(splitSpecs(entry.spec, `queue entry ${entry.task}`)[0] as RawSpec, { config: ctx.config });
   await checkRetryWorktrees(ctx.runner, spec.repos);
@@ -558,8 +702,12 @@ export type Condition =
   | { kind: 'slot'; text: string }
   | { kind: 'hold'; text: string }
   | { kind: 'paused'; text: string }
+  | { kind: 'accepted'; text: string }
   | { kind: 'starting'; text: string }
   | { kind: 'failed'; text: string };
+
+/** queue_list for an accepted spec (P93): the confirm recorded it, the watcher validates it at its next tick. */
+export const ACCEPTED_TEXT = 'przyjęte – watch sprawdza spec przy najbliższym ticku';
 
 export interface QueueView {
   /** 1-based place in the line of the waiting entries; null for the ones being started and the failed ones. */
@@ -589,6 +737,7 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
   let position = 0;
   return entries.map((entry): QueueView => {
     if (entry.status === 'failed') return { position: null, entry, condition: { kind: 'failed', text: `failed: ${(entry.error ?? '').split('\n')[0] ?? ''}` }, since: entry.failedAt ?? entry.queuedAt };
+    if (entry.status === 'accepted') return { position: null, entry, condition: { kind: 'accepted', text: entry.direct ? `uruchamiane – czeka na najbliższy tick watch (${ACCEPTED_TEXT})` : ACCEPTED_TEXT }, since: entry.queuedAt };
     if (entry.status === 'starting') return { position: null, entry, condition: { kind: 'starting', text: entry.direct || readSetupProgress(config, entry.task, queueDiagnosticSources(entries)) ? startProgressText(readSetupProgress(config, entry.task, queueDiagnosticSources(entries)), nowMs) : 'starting' }, since: entry.startingAt ?? entry.queuedAt };
     position++;
     const heavyReason = heavyWait(config, isHeavy(entry), heavy.size);
@@ -742,6 +891,8 @@ async function closeNeverReadyWindow(ctx: Context, task: string): Promise<boolea
 export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Notifier, opts: QueueTickOptions = {}): Promise<string[]> {
   const { config } = ctx;
   await touchWorker(ctx);
+  // Accepted MCP confirms are validated even while the queue is paused or disabled: the answer (queued, or failed with the reason) is due either way.
+  await validateAccepted(ctx, notifier, opts);
   if (!config.queue.enabled) return [];
   // A paused queue starts nothing that waits in line; an explicit start (`direct`) is not in the line.
   const paused = isPaused(config);

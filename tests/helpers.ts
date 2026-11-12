@@ -55,6 +55,12 @@ export function acknowledgingRespond(respond?: RecordingOptions['respond']): Rec
   };
 }
 
+/** What the watcher's next tick does first with MCP `queue`/`new` confirms (P93): it validates the accepted specs, then they wait in the line. */
+export async function watcherValidates(config: GlobalConfig, runner: Runner): Promise<void> {
+  const { validateAccepted } = await import('../src/core/queue.ts');
+  await validateAccepted(new Context(runner, config, () => {}), { clickable: false, notify: async () => {} });
+}
+
 /** The watcher heartbeat that watchAlive accepts: a chat `new` confirm is refused without it. */
 export function fakeWatcher(config: GlobalConfig): void {
   fs.mkdirSync(config.stateDir, { recursive: true });

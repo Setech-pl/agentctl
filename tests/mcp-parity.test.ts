@@ -9,7 +9,7 @@ import { MCP_ALLOW_GROUPS, MCP_WRITE_TOOLS } from '../src/core/config.ts';
 import { Context } from '../src/core/context.ts';
 import { MCP_TOOLS, auditPath } from '../src/core/mcp-tools.ts';
 import type { McpDeps } from '../src/core/mcp-tools.ts';
-import { DiskRunner, FakeTmux, fakeWatcher, makeConfig, seedTask, useScratch } from './helpers.ts';
+import { DiskRunner, FakeTmux, fakeWatcher, makeConfig, seedTask, useScratch, watcherValidates } from './helpers.ts';
 import { readQueue, saveEntry } from '../src/core/queue.ts';
 import { touchCohort } from '../src/core/cohort.ts';
 import { readJournal } from '../src/core/journal.ts';
@@ -100,6 +100,7 @@ describe('MCP parity guard', () => {
         const spec = `---\ntask: Q-1\nagent: claude\nrepos:\n  - path: ${repo}\n    worktree: ${repo}-wt\n---\nFake.\n`;
         await f.call('queue', { spec });
         assert.equal((await f.call('queue', { spec, confirm: true })).isError, undefined);
+        await watcherValidates(f.config, f.runner);
         const entry = readQueue(f.config)[0]!;
         const ctx = f.deps.context(() => {});
         if (name === 'queue_retry') await saveEntry(ctx, { ...entry, status: 'failed', error: 'git ETIMEDOUT', failedAt: new Date().toISOString() });
@@ -137,7 +138,7 @@ describe('MCP parity guard', () => {
     assert.match(preview.text, /OPT-1  codex/);
     const done = await f.call('new', { ...args, confirm: true });
     assert.equal(done.isError, undefined, done.text);
-    assert.match(done.text, /^Registered: OPT-1 \(codex \S+\/medium\)\. The worktrees are prepared in the watcher/);
+    assert.match(done.text, /^Registered: OPT-1 \(codex \S+\/medium\) – starting\. The worktrees are prepared in the watcher/);
     assert.ok(!f.runner.commands.some((line) => /tmux new|claude --|codex -/.test(line)));
   });
   it('all added reads remain available without allow', async () => {

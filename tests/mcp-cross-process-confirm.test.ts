@@ -6,7 +6,7 @@ import { it } from 'node:test';
 import { fakeWatcher, makeConfig, specText, useScratch } from './helpers.ts';
 import { readQueue } from '../src/core/queue.ts';
 const scratch = useScratch();
-for (const name of ['queue', 'new']) it(`R2: two MCP processes confirm ${name} once under start.lock`, { timeout: 30000 }, async () => {
+for (const name of ['queue', 'new']) it(`R2: two MCP processes confirm ${name} once under the queue accept lock`, { timeout: 30000 }, async () => {
   const root = scratch.sub(name);
   const config = makeConfig(root, `mcp: {allow: [${name}]}\ncapacity: {snapshot: false, codex_refresh: false}\n`);
   fakeWatcher(config);
@@ -24,7 +24,7 @@ for (const name of ['queue', 'new']) it(`R2: two MCP processes confirm ${name} o
     const open = fs.openSync;
     fs.openSync = function(file, ...args) {
       try { return open.call(fs, file, ...args); }
-      catch(e) { if (confirm && String(file).endsWith('/start.lock') && e.code === 'EEXIST' && !blocked) { blocked = true; process.send({stage:'blocked'}); } throw e; }
+      catch(e) { if (confirm && String(file).endsWith('/queue-accept.lock') && e.code === 'EEXIST' && !blocked) { blocked = true; process.send({stage:'blocked'}); } throw e; }
     };
     const runner = new DiskRunner({dryRun:false, respond:new FakeTmux().respond});
     const write = runner.writeFile.bind(runner);

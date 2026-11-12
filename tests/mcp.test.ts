@@ -402,12 +402,12 @@ describe('mcp: the write tools', () => {
     const again = await t.call('new', { spec });
     assert.match(again.text, /Start: asynchronous/);
     const done = await t.call('new', { spec, confirm: true });
-    assert.match(done.text, /^Registered: NC-9 \(claude default\/high\)/);
+    assert.match(done.text, /^Registered: NC-9 \(claude default\/high\) – starting\./);
     assert.ok(!t.runner.commands.some((c) => c.startsWith('git') && c.includes('worktree add')), 'no checkout in the server');
     assert.ok(!t.runner.commands.some((c) => c.includes('new-window') || c.includes('new-session')), 'no window in the server');
     assert.equal(readTaskRecord(t.config, 'nc-9'), undefined, 'no TASK.md yet: the watcher has not begun');
     const [entry] = readQueue(t.config);
-    assert.deepEqual([entry?.task, entry?.status, entry?.direct], ['NC-9', 'queued', true]);
+    assert.deepEqual([entry?.task, entry?.status, entry?.direct], ['NC-9', 'accepted', true], 'accepted: the watcher validates it at its next tick');
     assert.deepEqual(t.notified, ['czat zlecił: new NC-9']);
   });
 
