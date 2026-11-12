@@ -40,9 +40,11 @@ export function assertClean(opts: Options, dirty: boolean): void {
   if (opts.tier !== 'quick' && dirty && !opts.allowDirty) throw new Error(`${opts.tier} refuses a dirty tree; use --allow-dirty to record the exception`);
 }
 export function planTier(tier: Tier, tests: string[], live: string[], skipLive = false, node26Only = false): string[] {
-  if (tier === 'quick') return ['typecheck', 'build', 'git diff --check', `tests current: ${tests.join(' ') || '(none)'}`];
-  if (tier === 'full') return [...(node26Only ? [] : ['tests Node 22.14.0 (full)']), 'tests Node 26 (full)'];
-  return ['build', 'pack', 'installed-tarball smoke Node 22.14.0', 'doctor 10-case matrix Node 22.14.0', 'installed-tarball smoke Node 26', 'doctor 10-case matrix Node 26', ...(skipLive ? ['SKIP live entries'] : live)];
+  // Every tier ends its checks with the regression catalog: a known, fixed bug that comes back fails the build.
+  const regression = 'regression scenarios (tests/regression/CATALOG.md)';
+  if (tier === 'quick') return ['typecheck', 'build', 'git diff --check', regression, `tests current: ${tests.join(' ') || '(none)'}`];
+  if (tier === 'full') return [...(node26Only ? [] : ['tests Node 22.14.0 (full)']), 'tests Node 26 (full)', regression];
+  return ['build', 'pack', 'installed-tarball smoke Node 22.14.0', 'doctor 10-case matrix Node 22.14.0', 'installed-tarball smoke Node 26', 'doctor 10-case matrix Node 26', regression, ...(skipLive ? ['SKIP live entries'] : live)];
 }
 /** Static relative import closure plus exact test naming. Unknown inputs always widen to the full suite. */
 export function affectedTests(changed: string[], sources: Record<string, string>, tests: string[]): { tests: string[]; uncertain: boolean } {
@@ -173,12 +175,13 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       await run('build', process.execPath, ['node_modules/typescript/bin/tsc', '-p', 'tsconfig.build.json', '--outDir', path.join(work, 'dist')]);
       await run('finish-build', process.execPath, ['scripts/finish-build.js', path.join(work, 'dist')]);
       await run('diff-check', 'git', ['diff', '--check']);
+      await run('regression', process.execPath, ['--experimental-strip-types', '--no-warnings', 'scripts/regression.ts']);
       await testSuite(process.execPath, 'current', affected.tests);
     } else {
       if (!opts.node26Only) await run('runtime-node22', process.execPath, ['--experimental-strip-types', '--no-warnings', 'scripts/runtime.ts', work]);
       const node22 = node22Path(), node26 = homebrewNode26();
       result.nodeVersions = { ...(!opts.node26Only ? { node22: checkRuntime(node22, '22.14.0') } : {}), node26: checkRuntime(node26, '26.') };
-      if (opts.tier === 'full') { if (!opts.node26Only) await testSuite(node22, 'node22', tests); await testSuite(node26, 'node26', tests); }
+      if (opts.tier === 'full') { if (!opts.node26Only) await testSuite(node22, 'node22', tests); await testSuite(node26, 'node26', tests); await run('regression', node26, ['--experimental-strip-types', '--no-warnings', 'scripts/regression.ts']); }
       else {
         await run('build', node26, ['node_modules/typescript/bin/tsc', '-p', 'tsconfig.build.json', '--outDir', path.join(work, 'dist')]);
         await run('finish-build', node26, ['scripts/finish-build.js', path.join(work, 'dist')]);
@@ -199,6 +202,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
           await run(`doctor-${label}`, node!, ['--experimental-strip-types', '--no-warnings', 'scripts/doctor-matrix.ts'], runtimeEnv);
           result.counts.pass += 10;
         }
+        await run('regression', node26, ['--experimental-strip-types', '--no-warnings', 'scripts/regression.ts']);
         if (opts.skipLive) result.counts.skip += live.length;
         else for (const file of live) await run(file, node26, ['--experimental-strip-types', '--no-warnings', file]);
       }
