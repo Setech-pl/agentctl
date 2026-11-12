@@ -8,7 +8,7 @@ import { seedTask } from './helpers.ts';
 import { Alerts } from '../src/core/alert.ts';
 import { handleEvent } from '../src/core/event-command.ts';
 import { sendPrompts } from '../src/core/send.ts';
-import { drainPromptQueue, enqueuePrompt, promptQueueView, withdrawPrompt } from '../src/core/prompt-queue.ts';
+import { drainPromptQueue, enqueuePrompt, promptQueueView, readPromptQueue, withdrawPrompt } from '../src/core/prompt-queue.ts';
 import { readTaskRecord } from '../src/core/taskstore.ts';
 import { readJournal } from '../src/core/journal.ts';
 import { composerFixture } from './composer-fixture.ts';
@@ -73,4 +73,19 @@ it('P90: an idle Codex still receives the paste and Enter immediately', async ()
   assert.equal(result!.outcome, undefined);
   assert.equal(w.tmux.seen.filter(s => s.startsWith('paste-buffer')).length, 1);
   assert.equal(w.tmux.seen.filter(s => s.startsWith('send-keys')).length, 1);
+});
+
+// Documents the single-capture gate (src/core/prompt-queue.ts, Codex branch): an item enqueued without waitForTurnEnd (idle at send
+// time, or queued by a version before 0.19.4) is released by ONE idle composer capture, whatever the watch state says. Only
+// waitForTurnEnd items are held for the confirmed turn end. Making every item wait would change delivery of legacy queues, so it is
+// noted in the 0.19.4 report instead of changed here.
+for (const waitForTurnEnd of [true, false]) it(`P90: queued Codex item with waitForTurnEnd=${waitForTurnEnd} versus one idle capture while status says working`, async () => {
+  const w = world(`single-capture-${waitForTurnEnd}`);
+  seedTask(w.config, 'GATE', { agent: 'codex' });
+  w.tmux.add('gate', composerFixture('› Ask Codex to do anything\n'));
+  await enqueuePrompt(w.ctx, 'gate', 'Queued follow-up', { waitForTurnEnd });
+  await drainPromptQueue(w.ctx, 'gate', 'working');
+  const pasted = w.tmux.seen.filter(s => s.startsWith('paste-buffer')).length;
+  assert.equal(pasted, waitForTurnEnd ? 0 : 1);
+  assert.equal(readPromptQueue(w.ctx, 'gate').length, waitForTurnEnd ? 1 : 0); // FIFO only: an unconfirmed paste is the active prompt
 });
