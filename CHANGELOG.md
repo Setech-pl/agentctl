@@ -4,15 +4,19 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
-- P93: MCP `queue`/`new` confirm records the accepted spec (status `accepted`, short accept lock, no re-plan, no start.lock) and answers within the 8 s budget on a loaded host; the watcher validates accepted specs at its next tick and queues/starts them, a refused one is `failed` with its reason, an event and a notification (`queue_retry` validates again). Previews plan once, with no git network, git status, worker measurement or worktree walk. / P93: potwierdzenie MCP `queue`/`new` zapisuje przyjętą specyfikację (status `accepted`, krótka blokada przyjęcia, bez ponownego planowania i bez start.lock) i odpowiada w ramach 8 s także na obciążonym komputerze; watch sprawdza przyjęte specyfikacje przy najbliższym ticku i je kolejkuje/uruchamia, odrzucona ma status `failed` z przyczyną, zdarzeniem i powiadomieniem (`queue_retry` sprawdza ponownie). Podglądy planują raz, bez sieci git, git status, pomiarów w workerach i przechodzenia worktree.
-
-- P92: Kimi takes the first prompt on its start screen: paste into a settled, whole composer, `C-m` once the composer and the lines above it hold still (footer tips may rotate); an unsettled paste waits for a later watch pass instead of the owner; `new` waits for a structural Kimi composer. / P92: Kimi przyjmuje pierwszy prompt na ekranie startowym: wklejenie do ustabilizowanego, pełnego pola, `C-m`, gdy pole i wiersze nad nim się nie zmieniają (podpowiedzi w stopce mogą się zmieniać); nieustabilizowane wklejenie czeka na kolejny przebieg watch zamiast na właściciela; `new` czeka na pełną ramkę pola Kimi.
-
 - P83: preserve cancel selector validation before cohort resolution; history tests seed background observations before close. / P83: walidacja wyboru cancel poprzedza rozwiązywanie kohort; testy historii zapisują obserwacje tła przed close.
 
 - P83 cohort close/cancel selection reads metadata only; nested MCP status planners inherit cached-only mode. / Wybór kohort dla close/cancel w P83 czyta tylko metadane; zagnieżdżone planery statusu MCP dziedziczą tryb zapisanych danych.
 
 - Board/Ink test instrumentation counts bounded task-header reads and keeps board fixtures in gate-owned scratch. / Licznik testowy planszy i Ink uwzględnia ograniczone odczyty nagłówków i przechowuje plansze testowe w katalogu roboczym gate.
+
+## [0.19.5] - 2026-11-12
+
+- Hotfix release on top of 0.19.4: package and lockfile versions are 0.19.5. / Wydanie poprawkowe na bazie 0.19.4: wersje pakietu i lockfile to 0.19.5.
+
+- P93: MCP `queue`/`new` confirm records the accepted spec (status `accepted`, short accept lock, no re-plan, no start.lock) and answers within the 8 s budget on a loaded host; the watcher validates accepted specs at its next tick and queues/starts them, a refused one is `failed` with its reason, an event and a notification (`queue_retry` validates again). Previews plan once, with no git network, git status, worker measurement or worktree walk. / P93: potwierdzenie MCP `queue`/`new` zapisuje przyjętą specyfikację (status `accepted`, krótka blokada przyjęcia, bez ponownego planowania i bez start.lock) i odpowiada w ramach 8 s także na obciążonym komputerze; watch sprawdza przyjęte specyfikacje przy najbliższym ticku i je kolejkuje/uruchamia, odrzucona ma status `failed` z przyczyną, zdarzeniem i powiadomieniem (`queue_retry` sprawdza ponownie). Podglądy planują raz, bez sieci git, git status, pomiarów w workerach i przechodzenia worktree.
+
+- P92: Kimi takes the first prompt on its start screen: paste into a settled, whole composer, `C-m` once the composer and the lines above it hold still (footer tips may rotate); an unsettled paste waits for a later watch pass instead of the owner; `new` waits for a structural Kimi composer. / P92: Kimi przyjmuje pierwszy prompt na ekranie startowym: wklejenie do ustabilizowanego, pełnego pola, `C-m`, gdy pole i wiersze nad nim się nie zmieniają (podpowiedzi w stopce mogą się zmieniać); nieustabilizowane wklejenie czeka na kolejny przebieg watch zamiast na właściciela; `new` czeka na pełną ramkę pola Kimi.
 
 ## [0.19.4] - 2026-11-12
 
