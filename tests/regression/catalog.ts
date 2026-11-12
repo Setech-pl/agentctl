@@ -21,6 +21,8 @@ export interface BugEntry {
   noProof?: string;
 }
 
+// P19 scenarios leave out the three tests with sub-2-second wall-clock windows (R5 background parent, hung-worker timeout, collectDisk budget):
+// a regression scenario must not flake on a loaded host. Their coverage stays in the normal test run.
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
@@ -93,8 +95,8 @@ export const BUGS: BugEntry[] = [
   { id: 'P30', fixedIn: '0.18.2', symptom: 'A rejected config reload was forgotten between reads, hiding the rejection from doctor and status.', scenarios: [s('config-reload.test.ts', 'rejection receipt')] },
   { id: 'P27', fixedIn: '0.18.2', symptom: 'Long PATH or Codex notify arguments overflowed the tmux command line when launching an agent.', scenarios: [s('launch-script.test.ts')] },
   { id: 'P28', fixedIn: '0.18.2', symptom: 'Kimi status stayed on a stale error banner after a successful re-login.', scenarios: [s('c2-kimi.test.ts'), s('kimi.test.ts', 'P28')] },
-  { id: 'P19', fixedIn: '0.18.2', symptom: 'The MCP server was held by a task start and by synchronous worktree-size walks over node_modules.', scenarios: [s('p19-setup.test.ts', '^P19'), s('p19-reads.test.ts')] },
-  { id: 'P19-FIX2', fixedIn: '0.18.2', symptom: 'Disk measurements were duplicated, never invalidated, and batched author/reviewer starts lost their order and scope.', scenarios: [s('p19-fix2-disk.test.ts'), s('p19-fix2-measurement.test.ts'), s('p19-fix2-no-agent.test.ts'), s('p19-fix2-setup.test.ts')] },
+  { id: 'P19', fixedIn: '0.18.2', symptom: 'The MCP server was held by a task start and by synchronous worktree-size walks over node_modules.', scenarios: [s('p19-setup.test.ts', '^P19'), s('p19-reads.test.ts', 'RealRunner: a child process|the size walks')] },
+  { id: 'P19-FIX2', fixedIn: '0.18.2', symptom: 'Disk measurements were duplicated, never invalidated, and batched author/reviewer starts lost their order and scope.', scenarios: [s('p19-fix2-disk.test.ts', 'R2: cold inventory|R3: path TTLs|R3: removed and replaced'), s('p19-fix2-measurement.test.ts', 'disk.workers=1|a crashed foreground|shutdown cancels|MCP stdin end|GC rechecks'), s('p19-fix2-no-agent.test.ts'), s('p19-fix2-setup.test.ts')] },
   { id: 'P15', fixedIn: '0.18.2', symptom: '`send` to a working agent was silent and could press Enter into the wrong field or mark an undelivered message as delivered.', scenarios: [s('p15-fix3-contract.test.ts'), s('p15-fix3.test.ts'), s('p15-fix4.test.ts'), s('p15-fix5.test.ts')] },
   { id: 'P15b', fixedIn: '0.18.2', symptom: 'A collapsed Claude paste arrived wrapped in <pasted_content> and never matched the pending prompt, ending in needs-attention.', scenarios: [s('p15-send.test.ts', 'P15b')] },
   { id: 'P16', fixedIn: '0.18.2', symptom: 'Codex follow-ups to a working agent were not recognised as queued/steered, so delivery stayed unconfirmed.', scenarios: [s('p15-send.test.ts', 'P16')] },
