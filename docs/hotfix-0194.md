@@ -15,3 +15,11 @@ P89: Zwykłe `after` akceptuje PASS, PASS with findings, PARTIAL lub GO z pierws
 P85: MCP doctor reads cached worktree sizes, avoids worktree discovery and returns a task inventory instead of per-task report/link probes, while preserving active callback wiring diagnostics. Ordinary CLI doctor retains link ancestry validation. `doctor --timings` includes cached doctor section wall times alongside the existing five read checks, so a slow section is named.
 
 P85: MCP doctor czyta zapisane rozmiary worktree, pomija przeszukiwanie worktree i bieżące sprawdzanie historii Git dla celów linków. Zwykły CLI doctor zachowuje walidację historii linków. `doctor --timings` oprócz pięciu dotychczasowych odczytów podaje czas sekcji zapisanej diagnostyki, wskazując wolną sekcję.
+
+Review follow-ups: a spec with `after_verdict` but without `after` is rejected (the override has nothing to apply to). `close` writes one `delivery` journal entry for every follow-up it discards (queued or not yet delivered).
+
+Poprawki z przeglądu: spec z `after_verdict` bez `after` jest odrzucana (nie ma czego nadpisać). `close` zapisuje jeden wpis dziennika `delivery` dla każdego odrzucanego follow-upu (w kolejce lub jeszcze niedostarczonego).
+
+Regression suite: `tests/regression/CATALOG.md` lists every known fixed bug of 0.18.x and 0.19.x with its deterministic scenario and pre-fix proof. `npm run regression` runs it and every `npm run gate` tier includes it.
+
+Zestaw regresji: `tests/regression/CATALOG.md` wymienia każdy znany naprawiony błąd z 0.18.x i 0.19.x wraz ze scenariuszem i dowodem na poprzednim wydaniu. `npm run regression` uruchamia go, a każdy poziom `npm run gate` go zawiera.

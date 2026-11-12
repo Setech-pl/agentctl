@@ -10,7 +10,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - Board/Ink test instrumentation counts bounded task-header reads and keeps board fixtures in gate-owned scratch. / Licznik testowy planszy i Ink uwzględnia ograniczone odczyty nagłówków i przechowuje plansze testowe w katalogu roboczym gate.
 
-## [0.19.4] - 2026-11-11
+## [0.19.4] - 2026-11-12
 
 - P85: MCP doctor reuses one inventory snapshot and cached sizes, skipping detailed report/link probes while preserving active wiring warnings; doctor --timings identifies diagnostic section wall times. / P85: MCP doctor używa jednego indeksu i zapisanych rozmiarów, pomijając szczegółowe kontrole raportów/linków i zachowując ostrzeżenia o aktywnych callbackach; doctor --timings podaje czas sekcji diagnostycznych.
 
@@ -19,6 +19,12 @@ All notable changes to this project are documented here. The format follows [Kee
 - P90: busy Codex follow-ups wait durably until confirmed idle/turn end, including windows with existing reports; send returns queued_until_turn_end with message_id, status/board/events expose pending messages and withdraw remains available. Claude/Kimi unchanged. / P90: follow-upy do pracującego Codexa czekają trwale na potwierdzoną bezczynność/koniec tury; send zwraca queued_until_turn_end i message_id, status/board/events pokazują kolejkę, withdraw działa. Claude/Kimi bez zmian.
 
 - P91: pending/withdrawn messages and closed tasks no longer hide existing reports; get_report returns a message warning, withdraw/close clear stale freshness markers. / P91: wiadomości oczekujące i wycofane oraz zamknięte zadania nie ukrywają raportów; get_report zwraca ostrzeżenie, withdraw/close usuwają nieaktualne znaczniki.
+
+- Review follow-ups: a spec with `after_verdict` but no `after` is rejected with a clear error; `close` writes one journal entry per message it drops (queued and unsent); a test documents that a queued Codex item without waitForTurnEnd is released by a single idle capture (unchanged, noted). / Poprawki z przeglądu: spec z `after_verdict` bez `after` jest odrzucana z czytelnym błędem; `close` zapisuje po jednym wpisie dziennika na każdą odrzuconą wiadomość (w kolejce i niewysłaną); test dokumentuje, że element kolejki Codexa bez waitForTurnEnd jest zwalniany jednym odczytem bezczynności (bez zmiany, odnotowane).
+
+- Regression suite: `tests/regression/catalog.ts` and `CATALOG.md` list every known fixed bug of 0.18.x and 0.19.x (bug ID, symptom, deterministic scenario, fixed-in version, measured pre-fix proof against the previous release); `npm run regression` runs them and is a step of every `npm run gate` tier, so a returning bug fails the build. AGENTS.md requires a scenario and a catalog entry with every future bug fix. / Zestaw regresji: `tests/regression/catalog.ts` i `CATALOG.md` wymieniają każdy znany naprawiony błąd z 0.18.x i 0.19.x (identyfikator, objaw, deterministyczny scenariusz, wersja naprawy, zmierzony dowód na poprzednim wydaniu); `npm run regression` uruchamia je i jest krokiem każdego poziomu `npm run gate`, więc powracający błąd przerywa build. AGENTS.md wymaga scenariusza i wpisu w katalogu przy każdej przyszłej poprawce.
+
+- Known: the release-gate scenario `live-hotfix-0173-p` failed on 11.11 (Codex Enter took 9.8 s against an 8 s window; watcher-ready retry). The owner waived it for this hotfix; timing work is postponed. / Znane: scenariusz bramki wydania `live-hotfix-0173-p` nie przeszedł 11.11 (Enter w Codexie trwał 9,8 s przy oknie 8 s; ponowienie gotowości watchera). Właściciel zwolnił go dla tej poprawki; prace nad czasami odłożono.
 
 ## [0.19.3] - 2026-11-10
 
