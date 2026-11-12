@@ -5,7 +5,8 @@ import { it } from 'node:test';
 import { world, scratch } from './hotfix-0194-fixture.ts';
 import { seedTask } from './helpers.ts';
 import { queuePrompt } from '../src/core/prompt-delivery.ts';
-import { withdrawPrompt } from '../src/core/prompt-queue.ts';
+import { enqueuePrompt, readPromptQueue, withdrawPrompt } from '../src/core/prompt-queue.ts';
+import { readJournal } from '../src/core/journal.ts';
 import { closeTask } from '../src/core/close.ts';
 import { reportFingerprint } from '../src/core/report-state.ts';
 import { readTaskRecord, setHeaderFields, taskFile } from '../src/core/taskstore.ts';
@@ -31,4 +32,23 @@ for (const state of ['pending', 'withdrawn', 'stale', 'closed'] as const) it(`P9
     assert.match(result.text, /report may predate it/);
   }
   if (state !== 'pending') assert.equal(readTaskRecord(w.config, 'report')!.deliveryReportBaseline, undefined);
+});
+it('close journals one entry per message it drops (queued FIFO items and the unsent active prompt)', async () => {
+  const w = world('close-journal');
+  const record = seedTask(w.config, 'DROPS');
+  await queuePrompt(w.ctx, record, 'Active, never delivered', 'pending', { kind: 'followup' });
+  const active = readTaskRecord(w.config, 'drops')!.deliveryId!;
+  const first = await enqueuePrompt(w.ctx, 'drops', 'Queued one', { waitForTurnEnd: true });
+  const second = await enqueuePrompt(w.ctx, 'drops', 'Queued two', { waitForTurnEnd: true });
+  await closeTask(w.ctx, 'DROPS');
+  const dropped = readJournal(w.config).filter(e => e.kind === 'delivery' && e.task === 'DROPS' && /close odrzucił/.test(e.text));
+  assert.equal(dropped.length, 3);
+  for (const id of [active, first.id, second.id]) assert.equal(dropped.filter(e => e.text.includes(id.slice(0, 8))).length, 1, id);
+  assert.deepEqual(readPromptQueue(w.ctx, 'drops'), []);
+});
+it('close journals nothing when no message was waiting', async () => {
+  const w = world('close-journal-none');
+  seedTask(w.config, 'CLEAN');
+  await closeTask(w.ctx, 'CLEAN');
+  assert.equal(readJournal(w.config).filter(e => /close odrzucił/.test(e.text)).length, 0);
 });

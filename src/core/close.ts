@@ -1,4 +1,5 @@
-import { reportMessageWarning, queueFile as promptQueueFile } from './prompt-queue.ts';
+import { readPromptQueue, reportMessageWarning, queueFile as promptQueueFile } from './prompt-queue.ts';
+import { recordJournal } from './journal.ts';
 import { worktreeCacheFreed } from './worktree-cache.ts';
 import { lastMeasurement } from './fs-measure.ts';
 import { restoreDiskMeasurements } from './disk.ts';
@@ -44,6 +45,10 @@ export async function closeTask(ctx: Context, taskArg: string, opts: CloseOption
   // The window is gone: the task is closed, whether or not the worktree can be removed below. The state and the report stay.
   if (record) {
     const warning = reportMessageWarning(ctx, window, record);
+    // Close discards every message not yet delivered; each one leaves a trace (an interrupted transfer shows the same id in both places).
+    const dropped = new Map(readPromptQueue(ctx, window).map(p => [p.id, p.queuedAt] as const));
+    if (record.pendingPrompt && record.promptDelivery !== 'sent') dropped.set(record.deliveryId ?? 'legacy', record.deliveryStartedAt ?? record.started);
+    for (const [id, since] of dropped) await recordJournal(ctx, { kind: 'delivery', task: record.task, text: `${record.task}: close odrzucił niedostarczoną wiadomość (${id.slice(0, 8)}), oczekiwała od ${since} [dostawa ${id.slice(0, 8)}]` });
     if (fs.existsSync(promptQueueFile(ctx, window))) await runner.writeFile(promptQueueFile(ctx, window), '[]');
     await setHeaderFields(runner, taskFile(config, window), { delivery_report_baseline: null, pending_prompt: null, prompt_delivery: null, report_message_warning: warning ?? null, closed: true, closed_at: new Date(runner.now()).toISOString() });
     // Before the worktree goes: the progress is read from it.
