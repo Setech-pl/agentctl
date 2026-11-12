@@ -37,7 +37,7 @@ it('P28 recomputes needs-input after re-login despite persisted event, observati
 for (const version of ['2.5.1', '']) it(`records fake kimi --version at start (${version || 'unreadable'}) and uses it in status and usage`, async () => {
   const w = world(`version-${version || 'empty'}`), fake = path.join(w.root, 'fake-kimi');
   fs.writeFileSync(fake, `#!/bin/sh\n[ "$1" = --version ] || exit 99\nprintf '%s\\n' '${version}'\n`, { mode: 0o755 });
-  const tmux = new FakeTmux(w.config.session); tmux.newWindowScreen = '│ > │';
+  const tmux = new FakeTmux(w.config.session); tmux.newWindowScreen = fs.readFileSync(path.join(REPO_ROOT, 'tests/fixtures/screen-kimi-02-bezczynny.txt'), 'utf8');
   const versionCalls: string[][] = [];
   const { ctx } = makeContext(w.config, { respond: (cmd, args, opts) => {
     if (cmd === 'kimi') { versionCalls.push(args); const r = spawnSync(fake, args, { encoding: 'utf8' }); return { code: r.status ?? 1, stdout: r.stdout, stderr: r.stderr }; }

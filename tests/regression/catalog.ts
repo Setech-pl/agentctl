@@ -26,6 +26,8 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  // 0.19.5
+  { id: 'P92', fixedIn: '0.19.5', symptom: 'Kimi did not take the first prompt: "Kimi screen is not stable before Enter" (a rotating footer tip) left it in the field for the owner.', scenarios: [s('p92-kimi-start.test.ts')] },
   // 0.19.4
   { id: 'P85', fixedIn: '0.19.4', symptom: 'MCP doctor probed every task report and link and walked worktrees, so it stalled on a large home.', scenarios: [s('hotfix-0194-p85.test.ts')] },
   { id: 'P89', fixedIn: '0.19.4', symptom: '`after` released dependents on any finished report; a FAIL/BLOCKED/NO-GO or missing first-line verdict did not hold them.', scenarios: [s('hotfix-0194-p89.test.ts')] },

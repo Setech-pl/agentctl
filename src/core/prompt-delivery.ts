@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { inspectReport, reportFingerprint } from './report-state.ts';
 import { PATTERN_FLAGS } from './config.ts';
-import type { AgentSettings } from './config.ts';
+import type { AgentName, AgentSettings } from './config.ts';
 import type { Context } from './context.ts';
 import { withFileLock } from './file-lock.ts';
 import { classifyScreen, inputVisible } from './state.ts';
@@ -28,12 +28,31 @@ export async function queuePrompt(ctx: Context, record: TaskRecord, text: string
 const outputFingerprint = (screen: string, pattern: string) => createHash('sha256').update(screen.split('\n').filter(line => new RegExp(pattern, PATTERN_FLAGS).test(line)).join('\n')).digest('hex');
 
 export const DELIVERY_WARNING = 'dostarczenie niepotwierdzone – sprawdzam';
+/** Kimi: our paste stands in the field, no Enter has gone in yet, and the screen has not held still; the watcher presses Enter once it does. */
+export const KIMI_SETTLING = 'ekran Kimi jeszcze się zmienia – Enter po ustabilizowaniu';
 /** The paste stands in the input field and no Enter took it. */
 export const NOT_DELIVERED = 'nie dostarczono – tekst w polu wpisywania';
 /** The screen shows the message in the agent's queue; no hook and no transcript has said so. It is a classification, not a confirmation. */
 export const QUEUED_IN_AGENT = 'w kolejce agenta – niepotwierdzone';
 /** Enters of one delivery: all in the call that pasted. After it agentctl presses Enter only when a human confirms the exact text (`send --enter-only`). */
 const PASTE_ENTERS = 3;
+/**
+ * Kimi only (stablePaste): how often and how far apart the screen is read until two reads agree before a paste or an Enter. Bounded on purpose:
+ * a screen that keeps changing gets no Enter in this call; the watcher looks again on its next pass (no global timeout is widened).
+ */
+const SETTLE_LOOKS = 8;
+const SETTLE_MS = 250;
+
+/**
+ * The part of a Kimi screen that has to hold still: the composer and everything above it. Below the composer Kimi redraws its footer on its own
+ * clock (a rotating tip, the context gauge), so a whole-screen comparison never settles for long (P92, dev 12.11: "Kimi screen is not stable before
+ * Enter" on the start screen left the first prompt in the field for the owner). Undefined while the composer box is not whole.
+ */
+export function kimiSettledView(screen: string): string | undefined {
+  const field = inspectField(screen, 'kimi');
+  if (!field.readable || field.bottom === undefined) return undefined;
+  return screen.split('\n').slice(0, field.bottom + 1).map(line => line.trimEnd()).join('\n');
+}
 
 export type DeliveryProof = 'delivered';
 
@@ -267,6 +286,100 @@ async function deliverOnce(ctx: Context, window: string): Promise<'sent' | 'pend
       return 'sent' as const;
     };
     const proofOf = (screen: string) => record.agent === 'unknown' ? null : proofSource(ctx, record, screen);
+    /**
+     * The Enters of one delivery after its paste, and the looks that follow each of them. `before` is the screen from before our paste (or, when a
+     * Kimi delivery resumes, the screen with the paste); `owned` is the field our paste left, when it is already known.
+     */
+    const enterLoop = async (before: Capture, owned: string[] | undefined): Promise<'sent' | 'confirming'> => {
+      const agent = record.agent as AgentName, settings = ctx.config.agents[agent], text = record.pendingPrompt ?? '', profile = provider(agent).screen;
+      /** The area of the field as the first capture after our paste shows it: it must be our paste, and every later Enter needs the same bytes. */
+      let image = owned;
+      for (let attempt = 0; attempt < PASTE_ENTERS; attempt++) {
+        if (attempt > 0) await ctx.runner.sleep(400);
+        let ready = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
+        const currentState = classifyScreen(ready.stdout, settings), field = inspectField(ready.stdout, record.agent), area = field.area;
+        const source = proofOf(ready.stdout !== before.stdout ? ready.stdout : '');
+        if (source) return sent(source);
+        if (await keepConfirmedQueue(ctx, record)) return 'confirming';
+        if (ready.code !== 0) return uncertain('the pane cannot be read');
+        if (!field.readable) return notDelivered(field.reason!);
+        // The screen of a working agent can look idle for a moment before the paste: what counts is the state with our paste in the field.
+        if (attempt === 0 && !record.deliveryWasBusy && ['working', 'background'].includes(currentState) && record.promptKind === 'followup') {
+          record.deliveryWasBusy = true;
+          await setHeaderFields(ctx.runner, file, { delivery_was_busy: true });
+        }
+        if (area.length) {
+          if (!image) {
+            if (!pasteImage(area, text, record.agent)) return notDelivered('the input shows something other than our paste; no Enter was sent');
+            image = area;
+            record.deliveryField = areaKey(area);
+            await setHeaderFields(ctx.runner, file, { delivery_field: record.deliveryField });
+          } else if (areaKey(area) !== areaKey(image)) return notDelivered('the input changed since our paste; no Enter was sent');
+        }
+        if (!mayPressEnter(currentState, record, settings)) return notDelivered(`the agent shows ${currentState}; no Enter was sent`);
+        if (profile.stablePaste) {
+          if (!area.length || !image) return uncertain('no owned Kimi draft before Enter');
+          // The composer and what stands above it must read the same twice in a row; the footer below it may change (kimiSettledView).
+          let settled: Capture | undefined;
+          for (let look = 0; look < SETTLE_LOOKS && !settled; look++) {
+            await ctx.runner.sleep(SETTLE_MS);
+            const next = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
+            if (next.code !== 0) return uncertain('the pane cannot be read');
+            const shown = inspectField(next.stdout, record.agent);
+            if (shown.readable && shown.area.length && areaKey(shown.area) !== areaKey(image)) {
+              // Kimi may still fold a long paste into "[paste #1 …]": before any Enter, a newer image of our own paste replaces the first one.
+              if ((record.deliveryEnters ?? 0) > 0 || !pasteImage(shown.area, text, record.agent)) return notDelivered('the input changed since our paste; no Enter was sent');
+              image = shown.area;
+              record.deliveryField = areaKey(image);
+              await setHeaderFields(ctx.runner, file, { delivery_field: record.deliveryField });
+            }
+            const state = classifyScreen(next.stdout, settings);
+            if (!mayPressEnter(state, record, settings)) return notDelivered(`the agent shows ${state}; no Enter was sent`);
+            const view = kimiSettledView(next.stdout);
+            if (view !== undefined && shown.area.length && view === kimiSettledView(ready.stdout)) settled = next;
+            ready = next;
+          }
+          if (!settled) {
+            if ((record.deliveryEnters ?? 0) > 0) return notDelivered('Kimi screen is not stable before Enter');
+            // No Enter has gone in for this paste: the watcher resumes it once the screen holds still (deliverOnce, the confirming branch).
+            await setHeaderFields(ctx.runner, file, { prompt_delivery: 'confirming', delivery_result: null, prompt_error: `${DELIVERY_WARNING}: ${KIMI_SETTLING}` });
+            return 'confirming';
+          }
+          ready = settled;
+        }
+        const pressed = await pressEnterAfter(ctx, record, file, window, ready);
+        if (pressed.code !== 0) return notDelivered(`Enter failed: ${pressed.stderr}`);
+        let ourDraft = false;
+        for (let poll = 0; poll < 8; poll++) {
+          await ctx.runner.sleep(150);
+          const pane = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
+          if (pane.code !== 0) return uncertain('the pane cannot be read');
+          const state = classifyScreen(pane.stdout, settings), shown = fieldArea(pane.stdout, settings.footerPatterns, record.agent);
+          // A quick completed turn can finish between polls; require new assistant output as its acknowledgement.
+          const seen = pane.stdout !== before.stdout;
+          const again = proofOf(seen ? pane.stdout : '');
+          if (again) return sent(again);
+          if (await keepConfirmedQueue(ctx, record)) return 'confirming';
+          if (state !== 'idle' && !(record.deliveryWasBusy && ['working', 'background'].includes(state))) return uncertain(`the agent shows ${state}; no further key was sent`);
+          ourDraft = shown.length > 0;
+          if (shown.length) {
+            if (!image) {
+              if (!pasteImage(shown, text, record.agent)) return notDelivered('the input changed to another draft');
+              image = shown;
+              record.deliveryField = areaKey(shown);
+              await setHeaderFields(ctx.runner, file, { delivery_field: record.deliveryField });
+            } else if (areaKey(shown) !== areaKey(image)) return notDelivered('the input changed to another draft');
+          }
+        }
+        // Never send another Enter into an empty input: the first submission may already have been accepted.
+        if (!ourDraft) {
+          const last = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
+          const queued = last.code === 0 ? deliveryClass(record, last.stdout, last.dimInput) : null;
+          return uncertain(queued ? QUEUED_IN_AGENT : 'no hook or transcript line for this message yet', queued);
+        }
+      }
+      return notDelivered('the pasted prompt is still in the input after Enter and two retries; agentctl presses no further Enter by itself');
+    };
     if (['sending', 'confirming', 'needs-attention'].includes(record.promptDelivery ?? '')) {
       const screen = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
       const text = screen.code === 0 ? screen.stdout : '';
@@ -276,6 +389,12 @@ async function deliverOnce(ctx: Context, window: string): Promise<'sent' | 'pend
       let queued: 'queued-in-agent' | null = null;
       if (screen.code === 0 && record.agent !== 'unknown') {
         const settings = ctx.config.agents[record.agent], area = fieldArea(text, settings.footerPatterns, record.agent);
+        // P92: a Kimi paste that got no Enter because the screen kept changing. Nothing was submitted, so the first Enter cannot double anything:
+        // resume once the screen holds still, within delivery_confirm_s.
+        const settling = provider(record.agent).screen.stablePaste && record.promptDelivery === 'confirming' && !record.deliveryResult && (record.deliveryEnters ?? 0) === 0;
+        if (settling && record.deliveryField && area.length && areaKey(area) === record.deliveryField && classifyScreen(text, settings) === 'idle' && ctx.runner.now() - Date.parse(record.deliveryStartedAt ?? record.started) < ctx.config.deliveryConfirmS * 1000) {
+          try { return await enterLoop(screen, area); } catch (e) { return uncertain(errorMessage(e)); }
+        }
         // The text of our paste still stands in the field and nothing presses Enter for it any more: say so, with the way out.
         if (record.deliveryField && area.length && areaKey(area) === record.deliveryField) {
           return record.promptDelivery === 'needs-attention' && record.deliveryResult === 'not-delivered-in-field' ? 'needs-attention' : attention('the paste of agentctl still stands in the input and no Enter is sent for it any more', true);
@@ -313,6 +432,14 @@ async function deliverOnce(ctx: Context, window: string): Promise<'sent' | 'pend
 
     const profile = provider(record.agent).screen;
     const draftOf = (screen: string) => record.agent === 'kimi' ? fieldText(inspectField(screen, record.agent).area) : screenMetadata(screen).draft_input;
+    if (profile.stablePaste) {
+      // P92: Kimi shows its composer before it has finished starting. Paste only into a whole, empty composer that read the same twice;
+      // otherwise nothing is pasted and the watcher tries again on its next pass.
+      await ctx.runner.sleep(SETTLE_MS);
+      const again = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
+      const view = kimiSettledView(before.stdout);
+      if (again.code !== 0 || view === undefined || kimiSettledView(again.stdout) !== view || classifyScreen(again.stdout, settings) !== beforeState) return 'pending';
+    }
     if (record.promptKind === 'initial' && !inspectField(before.stdout, record.agent).readable) {
       await setHeaderFields(ctx.runner, file, { prompt_delivery: 'needs-attention', prompt_error: 'Composer is not structurally ready; initial prompt was not pasted and remains in TASK.md' });
       return 'needs-attention';
@@ -328,69 +455,7 @@ async function deliverOnce(ctx: Context, window: string): Promise<'sent' | 'pend
       // tmux turns a CR into the Enter of the TUI; \r\n would make two of it. Line endings are the one thing normalised, here and in every comparison.
       await ctx.tmux.pasteText(window, eol(text));
       await ctx.runner.sleep(400);
-      /** The area of the field as the first capture after our paste shows it: it must be our paste, and every later Enter needs the same bytes. */
-      let image: string[] | undefined;
-      for (let attempt = 0; attempt < PASTE_ENTERS; attempt++) {
-        if (attempt > 0) await ctx.runner.sleep(400);
-        const ready = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
-        const currentState = classifyScreen(ready.stdout, settings), field = inspectField(ready.stdout, record.agent), area = field.area;
-        const source = proofOf(ready.stdout !== before.stdout ? ready.stdout : '');
-        if (source) return sent(source);
-        if (await keepConfirmedQueue(ctx, record)) return 'confirming';
-        if (ready.code !== 0) return uncertain('the pane cannot be read');
-        if (!field.readable) return notDelivered(field.reason!);
-        // The screen of a working agent can look idle for a moment before the paste: what counts is the state with our paste in the field.
-        if (attempt === 0 && !record.deliveryWasBusy && ['working', 'background'].includes(currentState) && record.promptKind === 'followup') {
-          record.deliveryWasBusy = true;
-          await setHeaderFields(ctx.runner, file, { delivery_was_busy: true });
-        }
-        if (area.length) {
-          if (!image) {
-            if (!pasteImage(area, text, record.agent)) return notDelivered('the input shows something other than our paste; no Enter was sent');
-            image = area;
-            record.deliveryField = areaKey(area);
-            await setHeaderFields(ctx.runner, file, { delivery_field: record.deliveryField });
-          } else if (areaKey(area) !== areaKey(image)) return notDelivered('the input changed since our paste; no Enter was sent');
-        }
-        if (!mayPressEnter(currentState, record, settings)) return notDelivered(`the agent shows ${currentState}; no Enter was sent`);
-        if (profile.stablePaste) {
-          if (!area.length || !image) return uncertain('no owned Kimi draft before Enter');
-          await ctx.runner.sleep(200);
-          const stable = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
-          if (stable.code !== 0 || stable.stdout !== ready.stdout || areaKey(inspectField(stable.stdout, record.agent).area) !== record.deliveryField) return notDelivered('Kimi screen is not stable before Enter');
-        }
-        const pressed = await pressEnterAfter(ctx, record, file, window, ready);
-        if (pressed.code !== 0) return notDelivered(`Enter failed: ${pressed.stderr}`);
-        let ourDraft = false;
-        for (let poll = 0; poll < 8; poll++) {
-          await ctx.runner.sleep(150);
-          const pane = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
-          if (pane.code !== 0) return uncertain('the pane cannot be read');
-          const state = classifyScreen(pane.stdout, settings), shown = fieldArea(pane.stdout, settings.footerPatterns, record.agent);
-          // A quick completed turn can finish between polls; require new assistant output as its acknowledgement.
-          const seen = pane.stdout !== before.stdout;
-          const again = proofOf(seen ? pane.stdout : '');
-          if (again) return sent(again);
-          if (await keepConfirmedQueue(ctx, record)) return 'confirming';
-          if (state !== 'idle' && !(record.deliveryWasBusy && ['working', 'background'].includes(state))) return uncertain(`the agent shows ${state}; no further key was sent`);
-          ourDraft = shown.length > 0;
-          if (shown.length) {
-            if (!image) {
-              if (!pasteImage(shown, text, record.agent)) return notDelivered('the input changed to another draft');
-              image = shown;
-              record.deliveryField = areaKey(shown);
-              await setHeaderFields(ctx.runner, file, { delivery_field: record.deliveryField });
-            } else if (areaKey(shown) !== areaKey(image)) return notDelivered('the input changed to another draft');
-          }
-        }
-        // Never send another Enter into an empty input: the first submission may already have been accepted.
-        if (!ourDraft) {
-          const last = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
-          const queued = last.code === 0 ? deliveryClass(record, last.stdout, last.dimInput) : null;
-          return uncertain(queued ? QUEUED_IN_AGENT : 'no hook or transcript line for this message yet', queued);
-        }
-      }
-      return notDelivered('the pasted prompt is still in the input after Enter and two retries; agentctl presses no further Enter by itself');
+      return await enterLoop(before, undefined);
     } catch (e) { return uncertain(errorMessage(e)); }
   });
 }

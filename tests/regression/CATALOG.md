@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| P92 | Kimi did not take the first prompt: "Kimi screen is not stable before Enter" (a rotating footer tip) left it in the field for the owner. | `tests/p92-kimi-start.test.ts` | 0.19.5 | fails on v0.19.4 (4 failing of 4) |
 | P85 | MCP doctor probed every task report and link and walked worktrees, so it stalled on a large home. | `tests/hotfix-0194-p85.test.ts` | 0.19.4 | fails on v0.19.3 (1 failing of 1) |
 | P89 | `after` released dependents on any finished report; a FAIL/BLOCKED/NO-GO or missing first-line verdict did not hold them. | `tests/hotfix-0194-p89.test.ts` | 0.19.4 | fails on v0.19.3 (6 failing of 10) |
 | P89-f1 | A spec with `after_verdict` but no `after` was accepted and the override silently did nothing. | `tests/spec.test.ts` (`after_verdict`) | 0.19.4 | fails on v0.19.3 (2 failing of 2) |

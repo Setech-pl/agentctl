@@ -16,6 +16,8 @@ export interface ReadyOptions {
   pattern: string;
   emptyInput?: boolean;
   structuralComposer?: boolean;
+  /** Whose composer `structuralComposer` reads: Kimi draws its own box, and its empty box (not the generic draft reading) is the empty input. */
+  agent?: 'claude' | 'codex' | 'kimi' | 'unknown';
   /** If the screen matches this (folder-trust dialog), the human has to answer it: stop waiting, or wait for them (`waitTrust`). */
   trustPattern?: string;
   /** If the screen matches this (another startup dialog, e.g. Codex "Update available"), stop waiting at once: a human has to answer it. */
@@ -80,7 +82,9 @@ export async function waitForReady(runner: Runner, tmux: Tmux, window: string, o
           deadline = runner.now() + opts.timeoutMs;
         }
         if (dialog?.test(screen)) return { ready: false, trust: false, dialog: true, screen };
-        if ((!opts.structuralComposer || inspectField(screen).readable) && regex.test(screen) && (!opts.emptyInput || !screenMetadata(screen).draft_input)) return { ready: true, trust: false, screen };
+        const composer = opts.structuralComposer ? inspectField(screen, opts.agent) : undefined;
+        const draft = opts.agent === 'kimi' && composer ? composer.area.length > 0 : Boolean(screenMetadata(screen).draft_input);
+        if ((!composer || composer.readable) && regex.test(screen) && (!opts.emptyInput || !draft)) return { ready: true, trust: false, screen };
       }
     }
     if (runner.now() >= deadline) return { ready: false, trust: inTrust, screen };

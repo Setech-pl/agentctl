@@ -21,8 +21,8 @@ const NOT_A_DRAFT = /^Try\s|^Ask Codex to do anything$|^\d+\./;
 
 const digest = (text: string) => createHash('sha256').update(text).digest('hex').slice(0, 24);
 
-/** top is the structural upper edge: Claude border, or Codex prompt row. */
-export interface FieldCapture { area: string[]; readable: boolean; top?: number; reason?: string }
+/** top is the structural upper edge: Claude border, or Codex prompt row; bottom (Kimi) is the row of the lower border. */
+export interface FieldCapture { area: string[]; readable: boolean; top?: number; bottom?: number; reason?: string }
 
 /** Read the composer by its geometry, never by a footer-like line in its body. */
 export function inspectField(screen: string, agent?: 'claude' | 'codex' | 'kimi' | 'unknown'): FieldCapture {
@@ -39,7 +39,7 @@ export function inspectField(screen: string, agent?: 'claude' | 'codex' | 'kimi'
       return { area: [], readable: false, reason: 'niepełne granice composera Kimi' };
     }
     const empty = rows.length === 1 && fieldText(rows).trim() === '';
-    return { area: empty ? [] : rows, readable: true, top };
+    return { area: empty ? [] : rows, readable: true, top, bottom: end };
   }
   const lastMarker = lines.findLastIndex(line => /^[❯›>](?:\s|$)/.test(line));
   const areaOf = (start: number, end: number, top = start): FieldCapture => {

@@ -1050,6 +1050,8 @@ Kimi 2.5.0 effective model/effort comes from passive `llm.request.modelAlias/thi
 
 Claude plan capacity can optionally refresh without an active task: set `capacity.claude_usage_probe: true` (default off). `capacity` and `usage` run a neutral, isolated `/usage` probe at most every 15 minutes, with no prompt/model tokens and no task-window interaction. `capacity.claude_usage_probe_interval_minutes` can increase that interval. Folder trust/login is a one-time manual wait for Marcin; agentctl never answers dialogs. See [configuration](docs/configuration.md#claude-plan-usage-probe) for sources, staleness and parser limits.
 
+Kimi start screen (0.19.5, P92): the first prompt is pasted only into a whole, empty Kimi composer that reads the same twice, and `C-m` follows once the composer and the lines above it hold still (the footer below it may rotate tips). A paste that has not settled waits for a later watch pass instead of calling the owner. Details: [hotfix 0.19.5](docs/hotfix-0195.md).
+
 Codex CLI 0.167 follow-ups: while Codex is working, `send` uses Tab when its footer advertises "tab to queue message"; idle Codex submits with Enter. Wrapped input is checked against the pasted text, and a follow-up is confirmed only by the task session transcript or hook. Claude Code keeps Enter and Kimi keeps C-m. Requeuing an ID after `queue rm` starts fresh; the prior cancelled attempt is preserved under `state/.history`.
 Machine awareness: `capacity` (also JSON) and `status --detail` show load averages
 for 1/5/15 minutes and free memory in bytes. `capacity.load_threshold` sets the

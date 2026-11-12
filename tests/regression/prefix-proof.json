@@ -329,6 +329,19 @@
       "close journals one entry per message it drops (queued FIFO items and the unsent active prompt)"
     ]
   },
+  "P92": {
+    "rev": "v0.19.4",
+    "outcome": "FAILS",
+    "failed": 4,
+    "passed": 0,
+    "failing": [
+      "P92: Kimi start screen with a rotating footer tip takes the first prompt: one paste, one Enter, verified by the wire turn.prompt",
+      "P92: Kimi folding the paste into \"[paste #1 …]\" before Enter keeps the delivery: the newer image of our own paste replaces the first",
+      "P92: a Kimi screen that keeps changing gets no Enter in that pass; the next watch pass presses it once the screen holds still",
+      "P92: a Kimi start screen still being drawn gets no paste; the next pass pastes into the settled composer",
+      "P92: Kimi start screen with a rotating footer tip takes the first prompt: one paste, one Enter, verified by the wire turn.prompt"
+    ]
+  },
   "R1-redact": {
     "rev": "v0.18.2",
     "outcome": "FAILS",

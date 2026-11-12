@@ -1050,6 +1050,8 @@ Rzeczywisty model/effort Kimi 2.5.0 pochodzi z pasywnego `llm.request.modelAlias
 
 Capacity planu Claude może opcjonalnie odświeżać się bez aktywnego zadania: ustaw `capacity.claude_usage_probe: true` (domyślnie wyłączone). `capacity` i `usage` uruchamiają `/usage` w neutralnej, osobnej sesji najwyżej co 15 minut, bez promptu, tokenów modelu i dotykania okien zadań. `capacity.claude_usage_probe_interval_minutes` pozwala wydłużyć odstęp. Trust/login katalogu wymaga jednorazowej ręcznej akcji Marcina; agentctl nigdy nie odpowiada na dialogi. Szczegóły źródeł, nieaktualności i ograniczeń parsera: [configuration](docs/configuration.md#claude-plan-usage-probe).
 
+Ekran startowy Kimi (0.19.5, P92): pierwszy prompt trafia tylko do pełnego, pustego pola Kimi, które dwa razy z rzędu wygląda tak samo, a `C-m` przychodzi, gdy pole i wiersze nad nim się nie zmieniają (stopka pod polem może zmieniać podpowiedzi). Wklejenie, które się nie ustabilizowało, czeka na kolejny przebieg watch zamiast wzywać właściciela. Szczegóły: [poprawka 0.19.5](docs/hotfix-0195.md).
+
 Wiadomości do Codex CLI 0.167: gdy Codex pracuje, `send` używa Tab, jeśli stopka pokazuje „tab to queue message”; bezczynny Codex przyjmuje Enter. Zawinięty tekst jest porównywany z wklejoną wiadomością, a dostawę potwierdza tylko transkrypt sesji zadania lub hook. Claude Code zachowuje Enter, Kimi zachowuje C-m. Ponowne dodanie ID po `queue rm` zaczyna świeżą próbę; poprzednia anulowana próba zostaje w `state/.history`.
 Obciążenie maszyny: `capacity` (również JSON) i `status --detail` pokazują średnie
 obciążenie z 1/5/15 minut oraz wolną pamięć w bajtach. `capacity.load_threshold`
