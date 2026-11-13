@@ -498,6 +498,7 @@ Spec to nagłówek YAML między liniami `---`, a po nim prompt. Kilka specyfikac
 ---
 task: TASK-42
 agent: claude
+# agent: glm  # Z.ai GLM Coding Plan via the claude-glm wrapper (models: glm-5.3, glm-5.3-flash)
 model: claude-opus-5-5
 effort: high
 repos:
@@ -1037,6 +1038,22 @@ limits: {claude: 3, codex: 3, kimi: 1}
 capacity: {kimi_usage_probe: false}
 review: {prefer: [codex, kimi, claude]}
 ```
+
+### GLM (Z.ai GLM Coding Plan)
+
+GLM to Claude Code uruchamiany przez wrapper `claude-glm`, który sam eksportuje `ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic` i `ANTHROPIC_AUTH_TOKEN` (z elementu Keychain `neon-city-zai`) i odpala `claude`. Agentctl używa dla niego całego adaptera Claude - te same hooki, skills, subagenty, dostarczanie promptu, kontrakt raportu i obsługa folder-trust - a zmienia tylko polecenie startu, listę zwalidowanych modeli i rozliczanie użycia. Włączysz go w configu:
+
+```yaml
+providers: [claude, codex, glm]
+limits: {claude: 3, codex: 3, glm: 2}   # glm domyślnie 2; własny limit Z.ai, nigdy limit konta Claude
+# providers_config: {glm: {command: claude-glm}}   # tylko gdy wrapper ma inną nazwę/ścieżkę
+```
+
+`agent: glm` akceptuje dokładnie `glm-5.3` i `glm-5.3-flash` (modele udokumentowane w planie); `model: default` pomija flagę, a effort działa jak dla Claude (`--effort`, `low/medium/high/xhigh/max`). `class:` mapuje przez kolumnę glm macierzy modeli, a `equivalents` przyjmuje kolumnę `glm`, więc `move` i `--agent glm` tłumaczą przez tabelę. Status, board, zdarzenia, statystyki i rekordy benchmarku pokazują dostawcę `glm`, z osobnym rozliczaniem tokenów od Claude.
+
+Izolacja to twarde zasada: agentctl nigdy nie zapisuje `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY` ani żadnego sekretu Z.ai do `~/.claude/settings.json`, ustawień zadania, `TASK.md`, logów, dziennika, rekordów benchmarku ani środowiska zadań `claude`. Zadania `claude` zachowują środowisko niezmienione; zadania `glm` dostają tylko to, co robi wrapper (zmienne te są usuwane z `env` specu glm, z ostrzeżeniem w podglądzie). `doctor` sprawdza, czy `claude-glm` jest na `PATH` i wykonywalny oraz czy element Keychain istnieje - samo istnienie, nigdy sekret.
+
+Z.ai nie udokumentowało endpointu ani wyjścia CLI z kwotą dla okien 5-godzinnego i tygodniowego (tylko strona subskrypcji), więc plan GLM to **n/d**, a `usage.queue_hold` nigdy nie wstrzymuje glm; `usage.warn`/`usage.critical` przyjmują klucz `glm` jak każdy inny, ale nie mają odczytu planu, na którym mogłyby zadziałać. Rozliczanie tokenów z logów sesji działa jak dla Claude. Zobacz [configuration](docs/configuration.md#glm-zai-glm-coding-plan).
 
 `agent: kimi` uruchamia interaktywny `kimi`; alias bez prefiksu dostaje `kimi-code/`, a `model: default` pomija flagę modelu. Katalog modeli, `display_name` i `support_efforts` pochodzą z configu TOML Kimi. Obsługiwane poziomy to `low/high/max`, wyłącznie zgodnie z katalogiem wybranego modelu; bez danych agentctl nie wymusza effort. Aliasy bez wersji są dynamiczne po stronie serwera. Manager i Remote Control pozostają Claude-only.
 

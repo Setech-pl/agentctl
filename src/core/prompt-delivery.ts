@@ -11,6 +11,7 @@ import { withFileLock } from './file-lock.ts';
 import { classifyScreen, inputVisible } from './state.ts';
 import { codexQueueKey, areaKey, fieldArea, fieldText, inspectField, pasteImage, readsAs } from './input-field.ts';
 import { eol } from './paste-wrapper.ts';
+import type { DeliveryAgent } from './paste-wrapper.ts';
 import { recordJournal } from './journal.ts';
 import type { ScreenState } from './state.ts';
 import { screenMetadata } from './tmux.ts';
@@ -94,7 +95,7 @@ export function codexQueuedEcho(screen: string, prompt: string | undefined): boo
  * The echo of `prompt` in the transcript of the screen: a line that starts with the agent's prompt marker plus the rows that continue it (the TUI
  * wraps long lines and indents the rest), read back to exactly the prompt - nothing squeezed, nothing left out. Counts the blocks above the input field.
  */
-export function echoLines(screen: string, marker: string, prompt: string | undefined, agent?: 'claude' | 'codex' | 'kimi' | 'unknown'): number {
+export function echoLines(screen: string, marker: string, prompt: string | undefined, agent?: DeliveryAgent): number {
   if (!prompt?.trim()) return 0;
   const lines = screen.split('\n').map(line => line.trimEnd());
   const isMarker = (line: string) => line.trimStart().startsWith(marker);

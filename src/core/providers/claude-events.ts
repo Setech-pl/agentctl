@@ -3,7 +3,7 @@ import { clip, firstLine, eventArgs, MAX_QUESTION } from '../events.ts';
 import { stableSelfArgv } from '../mcp-install.ts';
 import { isObject, resolvePath } from '../util.ts';
 import type { EventWiringInput, EventWiring } from './types.ts';
-import type { GlobalConfig } from '../config.ts';
+import type { AgentName, GlobalConfig } from '../config.ts';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -21,33 +21,33 @@ const CLAUDE_ASKING = new Set(['permission_prompt', 'elicitation_dialog', 'elici
 /** Claude `StopFailure` errors that mean the plan is used up or throttled. */
 const CLAUDE_LIMIT_ERRORS = new Set(['rate_limit', 'billing_error']);
 
-export function parseClaudeEvent(kind: ClaudeKind, input: unknown): AgentEvent {
+export function parseClaudeEvent(kind: ClaudeKind, input: unknown, agent: AgentName = 'claude'): AgentEvent {
   const data = isObject(input) ? input : {};
-  if (kind === 'session-start') return { agent: 'claude', outcome: 'ignored', type: kind, text: '' };
-  if (kind === 'user-prompt-submit') return { agent: 'claude', outcome: 'ignored', type: kind, text: '' };
+  if (kind === 'session-start') return { agent, outcome: 'ignored', type: kind, text: '' };
+  if (kind === 'user-prompt-submit') return { agent, outcome: 'ignored', type: kind, text: '' };
   if (kind === 'notification') {
     const type = str(data.notification_type);
     const outcome: EventOutcome = CLAUDE_ASKING.has(type) ? 'needs-input' : type === 'idle_prompt' ? 'idle' : 'ignored';
-    return { agent: 'claude', outcome, type: `notification:${type || 'unknown'}`, text: clip(str(data.message), MAX_QUESTION) };
+    return { agent, outcome, type: `notification:${type || 'unknown'}`, text: clip(str(data.message), MAX_QUESTION) };
   }
-  if (kind === 'stop') return { agent: 'claude', outcome: 'turn-complete', type: 'stop', text: firstLine(str(data.last_assistant_message)) };
+  if (kind === 'stop') return { agent, outcome: 'turn-complete', type: 'stop', text: firstLine(str(data.last_assistant_message)) };
   const error = str(data.error);
   const detail = clip(str(data.error_details) || str(data.last_assistant_message) || error, MAX_QUESTION);
-  return { agent: 'claude', outcome: ['overloaded', 'overloaded_error'].includes(error) || /^API Error:\s*529\b/.test(detail) ? 'overloaded' : CLAUDE_LIMIT_ERRORS.has(error) ? 'limited' : 'ignored', type: `stop-failure:${error || 'unknown'}`, text: detail };
+  return { agent, outcome: ['overloaded', 'overloaded_error'].includes(error) || /^API Error:\s*529\b/.test(detail) ? 'overloaded' : CLAUDE_LIMIT_ERRORS.has(error) ? 'limited' : 'ignored', type: `stop-failure:${error || 'unknown'}`, text: detail };
 }
 
-export function claudeSettingsPath(config: GlobalConfig, window: string): string {
-  return path.join(taskDir(config, window), 'claude-settings.json');
+export function claudeSettingsPath(config: GlobalConfig, window: string, agent: AgentName = 'claude'): string {
+  return path.join(taskDir(config, window), `${agent}-settings.json`);
 }
 
 const shellWord = (s: string): string => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`);
 
-/** The settings file for one Claude window: the event hooks, merged by Claude with the user's and the project's own. */
-export function buildClaudeSettings(task: string, self: SelfArgv, statusLine?: Record<string, unknown>, attempt?: string): Record<string, unknown> {
+/** The settings file for one Claude-family window: the event hooks, merged by Claude with the user's and the project's own. */
+export function buildClaudeSettings(task: string, self: SelfArgv, statusLine?: Record<string, unknown>, attempt?: string, agent: AgentName = 'claude'): Record<string, unknown> {
   self = stableSelfArgv(self);
   const hooks: Record<string, unknown> = {};
   for (const kind of CLAUDE_KINDS) {
-    const command = [...self, ...eventArgs(task, 'claude', kind), ...(attempt ? ['--attempt', attempt] : [])].map(shellWord).join(' ');
+    const command = [...self, ...eventArgs(task, agent, kind), ...(attempt ? ['--attempt', attempt] : [])].map(shellWord).join(' ');
     hooks[CLAUDE_HOOK_NAME[kind]] = [{ hooks: [{ type: 'command', command, timeout: 15 }] }];
   }
   // Claude Code shows a dim suggestion of the next prompt in the empty field; it is not the human's text, so it is switched off for the tasks agentctl starts.
@@ -56,11 +56,12 @@ export function buildClaudeSettings(task: string, self: SelfArgv, statusLine?: R
 
 
 export function planClaudeEvents(input: EventWiringInput): EventWiring {
-    const file = claudeSettingsPath(input.config, input.window);
-    const statusLine = buildTapStatusLine(input.task, input.self, input.config, input.worktree, input.env, input.attempt);
+    const file = claudeSettingsPath(input.config, input.window, input.agent);
+    const statusLine = buildTapStatusLine(input.agent, input.task, input.self, input.config, input.worktree, input.env, input.attempt);
+    const label = input.agent === 'glm' ? 'GLM (claude-glm)' : 'Claude';
     return {
       args: ['--settings', file],
-      files: [{ path: file, content: `${JSON.stringify(buildClaudeSettings(input.task, input.self, statusLine, input.attempt), null, 2)}\n` }],
-      note: `events: Claude hooks SessionStart, UserPromptSubmit, Notification, Stop and StopFailure${statusLine ? ', statusLine (usage-tap)' : ''} in ${file}`,
+      files: [{ path: file, content: `${JSON.stringify(buildClaudeSettings(input.task, input.self, statusLine, input.attempt, input.agent), null, 2)}\n` }],
+      note: `events: ${label} hooks SessionStart, UserPromptSubmit, Notification, Stop and StopFailure${statusLine ? ', statusLine (usage-tap)' : ''} in ${file}`,
     };
 }

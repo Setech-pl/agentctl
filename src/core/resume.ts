@@ -1,6 +1,6 @@
 import { writeLaunchScript } from './launch-script.ts';
 import { validateLaunch, launchEnvironment } from './safety.ts';
-import { provider, isActive } from './providers/registry.ts';
+import { provider, isActive, providerCommand } from './providers/registry.ts';
 import { withStartLock, reserveStarts, releaseStarts } from './start-lock.ts';
 import { queuePrompt, deliverPendingPrompt } from './prompt-delivery.ts';
 import { waitForReady } from './ready.ts';
@@ -141,7 +141,7 @@ async function startResumed(ctx: Context, plan: ResumePlan, opts: { self?: SelfA
         if (protectedFile.code !== 0) throw new Error(`Cannot protect event script: ${file.path}`);
       }
     }
-    const command = await writeLaunchScript(runner, taskDir(config, c.window), buildResumeArgv({ agent: c.agent, model: c.model, effort: c.effort as never, task: c.task, remoteControl: record.remoteControl }, config.agents[c.agent], wiring?.args, c.sessionId), launchEnvironment(config, order, record.env));
+    const command = await writeLaunchScript(runner, taskDir(config, c.window), buildResumeArgv({ agent: c.agent, model: c.model, effort: c.effort as never, task: c.task, remoteControl: record.remoteControl, command: providerCommand(config, c.agent) }, config.agents[c.agent], wiring?.args, c.sessionId), launchEnvironment(config, order, record.env));
     const started = await openAgentWindow(ctx, { task: c.task, window: c.window, cwd: c.worktree, env: {}, report: record.report, repos: record.repos, reviewOf: record.reviewOf, autoReview: record.autoReview, origin: 'resume', sessionUp });
     if (started.code !== 0) throw new AgentctlError(`${c.task}: tmux could not make the window: ${started.stderr.trim() || `exit ${started.code}`}`, results.length > 0 ? `Resumed before it: ${results.map((r) => r.task).join(', ')}.` : undefined);
     sessionUp = true;

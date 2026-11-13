@@ -3,7 +3,11 @@ const SECRET_WORD = /(?:^|[^a-z0-9])(?:TOKEN|KEY|SECRET|PASSWORD|PASSWD|PASS|COO
 /** Case-sensitive camelCase segments preserve author metadata such as authorizationAuthor. */
 const CAMEL_SECRET = /(?:Token|Key|Secret|Password|Passwd|Pass|Cookie|Auth(?:orization)?|OAuth)(?=$|[^A-Za-z0-9]|[A-Z])/;
 export const SECRET_KEY = { test: (key: string): boolean => SECRET_WORD.test(key) || CAMEL_SECRET.test(key) };
+/** Variable names redacted by name alone (no secret word in them): the Z.ai/Anthropic endpoint and credential variables. */
+const EXPLICIT_SECRET_NAME = /^(?:ANTHROPIC_BASE_URL|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_API_KEY|ZAI_API_KEY)$/;
+const secretName = (key: string): boolean => SECRET_KEY.test(key) || EXPLICIT_SECRET_NAME.test(key);
 const ASSIGNMENT = /([\w.-]*(?:TOKEN|KEY|SECRET|PASSWORD|PASSWD|PASS|AUTH|COOKIE)[\w.-]*\s*[:=]\s*)("(?:\\.|[^"\\])*"|'[^']*'|[^\s,;]+)/gi;
+const EXPLICIT_ASSIGNMENT = /(\b(?:ANTHROPIC_BASE_URL|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_API_KEY|ZAI_API_KEY)\s*[:=]\s*)("(?:\\.|[^"\\])*"|'[^']*'|[^\s,;]+)/g;
 const assignmentKey = (prefix: string): string => prefix.trim().replace(/[:=]$/, '').trim();
 const URL_TEXT = /https?:\/\/[^\s"'<>]+/g;
 
@@ -19,7 +23,7 @@ export function secretRedactor(sources: unknown[], taskIds = new Set<string>()):
   for (const source of sources) collectTaskIds(source);
   const collect = (value: unknown, key = ''): void => {
     if (typeof value === 'string') {
-      if (SECRET_KEY.test(key) && value) secrets.add(value);
+      if (secretName(key) && value) secrets.add(value);
       for (const match of value.matchAll(ASSIGNMENT)) {
         if (!SECRET_KEY.test(assignmentKey(match[1]!)) || taskIds.has(assignmentKey(match[1]!))) continue;
         const literal = match[2]!.replace(/^(['"])(.*)\1$/s, '$2');
@@ -51,10 +55,11 @@ export function secretRedactor(sources: unknown[], taskIds = new Set<string>()):
         for (const key of [...url.searchParams.keys()]) if (SECRET_KEY.test(key)) url.searchParams.set(key, '***');
         return url.toString();
       } catch { return raw; }
-    }).replace(ASSIGNMENT, (all, prefix: string, value: string) => !SECRET_KEY.test(assignmentKey(prefix)) || taskIds.has(assignmentKey(prefix)) || value.includes('***') ? all : `${prefix}***`);
+    }).replace(ASSIGNMENT, (all, prefix: string, value: string) => !SECRET_KEY.test(assignmentKey(prefix)) || taskIds.has(assignmentKey(prefix)) || value.includes('***') ? all : `${prefix}***`)
+      .replace(EXPLICIT_ASSIGNMENT, (_all, prefix: string, value: string) => value.includes('***') ? _all : `${prefix}***`);
   };
   const walk = (value: unknown, key = ''): unknown => {
-    if (SECRET_KEY.test(key) && !taskIds.has(key)) return '***';
+    if (secretName(key) && !taskIds.has(key)) return '***';
     if (typeof value === 'string') return cleanText(value);
     if (Array.isArray(value)) return value.map(v => walk(v));
     if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, key === 'env' ? '***' : walk(v, k)]));

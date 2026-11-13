@@ -10,6 +10,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - Board/Ink test instrumentation counts bounded task-header reads and keeps board fixtures in gate-owned scratch. / Licznik testowy planszy i Ink uwzględnia ograniczone odczyty nagłówków i przechowuje plansze testowe w katalogu roboczym gate.
 
+## [0.20.0] - 2026-11-13
+
+- New provider `glm` (Z.ai GLM Coding Plan): a parametrised variant of the Claude adapter started through the `claude-glm` wrapper (default `~/.local/bin/claude-glm`, overridable with `providers_config.glm.command`), which exports `ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic` and `ANTHROPIC_AUTH_TOKEN` from the macOS Keychain item `neon-city-zai` itself. Same hooks, skills, subagents, prompt delivery, report contract and folder-trust handling as Claude; models `glm-5.3` and `glm-5.3-flash` (validated list, `--model`), effort as for Claude. Isolation hard rule: agentctl never writes `ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN`/`ANTHROPIC_API_KEY` or any Z.ai secret into `~/.claude/settings.json`, task settings, `TASK.md`, logs, the journal, benchmark records or the environment of `claude` tasks; `glm` tasks get only what the wrapper does (these variables are stripped from a glm spec's `env` with a preview warning, and redacted from captured output). / Nowy dostawca `glm` (Z.ai GLM Coding Plan): sparametryzowana wersja adaptera Claude uruchamiana przez wrapper `claude-glm` (domyślnie `~/.local/bin/claude-glm`, zmienialny przez `providers_config.glm.command`), który sam eksportuje `ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic` i `ANTHROPIC_AUTH_TOKEN` z elementu Keychain `neon-city-zai`. Te same hooki, skills, subagenty, dostarczanie promptu, kontrakt raportu i obsługa folder-trust co Claude; modele `glm-5.3` i `glm-5.3-flash` (zweryfikowana lista, `--model`), effort jak dla Claude. Twarda zasada izolacji: agentctl nigdy nie zapisuje `ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN`/`ANTHROPIC_API_KEY` ani żadnego sekretu Z.ai do `~/.claude/settings.json`, ustawień zadania, `TASK.md`, logów, dziennika, rekordów benchmarku ani środowiska zadań `claude`; zadania `glm` dostają tylko to, co robi wrapper (zmienne te są usuwane z `env` specu glm z ostrzeżeniem w podglądzie i maskowane w przechwyconym wyjściu).
+
+- GLM has its own limit key (`limits.glm`, default 2, never the Claude account limit), separate token accounting (status/board/events/stats/benchmark show provider `glm`), a glm column in `equivalents` and in the model matrix (`class:` mapping), and `usage.warn`/`usage.critical`/`usage.queue_hold` accept a `glm` key. Z.ai documents no quota endpoint or CLI quota output for the 5-hour and weekly windows, so the GLM plan is n/d and `usage.queue_hold` never holds glm. `doctor` checks `claude-glm` on PATH/executable and the Keychain item's existence (never the secret). / GLM ma własny klucz limitu (`limits.glm`, domyślnie 2, nigdy limit konta Claude), osobne rozliczanie tokenów (status/board/zdarzenia/statystyki/benchmark pokazują dostawcę `glm`), kolumnę glm w `equivalents` i w macierzy modeli (mapowanie `class:`), a `usage.warn`/`usage.critical`/`usage.queue_hold` przyjmują klucz `glm`. Z.ai nie udokumentowało endpointu ani wyjścia CLI z kwotą dla okien 5-godzinnego i tygodniowego, więc plan GLM to n/d, a `usage.queue_hold` nigdy nie wstrzymuje glm. `doctor` sprawdza `claude-glm` na PATH/wykonywalność i istnienie elementu Keychain (nigdy sekretu).
+
 ## [0.19.6] - 2026-11-13
 
 - Hotfix release on top of 0.19.4: package and lockfile versions are 0.19.6. 0.19.5 was prepared on 2026-11-12 but never tagged; its fixes (P93, P92) ship in this release. / Wydanie poprawkowe na bazie 0.19.4: wersje pakietu i lockfile to 0.19.6. 0.19.5 przygotowano 2026-11-12, ale nigdy nie otagowano; jego poprawki (P93, P92) trafiają do tego wydania.
@@ -731,7 +737,8 @@ Pull request #1: iteration 1, core and CLI.
 - Task states (`working`, `waiting`, `needs-trust`, `report-ready`, `dead`) and folder-trust detection.
 - Per-provider window limits, the `review_of` cross-review rule, an optional mirror of the reports.
 
-[Unreleased]: https://github.com/Setech-pl/agentctl/compare/v0.19.1...HEAD
+[Unreleased]: https://github.com/Setech-pl/agentctl/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/Setech-pl/agentctl/compare/v0.19.6...v0.20.0
 [0.19.1]: https://github.com/Setech-pl/agentctl/compare/v0.19.0...v0.19.1
 [0.18.2]: https://github.com/Setech-pl/agentctl/compare/v0.18.0...v0.18.2
 [0.11.0]: https://github.com/Setech-pl/agentctl/compare/v0.10.0...v0.11.0

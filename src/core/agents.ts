@@ -20,7 +20,7 @@ export const DEFAULT_MODEL = 'default';
  * `--effort` go with it (the server mode `claude remote-control` would refuse `--settings` before it).
  * `extra` (event wiring: `--settings <file>` for Claude, `-c notify=[…]` for Codex) goes last.
  */
-export function buildAgentArgv(spec: Pick<ResolvedSpec, 'agent' | 'model' | 'effort'> & { remoteControl?: boolean | undefined; task?: string | undefined }, settings: AgentSettings, extra: string[] = []): string[] {
+export function buildAgentArgv(spec: Pick<ResolvedSpec, 'agent' | 'model' | 'effort'> & { remoteControl?: boolean | undefined; task?: string | undefined; command?: string | undefined }, settings: AgentSettings, extra: string[] = []): string[] {
   const argv = provider(spec.agent).argv({ ...spec, task: spec.task ?? '' }, settings, extra);
   assertSafeArgs(spec.agent, argv);
   return argv;
@@ -34,7 +34,7 @@ export function buildAgentArgv(spec: Pick<ResolvedSpec, 'agent' | 'model' | 'eff
  *   (the most recent conversation of the worktree).
  * - codex:  `codex resume <session id> …` or `codex resume --last …` (the most recent session of the worktree); the flags follow `resume`.
  */
-export function buildResumeArgv(spec: Pick<ResolvedSpec, 'agent' | 'model' | 'effort'> & { remoteControl?: boolean | undefined; task?: string | undefined }, settings: AgentSettings, extra: string[] = [], sessionId?: string): string[] {
+export function buildResumeArgv(spec: Pick<ResolvedSpec, 'agent' | 'model' | 'effort'> & { remoteControl?: boolean | undefined; task?: string | undefined; command?: string | undefined }, settings: AgentSettings, extra: string[] = [], sessionId?: string): string[] {
   const argv = provider(spec.agent).resumeArgv({ ...spec, task: spec.task ?? '' }, settings, extra, sessionId);
   assertSafeArgs(spec.agent, argv);
   return argv;

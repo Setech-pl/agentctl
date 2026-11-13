@@ -2,6 +2,7 @@
 export const EXAMPLE_SPEC = `---
 task: TASK-42
 agent: claude
+# agent: glm  # Z.ai GLM Coding Plan via the claude-glm wrapper (models: glm-5.3, glm-5.3-flash)
 model: claude-opus-5-5
 effort: high
 repos:

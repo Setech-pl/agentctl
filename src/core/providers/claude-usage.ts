@@ -2,7 +2,7 @@ import { claudeProbeFile } from './claude-probe.ts';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { GlobalConfig } from '../config.ts';
+import type { AgentName, GlobalConfig } from '../config.ts';
 import type { UsageReader } from '../usage-sources.ts';
 import { homeDir } from '../usage-sources.ts';
 import { planState } from '../usage.ts';
@@ -13,13 +13,23 @@ export function claudePlanFile(config: Pick<GlobalConfig, 'path'>): string {
   return path.join(homeDir(config), 'usage', 'claude-plan.json');
 }
 
+/** The GLM plan reading of the glm statusLine tap: separate from Claude's, never mixed (glm usage is n/d until a reading exists). */
+export function glmPlanFile(config: Pick<GlobalConfig, 'path'>): string {
+  return path.join(homeDir(config), 'usage', 'glm-plan.json');
+}
+
+/** The file where the statusLine tap of `agent` keeps its plan reading. */
+export function planFileFor(agent: AgentName, config: Pick<GlobalConfig, 'path'>): string {
+  return agent === 'glm' ? glmPlanFile(config) : claudePlanFile(config);
+}
+
 export function readClaudeSnapshot(config: Pick<GlobalConfig, 'path'>): PlanSnapshot | undefined {
-  return readSnapshot(claudePlanFile(config));
+  return readSnapshotFile(claudePlanFile(config));
 }
 export function readClaudeProbeSnapshot(config: Pick<GlobalConfig, 'path'>): PlanSnapshot | undefined {
-  return readSnapshot(claudeProbeFile(config));
+  return readSnapshotFile(claudeProbeFile(config));
 }
-function readSnapshot(file: string): PlanSnapshot | undefined {
+export function readSnapshotFile(file: string): PlanSnapshot | undefined {
   try {
     const data: unknown = JSON.parse(fs.readFileSync(file, 'utf8'));
     if (!isObject(data) || typeof data.at !== 'number' || !Number.isFinite(data.at) || !Array.isArray(data.windows)) return undefined;

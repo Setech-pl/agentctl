@@ -5,7 +5,7 @@ import { DEFAULT_AGENT_SETTINGS } from '../src/core/config.ts';
 import { makeConfig, useScratch } from './helpers.ts';
 const scratch = useScratch();
 it('registers the original providers and returns isolated default settings', () => {
-  assert.deepEqual(PROVIDER_IDS, ['claude', 'codex', 'kimi']);
+  assert.deepEqual(PROVIDER_IDS, ['claude', 'codex', 'kimi', 'glm']);
   for (const id of ['claude', 'codex'] as const) {
     const settings = provider(id).defaultSettings();
     assert.deepEqual(settings, DEFAULT_AGENT_SETTINGS[id]);
@@ -33,4 +33,11 @@ it('keeps Kimi registered but inactive in the default configuration', () => {
   assert.deepEqual(activeProviders(config), ['claude', 'codex']);
   assert.equal(isActive(config, 'kimi'), false);
   assert.equal(provider('kimi').id, 'kimi');
+});
+
+it('keeps GLM registered but inactive in the default configuration', () => {
+  const config = makeConfig(scratch.sub('active-glm-default'));
+  assert.equal(isActive(config, 'glm'), false);
+  assert.equal(provider('glm').id, 'glm');
+  assert.equal(provider('glm').command, 'claude-glm');
 });

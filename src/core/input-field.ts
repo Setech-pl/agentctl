@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { storedForm } from './paste-wrapper.ts';
+import type { DeliveryAgent } from './paste-wrapper.ts';
 
 /*
  * The input field of the agent as an exact area of the screen: from its structural upper edge to its structural lower edge,
@@ -25,7 +26,7 @@ const digest = (text: string) => createHash('sha256').update(text).digest('hex')
 export interface FieldCapture { area: string[]; readable: boolean; top?: number; bottom?: number; reason?: string }
 
 /** Read the composer by its geometry, never by a footer-like line in its body. */
-export function inspectField(screen: string, agent?: 'claude' | 'codex' | 'kimi' | 'unknown'): FieldCapture {
+export function inspectField(screen: string, agent?: DeliveryAgent): FieldCapture {
   const lines = screen.split('\n').map(line => line.trimEnd());
   if (agent === 'kimi') {
     const marker = lines.findLastIndex(line => /^\s*│ >(?:\s|│)/u.test(line));
@@ -77,7 +78,7 @@ export function inspectField(screen: string, agent?: 'claude' | 'codex' | 'kimi'
 }
 
 /** Compatibility API: an unreadable area is never an owned field. Call inspectField before any Enter to distinguish it from empty. */
-export function fieldArea(screen: string, _footerPatterns: string[] = [], agent?: 'claude' | 'codex' | 'kimi' | 'unknown'): string[] { return inspectField(screen, agent).area; }
+export function fieldArea(screen: string, _footerPatterns: string[] = [], agent?: DeliveryAgent): string[] { return inspectField(screen, agent).area; }
 
 /** The marker and the one space (or no-break space) after it; Claude Code draws a no-break space. */
 const stripMarker = (line: string) => line.replace(/^\s*[❯›>][ \u00a0]?/, '');
@@ -97,7 +98,7 @@ export function areaKey(area: string[]): string {
  * Do the rows the TUI shows read back as exactly this text? Each logical line of the text is shown as one row, or as several when the TUI wrapped it:
  * then the space the wrap swallows is the only difference allowed. With `whole` false the TUI may show only the first lines of the text.
  */
-export function readsAs(shown: string[], text: string, agent: 'claude' | 'codex' | 'kimi' | 'unknown' | undefined, whole: boolean): boolean {
+export function readsAs(shown: string[], text: string, agent: DeliveryAgent | undefined, whole: boolean): boolean {
   const want = storedForm(text, agent).split('\n');
   // A soft wrap may retain the separating space on the next row or swallow it.
   // Try both exact boundaries; greedily swallowing it rejects a valid retained-space wrap.
@@ -124,7 +125,7 @@ export function readsAs(shown: string[], text: string, agent: 'claude' | 'codex'
  * Does the area, right after our paste, show this paste? One placeholder, or the lines of the prompt - possibly fewer than all of them (a TUI
  * may show only the start), but each shown line exactly as written. A changed, extra or other line is not our paste.
  */
-export function pasteImage(area: string[], prompt: string, agent?: 'claude' | 'codex' | 'kimi' | 'unknown'): boolean {
+export function pasteImage(area: string[], prompt: string, agent?: DeliveryAgent): boolean {
   if (!area.length) return false;
   const shown = fieldText(area).split('\n');
   if (agent === 'kimi' && shown.length === 1 && /^\[paste #\d+[^\]\n]*\]$/i.test(shown[0]!)) return true;

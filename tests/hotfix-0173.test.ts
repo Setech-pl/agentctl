@@ -119,7 +119,7 @@ it('0173-9: all generated task callbacks normalize the same stable Node path; do
   const f = fixture('node'), prefix = scratch.sub('node/brew'), cellar = path.join(prefix, 'Cellar/node/26/bin/node');
   fs.mkdirSync(path.dirname(cellar), { recursive: true }); fs.writeFileSync(cellar, ''); fs.mkdirSync(path.join(prefix, 'bin')); fs.symlinkSync(cellar, path.join(prefix, 'bin/node'));
   const self = [cellar, '/agentctl.js'], stable = path.join(prefix, 'bin/node');
-  assert.equal(stableSelfArgv(self)[0], stable); assert.equal(buildCodexNotify('T1', self, undefined)[0], stable); assert.ok(!JSON.stringify(buildClaudeSettings('T1', self)).includes('/Cellar/')); assert.ok(!JSON.stringify(buildTapStatusLine('T1', self, f.config, undefined, {})).includes('/Cellar/'));
+  assert.equal(stableSelfArgv(self)[0], stable); assert.equal(buildCodexNotify('T1', self, undefined)[0], stable); assert.ok(!JSON.stringify(buildClaudeSettings('T1', self)).includes('/Cellar/')); assert.ok(!JSON.stringify(buildTapStatusLine('claude', 'T1', self, f.config, undefined, {})).includes('/Cellar/'));
   seedTask(f.config, 'OLD'); fs.writeFileSync(path.join(f.config.stateDir, 'old/claude-settings.json'), JSON.stringify({ command: '/opt/homebrew/Cellar/node/26/bin/node' }));
   assert.match((await f.call('doctor')).text, /versioned Node path.*until Node is upgraded/);
   seedTask(f.config, 'OLD-CODEX', { agent: 'codex' });

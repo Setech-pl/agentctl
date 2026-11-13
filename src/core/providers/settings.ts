@@ -7,40 +7,44 @@ const LINE_MARK = '^[\\s⎿●•■⚠!*>-]*';
 
 const BACKGROUND_CLAUDE = '[·⏵].*\\b\\d+ (?:shells?|monitors?)\\b(?: still running)?';
 
+/** The Claude Code screen patterns; `glm` (the claude-glm wrapper) shows the same TUI, so it shares them. */
+const CLAUDE_SCREEN: AgentSettings = {
+  acceptsBusyPrompt: true,
+  flags: [],
+  effortArgs: ['--effort', '{effort}'],
+  // Claude Code 2.1.309 idle screen: the input box line "❯ Try ...". The trust dialog also uses "❯", but with "1. Yes".
+  readyPattern: '^\\s*❯\\s(?!\\d+\\.)',
+  readyTimeout: 60,
+  trustTimeout: 600,
+  trustPattern: 'Quick safety check|Yes, I trust this folder',
+  workingPattern: 'esc to interrupt|^\\s*(?:⏺\\s+)?Running(?:\\s|…|\\.\\.\\.)|^\\s*[✶✻✽✢·*]\\s+[^\\n]+(?:…|\\.\\.\\.)\\s*\\([^\\n]*(?:\\d+(?:\\.\\d+)?s\\s*·|thinking|tokens)[^\\n]*\\)',
+  deliveryPattern: '^\\s*⏺|● got:',
+  interruptKey: 'Escape',
+  footerPatterns: [
+    '\\? for shortcuts',
+    '^\\s*(⏵⏵|⏸)',
+    'shift\\+tab to cycle',
+    '^\\s*[❯>]\\s*(Try ".*")?$',
+  ],
+  // AskUserQuestion dialog footer, and the footer of a permission dialog ("Esc to cancel · Tab to amend").
+  questionPattern: 'Enter to select\\b.*Esc to cancel|Esc to cancel · Tab to amend',
+  // Strings of the 2.1.309 binary: "You've hit your session limit" / "weekly limit" / "<model> limit" / "monthly spend limit" (+ " · resets …"),
+  // "Usage limit reached", "You're out of extra usage". The 429 line is also printed for a passing capacity problem (lower confidence).
+  limitPatterns: [
+    `${LINE_MARK}You.ve hit your .{0,60}limit`,
+    `${LINE_MARK}Usage limit reached`,
+    `${LINE_MARK}You.re out of extra usage`,
+    `${LINE_MARK}(?:API Error: )?Request rejected \\(429\\)`,
+  ],
+  // Claude Code 2.1.309 footer "⏵⏵ auto mode on · 1 shell, 6 monitors" and the lines "… · 1 shell, 6 monitors still running". A "·" or "⏵⏵" on the same
+  // line keeps a sentence of the conversation ("ran 2 shells") from counting.
+  overloadPatterns: ['^\\s*⎿\\s*API Error:\\s*529(?:\\s|$)', '^\\s*⎿\\s*(?:API Error:\\s*)?Overloaded(?:[.:]|$)'],
+  backgroundPatterns: ['^\\s*\\d+ (?:monitors?|shells?)(?:, \\d+ (?:monitors?|shells?))? still running\\b', BACKGROUND_CLAUDE, '[·⏵].*\\b\\d+ background\\b'],
+};
+
 const SETTINGS: Record<ProviderId, AgentSettings> = {
-  claude: {
-    acceptsBusyPrompt: true,
-    flags: [],
-    effortArgs: ['--effort', '{effort}'],
-    // Claude Code 2.1.309 idle screen: the input box line "❯ Try ...". The trust dialog also uses "❯", but with "1. Yes".
-    readyPattern: '^\\s*❯\\s(?!\\d+\\.)',
-    readyTimeout: 60,
-    trustTimeout: 600,
-    trustPattern: 'Quick safety check|Yes, I trust this folder',
-    workingPattern: 'esc to interrupt|^\\s*(?:⏺\\s+)?Running(?:\\s|…|\\.\\.\\.)|^\\s*[✶✻✽✢·*]\\s+[^\\n]+(?:…|\\.\\.\\.)\\s*\\([^\\n]*(?:\\d+(?:\\.\\d+)?s\\s*·|thinking|tokens)[^\\n]*\\)',
-    deliveryPattern: '^\\s*⏺|● got:',
-    interruptKey: 'Escape',
-    footerPatterns: [
-      '\\? for shortcuts',
-      '^\\s*(⏵⏵|⏸)',
-      'shift\\+tab to cycle',
-      '^\\s*[❯>]\\s*(Try ".*")?$',
-    ],
-    // AskUserQuestion dialog footer, and the footer of a permission dialog ("Esc to cancel · Tab to amend").
-    questionPattern: 'Enter to select\\b.*Esc to cancel|Esc to cancel · Tab to amend',
-    // Strings of the 2.1.309 binary: "You've hit your session limit" / "weekly limit" / "<model> limit" / "monthly spend limit" (+ " · resets …"),
-    // "Usage limit reached", "You're out of extra usage". The 429 line is also printed for a passing capacity problem (lower confidence).
-    limitPatterns: [
-      `${LINE_MARK}You.ve hit your .{0,60}limit`,
-      `${LINE_MARK}Usage limit reached`,
-      `${LINE_MARK}You.re out of extra usage`,
-      `${LINE_MARK}(?:API Error: )?Request rejected \\(429\\)`,
-    ],
-    // Claude Code 2.1.309 footer "⏵⏵ auto mode on · 1 shell, 6 monitors" and the lines "… · 1 shell, 6 monitors still running". A "·" or "⏵⏵" on the same
-    // line keeps a sentence of the conversation ("ran 2 shells") from counting.
-    overloadPatterns: ['^\\s*⎿\\s*API Error:\\s*529(?:\\s|$)', '^\\s*⎿\\s*(?:API Error:\\s*)?Overloaded(?:[.:]|$)'],
-    backgroundPatterns: ['^\\s*\\d+ (?:monitors?|shells?)(?:, \\d+ (?:monitors?|shells?))? still running\\b', BACKGROUND_CLAUDE, '[·⏵].*\\b\\d+ background\\b'],
-  },
+  claude: CLAUDE_SCREEN,
+  glm: CLAUDE_SCREEN,
   kimi: kimiSettings(),
   codex: {
     acceptsBusyPrompt: true,

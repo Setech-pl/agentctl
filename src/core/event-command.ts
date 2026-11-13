@@ -77,12 +77,12 @@ export function limitText(record: { task: string; agent: string; pin?: boolean |
 async function noteSession(ctx: Context, record: TaskRecord, input: EventInput): Promise<void> {
   try {
     const session = provider(input.agent).events.session({ kind: input.kind, payload: input.payload });
-    if (session && input.agent === 'claude' && input.kind === 'session-start') {
+    if (session && (input.agent === 'claude' || input.agent === 'glm') && input.kind === 'session-start') {
       // SessionStart may precede transcript creation. Save the resume ID now, but leave transcript selection
       // to the existing prompt/statusLine receipts so an early missing file cannot pin delivery evidence as absent.
       const known = readTaskSessions(ctx.config, record.window);
-      if (!(known.claude ?? []).some(entry => entry.id === session.id)) {
-        (known.claude ??= []).push(session);
+      if (!(known[input.agent] ?? []).some(entry => entry.id === session.id)) {
+        (known[input.agent] ??= []).push(session);
         await ctx.runner.writeFile(sessionsFile(ctx.config, record.window), `${JSON.stringify(known, null, 2)}\n`);
       }
     } else if (session) await rememberSession(ctx.runner, ctx.config, record.window, input.agent, session, input.attempt ?? '');

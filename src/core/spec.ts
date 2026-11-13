@@ -1,5 +1,5 @@
 import { linkBaseWarnings, validateLink, missingLinkTargets, fillTaskLinkTargets, staleProjectLinkWarnings } from './links.ts';
-import { validateLaunch } from './safety.ts';
+import { validateLaunch, ANTHROPIC_SECRET_ENV } from './safety.ts';
 import { provider, isActive, activeProviders } from './providers/registry.ts';
 import { PROVIDER_IDS } from './providers/types.ts';
 import { classNames, matrixClass, explicitOnlyModel } from './matrix.ts';
@@ -464,6 +464,13 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
       const filled = fill(value);
       env[key] = filled === '~' || filled.startsWith('~/') ? resolvePath(filled) : filled;
     }
+  }
+  // Isolation: a glm task gets ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN only from the claude-glm wrapper; agentctl never
+  // writes them into TASK.md, the launch script or logs, so they are dropped from the spec env (with a warning).
+  if (agent === 'glm') {
+    const stripped = ANTHROPIC_SECRET_ENV.filter((name) => env[name] !== undefined);
+    for (const name of stripped) delete env[name];
+    if (stripped.length > 0) classWarnings.push(`env ${stripped.join(', ')} removed: a glm task gets the Z.ai endpoint and token only from the claude-glm wrapper (agentctl never writes them into a task)`);
   }
 
   const reportLayer = specReport.length > 0 ? { first: specReport[0], alt: specReport.slice(1) } : project?.report ? { first: project.report, alt: project.reportAlt ?? [] } : config.report ? { first: config.report, alt: config.reportAlt ?? [] } : undefined;

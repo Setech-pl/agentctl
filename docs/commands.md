@@ -1374,7 +1374,7 @@ agentctl event [options] [payload]
 | `--task <task>` | task ID | required |
 | `--attempt <id>` | attempt that owns this hook/session |  |
 | `--agent <agent>` | the agent that reports | one of `claude`, `codex`; required |
-| `--kind <kind>` | claude: which hook called | one of `notification`, `stop`, `stop-failure`, `user-prompt-submit`, `session-start` |
+| `--kind <kind>` | claude/glm: which hook called | one of `notification`, `stop`, `stop-failure`, `user-prompt-submit`, `session-start` |
 | `--forward-file <path>` | codex: private JSON file containing the original notify command |  |
 | `--forward <json>` | codex: JSON list, the notify command the user had; run with the same JSON after this one |  |
 
@@ -1389,6 +1389,7 @@ agentctl usage-tap [options]
 | Option | Meaning | Notes |
 |---|---|---|
 | `--task <task>` | task ID | required |
+| `--agent <provider>` | the provider whose statusLine this is (default claude; glm keeps its own plan file) | default `claude` |
 | `--attempt <id>` | attempt that owns this statusLine session |  |
 | `--forward <command>` | your own statusLine command: run with the same input after this one |  |
 

@@ -1458,7 +1458,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .requiredOption('--task <task>', 'task ID')
     .option('--attempt <id>', 'attempt that owns this hook/session')
     .addOption(new Option('--agent <agent>', 'the agent that reports').choices([...cliProviders]).makeOptionMandatory())
-    .addOption(new Option('--kind <kind>', 'claude: which hook called').choices(PROVIDER_IDS.flatMap(id => [...provider(id).events.kinds])))
+    .addOption(new Option('--kind <kind>', 'claude/glm: which hook called').choices([...new Set(PROVIDER_IDS.flatMap(id => [...provider(id).events.kinds]))]))
     .option('--forward-file <path>', 'codex: private JSON file containing the original notify command')
     .option('--forward <json>', 'codex: JSON list, the notify command the user had; run with the same JSON after this one')
     .argument('[payload]', 'the event as JSON (codex puts it here; claude sends it on stdin)')
@@ -1489,15 +1489,17 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .command('usage-tap')
     .description('Called by Claude Code as the statusLine of a task window (set up by "new"): keeps the plan limits that Claude gives only to a statusLine, remembers the session, then runs your own statusLine command with the same input and prints its output. Always exits 0.')
     .requiredOption('--task <task>', 'task ID')
+    .option('--agent <provider>', 'the provider whose statusLine this is (default claude; glm keeps its own plan file)', 'claude')
     .option('--attempt <id>', 'attempt that owns this statusLine session')
     .option('--forward <command>', 'your own statusLine command: run with the same input after this one')
-    .action(async (opts: { task: string; attempt?: string; forward?: string }) => {
+    .action(async (opts: { task: string; agent?: string; attempt?: string; forward?: string }) => {
       // A status line must never break the agent: whatever happens, the exit code stays 0.
       try {
         const config = deps.loadConfig();
         const runner = deps.makeRunner(false, () => {});
         const raw = deps.stdinIsTTY ? '' : deps.readStdin();
-        const result = await handleTap(runner, config, { task: opts.task, attempt: opts.attempt, window: windowName(opts.task), raw, ...(opts.forward ? { forward: opts.forward } : {}) });
+        const agent = (PROVIDER_IDS as readonly string[]).includes(opts.agent ?? '') ? opts.agent as AgentName : 'claude';
+        const result = await handleTap(runner, config, { agent, task: opts.task, attempt: opts.attempt, window: windowName(opts.task), raw, ...(opts.forward ? { forward: opts.forward } : {}) });
         if (result.output !== '') deps.stdout(result.output);
       } catch (e) {
         deps.stderr(`agentctl usage-tap: ${errorMessage(e)}\n`);

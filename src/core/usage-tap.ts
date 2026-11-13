@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { AgentName, GlobalConfig } from './config.ts';
 import type { Runner } from './runner.ts';
-import { claudePlanFile, readTaskSessions, sessionsFile } from './usage.ts';
+import { planFileFor, readTaskSessions, sessionsFile } from './usage.ts';
 import { agentHomes } from './usage-sources.ts';
 import { windowKind } from './usage-parse.ts';
 import { isObject } from './util.ts';
@@ -47,7 +47,7 @@ export function sessionOfStatusLine(input: unknown): { id: string; transcript?: 
 export async function rememberSession(runner: Runner, config: GlobalConfig, window: string, agent: AgentName, session: { id: string; transcript?: string }, attempt?: string): Promise<void> {
   const file = sessionsFile(config, window);
   if (!fs.existsSync(path.dirname(file))) return; // an orphan window has no state folder
-  if (agent === 'claude' || agent === 'codex') await selectTranscriptSession(runner, config, window, agent, session, attempt);
+  if (agent === 'claude' || agent === 'glm' || agent === 'codex') await selectTranscriptSession(runner, config, window, agent, session, attempt);
   const known = readTaskSessions(config, window);
   const entries = known[agent] ??= [];
   if (provider(agent).capabilities.statusLineTap) {
@@ -62,8 +62,8 @@ export async function rememberSession(runner: Runner, config: GlobalConfig, wind
 }
 
 /** Write the plan windows where `usage` reads them. Nothing is written when they are what the file has already, and fresh. */
-export async function storeClaudePlan(runner: Runner, config: Pick<GlobalConfig, 'path'>, reading: ClaudePlanReading): Promise<boolean> {
-  const file = claudePlanFile(config);
+export async function storeClaudePlan(runner: Runner, config: Pick<GlobalConfig, 'path'>, reading: ClaudePlanReading, agent: AgentName = 'claude'): Promise<boolean> {
+  const file = planFileFor(agent, config);
   try {
     const old: unknown = JSON.parse(fs.readFileSync(file, 'utf8'));
     if (isObject(old) && typeof old.at === 'number' && reading.at - old.at < 30_000 && JSON.stringify(old.windows) === JSON.stringify(reading.windows.map((w) => ({ kind: windowKind(w.minutes), ...w })))) return false;
@@ -120,12 +120,12 @@ export function userStatusLine(worktree: string | undefined, claudeHome: string,
 const shellWord = (s: string): string => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`);
 
 /** The `statusLine` entry for a task's settings file, or undefined when the tap is off or must not replace the user's own status line. */
-export function buildTapStatusLine(task: string, self: string[], config: Pick<GlobalConfig, 'usage'>, worktree: string | undefined, env: Record<string, string>, attempt?: string): Record<string, unknown> | undefined {
+export function buildTapStatusLine(agent: AgentName, task: string, self: string[], config: Pick<GlobalConfig, 'usage'>, worktree: string | undefined, env: Record<string, string>, attempt?: string): Record<string, unknown> | undefined {
   self = stableSelfArgv(self);
   if (!config.usage.claudeTap) return undefined;
   const user = userStatusLine(worktree, env.CLAUDE_CONFIG_DIR ?? agentHomes(config, { ...process.env, ...env }).claude);
   if (user.foreign) return undefined;
-  const args = [...self, 'usage-tap', '--task', task, ...(attempt ? ['--attempt', attempt] : []), ...(user.command ? ['--forward', user.command] : [])];
+  const args = [...self, 'usage-tap', '--task', task, ...(agent !== 'claude' ? ['--agent', agent] : []), ...(attempt ? ['--attempt', attempt] : []), ...(user.command ? ['--forward', user.command] : [])];
   return { type: 'command', command: args.map(shellWord).join(' '), ...(user.padding !== undefined ? { padding: user.padding } : {}) };
 }
 
@@ -136,8 +136,9 @@ export interface TapResult {
 }
 
 /** `agentctl usage-tap`: the statusLine input arrives as `raw`. Never throws. */
-export async function handleTap(runner: Runner, config: GlobalConfig, input: { task?: string | undefined; window?: string | undefined; raw: string; attempt?: string | undefined; forward?: string | undefined }): Promise<TapResult> {
+export async function handleTap(runner: Runner, config: GlobalConfig, input: { agent?: AgentName | undefined; task?: string | undefined; window?: string | undefined; raw: string; attempt?: string | undefined; forward?: string | undefined }): Promise<TapResult> {
   let stored = false;
+  const agent: AgentName = input.agent ?? 'claude';
   try {
     let payload: unknown;
     try {
@@ -146,9 +147,9 @@ export async function handleTap(runner: Runner, config: GlobalConfig, input: { t
       payload = undefined;
     }
     const reading = parseClaudeRateLimits(payload, runner.now());
-    if (reading) stored = await storeClaudePlan(runner, config, reading);
+    if (reading) stored = await storeClaudePlan(runner, config, reading, agent);
     const session = sessionOfStatusLine(payload);
-    if (session && input.window) await rememberSession(runner, config, input.window, 'claude', session, input.attempt ?? '');
+    if (session && input.window) await rememberSession(runner, config, input.window, agent, session, input.attempt ?? '');
   } catch {
     // a status line must never break the agent
   }

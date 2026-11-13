@@ -1,4 +1,4 @@
-import type { AgentSettings, Effort, GlobalConfig } from '../config.ts';
+import type { AgentName, AgentSettings, Effort, GlobalConfig } from '../config.ts';
 import type { Context } from '../context.ts';
 import type { Runner } from '../runner.ts';
 import type { TaskRecord } from '../taskstore.ts';
@@ -7,7 +7,7 @@ import type { PlanState } from '../usage.ts';
 import type { SessionStats } from '../usage-parse.ts';
 import type { UsageReader } from '../usage-sources.ts';
 
-export const PROVIDER_IDS = ['claude', 'codex', 'kimi'] as const;
+export const PROVIDER_IDS = ['claude', 'codex', 'kimi', 'glm'] as const;
 export const DEFAULT_PROVIDERS = ['claude', 'codex'] as const;
 export type ProviderId = (typeof PROVIDER_IDS)[number];      // config.ts: export type AgentName = ProviderId
 
@@ -20,6 +20,8 @@ export interface LaunchOrder {
   effort: Effort;
   task: string;
   remoteControl?: boolean;
+  /** The binary that starts the agent; glm honours `providers_config.glm.command` (default `claude-glm`). Others: the adapter default. */
+  command?: string;
 }
 
 export interface ProviderDetection {
@@ -62,6 +64,8 @@ export interface RawEvent { kind?: string; payload: unknown; raw?: string; promp
 export interface EventWiringInput {
   attempt?: string;                    // attempt that owns the hooks/session (p15: --attempt)
   task: string; window: string; config: GlobalConfig;
+  /** The provider whose hooks these are (claude, glm: the same Claude Code hook kinds). */
+  agent: AgentName;
   self: string[];                       // stableSelfArgv
   env: Record<string, string>;          // env specu (CODEX_HOME, KIMI_CODE_HOME…)
   worktree?: string;
@@ -135,7 +139,7 @@ export interface ProviderAdapter {
   readonly installHint: string;
   readonly capabilities: Readonly<{ remoteControl: boolean; statusLineTap: boolean; mcpInstall: boolean; busyPrompt: boolean }>;
   defaultSettings(): AgentSettings;
-  detect(runner: Runner): Promise<ProviderDetection>;
+  detect(runner: Runner, config?: GlobalConfig): Promise<ProviderDetection>;
   doctor(d: ProviderDetection, env: NodeJS.ProcessEnv, config?: GlobalConfig): DoctorLine[];
   argv(order: LaunchOrder, settings: AgentSettings, extra: string[]): string[];
   /** Zmienne okna wymagane przez sam start (Kimi: KIMI_MODEL_THINKING_EFFORT, KIMI_CODE_NO_AUTO_UPDATE, AGENTCTL_TASK); doklejane do spec.env w new/resume

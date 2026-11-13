@@ -398,7 +398,7 @@ describe('Claude statusLine tap', () => {
     fs.writeFileSync(path.join(w.claudeHome, 'settings.json'), JSON.stringify({ statusLine: { type: 'something' } }));
     assert.equal(settings(wire()).statusLine, undefined);
     const off = makeConfigOff(w.root);
-    assert.equal(buildTapStatusLine('NC-1', self, off, undefined, {}), undefined);
+    assert.equal(buildTapStatusLine('claude', 'NC-1', self, off, undefined, {}), undefined);
     assert.deepEqual(Object.keys(buildClaudeSettings('NC-1', self)), ['hooks', 'promptSuggestionEnabled']);
   });
 });

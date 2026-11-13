@@ -37,6 +37,8 @@ Column "Layers": **g** global config, **p** project config, **s** spec.
 | Key | Type | Default | Layers | Meaning |
 |---|---|---|---|---|
 | `providers` | global | `[claude, codex]` | Active providers in order; both claude and codex are required, without duplicates. |
+| `providers_config` | mapping | `{}` | g | Per-provider launch overrides. Today only `providers_config.glm.command` (see [GLM](#glm-zai-glm-coding-plan)). |
+| `providers_config.glm.command` | string | `claude-glm` | g | The executable that starts GLM tasks (one name or path, no arguments). |
 | `cache` | path | `~/workspace/cache` | g | Directory with one folder per task, `<cache>/<task>/`: the only place the agents write to (reports). |
 | `state_dir` | path | `<config dir>/tasks` | g | agentctl's own state per task (`TASK.md`, `setup.log`, `event.json`, `notified.json`), out of the agents' reach. Closed tasks are archived next to it, in `archive/`. |
 | `tmux` | mapping | socket unset | g | Optional dedicated tmux server. |
@@ -176,6 +178,7 @@ Queued tasks live in `<config dir>/queue/` (one JSON file each, with the spec te
 | `usage.claude_tap` | boolean | `true` | g | `new` sets the `statusLine` of a Claude window to `agentctl usage-tap`, which records the plan limits that Claude gives only to a statusLine and passes your own statusLine on. `false`: Claude's limits are n/d. |
 | `usage.claude_dir` | path | `$CLAUDE_CONFIG_DIR`, else `~/.claude` | g | Where Claude Code keeps `projects/` (the transcripts). |
 | `usage.codex_dir` | path | `$CODEX_HOME`, else `~/.codex` | g | Where Codex keeps `sessions/`. |
+| `usage.glm_dir` | path | `$CLAUDE_CONFIG_DIR`, else `~/.claude` | g | Where GLM (claude-glm) keeps `projects/` (the transcripts); the Claude Code layout, read separately from Claude's. |
 
 ## Keys per agent
 
@@ -607,3 +610,25 @@ Both `capacity` and `usage` refresh on demand when enabled; this is not a backgr
 If trust/login is required, agentctl reports a **one-time wait for Marcin**. Run `claude` manually in the printed neutral directory, complete the dialog yourself, then exit. Agentctl never answers dialogs; it also checks the idle slash-command composer again before Enter. `doctor` shows off/enabled, interval, missing reading/manual trust, and the last reading's age/staleness. Doctor itself does not run a probe.
 
 The parser uses the real Claude Code 2.1.311 panel: `Current session` (5 h) and `Current week (all models)`, percentage used, and `Resets … (IANA timezone)`. Model-specific weeks and usage credits are excluded from these all-model windows. Unsupported reset formats remain unknown rather than guessed. A weekly panel is required before replacing a reading. Only percentages, reset timestamps and the capture timestamp are stored in `usage/claude-usage-probe.json`, exposed as `source: claude-usage-probe`. The newer of the probe and existing statusline reading wins; disabling the probe restores statusline-only reads. Old readings retain the existing `capacity.stale_minutes` marking, and expired windows are dropped. CLI layout changes or unsupported localized reset text may prevent refresh or leave reset unknown; a failed refresh retains the previous reading.
+
+### GLM (Z.ai GLM Coding Plan)
+
+GLM is Claude Code started through the `claude-glm` wrapper, which exports `ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic` and `ANTHROPIC_AUTH_TOKEN` (from the macOS Keychain item `neon-city-zai`) itself and then runs `claude`. agentctl reuses the whole Claude adapter (hooks, skills, subagents, prompt delivery, report contract, folder-trust handling) and changes only the launch command, the validated model list and the usage bookkeeping. Enable it in the config:
+
+```yaml
+providers: [claude, codex, glm]
+limits: {claude: 3, codex: 3, glm: 2}        # glm defaults to 2; its own Z.ai limit, never the Claude account limit
+# providers_config: {glm: {command: claude-glm}}   # only when the wrapper has another name/path
+```
+
+| Key | Type | Default | Layers | Meaning |
+|---|---|---|---|---|
+| `limits.glm` | positive integer, `0` or `off` | `2` | g | Cap for GLM windows (agentctl windows + reserved places + external sessions when counted); `0` = no limit, `off` = disabled. Separate from the Claude account limit. |
+| `usage.glm_dir` | path | `$CLAUDE_CONFIG_DIR`, else `~/.claude` | g | Where GLM session transcripts land (the Claude Code `projects/` layout). |
+| `providers_config.glm.command` | string | `claude-glm` | g | The executable that starts GLM tasks; one name or path, no arguments. |
+
+`agent: glm` accepts exactly `glm-5.3` and `glm-5.3-flash` (the models the plan documents, docs.z.ai/devpack/faq); `model: default` omits the flag. Effort works as for Claude (`--effort`, `low/medium/high/xhigh/max`). `class:` maps through the glm column of [data/model-matrix.yaml](../data/model-matrix.yaml), and `equivalents` accepts a `glm` column, so `move` and `--agent glm` translate through the table.
+
+Isolation is a hard rule: agentctl never writes `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY` or any Z.ai secret into `~/.claude/settings.json`, the per-task settings, `TASK.md`, logs, the journal, benchmark records or the environment of `claude` tasks. `claude` tasks keep their environment unchanged; `glm` tasks get only what the wrapper does - these variables are stripped from a glm spec's `env` (with a preview warning), and their values are redacted wherever captured output is persisted. The wrapper's own environment (Keychain, `PATH`) is never read by agentctl; doctor checks only that `claude-glm` is on `PATH` and executable and that the Keychain item exists (never the secret).
+
+Usage accounting is separate (benchmark/statistics rows show `glm`). Z.ai documents no quota endpoint or CLI quota output for the 5-hour and weekly windows (only the subscription web page), so the GLM plan is **n/d** and `usage.queue_hold` never holds glm; token accounting from the session logs works as for Claude. `usage.warn`/`usage.critical` accept a `glm` percentage like any other provider but have no plan reading to fire on. The statusLine tap of a glm window writes `usage/glm-plan.json`, never the Claude plan file.

@@ -147,7 +147,7 @@ export async function runDoctor(
   for (const id of PROVIDER_IDS) {
     const adapter = provider(id);
     if (config && !isActive(config, id)) continue;
-    const detection = await adapter.detect(runner);
+    const detection = await adapter.detect(runner, config);
     if (config && !isActive(config, id) && !detection.found) continue;
     for (const check of adapter.doctor(detection, env, config)) add(check.name, check.level, check.text);
   }
@@ -262,10 +262,12 @@ export async function runDoctor(
       const legacyTokens = new Set(commands.filter(command => /\/Cellar\/node(?:@[^/]+)?\//.test(command) && command.includes('--task')).flatMap(command => command.replaceAll(/[^a-zA-Z0-9_-]+/g, ' ').split(' ')));
       for (const record of currentRecords.filter(record => !record.closed && !record.cancelled)) {
         if (legacyTokens.has(record.task)) add(`task node ${record.task}`, 'warn', 'versioned Node path in active callback argv; works until Node is upgraded; regenerate task wiring when convenient');
-        const file = path.join(config.stateDir, record.window, 'claude-settings.json');
-        if (fs.existsSync(file)) try {
-          if (/\/Cellar\/node(?:@[^/]+)?\//.test(fs.readFileSync(file, 'utf8'))) add(`task node ${record.task}`, 'warn', 'versioned Node path in claude-settings.json; works until Node is upgraded; regenerate task wiring when convenient');
-        } catch { /* missing/unreadable managed wiring */ }
+        for (const wiringFile of ['claude-settings.json', 'glm-settings.json']) {
+          const file = path.join(config.stateDir, record.window, wiringFile);
+          if (fs.existsSync(file)) try {
+            if (/\/Cellar\/node(?:@[^/]+)?\//.test(fs.readFileSync(file, 'utf8'))) add(`task node ${record.task}`, 'warn', `versioned Node path in ${wiringFile}; works until Node is upgraded; regenerate task wiring when convenient`);
+          } catch { /* missing/unreadable managed wiring */ }
+        }
       }
     } catch (e) { add('task wiring', 'warn', errorMessage(e)); }
     if (cachedOnly) add('task inventory', 'ok', `${currentRecords.length} current, ${archivedRecords.length} archived; per-task report/link checks skipped in cached mode; active callback wiring checked (CLI doctor runs detailed checks)`);

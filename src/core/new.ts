@@ -11,6 +11,7 @@ import type { Order } from './equivalents.ts';
 import { touchCohort } from './cohort.ts';
 import { planEventWiring } from './events.ts';
 import type { SelfArgv } from './events.ts';
+import { providerCommand } from './providers/registry.ts';
 import { addWorktree } from './git.ts';
 import { applyLinks, checkLinkTargets, planLinks } from './links.ts';
 import { planBatch } from './plan.ts';
@@ -56,9 +57,9 @@ export interface NewResult {
   switchedBy?: 'flag' | 'limit';
 }
 
-async function requireTool(ctx: Context, tool: string, args: string[]): Promise<string> {
+async function requireTool(ctx: Context, tool: string, args: string[], hint?: string): Promise<string> {
   const r = await ctx.runner.exec(tool, args, { readOnly: true });
-  if (r.code !== 0) throw new AgentctlError(`${tool} not found or not working`, INSTALL_HINTS[tool]);
+  if (r.code !== 0) throw new AgentctlError(`${tool} not found or not working`, hint);
   return r.stdout.trim().split('\n')[0] || 'unknown';
 }
 
@@ -118,14 +119,14 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
 
   // Tools needed by the orders as written; the provider may change below, so check both agents the batch could end on.
   if (!runner.dryRun) {
-    if (!opts.noAgent) await requireTool(ctx, 'tmux', ['-V']);
-    await requireTool(ctx, 'git', ['--version']);
+    if (!opts.noAgent) await requireTool(ctx, 'tmux', ['-V'], INSTALL_HINTS.tmux);
+    await requireTool(ctx, 'git', ['--version'], INSTALL_HINTS.git);
   }
   const specs = admitted ? requested : await planBatch(ctx, requested, opts);
   for (const spec of specs) checkLinkTargets(spec.links.filter(l => !spec.repos.some(r => l.to === r.worktree || l.to.startsWith(`${r.worktree}/`))), spec.task);
   const versions: Record<string, string> = {};
   if (!runner.dryRun && !opts.noAgent) {
-    for (const agent of new Set(specs.map((s) => s.agent))) versions[agent] = await requireTool(ctx, agent, ['--version']);
+    for (const agent of new Set(specs.map((s) => s.agent))) versions[agent] = await requireTool(ctx, providerCommand(config, agent), ['--version'], INSTALL_HINTS[agent]);
   }
 
   const results: NewResult[] = [];
@@ -202,7 +203,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
     const launchEnv = launchEnvironment(config, spec, spec.env);
 
     const settings = config.agents[spec.agent];
-    const commandLine = await writeLaunchScript(runner, taskDir(config, spec.window), buildAgentArgv(spec, settings, wiring?.args), launchEnv);
+    const commandLine = await writeLaunchScript(runner, taskDir(config, spec.window), buildAgentArgv({ ...spec, command: providerCommand(config, spec.agent) }, settings, wiring?.args), launchEnv);
     // 5. window + agent
     await openAgentWindow(ctx, { ...guardRequest(spec), cwd: primary, env: {}, origin: opts.origin ?? (spec.autoReview ? 'start' : 'new'), sessionUp });
     sessionUp = true;

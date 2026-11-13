@@ -43,15 +43,18 @@ describe('model matrix: data/model-matrix.yaml is the one source of truth', () =
   it('config defaults equal the table derived from the matrix', () => {
     const p = new Problems();
     const parsed = parseEquivalents(deriveEquivalentRows(), 'matrix', p, PROVIDER_IDS);
-    assert.deepEqual(defaultEquivalents(['claude', 'codex', 'kimi']), parsed);
+    const without = (rows: typeof parsed, ...cols: ('kimi' | 'glm')[]) => rows.map((row) => {
+      const rest = { ...row } as Record<string, unknown>;
+      for (const col of cols) delete rest[col];
+      return rest;
+    });
+    assert.deepEqual(defaultEquivalents(['claude', 'codex', 'kimi']), without(parsed, 'glm'));
+    assert.deepEqual(defaultEquivalents(['claude', 'codex', 'kimi', 'glm']), parsed);
     const config = loadGlobalConfig(scratch.sub('matrix-config'));
     assert.deepEqual(
       config.equivalents,
-      parsed.map((row) => {
-        const { kimi: _kimi, ...rest } = row;
-        return rest;
-      }),
-      'without kimi the defaults keep the same rows, minus the kimi column',
+      without(parsed, 'kimi', 'glm'),
+      'without kimi and glm the defaults keep the same rows, minus the optional columns',
     );
   });
 

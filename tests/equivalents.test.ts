@@ -32,14 +32,14 @@ describe('equivalents table', () => {
 
   it('has exactly the defaults derived from data/model-matrix.yaml', () => {
     assert.deepEqual(defaultEquivalentRows(), [
-      { claude: 'claude-haiku-5-5/low', codex: 'gpt-6-luna/medium', kimi: 'k3-256k/low', class: 'light' },
-      { claude: 'claude-sonnet-5-5/medium', codex: 'gpt-6-luna/medium', kimi: 'k3-256k/low', class: 'light' },
-      { claude: 'claude-sonnet-5-5/medium', codex: 'gpt-6-luna/medium', kimi: 'k3/high', class: 'light' },
-      { claude: 'claude-sonnet-5-5/medium', codex: 'gpt-6.1-sol/medium', kimi: 'k3/high', class: 'medium' },
-      { claude: 'claude-sonnet-5-5/high', codex: 'gpt-6.1-sol/medium', kimi: 'k3/high', class: 'medium' },
-      { claude: 'claude-opus-5-5/high', codex: 'gpt-6.1-sol/high', kimi: 'k3/max', class: 'strong' },
-      { claude: 'claude-opus-5-5/medium', codex: 'gpt-6.1-sol/medium', kimi: 'k3/high', class: 'medium' },
-      { claude: 'claude-opus-5-5/medium', codex: 'gpt-6.1-sol/medium', class: 'medium' },
+      { claude: 'claude-haiku-5-5/low', codex: 'gpt-6-luna/medium', kimi: 'k3-256k/low', glm: 'glm-5.3-flash/low', class: 'light' },
+      { claude: 'claude-sonnet-5-5/medium', codex: 'gpt-6-luna/medium', kimi: 'k3-256k/low', glm: 'glm-5.3-flash/medium', class: 'light' },
+      { claude: 'claude-sonnet-5-5/medium', codex: 'gpt-6-luna/medium', kimi: 'k3/high', glm: 'glm-5.3-flash/medium', class: 'light' },
+      { claude: 'claude-sonnet-5-5/medium', codex: 'gpt-6.1-sol/medium', kimi: 'k3/high', glm: 'glm-5.3/medium', class: 'medium' },
+      { claude: 'claude-sonnet-5-5/high', codex: 'gpt-6.1-sol/medium', kimi: 'k3/high', glm: 'glm-5.3/high', class: 'medium' },
+      { claude: 'claude-opus-5-5/high', codex: 'gpt-6.1-sol/high', kimi: 'k3/max', glm: 'glm-5.3/high', class: 'strong' },
+      { claude: 'claude-opus-5-5/medium', codex: 'gpt-6.1-sol/medium', kimi: 'k3/high', glm: 'glm-5.3/medium', class: 'medium' },
+      { claude: 'claude-opus-5-5/medium', codex: 'gpt-6.1-sol/medium', glm: 'glm-5.3/medium', class: 'medium' },
     ]);
   });
 

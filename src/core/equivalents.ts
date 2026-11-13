@@ -16,6 +16,7 @@ export interface Equivalent {
   claude: ModelEffort;
   codex: ModelEffort;
   kimi?: ModelEffort;
+  glm?: ModelEffort;
   class?: 'light' | 'medium' | 'strong';
 }
 
@@ -82,10 +83,13 @@ export function parseEquivalents(v: unknown, where: string, p: Problems, ids: re
 export function defaultEquivalents(ids: readonly AgentName[] = DEFAULT_PROVIDERS): Equivalent[] {
   const p = new Problems();
   const table = parseEquivalents(deriveEquivalentRows(), 'DEFAULT_EQUIVALENTS', p, PROVIDER_IDS);
-  if (ids.includes('kimi')) return table;
   return table.map((row) => {
-    const { kimi: _kimi, ...rest } = row;
-    return rest as Equivalent;
+    const { kimi: _kimi, glm: _glm, ...rest } = row;
+    return {
+      ...rest,
+      ...(ids.includes('kimi') && row.kimi ? { kimi: row.kimi } : {}),
+      ...(ids.includes('glm') && row.glm ? { glm: row.glm } : {}),
+    } as Equivalent;
   });
 }
 
@@ -109,7 +113,9 @@ export function translate(order: Order, target: AgentName, table: Equivalent[]):
     };
   }
   const placeholder = '<model>/<effort>';
-  const line = `{${(target === 'kimi' || order.agent === 'kimi' ? PROVIDER_IDS : DEFAULT_PROVIDERS).map(id => `${id}: "${id === order.agent ? here : placeholder}"`).join(', ')}}`;
+  // A pair that names an optional provider mentions every registered provider in the hint, so the glm/kimi column shows too.
+  const all = [order.agent, target].some(id => !(DEFAULT_PROVIDERS as readonly string[]).includes(id));
+  const line = `{${(all ? PROVIDER_IDS : DEFAULT_PROVIDERS).map(id => `${id}: "${id === order.agent ? here : placeholder}"`).join(', ')}}`;
   return {
     ok: false,
     message: `no ${target} equivalent for ${order.agent} ${here}`,

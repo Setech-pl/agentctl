@@ -105,6 +105,8 @@ export interface AgentSettings {
 
 export interface GlobalConfig extends Layer {
   providers: ProviderId[];
+  /** Per-provider launch overrides; today only `glm.command` (default `claude-glm`). */
+  providersConfig?: { glm?: { command?: string } };
   warnings?: string[];
   /** Absolute path of the directory that holds per-task cache folders: only the reports the agents write. */
   cache: string;
@@ -228,6 +230,8 @@ export interface UsageSettings {
   /** Codex's home (holds `sessions/`); null: `$CODEX_HOME`, else ~/.codex. */
   codexDir: string | null;
   kimiDir?: string | null;
+  /** GLM's Claude config directory (holds `projects/`); null: `$CLAUDE_CONFIG_DIR`, else ~/.claude. */
+  glmDir?: string | null;
 }
 
 export interface CollisionSettings {
@@ -345,7 +349,7 @@ export const DEFAULT_AGENT_SETTINGS = Object.fromEntries(DEFAULT_PROVIDERS.map(i
 
 /** The keys accepted in every layer: the global config, `.agentctl.yaml` and (with a few of its own) a spec. docs/configuration.md describes each one. */
 export const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'setup', 'defaults', 'guide', 'review'];
-export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'limited', 'cache', 'state_dir', 'session', 'ui', 'tmux', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git', 'cohort', 'delivery_confirm_s', 'preview', 'providers'];
+export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'limited', 'cache', 'state_dir', 'session', 'ui', 'tmux', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git', 'cohort', 'delivery_confirm_s', 'preview', 'providers', 'providers_config'];
 export const LIMITS_KEYS = [...AGENT_NAMES, 'count_external', 'count_report_ready', 'heavy'];
 export const DEFAULTS_KEYS = ['agent', 'model', 'effort', 'remote_control'];
 export const LINK_KEYS = ['from', 'to'];
@@ -929,7 +933,7 @@ function parseUsage(v: unknown, p: Problems, ids: readonly ProviderId[]): UsageS
   }
   for (const id of PROVIDER_IDS) {
     const key = `${id}_dir`;
-    const field = `${id}Dir` as 'claudeDir' | 'codexDir' | 'kimiDir';
+    const field = `${id}Dir` as 'claudeDir' | 'codexDir' | 'kimiDir' | 'glmDir';
     const dir = parseString(v[key], `config.usage.${key}`, p);
     if (dir) usage[field] = resolvePath(dir);
   }
@@ -985,6 +989,26 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   checkKeys(raw, GLOBAL_KEYS, 'config', p);
   const layer = parseLayer(raw, 'config', p);
   const providers = parseProviders(raw.providers, p);
+
+  let providersConfig: GlobalConfig['providersConfig'];
+  if (raw.providers_config !== undefined && raw.providers_config !== null) {
+    if (!isObject(raw.providers_config)) p.add('config.providers_config must be a mapping like {glm: {command: claude-glm}}');
+    else {
+      checkKeys(raw.providers_config, ['glm'], 'config.providers_config', p);
+      const glmConfig = raw.providers_config.glm;
+      if (glmConfig !== undefined && glmConfig !== null) {
+        if (!isObject(glmConfig)) p.add('config.providers_config.glm must be a mapping like {command: claude-glm}');
+        else {
+          checkKeys(glmConfig, ['command'], 'config.providers_config.glm', p);
+          const command = parseString(glmConfig.command, 'config.providers_config.glm.command', p);
+          if (command) {
+            if (/\s/.test(command.trim())) p.add('config.providers_config.glm.command must be one executable name or path, without arguments');
+            else providersConfig = { glm: { command } };
+          }
+        }
+      }
+    }
+  }
 
   const cache = parseString(raw.cache, 'config.cache', p) ?? '~/Projects/cache';
   const stateDir = parseString(raw.state_dir, 'config.state_dir', p) ?? path.join(dir, 'tasks');
@@ -1049,6 +1073,8 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
       }
     }
   }
+  // GLM has its own Z.ai plan, never the Claude account limit: 2 simultaneous windows by default when active (0 removes it, as for the others).
+  if (providers.includes('glm') && limits.glm === undefined && !(isObject(raw.limits) && raw.limits.glm !== undefined)) limits.glm = 2;
 
   const agents = {} as Record<AgentName, AgentSettings>;
   const rawAgents = raw.agents;
@@ -1188,7 +1214,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
     const configuredUsage = usageMap[`${id}_dir`] !== undefined || ['warn', 'critical', 'queue_hold'].some(k => { const values = usageMap[k]; return isObject(values) && values[id] !== undefined; });
     if (agentMap[id] !== undefined || (isObject(raw.limits) && raw.limits[id] !== undefined) || configuredUsage) warnings.push(`${id} is not in providers; its agent/limit/usage settings are inactive`);
   }
-  const config: GlobalConfig = { ...layer, providers, cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, ...(ui ? { ui } : {}), ...(tmux ? { tmux } : {}), deliveryConfirmS: deliveryConfirmS as number, limits, countExternal, countReportReady, preview, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, cleanWorktreeCache, cohort, overload, limited, collisions, cancel, usage, guideLang, capacity, disk, git, path: file, loaded: exists };
+  const config: GlobalConfig = { ...layer, providers, ...(providersConfig ? { providersConfig } : {}), cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, ...(ui ? { ui } : {}), ...(tmux ? { tmux } : {}), deliveryConfirmS: deliveryConfirmS as number, limits, countExternal, countReportReady, preview, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, cleanWorktreeCache, cohort, overload, limited, collisions, cancel, usage, guideLang, capacity, disk, git, path: file, loaded: exists };
   if (mirror) config.mirrorDir = resolvePath(mirror);
   if (warnings.length) config.warnings = warnings;
   return config;

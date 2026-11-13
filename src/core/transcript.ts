@@ -9,6 +9,7 @@ import { sameMessage } from './paste-wrapper.ts';
 import type { TaskRecord } from './taskstore.ts';
 import { readTaskSessions } from './usage.ts';
 import { agentHomes, claudeProjectName } from './usage-sources.ts';
+import { provider } from './providers/registry.ts';
 import { isObject } from './util.ts';
 
 /*
@@ -138,8 +139,10 @@ export async function selectTranscriptSession(runner: Runner, config: GlobalConf
   const file = selectionFile(config, window), current = attemptOf(record);
   await withFileLock(`${file}.lock`, async () => {
     try { const selected = JSON.parse(fs.readFileSync(file, 'utf8')); if (selected.attempt === current) return; } catch { /* first session of the attempt */ }
-    const home = agent === 'claude' ? record.env.CLAUDE_CONFIG_DIR ?? agentHomes(config).claude : record.env.CODEX_HOME ?? agentHomes(config).codex;
-    const target = agent === 'claude' ? session.transcript ?? record.repos.map(r => path.join(home, 'projects', claudeProjectName(r.worktree), `${session.id}.jsonl`)).find(f => fs.existsSync(f)) : namedRollout(home, session.id);
+    const claudeLike = agent === 'claude' || agent === 'glm';
+    const homeEnv = provider(agent).usage.homeEnv;
+    const home = claudeLike ? (homeEnv ? record.env[homeEnv] : undefined) ?? agentHomes(config)[agent] : record.env.CODEX_HOME ?? agentHomes(config).codex;
+    const target = claudeLike ? session.transcript ?? record.repos.map(r => path.join(home, 'projects', claudeProjectName(r.worktree), `${session.id}.jsonl`)).find(f => fs.existsSync(f)) : namedRollout(home, session.id);
     const selected: SelectedSession = { attempt: current, agent, id: session.id };
     if (target) { selected.file = path.resolve(target); try { selected.identity = identityOf(selected.file); } catch { /* missing stays unconfirmed */ } }
     await runner.writeFile(file, JSON.stringify(selected) + '\n');

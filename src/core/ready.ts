@@ -1,4 +1,5 @@
 import { inspectField } from './input-field.ts';
+import type { DeliveryAgent } from './paste-wrapper.ts';
 import { screenMetadata } from './tmux.ts';
 import { PATTERN_FLAGS } from './config.ts';
 import type { Runner } from './runner.ts';
@@ -17,7 +18,7 @@ export interface ReadyOptions {
   emptyInput?: boolean;
   structuralComposer?: boolean;
   /** Whose composer `structuralComposer` reads: Kimi draws its own box, and its empty box (not the generic draft reading) is the empty input. */
-  agent?: 'claude' | 'codex' | 'kimi' | 'unknown';
+  agent?: DeliveryAgent;
   /** If the screen matches this (folder-trust dialog), the human has to answer it: stop waiting, or wait for them (`waitTrust`). */
   trustPattern?: string;
   /** If the screen matches this (another startup dialog, e.g. Codex "Update available"), stop waiting at once: a human has to answer it. */

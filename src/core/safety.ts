@@ -1,8 +1,19 @@
-import { provider, isActive } from './providers/registry.ts';
+import { provider, isActive, providerCommand } from './providers/registry.ts';
 import type { ProviderId, LaunchOrder } from './providers/types.ts';
 import type { GlobalConfig } from './config.ts';
 import { splitFlag } from './providers/safety.ts';
 import { AgentctlError } from './util.ts';
+
+/** The variables of the Z.ai/Anthropic authentication that agentctl never writes into a task environment, TASK.md or a launch script. */
+export const ANTHROPIC_SECRET_ENV = ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_API_KEY'] as const;
+
+/** `glm` tasks get these only from the claude-glm wrapper; every other provider's environment stays exactly as configured. */
+export function launchEnvFor(config: GlobalConfig, order: LaunchOrder & { agent: ProviderId }, env: Record<string, string>): Record<string, string> {
+  if (order.agent !== 'glm') return env;
+  const stripped = { ...env };
+  for (const name of ANTHROPIC_SECRET_ENV) delete stripped[name];
+  return stripped;
+}
 
 /** Default preserves the public 0.17.4 checker; explicit calls use only the target adapter. */
 export function findAutoAcceptFlag(args: string[], id: ProviderId = 'claude'): string | undefined {
@@ -25,7 +36,7 @@ export function assertSafeArgs(id: ProviderId, args: string[]): void {
 export function validateLaunch(config: GlobalConfig, order: LaunchOrder & { agent: ProviderId }, env: Record<string, string>): void {
   if (!isActive(config, order.agent)) throw new AgentctlError(`provider ${order.agent} is not enabled; add it to providers: [claude, codex, kimi]`);
   const adapter = provider(order.agent), settings = config.agents[order.agent];
-  assertSafeArgs(order.agent, adapter.argv(order, settings, []));
+  assertSafeArgs(order.agent, adapter.argv({ ...order, command: providerCommand(config, order.agent) }, settings, []));
   const effective: Record<string, string> = Object.fromEntries(Object.entries({ ...process.env, ...settings.env, ...env }).filter((entry): entry is [string, string] => entry[1] !== undefined));
   if (adapter.safety.validate && adapter.usage.homeEnv) effective[adapter.usage.homeEnv] = adapter.usage.home(config, effective);
   const problem = adapter.safety.validate?.(order, settings, effective);
@@ -35,7 +46,7 @@ export function validateLaunch(config: GlobalConfig, order: LaunchOrder & { agen
 export function launchEnvironment(config: GlobalConfig, order: LaunchOrder & { agent: ProviderId }, env: Record<string, string>): Record<string, string> {
   validateLaunch(config, order, env);
   const adapter = provider(order.agent), settings = config.agents[order.agent];
-  const merged = { ...settings.env, ...env };
+  const merged = launchEnvFor(config, order, { ...settings.env, ...env });
   if (adapter.safety.validate && adapter.usage.homeEnv) merged[adapter.usage.homeEnv] = adapter.usage.home(config, { ...process.env, ...merged });
   const required = adapter.launchEnv(order, settings, merged);
   return { ...merged, ...required };

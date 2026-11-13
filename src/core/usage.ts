@@ -84,7 +84,7 @@ export function formatReset(ms: number, now: number): string {
 }
 
 /** The file `usage-tap` writes in the windows of Claude: the plan windows of the newest statusLine call. */
-export { claudePlanFile, readClaudeSnapshot } from './providers/claude-usage.ts';
+export { claudePlanFile, glmPlanFile, planFileFor, readClaudeSnapshot } from './providers/claude-usage.ts';
 
 /** Both plans. Reads one file for Claude and the tail of the newest Codex logs. */
 export function readPlans(config: GlobalConfig, reader: UsageReader, now: number, records: readonly TaskRecord[] = allRecords(config)): ProviderValues<PlanState> {
@@ -102,7 +102,7 @@ export { codexPlanFile } from './providers/codex-usage.ts';
 // ---- tokens per task
 
 /** `<state_dir>/<task>/sessions.json`: the sessions the agent's own events named (transcript paths of Claude, thread ids of Codex). */
-export type TaskSessions = Record<'claude' | 'codex', { id: string; transcript?: string }[]> & { kimi?: { id: string; transcript?: string }[] };
+export type TaskSessions = Record<'claude' | 'codex', { id: string; transcript?: string }[]> & { kimi?: { id: string; transcript?: string }[]; glm?: { id: string; transcript?: string }[] };
 
 export const sessionsFile = (config: Pick<GlobalConfig, 'stateDir'>, window: string): string => path.join(config.stateDir, window, 'sessions.json');
 

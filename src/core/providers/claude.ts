@@ -61,7 +61,7 @@ export const claude: ProviderAdapter = {
   const hasModel = spec.model !== 'default';
   const effortArgs = settings.effortArgs.map((a) => a.replaceAll('{effort}', spec.effort));
     if (spec.remoteControl && !spec.task) throw new Error('remote control needs the task ID as the name of the session');
-    return ['claude', ...(hasModel ? ['--model', spec.model] : []), ...effortArgs, ...settings.flags, ...(spec.remoteControl ? ['--remote-control', spec.task as string] : []), ...extra];
+    return [spec.command ?? this.command, ...(hasModel ? ['--model', spec.model] : []), ...effortArgs, ...settings.flags, ...(spec.remoteControl ? ['--remote-control', spec.task as string] : []), ...extra];
   },
   launchEnv: () => ({}),
   resumeArgv(order, settings, extra, sessionId) { return [...this.argv(order, settings, extra), ...(sessionId ? ['--resume', sessionId] : ['--continue'])]; },
@@ -72,7 +72,7 @@ export const claude: ProviderAdapter = {
     emits: { turnEnd: true, needsInput: true, limit: true, overload: true, promptSubmit: true },
     get kinds() { return CLAUDE_KINDS; }, payloadFrom: 'stdin',
     plan: planClaudeEvents,
-    parse: e => e.kind ? parseClaudeEvent(e.kind as ClaudeKind, e.payload) : undefined,
+    parse: e => e.kind ? parseClaudeEvent(e.kind as ClaudeKind, e.payload, 'claude') : undefined,
     session(e) { return sessionOfStatusLine(isObject(e.payload) ? e.payload : {}); },
     acknowledgesPrompt(e) {
       const data = isObject(e.payload) ? e.payload : {};

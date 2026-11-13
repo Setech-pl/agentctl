@@ -334,7 +334,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 - `interrupt`: `--dry-run`
 - `attach`: `--switch-client`
 - `event`: `--task &lt;task&gt;`, `--attempt &lt;id&gt;`, `--agent &lt;agent&gt;`, `--kind &lt;kind&gt;`, `--forward-file &lt;path&gt;`, `--forward &lt;json&gt;`
-- `usage-tap`: `--task &lt;task&gt;`, `--attempt &lt;id&gt;`, `--forward &lt;command&gt;`
+- `usage-tap`: `--task &lt;task&gt;`, `--agent &lt;provider&gt;`, `--attempt &lt;id&gt;`, `--forward &lt;command&gt;`
 - `move`: `--agent &lt;agent&gt;`, `-y, --yes`
 - `peek`: `-n, --lines &lt;n&gt;`
 - `mcp install`: `--desktop`, `--claude-code`, `--config &lt;file&gt;`, `--dry-run`, `-y, --yes`
