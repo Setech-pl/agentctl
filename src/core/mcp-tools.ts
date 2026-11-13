@@ -82,7 +82,7 @@ import { collectUsage } from './usage-report.ts';
 import { planResume, resumeTasks } from './resume.ts';
 import { planGc, renderGc, gcView } from './gc.ts';
 import { collectEvents, renderEvents } from './chat-events.ts';
-import { applySetLimits, collectLimits, planSetLimits, readReservations, releasePlaces, reservePlaces } from './limits.ts';
+import { applySetLimits, collectLimits, holdText, parseHoldInput, planSetLimits, readReservations, releasePlaces, reservePlaces } from './limits.ts';
 import type { LimitAssignments } from './limits.ts';
 import { planLine } from './usage-report.ts';
 import { openReader, readPlans } from './usage.ts';
@@ -443,19 +443,26 @@ async function runLimits(deps: McpDeps): Promise<ToolResult> {
 const limitArg = z.number().int().min(0).max(50).optional();
 /** set_limits additionally accepts "off": the provider is disabled (no windows of it start). */
 const setLimitArg = z.union([z.number().int().min(0).max(50), z.string().regex(/^(?:[0-9]|[1-4][0-9]|50)$/), z.literal('off')]).optional();
+/** One queue hold: a whole percentage 1-100 or "off". */
+const holdValueArg = z.union([z.number().int().min(1).max(100), z.string().regex(/^(?:[1-9][0-9]?|100)$/), z.literal('off')]);
+const queueHoldArg = z.union([holdValueArg, z.object(Object.fromEntries(PROVIDER_IDS.map((id) => [id, holdValueArg.optional()]))).strict()]).optional()
+  .describe('usage.queue_hold: 90 (every active provider), "off" (no hold), or per provider {claude: 90, codex: "off"}. A whole percentage 1-100 of the plan, any window. Omit to leave it.');
 
-async function runSetLimits(deps: McpDeps, args: Partial<Record<AgentName, number | string>> & { confirm?: boolean | undefined }): Promise<ToolResult> {
-  return writeTool(deps, 'set_limits', { detail: `${PROVIDER_IDS.map(id => `${id}=${args[id] ?? '-'}`).join(' ')} confirm=${Boolean(args.confirm)}` }, async (ctx) => {
+async function runSetLimits(deps: McpDeps, args: Partial<Record<AgentName, number | string>> & { queue_hold?: unknown; confirm?: boolean | undefined }): Promise<ToolResult> {
+  return writeTool(deps, 'set_limits', { detail: `${PROVIDER_IDS.map(id => `${id}=${args[id] ?? '-'}`).join(' ')}${args.queue_hold !== undefined ? ` queue_hold=${JSON.stringify(args.queue_hold)}` : ''} confirm=${Boolean(args.confirm)}` }, async (ctx) => {
     const assignments: LimitAssignments = {};
     for (const agent of activeProviders(ctx.config)) if (args[agent] !== undefined) {
       const value = args[agent] === 'off' ? 'off' : Number(args[agent]);
       assignments[agent] = value === 0 ? null : value;
     }
-    if (Object.keys(assignments).length === 0) throw new AgentctlError(`give ${activeProviders(ctx.config).join(' and/or ')}`,  '0 removes a limit, "off" disables the provider.');
-    const plan = planSetLimits(ctx.config, assignments);
-    if (!args.confirm) return { text: `${plan.summary.join('\n')}\n\nNot changed yet. Show this to the user and ask; if they agree, call set_limits again with the same numbers and confirm: true.`, executed: false, announce: '' };
+    const hold = args.queue_hold === undefined ? undefined : parseHoldInput(args.queue_hold, activeProviders(ctx.config));
+    if (Object.keys(assignments).length === 0 && hold === undefined) throw new AgentctlError(`give ${activeProviders(ctx.config).join(' and/or ')}, or queue_hold`,  '0 removes a limit, "off" disables the provider; queue_hold: 90, "off" or {codex: 90}.');
+    const plan = planSetLimits(ctx.config, assignments, hold);
+    if (!args.confirm) return { text: `${plan.summary.join('\n')}\n\nNot changed yet. Show this to the user and ask; if they agree, call set_limits again with the same arguments and confirm: true.`, executed: false, announce: '' };
     await applySetLimits(ctx, plan);
-    return { text: `Limits changed (${plan.changes.map((c) => `${c.agent} ${c.from ?? '-'} -> ${c.to ?? '-'}`).join(', ')}). They are in force now: a running watch picks the file up and starts waiting tasks at its next tick.`, executed: true, announce: `limity ${activeProviders(ctx.config).map(id => `${id}=${plan.changes.some(c => c.agent === id) ? plan.changes.find(c => c.agent === id)!.to ?? 'brak' : ctx.config.limits[id] ?? 'brak'}`).join(' ')}` };
+    const changed = [...plan.changes.map((c) => `${c.agent} ${c.from ?? '-'} -> ${c.to ?? '-'}`), ...plan.holdChanges.filter((c) => c.from !== c.to).map((c) => `queue_hold ${c.agent} ${holdText(c.from)} -> ${holdText(c.to)}`)];
+    const announce = [...(plan.changes.length ? [`limity ${activeProviders(ctx.config).map(id => `${id}=${plan.changes.some(c => c.agent === id) ? plan.changes.find(c => c.agent === id)!.to ?? 'brak' : ctx.config.limits[id] ?? 'brak'}`).join(' ')}`] : []), ...(hold !== undefined ? [`queue_hold ${plan.holdChanges.map((c) => `${c.agent}=${holdText(c.to)}`).join(' ')}`] : [])].join('; ');
+    return { text: `${plan.changes.length ? 'Limits changed' : 'Queue hold changed'} (${changed.join(', ') || 'nothing new'}). They are in force now: a running watch picks the file up and starts waiting tasks at its next tick${hold !== undefined ? '; the queue hold counts from that tick, without a restart' : ''}.`, executed: true, announce };
   });
 }
 
@@ -1149,11 +1156,12 @@ export const MCP_TOOLS: McpToolDef[] = [
     title: 'Change the limits',
     kind: 'write',
     description:
-      'WRITE, off unless the user put "set_limits" in mcp.allow. Sets the most simultaneous agents per provider in config.yaml (0 removes a limit, "off" disables the provider: no windows of it start); comments in the file stay, a copy is kept as config.yaml.bak. It takes effect at once, without restarting watch. ' +
+      'WRITE, off unless the user put "set_limits" in mcp.allow. Sets the most simultaneous agents per provider in config.yaml (0 removes a limit, "off" disables the provider: no windows of it start), and the queue hold usage.queue_hold; comments in the file stay, a copy is kept as config.yaml.bak. It takes effect at once, without restarting watch (watch reloads config.yaml when it changes, also after a hand edit). ' +
+      `queue_hold format, exactly: a whole percentage 1-100 for every active provider (queue_hold: 90), "off" for no hold at all (queue_hold: "off"), or per provider {claude: 90, codex: "off"} (only the named providers change; "off" removes that provider's hold). Above that percentage of its plan, in any window, the queue starts no task of the provider; queue_list shows "wstrzymane: … > usage.queue_hold N%"; limits, capacity and config_show show the current hold. ` +
       'The FIRST call (confirm omitted) only describes the change; show it to the user, then call again with confirm: true.',
-    input: { ...perProvider(DEFAULT_PROVIDERS, id => setLimitArg.describe(`New limit for ${provider(id).displayName}; 0 = no limit, "off" = disabled. Omit to leave it.`)), confirm: z.boolean().optional().describe('true only after the user agreed to the described change.') },
+    input: { ...perProvider(DEFAULT_PROVIDERS, id => setLimitArg.describe(`New limit for ${provider(id).displayName}; 0 = no limit, "off" = disabled. Omit to leave it.`)), queue_hold: queueHoldArg, confirm: z.boolean().optional().describe('true only after the user agreed to the described change.') },
     annotations: { title: 'Change the limits', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    run: (deps, args) => guarded(() => runSetLimits(deps, args as { claude?: number; codex?: number; confirm?: boolean })),
+    run: (deps, args) => guarded(() => runSetLimits(deps, args as { claude?: number; codex?: number; queue_hold?: unknown; confirm?: boolean })),
   }),
   def({
     name: 'reserve',
@@ -1485,7 +1493,7 @@ MCP_TOOLS.push(
   extraRead('spec_example', 'spec example', 'Read an example spec before writing a new order', {}, async () => EXAMPLE_SPEC),
   extraRead('doctor', 'doctor', 'Diagnose the installation, permissions and disk', { project: optionalText }, async (ctx, a) => runDoctor(ctx.runner, () => ctx.config, a.project as string ?? null, undefined, undefined, undefined, undefined, { cachedOnly: true })),
   extraRead('equivalents', 'capacity', 'Read the equivalents table for active providers, including Kimi when enabled', {}, async (ctx) => ctx.config.equivalents),
-  extraRead('config_show', 'doctor', 'Read effective configuration with secrets masked', {}, async (ctx) => redactConfig(ctx.config)),
+  extraRead('config_show', 'doctor', 'Read effective configuration with secrets masked; queue_hold (first) is usage.queue_hold per active provider', {}, async (ctx) => ({ queue_hold: Object.fromEntries(activeProviders(ctx.config).map((id) => [id, holdText(ctx.config.usage.queueHold[id])])), ...(redactConfig(ctx.config) as object) })),
   extraRead('manager_status', 'manager --url', 'Inspect the manager session', {}, async (ctx) => managerView(ctx)),
   extraRead('away_status', 'away status', 'Inspect away mode', {}, async (ctx) => awayReport(ctx.config)),
   extraRead('report', 'report <TASK>', 'Inspect report location and candidates', { task: taskArg }, async (ctx, a) => reportInfo(ctx, a.task as string)),
@@ -1889,7 +1897,7 @@ for (const tool of MCP_TOOLS.filter(t => ['status', 'events_since', 'queue_list'
       const data = JSON.parse(raw);
       if (tool.name === 'cohort_show') return ok([data.cohort, ...data.tasks.map((r: Record<string, unknown>) => `${r.task} ${r.agent}/${r.model}/${r.effort} ${r.state} ${r.duration} cohort=${r.cohort ?? 'n/d'} report=${r.report} decisions=${r.decisions ?? 0} actions=${r.actions ?? 0}`), `outputs: ${JSON.stringify({ integrate: data.integrate, decisions: data.decisions, actions: data.actions, checks: data.checks, warnings: data.warnings })}`, ...data.queued.map((r: Record<string, unknown>) => `${r.task}: ${r.startCondition}`)].join('\n'));
       if (tool.name === 'capacity') return ok([diskLine(data.disk), ...snapshotLines(capacitySnapshot(data))].join('\n'));
-      if (tool.name === 'limits') return ok(data.providers.map((p: Record<string, unknown>) => `${p.agent}: used=${p.used} limit=${p.limit ?? 'n/d'} free=${p.free ?? 'n/d'} reserved=${p.reserved} queued=${p.queued}`).join('\n'));
+      if (tool.name === 'limits') return ok(data.providers.map((p: Record<string, unknown>) => `${p.agent}: used=${p.used} limit=${p.limit ?? 'n/d'} free=${p.free ?? 'n/d'} reserved=${p.reserved} queued=${p.queued} queue_hold=${holdText(p.queueHold as number | null)}`).join('\n'));
       if (Array.isArray(data)) return ok(data.map(r => `${r.task} ${r.agent}/${r.model}/${r.effort}: ${r.startCondition}`).join('\n') || 'The queue is empty.');
       return ok(compactFacts(data));
     } catch { return ok(at >= 0 ? result.text.slice(0, at) : result.text); }

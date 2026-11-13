@@ -200,6 +200,8 @@ export interface ProviderLoad {
   free: number | null;
   /** Tasks waiting in the queue for this provider. */
   queued: number;
+  /** `usage.queue_hold` of this provider: the plan percentage above which the queue starts none of its tasks; null: off. */
+  queueHold: number | null;
 }
 
 export interface LimitsReport {
@@ -225,14 +227,14 @@ export function collectLimits(config: GlobalConfig, live: readonly LiveWindow[])
       const external = mine.filter((w) => w.kind === 'external').map((w) => ({ pid: w.pid ?? 0, cwd: w.cwd ?? null }));
       const limit = config.limits[agent] ?? null;
       const used = mine.filter(w => w.kind === undefined && w.counted !== false).length + starting + reserved + external.length;
-      return { agent, limit, windows, starting, working, reportReady, reserved, reservedNote: reservations[agent]?.note ?? null, external, used, free: limit === 'off' ? 0 : limit === null ? null : Math.max(0, limit - used), queued: queue.filter((e) => e.agent === agent).length };
+      return { agent, limit, windows, starting, working, reportReady, reserved, reservedNote: reservations[agent]?.note ?? null, external, used, free: limit === 'off' ? 0 : limit === null ? null : Math.max(0, limit - used), queued: queue.filter((e) => e.agent === agent).length, queueHold: config.usage.queueHold[agent] ?? null };
     }),
   };
 }
 
 export function renderLimits(report: LimitsReport): string[] {
-  const header = ['PROVIDER', 'LIMIT', 'USED', 'FREE', 'AGENTCTL', 'WORKING', 'REPORT-READY', 'RESERVED', 'EXTERNAL', 'QUEUED'];
-  const body = report.providers.map((p) => [p.agent, p.limit === null ? '-' : String(p.limit), String(p.used), p.free === null ? '-' : String(p.free), String(p.windows.length), String(p.working.length), String(p.reportReady.length), String(p.reserved), report.countExternal ? String(p.external.length) : 'off', String(p.queued)]);
+  const header = ['PROVIDER', 'LIMIT', 'USED', 'FREE', 'AGENTCTL', 'WORKING', 'REPORT-READY', 'RESERVED', 'EXTERNAL', 'QUEUED', 'HOLD'];
+  const body = report.providers.map((p) => [p.agent, p.limit === null ? '-' : String(p.limit), String(p.used), p.free === null ? '-' : String(p.free), String(p.windows.length), String(p.working.length), String(p.reportReady.length), String(p.reserved), report.countExternal ? String(p.external.length) : 'off', String(p.queued), holdText(p.queueHold)]);
   const widths = header.map((h, i) => Math.max(h.length, ...body.map((r) => (r[i] as string).length)));
   const fmt = (cells: string[]): string => cells.map((c, i) => (i === cells.length - 1 ? c : c.padEnd(widths[i] as number))).join('  ').trimEnd();
   const lines = [fmt(header), ...body.map(fmt)];
@@ -244,8 +246,62 @@ export function renderLimits(report: LimitsReport): string[] {
     if (parts.length > 0) lines.push(`  ${p.agent}: ${parts.join(' · ')}`);
   }
   lines.push(report.countExternal ? 'External sessions are counted (limits.count_external).' : 'Sessions started by hand are not counted: "agentctl limits reserve claude=1" holds a place, or set limits.count_external: true.');
-  lines.push('Change: agentctl limits set claude=3 codex=5   (takes effect at once, also in a running watch)');
+  lines.push('HOLD = usage.queue_hold: above that plan percentage (any window) the queue starts no task of the provider; off = never held.');
+  lines.push('Change: agentctl limits set claude=3 codex=5 queue_hold.codex=90   (takes effect at once, also in a running watch)');
   return lines;
+}
+
+/** "90%" or "off". */
+export const holdText = (hold: number | null | undefined): string => (hold === null || hold === undefined ? 'off' : `${hold}%`);
+
+/** "queue_hold: claude off → 90%": the same words whoever changed the file (MCP, CLI, a hand edit seen by watch), so the journal says it once. */
+export function holdDiffText(from: Partial<Record<AgentName, number>>, to: Partial<Record<AgentName, number>>): string | undefined {
+  const parts = AGENT_NAMES.filter((a) => (from[a] ?? null) !== (to[a] ?? null)).map((a) => `${a} ${holdText(from[a])} → ${holdText(to[a])}`);
+  return parts.length === 0 ? undefined : `queue_hold: ${parts.join(', ')}`;
+}
+
+/** One value of `usage.queue_hold`: a whole percentage 1–100, or off. */
+export type HoldValue = number | 'off';
+/** What `limits set` / MCP `set_limits` change in `usage.queue_hold`: one value for every active provider, or per provider. */
+export type HoldAssignment = HoldValue | Partial<Record<AgentName, HoldValue>>;
+export interface HoldChange { agent: AgentName; from: number | null; to: number | null }
+
+function holdValue(value: unknown, where: string): HoldValue {
+  if (value === 'off') return 'off';
+  const n = typeof value === 'string' && /^\d{1,3}$/.test(value) ? Number(value) : value;
+  if (typeof n === 'number' && Number.isInteger(n) && n >= 1 && n <= 100) return n;
+  throw new AgentctlError(`${where}: "${String(value)}" is not a whole percentage from 1 to 100 or off`, 'Examples: queue_hold=90, queue_hold=off, queue_hold.codex=85.');
+}
+
+/** `queue_hold=90`, `queue_hold=off`, `queue_hold.codex=85`: the queue_hold words of `limits set`, and the other words left over. */
+export function parseHoldArgs(args: string[], ids: readonly AgentName[] = DEFAULT_PROVIDERS): { hold?: HoldAssignment; rest: string[] } {
+  const rest: string[] = [];
+  let hold: HoldAssignment | undefined;
+  for (const arg of args) {
+    const m = /^queue_hold(?:\.([a-z]+))?=(.+)$/.exec(arg.trim());
+    if (!m) { rest.push(arg); continue; }
+    const value = holdValue(m[2], 'queue_hold');
+    if (!m[1]) { hold = value; continue; }
+    const agent = m[1] as AgentName;
+    if (!ids.includes(agent)) throw new AgentctlError(`queue_hold.${m[1]}: not an active provider (${ids.join(', ')})`);
+    hold = { ...(typeof hold === 'object' ? hold : {}), [agent]: value };
+  }
+  return { ...(hold !== undefined ? { hold } : {}), rest };
+}
+
+/** The MCP form: 90, "90", "off", or {claude: 90, codex: "off"}. */
+export function parseHoldInput(input: unknown, ids: readonly AgentName[]): HoldAssignment {
+  if (input && typeof input === 'object' && !Array.isArray(input)) {
+    const out: Partial<Record<AgentName, HoldValue>> = {};
+    for (const [agent, value] of Object.entries(input as Record<string, unknown>)) {
+      if (value === undefined) continue;
+      if (!(ids as readonly string[]).includes(agent)) throw new AgentctlError(`queue_hold.${agent}: not an active provider (${ids.join(', ')})`);
+      out[agent as AgentName] = holdValue(value, `queue_hold.${agent}`);
+    }
+    if (Object.keys(out).length === 0) throw new AgentctlError('queue_hold: give at least one provider, e.g. {codex: 90}');
+    return out;
+  }
+  return holdValue(input, 'queue_hold');
 }
 
 // ---- changing the limits
@@ -283,16 +339,36 @@ export interface LimitsChange {
 export interface LimitsPlan {
   file: string;
   changes: LimitsChange[];
+  /** `usage.queue_hold` per active provider, when the plan changes it. */
+  holdChanges: HoldChange[];
   /** The new text of the config file: comments and order of everything else kept. */
   text: string;
   summary: string[];
 }
 
 /** The edit as text; nothing is written. */
-export function planSetLimits(config: GlobalConfig, assignments: LimitAssignments): LimitsPlan {
+export function planSetLimits(config: GlobalConfig, assignments: LimitAssignments, hold?: HoldAssignment): LimitsPlan {
   const file = config.path;
   const changes: LimitsChange[] = [];
+  const holdChanges: HoldChange[] = [];
   const text = editConfigText(config, (doc) => {
+    if (hold !== undefined) {
+      const ids = activeProviders(config);
+      const current = config.usage.queueHold;
+      const next: Partial<Record<AgentName, number>> = {};
+      if (typeof hold === 'number') for (const id of ids) next[id] = hold;
+      else if (typeof hold === 'object') {
+        for (const id of ids) if (current[id] !== undefined) next[id] = current[id];
+        for (const [agent, value] of Object.entries(hold) as [AgentName, HoldValue][]) {
+          if (value === 'off') delete next[agent];
+          else next[agent] = value;
+        }
+      }
+      for (const id of ids) holdChanges.push({ agent: id, from: current[id] ?? null, to: next[id] ?? null });
+      // One number stays one number; a mapping names only the held providers; nothing held removes the key.
+      if (Object.keys(next).length === 0) doc.deleteIn(['usage', 'queue_hold']);
+      else doc.setIn(['usage', 'queue_hold'], typeof hold === 'number' ? hold : doc.createNode(next));
+    }
     for (const agent of activeProviders(config)) {
       const to = assignments[agent];
       if (to === undefined) continue;
@@ -306,8 +382,9 @@ export function planSetLimits(config: GlobalConfig, assignments: LimitAssignment
   return {
     file,
     changes,
+    holdChanges,
     text,
-    summary: [`${file}`, ...changes.map((c) => `  limits.${c.agent}: ${show(c.from)} -> ${show(c.to)}${c.from === c.to ? ' (unchanged)' : ''}`), '  (a copy of the file is kept as config.yaml.bak; comments and the order of the keys stay)'],
+    summary: [`${file}`, ...changes.map((c) => `  limits.${c.agent}: ${show(c.from)} -> ${show(c.to)}${c.from === c.to ? ' (unchanged)' : ''}`), ...holdChanges.map((c) => `  usage.queue_hold.${c.agent}: ${holdText(c.from)} -> ${holdText(c.to)}${c.from === c.to ? ' (unchanged)' : ''}`), '  (a copy of the file is kept as config.yaml.bak; comments and the order of the keys stay)'],
   };
 }
 
@@ -321,4 +398,6 @@ export async function applySetLimits(ctx: Context, plan: LimitsPlan): Promise<vo
   }
   const text = limitsDiffText(ctx.config.limits, after, activeProviders(ctx.config));
   if (text) await recordJournalOnce(ctx, { kind: 'limits-changed', text });
+  const hold = holdDiffText(ctx.config.usage.queueHold, Object.fromEntries(plan.holdChanges.length ? plan.holdChanges.filter((c) => c.to !== null).map((c) => [c.agent, c.to]) : Object.entries(ctx.config.usage.queueHold)));
+  if (hold) await recordJournalOnce(ctx, { kind: 'limits-changed', text: hold });
 }

@@ -171,7 +171,7 @@ Queued tasks live in `<config dir>/queue/` (one JSON file each, with the spec te
 |---|---|---|---|---|
 | `usage.warn` | percentage or mapping | `80` | g | From this percentage of a plan window `watch` sends one notification per window and reset. |
 | `usage.critical` | percentage or mapping | `95` | g | The same, louder; not below `warn`. |
-| `usage.queue_hold` | percentage, mapping or `false` | `false` | g | The queue does not start a task of a provider whose plan is above this percentage (in any window); `queue list` says so. `false`: the plan never holds the queue. |
+| `usage.queue_hold` | percentage, mapping or `false` | `false` | g | The queue does not start a task of a provider whose plan is above this percentage (in any window); `queue list` says so. `false`: the plan never holds the queue. Set live with MCP `set_limits` `queue_hold` or `agentctl limits set queue_hold=90 | off | queue_hold.<provider>=N`; a running watch applies it from its next tick. |
 | `usage.status_line` | boolean | `true` | g | The plan percentages (`C 62% · X 18%`) in the tmux status line of the agentctl session. |
 | `usage.claude_tap` | boolean | `true` | g | `new` sets the `statusLine` of a Claude window to `agentctl usage-tap`, which records the plan limits that Claude gives only to a statusLine and passes your own statusLine on. `false`: Claude's limits are n/d. |
 | `usage.claude_dir` | path | `$CLAUDE_CONFIG_DIR`, else `~/.claude` | g | Where Claude Code keeps `projects/` (the transcripts). |

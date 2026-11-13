@@ -15,7 +15,7 @@ import path from 'node:path';
 import { ConfigStore, configStatePath, noteConfigState } from './config-store.ts';
 import type { ConfigRefresh } from './config-store.ts';
 import { loadGlobalConfig } from './config.ts';
-import { limitsDiffText } from './limits.ts';
+import { limitsDiffText, holdDiffText } from './limits.ts';
 import { findResumable, resumeText } from './resume.ts';
 import { recordJournal, recordJournalOnce } from './journal.ts';
 import type { JournalKind } from './journal.ts';
@@ -303,6 +303,9 @@ export async function reloadConfig(ctx: Context, store: ConfigStore, by = 'watch
     await log(`config: reloaded (${r.keys.join(', ')})`);
     const text = limitsDiffText(before.limits, r.config.limits, r.config.providers);
     if (text) await recordJournalOnce(ctx, { kind: 'limits-changed', text });
+    // QH: a changed usage.queue_hold (set_limits, limits set or a hand edit) is in force from this tick and said once.
+    const hold = holdDiffText(before.usage.queueHold, r.config.usage.queueHold);
+    if (hold) await recordJournalOnce(ctx, { kind: 'limits-changed', text: hold });
   }
   if (r.error || r.changed || before.reloadWarning) noteConfigState(configStatePath(r.config), by, ctx.runner.now(), r.error ?? r.config.reloadWarning);
   return r;

@@ -57,7 +57,7 @@ import { writeConfigText } from './core/config-edit.ts';
 import { sendPhoneTest } from './core/phone.ts';
 import type { FetchLike } from './core/phone.ts';
 import { awayReport, phoneActive, renderAway, setAway } from './core/away.ts';
-import { applySetLimits, collectLimits, parseAssignments, parseCounts, planSetLimits, releasePlaces, renderLimits, reservePlaces } from './core/limits.ts';
+import { applySetLimits, collectLimits, parseAssignments, parseCounts, parseHoldArgs, planSetLimits, releasePlaces, renderLimits, reservePlaces } from './core/limits.ts';
 import { collectOverlaps, renderOverlaps, touchWarnings } from './core/collisions.ts';
 import type { NewOptions, NewResult } from './core/new.ts';
 import { pullReady, pullTask } from './core/pull.ts';
@@ -831,13 +831,15 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
   limits
     .command('set')
     .description('Change the limits in config.yaml (comments and the order of the keys stay; the old file is kept as config.yaml.bak). A running watch and the MCP server pick it up at once; waiting tasks of the queue start at the next tick.')
-    .argument('<limits...>', 'claude=3 codex=5; off disables a provider (codex=off: no windows of it start), 0 or none removes a limit (codex=0)')
+    .argument('<limits...>', 'claude=3 codex=5; off disables a provider (codex=off: no windows of it start), 0 or none removes a limit (codex=0); queue_hold=90 | queue_hold=off | queue_hold.codex=85 sets usage.queue_hold')
     .option('-y, --yes', 'do not ask')
     .option('--dry-run', 'print what would be written, change nothing')
     .action(
       guarded(async (assignments: string[], opts: { yes?: boolean; dryRun?: boolean }) => {
         const ctx = contextFor(Boolean(opts.dryRun), { migrate: false });
-        const plan = planSetLimits(ctx.config, parseAssignments(assignments, activeProviders(ctx.config)));
+        const ids = activeProviders(ctx.config);
+        const { hold, rest } = parseHoldArgs(assignments, ids);
+        const plan = planSetLimits(ctx.config, rest.length > 0 || hold === undefined ? parseAssignments(rest, ids) : {}, hold);
         if (!(await confirmAction(ctx, plan.summary, 'Write it?', Boolean(opts.yes) || Boolean(opts.dryRun)))) return;
         await applySetLimits(ctx, plan);
         if (!opts.dryRun) line('Done. The limits are in force now.');

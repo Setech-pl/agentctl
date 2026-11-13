@@ -206,7 +206,7 @@ describe('capacity: scheduling evidence', () => {
     fs.writeFileSync(historyPath(t.config), JSON.stringify(history) + '\n');
     const p = (await collectCapacity(t.ctx)).providers[0]!;
     assert.deepEqual(p.slots, { starting: 0, active: 1, reportReady: 0, used: 2, limit: 4, reserved: 1, external: 0, free: 2 });
-    assert.deepEqual(p.queue, { count: 2, next: 'APP-3' });
+    assert.deepEqual(p.queue, { count: 2, next: 'APP-3', hold: null });
     assert.equal(p.stats[0]!.medianDurationMs, 60000); assert.equal(p.stats[0]!.medianTokens, 5000); assert.equal(p.stats[0]!.ok, 1);
     assert.ok(!('tasks' in p));
   });

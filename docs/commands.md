@@ -635,7 +635,7 @@ agentctl limits set [options] <limits...>
 
 | Argument | Meaning |
 |---|---|
-| `<limits...>` | claude=3 codex=5; off disables a provider (codex=off: no windows of it start), 0 or none removes a limit (codex=0) |
+| `<limits...>` | claude=3 codex=5; off disables a provider (codex=off: no windows of it start), 0 or none removes a limit (codex=0); queue_hold=90 \| queue_hold=off \| queue_hold.codex=85 sets usage.queue_hold |
 
 | Option | Meaning | Notes |
 |---|---|---|

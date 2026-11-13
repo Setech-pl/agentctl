@@ -36,13 +36,26 @@ export class ConfigStore {
   private warning: string | undefined;
   private file: string | undefined;
   private view: GlobalConfig | undefined;
+  /** mtime, size and inode of the file at the last look: an unchanged stamp is not read again (QH: a hand edit changes it). */
+  private seen: string | undefined;
 
   constructor(load: () => GlobalConfig, initial?: GlobalConfig, file?: string) {
     this.load = load;
     this.file = file ?? initial?.path;
     if (initial) {
       this.good = initial;
+      this.seen = this.stamp();
       this.goodText = this.read();
+    }
+  }
+
+  private stamp(): string | undefined {
+    if (!this.file) return undefined;
+    try {
+      const st = fs.statSync(this.file, { bigint: true });
+      return `${st.mtimeNs}:${st.size}:${st.ino}`;
+    } catch {
+      return 'missing';
     }
   }
 
@@ -64,6 +77,9 @@ export class ConfigStore {
 
   /** Look at the file. The first call (nothing loaded yet) loads it and throws when it cannot. */
   refresh(): ConfigRefresh {
+    const stamp = this.stamp();
+    if (this.good && stamp !== undefined && stamp === this.seen) return { config: this.current, changed: false, keys: [] };
+    this.seen = stamp;
     const text = this.read();
     if (this.good && text !== undefined && text === (this.failedText ?? this.goodText)) return { config: this.current, changed: false, keys: [] };
     try {
