@@ -250,6 +250,7 @@ const KIND_LABEL: Record<JournalEntry['kind'], string> = {
   'delivery-queued': 'WIADOMOŚĆ W KOLEJCE',
   'mcp-applied': 'MCP WYKONANE',
   'mcp-failed': 'MCP BŁĄD',
+  unblocked: 'ODBLOKOWANE',
 };
 
 export function summaryLine(s: EventsSummary): string {

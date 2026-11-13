@@ -27,6 +27,7 @@ const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name 
 
 export const BUGS: BugEntry[] = [
   // 0.19.6
+  { id: 'P94', fixedIn: '0.19.6', symptom: '`after` read a live author\'s report before its verdict line was written, announced the dependent blocked and never announced the release when the report said PASS; the owner unblocked it by hand.', scenarios: [s('p94-after-verdict.test.ts')] },
   { id: 'P93b', fixedIn: '0.19.6', symptom: 'MCP unblock (and other write) confirms scanned every task under load, ran past the 8 s budget again and again and did nothing; the owner ran the CLI.', scenarios: [s('p93b-mcp-deferred.test.ts')] },
   // 0.19.5
   { id: 'P93', fixedIn: '0.19.5', symptom: 'MCP queue/new confirm planned again and waited for start.lock on a loaded host, ran past the 8 s budget and registered nothing; the owner pasted `agentctl queue` in a terminal.', scenarios: [s('p93-mcp-accept.test.ts', 'P93: (queue|new) confirm|refuses')] },

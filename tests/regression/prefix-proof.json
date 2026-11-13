@@ -368,6 +368,19 @@
       "P93b: every write confirm on a host that runs nothing and a held start.lock returns at once, the watcher applies it with an event"
     ]
   },
+  "P94": {
+    "rev": "v0.19.4",
+    "outcome": "FAILS",
+    "failed": 3,
+    "passed": 1,
+    "failing": [
+      "P94: a report without a verdict line of a live author is pending, not blocking; the verdict PASS then starts the dependent",
+      "P94: a dead author whose report changed within report.settle_s is pending; once settled without a verdict it blocks",
+      "P94: an already-blocked dependent whose blocker report now passes is released automatically, with an event and a notification",
+      "P94: a report without a verdict line of a live author is pending, not blocking; the verdict PASS then starts the dependent",
+      "P94: a dead author whose report changed within report.settle_s is pending; once settled without a verdict it blocks"
+    ]
+  },
   "R1-redact": {
     "rev": "v0.18.2",
     "outcome": "FAILS",

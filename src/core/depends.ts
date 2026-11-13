@@ -33,6 +33,19 @@ export function cancelledTasks(rows: readonly StatusRow[]): Set<string> {
   return new Set(rows.filter((r) => r.cancelled).map((r) => r.task));
 }
 
+/** The time of the watcher's look and `report.settle_s`: a report that changed within the settle time is still being written. */
+export interface VerdictClock { nowMs: number; settleS: number }
+
+/**
+ * P94: a report without a readable first-line verdict is not a verdict yet while its author can still write one: the task is alive (its window
+ * is up and it is neither closed nor cancelled) or the report changed within `report.settle_s`. Only then does a missing verdict block.
+ */
+export function verdictPending(row: StatusRow | undefined, clock?: VerdictClock): boolean {
+  if (!row || row.verdict) return false;
+  if (row.window === 'alive' && !row.closed && !row.cancelled) return true;
+  return clock !== undefined && clock.settleS > 0 && row.reportMtime !== undefined && clock.nowMs - row.reportMtime < clock.settleS * 1000;
+}
+
 /** What keeps a queued task from ever starting: the cancelled tasks its `after` names, and the queued tasks that are blocked themselves. */
 export interface Blockers {
   cancelled: string[];
@@ -42,9 +55,11 @@ export interface Blockers {
 
 /**
  * The queued tasks that are blocked, with the cause. A task is blocked while its `after` names a cancelled task: it would wait for a report
- * that never comes. A task that waits for a blocked task is blocked too. The way out is `agentctl unblock` or `agentctl cancel`.
+ * that never comes, or a report whose first-line verdict is not accepted (FAIL, BLOCKED, NO-GO by default), or one without a verdict once its
+ * author can no longer write it (closed, cancelled, window gone, report settled; P94). A missing verdict of a live author is waiting, not
+ * blocked. A task that waits for a blocked task is blocked too. The way out is `agentctl unblock` or `agentctl cancel`.
  */
-export function findBlocked(entries: readonly Pick<QueueEntry, 'task' | 'after' | 'status' | 'afterVerdicts'>[], rows: readonly StatusRow[]): Map<string, Blockers> {
+export function findBlocked(entries: readonly Pick<QueueEntry, 'task' | 'after' | 'status' | 'afterVerdicts'>[], rows: readonly StatusRow[], clock?: VerdictClock): Map<string, Blockers> {
   const cancelled = cancelledTasks(rows);
   const blocked = new Map<string, Blockers>();
   const waiting = entries.filter((e) => e.status === 'queued');
@@ -55,7 +70,7 @@ export function findBlocked(entries: readonly Pick<QueueEntry, 'task' | 'after' 
       const verdicts = e.after.flatMap(task => {
         const allowed = e.afterVerdicts?.[task] ?? DEFAULT_AFTER_VERDICTS;
         const row = rows.find(r => r.task === task);
-        return hasReport(row) && (!row?.verdict || !allowed.includes(row.verdict)) ? [{ task, reason: row?.verdict ? `verdict ${row.verdict}` : 'verdict missing/unparsable (brak werdyktu)' }] : [];
+        return hasReport(row) && !verdictPending(row, clock) && (!row?.verdict || !allowed.includes(row.verdict)) ? [{ task, reason: row?.verdict ? `verdict ${row.verdict}` : 'verdict missing/unparsable (brak werdyktu)' }] : [];
       });
       if (verdicts.length) b.verdicts = verdicts;
       if (b.cancelled.length + b.blocked.length + verdicts.length === 0) continue;

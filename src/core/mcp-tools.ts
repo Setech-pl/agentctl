@@ -1629,7 +1629,7 @@ async function confirmationScope(ctx: Context, name: string, args: Record<string
     const before = findEntry(ctx.config, args.task as string);
     const entries = readQueue(ctx.config);
     const rows = await queueDependencyRows(ctx, entries);
-    const blockers = findBlocked(entries, rows).get(before.task);
+    const blockers = findBlocked(entries, rows, { nowMs: ctx.runner.now(), settleS: ctx.config.reportSettleS }).get(before.task);
     return { tasks: [{ task: before.task, state: blockers ? 'blocked' : before.status, blockers, after: before.after }], change: await unblockEntry(ctx, before.task, { dropAfter: args.drop_after as string | undefined, preview: true, rows }) };
   }
   if (name === 'cancel') {

@@ -728,7 +728,7 @@ agentctl queue retry NC-42     # nieudany start, jeszcze raz
 
 ## Zależności
 
-`after: NC-42` (lub lista) czeka na kompletny raport i akceptowany werdykt z pierwszej linii `Werdykt:`/`Verdict:`: PASS, PASS with findings, PARTIAL lub GO (bez rozróżniania wielkości liter). BLOCKED, FAIL, NO-GO oraz brak lub niezrozumiały werdykt zatrzymują zadania; status/board pokazują `waiting: NC-42 verdict BLOCKED`, a watch zapisuje zdarzenie i powiadamia. `after_verdict: [BLOCKED]` nadpisuje listę dla wszystkich zależności tego zadania. `queue up TASK` lub `unblock TASK` pozwala ręcznie zwolnić blokadę werdyktu.
+`after: NC-42` (lub lista) czeka na kompletny raport i akceptowany werdykt z pierwszej linii `Werdykt:`/`Verdict:`: PASS, PASS with findings, PARTIAL lub GO (bez rozróżniania wielkości liter). BLOCKED, FAIL i NO-GO zatrzymują zadania; status/board pokazują `waiting: NC-42 verdict BLOCKED`, a watch zapisuje zdarzenie i powiadamia. Brak lub niezrozumiały werdykt oznacza oczekiwanie, nie blokadę, dopóki NC-42 działa albo jego raport zmienił się w ciągu `report.settle_s` (agent może jeszcze dopisać pierwszą linię; kolejka pokazuje `raport NC-42 bez werdyktu – czeka, aż autor go dopisze`); blokuje dopiero, gdy NC-42 jest zamknięte, anulowane albo jego okno zniknęło, a raport się ustalił (0.19.6, P94). Zadanie zablokowane werdyktem, który poprawiony raport teraz akceptuje, zwalnia się samo, ze zdarzeniem `ODBLOKOWANE` i powiadomieniem. `after_verdict: [BLOCKED]` nadpisuje listę dla wszystkich zależności tego zadania. `queue up TASK` lub `unblock TASK` pozwala ręcznie zwolnić blokadę werdyktu.
 
 ```yaml
 ---

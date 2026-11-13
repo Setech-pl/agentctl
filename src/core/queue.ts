@@ -20,7 +20,8 @@ import { overProviderLimit } from './checks.ts';
 import type { AgentModel } from './checks.ts';
 import { Alerts } from './alert.ts';
 import { recordJournal } from './journal.ts';
-import { cancelledTasks, checkAfter, findBlocked, blockedText, hasReport, unmetAfter, waitingText } from './depends.ts';
+import { cancelledTasks, checkAfter, DEFAULT_AFTER_VERDICTS, findBlocked, blockedText, hasReport, unmetAfter, verdictPending, waitingText } from './depends.ts';
+import type { VerdictClock } from './depends.ts';
 import type { Blockers } from './depends.ts';
 import { touchWarnings } from './collisions.ts';
 import { touchCohort } from './cohort.ts';
@@ -600,7 +601,7 @@ export async function unblockEntry(ctx: Context, input: string, opts: { dropAfte
   const entries = readQueue(ctx.config);
   // Only the tasks the queue's `after` names (P93b): no scan of every task, no git; their verdicts are read, closed ones too.
   const rows = opts.rows ?? await queueDependencyRows(ctx, entries);
-  const blocked = findBlocked(entries, rows).get(entry.task);
+  const blocked = findBlocked(entries, rows, verdictClock(ctx.config, ctx.runner.now())).get(entry.task);
   let dropped: string[];
   if (opts.dropAfter !== undefined) {
     const wanted = opts.dropAfter.trim().toLowerCase();
@@ -623,13 +624,44 @@ export async function unblockEntry(ctx: Context, input: string, opts: { dropAfte
 }
 
 /**
+ * P94: a verdict block that was announced ("AUTHOR:verdict …" in blockedNotified) whose author's report now carries an accepted verdict is
+ * released: "DEP odblokowane – AUTHOR: werdykt PASS", once, with an `unblocked` event and a notification. The queue tick says it before it
+ * starts the released task, so the release is never lost to the start.
+ */
+export async function announceReleased(ctx: Context, notifier: Notifier, rows: readonly StatusRow[], opts: { self?: SelfArgv | undefined; log?: (line: string) => Promise<void> | void } = {}): Promise<string[]> {
+  const entries = readQueue(ctx.config);
+  const blocked = findBlocked(entries.map((e) => ({ ...e, after: effectiveAfter(ctx.config, e, rows, ctx.runner.now()) })), rows, verdictClock(ctx.config, ctx.runner.now()));
+  const said: string[] = [];
+  for (const entry of entries) {
+    const b = blocked.get(entry.task);
+    const released = [...new Set((entry.blockedNotified ?? []).filter((k) => k.includes(':')).map((k) => k.slice(0, k.indexOf(':'))))].filter((task) => {
+      if (b?.verdicts?.some((v) => v.task === task)) return false;
+      const row = rows.find((r) => r.task === task);
+      return hasReport(row) && row!.verdict !== undefined && (entry.afterVerdicts?.[task] ?? DEFAULT_AFTER_VERDICTS).includes(row!.verdict);
+    });
+    if (released.length === 0) continue;
+    const kept = (entry.blockedNotified ?? []).filter((k) => !released.some((task) => k.startsWith(`${task}:`)));
+    const { blockedNotified: _was, ...rest } = entry;
+    await writeEntry(ctx, kept.length > 0 ? { ...rest, blockedNotified: kept } : rest);
+    for (const task of released) {
+      const text = `${entry.task} odblokowane – ${task}: werdykt ${rows.find((r) => r.task === task)!.verdict}`;
+      await opts.log?.(`queue: ${text}`);
+      await notifyPlain(ctx, notifier, entry.task, text, opts.self);
+      await recordJournal(ctx, { kind: 'unblocked', task: entry.task, text, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
+      said.push(text);
+    }
+  }
+  return said;
+}
+
+/**
  * Once per cancelled author: "NC-3 zablokowane – NC-1 anulowane". The entries remember what was announced, so a restart of the watcher
  * says nothing twice. Returns the announcements made.
  */
 export async function announceBlocked(ctx: Context, notifier: Notifier, rows: readonly StatusRow[], opts: { self?: SelfArgv | undefined; log?: (line: string) => Promise<void> | void } = {}): Promise<string[]> {
+  const said = await announceReleased(ctx, notifier, rows, opts);
   const entries = readQueue(ctx.config);
-  const blocked = findBlocked(entries.map((e) => ({ ...e, after: effectiveAfter(ctx.config, e, rows, ctx.runner.now()) })), rows);
-  const said: string[] = [];
+  const blocked = findBlocked(entries.map((e) => ({ ...e, after: effectiveAfter(ctx.config, e, rows, ctx.runner.now()) })), rows, verdictClock(ctx.config, ctx.runner.now()));
   for (const entry of entries) {
     const b = blocked.get(entry.task);
     const reasons = b ? [...b.cancelled.map(task => ({ key: task, text: `${task} anulowane` })), ...(b.verdicts ?? []).map(v => ({ key: `${v.task}:${v.reason}`, text: `${v.task}: ${v.reason}` }))] : [];
@@ -652,7 +684,7 @@ export async function moveToFront(ctx: Context, input: string): Promise<QueueEnt
   let entry = findEntry(ctx.config, input);
   if (entry.status !== 'queued') throw new AgentctlError(`${entry.task} is ${entry.status}, not waiting`, entry.status === 'failed' ? `"agentctl queue retry ${entry.task}" puts it back in the line.` : undefined);
   const rows = await queueDependencyRows(ctx, [entry]);
-  const rejected = findBlocked([entry], rows).get(entry.task)?.verdicts ?? [];
+  const rejected = findBlocked([entry], rows, verdictClock(ctx.config, ctx.runner.now())).get(entry.task)?.verdicts ?? [];
   if (rejected.length) entry = (await unblockEntry(ctx, entry.task, { rows: await queueDependencyRows(ctx, readQueue(ctx.config)) })).entry;
   const lowest = readQueue(ctx.config).reduce((n, e) => Math.min(n, e.order), entry.order);
   const moved = { ...entry, order: lowest - 1 };
@@ -731,7 +763,7 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
   for (const w of live) if (w.agent && w.counted !== false) used[w.agent]++;
   const paused = isPaused(config) || !config.queue.enabled;
   const reason = !config.queue.enabled ? 'queue.enabled is false' : 'queue paused (agentctl queue resume)';
-  const blocked = findBlocked(entries.map((e) => ({ ...e, after: effectiveAfter(config, e, rows, nowMs) })), rows);
+  const blocked = findBlocked(entries.map((e) => ({ ...e, after: effectiveAfter(config, e, rows, nowMs) })), rows, verdictClock(config, nowMs));
   const cancelled = cancelledTasks(rows);
   // `usage.queue_hold`: a provider whose plan is above the limit starts nothing (off by default).
   const holds = queueHolds(config, nowMs);
@@ -760,7 +792,11 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
     if (paused) return { position, entry, condition: { kind: 'paused', text: reason }, since: entry.queuedAt };
     if (entry.retryAt && Date.parse(entry.retryAt) > nowMs) return { position, entry, condition: { kind: 'hold', text: `retry at ${entry.retryAt}: ${entry.error ?? ''}` }, since: entry.queuedAt };
     const unmet = unmetAfter(effectiveAfter(config, entry, rows, nowMs), rows, entry.afterVerdicts);
-    if (unmet.length > 0) return { position, entry, condition: { kind: 'after', text: waitingText(unmet, failed, cancelled) }, since: entry.queuedAt };
+    if (unmet.length > 0) {
+      // P94: a report without a verdict whose author can still write it is waited for, and said so.
+      const writing = unmet.filter((t) => { const row = rows.find((r) => r.task === t); return hasReport(row) && verdictPending(row, verdictClock(config, nowMs)); });
+      return { position, entry, condition: { kind: 'after', text: `${waitingText(unmet, failed, cancelled)}${writing.length > 0 ? ` (raport ${writing.join(', ')} bez werdyktu – czeka, aż autor go dopisze)` : ''}` }, since: entry.queuedAt };
+    }
     const waitsFor = authorWaitReason(config, entry.autoReview, rows, nowMs);
     if (waitsFor) return { position, entry, condition: { kind: 'after', text: waitsFor }, since: entry.queuedAt };
     const held = holds[entry.agent];
@@ -774,6 +810,11 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
     if (isHeavy(entry)) heavy.add(entry.task);
     return { position, entry, condition: { kind: 'ready', text: 'wolne miejsce – start przy najbliższym ticku watch' }, since: entry.queuedAt };
   }).map(view => ({ ...view, condition: { ...view.condition, text: redact(view.condition.text) } }));
+}
+
+/** The clock of the verdict rules (P94): now and `report.settle_s`. */
+export function verdictClock(config: Pick<GlobalConfig, 'reportSettleS'>, nowMs: number): VerdictClock {
+  return { nowMs, settleS: config.reportSettleS };
 }
 
 /** Queue reads load only explicitly named dependencies, never every report or task record. */
@@ -795,7 +836,7 @@ export async function queueDependencyRows(ctx: Context, entries: readonly (Pick<
 export async function queueViews(ctx: Context): Promise<QueueView[]> {
   const entries = readQueue(ctx.config);
   if (!entries.length) return [];
-  return describeQueue(ctx.config, entries, await liveWindows(ctx), await queueDependencyRows(ctx, entries));
+  return describeQueue(ctx.config, entries, await liveWindows(ctx), await queueDependencyRows(ctx, entries), ctx.runner.now());
 }
 
 /** What `status` prints under its table: the waiting tasks and what each one waits for; nothing when the queue is empty. */
@@ -932,6 +973,9 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   // A start in progress whose window is not up yet already holds its place.
   for (const [task, i] of memory.inflight) if (!live.some((w) => w.window === task.toLowerCase())) used[i.agent]++;
 
+  // A block that the author's corrected report lifted is said before the released task starts (P94).
+  await announceReleased(ctx, notifier, rows, opts).catch((e: unknown) => opts.log?.(`queue: ${errorMessage(e)}`));
+  entries = readQueue(config);
   const began: string[] = [];
   const holds = queueHolds(config, ctx.runner.now());
   const stillHeld = new Set<string>();

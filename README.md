@@ -730,7 +730,7 @@ agentctl queue retry NC-42     # a failed start, once more
 
 ## Dependencies
 
-`after: NC-42` (or a list) waits for a complete report and an accepted first-line `Werdykt:`/`Verdict:`: PASS, PASS with findings, PARTIAL or GO (case-insensitive). BLOCKED, FAIL, NO-GO and missing/unparsable verdicts hold dependents; status/board show `waiting: NC-42 verdict BLOCKED`, and watch records an event and sends a desktop notification. `after_verdict: [BLOCKED]` overrides the allowed list for every dependency of this task. `queue up TASK` or `unblock TASK` releases a rejected verdict manually.
+`after: NC-42` (or a list) waits for a complete report and an accepted first-line `Werdykt:`/`Verdict:`: PASS, PASS with findings, PARTIAL or GO (case-insensitive). BLOCKED, FAIL and NO-GO hold dependents; status/board show `waiting: NC-42 verdict BLOCKED`, and watch records an event and sends a desktop notification. A missing or unparsable verdict is pending, not a block, while NC-42 is alive or its report changed within `report.settle_s` (the agent may still write the first line; the queue shows `raport NC-42 bez werdyktu – czeka, aż autor go dopisze`); it blocks only once NC-42 is closed, cancelled or gone and its report settled (0.19.6, P94). A dependent blocked by a verdict that the corrected report now accepts is released by itself, with an `ODBLOKOWANE` event and a notification. `after_verdict: [BLOCKED]` overrides the allowed list for every dependency of this task. `queue up TASK` or `unblock TASK` releases a rejected verdict manually.
 
 ```yaml
 ---

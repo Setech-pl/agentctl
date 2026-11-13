@@ -83,6 +83,8 @@ export interface StatusRow {
   report: 'yes' | 'missing';
   reportPath: string;
   reportSignature?: string;
+  /** When the report file last changed (ms); the queue treats a missing verdict as still being written within `report.settle_s` (P94). */
+  reportMtime?: number;
   /** Where the agent wrote the report when that was not the `report:` path (the file at `reportPath` is a copy). */
   reportSource?: string;
   reportConfirmed?: string;
@@ -320,6 +322,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       report: reportReady ? 'yes' : 'missing',
       reportPath: record.report,
       reportSignature: reportState.signature,
+      ...(reportState.mtime !== undefined ? { reportMtime: reportState.mtime } : {}),
       ...(record.reportSource ? { reportSource: record.reportSource } : {}),
       ...(record.reportConfirmed ? { reportConfirmed: record.reportConfirmed } : {}),
       pulled,
