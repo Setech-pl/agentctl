@@ -161,6 +161,8 @@ export interface CollectOptions {
    * collection for them (the board shows only their count unless the section is expanded). Their state and report stay exact.
    */
   shallowClosed?: boolean;
+  /** false: no rows for windows without a state file. A caller that passes a subset of `records` wants those records only: every other task's window would look like an orphan and be captured (P93b). */
+  orphans?: boolean;
 }
 
 const idleObservations = new Map<string, { working: boolean; idle: number; attempt: string; observedWork: boolean; workStopAt?: string }>();
@@ -346,7 +348,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     });
   }
   // Windows of the session that agentctl has no state file for: never skipped silently.
-  for (const window of [...live].sort()) {
+  for (const window of opts.orphans === false ? [] : [...live].sort()) {
     if (window === WATCH_WINDOW || window === BOARD_WINDOW || window === MANAGER_WINDOW || knownWindows.has(window)) continue;
     const screen = await tmux.capture(window, undefined, infos);
     const screenText = screen.code === 0 ? screen.stdout : '';

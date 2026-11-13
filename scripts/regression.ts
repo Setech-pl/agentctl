@@ -16,7 +16,7 @@ import type { BugEntry, Scenario } from '../tests/regression/catalog.ts';
 export const CATALOG_FILE = 'tests/regression/CATALOG.md';
 export const PROOF_FILE = 'tests/regression/prefix-proof.json';
 /** Release that precedes each fixed-in version: the "before the fix" side of the proof. */
-export const PREVIOUS_RELEASE: Record<string, string> = { '0.19.5': 'v0.19.4', '0.19.4': 'v0.19.3', '0.19.3': 'v0.19.2', '0.19.2': 'v0.19.1', '0.19.1': 'v0.19.0', '0.19.0': 'v0.18.2', '0.18.3': 'v0.18.2', '0.18.2': 'v0.17.3' };
+export const PREVIOUS_RELEASE: Record<string, string> = { '0.19.6': 'v0.19.4', '0.19.5': 'v0.19.4', '0.19.4': 'v0.19.3', '0.19.3': 'v0.19.2', '0.19.2': 'v0.19.1', '0.19.1': 'v0.19.0', '0.19.0': 'v0.18.2', '0.18.3': 'v0.18.2', '0.18.2': 'v0.17.3' };
 
 export interface ProofRecord { rev: string; outcome: 'FAILS' | 'IMPORT-ERROR' | 'PASSES' | 'NO-TESTS'; failed: number; passed: number; failing: string[] }
 export type Proof = Record<string, ProofRecord>;

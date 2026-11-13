@@ -248,6 +248,8 @@ const KIND_LABEL: Record<JournalEntry['kind'], string> = {
   'report-detected': 'RAPORT WYKRYTY',
   delivery: 'WIADOMOŚĆ',
   'delivery-queued': 'WIADOMOŚĆ W KOLEJCE',
+  'mcp-applied': 'MCP WYKONANE',
+  'mcp-failed': 'MCP BŁĄD',
 };
 
 export function summaryLine(s: EventsSummary): string {

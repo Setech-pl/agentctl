@@ -595,10 +595,12 @@ export async function removeFromQueue(ctx: Context, input: string, opts: { reaso
 }
 
 /** `agentctl unblock`: the entry's `after` loses the cancelled (or blocked) tasks, or just `dropAfter`; it waits for the rest, or starts. */
-export async function unblockEntry(ctx: Context, input: string, opts: { dropAfter?: string | undefined; preview?: boolean } = {}): Promise<{ entry: QueueEntry; dropped: string[] }> {
+export async function unblockEntry(ctx: Context, input: string, opts: { dropAfter?: string | undefined; preview?: boolean; /** The dependency rows the caller read already. */ rows?: StatusRow[] } = {}): Promise<{ entry: QueueEntry; dropped: string[] }> {
   const entry = findEntry(ctx.config, input);
-  const rows = await collectStatus(ctx, { progress: false, archived: true });
-  const blocked = findBlocked(readQueue(ctx.config), rows).get(entry.task);
+  const entries = readQueue(ctx.config);
+  // Only the tasks the queue's `after` names (P93b): no scan of every task, no git; their verdicts are read, closed ones too.
+  const rows = opts.rows ?? await queueDependencyRows(ctx, entries);
+  const blocked = findBlocked(entries, rows).get(entry.task);
   let dropped: string[];
   if (opts.dropAfter !== undefined) {
     const wanted = opts.dropAfter.trim().toLowerCase();
@@ -649,9 +651,9 @@ export async function announceBlocked(ctx: Context, notifier: Notifier, rows: re
 export async function moveToFront(ctx: Context, input: string): Promise<QueueEntry> {
   let entry = findEntry(ctx.config, input);
   if (entry.status !== 'queued') throw new AgentctlError(`${entry.task} is ${entry.status}, not waiting`, entry.status === 'failed' ? `"agentctl queue retry ${entry.task}" puts it back in the line.` : undefined);
-  const rows = await collectStatus(ctx, { progress: false, cachedOnly: true, archived: true });
+  const rows = await queueDependencyRows(ctx, [entry]);
   const rejected = findBlocked([entry], rows).get(entry.task)?.verdicts ?? [];
-  if (rejected.length) entry = (await unblockEntry(ctx, entry.task)).entry;
+  if (rejected.length) entry = (await unblockEntry(ctx, entry.task, { rows: await queueDependencyRows(ctx, readQueue(ctx.config)) })).entry;
   const lowest = readQueue(ctx.config).reduce((n, e) => Math.min(n, e.order), entry.order);
   const moved = { ...entry, order: lowest - 1 };
   await writeEntry(ctx, moved);
@@ -788,7 +790,7 @@ export async function queueDependencyRows(ctx: Context, entries: readonly (Pick<
       if (old) archived.push(old);
     } catch { /* dependency not registered yet */ }
   }
-  return collectStatus(ctx, { progress: false, cachedOnly: true, archived: true, records: { current, archived } });
+  return collectStatus(ctx, { progress: false, cachedOnly: true, archived: true, records: { current, archived }, orphans: false });
 }
 export async function queueViews(ctx: Context): Promise<QueueView[]> {
   const entries = readQueue(ctx.config);
@@ -893,6 +895,7 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   await touchWorker(ctx);
   // Accepted MCP confirms are validated even while the queue is paused or disabled: the answer (queued, or failed with the reason) is due either way.
   await validateAccepted(ctx, notifier, opts);
+  await applyAcceptedWrites(ctx, notifier, opts);
   if (!config.queue.enabled) return [];
   // A paused queue starts nothing that waits in line; an explicit start (`direct`) is not in the line.
   const paused = isPaused(config);
@@ -978,6 +981,19 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   }
   for (const task of [...memory.held.keys()]) if (!stillHeld.has(task)) memory.held.delete(task);
   return began;
+}
+
+/**
+ * P93b: the MCP writes whose confirm recorded a request (mcp-requests.ts) are applied here, before the line is read, so an unblock, a
+ * queue_up or a queue_rm counts in this very tick. The modules are loaded only when a request waits.
+ */
+async function applyAcceptedWrites(ctx: Context, notifier: Notifier, opts: QueueTickOptions): Promise<void> {
+  let names: string[] = [];
+  try { names = fs.readdirSync(path.join(path.dirname(ctx.config.path), 'mcp-requests')); } catch { return; }
+  if (!names.some((n) => n.endsWith('.json'))) return;
+  const [{ applyMcpRequests }, { applyMcpRequest }] = await Promise.all([import('./mcp-requests.ts'), import('./mcp-tools.ts')]);
+  const deps = { context: (out: (line: string) => void) => new ContextClass(ctx.runner, ctx.config, out), notify: async (message: string) => { await notifier.notify('agentctl', message); }, self: opts.self };
+  await applyMcpRequests(ctx, notifier, (request) => applyMcpRequest(deps, request), { log: opts.log }).catch((e: unknown) => opts.log?.(`mcp: ${errorMessage(e)}`));
 }
 
 /** Why the review of `entry` has to wait for its author now: its turn is not over, or a git process works in its checkout. */

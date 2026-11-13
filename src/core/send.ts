@@ -114,7 +114,8 @@ export interface DraftResult { task: string; message: string; outcome: SubmitDra
 export async function submitDrafts(ctx: Context, items: { task: string; window: string }[], options: { token?: string } = {}): Promise<DraftResult[]> {
   const results: DraftResult[] = [];
   for (const item of items) {
-    const done = ctx.runner.dryRun ? await submitDraft(ctx, item.window, options) : await withStartLock(ctx, () => submitDraft(ctx, item.window, options));
+    // The preview (no token) only reads the screen: it takes no start.lock, so it answers while a watcher delivers or starts (P93b).
+    const done = ctx.runner.dryRun || !options.token ? await submitDraft(ctx, item.window, options) : await withStartLock(ctx, () => submitDraft(ctx, item.window, options));
     if (done.outcome !== 'refused') ctx.info(`${item.task}: ${done.message}`);
     results.push({ task: item.task, message: done.message, outcome: done.outcome, keySent: done.keySent === true, deliveryId: done.deliveryId, field: done.field, screenState: done.screenState, token: done.token, ...(done.outcome === 'submitted' || done.outcome === 'ready' ? {} : { warning: done.message }), ...(done.outcome === 'refused' ? { refused: true } : {}) });
   }

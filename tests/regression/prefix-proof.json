@@ -355,6 +355,19 @@
       "P93: queue confirm with a 30 s worktree+setup and a host that runs nothing returns before any work, the watcher validates and starts it"
     ]
   },
+  "P93b": {
+    "rev": "v0.19.4",
+    "outcome": "FAILS",
+    "failed": 4,
+    "passed": 0,
+    "failing": [
+      "P93b: every write confirm on a host that runs nothing and a held start.lock returns at once, the watcher applies it with an event",
+      "P93b: a scope that changed between the preview and the watcher is refused with an event and a notification; nothing is done",
+      "P93b: the same token confirmed again records nothing twice; a permission revoked before the tick fails the request",
+      "P93b: the unblock preview reads only the queue and its dependencies (no capture of every window, no git)",
+      "P93b: every write confirm on a host that runs nothing and a held start.lock returns at once, the watcher applies it with an event"
+    ]
+  },
   "R1-redact": {
     "rev": "v0.18.2",
     "outcome": "FAILS",

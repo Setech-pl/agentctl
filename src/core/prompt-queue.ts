@@ -57,7 +57,7 @@ export async function drainPromptQueue(ctx: Context, window: string, turnState?:
         const screen = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
         if (screen.code !== 0 || classifyScreen(screen.stdout, ctx.config.agents.codex) !== 'idle') { await resetIdle(); return; }
         if (item.waitForTurnEnd) {
-          const state = turnState ?? (await collectStatus(ctx, { progress: false, cachedOnly: true, records: { current: [record], archived: [] } }))[0]?.state;
+          const state = turnState ?? (await collectStatus(ctx, { progress: false, cachedOnly: true, records: { current: [record], archived: [] }, orphans: false }))[0]?.state;
           if (state !== 'waiting' && state !== 'report-ready') { await resetIdle(); return; }
           // report-ready bypasses status's waiting-state idle counter. An old report is
           // not a turn-end signal for this message: confirm consecutive idle frames too.

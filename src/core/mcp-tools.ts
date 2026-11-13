@@ -52,7 +52,9 @@ import { stableScript } from './mcp-install.ts';
 import { closeTask, closeTasks, planClose } from './close.ts';
 import { cohortEntries, cohortRows, findCohort, openCohortTasks, summarizeCohorts } from './cohort.ts';
 import { collectOverlaps, collideText } from './collisions.ts';
-import { ACCEPTED_TEXT, acceptSpecs, describeQueue, directStartText, findDirectStart, planQueueAdd, readQueue, removeFromQueue, waiting, watchAlive, withAcceptLock } from './queue.ts';
+import { ACCEPTED_TEXT, acceptSpecs, describeQueue, directStartText, findDirectStart, planQueueAdd, queueDependencyRows, readQueue, removeFromQueue, waiting, watchAlive, withAcceptLock } from './queue.ts';
+import { acceptedText, deferMcpWrites, readMcpRequests, recordMcpRequest } from './mcp-requests.ts';
+import type { McpRequest } from './mcp-requests.ts';
 import { readSetupProgress } from './setup-progress.ts';
 import { liveWindows, planBatch } from './plan.ts';
 import { awayReport, renderAway, setAway } from './away.ts';
@@ -85,7 +87,7 @@ import type { LimitAssignments } from './limits.ts';
 import { planLine } from './usage-report.ts';
 import { openReader, readPlans } from './usage.ts';
 import { AGENT_NAMES } from './config.ts';
-import { AgentctlError, cohortKey, errorMessage, formatLocalTime, plural, resolvePath } from './util.ts';
+import { AgentctlError, cohortKey, errorMessage, formatLocalTime, plural, resolvePath, windowName } from './util.ts';
 
 /*
  * The tools of `agentctl mcp`. This file is data and functions only: the MCP SDK front (src/mcp/server.ts) registers them.
@@ -124,6 +126,8 @@ export interface McpDeps {
   budgetClock?: BudgetClock;
   /** Each initialized transport snapshots the client's high-water marks, then consumes independently. */
   eventsSession?: { initialSince: string; markers: Partial<Record<string, string>>; cursors: Partial<Record<string, string>> };
+  /** The watcher applies a recorded MCP request (P93b): it journals `mcp-applied` itself, so the write does not journal `mcp-write` again. */
+  applying?: boolean;
 }
 
 export interface ServerInfo {
@@ -787,7 +791,7 @@ async function writeTool(
     if (result.executed) {
       lastPreviewMutation.set(deps, tool as McpWriteTool);
       const announce = async () => {
-        await recordJournal(ctx, { kind: 'mcp-write', text: `${tool}: ${result.announce}` });
+        if (!deps.applying) await recordJournal(ctx, { kind: 'mcp-write', text: `${tool}: ${result.announce}` });
         await mcpWriteNotice(ctx, deps.notify.bind(deps), result.announce);
       };
       if (tool === 'queue' || tool === 'new') void announce().catch(() => undefined);
@@ -822,9 +826,37 @@ async function runAnswer(deps: McpDeps, args: { task: string; option: number; co
   });
 }
 
-async function runSend(deps: McpDeps, args: { task: string; text?: string; enter_only?: boolean; confirm?: boolean; token?: string; withdraw?: string }): Promise<ToolResult> {
+/**
+ * The task of a send that the watcher will deliver (P93b): the state folders are listed (no record is read, no tmux): an exact ID or a unique
+ * prefix. The watcher resolves the running window when it applies the request.
+ */
+function sendTarget(ctx: Context, input: string): string {
+  const wanted = windowName(input.trim());
+  let names: string[] = [];
+  try { names = fs.readdirSync(ctx.config.stateDir).filter((n) => fs.existsSync(path.join(ctx.config.stateDir, n, 'TASK.md'))); } catch { /* no tasks */ }
+  const hits = names.includes(wanted) ? [wanted] : names.filter((n) => wanted !== '' && n.startsWith(wanted));
+  if (hits.length === 1) return hits[0]!.toUpperCase();
+  if (hits.length > 1) throw new AgentctlError(`"${input}" fits more than one task: ${hits.map((h) => h.toUpperCase()).join(', ')}`, 'Type more of the task ID.');
+  throw new AgentctlError(`no task "${input}"`, 'See "agentctl status".');
+}
+
+/** A send that a running watcher delivers (P93b): checked here without any lock, recorded, and answered at once. */
+async function deferSend(deps: McpDeps, permission: McpPermission, args: Record<string, unknown>, detail: string): Promise<ToolResult | undefined> {
+  const ctx = deps.context(() => {});
+  if (args._apply || !deferMcpWrites(ctx)) return undefined;
+  if (!ctx.config.mcp.allow.includes(permission)) return undefined; // writeTool refuses it with the remedy
+  const task = sendTarget(ctx, String(args.task));
+  const { _apply: _a, ...stored } = args;
+  const { request, existing } = await recordMcpRequest(ctx, { tool: 'send', args: { ...stored, task }, scope: null, key: `send:${createHash('sha256').update(JSON.stringify(canonical(stored))).digest('hex')}`, ...(typeof args.token === 'string' ? { token: `send:${args.token}` } : {}), label: task, task });
+  audit(ctx, { tool: permission, task, outcome: 'requested', detail: `${detail}; ${existing ? 'already accepted' : 'accepted for the watcher'}: request ${request.id}` });
+  return { text: `${acceptedText(ctx.config, request, existing)}\nThe delivery outcome (delivered, queued in the agent, or left in the input field) is in that event.`, data: { request: request.id, state: request.status, tool: 'send', target: task } };
+}
+
+async function runSend(deps: McpDeps, args: { task: string; text?: string; enter_only?: boolean; confirm?: boolean; token?: string; withdraw?: string; _apply?: boolean }): Promise<ToolResult> {
   if (args.withdraw !== undefined) {
     if (args.text !== undefined && args.text !== '') return fail('withdraw takes no text');
+    const deferred = await deferSend(deps, 'send', args, `withdraw ${args.withdraw}`);
+    if (deferred) return deferred;
     return writeTool(deps, 'send', { task: args.task, detail: `withdraw ${args.withdraw}` }, async (ctx) => {
       const target = await resolveRunningTask(ctx, args.task);
       const done = await withdrawPrompt(ctx, target.window, args.withdraw!);
@@ -834,6 +866,11 @@ async function runSend(deps: McpDeps, args: { task: string; text?: string; enter
   if (args.enter_only) {
     if (args.text !== undefined && args.text !== '') return fail('enter_only presses Enter only: do not give text');
     // Its own permission (send_enter): pressing Enter for a text that stands in a field is not pasting, and needs a preview and a confirm.
+    // The preview reads the screen at once; the confirm (with its token) is pressed by a running watcher, which checks the field again.
+    if (args.confirm && args.token) {
+      const deferred = await deferSend(deps, 'send_enter', args, 'enter_only confirm');
+      if (deferred) return deferred;
+    }
     return writeTool(deps, 'send_enter', { task: args.task, detail: `enter_only confirm=${Boolean(args.confirm)}` }, async (ctx) => {
       if (args.confirm && !args.token) return { text: 'enter_only with confirm needs the token from the preview: call enter_only without confirm first, show the user the exact text, then call again with confirm: true and that token. Nothing was pressed.', executed: false, error: true, announce: '', detail: 'refused: no token' };
       const target = await resolveRunningTask(ctx, args.task);
@@ -860,6 +897,10 @@ async function runSend(deps: McpDeps, args: { task: string; text?: string; enter
   }
   if (args.text === undefined) return fail('text is required (or enter_only: true to press Enter for the text a send left in the input field)');
   const text = args.text;
+  if (text.trim() !== '' && text.length <= MAX_SEND_CHARS) {
+    const deferred = await deferSend(deps, 'send', args, clipText(text));
+    if (deferred) return deferred;
+  }
   return writeTool(deps, 'send', { task: args.task, detail: clipText(text) }, async (ctx, lines) => {
     if (text.trim() === '') throw new AgentctlError('the text is empty');
     if (text.length > MAX_SEND_CHARS) throw new AgentctlError(`the text is ${text.length} characters; the limit is ${MAX_SEND_CHARS}`);
@@ -1307,6 +1348,7 @@ export const MCP_TOOLS: McpToolDef[] = [
       'To a working agent the message goes into the agent\'s own queue. "Delivered" is said only on exact proof (the hook of the agent or its session transcript holds exactly this message); the answer is otherwise "w kolejce agenta – niepotwierdzone" (the screen shows it queued, nothing confirms it) or "nie dostarczono – tekst w polu wpisywania" (the paste stands in the input field). agentctl presses Enter only in the call that pastes, never later by itself. ' +
       'In the last case enter_only: true (no text) presses Enter for that text. It needs its own permission, send_enter, in mcp.allow. The first call (no confirm) only previews: it returns the exact text of the field, the screen state and a token for those bytes; show the text to the user, then call again with confirm: true and that token. It refuses (an error, no key) when the field is not byte for byte what agentctl pasted and what the preview showed, or a dialog is open. The answer keeps "Enter sent" apart from "delivery confirmed". An agent with an open question gets nothing pasted. ' +
       'withdraw: "<id>" (no text; peek lists prompt_queue with ids) takes back a waiting message: a queued one is removed, one whose delivery already began is marked stale instead (the agent may already work on it). ' +
+      'With "agentctl watch" running, a send (also withdraw, and enter_only with confirm) is checked here without any lock, recorded and answered at once ("Accepted: send …"); the watcher delivers it at its next tick and events_since says the outcome (MCP WYKONANE with the delivery result, or MCP BŁĄD with the reason). ' +
       'Use it only when the user asked you to instruct an agent; say what you will send first. The user gets a desktop notification.',
     input: { task: taskArg, text: z.string().min(1).max(MAX_SEND_CHARS).optional().describe('The prompt for the agent. Required unless enter_only is true or withdraw is set.'), enter_only: z.boolean().optional().describe('true: paste nothing, press Enter for the text that an earlier send left in the input field (only that text, only while the whole field is exactly our paste). Needs send_enter in mcp.allow; without confirm it only previews.'), confirm: z.boolean().optional().describe('With enter_only: true presses Enter after a preview (needs token); without it nothing is pressed.'), token: z.string().min(1).max(64).optional().describe('With enter_only and confirm: the token that the preview returned for the exact text of the field.'), withdraw: z.string().min(1).max(64).optional().describe('Take back a waiting message: its id (a unique prefix is enough). A queued one is removed; one whose delivery began is marked stale. No text then.') },
     annotations: { title: 'Send a prompt to a running task', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
@@ -1481,6 +1523,57 @@ function redactConfig(config: GlobalConfig): unknown {
   return copy;
 }
 
+/**
+ * P93b: the writes whose confirm can wait on start.lock, git, tmux or a scan of every task. With a watcher running, the confirm records the
+ * request (mcp-requests.ts) and returns; the watcher applies it. `set_limits` stays synchronous: it writes config.yaml under no shared lock.
+ */
+export const DEFERRED_TOOLS = new Set(['unblock', 'queue_up', 'queue_rm', 'queue_retry', 'close', 'cancel', 'send', 'mark', 'hide', 'unhide', 'archive', 'cohort_add', 'cohort_remove', 'cohort_archive', 'cohort_note']);
+/** The run of every tool before the confirm, format, budget and paging wrappers: what the watcher calls to apply a request. */
+const originalRuns = new Map<string, McpToolDef['run']>();
+
+/** The label and the one task of a request, for its events. */
+function requestTarget(tool: string, args: Record<string, unknown>): { label: string; task?: string } {
+  if (typeof args.task === 'string') return { label: args.task.toUpperCase(), task: args.task.toUpperCase() };
+  if (Array.isArray(args.tasks)) return { label: (args.tasks as string[]).join(', ') };
+  if (typeof args.cohort === 'string') return { label: `cohort ${args.cohort}` };
+  if (Array.isArray(args.cohorts)) return { label: `cohorts ${(args.cohorts as string[]).join(', ')}` };
+  return { label: typeof args.older_than === 'string' ? `older than ${args.older_than}` : tool };
+}
+
+/** Record a confirmed write for the watcher and answer (audited as requested; the watcher's application is audited as done or error). */
+async function recordDeferred(deps: McpDeps, tool: string, args: Record<string, unknown>, scope: string | null, key: string, token: string | undefined): Promise<ToolResult> {
+  const ctx = deps.context(() => {});
+  const target = requestTarget(tool, args);
+  const { request, existing } = await recordMcpRequest(ctx, { tool, args, scope, key, ...(token ? { token } : {}), ...target });
+  audit(ctx, { tool, task: target.label, outcome: 'requested', detail: `${existing ? 'already accepted' : 'accepted for the watcher'}: request ${request.id}` });
+  return { text: acceptedText(ctx.config, request, existing), data: { request: request.id, state: request.status, tool, target: target.label } };
+}
+
+/**
+ * The watcher applies one recorded request (P93b), outside the response budget: the permission is read again, the scope of the preview is
+ * computed again and must be the same, then the tool runs as its confirm ran before. Throws with the reason when nothing was done.
+ */
+export async function applyMcpRequest(deps: McpDeps, request: McpRequest): Promise<{ text: string }> {
+  const run = originalRuns.get(request.tool);
+  if (!run || !DEFERRED_TOOLS.has(request.tool)) throw new AgentctlError(`${request.tool} is not a tool the watcher applies`);
+  const applying: McpDeps = { ...deps, applying: true };
+  const ctx = applying.context(() => {});
+  const permission = (request.tool === 'send' && request.args.enter_only ? 'send_enter' : request.tool) as McpPermission;
+  if (!ctx.config.mcp.allow.includes(permission)) throw new AgentctlError(`"${permission}" is no longer in mcp.allow; nothing was done`);
+  let scope: unknown;
+  if (request.scope !== null) {
+    scope = await confirmationScope(ctx, request.tool, request.args);
+    if (JSON.stringify(canonical(confirmationTargets(request.tool, scope))) !== request.scope) {
+      throw new AgentctlError(`changed preview: the ${request.tool} target scope changed since the preview; nothing was done`, 'Call the tool again without confirm, show the new scope to the user and confirm that.');
+    }
+  }
+  const result = request.tool === 'archive'
+    ? await writeTool(applying, 'archive', {}, async (fresh) => { await applyArchive(fresh, scope as Awaited<ReturnType<typeof archiveClosed>>); return { text: JSON.stringify(scope, null, 2), executed: true, announce: 'archive closed task state' }; })
+    : await guarded(() => run(applying, { ...request.args, confirm: true, _apply: true } as never));
+  if (result.isError) throw new AgentctlError(result.text);
+  return { text: result.text };
+}
+
 const confirmedTools = new Set(['mark', 'new', 'queue', 'cancel', 'resume', 'move', 'interrupt', 'close', 'queue_rm', ...MCP_TOOLS.filter((t) => t.kind === 'write' && !['send', 'answer', 'mark', 'away', 'set_limits', 'reserve'].includes(t.name)).map((t) => t.name)]);
 const previews = new WeakMap<McpDeps, Map<string, { key: string; arguments: Record<string, unknown>; /** The arguments as they came in (the spec text, not its canonical form): a token-only confirm executes these. */ raw: Record<string, unknown>; scope: string; at: number; ttlS: number; /** new/queue: what the preview planned; the confirm records it without planning again (P93). */ planned?: AcceptedOrder[] }>>();
 const lastPreviewMutation = new WeakMap<McpDeps, string>();
@@ -1532,9 +1625,12 @@ async function confirmationScope(ctx: Context, name: string, args: Record<string
     return { channels: args.phone ? ['ntfy'] : ['desktop'], notify: (redactConfig(ctx.config) as { notify: unknown }).notify };
   }
   if (name === 'unblock') {
+    // P93b: one bounded read: the queue and the status of the tasks its `after` names (with their verdicts, closed ones too), no scan of every task.
     const before = findEntry(ctx.config, args.task as string);
-    const rows = await collectStatus(ctx, { progress: false, archived: true });
-    return { tasks: [{ task: before.task, state: findBlocked(readQueue(ctx.config), rows).has(before.task) ? 'blocked' : before.status, blockers: findBlocked(readQueue(ctx.config), rows).get(before.task), after: before.after }], change: await unblockEntry(ctx, before.task, { dropAfter: args.drop_after as string | undefined, preview: true }) };
+    const entries = readQueue(ctx.config);
+    const rows = await queueDependencyRows(ctx, entries);
+    const blockers = findBlocked(entries, rows).get(before.task);
+    return { tasks: [{ task: before.task, state: blockers ? 'blocked' : before.status, blockers, after: before.after }], change: await unblockEntry(ctx, before.task, { dropAfter: args.drop_after as string | undefined, preview: true, rows }) };
   }
   if (name === 'cancel') {
     if ([args.task !== undefined, args.tasks !== undefined, args.cohort !== undefined].filter(Boolean).length !== 1) throw new AgentctlError('give either task or cohort', 'cancel takes one task (task) or all open tasks of a cohort (cohort), not both and not neither.');
@@ -1607,6 +1703,8 @@ async function previewScope(ctx: Context, name: string, args: Record<string, unk
 for (const tool of MCP_TOOLS) {
   const cli = ({ queue_list: 'queue list', queue_rm: 'queue rm', queue_retry: 'queue retry', queue_up: 'queue up', queue_pause: 'queue pause', queue_resume: 'queue resume', cohort_list: 'cohort list', cohort_show: 'cohort show', list_reports: 'status', get_report: 'pull <TASK>', pull_ready: 'pull --ready', task_spec: 'peek <TASK>', gc_preview: 'gc', events_since: 'events', set_limits: 'limits set', reserve: 'limits reserve' } as Record<string, string>)[tool.name] ?? tool.name.replaceAll('_', ' ');
   if (!tool.description.includes('CLI:')) tool.description += ` Use when the user needs this operation. CLI: agentctl ${cli}.`;
+  originalRuns.set(tool.name, tool.run);
+  if (DEFERRED_TOOLS.has(tool.name) && tool.name !== 'send') tool.description += ` With "agentctl watch" running, confirm records the request and returns at once; the watcher checks the preview's scope again and applies it at its next tick (events_since: MCP WYKONANE, or MCP BŁĄD with the reason and a notification).`;
   if (!confirmedTools.has(tool.name)) continue;
   const previewInput = tool.input;
   tool.input = { ...Object.fromEntries(Object.entries(tool.input).map(([name, schema]) => [name, z.optional(schema)])), confirm: confirmArg, preview_token: z.string().optional().describe('Token returned by this preview. Independent previews can be confirmed in any order if their scope is unchanged. A confirm may carry only this token: the stored arguments then execute.') };
@@ -1615,6 +1713,12 @@ for (const tool of MCP_TOOLS) {
   tool.run = (deps, args) => guarded(async () => {
     const ctx = deps.context(() => {});
     if (!ctx.config.mcp.allow.includes(tool.name as McpWriteTool)) return writeTool(deps, tool.name as McpWriteTool, {}, async () => { throw new Error('unreachable'); });
+    if (tool.name === 'mark' && !(args.confirm && args.preview_token) && typeof args.task === 'string' && args.tasks === undefined && args.cohort === undefined && deferMcpWrites(ctx)) {
+      // P93b: a single mark needs no preview; with a watcher it is recorded and applied there (the mark resolves the task over every record).
+      const { confirm: _c, preview_token: _t, ...input } = args;
+      z.object(previewInput).parse(input);
+      return recordDeferred(deps, tool.name, input, null, `${tool.name}:${createHash('sha256').update(JSON.stringify(previewArguments(input))).digest('hex')}`, undefined);
+    }
     if (tool.name === 'mark' && !(args.confirm && args.preview_token) && planMark(ctx, args as MarkSelection).length === 1) return original(deps, args);
     if (tool.name === 'new' && !(args.confirm && args.preview_token)) {
       // A task that was handed to the watcher is being started (or failed to): a second preview or confirm, with or without a token, reports that state and starts nothing.
@@ -1677,6 +1781,12 @@ for (const tool of MCP_TOOLS) {
       return undefined;
     };
     if (confirm) { const done = durableReplay(); if (done) return done; }
+    if (confirm && token && DEFERRED_TOOLS.has(tool.name)) {
+      // A recorded request answers a repeated confirm of its token, also after a restart of this server; nothing is recorded twice.
+      const known = readMcpRequests(ctx.config).find((r) => r.token === token);
+      if (known && known.tool !== tool.name) return deny('different tool for an accepted token');
+      if (known) return ok(`${acceptedText(ctx.config, known, true)}\nState: ${known.status}${known.error ? ` – ${known.error.split('\n')[0]}` : ''}`);
+    }
     if (confirm) {
       const repeated = await replay();
       if (repeated) return repeated;
@@ -1694,6 +1804,10 @@ for (const tool of MCP_TOOLS) {
     // P93: the confirm of new/queue does not plan again (git, tmux, every task record: seconds on a loaded host). Its scope identity is the
     // argument hash alone (confirmationTargets), the plan is the preview's, and the watcher validates the accepted specs.
     const accepting = Boolean(confirm) && (tool.name === 'new' || tool.name === 'queue');
+    // P93b: a confirm that a watcher can apply records the request and returns; the watcher computes the scope again and compares it.
+    if (confirm && DEFERRED_TOOLS.has(tool.name) && deferMcpWrites(ctx)) {
+      return recordDeferred(deps, tool.name, effective, preview!.scope, preview!.key, token);
+    }
     let scope: unknown;
     try { scope = accepting ? null : await confirmationScope(ctx, tool.name, effective); }
     catch (e) { audit(ctx, { tool: tool.name, outcome: 'error', detail: errorMessage(e) }); throw e; }
@@ -1826,7 +1940,9 @@ for (const tool of MCP_TOOLS.filter(t => capacityCarriers.has(t.name))) {
     if (result.isError) return result;
     const ctx = deps.context(() => {});
     const warnings = sessionWarnings(deps, ctx).map(w => `Config warning: ${w}`);
-    const footer = args.confirm && ['new', 'queue'].includes(tool.name) ? [] : await capacityFooter(deps, ctx, args.detail === true || args.capacity === true);
+    // An accepted confirm (P93/P93b) answers without the footer: it reads tmux and the disk, which a loaded host may not run in time.
+    const accepted = args.confirm && (['new', 'queue'].includes(tool.name) || typeof (result.data as { request?: unknown } | undefined)?.request === 'string');
+    const footer = accepted ? [] : await capacityFooter(deps, ctx, args.detail === true || args.capacity === true);
     // Core new/queue helpers also serve the CLI. Remove only their display footer here.
     const text = result.text.split('\n').filter(l => !/^(?:Plans:|plan:\s|capacity:|(?:WARNING: )?Disk:)/.test(l)).join('\n');
     if ((args.format === 'json' || args.detail === true && tool.name === 'status') && /^[{[]/.test(text)) {

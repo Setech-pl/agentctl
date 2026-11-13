@@ -26,6 +26,8 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  // 0.19.6
+  { id: 'P93b', fixedIn: '0.19.6', symptom: 'MCP unblock (and other write) confirms scanned every task under load, ran past the 8 s budget again and again and did nothing; the owner ran the CLI.', scenarios: [s('p93b-mcp-deferred.test.ts')] },
   // 0.19.5
   { id: 'P93', fixedIn: '0.19.5', symptom: 'MCP queue/new confirm planned again and waited for start.lock on a loaded host, ran past the 8 s budget and registered nothing; the owner pasted `agentctl queue` in a terminal.', scenarios: [s('p93-mcp-accept.test.ts', 'P93: (queue|new) confirm|refuses')] },
   { id: 'P92', fixedIn: '0.19.5', symptom: 'Kimi did not take the first prompt: "Kimi screen is not stable before Enter" (a rotating footer tip) left it in the field for the owner.', scenarios: [s('p92-kimi-start.test.ts')] },

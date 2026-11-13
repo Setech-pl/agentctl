@@ -101,7 +101,7 @@ export async function planCancel(ctx: Context, inputs: string[], opts: CancelOpt
   }
 
   const selectedRecords = records.filter(r => chosen.some(c => c.task === r.task));
-  const rows = new Map((await collectStatus(ctx, { progress: false, cachedOnly: true, records: { current: selectedRecords, archived: [] } })).map(r => [r.task, r] as const));
+  const rows = new Map((await collectStatus(ctx, { progress: false, cachedOnly: true, records: { current: selectedRecords, archived: [] }, orphans: false })).map(r => [r.task, r] as const));
   const items: CancelPlanItem[] = [];
   const p = chosen.map((c) => c.task);
   for (const { task, partnerOf } of chosen) {
