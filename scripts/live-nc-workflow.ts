@@ -15,7 +15,7 @@ import { readTaskRecord, renderTaskMd, taskFile } from '../src/core/taskstore.ts
 import type { TaskRecord } from '../src/core/taskstore.ts';
 import { readOutputs } from '../src/core/outputs.ts';
 import { collectStatus } from '../src/core/status.ts';
-import { readQueue } from '../src/core/queue.ts';
+import { readQueue, validateAccepted } from '../src/core/queue.ts';
 import { readJournal } from '../src/core/journal.ts';
 import { cohortTick } from '../src/core/cohort.ts';
 import { limitedTick } from '../src/core/limited.ts';
@@ -84,6 +84,8 @@ await withHarness({ name: 'nc-workflow', cacheRoot: cache, config: 'watch: {inte
     const cohort = JSON.parse((await call('cohort_show', { cohort: 'nc', format: 'json' })).text); check('cohort aggregates proposed integration/actions with source IDs', cohort.integrate[0].task === 'AUTHOR' && cohort.actions[0].task === 'AUTHOR');
     fs.writeFileSync(path.join(cache, 'nc-example-outputs.json'), JSON.stringify({ ...await readOutputs(ctx, record('AUTHOR')), cohort_show: cohort }, null, 2));
     const dependent = spec('DEPENDENT', { after: [{ task: 'AUTHOR', verdict: 'FAIL' }] }); await call('queue', { spec: dependent }); await call('queue', { spec: dependent, confirm: true });
+    // P93: the confirm records the spec as accepted; the watcher's tick validates it (this sandbox drives that half in process, the queue is off).
+    await validateAccepted(ctx, notifier);
     check('verdict condition blocks despite a complete author report', (await call('queue_list')).text.includes('verdict PASS'));
     const unblock = await call('unblock', { task: 'DEPENDENT' }); check('unblock preview states blocked and exact dependency', !unblock.error && unblock.text.includes('"state": "blocked"') && unblock.text.includes('AUTHOR'));
     const baseSpec = spec('FROM-AUTHOR', { repos: [{ path: repo, worktree: path.join(h.root, 'wt/from-author'), branch: 'from-author', base: '@AUTHOR:repo' }] }); const basePreview = await call('new', { spec: baseSpec }); check('base reference preview resolves exact output commit', basePreview.text.includes(first) && basePreview.text.includes('@AUTHOR:repo'));
