@@ -57,6 +57,8 @@ export interface WallPostRecord {
   refs: string[];
   replyTo: string | null;
   status: WallStatus;
+  /** A post agentctl published for a task report (`wall_posts`): `<task>/<attempt>/<n>`, so the same post is never published twice. */
+  origin?: string;
 }
 
 export interface WallStatusRecord {
@@ -91,6 +93,7 @@ export interface WallHeader {
   status: WallStatus;
   /** Every status after the first, oldest first. */
   history: WallStatusChange[];
+  origin?: string;
   bodyBytes: number;
   offset: number;
   length: number;
@@ -211,7 +214,7 @@ function isRecord(d: unknown): d is WallPostRecord | WallStatusRecord {
 function fold(index: ChannelIndex, record: WallPostRecord | WallStatusRecord, offset: number, length: number): void {
   if (record.type === 'post') {
     if (index.messages.some((m) => m.id === record.id)) return;
-    index.messages.push({ id: record.id, seq: record.seq, ts: record.ts, channel: record.channel, from: record.from, to: record.to, kind: record.kind, subject: record.subject, refs: record.refs ?? [], replyTo: record.replyTo ?? null, status: record.status, history: [], bodyBytes: Buffer.byteLength(record.body), offset, length });
+    index.messages.push({ id: record.id, seq: record.seq, ts: record.ts, channel: record.channel, from: record.from, to: record.to, kind: record.kind, subject: record.subject, refs: record.refs ?? [], replyTo: record.replyTo ?? null, status: record.status, history: [], ...(record.origin ? { origin: record.origin } : {}), bodyBytes: Buffer.byteLength(record.body), offset, length });
     return;
   }
   const message = index.messages.find((m) => m.id === record.id);
@@ -391,6 +394,8 @@ export interface PostInput {
   refs?: string[] | undefined;
   to?: string | undefined;
   replyTo?: string | undefined;
+  /** See WallPostRecord.origin: a post with this origin already in the channel is returned instead of posted again. */
+  origin?: string | undefined;
 }
 
 export interface PostPlan {
@@ -432,10 +437,13 @@ export interface WallWriteEnv {
 /** Post (or reply): checked again under the lock, appended, the index saved, a WALL event journaled; returns the message. */
 export async function postMessage(ctx: Context, who: WallIdentity, input: PostInput, env: WallWriteEnv = {}): Promise<WallMessage> {
   const { config } = ctx;
+  let again = false;
   const message = await withWallLock(config, async () => {
     const plan = planPost(config, who, input);
+    const published = input.origin ? channelMessages(config, plan.channel).find((m) => m.origin === input.origin) : undefined;
+    if (published) { again = true; return messageWithBody(config, published); }
     const seq = (channelMessages(config, plan.channel).at(-1)?.seq ?? 0) + 1;
-    const record: WallPostRecord = { v: 1, type: 'post', id: `${plan.channel}-${seq}`, seq, ts: new Date(ctx.runner.now()).toISOString(), channel: plan.channel, from: plan.from, to: plan.to, kind: plan.kind, subject: plan.subject, body: input.body, refs: plan.refs, replyTo: plan.replyTo, status: plan.status };
+    const record: WallPostRecord = { v: 1, type: 'post', id: `${plan.channel}-${seq}`, seq, ts: new Date(ctx.runner.now()).toISOString(), channel: plan.channel, from: plan.from, to: plan.to, kind: plan.kind, subject: plan.subject, body: input.body, refs: plan.refs, replyTo: plan.replyTo, status: plan.status, ...(input.origin ? { origin: input.origin } : {}) };
     appendRecord(config, plan.channel, record);
     // An answer closes the open question it replies to (a decision stays with the owner).
     if (plan.parent && plan.kind === 'answer' && plan.parent.kind === 'question' && plan.parent.status === 'open') {
@@ -444,8 +452,51 @@ export async function postMessage(ctx: Context, who: WallIdentity, input: PostIn
     saveIndex(config, [plan.channel]);
     return messageWithBody(config, findMessage(config, record.id));
   });
-  await announce(ctx, message, env);
+  if (!again) await announce(ctx, message, env);
   return message;
+}
+
+// ---- posts of a task report (`wall_posts` in agentctl-outputs)
+
+/** Kinds a task may post from its report: news and questions; decisions stay with the owner and the chats. */
+export const TASK_POST_KINDS: readonly WallKind[] = ['info', 'question'];
+export const MAX_TASK_POSTS = 5;
+const TASK_POST_KEYS = ['channel', 'kind', 'subject', 'body', 'refs'];
+
+export interface TaskPostsResult { posted: string[]; findings: string[] }
+
+/**
+ * Publish the `wall_posts` of a finished report as `task:<ID>`, each one through the checks of every post (channel permissions, secret
+ * scan, size, refs). A bad entry is a finding, never an error: the report stays what it is. `attempt` makes each post's origin, so a
+ * second run (another process, a restart) finds the post and does not publish it again.
+ */
+export async function publishTaskPosts(ctx: Context, task: string, attempt: string, raw: unknown): Promise<TaskPostsResult> {
+  const result: TaskPostsResult = { posted: [], findings: [] };
+  if (raw === undefined || raw === null) return result;
+  if (!Array.isArray(raw)) return { ...result, findings: ['wall_posts: expected a list of {channel, kind, subject, body, refs}'] };
+  const who: WallIdentity = { id: `task:${task}`, kind: 'task' };
+  for (const [i, entry] of raw.entries()) {
+    const at = `wall_posts[${i}]`;
+    if (i >= MAX_TASK_POSTS) { result.findings.push(`${at}…: at most ${MAX_TASK_POSTS} posts per report, ${raw.length - MAX_TASK_POSTS} not published`); break; }
+    if (!isObject(entry)) { result.findings.push(`${at}: expected a mapping {channel, kind, subject, body, refs}`); continue; }
+    const unknown = Object.keys(entry).filter((k) => !TASK_POST_KEYS.includes(k));
+    const refs = entry.refs ?? [];
+    const problem = unknown.length ? `unknown field ${unknown.join(', ')} (allowed: ${TASK_POST_KEYS.join(', ')})`
+      : typeof entry.channel !== 'string' ? 'channel: expected a channel name'
+      : !TASK_POST_KINDS.includes(entry.kind as WallKind) ? `kind: a task posts ${TASK_POST_KINDS.join(' or ')}`
+      : typeof entry.subject !== 'string' ? 'subject: expected one line of text'
+      : entry.body !== undefined && entry.body !== null && typeof entry.body !== 'string' ? 'body: expected Markdown text'
+      : !Array.isArray(refs) || refs.some((r) => typeof r !== 'string') ? 'refs: expected a list of refs' : undefined;
+    const where = typeof entry.channel === 'string' ? `${at} (${entry.channel})` : at;
+    if (problem) { result.findings.push(`${where}: ${problem}`); continue; }
+    try {
+      const m = await postMessage(ctx, who, { channel: entry.channel as string, kind: entry.kind as WallKind, subject: entry.subject as string, body: (entry.body as string | undefined) ?? '', refs: refs as string[], origin: `${task}/${attempt}/${i}` });
+      result.posted.push(m.id);
+    } catch (e) {
+      result.findings.push(`${where}: ${e instanceof AgentctlError ? e.message : String(e)}`);
+    }
+  }
+  return result;
 }
 
 export function eventText(m: Pick<WallHeader, 'channel' | 'kind' | 'id' | 'from' | 'subject'>): string {

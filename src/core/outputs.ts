@@ -11,6 +11,8 @@ import { recordJournal, readJournal } from './journal.ts';
 import { withFileLock } from './file-lock.ts';
 import { findRecordAnywhere } from './taskstore.ts';
 import { plural, resolvePath } from './util.ts';
+import { publishTaskPosts } from './wall.ts';
+import type { TaskPostsResult } from './wall.ts';
 
 const countText = (n: number, one: string, few: string, many: string): string => `${n} ${plural(n, one, few, many)}`;
 
@@ -74,7 +76,8 @@ function takeList<T>(raw: unknown, section: string, item: z.ZodType<T>, errors: 
   return kept;
 }
 
-const OUTPUT_KEYS = ['version', 'verdict', 'commits', 'integrate', 'decisions', 'actions', 'checks', 'preview', 'notes'];
+/** `wall_posts` is not part of Outputs: agentctl publishes it on the WALL once per attempt (journalOutputs), and its problems are findings of that event. */
+const OUTPUT_KEYS = ['version', 'verdict', 'commits', 'integrate', 'decisions', 'actions', 'checks', 'preview', 'notes', 'wall_posts'];
 
 /** The verdict words a review report may declare; they map onto the output verdicts (GO = PASS, GO-WITH-CHANGES = PARTIAL, NO-GO = FAIL). */
 const REVIEW_VERDICT_ALIAS: Record<string, OutputVerdict> = { GO: 'PASS', 'GO-WITH-CHANGES': 'PARTIAL', 'NO-GO': 'FAIL' };
@@ -120,7 +123,7 @@ export function inconsistentReviewVerdict(report: string): { first: string; decl
 }
 
 /** Only a top-level fenced block before the report-end directive is report data. */
-export function parseOutputs(text: string, opts: { review?: boolean } = {}): OutputData {
+function outputBlocks(text: string): string[] {
   const blocks: string[] = [];
   let fence: string | undefined, lines: string[] = [], target = false;
   for (const line of text.replace(/\r\n/g, '\n').split('\n')) {
@@ -133,6 +136,21 @@ export function parseOutputs(text: string, opts: { review?: boolean } = {}): Out
     }
     if (fence && target) lines.push(line);
   }
+  return blocks;
+}
+
+/** The `wall_posts` of the one agentctl-outputs block, as written (publishTaskPosts checks every entry); undefined: none, or no readable block. */
+export function outputWallPosts(text: string): unknown {
+  const blocks = outputBlocks(text);
+  if (blocks.length !== 1) return undefined;
+  try {
+    const data: unknown = YAML.parse(blocks[0]!, { maxAliasCount: 50 });
+    return data && typeof data === 'object' && !Array.isArray(data) ? (data as Record<string, unknown>).wall_posts : undefined;
+  } catch { return undefined; }
+}
+
+export function parseOutputs(text: string, opts: { review?: boolean } = {}): OutputData {
+  const blocks = outputBlocks(text);
   const invalid = (message: string): OutputData => ({ outputs: null, outputs_valid: false, outputs_errors: [message], outputs_partial: false });
   if (blocks.length !== 1) return invalid(blocks.length ? 'multiple agentctl-outputs blocks' : 'missing agentctl-outputs block (schema version: 1)');
   let data: unknown;
@@ -279,7 +297,13 @@ export async function journalOutputs(ctx: Context, record: TaskRecord, opts: { r
     if (!record.outputsProtocol && !data.outputs) { await ctx.runner.writeFile(file, JSON.stringify([...seen, identity])); return; }
     // Journal is also the recovery ledger if a process died before writing outputs-seen.
     if (!readJournal(ctx.config, -1).some(e => e.kind === 'report-outputs' && e.task === record.task && (e.reportAttempt === identity || (!e.reportAttempt && e.reportHash === report.signature)))) {
-      await recordJournal(ctx, { kind: 'report-outputs', task: record.task, ...(record.reviewOf ? { reviewOf: record.reviewOf } : {}), reportHash: report.signature, reportAttempt: identity, decisions: data.outputs?.decisions ?? [], actions: data.outputs?.actions ?? [], text: data.outputs_valid ? `${record.task}: ${countText(data.outputs!.decisions.length, 'decyzja', 'decyzje', 'decyzji')}, ${countText(data.outputs!.actions.length, 'akcja', 'akcje', 'akcji')}` : `${record.task}: outputs warning: ${data.outputs_errors.join('; ')}` });
+      // wall_posts: published as task:<ID> before the event, which carries what was posted and what was refused (never a block of the report).
+      let wall: TaskPostsResult = { posted: [], findings: [] };
+      try {
+        wall = await publishTaskPosts(ctx, record.task, identity, outputWallPosts(readReportText(ctx.config, record, record.report)));
+      } catch (e) { wall.findings.push(`wall_posts: ${e instanceof Error ? e.message : String(e)}`); }
+      const wallText = wall.posted.length || wall.findings.length ? `; WALL: ${[...(wall.posted.length ? [`posted ${wall.posted.join(', ')}`] : []), ...(wall.findings.length ? [`${wall.findings.length} not posted: ${wall.findings.join('; ')}`] : [])].join('; ')}` : '';
+      await recordJournal(ctx, { kind: 'report-outputs', task: record.task, ...(record.reviewOf ? { reviewOf: record.reviewOf } : {}), reportHash: report.signature, reportAttempt: identity, decisions: data.outputs?.decisions ?? [], actions: data.outputs?.actions ?? [], ...(wall.posted.length || wall.findings.length ? { wallPosts: wall } : {}), text: `${data.outputs_valid ? `${record.task}: ${countText(data.outputs!.decisions.length, 'decyzja', 'decyzje', 'decyzji')}, ${countText(data.outputs!.actions.length, 'akcja', 'akcje', 'akcji')}` : `${record.task}: outputs warning: ${data.outputs_errors.join('; ')}`}${wallText}` });
     }
     // A review's first line is its verdict; a block that disagrees (POP-E1: "Werdykt: NO-GO" with verdict: PASS) is flagged once per attempt.
     if (record.reviewOf) {

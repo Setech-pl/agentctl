@@ -17,7 +17,7 @@ import { findBlocked } from './depends.ts';
 import { mcpWriteNotice } from './mcp-notify.ts';
 import { planMark, markTasks } from './mark.ts';
 import type { MarkSelection } from './mark.ts';
-import { readOutputs, aggregateOutputs, reviewVerdict } from './outputs.ts';
+import { readOutputs, aggregateOutputs, journalOutputs, reviewVerdict } from './outputs.ts';
 import type { OutputData } from './outputs.ts';
 import { developmentEnvironment } from './installation.ts';
 import { withFileLock as withReportLock } from './file-lock.ts';
@@ -660,6 +660,8 @@ async function runGetReport(deps: McpDeps, args: { task: string; section?: strin
     const state = inspectReport(ctx.config, record, ctx.runner.now(), !record.attemptId);
     throw new AgentctlError(state.reason === 'not a regular report' ? `the report of ${record.task} is not a regular file; refusing to read it` : `${record.task} has no report yet: ${state.reason}`, 'Use report to inspect candidates or wait for completion.');
   }
+  // The report is read: its outputs event (and its wall_posts) is recorded now if no watcher did it yet; once per attempt, never a failed read.
+  await journalOutputs(ctx, record, { readOnly: true }).catch(() => undefined);
   if (!args.detail && args.mode !== 'full' && args.section === undefined && args.offset === undefined && args.byte_offset === undefined && args.limit === undefined) {
     return ok(`=== ${record.task} (${record.agent} ${record.model}/${record.effort}) ===\n${conciseReport(readReportText(ctx.config, record, record.report), await readOutputs(ctx, record), record.reviewOf != null)}${warning ? `\n${JSON.stringify({ warning })}` : ''}`);
   }
@@ -707,6 +709,8 @@ async function runPullReady(deps: McpDeps, args: { cohort?: string | undefined; 
   const chosen = selection.rows.slice(offset, offset + (args.limit ?? 100));
   if (chosen.length === 0) return ok(noReadyMessage(rows));
   if (chosen.some(row => { const current = rows.find(r => r.task === row.task); return !current || current.report !== 'yes' || current.attemptId !== row.attemptId; })) throw new AgentctlError('report selection changed; restart at offset 0 before acknowledging');
+  const records = listTaskRecords(ctx.config);
+  for (const row of chosen) { const record = records.find(r => r.task === row.task); if (record) await journalOutputs(ctx, record, { readOnly: true }).catch(() => undefined); }
   if (!args.detail && args.mode !== 'full') { const result = await pullSummaries(ctx, chosen, args.ack); return ok(`${result.text}\nnext_cursor: ${selection.id}:${offset + (result.delivered ?? 0)}; has_more: ${offset + (result.delivered ?? 0) < selection.rows.length}`); }
   if (chosen.length === 0) return ok(noReadyMessage(rows));
   const { text, pulled } = joinReports(chosen, ctx);

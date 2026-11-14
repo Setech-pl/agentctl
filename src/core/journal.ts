@@ -42,6 +42,8 @@ export interface JournalEntry {
   phone?: 'sent' | 'queued';
   /** `wall` only: the message that was posted (never its body). events_since returns it to the clients subscribed to the channel. */
   wall?: { channel: string; kind: string; subject: string; id: string; from: string };
+  /** `report-outputs` only: the report's `wall_posts` that were published (ids) and the ones that were not (why; never a body). */
+  wallPosts?: { posted: string[]; findings: string[] };
 }
 
 export const journalPath = (config: Pick<GlobalConfig, 'path'>): string => path.join(path.dirname(config.path), 'journal.jsonl');

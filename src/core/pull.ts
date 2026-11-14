@@ -1,4 +1,5 @@
 import { readReportText } from './report-path.ts';
+import { journalOutputs } from './outputs.ts';
 import { reportFingerprint } from './report-state.ts';
 import fs from 'node:fs';
 import { findClipboardTool, writeClipboard } from './clipboard.ts';
@@ -28,6 +29,8 @@ export async function pullTask(ctx: Context, taskArg: string, platform?: string)
   // An agent that wrote the report elsewhere: copy it to the canonical path first.
   if (record.report && !fs.existsSync(record.report)) await syncReport(ctx, record).catch(() => undefined);
   if (record.report && fs.existsSync(record.report)) {
+    // Read means recorded: the outputs event and the report's wall_posts, once per attempt, if no watcher did it yet.
+    await journalOutputs(ctx, record).catch(() => undefined);
     const text = readReportText(config, record, record.report);
     const clip = await findClipboardTool(runner, 'write', platform);
     if (clip) {
