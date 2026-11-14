@@ -53,7 +53,7 @@ import { errorMessage } from '../core/util.ts';
 import { beginTitle } from '../core/title.ts';
 import { applyInstanceLabel, instanceName } from '../core/instance.ts';
 import { packageVersion } from '../core/version.ts';
-import { wallUnread, wallView } from '../core/board-wall.ts';
+import { wallBadgeDue, wallUnread, wallView } from '../core/board-wall.ts';
 import { loadWallBoard, markRead, ownerThreadLines } from '../core/wall.ts';
 
 /*
@@ -169,6 +169,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
     clear: (timer: unknown) => clearTimeout(timer as NodeJS.Timeout),
   };
   const noticeTimer = useRef<unknown>(undefined);
+  const wallReadAt = useRef<number | null>(null);
   useEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; pendingView.current = null; if (noticeTimer.current !== undefined) timers.clear(noticeTimer.current); };
@@ -183,8 +184,11 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
       // Closed/cancelled rows are detailed only while their section is listed (the `a` key).
       const snap = await loadBoard(ctx, current.current.selected, cache.current, PREVIEW_LINES, { deepClosed: current.current.showHidden });
       if (!stopped) { update((s) => applySnapshot(s, snap)); props.runtime?.refreshed?.(cache.current.size, performance.now() - started); }
-      // New WALL messages show while the view is open (the index is incremental: a stat per channel, the new tail only).
+      // New WALL messages show while the view is open; the header's unread count is read in the background from the start, at most every
+      // WALL_BADGE_REFRESH_MS (the index is incremental: a stat per channel, the new tail only). A background read never shows an error.
+      const now = props.runtime?.now() ?? Date.now();
       if (!stopped && current.current.mode.kind === 'wall') loadWall();
+      else if (!stopped && wallBadgeDue(wallReadAt.current, now)) { wallReadAt.current = now; loadWall(true); }
     }, () => boardRefreshMs(current.current.rows), (e) => {
       if (!stopped) update((s) => withLoadError(s, errorMessage(e).split('\n')[0] as string));
     }, props.runtime?.clock);
@@ -211,15 +215,15 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
     };
   }, []);
 
-  /** The WALL data, read off the input path (setImmediate); a failure is a notice, never a crash. */
-  const loadWall = (): void => {
+  /** The WALL data, read off the input path (setImmediate); a failure is a notice (none for a background read), never a crash. */
+  const loadWall = (quiet = false): void => {
     setImmediate(() => {
       if (!mounted.current) return;
       try {
         const data = loadWallBoard(ctx.config);
         update((s) => ({ ...s, wall: data }));
       } catch (e) {
-        update((s) => showNotice(s, { level: 'error', text: `WALL: ${errorMessage(e).split('\n')[0]}` }));
+        if (!quiet) update((s) => showNotice(s, { level: 'error', text: `WALL: ${errorMessage(e).split('\n')[0]}` }));
       }
     });
   };

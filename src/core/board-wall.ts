@@ -98,7 +98,13 @@ export function wallView(state: BoardState, mode: WallMode): { title: string; li
   };
 }
 
-/** The total the board's header shows once the WALL was loaded. */
+/** How often the board reads the WALL index in the background for the header's unread count (the view itself reloads every refresh). */
+export const WALL_BADGE_REFRESH_MS = 15_000;
+
+/** The background read of the header count is due: never read yet, or the last one is WALL_BADGE_REFRESH_MS old. */
+export const wallBadgeDue = (lastMs: number | null, nowMs: number): boolean => lastMs === null || nowMs - lastMs >= WALL_BADGE_REFRESH_MS;
+
+/** The total the board's header shows (read in the background from the start, and by the WALL view). */
 export function wallUnread(data: WallBoardData | null): number {
   return (data?.channels ?? []).reduce((n, c) => n + (c.unread ?? 0), 0);
 }

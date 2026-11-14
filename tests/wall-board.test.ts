@@ -5,7 +5,7 @@ import { describe, it } from 'node:test';
 import { runBoardApp } from '../src/board/app.ts';
 import { handleKey, HELP_LINES, initialBoardState, KEY_HINTS } from '../src/core/board.ts';
 import type { BoardState } from '../src/core/board.ts';
-import { wallMessages, wallView } from '../src/core/board-wall.ts';
+import { WALL_BADGE_REFRESH_MS, wallBadgeDue, wallMessages, wallView } from '../src/core/board-wall.ts';
 import { Context } from '../src/core/context.ts';
 import { isRead, loadWallBoard, OWNER_IDENTITY, postMessage, readOwnerState, wallIdentity } from '../src/core/wall.ts';
 import { DiskRunner, FakeTmux, makeConfig, makeContext, useScratch } from './helpers.ts';
@@ -131,6 +131,30 @@ describe('WALL view: the Ink front', () => {
     } finally {
       // Out of any WALL level first: q there goes back, it does not leave the board.
       for (let i = 0; i < 3; i++) { keys.write('\u001b'); await wait(60); }
+      keys.write('q');
+      await done;
+    }
+  });
+});
+
+describe('WALL-2: the header count without opening W', () => {
+  it('the background read is due at once, then at most every WALL_BADGE_REFRESH_MS', () => {
+    assert.equal(wallBadgeDue(null, 0), true);
+    assert.equal(wallBadgeDue(1_000, 1_000 + WALL_BADGE_REFRESH_MS - 1), false);
+    assert.equal(wallBadgeDue(1_000, 1_000 + WALL_BADGE_REFRESH_MS), true);
+  });
+
+  it('the board header shows the unread WALL count from the start, before W was ever pressed', async () => {
+    const { config } = await seeded('badge');
+    const made = makeContext(config, { respond: new FakeTmux().respond });
+    const term = new FakeTerminal(120, 30);
+    const keys = new FakeKeyboard();
+    screen = () => term.last();
+    const done = runBoardApp(made.ctx, true, { stdout: term as unknown as NodeJS.WriteStream, stdin: keys as unknown as NodeJS.ReadStream });
+    try {
+      await until(() => term.seen('WALL 4 unread (W)'));
+      assert.ok(!term.seen('WALL – channels'), 'the view itself was never opened');
+    } finally {
       keys.write('q');
       await done;
     }

@@ -208,7 +208,7 @@ export interface BoardState {
   archivedCohorts: string[];
   /** `board.cohorts_recent`: how many of the most recently active cohorts the `k` choice lists before "starsze…". */
   cohortsRecent: number;
-  /** The WALL as the owner sees it; null until the WALL view (W) loaded it. */
+  /** The WALL as the owner sees it; null until the first background read (header count) or the WALL view (W) loaded it. */
   wall: WallBoardData | null;
 }
 
