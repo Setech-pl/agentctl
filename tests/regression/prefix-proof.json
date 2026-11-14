@@ -39,6 +39,19 @@
       "tests/gate.test.ts"
     ]
   },
+  "P16-f1": {
+    "rev": "v0.20.1",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 5,
+    "failing": [
+      "P16-f1 glm: the user line of exactly that message delivers it with source transcript",
+      "P16-f1 glm: the enqueue line only confirms the queue, the injection delivers it",
+      "P16-f1: glm follow-up proof from the transcript",
+      "P16-f1 glm: the user line of exactly that message delivers it with source transcript",
+      "P16-f1 glm: the enqueue line only confirms the queue, the injection delivers it"
+    ]
+  },
   "P42": {
     "rev": "v0.18.2",
     "outcome": "FAILS",
