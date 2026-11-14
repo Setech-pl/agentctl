@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'CONSULT-f1', fixedIn: '0.22.0', symptom: 'A long task cache produced a 101-byte tmux socket even after digest shortening, so the stdio/release harness refused before startup.', scenarios: [s('harness.test.ts', 'CONSULT-f1')] },
   // 0.21.0 (WALL-1 findings): WALL-1 was never released, so v0.20.2 gives an import error; the unreleased WALL-1 commit 19e8192 was measured too
   { id: 'WALL-1-f1', fixedIn: '0.21.0', symptom: '`agentctl wall post/reply/status` acted as the owner also in an agent\'s task shell: an agent could post as the owner, answer as a chat with --as chat:<name>, or close a decision-request (pre-fix run on the unreleased WALL-1 commit 19e8192: 4 of 5 fail).', scenarios: [s('wall2-identity.test.ts')] },
   { id: 'WALL-1-f2', fixedIn: '0.21.0', symptom: 'The WALL secret scan refused plain prose such as "Token: x" or "Key: the building height" (the report redaction\'s assignment rule); nothing was posted (pre-fix run on the unreleased WALL-1 commit 19e8192: 2 of 2 fail).', scenarios: [s('wall2-secrets.test.ts')] },

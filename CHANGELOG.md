@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- CONSULT-f1: fit the harness digest to the remaining task-owned tmux socket budget (minimum eight hex characters); a 101-byte path now fits at 100 without escaping the cache. / CONSULT-f1: długość skrótu harnessu mieści się w pozostałym limicie ścieżki gniazda tmux (minimum osiem znaków hex); ścieżka 101-bajtowa mieści się w 100 bajtach bez wyjścia poza cache.
+
 ## [0.21.0] - 2026-11-14
 
 - Release 0.21.0: WALL-1 and WALL-2 on top of 0.20.2 (tag v0.20.2 merged: P16 `live-p15-send` waits for the queued Codex follow-up itself, P16-f1 glm transcript read like Claude's); package and lockfile versions are 0.21.0. The prod upgrade adds `wall` to `mcp.allow` and, to pin them, the `wall.chats` of the owner's chats (README, WALL). / Wydanie 0.21.0: WALL-1 i WALL-2 na bazie 0.20.2 (scalony tag v0.20.2: P16 `live-p15-send` czeka na sam zakolejkowany follow-up Codexa, P16-f1 transkrypt glm czytany jak Claude'a); wersje pakietu i lockfile to 0.21.0. Aktualizacja prod dopisuje `wall` do `mcp.allow` i, żeby je utrwalić, `wall.chats` czatów właściciela (README, WALL).

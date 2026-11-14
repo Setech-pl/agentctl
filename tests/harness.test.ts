@@ -15,6 +15,16 @@ afterEach(() => {
   else process.env.AGENTCTL_LIVE_CACHE = liveCache;
 });
 
+it('CONSULT-f1: compacts the digest to fit a task-owned socket at the 100-byte boundary', () => {
+  const suffix = Buffer.byteLength(`/live-123456789/tmx/tmux-${process.getuid?.() ?? 0}/default`);
+  // A virtual, nonexistent root: constructor/path assertions only; no filesystem writes or tmux.
+  const cacheRoot = '/' + 'x'.repeat(100 - suffix);
+  process.env.AGENTCTL_LIVE_CACHE = cacheRoot;
+  const h = new Harness({ name: 'long-consultation-harness-name', cacheRoot }, REPO_ROOT);
+  assert.equal(path.dirname(h.root), cacheRoot);
+  assert.equal(Buffer.byteLength(path.join(h.tmuxDir, `tmux-${process.getuid?.() ?? 0}`, 'default')), 100);
+});
+
 it('shortens long sandbox names inside the requested root and refuses an oversized root before reset', () => {
   const cacheRoot = '/Users/marcinkrzetowski/Projects/cache-dev/agentctl-0181/e2/x';
   process.env.AGENTCTL_LIVE_CACHE = cacheRoot;

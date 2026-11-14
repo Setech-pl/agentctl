@@ -19,6 +19,16 @@
       "tests/gate-clean.test.ts"
     ]
   },
+  "CONSULT-f1": {
+    "rev": "v0.21.0",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "CONSULT-f1: compacts the digest to fit a task-owned socket at the 100-byte boundary",
+      "CONSULT-f1: compacts the digest to fit a task-owned socket at the 100-byte boundary"
+    ]
+  },
   "F1": {
     "rev": "v0.19.0",
     "outcome": "IMPORT-ERROR",
