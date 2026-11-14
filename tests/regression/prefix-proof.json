@@ -443,6 +443,19 @@
       "WALL-1-f1: the owner identity is not usable from an agent task shell"
     ]
   },
+  "WALL-1-f2": {
+    "rev": "19e8192",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "plain-prose labels (\"Token: x\", \"Key: …\") are posted",
+      "real secret shapes are still refused and nothing is stored; the finding never repeats the value",
+      "WALL-1-f2: the secret scan keeps real secrets out and lets prose through",
+      "plain-prose labels (\"Token: x\", \"Key: …\") are posted",
+      "real secret shapes are still refused and nothing is stored; the finding never repeats the value"
+    ]
+  },
   "X1": {
     "rev": "v0.18.2",
     "outcome": "IMPORT-ERROR",

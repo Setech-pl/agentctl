@@ -28,6 +28,7 @@ const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name 
 export const BUGS: BugEntry[] = [
   // 0.21.0 (WALL-1 findings; WALL-1 was never released, the pre-fix proof is measured on its commit 19e8192)
   { id: 'WALL-1-f1', fixedIn: '0.21.0', symptom: '`agentctl wall post/reply/status` acted as the owner also in an agent\'s task shell: an agent could post as the owner, answer as a chat with --as chat:<name>, or close a decision-request.', scenarios: [s('wall2-identity.test.ts')] },
+  { id: 'WALL-1-f2', fixedIn: '0.21.0', symptom: 'The WALL secret scan refused plain prose such as "Token: x" or "Key: the building height" (the report redaction\'s assignment rule); nothing was posted.', scenarios: [s('wall2-secrets.test.ts')] },
   // 0.20.2
   { id: 'P16-f1', fixedIn: '0.20.2', symptom: 'A glm follow-up never got transcript proof (no `delivery_source: transcript`, no queue-acceptance note): the session transcript of a glm task was read with the Codex parser. The release scenario live-p15-send also failed from 0.19.4 because it read the delivery fields of the first prompt while the Codex follow-up was still queued (a scenario defect; the queued Codex path is pinned in the same file).', scenarios: [s('p16-queued-proof.test.ts')] },
   // 0.20.1

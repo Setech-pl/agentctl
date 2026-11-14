@@ -6,7 +6,7 @@ import type { GlobalConfig } from './config.ts';
 import type { Context } from './context.ts';
 import { withFileLock } from './file-lock.ts';
 import { recordJournal } from './journal.ts';
-import { secretRedactor } from './secret-redaction.ts';
+import { SECRET_KEY, secretValues, URL_TEXT } from './secret-redaction.ts';
 import { listTaskRecords, readTaskRecordById } from './taskstore.ts';
 import { AgentctlError, expandHome, formatLocalTime, isObject } from './util.ts';
 import { sortedChannels, WALL_CHANNEL_NAME, WALL_CHAT_NAME, WALL_TOOL_CHANNEL, wallGlob } from './wall-config.ts';
@@ -377,18 +377,47 @@ const TOKEN_PATTERNS: Array<[string, RegExp]> = [
   ['a Slack token', /\bxox[abprs]-[A-Za-z0-9-]{10,}/],
   ['a private key', /-----BEGIN [A-Z ]*PRIVATE KEY-----/],
   ['a JSON web token', /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/],
+  ['a bearer token', /\bBearer\s+[A-Za-z0-9._~+/-]{20,}=*/],
+  ['a Z.ai/Anthropic credential assignment', /\b(?:ANTHROPIC_BASE_URL|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_API_KEY|ZAI_API_KEY)\s*[:=]\s*\S/],
 ];
 
+/** `key<sep>value` where the key holds a secret word; the separator and its spacing tell code (`TOKEN=x`, `"token": "x"`) from prose (`Token: x`). */
+const SECRET_ASSIGNMENT = /([\w.-]*(?:TOKEN|KEY|SECRET|PASSWORD|PASSWD|PASS|AUTH|COOKIE)[\w.-]*)(["']?)(\s*)([:=])(\s*)("(?:\\.|[^"\\])*"|'[^']*'|[^\s,;]+)/gi;
+
+/** Shaped like a credential: long with mixed letters and digits (a hex or base64 token), or a password with lower, upper and digits. */
+export function credentialLike(value: string): boolean {
+  if (/\s/.test(value) || /^[~/.]/.test(value) || /^https?:/i.test(value)) return false;
+  const classes = [/[a-z]/, /[A-Z]/, /\d/].filter((r) => r.test(value)).length;
+  return (value.length >= 20 && classes >= 2) || (value.length >= 12 && classes === 3);
+}
+
 /**
- * The secret scan of a post: the redaction that guards reports, the journal and the events (a value of a secret config/env key, a
- * TOKEN=/KEY:/PASSWORD= assignment, credentials in a URL) plus well-known token shapes. Returns what was found, never the value.
+ * The secret scan of a post. Real secret shapes are refused: a value of a secret config/env key (the redaction source of reports and the
+ * journal), credentials in a URL, well-known token shapes, and a secret assignment written as code (`API_TOKEN=…`, `"token": "…"`,
+ * `PASSWORD: …`). A plain-prose label (`Token: x`, `Key: the building height`: a capitalised or lower-case word, a colon, a space, an
+ * unquoted value) is refused only when its value is shaped like a credential. Returns what was found, never the value.
  */
 export function secretFindings(config: GlobalConfig, fields: Record<string, string>): string[] {
-  const redact = secretRedactor([config, process.env, fields]);
+  const known = [...secretValues([config, process.env])].filter((v) => v.length >= 8);
   const found: string[] = [];
   for (const [field, text] of Object.entries(fields)) {
     if (!text) continue;
-    if (redact(text) !== text) found.push(`${field}: a secret value or a secret assignment (TOKEN=, KEY:, PASSWORD=, credentials in a URL)`);
+    if (known.some((v) => new RegExp(`(?<![\\p{L}\\p{N}_-])${v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}_-])`, 'u').test(text))) found.push(`${field}: a value of a secret config or environment key`);
+    for (const m of text.matchAll(URL_TEXT)) {
+      try {
+        const url = new URL(m[0]);
+        if (url.username || url.password || [...url.searchParams].some(([k, v]) => SECRET_KEY.test(k) && v)) found.push(`${field}: credentials in a URL`);
+      } catch { /* not a complete URL */ }
+    }
+    for (const m of text.matchAll(SECRET_ASSIGNMENT)) {
+      const [, key, keyQuote, before, sep, after, raw] = m as unknown as string[];
+      if (!SECRET_KEY.test(key!)) continue;
+      const quoted = /^["']/.test(raw!);
+      const value = raw!.replace(/^(['"])(.*)\1$/s, '$2');
+      if (!value || value.includes('***') || value.includes('$') || /^<.*>$/.test(value)) continue;
+      const prose = sep === ':' && !keyQuote && !before && after!.length > 0 && !quoted && !/^[A-Z0-9_]+$/.test(key!);
+      if (prose ? credentialLike(value) : true) found.push(`${field}: a secret assignment (${prose ? 'a credential-like value after a label' : 'KEY=value, "key": "value" or KEY: value'})`);
+    }
     for (const [what, pattern] of TOKEN_PATTERNS) if (pattern.test(text)) found.push(`${field}: ${what}`);
   }
   return [...new Set(found)];

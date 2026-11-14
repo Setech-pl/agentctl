@@ -9,9 +9,10 @@ const secretName = (key: string): boolean => SECRET_KEY.test(key) || EXPLICIT_SE
 const ASSIGNMENT = /([\w.-]*(?:TOKEN|KEY|SECRET|PASSWORD|PASSWD|PASS|AUTH|COOKIE)[\w.-]*\s*[:=]\s*)("(?:\\.|[^"\\])*"|'[^']*'|[^\s,;]+)/gi;
 const EXPLICIT_ASSIGNMENT = /(\b(?:ANTHROPIC_BASE_URL|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_API_KEY|ZAI_API_KEY)\s*[:=]\s*)("(?:\\.|[^"\\])*"|'[^']*'|[^\s,;]+)/g;
 const assignmentKey = (prefix: string): string => prefix.trim().replace(/[:=]$/, '').trim();
-const URL_TEXT = /https?:\/\/[^\s"'<>]+/g;
+export const URL_TEXT = /https?:\/\/[^\s"'<>]+/g;
 
-export function secretRedactor(sources: unknown[], taskIds = new Set<string>()): <T>(value: T) => T {
+/** The secret values the sources hold: values of secret keys, literals of secret assignments, credentials and secret query values in URLs. */
+export function secretValues(sources: unknown[], taskIds = new Set<string>()): Set<string> {
   const secrets = new Set<string>();
   const collectTaskIds = (value: unknown): void => {
     if (!value || typeof value !== 'object') return;
@@ -40,6 +41,11 @@ export function secretRedactor(sources: unknown[], taskIds = new Set<string>()):
     } else if (value && typeof value === 'object') for (const [k, v] of Object.entries(value)) collect(v, k);
   };
   for (const source of sources) collect(source);
+  return secrets;
+}
+
+export function secretRedactor(sources: unknown[], taskIds = new Set<string>()): <T>(value: T) => T {
+  const secrets = secretValues(sources, taskIds);
   const cleanText = (input: string): string => {
     let text = input;
     for (const secret of [...secrets].sort((a, b) => b.length - a.length)) {
