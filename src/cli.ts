@@ -1,3 +1,4 @@
+import { acceptConsult, planConsult } from './core/consult.ts';
 import { dryCloseTimingPreview, dryQueueTimingPreview, measureReadTimings, renderReadTimings } from './core/doctor-timings.ts';
 import { queueViews } from './core/queue.ts';
 import { attachHint, tmuxCommand } from './core/tmux-socket.ts';
@@ -434,6 +435,19 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     }));
 
   program
+    .command('consult')
+    .description('Preview a high-cost Delphi consultation; --confirm registers it for watch.')
+    .argument('[file]', 'consult YAML spec, or - for stdin')
+    .option('--confirm', 'accept the consultation shown by the preview')
+    .action(guarded(async (file: string | undefined, opts: { confirm?: boolean }) => {
+      const ctx = contextFor(false, { migrate: false });
+      const text = readSpecText(file);
+      if (!opts.confirm) { line(JSON.stringify((await planConsult(ctx, text)).preview, null, 2)); line('Not executed. Review, then repeat with --confirm.'); return; }
+      const state = await acceptConsult(ctx, text);
+      line(`Accepted CONSULT ${state.spec.id}: ${state.spec.panel.length * state.spec.rounds + 1} tasks; agentctl watch advances rounds.`);
+    }));
+
+  program
     .command('new')
     .description('Start the tasks in a spec file: worktree, setup commands, symlinks, TASK.md, tmux window, agent, prompt.')
     .argument('[file]', 'spec file, or "-" for stdin')
@@ -802,6 +816,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
           return deps.stdout(md);
         }
         if (opts.json) return line(JSON.stringify(rows, null, 2));
+        for (const m of listCohorts(ctx.config).filter(m => m.note?.startsWith('CONSULT ') && (cohort === undefined || m.name === cohort))) line(`${m.name}: ${m.note}`);
         if (opts.detail) line(machineLine(collectMachine(ctx.config)));
         line(diskLine(await collectDisk(ctx)));
         if (rows.length === 0) {

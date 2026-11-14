@@ -1,3 +1,4 @@
+import { consultTick } from './consult.ts';
 import { applyInstanceLabel } from './instance.ts';
 import { beginTitle } from './title.ts';
 import { packageVersion } from './version.ts';
@@ -242,6 +243,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
     ctx.out(text);
   };
   await reviewTick(ctx).catch((e: unknown) => startLog(`review: ${errorMessage(e)}`));
+  await consultTick(ctx).catch((e: unknown) => startLog(`consult: ${errorMessage(e)}`));
   await queueTick(ctx, memory.queue, notifier, { self: options.self, signal: options.signal, rows: allRows, log: startLog });
   await announceBlocked(ctx, notifier, allRows, { self: options.self, log: startLog }).catch((e: unknown) => startLog(`queue: ${errorMessage(e)}`));
   await cohortTick(ctx, notifier, allRows, startLog).catch((e: unknown) => startLog(`cohort: ${errorMessage(e)}`));

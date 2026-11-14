@@ -1,3 +1,4 @@
+import { protectReadOnly } from './read-only.ts';
 import { attachHint } from './tmux-socket.ts';
 import { writeLaunchScript } from './launch-script.ts';
 import { launchEnvironment } from './safety.ts';
@@ -153,6 +154,8 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
         ctx.info(`${spec.task}: worktree ${repo.worktree}`);
       }
     }
+
+    if (spec.readOnly) await protectReadOnly(ctx, spec);
 
     // 2. setup commands (per repository, in its own worktree; an install may wipe node_modules, so this comes before the links)
     await runSetup(ctx, spec, track);

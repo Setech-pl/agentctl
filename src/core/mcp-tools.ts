@@ -1,3 +1,4 @@
+import { acceptConsult, planConsult } from './consult.ts';
 import { reportMessageWarning } from './prompt-queue.ts';
 import { queueViews as coreQueueViews } from './queue.ts';
 import { withResponseBudget } from './response-budget.ts';
@@ -30,7 +31,7 @@ import { createHash } from 'node:crypto';
 import { collectDisk as collectDiskFull, diskLine, refreshDiskAfterGc } from './disk.ts';
 import type { DiskReport } from './disk.ts';
 import { retryEntry, moveToFront, setPaused, unblockEntry, findEntry, rebuildAutoReview } from './queue.ts';
-import { touchCohort, setCohortOf, setNote, planCohortArchive, applyCohortArchive } from './cohort.ts';
+import { listCohorts, touchCohort, setCohortOf, setNote, planCohortArchive, applyCohortArchive } from './cohort.ts';
 import { setHidden } from './hide.ts';
 import { archiveClosed, applyArchive, parseAge } from './archive.ts';
 import { adoptTask } from './adopt.ts';
@@ -336,7 +337,7 @@ async function runStatus(deps: McpDeps, args: { all?: boolean | undefined; cohor
   const rows = cohort === undefined ? everyRow : cohortRows(everyRow, cohort);
   const shown = shownRows(rows, all);
   // The queue and the collisions come as short lines before the rows (queue_list and overlap have the detail).
-  const extra: string[] = [];
+  const extra: string[] = listCohorts(ctx.config).filter(m => m.note?.startsWith('CONSULT ') && (cohort === undefined || m.name === cohort)).map(m => `${m.name}: ${m.note}`);
   if (cohort !== undefined) extra.push(`Cohort ${cohort}: only its tasks are listed.`);
   const views = (await queueViews(ctx)).filter((v) => cohort === undefined || cohortEntries([v.entry], cohort).length > 0);
   if (views.length > 0) {
@@ -1384,6 +1385,18 @@ export const MCP_TOOLS: McpToolDef[] = [
     run: (deps, args) => guarded(() => runSend(deps, args as { task: string; text?: string; enter_only?: boolean; confirm?: boolean; token?: string })),
   }),
   def({
+    name: 'consult', title: 'Consult a multi-provider panel', kind: 'write',
+    description: 'WRITE, off unless the user put "consult" in mcp.allow. High-cost decisions only: architecture, shared NC/HEMS contracts, provider choice. Preview panel × rounds plus synthesis cost and current provider usage; confirm accepts a durable watcher request. Independent read-only Delphi rounds, anonymised revisions, reasoning-weighted synthesis. Requires consult in mcp.allow and agentctl watch running. CLI: agentctl consult <spec> [--confirm].',
+    input: { spec: z.string().min(1).max(100_000), confirm: z.boolean().optional() },
+    annotations: { title: 'Consult a multi-provider panel', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    run: (deps, args) => writeTool(deps, 'consult', {}, async ctx => {
+      if (!args.confirm) return { text: JSON.stringify((await planConsult(ctx, args.spec)).preview), executed: false, announce: '' };
+      if (!deps.applying && !watchAlive(ctx.config, ctx.runner.now())) throw new AgentctlError('consult requires agentctl watch running');
+      const state = await acceptConsult(ctx, args.spec);
+      return { text: `Accepted CONSULT ${state.spec.id}; follow events_since and cohort_show.`, executed: true, announce: `CONSULT ${state.spec.id}` };
+    }),
+  }),
+  def({
     name: 'new',
     title: 'Start tasks from a spec',
     kind: 'write',
@@ -1654,7 +1667,7 @@ function redactConfig(config: GlobalConfig): unknown {
  * P93b: the writes whose confirm can wait on start.lock, git, tmux or a scan of every task. With a watcher running, the confirm records the
  * request (mcp-requests.ts) and returns; the watcher applies it. `set_limits` stays synchronous: it writes config.yaml under no shared lock.
  */
-export const DEFERRED_TOOLS = new Set(['unblock', 'queue_up', 'queue_rm', 'queue_retry', 'close', 'cancel', 'send', 'mark', 'hide', 'unhide', 'archive', 'cohort_add', 'cohort_remove', 'cohort_archive', 'cohort_note', 'wall_post', 'wall_reply', 'wall_set_status']);
+export const DEFERRED_TOOLS = new Set(['consult', 'unblock', 'queue_up', 'queue_rm', 'queue_retry', 'close', 'cancel', 'send', 'mark', 'hide', 'unhide', 'archive', 'cohort_add', 'cohort_remove', 'cohort_archive', 'cohort_note', 'wall_post', 'wall_reply', 'wall_set_status']);
 /** The run of every tool before the confirm, format, budget and paging wrappers: what the watcher calls to apply a request. */
 const originalRuns = new Map<string, McpToolDef['run']>();
 
@@ -1713,12 +1726,13 @@ function canonical(value: unknown): unknown {
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, canonical(v)]));
   return value;
 }
-function previewArguments(input: Record<string, unknown>): Record<string, unknown> {
-  return canonical({ ...input, ...(typeof input.spec === 'string' ? { spec: splitSpecs(input.spec, 'preview arguments').map(s => ({ header: s.header, prompt: s.prompt.replace(/\r\n?/g, '\n').split('\n').map(line => line.trimEnd()).join('\n').trim() })) } : {}) }) as Record<string, unknown>;
+function previewArguments(input: Record<string, unknown>, tool?: string): Record<string, unknown> {
+  return canonical({ ...input, ...(typeof input.spec === 'string' && tool !== 'consult' ? { spec: splitSpecs(input.spec, 'preview arguments').map(s => ({ header: s.header, prompt: s.prompt.replace(/\r\n?/g, '\n').split('\n').map(line => line.trimEnd()).join('\n').trim() })) } : {}) }) as Record<string, unknown>;
 }
 
 /** Guard target identities, excluding receipt timestamps written by read tools. */
 function confirmationTargets(name: string, scope: unknown): unknown {
+  if (name === 'consult') { const plan = scope as Awaited<ReturnType<typeof planConsult>>; return { spec: plan.spec, context: plan.context }; }
   if (name === 'new' || name === 'queue') return null;
   if (name === 'gc') return (scope as GcPlan).items.map(({ kind, task, target, repo, branch }) => ({ kind, task, target, repo, branch }));
   const project = (value: unknown): unknown => {
@@ -1776,6 +1790,7 @@ async function confirmationScope(ctx: Context, name: string, args: Record<string
     const plan = await planGc(ctx, { cohort: args.cohort as string | undefined, olderThan: args.older_than as string | undefined, branches: Boolean(args.branches), cachedSizes: true });
     return plan;
   }
+  if (name === 'consult') { const plan = await planConsult(ctx, args.spec as string); return { spec: plan.spec, context: plan.context, preview: plan.preview }; }
   if (name === 'new' || name === 'queue') {
     const rawSpecs = splitSpecs(args.spec as string, 'MCP preview');
     if (args.cohort) for (const raw of rawSpecs) raw.header.cohort = args.cohort;
@@ -1815,6 +1830,7 @@ async function confirmationScope(ctx: Context, name: string, args: Record<string
 }
 /** Display only the operation's targets; the private fingerprint still guards the full observed scope. */
 async function previewScope(ctx: Context, name: string, args: Record<string, unknown>, scope: unknown): Promise<unknown> {
+  if (name === 'consult') return (scope as Awaited<ReturnType<typeof planConsult>>).preview;
   if (name === 'mark') { const plan = scope as { tasks: TaskRecord[]; result: unknown; note: unknown }; return { ...plan, tasks: plan.tasks.map(r => ({ task: r.task, cohort: r.cohort ?? null, agent: r.agent, model: r.model, effort: r.effort, report: r.report })) }; }
   if (name === 'queue_up' || name === 'queue_rm') { const plan = scope as { queue: ReturnType<typeof readQueue> }; return { tasks: [], queue: plan.queue.map(e => ({ task: e.task, status: e.status, after: e.after, afterVerdicts: e.afterVerdicts })) }; }
   if (['archive', 'interrupt', 'hide', 'unhide', 'cohort_add', 'cohort_remove', 'cohort_note', 'cohort_archive', 'adopt', 'notify_test', 'unblock', 'wall_post', 'wall_reply', 'wall_set_status'].includes(name)) return scope;
@@ -1866,7 +1882,7 @@ for (const tool of MCP_TOOLS) {
     // A token-only confirm restores the validated arguments from its session preview.
     if (!(confirm && typeof preview_token === 'string' && Object.keys(input).length === 0)) z.object(previewInput).parse(input);
     const { detail: _detail, offset: _offset, limit: _limit, ...identityInput } = input;
-    const arguments_ = previewArguments(tool.name === 'gc' ? identityInput : input);
+    const arguments_ = previewArguments(tool.name === 'gc' ? identityInput : input, tool.name);
     const key = `${tool.name}:${createHash('sha256').update(JSON.stringify(arguments_)).digest('hex')}`;
     if (input.remove_worktree && !ctx.config.mcp.allowRmWorktree) {
       audit(ctx, { tool: tool.name, outcome: 'denied', detail: 'worktree removal not allowed' });
@@ -1963,7 +1979,7 @@ for (const tool of MCP_TOOLS) {
     if (preview!.scope !== scopeIdentity) return deny(`changed preview: invalidated by ${lastPreviewMutation.get(deps) ?? 'external operation'} (${tool.name} target scope changed)`);
     // Another confirm may have completed while this one checked the scope.
     if (token && receipts.has(token)) return (await replay())!;
-    const taskIds = typeof effective.spec === 'string' ? splitSpecs(effective.spec, 'confirmation').map(s => String(s.header.task)) : [String(effective.task ?? tool.name)];
+    const taskIds = typeof effective.spec === 'string' && tool.name !== 'consult' ? splitSpecs(effective.spec, 'confirmation').map(s => String(s.header.task)) : [String(effective.task ?? tool.name)];
     const registration: QueueConfirmation | undefined = token && ['queue', 'new'].includes(tool.name) ? { token, key: preview!.key, tool: tool.name, tasks: taskIds } : undefined;
     const execute = async (): Promise<ToolResult> => {
       if (registration) return withAcceptLock(ctx, async () => {
@@ -1990,7 +2006,7 @@ for (const tool of MCP_TOOLS) {
       });
       return original(deps, { ...(tokenOnly ? { ...effective, confirm: true } : args), ...(registration ? { _confirmation: registration } : {}) });
     };
-    const tasks = typeof effective.spec === 'string' ? splitSpecs(effective.spec, 'confirmation').map(s => String(s.header.task)).join(', ') : String(effective.task ?? effective.tasks ?? tool.name);
+    const tasks = typeof effective.spec === 'string' && tool.name !== 'consult' ? splitSpecs(effective.spec, 'confirmation').map(s => String(s.header.task)).join(', ') : String(effective.task ?? effective.tasks ?? tool.name);
     // Publish the promise before executing; simultaneous retries share one execution.
     const result = Promise.resolve().then(execute);
     if (token) receipts.set(token, { name: tool.name, key: preview!.key, tasks, result });

@@ -206,6 +206,7 @@ export interface BoardState {
   manager: ManagerView | null;
   /** Keys of the cohorts hidden by `cohort archive`: not in the `k` choice. */
   archivedCohorts: string[];
+  cohortNotes?: Record<string, string>;
   /** `board.cohorts_recent`: how many of the most recently active cohorts the `k` choice lists before "starsze…". */
   cohortsRecent: number;
   /** The WALL as the owner sees it; null until the first background read (header count) or the WALL view (W) loaded it. */
@@ -686,6 +687,7 @@ export interface BoardSnapshot {
   away?: AwayView;
   manager?: ManagerView;
   archivedCohorts?: string[];
+  cohortNotes?: Record<string, string>;
   cohortsRecent?: number;
   preview: Preview | null;
   refreshedAt: string;
@@ -693,7 +695,7 @@ export interface BoardSnapshot {
 
 /** Keep the selection when the task is still there, otherwise take the first row. */
 export function applySnapshot(state: BoardState, snap: BoardSnapshot): BoardState {
-  const next: BoardState = { ...state, rows: snap.rows, queue: snap.queue ?? [], queuePaused: snap.queuePaused ?? false, disk: snap.disk ?? null, plans: snap.plans ?? null, resumable: snap.resumable ?? [], away: snap.away ?? null, manager: snap.manager ?? null, archivedCohorts: snap.archivedCohorts ?? state.archivedCohorts, cohortsRecent: snap.cohortsRecent ?? state.cohortsRecent, refreshedAt: snap.refreshedAt, loadError: null };
+  const next: BoardState = { ...state, rows: snap.rows, queue: snap.queue ?? [], queuePaused: snap.queuePaused ?? false, disk: snap.disk ?? null, plans: snap.plans ?? null, resumable: snap.resumable ?? [], away: snap.away ?? null, manager: snap.manager ?? null, cohortNotes: snap.cohortNotes ?? state.cohortNotes, archivedCohorts: snap.archivedCohorts ?? state.archivedCohorts, cohortsRecent: snap.cohortsRecent ?? state.cohortsRecent, refreshedAt: snap.refreshedAt, loadError: null };
   const listed = navTasks(next);
   const selected = state.selected !== null && listed.includes(state.selected) ? state.selected : firstSelectable(listed);
   const preview = snap.preview && snap.preview.task === selected ? snap.preview : selected === state.selected ? state.preview : null;
@@ -779,7 +781,9 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
   const queuePaused = isPaused(config) || !config.queue.enabled;
   const resumable = (await findResumable(ctx, { rows: statusRows })).map((c) => c.task);
   const manager = await managerView(ctx);
-  const archivedCohorts = listCohorts(config).filter((m) => m.archived).map((m) => cohortKey(m.name));
+  const cohortMetas = listCohorts(config);
+  const cohortNotes = Object.fromEntries(cohortMetas.filter(m => m.note?.startsWith('CONSULT ')).map(m => [cohortKey(m.name), m.note!]));
+  const archivedCohorts = cohortMetas.filter((m) => m.archived).map((m) => cohortKey(m.name));
   const queued = queue.find((v) => v.entry.task === selected);
   if (selected === MANAGER_SELECT && manager.state !== 'missing') {
     let lines: string[];
@@ -788,9 +792,9 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
     } catch (e) {
       lines = [`(cannot read the window: ${errorMessage(e)})`];
     }
-    return { rows, queue, queuePaused, disk, plans, resumable, away: awayView(config), manager, archivedCohorts, cohortsRecent: config.board.cohortsRecent, preview: { task: MANAGER_SELECT, lines }, refreshedAt: clock(now) };
+    return { rows, queue, queuePaused, disk, plans, resumable, away: awayView(config), manager, archivedCohorts, cohortNotes, cohortsRecent: config.board.cohortsRecent, preview: { task: MANAGER_SELECT, lines }, refreshedAt: clock(now) };
   }
-  if (queued) return { rows, queue, queuePaused, disk, plans, resumable, away: awayView(config), manager, archivedCohorts, cohortsRecent: config.board.cohortsRecent, preview: { task: queued.entry.task, model: `${queued.entry.agent} · model: ${queued.entry.model} · effort: ${queued.entry.effort}`, lines: queuePreview(queued) }, refreshedAt: clock(now) };
+  if (queued) return { rows, queue, queuePaused, disk, plans, resumable, away: awayView(config), manager, archivedCohorts, cohortNotes, cohortsRecent: config.board.cohortsRecent, preview: { task: queued.entry.task, model: `${queued.entry.agent} · model: ${queued.entry.model} · effort: ${queued.entry.effort}`, lines: queuePreview(queued) }, refreshedAt: clock(now) };
   // The selected task; else the first one the list shows (not a hidden, closed or finished one).
   const target = rows.find((r) => r.task === selected) ?? rows.find((r) => !r.hidden && !r.finished) ?? rows.find((r) => !r.hidden) ?? rows[0];
   let preview: Preview | null = null;
@@ -811,7 +815,7 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
     if (target.promptQueue?.length) notes.push(`${target.promptQueue.length} messages (${target.promptDelivery ?? 'queued'})`);
     preview = { task: target.task, model: `${target.agent} · model: ${target.model} · effort: ${target.effort}`, lines, ...(notes.length > 0 ? { note: notes.join(' · ') } : {}) };
   }
-  return { rows, queue, queuePaused, disk, plans, resumable, away: awayView(config), manager, archivedCohorts, cohortsRecent: config.board.cohortsRecent, preview, refreshedAt: clock(now) };
+  return { rows, queue, queuePaused, disk, plans, resumable, away: awayView(config), manager, archivedCohorts, cohortNotes, cohortsRecent: config.board.cohortsRecent, preview, refreshedAt: clock(now) };
 }
 
 /** The preview of a queued task: what it will run, what it waits for, how it ends if it failed, and the start of its prompt. */
@@ -1068,7 +1072,7 @@ export function usagePanel(plans: ProviderValues<PlanState> | null, usage: Usage
 
 export type ListItem =
   | { kind: 'row'; row: BoardRow }
-  | { kind: 'group'; key: string; name: string | null; folded: boolean; rows: BoardRow[]; queued: number }
+  | { kind: 'group'; key: string; name: string | null; note?: string; folded: boolean; rows: BoardRow[]; queued: number }
   | { kind: 'queue-title'; count: number; paused: boolean }
   | { kind: 'queue'; view: QueueView }
   | { kind: 'resume-title'; count: number }
@@ -1087,7 +1091,7 @@ export function cohortLabel(state: BoardState): string {
 /** Header of a cohort group: `- sprint-1 (4) 2⚙ 1✓ 1⧗`; `+` while it is folded. The last group is "bez kohorty". */
 export function groupTitle(item: Extract<ListItem, { kind: 'group' }>, icons: Record<TaskState, string> | null = null): string {
   const counts = countsLine(item.rows, item.queued, icons ?? DEFAULT_WINDOW_ICONS);
-  return `${item.folded ? '+' : '-'} ${item.name ?? 'bez kohorty'} (${item.rows.length + item.queued})${counts ? ` ${counts}` : ''}${item.folded ? ' – g opens, G opens all' : ''}`;
+  return `${item.folded ? '+' : '-'} ${item.name ?? 'bez kohorty'}${item.note ? ` · ${item.note}` : ''} (${item.rows.length + item.queued})${counts ? ` ${counts}` : ''}${item.folded ? ' – g opens, G opens all' : ''}`;
 }
 
 /** `Queue (3)` title under the active tasks. */
@@ -1139,7 +1143,7 @@ export function listItems(state: BoardState): ListItem[] {
         const queued = queue.filter((v) => groupOf(v.entry.cohort) === g.key).length;
         if (rows.length + queued === 0) return [];
         const folded = state.folded.includes(g.key);
-        return [{ kind: 'group', key: g.key, name: g.name, folded, rows, queued }, ...(folded ? [] : rows.map((row): ListItem => ({ kind: 'row', row })))];
+        return [{ kind: 'group', key: g.key, name: g.name, ...(state.cohortNotes?.[g.key] ? { note: state.cohortNotes[g.key] } : {}), folded, rows, queued }, ...(folded ? [] : rows.map((row): ListItem => ({ kind: 'row', row })))];
       })
     : active.map((row): ListItem => ({ kind: 'row', row }));
   return [

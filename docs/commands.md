@@ -12,6 +12,7 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`version`](#agentctl-version) | Print the installed version (alias of --version). |
 | [`guide`](#agentctl-guide) | Read the dispatcher guide and optional project overlay. |
 | [`capacity`](#agentctl-capacity) | Current plan windows, pace, slots, queue, equivalents and seven-day model statistics; no provider selection. |
+| [`consult`](#agentctl-consult) | Preview a high-cost Delphi consultation; --confirm registers it for watch. |
 | [`new`](#agentctl-new) | Start the tasks in a spec file: worktree, setup commands, symlinks, TASK.md, tmux window, agent, prompt. |
 | [`queue`](#agentctl-queue) | Put the tasks of a spec file in the queue: they start by themselves (while "agentctl watch" runs) when a window of their provider is free. Shows a summary and asks y/N first. |
 | [`queue list`](#agentctl-queue-list) | The queue: position, task, agent/model/effort, priority, start condition and how long it waits. |
@@ -141,6 +142,29 @@ Examples:
 ```sh
 agentctl capacity --json
 agentctl capacity --clip
+```
+
+## agentctl consult
+
+Preview a high-cost Delphi consultation; --confirm registers it for watch.
+
+```
+agentctl consult [options] [file]
+```
+
+| Argument | Meaning |
+|---|---|
+| `[file]` | consult YAML spec, or - for stdin |
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--confirm` | accept the consultation shown by the preview |  |
+
+Examples:
+
+```sh
+agentctl consult consult.yaml
+agentctl consult consult.yaml --confirm
 ```
 
 ## agentctl new

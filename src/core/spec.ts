@@ -52,6 +52,7 @@ export interface AutoReviewSource {
 }
 
 export interface ResolvedSpec {
+  readOnly?: boolean;
   /** Internal queue provenance, never accepted from spec YAML. */
   autoReview?: AutoReviewSource;
   index: number;
@@ -184,7 +185,7 @@ export interface ResolveContext {
 /** Task IDs whose window name is one agentctl uses for itself (`watch`, `board`, `manager`). */
 export const RESERVED_TASK_IDS = ['WATCH', 'BOARD', 'MANAGER'];
 
-export const SPEC_KEYS = ['task', 'agent', 'class', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'review', 'report', 'pin', 'remote_control', 'weight', 'priority', 'after', 'after_verdict', 'touches', 'cohort', 'wall'];
+export const SPEC_KEYS = ['task', 'agent', 'class', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'review', 'report', 'pin', 'remote_control', 'weight', 'priority', 'after', 'after_verdict', 'touches', 'cohort', 'wall', 'read_only'];
 export const REPO_KEYS = ['path', 'worktree', 'base', 'branch', 'setup'];
 
 function label(raw: RawSpec): string {
@@ -231,6 +232,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
 
   checkKeys(h, SPEC_KEYS, where, p);
   const task = checkTask(raw, p);
+  if (h.read_only !== undefined && typeof h.read_only !== 'boolean') p.add('read_only must be boolean');
   const specAgent = (typeof h.agent === 'string' && (AGENT_NAMES as readonly string[]).includes(h.agent) ? h.agent as AgentName : parseEnumValue(h.agent, activeProviders(config), 'agent', p));
   const specEffort = parseEnumValue(h.effort, EFFORTS, 'effort', p);
   let specClass: string | undefined;
@@ -513,6 +515,14 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   if (agent && remote && (specRemote ?? remoteDefault)) spec.remoteControl = true;
   if (cohort) spec.cohort = cohort;
   if (wall?.length) spec.wall = wall;
+  if (h.read_only === true) {
+    spec.readOnly = true;
+    spec.setup = [];
+    spec.links = [];
+    spec.repos = spec.repos.map(r => ({ ...r, setup: [] }));
+    if (spec.repos.some(r => r.branch)) p.add('read_only requires detached worktrees (no branch)');
+    p.throwIfAny('Invalid read-only task:');
+  }
   if (reportAlt.length > 0) spec.reportAlt = reportAlt;
   validateLaunch(config, spec, spec.env);
   return spec;

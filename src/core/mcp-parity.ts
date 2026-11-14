@@ -6,6 +6,7 @@ import { MCP_TOOLS } from './mcp-tools.ts';
 
 /** Each executable command has an explicit mapping or a justified terminal/installation exception. */
 export const CLI_MCP: Record<string, string[]> = {
+  consult: ['consult'],
   'mcp check': ['mcp_check'], spec: ['spec_example'], 'spec example': ['spec_example'], version: ['version'], guide: ['guide'], capacity: ['capacity'], new: ['new'],
   queue: ['queue'], 'queue show': ['queue_show'], 'queue list': ['queue_list'], 'queue rm': ['queue_rm'], 'queue up': ['queue_up'], 'queue retry': ['queue_retry'], 'queue pause': ['queue_pause'], 'queue resume': ['queue_resume'],
   unblock: ['unblock'], cohort: ['cohort_list'], 'cohort list': ['cohort_list'], 'cohort show': ['cohort_show'], 'cohort add': ['cohort_add'], 'cohort remove': ['cohort_remove'], 'cohort note': ['cohort_note'], 'cohort archive': ['cohort_archive'],

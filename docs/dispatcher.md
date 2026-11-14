@@ -165,3 +165,7 @@ State the acceptance criteria, constraints and report requirements here.
 Kimi screen auth/limit/overload/background patterns, busy queue footer, other wire interactions are hypotheses backed by synthetic fixtures; do not describe them as verified real 2.5.0 behavior.
 
 Kimi 2.5.0 effective model/effort comes from passive `llm.request.modelAlias/thinkingEffort`, recorded beside requested settings in TASK.md and status JSON. The footer can retain `high` while the effective wire effort is `low`; a wire mismatch warns. Sessions bind via `sessions/<workspace>/<session>/state.json` (session index fallback); `usage.record` supplies input/output/cache tokens and numeric `time`.
+
+## CONSULT: high-cost decisions only
+
+Use `consult` for architecture, shared NC/HEMS contracts and provider choice when independent multi-provider reasoning justifies `panel × rounds + synthesis` tasks. Read the README CONSULT spec, explicitly name repositories, use only active/enabled providers (at least two distinct on the panel), and show the cost/usage preview to the owner before confirming its token. `mcp.allow` must include `consult`; keep watch running and follow cohort status plus CONSULT round-done/synthesis-ready in `events_since`. Round-one answers are blind; later answers are anonymised and mark “yours”; synthesis weighs reasoning without majority voting. The identity map is owner-only after synthesis; anonymisation and task-scoped Git hooks are best effort, not filesystem isolation. Do not use consultations for routine implementation.

@@ -677,3 +677,7 @@ Isolation is a hard rule: agentctl never writes `ANTHROPIC_BASE_URL`, `ANTHROPIC
 **A failed start keeps its window.** When the agent never shows its input (timeout, an unknown screen), the window stays open (`start_failure.keep_window`, default `true`), the last ≈200 lines are saved in `<state_dir>/<task>/start-failure-screen.txt`, and the needs-attention line, `queue_list` and `peek` name that file. `queue_retry` closes the leftover window first (the capture stays) and starts a fresh one over the worktree.
 
 Usage accounting is separate (benchmark/statistics rows show `glm`). Z.ai documents no quota endpoint or CLI quota output for the 5-hour and weekly windows (only the subscription web page), so the GLM plan is **n/d** and `usage.queue_hold` never holds glm; token accounting from the session logs works as for Claude. `usage.warn`/`usage.critical` accept a `glm` percentage like any other provider but have no plan reading to fire on. The statusLine tap of a glm window writes `usage/glm-plan.json`, never the Claude plan file.
+
+| Key | Meaning |
+|---|---|
+| `read_only` | Task spec boolean: detached worktrees only; skip setup and links, install a task-scoped commit-refusing Git hook, retain a HEAD baseline for CONSULT report findings. This is a cooperative guard, not an OS sandbox. |

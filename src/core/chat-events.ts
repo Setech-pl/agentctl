@@ -253,6 +253,7 @@ const KIND_LABEL: Record<JournalEntry['kind'], string> = {
   'mcp-failed': 'MCP BŁĄD',
   unblocked: 'ODBLOKOWANE',
   wall: 'WALL',
+  consult: 'CONSULT',
 };
 
 export function summaryLine(s: EventsSummary): string {

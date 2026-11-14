@@ -1152,3 +1152,29 @@ MCP `set_limits` accepts integers or numeric strings (`2` or `"2"`), plus `"off"
 For every MCP tool exposing `preview_token`, confirmation may send only `confirm: true` and that token; task and other arguments come from the stored preview. A new preview still requires its normal arguments.
 
 After upgrading, run `agentctl doctor --timings`: command wall times (excluding Node startup) for status (<1500 ms), queue list (<500 ms), events, a dry queue preview and a dry close preview (<2000 ms each), with PASS/WARN. It never registers, starts or closes the preview task.
+
+## CONSULT (0.22.0)
+
+Use CONSULT only for high-cost decisions: architecture, shared NC/HEMS contracts, or provider choice. A consultation spends `panel size × rounds + 1` tasks; ordinary implementation questions should use a single task. `agentctl consult consult.yaml` previews the task count, current provider usage (unknown stays unknown), limits and `usage.queue_hold`; repeat with `--confirm` to accept. Keep `agentctl watch` running. The owner's NC/HEMS chats use MCP `consult`: add `consult` to `mcp.allow`, show the preview, then confirm its `preview_token`. Confirmation records an Accepted watcher request; watch registers ordinary Accepted queue tasks. Queue pause, provider limits and usage holds apply without switching panelists.
+
+```yaml
+consult: NC-HEMS-UNITS
+question: Should NC and HEMS freeze the shared contract with SI units at the boundary?
+context: [file:README.md, report:~/Projects/cache/contracts/REVIEW.md, commit:HEAD, wall:shared:sim-1]
+repos: [{path: ~/Projects/neon-city, base: HEAD}]
+panel:
+  - {agent: claude, model: opus, effort: high}
+  - {agent: codex, model: gpt-5.4, effort: high}
+rounds: 2
+synthesis: {agent: claude, model: opus, effort: high}
+cohort: consult-nc-hems
+post_to: shared:sim
+```
+
+IDs use 1–24 uppercase letters, digits or hyphens, starting with a letter. `repos` accepts repository paths or `{path, base}` entries; it defaults to the dispatcher's working directory, so MCP callers should specify it. Bases and context are frozen when accepted (a changed base/context invalidates the MCP preview). Context is a list of local files/reports (up to 64 KiB each, 128 KiB total), commit references in the first repository, or `wall:<message-id>`; it is supplied as read-only reference text. Providers must be active and enabled, with at least two distinct providers on the panel; synthesis also requires an enabled provider and explicit model/effort. Rounds default to two, maximum three (one round is allowed).
+
+Every task gets fresh detached snapshots, no project setup commands or shared links, and a task-scoped pre-commit hook which refuses commits. Git subprocesses inherit its `core.hooksPath` through environment configuration; shared Git configuration stays untouched. At report collection agentctl checks HEAD and tracked changes, records refused/bypassed commit attempts as findings, and includes findings in the owner report. This is a cooperative read-only guard, **not an OS filesystem sandbox**: `--no-verify`/overridden environment can bypass the hook, and a same-user process can access other files. Agents are instructed to inspect only supplied snapshots/context and write their assigned report.
+
+Round one is independent. Answers use Recommendation, Reasoning, Risks, Confidence (1–5), Unknowns; later rounds also use Changed: yes/no – why. The coordinator validates complete current-attempt reports before advancing. It strips provider/model names and common self-identification phrases, removes agentctl report metadata, and shuffles labels A–Z using a random seed recorded in `<AGENTCTL_HOME>/consult/<ID>.json` (normally `~/.agentctl/consult/`). Labels stay stable; revised prompts include every previous answer and mark the recipient's own answer “yours”. The seed and identity map never appear in panel/synthesis prompts. Redaction is best effort: writing style, unusual names or content can still identify an author; it can also redact a provider name relevant to the decision.
+
+Synthesis weighs reasoning, never majority votes, and writes consensus, disagreements, a recommendation and what the owner must decide. Its first line is `Werdykt: GO`, `Werdykt: NO-GO` or `Werdykt: SPLIT`. Only after synthesis completes does agentctl produce the owner report with the identity map and findings, default `<cache>/consult-<ID>/CONSULT-<ID>.md` (`~/Projects/cache/...` by default); `report` overrides it within allowed report roots. The synthesis task's `get_report`/pull then points to this owner report. Status and board group tasks by cohort and show the current round; `events_since` emits CONSULT `round-done` and `synthesis-ready`. Optional `post_to` posts the summary once as owner through ordinary WALL permissions and secret scanning. Invalid/incomplete answers wait for report repair (watch logs the reason); a cancelled task blocks the consultation. Restarting watch repairs partial registration without duplicating tasks or WALL posts; IDs are never silently reused.

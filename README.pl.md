@@ -1152,3 +1152,29 @@ MCP `set_limits` przyjmuje liczby całkowite lub zapisane jako tekst (`2` lub `"
 Każde narzędzie MCP z `preview_token` można potwierdzić, wysyłając tylko `confirm: true` i token; zadanie oraz pozostałe argumenty pochodzą z zapisanego podglądu. Nowy podgląd nadal wymaga zwykłych argumentów.
 
 Po aktualizacji uruchom `agentctl doctor --timings`: czas wykonania poleceń (bez startu Node) dla statusu (<1500 ms), listy kolejki (<500 ms), zdarzeń oraz próbnych podglądów kolejki i close (<2000 ms każde), z oceną PASS/WARN. Podgląd nie rejestruje, nie uruchamia ani nie zamyka zadania.
+
+## CONSULT (0.22.0)
+
+CONSULT służy tylko do kosztownych decyzji: architektury, wspólnych kontraktów NC/HEMS i wyboru dostawcy. Koszt to `liczba panelistów × rundy + 1` zadań; zwykłe pytanie implementacyjne kieruj do jednego agenta. `agentctl consult consult.yaml` pokazuje liczbę zadań, aktualne użycie dostawców, limity i `queue_hold`; ponów z `--confirm`. Czaty właściciela NC/HEMS używają narzędzia MCP `consult` (dopisz `consult` do `mcp.allow`): podgląd, zgoda właściciela, potwierdzenie `preview_token`. Działający `agentctl watch` przyjmuje trwałe zlecenie i rejestruje zadania Accepted; obowiązują pauza kolejki, limity i wstrzymanie użycia, bez zamiany panelistów.
+
+```yaml
+consult: NC-HEMS-UNITS
+question: Should NC and HEMS freeze the shared contract with SI units at the boundary?
+context: [file:README.md, wall:shared:sim-1]
+repos: [{path: ~/Projects/neon-city, base: HEAD}]
+panel:
+  - {agent: claude, model: opus, effort: high}
+  - {agent: codex, model: gpt-5.4, effort: high}
+rounds: 2
+synthesis: {agent: claude, model: opus, effort: high}
+cohort: consult-nc-hems
+post_to: shared:sim
+```
+
+ID: 1–24 wielkich liter, cyfr lub myślników, pierwsza litera. Panel wymaga co najmniej dwóch aktywnych, włączonych dostawców; synteza także jawnie podaje agenta, model i effort. Domyślnie dwie rundy, najwyżej trzy, jedna dozwolona. `repos` to ścieżki repozytoriów lub wpisy `{path, base}`; domyślnie bieżący katalog dyspozytora, dlatego w MCP podawaj je jawnie. Bazy i kontekst są utrwalane przy przyjęciu; zmiana po podglądzie MCP wymaga nowego podglądu. Kontekst przyjmuje `file:`, `report:` (lokalne pliki, do 64 KiB każdy i 128 KiB razem), `commit:` w pierwszym repozytorium i `wall:<ID wiadomości>`.
+
+Każde zadanie dostaje osobne worktree z odłączonym HEAD, bez poleceń setup i współdzielonych linków. Hook pre-commit odmawia commitów przez konfigurację środowiska procesu; nie zmienia wspólnej konfiguracji Git. Przy odbiorze raportu agentctl sprawdza HEAD i zmiany śledzonych plików; odmowa commitu lub obejście hooka trafia do uwag raportu. To współpracująca ochrona tylko do odczytu, nie izolacja systemowa: `--no-verify` lub zmienione środowisko mogą ominąć hook, a proces tego samego użytkownika może czytać inne pliki. Agent ma czytać tylko przekazany kontekst i snapshoty oraz pisać wyłącznie swój raport.
+
+Pierwsza runda jest niezależna; format odpowiedzi: Recommendation, Reasoning, Risks, Confidence (1–5), Unknowns. Następne rundy dodają Changed: yes/no – why. Koordynator sprawdza kompletność raportów aktualnego podejścia, usuwa nazwy modeli/dostawców i typowe deklaracje tożsamości oraz metadane raportu, losuje stabilne etykiety A–Z i pokazuje wszystkie poprzednie odpowiedzi (własną oznacza „yours”). Seed i mapa pozostają w `<AGENTCTL_HOME>/consult/<ID>.json`, zwykle `~/.agentctl/consult/`, i nie trafiają do promptów panelu ani syntezy. Anonimizacja jest przybliżona: styl lub treść mogą zdradzić autora, a nazwa dostawcy istotna dla decyzji może zostać usunięta.
+
+Synteza waży argumenty bez głosowania, opisuje zgodność, różnice, rekomendację i decyzje właściciela. Pierwsza linia: `Werdykt: GO`, `Werdykt: NO-GO` albo `Werdykt: SPLIT`. Dopiero po zakończeniu agentctl dopisuje mapę autorów i uwagi do raportu właściciela, domyślnie `<cache>/consult-<ID>/CONSULT-<ID>.md` (`report` może wskazać inne dozwolone miejsce). `get_report` i pull zadania syntezy wskazują wtedy raport właściciela. Status/board grupują konsultację w kohorcie z numerem rundy; `events_since` zwraca CONSULT `round-done` i `synthesis-ready`. `post_to` publikuje podsumowanie raz jako owner przez zwykłe uprawnienia i skan sekretów WALL. Niekompletna odpowiedź czeka na poprawienie raportu (powód w logu watch), anulowanie zadania blokuje konsultację. Restart watch naprawia częściową rejestrację bez duplikatów; istniejący ID nie jest nadpisywany.

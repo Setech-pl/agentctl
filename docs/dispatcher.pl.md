@@ -165,3 +165,7 @@ Zapisz kryteria odbioru, ograniczenia i wymagania raportu.
 Wzorce auth/limit/overload/background Kimi, stopka kolejki w trakcie pracy, pozostałe interakcje wire są hipotezami z syntetycznymi fixture; nie opisuj ich jako potwierdzonego działania prawdziwej wersji 2.5.0.
 
 Rzeczywisty model/effort Kimi 2.5.0 pochodzi z pasywnego `llm.request.modelAlias/thinkingEffort`, obok zamówienia w TASK.md i status JSON. Stopka może pokazywać `high`, gdy wire potwierdza `low`; rozbieżność z zamówieniem daje ostrzeżenie. Sesje wiążemy przez `state.json` i indeks sesji; tokeny pochodzą z `usage.record`.
+
+## CONSULT: tylko kosztowne decyzje
+
+Używaj `consult` do architektury, wspólnych kontraktów NC/HEMS i wyboru dostawcy, gdy niezależne argumenty wielu dostawców uzasadniają koszt `panel × rundy + synteza`. Przeczytaj spec CONSULT w README, podaj repozytoria oraz aktywnych i włączonych dostawców (co najmniej dwóch różnych w panelu), pokaż właścicielowi podgląd kosztu/użycia i dopiero po zgodzie potwierdź token. `mcp.allow` musi zawierać `consult`; watch ma działać, postęp widać w kohorcie oraz CONSULT round-done/synthesis-ready w `events_since`. Pierwsza runda jest niezależna; kolejne pokazują anonimowe odpowiedzi z oznaczeniem „yours”; synteza waży argumenty bez głosowania. Mapa autorów jest dopiero dla właściciela po syntezie; anonimizacja i hooki Git nie stanowią izolacji systemowej. Nie zamawiaj konsultacji do rutynowej implementacji.

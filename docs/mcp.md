@@ -184,6 +184,7 @@ Both are always readable without mcp.allow. MCP new/queue responses omit capacit
 | `version` | `version` |  |
 | `guide` | `guide` |  |
 | `capacity` | `capacity` |  |
+| `consult` | `consult` |  |
 | `new` | `new` |  |
 | `queue` | `queue` |  |
 | `queue list` | `queue_list` |  |
@@ -287,6 +288,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 | `resume` | write | `tasks?`, `all?`, `confirm?`, `preview_token?` |
 | `answer` | write | `task`, `option`, `confirm?`, `token?` |
 | `send` | write | `task`, `text?`, `enter_only?`, `confirm?`, `token?`, `withdraw?` |
+| `consult` | write | `spec?`, `confirm?`, `preview_token?` |
 | `new` | write | `spec?`, `agent?`, `reuse?`, `no_agent?`, `cohort?`, `wait_trust?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` |
 | `queue` | write | `spec?`, `cohort?`, `agent?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` |
 | `queue_rm` | write | `task?`, `confirm?`, `preview_token?` |
@@ -332,6 +334,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 
 - `guide`: `--project &lt;repo&gt;`, `--lang &lt;lang&gt;`, `--clip`, `--json`
 - `capacity`: `--json`, `--clip`
+- `consult`: `--confirm`
 - `new`: `--dry-run`, `--json`, `--reuse`, `--agent &lt;agent&gt;`, `--no-switch`, `--no-agent`, `--no-wait-trust`, `--clip`, `-y, --yes`, `--cohort &lt;name&gt;`
 - `queue`: `--clip`, `--agent &lt;agent&gt;`, `-y, --yes`, `--json`, `--cohort &lt;name&gt;`
 - `queue list`: `--json`, `--cohort &lt;name&gt;`
