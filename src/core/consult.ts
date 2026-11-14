@@ -135,7 +135,7 @@ export async function planConsult(ctx: Context, text: string) {
 function taskIds(spec: ConsultSpec, round: number) { return spec.panel.map((_, i) => `CONSULT-${spec.id}-R${round}-P${i + 1}`); }
 function taskRaw(ctx: Context, state: ConsultState, task: string, who: ConsultOrder, prompt: string, after: string[], report?: string): RawSpec {
   const root = path.join(ctx.config.cache, `consult-${state.spec.id}`, task);
-  return { index: 1, header: { task, ...who, pin: true, read_only: true, cohort: state.spec.cohort,
+  return { index: 1, header: { task, ...who, pin: true, read_only: true, review: false, cohort: state.spec.cohort,
     repos: state.spec.repos.map((r, i) => ({ ...r, worktree: path.join(root, `repo-${i + 1}`) })),
     report: report ?? path.join(root, 'ANSWER.md'), after, ...(after.length ? { after_verdict: ['PASS', 'PARTIAL', 'FAIL', 'BLOCKED'] } : {}) }, prompt };
 }

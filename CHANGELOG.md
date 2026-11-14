@@ -7,6 +7,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.22.0] - 2026-11-14
 
+- CONSULT-f2: explicitly disable inherited automatic review for detached consultation tasks, preserving admission and previewed task counts. / CONSULT-f2: zadania konsultacji wyłączają odziedziczony automatyczny review, zachowując start na odłączonym HEAD i liczbę zadań z podglądu.
+
 - CONSULT-f1: fit the harness digest to the remaining task-owned tmux socket budget (minimum eight hex characters); a 101-byte path now fits at 100 without escaping the cache. / CONSULT-f1: długość skrótu harnessu mieści się w pozostałym limicie ścieżki gniazda tmux (minimum osiem znaków hex); ścieżka 101-bajtowa mieści się w 100 bajtach bez wyjścia poza cache.
 
 - CONSULT: CLI/MCP preview → confirm → Accepted watcher coordination for high-cost Delphi decisions; independent detached read-only snapshots, 1–3 rounds, seeded anonymous revisions, reasoning-weighted GO/NO-GO/SPLIT synthesis with owner-only identity map, provider usage/cost preview, cohort round display, CONSULT events and optional idempotent WALL summary. Queue limits, pause and usage holds apply; task-scoped commit hooks plus HEAD/tracked-file checks record findings. No real inference in deterministic tests. / CONSULT: CLI/MCP podgląd → potwierdzenie → Accepted, kosztowne decyzje metodą delficką; niezależne snapshoty tylko do odczytu, 1–3 rundy, anonimowe rewizje ze stabilnymi etykietami, synteza GO/NO-GO/SPLIT z mapą dla właściciela, podgląd kosztu/użycia, runda w kohorcie, zdarzenia i jednorazowe podsumowanie WALL. Obowiązują limity, pauza i wstrzymanie użycia; hooki commitów oraz kontrola HEAD i plików zapisują uwagi. Testy deterministyczne bez inferencji.

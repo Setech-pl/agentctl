@@ -29,6 +29,16 @@
       "CONSULT-f1: compacts the digest to fit a task-owned socket at the 100-byte boundary"
     ]
   },
+  "CONSULT-f2": {
+    "rev": "v0.21.0",
+    "outcome": "IMPORT-ERROR",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "tests/consult.test.ts",
+      "tests/consult.test.ts"
+    ]
+  },
   "F1": {
     "rev": "v0.19.0",
     "outcome": "IMPORT-ERROR",

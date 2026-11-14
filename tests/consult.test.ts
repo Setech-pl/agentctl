@@ -141,6 +141,18 @@ describe('CONSULT deterministic Delphi orchestration (no inference/network)', ()
     assert.equal(readQueue(f.config).length, 6);
   });
 
+  it('CONSULT-f2: suppresses inherited automatic review for detached consultation tasks', async () => {
+    const f = fixture('auto-review');
+    f.config.review = { default: 'auto' };
+    await acceptConsult(f.ctx, f.spec());
+    for (const entry of readQueue(f.config)) {
+      const raw = splitSpecs(entry.spec)[0]!;
+      const spec = resolveSpec(raw, { config: f.config });
+      assert.equal(spec.review, undefined, 'automatic review needs a branch and must not alter consultation task counts');
+      assert.equal(raw.header.review, false);
+    }
+  });
+
   it('recovers after a crash between individual Accepted queue writes', async () => {
     const f = fixture('partial-registration');
     const write = f.runner.writeFile.bind(f.runner);
