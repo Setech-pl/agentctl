@@ -2,6 +2,7 @@ import { inspectField } from './input-field.ts';
 import type { DeliveryAgent } from './paste-wrapper.ts';
 import { screenMetadata } from './tmux.ts';
 import { PATTERN_FLAGS } from './config.ts';
+import { startupDialogShown } from './state.ts';
 import type { Runner } from './runner.ts';
 import type { Tmux } from './tmux.ts';
 import { shellLine } from './util.ts';
@@ -60,7 +61,6 @@ export async function waitForReady(runner: Runner, tmux: Tmux, window: string, o
   }
   const regex = new RegExp(opts.pattern, PATTERN_FLAGS);
   const trust = opts.trustPattern ? new RegExp(opts.trustPattern, PATTERN_FLAGS) : undefined;
-  const dialog = opts.dialogPattern ? new RegExp(opts.dialogPattern, PATTERN_FLAGS) : undefined;
   const interval = opts.intervalMs ?? 500;
   let deadline = runner.now() + opts.timeoutMs;
   let inTrust = false;
@@ -82,7 +82,7 @@ export async function waitForReady(runner: Runner, tmux: Tmux, window: string, o
           inTrust = false;
           deadline = runner.now() + opts.timeoutMs;
         }
-        if (dialog?.test(screen)) return { ready: false, trust: false, dialog: true, screen };
+        if (startupDialogShown(screen, { dialogPattern: opts.dialogPattern, readyPattern: opts.pattern })) return { ready: false, trust: false, dialog: true, screen };
         const composer = opts.structuralComposer ? inspectField(screen, opts.agent) : undefined;
         const draft = opts.agent === 'kimi' && composer ? composer.area.length > 0 : Boolean(screenMetadata(screen).draft_input);
         if ((!composer || composer.readable) && regex.test(screen) && (!opts.emptyInput || !draft)) return { ready: true, trust: false, screen };

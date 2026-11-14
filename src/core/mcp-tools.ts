@@ -588,7 +588,7 @@ async function runOverlap(deps: McpDeps, args: { task?: string | undefined }): P
 async function runPeek(deps: McpDeps, args: { task: string; lines?: number | undefined }): Promise<ToolResult> {
   const ctx = deps.context(() => {});
   const result = await peekTask(ctx, args.task, args.lines ?? 40);
-  return ok(`${result.task}: last ${result.lines.length} lines of its window (agent footer removed)\n\n${result.lines.join('\n')}\nusage_hint: ${result.usage_hint ?? 'n/d'}\ndraft_input: ${result.draft_input ?? 'n/d'}\nprompt_delivery: ${result.promptDelivery ?? 'n/d'}\nprompt_queue: ${JSON.stringify(result.promptQueue ?? [])}`);
+  return ok(`${result.task}: last ${result.lines.length} lines of its window (agent footer removed)\n\n${result.lines.join('\n')}\nusage_hint: ${result.usage_hint ?? 'n/d'}\ndraft_input: ${result.draft_input ?? 'n/d'}\nprompt_delivery: ${result.promptDelivery ?? 'n/d'}\nprompt_queue: ${JSON.stringify(result.promptQueue ?? [])}${result.startFailureScreen ? `\nstart_failure_screen: ${result.startFailureScreen}` : ''}`);
 }
 
 async function runListReports(deps: McpDeps, args: { all?: boolean | undefined }): Promise<ToolResult> {

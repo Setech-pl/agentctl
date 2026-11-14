@@ -7,12 +7,20 @@ import { AgentctlError } from './util.ts';
 /** The variables of the Z.ai/Anthropic authentication that agentctl never writes into a task environment, TASK.md or a launch script. */
 export const ANTHROPIC_SECRET_ENV = ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_API_KEY'] as const;
 
-/** `glm` tasks get these only from the claude-glm wrapper; every other provider's environment stays exactly as configured. */
+/**
+ * The task environment glm tasks get unless `providers_config.glm.env` says otherwise. Claude Code's auto mode asks the Anthropic
+ * server whether a session may use it; behind the Z.ai endpoint that check cannot succeed, so the glm default switches it off.
+ * Claude tasks never get it, and it is never written to ~/.claude/settings.json.
+ */
+export const GLM_DEFAULT_ENV: Readonly<Record<string, string>> = { CLAUDE_CODE_AUTO_MODE_SERVER: '0' };
+
+/** `glm` tasks get the Z.ai endpoint and token only from the claude-glm wrapper; every other provider's environment stays exactly as configured. */
 export function launchEnvFor(config: GlobalConfig, order: LaunchOrder & { agent: ProviderId }, env: Record<string, string>): Record<string, string> {
   if (order.agent !== 'glm') return env;
-  const stripped = { ...env };
-  for (const name of ANTHROPIC_SECRET_ENV) delete stripped[name];
-  return stripped;
+  // Lowest to highest: the glm defaults, providers_config.glm.env, then what the settings and the spec set (already merged into `env`).
+  const merged = { ...GLM_DEFAULT_ENV, ...config.providersConfig?.glm?.env, ...env };
+  for (const name of ANTHROPIC_SECRET_ENV) delete merged[name];
+  return merged;
 }
 
 /** Default preserves the public 0.17.4 checker; explicit calls use only the target adapter. */

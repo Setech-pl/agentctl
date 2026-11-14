@@ -5,29 +5,45 @@ import type { ProviderId } from './types.ts';
 /** The mark that opens the line an agent prints for an error: bullets, tree corners, warning signs. */
 const LINE_MARK = '^[\\s⎿●•■⚠!*>-]*';
 
-const BACKGROUND_CLAUDE = '[·⏵].*\\b\\d+ (?:shells?|monitors?)\\b(?: still running)?';
+const BACKGROUND_CLAUDE = '[·⏵▸].*\\b\\d+ (?:shells?|monitors?)\\b(?: still running)?';
+
+/**
+ * Claude Code's first-run screens, and any startup notice that waits for a key (a fresh CLAUDE_CONFIG_DIR, as the claude-glm wrapper uses, shows them
+ * before the folder-trust dialog): "Let's get started." / "Choose the text style that looks best with your terminal" with the theme list
+ * ("❯ ✔ Dark mode …", "Syntax theme: …"), "Security notes: … Press Enter to continue…", the login method choice. A human answers them; agentctl never does.
+ * "What's new" is deliberately not here: the main screen's banner box carries it.
+ */
+const STARTUP_DIALOG_CLAUDE = 'Let.s get started|Choose the text style|Syntax theme:|Security notes:|Press (?:Enter|any key) to continue|Select login method|Paste code here if prompted';
+
+/** A selection prompt about auto mode ("Enable auto mode?" with a numbered menu). The banner "Auto mode is now … default permission mode." is no question. */
+const AUTO_MODE_PROMPT = '\\bauto mode\\b[^\\n]*\\?[^\\n]*\\n(?:[^\\n]*\\n){0,8}?[^\\n]*❯\\s*\\d+\\.';
 
 /** The Claude Code screen patterns; `glm` (the claude-glm wrapper) shows the same TUI, so it shares them. */
 const CLAUDE_SCREEN: AgentSettings = {
   acceptsBusyPrompt: true,
   flags: [],
   effortArgs: ['--effort', '{effort}'],
-  // Claude Code 2.1.309 idle screen: the input box line "❯ Try ...". The trust dialog also uses "❯", but with "1. Yes".
-  readyPattern: '^\\s*❯\\s(?!\\d+\\.)',
+  // Claude Code 2.1.309 idle screen: the input box line "❯ Try ...". The trust dialog also uses "❯", but with "1. Yes", and the theme picker of
+  // the first-run onboarding marks its selected row "❯ ✔ Dark mode" (P95): neither is an input box.
+  readyPattern: '^\\s*❯\\s(?!\\d+\\.|[✔✓])',
   readyTimeout: 60,
   trustTimeout: 600,
   trustPattern: 'Quick safety check|Yes, I trust this folder',
+  dialogPattern: STARTUP_DIALOG_CLAUDE,
   workingPattern: 'esc to interrupt|^\\s*(?:⏺\\s+)?Running(?:\\s|…|\\.\\.\\.)|^\\s*[✶✻✽✢·*]\\s+[^\\n]+(?:…|\\.\\.\\.)\\s*\\([^\\n]*(?:\\d+(?:\\.\\d+)?s\\s*·|thinking|tokens)[^\\n]*\\)',
   deliveryPattern: '^\\s*⏺|● got:',
   interruptKey: 'Escape',
   footerPatterns: [
     '\\? for shortcuts',
-    '^\\s*(⏵⏵|⏸)',
+    '^\\s*(⏵⏵|▸▸|⏸)',
     'shift\\+tab to cycle',
+    // Informational chrome: the auto-mode banner and the MCP warning (G3, G5) never block readiness.
+    "Auto mode is now Claude Code.s default permission mode",
+    '⚠\\s*\\d+ MCP servers? needs? authentication',
     '^\\s*[❯>]\\s*(Try ".*")?$',
   ],
   // AskUserQuestion dialog footer, and the footer of a permission dialog ("Esc to cancel · Tab to amend").
-  questionPattern: 'Enter to select\\b.*Esc to cancel|Esc to cancel · Tab to amend',
+  questionPattern: `Enter to select\\b.*Esc to cancel|Esc to cancel · Tab to amend|${AUTO_MODE_PROMPT}`,
   // Strings of the 2.1.309 binary: "You've hit your session limit" / "weekly limit" / "<model> limit" / "monthly spend limit" (+ " · resets …"),
   // "Usage limit reached", "You're out of extra usage". The 429 line is also printed for a passing capacity problem (lower confidence).
   limitPatterns: [

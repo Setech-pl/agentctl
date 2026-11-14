@@ -26,6 +26,9 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  // 0.20.1
+  { id: 'P95', fixedIn: '0.20.1', symptom: 'The first glm task failed its start ("glm did not show its input prompt within 60s"): the wrapper\'s fresh Claude config shows the first-run onboarding, whose theme line "❯ ✔ Dark mode" also looked like the input box; the owner saw nothing and the window was closed.', scenarios: [s('p95-p96-glm-start.test.ts', '^P95')] },
+  { id: 'P96', fixedIn: '0.20.1', symptom: 'A start that did not reach the agent\'s input closed its window and kept no screen: the owner could not see why it failed; queue_retry had no capture to look at.', scenarios: [s('p95-p96-glm-start.test.ts', '^P96')] },
   // 0.19.6
   { id: 'P94', fixedIn: '0.19.6', symptom: '`after` read a live author\'s report before its verdict line was written, announced the dependent blocked and never announced the release when the report said PASS; the owner unblocked it by hand.', scenarios: [s('p94-after-verdict.test.ts')] },
   { id: 'P93b', fixedIn: '0.19.6', symptom: 'MCP unblock (and other write) confirms scanned every task under load, ran past the 8 s budget again and again and did nothing; the owner ran the CLI.', scenarios: [s('p93b-mcp-deferred.test.ts')] },

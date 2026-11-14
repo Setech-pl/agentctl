@@ -2,7 +2,8 @@ import { promptQueueView } from './prompt-queue.ts';
 import { sessionQuestion } from './codex-question.ts';
 import { clip, collapsedQuestion, collapsedQuestionText, extractQuestion, MAX_QUESTION } from './events.ts';
 import type { Context } from './context.ts';
-import { resolveRunningTask } from './resolve.ts';
+import { listTargets, matchTask, resolveRunningTask } from './resolve.ts';
+import { readStartFailureScreen, startFailureScreenFile } from './start-failure.ts';
 import { guessAgent } from './status.ts';
 import { screenMetadata, contentLines } from './tmux.ts';
 import { readTaskRecord } from './taskstore.ts';
@@ -41,6 +42,8 @@ export interface PeekResult {
   promptDelivery?: string;
   usage_hint?: string | null;
   draft_input?: string | null;
+  /** The saved last screen of a start that did not reach the agent's input (P96): its file. With no window left, `lines` are that capture. */
+  startFailureScreen?: string;
 }
 
 /** The last `count` lines of content of a window (screen and scrollback), without the agent's footer lines. */
@@ -53,14 +56,34 @@ export async function peekWindow(ctx: Context, window: string, count: number): P
   return [...(question ? [question] : []), ...contentLines(screen.stdout, ctx.config.agents[agent].footerPatterns, count)];
 }
 
+/** The record says the start did not get the prompt in (failed start, or waiting for the owner at a startup dialog): its capture is worth pointing at. */
+const startUnfinished = (record: TaskRecord | null | undefined): boolean => ['needs-attention', 'needs-input', 'launching'].includes(record?.promptDelivery ?? '') && !record?.deliveryStartedAt;
+
+/** A task whose window is gone but whose failed start left a capture: peek reads that instead of failing. */
+async function peekStartFailure(ctx: Context, taskArg: string, count: number): Promise<PeekResult | undefined> {
+  const match = matchTask(taskArg, await listTargets(ctx));
+  if (match.kind !== 'one') return undefined;
+  const text = readStartFailureScreen(ctx.config, match.target.window);
+  if (text === undefined) return undefined;
+  const lines = text.split('\n');
+  while (lines.length > 0 && lines.at(-1) === '') lines.pop();
+  return { task: match.target.task, window: match.target.window, lines: lines.slice(-count), startFailureScreen: startFailureScreenFile(ctx.config, match.target.window) };
+}
+
 /** `agentctl peek TASK [-n 40]` */
 export async function peekTask(ctx: Context, taskArg: string, count: number = PEEK_LINES): Promise<PeekResult> {
   if (!Number.isInteger(count) || count < 1) throw new AgentctlError(`-n must be a positive whole number (got ${count})`);
-  const target = await resolveRunningTask(ctx, taskArg);
+  let target;
+  try { target = await resolveRunningTask(ctx, taskArg); } catch (e) {
+    const saved = await peekStartFailure(ctx, taskArg, count);
+    if (saved) return saved;
+    throw e;
+  }
   const screen = await ctx.tmux.capture(target.window, count + PEEK_SLACK);
   if (screen.code !== 0) throw new AgentctlError(`cannot read window ${target.window}`);
   const record = readTaskRecord(ctx.config, target.window);
   const agent = record && record.agent !== 'unknown' ? record.agent : guessAgent(screen.stdout);
   const question = peekQuestion(ctx.config, record, screen.stdout);
-  return { task: target.task, window: target.window, promptQueue: promptQueueView(ctx, target.window), promptDelivery: record?.promptDelivery, ...screenMetadata(screen.stdout), lines: [...(question ? [question] : []), ...contentLines(screen.stdout, ctx.config.agents[agent].footerPatterns, count)] };
+  const failed = startUnfinished(record) && readStartFailureScreen(ctx.config, target.window) !== undefined ? startFailureScreenFile(ctx.config, target.window) : undefined;
+  return { task: target.task, window: target.window, promptQueue: promptQueueView(ctx, target.window), promptDelivery: record?.promptDelivery, ...screenMetadata(screen.stdout), lines: [...(question ? [question] : []), ...contentLines(screen.stdout, ctx.config.agents[agent].footerPatterns, count)], ...(failed ? { startFailureScreen: failed } : {}) };
 }

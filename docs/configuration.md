@@ -37,8 +37,11 @@ Column "Layers": **g** global config, **p** project config, **s** spec.
 | Key | Type | Default | Layers | Meaning |
 |---|---|---|---|---|
 | `providers` | global | `[claude, codex]` | Active providers in order; both claude and codex are required, without duplicates. |
-| `providers_config` | mapping | `{}` | g | Per-provider launch overrides. Today only `providers_config.glm.command` (see [GLM](#glm-zai-glm-coding-plan)). |
+| `providers_config` | mapping | `{}` | g | Per-provider launch overrides: `providers_config.glm.command` and `providers_config.glm.env` (see [GLM](#glm-zai-glm-coding-plan)). |
 | `providers_config.glm.command` | string | `claude-glm` | g | The executable that starts GLM tasks (one name or path, no arguments). |
+| `providers_config.glm.env` | mapping | `{CLAUDE_CODE_AUTO_MODE_SERVER: "0"}` | g | Environment of every GLM task, added to the built-in default; a key you set wins over the default. The Z.ai endpoint and token (`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`) are refused: they come only from the wrapper. |
+| `start_failure` | mapping | `{keep_window: true}` | g | What a start that did not reach the agent's input leaves behind. |
+| `start_failure.keep_window` | boolean | `true` | g | `true`: the window of a failed start (the agent never showed its input) stays open for diagnosis, and its last screen is saved in `<state_dir>/<task>/start-failure-screen.txt` either way. `queue_retry` closes the leftover window first. `false`: the window is closed at once (the capture stays), so it cannot hold a provider slot. A window that waits for you (folder trust, first-run onboarding) is never closed. |
 | `cache` | path | `~/workspace/cache` | g | Directory with one folder per task, `<cache>/<task>/`: the only place the agents write to (reports). |
 | `state_dir` | path | `<config dir>/tasks` | g | agentctl's own state per task (`TASK.md`, `setup.log`, `event.json`, `notified.json`), out of the agents' reach. Closed tasks are archived next to it, in `archive/`. |
 | `tmux` | mapping | socket unset | g | Optional dedicated tmux server. |
@@ -191,7 +194,7 @@ Queued tasks live in `<config dir>/queue/` (one JSON file each, with the spec te
 | `agents.<agent>.ready_pattern` | regex | see below | g | The agent shows its input box. |
 | `agents.<agent>.ready_timeout` | seconds | `60` | g | How long `new` waits for `ready_pattern`. |
 | `agents.<agent>.trust_pattern` | regex | see below | g | The agent shows its folder-trust dialog. agentctl never answers it. |
-| `agents.<agent>.dialog_pattern` | regex | codex `'Update available\|Skip until next version'` | g | Another startup dialog a human must answer (the Codex "Update available" modal): `new` stops at it at once as needs-input instead of waiting out `ready_timeout`. agentctl never answers it. Codex task windows also start with `-c check_for_update_on_startup=false`, so a current Codex does not show the modal at all. |
+| `agents.<agent>.dialog_pattern` | regex | claude and glm: the first-run onboarding screens (see below), codex `'Update available\|Skip until next version'` | g | Another startup dialog a human must answer (the Codex "Update available" modal, Claude Code's first-run onboarding: theme picker, "Security notes … Press Enter to continue", login choice): `new` stops at it at once as needs-input (with a clear line and a notification, the window stays) instead of failing after `ready_timeout`; once you have answered it, watch carries on with folder trust, the input and the prompt. agentctl never answers it. Codex task windows also start with `-c check_for_update_on_startup=false`, so a current Codex does not show the modal at all. |
 | `agents.<agent>.trust_timeout` | seconds | `600` | g | How long `new` waits for you to answer the trust dialog. |
 | `agents.<agent>.working_pattern` | regex | see below | g | A turn is running, including Claude 2.1.x spinner progress. The spinner frame `✳` is not in the pattern: it counts only as a spinner line (word, `…`, a bracket that starts with the elapsed time) right above the input box, never in the transcript, whatever the pattern says. |
 | `agents.<agent>.delivery_pattern` | regex | see below | g | New adapter assistant output acknowledges a submitted prompt; input drafts never count. |
@@ -210,15 +213,18 @@ The built-in values, as the code has them (a test compares this block with `src/
 ```yaml
 claude:
   effort_args: ['--effort', '{effort}']
-  ready_pattern: '^\s*❯\s(?!\d+\.)'
+  ready_pattern: '^\s*❯\s(?!\d+\.|[✔✓])'
   trust_pattern: 'Quick safety check|Yes, I trust this folder'
+  dialog_pattern: 'Let.s get started|Choose the text style|Syntax theme:|Security notes:|Press (?:Enter|any key) to continue|Select login method|Paste code here if prompted'
   working_pattern: 'esc to interrupt|^\s*(?:⏺\s+)?Running(?:\s|…|\.\.\.)|^\s*[✶✻✽✢·*]\s+[^\n]+(?:…|\.\.\.)\s*\([^\n]*(?:\d+(?:\.\d+)?s\s*·|thinking|tokens)[^\n]*\)'
   delivery_pattern: '^\s*⏺|● got:'
-  question_pattern: 'Enter to select\b.*Esc to cancel|Esc to cancel · Tab to amend'
+  question_pattern: 'Enter to select\b.*Esc to cancel|Esc to cancel · Tab to amend|\bauto mode\b[^\n]*\?[^\n]*\n(?:[^\n]*\n){0,8}?[^\n]*❯\s*\d+\.'
   footer_patterns:
     - '\? for shortcuts'
-    - '^\s*(⏵⏵|⏸)'
+    - '^\s*(⏵⏵|▸▸|⏸)'
     - 'shift\+tab to cycle'
+    - "Auto mode is now Claude Code.s default permission mode"
+    - '⚠\s*\d+ MCP servers? needs? authentication'
     - '^\s*[❯>]\s*(Try ".*")?$'
   limit_patterns:
     - '^[\s⎿●•■⚠!*>-]*You.ve hit your .{0,60}limit'
@@ -226,7 +232,7 @@ claude:
     - '^[\s⎿●•■⚠!*>-]*You.re out of extra usage'
     - '^[\s⎿●•■⚠!*>-]*(?:API Error: )?Request rejected \(429\)'
   background_patterns:
-    - '[·⏵].*\b\d+ (?:shells?|monitors?)\b(?: still running)?'
+    - '[·⏵▸].*\b\d+ (?:shells?|monitors?)\b(?: still running)?'
     - '[·⏵].*\b\d+ background\b'
 codex:
   effort_args: ['-c', 'model_reasoning_effort={effort}']
@@ -619,6 +625,7 @@ GLM is Claude Code started through the `claude-glm` wrapper, which exports `ANTH
 providers: [claude, codex, glm]
 limits: {claude: 3, codex: 3, glm: 2}        # glm defaults to 2; its own Z.ai limit, never the Claude account limit
 # providers_config: {glm: {command: claude-glm}}   # only when the wrapper has another name/path
+# providers_config: {glm: {env: {CLAUDE_CODE_AUTO_MODE_SERVER: "1"}}}   # overrides the default below
 ```
 
 | Key | Type | Default | Layers | Meaning |
@@ -626,9 +633,14 @@ limits: {claude: 3, codex: 3, glm: 2}        # glm defaults to 2; its own Z.ai l
 | `limits.glm` | positive integer, `0` or `off` | `2` | g | Cap for GLM windows (agentctl windows + reserved places + external sessions when counted); `0` = no limit, `off` = disabled. Separate from the Claude account limit. |
 | `usage.glm_dir` | path | `$CLAUDE_CONFIG_DIR`, else `~/.claude` | g | Where GLM session transcripts land (the Claude Code `projects/` layout). |
 | `providers_config.glm.command` | string | `claude-glm` | g | The executable that starts GLM tasks; one name or path, no arguments. |
+| `providers_config.glm.env` | mapping | `{CLAUDE_CODE_AUTO_MODE_SERVER: "0"}` | g | Task environment of GLM tasks (written to the task's launch script). The default switches off Claude Code's auto-mode server check, which cannot succeed behind the Z.ai endpoint; set the key to another value to override it. `agents.glm.env` and the spec's `env` still win over it. Claude tasks never get it, and it is never written to `~/.claude/settings.json`. |
 
 `agent: glm` accepts exactly `glm-5.3` and `glm-5.3-flash` (the models the plan documents, docs.z.ai/devpack/faq); `model: default` omits the flag. Effort works as for Claude (`--effort`, `low/medium/high/xhigh/max`). `class:` maps through the glm column of [data/model-matrix.yaml](../data/model-matrix.yaml), and `equivalents` accepts a `glm` column, so `move` and `--agent glm` translate through the table.
 
 Isolation is a hard rule: agentctl never writes `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY` or any Z.ai secret into `~/.claude/settings.json`, the per-task settings, `TASK.md`, logs, the journal, benchmark records or the environment of `claude` tasks. `claude` tasks keep their environment unchanged; `glm` tasks get only what the wrapper does - these variables are stripped from a glm spec's `env` (with a preview warning), and their values are redacted wherever captured output is persisted. The wrapper's own environment (Keychain, `PATH`) is never read by agentctl; doctor checks only that `claude-glm` is on `PATH` and executable and that the Keychain item exists (never the secret).
+
+**First start.** The wrapper uses its own Claude config directory, so the first glm task ever runs Claude Code's first-run onboarding: the theme picker (`❯ ✔ Dark mode …`), "Security notes … Press Enter to continue", then the folder-trust dialog. agentctl does not treat that as a failed start: the task shows `needs-input` with the line "glm first-run onboarding – finish it once in the window, F12 back to board", you get a notification, the window stays, and the folder trust, input and prompt follow by themselves once you have answered the screens (agentctl never answers them). `doctor` warns when the glm config directory has not completed onboarding; fix it once with `claude-glm` in a terminal. The banner "Auto mode is now Claude Code's default permission mode" and the warning "⚠ 1 MCP server needs authentication · run /mcp" are informational and never block the start; an auto-mode selection prompt that waits for an answer is `needs-input`.
+
+**A failed start keeps its window.** When the agent never shows its input (timeout, an unknown screen), the window stays open (`start_failure.keep_window`, default `true`), the last ≈200 lines are saved in `<state_dir>/<task>/start-failure-screen.txt`, and the needs-attention line, `queue_list` and `peek` name that file. `queue_retry` closes the leftover window first (the capture stays) and starts a fresh one over the worktree.
 
 Usage accounting is separate (benchmark/statistics rows show `glm`). Z.ai documents no quota endpoint or CLI quota output for the 5-hour and weekly windows (only the subscription web page), so the GLM plan is **n/d** and `usage.queue_hold` never holds glm; token accounting from the session logs works as for Claude. `usage.warn`/`usage.critical` accept a `glm` percentage like any other provider but have no plan reading to fire on. The statusLine tap of a glm window writes `usage/glm-plan.json`, never the Claude plan file.

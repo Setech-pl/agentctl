@@ -381,6 +381,32 @@
       "P94: a dead author whose report changed within report.settle_s is pending; once settled without a verdict it blocks"
     ]
   },
+  "P95": {
+    "rev": "v0.20.0",
+    "outcome": "FAILS",
+    "failed": 11,
+    "passed": 1,
+    "failing": [
+      "glm: theme picker → needs-input with a clear line, notified, window kept; the owner finishes it, trust and the prompt follow by themselves",
+      "claude: theme picker → needs-input with a clear line, notified, window kept; the owner finishes it, trust and the prompt follow by themselves",
+      "the theme list line \"❯ ✔ Dark mode\" is not the ready prompt; the trust and numbered menus never were",
+      "a start at the picker returns \"dialog\" from waitForReady at once, and not after ready_timeout",
+      "P95: first-run onboarding of a fresh Claude config (glm wrapper) is a wait for the owner, not a failed start"
+    ]
+  },
+  "P96": {
+    "rev": "v0.20.0",
+    "outcome": "FAILS",
+    "failed": 3,
+    "passed": 0,
+    "failing": [
+      "ready timeout: the window stays, start-failure-screen.txt is saved, the failure line, queue_list and peek name it; queue_retry closes the window and starts again",
+      "start_failure.keep_window: false closes the window at once, the capture stays and peek reads it",
+      "keep_window defaults to true and rejects a non-boolean",
+      "P96: a failed start keeps its window and saves the last screen",
+      "ready timeout: the window stays, start-failure-screen.txt is saved, the failure line, queue_list and peek name it; queue_retry closes the window and starts again"
+    ]
+  },
   "R1-redact": {
     "rev": "v0.18.2",
     "outcome": "FAILS",

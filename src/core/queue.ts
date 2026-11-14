@@ -4,7 +4,7 @@ import { activeProviders, perProvider, isActive } from './providers/registry.ts'
 import { withStartLock } from './start-lock.ts';
 import { authorCheckoutBusy, authorTerminal, authorWaitReason, effectiveAfter, findAuthorRecord, repinReview, syncReviewLedger } from './review-gate.ts';
 import { queueFile as promptQueueFile } from './prompt-queue.ts';
-import { expectedCloseFile } from './tmux-loss.ts';
+import { closeFailedStartWindow, keepFailedWindow, saveStartFailureScreen, startFailureScreenFile } from './start-failure.ts';
 import { withFileLock } from './file-lock.ts';
 import { reportPathWarnings } from './report-path.ts';
 import { missingLinkTargets, checkLinkTargets } from './links.ts';
@@ -587,6 +587,7 @@ export async function removeFromQueue(ctx: Context, input: string, opts: { reaso
   // cancelled state in status — an idle prompt reads as "waiting". It is the cancelled task's window: it goes too.
   const record = readTaskRecord(ctx.config, windowName(entry.task));
   if (record && (await ctx.tmux.windows()).some((w) => w.plain === record.window)) {
+    await saveStartFailureScreen(ctx, record.window, record.windowId);
     if ((await ctx.tmux.killWindow(record.window)).code === 0) {
       await recordJournal(ctx, { kind: 'cancelled', task: entry.task, text: `${entry.task}: removed from the queue (cancelled); the leftover window of the start was closed`, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
     }
@@ -711,6 +712,8 @@ async function retryEntryLocked(ctx: Context, input: string): Promise<QueueEntry
   if (entry.autoReview) entry = await rebuildAutoReview(ctx, entry, { write: false });
   const spec = resolveSpec(splitSpecs(entry.spec, `queue entry ${entry.task}`)[0] as RawSpec, { config: ctx.config });
   await checkRetryWorktrees(ctx.runner, spec.repos);
+  // P96: a failed start keeps its window (start_failure.keep_window); the fresh start needs the name, so the old window goes, its capture stays.
+  await closeFailedStartWindow(ctx, entry.task);
   const highest = readQueue(ctx.config).reduce((n, e) => Math.max(n, e.order, e.seq), 0);
   const { failedAt: _f, error: _e, startingAt: _s, ...rest } = entry;
   const again: QueueEntry = { ...rest, status: 'queued', order: highest + 1, ...(entry !== original && !entry.reuse ? {} : { reuse: true }) };
@@ -912,18 +915,17 @@ async function liveStartedRecord(ctx: Context, task: string): Promise<TaskRecord
 }
 
 /**
- * A start that died before the agent showed its input (readiness timeout, a startup dialog, the watcher stopped mid-wait) leaves a window
- * nobody watches and a prompt that was never pasted. Close that window — it is untrusted state — so it cannot hold a provider slot; the
- * record keeps its worktree, so the task lands in "to resume". A window waiting for a human (folder trust, prompt_delivery: pending;
- * a startup dialog, prompt_delivery: needs-input) is kept: a human may be answering it and the next watch serves it.
+ * A start that died before the agent showed its input (readiness timeout, an unexpected screen, the watcher stopped mid-wait) leaves a window
+ * nobody watches and a prompt that was never pasted. Its last screen is saved to the task folder first (`start-failure-screen.txt`). By default
+ * (`start_failure.keep_window`, P96) the window then stays open for diagnosis; `queue_retry` closes it and starts a fresh one over the worktree.
+ * With `force`, or `keep_window: false`, it is closed so it cannot hold a provider slot (the record keeps its worktree: the task lands in
+ * "to resume"). A window waiting for a human (folder trust, prompt_delivery: pending; a startup dialog, prompt_delivery: needs-input) is never closed.
  */
-async function closeNeverReadyWindow(ctx: Context, task: string): Promise<boolean> {
+async function closeNeverReadyWindow(ctx: Context, task: string, opts: { force?: boolean } = {}): Promise<boolean> {
+  if (opts.force || !keepFailedWindow(ctx.config)) return closeFailedStartWindow(ctx, task);
   const record = readTaskRecord(ctx.config, windowName(task));
-  if (!record || (record.promptDelivery !== 'needs-attention' && record.promptDelivery !== 'launching') || record.deliveryStartedAt) return false;
-  if (!(await ctx.tmux.windows()).some((w) => w.plain === record.window)) return false;
-  // Record the intentional closure first: the missing window must not surface as a false tmux loss (tmux-loss.ts).
-  if (!ctx.runner.dryRun) await ctx.runner.writeFile(expectedCloseFile(ctx.config, record.window), JSON.stringify({ identity: `${record.attemptId ?? record.started}:${record.windowId ?? ''}`, at: new Date(ctx.runner.now()).toISOString() }));
-  return (await ctx.tmux.killWindow(record.window)).code === 0;
+  if (record && (record.promptDelivery === 'needs-attention' || record.promptDelivery === 'launching') && !record.deliveryStartedAt && (await ctx.tmux.windows()).some((w) => w.plain === record.window)) await saveStartFailureScreen(ctx, record.window, record.windowId);
+  return false;
 }
 
 /**
@@ -958,7 +960,7 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
     if (records.has(entry.task)) {
       // The record and the queue must not disagree: the entry goes away with the record in place, a leftover never-ready
       // window is closed, and the task (worktree kept) lands in "to resume" like its siblings.
-      const closed = await closeNeverReadyWindow(ctx, entry.task).catch(() => false);
+      const closed = await closeNeverReadyWindow(ctx, entry.task, { force: true }).catch(() => false);
       fs.rmSync(entryFile(config, entry), { force: true });
       fs.rmSync(queueLogFile(config, entry), { force: true });
       await recordJournal(ctx, { kind: 'queue-failed', task: entry.task, text: `${entry.task}: the start was interrupted (the watcher stopped before it finished); ${closed ? 'the never-ready window was closed, t' : 't'}he worktree stays – to resume: agentctl resume ${entry.task}`, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
@@ -1148,7 +1150,7 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
     } catch (e) {
       if (/window limit for .* reached/.test(errorMessage(e))) { await writeEntry(ctx, { ...entry, status: 'queued' }); return; }
       // A never-ready window is untrusted state nobody watches: close it so it cannot hold a slot (the record and its worktree stay).
-      const closedLeftover = await closeNeverReadyWindow(ctx, entry.task).catch(() => false);
+      const closedLeftover = await closeNeverReadyWindow(ctx, entry.task, { force: Boolean(opts.signal?.aborted) }).catch(() => false);
       if (await liveStartedRecord(ctx, entry.task)) {
         // A trust timeout leaves a live pending task, not a failed start. The ordinary watch delivery path continues it.
         await dropEntry(ctx, starting);
@@ -1166,7 +1168,7 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
         await recordJournal(ctx, { kind: 'queue-failed', task: entry.task, text: `${entry.task}: the start was interrupted (the watcher stopped before it finished); ${closedLeftover ? 'the never-ready window was closed, t' : 't'}he worktree stays – to resume: agentctl resume ${entry.task}`, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
         return;
       }
-      await failEntry(ctx, starting, `${e instanceof AgentctlError && e.hint ? `${e.message}\nHint: ${e.hint}` : errorMessage(e)}${closedLeftover ? '\nThe window that never became ready was closed; the worktree stays. queue_retry starts a fresh window over it.' : ''}`, notifier, opts, !opts.signal?.aborted, log).catch(() => undefined);
+      await failEntry(ctx, starting, `${e instanceof AgentctlError && e.hint ? `${e.message}\nHint: ${e.hint}` : errorMessage(e)}${closedLeftover ? '\nThe window that never became ready was closed; the worktree stays. queue_retry starts a fresh window over it.' : keptWindowNote(ctx, entry.task)}`, notifier, opts, !opts.signal?.aborted, log).catch(() => undefined);
     } finally {
       clearSetupProgress(config, entry.task);
       memory.inflight.delete(entry.task);
@@ -1174,6 +1176,14 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
   };
   memory.inflight.set(entry.task, { agent: entry.agent, promise: run() });
   return true;
+}
+
+/** The failed start's window stayed open (`start_failure.keep_window`): say so, with the file that holds its last screen. */
+function keptWindowNote(ctx: Context, task: string): string {
+  const record = readTaskRecord(ctx.config, windowName(task));
+  const file = startFailureScreenFile(ctx.config, windowName(task));
+  if (!record || !fs.existsSync(file)) return '';
+  return `\nThe window stays open for diagnosis (start_failure.keep_window); its last screen is saved in ${file}. queue_retry closes it and starts a fresh window over the worktree.`;
 }
 
 /** The entry goes to the end of the line as `failed`, with the log of the attempt; no retry loop: `queue retry` is a human's decision. */

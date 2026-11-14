@@ -10,6 +10,8 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| P95 | The first glm task failed its start ("glm did not show its input prompt within 60s"): the wrapper's fresh Claude config shows the first-run onboarding, whose theme line "❯ ✔ Dark mode" also looked like the input box; the owner saw nothing and the window was closed. | `tests/p95-p96-glm-start.test.ts` (`^P95`) | 0.20.1 | fails on v0.20.0 (11 failing of 12) |
+| P96 | A start that did not reach the agent's input closed its window and kept no screen: the owner could not see why it failed; queue_retry had no capture to look at. | `tests/p95-p96-glm-start.test.ts` (`^P96`) | 0.20.1 | fails on v0.20.0 (3 failing of 3) |
 | P94 | `after` read a live author's report before its verdict line was written, announced the dependent blocked and never announced the release when the report said PASS; the owner unblocked it by hand. | `tests/p94-after-verdict.test.ts` | 0.19.6 | fails on v0.19.4 (3 failing of 4) |
 | P93b | MCP unblock (and other write) confirms scanned every task under load, ran past the 8 s budget again and again and did nothing; the owner ran the CLI. | `tests/p93b-mcp-deferred.test.ts` | 0.19.6 | fails on v0.19.4 (4 failing of 4) |
 | P93 | MCP queue/new confirm planned again and waited for start.lock on a loaded host, ran past the 8 s budget and registered nothing; the owner pasted `agentctl queue` in a terminal. | `tests/p93-mcp-accept.test.ts` (`P93: (queue\|new) confirm\|refuses`) | 0.19.5 | fails on v0.19.4 (4 failing of 4) |

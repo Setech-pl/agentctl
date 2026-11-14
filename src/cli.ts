@@ -565,7 +565,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
 
   queue
     .command('retry')
-    .description('Put a failed task back at the end of the line; it is tried once more (over the worktree the failed start left).')
+    .description('Put a failed task back at the end of the line; it is tried once more (over the worktree the failed start left; a window the failed start kept open is closed first, its saved screen stays).')
     .argument('<task>', 'task ID; a unique prefix is enough')
     .action(guarded(async (task: string) => line(`${(await retryEntry(contextFor(false, { migrate: false }), task)).task}: back in the queue`)));
 
@@ -1527,7 +1527,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
 
   program
     .command('peek')
-    .description('Print the last lines of the task window (without the agent footer), to read along without attaching. A collapsed Codex question is named with its text (from the session log or the captured expanded view).')
+    .description('Print the last lines of the task window (without the agent footer), to read along without attaching. A collapsed Codex question is named with its text (from the session log or the captured expanded view). A start that failed names its saved last screen (start-failure-screen.txt), and shows it when the window is gone.')
     .argument('<task>', 'task ID; case does not matter and a unique prefix is enough')
     .option('-n, --lines <n>', 'number of lines', String(PEEK_LINES))
     .action(
@@ -1536,6 +1536,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         if (!Number.isInteger(count) || count < 1) throw new AgentctlError(`-n must be a positive whole number (got "${opts.lines}")`);
         const result = await peekTask(contextFor(false), task, count);
         for (const l of result.lines) line(l);
+        if (result.startFailureScreen) line(`start failure screen: ${result.startFailureScreen}`);
       }),
     );
 

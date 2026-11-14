@@ -24,7 +24,7 @@ export type ScreenState = 'overloaded' | 'needs-trust' | 'needs-input' | 'limite
 const matches = (pattern: string, screen: string): boolean => new RegExp(pattern, PATTERN_FLAGS).test(screen);
 
 /** The offset of the last match of pattern in screen (-1: none). */
-const lastMatchIndex = (pattern: string, screen: string): number => {
+export const lastMatchIndex = (pattern: string, screen: string): number => {
   const re = new RegExp(pattern, `${PATTERN_FLAGS}g`);
   let last = -1;
   for (let m = re.exec(screen); m !== null; m = re.exec(screen)) {
@@ -101,6 +101,16 @@ export function starSpinnerActive(screen: string): boolean {
     return STAR_SPINNER.test(lines[i]!);
   }
   return false;
+}
+
+/**
+ * The startup dialog (`dialogPattern`: first-run onboarding, an update notice) is what the screen shows now: an input line below its last trace
+ * means the dialog is history (a tall pane, a capture with scrollback). A human answers it; agentctl never does.
+ */
+export function startupDialogShown(screen: string, settings: { dialogPattern?: string | undefined; readyPattern: string }): boolean {
+  if (!settings.dialogPattern) return false;
+  const at = lastMatchIndex(settings.dialogPattern, screen);
+  return at >= 0 && !(lastMatchIndex(settings.readyPattern, screen) > at);
 }
 
 /** The agent's input box is on the screen: no dialog (permission, question) covers it. */

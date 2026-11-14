@@ -17,6 +17,7 @@ import { applyLinks, checkLinkTargets, planLinks } from './links.ts';
 import { planBatch } from './plan.ts';
 import type { PlanOptions } from './plan.ts';
 import { waitForReady } from './ready.ts';
+import { saveStartFailureScreen } from './start-failure.ts';
 import { RC_CONFIRM, RC_FIRST_TIME } from './remote-control.ts';
 import type { ResolvedSpec } from './spec.ts';
 import { recordFromSpec, renderTaskMd, readTaskRecord, setHeaderField, setHeaderFields, taskDir, taskFile } from './taskstore.ts';
@@ -267,18 +268,31 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
       );
     }
     if (ready.dialog) {
-      const which = spec.agent === 'codex' ? ' ("Update available": choose "Skip until next version")' : '';
-      await setHeaderFields(runner, taskFile(config, spec.window), { prompt_delivery: 'needs-input', prompt_error: `${spec.agent} shows a startup dialog${which}; original prompt remains in TASK.md` });
+      const capture = await saveStartFailureScreen(ctx, spec.window, windowId);
+      const seen = capture ? ` (screen: ${capture})` : '';
+      if (spec.agent === 'codex') {
+        const which = ' ("Update available": choose "Skip until next version")';
+        await setHeaderFields(runner, taskFile(config, spec.window), { prompt_delivery: 'needs-input', prompt_error: `${spec.agent} shows a startup dialog${which}; original prompt remains in TASK.md${seen}` });
+        throw new AgentctlError(
+          `${spec.task}: ${spec.agent} shows a startup dialog${which} – attach: ${attachHint(config)}, answer it in window ${spec.window}`,
+          `agentctl never answers that dialog. The window stays open and the prompt was not sent; once the agent shows its input, watch will automatically deliver it once ready: ${sendHint}. ` +
+            'Task windows start with the startup update check disabled (-c check_for_update_on_startup=false), so a current Codex does not show it.',
+        );
+      }
+      // P95: Claude Code's first-run onboarding (a fresh CLAUDE_CONFIG_DIR: the claude-glm wrapper has its own) is a wait for the owner, not a failed start.
+      const line = `${spec.agent} first-run onboarding – finish it once in the window, ${config.board.returnKey ?? 'Ctrl-b l'} back to board`;
+      await setHeaderFields(runner, taskFile(config, spec.window), { prompt_delivery: 'needs-input', prompt_error: `${line}; trust and the prompt follow by themselves${seen}` });
       throw new AgentctlError(
-        `${spec.task}: ${spec.agent} shows a startup dialog${which} – attach: ${attachHint(config)}, answer it in window ${spec.window}`,
-        `agentctl never answers that dialog. The window stays open and the prompt was not sent; once the agent shows its input, watch will automatically deliver it once ready: ${sendHint}. ` +
-          (spec.agent === 'codex' ? 'Task windows start with the startup update check disabled (-c check_for_update_on_startup=false), so a current Codex does not show it.' : ''),
+        `${spec.task}: ${line} – attach: ${attachHint(config)}, window ${spec.window}`,
+        `agentctl never answers that dialog. The window stays open and the prompt was not sent; once the agent shows its input, watch will automatically deliver it once ready (after the folder-trust dialog, which also waits for you): ${sendHint}.`,
       );
     }
     if (!ready.ready) {
-      await setHeaderFields(runner, taskFile(config, spec.window), { prompt_delivery: 'needs-attention', prompt_error: `${spec.agent} did not become ready; original prompt remains in TASK.md` });
+      const capture = await saveStartFailureScreen(ctx, spec.window, windowId);
+      const seen = capture ? `; last screen: ${capture}` : '';
+      await setHeaderFields(runner, taskFile(config, spec.window), { prompt_delivery: 'needs-attention', prompt_error: `${spec.agent} did not become ready; original prompt remains in TASK.md${seen}` });
       throw new AgentctlError(
-        `${spec.task}: ${spec.agent} did not show its input prompt within ${settings.readyTimeout}s (pattern /${settings.readyPattern}/)`,
+        `${spec.task}: ${spec.agent} did not show its input prompt within ${settings.readyTimeout}s (pattern /${settings.readyPattern}/)${seen}`,
         `The window is still open: "${attachHint(config)}". Once the agent is ready, send the prompt with "agentctl send"; ` +
           `a recognized structural composer is required before any paste; if the prompt looks normal, adjust agents.${spec.agent}.ready_pattern / ready_timeout in ${config.path}.`,
       );

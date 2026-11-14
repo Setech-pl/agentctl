@@ -8,7 +8,7 @@ import { PATTERN_FLAGS } from './config.ts';
 import type { AgentName, AgentSettings } from './config.ts';
 import type { Context } from './context.ts';
 import { withFileLock } from './file-lock.ts';
-import { classifyScreen, inputVisible } from './state.ts';
+import { classifyScreen, inputVisible, startupDialogShown } from './state.ts';
 import { codexQueueKey, areaKey, fieldArea, fieldText, inspectField, pasteImage, readsAs } from './input-field.ts';
 import { eol } from './paste-wrapper.ts';
 import type { DeliveryAgent } from './paste-wrapper.ts';
@@ -427,6 +427,12 @@ async function deliverOnce(ctx: Context, window: string): Promise<'sent' | 'pend
     const settings = ctx.config.agents[record.agent], text = record.pendingPrompt;
     if (record.promptDelivery === 'launching') return 'pending';
     const before = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
+    // P95: a startup dialog (first-run onboarding, an update notice) is the owner's to answer: nothing is pasted into it. Once the owner is through,
+    // a record that waited for it (needs-input) goes back to the ordinary start: folder trust, then the input, then this prompt.
+    if (before.code === 0 && record.promptKind !== 'followup') {
+      if (startupDialogShown(before.stdout, settings)) return 'pending';
+      if (record.promptDelivery === 'needs-input') await setHeaderFields(ctx.runner, file, { prompt_delivery: 'pending', prompt_error: null });
+    }
     const beforeState = classifyScreen(before.stdout, settings);
     const busyFollowup = record.agent !== 'codex' && record.promptKind === 'followup' && settings.acceptsBusyPrompt !== false && ['working', 'background'].includes(beforeState);
     if (before.code !== 0 || !inputVisible(before.stdout, settings) || (!busyFollowup && beforeState !== 'idle')) return 'pending';

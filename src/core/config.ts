@@ -9,7 +9,7 @@ import YAML from 'yaml';
 import { defaultEquivalents, parseEquivalents } from './equivalents.ts';
 import type { Equivalent } from './equivalents.ts';
 import { DEFAULT_WINDOW_ICONS, TASK_STATES } from './icons.ts';
-import { findAutoAcceptFlag } from './safety.ts';
+import { ANTHROPIC_SECRET_ENV, findAutoAcceptFlag } from './safety.ts';
 import type { TaskState } from './state.ts';
 import { AgentctlError, Problems, errorMessage, expandHome, isObject, resolvePath } from './util.ts';
 
@@ -105,8 +105,10 @@ export interface AgentSettings {
 
 export interface GlobalConfig extends Layer {
   providers: ProviderId[];
-  /** Per-provider launch overrides; today only `glm.command` (default `claude-glm`). */
-  providersConfig?: { glm?: { command?: string } };
+  /** Per-provider launch overrides: `glm.command` (default `claude-glm`) and `glm.env` (task environment of glm tasks; default CLAUDE_CODE_AUTO_MODE_SERVER=0). */
+  providersConfig?: { glm?: { command?: string; env?: Record<string, string> } };
+  /** What a start that did not reach the agent's input leaves behind (`start_failure.keep_window`, default true: the window stays for diagnosis). */
+  startFailure?: { keepWindow: boolean };
   warnings?: string[];
   /** Absolute path of the directory that holds per-task cache folders: only the reports the agents write. */
   cache: string;
@@ -349,7 +351,7 @@ export const DEFAULT_AGENT_SETTINGS = Object.fromEntries(DEFAULT_PROVIDERS.map(i
 
 /** The keys accepted in every layer: the global config, `.agentctl.yaml` and (with a few of its own) a spec. docs/configuration.md describes each one. */
 export const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'setup', 'defaults', 'guide', 'review'];
-export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'limited', 'cache', 'state_dir', 'session', 'ui', 'tmux', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git', 'cohort', 'delivery_confirm_s', 'preview', 'providers', 'providers_config'];
+export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'limited', 'cache', 'state_dir', 'session', 'ui', 'tmux', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git', 'cohort', 'delivery_confirm_s', 'preview', 'providers', 'providers_config', 'start_failure'];
 export const LIMITS_KEYS = [...AGENT_NAMES, 'count_external', 'count_report_ready', 'heavy'];
 export const DEFAULTS_KEYS = ['agent', 'model', 'effort', 'remote_control'];
 export const LINK_KEYS = ['from', 'to'];
@@ -997,15 +999,32 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
       checkKeys(raw.providers_config, ['glm'], 'config.providers_config', p);
       const glmConfig = raw.providers_config.glm;
       if (glmConfig !== undefined && glmConfig !== null) {
-        if (!isObject(glmConfig)) p.add('config.providers_config.glm must be a mapping like {command: claude-glm}');
+        if (!isObject(glmConfig)) p.add('config.providers_config.glm must be a mapping like {command: claude-glm, env: {CLAUDE_CODE_AUTO_MODE_SERVER: "0"}}');
         else {
-          checkKeys(glmConfig, ['command'], 'config.providers_config.glm', p);
+          checkKeys(glmConfig, ['command', 'env'], 'config.providers_config.glm', p);
           const command = parseString(glmConfig.command, 'config.providers_config.glm.command', p);
+          const glm: { command?: string; env?: Record<string, string> } = {};
           if (command) {
             if (/\s/.test(command.trim())) p.add('config.providers_config.glm.command must be one executable name or path, without arguments');
-            else providersConfig = { glm: { command } };
+            else glm.command = command;
           }
+          if (glmConfig.env !== undefined) {
+            glm.env = parseEnv(glmConfig.env, 'config.providers_config.glm.env', p);
+            for (const name of ANTHROPIC_SECRET_ENV) if (name in glm.env) p.add(`config.providers_config.glm.env.${name}: the Z.ai endpoint and token come only from the claude-glm wrapper; agentctl never sets ${name}`);
+          }
+          if (glm.command !== undefined || glm.env !== undefined) providersConfig = { glm };
         }
+      }
+    }
+  }
+  let startFailure: GlobalConfig['startFailure'];
+  if (raw.start_failure !== undefined && raw.start_failure !== null) {
+    if (!isObject(raw.start_failure)) p.add('config.start_failure must be a mapping like {keep_window: true}');
+    else {
+      checkKeys(raw.start_failure, ['keep_window'], 'config.start_failure', p);
+      if (raw.start_failure.keep_window !== undefined) {
+        if (typeof raw.start_failure.keep_window === 'boolean') startFailure = { keepWindow: raw.start_failure.keep_window };
+        else p.add('config.start_failure.keep_window must be a boolean');
       }
     }
   }
@@ -1214,7 +1233,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
     const configuredUsage = usageMap[`${id}_dir`] !== undefined || ['warn', 'critical', 'queue_hold'].some(k => { const values = usageMap[k]; return isObject(values) && values[id] !== undefined; });
     if (agentMap[id] !== undefined || (isObject(raw.limits) && raw.limits[id] !== undefined) || configuredUsage) warnings.push(`${id} is not in providers; its agent/limit/usage settings are inactive`);
   }
-  const config: GlobalConfig = { ...layer, providers, ...(providersConfig ? { providersConfig } : {}), cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, ...(ui ? { ui } : {}), ...(tmux ? { tmux } : {}), deliveryConfirmS: deliveryConfirmS as number, limits, countExternal, countReportReady, preview, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, cleanWorktreeCache, cohort, overload, limited, collisions, cancel, usage, guideLang, capacity, disk, git, path: file, loaded: exists };
+  const config: GlobalConfig = { ...layer, providers, ...(providersConfig ? { providersConfig } : {}), ...(startFailure ? { startFailure } : {}), cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, ...(ui ? { ui } : {}), ...(tmux ? { tmux } : {}), deliveryConfirmS: deliveryConfirmS as number, limits, countExternal, countReportReady, preview, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, cleanWorktreeCache, cohort, overload, limited, collisions, cancel, usage, guideLang, capacity, disk, git, path: file, loaded: exists };
   if (mirror) config.mirrorDir = resolvePath(mirror);
   if (warnings.length) config.warnings = warnings;
   return config;
