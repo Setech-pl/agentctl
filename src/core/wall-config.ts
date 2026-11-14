@@ -62,6 +62,43 @@ export function defaultWallSettings(): WallSettings {
   };
 }
 
+/** `*` matches any run of characters; everything else is literal. */
+export function wallGlob(pattern: string, value: string): boolean {
+  if (!pattern.includes('*')) return pattern === value;
+  return new RegExp(`^${pattern.split('*').map((s) => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`).test(value);
+}
+
+/** The channels in display order: `agentctl` first, then by name. */
+export const sortedChannels = (wall: WallSettings): string[] => Object.keys(wall.channels).sort((a, b) => (a === WALL_TOOL_CHANNEL ? -1 : b === WALL_TOOL_CHANNEL ? 1 : a.localeCompare(b)));
+
+/** What a task (`task:<ID>`) reads: `agentctl` and every channel whose authors name it (task:*, task:<ID>, *). */
+export const taskReadableChannels = (wall: WallSettings, task: string): string[] =>
+  sortedChannels(wall).filter((c) => c === WALL_TOOL_CHANNEL || (wall.channels[c]?.authors ?? []).some((a) => a === '*' || wallGlob(a, `task:${task}`)));
+
+/**
+ * A spec's `wall:` key: the channels whose open messages the agent gets (read-only) in its start prompt. Entries are channel names,
+ * patterns (`shared:*`) or `chat:<name>` (the channels of that chat in wall.chats); each must name at least one channel the task reads.
+ */
+export function resolveSpecWall(wall: WallSettings, task: string | undefined, v: unknown, p: Problems): string[] | undefined {
+  if (v === undefined || v === null) return undefined;
+  const list = typeof v === 'string' ? [v] : v;
+  if (!Array.isArray(list) || list.some((x) => typeof x !== 'string' || !x.trim())) { p.add('wall must be a list of WALL channels, like wall: [nc, agentctl, "shared:*"] (or chat:<name> for the channels of a chat)'); return undefined; }
+  const readable = task ? taskReadableChannels(wall, task) : sortedChannels(wall);
+  const picked = new Set<string>();
+  for (const raw of list as string[]) {
+    const entry = raw.trim();
+    const chat = /^chat:(.+)$/.exec(entry)?.[1];
+    if (chat !== undefined && !wall.chats[chat]) { p.add(`wall: "${entry}" is no chat of wall.chats (known: ${Object.keys(wall.chats).map((n) => `chat:${n}`).join(', ') || 'none'})`); continue; }
+    const patterns = chat !== undefined ? wall.chats[chat]!.channels : [entry];
+    const known = sortedChannels(wall).filter((c) => patterns.some((pattern) => wallGlob(pattern, c)));
+    if (!known.length) { p.add(`wall: "${entry}" names no channel of wall.channels (${sortedChannels(wall).join(', ')})`); continue; }
+    const hits = known.filter((c) => readable.includes(c));
+    if (!hits.length) { p.add(`wall: task:${task ?? '<ID>'} does not read ${known.join(', ')} (wall.channels.<channel>.authors must name task:* or task:${task ?? '<ID>'}); it reads ${readable.join(', ')}`); continue; }
+    for (const c of hits) picked.add(c);
+  }
+  return sortedChannels(wall).filter((c) => picked.has(c));
+}
+
 const AUTHOR_PATTERN = /^(?:\*|owner|chat:(?:\*|[a-z0-9][a-z0-9_-]{0,39})|task:(?:\*|[A-Za-z0-9][A-Za-z0-9_*-]{0,39}))$/;
 const CHANNEL_PATTERN = /^[a-z0-9*][a-z0-9*-]{0,39}(?::[a-z0-9*][a-z0-9*-]{0,39})?$/;
 

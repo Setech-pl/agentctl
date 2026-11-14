@@ -48,8 +48,9 @@ export function agentCommandLine(argv: string[]): string {
 /** Every prompt agentctl delivers starts with this line, whatever flags the agent took. A review (review_of) gets the review verdict protocol. */
 export const reportInstructions = (attemptId = 'current', report?: string, review = false) => `Report protocol: write the report${report ? ` to the canonical absolute path ${resolvePath(report)} (filename: ${path.basename(report)})` : ''} for attempt ${attemptId}. Include <!-- agentctl:attempt ${attemptId} --> and append <!-- agentctl:report-end --> as the final line only after the entire report is written.\n${review ? REVIEW_OUTPUT_PROTOCOL : OUTPUT_PROTOCOL}`;
 
-export function promptWithHeader(spec: Pick<ResolvedSpec, 'model' | 'effort' | 'prompt' | 'reviewOf'> & { report?: string }, attemptId?: string): string {
-  return `Model: ${spec.model} · effort ${spec.effort}\n\n${spec.prompt}\n\n${reportInstructions(attemptId, spec.report, spec.reviewOf != null)}`;
+/** `wall`: the read-only WALL context of the spec's `wall:` channels (wall.ts taskWallContext), between the prompt and the report protocol. */
+export function promptWithHeader(spec: Pick<ResolvedSpec, 'model' | 'effort' | 'prompt' | 'reviewOf'> & { report?: string }, attemptId?: string, wall?: string): string {
+  return `Model: ${spec.model} · effort ${spec.effort}\n\n${spec.prompt}\n\n${wall ? `${wall}\n\n` : ''}${reportInstructions(attemptId, spec.report, spec.reviewOf != null)}`;
 }
 
 export const INSTALL_HINTS: Record<string, string> = Object.defineProperties({

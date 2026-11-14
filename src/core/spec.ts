@@ -4,6 +4,7 @@ import { provider, isActive, activeProviders } from './providers/registry.ts';
 import { PROVIDER_IDS } from './providers/types.ts';
 import { classNames, matrixClass, explicitOnlyModel } from './matrix.ts';
 import { normalizeDependencyVerdict, VERDICTS } from './outputs.ts';
+import { resolveSpecWall } from './wall-config.ts';
 import type { OutputVerdict } from './outputs.ts';
 import path from 'node:path';
 import YAML from 'yaml';
@@ -88,6 +89,8 @@ export interface ResolvedSpec {
   touches: string[];
   /** The cohort the task belongs to, as written. Absent: no cohort (there is no default one). */
   cohort?: string;
+  /** `wall:`: the WALL channels whose open messages the start prompt carries (read-only data); resolved from names, patterns and chat:<name>. */
+  wall?: string[];
   /** The order as written in the spec; agent/model/effort above are the effective values. */
   requested: Order;
   /** Why the effective order differs from the requested one. */
@@ -181,7 +184,7 @@ export interface ResolveContext {
 /** Task IDs whose window name is one agentctl uses for itself (`watch`, `board`, `manager`). */
 export const RESERVED_TASK_IDS = ['WATCH', 'BOARD', 'MANAGER'];
 
-export const SPEC_KEYS = ['task', 'agent', 'class', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'review', 'report', 'pin', 'remote_control', 'weight', 'priority', 'after', 'after_verdict', 'touches', 'cohort'];
+export const SPEC_KEYS = ['task', 'agent', 'class', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'review', 'report', 'pin', 'remote_control', 'weight', 'priority', 'after', 'after_verdict', 'touches', 'cohort', 'wall'];
 export const REPO_KEYS = ['path', 'worktree', 'base', 'branch', 'setup'];
 
 function label(raw: RawSpec): string {
@@ -332,6 +335,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     if (problem) p.add(problem);
     else cohort = (h.cohort as string).normalize('NFC');
   }
+  const wall = resolveSpecWall(config.wall, task, h.wall, p);
   const weight = parseEnumValue(h.weight, ['normal', 'heavy'] as const, 'weight', p) ?? 'normal';
   const priority = parseEnumValue(h.priority, PRIORITIES, 'priority', p) ?? 'normal';
   if (raw.prompt === '') p.add('the prompt is empty (write it below the closing "---" of the header)');
@@ -508,6 +512,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   if (review) spec.review = review;
   if (agent && remote && (specRemote ?? remoteDefault)) spec.remoteControl = true;
   if (cohort) spec.cohort = cohort;
+  if (wall?.length) spec.wall = wall;
   if (reportAlt.length > 0) spec.reportAlt = reportAlt;
   validateLaunch(config, spec, spec.env);
   return spec;

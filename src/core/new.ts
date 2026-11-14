@@ -22,7 +22,8 @@ import { RC_CONFIRM, RC_FIRST_TIME } from './remote-control.ts';
 import type { ResolvedSpec } from './spec.ts';
 import { recordFromSpec, renderTaskMd, readTaskRecord, setHeaderField, setHeaderFields, taskDir, taskFile } from './taskstore.ts';
 import { assertAgentSpawnAllowed, openAgentWindow } from './window-guard.ts';
-import { AgentctlError } from './util.ts';
+import { AgentctlError, errorMessage } from './util.ts';
+import { taskWallContext } from './wall.ts';
 import { recordJournal } from './journal.ts';
 import { secretRedactor } from './secret-redaction.ts';
 import { writeSetupProgress } from './setup-progress.ts';
@@ -179,6 +180,9 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
 
     // 4. TASK.md
     const record = recordFromSpec(spec, config, taskStartedMs);
+    // `wall:` – the open WALL messages as they are at this start (read-only data in the prompt); a WALL that cannot be read never stops a start.
+    let wallContext: string | undefined;
+    try { wallContext = spec.wall?.length ? taskWallContext(config, spec.task, spec.wall) : undefined; } catch (e) { ctx.info(`${spec.task}: WALL context left out: ${errorMessage(e)}`); }
     record.agentCliVersion = versions[spec.agent] ?? 'unknown';
     // The cohort is made by its first task; a name that exists keeps the spelling it had.
     if (spec.cohort) record.cohort = (await touchCohort(ctx, spec.cohort)).name;
@@ -186,7 +190,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
     await withStartLock(ctx, async () => {
       await runner.mkdir(taskDir(config, spec.window));
       await runner.writeFile(taskFile(config, spec.window), renderTaskMd(record, spec.prompt));
-      await queuePrompt(ctx, record, promptWithHeader(spec, record.attemptId), 'launching');
+      await queuePrompt(ctx, record, promptWithHeader(spec, record.attemptId, wallContext), 'launching');
     });
     // The agent's own folder: only the report goes there (agentctl's state is in state_dir).
     await runner.mkdir(path.dirname(spec.report));
@@ -297,7 +301,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
           `a recognized structural composer is required before any paste; if the prompt looks normal, adjust agents.${spec.agent}.ready_pattern / ready_timeout in ${config.path}.`,
       );
     }
-    if (runner.dryRun) await tmux.submitPrompt(spec.window, promptWithHeader(spec, record.attemptId));
+    if (runner.dryRun) await tmux.submitPrompt(spec.window, promptWithHeader(spec, record.attemptId, wallContext));
     const delivery = runner.dryRun ? 'sent' : await deliverPendingPrompt(ctx, spec.window);
     ctx.info(`${spec.task}: ${delivery === 'sent' ? 'prompt sent' : DELIVERY_WARNING + '; watch confirms within delivery_confirm_s; do not repeat new'}`);
 
