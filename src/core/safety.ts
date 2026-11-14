@@ -57,5 +57,6 @@ export function launchEnvironment(config: GlobalConfig, order: LaunchOrder & { a
   const merged = launchEnvFor(config, order, { ...settings.env, ...env });
   if (adapter.safety.validate && adapter.usage.homeEnv) merged[adapter.usage.homeEnv] = adapter.usage.home(config, { ...process.env, ...merged });
   const required = adapter.launchEnv(order, settings, merged);
-  return { ...merged, ...required };
+  // AGENTCTL_TASK names the task in every agent's shell: the CLI never acts as the owner there (WALL: wall.ts taskShell).
+  return { ...merged, AGENTCTL_TASK: order.task, ...required };
 }

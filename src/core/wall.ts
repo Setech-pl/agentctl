@@ -7,7 +7,7 @@ import type { Context } from './context.ts';
 import { withFileLock } from './file-lock.ts';
 import { recordJournal } from './journal.ts';
 import { secretRedactor } from './secret-redaction.ts';
-import { readTaskRecordById } from './taskstore.ts';
+import { listTaskRecords, readTaskRecordById } from './taskstore.ts';
 import { AgentctlError, expandHome, formatLocalTime, isObject } from './util.ts';
 import { sortedChannels, WALL_CHANNEL_NAME, WALL_CHAT_NAME, WALL_TOOL_CHANNEL, wallGlob } from './wall-config.ts';
 import type { WallSettings } from './wall-config.ts';
@@ -154,6 +154,39 @@ export function wallIdentity(config: GlobalConfig, opts: { as?: string | undefin
     return { id: 'unknown', kind: 'unknown', note: `"${as}" names no task of agentctl` };
   }
   return { id: 'unknown', kind: 'unknown', note: `"${as}" is not chat:<name> or task:<ID>` };
+}
+
+/**
+ * The CLI runs in an agent's shell: AGENTCTL_TASK (set in every task's launch environment) or a working directory inside the worktree of a
+ * task. There the CLI is never the owner (the owner is the human at the CLI and the board): WALL commands act as task:<ID>. Undefined: an
+ * ordinary shell of the owner.
+ */
+export function taskShell(config: GlobalConfig, env: Record<string, string | undefined>, cwd: string): { task: string; why: string } | undefined {
+  const named = env.AGENTCTL_TASK?.trim();
+  if (named && named !== 'usage-probe') return { task: readTaskRecordById(config, named)?.task ?? named, why: `AGENTCTL_TASK=${named}` };
+  const real = (p: string): string => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+  const here = real(cwd);
+  for (const record of listTaskRecords(config)) {
+    for (const repo of record.repos) {
+      if (!repo.worktree) continue;
+      const tree = real(repo.worktree);
+      if (here === tree || here.startsWith(`${tree}${path.sep}`)) return { task: record.task, why: `the working directory is in the worktree of ${record.task} (${repo.worktree})` };
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The identity of a WALL command of the CLI. In an owner's shell: the owner, or `--as`. In a task's shell (taskShell): task:<ID> only;
+ * `--as` naming anyone else, `--as owner` and `--owner-confirmed` are refused, and a task agentctl does not know reads like an unknown caller.
+ */
+export function cliWallIdentity(config: GlobalConfig, opts: { as?: string | undefined; ownerConfirmed?: boolean | undefined; env: Record<string, string | undefined>; cwd: string }): { who: WallIdentity; note?: string } {
+  const shell = taskShell(config, opts.env, opts.cwd);
+  if (!shell) return { who: wallIdentity(config, { as: opts.as, owner: true }) };
+  const self = `task:${shell.task}`;
+  if (opts.as !== undefined && opts.as.trim() !== self) throw new AgentctlError(`--as ${opts.as} is refused in an agent task's shell (${shell.why}): here the CLI is ${self}, never the owner or a chat`, 'Owner actions (posting as owner, closing decisions, --as chat:<name>) belong to the owner\'s own terminal or board. A task posts through wall_posts in its report or as itself.');
+  if (opts.ownerConfirmed) throw new AgentctlError(`--owner-confirmed is refused in an agent task's shell (${shell.why}): only the owner or a chat for the owner closes a decision`);
+  return { who: wallIdentity(config, { as: self }), note: `agent task shell (${shell.why}): acting as ${self}, not as the owner` };
 }
 
 export const wallChannels = (config: GlobalConfig): string[] => sortedChannels(config.wall);

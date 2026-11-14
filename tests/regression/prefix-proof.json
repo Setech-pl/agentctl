@@ -430,6 +430,19 @@
       "R1: camelCase credentials and passwd are masked in fields, text and URLs"
     ]
   },
+  "WALL-1-f1": {
+    "rev": "19e8192",
+    "outcome": "FAILS",
+    "failed": 4,
+    "passed": 1,
+    "failing": [
+      "with AGENTCTL_TASK the CLI posts and replies as task:<ID>, never as the owner",
+      "refuses --as owner, --as chat:<name> and --owner-confirmed there; a decision stays open",
+      "a working directory inside a task worktree is a task shell too; an unknown AGENTCTL_TASK only reads",
+      "every task's launch environment names the task in AGENTCTL_TASK; the spec env cannot change it",
+      "WALL-1-f1: the owner identity is not usable from an agent task shell"
+    ]
+  },
   "X1": {
     "rev": "v0.18.2",
     "outcome": "IMPORT-ERROR",

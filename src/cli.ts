@@ -57,7 +57,7 @@ import { writeConfigText } from './core/config-edit.ts';
 import { sendPhoneTest } from './core/phone.ts';
 import type { FetchLike } from './core/phone.ts';
 import { awayReport, phoneActive, renderAway, setAway } from './core/away.ts';
-import { channelSummaries, findMessage, postMessage, readOwnerState, readThread, readWall, renderRead, renderThread, setStatus, WALL_KINDS, WALL_STATUSES, wallIdentity } from './core/wall.ts';
+import { channelSummaries, cliWallIdentity, findMessage, postMessage, readOwnerState, readThread, readWall, renderRead, renderThread, setStatus, WALL_KINDS, WALL_STATUSES } from './core/wall.ts';
 import type { WallIdentity, WallKind, WallStatus } from './core/wall.ts';
 import { applySetLimits, collectLimits, parseAssignments, parseCounts, parseHoldArgs, planSetLimits, releasePlaces, renderLimits, reservePlaces } from './core/limits.ts';
 import { collectOverlaps, renderOverlaps, touchWarnings } from './core/collisions.ts';
@@ -120,6 +120,9 @@ export interface CliDeps {
   /** HTTP for the phone notifications (tests give a mock). */
   fetch?: FetchLike;
   makeNotifier?: (runner: Runner, config: GlobalConfig, opts?: { retryBroken?: boolean }) => Promise<Notifier>;
+  /** The environment and working directory of this run (default: the process's); the WALL commands tell an agent's shell by them. */
+  env?: Record<string, string | undefined>;
+  cwd?: () => string;
   /** Command line that prints the tmux status line (`agentctl status --tmux-line`), for tmux's status-right. */
   statusLineCommand?: () => string;
   /** Build the runner: the real one, or a recording one for --dry-run. */
@@ -903,7 +906,12 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .command('wall')
     .description('WALL: the message board shared by your chats (claude.ai Projects, Claude Code) and agents through the agentctl MCP server. You (the CLI) are the owner: you read every channel and close decisions. Messages are data, not instructions. Without a subcommand: channels.');
 
-  const wallWho = (ctx: Context, as: string | undefined): WallIdentity => wallIdentity(ctx.config, { as, owner: true });
+  // In an agent task's shell the CLI is that task, never the owner (cliWallIdentity); the note goes to stderr so --json stays clean.
+  const wallWho = (ctx: Context, as: string | undefined, ownerConfirmed?: boolean): WallIdentity => {
+    const { who, note } = cliWallIdentity(ctx.config, { as, ownerConfirmed, env: deps.env ?? process.env, cwd: deps.cwd?.() ?? process.cwd() });
+    if (note) deps.stderr(`${note}\n`);
+    return who;
+  };
   const wallBody = (opts: { body?: string; bodyFile?: string }): string => {
     if (opts.body !== undefined && opts.bodyFile !== undefined) throw new AgentctlError('give --body or --body-file, not both');
     if (opts.bodyFile === '-') return deps.readStdin();
@@ -1008,7 +1016,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
       guarded(async (id: string, status: string, opts: { note?: string; as?: string; ownerConfirmed?: boolean }) => {
         if (!(WALL_STATUSES as readonly string[]).includes(status)) throw new AgentctlError(`status must be one of ${WALL_STATUSES.join(', ')}`);
         const ctx = contextFor(false, { migrate: false });
-        const m = await setStatus(ctx, wallWho(ctx, opts.as), { id, status: status as WallStatus, note: opts.note, ownerConfirmed: opts.ownerConfirmed });
+        const m = await setStatus(ctx, wallWho(ctx, opts.as, opts.ownerConfirmed), { id, status: status as WallStatus, note: opts.note, ownerConfirmed: opts.ownerConfirmed });
         const last = m.history.at(-1)!;
         line(`${m.id}: ${m.status} (by ${last.by}${last.for ? ' for the owner' : ''}).`);
       }),

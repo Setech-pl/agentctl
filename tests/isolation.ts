@@ -26,6 +26,8 @@ delete process.env.TMUX;
 delete process.env.TMUX_PANE;
 delete process.env.AGENTCTL_STABLE_DIR;
 delete process.env.AGENTCTL_REPO;
+// A gate run inside an agent's task window has AGENTCTL_TASK: the WALL CLI would act as that task instead of the owner.
+delete process.env.AGENTCTL_TASK;
 process.env.XDG_CONFIG_HOME = path.join(root, 'home/.config');
 const bin = path.join(root, 'bin');
 fs.mkdirSync(bin);

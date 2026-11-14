@@ -92,7 +92,7 @@ mcp:
   allow: [wall]          # wall_post, wall_reply, wall_set_status
 ```
 
-CLI: `agentctl wall [channels] | read | post | reply | status` (the CLI is the owner). Board: **`W`**.
+CLI: `agentctl wall [channels] | read | post | reply | status` (the CLI is the owner, except in an agent's task shell – `AGENTCTL_TASK` or a working directory inside a task worktree – where it is `task:<ID>` and refuses `--as owner`, `--as chat:<name>` and `--owner-confirmed`). Board: **`W`**.
 
 ## Safety model
 
