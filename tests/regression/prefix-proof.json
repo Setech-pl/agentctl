@@ -431,29 +431,23 @@
     ]
   },
   "WALL-1-f1": {
-    "rev": "19e8192",
-    "outcome": "FAILS",
-    "failed": 4,
-    "passed": 1,
+    "rev": "v0.20.2",
+    "outcome": "IMPORT-ERROR",
+    "failed": 1,
+    "passed": 0,
     "failing": [
-      "with AGENTCTL_TASK the CLI posts and replies as task:<ID>, never as the owner",
-      "refuses --as owner, --as chat:<name> and --owner-confirmed there; a decision stays open",
-      "a working directory inside a task worktree is a task shell too; an unknown AGENTCTL_TASK only reads",
-      "every task's launch environment names the task in AGENTCTL_TASK; the spec env cannot change it",
-      "WALL-1-f1: the owner identity is not usable from an agent task shell"
+      "tests/wall2-identity.test.ts",
+      "tests/wall2-identity.test.ts"
     ]
   },
   "WALL-1-f2": {
-    "rev": "19e8192",
-    "outcome": "FAILS",
-    "failed": 2,
+    "rev": "v0.20.2",
+    "outcome": "IMPORT-ERROR",
+    "failed": 1,
     "passed": 0,
     "failing": [
-      "plain-prose labels (\"Token: x\", \"Key: …\") are posted",
-      "real secret shapes are still refused and nothing is stored; the finding never repeats the value",
-      "WALL-1-f2: the secret scan keeps real secrets out and lets prose through",
-      "plain-prose labels (\"Token: x\", \"Key: …\") are posted",
-      "real secret shapes are still refused and nothing is stored; the finding never repeats the value"
+      "tests/wall2-secrets.test.ts",
+      "tests/wall2-secrets.test.ts"
     ]
   },
   "X1": {
