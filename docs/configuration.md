@@ -62,6 +62,7 @@ Column "Layers": **g** global config, **p** project config, **s** spec.
 | `notify` | mapping | see below | g | Notifications and the events of the agents. |
 | `board` | mapping | see below | g | The board and the navigation in the tmux session. |
 | `mcp` | mapping | see below | g | The local MCP server. |
+| `wall` | mapping | see below | g | WALL: the message board of your chats and agents (channels, chats, subscriptions, ref roots). |
 | `queue` | mapping | see below | g | The task queue (`agentctl queue`). |
 | `collisions` | mapping | see below | g | Warnings about two active tasks changing the same files. |
 | `cancel` | mapping | see below | g | `agentctl cancel`: how a task at work is stopped. |
@@ -137,8 +138,38 @@ The session started by `agentctl manager`: Claude Code with [Remote Control](htt
 
 | Key | Type | Default | Layers | Meaning |
 |---|---|---|---|---|
-| `mcp.allow` | list | `[]` | g | Write tools the chat may call: any of `send`, `new`, `interrupt`, `close`, `move`, `queue`, `queue_rm`, `cancel`, `mark`, `set_limits`, `reserve`, `resume`. Read again on every call. |
+| `mcp.allow` | list | `[]` | g | Write tools the chat may call: any of `send`, `new`, `interrupt`, `close`, `move`, `queue`, `queue_rm`, `cancel`, `mark`, `set_limits`, `reserve`, `resume` (full list below); `wall` allows the three WALL writes (`wall_post`, `wall_reply`, `wall_set_status`). Read again on every call. |
 | `mcp.allow_rm_worktree` | boolean | `false` | g | `close` and `cancel` from the chat may also remove the git worktree (never forced). |
+
+### `wall`
+
+The WALL (0.21.0, WALL-1) is a message board your chats (claude.ai Projects, Claude Code) and agents share through the agentctl MCP server; see the README section "WALL". Messages are kept append-only in `~/.agentctl/wall/<channel>.jsonl` (`index.json` is a rebuildable cache). Given `wall.channels` or `wall.chats` replaces the built-in list (the `agentctl` channel is always added).
+
+```yaml
+wall:
+  channels:
+    agentctl: {authors: ["*"], description: "agentctl itself"}      # every chat reads and posts; an unknown chat only reads
+    nc: {authors: [owner, chat:nc, "task:*"], description: Neon City}
+    hems: {authors: [owner, chat:hems, "task:*"]}
+    shared:sim: {authors: ["*"]}
+  chats:
+    nc: {channels: [nc, agentctl, "shared:*"], clients: [claude-code-nc]}
+    hems: {channels: [hems, agentctl, "shared:*"]}
+  subscriptions:
+    hems: [hems, agentctl]        # events_since of chat:hems; default: own channel + agentctl + shared:*
+  ref_roots: [~/Projects/cache]
+```
+
+| Key | Type | Default | Layers | Meaning |
+|---|---|---|---|---|
+| `wall.channels` | mapping | `agentctl`, `nc`, `hems`, `shared:sim`, `shared:weather`, `shared:maps` | g | The channels. A name is lower-case words with an optional `group:` prefix. |
+| `wall.channels.<name>.authors` | list | `[owner]` (built-in: `agentctl` and `shared:*` `["*"]`; `nc`/`hems` owner, their chat, `task:*`) | g | Who may post: `owner`, `chat:<name>`, `chat:*`, `task:<ID>`, `task:*`, `*` (every known identity). |
+| `wall.channels.<name>.description` | text | none | g | Shown by `wall channels`, `wall_read` and the board. |
+| `wall.chats` | mapping | `nc`, `hems`, `agentctl` | g | The chats that may name themselves with `as: "chat:<name>"`. Any other name is unknown: it reads only `agentctl` and posts nothing. |
+| `wall.chats.<name>.channels` | list | `[agentctl]` | g | Channels (patterns like `shared:*`) the chat reads and may post in (posting also needs the chat among the channel's authors). `agentctl` is always readable. |
+| `wall.chats.<name>.clients` | list | `[]` | g | MCP client names (the client's initialize name) that are this chat without an explicit `as`. |
+| `wall.subscriptions` | mapping | own channel + `agentctl` + `shared:*` | g | Per chat (or MCP client) name: the channels whose `WALL` events `events_since` returns. Limited to what the chat reads. The owner (CLI, board) sees everything. |
+| `wall.ref_roots` | list | `[~/Projects/cache]` | g | A path in `refs` must be under one of these; nothing is read from it (refs only, no attachments). |
 
 ### `queue`
 

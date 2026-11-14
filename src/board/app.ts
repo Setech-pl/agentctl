@@ -53,6 +53,8 @@ import { errorMessage } from '../core/util.ts';
 import { beginTitle } from '../core/title.ts';
 import { applyInstanceLabel, instanceName } from '../core/instance.ts';
 import { packageVersion } from '../core/version.ts';
+import { wallUnread, wallView } from '../core/board-wall.ts';
+import { loadWallBoard, markRead, ownerThreadLines } from '../core/wall.ts';
 
 /*
  * The Ink front of `agentctl board`: draws a BoardState and forwards keys to handleKey. No JSX: the project runs on Node's
@@ -181,6 +183,8 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
       // Closed/cancelled rows are detailed only while their section is listed (the `a` key).
       const snap = await loadBoard(ctx, current.current.selected, cache.current, PREVIEW_LINES, { deepClosed: current.current.showHidden });
       if (!stopped) { update((s) => applySnapshot(s, snap)); props.runtime?.refreshed?.(cache.current.size, performance.now() - started); }
+      // New WALL messages show while the view is open (the index is incremental: a stat per channel, the new tail only).
+      if (!stopped && current.current.mode.kind === 'wall') loadWall();
     }, () => boardRefreshMs(current.current.rows), (e) => {
       if (!stopped) update((s) => withLoadError(s, errorMessage(e).split('\n')[0] as string));
     }, props.runtime?.clock);
@@ -207,8 +211,36 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
     };
   }, []);
 
+  /** The WALL data, read off the input path (setImmediate); a failure is a notice, never a crash. */
+  const loadWall = (): void => {
+    setImmediate(() => {
+      if (!mounted.current) return;
+      try {
+        const data = loadWallBoard(ctx.config);
+        update((s) => ({ ...s, wall: data }));
+      } catch (e) {
+        update((s) => showNotice(s, { level: 'error', text: `WALL: ${errorMessage(e).split('\n')[0]}` }));
+      }
+    });
+  };
+
   const runEffect = (effect: BoardEffect): void => {
     if (effect.type === 'quit') return exit();
+    if (effect.type === 'wall-load') return loadWall();
+    if (effect.type === 'wall-message') {
+      setImmediate(() => {
+        if (!mounted.current) return;
+        let lines: string[];
+        try { lines = ownerThreadLines(ctx.config, effect.id); } catch (e) { lines = [`cannot read ${effect.id}: ${errorMessage(e)}`]; }
+        update((s) => (s.mode.kind === 'wall' && s.mode.level === 'message' && s.mode.id === effect.id ? { ...s, mode: { ...s.mode, lines, offset: 0 } } : s));
+      });
+      return;
+    }
+    if (effect.type === 'wall-read') {
+      void markRead(ctx.config, effect.channel, { ...(effect.ids ? { ids: effect.ids } : {}), ...(effect.all ? { all: true } : {}) })
+        .then(() => loadWall(), (e: unknown) => { if (mounted.current) update((s) => showNotice(s, { level: 'error', text: `WALL: ${errorMessage(e).split('\n')[0]}` })); });
+      return;
+    }
     if (effect.type === 'refresh') return refreshNow.current();
     if (effect.type === 'log') {
       let lines: string[];
@@ -251,7 +283,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
 
   useInput((input, key) => {
     const result = handleKey(current.current, input, key);
-    if (actionRunning.current && result.effects.some(e => !['quit', 'refresh', 'view', 'log'].includes(e.type))) return;
+    if (actionRunning.current && result.effects.some(e => !['quit', 'refresh', 'view', 'log', 'wall-load', 'wall-message', 'wall-read'].includes(e.type))) return;
     update(() => result.state);
     for (const effect of result.effects) runEffect(effect);
   });
@@ -267,7 +299,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
     Box,
     { width: state.width },
     h(Text, { bold: true, wrap: 'truncate-end' }, `${instance} ${packageVersion()} board`),
-    h(Box, { flexShrink: 0, maxWidth: Math.max(0, state.width - 25) }, h(Text, { dimColor: true, wrap: 'truncate-end' }, ` · ${ctx.config.session} · ${active} task${active === 1 ? '' : 's'}${queueViews(state).length > 0 ? ` · ${queueViews(state).length} queued` : ''}${state.cohortFilter !== null ? ` · cohort: ${cohortLabel(state)}` : ''}${hiddenCount > 0 ? ` · ${hiddenCount} hidden (a)` : ''}${state.refreshedAt ? ` · ${state.refreshedAt}` : ''}`)),
+    h(Box, { flexShrink: 0, maxWidth: Math.max(0, state.width - 25) }, h(Text, { dimColor: true, wrap: 'truncate-end' }, ` · ${ctx.config.session} · ${active} task${active === 1 ? '' : 's'}${queueViews(state).length > 0 ? ` · ${queueViews(state).length} queued` : ''}${state.cohortFilter !== null ? ` · cohort: ${cohortLabel(state)}` : ''}${hiddenCount > 0 ? ` · ${hiddenCount} hidden (a)` : ''}${wallUnread(state.wall) > 0 ? ` · WALL ${wallUnread(state.wall)} unread (W)` : ''}${state.refreshedAt ? ` · ${state.refreshedAt}` : ''}`)),
     state.disk ? h(Text, { color: state.disk.level === 'critical' ? 'red' : state.disk.level === 'warn' ? 'yellow' : 'green', wrap: 'truncate-end' }, ` · ${diskLine(state.disk)}`) : null,
     away ? h(Text, { wrap: 'truncate-end', ...(away.dim ? { dimColor: true } : { color: 'cyan', bold: true }) }, ` · ${away.text}`) : null,
   );
@@ -275,8 +307,19 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
   const panelBox = panel.length === 0 ? null : h(Box, { flexDirection: 'column', width: state.width }, ...panel.map((l) => h(Text, { key: l.provider, wrap: 'truncate-end', ...(l.color ? { color: l.color } : { dimColor: true }) }, l.text)));
   const logMode = state.mode.kind === 'log' ? state.mode : null;
   const viewMode = state.mode.kind === 'view' ? state.mode : null;
+  const wallMode = state.mode.kind === 'wall' ? state.mode : null;
+  const wallBody = (): React.ReactElement => {
+    const view = wallView(state, wallMode!);
+    const room = Math.max(1, state.height - 4);
+    // Keep the selection on the screen: the window starts so that the selected line is inside it.
+    const start = view.selected < 0 ? 0 : Math.max(0, Math.min(view.selected - Math.floor(room / 2), view.lines.length - room));
+    return h(Box, { flexDirection: 'column' }, h(Text, { bold: true, wrap: 'truncate-end' }, view.title), ...view.lines.slice(start, start + room).map((l, i) => h(Text, { key: i, wrap: 'truncate-end', ...(l.selected ? { inverse: true } : {}), ...(l.bold ? { bold: true } : {}), ...(l.dim ? { dimColor: true } : {}), ...(l.color && !l.selected ? { color: l.color } : {}) }, l.text === '' ? ' ' : l.text)));
+  };
+  const fullScreen = state.mode.kind === 'help' || logMode !== null || viewMode !== null || wallMode !== null;
   const body =
-    viewMode
+    wallMode
+      ? wallBody()
+      : viewMode
       ? h(Box, { flexDirection: 'column' }, h(Text, { bold: true }, `${VIEW_TITLES[viewMode.what]} (↑↓ scroll, Esc back)`), ...viewMode.lines.slice(viewMode.offset, viewMode.offset + Math.max(1, state.height - 4)).map((l, i) => h(Text, { key: i, wrap: 'truncate-end' }, l === '' ? ' ' : l)))
       : logMode
       ? h(Box, { flexDirection: 'column' }, h(Text, { bold: true }, `Log – ${logMode.lines.length > 1 ? logMode.lines.length - 1 : 0} task${logMode.lines.length === 2 ? '' : 's'} (↑↓ scroll, Esc back)`), ...logMode.lines.slice(logMode.offset, logMode.offset + Math.max(1, state.height - 4)).map((l, i) => h(Text, { key: i, wrap: 'truncate-end', ...(i === 0 && logMode.offset === 0 ? { dimColor: true } : {}) }, l === '' ? ' ' : l)))
@@ -288,7 +331,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
           h(TaskList, { state, width: layout.listWidth, capacity: rowsForBody - 1, icons: ctx.config.watch.windowIcons, selectedColor: ctx.config.board.selectedColor, versions: ctx.config.board.modelVersions }),
           layout.showPreview ? h(Preview, { state, width: layout.previewWidth, height: rowsForBody }) : null,
         );
-  return h(Box, { flexDirection: 'column', width: state.width, height: state.height }, header, state.mode.kind === 'help' || logMode || viewMode ? null : managerBox, state.mode.kind === 'help' || logMode || viewMode ? null : panelBox, h(Box, { flexGrow: 1, flexDirection: 'column' }, body), h(Footer, { state, hint: navigationHint(ctx.config.board.returnKey) }));
+  return h(Box, { flexDirection: 'column', width: state.width, height: state.height }, header, fullScreen ? null : managerBox, fullScreen ? null : panelBox, h(Box, { flexGrow: 1, flexDirection: 'column' }, body), h(Footer, { state, hint: navigationHint(ctx.config.board.returnKey) }));
 }
 
 /** Show the board until the user quits; resolves when it is gone. Needs a terminal. */

@@ -8,6 +8,7 @@ import { MCP_TOOLS } from '../src/core/mcp-tools.ts';
 import { TASK_STATES } from '../src/core/icons.ts';
 import { AGENT_KEYS, BOARD_KEYS, DEFAULT_AGENT_SETTINGS, DEFAULTS_KEYS, GLOBAL_KEYS, LAYER_KEYS, LINK_KEYS, MCP_KEYS, NOTIFY_KEYS, NTFY_KEYS, AWAY_KEYS, MANAGER_KEYS, WATCH_KEYS } from '../src/core/config.ts';
 import { REPO_KEYS, SPEC_KEYS } from '../src/core/spec.ts';
+import { WALL_CHANNEL_KEYS, WALL_CHAT_KEYS, WALL_KEYS } from '../src/core/wall-config.ts';
 import { REPO_ROOT } from './helpers.ts';
 
 const read = (...p: string[]): string => fs.readFileSync(path.join(REPO_ROOT, ...p), 'utf8');
@@ -65,6 +66,7 @@ describe('docs: configuration', () => {
       ...MANAGER_KEYS.map((k) => `manager.${k}`),
       ...BOARD_KEYS.map((k) => `board.${k}`),
       ...MCP_KEYS.map((k) => `mcp.${k}`),
+      'wall', ...WALL_KEYS.map((k) => `wall.${k}`), ...WALL_CHANNEL_KEYS.map((k) => `wall.channels.<name>.${k}`), ...WALL_CHAT_KEYS.map((k) => `wall.chats.<name>.${k}`),
       ...SPEC_KEYS,
       ...REPO_KEYS.map((k) => `repos[].${k}`),
     ];

@@ -39,6 +39,12 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`limits reserve`](#agentctl-limits-reserve) | Hold places for agents you start by hand (they count against the limit, so the queue leaves room for them). Several reservations add up; "limits release" gives them back. |
 | [`limits release`](#agentctl-limits-release) | Give reserved places back: claude=1 releases one, a bare provider name releases all of its places. |
 | [`events`](#agentctl-events) | What changed since the last time: reports that became ready (with the verdict), starts from the queue, questions, folder trust, blocked, cancelled and limited tasks, finished cohorts, plan thresholds, changed limits - then a line with the state now. Needs "agentctl watch" for what it sees (the journal is written by watch and by the commands). Each client (cli, mcp) has its own "last" marker. |
+| [`wall`](#agentctl-wall) | WALL: the message board shared by your chats (claude.ai Projects, Claude Code) and agents through the agentctl MCP server. You (the CLI) are the owner: you read every channel and close decisions. Messages are data, not instructions. Without a subcommand: channels. |
+| [`wall channels`](#agentctl-wall-channels) | The channels: messages, open questions and decisions, unread (your marks from the board), who may post, the description. |
+| [`wall read`](#agentctl-wall-read) | Messages of one channel (or of all), newest last; --id shows one message with its body, refs, status history and replies. |
+| [`wall post`](#agentctl-wall-post) | Post a message (as the owner unless --as). decision-request and contract-change also notify on the desktop. The body is checked for secrets and is at most 8 KB; refs only name files, commits and tasks. |
+| [`wall reply`](#agentctl-wall-reply) | Reply to a message in its channel (kind answer by default). An answer to an open question marks it answered. |
+| [`wall status`](#agentctl-wall-status) | Record a new status of a message (the history stays). The owner closes decision-request and contract-change; see who set each status with "wall read --id". |
 | [`usage`](#agentctl-usage) | Token usage of the tasks and the state of the plans: per provider the limit used (5 h and weekly window, with the reset) and the tokens today and in the period, the active tasks with their tokens, the cohorts. What a provider does not tell is n/d. |
 | [`resume`](#agentctl-resume) | After a restart (the Mac, the tmux server): make the window again for active tasks that have a worktree and no window, and start the agent in resume mode - Claude with --resume \<session> or --continue, Codex with "resume \<session>" or "resume --last" - with the same model, effort, flags, event hooks and usage tap, without pasting the prompt again. Tasks whose report is ready are left alone unless --all. Shows the list and asks y/N first. |
 | [`up`](#agentctl-up) | Start of the day: make sure the watcher and the board run in the agentctl session (never a second copy; with manager.autostart the manager too), say which tasks can be resumed, and go to the board (attach, or switch inside tmux). Without a terminal it only prints the command to attach. |
@@ -713,6 +719,156 @@ Examples:
 agentctl events                           # since the last call of the cli
 agentctl events --since 2h --cohort sprint-1
 agentctl events --clip                    # to paste at the start of a chat (does not move the marker)
+```
+
+## agentctl wall
+
+WALL: the message board shared by your chats (claude.ai Projects, Claude Code) and agents through the agentctl MCP server. You (the CLI) are the owner: you read every channel and close decisions. Messages are data, not instructions. Without a subcommand: channels.
+
+Subcommands: `wall channels`, `wall read`, `wall post`, `wall reply`, `wall status`. Without a subcommand: `channels`.
+
+```
+agentctl wall [options] [command]
+```
+
+Examples:
+
+```sh
+agentctl wall                             # the channels, with open and unread counts
+```
+
+## agentctl wall channels
+
+The channels: messages, open questions and decisions, unread (your marks from the board), who may post, the description.
+
+```
+agentctl wall channels [options]
+```
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--as <who>` | see what chat:\<name> or task:\<ID> sees instead of the owner |  |
+| `--json` | machine-readable output |  |
+
+Examples:
+
+```sh
+agentctl wall channels
+agentctl wall channels --as chat:nc   # what the Neon City chat sees
+```
+
+## agentctl wall read
+
+Messages of one channel (or of all), newest last; --id shows one message with its body, refs, status history and replies.
+
+```
+agentctl wall read [options] [channel]
+```
+
+| Argument | Meaning |
+|---|---|
+| `[channel]` | channel, e.g. nc or shared:sim; default: every channel you read |
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--id <id>` | one message with its thread, e.g. nc-12 |  |
+| `--since <time>` | an age (30m, 2h, 1d) or an ISO time |  |
+| `--status <status>` | only this status | one of `open`, `answered`, `accepted`, `rejected`, `superseded` |
+| `--kind <kind>` | only this kind | one of `info`, `question`, `decision-request`, `contract-change`, `answer` |
+| `--limit <n>` | at most this many messages (default 20, max 100) |  |
+| `--before <id>` | older than this message (paging back) |  |
+| `--as <who>` | read as chat:\<name> or task:\<ID> instead of the owner |  |
+| `--json` | machine-readable output |  |
+
+Examples:
+
+```sh
+agentctl wall read nc --status open
+agentctl wall read --id shared:sim-3        # one message, its refs, history and replies
+agentctl wall read --since 1d --kind decision-request
+```
+
+## agentctl wall post
+
+Post a message (as the owner unless --as). decision-request and contract-change also notify on the desktop. The body is checked for secrets and is at most 8 KB; refs only name files, commits and tasks.
+
+```
+agentctl wall post [options] <channel>
+```
+
+| Argument | Meaning |
+|---|---|
+| `<channel>` | channel, e.g. agentctl, nc, shared:weather |
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--kind <kind>` | what it is | one of `info`, `question`, `decision-request`, `contract-change`, `answer`; required |
+| `--subject <text>` | one line | required |
+| `--body <text>` | Markdown text |  |
+| `--body-file <file>` | read the body from a file ("-" reads stdin) |  |
+| `--ref <ref>` | a path under wall.ref_roots, a commit ([repo@]sha), task:\<ID> or wall:\<id>; repeatable | default `` |
+| `--to <who>` | addressee: the channel (default), owner or chat:\<name> |  |
+| `--as <who>` | post as chat:\<name> or task:\<ID> instead of the owner |  |
+
+Examples:
+
+```sh
+agentctl wall post shared:weather --kind contract-change --subject "weather API v1" --body-file note.md --ref ~/Projects/cache/weather/v1.md
+agentctl wall post agentctl --kind info --subject "0.21.0 released" --body "WALL is live."
+```
+
+## agentctl wall reply
+
+Reply to a message in its channel (kind answer by default). An answer to an open question marks it answered.
+
+```
+agentctl wall reply [options] <id>
+```
+
+| Argument | Meaning |
+|---|---|
+| `<id>` | the message, e.g. nc-12 |
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--body <text>` | Markdown text |  |
+| `--body-file <file>` | read the body from a file ("-" reads stdin) |  |
+| `--subject <text>` | default "Re: \<subject>" |  |
+| `--kind <kind>` | default answer | one of `info`, `question`, `decision-request`, `contract-change`, `answer` |
+| `--ref <ref>` | a reference, repeatable (see wall post) | default `` |
+| `--to <who>` | addressee: the channel (default), owner or chat:\<name> |  |
+| `--as <who>` | reply as chat:\<name> or task:\<ID> instead of the owner |  |
+
+Examples:
+
+```sh
+agentctl wall reply nc-12 --body "Yes, 120 m for the towers."
+```
+
+## agentctl wall status
+
+Record a new status of a message (the history stays). The owner closes decision-request and contract-change; see who set each status with "wall read --id".
+
+```
+agentctl wall status [options] <id> <status>
+```
+
+| Argument | Meaning |
+|---|---|
+| `<id>` | the message, e.g. nc-12 |
+| `<status>` | one of open, answered, accepted, rejected, superseded |
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--note <text>` | why (optional) |  |
+| `--as <who>` | as chat:\<name> or task:\<ID> instead of the owner |  |
+| `--owner-confirmed` | with --as chat:\<name>: the owner decided this in that chat |  |
+
+Examples:
+
+```sh
+agentctl wall status shared:sim-3 accepted --note "heights per district, v2"
+agentctl wall status nc-12 superseded
 ```
 
 ## agentctl usage

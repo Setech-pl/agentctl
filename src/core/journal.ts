@@ -14,7 +14,7 @@ import { isObject, windowName } from './util.ts';
  * the limits commands write it; `agentctl events` and the MCP tool `events_since` read it for a chat that gets no notifications.
  */
 
-export const JOURNAL_KINDS = ['tmux-lost', 'machine-load-high', 'machine-load-recovered', 'report-outputs', 'review-added', 'review-repinned', 'gc_suggest', 'gc-freed', 'limited-resume', 'needs-attention', 'report-candidate', 'overloaded', 'overload-retry', 'queue-retry', 'mcp-write', 'disk-warn', 'disk-critical', 'disk-ok', 'report-ready', 'queue-start', 'queue-failed', 'setup-started', 'setup-finished', 'setup-failed', 'needs-input', 'needs-trust', 'blocked', 'cancelled', 'limited', 'dead', 'orphan', 'cohort-done', 'usage', 'limits-changed', 'report-detected', 'delivery', 'delivery-queued', 'mcp-applied', 'mcp-failed', 'unblocked'] as const;
+export const JOURNAL_KINDS = ['tmux-lost', 'machine-load-high', 'machine-load-recovered', 'report-outputs', 'review-added', 'review-repinned', 'gc_suggest', 'gc-freed', 'limited-resume', 'needs-attention', 'report-candidate', 'overloaded', 'overload-retry', 'queue-retry', 'mcp-write', 'disk-warn', 'disk-critical', 'disk-ok', 'report-ready', 'queue-start', 'queue-failed', 'setup-started', 'setup-finished', 'setup-failed', 'needs-input', 'needs-trust', 'blocked', 'cancelled', 'limited', 'dead', 'orphan', 'cohort-done', 'usage', 'limits-changed', 'report-detected', 'delivery', 'delivery-queued', 'mcp-applied', 'mcp-failed', 'unblocked', 'wall'] as const;
 export type JournalKind = (typeof JOURNAL_KINDS)[number];
 
 export interface JournalEntry {
@@ -40,6 +40,8 @@ export interface JournalEntry {
   level?: 'warn' | 'critical';
   /** The event went to the phone: `sent`, or `queued` when the first request failed and the watcher retries. Absent: not sent (away off, event not chosen, no phone). */
   phone?: 'sent' | 'queued';
+  /** `wall` only: the message that was posted (never its body). events_since returns it to the clients subscribed to the channel. */
+  wall?: { channel: string; kind: string; subject: string; id: string; from: string };
 }
 
 export const journalPath = (config: Pick<GlobalConfig, 'path'>): string => path.join(path.dirname(config.path), 'journal.jsonl');

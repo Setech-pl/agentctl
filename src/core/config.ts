@@ -12,6 +12,8 @@ import { DEFAULT_WINDOW_ICONS, TASK_STATES } from './icons.ts';
 import { ANTHROPIC_SECRET_ENV, findAutoAcceptFlag } from './safety.ts';
 import type { TaskState } from './state.ts';
 import { AgentctlError, Problems, errorMessage, expandHome, isObject, resolvePath } from './util.ts';
+import { parseWall } from './wall-config.ts';
+import type { WallSettings } from './wall-config.ts';
 
 import { PROVIDER_IDS, DEFAULT_PROVIDERS } from './providers/types.ts';
 import type { ProviderId } from './providers/types.ts';
@@ -164,6 +166,8 @@ export interface GlobalConfig extends Layer {
   capacity: { loadThreshold?: number; snapshot: boolean; staleMinutes: number; sampleLimit: number; thresholds: number[]; codexRefresh: boolean; claudeUsageProbe: boolean; claudeUsageProbeIntervalMinutes: number; kimiUsageProbe?: boolean; kimiUsageProbeModel?: string };
   /** Set by a long-running process (watch, MCP) when the file on disk does not load and the previous settings stay in force. */
   reloadWarning?: string;
+  /** WALL: channels, chats, subscriptions and ref roots (wall-config.ts). */
+  wall: WallSettings;
   /** Where the config was (or would be) read from. */
   path: string;
   loaded: boolean;
@@ -174,7 +178,7 @@ export const NOTIFY_BACKENDS = ['auto', 'terminal-notifier', 'osascript'] as con
 export type NotifyBackend = (typeof NOTIFY_BACKENDS)[number];
 
 /** Write tools of the MCP server; each one must be listed in `mcp.allow` to work. */
-export const MCP_WRITE_TOOLS = ['send', 'answer', 'new', 'interrupt', 'close', 'move', 'queue', 'queue_rm', 'cancel', 'mark', 'set_limits', 'reserve', 'resume', 'away', 'queue_retry', 'queue_up', 'queue_pause', 'queue_resume', 'unblock', 'cohort_add', 'cohort_remove', 'cohort_note', 'cohort_archive', 'hide', 'unhide', 'archive', 'adopt', 'report_from', 'limits_release', 'manager_start', 'manager_stop', 'notify_test', 'gc'] as const;
+export const MCP_WRITE_TOOLS = ['send', 'answer', 'new', 'interrupt', 'close', 'move', 'queue', 'queue_rm', 'cancel', 'mark', 'set_limits', 'reserve', 'resume', 'away', 'queue_retry', 'queue_up', 'queue_pause', 'queue_resume', 'unblock', 'cohort_add', 'cohort_remove', 'cohort_note', 'cohort_archive', 'hide', 'unhide', 'archive', 'adopt', 'report_from', 'limits_release', 'manager_start', 'manager_stop', 'notify_test', 'gc', 'wall_post', 'wall_reply', 'wall_set_status'] as const;
 export type McpWriteTool = (typeof MCP_WRITE_TOOLS)[number];
 /** Permissions of `mcp.allow` that are not a tool of their own: `send_enter` lets `send` with `enter_only` press Enter for the text that a send left in an input field (it does not allow pasting). */
 export const MCP_EXTRA_PERMISSIONS = ['send_enter'] as const;
@@ -185,6 +189,8 @@ export const MCP_ALLOW_GROUPS: Record<string, readonly McpWriteTool[]> = {
   'queue:*': ['queue', 'queue_rm', 'queue_retry', 'queue_up', 'queue_pause', 'queue_resume'],
   cohort: ['cohort_add', 'cohort_remove', 'cohort_note', 'cohort_archive'],
   'manager:*': ['manager_start', 'manager_stop'],
+  /** WALL writes: post, reply, status (WALL-1). */
+  wall: ['wall_post', 'wall_reply', 'wall_set_status'],
 };
 
 export interface BoardSettings {
@@ -351,7 +357,7 @@ export const DEFAULT_AGENT_SETTINGS = Object.fromEntries(DEFAULT_PROVIDERS.map(i
 
 /** The keys accepted in every layer: the global config, `.agentctl.yaml` and (with a few of its own) a spec. docs/configuration.md describes each one. */
 export const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'setup', 'defaults', 'guide', 'review'];
-export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'limited', 'cache', 'state_dir', 'session', 'ui', 'tmux', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git', 'cohort', 'delivery_confirm_s', 'preview', 'providers', 'providers_config', 'start_failure'];
+export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'limited', 'cache', 'state_dir', 'session', 'ui', 'tmux', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git', 'cohort', 'delivery_confirm_s', 'preview', 'providers', 'providers_config', 'start_failure', 'wall'];
 export const LIMITS_KEYS = [...AGENT_NAMES, 'count_external', 'count_report_ready', 'heavy'];
 export const DEFAULTS_KEYS = ['agent', 'model', 'effort', 'remote_control'];
 export const LINK_KEYS = ['from', 'to'];
@@ -853,7 +859,7 @@ function parseMcp(v: unknown): McpSettings {
   for (const name of allow) {
     if (MCP_ALLOW_GROUPS[name]) {
       for (const tool of MCP_ALLOW_GROUPS[name]) if (!mcp.allow.includes(tool)) mcp.allow.push(tool);
-    } else if (!([...MCP_WRITE_TOOLS, ...MCP_EXTRA_PERMISSIONS] as readonly string[]).includes(name)) mcp.warnings.push(`config.mcp.allow: "${name}" is not a write tool of this version, ignored (allowed: ${MCP_WRITE_TOOLS.join(', ')})`);
+    } else if (!([...MCP_WRITE_TOOLS, ...MCP_EXTRA_PERMISSIONS] as readonly string[]).includes(name)) mcp.warnings.push(`config.mcp.allow: "${name}" is not a write tool of this version, ignored (allowed: ${MCP_WRITE_TOOLS.join(', ')}; groups: ${Object.keys(MCP_ALLOW_GROUPS).join(', ')})`);
     else if (!mcp.allow.includes(name as McpPermission)) mcp.allow.push(name as McpPermission);
   }
   if (v.allow_rm_worktree !== undefined) {
@@ -1114,6 +1120,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   const collisions = parseCollisions(raw.collisions, p);
   const cancel = parseCancel(raw.cancel, p);
   const usage = parseUsage(raw.usage, p, activeProviders({ providers }));
+  const wall = parseWall(raw.wall, p);
   let guideLang: 'en' | 'pl' = 'en';
   if (isObject(raw.guide)) {
     checkKeys(raw.guide, ['lang'], 'config.guide', p);
@@ -1233,7 +1240,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
     const configuredUsage = usageMap[`${id}_dir`] !== undefined || ['warn', 'critical', 'queue_hold'].some(k => { const values = usageMap[k]; return isObject(values) && values[id] !== undefined; });
     if (agentMap[id] !== undefined || (isObject(raw.limits) && raw.limits[id] !== undefined) || configuredUsage) warnings.push(`${id} is not in providers; its agent/limit/usage settings are inactive`);
   }
-  const config: GlobalConfig = { ...layer, providers, ...(providersConfig ? { providersConfig } : {}), ...(startFailure ? { startFailure } : {}), cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, ...(ui ? { ui } : {}), ...(tmux ? { tmux } : {}), deliveryConfirmS: deliveryConfirmS as number, limits, countExternal, countReportReady, preview, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, cleanWorktreeCache, cohort, overload, limited, collisions, cancel, usage, guideLang, capacity, disk, git, path: file, loaded: exists };
+  const config: GlobalConfig = { ...layer, providers, ...(providersConfig ? { providersConfig } : {}), ...(startFailure ? { startFailure } : {}), cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, ...(ui ? { ui } : {}), ...(tmux ? { tmux } : {}), deliveryConfirmS: deliveryConfirmS as number, limits, countExternal, countReportReady, preview, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, cleanWorktreeCache, cohort, overload, limited, collisions, cancel, usage, guideLang, capacity, disk, git, wall, path: file, loaded: exists };
   if (mirror) config.mirrorDir = resolvePath(mirror);
   if (warnings.length) config.warnings = warnings;
   return config;

@@ -116,7 +116,7 @@ export interface EventsReport {
   next_cursor: string;
 }
 
-export async function collectEvents(ctx: Context, opts: { client: EventClient; since?: string | undefined; cohort?: string | undefined; keep?: boolean | undefined; cursor?: string; limit?: number; maxBytes?: number }): Promise<EventsReport> {
+export async function collectEvents(ctx: Context, opts: { client: EventClient; since?: string | undefined; cohort?: string | undefined; keep?: boolean | undefined; cursor?: string; limit?: number; maxBytes?: number; /** WALL events only of these channels (the caller's subscriptions); undefined: every channel (the owner). */ wallChannels?: ReadonlySet<string> | undefined }): Promise<EventsReport> {
   const { config, runner } = ctx;
   const now = runner.now();
   const since = parseSince(opts.since, opts.client, config, now);
@@ -156,6 +156,7 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
   while (position.index < all.length && events.length < limit) {
     const event = all[position.index]!;
     if (cohort !== null && (!event.cohort || cohortKey(event.cohort) !== cohortKey(cohort))) { position = { index: position.index + 1, offset: 0 }; continue; }
+    if (event.kind === 'wall' && opts.wallChannels && !opts.wallChannels.has(event.wall?.channel ?? '')) { position = { index: position.index + 1, offset: 0 }; continue; }
     const raw = JSON.stringify(event);
     const prefix = legacyGc[position.index]?.prefix;
     if (position.offset > 0 && ((prefix !== undefined && position.offset > prefix) || position.offset >= raw.length)) {
@@ -251,6 +252,7 @@ const KIND_LABEL: Record<JournalEntry['kind'], string> = {
   'mcp-applied': 'MCP WYKONANE',
   'mcp-failed': 'MCP BŁĄD',
   unblocked: 'ODBLOKOWANE',
+  wall: 'WALL',
 };
 
 export function summaryLine(s: EventsSummary): string {

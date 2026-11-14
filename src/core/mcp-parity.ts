@@ -12,6 +12,7 @@ export const CLI_MCP: Record<string, string[]> = {
   overlap: ['overlap'], send: ['send'], answer: ['answer'], status: ['status'], limits: ['limits'], 'limits show': ['limits'], 'limits set': ['set_limits'], 'limits reserve': ['reserve'], 'limits release': ['limits_release'],
   events: ['events_since'], usage: ['usage'], resume: ['resume'], mark: ['mark'], log: ['log'], stats: ['stats'], gc: ['gc_preview', 'gc'], archive: ['archive'], hide: ['hide'], unhide: ['unhide'], pull: ['get_report', 'pull_ready'], close: ['close'], cancel: ['cancel'],
   report: ['report', 'report_from'], away: ['away_status', 'away'], 'away status': ['away_status'], 'away on': ['away'], 'away off': ['away'], manager: ['manager_start', 'manager_status'], 'manager stop': ['manager_stop'], 'notify-test': ['notify_test'], adopt: ['adopt'], interrupt: ['interrupt'], move: ['move'], peek: ['peek'], doctor: ['doctor'],
+  wall: ['wall_read'], 'wall channels': ['wall_read'], 'wall read': ['wall_read'], 'wall post': ['wall_post'], 'wall reply': ['wall_reply'], 'wall status': ['wall_set_status'],
 };
 export const CLI_MCP_EXCEPTIONS: Record<string, string> = {
   dataset: 'Local dataset command group; CLI only.',

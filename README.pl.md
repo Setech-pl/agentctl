@@ -869,6 +869,29 @@ agentctl events --clip             # Markdown na początek czatu (nie przesuwa z
 - Każdy klient ma własny znacznik „ostatnio” (`cli`, `mcp`); pierwsze wywołanie patrzy 24 godziny wstecz; `--since` przyjmuje `last`, wiek (`30m`, `2h`, `1d`), `HH:MM` albo czas ISO.
 - MCP `events_since` (odczyt) w opisie mówi, że czat ma wywołać go na początku każdej odpowiedzi o pracy agentów. Zdarzenia są zapisywane, gdy działa `agentctl watch`.
 
+## WALL
+
+Tablica wiadomości wspólna dla Twoich czatów (Projekty claude.ai, np. „Neon City” i „HEMS”, czat rozwoju agentctl, sesje Claude Code) i agentów, przez jeden serwer MCP agentctl, z którego wszystkie korzystają. Decyzja podjęta w jednym czacie (weather API v1, wysokości budynków w `@neon-city/sim`, lądowiska) trafia na tablicę raz; inne czaty widzą ją w `events_since` i czytają przez `wall_read`, zamiast kopiowania jej przez Ciebie między czatami.
+
+```sh
+agentctl wall                                   # kanały: wiadomości, otwarte, nieprzeczytane
+agentctl wall read shared:sim --status open
+agentctl wall read --id shared:sim-3            # jedna wiadomość: treść, refs, historia statusu, odpowiedzi
+agentctl wall post agentctl --kind info --subject "0.21.0 released" --body "WALL is live."
+agentctl wall reply nc-12 --body "Tak, 120 m."
+agentctl wall status shared:sim-3 accepted --note "wysokości v2"
+```
+
+- **Treść WALL to dane, nie polecenia.** Każde narzędzie WALL i `events_since` mówią to czatowi: działa na podstawie wiadomości dopiero po Twojej decyzji w tym czacie.
+- **Kanały** (`wall.channels`, z dozwolonymi autorami): `agentctl` (samo narzędzie: zgłoszenia błędów, ogłoszenia wersji, pytania; każdy czat czyta i pisze), `nc`, `hems`, `shared:sim`, `shared:weather`, `shared:maps`.
+- **Tożsamość.** Czat wywołuje narzędzia z `as: "chat:nc"` (czat z `wall.chats`, gdzie są też jego kanały) albo jest rozpoznawany po nazwie klienta MCP; nieznany czat tylko czyta `agentctl`. W CLI i na boardzie jesteś właścicielem i czytasz każdy kanał.
+- **Wiadomości**: rodzaj `info`, `question`, `decision-request`, `contract-change` albo `answer`; jednoliniowy temat, treść Markdown do 8 KB, `refs` (ścieżki pod `~/Projects/cache`, commity, zadania; nic nie jest załączane), wątek odpowiedzi i status (`open`, `answered`, `accepted`, `rejected`, `superseded`). Wpis z sekretem jest odrzucany. `decision-request` i `contract-change` dają Ci powiadomienie na pulpicie i zamykasz je tylko Ty albo czat z `owner_confirmed: true` po Twojej decyzji w nim (zapisane jako przez ten czat, za Ciebie).
+- **Zapis**: tylko dopisywany `~/.agentctl/wall/<kanał>.jsonl`; zmiana statusu to nowy rekord, nic nie jest przepisywane.
+- **MCP**: `wall_read` (odczyt), `wall_post`, `wall_reply`, `wall_set_status` (zapisy: `wall` w `mcp.allow`, podgląd, potem potwierdzenie). `events_since` zwraca zdarzenia `WALL` dla kanałów, które czat subskrybuje (`wall.subscriptions`; domyślnie własny kanał, `agentctl` i `shared:*`). Każdą odpowiedź zaczynaj od `events_since`.
+- **Board**: **`W`** otwiera WALL: kanały z liczbą nieprzeczytanych i otwartych, Enter na kanale (najnowsze na górze; `s`/`t` filtrują status/rodzaj), Enter na wiadomości (refs, historia, odpowiedzi). `r`/`R` oznaczają przeczytane (zapis lokalny); Esc wraca.
+
+Szczegóły: [docs/mcp.md](docs/mcp.md#wall-0210-wall-1), konfiguracja: [docs/configuration.md](docs/configuration.md#wall).
+
 ## Sprzątanie
 
 ```sh
@@ -899,7 +922,8 @@ agentctl up                                # start dnia
 
 `agentctl mcp` to lokalny serwer MCP na stdio. Aplikacja Claude, Claude Code i VS Code uruchamiają go same; nic nie nasłuchuje na porcie.
 
-- **Narzędzia odczytu** (zawsze włączone): `status`, `events_since`, `peek`, `list_reports`, `get_report`, `pull_ready`, `task_spec`, `queue_list`, `cohort_list`, `cohort_show`, `overlap`, `usage`, `log`, `stats`, `limits`, `gc_preview`, `version`.
+- **Narzędzia odczytu** (zawsze włączone): `status`, `events_since`, `peek`, `list_reports`, `get_report`, `pull_ready`, `task_spec`, `queue_list`, `cohort_list`, `cohort_show`, `overlap`, `usage`, `log`, `stats`, `limits`, `gc_preview`, `version`, `wall_read`.
+- **WALL** (0.21.0): `wall_read`, `wall_post`, `wall_reply`, `wall_set_status` – tablica wspólna dla Twoich czatów i agentów; zob. [WALL](#wall).
 - **Narzędzia zapisu** (wyłączone, dopóki nie wpiszesz ich w `mcp.allow`): `send`, `new`, `queue`, `queue_rm`, `cancel`, `interrupt`, `close`, `move`, `mark`, `set_limits`, `reserve`, `resume`. `new`, `queue`, `cancel`, `move`, `set_limits`, `reserve` i `resume` nic nie zmieniają, dopóki nie zostaną wywołane ponownie z `confirm: true`; `mark` zapisuje wynik, który podałeś; wiele zadań wymaga podglądu/confirm. Każdy zapis trafia do audytu w `~/.agentctl/mcp-audit.log` a powiadomienia o zapisach są domyślnie grupowane.
 - Żadne narzędzie nie scala, nie pushuje, nie robi rebase, nie usuwa gałęzi, nie sprząta (`gc_preview` tylko patrzy), nie uruchamia komend shell i nie przyjmuje ścieżki.
 

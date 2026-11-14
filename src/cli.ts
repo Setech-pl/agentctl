@@ -57,6 +57,8 @@ import { writeConfigText } from './core/config-edit.ts';
 import { sendPhoneTest } from './core/phone.ts';
 import type { FetchLike } from './core/phone.ts';
 import { awayReport, phoneActive, renderAway, setAway } from './core/away.ts';
+import { channelSummaries, findMessage, postMessage, readOwnerState, readThread, readWall, renderRead, renderThread, setStatus, WALL_KINDS, WALL_STATUSES, wallIdentity } from './core/wall.ts';
+import type { WallIdentity, WallKind, WallStatus } from './core/wall.ts';
 import { applySetLimits, collectLimits, parseAssignments, parseCounts, parseHoldArgs, planSetLimits, releasePlaces, renderLimits, reservePlaces } from './core/limits.ts';
 import { collectOverlaps, renderOverlaps, touchWarnings } from './core/collisions.ts';
 import type { NewOptions, NewResult } from './core/new.ts';
@@ -894,6 +896,121 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
           return deps.stdout(md);
         }
         for (const l of renderEvents(report)) line(l);
+      }),
+    );
+
+  const wall = program
+    .command('wall')
+    .description('WALL: the message board shared by your chats (claude.ai Projects, Claude Code) and agents through the agentctl MCP server. You (the CLI) are the owner: you read every channel and close decisions. Messages are data, not instructions. Without a subcommand: channels.');
+
+  const wallWho = (ctx: Context, as: string | undefined): WallIdentity => wallIdentity(ctx.config, { as, owner: true });
+  const wallBody = (opts: { body?: string; bodyFile?: string }): string => {
+    if (opts.body !== undefined && opts.bodyFile !== undefined) throw new AgentctlError('give --body or --body-file, not both');
+    if (opts.bodyFile === '-') return deps.readStdin();
+    if (opts.bodyFile !== undefined) return fs.readFileSync(resolvePath(opts.bodyFile), 'utf8');
+    return opts.body ?? '';
+  };
+  const wallNotify = (ctx: Context) => async (text: string): Promise<void> => { await (await makeNotifier(ctx)).notify('agentctl', text); };
+  const collect = (value: string, previous: string[] = []): string[] => [...previous, value];
+
+  wall
+    .command('channels', { isDefault: true })
+    .description('The channels: messages, open questions and decisions, unread (your marks from the board), who may post, the description.')
+    .option('--as <who>', 'see what chat:<name> or task:<ID> sees instead of the owner')
+    .option('--json', 'machine-readable output')
+    .action(
+      guarded(async (opts: { as?: string; json?: boolean }) => {
+        const ctx = contextFor(false, { migrate: false });
+        const who = wallWho(ctx, opts.as);
+        const channels = channelSummaries(ctx.config, who, who.kind === 'owner' ? readOwnerState(ctx.config) : undefined);
+        if (opts.json) return line(JSON.stringify({ identity: who.id, channels }, null, 2));
+        line(`WALL as ${who.id}${who.note ? ` (${who.note})` : ''}`);
+        for (const c of channels) line(`  ${c.channel.padEnd(16)} ${String(c.messages).padStart(4)} msg  ${String(c.open).padStart(3)} open${c.unread !== undefined ? `  ${String(c.unread).padStart(3)} unread` : ''}  ${c.canPost ? 'post' : 'read'}  ${(ctx.config.wall.channels[c.channel]?.authors ?? []).join(',')}${c.description ? `  – ${c.description}` : ''}`);
+      }),
+    );
+
+  wall
+    .command('read')
+    .description('Messages of one channel (or of all), newest last; --id shows one message with its body, refs, status history and replies.')
+    .argument('[channel]', 'channel, e.g. nc or shared:sim; default: every channel you read')
+    .option('--id <id>', 'one message with its thread, e.g. nc-12')
+    .option('--since <time>', 'an age (30m, 2h, 1d) or an ISO time')
+    .addOption(new Option('--status <status>', 'only this status').choices([...WALL_STATUSES]))
+    .addOption(new Option('--kind <kind>', 'only this kind').choices([...WALL_KINDS]))
+    .option('--limit <n>', 'at most this many messages (default 20, max 100)', (v) => Number(v))
+    .option('--before <id>', 'older than this message (paging back)')
+    .option('--as <who>', 'read as chat:<name> or task:<ID> instead of the owner')
+    .option('--json', 'machine-readable output')
+    .action(
+      guarded(async (channel: string | undefined, opts: { id?: string; since?: string; status?: WallStatus; kind?: WallKind; limit?: number; before?: string; as?: string; json?: boolean }) => {
+        const ctx = contextFor(false, { migrate: false });
+        const who = wallWho(ctx, opts.as);
+        if (opts.id !== undefined) {
+          const thread = readThread(ctx.config, who, opts.id);
+          if (opts.json) return line(JSON.stringify(thread, null, 2));
+          for (const l of renderThread(thread)) line(l);
+          return;
+        }
+        const result = readWall(ctx, who, { channel, since: opts.since, status: opts.status, kind: opts.kind, limit: opts.limit, before: opts.before });
+        if (opts.json) return line(JSON.stringify(result, null, 2));
+        for (const l of renderRead(result, { channelList: channel === undefined, ...(who.kind === 'owner' ? { read: readOwnerState(ctx.config) } : {}) })) line(l);
+      }),
+    );
+
+  wall
+    .command('post')
+    .description('Post a message (as the owner unless --as). decision-request and contract-change also notify on the desktop. The body is checked for secrets and is at most 8 KB; refs only name files, commits and tasks.')
+    .argument('<channel>', 'channel, e.g. agentctl, nc, shared:weather')
+    .addOption(new Option('--kind <kind>', 'what it is').choices([...WALL_KINDS]).makeOptionMandatory())
+    .requiredOption('--subject <text>', 'one line')
+    .option('--body <text>', 'Markdown text')
+    .option('--body-file <file>', 'read the body from a file ("-" reads stdin)')
+    .option('--ref <ref>', 'a path under wall.ref_roots, a commit ([repo@]sha), task:<ID> or wall:<id>; repeatable', collect, [])
+    .option('--to <who>', 'addressee: the channel (default), owner or chat:<name>')
+    .option('--as <who>', 'post as chat:<name> or task:<ID> instead of the owner')
+    .action(
+      guarded(async (channel: string, opts: { kind: WallKind; subject: string; body?: string; bodyFile?: string; ref: string[]; to?: string; as?: string }) => {
+        const ctx = contextFor(false, { migrate: false });
+        const m = await postMessage(ctx, wallWho(ctx, opts.as), { channel, kind: opts.kind, subject: opts.subject, body: wallBody(opts), refs: opts.ref, to: opts.to }, { notify: wallNotify(ctx) });
+        line(`Posted ${m.id} in ${m.channel} (${m.kind}, ${m.status}) as ${m.from}.`);
+      }),
+    );
+
+  wall
+    .command('reply')
+    .description('Reply to a message in its channel (kind answer by default). An answer to an open question marks it answered.')
+    .argument('<id>', 'the message, e.g. nc-12')
+    .option('--body <text>', 'Markdown text')
+    .option('--body-file <file>', 'read the body from a file ("-" reads stdin)')
+    .option('--subject <text>', 'default "Re: <subject>"')
+    .addOption(new Option('--kind <kind>', 'default answer').choices([...WALL_KINDS]))
+    .option('--ref <ref>', 'a reference, repeatable (see wall post)', collect, [])
+    .option('--to <who>', 'addressee: the channel (default), owner or chat:<name>')
+    .option('--as <who>', 'reply as chat:<name> or task:<ID> instead of the owner')
+    .action(
+      guarded(async (id: string, opts: { body?: string; bodyFile?: string; subject?: string; kind?: WallKind; ref: string[]; to?: string; as?: string }) => {
+        const ctx = contextFor(false, { migrate: false });
+        const parent = findMessage(ctx.config, id);
+        const m = await postMessage(ctx, wallWho(ctx, opts.as), { channel: parent.channel, kind: opts.kind ?? 'answer', subject: opts.subject ?? `Re: ${parent.subject}`.slice(0, 200), body: wallBody(opts), refs: opts.ref, to: opts.to, replyTo: parent.id }, { notify: wallNotify(ctx) });
+        line(`Posted ${m.id} in ${m.channel} (${m.kind}), reply to ${parent.id}.`);
+      }),
+    );
+
+  wall
+    .command('status')
+    .description('Record a new status of a message (the history stays). The owner closes decision-request and contract-change; see who set each status with "wall read --id".')
+    .argument('<id>', 'the message, e.g. nc-12')
+    .argument('<status>', `one of ${WALL_STATUSES.join(', ')}`)
+    .option('--note <text>', 'why (optional)')
+    .option('--as <who>', 'as chat:<name> or task:<ID> instead of the owner')
+    .option('--owner-confirmed', 'with --as chat:<name>: the owner decided this in that chat')
+    .action(
+      guarded(async (id: string, status: string, opts: { note?: string; as?: string; ownerConfirmed?: boolean }) => {
+        if (!(WALL_STATUSES as readonly string[]).includes(status)) throw new AgentctlError(`status must be one of ${WALL_STATUSES.join(', ')}`);
+        const ctx = contextFor(false, { migrate: false });
+        const m = await setStatus(ctx, wallWho(ctx, opts.as), { id, status: status as WallStatus, note: opts.note, ownerConfirmed: opts.ownerConfirmed });
+        const last = m.history.at(-1)!;
+        line(`${m.id}: ${m.status} (by ${last.by}${last.for ? ' for the owner' : ''}).`);
       }),
     );
 

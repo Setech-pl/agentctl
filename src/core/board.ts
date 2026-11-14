@@ -53,6 +53,8 @@ import { MANAGER_WINDOW } from './windows.ts';
 import { AGENT_NAMES } from './config.ts';
 import type { AgentName, UsageSettings } from './config.ts';
 import { cohortKey, errorMessage } from './util.ts';
+import { openWall, wallKey } from './board-wall.ts';
+import type { WallBoardData, WallKind, WallStatus } from './wall.ts';
 
 /*
  * The model of `agentctl board`: what is on the screen as plain data, and what a key press does to it. The Ink front
@@ -153,7 +155,9 @@ export type BoardMode =
   /** `l`: the history of the tasks (`agentctl log`), scrolled with the arrows. */
   | { kind: 'log'; lines: string[]; offset: number }
   /** `L` (limits), `G` (gc preview): a page of lines from the core, scrolled with the arrows. */
-  | { kind: 'view'; what: ViewKind; lines: string[]; offset: number };
+  | { kind: 'view'; what: ViewKind; lines: string[]; offset: number }
+  /** `W`: the WALL (board-wall.ts): channels, the messages of one (status/kind filters), one message with its thread. */
+  | { kind: 'wall'; level: 'channels' | 'messages' | 'message'; channel: number; message: number; id: string | null; status: WallStatus | null; wallKind: WallKind | null; lines: string[]; offset: number };
 
 export type ViewKind = 'limits' | 'gc' | 'capacity';
 
@@ -204,13 +208,15 @@ export interface BoardState {
   archivedCohorts: string[];
   /** `board.cohorts_recent`: how many of the most recently active cohorts the `k` choice lists before "starsze…". */
   cohortsRecent: number;
+  /** The WALL as the owner sees it; null until the WALL view (W) loaded it. */
+  wall: WallBoardData | null;
 }
 
 /** The cursor stands on the line of the manager (it is no task: Enter goes to its window). */
 export const MANAGER_SELECT = '@manager';
 
 export function initialBoardState(width: number, height: number): BoardState {
-  return { rows: [], selected: null, mode: { kind: 'list' }, notice: null, preview: null, width, height, refreshedAt: null, busy: null, loadError: null, quit: false, showFinished: false, showHidden: false, queue: [], queuePaused: false, cohortFilter: null, folded: [], disk: null, plans: null, resumable: [], away: null, manager: null, archivedCohorts: [], cohortsRecent: 10 };
+  return { rows: [], selected: null, mode: { kind: 'list' }, notice: null, preview: null, width, height, refreshedAt: null, busy: null, loadError: null, quit: false, showFinished: false, showHidden: false, queue: [], queuePaused: false, cohortFilter: null, folded: [], disk: null, plans: null, resumable: [], away: null, manager: null, archivedCohorts: [], cohortsRecent: 10, wall: null };
 }
 
 /** What the front has to do after a key press. */
@@ -238,6 +244,10 @@ export type BoardEffect =
   | { type: 'log' }
   /** `L`, `G`: load the lines of a view. */
   | { type: 'view'; what: ViewKind }
+  /** `W`: (re)load the WALL data; Enter on a message: its lines; the owner's read marks (local). */
+  | { type: 'wall-load' }
+  | { type: 'wall-message'; id: string }
+  | { type: 'wall-read'; channel: string; ids?: string[]; all?: boolean }
   /** The selection moved: load the preview of the new one now instead of at the next refresh. */
   | { type: 'refresh' }
   | { type: 'quit' };
@@ -403,6 +413,7 @@ function listKey(state: BoardState, input: string, key: KeyPress): KeyResult {
     if (markable) return stay(withNotice(state, 'info', `${picked.task}: marking it ${result}…`), [{ type: 'mark', task: picked.task, result }]);
     if (input !== 'p') return stay(withNotice(state, 'error', 'o / p / f mark the result of a finished task (one with a report, or without a window): select one first.'));
   }
+  if (input === 'W') return openWall(state);
   if (input === 'w') {
     const on = !(state.away?.on ?? false);
     return stay({ ...state, notice: null, mode: { kind: 'confirm', action: 'away', task: on ? 'on' : 'off' } });
@@ -641,6 +652,8 @@ export function handleKey(state: BoardState, input: string, key: KeyPress): KeyR
       return logKey(state, state.mode, input, key);
     case 'view':
       return viewKey(state, state.mode, input, key);
+    case 'wall':
+      return wallKey(state, state.mode, input, key);
   }
 }
 
@@ -896,6 +909,9 @@ export async function runBoardEffect(runner: Runner, config: GlobalConfig, effec
       case 'refresh':
       case 'log':
       case 'view':
+      case 'wall-load':
+      case 'wall-message':
+      case 'wall-read':
       case 'quit':
         return { level: 'info', text: '' };
     }
@@ -1161,7 +1177,7 @@ export function visibleRows(state: BoardState, capacity: number): { rows: BoardR
 
 // ---- texts
 
-export const KEY_HINTS = 'm M move i int c/r pull x close X cancel k cohort h hide l log L G R w u/d/p ?';
+export const KEY_HINTS = 'm M move i int c/r pull x close X cancel k cohort h hide l log L G W R w u/d/p ?';
 
 export const HELP_LINES: string[] = [
   'agentctl board',
@@ -1197,10 +1213,10 @@ export const HELP_LINES: string[] = [
   '  R           resume the tasks under "Do wznowienia" (asks first)',
   '  w           away on or off (asks first): notifications to the phone',
   '  h           hide the task (or show a hidden one); nothing is closed or removed',
-  '  z           open or close the "Finished" section (tasks without a window)',
-  '  a           list hidden tasks too (dimmed, marked ·)',
+  '  z / a       open or close "Finished" / list hidden tasks too (dimmed, ·)',
   '  u           (on a queued task) move it to the front',
   '  d           (on a queued task) remove it (asks first)',
+  '  W           the WALL: channels → messages → one message; s/t filter, r/R read',
   '  p           pause or resume the queue (nothing new starts while paused)',
   '  ⚠           first column: another active task changes the same files',
   '  q           leave the board; the agents keep running',
