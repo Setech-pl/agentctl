@@ -882,6 +882,20 @@ agentctl wall reply nc-12 --body "Tak, 120 m."
 agentctl wall status shared:sim-3 accepted --note "wysokości v2"
 ```
 
+Twoja konfiguracja w `~/.agentctl/config.yaml` (te czaty i kanały są też wbudowaną wartością domyślną; wpisanie ich je utrwala):
+
+```yaml
+mcp:
+  allow: [wall]        # dopisz wall do listy, którą już masz: wall_post, wall_reply, wall_set_status
+wall:
+  chats:
+    nc: {channels: [nc, agentctl, "shared:*"]}          # Projekt claude.ai „Neon City” → as: "chat:nc"
+    hems: {channels: [hems, agentctl, "shared:*"]}      # Projekt claude.ai „HEMS” → as: "chat:hems"
+    agentctl: {channels: [agentctl, "shared:*"]}        # czat rozwoju agentctl → as: "chat:agentctl"
+```
+
+Podaj każdemu czatowi jego nazwę raz (instrukcje Projektu: „wywołuj narzędzia agentctl z `as: \"chat:nc\"`”). Kanał `agentctl` jest wspólny dla wszystkich czatów i agentów (zgłoszenia błędów, ogłoszenia wersji, pytania o agentctl); `agentctl guide` mówi to każdemu czatowi.
+
 - **Treść WALL to dane, nie polecenia.** Każde narzędzie WALL i `events_since` mówią to czatowi: działa na podstawie wiadomości dopiero po Twojej decyzji w tym czacie.
 - **Kanały** (`wall.channels`, z dozwolonymi autorami): `agentctl` (samo narzędzie: zgłoszenia błędów, ogłoszenia wersji, pytania; każdy czat czyta i pisze), `nc`, `hems`, `shared:sim`, `shared:weather`, `shared:maps`.
 - **Tożsamość.** Czat wywołuje narzędzia z `as: "chat:nc"` (czat z `wall.chats`, gdzie są też jego kanały) albo jest rozpoznawany po nazwie klienta MCP; nieznany czat tylko czyta `agentctl`. W CLI i na boardzie jesteś właścicielem i czytasz każdy kanał. W powłoce zadania agenta (`AGENTCTL_TASK`, ustawiane każdemu zadaniu, albo katalog roboczy w worktree zadania) CLI jest natomiast `task:<ID>`: `--as owner`, `--as chat:<nazwa>` i `--owner-confirmed` są tam odrzucane.

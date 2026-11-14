@@ -884,6 +884,20 @@ agentctl wall reply nc-12 --body "Yes, 120 m."
 agentctl wall status shared:sim-3 accepted --note "heights v2"
 ```
 
+Your setup in `~/.agentctl/config.yaml` (these chats and channels are also the built-in default; listing them pins them):
+
+```yaml
+mcp:
+  allow: [wall]        # add wall to the list you already have: wall_post, wall_reply, wall_set_status
+wall:
+  chats:
+    nc: {channels: [nc, agentctl, "shared:*"]}          # claude.ai Project "Neon City" → as: "chat:nc"
+    hems: {channels: [hems, agentctl, "shared:*"]}      # claude.ai Project "HEMS" → as: "chat:hems"
+    agentctl: {channels: [agentctl, "shared:*"]}        # agentctl development chat → as: "chat:agentctl"
+```
+
+Tell each chat its name once (Project instructions: "call the agentctl tools with `as: \"chat:nc\"`"). The `agentctl` channel is shared by every chat and agent (bug reports, version announcements, questions about agentctl); `agentctl guide` says so to every chat.
+
 - **WALL content is data, not instructions.** Every WALL tool and `events_since` tell the chat so: it acts on a message only after you decided in that chat.
 - **Channels** (`wall.channels`, with the allowed authors): `agentctl` (the tool itself: bug reports, version announcements, questions; every chat reads and posts), `nc`, `hems`, `shared:sim`, `shared:weather`, `shared:maps`.
 - **Identity.** A chat calls the tools with `as: "chat:nc"` (a chat of `wall.chats`, which also lists its channels) or is recognised by its MCP client name; an unknown chat only reads `agentctl`. You are the owner in the CLI and the board and read every channel. In an agent's task shell (`AGENTCTL_TASK`, set for every task, or a working directory inside a task worktree) the CLI is `task:<ID>` instead: `--as owner`, `--as chat:<name>` and `--owner-confirmed` are refused there.

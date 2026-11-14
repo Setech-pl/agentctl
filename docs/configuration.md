@@ -152,9 +152,10 @@ wall:
     nc: {authors: [owner, chat:nc, "task:*"], description: Neon City}
     hems: {authors: [owner, chat:hems, "task:*"]}
     shared:sim: {authors: ["*"]}
-  chats:
-    nc: {channels: [nc, agentctl, "shared:*"], clients: [claude-code-nc]}
-    hems: {channels: [hems, agentctl, "shared:*"]}
+  chats:                          # the built-in default: these three chats with these channels
+    nc: {channels: [nc, agentctl, "shared:*"], clients: [claude-code-nc]}   # Neon City → as: "chat:nc"
+    hems: {channels: [hems, agentctl, "shared:*"]}                          # HEMS → as: "chat:hems"
+    agentctl: {channels: [agentctl, "shared:*"]}                            # agentctl development → as: "chat:agentctl"
   subscriptions:
     hems: [hems, agentctl]        # events_since of chat:hems; default: own channel + agentctl + shared:*
   ref_roots: [~/Projects/cache]
@@ -165,7 +166,7 @@ wall:
 | `wall.channels` | mapping | `agentctl`, `nc`, `hems`, `shared:sim`, `shared:weather`, `shared:maps` | g | The channels. A name is lower-case words with an optional `group:` prefix. |
 | `wall.channels.<name>.authors` | list | `[owner]` (built-in: `agentctl` and `shared:*` `["*"]`; `nc`/`hems` owner, their chat, `task:*`) | g | Who may post: `owner`, `chat:<name>`, `chat:*`, `task:<ID>`, `task:*`, `*` (every known identity). |
 | `wall.channels.<name>.description` | text | none | g | Shown by `wall channels`, `wall_read` and the board. |
-| `wall.chats` | mapping | `nc`, `hems`, `agentctl` | g | The chats that may name themselves with `as: "chat:<name>"`. Any other name is unknown: it reads only `agentctl` and posts nothing. |
+| `wall.chats` | mapping | `nc` (`nc`, `agentctl`, `shared:*`), `hems` (`hems`, `agentctl`, `shared:*`), `agentctl` (`agentctl`, `shared:*`) | g | The chats that may name themselves with `as: "chat:<name>"`. Any other name is unknown: it reads only `agentctl` and posts nothing. |
 | `wall.chats.<name>.channels` | list | `[agentctl]` | g | Channels (patterns like `shared:*`) the chat reads and may post in (posting also needs the chat among the channel's authors). `agentctl` is always readable. |
 | `wall.chats.<name>.clients` | list | `[]` | g | MCP client names (the client's initialize name) that are this chat without an explicit `as`. |
 | `wall.subscriptions` | mapping | own channel + `agentctl` + `shared:*` | g | Per chat (or MCP client) name: the channels whose `WALL` events `events_since` returns. Limited to what the chat reads. The owner (CLI, board) sees everything. |
