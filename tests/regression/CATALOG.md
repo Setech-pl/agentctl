@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| P16-f1 | A glm follow-up never got transcript proof (no `delivery_source: transcript`, no queue-acceptance note): the session transcript of a glm task was read with the Codex parser. The release scenario live-p15-send also failed from 0.19.4 because it read the delivery fields of the first prompt while the Codex follow-up was still queued (a scenario defect; the queued Codex path is pinned in the same file). | `tests/p16-queued-proof.test.ts` | 0.20.2 | fails on v0.20.1 (2 failing of 7) |
 | P95 | The first glm task failed its start ("glm did not show its input prompt within 60s"): the wrapper's fresh Claude config shows the first-run onboarding, whose theme line "❯ ✔ Dark mode" also looked like the input box; the owner saw nothing and the window was closed. | `tests/p95-p96-glm-start.test.ts` (`^P95`) | 0.20.1 | fails on v0.20.0 (11 failing of 12) |
 | P96 | A start that did not reach the agent's input closed its window and kept no screen: the owner could not see why it failed; queue_retry had no capture to look at. | `tests/p95-p96-glm-start.test.ts` (`^P96`) | 0.20.1 | fails on v0.20.0 (3 failing of 3) |
 | P94 | `after` read a live author's report before its verdict line was written, announced the dependent blocked and never announced the release when the report said PASS; the owner unblocked it by hand. | `tests/p94-after-verdict.test.ts` | 0.19.6 | fails on v0.19.4 (3 failing of 4) |

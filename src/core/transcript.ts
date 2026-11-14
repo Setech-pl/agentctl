@@ -39,6 +39,9 @@ const TAIL_BYTES = 4 * 1024 * 1024;
 /** Transcripts that were read and did not hold the message, by file, delivery and the size and time they had then. */
 const unchanged = new Map<string, string>();
 
+/** GLM is Claude Code behind the claude-glm wrapper: same transcript shape, same queue records. */
+const claudeShaped = (agent: AgentName) => agent === 'claude' || agent === 'glm';
+
 const fileIdentity = (s: fs.Stats) => `${s.dev}:${s.ino}:${s.birthtimeMs}`;
 
 function readTail(file: string, expectedIdentity: string): string {
@@ -139,7 +142,7 @@ export async function selectTranscriptSession(runner: Runner, config: GlobalConf
   const file = selectionFile(config, window), current = attemptOf(record);
   await withFileLock(`${file}.lock`, async () => {
     try { const selected = JSON.parse(fs.readFileSync(file, 'utf8')); if (selected.attempt === current) return; } catch { /* first session of the attempt */ }
-    const claudeLike = agent === 'claude' || agent === 'glm';
+    const claudeLike = claudeShaped(agent);
     const homeEnv = provider(agent).usage.homeEnv;
     const home = claudeLike ? (homeEnv ? record.env[homeEnv] : undefined) ?? agentHomes(config)[agent] : record.env.CODEX_HOME ?? agentHomes(config).codex;
     const target = claudeLike ? session.transcript ?? record.repos.map(r => path.join(home, 'projects', claudeProjectName(r.worktree), `${session.id}.jsonl`)).find(f => fs.existsSync(f)) : namedRollout(home, session.id);
@@ -184,7 +187,7 @@ export function transcriptMessage(ctx: Context, record: TaskRecord, pending: str
       unchanged.set(key, version);
       if (unchanged.size > 256) unchanged.delete(unchanged.keys().next().value!);
     } catch { continue; }
-    const rows = record.agent === 'claude' ? claudeMessages(text) : codexMessages(text);
+    const rows = claudeShaped(record.agent) ? claudeMessages(text) : codexMessages(text);
     const hits = rows.filter(row => row.kind !== 'uncertain-queue' && row.at >= sinceMs && !row.ambiguous && !row.consumed && (row.enqueuedAt === undefined || row.enqueuedAt >= sinceMs) && sameMessage(row.text, pending, record.agent));
     const uncertain = rows.find(row => row.at >= sinceMs && sameMessage(row.text, pending, record.agent) && (row.kind === 'uncertain-queue' || row.ambiguous || (row.enqueuedAt !== undefined && row.enqueuedAt < sinceMs)));
     const hit = hits.find(row => row.kind === 'user') ?? hits.find(row => row.kind === 'queued') ?? (uncertain ? { ...uncertain, kind: 'uncertain-queue' as const } : undefined);

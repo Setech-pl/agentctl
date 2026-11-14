@@ -26,6 +26,8 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  // 0.20.2
+  { id: 'P16-f1', fixedIn: '0.20.2', symptom: 'A glm follow-up never got transcript proof (no `delivery_source: transcript`, no queue-acceptance note): the session transcript of a glm task was read with the Codex parser. The release scenario live-p15-send also failed from 0.19.4 because it read the delivery fields of the first prompt while the Codex follow-up was still queued (a scenario defect; the queued Codex path is pinned in the same file).', scenarios: [s('p16-queued-proof.test.ts')] },
   // 0.20.1
   { id: 'P95', fixedIn: '0.20.1', symptom: 'The first glm task failed its start ("glm did not show its input prompt within 60s"): the wrapper\'s fresh Claude config shows the first-run onboarding, whose theme line "❯ ✔ Dark mode" also looked like the input box; the owner saw nothing and the window was closed.', scenarios: [s('p95-p96-glm-start.test.ts', '^P95')] },
   { id: 'P96', fixedIn: '0.20.1', symptom: 'A start that did not reach the agent\'s input closed its window and kept no screen: the owner could not see why it failed; queue_retry had no capture to look at.', scenarios: [s('p95-p96-glm-start.test.ts', '^P96')] },
