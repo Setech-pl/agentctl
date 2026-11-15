@@ -1,0 +1,27 @@
+@startuml wall-flow
+skinparam linetype ortho
+hide footbox
+title WALL: cross-chat data, reply and owner decision
+actor Owner
+participant "NC chat" as NC
+participant MCP
+participant Watch
+database "WALL / journal" as Wall
+participant "HEMS chat" as HEMS
+NC -> MCP: wall_post(as: chat:nc, channel: shared:sim, kind: decision-request)
+MCP --> NC: Preview + token
+Owner -> NC: Approve posting
+NC -> MCP: confirm: true, preview_token
+MCP --> NC: Accepted (watch running)
+Watch -> Wall: Revalidate rights / refs / secrets; append post once
+Watch -> Wall: Journal event (header only)
+HEMS -> MCP: events_since(as: chat:hems)
+MCP --> HEMS: WALL id, channel, kind, subject, from (no body)
+HEMS -> MCP: wall_read(as: chat:hems, id)
+MCP --> HEMS: Message + thread + status history (data)
+HEMS -> MCP: wall_reply — preview → owner approval → confirm
+MCP --> HEMS: Accepted
+Watch -> Wall: Append answer; decision remains owner's choice
+Owner -> Wall: CLI wall status ID accepted --note ...
+note over NC,HEMS: Declared chat identity is not authentication.\nSubscriptions and channel authors bound access.\nA chat closes decisions only after owner's decision\nwith owner_confirmed: true; record is for owner.
+@enduml
