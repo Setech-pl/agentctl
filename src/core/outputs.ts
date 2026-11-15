@@ -98,8 +98,12 @@ export interface ReviewVerdict {
 }
 
 /** The verdict a review report carries on its first line, checked against the declared outputs verdict. */
+export function firstReportLine(report: string): string {
+  return report.replace(/<!--[\s\S]*?-->/g, '').replace(/\r\n/g, '\n').split('\n').find(l => l.trim()) ?? '';
+}
+
 export function reviewVerdict(report: string): ReviewVerdict | undefined {
-  const line = report.replace(/\r\n/g, '\n').split('\n').find((l) => /[\p{L}\p{N}]/u.test(l));
+  const line = firstReportLine(report);
   const m = line ? REVIEW_FIRST_LINE.exec(line) : null;
   if (!m) return undefined;
   const token = m[1]!.toUpperCase().replace(/\s+/g, ' ');
@@ -260,7 +264,7 @@ export function normalizeDependencyVerdict(value: string): OutputVerdict | undef
   return ({ PASS: 'PASS', 'PASS WITH FINDINGS': 'PARTIAL', PARTIAL: 'PARTIAL', GO: 'PASS', 'GO-WITH-CHANGES': 'PARTIAL', FAIL: 'FAIL', 'NO-GO': 'FAIL', BLOCKED: 'BLOCKED' } as Record<string, OutputVerdict>)[token];
 }
 export function dependencyVerdict(text: string, review = false): OutputVerdict | undefined {
-  const line = text.replace(/\r\n/g, '\n').split('\n').find(l => l.trim()) ?? '';
+  const line = firstReportLine(text);
   const found = /^\s*(?:#{1,6}\s*)?(?:\*\*)?(?:Werdykt|Verdict):\s*(?:\*\*)?(PASS\s+with\s+findings|GO-WITH-CHANGES|NO-GO|PASS|PARTIAL|FAIL|BLOCKED|GO)(?=$|[\s*—–.:;,])/i.exec(line)?.[1];
   return found ? normalizeDependencyVerdict(found) : review ? reviewVerdict(text) && reviewVerdictAsOutput(reviewVerdict(text)!.first) : undefined;
 }

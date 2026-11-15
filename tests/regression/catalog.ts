@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'H4', fixedIn: '0.22.4', symptom: 'Attempt markers before the verdict blocked dependencies.', scenarios: [s('fix0226-h4.test.ts')] },
   { id: 'HELP-HEIGHT', fixedIn: '0.22.3', symptom: 'Board help overflowed terminal height and overdrew its header.', scenarios: [s('board.test.ts', '^HELP-HEIGHT:')] },
   { id: 'BASE-DEFAULT', fixedIn: '0.22.3', symptom: 'A missing spec base did not identify the repository default branch.', scenarios: [s('worktree-start.test.ts', '^BASE-DEFAULT:')] },
   { id: 'A11', fixedIn: '0.22.2', symptom: 'Unknown WALL identity and own posts are not visibly labelled.', scenarios: [s('a11-wall-visibility.test.ts')] },

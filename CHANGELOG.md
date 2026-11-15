@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- H4: verdict parsing ignores leading comments; report instructions put the attempt marker after the verdict. / Parser werdyktu pomija komentarze; instrukcja umieszcza marker próby po werdykcie.
+
 
 
 ## [0.22.3] - 2026-11-15

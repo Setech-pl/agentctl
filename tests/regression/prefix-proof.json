@@ -158,6 +158,18 @@
       "tests/p73-cache-clean.test.ts"
     ]
   },
+  "H4": {
+    "rev": "v0.22.3",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "H4: comments and attempt markers before verdict do not block dependencies or review",
+      "H4: report protocol puts the attempt marker after the first verdict line",
+      "H4: comments and attempt markers before verdict do not block dependencies or review",
+      "H4: report protocol puts the attempt marker after the first verdict line"
+    ]
+  },
   "HELP-HEIGHT": {
     "rev": "v0.22.2",
     "outcome": "FAILS",
