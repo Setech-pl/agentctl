@@ -41,7 +41,7 @@ import { reportInfo } from './report-detect.ts';
 import { managerView, startManager, stopManager } from './manager.ts';
 import { runDoctor } from './doctor.ts';
 import { sendPhoneTest } from './phone.ts';
-import { recordJournal } from './journal.ts';
+import { recordJournal, readJournal } from './journal.ts';
 import type { GcPlan } from './gc.ts';
 import { applyGc } from './gc.ts';
 import { collectCapacity as collectCapacityFull, capacitySnapshot, snapshotLines } from './capacity.ts';
@@ -2229,6 +2229,19 @@ function compactFacts(value: unknown, prefix = ''): string {
 }
 
 /** One atomic watch publication; readers never probe processes when it is fresh. */
+const ageLine = (at: number, now: number): string => {
+  const minutes = Math.max(0, Math.floor((now - at) / 60000));
+  return `stan z ${formatLocalTime(new Date(at).toISOString()).slice(-5)}, ${minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes}m`} temu`;
+};
+function durableStatus(ctx: Context): string {
+  const entries = readQueue(ctx.config);
+  const latest = new Map<string, ReturnType<typeof readJournal>[number]>();
+  const states = new Set(['queue-start', 'needs-input', 'needs-trust', 'needs-attention', 'limited', 'overloaded', 'report-ready', 'dead', 'cancelled', 'queue-failed']);
+  for (const event of readJournal(ctx.config)) if (event.task && states.has(event.kind)) latest.set(event.task, event);
+  return [`Durable queue (${entries.length}; first 20):`, ...entries.slice(0, 20).map(e => `${e.task}: ${e.status === 'queued' ? 'registered' : e.status}`),
+    'Active tasks from journal/events (last known; no live window probe):',
+    ...[...latest.values()].filter(e => !['dead', 'cancelled', 'queue-failed'].includes(e.kind)).slice(-20).map(e => `${e.task}: ${e.kind} (${formatLocalTime(e.at)})`)].join('\n');
+}
 const stateSnapshotPath = (ctx: Context) => path.join(ctx.config.stateDir, 'mcp-state-snapshot.json');
 export async function publishMcpSnapshot(ctx: Context, rows?: StatusRow[], at = ctx.runner.now()): Promise<void> {
   if (ctx.runner.dryRun) return;
@@ -2265,8 +2278,9 @@ function snapshotRead(ctx: Context, name: string, args: Record<string, unknown>)
     if (args.project !== undefined) return undefined;
     const snap = JSON.parse(fs.readFileSync(stateSnapshotPath(ctx), 'utf8'));
     const age = ctx.runner.now() - snap.at;
+    if (name === 'status' && snap.version === 1 && age > 300000) return ok(`${ageLine(snap.at, ctx.runner.now())}\nSnapshot starszy niż 5 min; krótki fallback z kolejki i dziennika zamiast starej tabeli.\n${durableStatus(ctx)}`);
     if (snap.version !== 1 || age < 0 || age >= 2 * ctx.config.watch.interval * 1000 || snap.configHash !== createHash('sha256').update(JSON.stringify(ctx.config)).digest('hex')) return undefined;
-    const note = `Watch snapshot age: ${(age / 1000).toFixed(1)} s.`;
+    const note = `${ageLine(snap.at, ctx.runner.now())}; Watch snapshot age: ${(age / 1000).toFixed(1)} s.`;
     const json = args.format === 'json' || args.detail === true;
     let data: unknown, text = '';
     const fits = (r: { cohort?: string | null }) => args.cohort === undefined || cohortKey(r.cohort ?? '') === cohortKey(String(args.cohort));
@@ -2283,8 +2297,8 @@ function snapshotRead(ctx: Context, name: string, args: Record<string, unknown>)
     } else if (name === 'capacity') { data = snap.capacity; text = [diskLine(snap.capacity.disk), ...snapshotLines(capacitySnapshot(snap.capacity))].join('\n'); }
     else if (name === 'limits') { data = snap.limits; text = snap.limits.providers.map((p: {agent: string; used: number; limit: number; free: number; reserved: number; queued: number; queueHold: number | null}) => `${p.agent}: used=${p.used} limit=${p.limit ?? 'n/d'} free=${p.free ?? 'n/d'} reserved=${p.reserved} queued=${p.queued} queue_hold=${holdText(p.queueHold)}`).join('\n'); }
     else { data = snap[name === 'config_show' ? 'config' : 'doctor']; text = JSON.stringify(data, null, 2); }
-    if (json || ['config_show', 'doctor'].includes(name)) return ok(JSON.stringify(Array.isArray(data) ? data.map(item => ({...item, snapshot_age_s: age / 1000})) : { snapshot_age_s: age / 1000, ...(data as object) }, null, 2));
-    return ok(`${text}\n${note}`);
+    if (json || ['config_show', 'doctor'].includes(name)) return ok(JSON.stringify(Array.isArray(data) ? data.map(item => ({...item, snapshot_age_s: age / 1000})) : { snapshot_age_s: age / 1000, snapshot_age: ageLine(snap.at, ctx.runner.now()), ...(data as object) }, null, 2));
+    return ok(`${note}\n${text}`);
   } catch { return undefined; }
 }
 const snapshotTools = new Set(['status', 'queue_list', 'capacity', 'limits', 'config_show', 'doctor']);
@@ -2341,21 +2355,22 @@ for (const tool of MCP_TOOLS) {
 }
 
 /** Deadline also covers formatting, capacity footers and notification work. */
-const lastReads = new WeakMap<McpDeps, Map<string, ToolResult>>();
+const lastReads = new WeakMap<McpDeps, Map<string, {at: number; result: ToolResult}>>();
 for (const tool of MCP_TOOLS) {
   const run = tool.run;
   tool.run = async (deps, args) => {
     const key = `${tool.name}:${JSON.stringify(args)}`;
-    const saved = lastReads.get(deps) ?? new Map<string, ToolResult>(); lastReads.set(deps, saved);
+    const saved = lastReads.get(deps) ?? new Map<string, {at: number; result: ToolResult}>(); lastReads.set(deps, saved);
     return withResponseBudget(async () => {
       const result = await run(deps, args);
-      if (tool.kind === 'read' && !result.isError) { if (saved.size >= 100) saved.delete(saved.keys().next().value!); saved.set(key, result); }
+      if (tool.kind === 'read' && !result.isError) { if (saved.size >= 100) saved.delete(saved.keys().next().value!); saved.set(key, {at: deps.context(() => {}).runner.now(), result}); }
       return result;
     }, () => {
       const ctx = deps.context(() => {});
       const entries = readQueue(ctx.config);
       const queue = `Durable queue (${entries.length}; first 20):\n` + entries.slice(0, 20).map(e => `${e.task}: ${e.status === 'queued' ? 'registered' : e.status}`).join('\n');
       const cached = saved.get(key);
+      const stale = cached && ctx.runner.now() - cached.at > 300000;
       let inbox = '';
       if (tool.name === 'events_since') {
         try {
@@ -2367,9 +2382,9 @@ for (const tool of MCP_TOOLS) {
           } else if (who.kind === 'unknown') inbox = 'unknown chat – only channel agentctl visible; pass as: "chat:<name>"\n';
         } catch { /* retain the durable bounded response even when WALL storage is unavailable */ }
       }
-      const prefix = `${inbox}Partial result: 8 s response budget exhausted; ${cached ? 'last cached response follows' : 'durable queue snapshot follows'}. Retry reads; retry a confirm only with the same preview_token.\n`;
+      const prefix = `${cached ? ageLine(cached.at, ctx.runner.now()) + '\n' : ''}${inbox}Partial result: 8 s response budget exhausted; ${stale ? 'cache older than 5 min; short queue/journal fallback replaces stale full table' : cached ? 'last cached response follows' : 'durable queue snapshot follows'}. Retry reads; retry a confirm only with the same preview_token.\n`;
       const wireBudget = ctx.config.mcp.maxResponseKb * 1024;
-      let text = prefix + [queue, cached?.text].filter(Boolean).join('\n');
+      let text = prefix + (stale || !cached ? durableStatus(ctx) : [queue, cached.result.text].join('\n'));
       while (responseWireBytes(ok(text)) > wireBudget && text.length > 1) text = text.slice(0, Math.max(1, Math.floor(text.length * 0.8)));
       return { text };
     }, deps.budgetClock);

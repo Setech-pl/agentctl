@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- H2: cached text starts with its age; status older than five minutes uses a short queue/journal fallback. / Odpowiedź z cache zaczyna się wiekiem; status starszy niż pięć minut pokazuje krótki fallback kolejki i dziennika.
+
 - H3: queue previews identify pending queue_rm requests; replace: true removes and re-adds in one watch step. / Podgląd wskazuje oczekujące queue_rm; replace: true usuwa i dodaje spec w jednym ticku watch.
 
 - H5: report reads expose outputs findings; duplicate blocks select the last valid block with a warning. / Odczyt raportu pokazuje błędy outputs; duplikaty wybierają ostatni poprawny blok z ostrzeżeniem.

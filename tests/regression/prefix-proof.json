@@ -168,6 +168,18 @@
       "H1: a never-started queue_rm is cancelled before watch observes windows or publishes a snapshot"
     ]
   },
+  "H2": {
+    "rev": "v0.22.3",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "H2: snapshot starts with age and a three-hour snapshot returns queue/journal fallback",
+      "H2: response-budget cache carries its original age and drops old full tables",
+      "H2: snapshot starts with age and a three-hour snapshot returns queue/journal fallback",
+      "H2: response-budget cache carries its original age and drops old full tables"
+    ]
+  },
   "H3": {
     "rev": "v0.22.3",
     "outcome": "FAILS",

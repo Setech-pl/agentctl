@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| H2 | Budget fallback presented a three-hour cached status as current. | `tests/fix0226-h2.test.ts` | 0.22.4 | fails on v0.22.3 (2 failing of 2) |
 | H3 | A pending queue_rm prevented replacing the same task ID. | `tests/fix0226-h3.test.ts` | 0.22.4 | fails on v0.22.3 (1 failing of 1) |
 | H5 | Report summaries hid outputs findings and duplicate blocks discarded all outputs. | `tests/fix0226-h5.test.ts` | 0.22.4 | fails on v0.22.3 (2 failing of 2) |
 | H1 | Deferred queue removal published a vanished-window event before cancellation. | `tests/fix0226-h1.test.ts` | 0.22.4 | fails on v0.22.3 (1 failing of 1) |

@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'H2', fixedIn: '0.22.4', symptom: 'Budget fallback presented a three-hour cached status as current.', scenarios: [s('fix0226-h2.test.ts')] },
   { id: 'H3', fixedIn: '0.22.4', symptom: 'A pending queue_rm prevented replacing the same task ID.', scenarios: [s('fix0226-h3.test.ts')] },
   { id: 'H5', fixedIn: '0.22.4', symptom: 'Report summaries hid outputs findings and duplicate blocks discarded all outputs.', scenarios: [s('fix0226-h5.test.ts')] },
   { id: 'H1', fixedIn: '0.22.4', symptom: 'Deferred queue removal published a vanished-window event before cancellation.', scenarios: [s('fix0226-h1.test.ts')] },

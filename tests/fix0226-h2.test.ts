@@ -1,0 +1,41 @@
+import assert from 'node:assert/strict';
+import { it } from 'node:test';
+import { Context } from '../src/core/context.ts';
+import { MCP_TOOLS, publishMcpSnapshot } from '../src/core/mcp-tools.ts';
+import type { McpDeps, ToolResult } from '../src/core/mcp-tools.ts';
+import { recordJournal } from '../src/core/journal.ts';
+import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helpers.ts';
+const scratch = useScratch();
+const drain = async () => { for (let i = 0; i < 30; i++) await new Promise(resolve => setImmediate(resolve)); };
+it('H2: snapshot starts with age and a three-hour snapshot returns queue/journal fallback', async () => {
+  const config = makeConfig(scratch.sub('snapshot-age'), 'capacity: {snapshot: false, codex_refresh: false}\n');
+  const tmux = new FakeTmux(); tmux.add('old', 'Working (esc to interrupt)'); seedTask(config, 'OLD');
+  const runner = new DiskRunner({dryRun: false, respond: tmux.respond});
+  const ctx = new Context(runner, config, () => {}), deps = {context: () => ctx, notify: async () => {}};
+  await publishMcpSnapshot(ctx);
+  const tool = MCP_TOOLS.find(t => t.name === 'status')!;
+  assert.match((await tool.run(deps, {})).text.split('\n')[0]!, /^stan z \d\d:\d\d, 0m temu/);
+  await runner.sleep(3 * 3600000);
+  await recordJournal(ctx, {kind: 'queue-start', task: 'NEW', text: 'new task started'});
+  const read = await tool.run(deps, {});
+  assert.match(read.text.split('\n')[0]!, /3h 0m temu/);
+  assert.match(read.text, /fallback/); assert.match(read.text, /NEW: queue-start/);
+  assert.doesNotMatch(read.text, /OLD claude/);
+});
+it('H2: response-budget cache carries its original age and drops old full tables', async () => {
+  const config = makeConfig(scratch.sub('budget-age'), 'capacity: {snapshot: false, codex_refresh: false}\n');
+  const tmux = new FakeTmux(); tmux.add('old', 'Working (esc to interrupt)'); seedTask(config, 'OLD');
+  let hold = false, release!: () => void; const held = new Promise<void>(yes => {release = yes;});
+  class Runner extends DiskRunner { override async exec(...args: Parameters<DiskRunner['exec']>) {if (hold) await held; return super.exec(...args);} }
+  const runner = new Runner({dryRun: false, respond: tmux.respond}), ctx = new Context(runner, config, () => {});
+  let now = 0; const timers = new Map<() => void, number>();
+  const deps: McpDeps = {context: () => ctx, notify: async () => {}, budgetClock: {now: () => now, schedule: (fn, ms) => {timers.set(fn, now + ms); return () => {timers.delete(fn);};}}};
+  const tool = MCP_TOOLS.find(t => t.name === 'status')!;
+  assert.match((await tool.run(deps, {})).text, /OLD/);
+  await runner.sleep(3 * 3600000); await recordJournal(ctx, {kind: 'queue-start', task: 'CURRENT', text: 'start'});
+  hold = true; let result: ToolResult | undefined; const pending = tool.run(deps, {}).then(r => {result = r;});
+  await drain(); now += 8000; for (const [fn, at] of timers) if (at <= now) fn(); await drain();
+  release(); await pending;
+  assert.match(result!.text.split('\n')[0]!, /3h 0m temu/);
+  assert.match(result!.text, /CURRENT: queue-start/); assert.doesNotMatch(result!.text, /OLD claude/);
+});
