@@ -89,25 +89,30 @@ export function taskTmux(local: Tmux, hosts: HostRuntime, config: GlobalConfig):
   const routed = new Set(['target', 'targetFor', 'newSession', 'newWindow', 'startWindow', 'paneDead', 'respawn', 'typeCommand', 'sendKey', 'pressEnter', 'pasteText', 'submitPrompt', 'capture', 'selectWindow', 'killWindow']);
   return new Proxy(local, {
     get(target, key) {
-      if (key === 'windows') return async () => [...await target.windows(), ...await hosts.windows()];
-      if (key === 'listWindows') return async () => [...await target.windows(), ...await hosts.windows()].map(w => w.plain);
-      if (typeof key === 'string' && routed.has(key)) return (...args: unknown[]) => {
-        const window = String(args[0]);
-        const host = readTaskRecord(config, window)?.host;
-        if (host && key === 'capture' && cachedRequest()) return Promise.resolve(hosts.cachedCapture(host, window));
-        const client = host ? hosts.tmux(host) : target;
-        // A caller may pass the aggregate listing; remote capture/lookup must see only this host's windows.
-        if (host && key === 'capture' && Array.isArray(args[2])) args[2] = (args[2] as WindowInfo[]).filter(w => w.host === host);
-        if (host && key === 'targetFor' && Array.isArray(args[1])) args[1] = (args[1] as WindowInfo[]).filter(w => w.host === host);
-        const result = (client[key as keyof Tmux] as Function).apply(client, args);
-        if (host && key === 'capture') return Promise.resolve(result).then(async screen => {
-          await hosts.rememberCapture(host, window, screen);
-          const record = readTaskRecord(config, window);
-          if (record) await syncRemoteFiles({ runner: hosts.runner, config, hosts } as Context, record);
-          return screen;
-        });
-        return result;
-      };
+      if (key === 'windows' || key === 'listWindows') {
+        const windows = target.windows.bind(target);
+        return async () => { const all = [...await windows(), ...await hosts.windows()]; return key === 'windows' ? all : all.map(w => w.plain); };
+      }
+      if (typeof key === 'string' && routed.has(key)) {
+        const localMethod = Reflect.get(target, key) as Function;
+        return (...args: unknown[]) => {
+          const window = String(args[0]);
+          const host = readTaskRecord(config, window)?.host;
+          if (host && key === 'capture' && cachedRequest()) return Promise.resolve(hosts.cachedCapture(host, window));
+          const client = host ? hosts.tmux(host) : target;
+          // A caller may pass the aggregate listing; remote capture/lookup must see only this host's windows.
+          if (host && key === 'capture' && Array.isArray(args[2])) args[2] = (args[2] as WindowInfo[]).filter(w => w.host === host);
+          if (host && key === 'targetFor' && Array.isArray(args[1])) args[1] = (args[1] as WindowInfo[]).filter(w => w.host === host);
+          const result = (host ? client[key as keyof Tmux] as Function : localMethod).apply(client, args);
+          if (host && key === 'capture') return Promise.resolve(result).then(async screen => {
+            await hosts.rememberCapture(host, window, screen);
+            const record = readTaskRecord(config, window);
+            if (record) await syncRemoteFiles({ runner: hosts.runner, config, hosts } as Context, record);
+            return screen;
+          });
+          return result;
+        };
+      }
       const value = Reflect.get(target, key);
       return typeof value === 'function' ? value.bind(target) : value;
     },

@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- HOST-TMUX-WRAP: keep saved tmux methods stable when consumers wrap them. / Zachowuj stabilne metody tmux przy podpinaniu wrapperów przez konsumentów.
+
 - HOST-MIRROR-ENV: send only provider session-home paths to the remote mirror reader, keeping other task environment values out of its SSH command. / Czytnik kopii raportu dostaje tylko ścieżki sesji dostawców; pozostałe wartości env zadania nie trafiają do jego komendy SSH.
 
 - HOST-LOCAL-IO: avoid host inventory work in local-only instances; retain offline tracking when host config is removed. / Instancje wyłącznie lokalne nie skanują inwentarza hostów; usunięcie configu hosta zachowuje śledzenie offline.

@@ -50,3 +50,21 @@ it('HOST-MIRROR-ENV: mirror command carries session-home paths without copying l
   assert.ok(!script.includes('APP_SECRET'));
   assert.ok(script.includes('/remote/codex') && script.includes('/remote/kimi'));
 });
+
+
+it('HOST-TMUX-WRAP: saved facade methods remain stable when capture, paste or windows are wrapped', async () => {
+  const config = makeConfig(scratch.sub('wrap'));
+  const runner = new DiskRunner({ dryRun: false, respond: (cmd, args) => cmd === 'tmux' && args.includes('list-windows') ? { stdout: '@1\tlocal\ttask' } : { stdout: 'captured' } });
+  const ctx = new Context(runner, config, () => {});
+  for (const key of ['capture', 'pasteText', 'windows'] as const) {
+    const original = ctx.tmux[key].bind(ctx.tmux) as (...args: unknown[]) => Promise<unknown>;
+    let calls = 0;
+    const replacement = async (...args: unknown[]) => {
+      if (++calls > 1) return undefined; // Bound a broken router's recursion deterministically.
+      return original(...args);
+    };
+    Reflect.set(ctx.tmux, key, replacement);
+    await (ctx.tmux[key] as (...args: unknown[]) => Promise<unknown>)('local', 'text');
+    assert.equal(calls, 1, `${key} recursed through its own wrapper`);
+  }
+});
