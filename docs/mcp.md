@@ -21,7 +21,9 @@ Czaty claude.ai mają wspólną nazwę klienta MCP: w `events_since` i WALL trze
 
 ## Read tools
 
-These always work.
+These always work. `status` (also capacity/cohort), `queue_list`, `capacity`, `limits`, `config_show` and non-deep `doctor` use an atomic watch snapshot younger than two ticks, with its age; an unavailable/stale snapshot uses the bounded fallback and says so. `new`/`queue` previews run cheap checks only: base, overlap, worktrees, capacity and disk are checked by watch at accept, with errors in events. `gc`/`gc_preview` can return Accepted while watch prepares the protected plan; read `gc_preview` with the returned `request_id`, then preview `gc` again to obtain its confirmation token. WALL confirms append directly and return their id without waiting for watch.
+
+Odczyty korzystają z atomowego snapshotu watch młodszego niż dwa ticki i podają jego wiek; starszy snapshot uruchamia oznaczony odczyt z budżetem. Podglądy `new`/`queue` robią tanie kontrole, a watch sprawdza bazę, konflikty, worktree, limity i dysk po przyjęciu. GC może zwrócić Accepted: wynik odczytaj przez `gc_preview` z `request_id`, potem ponów podgląd `gc` po token. WALL zapisuje potwierdzenie od razu, bez czekania na watch.
 
 | Tool | Arguments | What it returns |
 |---|---|---|

@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.22.2] - 2026-11-15
+
 - A12: watch announces gaps longer than max(5 min, 10 intervals), including first-tick task changes after restart. / Watch ogłasza przerwy dłuższe niż max(5 min, 10 interwałów) ze zmianami zadań z pierwszego ticka po wznowieniu.
 
 - A11: unknown chat warnings, own-post markers on every WALL channel, and explicit claude.ai identity guidance. / Ostrzeżenia o nieznanym czacie, oznaczenia własnych wpisów na każdym kanale i jawna tożsamość claude.ai.
