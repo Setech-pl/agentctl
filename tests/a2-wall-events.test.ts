@@ -10,7 +10,7 @@ it('A2: shared WALL bypasses cohort; chat cursors survive sessions; open inbox i
   const config = makeConfig(scratch.sub('a2'), 'wall:\n  channels:\n    shared:maps-3: {authors: ["*"]}\n  chats:\n    nc: {channels: [nc, agentctl, "shared:*"]}\n    hems: {channels: [hems, agentctl, "shared:*"]}\n');
   const runner = new DiskRunner({ dryRun: false, respond: new FakeTmux().respond });
   const ctx = new Context(runner, config, () => {});
-  await touchCohort(ctx, '62');
+  await touchCohort(ctx, '62'); await touchCohort(ctx, '63');
   const m = await postMessage(ctx, wallIdentity(config, {as: 'chat:hems'}), { channel: 'shared:maps-3', to: 'chat:nc', kind: 'question', subject: 'maps contract?', body: 'Check maps' });
   const tool = MCP_TOOLS.find(t => t.name === 'events_since')!;
   const deps = () => ({context: () => ctx, notify: async () => {}, clientId: 'claude-ai'});
@@ -22,6 +22,10 @@ it('A2: shared WALL bypasses cohort; chat cursors survive sessions; open inbox i
   assert.match(second.text, /WALL do Ciebie \(open\)/);
   assert.match(second.text, /maps contract/);
   assert.ok(!second.text.includes('  WALL  '), 'new MCP session uses the chat cursor');
+  const anotherCohort = await tool.run(deps(), {as: 'chat:nc', cohort: '63', format: 'json'});
+  assert.ok(!JSON.parse(anotherCohort.text).events.some((e: any) => e.kind === 'wall'), 'WALL cursor is shared across cohort filters of this chat');
+  config.wall.subscriptions.nc = ['agentctl'];
+  assert.match((await tool.run(deps(), {as: 'chat:nc', cohort: '62'})).text, /maps contract/, 'inbox covers readable channels even when event subscriptions are narrower');
   const other = await tool.run(deps(), {as: 'chat:hems', cohort: '62', format: 'json'});
   assert.ok(JSON.parse(other.text).events.some((e: any) => e.wall?.id === m.id), 'another chat has an independent cursor');
 });

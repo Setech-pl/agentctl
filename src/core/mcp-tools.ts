@@ -88,7 +88,7 @@ import type { LimitAssignments } from './limits.ts';
 import { planLine } from './usage-report.ts';
 import { openReader, readPlans } from './usage.ts';
 import { AGENT_NAMES } from './config.ts';
-import { findMessage, MAX_BODY_BYTES, MAX_NOTE_CHARS, MAX_REF_CHARS, MAX_REFS, MAX_SUBJECT_CHARS, OWNER_KINDS, planPost, planStatus, postMessage, readThread, readWall, renderRead, renderThread, setStatus, subscribedChannels, WALL_KINDS, WALL_STATUSES, wallIdentity } from './wall.ts';
+import { findMessage, MAX_BODY_BYTES, MAX_NOTE_CHARS, MAX_REF_CHARS, MAX_REFS, MAX_SUBJECT_CHARS, OWNER_KINDS, planPost, planStatus, postMessage, readThread, readWall, renderRead, renderThread, setStatus, subscribedChannels, readableChannels, WALL_KINDS, WALL_STATUSES, wallIdentity } from './wall.ts';
 import type { PostInput, WallIdentity, WallKind, WallMessage, WallStatus } from './wall.ts';
 import { AgentctlError, cohortKey, errorMessage, formatLocalTime, plural, resolvePath, windowName } from './util.ts';
 
@@ -417,7 +417,7 @@ async function runEventsSince(deps: McpDeps, args: { since?: string | undefined;
   const session = shared === undefined && who.kind !== 'chat' ? deps.eventsSession : undefined;
   const key = args.cohort === undefined ? client : `${client}|cohort:${cohortKey(args.cohort)}`;
   const sessionCursor = session ? (session.cursors[key] ?? session.markers[key] ?? session.markers.mcp ?? session.initialSince) : undefined;
-  const report = await collectEvents(ctx, { client, cursor: args.cursor ?? ((!args.since || args.since === 'last') ? sessionCursor : undefined), limit: args.limit, since: args.since, cohort: args.cohort, keep: Boolean(args.peek), wallChannels, wallIdentity: who.id });
+  const report = await collectEvents(ctx, { client, cursor: args.cursor ?? ((!args.since || args.since === 'last') ? sessionCursor : undefined), limit: args.limit, since: args.since, cohort: args.cohort, keep: Boolean(args.peek), wallChannels, wallIdentity: who.id, wallOpenChannels: new Set(readableChannels(ctx.config, who)) });
   if (who.kind === 'unknown') report.note = [report.note, 'unknown chat – only channel agentctl visible; pass as: \"chat:<name>\"'].filter(Boolean).join('\n');
   if (session && !args.peek) session.cursors[key] = report.next_cursor;
   return { text: renderEvents(report).join('\n'), data: report };

@@ -119,7 +119,7 @@ export interface EventsReport {
   next_cursor: string;
 }
 
-export async function collectEvents(ctx: Context, opts: { client: EventClient; since?: string | undefined; cohort?: string | undefined; keep?: boolean | undefined; cursor?: string; limit?: number; maxBytes?: number; /** WALL events only of these channels (the caller's subscriptions); undefined: every channel (the owner). */ wallIdentity?: string; wallChannels?: ReadonlySet<string> | undefined }): Promise<EventsReport> {
+export async function collectEvents(ctx: Context, opts: { client: EventClient; since?: string | undefined; cohort?: string | undefined; keep?: boolean | undefined; cursor?: string; limit?: number; maxBytes?: number; /** WALL events only of these channels (the caller's subscriptions); undefined: every channel (the owner). */ wallIdentity?: string; wallOpenChannels?: ReadonlySet<string>; wallChannels?: ReadonlySet<string> | undefined }): Promise<EventsReport> {
   const { config, runner } = ctx;
   const now = runner.now();
   const since = parseSince(opts.since, opts.client, config, now);
@@ -134,6 +134,11 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
   let position = saved?.startsWith('e2:') ? decodeCursor(saved) : { index: all.findIndex(e => Date.parse(e.at) > (saved ? Date.parse(saved) : since.ms)), offset: 0 };
   if (position.index < 0) position.index = all.length;
   if (position.index > all.length) throw new AgentctlError('events cursor is beyond this journal; request an explicit since');
+  const taskStart = {...position};
+  const wallKey = opts.wallIdentity?.startsWith('chat:') ? `${opts.client}|wall` : undefined;
+  const wallSaved = wallKey && !opts.cursor && (!opts.since || opts.since === 'last') ? readMarkers(config)[wallKey] : undefined;
+  const wallStart = wallSaved?.startsWith('e2:') ? decodeCursor(wallSaved) : {...taskStart};
+  if (wallStart.index < position.index || (wallStart.index === position.index && wallStart.offset < position.offset)) position = {...wallStart};
   const events: Array<JournalEntry & { fragment?: { offset: number; total: number; encoding: string } }> = [];
   const rows = await collectStatus(ctx, { progress: false, archived: false, cachedOnly: true, shallowClosed: true });
   const open = rows.filter((r) => !r.closed && !r.cancelled && !r.hidden && (cohort === null || (r.cohort !== null && cohortKey(r.cohort) === cohortKey(cohort))));
@@ -152,7 +157,7 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
   const report: EventsReport = { client: opts.client, since: new Date(since.ms).toISOString(), sinceLabel: since.label, ...(since.note ? { note: since.note } : {}), cohort, events, summary, away: awayView(config), markerMoved: false, has_more: false, next_cursor: '' };
   if (opts.wallIdentity?.startsWith('chat:')) {
     report.wallIdentity = opts.wallIdentity;
-    report.wallOpen = [...(opts.wallChannels ?? [])].flatMap(c => channelMessages(config, c))
+    report.wallOpen = [...(opts.wallOpenChannels ?? opts.wallChannels ?? [])].flatMap(c => channelMessages(config, c))
       .filter(m => m.status === 'open' && (m.to === opts.wallIdentity || m.kind === 'question' || m.kind === 'decision-request'))
       .sort((a, b) => b.ts.localeCompare(a.ts)).slice(0, 10).map(m => ({ id: m.id, subject: m.subject.slice(0, 100), from: m.from }));
   }
@@ -164,6 +169,9 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
   const limit = Math.max(1, Math.min(200, opts.limit ?? 100));
   while (position.index < all.length && events.length < limit) {
     const event = all[position.index]!;
+    const start = event.kind === 'wall' ? wallStart : taskStart;
+    if (position.index < start.index) { position = {index: position.index + 1, offset: 0}; continue; }
+    if (position.index === start.index) position.offset = Math.max(position.offset, start.offset);
     if (event.kind !== 'wall' && cohort !== null && (!event.cohort || cohortKey(event.cohort) !== cohortKey(cohort))) { position = { index: position.index + 1, offset: 0 }; continue; }
     if (event.kind === 'wall' && opts.wallChannels && !opts.wallChannels.has(event.wall?.channel ?? '')) { position = { index: position.index + 1, offset: 0 }; continue; }
     const raw = JSON.stringify(event);
@@ -208,7 +216,11 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
       const previous = markers[key]?.startsWith('e2:') ? decodeCursor(markers[key]!) : null;
       const next = !previous || previous.index < position.index || (previous.index === position.index && previous.offset <= position.offset) ? report.next_cursor : markers[key]!;
       delete markers[key]; markers[key] = next;
-      while (Object.keys(markers).length > 256) delete markers[Object.keys(markers).find(k => k !== key && k !== 'cli')!];
+      if (wallKey) {
+        const previousWall = markers[wallKey]?.startsWith('e2:') ? decodeCursor(markers[wallKey]!) : undefined;
+        if (!previousWall || previousWall.index < position.index || (previousWall.index === position.index && previousWall.offset <= position.offset)) markers[wallKey] = report.next_cursor;
+      }
+      while (Object.keys(markers).length > 256) delete markers[Object.keys(markers).find(k => k !== key && k !== wallKey && k !== 'cli')!];
       await runner.writeFile(markersPath(config), `${JSON.stringify(markers, null, 2)}\n`);
       report.markerMoved = true;
       if (summary.unmarked) ratingShown.add(ratingKey);
@@ -278,8 +290,8 @@ export function renderEvents(report: EventsReport): string[] {
   return [
     head,
     ...(report.note ? [report.note] : []),
-    ...report.events.map((e) => `${hhmm(e.at)}  ${KIND_LABEL[e.kind]}${e.task ? `  ${e.task}` : ''}  ${e.verdict ? `${e.verdict}` : e.text}${e.wall?.from === report.wallIdentity ? ' (yours)' : ''}${e.phone ? PHONE_MARK : ''}`),
     ...(report.wallOpen ? ['WALL do Ciebie (open)', ...report.wallOpen.map(m => `${m.id}: ${m.subject}${m.from === report.wallIdentity ? ' (yours)' : ''}`), ...(!report.wallOpen.length ? ['brak'] : [])] : []),
+    ...report.events.map((e) => `${hhmm(e.at)}  ${KIND_LABEL[e.kind]}${e.task ? `  ${e.task}` : ''}  ${e.verdict ? `${e.verdict}` : e.text}${e.wall?.from === report.wallIdentity ? ' (yours)' : ''}${e.phone ? PHONE_MARK : ''}`),
     summaryLine(report.summary),
     `has_more: ${report.has_more}; next_cursor: ${report.next_cursor}`,
     ...(report.away.on ? ['Away włączone: telefon dostaje powiadomienia (📱 przy zdarzeniu = poszło na telefon).'] : []),
