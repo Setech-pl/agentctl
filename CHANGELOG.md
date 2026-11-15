@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- HOST-MIRROR-ENV: send only provider session-home paths to the remote mirror reader, keeping other task environment values out of its SSH command. / Czytnik kopii raportu dostaje tylko ścieżki sesji dostawców; pozostałe wartości env zadania nie trafiają do jego komendy SSH.
+
 - HOST-LOCAL-IO: avoid host inventory work in local-only instances; retain offline tracking when host config is removed. / Instancje wyłącznie lokalne nie skanują inwentarza hostów; usunięcie configu hosta zachowuje śledzenie offline.
 
 - 0.23.0 part B (HOST-0B): `host:` starts task worktrees, fetch-only clone sync, repository setup and the existing interactive provider adapters over multiplexed SSH. Task operations, verified follow-ups/menu answers, remote Claude hook/settings installation, report mirrors/outputs, host badges/attach hints, host-unreachable recovery with backoff, and account plus host queue limits are available. Remote GC/board/limit polish follows in HOST-0C; no release tag yet. / Część B (HOST-0B) 0.23.0: `host:` uruchamia worktree, fetch klonu, setup projektu i istniejące interaktywne adaptery po multipleksowanym SSH. Dostępne są operacje zadania, weryfikowane follow-upy/odpowiedzi menu, zdalne hooki/ustawienia Claude, kopia raportu/outputs, znaczek hosta i attach, odzyskiwanie połączenia host-unreachable z backoff oraz limity konta i hosta w kolejce. Zdalne GC i dopracowanie boardu/limitów następują w HOST-0C; bez taga wydania.

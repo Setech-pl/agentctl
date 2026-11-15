@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'HOST-MIRROR-ENV', fixedIn: '0.23.0', symptom: 'Remote report mirror commands included unrelated launch environment values in SSH argv (unreleased b9384f2; mirror absent from v0.22.3).', scenarios: [s('host-boundaries.test.ts', '^HOST-MIRROR-ENV:')] },
   { id: 'HOST-LOCAL-IO', fixedIn: '0.23.0', symptom: 'The remote host router scanned every local task header before board/status previews (unreleased b9384f2; host runtime absent from v0.22.3).', scenarios: [s('host-boundaries.test.ts', '^HOST-LOCAL-IO:')] },
   { id: 'HOST-SSH-EXIT', fixedIn: '0.23.0', symptom: 'A reachable host command exiting nonzero was misclassified as unreachable (unreleased HOST-0A 7fa25d6: 1/1 fails; absent from v0.22.3).', scenarios: [s('host-ssh-exit.test.ts')] },
   { id: 'HELP-HEIGHT', fixedIn: '0.22.3', symptom: 'Board help overflowed terminal height and overdrew its header.', scenarios: [s('board.test.ts', '^HELP-HEIGHT:')] },

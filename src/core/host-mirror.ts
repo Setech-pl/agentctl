@@ -5,7 +5,7 @@ import type { TaskRecord } from './taskstore.ts';
 export function remoteMirrorScript(record: TaskRecord): string {
   const files = { report: record.remoteReport, receipt: path.posix.join(record.remoteDir!, 'receipt.json') };
   return `const fs=require('fs'),path=require('path'),os=require('os');
-const record=${JSON.stringify({ agent: record.agent, env: record.env, repos: record.repos.map(r => r.worktree), attempt: record.attemptId, started: record.attemptStarted ?? record.started, dir: record.remoteDir })};
+const record=${JSON.stringify({ agent: record.agent, env: Object.fromEntries(['CODEX_HOME', 'KIMI_CODE_HOME'].flatMap(key => record.env[key] === undefined ? [] : [[key, record.env[key]]])), repos: record.repos.map(r => r.worktree), attempt: record.attemptId, started: record.attemptStarted ?? record.started, dir: record.remoteDir })};
 const files=${JSON.stringify(files)},out={};
 const read=(f,max=16*1024*1024)=>{try{const st=fs.lstatSync(f);if(st.isFile()&&!st.isSymbolicLink()&&st.size<=max)return fs.readFileSync(f,'utf8')}catch(e){if(e.code!=='ENOENT')throw e}};
 for(const [key,file] of Object.entries(files)){const text=read(file);if(text!==undefined)out[key]=text}

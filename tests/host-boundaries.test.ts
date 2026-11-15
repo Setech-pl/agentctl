@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { it } from 'node:test';
+import { remoteMirrorScript } from '../src/core/host-mirror.ts';
 import { HostRuntime } from '../src/core/host-runtime.ts';
 import { Context } from '../src/core/context.ts';
 import { liveWindows } from '../src/core/plan.ts';
@@ -38,4 +39,14 @@ it('HOST-LOCAL-IO: removing the host config retains unreachable task state and i
   const rows = await collectStatus(removed, { progress: false });
   assert.equal(rows[0]?.state, 'host-unreachable');
   assert.ok((await liveWindows(removed)).some(w => w.window === 'remote' && w.agent === 'claude' && w.counted !== false));
+});
+
+
+it('HOST-MIRROR-ENV: mirror command carries session-home paths without copying launch secrets into SSH argv', () => {
+  const config = makeConfig(scratch.sub('mirror-env'));
+  const record = seedTask(config, 'SECRET', { host: 'pc', remoteDir: '/work/.agentctl/secret', remoteReport: '/work/reports/SECRET.md', env: { APP_SECRET: 'private-launch-value', CODEX_HOME: '/remote/codex', KIMI_CODE_HOME: '/remote/kimi' } });
+  const script = remoteMirrorScript(record);
+  assert.ok(!script.includes('private-launch-value'));
+  assert.ok(!script.includes('APP_SECRET'));
+  assert.ok(script.includes('/remote/codex') && script.includes('/remote/kimi'));
 });
