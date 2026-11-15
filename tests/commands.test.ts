@@ -259,7 +259,8 @@ describe('close', () => {
     });
     await closeTask(ctx, 'NC-1', { rmWorktree: true });
     assert.deepEqual(runner.commands.filter((l) => !l.startsWith('write ') && !l.includes('history.jsonl')), ['tmux kill-window -t \'=agentctl:nc-1\'', `git -C ${repo} worktree remove ${wtDir}`]);
-    for (const line of runner.commands) assert.doesNotMatch(line, /--force|branch|merge|rebase|push|reset/);
+    // The exact mutating-command list above excludes branch/merge/force operations.
+    // Do not scan file paths for command words: a task cache may be named docmerge.
   });
 
   it('refuses to remove a worktree that has main or master checked out', async () => {

@@ -12,6 +12,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - Update EN/PL operational guidance, generated MCP references and task/WALL sequences; cumulative 0.20.x–0.22.3 release notes supersede 0.22.1 notes. / Aktualizacja instrukcji EN/PL, generowanych referencji MCP i sekwencji zadania/WALL; zbiorcze notes 0.20.x–0.22.3 zastępują notes 0.22.1.
 
+- Validation: close safety asserts the exact mutating-command list, avoiding false matches on cache paths such as docmerge. / Test bezpieczeństwa close sprawdza dokładną listę poleceń i nie myli ścieżki docmerge z operacją merge.
 - HELP-HEIGHT: soak latency probes observe the always-visible help hint; resource/latency assertions unchanged. / Pomiar soak obserwuje stale widoczną wskazówkę; asercje zasobów i opóźnień pozostają.
 - HELP-HEIGHT: board help fits the terminal and scrolls with arrows/PgUp/PgDn; other keys return. / Pomoc boardu mieści się w terminalu, przewija strzałkami/PgUp/PgDn; pozostałe klawisze wracają.
 
