@@ -143,7 +143,7 @@ MCP previews have independent `preview_token` values, expire after ten minutes a
 
 ## Active providers and Kimi
 
-Choose among the active `providers` in config: Claude and Codex are required; Kimi is optional. Use equivalents by model class as dispatch mappings, then check current capacity and slots. With three providers, move requires an explicit `--agent`; auto review follows `review.prefer` or provider order and skips the author, unavailable CLIs and unmapped targets.
+Choose among the active `providers` in config: Claude and Codex are required; Kimi and GLM are optional. Use equivalents by model class as dispatch mappings, then check current capacity and slots. With three providers, move requires an explicit `--agent`; auto review follows `review.prefer` or provider order and skips the author, unavailable CLIs and unmapped targets.
 
 Kimi equivalents: light → `k3-256k/low`, medium → `k3/high`, strong → `k3/max`. Use `k3.1-pro` only when explicitly requested; it consumes about 10× the plan limit.
 

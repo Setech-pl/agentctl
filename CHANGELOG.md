@@ -6,7 +6,20 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - 0.23.0 part A (HOST-0A): remote hosts over SSH — the `hosts:` config section (`ssh`, `port`, `identity_file?`, `work_dir`, `repos`, `providers`, `limits?`, `env?`; validated, no secrets stored, `config_show` unmasked), one multiplexed connection per host (ControlMaster socket in `~/.agentctl/ssh/`, host re-resolved every call, never a cached IP), clear states (reachable / unreachable / auth-failed / host-key-unknown with the exact one-off ssh command in doctor / host-key-changed never auto-accepted), `agentctl hosts` and the MCP `hosts` read tool (per-host latency, GPU via nvidia-smi, disk in work_dir, tmux, provider CLIs with version and best-effort logged-in check, repo clones with HEAD and origin; parallel, per-host timeout, cached for the board), the spec key `host: <name>` validated now but refused at start until part B ("remote execution arrives in agentctl 0.23 part B"), and the board `H` view plus a header hosts line. / Część A (HOST-0A) wersji 0.23.0: zdalne hosty po SSH — sekcja konfiguracji `hosts:` (bez sekretów), multipleksowane połączenie na hosta (gniazdo ControlMaster w `~/.agentctl/ssh/`, nazwa rozwiązywana przy każdym wywołaniu), jawne stany (reachable / unreachable / auth-failed / host-key-unknown z dokładną komendą ssh w doctorze / host-key-changed nigdy auto-akceptowany), `agentctl hosts` i narzędzie MCP `hosts` (GPU, dysk, tmux, CLI z wersją i logowaniem best-effort, klony repozytoriów; równolegle, z limitem czasu, cache dla boardu), klucz spec `host: <name>` walidowany od razu, lecz odmawiany na starcie do części B, oraz widok boardu `H` i linia hostów w nagłówku.
 
+
+## [0.22.3] - 2026-11-15
+
 - A3 validation: the P19 live scenario waits for publication of a queue-failure snapshot; a deterministic test covers the journal/snapshot boundary and retains error/retry assertions. / Scenariusz P19 czeka na publikację snapshotu błędu kolejki; test deterministyczny obejmuje granicę dziennik/snapshot i zachowuje asercje błędu oraz ponowienia.
+
+- Update EN/PL operational guidance, generated MCP references and task/WALL sequences; cumulative 0.20.x–0.22.3 release notes supersede 0.22.1 notes. / Aktualizacja instrukcji EN/PL, generowanych referencji MCP i sekwencji zadania/WALL; zbiorcze notes 0.20.x–0.22.3 zastępują notes 0.22.1.
+
+- Validation: close safety asserts the exact mutating-command list, avoiding false matches on cache paths such as docmerge. / Test bezpieczeństwa close sprawdza dokładną listę poleceń i nie myli ścieżki docmerge z operacją merge.
+- HELP-HEIGHT: soak latency probes observe the always-visible help hint; resource/latency assertions unchanged. / Pomiar soak obserwuje stale widoczną wskazówkę; asercje zasobów i opóźnień pozostają.
+- HELP-HEIGHT: board help fits the terminal and scrolls with arrows/PgUp/PgDn; other keys return. / Pomoc boardu mieści się w terminalu, przewija strzałkami/PgUp/PgDn; pozostałe klawisze wracają.
+
+
+- Merge the complete 0.22.1 manuals and diagrams with all 0.22.2 operations fixes. / Scalenie pełnej dokumentacji 0.22.1 ze wszystkimi poprawkami operacyjnymi 0.22.2.
+- BASE-DEFAULT: unresolved spec bases identify the default from local origin/HEAD, falling back to local HEAD only for main/master; unknown metadata is explicit. No network or automatic substitution. / Nierozwiązywalna baza wskazuje domyślną gałąź z lokalnego origin/HEAD, awaryjnie HEAD dla main/master; brak danych jest jawny. Bez sieci i automatycznej podmiany.
 
 ## [0.22.2] - 2026-11-15
 
@@ -33,6 +46,15 @@ All notable changes to this project are documented here. The format follows [Kee
 - A2: WALL bypasses cohort filters, uses chat identity cursors and repeats a bounded open inbox. / WALL omija filtry kohorty, używa kursora tożsamości czatu i pokazuje otwartą skrzynkę.
 
 - A1: MCP new/queue previews perform cheap validation; watch checks base/overlap, worktrees, limits and disk after acceptance. / Podglądy new/queue wykonują tanią walidację; watch sprawdza bazę, konflikty, worktree, limity i dysk po przyjęciu.
+## [0.22.1] - 2026-11-15
+
+- Final documentation QA: repair the GLM cross-page anchor, configure local demo Git identity and terminate the cancelled sequence path explicitly. / Końcowe QA: poprawny odnośnik GLM, lokalna tożsamość Git demo i jawny koniec ścieżki anulowania.
+
+- Documentation validation: type the recursive file inventory explicitly; freeze demo host readings and show a populated WALL filter. No runtime behavior change. / Walidacja dokumentacji: jawny typ inwentarza, stałe odczyty hosta demo i filtr WALL z wynikiem. Bez zmiany runtime.
+
+- Documentation-only release: matching EN/PL manuals, concise front pages, from-zero installation/tutorial, all 67 MCP tools/four permission groups and 204 configuration keys, provider and token-economics guidance, Project inserts and ordering guide. / Wydanie dokumentacji: zgodne instrukcje EN/PL, zwięzłe strony główne, instalacja/samouczek od zera, 67 narzędzi MCP/cztery grupy i 204 klucze konfiguracji, dostawcy/ekonomia, wstawki Projektu i przewodnik zlecającego.
+- Twenty real TUI captures from an isolated fake-provider demo; local C4 Context/Containers and task/WALL/CONSULT sequence diagrams with PlantUML, SVG and PNG. Runtime behavior is unchanged from 0.22.0. / Dwadzieścia prawdziwych zrzutów TUI z izolowanego demo atrap; lokalne C4 i sekwencje zadania/WALL/CONSULT w PlantUML, SVG i PNG. Runtime bez zmian względem 0.22.0.
+- Documentation links, bilingual coverage, generated schemas and image/diagram artifacts are checked by the quick gate; release notes summarize the 0.20.x–0.22.x series. / Quick gate sprawdza linki, pokrycie językowe, schematy i artefakty; notes podsumowują serię 0.20.x–0.22.x.
 
 
 ## [0.22.0] - 2026-11-14
@@ -819,7 +841,7 @@ Pull request #1: iteration 1, core and CLI.
 - Task states (`working`, `waiting`, `needs-trust`, `report-ready`, `dead`) and folder-trust detection.
 - Per-provider window limits, the `review_of` cross-review rule, an optional mirror of the reports.
 
-[Unreleased]: https://github.com/Setech-pl/agentctl/compare/v0.22.0...HEAD
+[Unreleased]: https://github.com/Setech-pl/agentctl/compare/v0.22.3...HEAD
 [0.22.0]: https://github.com/Setech-pl/agentctl/compare/v0.21.0...v0.22.0
 [0.20.0]: https://github.com/Setech-pl/agentctl/compare/v0.19.6...v0.20.0
 [0.19.1]: https://github.com/Setech-pl/agentctl/compare/v0.19.0...v0.19.1

@@ -138,8 +138,8 @@ describe('spec example', () => {
     assert.doesNotMatch(EXAMPLE_SPEC, /neon.city|~\/Projects|marcinkrzetowski/i);
     assert.deepEqual(splitSpecs(EXAMPLE_SPEC)[0]?.header.links, [{ from: '.env.local', to: '~/src/sample-app/.env.local' }]);
     assert.equal(splitSpecs(EXAMPLE_SPEC)[0]?.header.task, 'TASK-42');
-    const readme = fs.readFileSync(path.join(REPO_ROOT, 'README.md'), 'utf8');
-    assert.ok(readme.includes(EXAMPLE_SPEC), 'README must contain the example spec verbatim (see src/example.ts)');
+    const readme = fs.readFileSync(path.join(REPO_ROOT, 'docs/examples/spec.md'), 'utf8');
+    assert.ok(readme.includes(EXAMPLE_SPEC), 'docs/examples/spec.md must contain the example spec verbatim (see src/example.ts)');
   });
 
   it('the example on codex: new --dry-run --agent codex translates claude-opus-5-5/high to gpt-6.1-sol/high', () => {

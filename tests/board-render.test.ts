@@ -110,6 +110,10 @@ describe('board: the Ink front renders the model', () => {
     await until(() => term.screen().includes('NC-1'));
     await wait(100);
     keys.write('?');
+    await until(() => term.frames.some((f) => f.includes('Press any other key')));
+    keys.write('\u001b[6~'); // page down twice: help is bounded at 24 rows
+    await wait(50);
+    keys.write('\u001b[6~');
     await until(() => term.frames.some((f) => f.includes('leave the board')));
     keys.write('x'); // any key closes the help
     await wait(100);

@@ -105,3 +105,19 @@ describe('worktree start resilience', () => {
     await checkRetryWorktrees(runner, [r]);
   });
 });
+
+it('BASE-DEFAULT: missing bases name the local default without network or substitution', async () => {
+  for (const branch of ['agent/new', undefined]) {
+    for (const remote of ['origin/trunk', '']) {
+      const r = { ...repo(`base-${branch ? 'branch' : 'detached'}-${remote ? 'remote' : 'local'}`), branch };
+      const runner = new RecordingRunner({ dryRun: false, respond: (_cmd, args) => {
+        if (args.includes('--git-common-dir')) return { stdout: '.git' };
+        if (args.includes('symbolic-ref')) return args.includes('refs/remotes/origin/HEAD') ? { code: remote ? 0 : 1, stdout: remote } : { stdout: 'master' };
+        return { code: 1, stderr: 'unknown revision' };
+      } });
+      await assert.rejects(addWorktree(runner, r), new RegExp(`base main not found – default branch is ${remote ? 'trunk' : 'master'}`));
+      assert.ok(!runner.commands.some(c => /fetch|ls-remote|branch agent/.test(c)));
+      assert.ok(!fs.existsSync(r.worktree));
+    }
+  }
+});

@@ -16,14 +16,13 @@ import {
   boardRefreshMs,
   clearNotice,
   handleKey,
-  HELP_LINES,
+  helpLines,
   headerCells,
   initialBoardState,
   KEY_HINTS,
   awayLabel,
   loadBoard,
   managerLine,
-  modelHelp,
   loadLogLines,
   PREVIEW_LINES,
   ProgressCache,
@@ -329,7 +328,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
       : logMode
       ? h(Box, { flexDirection: 'column' }, h(Text, { bold: true }, `Log – ${logMode.lines.length > 1 ? logMode.lines.length - 1 : 0} task${logMode.lines.length === 2 ? '' : 's'} (↑↓ scroll, Esc back)`), ...logMode.lines.slice(logMode.offset, logMode.offset + Math.max(1, state.height - 4)).map((l, i) => h(Text, { key: i, wrap: 'truncate-end', ...(i === 0 && logMode.offset === 0 ? { dimColor: true } : {}) }, l === '' ? ' ' : l)))
       : state.mode.kind === 'help'
-      ? h(Box, { flexDirection: 'column' }, ...[...modelHelp(state), ...HELP_LINES].map((l, i) => h(Text, { key: i }, l === '' ? ' ' : l)))
+      ? h(Box, { flexDirection: 'column' }, ...helpLines(state).map((l, i) => h(Text, { key: i, wrap: 'truncate-end' }, l === '' ? ' ' : l)))
       : h(
           Box,
           { flexDirection: 'row', height: rowsForBody },

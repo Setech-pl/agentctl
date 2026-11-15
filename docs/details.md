@@ -220,7 +220,7 @@ then a verdict line in the header of the report (before the first `##` heading, 
 
 ## Phone notifications
 
-A copy of the events the Mac gets goes to a phone through [ntfy](https://ntfy.sh) while away is on. The overview and the setup steps are in the [README](../README.md#phone-notifications); this is how it works.
+A copy of the events the Mac gets goes to a phone through [ntfy](https://ntfy.sh) while away is on. The overview and the setup steps are in the [README](en/features.md#watch-board-and-notifications); this is how it works.
 
 - **One place.** Every announced event is written to the journal (`<config dir>/journal.jsonl`) once, after the de-duplication of the Mac (the agent's event and the watcher's screen reading of the same transition are one). The write goes through `notifyPhone`: if a topic is set, away is on (or `notify.ntfy.always`) and the event is in `notify.ntfy.events`, it sends the request. So the phone cannot get an event twice, or one the Mac did not announce. The journal entry gets `phone: sent` or `phone: queued` (`events` prints 📱 behind it). `orphan` and `usage-critical` (a plan window over `usage.critical`) became journal events for this; a plain `usage` warning stays on the Mac.
 - **Away.** `<config dir>/away.json` holds `{on, since, by}`; `by` is `cli`, `board`, `mcp` or `auto`. The watcher, the event hooks, the board and the MCP server read the same file, so a change is seen at once everywhere. With `away.auto_idle: N` every watch tick asks `ioreg -c IOHIDSystem` for `HIDIdleTime`: idle for N minutes turns away on (`by: auto`), the first activity turns it off again, but only what `auto` turned on. A hand-made `away off` while the Mac is still idle is not undone until there was activity in between. Where `ioreg` fails nothing happens.
@@ -232,7 +232,7 @@ A copy of the events the Mac gets goes to a phone through [ntfy](https://ntfy.sh
 
 ## Remote control and the manager
 
-The overview and the steps are in the [README](../README.md#remote-control-from-your-phone); this is how it works and what was (and was not) checked. Sources: the Remote Control page of the Claude Code documentation (https://code.claude.com/docs/en/remote-control, the CLI reference and the error reference), and `claude --help` and `claude remote-control --help` of the installed Claude Code 2.1.309 - only the help texts were read; no real session was started.
+The overview and the steps are in the [README](en/features.md#watch-board-and-notifications); this is how it works and what was (and was not) checked. Sources: the Remote Control page of the Claude Code documentation (https://code.claude.com/docs/en/remote-control, the CLI reference and the error reference), and `claude --help` and `claude remote-control --help` of the installed Claude Code 2.1.309 - only the help texts were read; no real session was started.
 
 | Way | What it is | Used by agentctl |
 |---|---|---|

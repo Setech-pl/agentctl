@@ -1,3 +1,4 @@
+import * as boardModel from '../src/core/board.ts';
 import { readTaskRecord } from '../src/core/taskstore.ts';
 import { composerFixture } from './composer-fixture.ts';
 import assert from 'node:assert/strict';
@@ -519,3 +520,22 @@ describe('board: selected row colors', () => {
   });
 });
 
+
+it('HELP-HEIGHT: help fits the terminal and scrolls to every key without header overdraw', () => {
+  for (const height of [24, 45, 60]) {
+    let state = { ...initialBoardState(160, height), mode: { kind: 'help' as const } } as BoardState;
+    state = handleKey(state, '', { downArrow: true }).state;
+    assert.equal(state.mode.kind, 'help');
+    assert.ok(boardModel.helpLines(state).length <= height - 3);
+    state = handleKey(state, '', { upArrow: true }).state;
+    assert.ok(boardModel.helpLines(state).some(l => l.includes('agentctl board')));
+    for (let i = 0; i < 100; i++) state = handleKey(state, '', { downArrow: true }).state;
+    assert.equal(state.mode.kind, 'help');
+    assert.ok(boardModel.helpLines(state).some(l => l.includes('preview of the selected window')));
+    assert.ok(boardModel.helpLines(state).length <= height - 3);
+    state = handleKey(state, '', { pageUp: true }).state;
+    assert.equal(state.mode.kind, 'help');
+    state = handleKey(state, 'x', {}).state;
+    assert.equal(state.mode.kind, 'list');
+  }
+});

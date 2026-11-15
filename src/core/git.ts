@@ -7,6 +7,18 @@ import type { ResolvedRepo } from './spec.ts';
 import { withFileLock } from './file-lock.ts';
 import { AgentctlError } from './util.ts';
 
+/** Local metadata only: never fetch or guess a default from an arbitrary feature checkout. */
+export async function missingBaseFailure(runner: Runner, repo: ResolvedRepo): Promise<AgentctlError> {
+  const remote = await runner.exec('git', ['-C', repo.path, 'symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], { readOnly: true });
+  let branch = remote.code === 0 && remote.stdout.trim().startsWith('origin/') ? remote.stdout.trim().slice(7) : '';
+  if (!branch) {
+    const head = await runner.exec('git', ['-C', repo.path, 'symbolic-ref', '--quiet', '--short', 'HEAD'], { readOnly: true });
+    if (head.code === 0 && ['main', 'master'].includes(head.stdout.trim())) branch = head.stdout.trim();
+  }
+  return new AgentctlError(`base ${repo.base ?? 'HEAD'} not found – default branch ${branch ? `is ${branch}` : 'is unknown (no local default metadata)'} in ${repo.path}`,
+    'Correct repos[].base to an existing ref and retry; no branch is substituted automatically. / Popraw repos[].base na istniejącą referencję i ponów; gałąź nie jest podmieniana automatycznie.');
+}
+
 /** Repository identity is the common git directory, including callers in linked worktrees. */
 async function commonDir(runner: Runner, repo: ResolvedRepo): Promise<string> {
   const r = await runner.exec('git', ['-C', repo.path, 'rev-parse', '--git-common-dir'], { readOnly: true });
@@ -70,7 +82,7 @@ export async function addWorktree(runner: Runner, repo: ResolvedRepo, timeoutS =
         const base = await runner.exec('git', ['-C', repo.path, 'rev-parse', '--verify', repo.base ?? 'HEAD'], { readOnly: true });
         if (base.code === 0) baseOid = base.stdout.trim();
         // A successful explicit creation is ownership evidence; a failed -b checkout alone is not.
-        if (!baseOid && !runner.dryRun) throw gitFailure(`cannot resolve base for ${repo.worktree}`, base.stderr);
+        if (!baseOid && !runner.dryRun) throw await missingBaseFailure(runner, repo);
         const created = await runner.exec('git', ['-C', repo.path, 'branch', repo.branch, repo.base ?? 'HEAD'], { timeoutMs: timeoutS * 1000, async: true });
         if (created.code !== 0) throw gitFailure(`cannot create branch ${repo.branch}`, created.stderr);
         createdBranch = !runner.dryRun;
@@ -82,6 +94,10 @@ export async function addWorktree(runner: Runner, repo: ResolvedRepo, timeoutS =
     }
     const r = await runner.exec('git', args, { timeoutMs: timeoutS * 1000, async: true });
     if (r.code === 0) return;
+    if (!repo.branch && repo.base) {
+      const base = await runner.exec('git', ['-C', repo.path, 'rev-parse', '--verify', '--end-of-options', `${repo.base}^{commit}`], { readOnly: true });
+      if (base.code !== 0) throw await missingBaseFailure(runner, repo);
+    }
     const residue: string[] = [];
     // Nonempty partial checkouts are kept: a failed checkout cannot prove who wrote their contents.
     if (!existed && !runner.dryRun && fs.existsSync(repo.worktree)) {

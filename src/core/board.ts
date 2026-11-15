@@ -154,7 +154,7 @@ export type BoardMode =
   | { kind: 'cancel-reason'; task: string; text: string }
   /** `k`: pick the cohort to show; `value` null is every task, '' the tasks without a cohort. */
   | { kind: 'cohort-pick'; options: CohortOption[]; index: number; expanded?: boolean }
-  | { kind: 'help' }
+  | { kind: 'help'; offset?: number }
   /** `l`: the history of the tasks (`agentctl log`), scrolled with the arrows. */
   | { kind: 'log'; lines: string[]; offset: number }
   /** `L` (limits), `G` (gc preview), `H` (hosts): a page of lines from the core, scrolled with the arrows. */
@@ -652,8 +652,14 @@ export function handleKey(state: BoardState, input: string, key: KeyPress): KeyR
       return cancelReasonKey(state, state.mode, input, key);
     case 'cohort-pick':
       return cohortPickKey(state, state.mode, input, key);
-    case 'help':
+    case 'help': {
+      const step = key.pageDown ? Math.max(1, state.height - 4) : key.pageUp ? -Math.max(1, state.height - 4) : key.downArrow ? 1 : key.upArrow ? -1 : 0;
+      if (step) {
+        const max = Math.max(0, modelHelp(state).length + HELP_LINES.length - Math.max(1, state.height - 4));
+        return { state: { ...state, mode: { kind: 'help', offset: Math.max(0, Math.min(max, (state.mode.offset ?? 0) + step)) } }, effects: [] };
+      }
       return { state: toList(state), effects: [] };
+    }
     case 'log':
       return logKey(state, state.mode, input, key);
     case 'view':
@@ -1290,4 +1296,12 @@ export function awayLabel(away: AwayView | null): { text: string; dim: boolean }
 export function modelHelp(state: BoardState): string[] {
   const row = state.rows.find(r => r.task === state.selected) ?? state.queue.find(v => v.entry.task === state.selected)?.entry;
   return row ? [`${row.task}: ${row.agent} · model: ${row.model} · effort: ${row.effort}`] : [];
+}
+
+/** Header, two footer rows and help hint reserve four terminal rows. Never overflow Ink's screen. */
+export function helpLines(state: BoardState): string[] {
+  const lines = [...modelHelp(state), ...HELP_LINES];
+  const room = Math.max(1, state.height - 4);
+  const offset = Math.min(state.mode.kind === 'help' ? state.mode.offset ?? 0 : 0, Math.max(0, lines.length - room));
+  return [...lines.slice(offset, offset + room), '↑↓ PgUp/PgDn scroll · Press any other key to go back.'];
 }

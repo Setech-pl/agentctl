@@ -1,0 +1,28 @@
+@startuml context
+!include <C4/C4_Context>
+skinparam linetype ortho
+skinparam nodesep 70
+skinparam ranksep 90
+title agentctl 0.22.1 — C1 System Context
+Person(owner, "Owner", "Approves tasks, trust, integration and publication")
+System_Ext(chats, "NC / HEMS chats", "Claude Projects in the desktop app; local MCP client")
+System(agentctl, "agentctl", "Local dispatcher for coding-agent tasks, reports, WALL and CONSULT")
+System_Ext(clis, "Provider CLIs", "Claude Code / Codex CLI / Kimi Code CLI / claude-glm wrapper")
+System_Ext(anthropic, "Anthropic", "Claude service")
+System_Ext(openai, "OpenAI", "Codex service")
+System_Ext(moonshot, "Moonshot AI", "Kimi service")
+System_Ext(zai, "Z.ai", "GLM Coding Plan")
+System_Ext(github, "GitHub", "Owner's repository and releases")
+System_Ext(phone, "ntfy / Phone", "Optional away-mode notifications; Claude Remote Control via manager")
+Rel(owner, chats, "Orders")
+Rel(owner, agentctl, "CLI / board")
+Rel(chats, agentctl, "MCP tools", "Local MCP stdio")
+Rel(agentctl, clis, "Launch / observe", "tmux / hooks / logs")
+Rel(clis, anthropic, "Claude", "HTTPS")
+Rel(clis, openai, "Codex", "HTTPS")
+Rel(clis, moonshot, "Kimi", "HTTPS")
+Rel(clis, zai, "GLM", "HTTPS")
+Rel(owner, github, "Publish", "git / gh (outside MCP)")
+Rel(agentctl, phone, "Notifications", "ntfy HTTP(S)")
+SHOW_LEGEND()
+@enduml

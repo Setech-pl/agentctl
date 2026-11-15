@@ -1,0 +1,111 @@
+@startuml task-lifecycle
+skinparam linetype ortho
+skinparam backgroundColor #F8FAFC
+skinparam sequenceMessageAlign center
+hide footbox
+title Task order → Accepted → report → collection (0.22.3)
+actor Owner
+participant "Chat / MCP client" as Chat
+participant "MCP server" as MCP
+collections "Queue / durable requests" as Queue
+participant "Watch" as Watch
+participant "Git / setup" as Git
+participant "tmux / provider" as Agent
+database "State / journal / report" as State
+Owner -> Chat: Request a concrete task
+Chat -> MCP: events_since(as: chat:name)
+MCP --> Chat: Changes since configured as cursor (client override)
+Chat -> MCP: new / queue(spec) — preview
+MCP --> Chat: Cheap syntax/model/duplicate checks + token + expiry
+Chat -> Owner: Show task IDs, repos, branch/base, model/effort, after, cost
+Owner --> Chat: Confirm this plan
+Chat -> MCP: confirm: true, preview_token (same session)
+MCP -> Queue: Persist accepted spec under short accept lock
+MCP --> Chat: Accepted (registration; not started/completed)
+Watch -> Queue: Next tick: validate base / overlap / disk / eligibility
+alt invalid spec / changed facts
+ Watch -> Queue: failed + reason
+ Watch -> State: Start failure event + notification
+else valid and eligible
+ Watch -> Git: Worktree → per-repo setup → links
+ Watch -> Agent: Start interactive provider window
+ alt folder trust / first-run dialog
+  Agent --> Owner: needs-trust / needs-input
+  Owner -> Agent: Answer in task window
+ end
+ Watch -> Agent: Wait for structural ready input; paste prompt
+ Agent --> Watch: Delivery acknowledgement / turn start
+ Watch -> State: Delivery confirmed / start event
+ group Work and follow-ups
+  Agent -> Git: Work in assigned checkout
+  alt needs-input menu
+   Watch -> State: Question event
+   Chat -> MCP: events_since → peek
+   Owner -> Chat: Select answer
+   Chat -> MCP: answer(task, option, token), preview → confirm
+   MCP -> Agent: Safe answer (explicit owner-approved menu only)
+  else send while Codex is busy
+   Chat -> MCP: send(task, text), preview → confirm
+   MCP -> Queue: Accepted send request (with watcher)
+   Watch -> State: queued_until_turn_end + message_id
+   Agent --> Watch: Confirmed idle / turn end
+   Watch -> Agent: Deliver durable queued follow-up
+  else limited
+   Watch -> State: limited event
+   Owner -> MCP: send continuation / move — preview → confirm
+   MCP -> Agent: Continue live window / mapped provider in same worktree
+  note right of Agent: resume recreates a missing window after loss.
+  else cancel
+   break Cancelled path; existing reports retained
+   Owner -> MCP: cancel — preview → confirm
+   MCP -> Queue: Accepted request (with watcher)
+   Watch -> Agent: Interrupt then close window
+   Watch -> State: cancelled; worktree and branch retained
+   end
+  end
+ end
+ Agent -> State: Verdict first line + attempt marker + outputs + report-end
+ Watch -> State: Current report complete / report-ready event
+ Chat -> MCP: events_since(as: chat:name)
+ MCP --> Chat: Report verdict + current summary
+ Chat -> MCP: get_report(task, mark_pulled?)
+ MCP --> Chat: Summary / first full page marks by default; false opts out\nOther pages: coverage in any order; sections do not by default
+ Owner -> Chat: Review and approve closure
+ Chat -> MCP: close — preview → confirm
+ MCP -> Queue: Accepted close request (with watcher)
+ Watch -> Agent: Close window; optional protected worktree removal
+end
+== Bounded read state ==
+Watch -> State: Atomically publish one tick snapshot
+Chat -> MCP: status / queue_list / capacity / limits / config_show / doctor
+MCP -> State: Read snapshot (<2 intervals, matching config)
+MCP --> Chat: Bounded data + snapshot age; labeled fallback if stale
+== Other durable paths ==
+group failed start → queue_retry
+ Watch -> Agent: Input never becomes ready
+ Watch -> State: Save start-failure-screen.txt; queue failed
+ note right of Agent: Keep diagnostic window by default\n(start_failure.keep_window)
+ Owner -> MCP: queue_retry — preview → confirm
+ MCP -> Queue: Accepted retry
+ Watch -> Agent: Close leftover failed window; retry validation/start
+end
+group after + BLOCKED
+ Watch -> State: Read predecessor's first-line verdict
+ alt rejected verdict (FAIL / BLOCKED / NO-GO by default)
+  Watch -> Queue: Block dependent; notify
+  Owner -> MCP: unblock(task, drop_after?) — preview → confirm
+  MCP -> Queue: Accepted dependency change
+  Watch -> Queue: Apply; re-evaluate eligibility
+ else report incomplete / author still active
+  Watch -> Queue: Wait for verdict
+ else corrected report now accepted
+  Watch -> Queue: Auto-unblock at next tick; emit unblocked
+ end
+end
+group watch restarts mid-task
+ Watch -> State: Reload durable tasks, queue, pending delivery
+ Watch -> State: WATCH WZNOWIONY event
+ Watch -> Agent: Reconcile live windows; continue monitoring
+ note right of Watch: Live windows survive watch restart.\nLost metadata: explicit adopt.\nLost windows: explicit resume, no duplicate initial prompt.
+end
+@enduml

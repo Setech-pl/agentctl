@@ -2,7 +2,7 @@
 
 `agentctl dataset export` is a local, read-only CLI command. It exports this
 instance only; it does not contact tmux, migrate state, acknowledge reports,
-save usage caches, or create projects. Package version remains 0.18.0.
+save usage caches, or create projects. The dataset schema version is independent of the package version.
 
 ```sh
 agentctl dataset export --out attempts.jsonl
