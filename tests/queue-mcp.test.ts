@@ -65,7 +65,7 @@ describe('mcp: queue read tools', () => {
 
   it('queue_list says the queue is empty, then lists position, condition, after and the error', async () => {
     const t = setup('ql', 'mcp: {allow: [queue]}\n');
-    assert.equal((await t.call('queue_list')).text, 'The queue is empty.');
+    assert.match((await t.call('queue_list')).text, /^The queue is empty\.[\s\S]*snapshot unavailable\/stale/i);
     t.running('NC-9', []);
     await t.call('queue', { spec: t.spec('Q-1') + t.spec('Q-2', 'after: Q-1\n') });
     assert.equal((await t.call('queue', { spec: t.spec('Q-1') + t.spec('Q-2', 'after: Q-1\n'), confirm: true })).isError, undefined);

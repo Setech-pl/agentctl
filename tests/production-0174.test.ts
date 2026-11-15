@@ -12,7 +12,8 @@ import { classifyScreen } from '../src/core/state.ts';
 import { DEFAULT_AGENT_SETTINGS } from '../src/core/config.ts';
 import { handleEvent } from '../src/core/event-command.ts';
 import { Alerts } from '../src/core/alert.ts';
-import { MCP_TOOLS } from '../src/core/mcp-tools.ts';
+import { readMcpRequests } from '../src/core/mcp-requests.ts';
+import { MCP_TOOLS, applyMcpRequest } from '../src/core/mcp-tools.ts';
 import { planGc, applyGc, gcView, renderGc } from '../src/core/gc.ts';
 import type { GcPlan } from '../src/core/gc.ts';
 import { liveWindows } from '../src/core/plan.ts';
@@ -126,7 +127,10 @@ for (const source of ['project', 'active-spec'] as const) it(`P2 GC protects a w
   if (source === 'project') fs.writeFileSync(path.join(f.repo, '.agentctl.yaml'), YAML.stringify({ links: [{ from: 'deps', to: path.join(wt, 'packages/*') }] }));
   else seedTask(f.config, 'ACTIVE', { links: [{ from: 'deps', to: path.join(wt, 'packages') }] });
   const plan = await planGc(f.ctx); assert.ok(plan.skipped.some(s => s.target === wt && /links target used/.test(s.reason))); assert.equal(plan.items.some(i => i.target === wt), false);
-  assert.match((await f.call('gc_preview', { detail: true })).text, /links target/);
+  assert.match((await f.call('gc_preview', {detail: true})).text, /^Accepted/);
+  const request = readMcpRequests(f.config)[0]!;
+  await applyMcpRequest(f.deps, request);
+  assert.match((await f.call('gc_preview', {request_id: request.id, detail: true})).text, /links target/);
   assert.ok((await planGc(f.ctx, { forceLinks: true })).items.some(i => i.target === wt)); assert.equal('force_links' in MCP_TOOLS.find(t => t.name === 'gc')!.input, false);
 });
 it('P2 apply rechecks new link references after preview', async () => {
