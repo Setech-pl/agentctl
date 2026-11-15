@@ -192,6 +192,7 @@ Both are always readable without mcp.allow. MCP new/queue responses omit capacit
 | `version` | `version` |  |
 | `guide` | `guide` |  |
 | `capacity` | `capacity` |  |
+| `hosts` | `hosts` |  |
 | `consult` | `consult` |  |
 | `new` | `new` |  |
 | `queue` | `queue` |  |
@@ -312,6 +313,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 | `doctor` | read | `project?` |
 | `equivalents` | read |  |
 | `config_show` | read |  |
+| `hosts` | read | `refresh?` |
 | `manager_status` | read |  |
 | `away_status` | read |  |
 | `report` | read | `task` |
@@ -342,6 +344,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 
 - `guide`: `--project &lt;repo&gt;`, `--lang &lt;lang&gt;`, `--clip`, `--json`
 - `capacity`: `--json`, `--clip`
+- `hosts`: `--json`, `--refresh`, `--clip`
 - `consult`: `--confirm`
 - `new`: `--dry-run`, `--json`, `--reuse`, `--agent &lt;agent&gt;`, `--no-switch`, `--no-agent`, `--no-wait-trust`, `--clip`, `-y, --yes`, `--cohort &lt;name&gt;`
 - `queue`: `--clip`, `--agent &lt;agent&gt;`, `-y, --yes`, `--json`, `--cohort &lt;name&gt;`

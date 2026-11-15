@@ -14,6 +14,8 @@ import type { TaskState } from './state.ts';
 import { AgentctlError, Problems, errorMessage, expandHome, isObject, resolvePath } from './util.ts';
 import { parseWall } from './wall-config.ts';
 import type { WallSettings } from './wall-config.ts';
+import { parseHosts } from './hosts.ts';
+import type { HostConfig } from './hosts.ts';
 
 import { PROVIDER_IDS, DEFAULT_PROVIDERS } from './providers/types.ts';
 import type { ProviderId } from './providers/types.ts';
@@ -168,6 +170,8 @@ export interface GlobalConfig extends Layer {
   reloadWarning?: string;
   /** WALL: channels, chats, subscriptions and ref roots (wall-config.ts). */
   wall: WallSettings;
+  /** Remote hosts over SSH (0.23): config + transport + health now, task execution in part B. No secrets are stored here. */
+  hosts: Record<string, HostConfig>;
   /** Where the config was (or would be) read from. */
   path: string;
   loaded: boolean;
@@ -357,7 +361,7 @@ export const DEFAULT_AGENT_SETTINGS = Object.fromEntries(DEFAULT_PROVIDERS.map(i
 
 /** The keys accepted in every layer: the global config, `.agentctl.yaml` and (with a few of its own) a spec. docs/configuration.md describes each one. */
 export const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'setup', 'defaults', 'guide', 'review'];
-export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'limited', 'cache', 'state_dir', 'session', 'ui', 'tmux', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git', 'cohort', 'delivery_confirm_s', 'preview', 'providers', 'providers_config', 'start_failure', 'wall'];
+export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'limited', 'cache', 'state_dir', 'session', 'ui', 'tmux', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git', 'cohort', 'delivery_confirm_s', 'preview', 'providers', 'providers_config', 'start_failure', 'wall', 'hosts'];
 export const LIMITS_KEYS = [...AGENT_NAMES, 'count_external', 'count_report_ready', 'heavy'];
 export const DEFAULTS_KEYS = ['agent', 'model', 'effort', 'remote_control'];
 export const LINK_KEYS = ['from', 'to'];
@@ -1233,6 +1237,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   }
   const deliveryConfirmS = raw.delivery_confirm_s ?? 60;
   if (typeof deliveryConfirmS !== 'number' || !Number.isFinite(deliveryConfirmS) || deliveryConfirmS <= 0) p.add('config.delivery_confirm_s must be a positive number');
+  const hosts = parseHosts(raw.hosts, p);
   p.throwIfAny(`Invalid config ${file}:`, 'Fix the listed keys; see the README section "Configuration".');
   const warnings: string[] = [];
   const usageMap = isObject(raw.usage) ? raw.usage : {};
@@ -1240,7 +1245,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
     const configuredUsage = usageMap[`${id}_dir`] !== undefined || ['warn', 'critical', 'queue_hold'].some(k => { const values = usageMap[k]; return isObject(values) && values[id] !== undefined; });
     if (agentMap[id] !== undefined || (isObject(raw.limits) && raw.limits[id] !== undefined) || configuredUsage) warnings.push(`${id} is not in providers; its agent/limit/usage settings are inactive`);
   }
-  const config: GlobalConfig = { ...layer, providers, ...(providersConfig ? { providersConfig } : {}), ...(startFailure ? { startFailure } : {}), cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, ...(ui ? { ui } : {}), ...(tmux ? { tmux } : {}), deliveryConfirmS: deliveryConfirmS as number, limits, countExternal, countReportReady, preview, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, cleanWorktreeCache, cohort, overload, limited, collisions, cancel, usage, guideLang, capacity, disk, git, wall, path: file, loaded: exists };
+  const config: GlobalConfig = { ...layer, providers, ...(providersConfig ? { providersConfig } : {}), ...(startFailure ? { startFailure } : {}), cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, ...(ui ? { ui } : {}), ...(tmux ? { tmux } : {}), deliveryConfirmS: deliveryConfirmS as number, limits, countExternal, countReportReady, preview, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, cleanWorktreeCache, cohort, overload, limited, collisions, cancel, usage, guideLang, capacity, disk, git, wall, hosts, path: file, loaded: exists };
   if (mirror) config.mirrorDir = resolvePath(mirror);
   if (warnings.length) config.warnings = warnings;
   return config;

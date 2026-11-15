@@ -3,6 +3,8 @@ import { dryCloseTimingPreview, dryQueueTimingPreview, measureReadTimings, rende
 import { queueViews } from './core/queue.ts';
 import { attachHint, tmuxCommand } from './core/tmux-socket.ts';
 import { collectMachine, machineLine } from './core/machine.ts';
+import { probeHosts, renderHostsHealth } from './core/host-health.ts';
+import { readHostsCache, writeHostsCache } from './core/hosts.ts';
 import { exportDataset, validateDatasetOptions } from './core/dataset.ts';
 import type { DatasetOptions } from './core/dataset.ts';
 import { DEFAULT_PROVIDERS } from './core/providers/types.ts';
@@ -429,6 +431,30 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
       if (opts.clip) {
         const copy = await writeClipboard(ctx.runner, text);
         if (copy.ok) return line(`Copied capacity to the clipboard (${copy.tool}).`);
+        line(copy.error ?? 'Clipboard unavailable');
+      }
+      deps.stdout(text);
+    }));
+
+  program.command('hosts').description('Remote hosts over SSH (config section "hosts"): reachability, latency, GPU, disk in work_dir, tmux, provider CLIs (+ version, best-effort logged-in) and repo clones. Probes in parallel with a per-host timeout and caches the result for the board; a spec may already say "host: <name>", but starting tasks there arrives in 0.23 part B.')
+    .option('--json', 'machine-readable health records')
+    .option('--refresh', 'probe every host now, even when the cache is fresh')
+    .option('--clip', 'copy the summary to the clipboard')
+    .action(guarded(async (opts: { json?: boolean; refresh?: boolean; clip?: boolean }) => {
+      if (opts.clip && opts.json) throw new AgentctlError('--json and --clip exclude each other');
+      const ctx = contextFor(false, { migrate: false });
+      if (Object.keys(ctx.config.hosts).length === 0) {
+        if (opts.json) return line(JSON.stringify({ hosts: [] }, null, 2));
+        return line(`No hosts configured: add a hosts: section to ${ctx.config.path} (the README "Hosts" section shows the setup).`);
+      }
+      const fresh = opts.refresh ? undefined : readHostsCache(deps.env ?? process.env, Date.now(), 60_000);
+      const health = fresh?.hosts ?? await probeHosts(ctx.runner, ctx.config.hosts, ctx.config, { env: deps.env ?? process.env });
+      if (!fresh) await writeHostsCache(ctx.runner, health, deps.env ?? process.env);
+      if (opts.json) return line(JSON.stringify({ cached: Boolean(fresh), hosts: health }, null, 2));
+      const text = renderHostsHealth(health).join('\n') + '\n';
+      if (opts.clip) {
+        const copy = await writeClipboard(ctx.runner, text);
+        if (copy.ok) return line(`Copied hosts to the clipboard (${copy.tool}).`);
         line(copy.error ?? 'Clipboard unavailable');
       }
       deps.stdout(text);

@@ -26,6 +26,8 @@ import { blockingEnv, managerFiles, managerView, readManagerMcp, remoteControlSu
 import { isPublicServer, weakTopic } from './ntfy-setup.ts';
 import { findTerminalNotifier, notifierMemoryPath, readNotifierMemory } from './notify.ts';
 import { Tmux } from './tmux.ts';
+import { firstConnectCommand, readHostsCache } from './hosts.ts';
+import { probeHosts } from './host-health.ts';
 import { errorMessage, safeCwd } from './util.ts';
 
 export interface Check {
@@ -157,6 +159,26 @@ export async function runDoctor(
   const gh = await runner.exec('gh', ['--version'], { readOnly: true });
   if (gh.code === 0) add('gh', 'ok', firstLine(gh.stdout));
   else add('gh', 'warn', 'not found (optional; used by humans for PRs, never by agentctl)');
+
+  if (config && Object.keys(config.hosts).length > 0) {
+    // Remote hosts are optional: nothing here is a hard fail except a changed host key (never auto-accepted).
+    const names = Object.keys(config.hosts);
+    const cached = cachedOnly ? readHostsCache(env) : undefined;
+    if (cachedOnly && !cached) add('hosts', 'ok', `${names.join(', ')}: no cached health yet; run "agentctl hosts" once`);
+    else {
+      const health = cached?.hosts ?? await probeHosts(runner, config.hosts, config, { timeoutMs: 12_000, env });
+      for (const host of health) {
+        const age = cached ? ` (cached ${cached.writtenAt.slice(11, 19)})` : '';
+        const gpu = host.gpu ? `, ${host.gpu.name} ${host.gpu.usedMiB}/${host.gpu.totalMiB} MiB` : '';
+        const disk = host.disk ? `, free ${Math.round(host.disk.freeKb / (1024 * 1024))}G of ${Math.round(host.disk.totalKb / (1024 * 1024))}G in ${host.disk.workDir}` : '';
+        if (host.state === 'reachable') add(`host ${host.name}`, 'ok', `reachable${host.latencyMs !== undefined ? ` ${host.latencyMs}ms` : ''}${gpu}${disk}${age}`);
+        else if (host.state === 'host-key-changed') add(`host ${host.name}`, 'fail', `HOST KEY CHANGED — refused to connect; check the machine (MITM or reinstalled sshd), fix ~/.ssh/known_hosts: ${host.detail ?? ''}`);
+        else if (host.state === 'host-key-unknown') add(`host ${host.name}`, 'warn', `first connection: accept the host key by running this once in your terminal: ${firstConnectCommand(config.hosts[host.name]!)}`);
+        else if (host.state === 'auth-failed') add(`host ${host.name}`, 'warn', `authentication failed: ${host.detail ?? ''}. Check identity_file/ssh-agent for ${config.hosts[host.name]!.ssh}`);
+        else add(`host ${host.name}`, 'warn', `unreachable: ${host.detail ?? 'no answer'}${age}`);
+      }
+    }
+  }
 
   section('tools/providers');
   const notifier = await findTerminalNotifier(runner, platform);

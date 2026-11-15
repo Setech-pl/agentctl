@@ -12,6 +12,7 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`version`](#agentctl-version) | Print the installed version (alias of --version). |
 | [`guide`](#agentctl-guide) | Read the dispatcher guide and optional project overlay. |
 | [`capacity`](#agentctl-capacity) | Current plan windows, pace, slots, queue, equivalents and seven-day model statistics; no provider selection. |
+| [`hosts`](#agentctl-hosts) | Remote hosts over SSH (config section "hosts"): reachability, latency, GPU, disk in work_dir, tmux, provider CLIs (+ version, best-effort logged-in) and repo clones. Probes in parallel with a per-host timeout and caches the result for the board; a spec may already say "host: \<name>", but starting tasks there arrives in 0.23 part B. |
 | [`consult`](#agentctl-consult) | Preview a high-cost Delphi consultation; --confirm registers it for watch. |
 | [`new`](#agentctl-new) | Start the tasks in a spec file: worktree, setup commands, symlinks, TASK.md, tmux window, agent, prompt. |
 | [`queue`](#agentctl-queue) | Put the tasks of a spec file in the queue: they start by themselves (while "agentctl watch" runs) when a window of their provider is free. Shows a summary and asks y/N first. |
@@ -142,6 +143,27 @@ Examples:
 ```sh
 agentctl capacity --json
 agentctl capacity --clip
+```
+
+## agentctl hosts
+
+Remote hosts over SSH (config section "hosts"): reachability, latency, GPU, disk in work_dir, tmux, provider CLIs (+ version, best-effort logged-in) and repo clones. Probes in parallel with a per-host timeout and caches the result for the board; a spec may already say "host: \<name>", but starting tasks there arrives in 0.23 part B.
+
+```
+agentctl hosts [options]
+```
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--json` | machine-readable health records |  |
+| `--refresh` | probe every host now, even when the cache is fresh |  |
+| `--clip` | copy the summary to the clipboard |  |
+
+Examples:
+
+```sh
+agentctl hosts                          # reachability, GPU, disk, tmux, provider CLIs, repos
+agentctl hosts --refresh --json          # probe every host now, machine-readable
 ```
 
 ## agentctl consult

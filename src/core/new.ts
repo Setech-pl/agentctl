@@ -107,6 +107,14 @@ async function runSetup(ctx: Context, spec: ResolvedSpec, track?: (step: Omit<Se
 
 /** Start every spec: worktree, links, TASK.md, tmux window, agent, prompt. Plans and validates everything first. */
 export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOptions = {}): Promise<NewResult[]> {
+  // A spec may already name a remote host (validated in resolveSpec), but running there arrives in 0.23 part B:
+  // refuse the whole batch at start, with one clear line per remote task, so nothing half-starts.
+  const remote = requested.filter((spec) => spec.host !== undefined);
+  if (remote.length > 0) {
+    throw new AgentctlError(
+      remote.map((spec) => `${spec.task}: host "${spec.host}" — remote execution arrives in agentctl 0.23 part B; for now remove "host:" from the spec to start it locally`).join('\n'),
+    );
+  }
   if (ctx.runner.dryRun || opts.noAgent) return startTasks(ctx, requested, opts);
   const admission = await withStartLock(ctx, async () => {
     const specs = await planBatch(ctx, requested, opts);

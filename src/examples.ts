@@ -9,6 +9,7 @@ export const COMMAND_EXAMPLES: Record<string, string[]> = {
   'dataset export': ['agentctl dataset export --out attempts.jsonl', 'agentctl dataset export --format csv --since 30d', 'agentctl dataset export --include-prompts --include-reports --out content.jsonl'],
   guide: ['agentctl guide --project /path/to/repo --lang en --clip', 'agentctl guide --lang pl'],
   capacity: ['agentctl capacity --json', 'agentctl capacity --clip'],
+  hosts: ['agentctl hosts                          # reachability, GPU, disk, tmux, provider CLIs, repos', 'agentctl hosts --refresh --json          # probe every host now, machine-readable'],
   consult: ['agentctl consult consult.yaml', 'agentctl consult consult.yaml --confirm'],
   new: [
     'agentctl new --dry-run task-42.md        # print every command, run nothing',

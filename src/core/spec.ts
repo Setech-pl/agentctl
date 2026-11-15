@@ -92,6 +92,8 @@ export interface ResolvedSpec {
   cohort?: string;
   /** `wall:`: the WALL channels whose open messages the start prompt carries (read-only data); resolved from names, patterns and chat:<name>. */
   wall?: string[];
+  /** `host: <name>`: run on a remote host configured under `hosts:` (0.23 part B); validated now, refused at start until then. */
+  host?: string;
   /** The order as written in the spec; agent/model/effort above are the effective values. */
   requested: Order;
   /** Why the effective order differs from the requested one. */
@@ -185,7 +187,7 @@ export interface ResolveContext {
 /** Task IDs whose window name is one agentctl uses for itself (`watch`, `board`, `manager`). */
 export const RESERVED_TASK_IDS = ['WATCH', 'BOARD', 'MANAGER'];
 
-export const SPEC_KEYS = ['task', 'agent', 'class', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'review', 'report', 'pin', 'remote_control', 'weight', 'priority', 'after', 'after_verdict', 'touches', 'cohort', 'wall', 'read_only'];
+export const SPEC_KEYS = ['task', 'agent', 'class', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'review', 'report', 'pin', 'remote_control', 'weight', 'priority', 'after', 'after_verdict', 'touches', 'cohort', 'wall', 'read_only', 'host'];
 export const REPO_KEYS = ['path', 'worktree', 'base', 'branch', 'setup'];
 
 function label(raw: RawSpec): string {
@@ -386,6 +388,17 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   const remoteDefault = project?.defaults.remoteControl ?? config.defaults.remoteControl ?? false;
   const remote = agent ? provider(agent).capabilities.remoteControl : false;
   if (agent && !isActive(config, agent)) p.add(`provider ${agent} is not enabled; add it to providers: [claude, codex, kimi] in ${config.path}`);
+  // Remote host: the name must be configured and the effective provider must be installed there. Starting there arrives in 0.23 part B;
+  // `new` refuses at start with a clear message, so specs can be written already.
+  let host: string | undefined;
+  if (h.host !== undefined && h.host !== null) {
+    if (typeof h.host !== 'string' || h.host.trim() === '') p.add('host must be the name of a host from the hosts: section of the config');
+    else if (!config.hosts[h.host.trim()]) p.add(`unknown host "${h.host.trim()}": add it under hosts: in ${config.path} (agentctl hosts lists them)`);
+    else {
+      host = h.host.trim();
+      if (agent && !config.hosts[host]!.providers.includes(agent)) p.add(`host "${host}" has no ${agent} CLI (its providers: ${config.hosts[host]!.providers.join(', ')}); drop host: or pick another agent/host`);
+    }
+  }
   if (specRemote === true && agent && !remote) p.add(`remote_control: true works for Claude only (${provider(agent).displayName} has no Remote Control); drop the key or use agent: claude`);
   if (agent && remote && (specRemote === true || (specRemote === undefined && remoteDefault))) {
     const flags = config.agents[agent].flags;
@@ -514,6 +527,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   if (review) spec.review = review;
   if (agent && remote && (specRemote ?? remoteDefault)) spec.remoteControl = true;
   if (cohort) spec.cohort = cohort;
+  if (host) spec.host = host;
   if (wall?.length) spec.wall = wall;
   if (h.read_only === true) {
     spec.readOnly = true;

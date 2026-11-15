@@ -38,6 +38,8 @@ import { adoptTask } from './adopt.ts';
 import { reportInfo } from './report-detect.ts';
 import { managerView, startManager, stopManager } from './manager.ts';
 import { runDoctor } from './doctor.ts';
+import { probeHosts } from './host-health.ts';
+import { readHostsCache, writeHostsCache } from './hosts.ts';
 import { sendPhoneTest } from './phone.ts';
 import { recordJournal } from './journal.ts';
 import type { GcPlan } from './gc.ts';
@@ -1569,6 +1571,14 @@ MCP_TOOLS.push(
   extraRead('doctor', 'doctor', 'Diagnose the installation, permissions and disk', { project: optionalText }, async (ctx, a) => runDoctor(ctx.runner, () => ctx.config, a.project as string ?? null, undefined, undefined, undefined, undefined, { cachedOnly: true })),
   extraRead('equivalents', 'capacity', 'Read the equivalents table for active providers, including Kimi when enabled', {}, async (ctx) => ctx.config.equivalents),
   extraRead('config_show', 'doctor', 'Read effective configuration with secrets masked; queue_hold (first) is usage.queue_hold per active provider', {}, async (ctx) => ({ queue_hold: Object.fromEntries(activeProviders(ctx.config).map((id) => [id, holdText(ctx.config.usage.queueHold[id])])), ...(redactConfig(ctx.config) as object) })),
+  extraRead('hosts', 'hosts', 'Read remote host health over SSH: per host the state (reachable / unreachable / auth-failed / host-key-*), latency, GPU (nvidia-smi, null when absent), free disk in work_dir, tmux, each provider CLI (present, version, best-effort logged in/out) and repo clones (HEAD, origin). Cached ~60s by "agentctl hosts"; refresh: true probes now. A spec may say "host: <name>", but starting tasks remotely arrives in 0.23 part B', { refresh: z.boolean().optional() }, async (ctx, a) => {
+    if (Object.keys(ctx.config.hosts).length === 0) return { hosts: [], note: 'no hosts: section in the config' };
+    const fresh = a.refresh ? undefined : readHostsCache(process.env, ctx.runner.now(), 60_000);
+    if (fresh) return { cached: true, writtenAt: fresh.writtenAt, hosts: fresh.hosts };
+    const hosts = await probeHosts(ctx.runner, ctx.config.hosts, ctx.config);
+    await writeHostsCache(ctx.runner, hosts);
+    return { cached: false, hosts };
+  }),
   extraRead('manager_status', 'manager --url', 'Inspect the manager session', {}, async (ctx) => managerView(ctx)),
   extraRead('away_status', 'away status', 'Inspect away mode', {}, async (ctx) => awayReport(ctx.config)),
   extraRead('report', 'report <TASK>', 'Inspect report location and candidates', { task: taskArg }, async (ctx, a) => reportInfo(ctx, a.task as string)),

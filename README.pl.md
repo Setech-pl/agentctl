@@ -541,6 +541,7 @@ Play a notification sound when a background task finishes.
 | `touches` | nie | Globy plików, które zadanie zmieni: ostrzeżenie, gdy aktywne zadanie już je zmienia. |
 | `cohort` | nie | Nazwa grupy, do której należy zadanie (`--cohort` przy `new` i `queue` ją nadpisuje). Bez niej zadanie nie należy do żadnej kohorty. |
 | `report` | nie | Gdzie agent zapisuje raport (domyślnie `<cache>/<task>/<TASK>.md`). |
+| `host` | nie | Nazwa hosta z sekcji `hosts:` configu: zadanie ma działać na tej maszynie. Walidowane od razu (nieznany host albo dostawca, którego host nie ma, to błąd); start zdalny nadejdzie w części B wersji 0.23 — `agentctl new` odmawia z jasnym komunikatem do tego czasu. |
 
 Podgląd odrzuca linki wskazujące na siebie oraz link wewnątrz jego celu lub cel wewnątrz linku, także po rozwiązaniu symlinków w ścieżce. Brak bezwzględnej ścieżki `links.from` powoduje ostrzeżenie; `from` musi pozostać wewnątrz głównego worktree.
 
@@ -907,6 +908,53 @@ Podaj każdemu czatowi jego nazwę raz (instrukcje Projektu: „wywołuj narzęd
 - **Board**: **`W`** otwiera WALL: kanały z liczbą nieprzeczytanych i otwartych, Enter na kanale (najnowsze na górze; `s`/`t` filtrują status/rodzaj), Enter na wiadomości (refs, historia, odpowiedzi). `r`/`R` oznaczają przeczytane (zapis lokalny); Esc wraca. Nagłówek pokazuje `WALL <n> unread (W)` od początku: board czyta indeks WALL w tle (stat na kanał, najwyżej co 15 s).
 
 Szczegóły: [docs/mcp.md](docs/mcp.md#wall-0210-wall-1), konfiguracja: [docs/configuration.md](docs/configuration.md#wall).
+
+## Hosty (0.23, część A)
+
+Druga maszyna — box Windows 11 + WSL2 z RTX 5080, serwer Linuksa — osiągalna po SSH i widoczna dla agentctl: stan, GPU, dysk, CLI dostawców, klony repozytoriów. Startowanie na niej zadań nadejdzie w **części B wersji 0.23**; spec może już zawierać `host: <nazwa>` (klucz jest walidowany od razu, a `agentctl new` odmawia startu z jasnym komunikatem do części B).
+
+```sh
+agentctl hosts              # na hosta: stan, opóźnienie, GPU, dysk, tmux, CLI (+ wersja, logowanie), repozytoria
+agentctl hosts --json       # dla maszyn; --refresh odpytuje teraz (wynik cachuje się ~60 s dla boardu)
+agentctl doctor             # hosty też: pierwszy klucz hosta wypisuje dokładną jednorazową komendę ssh
+```
+
+Board: **`H`** pokazuje zcache'owane dane; linia w nagłówku `hosts: <nazwa> <stan> (GPU)` pojawia się, gdy istnieje sekcja `hosts:`. MCP: narzędzie odczytu `hosts` (bez `mcp.allow`; `refresh: true` odpytuje teraz).
+
+```yaml
+# ~/.agentctl/config.yaml
+hosts:
+  gpu-pc:
+    ssh: krzet@192.168.2.64     # nazwa lub IP; przekazywane do ssh dosłownie przy każdym wywołaniu — bez cachowanego IP
+    port: 2222                  # portproxy Windows → WSL2 NAT; domyślnie 22
+    # identity_file: ~/.ssh/wsl  # opcjonalnie; domyślnie ssh sam (agent, domyślne klucze)
+    work_dir: ~/work            # zdalny katalog pracy; stan dysku raportowany dla niego
+    repos: {app: ~/src/app}     # osobne klone na hoście, synchronizowane przez GitHub
+    providers: [claude]         # CLI dostawców zainstalowane tam (claude, codex, kimi, glm)
+    limits: {claude: 1}         # opcjonalny limit równoczesnych zdalnych zadań (użyje go część B)
+    env: {CUDA_VISIBLE_DEVICES: "0"}   # opcjonalne; środowisko zdalnych komend (użyje go część B)
+```
+
+W tej sekcji nie ma sekretów: tożsamość to ścieżka pliku klucza, `config_show` pokazuje hosty bez maskowania, a uwierzytelnianie należy do OpenSSH (agent lub klucz bez hasła — ssh nigdy nie pyta, `BatchMode`). Jedno połączenie multipleksowane na hosta (`ControlMaster`, gniazdo w `~/.agentctl/ssh/`); nazwa hosta rozwiązywana przy każdym wywołaniu.
+
+Postawa bezpieczeństwa jest stała, niekonfigurowalna: `StrictHostKeyChecking=yes` — **zmieniony** klucz hosta kończy się błędem (`host-key-changed`, nigdy auto-akceptowany; sprawdź maszynę, zanim ruszysz `known_hosts`), **pierwszy** klucz kończy się `host-key-unknown`, a `agentctl doctor` wypisuje dokładne `ssh -p 2222 krzet@192.168.2.64` do jednorazowego wykonania w Twoim terminalu. Stany: `reachable`, `unreachable` (timeout/odmowa/DNS), `auth-failed`, `host-key-unknown`, `host-key-changed`.
+
+Jednorazowa konfiguracja strony WSL (przepis właściciela):
+
+```sh
+# w WSL2 Ubuntu:
+sudo apt install openssh-server tmux
+sudo service ssh start                    # lub: sudo systemctl enable --now ssh
+# claude itd.: zainstaluj CLI dostawców i zaloguj się (claude auth login)
+```
+
+```powershell
+# w Windows (PowerShell jako administrator): portproxy z LAN do WSL
+netsh interface portproxy add v4tov4 listenport=2222 listenaddress=0.0.0.0 connectport=22 connectaddress=<IP-WSL>
+# firewall: odblokuj TCP 2222; IP WSL może się zmienić po restarcie — wtedy zaktualizuj portproxy (i IP w configu)
+```
+
+Udokumentowane założenia (każde konfigurowalne): repozytoria na hoście to **osobne klone synchronizowane przez GitHub — agentctl robi fetch, nigdy push**; instalacja hooków/ustawień Claude na hoście tak jak lokalnie należy do części B (idempotentna, raportowana); dev (`AGENTCTL_HOME`) i prod mogą pracować z hostami równolegle. Sprawdzanie **zalogowania** jest best-effort: szuka pliku poświadczeń CLI na hoście (`~/.claude/.credentials.json`, `~/.codex/auth.json`) — „ktoś się tu logował”, nie „token jest ważny”; CLI bez znanego pliku poświadczeń raportują `unknown`.
 
 ## Sprzątanie
 

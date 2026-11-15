@@ -24,6 +24,9 @@ import { moveTask } from './move.ts';
 import { liveWindows } from './plan.ts';
 import { collectLimits, renderLimits } from './limits.ts';
 import { planGc, renderGc } from './gc.ts';
+import { hostsViewLines } from './host-health.ts';
+import { readHostsCache, summarizeHosts } from './hosts.ts';
+import type { HostsBoardSummary } from './hosts.ts';
 import { findResumable, planResume, resumeTasks } from './resume.ts';
 import { describeQueue, moveToFront, readQueue, removeFromQueue, setPaused, isPaused } from './queue.ts';
 import type { QueueView } from './queue.ts';
@@ -154,14 +157,14 @@ export type BoardMode =
   | { kind: 'help' }
   /** `l`: the history of the tasks (`agentctl log`), scrolled with the arrows. */
   | { kind: 'log'; lines: string[]; offset: number }
-  /** `L` (limits), `G` (gc preview): a page of lines from the core, scrolled with the arrows. */
+  /** `L` (limits), `G` (gc preview), `H` (hosts): a page of lines from the core, scrolled with the arrows. */
   | { kind: 'view'; what: ViewKind; lines: string[]; offset: number }
   /** `W`: the WALL (board-wall.ts): channels, the messages of one (status/kind filters), one message with its thread. */
   | { kind: 'wall'; level: 'channels' | 'messages' | 'message'; channel: number; message: number; id: string | null; status: WallStatus | null; wallKind: WallKind | null; lines: string[]; offset: number };
 
-export type ViewKind = 'limits' | 'gc' | 'capacity';
+export type ViewKind = 'limits' | 'gc' | 'capacity' | 'hosts';
 
-export const VIEW_TITLES: Record<ViewKind, string> = { capacity: 'Capacity', limits: 'Limits', gc: 'Clean-up preview (agentctl gc)' };
+export const VIEW_TITLES: Record<ViewKind, string> = { capacity: 'Capacity', limits: 'Limits', gc: 'Clean-up preview (agentctl gc)', hosts: 'Hosts (remote machines over SSH)' };
 
 export interface CohortOption {
   label: string;
@@ -211,13 +214,15 @@ export interface BoardState {
   cohortsRecent: number;
   /** The WALL as the owner sees it; null until the first background read (header count) or the WALL view (W) loaded it. */
   wall: WallBoardData | null;
+  /** Remote hosts (config `hosts:`): compact summaries from the on-disk cache; null when no hosts are configured. */
+  hosts: HostsBoardSummary[] | null;
 }
 
 /** The cursor stands on the line of the manager (it is no task: Enter goes to its window). */
 export const MANAGER_SELECT = '@manager';
 
 export function initialBoardState(width: number, height: number): BoardState {
-  return { rows: [], selected: null, mode: { kind: 'list' }, notice: null, preview: null, width, height, refreshedAt: null, busy: null, loadError: null, quit: false, showFinished: false, showHidden: false, queue: [], queuePaused: false, cohortFilter: null, folded: [], disk: null, plans: null, resumable: [], away: null, manager: null, archivedCohorts: [], cohortsRecent: 10, wall: null };
+  return { rows: [], selected: null, mode: { kind: 'list' }, notice: null, preview: null, width, height, refreshedAt: null, busy: null, loadError: null, quit: false, showFinished: false, showHidden: false, queue: [], queuePaused: false, cohortFilter: null, folded: [], disk: null, plans: null, resumable: [], away: null, manager: null, archivedCohorts: [], cohortsRecent: 10, wall: null, hosts: null };
 }
 
 /** What the front has to do after a key press. */
@@ -243,7 +248,7 @@ export type BoardEffect =
   | { type: 'mark-cohort'; cohort: string; tasks: string[]; result: Result }
   /** `l`: load the history into the log view. */
   | { type: 'log' }
-  /** `L`, `G`: load the lines of a view. */
+  /** `L`, `G`, `H`: load the lines of a view. */
   | { type: 'view'; what: ViewKind }
   /** `W`: (re)load the WALL data; Enter on a message: its lines; the owner's read marks (local). */
   | { type: 'wall-load' }
@@ -399,7 +404,7 @@ function listKey(state: BoardState, input: string, key: KeyPress): KeyResult {
 
   if (input === '?') return stay({ ...state, mode: { kind: 'help' } });
   if (input === 'l') return stay({ ...state, notice: null, mode: { kind: 'log', lines: ['Loading…'], offset: 0 } }, [{ type: 'log' }]);
-  const view: ViewKind | null = input === 'C' ? 'capacity' : input === 'L' ? 'limits' : input === 'G' ? 'gc' : null;
+  const view: ViewKind | null = input === 'C' ? 'capacity' : input === 'L' ? 'limits' : input === 'G' ? 'gc' : input === 'H' ? 'hosts' : null;
   if (view) return stay({ ...state, notice: null, mode: { kind: 'view', what: view, lines: ['Loading…'], offset: 0 } }, [{ type: 'view', what: view }]);
   // o / p / f: how a finished task turned out. `p` is also the queue's pause: it marks only while a finished task is selected.
   const result = input === 'o' ? 'ok' : input === 'p' ? 'partial' : input === 'f' ? 'fail' : null;
@@ -691,11 +696,13 @@ export interface BoardSnapshot {
   cohortsRecent?: number;
   preview: Preview | null;
   refreshedAt: string;
+  /** Remote host summaries from the health cache; absent when no hosts are configured. */
+  hosts?: HostsBoardSummary[];
 }
 
 /** Keep the selection when the task is still there, otherwise take the first row. */
 export function applySnapshot(state: BoardState, snap: BoardSnapshot): BoardState {
-  const next: BoardState = { ...state, rows: snap.rows, queue: snap.queue ?? [], queuePaused: snap.queuePaused ?? false, disk: snap.disk ?? null, plans: snap.plans ?? null, resumable: snap.resumable ?? [], away: snap.away ?? null, manager: snap.manager ?? null, cohortNotes: snap.cohortNotes ?? state.cohortNotes, archivedCohorts: snap.archivedCohorts ?? state.archivedCohorts, cohortsRecent: snap.cohortsRecent ?? state.cohortsRecent, refreshedAt: snap.refreshedAt, loadError: null };
+  const next: BoardState = { ...state, rows: snap.rows, queue: snap.queue ?? [], queuePaused: snap.queuePaused ?? false, disk: snap.disk ?? null, plans: snap.plans ?? null, resumable: snap.resumable ?? [], away: snap.away ?? null, manager: snap.manager ?? null, cohortNotes: snap.cohortNotes ?? state.cohortNotes, archivedCohorts: snap.archivedCohorts ?? state.archivedCohorts, cohortsRecent: snap.cohortsRecent ?? state.cohortsRecent, hosts: snap.hosts === undefined ? state.hosts : snap.hosts, refreshedAt: snap.refreshedAt, loadError: null };
   const listed = navTasks(next);
   const selected = state.selected !== null && listed.includes(state.selected) ? state.selected : firstSelectable(listed);
   const preview = snap.preview && snap.preview.task === selected ? snap.preview : selected === state.selected ? state.preview : null;
@@ -785,6 +792,9 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
   const cohortNotes = Object.fromEntries(cohortMetas.filter(m => m.note?.startsWith('CONSULT ')).map(m => [cohortKey(m.name), m.note!]));
   const archivedCohorts = cohortMetas.filter((m) => m.archived).map((m) => cohortKey(m.name));
   const queued = queue.find((v) => v.entry.task === selected);
+  // Remote hosts: from the on-disk health cache only — the board never opens network connections on a refresh.
+  const hosts = Object.keys(config.hosts).length === 0 ? undefined : summarizeHosts(readHostsCache(), Object.keys(config.hosts));
+  const hostsSnap = hosts === undefined ? {} : { hosts };
   if (selected === MANAGER_SELECT && manager.state !== 'missing') {
     let lines: string[];
     try {
@@ -792,9 +802,9 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
     } catch (e) {
       lines = [`(cannot read the window: ${errorMessage(e)})`];
     }
-    return { rows, queue, queuePaused, disk, plans, resumable, away: awayView(config), manager, archivedCohorts, cohortNotes, cohortsRecent: config.board.cohortsRecent, preview: { task: MANAGER_SELECT, lines }, refreshedAt: clock(now) };
+    return { rows, queue, queuePaused, disk, plans, resumable, away: awayView(config), manager, archivedCohorts, cohortNotes, cohortsRecent: config.board.cohortsRecent, ...hostsSnap, preview: { task: MANAGER_SELECT, lines }, refreshedAt: clock(now) };
   }
-  if (queued) return { rows, queue, queuePaused, disk, plans, resumable, away: awayView(config), manager, archivedCohorts, cohortNotes, cohortsRecent: config.board.cohortsRecent, preview: { task: queued.entry.task, model: `${queued.entry.agent} · model: ${queued.entry.model} · effort: ${queued.entry.effort}`, lines: queuePreview(queued) }, refreshedAt: clock(now) };
+  if (queued) return { rows, queue, queuePaused, disk, plans, resumable, away: awayView(config), manager, archivedCohorts, cohortNotes, cohortsRecent: config.board.cohortsRecent, ...hostsSnap, preview: { task: queued.entry.task, model: `${queued.entry.agent} · model: ${queued.entry.model} · effort: ${queued.entry.effort}`, lines: queuePreview(queued) }, refreshedAt: clock(now) };
   // The selected task; else the first one the list shows (not a hidden, closed or finished one).
   const target = rows.find((r) => r.task === selected) ?? rows.find((r) => !r.hidden && !r.finished) ?? rows.find((r) => !r.hidden) ?? rows[0];
   let preview: Preview | null = null;
@@ -815,7 +825,7 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
     if (target.promptQueue?.length) notes.push(`${target.promptQueue.length} messages (${target.promptDelivery ?? 'queued'})`);
     preview = { task: target.task, model: `${target.agent} · model: ${target.model} · effort: ${target.effort}`, lines, ...(notes.length > 0 ? { note: notes.join(' · ') } : {}) };
   }
-  return { rows, queue, queuePaused, disk, plans, resumable, away: awayView(config), manager, archivedCohorts, cohortNotes, cohortsRecent: config.board.cohortsRecent, preview, refreshedAt: clock(now) };
+  return { rows, queue, queuePaused, disk, plans, resumable, away: awayView(config), manager, archivedCohorts, cohortNotes, cohortsRecent: config.board.cohortsRecent, ...hostsSnap, preview, refreshedAt: clock(now) };
 }
 
 /** The preview of a queued task: what it will run, what it waits for, how it ends if it failed, and the start of its prompt. */
@@ -1037,6 +1047,10 @@ export const loadLogLines = (ctx: Context): string[] => logLines(ctx);
 export async function loadViewLines(ctx: Context, what: ViewKind): Promise<string[]> {
   if (what === 'capacity') return renderCapacity(await collectCapacity(ctx));
   if (what === 'limits') return renderLimits(collectLimits(ctx.config, await liveWindows(ctx)));
+  if (what === 'hosts') {
+    const cache = Object.keys(ctx.config.hosts).length === 0 ? undefined : readHostsCache();
+    return hostsViewLines(cache?.hosts, cache?.writtenAt);
+  }
   return renderGc(await planGc(ctx, {}));
 }
 
@@ -1181,7 +1195,7 @@ export function visibleRows(state: BoardState, capacity: number): { rows: BoardR
 
 // ---- texts
 
-export const KEY_HINTS = 'm M move i int c/r pull x close X cancel k cohort h hide l log L G W R w u/d/p ?';
+export const KEY_HINTS = 'm M move int c/r pull x close X cancel k cohort h hide l log L G H W R w u/d/p?';
 
 export const HELP_LINES: string[] = [
   'agentctl board',
