@@ -26,6 +26,8 @@ import type { WallSettings } from './wall-config.ts';
 
 export const WALL_KINDS = ['info', 'question', 'decision-request', 'contract-change', 'answer'] as const;
 export type WallKind = (typeof WALL_KINDS)[number];
+export const UNKNOWN_CHAT_WARNING = 'unknown chat – only channel agentctl visible; pass as: "chat:<name>"';
+
 export const WALL_STATUSES = ['open', 'answered', 'accepted', 'rejected', 'superseded'] as const;
 export type WallStatus = (typeof WALL_STATUSES)[number];
 /** Only the owner (or a chat confirming on the owner's behalf) changes the status of these. */
@@ -737,17 +739,18 @@ export function renderRead(result: ReadResult, opts: { channelList?: boolean; re
   return [
     WALL_DATA_NOTE,
     `identity: ${result.identity}`,
+    ...(result.identity === 'unknown' ? [UNKNOWN_CHAT_WARNING] : []),
     ...(opts.channelList ? ['channels:', ...result.channels.map((c) => `  ${c.channel}  ${c.messages} msg, ${c.open} open${c.unread !== undefined ? `, ${c.unread} unread` : ''}${c.canPost ? '' : ', read-only'}${c.description ? `  – ${c.description}` : ''}`)] : []),
-    ...(result.messages.length ? result.messages.map((m) => headerLine(m, opts.read ? !isRead(opts.read, m) : false)) : ['no messages']),
+    ...(result.messages.length ? result.messages.map((m) => `${headerLine(m, opts.read ? !isRead(opts.read, m) : false)}${m.from === result.identity ? ' (yours)' : ''}`) : ['no messages']),
     ...(result.older ? [`older: ${result.older} more (before: ${result.messages[0]!.id})`] : []),
   ];
 }
 
-export function renderThread(thread: ReturnType<typeof readThread>): string[] {
+export function renderThread(thread: ReturnType<typeof readThread>, identity?: string): string[] {
   const m = thread.message;
   const block = (x: WallMessage): string[] => [
     `${x.id}  ${x.kind}  ${x.status}`,
-    `from: ${x.from}   to: ${x.to}   at: ${when(x.ts)}`,
+    `from: ${x.from}${x.from === identity ? ' (yours)' : ''}   to: ${x.to}   at: ${when(x.ts)}`,
     `subject: ${x.subject}`,
     ...(x.refs.length ? [`refs: ${x.refs.join(', ')}`] : []),
     ...(x.history.length ? ['status history:', ...x.history.map((c) => `  ${statusLine(c)}`)] : []),

@@ -13,6 +13,12 @@ The server is a thin front over the same core functions the CLI uses (`src/core/
 | Write tools from a chat in the app | Covered by tests; not yet tried by hand in the app. |
 | Which approval screen the app shows for tools of a local server | Not confirmed. Tools are annotated (`readOnlyHint`, `destructiveHint`), but what the app does with them for a local server is not documented. |
 
+## Chat identity
+
+claude.ai chats share one MCP client name: `as: "chat:<name>"` is mandatory on `events_since` and WALL calls. Unknown callers see only `agentctl` with a warning. Own posts carry `(yours)` on every readable channel; known chats always receive the bounded “WALL do Ciebie (open)” inbox, independent of the event cursor or cohort.
+
+Czaty claude.ai mają wspólną nazwę klienta MCP: w `events_since` i WALL trzeba podawać `as: "chat:<name>"`. Nieznany czat widzi tylko `agentctl` z ostrzeżeniem. Własne wpisy mają `(yours)`, a znane czaty zawsze widzą otwartą skrzynkę niezależnie od kursora i kohorty.
+
 ## Read tools
 
 These always work.
@@ -23,7 +29,7 @@ These always work.
 | `version` | none | The version of agentctl this server process runs, its script, pid and start time, the version of the stable copy on disk (`older: true` when they differ), the write tools the user allowed and the warnings about the MCP part of the config. Use it when a tool seems to be missing. |
 | `peek` | `task`, `lines?` (1 to 200, default 40) | The last lines of a running task's window without the agent's footer. |
 | `list_reports` | `all?` | Which tasks have a report: size, `modified` (UTC) and `modifiedLocal`, whether it was pulled, and `source` (where the agent wrote the report when the file is a copy, else `null`). |
-| `get_report` | `task`, `section?`, `offset?`, `limit?` | A selected Markdown section or line/byte page, bounded by mcp.max_response_kb. It reads only the file that the task's `TASK.md` names, never a path from the chat, and refuses a report that is a symbolic link. A contiguous whole-file read marks it pulled only at EOF; sections do not. |
+| `get_report` | `task`, `section?`, `offset?`, `limit?` | A selected Markdown section or line/byte page, bounded by mcp.max_response_kb. It reads only the file that the task's `TASK.md` names, never a path from the chat, and refuses a report that is a symbolic link. The summary or full first page marks it pulled by default; `mark_pulled: false` opts out. Explicit line/byte pages acknowledge after their combined coverage reaches the whole file, in any order; sections do not by default. |
 | `pull_ready` | `cohort?`, `mode?`, `offset?`, `limit?` | Summary by default: task/path/size/SHA, verdict, decisions, actions and the final Polish summary. mode: full returns complete bodies through response_page fragments. Only mode full or explicit ack marks fully delivered reports as pulled. This is the only read tool that changes anything, and only in agentctl's own state. A chat should call it at the start of discussing finished work. |
 | `queue_list` | none | The task queue: position, agent/model/effort, priority, weight (`normal`/`heavy`), `after`, what each task waits for (`startCondition`: `czeka na miejsce: claude 2/2`, `czeka na NC-42`, paused), since when, and the error of a start that failed. |
 | `usage` | `cohort?`, `since?` | Token usage and the plan limits: per provider the 5 hour and weekly window (percentage used, reset time; `available: false` when the provider did not say, shown as n/d) and the tokens today and in the period, per task, cohort, model and day. `since` is an age such as `12h`, `7d`, `2w` (default `7d`). A chat should call it before the user orders more tasks. `status` includes `Plans:` only with `detail: true` or `capacity: true`. |

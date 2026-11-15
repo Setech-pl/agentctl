@@ -418,6 +418,7 @@ async function runEventsSince(deps: McpDeps, args: { since?: string | undefined;
   const key = args.cohort === undefined ? client : `${client}|cohort:${cohortKey(args.cohort)}`;
   const sessionCursor = session ? (session.cursors[key] ?? session.markers[key] ?? session.markers.mcp ?? session.initialSince) : undefined;
   const report = await collectEvents(ctx, { client, cursor: args.cursor ?? ((!args.since || args.since === 'last') ? sessionCursor : undefined), limit: args.limit, since: args.since, cohort: args.cohort, keep: Boolean(args.peek), wallChannels, wallIdentity: who.id });
+  if (who.kind === 'unknown') report.note = [report.note, 'unknown chat – only channel agentctl visible; pass as: \"chat:<name>\"'].filter(Boolean).join('\n');
   if (session && !args.peek) session.cursors[key] = report.next_cursor;
   return { text: renderEvents(report).join('\n'), data: report };
 }
@@ -1613,7 +1614,7 @@ MCP_TOOLS.push(
       const ctx = deps.context(() => {});
       const a = args as { as?: string; channel?: string; id?: string; since?: string; status?: WallStatus; kind?: WallKind; limit?: number; before?: string };
       const who = wallCaller(deps, ctx, a.as);
-      if (a.id !== undefined) return ok(renderThread(readThread(ctx.config, who, a.id)).join('\n'));
+      if (a.id !== undefined) return ok(renderThread(readThread(ctx.config, who, a.id), who.id).join('\n'));
       const result = readWall(ctx, who, a);
       return ok([...renderRead(result, { channelList: a.channel === undefined }), ...(who.note ? [`note: ${who.note}`] : [])].join('\n'));
     }),

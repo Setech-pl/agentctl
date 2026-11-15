@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| A11 | Unknown WALL identity and own posts are not visibly labelled. | `tests/a11-wall-visibility.test.ts` | 0.22.2 | fails on v0.22.0 (1 failing of 1) |
 | A10 | Collapsed Codex questions omit text from namespaced session tool calls. | `tests/p65b-peek-question.test.ts` (`^A10:`) | 0.22.2 | fails on v0.22.0 (1 failing of 1) |
 | A9 | Compact output references fail YAML parsing and placeholder branches escape validation. | `tests/a9-report-formats.test.ts` | 0.22.2 | fails on v0.22.0 (2 failing of 2) |
 | A8 | YAML converts unquoted git identifiers such as 2742e697 into numbers. | `tests/spec.test.ts` (`^A8:`) | 0.22.2 | fails on v0.22.0 (1 failing of 1) |

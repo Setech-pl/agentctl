@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'A11', fixedIn: '0.22.2', symptom: 'Unknown WALL identity and own posts are not visibly labelled.', scenarios: [s('a11-wall-visibility.test.ts')] },
   { id: 'A10', fixedIn: '0.22.2', symptom: 'Collapsed Codex questions omit text from namespaced session tool calls.', scenarios: [s('p65b-peek-question.test.ts', '^A10:')] },
   { id: 'A9', fixedIn: '0.22.2', symptom: 'Compact output references fail YAML parsing and placeholder branches escape validation.', scenarios: [s('a9-report-formats.test.ts')] },
   { id: 'A8', fixedIn: '0.22.2', symptom: 'YAML converts unquoted git identifiers such as 2742e697 into numbers.', scenarios: [s('spec.test.ts', '^A8:')] },

@@ -101,6 +101,7 @@ export interface EventsSummary {
 
 export interface EventsReport {
   client: EventClient;
+  wallIdentity?: string;
   wallOpen?: { id: string; subject: string; from: string }[];
   /** ISO time the events start after. */
   since: string;
@@ -150,6 +151,7 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
   // Bound the complete JSON and text forms before advancing the persistent cursor.
   const report: EventsReport = { client: opts.client, since: new Date(since.ms).toISOString(), sinceLabel: since.label, ...(since.note ? { note: since.note } : {}), cohort, events, summary, away: awayView(config), markerMoved: false, has_more: false, next_cursor: '' };
   if (opts.wallIdentity?.startsWith('chat:')) {
+    report.wallIdentity = opts.wallIdentity;
     report.wallOpen = [...(opts.wallChannels ?? [])].flatMap(c => channelMessages(config, c))
       .filter(m => m.status === 'open' && (m.to === opts.wallIdentity || m.kind === 'question' || m.kind === 'decision-request'))
       .sort((a, b) => b.ts.localeCompare(a.ts)).slice(0, 10).map(m => ({ id: m.id, subject: m.subject.slice(0, 100), from: m.from }));
@@ -275,8 +277,8 @@ export function renderEvents(report: EventsReport): string[] {
   return [
     head,
     ...(report.note ? [report.note] : []),
-    ...report.events.map((e) => `${hhmm(e.at)}  ${KIND_LABEL[e.kind]}${e.task ? `  ${e.task}` : ''}  ${e.verdict ? `${e.verdict}` : e.text}${e.phone ? PHONE_MARK : ''}`),
-    ...(report.wallOpen ? ['WALL do Ciebie (open)', ...report.wallOpen.map(m => `${m.id}: ${m.subject}`), ...(!report.wallOpen.length ? ['brak'] : [])] : []),
+    ...report.events.map((e) => `${hhmm(e.at)}  ${KIND_LABEL[e.kind]}${e.task ? `  ${e.task}` : ''}  ${e.verdict ? `${e.verdict}` : e.text}${e.wall?.from === report.wallIdentity ? ' (yours)' : ''}${e.phone ? PHONE_MARK : ''}`),
+    ...(report.wallOpen ? ['WALL do Ciebie (open)', ...report.wallOpen.map(m => `${m.id}: ${m.subject}${m.from === report.wallIdentity ? ' (yours)' : ''}`), ...(!report.wallOpen.length ? ['brak'] : [])] : []),
     summaryLine(report.summary),
     `has_more: ${report.has_more}; next_cursor: ${report.next_cursor}`,
     ...(report.away.on ? ['Away włączone: telefon dostaje powiadomienia (📱 przy zdarzeniu = poszło na telefon).'] : []),
@@ -285,7 +287,7 @@ export function renderEvents(report: EventsReport): string[] {
 
 export function eventsMarkdown(report: EventsReport): string {
   const lines = [`**${renderEvents(report)[0]}**`, ''];
-  for (const e of report.events) lines.push(`- ${hhmm(e.at)} **${KIND_LABEL[e.kind]}**${e.task ? ` ${e.task}` : ''} – ${e.verdict ?? e.text}${e.phone ? PHONE_MARK : ''}`);
+  for (const e of report.events) lines.push(`- ${hhmm(e.at)} **${KIND_LABEL[e.kind]}**${e.task ? ` ${e.task}` : ''} – ${e.verdict ?? e.text}${e.wall?.from === report.wallIdentity ? ' (yours)' : ''}${e.phone ? PHONE_MARK : ''}`);
   if (report.events.length > 0) lines.push('');
   lines.push(summaryLine(report.summary));
   if (report.away.on) lines.push('', 'Away włączone: telefon dostaje powiadomienia.');
