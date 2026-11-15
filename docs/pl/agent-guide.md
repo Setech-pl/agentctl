@@ -41,7 +41,7 @@ notes: []
 
 To przykład kształtu: podstaw istniejące gałęzie/pełne SHA repo zadań. Agentctl sprawdza lokalne referencje, zachowuje poprawne wpisy i ostrzega o błędnych częściach. Actions jest proponowanym tekstem powłoki, bez automatycznego wykonania. Brak/błędne outputs to uwaga, nie dowód niekompletnej treści. Niezgodność próby/niedokończenie raportu jest inną przeszkodą.
 
-Podsumowanie nie jest pełnym odbiorem; sekcje nie oznaczają pulled. Przeczytaj ciągłe pełne strony get_report lub pull_ready full/jawny ack. Ludzki mark to osobna upoważniona ocena. Nie wnioskuj akceptacji z samooceny. Agreguj outputs kohorty z konfliktami i ID; publikacja/integracja należy do właściciela.
+`get_report` domyślnie oznacza pulled po podsumowaniu/pierwszej pełnej stronie; `mark_pulled: false` wyłącza, `true` jawnie potwierdza. Pozostałe strony zbierają pokrycie w dowolnej kolejności; sekcje domyślnie nie oznaczają. Podsumowanie `pull_ready` nadal nie potwierdza pełnego odbioru; użyj full/ack. Ludzki mark to osobna upoważniona ocena. Nie wnioskuj akceptacji z samooceny. Agreguj outputs kohorty z konfliktami i ID; publikacja/integracja należy do właściciela.
 
 ## WALL i CONSULT
 

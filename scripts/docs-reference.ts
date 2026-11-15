@@ -10,7 +10,7 @@ const bt = String.fromCharCode(96);
 const code = (s: string) => bt + s + bt;
 const pl: Record<string, string> = {
  status: 'Stan zadań, pytań, raportów i potrzebnej uwagi; domyślnie zwięzły.',
- events_since: 'Przyrost zdarzeń na klienta; as wybiera tożsamość WALL, peek nie przesuwa kursora.',
+ events_since: 'Przyrost według as czatu (client nadpisuje), otwarta skrzynka WALL; peek zachowuje kursor.',
  gc_preview: 'Chroniony plan sprzątania z rozmiarami i powodami pominięcia; bez usuwania.',
  limits: 'Limity slotów, zajętość, rezerwacje, kolejka i obowiązujący queue_hold.',
  set_limits: 'Zmień limity i queue_hold w configu z komentarzami/backupem; zapis synchroniczny.',
@@ -18,7 +18,7 @@ const pl: Record<string, string> = {
  version: 'Wersja procesu MCP, skrypt, PID, czas startu i wersja stabilnej kopii na dysku.',
  peek: 'Ostatnie linie okna bez stopki, pytanie, stan kolejki promptów lub zapis błędu startu.',
  list_reports: 'Lista raportów, rozmiar/czas, źródło i informacja o odebraniu.',
- get_report: 'Raport zadania, sekcja lub strona; pełny ciągły odczyt do EOF oznacza pulled.',
+ get_report: 'Raport; podsumowanie/pierwsza pełna strona domyślnie pulled, mark_pulled steruje potwierdzeniem.',
  pull_ready: 'Nowe raporty: domyślnie podsumowanie; full/ack oznacza pełne odebranie.',
  task_spec: 'Zapisany nagłówek i prompt zadania.',
  queue_list: 'Pozycja, stan i warunek startu zadań w kolejce.',

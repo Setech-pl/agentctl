@@ -15,7 +15,7 @@ Start with `agentctl doctor`, `agentctl version`, `agentctl status --all` and `a
 | Codex follow-up waiting | Busy Codex queues until confirmed turn end. Inspect message_id, pending state; withdraw if no longer needed. Existing reports remain readable with warnings. |
 | after blocked | Read the predecessor's first verdict. FAIL/BLOCKED/NO-GO normally blocks; incomplete missing verdict can wait. Corrected accepted report auto-unblocks; manual unblock/drop-after is an owner decision. |
 | Report missing/stale | Inspect report candidates, canonical path, current attempt marker and report-end. Touching mtime does not make an old attempt valid. report_from copies only allowed regular files; never symlinks/outside roots. |
-| Report summary seen, still unpulled | Summary/sections do not equal full collection. Read contiguous whole report to EOF, pull_ready full or explicit ack; mark is separate. |
+| Report summary seen, still unpulled | `get_report` summary/first full page marks by default; check mark_pulled: false. Other pages combine in any order. pull_ready summary does not mark; full/ack does. Human mark is separate. |
 | limited / n/d quota | Read capacity source/age/reset. n/d is unknown, especially GLM. Check same-provider auto-resume policy or explicit resume/move. No silent provider switching. |
 | GLM theme or auto-mode notice | Run claude-glm once in its separate config directory and finish onboarding. Informational banners/MCP auth warning are not startup blockers. Default AUTO_MODE_SERVER=0 is GLM task-only. |
 | Kimi refuses safety settings | Doctor reads config.toml: mode auto or disabled dangerous-command guard is refused. Keep guard enabled, use supported manual/yolo config, never bypass trust flags. |
@@ -85,3 +85,5 @@ tmux -L agentctl-dev attach -t '=agentctl-dev'
 
 After server/session loss, unfinished tasks show `needs-attention` with a recovery hint and one `tmux-lost` journal event per loss. Claude records the session ID at `SessionStart`; other provider receipts are retained as soon as received. If a saved session exists, use the suggested `agentctl resume TASK` after reviewing the list. Without one, create a spec with a **new task ID**, point its repositories at the old worktree, and use `agentctl new --reuse recovery.md` to start a replacement task; do not assume that `--continue` or `--last` identifies the lost conversation. Finished reports, closed and cancelled tasks keep their existing state.
 <!-- tmux-dev-end -->
+
+Missing `main` base: the error identifies the locally known default (for example `master`) or unknown metadata. Correct `repos[].base` and retry; agentctl never substitutes it automatically.

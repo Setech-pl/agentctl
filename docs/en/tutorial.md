@@ -26,8 +26,8 @@ git clone https://github.com/Setech-pl/agentctl.git
 cd agentctl
 npm ci
 npm run build
-./bin/agentctl-update --ref v0.22.1 --dry-run
-./bin/agentctl-update --ref v0.22.1
+./bin/agentctl-update --ref v0.22.3 --dry-run
+./bin/agentctl-update --ref v0.22.3
 ~~~
 
 The updater fetches origin, creates/updates a detached stable worktree (default `~/Projects/agentctl-stable`), runs npm ci/build/link there, doctor, and restarts existing watch/board service windows unless disabled. It refuses a dirty stable copy. Check `agentctl --version` and `command -v agentctl`. Use a user-owned npm prefix or Node manager if global linking is denied. Later, `agentctl-update --dry-run` previews an update to origin/main; `--ref` pins a release, `--no-watch` skips restarts, `--no-link` skips global linking. The npm distribution is another path (`npm install -g @setech-pl/agentctl`); there the updater runs npm's latest update and rejects clone-only options.

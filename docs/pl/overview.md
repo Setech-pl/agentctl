@@ -1,4 +1,4 @@
-# agentctl 0.22.1
+# agentctl 0.22.3
 
 agentctl zamienia zlecenie w Markdown na worktree Git, interaktywnego agenta w tmux oraz obserwowane zadanie zakończone raportem. Działa lokalnie i korzysta z zainstalowanych CLI dostawców, do których użytkownik sam się loguje. Obsługuje Claude Code, OpenAI Codex CLI, Kimi Code CLI i Z.ai GLM przez wrapper Claude Code.
 
@@ -20,10 +20,10 @@ Właściciel decyduje, co uruchomić, zatwierdza zaufanie folderów, ocenia dowo
 | [Architektura](architecture.md) | C4 i diagramy sekwencji |
 | [Galeria ekranów](screenshots.md) | Prawdziwe zrzuty TUI z syntetycznymi danymi |
 
-[English](../en/overview.md) · [Referencja poleceń CLI](../commands.md) · [Informacje o wydaniu 0.22.1](../release-notes/0.22.1.pl.md)
+[English](../en/overview.md) · [Referencja poleceń CLI](../commands.md) · [Informacje o wydaniu 0.22.3](../release-notes/0.22.3.pl.md)
 
 ## Granice
 
 To orkiestracja, a nie piaskownica systemu operacyjnego. Procesy dostawców mają lokalne uprawnienia właściciela; worktree rozdziela checkouty, a nie poświadczenia ani sieć. MCP nie udostępnia merge, push, publish ani dowolnej powłoki. Proponowane polecenia w raportach pozostają danymi. Lokalny MCP stdio działa przez klienta desktopowego; claude.ai w przeglądarce i telefon nie łączą się z nim bezpośrednio. Opcjonalny manager Claude używa Remote Control do nadzoru z telefonu.
 
-Procenty i aliasy modeli pochodzą z odczytów dostawców oraz konfiguracji. Nieznane odczyty pozostają `n/d`. Rozpoznawanie ekranu jest heurystyczne; zmiana CLI może wymagać zmiany wzorców. Wersja 0.22.1 zmienia dokumentację i jej narzędzia, bez nowego zachowania produktu.
+Procenty i aliasy modeli pochodzą z odczytów dostawców oraz konfiguracji. Nieznane odczyty pozostają `n/d`. Rozpoznawanie ekranu jest heurystyczne; zmiana CLI może wymagać zmiany wzorców. Wersja 0.22.3 łączy pełne instrukcje z poprawkami operacyjnymi 0.22.2, diagnostyką bazy i przewijaną pomocą boardu.

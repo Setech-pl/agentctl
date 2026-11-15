@@ -10,7 +10,9 @@ Queue order is high priority before normal, FIFO within each class. `weight: hea
 
 | Task state | Meaning |
 |---|---|
-| `needs-attention` | Delivery, lost-window or state-write problem needs inspection |\n| `overloaded` | Recognized provider capacity/overload episode |\n| `working` | Provider turn is running |
+| `needs-attention` | Delivery, lost-window or state-write problem needs inspection |
+| `overloaded` | Recognized provider capacity/overload episode |
+| `working` | Provider turn is running |
 | `background` | Provider's own background work continues |
 | `waiting` | Idle prompt, no complete report |
 | `needs-input` | Question, approval or first-run dialog waits for the owner |
@@ -35,9 +37,9 @@ The Ink board has a task list and selected-task peek, cohort grouping/folding, q
 
 Reports use a canonical allowed path, current attempt marker and `<!-- agentctl:report-end -->`, or settle after a confirmed ended turn. A partial/old-attempt report is not ready. Alternate paths are candidates; `report --from` explicitly copies a permitted regular file. The first line is `Verdict: …` or `Werdykt: …`. An `agentctl-outputs` YAML block version 1 carries verdict, commits, proposed integration refs, decisions, actions, checks, optional preview and notes. Git refs are checked locally; invalid entries warn and valid sections survive. Proposed actions never execute automatically. `wall_posts` is a separately validated extension described below.
 
-`pull` copies reports; MCP `pull_ready` defaults to summary. Summary delivery, full collection and human `mark` are different facts. `get_report` can read a section or contiguous pages; only full delivery/explicit acknowledgement marks pulled. `review_of` links a review; configured `review: auto` queues a different eligible provider after the author, pinned to its recorded commits, with rerun policy. Review GO / GO-WITH-CHANGES / NO-GO maps to PASS / PARTIAL / FAIL. `cohort show` aggregates outputs and flags conflicting refs.
+`pull` copies reports; MCP `pull_ready` defaults to summary. Summary delivery, full collection and human `mark` are different facts. `get_report` summary/first full page marks pulled by default; `mark_pulled: false` opts out and `true` explicitly acknowledges. Other full pages can cover the report in any order; sections do not mark by default. `review_of` links a review; configured `review: auto` queues a different eligible provider after the author, pinned to its recorded commits, with rerun policy. Review GO / GO-WITH-CHANGES / NO-GO maps to PASS / PARTIAL / FAIL. `cohort show` aggregates outputs and flags conflicting refs.
 
-`events_since` is a per-client delta read, not a push subscription. Start every work-related chat reply with it; use `as: "chat:<name>"` for WALL visibility. First read looks back 24 hours; `peek: true` does not advance the cursor. Journal events include report verdicts, questions, trust, queue/setup/failure, blocks, limits, outputs and CONSULT milestones. Watch must run for continuous observation. [MCP transport and Accepted](mcp-tools.md) explain safe retries and response pages.
+`events_since` is a delta read scoped by configured `as` (explicit `client` overrides; otherwise transport client), not a push subscription. Start every work-related chat reply with it; use `as: "chat:<name>"` for WALL visibility. First read looks back 24 hours; `peek: true` does not advance the cursor. Journal events include report verdicts, questions, trust, queue/setup/failure, blocks, limits, outputs and CONSULT milestones. Watch must run for continuous observation. [MCP transport and Accepted](mcp-tools.md) explain safe retries and response pages.
 
 ## WALL and CONSULT
 
@@ -64,3 +66,13 @@ Automatic reviews use their own detached checkout and canonical report, with a r
 Read-only CONSULT context accepts configured task/WALL/file/commit references under its validated roots, freezes repository commits/context, and does not attach arbitrary paths from another chat. Reports can trigger protected per-worktree .cache cleanup only after a settled sentinel and ended turn, with no shared checkout or escaping symlink; node_modules is retained. Use report.clean_worktree_cache to disable this policy.
 
 Manager and phone options are local setup choices: ntfy-setup creates the subscription secret; notify-test --phone explicitly tests delivery, while away controls routine forwarding. Internal event and usage-tap are provider callbacks, not chat shell access. For exact selectors, flags and terminal-only operations use the [generated CLI reference](../commands.md); the [source map](../reference/source-map.md) identifies implementations and deterministic coverage.
+
+## Operations in 0.22.2–0.22.3
+
+MCP new/queue previews defer base, worktree overlap and disk checks to watch; acceptance can therefore be followed by a failure event. A missing base now reports, for example, `base main not found – default branch is master`. The default comes from local origin/HEAD or a main/master HEAD; missing metadata is reported as unknown. Correct the spec and retry; no automatic substitution occurs.
+
+Send verification retains ownership of scrolled multiline Codex input and requires delivery evidence, including transcript acknowledgement; a paste alone is not delivery. Collapsed Codex questions keep their text. Watch restarts emit `WATCH WZNOWIONY`. Board help scrolls with ↑↓/PgUp/PgDn and fits terminal height.
+
+YAML base and output SHA identifiers are strings (quote SHAs, including numeric/exponent-looking values). Both `Verdict:` and `Werdykt:` first lines are accepted; the first-line verdict takes precedence. Under commits/integrate, compact output mappings accept `- repo: example, branch: dev, sha: "2742e697"` as well as object entries. Use existing branches and SHAs, never placeholders; checks accept mappings with name/result, one-key mappings or text. Structured name/result entries remain clearest.
+
+WALL confirms append synchronously, without a watch round-trip. Events use the configured `as` cursor, show the bounded `WALL do Ciebie (open)` section and label actual own posts `(yours)`; unknown chats get a warning. See [MCP semantics](mcp-tools.md) for snapshot ages and report acknowledgement.

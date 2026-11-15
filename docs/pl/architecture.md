@@ -1,6 +1,6 @@
 # Architektura
 
-Diagramy opisują lokalną implementację 0.22.1. Etykiety są wspólne po angielsku, objaśnienia dwujęzyczne. C4 pochodzi z lokalnej biblioteki standardowej PlantUML; nie użyto publicznego serwera renderowania. Łączniki mają skinparam linetype ortho, oba C4 zawierają SHOW_LEGEND().
+Diagramy opisują lokalną implementację 0.22.3. Etykiety są wspólne po angielsku, objaśnienia dwujęzyczne. C4 pochodzi z lokalnej biblioteki standardowej PlantUML; nie użyto publicznego serwera renderowania. Łączniki mają skinparam linetype ortho, oba C4 zawierają SHOW_LEGEND().
 
 ## C1 — System Context
 

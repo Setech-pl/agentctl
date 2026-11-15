@@ -1,6 +1,6 @@
 # Architecture
 
-All diagrams describe the local 0.22.1 implementation. Text labels are shared English; the explanations below are bilingual. C4 includes ship in the local PlantUML standard library; no public rendering service is used. Orthogonal connectors use skinparam linetype ortho; both C4 views include SHOW_LEGEND().
+All diagrams describe the local 0.22.3 implementation. Text labels are shared English; the explanations below are bilingual. C4 includes ship in the local PlantUML standard library; no public rendering service is used. Orthogonal connectors use skinparam linetype ortho; both C4 views include SHOW_LEGEND().
 
 ## C1 — System Context
 

@@ -41,7 +41,7 @@ notes: []
 
 This is a shape example: replace refs with existing branches/full SHAs in the task repositories. agentctl validates local refs, retains valid entries and reports invalid sections. Actions are proposed shell text and never run automatically. Missing/invalid outputs is a finding, not proof the report body is incomplete. Attempt mismatch/unfinished report is different and cannot complete work.
 
-Summary delivery is not full collection; sections do not mark pulled. Read full contiguous get_report pages or pull_ready full/explicit ack before claiming collection. Human mark is a separate authorized judgment. Do not infer acceptance from self-verdict. Aggregate cohort outputs while preserving conflicts and task identity; publication/integration remains the owner's decision.
+`get_report` summary/first full page marks pulled by default; use `mark_pulled: false` to opt out, `true` to acknowledge explicitly. Other pages accumulate coverage in any order; sections do not mark by default. `pull_ready` summary still does not acknowledge full delivery; use full/ack for that. Human mark is a separate authorized judgment. Do not infer acceptance from self-verdict. Aggregate cohort outputs while preserving conflicts and task identity; publication/integration remains the owner's decision.
 
 ## WALL and CONSULT
 

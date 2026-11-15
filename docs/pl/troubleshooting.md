@@ -15,7 +15,7 @@ Zacznij od `agentctl doctor`, `agentctl version`, `agentctl status --all` i `age
 | Follow-up Codex czeka | Zajęty Codex kolejkuje do potwierdzonego końca tury. Sprawdź message_id/pending; withdraw gdy zbędne. Raport pozostaje czytelny z ostrzeżeniem. |
 | after blokuje | Pierwszy werdykt poprzednika. FAIL/BLOCKED/NO-GO zwykle blokuje; brak werdyktu w trakcie może czekać. Poprawiony raport sam odblokuje; ręczne unblock/drop-after to decyzja właściciela. |
 | Brak/stary raport | Kandydaci, ścieżka kanoniczna, marker próby i report-end. Sam mtime nie uaktualnia próby. report_from tylko dozwolone zwykłe pliki, bez symlinków/wyjścia poza korzenie. |
-| Podsumowanie przeczytane, nadal unpulled | Podsumowanie/sekcje nie są pełnym odbiorem. Czytaj ciągle do EOF, pull_ready full lub jawny ack; mark osobno. |
+| Podsumowanie przeczytane, nadal unpulled | `get_report` podsumowanie/pierwsza pełna strona oznacza domyślnie; sprawdź mark_pulled: false. Pozostałe strony łączą się w dowolnej kolejności. pull_ready skrót nie oznacza, full/ack tak; mark osobno. |
 | limited / kwota n/d | Źródło/wiek/reset capacity. n/d to brak danych, zwłaszcza GLM. Sprawdź auto-resume albo jawne resume/move. Bez cichej zmiany dostawcy. |
 | GLM motyw / banner auto-mode | Uruchom raz claude-glm w osobnym configu i ukończ onboarding. Banner/MCP auth warning nie blokuje startu. AUTO_MODE_SERVER=0 tylko dla zadania GLM. |
 | Kimi odmawia bezpieczeństwa | Doctor czyta config.toml: auto lub wyłączony guard jest odrzucany. Zachowaj guard, wspierany manual/yolo config; nie obchodź trust flagami. |
@@ -85,3 +85,5 @@ tmux -L agentctl-dev attach -t '=agentctl-dev'
 
 Po utracie serwera/sesji niedokończone zadania pokazują `needs-attention`, wskazówkę odzyskania i jedno zdarzenie `tmux-lost` w dzienniku na epizod utraty. Claude zapisuje identyfikator przy `SessionStart`; zapisy pozostałych dostawców zachowujemy od razu po otrzymaniu. Jeśli istnieje zapisana sesja, po sprawdzeniu listy użyj wskazanego `agentctl resume TASK`. Bez niej przygotuj spec z **nowym ID zadania**, skieruj repozytoria na stare worktree i uruchom zadanie zastępcze przez `agentctl new --reuse recovery.md`; nie zakładaj, że `--continue` lub `--last` wskaże utraconą rozmowę. Gotowe raporty oraz zadania zamknięte i anulowane zachowują dotychczasowy stan.
 <!-- tmux-dev-end -->
+
+Baza `main` nie istnieje: komunikat wskazuje lokalną gałąź domyślną (np. `master`) albo brak metadanych. Popraw `repos[].base` i ponów; agentctl nie zmienia jej automatycznie.

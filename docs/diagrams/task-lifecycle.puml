@@ -3,7 +3,7 @@ skinparam linetype ortho
 skinparam backgroundColor #F8FAFC
 skinparam sequenceMessageAlign center
 hide footbox
-title Task order → Accepted → report → collection (0.22.1)
+title Task order → Accepted → report → collection (0.22.3)
 actor Owner
 participant "Chat / MCP client" as Chat
 participant "MCP server" as MCP
@@ -14,15 +14,15 @@ participant "tmux / provider" as Agent
 database "State / journal / report" as State
 Owner -> Chat: Request a concrete task
 Chat -> MCP: events_since(as: chat:name)
-MCP --> Chat: Changes since this client's cursor
+MCP --> Chat: Changes since configured as cursor (client override)
 Chat -> MCP: new / queue(spec) — preview
-MCP --> Chat: Plan + preview_token + expiry
+MCP --> Chat: Cheap syntax/model/duplicate checks + token + expiry
 Chat -> Owner: Show task IDs, repos, branch/base, model/effort, after, cost
 Owner --> Chat: Confirm this plan
 Chat -> MCP: confirm: true, preview_token (same session)
 MCP -> Queue: Persist accepted spec under short accept lock
 MCP --> Chat: Accepted (registration; not started/completed)
-Watch -> Queue: Next tick: validate accepted spec
+Watch -> Queue: Next tick: validate base / overlap / disk / eligibility
 alt invalid spec / changed facts
  Watch -> Queue: failed + reason
  Watch -> State: Start failure event + notification
@@ -68,13 +68,18 @@ else valid and eligible
  Watch -> State: Current report complete / report-ready event
  Chat -> MCP: events_since(as: chat:name)
  MCP --> Chat: Report verdict + current summary
- Chat -> MCP: get_report(task), contiguous pages to EOF
- MCP --> Chat: Full report; mark pulled only after full delivery
+ Chat -> MCP: get_report(task, mark_pulled?)
+ MCP --> Chat: Summary / first full page marks by default; false opts out\nOther pages: coverage in any order; sections do not by default
  Owner -> Chat: Review and approve closure
  Chat -> MCP: close — preview → confirm
  MCP -> Queue: Accepted close request (with watcher)
  Watch -> Agent: Close window; optional protected worktree removal
 end
+== Bounded read state ==
+Watch -> State: Atomically publish one tick snapshot
+Chat -> MCP: status / queue_list / capacity / limits / config_show / doctor
+MCP -> State: Read snapshot (<2 intervals, matching config)
+MCP --> Chat: Bounded data + snapshot age; labeled fallback if stale
 == Other durable paths ==
 group failed start → queue_retry
  Watch -> Agent: Input never becomes ready
@@ -99,6 +104,7 @@ group after + BLOCKED
 end
 group watch restarts mid-task
  Watch -> State: Reload durable tasks, queue, pending delivery
+ Watch -> State: WATCH WZNOWIONY event
  Watch -> Agent: Reconcile live windows; continue monitoring
  note right of Watch: Live windows survive watch restart.\nLost metadata: explicit adopt.\nLost windows: explicit resume, no duplicate initial prompt.
 end

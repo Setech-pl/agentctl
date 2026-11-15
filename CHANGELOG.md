@@ -4,9 +4,13 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
-- A3 validation: the P19 live scenario waits for publication of a queue-failure snapshot; a deterministic test covers the journal/snapshot boundary and retains error/retry assertions. / Scenariusz P19 czeka na publikację snapshotu błędu kolejki; test deterministyczny obejmuje granicę dziennik/snapshot i zachowuje asercje błędu oraz ponowienia.
+
 
 ## [0.22.3] - 2026-11-15
+
+- A3 validation: the P19 live scenario waits for publication of a queue-failure snapshot; a deterministic test covers the journal/snapshot boundary and retains error/retry assertions. / Scenariusz P19 czeka na publikację snapshotu błędu kolejki; test deterministyczny obejmuje granicę dziennik/snapshot i zachowuje asercje błędu oraz ponowienia.
+
+- Update EN/PL operational guidance, generated MCP references and task/WALL sequences; cumulative 0.20.x–0.22.3 release notes supersede 0.22.1 notes. / Aktualizacja instrukcji EN/PL, generowanych referencji MCP i sekwencji zadania/WALL; zbiorcze notes 0.20.x–0.22.3 zastępują notes 0.22.1.
 
 - HELP-HEIGHT: board help fits the terminal and scrolls with arrows/PgUp/PgDn; other keys return. / Pomoc boardu mieści się w terminalu, przewija strzałkami/PgUp/PgDn; pozostałe klawisze wracają.
 
@@ -834,7 +838,7 @@ Pull request #1: iteration 1, core and CLI.
 - Task states (`working`, `waiting`, `needs-trust`, `report-ready`, `dead`) and folder-trust detection.
 - Per-provider window limits, the `review_of` cross-review rule, an optional mirror of the reports.
 
-[Unreleased]: https://github.com/Setech-pl/agentctl/compare/v0.22.0...HEAD
+[Unreleased]: https://github.com/Setech-pl/agentctl/compare/v0.22.3...HEAD
 [0.22.0]: https://github.com/Setech-pl/agentctl/compare/v0.21.0...v0.22.0
 [0.20.0]: https://github.com/Setech-pl/agentctl/compare/v0.19.6...v0.20.0
 [0.19.1]: https://github.com/Setech-pl/agentctl/compare/v0.19.0...v0.19.1

@@ -2,7 +2,7 @@
 
 Local task dispatch for Claude Code, OpenAI Codex CLI, Kimi Code CLI and Z.ai GLM. A Markdown spec becomes a Git worktree, an interactive tmux agent and a reviewable report. Watch services the queue, delivery, notifications and consultations.
 
-[Polski](README.pl.md) · **[English manual](docs/en/overview.md)** · [From zero](docs/en/tutorial.md) · [0.22.1 release notes](docs/release-notes/0.22.1.en.md)
+[Polski](README.pl.md) · **[English manual](docs/en/overview.md)** · [From zero](docs/en/tutorial.md) · [0.22.3 release notes](docs/release-notes/0.22.3.en.md)
 
 ![Real board, synthetic tasks, no inference](docs/img/board-main.png)
 
@@ -31,9 +31,9 @@ git clone https://github.com/Setech-pl/agentctl.git
 cd agentctl
 npm ci
 npm run build
-./bin/agentctl-update --ref v0.22.1 --dry-run
+./bin/agentctl-update --ref v0.22.3 --dry-run
 ~~~
 
 Agentctl runs with your permissions; worktrees are not an OS sandbox. Folder trust is never automatically accepted. Local MCP uses desktop stdio; web/phone cannot connect directly. The owner reviews evidence and decides integration/publication; report actions are proposals. [Boundaries](docs/en/overview.md#boundaries).
 
-[Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [MIT license](LICENSE). Use the repository gate and task-owned cache. This documentation release adds no runtime behavior.
+[Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [MIT license](LICENSE). Use the repository gate and task-owned cache. This release combines the complete manuals with the 0.22.2 operations fixes and small diagnostics/help fixes.

@@ -31,6 +31,7 @@
           },
           "sha": {
             "type": "string",
+            "minLength": 1,
             "pattern": "^[a-f0-9]{7,40}$"
           }
         },
@@ -58,6 +59,7 @@
           },
           "sha": {
             "type": "string",
+            "minLength": 1,
             "pattern": "^[a-f0-9]{7,40}$"
           },
           "note": {

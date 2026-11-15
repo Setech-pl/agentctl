@@ -10,7 +10,9 @@ Kolejka uruchamia high przed normal, FIFO w każdej klasie. `weight: heavy` wsp�
 
 | Stan zadania | Znaczenie |
 |---|---|
-| `needs-attention` | Problem dostarczenia, utraconego okna lub zapisu stanu wymaga uwagi |\n| `overloaded` | Rozpoznane przeciążenie dostawcy |\n| `working` | Trwa tura dostawcy |
+| `needs-attention` | Problem dostarczenia, utraconego okna lub zapisu stanu wymaga uwagi |
+| `overloaded` | Rozpoznane przeciążenie dostawcy |
+| `working` | Trwa tura dostawcy |
 | `background` | Trwają zadania dostawcy w tle |
 | `waiting` | Agent jest bezczynny, bez kompletnego raportu |
 | `needs-input` | Pytanie, zgoda lub onboarding czeka na właściciela |
@@ -35,7 +37,7 @@ Board Ink ma listę zadań i peek zaznaczonego zadania, kohorty i zwijanie grup,
 
 Raport ma kanoniczną dozwoloną ścieżkę, marker bieżącej próby i `<!-- agentctl:report-end -->` albo stabilizuje się po potwierdzonym końcu tury. Fragment lub raport starej próby nie jest gotowy. Ścieżki alternatywne są kandydatami; `report --from` jawnie kopiuje dozwolony zwykły plik. Pierwsza linia to `Verdict: …` lub `Werdykt: …`. Blok YAML `agentctl-outputs` w wersji 1 zawiera werdykt, commity, propozycje integracji, decyzje, działania, kontrole, opcjonalny preview i uwagi. Referencje Git sprawdzane są lokalnie; błędne wpisy ostrzegają, poprawne części zostają. Proponowane działania nie wykonują się automatycznie. `wall_posts` jest osobno sprawdzanym rozszerzeniem opisanym niżej.
 
-`pull` kopiuje raporty; MCP `pull_ready` domyślnie daje podsumowanie. Dostarczenie podsumowania, pełne odebranie i ludzki `mark` są osobnymi faktami. `get_report` czyta sekcję lub kolejne strony; dopiero pełne dostarczenie/jawny ack oznacza pulled. `review_of` łączy przegląd z autorem; `review: auto` kolejkuje innego dostępnego dostawcę po autorze, na zapisanych commitach i z polityką rerun. GO / GO-WITH-CHANGES / NO-GO mapuje się na PASS / PARTIAL / FAIL. `cohort show` agreguje outputs i wykrywa konflikt referencji.
+`pull` kopiuje raporty; MCP `pull_ready` domyślnie daje podsumowanie. Dostarczenie podsumowania, pełne odebranie i ludzki `mark` są osobnymi faktami. `get_report` domyślnie oznacza pulled po podsumowaniu/pierwszej pełnej stronie; `mark_pulled: false` wyłącza, `true` jawnie potwierdza. Pozostałe strony pokrywają raport w dowolnej kolejności; sekcje domyślnie nie oznaczają. `review_of` łączy przegląd z autorem; `review: auto` kolejkuje innego dostępnego dostawcę po autorze, na zapisanych commitach i z polityką rerun. GO / GO-WITH-CHANGES / NO-GO mapuje się na PASS / PARTIAL / FAIL. `cohort show` agreguje outputs i wykrywa konflikt referencji.
 
 `events_since` czyta przyrost na klienta, nie jest subskrypcją push. Wywołuj je na początku każdej odpowiedzi o pracy; podaj `as: "chat:<name>"` dla WALL. Pierwszy odczyt obejmuje 24 godziny; `peek: true` nie przesuwa kursora. Dziennik zawiera werdykty, pytania, trust, kolejkę/setup/błędy, blokady, limity, outputs i etapy CONSULT. Ciągła obserwacja wymaga watch. [MCP i Accepted](mcp-tools.md) opisują retry i stronicowanie.
 
@@ -64,3 +66,13 @@ Automatyczny review ma własny detached checkout i raport z zapisaną deltą/baz
 Kontekst CONSULT obsługuje zwalidowane referencje task/WALL/file/commit w dozwolonych korzeniach, zamraża commity/kontekst i nie załącza dowolnej ścieżki z innego czatu. Raport może uruchomić chronione sprzątanie .cache worktree dopiero po stabilnym markerze i końcu tury, bez wspólnego checkoutu/symlinka poza nim; node_modules zostaje. report.clean_worktree_cache wyłącza tę politykę.
 
 Manager i telefon wymagają lokalnej konfiguracji: ntfy-setup tworzy sekret subskrypcji; notify-test --phone jawnie testuje wysyłkę, away steruje zwykłymi powiadomieniami. Wewnętrzne event i usage-tap są callbackami, nie dostępem czatu do powłoki. Dokładne selektory/flagi i operacje terminalowe opisuje [generowana referencja CLI](../commands.md), a [mapa źródeł](../reference/source-map.md) wskazuje kod i testy.
+
+## Operacje w 0.22.2–0.22.3
+
+Podgląd MCP new/queue odkłada bazę, nakładanie worktree i kontrolę dysku do watch; po Accepted może przyjść zdarzenie błędu. Brak bazy daje teraz np. `base main not found – default branch is master`. Źródłem jest lokalny origin/HEAD albo HEAD main/master; brak danych jest jawnie nieznany. Popraw spec i ponów; nie ma automatycznej podmiany.
+
+Weryfikacja send zachowuje własność przewiniętego wielowierszowego pola Codexa i wymaga dowodu dostarczenia, także potwierdzenia w transkrypcie; samo wklejenie nie oznacza dostarczenia. Zwinięte pytania Codexa zachowują tekst. Restart watch emituje `WATCH WZNOWIONY`. Pomoc boardu przewija się ↑↓/PgUp/PgDn i mieści się w wysokości terminala.
+
+Identyfikatory baz i SHA outputs są tekstem YAML (cytuj SHA, również wyglądające jak liczba/notacja wykładnicza). Pierwsza linia przyjmuje `Verdict:` i `Werdykt:` oraz ma pierwszeństwo przed werdyktem outputs. Pod commits/integrate zwięzłe mapy outputs przyjmują `- repo: example, branch: dev, sha: "2742e697"` obok obiektów. Używaj istniejących gałęzi/SHA, bez placeholderów; checks przyjmuje name/result, mapy jednokluczowe lub tekst. Najczytelniejsze są wpisy name/result.
+
+Confirm WALL zapisuje synchronicznie, bez obiegu przez watch. Zdarzenia używają kursora skonfigurowanego `as`, pokazują ograniczoną sekcję `WALL do Ciebie (open)` i oznaczają rzeczywiste własne wpisy `(yours)`; nieznane czaty dostają ostrzeżenie. [Semantyka MCP](mcp-tools.md) wyjaśnia wiek snapshotów i potwierdzanie raportów.
