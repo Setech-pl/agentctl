@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- G1b: provider error screens/hooks and pinned transcript errors mark limited and hold starts until the stated reset (else 1 h), once per evidence; docs-backed fixtures. / Błędy dostawcy ustawiają limited i blokadę do resetu lub na 1 h, bez odnawiania od starego komunikatu; fixture’y według dokumentacji.
+
 - G1a: timed per-provider hold (HH:MM, ISO, duration, off) blocks queued/direct starts and expires with an event; limits, capacity and board show it. / Czasowe wstrzymanie dostawcy blokuje starty i wygasa ze zdarzeniem; widoczne w limits, capacity i board.
 
 - H6: overlap compares the spec base and excludes imported merge changes; integration: true suppresses warnings with a note. / Kolizje odnoszą się do bazy specyfikacji i pomijają zmiany przejęte przez merge; integration: true wycisza ostrzeżenia z adnotacją.

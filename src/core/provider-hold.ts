@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { AgentName, GlobalConfig } from './config.ts';
@@ -44,6 +45,7 @@ export function parseTimedHolds(config: GlobalConfig, input: unknown, now: numbe
   return out;
 }
 export async function setProviderHolds(ctx: Context, assignments: TimedHolds): Promise<void> {
+  if (ctx.runner.dryRun) return;
   const file = providerHoldFile(ctx.config);
   await withFileLock(`${file}.lock`, async () => {
     const state = readProviderHoldState(ctx.config);
@@ -67,5 +69,23 @@ export async function expireProviderHolds(ctx: Context): Promise<void> {
       await ctx.runner.writeFile(file, JSON.stringify(state));
       await recordJournal(ctx, {kind: 'limits-changed', text: `${agent}: wstrzymanie wygasło (${hold.source === 'manual' ? 'ręcznie' : 'automatycznie'})`});
     }
+  });
+}
+
+/** A stable evidence key is consumed once, so a stale pane cannot extend/re-arm an expired hold. */
+export async function automaticProviderHold(ctx: Context, agent: AgentName, key: string, evidence: string, reset?: number): Promise<void> {
+  if (ctx.runner.dryRun) return;
+  const file = providerHoldFile(ctx.config);
+  await withFileLock(`${file}.lock`, async () => {
+    const state = readProviderHoldState(ctx.config);
+    const fingerprint = createHash('sha256').update(evidence).digest('hex');
+    if (state.seen[key] === fingerprint) return;
+    state.seen[key] = fingerprint;
+    while (Object.keys(state.seen).length > 2000) delete state.seen[Object.keys(state.seen)[0]!];
+    const current = state.holds[agent];
+    const until = new Date(reset && reset > ctx.runner.now() ? reset : ctx.runner.now() + 3600000).toISOString();
+    if (!current || Date.parse(current.until) <= ctx.runner.now() || (current.source === 'automatic' && Date.parse(current.until) < Date.parse(until))) state.holds[agent] = {until, source: 'automatic', reason: 'provider quota/rate-limit error'};
+    await ctx.runner.writeFile(file, JSON.stringify(state));
+    await recordJournal(ctx, {kind: 'limits-changed', task: key.split(':')[0], text: `${providerHoldText(agent, state.holds[agent]!)}; błąd quota/rate-limit dostawcy`});
   });
 }

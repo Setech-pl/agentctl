@@ -168,6 +168,19 @@
       "G1a: manual holds block every provider including direct starts, expose capacity, expire once, and clear with off"
     ]
   },
+  "G1b": {
+    "rev": "v0.22.3",
+    "outcome": "FAILS",
+    "failed": 7,
+    "passed": 0,
+    "failing": [
+      "G1b: glm fixture 0 marks limited and holds starts without usage data",
+      "G1b: glm fixture 1 marks limited and holds starts without usage data",
+      "G1b: glm fixture 2 marks limited and holds starts without usage data",
+      "G1b: claude fixture 3 marks limited and holds starts without usage data",
+      "G1b: codex fixture 4 marks limited and holds starts without usage data"
+    ]
+  },
   "H1": {
     "rev": "v0.22.3",
     "outcome": "FAILS",

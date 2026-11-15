@@ -1,3 +1,5 @@
+import { quotaError, quotaReset } from './quota-error.ts';
+import { transcriptQuotaError } from './transcript.ts';
 import { PATTERN_FLAGS } from './config.ts';
 import { tmuxLoss } from './tmux-loss.ts';
 import { provider, matchesProviderCommand, isProviderLauncher } from './providers/registry.ts';
@@ -108,6 +110,7 @@ export interface StatusRow {
   /** `pin: true` in the spec: the task is never moved to the other provider. */
   pin: boolean;
   integration?: boolean;
+  limitEvidence?: {text: string; reset?: number};
   /** The task has no tmux window any more (or was moved to the other provider): it is done, whatever it left behind. Shown under "Finished" on the board. */
   finished: boolean;
   /** Hidden from board and status: by `agentctl hide`, or by itself (`auto`: no window and the report was pulled). The task and its worktree are untouched. */
@@ -251,6 +254,8 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     const lossHint = await tmuxLoss(ctx, record, alive, reportReady || cancelled || closed || archived || !!record.supersededBy, infos.length > 0, opts.cachedOnly);
     if (lossHint && hiddenBy === 'auto') hiddenBy = null;
     let state: TaskState = cancelled ? 'cancelled' : closed ? 'closed' : record.supersededBy ? 'superseded' : lossHint ? 'needs-attention' : writeFailure ? 'needs-attention' : deliveryReport ? 'report-ready' : startupDialog ? 'needs-input' : unconfirmed ? 'needs-attention' : taskState({ alive, screen: screenText, settings, reportReady, event: stored?.outcome });
+    const quota = alive && !reportReady && !cancelled && !closed ? (quotaError(screenText) ?? (stored?.outcome === 'limited' ? stored.text : undefined) ?? (!opts.cachedOnly && !cachedRequest() ? transcriptQuotaError(ctx, record)?.text : undefined)) : undefined;
+    if (quota && !['working', 'background', 'report-ready', 'closed', 'cancelled', 'superseded'].includes(state)) state = 'limited';
     // Passive wire failures fill an idle screen; legacy hook recovery keeps its existing precedence.
     if (state === 'waiting' && stored?.outcome === 'overloaded' && record.agent !== 'unknown' && provider(record.agent).events.payloadFrom === 'wire') state = 'overloaded';
     const observationKey = `${config.stateDir}:${record.window}`;
@@ -338,6 +343,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       ...((state === 'needs-input' || state === 'needs-trust') && alive ? { menuOptions: menuOptionLines(screenText) } : {}),
       pin: record.pin === true,
       integration: record.integration === true,
+      ...(quota ? {limitEvidence: {text: quota, reset: quotaReset(quota, runner.now())}} : {}),
       finished: (!alive && !lossHint) || state === 'superseded',
       hidden: hiddenBy !== null,
       hiddenBy,

@@ -1,0 +1,8 @@
+[
+  {"provider":"glm","screen":"API Error: 429 {\"error\":{\"code\":\"1113\",\"message\":\"Insufficient balance or no resource package\"}}\n❯ ","reset":null,"source":"https://docs.z.ai/api-reference/api-code"},
+  {"provider":"glm","screen":"API Error: 429 {\"error\":{\"code\":\"1302\",\"message\":\"Rate limit reached for requests\"}}\n❯ ","reset":null,"source":"https://docs.z.ai/api-reference/api-code"},
+  {"provider":"glm","screen":"API Error: 429 [1308] Usage limit reached; resets at 2026-10-31T16:30:00Z\n❯ ","reset":"2026-10-31T16:30:00Z","source":"https://docs.z.ai/api-reference/api-code"},
+  {"provider":"claude","screen":"API Error: 429 rate_limit_error; retry-after: 7200\n❯ ","reset":"2026-10-31T14:00:00Z","source":"https://platform.claude.com/docs/en/api/rate-limits"},
+  {"provider":"codex","screen":"Error: insufficient quota\n› ","reset":null,"source":"synthetic provider error"},
+  {"provider":"kimi","screen":"Error: [provider.rate_limit]\n> ","reset":null,"source":"tests/fixtures/screen-kimi-synthetic-limit.txt"}
+]
