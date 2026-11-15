@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { it } from 'node:test';
 import path from 'node:path';
 import { Context } from '../src/core/context.ts';
@@ -16,13 +17,19 @@ it('A3: atomic watch snapshot serves every bounded read with stalled processes a
   const ctx = new Context(runner, config, () => {}), deps = {context: () => ctx, notify: async () => {}};
   await publishMcpSnapshot(ctx);
   stalled = true; const before = probes;
+  const readdir = fs.readdirSync, statfs = fs.promises.statfs;
+  let fsProbes = 0;
+  fs.readdirSync = (() => {fsProbes++; throw new Error('stalled filesystem inventory');}) as typeof fs.readdirSync;
+  fs.promises.statfs = (() => {fsProbes++; return new Promise(() => {});}) as typeof fs.promises.statfs;
+  try {
   for (const name of ['status', 'queue_list', 'capacity', 'limits', 'config_show', 'doctor']) {
     const result = await MCP_TOOLS.find(t => t.name === name)!.run(deps, name === 'status' ? {cohort: '62', capacity: true} : {});
     assert.ok(!result.isError, result.text);
     assert.match(result.text, /snapshot(?: age|_age_s)/i, name);
     if (name === 'status') assert.match(result.text, /SNAP/);
   }
-  assert.equal(probes, before);
+  assert.equal(probes, before); assert.equal(fsProbes, 0);
+  } finally {fs.readdirSync = readdir; fs.promises.statfs = statfs;}
   const lock = tryFileLock(path.join(config.stateDir, 'start.lock'))!;
   try { const result = await MCP_TOOLS.find(t => t.name === 'set_limits')!.run(deps, {claude: 3, confirm: true}); assert.ok(!result.isError, result.text); } finally { lock(); }
   stalled = false; await runner.sleep(4001);
