@@ -9,11 +9,7 @@ fs.mkdirSync(path.dirname(file), { recursive: true });
 fs.writeFileSync(file, renderCommandsMarkdown(await loadProgram()).replaceAll('the Neon City example from the README', 'the project example from the README'));
 console.log(`wrote ${path.relative(root, file)}`);
 
-// README is the canonical source for the standalone diagram reference.
-const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8');
-const diagrams = [...readme.matchAll(/^```mermaid[^\n]*\n[\s\S]*?^```/gm)].map(m => m[0]);
-fs.writeFileSync(path.join(root, 'docs', 'diagrams.md'), '# Diagrams\n\nGenerated from README.md by `npm run docs`.\n\n' + diagrams.map((diagram, i) => ['## Automatic flow', '## Dispatcher', '## Flow', '## Architecture', '## Task states'][i] + '\n\n' + diagram).join('\n\n') + '\n');
-
+// Current architecture sources live in docs/diagrams/*.puml.
 const program = await loadProgram();
 const errors = parityErrors(program);
 if (errors.length) throw new Error(errors.join('\n'));
@@ -26,3 +22,8 @@ fs.writeFileSync(mcpFile, before.includes('<!-- BEGIN GENERATED MCP PARITY -->')
 const { outputsSchema } = await import('../src/core/outputs.ts');
 const { z } = await import('zod');
 fs.writeFileSync(path.join(root, 'docs/examples/outputs-v1.schema.json'), `${JSON.stringify(z.toJSONSchema(outputsSchema), null, 2)}\n`);
+
+await import('./docs-reference.ts');
+
+const { EXAMPLE_SPEC } = await import('../src/core/example.ts');
+fs.writeFileSync(path.join(root, 'docs/examples/spec.md'), '# Canonical CLI spec example\n\n' + String.fromCharCode(96).repeat(3) + 'yaml\n' + EXAMPLE_SPEC + String.fromCharCode(96).repeat(3) + '\n');

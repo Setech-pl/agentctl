@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { test } from 'node:test';
-for (const file of ['README.md', 'README.pl.md']) test(`${file}: dedicated dev server and migration instructions are runnable`, () => {
+for (const file of ['docs/en/troubleshooting.md', 'docs/pl/troubleshooting.md']) test(`${file}: dedicated dev server and migration instructions are runnable`, () => {
   const text = fs.readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
   const section = /<!-- tmux-dev-start -->([\s\S]*?)<!-- tmux-dev-end -->/.exec(text)?.[1];
   assert.ok(section, 'dedicated dev server section');

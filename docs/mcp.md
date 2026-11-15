@@ -127,7 +127,7 @@ User scope makes the server available in every project; the VS Code extension re
 
 ### The phone: the manager session
 
-The Claude app on a phone cannot reach this server directly (local MCP servers work in the desktop app only). [`agentctl manager`](../README.md#remote-control-from-your-phone) goes round it: it starts a Claude Code session in the window `manager` with Remote Control, and that session gets this server through `--mcp-config <config dir>/manager/mcp.json` (the same entry as `mcp install --claude-code`, under the name `agentctl`, so you need no user-scope registration for it; `doctor` checks that the file's `node` and script still exist). The tools are the same; what changes is who asks you:
+The Claude app on a phone cannot reach this server directly (local MCP servers work in the desktop app only). [`agentctl manager`](en/features.md#watch-board-and-notifications) goes round it: it starts a Claude Code session in the window `manager` with Remote Control, and that session gets this server through `--mcp-config <config dir>/manager/mcp.json` (the same entry as `mcp install --claude-code`, under the name `agentctl`, so you need no user-scope registration for it; `doctor` checks that the file's `node` and script still exist). The tools are the same; what changes is who asks you:
 
 - The **read tools** are in `permissions.allow` of the `--settings` file of the manager, so the phone is not asked about `status` or `get_report`.
 - The **write tools** are not, so Claude Code asks for your permission on the phone before each call, and `mcp.allow` decides whether the server does it at all (and `confirm: true` where a tool has that step). The role of the manager adds a third rule: your clear yes to that very action first.

@@ -1,6 +1,6 @@
 # Diagrams
 
-Generated from README.md by `npm run docs`.
+Supplementary historical Mermaid flows. Current C4/sequences: [architecture](en/architecture.md).
 
 ## Automatic flow
 
