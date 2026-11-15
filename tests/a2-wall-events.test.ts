@@ -29,3 +29,22 @@ it('A2: shared WALL bypasses cohort; chat cursors survive sessions; open inbox i
   const other = await tool.run(deps(), {as: 'chat:hems', cohort: '62', format: 'json'});
   assert.ok(JSON.parse(other.text).events.some((e: any) => e.wall?.id === m.id), 'another chat has an independent cursor');
 });
+
+it('A2: known chat receives the open inbox even when task reads exhaust the response budget', async () => {
+  const config = makeConfig(scratch.sub('budget'));
+  let stalled = false, release!: () => void, expire: (() => void) | undefined;
+  const held = new Promise<void>(yes => {release = yes;});
+  const runner = new DiskRunner({dryRun: false, respond: new FakeTmux().respond});
+  const exec = runner.exec.bind(runner);
+  runner.exec = async (...args) => {if (stalled) await held; return exec(...args);};
+  const ctx = new Context(runner, config, () => {});
+  const m = await postMessage(ctx, wallIdentity(config, {as: 'chat:nc'}), {channel: 'nc', kind: 'question', subject: 'Read me under load', body: 'data'});
+  let time = 0;
+  const deps = {context: () => ctx, notify: async () => {}, budgetClock: {now: () => time, schedule: (fn: () => void) => {expire = fn; return () => {};}}};
+  stalled = true;
+  const pending = MCP_TOOLS.find(t => t.name === 'events_since')!.run(deps, {as: 'chat:nc'});
+  for (let i = 0; i < 50; i++) await new Promise(yes => setImmediate(yes));
+  time = 8000; expire!();
+  try { const result = await pending; assert.match(result.text, /WALL do Ciebie \(open\)/); assert.ok(result.text.includes(`${m.id}: Read me under load`), result.text); }
+  finally {release();}
+});

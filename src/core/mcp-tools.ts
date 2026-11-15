@@ -2310,9 +2310,22 @@ for (const tool of MCP_TOOLS) {
       const entries = readQueue(ctx.config);
       const queue = `Durable queue (${entries.length}; first 20):\n` + entries.slice(0, 20).map(e => `${e.task}: ${e.status === 'queued' ? 'registered' : e.status}`).join('\n');
       const cached = saved.get(key);
-      const prefix = `Partial result: 8 s response budget exhausted; ${cached ? 'last cached response follows' : 'durable queue snapshot follows'}. Retry reads; retry a confirm only with the same preview_token.\n`;
-      const limit = Math.max(256, ctx.config.mcp.maxResponseKb * 1024 - 1024);
-      return { text: prefix + Buffer.from([queue, cached?.text].filter(Boolean).join('\n')).subarray(0, limit).toString('utf8') };
+      let inbox = '';
+      if (tool.name === 'events_since') {
+        try {
+          const who = wallIdentity(ctx.config, {as: typeof args.as === 'string' ? args.as : undefined, client: deps.clientId});
+          if (who.kind === 'chat') {
+            const messages = readWall(ctx, who, {status: 'open', limit: 100}).messages
+              .filter(m => m.to === who.id || m.kind === 'question' || m.kind === 'decision-request').slice(-10);
+            inbox = ['WALL do Ciebie (open)', ...messages.map(m => `${m.id}: ${m.subject.slice(0, 100)}${m.from === who.id ? ' (yours)' : ''}`), ...(!messages.length ? ['brak'] : [])].join('\n') + '\n';
+          } else if (who.kind === 'unknown') inbox = 'unknown chat – only channel agentctl visible; pass as: "chat:<name>"\n';
+        } catch { /* retain the durable bounded response even when WALL storage is unavailable */ }
+      }
+      const prefix = `${inbox}Partial result: 8 s response budget exhausted; ${cached ? 'last cached response follows' : 'durable queue snapshot follows'}. Retry reads; retry a confirm only with the same preview_token.\n`;
+      const wireBudget = ctx.config.mcp.maxResponseKb * 1024;
+      let text = prefix + [queue, cached?.text].filter(Boolean).join('\n');
+      while (responseWireBytes(ok(text)) > wireBudget && text.length > 1) text = text.slice(0, Math.max(1, Math.floor(text.length * 0.8)));
+      return { text };
     }, deps.budgetClock);
   };
 }
