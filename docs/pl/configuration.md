@@ -67,6 +67,7 @@ Typy/domysły sprawdzono z [config.ts](../../src/core/config.ts), [spec.ts](../.
 | `after` | task ID or list · none · s | Kompletne raporty i akceptowany pierwszy werdykt; brak werdyktu może czekać, jawne odrzucenie blokuje. |
 | `after_verdict` | non-empty verdict list · `[PASS, PARTIAL]` · s | Niepusta lista, wymaga after; domyślnie PASS/PARTIAL z aliasami. |
 | `touches` | glob or list of globs · none · s | Globy do ostrzegania, nie blokady. |
+| `integration` | boolean · false · s | Wycisz kolizje zadania integracyjnego z adnotacją; pozostałe zadania porównują bazę specyfikacji i pomijają przejęte merge. |
 | `cohort` | name · none · s | Spec: grupa zadania; globalnie ustawienia ukończenia kohorty. |
 | `weight` | `normal` or `heavy` · `normal` · s | normal/heavy, ciężkie dzielą cap kolejki. |
 | `priority` | `high` or `normal` · `normal` · s | high/normal; FIFO w klasie, new pomija. |
