@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| A6 | Scrolled Codex multiline drafts lose paste ownership and cannot be submitted. | `tests/p49-codex-queue.test.ts` (`^A6:`) | 0.22.2 | fails on v0.22.0 (1 failing of 1) |
 | A5 | Not every preview write accepts a token-only confirm; limits and reserve lacked preview_token. | `tests/mcp-token-confirm.test.ts` (`^A5:`) | 0.22.2 | fails on v0.22.0 (1 failing of 1) |
 | A2 | WALL events disappear behind cohort filters and transport client cursors. | `tests/a2-wall-events.test.ts` | 0.22.2 | fails on v0.22.0 (1 failing of 1) |
 | A1 | MCP new/queue preview waits on git and runtime reads and loses its token at the budget. | `tests/p93-mcp-accept.test.ts` (`^A1:`) | 0.22.2 | fails on v0.22.0 (2 failing of 2) |

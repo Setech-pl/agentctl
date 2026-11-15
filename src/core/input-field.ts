@@ -130,7 +130,14 @@ export function pasteImage(area: string[], prompt: string, agent?: DeliveryAgent
   const shown = fieldText(area).split('\n');
   if (agent === 'kimi' && shown.length === 1 && /^\[paste #\d+[^\]\n]*\]$/i.test(shown[0]!)) return true;
   if (shown.length === 1 && PLACEHOLDER.test(shown[0]!.trim())) return true;
-  return readsAs(shown, prompt, agent, agent === 'kimi');
+  if (readsAs(shown, prompt, agent, agent === 'kimi')) return true;
+  // Codex scrolls the composer: the visible rows may be any contained window, not its prefix.
+  if (agent === 'codex') {
+    const visible = shown.join(' ').replace(/\s+/g, ' ').trim();
+    const full = storedForm(prompt, agent).replace(/\s+/g, ' ').trim();
+    return visible.length >= 24 && visible.length < full.length && full.includes(visible);
+  }
+  return false;
 }
 
 /** Only the separate, structurally validated footer advertises a queue key; composer text cannot select it. */

@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- A6: Codex scrolled composer windows retain verified paste ownership; enter_only tokens bind the delivery text and manual transcript acceptance clears attention. / Przewijanie pola Codex zachowuje ślad wklejki; enter_only wiąże token z dostawą, a potwierdzenie w transkrypcie usuwa uwagę.
+
 - A5: token-only confirmations cover limits/reservations too; table tests include every phased write and WALL (already accepted in 0.22.0). / Potwierdzenia samym tokenem obejmują limity i rezerwacje; test tabelaryczny obejmuje zapisy dwuetapowe i WALL (działające już w 0.22.0).
 
 - A4: WALL confirms append synchronously with permission/secret checks; notifications do not delay the returned id. / Potwierdzenia WALL zapisują się od razu z kontrolą uprawnień i sekretów; powiadomienia nie opóźniają identyfikatora.

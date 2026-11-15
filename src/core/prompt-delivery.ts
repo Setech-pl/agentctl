@@ -21,6 +21,12 @@ import type { TaskRecord } from './taskstore.ts';
 import { transcriptMessage } from './transcript.ts';
 import { errorMessage } from './util.ts';
 
+/** A recorded paste remains owned when Codex scrolls or wraps its visible window. */
+function ownsField(record: TaskRecord, area: string[]): boolean {
+  return Boolean(record.deliveryField && area.length && (areaKey(area) === record.deliveryField ||
+    (record.agent === 'codex' && record.pendingPrompt && pasteImage(area, record.pendingPrompt, 'codex'))));
+}
+
 /** Persist before waiting for trust, so a watcher can finish the same delivery after new returns. */
 export async function queuePrompt(ctx: Context, record: TaskRecord, text: string, delivery: 'launching' | 'pending' = 'pending', options: { kind?: 'followup'; id?: string } = {}): Promise<void> {
   await setHeaderFields(ctx.runner, taskFile(ctx.config, record.window), { pending_prompt: text, prompt_delivery: delivery, prompt_error: null, prompt_sent_at: null, delivery_id: options.id ?? randomUUID(), prompt_kind: options.kind ?? 'initial', delivery_was_busy: null, delivery_started_at: null, delivery_report_baseline: reportFingerprint(record.report), delivery_result: null, delivery_field: null, delivery_source: null, delivery_enters: null, delivery_enter_at: null, delivery_echo_baseline: null, delivery_queue_sign: null });
@@ -315,7 +321,7 @@ async function deliverOnce(ctx: Context, window: string): Promise<'sent' | 'pend
             image = area;
             record.deliveryField = areaKey(area);
             await setHeaderFields(ctx.runner, file, { delivery_field: record.deliveryField });
-          } else if (areaKey(area) !== areaKey(image)) return notDelivered('the input changed since our paste; no Enter was sent');
+          } else if (areaKey(area) !== areaKey(image) && !(record.agent === 'codex' && pasteImage(area, text, 'codex'))) return notDelivered('the input changed since our paste; no Enter was sent');
         }
         if (!mayPressEnter(currentState, record, settings)) return notDelivered(`the agent shows ${currentState}; no Enter was sent`);
         if (profile.stablePaste) {
@@ -369,7 +375,7 @@ async function deliverOnce(ctx: Context, window: string): Promise<'sent' | 'pend
               image = shown;
               record.deliveryField = areaKey(shown);
               await setHeaderFields(ctx.runner, file, { delivery_field: record.deliveryField });
-            } else if (areaKey(shown) !== areaKey(image)) return notDelivered('the input changed to another draft');
+            } else if (areaKey(shown) !== areaKey(image) && !(record.agent === 'codex' && pasteImage(shown, text, 'codex'))) return notDelivered('the input changed to another draft');
           }
         }
         // Never send another Enter into an empty input: the first submission may already have been accepted.
@@ -393,11 +399,11 @@ async function deliverOnce(ctx: Context, window: string): Promise<'sent' | 'pend
         // P92: a Kimi paste that got no Enter because the screen kept changing. Nothing was submitted, so the first Enter cannot double anything:
         // resume once the screen holds still, within delivery_confirm_s.
         const settling = provider(record.agent).screen.stablePaste && record.promptDelivery === 'confirming' && !record.deliveryResult && (record.deliveryEnters ?? 0) === 0;
-        if (settling && record.deliveryField && area.length && areaKey(area) === record.deliveryField && classifyScreen(text, settings) === 'idle' && ctx.runner.now() - Date.parse(record.deliveryStartedAt ?? record.started) < ctx.config.deliveryConfirmS * 1000) {
+        if (settling && ownsField(record, area) && classifyScreen(text, settings) === 'idle' && ctx.runner.now() - Date.parse(record.deliveryStartedAt ?? record.started) < ctx.config.deliveryConfirmS * 1000) {
           try { return await enterLoop(screen, area); } catch (e) { return uncertain(errorMessage(e)); }
         }
         // The text of our paste still stands in the field and nothing presses Enter for it any more: say so, with the way out.
-        if (record.deliveryField && area.length && areaKey(area) === record.deliveryField) {
+        if (ownsField(record, area)) {
           return record.promptDelivery === 'needs-attention' && record.deliveryResult === 'not-delivered-in-field' ? 'needs-attention' : attention('the paste of agentctl still stands in the input and no Enter is sent for it any more', true);
         }
         if (record.deliveryResult === 'not-delivered-in-field' && area.length && record.promptDelivery !== 'needs-attention') return attention('the input changed since our paste', true);
@@ -517,11 +523,12 @@ async function submitOnce(ctx: Context, window: string, options: { preview?: boo
     if (!area.length) return refused('pole wpisywania jest puste – nie ma czego zatwierdzić', record);
     if (record.deliveryResult === 'queued-in-agent-confirmed') return refused('wiadomość jest już w kolejce agenta – potwierdzone; czekam na wstrzyknięcie albo hook, nie wysyłam kolejnego Enter', record, area);
     if (record.promptDelivery === 'sent' || !record.deliveryId || !record.deliveryField) return refused('agentctl nie wkleił w to pole tekstu żadnej oczekującej wiadomości (brak śladu wklejki dla tej dostawy) – nie zatwierdzam; sprawdź peek albo attach', record, area);
-    if (areaKey(area) !== record.deliveryField) return refused(`pole wpisywania różni się od tego, co agentctl wkleił i zapisał po wklejce („${fieldText(area).replace(/\s+/g, ' ').slice(0, 60)}”) – nie zatwierdzam; sprawdź peek albo attach i wciśnij Enter w oknie, jeśli to ma pójść`, record, area);
+    if (!ownsField(record, area)) return refused(`pole wpisywania różni się od tego, co agentctl wkleił i zapisał po wklejce („${fieldText(area).replace(/\s+/g, ' ').slice(0, 60)}”) – nie zatwierdzam; sprawdź peek albo attach i wciśnij Enter w oknie, jeśli to ma pójść`, record, area);
     const state = classifyScreen(screen.stdout, settings);
     if (!mayPressEnter(state, { promptKind: 'followup' }, settings)) return refused(`agent pokazuje ${state} – nie wciskam Enter; odpowiedz w oknie (attach)`, record, area);
-    const token = tokenOf(record.deliveryId, area);
-    if (!options.token) return { outcome: 'ready', message: `w polu stoi dokładnie wklejka agentctl dla dostawy ${record.deliveryId.slice(0, 8)}; stan ekranu: ${state}; Enter zostanie wciśnięty dopiero z tokenem ${token}`, deliveryId: record.deliveryId, field: fieldText(area).split('\n'), screenState: state, token };
+    const tokenArea = record.agent === 'codex' && record.pendingPrompt ? [record.pendingPrompt] : area;
+    const token = tokenOf(record.deliveryId, tokenArea);
+    if (!options.token) return { outcome: 'ready', message: `w polu stoi dokładnie wklejka agentctl dla dostawy ${record.deliveryId.slice(0, 8)}; stan ekranu: ${state}; Enter zostanie wciśnięty dopiero z tokenem ${token}`, deliveryId: record.deliveryId, field: record.agent === 'codex' && record.pendingPrompt ? record.pendingPrompt.split('\n') : fieldText(area).split('\n'), screenState: state, token };
     if (options.token !== token) return refused(`token nie pasuje do bieżącej treści pola (podgląd był dla innego tekstu albo innej dostawy) – zrób podgląd jeszcze raz`, record, area);
     const busy = ['working', 'background'].includes(state);
     if (record.deliveryWasBusy === undefined) { record.deliveryWasBusy = busy; await setHeaderFields(ctx.runner, file, { delivery_was_busy: busy }); }
@@ -543,10 +550,10 @@ async function submitOnce(ctx: Context, window: string, options: { preview?: boo
         return { outcome: 'submitted', message: `zatwierdzono Enter; agent przyjął wiadomość (${SOURCES[source] ?? source})`, ...keySent };
       }
       if (await keepConfirmedQueue(ctx, record)) return { outcome: 'pending', message: deliveryNote(record)!, ...keySent };
-      if (areaKey(fieldArea(pane.stdout, settings.footerPatterns, record.agent)) !== record.deliveryField) break;
+      if (!ownsField(record, fieldArea(pane.stdout, settings.footerPatterns, record.agent))) break;
     }
     const after = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
-    if (after.code === 0 && areaKey(fieldArea(after.stdout, settings.footerPatterns, record.agent)) === record.deliveryField) {
+    if (after.code === 0 && ownsField(record, fieldArea(after.stdout, settings.footerPatterns, record.agent))) {
       await setHeaderFields(ctx.runner, file, { prompt_delivery: 'confirming', delivery_result: 'not-delivered-in-field', prompt_error: `${NOT_DELIVERED}: Enter was pressed and the text is still in the field` });
       return { outcome: 'not-delivered', message: `${NOT_DELIVERED}; Enter poszedł, ale tekst nadal stoi w polu – wciśnij Enter w oknie (attach)`, ...keySent };
     }
