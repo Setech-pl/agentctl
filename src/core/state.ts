@@ -1,4 +1,3 @@
-import { quotaError } from './quota-error.ts';
 import { provider, PROVIDER_IDS } from './providers/registry.ts';
 import { DEFAULT_AGENT_SETTINGS, PATTERN_FLAGS } from './config.ts';
 import type { AgentSettings } from './config.ts';
@@ -77,7 +76,7 @@ export function classifyScreen(
   if (working) return 'working';
   if (settings.approvalPattern && settings.overloadPatterns?.some(p => matches(p, screen))) return 'overloaded';
   if (isOverloaded(screen, settings.overloadPatterns)) return 'overloaded';
-  if (quotaError(screen) || settings.limitPatterns.some((p) => matches(p, screen))) return 'limited';
+  if (settings.limitPatterns.some((p) => matches(p, screen))) return 'limited';
   if ((settings.backgroundPatterns ?? []).some((p) => matches(p, screen))) return 'background';
   if (settings.idleRequiresInput && (!settings.readyPattern || !matches(settings.readyPattern, screen) || errorAwaitingInput(screen, settings.readyPattern))) return 'needs-input';
   return 'idle';

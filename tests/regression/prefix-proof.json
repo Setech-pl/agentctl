@@ -172,7 +172,7 @@
     "rev": "v0.22.3",
     "outcome": "FAILS",
     "failed": 7,
-    "passed": 0,
+    "passed": 1,
     "failing": [
       "G1b: glm fixture 0 marks limited and holds starts without usage data",
       "G1b: glm fixture 1 marks limited and holds starts without usage data",

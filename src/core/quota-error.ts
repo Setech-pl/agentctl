@@ -1,6 +1,7 @@
 /** Provider errors only: never classify an ordinary user/tool mention of a quota. */
 const QUOTA = /\b429\b|\bquota\b|rate[_ -]?limit|insufficient (?:balance|funds)|usage[_ -]?limit|limit (?:reached|exhausted)|you.ve hit your .{0,60}limit|out of extra usage|enforced_spend_limit_reached/i;
 const ERROR_LINE = /^\s*(?:[●■⎿]\s*)?(?:API Error:|Error:|HTTP(?:\/\d(?:\.\d)?)?\s+429\b|Request rejected\s*\(429\)|Usage limit reached|You.ve hit your|You.re out of extra usage|Quota (?:exceeded|exhausted)|Insufficient balance|Rate limit)/i;
+export const PROVIDER_QUOTA_PATTERN = `^(?=[^\\n]*(?:${QUOTA.source}))${ERROR_LINE.source.slice(1)}`;
 export function quotaError(text: string, structured = false): string | undefined {
   if (structured) return QUOTA.test(text) ? text : undefined;
   return text.split('\n').find(line => ERROR_LINE.test(line) && QUOTA.test(line));

@@ -48,3 +48,11 @@ it('G1b: pinned current-attempt transcript errors count; user and successful ass
   assert.notEqual((await collectStatus(ctx, {progress: false}))[0]!.state, 'limited');
   assert.equal(parseClaudeEvent('stop-failure', {error: 'api_error', error_details: 'API Error: 429 insufficient balance'}, 'glm').outcome, 'limited');
 });
+
+it('G1b: custom screen limit patterns retain their replacement semantics', async () => {
+  const config = makeConfig(scratch.sub('custom-pattern'), 'agents: {claude: {limit_patterns: ["^CUSTOM quota"]}}\n');
+  const tmux = new FakeTmux(); tmux.add('custom', 'API Error: 429 quota exhausted\n❯ ');
+  const runner = new DiskRunner({dryRun: false, startTime: now, respond: tmux.respond}), ctx = new Context(runner, config, () => {});
+  seedTask(config, 'CUSTOM', {started: new Date(now - 1000).toISOString()});
+  assert.notEqual((await collectStatus(ctx, {progress: false}))[0]!.state, 'limited');
+});

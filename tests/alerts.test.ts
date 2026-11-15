@@ -1,3 +1,5 @@
+import { collectLimits } from '../src/core/limits.ts';
+import { formatReset } from '../src/core/usage.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -64,6 +66,13 @@ function setup(name: string, yaml = '', task = 'NC-1', extra: Parameters<typeof 
   };
   return { config, fake, runner, ctx, out, record, notifier, alerts, send, screen };
 }
+
+const limitNotice = (t: ReturnType<typeof setup>): string => {
+  const hold = collectLimits(t.config, [], t.runner.now()).providers.find(p => p.agent === 'claude')!.providerHold!;
+  assert.equal(hold.source, 'automatic');
+  assert.ok(Date.parse(hold.until) > t.runner.now());
+  return `claude: limit wyczerpany – zresetuj lub poczekaj do ${formatReset(Date.parse(hold.until), t.runner.now())}`;
+};
 
 const logOf = (ctx: Context): string => fs.readFileSync(eventsLogPath(ctx), 'utf8');
 
@@ -182,7 +191,7 @@ describe('agentctl event: limits, bad input, the notify of the user', () => {
   it('a limit event: state limited, provider episode notification', async () => {
     const t = setup('ev-l1');
     await t.send({ kind: 'stop-failure', payload: json('claude-stop-failure-rate-limit.synthetic.json') });
-    assert.deepEqual(t.notifier.messages, ['claude: limit wyczerpany – zresetuj lub poczekaj do n/d']);
+    assert.deepEqual(t.notifier.messages, [limitNotice(t)]);
     assert.equal((await collectStatus(t.ctx, { progress: false }))[0]?.state, 'limited');
     t.screen(WORKING);
     assert.equal((await collectStatus(t.ctx, { progress: false }))[0]?.state, 'working', 'a retry after the reset clears it');
@@ -191,7 +200,7 @@ describe('agentctl event: limits, bad input, the notify of the user', () => {
   it('a pinned task: recovery notice preserves its provider', async () => {
     const t = setup('ev-l2', '', 'NC-1', { pin: true });
     await t.send({ kind: 'stop-failure', payload: { error: 'billing_error' } });
-    assert.match(t.notifier.messages[0] as string, /claude: limit wyczerpany – zresetuj lub poczekaj do n\/d/);
+    assert.equal(t.notifier.messages[0], limitNotice(t));
   });
 
   it('an unknown task, garbage and a missing --kind never throw', async () => {
@@ -298,7 +307,7 @@ describe('agentctl event and watch: one transition, one notification', () => {
     assert.deepEqual(t.notifier.messages, ['NC-1: Which colour do you prefer, red or blue?']);
     t.screen(`${IDLE}\n  ⎿  You've hit your session limit · resets 3pm`);
     await watchTick(t.ctx, memory, t.notifier);
-    assert.equal(t.notifier.messages[1], 'claude: limit wyczerpany – zresetuj lub poczekaj do n/d');
+    assert.equal(t.notifier.messages[1], limitNotice(t));
   });
 
   it('an orphan window is notified without a state folder being made for it', async () => {
