@@ -96,7 +96,7 @@ describe('P70: the verdict of a review report is its first line', () => {
     const report = await f.call('get_report', { task: 'POP-E1-REVIEW' });
     assert.match(report.text, /verdict: NO-GO/);
     assert.match(report.text, /outputs: PASS/);
-    const pulled = await f.call('pull_ready');
+    const pulled = await f.call('pull_ready', {all: true});
     assert.match(pulled.text, /verdict: NO-GO/);
     assert.match(pulled.text, /outputs: PASS/);
   });
