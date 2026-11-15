@@ -1,4 +1,16 @@
 {
+  "A1": {
+    "rev": "v0.22.0",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "A1: queue preview returns a token while every git/tmux process is stalled",
+      "A1: new preview returns a token while every git/tmux process is stalled",
+      "A1: queue preview returns a token while every git/tmux process is stalled",
+      "A1: new preview returns a token while every git/tmux process is stalled"
+    ]
+  },
   "B1-answer": {
     "rev": "v0.18.2",
     "outcome": "IMPORT-ERROR",

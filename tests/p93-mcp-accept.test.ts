@@ -177,3 +177,18 @@ it('P93: queue and new previews stay bounded: no git network, no git status, no 
     assert.equal(walks, 0, 'no walk of a worktree');
   } finally { threads.Worker = Worker; fs.readdirSync = readdir; syncBuiltinESMExports(); await shutdownMeasurements(); }
 });
+
+for (const name of ['queue', 'new']) it(`A1: ${name} preview returns a token while every git/tmux process is stalled`, async () => {
+  const e = environment(`a1-${name}`);
+  e.runner.hold();
+  let result: ToolResult | undefined;
+  const pending = e.call(name, { spec: [1, 2, 3].map(i => e.spec(`A1-${i}`)).join('\n') }).then(r => { result = r; });
+  try {
+    await drain();
+    assert.ok(result, 'preview must not wait on processes');
+    assert.ok(!result.isError, result.text);
+    assert.ok(token(result));
+    assert.match(result.text, /checked by watch at accept/);
+    assert.deepEqual(e.runner.procs, []);
+  } finally { e.runner.release(); await pending; }
+});

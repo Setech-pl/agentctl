@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- A1: MCP new/queue previews perform cheap validation; watch checks base/overlap, worktrees, limits and disk after acceptance. / Podglądy new/queue wykonują tanią walidację; watch sprawdza bazę, konflikty, worktree, limity i dysk po przyjęciu.
+
 
 ## [0.22.0] - 2026-11-14
 

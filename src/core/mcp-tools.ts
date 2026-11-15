@@ -1795,9 +1795,8 @@ async function confirmationScope(ctx: Context, name: string, args: Record<string
     const rawSpecs = splitSpecs(args.spec as string, 'MCP preview');
     if (args.cohort) for (const raw of rawSpecs) raw.header.cohort = args.cohort;
     for (const raw of rawSpecs) if (chatSetup(raw.header)) throw new AgentctlError(`${String(raw.header.task ?? 'a task')}: \"setup\" runs shell commands and is not accepted from the chat`);
-    const knownAuthors = new Map(readQueue(ctx.config).filter(e => name === 'queue' || e.direct).map(e => [e.task, { agent: e.agent, model: e.model }]));
-    const specs = await planBatch(ctx, rawSpecs.map(raw => resolveSpec(raw, { config: ctx.config })), { noSwitch: true, reuse: Boolean(args.reuse), knownAuthors, ...(args.agent ? { agent: args.agent as AgentName } : {}), ignoreLimits: name === 'queue', deferBases: name === 'queue', skipAfter: name === 'queue' });
-    for (const spec of specs) { const warnings = reportPathWarnings(ctx.config, spec); if (warnings.length) throw new AgentctlError(`${spec.task}: ${warnings.join('; ')}`); }
+    const knownAuthors = new Map<string, { agent: AgentName; model: string }>();
+    const specs = await planBatch(ctx, rawSpecs.map(raw => resolveSpec(raw, { config: ctx.config })), { previewOnly: true, noSwitch: true, knownAuthors, ...(args.agent ? { agent: args.agent as AgentName } : {}) });
     return { specs };
   }
   if (name === 'queue_retry') {
@@ -1960,7 +1959,7 @@ for (const tool of MCP_TOOLS) {
     const scopeIdentity = JSON.stringify(canonical(confirmationTargets(tool.name, scope)));
     if (!confirm) {
       let result: ToolResult;
-      if (tool.name === 'new' || tool.name === 'queue') result = await original(deps, { ...args, _specs: (scope as { specs: ResolvedSpec[] }).specs });
+      if (tool.name === 'new' || tool.name === 'queue') result = await writeTool(deps, tool.name, {}, async () => ({ text: `${summarizeSpecs((scope as { specs: ResolvedSpec[] }).specs).join('\n')}\nBase/overlap, worktrees, capacity and disk checked by watch at accept; errors appear as events.\nBaza/nakładanie, worktree, limity i dysk: watch sprawdzi po przyjęciu; błędy w events_since.\nNot executed. Review, then confirm the preview_token.`, executed: false, announce: '' }));
       else if (['cancel', 'resume', 'move'].includes(tool.name)) result = await original(deps, args);
       else result = await writeTool(deps, tool.name as McpWriteTool, {}, async () => {
         const detail = tool.name === 'gc' ? renderGc(scope as GcPlan, { detail: Boolean(input.detail), offset: input.offset as number | undefined, limit: input.limit as number | undefined }).join('\n') : JSON.stringify({ operation: tool.name, arguments: input, scope: await previewScope(ctx, tool.name, input, scope) }, null, 2);
@@ -2101,7 +2100,7 @@ for (const tool of MCP_TOOLS.filter(t => capacityCarriers.has(t.name))) {
     const warnings = sessionWarnings(deps, ctx).map(w => `Config warning: ${w}`);
     // An accepted confirm (P93/P93b) answers without the footer: it reads tmux and the disk, which a loaded host may not run in time.
     const accepted = args.confirm && (['new', 'queue'].includes(tool.name) || typeof (result.data as { request?: unknown } | undefined)?.request === 'string');
-    const footer = accepted ? [] : await capacityFooter(deps, ctx, args.detail === true || args.capacity === true);
+    const footer = accepted || ['new', 'queue'].includes(tool.name) ? [] : await capacityFooter(deps, ctx, args.detail === true || args.capacity === true);
     // Core new/queue helpers also serve the CLI. Remove only their display footer here.
     const text = result.text.split('\n').filter(l => !/^(?:Plans:|plan:\s|capacity:|(?:WARNING: )?Disk:)/.test(l)).join('\n');
     if ((args.format === 'json' || args.detail === true && tool.name === 'status') && /^[{[]/.test(text)) {

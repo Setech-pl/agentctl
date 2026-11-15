@@ -36,6 +36,8 @@ export interface PlanOptions {
    */
   overflow?: { queued: ResolvedSpec[] };
   deferBases?: boolean;
+  /** MCP preview: validate syntax, models and batch duplicates without runtime reads. */
+  previewOnly?: boolean;
 }
 
 /** Codex reasoning efforts; `max` is Claude-only. */
@@ -80,9 +82,9 @@ function switchTo(spec: ResolvedSpec, to: Order, by: 'flag' | 'limit'): Resolved
 export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanOptions = {}): Promise<ResolvedSpec[]> {
   const { config } = ctx;
   const p = new Problems();
-  const live = ctx.runner.dryRun ? [] : await liveWindows(ctx);
+  const live = ctx.runner.dryRun || opts.previewOnly ? [] : await liveWindows(ctx);
   // `after` belongs to the queue: `new` starts a task now, so what it waits for must be done already.
-  if (!opts.skipAfter && !ctx.runner.dryRun && specs.some((s) => s.after.length > 0)) {
+  if (!opts.previewOnly && !opts.skipAfter && !ctx.runner.dryRun && specs.some((s) => s.after.length > 0)) {
     const rows = await collectStatus(ctx, { progress: false, cachedOnly: true, archived: true });
     for (const spec of specs) {
       const unmet = unmetAfter(spec.after, rows, spec.afterVerdicts);
@@ -96,8 +98,8 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
   const result: ResolvedSpec[] = [];
 
   for (let spec of specs) {
-    if (!opts.deferBases) spec = await resolveTaskBases(ctx, spec);
-    if (spec.review) {
+    if (!opts.previewOnly && !opts.deferBases) spec = await resolveTaskBases(ctx, spec);
+    if (spec.review && !opts.previewOnly) {
       const repos = [];
       for (const repo of spec.repos) {
         if (!repo.branch) throw new AgentctlError(`${spec.task}: review: auto requires an explicit author repos[].branch`);
@@ -134,7 +136,7 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
 
     // 3. provider limit, with an offer to switch
     const occupied = (): LiveWindow[] => [...live, ...planned];
-    let limitProblem = opts.ignoreLimits ? undefined : checkWindowLimit(spec.agent, config.limits[spec.agent], occupied(), config.session);
+    let limitProblem = opts.ignoreLimits || opts.previewOnly ? undefined : checkWindowLimit(spec.agent, config.limits[spec.agent], occupied(), config.session);
     if (limitProblem) {
       const others = alternatives(config, spec.agent);
       const current: Order = { agent: spec.agent, model: spec.model, effort: spec.effort };
@@ -185,7 +187,7 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
     planned.push({ window: spec.window, agent: spec.agent });
 
     // 4. worktrees
-    for (const repo of spec.repos) {
+    for (const repo of opts.previewOnly ? [] : spec.repos) {
       // A dry run may be rehearsed on a machine without the repositories, so only real runs require them.
       if (!ctx.runner.dryRun && !fs.existsSync(repo.path)) p.add(`${at} repository ${repo.path} does not exist`);
       if (fs.existsSync(repo.worktree) && !opts.reuse) {
@@ -200,7 +202,7 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
     const reviewed = spec.reviewOfAll ?? (spec.reviewOf ? [spec.reviewOf] : []);
     const warnings: string[] = [];
     for (const reviewedTask of reviewed) {
-      const author = findAuthor(reviewedTask, [...result, ...(opts.overflow?.queued ?? [])], config) ?? opts.knownAuthors?.get(reviewedTask);
+      const author = (opts.previewOnly ? result.find(s => s.task === reviewedTask) : findAuthor(reviewedTask, [...result, ...(opts.overflow?.queued ?? [])], config)) ?? opts.knownAuthors?.get(reviewedTask);
       const problem = checkReviewer({ ...spec, reviewOf: reviewedTask }, author);
       if (problem) {
         p.add(`${spec.task}: ${problem}`);

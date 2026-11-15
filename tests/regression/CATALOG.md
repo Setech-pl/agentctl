@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| A1 | MCP new/queue preview waits on git and runtime reads and loses its token at the budget. | `tests/p93-mcp-accept.test.ts` (`^A1:`) | 0.22.2 | fails on v0.22.0 (2 failing of 2) |
 | CONSULT-f2 | Consultation tasks inherited automatic review and failed detached-worktree admission (pre-fix unreleased 1c98117: 1 of 1 fails; absent on v0.21.0). | `tests/consult.test.ts` (`CONSULT-f2`) | 0.22.0 | cannot run on v0.21.0: the code under test did not exist there (import error) |
 | CONSULT-f1 | A long task cache produced a 101-byte tmux socket even after digest shortening, so the stdio/release harness refused before startup. | `tests/harness.test.ts` (`CONSULT-f1`) | 0.22.0 | fails on v0.21.0 (1 failing of 1) |
 | WALL-1-f1 | `agentctl wall post/reply/status` acted as the owner also in an agent's task shell: an agent could post as the owner, answer as a chat with --as chat:<name>, or close a decision-request (pre-fix run on the unreleased WALL-1 commit 19e8192: 4 of 5 fail). | `tests/wall2-identity.test.ts` | 0.21.0 | cannot run on v0.20.2: the code under test did not exist there (import error) |
