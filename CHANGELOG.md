@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- H6: overlap compares the spec base and excludes imported merge changes; integration: true suppresses warnings with a note. / Kolizje odnoszą się do bazy specyfikacji i pomijają zmiany przejęte przez merge; integration: true wycisza ostrzeżenia z adnotacją.
+
 - H2: cached text starts with its age; status older than five minutes uses a short queue/journal fallback. / Odpowiedź z cache zaczyna się wiekiem; status starszy niż pięć minut pokazuje krótki fallback kolejki i dziennika.
 
 - H3: queue previews identify pending queue_rm requests; replace: true removes and re-adds in one watch step. / Podgląd wskazuje oczekujące queue_rm; replace: true usuwa i dodaje spec w jednym ticku watch.

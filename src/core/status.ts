@@ -107,6 +107,7 @@ export interface StatusRow {
   menuOptions?: string[];
   /** `pin: true` in the spec: the task is never moved to the other provider. */
   pin: boolean;
+  integration?: boolean;
   /** The task has no tmux window any more (or was moved to the other provider): it is done, whatever it left behind. Shown under "Finished" on the board. */
   finished: boolean;
   /** Hidden from board and status: by `agentctl hide`, or by itself (`auto`: no window and the report was pulled). The task and its worktree are untouched. */
@@ -336,6 +337,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       question: (record.agent === 'codex' && (state === 'needs-input' || (settings.asyncQuestionPattern && new RegExp(settings.asyncQuestionPattern, PATTERN_FLAGS).test(screenText))) ? sessionQuestion(config, record) : undefined) ?? (state === 'needs-input' ? ((startupDialog ? record.promptError : undefined) ?? extractQuestion(screenText) ?? (stored?.outcome === 'needs-input' && stored.text !== '' ? stored.text : null)) : null),
       ...((state === 'needs-input' || state === 'needs-trust') && alive ? { menuOptions: menuOptionLines(screenText) } : {}),
       pin: record.pin === true,
+      integration: record.integration === true,
       finished: (!alive && !lossHint) || state === 'superseded',
       hidden: hiddenBy !== null,
       hiddenBy,

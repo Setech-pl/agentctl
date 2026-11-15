@@ -214,6 +214,18 @@
       "H5: HEMS fixture reports shape findings but accepts check aliases and Verdict"
     ]
   },
+  "H6": {
+    "rev": "v0.22.3",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "H6: predecessor imports do not count as its own overlap and spec base defines comparison",
+      "H6: integration flag is persisted and silences all overlap warnings with an explicit note",
+      "H6: predecessor imports do not count as its own overlap and spec base defines comparison",
+      "H6: integration flag is persisted and silences all overlap warnings with an explicit note"
+    ]
+  },
   "HELP-HEIGHT": {
     "rev": "v0.22.2",
     "outcome": "FAILS",
