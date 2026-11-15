@@ -1,0 +1,2 @@
+{"type":"session_meta","payload":{"id":"a10-session"}}
+{"type":"response_item","payload":{"type":"function_call","name":"functions.request_user_input_async","call_id":"a10-q","arguments":"{\"questions\":[{\"title\":\"Which map contract should NC use?\",\"options\":[\"v1\",\"v2\"]}]}"}}

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { it } from 'node:test';
 import { makeConfig, makeContext, seedTask, useScratch, FakeTmux } from './helpers.ts';
+import { collectStatus } from '../src/core/status.ts';
 import { peekTask } from '../src/core/peek.ts';
 import { sessionsFile } from '../src/core/usage.ts';
 import { localDay } from '../src/core/usage-parse.ts';
@@ -55,4 +56,18 @@ it('P65-b: the marker alone still yields the plain collapsed hint, never a fabri
   const r = await peekTask(ctx, 'NC-1');
   assert.match(r.lines[0] ?? '', /zwinięte, 2/);
   assert.doesNotMatch(r.lines[0] ?? '', /„/);
+});
+
+it('A10: namespaced Codex session tool calls supply collapsed question text to peek and status', async () => {
+  const f = setup('a10', '• Working (27s • esc to interrupt)\n  ? 1 question · 8s\n  ⇧← to answer\n› Ask Codex to do anything\n  GPT-6.1-Sol low · ~/work/sandbox\n');
+  const home = path.join(f.config.cache, 'codex-home');
+  fs.mkdirSync(path.dirname(sessionsFile(f.config, 'nc-1')), {recursive: true});
+  fs.writeFileSync(sessionsFile(f.config, 'nc-1'), JSON.stringify({codex: [{id: 'a10-session'}]}));
+  const dir = path.join(home, 'sessions', ...localDay(Date.now()).split('-')); fs.mkdirSync(dir, {recursive: true});
+  const file = path.join(dir, 'rollout-a10-session.jsonl'); fs.writeFileSync(file, fx('codex-namespaced-question.jsonl'));
+  seedTask(f.config, 'NC-1', {agent: 'codex', env: {CODEX_HOME: home}});
+  const peek = await peekTask(f.ctx, 'NC-1'); assert.match(peek.lines[0] ?? '', /Which map contract should NC use/);
+  const status = await collectStatus(f.ctx); assert.match(status[0]?.question ?? '', /Which map contract should NC use/);
+  fs.appendFileSync(file, JSON.stringify({type: 'response_item', payload: {type: 'function_call_output', call_id: 'a10-q', output: 'v2'}}) + '\n');
+  assert.doesNotMatch((await peekTask(f.ctx, 'NC-1')).lines[0] ?? '', /Which map contract should NC use/);
 });

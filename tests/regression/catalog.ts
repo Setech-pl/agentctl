@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'A10', fixedIn: '0.22.2', symptom: 'Collapsed Codex questions omit text from namespaced session tool calls.', scenarios: [s('p65b-peek-question.test.ts', '^A10:')] },
   { id: 'A9', fixedIn: '0.22.2', symptom: 'Compact output references fail YAML parsing and placeholder branches escape validation.', scenarios: [s('a9-report-formats.test.ts')] },
   { id: 'A8', fixedIn: '0.22.2', symptom: 'YAML converts unquoted git identifiers such as 2742e697 into numbers.', scenarios: [s('spec.test.ts', '^A8:')] },
   { id: 'A7', fixedIn: '0.22.2', symptom: 'Summary and out-of-order full report reads stay unread in events_since.', scenarios: [s('a7-report-pulled.test.ts')] },

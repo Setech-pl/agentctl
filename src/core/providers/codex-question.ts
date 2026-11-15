@@ -30,9 +30,9 @@ export function sessionQuestion(config: GlobalConfig, record: TaskRecord): strin
         try {
           const item = JSON.parse(line).payload;
           if (item?.type === 'function_call_output') pending.delete(item.call_id);
-          if (item?.type === 'function_call' && /^(?:request_user_input|request_user_input_async)$/.test(item.name)) {
-            const args = JSON.parse(item.arguments);
-            const text = args.questions?.[0]?.question ?? args.questions?.[0]?.title;
+          if (item?.type === 'function_call' && /(?:^|[.:/])request_user_input(?:_async)?$/.test(item.name ?? '')) {
+            const args = typeof item.arguments === 'string' ? JSON.parse(item.arguments) : item.arguments;
+            const text = args?.questions?.map((q: {question?: string; title?: string}) => q.question ?? q.title).filter((q: unknown) => typeof q === 'string').join('; ');
             if (typeof text === 'string') pending.set(item.call_id, clip(firstLine(text), MAX_QUESTION));
           }
         } catch { /* incomplete or unrelated log entry */ }

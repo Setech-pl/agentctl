@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- A10: collapsed Codex questions read namespaced session tool calls and object/string arguments. / Zwinięte pytania Codex odczytują wywołania z przestrzenią nazw i argumentami jako obiekt lub tekst.
+
 - A9: compact/flow output references preserve SHAs and reject placeholders as findings; Verdict/Werdykt first-line admission is covered. / Referencje outputs w skróconym YAML zachowują SHA, odrzucają placeholdery jako uwagi; testy obejmują pierwszy wiersz Verdict/Werdykt.
 
 - A8: git base/branch/SHA scalars preserve their YAML source instead of numeric conversion. / Wartości base/branch/SHA zachowują zapis YAML zamiast konwersji liczbowej.
