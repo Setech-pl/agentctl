@@ -1,0 +1,40 @@
+@startuml containers
+!include <C4/C4_Container>
+skinparam linetype ortho
+skinparam nodesep 80
+skinparam ranksep 100
+title agentctl 0.22.1 — C2 Containers (local processes and files)
+Person(owner, "Owner", "Terminal and desktop chat")
+System_Ext(chat, "Claude desktop", "NC / HEMS MCP clients")
+System_Boundary(a, "agentctl on the owner's machine") {
+ Container(cli, "CLI", "Node.js / TypeScript", "Orders, diagnostics, reports, local maintenance")
+ Container(board, "Board TUI", "Ink / React", "Tasks, queue, capacity, WALL; owner input")
+ Container(watch, "Watch daemon", "Node.js", "Polls state, applies Accepted writes, starts queue, advances CONSULT")
+ Container(mcp, "MCP server", "Node.js / stdio", "Read tools, preview tokens, allow-list, durable receipts")
+ Container(adapters, "Provider adapters", "Shared library", "Launch, parse screens/events, usage and safe delivery")
+ Container(hooks, "Callbacks", "event / usage-tap", "Task-scoped provider hooks and statusLine")
+ ContainerDb(state, "State store", "Files under ~/.agentctl", "Tasks, queue, journal, wall, consult, usage, MCP requests; configurable home/state")
+ ContainerDb(reports, "Reports and task cache", "Markdown / YAML", "Canonical report paths outside internal state")
+}
+System_Ext(tmux, "tmux server", "Task sessions/windows; board/watch service windows")
+System_Ext(worktrees, "Git repositories / worktrees", "Per-task branches or detached read-only CONSULT snapshots")
+System_Ext(providers, "Provider CLI processes / clouds", "claude / codex / kimi / claude-glm")
+Rel(owner, cli, "Commands")
+Rel(owner, board, "Keys")
+Rel(chat, mcp, "Tools", "stdio")
+Rel(cli, state, "R/W")
+Rel(board, state, "Read / actions")
+Rel(mcp, state, "Accepted / read")
+Rel(watch, state, "Apply / events")
+Rel(watch, worktrees, "Create", "git / shell")
+Rel(cli, worktrees, "Maintain")
+Rel(watch, adapters, "Uses")
+Rel(cli, adapters, "Uses")
+Rel(adapters, tmux, "tmux I/O")
+Rel(tmux, providers, "Hosts")
+Rel(providers, hooks, "Callbacks")
+Rel(hooks, state, "Events")
+Rel(providers, reports, "Report")
+Rel(watch, reports, "Validate")
+SHOW_LEGEND()
+@enduml
