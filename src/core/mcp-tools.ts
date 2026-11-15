@@ -817,7 +817,7 @@ async function writeTool(
         if (!deps.applying) await recordJournal(ctx, { kind: 'mcp-write', text: `${tool}: ${result.announce}` });
         await mcpWriteNotice(ctx, deps.notify.bind(deps), result.announce);
       };
-      if (tool === 'queue' || tool === 'new') void announce().catch(() => undefined);
+      if (tool === 'queue' || tool === 'new' || tool.startsWith('wall_')) void announce().catch(() => undefined);
       else await announce();
     }
     return { ...(result.error ? fail(result.text) : ok(result.text)), ...(result.data !== undefined ? { data: result.data } : {}) };
@@ -1619,7 +1619,7 @@ MCP_TOOLS.push(
     annotations: { title: 'Post on the WALL', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     run: (deps, args) => guarded(() => writeTool(deps, 'wall_post', { detail: `${(args as WallPostArgs).channel} ${(args as WallPostArgs).kind}` }, async (ctx) => {
       const a = args as WallPostArgs;
-      const m = await postMessage(ctx, wallCaller(deps, ctx, a.as), a, { notify: (text) => deps.notify(text) });
+      const m = await postMessage(ctx, wallCaller(deps, ctx, a.as), a, { notify: async (text) => { void deps.notify(text).catch(() => undefined); } });
       return { text: postedText(m), executed: true, announce: `wall_post ${m.id}`, detail: m.id, data: { id: m.id } };
     })),
   }),
@@ -1634,7 +1634,7 @@ MCP_TOOLS.push(
     annotations: { title: 'Reply on the WALL', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     run: (deps, args) => guarded(() => writeTool(deps, 'wall_reply', { detail: `reply ${(args as WallReplyArgs).reply_to}` }, async (ctx) => {
       const a = args as WallReplyArgs;
-      const m = await postMessage(ctx, wallCaller(deps, ctx, a.as), wallReplyInput(ctx.config, a), { notify: (text) => deps.notify(text) });
+      const m = await postMessage(ctx, wallCaller(deps, ctx, a.as), wallReplyInput(ctx.config, a), { notify: async (text) => { void deps.notify(text).catch(() => undefined); } });
       return { text: postedText(m), executed: true, announce: `wall_reply ${m.id} -> ${m.replyTo}`, detail: m.id, data: { id: m.id } };
     })),
   }),
@@ -1672,7 +1672,7 @@ function redactConfig(config: GlobalConfig): unknown {
  * P93b: the writes whose confirm can wait on start.lock, git, tmux or a scan of every task. With a watcher running, the confirm records the
  * request (mcp-requests.ts) and returns; the watcher applies it. `set_limits` stays synchronous: it writes config.yaml under no shared lock.
  */
-export const DEFERRED_TOOLS = new Set(['gc_preview', 'consult', 'unblock', 'queue_up', 'queue_rm', 'queue_retry', 'close', 'cancel', 'send', 'mark', 'hide', 'unhide', 'archive', 'cohort_add', 'cohort_remove', 'cohort_archive', 'cohort_note', 'wall_post', 'wall_reply', 'wall_set_status']);
+export const DEFERRED_TOOLS = new Set(['gc_preview', 'consult', 'unblock', 'queue_up', 'queue_rm', 'queue_retry', 'close', 'cancel', 'send', 'mark', 'hide', 'unhide', 'archive', 'cohort_add', 'cohort_remove', 'cohort_archive', 'cohort_note']);
 /** The run of every tool before the confirm, format, budget and paging wrappers: what the watcher calls to apply a request. */
 const originalRuns = new Map<string, McpToolDef['run']>();
 

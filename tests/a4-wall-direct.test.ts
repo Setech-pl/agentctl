@@ -1,0 +1,32 @@
+import assert from 'node:assert/strict';
+import { it } from 'node:test';
+import { z } from 'zod';
+import { Context } from '../src/core/context.ts';
+import { MCP_TOOLS } from '../src/core/mcp-tools.ts';
+import { readMcpRequests } from '../src/core/mcp-requests.ts';
+import { findMessage } from '../src/core/wall.ts';
+import { DiskRunner, makeConfig, useScratch, fakeWatcher } from './helpers.ts';
+const scratch = useScratch();
+it('A4: all WALL writes commit directly while watch and notification delivery are stalled', async () => {
+  const config = makeConfig(scratch.sub('a4'), 'mcp: {allow: [wall]}\n'); fakeWatcher(config);
+  const ctx = new Context(new DiskRunner({dryRun: false, respond: () => {throw new Error('no processes');}}), config, () => {});
+  const deps = {context: () => ctx, notify: async () => new Promise<void>(() => {})};
+  const call = (name: string, args: any) => { const t = MCP_TOOLS.find(t => t.name === name)!; return t.run(deps, z.object(t.input).parse(args)); };
+  const write = async (name: string, args: any) => {
+    const preview = await call(name, args); assert.ok(!preview.isError, preview.text);
+    const token = /preview_token: (\S+)/.exec(preview.text)![1];
+    const done = await call(name, {preview_token: token, confirm: true});
+    assert.ok(!done.isError, done.text); assert.ok(!done.text.startsWith('Accepted'), done.text);
+    return done;
+  };
+  const post = await write('wall_post', {as: 'chat:nc', channel: 'nc', kind: 'question', subject: 'Direct?', body: 'Please answer'});
+  const id = /Posted (\S+) in/.exec(post.text)![1]!;
+  assert.equal(findMessage(config, id).status, 'open');
+  await write('wall_reply', {as: 'chat:nc', reply_to: id, body: 'yes'});
+  assert.equal(findMessage(config, id).status, 'answered');
+  await write('wall_set_status', {as: 'chat:nc', id, status: 'superseded'});
+  assert.equal(findMessage(config, id).status, 'superseded');
+  assert.deepEqual(readMcpRequests(config), []);
+  const denied = await call('wall_post', {as: 'chat:nc', channel: 'nc', kind: 'info', subject: 'Secret', body: 'GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123456789'});
+  assert.equal(denied.isError, true);
+});

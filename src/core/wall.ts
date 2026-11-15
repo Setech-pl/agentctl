@@ -346,7 +346,7 @@ function saveIndex(config: GlobalConfig, channels: string[]): void {
 
 const withWallLock = <T>(config: GlobalConfig, action: () => Promise<T>): Promise<T> => {
   fs.mkdirSync(wallDir(config), { recursive: true });
-  return withFileLock(lockFile(config), action, 10_000);
+  return withFileLock(lockFile(config), action, 1000);
 };
 
 // ---- validation
