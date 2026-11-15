@@ -257,3 +257,11 @@ describe('after_verdict', () => {
     assert.deepEqual(parsed?.afterVerdicts, { 'NC-0': ['PASS'] });
   });
 });
+
+it('A8: exponent-like base and numeric branch are preserved from YAML source (flow and block)', () => {
+  for (const repos of ['repos: [{path: ~/app, base: 2742e697, branch: 20261115}]', 'repos:\n  - path: ~/app\n    base: 2742e697\n    branch: 20261115']) {
+    const [spec] = resolve(`---\ntask: A8\nagent: claude\n${repos}\n---\nGo`);
+    assert.equal(spec!.repos[0]!.base, '2742e697');
+    assert.equal(spec!.repos[0]!.branch, '20261115');
+  }
+});

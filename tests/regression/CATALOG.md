@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| A8 | YAML converts unquoted git identifiers such as 2742e697 into numbers. | `tests/spec.test.ts` (`^A8:`) | 0.22.2 | fails on v0.22.0 (1 failing of 1) |
 | A7 | Summary and out-of-order full report reads stay unread in events_since. | `tests/a7-report-pulled.test.ts` | 0.22.2 | fails on v0.22.0 (1 failing of 1) |
 | A6 | Scrolled Codex multiline drafts lose paste ownership and cannot be submitted. | `tests/p49-codex-queue.test.ts` (`^A6:`) | 0.22.2 | fails on v0.22.0 (1 failing of 1) |
 | A5 | Not every preview write accepts a token-only confirm; limits and reserve lacked preview_token. | `tests/mcp-token-confirm.test.ts` (`^A5:`) | 0.22.2 | fails on v0.22.0 (1 failing of 1) |

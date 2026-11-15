@@ -7,7 +7,7 @@ import { normalizeDependencyVerdict, VERDICTS } from './outputs.ts';
 import { resolveSpecWall } from './wall-config.ts';
 import type { OutputVerdict } from './outputs.ts';
 import path from 'node:path';
-import YAML from 'yaml';
+import { parseRefYaml } from './ref-yaml.ts';
 import {
   AGENT_NAMES,
   EFFORTS,
@@ -138,7 +138,7 @@ export function splitSpecs(text: string, source = 'spec'): RawSpec[] {
     }
     let data: unknown;
     try {
-      data = YAML.parse(lines.slice(at + 1, close).join('\n'));
+      data = parseRefYaml(lines.slice(at + 1, close).join('\n'));
     } catch (e) {
       if (mandatory) throw new AgentctlError(`${source}: invalid YAML in the header at line ${at + 1}: ${errorMessage(e)}`, 'Fix the YAML syntax.');
       return undefined;
@@ -261,7 +261,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
         const value = entry[key];
         if (value === undefined || value === null) continue;
         if (typeof value === 'string' && value.trim() !== '') repo[key] = value.trim();
-        else p.add(`${at}.${key} must be a non-empty string`);
+        else p.add(`${at}.${key} must be a non-empty string${key === 'base' || key === 'branch' ? '; quote the SHA' : ''}`);
       }
       if (entry.setup !== undefined && entry.setup !== null) {
         if (Array.isArray(entry.setup) && entry.setup.every((c: unknown) => typeof c === 'string' && c.trim() !== '')) repo.setup = entry.setup as string[];
