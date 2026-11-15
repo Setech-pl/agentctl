@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { Context } from './context.ts';
 import type { Notifier } from './notify.ts';
 import type { Progress } from './progress.ts';
-import { taskProgress } from './progress.ts';
+import { repoProgress, taskProgress } from './progress.ts';
 import type { ResolvedSpec } from './spec.ts';
 import type { StatusRow } from './status.ts';
 import { listTaskRecords } from './taskstore.ts';
@@ -110,7 +110,7 @@ const isActive = (r: Pick<StatusRow, 'window' | 'closed' | 'cancelled' | 'state'
 export function attachCollisions(rows: StatusRow[], ignore: readonly string[], enabled = true): Overlap[] {
   for (const r of rows) r.collide = [];
   if (!enabled) return [];
-  const overlaps = findOverlaps(rows.filter((r) => isActive(r) && r.progress).map((r) => filesOfProgress(r.task, r.progress as Progress)), ignore);
+  const overlaps = findOverlaps(rows.filter((r) => !r.integration && isActive(r) && r.progress).map((r) => filesOfProgress(r.task, r.progress as Progress)), ignore);
   for (const r of rows) r.collide = collideOf(overlaps, r.task);
   return overlaps;
 }
@@ -120,7 +120,7 @@ export async function collectActiveFiles(ctx: Context): Promise<TaskFiles[]> {
   const live = new Set(await ctx.tmux.listWindows());
   const tasks: TaskFiles[] = [];
   for (const record of listTaskRecords(ctx.config)) {
-    if (record.closed || record.cancelled || record.supersededBy || !live.has(record.window) || record.repos.length === 0) continue;
+    if (record.integration || record.closed || record.cancelled || record.supersededBy || !live.has(record.window) || record.repos.length === 0) continue;
     const progress = await taskProgress(ctx.runner, record.repos);
     if (progress) {
       tasks.push(filesOfProgress(record.task, progress));
@@ -157,7 +157,7 @@ async function cachedActiveFiles(ctx: Context): Promise<TaskFiles[]> {
   const live = new Set(await ctx.tmux.listWindows());
   const active: TaskFiles[] = [];
   for (const record of listTaskRecords(ctx.config)) {
-    if (!live.has(record.window) || record.closed || record.cancelled) continue;
+    if (record.integration || !live.has(record.window) || record.closed || record.cancelled) continue;
     try {
       const progress = JSON.parse(fs.readFileSync(path.join(ctx.config.stateDir, record.window, 'progress.json'), 'utf8'));
       if (progress?.repos) active.push(filesOfProgress(record.task, progress));
@@ -167,7 +167,7 @@ async function cachedActiveFiles(ctx: Context): Promise<TaskFiles[]> {
 }
 
 export async function touchWarnings(ctx: Context, specs: readonly ResolvedSpec[], opts: { cachedOnly?: boolean } = {}): Promise<string[]> {
-  const asking = specs.filter((s) => s.touches.length > 0);
+  const asking = specs.filter((s) => !s.integration && s.touches.length > 0);
   if (asking.length === 0 || !ctx.config.collisions.enabled) return [];
   const active = opts.cachedOnly ? await cachedActiveFiles(ctx) : await collectActiveFiles(ctx);
   const warnings: string[] = [];
@@ -177,7 +177,10 @@ export async function touchWarnings(ctx: Context, specs: readonly ResolvedSpec[]
       for (const t of active) {
         if (t.task === spec.task) continue;
         const mine = t.repos.find((r) => r.repoPath === repoPath);
-        const files = (mine?.files ?? []).filter((f) => matchesAny(f, spec.touches) && !matchesAny(f, ctx.config.collisions.ignore));
+        const predecessor = listTaskRecords(ctx.config).find(r => r.task === t.task)?.repos.find(r => path.resolve(r.path) === repoPath);
+        const compared = !opts.cachedOnly && repo.base && !repo.base.startsWith('@') && predecessor
+          ? await repoProgress(ctx.runner, {...predecessor, base: repo.base}) : undefined;
+        const files = (compared?.fileNames ?? mine?.files ?? []).filter((f) => matchesAny(f, spec.touches) && !matchesAny(f, ctx.config.collisions.ignore));
         if (files.length === 0) continue;
         warnings.push(`${spec.task} touches ${spec.touches.join(', ')}, and ${t.task} already changes ${files.length} matching file${files.length === 1 ? '' : 's'} in ${repoPath}: ${files.slice(0, 5).join(', ')}${files.length > 5 ? ', …' : ''}`);
       }

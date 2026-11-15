@@ -13,7 +13,7 @@ export const expectedCloseFile = (config: GlobalConfig, window: string): string 
 
 /** A missing launched window is recoverable work, even after watch recreates the server/session. */
 export async function tmuxLoss(ctx: Context, record: TaskRecord, alive: boolean, complete: boolean, sessionAlive = false, readOnly = false): Promise<string | undefined> {
-  if (complete) return undefined;
+  if (complete || record.cancelled || record.closed || !record.started) return undefined;
   const file = path.join(taskDir(ctx.config, record.window), 'tmux-loss.json');
   let previous: { identity?: string; active?: boolean } | undefined;
   try { previous = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* no observation yet */ }

@@ -55,6 +55,7 @@ export interface AutoReviewSource {
 
 export interface ResolvedSpec {
   readOnly?: boolean;
+  integration?: boolean;
   /** Internal queue provenance, never accepted from spec YAML. */
   autoReview?: AutoReviewSource;
   index: number;
@@ -191,7 +192,7 @@ export interface ResolveContext {
 /** Task IDs whose window name is one agentctl uses for itself (`watch`, `board`, `manager`). */
 export const RESERVED_TASK_IDS = ['WATCH', 'BOARD', 'MANAGER'];
 
-export const SPEC_KEYS = ['task', 'agent', 'class', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'review', 'report', 'pin', 'remote_control', 'weight', 'priority', 'after', 'after_verdict', 'touches', 'cohort', 'wall', 'read_only', 'host'];
+export const SPEC_KEYS = ['task', 'agent', 'class', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'review', 'report', 'pin', 'remote_control', 'weight', 'priority', 'after', 'after_verdict', 'touches', 'cohort', 'wall', 'read_only', 'host', 'integration'];
 export const REPO_KEYS = ['path', 'worktree', 'base', 'branch', 'setup'];
 
 function label(raw: RawSpec): string {
@@ -238,6 +239,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
 
   checkKeys(h, SPEC_KEYS, where, p);
   const task = checkTask(raw, p);
+  if (h.integration !== undefined && typeof h.integration !== 'boolean') p.add('integration must be boolean');
   if (h.read_only !== undefined && typeof h.read_only !== 'boolean') p.add('read_only must be boolean');
   const specAgent = (typeof h.agent === 'string' && (AGENT_NAMES as readonly string[]).includes(h.agent) ? h.agent as AgentName : parseEnumValue(h.agent, activeProviders(config), 'agent', p));
   const specEffort = parseEnumValue(h.effort, EFFORTS, 'effort', p);
@@ -526,10 +528,12 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     after,
     ...(Object.keys(afterVerdicts).length ? { afterVerdicts } : {}),
     touches,
+    ...(h.integration === true ? {integration: true} : {}),
     requested: { agent: agent as AgentName, model, effort },
   };
   if (specClass) spec.class = specClass;
   if (classWarnings.length > 0) spec.warnings = classWarnings;
+  if (spec.integration) spec.warnings = [...(spec.warnings ?? []), 'integration: true – overlap warnings suppressed / ostrzeżenia o nakładaniu wyciszone'];
   if (reviewOf) spec.reviewOf = reviewOf;
   if (reviewOfList.length > 0) spec.reviewOfAll = reviewOfList;
   if (review) spec.review = review;

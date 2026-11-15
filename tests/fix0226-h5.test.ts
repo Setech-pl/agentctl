@@ -1,0 +1,41 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { it } from 'node:test';
+import { parseOutputs, dependencyVerdict } from '../src/core/outputs.ts';
+import { world } from './hotfix-0194-fixture.ts';
+import { seedTask } from './helpers.ts';
+const block = (verdict: string) => '```agentctl-outputs\nversion: 1\nverdict: ' + verdict + '\n```\n';
+it('H5: duplicate outputs use last valid block and explain findings', () => {
+  const data = parseOutputs(block('FAIL') + block('PASS') + block('broken'));
+  assert.equal(data.outputs?.verdict, 'PASS');
+  assert.equal(data.outputs_valid, false);
+  assert.match(data.outputs_errors.join('; '), /last valid block 2/);
+});
+it('H5: HEMS fixture reports shape findings but accepts check aliases and Verdict', async () => {
+  const text = fs.readFileSync(new URL('./fixtures/hems-outputs.md', import.meta.url), 'utf8');
+  const parsed = parseOutputs(text);
+  assert.equal(dependencyVerdict(text), 'PASS');
+  assert.equal(parsed.outputs?.checks.length, 3);
+  assert.match(parsed.outputs_errors.join('; '), /schema_version/);
+  assert.match(parsed.outputs_errors.join('; '), /commits.0.sha/);
+  assert.ok(!parsed.outputs_errors.some(e => e.startsWith('checks')));
+  const w = world('h5'); const record = seedTask(w.config, 'HEMS');
+  fs.mkdirSync(new URL('.', 'file://' + record.report).pathname, {recursive: true});
+  fs.writeFileSync(record.report, text.replace('<!-- agentctl:attempt hems-feedback -->', ''));
+  const read = await w.call('get_report', {task: 'HEMS', mark_pulled: false});
+  assert.ok(!read.isError, read.text); assert.match(read.text, /outputs_errors:.*schema_version/);
+  const events = await w.call('events_since', {all: true, format: 'json'});
+  assert.match(events.text, /outputs warning.*schema_version/);
+  const event = JSON.parse(events.text).events.find((e: {kind: string}) => e.kind === 'report-outputs');
+  assert.match(event.outputs_errors.join('; '), /schema_version/);
+});
+
+it('H5: an explicit malformed outputs block is a finding even on a legacy task', async () => {
+  const w = world('h5-legacy'); const record = seedTask(w.config, 'LEGACY');
+  fs.mkdirSync(new URL('.', 'file://' + record.report).pathname, {recursive: true});
+  fs.writeFileSync(record.report, 'Verdict: PASS\n```agentctl-outputs\nschema_version: 1\nverdict: PASS\n```\n<!-- agentctl:report-end -->\n');
+  const read = await w.call('get_report', {task: 'LEGACY', mark_pulled: false});
+  assert.match(read.text, /outputs_errors:.*version/);
+  const events = await w.call('events_since', {all: true, format: 'json'});
+  assert.ok(JSON.parse(events.text).events.some((e: {outputs_errors?: string[]}) => e.outputs_errors?.some(error => error.startsWith('version:'))));
+});

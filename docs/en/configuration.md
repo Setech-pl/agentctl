@@ -76,6 +76,7 @@ Types/defaults below are cross-checked with [config.ts](../../src/core/config.ts
 | `after` | task ID or list · none · s | Complete reports and accepted first-line verdicts. Missing verdict waits while author is live or report settling; rejection blocks. Corrected accepted reports auto-unblock next watch tick. Unknown tasks/cycles fail. |
 | `after_verdict` | non-empty verdict list · `[PASS, PARTIAL]` · s | Non-empty accepted list; requires after. Default PASS/PARTIAL with first-line aliases PASS with findings and GO. |
 | `touches` | glob or list of globs · none · s | Files the task will change. `queue` and `new` warn (and ask y/N) when an active task of the same repository already changes matching files. |
+| `integration` | boolean · false · s | Suppress overlap warnings with a note; other tasks compare the spec base and exclude imported merges. |
 | `cohort` | name · none · s | The cohort of the task: letters, digits, `-`, `_` and `.` (at most 40 characters), compared without regard to case and shown as it was first written. The cohort is made by its first task; its file is `<config dir>/cohorts/<name>.json`. Without the key the task belongs to no cohort (there is no default one). `new --cohort` and `queue --cohort` override it for the whole file. See [cohorts](../details.md#cohorts). |
 | `weight` | `normal` or `heavy` · `normal` · s | Heavy tasks share the queue cap across providers; starting tasks and live task windows count, including report-ready. Immediate new is outside queue admission. |
 | `priority` | `high` or `normal` · `normal` · s | Queue order: `high` tasks start before every `normal` one (first come, first served inside each class). `new` ignores it. |
@@ -270,3 +271,15 @@ wall:
     hems: {channels: [hems, agentctl, "shared:*"]}
     agentctl: {channels: [agentctl, "shared:*"]}
 ~~~
+
+## Hotfix 0.22.4: provider holds, snapshots and integrations
+
+`set_limits` accepts `hold: {glm: "21:50"}` (next local occurrence), an ISO timestamp, a duration such as `"3h"`, or `"off"`. Every active provider supports it. CLI: `agentctl limits set hold.glm=3h`; clear with `hold.glm=off`. These durable holds are independent of percentage-based `queue_hold` and do not require a usage reading. They block queued and explicit asynchronous starts, survive watch restarts, appear in queue_list/limits/capacity/board, and expire with a `limits-changed` event. `off` clears the current timed hold; a new provider error can hold it again.
+
+Provider quota/rate-limit errors in windows, hooks and the pinned current-attempt transcript set `limited` and an automatic provider hold. A stated reset (ISO/local clock or Retry-After) wins; otherwise the hold lasts one hour. Stale evidence does not extend or re-arm it. Only provider error records count in transcripts; ordinary user/tool discussion does not. GLM usage can remain n/d while its provider is held. Fixtures cover Z.ai 1113 (balance), 1302 (rate), 1308 (usage/reset), Anthropic-compatible 429 and existing Kimi errors; [Z.ai error codes](https://docs.z.ai/api-reference/api-code), [Claude rate limits](https://platform.claude.com/docs/en/api/rate-limits). Fixtures are deterministic examples based on those documented formats, without inference or network calls in tests.
+
+Cached text begins with `stan z HH:MM, 2h 44m temu`; JSON snapshot records carry `snapshot_age_s` (and object responses `snapshot_age`). Status snapshots or budget caches older than five minutes return a short queue/journal fallback with last-observed event times instead of a stale full table. It explicitly says that it does not probe live windows.
+
+`integration: true` in the spec suppresses overlap warnings with an explicit note. Otherwise overlap uses the spec base through its merge-base and excludes files imported by the predecessor's own merges; uncommitted changes still count. Declare the branch being integrated as `repos[].base`. Integration is a declaration about warnings, not permission to merge.
+
+A pending `queue_rm` is named with its request ID in queue previews. MCP `queue` with `replace: true` removes a waiting entry and adds the new spec in one watch step; starting entries are refused. Never-started removals are hidden `cancelled` tasks, without vanished-window alerts. Report instructions put the attempt marker after the first verdict line; parsers tolerate leading comments. Report reads/events expose `outputs_errors`; duplicate blocks select the last valid block with a finding. `Verdict:` and `Werdykt:` and documented check aliases remain accepted.

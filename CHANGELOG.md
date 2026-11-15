@@ -17,6 +17,34 @@ All notable changes to this project are documented here. The format follows [Kee
 - HOST-SSH-EXIT (0.23.0): distinguish a nonzero remote command exit from SSH transport failure. / Odróżniaj niezerowy wynik zdalnego polecenia od awarii transportu SSH.
 
 - 0.23.0 part A (HOST-0A): remote hosts over SSH — the `hosts:` config section (`ssh`, `port`, `identity_file?`, `work_dir`, `repos`, `providers`, `limits?`, `env?`; validated, no secrets stored, `config_show` unmasked), one multiplexed connection per host (ControlMaster socket in `~/.agentctl/ssh/`, host re-resolved every call, never a cached IP), clear states (reachable / unreachable / auth-failed / host-key-unknown with the exact one-off ssh command in doctor / host-key-changed never auto-accepted), `agentctl hosts` and the MCP `hosts` read tool (per-host latency, GPU via nvidia-smi, disk in work_dir, tmux, provider CLIs with version and best-effort logged-in check, repo clones with HEAD and origin; parallel, per-host timeout, cached for the board), the spec key `host: <name>` validated now but refused at start until part B ("remote execution arrives in agentctl 0.23 part B"), and the board `H` view plus a header hosts line. / Część A (HOST-0A) wersji 0.23.0: zdalne hosty po SSH — sekcja konfiguracji `hosts:` (bez sekretów), multipleksowane połączenie na hosta (gniazdo ControlMaster w `~/.agentctl/ssh/`, nazwa rozwiązywana przy każdym wywołaniu), jawne stany (reachable / unreachable / auth-failed / host-key-unknown z dokładną komendą ssh w doctorze / host-key-changed nigdy auto-akceptowany), `agentctl hosts` i narzędzie MCP `hosts` (GPU, dysk, tmux, CLI z wersją i logowaniem best-effort, klony repozytoriów; równolegle, z limitem czasu, cache dla boardu), klucz spec `host: <name>` walidowany od razu, lecz odmawiany na starcie do części B, oraz widok boardu `H` i linia hostów w nagłówku.
+## [0.22.4] - 2026-11-15
+
+- G1a validation: board puts timed holds before long n/d explanations so they remain visible at 80 columns. / Board pokazuje blokadę przed długim opisem n/d, także przy 80 kolumnach.
+
+- H5 validation: explicit malformed outputs in legacy reports are findings too. / Jawny błędny blok outputs w starym raporcie również jest uwagą.
+
+- H5 validation: structured events carry outputs_errors; later report pages expose findings without repeating full outputs. / Zdarzenia zawierają outputs_errors; kolejne strony raportu pokazują uwagi bez powtarzania pełnych outputs.
+
+- H1 validation: re-queued records without a launch are displayed only by the queue, preventing a dead-window alert while they wait. / Wpis po ponownym dodaniu bez startu jest widoczny tylko w kolejce, bez alarmu martwego okna.
+
+- G1b validation: retain custom limit_patterns overrides and assert notifications against concrete hold deadlines. / Zachowane własne limit_patterns; powiadomienia sprawdzane względem czasu blokady.
+
+- G1b: provider error screens/hooks and pinned transcript errors mark limited and hold starts until the stated reset (else 1 h), once per evidence; docs-backed fixtures. / Błędy dostawcy ustawiają limited i blokadę do resetu lub na 1 h, bez odnawiania od starego komunikatu; fixture’y według dokumentacji.
+
+- G1a: timed per-provider hold (HH:MM, ISO, duration, off) blocks queued/direct starts and expires with an event; limits, capacity and board show it. / Czasowe wstrzymanie dostawcy blokuje starty i wygasa ze zdarzeniem; widoczne w limits, capacity i board.
+
+- H6: overlap compares the spec base and excludes imported merge changes; integration: true suppresses warnings with a note. / Kolizje odnoszą się do bazy specyfikacji i pomijają zmiany przejęte przez merge; integration: true wycisza ostrzeżenia z adnotacją.
+
+- H2: cached text starts with its age; status older than five minutes uses a short queue/journal fallback. / Odpowiedź z cache zaczyna się wiekiem; status starszy niż pięć minut pokazuje krótki fallback kolejki i dziennika.
+
+- H3: queue previews identify pending queue_rm requests; replace: true removes and re-adds in one watch step. / Podgląd wskazuje oczekujące queue_rm; replace: true usuwa i dodaje spec w jednym ticku watch.
+
+- H5: report reads expose outputs findings; duplicate blocks select the last valid block with a warning. / Odczyt raportu pokazuje błędy outputs; duplikaty wybierają ostatni poprawny blok z ostrzeżeniem.
+
+- H1: apply queued removals before observing tasks; never-started cancellations stay hidden without window-loss alerts. / Usuwanie z kolejki poprzedza odczyt stanu; anulowane zadania bez startu są ukryte, bez alarmu utraty okna.
+
+- H4: verdict parsing ignores leading comments; report instructions put the attempt marker after the verdict. / Parser werdyktu pomija komentarze; instrukcja umieszcza marker próby po werdykcie.
+
 
 
 ## [0.22.3] - 2026-11-15

@@ -158,6 +158,100 @@
       "tests/p73-cache-clean.test.ts"
     ]
   },
+  "G1a": {
+    "rev": "v0.22.3",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "G1a: manual holds block every provider including direct starts, expose capacity, expire once, and clear with off",
+      "G1a: manual holds block every provider including direct starts, expose capacity, expire once, and clear with off"
+    ]
+  },
+  "G1b": {
+    "rev": "v0.22.3",
+    "outcome": "FAILS",
+    "failed": 7,
+    "passed": 1,
+    "failing": [
+      "G1b: glm fixture 0 marks limited and holds starts without usage data",
+      "G1b: glm fixture 1 marks limited and holds starts without usage data",
+      "G1b: glm fixture 2 marks limited and holds starts without usage data",
+      "G1b: claude fixture 3 marks limited and holds starts without usage data",
+      "G1b: codex fixture 4 marks limited and holds starts without usage data"
+    ]
+  },
+  "H1": {
+    "rev": "v0.22.3",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "H1: a never-started queue_rm is cancelled before watch observes windows or publishes a snapshot",
+      "H1: a re-queued never-launched record is represented by the queue, without a dead window row",
+      "H1: a never-started queue_rm is cancelled before watch observes windows or publishes a snapshot",
+      "H1: a re-queued never-launched record is represented by the queue, without a dead window row"
+    ]
+  },
+  "H2": {
+    "rev": "v0.22.3",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "H2: snapshot starts with age and a three-hour snapshot returns queue/journal fallback",
+      "H2: response-budget cache carries its original age and drops old full tables",
+      "H2: snapshot starts with age and a three-hour snapshot returns queue/journal fallback",
+      "H2: response-budget cache carries its original age and drops old full tables"
+    ]
+  },
+  "H3": {
+    "rev": "v0.22.3",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "H3: pending queue_rm is named and replace confirms once into a single watch step",
+      "H3: pending queue_rm is named and replace confirms once into a single watch step"
+    ]
+  },
+  "H4": {
+    "rev": "v0.22.3",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "H4: comments and attempt markers before verdict do not block dependencies or review",
+      "H4: report protocol puts the attempt marker after the first verdict line",
+      "H4: comments and attempt markers before verdict do not block dependencies or review",
+      "H4: report protocol puts the attempt marker after the first verdict line"
+    ]
+  },
+  "H5": {
+    "rev": "v0.22.3",
+    "outcome": "FAILS",
+    "failed": 3,
+    "passed": 0,
+    "failing": [
+      "H5: duplicate outputs use last valid block and explain findings",
+      "H5: HEMS fixture reports shape findings but accepts check aliases and Verdict",
+      "H5: an explicit malformed outputs block is a finding even on a legacy task",
+      "H5: duplicate outputs use last valid block and explain findings",
+      "H5: HEMS fixture reports shape findings but accepts check aliases and Verdict"
+    ]
+  },
+  "H6": {
+    "rev": "v0.22.3",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "H6: predecessor imports do not count as its own overlap and spec base defines comparison",
+      "H6: integration flag is persisted and silences all overlap warnings with an explicit note",
+      "H6: predecessor imports do not count as its own overlap and spec base defines comparison",
+      "H6: integration flag is persisted and silences all overlap warnings with an explicit note"
+    ]
+  },
   "HELP-HEIGHT": {
     "rev": "v0.22.2",
     "outcome": "FAILS",

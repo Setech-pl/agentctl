@@ -1,3 +1,4 @@
+import { PROVIDER_QUOTA_PATTERN } from '../quota-error.ts';
 import type { AgentSettings } from '../config.ts';
 import { kimiSettings } from './kimi-settings.ts';
 import type { ProviderId } from './types.ts';
@@ -47,6 +48,7 @@ const CLAUDE_SCREEN: AgentSettings = {
   // Strings of the 2.1.309 binary: "You've hit your session limit" / "weekly limit" / "<model> limit" / "monthly spend limit" (+ " · resets …"),
   // "Usage limit reached", "You're out of extra usage". The 429 line is also printed for a passing capacity problem (lower confidence).
   limitPatterns: [
+      PROVIDER_QUOTA_PATTERN,
     `${LINE_MARK}You.ve hit your .{0,60}limit`,
     `${LINE_MARK}Usage limit reached`,
     `${LINE_MARK}You.re out of extra usage`,
@@ -94,6 +96,7 @@ const SETTINGS: Record<ProviderId, AgentSettings> = {
     // Strings of the 0.166.0 binary (the apostrophe there is U+2019): "You've hit your usage limit. …", "Usage limit reached",
     // "You're out of credits", "Your workspace is out of credits", "You hit your spend cap …".
     limitPatterns: [
+      PROVIDER_QUOTA_PATTERN,
       `${LINE_MARK}You.ve hit your usage limit`,
       `${LINE_MARK}Usage limit reached`,
       `${LINE_MARK}You.re out of credits`,

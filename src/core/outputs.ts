@@ -100,8 +100,12 @@ export interface ReviewVerdict {
 }
 
 /** The verdict a review report carries on its first line, checked against the declared outputs verdict. */
+export function firstReportLine(report: string): string {
+  return report.replace(/<!--[\s\S]*?-->/g, '').replace(/\r\n/g, '\n').split('\n').find(l => l.trim()) ?? '';
+}
+
 export function reviewVerdict(report: string): ReviewVerdict | undefined {
-  const line = report.replace(/\r\n/g, '\n').split('\n').find((l) => /[\p{L}\p{N}]/u.test(l));
+  const line = firstReportLine(report);
   const m = line ? REVIEW_FIRST_LINE.exec(line) : null;
   if (!m) return undefined;
   const token = m[1]!.toUpperCase().replace(/\s+/g, ' ');
@@ -168,7 +172,17 @@ export function outputWallPosts(text: string): unknown {
 export function parseOutputs(text: string, opts: { review?: boolean } = {}): OutputData {
   const blocks = outputBlocks(text);
   const invalid = (message: string): OutputData => ({ outputs: null, outputs_valid: false, outputs_errors: [message], outputs_partial: false });
-  if (blocks.length !== 1) return invalid(blocks.length ? 'multiple agentctl-outputs blocks' : 'missing agentctl-outputs block (schema version: 1)');
+  if (!blocks.length) return invalid('missing agentctl-outputs block (schema version: 1)');
+  if (blocks.length > 1) {
+    const parsed = blocks.map(block => parseOutputs('```agentctl-outputs\n' + block + '\n```', opts));
+    const index = parsed.findLastIndex(data => data.outputs_valid);
+    const selected = index >= 0 ? parsed[index]! : parsed.findLast(data => data.outputs !== null);
+    if (!selected) return invalid('multiple agentctl-outputs blocks; no valid block');
+    return { ...selected, outputs_valid: false, outputs_partial: true, outputs_errors: [
+      `multiple agentctl-outputs blocks (${blocks.length}); using ${index >= 0 ? 'last valid' : 'last partially readable'} block ${index >= 0 ? index + 1 : parsed.lastIndexOf(selected) + 1}`,
+      ...parsed.flatMap((data, i) => data.outputs_errors.map(error => `block ${i + 1}: ${error}`)),
+    ] };
+  }
   let data: unknown;
   try { data = parseRefYaml(compactRefMaps(blocks[0]!)); } catch (e) { return invalid(`invalid outputs YAML: ${e instanceof Error ? e.message : String(e)}`); }
   if (!data || typeof data !== 'object' || Array.isArray(data)) return invalid('the agentctl-outputs block must be a YAML mapping');
@@ -273,7 +287,7 @@ export function normalizeDependencyVerdict(value: string): OutputVerdict | undef
   return ({ PASS: 'PASS', 'PASS WITH FINDINGS': 'PARTIAL', PARTIAL: 'PARTIAL', GO: 'PASS', 'GO-WITH-CHANGES': 'PARTIAL', FAIL: 'FAIL', 'NO-GO': 'FAIL', BLOCKED: 'BLOCKED' } as Record<string, OutputVerdict>)[token];
 }
 export function dependencyVerdict(text: string, review = false): OutputVerdict | undefined {
-  const line = text.replace(/\r\n/g, '\n').split('\n').find(l => l.trim()) ?? '';
+  const line = firstReportLine(text);
   const found = /^\s*(?:#{1,6}\s*)?(?:\*\*)?(?:Werdykt|Verdict):\s*(?:\*\*)?(PASS\s+with\s+findings|GO-WITH-CHANGES|NO-GO|PASS|PARTIAL|FAIL|BLOCKED|GO)(?=$|[\s*—–.:;,])/i.exec(line)?.[1];
   return found ? normalizeDependencyVerdict(found) : review ? reviewVerdict(text) && reviewVerdictAsOutput(reviewVerdict(text)!.first) : undefined;
 }
@@ -321,7 +335,7 @@ export async function journalOutputs(ctx: Context, record: TaskRecord, opts: { r
     if (seen.includes(identity)) return;
     const data = await readOutputs(ctx, record);
     // A closed task from before the protocol was never asked for the block: its absence is not a warning (a block it has is still journaled).
-    if (!record.outputsProtocol && !data.outputs) { await ctx.runner.writeFile(file, JSON.stringify([...seen, identity])); return; }
+    if (!record.outputsProtocol && !data.outputs && !/^(?:```|~~~)agentctl-outputs\s*$/m.test(readReportText(ctx.config, record, record.report))) { await ctx.runner.writeFile(file, JSON.stringify([...seen, identity])); return; }
     // Journal is also the recovery ledger if a process died before writing outputs-seen.
     if (!readJournal(ctx.config, -1).some(e => e.kind === 'report-outputs' && e.task === record.task && (e.reportAttempt === identity || (!e.reportAttempt && e.reportHash === report.signature)))) {
       // wall_posts: published as task:<ID> before the event, which carries what was posted and what was refused (never a block of the report).
@@ -330,7 +344,7 @@ export async function journalOutputs(ctx: Context, record: TaskRecord, opts: { r
         wall = await publishTaskPosts(ctx, record.task, identity, outputWallPosts(readReportText(ctx.config, record, record.report)));
       } catch (e) { wall.findings.push(`wall_posts: ${e instanceof Error ? e.message : String(e)}`); }
       const wallText = wall.posted.length || wall.findings.length ? `; WALL: ${[...(wall.posted.length ? [`posted ${wall.posted.join(', ')}`] : []), ...(wall.findings.length ? [`${wall.findings.length} not posted: ${wall.findings.join('; ')}`] : [])].join('; ')}` : '';
-      await recordJournal(ctx, { kind: 'report-outputs', task: record.task, ...(record.reviewOf ? { reviewOf: record.reviewOf } : {}), reportHash: report.signature, reportAttempt: identity, decisions: data.outputs?.decisions ?? [], actions: data.outputs?.actions ?? [], ...(wall.posted.length || wall.findings.length ? { wallPosts: wall } : {}), text: `${data.outputs_valid ? `${record.task}: ${countText(data.outputs!.decisions.length, 'decyzja', 'decyzje', 'decyzji')}, ${countText(data.outputs!.actions.length, 'akcja', 'akcje', 'akcji')}` : `${record.task}: outputs warning: ${data.outputs_errors.join('; ')}`}${wallText}` });
+      await recordJournal(ctx, { kind: 'report-outputs', task: record.task, ...(record.reviewOf ? { reviewOf: record.reviewOf } : {}), reportHash: report.signature, reportAttempt: identity, ...(data.outputs_errors.length ? {outputs_errors: data.outputs_errors} : {}), decisions: data.outputs?.decisions ?? [], actions: data.outputs?.actions ?? [], ...(wall.posted.length || wall.findings.length ? { wallPosts: wall } : {}), text: `${data.outputs_valid ? `${record.task}: ${countText(data.outputs!.decisions.length, 'decyzja', 'decyzje', 'decyzji')}, ${countText(data.outputs!.actions.length, 'akcja', 'akcje', 'akcji')}` : `${record.task}: outputs warning: ${data.outputs_errors.join('; ')}`}${wallText}` });
     }
     // A review's first line is its verdict; a block that disagrees (POP-E1: "Werdykt: NO-GO" with verdict: PASS) is flagged once per attempt.
     if (record.reviewOf) {

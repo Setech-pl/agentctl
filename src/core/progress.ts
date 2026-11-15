@@ -55,7 +55,14 @@ export async function repoProgress(runner: Runner, repo: ResolvedRepo): Promise<
     const count = await git(runner, repo.worktree, ['rev-list', '--count', `${base}..HEAD`]);
     if (count.ok && /^\d+$/.test(count.lines[0] ?? '')) commits = Number(count.lines[0]);
     // Three dots: the changes of this branch since it left the base, not the changes the base got meanwhile.
-    for (const f of (await git(runner, repo.worktree, ['diff', '--name-only', `${base}...HEAD`])).lines) files.add(f);
+    const changed = (await git(runner, repo.worktree, ['diff', '--name-only', `${base}...HEAD`])).lines;
+    const merges = await git(runner, repo.worktree, ['rev-list', '--merges', `${base}..HEAD`]);
+    // Imported side branches are not work authored by this predecessor. Keep its own first-parent
+    // commits, and uncommitted changes, while comparing to the spec's base through git's merge base.
+    const hasMerges = merges.ok && merges.lines.some(line => /^[a-f0-9]{40}$/.test(line));
+    const own = hasMerges ? await git(runner, repo.worktree, ['log', '--first-parent', '--no-merges', '--format=', '--name-only', `${base}..HEAD`]) : undefined;
+    const ownFiles = own?.ok ? new Set(own.lines) : undefined;
+    for (const f of changed) if (!ownFiles || ownFiles.has(f)) files.add(f);
   }
   return { worktree: repo.worktree, repoPath: repo.path, fileNames: [...files].sort(), base, commits, files: files.size };
 }

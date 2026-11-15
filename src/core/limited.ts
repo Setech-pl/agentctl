@@ -1,3 +1,4 @@
+import { automaticProviderHold, providerHolds } from './provider-hold.ts';
 import { get as providerValue } from './providers/registry.ts';
 import type { ProviderValues } from './providers/registry.ts';
 import { activeProviders, PROVIDER_IDS } from './providers/registry.ts';
@@ -32,10 +33,12 @@ export async function limitedTick(ctx: Context, rows: StatusRow[], notifier: Not
     for (const provider of activeProviders(ctx.config)) {
       const mine = rows.filter(r => r.agent === provider && !r.closed && !r.cancelled && r.window === 'alive' && r.report !== 'yes' && !r.finished);
       const limited = mine.filter(r => r.state === 'limited');
+      for (const row of limited) await automaticProviderHold(ctx, provider, `${row.task}:${row.attemptId ?? row.started}`, row.limitEvidence?.text ?? `limited:${row.task}:${row.attemptId ?? row.started}`, row.limitEvidence?.reset);
       const exhausted = providerValue(plans, provider).windows.filter(w => w.usedPercent >= 100);
       if (!state[provider] && !limited.length) continue;
       const reset = exhausted.length && exhausted.every(w => w.resetsAt !== null) ? Math.max(...exhausted.map(w => w.resetsAt!)) : null;
-      const episode = state[provider] ??= { since: now, reset, notified: false, tasks: {} };
+      const holdReset = providerHolds(ctx.config, now)[provider]?.until;
+      const episode = state[provider] ??= { since: now, reset: reset ?? (holdReset ? Date.parse(holdReset) : null), notified: false, tasks: {} };
       if (episode.reset === null && reset !== null) episode.reset = reset;
       if (!episode.notified) {
         const text = `${provider}: limit wyczerpany – zresetuj lub poczekaj do ${episode.reset === null ? 'n/d' : formatReset(episode.reset, now)}`;

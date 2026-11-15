@@ -1,3 +1,5 @@
+import { providerHolds, providerHoldText, parseTimedHolds, setProviderHolds } from './provider-hold.ts';
+import type { ProviderHold, TimedHolds } from './provider-hold.ts';
 import { provider as adapter, activeProviders, PROVIDER_IDS } from './providers/registry.ts';
 import { DEFAULT_PROVIDERS } from './providers/types.ts';
 import fs from 'node:fs';
@@ -202,6 +204,7 @@ export interface ProviderLoad {
   queued: number;
   /** `usage.queue_hold` of this provider: the plan percentage above which the queue starts none of its tasks; null: off. */
   queueHold: number | null;
+  providerHold?: ProviderHold;
 }
 
 export interface LimitsReport {
@@ -211,7 +214,8 @@ export interface LimitsReport {
 }
 
 /** `live` is what `liveWindows` returns: windows of agentctl plus the reservations and the external sessions. */
-export function collectLimits(config: GlobalConfig, live: readonly LiveWindow[]): LimitsReport {
+export function collectLimits(config: GlobalConfig, live: readonly LiveWindow[], now = Date.now()): LimitsReport {
+  const holds = providerHolds(config, now);
   const queue = waiting(readQueue(config));
   const reservations = readReservations(config);
   return {
@@ -227,14 +231,14 @@ export function collectLimits(config: GlobalConfig, live: readonly LiveWindow[])
       const external = mine.filter((w) => w.kind === 'external').map((w) => ({ pid: w.pid ?? 0, cwd: w.cwd ?? null }));
       const limit = config.limits[agent] ?? null;
       const used = mine.filter(w => w.kind === undefined && w.counted !== false).length + starting + reserved + external.length;
-      return { agent, limit, windows, starting, working, reportReady, reserved, reservedNote: reservations[agent]?.note ?? null, external, used, free: limit === 'off' ? 0 : limit === null ? null : Math.max(0, limit - used), queued: queue.filter((e) => e.agent === agent).length, queueHold: config.usage.queueHold[agent] ?? null };
+      return { agent, limit, windows, starting, working, reportReady, reserved, reservedNote: reservations[agent]?.note ?? null, external, used, ...(holds[agent] ? {providerHold: holds[agent]} : {}), free: holds[agent] || limit === 'off' ? 0 : limit === null ? null : Math.max(0, limit - used), queued: queue.filter((e) => e.agent === agent).length, queueHold: config.usage.queueHold[agent] ?? null };
     }),
   };
 }
 
 export function renderLimits(report: LimitsReport): string[] {
   const header = ['PROVIDER', 'LIMIT', 'USED', 'FREE', 'AGENTCTL', 'WORKING', 'REPORT-READY', 'RESERVED', 'EXTERNAL', 'QUEUED', 'HOLD'];
-  const body = report.providers.map((p) => [p.agent, p.limit === null ? '-' : String(p.limit), String(p.used), p.free === null ? '-' : String(p.free), String(p.windows.length), String(p.working.length), String(p.reportReady.length), String(p.reserved), report.countExternal ? String(p.external.length) : 'off', String(p.queued), holdText(p.queueHold)]);
+  const body = report.providers.map((p) => [p.agent, p.limit === null ? '-' : String(p.limit), String(p.used), p.free === null ? '-' : String(p.free), String(p.windows.length), String(p.working.length), String(p.reportReady.length), String(p.reserved), report.countExternal ? String(p.external.length) : 'off', String(p.queued), p.providerHold ? providerHoldText(p.agent, p.providerHold) : holdText(p.queueHold)]);
   const widths = header.map((h, i) => Math.max(h.length, ...body.map((r) => (r[i] as string).length)));
   const fmt = (cells: string[]): string => cells.map((c, i) => (i === cells.length - 1 ? c : c.padEnd(widths[i] as number))).join('  ').trimEnd();
   const lines = [fmt(header), ...body.map(fmt)];
@@ -341,13 +345,15 @@ export interface LimitsPlan {
   changes: LimitsChange[];
   /** `usage.queue_hold` per active provider, when the plan changes it. */
   holdChanges: HoldChange[];
+  timedHolds?: TimedHolds;
   /** The new text of the config file: comments and order of everything else kept. */
   text: string;
   summary: string[];
 }
 
 /** The edit as text; nothing is written. */
-export function planSetLimits(config: GlobalConfig, assignments: LimitAssignments, hold?: HoldAssignment): LimitsPlan {
+export function planSetLimits(config: GlobalConfig, assignments: LimitAssignments, hold?: HoldAssignment, timedInput?: unknown, now = Date.now()): LimitsPlan {
+  const timedHolds = timedInput === undefined ? undefined : parseTimedHolds(config, timedInput, now);
   const file = config.path;
   const changes: LimitsChange[] = [];
   const holdChanges: HoldChange[] = [];
@@ -383,14 +389,16 @@ export function planSetLimits(config: GlobalConfig, assignments: LimitAssignment
     file,
     changes,
     holdChanges,
+    ...(timedHolds ? {timedHolds} : {}),
     text,
-    summary: [`${file}`, ...changes.map((c) => `  limits.${c.agent}: ${show(c.from)} -> ${show(c.to)}${c.from === c.to ? ' (unchanged)' : ''}`), ...holdChanges.map((c) => `  usage.queue_hold.${c.agent}: ${holdText(c.from)} -> ${holdText(c.to)}${c.from === c.to ? ' (unchanged)' : ''}`), '  (a copy of the file is kept as config.yaml.bak; comments and the order of the keys stay)'],
+    summary: [`${file}`, ...Object.entries(timedHolds ?? {}).map(([agent, until]) => `  hold.${agent}: ${until}`), ...changes.map((c) => `  limits.${c.agent}: ${show(c.from)} -> ${show(c.to)}${c.from === c.to ? ' (unchanged)' : ''}`), ...holdChanges.map((c) => `  usage.queue_hold.${c.agent}: ${holdText(c.from)} -> ${holdText(c.to)}${c.from === c.to ? ' (unchanged)' : ''}`), '  (a copy of the file is kept as config.yaml.bak; comments and the order of the keys stay)'],
   };
 }
 
 /** Write the plan: a `.bak` copy first, the new text, and a check that the result loads (else the old text comes back). */
 export async function applySetLimits(ctx: Context, plan: LimitsPlan): Promise<void> {
-  await writeConfigText(ctx, plan.file, plan.text);
+  if (plan.changes.length || plan.holdChanges.length) await writeConfigText(ctx, plan.file, plan.text);
+  if (plan.timedHolds) await setProviderHolds(ctx, plan.timedHolds);
   const after: GlobalConfig['limits'] = { ...ctx.config.limits };
   for (const c of plan.changes) {
     if (c.to === null) delete after[c.agent];

@@ -32,6 +32,7 @@
     ]
   },
   "deferred_with_watch": [
+    "queue",
     "gc",
     "gc_preview",
     "consult",
@@ -56,7 +57,7 @@
       "name": "status",
       "kind": "read",
       "title": "Status of all agent tasks",
-      "description": "Current state of every agentctl task: agent/model/effort, state (working, background, waiting, needs-input, needs-trust, limited, report-ready, dead, orphan, superseded), start time (started in UTC, startedLocal in the user's local time: show the local one), running time, git progress, whether a report exists and was already pulled, the last line and the open question of a waiting agent. Use events_since FIRST; status gives task detail when the user asks what is running, who waits for them, or whether something is ready, and at the start of a planning session. Hidden, closed and cancelled tasks are left out unless all is true. cohort limits it to the tasks of one cohort (a group the user named). Every row has its cohort (null: none). Use when the user needs this operation. CLI: agentctl status. Default: concise text only. format: \"json\" or detail: true returns full data. Plans/capacity/disk footer is omitted by default; detail: true or capacity: true opts in. A threshold transition since this session last called a capacity-carrying tool emits one line once. Every response is bounded by mcp.max_response_kb (default 8 KiB). A truncated JSON envelope gives response_id and next_response_offset; call response_page with only those continuation fields to retrieve the next fragment without executing again. Concatenate fragment values to recover the original text/JSON.",
+      "description": "Current state of every agentctl task: agent/model/effort, state (working, background, waiting, needs-input, needs-trust, limited, report-ready, dead, orphan, superseded), start time (started in UTC, startedLocal in the user's local time: show the local one), running time, git progress, whether a report exists and was already pulled, the last line and the open question of a waiting agent. Cached text starts with its age; JSON snapshots carry snapshot_age_s. Status older than five minutes uses a short queue/journal fallback. Use events_since FIRST; status gives task detail when the user asks what is running, who waits for them, or whether something is ready, and at the start of a planning session. Hidden, closed and cancelled tasks are left out unless all is true. cohort limits it to the tasks of one cohort (a group the user named). Every row has its cohort (null: none). Use when the user needs this operation. CLI: agentctl status. Default: concise text only. format: \"json\" or detail: true returns full data. Plans/capacity/disk footer is omitted by default; detail: true or capacity: true opts in. A threshold transition since this session last called a capacity-carrying tool emits one line once. Every response is bounded by mcp.max_response_kb (default 8 KiB). A truncated JSON envelope gives response_id and next_response_offset; call response_page with only those continuation fields to retrieve the next fragment without executing again. Concatenate fragment values to recover the original text/JSON.",
       "input": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -229,7 +230,7 @@
       "name": "set_limits",
       "kind": "write",
       "title": "Change the limits",
-      "description": "WRITE, off unless the user put \"set_limits\" in mcp.allow. Sets the most simultaneous agents per provider in config.yaml (0 removes a limit, \"off\" disables the provider: no windows of it start), and the queue hold usage.queue_hold; comments in the file stay, a copy is kept as config.yaml.bak. It takes effect at once, without restarting watch (watch reloads config.yaml when it changes, also after a hand edit). queue_hold format, exactly: a whole percentage 1-100 for every active provider (queue_hold: 90), \"off\" for no hold at all (queue_hold: \"off\"), or per provider {claude: 90, codex: \"off\"} (only the named providers change; \"off\" removes that provider's hold). Above that percentage of its plan, in any window, the queue starts no task of the provider; queue_list shows \"wstrzymane: … > usage.queue_hold N%\"; limits, capacity and config_show show the current hold. The FIRST call (confirm omitted) only describes the change; show it to the user, then call again with confirm: true. Use when the user needs this operation. CLI: agentctl limits set. Two steps are mandatory: preview, then confirm: true with identical arguments — or with preview_token only, which executes the stored arguments (for new/queue the spec need not be resent). A changed scope requires a new preview. Every response is bounded by mcp.max_response_kb (default 8 KiB). A truncated JSON envelope gives response_id and next_response_offset; call response_page with only those continuation fields to retrieve the next fragment without executing again. Concatenate fragment values to recover the original text/JSON.",
+      "description": "WRITE, off unless the user put \"set_limits\" in mcp.allow. Sets the most simultaneous agents per provider in config.yaml (0 removes a limit, \"off\" disables the provider: no windows of it start), and the queue hold usage.queue_hold; comments in the file stay, a copy is kept as config.yaml.bak. It takes effect at once, without restarting watch (watch reloads config.yaml when it changes, also after a hand edit). Timed provider hold: hold: {glm: \"21:50\"}, ISO timestamp, duration \"3h\", or \"off\"; every active provider is supported. Holds block starts even with plan n/d, appear in limits/capacity/board/queue_list and expire with an event. queue_hold format, exactly: a whole percentage 1-100 for every active provider (queue_hold: 90), \"off\" for no hold at all (queue_hold: \"off\"), or per provider {claude: 90, codex: \"off\"} (only the named providers change; \"off\" removes that provider's hold). Above that percentage of its plan, in any window, the queue starts no task of the provider; queue_list shows \"wstrzymane: … > usage.queue_hold N%\"; limits, capacity and config_show show the current hold. The FIRST call (confirm omitted) only describes the change; show it to the user, then call again with confirm: true. Use when the user needs this operation. CLI: agentctl limits set. Two steps are mandatory: preview, then confirm: true with identical arguments — or with preview_token only, which executes the stored arguments (for new/queue the spec need not be resent). A changed scope requires a new preview. Every response is bounded by mcp.max_response_kb (default 8 KiB). A truncated JSON envelope gives response_id and next_response_offset; call response_page with only those continuation fields to retrieve the next fragment without executing again. Concatenate fragment values to recover the original text/JSON.",
       "input": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -365,6 +366,16 @@
                 "additionalProperties": false
               }
             ]
+          },
+          "hold": {
+            "description": "Timed provider hold: {glm: \"21:50\"}, ISO timestamp, \"3h\", or \"off\". Applies to every active provider.",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
           },
           "confirm": {
             "description": "First call previews. true executes only the unchanged preview in this server session.",
@@ -1089,7 +1100,7 @@
       "name": "queue",
       "kind": "write",
       "title": "Put tasks in the queue",
-      "description": "WRITE, off unless the user put \"queue\" in mcp.allow. Puts the tasks of a spec in the queue (same spec format as new, plus priority: high|normal, after: <TASK or list>, touches: [globs]): each starts when a provider window is free and its `after` reports have an accepted first-line verdict (PASS, PASS with findings, PARTIAL, GO); after_verdict overrides the list. The FIRST call (confirm omitted) validates the spec and returns a summary (where each task will stand, hints, touches warnings); show it to the user. Only when they agree, call again with the same spec and confirm: true. \"setup\" is not accepted from the chat. Use when the user needs this operation. CLI: agentctl queue. Two steps are mandatory: preview, then confirm: true with identical arguments — or with preview_token only, which executes the stored arguments (for new/queue the spec need not be resent). A changed scope requires a new preview. Plans/capacity/disk footer is omitted by default; detail: true or capacity: true opts in. A threshold transition since this session last called a capacity-carrying tool emits one line once. Every response is bounded by mcp.max_response_kb (default 8 KiB). A truncated JSON envelope gives response_id and next_response_offset; call response_page with only those continuation fields to retrieve the next fragment without executing again. Concatenate fragment values to recover the original text/JSON.",
+      "description": "WRITE, off unless the user put \"queue\" in mcp.allow. Puts the tasks of a spec in the queue (same spec format as new, plus priority: high|normal, after: <TASK or list>, touches: [globs]): each starts when a provider window is free and its `after` reports have an accepted first-line verdict (PASS, PASS with findings, PARTIAL, GO); after_verdict overrides the list. The FIRST call (confirm omitted) validates the spec and returns a summary (where each task will stand, hints, touches warnings); show it to the user. Only when they agree, call again with the same spec and confirm: true. \"setup\" is not accepted from the chat. replace: true replaces a waiting entry in one watch step; previews identify pending queue_rm requests. Use when the user needs this operation. CLI: agentctl queue. With \"agentctl watch\" running, confirm records the request and returns at once; the watcher checks the preview's scope again and applies it at its next tick (events_since: MCP WYKONANE, or MCP BŁĄD with the reason and a notification). Two steps are mandatory: preview, then confirm: true with identical arguments — or with preview_token only, which executes the stored arguments (for new/queue the spec need not be resent). A changed scope requires a new preview. Plans/capacity/disk footer is omitted by default; detail: true or capacity: true opts in. A threshold transition since this session last called a capacity-carrying tool emits one line once. Every response is bounded by mcp.max_response_kb (default 8 KiB). A truncated JSON envelope gives response_id and next_response_offset; call response_page with only those continuation fields to retrieve the next fragment without executing again. Concatenate fragment values to recover the original text/JSON.",
       "input": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -1105,6 +1116,10 @@
             "minLength": 1,
             "maxLength": 60,
             "description": "Cohort name; case does not matter."
+          },
+          "replace": {
+            "description": "Remove a waiting entry and re-add this spec atomically in one watch step; also works while queue_rm is pending.",
+            "type": "boolean"
           },
           "agent": {
             "type": "string",

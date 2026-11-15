@@ -14,6 +14,14 @@ Regenerate this file with `npm run regression -- --catalog`.
 | HOST-MIRROR-ENV | Remote report mirror commands included unrelated launch environment values in SSH argv (unreleased b9384f2; mirror absent from v0.22.3). | `tests/host-boundaries.test.ts` (`^HOST-MIRROR-ENV:`) | 0.23.0 | cannot run on v0.22.3: the code under test did not exist there (import error) |
 | HOST-LOCAL-IO | The remote host router scanned every local task header before board/status previews (unreleased b9384f2; host runtime absent from v0.22.3). | `tests/host-boundaries.test.ts` (`^HOST-LOCAL-IO:`) | 0.23.0 | cannot run on v0.22.3: the code under test did not exist there (import error) |
 | HOST-SSH-EXIT | A reachable host command exiting nonzero was misclassified as unreachable (unreleased HOST-0A 7fa25d6: 1/1 fails; absent from v0.22.3). | `tests/host-ssh-exit.test.ts` | 0.23.0 | cannot run on v0.22.3: the code under test did not exist there (import error) |
+| G1b | Provider quota errors left GLM capacity free when usage was unavailable. | `tests/fix0226-g1b.test.ts` | 0.22.4 | fails on v0.22.3 (7 failing of 8) |
+| G1a | Plan n/d left free provider slots with no timed hold override. | `tests/fix0226-g1a.test.ts` | 0.22.4 | fails on v0.22.3 (1 failing of 1) |
+| H6 | Overlap warnings counted predecessor imports and ignored the integration base. | `tests/fix0226-h6.test.ts` | 0.22.4 | fails on v0.22.3 (2 failing of 2) |
+| H2 | Budget fallback presented a three-hour cached status as current. | `tests/fix0226-h2.test.ts` | 0.22.4 | fails on v0.22.3 (2 failing of 2) |
+| H3 | A pending queue_rm prevented replacing the same task ID. | `tests/fix0226-h3.test.ts` | 0.22.4 | fails on v0.22.3 (1 failing of 1) |
+| H5 | Report summaries hid outputs findings and duplicate blocks discarded all outputs. | `tests/fix0226-h5.test.ts` | 0.22.4 | fails on v0.22.3 (3 failing of 3) |
+| H1 | Deferred queue removal published a vanished-window event before cancellation. | `tests/fix0226-h1.test.ts` | 0.22.4 | fails on v0.22.3 (2 failing of 2) |
+| H4 | Attempt markers before the verdict blocked dependencies. | `tests/fix0226-h4.test.ts` | 0.22.4 | fails on v0.22.3 (2 failing of 2) |
 | HELP-HEIGHT | Board help overflowed terminal height and overdrew its header. | `tests/board.test.ts` (`^HELP-HEIGHT:`) | 0.22.3 | fails on v0.22.2 (1 failing of 1) |
 | BASE-DEFAULT | A missing spec base did not identify the repository default branch. | `tests/worktree-start.test.ts` (`^BASE-DEFAULT:`) | 0.22.3 | fails on v0.22.2 (1 failing of 1) |
 | A11 | Unknown WALL identity and own posts are not visibly labelled. | `tests/a11-wall-visibility.test.ts` | 0.22.2 | fails on v0.22.0 (1 failing of 1) |

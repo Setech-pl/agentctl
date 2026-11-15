@@ -1,3 +1,6 @@
+import { readProviderHoldState, providerHoldText } from './provider-hold.ts';
+import { withStartLock } from './start-lock.ts';
+import { commitQueueAdd } from './queue.ts';
 import { acceptConsult, planConsult } from './consult.ts';
 import { reportMessageWarning } from './prompt-queue.ts';
 import { queueViews as coreQueueViews } from './queue.ts';
@@ -41,7 +44,7 @@ import { runDoctor } from './doctor.ts';
 import { probeHosts } from './host-health.ts';
 import { readHostsCache, writeHostsCache } from './hosts.ts';
 import { sendPhoneTest } from './phone.ts';
-import { recordJournal } from './journal.ts';
+import { recordJournal, readJournal } from './journal.ts';
 import type { GcPlan } from './gc.ts';
 import { applyGc } from './gc.ts';
 import { collectCapacity as collectCapacityFull, capacitySnapshot, snapshotLines } from './capacity.ts';
@@ -235,7 +238,7 @@ function conciseReport(text: string, data: OutputData, review = false): string {
   // Legacy reports can end inside a checks section; do not return that list as a summary.
   const lastHeading = markdownHeadings(summary).at(-1);
   const safeSummary = lastHeading && /check|test|gate|walidac/i.test(lastHeading.title) ? '' : summary;
-  return `${data.outputs_pending ? '"outputs_pending": true\n' : ''}verdict: ${verdict}\ndecisions: ${decisions}\nactions: ${actions}\n${safeSummary.slice(-3000)}`.trim();
+  return `${data.outputs_errors.length ? `outputs_errors: ${JSON.stringify(data.outputs_errors)}\n` : ''}${data.outputs_pending ? '"outputs_pending": true\n' : ''}verdict: ${verdict}\ndecisions: ${decisions}\nactions: ${actions}\n${safeSummary.slice(-3000)}`.trim();
 }
 
 async function pullSummaries(ctx: Context, rows: StatusRow[], ack = false): Promise<ToolResult> {
@@ -458,7 +461,7 @@ async function runResume(deps: McpDeps, args: { tasks?: string[] | undefined; al
 
 async function runLimits(deps: McpDeps): Promise<ToolResult> {
   const ctx = deps.context(() => {});
-  const report = collectLimits(ctx.config, await liveWindows(ctx));
+  const report = collectLimits(ctx.config, await liveWindows(ctx), ctx.runner.now());
   const reserved = readReservations(ctx.config);
   return ok(
     `Limits of simultaneous agents per provider. used = windows of agentctl + reserved places + external sessions (counted only if countExternal is true); free = limit - used; queued = tasks waiting for a place of that provider.\n\n${JSON.stringify({ ...report, reservations: reserved }, null, 2)}`,
@@ -473,7 +476,7 @@ const holdValueArg = z.union([z.number().int().min(1).max(100), z.string().regex
 const queueHoldArg = z.union([holdValueArg, z.object(Object.fromEntries(PROVIDER_IDS.map((id) => [id, holdValueArg.optional()]))).strict()]).optional()
   .describe('usage.queue_hold: 90 (every active provider), "off" (no hold), or per provider {claude: 90, codex: "off"}. A whole percentage 1-100 of the plan, any window. Omit to leave it.');
 
-async function runSetLimits(deps: McpDeps, args: Partial<Record<AgentName, number | string>> & { queue_hold?: unknown; confirm?: boolean | undefined }): Promise<ToolResult> {
+async function runSetLimits(deps: McpDeps, args: Partial<Record<AgentName, number | string>> & { queue_hold?: unknown; hold?: unknown; confirm?: boolean | undefined }): Promise<ToolResult> {
   return writeTool(deps, 'set_limits', { detail: `${PROVIDER_IDS.map(id => `${id}=${args[id] ?? '-'}`).join(' ')}${args.queue_hold !== undefined ? ` queue_hold=${JSON.stringify(args.queue_hold)}` : ''} confirm=${Boolean(args.confirm)}` }, async (ctx) => {
     const assignments: LimitAssignments = {};
     for (const agent of activeProviders(ctx.config)) if (args[agent] !== undefined) {
@@ -481,13 +484,13 @@ async function runSetLimits(deps: McpDeps, args: Partial<Record<AgentName, numbe
       assignments[agent] = value === 0 ? null : value;
     }
     const hold = args.queue_hold === undefined ? undefined : parseHoldInput(args.queue_hold, activeProviders(ctx.config));
-    if (Object.keys(assignments).length === 0 && hold === undefined) throw new AgentctlError(`give ${activeProviders(ctx.config).join(' and/or ')}, or queue_hold`,  '0 removes a limit, "off" disables the provider; queue_hold: 90, "off" or {codex: 90}.');
-    const plan = planSetLimits(ctx.config, assignments, hold);
+    if (Object.keys(assignments).length === 0 && hold === undefined && args.hold === undefined) throw new AgentctlError(`give ${activeProviders(ctx.config).join(' and/or ')}, or queue_hold`,  '0 removes a limit, "off" disables the provider; queue_hold: 90, "off" or {codex: 90}.');
+    const plan = planSetLimits(ctx.config, assignments, hold, args.hold, ctx.runner.now());
     if (!args.confirm) return { text: `${plan.summary.join('\n')}\n\nNot changed yet. Show this to the user and ask; if they agree, call set_limits again with the same arguments and confirm: true.`, executed: false, announce: '' };
     await applySetLimits(ctx, plan);
     const changed = [...plan.changes.map((c) => `${c.agent} ${c.from ?? '-'} -> ${c.to ?? '-'}`), ...plan.holdChanges.filter((c) => c.from !== c.to).map((c) => `queue_hold ${c.agent} ${holdText(c.from)} -> ${holdText(c.to)}`)];
     const announce = [...(plan.changes.length ? [`limity ${activeProviders(ctx.config).map(id => `${id}=${plan.changes.some(c => c.agent === id) ? plan.changes.find(c => c.agent === id)!.to ?? 'brak' : ctx.config.limits[id] ?? 'brak'}`).join(' ')}`] : []), ...(hold !== undefined ? [`queue_hold ${plan.holdChanges.map((c) => `${c.agent}=${holdText(c.to)}`).join(' ')}`] : [])].join('; ');
-    return { text: `${plan.changes.length ? 'Limits changed' : 'Queue hold changed'} (${changed.join(', ') || 'nothing new'}). They are in force now: a running watch picks the file up and starts waiting tasks at its next tick${hold !== undefined ? '; the queue hold counts from that tick, without a restart' : ''}.`, executed: true, announce };
+    return { text: `${plan.timedHolds ? plan.summary.join('\n') + '\n' : ''}${plan.changes.length ? 'Limits changed' : 'Queue hold changed'} (${changed.join(', ') || 'nothing new'}). They are in force now: a running watch picks the file up and starts waiting tasks at its next tick${hold !== undefined ? '; the queue hold counts from that tick, without a restart' : ''}.`, executed: true, announce };
   });
 }
 
@@ -690,7 +693,8 @@ async function runGetReport(deps: McpDeps, args: { task: string; section?: strin
     const full = readReportText(ctx.config, record, record.report);
     return { text: `=== ${record.task} (${record.agent} ${record.model}/${record.effort}) ===\n${conciseReport(full, await readOutputs(ctx, record), record.reviewOf != null)}${warning ? `\n${JSON.stringify({ warning })}` : ''}`, ...(args.mark_pulled !== false ? { onDelivered: () => markRead(createHash('sha256').update(full).digest('hex')) } : {}) };
   }
-  const outputs = (args.detail || args.mode === 'full') && !(args.offset ?? 0) && !(args.byte_offset ?? 0) ? await readOutputs(ctx, record) : {};
+  const validated = await readOutputs(ctx, record);
+  const outputs = (args.detail || args.mode === 'full') && !(args.offset ?? 0) && !(args.byte_offset ?? 0) ? validated : validated.outputs_errors.length ? {outputs_errors: validated.outputs_errors} : {};
   const render = (r: ReportPage, pulled: boolean): ToolResult => {
     const { text, signature: _signature, ...page } = r;
     return ok(`=== ${record.task} (${record.agent} ${record.model}/${record.effort}) ===\n${text}\n--- page ---\n${JSON.stringify({ ...page, pulled, ...outputs, ...(warning ? { warning } : {}) })}`);
@@ -1087,7 +1091,7 @@ async function runNew(deps: McpDeps, args: NewMcpArgs): Promise<ToolResult> {
   });
 }
 
-async function runQueue(deps: McpDeps, args: { _confirmation?: QueueConfirmation; _specs?: ResolvedSpec[]; _planned?: AcceptedOrder[]; spec?: string | undefined; agent?: AgentName | undefined; cohort?: string | undefined; confirm?: boolean | undefined }): Promise<ToolResult> {
+async function runQueue(deps: McpDeps, args: { replace?: boolean; _confirmation?: QueueConfirmation; _specs?: ResolvedSpec[]; _planned?: AcceptedOrder[]; spec?: string | undefined; agent?: AgentName | undefined; cohort?: string | undefined; confirm?: boolean | undefined }): Promise<ToolResult> {
   let tasks = '?';
   try {
     tasks = splitSpecs(args.spec ?? '', 'mcp').map((s) => String(s.header.task ?? '?')).join(', ');
@@ -1103,7 +1107,20 @@ async function runQueue(deps: McpDeps, args: { _confirmation?: QueueConfirmation
         throw new AgentctlError(`${String(raw.header.task ?? 'a task')}: "setup" runs shell commands and is not accepted from the chat`, 'Put setup commands in the .agentctl.yaml of the repository, or queue the task from the terminal.');
       }
     }
-    const opts = args.agent ? { agent: args.agent } : {};
+    const opts = { ...(args.agent ? { agent: args.agent } : {}), replace: args.replace };
+    if (args.confirm && args.replace) {
+      if (!deps.applying) throw new AgentctlError('replace: true requires a running watcher');
+      return withStartLock(ctx, async () => {
+        const plan = await planQueueAdd(ctx, raws, opts);
+        for (const {spec} of plan.items) {
+          const entry = readQueue(ctx.config).find(e => e.task === spec.task);
+          if (entry?.status === 'starting') throw new AgentctlError(`${spec.task} is being started; replacement refused`);
+        }
+        for (const {spec} of plan.items) if (readQueue(ctx.config).some(e => e.task === spec.task)) await removeFromQueue(ctx, spec.task, {source: 'mcp'});
+        await commitQueueAdd(ctx, plan.items, args._confirmation ? {confirmation: args._confirmation} : {});
+        return {text: `Replaced: ${plan.items.map(i => i.spec.task).join(', ')} in one watch step`, executed: true, announce: 'queue replaced'};
+      });
+    }
     if (args.confirm) {
       // P93: durable registration is the response boundary. The confirm records the accepted specs and answers; the watcher validates them at its
       // next tick (git, tmux and the task records are its work), then they wait in the line; a refused spec fails with its reason and an event.
@@ -1176,7 +1193,7 @@ export const MCP_TOOLS: McpToolDef[] = [
     description:
       'Current state of every agentctl task: agent/model/effort, state (working, background, waiting, needs-input, needs-trust, limited, report-ready, dead, orphan, superseded), ' +
       'start time (started in UTC, startedLocal in the user\'s local time: show the local one), running time, git progress, whether a report exists and was already pulled, the last line and the open question of a waiting agent. ' +
-      'Use events_since FIRST; status gives task detail when the user asks what is running, who waits for them, or whether something is ready, and at the start of a planning session. ' +
+      'Cached text starts with its age; JSON snapshots carry snapshot_age_s. Status older than five minutes uses a short queue/journal fallback. Use events_since FIRST; status gives task detail when the user asks what is running, who waits for them, or whether something is ready, and at the start of a planning session. ' +
       'Hidden, closed and cancelled tasks are left out unless all is true. cohort limits it to the tasks of one cohort (a group the user named). Every row has its cohort (null: none).',
     input: { all: allArg, cohort: cohortArg.optional() },
     annotations: readOnly('Status of all agent tasks'),
@@ -1222,9 +1239,10 @@ export const MCP_TOOLS: McpToolDef[] = [
     kind: 'write',
     description:
       'WRITE, off unless the user put "set_limits" in mcp.allow. Sets the most simultaneous agents per provider in config.yaml (0 removes a limit, "off" disables the provider: no windows of it start), and the queue hold usage.queue_hold; comments in the file stay, a copy is kept as config.yaml.bak. It takes effect at once, without restarting watch (watch reloads config.yaml when it changes, also after a hand edit). ' +
+      'Timed provider hold: hold: {glm: "21:50"}, ISO timestamp, duration "3h", or "off"; every active provider is supported. Holds block starts even with plan n/d, appear in limits/capacity/board/queue_list and expire with an event. ' +
       `queue_hold format, exactly: a whole percentage 1-100 for every active provider (queue_hold: 90), "off" for no hold at all (queue_hold: "off"), or per provider {claude: 90, codex: "off"} (only the named providers change; "off" removes that provider's hold). Above that percentage of its plan, in any window, the queue starts no task of the provider; queue_list shows "wstrzymane: … > usage.queue_hold N%"; limits, capacity and config_show show the current hold. ` +
       'The FIRST call (confirm omitted) only describes the change; show it to the user, then call again with confirm: true.',
-    input: { ...perProvider(DEFAULT_PROVIDERS, id => setLimitArg.describe(`New limit for ${provider(id).displayName}; 0 = no limit, "off" = disabled. Omit to leave it.`)), queue_hold: queueHoldArg, confirm: z.boolean().optional().describe('true only after the user agreed to the described change.') },
+    input: { ...perProvider(DEFAULT_PROVIDERS, id => setLimitArg.describe(`New limit for ${provider(id).displayName}; 0 = no limit, "off" = disabled. Omit to leave it.`)), queue_hold: queueHoldArg, hold: z.record(z.string(), z.string()).optional().describe('Timed provider hold: {glm: "21:50"}, ISO timestamp, "3h", or "off". Applies to every active provider.'), confirm: z.boolean().optional().describe('true only after the user agreed to the described change.') },
     annotations: { title: 'Change the limits', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     run: (deps, args) => guarded(() => runSetLimits(deps, args as { claude?: number; codex?: number; queue_hold?: unknown; confirm?: boolean })),
   }),
@@ -1457,10 +1475,11 @@ export const MCP_TOOLS: McpToolDef[] = [
     kind: 'write',
     description:
       'WRITE, off unless the user put "queue" in mcp.allow. Puts the tasks of a spec in the queue (same spec format as new, plus priority: high|normal, after: <TASK or list>, touches: [globs]): each starts when a provider window is free and its `after` reports have an accepted first-line verdict (PASS, PASS with findings, PARTIAL, GO); after_verdict overrides the list. ' +
-      'The FIRST call (confirm omitted) validates the spec and returns a summary (where each task will stand, hints, touches warnings); show it to the user. Only when they agree, call again with the same spec and confirm: true. "setup" is not accepted from the chat.',
+      'The FIRST call (confirm omitted) validates the spec and returns a summary (where each task will stand, hints, touches warnings); show it to the user. Only when they agree, call again with the same spec and confirm: true. "setup" is not accepted from the chat. replace: true replaces a waiting entry in one watch step; previews identify pending queue_rm requests.',
     input: {
       spec: z.string().min(1).max(100_000).optional().describe('The spec text: ---, YAML header, ---, prompt. Several specs may follow each other. Optional only when confirming with preview_token: the stored spec then executes.'),
       cohort: cohortArg.optional(),
+      replace: z.boolean().optional().describe('Remove a waiting entry and re-add this spec atomically in one watch step; also works while queue_rm is pending.'),
       agent: z.enum(DEFAULT_PROVIDERS).optional().describe('Run the specs on this provider, translated through the equivalents table. The queue never switches provider by itself.'),
       confirm: z.boolean().optional().describe('true only after the user agreed to the summary.'),
     },
@@ -1718,7 +1737,7 @@ function redactConfig(config: GlobalConfig): unknown {
  * P93b: the writes whose confirm can wait on start.lock, git, tmux or a scan of every task. With a watcher running, the confirm records the
  * request (mcp-requests.ts) and returns; the watcher applies it. `set_limits` stays synchronous: it writes config.yaml under no shared lock.
  */
-export const DEFERRED_TOOLS = new Set(['gc', 'gc_preview', 'consult', 'unblock', 'queue_up', 'queue_rm', 'queue_retry', 'close', 'cancel', 'send', 'mark', 'hide', 'unhide', 'archive', 'cohort_add', 'cohort_remove', 'cohort_archive', 'cohort_note']);
+export const DEFERRED_TOOLS = new Set(['queue', 'gc', 'gc_preview', 'consult', 'unblock', 'queue_up', 'queue_rm', 'queue_retry', 'close', 'cancel', 'send', 'mark', 'hide', 'unhide', 'archive', 'cohort_add', 'cohort_remove', 'cohort_archive', 'cohort_note']);
 /** The run of every tool before the confirm, format, budget and paging wrappers: what the watcher calls to apply a request. */
 const originalRuns = new Map<string, McpToolDef['run']>();
 
@@ -1806,7 +1825,7 @@ function confirmationTargets(name: string, scope: unknown): unknown {
 }
 /** Exact arguments and observed task/queue/window identities bind confirmation to this session. No scope can silently grow. */
 async function confirmationScope(ctx: Context, name: string, args: Record<string, unknown>): Promise<unknown> {
-  if (name === 'set_limits') return { limits: ctx.config.limits, queueHold: ctx.config.usage.queueHold };
+  if (name === 'set_limits') return { limits: ctx.config.limits, queueHold: ctx.config.usage.queueHold, providerHolds: readProviderHoldState(ctx.config).holds };
   if (name === 'reserve') return { reservations: readReservations(ctx.config) };
   if (name === 'queue_up' || name === 'queue_rm') {
     const entry = findEntry(ctx.config, args.task as string);
@@ -2018,7 +2037,7 @@ for (const tool of MCP_TOOLS) {
     // argument hash alone (confirmationTargets), the plan is the preview's, and the watcher validates the accepted specs.
     const accepting = Boolean(confirm) && (tool.name === 'new' || tool.name === 'queue');
     // P93b: a confirm that a watcher can apply records the request and returns; the watcher computes the scope again and compares it.
-    if (confirm && DEFERRED_TOOLS.has(tool.name) && deferMcpWrites(ctx)) {
+    if (confirm && DEFERRED_TOOLS.has(tool.name) && (tool.name !== 'queue' || effective.replace) && deferMcpWrites(ctx)) {
       return recordDeferred(deps, tool.name, effective, preview!.scope, preview!.key, token);
     }
     let scope: unknown;
@@ -2032,7 +2051,7 @@ for (const tool of MCP_TOOLS) {
     const scopeIdentity = JSON.stringify(canonical(confirmationTargets(tool.name, scope)));
     if (!confirm) {
       let result: ToolResult;
-      if (tool.name === 'new' || tool.name === 'queue') result = await writeTool(deps, tool.name, {task: (scope as {specs: ResolvedSpec[]}).specs.map(s => s.task).join(', ')}, async () => ({ text: `${cheapSpecSummary(ctx, (scope as { specs: ResolvedSpec[] }).specs, tool.name === 'queue').join('\n')}\nBase/overlap, worktrees, capacity and disk checked by watch at accept; errors appear as events.\nBaza/nakładanie, worktree, limity i dysk: watch sprawdzi po przyjęciu; błędy w events_since.\n${tool.name === 'new' ? (watchAlive(ctx.config, ctx.runner.now()) ? 'Start: asynchronous – confirm registers the start; watch validates and opens the window.' : 'WARNING: the watcher is not running (or the queue is disabled); confirm will be refused. Start agentctl watch --tmux.') : ''}\nNot ${tool.name === 'new' ? 'started' : 'queued'} yet. Show this to the user and ask; if they agree, call ${tool.name} again with the same spec and confirm: true.`, executed: false, announce: '' }));
+      if (tool.name === 'new' || tool.name === 'queue') result = await writeTool(deps, tool.name, {task: (scope as {specs: ResolvedSpec[]}).specs.map(s => s.task).join(', ')}, async () => ({ text: `${cheapSpecSummary(ctx, (scope as { specs: ResolvedSpec[] }).specs, tool.name === 'queue').join('\n')}\n${tool.name === 'queue' ? readMcpRequests(ctx.config).filter(r => r.tool === 'queue_rm' && ['pending', 'applying'].includes(r.status) && (scope as {specs: ResolvedSpec[]}).specs.some(s => s.task === r.task)).map(r => `${r.task}: oczekuje queue_rm (request ${r.id}); use replace: true`).join('\n') : ''}\n${effective.replace ? 'replace: true – remove and re-add in one watch step.' : ''}\nBase/overlap, worktrees, capacity and disk checked by watch at accept; errors appear as events.\nBaza/nakładanie, worktree, limity i dysk: watch sprawdzi po przyjęciu; błędy w events_since.\n${tool.name === 'new' ? (watchAlive(ctx.config, ctx.runner.now()) ? 'Start: asynchronous – confirm registers the start; watch validates and opens the window.' : 'WARNING: the watcher is not running (or the queue is disabled); confirm will be refused. Start agentctl watch --tmux.') : ''}\nNot ${tool.name === 'new' ? 'started' : 'queued'} yet. Show this to the user and ask; if they agree, call ${tool.name} again with the same spec and confirm: true.`, executed: false, announce: '' }));
       else if (['cancel', 'resume', 'move', 'set_limits', 'reserve'].includes(tool.name)) result = await original(deps, args);
       else result = await writeTool(deps, tool.name as McpWriteTool, {}, async () => {
         const detail = tool.name === 'gc' ? renderGc(scope as GcPlan, { detail: Boolean(input.detail), offset: input.offset as number | undefined, limit: input.limit as number | undefined }).join('\n') : JSON.stringify({ operation: tool.name, arguments: input, scope: await previewScope(ctx, tool.name, input, scope) }, null, 2);
@@ -2151,7 +2170,7 @@ for (const tool of MCP_TOOLS.filter(t => ['status', 'events_since', 'queue_list'
       const data = JSON.parse(raw);
       if (tool.name === 'cohort_show') return ok([data.cohort, ...data.tasks.map((r: Record<string, unknown>) => `${r.task} ${r.agent}/${r.model}/${r.effort} ${r.state} ${r.duration} cohort=${r.cohort ?? 'n/d'} report=${r.report} decisions=${r.decisions ?? 0} actions=${r.actions ?? 0}`), `outputs: ${JSON.stringify({ integrate: data.integrate, decisions: data.decisions, actions: data.actions, checks: data.checks, warnings: data.warnings })}`, ...data.queued.map((r: Record<string, unknown>) => `${r.task}: ${r.startCondition}`)].join('\n'));
       if (tool.name === 'capacity') return ok([diskLine(data.disk), ...snapshotLines(capacitySnapshot(data))].join('\n'));
-      if (tool.name === 'limits') return ok(data.providers.map((p: Record<string, unknown>) => `${p.agent}: used=${p.used} limit=${p.limit ?? 'n/d'} free=${p.free ?? 'n/d'} reserved=${p.reserved} queued=${p.queued} queue_hold=${holdText(p.queueHold as number | null)}`).join('\n'));
+      if (tool.name === 'limits') return ok(data.providers.map((p: Record<string, unknown>) => `${p.agent}: used=${p.used} limit=${p.limit ?? 'n/d'} free=${p.free ?? 'n/d'} reserved=${p.reserved} queued=${p.queued} queue_hold=${holdText(p.queueHold as number | null)}${p.providerHold ? `; ${providerHoldText(String(p.agent), p.providerHold as import('./provider-hold.ts').ProviderHold)}` : ''}`).join('\n'));
       if (Array.isArray(data)) return ok(data.map(r => `${r.task} ${r.agent}/${r.model}/${r.effort}: ${r.startCondition}`).join('\n') || 'The queue is empty.');
       return ok(compactFacts(data));
     } catch { return ok(at >= 0 ? result.text.slice(0, at) : result.text); }
@@ -2173,7 +2192,7 @@ async function capacityFooter(deps: McpDeps, ctx: Context, explicit: boolean): P
   const reader = openReader(ctx.config);
   const plans = readPlans(ctx.config, reader, ctx.runner.now()); reader.save();
   const disk = await collectDisk(ctx);
-  const limits = collectLimits(ctx.config, await liveWindows(ctx));
+  const limits = collectLimits(ctx.config, await liveWindows(ctx), ctx.runner.now());
   const bands: Record<string, string> = {};
   for (const p of activeProviders(ctx.config)) {
     for (const w of providerValue(plans, p).windows) {
@@ -2223,6 +2242,19 @@ function compactFacts(value: unknown, prefix = ''): string {
 }
 
 /** One atomic watch publication; readers never probe processes when it is fresh. */
+const ageLine = (at: number, now: number): string => {
+  const minutes = Math.max(0, Math.floor((now - at) / 60000));
+  return `stan z ${formatLocalTime(new Date(at).toISOString()).slice(-5)}, ${minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes}m`} temu`;
+};
+function durableStatus(ctx: Context): string {
+  const entries = readQueue(ctx.config);
+  const latest = new Map<string, ReturnType<typeof readJournal>[number]>();
+  const states = new Set(['queue-start', 'needs-input', 'needs-trust', 'needs-attention', 'limited', 'overloaded', 'report-ready', 'dead', 'cancelled', 'queue-failed']);
+  for (const event of readJournal(ctx.config)) if (event.task && states.has(event.kind)) latest.set(event.task, event);
+  return [`Durable queue (${entries.length}; first 20):`, ...entries.slice(0, 20).map(e => `${e.task}: ${e.status === 'queued' ? 'registered' : e.status}`),
+    'Active tasks from journal/events (last known; no live window probe):',
+    ...[...latest.values()].filter(e => !['dead', 'cancelled', 'queue-failed'].includes(e.kind)).slice(-20).map(e => `${e.task}: ${e.kind} (${formatLocalTime(e.at)})`)].join('\n');
+}
 const stateSnapshotPath = (ctx: Context) => path.join(ctx.config.stateDir, 'mcp-state-snapshot.json');
 export async function publishMcpSnapshot(ctx: Context, rows?: StatusRow[], at = ctx.runner.now()): Promise<void> {
   if (ctx.runner.dryRun) return;
@@ -2231,7 +2263,7 @@ export async function publishMcpSnapshot(ctx: Context, rows?: StatusRow[], at = 
   const live = await liveWindows(ctx, observed);
   const queue = await runQueueList(deps, {}, {rows: observed, live});
   const capacity = await collectCapacityFull(ctx, {diskBudgetMs: DISK_BUDGET_MS, cachedOnly: true, rows: observed, live});
-  const limits = collectLimits(ctx.config, live);
+  const limits = collectLimits(ctx.config, live, ctx.runner.now());
   const config = await originalRuns.get('config_show')!(deps, {});
   // Snapshot diagnostics observe state only: spawning provider CLIs each tick both blocks watch and can start a session.
   const doctor: {name: string; status: string; detail: string}[] = [
@@ -2249,6 +2281,7 @@ export async function publishMcpSnapshot(ctx: Context, rows?: StatusRow[], at = 
   }
   const snapshot = { version: 1, at, interval: ctx.config.watch.interval,
     configHash: createHash('sha256').update(JSON.stringify(ctx.config)).digest('hex'),
+    providerHolds: readProviderHoldState(ctx.config).holds,
     rows: observed, queue: JSON.parse(queue.text.slice(queue.text.indexOf('\n\n') + 2)), capacity, limits,
     config: JSON.parse(config.text), doctor };
   fs.mkdirSync(ctx.config.stateDir, { recursive: true });
@@ -2259,8 +2292,9 @@ function snapshotRead(ctx: Context, name: string, args: Record<string, unknown>)
     if (args.project !== undefined) return undefined;
     const snap = JSON.parse(fs.readFileSync(stateSnapshotPath(ctx), 'utf8'));
     const age = ctx.runner.now() - snap.at;
-    if (snap.version !== 1 || age < 0 || age >= 2 * ctx.config.watch.interval * 1000 || snap.configHash !== createHash('sha256').update(JSON.stringify(ctx.config)).digest('hex')) return undefined;
-    const note = `Watch snapshot age: ${(age / 1000).toFixed(1)} s.`;
+    if (name === 'status' && snap.version === 1 && age > 300000) return ok(`${ageLine(snap.at, ctx.runner.now())}\nSnapshot starszy niż 5 min; krótki fallback z kolejki i dziennika zamiast starej tabeli.\n${durableStatus(ctx)}`);
+    if (snap.version !== 1 || age < 0 || age >= 2 * ctx.config.watch.interval * 1000 || JSON.stringify(snap.providerHolds ?? {}) !== JSON.stringify(readProviderHoldState(ctx.config).holds) || snap.configHash !== createHash('sha256').update(JSON.stringify(ctx.config)).digest('hex')) return undefined;
+    const note = `${ageLine(snap.at, ctx.runner.now())}; Watch snapshot age: ${(age / 1000).toFixed(1)} s.`;
     const json = args.format === 'json' || args.detail === true;
     let data: unknown, text = '';
     const fits = (r: { cohort?: string | null }) => args.cohort === undefined || cohortKey(r.cohort ?? '') === cohortKey(String(args.cohort));
@@ -2275,10 +2309,10 @@ function snapshotRead(ctx: Context, name: string, args: Record<string, unknown>)
     } else if (name === 'queue_list') {
       data = queue; text = queue.map((q: {task: string; agent: string; model: string; effort: string; startCondition: string}) => `${q.task} ${q.agent}/${q.model}/${q.effort}: ${q.startCondition}`).join('\n') || 'The queue is empty.';
     } else if (name === 'capacity') { data = snap.capacity; text = [diskLine(snap.capacity.disk), ...snapshotLines(capacitySnapshot(snap.capacity))].join('\n'); }
-    else if (name === 'limits') { data = snap.limits; text = snap.limits.providers.map((p: {agent: string; used: number; limit: number; free: number; reserved: number; queued: number; queueHold: number | null}) => `${p.agent}: used=${p.used} limit=${p.limit ?? 'n/d'} free=${p.free ?? 'n/d'} reserved=${p.reserved} queued=${p.queued} queue_hold=${holdText(p.queueHold)}`).join('\n'); }
+    else if (name === 'limits') { data = snap.limits; text = snap.limits.providers.map((p: {agent: string; used: number; limit: number; free: number; reserved: number; queued: number; queueHold: number | null; providerHold?: import('./provider-hold.ts').ProviderHold}) => `${p.agent}: used=${p.used} limit=${p.limit ?? 'n/d'} free=${p.free ?? 'n/d'} reserved=${p.reserved} queued=${p.queued} queue_hold=${holdText(p.queueHold)}${p.providerHold ? `; ${providerHoldText(p.agent, p.providerHold)}` : ''}`).join('\n'); }
     else { data = snap[name === 'config_show' ? 'config' : 'doctor']; text = JSON.stringify(data, null, 2); }
-    if (json || ['config_show', 'doctor'].includes(name)) return ok(JSON.stringify(Array.isArray(data) ? data.map(item => ({...item, snapshot_age_s: age / 1000})) : { snapshot_age_s: age / 1000, ...(data as object) }, null, 2));
-    return ok(`${text}\n${note}`);
+    if (json || ['config_show', 'doctor'].includes(name)) return ok(JSON.stringify(Array.isArray(data) ? data.map(item => ({...item, snapshot_age_s: age / 1000})) : { snapshot_age_s: age / 1000, snapshot_age: ageLine(snap.at, ctx.runner.now()), ...(data as object) }, null, 2));
+    return ok(`${note}\n${text}`);
   } catch { return undefined; }
 }
 const snapshotTools = new Set(['status', 'queue_list', 'capacity', 'limits', 'config_show', 'doctor']);
@@ -2335,21 +2369,22 @@ for (const tool of MCP_TOOLS) {
 }
 
 /** Deadline also covers formatting, capacity footers and notification work. */
-const lastReads = new WeakMap<McpDeps, Map<string, ToolResult>>();
+const lastReads = new WeakMap<McpDeps, Map<string, {at: number; result: ToolResult}>>();
 for (const tool of MCP_TOOLS) {
   const run = tool.run;
   tool.run = async (deps, args) => {
     const key = `${tool.name}:${JSON.stringify(args)}`;
-    const saved = lastReads.get(deps) ?? new Map<string, ToolResult>(); lastReads.set(deps, saved);
+    const saved = lastReads.get(deps) ?? new Map<string, {at: number; result: ToolResult}>(); lastReads.set(deps, saved);
     return withResponseBudget(async () => {
       const result = await run(deps, args);
-      if (tool.kind === 'read' && !result.isError) { if (saved.size >= 100) saved.delete(saved.keys().next().value!); saved.set(key, result); }
+      if (tool.kind === 'read' && !result.isError) { if (saved.size >= 100) saved.delete(saved.keys().next().value!); saved.set(key, {at: deps.context(() => {}).runner.now(), result}); }
       return result;
     }, () => {
       const ctx = deps.context(() => {});
       const entries = readQueue(ctx.config);
       const queue = `Durable queue (${entries.length}; first 20):\n` + entries.slice(0, 20).map(e => `${e.task}: ${e.status === 'queued' ? 'registered' : e.status}`).join('\n');
       const cached = saved.get(key);
+      const stale = cached && ctx.runner.now() - cached.at > 300000;
       let inbox = '';
       if (tool.name === 'events_since') {
         try {
@@ -2361,9 +2396,9 @@ for (const tool of MCP_TOOLS) {
           } else if (who.kind === 'unknown') inbox = 'unknown chat – only channel agentctl visible; pass as: "chat:<name>"\n';
         } catch { /* retain the durable bounded response even when WALL storage is unavailable */ }
       }
-      const prefix = `${inbox}Partial result: 8 s response budget exhausted; ${cached ? 'last cached response follows' : 'durable queue snapshot follows'}. Retry reads; retry a confirm only with the same preview_token.\n`;
+      const prefix = `${cached ? ageLine(cached.at, ctx.runner.now()) + '\n' : ''}${inbox}Partial result: 8 s response budget exhausted; ${stale ? 'cache older than 5 min; short queue/journal fallback replaces stale full table' : cached ? 'last cached response follows' : 'durable queue snapshot follows'}. Retry reads; retry a confirm only with the same preview_token.\n`;
       const wireBudget = ctx.config.mcp.maxResponseKb * 1024;
-      let text = prefix + [queue, cached?.text].filter(Boolean).join('\n');
+      let text = prefix + (stale || !cached ? durableStatus(ctx) : [queue, cached.result.text].join('\n'));
       while (responseWireBytes(ok(text)) > wireBudget && text.length > 1) text = text.slice(0, Math.max(1, Math.floor(text.length * 0.8)));
       return { text };
     }, deps.budgetClock);

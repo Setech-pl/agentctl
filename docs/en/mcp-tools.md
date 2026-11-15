@@ -44,7 +44,7 @@ Arguments marked ? are optional. Provider fields below include enabled optional 
 | `events_since` | read | `as?`, `cursor?`, `limit?`, `client?`, `since?`, `cohort?`, `peek?`, `format?`, `detail?` | What changed since the last look |
 | `gc_preview` | read | `request_id?`, `detail?`, `offset?`, `limit?`, `older_than?`, `merged?`, `cohort?` | Preview of the clean-up |
 | `limits` | read | `format?`, `detail?` | Limits of simultaneous agents |
-| `set_limits` | write | `claude?`, `codex?`, `queue_hold?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Change the limits |
+| `set_limits` | write | `claude?`, `codex?`, `queue_hold?`, `hold?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Change the limits |
 | `reserve` | write | `claude?`, `codex?`, `note?`, `release?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Reserve places for agents started by hand |
 | `version` | read |  | Version of this server |
 | `peek` | read | `task`, `lines?` | Look into a task window |
@@ -66,7 +66,7 @@ Arguments marked ? are optional. Provider fields below include enabled optional 
 | `send` | write | `task?`, `text?`, `enter_only?`, `confirm?`, `token?`, `withdraw?`, `preview_token?` | Send a prompt to a running task |
 | `consult` | write | `spec?`, `confirm?`, `preview_token?` | Consult a multi-provider panel |
 | `new` | write | `spec?`, `agent?`, `reuse?`, `no_agent?`, `cohort?`, `wait_trust?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` | Start tasks from a spec |
-| `queue` | write | `spec?`, `cohort?`, `agent?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` | Put tasks in the queue |
+| `queue` | write | `spec?`, `cohort?`, `replace?`, `agent?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` | Put tasks in the queue |
 | `queue_rm` | write | `task?`, `confirm?`, `preview_token?` | Take a task out of the queue |
 | `cancel` | write | `task?`, `tasks?`, `cohort?`, `reason?`, `remove_worktree?`, `confirm?`, `preview_token?` | Cancel tasks |
 | `mark` | write | `task?`, `tasks?`, `cohort?`, `result?`, `note?`, `confirm?`, `preview_token?` | Mark how a task turned out |

@@ -1,3 +1,4 @@
+import { quotaError } from './quota-error.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Context } from './context.ts';
@@ -194,4 +195,26 @@ export function transcriptMessage(ctx: Context, record: TaskRecord, pending: str
     if (hit) { unchanged.delete(`${file}|${record.deliveryId ?? sinceMs}|${pending}`); return hit; }
   }
   return undefined;
+}
+
+/** Last error of the pinned, current-attempt session. Human/tool text is never provider evidence. */
+export function transcriptQuotaError(ctx: Context, record: TaskRecord): {text: string; at: number} | undefined {
+  const selected = selectedFile(ctx, record);
+  if (!selected?.file || !selected.identity) return undefined;
+  let last: {text: string; at: number} | undefined;
+  try {
+    for (const line of readTail(selected.file, selected.identity).split('\n')) {
+      let row: any; try { row = JSON.parse(line); } catch { continue; }
+      const at = Date.parse(row.timestamp ?? '');
+      if (!Number.isFinite(at) || at < Date.parse(record.attemptStarted ?? record.started)) continue;
+      const payload = row.payload;
+      if (row.type === 'user' || (row.type === 'response_item' && payload?.role === 'user') || (row.type === 'event_msg' && payload?.type === 'user_message')) {last = undefined; continue;}
+      const error = row.isApiErrorMessage === true || row.type === 'error' || (row.type === 'event_msg' && payload?.type === 'error');
+      if (error) {
+        const text = JSON.stringify(row);
+        last = quotaError(text, true) ? {text, at} : undefined;
+      } else if (row.type === 'assistant' || (row.type === 'response_item' && payload?.role === 'assistant')) last = undefined;
+    }
+  } catch { return undefined; }
+  return last;
 }

@@ -277,7 +277,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 | `events_since` | read | `as?`, `cursor?`, `limit?`, `client?`, `since?`, `cohort?`, `peek?`, `format?`, `detail?` |
 | `gc_preview` | read | `request_id?`, `detail?`, `offset?`, `limit?`, `older_than?`, `merged?`, `cohort?` |
 | `limits` | read | `format?`, `detail?` |
-| `set_limits` | write | `claude?`, `codex?`, `queue_hold?`, `confirm?`, `preview_token?` |
+| `set_limits` | write | `claude?`, `codex?`, `queue_hold?`, `hold?`, `confirm?`, `preview_token?` |
 | `reserve` | write | `claude?`, `codex?`, `note?`, `release?`, `confirm?`, `preview_token?` |
 | `version` | read |  |
 | `peek` | read | `task`, `lines?` |
@@ -299,7 +299,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 | `send` | write | `task?`, `text?`, `enter_only?`, `confirm?`, `token?`, `withdraw?`, `preview_token?` |
 | `consult` | write | `spec?`, `confirm?`, `preview_token?` |
 | `new` | write | `spec?`, `agent?`, `reuse?`, `no_agent?`, `cohort?`, `wait_trust?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` |
-| `queue` | write | `spec?`, `cohort?`, `agent?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` |
+| `queue` | write | `spec?`, `cohort?`, `replace?`, `agent?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` |
 | `queue_rm` | write | `task?`, `confirm?`, `preview_token?` |
 | `cancel` | write | `task?`, `tasks?`, `cohort?`, `reason?`, `remove_worktree?`, `confirm?`, `preview_token?` |
 | `mark` | write | `task?`, `tasks?`, `cohort?`, `result?`, `note?`, `confirm?`, `preview_token?` |

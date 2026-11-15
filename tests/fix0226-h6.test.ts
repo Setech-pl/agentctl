@@ -1,0 +1,50 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { it } from 'node:test';
+import { Context } from '../src/core/context.ts';
+import { repoProgress } from '../src/core/progress.ts';
+import { collectOverlaps, touchWarnings } from '../src/core/collisions.ts';
+import { resolveSpec, splitSpecs } from '../src/core/spec.ts';
+import { recordFromSpec, parseTaskRecord, renderTaskMd } from '../src/core/taskstore.ts';
+import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helpers.ts';
+const scratch = useScratch();
+it('H6: predecessor imports do not count as its own overlap and spec base defines comparison', async () => {
+  const repo = scratch.sub('git');
+  const git = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], {encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']});
+  git('init', '-b', 'main'); git('config', 'user.name', 'Fixture'); git('config', 'user.email', 'fixture@example.test');
+  fs.writeFileSync(path.join(repo, 'root'), 'base'); git('add', '.'); git('commit', '-m', 'base');
+  git('switch', '-c', 'side'); fs.writeFileSync(path.join(repo, 'imported'), 'side'); git('add', '.'); git('commit', '-m', 'side');
+  git('switch', 'main'); git('switch', '-c', 'predecessor'); fs.writeFileSync(path.join(repo, 'own'), 'own'); git('add', '.'); git('commit', '-m', 'own');
+  git('merge', '--no-ff', 'side', '-m', 'import');
+  const config = makeConfig(scratch.sub('config'));
+  const tmux = new FakeTmux(); tmux.add('pred');
+  const runner = new DiskRunner({dryRun: false, respond: (cmd, args, opts) => {
+    if (cmd === 'git') { try {return {stdout: execFileSync('git', args, {encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']})};} catch {return {code: 1};} }
+    return tmux.respond(cmd, args, opts);
+  }});
+  const ctx = new Context(runner, config, () => {});
+  seedTask(config, 'PRED', {repos: [{path: repo, worktree: repo, base: 'main'}]});
+  const progress = await repoProgress(runner, {path: repo, worktree: repo, base: 'main'});
+  assert.deepEqual(progress?.fileNames, ['own']);
+  const spec = resolveSpec(splitSpecs(`---\ntask: NEXT\nagent: claude\ntouches: [own, imported]\nrepos:\n - path: ${repo}\n   worktree: ${repo}-next\n   base: predecessor\n---\nIntegrate.`, 'fixture')[0]!, {config});
+  assert.deepEqual(await touchWarnings(ctx, [spec]), [], 'changes already in the spec base are not overlap');
+  const mainSpec = {...spec, repos: spec.repos.map(r => ({...r, base: 'main'}))};
+  const warnings = await touchWarnings(ctx, [mainSpec]);
+  assert.equal(warnings.length, 1); assert.match(warnings[0]!, /: own$/);
+});
+it('H6: integration flag is persisted and silences all overlap warnings with an explicit note', async () => {
+  const config = makeConfig(scratch.sub('integration'));
+  const raw = splitSpecs(`---\ntask: MERGE\nagent: claude\nintegration: true\ntouches: ["**"]\nrepos:\n - path: ${scratch.sub('integration-repo')}\n   worktree: ${scratch.sub('integration-wt')}\n---\nMerge.`, 'fixture')[0]!;
+  const spec = resolveSpec(raw, {config});
+  assert.equal(spec.integration, true); assert.match(spec.warnings!.join(' '), /overlap warnings suppressed/);
+  const record = parseTaskRecord(renderTaskMd(recordFromSpec(spec, config, Date.now()), spec.prompt))!;
+  assert.equal(record.integration, true);
+  const tmux = new FakeTmux(); tmux.add('merge'); tmux.add('other');
+  const runner = new DiskRunner({dryRun: false, respond: (cmd, args, opts) => cmd === 'git' ? {stdout: args.includes('diff') ? 'same\n' : args.includes('status') ? '' : '1\n'} : tmux.respond(cmd, args, opts)});
+  const ctx = new Context(runner, config, () => {});
+  seedTask(config, 'MERGE', {integration: true, repos: [{path: '/repo', worktree: '/merge'}]});
+  seedTask(config, 'OTHER', {repos: [{path: '/repo', worktree: '/other'}]});
+  assert.deepEqual(await collectOverlaps(ctx), []); assert.deepEqual(await touchWarnings(ctx, [spec]), []);
+});

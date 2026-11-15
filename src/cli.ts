@@ -877,15 +877,17 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
   limits
     .command('set')
     .description('Change the limits in config.yaml (comments and the order of the keys stay; the old file is kept as config.yaml.bak). A running watch and the MCP server pick it up at once; waiting tasks of the queue start at the next tick.')
-    .argument('<limits...>', 'claude=3 codex=5; off disables a provider (codex=off: no windows of it start), 0 or none removes a limit (codex=0); queue_hold=90 | queue_hold=off | queue_hold.codex=85 sets usage.queue_hold')
+    .argument('<limits...>', 'claude=3 codex=5; off disables a provider (codex=off: no windows of it start), 0 or none removes a limit (codex=0); queue_hold=90 | queue_hold=off | queue_hold.codex=85 sets usage.queue_hold; hold.glm=21:50 | hold.glm=3h | hold.glm=off sets a timed provider hold')
     .option('-y, --yes', 'do not ask')
     .option('--dry-run', 'print what would be written, change nothing')
     .action(
       guarded(async (assignments: string[], opts: { yes?: boolean; dryRun?: boolean }) => {
         const ctx = contextFor(Boolean(opts.dryRun), { migrate: false });
         const ids = activeProviders(ctx.config);
-        const { hold, rest } = parseHoldArgs(assignments, ids);
-        const plan = planSetLimits(ctx.config, rest.length > 0 || hold === undefined ? parseAssignments(rest, ids) : {}, hold);
+        const timed: Record<string, string> = {};
+        const remaining = assignments.filter(a => { const m = /^hold\.([a-z]+)=(.+)$/.exec(a); if (!m) return true; timed[m[1]!] = m[2]!; return false; });
+        const { hold, rest } = parseHoldArgs(remaining, ids);
+        const plan = planSetLimits(ctx.config, rest.length > 0 || (hold === undefined && !Object.keys(timed).length) ? parseAssignments(rest, ids) : {}, hold, Object.keys(timed).length ? timed : undefined, ctx.runner.now());
         if (!(await confirmAction(ctx, plan.summary, 'Write it?', Boolean(opts.yes) || Boolean(opts.dryRun)))) return;
         await applySetLimits(ctx, plan);
         if (!opts.dryRun) line('Done. The limits are in force now.');

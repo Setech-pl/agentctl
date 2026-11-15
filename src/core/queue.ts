@@ -1,4 +1,6 @@
 import { checkHostLimit } from './host-limits.ts';
+import { expireProviderHolds, providerHolds } from './provider-hold.ts';
+import { readMcpRequests } from './mcp-requests.ts';
 import { heavyBudget, heavyPreviewUsed, heavyWait, isHeavy } from './heavy.ts';
 import { secretRedactor } from './secret-redaction.ts';
 import { activeProviders, perProvider, isActive } from './providers/registry.ts';
@@ -216,14 +218,15 @@ export interface QueueAddPlan {
  * Validate specs for the queue the way `new` does (review_of, pin, `--agent` mapping, codex efforts, duplicates, repositories), except that a
  * full provider is not an error: that is what the queue is for. Throws one error listing every problem; nothing is written.
  */
-export async function planQueueAdd(ctx: Context, raws: RawSpec[], opts: { agent?: AgentName; diskBudgetMs?: number; specs?: ResolvedSpec[] } = {}): Promise<QueueAddPlan> {
+export async function planQueueAdd(ctx: Context, raws: RawSpec[], opts: { agent?: AgentName; diskBudgetMs?: number; specs?: ResolvedSpec[]; replace?: boolean } = {}): Promise<QueueAddPlan> {
   const { config } = ctx;
   const entries = readQueue(config);
-  const items = await validateQueueAdd(ctx, raws, entries, opts);
+  const items = await validateQueueAdd(ctx, raws, opts.replace ? entries.filter(e => !raws.some(raw => raw.header.task === e.task)) : entries, opts);
   const specs = items.map((i) => i.spec);
   const rows = await queueDependencyRows(ctx, [...entries, ...specs]);
   const warnings = [...await touchWarnings(ctx, specs, { cachedOnly: true }), ...specs.flatMap(s => reportPathWarnings(ctx.config, s).map(w => `${s.task}: ${w}`)), ...specs.flatMap(s => [...(s.linkWarnings ?? []), ...(s.warnings ?? []), ...missingLinkTargets(s.links, s.repos[0]?.worktree)].map(w => `${s.task}: ${w}`))];
   const capacity = config.capacity.snapshot && !ctx.runner.dryRun ? capacitySnapshot(await collectCapacity(ctx, { cachedOnly: true, ...(opts.diskBudgetMs === undefined ? {} : { diskBudgetMs: opts.diskBudgetMs }) }), specs.map((s) => s.agent)) : undefined;
+  if (opts.replace) warnings.push(...specs.map(s => `${s.task}: replace in one watch step${readMcpRequests(config).filter(r => r.tool === 'queue_rm' && r.task === s.task && ['pending', 'applying'].includes(r.status)).map(r => `; oczekuje queue_rm (request ${r.id})`).join('')}`));
   return { items, warnings, ...(capacity ? { capacity } : {}), summary: [...describeQueueAdd(ctx, specs, entries, await liveWindows(ctx), rows), ...usageSummaryLines(config, specs, ctx.runner.now()), ...(capacity ? snapshotLines(capacity) : []), ...warnings.map((w) => `⚠ ${w}`)] };
 }
 
@@ -236,7 +239,11 @@ async function validateQueueAdd(ctx: Context, raws: RawSpec[], entries: QueueEnt
   const resolved = raws.map((raw) => resolveSpec(raw, { config: ctx.config }));
   for (const spec of resolved) {
     const inQueue = entries.find((e) => e.task === spec.task);
-    if (inQueue) throw inQueueError(spec, inQueue);
+    if (inQueue) {
+      const pending = readMcpRequests(ctx.config).find(r => r.tool === 'queue_rm' && r.task === spec.task && ['pending', 'applying'].includes(r.status));
+      if (pending) throw new AgentctlError(`${spec.task}: oczekuje queue_rm (request ${pending.id})`, 'Use replace: true to remove and re-add in one watch step.');
+      throw inQueueError(spec, inQueue);
+    }
   }
   const knownAuthors = new Map<string, AgentModel>(entries.map((e) => [e.task, { agent: e.agent, model: e.model }]));
   const specs = opts.specs ?? await planBatch(ctx, resolved, { ...(opts.agent ? { agent: opts.agent } : {}), ignoreLimits: true, skipAfter: true, deferBases: true, knownAuthors });
@@ -792,6 +799,7 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
     if (author.waiting || author.failed) return { position, entry, condition: { kind: 'after', text: author.waiting ?? author.failed! }, since: entry.queuedAt };
     const hostProblem = checkHostLimit(config, entry, hostSlots);
     if (hostProblem) return { position, entry, condition: { kind: 'slot', text: hostProblem }, since: entry.queuedAt };
+    if (holds[entry.agent]) return { position, entry, condition: {kind: 'hold', text: holds[entry.agent]!}, since: entry.queuedAt };
     if (entry.direct && !(entry.retryAt && Date.parse(entry.retryAt) > nowMs) && !overProviderLimit(config.limits[entry.agent], used[entry.agent])) {
       used[entry.agent]++;
       hostSlots.push(entry);
@@ -945,6 +953,7 @@ async function closeNeverReadyWindow(ctx: Context, task: string, opts: { force?:
  */
 export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Notifier, opts: QueueTickOptions = {}): Promise<string[]> {
   const { config } = ctx;
+  await expireProviderHolds(ctx);
   await touchWorker(ctx);
   // Accepted MCP confirms are validated even while the queue is paused or disabled: the answer (queued, or failed with the reason) is due either way.
   await validateAccepted(ctx, notifier, opts);
@@ -999,6 +1008,7 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
     if (author.waiting) continue;
     if (memory.inflight.size >= config.queue.parallelStarts) break;
     if (checkHostLimit(config, entry, live)) continue;
+    if (providerHolds(config, ctx.runner.now())[entry.agent]) continue;
     if (entry.direct) {
       const room = config.limits[entry.agent];
       if (overProviderLimit(room, used[entry.agent])) continue;
@@ -1044,7 +1054,7 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
  * P93b: the MCP writes whose confirm recorded a request (mcp-requests.ts) are applied here, before the line is read, so an unblock, a
  * queue_up or a queue_rm counts in this very tick. The modules are loaded only when a request waits.
  */
-async function applyAcceptedWrites(ctx: Context, notifier: Notifier, opts: QueueTickOptions): Promise<void> {
+export async function applyAcceptedWrites(ctx: Context, notifier: Notifier, opts: QueueTickOptions): Promise<void> {
   let names: string[] = [];
   try { names = fs.readdirSync(path.join(path.dirname(ctx.config.path), 'mcp-requests')); } catch { return; }
   if (!names.some((n) => n.endsWith('.json'))) return;
@@ -1096,7 +1106,7 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
   };
   const claimed = await withStartLock(ctx, async () => {
     const fresh = readQueue(config).find(e => e.seq === entry.seq && e.task === entry.task);
-    if (!fresh || fresh.status !== 'queued') return false;
+    if (!fresh || fresh.status !== 'queued' || providerHolds(config, ctx.runner.now())[fresh.agent]) return false;
     const author = directAuthorState(config, fresh, readQueue(config));
     if (author.failed) { await failEntry(ctx, fresh, author.failed, notifier, opts, true); return false; }
     if (author.waiting) return false;

@@ -1,3 +1,4 @@
+import { quotaError } from '../quota-error.ts';
 import type { AgentEvent, EventOutcome, SelfArgv } from '../events.ts';
 import { clip, firstLine, eventArgs, MAX_QUESTION } from '../events.ts';
 import { stableSelfArgv } from '../mcp-install.ts';
@@ -32,8 +33,8 @@ export function parseClaudeEvent(kind: ClaudeKind, input: unknown, agent: AgentN
   }
   if (kind === 'stop') return { agent, outcome: 'turn-complete', type: 'stop', text: firstLine(str(data.last_assistant_message)) };
   const error = str(data.error);
-  const detail = clip(str(data.error_details) || str(data.last_assistant_message) || error, MAX_QUESTION);
-  return { agent, outcome: ['overloaded', 'overloaded_error'].includes(error) || /^API Error:\s*529\b/.test(detail) ? 'overloaded' : CLAUDE_LIMIT_ERRORS.has(error) ? 'limited' : 'ignored', type: `stop-failure:${error || 'unknown'}`, text: detail };
+  const detail = clip(str(data.error_details) || str(data.last_assistant_message) || error, 4096);
+  return { agent, outcome: ['overloaded', 'overloaded_error'].includes(error) || /^API Error:\s*529\b/.test(detail) ? 'overloaded' : (CLAUDE_LIMIT_ERRORS.has(error) || quotaError(`${error} ${str(data.error_details)}`, true)) ? 'limited' : 'ignored', type: `stop-failure:${error || 'unknown'}`, text: detail };
 }
 
 export function claudeSettingsPath(config: GlobalConfig, window: string, agent: AgentName = 'claude'): string {
