@@ -16,7 +16,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 | A8 | YAML converts unquoted git identifiers such as 2742e697 into numbers. | `tests/spec.test.ts` (`^A8:`) | 0.22.2 | fails on v0.22.0 (1 failing of 1) |
 | A7 | Summary and out-of-order full report reads stay unread in events_since. | `tests/a7-report-pulled.test.ts` | 0.22.2 | fails on v0.22.0 (1 failing of 1) |
 | A6 | Scrolled Codex multiline drafts lose paste ownership and cannot be submitted. | `tests/p49-codex-queue.test.ts` (`^A6:`) | 0.22.2 | fails on v0.22.0 (1 failing of 1) |
-| A5 | Not every preview write accepts a token-only confirm; limits and reserve lacked preview_token. | `tests/mcp-token-confirm.test.ts` (`^A5:`) | 0.22.2 | fails on v0.22.0 (1 failing of 1) |
+| A5 | Not every preview write accepts a token-only confirm; limits and reserve lacked preview_token. | `tests/mcp-token-confirm.test.ts` (`^A5:`) | 0.22.2 | fails on v0.22.0 (2 failing of 2) |
 | A2 | WALL events disappear behind cohort filters and transport client cursors. | `tests/a2-wall-events.test.ts` | 0.22.2 | fails on v0.22.0 (1 failing of 1) |
 | A1 | MCP new/queue preview waits on git and runtime reads and loses its token at the budget. | `tests/p93-mcp-accept.test.ts` (`^A1:`) | 0.22.2 | fails on v0.22.0 (2 failing of 2) |
 | CONSULT-f2 | Consultation tasks inherited automatic review and failed detached-worktree admission (pre-fix unreleased 1c98117: 1 of 1 fails; absent on v0.21.0). | `tests/consult.test.ts` (`CONSULT-f2`) | 0.22.0 | cannot run on v0.21.0: the code under test did not exist there (import error) |
@@ -39,7 +39,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 | P83-write | MCP write previews (close/cancel/mark/gc/queue) ran worker measurements, du and git status and took seconds on large homes. | `tests/write-contracts.test.ts` | 0.19.3 | fails on v0.19.2 (4 failing of 4) |
 | P83-read | status, queue list and MCP reads walked every worktree again (read-path regression on large homes). | `tests/read-contracts.test.ts` | 0.19.2 | fails on v0.19.1 (4 failing of 5) |
 | P84 | MCP set_limits rejected integer strings such as "3" for a provider (P84/P79). | `tests/mcp-limit-strings.test.ts` | 0.19.2 | fails on v0.19.1 (1 failing of 1) |
-| P77 | Several two-phase MCP tools refused a confirm that carried only the preview_token. | `tests/mcp-token-confirm.test.ts` | 0.19.2 | NOT PROVEN: passes on v0.22.0 |
+| P77 | Several two-phase MCP tools refused a confirm that carried only the preview_token. | `tests/mcp-token-confirm.test.ts` | 0.19.2 | fails on v0.19.1 (2 failing of 2) |
 | L1 | A third gate entering while a live lock was displaced during stale-lock reclamation could own the gate lock too. | `tests/gate.test.ts` (`^L1`) | 0.19.1 | cannot run on v0.19.0: the code under test did not exist there (import error) |
 | F1 | Automatic .cache cleanup ran during a live turn or in a worktree shared with another open task. | `tests/p73-cache-clean.test.ts` (`^F1`) | 0.19.1 | cannot run on v0.19.0: the code under test did not exist there (import error) |
 | P65-b | peek of a Codex task with a collapsed question did not name the question text. | `tests/p65b-peek-question.test.ts` | 0.19.1 | fails on v0.19.0 (2 failing of 3) |

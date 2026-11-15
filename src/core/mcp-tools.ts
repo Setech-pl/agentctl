@@ -2065,6 +2065,37 @@ for (const tool of MCP_TOOLS) {
   });
 }
 
+/** Menu answers and enter_only keep their exact frame/delivery tokens; the generic token restores their arguments too. */
+for (const tool of MCP_TOOLS.filter(t => ['answer', 'send'].includes(t.name))) {
+  const run = tool.run, inputSchema = z.object(tool.input);
+  const pending = new WeakMap<McpDeps, Map<string, {args: Record<string, unknown>; token: string; at: number; result?: Promise<ToolResult>}>>();
+  tool.input = {...Object.fromEntries(Object.entries(tool.input).map(([key, schema]) => [key, z.optional(schema)])), preview_token: z.string().optional()};
+  tool.description += ' A preview also returns preview_token; confirm may carry only preview_token and confirm: true, restoring the menu/delivery arguments.';
+  tool.run = (deps, args) => guarded(async () => {
+    const {preview_token, confirm, ...input} = args;
+    let entries = pending.get(deps); if (!entries) {entries = new Map(); pending.set(deps, entries);}
+    if (confirm && typeof preview_token === 'string') {
+      const preview = entries.get(preview_token);
+      if (!preview) return fail('Confirmation refused: missing preview in this session. Preview again.');
+      const ctx = deps.context(() => {});
+      if (ctx.runner.now() - preview.at > ctx.config.preview.ttlS * 1000) return fail('Confirmation refused: TTL expired; preview again.');
+      if (Object.keys(input).length && JSON.stringify(canonical(input)) !== JSON.stringify(canonical(preview.args))) return fail('Confirmation refused: different arguments; preview again.');
+      preview.result ??= run(deps, {...preview.args, token: preview.token, confirm: true});
+      return preview.result;
+    }
+    const validated = inputSchema.parse(args);
+    const result = await run(deps, validated);
+    const token = (result.data as {token?: string} | undefined)?.token;
+    if (!confirm && !result.isError && token && (tool.name === 'answer' || args.enter_only)) {
+      const id = crypto.randomUUID();
+      if (entries.size >= 100) entries.delete(entries.keys().next().value!);
+      entries.set(id, {args: input, token, at: deps.context(() => {}).runner.now()});
+      return {...result, text: `${result.text}\npreview_token: ${id}`, data: {...(result.data as object), preview_token: id}};
+    }
+    return result;
+  });
+}
+
 /**
  * A WALL caller without `as` whose MCP client name is a chat of wall.chats gets that identity as an explicit argument, so the preview, its
  * confirm and a watcher applying the request later all see the same author. A token-only confirm carries the stored arguments.

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { it } from 'node:test';
 import { z } from 'zod';
 import { MCP_TOOLS, providerToolInput } from '../src/core/mcp-tools.ts';
@@ -48,7 +49,7 @@ it('P77: queue_rm token-only confirmation executes stored task; missing preview 
 });
 
 it('A5: table of write tools exposes token-only confirm schemas, including limits/reservations and WALL', async () => {
-  const exceptions = new Set(['send', 'answer', 'away']); // dedicated delivery/menu tokens; away executes without preview
+  const exceptions = new Set(['away']); // away executes without preview
   for (const t of MCP_TOOLS.filter(t => t.kind === 'write' && !exceptions.has(t.name))) {
     assert.ok(t.input.preview_token, t.name);
     assert.ok(z.object(t.input).safeParse({confirm: true, preview_token: 'preview'}).success, t.name);
@@ -63,4 +64,17 @@ it('A5: table of write tools exposes token-only confirm schemas, including limit
     assert.ok(!done.isError, done.text);
     assert.ok(!done.text.includes('Not executed'), done.text);
   }
+});
+
+it('A5: menu preview token alone restores task, option and frame token; retries press once', async () => {
+ const config = makeConfig(scratch.sub('a5-menu'), 'mcp: {allow: [answer]}\n');
+ const tmux = new FakeTmux(); tmux.add('menu', fs.readFileSync(new URL('./fixtures/screen-kimi-04-zgoda.txt', import.meta.url), 'utf8'));
+ seedTask(config, 'MENU', {agent: 'kimi'});
+ const ctx = new Context(new DiskRunner({dryRun: false, respond: tmux.respond}), config, () => {}), deps = {context: () => ctx, notify: async () => {}};
+ const preview = await tool('answer').run(deps, {task: 'MENU', option: 1});
+ const token = /preview_token: (\S+)/.exec(preview.text)![1];
+ const done = await tool('answer').run(deps, {confirm: true, preview_token: token});
+ assert.ok(!done.isError, done.text);
+ await tool('answer').run(deps, {confirm: true, preview_token: token});
+ assert.equal(tmux.seen.filter(c => c.startsWith('send-keys')).length, 1);
 });
