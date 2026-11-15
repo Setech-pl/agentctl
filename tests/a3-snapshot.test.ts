@@ -30,7 +30,7 @@ it('A3: atomic watch snapshot serves every bounded read with stalled processes a
   assert.match(result.text, /snapshot unavailable\/stale/i);
 });
 it('A3: GC preview is Accepted without slow checks and read back after watch', async () => {
-  const config = makeConfig(scratch.sub('gc')); fakeWatcher(config);
+  const config = makeConfig(scratch.sub('gc'), 'mcp: {allow: [gc]}\n'); fakeWatcher(config);
   const runner = new DiskRunner({dryRun: false, respond: new FakeTmux().respond});
   const ctx = new Context(runner, config, () => {}), deps = {context: () => ctx, notify: async () => {}};
   const tool = MCP_TOOLS.find(t => t.name === 'gc_preview')!;
@@ -40,4 +40,12 @@ it('A3: GC preview is Accepted without slow checks and read back after watch', a
   await applyMcpRequest(deps, request);
   const read = await tool.run(deps, {request_id: request.id});
   assert.match(read.text, /preview/);
+  const gc = MCP_TOOLS.find(t => t.name === 'gc')!;
+  const preview = await gc.run(deps, {});
+  assert.match(preview.text, /preview_token:/);
+  const token = /preview_token: (\S+)/.exec(preview.text)![1];
+  const confirm = await gc.run(deps, {confirm: true, preview_token: token});
+  assert.match(confirm.text, /^Accepted/);
+  const different = await gc.run(deps, {branches: true});
+  assert.match(different.text, /^Accepted/, 'different filters require watch to prepare a new plan');
 });

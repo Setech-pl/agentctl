@@ -423,6 +423,15 @@ async function runEventsSince(deps: McpDeps, args: { since?: string | undefined;
   return { text: renderEvents(report).join('\n'), data: report };
 }
 
+const gcPlanKey = (args: Record<string, unknown>) => createHash('sha256').update(JSON.stringify({cohort: args.cohort ?? null, older_than: args.older_than ?? null, branches: Boolean(args.branches ?? args.merged)})).digest('hex');
+const gcPlanPath = (ctx: Context, args: Record<string, unknown>) => path.join(ctx.config.stateDir, `gc-plan-${gcPlanKey(args)}.json`);
+function cachedGcPlan(ctx: Context, args: Record<string, unknown>): GcPlan | undefined {
+  try { const saved = JSON.parse(fs.readFileSync(gcPlanPath(ctx, args), 'utf8')); const age = ctx.runner.now() - saved.at;
+    if (saved.key === gcPlanKey(args) && age >= 0 && age < 2 * ctx.config.watch.interval * 1000) return saved.plan;
+  } catch { /* watch prepares it */ }
+  return undefined;
+}
+
 async function runGcPreview(deps: McpDeps, args: { request_id?: string; older_than?: string | undefined; merged?: boolean | undefined; cohort?: string | undefined; detail?: boolean; offset?: number; limit?: number }): Promise<ToolResult> {
   const ctx = deps.context(() => {});
   if (args.request_id) {
@@ -431,6 +440,7 @@ async function runGcPreview(deps: McpDeps, args: { request_id?: string; older_th
   }
   if (!deps.applying && watchAlive(ctx.config, ctx.runner.now())) return recordDeferred(deps, 'gc_preview', args, null, `gc_preview:${JSON.stringify(args)}`, undefined);
   const plan = await planGc(ctx, { olderThan: args.older_than, branches: args.merged, cohort: args.cohort, cachedSizes: true });
+  if (deps.applying) { fs.mkdirSync(ctx.config.stateDir, {recursive: true}); atomicWriteFile(gcPlanPath(ctx, args), JSON.stringify({at: ctx.runner.now(), key: gcPlanKey(args), plan})); }
   return ok(JSON.stringify({ ...gcView(plan, args), partial_result: 'Partial result: sizes are cached or measuring (unknown sizes count as 0); repeat for updated estimates.', preview: true, execution: ctx.config.mcp.allow.includes('gc') ? 'gc preview then confirm' : 'requires gc in mcp.allow or CLI --apply' }));
 }
 
@@ -1684,7 +1694,7 @@ function redactConfig(config: GlobalConfig): unknown {
  * P93b: the writes whose confirm can wait on start.lock, git, tmux or a scan of every task. With a watcher running, the confirm records the
  * request (mcp-requests.ts) and returns; the watcher applies it. `set_limits` stays synchronous: it writes config.yaml under no shared lock.
  */
-export const DEFERRED_TOOLS = new Set(['gc_preview', 'consult', 'unblock', 'queue_up', 'queue_rm', 'queue_retry', 'close', 'cancel', 'send', 'mark', 'hide', 'unhide', 'archive', 'cohort_add', 'cohort_remove', 'cohort_archive', 'cohort_note']);
+export const DEFERRED_TOOLS = new Set(['gc', 'gc_preview', 'consult', 'unblock', 'queue_up', 'queue_rm', 'queue_retry', 'close', 'cancel', 'send', 'mark', 'hide', 'unhide', 'archive', 'cohort_add', 'cohort_remove', 'cohort_archive', 'cohort_note']);
 /** The run of every tool before the confirm, format, budget and paging wrappers: what the watcher calls to apply a request. */
 const originalRuns = new Map<string, McpToolDef['run']>();
 
@@ -1725,7 +1735,9 @@ export async function applyMcpRequest(deps: McpDeps, request: McpRequest): Promi
       throw new AgentctlError(`changed preview: the ${request.tool} target scope changed since the preview; nothing was done`, 'Call the tool again without confirm, show the new scope to the user and confirm that.');
     }
   }
-  const result = request.tool === 'archive'
+  const result = request.tool === 'gc'
+    ? await writeTool(applying, 'gc', {}, async fresh => { const result = await applyGc(fresh, scope as GcPlan); await refreshDiskAfterGc(fresh, result.freedBytes); return {text: JSON.stringify(result), executed: true, announce: `gc: ${result.done.length} items, ${result.freedBytes} bytes`}; })
+    : request.tool === 'archive'
     ? await writeTool(applying, 'archive', {}, async (fresh) => { await applyArchive(fresh, scope as Awaited<ReturnType<typeof archiveClosed>>); return { text: JSON.stringify(scope, null, 2), executed: true, announce: 'archive closed task state' }; })
     : await guarded(() => run(applying, { ...request.args, confirm: true, _apply: true } as never));
   if (result.isError) throw new AgentctlError(result.text);
@@ -1979,7 +1991,11 @@ for (const tool of MCP_TOOLS) {
       return recordDeferred(deps, tool.name, effective, preview!.scope, preview!.key, token);
     }
     let scope: unknown;
-    try { scope = accepting ? null : await confirmationScope(ctx, tool.name, effective); }
+    if (!confirm && tool.name === 'gc' && deferMcpWrites(ctx)) {
+      scope = cachedGcPlan(ctx, effective);
+      if (!scope) return recordDeferred(deps, 'gc_preview', {...effective, merged: effective.branches}, null, `gc_preview:${gcPlanKey(effective)}`, undefined);
+    }
+    try { scope ??= accepting ? null : await confirmationScope(ctx, tool.name, effective); }
     catch (e) { audit(ctx, { tool: tool.name, outcome: 'error', detail: errorMessage(e) }); throw e; }
     // Argument identity is independent of mutable runtime facts. Destructive scopes are checked separately.
     const scopeIdentity = JSON.stringify(canonical(confirmationTargets(tool.name, scope)));
