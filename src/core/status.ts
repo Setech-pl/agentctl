@@ -1,3 +1,4 @@
+import { PATTERN_FLAGS } from './config.ts';
 import { tmuxLoss } from './tmux-loss.ts';
 import { provider, matchesProviderCommand, isProviderLauncher } from './providers/registry.ts';
 import { atomicWriteFile, stateWriteFailure } from './atomic-file.ts';
@@ -332,7 +333,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       hint: [lossHint, reportCandidate && reportCandidate !== record.report && !reportState.exists ? `Raport poza ścieżką kanoniczną; użyj report_from ze ścieżką ${reportCandidate}` : null, writeFailure ? `State write failed: ${writeFailure.reason}; old TASK.md preserved` : startupDialog ? record.promptError : unconfirmed ? record.promptError : record.promptDelivery === 'confirming' || record.promptDelivery === 'sending' ? (deliveryNote(record) ?? 'dostarczenie niepotwierdzone – sprawdzam; watch confirms within delivery_confirm_s') : record.promptDelivery === 'pending' ? 'original prompt pending; watch sends it once after folder trust and empty ready input' : stateHint(record.task, state, record.pin === true, record.supersededBy), !record.reportConfirmed && record.reportSource && path.normalize(record.reportSource) !== path.normalize(record.report) ? `raport pochodzi z kopii ${record.reportSource} – sprawdź` : null].filter(Boolean).join('; ') || null,
       // Codex: the session log names a pending request_user_input question exactly (the text of the expanded view),
       // for a collapsed one and for a waiting one alike; the screen reader covers every other dialog.
-      question: (record.agent === 'codex' ? sessionQuestion(config, record) : undefined) ?? (state === 'needs-input' ? ((startupDialog ? record.promptError : undefined) ?? extractQuestion(screenText) ?? (stored?.outcome === 'needs-input' && stored.text !== '' ? stored.text : null)) : null),
+      question: (record.agent === 'codex' && (state === 'needs-input' || (settings.asyncQuestionPattern && new RegExp(settings.asyncQuestionPattern, PATTERN_FLAGS).test(screenText))) ? sessionQuestion(config, record) : undefined) ?? (state === 'needs-input' ? ((startupDialog ? record.promptError : undefined) ?? extractQuestion(screenText) ?? (stored?.outcome === 'needs-input' && stored.text !== '' ? stored.text : null)) : null),
       ...((state === 'needs-input' || state === 'needs-trust') && alive ? { menuOptions: menuOptionLines(screenText) } : {}),
       pin: record.pin === true,
       finished: (!alive && !lossHint) || state === 'superseded',
