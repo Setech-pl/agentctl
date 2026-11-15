@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import { it } from 'node:test';
 import { z } from 'zod';
 import { MCP_TOOLS, providerToolInput } from '../src/core/mcp-tools.ts';
+import { composerFixture } from './composer-fixture.ts';
+import { areaKey, inspectField } from '../src/core/input-field.ts';
 import { Context } from '../src/core/context.ts';
 import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helpers.ts';
 import { readQueue, saveEntry } from '../src/core/queue.ts';
@@ -76,5 +78,20 @@ it('A5: menu preview token alone restores task, option and frame token; retries 
  const done = await tool('answer').run(deps, {confirm: true, preview_token: token});
  assert.ok(!done.isError, done.text);
  await tool('answer').run(deps, {confirm: true, preview_token: token});
+ assert.equal(tmux.seen.filter(c => c.startsWith('send-keys')).length, 1);
+});
+
+it('A5: enter_only preview token alone restores task and delivery token', async () => {
+ const config = makeConfig(scratch.sub('a5-enter'), 'mcp: {allow: [send_enter]}\n');
+ const message = 'Exact draft left by this delivery';
+ const screen = composerFixture(`❯ ${message}\n`), tmux = new FakeTmux(); tmux.add('draft', screen);
+ seedTask(config, 'DRAFT', {pendingPrompt: message, deliveryId: 'a5-delivery', promptDelivery: 'needs-attention', deliveryResult: 'not-delivered-in-field', deliveryStartedAt: new Date().toISOString(), deliveryField: areaKey(inspectField(screen, 'claude').area), promptKind: 'followup'});
+ const ctx = new Context(new DiskRunner({dryRun: false, respond: tmux.respond}), config, () => {}), deps = {context: () => ctx, notify: async () => {}};
+ const preview = await tool('send').run(deps, {task: 'DRAFT', enter_only: true});
+ assert.ok(!preview.isError, preview.text);
+ const token = /preview_token: (\S+)/.exec(preview.text)![1];
+ const done = await tool('send').run(deps, {confirm: true, preview_token: token});
+ assert.ok(!done.isError, done.text);
+ await tool('send').run(deps, {confirm: true, preview_token: token});
  assert.equal(tmux.seen.filter(c => c.startsWith('send-keys')).length, 1);
 });
