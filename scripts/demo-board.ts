@@ -19,7 +19,7 @@ import { shellQuote } from '../src/core/util.ts';
 export const COLUMNS = 160;
 export const ROWS = 24;
 /** The board's clock: 2026-11-04 10:42:07 UTC (the board runs with TZ=UTC). */
-const FIXED_MS = Date.UTC(2026, 10, 4, 10, 42, 7);
+export const FIXED_MS = Date.UTC(2026, 10, 4, 10, 42, 7);
 const minutes = (n: number): number => n * 60_000;
 
 type Provider = 'claude' | 'codex';
@@ -44,10 +44,10 @@ interface DemoTask {
   tokens: { input: number; output: number; cacheRead: number };
 }
 
-const CLAUDE_PROMPT = '─────────────────────────────────────────────────────────────────────────────\n❯ \n─────────────────────────────────────────────────────────────────────────────\n';
-const CODEX_PROMPT = '› Ask Codex to do anything\n';
+export const CLAUDE_PROMPT = '─────────────────────────────────────────────────────────────────────────────\n❯ \n─────────────────────────────────────────────────────────────────────────────\n';
+export const CODEX_PROMPT = '› Ask Codex to do anything\n';
 
-const TASKS: DemoTask[] = [
+export const TASKS: DemoTask[] = [
   {
     id: 'API-AUTH-1',
     cohort: 'sprint-1',
@@ -249,7 +249,7 @@ case "$1" in
   --help) ${help}; exit 0;;
 esac
 stty -echo 2>/dev/null
-printf '${name === 'claude' ? '❯ ' : '› Ask Codex to do anything'}\\n'
+printf '${name === 'claude' ? '────────────────────\\n❯ \\n────────────────────' : '› Ask Codex to do anything\\n  gpt-6.1-sol medium · ~/Projects/demo\\n  ? for shortcuts'}\\n'
 screen=${shellQuote(screens)}/"$(basename "$PWD")".txt
 while [ ! -f "$screen" ]; do sleep 0.2; done
 last=
@@ -265,7 +265,7 @@ done
 `;
 }
 
-function specText(h: Harness, repo: string, t: { id: string; cohort: string; agent: string; model: string; effort: string; reviewOf?: string | undefined; after?: string | undefined }): string {
+export function specText(h: Harness, repo: string, t: { id: string; cohort: string; agent: string; model: string; effort: string; reviewOf?: string | undefined; after?: string | undefined }): string {
   const wt = path.join(h.root, 'wt', t.id.toLowerCase());
   return `---
 task: ${t.id}
@@ -313,7 +313,7 @@ function codexLog(file: string, cwd: string, id: string, startMs: number, model:
 const gitOut = (h: Harness, cwd: string, args: string[]): string => spawnSync('git', args, { cwd, env: h.env, encoding: 'utf8' }).stdout;
 
 /** Write the report where the task's TASK.md says it goes. */
-function writeReport(h: Harness, id: string, text: string, mtimeMs: number): void {
+export function writeReport(h: Harness, id: string, text: string, mtimeMs: number): void {
   const status = JSON.parse(h.agentctl(['status', '--json']).stdout) as { rows?: { task: string; reportPath: string }[] } | { task: string; reportPath: string }[];
   const rows = Array.isArray(status) ? status : (status.rows ?? []);
   const p = rows.find((r) => r.task === id)?.reportPath;
@@ -346,7 +346,7 @@ notes: []
 `;
 
 /** The readings the agents' own status lines would have given two minutes before `nowMs`. */
-function writePlans(h: Harness, nowMs: number): void {
+export function writePlans(h: Harness, nowMs: number): void {
   const usage = path.join(h.agentctlHome, 'usage');
   const at = nowMs - minutes(2);
   const reset = (offsetMin: number): number => Math.floor((nowMs + minutes(offsetMin)) / 1000);
@@ -394,7 +394,7 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 const startMs = (t: DemoTask): number => FIXED_MS - minutes(t.runningMin) - 20_000;
 
 /** The repository, the six running tasks (idle agents so far), their commits, start times and session logs. Returns the repository and the screens directory. */
-function buildDemo(h: Harness): { repo: string; screens: string } {
+export function buildDemo(h: Harness): { repo: string; screens: string } {
   const screens = path.join(h.root, 'screens');
   fs.mkdirSync(screens, { recursive: true });
   for (const name of ['claude', 'codex'] as const) fs.writeFileSync(path.join(h.fakeBin, name), fakeAgent(name, screens), { mode: 0o755 });
@@ -432,7 +432,7 @@ function buildDemo(h: Harness): { repo: string; screens: string } {
   return { repo, screens };
 }
 
-function queueReviews(h: Harness, repo: string): void {
+export function queueReviews(h: Harness, repo: string): void {
   for (const q of QUEUED) {
     const file = path.join(h.root, `${q.id}.md`);
     fs.writeFileSync(file, specText(h, repo, q));
@@ -441,8 +441,8 @@ function queueReviews(h: Harness, repo: string): void {
   }
 }
 
-const writeScreens = (screens: string): void => TASKS.forEach((t) => writeFile(path.join(screens, `${t.id.toLowerCase()}.txt`), t.screen));
-const writeReports = (h: Harness): void => TASKS.forEach((t) => t.report && writeReport(h, t.id, t.report(gitOut(h, path.join(h.root, 'wt', t.id.toLowerCase()), ['rev-parse', 'HEAD']).trim()), FIXED_MS - minutes(3)));
+export const writeScreens = (screens: string): void => TASKS.forEach((t) => writeFile(path.join(screens, `${t.id.toLowerCase()}.txt`), t.screen));
+export const writeReports = (h: Harness): void => TASKS.forEach((t) => t.report && writeReport(h, t.id, t.report(gitOut(h, path.join(h.root, 'wt', t.id.toLowerCase()), ['rev-parse', 'HEAD']).trim()), FIXED_MS - minutes(3)));
 
 /** The board of the demo session at 160x24, with colours, on a frozen clock. */
 export async function captureBoard(cacheRoot: string): Promise<{ ansi: string; plain: string }> {

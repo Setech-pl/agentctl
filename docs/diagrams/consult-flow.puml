@@ -1,0 +1,37 @@
+@startuml consult-flow
+skinparam linetype ortho
+hide footbox
+title CONSULT: independent rounds → anonymous revision → synthesis → owner map
+actor Owner
+participant "CLI / MCP" as API
+participant Watch
+database "Private consult state" as State
+participant "Panel (2–26, ≥2 providers)" as Panel
+participant "Synthesis agent" as Synthesis
+Owner -> API: consult spec; preview panel × rounds + 1 and usage
+API --> Owner: High-cost plan; 1–3 rounds (default 2)
+Owner -> API: Confirm (MCP preview_token / CLI --confirm)
+API -> State: Durable consultation; seed / stable shuffled A–Z labels
+API --> Owner: Accepted
+loop Each round
+ Watch -> State: Frozen repo commits and context
+ Watch -> Panel: Accepted pinned, read_only tasks; detached snapshots
+ note right of Panel: No setup / links; commit guard + HEAD baseline.\nCooperative guard, not OS isolation.
+ Panel -> State: Complete current-attempt structured reports
+ Watch -> State: Validate Recommendation, Reasoning, Risks, Confidence, Unknowns
+ alt Later round
+  Watch -> State: Strip provider/self-identification + metadata
+  Watch -> Panel: All previous answers under stable labels; recipient marked yours
+  Panel -> State: Revised answers + Changed: yes/no and reason
+ end
+ Watch -> State: round-done event
+end
+Watch -> Synthesis: Anonymous final answers; no seed / identity map
+Synthesis -> State: GO / NO-GO / SPLIT; consensus, disagreement, recommendation, owner choice
+Watch -> State: Owner report = synthesis + de-anonymised identity map + findings
+Watch --> Owner: synthesis-ready event; get_report / pull via synthesis task
+opt post_to configured and permitted
+ Watch -> State: WALL summary once as owner (normal checks)
+end
+note over Panel,Synthesis: Anonymisation is best effort: style and content can identify authors.\nInvalid/incomplete answers wait for repair; cancellation blocks progression.\nRestart repairs partial registration without duplicate tasks/posts.
+@enduml

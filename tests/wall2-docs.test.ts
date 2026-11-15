@@ -15,9 +15,9 @@ describe('WALL-2: default chats, README example and guide', () => {
     assert.deepEqual(Object.fromEntries(Object.entries(chats).map(([n, c]) => [n, c.channels])), { nc: ['nc', 'agentctl', 'shared:*'], hems: ['hems', 'agentctl', 'shared:*'], agentctl: ['agentctl', 'shared:*'] });
   });
 
-  for (const name of ['README.md', 'README.pl.md']) {
+  for (const name of ['docs/en/configuration.md', 'docs/pl/configuration.md']) {
     it(`${name}: the owner's config example parses and equals the default chats, with mcp.allow: [wall]`, () => {
-      const block = /```yaml\n(mcp:\n {2}allow: \[wall\][\s\S]*?)```/.exec(readme(name))?.[1];
+      const block = /~~~yaml\n(mcp:\n {2}allow: \[wall\][\s\S]*?)~~~/.exec(readme(name))?.[1];
       assert.ok(block, 'the example is in the WALL section');
       const parsed = YAML.parse(block) as { mcp: { allow: string[] }; wall: unknown };
       assert.deepEqual(parsed.mcp.allow, ['wall']);

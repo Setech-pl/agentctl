@@ -31,6 +31,15 @@ All notable changes to this project are documented here. The format follows [Kee
 - A2: WALL bypasses cohort filters, uses chat identity cursors and repeats a bounded open inbox. / WALL omija filtry kohorty, używa kursora tożsamości czatu i pokazuje otwartą skrzynkę.
 
 - A1: MCP new/queue previews perform cheap validation; watch checks base/overlap, worktrees, limits and disk after acceptance. / Podglądy new/queue wykonują tanią walidację; watch sprawdza bazę, konflikty, worktree, limity i dysk po przyjęciu.
+## [0.22.1] - 2026-11-15
+
+- Final documentation QA: repair the GLM cross-page anchor, configure local demo Git identity and terminate the cancelled sequence path explicitly. / Końcowe QA: poprawny odnośnik GLM, lokalna tożsamość Git demo i jawny koniec ścieżki anulowania.
+
+- Documentation validation: type the recursive file inventory explicitly; freeze demo host readings and show a populated WALL filter. No runtime behavior change. / Walidacja dokumentacji: jawny typ inwentarza, stałe odczyty hosta demo i filtr WALL z wynikiem. Bez zmiany runtime.
+
+- Documentation-only release: matching EN/PL manuals, concise front pages, from-zero installation/tutorial, all 67 MCP tools/four permission groups and 204 configuration keys, provider and token-economics guidance, Project inserts and ordering guide. / Wydanie dokumentacji: zgodne instrukcje EN/PL, zwięzłe strony główne, instalacja/samouczek od zera, 67 narzędzi MCP/cztery grupy i 204 klucze konfiguracji, dostawcy/ekonomia, wstawki Projektu i przewodnik zlecającego.
+- Twenty real TUI captures from an isolated fake-provider demo; local C4 Context/Containers and task/WALL/CONSULT sequence diagrams with PlantUML, SVG and PNG. Runtime behavior is unchanged from 0.22.0. / Dwadzieścia prawdziwych zrzutów TUI z izolowanego demo atrap; lokalne C4 i sekwencje zadania/WALL/CONSULT w PlantUML, SVG i PNG. Runtime bez zmian względem 0.22.0.
+- Documentation links, bilingual coverage, generated schemas and image/diagram artifacts are checked by the quick gate; release notes summarize the 0.20.x–0.22.x series. / Quick gate sprawdza linki, pokrycie językowe, schematy i artefakty; notes podsumowują serię 0.20.x–0.22.x.
 
 
 ## [0.22.0] - 2026-11-14

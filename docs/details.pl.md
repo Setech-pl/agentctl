@@ -220,7 +220,7 @@ potem linia werdyktu w nagłówku raportu (przed pierwszym nagłówkiem `##`, bl
 
 ## Powiadomienia na telefon
 
-Gdy away jest włączone, kopia zdarzeń, które dostaje Mac, idzie na telefon przez [ntfy](https://ntfy.sh). Przegląd i kroki konfiguracji są w [README](../README.pl.md#powiadomienia-na-telefon); tu jest opis działania.
+Gdy away jest włączone, kopia zdarzeń, które dostaje Mac, idzie na telefon przez [ntfy](https://ntfy.sh). Przegląd i kroki konfiguracji są w [README](pl/features.md#watch-board-i-powiadomienia); tu jest opis działania.
 
 - **Jedno miejsce.** Każde ogłoszone zdarzenie trafia do dziennika (`<katalog konfiguracji>/journal.jsonl`) raz, po deduplikacji Maca (zdarzenie agenta i odczyt ekranu przez obserwatora tej samej zmiany to jedno). Zapis przechodzi przez `notifyPhone`: jeśli ustawiony jest temat, away jest włączone (albo `notify.ntfy.always`) i zdarzenie jest w `notify.ntfy.events`, wysyła żądanie. Telefon nie może więc dostać zdarzenia dwa razy ani takiego, którego Mac nie ogłosił. Wpis w dzienniku dostaje `phone: sent` albo `phone: queued` (`events` drukuje za nim 📱). `orphan` i `usage-critical` (okno planu powyżej `usage.critical`) stały się w tym celu zdarzeniami dziennika; zwykłe ostrzeżenie `usage` zostaje na Macu.
 - **Away.** `<katalog konfiguracji>/away.json` trzyma `{on, since, by}`; `by` to `cli`, `board`, `mcp` albo `auto`. Obserwator, hooki zdarzeń, board i serwer MCP czytają ten sam plik, więc zmiana jest widoczna wszędzie od razu. Z `away.auto_idle: N` każdy tick obserwatora pyta `ioreg -c IOHIDSystem` o `HIDIdleTime`: bezczynność przez N minut włącza away (`by: auto`), pierwsza aktywność wyłącza je z powrotem, ale tylko to, co włączyło `auto`. Ręczne `away off` przy wciąż bezczynnym Macu nie jest cofane, dopóki nie wystąpi aktywność. Gdy `ioreg` zawodzi, nic się nie dzieje.
@@ -232,7 +232,7 @@ Gdy away jest włączone, kopia zdarzeń, które dostaje Mac, idzie na telefon p
 
 ## Zdalne sterowanie i manager
 
-Przegląd i kroki są w [README](../README.pl.md#sterowanie-z-telefonu); tu jest, jak to działa i co sprawdzono (a czego nie). Źródła: strona Remote Control w dokumentacji Claude Code (https://code.claude.com/docs/en/remote-control, opis CLI i opis błędów) oraz `claude --help` i `claude remote-control --help` zainstalowanego Claude Code 2.1.309 - czytane były tylko teksty pomocy, żadna prawdziwa sesja nie została uruchomiona.
+Przegląd i kroki są w [README](pl/features.md#watch-board-i-powiadomienia); tu jest, jak to działa i co sprawdzono (a czego nie). Źródła: strona Remote Control w dokumentacji Claude Code (https://code.claude.com/docs/en/remote-control, opis CLI i opis błędów) oraz `claude --help` i `claude remote-control --help` zainstalowanego Claude Code 2.1.309 - czytane były tylko teksty pomocy, żadna prawdziwa sesja nie została uruchomiona.
 
 | Sposób | Co to jest | Użycie w agentctl |
 |---|---|---|

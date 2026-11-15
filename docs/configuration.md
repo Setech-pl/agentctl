@@ -24,7 +24,7 @@ Column "Layers": **g** global config, **p** project config, **s** spec.
 | `links[].from` | path | required | g p s | Where the link goes, relative to the first worktree. A glob links every match. |
 | `links[].to` | path | required | g p s | What it points at. Must exist. `from` and `to` ending in `/*` make one link per entry of the directory. |
 | `env` | mapping | `{}` | g p s | Environment variables of the tmux window (strings, numbers or booleans). |
-| `report` | path or list | `{cache}/{task}/{TASK}.md` | g p s | Where the agent writes its report. Used by `status`, `pull` and the notifications. A list: the first entry is the canonical path, the others are places to look (paths and globs `*`, `?`, `**`; absolute, `~/` or relative to the worktree; `{task}` and `{TASK}` work), e.g. `[~/workspace/cache/{task}/{TASK}.md, docs/reports/*{task}*.md, docs/reports/*{TASK}*.md]`. Fresh alternatives bearing the task ID become candidate flags (see [Report detection](details.md#report-detection)); copying requires explicit `report --from` / `report_from`. |
+| `report` | path or list | `{cache}/{task}/{TASK}.md` | g p s | Where the agent writes its report. Used by `status`, `pull` and the notifications. A list: the first entry is the canonical path, the others are places to look (paths and globs `*`, `?`, `**`; absolute, `~/` or relative to the worktree; `{task}` and `{TASK}` work), e.g. `[~/Projects/cache/{task}/{TASK}.md, docs/reports/*{task}*.md, docs/reports/*{TASK}*.md]`. Fresh alternatives bearing the task ID become candidate flags (see [Report detection](details.md#report-detection)); copying requires explicit `report --from` / `report_from`. |
 | `setup` | list of strings | `[]` | g p s | Shell commands run after `git worktree add` and before the links; a failing command stops `new`. Every repository runs its own setup in its own worktree: `repos[].setup` in the spec, else the `setup` of that repository's `.agentctl.yaml`. The top-level spec `setup` and the global one belong to the first repository only (compatible with single-repo specs). The preview lists them per repository (`backend 1/1, client 1/1`). The chat (MCP) cannot send `setup`, top-level or per repo; project config setup still runs. |
 | `defaults` | mapping | `{}` | g p | Values for a spec that leaves them out: `agent`, `model`, `effort`. |
 | `defaults.agent` | active `claude`, `codex` or `kimi` | none | g p | Agent when the spec has no `agent`. |
@@ -42,7 +42,7 @@ Column "Layers": **g** global config, **p** project config, **s** spec.
 | `providers_config.glm.env` | mapping | `{CLAUDE_CODE_AUTO_MODE_SERVER: "0"}` | g | Environment of every GLM task, added to the built-in default; a key you set wins over the default. The Z.ai endpoint and token (`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`) are refused: they come only from the wrapper. |
 | `start_failure` | mapping | `{keep_window: true}` | g | What a start that did not reach the agent's input leaves behind. |
 | `start_failure.keep_window` | boolean | `true` | g | `true`: the window of a failed start (the agent never showed its input) stays open for diagnosis, and its last screen is saved in `<state_dir>/<task>/start-failure-screen.txt` either way. `queue_retry` closes the leftover window first. `false`: the window is closed at once (the capture stays), so it cannot hold a provider slot. A window that waits for you (folder trust, first-run onboarding) is never closed. |
-| `cache` | path | `~/workspace/cache` | g | Directory with one folder per task, `<cache>/<task>/`: the only place the agents write to (reports). |
+| `cache` | path | `~/Projects/cache` | g | Directory with one folder per task, `<cache>/<task>/`: the only place the agents write to (reports). |
 | `state_dir` | path | `<config dir>/tasks` | g | agentctl's own state per task (`TASK.md`, `setup.log`, `event.json`, `notified.json`), out of the agents' reach. Closed tasks are archived next to it, in `archive/`. |
 | `tmux` | mapping | socket unset | g | Optional dedicated tmux server. |
 | `tmux.socket` | string | unset | g | Server name passed to `tmux -L` for every invocation; letters, digits, `_` and `-`. Default: existing server selection. Doctor checks server/session AGENTCTL_HOME. |
@@ -110,7 +110,7 @@ Default icons: `working` ⚙, `background` ⏳, `waiting` ⏸, `needs-input` ?, 
 
 ### `manager`
 
-The session started by `agentctl manager`: Claude Code with [Remote Control](https://code.claude.com/docs/en/remote-control), the agentctl MCP server and a role that makes it a dispatcher. See [Remote control from your phone](../README.md#remote-control-from-your-phone) and [the details](details.md#remote-control-and-the-manager).
+The session started by `agentctl manager`: Claude Code with [Remote Control](https://code.claude.com/docs/en/remote-control), the agentctl MCP server and a role that makes it a dispatcher. See [Remote control from your phone](en/features.md#watch-board-and-notifications) and [the details](details.md#remote-control-and-the-manager).
 
 | Key | Type | Default | Layers | Meaning |
 |---|---|---|---|---|
@@ -240,7 +240,7 @@ Queued tasks live in `<config dir>/queue/` (one JSON file each, with the spec te
 | `agents.<agent>.limit_patterns` | list of regexes | see below | g | The usage limit is used up (state `limited`). A message has to open its line, so a diff or a quoted sentence is not taken for one. |
 | `agents.<agent>.background_patterns` | list of regexes | see below | g | The agent waits for its own shells or monitors (state `background`). |
 
-The built-in values, as the code has them (a test compares this block with `src/core/config.ts`). The Codex limit and background patterns come from strings in the binary, not from a real screen; see [Limitations](../README.md#limitations).
+The built-in values, as the code has them (a test compares this block with `src/core/config.ts`). The Codex limit and background patterns come from strings in the binary, not from a real screen; see [Limitations](en/overview.md#boundaries).
 
 ```yaml
 claude:
@@ -475,7 +475,7 @@ overload:
   message: kontynuuj
 ```
 
-The final report line `<!-- agentctl:report-end -->` explicitly completes a write. Without it the report needs an ended turn and settle_s; a partial canonical file is a candidate. new/queue prompts include report instructions and current attempt ID. TASK.md keeps attempt, attempt_id, attempt_started and the previous report fingerprint; resume starts another attempt, move/new/retry get fresh identities. Old report content cannot complete a new attempt just by touching its mtime. A FAIL report still satisfies after; agent self assessment and user mark remain independent.
+The final report line `<!-- agentctl:report-end -->` explicitly completes a write. Without it the report needs an ended turn and settle_s; a partial canonical file is a candidate. new/queue prompts include report instructions and current attempt ID. TASK.md keeps attempt, attempt_id, attempt_started and the previous report fingerprint; resume starts another attempt, move/new/retry get fresh identities. Old report content cannot complete a new attempt just by touching its mtime. A FAIL report blocks after by default unless explicitly accepted with after_verdict; agent self assessment and user mark remain independent.
 
 Auto-retry rechecks report/candidate, window identity, prompt, draft, work, trust and question before paste and again before Enter. A failure is journaled and watch continues. Retry of a timed-out checkout requires registration, toplevel, successful clean tracked git status, no index.lock, expected HEAD/branch and no task/git process or window. Uncertain residue is preserved with repair instructions.
 
@@ -537,7 +537,7 @@ PL: `ui.instance_name` nadpisuje automatyczną etykietę `agentctl` / `agentctl-
 
 `repos[].base: "@TASK"` uses that task's output commit, otherwise its branch HEAD. `"@TASK:repo-name"` selects one repository. Resolution happens at start; the exact existing commit and original reference are saved in TASK.md and displayed in the new preview. Queue entries retain the reference until start. Missing tasks, commits, branches and ambiguous repositories block start.
 
-Automatic review requires an explicit author `repos[].branch`. The review shares the author's worktree/branch, uses `review_of` and `after`, and is prompted to read only and write its separate report. Start validates that the shared checkout is clean. A missing provider/model/template/base leaves the author report ready and records a visible review error. Defaults come from `equivalents`, not model guesses. An explicit same-provider model is allowed only when different from the author.
+Automatic review requires an explicit author `repos[].branch`. The review has its own detached worktree at the author's recorded commit, uses `review_of` and `after`, and is prompted to read only and write its separate report. Start validates author turn/report/delivery/Git guards and keeps the review checkout isolated. A missing provider/model/template/base leaves the author report ready and records a visible review error. Defaults come from `equivalents`, not model guesses. An explicit same-provider model is allowed only when different from the author.
 
 PL: `outputs` to fakty autora, bez wykonywania `actions.shell` i bez scalania. Błędny/brakujący blok ostrzega, ale raport nadal jest gotowy. `after` może wymagać konkretnego werdyktu. `review: auto` tworzy przegląd po raporcie, `rerun` włącza przeglądy delty. `limited` wznawia wyłącznie na tym samym dostawcy/modelu, z pustym polem i kontrolą przed Enterem. Zbiorczy `mark` zapisuje ocenę podaną przez użytkownika, po podglądzie zakresu. F12 wraca do boarda własnej sesji, także przy równoległym `agentctl-dev`.
 

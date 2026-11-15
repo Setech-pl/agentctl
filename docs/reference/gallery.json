@@ -1,0 +1,132 @@
+{
+  "session": "agentctl-demo",
+  "columns": 160,
+  "rows": 45,
+  "inference": false,
+  "captures": [
+    {
+      "name": "board-main",
+      "bytes": 154051
+    },
+    {
+      "name": "board-peek",
+      "bytes": 171203
+    },
+    {
+      "name": "board-message",
+      "bytes": 174995
+    },
+    {
+      "name": "board-confirm",
+      "bytes": 173670
+    },
+    {
+      "name": "board-cancel-reason",
+      "bytes": 173400
+    },
+    {
+      "name": "board-help",
+      "bytes": 208116
+    },
+    {
+      "name": "board-cohorts",
+      "bytes": 175899
+    },
+    {
+      "name": "board-limits",
+      "bytes": 86579
+    },
+    {
+      "name": "board-capacity",
+      "bytes": 151720
+    },
+    {
+      "name": "board-gc",
+      "bytes": 70240
+    },
+    {
+      "name": "board-log",
+      "bytes": 51855
+    },
+    {
+      "name": "board-queue",
+      "bytes": 164177
+    },
+    {
+      "name": "wall-channels",
+      "bytes": 70624
+    },
+    {
+      "name": "wall-messages",
+      "bytes": 60042
+    },
+    {
+      "name": "wall-filter-status",
+      "bytes": 46155
+    },
+    {
+      "name": "wall-filter-kind",
+      "bytes": 47573
+    },
+    {
+      "name": "wall-thread",
+      "bytes": 81784
+    },
+    {
+      "name": "board-report-fail",
+      "bytes": 153470
+    },
+    {
+      "name": "board-finished-menu",
+      "bytes": 161281
+    },
+    {
+      "name": "board-all",
+      "bytes": 157951
+    }
+  ],
+  "taskStates": [
+    {
+      "task": "API-AUTH-1",
+      "state": "report-ready"
+    },
+    {
+      "task": "DB-MIGRATE-3",
+      "state": "working"
+    },
+    {
+      "task": "DOCS-SEARCH-1",
+      "state": "background"
+    },
+    {
+      "task": "FAIL-DEMO",
+      "state": "report-ready"
+    },
+    {
+      "task": "LIMIT-DEMO",
+      "state": "limited"
+    },
+    {
+      "task": "PERF-CACHE-2",
+      "state": "working"
+    },
+    {
+      "task": "REVIEW-API-AUTH-1",
+      "state": "working"
+    },
+    {
+      "task": "TRUST-DEMO",
+      "state": "needs-trust"
+    },
+    {
+      "task": "UI-CART-2",
+      "state": "needs-input"
+    },
+    {
+      "task": "WAIT-DEMO",
+      "state": "waiting"
+    }
+  ],
+  "queue": "after + queue_hold; CONSULT accepted",
+  "syntheticDelivery": "Marked fixture initial prompts sent; no real model turn"
+}

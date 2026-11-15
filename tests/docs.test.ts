@@ -4,7 +4,9 @@ import path from 'node:path';
 import { describe, it } from 'node:test';
 import { COMMAND_EXAMPLES, commandPath } from '../src/examples.ts';
 import { allCommands, loadProgram, renderCommandsMarkdown } from '../src/help.ts';
-import { MCP_TOOLS } from '../src/core/mcp-tools.ts';
+import { MCP_TOOLS, providerToolInput } from '../src/core/mcp-tools.ts';
+import { z } from 'zod';
+import type { GlobalConfig } from '../src/core/config.ts';
 import { TASK_STATES } from '../src/core/icons.ts';
 import { AGENT_KEYS, BOARD_KEYS, DEFAULT_AGENT_SETTINGS, DEFAULTS_KEYS, GLOBAL_KEYS, LAYER_KEYS, LINK_KEYS, MCP_KEYS, NOTIFY_KEYS, NTFY_KEYS, AWAY_KEYS, MANAGER_KEYS, WATCH_KEYS } from '../src/core/config.ts';
 import { REPO_KEYS, SPEC_KEYS } from '../src/core/spec.ts';
@@ -88,8 +90,8 @@ describe('docs: configuration', () => {
     }
   });
 
-  it('the README mentions every task state', () => {
-    for (const state of TASK_STATES) assert.ok(read('README.md').includes(`\`${state}\``), `README does not mention the state ${state}`);
+  it('both feature manuals describe every task state', () => {
+    for (const lang of ['en', 'pl']) for (const state of TASK_STATES) assert.ok(read('docs', lang, 'features.md').includes(String.fromCharCode(96) + state + String.fromCharCode(96)), lang + ': missing ' + state);
   });
 });
 
@@ -101,7 +103,7 @@ describe('docs: mcp', () => {
 });
 
 describe('docs: links and versions', () => {
-  const files = ['README.md', 'README.pl.md', 'CHANGELOG.md', 'CONTRIBUTING.md', ...fs.readdirSync(path.join(REPO_ROOT, 'docs')).filter((f) => f.endsWith('.md')).map((f) => `docs/${f}`)];
+  const files = ['README.md', 'README.pl.md', 'CHANGELOG.md', 'CONTRIBUTING.md', ...fs.readdirSync(path.join(REPO_ROOT, 'docs'), { recursive: true }).map(String).filter((f) => f.endsWith('.md')).map((f) => `docs/${f}`)];
 
   it('relative links and anchors in the documents point at something that exists', () => {
     const problems: string[] = [];
@@ -114,7 +116,7 @@ describe('docs: links and versions', () => {
     };
     for (const file of files) {
       const text = read(file);
-      const withoutCode = text.replace(/```[\s\S]*?```/g, '');
+      const withoutCode = text.replace(/```[\s\S]*?```|~~~[\s\S]*?~~~/g, '');
       for (const m of withoutCode.matchAll(/\]\(([^)\s]+)\)/g)) {
         const target = m[1]!;
         if (/^(https?:|mailto:)/.test(target)) continue;
@@ -138,34 +140,60 @@ describe('docs: links and versions', () => {
     assert.equal(newest, version, 'the newest released version in CHANGELOG.md must be the version in package.json');
   });
 
-  it('the English README has the diagrams of docs/diagrams.md, and the Polish one has the same five diagrams', () => {
-    const blocks = (text: string): string[] => [...text.matchAll(/```mermaid\n([\s\S]*?)```/g)].map((m) => m[1]!);
-    const diagrams = blocks(read('docs', 'diagrams.md'));
-    assert.deepEqual(diagrams.map((d) => d.split('\n')[0]), ['sequenceDiagram', 'sequenceDiagram', 'sequenceDiagram', 'flowchart TB', 'stateDiagram-v2']);
-    assert.deepEqual(blocks(read('README.md')).sort(), [...diagrams].sort());
-    assert.deepEqual(blocks(read('README.pl.md')).map((d) => d.split('\n')[0]), diagrams.map((d) => d.split('\n')[0]));
+  it('both front pages link the local C4 and real screenshot gallery', () => {
+    for (const file of ['README.md', 'README.pl.md']) {
+      assert.ok(read(file).includes('](docs/diagrams/context.svg)'));
+      assert.ok(read(file).includes('](docs/img/board-main.png)'));
+      assert.ok(read(file).length < 6000, 'front page stays concise');
+    }
+    for (const name of ['context', 'containers', 'task-lifecycle', 'wall-flow', 'consult-flow']) {
+      const source = read('docs', 'diagrams', name + '.puml');
+      assert.ok(source.includes('skinparam linetype ortho'));
+      if (name === 'context' || name === 'containers') {
+        assert.match(source, /!include <C4\//);
+        assert.ok(source.includes('SHOW_LEGEND()'));
+      }
+      const png = fs.readFileSync(path.join(REPO_ROOT, 'docs/diagrams', name + '.png'));
+      assert.equal(png.subarray(1, 4).toString(), 'PNG');
+      assert.ok(read('docs', 'diagrams', name + '.svg').startsWith('<svg'));
+    }
   });
 });
 
-describe('docs: the README top (screenshot and demo output)', () => {
-  it('both READMEs show the board image and the texts that `npm run docs:screenshot` writes', () => {
-    for (const file of ['README.md', 'README.pl.md']) {
-      const readme = read(file);
-      assert.ok(readme.includes('](docs/img/board.svg)'), `${file}: no board image`);
-      for (const name of ['events_since.txt', 'pull_ready.txt']) assert.ok(readme.includes(read('docs', 'demo', name).trimEnd()), `${file}: the block of docs/demo/${name} is missing or out of date`);
+describe('docs: release inventories and screenshots', () => {
+  it('bilingual chapters and all generated MCP schemas match the runtime registry', () => {
+    const en = fs.readdirSync(path.join(REPO_ROOT, 'docs/en')).sort();
+    assert.deepEqual(fs.readdirSync(path.join(REPO_ROOT, 'docs/pl')).sort(), en);
+    const inventory = JSON.parse(read('docs', 'reference', 'mcp-tools.json'));
+    const config = { providers: ['claude', 'codex', 'kimi', 'glm'] } as GlobalConfig;
+    assert.deepEqual(inventory.tools.map((t: { name: string }) => t.name), MCP_TOOLS.map(t => t.name));
+    for (const [i, tool] of MCP_TOOLS.entries()) {
+      assert.deepEqual(inventory.tools[i].input, z.toJSONSchema(z.object(providerToolInput(tool, config))), tool.name);
+      for (const lang of ['en', 'pl']) assert.ok(read('docs', lang, 'mcp-tools.md').includes('| ' + String.fromCharCode(96) + tool.name + String.fromCharCode(96) + ' |'));
     }
-    for (const image of ['board.svg', 'board.png']) assert.ok(fs.existsSync(path.join(REPO_ROOT, 'docs', 'img', image)), `docs/img/${image} is missing`);
+    for (const lang of ['en', 'pl']) for (const key of [...GLOBAL_KEYS, ...SPEC_KEYS, 'capacity.claude_usage_probe', 'report.clean_worktree_cache']) {
+      assert.ok(read('docs', lang, 'configuration.md').includes('| ' + String.fromCharCode(96) + key + String.fromCharCode(96) + ' |'), lang + ': ' + key);
+    }
   });
-
-  it('nothing of the machine is in the generated texts and images', () => {
-    for (const rel of ['img/board.svg', 'demo/events_since.txt', 'demo/pull_ready.txt']) assert.doesNotMatch(read('docs', ...rel.split('/')), /\/Users\/|\/home\/(?!demo\/)|neon/i, rel);
+  it('gallery uses real captured 160x45 views and all final PNGs are present', () => {
+    const manifest = JSON.parse(read('docs', 'reference', 'gallery.json'));
+    assert.equal(manifest.inference, false);
+    assert.equal(manifest.columns, 160); assert.equal(manifest.rows, 45);
+    assert.ok(manifest.captures.length >= 20);
+    for (const { name } of manifest.captures) {
+      const png = fs.readFileSync(path.join(REPO_ROOT, 'docs/img', name + '.png'));
+      assert.equal(png.subarray(1, 4).toString(), 'PNG');
+      for (const lang of ['en', 'pl']) assert.ok(read('docs', lang, 'screenshots.md').includes('../img/' + name + '.png'));
+    }
+    for (const state of ['working', 'waiting', 'needs-input', 'needs-trust', 'limited', 'report-ready']) assert.ok(manifest.taskStates.some((r: { state: string }) => r.state === state), state);
+    for (const rel of ['img/board.svg', 'demo/events_since.txt', 'demo/pull_ready.txt', 'reference/gallery.json']) assert.doesNotMatch(read('docs', ...rel.split('/')), /\/Users\/|\/home\/(?!demo\/)|neon/i, rel);
   });
 });
 
 describe('docs: details.pl.md is a full equivalent of details.md', () => {
   const en = read('docs', 'details.md');
   const pl = read('docs', 'details.pl.md');
-  const headings = (text: string): string[] => [...text.replace(/```[\s\S]*?```/g, '').matchAll(/^(#{1,6})\s/gm)].map((m) => m[1]!);
+  const headings = (text: string): string[] => [...text.replace(/```[\s\S]*?```|~~~[\s\S]*?~~~/g, '').matchAll(/^(#{1,6})\s/gm)].map((m) => m[1]!);
 
   it('has the same headings (levels and order), code blocks and table rows', () => {
     assert.deepEqual(headings(pl), headings(en));
@@ -173,11 +201,8 @@ describe('docs: details.pl.md is a full equivalent of details.md', () => {
     assert.equal((pl.match(/^\|/gm) ?? []).length, (en.match(/^\|/gm) ?? []).length);
   });
 
-  it('README.pl.md links to the Polish details, not the English ones', () => {
-    const readme = read('README.pl.md');
-    const links = [...readme.matchAll(/\]\((docs\/details(?:\.pl)?\.md)[#)]/g)].map((m) => m[1]);
-    assert.ok(links.length > 5);
-    assert.ok(links.every((l) => l === 'docs/details.pl.md' || l === 'docs/details.md'));
-    assert.equal(readme.match(/\]\(docs\/details\.md#/g), null, 'an anchor link into the English details');
+  it('the Polish front page links the Polish manual', () => {
+    assert.ok(read('README.pl.md').includes('](docs/pl/overview.md)'));
+    assert.doesNotMatch(read('README.pl.md'), /\]\(docs\/en\//);
   });
 });
