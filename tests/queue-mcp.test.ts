@@ -150,20 +150,21 @@ describe('mcp: queue write tools', () => {
     assert.equal(t.audit().at(-1)!.outcome, 'done');
   });
 
-  it('validates like the CLI (unknown after, a circle), refuses setup, and shows touches warnings and the review hint in the summary', async () => {
+  it('defers dependency/overlap checks, refuses setup, and preserves the review hint in the summary', async () => {
     const t = setup('qv', 'mcp: {allow: [queue]}\n');
     t.running('A-1', ['src/menu/a.ts']);
     await collectStatus(new Context(t.runner, t.config, () => {})); // cached collision sample from watch
     const bad = await t.call('queue', { spec: t.spec('Q-1', 'after: NOPE-1\n') });
-    assert.equal(bad.isError, true);
-    assert.match(bad.text, /after NOPE-1: there is no such task/);
+    assert.ok(!bad.isError, bad.text);
+    assert.match(bad.text, /checked by watch at accept/);
+    assert.match(bad.text, /after: NOPE-1/);
     const setupSpec = t.spec('Q-2').replace('repos:', 'setup: [rm -rf /]\nrepos:');
     await t.call('queue', { spec: setupSpec });
     const refused = await t.call('queue', { spec: setupSpec, confirm: true });
     assert.equal(refused.isError, true);
-    assert.match(refused.text, /Confirmation refused: missing preview/);
+    assert.match(refused.text, /Confirmation refused: (missing preview|different argument hash)/);
     const warn = await t.call('queue', { spec: t.spec('Q-3', 'touches: src/menu/**\n') });
-    assert.match(warn.text, /⚠ Q-3 touches src\/menu\/\*\*, and A-1 already changes 1 matching file/);
+    assert.match(warn.text, /Base\/overlap.*checked by watch at accept/);
     const hint = await t.call('queue', { spec: t.spec('Q-4', 'review_of: A-1\nmodel: sonnet\n') });
     assert.match(hint.text, /hint: .*add "after: A-1"/);
     assert.deepEqual(readQueue(t.config), []);

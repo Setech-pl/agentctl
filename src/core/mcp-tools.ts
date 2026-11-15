@@ -53,7 +53,7 @@ import { stableScript } from './mcp-install.ts';
 import { closeTask, closeTasks, planClose } from './close.ts';
 import { cohortEntries, cohortRows, findCohort, openCohortTasks, summarizeCohorts } from './cohort.ts';
 import { collectOverlaps, collideText } from './collisions.ts';
-import { ACCEPTED_TEXT, acceptSpecs, describeQueue, directStartText, findDirectStart, planQueueAdd, queueDependencyRows, readQueue, removeFromQueue, waiting, watchAlive, withAcceptLock } from './queue.ts';
+import { ACCEPTED_TEXT, acceptSpecs, isPaused, describeQueue, directStartText, findDirectStart, planQueueAdd, queueDependencyRows, readQueue, removeFromQueue, waiting, watchAlive, withAcceptLock } from './queue.ts';
 import { acceptedText, deferMcpWrites, readMcpRequests, recordMcpRequest } from './mcp-requests.ts';
 import type { McpRequest } from './mcp-requests.ts';
 import { readSetupProgress } from './setup-progress.ts';
@@ -1011,6 +1011,20 @@ function acceptedOrders(ctx: Context, raws: RawSpec[], planned: AcceptedOrder[] 
 }
 export function plannedOrder(s: ResolvedSpec): AcceptedOrder {
   return { task: s.task, agent: s.agent, model: s.model, effort: s.effort, priority: s.priority, after: s.after, ...(s.afterVerdicts ? { afterVerdicts: s.afterVerdicts } : {}), ...(s.reviewOf ? { reviewOf: s.reviewOf } : {}), ...(s.cohort ? { cohort: s.cohort } : {}) };
+}
+
+/** Preview metadata that is already in the spec/config, with no runtime census. */
+function cheapSpecSummary(ctx: Context, specs: ResolvedSpec[], queued: boolean): string[] {
+  const summary = summarizeSpecs(specs);
+  if (!queued) return summary;
+  return [...summary.map(line => {
+    const spec = specs.find(s => line.startsWith(`${s.task}  `));
+    return spec ? line.replace(`${spec.agent}/${spec.model}/${spec.effort}`, `${spec.agent}/${spec.model}/${spec.effort}  priority ${spec.priority}`) : line;
+  }), ...specs.flatMap(spec => [
+    ...(spec.after.length ? [`${spec.task} after: ${spec.after.join(', ')} (watch checks dependency state)`] : []),
+    `  start: ${isPaused(ctx.config) ? 'queue paused; starts after queue_resume (agentctl queue resume)' : !ctx.config.queue.enabled ? 'queue.enabled is false; enable the queue first' : `waits for a free ${spec.agent} window; watch checks capacity at accept`}`,
+    ...(spec.reviewOf && !spec.after.includes(spec.reviewOf) ? [`  hint: if the author report is not ready, add "after: ${spec.reviewOf}" so the review waits for it`] : []),
+  ])];
 }
 
 interface NewMcpArgs { _confirmation?: QueueConfirmation; /** The preview's plan (wrapper): the preview plans once; the confirm records it. */ _specs?: ResolvedSpec[]; _planned?: AcceptedOrder[]; spec?: string | undefined; confirm?: boolean | undefined; agent?: AgentName | undefined; reuse?: boolean | undefined; no_agent?: boolean | undefined; cohort?: string | undefined; wait_trust?: boolean | undefined }
@@ -2008,7 +2022,7 @@ for (const tool of MCP_TOOLS) {
     const scopeIdentity = JSON.stringify(canonical(confirmationTargets(tool.name, scope)));
     if (!confirm) {
       let result: ToolResult;
-      if (tool.name === 'new' || tool.name === 'queue') result = await writeTool(deps, tool.name, {}, async () => ({ text: `${summarizeSpecs((scope as { specs: ResolvedSpec[] }).specs).join('\n')}\nBase/overlap, worktrees, capacity and disk checked by watch at accept; errors appear as events.\nBaza/nakładanie, worktree, limity i dysk: watch sprawdzi po przyjęciu; błędy w events_since.\n${tool.name === 'new' ? (watchAlive(ctx.config, ctx.runner.now()) ? 'Start: asynchronous – confirm registers the start; watch validates and opens the window.' : 'WARNING: the watcher is not running (or the queue is disabled); confirm will be refused. Start agentctl watch --tmux.') : ''}\nNot ${tool.name === 'new' ? 'started' : 'queued'} yet. Show this to the user and ask; if they agree, call ${tool.name} again with the same spec and confirm: true.`, executed: false, announce: '' }));
+      if (tool.name === 'new' || tool.name === 'queue') result = await writeTool(deps, tool.name, {task: (scope as {specs: ResolvedSpec[]}).specs.map(s => s.task).join(', ')}, async () => ({ text: `${cheapSpecSummary(ctx, (scope as { specs: ResolvedSpec[] }).specs, tool.name === 'queue').join('\n')}\nBase/overlap, worktrees, capacity and disk checked by watch at accept; errors appear as events.\nBaza/nakładanie, worktree, limity i dysk: watch sprawdzi po przyjęciu; błędy w events_since.\n${tool.name === 'new' ? (watchAlive(ctx.config, ctx.runner.now()) ? 'Start: asynchronous – confirm registers the start; watch validates and opens the window.' : 'WARNING: the watcher is not running (or the queue is disabled); confirm will be refused. Start agentctl watch --tmux.') : ''}\nNot ${tool.name === 'new' ? 'started' : 'queued'} yet. Show this to the user and ask; if they agree, call ${tool.name} again with the same spec and confirm: true.`, executed: false, announce: '' }));
       else if (['cancel', 'resume', 'move', 'set_limits', 'reserve'].includes(tool.name)) result = await original(deps, args);
       else result = await writeTool(deps, tool.name as McpWriteTool, {}, async () => {
         const detail = tool.name === 'gc' ? renderGc(scope as GcPlan, { detail: Boolean(input.detail), offset: input.offset as number | undefined, limit: input.limit as number | undefined }).join('\n') : JSON.stringify({ operation: tool.name, arguments: input, scope: await previewScope(ctx, tool.name, input, scope) }, null, 2);
