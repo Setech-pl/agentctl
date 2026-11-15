@@ -274,14 +274,14 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 |---|---|---|
 | `status` | read | `all?`, `cohort?`, `format?`, `detail?`, `offset?`, `limit?`, `capacity?` |
 | `events_since` | read | `as?`, `cursor?`, `limit?`, `client?`, `since?`, `cohort?`, `peek?`, `format?`, `detail?` |
-| `gc_preview` | read | `detail?`, `offset?`, `limit?`, `older_than?`, `merged?`, `cohort?` |
+| `gc_preview` | read | `request_id?`, `detail?`, `offset?`, `limit?`, `older_than?`, `merged?`, `cohort?` |
 | `limits` | read | `format?`, `detail?` |
-| `set_limits` | write | `claude?`, `codex?`, `queue_hold?`, `confirm?` |
-| `reserve` | write | `claude?`, `codex?`, `note?`, `release?`, `confirm?` |
+| `set_limits` | write | `claude?`, `codex?`, `queue_hold?`, `confirm?`, `preview_token?` |
+| `reserve` | write | `claude?`, `codex?`, `note?`, `release?`, `confirm?`, `preview_token?` |
 | `version` | read |  |
 | `peek` | read | `task`, `lines?` |
 | `list_reports` | read | `all?` |
-| `get_report` | read | `task`, `detail?`, `mode?`, `section?`, `byte_offset?`, `offset?`, `limit?` |
+| `get_report` | read | `task`, `mark_pulled?`, `detail?`, `mode?`, `section?`, `byte_offset?`, `offset?`, `limit?` |
 | `pull_ready` | read | `cohort?`, `all?`, `detail?`, `mode?`, `ack?`, `cursor?`, `offset?`, `limit?` |
 | `task_spec` | read | `task` |
 | `queue_list` | read | `cohort?`, `format?`, `detail?` |
@@ -294,8 +294,8 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 | `stats` | read | `cohort?`, `since?` |
 | `overlap` | read | `task?` |
 | `resume` | write | `tasks?`, `all?`, `confirm?`, `preview_token?` |
-| `answer` | write | `task`, `option`, `confirm?`, `token?` |
-| `send` | write | `task`, `text?`, `enter_only?`, `confirm?`, `token?`, `withdraw?` |
+| `answer` | write | `task?`, `option?`, `confirm?`, `token?`, `preview_token?` |
+| `send` | write | `task?`, `text?`, `enter_only?`, `confirm?`, `token?`, `withdraw?`, `preview_token?` |
 | `consult` | write | `spec?`, `confirm?`, `preview_token?` |
 | `new` | write | `spec?`, `agent?`, `reuse?`, `no_agent?`, `cohort?`, `wait_trust?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` |
 | `queue` | write | `spec?`, `cohort?`, `agent?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` |
