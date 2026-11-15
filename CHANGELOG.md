@@ -8,6 +8,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.22.3] - 2026-11-15
 
+- HELP-HEIGHT: board help fits the terminal and scrolls with arrows/PgUp/PgDn; other keys return. / Pomoc boardu mieści się w terminalu, przewija strzałkami/PgUp/PgDn; pozostałe klawisze wracają.
+
 
 - Merge the complete 0.22.1 manuals and diagrams with all 0.22.2 operations fixes. / Scalenie pełnej dokumentacji 0.22.1 ze wszystkimi poprawkami operacyjnymi 0.22.2.
 - BASE-DEFAULT: unresolved spec bases identify the default from local origin/HEAD, falling back to local HEAD only for main/master; unknown metadata is explicit. No network or automatic substitution. / Nierozwiązywalna baza wskazuje domyślną gałąź z lokalnego origin/HEAD, awaryjnie HEAD dla main/master; brak danych jest jawny. Bez sieci i automatycznej podmiany.

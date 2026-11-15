@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| HELP-HEIGHT | Board help overflowed terminal height and overdrew its header. | `tests/board.test.ts` (`^HELP-HEIGHT:`) | 0.22.3 | fails on v0.22.2 (1 failing of 1) |
 | BASE-DEFAULT | A missing spec base did not identify the repository default branch. | `tests/worktree-start.test.ts` (`^BASE-DEFAULT:`) | 0.22.3 | fails on v0.22.2 (1 failing of 1) |
 | A11 | Unknown WALL identity and own posts are not visibly labelled. | `tests/a11-wall-visibility.test.ts` | 0.22.2 | fails on v0.22.0 (1 failing of 1) |
 | A10 | Collapsed Codex questions omit text from namespaced session tool calls. | `tests/p65b-peek-question.test.ts` (`^A10:`) | 0.22.2 | fails on v0.22.0 (1 failing of 1) |

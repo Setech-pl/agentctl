@@ -89,3 +89,5 @@ Run with an absolute task-owned AGENTCTL_LIVE_CACHE: node --experimental-strip-t
 ## Finished/all visibility
 
 ![Finished/all visibility](../img/board-all.png)
+
+Help is height-bounded; ↑↓ and PgUp/PgDn scroll, any other key returns. Recapture only help with `scripts/docs-gallery.ts --help-only` using the same Node flags above.

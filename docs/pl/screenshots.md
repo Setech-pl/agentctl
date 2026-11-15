@@ -89,3 +89,5 @@ Uruchom z bezwzględnym AGENTCTL_LIVE_CACHE własnego zadania: node --experiment
 ## Widoczność finished/wszystkich
 
 ![Widoczność finished/wszystkich](../img/board-all.png)
+
+Pomoc mieści się w wysokości terminala; ↑↓ i PgUp/PgDn przewijają, pozostałe klawisze wracają. Samą pomoc odtworzysz przez `scripts/docs-gallery.ts --help-only`, z powyższymi flagami Node.

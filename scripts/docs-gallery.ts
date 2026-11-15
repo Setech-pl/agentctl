@@ -66,14 +66,16 @@ await withHarness({ name: 'docs-gallery', session: 'agentctl-demo', config: 'lim
     throw new Error(`${label} not visible:\n${plain()}`);
   };
   const captures: { name: string; bytes: number }[] = [];
+  const helpOnly = process.argv.includes('--help-only');
   const capture = async (name: string) => {
+    if (helpOnly && name !== 'board-help') return;
     h.tmux(['resize-window', '-t', target, '-x', '161', '-y', '45']);
     await pause(250);
     h.tmux(['resize-window', '-t', target, '-x', '160', '-y', '45']);
     await pause(600);
     const ansi = h.tmux(['capture-pane', '-e', '-p', '-t', target]).stdout;
     if (/\/Users\/|marcin|cache-dev|agentctl-wt|\/private\/tmp/i.test(ansi)) throw new Error(`non-generic path in ${name}:\n${plain()}`);
-    const svg = renderSvg(parseAnsi(ansi, 160), { title: `agentctl 0.22.1 · ${name}` });
+    const svg = renderSvg(parseAnsi(ansi, 160), { title: `agentctl 0.22.3 · ${name}` });
     const png = new Resvg(svg.replaceAll(FONT_STACK, "'DejaVu Sans Mono'"), { font: { fontFiles, loadSystemFonts: false, defaultFontFamily: 'DejaVu Sans Mono' } }).render().asPng();
     fs.writeFileSync(path.join(repoRoot, 'docs/img', `${name}.png`), png);
     fs.writeFileSync(path.join(h.root, `${name}.ansi`), ansi);
@@ -85,6 +87,13 @@ await withHarness({ name: 'docs-gallery', session: 'agentctl-demo', config: 'lim
     for (let i = 0; i < 40; i++) { if (new RegExp(`▸\\s*${id}`).test(plain())) return; await key('Down'); }
     throw new Error(`cannot select ${id}`);
   };
+  if (helpOnly) {
+    await until('main', s => s.includes('TRUST-DEMO') && s.includes('Queue'));
+    await key('?'); await until('help', s => s.includes('Press any other key'));
+    await capture('board-help');
+    console.log('Recaptured help only; fake providers; sandbox stopped in finally.');
+    return;
+  }
   await until('main', s => s.includes('TRUST-DEMO') && s.includes('Queue') && s.includes('83%'));
   await until('waiting and preview', s => /WAIT-DEMO[^\n]*waiting/.test(s) && s.includes('Quick safety check')); await capture('board-main');
   await select('UI-CART-2'); await pause(2300); await capture('board-peek');
