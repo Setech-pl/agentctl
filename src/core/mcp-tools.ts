@@ -1,3 +1,5 @@
+import { withStartLock } from './start-lock.ts';
+import { commitQueueAdd } from './queue.ts';
 import { acceptConsult, planConsult } from './consult.ts';
 import { reportMessageWarning } from './prompt-queue.ts';
 import { queueViews as coreQueueViews } from './queue.ts';
@@ -1085,7 +1087,7 @@ async function runNew(deps: McpDeps, args: NewMcpArgs): Promise<ToolResult> {
   });
 }
 
-async function runQueue(deps: McpDeps, args: { _confirmation?: QueueConfirmation; _specs?: ResolvedSpec[]; _planned?: AcceptedOrder[]; spec?: string | undefined; agent?: AgentName | undefined; cohort?: string | undefined; confirm?: boolean | undefined }): Promise<ToolResult> {
+async function runQueue(deps: McpDeps, args: { replace?: boolean; _confirmation?: QueueConfirmation; _specs?: ResolvedSpec[]; _planned?: AcceptedOrder[]; spec?: string | undefined; agent?: AgentName | undefined; cohort?: string | undefined; confirm?: boolean | undefined }): Promise<ToolResult> {
   let tasks = '?';
   try {
     tasks = splitSpecs(args.spec ?? '', 'mcp').map((s) => String(s.header.task ?? '?')).join(', ');
@@ -1101,7 +1103,20 @@ async function runQueue(deps: McpDeps, args: { _confirmation?: QueueConfirmation
         throw new AgentctlError(`${String(raw.header.task ?? 'a task')}: "setup" runs shell commands and is not accepted from the chat`, 'Put setup commands in the .agentctl.yaml of the repository, or queue the task from the terminal.');
       }
     }
-    const opts = args.agent ? { agent: args.agent } : {};
+    const opts = { ...(args.agent ? { agent: args.agent } : {}), replace: args.replace };
+    if (args.confirm && args.replace) {
+      if (!deps.applying) throw new AgentctlError('replace: true requires a running watcher');
+      return withStartLock(ctx, async () => {
+        const plan = await planQueueAdd(ctx, raws, opts);
+        for (const {spec} of plan.items) {
+          const entry = readQueue(ctx.config).find(e => e.task === spec.task);
+          if (entry?.status === 'starting') throw new AgentctlError(`${spec.task} is being started; replacement refused`);
+        }
+        for (const {spec} of plan.items) if (readQueue(ctx.config).some(e => e.task === spec.task)) await removeFromQueue(ctx, spec.task, {source: 'mcp'});
+        await commitQueueAdd(ctx, plan.items, args._confirmation ? {confirmation: args._confirmation} : {});
+        return {text: `Replaced: ${plan.items.map(i => i.spec.task).join(', ')} in one watch step`, executed: true, announce: 'queue replaced'};
+      });
+    }
     if (args.confirm) {
       // P93: durable registration is the response boundary. The confirm records the accepted specs and answers; the watcher validates them at its
       // next tick (git, tmux and the task records are its work), then they wait in the line; a refused spec fails with its reason and an event.
@@ -1459,6 +1474,7 @@ export const MCP_TOOLS: McpToolDef[] = [
     input: {
       spec: z.string().min(1).max(100_000).optional().describe('The spec text: ---, YAML header, ---, prompt. Several specs may follow each other. Optional only when confirming with preview_token: the stored spec then executes.'),
       cohort: cohortArg.optional(),
+      replace: z.boolean().optional().describe('Remove a waiting entry and re-add this spec atomically in one watch step; also works while queue_rm is pending.'),
       agent: z.enum(DEFAULT_PROVIDERS).optional().describe('Run the specs on this provider, translated through the equivalents table. The queue never switches provider by itself.'),
       confirm: z.boolean().optional().describe('true only after the user agreed to the summary.'),
     },
@@ -1708,7 +1724,7 @@ function redactConfig(config: GlobalConfig): unknown {
  * P93b: the writes whose confirm can wait on start.lock, git, tmux or a scan of every task. With a watcher running, the confirm records the
  * request (mcp-requests.ts) and returns; the watcher applies it. `set_limits` stays synchronous: it writes config.yaml under no shared lock.
  */
-export const DEFERRED_TOOLS = new Set(['gc', 'gc_preview', 'consult', 'unblock', 'queue_up', 'queue_rm', 'queue_retry', 'close', 'cancel', 'send', 'mark', 'hide', 'unhide', 'archive', 'cohort_add', 'cohort_remove', 'cohort_archive', 'cohort_note']);
+export const DEFERRED_TOOLS = new Set(['queue', 'gc', 'gc_preview', 'consult', 'unblock', 'queue_up', 'queue_rm', 'queue_retry', 'close', 'cancel', 'send', 'mark', 'hide', 'unhide', 'archive', 'cohort_add', 'cohort_remove', 'cohort_archive', 'cohort_note']);
 /** The run of every tool before the confirm, format, budget and paging wrappers: what the watcher calls to apply a request. */
 const originalRuns = new Map<string, McpToolDef['run']>();
 
@@ -2008,7 +2024,7 @@ for (const tool of MCP_TOOLS) {
     // argument hash alone (confirmationTargets), the plan is the preview's, and the watcher validates the accepted specs.
     const accepting = Boolean(confirm) && (tool.name === 'new' || tool.name === 'queue');
     // P93b: a confirm that a watcher can apply records the request and returns; the watcher computes the scope again and compares it.
-    if (confirm && DEFERRED_TOOLS.has(tool.name) && deferMcpWrites(ctx)) {
+    if (confirm && DEFERRED_TOOLS.has(tool.name) && (tool.name !== 'queue' || effective.replace) && deferMcpWrites(ctx)) {
       return recordDeferred(deps, tool.name, effective, preview!.scope, preview!.key, token);
     }
     let scope: unknown;
@@ -2022,7 +2038,7 @@ for (const tool of MCP_TOOLS) {
     const scopeIdentity = JSON.stringify(canonical(confirmationTargets(tool.name, scope)));
     if (!confirm) {
       let result: ToolResult;
-      if (tool.name === 'new' || tool.name === 'queue') result = await writeTool(deps, tool.name, {task: (scope as {specs: ResolvedSpec[]}).specs.map(s => s.task).join(', ')}, async () => ({ text: `${cheapSpecSummary(ctx, (scope as { specs: ResolvedSpec[] }).specs, tool.name === 'queue').join('\n')}\nBase/overlap, worktrees, capacity and disk checked by watch at accept; errors appear as events.\nBaza/nakładanie, worktree, limity i dysk: watch sprawdzi po przyjęciu; błędy w events_since.\n${tool.name === 'new' ? (watchAlive(ctx.config, ctx.runner.now()) ? 'Start: asynchronous – confirm registers the start; watch validates and opens the window.' : 'WARNING: the watcher is not running (or the queue is disabled); confirm will be refused. Start agentctl watch --tmux.') : ''}\nNot ${tool.name === 'new' ? 'started' : 'queued'} yet. Show this to the user and ask; if they agree, call ${tool.name} again with the same spec and confirm: true.`, executed: false, announce: '' }));
+      if (tool.name === 'new' || tool.name === 'queue') result = await writeTool(deps, tool.name, {task: (scope as {specs: ResolvedSpec[]}).specs.map(s => s.task).join(', ')}, async () => ({ text: `${cheapSpecSummary(ctx, (scope as { specs: ResolvedSpec[] }).specs, tool.name === 'queue').join('\n')}\n${tool.name === 'queue' ? readMcpRequests(ctx.config).filter(r => r.tool === 'queue_rm' && ['pending', 'applying'].includes(r.status) && (scope as {specs: ResolvedSpec[]}).specs.some(s => s.task === r.task)).map(r => `${r.task}: oczekuje queue_rm (request ${r.id}); use replace: true`).join('\n') : ''}\n${effective.replace ? 'replace: true – remove and re-add in one watch step.' : ''}\nBase/overlap, worktrees, capacity and disk checked by watch at accept; errors appear as events.\nBaza/nakładanie, worktree, limity i dysk: watch sprawdzi po przyjęciu; błędy w events_since.\n${tool.name === 'new' ? (watchAlive(ctx.config, ctx.runner.now()) ? 'Start: asynchronous – confirm registers the start; watch validates and opens the window.' : 'WARNING: the watcher is not running (or the queue is disabled); confirm will be refused. Start agentctl watch --tmux.') : ''}\nNot ${tool.name === 'new' ? 'started' : 'queued'} yet. Show this to the user and ask; if they agree, call ${tool.name} again with the same spec and confirm: true.`, executed: false, announce: '' }));
       else if (['cancel', 'resume', 'move', 'set_limits', 'reserve'].includes(tool.name)) result = await original(deps, args);
       else result = await writeTool(deps, tool.name as McpWriteTool, {}, async () => {
         const detail = tool.name === 'gc' ? renderGc(scope as GcPlan, { detail: Boolean(input.detail), offset: input.offset as number | undefined, limit: input.limit as number | undefined }).join('\n') : JSON.stringify({ operation: tool.name, arguments: input, scope: await previewScope(ctx, tool.name, input, scope) }, null, 2);

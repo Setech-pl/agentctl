@@ -168,6 +168,16 @@
       "H1: a never-started queue_rm is cancelled before watch observes windows or publishes a snapshot"
     ]
   },
+  "H3": {
+    "rev": "v0.22.3",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "H3: pending queue_rm is named and replace confirms once into a single watch step",
+      "H3: pending queue_rm is named and replace confirms once into a single watch step"
+    ]
+  },
   "H4": {
     "rev": "v0.22.3",
     "outcome": "FAILS",

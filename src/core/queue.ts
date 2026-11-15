@@ -1,3 +1,4 @@
+import { readMcpRequests } from './mcp-requests.ts';
 import { heavyBudget, heavyPreviewUsed, heavyWait, isHeavy } from './heavy.ts';
 import { secretRedactor } from './secret-redaction.ts';
 import { activeProviders, perProvider, isActive } from './providers/registry.ts';
@@ -214,14 +215,15 @@ export interface QueueAddPlan {
  * Validate specs for the queue the way `new` does (review_of, pin, `--agent` mapping, codex efforts, duplicates, repositories), except that a
  * full provider is not an error: that is what the queue is for. Throws one error listing every problem; nothing is written.
  */
-export async function planQueueAdd(ctx: Context, raws: RawSpec[], opts: { agent?: AgentName; diskBudgetMs?: number; specs?: ResolvedSpec[] } = {}): Promise<QueueAddPlan> {
+export async function planQueueAdd(ctx: Context, raws: RawSpec[], opts: { agent?: AgentName; diskBudgetMs?: number; specs?: ResolvedSpec[]; replace?: boolean } = {}): Promise<QueueAddPlan> {
   const { config } = ctx;
   const entries = readQueue(config);
-  const items = await validateQueueAdd(ctx, raws, entries, opts);
+  const items = await validateQueueAdd(ctx, raws, opts.replace ? entries.filter(e => !raws.some(raw => raw.header.task === e.task)) : entries, opts);
   const specs = items.map((i) => i.spec);
   const rows = await queueDependencyRows(ctx, [...entries, ...specs]);
   const warnings = [...await touchWarnings(ctx, specs, { cachedOnly: true }), ...specs.flatMap(s => reportPathWarnings(ctx.config, s).map(w => `${s.task}: ${w}`)), ...specs.flatMap(s => [...(s.linkWarnings ?? []), ...(s.warnings ?? []), ...missingLinkTargets(s.links, s.repos[0]?.worktree)].map(w => `${s.task}: ${w}`))];
   const capacity = config.capacity.snapshot && !ctx.runner.dryRun ? capacitySnapshot(await collectCapacity(ctx, { cachedOnly: true, ...(opts.diskBudgetMs === undefined ? {} : { diskBudgetMs: opts.diskBudgetMs }) }), specs.map((s) => s.agent)) : undefined;
+  if (opts.replace) warnings.push(...specs.map(s => `${s.task}: replace in one watch step${readMcpRequests(config).filter(r => r.tool === 'queue_rm' && r.task === s.task && ['pending', 'applying'].includes(r.status)).map(r => `; oczekuje queue_rm (request ${r.id})`).join('')}`));
   return { items, warnings, ...(capacity ? { capacity } : {}), summary: [...describeQueueAdd(ctx, specs, entries, await liveWindows(ctx), rows), ...usageSummaryLines(config, specs, ctx.runner.now()), ...(capacity ? snapshotLines(capacity) : []), ...warnings.map((w) => `⚠ ${w}`)] };
 }
 
@@ -234,7 +236,11 @@ async function validateQueueAdd(ctx: Context, raws: RawSpec[], entries: QueueEnt
   const resolved = raws.map((raw) => resolveSpec(raw, { config: ctx.config }));
   for (const spec of resolved) {
     const inQueue = entries.find((e) => e.task === spec.task);
-    if (inQueue) throw inQueueError(spec, inQueue);
+    if (inQueue) {
+      const pending = readMcpRequests(ctx.config).find(r => r.tool === 'queue_rm' && r.task === spec.task && ['pending', 'applying'].includes(r.status));
+      if (pending) throw new AgentctlError(`${spec.task}: oczekuje queue_rm (request ${pending.id})`, 'Use replace: true to remove and re-add in one watch step.');
+      throw inQueueError(spec, inQueue);
+    }
   }
   const knownAuthors = new Map<string, AgentModel>(entries.map((e) => [e.task, { agent: e.agent, model: e.model }]));
   const specs = opts.specs ?? await planBatch(ctx, resolved, { ...(opts.agent ? { agent: opts.agent } : {}), ignoreLimits: true, skipAfter: true, deferBases: true, knownAuthors });
