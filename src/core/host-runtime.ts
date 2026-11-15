@@ -27,6 +27,8 @@ export class HostRuntime {
   readonly runner: Runner;
   readonly config: GlobalConfig;
   constructor(runner: Runner, config: GlobalConfig) { this.runner = runner; this.config = config; }
+  hasTrackedHosts(): boolean { return Object.keys(this.config.hosts).length > 0 || this.connections.size > 0 || fs.existsSync(path.join(this.config.stateDir, 'hosts')); }
+  async trackHost(name: string): Promise<void> { await this.persist(name); }
   private file(name: string): string { return path.join(this.config.stateDir, 'hosts', `${name}.json`); }
   connection(name: string): Connection {
     let c = this.connections.get(name);
@@ -35,6 +37,7 @@ export class HostRuntime {
       if (!c || !Array.isArray(c.windows) || !Number.isFinite(c.retryAt)) c = { unreachable: false, failures: 0, retryAt: 0, detail: '', windows: [] };
       this.connections.set(name, c);
     }
+    if (!this.config.hosts[name]) { c.unreachable = true; c.detail = 'host removed from config; restore its hosts: entry'; }
     return c;
   }
   private async persist(name: string): Promise<void> { if (!this.runner.dryRun) await this.runner.writeFile(this.file(name), JSON.stringify(this.connection(name))); }
@@ -63,6 +66,7 @@ export class HostRuntime {
     await this.persist(name);
   }
   async windows(cachedOnly = false): Promise<WindowInfo[]> {
+    if (!this.hasTrackedHosts()) return [];
     const records = listTaskRecords(this.config).filter(r => r.host && !r.closed && !r.cancelled);
     const names = [...new Set(records.map(r => r.host!))];
     return (await Promise.all(names.map(async name => {

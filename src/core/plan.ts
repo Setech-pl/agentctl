@@ -52,7 +52,7 @@ const label = (o: Order): string => `${o.agent} ${formatModelEffort(o)}`;
 /** Windows currently in the session, each tagged with the agent that agentctl started in it, then the places held by reservations and external sessions. */
 export async function liveWindows(ctx: Context, knownRows?: StatusRow[]): Promise<LiveWindow[]> {
   const names = knownRows ? [...new Set(knownRows.filter(r => r.window === 'alive').map(r => r.windowName))] : await ctx.tmux.listWindows();
-  for (const record of listTaskRecords(ctx.config)) if (record.host && !record.closed && !record.cancelled && (knownRows ? knownRows.some(r => r.windowName === record.window && r.state === 'host-unreachable') : ctx.hosts.connection(record.host).unreachable) && !names.includes(record.window)) names.push(record.window);
+  for (const record of ctx.hosts.hasTrackedHosts() ? listTaskRecords(ctx.config) : []) if (record.host && !record.closed && !record.cancelled && (knownRows ? knownRows.some(r => r.windowName === record.window && r.state === 'host-unreachable') : ctx.hosts.connection(record.host).unreachable) && !names.includes(record.window)) names.push(record.window);
   const records = names.flatMap(window => { const record = readTaskRecord(ctx.config, window); return record ? [record] : []; });
   const agentByWindow = new Map(records.filter(r => r.agent !== 'unknown').map(r => [r.window, r.agent as AgentName]));
   const recordByWindow = new Map(records.map(r => [r.window, r]));

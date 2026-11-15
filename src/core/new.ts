@@ -220,6 +220,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
     await withStartLock(ctx, async () => {
       await runner.mkdir(taskDir(config, spec.window));
       await runner.writeFile(taskFile(config, spec.window), renderTaskMd(record, spec.prompt));
+      if (spec.host) await ctx.hosts.trackHost(spec.host);
       await queuePrompt(ctx, record, promptWithHeader({ ...spec, report: spec.remoteReport ?? spec.report }, record.attemptId, wallContext), 'launching');
     });
     // The agent's own folder: only the report goes there (agentctl's state is in state_dir).

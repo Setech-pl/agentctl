@@ -168,6 +168,16 @@
       "HELP-HEIGHT: help fits the terminal and scrolls to every key without header overdraw"
     ]
   },
+  "HOST-LOCAL-IO": {
+    "rev": "v0.22.3",
+    "outcome": "IMPORT-ERROR",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "tests/host-boundaries.test.ts",
+      "tests/host-boundaries.test.ts"
+    ]
+  },
   "HOST-SSH-EXIT": {
     "rev": "v0.22.3",
     "outcome": "IMPORT-ERROR",
