@@ -422,8 +422,13 @@ async function runEventsSince(deps: McpDeps, args: { since?: string | undefined;
   return { text: renderEvents(report).join('\n'), data: report };
 }
 
-async function runGcPreview(deps: McpDeps, args: { older_than?: string | undefined; merged?: boolean | undefined; cohort?: string | undefined; detail?: boolean; offset?: number; limit?: number }): Promise<ToolResult> {
+async function runGcPreview(deps: McpDeps, args: { request_id?: string; older_than?: string | undefined; merged?: boolean | undefined; cohort?: string | undefined; detail?: boolean; offset?: number; limit?: number }): Promise<ToolResult> {
   const ctx = deps.context(() => {});
+  if (args.request_id) {
+    if (!/^[a-f0-9-]{36}$/.test(args.request_id)) throw new AgentctlError('invalid GC preview request id');
+    try { return JSON.parse(fs.readFileSync(path.join(ctx.config.stateDir, `gc-preview-${args.request_id}.json`), 'utf8')); } catch { return ok('GC preview pending; retry request_id after the next watch tick.'); }
+  }
+  if (!deps.applying && watchAlive(ctx.config, ctx.runner.now())) return recordDeferred(deps, 'gc_preview', args, null, `gc_preview:${JSON.stringify(args)}`, undefined);
   const plan = await planGc(ctx, { olderThan: args.older_than, branches: args.merged, cohort: args.cohort, cachedSizes: true });
   return ok(JSON.stringify({ ...gcView(plan, args), partial_result: 'Partial result: sizes are cached or measuring (unknown sizes count as 0); repeat for updated estimates.', preview: true, execution: ctx.config.mcp.allow.includes('gc') ? 'gc preview then confirm' : 'requires gc in mcp.allow or CLI --apply' }));
 }
@@ -1158,7 +1163,7 @@ export const MCP_TOOLS: McpToolDef[] = [
     description:
       'What "agentctl gc" would free now, without doing anything: git worktrees of closed, cancelled and archived tasks without uncommitted changes, old files next to the reports, state folders to archive, merged branches (merged: true), each with its size, and what is skipped and why. ' +
       'Use the separately allowed gc tool to apply this protected plan with preview and confirm: true (branches default false).',
-    input: { detail: z.boolean().optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional(), older_than: z.string().max(10).optional().describe('Age of the files next to the reports before they count: 12h, 7d, 2w. Default 7d.'), merged: z.boolean().optional().describe('true: also list merged branches of finished tasks.'), cohort: cohortArg.optional() },
+    input: { request_id: z.string().optional().describe('Read a GC preview accepted by watch: the request UUID from Accepted.'), detail: z.boolean().optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional(), older_than: z.string().max(10).optional().describe('Age of the files next to the reports before they count: 12h, 7d, 2w. Default 7d.'), merged: z.boolean().optional().describe('true: also list merged branches of finished tasks.'), cohort: cohortArg.optional() },
     annotations: readOnly('Preview of the clean-up'),
     run: (deps, args) => guarded(() => runGcPreview(deps, args as { older_than?: string; merged?: boolean; cohort?: string })),
   }),
@@ -1667,7 +1672,7 @@ function redactConfig(config: GlobalConfig): unknown {
  * P93b: the writes whose confirm can wait on start.lock, git, tmux or a scan of every task. With a watcher running, the confirm records the
  * request (mcp-requests.ts) and returns; the watcher applies it. `set_limits` stays synchronous: it writes config.yaml under no shared lock.
  */
-export const DEFERRED_TOOLS = new Set(['consult', 'unblock', 'queue_up', 'queue_rm', 'queue_retry', 'close', 'cancel', 'send', 'mark', 'hide', 'unhide', 'archive', 'cohort_add', 'cohort_remove', 'cohort_archive', 'cohort_note', 'wall_post', 'wall_reply', 'wall_set_status']);
+export const DEFERRED_TOOLS = new Set(['gc_preview', 'consult', 'unblock', 'queue_up', 'queue_rm', 'queue_retry', 'close', 'cancel', 'send', 'mark', 'hide', 'unhide', 'archive', 'cohort_add', 'cohort_remove', 'cohort_archive', 'cohort_note', 'wall_post', 'wall_reply', 'wall_set_status']);
 /** The run of every tool before the confirm, format, budget and paging wrappers: what the watcher calls to apply a request. */
 const originalRuns = new Map<string, McpToolDef['run']>();
 
@@ -1700,7 +1705,7 @@ export async function applyMcpRequest(deps: McpDeps, request: McpRequest): Promi
   const applying: McpDeps = { ...deps, applying: true };
   const ctx = applying.context(() => {});
   const permission = (request.tool === 'send' && request.args.enter_only ? 'send_enter' : request.tool) as McpPermission;
-  if (!ctx.config.mcp.allow.includes(permission)) throw new AgentctlError(`"${permission}" is no longer in mcp.allow; nothing was done`);
+  if (request.tool !== 'gc_preview' && !ctx.config.mcp.allow.includes(permission)) throw new AgentctlError(`"${permission}" is no longer in mcp.allow; nothing was done`);
   let scope: unknown;
   if (request.scope !== null) {
     scope = await confirmationScope(ctx, request.tool, request.args);
@@ -1712,6 +1717,11 @@ export async function applyMcpRequest(deps: McpDeps, request: McpRequest): Promi
     ? await writeTool(applying, 'archive', {}, async (fresh) => { await applyArchive(fresh, scope as Awaited<ReturnType<typeof archiveClosed>>); return { text: JSON.stringify(scope, null, 2), executed: true, announce: 'archive closed task state' }; })
     : await guarded(() => run(applying, { ...request.args, confirm: true, _apply: true } as never));
   if (result.isError) throw new AgentctlError(result.text);
+  if (request.tool === 'gc_preview') {
+    const destination = path.join(ctx.config.stateDir, `gc-preview-${request.id}.json`);
+    atomicWriteFile(destination, JSON.stringify({ text: result.text }));
+    return { text: `GC preview ready: ${destination}; run gc preview then confirm to apply.` };
+  }
   return { text: result.text };
 }
 
@@ -2116,6 +2126,61 @@ function compactFacts(value: unknown, prefix = ''): string {
   if (Array.isArray(value)) return value.map((v, i) => compactFacts(v, `${prefix}[${i}]`)).join('\n');
   if (typeof value === 'object') return Object.entries(value).map(([k, v]) => compactFacts(v, prefix ? `${prefix}.${k}` : k)).join('\n');
   return `${prefix}=${value}`;
+}
+
+/** One atomic watch publication; readers never probe processes when it is fresh. */
+const stateSnapshotPath = (ctx: Context) => path.join(ctx.config.stateDir, 'mcp-state-snapshot.json');
+export async function publishMcpSnapshot(ctx: Context, rows?: StatusRow[]): Promise<void> {
+  const deps: McpDeps = { context: () => ctx, notify: async () => {} };
+  const queue = await runQueueList(deps);
+  const capacity = await collectCapacity(ctx);
+  const limits = collectLimits(ctx.config, await liveWindows(ctx));
+  const config = await originalRuns.get('config_show')!(deps, {});
+  const doctor = await originalRuns.get('doctor')!(deps, {});
+  const snapshot = { version: 1, at: ctx.runner.now(), interval: ctx.config.watch.interval,
+    configHash: createHash('sha256').update(JSON.stringify(ctx.config)).digest('hex'),
+    rows: rows ?? await collectStatus(ctx, { archived: true }), queue: JSON.parse(queue.text.slice(queue.text.indexOf('\n\n') + 2)), capacity, limits,
+    config: JSON.parse(config.text), doctor: JSON.parse(doctor.text) };
+  fs.mkdirSync(ctx.config.stateDir, { recursive: true });
+  atomicWriteFile(stateSnapshotPath(ctx), JSON.stringify(snapshot));
+}
+function snapshotRead(ctx: Context, name: string, args: Record<string, unknown>): ToolResult | undefined {
+  try {
+    if (args.project !== undefined) return undefined;
+    const snap = JSON.parse(fs.readFileSync(stateSnapshotPath(ctx), 'utf8'));
+    const age = ctx.runner.now() - snap.at;
+    if (snap.version !== 1 || age < 0 || age >= 2 * ctx.config.watch.interval * 1000 || snap.configHash !== createHash('sha256').update(JSON.stringify(ctx.config)).digest('hex')) return undefined;
+    const note = `Watch snapshot age: ${(age / 1000).toFixed(1)} s.`;
+    const json = args.format === 'json' || args.detail === true;
+    let data: unknown, text = '';
+    const fits = (r: { cohort?: string | null }) => args.cohort === undefined || cohortKey(r.cohort ?? '') === cohortKey(String(args.cohort));
+    const queue = snap.queue.filter(fits);
+    if (name === 'status') {
+      const allRows = (snap.rows as StatusRow[]).filter(fits);
+      const rows = shownRows(allRows, Boolean(args.all));
+      const offset = Number(args.offset ?? 0), limit = Number(args.limit ?? rows.length);
+      const shown = rows.slice(offset, offset + limit);
+      data = { tasks: [...shown.map(statusRowForChat), ...queue.filter((q: { task: string }) => !rows.some(r => r.task === q.task)).map((q: { task: string; status: string; startCondition: string }) => ({...q, state: q.status === 'queued' ? 'registered' : q.status}))], ...(args.capacity || args.detail ? { disk: snap.capacity.disk, capacity: capacitySnapshot(snap.capacity) } : {}) };
+      text = [statusLine(rows, allRows.length - rows.length), ...shown.map(compactStatus), ...queue.map((q: {task: string; startCondition: string}) => `${q.task}: ${q.startCondition}`), ...(args.capacity ? snapshotLines(capacitySnapshot(snap.capacity)) : [])].join('\n');
+    } else if (name === 'queue_list') {
+      data = queue; text = queue.map((q: {task: string; agent: string; model: string; effort: string; startCondition: string}) => `${q.task} ${q.agent}/${q.model}/${q.effort}: ${q.startCondition}`).join('\n') || 'The queue is empty.';
+    } else if (name === 'capacity') { data = snap.capacity; text = [diskLine(snap.capacity.disk), ...snapshotLines(capacitySnapshot(snap.capacity))].join('\n'); }
+    else if (name === 'limits') { data = snap.limits; text = snap.limits.providers.map((p: {agent: string; used: number; limit: number; free: number; reserved: number; queued: number; queueHold: number | null}) => `${p.agent}: used=${p.used} limit=${p.limit ?? 'n/d'} free=${p.free ?? 'n/d'} reserved=${p.reserved} queued=${p.queued} queue_hold=${holdText(p.queueHold)}`).join('\n'); }
+    else { data = snap[name === 'config_show' ? 'config' : 'doctor']; text = JSON.stringify(data, null, 2); }
+    if (json || ['config_show', 'doctor'].includes(name)) return ok(JSON.stringify(Array.isArray(data) ? data.map(item => ({...item, snapshot_age_s: age / 1000})) : { snapshot_age_s: age / 1000, ...(data as object) }, null, 2));
+    return ok(`${text}\n${note}`);
+  } catch { return undefined; }
+}
+const snapshotTools = new Set(['status', 'queue_list', 'capacity', 'limits', 'config_show', 'doctor']);
+for (const tool of MCP_TOOLS.filter(t => snapshotTools.has(t.name))) {
+  const run = tool.run;
+  tool.run = async (deps, args) => {
+    const cached = snapshotRead(deps.context(() => {}), tool.name, args);
+    if (cached) return cached;
+    const result = await run(deps, args);
+    const note = 'Watch snapshot unavailable/stale; bounded fallback path. / Snapshot watch niedostępny lub stary; odczyt ograniczony budżetem.';
+    try { const data = JSON.parse(result.text); return { ...result, text: JSON.stringify(Array.isArray(data) ? data : { ...data, snapshot_note: note }, null, 2) }; } catch { return { ...result, text: `${result.text}\n${note}` }; }
+  };
 }
 
 /** Session-local snapshots: continuing a response never repeats a write or consumes another event page. */

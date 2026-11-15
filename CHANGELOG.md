@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- A3: watch atomically publishes bounded read state (age <2 ticks), with noted fallback and Accepted GC preview; set_limits stays independent of start.lock. / Watch zapisuje atomowy snapshot odczytów (<2 ticki), starszy uruchamia oznaczony odczyt; GC preview przez Accepted, set_limits bez start.lock.
+
 - A2: WALL bypasses cohort filters, uses chat identity cursors and repeats a bounded open inbox. / WALL omija filtry kohorty, używa kursora tożsamości czatu i pokazuje otwartą skrzynkę.
 
 - A1: MCP new/queue previews perform cheap validation; watch checks base/overlap, worktrees, limits and disk after acceptance. / Podglądy new/queue wykonują tanią walidację; watch sprawdza bazę, konflikty, worktree, limity i dysk po przyjęciu.

@@ -269,6 +269,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
     await ctx.runner.appendFile(watchLogPath(ctx), logLine(now, e));
     if (e.reason !== 'baseline') ctx.out(logLine(now, e).trimEnd());
   }
+  await (await import('./mcp-tools.ts')).publishMcpSnapshot(ctx, allRows).catch(e => ctx.out(`snapshot: ${errorMessage(e)}`));
   return events;
 }
 

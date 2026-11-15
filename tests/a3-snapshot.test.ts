@@ -1,0 +1,43 @@
+import assert from 'node:assert/strict';
+import { it } from 'node:test';
+import path from 'node:path';
+import { Context } from '../src/core/context.ts';
+import { MCP_TOOLS, publishMcpSnapshot, applyMcpRequest } from '../src/core/mcp-tools.ts';
+import { tryFileLock } from '../src/core/file-lock.ts';
+import { readMcpRequests } from '../src/core/mcp-requests.ts';
+import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch, fakeWatcher } from './helpers.ts';
+const scratch = useScratch();
+it('A3: atomic watch snapshot serves every bounded read with stalled processes and supports cohort/capacity; stale falls back', async () => {
+  const config = makeConfig(scratch.sub('snapshot'), 'mcp: {allow: [set_limits]}\nwatch: {interval: 2}\n');
+  seedTask(config, 'SNAP', {cohort: '62'});
+  const tmux = new FakeTmux(); tmux.add('snap', 'Working (esc to interrupt)');
+  let stalled = false, probes = 0;
+  const runner = new DiskRunner({dryRun: false, respond: (cmd, args, opts) => { probes++; if (stalled) throw new Error('stalled git/fs/process fixture'); return tmux.respond(cmd, args, opts); }});
+  const ctx = new Context(runner, config, () => {}), deps = {context: () => ctx, notify: async () => {}};
+  await publishMcpSnapshot(ctx);
+  stalled = true; const before = probes;
+  for (const name of ['status', 'queue_list', 'capacity', 'limits', 'config_show', 'doctor']) {
+    const result = await MCP_TOOLS.find(t => t.name === name)!.run(deps, name === 'status' ? {cohort: '62', capacity: true} : {});
+    assert.ok(!result.isError, result.text);
+    assert.match(result.text, /snapshot(?: age|_age_s)/i, name);
+    if (name === 'status') assert.match(result.text, /SNAP/);
+  }
+  assert.equal(probes, before);
+  const lock = tryFileLock(path.join(config.stateDir, 'start.lock'))!;
+  try { const result = await MCP_TOOLS.find(t => t.name === 'set_limits')!.run(deps, {claude: 3, confirm: true}); assert.ok(!result.isError, result.text); } finally { lock(); }
+  stalled = false; await runner.sleep(4001);
+  const result = await MCP_TOOLS.find(t => t.name === 'status')!.run(deps, {});
+  assert.match(result.text, /snapshot unavailable\/stale/i);
+});
+it('A3: GC preview is Accepted without slow checks and read back after watch', async () => {
+  const config = makeConfig(scratch.sub('gc')); fakeWatcher(config);
+  const runner = new DiskRunner({dryRun: false, respond: new FakeTmux().respond});
+  const ctx = new Context(runner, config, () => {}), deps = {context: () => ctx, notify: async () => {}};
+  const tool = MCP_TOOLS.find(t => t.name === 'gc_preview')!;
+  const accepted = await tool.run(deps, {});
+  assert.match(accepted.text, /^Accepted/);
+  const request = readMcpRequests(config)[0]!;
+  await applyMcpRequest(deps, request);
+  const read = await tool.run(deps, {request_id: request.id});
+  assert.match(read.text, /preview/);
+});
