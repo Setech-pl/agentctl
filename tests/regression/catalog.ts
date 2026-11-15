@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'H5', fixedIn: '0.22.4', symptom: 'Report summaries hid outputs findings and duplicate blocks discarded all outputs.', scenarios: [s('fix0226-h5.test.ts')] },
   { id: 'H1', fixedIn: '0.22.4', symptom: 'Deferred queue removal published a vanished-window event before cancellation.', scenarios: [s('fix0226-h1.test.ts')] },
   { id: 'H4', fixedIn: '0.22.4', symptom: 'Attempt markers before the verdict blocked dependencies.', scenarios: [s('fix0226-h4.test.ts')] },
   { id: 'HELP-HEIGHT', fixedIn: '0.22.3', symptom: 'Board help overflowed terminal height and overdrew its header.', scenarios: [s('board.test.ts', '^HELP-HEIGHT:')] },

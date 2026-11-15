@@ -233,7 +233,7 @@ function conciseReport(text: string, data: OutputData, review = false): string {
   // Legacy reports can end inside a checks section; do not return that list as a summary.
   const lastHeading = markdownHeadings(summary).at(-1);
   const safeSummary = lastHeading && /check|test|gate|walidac/i.test(lastHeading.title) ? '' : summary;
-  return `${data.outputs_pending ? '"outputs_pending": true\n' : ''}verdict: ${verdict}\ndecisions: ${decisions}\nactions: ${actions}\n${safeSummary.slice(-3000)}`.trim();
+  return `${data.outputs_errors.length ? `outputs_errors: ${JSON.stringify(data.outputs_errors)}\n` : ''}${data.outputs_pending ? '"outputs_pending": true\n' : ''}verdict: ${verdict}\ndecisions: ${decisions}\nactions: ${actions}\n${safeSummary.slice(-3000)}`.trim();
 }
 
 async function pullSummaries(ctx: Context, rows: StatusRow[], ack = false): Promise<ToolResult> {
@@ -688,7 +688,7 @@ async function runGetReport(deps: McpDeps, args: { task: string; section?: strin
     const full = readReportText(ctx.config, record, record.report);
     return { text: `=== ${record.task} (${record.agent} ${record.model}/${record.effort}) ===\n${conciseReport(full, await readOutputs(ctx, record), record.reviewOf != null)}${warning ? `\n${JSON.stringify({ warning })}` : ''}`, ...(args.mark_pulled !== false ? { onDelivered: () => markRead(createHash('sha256').update(full).digest('hex')) } : {}) };
   }
-  const outputs = (args.detail || args.mode === 'full') && !(args.offset ?? 0) && !(args.byte_offset ?? 0) ? await readOutputs(ctx, record) : {};
+  const outputs = await readOutputs(ctx, record);
   const render = (r: ReportPage, pulled: boolean): ToolResult => {
     const { text, signature: _signature, ...page } = r;
     return ok(`=== ${record.task} (${record.agent} ${record.model}/${record.effort}) ===\n${text}\n--- page ---\n${JSON.stringify({ ...page, pulled, ...outputs, ...(warning ? { warning } : {}) })}`);

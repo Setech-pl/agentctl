@@ -170,7 +170,17 @@ export function outputWallPosts(text: string): unknown {
 export function parseOutputs(text: string, opts: { review?: boolean } = {}): OutputData {
   const blocks = outputBlocks(text);
   const invalid = (message: string): OutputData => ({ outputs: null, outputs_valid: false, outputs_errors: [message], outputs_partial: false });
-  if (blocks.length !== 1) return invalid(blocks.length ? 'multiple agentctl-outputs blocks' : 'missing agentctl-outputs block (schema version: 1)');
+  if (!blocks.length) return invalid('missing agentctl-outputs block (schema version: 1)');
+  if (blocks.length > 1) {
+    const parsed = blocks.map(block => parseOutputs('```agentctl-outputs\n' + block + '\n```', opts));
+    const index = parsed.findLastIndex(data => data.outputs_valid);
+    const selected = index >= 0 ? parsed[index]! : parsed.findLast(data => data.outputs !== null);
+    if (!selected) return invalid('multiple agentctl-outputs blocks; no valid block');
+    return { ...selected, outputs_valid: false, outputs_partial: true, outputs_errors: [
+      `multiple agentctl-outputs blocks (${blocks.length}); using ${index >= 0 ? 'last valid' : 'last partially readable'} block ${index >= 0 ? index + 1 : parsed.lastIndexOf(selected) + 1}`,
+      ...parsed.flatMap((data, i) => data.outputs_errors.map(error => `block ${i + 1}: ${error}`)),
+    ] };
+  }
   let data: unknown;
   try { data = parseRefYaml(compactRefMaps(blocks[0]!)); } catch (e) { return invalid(`invalid outputs YAML: ${e instanceof Error ? e.message : String(e)}`); }
   if (!data || typeof data !== 'object' || Array.isArray(data)) return invalid('the agentctl-outputs block must be a YAML mapping');

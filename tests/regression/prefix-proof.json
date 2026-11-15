@@ -180,6 +180,18 @@
       "H4: report protocol puts the attempt marker after the first verdict line"
     ]
   },
+  "H5": {
+    "rev": "v0.22.3",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "H5: duplicate outputs use last valid block and explain findings",
+      "H5: HEMS fixture reports shape findings but accepts check aliases and Verdict",
+      "H5: duplicate outputs use last valid block and explain findings",
+      "H5: HEMS fixture reports shape findings but accepts check aliases and Verdict"
+    ]
+  },
   "HELP-HEIGHT": {
     "rev": "v0.22.2",
     "outcome": "FAILS",
