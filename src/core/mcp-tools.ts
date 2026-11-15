@@ -1831,8 +1831,14 @@ async function confirmationScope(ctx: Context, name: string, args: Record<string
     const rawSpecs = splitSpecs(args.spec as string, 'MCP preview');
     if (args.cohort) for (const raw of rawSpecs) raw.header.cohort = args.cohort;
     for (const raw of rawSpecs) if (chatSetup(raw.header)) throw new AgentctlError(`${String(raw.header.task ?? 'a task')}: \"setup\" runs shell commands and is not accepted from the chat`);
-    const knownAuthors = new Map<string, { agent: AgentName; model: string }>();
-    const specs = await planBatch(ctx, rawSpecs.map(raw => resolveSpec(raw, { config: ctx.config })), { previewOnly: true, noSwitch: true, knownAuthors, ...(args.agent ? { agent: args.agent as AgentName } : {}) });
+    const knownAuthors = new Map(readQueue(ctx.config).map(e => [e.task, {agent: e.agent, model: e.model}]));
+    const resolved = rawSpecs.map(raw => resolveSpec(raw, {config: ctx.config}));
+    for (const id of new Set(resolved.flatMap(s => s.reviewOfAll ?? (s.reviewOf ? [s.reviewOf] : [])))) {
+      if (knownAuthors.has(id)) continue;
+      const author = readTaskRecordById(ctx.config, id);
+      if (author && author.agent !== 'unknown') knownAuthors.set(id, {agent: author.agent, model: author.model});
+    }
+    const specs = await planBatch(ctx, resolved, { previewOnly: true, noSwitch: true, knownAuthors, ...(args.agent ? { agent: args.agent as AgentName } : {}) });
     return { specs };
   }
   if (name === 'queue_retry') {
@@ -2001,7 +2007,7 @@ for (const tool of MCP_TOOLS) {
     const scopeIdentity = JSON.stringify(canonical(confirmationTargets(tool.name, scope)));
     if (!confirm) {
       let result: ToolResult;
-      if (tool.name === 'new' || tool.name === 'queue') result = await writeTool(deps, tool.name, {}, async () => ({ text: `${summarizeSpecs((scope as { specs: ResolvedSpec[] }).specs).join('\n')}\nBase/overlap, worktrees, capacity and disk checked by watch at accept; errors appear as events.\nBaza/nakładanie, worktree, limity i dysk: watch sprawdzi po przyjęciu; błędy w events_since.\nNot executed. Review, then confirm the preview_token.`, executed: false, announce: '' }));
+      if (tool.name === 'new' || tool.name === 'queue') result = await writeTool(deps, tool.name, {}, async () => ({ text: `${summarizeSpecs((scope as { specs: ResolvedSpec[] }).specs).join('\n')}\nBase/overlap, worktrees, capacity and disk checked by watch at accept; errors appear as events.\nBaza/nakładanie, worktree, limity i dysk: watch sprawdzi po przyjęciu; błędy w events_since.\n${tool.name === 'new' ? (watchAlive(ctx.config, ctx.runner.now()) ? 'Start: asynchronous – confirm registers the start; watch validates and opens the window.' : 'WARNING: the watcher is not running; confirm will be refused. Start agentctl watch --tmux.') : ''}\nNot ${tool.name === 'new' ? 'started' : 'queued'} yet. Show this to the user and ask; if they agree, call ${tool.name} again with the same spec and confirm: true.`, executed: false, announce: '' }));
       else if (['cancel', 'resume', 'move', 'set_limits', 'reserve'].includes(tool.name)) result = await original(deps, args);
       else result = await writeTool(deps, tool.name as McpWriteTool, {}, async () => {
         const detail = tool.name === 'gc' ? renderGc(scope as GcPlan, { detail: Boolean(input.detail), offset: input.offset as number | undefined, limit: input.limit as number | undefined }).join('\n') : JSON.stringify({ operation: tool.name, arguments: input, scope: await previewScope(ctx, tool.name, input, scope) }, null, 2);

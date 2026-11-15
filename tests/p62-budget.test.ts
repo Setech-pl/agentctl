@@ -42,7 +42,7 @@ function fixture(name: string) {
   const spec = specText({ task: 'P62', agent: 'claude' }, repo);
   return { ctx, config, deps, call, spec, clock, hold: () => { slow = true; }, release };
 }
-for (const operation of ['queue preview', 'queue confirm', 'status', 'gc_preview']) it(`P62: ${operation} returns ${operation === 'queue confirm' ? 'its durable registration' : 'partial'} at the injected 8s budget under four-window load`, async () => {
+for (const operation of ['queue preview', 'queue confirm', 'status', 'gc_preview']) it(`P62: ${operation} returns ${operation === 'queue confirm' ? 'its durable registration' : operation === 'queue preview' ? 'its token' : 'partial'} at the injected 8s budget under four-window load`, async () => {
   const f = fixture(operation.replaceAll(' ', '-'));
   let args: Record<string, unknown> = operation.startsWith('queue') ? { spec: f.spec } : {};
   if (operation === 'queue confirm') {
@@ -64,7 +64,8 @@ for (const operation of ['queue preview', 'queue confirm', 'status', 'gc_preview
     assert.deepEqual(readQueue(f.config).map(e => [e.task, e.status]), [['P62', 'accepted']]);
     return;
   }
-  assert.match(result!.text, /Partial result:/);
+  if (operation === 'queue preview') assert.match(result!.text, /preview_token:/);
+  else assert.match(result!.text, /Partial result:/);
   assert.equal(readQueue(f.config).length, 0, 'expired confirmation cannot register work later');
 });
 it('P62: confirm retries share one durable registration, even while notifications are blocked', async () => {
