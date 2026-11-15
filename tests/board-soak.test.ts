@@ -155,7 +155,7 @@ it('eight-hour Ink soak keeps timers, watchers, listeners, caches and tick work 
       await settleLoad(() => overlap === 0 && [...clock.timers.values()].some(timer => timer.at > clock.now + 1000));
       clock.advance(50); for (let n = 0; n < 5; n++) await turn();
       const keyAt = clock.now, keyWallAt = performance.now(); let latency = -1, wallLatency = -1;
-      term.onWrite = () => { if (latency < 0 && term.last.includes('leave the board')) { latency = clock.now - keyAt; wallLatency = performance.now() - keyWallAt; } };
+      term.onWrite = () => { if (latency < 0 && term.last.includes('Press any other key')) { latency = clock.now - keyAt; wallLatency = performance.now() - keyWallAt; } };
       keys.write('?'); await turn(); clock.advance(50); await turn();
       await drain(() => latency >= 0);
       term.onWrite = undefined;
