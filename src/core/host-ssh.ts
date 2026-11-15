@@ -1,7 +1,7 @@
 import path from 'node:path';
 import type { HostConfig, HostState } from './hosts.ts';
 import { sshSocketDir } from './hosts.ts';
-import type { ExecResult, Runner } from './runner.ts';
+import type { ExecResult, ExecOptions, Runner } from './runner.ts';
 
 /*
  * The SSH transport to a remote host. One multiplexed connection per host: OpenSSH ControlMaster with a
@@ -66,10 +66,10 @@ export function classifySshFailure(stderr: string, timedOut: boolean): HostState
  * `reachable` (exit code is whatever the remote command returned, in `code`), or one of the failure states,
  * where `code` is ssh's exit code (255 for ssh-level failures) and `stderr` carries the diagnostic.
  */
-export async function runOnHost(runner: Runner, hostName: string, host: HostConfig, command: string, timeoutMs: number = SSH_COMMAND_TIMEOUT_MS, env: NodeJS.ProcessEnv = process.env): Promise<HostRunResult> {
-  const result = await runner.exec('ssh', sshArgs(hostName, host, command, env), { timeoutMs, readOnly: false });
+export async function runOnHost(runner: Runner, hostName: string, host: HostConfig, command: string, timeoutMs: number = SSH_COMMAND_TIMEOUT_MS, env: NodeJS.ProcessEnv = process.env, options: ExecOptions = {}): Promise<HostRunResult> {
+  const result = await runner.exec('ssh', sshArgs(hostName, host, command, env), { ...options, timeoutMs, readOnly: options.readOnly ?? false });
   const timedOut = /ETIMEDOUT after \d+ms/.test(result.stderr);
-  if (result.code === 0 && !timedOut) return { ...result, state: 'reachable', timedOut: false };
+  if (result.code !== 255 && !timedOut && !(result.code === 127 && /spawn ssh.*ENOENT/.test(result.stderr))) return { ...result, state: 'reachable', timedOut: false };
   return { ...result, state: classifySshFailure(result.stderr, timedOut), timedOut };
 }
 
