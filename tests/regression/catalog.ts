@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'A7', fixedIn: '0.22.2', symptom: 'Summary and out-of-order full report reads stay unread in events_since.', scenarios: [s('a7-report-pulled.test.ts')] },
   { id: 'A6', fixedIn: '0.22.2', symptom: 'Scrolled Codex multiline drafts lose paste ownership and cannot be submitted.', scenarios: [s('p49-codex-queue.test.ts', '^A6:')] },
   { id: 'A5', fixedIn: '0.22.2', symptom: 'Not every preview write accepts a token-only confirm; limits and reserve lacked preview_token.', scenarios: [s('mcp-token-confirm.test.ts', '^A5:')] },
   { id: 'A2', fixedIn: '0.22.2', symptom: 'WALL events disappear behind cohort filters and transport client cursors.', scenarios: [s('a2-wall-events.test.ts')] },

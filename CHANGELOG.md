@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- A7: get_report marks summaries/full first pages pulled by default, accepts mark_pulled and merges page coverage in any order. / get_report oznacza podsumowanie/pierwszą pełną stronę jako pobrane, przyjmuje mark_pulled i sumuje strony w dowolnej kolejności.
+
 - A6: Codex scrolled composer windows retain verified paste ownership; enter_only tokens bind the delivery text and manual transcript acceptance clears attention. / Przewijanie pola Codex zachowuje ślad wklejki; enter_only wiąże token z dostawą, a potwierdzenie w transkrypcie usuwa uwagę.
 
 - A5: token-only confirmations cover limits/reservations too; table tests include every phased write and WALL (already accepted in 0.22.0). / Potwierdzenia samym tokenem obejmują limity i rezerwacje; test tabelaryczny obejmuje zapisy dwuetapowe i WALL (działające już w 0.22.0).

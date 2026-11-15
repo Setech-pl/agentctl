@@ -657,7 +657,7 @@ export function readReportFile(record: Pick<TaskRecord, 'task' | 'report'> & Par
   return { text, bytes: Buffer.byteLength(full), truncated: hasMore, total_lines: lines.length, offset, byte_offset: byteOffset, next_offset: hasMore ? nextOffset : null, next_byte_offset: end, has_more: hasMore, returned_bytes: end - startByte, start_byte: startByte, end_byte: end, signature: createHash('sha256').update(full).digest('hex') };
 }
 
-async function runGetReport(deps: McpDeps, args: { task: string; section?: string; offset?: number; limit?: number; byte_offset?: number; detail?: boolean; mode?: string }): Promise<ToolResult> {
+async function runGetReport(deps: McpDeps, args: { task: string; section?: string; offset?: number; limit?: number; byte_offset?: number; detail?: boolean; mode?: string; mark_pulled?: boolean }): Promise<ToolResult> {
   const ctx = deps.context(() => {});
   const record = findRecord(ctx, args.task);
   const row = (await collectStatus(ctx, { progress: false, archived: true })).find(r => r.task === record.task);
@@ -666,10 +666,16 @@ async function runGetReport(deps: McpDeps, args: { task: string; section?: strin
     const state = inspectReport(ctx.config, record, ctx.runner.now(), !record.attemptId);
     throw new AgentctlError(state.reason === 'not a regular report' ? `the report of ${record.task} is not a regular file; refusing to read it` : `${record.task} has no report yet: ${state.reason}`, 'Use report to inspect candidates or wait for completion.');
   }
+  async function markRead(signature: string): Promise<void> {
+    const current = inspectReport(ctx.config, record, ctx.runner.now(), !record.attemptId);
+    if (current.ready && createHash('sha256').update(readReportText(ctx.config, record, record.report)).digest('hex') === signature)
+      await setHeaderField(ctx.runner, taskFile(ctx.config, record.window), 'pulled', new Date(Math.max(ctx.runner.now(), Math.ceil(fs.statSync(record.report).mtimeMs))).toISOString());
+  }
   // The report is read: its outputs event (and its wall_posts) is recorded now if no watcher did it yet; once per attempt, never a failed read.
   await journalOutputs(ctx, record, { readOnly: true }).catch(() => undefined);
   if (!args.detail && args.mode !== 'full' && args.section === undefined && args.offset === undefined && args.byte_offset === undefined && args.limit === undefined) {
-    return ok(`=== ${record.task} (${record.agent} ${record.model}/${record.effort}) ===\n${conciseReport(readReportText(ctx.config, record, record.report), await readOutputs(ctx, record), record.reviewOf != null)}${warning ? `\n${JSON.stringify({ warning })}` : ''}`);
+    const full = readReportText(ctx.config, record, record.report);
+    return { text: `=== ${record.task} (${record.agent} ${record.model}/${record.effort}) ===\n${conciseReport(full, await readOutputs(ctx, record), record.reviewOf != null)}${warning ? `\n${JSON.stringify({ warning })}` : ''}`, ...(args.mark_pulled !== false ? { onDelivered: () => markRead(createHash('sha256').update(full).digest('hex')) } : {}) };
   }
   const outputs = (args.detail || args.mode === 'full') && !(args.offset ?? 0) && !(args.byte_offset ?? 0) ? await readOutputs(ctx, record) : {};
   const render = (r: ReportPage, pulled: boolean): ToolResult => {
@@ -681,24 +687,29 @@ async function runGetReport(deps: McpDeps, args: { task: string; section?: strin
   while (responseWireBytes(render(r, false)) > ctx.config.mcp.maxResponseKb * 1024 && maxBytes > 4) {
     maxBytes = Math.max(4, Math.floor(maxBytes / 2)); r = readReportFile(record, { ...args, maxBytes, config: ctx.config });
   }
-  let pulled = false;
-  if (!args.section) {
+  const firstFull = (args.detail || args.mode === 'full') && !(args.offset ?? 0) && !(args.byte_offset ?? 0) && !args.section;
+  const acknowledge = args.mark_pulled === true || (args.mark_pulled !== false && firstFull);
+  const delivered = async () => {
+    if (args.mark_pulled === false) return;
+    if (acknowledge) { await markRead(r.signature); return; }
+    if (args.section) return;
     const file = path.join(path.dirname(ctx.config.path), 'report-read-progress.json');
     await withReportLock(`${file}.lock`, async () => {
-      let reads: Record<string, number> = {};
-      try { const parsed: unknown = JSON.parse(fs.readFileSync(file, 'utf8')); if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) reads = Object.fromEntries(Object.entries(parsed).filter(([, v]) => typeof v === 'number' && Number.isFinite(v) && v >= 0)); } catch { /* first read */ }
+      let reads: Record<string, [number, number][]> = {};
+      try { const parsed = JSON.parse(fs.readFileSync(file, 'utf8')); for (const [key, value] of Object.entries(parsed)) {
+        if (typeof value === 'number' && Number.isFinite(value)) reads[key] = [[0, value]];
+        else if (Array.isArray(value)) reads[key] = value.filter(v => Array.isArray(v) && v.length === 2 && v.every(n => typeof n === 'number' && Number.isFinite(n) && n >= 0)) as [number, number][];
+      } } catch { /* first read */ }
       const key = `${deps.clientId ?? 'direct'}:${record.task}:${record.attemptId ?? record.started}:${r.signature}`;
-      const covered = reads[key] ?? 0;
-      if (r.start_byte <= covered) reads[key] = Math.max(covered, r.end_byte);
-      const current = (await collectStatus(ctx, { archived: true })).find(row => row.task === record.task);
-      if (!r.has_more && (reads[key] ?? 0) >= r.bytes && current?.report === 'yes' && current.reportSignature === r.signature) {
-        await setHeaderField(ctx.runner, taskFile(ctx.config, record.window), 'pulled', new Date(Math.max(ctx.runner.now(), Math.ceil(fs.statSync(record.report).mtimeMs))).toISOString()); pulled = true;
-      }
-      const entries = Object.entries(reads).slice(-256);
-      await ctx.runner.writeFile(file, JSON.stringify(Object.fromEntries(entries)));
+      const ranges = [...(reads[key] ?? []), [r.start_byte, r.end_byte] as [number, number]].sort((a, b) => a[0] - b[0]);
+      const merged: [number, number][] = [];
+      for (const range of ranges) { const last = merged.at(-1); if (last && range[0] <= last[1]) last[1] = Math.max(last[1], range[1]); else merged.push([...range]); }
+      reads[key] = merged;
+      if (merged[0]?.[0] === 0 && merged[0][1] >= r.bytes) await markRead(r.signature);
+      await ctx.runner.writeFile(file, JSON.stringify(Object.fromEntries(Object.entries(reads).slice(-256))));
     });
-  }
-  return render(r, pulled);
+  };
+  return { ...render(r, acknowledge), onDelivered: delivered };
 }
 
 async function runPullReady(deps: McpDeps, args: { cohort?: string | undefined; all?: boolean | undefined; mode?: string; detail?: boolean; offset?: number; limit?: number; ack?: boolean; cursor?: string } = {}): Promise<ToolResult> {
@@ -1239,8 +1250,8 @@ export const MCP_TOOLS: McpToolDef[] = [
     kind: 'read',
     description:
       `Default: verdict, decisions, actions and final Polish summary. detail: true or mode: full reads the complete report with parsed outputs on the first page only. Explicit section/offset/limit reads report text without outputs unless detail/full is requested. The report of one task (the file its spec names), paginated within mcp.max_response_kb. Use it when the user asks for the result of a particular task, also an older or closed one. ` +
-      'section selects a Markdown heading; offset and limit paginate lines (zero-based offset), capped by mcp.max_response_kb. byte_offset is absolute within the selected whole report or section; next_byte_offset equals end_byte. Contiguous whole-file delivery marks pulled at EOF; sections do not. Page metadata includes total_lines, returned_bytes, has_more, next_offset and next_byte_offset. Reads only that report file, never another path.',
-    input: { task: taskArg, detail: z.boolean().optional(), mode: z.enum(['summary', 'full']).optional(), section: z.string().optional(), byte_offset: z.number().int().min(0).optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(10000).optional() },
+      'section selects a Markdown heading; offset and limit paginate lines (zero-based offset), capped by mcp.max_response_kb. byte_offset is absolute within the selected whole report or section; next_byte_offset equals end_byte. Reading the summary or a full first page marks pulled by default; mark_pulled: false disables this, true explicitly acknowledges a read. Other pages mark pulled when their combined ranges cover the report, in any order; sections do not by default. Page metadata includes total_lines, returned_bytes, has_more, next_offset and next_byte_offset. Reads only that report file, never another path.',
+    input: { task: taskArg, mark_pulled: z.boolean().optional(), detail: z.boolean().optional(), mode: z.enum(['summary', 'full']).optional(), section: z.string().optional(), byte_offset: z.number().int().min(0).optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(10000).optional() },
     annotations: { ...readOnly('Read one report'), readOnlyHint: false },
     run: (deps, args) => guarded(() => runGetReport(deps, args as { task: string })),
   }),

@@ -41,6 +41,16 @@
       "A6: scrolled Codex multiline paste retains ownership for enter_only and manual Enter transcript clears attention"
     ]
   },
+  "A7": {
+    "rev": "v0.22.0",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "A7: summary and full first page acknowledge, opt-out preserves unread, out-of-order pages cover the file",
+      "A7: summary and full first page acknowledge, opt-out preserves unread, out-of-order pages cover the file"
+    ]
+  },
   "B1-answer": {
     "rev": "v0.18.2",
     "outcome": "IMPORT-ERROR",

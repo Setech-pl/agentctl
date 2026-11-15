@@ -1,0 +1,24 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { it } from 'node:test';
+import { Context } from '../src/core/context.ts';
+import { MCP_TOOLS } from '../src/core/mcp-tools.ts';
+import { readTaskRecord } from '../src/core/taskstore.ts';
+import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helpers.ts';
+const scratch = useScratch();
+it('A7: summary and full first page acknowledge, opt-out preserves unread, out-of-order pages cover the file', async () => {
+  const config = makeConfig(scratch.sub('a7'));
+  const ctx = new Context(new DiskRunner({dryRun: false, respond: new FakeTmux().respond}), config, () => {});
+  const deps = {context: () => ctx, notify: async () => {}};
+  const call = (args: any) => MCP_TOOLS.find(t => t.name === 'get_report')!.run(deps, args);
+  const seed = (task: string) => { const r = seedTask(config, task); fs.mkdirSync(path.dirname(r.report), {recursive: true}); fs.writeFileSync(r.report, 'Werdykt: PASS\none\ntwo\nthree'); return r; };
+  for (const task of ['SUM', 'FULL', 'NO', 'PAGES']) seed(task);
+  await call({task: 'SUM'}); assert.ok(readTaskRecord(config, 'sum')?.pulled);
+  await call({task: 'FULL', mode: 'full', limit: 1}); assert.ok(readTaskRecord(config, 'full')?.pulled);
+  await call({task: 'NO', mark_pulled: false}); await call({task: 'NO', mode: 'full', mark_pulled: false}); assert.equal(readTaskRecord(config, 'no')?.pulled, undefined);
+  for (const offset of [2, 0, 3, 1]) await call({task: 'PAGES', offset, limit: 1});
+  assert.ok(readTaskRecord(config, 'pages')?.pulled, 'all pages covered in arbitrary order');
+  const events = await MCP_TOOLS.find(t => t.name === 'events_since')!.run(deps, {format: 'json'});
+  assert.deepEqual(JSON.parse(events.text).summary.reportsToPull, ['NO']);
+});
