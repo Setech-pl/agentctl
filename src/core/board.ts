@@ -1,3 +1,4 @@
+import { providerHoldText } from './provider-hold.ts';
 import type { RefreshClock } from '../board/refresh-scheduler.ts';
 import { attachHint } from './tmux-socket.ts';
 import { provider as providerAdapter, PROVIDERS } from './providers/registry.ts';
@@ -1062,13 +1063,13 @@ export interface PanelLine {
 }
 
 /** The two lines under the header: per provider the windows as a bar with the percentage and the reset, or n/d. */
-export function usagePanel(plans: ProviderValues<PlanState> | null, usage: UsageSettings, now: number): PanelLine[] {
+export function usagePanel(plans: ProviderValues<PlanState> | null, usage: UsageSettings, now: number, holds: Partial<Record<AgentName, import('./provider-hold.ts').ProviderHold>> = {}): PanelLine[] {
   if (plans === null) return [];
   return (Object.keys(plans) as AgentName[]).map((provider): PanelLine => {
     const plan = providerValue(plans, provider);
     const name = provider.padEnd(6);
     // usage.queue_hold of the provider, when one is set (changed live by set_limits / limits set / a hand edit).
-    const hold = usage.queueHold[provider] === undefined ? '' : `  hold ${usage.queueHold[provider]}%`;
+    const hold = holds[provider] ? `  ${providerHoldText(provider, holds[provider]!)}` : usage.queueHold[provider] === undefined ? '' : `  hold ${usage.queueHold[provider]}%`;
     if (!plan.available) return { provider, text: `${name} n/d${plan.note ? ` – ${plan.note}` : ''}${hold}` };
     const parts = plan.windows.map((w) => `${w.label} ${usageBar(w.usedPercent)} ${Math.round(w.usedPercent)}%${w.resetsAt === null ? '' : ` ↻${formatReset(w.resetsAt, now)}`}`);
     const worst = plan.maxPercent ?? 0;

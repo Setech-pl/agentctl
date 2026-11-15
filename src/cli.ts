@@ -858,8 +858,10 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
       guarded(async (assignments: string[], opts: { yes?: boolean; dryRun?: boolean }) => {
         const ctx = contextFor(Boolean(opts.dryRun), { migrate: false });
         const ids = activeProviders(ctx.config);
-        const { hold, rest } = parseHoldArgs(assignments, ids);
-        const plan = planSetLimits(ctx.config, rest.length > 0 || hold === undefined ? parseAssignments(rest, ids) : {}, hold);
+        const timed: Record<string, string> = {};
+        const remaining = assignments.filter(a => { const m = /^hold\.([a-z]+)=(.+)$/.exec(a); if (!m) return true; timed[m[1]!] = m[2]!; return false; });
+        const { hold, rest } = parseHoldArgs(remaining, ids);
+        const plan = planSetLimits(ctx.config, rest.length > 0 || (hold === undefined && !Object.keys(timed).length) ? parseAssignments(rest, ids) : {}, hold, Object.keys(timed).length ? timed : undefined, ctx.runner.now());
         if (!(await confirmAction(ctx, plan.summary, 'Write it?', Boolean(opts.yes) || Boolean(opts.dryRun)))) return;
         await applySetLimits(ctx, plan);
         if (!opts.dryRun) line('Done. The limits are in force now.');

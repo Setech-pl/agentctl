@@ -158,6 +158,16 @@
       "tests/p73-cache-clean.test.ts"
     ]
   },
+  "G1a": {
+    "rev": "v0.22.3",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "G1a: manual holds block every provider including direct starts, expose capacity, expire once, and clear with off",
+      "G1a: manual holds block every provider including direct starts, expose capacity, expire once, and clear with off"
+    ]
+  },
   "H1": {
     "rev": "v0.22.3",
     "outcome": "FAILS",

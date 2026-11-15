@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'G1a', fixedIn: '0.22.4', symptom: 'Plan n/d left free provider slots with no timed hold override.', scenarios: [s('fix0226-g1a.test.ts')] },
   { id: 'H6', fixedIn: '0.22.4', symptom: 'Overlap warnings counted predecessor imports and ignored the integration base.', scenarios: [s('fix0226-h6.test.ts')] },
   { id: 'H2', fixedIn: '0.22.4', symptom: 'Budget fallback presented a three-hour cached status as current.', scenarios: [s('fix0226-h2.test.ts')] },
   { id: 'H3', fixedIn: '0.22.4', symptom: 'A pending queue_rm prevented replacing the same task ID.', scenarios: [s('fix0226-h3.test.ts')] },

@@ -1,3 +1,4 @@
+import { readProviderHoldState, providerHoldText } from './provider-hold.ts';
 import { withStartLock } from './start-lock.ts';
 import { commitQueueAdd } from './queue.ts';
 import { acceptConsult, planConsult } from './consult.ts';
@@ -458,7 +459,7 @@ async function runResume(deps: McpDeps, args: { tasks?: string[] | undefined; al
 
 async function runLimits(deps: McpDeps): Promise<ToolResult> {
   const ctx = deps.context(() => {});
-  const report = collectLimits(ctx.config, await liveWindows(ctx));
+  const report = collectLimits(ctx.config, await liveWindows(ctx), ctx.runner.now());
   const reserved = readReservations(ctx.config);
   return ok(
     `Limits of simultaneous agents per provider. used = windows of agentctl + reserved places + external sessions (counted only if countExternal is true); free = limit - used; queued = tasks waiting for a place of that provider.\n\n${JSON.stringify({ ...report, reservations: reserved }, null, 2)}`,
@@ -473,7 +474,7 @@ const holdValueArg = z.union([z.number().int().min(1).max(100), z.string().regex
 const queueHoldArg = z.union([holdValueArg, z.object(Object.fromEntries(PROVIDER_IDS.map((id) => [id, holdValueArg.optional()]))).strict()]).optional()
   .describe('usage.queue_hold: 90 (every active provider), "off" (no hold), or per provider {claude: 90, codex: "off"}. A whole percentage 1-100 of the plan, any window. Omit to leave it.');
 
-async function runSetLimits(deps: McpDeps, args: Partial<Record<AgentName, number | string>> & { queue_hold?: unknown; confirm?: boolean | undefined }): Promise<ToolResult> {
+async function runSetLimits(deps: McpDeps, args: Partial<Record<AgentName, number | string>> & { queue_hold?: unknown; hold?: unknown; confirm?: boolean | undefined }): Promise<ToolResult> {
   return writeTool(deps, 'set_limits', { detail: `${PROVIDER_IDS.map(id => `${id}=${args[id] ?? '-'}`).join(' ')}${args.queue_hold !== undefined ? ` queue_hold=${JSON.stringify(args.queue_hold)}` : ''} confirm=${Boolean(args.confirm)}` }, async (ctx) => {
     const assignments: LimitAssignments = {};
     for (const agent of activeProviders(ctx.config)) if (args[agent] !== undefined) {
@@ -481,13 +482,13 @@ async function runSetLimits(deps: McpDeps, args: Partial<Record<AgentName, numbe
       assignments[agent] = value === 0 ? null : value;
     }
     const hold = args.queue_hold === undefined ? undefined : parseHoldInput(args.queue_hold, activeProviders(ctx.config));
-    if (Object.keys(assignments).length === 0 && hold === undefined) throw new AgentctlError(`give ${activeProviders(ctx.config).join(' and/or ')}, or queue_hold`,  '0 removes a limit, "off" disables the provider; queue_hold: 90, "off" or {codex: 90}.');
-    const plan = planSetLimits(ctx.config, assignments, hold);
+    if (Object.keys(assignments).length === 0 && hold === undefined && args.hold === undefined) throw new AgentctlError(`give ${activeProviders(ctx.config).join(' and/or ')}, or queue_hold`,  '0 removes a limit, "off" disables the provider; queue_hold: 90, "off" or {codex: 90}.');
+    const plan = planSetLimits(ctx.config, assignments, hold, args.hold, ctx.runner.now());
     if (!args.confirm) return { text: `${plan.summary.join('\n')}\n\nNot changed yet. Show this to the user and ask; if they agree, call set_limits again with the same arguments and confirm: true.`, executed: false, announce: '' };
     await applySetLimits(ctx, plan);
     const changed = [...plan.changes.map((c) => `${c.agent} ${c.from ?? '-'} -> ${c.to ?? '-'}`), ...plan.holdChanges.filter((c) => c.from !== c.to).map((c) => `queue_hold ${c.agent} ${holdText(c.from)} -> ${holdText(c.to)}`)];
     const announce = [...(plan.changes.length ? [`limity ${activeProviders(ctx.config).map(id => `${id}=${plan.changes.some(c => c.agent === id) ? plan.changes.find(c => c.agent === id)!.to ?? 'brak' : ctx.config.limits[id] ?? 'brak'}`).join(' ')}`] : []), ...(hold !== undefined ? [`queue_hold ${plan.holdChanges.map((c) => `${c.agent}=${holdText(c.to)}`).join(' ')}`] : [])].join('; ');
-    return { text: `${plan.changes.length ? 'Limits changed' : 'Queue hold changed'} (${changed.join(', ') || 'nothing new'}). They are in force now: a running watch picks the file up and starts waiting tasks at its next tick${hold !== undefined ? '; the queue hold counts from that tick, without a restart' : ''}.`, executed: true, announce };
+    return { text: `${plan.timedHolds ? plan.summary.join('\n') + '\n' : ''}${plan.changes.length ? 'Limits changed' : 'Queue hold changed'} (${changed.join(', ') || 'nothing new'}). They are in force now: a running watch picks the file up and starts waiting tasks at its next tick${hold !== undefined ? '; the queue hold counts from that tick, without a restart' : ''}.`, executed: true, announce };
   });
 }
 
@@ -1237,7 +1238,7 @@ export const MCP_TOOLS: McpToolDef[] = [
       'WRITE, off unless the user put "set_limits" in mcp.allow. Sets the most simultaneous agents per provider in config.yaml (0 removes a limit, "off" disables the provider: no windows of it start), and the queue hold usage.queue_hold; comments in the file stay, a copy is kept as config.yaml.bak. It takes effect at once, without restarting watch (watch reloads config.yaml when it changes, also after a hand edit). ' +
       `queue_hold format, exactly: a whole percentage 1-100 for every active provider (queue_hold: 90), "off" for no hold at all (queue_hold: "off"), or per provider {claude: 90, codex: "off"} (only the named providers change; "off" removes that provider's hold). Above that percentage of its plan, in any window, the queue starts no task of the provider; queue_list shows "wstrzymane: … > usage.queue_hold N%"; limits, capacity and config_show show the current hold. ` +
       'The FIRST call (confirm omitted) only describes the change; show it to the user, then call again with confirm: true.',
-    input: { ...perProvider(DEFAULT_PROVIDERS, id => setLimitArg.describe(`New limit for ${provider(id).displayName}; 0 = no limit, "off" = disabled. Omit to leave it.`)), queue_hold: queueHoldArg, confirm: z.boolean().optional().describe('true only after the user agreed to the described change.') },
+    input: { ...perProvider(DEFAULT_PROVIDERS, id => setLimitArg.describe(`New limit for ${provider(id).displayName}; 0 = no limit, "off" = disabled. Omit to leave it.`)), queue_hold: queueHoldArg, hold: z.record(z.string(), z.string()).optional().describe('Timed provider hold: {glm: "21:50"}, ISO timestamp, "3h", or "off". Applies to every active provider.'), confirm: z.boolean().optional().describe('true only after the user agreed to the described change.') },
     annotations: { title: 'Change the limits', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     run: (deps, args) => guarded(() => runSetLimits(deps, args as { claude?: number; codex?: number; queue_hold?: unknown; confirm?: boolean })),
   }),
@@ -1812,7 +1813,7 @@ function confirmationTargets(name: string, scope: unknown): unknown {
 }
 /** Exact arguments and observed task/queue/window identities bind confirmation to this session. No scope can silently grow. */
 async function confirmationScope(ctx: Context, name: string, args: Record<string, unknown>): Promise<unknown> {
-  if (name === 'set_limits') return { limits: ctx.config.limits, queueHold: ctx.config.usage.queueHold };
+  if (name === 'set_limits') return { limits: ctx.config.limits, queueHold: ctx.config.usage.queueHold, providerHolds: readProviderHoldState(ctx.config).holds };
   if (name === 'reserve') return { reservations: readReservations(ctx.config) };
   if (name === 'queue_up' || name === 'queue_rm') {
     const entry = findEntry(ctx.config, args.task as string);
@@ -2157,7 +2158,7 @@ for (const tool of MCP_TOOLS.filter(t => ['status', 'events_since', 'queue_list'
       const data = JSON.parse(raw);
       if (tool.name === 'cohort_show') return ok([data.cohort, ...data.tasks.map((r: Record<string, unknown>) => `${r.task} ${r.agent}/${r.model}/${r.effort} ${r.state} ${r.duration} cohort=${r.cohort ?? 'n/d'} report=${r.report} decisions=${r.decisions ?? 0} actions=${r.actions ?? 0}`), `outputs: ${JSON.stringify({ integrate: data.integrate, decisions: data.decisions, actions: data.actions, checks: data.checks, warnings: data.warnings })}`, ...data.queued.map((r: Record<string, unknown>) => `${r.task}: ${r.startCondition}`)].join('\n'));
       if (tool.name === 'capacity') return ok([diskLine(data.disk), ...snapshotLines(capacitySnapshot(data))].join('\n'));
-      if (tool.name === 'limits') return ok(data.providers.map((p: Record<string, unknown>) => `${p.agent}: used=${p.used} limit=${p.limit ?? 'n/d'} free=${p.free ?? 'n/d'} reserved=${p.reserved} queued=${p.queued} queue_hold=${holdText(p.queueHold as number | null)}`).join('\n'));
+      if (tool.name === 'limits') return ok(data.providers.map((p: Record<string, unknown>) => `${p.agent}: used=${p.used} limit=${p.limit ?? 'n/d'} free=${p.free ?? 'n/d'} reserved=${p.reserved} queued=${p.queued} queue_hold=${holdText(p.queueHold as number | null)}${p.providerHold ? `; ${providerHoldText(String(p.agent), p.providerHold as import('./provider-hold.ts').ProviderHold)}` : ''}`).join('\n'));
       if (Array.isArray(data)) return ok(data.map(r => `${r.task} ${r.agent}/${r.model}/${r.effort}: ${r.startCondition}`).join('\n') || 'The queue is empty.');
       return ok(compactFacts(data));
     } catch { return ok(at >= 0 ? result.text.slice(0, at) : result.text); }
@@ -2179,7 +2180,7 @@ async function capacityFooter(deps: McpDeps, ctx: Context, explicit: boolean): P
   const reader = openReader(ctx.config);
   const plans = readPlans(ctx.config, reader, ctx.runner.now()); reader.save();
   const disk = await collectDisk(ctx);
-  const limits = collectLimits(ctx.config, await liveWindows(ctx));
+  const limits = collectLimits(ctx.config, await liveWindows(ctx), ctx.runner.now());
   const bands: Record<string, string> = {};
   for (const p of activeProviders(ctx.config)) {
     for (const w of providerValue(plans, p).windows) {
@@ -2250,7 +2251,7 @@ export async function publishMcpSnapshot(ctx: Context, rows?: StatusRow[], at = 
   const live = await liveWindows(ctx, observed);
   const queue = await runQueueList(deps, {}, {rows: observed, live});
   const capacity = await collectCapacityFull(ctx, {diskBudgetMs: DISK_BUDGET_MS, cachedOnly: true, rows: observed, live});
-  const limits = collectLimits(ctx.config, live);
+  const limits = collectLimits(ctx.config, live, ctx.runner.now());
   const config = await originalRuns.get('config_show')!(deps, {});
   // Snapshot diagnostics observe state only: spawning provider CLIs each tick both blocks watch and can start a session.
   const doctor: {name: string; status: string; detail: string}[] = [
@@ -2268,6 +2269,7 @@ export async function publishMcpSnapshot(ctx: Context, rows?: StatusRow[], at = 
   }
   const snapshot = { version: 1, at, interval: ctx.config.watch.interval,
     configHash: createHash('sha256').update(JSON.stringify(ctx.config)).digest('hex'),
+    providerHolds: readProviderHoldState(ctx.config).holds,
     rows: observed, queue: JSON.parse(queue.text.slice(queue.text.indexOf('\n\n') + 2)), capacity, limits,
     config: JSON.parse(config.text), doctor };
   fs.mkdirSync(ctx.config.stateDir, { recursive: true });
@@ -2279,7 +2281,7 @@ function snapshotRead(ctx: Context, name: string, args: Record<string, unknown>)
     const snap = JSON.parse(fs.readFileSync(stateSnapshotPath(ctx), 'utf8'));
     const age = ctx.runner.now() - snap.at;
     if (name === 'status' && snap.version === 1 && age > 300000) return ok(`${ageLine(snap.at, ctx.runner.now())}\nSnapshot starszy niż 5 min; krótki fallback z kolejki i dziennika zamiast starej tabeli.\n${durableStatus(ctx)}`);
-    if (snap.version !== 1 || age < 0 || age >= 2 * ctx.config.watch.interval * 1000 || snap.configHash !== createHash('sha256').update(JSON.stringify(ctx.config)).digest('hex')) return undefined;
+    if (snap.version !== 1 || age < 0 || age >= 2 * ctx.config.watch.interval * 1000 || JSON.stringify(snap.providerHolds ?? {}) !== JSON.stringify(readProviderHoldState(ctx.config).holds) || snap.configHash !== createHash('sha256').update(JSON.stringify(ctx.config)).digest('hex')) return undefined;
     const note = `${ageLine(snap.at, ctx.runner.now())}; Watch snapshot age: ${(age / 1000).toFixed(1)} s.`;
     const json = args.format === 'json' || args.detail === true;
     let data: unknown, text = '';
@@ -2295,7 +2297,7 @@ function snapshotRead(ctx: Context, name: string, args: Record<string, unknown>)
     } else if (name === 'queue_list') {
       data = queue; text = queue.map((q: {task: string; agent: string; model: string; effort: string; startCondition: string}) => `${q.task} ${q.agent}/${q.model}/${q.effort}: ${q.startCondition}`).join('\n') || 'The queue is empty.';
     } else if (name === 'capacity') { data = snap.capacity; text = [diskLine(snap.capacity.disk), ...snapshotLines(capacitySnapshot(snap.capacity))].join('\n'); }
-    else if (name === 'limits') { data = snap.limits; text = snap.limits.providers.map((p: {agent: string; used: number; limit: number; free: number; reserved: number; queued: number; queueHold: number | null}) => `${p.agent}: used=${p.used} limit=${p.limit ?? 'n/d'} free=${p.free ?? 'n/d'} reserved=${p.reserved} queued=${p.queued} queue_hold=${holdText(p.queueHold)}`).join('\n'); }
+    else if (name === 'limits') { data = snap.limits; text = snap.limits.providers.map((p: {agent: string; used: number; limit: number; free: number; reserved: number; queued: number; queueHold: number | null; providerHold?: import('./provider-hold.ts').ProviderHold}) => `${p.agent}: used=${p.used} limit=${p.limit ?? 'n/d'} free=${p.free ?? 'n/d'} reserved=${p.reserved} queued=${p.queued} queue_hold=${holdText(p.queueHold)}${p.providerHold ? `; ${providerHoldText(p.agent, p.providerHold)}` : ''}`).join('\n'); }
     else { data = snap[name === 'config_show' ? 'config' : 'doctor']; text = JSON.stringify(data, null, 2); }
     if (json || ['config_show', 'doctor'].includes(name)) return ok(JSON.stringify(Array.isArray(data) ? data.map(item => ({...item, snapshot_age_s: age / 1000})) : { snapshot_age_s: age / 1000, snapshot_age: ageLine(snap.at, ctx.runner.now()), ...(data as object) }, null, 2));
     return ok(`${note}\n${text}`);

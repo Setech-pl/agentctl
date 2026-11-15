@@ -1,3 +1,4 @@
+import { expireProviderHolds, providerHolds } from './provider-hold.ts';
 import { readMcpRequests } from './mcp-requests.ts';
 import { heavyBudget, heavyPreviewUsed, heavyWait, isHeavy } from './heavy.ts';
 import { secretRedactor } from './secret-redaction.ts';
@@ -791,6 +792,7 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
     }
     const author = directAuthorState(config, entry, entries);
     if (author.waiting || author.failed) return { position, entry, condition: { kind: 'after', text: author.waiting ?? author.failed! }, since: entry.queuedAt };
+    if (holds[entry.agent]) return { position, entry, condition: {kind: 'hold', text: holds[entry.agent]!}, since: entry.queuedAt };
     if (entry.direct && !(entry.retryAt && Date.parse(entry.retryAt) > nowMs) && !overProviderLimit(config.limits[entry.agent], used[entry.agent])) {
       used[entry.agent]++;
       if (isHeavy(entry)) heavy.add(entry.task);
@@ -941,6 +943,7 @@ async function closeNeverReadyWindow(ctx: Context, task: string, opts: { force?:
  */
 export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Notifier, opts: QueueTickOptions = {}): Promise<string[]> {
   const { config } = ctx;
+  await expireProviderHolds(ctx);
   await touchWorker(ctx);
   // Accepted MCP confirms are validated even while the queue is paused or disabled: the answer (queued, or failed with the reason) is due either way.
   await validateAccepted(ctx, notifier, opts);
@@ -994,6 +997,7 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
     if (author.failed) { await failEntry(ctx, entry, author.failed, notifier, opts, true); continue; }
     if (author.waiting) continue;
     if (memory.inflight.size >= config.queue.parallelStarts) break;
+    if (providerHolds(config, ctx.runner.now())[entry.agent]) continue;
     if (entry.direct) {
       const room = config.limits[entry.agent];
       if (overProviderLimit(room, used[entry.agent])) continue;
@@ -1091,7 +1095,7 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
   };
   const claimed = await withStartLock(ctx, async () => {
     const fresh = readQueue(config).find(e => e.seq === entry.seq && e.task === entry.task);
-    if (!fresh || fresh.status !== 'queued') return false;
+    if (!fresh || fresh.status !== 'queued' || providerHolds(config, ctx.runner.now())[fresh.agent]) return false;
     const author = directAuthorState(config, fresh, readQueue(config));
     if (author.failed) { await failEntry(ctx, fresh, author.failed, notifier, opts, true); return false; }
     if (author.waiting) return false;

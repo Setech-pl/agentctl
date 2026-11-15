@@ -1,3 +1,4 @@
+import { providerHolds, providerHoldText } from './provider-hold.ts';
 import { get as providerValue } from './providers/registry.ts';
 import type { ProviderValues } from './providers/registry.ts';
 import fs from 'node:fs';
@@ -158,16 +159,18 @@ export function usageSummaryLines(config: GlobalConfig, specs: readonly Pick<Res
 
 /** For each provider that `usage.queue_hold` holds: why. A provider whose plan is n/d is never held (nothing is known). */
 export function queueHolds(config: GlobalConfig, now: number, plans?: ProviderValues<PlanState>): Partial<Record<AgentName, string>> {
+  const held = Object.fromEntries(Object.entries(providerHolds(config, now)).map(([agent, hold]) => [agent, providerHoldText(agent, hold!)]));
   const limits = config.usage.queueHold;
-  if (Object.keys(limits).length === 0) return {};
+  if (Object.keys(limits).length === 0) return held;
   let state = plans;
   if (!state) {
     const reader = openReader(config);
     state = readPlans(config, reader, now);
     reader.save();
   }
-  const out: Partial<Record<AgentName, string>> = {};
+  const out: Partial<Record<AgentName, string>> = {...held};
   for (const provider of planIds(state)) {
+    if (out[provider]) continue;
     const limit = limits[provider];
     const plan = providerValue(state, provider);
     if (limit === undefined || !plan.available || plan.maxPercent === null || plan.maxPercent <= limit) continue;

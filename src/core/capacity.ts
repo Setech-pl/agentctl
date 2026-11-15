@@ -1,3 +1,4 @@
+import { providerHoldText } from './provider-hold.ts';
 import { collectMachine, machineLine } from './machine.ts';
 import { get as providerValue } from './providers/registry.ts';
 import { provider as adapter, activeProviders, perProvider } from './providers/registry.ts';
@@ -65,7 +66,7 @@ export async function collectCapacity(ctx: Context, opts: { diskBudgetMs?: numbe
   reader.save();
   await recordStaleCapacity(ctx, plans);
   const samples = readSamples(ctx.config);
-  const loads = collectLimits(ctx.config, opts.live ?? await liveWindows(ctx));
+  const loads = collectLimits(ctx.config, opts.live ?? await liveWindows(ctx), now);
   const queue = waiting(readQueue(ctx.config));
   const rows = opts.rows ?? await collectStatus(ctx, { cachedOnly: true, shallowClosed: true, progress: false });
   const stats = computeStats(selectHistory(ctx, { since: '7d' }));
@@ -87,7 +88,8 @@ export async function collectCapacity(ctx: Context, opts: { diskBudgetMs?: numbe
       if (load.free === 0) hints.push('no free configured slots');
       return {
         provider, estimate: [...windows].sort((a, b) => a.remainingPercent - b.remainingPercent)[0]?.estimate ?? null, source: plan.source, ageSeconds: plan.readAt === null ? null : Math.max(0, Math.floor((now - plan.readAt) / 1000)), stale: plan.stale, staleDescription: plan.stale && plan.readAt !== null ? `${adapter(provider).displayName}: brak aktywnej sesji od ${((now - plan.readAt) / 3600000).toFixed(1)} h (odczyt z ${new Date(plan.readAt).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })})` : null, windows,
-        limited: rows.some((r) => r.agent === provider && r.window === 'alive' && r.state === 'limited') || (windows.length > 0 ? windows.some((w) => w.usedPercent >= 100) : null),
+        providerHold: load.providerHold ?? null,
+        limited: Boolean(load.providerHold) || rows.some((r) => r.agent === provider && r.window === 'alive' && r.state === 'limited') || (windows.length > 0 ? windows.some((w) => w.usedPercent >= 100) : null),
         slots: { starting: load.starting, active: load.working.length, reportReady: load.reportReady.length, used: load.used, limit: load.limit, reserved: load.reserved, external: load.external.length, free: load.free },
         queue: { count: load.queued, next: queue.find((q) => q.agent === provider)?.task ?? null, hold: load.queueHold },
         models: [...new Map(ctx.config.equivalents.flatMap((e) => e[provider] ? [[`${e[provider].model}/${e[provider].effort}`, e[provider]] as const] : [])).values()],
@@ -100,11 +102,11 @@ export type Capacity = Awaited<ReturnType<typeof collectCapacity>>;
 export function capacitySnapshot(report: Capacity, ordered: readonly AgentName[] = []) {
   return report.providers.map((p) => {
     const worst = [...p.windows].sort((a, b) => a.remainingPercent - b.remainingPercent)[0];
-    return { provider: p.provider, ordered: ordered.includes(p.provider), queueHold: p.queue.hold ?? null, remainingPercent: worst?.remainingPercent ?? null, resetsInMinutes: worst?.resetsInMinutes ?? null, ageSeconds: p.ageSeconds, stale: p.stale, staleDescription: p.staleDescription, reportReady: p.slots.reportReady, freeSlots: p.slots.free, estimate: worst?.estimate ? { remainingTokens: worst.estimate.remainingTokens, confidence: worst.estimate.confidence } : null };
+    return { provider: p.provider, ordered: ordered.includes(p.provider), queueHold: p.queue.hold ?? null, providerHold: p.providerHold, remainingPercent: worst?.remainingPercent ?? null, resetsInMinutes: worst?.resetsInMinutes ?? null, ageSeconds: p.ageSeconds, stale: p.stale, staleDescription: p.staleDescription, reportReady: p.slots.reportReady, freeSlots: p.slots.free, estimate: worst?.estimate ? { remainingTokens: worst.estimate.remainingTokens, confidence: worst.estimate.confidence } : null };
   });
 }
 export function snapshotLines(snapshot: ReturnType<typeof capacitySnapshot>): string[] {
-  return snapshot.map((p) => `capacity: ${p.provider}${p.ordered ? ' (order)' : ''}: remaining ${p.remainingPercent === null ? 'n/d' : `${p.remainingPercent}%`}, reset ${p.resetsInMinutes ?? 'n/d'} min, age ${p.ageSeconds ?? 'n/d'} s${p.staleDescription ? `, ${p.staleDescription}` : ''}, free slots ${p.freeSlots ?? 'unbounded'}, queue_hold ${p.queueHold === null ? 'off' : `${p.queueHold}%`}${p.reportReady ? `; ${p.reportReady} ${plural(p.reportReady, 'okno', 'okna', 'okien')} report-ready – close zwolni ${plural(p.reportReady, 'okno', 'okna', 'okien')}` : ''}${p.estimate ? `, estimate.remainingTokens ${p.estimate.remainingTokens} (${p.estimate.confidence})` : ''}`);
+  return snapshot.map((p) => `capacity: ${p.provider}${p.ordered ? ' (order)' : ''}: remaining ${p.remainingPercent === null ? 'n/d' : `${p.remainingPercent}%`}, reset ${p.resetsInMinutes ?? 'n/d'} min, age ${p.ageSeconds ?? 'n/d'} s${p.staleDescription ? `, ${p.staleDescription}` : ''}, free slots ${p.freeSlots ?? 'unbounded'}, queue_hold ${p.queueHold === null ? 'off' : `${p.queueHold}%`}${p.providerHold ? `; ${providerHoldText(p.provider, p.providerHold)}` : ''}${p.reportReady ? `; ${p.reportReady} ${plural(p.reportReady, 'okno', 'okna', 'okien')} report-ready – close zwolni ${plural(p.reportReady, 'okno', 'okna', 'okien')}` : ''}${p.estimate ? `, estimate.remainingTokens ${p.estimate.remainingTokens} (${p.estimate.confidence})` : ''}`);
 }
 export function renderCapacity(report: Capacity): string[] {
   return [machineLine(report.machine), diskLine(report.disk), ...snapshotLines(capacitySnapshot(report)), ...report.providers.flatMap((p) => [

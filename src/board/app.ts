@@ -1,3 +1,4 @@
+import { providerHolds } from '../core/provider-hold.ts';
 import type { RefreshClock } from './refresh-scheduler.ts';
 import { RefreshScheduler } from './refresh-scheduler.ts';
 import { diskLine } from '../core/disk.ts';
@@ -294,7 +295,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
   const layout = boardLayout(state.width, ctx.config.board.listWidth);
   const active = state.rows.filter((r) => !r.closed && !r.finished && !r.hidden).length;
   const hiddenCount = state.showHidden ? 0 : state.rows.filter((r) => r.hidden).length;
-  const panel = usagePanel(state.plans, ctx.config.usage, Date.now());
+  const panel = usagePanel(state.plans, ctx.config.usage, Date.now(), providerHolds(ctx.config, Date.now()));
   const mline = managerLine(state, ctx.config.manager.autostart || ctx.config.manager.project !== null);
   const rowsForBody = Math.max(3, state.height - 4 - panel.length - (mline ? 1 : 0));
   const away = awayLabel(state.away);
