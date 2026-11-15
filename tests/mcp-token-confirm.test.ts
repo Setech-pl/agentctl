@@ -46,3 +46,21 @@ it('P77: queue_rm token-only confirmation executes stored task; missing preview 
   const missing = await tool('queue_rm').run(deps, {});
   assert.equal(missing.isError, true, 'relaxing confirm schemas must not relax preview validation');
 });
+
+it('A5: table of write tools exposes token-only confirm schemas, including limits/reservations and WALL', async () => {
+  const exceptions = new Set(['send', 'answer', 'away']); // dedicated delivery/menu tokens; away executes without preview
+  for (const t of MCP_TOOLS.filter(t => t.kind === 'write' && !exceptions.has(t.name))) {
+    assert.ok(t.input.preview_token, t.name);
+    assert.ok(z.object(t.input).safeParse({confirm: true, preview_token: 'preview'}).success, t.name);
+  }
+  const config = makeConfig(scratch.sub('a5'), 'mcp: {allow: [set_limits, reserve, wall]}\n');
+  const deps = {context: () => new Context(new DiskRunner({dryRun: false}), config, () => {}), notify: async () => {}};
+  for (const [name, args] of [['set_limits', {claude: 3}], ['reserve', {codex: 1}], ['wall_post', {as: 'chat:nc', channel: 'nc', kind: 'info', subject: 'A5', body: 'hello'}]] as const) {
+    const preview = await tool(name).run(deps, args);
+    assert.ok(!preview.isError, preview.text);
+    const token = /preview_token: (\S+)/.exec(preview.text)![1];
+    const done = await tool(name).run(deps, z.object(tool(name).input).parse({confirm: true, preview_token: token}));
+    assert.ok(!done.isError, done.text);
+    assert.ok(!done.text.includes('Not executed'), done.text);
+  }
+});

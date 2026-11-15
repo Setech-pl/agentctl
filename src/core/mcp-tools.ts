@@ -1725,7 +1725,7 @@ export async function applyMcpRequest(deps: McpDeps, request: McpRequest): Promi
   return { text: result.text };
 }
 
-const confirmedTools = new Set(['mark', 'new', 'queue', 'cancel', 'resume', 'move', 'interrupt', 'close', 'queue_rm', ...MCP_TOOLS.filter((t) => t.kind === 'write' && !['send', 'answer', 'mark', 'away', 'set_limits', 'reserve'].includes(t.name)).map((t) => t.name)]);
+const confirmedTools = new Set(['mark', 'new', 'queue', 'cancel', 'resume', 'move', 'interrupt', 'close', 'queue_rm', ...MCP_TOOLS.filter((t) => t.kind === 'write' && !['send', 'answer', 'mark', 'away'].includes(t.name)).map((t) => t.name)]);
 const previews = new WeakMap<McpDeps, Map<string, { key: string; arguments: Record<string, unknown>; /** The arguments as they came in (the spec text, not its canonical form): a token-only confirm executes these. */ raw: Record<string, unknown>; scope: string; at: number; ttlS: number; /** new/queue: what the preview planned; the confirm records it without planning again (P93). */ planned?: AcceptedOrder[] }>>();
 const lastPreviewMutation = new WeakMap<McpDeps, string>();
 const previewSessions = new WeakMap<McpDeps, string>();
@@ -1758,6 +1758,8 @@ function confirmationTargets(name: string, scope: unknown): unknown {
 }
 /** Exact arguments and observed task/queue/window identities bind confirmation to this session. No scope can silently grow. */
 async function confirmationScope(ctx: Context, name: string, args: Record<string, unknown>): Promise<unknown> {
+  if (name === 'set_limits') return { limits: ctx.config.limits, queueHold: ctx.config.usage.queueHold };
+  if (name === 'reserve') return { reservations: readReservations(ctx.config) };
   if (name === 'queue_up' || name === 'queue_rm') {
     const entry = findEntry(ctx.config, args.task as string);
     if (name === 'queue_up' && entry.status !== 'queued') throw new AgentctlError(`${entry.task} is ${entry.status}, not waiting`);
@@ -1866,6 +1868,8 @@ for (const tool of MCP_TOOLS) {
   const original = tool.run;
   tool.run = (deps, args) => guarded(async () => {
     const ctx = deps.context(() => {});
+    // Keep the established explicit-argument limit API; token-only confirms restore a reviewed preview.
+    if (['set_limits', 'reserve'].includes(tool.name) && args.confirm && !args.preview_token) return original(deps, args);
     if (!ctx.config.mcp.allow.includes(tool.name as McpWriteTool)) return writeTool(deps, tool.name as McpWriteTool, {}, async () => { throw new Error('unreachable'); });
     if (tool.name === 'mark' && !(args.confirm && args.preview_token) && typeof args.task === 'string' && args.tasks === undefined && args.cohort === undefined && deferMcpWrites(ctx)) {
       // P93b: a single mark needs no preview; with a watcher it is recorded and applied there (the mark resolves the task over every record).
@@ -1970,7 +1974,7 @@ for (const tool of MCP_TOOLS) {
     if (!confirm) {
       let result: ToolResult;
       if (tool.name === 'new' || tool.name === 'queue') result = await writeTool(deps, tool.name, {}, async () => ({ text: `${summarizeSpecs((scope as { specs: ResolvedSpec[] }).specs).join('\n')}\nBase/overlap, worktrees, capacity and disk checked by watch at accept; errors appear as events.\nBaza/nakładanie, worktree, limity i dysk: watch sprawdzi po przyjęciu; błędy w events_since.\nNot executed. Review, then confirm the preview_token.`, executed: false, announce: '' }));
-      else if (['cancel', 'resume', 'move'].includes(tool.name)) result = await original(deps, args);
+      else if (['cancel', 'resume', 'move', 'set_limits', 'reserve'].includes(tool.name)) result = await original(deps, args);
       else result = await writeTool(deps, tool.name as McpWriteTool, {}, async () => {
         const detail = tool.name === 'gc' ? renderGc(scope as GcPlan, { detail: Boolean(input.detail), offset: input.offset as number | undefined, limit: input.limit as number | undefined }).join('\n') : JSON.stringify({ operation: tool.name, arguments: input, scope: await previewScope(ctx, tool.name, input, scope) }, null, 2);
         return { text: `${detail}\nNot executed. Review, then call with identical arguments and confirm: true.`, executed: false, announce: '' };
