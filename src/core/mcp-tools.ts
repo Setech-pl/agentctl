@@ -1839,6 +1839,7 @@ async function confirmationScope(ctx: Context, name: string, args: Record<string
       if (author && author.agent !== 'unknown') knownAuthors.set(id, {agent: author.agent, model: author.model});
     }
     const specs = await planBatch(ctx, resolved, { previewOnly: true, noSwitch: true, knownAuthors, ...(args.agent ? { agent: args.agent as AgentName } : {}) });
+    for (const spec of specs) { const warnings = reportPathWarnings(ctx.config, spec); if (warnings.length) throw new AgentctlError(`${spec.task}: ${warnings.join('; ')}`); }
     return { specs };
   }
   if (name === 'queue_retry') {
