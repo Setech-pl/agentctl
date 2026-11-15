@@ -82,7 +82,7 @@ it('P47: omit unchanged footers, opt in explicitly, warn once and report thresho
     assert.ok(!preview.isError, preview.text);
     assert.doesNotMatch(preview.text, /Plans:|plan:|capacity:|Disk:/);
     const detail = await f.call(name, { spec, capacity: true });
-    assert.match(detail.text, /capacity:/); assert.match(detail.text, /Disk:/);
+    assert.match(detail.text, /checked by watch at accept/); assert.doesNotMatch(detail.text, /capacity:|Disk:/);
   }
   seedTask(f.config, 'C-1');
   const queued = await f.call('queue', { spec, confirm: true });
