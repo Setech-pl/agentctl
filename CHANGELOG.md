@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.22.4] - 2026-11-15
 
+- H1 validation: re-queued records without a launch are displayed only by the queue, preventing a dead-window alert while they wait. / Wpis po ponownym dodaniu bez startu jest widoczny tylko w kolejce, bez alarmu martwego okna.
+
 - G1b validation: retain custom limit_patterns overrides and assert notifications against concrete hold deadlines. / Zachowane własne limit_patterns; powiadomienia sprawdzane względem czasu blokady.
 
 - G1b: provider error screens/hooks and pinned transcript errors mark limited and hold starts until the stated reset (else 1 h), once per evidence; docs-backed fixtures. / Błędy dostawcy ustawiają limited i blokadę do resetu lub na 1 h, bez odnawiania od starego komunikatu; fixture’y według dokumentacji.

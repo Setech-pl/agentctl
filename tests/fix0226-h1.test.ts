@@ -27,3 +27,11 @@ it('H1: a never-started queue_rm is cancelled before watch observes windows or p
   assert.equal(snapshot.rows.find((r: {task: string}) => r.task === 'WAIT').state, 'cancelled');
   assert.ok(!readJournal(config).some(e => e.task === 'WAIT' && ['dead', 'tmux-lost'].includes(e.kind)));
 });
+
+it('H1: a re-queued never-launched record is represented by the queue, without a dead window row', async () => {
+  const config = makeConfig(scratch.sub('requeued'));
+  const runner = new DiskRunner({dryRun: false, respond: new FakeTmux().respond});
+  const ctx = new Context(runner, config, () => {});
+  seedTask(config, 'REQUEUED', {started: '', promptDelivery: 'launching'});
+  assert.deepEqual(await collectStatus(ctx, {cachedOnly: true}), []);
+});

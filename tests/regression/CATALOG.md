@@ -16,7 +16,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 | H2 | Budget fallback presented a three-hour cached status as current. | `tests/fix0226-h2.test.ts` | 0.22.4 | fails on v0.22.3 (2 failing of 2) |
 | H3 | A pending queue_rm prevented replacing the same task ID. | `tests/fix0226-h3.test.ts` | 0.22.4 | fails on v0.22.3 (1 failing of 1) |
 | H5 | Report summaries hid outputs findings and duplicate blocks discarded all outputs. | `tests/fix0226-h5.test.ts` | 0.22.4 | fails on v0.22.3 (2 failing of 2) |
-| H1 | Deferred queue removal published a vanished-window event before cancellation. | `tests/fix0226-h1.test.ts` | 0.22.4 | fails on v0.22.3 (1 failing of 1) |
+| H1 | Deferred queue removal published a vanished-window event before cancellation. | `tests/fix0226-h1.test.ts` | 0.22.4 | fails on v0.22.3 (2 failing of 2) |
 | H4 | Attempt markers before the verdict blocked dependencies. | `tests/fix0226-h4.test.ts` | 0.22.4 | fails on v0.22.3 (2 failing of 2) |
 | HELP-HEIGHT | Board help overflowed terminal height and overdrew its header. | `tests/board.test.ts` (`^HELP-HEIGHT:`) | 0.22.3 | fails on v0.22.2 (1 failing of 1) |
 | BASE-DEFAULT | A missing spec base did not identify the repository default branch. | `tests/worktree-start.test.ts` (`^BASE-DEFAULT:`) | 0.22.3 | fails on v0.22.2 (1 failing of 1) |

@@ -184,11 +184,13 @@
   "H1": {
     "rev": "v0.22.3",
     "outcome": "FAILS",
-    "failed": 1,
+    "failed": 2,
     "passed": 0,
     "failing": [
       "H1: a never-started queue_rm is cancelled before watch observes windows or publishes a snapshot",
-      "H1: a never-started queue_rm is cancelled before watch observes windows or publishes a snapshot"
+      "H1: a re-queued never-launched record is represented by the queue, without a dead window row",
+      "H1: a never-started queue_rm is cancelled before watch observes windows or publishes a snapshot",
+      "H1: a re-queued never-launched record is represented by the queue, without a dead window row"
     ]
   },
   "H2": {

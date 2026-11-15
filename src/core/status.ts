@@ -203,6 +203,8 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     }
     if (!archived) knownWindows.add(record.window);
     const alive = live.has(record.window);
+    // Re-queued records retain attempt history, but no window has been launched yet. The queue owns their display.
+    if (!alive && !record.started && record.promptDelivery === 'launching' && !record.cancelled && !record.closed && !archived) continue;
     // Closed, cancelled or archived and not live: the board only counts them (unless a section is expanded), so the
     // prompt queue, the outputs and the tokens are not collected for them. Everything that decides the state stays.
     const shallow = opts.shallowClosed === true && !alive && (archived || record.closed === true || record.cancelled === true);
