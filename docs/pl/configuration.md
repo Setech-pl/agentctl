@@ -261,3 +261,15 @@ wall:
     hems: {channels: [hems, agentctl, "shared:*"]}
     agentctl: {channels: [agentctl, "shared:*"]}
 ~~~
+
+## Hotfix 0.22.4: wstrzymania dostawców, snapshoty i integracje
+
+`set_limits` przyjmuje `hold: {glm: "21:50"}` (najbliższa lokalna godzina), czas ISO, okres np. `"3h"` lub `"off"`. Obsługiwany jest każdy aktywny dostawca. CLI: `agentctl limits set hold.glm=3h`; wyłączenie: `hold.glm=off`. Trwała blokada działa niezależnie od procentowego `queue_hold` i odczytu zużycia. Blokuje kolejkę oraz jawne starty asynchroniczne, przetrwa restart watch, jest widoczna w queue_list/limits/capacity/board i wygasa ze zdarzeniem `limits-changed`. `off` usuwa bieżącą blokadę; nowy błąd dostawcy może ustawić kolejną.
+
+Błąd quota/rate-limit w oknie, hooku lub przypisanym transkrypcie bieżącej próby ustawia `limited` i automatyczną blokadę dostawcy. Podany reset (ISO/godzina lokalna lub Retry-After) ma pierwszeństwo; bez niego blokada trwa godzinę. Stary komunikat nie przedłuża ani nie odnawia blokady. W transkrypcie liczą się rekordy błędów dostawcy, nie wypowiedzi użytkownika lub narzędzi. GLM może mieć zużycie n/d i aktywną blokadę. Fixture’y obejmują Z.ai 1113, 1302, 1308, zgodne z Anthropic 429 i istniejące błędy Kimi; [kody Z.ai](https://docs.z.ai/api-reference/api-code), [limity Claude](https://platform.claude.com/docs/en/api/rate-limits). To deterministyczne przykłady formatów z dokumentacji; testy nie wykonują inferencji ani zapytań sieciowych.
+
+Tekst z cache zaczyna się od `stan z HH:MM, 2h 44m temu`; rekordy JSON mają `snapshot_age_s`, a odpowiedzi obiektowe także `snapshot_age`. Snapshot statusu lub cache odpowiedzi starszy niż pięć minut daje krótki fallback kolejki/dziennika z czasami ostatnich zdarzeń zamiast starej pełnej tabeli. Komunikat jawnie zaznacza brak odczytu żywych okien.
+
+`integration: true` w specyfikacji wycisza ostrzeżenia o kolizjach z adnotacją. W pozostałych przypadkach porównanie używa merge-base bazy specyfikacji i pomija pliki przejęte przez merge wykonany przez poprzednika; zmiany bez commita nadal się liczą. Gałąź integrowaną deklaruj jako `repos[].base`. Flaga steruje ostrzeżeniami, nie daje uprawnień do scalenia.
+
+Podgląd kolejki wskazuje oczekujące `queue_rm` i identyfikator requestu. MCP `queue` z `replace: true` usuwa oczekujący wpis i dodaje nową specyfikację w jednym ticku watch; rozpoczęte zadanie jest odrzucane. Usunięte zadania bez startu mają ukryty stan `cancelled`, bez alarmu utraty okna. Instrukcja raportu umieszcza marker próby po pierwszym wierszu werdyktu, a parser toleruje wcześniejsze komentarze. Odczyt raportu/zdarzenia pokazują `outputs_errors`; duplikaty bloków wybierają ostatni poprawny z uwagą. `Verdict:`, `Werdykt:` i udokumentowane aliasy checks nadal działają.

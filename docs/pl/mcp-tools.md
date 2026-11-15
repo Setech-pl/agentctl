@@ -38,11 +38,11 @@ Argumenty z ? są opcjonalne. Pola dostawców obejmują opcjonalnych; uruchomion
 
 | Tool | Rodzaj | Argumenty | Zastosowanie |
 |---|---|---|---|
-| `status` | odczyt | `all?`, `cohort?`, `format?`, `detail?`, `offset?`, `limit?`, `capacity?` | Stan zadań, pytań, raportów i potrzebnej uwagi; domyślnie zwięzły. |
+| `status` | odczyt | `all?`, `cohort?`, `format?`, `detail?`, `offset?`, `limit?`, `capacity?` | Stan zadań i raportów; cache podaje wiek, po 5 min krótki fallback kolejki/dziennika. |
 | `events_since` | odczyt | `as?`, `cursor?`, `limit?`, `client?`, `since?`, `cohort?`, `peek?`, `format?`, `detail?` | Przyrost według as czatu (client nadpisuje), otwarta skrzynka WALL; peek zachowuje kursor. |
 | `gc_preview` | odczyt | `request_id?`, `detail?`, `offset?`, `limit?`, `older_than?`, `merged?`, `cohort?` | Chroniony plan sprzątania z rozmiarami i powodami pominięcia; bez usuwania. |
 | `limits` | odczyt | `format?`, `detail?` | Limity slotów, zajętość, rezerwacje, kolejka i obowiązujący queue_hold. |
-| `set_limits` | zapis | `claude?`, `codex?`, `queue_hold?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Zmień limity i queue_hold w configu z komentarzami/backupem; zapis synchroniczny. |
+| `set_limits` | zapis | `claude?`, `codex?`, `queue_hold?`, `hold?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Zmień limity, queue_hold i czasowe hold (HH:MM/ISO/3h/off); zapis synchroniczny. |
 | `reserve` | zapis | `claude?`, `codex?`, `note?`, `release?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Zarezerwuj sloty dla agentów uruchamianych ręcznie. |
 | `version` | odczyt |  | Wersja procesu MCP, skrypt, PID, czas startu i wersja stabilnej kopii na dysku. |
 | `peek` | odczyt | `task`, `lines?` | Ostatnie linie okna bez stopki, pytanie, stan kolejki promptów lub zapis błędu startu. |
@@ -64,7 +64,7 @@ Argumenty z ? są opcjonalne. Pola dostawców obejmują opcjonalnych; uruchomion
 | `send` | zapis | `task?`, `text?`, `enter_only?`, `confirm?`, `token?`, `withdraw?`, `preview_token?` | Wyślij follow-up lub wycofaj ID; busy Codex czeka do końca tury. enter_only wymaga send_enter. |
 | `consult` | zapis | `spec?`, `confirm?`, `preview_token?` | Kosztowny panel wielu dostawców: podgląd liczby/usage, Accepted, rundy i synteza przez watch. |
 | `new` | zapis | `spec?`, `agent?`, `reuse?`, `no_agent?`, `cohort?`, `wait_trust?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` | Podgląd specyfikacji, potem trwała rejestracja Accepted do walidacji/startu przez watch. |
-| `queue` | zapis | `spec?`, `cohort?`, `agent?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` | Podgląd specyfikacji, potem Accepted do walidacji i kolejki przez watch. |
+| `queue` | zapis | `spec?`, `cohort?`, `replace?`, `agent?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` | Podgląd specyfikacji, potem Accepted do walidacji i kolejki przez watch. |
 | `queue_rm` | zapis | `task?`, `confirm?`, `preview_token?` | Usuń oczekujące zadanie z kolejki. |
 | `cancel` | zapis | `task?`, `tasks?`, `cohort?`, `reason?`, `remove_worktree?`, `confirm?`, `preview_token?` | Przerwij i porzuć zadania; zachowaj gałęzie/worktree, zapisz powód. |
 | `mark` | zapis | `task?`, `tasks?`, `cohort?`, `result?`, `note?`, `confirm?`, `preview_token?` | Zapisz ocenę człowieka ok/partial/fail, osobną od werdyktu autora. |

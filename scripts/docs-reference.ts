@@ -9,11 +9,11 @@ const root = path.resolve(import.meta.dirname, '..');
 const bt = String.fromCharCode(96);
 const code = (s: string) => bt + s + bt;
 const pl: Record<string, string> = {
- status: 'Stan zadań, pytań, raportów i potrzebnej uwagi; domyślnie zwięzły.',
+ status: 'Stan zadań i raportów; cache podaje wiek, po 5 min krótki fallback kolejki/dziennika.',
  events_since: 'Przyrost według as czatu (client nadpisuje), otwarta skrzynka WALL; peek zachowuje kursor.',
  gc_preview: 'Chroniony plan sprzątania z rozmiarami i powodami pominięcia; bez usuwania.',
  limits: 'Limity slotów, zajętość, rezerwacje, kolejka i obowiązujący queue_hold.',
- set_limits: 'Zmień limity i queue_hold w configu z komentarzami/backupem; zapis synchroniczny.',
+ set_limits: 'Zmień limity, queue_hold i czasowe hold (HH:MM/ISO/3h/off); zapis synchroniczny.',
  reserve: 'Zarezerwuj sloty dla agentów uruchamianych ręcznie.',
  version: 'Wersja procesu MCP, skrypt, PID, czas startu i wersja stabilnej kopii na dysku.',
  peek: 'Ostatnie linie okna bez stopki, pytanie, stan kolejki promptów lub zapis błędu startu.',

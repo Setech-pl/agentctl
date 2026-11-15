@@ -1190,7 +1190,7 @@ export const MCP_TOOLS: McpToolDef[] = [
     description:
       'Current state of every agentctl task: agent/model/effort, state (working, background, waiting, needs-input, needs-trust, limited, report-ready, dead, orphan, superseded), ' +
       'start time (started in UTC, startedLocal in the user\'s local time: show the local one), running time, git progress, whether a report exists and was already pulled, the last line and the open question of a waiting agent. ' +
-      'Use events_since FIRST; status gives task detail when the user asks what is running, who waits for them, or whether something is ready, and at the start of a planning session. ' +
+      'Cached text starts with its age; JSON snapshots carry snapshot_age_s. Status older than five minutes uses a short queue/journal fallback. Use events_since FIRST; status gives task detail when the user asks what is running, who waits for them, or whether something is ready, and at the start of a planning session. ' +
       'Hidden, closed and cancelled tasks are left out unless all is true. cohort limits it to the tasks of one cohort (a group the user named). Every row has its cohort (null: none).',
     input: { all: allArg, cohort: cohortArg.optional() },
     annotations: readOnly('Status of all agent tasks'),
@@ -1236,6 +1236,7 @@ export const MCP_TOOLS: McpToolDef[] = [
     kind: 'write',
     description:
       'WRITE, off unless the user put "set_limits" in mcp.allow. Sets the most simultaneous agents per provider in config.yaml (0 removes a limit, "off" disables the provider: no windows of it start), and the queue hold usage.queue_hold; comments in the file stay, a copy is kept as config.yaml.bak. It takes effect at once, without restarting watch (watch reloads config.yaml when it changes, also after a hand edit). ' +
+      'Timed provider hold: hold: {glm: "21:50"}, ISO timestamp, duration "3h", or "off"; every active provider is supported. Holds block starts even with plan n/d, appear in limits/capacity/board/queue_list and expire with an event. ' +
       `queue_hold format, exactly: a whole percentage 1-100 for every active provider (queue_hold: 90), "off" for no hold at all (queue_hold: "off"), or per provider {claude: 90, codex: "off"} (only the named providers change; "off" removes that provider's hold). Above that percentage of its plan, in any window, the queue starts no task of the provider; queue_list shows "wstrzymane: … > usage.queue_hold N%"; limits, capacity and config_show show the current hold. ` +
       'The FIRST call (confirm omitted) only describes the change; show it to the user, then call again with confirm: true.',
     input: { ...perProvider(DEFAULT_PROVIDERS, id => setLimitArg.describe(`New limit for ${provider(id).displayName}; 0 = no limit, "off" = disabled. Omit to leave it.`)), queue_hold: queueHoldArg, hold: z.record(z.string(), z.string()).optional().describe('Timed provider hold: {glm: "21:50"}, ISO timestamp, "3h", or "off". Applies to every active provider.'), confirm: z.boolean().optional().describe('true only after the user agreed to the described change.') },
@@ -1471,7 +1472,7 @@ export const MCP_TOOLS: McpToolDef[] = [
     kind: 'write',
     description:
       'WRITE, off unless the user put "queue" in mcp.allow. Puts the tasks of a spec in the queue (same spec format as new, plus priority: high|normal, after: <TASK or list>, touches: [globs]): each starts when a provider window is free and its `after` reports have an accepted first-line verdict (PASS, PASS with findings, PARTIAL, GO); after_verdict overrides the list. ' +
-      'The FIRST call (confirm omitted) validates the spec and returns a summary (where each task will stand, hints, touches warnings); show it to the user. Only when they agree, call again with the same spec and confirm: true. "setup" is not accepted from the chat.',
+      'The FIRST call (confirm omitted) validates the spec and returns a summary (where each task will stand, hints, touches warnings); show it to the user. Only when they agree, call again with the same spec and confirm: true. "setup" is not accepted from the chat. replace: true replaces a waiting entry in one watch step; previews identify pending queue_rm requests.',
     input: {
       spec: z.string().min(1).max(100_000).optional().describe('The spec text: ---, YAML header, ---, prompt. Several specs may follow each other. Optional only when confirming with preview_token: the stored spec then executes.'),
       cohort: cohortArg.optional(),

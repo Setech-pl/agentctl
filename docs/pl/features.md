@@ -76,3 +76,5 @@ Weryfikacja send zachowuje własność przewiniętego wielowierszowego pola Code
 Identyfikatory baz i SHA outputs są tekstem YAML (cytuj SHA, również wyglądające jak liczba/notacja wykładnicza). Pierwsza linia przyjmuje `Verdict:` i `Werdykt:` oraz ma pierwszeństwo przed werdyktem outputs. Pod commits/integrate zwięzłe mapy outputs przyjmują `- repo: example, branch: dev, sha: "2742e697"` obok obiektów. Używaj istniejących gałęzi/SHA, bez placeholderów; checks przyjmuje name/result, mapy jednokluczowe lub tekst. Najczytelniejsze są wpisy name/result.
 
 Confirm WALL zapisuje synchronicznie, bez obiegu przez watch. Zdarzenia używają kursora skonfigurowanego `as`, pokazują ograniczoną sekcję `WALL do Ciebie (open)` i oznaczają rzeczywiste własne wpisy `(yours)`; nieznane czaty dostają ostrzeżenie. [Semantyka MCP](mcp-tools.md) wyjaśnia wiek snapshotów i potwierdzanie raportów.
+
+Blokady dostawców, wiek statusu, zastępowanie kolejki i kolizje integracji: [opis 0.22.4](configuration.md#hotfix-0224-wstrzymania-dostawców-snapshoty-i-integracje).

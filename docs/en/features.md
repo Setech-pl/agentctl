@@ -76,3 +76,5 @@ Send verification retains ownership of scrolled multiline Codex input and requir
 YAML base and output SHA identifiers are strings (quote SHAs, including numeric/exponent-looking values). Both `Verdict:` and `Werdykt:` first lines are accepted; the first-line verdict takes precedence. Under commits/integrate, compact output mappings accept `- repo: example, branch: dev, sha: "2742e697"` as well as object entries. Use existing branches and SHAs, never placeholders; checks accept mappings with name/result, one-key mappings or text. Structured name/result entries remain clearest.
 
 WALL confirms append synchronously, without a watch round-trip. Events use the configured `as` cursor, show the bounded `WALL do Ciebie (open)` section and label actual own posts `(yours)`; unknown chats get a warning. See [MCP semantics](mcp-tools.md) for snapshot ages and report acknowledgement.
+
+Timed provider holds, status age/fallback, queue replacement and integration warnings: see [0.22.4 configuration](configuration.md#hotfix-0224-provider-holds-snapshots-and-integrations).
