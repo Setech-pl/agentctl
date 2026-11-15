@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Complete the English/Polish host configuration and host-unreachable state inventories. / Uzupełnij angielskie i polskie tabele konfiguracji hostów oraz stanu host-unreachable.
+
 - HOST-TMUX-WRAP: keep saved tmux methods stable when consumers wrap them. / Zachowuj stabilne metody tmux przy podpinaniu wrapperów przez konsumentów.
 
 - HOST-MIRROR-ENV: send only provider session-home paths to the remote mirror reader, keeping other task environment values out of its SSH command. / Czytnik kopii raportu dostaje tylko ścieżki sesji dostawców; pozostałe wartości env zadania nie trafiają do jego komendy SSH.

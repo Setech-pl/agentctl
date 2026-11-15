@@ -10,6 +10,7 @@ Kolejka uruchamia high przed normal, FIFO w każdej klasie. `weight: heavy` wsp�
 
 | Stan zadania | Znaczenie |
 |---|---|
+| `host-unreachable` | SSH nie dociera do hosta zadania; zachowaj okno i slot, ponawiaj z backoff |
 | `needs-attention` | Problem dostarczenia, utraconego okna lub zapisu stanu wymaga uwagi |
 | `overloaded` | Rozpoznane przeciążenie dostawcy |
 | `working` | Trwa tura dostawcy |

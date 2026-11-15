@@ -10,6 +10,11 @@ Types/defaults below are cross-checked with [config.ts](../../src/core/config.ts
 
 `hosts.<name>` configures SSH, remote clones, providers, environment and optional provider caps. A spec with `host: <name>` runs remotely and mirrors its report locally. See [Hosts](hosts.md) for the complete config, limits, recovery and PC example.
 
+| Key | Type / default / layers | Meaning |
+|---|---|---|
+| `hosts` | mapping · `{}` · g | Named SSH hosts: ssh, port, identity_file, work_dir, repos, providers, limits, env. [Full host configuration](hosts.md). |
+| `host` | name · none · s | Execute this task on a configured host; keep the local report mirror and account plus host limits. |
+
 ## Layers and instance
 
 | Key | Type / default / layers | Meaning |

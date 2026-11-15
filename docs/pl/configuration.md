@@ -10,6 +10,11 @@ Typy/domysły sprawdzono z [config.ts](../../src/core/config.ts), [spec.ts](../.
 
 `hosts.<name>` konfiguruje SSH, zdalne klony, dostawców, env i opcjonalne limity dostawców. Spec z `host: <name>` działa zdalnie, a raport ma lokalną kopię. [Hosty](hosts.md): pełny config, limity, odzyskiwanie połączenia i przykład na PC.
 
+| Key | Typ / domyślne / warstwy | Znaczenie |
+|---|---|---|
+| `hosts` | mapping · `{}` · g | Nazwane hosty SSH: ssh, port, identity_file, work_dir, repos, providers, limits, env. [Pełny config hostów](hosts.md). |
+| `host` | nazwa · brak · s | Uruchom zadanie na skonfigurowanym hoście; lokalna kopia raportu oraz limity konta i hosta. |
+
 ## Warstwy i instancja
 
 | Key | Typ / domyślne / warstwy | Znaczenie |

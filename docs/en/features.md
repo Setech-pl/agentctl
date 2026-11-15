@@ -10,6 +10,7 @@ Queue order is high priority before normal, FIFO within each class. `weight: hea
 
 | Task state | Meaning |
 |---|---|
+| `host-unreachable` | SSH cannot reach the task host; keep its window and slot, retry with backoff |
 | `needs-attention` | Delivery, lost-window or state-write problem needs inspection |
 | `overloaded` | Recognized provider capacity/overload episode |
 | `working` | Provider turn is running |
