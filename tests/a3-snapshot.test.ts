@@ -35,7 +35,10 @@ it('A3: atomic watch snapshot serves every bounded read with stalled processes a
   stalled = false; await runner.sleep(4001);
   const result = await MCP_TOOLS.find(t => t.name === 'status')!.run(deps, {});
   assert.match(result.text, /snapshot unavailable\/stale/i);
-  assert.match((await MCP_TOOLS.find(t => t.name === 'doctor')!.run(deps, {})).text, /snapshot unavailable\/stale/i);
+  const doctor = await MCP_TOOLS.find(t => t.name === 'doctor')!.run(deps, {});
+  assert.match(doctor.text, /snapshot unavailable\/stale/i);
+  assert.match(doctor.text, /per-task report\/link checks skipped/);
+  assert.equal((doctor.text.match(/snapshot_note/g) ?? []).length, 1, 'one note preserves bounded diagnostics');
 });
 it('A3: GC preview is Accepted without slow checks and read back after watch', async () => {
   const config = makeConfig(scratch.sub('gc'), 'mcp: {allow: [gc]}\n'); fakeWatcher(config);

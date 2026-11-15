@@ -2263,7 +2263,7 @@ for (const tool of MCP_TOOLS.filter(t => snapshotTools.has(t.name))) {
     if (cached) return cached;
     const result = await run(deps, args);
     const note = 'Watch snapshot unavailable/stale; bounded fallback path. / Snapshot watch niedostępny lub stary; odczyt ograniczony budżetem.';
-    try { const data = JSON.parse(result.text); return { ...result, text: JSON.stringify(Array.isArray(data) ? data.map(item => ({...item, snapshot_note: note})) : { ...data, snapshot_note: note }, null, 2) }; } catch { return { ...result, text: `${result.text}\n${note}` }; }
+    try { const data = JSON.parse(result.text); return { ...result, text: JSON.stringify(Array.isArray(data) ? data.map((item, index) => index === 0 ? {...item, snapshot_note: note} : item) : { ...data, snapshot_note: note }, null, 2) }; } catch { return { ...result, text: `${result.text}\n${note}` }; }
   };
 }
 
