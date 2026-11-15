@@ -413,11 +413,11 @@ async function runEventsSince(deps: McpDeps, args: { since?: string | undefined;
   let who: WallIdentity;
   try { who = wallIdentity(ctx.config, { as: args.as, client: deps.clientId }); } catch { who = { id: 'unknown', kind: 'unknown' }; }
   const wallChannels = new Set(subscribedChannels(ctx.config, who, shared ?? deps.clientId));
-  const client = `mcp:${deps.clientId ?? 'unknown'}:${shared ?? 'default'}`;
-  const session = shared === undefined ? deps.eventsSession : undefined;
+  const client = who.kind === 'chat' ? `mcp:${who.id}` : `mcp:${deps.clientId ?? 'unknown'}:${shared ?? 'default'}`;
+  const session = shared === undefined && who.kind !== 'chat' ? deps.eventsSession : undefined;
   const key = args.cohort === undefined ? client : `${client}|cohort:${cohortKey(args.cohort)}`;
   const sessionCursor = session ? (session.cursors[key] ?? session.markers[key] ?? session.markers.mcp ?? session.initialSince) : undefined;
-  const report = await collectEvents(ctx, { client, cursor: args.cursor ?? ((!args.since || args.since === 'last') ? sessionCursor : undefined), limit: args.limit, since: args.since, cohort: args.cohort, keep: Boolean(args.peek), wallChannels });
+  const report = await collectEvents(ctx, { client, cursor: args.cursor ?? ((!args.since || args.since === 'last') ? sessionCursor : undefined), limit: args.limit, since: args.since, cohort: args.cohort, keep: Boolean(args.peek), wallChannels, wallIdentity: who.id });
   if (session && !args.peek) session.cursors[key] = report.next_cursor;
   return { text: renderEvents(report).join('\n'), data: report };
 }

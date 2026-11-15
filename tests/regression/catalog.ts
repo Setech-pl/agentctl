@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'A2', fixedIn: '0.22.2', symptom: 'WALL events disappear behind cohort filters and transport client cursors.', scenarios: [s('a2-wall-events.test.ts')] },
   { id: 'A1', fixedIn: '0.22.2', symptom: 'MCP new/queue preview waits on git and runtime reads and loses its token at the budget.', scenarios: [s('p93-mcp-accept.test.ts', '^A1:')] },
   { id: 'CONSULT-f2', fixedIn: '0.22.0', symptom: 'Consultation tasks inherited automatic review and failed detached-worktree admission (pre-fix unreleased 1c98117: 1 of 1 fails; absent on v0.21.0).', scenarios: [s('consult.test.ts', 'CONSULT-f2')] },
   { id: 'CONSULT-f1', fixedIn: '0.22.0', symptom: 'A long task cache produced a 101-byte tmux socket even after digest shortening, so the stdio/release harness refused before startup.', scenarios: [s('harness.test.ts', 'CONSULT-f1')] },

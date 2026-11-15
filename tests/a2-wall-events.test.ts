@@ -1,0 +1,27 @@
+import assert from 'node:assert/strict';
+import { it } from 'node:test';
+import { Context } from '../src/core/context.ts';
+import { MCP_TOOLS } from '../src/core/mcp-tools.ts';
+import { touchCohort } from '../src/core/cohort.ts';
+import { postMessage, wallIdentity } from '../src/core/wall.ts';
+import { DiskRunner, FakeTmux, makeConfig, useScratch } from './helpers.ts';
+const scratch = useScratch();
+it('A2: shared WALL bypasses cohort; chat cursors survive sessions; open inbox ignores the cursor', async () => {
+  const config = makeConfig(scratch.sub('a2'), 'wall:\n  channels:\n    shared:maps-3: {authors: ["*"]}\n  chats:\n    nc: {channels: [nc, agentctl, "shared:*"]}\n    hems: {channels: [hems, agentctl, "shared:*"]}\n');
+  const runner = new DiskRunner({ dryRun: false, respond: new FakeTmux().respond });
+  const ctx = new Context(runner, config, () => {});
+  await touchCohort(ctx, '62');
+  const m = await postMessage(ctx, wallIdentity(config, {as: 'chat:hems'}), { channel: 'shared:maps-3', to: 'chat:nc', kind: 'question', subject: 'maps contract?', body: 'Check maps' });
+  const tool = MCP_TOOLS.find(t => t.name === 'events_since')!;
+  const deps = () => ({context: () => ctx, notify: async () => {}, clientId: 'claude-ai'});
+  const first = await tool.run(deps(), {as: 'chat:nc', cohort: '62', format: 'json'});
+  assert.ok(!first.isError, first.text);
+  const data = JSON.parse(first.text);
+  assert.ok(data.events.some((e: any) => e.wall?.id === m.id), first.text);
+  const second = await tool.run(deps(), {as: 'chat:nc', cohort: '62'});
+  assert.match(second.text, /WALL do Ciebie \(open\)/);
+  assert.match(second.text, /maps contract/);
+  assert.ok(!second.text.includes('  WALL  '), 'new MCP session uses the chat cursor');
+  const other = await tool.run(deps(), {as: 'chat:hems', cohort: '62', format: 'json'});
+  assert.ok(JSON.parse(other.text).events.some((e: any) => e.wall?.id === m.id), 'another chat has an independent cursor');
+});

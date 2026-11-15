@@ -1,3 +1,4 @@
+import { channelMessages } from './wall.ts';
 import { journalOutputs } from './outputs.ts';
 import { listTaskRecords } from './taskstore.ts';
 import { withFileLock } from './file-lock.ts';
@@ -100,6 +101,7 @@ export interface EventsSummary {
 
 export interface EventsReport {
   client: EventClient;
+  wallOpen?: { id: string; subject: string; from: string }[];
   /** ISO time the events start after. */
   since: string;
   sinceLabel: string;
@@ -116,7 +118,7 @@ export interface EventsReport {
   next_cursor: string;
 }
 
-export async function collectEvents(ctx: Context, opts: { client: EventClient; since?: string | undefined; cohort?: string | undefined; keep?: boolean | undefined; cursor?: string; limit?: number; maxBytes?: number; /** WALL events only of these channels (the caller's subscriptions); undefined: every channel (the owner). */ wallChannels?: ReadonlySet<string> | undefined }): Promise<EventsReport> {
+export async function collectEvents(ctx: Context, opts: { client: EventClient; since?: string | undefined; cohort?: string | undefined; keep?: boolean | undefined; cursor?: string; limit?: number; maxBytes?: number; /** WALL events only of these channels (the caller's subscriptions); undefined: every channel (the owner). */ wallIdentity?: string; wallChannels?: ReadonlySet<string> | undefined }): Promise<EventsReport> {
   const { config, runner } = ctx;
   const now = runner.now();
   const since = parseSince(opts.since, opts.client, config, now);
@@ -147,6 +149,11 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
   };
   // Bound the complete JSON and text forms before advancing the persistent cursor.
   const report: EventsReport = { client: opts.client, since: new Date(since.ms).toISOString(), sinceLabel: since.label, ...(since.note ? { note: since.note } : {}), cohort, events, summary, away: awayView(config), markerMoved: false, has_more: false, next_cursor: '' };
+  if (opts.wallIdentity?.startsWith('chat:')) {
+    report.wallOpen = [...(opts.wallChannels ?? [])].flatMap(c => channelMessages(config, c))
+      .filter(m => m.status === 'open' && (m.to === opts.wallIdentity || m.kind === 'question' || m.kind === 'decision-request'))
+      .sort((a, b) => b.ts.localeCompare(a.ts)).slice(0, 10).map(m => ({ id: m.id, subject: m.subject.slice(0, 100), from: m.from }));
+  }
   const encode = () => `e2:${position.index}:${position.offset}`;
   const baseNeedYou = [...summary.needYou];
   const attentionTasks = new Set(rows.filter(r => !r.closed && !r.cancelled && !r.pulled).map(r => r.task));
@@ -155,7 +162,7 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
   const limit = Math.max(1, Math.min(200, opts.limit ?? 100));
   while (position.index < all.length && events.length < limit) {
     const event = all[position.index]!;
-    if (cohort !== null && (!event.cohort || cohortKey(event.cohort) !== cohortKey(cohort))) { position = { index: position.index + 1, offset: 0 }; continue; }
+    if (event.kind !== 'wall' && cohort !== null && (!event.cohort || cohortKey(event.cohort) !== cohortKey(cohort))) { position = { index: position.index + 1, offset: 0 }; continue; }
     if (event.kind === 'wall' && opts.wallChannels && !opts.wallChannels.has(event.wall?.channel ?? '')) { position = { index: position.index + 1, offset: 0 }; continue; }
     const raw = JSON.stringify(event);
     const prefix = legacyGc[position.index]?.prefix;
@@ -269,6 +276,7 @@ export function renderEvents(report: EventsReport): string[] {
     head,
     ...(report.note ? [report.note] : []),
     ...report.events.map((e) => `${hhmm(e.at)}  ${KIND_LABEL[e.kind]}${e.task ? `  ${e.task}` : ''}  ${e.verdict ? `${e.verdict}` : e.text}${e.phone ? PHONE_MARK : ''}`),
+    ...(report.wallOpen ? ['WALL do Ciebie (open)', ...report.wallOpen.map(m => `${m.id}: ${m.subject}`), ...(!report.wallOpen.length ? ['brak'] : [])] : []),
     summaryLine(report.summary),
     `has_more: ${report.has_more}; next_cursor: ${report.next_cursor}`,
     ...(report.away.on ? ['Away włączone: telefon dostaje powiadomienia (📱 przy zdarzeniu = poszło na telefon).'] : []),
