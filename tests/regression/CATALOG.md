@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| A9 | Compact output references fail YAML parsing and placeholder branches escape validation. | `tests/a9-report-formats.test.ts` | 0.22.2 | fails on v0.22.0 (2 failing of 2) |
 | A8 | YAML converts unquoted git identifiers such as 2742e697 into numbers. | `tests/spec.test.ts` (`^A8:`) | 0.22.2 | fails on v0.22.0 (1 failing of 1) |
 | A7 | Summary and out-of-order full report reads stay unread in events_since. | `tests/a7-report-pulled.test.ts` | 0.22.2 | fails on v0.22.0 (1 failing of 1) |
 | A6 | Scrolled Codex multiline drafts lose paste ownership and cannot be submitted. | `tests/p49-codex-queue.test.ts` (`^A6:`) | 0.22.2 | fails on v0.22.0 (1 failing of 1) |

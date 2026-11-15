@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- A9: compact/flow output references preserve SHAs and reject placeholders as findings; Verdict/Werdykt first-line admission is covered. / Referencje outputs w skróconym YAML zachowują SHA, odrzucają placeholdery jako uwagi; testy obejmują pierwszy wiersz Verdict/Werdykt.
+
 - A8: git base/branch/SHA scalars preserve their YAML source instead of numeric conversion. / Wartości base/branch/SHA zachowują zapis YAML zamiast konwersji liczbowej.
 
 - A7: get_report marks summaries/full first pages pulled by default, accepts mark_pulled and merges page coverage in any order. / get_report oznacza podsumowanie/pierwszą pełną stronę jako pobrane, przyjmuje mark_pulled i sumuje strony w dowolnej kolejności.

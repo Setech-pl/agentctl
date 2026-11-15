@@ -2,7 +2,7 @@ import { cleanWorktreeCache } from './worktree-cache.ts';
 import { readReportText } from './report-path.ts';
 import fs from 'node:fs';
 import path from 'node:path';
-import YAML from 'yaml';
+import { parseRefYaml } from './ref-yaml.ts';
 import { z } from 'zod';
 import type { Context } from './context.ts';
 import type { TaskRecord } from './taskstore.ts';
@@ -18,7 +18,8 @@ const countText = (n: number, one: string, few: string, many: string): string =>
 
 export const VERDICTS = ['PASS', 'PARTIAL', 'FAIL', 'BLOCKED'] as const;
 export type OutputVerdict = typeof VERDICTS[number];
-const ref = z.object({ repo: z.string().min(1), branch: z.string().min(1), sha: z.string().regex(/^[a-f0-9]{7,40}$/i) }).strict();
+const refText = z.string().min(1).refine(v => !/\[[^\]]+\]|^<[^>]+>$|^(?:TODO|TBD)$/i.test(v), 'placeholder value is not a published reference');
+const ref = z.object({ repo: refText, branch: refText, sha: refText.regex(/^[a-f0-9]{7,40}$/i, 'expected a git SHA; quote the SHA if YAML cannot preserve it') }).strict();
 const integrateRef = ref.extend({ note: z.string().optional() });
 const decision = z.string().min(1);
 const action = z.object({ title: z.string().min(1), shell: z.string().min(1) }).strict();
@@ -139,12 +140,25 @@ function outputBlocks(text: string): string[] {
   return blocks;
 }
 
+/** Accept the common compact reference spelling, restricted to commits/integrate list entries. */
+function compactRefMaps(source: string): string {
+  let section: string | undefined;
+  return source.split('\n').map(line => {
+    const header = /^(commits|integrate):\s*$/.exec(line);
+    if (header) { section = header[1]; return line; }
+    if (/^\S/.test(line)) section = undefined;
+    if (section && /^\s*-\s+(?:repo|branch|sha):.+,\s*(?:repo|branch|sha):/.test(line))
+      return line.replace(/^(\s*-\s+)(.*)$/, '$1{$2}');
+    return line;
+  }).join('\n');
+}
+
 /** The `wall_posts` of the one agentctl-outputs block, as written (publishTaskPosts checks every entry); undefined: none, or no readable block. */
 export function outputWallPosts(text: string): unknown {
   const blocks = outputBlocks(text);
   if (blocks.length !== 1) return undefined;
   try {
-    const data: unknown = YAML.parse(blocks[0]!, { maxAliasCount: 50 });
+    const data: unknown = parseRefYaml(compactRefMaps(blocks[0]!));
     return data && typeof data === 'object' && !Array.isArray(data) ? (data as Record<string, unknown>).wall_posts : undefined;
   } catch { return undefined; }
 }
@@ -154,7 +168,7 @@ export function parseOutputs(text: string, opts: { review?: boolean } = {}): Out
   const invalid = (message: string): OutputData => ({ outputs: null, outputs_valid: false, outputs_errors: [message], outputs_partial: false });
   if (blocks.length !== 1) return invalid(blocks.length ? 'multiple agentctl-outputs blocks' : 'missing agentctl-outputs block (schema version: 1)');
   let data: unknown;
-  try { data = YAML.parse(blocks[0]!, { maxAliasCount: 50 }); } catch (e) { return invalid(`invalid outputs YAML: ${e instanceof Error ? e.message : String(e)}`); }
+  try { data = parseRefYaml(compactRefMaps(blocks[0]!)); } catch (e) { return invalid(`invalid outputs YAML: ${e instanceof Error ? e.message : String(e)}`); }
   if (!data || typeof data !== 'object' || Array.isArray(data)) return invalid('the agentctl-outputs block must be a YAML mapping');
   const d = data as Record<string, unknown>, errors: string[] = [];
   // Without a known version and verdict nothing can be interpreted (a dependent task gates on the verdict): the block is refused as a whole.
