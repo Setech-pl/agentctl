@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| H1 | Deferred queue removal published a vanished-window event before cancellation. | `tests/fix0226-h1.test.ts` | 0.22.4 | fails on v0.22.3 (1 failing of 1) |
 | H4 | Attempt markers before the verdict blocked dependencies. | `tests/fix0226-h4.test.ts` | 0.22.4 | fails on v0.22.3 (2 failing of 2) |
 | HELP-HEIGHT | Board help overflowed terminal height and overdrew its header. | `tests/board.test.ts` (`^HELP-HEIGHT:`) | 0.22.3 | fails on v0.22.2 (1 failing of 1) |
 | BASE-DEFAULT | A missing spec base did not identify the repository default branch. | `tests/worktree-start.test.ts` (`^BASE-DEFAULT:`) | 0.22.3 | fails on v0.22.2 (1 failing of 1) |

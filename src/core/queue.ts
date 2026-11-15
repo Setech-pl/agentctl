@@ -1033,7 +1033,7 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
  * P93b: the MCP writes whose confirm recorded a request (mcp-requests.ts) are applied here, before the line is read, so an unblock, a
  * queue_up or a queue_rm counts in this very tick. The modules are loaded only when a request waits.
  */
-async function applyAcceptedWrites(ctx: Context, notifier: Notifier, opts: QueueTickOptions): Promise<void> {
+export async function applyAcceptedWrites(ctx: Context, notifier: Notifier, opts: QueueTickOptions): Promise<void> {
   let names: string[] = [];
   try { names = fs.readdirSync(path.join(path.dirname(ctx.config.path), 'mcp-requests')); } catch { return; }
   if (!names.some((n) => n.endsWith('.json'))) return;

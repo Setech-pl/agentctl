@@ -158,6 +158,16 @@
       "tests/p73-cache-clean.test.ts"
     ]
   },
+  "H1": {
+    "rev": "v0.22.3",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "H1: a never-started queue_rm is cancelled before watch observes windows or publishes a snapshot",
+      "H1: a never-started queue_rm is cancelled before watch observes windows or publishes a snapshot"
+    ]
+  },
   "H4": {
     "rev": "v0.22.3",
     "outcome": "FAILS",

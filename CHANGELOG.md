@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- H1: apply queued removals before observing tasks; never-started cancellations stay hidden without window-loss alerts. / Usuwanie z kolejki poprzedza odczyt stanu; anulowane zadania bez startu są ukryte, bez alarmu utraty okna.
+
 - H4: verdict parsing ignores leading comments; report instructions put the attempt marker after the verdict. / Parser werdyktu pomija komentarze; instrukcja umieszcza marker próby po werdykcie.
 
 

@@ -1,3 +1,4 @@
+import { applyAcceptedWrites } from './queue.ts';
 import { consultTick } from './consult.ts';
 import { applyInstanceLabel } from './instance.ts';
 import { beginTitle } from './title.ts';
@@ -208,6 +209,7 @@ export interface TickOptions {
  * announced a moment ago (see `agentctl event`) is logged but not notified again.
  */
 export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Notifier, options: TickOptions = {}): Promise<WatchEvent[]> {
+  await applyAcceptedWrites(ctx, notifier, options);
   const tickAt = ctx.runner.now();
   if (memory.lastTickAt === undefined) {
     try {
