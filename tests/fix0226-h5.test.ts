@@ -29,3 +29,13 @@ it('H5: HEMS fixture reports shape findings but accepts check aliases and Verdic
   const event = JSON.parse(events.text).events.find((e: {kind: string}) => e.kind === 'report-outputs');
   assert.match(event.outputs_errors.join('; '), /schema_version/);
 });
+
+it('H5: an explicit malformed outputs block is a finding even on a legacy task', async () => {
+  const w = world('h5-legacy'); const record = seedTask(w.config, 'LEGACY');
+  fs.mkdirSync(new URL('.', 'file://' + record.report).pathname, {recursive: true});
+  fs.writeFileSync(record.report, 'Verdict: PASS\n```agentctl-outputs\nschema_version: 1\nverdict: PASS\n```\n<!-- agentctl:report-end -->\n');
+  const read = await w.call('get_report', {task: 'LEGACY', mark_pulled: false});
+  assert.match(read.text, /outputs_errors:.*version/);
+  const events = await w.call('events_since', {all: true, format: 'json'});
+  assert.ok(JSON.parse(events.text).events.some((e: {outputs_errors?: string[]}) => e.outputs_errors?.some(error => error.startsWith('version:'))));
+});

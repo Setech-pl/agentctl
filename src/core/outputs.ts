@@ -322,7 +322,7 @@ export async function journalOutputs(ctx: Context, record: TaskRecord, opts: { r
     if (seen.includes(identity)) return;
     const data = await readOutputs(ctx, record);
     // A closed task from before the protocol was never asked for the block: its absence is not a warning (a block it has is still journaled).
-    if (!record.outputsProtocol && !data.outputs) { await ctx.runner.writeFile(file, JSON.stringify([...seen, identity])); return; }
+    if (!record.outputsProtocol && !data.outputs && !/^(?:```|~~~)agentctl-outputs\s*$/m.test(readReportText(ctx.config, record, record.report))) { await ctx.runner.writeFile(file, JSON.stringify([...seen, identity])); return; }
     // Journal is also the recovery ledger if a process died before writing outputs-seen.
     if (!readJournal(ctx.config, -1).some(e => e.kind === 'report-outputs' && e.task === record.task && (e.reportAttempt === identity || (!e.reportAttempt && e.reportHash === report.signature)))) {
       // wall_posts: published as task:<ID> before the event, which carries what was posted and what was refused (never a block of the report).

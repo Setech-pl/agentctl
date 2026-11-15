@@ -259,6 +259,7 @@ claude:
     - '⚠\s*\d+ MCP servers? needs? authentication'
     - '^\s*[❯>]\s*(Try ".*")?$'
   limit_patterns:
+    - '^(?=[^\n]*(?:\b429\b|\bquota\b|rate[_ -]?limit|insufficient (?:balance|funds)|usage[_ -]?limit|limit (?:reached|exhausted)|you.ve hit your .{0,60}limit|out of extra usage|enforced_spend_limit_reached))\s*(?:[●■⎿]\s*)?(?:API Error:|Error:|HTTP(?:\/\d(?:\.\d)?)?\s+429\b|Request rejected\s*\(429\)|Usage limit reached|You.ve hit your|You.re out of extra usage|Quota (?:exceeded|exhausted)|Insufficient balance|Rate limit)'
     - '^[\s⎿●•■⚠!*>-]*You.ve hit your .{0,60}limit'
     - '^[\s⎿●•■⚠!*>-]*Usage limit reached'
     - '^[\s⎿●•■⚠!*>-]*You.re out of extra usage'
@@ -283,6 +284,7 @@ codex:
     - '^\s*›\s*(Ask Codex to do anything)?\s*$'
     - 'Queued follow-up inputs|⇧.? (edit last queued message|to answer)'
   limit_patterns:
+    - '^(?=[^\n]*(?:\b429\b|\bquota\b|rate[_ -]?limit|insufficient (?:balance|funds)|usage[_ -]?limit|limit (?:reached|exhausted)|you.ve hit your .{0,60}limit|out of extra usage|enforced_spend_limit_reached))\s*(?:[●■⎿]\s*)?(?:API Error:|Error:|HTTP(?:\/\d(?:\.\d)?)?\s+429\b|Request rejected\s*\(429\)|Usage limit reached|You.ve hit your|You.re out of extra usage|Quota (?:exceeded|exhausted)|Insufficient balance|Rate limit)'
     - '^[\s⎿●•■⚠!*>-]*You.ve hit your usage limit'
     - '^[\s⎿●•■⚠!*>-]*Usage limit reached'
     - '^[\s⎿●•■⚠!*>-]*You.re out of credits'
