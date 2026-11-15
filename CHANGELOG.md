@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.22.4] - 2026-11-15
 
+- G1a validation: board puts timed holds before long n/d explanations so they remain visible at 80 columns. / Board pokazuje blokadę przed długim opisem n/d, także przy 80 kolumnach.
+
 - H5 validation: explicit malformed outputs in legacy reports are findings too. / Jawny błędny blok outputs w starym raporcie również jest uwagą.
 
 - H5 validation: structured events carry outputs_errors; later report pages expose findings without repeating full outputs. / Zdarzenia zawierają outputs_errors; kolejne strony raportu pokazują uwagi bez powtarzania pełnych outputs.

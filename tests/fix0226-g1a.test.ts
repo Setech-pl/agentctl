@@ -1,3 +1,5 @@
+import { usagePanel } from '../src/core/board.ts';
+import { openReader, readPlans } from '../src/core/usage.ts';
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { Context } from '../src/core/context.ts';
@@ -23,6 +25,10 @@ it('G1a: manual holds block every provider including direct starts, expose capac
   }
   const limits = collectLimits(config, [], runner.now());
   assert.ok(limits.providers.every(p => p.free === 0 && p.providerHold?.source === 'manual'));
+  const reader = openReader(config); const plans = readPlans(config, reader, runner.now()); reader.save();
+  const holds = Object.fromEntries(limits.providers.map(p => [p.agent, p.providerHold!]));
+  const panel = usagePanel(plans, config.usage, runner.now(), holds);
+  assert.ok(panel.every(line => /wstrzymane: .* \(ręcznie\)/.test(line.text.slice(0, 80))), 'timed hold stays visible in the first 80 columns, before long n/d notes');
   const views = await queueViews(ctx); assert.ok(views.every(v => /wstrzymane: .* \(ręcznie\)/.test(v.condition.text)));
   const memory = new QueueMemory(), notifier = {notify: async () => {}};
   assert.deepEqual(await queueTick(ctx, memory, notifier), []); await memory.idle();

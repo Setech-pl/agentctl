@@ -1069,11 +1069,12 @@ export function usagePanel(plans: ProviderValues<PlanState> | null, usage: Usage
     const plan = providerValue(plans, provider);
     const name = provider.padEnd(6);
     // usage.queue_hold of the provider, when one is set (changed live by set_limits / limits set / a hand edit).
-    const hold = holds[provider] ? `  ${providerHoldText(provider, holds[provider]!)}` : usage.queueHold[provider] === undefined ? '' : `  hold ${usage.queueHold[provider]}%`;
-    if (!plan.available) return { provider, text: `${name} n/d${plan.note ? ` – ${plan.note}` : ''}${hold}` };
+    const timedHold = holds[provider] ? `  ${providerHoldText(provider, holds[provider]!)}` : '';
+    const hold = usage.queueHold[provider] === undefined ? '' : `  hold ${usage.queueHold[provider]}%`;
+    if (!plan.available) return { provider, text: `${name} n/d${timedHold}${plan.note ? ` – ${plan.note}` : ''}${hold}` };
     const parts = plan.windows.map((w) => `${w.label} ${usageBar(w.usedPercent)} ${Math.round(w.usedPercent)}%${w.resetsAt === null ? '' : ` ↻${formatReset(w.resetsAt, now)}`}`);
     const worst = plan.maxPercent ?? 0;
-    return { provider, text: `${name} ${parts.join('  ')}${plan.stale ? ' (old)' : ''}${hold}`, color: worst >= providerValue(usage.critical, provider) ? 'red' : worst >= providerValue(usage.warn, provider) ? 'yellow' : 'green' };
+    return { provider, text: `${name}${timedHold} ${parts.join('  ')}${plan.stale ? ' (old)' : ''}${hold}`, color: worst >= providerValue(usage.critical, provider) ? 'red' : worst >= providerValue(usage.warn, provider) ? 'yellow' : 'green' };
   });
 }
 
