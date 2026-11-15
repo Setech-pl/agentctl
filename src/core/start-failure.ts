@@ -40,7 +40,7 @@ export async function saveStartFailureScreen(ctx: Context, window: string, windo
  */
 export async function closeFailedStartWindow(ctx: Context, task: string): Promise<boolean> {
   const record = readTaskRecord(ctx.config, windowName(task));
-  if (!record || (record.promptDelivery !== 'needs-attention' && record.promptDelivery !== 'launching') || record.deliveryStartedAt) return false;
+  if (!record || record.host || (record.promptDelivery !== 'needs-attention' && record.promptDelivery !== 'launching') || record.deliveryStartedAt) return false;
   if (!(await ctx.tmux.windows()).some((w) => w.plain === record.window)) return false;
   await saveStartFailureScreen(ctx, record.window, record.windowId);
   // Record the intentional closure first: the missing window must not surface as a false tmux loss (tmux-loss.ts).

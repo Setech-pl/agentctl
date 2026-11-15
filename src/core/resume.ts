@@ -49,7 +49,7 @@ export async function findResumable(ctx: Context, opts: { all?: boolean; rows?: 
     if (row.window !== 'gone' || row.closed || row.cancelled || row.archived || row.hidden || row.supersededBy) continue;
     if (row.state === 'superseded' || row.state === 'orphan') continue;
     const record = readTaskRecord(ctx.config, row.windowName);
-    if (!record || record.agent === 'unknown') continue;
+    if (!record || record.host || record.agent === 'unknown') continue;
     const worktree = record.repos[0]?.worktree;
     if (!worktree || !fs.existsSync(worktree)) continue;
     const hasReport = row.report === 'yes';

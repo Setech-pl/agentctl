@@ -170,7 +170,7 @@ export interface GlobalConfig extends Layer {
   reloadWarning?: string;
   /** WALL: channels, chats, subscriptions and ref roots (wall-config.ts). */
   wall: WallSettings;
-  /** Remote hosts over SSH (0.23): config + transport + health now, task execution in part B. No secrets are stored here. */
+  /** Remote task hosts over SSH (0.23): transport, health and execution. No secrets are stored here. */
   hosts: Record<string, HostConfig>;
   /** Where the config was (or would be) read from. */
   path: string;
@@ -289,7 +289,7 @@ export interface NotifySettings {
 }
 
 /** Events that can go to the phone (`notify.ntfy.events`). */
-export const PHONE_EVENTS = ['disk-warn', 'disk-critical', 'disk-ok', 'needs-input', 'needs-trust', 'overloaded', 'limited', 'blocked', 'report-ready', 'cohort-done', 'queue-failed', 'orphan', 'dead', 'usage-critical'] as const;
+export const PHONE_EVENTS = ['host-unreachable', 'disk-warn', 'disk-critical', 'disk-ok', 'needs-input', 'needs-trust', 'overloaded', 'limited', 'blocked', 'report-ready', 'cohort-done', 'queue-failed', 'orphan', 'dead', 'usage-critical'] as const;
 export type PhoneEvent = (typeof PHONE_EVENTS)[number];
 
 /** ntfy priorities by name (1..5). */
@@ -311,6 +311,7 @@ export const DEFAULT_NTFY_PRIORITY: Record<PhoneEvent, NtfyPriority> = {
   'cohort-done': 'default',
   'queue-failed': 'default',
   orphan: 'default',
+  'host-unreachable': 'default',
   dead: 'default',
   'usage-critical': 'high',
 };
@@ -1252,6 +1253,17 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
 }
 
 export const PROJECT_CONFIG_NAME = '.agentctl.yaml';
+
+/** Parse a project file read through the host transport with the same validation as local files. */
+export function parseProjectConfigText(text: string, file: string): Layer {
+  const raw = YAML.parse(text);
+  if (!isObject(raw)) throw new AgentctlError(`${file}: the top level must be a mapping`);
+  const p = new Problems();
+  checkKeys(raw, LAYER_KEYS, PROJECT_CONFIG_NAME, p);
+  const layer = parseLayer(raw, PROJECT_CONFIG_NAME, p);
+  p.throwIfAny(`Invalid project config ${file}:`);
+  return layer;
+}
 
 /** Project layer from `<repo>/.agentctl.yaml`; undefined when the repo has none. */
 export function loadProjectConfig(repoPath: string): (Layer & { path: string }) | undefined {

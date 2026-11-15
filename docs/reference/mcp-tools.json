@@ -1497,6 +1497,22 @@
       }
     },
     {
+      "name": "hosts",
+      "kind": "read",
+      "title": "Read remote host health over SSH: per host the state (reachable / unreachable / auth-failed / host-key-*), latency, GPU (nvidia-smi, null when absent), free disk in work_dir, tmux, each provider CLI (present, version, best-effort logged in/out) and repo clones (HEAD, origin). Cached ~60s by \"agentctl hosts\"; refresh: true probes now. A spec with \"host: <name>\" starts the task remotely, with a local report mirror",
+      "description": "Read remote host health over SSH: per host the state (reachable / unreachable / auth-failed / host-key-*), latency, GPU (nvidia-smi, null when absent), free disk in work_dir, tmux, each provider CLI (present, version, best-effort logged in/out) and repo clones (HEAD, origin). Cached ~60s by \"agentctl hosts\"; refresh: true probes now. A spec with \"host: <name>\" starts the task remotely, with a local report mirror. CLI: agentctl hosts. Use when you need these facts; no mcp.allow required. Every response is bounded by mcp.max_response_kb (default 8 KiB). A truncated JSON envelope gives response_id and next_response_offset; call response_page with only those continuation fields to retrieve the next fragment without executing again. Concatenate fragment values to recover the original text/JSON.",
+      "input": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "refresh": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
       "name": "manager_status",
       "kind": "read",
       "title": "Inspect the manager session",

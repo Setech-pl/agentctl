@@ -32,6 +32,8 @@ export interface RawSpec {
 }
 
 export interface ResolvedRepo {
+  name?: string;
+  setupExplicit?: boolean;
   path: string;
   worktree: string;
   base?: string;
@@ -92,8 +94,10 @@ export interface ResolvedSpec {
   cohort?: string;
   /** `wall:`: the WALL channels whose open messages the start prompt carries (read-only data); resolved from names, patterns and chat:<name>. */
   wall?: string[];
-  /** `host: <name>`: run on a remote host configured under `hosts:` (0.23 part B); validated now, refused at start until then. */
+  /** Run on a configured host through SSH; report is the local mirror path. */
   host?: string;
+  remoteReport?: string;
+  remoteDir?: string;
   /** The order as written in the spec; agent/model/effort above are the effective values. */
   requested: Order;
   /** Why the effective order differs from the requested one. */
@@ -227,7 +231,7 @@ export function resolveSendSpec(raw: RawSpec): { task: string; window: string; p
 /** Validate a raw spec and merge global config < project config < spec. */
 export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   const { config } = ctx;
-  const loadProject = ctx.loadProject ?? loadProjectConfig;
+  const loadProject = raw.header.host ? () => undefined : ctx.loadProject ?? loadProjectConfig;
   const p = new Problems();
   const h = raw.header;
   const where = 'spec';
@@ -388,7 +392,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   const remoteDefault = project?.defaults.remoteControl ?? config.defaults.remoteControl ?? false;
   const remote = agent ? provider(agent).capabilities.remoteControl : false;
   if (agent && !isActive(config, agent)) p.add(`provider ${agent} is not enabled; add it to providers: [claude, codex, kimi] in ${config.path}`);
-  // Remote host: the name must be configured and the effective provider must be installed there. Starting there arrives in 0.23 part B;
+  // Remote host: the name must be configured and the effective provider must be installed there.
   // `new` refuses at start with a clear message, so specs can be written already.
   let host: string | undefined;
   if (h.host !== undefined && h.host !== null) {
@@ -415,7 +419,10 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
 
   const repos: ResolvedRepo[] = [];
   for (const repo of rawRepos) {
-    const repoPath = resolvePath(repo.path);
+    const remoteHost = host ? config.hosts[host] : undefined;
+    const repoName = path.basename(repo.path);
+    const repoPath = remoteHost ? remoteHost.repos[repoName] ?? repo.path : resolvePath(repo.path);
+    if (remoteHost && !remoteHost.repos[repoName]) p.add(`host ${host}: no configured clone for repository ${repoName}`);
     let projectOfRepo: Layer | undefined = project;
     if (repo !== firstRepo) {
       try {
@@ -427,7 +434,8 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     }
     const root = projectOfRepo?.worktreeRoot ?? config.worktreeRoot;
     let worktree: string | undefined;
-    if (repo.worktree) worktree = pathOf(repo.worktree);
+    if (remoteHost) worktree = repo.worktree ?? path.posix.join(remoteHost.workDir, `${repoName}-${windowName(taskId)}`);
+    else if (repo.worktree) worktree = pathOf(repo.worktree);
     else if (root) worktree = path.join(pathOf(root), `${path.basename(repoPath)}-${windowName(taskId)}`);
     else {
       p.add(
@@ -435,12 +443,12 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
       );
       continue;
     }
-    const resolved: ResolvedRepo = { path: repoPath, worktree };
+    const resolved: ResolvedRepo = { path: repoPath, worktree, ...(remoteHost ? { name: repoName, setupExplicit: repo.setup !== undefined || repo === firstRepo && specSetup !== undefined } : {}) };
     if (repo.base) resolved.base = repo.base;
     if (repo.branch) resolved.branch = repo.branch;
     // Own setup of this repository: its spec entry, then (first repository) the spec's top-level setup, then the repository's own project config.
     const own = repo.setup ?? (repo === firstRepo ? specSetup : undefined) ?? projectOfRepo?.setup ?? (repo === firstRepo ? config.setup : undefined);
-    if (own && own.length > 0) resolved.setup = own.map(c => c);
+    if (own && (own.length > 0 || remoteHost)) resolved.setup = own.map(c => c);
     repos.push(resolved);
   }
   for (let i = 0; i < repos.length; i++) {
@@ -457,12 +465,12 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     if (fallback) return resolvePath(basicFill(fillTaskLinkTargets(fallback, config)));
     throw new AgentctlError(`${taskId}: no repository "${name}" for {worktree:${name}}; add it to repos or provide {worktree:${name}|~/fallback}`);
   }));
-  for (const r of repos) if (r.setup) r.setup = r.setup.map(fill);
+  for (const r of repos) if (r.setup && !host) r.setup = r.setup.map(fill);
   // Links: later layers win for the same `from`.
   const linkByFrom = new Map<string, Link>();
   const projectLinkByFrom = new Map<string, Link>();
-  for (const link of [...config.links, ...(project?.links ?? []), ...specLinks]) {
-    const target = pathOf(fillTaskLinkTargets(fill(link.to), config));
+  for (const link of [...(host ? [] : config.links), ...(project?.links ?? []), ...specLinks]) {
+    const target = host ? fill(link.to) : pathOf(fillTaskLinkTargets(fill(link.to), config));
     const expanded = fill(link.from);
     const from = path.isAbsolute(expanded) ? path.relative(repos[0]!.worktree, expanded) : expanded;
     if (!from || from === '.' || from.startsWith('../')) throw new AgentctlError(`${taskId}: link from must stay inside the primary worktree: ${expanded}`, missingLinkTargets([{ from: expanded, to: target }]).join('; ') || undefined);
@@ -481,7 +489,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   for (const layerEnv of [config.env, project?.env ?? {}, specEnv]) {
     for (const [key, value] of Object.entries(layerEnv)) {
       const filled = fill(value);
-      env[key] = filled === '~' || filled.startsWith('~/') ? resolvePath(filled) : filled;
+      env[key] = !host && (filled === '~' || filled.startsWith('~/')) ? resolvePath(filled) : filled;
     }
   }
   // Isolation: a glm task gets ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN only from the claude-glm wrapper; agentctl never

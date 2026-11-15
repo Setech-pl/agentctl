@@ -1,3 +1,4 @@
+import { checkHostLimit } from './host-limits.ts';
 import { missingBaseFailure } from './git.ts';
 import { validateLaunch } from './safety.ts';
 import { provider, alternatives } from './providers/registry.ts';
@@ -51,6 +52,7 @@ const label = (o: Order): string => `${o.agent} ${formatModelEffort(o)}`;
 /** Windows currently in the session, each tagged with the agent that agentctl started in it, then the places held by reservations and external sessions. */
 export async function liveWindows(ctx: Context, knownRows?: StatusRow[]): Promise<LiveWindow[]> {
   const names = knownRows ? [...new Set(knownRows.filter(r => r.window === 'alive').map(r => r.windowName))] : await ctx.tmux.listWindows();
+  for (const record of listTaskRecords(ctx.config)) if (record.host && !record.closed && !record.cancelled && (knownRows ? knownRows.some(r => r.windowName === record.window && r.state === 'host-unreachable') : ctx.hosts.connection(record.host).unreachable) && !names.includes(record.window)) names.push(record.window);
   const records = names.flatMap(window => { const record = readTaskRecord(ctx.config, window); return record ? [record] : []; });
   const agentByWindow = new Map(records.filter(r => r.agent !== 'unknown').map(r => [r.window, r.agent as AgentName]));
   const recordByWindow = new Map(records.map(r => [r.window, r]));
@@ -62,10 +64,10 @@ export async function liveWindows(ctx: Context, knownRows?: StatusRow[]): Promis
   const windows = names.map((window): LiveWindow => {
     const agent = agentByWindow.get(window);
     const reportReady = rows.some(r => r.windowName === window && r.state === 'report-ready');
-    return agent ? { window, agent, ...(neverReady(window) ? { counted: false } : reportReady ? { reportReady: true, counted: configCountsReady(ctx) } : {}) } : { window };
+    return agent ? { window, agent, host: recordByWindow.get(window)?.host, ...(neverReady(window) ? { counted: false } : reportReady ? { reportReady: true, counted: configCountsReady(ctx) } : {}) } : { window };
   });
   // Places held by the user (`limits reserve`) and sessions outside agentctl count against the limit like its own windows.
-  return [...windows, ...pendingStarts(ctx.config).filter(r => !names.includes(r.window)).map(r => ({ window: r.window, agent: r.agent, kind: 'starting' as const })), ...(await slotHolders(ctx))];
+  return [...windows, ...pendingStarts(ctx.config).filter(r => !names.includes(r.window)).map(r => ({ window: r.window, agent: r.agent, host: r.host, kind: 'starting' as const })), ...(await slotHolders(ctx))];
 }
 
 function configCountsReady(ctx: Context): boolean { return ctx.config.countReportReady; }
@@ -100,8 +102,8 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
   const result: ResolvedSpec[] = [];
 
   for (let spec of specs) {
-    if (!opts.previewOnly && !opts.deferBases) spec = await resolveTaskBases(ctx, spec);
-    if (spec.review && !opts.previewOnly) {
+    if (!spec.host && !opts.previewOnly && !opts.deferBases) spec = await resolveTaskBases(ctx, spec);
+    if (spec.review && !spec.host && !opts.previewOnly) {
       const repos = [];
       for (const repo of spec.repos) {
         if (!repo.branch) throw new AgentctlError(`${spec.task}: review: auto requires an explicit author repos[].branch`);
@@ -140,7 +142,7 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
     const occupied = (): LiveWindow[] => [...live, ...planned];
     let limitProblem = opts.ignoreLimits || opts.previewOnly ? undefined : checkWindowLimit(spec.agent, config.limits[spec.agent], occupied(), config.session);
     if (limitProblem) {
-      const others = alternatives(config, spec.agent);
+      const others = alternatives(config, spec.agent).filter(a => !spec.host || config.hosts[spec.host]?.providers.includes(a));
       const current: Order = { agent: spec.agent, model: spec.model, effort: spec.effort };
       let offered = false;
       if (spec.pin) {
@@ -186,10 +188,15 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
     if (spec.switchedBy && explicitOnlyModel(spec.agent, spec.model)) {
       p.add(`${at} the switch landed on the restricted ${spec.agent} ${spec.model}: k3.1-pro* and gpt-6-astra never come from a translation; order such a model with an explicit model: in the spec, or with an explicit-only class (visual, escalate)`);
     }
-    planned.push({ window: spec.window, agent: spec.agent });
+    if (spec.host && !config.hosts[spec.host]?.providers.includes(spec.agent)) p.add(`${at} host ${spec.host} has no ${spec.agent} provider`);
+    if (!opts.ignoreLimits && !opts.previewOnly) {
+      const hostProblem = checkHostLimit(config, spec, occupied());
+      if (hostProblem) p.add(`${at} ${hostProblem}`);
+    }
+    planned.push({ window: spec.window, agent: spec.agent, host: spec.host });
 
     // 4. worktrees
-    for (const repo of opts.previewOnly ? [] : spec.repos) {
+    for (const repo of opts.previewOnly || spec.host ? [] : spec.repos) {
       // A dry run may be rehearsed on a machine without the repositories, so only real runs require them.
       if (!ctx.runner.dryRun && !fs.existsSync(repo.path)) p.add(`${at} repository ${repo.path} does not exist`);
       if (fs.existsSync(repo.worktree) && !opts.reuse) {

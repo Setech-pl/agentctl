@@ -20,9 +20,9 @@ export function launchScript(argv: string[], env: Record<string, string> = {}): 
   return `#!/bin/sh\n${lines.join('\n')}\nexec ${shellLine(args[0]!, args.slice(1))}\n`;
 }
 
-export async function writeLaunchScript(runner: Runner, dir: string, argv: string[], env: Record<string, string>): Promise<string> {
+export async function writeLaunchScript(runner: Runner, dir: string, argv: string[], env: Record<string, string>, inheritPath = true): Promise<string> {
   const file = path.join(dir, 'start.sh');
-  await runner.writeFile(file, launchScript(argv, { ...(process.env.PATH === undefined ? {} : { PATH: process.env.PATH }), ...env }));
+  await runner.writeFile(file, launchScript(argv, { ...(!inheritPath || process.env.PATH === undefined ? {} : { PATH: process.env.PATH }), ...env }));
   const result = await runner.exec('chmod', ['0700', file]);
   if (result.code !== 0) throw new Error(`Cannot protect launch script: ${file}`);
   return `exec ${shellLine('sh', [file])}`;

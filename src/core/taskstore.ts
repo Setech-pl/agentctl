@@ -18,6 +18,9 @@ export type RecordEffort = Effort | 'unknown';
 
 /** What agentctl remembers about a task: the YAML header of `<state_dir>/<task>/TASK.md`. */
 export interface TaskRecord {
+  host?: string;
+  remoteReport?: string;
+  remoteDir?: string;
   weight?: 'normal' | 'heavy';
   autoReview?: AutoReviewSource;
   task: string;
@@ -136,6 +139,7 @@ export function taskFile(config: GlobalConfig, window: string): string {
 
 export function recordFromSpec(spec: ResolvedSpec, config: GlobalConfig, startedMs: number): TaskRecord {
   const record: TaskRecord = {
+    host: spec.host,
     weight: spec.weight,
     task: spec.task,
     window: spec.window,
@@ -180,6 +184,9 @@ export function renderTaskMd(record: TaskRecord, prompt: string): string {
     links: record.links,
     env: record.env,
   };
+  if (record.host) header.host = record.host;
+  if (record.remoteReport) header.remote_report = record.remoteReport;
+  if (record.remoteDir) header.remote_dir = record.remoteDir;
   if (record.weight) header.weight = record.weight;
   if (record.reviewOf) header.review_of = record.reviewOf;
   if (record.review) header.review = record.review;
@@ -304,6 +311,9 @@ function parseTaskRecordUncached(text: string): TaskRecord | undefined {
     started: typeof data.started === 'string' ? data.started : '',
     requested: { agent: 'claude', model: 'default', effort: 'high' },
   };
+  if (typeof data.host === 'string') record.host = data.host;
+  if (typeof data.remote_report === 'string') record.remoteReport = data.remote_report;
+  if (typeof data.remote_dir === 'string') record.remoteDir = data.remote_dir;
   record.requested = parseOrder(data.requested) ?? {
     agent: record.agent === 'unknown' ? 'claude' : record.agent,
     model: record.model,

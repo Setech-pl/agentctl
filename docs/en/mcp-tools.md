@@ -80,6 +80,7 @@ Arguments marked ? are optional. Provider fields below include enabled optional 
 | `doctor` | read | `project?` | Diagnose the installation, permissions and disk |
 | `equivalents` | read |  | Read the equivalents table for active providers, including Kimi when enabled |
 | `config_show` | read |  | Read effective configuration with secrets masked; queue_hold (first) is usage.queue_hold per active provider |
+| `hosts` | read | `refresh?` | Read remote host health over SSH: per host the state (reachable / unreachable / auth-failed / host-key-*), latency, GPU (nvidia-smi, null when absent), free disk in work_dir, tmux, each provider CLI (present, version, best-effort logged in/out) and repo clones (HEAD, origin). Cached ~60s by "agentctl hosts"; refresh: true probes now. A spec with "host: <name>" starts the task remotely, with a local report mirror |
 | `manager_status` | read |  | Inspect the manager session |
 | `away_status` | read |  | Inspect away mode |
 | `report` | read | `task` | Inspect report location and candidates |

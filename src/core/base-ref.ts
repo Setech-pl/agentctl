@@ -30,7 +30,7 @@ export async function resolveTaskBases(ctx: Context, spec: ResolvedSpec): Promis
     if (!ref) {
       let branch = selected.branch;
       if (!branch) {
-        const b = await ctx.runner.exec('git', ['-C', selected.worktree, 'symbolic-ref', '--quiet', '--short', 'HEAD'], { readOnly: true });
+        const b = await (source.host ? ctx.hosts.forHost(source.host) : ctx.runner).exec('git', ['-C', selected.worktree, 'symbolic-ref', '--quiet', '--short', 'HEAD'], { readOnly: true });
         if (b.code === 0) branch = b.stdout.trim();
       }
       // A review's own checkout is detached: without commits in its outputs it stands for the branch it reviewed.
@@ -38,7 +38,7 @@ export async function resolveTaskBases(ctx: Context, spec: ResolvedSpec): Promis
       if (!branch) throw new AgentctlError(`${spec.task}: base ${raw}: ${source.task} has no commits in its outputs and no branch (a detached review checkout); name the commit in outputs.commits; start blocked`);
       ref = `refs/heads/${branch}`;
     }
-    const result = await ctx.runner.exec('git', ['-C', repo.path, 'rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`], { readOnly: true });
+    const result = await (spec.host ? ctx.hosts.forHost(spec.host) : ctx.runner).exec('git', ['-C', repo.path, 'rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`], { readOnly: true });
     if (result.code !== 0 || !/^[a-f0-9]{40}$/i.test(result.stdout.trim())) throw new AgentctlError(`${spec.task}: base ${raw}: commit ${ref} does not exist in ${repo.path}; start blocked`);
     repos.push({ ...repo, base: result.stdout.trim(), baseTask: raw });
   }

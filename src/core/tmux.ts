@@ -12,6 +12,7 @@ export interface Capture extends ExecResult {
 
 /** A window of the session as tmux reports it. */
 export interface WindowInfo {
+  host?: string;
   /** tmux's window ID ("@12"); empty when the listing did not carry one. */
   id: string;
   /** The name as it is now, with a state icon in front when `watch` put one there. */

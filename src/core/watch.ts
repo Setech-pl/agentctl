@@ -36,7 +36,7 @@ import { CollisionMemory, collisionTick } from './collisions.ts';
 import { cohortTick } from './cohort.ts';
 import { announceBlocked, QueueMemory, queueTick } from './queue.ts';
 import { usageTick } from './usage-limits.ts';
-import { listTaskRecords, readTaskRecord } from './taskstore.ts';
+import { listTaskRecords, readTaskRecord, setHeaderField, taskFile } from './taskstore.ts';
 import { syncReport } from './report-detect.ts';
 import { recordEvent } from './history.ts';
 import { errorMessage, formatDuration } from './util.ts';
@@ -81,6 +81,7 @@ export class WatchMemory {
 export const NOTIFY_ON_TRUST = (r: StatusRow): string => `${r.task} czeka na zaufanie folderu (trust) – board: wiersz na górze, Enter otwiera dialog`;
 
 const NOTIFY_ON: Partial<Record<TaskState, (row: StatusRow) => string>> = {
+  'host-unreachable': r => `${r.task}: host ${r.host} niedostępny – watch ponawia połączenie; okno pozostaje na hoście`,
   'needs-attention': r => `${r.task}: ${r.hint ?? 'prompt delivery needs attention'}`,
   'report-ready': (r) => reportReadyText(r.task, undefined),
   'needs-trust': NOTIFY_ON_TRUST,
@@ -123,11 +124,11 @@ async function recordReport(ctx: Context, task: string): Promise<void> {
   if (record) { await recordEvent(ctx, record, 'report'); await journalOutputs(ctx, record); }
 }
 
-const JOURNALED: Partial<Record<TaskState, JournalKind>> = { 'needs-attention': 'needs-attention', overloaded: 'overloaded', 'report-ready': 'report-ready', 'needs-trust': 'needs-trust', 'needs-input': 'needs-input', limited: 'limited', dead: 'dead', orphan: 'orphan' };
+const JOURNALED: Partial<Record<TaskState, JournalKind>> = { 'host-unreachable': 'host-unreachable', 'needs-attention': 'needs-attention', overloaded: 'overloaded', 'report-ready': 'report-ready', 'needs-trust': 'needs-trust', 'needs-input': 'needs-input', limited: 'limited', dead: 'dead', orphan: 'orphan' };
 
 /** The transition goes to the journal that `events` reads (the notification only reaches the desktop). */
 async function journalTransition(ctx: Context, row: StatusRow, e: WatchEvent): Promise<void> {
-  const kind = JOURNALED[e.to];
+  const kind = e.from === 'host-unreachable' && e.to !== 'host-unreachable' ? 'host-recovered' : JOURNALED[e.to];
   if (!kind || row.tmuxLost) return;
   const verdict = kind === 'report-ready' ? readVerdict(row.reportPath, ctx.config.notify.verdictPattern, row.reviewOf != null) : undefined;
   await recordJournal(ctx, { kind, task: row.task, text: e.notification ?? e.to, ...(verdict ? { verdict } : {}) });
@@ -154,12 +155,12 @@ export async function decorateWindows(ctx: Context, memory: WatchMemory, rows: S
   const infos = await tmux.windows();
   const renamed: string[] = [];
   for (const row of rows) {
-    if (row.window !== 'alive') continue;
+    if (row.window !== 'alive' || row.state === 'host-unreachable') continue;
     const info = tmux.resolve(row.windowName, infos, row.windowId ?? undefined);
     if (!info) continue;
     const wanted = decorateName(row.windowName, icons[row.state]);
     if (info.name === wanted) continue;
-    const r = await tmux.renameWindow(info.id !== '' ? info.id : tmux.target(info.name), wanted);
+    const r = await (row.host ? ctx.hosts.tmux(row.host) : tmux).renameWindow(info.id !== '' ? info.id : tmux.target(info.name), wanted);
     if (r.code !== 0) continue;
     memory.decorated.set(row.windowName, info.id);
     renamed.push(row.task);
@@ -176,7 +177,7 @@ export async function restoreWindowNames(ctx: Context, memory: WatchMemory): Pro
   for (const [plain, id] of memory.decorated) {
     const info = tmux.resolve(plain, infos, id || undefined);
     if (!info || info.name === plain) continue;
-    if ((await tmux.renameWindow(info.id !== '' ? info.id : tmux.target(info.name), plain)).code === 0) restored++;
+    if ((await (readTaskRecord(ctx.config, plain)?.host ? ctx.hosts.tmux(readTaskRecord(ctx.config, plain)!.host!) : tmux).renameWindow(info.id !== '' ? info.id : tmux.target(info.name), plain)).code === 0) restored++;
   }
   memory.decorated.clear();
   return restored;
@@ -188,7 +189,7 @@ async function syncWaitingReports(ctx: Context, rows: StatusRow[]): Promise<bool
   for (const row of rows) {
     if (row.report === 'yes' || row.closed || row.cancelled || row.archived) continue;
     const record = readTaskRecord(ctx.config, row.windowName);
-    if (!record) continue;
+    if (!record || record.host) continue;
     const candidateBefore = record.reportCandidate;
     const r = await syncReport(ctx, record).catch(() => undefined);
     if (r && (r.action === 'copied' || r.action === 'updated' || record.reportCandidate !== candidateBefore)) copied = true;
@@ -227,7 +228,11 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   let allRows = await collectStatus(ctx, { progress: false, archived: true });
   for (const row of allRows) {
     const record = !row.closed && !row.cancelled ? readTaskRecord(ctx.config, row.windowName) : undefined;
-    if (row.tmuxLost) continue;
+    if (row.tmuxLost || row.state === 'host-unreachable') continue;
+    if (record?.host && record.promptDelivery === 'launching' && row.window === 'alive') {
+      await setHeaderField(ctx.runner, taskFile(ctx.config, record.window), 'prompt_delivery', 'pending');
+      record.promptDelivery = 'pending';
+    }
     if (record && ['pending', 'sending', 'confirming', 'needs-attention', 'needs-input'].includes(record.promptDelivery ?? '')) {
       if (record.promptDelivery === 'pending' && row.window !== 'alive') continue;
       const result = await deliverPendingPrompt(ctx, row.windowName);
@@ -241,7 +246,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
       if (result !== 'pending') allRows = await collectStatus(ctx, { progress: false, archived: true });
     }
   }
-  for (const record of listTaskRecords(ctx.config)) if (!record.closed && !record.cancelled) await drainPromptQueue(ctx, record.window, allRows.find(row => row.windowName === record.window)?.state);
+  for (const record of listTaskRecords(ctx.config)) if (!record.closed && !record.cancelled && (!record.host || !ctx.hosts.connection(record.host).unreachable)) await drainPromptQueue(ctx, record.window, allRows.find(row => row.windowName === record.window)?.state);
   // A waiting agent may have written its report somewhere else than the spec says: record a candidate without changing the execution state.
   if (await syncWaitingReports(ctx, allRows)) allRows = await collectStatus(ctx, { progress: false, archived: true });
   for (const record of listTaskRecords(ctx.config)) await journalOutputs(ctx, record);
@@ -282,6 +287,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
       if ((await alerts.send({ task: row.task, window: row.windowName }, key, e.notification, 'watch')) === 'duplicate') e.duplicate = true;
       else if (e.reason === 'transition') await journalTransition(ctx, row, e);
     }
+    if (!e.notification && e.from === 'host-unreachable' && e.reason === 'transition' && row) await journalTransition(ctx, row, e);
     await ctx.runner.appendFile(watchLogPath(ctx), logLine(now, e));
     if (e.reason !== 'baseline') ctx.out(logLine(now, e).trimEnd());
   }

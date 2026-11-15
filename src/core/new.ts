@@ -1,3 +1,5 @@
+import { prepareRemoteTask, installRemoteHooks } from './host-task.ts';
+import { remoteAttachHint } from './host-runtime.ts';
 import { protectReadOnly } from './read-only.ts';
 import { attachHint } from './tmux-socket.ts';
 import { writeLaunchScript } from './launch-script.ts';
@@ -30,7 +32,7 @@ import { secretRedactor } from './secret-redaction.ts';
 import { writeSetupProgress } from './setup-progress.ts';
 import type { SetupProgress } from './setup-progress.ts';
 
-const guardRequest = (spec: ResolvedSpec) => ({ task: spec.task, window: spec.window, report: spec.report, reportAlt: spec.reportAlt, repos: spec.repos, reviewOf: spec.reviewOf, reviewOfAll: spec.reviewOfAll, autoReview: spec.autoReview });
+const guardRequest = (spec: ResolvedSpec) => ({ host: spec.host, task: spec.task, window: spec.window, report: spec.report, reportAlt: spec.reportAlt, repos: spec.repos, reviewOf: spec.reviewOf, reviewOfAll: spec.reviewOfAll, autoReview: spec.autoReview });
 
 export interface NewOptions extends PlanOptions {
   /** Wait for a human to answer the folder-trust dialog (default). `false` (--no-wait-trust): stop at the dialog. */
@@ -87,7 +89,7 @@ async function runSetup(ctx: Context, spec: ResolvedSpec, track?: (step: Omit<Se
       await track?.({ phase: 'setup', repo: name, repoIndex: repoIndex + 1, repoCount: todo.length, command: label, commandIndex: i + 1, commandCount: commands.length, log: logFile });
       const setup = { repo: name, repoIndex: repoIndex + 1, repoCount: todo.length, command: label, commandIndex: i + 1, commandCount: commands.length, log: logFile };
       if (track) await recordJournal(ctx, { kind: 'setup-started', task: spec.task, setup, text: `${spec.task}: setup rozpoczęty w ${name} (repo ${repoIndex + 1}/${todo.length}, command ${i + 1}/${commands.length}): ${label}; log: ${logFile}` });
-      const r = await runner.exec('sh', label === command ? ['-c', command] : ['-s'], { cwd: repo.worktree, ...(label === command ? {} : { input: command }), timeoutMs: ctx.config.git.timeoutS * 1000, async: true });
+      const r = await (spec.host ? ctx.hosts.forHost(spec.host) : runner).exec('sh', label === command ? ['-c', command] : ['-s'], { cwd: repo.worktree, ...(label === command ? {} : { input: command }), timeoutMs: ctx.config.git.timeoutS * 1000, async: true });
       if (runner.dryRun) continue;
       const output = redact(`${r.stdout}${r.stderr}`);
       await runner.appendFile(logFile, `[${name}] $ ${label}\n${output}${output.endsWith('\n') || output === '' ? '' : '\n'}[exit ${r.code}]\n\n`);
@@ -107,18 +109,10 @@ async function runSetup(ctx: Context, spec: ResolvedSpec, track?: (step: Omit<Se
 
 /** Start every spec: worktree, links, TASK.md, tmux window, agent, prompt. Plans and validates everything first. */
 export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOptions = {}): Promise<NewResult[]> {
-  // A spec may already name a remote host (validated in resolveSpec), but running there arrives in 0.23 part B:
-  // refuse the whole batch at start, with one clear line per remote task, so nothing half-starts.
-  const remote = requested.filter((spec) => spec.host !== undefined);
-  if (remote.length > 0) {
-    throw new AgentctlError(
-      remote.map((spec) => `${spec.task}: host "${spec.host}" — remote execution arrives in agentctl 0.23 part B; for now remove "host:" from the spec to start it locally`).join('\n'),
-    );
-  }
   if (ctx.runner.dryRun || opts.noAgent) return startTasks(ctx, requested, opts);
   const admission = await withStartLock(ctx, async () => {
     const specs = await planBatch(ctx, requested, opts);
-    for (const spec of specs) checkLinkTargets(spec.links.filter(l => !spec.repos.some(r => l.to === r.worktree || l.to.startsWith(`${r.worktree}/`))), spec.task);
+    for (const spec of specs.filter(s => !s.host)) checkLinkTargets(spec.links.filter(l => !spec.repos.some(r => l.to === r.worktree || l.to.startsWith(`${r.worktree}/`))), spec.task);
     return { specs, ids: await reserveStarts(ctx, specs) };
   });
   try { return await startTasks(ctx, admission.specs, opts, true); }
@@ -129,20 +123,30 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
   const { runner, tmux, config } = ctx;
 
   // Tools needed by the orders as written; the provider may change below, so check both agents the batch could end on.
-  if (!runner.dryRun) {
+  if (!runner.dryRun && requested.some(s => !s.host)) {
     if (!opts.noAgent) await requireTool(ctx, 'tmux', ['-V'], INSTALL_HINTS.tmux);
     await requireTool(ctx, 'git', ['--version'], INSTALL_HINTS.git);
   }
   const specs = admitted ? requested : await planBatch(ctx, requested, opts);
-  for (const spec of specs) checkLinkTargets(spec.links.filter(l => !spec.repos.some(r => l.to === r.worktree || l.to.startsWith(`${r.worktree}/`))), spec.task);
+  for (const spec of specs.filter(s => !s.host)) checkLinkTargets(spec.links.filter(l => !spec.repos.some(r => l.to === r.worktree || l.to.startsWith(`${r.worktree}/`))), spec.task);
   const versions: Record<string, string> = {};
   if (!runner.dryRun && !opts.noAgent) {
-    for (const agent of new Set(specs.map((s) => s.agent))) versions[agent] = await requireTool(ctx, providerCommand(config, agent), ['--version'], INSTALL_HINTS[agent]);
+    for (const agent of new Set(specs.filter(s => !s.host).map((s) => s.agent))) versions[agent] = await requireTool(ctx, providerCommand(config, agent), ['--version'], INSTALL_HINTS[agent]);
   }
 
   const results: NewResult[] = [];
   let sessionUp = await tmux.hasSession();
-  for (const [index, spec] of specs.entries()) {
+  for (const [index, original] of specs.entries()) {
+    const spec = original.host ? await prepareRemoteTask(ctx, original, opts.reuse) : original;
+    const execution = spec.host ? ctx.hosts.forHost(spec.host) : runner;
+    const taskTmux = spec.host ? ctx.hosts.tmux(spec.host) : tmux;
+    const hint = spec.host ? remoteAttachHint(config, spec)! : attachHint(config);
+    if (spec.host) {
+      if (!opts.noAgent) await execution.exec('tmux', ['-V'], { readOnly: true }).then(r => { if (r.code !== 0) throw new AgentctlError(`host ${spec.host}: tmux is unavailable`); });
+      const cli = await execution.exec(providerCommand(config, spec.agent), ['--version'], { readOnly: true });
+      if (!opts.noAgent && cli.code !== 0) throw new AgentctlError(`host ${spec.host}: ${spec.agent} CLI is unavailable`);
+      versions[`${spec.host}:${spec.agent}`] = cli.stdout.trim().split('\n')[0] ?? 'unknown';
+    }
     // The same check as in the door itself, before the first worktree or file exists.
     assertAgentSpawnAllowed(ctx, { ...guardRequest(spec), origin: opts.origin ?? (spec.autoReview ? 'start' : 'new') });
     const taskStartedMs = runner.now();
@@ -155,7 +159,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
 
     // 1. worktrees
     await track?.({ phase: 'worktree' });
-    for (const repo of spec.repos) {
+    for (const repo of spec.host ? [] : spec.repos) {
       if (opts.reuse && fs.existsSync(repo.worktree)) ctx.info(`${spec.task}: reusing worktree ${repo.worktree}`);
       else {
         await addWorktree(runner, repo, config.git.timeoutS);
@@ -170,8 +174,18 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
     await track?.({ phase: 'launching' });
 
     // 3. symlinks (in the primary worktree)
-    checkLinkTargets(spec.links, spec.task);
-    const { ops, warnings } = planLinks(spec.links, primary);
+    if (!spec.host) checkLinkTargets(spec.links, spec.task);
+    const { ops, warnings } = spec.host ? { ops: [], warnings: [] } : planLinks(spec.links, primary);
+    if (spec.host) for (const link of spec.links) {
+      const from = path.posix.resolve(primary, link.from);
+      if (!from.startsWith(`${primary}/`)) throw new AgentctlError(`${spec.task}: remote link escapes worktree: ${link.from}`);
+      const exists = await execution.exec('test', ['-e', link.to], { readOnly: true });
+      if (!runner.dryRun && exists.code !== 0) throw new AgentctlError(`${spec.task}: remote link target missing: ${link.to}`);
+      const replaceable = await execution.exec('sh', ['-c', 'test -L "$1" || test ! -e "$1"', 'agentctl-link', from], { readOnly: true });
+      if (!runner.dryRun && replaceable.code !== 0) throw new AgentctlError(`${spec.task}: remote link would overwrite an existing file/directory: ${from}`);
+      await execution.mkdir(path.posix.dirname(from));
+      await execution.symlink(link.to, from);
+    }
     for (const w of warnings) ctx.info(`${spec.task}: warning: ${w}`);
     await applyLinks(runner, ops);
 
@@ -191,23 +205,28 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
 
     // 4. TASK.md
     const record = recordFromSpec(spec, config, taskStartedMs);
+    if (spec.host) {
+      record.session = `agentctl-${spec.host}`;
+      record.remoteReport = spec.remoteReport;
+      record.remoteDir = spec.remoteDir;
+    }
     // `wall:` – the open WALL messages as they are at this start (read-only data in the prompt); a WALL that cannot be read never stops a start.
     let wallContext: string | undefined;
     try { wallContext = spec.wall?.length ? taskWallContext(config, spec.task, spec.wall) : undefined; } catch (e) { ctx.info(`${spec.task}: WALL context left out: ${errorMessage(e)}`); }
-    record.agentCliVersion = versions[spec.agent] ?? 'unknown';
+    record.agentCliVersion = versions[spec.host ? `${spec.host}:${spec.agent}` : spec.agent] ?? 'unknown';
     // The cohort is made by its first task; a name that exists keeps the spelling it had.
     if (spec.cohort) record.cohort = (await touchCohort(ctx, spec.cohort)).name;
     // The reservation spans checkout/setup; its first TASK snapshot commits under the same global admission lock.
     await withStartLock(ctx, async () => {
       await runner.mkdir(taskDir(config, spec.window));
       await runner.writeFile(taskFile(config, spec.window), renderTaskMd(record, spec.prompt));
-      await queuePrompt(ctx, record, promptWithHeader(spec, record.attemptId, wallContext), 'launching');
+      await queuePrompt(ctx, record, promptWithHeader({ ...spec, report: spec.remoteReport ?? spec.report }, record.attemptId, wallContext), 'launching');
     });
     // The agent's own folder: only the report goes there (agentctl's state is in state_dir).
     await runner.mkdir(path.dirname(spec.report));
 
     // 4b. the agent reports its own events (question, end of turn, limit) to `agentctl event`
-    const wiring = config.notify.events && opts.self ? planEventWiring({ attempt: record.attemptId, agent: spec.agent, task: spec.task, window: spec.window, config, self: opts.self, env: spec.env, worktree: primary }) : undefined;
+    const wiring = !spec.host && config.notify.events && opts.self ? planEventWiring({ attempt: record.attemptId, agent: spec.agent, task: spec.task, window: spec.window, config, self: opts.self, env: spec.env, worktree: primary }) : undefined;
     for (const file of wiring?.files ?? []) {
       await runner.writeFile(file.path, file.content);
       if (file.path.endsWith('.sh')) {
@@ -217,12 +236,13 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
     }
 
     const launchEnv = launchEnvironment(config, spec, spec.env);
+    const remoteArgs = spec.host ? await installRemoteHooks(ctx, spec, record) : undefined;
 
     const settings = config.agents[spec.agent];
-    const commandLine = await writeLaunchScript(runner, taskDir(config, spec.window), buildAgentArgv({ ...spec, command: providerCommand(config, spec.agent) }, settings, wiring?.args), launchEnv);
+    const commandLine = await writeLaunchScript(execution, spec.remoteDir ?? taskDir(config, spec.window), buildAgentArgv({ ...spec, command: providerCommand(config, spec.agent) }, settings, remoteArgs ?? wiring?.args), launchEnv, !spec.host);
     // 5. window + agent
-    await openAgentWindow(ctx, { ...guardRequest(spec), cwd: primary, env: {}, origin: opts.origin ?? (spec.autoReview ? 'start' : 'new'), sessionUp });
-    sessionUp = true;
+    await openAgentWindow(ctx, { ...guardRequest(spec), cwd: primary, env: {}, origin: opts.origin ?? (spec.autoReview ? 'start' : 'new'), sessionUp: spec.host ? await taskTmux.hasSession() : sessionUp });
+    if (!spec.host) sessionUp = true;
 
     if (wiring) ctx.info(`${spec.task}: ${wiring.note}`);
     const remote = spec.remoteControl === true;
@@ -230,16 +250,16 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
     const dialog = remote ? 'folder trust or "Enable Remote Control"' : 'folder trust';
     if (remote) ctx.info(`${spec.task}: Remote Control on: the session "${spec.task}" appears in the Claude app (Code). If a dialog comes up, ${RC_FIRST_TIME}`);
     // tmux's own ID of the window: operations keep finding it when `watch` puts a state icon in front of its name.
-    const windowId = (await tmux.windows()).find((w) => w.plain === spec.window)?.id;
+    const windowId = (await taskTmux.windows()).find((w) => w.plain === spec.window)?.id;
     if (windowId) await setHeaderField(runner, taskFile(config, spec.window), 'window_id', windowId);
-    await runner.exec('tmux', ['set-option', '-w', '-t', windowId || tmux.target(spec.window), '@agentctl-role', 'task']);
-    await tmux.typeCommand(spec.window, commandLine);
+    await execution.exec('tmux', ['set-option', '-w', '-t', windowId || tmux.target(spec.window), '@agentctl-role', 'task']);
+    await taskTmux.typeCommand(spec.window, commandLine);
     ctx.info(`${spec.task}: window ${config.session}:${spec.window} running ${spec.agent} (model ${spec.model}, effort ${spec.effort}) via ${commandLine}`);
 
     // 6. wait for the agent; never answer a trust dialog (wait for the human to do it); then paste the prompt and press Enter
     const waitTrust = opts.waitTrust !== false;
     const sendHint = `agentctl watch --tmux (original prompt with report protocol is pending in ${taskFile(config, spec.window)}; sent once after trust and ready input)`;
-    const ready = await waitForReady(runner, tmux, spec.window, {
+    const ready = await waitForReady(runner, taskTmux, spec.window, {
       pattern: settings.readyPattern,
       emptyInput: true,
       // Kimi included (P92): its box is read by its own geometry, so the paste waits for a whole composer, not for the first "│ >" row.
@@ -253,7 +273,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
         ? {
             waitTrust: {
               timeoutMs: settings.trustTimeout * 1000,
-              onWaiting: async () => { await setHeaderField(runner, taskFile(config, spec.window), 'prompt_delivery', 'pending'); ctx.info(`${spec.task}: agent waits for ${dialog} – attach: ${attachHint(config)}, confirm in window ${spec.window}`); },
+              onWaiting: async () => { await setHeaderField(runner, taskFile(config, spec.window), 'prompt_delivery', 'pending'); ctx.info(`${spec.task}: agent waits for ${dialog} – attach: ${hint}, confirm in window ${spec.window}`); },
             },
           }
         : {}),
@@ -271,14 +291,14 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
     }
     if (ready.trust && waitTrust) {
       throw new AgentctlError(
-        `${spec.task}: agent still waits for ${dialog} after ${settings.trustTimeout}s – attach: ${attachHint(config)}, confirm in window ${spec.window}`,
+        `${spec.task}: agent still waits for ${dialog} after ${settings.trustTimeout}s – attach: ${hint}, confirm in window ${spec.window}`,
         `agentctl never answers that dialog. The window stays open and the prompt was not sent; once the agent shows its input, watch will automatically deliver it once ready: ${sendHint}. ` +
           `To wait longer, raise agents.${spec.agent}.trust_timeout in ${config.path}.`,
       );
     }
     if (ready.trust) {
       throw new AgentctlError(
-        `${spec.task}: agent waits for ${dialog} – attach: ${attachHint(config)}, confirm, then agentctl status`,
+        `${spec.task}: agent waits for ${dialog} – attach: ${hint}, confirm, then agentctl status`,
         `agentctl never answers that dialog. The prompt was not sent; once the agent shows its input, watch will automatically deliver it once ready: ${sendHint}`,
       );
     }
@@ -289,7 +309,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
         const which = ' ("Update available": choose "Skip until next version")';
         await setHeaderFields(runner, taskFile(config, spec.window), { prompt_delivery: 'needs-input', prompt_error: `${spec.agent} shows a startup dialog${which}; original prompt remains in TASK.md${seen}` });
         throw new AgentctlError(
-          `${spec.task}: ${spec.agent} shows a startup dialog${which} – attach: ${attachHint(config)}, answer it in window ${spec.window}`,
+          `${spec.task}: ${spec.agent} shows a startup dialog${which} – attach: ${hint}, answer it in window ${spec.window}`,
           `agentctl never answers that dialog. The window stays open and the prompt was not sent; once the agent shows its input, watch will automatically deliver it once ready: ${sendHint}. ` +
             'Task windows start with the startup update check disabled (-c check_for_update_on_startup=false), so a current Codex does not show it.',
         );
@@ -298,7 +318,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
       const line = `${spec.agent} first-run onboarding – finish it once in the window, ${config.board.returnKey ?? 'Ctrl-b l'} back to board`;
       await setHeaderFields(runner, taskFile(config, spec.window), { prompt_delivery: 'needs-input', prompt_error: `${line}; trust and the prompt follow by themselves${seen}` });
       throw new AgentctlError(
-        `${spec.task}: ${line} – attach: ${attachHint(config)}, window ${spec.window}`,
+        `${spec.task}: ${line} – attach: ${hint}, window ${spec.window}`,
         `agentctl never answers that dialog. The window stays open and the prompt was not sent; once the agent shows its input, watch will automatically deliver it once ready (after the folder-trust dialog, which also waits for you): ${sendHint}.`,
       );
     }
@@ -308,11 +328,11 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
       await setHeaderFields(runner, taskFile(config, spec.window), { prompt_delivery: 'needs-attention', prompt_error: `${spec.agent} did not become ready; original prompt remains in TASK.md${seen}` });
       throw new AgentctlError(
         `${spec.task}: ${spec.agent} did not show its input prompt within ${settings.readyTimeout}s (pattern /${settings.readyPattern}/)${seen}`,
-        `The window is still open: "${attachHint(config)}". Once the agent is ready, send the prompt with "agentctl send"; ` +
+        `The window is still open: "${hint}". Once the agent is ready, send the prompt with "agentctl send"; ` +
           `a recognized structural composer is required before any paste; if the prompt looks normal, adjust agents.${spec.agent}.ready_pattern / ready_timeout in ${config.path}.`,
       );
     }
-    if (runner.dryRun) await tmux.submitPrompt(spec.window, promptWithHeader(spec, record.attemptId, wallContext));
+    if (runner.dryRun) await taskTmux.submitPrompt(spec.window, promptWithHeader({ ...spec, report: spec.remoteReport ?? spec.report }, record.attemptId, wallContext));
     const delivery = runner.dryRun ? 'sent' : await deliverPendingPrompt(ctx, spec.window);
     ctx.info(`${spec.task}: ${delivery === 'sent' ? 'prompt sent' : DELIVERY_WARNING + '; watch confirms within delivery_confirm_s; do not repeat new'}`);
 
@@ -329,6 +349,6 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
     if (spec.switchedBy) result.switchedBy = spec.switchedBy;
     results.push(result);
   }
-  if (!opts.noAgent) ctx.info(`attach with: ${attachHint(config)}`);
+  if (!opts.noAgent && specs.some(s => !s.host)) ctx.info(`attach with: ${attachHint(config)}`);
   return results;
 }

@@ -1,3 +1,4 @@
+import { HostRuntime, taskTmux } from './host-runtime.ts';
 import { budgetRunner, unwrapBudgetRunner } from './response-budget.ts';
 import { socketRunner } from './tmux-socket.ts';
 import type { GlobalConfig } from './config.ts';
@@ -12,6 +13,8 @@ export class Context {
   readonly runner: Runner;
   private current: GlobalConfig;
   private tmuxClient: Tmux;
+  private localTmuxClient: Tmux;
+  hosts: HostRuntime;
   /** Asks a yes/no question on the terminal; undefined when there is no TTY. */
   readonly confirm: ((question: string) => Promise<boolean>) | undefined;
   private sink: (line: string) => void;
@@ -22,7 +25,9 @@ export class Context {
     this.confirm = confirm;
     this.runner = budgetRunner(socketRunner(unwrapBudgetRunner(runner), () => this.current.tmux?.socket));
     this.current = config;
-    this.tmuxClient = Context.tmuxFor(this.runner, config);
+    this.hosts = new HostRuntime(this.runner, config);
+    this.localTmuxClient = Context.tmuxFor(this.runner, config);
+    this.tmuxClient = taskTmux(this.localTmuxClient, this.hosts, config);
     this.sink = out;
   }
 
@@ -38,6 +43,8 @@ export class Context {
     return this.current;
   }
 
+  get localTmux(): Tmux { return this.localTmuxClient; }
+
   get tmux(): Tmux {
     return this.tmuxClient;
   }
@@ -45,7 +52,9 @@ export class Context {
   /** Put a reloaded configuration in force (the tmux client follows the new session name and icons). */
   setConfig(config: GlobalConfig): void {
     this.current = config;
-    this.tmuxClient = Context.tmuxFor(this.runner, config);
+    this.hosts = new HostRuntime(this.runner, config);
+    this.localTmuxClient = Context.tmuxFor(this.runner, config);
+    this.tmuxClient = taskTmux(this.localTmuxClient, this.hosts, config);
   }
 
   /** Normal output. */

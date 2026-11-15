@@ -302,7 +302,7 @@ describe('spec host: key', () => {
 task: NC-1
 agent: claude
 host: gpu-pc
-repos: [{path: /repo, worktree: /wt/nc-1}]
+repos: [{path: app}]
 ---
 Do the thing.
 `;
@@ -326,29 +326,13 @@ Do the thing.
     assert.throws(() => resolveSpec(raw!, { config, loadProject: () => undefined }), /host "gpu-pc" has no codex CLI/);
   });
 
-  it('new refuses to start a host task until 0.23 part B, even in a dry run', async () => {
+  it('a dry run plans remote worktrees and uses SSH instead of the part-A refusal', async () => {
     const { config } = hostConfig();
-    const [raw] = splitSpecs(SPEC);
-    const spec = resolveSpec(raw!, { config, loadProject: () => undefined });
-    const { ctx } = makeContext(config, { dryRun: true });
-    const error = await newTasks(ctx, [spec]).then(() => undefined, (e: unknown) => e);
-    assert.ok(error instanceof AgentctlError, String(error));
-    assert.ok(error.message.includes('NC-1: host "gpu-pc" — remote execution arrives in agentctl 0.23 part B'));
-  });
-
-  it('local specs start untouched beside the refusal (host batch refused as a whole)', async () => {
-    const { config } = hostConfig();
-    const text = `${SPEC}---
-task: NC-2
-agent: claude
-repos: [{path: /repo, worktree: /wt/nc-2}]
----
-Local.
-`;
-    const raws = splitSpecs(text);
-    const specs = raws.map((raw) => resolveSpec(raw, { config, loadProject: () => undefined }));
-    const { ctx } = makeContext(config, { dryRun: true });
-    await assert.rejects(() => newTasks(ctx, specs), /0\.23 part B/);
+    const spec = resolveSpec(splitSpecs(SPEC)[0]!, { config });
+    const { ctx, runner } = makeContext(config, { dryRun: true });
+    const result = await newTasks(ctx, [spec]);
+    assert.equal(result[0]?.agentStarted, true);
+    assert.ok(runner.commands.some(c => c.includes('ssh') && c.includes('worktree')));
   });
 });
 

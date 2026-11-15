@@ -1,3 +1,4 @@
+import { checkHostLimit } from './host-limits.ts';
 import { heavyBudget, heavyPreviewUsed, heavyWait, isHeavy } from './heavy.ts';
 import { secretRedactor } from './secret-redaction.ts';
 import { activeProviders, perProvider, isActive } from './providers/registry.ts';
@@ -53,6 +54,7 @@ export type QueueStatus = 'accepted' | 'queued' | 'starting' | 'failed';
 
 export interface QueueConfirmation { token: string; key: string; tool: string; tasks: string[] }
 export interface QueueEntry {
+  host?: string;
   /** Durable idempotency identity installed with the queue entry. */
   confirmation?: QueueConfirmation;
   autoReview?: AutoReviewSource;
@@ -295,6 +297,7 @@ export async function commitQueueAdd(ctx: Context, items: QueueAddItem[], opts: 
 }
 /** A link into the task's own worktree cannot exist before the start made it (the same exception `new` makes); every other target must exist. */
 function checkOwnLinkTargets(spec: ResolvedSpec): void {
+  if (spec.host) return;
   checkLinkTargets(spec.links.filter((l) => !spec.repos.some((r) => l.to === r.worktree || l.to.startsWith(`${r.worktree}/`))), spec.task);
 }
 async function commitQueueAddLocked(ctx: Context, items: QueueAddItem[], opts: Parameters<typeof commitQueueAdd>[2] & object): Promise<QueueEntry[]> {
@@ -319,6 +322,7 @@ async function commitQueueAddLocked(ctx: Context, items: QueueAddItem[], opts: P
       priority: opts.direct ? 'high' : spec.priority,
       status: 'queued',
       queuedAt: kept?.queuedAt ?? new Date(runner.now()).toISOString(),
+      host: spec.host,
       agent: spec.agent,
       model: spec.model,
       effort: spec.effort,
@@ -450,7 +454,7 @@ export async function acceptSpecs(ctx: Context, raws: RawSpec[], orders: Accepte
       seq++;
       const entry: QueueEntry = {
         seq, task: order.task, order: seq, priority: opts.direct ? 'high' : order.priority, status: 'accepted', unvalidated: true,
-        queuedAt: new Date(ctx.runner.now()).toISOString(), agent: order.agent, model: order.model, effort: order.effort, after: order.after,
+        queuedAt: new Date(ctx.runner.now()).toISOString(), host: typeof raws[i]?.header.host === 'string' ? raws[i]!.header.host as string : undefined, agent: order.agent, model: order.model, effort: order.effort, after: order.after,
         ...(order.afterVerdicts ? { afterVerdicts: order.afterVerdicts } : {}),
         ...(order.reviewOf ? { reviewOf: order.reviewOf } : {}),
         // The cohort exists from the confirm on (cohort_show, cancel by cohort), spelled as its first task named it.
@@ -711,7 +715,7 @@ async function retryEntryLocked(ctx: Context, input: string): Promise<QueueEntry
   }
   if (entry.autoReview) entry = await rebuildAutoReview(ctx, entry, { write: false });
   const spec = resolveSpec(splitSpecs(entry.spec, `queue entry ${entry.task}`)[0] as RawSpec, { config: ctx.config });
-  await checkRetryWorktrees(ctx.runner, spec.repos);
+  if (!spec.host) await checkRetryWorktrees(ctx.runner, spec.repos);
   // P96: a failed start keeps its window (start_failure.keep_window); the fresh start needs the name, so the old window goes, its capture stays.
   await closeFailedStartWindow(ctx, entry.task);
   const highest = readQueue(ctx.config).reduce((n, e) => Math.max(n, e.order, e.seq), 0);
@@ -759,7 +763,7 @@ export interface QueueView {
  * For every entry: what it waits for. Entries are walked in turn order, each one that will start in the next tick uses up a window of its
  * provider, so the answer matches what `watch` does. `inflight` are the tasks this very process is starting.
  */
-export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live: { window?: string; agent?: AgentName; counted?: boolean }[], rows: StatusRow[] = [], nowMs: number = Date.now()): QueueView[] {
+export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live: { window?: string; host?: string; agent?: AgentName; counted?: boolean }[], rows: StatusRow[] = [], nowMs: number = Date.now()): QueueView[] {
   const redact = secretRedactor([config, process.env, ...queueDiagnosticSources(entries)]);
   const failed = new Set(entries.filter((e) => e.status === 'failed').map((e) => e.task));
   const used: Record<AgentName, number> = perProvider(activeProviders(config), () => 0);
@@ -771,6 +775,7 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
   // `usage.queue_hold`: a provider whose plan is above the limit starts nothing (off by default).
   const holds = queueHolds(config, nowMs);
   const heavy = heavyBudget(config, entries, live);
+  const hostSlots = [...live, ...entries.filter(e => e.status === 'starting' && !live.some(w => w.window === e.task.toLowerCase()))];
   let position = 0;
   return entries.map((entry): QueueView => {
     if (entry.status === 'failed') return { position: null, entry, condition: { kind: 'failed', text: `failed: ${(entry.error ?? '').split('\n')[0] ?? ''}` }, since: entry.failedAt ?? entry.queuedAt };
@@ -785,8 +790,11 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
     }
     const author = directAuthorState(config, entry, entries);
     if (author.waiting || author.failed) return { position, entry, condition: { kind: 'after', text: author.waiting ?? author.failed! }, since: entry.queuedAt };
+    const hostProblem = checkHostLimit(config, entry, hostSlots);
+    if (hostProblem) return { position, entry, condition: { kind: 'slot', text: hostProblem }, since: entry.queuedAt };
     if (entry.direct && !(entry.retryAt && Date.parse(entry.retryAt) > nowMs) && !overProviderLimit(config.limits[entry.agent], used[entry.agent])) {
       used[entry.agent]++;
+      hostSlots.push(entry);
       if (isHeavy(entry)) heavy.add(entry.task);
       return { position, entry, condition: { kind: 'ready', text: config.queue.enabled ? 'uruchamiane – czeka na najbliższy tick watch' : 'queue.enabled is false; the watcher does not start it' }, since: entry.queuedAt };
     }
@@ -810,6 +818,7 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
       return { position, entry, condition: { kind: 'slot', text }, since: entry.queuedAt };
     }
     used[entry.agent]++;
+    hostSlots.push(entry);
     if (isHeavy(entry)) heavy.add(entry.task);
     return { position, entry, condition: { kind: 'ready', text: 'wolne miejsce – start przy najbliższym ticku watch' }, since: entry.queuedAt };
   }).map(view => ({ ...view, condition: { ...view.condition, text: redact(view.condition.text) } }));
@@ -886,7 +895,7 @@ export function renderQueueList(views: QueueView[], nowMs: number): string[] {
 /** What `watch` remembers about the starts it has begun. */
 export class QueueMemory {
   /** Tasks being started by this process: their agent counts against the provider limit before the window exists. */
-  readonly inflight = new Map<string, { agent: AgentName; promise: Promise<void> }>();
+  readonly inflight = new Map<string, { agent: AgentName; host?: string; promise: Promise<void> }>();
   /** Tasks the plan holds back (`usage.queue_hold`) and the reason last said, so that the log says it once. */
   readonly held = new Map<string, string>();
 
@@ -910,6 +919,7 @@ const firstLine = (s: string): string => s.split('\n')[0] ?? s;
 /** Once a live task is pending trust or a startup dialog, delivering, or sent, watch owns it; a failed queue entry must not offer a second start. */
 async function liveStartedRecord(ctx: Context, task: string): Promise<TaskRecord | undefined> {
   const record = readTaskRecord(ctx.config, windowName(task));
+  if (record?.host && !record.closed && !record.cancelled && ctx.hosts.connection(record.host).unreachable) return record;
   if (!record || !['pending', 'sending', 'confirming', 'sent', 'needs-input'].includes(record.promptDelivery ?? '')) return undefined;
   return (await ctx.tmux.windows()).some(w => w.plain === record.window) ? record : undefined;
 }
@@ -973,7 +983,7 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   const used: Record<AgentName, number> = perProvider(activeProviders(config), () => 0);
   for (const w of live) if (w.agent && w.counted !== false) used[w.agent]++;
   // A start in progress whose window is not up yet already holds its place.
-  for (const [task, i] of memory.inflight) if (!live.some((w) => w.window === task.toLowerCase())) used[i.agent]++;
+  for (const [task, i] of memory.inflight) if (!live.some((w) => w.window === task.toLowerCase())) { used[i.agent]++; live.push({ window: task.toLowerCase(), agent: i.agent, host: i.host }); }
 
   // A block that the author's corrected report lifted is said before the released task starts (P94).
   await announceReleased(ctx, notifier, rows, opts).catch((e: unknown) => opts.log?.(`queue: ${errorMessage(e)}`));
@@ -988,12 +998,13 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
     if (author.failed) { await failEntry(ctx, entry, author.failed, notifier, opts, true); continue; }
     if (author.waiting) continue;
     if (memory.inflight.size >= config.queue.parallelStarts) break;
+    if (checkHostLimit(config, entry, live)) continue;
     if (entry.direct) {
       const room = config.limits[entry.agent];
       if (overProviderLimit(room, used[entry.agent])) continue;
       // A claim that did not begin consumes no provider slot: a heavy-blocked or raced entry must not starve its provider for this tick.
       // Starts run in the background, so a broken setup can fail several entries of one tick — bounded by queue.parallel_starts, each failed once.
-      if (await beginStart(ctx, memory, notifier, entry, opts)) { used[entry.agent]++; began.push(entry.task); }
+      if (await beginStart(ctx, memory, notifier, entry, opts)) { used[entry.agent]++; live.push({ window: entry.task.toLowerCase(), agent: entry.agent, host: entry.host }); began.push(entry.task); }
       continue;
     }
     if (entry.autoReview) {
@@ -1023,7 +1034,7 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
     }
     const limit = config.limits[entry.agent];
     if (overProviderLimit(limit, used[entry.agent])) continue;
-    if (await beginStart(ctx, memory, notifier, entry, opts)) { used[entry.agent]++; began.push(entry.task); }
+    if (await beginStart(ctx, memory, notifier, entry, opts)) { used[entry.agent]++; live.push({ window: entry.task.toLowerCase(), agent: entry.agent, host: entry.host }); began.push(entry.task); }
   }
   for (const task of [...memory.held.keys()]) if (!stillHeld.has(task)) memory.held.delete(task);
   return began;
@@ -1122,7 +1133,7 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
       if (entry.autoReview) spec.autoReview = entry.autoReview;
       if (entry.reuse) {
         if ((await ctx.tmux.windows()).some(w => w.plain === spec.window)) throw new AgentctlError(`${entry.task}: task window already exists; inspect it instead of retrying`);
-        await checkRetryWorktrees(ctx.runner, spec.repos);
+        if (!spec.host) await checkRetryWorktrees(ctx.runner, spec.repos);
       }
       await newTasks(startCtx, [spec], {
         ...(entry.agentOverride ? { agent: entry.agentOverride } : {}),
@@ -1148,7 +1159,7 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
       await notifyPlain(ctx, notifier, entry.task, done, opts.self);
       await recordJournal(ctx, { kind: 'queue-start', task: entry.task, text: `${done} (${entry.agent})`, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
     } catch (e) {
-      if (/window limit for .* reached/.test(errorMessage(e))) { await writeEntry(ctx, { ...entry, status: 'queued' }); return; }
+      if (/window limit for .* reached|host .* limit reached/.test(errorMessage(e))) { await writeEntry(ctx, { ...entry, status: 'queued' }); return; }
       // A never-ready window is untrusted state nobody watches: close it so it cannot hold a slot (the record and its worktree stay).
       const closedLeftover = await closeNeverReadyWindow(ctx, entry.task, { force: Boolean(opts.signal?.aborted) }).catch(() => false);
       if (await liveStartedRecord(ctx, entry.task)) {
@@ -1174,7 +1185,7 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
       memory.inflight.delete(entry.task);
     }
   };
-  memory.inflight.set(entry.task, { agent: entry.agent, promise: run() });
+  memory.inflight.set(entry.task, { agent: entry.agent, host: entry.host, promise: run() });
   return true;
 }
 

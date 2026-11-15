@@ -12,7 +12,7 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`version`](#agentctl-version) | Print the installed version (alias of --version). |
 | [`guide`](#agentctl-guide) | Read the dispatcher guide and optional project overlay. |
 | [`capacity`](#agentctl-capacity) | Current plan windows, pace, slots, queue, equivalents and seven-day model statistics; no provider selection. |
-| [`hosts`](#agentctl-hosts) | Remote hosts over SSH (config section "hosts"): reachability, latency, GPU, disk in work_dir, tmux, provider CLIs (+ version, best-effort logged-in) and repo clones. Probes in parallel with a per-host timeout and caches the result for the board; a spec may already say "host: \<name>", but starting tasks there arrives in 0.23 part B. |
+| [`hosts`](#agentctl-hosts) | Remote hosts over SSH (config section "hosts"): reachability, latency, GPU, disk in work_dir, tmux, provider CLIs (+ version, best-effort logged-in) and repo clones. Probes in parallel with a per-host timeout and caches the result for the board; a spec with "host: \<name>" starts its worktree, setup and agent there. |
 | [`consult`](#agentctl-consult) | Preview a high-cost Delphi consultation; --confirm registers it for watch. |
 | [`new`](#agentctl-new) | Start the tasks in a spec file: worktree, setup commands, symlinks, TASK.md, tmux window, agent, prompt. |
 | [`queue`](#agentctl-queue) | Put the tasks of a spec file in the queue: they start by themselves (while "agentctl watch" runs) when a window of their provider is free. Shows a summary and asks y/N first. |
@@ -147,7 +147,7 @@ agentctl capacity --clip
 
 ## agentctl hosts
 
-Remote hosts over SSH (config section "hosts"): reachability, latency, GPU, disk in work_dir, tmux, provider CLIs (+ version, best-effort logged-in) and repo clones. Probes in parallel with a per-host timeout and caches the result for the board; a spec may already say "host: \<name>", but starting tasks there arrives in 0.23 part B.
+Remote hosts over SSH (config section "hosts"): reachability, latency, GPU, disk in work_dir, tmux, provider CLIs (+ version, best-effort logged-in) and repo clones. Probes in parallel with a per-host timeout and caches the result for the board; a spec with "host: \<name>" starts its worktree, setup and agent there.
 
 ```
 agentctl hosts [options]

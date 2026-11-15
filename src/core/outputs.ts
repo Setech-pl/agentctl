@@ -1,3 +1,5 @@
+import { cachedRequest } from './response-budget.ts';
+import { HostUnreachable } from './host-runner.ts';
 import { cleanWorktreeCache } from './worktree-cache.ts';
 import { readReportText } from './report-path.ts';
 import fs from 'node:fs';
@@ -6,7 +8,7 @@ import { parseRefYaml } from './ref-yaml.ts';
 import { z } from 'zod';
 import type { Context } from './context.ts';
 import type { TaskRecord } from './taskstore.ts';
-import { inspectReport } from './report-state.ts';
+import { inspectReport, reportFingerprint } from './report-state.ts';
 import { recordJournal, readJournal } from './journal.ts';
 import { withFileLock } from './file-lock.ts';
 import { findRecordAnywhere } from './taskstore.ts';
@@ -199,7 +201,7 @@ export interface RepoResolution { repo?: TaskRecord['repos'][number]; allowed: s
  */
 export function resolveOutputRepo(record: Pick<TaskRecord, 'repos'>, name: string, author?: Pick<TaskRecord, 'repos'> | undefined): RepoResolution {
   const ids = new Map<TaskRecord['repos'][number], { names: string[]; paths: string[] }>();
-  for (const r of record.repos) ids.set(r, { names: [path.basename(r.path), ...(r.worktree ? [path.basename(r.worktree)] : [])], paths: [r.path, r.worktree] });
+  for (const r of record.repos) ids.set(r, { names: [...(r.name ? [r.name] : []), path.basename(r.path), ...(r.worktree ? [path.basename(r.worktree)] : [])], paths: [r.path, r.worktree] });
   // The author's checkout and branch lead to the reviewer's repo of the same repository.
   for (const a of author?.repos ?? []) {
     const mine = record.repos.find((r) => samePath(r.path, a.path));
@@ -228,13 +230,21 @@ export function outputRepo(record: Pick<TaskRecord, 'repos'>, name: string, auth
 }
 
 /** Validation observes git; it never fetches, checks out or integrates anything. */
-export async function readOutputs(ctx: Context, record: TaskRecord): Promise<OutputData> {
+export async function readOutputs(ctx: Context, record: TaskRecord, options: { cachedOnly?: boolean } = {}): Promise<OutputData> {
   // The one gate of every consumer (status, get_report, pull_ready, cohort_show, events, base refs): a report still being written is not judged.
   if (outputsPending(ctx.config, record, inspectReport(ctx.config, record, ctx.runner.now(), !record.attemptId), ctx.runner.now())) return { outputs: null, outputs_valid: false, outputs_errors: [], outputs_partial: false, outputs_pending: true };
   let data: OutputData;
   try { data = parseOutputs(readReportText(ctx.config, record, record.report), { review: record.reviewOf != null }); }
   catch { return { outputs: null, outputs_valid: false, outputs_errors: ['no report'] }; }
   if (!data.outputs) return data;
+  const remoteCache = record.host ? path.join(ctx.config.stateDir, record.window, 'remote-outputs.json') : undefined;
+  const signature = remoteCache ? reportFingerprint(record.report) : undefined;
+  if (remoteCache && (options.cachedOnly || cachedRequest() || ctx.hosts.connection(record.host!).unreachable)) {
+    try { const saved = JSON.parse(fs.readFileSync(remoteCache, 'utf8')); if (saved.signature === signature) return saved.data; } catch { /* not validated yet */ }
+    if (data.outputs.commits.length || data.outputs.integrate.length) return { ...data, outputs_valid: false, outputs_partial: true, outputs_errors: [...data.outputs_errors, `host ${record.host}: output references await validation on the host`] };
+    return data;
+  }
+
   // One message per distinct problem, with the number of entries it covers.
   const problems = new Map<string, number>();
   const note = (message: string): void => void problems.set(message, (problems.get(message) ?? 0) + 1);
@@ -242,14 +252,17 @@ export async function readOutputs(ctx: Context, record: TaskRecord): Promise<Out
     const found = resolveRefRepo(ctx, record, ref.repo);
     if (!found.repo) { note(`repo ${ref.repo}: ${found.problem === 'ambiguous' ? 'ambiguous' : 'not'} in the task repos; write one of: ${found.allowed.join(', ')}`); continue; }
     const repo = found.repo;
-    ref.repo = path.basename(repo.path);
-    const git = async (args: string[]) => ctx.runner.exec('git', ['-C', repo.path, ...args], { readOnly: true });
-    if ((await git(['show-ref', '--verify', '--quiet', `refs/heads/${ref.branch}`])).code !== 0) note(`${ref.repo}: branch ${ref.branch} does not exist`);
-    if ((await git(['rev-parse', '--verify', '--end-of-options', `${ref.sha}^{commit}`])).code !== 0) note(`${ref.repo}: commit ${ref.sha} does not exist`);
+    ref.repo = repo.name ?? path.basename(repo.path);
+    const git = async (args: string[]) => (record.host ? ctx.hosts.forHost(record.host) : ctx.runner).exec('git', ['-C', repo.path, ...args], { readOnly: true });
+    try {
+      if ((await git(['show-ref', '--verify', '--quiet', `refs/heads/${ref.branch}`])).code !== 0) note(`${ref.repo}: branch ${ref.branch} does not exist`);
+      if ((await git(['rev-parse', '--verify', '--end-of-options', `${ref.sha}^{commit}`])).code !== 0) note(`${ref.repo}: commit ${ref.sha} does not exist`);
+    } catch (error) { if (!(error instanceof HostUnreachable)) throw error; note(`host ${record.host}: output references await validation on the host`); }
   }
   for (const [message, count] of problems) data.outputs_errors.push(count > 1 ? `${message} (${count} entries)` : message);
   data.outputs_valid = data.outputs_errors.length === 0;
   if (!data.outputs_valid) data.outputs_partial = true;
+  if (remoteCache && !ctx.runner.dryRun && !ctx.hosts.connection(record.host!).unreachable) await ctx.runner.writeFile(remoteCache, JSON.stringify({ signature, data }));
   return data;
 }
 

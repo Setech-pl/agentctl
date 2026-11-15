@@ -1,3 +1,4 @@
+import { syncRemoteFiles } from './host-runtime.ts';
 import { readPromptQueue, reportMessageWarning, queueFile as promptQueueFile } from './prompt-queue.ts';
 import { recordJournal } from './journal.ts';
 import { worktreeCacheFreed } from './worktree-cache.ts';
@@ -34,9 +35,16 @@ export async function closeTask(ctx: Context, taskArg: string, opts: CloseOption
     );
   }
 
+  if (record?.host && !runner.dryRun) {
+    // Explicit close must reach the host; otherwise the record remains open and retryable.
+    await ctx.hosts.forHost(record.host).checked('true', []);
+    await syncRemoteFiles(ctx, record);
+  }
   const windows = runner.dryRun ? [window] : await tmux.listWindows();
   if (windows.includes(window)) {
-    await tmux.killWindow(window);
+    const killed = await tmux.killWindow(window);
+    if (killed.code !== 0) throw new AgentctlError(`cannot close ${taskArg}: ${killed.stderr}`);
+    if (record?.host) await syncRemoteFiles(ctx, record);
     ctx.info(`${taskArg}: window ${config.session}:${window} closed`);
   } else {
     ctx.info(`${taskArg}: no window "${window}" in session "${config.session}" (already closed)`);
@@ -56,7 +64,7 @@ export async function closeTask(ctx: Context, taskArg: string, opts: CloseOption
     if (closed) await recordEvent(ctx, closed, 'closed');
   }
 
-  if (record) {
+  if (record && !record.host) {
     const cacheFreed = worktreeCacheFreed(ctx, record);
     if (cacheFreed > 0) ctx.info(`${taskArg}: .cache cleanup: ${cacheFreed} bytes freed in total`);
     restoreDiskMeasurements(ctx);
@@ -73,13 +81,14 @@ export async function closeTask(ctx: Context, taskArg: string, opts: CloseOption
 
 /** `git worktree remove` (never --force) for each worktree of a task. The main checkout, main/master and missing worktrees are left alone; branches are never deleted. */
 export async function removeWorktrees(ctx: Context, taskArg: string, repos: TaskRecord['repos']): Promise<void> {
-  const { runner } = ctx;
+  const record = readTaskRecord(ctx.config, windowName(taskArg));
+  const runner = record?.host ? ctx.hosts.forHost(record.host) : ctx.runner;
   for (const repo of repos) {
     if (path.resolve(repo.worktree) === path.resolve(repo.path)) {
       ctx.info(`${taskArg}: skipping ${repo.worktree}: it is the main checkout`);
       continue;
     }
-    if (!runner.dryRun && !fs.existsSync(repo.worktree)) {
+    if (!runner.dryRun && (record?.host ? (await runner.exec('test', ['-e', repo.worktree], { readOnly: true })).code !== 0 : !fs.existsSync(repo.worktree))) {
       ctx.info(`${taskArg}: worktree ${repo.worktree} is already gone`);
       continue;
     }

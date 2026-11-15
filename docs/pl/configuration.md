@@ -6,6 +6,10 @@ env scala się po kluczach, links po from, setup zastępuje całą listę ([] wy
 
 Typy/domysły sprawdzono z [config.ts](../../src/core/config.ts), [spec.ts](../../src/core/spec.ts) i adapterami. g/p/s = globalny/projekt/spec. Część zwięzłych starszych wierszy podaje domyślne/typ w opisie. Dokładne regexy: [wspólne adaptery](../../src/core/providers/settings.ts), [Kimi](../../src/core/providers/kimi-settings.ts), [referencja szczegółowa](../configuration.md). Mapping raportu używa path ALBO paths oraz settle_s/clean_worktree_cache; gotowość nadal wymaga bieżącej próby. To nie pojemności konta właściciela.
 
+## Hosty
+
+`hosts.<name>` konfiguruje SSH, zdalne klony, dostawców, env i opcjonalne limity dostawców. Spec z `host: <name>` działa zdalnie, a raport ma lokalną kopię. [Hosty](hosts.md): pełny config, limity, odzyskiwanie połączenia i przykład na PC.
+
 ## Warstwy i instancja
 
 | Key | Typ / domyślne / warstwy | Znaczenie |

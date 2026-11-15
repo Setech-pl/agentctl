@@ -12,6 +12,7 @@ import { AgentctlError } from './util.ts';
  */
 
 export interface AgentWindowRequest {
+  host?: string;
   task: string;
   window: string;
   /** The first worktree: the window's directory. */
@@ -52,5 +53,6 @@ export function assertAgentSpawnAllowed(ctx: Context, req: Omit<AgentWindowReque
 /** Make the window of an agent (and the session, when it is not up). The only caller of tmux new-window/new-session for a task. */
 export async function openAgentWindow(ctx: Context, req: AgentWindowRequest): Promise<ExecResult> {
   assertAgentSpawnAllowed(ctx, req);
-  return req.sessionUp ? ctx.tmux.newWindow(req.window, req.cwd, req.env, req.command) : ctx.tmux.newSession(req.window, req.cwd, req.env, req.command);
+  const tmux = req.host ? ctx.hosts.tmux(req.host) : ctx.tmux;
+  return req.sessionUp ? tmux.newWindow(req.window, req.cwd, req.env, req.command) : tmux.newSession(req.window, req.cwd, req.env, req.command);
 }

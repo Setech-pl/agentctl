@@ -1,3 +1,4 @@
+import { checkHostLimit } from './host-limits.ts';
 import { collectStatus } from './status.ts';
 import { classifyScreen } from './state.ts';
 import type { TaskState } from './state.ts';
@@ -44,7 +45,7 @@ export async function drainPromptQueue(ctx: Context, window: string, turnState?:
       record = readTaskRecord(ctx.config, window)!;
       if (record.agent !== 'unknown') {
         const live = await liveWindows(ctx);
-        if (live.some(w => w.window === window && w.counted === false) && checkWindowLimit(record.agent, ctx.config.limits[record.agent], live, ctx.config.session)) return;
+        if (live.some(w => w.window === window && w.counted === false) && (checkWindowLimit(record.agent, ctx.config.limits[record.agent], live, ctx.config.session) || checkHostLimit(ctx.config, { ...record, agent: record.agent }, live))) return;
       }
       // Codex redraws its composer mid-turn. Keep the FIFO intact until watch observes idle.
       if (record.agent === 'codex') {

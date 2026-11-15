@@ -37,6 +37,7 @@ export interface PhoneInput {
 export const HINTED_EVENTS: readonly PhoneEvent[] = ['needs-input', 'report-ready', 'cohort-done'];
 
 export const NTFY_TAGS: Record<PhoneEvent, string> = {
+  'host-unreachable': 'cloud',
   'disk-warn': 'warning',
   'disk-critical': 'warning',
   'disk-ok': 'white_check_mark',
@@ -74,6 +75,11 @@ export function phoneMessage(event: PhoneEvent, input: PhoneInput, ntfy: Pick<Nt
   let title: string;
   let body: string;
   switch (event) {
+    case 'host-unreachable':
+      if (!task) return undefined;
+      title = `${task}: host niedostępny`;
+      body = input.text ?? `${task}: połączenie z hostem niedostępne, watch ponawia`;
+      break;
     case 'needs-input':
       if (!task) return undefined;
       title = `${task}: pytanie`;

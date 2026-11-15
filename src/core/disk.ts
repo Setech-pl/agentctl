@@ -29,11 +29,11 @@ function existingAncestor(target: string): string {
 }
 /** Read cached sizes only. Watch owns measurement jobs; no read starts a walk or writes the size cache. */
 export async function collectDisk(ctx: Context, statfs = fs.promises.statfs, opts: { detail?: boolean; offset?: number; limit?: number; budgetMs?: number; records?: TaskRecord[] } = {}): Promise<DiskReport> {
-  const records = opts.records ?? [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)];
+  const records = (opts.records ?? [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)]).filter(r => !r.host);
   const targets = new Set([ctx.config.cache, ctx.config.stateDir]);
   if (ctx.config.worktreeRoot) targets.add(resolvePath(ctx.config.worktreeRoot));
   const queuedRepos = readQueue(ctx.config).flatMap((entry) => {
-    try { return resolveSpec(splitSpecs(entry.spec, 'disk queue inventory')[0]!, { config: ctx.config }).repos; }
+    try { const spec = resolveSpec(splitSpecs(entry.spec, 'disk queue inventory')[0]!, { config: ctx.config }); return spec.host ? [] : spec.repos; }
     catch { return []; }
   });
   for (const repo of [...records.flatMap((r) => r.repos), ...queuedRepos]) {
@@ -134,7 +134,7 @@ export async function refreshDiskAfterGc(ctx: Context, freedBytes: number): Prom
   return text;
 }
 async function persistDiskMeasurements(ctx: Context): Promise<void> {
-  const worktrees = [...new Set([...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)].flatMap(r => r.repos.map(r => r.worktree)))];
+  const worktrees = [...new Set([...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)].filter(r => !r.host).flatMap(r => r.repos.map(r => r.worktree)))];
   const entries = worktrees.flatMap(wt => { const m = lastMeasurement(wt); return m ? [m] : []; });
   await ctx.runner.writeFile(path.join(path.dirname(ctx.config.path), 'disk-sizes.json'), JSON.stringify({ version: 2, entries }));
 }
@@ -146,7 +146,7 @@ export async function refreshDiskMeasurements(ctx: Context): Promise<void> {
   if (ctx.runner.dryRun || refreshing.has(key) || now - (refreshed.get(key) ?? -Infinity) < 5000) return;
   refreshed.set(key, now);
   await collectDisk(ctx); // restore persisted readings without scheduling any work
-  const targets = [...new Set([...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)].flatMap(r => r.repos.map(r => r.worktree)))];
+  const targets = [...new Set([...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)].filter(r => !r.host).flatMap(r => r.repos.map(r => r.worktree)))];
   const target = targets.sort((a, b) => (lastMeasurement(a)?.at ?? 0) - (lastMeasurement(b)?.at ?? 0)).find(wt => !cachedMeasurement(wt) || now - lastMeasurement(wt)!.at >= DISK_INTERVAL_MS);
   if (!target) return;
   configureMeasurements(ctx.config.disk);

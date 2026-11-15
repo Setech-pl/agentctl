@@ -1,3 +1,4 @@
+import { prepareRemoteDelivery, syncRemoteFiles } from './host-runtime.ts';
 import { provider } from './providers/registry.ts';
 import { stateWriteFailure } from './atomic-file.ts';
 import path from 'node:path';
@@ -161,7 +162,7 @@ function proofSource(ctx: Context, record: TaskRecord, screen: string): string |
     if (record.deliveryId && evidence.accepted === true && evidence.deliveryId === record.deliveryId && Date.parse(evidence.at) >= Date.parse(record.deliveryStartedAt ?? '')) return 'hook';
   } catch { /* no current hook acknowledgement */ }
   if (record.pendingPrompt && record.deliveryStartedAt) {
-    const seen = transcriptMessage(ctx, record, record.pendingPrompt, Date.parse(record.deliveryStartedAt));
+    const seen = record.host ? undefined : transcriptMessage(ctx, record, record.pendingPrompt, Date.parse(record.deliveryStartedAt));
     if (seen?.kind === 'user') return 'transcript';
     if (seen) return null; // Queue acceptance and ambiguous/old injection must not fall through to legacy screen signs.
   }
@@ -193,7 +194,7 @@ export function deliveryEvidence(ctx: Context, record: TaskRecord, screen: strin
 
 /** The enqueue is an exact source for queue acceptance, never for injection. Keep the message pending, even after the turn/timeout. */
 async function keepConfirmedQueue(ctx: Context, record: TaskRecord): Promise<boolean> {
-  const seen = record.pendingPrompt && record.deliveryStartedAt ? transcriptMessage(ctx, record, record.pendingPrompt, Date.parse(record.deliveryStartedAt)) : undefined;
+  const seen = !record.host && record.pendingPrompt && record.deliveryStartedAt ? transcriptMessage(ctx, record, record.pendingPrompt, Date.parse(record.deliveryStartedAt)) : undefined;
   if (record.deliveryResult !== 'queued-in-agent-confirmed' && seen?.kind !== 'queued') return false;
   record.deliveryResult = 'queued-in-agent-confirmed';
   const note = deliveryNote(record)!;
@@ -252,13 +253,15 @@ async function pressEnterAfter(ctx: Context, record: TaskRecord, file: string, w
   await setHeaderFields(ctx.runner, file, { delivery_enters: record.deliveryEnters, delivery_enter_at: new Date(ctx.runner.now()).toISOString(), delivery_queue_sign: record.deliveryQueueSign });
   if (record.agent === 'codex' && record.promptKind === 'followup' && record.deliveryWasBusy && ['working', 'background'].includes(classifyScreen(last.stdout, ctx.config.agents.codex)) && codexQueueKey(last.stdout) === 'Tab') return ctx.tmux.sendKey(window, 'Tab');
   return record.agent === 'kimi'
-    ? ctx.runner.exec('tmux', ['send-keys', '-t', await ctx.tmux.targetFor(window), 'C-m'])
+    ? ctx.tmux.sendKey(window, 'C-m')
     : ctx.tmux.pressEnter(window);
 }
 
 /** Initial prompts and resume instructions are pasted once and get their Enters in that call. Later agentctl only looks (hook, transcript, screen) and never presses Enter by itself. */
 export async function deliverPendingPrompt(ctx: Context, window: string): Promise<'sent' | 'pending' | 'confirming' | 'needs-attention'> {
   if (ctx.runner.dryRun) return 'sent';
+  const remoteRecord = readTaskRecord(ctx.config, window);
+  if (remoteRecord?.host) await syncRemoteFiles(ctx, remoteRecord);
   const was = readTaskRecord(ctx.config, window), before = { id: was?.deliveryId, result: was?.deliveryResult };
   const outcome = await deliverOnce(ctx, window);
   await recordDelivery(ctx, window, before);
@@ -462,6 +465,7 @@ async function deliverOnce(ctx: Context, window: string): Promise<'sent' | 'pend
     record.deliveryOutputBaseline = outputFingerprint(before.stdout, settings.deliveryPattern);
     record.deliveryEchoBaseline = echoLines(before.stdout, markerOf(record), text, record.agent);
     await setHeaderFields(ctx.runner, file, { prompt_delivery: 'sending', delivery_was_busy: busyFollowup, delivery_started_at: record.deliveryStartedAt, delivery_output_baseline: record.deliveryOutputBaseline, delivery_echo_baseline: record.deliveryEchoBaseline, delivery_enters: 0 });
+    await prepareRemoteDelivery(ctx, record);
     record.deliveryEnters = 0;
     if (draftOf(before.stdout)) return uncertain('the input already contains a draft; it was not overwritten');
     try {

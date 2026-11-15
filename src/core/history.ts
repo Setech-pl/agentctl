@@ -100,7 +100,7 @@ export async function snapshot(ctx: Context, record: TaskRecord, event: HistoryE
   if (cached) {
     try { const p = JSON.parse(fs.readFileSync(path.join(config.stateDir, record.window, 'progress.json'), 'utf8')); if (p) progress = { commits: p.commits, files: p.files }; } catch { progress = previous?.progress ?? null; }
   } else if (record.repos.length > 0) {
-    const p = await taskProgress(runner, record.repos).catch(() => null);
+    const p = await taskProgress(record.host ? ctx.hosts.forHost(record.host) : runner, record.repos).catch(() => null);
     if (p) progress = { commits: p.commits, files: p.files };
   }
   const usage = cached ? undefined : collectTaskUsage(config, openReader(config), allRecords(config), now).get(record.task);

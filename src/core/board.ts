@@ -1,3 +1,4 @@
+import { remoteAttachHint } from './host-runtime.ts';
 import type { RefreshClock } from '../board/refresh-scheduler.ts';
 import { attachHint } from './tmux-socket.ts';
 import { provider as providerAdapter, PROVIDERS } from './providers/registry.ts';
@@ -40,7 +41,7 @@ import { sendPrompts } from './send.ts';
 import type { TaskState } from './state.ts';
 import { collectStatus } from './status.ts';
 import type { StatusRow } from './status.ts';
-import { snapshotRecords } from './taskstore.ts';
+import { snapshotRecords, readTaskRecord } from './taskstore.ts';
 import type { TaskRecord } from './taskstore.ts';
 import { logLines, markTask } from './history.ts';
 import type { Result } from './history.ts';
@@ -774,7 +775,7 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
   const scan = await snapshotRecords(config);
   const reader = sharedReader(config);
   reader.dropListings(); // directory listings are per tick, the parsed cache persists
-  const statusRows = await collectStatus(ctx, { progress: false, archived: true, tokens: true, records: scan, reader, shallowClosed: opts.deepClosed !== true });
+  const statusRows = await collectStatus(ctx, { progress: false, remoteCachedOnly: true, archived: true, tokens: true, records: scan, reader, shallowClosed: opts.deepClosed !== true });
   const records = new Map([...scan.archived, ...scan.current].map((r) => [r.task, r]));
   cache.retain(records.keys());
   const now = runner.now();
@@ -784,13 +785,13 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
   const rows: BoardRow[] = [];
   for (const row of statusRows) {
     const record = records.get(row.task);
-    const progress = record && record.repos.length > 0 && !row.hidden ? await cache.get(runner, row.task, record.repos, now) : null;
+    const progress = record && !record.host && record.repos.length > 0 && !row.hidden ? await cache.get(runner, row.task, record.repos, now) : null;
     const worktrees = (record?.repos ?? []).filter((r) => path.resolve(r.worktree) !== path.resolve(r.path)).map((r) => r.worktree);
     rows.push({ ...row, progress, worktrees });
   }
   attachCollisions(rows, config.collisions.ignore, config.collisions.enabled);
   const entries = readQueue(config);
-  const queue = entries.length > 0 ? describeQueue(config, entries, await liveWindows(ctx), statusRows) : [];
+  const queue = entries.length > 0 ? describeQueue(config, entries, await liveWindows(ctx, statusRows), statusRows) : [];
   const queuePaused = isPaused(config) || !config.queue.enabled;
   const resumable = (await findResumable(ctx, { rows: statusRows })).map((c) => c.task);
   const manager = await managerView(ctx);
@@ -821,7 +822,7 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
     else if (!isAlive(target)) lines = [`(finished: no tmux window${target.report === 'yes' ? `; the report is ${target.pulled ? 'pulled' : 'ready: c copies it'}` : '; no report was written'})`];
     else {
       try {
-        lines = await peekWindow(ctx, target.windowName, previewLines);
+        lines = target.host ? ctx.hosts.cachedCapture(target.host, target.windowName).stdout.split('\n').slice(-previewLines) : await peekWindow(ctx, target.windowName, previewLines);
       } catch (e) {
         lines = [`(cannot read the window: ${errorMessage(e)})`];
       }
@@ -865,6 +866,8 @@ export async function runBoardEffect(runner: Runner, config: GlobalConfig, effec
   try {
     switch (effect.type) {
       case 'switch':
+        const remote = readTaskRecord(config, effect.window);
+        if (remote?.host) return { level: 'info', text: remoteAttachHint(config, remote)! };
         if (!env.insideTmux) return { level: 'error', text: effect.window === MANAGER_WINDOW ? `Not inside tmux: ${attachHint(config)} \\; select-window -t ${MANAGER_WINDOW}` : `Not inside tmux: run "agentctl attach ${effect.task}".` };
         await showWindow(ctx, effect.window, true);
         return { level: 'info', text: `Switched to ${effect.task}. Back to the board: ${config.board.returnKey ?? 'Ctrl-b l'}` };
@@ -991,6 +994,7 @@ export interface BoardCell {
 }
 
 const STATE_COLOR: Record<TaskState, string> = {
+  'host-unreachable': 'yellow',
   'needs-attention': 'red',
   working: 'cyan',
   background: 'cyan',
@@ -1032,7 +1036,7 @@ export function rowCells(row: StatusRow, selected: boolean, cols: BoardColumns, 
   const quiet = row.finished || row.hidden;
   const cells: BoardCell[] = [
     { key: 'marker', text: selected ? '▸' : row.collide.length > 0 ? '⚠' : row.hidden ? '·' : '', width: cols.marker, bold: true, ...(!selected && row.collide.length > 0 ? { color: 'yellow' } : {}) },
-    { key: 'task', text: row.task, width: cols.task, bold: selected },
+    { key: 'task', text: `${row.task}${row.host ? ` [${row.host}]` : ''}`, width: cols.task, bold: selected },
     { key: 'who', text: `${providerLabel(row.agent)} ${(PROVIDERS[row.agent as keyof typeof PROVIDERS]?.models.label ?? modelLabel)(row.model, row.effort, row.tokens?.observed?.model, versions)}`, width: cols.who },
     { key: 'state', text: `${icon} ${row.state}${row.question?.includes("zwinięte") ? " (zw.)" : ""}`, width: cols.state, color: STATE_COLOR[row.state] },
     { key: 'time', text: row.duration, width: cols.time },

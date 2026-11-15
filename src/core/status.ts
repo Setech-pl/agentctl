@@ -1,3 +1,5 @@
+import { HostUnreachable } from './host-runner.ts';
+import { remoteAttachHint, syncRemoteFiles } from './host-runtime.ts';
 import { PATTERN_FLAGS } from './config.ts';
 import { tmuxLoss } from './tmux-loss.ts';
 import { provider, matchesProviderCommand, isProviderLauncher } from './providers/registry.ts';
@@ -40,6 +42,7 @@ import { openReader } from './usage.ts';
 import { formatTokens } from './usage-parse.ts';
 
 export interface StatusRow {
+  host?: string;
   task: string;
   outputs?: OutputData['outputs'];
   outputs_valid?: boolean;
@@ -147,6 +150,8 @@ export function guessAgent(screen: string): AgentName {
 }
 
 export interface CollectOptions {
+  /** Board refresh uses remote samples published by watch. */
+  remoteCachedOnly?: boolean;
   /** Ask git for the progress of each worktree (default). The watcher and the close plan have no use for it. */
   progress?: boolean;
   /** Read paths use persisted facts and never discover files or ask git to scan a worktree. */
@@ -177,7 +182,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
   // Nested planners inherit the MCP request contract too, without relying on facade-local wrappers.
   if (cachedRequest()) opts = { ...opts, cachedOnly: true };
   const { runner, tmux, config } = ctx;
-  const infos = await tmux.windows();
+  const infos = [...await ctx.localTmux.windows(), ...await ctx.hosts.windows(opts.cachedOnly || opts.remoteCachedOnly)];
   const live = new Set(infos.map((w) => w.plain));
   const rows: StatusRow[] = [];
   const knownWindows = new Set<string>();
@@ -198,11 +203,13 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       await new Promise((resolve) => setImmediate(resolve));
     }
     if (!archived) knownWindows.add(record.window);
-    const alive = live.has(record.window);
+    if (record.host && !archived && !record.closed && !record.cancelled && !opts.cachedOnly && !opts.remoteCachedOnly) await syncRemoteFiles(ctx, record);
+    let unreachable = !!record.host && !record.closed && !record.cancelled && !archived && ctx.hosts.connection(record.host).unreachable;
+    const alive = live.has(record.window) || unreachable;
     // Closed, cancelled or archived and not live: the board only counts them (unless a section is expanded), so the
     // prompt queue, the outputs and the tokens are not collected for them. Everything that decides the state stays.
     const shallow = opts.shallowClosed === true && !alive && (archived || record.closed === true || record.cancelled === true);
-    if (opts.tokens && !shallow) tokenRecords.push(record);
+    if (opts.tokens && !shallow && !record.host) tokenRecords.push(record);
     const startedMs = Date.parse(record.started);
     let reportMtime: number | undefined;
     try {
@@ -219,20 +226,22 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     }
     let screenText = '';
     let screenRead = !alive;
-    if (alive) {
-      const screen = await tmux.capture(record.window, undefined, infos, record.windowId);
+    if (alive && !unreachable) {
+      let screen;
+      try { screen = record.host && (opts.cachedOnly || opts.remoteCachedOnly) ? ctx.hosts.cachedCapture(record.host, record.window) : await tmux.capture(record.window, undefined, infos, record.windowId); }
+      catch (error) { if (!(error instanceof HostUnreachable)) throw error; unreachable = true; screen = { code: 255, stdout: '', stderr: error.message }; }
       if (screen.code === 0) { screenText = screen.stdout; screenRead = true; }
     }
     const screenAgent = record.agent === 'unknown' ? guessAgent(screenText) : record.agent;
     const settings = config.agents[screenAgent] ?? provider(screenAgent).defaultSettings();
-    if (!opts.cachedOnly && !cachedRequest()) await provider(screenAgent).events.poll?.(ctx, record);
+    if (!record.host && !opts.cachedOnly && !cachedRequest()) await provider(screenAgent).events.poll?.(ctx, record);
     const stored = readStoredEvent(config, record);
     const reportState = inspectReport(config, { ...record, ...(stored?.outcome === 'turn-complete' ? { turnEndedAt: stored.at } : {}) }, runner.now(), !record.attemptId && (!alive || (config.reportSettleS === 0 && classifyScreen(screenText, settings) === 'idle')));
     reportReady = reportState.ready;
     // The candidate lives on the row, not on the record copy: one bounded discovery walk per task per collect (R3).
     let reportCandidate = record.reportCandidate;
     let candidatesCache: ReturnType<typeof findCandidates> | undefined;
-    const candidates = () => (candidatesCache ??= findCandidates(ctx, record));
+    const candidates = () => (candidatesCache ??= record.host ? [] : findCandidates(ctx, record));
     if (!opts.cachedOnly && reportCandidate && reportCandidate !== record.report && !candidates().some(c => c.file === reportCandidate)) reportCandidate = undefined;
     if (reportState.exists && !reportReady && !reportCandidate) reportCandidate = record.report;
     if (reportReady && !alive && reportState.mtime !== undefined && !Number.isNaN(startedMs)) duration = formatDuration(reportState.mtime - startedMs);
@@ -247,9 +256,9 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     const unconfirmed = record.promptDelivery === 'needs-attention' && !reportReady && !deliveryEvidence(ctx, record, screenText);
     // A startup dialog `new` stopped at (prompt_delivery: needs-input) is a question to the human, not a delivery failure.
     const startupDialog = record.promptDelivery === 'needs-input' && !reportReady;
-    const lossHint = await tmuxLoss(ctx, record, alive, reportReady || cancelled || closed || archived || !!record.supersededBy, infos.length > 0, opts.cachedOnly);
+    const lossHint = record.host ? undefined : await tmuxLoss(ctx, record, alive, reportReady || cancelled || closed || archived || !!record.supersededBy, infos.length > 0, opts.cachedOnly);
     if (lossHint && hiddenBy === 'auto') hiddenBy = null;
-    let state: TaskState = cancelled ? 'cancelled' : closed ? 'closed' : record.supersededBy ? 'superseded' : lossHint ? 'needs-attention' : writeFailure ? 'needs-attention' : deliveryReport ? 'report-ready' : startupDialog ? 'needs-input' : unconfirmed ? 'needs-attention' : taskState({ alive, screen: screenText, settings, reportReady, event: stored?.outcome });
+    let state: TaskState = unreachable ? 'host-unreachable' : cancelled ? 'cancelled' : closed ? 'closed' : record.supersededBy ? 'superseded' : lossHint ? 'needs-attention' : writeFailure ? 'needs-attention' : deliveryReport ? 'report-ready' : startupDialog ? 'needs-input' : unconfirmed ? 'needs-attention' : taskState({ alive, screen: screenText, settings, reportReady, event: stored?.outcome });
     // Passive wire failures fill an idle screen; legacy hook recovery keeps its existing precedence.
     if (state === 'waiting' && stored?.outcome === 'overloaded' && record.agent !== 'unknown' && provider(record.agent).events.payloadFrom === 'wire') state = 'overloaded';
     const observationKey = `${config.stateDir}:${record.window}`;
@@ -274,7 +283,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     idleObservations.set(observationKey, observation);
     if (release) { try { atomicWriteFile(observationFile, JSON.stringify(observation)); } catch { /* observation persistence is best effort */ } finally { release(); } }
     // Still being written (no report-end yet, or not settled): readOutputs says `outputs_pending` and judges nothing.
-    const outputData = !shallow && reportReady ? await readOutputs(ctx, record) : undefined;
+    const outputData = !shallow && reportReady ? await readOutputs(ctx, record, { cachedOnly: opts.cachedOnly || !!record.host && opts.remoteCachedOnly }) : undefined;
     let verdict: OutputVerdict | undefined;
     if (!shallow && reportReady) {
       try {
@@ -289,13 +298,14 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       const file = path.join(config.stateDir, record.window, 'progress.json');
       if (opts.cachedOnly) { try { progress = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* watch has not sampled yet */ } }
       else {
-        progress = await taskProgress(runner, record.repos);
+        progress = unreachable ? null : await taskProgress(record.host ? ctx.hosts.forHost(record.host) : runner, record.repos);
         if (!runner.dryRun && !archived) await runner.writeFile(file, JSON.stringify(progress)).catch(() => undefined);
       }
     }
     rows.push({
       ...(outputData ? { ...outputData, verdict, decisionsCount: outputData.outputs?.decisions.length ?? 0, actionsCount: outputData.outputs?.actions.length ?? 0 } : {}),
       task: record.task,
+      ...(record.host ? { host: record.host } : {}),
       promptQueue: shallow ? [] : promptQueueView(ctx, record.window, record),
       promptDelivery: record.promptDelivery,
       ...(record.deliveryResult ? { deliveryResult: record.deliveryResult } : {}),
@@ -330,7 +340,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       lastLine: lastContentLine(screenText, settings.footerPatterns),
       progress,
       collide: [],
-      hint: [lossHint, reportCandidate && reportCandidate !== record.report && !reportState.exists ? `Raport poza ścieżką kanoniczną; użyj report_from ze ścieżką ${reportCandidate}` : null, writeFailure ? `State write failed: ${writeFailure.reason}; old TASK.md preserved` : startupDialog ? record.promptError : unconfirmed ? record.promptError : record.promptDelivery === 'confirming' || record.promptDelivery === 'sending' ? (deliveryNote(record) ?? 'dostarczenie niepotwierdzone – sprawdzam; watch confirms within delivery_confirm_s') : record.promptDelivery === 'pending' ? 'original prompt pending; watch sends it once after folder trust and empty ready input' : stateHint(record.task, state, record.pin === true, record.supersededBy), !record.reportConfirmed && record.reportSource && path.normalize(record.reportSource) !== path.normalize(record.report) ? `raport pochodzi z kopii ${record.reportSource} – sprawdź` : null].filter(Boolean).join('; ') || null,
+      hint: [unreachable ? `${ctx.hosts.connection(record.host!).detail}; retry at ${new Date(ctx.hosts.connection(record.host!).retryAt).toISOString()}` : null, record.host ? remoteAttachHint(config, record) : null, lossHint, reportCandidate && reportCandidate !== record.report && !reportState.exists ? `Raport poza ścieżką kanoniczną; użyj report_from ze ścieżką ${reportCandidate}` : null, writeFailure ? `State write failed: ${writeFailure.reason}; old TASK.md preserved` : startupDialog ? record.promptError : unconfirmed ? record.promptError : record.promptDelivery === 'confirming' || record.promptDelivery === 'sending' ? (deliveryNote(record) ?? 'dostarczenie niepotwierdzone – sprawdzam; watch confirms within delivery_confirm_s') : record.promptDelivery === 'pending' ? 'original prompt pending; watch sends it once after folder trust and empty ready input' : stateHint(record.task, state, record.pin === true, record.supersededBy), !record.reportConfirmed && record.reportSource && path.normalize(record.reportSource) !== path.normalize(record.report) ? `raport pochodzi z kopii ${record.reportSource} – sprawdź` : null].filter(Boolean).join('; ') || null,
       // Codex: the session log names a pending request_user_input question exactly (the text of the expanded view),
       // for a collapsed one and for a waiting one alike; the screen reader covers every other dialog.
       question: (record.agent === 'codex' && (state === 'needs-input' || (settings.asyncQuestionPattern && new RegExp(settings.asyncQuestionPattern, PATTERN_FLAGS).test(screenText))) ? sessionQuestion(config, record) : undefined) ?? (state === 'needs-input' ? ((startupDialog ? record.promptError : undefined) ?? extractQuestion(screenText) ?? (stored?.outcome === 'needs-input' && stored.text !== '' ? stored.text : null)) : null),

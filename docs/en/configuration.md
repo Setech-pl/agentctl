@@ -6,6 +6,10 @@ env merges by key; links by from; setup replaces the whole list ([] disables). E
 
 Types/defaults below are cross-checked with [config.ts](../../src/core/config.ts), [spec.ts](../../src/core/spec.ts) and adapters. g/p/s = global/project/spec. Compact legacy rows sometimes state default/type in their meaning. Exact regex defaults: [shared adapters](../../src/core/providers/settings.ts), [Kimi](../../src/core/providers/kimi-settings.ts), and [detailed reference](../configuration.md). Report mapping uses path OR paths plus settle_s/clean_worktree_cache; readiness still requires the current attempt. No owner-specific capacities are implied.
 
+## Hosts
+
+`hosts.<name>` configures SSH, remote clones, providers, environment and optional provider caps. A spec with `host: <name>` runs remotely and mirrors its report locally. See [Hosts](hosts.md) for the complete config, limits, recovery and PC example.
+
 ## Layers and instance
 
 | Key | Type / default / layers | Meaning |

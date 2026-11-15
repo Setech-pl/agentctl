@@ -1,3 +1,5 @@
+import { remoteAttachHint } from './host-runtime.ts';
+import { readTaskRecord } from './taskstore.ts';
 import { attachHint } from './tmux-socket.ts';
 import type { Context } from './context.ts';
 import { describeTargets, listTargets, resolveRunningTask } from './resolve.ts';
@@ -33,6 +35,8 @@ async function pickTask(ctx: Context, taskArg: string | undefined, opts: AttachO
 /** Make the task's window the current one, in this terminal: switch-client inside tmux, attach-session outside. */
 export async function showWindow(ctx: Context, window: string, insideTmux: boolean): Promise<void> {
   const { tmux, config } = ctx;
+  const record = readTaskRecord(config, window);
+  if (record?.host) { ctx.out(remoteAttachHint(config, record)!); return; }
   if (!(await tmux.hasSession())) {
     throw new AgentctlError(`tmux session "${config.session}" is not running`, 'Start a task with "agentctl new <spec>".');
   }
@@ -57,6 +61,8 @@ export async function attachTask(ctx: Context, taskArg: string | undefined, opts
 export async function switchAttachedClient(ctx: Context, taskArg: string): Promise<TaskTarget> {
   const { tmux, config } = ctx;
   const target = await resolveRunningTask(ctx, taskArg);
+  const record = readTaskRecord(config, target.window);
+  if (record?.host) { ctx.out(remoteAttachHint(config, record)!); return target; }
   const clients = await tmux.clients();
   if (clients.length === 0) {
     throw new AgentctlError(`no tmux client is attached to session "${config.session}"`, `Attach one: ${attachHint(config)}, or run "agentctl attach ${target.task}" in a terminal.`);

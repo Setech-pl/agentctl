@@ -108,7 +108,7 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
   const newest = (target: string) => opts.cachedSizes ? Promise.resolve(measurement(target)?.newest ?? runner.now()) : newestMtime(target);
   const olderThanMs = parseAge(opts.olderThan ?? DEFAULT_OLDER_THAN);
   const cohort = opts.cohort === undefined ? undefined : findCohort(config, opts.cohort).name;
-  const currentRecords = listTaskRecords(config), archivedRecords = listArchivedRecords(config);
+  const currentRecords = listTaskRecords(config).filter(r => !r.host), archivedRecords = listArchivedRecords(config).filter(r => !r.host);
   const archived = new Set(archivedRecords.map(r => r.window));
   const currentNames = new Set(currentRecords.map(r => r.window));
   const all: TaskRecord[] = [...currentRecords, ...archivedRecords.filter(r => !currentNames.has(r.window))];

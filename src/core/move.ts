@@ -68,6 +68,7 @@ export async function planMove(ctx: Context, taskArg: string, opts: MoveOptions 
   const from = readTaskRecord(config, match.target.window);
   if (!from) throw new AgentctlError(`${match.target.task} has no state file, so its prompt and worktree are unknown`, 'Orphans cannot be moved; see "agentctl adopt".');
 
+  if (from.host) throw new AgentctlError(`${from.task}: remote move is not supported yet; send a follow-up or start a new host task`);
   if (from.supersededBy) throw new AgentctlError(`${from.task} was already moved to ${from.supersededBy}`, `Close the old window when you are done: agentctl close ${from.task}`);
   if (from.pin) throw new AgentctlError(`${from.task} is pinned (pin: true): it is never moved to the other provider`, 'Wait for the limit to reset, or remove the pin from the spec and start the task again.');
   if (from.agent === 'unknown') throw new AgentctlError(`the agent of ${from.task} is unknown (adopted without --agent), so its model cannot be translated`, 'Start the task again on the provider you want, with "agentctl new --agent <agent>".');

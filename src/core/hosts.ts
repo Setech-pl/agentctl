@@ -9,8 +9,8 @@ import { Problems, expandHome, isObject } from './util.ts';
 import type { Runner } from './runner.ts';
 
 /*
- * Remote hosts (0.23.0 part A: config + transport + health). A host is a second machine reached over SSH
- * (WSL, a server, a GPU box) that later parts of 0.23 run tasks on. This module holds the config shape and
+ * Remote hosts: config, transport, health and task execution. A host is a second machine reached over SSH
+ * (WSL, a server, a GPU box) that runs tasks while the dispatcher keeps state and report mirrors. This module holds the config shape and
  * the on-disk health cache; the transport is host-ssh.ts, the probe is host-health.ts.
  *
  * No secrets are ever stored in the hosts config: the SSH identity is a key file path, and auth itself is
@@ -29,9 +29,9 @@ export interface HostConfig {
   repos: Record<string, string>;
   /** Provider CLIs installed on this host. */
   providers: ProviderId[];
-  /** Per-provider cap of simultaneous remote tasks (0.23 part B consumes it). */
+  /** Per-provider cap of simultaneous remote tasks (in addition to the provider account limit). */
   limits?: Partial<Record<AgentName, number>>;
-  /** Extra environment for remote commands (0.23 part B consumes it). */
+  /** Extra environment for remote commands (in addition to the provider account limit). */
   env?: Record<string, string>;
 }
 

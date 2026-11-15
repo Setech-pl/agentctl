@@ -78,6 +78,7 @@ Argumenty z ? są opcjonalne. Pola dostawców obejmują opcjonalnych; uruchomion
 | `doctor` | odczyt | `project?` | Diagnoza instalacji, uprawnień i dysku; budżetowany odczyt z cache. |
 | `equivalents` | odczyt |  | Tabela mapowań model/effort aktywnych dostawców. |
 | `config_show` | odczyt |  | Efektywny config z maskowaniem sekretów; queue_hold jako pierwszy klucz. |
+| `hosts` | odczyt | `refresh?` | Zdrowie hostów SSH: połączenie, GPU, dysk, tmux, CLI i klony; host: w spec uruchamia zadanie zdalnie z lokalną kopią raportu. |
 | `manager_status` | odczyt |  | Stan lokalnej sesji manager. |
 | `away_status` | odczyt |  | Stan away i telefonu. |
 | `report` | odczyt | `task` | Kanoniczna ścieżka raportu i kandydaci. |

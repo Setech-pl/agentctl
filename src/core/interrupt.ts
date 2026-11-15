@@ -30,7 +30,8 @@ export async function interruptTask(ctx: Context, taskArg: string): Promise<Inte
     }
   }
   const key = config.agents[record.agent === 'unknown' ? 'claude' : record.agent].interruptKey;
-  await tmux.sendKey(window, key);
+  const pressed = await tmux.sendKey(window, key);
+  if (pressed.code !== 0) throw new AgentctlError(`cannot interrupt ${record.task}: ${pressed.stderr}`);
   ctx.info(`${record.task}: sent ${key} to ${config.session}:${window}; the window stays open`);
   return { task: record.task, window, key };
 }

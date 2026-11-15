@@ -233,6 +233,8 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
 const PHONE_MARK = ' 📱';
 const hhmm = (iso: string): string => formatLocalTime(iso).slice(-5);
 const KIND_LABEL: Record<JournalEntry['kind'], string> = {
+  'host-unreachable': 'HOST NIEDOSTĘPNY',
+  'host-recovered': 'HOST OSIĄGALNY',
   'watch-resumed': 'WATCH',
   'tmux-lost': 'TMUX UTRACONY',
   'machine-load-high': 'OBCIĄŻENIE',

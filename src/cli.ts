@@ -436,7 +436,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
       deps.stdout(text);
     }));
 
-  program.command('hosts').description('Remote hosts over SSH (config section "hosts"): reachability, latency, GPU, disk in work_dir, tmux, provider CLIs (+ version, best-effort logged-in) and repo clones. Probes in parallel with a per-host timeout and caches the result for the board; a spec may already say "host: <name>", but starting tasks there arrives in 0.23 part B.')
+  program.command('hosts').description('Remote hosts over SSH (config section "hosts"): reachability, latency, GPU, disk in work_dir, tmux, provider CLIs (+ version, best-effort logged-in) and repo clones. Probes in parallel with a per-host timeout and caches the result for the board; a spec with "host: <name>" starts its worktree, setup and agent there.')
     .option('--json', 'machine-readable health records')
     .option('--refresh', 'probe every host now, even when the cache is fresh')
     .option('--clip', 'copy the summary to the clipboard')

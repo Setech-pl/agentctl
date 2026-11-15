@@ -9,6 +9,7 @@ const root = path.resolve(import.meta.dirname, '..');
 const bt = String.fromCharCode(96);
 const code = (s: string) => bt + s + bt;
 const pl: Record<string, string> = {
+ hosts: 'Zdrowie hostów SSH: połączenie, GPU, dysk, tmux, CLI i klony; host: w spec uruchamia zadanie zdalnie z lokalną kopią raportu.',
  status: 'Stan zadań, pytań, raportów i potrzebnej uwagi; domyślnie zwięzły.',
  events_since: 'Przyrost według as czatu (client nadpisuje), otwarta skrzynka WALL; peek zachowuje kursor.',
  gc_preview: 'Chroniony plan sprzątania z rozmiarami i powodami pominięcia; bez usuwania.',

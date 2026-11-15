@@ -35,6 +35,12 @@ export function readKimiConfig(env: Record<string, string | undefined> = process
   let text: string;
   try { text = fs.readFileSync(file, 'utf8'); }
   catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') result.error = 'cannot read Kimi config.toml'; return result; }
+  return parseKimiConfigText(text, file);
+}
+
+/** The same parser for a config read over SSH; never consult the dispatcher's Kimi home. */
+export function parseKimiConfigText(text: string, file: string): KimiConfig {
+  const result: KimiConfig = { file, mode: 'manual', guard: true, rules: [], models: [] };
   let data: Record<string, unknown>;
   try { data = parse(text) as Record<string, unknown>; }
   catch { result.error = 'invalid TOML in Kimi config.toml; permissions and models were not interpreted'; return result; }

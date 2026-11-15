@@ -1,3 +1,4 @@
+import { syncRemoteFiles } from './host-runtime.ts';
 import { recordJournal } from './journal.ts';
 import type { Context } from './context.ts';
 import { removeWorktrees } from './close.ts';
@@ -109,7 +110,7 @@ export async function planCancel(ctx: Context, inputs: string[], opts: CancelOpt
     const entry = entries.find((e) => e.task === task);
     const window = record?.window ?? task.toLowerCase();
     // A dry run asks tmux nothing: every task with a state file is taken for a running one, so the commands show.
-    const alive = runner.dryRun ? record !== undefined && !entry : live.has(window);
+    const alive = runner.dryRun ? record !== undefined && !entry : live.has(window) || !!record?.host && !record.closed && !record.cancelled && ctx.hosts.connection(record.host).unreachable;
     if (record?.cancelled && !alive) {
       if (partnerOf) continue;
       throw new AgentctlError(`${task} is already cancelled`, record.cancelReason ? `Reason given: ${record.cancelReason}` : undefined);
@@ -163,8 +164,10 @@ export async function cancelTasks(ctx: Context, plan: CancelPlan, opts: CancelOp
 
   for (const item of live) {
     const record = item.record as TaskRecord;
+    if (record.host && !runner.dryRun) { await ctx.hosts.forHost(record.host).checked('true', []); await syncRemoteFiles(ctx, record); }
     const key = config.agents[record.agent === 'unknown' ? 'claude' : record.agent].interruptKey;
-    await tmux.sendKey(record.window, key);
+    const pressed = await tmux.sendKey(record.window, key);
+    if (pressed.code !== 0) throw new AgentctlError(`cannot interrupt ${record.task}: ${pressed.stderr}`);
     ctx.info(`${item.task}: sent ${key} to ${config.session}:${record.window}`);
   }
   if (live.length > 0 && config.cancel.grace > 0) {
@@ -177,7 +180,10 @@ export async function cancelTasks(ctx: Context, plan: CancelPlan, opts: CancelOp
       const at = new Date(runner.now()).toISOString();
       if (item.kind === 'live') {
         const record = item.record as TaskRecord;
-        await tmux.killWindow(record.window);
+        if (record.host) await syncRemoteFiles(ctx, record);
+        const killed = await tmux.killWindow(record.window);
+        if (killed.code !== 0) throw new AgentctlError(`cannot cancel ${record.task}: ${killed.stderr}`);
+        if (record.host) await syncRemoteFiles(ctx, record);
         ctx.info(`${item.task}: window ${config.session}:${record.window} closed`);
       }
       if (item.entry) await dropEntry(ctx, item.entry);

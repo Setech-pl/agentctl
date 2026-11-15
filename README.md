@@ -36,4 +36,8 @@ npm run build
 
 Agentctl runs with your permissions; worktrees are not an OS sandbox. Folder trust is never automatically accepted. Local MCP uses desktop stdio; web/phone cannot connect directly. The owner reviews evidence and decides integration/publication; report actions are proposals. [Boundaries](docs/en/overview.md#boundaries).
 
+## Hosts
+
+Use `host: pc` to run a task on a configured SSH host: remote worktree/setup/agent, ordinary task operations and a local report mirror. [Remote task setup and PC example](docs/en/hosts.md).
+
 [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [MIT license](LICENSE). Use the repository gate and task-owned cache. This release combines the complete manuals with the 0.22.2 operations fixes and small diagnostics/help fixes.

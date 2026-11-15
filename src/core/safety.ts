@@ -45,6 +45,12 @@ export function validateLaunch(config: GlobalConfig, order: LaunchOrder & { agen
   if (!isActive(config, order.agent)) throw new AgentctlError(`provider ${order.agent} is not enabled; add it to providers: [claude, codex, kimi]`);
   const adapter = provider(order.agent), settings = config.agents[order.agent];
   assertSafeArgs(order.agent, adapter.argv({ ...order, command: providerCommand(config, order.agent) }, settings, []));
+  // Host permissions/catalog are checked from the host's config by prepareRemoteTask.
+  if ((order as LaunchOrder & { host?: string }).host && order.agent === 'kimi') {
+    const remoteEnv = { ...settings.env, ...env };
+    if (remoteEnv.KIMI_CODE_TRUST_WORKSPACE !== undefined || /^(false|0|off|no)$/i.test(remoteEnv.KIMI_CODE_DANGEROUS_COMMAND_GUARD ?? '')) throw new AgentctlError(`${order.task}: Kimi trust/guard bypass is forbidden`);
+    return;
+  }
   const effective: Record<string, string> = Object.fromEntries(Object.entries({ ...process.env, ...settings.env, ...env }).filter((entry): entry is [string, string] => entry[1] !== undefined));
   if (adapter.safety.validate && adapter.usage.homeEnv) effective[adapter.usage.homeEnv] = adapter.usage.home(config, effective);
   const problem = adapter.safety.validate?.(order, settings, effective);
@@ -54,6 +60,7 @@ export function validateLaunch(config: GlobalConfig, order: LaunchOrder & { agen
 export function launchEnvironment(config: GlobalConfig, order: LaunchOrder & { agent: ProviderId }, env: Record<string, string>): Record<string, string> {
   validateLaunch(config, order, env);
   const adapter = provider(order.agent), settings = config.agents[order.agent];
+  if ((order as LaunchOrder & { host?: string }).host && order.agent === 'kimi') return { ...settings.env, ...env, KIMI_CODE_NO_AUTO_UPDATE: '1', KIMI_DISABLE_TELEMETRY: '1', AGENTCTL_TASK: order.task };
   const merged = launchEnvFor(config, order, { ...settings.env, ...env });
   if (adapter.safety.validate && adapter.usage.homeEnv) merged[adapter.usage.homeEnv] = adapter.usage.home(config, { ...process.env, ...merged });
   const required = adapter.launchEnv(order, settings, merged);

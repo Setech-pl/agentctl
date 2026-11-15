@@ -169,13 +169,13 @@
     ]
   },
   "HOST-SSH-EXIT": {
-    "rev": "7fa25d6",
-    "outcome": "FAILS",
+    "rev": "v0.22.3",
+    "outcome": "IMPORT-ERROR",
     "failed": 1,
     "passed": 0,
     "failing": [
-      "HOST-SSH-EXIT: nonzero command status is reachable; only SSH errors/timeouts lose the host",
-      "HOST-SSH-EXIT: nonzero command status is reachable; only SSH errors/timeouts lose the host"
+      "tests/host-ssh-exit.test.ts",
+      "tests/host-ssh-exit.test.ts"
     ]
   },
   "L1": {

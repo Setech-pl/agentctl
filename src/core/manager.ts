@@ -207,7 +207,8 @@ export interface ManagerView {
 
 /** The manager window and what its screen says; `state: missing` when there is no window. */
 export async function managerView(ctx: Context): Promise<ManagerView> {
-  const { config, tmux } = ctx;
+  const { config } = ctx;
+  const tmux = ctx.localTmux;
   const base = { name: config.manager.name, window: MANAGER_WINDOW };
   if (!(await tmux.hasSession()) || !(await tmux.listWindows()).includes(MANAGER_WINDOW)) return { ...base, state: 'missing', text: MANAGER_STATE_TEXT.missing };
   const screen = await tmux.capture(MANAGER_WINDOW);
