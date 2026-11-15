@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- A3 validation: the P19 live scenario waits for publication of a queue-failure snapshot; a deterministic test covers the journal/snapshot boundary and retains error/retry assertions. / Scenariusz P19 czeka na publikację snapshotu błędu kolejki; test deterministyczny obejmuje granicę dziennik/snapshot i zachowuje asercje błędu oraz ponowienia.
+
 ## [0.22.2] - 2026-11-15
 
 - A12: watch announces gaps longer than max(5 min, 10 intervals), including first-tick task changes after restart. / Watch ogłasza przerwy dłuższe niż max(5 min, 10 interwałów) ze zmianami zadań z pierwszego ticka po wznowieniu.

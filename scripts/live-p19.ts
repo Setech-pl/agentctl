@@ -109,8 +109,15 @@ await withHarness({ name: 'p19-live', cacheRoot: cache, config: 'capacity: {snap
     for (let i = 0; i < 40 && !journal().some((j) => j.kind === 'queue-failed' && j.task === 'FAIL-1'); i++) await pause(500);
     const failedEvents = journal().filter((j) => j.task === 'FAIL-1' && ['setup-failed', 'queue-failed'].includes(j.kind));
     check('L4 setup failed: event with repo, exit code and log', failedEvents.some((j) => j.kind === 'setup-failed' && /beta\d* \(exit 3\)/.test(j.text) && /setup\.log/.test(j.text)), failedEvents[0]?.text);
-    const list = await call(second.client, 'queue_list', { format: 'json' });
-    check('L4 the task is failed with the reason and a retry hint; worktrees stay', /"status": "failed"/.test(list.text) && /queue_retry task=FAIL-1/.test(list.text) && bad.every((p) => fs.existsSync(`${p}-FAIL-1`)));
+    // Queue failure is journalled asynchronously after a tick's snapshot. A3 readers may still see that fresh
+    // snapshot until the next publication; wait for the observable state, not a fixed sleep after the event.
+    let list = await call(second.client, 'queue_list', { format: 'json' });
+    const publishedBy = Date.now() + 15_000;
+    while (!/"status": "failed"/.test(list.text) && Date.now() < publishedBy) {
+      await pause(100);
+      list = await call(second.client, 'queue_list', { format: 'json' });
+    }
+    check('L4 the task is failed with the reason and a retry hint; worktrees stay', /"status": "failed"/.test(list.text) && /queue_retry task=FAIL-1/.test(list.text) && bad.every((p) => fs.existsSync(`${p}-FAIL-1`)), list.text);
     check('L4 a repeated new returns the failed state', /FAIL-1: the start failed/.test((await call(second.client, 'new', { spec: badSpec })).text));
     fs.writeFileSync(path.join(bad[1]!, '.agentctl.yaml'), YAML.stringify({ setup: ['echo fixed'] }));
     const retryPreview = await call(second.client, 'queue_retry', { task: 'FAIL-1' });

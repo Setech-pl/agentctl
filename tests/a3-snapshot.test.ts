@@ -6,8 +6,33 @@ import { Context } from '../src/core/context.ts';
 import { MCP_TOOLS, publishMcpSnapshot, applyMcpRequest } from '../src/core/mcp-tools.ts';
 import { tryFileLock } from '../src/core/file-lock.ts';
 import { readMcpRequests } from '../src/core/mcp-requests.ts';
+import { saveEntry } from '../src/core/queue.ts';
 import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch, fakeWatcher } from './helpers.ts';
 const scratch = useScratch();
+it('A3: an async queue failure becomes visible on the next snapshot with its error and retry hint', async () => {
+  const config = makeConfig(scratch.sub('snapshot-failure'), 'watch: {interval: 2}\n');
+  const runner = new DiskRunner({dryRun: false, respond: new FakeTmux().respond});
+  const ctx = new Context(runner, config, () => {}), deps = {context: () => ctx, notify: async () => {}};
+  const entry = {seq: 1, order: 1, task: 'FAIL-1', direct: true, priority: 'high' as const,
+    status: 'starting' as const, queuedAt: new Date(runner.now()).toISOString(),
+    agent: 'claude' as const, model: 'sonnet', effort: 'high' as const, after: [], spec: '---\ntask: FAIL-1\n---\nWork.'};
+  await saveEntry(ctx, entry);
+  await publishMcpSnapshot(ctx, []);
+  await runner.sleep(1);
+  await saveEntry(ctx, {...entry, status: 'failed', failedAt: new Date(runner.now()).toISOString(), error: 'setup failed in beta (exit 3)'});
+  const list = () => MCP_TOOLS.find(t => t.name === 'queue_list')!.run(deps, {format: 'json'});
+  const before = JSON.parse((await list()).text);
+  assert.equal(before[0].status, 'starting', 'a fresh tick snapshot is consistent even after a later journal event');
+  assert.equal(before[0].retryHint, null);
+  assert.equal(before[0].snapshot_age_s, 0.001);
+  await runner.sleep(1999);
+  await publishMcpSnapshot(ctx, []);
+  const after = JSON.parse((await list()).text);
+  assert.equal(after[0].status, 'failed');
+  assert.match(after[0].error, /setup failed in beta \(exit 3\)/);
+  assert.match(after[0].retryHint, /queue_retry task=FAIL-1/);
+  assert.equal(after[0].snapshot_age_s, 0);
+});
 it('A3: atomic watch snapshot serves every bounded read with stalled processes and supports cohort/capacity; stale falls back', async () => {
   const config = makeConfig(scratch.sub('snapshot'), 'mcp: {allow: [set_limits]}\nwatch: {interval: 2}\n');
   seedTask(config, 'SNAP', {cohort: '62'});
