@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { Context } from '../src/core/context.ts';
+import { recordJournal } from '../src/core/journal.ts';
 import { MCP_TOOLS } from '../src/core/mcp-tools.ts';
 import { postMessage, wallIdentity } from '../src/core/wall.ts';
 import { DiskRunner, FakeTmux, makeConfig, useScratch } from './helpers.ts';
@@ -18,4 +19,6 @@ it('A11: unknown chat warning and own post markers on every readable channel and
   assert.match((await call('wall_read', {as: 'chat:nc', id: m.id})).text, /\(yours\)/);
  }
  assert.match((await call('events_since', {as: 'chat:nc'})).text, /\(yours\)/);
+ await recordJournal(ctx, {kind: 'limits-changed', text: 'ordinary limits'});
+ assert.doesNotMatch((await call('events_since')).text, /\(yours\)/, 'unknown identity never labels ordinary events as own posts');
 });

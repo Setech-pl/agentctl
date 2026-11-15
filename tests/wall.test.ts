@@ -257,8 +257,8 @@ describe('WALL: events_since', () => {
     for (const [channel, who] of [['nc', 'owner'], ['hems', 'owner'], ['shared:sim', 'chat:nc'], ['agentctl', 'chat:hems']] as const) {
       await postMessage(w.ctx, who === 'owner' ? OWNER_IDENTITY : w.as(who), { channel, kind: 'info', subject: `in ${channel}`, body: 'body text' });
     }
-    const seen = async (args: Record<string, unknown>, d = w.deps()) => (await w.call('events_since', { since: '1d', ...args }, d)).text.split('\n').filter((l) => l.includes('WALL'));
-    assert.deepEqual((await seen({ as: 'chat:nc' })).map((l) => l.slice(7)), ['WALL  [nc] info nc-1 od owner: in nc', 'WALL  [shared:sim] info shared:sim-1 od chat:nc: in shared:sim', 'WALL  [agentctl] info agentctl-1 od chat:hems: in agentctl']);
+    const seen = async (args: Record<string, unknown>, d = w.deps()) => (await w.call('events_since', { since: '1d', ...args }, d)).text.split('\n').filter(l => /^\d\d:\d\d\s+WALL\s+/.test(l));
+    assert.deepEqual((await seen({ as: 'chat:nc' })).map((l) => l.slice(7)), ['WALL  [nc] info nc-1 od owner: in nc', 'WALL  [shared:sim] info shared:sim-1 od chat:nc: in shared:sim (yours)', 'WALL  [agentctl] info agentctl-1 od chat:hems: in agentctl']);
     assert.deepEqual((await seen({ as: 'chat:hems' })).map((l) => l.slice(7)), ['WALL  [hems] info hems-1 od owner: in hems'], 'wall.subscriptions.hems narrows it');
     assert.deepEqual((await seen({})).map((l) => l.slice(7)), ['WALL  [agentctl] info agentctl-1 od chat:hems: in agentctl'], 'an unknown caller: agentctl only');
     assert.ok(!(await w.call('events_since', { since: '1d', as: 'chat:nc' })).text.includes('body text'), 'no body in events');
