@@ -61,6 +61,8 @@ Użyj nowego katalogu:
 mkdir -p ~/Projects/demo
 cd ~/Projects/demo
 git init -b main
+git config user.name "Demo User"
+git config user.email demo@example.invalid
 printf '# Demo\n' > README.md
 git add README.md
 git commit -m "Initialize demo"

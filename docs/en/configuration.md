@@ -23,7 +23,7 @@ Types/defaults below are cross-checked with [config.ts](../../src/core/config.ts
 | `defaults.effort` | `low` `medium` `high` `xhigh` `max` · `high` · g p | Effort when the spec has none. |
 | `defaults.remote_control` | boolean · `false` · g p | `true`: Claude tasks start with Remote Control (see the spec key `remote_control`) unless the spec says `remote_control: false`. A Codex task is not affected. |
 | `providers` | global · `[claude, codex]` | Active providers in order; both claude and codex are required, without duplicates. |
-| `providers_config` | mapping · `{}` · g | Per-provider launch overrides: `providers_config.glm.command` and `providers_config.glm.env` (see [GLM](#glm-zai-glm-coding-plan)). |
+| `providers_config` | mapping · `{}` · g | Per-provider launch overrides: `providers_config.glm.command` and `providers_config.glm.env` (see [GLM](providers.md#glm-coding-plan-zai)). |
 | `providers_config.glm.command` | string · `claude-glm` · g | The executable that starts GLM tasks (one name or path, no arguments). |
 | `providers_config.glm.env` | mapping · `{CLAUDE_CODE_AUTO_MODE_SERVER: "0"}` · g | Environment of every GLM task, added to the built-in default; a key you set wins over the default. The Z.ai endpoint and token (`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`) are refused: they come only from the wrapper. |
 | `start_failure` | mapping · `{keep_window: true}` · g | What a start that did not reach the agent's input leaves behind. |

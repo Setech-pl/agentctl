@@ -56,10 +56,12 @@ else valid and eligible
    MCP -> Agent: Continue live window / mapped provider in same worktree
   note right of Agent: resume recreates a missing window after loss.
   else cancel
+   break Cancelled path; existing reports retained
    Owner -> MCP: cancel — preview → confirm
    MCP -> Queue: Accepted request (with watcher)
    Watch -> Agent: Interrupt then close window
    Watch -> State: cancelled; worktree and branch retained
+   end
   end
  end
  Agent -> State: Verdict first line + attempt marker + outputs + report-end

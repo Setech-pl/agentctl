@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.22.1] - 2026-11-15
 
+- Final documentation QA: repair the GLM cross-page anchor, configure local demo Git identity and terminate the cancelled sequence path explicitly. / Końcowe QA: poprawny odnośnik GLM, lokalna tożsamość Git demo i jawny koniec ścieżki anulowania.
+
 - Documentation validation: type the recursive file inventory explicitly; freeze demo host readings and show a populated WALL filter. No runtime behavior change. / Walidacja dokumentacji: jawny typ inwentarza, stałe odczyty hosta demo i filtr WALL z wynikiem. Bez zmiany runtime.
 
 - Documentation-only release: matching EN/PL manuals, concise front pages, from-zero installation/tutorial, all 67 MCP tools/four permission groups and 204 configuration keys, provider and token-economics guidance, Project inserts and ordering guide. / Wydanie dokumentacji: zgodne instrukcje EN/PL, zwięzłe strony główne, instalacja/samouczek od zera, 67 narzędzi MCP/cztery grupy i 204 klucze konfiguracji, dostawcy/ekonomia, wstawki Projektu i przewodnik zlecającego.
