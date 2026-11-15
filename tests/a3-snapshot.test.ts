@@ -35,6 +35,7 @@ it('A3: atomic watch snapshot serves every bounded read with stalled processes a
   stalled = false; await runner.sleep(4001);
   const result = await MCP_TOOLS.find(t => t.name === 'status')!.run(deps, {});
   assert.match(result.text, /snapshot unavailable\/stale/i);
+  assert.match((await MCP_TOOLS.find(t => t.name === 'doctor')!.run(deps, {})).text, /snapshot unavailable\/stale/i);
 });
 it('A3: GC preview is Accepted without slow checks and read back after watch', async () => {
   const config = makeConfig(scratch.sub('gc'), 'mcp: {allow: [gc]}\n'); fakeWatcher(config);
@@ -43,9 +44,12 @@ it('A3: GC preview is Accepted without slow checks and read back after watch', a
   const tool = MCP_TOOLS.find(t => t.name === 'gc_preview')!;
   const accepted = await tool.run(deps, {});
   assert.match(accepted.text, /^Accepted/);
-  const request = readMcpRequests(config)[0]!;
+  const id = /request_id: ([a-f0-9-]{36})/.exec(accepted.text)![1];
+  assert.ok(id, 'client-visible full request ID');
+  await tool.run(deps, {}); assert.equal(readMcpRequests(config).length, 1, 'polling the same preview must not duplicate watch work');
+  const request = readMcpRequests(config)[0]!; assert.equal(request.id, id);
   await applyMcpRequest(deps, request);
-  const read = await tool.run(deps, {request_id: request.id});
+  const read = await tool.run(deps, {request_id: id});
   assert.match(read.text, /preview/);
   const gc = MCP_TOOLS.find(t => t.name === 'gc')!;
   const preview = await gc.run(deps, {});

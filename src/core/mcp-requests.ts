@@ -83,7 +83,7 @@ export function deferMcpWrites(ctx: Context): boolean {
 export async function recordMcpRequest(ctx: Context, input: Omit<McpRequest, 'id' | 'seq' | 'requestedAt' | 'status'>): Promise<{ request: McpRequest; existing: boolean }> {
   return withRequestLock(ctx, async () => {
     const all = readMcpRequests(ctx.config);
-    const known = input.token ? all.find((r) => r.token === input.token) : undefined;
+    const known = input.token ? all.find((r) => r.token === input.token) : input.tool === 'gc_preview' ? all.find(r => r.tool === input.tool && r.key === input.key && (r.status === 'pending' || r.status === 'applying')) : undefined;
     if (known) return { request: known, existing: true };
     const seq = all.reduce((n, r) => Math.max(n, r.seq ?? 0), 0) + 1;
     const request: McpRequest = { ...input, id: randomUUID(), seq, requestedAt: new Date(ctx.runner.now()).toISOString(), status: 'pending' };

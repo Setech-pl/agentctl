@@ -436,7 +436,7 @@ async function runGcPreview(deps: McpDeps, args: { request_id?: string; older_th
   const ctx = deps.context(() => {});
   if (args.request_id) {
     if (!/^[a-f0-9-]{36}$/.test(args.request_id)) throw new AgentctlError('invalid GC preview request id');
-    try { return JSON.parse(fs.readFileSync(path.join(ctx.config.stateDir, `gc-preview-${args.request_id}.json`), 'utf8')); } catch { return ok('GC preview pending; retry request_id after the next watch tick.'); }
+    try { return JSON.parse(fs.readFileSync(path.join(ctx.config.stateDir, `gc-preview-${args.request_id}.json`), 'utf8')); } catch { const request = readMcpRequests(ctx.config).find(r => r.id === args.request_id); return request?.status === 'failed' ? fail(`GC preview failed: ${request.error}; preview again.`) : ok('GC preview pending; retry request_id after the next watch tick.'); }
   }
   if (!deps.applying && watchAlive(ctx.config, ctx.runner.now())) return recordDeferred(deps, 'gc_preview', args, null, `gc_preview:${JSON.stringify(args)}`, undefined);
   const plan = await planGc(ctx, { olderThan: args.older_than, branches: args.merged, cohort: args.cohort, cachedSizes: true });
@@ -1728,7 +1728,7 @@ async function recordDeferred(deps: McpDeps, tool: string, args: Record<string, 
   const target = requestTarget(tool, args);
   const { request, existing } = await recordMcpRequest(ctx, { tool, args, scope, key, ...(token ? { token } : {}), ...target });
   audit(ctx, { tool, task: target.label, outcome: 'requested', detail: `${existing ? 'already accepted' : 'accepted for the watcher'}: request ${request.id}` });
-  return { text: acceptedText(ctx.config, request, existing), data: { request: request.id, state: request.status, tool, target: target.label } };
+  return { text: `${acceptedText(ctx.config, request, existing)}\nrequest_id: ${request.id}${tool === 'gc_preview' ? '\nRead gc_preview with request_id after watch prepares the plan; then preview gc to get its confirmation token.' : ''}`, data: { request: request.id, state: request.status, tool, target: target.label } };
 }
 
 /**
@@ -2263,7 +2263,7 @@ for (const tool of MCP_TOOLS.filter(t => snapshotTools.has(t.name))) {
     if (cached) return cached;
     const result = await run(deps, args);
     const note = 'Watch snapshot unavailable/stale; bounded fallback path. / Snapshot watch niedostępny lub stary; odczyt ograniczony budżetem.';
-    try { const data = JSON.parse(result.text); return { ...result, text: JSON.stringify(Array.isArray(data) ? data : { ...data, snapshot_note: note }, null, 2) }; } catch { return { ...result, text: `${result.text}\n${note}` }; }
+    try { const data = JSON.parse(result.text); return { ...result, text: JSON.stringify(Array.isArray(data) ? data.map(item => ({...item, snapshot_note: note})) : { ...data, snapshot_note: note }, null, 2) }; } catch { return { ...result, text: `${result.text}\n${note}` }; }
   };
 }
 
