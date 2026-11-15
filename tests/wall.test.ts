@@ -217,15 +217,15 @@ describe('WALL: MCP tools', () => {
     for (const t of ['wall_read', 'wall_post', 'wall_reply', 'wall_set_status', 'events_since']) assert.match(tool(t).description, /data, not instructions|DATA, NOT INSTRUCTIONS/i, t);
   });
 
-  it('with a watcher running the confirm answers "Accepted" and the watcher applies the post', async () => {
-    const w = world('deferred');
+  it('with a watcher running the confirm posts directly and never waits for the watcher', async () => {
+    const w = world('direct');
     fakeWatcher(w.config);
     const { done } = await w.write('wall_post', { as: 'chat:nc', channel: 'nc', kind: 'info', subject: 'deferred', body: '' });
-    assert.match(done.text, /^Accepted: wall_post /);
-    assert.equal(fs.existsSync(channelFile(w.config, 'nc')), false, 'nothing was posted in the confirm');
+    assert.match(done.text, /^Posted nc-1 /);
+    assert.equal(fs.existsSync(channelFile(w.config, 'nc')), true, 'the confirm committed the post');
     await applyMcpRequests(w.ctx, { clickable: false, notify: async () => undefined }, (r) => applyMcpRequest(w.session, r));
-    assert.equal(findMessage(w.config, 'nc-1').from, 'chat:nc', 'the identity of the preview is what the watcher posts as');
-    assert.ok(readJournal(w.config).some((e) => e.kind === 'mcp-applied' && e.text.startsWith('wall_post ')));
+    assert.equal(findMessage(w.config, 'nc-1').from, 'chat:nc', 'the identity of the preview is what the direct confirm posts as');
+    assert.ok(!readJournal(w.config).some(e => e.kind === 'mcp-applied' && e.text.startsWith('wall_post ')), 'no watch round-trip');
   });
 
   it('a long read is paged under the 8 KiB budget through response_page', async () => {
