@@ -2146,14 +2146,14 @@ function compactFacts(value: unknown, prefix = ''): string {
 
 /** One atomic watch publication; readers never probe processes when it is fresh. */
 const stateSnapshotPath = (ctx: Context) => path.join(ctx.config.stateDir, 'mcp-state-snapshot.json');
-export async function publishMcpSnapshot(ctx: Context, rows?: StatusRow[]): Promise<void> {
+export async function publishMcpSnapshot(ctx: Context, rows?: StatusRow[], at = ctx.runner.now()): Promise<void> {
   const deps: McpDeps = { context: () => ctx, notify: async () => {} };
   const queue = await runQueueList(deps);
   const capacity = await collectCapacity(ctx);
   const limits = collectLimits(ctx.config, await liveWindows(ctx));
   const config = await originalRuns.get('config_show')!(deps, {});
   const doctor = await originalRuns.get('doctor')!(deps, {});
-  const snapshot = { version: 1, at: ctx.runner.now(), interval: ctx.config.watch.interval,
+  const snapshot = { version: 1, at, interval: ctx.config.watch.interval,
     configHash: createHash('sha256').update(JSON.stringify(ctx.config)).digest('hex'),
     rows: rows ?? await collectStatus(ctx, { archived: true }), queue: JSON.parse(queue.text.slice(queue.text.indexOf('\n\n') + 2)), capacity, limits,
     config: JSON.parse(config.text), doctor: JSON.parse(doctor.text) };

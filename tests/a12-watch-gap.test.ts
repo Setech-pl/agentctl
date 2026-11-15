@@ -1,0 +1,23 @@
+import assert from 'node:assert/strict';
+import { it } from 'node:test';
+import { Context } from '../src/core/context.ts';
+import { watchTick, WatchMemory } from '../src/core/watch.ts';
+import { readJournal } from '../src/core/journal.ts';
+import { composerFixture } from './composer-fixture.ts';
+import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helpers.ts';
+const scratch = useScratch();
+it('A12: watch resumes after a long tick gap or process restart with first-tick changes', async () => {
+ const config = makeConfig(scratch.sub('a12'), 'watch: {interval: 2, window_icons: false}\ncapacity: {codex_refresh: false}\n');
+ seedTask(config, 'GAP'); const tmux = new FakeTmux(); tmux.add('gap', 'Working (esc to interrupt)');
+ const runner = new DiskRunner({dryRun: false, respond: tmux.respond});
+ const ctx = new Context(runner, config, () => {}), notifier = {clickable: false, notify: async () => {}};
+ const memory = new WatchMemory(); await watchTick(ctx, memory, notifier);
+ await runner.sleep(301000); tmux.windows[0]!.screen = 'Quick safety check\nYes, I trust this folder';
+ await watchTick(ctx, memory, notifier);
+ let resumes = readJournal(config).filter(e => e.kind === 'watch-resumed');
+ assert.equal(resumes.length, 1); assert.match(resumes[0]!.text, /WATCH WZNOWIONY po przerwie 5m/); assert.match(resumes[0]!.text, /GAP: working → needs-trust/);
+ await runner.sleep(2000); await watchTick(ctx, memory, notifier); assert.equal(readJournal(config).filter(e => e.kind === 'watch-resumed').length, 1);
+ await runner.sleep(301000); tmux.windows[0]!.screen = 'Working (esc to interrupt)';
+ await watchTick(ctx, new WatchMemory(), notifier);
+ resumes = readJournal(config).filter(e => e.kind === 'watch-resumed'); assert.equal(resumes.length, 2); assert.match(resumes[1]!.text, /GAP: needs-trust → working/);
+});

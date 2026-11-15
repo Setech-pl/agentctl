@@ -39,7 +39,7 @@ import { usageTick } from './usage-limits.ts';
 import { listTaskRecords, readTaskRecord } from './taskstore.ts';
 import { syncReport } from './report-detect.ts';
 import { recordEvent } from './history.ts';
-import { errorMessage } from './util.ts';
+import { errorMessage, formatDuration } from './util.ts';
 import { ensureWindow } from './windows.ts';
 import type { EnsureResult } from './windows.ts';
 
@@ -68,6 +68,7 @@ export interface WatchEvent {
 export class WatchMemory {
   readonly tasks = new Map<string, Seen>();
   started = false;
+  lastTickAt?: number;
   /** Windows that got a state icon from this watcher (plain name -> tmux window ID, if known): they get their plain names back. */
   readonly decorated = new Map<string, string>();
   /** Queued tasks this watcher is in the middle of starting. */
@@ -207,6 +208,21 @@ export interface TickOptions {
  * announced a moment ago (see `agentctl event`) is logged but not notified again.
  */
 export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Notifier, options: TickOptions = {}): Promise<WatchEvent[]> {
+  const tickAt = ctx.runner.now();
+  if (memory.lastTickAt === undefined) {
+    try {
+      const previous = JSON.parse(fs.readFileSync(path.join(ctx.config.stateDir, 'mcp-state-snapshot.json'), 'utf8'));
+      if (previous.version === 1 && typeof previous.at === 'number') {
+        memory.lastTickAt = previous.at;
+        if (tickAt - previous.at > Math.max(300_000, 10 * ctx.config.watch.interval * 1000)) {
+          for (const row of previous.rows as StatusRow[]) memory.tasks.set(row.task, {state: row.state, since: previous.at, waitingNotified: false});
+          memory.started = true;
+        }
+      }
+    } catch { /* first watch, no durable baseline */ }
+  }
+  const gap = memory.lastTickAt === undefined ? 0 : tickAt - memory.lastTickAt;
+  memory.lastTickAt = tickAt;
   // A closed or cancelled task is off the list: no transitions, no notifications (closing a task with no report is not a vanished window).
   let allRows = await collectStatus(ctx, { progress: false, archived: true });
   for (const row of allRows) {
@@ -269,7 +285,11 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
     await ctx.runner.appendFile(watchLogPath(ctx), logLine(now, e));
     if (e.reason !== 'baseline') ctx.out(logLine(now, e).trimEnd());
   }
-  await (await import('./mcp-tools.ts')).publishMcpSnapshot(ctx, allRows).catch(e => ctx.out(`snapshot: ${errorMessage(e)}`));
+  if (gap > Math.max(300_000, 10 * ctx.config.watch.interval * 1000)) {
+    const changes = events.filter(e => e.reason === 'transition').map(e => `${e.task}: ${e.from ?? 'new'} → ${e.to}`);
+    await recordJournal(ctx, {kind: 'watch-resumed', text: `WATCH WZNOWIONY po przerwie ${formatDuration(gap)}; ${changes.join('; ') || 'bez zmian stanu zadań'}`});
+  }
+  await (await import('./mcp-tools.ts')).publishMcpSnapshot(ctx, allRows, tickAt).catch(e => ctx.out(`snapshot: ${errorMessage(e)}`));
   return events;
 }
 
