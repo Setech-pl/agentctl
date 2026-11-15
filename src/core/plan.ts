@@ -15,6 +15,7 @@ import { cancelledTasks, unmetAfter, waitingText } from './depends.ts';
 import { explicitOnlyModel } from './matrix.ts';
 import { slotHolders } from './limits.ts';
 import { collectStatus } from './status.ts';
+import type { StatusRow } from './status.ts';
 import { listTaskRecords, readTaskRecord } from './taskstore.ts';
 import { AgentctlError, Problems } from './util.ts';
 
@@ -47,8 +48,8 @@ export interface PlanOptions {
 const label = (o: Order): string => `${o.agent} ${formatModelEffort(o)}`;
 
 /** Windows currently in the session, each tagged with the agent that agentctl started in it, then the places held by reservations and external sessions. */
-export async function liveWindows(ctx: Context): Promise<LiveWindow[]> {
-  const names = await ctx.tmux.listWindows();
+export async function liveWindows(ctx: Context, knownRows?: StatusRow[]): Promise<LiveWindow[]> {
+  const names = knownRows ? [...new Set(knownRows.filter(r => r.window === 'alive').map(r => r.windowName))] : await ctx.tmux.listWindows();
   const records = names.flatMap(window => { const record = readTaskRecord(ctx.config, window); return record ? [record] : []; });
   const agentByWindow = new Map(records.filter(r => r.agent !== 'unknown').map(r => [r.window, r.agent as AgentName]));
   const recordByWindow = new Map(records.map(r => [r.window, r]));
@@ -56,7 +57,7 @@ export async function liveWindows(ctx: Context): Promise<LiveWindow[]> {
     const r = recordByWindow.get(window);
     return Boolean(r?.pendingPrompt && r.promptDelivery === 'needs-attention' && !r.deliveryStartedAt);
   };
-  const rows = records.some(r => inspectReport(ctx.config, r, ctx.runner.now(), !r.attemptId).ready) ? await collectStatus(ctx, { progress: false, cachedOnly: true, records: { current: records, archived: [] }, orphans: false }) : [];
+  const rows = knownRows ?? (records.some(r => inspectReport(ctx.config, r, ctx.runner.now(), !r.attemptId).ready) ? await collectStatus(ctx, { progress: false, cachedOnly: true, records: { current: records, archived: [] }, orphans: false }) : []);
   const windows = names.map((window): LiveWindow => {
     const agent = agentByWindow.get(window);
     const reportReady = rows.some(r => r.windowName === window && r.state === 'report-ready');

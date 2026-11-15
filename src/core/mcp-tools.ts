@@ -537,19 +537,19 @@ async function runVersion(deps: McpDeps): Promise<ToolResult> {
   return ok(`${JSON.stringify(info, null, 2)}${note}`);
 }
 
-async function queueViews(ctx: Context): Promise<ReturnType<typeof describeQueue>> {
+async function queueViews(ctx: Context, facts?: Parameters<typeof coreQueueViews>[1]): Promise<ReturnType<typeof describeQueue>> {
   const entries = readQueue(ctx.config);
-  return (await coreQueueViews(ctx)).map(view => {
+  return (await coreQueueViews(ctx, facts)).map(view => {
     const safe = redactQueue(view.entry, ctx.config) as typeof view.entry;
     const condition = redactQueue({ ...view.entry, error: view.condition.text }, ctx.config) as typeof view.entry;
     return { ...view, entry: { ...view.entry, ...safe }, condition: { ...view.condition, text: condition.error ?? 'n/d' } };
   });
 }
 
-async function runQueueList(deps: McpDeps, args: { cohort?: string | undefined } = {}): Promise<ToolResult> {
+async function runQueueList(deps: McpDeps, args: { cohort?: string | undefined } = {}, facts?: Parameters<typeof coreQueueViews>[1]): Promise<ToolResult> {
   const ctx = deps.context(() => {});
   const cohort = args.cohort ? findCohort(ctx.config, args.cohort).name : undefined;
-  const views = (await queueViews(ctx)).filter((v) => !cohort || cohortEntries([v.entry], cohort).length > 0);
+  const views = (await queueViews(ctx, facts)).filter((v) => !cohort || cohortEntries([v.entry], cohort).length > 0);
   if (views.length === 0) return ok('The queue is empty.\n\n[]');
   const list = views.map((v) => ({
     position: v.position,
@@ -2215,16 +2215,32 @@ function compactFacts(value: unknown, prefix = ''): string {
 /** One atomic watch publication; readers never probe processes when it is fresh. */
 const stateSnapshotPath = (ctx: Context) => path.join(ctx.config.stateDir, 'mcp-state-snapshot.json');
 export async function publishMcpSnapshot(ctx: Context, rows?: StatusRow[], at = ctx.runner.now()): Promise<void> {
+  if (ctx.runner.dryRun) return;
   const deps: McpDeps = { context: () => ctx, notify: async () => {} };
-  const queue = await runQueueList(deps);
-  const capacity = await collectCapacity(ctx);
-  const limits = collectLimits(ctx.config, await liveWindows(ctx));
+  const observed = rows ?? await collectStatus(ctx, {archived: true});
+  const live = await liveWindows(ctx, observed);
+  const queue = await runQueueList(deps, {}, {rows: observed, live});
+  const capacity = await collectCapacityFull(ctx, {diskBudgetMs: DISK_BUDGET_MS, cachedOnly: true, rows: observed, live});
+  const limits = collectLimits(ctx.config, live);
   const config = await originalRuns.get('config_show')!(deps, {});
-  const doctor = await originalRuns.get('doctor')!(deps, {});
+  // Snapshot diagnostics observe state only: spawning provider CLIs each tick both blocks watch and can start a session.
+  const doctor: {name: string; status: string; detail: string}[] = [
+    {name: 'node/installation', status: 'ok', detail: `${process.version}; ${process.argv[1] ?? 'agentctl watch'}`},
+    {name: 'disk', status: capacity.disk.level === 'critical' ? 'fail' : capacity.disk.level === 'ok' ? 'ok' : 'warn', detail: diskLine(capacity.disk)},
+    {name: 'config', status: ctx.config.reloadWarning ? 'warn' : 'ok', detail: `${ctx.config.path}${ctx.config.reloadWarning ? `; ${ctx.config.reloadWarning}` : ''}`},
+    {name: 'MCP permissions', status: 'ok', detail: ctx.config.mcp.allow.join(', ') || 'writes off'},
+    {name: 'task inventory', status: 'ok', detail: `${observed.length} records; per-task report/link checks skipped in snapshot mode`},
+    {name: 'tools/providers', status: 'warn', detail: 'Version, registration and provider probes deferred; run CLI doctor for installation diagnostics. Watch never starts provider CLIs for this snapshot.'},
+    ...[...new Set([...(ctx.config.warnings ?? []), ...ctx.config.mcp.warnings])].map(detail => ({name: 'config warning', status: 'warn', detail})),
+  ];
+  for (const [name, dir] of [['cache', ctx.config.cache], ['state', ctx.config.stateDir]]) {
+    try { fs.accessSync(dir!, fs.constants.W_OK); doctor.push({name: name!, status: 'ok', detail: dir!}); }
+    catch { doctor.push({name: name!, status: fs.existsSync(dir!) ? 'fail' : 'warn', detail: `${dir}: missing or not writable`}); }
+  }
   const snapshot = { version: 1, at, interval: ctx.config.watch.interval,
     configHash: createHash('sha256').update(JSON.stringify(ctx.config)).digest('hex'),
-    rows: rows ?? await collectStatus(ctx, { archived: true }), queue: JSON.parse(queue.text.slice(queue.text.indexOf('\n\n') + 2)), capacity, limits,
-    config: JSON.parse(config.text), doctor: JSON.parse(doctor.text) };
+    rows: observed, queue: JSON.parse(queue.text.slice(queue.text.indexOf('\n\n') + 2)), capacity, limits,
+    config: JSON.parse(config.text), doctor };
   fs.mkdirSync(ctx.config.stateDir, { recursive: true });
   atomicWriteFile(stateSnapshotPath(ctx), JSON.stringify(snapshot));
 }

@@ -12,10 +12,12 @@ it('A3: atomic watch snapshot serves every bounded read with stalled processes a
   const config = makeConfig(scratch.sub('snapshot'), 'mcp: {allow: [set_limits]}\nwatch: {interval: 2}\n');
   seedTask(config, 'SNAP', {cohort: '62'});
   const tmux = new FakeTmux(); tmux.add('snap', 'Working (esc to interrupt)');
-  let stalled = false, probes = 0;
-  const runner = new DiskRunner({dryRun: false, respond: (cmd, args, opts) => { probes++; if (stalled) throw new Error('stalled git/fs/process fixture'); return tmux.respond(cmd, args, opts); }});
+  let stalled = false, probes = 0; const commands: string[] = [];
+  const runner = new DiskRunner({dryRun: false, respond: (cmd, args, opts) => { probes++; commands.push(cmd); if (stalled) throw new Error('stalled git/fs/process fixture'); return tmux.respond(cmd, args, opts); }});
   const ctx = new Context(runner, config, () => {}), deps = {context: () => ctx, notify: async () => {}};
   await publishMcpSnapshot(ctx);
+  assert.equal(tmux.seen.filter(c => c.startsWith('capture-pane')).length, 1, 'snapshot publication reuses its one state sample');
+  assert.deepEqual(commands.filter(cmd => ['claude', 'codex', 'kimi', 'glm', 'gh'].includes(cmd)), [], 'snapshot publication never starts provider diagnostics');
   stalled = true; const before = probes;
   const readdir = fs.readdirSync, statfs = fs.promises.statfs;
   let fsProbes = 0;

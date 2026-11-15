@@ -836,10 +836,10 @@ export async function queueDependencyRows(ctx: Context, entries: readonly (Pick<
   }
   return collectStatus(ctx, { progress: false, cachedOnly: true, archived: true, records: { current, archived }, orphans: false });
 }
-export async function queueViews(ctx: Context): Promise<QueueView[]> {
+export async function queueViews(ctx: Context, facts?: {rows: StatusRow[]; live: Awaited<ReturnType<typeof liveWindows>>}): Promise<QueueView[]> {
   const entries = readQueue(ctx.config);
   if (!entries.length) return [];
-  return describeQueue(ctx.config, entries, await liveWindows(ctx), await queueDependencyRows(ctx, entries), ctx.runner.now());
+  return describeQueue(ctx.config, entries, facts?.live ?? await liveWindows(ctx), facts?.rows ?? await queueDependencyRows(ctx, entries), ctx.runner.now());
 }
 
 /** What `status` prints under its table: the waiting tasks and what each one waits for; nothing when the queue is empty. */

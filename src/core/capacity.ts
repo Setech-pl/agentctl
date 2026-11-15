@@ -3,6 +3,7 @@ import { get as providerValue } from './providers/registry.ts';
 import { provider as adapter, activeProviders, perProvider } from './providers/registry.ts';
 import { collectDisk, diskLine } from './disk.ts';
 import { collectStatus } from './status.ts';
+import type { StatusRow } from './status.ts';
 import { recordStaleCapacity } from './capacity-events.ts';
 import type { AgentName } from './config.ts';
 import { AGENT_NAMES } from './config.ts';
@@ -55,7 +56,7 @@ export function capacityTrend(samples: UsageSample[], provider: AgentName, windo
 
 export { refreshCodexCapacity } from './providers/codex-usage.ts';
 
-export async function collectCapacity(ctx: Context, opts: { diskBudgetMs?: number; cachedOnly?: boolean } = {}) {
+export async function collectCapacity(ctx: Context, opts: { diskBudgetMs?: number; cachedOnly?: boolean; rows?: StatusRow[]; live?: Awaited<ReturnType<typeof liveWindows>> } = {}) {
   const refreshNotes = perProvider(activeProviders(ctx.config), () => null as string | null);
   if (!opts.cachedOnly) for (const id of activeProviders(ctx.config)) refreshNotes[id] = await adapter(id).usage.refreshPlan?.(ctx) ?? null;
   const now = ctx.runner.now();
@@ -64,9 +65,9 @@ export async function collectCapacity(ctx: Context, opts: { diskBudgetMs?: numbe
   reader.save();
   await recordStaleCapacity(ctx, plans);
   const samples = readSamples(ctx.config);
-  const loads = collectLimits(ctx.config, await liveWindows(ctx));
+  const loads = collectLimits(ctx.config, opts.live ?? await liveWindows(ctx));
   const queue = waiting(readQueue(ctx.config));
-  const rows = await collectStatus(ctx, { cachedOnly: true, shallowClosed: true, progress: false });
+  const rows = opts.rows ?? await collectStatus(ctx, { cachedOnly: true, shallowClosed: true, progress: false });
   const stats = computeStats(selectHistory(ctx, { since: '7d' }));
   return {
     at: new Date(now).toISOString(),
