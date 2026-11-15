@@ -103,7 +103,7 @@ describe('docs: mcp', () => {
 });
 
 describe('docs: links and versions', () => {
-  const files = ['README.md', 'README.pl.md', 'CHANGELOG.md', 'CONTRIBUTING.md', ...fs.readdirSync(path.join(REPO_ROOT, 'docs'), { recursive: true }).filter((f) => f.endsWith('.md')).map((f) => `docs/${f}`)];
+  const files = ['README.md', 'README.pl.md', 'CHANGELOG.md', 'CONTRIBUTING.md', ...fs.readdirSync(path.join(REPO_ROOT, 'docs'), { recursive: true }).map(String).filter((f) => f.endsWith('.md')).map((f) => `docs/${f}`)];
 
   it('relative links and anchors in the documents point at something that exists', () => {
     const problems: string[] = [];

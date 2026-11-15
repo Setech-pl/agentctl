@@ -67,6 +67,9 @@ await withHarness({ name: 'docs-gallery', session: 'agentctl-demo', config: 'lim
   };
   const captures: { name: string; bytes: number }[] = [];
   const capture = async (name: string) => {
+    h.tmux(['resize-window', '-t', target, '-x', '161', '-y', '45']);
+    await pause(250);
+    h.tmux(['resize-window', '-t', target, '-x', '160', '-y', '45']);
     await pause(600);
     const ansi = h.tmux(['capture-pane', '-e', '-p', '-t', target]).stdout;
     if (/\/Users\/|marcin|cache-dev|agentctl-wt|\/private\/tmp/i.test(ansi)) throw new Error(`non-generic path in ${name}:\n${plain()}`);
@@ -96,7 +99,7 @@ await withHarness({ name: 'docs-gallery', session: 'agentctl-demo', config: 'lim
   await select('REVIEW-UI-CART-2'); await pause(2300); await capture('board-queue');
   await key('W'); await until('WALL', s => s.includes('shared:sim') && s.includes('channels')); await capture('wall-channels');
   await key('Enter'); await until('messages', s => s.includes('Choose release window')); await capture('wall-messages');
-  await key('s'); await capture('wall-filter-status'); await key('t'); await capture('wall-filter-kind');
+  await key('s'); await capture('wall-filter-status'); await key('t'); await key('t'); await key('t'); await capture('wall-filter-kind');
   await key('Escape'); await key('Enter'); // reset filters on channel re-entry
   await key('Down'); await key('Down'); await key('Enter');
   await until('thread', s => s.includes('Reviewed:') && !s.includes('Loading…')); await capture('wall-thread');

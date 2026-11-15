@@ -38,7 +38,7 @@
     },
     {
       "name": "board-capacity",
-      "bytes": 151747
+      "bytes": 151720
     },
     {
       "name": "board-gc",
@@ -46,7 +46,7 @@
     },
     {
       "name": "board-log",
-      "bytes": 51780
+      "bytes": 51855
     },
     {
       "name": "board-queue",
@@ -54,23 +54,23 @@
     },
     {
       "name": "wall-channels",
-      "bytes": 70574
+      "bytes": 70624
     },
     {
       "name": "wall-messages",
-      "bytes": 59857
+      "bytes": 60042
     },
     {
       "name": "wall-filter-status",
-      "bytes": 46110
+      "bytes": 46155
     },
     {
       "name": "wall-filter-kind",
-      "bytes": 45138
+      "bytes": 47573
     },
     {
       "name": "wall-thread",
-      "bytes": 81718
+      "bytes": 81784
     },
     {
       "name": "board-report-fail",
