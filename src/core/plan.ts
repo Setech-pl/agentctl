@@ -1,3 +1,4 @@
+import { missingBaseFailure } from './git.ts';
 import { validateLaunch } from './safety.ts';
 import { provider, alternatives } from './providers/registry.ts';
 import { pendingStarts } from './start-lock.ts';
@@ -105,7 +106,7 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
       for (const repo of spec.repos) {
         if (!repo.branch) throw new AgentctlError(`${spec.task}: review: auto requires an explicit author repos[].branch`);
         const r = await ctx.runner.exec('git', ['-C', repo.path, 'rev-parse', '--verify', '--end-of-options', `${repo.base ?? 'HEAD'}^{commit}`], { readOnly: true });
-        if (r.code !== 0 || !/^[a-f0-9]{40}$/i.test(r.stdout.trim())) throw new AgentctlError(`${spec.task}: cannot freeze author base for auto review in ${repo.path}`);
+        if (r.code !== 0 || !/^[a-f0-9]{40}$/i.test(r.stdout.trim())) throw await missingBaseFailure(ctx.runner, repo);
         repos.push({ ...repo, base: r.stdout.trim() });
       }
       spec = { ...spec, repos };

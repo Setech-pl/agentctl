@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - A3 validation: the P19 live scenario waits for publication of a queue-failure snapshot; a deterministic test covers the journal/snapshot boundary and retains error/retry assertions. / Scenariusz P19 czeka na publikację snapshotu błędu kolejki; test deterministyczny obejmuje granicę dziennik/snapshot i zachowuje asercje błędu oraz ponowienia.
 
+## [0.22.3] - 2026-11-15
+
+
+- Merge the complete 0.22.1 manuals and diagrams with all 0.22.2 operations fixes. / Scalenie pełnej dokumentacji 0.22.1 ze wszystkimi poprawkami operacyjnymi 0.22.2.
+- BASE-DEFAULT: unresolved spec bases identify the default from local origin/HEAD, falling back to local HEAD only for main/master; unknown metadata is explicit. No network or automatic substitution. / Nierozwiązywalna baza wskazuje domyślną gałąź z lokalnego origin/HEAD, awaryjnie HEAD dla main/master; brak danych jest jawny. Bez sieci i automatycznej podmiany.
+
 ## [0.22.2] - 2026-11-15
 
 - A12: watch announces gaps longer than max(5 min, 10 intervals), including first-tick task changes after restart. / Watch ogłasza przerwy dłuższe niż max(5 min, 10 interwałów) ze zmianami zadań z pierwszego ticka po wznowieniu.
