@@ -100,7 +100,7 @@ await withHarness({ name: 'docs-gallery', session: 'agentctl-demo', config: 'lim
   await key('m'); await key('Please add the synthetic edge case.'); await capture('board-message'); await key('Escape');
   await key('x'); await capture('board-confirm'); await key('Escape');
   await key('X'); await capture('board-cancel-reason'); await key('Escape');
-  await key('?'); await until('help', s => s.includes('Press any key')); await capture('board-help'); await key('Escape');
+  await key('?'); await until('help', s => s.includes('Press any other key')); await capture('board-help'); await key('Escape');
   await key('k'); await capture('board-cohorts'); await key('Escape');
   for (const [k, name, text] of [['L', 'board-limits', 'Limits'], ['C', 'board-capacity', 'Capacity'], ['G', 'board-gc', 'Clean-up preview'], ['l', 'board-log', 'Log']]) {
     await key(k); await until(name, s => s.includes(text) && !s.includes('Loading…')); await capture(name); await key('Escape');
