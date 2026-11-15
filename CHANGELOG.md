@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.22.4] - 2026-11-15
 
+- H5 validation: structured events carry outputs_errors; later report pages expose findings without repeating full outputs. / Zdarzenia zawierają outputs_errors; kolejne strony raportu pokazują uwagi bez powtarzania pełnych outputs.
+
 - H1 validation: re-queued records without a launch are displayed only by the queue, preventing a dead-window alert while they wait. / Wpis po ponownym dodaniu bez startu jest widoczny tylko w kolejce, bez alarmu martwego okna.
 
 - G1b validation: retain custom limit_patterns overrides and assert notifications against concrete hold deadlines. / Zachowane własne limit_patterns; powiadomienia sprawdzane względem czasu blokady.

@@ -24,6 +24,8 @@ it('H5: HEMS fixture reports shape findings but accepts check aliases and Verdic
   fs.writeFileSync(record.report, text.replace('<!-- agentctl:attempt hems-feedback -->', ''));
   const read = await w.call('get_report', {task: 'HEMS', mark_pulled: false});
   assert.ok(!read.isError, read.text); assert.match(read.text, /outputs_errors:.*schema_version/);
-  const events = await w.call('events_since', {all: true});
+  const events = await w.call('events_since', {all: true, format: 'json'});
   assert.match(events.text, /outputs warning.*schema_version/);
+  const event = JSON.parse(events.text).events.find((e: {kind: string}) => e.kind === 'report-outputs');
+  assert.match(event.outputs_errors.join('; '), /schema_version/);
 });
