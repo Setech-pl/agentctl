@@ -10,10 +10,10 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
-| D5 | Every spec inherited stale links to closed tasks and repeated the same project warning. | `tests/stale-links.test.ts` (`^D5:`) | 0.22.5 | fails on v0.22.4 (2 failing of 2) |
+| D5 | Every spec inherited stale links to closed tasks (including missing worktrees) and repeated the same project warning. | `tests/stale-links.test.ts` (`^D5:`) | 0.22.5 | fails on v0.22.4 (3 failing of 3) |
 | D3 | A valid answer token was refused after the permission menu scrolled to options 2–4. | `tests/p63-answer.test.ts` (`^D3:`) | 0.22.5 | fails on v0.22.4 (1 failing of 2) |
 | D2 | GC removed the only data copies in task caches without explicit cache authorization or report-reference protection. | `tests/fix0227-gc.test.ts` (`^D2:`) | 0.22.5 | fails on v0.22.4 (3 failing of 3) |
-| D1 | Cached GC previews declared dirty multi-repository tasks clean and missed unpushed commits. | `tests/fix0227-gc.test.ts` (`^D1:`) | 0.22.5 | fails on v0.22.4 (3 failing of 3) |
+| D1 | Cached GC previews declared dirty multi-repository tasks clean and missed unpushed commits, including linked worktrees. | `tests/fix0227-gc.test.ts` (`^D1:`) | 0.22.5 | fails on v0.22.4 (4 failing of 4) |
 | G1b | Provider quota errors left GLM capacity free when usage was unavailable. | `tests/fix0226-g1b.test.ts` | 0.22.4 | fails on v0.22.3 (7 failing of 8) |
 | G1a | Plan n/d left free provider slots with no timed hold override. | `tests/fix0226-g1a.test.ts` | 0.22.4 | fails on v0.22.3 (1 failing of 1) |
 | H6 | Overlap warnings counted predecessor imports and ignored the integration base. | `tests/fix0226-h6.test.ts` | 0.22.4 | fails on v0.22.3 (2 failing of 2) |

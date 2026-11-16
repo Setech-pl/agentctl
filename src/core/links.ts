@@ -150,7 +150,7 @@ export function missingLinkTargets(links: Link[], primary?: string): string[] {
 }
 
 /** Cross-task link targets use recorded worktrees, including retained closed/archived ones. */
-export function fillTaskLinkTargets(text: string, config: GlobalConfig): string {
+export function fillTaskLinkTargets(text: string, config: GlobalConfig, opts: { allowMissingClosed?: boolean } = {}): string {
   return text.replace(/\{task:([^,{}]+),repo:([^{}]+)\}/g, (_match, task: string, repo: string) => {
     const wanted = task.toLowerCase();
     const record = listTaskRecords(config).find(r => r.task.toLowerCase() === wanted)
@@ -162,7 +162,7 @@ export function fillTaskLinkTargets(text: string, config: GlobalConfig): string 
     if (matches.length > 1) throw new AgentctlError(`links: ${task}: ambiguous repository "${repo}"`);
     const match = matches[0];
     if (!match) throw new AgentctlError(`links: ${task}: no repository "${repo}" in recorded worktrees`);
-    if ((record.closed || record.cancelled) && !fs.existsSync(match.worktree)) {
+    if ((record.closed || record.cancelled) && !opts.allowMissingClosed && !fs.existsSync(match.worktree)) {
       throw new AgentctlError(`links: ${task}: ${state} worktree ${match.worktree} does not exist`);
     }
     return match.worktree;

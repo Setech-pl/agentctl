@@ -167,20 +167,20 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
         skipped.push({ task: record.task, kind: 'worktree', target: wt, reason: `also used by ${user.task}, which is not finished` });
         continue;
       }
-      const users = linkUsers(wt, references);
-      if (users.length && !opts.forceLinks) {
-        skipped.push({ task: record.task, kind: 'worktree', target: wt, bytes: await size(wt), reason: `links target used by ${users.join(', ')}; CLI --force-links overrides` });
-        continue;
-      }
-      const head = await git(ctx, ['-C', wt, 'rev-parse', '--abbrev-ref', 'HEAD']);
-      if (PROTECTED.has(head.out)) {
-        skipped.push({ task: record.task, kind: 'worktree', target: wt, reason: `has ${head.out} checked out` });
-        continue;
-      }
       let risk;
       try { risk = await worktreeRisk(ctx, wt, repo.base); }
       catch (error) {
         skipped.push({ task: record.task, kind: 'worktree', target: wt, repo: repo.path, reason: errorMessage(error) });
+        continue;
+      }
+      const users = linkUsers(wt, references);
+      if (users.length && !opts.forceLinks) {
+        skipped.push({ task: record.task, kind: 'worktree', target: wt, repo: repo.path, ...risk, bytes: await size(wt), reason: `links target used by ${users.join(', ')}; CLI --force-links overrides` });
+        continue;
+      }
+      const head = await git(ctx, ['-C', wt, 'rev-parse', '--abbrev-ref', 'HEAD']);
+      if (PROTECTED.has(head.out)) {
+        skipped.push({ task: record.task, kind: 'worktree', target: wt, repo: repo.path, ...risk, reason: `has ${head.out} checked out` });
         continue;
       }
       const detail = `${risk.dirtyFiles} dirty files, ${risk.unpushedCommits} unpushed commits vs ${risk.comparison}`;
@@ -367,7 +367,7 @@ export async function applyGc(ctx: Context, plan: GcPlan): Promise<GcResult> {
 const KIND_WORD: Record<GcKind, string> = { worktree: 'worktree', cache: 'cache', archive: 'archive', branch: 'branch' };
 
 export interface GcViewOptions { detail?: boolean; offset?: number; limit?: number }
-/** Bounded, aggregate-first representation; full paths are opt-in and paginated. */
+/** Bounded summaries with paginated safety facts and cache paths; combined details are opt-in. */
 export function gcView(plan: GcPlan, opts: GcViewOptions = {}) {
   const offset = opts.offset ?? 0, limit = Math.min(100, opts.limit ?? 10);
   const categories = (['worktree', 'archive', 'cache', 'branch'] as const).map(kind => ({ category: kind === 'branch' ? 'merged branches' : kind, count: plan.items.filter(i => i.kind === kind).length, bytes: plan.items.filter(i => i.kind === kind).reduce((n, i) => n + i.bytes, 0) }));

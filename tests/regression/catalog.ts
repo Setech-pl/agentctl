@@ -26,10 +26,10 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
-  { id: 'D5', fixedIn: '0.22.5', symptom: 'Every spec inherited stale links to closed tasks and repeated the same project warning.', scenarios: [s('stale-links.test.ts', '^D5:')] },
+  { id: 'D5', fixedIn: '0.22.5', symptom: 'Every spec inherited stale links to closed tasks (including missing worktrees) and repeated the same project warning.', scenarios: [s('stale-links.test.ts', '^D5:')] },
   { id: 'D3', fixedIn: '0.22.5', symptom: 'A valid answer token was refused after the permission menu scrolled to options 2–4.', scenarios: [s('p63-answer.test.ts', '^D3:')] },
   { id: 'D2', fixedIn: '0.22.5', symptom: 'GC removed the only data copies in task caches without explicit cache authorization or report-reference protection.', scenarios: [s('fix0227-gc.test.ts', '^D2:')] },
-  { id: 'D1', fixedIn: '0.22.5', symptom: 'Cached GC previews declared dirty multi-repository tasks clean and missed unpushed commits.', scenarios: [s('fix0227-gc.test.ts', '^D1:')] },
+  { id: 'D1', fixedIn: '0.22.5', symptom: 'Cached GC previews declared dirty multi-repository tasks clean and missed unpushed commits, including linked worktrees.', scenarios: [s('fix0227-gc.test.ts', '^D1:')] },
   { id: 'G1b', fixedIn: '0.22.4', symptom: 'Provider quota errors left GLM capacity free when usage was unavailable.', scenarios: [s('fix0226-g1b.test.ts')] },
   { id: 'G1a', fixedIn: '0.22.4', symptom: 'Plan n/d left free provider slots with no timed hold override.', scenarios: [s('fix0226-g1a.test.ts')] },
   { id: 'H6', fixedIn: '0.22.4', symptom: 'Overlap warnings counted predecessor imports and ignored the integration base.', scenarios: [s('fix0226-h6.test.ts')] },

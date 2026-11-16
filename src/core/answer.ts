@@ -57,7 +57,7 @@ export function menuInFrame(screen: string): FrameMenu | undefined {
   if (lines.slice(last + 1).some(l => /^\s*(?:│\s*)?[❯›>](?:\s|$)/u.test(l) || /^\s*\?\s+\d+ questions?\b/i.test(l))) return undefined;
   const extracted = extractQuestion(screen, Number.MAX_SAFE_INTEGER);
   // Identity uses the question, not arbitrary preceding prose added by the status extractor.
-  const question = extracted?.match(/^[\s\S]*?\?/)?.[0] ?? extracted;
+  const question = extracted?.match(/^[\s\S]*\?/)?.[0] ?? extracted;
   // Command approvals must still bind the command, even when the menu/selection scrolls.
   const command = lines.slice(Math.max(0, first - 12), first).map(l => l.trim()).filter(l => l.startsWith('$ ')).join('\n');
   return { options, question: question && command ? `${question} ${command}` : question };

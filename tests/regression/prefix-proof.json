@@ -151,14 +151,14 @@
   "D1": {
     "rev": "v0.22.4",
     "outcome": "FAILS",
-    "failed": 3,
+    "failed": 4,
     "passed": 0,
     "failing": [
       "D1: cached MCP preview checks every repo including untracked files in the second",
       "D1: unpushed commits and dirt created after preview are refused at apply",
       "D1: failed git risk checks fail closed even with a dirty override",
-      "D1: cached MCP preview checks every repo including untracked files in the second",
-      "D1: unpushed commits and dirt created after preview are refused at apply"
+      "D1: linked worktrees still expose fresh risk counts per repo",
+      "D1: cached MCP preview checks every repo including untracked files in the second"
     ]
   },
   "D2": {
@@ -187,11 +187,12 @@
   "D5": {
     "rev": "v0.22.4",
     "outcome": "FAILS",
-    "failed": 2,
+    "failed": 3,
     "passed": 0,
     "failing": [
       "D5: closed project defaults are skipped with one persisted project/day notice across specs",
       "D5: inherited defaults to a repo supplied by the spec are skipped; explicit worktree placeholders remain",
+      "D5: inherited closed-task placeholders are skipped even after the worktree is gone",
       "D5: closed project defaults are skipped with one persisted project/day notice across specs",
       "D5: inherited defaults to a repo supplied by the spec are skipped; explicit worktree placeholders remain"
     ]

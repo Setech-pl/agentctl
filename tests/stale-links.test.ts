@@ -123,4 +123,16 @@ it('D5: inherited defaults to a repo supplied by the spec are skipped; explicit 
   assert.equal(resolveSpec(raw, {config}).links.length, 0);
   fs.writeFileSync(path.join(app, '.agentctl.yaml'), "links:\n  - {from: pkg, to: '{worktree:backend}/packages/sim'}\n");
   assert.equal(resolveSpec(raw, {config}).links[0]!.to, `${backend}-new/packages/sim`);
+  fs.writeFileSync(path.join(app, '.agentctl.yaml'), "links:\n  - {from: pkg, to: '{worktree:backend|{task:UNKNOWN,repo:backend}}/packages/sim'}\n");
+  assert.equal(resolveSpec(raw, {config}).links[0]!.to, `${backend}-new/packages/sim`, 'unused fallback is not resolved');
+});
+
+it('D5: inherited closed-task placeholders are skipped even after the worktree is gone', () => {
+  const root = scratch.sub('d5-gone'), config = makeConfig(root), app = scratch.sub('d5-gone/app');
+  seedTask(config, 'GONE', {closed: true, repos: [{path: path.join(root, 'backend'), worktree: path.join(root, 'missing-wt')}]});
+  fs.writeFileSync(path.join(app, '.agentctl.yaml'), "links:\n  - {from: pkg, to: '{task:GONE,repo:backend}/packages/sim'}\n");
+  const raw = splitSpecs(specText({task: 'SAFE', agent: 'claude'}, app))[0]!;
+  assert.equal(resolveSpec(raw, {config}).links.length, 0);
+  raw.header.links = [{from: 'pkg', to: '{task:GONE,repo:backend}/packages/sim'}];
+  assert.throws(() => resolveSpec(raw, {config}), /does not exist/);
 });

@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.22.5] - 2026-11-16
 
+- Validation: expose risk counts even for link-protected worktrees, skip missing closed-task default placeholders, and retain cache size accounting without treating it as reclaimable. / Liczniki ryzyka także dla chronionych linków; pomijanie usuniętych celów; rozmiar zachowanego cache nie jest miejscem do odzyskania.
+
 - D5: skip inherited project links to closed tasks or repos already supplied by the spec; closed defaults emit one persisted notice per project/day. Explicit links/worktree placeholders remain intentional. / Domyślne linki do zamkniętych zadań lub repo ze specyfikacji są pomijane; komunikat raz dziennie na projekt.
 
 - D4: add task class `gate`: Sonnet medium / GPT-6-Luna medium / K3-256k low / GLM-5.3-Flash medium, derived into default equivalents. / Nowa klasa `gate` korzysta z szybkich modeli według macierzy.

@@ -30,6 +30,7 @@ function fixture(name: string, yaml = '') {
   fakeWatcher(config);
   const tmux = new FakeTmux();
   const runner = new DiskRunner({ dryRun: false, startTime: Date.now(), respond: (cmd, args, opts) => {
+    if (cmd === 'git' && args.includes('rev-list')) return {stdout: '0'};
     if (cmd === 'git') return args.includes('--porcelain') ? { stdout: '' } : args.includes('rev-parse') ? { stdout: args.includes('--abbrev-ref') ? 'feature\n' : 'a'.repeat(40) + '\n' } : { code: 0 };
     return tmux.respond(cmd, args, opts);
   } });

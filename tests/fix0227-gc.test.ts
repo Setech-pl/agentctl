@@ -126,3 +126,12 @@ it('D2: newly referenced caches are protected again at apply, including prose an
   assert.match(applied.failed.find(i => i.item.target === file)!.reason, /referenced by report/);
   assert.ok(fs.existsSync(path.join(file, 'only.png')));
 });
+
+it('D1: linked worktrees still expose fresh risk counts per repo', async () => {
+  const f = fixture('linked-risk');
+  seedTask(f.config, 'CONSUMER', {links: [{from: 'assets', to: f.repos[1]!.worktree}]});
+  const plan = await planGc(f.ctx, {cachedSizes: true});
+  const kept = plan.skipped.find(i => i.target === f.repos[1]!.worktree)!;
+  assert.equal(kept.dirtyFiles, 2);
+  assert.match(kept.reason, /links target/);
+});

@@ -62,6 +62,7 @@ Typy/domysły sprawdzono z [config.ts](../../src/core/config.ts), [spec.ts](../.
 | `repos[].base` | git ref · none · s | Ref Git lub task:<ID>, zamrażany do commitu przy starcie. |
 | `repos[].branch` | string · none · s | Gałąź; brak oznacza detached. |
 | `review_of` | task ID or list · none · s | ID/lista recenzowanych zadań; inny agent/model, wspólny provider ostrzega. |
+| `keep_cache` | boolean · `false` · s | Zachowaj cały cache zadania podczas gc. Usuwanie cache jest domyślnie wyłączone; include_cache: true / --include-cache wymaga jawnej zgody właściciela. Ścieżki persist/artifacts/refs w raporcie także chronią dane. |
 | `remote_control` | boolean · `false` · s | Tylko Claude; wymaga właściwego loginu i ręcznej zgody. |
 | `pin` | boolean · `false` · s | Zabroń translacji dostawcy i move. |
 | `after` | task ID or list · none · s | Kompletne raporty i akceptowany pierwszy werdykt; brak werdyktu może czekać, jawne odrzucenie blokuje. |
