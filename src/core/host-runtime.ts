@@ -55,7 +55,7 @@ export class HostRuntime {
     });
   }
   tmux(name: string): Tmux {
-    return new Tmux(this.forHost(name), `agentctl-${name}`, { icons: knownIcons(this.config.watch.windowIcons), idFor: window => readTaskRecord(this.config, window)?.windowId });
+    return new Tmux(this.forHost(name), `agentctl-${name}`, { taskRoles: true, icons: knownIcons(this.config.watch.windowIcons), idFor: window => readTaskRecord(this.config, window)?.windowId });
   }
   cachedCapture(name: string, window: string): Capture {
     return this.connection(name).screens?.[window] ?? { code: 1, stdout: '', stderr: 'No host screen sample yet; leave watch running' };
@@ -72,7 +72,17 @@ export class HostRuntime {
     return (await Promise.all(names.map(async name => {
       const c = this.connection(name);
       if (cachedOnly || cachedRequest() || c.unreachable && this.runner.now() < c.retryAt) return c.windows;
-      try { c.windows = (await this.tmux(name).windows()).filter(w => records.some(r => r.host === name && r.window === w.plain)).map(w => ({ ...w, host: name })); }
+      try {
+        const discovered = await this.tmux(name).windows();
+        c.windows = [];
+        for (const record of records.filter(r => r.host === name)) {
+          const matches = discovered.filter(w => w.role === record.window || w.plain === record.window);
+          if (matches.length !== 1) continue; // ambiguous identity is never adopted
+          const found = matches[0]!;
+          c.windows.push({ ...found, plain: record.window, host: name });
+          if (found.id && found.id !== record.windowId) await setHeaderField(this.runner, taskFile(this.config, record.window), 'window_id', found.id);
+        }
+      }
       catch (error) {
         if (!(error instanceof HostUnreachable)) throw error;
         c.unreachable = true; c.detail = error.message;
@@ -119,10 +129,11 @@ export function taskTmux(local: Tmux, hosts: HostRuntime, config: GlobalConfig):
   });
 }
 
-export function remoteAttachHint(config: GlobalConfig, record: Pick<TaskRecord, 'host' | 'window'>): string | undefined {
+export function remoteAttachHint(config: GlobalConfig, record: Pick<TaskRecord, 'host' | 'window'> & { windowId?: string }): string | undefined {
   const host = record.host && config.hosts[record.host];
   if (!host) return record.host ? `restore hosts.${record.host} in config` : undefined;
-  return `${firstConnectCommand(host).replace(/^ssh /, 'ssh -t ')} ${shellQuote(`tmux attach-session -t =agentctl-${record.host}:${record.window}`)}`;
+  const id = record.windowId ?? readTaskRecord(config, record.window)?.windowId;
+  return `${firstConnectCommand(host).replace(/^ssh /, 'ssh -t ')} ${shellQuote(`tmux attach -t =agentctl-${record.host}:${id ?? record.window}`)}`;
 }
 
 /** Canonical report mirror and hook receipts. Missing files are normal; SSH loss is never a missing window. */

@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| HOST-REDISCOVER | A renamed remote task window could be lost after watch restart when its tmux ID changed. | `tests/host-rediscover.test.ts` (`^HOST-REDISCOVER:`) | 0.23.0 | fails on v0.22.4 (1 failing of 1) |
 | HOST-TMUX-WRAP | Wrapping saved tmux capture/paste/window methods recursed through the remote router (unreleased 87662ec; router absent from v0.22.3). | `tests/host-boundaries.test.ts` (`^HOST-TMUX-WRAP:`) | 0.23.0 | cannot run on v0.22.3: the code under test did not exist there (import error) |
 | HOST-MIRROR-ENV | Remote report mirror commands included unrelated launch environment values in SSH argv (unreleased b9384f2; mirror absent from v0.22.3). | `tests/host-boundaries.test.ts` (`^HOST-MIRROR-ENV:`) | 0.23.0 | cannot run on v0.22.3: the code under test did not exist there (import error) |
 | HOST-LOCAL-IO | The remote host router scanned every local task header before board/status previews (unreleased b9384f2; host runtime absent from v0.22.3). | `tests/host-boundaries.test.ts` (`^HOST-LOCAL-IO:`) | 0.23.0 | cannot run on v0.22.3: the code under test did not exist there (import error) |

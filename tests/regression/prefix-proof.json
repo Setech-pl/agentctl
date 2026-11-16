@@ -282,6 +282,16 @@
       "tests/host-boundaries.test.ts"
     ]
   },
+  "HOST-REDISCOVER": {
+    "rev": "v0.22.4",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "HOST-REDISCOVER: recover a renamed remote window by task identity rather than stale tmux ID",
+      "HOST-REDISCOVER: recover a renamed remote window by task identity rather than stale tmux ID"
+    ]
+  },
   "HOST-SSH-EXIT": {
     "rev": "v0.22.3",
     "outcome": "IMPORT-ERROR",

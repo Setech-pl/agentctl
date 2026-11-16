@@ -23,6 +23,7 @@ export interface WindowInfo {
 }
 
 export interface TmuxOptions {
+  taskRoles?: boolean;
   /** Icons that may stand in front of a window name (see `stripIcon`). */
   icons?: string[];
   /** The window ID recorded in the task's state, if any. */
@@ -38,11 +39,13 @@ export interface TmuxOptions {
 export class Tmux {
   readonly runner: Runner;
   readonly session: string;
+  private readonly taskRoles: boolean;
   private readonly icons: string[];
   private readonly idFor: (window: string) => string | undefined;
 
   constructor(runner: Runner, session: string, options: TmuxOptions = {}) {
     this.runner = runner;
+    this.taskRoles = options.taskRoles ?? false;
     this.session = session;
     this.icons = options.icons ?? Object.values(DEFAULT_WINDOW_ICONS);
     this.idFor = options.idFor ?? (() => undefined);
@@ -80,7 +83,7 @@ export class Tmux {
       const fields = tab >= 0 ? line.slice(tab + 1).split('\t') : [line];
       const name = (fields[0] ?? '').trim();
       const role = fields[1]?.trim();
-      infos.push({ id, name, plain: role && ['watch', 'board', 'manager'].includes(role) ? role : stripIcon(name, this.icons), ...(role ? { role } : {}) });
+      infos.push({ id, name, plain: role && (['watch', 'board', 'manager'].includes(role) || this.taskRoles && role !== 'task' && /^[a-z0-9][a-z0-9_-]*$/.test(role)) ? role : stripIcon(name, this.icons), ...(role ? { role } : {}) });
     }
     return infos;
   }

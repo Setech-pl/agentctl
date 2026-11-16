@@ -1,3 +1,6 @@
+import { checkHostLimit } from './host-limits.ts';
+import { providerHolds } from './provider-hold.ts';
+import { installRemoteHooks } from './host-task.ts';
 import { writeLaunchScript } from './launch-script.ts';
 import { validateLaunch, launchEnvironment } from './safety.ts';
 import { provider, isActive, providerCommand } from './providers/registry.ts';
@@ -30,6 +33,7 @@ import { AgentctlError, plural } from './util.ts';
  */
 
 export interface ResumeCandidate {
+  host?: string;
   task: string;
   window: string;
   agent: AgentName;
@@ -49,14 +53,18 @@ export async function findResumable(ctx: Context, opts: { all?: boolean; rows?: 
     if (row.window !== 'gone' || row.closed || row.cancelled || row.archived || row.hidden || row.supersededBy) continue;
     if (row.state === 'superseded' || row.state === 'orphan') continue;
     const record = readTaskRecord(ctx.config, row.windowName);
-    if (!record || record.host || record.agent === 'unknown') continue;
+    if (!record || record.agent === 'unknown') continue;
     const worktree = record.repos[0]?.worktree;
-    if (!worktree || !fs.existsSync(worktree)) continue;
+    if (!worktree) continue;
+    if (record.host) {
+      if (!record.remoteDir || !record.remoteReport || ctx.hosts.connection(record.host).unreachable) continue;
+      if (!opts.rows && (await ctx.hosts.forHost(record.host).exec('test', ['-d', worktree], {readOnly: true})).code !== 0) continue;
+    } else if (!fs.existsSync(worktree)) continue;
     const hasReport = row.report === 'yes';
     if (hasReport && !opts.all) continue;
     const sessions = readTaskSessions(ctx.config, record.window);
     const sessionId = (sessions[record.agent] ?? []).at(-1)?.id;
-    out.push({ task: row.task, window: record.window, agent: record.agent, model: record.model, effort: record.effort, worktree, ...(sessionId ? { sessionId } : {}), hasReport });
+    out.push({ host: record.host, task: row.task, window: record.window, agent: record.agent, model: record.model, effort: record.effort, worktree, ...(sessionId ? { sessionId } : {}), hasReport });
   }
   return out;
 }
@@ -87,12 +95,13 @@ export async function planResume(ctx: Context, typed: string[], opts: { all?: bo
   for (const c of chosen) {
     if (!isActive(config, c.agent)) { skipped.push({ task: c.task, reason: `provider ${c.agent} is not enabled` }); continue; }
     if (occupied.some(w => w.window === c.window)) { skipped.push({ task: c.task, reason: 'task is already starting or running' }); continue; }
-    const problem = checkWindowLimit(c.agent, config.limits[c.agent], occupied, config.session);
+    if (providerHolds(config, ctx.runner.now())[c.agent]) { skipped.push({task: c.task, reason: 'provider hold'}); continue; }
+    const problem = checkHostLimit(config, c, occupied) ?? checkWindowLimit(c.agent, config.limits[c.agent], occupied, config.session);
     if (problem) {
       skipped.push({ task: c.task, reason: problem });
       continue;
     }
-    occupied.push({ window: c.window, agent: c.agent });
+    occupied.push({ window: c.window, agent: c.agent, host: c.host });
     items.push(c);
   }
   const summary = [
@@ -121,13 +130,15 @@ export async function resumeTasks(ctx: Context, plan: ResumePlan, opts: { self?:
   finally { await releaseStarts(ctx, admission.ids); }
 }
 async function startResumed(ctx: Context, plan: ResumePlan, opts: { self?: SelfArgv | undefined }): Promise<ResumeResult[]> {
-  const { tmux, runner, config } = ctx;
+  const { runner, config } = ctx;
   const results: ResumeResult[] = [];
-  let sessionUp = await tmux.hasSession();
+  let sessionUp = await ctx.localTmux.hasSession();
   for (const c of plan.items) {
     const record = readTaskRecord(config, c.window) as TaskRecord;
+    const tmux = c.host ? ctx.hosts.tmux(c.host) : ctx.localTmux;
+    const execution = c.host ? ctx.hosts.forHost(c.host) : runner;
     // Before the attempt is written into the record: a refused resume leaves it as it was.
-    assertAgentSpawnAllowed(ctx, { task: c.task, report: record.report, repos: record.repos, reviewOf: record.reviewOf, autoReview: record.autoReview, origin: 'resume' });
+    assertAgentSpawnAllowed(ctx, { task: c.task, report: record.report, host: c.host, repos: record.repos, reviewOf: record.reviewOf, autoReview: record.autoReview, origin: 'resume' });
     const order = { agent: c.agent, model: c.model, effort: c.effort as import('./config.ts').Effort, task: c.task };
     validateLaunch(config, order, record.env);
     const attempt = attemptFields(record, runner.now());
@@ -141,17 +152,18 @@ async function startResumed(ctx: Context, plan: ResumePlan, opts: { self?: SelfA
         if (protectedFile.code !== 0) throw new Error(`Cannot protect event script: ${file.path}`);
       }
     }
-    const command = await writeLaunchScript(runner, taskDir(config, c.window), buildResumeArgv({ agent: c.agent, model: c.model, effort: c.effort as never, task: c.task, remoteControl: record.remoteControl, command: providerCommand(config, c.agent) }, config.agents[c.agent], wiring?.args, c.sessionId), launchEnvironment(config, order, record.env));
-    const started = await openAgentWindow(ctx, { task: c.task, window: c.window, cwd: c.worktree, env: {}, report: record.report, repos: record.repos, reviewOf: record.reviewOf, autoReview: record.autoReview, origin: 'resume', sessionUp });
+    const remoteArgs = c.host ? await installRemoteHooks(ctx, { host: c.host, remoteDir: record.remoteDir, agent: c.agent, task: c.task }, record) : undefined;
+    const command = await writeLaunchScript(execution, record.remoteDir ?? taskDir(config, c.window), buildResumeArgv({ agent: c.agent, model: c.model, effort: c.effort as never, task: c.task, remoteControl: record.remoteControl, command: providerCommand(config, c.agent) }, config.agents[c.agent], remoteArgs ?? wiring?.args, c.sessionId), launchEnvironment(config, order, record.env), !c.host);
+    const started = await openAgentWindow(ctx, { task: c.task, window: c.window, cwd: c.worktree, env: {}, report: record.report, host: c.host, repos: record.repos, reviewOf: record.reviewOf, autoReview: record.autoReview, origin: 'resume', sessionUp: c.host ? await tmux.hasSession() : sessionUp });
     if (started.code !== 0) throw new AgentctlError(`${c.task}: tmux could not make the window: ${started.stderr.trim() || `exit ${started.code}`}`, results.length > 0 ? `Resumed before it: ${results.map((r) => r.task).join(', ')}.` : undefined);
-    sessionUp = true;
+    if (!c.host) sessionUp = true;
     const windowId = (await tmux.windows()).find((w) => w.plain === c.window)?.id;
     if (windowId) await setHeaderField(runner, taskFile(config, c.window), 'window_id', windowId);
 
-    await runner.exec('tmux', ['set-option', '-w', '-t', windowId || tmux.target(c.window), '@agentctl-role', 'task']);
+    await execution.exec('tmux', ['set-option', '-w', '-t', windowId || tmux.target(c.window), '@agentctl-role', c.host ? c.window : 'task']);
     await tmux.typeCommand(c.window, command);
-    const settings = config.agents[c.agent], note = reportInstructions(attempt.attemptId, record.report, record.reviewOf != null);
-    const ready = await waitForReady(runner, tmux, c.window, { pattern: settings.readyPattern, emptyInput: true, trustPattern: settings.trustPattern, timeoutMs: Math.min(5000, settings.readyTimeout * 1000) });
+    const settings = config.agents[c.agent], note = reportInstructions(attempt.attemptId, record.remoteReport ?? record.report, record.reviewOf != null);
+    const ready = await waitForReady(execution, tmux, c.window, { pattern: settings.readyPattern, emptyInput: true, trustPattern: settings.trustPattern, timeoutMs: Math.min(5000, settings.readyTimeout * 1000) });
     await queuePrompt(ctx, record, note);
     if (!ready.ready || await deliverPendingPrompt(ctx, c.window) !== 'sent') ctx.info(`${c.task}: report instructions pending until idle: ${note}`);
     ctx.info(`${c.task}: window ${config.session}:${c.window} running ${c.agent} (model ${c.model}, effort ${c.effort}) via ${command}`);

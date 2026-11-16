@@ -253,7 +253,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
     // tmux's own ID of the window: operations keep finding it when `watch` puts a state icon in front of its name.
     const windowId = (await taskTmux.windows()).find((w) => w.plain === spec.window)?.id;
     if (windowId) await setHeaderField(runner, taskFile(config, spec.window), 'window_id', windowId);
-    await execution.exec('tmux', ['set-option', '-w', '-t', windowId || tmux.target(spec.window), '@agentctl-role', 'task']);
+    await execution.exec('tmux', ['set-option', '-w', '-t', windowId || tmux.target(spec.window), '@agentctl-role', spec.host ? spec.window : 'task']);
     await taskTmux.typeCommand(spec.window, commandLine);
     ctx.info(`${spec.task}: window ${config.session}:${spec.window} running ${spec.agent} (model ${spec.model}, effort ${spec.effort}) via ${commandLine}`);
 

@@ -1,3 +1,5 @@
+import { adoptTask } from '../src/core/adopt.ts';
+import { findResumable, planResume, resumeTasks } from '../src/core/resume.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -109,6 +111,7 @@ function world(agent = 'claude', extra = '') {
       }
       if (command === 'tmux') {
         const target = argv[argv.indexOf('-t') + 1] ?? '', win = tmux.find(target);
+        if (argv[0] === 'set-option' && argv.includes('@agentctl-role') && win) { win.role = argv.at(-1); return result(); }
         if (argv[0] === 'load-buffer') { buffer = opts.input!; return result(); }
         if (argv[0] === 'paste-buffer') { pasted = true; pastes.push(buffer); if (win) win.screen = ready(agent, buffer); return result(); }
         if (argv[0] === 'send-keys') {
@@ -183,7 +186,7 @@ for (const agent of ['claude', 'glm', 'codex', 'kimi']) it(`remote ${agent}: ful
   assert.equal(fs.readFileSync(w.record().report, 'utf8'), text);
   const before = w.writes(); await syncRemoteFiles(w.ctx, w.record()); assert.equal(w.writes(), before, 'unchanged content is not rewritten');
   const peek = await peekTask(w.ctx, 'R-1'); assert.equal(peek.task, 'R-1');
-  const hint = remoteAttachHint(w.config, w.record())!; assert.match(hint, /ssh -t owner@fake-pc/); assert.match(hint, /agentctl-pc:r-1/);
+  const hint = remoteAttachHint(w.config, w.record())!; assert.match(hint, /ssh -t owner@fake-pc/); assert.match(hint, /agentctl-pc:@/);
   await closeTask(w.ctx, 'R-1');
   assert.equal(w.tmux.windows.length, 0);
   assert.equal(w.record().closed, true);
@@ -281,6 +284,34 @@ it('remote board refresh uses cached host windows/screens and Enter prints the S
   assert.equal(snapshot.rows.find(r => r.task === 'R-1')?.host, 'pc');
   assert.equal(w.sshCalls.length, before, 'board refresh does not open the network');
   const notice = await runBoardEffect(w.runner, w.config, { type: 'switch', task: 'R-1', window: 'r-1' }, { insideTmux: true });
-  assert.match(notice.text, /ssh -t.*agentctl-pc:r-1/);
+  assert.match(notice.text, /ssh -t.*agentctl-pc:@/);
   assert.equal(w.sshCalls.length, before);
+});
+
+it('remote restart: new Context rediscovers a renamed window by task ID and updates stale window ID', async () => {
+  const w = world(); await startAtTrust(w); await acceptTrust(w);
+  w.tmux.windows[0]!.id = '@88'; w.tmux.windows[0]!.name = 'owner renamed window';
+  const restarted = new Context(w.runner, w.config, () => {});
+  const rows = await collectStatus(restarted, {progress: false});
+  assert.equal(rows.find(r => r.task === 'R-1')?.window, 'alive');
+  assert.equal(w.record().windowId, '@88');
+  assert.equal((await findResumable(restarted)).length, 0, 'running remote window is never launched twice');
+  assert.match(remoteAttachHint(w.config, w.record())!, /agentctl-pc:@88/);
+});
+it('remote adopt: restores missing state from the task ID on the host', async () => {
+  const w = world(); const win = w.tmux.add('owner renamed', ready(), '@99'); win.role = 'adopt-1';
+  const record = await adoptTask(w.ctx, 'ADOPT-1', {host: 'pc', report: path.join(w.config.cache, 'adopt-1/ADOPT-1.md'), agent: 'claude', model: 'sonnet', effort: 'high'});
+  assert.equal(record.host, 'pc'); assert.equal(record.windowId, '@99'); assert.equal(record.session, 'agentctl-pc');
+  assert.match(record.remoteReport!, /reports\/adopt-1\/ADOPT-1.md$/);
+  assert.equal((await collectStatus(w.ctx, {progress: false})).find(r => r.task === 'ADOPT-1')?.window, 'alive');
+});
+it('remote resume: recreates only a missing window on its host with remote hooks and report path', async () => {
+  const w = world(); await startAtTrust(w); await acceptTrust(w);
+  w.tmux.windows.length = 0;
+  const plan = await planResume(w.ctx, ['R-1']); assert.equal(plan.items[0]!.host, 'pc');
+  w.tmux.newWindowScreen = ready();
+  await resumeTasks(w.ctx, plan);
+  assert.equal(w.tmux.windows.length, 1); assert.equal(w.localTmux.windows.length, 0);
+  assert.ok(w.pastes.at(-1)!.includes(w.record().remoteReport!));
+  assert.ok(w.commands.some(c => c[0] === 'sh' && c.join(' ').includes('start.sh')));
 });

@@ -28,7 +28,7 @@ function world() {
       catch (error) { const e = error as { status: number; stderr: string }; return { code: e.status, stdout: '', stderr: String(e.stderr) }; }
     }
   }
-  const runner = new SSH(), ctx = new Context(runner, config, () => {});
+  const runner = new SSH({ dryRun: false }), ctx = new Context(runner, config, () => {});
   const remoteDir = path.join(work, '.agentctl/gc-1'), reports = path.join(work, 'reports/gc-1');
   fs.mkdirSync(remoteDir, { recursive: true }); fs.mkdirSync(reports, { recursive: true });
   const old = new Date(Date.now() - 9 * 86400_000);

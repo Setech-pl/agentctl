@@ -85,7 +85,7 @@ export async function prepareRemoteTask(ctx: Context, spec: ResolvedSpec, reuse 
 }
 
 /** Task-owned settings merge with the owner's settings; repeated installs overwrite only our own files. */
-export async function installRemoteHooks(ctx: Context, spec: ResolvedSpec, record: TaskRecord): Promise<string[]> {
+export async function installRemoteHooks(ctx: Context, spec: Pick<ResolvedSpec, 'host' | 'remoteDir' | 'agent' | 'task'>, record: TaskRecord): Promise<string[]> {
   const runner = ctx.hosts.forHost(spec.host!);
   const script = path.posix.join(spec.remoteDir!, 'event.cjs');
   await runner.writeFile(script, remoteHookScript(spec.remoteDir!, record.attemptId!, spec.agent));

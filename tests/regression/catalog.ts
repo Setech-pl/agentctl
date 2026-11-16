@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'HOST-REDISCOVER', fixedIn: '0.23.0', symptom: 'A renamed remote task window could be lost after watch restart when its tmux ID changed.', scenarios: [s('host-rediscover.test.ts', '^HOST-REDISCOVER:')] },
   { id: 'HOST-TMUX-WRAP', fixedIn: '0.23.0', symptom: 'Wrapping saved tmux capture/paste/window methods recursed through the remote router (unreleased 87662ec; router absent from v0.22.3).', scenarios: [s('host-boundaries.test.ts', '^HOST-TMUX-WRAP:')] },
   { id: 'HOST-MIRROR-ENV', fixedIn: '0.23.0', symptom: 'Remote report mirror commands included unrelated launch environment values in SSH argv (unreleased b9384f2; mirror absent from v0.22.3).', scenarios: [s('host-boundaries.test.ts', '^HOST-MIRROR-ENV:')] },
   { id: 'HOST-LOCAL-IO', fixedIn: '0.23.0', symptom: 'The remote host router scanned every local task header before board/status previews (unreleased b9384f2; host runtime absent from v0.22.3).', scenarios: [s('host-boundaries.test.ts', '^HOST-LOCAL-IO:')] },

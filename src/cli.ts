@@ -1580,6 +1580,8 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .description('Restore the state file of a task whose TASK.md is lost (the report and the window are still there). Agent, model and effort default to "unknown".')
     .argument('<task>', 'task ID')
     .requiredOption('--report <path>', 'path of the task report')
+    .option('--host <host>', 'adopt the existing window on this remote host')
+    .option('--remote-report <path>', 'remote canonical report path (default: host work_dir/reports/task/TASK.md)')
     .option('--window <name>', 'tmux window of the task (default: the lowercase task ID)')
     .option('--worktree <path>', 'worktree of the task, so "close --rm-worktree" knows it')
     .addOption(new Option('--agent <agent>', 'agent running in the window').choices([...cliProviders]))
@@ -1587,7 +1589,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .addOption(new Option('--effort <effort>', 'effort of the task').choices(['low', 'medium', 'high', 'xhigh', 'max']))
     .option('--dry-run', 'print what would be written, write nothing')
     .action(
-      guarded(async (task: string, opts: { report: string; window?: string; worktree?: string; agent?: AgentName; model?: string; effort?: Effort; dryRun?: boolean }) => {
+      guarded(async (task: string, opts: { report: string; host?: string; remoteReport?: string; window?: string; worktree?: string; agent?: AgentName; model?: string; effort?: Effort; dryRun?: boolean }) => {
         await adoptTask(contextFor(Boolean(opts.dryRun)), task, opts);
       }),
     );

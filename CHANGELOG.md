@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- HOST-REDISCOVER / HOST-0C restart: rediscover remote windows by durable task ID and refresh tmux IDs after watch restart; remote `adopt --host` and missing-window `resume` keep execution/hooks/report paths on the host. / Po restarcie watch rozpoznaje okna po ID zadania i aktualizuje ID tmux; zdalne `adopt --host` i `resume` zachowują wykonanie, hooki i ścieżki raportu na hoście.
+
 - HOST-0C board: remote badges on queued and finished rows, cached H task/limit/attach view, and host disk status. / Znaczki hosta także w kolejce i zakończonych zadaniach, cache widoku H z zadaniami, limitami, attach i dyskiem.
 
 - HOST-0C limits/move: show host caps alongside account slots and holds; `move --host pc|local` changes only a queued, never-started task, preserving order and dependencies. / Limity hosta obok slotów i blokad konta; `move --host pc|local` przenosi tylko nieuruchomione zadanie w kolejce, zachowując kolejność i zależności.
