@@ -174,6 +174,16 @@
       "D2: keep_cache survives spec/record serialization and MCP/CLI overrides preserve cache"
     ]
   },
+  "D3": {
+    "rev": "v0.22.4",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 1,
+    "failing": [
+      "D3: Claude token survives a scrolled menu and normalized whitespace when chosen option is visible",
+      "D3: Claude token survives a scrolled menu and normalized whitespace when chosen option is visible"
+    ]
+  },
   "F1": {
     "rev": "v0.19.0",
     "outcome": "IMPORT-ERROR",

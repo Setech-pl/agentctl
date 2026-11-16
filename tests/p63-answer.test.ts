@@ -126,3 +126,29 @@ it('integration: a Kimi boxed composer below an old menu makes that menu history
   assert.equal((await answerMenu(f.ctx, 't1', 1)).outcome, 'ready');
   assert.deepEqual(f.keys, []);
 });
+
+it('D3: Claude token survives a scrolled menu and normalized whitespace when chosen option is visible', async () => {
+  const full = fx('screen-claude-read-menu-full.txt'), scrolled = fx('screen-claude-read-menu-scrolled.txt');
+  const f = fakeKimi(scratch.sub('d3-scroll'), full);
+  seedTask(f.config, 'T1', {agent: 'claude', windowId: '@1'});
+  const preview = await answerMenu(f.ctx, 't1', 2);
+  assert.equal(preview.outcome, 'ready', preview.message);
+  assert.equal(preview.menu!.length, 4);
+  f.setScreen(scrolled.replace('Allow this read', 'Allow  this   read'));
+  assert.deepEqual(menuInFrame(scrolled)!.options.map(o => o.n), [2, 3, 4]);
+  const confirmed = await answerMenu(f.ctx, 't1', 2, {token: preview.token!});
+  assert.equal(confirmed.keySent, true, confirmed.message);
+  assert.deepEqual(f.keys, ['2']);
+});
+
+it('D3: scrolled confirmation refuses changed question, changed label and hidden chosen option', async () => {
+  const full = fx('screen-claude-read-menu-full.txt'), scrolled = fx('screen-claude-read-menu-scrolled.txt');
+  const f = fakeKimi(scratch.sub('d3-refuse'), full);
+  seedTask(f.config, 'T1', {agent: 'claude', windowId: '@1'});
+  const preview = await answerMenu(f.ctx, 't1', 2);
+  for (const changed of [scrolled.replace('Allow this read', 'Allow this write'), scrolled.replace('/workspace/shared/', '/private/'), scrolled.replace(/^❯ 2\..*\n/m, '').replace('  3.', '❯ 3.')]) {
+    f.setScreen(changed);
+    assert.equal((await answerMenu(f.ctx, 't1', 2, {token: preview.token!})).outcome, 'refused');
+  }
+  assert.deepEqual(f.keys, []);
+});

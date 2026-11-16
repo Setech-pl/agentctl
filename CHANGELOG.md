@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- D3: answer tokens bind normalized question/option labels and task identity, so scrolling a permission menu does not invalidate the token; changed/hidden selections still refuse. / Token answer działa po przewinięciu menu, ale odrzuca zmienione pytanie/opcję i wybór niewidocznej opcji.
+
 - D2: task caches stay by default; owner-confirmed `include_cache` opts into deletion, while `keep_cache` and report-referenced artifacts always stay. Previews list paths/sizes and apply rechecks protection. / Cache zostaje domyślnie; jawne `include_cache` włącza usuwanie, a `keep_cache` i artefakty wskazane w raporcie chronią dane.
 
 - D1: GC checks fresh tracked/untracked status and unpushed commits in every task repository, including cached MCP previews; explicit `force_dirty` / `--force-dirty` is required to discard them. / GC sprawdza zmiany i niewysłane commity w każdym repo, także w podglądzie MCP; usunięcie wymaga jawnego nadpisania.
