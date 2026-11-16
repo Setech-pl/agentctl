@@ -1,6 +1,6 @@
 # Architektura
 
-Diagramy opisują lokalną implementację 0.22.3. Etykiety są wspólne po angielsku, objaśnienia dwujęzyczne. C4 pochodzi z lokalnej biblioteki standardowej PlantUML; nie użyto publicznego serwera renderowania. Łączniki mają skinparam linetype ortho, oba C4 zawierają SHOW_LEGEND().
+Diagram C2 opisuje dispatcher lokalny i host SSH w 0.23.0; pozostałe widoki zachowują szczegóły lokalnego cyklu życia. Etykiety są wspólne po angielsku, objaśnienia dwujęzyczne. C4 pochodzi z lokalnej biblioteki standardowej PlantUML; nie użyto publicznego serwera renderowania. Łączniki mają skinparam linetype ortho, oba C4 zawierają SHOW_LEGEND().
 
 ## C1 — System Context
 
@@ -9,6 +9,8 @@ Właściciel, czaty NC/HEMS w aplikacji desktopowej, provider CLI/cloud, GitHub 
 ![C1 — System Context](../diagrams/context.svg)
 
 [PlantUML](../diagrams/context.puml) · [SVG](../diagrams/context.svg) · [PNG](../diagrams/context.png)
+
+Host zdalny obejmuje transport SSH, tmux/CLI, klon/worktree i raporty; dispatcher zachowuje lokalny stan oraz kopię raportu.
 
 ## C2 — Containers
 

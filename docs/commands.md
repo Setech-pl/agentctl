@@ -1501,6 +1501,8 @@ agentctl adopt [options] <task>
 | Option | Meaning | Notes |
 |---|---|---|
 | `--report <path>` | path of the task report | required |
+| `--host <host>` | adopt the existing window on this remote host |  |
+| `--remote-report <path>` | remote canonical report path (default: host work_dir/reports/task/TASK.md) |  |
 | `--window <name>` | tmux window of the task (default: the lowercase task ID) |  |
 | `--worktree <path>` | worktree of the task, so "close --rm-worktree" knows it |  |
 | `--agent <agent>` | agent running in the window | one of `claude`, `codex` |
@@ -1616,6 +1618,7 @@ agentctl move [options] <task>
 | Option | Meaning | Notes |
 |---|---|---|
 | `--agent <agent>` | move to this provider (default: the other one) | one of `claude`, `codex` |
+| `--host <host>` | move a queued task to this host, or local |  |
 | `-y, --yes` | do not ask |  |
 
 Examples:

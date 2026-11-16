@@ -3,7 +3,7 @@
 skinparam linetype ortho
 skinparam nodesep 80
 skinparam ranksep 100
-title agentctl 0.22.1 — C2 Containers (local processes and files)
+title agentctl 0.23.0 — C2 Containers (local dispatcher and remote host)
 Person(owner, "Owner", "Terminal and desktop chat")
 System_Ext(chat, "Claude desktop", "NC / HEMS MCP clients")
 System_Boundary(a, "agentctl on the owner's machine") {
@@ -19,6 +19,12 @@ System_Boundary(a, "agentctl on the owner's machine") {
 System_Ext(tmux, "tmux server", "Task sessions/windows; board/watch service windows")
 System_Ext(worktrees, "Git repositories / worktrees", "Per-task branches or detached read-only CONSULT snapshots")
 System_Ext(providers, "Provider CLI processes / clouds", "claude / codex / kimi / claude-glm")
+System_Boundary(remote, "Remote host: Linux / WSL2 (SSH owner account)") {
+ Container(transport, "SSH transport", "OpenSSH ControlMaster", "Strict host keys; bounded probes, backoff; task-ID rediscovery")
+ Container(remoteTmux, "Remote tmux / provider CLIs", "Owner's interactive agents", "Worktree setup, hooks, prompt delivery, resume")
+ ContainerDb(remoteWork, "Host clone / task worktrees", "Git / filesystem", "Fetch-only sync; clean registered worktree GC; no forced deletion")
+ ContainerDb(remoteReports, "Remote reports / receipts", "Markdown / JSON", "Task-owned files; reports preserved by GC")
+}
 Rel(owner, cli, "Commands")
 Rel(owner, board, "Keys")
 Rel(chat, mcp, "Tools", "stdio")
@@ -36,5 +42,13 @@ Rel(providers, hooks, "Callbacks")
 Rel(hooks, state, "Events")
 Rel(providers, reports, "Report")
 Rel(watch, reports, "Validate")
+Rel(watch, transport, "Task operations, health, disk, GC", "multiplexed SSH")
+Rel(cli, transport, "Host commands / owner-confirmed maintenance")
+Rel(transport, remoteTmux, "tmux / shell")
+Rel(remoteTmux, remoteWork, "Works in")
+Rel(remoteTmux, remoteReports, "Report / hook receipt")
+Rel(transport, remoteReports, "Bounded read")
+Rel(watch, reports, "Local mirror of remote report")
+Rel(board, state, "Cached host health/tasks/limits")
 SHOW_LEGEND()
 @enduml

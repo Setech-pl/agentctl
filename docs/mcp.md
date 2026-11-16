@@ -306,7 +306,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 | `away` | write | `on` |
 | `interrupt` | write | `task?`, `confirm?`, `preview_token?` |
 | `close` | write | `task?`, `tasks?`, `cohort?`, `remove_worktree?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` |
-| `move` | write | `task?`, `agent?`, `confirm?`, `preview_token?` |
+| `move` | write | `task?`, `agent?`, `host?`, `confirm?`, `preview_token?` |
 | `queue_show` | read | `task` |
 | `mcp_check` | read |  |
 | `spec_example` | read |  |
@@ -329,7 +329,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 | `hide` | write | `tasks?`, `confirm?`, `preview_token?` |
 | `unhide` | write | `tasks?`, `confirm?`, `preview_token?` |
 | `archive` | write | `older_than?`, `cohort?`, `confirm?`, `preview_token?` |
-| `adopt` | write | `task?`, `report?`, `window?`, `worktree?`, `agent?`, `model?`, `effort?`, `confirm?`, `preview_token?` |
+| `adopt` | write | `task?`, `report?`, `host?`, `remoteReport?`, `window?`, `worktree?`, `agent?`, `model?`, `effort?`, `confirm?`, `preview_token?` |
 | `report_from` | write | `task?`, `from?`, `force?`, `confirm?`, `preview_token?` |
 | `limits_release` | write | `claude?`, `codex?`, `confirm?`, `preview_token?` |
 | `manager_start` | write | `project?`, `name?`, `model?`, `effort?`, `confirm?`, `preview_token?` |
@@ -385,12 +385,12 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 - `manager`: `--name &lt;name&gt;`, `--project &lt;dir&gt;`, `--model &lt;model&gt;`, `--effort &lt;level&gt;`, `--url`, `--dry-run`
 - `ntfy-setup`: `--server &lt;url&gt;`, `--regenerate`, `--show-qr`, `--dry-run`
 - `notify-test`: `--local`, `--phone`, `--all`
-- `adopt`: `--report &lt;path&gt;`, `--window &lt;name&gt;`, `--worktree &lt;path&gt;`, `--agent &lt;agent&gt;`, `--model &lt;model&gt;`, `--effort &lt;effort&gt;`, `--dry-run`
+- `adopt`: `--report &lt;path&gt;`, `--host &lt;host&gt;`, `--remote-report &lt;path&gt;`, `--window &lt;name&gt;`, `--worktree &lt;path&gt;`, `--agent &lt;agent&gt;`, `--model &lt;model&gt;`, `--effort &lt;effort&gt;`, `--dry-run`
 - `interrupt`: `--dry-run`
 - `attach`: `--switch-client`
 - `event`: `--task &lt;task&gt;`, `--attempt &lt;id&gt;`, `--agent &lt;agent&gt;`, `--kind &lt;kind&gt;`, `--forward-file &lt;path&gt;`, `--forward &lt;json&gt;`
 - `usage-tap`: `--task &lt;task&gt;`, `--agent &lt;provider&gt;`, `--attempt &lt;id&gt;`, `--forward &lt;command&gt;`
-- `move`: `--agent &lt;agent&gt;`, `-y, --yes`
+- `move`: `--agent &lt;agent&gt;`, `--host &lt;host&gt;`, `-y, --yes`
 - `peek`: `-n, --lines &lt;n&gt;`
 - `mcp install`: `--desktop`, `--claude-code`, `--config &lt;file&gt;`, `--dry-run`, `-y, --yes`
 - `mcp uninstall`: `--desktop`, `--claude-code`, `--config &lt;file&gt;`, `--dry-run`, `-y, --yes`

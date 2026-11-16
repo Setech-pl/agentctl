@@ -39,7 +39,7 @@ repos:
 Obejrzyj repozytorium i napisz krótki raport. Nie zmieniaj plików i nie commituj.
 ```
 
-Uruchom `agentctl new remote.md --no-wait-trust`, potem `agentctl attach PC-SMOKE`. Dla zadania na hoście attach wypisuje komendę `ssh -t … 'tmux attach-session …'`: uruchom ją i sam potwierdź trust folderu. Pozostaw działający watch (`agentctl watch --tmux`). Ctrl-b d odłącza sesję i wraca do lokalnego terminala; F12 to lokalny skrót boardu, bez przeskakiwania między hostami. Enter na boardzie również pokazuje zdalną komendę attach, a zadanie ma znaczek `[pc]`.
+Uruchom `agentctl new remote.md --no-wait-trust`, potem `agentctl attach PC-SMOKE`. Dla zadania na hoście attach wypisuje komendę `ssh -t … 'tmux attach …'`: uruchom ją i sam potwierdź trust folderu. Pozostaw działający watch (`agentctl watch --tmux`). Ctrl-b d odłącza sesję i wraca do lokalnego terminala; F12 to lokalny skrót boardu, bez przeskakiwania między hostami. Enter na boardzie również pokazuje zdalną komendę attach, a zadanie ma znaczek `[pc]`.
 
 `repos[].path` identyfikuje skonfigurowany klon: nazwą albo ścieżką o takiej końcówce. Agentctl robi tam fetch `origin`, nigdy push, a potem tworzy gałąź lub detached worktree według tych samych zasad base/branch co lokalnie. Preferuj `origin/main` zamiast potencjalnie starego lokalnego `main`. Błąd brakującej bazy podaje domyślną gałąź klonu na hoście. Worktree musi być osobnym katalogiem wewnątrz `work_dir`; domyślnie to `<work_dir>/<repo>-<task>`. Setup pochodzi z `.agentctl.yaml` każdego nowego worktree; jawny setup speca go zastępuje, także pustą listą `[]`. Projektowe linki i env wykonują się na hoście; lokalne pliki projektowe i globalne linki nie są tam kopiowane.
 
@@ -49,4 +49,106 @@ Zdalny raport kanoniczny to `<work_dir>/reports/<task>/<TASK>.md`. Pole speca `r
 
 Utrata SSH ustawia `host-unreachable`, zachowuje aktywne zadanie i jego slot, generuje zdarzenie/powiadomienie oraz ponawia połączenie po 5 sekundach, z wykładniczo rosnącą przerwą do 5 minut. Po odzyskaniu połączenia śledzenie wraca. Watch sam nie zamyka zdalnych okien. Jawne operacje zgłaszają awarię połączenia i nie oznaczają wtedy żywego zadania jako zamkniętego/anulowanego.
 
-Zadanie zdalne liczy się do limitu konta dostawcy razem z lokalnymi zadaniami i rezerwacjami; `hosts.<name>.limits` dodaje limit host/dostawca. Kolejka i follow-upy respektują oba. HOST-0C obejmuje dalsze GC, prezentację limitów i dopracowanie boardu. Lokalne GC, sprzątanie cache i pomiary dysku pomijają zdalne worktree. Ta część nie obsługuje zdalnych `move`, `resume` ani automatycznych review; użyj nowego speca/osobnego zadania review, a `review: false` wyłącza odziedziczone auto-review. Rzeczywisty test hosta z inference pozostaje do wykonania przez właściciela.
+Zadanie zdalne liczy się do limitu konta razem z lokalnymi zadaniami i rezerwacjami; `hosts.<name>.limits` dodaje limit host/dostawca.
+
+## 0.23.0: utrzymanie, limity i restart
+
+`limits`, `capacity`, board `L`/`C` oraz `H` pokazują limity hosta obok limitów konta. Blokada dostawcy obejmuje lokalną i zdalną kolejkę, również starty bezpośrednie; niedostępne zadania zachowują sloty. Watch mierzy wolne miejsce w `work_dir` każdego hosta; capacity/board wskazują nazwę hosta, a zmiana progu dysku generuje zdarzenie. Nieznany lub stary odczyt pozostaje n/d.
+
+`agentctl move TASK --host pc` albo `--host local` zmienia lokalizację wyłącznie nieuruchomionego zadania w kolejce. Podgląd i potwierdzenie y/N zachowują ID, priorytet, pozycję, zależności, prompt i dostawcę. Zadania uruchomione, startujące, retry/reuse oraz automatyczne review nie zmieniają lokalizacji. Pliki nie są przesyłane. Do przejścia w obie strony podaj w oryginalnym specu lokalną bezwzględną `repos[].path`, której końcówka odpowiada klonowi hosta, i skonfiguruj lokalny `worktree_root`. Oryginalna lokalna ścieżka worktree zostaje zachowana; host używa własnej domyślnej.
+
+`gc --preview` mierzy zdalne worktree i pliki własne zakończonych zadań po SSH, z budżetem 5 s/100 000 wpisów i limitem transportu 10 s na hosta. Cache jest ważny 60 s; podgląd z cache pomija brakujące/stare dane z wyjaśnieniem. Jawny podgląd CLI odświeża dane. `gc --apply` i MCP `gc` wymagają zwykłego potwierdzenia właściciela. Przed każdym usunięciem host ponownie sprawdza własność zadania, okna, użycie współdzielone/linki, rejestrację i czystość worktree, chronione main/master oraz wiek cache. Git nigdy nie używa force. Obce katalogi, symlinki i raporty (*.md, również zagnieżdżone) zostają. Zdalne gałęzie oraz lokalne kopie raportów/stanu nie są usuwane przez zdalny GC. Awaria SSH lub przekroczenie budżetu zachowuje cel i wyjaśnia pominięcie.
+
+Po restarcie watch odnajduje zdalne okna po ID zadania, aktualizuje ID tmux i obserwuje istniejącego agenta bez uruchamiania drugiego. `resume TASK` odtwarza rzeczywiście brakujące okno na hoście, z jego hookami i ścieżką raportu; niedostępny host nigdy nie oznacza pustego tmux. Utracony lokalny TASK.md odtwarza `adopt TASK --host pc --report /bezwzgledna/lokalna/kopia/TASK.md --agent claude --model sonnet --effort high`, identyfikując istniejące zdalne okno. Dodaj `--worktree /zdalny/worktree`, jeśli znasz ścieżkę; `--remote-report` zmienia domyślną ścieżkę zdalnego raportu. Adopt nie odzyskuje oryginalnego promptu. Zdalne review zamawiaj osobnym zadaniem (`review: false`).
+
+## Pierwszy rzeczywisty test PC: WSL2 → Windows → Mac
+
+Użyj Ubuntu WSL2 jako **krzet**, adresu Windows **192.168.2.64** i zewnętrznego portu SSH **2222**. Poniższe komendy wykonuje właściciel; uruchamiają jedno rzeczywiste zadanie Claude. Klony i worktree trzymaj w linuksowym systemie plików WSL.
+
+1. **WSL, jednorazowo:** zainstaluj Node >=22.14.0 (sprawdź `node --version`; w razie potrzeby skorzystaj z [instalatora Node](https://nodejs.org/en/download)), a następnie:
+
+   ```sh
+   sudo apt-get update
+   sudo apt-get install -y openssh-server git tmux
+   sudo ssh-keygen -A
+   sudo service ssh start
+   # Z systemd: sudo systemctl enable --now ssh
+   mkdir -p ~/.ssh ~/src ~/agentctl-work
+   chmod 700 ~/.ssh
+   npm install -g @anthropic-ai/claude-code
+   claude
+   # Zaloguj się, potem wyjdź z CLI.
+   git clone https://github.com/Setech-pl/agentctl.git ~/src/agentctl
+   ```
+
+   Wklej publiczny klucz Maca do `~/.ssh/authorized_keys` i ustaw `chmod 600 ~/.ssh/authorized_keys`. `whoami` ma pokazać `krzet`, a `ss -lnt` — SSH na porcie 22. Jeśli potrzebujesz systemd, dopisz `[boot]` / `systemd=true` do `/etc/wsl.conf`, wykonaj `wsl --shutdown` w Windows i otwórz Ubuntu ponownie. Nie zamykaj WSL podczas pracy zadań.
+
+2. **Windows, PowerShell jako administrator, jednorazowo:** zmień `Ubuntu`, jeśli `wsl -l -v` pokazuje inną nazwę dystrybucji.
+
+   ```powershell
+   $pcWslIp = ((wsl -d Ubuntu hostname -I).Trim() -split '\s+')[0]
+   netsh interface portproxy add v4tov4 listenaddress=192.168.2.64 listenport=2222 connectaddress=$pcWslIp connectport=22
+   New-NetFirewallRule -DisplayName 'agentctl WSL SSH 2222' -Direction Inbound -Action Allow -Protocol TCP -LocalPort 2222 -Profile Private -RemoteAddress LocalSubnet
+   netsh interface portproxy show v4tov4
+   ```
+
+   Po restarcie Windows/WSL otwórz Ubuntu, uruchom SSH, pobierz nowe IP WSL i popraw cel przekierowania:
+
+   ```powershell
+   $pcWslIp = ((wsl -d Ubuntu hostname -I).Trim() -split '\s+')[0]
+   netsh interface portproxy set v4tov4 listenaddress=192.168.2.64 listenport=2222 connectaddress=$pcWslIp connectport=22
+   Test-NetConnection 192.168.2.64 -Port 2222
+   ```
+
+   Zarezerwuj LAN IP Windows w DHCP. Jeśli zmieni się również ten adres, popraw `listenaddress` i `hosts.pc.ssh`. Adres NAT WSL różni się od adresu LAN Windows. Źródła: Microsoft [sieć WSL](https://learn.microsoft.com/windows/wsl/networking) i [systemd](https://learn.microsoft.com/windows/wsl/systemd).
+
+3. **Mac, jednorazowo:** jeśli nie masz klucza, wykonaj `ssh-keygen -t ed25519`; jego plik `.pub` zainstaluj w WSL jak wyżej. Uruchom `ssh -p 2222 krzet@192.168.2.64`, porównaj fingerprint z WSL (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`), zaakceptuj i wyjdź. Sprawdź dostęp bez pytań:
+
+   ```sh
+   ssh -o BatchMode=yes -p 2222 krzet@192.168.2.64 'whoami; tmux -V; node --version; command -v claude'
+   ```
+
+   Dopisz do istniejącego configu Maca, zwykle `~/.agentctl/config.yaml`:
+
+   ```yaml
+   hosts:
+     pc:
+       ssh: krzet@192.168.2.64
+       port: 2222
+       work_dir: /home/krzet/agentctl-work
+       repos: {agentctl: /home/krzet/src/agentctl}
+       providers: [claude]
+       limits: {claude: 1}
+       env: {PATH: /home/krzet/.local/bin:/usr/local/bin:/usr/bin:/bin}
+   ```
+
+   Jeśli Node/Claude są w prefiksie nvm/npm, zastąp `env.PATH` wynikiem `printf '%s\n' "$PATH"` z WSL i ponów test nieinteraktywnego SSH. Zapisz `pc-smoke.md`:
+
+   ```yaml
+   ---
+   task: PC-SMOKE-1
+   host: pc
+   agent: claude
+   model: sonnet
+   effort: high
+   review: false
+   setup: []
+   repos: [{path: agentctl, base: origin/main, branch: pc-smoke-1}]
+   ---
+   Odczytaj package.json i podaj w raporcie nazwę pakietu oraz wersję. Nie zmieniaj plików i nie commituj.
+   ```
+
+   Wykonaj `agentctl hosts --refresh`, `agentctl watch --tmux`, potem `agentctl new pc-smoke.md --no-wait-trust`. Uruchom dokładną komendę SSH wypisaną przez `agentctl attach PC-SMOKE-1`, potwierdź trust folderu i odłącz się Ctrl-b d. Sprawdź `[pc]`/`H` na boardzie i `agentctl pull PC-SMOKE-1`. Na koniec zamknij zadanie i obejrzyj plan GC przed jego wykonaniem.
+
+## Rozwiązywanie problemów
+
+| Objaw | Sprawdzenie / naprawa właściciela |
+| --- | --- |
+| host-key-unknown | Uruchom jednorazową komendę SSH z doctora i porównaj fingerprint na hoście przed akceptacją. |
+| HOST KEY CHANGED | Najpierw sprawdź fingerprint i adres; po potwierdzonej reinstalacji usuń wyłącznie stary wpis: `ssh-keygen -R '[192.168.2.64]:2222'`, potem połącz się ręcznie. Nie wyłączaj strict checking. |
+| auth-failed / Permission denied | Sprawdź SSH BatchMode, użytkownika krzet, uprawnienia authorized_keys, właściwy klucz/ssh-agent lub lokalne identity_file. Logowanie Windows nie loguje do WSL. |
+| Connection refused / timeout po restarcie | Otwórz WSL i uruchom sshd; popraw IP WSL w portproxy, sprawdź LAN IP Windows, regułę Private i port 2222. |
+| Brak tmux | Zainstaluj go wewnątrz WSL; sprawdź `ssh -p 2222 krzet@192.168.2.64 'tmux -V'`. |
+| Brak CLI / wylogowany dostawca | Zainstaluj i zaloguj jako krzet w WSL, nie w Windows ani jako root. Sprawdź nieinteraktywny PATH, uruchom CLI ręcznie. Plik danych logowania nie dowodzi ważności tokenu. |
+| GC pomija cel | Przeczytaj powód; zakończ/zamknij zadanie, commituj zamierzone zmiany, rozwiąż linki albo poczekaj na wymagany wiek. Bez force. |
+| Zadanie nie startuje | Sprawdź blokadę/limit konta i limit hosta w `limits`/`capacity`; hold dostawcy obejmuje także zdalną kolejkę. |

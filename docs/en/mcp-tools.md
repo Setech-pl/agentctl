@@ -73,7 +73,7 @@ Arguments marked ? are optional. Provider fields below include enabled optional 
 | `away` | write | `on` | Switch away mode (the phone) |
 | `interrupt` | write | `task?`, `confirm?`, `preview_token?` | Interrupt the current turn of a task |
 | `close` | write | `task?`, `tasks?`, `cohort?`, `remove_worktree?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` | Close a task |
-| `move` | write | `task?`, `agent?`, `confirm?`, `preview_token?` | Move a task to the other provider |
+| `move` | write | `task?`, `agent?`, `host?`, `confirm?`, `preview_token?` | Move a task to the other provider |
 | `queue_show` | read | `task` | Read full queued spec, error and attempt history |
 | `mcp_check` | read |  | Inspect stale MCP server processes without stopping them |
 | `spec_example` | read |  | Read an example spec before writing a new order |
@@ -96,7 +96,7 @@ Arguments marked ? are optional. Provider fields below include enabled optional 
 | `hide` | write | `tasks?`, `confirm?`, `preview_token?` | hide tasks on the board |
 | `unhide` | write | `tasks?`, `confirm?`, `preview_token?` | unhide tasks on the board |
 | `archive` | write | `older_than?`, `cohort?`, `confirm?`, `preview_token?` | Archive the state of closed tasks |
-| `adopt` | write | `task?`, `report?`, `window?`, `worktree?`, `agent?`, `model?`, `effort?`, `confirm?`, `preview_token?` | Restore missing task metadata from facts supplied by the user |
+| `adopt` | write | `task?`, `report?`, `host?`, `remoteReport?`, `window?`, `worktree?`, `agent?`, `model?`, `effort?`, `confirm?`, `preview_token?` | Restore missing task metadata from facts supplied by the user |
 | `report_from` | write | `task?`, `from?`, `force?`, `confirm?`, `preview_token?` | Copy a regular report from task worktrees or cache to its canonical location; force only overwrites, never permits outside or symlink sources |
 | `limits_release` | write | `claude?`, `codex?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Release reserved provider places |
 | `manager_start` | write | `project?`, `name?`, `model?`, `effort?`, `confirm?`, `preview_token?` | Start the supervising manager session |

@@ -71,7 +71,7 @@ Argumenty z ? są opcjonalne. Pola dostawców obejmują opcjonalnych; uruchomion
 | `away` | zapis | `on` | Przełącz tryb powiadomień na telefon. |
 | `interrupt` | zapis | `task?`, `confirm?`, `preview_token?` | Przerwij bieżącą turę, pozostawiając okno. |
 | `close` | zapis | `task?`, `tasks?`, `cohort?`, `remove_worktree?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` | Zamknij okno; usuwanie worktree wymaga dodatkowo allow_rm_worktree i jawnej opcji. |
-| `move` | zapis | `task?`, `agent?`, `confirm?`, `preview_token?` | Przenieś zadanie do innego aktywnego dostawcy przez equivalents w tym samym worktree; pin blokuje. |
+| `move` | zapis | `task?`, `agent?`, `host?`, `confirm?`, `preview_token?` | Przenieś zadanie do innego aktywnego dostawcy przez equivalents w tym samym worktree; pin blokuje. |
 | `queue_show` | odczyt | `task` | Pełny spec kolejki, błąd i historia prób. |
 | `mcp_check` | odczyt |  | Znajdź stare procesy MCP bez ich zatrzymywania. |
 | `spec_example` | odczyt |  | Wzorcowa specyfikacja przed napisaniem nowego zlecenia. |
@@ -94,7 +94,7 @@ Argumenty z ? są opcjonalne. Pola dostawców obejmują opcjonalnych; uruchomion
 | `hide` | zapis | `tasks?`, `confirm?`, `preview_token?` | Ukryj zadania w domyślnym widoku, bez zamykania. |
 | `unhide` | zapis | `tasks?`, `confirm?`, `preview_token?` | Pokaż ukryte zadania. |
 | `archive` | zapis | `older_than?`, `cohort?`, `confirm?`, `preview_token?` | Przenieś stan zamkniętych zadań do archiwum. |
-| `adopt` | zapis | `task?`, `report?`, `window?`, `worktree?`, `agent?`, `model?`, `effort?`, `confirm?`, `preview_token?` | Odtwórz brakujące metadane z faktów dostarczonych przez właściciela. |
+| `adopt` | zapis | `task?`, `report?`, `host?`, `remoteReport?`, `window?`, `worktree?`, `agent?`, `model?`, `effort?`, `confirm?`, `preview_token?` | Odtwórz brakujące metadane z faktów dostarczonych przez właściciela. |
 | `report_from` | zapis | `task?`, `from?`, `force?`, `confirm?`, `preview_token?` | Skopiuj zwykły dozwolony raport do ścieżki kanonicznej; force nie omija granic/symlinków. |
 | `limits_release` | zapis | `claude?`, `codex?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Zwolnij zarezerwowane miejsca dostawców. |
 | `manager_start` | zapis | `project?`, `name?`, `model?`, `effort?`, `confirm?`, `preview_token?` | Uruchom sesję nadzorczą Claude z Remote Control. |

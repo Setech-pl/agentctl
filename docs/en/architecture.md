@@ -1,6 +1,6 @@
 # Architecture
 
-All diagrams describe the local 0.22.3 implementation. Text labels are shared English; the explanations below are bilingual. C4 includes ship in the local PlantUML standard library; no public rendering service is used. Orthogonal connectors use skinparam linetype ortho; both C4 views include SHOW_LEGEND().
+The C2 diagram describes the 0.23.0 local dispatcher and remote SSH host; the other views retain their local lifecycle detail. Text labels are shared English; the explanations below are bilingual. C4 includes ship in the local PlantUML standard library; no public rendering service is used. Orthogonal connectors use skinparam linetype ortho; both C4 views include SHOW_LEGEND().
 
 ## C1 — System Context
 
@@ -12,7 +12,7 @@ Owner, NC/HEMS chats in the desktop app, provider CLIs/clouds, GitHub and option
 
 ## C2 — Containers
 
-CLI, watch, board, MCP, adapters/hooks, state, reports, tmux and worktrees. Containers here mean processes/stores, not Docker images.
+CLI, watch, board, MCP, adapters/hooks, state, reports, local tmux/worktrees and the remote SSH host with its own tmux, clones, worktrees and receipts. Containers here mean processes/stores, not Docker images.
 
 ![C2 — Containers](../diagrams/containers.svg)
 

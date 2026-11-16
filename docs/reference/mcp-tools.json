@@ -1391,7 +1391,7 @@
       "name": "move",
       "kind": "write",
       "title": "Move a task to the other provider",
-      "description": "WRITE, off unless the user put \"move\" in mcp.allow. Hands a task that hit its usage limit to another active provider (Claude, Codex, Kimi when enabled; choose a target when more than two are active): a new window in the same worktree with the original prompt and a note to continue. The FIRST call (confirm omitted) only describes the move; ask the user, then call again with confirm: true. Use when the user needs this operation. CLI: agentctl move. Two steps are mandatory: preview, then confirm: true with identical arguments — or with preview_token only, which executes the stored arguments (for new/queue the spec need not be resent). A changed scope requires a new preview. Every response is bounded by mcp.max_response_kb (default 8 KiB). A truncated JSON envelope gives response_id and next_response_offset; call response_page with only those continuation fields to retrieve the next fragment without executing again. Concatenate fragment values to recover the original text/JSON.",
+      "description": "WRITE, off unless the user put \"move\" in mcp.allow. Hands a task that hit its usage limit to another active provider (Claude, Codex, Kimi when enabled; choose a target when more than two are active): a new window in the same worktree with the original prompt and a note to continue. host changes the location of a queued, never-started task (host: local clears the remote host). Running tasks cannot change host. The FIRST call (confirm omitted) only describes the move; ask the user, then call again with confirm: true. Use when the user needs this operation. CLI: agentctl move. Two steps are mandatory: preview, then confirm: true with identical arguments — or with preview_token only, which executes the stored arguments (for new/queue the spec need not be resent). A changed scope requires a new preview. Every response is bounded by mcp.max_response_kb (default 8 KiB). A truncated JSON envelope gives response_id and next_response_offset; call response_page with only those continuation fields to retrieve the next fragment without executing again. Concatenate fragment values to recover the original text/JSON.",
       "input": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -1410,6 +1410,12 @@
               "kimi",
               "glm"
             ]
+          },
+          "host": {
+            "description": "Queued task only: target host name, or local. Cannot be combined with agent.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32
           },
           "confirm": {
             "description": "First call previews. true executes only the unchanged preview in this server session.",
@@ -1952,6 +1958,16 @@
           "report": {
             "type": "string",
             "minLength": 1
+          },
+          "host": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "remoteReport": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
           },
           "window": {
             "type": "string",
