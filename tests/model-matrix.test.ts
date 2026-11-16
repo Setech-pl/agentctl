@@ -22,7 +22,7 @@ describe('model matrix: data/model-matrix.yaml is the one source of truth', () =
   });
 
   it('is exactly the agreed class table', () => {
-    assert.deepEqual(classNames(), ['report', 'simple', 'smoke', 'feature', 'bugfix', 'review', 'merge', 'hard', 'sim', 'visual', 'visual-compare', 'design', 'creative', 'escalate']);
+    assert.deepEqual(classNames(), ['report', 'simple', 'gate', 'smoke', 'feature', 'bugfix', 'review', 'merge', 'hard', 'sim', 'visual', 'visual-compare', 'design', 'creative', 'escalate']);
     const cell = (cls: string, provider: 'claude' | 'codex' | 'kimi') => {
       const c = matrixClass(cls)?.cells[provider];
       return c ? `${c.model}/${c.effort}` : null;
@@ -64,4 +64,16 @@ describe('model matrix: data/model-matrix.yaml is the one source of truth', () =
     assert.ok(written.every((w) => !w.startsWith('k3.1-pro')));
     assert.ok(written.every((w) => !w.includes('fable')));
   });
+});
+
+it('D4: gate resolves across providers and its mapping is present in default equivalents', async () => {
+  const { resolveSpec, splitSpecs } = await import('../src/core/spec.ts');
+  const { makeConfig } = await import('./helpers.ts');
+  const config = makeConfig(scratch.sub('gate-class'), 'providers: [claude, codex, kimi, glm]');
+  const expected = {claude: 'claude-sonnet-5-5/medium', codex: 'gpt-6-luna/medium', kimi: 'k3-256k/low', glm: 'glm-5.3-flash/medium'};
+  for (const agent of PROVIDER_IDS) {
+    const spec = resolveSpec(splitSpecs(`---\ntask: GATE\nagent: ${agent}\nclass: gate\nrepos: [{path: /fixture/repo, worktree: /fixture/wt}]\n---\nRun gates.`)[0]!, {config});
+    assert.equal(`${spec.model}/${spec.effort}`, expected[agent]);
+  }
+  assert.ok(deriveEquivalentRows().some(row => PROVIDER_IDS.every(id => row[id] === expected[id])));
 });

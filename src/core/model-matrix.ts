@@ -14,6 +14,12 @@ export const GENERATED_MODEL_MATRIX = {
       "kimi": "k3-256k/low",
       "glm": "glm-5.3-flash/medium"
     },
+    "gate": {
+      "codex": "gpt-6-luna/medium",
+      "claude": "claude-sonnet-5-5/medium",
+      "kimi": "k3-256k/low",
+      "glm": "glm-5.3-flash/medium"
+    },
     "smoke": {
       "codex": "gpt-6-luna/medium",
       "claude": "claude-sonnet-5-5/medium",
