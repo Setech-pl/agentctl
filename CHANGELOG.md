@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.22.5] - 2026-11-16
+
 - D5: skip inherited project links to closed tasks or repos already supplied by the spec; closed defaults emit one persisted notice per project/day. Explicit links/worktree placeholders remain intentional. / Domyślne linki do zamkniętych zadań lub repo ze specyfikacji są pomijane; komunikat raz dziennie na projekt.
 
 - D4: add task class `gate`: Sonnet medium / GPT-6-Luna medium / K3-256k low / GLM-5.3-Flash medium, derived into default equivalents. / Nowa klasa `gate` korzysta z szybkich modeli według macierzy.

@@ -188,6 +188,7 @@ export function staleProjectLinkWarnings(links: Link[], config: GlobalConfig): s
 
 /** Drop legacy defaults to closed worktrees or repositories explicitly supplied by this spec. */
 export function projectDefaultLinkPolicy(links: Link[], config: GlobalConfig, repos: ResolvedRepo[], project: string, now = Date.now(), intentionalWorktrees = new Set<string>()): { links: Link[]; notices: string[] } {
+  if (!links.length) return {links, notices: []};
   const current = listTaskRecords(config);
   const records = [...current, ...listArchivedRecords(config).filter(r => !current.some(c => c.task === r.task)).map(r => ({ ...r, closed: true }))];
   const closed = new Set<string>();
