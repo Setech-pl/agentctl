@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.23.0] - 2026-11-16
 
+- HOST-SSH-COLD: create the ControlMaster directory before the first host probe; GC summaries identify each host. / Katalog ControlMaster powstaje przed pierwszym sprawdzeniem hosta; podsumowanie GC wskazuje każdy host.
+
 - Remote hosts over strict, multiplexed SSH: host config/health, fetch-only clones, remote worktrees/setup, interactive provider adapters, verified task operations, task-owned hooks, local report mirrors and output validation. Includes v0.22.4 provider holds and ACTL-0226 fixes. / Hosty zdalne po ścisłym, multipleksowanym SSH: konfiguracja/zdrowie, fetch klonów, worktree/setup, interaktywni dostawcy, weryfikowane operacje, hooki zadania, lokalne kopie raportów i walidacja outputs; wraz z blokadami dostawców i poprawkami ACTL-0226 z 0.22.4.
 - HOST-0C GC: bounded cached host measurements; owner-confirmed removal revalidates ownership, live windows, links/shared use, clean registered worktrees, main/master protection and age on the host. Reports stay, never force. Host work_dir disk warnings appear in capacity/events/board. / Ograniczone pomiary z cache; GC potwierdzony przez właściciela ponownie sprawdza własność, okna, linki/użycie wspólne, czystość worktree, ochronę main/master i wiek na hoście. Raporty zostają, bez force; ostrzeżenia dysku hosta w capacity/events/board.
 - Account/provider holds and host caps are shown together. `move --host pc|local` changes only a queued, never-started task, preserving its order and dependencies. / Blokady/limity konta oraz limity hosta są widoczne razem; `move --host pc|local` przenosi tylko nieuruchomione zadanie kolejki, zachowując kolejność i zależności.

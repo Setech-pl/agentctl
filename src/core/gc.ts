@@ -354,8 +354,13 @@ export function gcView(plan: GcPlan, opts: GcViewOptions = {}) {
   for (const i of plan.skipped) { const key = i.cohort ?? '(none)', group = cohorts.get(key) ?? { cohort: key, count: 0, bytes: 0, skipped: 0, skippedBytes: 0 }; group.skipped++; group.skippedBytes += i.bytes ?? 0; cohorts.set(key, group); }
   const newer = new Map<string, { task: string; files: number; bytes: number; reason: string }>();
   for (const s of plan.skipped.filter(s => s.reason.startsWith('newer than '))) { const group = newer.get(s.task) ?? { task: s.task, files: 0, bytes: 0, reason: s.reason }; group.files++; group.bytes += s.bytes ?? 0; newer.set(s.task, group); }
+  const hosts = [...new Set([...plan.items, ...plan.skipped].map(i => i.host ?? 'local'))].map(host => ({ host,
+    count: plan.items.filter(i => (i.host ?? 'local') === host).length,
+    bytes: plan.items.filter(i => (i.host ?? 'local') === host).reduce((n, i) => n + i.bytes, 0),
+    skipped: plan.skipped.filter(i => (i.host ?? 'local') === host).length,
+  }));
   const page = <T>(items: T[]) => ({ total: items.length, offset, next_offset: offset + limit < items.length ? offset + limit : null, items: items.slice(offset, offset + limit) });
-  return { autoCacheFreedBytes: plan.autoCacheFreedBytes ?? 0, freeBytes: plan.freeBytes, summary: `można zwolnić ${(plan.freeBytes / 1e9).toFixed(3)} GB (${plan.freeBytes} bytes)`, categories,
+  return { hosts, autoCacheFreedBytes: plan.autoCacheFreedBytes ?? 0, freeBytes: plan.freeBytes, summary: `można zwolnić ${(plan.freeBytes / 1e9).toFixed(3)} GB (${plan.freeBytes} bytes)`, categories,
     skipped: { count: plan.skipped.length, bytes: plan.skipped.reduce((n, s) => n + (s.bytes ?? 0), 0), reasons: page([...reasons.values()]) },
     cohorts: page([...cohorts.values()]), newer: page([...newer.values()]), unknownCacheDirs: plan.unknownCacheDirs, foreignWorktrees: plan.foreignWorktrees ?? 0,
     ...(opts.detail ? { details: page([...plan.items.map(i => ({ ...i, action: 'remove/archive' })), ...plan.skipped.map(s => ({ ...s, action: 'skip' }))]) } : {}),
@@ -367,6 +372,7 @@ const DONE_WORD: Record<GcKind, string> = { worktree: 'removed worktrees', cache
 export function renderGc(plan: GcPlan, opts: GcViewOptions & { applied?: GcResult | undefined } = {}): string[] {
   const view = gcView(plan, opts);
   const lines = opts.applied ? ['History and reports (*.md) stay.'] : [`Could free ${formatBytes(plan.freeBytes)}; ${view.summary}. History and reports (*.md) stay.`, ...view.categories.map(c => `${c.category}: ${c.count}, ${c.bytes} bytes`), `Skipped: ${view.skipped.count}, ${view.skipped.bytes} bytes`];
+  for (const h of view.hosts) lines.push(`host ${h.host}: ${h.count} candidates, ${h.bytes} bytes; skipped ${h.skipped}`);
   lines.push(`Automatic .cache cleanup: ${plan.autoCacheFreedBytes ?? 0} bytes freed previously.`);
   if (!opts.applied) {
     lines.push('Would clean up (a dry run; --apply does it, after a y/N):');

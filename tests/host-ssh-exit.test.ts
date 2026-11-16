@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { DiskRunner, useScratch } from './helpers.ts';
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { runOnHost } from '../src/core/host-ssh.ts';
@@ -15,4 +18,17 @@ it('HOST-SSH-EXIT: nonzero command status is reachable; only SSH errors/timeouts
     const runner = new RecordingRunner({ respond: () => failure });
     assert.equal((await runOnHost(runner, 'pc', host, 'true')).state, 'unreachable');
   }
+});
+
+const scratch = useScratch();
+it('HOST-SSH-COLD: the first health/transport call creates its ControlMaster directory before SSH', async () => {
+  const home = path.join(scratch.dir, 'fresh-home');
+  const runner = new DiskRunner({dryRun: false, respond: (cmd, args) => {
+    if (cmd !== 'ssh') return undefined;
+    const socket = args[args.indexOf('-S') + 1]!;
+    return fs.existsSync(path.dirname(socket)) ? {code: 0, stdout: 'ready'} : {code: 255, stderr: 'unix_listener: No such file or directory'};
+  }});
+  const host = {ssh: 'owner@fake', port: 2222, workDir: '/work', repos: {}, providers: ['claude' as const]};
+  assert.equal((await runOnHost(runner, 'pc', host, 'true', 1000, {AGENTCTL_HOME: home})).state, 'reachable');
+  assert.ok(fs.existsSync(path.join(home, 'ssh')));
 });

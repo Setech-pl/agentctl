@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { it } from 'node:test';
 import { Context } from '../src/core/context.ts';
 import { remoteGcProgram } from '../src/core/host-gc.ts';
-import { planGc, applyGc } from '../src/core/gc.ts';
+import { planGc, applyGc, renderGc } from '../src/core/gc.ts';
 import { DiskRunner, makeConfig, seedTask, useScratch } from './helpers.ts';
 import type { ExecOptions, ExecResult } from '../src/core/runner.ts';
 const scratch = useScratch();
@@ -40,6 +40,7 @@ function world() {
 }
 it('remote GC: host sizes, cached preview, on-host deletion, reports preserved', async () => {
   const w = world(), plan = await planGc(w.ctx);
+  assert.match(renderGc(plan).join('\n'), /host pc:/);
   assert.ok(plan.items.some(i => i.host === 'pc' && i.kind === 'worktree' && i.bytes > 0));
   assert.equal(plan.items.filter(i => i.host === 'pc' && i.kind === 'cache').length, 2);
   const calls = w.calls(); const cached = await planGc(w.ctx, { cachedSizes: true });

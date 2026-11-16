@@ -322,6 +322,16 @@
       "HOST-REDISCOVER: recover a renamed remote window by task identity rather than stale tmux ID"
     ]
   },
+  "HOST-SSH-COLD": {
+    "rev": "v0.22.4",
+    "outcome": "IMPORT-ERROR",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "tests/host-ssh-exit.test.ts",
+      "tests/host-ssh-exit.test.ts"
+    ]
+  },
   "HOST-SSH-EXIT": {
     "rev": "v0.22.4",
     "outcome": "IMPORT-ERROR",

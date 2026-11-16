@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| HOST-SSH-COLD | The first host health probe failed because its ControlMaster socket directory did not exist. | `tests/host-ssh-exit.test.ts` (`^HOST-SSH-COLD:`) | 0.23.0 | cannot run on v0.22.4: the code under test did not exist there (import error) |
 | HOST-DISK-PROBE | Host disk health used wrong df fields and did not expand remote HOME or honor host PATH. | `tests/host-health-home.test.ts` (`^HOST-DISK-PROBE:`) | 0.23.0 | cannot run on v0.22.4: the code under test did not exist there (import error) |
 | HOST-HOLD-OFFLINE | Persisted quota evidence could replace host-unreachable with limited after SSH loss. | `tests/host-tasks.test.ts` (`^HOST-HOLD-OFFLINE:`) | 0.23.0 | cannot run on v0.22.4: the code under test did not exist there (import error) |
 | HOST-GC-TARGET | An endpoint change could retarget a reviewed remote GC plan to a different SSH host. | `tests/host-gc.test.ts` (`^HOST-GC-TARGET:`) | 0.23.0 | cannot run on v0.22.4: the code under test did not exist there (import error) |

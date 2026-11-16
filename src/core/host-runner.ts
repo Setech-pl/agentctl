@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { HostConfig } from './hosts.ts';
-import { runOnHost, sshSocketPath, SSH_COMMAND_TIMEOUT_MS } from './host-ssh.ts';
+import { runOnHost, SSH_COMMAND_TIMEOUT_MS } from './host-ssh.ts';
 import type { ExecOptions, ExecResult, Runner } from './runner.ts';
 import { AgentctlError, shellLine, shellQuote } from './util.ts';
 
@@ -28,7 +28,6 @@ export class HostRunner implements Runner {
       return `export ${key}=${shellQuote(value)};`;
     }).join(' ');
     const command = `${exports}${opts.cwd ? ` cd ${shellQuote(opts.cwd)} &&` : ''} ${shellLine(cmd, args)}`.trim();
-    if (!this.dryRun) await this.local.mkdir(path.dirname(sshSocketPath(this.name)));
     const result = await runOnHost(this.local, this.name, this.host, command, opts.timeoutMs ?? SSH_COMMAND_TIMEOUT_MS, process.env, { input: opts.input, readOnly: opts.readOnly, dryResult: opts.dryResult });
     if (result.state !== 'reachable') {
       const detail = `${result.state}: ${result.stderr.trim()}`;
