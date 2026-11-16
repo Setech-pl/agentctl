@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- D1: GC checks fresh tracked/untracked status and unpushed commits in every task repository, including cached MCP previews; explicit `force_dirty` / `--force-dirty` is required to discard them. / GC sprawdza zmiany i niewysłane commity w każdym repo, także w podglądzie MCP; usunięcie wymaga jawnego nadpisania.
+
 ## [0.22.4] - 2026-11-15
 
 - G1a validation: board puts timed holds before long n/d explanations so they remain visible at 80 columns. / Board pokazuje blokadę przed długim opisem n/d, także przy 80 kolumnach.

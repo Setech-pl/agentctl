@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| D1 | Cached GC previews declared dirty multi-repository tasks clean and missed unpushed commits. | `tests/fix0227-gc.test.ts` (`^D1:`) | 0.22.5 | fails on v0.22.4 (3 failing of 3) |
 | G1b | Provider quota errors left GLM capacity free when usage was unavailable. | `tests/fix0226-g1b.test.ts` | 0.22.4 | fails on v0.22.3 (7 failing of 8) |
 | G1a | Plan n/d left free provider slots with no timed hold override. | `tests/fix0226-g1a.test.ts` | 0.22.4 | fails on v0.22.3 (1 failing of 1) |
 | H6 | Overlap warnings counted predecessor imports and ignored the integration base. | `tests/fix0226-h6.test.ts` | 0.22.4 | fails on v0.22.3 (2 failing of 2) |

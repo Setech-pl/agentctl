@@ -148,6 +148,19 @@
       "tests/consult.test.ts"
     ]
   },
+  "D1": {
+    "rev": "v0.22.4",
+    "outcome": "FAILS",
+    "failed": 3,
+    "passed": 0,
+    "failing": [
+      "D1: cached MCP preview checks every repo including untracked files in the second",
+      "D1: unpushed commits and dirt created after preview are refused at apply",
+      "D1: failed git risk checks fail closed even with a dirty override",
+      "D1: cached MCP preview checks every repo including untracked files in the second",
+      "D1: unpushed commits and dirt created after preview are refused at apply"
+    ]
+  },
   "F1": {
     "rev": "v0.19.0",
     "outcome": "IMPORT-ERROR",

@@ -37,3 +37,5 @@ npm run build
 Agentctl działa z twoimi uprawnieniami; worktree nie jest sandboxem OS. Trust folderu nigdy nie jest automatyczny. Lokalny MCP używa desktopowego stdio; web/telefon nie łączy się bezpośrednio. Właściciel ocenia dowody i decyduje o integracji/publikacji; actions to propozycje. [Granice](docs/pl/overview.md#granice).
 
 [Współtworzenie](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [Licencja MIT](LICENSE). Używaj gate repo i cache własnego zadania. Wydanie łączy pełne instrukcje z poprawkami operacyjnymi 0.22.2, diagnostyką i pomocą boardu.
+
+GC sprawdza `git status --porcelain --untracked-files=normal` w **każdym** worktree zadania oraz commity przed upstreamem (lub zapisaną bazą). Podgląd pokazuje liczbę zmienionych plików i niewysłanych commitów na repo, także przy rozmiarach z cache. Zmiany zostają bez jawnego CLI `--force-dirty` lub MCP `force_dirty: [TASK]`; wykonanie sprawdza stan ponownie. Pliki ignorowane są pomijane.

@@ -55,8 +55,9 @@ function world(name: string): World {
       if (cmd !== 'git') return tmux.respond(cmd, args, opts);
       const dir = args[1] as string;
       const rest = args.slice(2).join(' ');
+    if (args.includes('rev-list')) return { stdout: '0' };
       if (rest === 'rev-parse --abbrev-ref HEAD') return { stdout: dir === repo ? 'main\n' : `${wtDirs.get(dir) ?? 'agent/x'}\n` };
-      if (rest === 'status --porcelain') return { stdout: dirty.has(dir) ? ' M a.txt\n?? b.txt\n' : '' };
+      if (rest === 'status --porcelain --untracked-files=normal') return { stdout: dirty.has(dir) ? ' M a.txt\n?? b.txt\n' : '' };
       if (rest === 'worktree list --porcelain') return { stdout: [`worktree ${repo}\nbranch refs/heads/main`, ...[...wtDirs].map(([d, b]) => `worktree ${d}\nbranch refs/heads/${b}`), ...foreign.map((f) => `worktree ${f}\nbranch refs/heads/other`)].join('\n\n') + '\n' };
       const verify = /^rev-parse --verify --quiet refs\/heads\/(.+)$/.exec(rest);
       if (verify) return { code: branches.has(verify[1] as string) ? 0 : 1 };

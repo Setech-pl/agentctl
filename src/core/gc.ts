@@ -33,6 +33,9 @@ export interface GcItem {
   cohort?: string;
   repo?: string;
   branch?: string;
+  base?: string;
+  dirtyFiles?: number;
+  unpushedCommits?: number;
 }
 
 export interface GcSkip {
@@ -42,6 +45,9 @@ export interface GcSkip {
   reason: string;
   bytes?: number;
   cohort?: string;
+  repo?: string;
+  dirtyFiles?: number;
+  unpushedCommits?: number;
 }
 
 export interface GcPlan {
@@ -56,6 +62,7 @@ export interface GcPlan {
   unknownCacheDirs: number;
   foreignWorktrees?: number;
   forceLinks?: boolean;
+  forceDirty?: string[];
 }
 
 export interface GcOptions {
@@ -65,6 +72,8 @@ export interface GcOptions {
   olderThan?: string | undefined;
   branches?: boolean | undefined;
   cohort?: string | undefined;
+  /** Explicit owner override: true for CLI selection, or named tasks for MCP. */
+  forceDirty?: boolean | string[];
   /** CLI-only override for link references, never dirty/active/protected worktrees. */
   forceLinks?: boolean;
 }
@@ -78,6 +87,19 @@ async function git(ctx: Context, args: string[]): Promise<{ code: number; out: s
   const r = await ctx.runner.exec('git', args, { readOnly: true });
   return { code: r.code, out: r.stdout.trim(), err: r.stderr.trim() };
 }
+
+/** Fresh safety facts, independent of cached disk measurements. No network or ignored files. */
+async function worktreeRisk(ctx: Context, wt: string, base?: string) {
+  const status = await git(ctx, ['-C', wt, 'status', '--porcelain', '--untracked-files=normal']);
+  if (status.code !== 0) throw new Error(`git status failed: ${status.err || status.code}`);
+  const upstream = await git(ctx, ['-C', wt, 'rev-parse', '--verify', '--quiet', '@{upstream}']);
+  const comparison = upstream.code === 0 && upstream.out ? '@{upstream}' : base ?? 'main';
+  const ahead = await git(ctx, ['-C', wt, 'rev-list', '--count', `${comparison}..HEAD`]);
+  if (ahead.code !== 0 || !/^\d+$/.test(ahead.out)) throw new Error(`cannot check unpushed commits against ${comparison}: ${ahead.err || 'no count'}`);
+  return { dirtyFiles: status.out ? status.out.split('\n').length : 0, unpushedCommits: Number(ahead.out), comparison };
+}
+
+const permitsDirty = (tasks: boolean | string[] | undefined, task: string) => tasks === true || Array.isArray(tasks) && tasks.some(t => t.toLowerCase() === task.toLowerCase());
 
 interface WorktreeListing {
   path: string;
@@ -151,18 +173,19 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
         skipped.push({ task: record.task, kind: 'worktree', target: wt, reason: `has ${head.out} checked out` });
         continue;
       }
-      // In cached previews git worktree remove will enforce cleanliness at execution.
-      const status = opts.cachedSizes ? { code: 0, out: '', err: '' } : await git(ctx, ['-C', wt, 'status', '--porcelain']);
-      if (status.code !== 0) {
-        skipped.push({ task: record.task, kind: 'worktree', target: wt, reason: `git does not answer (${status.err.split('\n')[0] || `exit ${status.code}`})` });
+      let risk;
+      try { risk = await worktreeRisk(ctx, wt, repo.base); }
+      catch (error) {
+        skipped.push({ task: record.task, kind: 'worktree', target: wt, repo: repo.path, reason: errorMessage(error) });
         continue;
       }
-      if (status.out !== '') {
-        skipped.push({ task: record.task, kind: 'worktree', target: wt, reason: `uncommitted changes (${status.out.split('\n').length} file${status.out.split('\n').length === 1 ? '' : 's'})` });
+      const detail = `${risk.dirtyFiles} dirty files, ${risk.unpushedCommits} unpushed commits vs ${risk.comparison}`;
+      if ((risk.dirtyFiles || risk.unpushedCommits) && !permitsDirty(opts.forceDirty, record.task)) {
+        skipped.push({ task: record.task, kind: 'worktree', target: wt, repo: repo.path, ...risk, reason: `uncommitted changes / unpushed work (${detail}); requires force_dirty: [${record.task}] / --force-dirty` });
         continue;
       }
       const bytes = await size(wt);
-      items.push({ kind: 'worktree', task: record.task, target: wt, bytes, detail: `${record.cancelled ? 'cancelled' : 'closed'} task, no uncommitted changes`, repo: repo.path });
+      items.push({ kind: 'worktree', task: record.task, target: wt, bytes, ...risk, detail: `${record.cancelled ? 'cancelled' : 'closed'} task, ${detail}`, repo: repo.path, ...(repo.base ? { base: repo.base } : {}) });
       removing.add(key);
     }
   }
@@ -284,7 +307,7 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
   }
   const freeBytes = items.reduce((n, i) => n + i.bytes, 0);
   const foreignWorktrees = skipped.filter(s => s.kind === 'worktree-foreign').length;
-  return { ...(opts.cachedSizes ? { cachedSizes: true } : {}), autoCacheFreedBytes: all.filter(r => cohort === undefined || (r.cohort && cohortKey(r.cohort) === cohortKey(cohort))).reduce((sum, r) => sum + worktreeCacheFreed(ctx, r), 0), ...(opts.forceLinks ? { forceLinks: true } : {}), items, skipped: cohort === undefined ? skipped : skipped.filter(s => s.kind !== 'worktree-foreign'), freeBytes, olderThanMs, unknownCacheDirs, ...(cohort !== undefined ? { foreignWorktrees } : {}) };
+  return { forceDirty: mine.filter(r => permitsDirty(opts.forceDirty, r.task)).map(r => r.task), ...(opts.cachedSizes ? { cachedSizes: true } : {}), autoCacheFreedBytes: all.filter(r => cohort === undefined || (r.cohort && cohortKey(r.cohort) === cohortKey(cohort))).reduce((sum, r) => sum + worktreeCacheFreed(ctx, r), 0), ...(opts.forceLinks ? { forceLinks: true } : {}), items, skipped: cohort === undefined ? skipped : skipped.filter(s => s.kind !== 'worktree-foreign'), freeBytes, olderThanMs, unknownCacheDirs, ...(cohort !== undefined ? { foreignWorktrees } : {}) };
 }
 
 export interface GcResult {
@@ -306,7 +329,10 @@ export async function applyGc(ctx: Context, plan: GcPlan): Promise<GcResult> {
         if (kind === 'worktree') {
           const users = linkUsers(item.target, knownLinkReferences(config));
           if (users.length && !plan.forceLinks) throw new Error(`links target used by ${users.join(', ')}`);
-          const r = await runner.exec('git', ['-C', item.repo as string, 'worktree', 'remove', item.target], { timeoutMs: config.git.timeoutS * 1000 });
+          const risk = await worktreeRisk(ctx, item.target, item.base);
+          const forced = permitsDirty(plan.forceDirty, item.task);
+          if ((risk.dirtyFiles || risk.unpushedCommits) && !forced) throw new Error(`worktree has ${risk.dirtyFiles} dirty files and ${risk.unpushedCommits} unpushed commits; kept`);
+          const r = await runner.exec('git', ['-C', item.repo as string, 'worktree', 'remove', ...(forced ? ['--force'] : []), item.target], { timeoutMs: config.git.timeoutS * 1000 });
           if (r.code !== 0) throw new Error(r.stderr.trim().split('\n')[0] || `git exit ${r.code}`);
         } else if (kind === 'cache') {
           const st = plan.cachedSizes ? fs.lstatSync(item.target) : undefined;
@@ -346,6 +372,7 @@ export function gcView(plan: GcPlan, opts: GcViewOptions = {}) {
   for (const s of plan.skipped.filter(s => s.reason.startsWith('newer than '))) { const group = newer.get(s.task) ?? { task: s.task, files: 0, bytes: 0, reason: s.reason }; group.files++; group.bytes += s.bytes ?? 0; newer.set(s.task, group); }
   const page = <T>(items: T[]) => ({ total: items.length, offset, next_offset: offset + limit < items.length ? offset + limit : null, items: items.slice(offset, offset + limit) });
   return { autoCacheFreedBytes: plan.autoCacheFreedBytes ?? 0, freeBytes: plan.freeBytes, summary: `można zwolnić ${(plan.freeBytes / 1e9).toFixed(3)} GB (${plan.freeBytes} bytes)`, categories,
+    worktrees: page([...plan.items, ...plan.skipped].filter(i => i.kind === 'worktree').map(i => ({ task: i.task, repo: i.repo, target: i.target, dirtyFiles: i.dirtyFiles ?? null, unpushedCommits: i.unpushedCommits ?? null, detail: 'reason' in i ? i.reason : i.detail }))),
     skipped: { count: plan.skipped.length, bytes: plan.skipped.reduce((n, s) => n + (s.bytes ?? 0), 0), reasons: page([...reasons.values()]) },
     cohorts: page([...cohorts.values()]), newer: page([...newer.values()]), unknownCacheDirs: plan.unknownCacheDirs, foreignWorktrees: plan.foreignWorktrees ?? 0,
     ...(opts.detail ? { details: page([...plan.items.map(i => ({ ...i, action: 'remove/archive' })), ...plan.skipped.map(s => ({ ...s, action: 'skip' }))]) } : {}),
@@ -361,6 +388,7 @@ export function renderGc(plan: GcPlan, opts: GcViewOptions & { applied?: GcResul
   if (!opts.applied) {
     lines.push('Would clean up (a dry run; --apply does it, after a y/N):');
     if (!plan.items.length) lines.push('Nothing to clean up.');
+    for (const w of view.worktrees.items) lines.push(`  worktree ${w.task} ${w.target}: ${w.detail}`);
     for (const reason of view.skipped.reasons.items) lines.push(`  ${reason.reason}: ${reason.count}, ${reason.bytes} bytes`);
     for (const c of view.cohorts.items) lines.push(`cohort ${c.cohort}: ${c.count}, ${c.bytes} bytes; skipped ${c.skipped}, ${c.skippedBytes} bytes`);
     for (const n of view.newer.items) lines.push(`  ${n.task}: ${n.reason}, ${n.files} files, ${n.bytes} bytes`);

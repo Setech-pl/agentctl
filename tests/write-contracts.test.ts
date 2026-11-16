@@ -57,7 +57,7 @@ it('P83: cached retry registration defers checkout scanning, worker rechecks dir
   assert.equal(scans, 1, 'worker must reject dirty residue before starting inference');
 });
 
-it('P83: cached GC preview/confirm do not measure or scan; dirty deletion is refused by git', async () => {
+it('P83: cached GC preview checks dirt without recursive measurements; refuses dirty deletion', async () => {
   const { planGc, applyGc } = await import('../src/core/gc.ts');
   const { DiskRunner, makeConfig, seedTask } = await import('./helpers.ts');
   const root = scratch.sub('gc'), repo = scratch.sub('gc/repo'), wt = scratch.sub('gc/wt');
@@ -68,19 +68,21 @@ it('P83: cached GC preview/confirm do not measure or scan; dirty deletion is ref
   let statuses = 0, removals = 0;
   const runner = new DiskRunner({ dryRun: false, startTime: Date.now(), respond: (cmd, args) => {
     if (cmd === 'tmux') return { code: 1 };
-    if (args.includes('status')) { statuses++; throw new Error('unexpected git walk'); }
+    if (args.includes('status')) { statuses++; return { stdout: '?? only-copy.png' }; }
+    if (args.includes('rev-list')) return { stdout: '0' };
     if (args.includes('--abbrev-ref')) return { stdout: 'task-branch' };
     if (args.includes('remove')) { removals++; return { code: 1, stderr: 'contains modified or untracked files' }; }
     return { stdout: '' };
   } });
   const ctx = new (await import('../src/core/context.ts')).Context(runner, config, () => {});
   const plan = await planGc(ctx, { cachedSizes: true });
-  assert.equal(statuses, 0);
-  assert.ok(plan.items.some(i => i.kind === 'worktree'));
+  assert.equal(statuses, 1);
+  assert.ok(!plan.items.some(i => i.kind === 'worktree'));
+  assert.ok(plan.skipped.some(i => /uncommitted changes/.test(i.reason)));
   assert.ok(plan.skipped.some(i => i.target.endsWith('old-dir') && /directory age/.test(i.reason)));
   const result = await applyGc(ctx, plan);
-  assert.equal(removals, 1);
-  assert.match(result.failed[0]!.reason, /modified or untracked/);
+  assert.equal(removals, 0);
+  assert.equal(result.failed.length, 0);
   assert.ok(fs.existsSync(wt));
   assert.ok(fs.existsSync(path.join(path.dirname(record.report), 'old-dir/keep')));
 });

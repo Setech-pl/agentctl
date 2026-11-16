@@ -1201,6 +1201,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('--verbose', 'full details, paginated with --offset/--limit')
     .option('--offset <n>', 'page offset', '0')
     .option('--limit <n>', 'page size (1–100)', '10')
+    .option('--force-dirty', 'explicitly allow deleting dirty/unpushed worktrees in this selection')
     .option('--force-links', 'CLI only: allow removing a worktree referenced by links (other protections stay)')
     .option('--apply', 'do it (after showing the list and asking y/N); without it nothing is changed')
     .option('--older-than <age>', 'age of the files next to the reports before they go: 12h, 7d, 2w (default 7d)')
@@ -1209,12 +1210,12 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('-y, --yes', 'with --apply: do not ask')
     .option('--json', 'machine-readable output (the plan, or the result with --apply)')
     .action(
-      guarded(async (opts: { preview?: boolean; dryRun?: boolean; verbose?: boolean; offset: string; limit: string; forceLinks?: boolean; apply?: boolean; olderThan?: string; branches?: boolean; cohort?: string; yes?: boolean; json?: boolean }) => {
+      guarded(async (opts: { preview?: boolean; dryRun?: boolean; verbose?: boolean; offset: string; limit: string; forceLinks?: boolean; forceDirty?: boolean; apply?: boolean; olderThan?: string; branches?: boolean; cohort?: string; yes?: boolean; json?: boolean }) => {
         const ctx = contextFor(false, { migrate: false });
         if (opts.apply && (opts.preview || opts.dryRun)) throw new AgentctlError("--apply cannot be combined with --preview or --dry-run");
         const view = { detail: Boolean(opts.verbose), offset: Number(opts.offset), limit: Number(opts.limit) };
         if (!Number.isInteger(view.offset) || view.offset < 0 || !Number.isInteger(view.limit) || view.limit < 1 || view.limit > 100) throw new AgentctlError("offset must be >=0 and limit must be 1–100");
-        const plan = await planGc(ctx, { olderThan: opts.olderThan, branches: opts.branches, cohort: opts.cohort, forceLinks: opts.forceLinks });
+        const plan = await planGc(ctx, { olderThan: opts.olderThan, branches: opts.branches, cohort: opts.cohort, forceLinks: opts.forceLinks, forceDirty: opts.forceDirty });
         if (!opts.apply) {
           if (opts.json) return line(JSON.stringify(gcView(plan, view), null, 2));
           for (const l of renderGc(plan, view)) line(l);
