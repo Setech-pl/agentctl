@@ -4,6 +4,7 @@ import { it } from 'node:test';
 import path from 'node:path';
 import { Context } from '../src/core/context.ts';
 import { MCP_TOOLS, publishMcpSnapshot, applyMcpRequest } from '../src/core/mcp-tools.ts';
+import { readTaskRecord } from '../src/core/taskstore.ts';
 import { tryFileLock } from '../src/core/file-lock.ts';
 import { readMcpRequests } from '../src/core/mcp-requests.ts';
 import { saveEntry } from '../src/core/queue.ts';
@@ -89,4 +90,22 @@ it('A3: GC preview is Accepted without slow checks and read back after watch', a
   assert.match(confirm.text, /^Accepted/);
   const different = await gc.run(deps, {branches: true});
   assert.match(different.text, /^Accepted/, 'different filters require watch to prepare a new plan');
+});
+
+it('W4: summary receipts are durable while status still serves the previous watch snapshot', async () => {
+  const config = makeConfig(scratch.sub('summary-receipt'), 'watch: {interval: 2}\nmcp: {max_response_kb: 256}');
+  const runner = new DiskRunner({dryRun: false, respond: new FakeTmux().respond});
+  const ctx = new Context(runner, config, () => {}), deps = {context: () => ctx, notify: async () => {}};
+  for (let i = 1; i <= 6; i++) {
+    const record = seedTask(config, `NC-${i}`);
+    fs.mkdirSync(path.dirname(record.report), {recursive: true});
+    fs.writeFileSync(record.report, 'Verdict: PASS\nSummary receipt fixture.\n<!-- agentctl:report-end -->');
+  }
+  await publishMcpSnapshot(ctx);
+  const summary = await MCP_TOOLS.find(t => t.name === 'pull_ready')!.run(deps, {all: true});
+  assert.equal(summary.isError, undefined, summary.text);
+  const cached = JSON.parse((await MCP_TOOLS.find(t => t.name === 'status')!.run(deps, {all: true, format: 'json'})).text);
+  assert.ok(cached.tasks.every((r: {summary_delivered: unknown}) => !r.summary_delivered), 'the previous snapshot can legitimately predate the receipt');
+  const records = Array.from({length: 6}, (_, i) => readTaskRecord(config, `nc-${i + 1}`));
+  assert.ok(records.every(r => r && !r.pulled && r.summaryDelivered), 'task records prove all receipts and preserve unread full reports');
 });

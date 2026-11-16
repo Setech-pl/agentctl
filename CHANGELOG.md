@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.22.5] - 2026-11-16
 
+- Release harness validation: assert summary receipts in task records; a consistent watch snapshot can predate the receipt. / Harness sprawdza potwierdzenia podsumowań w rekordach zadań; snapshot watch może być wcześniejszy.
+
 - D6: every MCP write supports token-only confirmation; WALL also accepts the same `as` without repeating content, and refuses a changed author even on replay. Away now previews before confirmation. / Każdy zapis MCP obsługuje potwierdzenie samym tokenem; WALL przyjmuje to samo `as`, a zmiana autora jest odrzucana. Away także wymaga podglądu.
 
 - Validation: expose risk counts even for link-protected worktrees, skip missing closed-task default placeholders, and retain cache size accounting without treating it as reclaimable. / Liczniki ryzyka także dla chronionych linków; pomijanie usuniętych celów; rozmiar zachowanego cache nie jest miejscem do odzyskania.

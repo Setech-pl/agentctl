@@ -144,6 +144,7 @@ export const BUGS: BugEntry[] = [
 
 /** IDs that appear in the CHANGELOG but are not a fixed bug (or have no behaviour to reproduce), with the reason. */
 export const NOT_BUGS: Record<string, string> = {
+  'FIX0227-W4-harness': 'harness assertion aligned with the intentional A3 snapshot contract; production unchanged, covered by W4 in a3-snapshot.test.ts',
   P10: 'feature: optional tmux.socket and attach hints',
   P44: 'feature: dedicated dev tmux server documentation and doctor checks',
   P17: 'feature: stale project link warnings in previews',

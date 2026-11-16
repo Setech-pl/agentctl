@@ -119,6 +119,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 CHANGELOG identifiers that are features, improvements or studies rather than fixed bugs:
 
+- FIX0227-W4-harness: harness assertion aligned with the intentional A3 snapshot contract; production unchanged, covered by W4 in a3-snapshot.test.ts
 - P10: feature: optional tmux.socket and attach hints
 - P44: feature: dedicated dev tmux server documentation and doctor checks
 - P17: feature: stale project link warnings in previews
