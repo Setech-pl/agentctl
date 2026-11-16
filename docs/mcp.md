@@ -274,7 +274,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 |---|---|---|
 | `status` | read | `all?`, `cohort?`, `format?`, `detail?`, `offset?`, `limit?`, `capacity?` |
 | `events_since` | read | `as?`, `cursor?`, `limit?`, `client?`, `since?`, `cohort?`, `peek?`, `format?`, `detail?` |
-| `gc_preview` | read | `request_id?`, `detail?`, `offset?`, `limit?`, `older_than?`, `merged?`, `cohort?` |
+| `gc_preview` | read | `include_cache?`, `keep_cache?`, `force_dirty?`, `request_id?`, `detail?`, `offset?`, `limit?`, `older_than?`, `merged?`, `cohort?` |
 | `limits` | read | `format?`, `detail?` |
 | `set_limits` | write | `claude?`, `codex?`, `queue_hold?`, `hold?`, `confirm?`, `preview_token?` |
 | `reserve` | write | `claude?`, `codex?`, `note?`, `release?`, `confirm?`, `preview_token?` |
@@ -333,7 +333,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 | `manager_start` | write | `project?`, `name?`, `model?`, `effort?`, `confirm?`, `preview_token?` |
 | `manager_stop` | write | `confirm?`, `preview_token?` |
 | `notify_test` | write | `phone?`, `confirm?`, `preview_token?` |
-| `gc` | write | `detail?`, `offset?`, `limit?`, `cohort?`, `older_than?`, `branches?`, `confirm?`, `preview_token?` |
+| `gc` | write | `include_cache?`, `keep_cache?`, `force_dirty?`, `detail?`, `offset?`, `limit?`, `cohort?`, `older_than?`, `branches?`, `confirm?`, `preview_token?` |
 | `wall_read` | read | `as?`, `channel?`, `id?`, `since?`, `status?`, `kind?`, `limit?`, `before?` |
 | `wall_post` | write | `as?`, `channel?`, `kind?`, `subject?`, `body?`, `refs?`, `to?`, `confirm?`, `preview_token?` |
 | `wall_reply` | write | `as?`, `reply_to?`, `body?`, `subject?`, `kind?`, `refs?`, `to?`, `confirm?`, `preview_token?` |
@@ -370,7 +370,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 - `dataset export`: `--since &lt;time&gt;`, `--until &lt;time&gt;`, `--cohort &lt;name&gt;`, `--agent &lt;provider&gt;`, `--out &lt;file&gt;`, `--format &lt;format&gt;`, `--include-prompts`, `--include-reports`
 - `log`: `--since &lt;age&gt;`, `--cohort &lt;name&gt;`, `--json`, `--clip`
 - `stats`: `--since &lt;age&gt;`, `--cohort &lt;name&gt;`, `--json`, `--clip`
-- `gc`: `--preview`, `--dry-run`, `--verbose`, `--offset &lt;n&gt;`, `--limit &lt;n&gt;`, `--force-links`, `--apply`, `--older-than &lt;age&gt;`, `--branches`, `--cohort &lt;name&gt;`, `-y, --yes`, `--json`
+- `gc`: `--preview`, `--dry-run`, `--verbose`, `--offset &lt;n&gt;`, `--limit &lt;n&gt;`, `--include-cache`, `--keep-cache &lt;tasks...&gt;`, `--force-dirty`, `--force-links`, `--apply`, `--older-than &lt;age&gt;`, `--branches`, `--cohort &lt;name&gt;`, `-y, --yes`, `--json`
 - `archive`: `--older-than &lt;age&gt;`, `--dry-run`
 - `pull`: `--ready`, `--all`, `--cohort &lt;name&gt;`
 - `close`: `--cohort &lt;name&gt;`, `--rm-worktree`, `-y, --yes`, `--dry-run`

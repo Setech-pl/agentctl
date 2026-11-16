@@ -129,7 +129,7 @@ async function gcScenario(): Promise<void> {
     check('dry run changed nothing', fs.existsSync(wt1) && fs.existsSync(shots));
     const refused = h.agentctl(['gc', '--apply', '--branches'], { input: '' });
     check('--apply without a terminal and without -y refuses', refused.code === 1 && /no terminal to ask on/.test(refused.stderr), refused.stderr);
-    const applied = h.agentctl(['gc', '--apply', '--branches', '-y']);
+    const applied = h.agentctl(['gc', '--include-cache', '--apply', '--branches', '-y']);
     check('--apply succeeds', applied.code === 0 && /Freed/.test(applied.stdout), applied.stdout + applied.stderr);
     check('the clean worktree is gone, the dirty one stays', !fs.existsSync(wt1) && fs.existsSync(path.join(wt2, 'wip.txt')));
     check('the old file is gone, the report stays', !fs.existsSync(shots) && fs.existsSync(path.join(path.dirname(shots), 'LG-1.md')));

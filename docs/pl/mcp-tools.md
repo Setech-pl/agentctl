@@ -40,7 +40,7 @@ Argumenty z ? są opcjonalne. Pola dostawców obejmują opcjonalnych; uruchomion
 |---|---|---|---|
 | `status` | odczyt | `all?`, `cohort?`, `format?`, `detail?`, `offset?`, `limit?`, `capacity?` | Stan zadań i raportów; cache podaje wiek, po 5 min krótki fallback kolejki/dziennika. |
 | `events_since` | odczyt | `as?`, `cursor?`, `limit?`, `client?`, `since?`, `cohort?`, `peek?`, `format?`, `detail?` | Przyrost według as czatu (client nadpisuje), otwarta skrzynka WALL; peek zachowuje kursor. |
-| `gc_preview` | odczyt | `request_id?`, `detail?`, `offset?`, `limit?`, `older_than?`, `merged?`, `cohort?` | Chroniony plan sprzątania z rozmiarami i powodami pominięcia; bez usuwania. |
+| `gc_preview` | odczyt | `include_cache?`, `keep_cache?`, `force_dirty?`, `request_id?`, `detail?`, `offset?`, `limit?`, `older_than?`, `merged?`, `cohort?` | Chroniony plan sprzątania z rozmiarami i powodami pominięcia; bez usuwania. |
 | `limits` | odczyt | `format?`, `detail?` | Limity slotów, zajętość, rezerwacje, kolejka i obowiązujący queue_hold. |
 | `set_limits` | zapis | `claude?`, `codex?`, `queue_hold?`, `hold?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Zmień limity, queue_hold i czasowe hold (HH:MM/ISO/3h/off); zapis synchroniczny. |
 | `reserve` | zapis | `claude?`, `codex?`, `note?`, `release?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Zarezerwuj sloty dla agentów uruchamianych ręcznie. |
@@ -99,7 +99,7 @@ Argumenty z ? są opcjonalne. Pola dostawców obejmują opcjonalnych; uruchomion
 | `manager_start` | zapis | `project?`, `name?`, `model?`, `effort?`, `confirm?`, `preview_token?` | Uruchom sesję nadzorczą Claude z Remote Control. |
 | `manager_stop` | zapis | `confirm?`, `preview_token?` | Zatrzymaj sesję manager. |
 | `notify_test` | zapis | `phone?`, `confirm?`, `preview_token?` | Test powiadomienia lokalnego; phone jawnie wysyła do ntfy. |
-| `gc` | zapis | `detail?`, `offset?`, `limit?`, `cohort?`, `older_than?`, `branches?`, `confirm?`, `preview_token?` | Zastosuj chroniony plan sprzątania po podglądzie; opcjonalne scalone lokalne gałęzie. |
+| `gc` | zapis | `include_cache?`, `keep_cache?`, `force_dirty?`, `detail?`, `offset?`, `limit?`, `cohort?`, `older_than?`, `branches?`, `confirm?`, `preview_token?` | Zastosuj chroniony plan sprzątania po podglądzie; opcjonalne scalone lokalne gałęzie. |
 | `wall_read` | odczyt | `as?`, `channel?`, `id?`, `since?`, `status?`, `kind?`, `limit?`, `before?` | Kanały, nagłówki z filtrami albo wiadomość z treścią, refs, historią i wątkiem. |
 | `wall_post` | zapis | `as?`, `channel?`, `kind?`, `subject?`, `body?`, `refs?`, `to?`, `confirm?`, `preview_token?` | Opublikuj dozwoloną wiadomość po kontroli autora, refs, rozmiaru i sekretów. |
 | `wall_reply` | zapis | `as?`, `reply_to?`, `body?`, `subject?`, `kind?`, `refs?`, `to?`, `confirm?`, `preview_token?` | Odpowiedz w kanale rodzica; answer oznacza otwarte pytanie jako answered. |

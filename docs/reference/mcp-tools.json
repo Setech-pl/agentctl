@@ -162,11 +162,34 @@
       "name": "gc_preview",
       "kind": "read",
       "title": "Preview of the clean-up",
-      "description": "What \"agentctl gc\" would free now, without doing anything: git worktrees of closed, cancelled and archived tasks without uncommitted changes, old files next to the reports, state folders to archive, merged branches (merged: true), each with its size, and what is skipped and why. Use the separately allowed gc tool to apply this protected plan with preview and confirm: true (branches default false). Use when the user needs this operation. CLI: agentctl gc. With \"agentctl watch\" running, confirm records the request and returns at once; the watcher checks the preview's scope again and applies it at its next tick (events_since: MCP WYKONANE, or MCP BŁĄD with the reason and a notification). Every response is bounded by mcp.max_response_kb (default 8 KiB). A truncated JSON envelope gives response_id and next_response_offset; call response_page with only those continuation fields to retrieve the next fragment without executing again. Concatenate fragment values to recover the original text/JSON.",
+      "description": "What \"agentctl gc\" would free now, without doing anything: git worktrees of closed, cancelled and archived tasks without uncommitted changes, only with owner-confirmed include_cache: true, old unreferenced cache entries (keep_cache tasks stay); state folders to archive, merged branches (merged: true), each with its size, and what is skipped and why. Use the separately allowed gc tool to apply this protected plan with preview and confirm: true (branches default false). Use when the user needs this operation. CLI: agentctl gc. With \"agentctl watch\" running, confirm records the request and returns at once; the watcher checks the preview's scope again and applies it at its next tick (events_since: MCP WYKONANE, or MCP BŁĄD with the reason and a notification). Every response is bounded by mcp.max_response_kb (default 8 KiB). A truncated JSON envelope gives response_id and next_response_offset; call response_page with only those continuation fields to retrieve the next fragment without executing again. Concatenate fragment values to recover the original text/JSON.",
       "input": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "properties": {
+          "include_cache": {
+            "description": "Explicit owner confirmation to delete old unreferenced cache entries; default false.",
+            "type": "boolean"
+          },
+          "keep_cache": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 60,
+              "description": "Task ID such as NC-42; case does not matter and a unique prefix is enough."
+            }
+          },
+          "force_dirty": {
+            "description": "Owner-authorized tasks whose dirty/unpushed worktrees may be removed.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 60,
+              "description": "Task ID such as NC-42; case does not matter and a unique prefix is enough."
+            }
+          },
           "request_id": {
             "description": "Read a GC preview accepted by watch: the request UUID from Accepted.",
             "type": "string"
@@ -2160,6 +2183,27 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "properties": {
+          "include_cache": {
+            "type": "boolean"
+          },
+          "keep_cache": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 60,
+              "description": "Task ID such as NC-42; case does not matter and a unique prefix is enough."
+            }
+          },
+          "force_dirty": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 60,
+              "description": "Task ID such as NC-42; case does not matter and a unique prefix is enough."
+            }
+          },
           "detail": {
             "type": "boolean"
           },

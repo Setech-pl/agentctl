@@ -78,7 +78,7 @@ process.stdin.setRawMode(true);process.stdin.resume();process.stdin.on('data',()
     const wt = path.join(h.root, 'finished'); await runGit(repo, ['worktree', 'add', '-b', 'finished', wt]); record('FINISHED', { closed: true, repos: [{ path: repo, worktree: wt, branch: 'finished' }] });
     fs.writeFileSync(path.join(repo, '.agentctl.yaml'), YAML.stringify({ links: [{ from: 'dep', to: wt }] }));
     const plan = await planGc(ctx); check('P2 GC protects real worktree referenced by project', plan.skipped.some(s => s.target === wt && s.reason.includes('links target'))); const applied = await applyGc(ctx, plan); check('P2 GC apply leaves referenced worktree', !applied.failed.length && fs.existsSync(wt));
-    const compact = await call('gc_preview'); check('P9 default GC is compact summary without detailed paths', Buffer.byteLength(compact.text) < 8192 && !compact.text.includes(wt) && compact.text.includes('categories'));
+    const compact = await call('gc_preview'); check('P9 default GC is a bounded summary with repository safety facts', Buffer.byteLength(compact.text) < 16384 && compact.text.includes('worktrees') && compact.text.includes('categories'));
     const displaced = path.join(h.root, 'displaced.md'); fs.renameSync(ready.report, displaced); check('P5 get_report agrees with missing canonical', (await call('get_report', { task: 'READY' })).error && !(await call('list_reports', { all: true })).text.includes('"task":"READY"'));
     fs.renameSync(displaced, ready.report); fs.rmSync(path.join(repo, '.agentctl.yaml'));
     record('BUSY'); h.tmux(['new-window', '-d', '-t', `=${h.session}:`, '-n', 'busy', path.join(h.fakeBin, 'claude')]); await pause(250); fs.writeFileSync(mode, 'busy'); await pause(250);

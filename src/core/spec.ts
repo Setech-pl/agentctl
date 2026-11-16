@@ -52,6 +52,7 @@ export interface AutoReviewSource {
 }
 
 export interface ResolvedSpec {
+  keepCache?: boolean;
   readOnly?: boolean;
   integration?: boolean;
   /** Internal queue provenance, never accepted from spec YAML. */
@@ -186,7 +187,7 @@ export interface ResolveContext {
 /** Task IDs whose window name is one agentctl uses for itself (`watch`, `board`, `manager`). */
 export const RESERVED_TASK_IDS = ['WATCH', 'BOARD', 'MANAGER'];
 
-export const SPEC_KEYS = ['task', 'agent', 'class', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'review', 'report', 'pin', 'remote_control', 'weight', 'priority', 'after', 'after_verdict', 'touches', 'cohort', 'wall', 'read_only', 'integration'];
+export const SPEC_KEYS = ['task', 'agent', 'class', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'review', 'report', 'pin', 'remote_control', 'weight', 'priority', 'after', 'after_verdict', 'touches', 'cohort', 'wall', 'read_only', 'integration', 'keep_cache'];
 export const REPO_KEYS = ['path', 'worktree', 'base', 'branch', 'setup'];
 
 function label(raw: RawSpec): string {
@@ -233,6 +234,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
 
   checkKeys(h, SPEC_KEYS, where, p);
   const task = checkTask(raw, p);
+  if (h.keep_cache !== undefined && typeof h.keep_cache !== 'boolean') p.add('keep_cache must be boolean');
   if (h.integration !== undefined && typeof h.integration !== 'boolean') p.add('integration must be boolean');
   if (h.read_only !== undefined && typeof h.read_only !== 'boolean') p.add('read_only must be boolean');
   const specAgent = (typeof h.agent === 'string' && (AGENT_NAMES as readonly string[]).includes(h.agent) ? h.agent as AgentName : parseEnumValue(h.agent, activeProviders(config), 'agent', p));
@@ -507,6 +509,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     after,
     ...(Object.keys(afterVerdicts).length ? { afterVerdicts } : {}),
     touches,
+    ...(h.keep_cache === true ? {keepCache: true} : {}),
     ...(h.integration === true ? {integration: true} : {}),
     requested: { agent: agent as AgentName, model, effort },
   };

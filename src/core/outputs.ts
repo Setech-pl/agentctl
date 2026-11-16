@@ -37,12 +37,14 @@ export const outputsSchema = z.object({
   integrate: z.array(integrateRef).default([]),
   decisions: z.array(decision).default([]),
   actions: z.array(action).default([]),
+  persist: z.array(z.string()).optional(), artifacts: z.array(z.union([z.string(), z.object({path: z.string()}).passthrough()])).optional(), refs: z.array(z.union([z.string(), z.object({path: z.string()}).passthrough()])).optional(),
   checks: z.array(checkInput).default([]), preview: z.url().optional(), notes: z.array(z.string()).default([]),
 }).strict();
 export interface Outputs {
   version: 1; verdict: OutputVerdict;
   commits: z.infer<typeof ref>[]; integrate: z.infer<typeof integrateRef>[];
   decisions: string[]; actions: z.infer<typeof action>[]; checks: Check[];
+  persist?: string[]; artifacts?: (string | {path: string})[]; refs?: (string | {path: string})[];
   preview?: string; notes: string[];
 }
 /** `outputs_valid`: everything was accepted. `outputs_partial`: `outputs` holds the valid part of a block that had bad entries (listed in `outputs_errors`). */
@@ -78,7 +80,7 @@ function takeList<T>(raw: unknown, section: string, item: z.ZodType<T>, errors: 
 }
 
 /** `wall_posts` is not part of Outputs: agentctl publishes it on the WALL once per attempt (journalOutputs), and its problems are findings of that event. */
-const OUTPUT_KEYS = ['version', 'verdict', 'commits', 'integrate', 'decisions', 'actions', 'checks', 'preview', 'notes', 'wall_posts'];
+const OUTPUT_KEYS = ['version', 'verdict', 'commits', 'integrate', 'decisions', 'actions', 'checks', 'preview', 'notes', 'wall_posts', 'persist', 'artifacts', 'refs'];
 
 /** The verdict words a review report may declare; they map onto the output verdicts (GO = PASS, GO-WITH-CHANGES = PARTIAL, NO-GO = FAIL). */
 const REVIEW_VERDICT_ALIAS: Record<string, OutputVerdict> = { GO: 'PASS', 'GO-WITH-CHANGES': 'PARTIAL', 'NO-GO': 'FAIL' };
@@ -198,7 +200,8 @@ export function parseOutputs(text: string, opts: { review?: boolean } = {}): Out
   let preview: string | undefined;
   if (d.preview !== undefined && d.preview !== null) { const u = z.url().safeParse(d.preview); if (u.success) preview = u.data; else errors.push('preview: expected a URL (ignored)'); }
   const notes = takeList(d.notes, 'notes', z.string(), errors);
-  const outputs: Outputs = { version: 1, verdict: verdict.data!, commits, integrate, decisions, actions, checks, ...(preview ? { preview } : {}), notes };
+  const preserved = Object.fromEntries(['persist', 'artifacts', 'refs'].filter(k => d[k] !== undefined).map(k => [k, takeList(d[k], k, k === 'persist' ? z.string() : z.union([z.string(), z.object({path: z.string()}).passthrough()]), errors)]));
+  const outputs: Outputs = { ...preserved, version: 1, verdict: verdict.data!, commits, integrate, decisions, actions, checks, ...(preview ? { preview } : {}), notes };
   return { outputs, outputs_valid: errors.length === 0, outputs_errors: errors, outputs_partial: errors.length > 0 };
 }
 

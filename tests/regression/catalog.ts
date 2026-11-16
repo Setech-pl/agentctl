@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'D2', fixedIn: '0.22.5', symptom: 'GC removed the only data copies in task caches without explicit cache authorization or report-reference protection.', scenarios: [s('fix0227-gc.test.ts', '^D2:')] },
   { id: 'D1', fixedIn: '0.22.5', symptom: 'Cached GC previews declared dirty multi-repository tasks clean and missed unpushed commits.', scenarios: [s('fix0227-gc.test.ts', '^D1:')] },
   { id: 'G1b', fixedIn: '0.22.4', symptom: 'Provider quota errors left GLM capacity free when usage was unavailable.', scenarios: [s('fix0226-g1b.test.ts')] },
   { id: 'G1a', fixedIn: '0.22.4', symptom: 'Plan n/d left free provider slots with no timed hold override.', scenarios: [s('fix0226-g1a.test.ts')] },

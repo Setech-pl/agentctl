@@ -79,7 +79,7 @@ it('P83: cached GC preview checks dirt without recursive measurements; refuses d
   assert.equal(statuses, 1);
   assert.ok(!plan.items.some(i => i.kind === 'worktree'));
   assert.ok(plan.skipped.some(i => /uncommitted changes/.test(i.reason)));
-  assert.ok(plan.skipped.some(i => i.target.endsWith('old-dir') && /directory age/.test(i.reason)));
+  assert.ok(plan.skipped.some(i => i.target.endsWith('old-dir') && /cache kept by default/.test(i.reason)));
   const result = await applyGc(ctx, plan);
   assert.equal(removals, 0);
   assert.equal(result.failed.length, 0);
