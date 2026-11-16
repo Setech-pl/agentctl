@@ -19,7 +19,7 @@ let serial = 0;
 function world() {
   const root = scratch.sub(`polish-${serial++}`), clone = path.join(root, 'app'); fs.mkdirSync(clone);
   const config = makeConfig(root, `worktree_root: ${root}/wt\nlimits: {claude: 4}\nhosts:\n  pc:\n    ssh: krzet@192.168.2.64\n    port: 2222\n    work_dir: /remote/work\n    repos: {app: /remote/app}\n    providers: [claude]\n    limits: {claude: 1}\n`);
-  const runner = new DiskRunner({ dryRun: false, respond: () => ({ code: 0, stdout: '' }) });
+  const runner = new DiskRunner({ dryRun: false, startTime: Date.now(), respond: () => ({ code: 0, stdout: '' }) });
   const ctx = new Context(runner, config, () => {});
   const raw = splitSpecs(`---\ntask: MOVE-1\nagent: claude\nmodel: sonnet\neffort: high\nreview: false\nrepos: [{path: ${clone}, branch: move-one}]\n---\nKeep this original prompt.`)[0]!;
   return { config, runner, ctx, raw };
@@ -47,7 +47,7 @@ it('host limits and provider hold: account and host loads agree, remote queue is
   assert.equal(report.providers.find(p => p.agent === 'claude')!.free, 0);
   assert.deepEqual(report.hosts![0]!.providers[0], {agent: 'claude', limit: 1, used: 1, free: 0, queued: 1});
   assert.match(renderLimits(report).join('\n'), /host pc: claude 1\/1/);
-  assert.equal(describeQueue(w.config, readQueue(w.config), [], w.runner.now())[0]!.condition.kind, 'hold');
+  assert.equal(describeQueue(w.config, readQueue(w.config), [], [], w.runner.now())[0]!.condition.kind, 'hold');
 });
 it('board: remote queued/finished badges survive narrow columns; H lists tasks and exact SSH attach', async () => {
   const w = world(); w.raw.header.host = 'pc';
@@ -60,7 +60,7 @@ it('board: remote queued/finished badges survive narrow columns; H lists tasks a
   const lines = (await loadViewLines(w.ctx, 'hosts')).join('\n');
   assert.match(lines, /unreachable/); assert.match(lines, /MOVE-1: queued/); assert.match(lines, /VERY-LONG-TASK-ID/);
   assert.match(lines, /ssh -t -p 2222 krzet@192.168.2.64/);
-  assert.ok(!w.runner.calls.some(c => c.cmd === 'ssh'), 'H view stays offline');
+  assert.ok(!w.runner.calls.some(c => c.line.startsWith('ssh ')), 'H view stays offline');
 });
 it('remote disk: per-host warning in capacity disk and events', async () => {
   const w = world();

@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- HOST-0C board: remote badges on queued and finished rows, cached H task/limit/attach view, and host disk status. / Znaczki hosta także w kolejce i zakończonych zadaniach, cache widoku H z zadaniami, limitami, attach i dyskiem.
+
 - HOST-0C limits/move: show host caps alongside account slots and holds; `move --host pc|local` changes only a queued, never-started task, preserving order and dependencies. / Limity hosta obok slotów i blokad konta; `move --host pc|local` przenosi tylko nieuruchomione zadanie w kolejce, zachowując kolejność i zależności.
 
 - HOST-0C GC: bounded host measurements and cached previews; revalidate finished ownership, live windows, clean registered worktrees, protected branches, links and age on the host before removal. Reports stay. Disk warnings identify each host work_dir. / Ograniczone pomiary i cache zdalnego GC; ponowna kontrola własności, okien, czystości worktree, chronionych gałęzi, linków i wieku na hoście przed usunięciem. Raporty zostają, ostrzeżenia dysku wskazują host.

@@ -1037,7 +1037,7 @@ export function rowCells(row: StatusRow, selected: boolean, cols: BoardColumns, 
   const quiet = row.finished || row.hidden;
   const cells: BoardCell[] = [
     { key: 'marker', text: selected ? '▸' : row.collide.length > 0 ? '⚠' : row.hidden ? '·' : '', width: cols.marker, bold: true, ...(!selected && row.collide.length > 0 ? { color: 'yellow' } : {}) },
-    { key: 'task', text: `${row.task}${row.host ? ` [${row.host}]` : ''}`, width: cols.task, bold: selected },
+    { key: 'task', text: `${row.host ? `[${row.host}] ` : ''}${row.task}`, width: cols.task, bold: selected },
     { key: 'who', text: `${providerLabel(row.agent)} ${(PROVIDERS[row.agent as keyof typeof PROVIDERS]?.models.label ?? modelLabel)(row.model, row.effort, row.tokens?.observed?.model, versions)}`, width: cols.who },
     { key: 'state', text: `${icon} ${row.state}${row.question?.includes("zwinięte") ? " (zw.)" : ""}`, width: cols.state, color: STATE_COLOR[row.state] },
     { key: 'time', text: row.duration, width: cols.time },
@@ -1060,9 +1060,19 @@ export async function loadViewLines(ctx: Context, what: ViewKind): Promise<strin
   if (what === 'limits') return renderLimits(collectLimits(ctx.config, await liveWindows(ctx)));
   if (what === 'hosts') {
     const cache = Object.keys(ctx.config.hosts).length === 0 ? undefined : readHostsCache();
-    return hostsViewLines(cache?.hosts, cache?.writtenAt);
+    const health = Object.keys(ctx.config.hosts).map(name => cache?.hosts.find(h => h.name === name) ?? { name, state: 'unreachable' as const, probedAt: '', detail: 'not probed yet; run agentctl hosts --refresh' });
+    const rows = await collectStatus(ctx, { cachedOnly: true, progress: false, shallowClosed: true });
+    const loads = collectLimits(ctx.config, await liveWindows(ctx, rows));
+    const lines = hostsViewLines(health, cache?.writtenAt);
+    for (const host of Object.keys(ctx.config.hosts)) {
+      lines.push(`Host ${host} tasks:`);
+      for (const p of loads.hosts?.find(h => h.host === host)?.providers ?? []) lines.push(`  ${p.agent}: ${p.used}/${p.limit ?? 'unbounded'}, free ${p.free ?? 'unbounded'} (account limits/holds also apply)`);
+      for (const row of rows.filter(r => r.host === host)) lines.push(`  [${host}] ${row.task}: ${row.state}`, `    ${remoteAttachHint(ctx.config, {host, window: row.windowName})}`);
+      for (const e of readQueue(ctx.config).filter(e => e.host === host)) lines.push(`  [${host}] ${e.task}: ${e.status}`);
+    }
+    return lines;
   }
-  return renderGc(await planGc(ctx, {}));
+  return renderGc(await planGc(ctx, { cachedSizes: true }));
 }
 
 export const BAR_WIDTH = 10;
@@ -1132,7 +1142,7 @@ export function queueCells(view: QueueView, selected: boolean, cols: BoardColumn
   const text = `${view.position === null ? (e.status === 'failed' ? '✗' : '…') : `${view.position}.`} ${view.condition.text}${e.priority === 'high' ? ' · high' : ''}`;
   const cells: BoardCell[] = [
     { key: 'marker', text: selected ? '▸' : '', width: cols.marker, bold: true },
-    { key: 'task', text: e.task, width: cols.task, bold: selected },
+    { key: 'task', text: `${e.host ? `[${e.host}] ` : ''}${e.task}`, width: cols.task, bold: selected },
     { key: 'who', text: `${providerLabel(e.agent)} ${providerAdapter(e.agent).models.label(e.model, e.effort, undefined, versions)}`, width: cols.who },
     { key: 'report', text, width: wide, ...(e.status === 'failed' ? { color: 'red' } : view.condition.kind === 'blocked' ? { color: 'yellow' } : { dim: true }) },
   ];
