@@ -20,11 +20,12 @@ it('P17 new and queue previews name stale project defaults and suggest placehold
     const raw = splitSpecs(specText({ task: 'FRONT', agent: 'claude' }, repo))[0]!;
     const spec = resolveSpec(raw, { config });
     const summary = summarizeSpecs([spec]).join('\n');
-    assert.ok(summary.includes(`stale project link pkg -> ${target}`), summary);
+    assert.ok(closed ? summary.includes('Skipped stale project links') : summary.includes(`stale project link pkg -> ${target}`), summary);
+    if (closed) assert.equal(spec.links.length, 0);
     assert.match(summary, /\{task:TASK-ID,repo:REPO-NAME\}/);
     assert.match(summary, closed ? /closed task OLD/ : /does not exist/);
     const { ctx } = makeContext(config, { dryRun: true });
-    assert.ok((await planQueueAdd(ctx, [raw])).warnings.some(w => w.includes(`stale project link pkg -> ${target}`)));
+    assert.equal((await planQueueAdd(ctx, [raw])).warnings.some(w => w.includes('stale project link')), !closed, 'closed defaults notify once per project/day');
     raw.header.links = [{ from: 'pkg', to: scratch.sub(`override-${closed}`) }];
     assert.doesNotMatch(summarizeSpecs([resolveSpec(raw, { config })]).join('\n'), /stale project link/);
   }
@@ -76,6 +77,7 @@ it('P72 spec-derived backend links and previews compare target HEAD with its rep
   fs.writeFileSync(path.join(app, '.agentctl.yaml'), `links:\n  - {from: pkg, to: '${target}/packages/sim'}\n`);
   const raw = splitSpecs(specText({ task: 'FRONT', agent: 'claude' }, app))[0]!;
   raw.header.repos = [{ path: app, worktree: `${app}-wt` }, { path: backend, worktree: `${backend}-new`, base }];
+  raw.header.links = [{from: 'pkg', to: `${target}/packages/sim`}]; // explicit links still validate the chosen base
   const spec = resolveSpec(raw, { config });
   assert.match(summarizeSpecs([spec]).join('\n'), /older than task base/);
   const { ctx } = makeContext(config, { dryRun: true });
@@ -85,7 +87,40 @@ it('P72 spec-derived backend links and previews compare target HEAD with its rep
   assert.ok(checks.some(c => c.name === 'task links ACTIVE' && c.detail.includes('older than task base')));
   git('-C', target, 'checkout', '--detach', base);
   assert.doesNotMatch(summarizeSpecs([resolveSpec(raw, { config })]).join('\n'), /older than task base/);
+  delete raw.header.links;
   fs.writeFileSync(path.join(app, '.agentctl.yaml'), "links:\n  - {from: pkg, to: '{worktree:backend}/packages/sim'}\n");
   assert.equal(resolveSpec(raw, { config }).links[0]?.to, `${backend}-new/packages/sim`);
   await commitQueueAdd(ctx, (await planQueueAdd(ctx, [raw])).items, {});
+});
+
+it('D5: closed project defaults are skipped with one persisted project/day notice across specs', () => {
+  const root = scratch.sub('d5-day'), config = makeConfig(root), app = scratch.sub('d5-day/app');
+  const backend = scratch.sub('d5-day/backend'), old = scratch.sub('d5-day/backend-old');
+  seedTask(config, 'INTEGRATION-13', {closed: true, repos: [{path: backend, worktree: old}]});
+  fs.writeFileSync(path.join(app, '.agentctl.yaml'), `links:\n  - {from: pkg, to: ${old}/packages/sim}\n`);
+  const raw = splitSpecs(specText({task: 'FIRST', agent: 'claude'}, app))[0]!;
+  const now = Date.parse('2026-11-16T12:00:00Z');
+  const first = resolveSpec(raw, {config, now});
+  assert.equal(first.links.length, 0);
+  assert.equal(first.linkWarnings!.filter(w => /closed task INTEGRATION-13/.test(w)).length, 1);
+  raw.header.task = 'SECOND';
+  const second = resolveSpec(raw, {config, now});
+  assert.equal(second.links.length, 0);
+  assert.equal(second.linkWarnings?.length ?? 0, 0);
+  assert.equal(fs.readdirSync(path.join(config.stateDir, 'project-link-notices')).length, 1);
+  assert.equal(resolveSpec(raw, {config, now: now + 86400000}).linkWarnings!.length, 1);
+  raw.header.links = [{from: 'pkg', to: old}];
+  assert.equal(resolveSpec(raw, {config, now}).links[0]!.to, old, 'explicit spec links remain an opt-in');
+});
+
+it('D5: inherited defaults to a repo supplied by the spec are skipped; explicit worktree placeholders remain', () => {
+  const root = scratch.sub('d5-repo'), config = makeConfig(root), app = scratch.sub('d5-repo/app');
+  const backend = scratch.sub('d5-repo/backend'), old = scratch.sub('d5-repo/backend-old');
+  seedTask(config, 'LIVE-BACKEND', {repos: [{path: backend, worktree: old}]});
+  fs.writeFileSync(path.join(app, '.agentctl.yaml'), `links:\n  - {from: pkg, to: ${old}/packages/sim}\n`);
+  const raw = splitSpecs(specText({task: 'MULTI', agent: 'claude'}, app))[0]!;
+  raw.header.repos = [{path: app, worktree: `${app}-wt`}, {path: backend, worktree: `${backend}-new`}];
+  assert.equal(resolveSpec(raw, {config}).links.length, 0);
+  fs.writeFileSync(path.join(app, '.agentctl.yaml'), "links:\n  - {from: pkg, to: '{worktree:backend}/packages/sim'}\n");
+  assert.equal(resolveSpec(raw, {config}).links[0]!.to, `${backend}-new/packages/sim`);
 });

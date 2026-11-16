@@ -45,3 +45,5 @@ Cache zadania zostaje przy usuwaniu worktree. Usunięcie starych wpisów wymaga 
 Token `answer` wiąże znormalizowane pytanie i etykiety opcji, niezależnie od przewijania menu, zaznaczenia, odstępów i odświeżenia ekranu. Przy potwierdzeniu wybrana opcja musi być widoczna z tą samą etykietą i pytaniem; zmienione menu, wygasły lub zużyty token i inne zadanie są odrzucane.
 
 Klasa zadania `gate` używa Claude Sonnet medium, Codex `gpt-6-luna/medium`, Kimi `k3-256k/low` i GLM `glm-5.3-flash/medium`. Domyślne odpowiedniki wynikają z tej samej macierzy modeli.
+
+Odziedziczone linki projektu do zamkniętych lub zarchiwizowanych zadań są pomijane, z jednym zapamiętanym komunikatem na projekt i dzień UTC. Stare domyślne linki do repozytorium już podanego w specyfikacji również są pomijane. Jawne linki specyfikacji i placeholdery projektu `{worktree:repo}` pozostają świadomym wyborem.

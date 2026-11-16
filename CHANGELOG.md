@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- D5: skip inherited project links to closed tasks or repos already supplied by the spec; closed defaults emit one persisted notice per project/day. Explicit links/worktree placeholders remain intentional. / Domyślne linki do zamkniętych zadań lub repo ze specyfikacji są pomijane; komunikat raz dziennie na projekt.
+
 - D4: add task class `gate`: Sonnet medium / GPT-6-Luna medium / K3-256k low / GLM-5.3-Flash medium, derived into default equivalents. / Nowa klasa `gate` korzysta z szybkich modeli według macierzy.
 
 - D3: answer tokens bind normalized question/option labels and task identity, so scrolling a permission menu does not invalidate the token; changed/hidden selections still refuse. / Token answer działa po przewinięciu menu, ale odrzuca zmienione pytanie/opcję i wybór niewidocznej opcji.

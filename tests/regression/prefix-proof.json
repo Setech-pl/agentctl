@@ -184,6 +184,18 @@
       "D3: Claude token survives a scrolled menu and normalized whitespace when chosen option is visible"
     ]
   },
+  "D5": {
+    "rev": "v0.22.4",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "D5: closed project defaults are skipped with one persisted project/day notice across specs",
+      "D5: inherited defaults to a repo supplied by the spec are skipped; explicit worktree placeholders remain",
+      "D5: closed project defaults are skipped with one persisted project/day notice across specs",
+      "D5: inherited defaults to a repo supplied by the spec are skipped; explicit worktree placeholders remain"
+    ]
+  },
   "F1": {
     "rev": "v0.19.0",
     "outcome": "IMPORT-ERROR",

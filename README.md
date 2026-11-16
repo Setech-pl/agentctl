@@ -45,3 +45,5 @@ Task cache now stays when removing worktrees. Deleting old cache entries require
 `answer` tokens match the normalized question and option labels, independent of menu scrolling, selection marker, whitespace or unrelated screen redraws. Confirmation requires the chosen numbered option to remain visible with the same label and question; changed menus, expired/replayed tokens and changed task identity are refused.
 
 Task class `gate` uses Claude Sonnet medium, Codex `gpt-6-luna/medium`, Kimi `k3-256k/low`, and GLM `glm-5.3-flash/medium`. The default equivalents derive from the same model matrix.
+
+Inherited project links to closed/archived tasks are skipped, with one persisted notice per project per UTC day. Legacy defaults pointing into a repository already provided by the spec are skipped too. Explicit spec links and project `{worktree:repo}` placeholders remain intentional choices.

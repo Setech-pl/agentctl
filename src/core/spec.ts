@@ -1,4 +1,4 @@
-import { linkBaseWarnings, validateLink, missingLinkTargets, fillTaskLinkTargets, staleProjectLinkWarnings } from './links.ts';
+import { linkBaseWarnings, validateLink, missingLinkTargets, fillTaskLinkTargets, staleProjectLinkWarnings, projectDefaultLinkPolicy } from './links.ts';
 import { validateLaunch, ANTHROPIC_SECRET_ENV } from './safety.ts';
 import { provider, isActive, activeProviders } from './providers/registry.ts';
 import { PROVIDER_IDS } from './providers/types.ts';
@@ -181,6 +181,7 @@ export interface ResolveContext {
   config: GlobalConfig;
   /** Project layer lookup; defaults to reading `<repo>/.agentctl.yaml`. */
   loadProject?: (repoPath: string) => Layer | undefined;
+  now?: number;
 }
 
 /** Keys of a spec header, and of one entry of its `repos`; docs/configuration.md describes each one. */
@@ -452,20 +453,25 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   // Links: later layers win for the same `from`.
   const linkByFrom = new Map<string, Link>();
   const projectLinkByFrom = new Map<string, Link>();
+  const intentionalWorktrees = new Set<string>();
   for (const link of [...config.links, ...(project?.links ?? []), ...specLinks]) {
     const target = pathOf(fillTaskLinkTargets(fill(link.to), config));
     const expanded = fill(link.from);
     const from = path.isAbsolute(expanded) ? path.relative(repos[0]!.worktree, expanded) : expanded;
     if (!from || from === '.' || from.startsWith('../')) throw new AgentctlError(`${taskId}: link from must stay inside the primary worktree: ${expanded}`, missingLinkTargets([{ from: expanded, to: target }]).join('; ') || undefined);
-    validateLink(from, target, repos[0]!.worktree);
     const resolvedLink = { from, to: target };
     linkByFrom.set(from, resolvedLink);
-    if (project?.links?.includes(link)) projectLinkByFrom.set(from, resolvedLink);
+    if (project?.links?.includes(link)) {
+      projectLinkByFrom.set(from, resolvedLink);
+      if (/\{worktree:/.test(link.to)) intentionalWorktrees.add(from);
+    }
     else projectLinkByFrom.delete(from);
   }
 
-  // projectLinkByFrom holds exactly the inherited project links no spec link overrode; each stale one warns, whatever else the spec links.
-  const linkWarnings = [...staleProjectLinkWarnings([...projectLinkByFrom.values()], config), ...linkBaseWarnings([...linkByFrom.values()], repos)];
+  const projectDefaults = projectDefaultLinkPolicy([...projectLinkByFrom.values()], config, repos, repos[0]!.path, ctx.now, intentionalWorktrees);
+  for (const [from, link] of projectLinkByFrom) if (!projectDefaults.links.includes(link)) linkByFrom.delete(from);
+  for (const {from, to} of linkByFrom.values()) validateLink(from, to, repos[0]!.worktree);
+  const linkWarnings = [...projectDefaults.notices, ...staleProjectLinkWarnings(projectDefaults.links, config), ...linkBaseWarnings([...linkByFrom.values()], repos)];
 
   // Env: spec > project > global.
   const env: Record<string, string> = {};
