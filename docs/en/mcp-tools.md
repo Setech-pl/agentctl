@@ -70,7 +70,7 @@ Arguments marked ? are optional. Provider fields below include enabled optional 
 | `queue_rm` | write | `task?`, `confirm?`, `preview_token?` | Take a task out of the queue |
 | `cancel` | write | `task?`, `tasks?`, `cohort?`, `reason?`, `remove_worktree?`, `confirm?`, `preview_token?` | Cancel tasks |
 | `mark` | write | `task?`, `tasks?`, `cohort?`, `result?`, `note?`, `confirm?`, `preview_token?` | Mark how a task turned out |
-| `away` | write | `on` | Switch away mode (the phone) |
+| `away` | write | `on?`, `confirm?`, `preview_token?` | Switch away mode (the phone) |
 | `interrupt` | write | `task?`, `confirm?`, `preview_token?` | Interrupt the current turn of a task |
 | `close` | write | `task?`, `tasks?`, `cohort?`, `remove_worktree?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` | Close a task |
 | `move` | write | `task?`, `agent?`, `confirm?`, `preview_token?` | Move a task to the other provider |

@@ -68,7 +68,7 @@ Argumenty z ? są opcjonalne. Pola dostawców obejmują opcjonalnych; uruchomion
 | `queue_rm` | zapis | `task?`, `confirm?`, `preview_token?` | Usuń oczekujące zadanie z kolejki. |
 | `cancel` | zapis | `task?`, `tasks?`, `cohort?`, `reason?`, `remove_worktree?`, `confirm?`, `preview_token?` | Przerwij i porzuć zadania; zachowaj gałęzie/worktree, zapisz powód. |
 | `mark` | zapis | `task?`, `tasks?`, `cohort?`, `result?`, `note?`, `confirm?`, `preview_token?` | Zapisz ocenę człowieka ok/partial/fail, osobną od werdyktu autora. |
-| `away` | zapis | `on` | Przełącz tryb powiadomień na telefon. |
+| `away` | zapis | `on?`, `confirm?`, `preview_token?` | Przełącz tryb powiadomień na telefon. |
 | `interrupt` | zapis | `task?`, `confirm?`, `preview_token?` | Przerwij bieżącą turę, pozostawiając okno. |
 | `close` | zapis | `task?`, `tasks?`, `cohort?`, `remove_worktree?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` | Zamknij okno; usuwanie worktree wymaga dodatkowo allow_rm_worktree i jawnej opcji. |
 | `move` | zapis | `task?`, `agent?`, `confirm?`, `preview_token?` | Przenieś zadanie do innego aktywnego dostawcy przez equivalents w tym samym worktree; pin blokuje. |

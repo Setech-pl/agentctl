@@ -47,3 +47,5 @@ Token `answer` wiąże znormalizowane pytanie i etykiety opcji, niezależnie od 
 Klasa zadania `gate` używa Claude Sonnet medium, Codex `gpt-6-luna/medium`, Kimi `k3-256k/low` i GLM `glm-5.3-flash/medium`. Domyślne odpowiedniki wynikają z tej samej macierzy modeli.
 
 Odziedziczone linki projektu do zamkniętych lub zarchiwizowanych zadań są pomijane, z jednym zapamiętanym komunikatem na projekt i dzień UTC. Stare domyślne linki do repozytorium już podanego w specyfikacji również są pomijane. Jawne linki specyfikacji i placeholdery projektu `{worktree:repo}` pozostają świadomym wyborem.
+
+Każdy zapis MCP obsługuje `{preview_token, confirm: true}` po podglądzie, także `away`. Zapis WALL przyjmuje też `{as, preview_token, confirm: true}`, gdy `as` zgadza się z podglądem; channel/kind/subject/body i pozostałe argumenty są odtwarzane z tej sesji. Inny autor lub narzędzie, wygasły token i zmiana zakresu są odrzucane; ponowienie korzysta z potwierdzenia wykonania.

@@ -1530,7 +1530,7 @@ export const MCP_TOOLS: McpToolDef[] = [
     kind: 'write',
     description:
       'WRITE, off unless the user put "away" in mcp.allow. on: true makes agentctl send its notifications to the user\'s phone (ntfy) as well, on: false stops that. The notifications on the Mac do not depend on it. ' +
-      'It costs nothing and needs no confirmation (it is recorded in the audit log), but switch it only when the user says they are leaving or are back. status and events_since say whether away is on.',
+      'Preview then confirm (preview_token alone is supported); switch it only when the user says they are leaving or are back. status and events_since say whether away is on.',
     input: { on: z.boolean().describe('true: away, the phone gets the notifications. false: back at the Mac.') },
     annotations: { title: 'Switch away mode (the phone)', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     run: (deps, args) => guarded(() => runAway(deps, args as { on: boolean })),
@@ -1782,11 +1782,11 @@ export async function applyMcpRequest(deps: McpDeps, request: McpRequest): Promi
   return { text: result.text };
 }
 
-const confirmedTools = new Set(['mark', 'new', 'queue', 'cancel', 'resume', 'move', 'interrupt', 'close', 'queue_rm', ...MCP_TOOLS.filter((t) => t.kind === 'write' && !['send', 'answer', 'mark', 'away'].includes(t.name)).map((t) => t.name)]);
+const confirmedTools = new Set(['mark', 'new', 'queue', 'cancel', 'resume', 'move', 'interrupt', 'close', 'queue_rm', ...MCP_TOOLS.filter((t) => t.kind === 'write' && !['send', 'answer', 'mark'].includes(t.name)).map((t) => t.name)]);
 const previews = new WeakMap<McpDeps, Map<string, { key: string; arguments: Record<string, unknown>; /** The arguments as they came in (the spec text, not its canonical form): a token-only confirm executes these. */ raw: Record<string, unknown>; scope: string; at: number; ttlS: number; /** new/queue: what the preview planned; the confirm records it without planning again (P93). */ planned?: AcceptedOrder[] }>>();
 const lastPreviewMutation = new WeakMap<McpDeps, string>();
 const previewSessions = new WeakMap<McpDeps, string>();
-const confirmations = new WeakMap<McpDeps, Map<string, { name: string; key: string; tasks: string; result: Promise<ToolResult> }>>();
+const confirmations = new WeakMap<McpDeps, Map<string, { name: string; key: string; as?: unknown; tasks: string; result: Promise<ToolResult> }>>();
 const issuedPreviewTokens = new Map<string, { session: string; state: string }>();
 function canonical(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonical);
@@ -1815,6 +1815,7 @@ function confirmationTargets(name: string, scope: unknown): unknown {
 }
 /** Exact arguments and observed task/queue/window identities bind confirmation to this session. No scope can silently grow. */
 async function confirmationScope(ctx: Context, name: string, args: Record<string, unknown>): Promise<unknown> {
+  if (name === 'away') return {away: awayReport(ctx.config).on, on: args.on};
   if (name === 'set_limits') return { limits: ctx.config.limits, queueHold: ctx.config.usage.queueHold, providerHolds: readProviderHoldState(ctx.config).holds };
   if (name === 'reserve') return { reservations: readReservations(ctx.config) };
   if (name === 'queue_up' || name === 'queue_rm') {
@@ -1905,6 +1906,7 @@ async function confirmationScope(ctx: Context, name: string, args: Record<string
 }
 /** Display only the operation's targets; the private fingerprint still guards the full observed scope. */
 async function previewScope(ctx: Context, name: string, args: Record<string, unknown>, scope: unknown): Promise<unknown> {
+  if (name === 'away') return scope;
   if (name === 'consult') return (scope as Awaited<ReturnType<typeof planConsult>>).preview;
   if (name === 'mark') { const plan = scope as { tasks: TaskRecord[]; result: unknown; note: unknown }; return { ...plan, tasks: plan.tasks.map(r => ({ task: r.task, cohort: r.cohort ?? null, agent: r.agent, model: r.model, effort: r.effort, report: r.report })) }; }
   if (name === 'queue_up' || name === 'queue_rm') { const plan = scope as { queue: ReturnType<typeof readQueue> }; return { tasks: [], queue: plan.queue.map(e => ({ task: e.task, status: e.status, after: e.after, afterVerdicts: e.afterVerdicts })) }; }
@@ -1928,7 +1930,7 @@ for (const tool of MCP_TOOLS) {
   if (!confirmedTools.has(tool.name)) continue;
   const previewInput = tool.input;
   tool.input = { ...Object.fromEntries(Object.entries(tool.input).map(([name, schema]) => [name, z.optional(schema)])), confirm: confirmArg, preview_token: z.string().optional().describe('Token returned by this preview. Independent previews can be confirmed in any order if their scope is unchanged. A confirm may carry only this token: the stored arguments then execute.') };
-  tool.description += ' Two steps are mandatory: preview, then confirm: true with identical arguments — or with preview_token only, which executes the stored arguments (for new/queue the spec need not be resent). A changed scope requires a new preview.';
+  tool.description += ' Two steps are mandatory: preview, then confirm: true with identical arguments — or with preview_token only (plus the same optional as identity), which executes the stored arguments (for new/queue the spec need not be resent). A changed scope requires a new preview.';
   const original = tool.run;
   tool.run = (deps, args) => guarded(async () => {
     const ctx = deps.context(() => {});
@@ -1957,7 +1959,8 @@ for (const tool of MCP_TOOLS) {
     const { confirm, preview_token, ...input } = args;
     // Required preview fields remain required for a preview or explicit-argument confirm.
     // A token-only confirm restores the validated arguments from its session preview.
-    if (!(confirm && typeof preview_token === 'string' && Object.keys(input).length === 0)) z.object(previewInput).parse(input);
+    const tokenOnly = Boolean(confirm && typeof preview_token === 'string' && Object.keys(input).every(k => k === 'as' && 'as' in previewInput));
+    if (!tokenOnly) z.object(previewInput).parse(input);
     const { detail: _detail, offset: _offset, limit: _limit, ...identityInput } = input;
     const arguments_ = previewArguments(tool.name === 'gc' ? identityInput : input, tool.name);
     const key = `${tool.name}:${createHash('sha256').update(JSON.stringify(arguments_)).digest('hex')}`;
@@ -1973,10 +1976,11 @@ for (const tool of MCP_TOOLS) {
     const preview = token ? pending.get(token) : undefined;
     // A confirm may carry only the token: the token binds the scope, so the stored preview arguments execute
     // (for new/queue the chat then does not resend the whole spec). A confirm that also sends arguments must match the hash as before.
-    const tokenOnly = Boolean(confirm && typeof preview_token === 'string' && Object.keys(input).length === 0);
     const effective = tokenOnly && preview ? preview.raw : input;
     const deny = (reason: string) => { audit(ctx, { tool: tool.name, outcome: 'denied', detail: reason }); return fail(`Confirmation refused: ${reason}. Call again without confirm to recalculate the scope. Nothing was done.`); };
     const receipts = confirmations.get(deps) ?? new Map(); confirmations.set(deps, receipts);
+    const identity = preview ? {as: preview.raw.as} : token ? receipts.get(token) : undefined;
+    if (tokenOnly && identity && input.as !== undefined && input.as !== identity.as) return deny('different author: as must match the stored preview');
     const replay = async (): Promise<ToolResult | undefined> => {
       const receipt = token ? receipts.get(token) : undefined;
       if (!receipt) return undefined;
@@ -2090,7 +2094,7 @@ for (const tool of MCP_TOOLS) {
     const tasks = typeof effective.spec === 'string' && tool.name !== 'consult' ? splitSpecs(effective.spec, 'confirmation').map(s => String(s.header.task)).join(', ') : String(effective.task ?? effective.tasks ?? tool.name);
     // Publish the promise before executing; simultaneous retries share one execution.
     const result = Promise.resolve().then(execute);
-    if (token) receipts.set(token, { name: tool.name, key: preview!.key, tasks, result });
+    if (token) receipts.set(token, { name: tool.name, key: preview!.key, as: effective.as, tasks, result });
     const done = await result;
     if (done.isError) { if (token) receipts.delete(token); }
     else if (token) {

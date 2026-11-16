@@ -51,8 +51,7 @@ it('P77: queue_rm token-only confirmation executes stored task; missing preview 
 });
 
 it('A5: table of write tools exposes token-only confirm schemas, including limits/reservations and WALL', async () => {
-  const exceptions = new Set(['away']); // away executes without preview
-  for (const t of MCP_TOOLS.filter(t => t.kind === 'write' && !exceptions.has(t.name))) {
+  for (const t of MCP_TOOLS.filter(t => t.kind === 'write')) {
     assert.ok(t.input.preview_token, t.name);
     assert.ok(z.object(t.input).safeParse({confirm: true, preview_token: 'preview'}).success, t.name);
   }

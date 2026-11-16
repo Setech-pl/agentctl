@@ -47,3 +47,5 @@ Task cache now stays when removing worktrees. Deleting old cache entries require
 Task class `gate` uses Claude Sonnet medium, Codex `gpt-6-luna/medium`, Kimi `k3-256k/low`, and GLM `glm-5.3-flash/medium`. The default equivalents derive from the same model matrix.
 
 Inherited project links to closed/archived tasks are skipped, with one persisted notice per project per UTC day. Legacy defaults pointing into a repository already provided by the spec are skipped too. Explicit spec links and project `{worktree:repo}` placeholders remain intentional choices.
+
+Every MCP write supports `{preview_token, confirm: true}` after a preview, including `away`. WALL writes also accept `{as, preview_token, confirm: true}` when `as` matches the preview; channel/kind/subject/body and other operation arguments are restored from that session. A changed author or tool, expired token or changed scope is refused; retries reuse the receipt.

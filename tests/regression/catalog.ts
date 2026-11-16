@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'D6', fixedIn: '0.22.5', symptom: 'WALL token-only confirms carrying as hit required-field validation instead of restoring reviewed arguments.', scenarios: [s('fix0227-d6.test.ts', '^D6:')] },
   { id: 'D5', fixedIn: '0.22.5', symptom: 'Every spec inherited stale links to closed tasks (including missing worktrees) and repeated the same project warning.', scenarios: [s('stale-links.test.ts', '^D5:')] },
   { id: 'D3', fixedIn: '0.22.5', symptom: 'A valid answer token was refused after the permission menu scrolled to options 2–4.', scenarios: [s('p63-answer.test.ts', '^D3:')] },
   { id: 'D2', fixedIn: '0.22.5', symptom: 'GC removed the only data copies in task caches without explicit cache authorization or report-reference protection.', scenarios: [s('fix0227-gc.test.ts', '^D2:')] },
