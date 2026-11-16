@@ -144,7 +144,7 @@ async function startResumed(ctx: Context, plan: ResumePlan, opts: { self?: SelfA
     const attempt = attemptFields(record, runner.now());
     Object.assign(record, attempt);
     await withStartLock(ctx, () => setHeaderFields(runner, taskFile(config, c.window), { attempt: attempt.attempt, attempt_id: attempt.attemptId, attempt_started: attempt.attemptStarted, attempt_report_baseline: attempt.attemptReportBaseline, observed: null, observed_warning: null, turn_ended_at: null, report_candidate: null, pulled: null, summary_delivered: null, report_complete_hash: null }));
-    const wiring = config.notify.events && opts.self ? planEventWiring({ attempt: record.attemptId, agent: c.agent, task: c.task, window: c.window, config, self: opts.self, env: record.env, worktree: c.worktree }) : undefined;
+    const wiring = !c.host && config.notify.events && opts.self ? planEventWiring({ attempt: record.attemptId, agent: c.agent, task: c.task, window: c.window, config, self: opts.self, env: record.env, worktree: c.worktree }) : undefined;
     for (const file of wiring?.files ?? []) {
       await runner.writeFile(file.path, file.content);
       if (file.path.endsWith('.sh')) {

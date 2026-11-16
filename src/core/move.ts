@@ -82,6 +82,7 @@ export async function planMove(ctx: Context, taskArg: string, opts: MoveOptions 
     const targetHost = opts.host === 'local' ? undefined : opts.host;
     if (targetHost === entry.host) throw new AgentctlError(`${entry.task} is already on ${targetHost ?? 'local'}`);
     if (targetHost && !config.hosts[targetHost]) throw new AgentctlError(`unknown host ${targetHost}`);
+    if (targetHost && !config.hosts[targetHost]!.providers.includes(entry.agent)) throw new AgentctlError(`host ${targetHost} has no ${entry.agent} provider`);
     const sourceSpec = (entry as QueueEntry & { localSpec?: string }).localSpec ?? entry.spec;
     const raw = splitSpecs(sourceSpec, 'queued host move')[0]!;
     if (targetHost) {

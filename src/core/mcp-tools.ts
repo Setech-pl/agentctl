@@ -1,3 +1,4 @@
+import { planRemoteGc } from './host-gc.ts';
 import { readProviderHoldState, providerHoldText } from './provider-hold.ts';
 import { withStartLock } from './start-lock.ts';
 import { commitQueueAdd } from './queue.ts';
@@ -444,6 +445,7 @@ async function runGcPreview(deps: McpDeps, args: { request_id?: string; older_th
     try { return JSON.parse(fs.readFileSync(path.join(ctx.config.stateDir, `gc-preview-${args.request_id}.json`), 'utf8')); } catch { const request = readMcpRequests(ctx.config).find(r => r.id === args.request_id); return request?.status === 'failed' ? fail(`GC preview failed: ${request.error}; preview again.`) : ok('GC preview pending; retry request_id after the next watch tick.'); }
   }
   if (!deps.applying && watchAlive(ctx.config, ctx.runner.now())) return recordDeferred(deps, 'gc_preview', args, null, `gc_preview:${JSON.stringify(args)}`, undefined);
+  if (deps.applying) await planRemoteGc(ctx, {olderThan: args.older_than}, parseAge(args.older_than ?? '7d'));
   const plan = await planGc(ctx, { olderThan: args.older_than, branches: args.merged, cohort: args.cohort, cachedSizes: true });
   if (deps.applying) { fs.mkdirSync(ctx.config.stateDir, {recursive: true}); atomicWriteFile(gcPlanPath(ctx, args), JSON.stringify({at: ctx.runner.now(), key: gcPlanKey(args), plan})); }
   return ok(JSON.stringify({ ...gcView(plan, args), partial_result: 'Partial result: sizes are cached or measuring (unknown sizes count as 0); repeat for updated estimates.', preview: true, execution: ctx.config.mcp.allow.includes('gc') ? 'gc preview then confirm' : 'requires gc in mcp.allow or CLI --apply' }));
@@ -1812,7 +1814,7 @@ function previewArguments(input: Record<string, unknown>, tool?: string): Record
 function confirmationTargets(name: string, scope: unknown): unknown {
   if (name === 'consult') { const plan = scope as Awaited<ReturnType<typeof planConsult>>; return { spec: plan.spec, context: plan.context }; }
   if (name === 'new' || name === 'queue') return null;
-  if (name === 'gc') return (scope as GcPlan).items.map(({ kind, task, target, repo, branch }) => ({ kind, task, target, repo, branch }));
+  if (name === 'gc') return (scope as GcPlan).items.map(({ kind, task, target, repo, branch, host, hostFingerprint }) => ({ kind, task, target, repo, branch, host, hostFingerprint }));
   const project = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(project);
     if (!value || typeof value !== 'object') return value;

@@ -27,11 +27,17 @@ function shQuote(text: string): string {
   return `'${text.replaceAll("'", `'\\''`)}'`;
 }
 
+/** Expand only the remote HOME, keeping all other path characters literal. */
+function hostPath(value: string): string {
+  return value === '~' ? '"$HOME"' : value.startsWith('~/') ? '"$HOME"/' + shQuote(value.slice(2)) : shQuote(value);
+}
+
 /** One remote shell script; sections are tagged so the parser below stays trivial. */
 export function healthScript(host: HostConfig, config: Pick<GlobalConfig, 'providersConfig'>): string {
   const lines: string[] = [
+    ...Object.entries(host.env ?? {}).map(([key, value]) => `export ${key}=${shQuote(value)}`),
     'echo ==df==',
-    `df -Pk ${shQuote(host.workDir)} 2>/dev/null | tail -1 | awk '{print $(NF-3), $(NF-1)}'`,
+    `df -Pk ${hostPath(host.workDir)} 2>/dev/null | tail -1 | awk '{print $2, $4}'`,
     'echo ==gpu==',
     'command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi --query-gpu=name,memory.total,memory.used --format=csv,noheader | head -1 || echo none',
     'echo ==tmux==',
@@ -48,8 +54,8 @@ export function healthScript(host: HostConfig, config: Pick<GlobalConfig, 'provi
   }
   for (const [name, dir] of Object.entries(host.repos)) {
     lines.push(`echo ==repo== ${name}`);
-    lines.push(`git -C ${shQuote(dir)} rev-parse --verify HEAD 2>/dev/null || echo missing`);
-    lines.push(`git -C ${shQuote(dir)} remote get-url origin 2>/dev/null || echo noremote`);
+    lines.push(`git -C ${hostPath(dir)} rev-parse --verify HEAD 2>/dev/null || echo missing`);
+    lines.push(`git -C ${hostPath(dir)} remote get-url origin 2>/dev/null || echo noremote`);
   }
   return lines.join('\n');
 }

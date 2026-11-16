@@ -24,6 +24,7 @@ export type GcKind = 'worktree' | 'cache' | 'archive' | 'branch';
 
 export interface GcItem {
   host?: string;
+  hostFingerprint?: string;
   kind: GcKind;
   task: string;
   /** The worktree, the file or folder in the cache, the state folder, or `<repo>#<branch>`. */

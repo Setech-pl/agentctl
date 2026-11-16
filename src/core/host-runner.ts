@@ -50,7 +50,7 @@ export class HostRunner implements Runner {
   async appendFile(file: string, content: string): Promise<void> { await this.checked('sh', ['-c', `umask 077; cat >> ${shellQuote(file)}`], { input: content }); }
   async copyFile(src: string, dest: string): Promise<void> { await this.writeFile(dest, fs.readFileSync(src, 'utf8')); }
   async rename(from: string, to: string): Promise<void> { await this.checked('mv', ['--', from, to]); }
-  async remove(): Promise<void> { throw new AgentctlError('Remote deletion requires an explicit git worktree remove; host GC follows in HOST-0C'); }
+  async remove(): Promise<void> { throw new AgentctlError('Generic remote deletion is disabled; use owner-confirmed gc or explicit git worktree remove'); }
   async symlink(target: string, link: string): Promise<void> { await this.checked('ln', ['-sfn', '--', target, link]); }
   sleep(ms: number, signal?: AbortSignal): Promise<void> { return this.local.sleep(ms, signal); }
   now(): number { return this.local.now(); }

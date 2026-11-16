@@ -1,3 +1,5 @@
+import { MCP_TOOLS } from '../src/core/mcp-tools.ts';
+import { collectCapacity, capacitySnapshot, snapshotLines } from '../src/core/capacity.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -19,13 +21,13 @@ let serial = 0;
 function world() {
   const root = scratch.sub(`polish-${serial++}`), clone = path.join(root, 'app'); fs.mkdirSync(clone);
   const config = makeConfig(root, `worktree_root: ${root}/wt\nlimits: {claude: 4}\nhosts:\n  pc:\n    ssh: krzet@192.168.2.64\n    port: 2222\n    work_dir: /remote/work\n    repos: {app: /remote/app}\n    providers: [claude]\n    limits: {claude: 1}\n`);
-  const runner = new DiskRunner({ dryRun: false, startTime: Date.now(), respond: () => ({ code: 0, stdout: '' }) });
+  const runner = new DiskRunner({ dryRun: false, startTime: Date.now(), respond: cmd => ({ code: 0, stdout: cmd === 'ssh' ? '==df==\n104857600 1024\n' : '' }) });
   const ctx = new Context(runner, config, () => {});
   const raw = splitSpecs(`---\ntask: MOVE-1\nagent: claude\nmodel: sonnet\neffort: high\nreview: false\nrepos: [{path: ${clone}, branch: move-one}]\n---\nKeep this original prompt.`)[0]!;
   return { config, runner, ctx, raw };
 }
 it('queued host move: round trip preserves ID, position, dependencies, prompt and local paths', async () => {
-  const w = world(); const spec = resolveSpec(w.raw, { config: w.config });
+  const w = world(); w.raw.header.after = ['AUTHOR']; const spec = resolveSpec(w.raw, { config: w.config });
   const [before] = await commitQueueAdd(w.ctx, [{ raw: w.raw, spec }]);
   const preview = await planMove(w.ctx, 'MOVE-1', { host: 'pc' }); assert.equal(readQueue(w.config)[0]!.host, undefined);
   assert.equal(preview.task, 'MOVE-1');
@@ -48,6 +50,8 @@ it('host limits and provider hold: account and host loads agree, remote queue is
   assert.deepEqual(report.hosts![0]!.providers[0], {agent: 'claude', limit: 1, used: 1, free: 0, queued: 1});
   assert.match(renderLimits(report).join('\n'), /host pc: claude 1\/1/);
   assert.equal(describeQueue(w.config, readQueue(w.config), [], [], w.runner.now())[0]!.condition.kind, 'hold');
+  const capacity = await collectCapacity(w.ctx, {cachedOnly: true, live: [], rows: []});
+  assert.match(snapshotLines(capacitySnapshot(capacity)).join('\n'), /hosts pc 0\/1, free 0/);
 });
 it('board: remote queued/finished badges survive narrow columns; H lists tasks and exact SSH attach', async () => {
   const w = world(); w.raw.header.host = 'pc';
@@ -69,4 +73,17 @@ it('remote disk: per-host warning in capacity disk and events', async () => {
   assert.match(diskLine(disk), /\[pc\]/);
   await diskTick(w.ctx, {notify: async () => {}});
   assert.ok(readJournal(w.config).some(e => e.kind === 'disk-critical' && e.text.includes('[pc]')));
+});
+
+it('queued host move: MCP token-only confirmation preserves the reviewed target host', async () => {
+  const w = world(); w.config.mcp.allow = ['move'];
+  await commitQueueAdd(w.ctx, [{raw: w.raw, spec: resolveSpec(w.raw, {config: w.config})}]);
+  const deps = {context: (out: (text: string) => void) => new Context(w.runner, w.config, out), notify: async () => {}};
+  const tool = MCP_TOOLS.find(t => t.name === 'move')!;
+  const preview = await tool.run(deps, {task: 'MOVE-1', host: 'pc'});
+  assert.equal(preview.isError, undefined, preview.text);
+  const token = /preview_token: (\S+)/.exec(preview.text)![1]; assert.ok(token);
+  assert.equal(readQueue(w.config)[0]!.host, undefined);
+  const done = await tool.run(deps, {confirm: true, preview_token: token});
+  assert.equal(done.isError, undefined, done.text); assert.equal(readQueue(w.config)[0]!.host, 'pc');
 });

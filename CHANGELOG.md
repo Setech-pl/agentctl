@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- HOST-DISK-PROBE, HOST-HOLD-OFFLINE, HOST-GC-TARGET: correct remote df/HOME/PATH probes, preserve host-unreachable over old quota evidence, and bind GC approval to the SSH destination. Remote GC cache refreshes in watch and capacity summaries include host caps. / Popraw odczyt df/HOME/PATH hosta, zachowaj host-unreachable mimo starego błędu quota i powiąż zgodę GC z celem SSH. Watch odświeża cache GC, a podsumowania capacity obejmują limity hosta.
+
 - HOST-REDISCOVER / HOST-0C restart: rediscover remote windows by durable task ID and refresh tmux IDs after watch restart; remote `adopt --host` and missing-window `resume` keep execution/hooks/report paths on the host. / Po restarcie watch rozpoznaje okna po ID zadania i aktualizuje ID tmux; zdalne `adopt --host` i `resume` zachowują wykonanie, hooki i ścieżki raportu na hoście.
 
 - HOST-0C board: remote badges on queued and finished rows, cached H task/limit/attach view, and host disk status. / Znaczki hosta także w kolejce i zakończonych zadaniach, cache widoku H z zadaniami, limitami, attach i dyskiem.

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { it } from 'node:test';
 import { Context } from '../src/core/context.ts';
+import { remoteGcProgram } from '../src/core/host-gc.ts';
 import { planGc, applyGc } from '../src/core/gc.ts';
 import { DiskRunner, makeConfig, seedTask, useScratch } from './helpers.ts';
 import type { ExecOptions, ExecResult } from '../src/core/runner.ts';
@@ -73,4 +74,18 @@ it('remote GC: symlinks, escaped paths and nested reports are retained', async (
   const malicious = { ...plan.items.find(i => i.kind === 'worktree')!, target: w.clone };
   const result = await applyGc(w.ctx, { ...plan, items: [malicious] });
   assert.equal(result.done.length, 0); assert.ok(fs.existsSync(w.clone));
+});
+it('HOST-GC-TARGET: changing the SSH endpoint invalidates an owner-reviewed remote GC plan', async () => {
+  assert.equal(typeof remoteGcProgram, 'function');
+  const w = world(), plan = await planGc(w.ctx), calls = w.calls();
+  w.config.hosts.pc!.ssh = 'fake@other-host';
+  const result = await applyGc(w.ctx, plan);
+  assert.equal(result.done.length, 0); assert.ok(result.failed.every(f => /Host target changed/.test(f.reason)));
+  assert.equal(w.calls(), calls, 'refuse before connecting to the changed host'); assert.ok(fs.existsSync(w.wt));
+});
+it('remote GC: links and protected checked-out branches remain intact', async () => {
+  const w = world(); seedTask(w.config, 'LINKS', {host: 'pc', closed: true, links: [{from: 'dependency', to: w.wt}]});
+  assert.ok((await planGc(w.ctx)).skipped.some(s => /links target/.test(s.reason)));
+  const protectedWorld = world(); protectedWorld.git('-C', protectedWorld.wt, 'checkout', '--ignore-other-worktrees', 'main');
+  assert.ok((await planGc(protectedWorld.ctx)).skipped.some(s => /main\/master/.test(s.reason)));
 });

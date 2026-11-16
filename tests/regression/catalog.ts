@@ -26,6 +26,9 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'HOST-DISK-PROBE', fixedIn: '0.23.0', symptom: 'Host disk health used wrong df fields and did not expand remote HOME or honor host PATH.', scenarios: [s('host-health-home.test.ts', '^HOST-DISK-PROBE:')] },
+  { id: 'HOST-HOLD-OFFLINE', fixedIn: '0.23.0', symptom: 'Persisted quota evidence could replace host-unreachable with limited after SSH loss.', scenarios: [s('host-tasks.test.ts', '^HOST-HOLD-OFFLINE:')] },
+  { id: 'HOST-GC-TARGET', fixedIn: '0.23.0', symptom: 'An endpoint change could retarget a reviewed remote GC plan to a different SSH host.', scenarios: [s('host-gc.test.ts', '^HOST-GC-TARGET:')] },
   { id: 'HOST-REDISCOVER', fixedIn: '0.23.0', symptom: 'A renamed remote task window could be lost after watch restart when its tmux ID changed.', scenarios: [s('host-rediscover.test.ts', '^HOST-REDISCOVER:')] },
   { id: 'HOST-TMUX-WRAP', fixedIn: '0.23.0', symptom: 'Wrapping saved tmux capture/paste/window methods recursed through the remote router (unreleased 87662ec; router absent from v0.22.3).', scenarios: [s('host-boundaries.test.ts', '^HOST-TMUX-WRAP:')] },
   { id: 'HOST-MIRROR-ENV', fixedIn: '0.23.0', symptom: 'Remote report mirror commands included unrelated launch environment values in SSH argv (unreleased b9384f2; mirror absent from v0.22.3).', scenarios: [s('host-boundaries.test.ts', '^HOST-MIRROR-ENV:')] },

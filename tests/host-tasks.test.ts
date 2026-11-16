@@ -315,3 +315,13 @@ it('remote resume: recreates only a missing window on its host with remote hooks
   assert.ok(w.pastes.at(-1)!.includes(w.record().remoteReport!));
   assert.ok(w.commands.some(c => c[0] === 'sh' && c.join(' ').includes('start.sh')));
 });
+it('HOST-HOLD-OFFLINE: persisted provider quota evidence never hides SSH unreachability', async () => {
+  const w = world(); await startAtTrust(w); await acceptTrust(w);
+  w.tmux.windows[0]!.screen = ready();
+  await w.ctx.runner.writeFile(path.join(w.config.stateDir, 'r-1/event.json'), JSON.stringify({outcome: 'limited', text: 'API Error: 429 rate limit exceeded', at: new Date(w.runner.now()).toISOString()}));
+  await collectStatus(w.ctx, {progress: false});
+  w.offline(true);
+  const rows = await collectStatus(w.ctx, {progress: false});
+  assert.equal(rows[0]!.state, 'host-unreachable'); assert.equal(rows[0]!.window, 'alive');
+  assert.ok((await liveWindows(w.ctx)).some(w => w.host === 'pc' && w.counted !== false));
+});

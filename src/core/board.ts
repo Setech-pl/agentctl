@@ -801,7 +801,7 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
   const archivedCohorts = cohortMetas.filter((m) => m.archived).map((m) => cohortKey(m.name));
   const queued = queue.find((v) => v.entry.task === selected);
   // Remote hosts: from the on-disk health cache only — the board never opens network connections on a refresh.
-  const hosts = Object.keys(config.hosts).length === 0 ? undefined : summarizeHosts(readHostsCache(), Object.keys(config.hosts));
+  const hosts = Object.keys(config.hosts).length === 0 ? undefined : summarizeHosts(readHostsCache(), Object.keys(config.hosts)).map(h => ctx.hosts.connection(h.name).unreachable ? { ...h, state: 'unreachable' as const } : h);
   const hostsSnap = hosts === undefined ? {} : { hosts };
   if (selected === MANAGER_SELECT && manager.state !== 'missing') {
     let lines: string[];
@@ -1060,7 +1060,7 @@ export async function loadViewLines(ctx: Context, what: ViewKind): Promise<strin
   if (what === 'limits') return renderLimits(collectLimits(ctx.config, await liveWindows(ctx)));
   if (what === 'hosts') {
     const cache = Object.keys(ctx.config.hosts).length === 0 ? undefined : readHostsCache();
-    const health = Object.keys(ctx.config.hosts).map(name => cache?.hosts.find(h => h.name === name) ?? { name, state: 'unreachable' as const, probedAt: '', detail: 'not probed yet; run agentctl hosts --refresh' });
+    const health = Object.keys(ctx.config.hosts).map(name => ctx.hosts.connection(name).unreachable ? {name, state: 'unreachable' as const, probedAt: '', detail: ctx.hosts.connection(name).detail} : cache?.hosts.find(h => h.name === name) ?? { name, state: 'unreachable' as const, probedAt: '', detail: 'not probed yet; run agentctl hosts --refresh' });
     const rows = await collectStatus(ctx, { cachedOnly: true, progress: false, shallowClosed: true });
     const loads = collectLimits(ctx.config, await liveWindows(ctx, rows));
     const lines = hostsViewLines(health, cache?.writtenAt);

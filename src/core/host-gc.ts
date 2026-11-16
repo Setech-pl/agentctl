@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Context } from './context.ts';
@@ -16,7 +17,7 @@ export function remoteGcProgram(): void {
   const realRoot = fs.realpathSync(root);
   const deadline = Date.now() + 5000;
   let visited = 0;
-  const bounded = () => { if (++visited > 100_000 || Date.now() > deadline) throw Error('host GC measurement budget exceeded; retry a smaller cohort'); };
+  const bounded = () => { if (++visited > 100_000 || Date.now() > deadline) throw Error('host GC measurement budget exceeded; target kept, retry later'); };
   const run = (cmd: string, args: string[]) => cp.spawnSync(cmd, args, { encoding: 'utf8', timeout: 1500, maxBuffer: 2 * 1024 * 1024 });
   const git = (repo: string, args: string[]) => {
     bounded(); const r = run('git', ['-C', repo, ...args]);
@@ -48,6 +49,7 @@ export function remoteGcProgram(): void {
   const items: GcItem[] = [], skipped: GcSkip[] = [];
   const seen = new Set<string>();
   const add = (r: any, kind: 'worktree' | 'cache', target: string, repo?: string) => {
+    if (input.item && (target !== input.item.target || kind !== input.item.kind)) return;
     if (seen.has(target)) return; seen.add(target);
     const base = { host: input.host, task: r.task, kind, target, ...(r.cohort ? { cohort: r.cohort } : {}), ...(repo ? { repo } : {}) };
     try {
@@ -91,19 +93,21 @@ export function remoteGcProgram(): void {
   } else process.stdout.write(JSON.stringify({ items, skipped }));
 }
 
+const fingerprint = (ctx: Context, host: string) => { const h = ctx.config.hosts[host]!; return createHash('sha256').update(JSON.stringify({ssh: h.ssh, port: h.port, identityFile: h.identityFile, workDir: h.workDir, repos: h.repos})).digest('hex'); };
+
 const script = () => `(${remoteGcProgram.toString()})()`;
 const cacheFile = (ctx: Context, host: string) => path.join(ctx.config.stateDir, 'hosts', host + '-gc.json');
 function payload(ctx: Context, host: string, olderThanMs: number, cohort?: string) {
   const archived = listArchivedRecords(ctx.config);
   const current = listTaskRecords(ctx.config);
-  return { host, root: ctx.config.hosts[host]!.workDir, repos: ctx.config.hosts[host]!.repos, olderThanMs,
+  return { host, hostFingerprint: fingerprint(ctx, host), root: ctx.config.hosts[host]!.workDir, repos: ctx.config.hosts[host]!.repos, olderThanMs,
     records: [...current, ...archived.filter(a => !current.some(r => r.window === a.window))].filter(r => r.host === host).map(r => ({ task: r.task, window: r.window, repos: r.repos, links: r.links, remoteDir: r.remoteDir, remoteReport: r.remoteReport, closed: r.closed, cancelled: r.cancelled, archived: archived.some(a => a.window === r.window), cohort: r.cohort, selected: cohort === undefined || !!r.cohort && cohortKey(r.cohort) === cohortKey(cohort) })) };
 }
 
 export async function planRemoteGc(ctx: Context, opts: GcOptions, olderThanMs: number): Promise<Pick<GcPlan, 'items' | 'skipped'>> {
   const plans = await Promise.all(Object.keys(ctx.config.hosts).map(async host => {
     try {
-      const data = payload(ctx, host, olderThanMs, opts.cohort);
+      const data = payload(ctx, host, olderThanMs);
       if (!data.records.length) return { items: [], skipped: [] };
       if (opts.cachedSizes) {
         const cached = JSON.parse(fs.readFileSync(cacheFile(ctx, host), 'utf8'));
@@ -112,15 +116,18 @@ export async function planRemoteGc(ctx: Context, opts: GcOptions, olderThanMs: n
       }
       const r = await ctx.hosts.forHost(host).checked('node', ['-e', script()], { input: JSON.stringify(data), readOnly: true, timeoutMs: 10_000 });
       const plan = JSON.parse(r.stdout);
+      for (const item of plan.items) item.hostFingerprint = data.hostFingerprint;
       await ctx.runner.writeFile(cacheFile(ctx, host), JSON.stringify({ at: ctx.runner.now(), key: JSON.stringify(data), plan }));
       return plan;
     } catch (e) { return { items: [], skipped: [{ host, task: '-', kind: 'cache', target: ctx.config.hosts[host]!.workDir, reason: errorMessage(e) }] }; }
   }));
-  return { items: plans.flatMap(p => p.items), skipped: plans.flatMap(p => p.skipped) };
+  const selected = (i: GcItem | GcSkip) => opts.cohort === undefined || i.task === '-' || !!i.cohort && cohortKey(i.cohort) === cohortKey(opts.cohort);
+  return { items: plans.flatMap(p => p.items).filter(selected), skipped: plans.flatMap(p => p.skipped).filter(selected) };
 }
 
 export async function applyRemoteGc(ctx: Context, item: GcItem, olderThanMs: number): Promise<GcItem> {
   if (!item.host || !ctx.config.hosts[item.host]) throw Error('host removed from configuration');
+  if (item.hostFingerprint !== fingerprint(ctx, item.host)) throw Error('Host target changed since preview; preview GC again');
   const r = await ctx.hosts.forHost(item.host).checked('node', ['-e', script()], { input: JSON.stringify({ ...payload(ctx, item.host, olderThanMs), item }), timeoutMs: 10_000 });
-  return JSON.parse(r.stdout);
+  return { ...JSON.parse(r.stdout), hostFingerprint: item.hostFingerprint };
 }
