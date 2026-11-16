@@ -23,7 +23,10 @@ it('HOST-SSH-EXIT: nonzero command status is reachable; only SSH errors/timeouts
 const scratch = useScratch();
 it('HOST-SSH-COLD: the first health/transport call creates its ControlMaster directory before SSH', async () => {
   const home = path.join(scratch.dir, 'fresh-home');
-  const runner = new DiskRunner({dryRun: false, respond: (cmd, args) => {
+  class SSHRunner extends DiskRunner {
+    override async mkdir(dir: string): Promise<void> { await super.mkdir(dir); fs.mkdirSync(dir, {recursive: true}); }
+  }
+  const runner = new SSHRunner({dryRun: false, respond: (cmd, args) => {
     if (cmd !== 'ssh') return undefined;
     const socket = args[args.indexOf('-S') + 1]!;
     return fs.existsSync(path.dirname(socket)) ? {code: 0, stdout: 'ready'} : {code: 255, stderr: 'unix_listener: No such file or directory'};
