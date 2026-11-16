@@ -101,7 +101,7 @@ it('P63 MCP answer is a write tool of its own permission and honours preview →
 it('integration: a changed command, expired token and replay never send approval', async () => {
   const f = fakeKimi(scratch.sub('changed-command'), MENU);
   const preview = await answerMenu(f.ctx, 't1', 1);
-  f.setScreen(MENU.replace('$ git status', '$ git diff'));
+  f.setScreen(MENU.replaceAll('$ git status', '$ git diff'));
   assert.equal((await answerMenu(f.ctx, 't1', 1, { token: preview.token! })).outcome, 'refused');
   assert.equal(f.keys.length, 0);
   f.setScreen(MENU);
