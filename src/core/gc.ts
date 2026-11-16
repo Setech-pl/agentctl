@@ -1,3 +1,4 @@
+import { planRemoteGc, applyRemoteGc } from './host-gc.ts';
 import { restoreDiskMeasurements } from './disk.ts';
 import { worktreeCacheFreed } from './worktree-cache.ts';
 import { knownLinkReferences, linkUsers } from './links.ts';
@@ -22,6 +23,7 @@ import { AgentctlError, cohortKey, errorMessage } from './util.ts';
 export type GcKind = 'worktree' | 'cache' | 'archive' | 'branch';
 
 export interface GcItem {
+  host?: string;
   kind: GcKind;
   task: string;
   /** The worktree, the file or folder in the cache, the state folder, or `<repo>#<branch>`. */
@@ -36,6 +38,7 @@ export interface GcItem {
 }
 
 export interface GcSkip {
+  host?: string;
   task: string;
   kind: GcKind | 'worktree-foreign';
   target: string;
@@ -282,6 +285,8 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
     if (record?.cohort) item.cohort = record.cohort;
     if (item.bytes === undefined) item.bytes = item.kind === 'branch' || item.kind === 'worktree-foreign' ? 0 : await size(item.target);
   }
+  const remote = await planRemoteGc(ctx, opts, olderThanMs);
+  items.push(...remote.items); skipped.push(...remote.skipped);
   const freeBytes = items.reduce((n, i) => n + i.bytes, 0);
   const foreignWorktrees = skipped.filter(s => s.kind === 'worktree-foreign').length;
   return { ...(opts.cachedSizes ? { cachedSizes: true } : {}), autoCacheFreedBytes: all.filter(r => cohort === undefined || (r.cohort && cohortKey(r.cohort) === cohortKey(cohort))).reduce((sum, r) => sum + worktreeCacheFreed(ctx, r), 0), ...(opts.forceLinks ? { forceLinks: true } : {}), items, skipped: cohort === undefined ? skipped : skipped.filter(s => s.kind !== 'worktree-foreign'), freeBytes, olderThanMs, unknownCacheDirs, ...(cohort !== undefined ? { foreignWorktrees } : {}) };
@@ -301,6 +306,10 @@ export async function applyGc(ctx: Context, plan: GcPlan): Promise<GcResult> {
   for (const kind of order) {
     for (const item of plan.items.filter((i) => i.kind === kind)) {
       try {
+        if (item.host) {
+          const done = await applyRemoteGc(ctx, item, plan.olderThanMs);
+          result.done.push(done); result.freedBytes += done.bytes; continue;
+        }
         // CLI measures removed bytes; MCP uses the watch estimate and never delays removal for accounting.
         const bytes = kind === 'worktree' || kind === 'cache' ? plan.cachedSizes ? lastMeasurement(item.target)?.bytes ?? (kind === 'cache' ? fs.lstatSync(item.target).size : 0) : await sizeOf(item.target, { fresh: true, now: () => runner.now() }) : 0;
         if (kind === 'worktree') {
@@ -364,7 +373,7 @@ export function renderGc(plan: GcPlan, opts: GcViewOptions & { applied?: GcResul
     for (const reason of view.skipped.reasons.items) lines.push(`  ${reason.reason}: ${reason.count}, ${reason.bytes} bytes`);
     for (const c of view.cohorts.items) lines.push(`cohort ${c.cohort}: ${c.count}, ${c.bytes} bytes; skipped ${c.skipped}, ${c.skippedBytes} bytes`);
     for (const n of view.newer.items) lines.push(`  ${n.task}: ${n.reason}, ${n.files} files, ${n.bytes} bytes`);
-    for (const i of view.details?.items ?? []) lines.push(`  ${i.action} ${KIND_WORD[i.kind as GcKind] ?? i.kind} ${i.task} ${i.target} (${('reason' in i ? i.reason : i.detail)})`);
+    for (const i of view.details?.items ?? []) lines.push(`  ${i.action} ${KIND_WORD[i.kind as GcKind] ?? i.kind} ${i.task}${i.host ? ` [${i.host}]` : ''} ${i.target} (${('reason' in i ? i.reason : i.detail)})`);
     for (const [label, page] of [['cohorts', view.cohorts], ['newer', view.newer], ['reasons', view.skipped.reasons], ['details', view.details]] as const) if (page?.next_offset !== null && page?.next_offset !== undefined) lines.push(`${label}: next offset ${page.next_offset} of ${page.total}`);
     if (plan.foreignWorktrees) lines.push(`${plan.foreignWorktrees} foreign worktrees: not touched.`);
     if (plan.unknownCacheDirs) lines.push(`${plan.unknownCacheDirs} folder${plan.unknownCacheDirs === 1 ? '' : 's'} in the cache belong to no task of agentctl: not touched.`);
@@ -386,7 +395,7 @@ export function renderGc(plan: GcPlan, opts: GcViewOptions & { applied?: GcResul
     for (const reason of view.skipped.reasons.items) lines.push(`  skipped: ${reason.reason}: ${reason.count}, ${reason.bytes} bytes`);
   }
   if (opts.detail) {
-    for (const i of applied.done) lines.push(`  ${i.kind === 'archive' ? 'archived state' : i.kind === 'branch' ? 'deleted branch' : `removed ${KIND_WORD[i.kind]}`} ${i.task} ${i.target} (${i.detail})`);
+    for (const i of applied.done) lines.push(`  ${i.kind === 'archive' ? 'archived state' : i.kind === 'branch' ? 'deleted branch' : `removed ${KIND_WORD[i.kind]}`} ${i.task}${i.host ? ` [${i.host}]` : ''} ${i.target} (${i.detail})`);
     for (const f of applied.failed) lines.push(`  failed ${KIND_WORD[f.item.kind]} ${f.item.task} ${f.item.target} (${f.reason})`);
     for (const s of plan.skipped) lines.push(`  skipped ${s.kind === 'worktree-foreign' ? 'worktree-foreign' : KIND_WORD[s.kind as GcKind]} ${s.task} ${s.target} (${s.reason})`);
   }

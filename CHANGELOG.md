@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- HOST-0C GC: bounded host measurements and cached previews; revalidate finished ownership, live windows, clean registered worktrees, protected branches, links and age on the host before removal. Reports stay. Disk warnings identify each host work_dir. / Ograniczone pomiary i cache zdalnego GC; ponowna kontrola własności, okien, czystości worktree, chronionych gałęzi, linków i wieku na hoście przed usunięciem. Raporty zostają, ostrzeżenia dysku wskazują host.
+
 - Complete the English/Polish host configuration and host-unreachable state inventories. / Uzupełnij angielskie i polskie tabele konfiguracji hostów oraz stanu host-unreachable.
 
 - HOST-TMUX-WRAP: keep saved tmux methods stable when consumers wrap them. / Zachowuj stabilne metody tmux przy podpinaniu wrapperów przez konsumentów.

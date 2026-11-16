@@ -1,3 +1,5 @@
+import { readHostsCache, writeHostsCache } from './hosts.ts';
+import { probeHosts } from './host-health.ts';
 import { readQueue } from './queue.ts';
 import { resolveSpec, splitSpecs } from './spec.ts';
 import fs from 'node:fs';
@@ -15,7 +17,7 @@ import { fileVersion } from './file-version.ts';
 import { withFileLock } from './file-lock.ts';
 
 export type DiskLevel = 'ok' | 'warn' | 'critical' | 'unknown';
-export interface DiskVolume { device: string | null; paths: string[]; availableBytes: number | null; totalBytes: number | null; level: DiskLevel; error?: string }
+export interface DiskVolume { host?: string; device: string | null; paths: string[]; availableBytes: number | null; totalBytes: number | null; level: DiskLevel; error?: string }
 export interface DiskReport { reclaimableBytes?: number | null; gcHint?: boolean; measurementError?: string; /** The sizes below are the last ones measured (or none yet): a measurement is still running in the background. */ measuring?: boolean; worktreeCount?: number; largestWorktrees?: { path: string; bytes: number }[]; pathsTotal?: number; pathsOffset?: number; pathsNextOffset?: number | null; volumes: DiskVolume[]; worktreeBytes: number | null; measuredAt: string; level: DiskLevel }
 export const DISK_INTERVAL_MS = 5 * 60_000;
 const restored = new Map<string, string>();
@@ -86,6 +88,13 @@ export async function collectDisk(ctx: Context, statfs = fs.promises.statfs, opt
     const bytes = byDevice.get(volume.device ?? '') ?? 0;
     if (volume.totalBytes && bytes / volume.totalBytes * 100 > ctx.config.disk.worktreeSharePercent && volume.level !== 'critical') volume.level = 'warn';
   }
+  const health = readHostsCache();
+  for (const [host, h] of Object.entries(ctx.config.hosts)) {
+    const sample = health?.hosts.find(s => s.name === host);
+    const fresh = sample && sample.state === 'reachable' && ctx.runner.now() - Date.parse(sample.probedAt) < 120_000;
+    const availableBytes = fresh && sample.disk ? sample.disk.freeKb * 1024 : null;
+    volumes.set(`host:${host}`, { host, device: `host:${host}`, paths: [h.workDir], availableBytes, totalBytes: fresh && sample.disk ? sample.disk.totalKb * 1024 : null, level: diskLevel(availableBytes, ctx.config.disk.warnGb, ctx.config.disk.criticalGb), ...(!fresh ? { error: 'host health unavailable/stale; run agentctl hosts' } : {}) });
+  }
   const gcHint = [...volumes.values()].some(v => v.level === 'warn' || v.level === 'critical');
   // A disk read never computes a GC plan; that belongs to an explicit gc preview.
   const reclaimableBytes = null;
@@ -118,7 +127,7 @@ function readingAge(ageMs: number): string {
 export function diskLine(disk: DiskReport, now: number = Date.now()): string {
   const age = `, ${readingAge(Math.max(0, now - Date.parse(disk.measuredAt)))} old`;
   const note = disk.measuring ? ` (measuring, last reading${age})` : disk.measurementError ? ` (measurement failed, last reading${age})` : age ? ` (last reading${age})` : '';
-  return `Disk: ${disk.level}; free ${disk.volumes.map((v) => v.availableBytes === null ? 'n/d' : `${(v.availableBytes / 1024 ** 3).toFixed(1)} GiB`).join(' / ')}; agentctl worktrees ${disk.worktreeBytes === null ? 'n/d' : `${(disk.worktreeBytes / 1024 ** 3).toFixed(1)} GiB`}${note}${disk.level === 'critical' || disk.level === 'warn' ? `; run agentctl gc --preview (gc_preview); reclaimable ${disk.reclaimableBytes ?? 'n/d'} bytes` : ''}`;
+  return `Disk: ${disk.level}; free ${disk.volumes.map((v) => `${v.host ? `[${v.host}] ` : ''}${v.availableBytes === null ? 'n/d' : `${(v.availableBytes / 1024 ** 3).toFixed(1)} GiB`}`).join(' / ')}; agentctl worktrees ${disk.worktreeBytes === null ? 'n/d' : `${(disk.worktreeBytes / 1024 ** 3).toFixed(1)} GiB`}${note}${disk.level === 'critical' || disk.level === 'warn' ? `; run agentctl gc --preview (gc_preview); reclaimable ${disk.reclaimableBytes ?? 'n/d'} bytes` : ''}`;
 }
 
 /**
@@ -128,7 +137,7 @@ export async function refreshDiskAfterGc(ctx: Context, freedBytes: number): Prom
   if (ctx.runner.dryRun) return null;
   await persistDiskMeasurements(ctx);
   const disk = await collectDisk(ctx);
-  const free = disk.volumes.map((v) => v.availableBytes === null ? 'n/d' : `${(v.availableBytes / 1024 ** 3).toFixed(1)} GiB`).join(' / ');
+  const free = disk.volumes.map((v) => `${v.host ? `[${v.host}] ` : ''}${v.availableBytes === null ? 'n/d' : `${(v.availableBytes / 1024 ** 3).toFixed(1)} GiB`}`).join(' / ');
   const text = `gc freed ${(freedBytes / 1024 ** 3).toFixed(1)} GiB, free now ${free}`;
   await recordJournal(ctx, { kind: 'gc-freed', text });
   return text;
@@ -157,6 +166,7 @@ export async function refreshDiskMeasurements(ctx: Context): Promise<void> {
 }
 const sampled = new Map<string, number>();
 export async function diskTick(ctx: Context, notifier: Notifier): Promise<void> {
+  void refreshHostHealth(ctx).catch(() => undefined);
   void refreshDiskMeasurements(ctx).catch(() => undefined);
   const file = path.join(path.dirname(ctx.config.path), 'disk-state.json');
   if (ctx.runner.dryRun || ctx.runner.now() - (sampled.get(file) ?? -Infinity) < DISK_INTERVAL_MS) return;
@@ -186,4 +196,14 @@ export async function confirmDiskStart(ctx: Context, yes = false): Promise<boole
   if (yes) return true;
   if (!ctx.confirm) throw new Error('Disk critical: rerun with --yes after reviewing agentctl gc, or free disk space.');
   return ctx.confirm('Disk critical. Start anyway? [y/N] ');
+}
+
+const hostRefreshing = new Set<string>();
+const hostRefreshed = new Map<string, number>();
+/** Watch owns host probes; UI reads only their bounded cache. */
+export async function refreshHostHealth(ctx: Context): Promise<void> {
+  if (ctx.runner.dryRun || !Object.keys(ctx.config.hosts).length || hostRefreshing.has(ctx.config.path) || ctx.runner.now() - (hostRefreshed.get(ctx.config.path) ?? -Infinity) < 60_000) return;
+  hostRefreshing.add(ctx.config.path); hostRefreshed.set(ctx.config.path, ctx.runner.now());
+  try { await writeHostsCache(ctx.runner, await probeHosts(ctx.runner, ctx.config.hosts, ctx.config, { timeoutMs: 5000 })); }
+  finally { hostRefreshing.delete(ctx.config.path); }
 }
