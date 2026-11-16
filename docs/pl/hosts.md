@@ -61,6 +61,8 @@ Zadanie zdalne liczy się do limitu konta razem z lokalnymi zadaniami i rezerwac
 
 Po restarcie watch odnajduje zdalne okna po ID zadania, aktualizuje ID tmux i obserwuje istniejącego agenta bez uruchamiania drugiego. `resume TASK` odtwarza rzeczywiście brakujące okno na hoście, z jego hookami i ścieżką raportu; niedostępny host nigdy nie oznacza pustego tmux. Utracony lokalny TASK.md odtwarza `adopt TASK --host pc --report /bezwzgledna/lokalna/kopia/TASK.md --agent claude --model sonnet --effort high`, identyfikując istniejące zdalne okno. Dodaj `--worktree /zdalny/worktree`, jeśli znasz ścieżkę; `--remote-report` zmienia domyślną ścieżkę zdalnego raportu. Adopt nie odzyskuje oryginalnego promptu. Zdalne review zamawiaj osobnym zadaniem (`review: false`).
 
+Jawne `resume` właściciela zachowuje zachowanie 0.22.4: blokada dostawcy zatrzymuje kolejkę, a resume nadal sprawdza sloty konta i hosta.
+
 ## Pierwszy rzeczywisty test PC: WSL2 → Windows → Mac
 
 Użyj Ubuntu WSL2 jako **krzet**, adresu Windows **192.168.2.64** i zewnętrznego portu SSH **2222**. Poniższe komendy wykonuje właściciel; uruchamiają jedno rzeczywiste zadanie Claude. Klony i worktree trzymaj w linuksowym systemie plików WSL.

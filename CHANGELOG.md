@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.23.0] - 2026-11-16
 
+- HOST-RESUME-HOLD: preserve explicit owner resume during queue holds, while enforcing account/host slots. / Zachowaj jawne wznowienie właściciela przy blokadzie kolejki, z kontrolą slotów konta/hosta.
+
 - HOST-SSH-COLD: create the ControlMaster directory before the first host probe; GC summaries identify each host. / Katalog ControlMaster powstaje przed pierwszym sprawdzeniem hosta; podsumowanie GC wskazuje każdy host.
 
 - Remote hosts over strict, multiplexed SSH: host config/health, fetch-only clones, remote worktrees/setup, interactive provider adapters, verified task operations, task-owned hooks, local report mirrors and output validation. Includes v0.22.4 provider holds and ACTL-0226 fixes. / Hosty zdalne po ścisłym, multipleksowanym SSH: konfiguracja/zdrowie, fetch klonów, worktree/setup, interaktywni dostawcy, weryfikowane operacje, hooki zadania, lokalne kopie raportów i walidacja outputs; wraz z blokadami dostawców i poprawkami ACTL-0226 z 0.22.4.

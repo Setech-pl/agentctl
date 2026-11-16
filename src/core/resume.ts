@@ -1,5 +1,4 @@
 import { checkHostLimit } from './host-limits.ts';
-import { providerHolds } from './provider-hold.ts';
 import { installRemoteHooks } from './host-task.ts';
 import { writeLaunchScript } from './launch-script.ts';
 import { validateLaunch, launchEnvironment } from './safety.ts';
@@ -95,7 +94,6 @@ export async function planResume(ctx: Context, typed: string[], opts: { all?: bo
   for (const c of chosen) {
     if (!isActive(config, c.agent)) { skipped.push({ task: c.task, reason: `provider ${c.agent} is not enabled` }); continue; }
     if (occupied.some(w => w.window === c.window)) { skipped.push({ task: c.task, reason: 'task is already starting or running' }); continue; }
-    if (providerHolds(config, ctx.runner.now())[c.agent]) { skipped.push({task: c.task, reason: 'provider hold'}); continue; }
     const problem = checkHostLimit(config, c, occupied) ?? checkWindowLimit(c.agent, config.limits[c.agent], occupied, config.session);
     if (problem) {
       skipped.push({ task: c.task, reason: problem });

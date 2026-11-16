@@ -1,3 +1,4 @@
+import { setProviderHolds } from '../src/core/provider-hold.ts';
 import { adoptTask } from '../src/core/adopt.ts';
 import { findResumable, planResume, resumeTasks } from '../src/core/resume.ts';
 import assert from 'node:assert/strict';
@@ -324,4 +325,12 @@ it('HOST-HOLD-OFFLINE: persisted provider quota evidence never hides SSH unreach
   const rows = await collectStatus(w.ctx, {progress: false});
   assert.equal(rows[0]!.state, 'host-unreachable'); assert.equal(rows[0]!.window, 'alive');
   assert.ok((await liveWindows(w.ctx)).some(w => w.host === 'pc' && w.counted !== false));
+});
+
+it('HOST-RESUME-HOLD: an explicit remote resume keeps account/host slot checks during a queue hold', async () => {
+  const w = world(); await startAtTrust(w); await acceptTrust(w); w.tmux.windows.length = 0;
+  await setProviderHolds(w.ctx, {claude: new Date(w.runner.now() + 3600000).toISOString()});
+  assert.equal((await planResume(w.ctx, ['R-1'])).items.length, 1);
+  seedTask(w.config, 'SLOT', {host: 'pc', agent: 'claude'}); w.tmux.add('slot', ready());
+  assert.ok((await planResume(w.ctx, ['R-1'])).skipped.some(s => /host pc limit/.test(s.reason)));
 });

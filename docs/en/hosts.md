@@ -61,6 +61,8 @@ Use `agentctl move TASK --host pc` or `--host local` for a queued, never-started
 
 After watch restarts it rediscovers remote windows by task ID, refreshes their tmux IDs and resumes observation without launching a second agent. `resume TASK` recreates a genuinely missing remote window, with remote hooks and report instructions; an offline host is never treated as an empty tmux server. If local TASK.md was lost, `adopt TASK --host pc --report /absolute/local/mirror/TASK.md --agent claude --model sonnet --effort high` identifies the existing remote window. Supply `--worktree /remote/worktree` when known; `--remote-report` overrides the standard remote report path. Original prompt history cannot be reconstructed by adopt. Remote automatic reviews remain explicit separate tasks (`review: false`).
 
+An explicit owner `resume` preserves the 0.22.4 behavior: provider holds gate the queue; resume still checks account and host slots.
+
 ## First real PC test: WSL2 → Windows → Mac
 
 Use WSL2 Ubuntu as user **krzet**, Windows LAN address **192.168.2.64**, SSH exposed at **2222**. Commands below are owner actions; they launch one real Claude task. Keep repository clones and worktrees in WSL's Linux filesystem.

@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'HOST-RESUME-HOLD', fixedIn: '0.23.0', symptom: 'An explicit owner resume was silently skipped during a queued provider hold (introduced in unreleased HOST-0C).', noProof: 'Introduced in unreleased 3f0078c; v0.22.4 local resume was unaffected. Both scenarios fail on 6c574f7 (measured in HOST0C-prefix-resume.log).', scenarios: [s('resume.test.ts', '^HOST-RESUME-HOLD:'), s('host-tasks.test.ts', '^HOST-RESUME-HOLD:')] },
   { id: 'HOST-SSH-COLD', fixedIn: '0.23.0', symptom: 'The first host health probe failed because its ControlMaster socket directory did not exist.', scenarios: [s('host-ssh-exit.test.ts', '^HOST-SSH-COLD:')] },
   { id: 'HOST-DISK-PROBE', fixedIn: '0.23.0', symptom: 'Host disk health used wrong df fields and did not expand remote HOME or honor host PATH.', scenarios: [s('host-health-home.test.ts', '^HOST-DISK-PROBE:')] },
   { id: 'HOST-HOLD-OFFLINE', fixedIn: '0.23.0', symptom: 'Persisted quota evidence could replace host-unreachable with limited after SSH loss.', scenarios: [s('host-tasks.test.ts', '^HOST-HOLD-OFFLINE:')] },

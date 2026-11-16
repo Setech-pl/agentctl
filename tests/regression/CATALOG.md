@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| HOST-RESUME-HOLD | An explicit owner resume was silently skipped during a queued provider hold (introduced in unreleased HOST-0C). | `tests/resume.test.ts` (`^HOST-RESUME-HOLD:`)<br>`tests/host-tasks.test.ts` (`^HOST-RESUME-HOLD:`) | 0.23.0 | not proven: Introduced in unreleased 3f0078c; v0.22.4 local resume was unaffected. Both scenarios fail on 6c574f7 (measured in HOST0C-prefix-resume.log). |
 | HOST-SSH-COLD | The first host health probe failed because its ControlMaster socket directory did not exist. | `tests/host-ssh-exit.test.ts` (`^HOST-SSH-COLD:`) | 0.23.0 | cannot run on v0.22.4: the code under test did not exist there (import error) |
 | HOST-DISK-PROBE | Host disk health used wrong df fields and did not expand remote HOME or honor host PATH. | `tests/host-health-home.test.ts` (`^HOST-DISK-PROBE:`) | 0.23.0 | cannot run on v0.22.4: the code under test did not exist there (import error) |
 | HOST-HOLD-OFFLINE | Persisted quota evidence could replace host-unreachable with limited after SSH loss. | `tests/host-tasks.test.ts` (`^HOST-HOLD-OFFLINE:`) | 0.23.0 | cannot run on v0.22.4: the code under test did not exist there (import error) |

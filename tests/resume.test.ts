@@ -1,3 +1,4 @@
+import { setProviderHolds } from '../src/core/provider-hold.ts';
 import { readTaskRecord } from '../src/core/taskstore.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -219,4 +220,10 @@ describe('resume: the board and the chat', () => {
     assert.deepEqual(w.tmux.windows.map((x) => x.name), ['nc-1']);
     assert.match((await call({ tasks: ['NC-1'] })).text, /cannot be resumed/);
   });
+});
+
+it('HOST-RESUME-HOLD: an explicit local resume remains possible during a queued provider hold', async () => {
+  const w = world('explicit-hold'); w.task('NC-1');
+  await setProviderHolds(w.ctx, {claude: new Date(w.runner.now() + 3600000).toISOString()});
+  assert.deepEqual((await planResume(w.ctx, ['NC-1'])).items.map(i => i.task), ['NC-1']);
 });
