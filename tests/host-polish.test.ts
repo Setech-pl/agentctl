@@ -1,0 +1,72 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { it } from 'node:test';
+import { Context } from '../src/core/context.ts';
+import { collectLimits, renderLimits } from '../src/core/limits.ts';
+import { moveTask, planMove } from '../src/core/move.ts';
+import { commitQueueAdd, describeQueue, readQueue, renderRawSpec, saveEntry } from '../src/core/queue.ts';
+import { resolveSpec, splitSpecs } from '../src/core/spec.ts';
+import { setProviderHolds } from '../src/core/provider-hold.ts';
+import { boardColumns, loadViewLines, queueCells, rowCells } from '../src/core/board.ts';
+import { collectDisk, diskLine, diskTick } from '../src/core/disk.ts';
+import { writeHostsCache } from '../src/core/hosts.ts';
+import { DiskRunner, makeConfig, seedTask, useScratch } from './helpers.ts';
+import { collectStatus } from '../src/core/status.ts';
+import { readJournal } from '../src/core/journal.ts';
+const scratch = useScratch();
+let serial = 0;
+function world() {
+  const root = scratch.sub(`polish-${serial++}`), clone = path.join(root, 'app'); fs.mkdirSync(clone);
+  const config = makeConfig(root, `worktree_root: ${root}/wt\nlimits: {claude: 4}\nhosts:\n  pc:\n    ssh: krzet@192.168.2.64\n    port: 2222\n    work_dir: /remote/work\n    repos: {app: /remote/app}\n    providers: [claude]\n    limits: {claude: 1}\n`);
+  const runner = new DiskRunner({ dryRun: false, respond: () => ({ code: 0, stdout: '' }) });
+  const ctx = new Context(runner, config, () => {});
+  const raw = splitSpecs(`---\ntask: MOVE-1\nagent: claude\nmodel: sonnet\neffort: high\nreview: false\nrepos: [{path: ${clone}, branch: move-one}]\n---\nKeep this original prompt.`)[0]!;
+  return { config, runner, ctx, raw };
+}
+it('queued host move: round trip preserves ID, position, dependencies, prompt and local paths', async () => {
+  const w = world(); const spec = resolveSpec(w.raw, { config: w.config });
+  const [before] = await commitQueueAdd(w.ctx, [{ raw: w.raw, spec }]);
+  const preview = await planMove(w.ctx, 'MOVE-1', { host: 'pc' }); assert.equal(readQueue(w.config)[0]!.host, undefined);
+  assert.equal(preview.task, 'MOVE-1');
+  await moveTask(w.ctx, 'MOVE-1', { host: 'pc', yes: true });
+  let e = readQueue(w.config)[0]!; assert.equal(e.host, 'pc'); assert.equal(e.seq, before!.seq); assert.deepEqual(e.after, before!.after);
+  assert.equal(resolveSpec(splitSpecs(e.spec)[0]!, {config: w.config}).repos[0]!.path, '/remote/app');
+  await moveTask(w.ctx, 'MOVE-1', { host: 'local', yes: true }); e = readQueue(w.config)[0]!;
+  assert.equal(e.host, undefined); assert.equal(e.spec, renderRawSpec(w.raw));
+  assert.equal(e.queuedAt, before!.queuedAt); assert.equal(e.task, before!.task);
+  await assert.rejects(planMove(w.ctx, 'MOVE-1', { host: 'unknown' }), /unknown host/);
+  await saveEntry(w.ctx, { ...e, status: 'starting' });
+  await assert.rejects(moveTask(w.ctx, 'MOVE-1', { host: 'pc', yes: true }), /only queued/);
+});
+it('host limits and provider hold: account and host loads agree, remote queue is held', async () => {
+  const w = world(); w.raw.header.host = 'pc';
+  await commitQueueAdd(w.ctx, [{raw: w.raw, spec: resolveSpec(w.raw, {config: w.config})}]);
+  await setProviderHolds(w.ctx, { claude: new Date(w.runner.now() + 3600000).toISOString() });
+  const report = collectLimits(w.config, [{window: 'active', agent: 'claude', host: 'pc'}], w.runner.now());
+  assert.equal(report.providers.find(p => p.agent === 'claude')!.free, 0);
+  assert.deepEqual(report.hosts![0]!.providers[0], {agent: 'claude', limit: 1, used: 1, free: 0, queued: 1});
+  assert.match(renderLimits(report).join('\n'), /host pc: claude 1\/1/);
+  assert.equal(describeQueue(w.config, readQueue(w.config), [], w.runner.now())[0]!.condition.kind, 'hold');
+});
+it('board: remote queued/finished badges survive narrow columns; H lists tasks and exact SSH attach', async () => {
+  const w = world(); w.raw.header.host = 'pc';
+  const [e] = await commitQueueAdd(w.ctx, [{raw: w.raw, spec: resolveSpec(w.raw, {config: w.config})}]);
+  const view = describeQueue(w.config, [e!], [])[0]!;
+  assert.match(queueCells(view, false, boardColumns(80))[1]!.text, /^\[pc\]/);
+  seedTask(w.config, 'VERY-LONG-TASK-ID', {host: 'pc', closed: true});
+  const rows = await collectStatus(w.ctx, {cachedOnly: true, progress: false});
+  assert.match(rowCells(rows[0]! as any, false, boardColumns(80))[1]!.text, /^\[pc\]/);
+  const lines = (await loadViewLines(w.ctx, 'hosts')).join('\n');
+  assert.match(lines, /unreachable/); assert.match(lines, /MOVE-1: queued/); assert.match(lines, /VERY-LONG-TASK-ID/);
+  assert.match(lines, /ssh -t -p 2222 krzet@192.168.2.64/);
+  assert.ok(!w.runner.calls.some(c => c.cmd === 'ssh'), 'H view stays offline');
+});
+it('remote disk: per-host warning in capacity disk and events', async () => {
+  const w = world();
+  await writeHostsCache(w.runner, [{name: 'pc', state: 'reachable', probedAt: new Date(w.runner.now()).toISOString(), disk: {workDir: '/remote/work', freeKb: 1024, totalKb: 10 * 1024 ** 3}}]);
+  const disk = await collectDisk(w.ctx); assert.equal(disk.volumes.find(v => v.host === 'pc')?.level, 'critical');
+  assert.match(diskLine(disk), /\[pc\]/);
+  await diskTick(w.ctx, {notify: async () => {}});
+  assert.ok(readJournal(w.config).some(e => e.kind === 'disk-critical' && e.text.includes('[pc]')));
+});

@@ -1679,14 +1679,15 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .description('Hand a task that hit its usage limit to the other provider: new window <task>-2 in the same worktree, the original prompt plus a note to continue. Asks y/N.')
     .argument('<task>', 'task ID')
     .addOption(new Option('--agent <agent>', 'move to this provider (default: the other one)').choices([...cliProviders]))
+    .option('--host <host>', 'move a queued task to this host, or local')
     .option('-y, --yes', 'do not ask')
     .action(
-      guarded(async (task: string, opts: { agent?: AgentName; yes?: boolean }) => {
+      guarded(async (task: string, opts: { agent?: AgentName; host?: string; yes?: boolean }) => {
         const ctx = contextFor(false);
         const self = deps.selfArgv?.();
         const interrupt = deps.interruptSignal?.();
         try {
-          await moveTask(ctx, task, { agent: opts.agent, yes: Boolean(opts.yes), self, signal: interrupt?.signal });
+          await moveTask(ctx, task, { agent: opts.agent, host: opts.host, yes: Boolean(opts.yes), self, signal: interrupt?.signal });
         } finally {
           interrupt?.dispose();
         }

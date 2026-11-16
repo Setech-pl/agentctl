@@ -996,13 +996,13 @@ async function runClose(deps: McpDeps, args: CloseMcpArgs): Promise<ToolResult> 
   });
 }
 
-async function runMove(deps: McpDeps, args: { task: string; agent?: AgentName | undefined; confirm?: boolean | undefined }): Promise<ToolResult> {
+async function runMove(deps: McpDeps, args: { task: string; agent?: AgentName | undefined; host?: string; confirm?: boolean | undefined }): Promise<ToolResult> {
   return writeTool(deps, 'move', { task: args.task, detail: `agent=${args.agent ?? 'other'} confirm=${Boolean(args.confirm)}` }, async (ctx, lines) => {
-    const plan = await planMove(ctx, args.task, { agent: args.agent });
+    const plan = await planMove(ctx, args.task, { agent: args.agent, host: args.host });
     if (!args.confirm) {
       return { text: `${describeMove(plan).join('\n')}\n\nNot moved yet. Ask the user, then call move again with confirm: true.`, executed: false, announce: '' };
     }
-    const moved = await moveTask(ctx, args.task, { agent: args.agent, yes: true, self: deps.self });
+    const moved = await moveTask(ctx, args.task, { agent: args.agent, host: args.host, yes: true, self: deps.self });
     return { text: `${lines.join('\n')}`.trim() || `${plan.from.task} moved to ${plan.task}`, executed: moved !== undefined, announce: `move ${plan.from.task} -> ${plan.task}` };
   });
 }
@@ -1563,14 +1563,15 @@ export const MCP_TOOLS: McpToolDef[] = [
     kind: 'write',
     description:
       'WRITE, off unless the user put "move" in mcp.allow. Hands a task that hit its usage limit to another active provider (Claude, Codex, Kimi when enabled; choose a target when more than two are active): a new window in the same worktree with the original prompt and a note to continue. ' +
-      'The FIRST call (confirm omitted) only describes the move; ask the user, then call again with confirm: true.',
+      'host changes the location of a queued, never-started task (host: local clears the remote host). Running tasks cannot change host. The FIRST call (confirm omitted) only describes the move; ask the user, then call again with confirm: true.',
     input: {
       task: taskArg,
       agent: z.enum(DEFAULT_PROVIDERS).optional().describe('Target provider; default: the other one.'),
+      host: z.string().min(1).max(32).optional().describe('Queued task only: target host name, or local. Cannot be combined with agent.'),
       confirm: z.boolean().optional().describe('true only after the user agreed to the described move.'),
     },
     annotations: { title: 'Move a task to the other provider', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-    run: (deps, args) => guarded(() => runMove(deps, args as { task: string; agent?: AgentName; confirm?: boolean })),
+    run: (deps, args) => guarded(() => runMove(deps, args as { task: string; agent?: AgentName; host?: string; confirm?: boolean })),
   }),
 ];
 

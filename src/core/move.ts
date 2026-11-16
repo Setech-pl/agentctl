@@ -1,3 +1,9 @@
+import fs from 'node:fs';
+import { withStartLock, pendingStarts } from './start-lock.ts';
+import { findEntry, saveEntry, renderRawSpec, withAcceptLock } from './queue.ts';
+import type { QueueEntry } from './queue.ts';
+import { resolveSpec, splitSpecs } from './spec.ts';
+import { recordFromSpec } from './taskstore.ts';
 import { collectLimits } from './limits.ts';
 import { liveWindows } from './plan.ts';
 import { openReader, readPlans } from './usage.ts';
@@ -21,6 +27,8 @@ import { assertAgentSpawnAllowed } from './window-guard.ts';
 import { AgentctlError, windowName } from './util.ts';
 
 export interface MoveOptions {
+  /** Change location of a queued task; local clears host:. */
+  host?: string;
   /** The provider to move to; default: the other one. */
   agent?: AgentName | undefined;
   /** `-y`: do not ask. */
@@ -30,6 +38,10 @@ export interface MoveOptions {
 }
 
 export interface MovePlan {
+  queued?: QueueEntry;
+  targetHost?: string;
+  sourceSpec?: string;
+  queueBefore?: string;
   from: TaskRecord;
   /** The order on the other provider, translated through the equivalents table. */
   to: Order;
@@ -61,6 +73,26 @@ export function nextTaskId(task: string, taken: (task: string) => boolean): stri
 /** Everything `move` would do, or an error saying why not. Nothing has changed when this returns or throws. */
 export async function planMove(ctx: Context, taskArg: string, opts: MoveOptions = {}): Promise<MovePlan> {
   const { config } = ctx;
+  if (opts.host !== undefined) {
+    const entry = findEntry(config, taskArg);
+    if (entry.autoReview) throw new AgentctlError('Automatic review entries cannot change host; order a separate host review');
+    if (entry.status !== 'queued' || entry.reuse || pendingStarts(config).some(s => s.task === entry.task)) throw new AgentctlError(`${entry.task}: only queued, never-started tasks can change host`);
+    if (readTaskRecord(config, windowName(entry.task))?.started) throw new AgentctlError(`${entry.task}: a running or previously started task cannot change host`);
+    if (opts.agent) throw new AgentctlError('Change host and provider in separate moves');
+    const targetHost = opts.host === 'local' ? undefined : opts.host;
+    if (targetHost === entry.host) throw new AgentctlError(`${entry.task} is already on ${targetHost ?? 'local'}`);
+    if (targetHost && !config.hosts[targetHost]) throw new AgentctlError(`unknown host ${targetHost}`);
+    const sourceSpec = (entry as QueueEntry & { localSpec?: string }).localSpec ?? entry.spec;
+    const raw = splitSpecs(sourceSpec, 'queued host move')[0]!;
+    if (targetHost) {
+      raw.header.host = targetHost;
+      for (const repo of raw.header.repos as {worktree?: string}[]) delete repo.worktree;
+    } else delete raw.header.host;
+    const spec = resolveSpec(raw, { config });
+    if (!targetHost && spec.repos.some(r => !fs.existsSync(r.path))) throw new AgentctlError('Local clone missing: use a local absolute repos.path in the original spec and configure worktree_root');
+    const fromSpec = resolveSpec(splitSpecs(entry.spec)[0]!, { config });
+    return { queueBefore: JSON.stringify(entry), queued: { ...entry, host: targetHost, spec: renderRawSpec(raw) }, sourceSpec, targetHost, from: recordFromSpec(fromSpec, config, ctx.runner.now()), to: { agent: entry.agent, model: entry.model, effort: entry.effort as Order['effort'] }, task: entry.task, window: windowName(entry.task), prompt: raw.prompt };
+  }
   const targets = await listTargets(ctx);
   const match = matchTask(taskArg, targets);
   if (match.kind === 'many') throw new AgentctlError(`"${taskArg}" fits more than one task:\n${describeTargets(match.matches).join('\n')}`, 'Type more of the task ID.');
@@ -101,6 +133,7 @@ export async function planMove(ctx: Context, taskArg: string, opts: MoveOptions 
 /** Summary lines shown before the question. */
 export function describeMove(plan: MovePlan): string[] {
   const { from } = plan;
+  if (plan.queued) return [`Move queued ${from.task}: ${from.host ?? 'local'} -> ${plan.targetHost ?? 'local'}; task ID, queue position, dependencies and provider stay.`];
   return [
     `Move ${from.task} (${from.agent} ${from.model}/${from.effort}) -> ${plan.task} (${label(plan.to)})`,
     ...from.repos.map((r) => `  worktree: ${r.worktree} (the same one)`),
@@ -115,9 +148,18 @@ export function describeMove(plan: MovePlan): string[] {
  * original prompt and a note to continue from the state of the worktree; the old window stays, marked `superseded`.
  * Always asks y/N (`yes` skips); without a terminal and without `yes` it is an error.
  */
-export async function moveTask(ctx: Context, taskArg: string, opts: MoveOptions = {}): Promise<{ plan: MovePlan; result: NewResult } | undefined> {
+export async function moveTask(ctx: Context, taskArg: string, opts: MoveOptions = {}): Promise<{ plan: MovePlan; result?: NewResult } | undefined> {
   const plan = await planMove(ctx, taskArg, opts);
   if (!(await confirmAction(ctx, describeMove(plan), 'Move?', Boolean(opts.yes)))) return undefined;
+  if (plan.queued) {
+    await withStartLock(ctx, () => withAcceptLock(ctx, async () => {
+      const fresh = await planMove(ctx, taskArg, opts);
+      if (JSON.stringify(findEntry(ctx.config, taskArg)) !== plan.queueBefore || fresh.sourceSpec !== plan.sourceSpec || fresh.from.host !== plan.from.host || fresh.queued?.spec !== plan.queued?.spec) throw new AgentctlError('Queued task changed; preview the move again');
+      await saveEntry(ctx, { ...fresh.queued!, localSpec: fresh.sourceSpec } as QueueEntry);
+    }));
+    ctx.out(describeMove(plan)[0]!);
+    return { plan };
+  }
   const { from } = plan;
   const spec: ResolvedSpec = {
     index: 1,

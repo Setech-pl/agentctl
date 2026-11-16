@@ -209,6 +209,7 @@ export interface ProviderLoad {
 
 export interface LimitsReport {
   providers: ProviderLoad[];
+  hosts?: { host: string; providers: { agent: AgentName; limit: number | null; used: number; free: number | null; queued: number }[] }[];
   countExternal: boolean;
   config: string;
 }
@@ -221,6 +222,11 @@ export function collectLimits(config: GlobalConfig, live: readonly LiveWindow[],
   return {
     countExternal: config.countExternal,
     config: config.path,
+    hosts: Object.entries(config.hosts).map(([host, h]) => ({ host, providers: h.providers.map(agent => {
+      const limit = h.limits?.[agent] ?? null;
+      const used = live.filter(w => w.host === host && w.agent === agent && w.counted !== false).length;
+      return { agent, limit, used, free: holds[agent] ? 0 : limit === null ? null : Math.max(0, limit - used), queued: queue.filter(e => e.host === host && e.agent === agent).length };
+    }) })),
     providers: activeProviders(config).map((agent): ProviderLoad => {
       const mine = live.filter((w) => w.agent === agent);
       const windows = mine.filter((w) => w.kind === undefined).map((w) => w.window);
@@ -249,6 +255,7 @@ export function renderLimits(report: LimitsReport): string[] {
     for (const e of p.external) parts.push(`external: pid ${e.pid}${e.cwd ? ` in ${e.cwd}` : ''}`);
     if (parts.length > 0) lines.push(`  ${p.agent}: ${parts.join(' · ')}`);
   }
+  for (const h of report.hosts ?? []) lines.push(`host ${h.host}: ${h.providers.map(p => `${p.agent} ${p.used}/${p.limit ?? 'unbounded'}, free ${p.free ?? 'unbounded'}, queued ${p.queued}`).join(' · ')} (account limits/holds also apply)`);
   lines.push(report.countExternal ? 'External sessions are counted (limits.count_external).' : 'Sessions started by hand are not counted: "agentctl limits reserve claude=1" holds a place, or set limits.count_external: true.');
   lines.push('HOLD = usage.queue_hold: above that plan percentage (any window) the queue starts no task of the provider; off = never held.');
   lines.push('Change: agentctl limits set claude=3 codex=5 queue_hold.codex=90   (takes effect at once, also in a running watch)');

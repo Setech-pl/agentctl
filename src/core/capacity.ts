@@ -74,6 +74,7 @@ export async function collectCapacity(ctx: Context, opts: { diskBudgetMs?: numbe
     at: new Date(now).toISOString(),
     machine: collectMachine(ctx.config),
     disk: await collectDisk(ctx, undefined, opts.diskBudgetMs === undefined ? {} : { budgetMs: opts.diskBudgetMs }),
+    hosts: loads.hosts ?? [],
     note: 'n/d = null. Plan percentages include use outside agentctl. Estimates are not provider token quotas.',
     providers: activeProviders(ctx.config).map((provider) => {
       const plan = providerValue(plans, provider);
@@ -109,7 +110,7 @@ export function snapshotLines(snapshot: ReturnType<typeof capacitySnapshot>): st
   return snapshot.map((p) => `capacity: ${p.provider}${p.ordered ? ' (order)' : ''}: remaining ${p.remainingPercent === null ? 'n/d' : `${p.remainingPercent}%`}, reset ${p.resetsInMinutes ?? 'n/d'} min, age ${p.ageSeconds ?? 'n/d'} s${p.staleDescription ? `, ${p.staleDescription}` : ''}, free slots ${p.freeSlots ?? 'unbounded'}, queue_hold ${p.queueHold === null ? 'off' : `${p.queueHold}%`}${p.providerHold ? `; ${providerHoldText(p.provider, p.providerHold)}` : ''}${p.reportReady ? `; ${p.reportReady} ${plural(p.reportReady, 'okno', 'okna', 'okien')} report-ready – close zwolni ${plural(p.reportReady, 'okno', 'okna', 'okien')}` : ''}${p.estimate ? `, estimate.remainingTokens ${p.estimate.remainingTokens} (${p.estimate.confidence})` : ''}`);
 }
 export function renderCapacity(report: Capacity): string[] {
-  return [machineLine(report.machine), diskLine(report.disk), ...snapshotLines(capacitySnapshot(report)), ...report.providers.flatMap((p) => [
+  return [machineLine(report.machine), diskLine(report.disk), ...(report.hosts ?? []).map(h => `host ${h.host}: ${h.providers.map(p => `${p.agent} ${p.used}/${p.limit ?? 'unbounded'}, free ${p.free ?? 'unbounded'}, queued ${p.queued}`).join(' · ')} (account limits/holds also apply)`), ...snapshotLines(capacitySnapshot(report)), ...report.providers.flatMap((p) => [
     ...p.windows.map((w) => `${p.provider} ${w.label}: used ${w.usedPercent}%, remaining ${w.remainingPercent}%, reset ${w.resetsInMinutes ?? 'n/d'} min, pace ${w.percentPerHour === null ? 'n/d' : w.percentPerHour.toFixed(2)}%/h, projectedExhaustAt ${w.projectedExhaustAt ?? 'n/d'}, estimate ${w.estimate ? JSON.stringify(w.estimate) : 'n/d'}`),
     `${p.provider}: slots ${p.slots.active}/${p.slots.limit ?? 'unbounded'}, reserve ${p.slots.reserved}, queue ${p.queue.count} (next ${p.queue.next ?? 'n/d'}, queue_hold ${p.queue.hold == null ? 'off' : `${p.queue.hold}%`}), limited ${p.limited ?? 'n/d'}, source ${p.source}`,
     `${p.provider}: models ${p.models.map((m) => `${m.model}/${m.effort}`).join(', ')}`,
