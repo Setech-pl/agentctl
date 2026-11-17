@@ -332,3 +332,5 @@ Harmonogram szczytu dotyczy nowych startów, także bezpośrednich; działające
 Po `notify.attention_after_min` (domyślnie 15) ciągłego needs-trust/needs-input watch wysyła jedno powiadomienie pulpitu, skonfigurowanego telefonu i decision-request WALL na kanale `agentctl` do właściciela. Timer i zapis jednokrotnego wysłania na próbę zadania przetrwają restart. Eskalacja telefonu działa także bez away, respektuje `notify.ntfy.events`, prywatność i ponawianie wysyłki. Zwykłe powiadomienia o zmianach stanu działają niezależnie.
 
 Każde narzędzie MCP przyjmuje opcjonalne `as`; wykorzystują je WALL/events. Filtr kohorty statusu korzysta ze świeżego snapshotu watch, a overlap pojawia się tylko przy kolizjach. Podglądy potwierdzeń pokazują ISO `expires_at` i `expires_at_local`.
+
+Domyślne linki projektu do worktree zadań zamkniętych/anulowanych/zarchiwizowanych są błędem, także gdy cel już nie istnieje. Użyj własnego worktree backendu (`{worktree:backend}` z backendem w repos) albo `links: []`. Domyślny link do repo już zawartego w spec jest pomijany; celowe linki `{worktree:...}` pozostają. Jawne linki spec są świadomym wyborem i nadal przechodzą sprawdzenia celu.

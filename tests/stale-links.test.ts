@@ -18,6 +18,14 @@ it('P17 new and queue previews name stale project defaults and suggest placehold
     seedTask(config, 'OLD', { closed, repos: [{ path: path.join(root, 'backend'), worktree: wt }] });
     fs.writeFileSync(path.join(repo, '.agentctl.yaml'), `links:\n  - {from: pkg, to: ${target}}\n`);
     const raw = splitSpecs(specText({ task: 'FRONT', agent: 'claude' }, repo))[0]!;
+    if (closed) {
+      assert.throws(() => resolveSpec(raw, {config}), /closed task OLD/);
+      const {ctx} = makeContext(config, {dryRun: true});
+      await assert.rejects(planQueueAdd(ctx, [raw]), /closed task OLD/);
+      raw.header.links = [];
+      assert.equal(resolveSpec(raw, {config}).links.length, 0);
+      continue;
+    }
     const spec = resolveSpec(raw, { config });
     const summary = summarizeSpecs([spec]).join('\n');
     assert.ok(closed ? summary.includes('Skipped stale project links') : summary.includes(`stale project link pkg -> ${target}`), summary);
@@ -57,7 +65,7 @@ it('P17 finds archived owners through symlink aliases without matching sibling p
   fs.renameSync(taskDir(config, 'archived'), path.join(archiveDir(config), 'archived'));
   const raw = splitSpecs(specText({ task: 'FRONT', agent: 'claude' }, repo))[0]!;
   fs.writeFileSync(path.join(repo, '.agentctl.yaml'), `links:\n  - {from: pkg, to: ${alias}}\n`);
-  assert.match(summarizeSpecs([resolveSpec(raw, { config })]).join('\n'), /closed task ARCHIVED/);
+  assert.throws(() => resolveSpec(raw, {config}), /closed task ARCHIVED/);
   fs.mkdirSync(`${wt}-other`);
   fs.writeFileSync(path.join(repo, '.agentctl.yaml'), `links:\n  - {from: pkg, to: ${wt}-other}\n`);
   assert.doesNotMatch(summarizeSpecs([resolveSpec(raw, { config })]).join('\n'), /WARNING/);
@@ -93,24 +101,16 @@ it('P72 spec-derived backend links and previews compare target HEAD with its rep
   await commitQueueAdd(ctx, (await planQueueAdd(ctx, [raw])).items, {});
 });
 
-it('D5: closed project defaults are skipped with one persisted project/day notice across specs', () => {
+it('D5: closed project defaults consistently error across specs; explicit links remain opt-in', () => {
   const root = scratch.sub('d5-day'), config = makeConfig(root), app = scratch.sub('d5-day/app');
   const backend = scratch.sub('d5-day/backend'), old = scratch.sub('d5-day/backend-old');
   seedTask(config, 'INTEGRATION-13', {closed: true, repos: [{path: backend, worktree: old}]});
   fs.writeFileSync(path.join(app, '.agentctl.yaml'), `links:\n  - {from: pkg, to: ${old}/packages/sim}\n`);
   const raw = splitSpecs(specText({task: 'FIRST', agent: 'claude'}, app))[0]!;
-  const now = Date.parse('2026-11-16T12:00:00Z');
-  const first = resolveSpec(raw, {config, now});
-  assert.equal(first.links.length, 0);
-  assert.equal(first.linkWarnings!.filter(w => /closed task INTEGRATION-13/.test(w)).length, 1);
-  raw.header.task = 'SECOND';
-  const second = resolveSpec(raw, {config, now});
-  assert.equal(second.links.length, 0);
-  assert.equal(second.linkWarnings?.length ?? 0, 0);
-  assert.equal(fs.readdirSync(path.join(config.stateDir, 'project-link-notices')).length, 1);
-  assert.equal(resolveSpec(raw, {config, now: now + 86400000}).linkWarnings!.length, 1);
+  for (const task of ['FIRST', 'SECOND']) {raw.header.task = task; assert.throws(() => resolveSpec(raw, {config}), /closed task INTEGRATION-13/);}
+  assert.ok(!fs.existsSync(path.join(config.stateDir, 'project-link-notices')), 'validation is read-only');
   raw.header.links = [{from: 'pkg', to: old}];
-  assert.equal(resolveSpec(raw, {config, now}).links[0]!.to, old, 'explicit spec links remain an opt-in');
+  assert.equal(resolveSpec(raw, {config}).links[0]!.to, old);
 });
 
 it('D5: inherited defaults to a repo supplied by the spec are skipped; explicit worktree placeholders remain', () => {
@@ -127,12 +127,12 @@ it('D5: inherited defaults to a repo supplied by the spec are skipped; explicit 
   assert.equal(resolveSpec(raw, {config}).links[0]!.to, `${backend}-new/packages/sim`, 'unused fallback is not resolved');
 });
 
-it('D5: inherited closed-task placeholders are skipped even after the worktree is gone', () => {
+it('D5: inherited closed-task placeholders error even after the worktree is gone', () => {
   const root = scratch.sub('d5-gone'), config = makeConfig(root), app = scratch.sub('d5-gone/app');
   seedTask(config, 'GONE', {closed: true, repos: [{path: path.join(root, 'backend'), worktree: path.join(root, 'missing-wt')}]});
   fs.writeFileSync(path.join(app, '.agentctl.yaml'), "links:\n  - {from: pkg, to: '{task:GONE,repo:backend}/packages/sim'}\n");
   const raw = splitSpecs(specText({task: 'SAFE', agent: 'claude'}, app))[0]!;
-  assert.equal(resolveSpec(raw, {config}).links.length, 0);
+  assert.throws(() => resolveSpec(raw, {config}), /closed task GONE/);
   raw.header.links = [{from: 'pkg', to: '{task:GONE,repo:backend}/packages/sim'}];
   assert.throws(() => resolveSpec(raw, {config}), /does not exist/);
 });

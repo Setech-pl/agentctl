@@ -460,7 +460,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   const linkByFrom = new Map<string, Link>();
   const projectLinkByFrom = new Map<string, Link>();
   const intentionalWorktrees = new Set<string>();
-  for (const link of [...config.links, ...(project?.links ?? []), ...specLinks]) {
+  for (const link of [...(Array.isArray(h.links) && h.links.length === 0 ? [] : [...config.links, ...(project?.links ?? [])]), ...specLinks]) {
     const inherited = project?.links?.includes(link) === true;
     const target = pathOf(fillTaskLinkTargets(fill(link.to, inherited), config, {allowMissingClosed: inherited}));
     const expanded = fill(link.from);

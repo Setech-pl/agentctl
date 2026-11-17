@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- FIELD0230-F11: closed-task project link defaults now error with own-backend/links: [] hints; skip redundant links when the spec supplies that repo. / Błąd domyślnych linków do zamkniętych zadań z podpowiedzią własnego backendu/links: []; pominięcie zbędnych przy repo w spec.
+
 - FIELD0230-F10: Kimi medium maps to high with a warning; requested effort remains visible. / Kimi medium mapowane na high z ostrzeżeniem i zachowaniem zamówionego effort.
 
 - FIELD0230-F9: uniform MCP as, local preview expiry, cohort snapshot coverage and conditional overlap hints; fresh disk counters without inventory scans. / Jednolite as MCP, lokalne wygaśnięcie podglądu, test kohort snapshotu, overlap tylko przy kolizjach; świeży dysk bez skanowania.

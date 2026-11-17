@@ -332,3 +332,5 @@ Provider peak schedules apply to new starts only, including direct starts; runni
 After `notify.attention_after_min` (default 15) continuously in needs-trust/needs-input, watch sends one desktop alert, a configured phone alert and an `agentctl` WALL decision-request addressed to owner. The timer and one-per-attempt receipt survive restarts. Phone escalation works even when away mode is off, honors `notify.ntfy.events`, privacy settings and retry policy. Ordinary transition notifications remain independent.
 
 Every MCP tool accepts optional `as`; only WALL/events use it. Status cohort filters use the fresh watch snapshot and report overlap only when collisions exist. Confirmation previews show both ISO `expires_at` and `expires_at_local`.
+
+Project default links to closed/cancelled/archived task worktrees are errors, including missing targets. Use the spec’s own backend worktree (`{worktree:backend}` with backend in repos), or `links: []`. A default link to a repository already supplied by the spec is skipped; intentional `{worktree:...}` links remain. Explicit spec links remain an opt-in and still undergo target checks.

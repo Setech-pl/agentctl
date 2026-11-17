@@ -1,5 +1,4 @@
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import type { ResolvedRepo } from './spec.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -186,33 +185,22 @@ export function staleProjectLinkWarnings(links: Link[], config: GlobalConfig): s
   });
 }
 
-/** Drop legacy defaults to closed worktrees or repositories explicitly supplied by this spec. */
-export function projectDefaultLinkPolicy(links: Link[], config: GlobalConfig, repos: ResolvedRepo[], project: string, now = Date.now(), intentionalWorktrees = new Set<string>()): { links: Link[]; notices: string[] } {
+/** Inherited links to a supplied repository are redundant. Other closed-task defaults are errors, never silently skipped. */
+export function projectDefaultLinkPolicy(links: Link[], config: GlobalConfig, repos: ResolvedRepo[], _project: string, _now = Date.now(), intentionalWorktrees = new Set<string>()): { links: Link[]; notices: string[] } {
   if (!links.length) return {links, notices: []};
   const current = listTaskRecords(config);
-  const records = [...current, ...listArchivedRecords(config).filter(r => !current.some(c => c.task === r.task)).map(r => ({ ...r, closed: true }))];
-  const closed = new Set<string>();
+  const records = [...current, ...listArchivedRecords(config).filter(r => !current.some(c => c.task === r.task)).map(r => ({...r, closed: true}))];
   const inside = (child: string, parent: string) => child === parent || child.startsWith(`${parent}${path.sep}`);
   const kept = links.filter(link => {
     const target = resolvedLocation(link.to.endsWith('/*') ? path.dirname(link.to) : link.to);
     const owners = records.filter(r => r.repos.some(repo => inside(target, resolvedLocation(repo.worktree))));
+    const supplied = repos.some(repo => inside(target, resolvedLocation(repo.path)) || inside(target, resolvedLocation(repo.worktree)) || owners.some(owner => owner.repos.some(r => inside(target, resolvedLocation(r.worktree)) && resolvedLocation(r.path) === resolvedLocation(repo.path))));
+    if (supplied && !intentionalWorktrees.has(link.from)) return false;
     const stale = owners.filter(r => r.closed || r.cancelled);
-    if (stale.length) { stale.forEach(r => closed.add(r.task)); return false; }
-    if (intentionalWorktrees.has(link.from)) return true;
-    return !repos.some(repo => inside(target, resolvedLocation(repo.path)) || inside(target, resolvedLocation(repo.worktree)) || owners.some(owner => owner.repos.some(r => inside(target, resolvedLocation(r.worktree)) && resolvedLocation(r.path) === resolvedLocation(repo.path))));
+    if (stale.length) throw new AgentctlError(`stale project link ${link.from} -> ${link.to}: target belongs to closed task ${stale.map(r => r.task).join(', ')}`, "Use the spec's own backend worktree ({worktree:backend}, adding backend to repos), or set links: [] to disable project defaults.");
+    return true;
   });
-  const notices: string[] = [];
-  if (closed.size) {
-    const key = createHash('sha256').update(resolvedLocation(project)).digest('hex');
-    const day = new Date(now).toISOString().slice(0, 10);
-    const file = path.join(config.stateDir, 'project-link-notices', `${key}-${day}.json`);
-    try {
-      fs.mkdirSync(path.dirname(file), { recursive: true });
-      fs.writeFileSync(file, JSON.stringify({project, day, tasks: [...closed]}), {flag: 'wx', mode: 0o600});
-      notices.push(`Skipped stale project links for ${project}: closed task ${[...closed].join(', ')} (one notice per project per UTC day). Set links explicitly using {task:TASK-ID,repo:REPO-NAME} or {worktree:repo|fallback}.`);
-    } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
-  }
-  return {links: kept, notices};
+  return {links: kept, notices: []};
 }
 
 /** Compare only repositories sharing Git's common directory; never compare unrelated SHAs. */
