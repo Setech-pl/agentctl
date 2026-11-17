@@ -290,9 +290,10 @@ export function isGrouped(state: BoardState): boolean {
   return state.rows.some((r) => r.cohort !== null) || state.queue.some((v) => v.entry.cohort !== undefined);
 }
 
-/** P55: a task that waits for the human (folder trust) leads; the order of the rest is untouched. */
-const trustFirst = (rows: BoardRow[]): BoardRow[] => [...rows].sort((a, b) => priority(a) - priority(b));
-const priority = (r: BoardRow): number => r.state === 'report-ready' && !r.pulled ? 0 : r.state === 'needs-trust' ? 1 : 2;
+/** Unpulled reports lead, then trust prompts; other rows retain their order. */
+const priorityRows = (rows: BoardRow[]): BoardRow[] => [...rows].sort((a, b) => priority(a) - priority(b));
+const needsPull = (r: Pick<StatusRow, 'state' | 'pulled'>): boolean => r.state === 'report-ready' && !r.pulled;
+const priority = (r: BoardRow): number => needsPull(r) ? 0 : r.state === 'needs-trust' ? 1 : 2;
 const pulledId = (key: string): string => `@pulled:${key}`;
 export function collapsedPulled(state: BoardState, r: BoardRow): boolean {
   return pulledOpen(r) && (state.now ?? Date.now()) - Date.parse(r.pulled!) >= (state.pulledCollapseAfter ?? 0) * 60_000;
@@ -315,11 +316,11 @@ function groupOrder(state: BoardState): { key: string; name: string | null }[] {
 /** The rows of the active section, in list order (grouped by cohort when there are cohorts), including the ones of folded groups. */
 function activeAll(state: BoardState): BoardRow[] {
   const rows = state.rows.filter((r) => !r.closed && !r.cancelled && (!r.finished || r.state === 'report-ready') && !collapsedPulled(state, r) && (state.showHidden || !r.hidden) && passes(state, r.cohort));
-  if (!isGrouped(state)) return trustFirst(rows);
-  return groupOrder(state).flatMap((g) => trustFirst(rows.filter((r) => groupOf(r.cohort) === g.key)));
+  const ordered = isGrouped(state) ? groupOrder(state).flatMap(g => priorityRows(rows.filter(r => groupOf(r.cohort) === g.key))) : priorityRows(rows);
+  return [...ordered.filter(needsPull), ...ordered.filter(r => !needsPull(r))];
 }
 
-/** Tasks that still have a window, in the order of the status table (cohort by cohort when there are cohorts); hidden ones only with the `a` key. */
+/** Unpulled reports first across cohorts, then active/waiting rows; hidden ones only with the `a` key. */
 export function activeRows(state: BoardState): BoardRow[] {
   return activeAll(state);
 }
@@ -335,7 +336,7 @@ export function queueViews(state: BoardState): QueueView[] {
   return state.queue.filter((v) => passes(state, v.entry.cohort) && !windowed.has(v.entry.task));
 }
 
-/** Tasks without a window (or moved to the other provider) that were not closed: the "Finished" section. */
+/** Finished tasks other than report-ready, which has its own priority/pulled sections. */
 export function finishedRows(state: BoardState): BoardRow[] {
   return state.rows.filter((r) => !r.closed && !r.cancelled && r.finished && r.state !== 'report-ready' && !collapsedPulled(state, r) && (state.showHidden || !r.hidden) && passes(state, r.cohort));
 }
@@ -355,7 +356,7 @@ export function displayRows(state: BoardState): BoardRow[] {
   return [...reachableRows(state), ...pulledGroups(state).flatMap(g => state.pulledExpanded?.includes(g.key) ? g.rows : []), ...(state.showFinished ? finishedRows(state) : []), ...closedRows(state), ...cancelledRows(state)];
 }
 
-/** Every task the cursor can stand on, top to bottom: the active rows, the queue, the finished rows (while open), the closed ones. */
+/** Cursor order: unpulled reports, active rows, queue, pulled cohort headers/rows, then history sections. */
 export function navTasks(state: BoardState): string[] {
   const active = reachableRows(state).map((r) => r.task);
   const rest = [...(state.showFinished ? finishedRows(state) : []), ...closedRows(state), ...cancelledRows(state)].map(r => r.task);
@@ -1070,7 +1071,7 @@ export function reportLabel(row: StatusRow): string {
 export function rowCells(row: StatusRow, selected: boolean, cols: BoardColumns, icons: Record<TaskState, string> | null = null, selectedColor = 'blue', versions: Readonly<Record<string, string>> = {}): BoardCell[] {
   const icon = (icons ?? DEFAULT_WINDOW_ICONS)[row.state];
   // Finished and hidden tasks are dimmed: they are history, not work in progress.
-  const ready = row.state === 'report-ready' && !row.pulled;
+  const ready = needsPull(row);
   const quiet = !ready && (row.finished || row.hidden);
   const cells: BoardCell[] = [
     { key: 'marker', text: selected ? '▸' : row.collide.length > 0 ? '⚠' : row.hidden ? '·' : '', width: cols.marker, bold: true, ...(!selected && row.collide.length > 0 ? { color: 'yellow' } : {}) },
@@ -1132,7 +1133,9 @@ export function usagePanel(plans: ProviderValues<PlanState> | null, usage: Usage
 export type ListItem =
   | { kind: 'pulled'; key: string; count: number; expanded: boolean }
   | { kind: 'row'; row: BoardRow }
-  | { kind: 'group'; key: string; name: string | null; note?: string; folded: boolean; rows: BoardRow[]; queued: number }
+  | { kind: 'group'; key: string; name: string | null; note?: string; section?: 'ready'; folded: boolean; rows: BoardRow[]; queued: number }
+  | { kind: 'ready-title'; count: number }
+  | { kind: 'active-title'; count: number }
   | { kind: 'queue-title'; count: number; paused: boolean }
   | { kind: 'queue'; view: QueueView }
   | { kind: 'resume-title'; count: number }
@@ -1201,17 +1204,20 @@ export function listItems(state: BoardState): ListItem[] {
   const cancelled = cancelledRows(state);
   const queue = queueViews(state);
   const active = activeRows(state);
-  const activeItems: ListItem[] = isGrouped(state)
+  const ready = active.filter(needsPull);
+  const ordinary = active.filter(r => !needsPull(r));
+  const sectionItems = (members: BoardRow[], section?: 'ready'): ListItem[] => isGrouped(state)
     ? groupOrder(state).flatMap((g): ListItem[] => {
-        const rows = active.filter((r) => groupOf(r.cohort) === g.key);
-        const queued = queue.filter((v) => groupOf(v.entry.cohort) === g.key).length;
+        const rows = members.filter(r => groupOf(r.cohort) === g.key);
+        const queued = section === 'ready' ? 0 : queue.filter(v => groupOf(v.entry.cohort) === g.key).length;
         if (rows.length + queued === 0) return [];
         const folded = state.folded.includes(g.key);
-        return [{ kind: 'group', key: g.key, name: g.name, ...(state.cohortNotes?.[g.key] ? { note: state.cohortNotes[g.key] } : {}), folded, rows, queued }, ...(folded ? [] : rows.map((row): ListItem => ({ kind: 'row', row })))];
+        return [{ kind: 'group', key: g.key, name: g.name, ...(section ? { section } : {}), ...(state.cohortNotes?.[g.key] ? { note: state.cohortNotes[g.key] } : {}), folded, rows, queued }, ...(folded ? [] : rows.map((row): ListItem => ({ kind: 'row', row })))];
       })
-    : active.map((row): ListItem => ({ kind: 'row', row }));
+    : members.map((row): ListItem => ({ kind: 'row', row }));
   return [
-    ...activeItems,
+    ...(ready.length ? [{ kind: 'ready-title', count: ready.length } as ListItem, ...sectionItems(ready, 'ready'), ...(ordinary.length + queue.length ? [{ kind: 'active-title', count: ordinary.length + queue.length } as ListItem] : [])] : []),
+    ...sectionItems(ordinary),
     ...(queue.length > 0 ? [{ kind: 'queue-title', count: queue.length, paused: state.queuePaused } as ListItem, ...queue.map((view): ListItem => ({ kind: 'queue', view }))] : []),
     ...pulledGroups(state).flatMap((g): ListItem[] => [{ kind: 'pulled', key: g.key, count: g.rows.length, expanded: Boolean(state.pulledExpanded?.includes(g.key)) }, ...(state.pulledExpanded?.includes(g.key) ? g.rows.map((row): ListItem => ({ kind: 'row', row })) : [])]),
     ...(state.resumable.length > 0 ? [{ kind: 'resume-title', count: state.resumable.length } as ListItem, ...state.resumable.map((task): ListItem => ({ kind: 'resume', task }))] : []),
@@ -1250,6 +1256,7 @@ export const KEY_HINTS = 'B zamknij odebrane m/M i c/r x X cancel k cohort h l L
 
 export const HELP_LINES: string[] = [
   'agentctl board',
+  '  Unpulled reports lead the whole board, grouped in the highlighted top section.',
   '  B           close pulled reports of the selected cohort (lists tasks first);',
   '              worktrees stay. Enter on an “odebrane” row expands it.',
   '  AGENT: cl=claude, cx=codex, ki=kimi; S 6.1 XH = model family/version/effort',

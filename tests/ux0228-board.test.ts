@@ -63,3 +63,15 @@ it('UX0228: queued selection closes its cohort and manager selection has no impl
   const ungrouped = handleKey({...state, selected: 'UNGROUPED', pulledExpanded: ['']}, 'B', {}).state;
   assert.deepEqual(ungrouped.mode, {kind: 'confirm', action: 'close-pulled', task: '', tasks: ['UNGROUPED']});
 });
+it('UX0228: unpulled reports lead active tasks across cohorts', () => {
+  const state = { ...initialBoardState(100, 30), now, rows: [
+    row('WORK-A', {cohort: 'alpha'}), row('READ-B', {cohort: 'beta', state: 'report-ready', report: 'yes'}),
+    row('WORK-B', {cohort: 'beta'}), row('READ-C', {cohort: 'gamma', state: 'report-ready', report: 'yes'}),
+    row('PULLED-A', {cohort: 'alpha', state: 'report-ready', report: 'yes', pulled}),
+  ] };
+  const items = listItems(state);
+  assert.deepEqual(items.filter(i => i.kind === 'row').map(i => i.row.task), ['READ-B', 'READ-C', 'WORK-A', 'WORK-B']);
+  assert.deepEqual(items[0], {kind: 'ready-title', count: 2});
+  assert.deepEqual(navTasks(state), ['READ-B', 'READ-C', 'WORK-A', 'WORK-B', '@pulled:alpha']);
+  assert.deepEqual(items.at(-1), {kind: 'pulled', key: 'alpha', count: 1, expanded: false});
+});

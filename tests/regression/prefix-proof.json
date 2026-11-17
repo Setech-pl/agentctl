@@ -728,14 +728,24 @@
   "UX0228": {
     "rev": "v0.22.5",
     "outcome": "FAILS",
-    "failed": 4,
+    "failed": 5,
     "passed": 0,
     "failing": [
       "UX0228: pulled reports collapse per cohort after active rows; Enter expands and unpulled reports lead and highlight",
       "UX0228: bulk close lists scope, cancels by default, confirms without worktree removal and refuses changed scope",
       "UX0228: pulled dead report stays visible and a rewritten report is unpulled",
       "UX0228: queued selection closes its cohort and manager selection has no implicit cohort",
-      "UX0228: pulled reports collapse per cohort after active rows; Enter expands and unpulled reports lead and highlight"
+      "UX0228: unpulled reports lead active tasks across cohorts"
+    ]
+  },
+  "UX0228-PRIORITY": {
+    "rev": "v0.22.5",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "UX0228: unpulled reports lead active tasks across cohorts",
+      "UX0228: unpulled reports lead active tasks across cohorts"
     ]
   },
   "UX0228-SCOPE": {

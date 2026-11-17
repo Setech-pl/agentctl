@@ -90,10 +90,14 @@ function TaskList(props: { state: BoardState; width: number; capacity: number; i
     visible.items.length === 0
       ? [h(Text, { key: 'empty', dimColor: true }, state.refreshedAt === null ? 'Loading…' : state.rows.length === 0 ? 'No tasks. Start one with "agentctl new <spec>".' : state.cohortFilter !== null ? 'No tasks in this cohort. k picks another.' : 'No active tasks. z opens the finished ones.')]
       : visible.items.map((item) =>
-          item.kind === 'pulled'
+          item.kind === 'ready-title'
+            ? h(Text, { key: 'ready-title', bold: true, color: 'green', wrap: 'truncate-end' }, `Raporty do pobrania (${item.count})`)
+            : item.kind === 'active-title'
+            ? h(Text, { key: 'active-title', bold: true, wrap: 'truncate-end' }, `Aktywne i czekające (${item.count})`)
+            : item.kind === 'pulled'
             ? h(Text, { key: `pulled-${item.key}`, bold: state.selected === `@pulled:${item.key}`, wrap: 'truncate-end' }, `${state.selected === `@pulled:${item.key}` ? '▸' : ' '} ${pulledTitle(item)}`)
             : item.kind === 'group'
-            ? h(Text, { key: `group-${item.key}`, bold: true, wrap: 'truncate-end' }, groupTitle(item, props.icons))
+            ? h(Text, { key: `group-${item.section ?? 'active'}-${item.key}`, bold: true, wrap: 'truncate-end' }, groupTitle(item, props.icons))
             : item.kind === 'queue-title'
             ? h(Text, { key: 'queue-title', dimColor: true, wrap: 'truncate-end' }, `- ${queueTitle(item.count, item.paused)}`)
             : item.kind === 'resume-title'

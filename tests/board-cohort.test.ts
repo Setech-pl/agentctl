@@ -65,9 +65,9 @@ describe('board: grouping by cohort', () => {
   it('cohorts by name, each under a header with the counts of its states, "bez kohorty" last', () => {
     const s = boardOf(rows);
     const items = listItems(s);
-    assert.deepEqual(items.map((i) => (i.kind === 'group' ? `#${i.name}` : i.kind === 'row' ? i.row.task : i.kind)), ['#alpha', 'A-2', 'A-1', '#Wave', 'B-1', 'B-2', '#null', 'C-1']);
+    assert.deepEqual(items.map((i) => (i.kind === 'group' ? `#${i.name}` : i.kind === 'row' ? i.row.task : i.kind)), ['ready-title', '#alpha', 'A-2', 'active-title', '#alpha', 'A-1', '#Wave', 'B-1', 'B-2', '#null', 'C-1']);
     const titles = items.flatMap((i) => (i.kind === 'group' ? [groupTitle(i)] : []));
-    assert.deepEqual(titles, ['- alpha (2) 1⚙ 1✓', '- Wave (2) 1⚙ 1⏸', '- bez kohorty (1) 1⚙']);
+    assert.deepEqual(titles, ['- alpha (1) 1✓', '- alpha (1) 1⚙', '- Wave (2) 1⚙ 1⏸', '- bez kohorty (1) 1⚙']);
     assert.deepEqual(navTasks(s), ['A-2', 'A-1', 'B-1', 'B-2', 'C-1']);
   });
 
@@ -95,7 +95,7 @@ describe('board: grouping by cohort', () => {
     assert.equal(s.selected, 'B-1', 'the cursor moves off the folded group');
     assert.deepEqual(navTasks(s), ['B-1', 'B-2', 'C-1']);
     const titles = listItems(s).flatMap((i) => (i.kind === 'group' ? [groupTitle(i)] : []));
-    assert.equal(titles[0], '+ alpha (2) 1⚙ 1✓ – g opens, G opens all');
+    assert.equal(titles[0], '+ alpha (1) 1✓ – g opens, G opens all');
     assert.equal(listItems(s).filter((i) => i.kind === 'row').length, 3);
     s = press(s, 'g').state; // on B-1: folds Wave too
     assert.deepEqual(s.folded, ['alpha', 'wave']);

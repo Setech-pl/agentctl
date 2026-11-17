@@ -10,10 +10,11 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| UX0228-PRIORITY | An alphabetically earlier active cohort appeared above unpulled reports in other cohorts. | `tests/ux0228-board.test.ts` (`^UX0228: unpulled reports lead`) | 0.22.6 | fails on v0.22.5 (1 failing of 1) |
 | UX0228-READS | Pulled cohort previews inspected unrelated report bodies before filtering the cohort. | `tests/ux0228-mcp-cli.test.ts` (`^UX0228: pulled cohort preview`) | 0.22.6 | not proven: Introduced with the unreleased pulled selector; v0.22.5 has no pulled selector. The deterministic read-count test failed before this fix. |
 | UX0228-TEXT | New pulled hints exceeded 80 columns and the new status marker interrupted legacy field order. | `tests/board.test.ts` (`a line of the list is at most 80`)<br>`tests/economy.test.ts` (`economy: concise reads`) | 0.22.6 | not proven: Introduced during this unreleased feature; v0.22.5 already passes these width/format scenarios. |
 | UX0228-SCOPE | Pulled bulk close must select the queued task cohort and refuse manager-only selection. | `tests/ux0228-board.test.ts` (`^UX0228: queued selection`) | 0.22.6 | fails on v0.22.5 (1 failing of 1) |
-| UX0228 | Pulled report-ready tasks obscured reports still awaiting collection and vanished automatically without closure. | `tests/ux0228-board.test.ts` | 0.22.6 | fails on v0.22.5 (4 failing of 4) |
+| UX0228 | Pulled report-ready tasks obscured reports still awaiting collection and vanished automatically without closure. | `tests/ux0228-board.test.ts` | 0.22.6 | fails on v0.22.5 (5 failing of 5) |
 | D6 | WALL token-only confirms carrying as hit required-field validation instead of restoring reviewed arguments. | `tests/fix0227-d6.test.ts` (`^D6:`) | 0.22.5 | fails on v0.22.4 (5 failing of 5) |
 | D5 | Every spec inherited stale links to closed tasks (including missing worktrees) and repeated the same project warning. | `tests/stale-links.test.ts` (`^D5:`) | 0.22.5 | fails on v0.22.4 (3 failing of 3) |
 | D3 | A valid answer token was refused after the permission menu scrolled to options 2–4. | `tests/p63-answer.test.ts` (`^D3:`) | 0.22.5 | fails on v0.22.4 (1 failing of 2) |

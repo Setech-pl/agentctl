@@ -50,7 +50,7 @@ Inherited project links to closed/archived tasks are skipped, with one persisted
 
 Every MCP write supports `{preview_token, confirm: true}` after a preview, including `away`. WALL writes also accept `{as, preview_token, confirm: true}` when `as` matches the preview; channel/kind/subject/body and other operation arguments are restored from that session. A changed author or tool, expired token or changed scope is refused; retries reuse the receipt.
 
-Pulled report-ready tasks fold into “odebrane, do zamknięcia (N)” per cohort after active/waiting tasks. Enter expands the selected row; `B` lists the pulled tasks of that cohort and asks for confirmation before closing their windows. Reports, branches and worktrees stay. Unpulled reports lead each cohort and are highlighted, including tasks without a window.
+Pulled report-ready tasks fold into “odebrane, do zamknięcia (N)” per cohort after active/waiting tasks. Enter expands the selected row; `B` lists the pulled tasks of that cohort and asks for confirmation before closing their windows. Reports, branches and worktrees stay. Unpulled reports form the highlighted top section across all cohorts, including tasks without a window.
 
 `board.pulled_collapse_after: 0` sets the delay in minutes (default: collapse immediately). `board.pulled_auto_close_after: false` disables automatic closure by default. Set a non-negative number of hours to opt in: watch closes only current pulled report-ready tasks after that age since pull, records `pulled-auto-close`, and keeps worktrees. Restart watch/board after changing these settings.
 

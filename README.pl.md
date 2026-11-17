@@ -50,7 +50,7 @@ Odziedziczone linki projektu do zamkniętych lub zarchiwizowanych zadań są pom
 
 Każdy zapis MCP obsługuje `{preview_token, confirm: true}` po podglądzie, także `away`. Zapis WALL przyjmuje też `{as, preview_token, confirm: true}`, gdy `as` zgadza się z podglądem; channel/kind/subject/body i pozostałe argumenty są odtwarzane z tej sesji. Inny autor lub narzędzie, wygasły token i zmiana zakresu są odrzucane; ponowienie korzysta z potwierdzenia wykonania.
 
-Odebrane raporty w stanie report-ready zwijają się w kohortach do „odebrane, do zamknięcia (N)”, pod aktywnymi i czekającymi zadaniami. Enter rozwija wybrany wiersz; `B` pokazuje listę odebranych zadań kohorty i pyta o zamknięcie okien. Raporty, gałęzie i worktree pozostają. Nieodebrane raporty są wyróżnione na górze kohorty, także bez okna.
+Odebrane raporty w stanie report-ready zwijają się w kohortach do „odebrane, do zamknięcia (N)”, pod aktywnymi i czekającymi zadaniami. Enter rozwija wybrany wiersz; `B` pokazuje listę odebranych zadań kohorty i pyta o zamknięcie okien. Raporty, gałęzie i worktree pozostają. Nieodebrane raporty tworzą wyróżnioną sekcję na górze całej planszy, także bez okna.
 
 `board.pulled_collapse_after: 0` określa opóźnienie w minutach (domyślnie natychmiast). `board.pulled_auto_close_after: false` domyślnie wyłącza automatyczne zamykanie. Liczba nieujemna włącza zamykanie przez watch po tylu godzinach od odebrania bieżącego raportu report-ready; zdarzenie `pulled-auto-close` trafia do dziennika, worktree pozostają. Po zmianie uruchom watch/board ponownie.
 
