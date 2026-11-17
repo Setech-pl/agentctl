@@ -83,3 +83,7 @@ Oficjalne linki produktu/CLI sprawdzono curl HEAD z przekierowaniami 2026-11-15;
 Błędy limitu providera mają stan `limited`; `usage_hint` zachowuje komunikat, a `usage_reset_at` podaje jawny reset (czas bez strefy jest lokalny). Zdarzenia pokazują zadania limited w podsumowaniu uwagi.
 
 Blokada providera jest globalna w instancji agentctl dla wszystkich kohort/czatów. Status/limits pokazują zadanie źródłowe i reset; limit GLM wykryty w HEMS wstrzymuje też nowe starty GLM w NC. Działające zadania nie są przerywane.
+
+### Odpowiedniki effort
+
+Kimi obsługuje low/high/max. Zamówienie `effort: medium` jest przyjmowane i mapowane na `high` z ostrzeżeniem, również po zmianie providera przez equivalents. Metadane zachowują pierwotnie zamówiony effort.

@@ -83,3 +83,7 @@ Official product/CLI links were checked with curl HEAD+redirects on 2026-11-15; 
 Provider quota errors appear as `limited`; `usage_hint` retains the provider text and `usage_reset_at` gives its explicit reset (a timestamp without an offset uses local time). Events include limited tasks in the attention summary.
 
 Provider holds are global to the agentctl instance, across every cohort/chat. Status/limits name the detecting task and reset; a GLM quota exhausted in HEMS also blocks new GLM starts in NC. Running tasks are not interrupted.
+
+### Effort equivalents
+
+Kimi supports low/high/max. An order with `effort: medium` is accepted and mapped to `high` with a warning, including equivalents-based provider switches. The original requested effort stays in task metadata.

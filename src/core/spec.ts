@@ -1,3 +1,4 @@
+import { mapEffort } from './equivalents.ts';
 import { linkBaseWarnings, validateLink, missingLinkTargets, fillTaskLinkTargets, staleProjectLinkWarnings, projectDefaultLinkPolicy } from './links.ts';
 import { validateLaunch, ANTHROPIC_SECRET_ENV } from './safety.ts';
 import { provider, isActive, activeProviders } from './providers/registry.ts';
@@ -381,7 +382,10 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     if (specEffort && specEffort !== classCell.effort) classWarnings.push(`class ${matrixEntry.name} gives ${agent} ${classCell.model}/${classCell.effort}, but the spec sets effort: ${specEffort} — the explicit value wins`);
   }
   const model = specModel ?? classCell?.model ?? project?.defaults.model ?? config.defaults.model ?? 'default';
-  const effort = specEffort ?? classCell?.effort ?? project?.defaults.effort ?? config.defaults.effort ?? 'high';
+  const orderedEffort = specEffort ?? classCell?.effort ?? project?.defaults.effort ?? config.defaults.effort ?? 'high';
+  const effortMapping = agent ? mapEffort({agent, model, effort: orderedEffort}) : {effort: orderedEffort};
+  const effort = effortMapping.effort;
+  if (effortMapping.warning) classWarnings.push(effortMapping.warning);
   // Restricted models (k3.1-pro*, gpt-6-astra): an explicit `model:` or an explicit-only class, never a default.
   if (agent && specModel === undefined && explicitOnlyModel(agent, model)) {
     const fromExplicitClass = matrixEntry?.explicit === true && classCell?.model === model;
@@ -521,7 +525,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     ...(h.peak_ok === true ? {peakOk: true} : {}),
     ...(h.keep_cache === true ? {keepCache: true} : {}),
     ...(h.integration === true ? {integration: true} : {}),
-    requested: { agent: agent as AgentName, model, effort },
+    requested: { agent: agent as AgentName, model, effort: orderedEffort },
   };
   if (specClass) spec.class = specClass;
   if (classWarnings.length > 0) spec.warnings = classWarnings;

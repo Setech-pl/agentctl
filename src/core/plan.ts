@@ -1,3 +1,4 @@
+import { mapEffort } from './equivalents.ts';
 import { missingBaseFailure } from './git.ts';
 import { validateLaunch } from './safety.ts';
 import { provider, alternatives } from './providers/registry.ts';
@@ -122,6 +123,11 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
         if (t.ok) spec = switchTo(spec, t.order, 'flag');
         else p.add(`${at} ${t.message}. ${t.hint}`);
       }
+    }
+    const mapping = mapEffort(spec);
+    if (mapping.warning) {
+      ctx.info(`${spec.task}: WARNING: ${mapping.warning}`);
+      spec = {...spec, effort: mapping.effort, warnings: [...(spec.warnings ?? []), mapping.warning]};
     }
     if (!provider(spec.agent).effort.accepted.includes(spec.effort)) {
       p.add(`${at} ${spec.agent} has no effort "${spec.effort}" (use ${provider(spec.agent).effort.accepted.join(', ')})`);

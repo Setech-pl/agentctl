@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- FIELD0230-F10: Kimi medium maps to high with a warning; requested effort remains visible. / Kimi medium mapowane na high z ostrzeżeniem i zachowaniem zamówionego effort.
+
 - FIELD0230-F9: uniform MCP as, local preview expiry, cohort snapshot coverage and conditional overlap hints; fresh disk counters without inventory scans. / Jednolite as MCP, lokalne wygaśnięcie podglądu, test kohort snapshotu, overlap tylko przy kolizjach; świeży dysk bez skanowania.
 
 - F8: durable long-attention escalation after 15 min: desktop, configured phone and one owner WALL decision-request per task attempt. / Trwała eskalacja po 15 min: pulpit, skonfigurowany telefon i jedno pytanie WALL do właściciela na próbę zadania.

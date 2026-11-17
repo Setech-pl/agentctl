@@ -230,6 +230,16 @@
       "F1: CLI and MCP keep dirty worktrees out of Would remove and include skipped sizes"
     ]
   },
+  "FIELD0230-F10": {
+    "rev": "v0.22.7",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "F10: Kimi medium maps to high with a warning in spec and translated planning, preserving requested effort",
+      "F10: Kimi medium maps to high with a warning in spec and translated planning, preserving requested effort"
+    ]
+  },
   "FIELD0230-F3": {
     "rev": "v0.22.7",
     "outcome": "FAILS",

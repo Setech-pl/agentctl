@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| FIELD0230-F10 | Kimi effort medium was rejected instead of mapped to high with a warning. | `tests/field0230-effort.test.ts` | 0.22.8 | fails on v0.22.7 (1 failing of 1) |
 | FIELD0230-F9 | Tool identity and local preview expiration were inconsistent across reads/writes. | `tests/field0230-reads.test.ts` (`^F9:`) | 0.22.8 | fails on v0.22.7 (1 failing of 2) |
 | FIELD0230-F7 | GLM starts ignored the provider peak admission schedule. | `tests/field0230-peak.test.ts` (`^F7: default`) | 0.22.8 | fails on v0.22.7 (1 failing of 1) |
 | FIELD0230-F6 | Shared provider holds omitted global scope and the detecting task. | `tests/field0230-providers.test.ts` (`^F6:`) | 0.22.8 | fails on v0.22.7 (1 failing of 1) |

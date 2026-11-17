@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'FIELD0230-F10', fixedIn: '0.22.8', symptom: 'Kimi effort medium was rejected instead of mapped to high with a warning.', scenarios: [s('field0230-effort.test.ts')] },
   { id: 'FIELD0230-F9', fixedIn: '0.22.8', symptom: 'Tool identity and local preview expiration were inconsistent across reads/writes.', scenarios: [s('field0230-reads.test.ts', '^F9:')] },
   { id: 'FIELD0230-F7', fixedIn: '0.22.8', symptom: 'GLM starts ignored the provider peak admission schedule.', scenarios: [s('field0230-peak.test.ts', '^F7: default')] },
   { id: 'FIELD0230-F6', fixedIn: '0.22.8', symptom: 'Shared provider holds omitted global scope and the detecting task.', scenarios: [s('field0230-providers.test.ts', '^F6:')] },

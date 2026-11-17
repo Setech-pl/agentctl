@@ -1599,7 +1599,7 @@ MCP_TOOLS.push(
   extraRead('mcp_check', 'mcp check', 'Inspect stale MCP server processes without stopping them', {}, async (ctx) => ({ stale: staleProcesses(await findMcpProcesses(ctx.runner), stableScript()) })),
   extraRead('spec_example', 'spec example', 'Read an example spec before writing a new order', {}, async () => EXAMPLE_SPEC),
   extraRead('doctor', 'doctor', 'Diagnose the installation, permissions and disk', { project: optionalText }, async (ctx, a) => runDoctor(ctx.runner, () => ctx.config, a.project as string ?? null, undefined, undefined, undefined, undefined, { cachedOnly: true })),
-  extraRead('equivalents', 'capacity', 'Read the equivalents table for active providers, including Kimi when enabled', {}, async (ctx) => ctx.config.equivalents),
+  extraRead('equivalents', 'capacity', 'Read the equivalents table for active providers. Kimi effort medium is mapped to high with a warning (low/high/max supported)', {}, async (ctx) => ctx.config.equivalents),
   extraRead('config_show', 'doctor', 'Read effective configuration with secrets masked; queue_hold (first) is usage.queue_hold per active provider', {}, async (ctx) => ({ queue_hold: Object.fromEntries(activeProviders(ctx.config).map((id) => [id, holdText(ctx.config.usage.queueHold[id])])), ...(redactConfig(ctx.config) as object) })),
   extraRead('manager_status', 'manager --url', 'Inspect the manager session', {}, async (ctx) => managerView(ctx)),
   extraRead('away_status', 'away status', 'Inspect away mode', {}, async (ctx) => awayReport(ctx.config)),
