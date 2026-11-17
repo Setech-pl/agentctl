@@ -100,6 +100,7 @@ export interface ResolvedSpec {
   switchedBy?: 'flag' | 'limit';
   /** The task class (data/model-matrix.yaml) the model/effort came from. */
   class?: string;
+  peakOk?: boolean;
   /** Non-fatal diagnostics shown in the preview (a class overridden by an explicit model/effort, a same-provider reviewer, …). */
   warnings?: string[];
 }
@@ -188,7 +189,7 @@ export interface ResolveContext {
 /** Task IDs whose window name is one agentctl uses for itself (`watch`, `board`, `manager`). */
 export const RESERVED_TASK_IDS = ['WATCH', 'BOARD', 'MANAGER'];
 
-export const SPEC_KEYS = ['task', 'agent', 'class', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'review', 'report', 'pin', 'remote_control', 'weight', 'priority', 'after', 'after_verdict', 'touches', 'cohort', 'wall', 'read_only', 'integration', 'keep_cache'];
+export const SPEC_KEYS = ['task', 'agent', 'class', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'review', 'report', 'pin', 'remote_control', 'weight', 'priority', 'after', 'after_verdict', 'touches', 'cohort', 'wall', 'read_only', 'integration', 'keep_cache', 'peak_ok'];
 export const REPO_KEYS = ['path', 'worktree', 'base', 'branch', 'setup'];
 
 function label(raw: RawSpec): string {
@@ -235,6 +236,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
 
   checkKeys(h, SPEC_KEYS, where, p);
   const task = checkTask(raw, p);
+  if (h.peak_ok !== undefined && typeof h.peak_ok !== 'boolean') p.add('peak_ok must be boolean');
   if (h.keep_cache !== undefined && typeof h.keep_cache !== 'boolean') p.add('keep_cache must be boolean');
   if (h.integration !== undefined && typeof h.integration !== 'boolean') p.add('integration must be boolean');
   if (h.read_only !== undefined && typeof h.read_only !== 'boolean') p.add('read_only must be boolean');
@@ -516,6 +518,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     after,
     ...(Object.keys(afterVerdicts).length ? { afterVerdicts } : {}),
     touches,
+    ...(h.peak_ok === true ? {peakOk: true} : {}),
     ...(h.keep_cache === true ? {keepCache: true} : {}),
     ...(h.integration === true ? {integration: true} : {}),
     requested: { agent: agent as AgentName, model, effort },

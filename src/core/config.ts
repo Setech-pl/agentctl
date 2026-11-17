@@ -1,3 +1,5 @@
+import { peakDays } from './peak.ts';
+import type { ProviderSettings, PeakWindow } from './peak.ts';
 import { get as providerValue } from './providers/registry.ts';
 import type { ProviderValues } from './providers/registry.ts';
 import { activeProviders, perProvider } from './providers/registry.ts';
@@ -108,7 +110,7 @@ export interface AgentSettings {
 export interface GlobalConfig extends Layer {
   providers: ProviderId[];
   /** Per-provider launch overrides: `glm.command` (default `claude-glm`) and `glm.env` (task environment of glm tasks; default CLAUDE_CODE_AUTO_MODE_SERVER=0). */
-  providersConfig?: { glm?: { command?: string; env?: Record<string, string> } };
+  providersConfig?: Partial<Record<AgentName, ProviderSettings>>;
   /** What a start that did not reach the agent's input leaves behind (`start_failure.keep_window`, default true: the window stays for diagnosis). */
   startFailure?: { keepWindow: boolean };
   warnings?: string[];
@@ -1014,26 +1016,43 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
 
   let providersConfig: GlobalConfig['providersConfig'];
   if (raw.providers_config !== undefined && raw.providers_config !== null) {
-    if (!isObject(raw.providers_config)) p.add('config.providers_config must be a mapping like {glm: {command: claude-glm}}');
+    if (!isObject(raw.providers_config)) p.add('config.providers_config must be a mapping');
     else {
-      checkKeys(raw.providers_config, ['glm'], 'config.providers_config', p);
-      const glmConfig = raw.providers_config.glm;
-      if (glmConfig !== undefined && glmConfig !== null) {
-        if (!isObject(glmConfig)) p.add('config.providers_config.glm must be a mapping like {command: claude-glm, env: {CLAUDE_CODE_AUTO_MODE_SERVER: "0"}}');
-        else {
-          checkKeys(glmConfig, ['command', 'env'], 'config.providers_config.glm', p);
-          const command = parseString(glmConfig.command, 'config.providers_config.glm.command', p);
-          const glm: { command?: string; env?: Record<string, string> } = {};
+      checkKeys(raw.providers_config, [...PROVIDER_IDS], 'config.providers_config', p);
+      providersConfig = {};
+      for (const agent of PROVIDER_IDS) {
+        const value = raw.providers_config[agent], where = `config.providers_config.${agent}`;
+        if (value === undefined) continue;
+        if (!isObject(value)) {p.add(`${where} must be a mapping`); continue;}
+        checkKeys(value, agent === 'glm' ? ['command', 'env', 'peak', 'peak_policy'] : ['peak', 'peak_policy'], where, p);
+        const settings: ProviderSettings = {};
+        if (agent === 'glm') {
+          const command = parseString(value.command, `${where}.command`, p);
           if (command) {
-            if (/\s/.test(command.trim())) p.add('config.providers_config.glm.command must be one executable name or path, without arguments');
-            else glm.command = command;
+            if (/\s/.test(command.trim())) p.add(`${where}.command must be one executable name or path, without arguments`);
+            else settings.command = command;
           }
-          if (glmConfig.env !== undefined) {
-            glm.env = parseEnv(glmConfig.env, 'config.providers_config.glm.env', p);
-            for (const name of ANTHROPIC_SECRET_ENV) if (name in glm.env) p.add(`config.providers_config.glm.env.${name}: the Z.ai endpoint and token come only from the claude-glm wrapper; agentctl never sets ${name}`);
+          if (value.env !== undefined) {
+            settings.env = parseEnv(value.env, `${where}.env`, p);
+            for (const name of ANTHROPIC_SECRET_ENV) if (name in settings.env) p.add(`${where}.env.${name}: the Z.ai endpoint and token come only from the claude-glm wrapper; agentctl never sets ${name}`);
           }
-          if (glm.command !== undefined || glm.env !== undefined) providersConfig = { glm };
         }
+        settings.peakPolicy = parseEnumValue(value.peak_policy, ['hold', 'short_only'] as const, `${where}.peak_policy`, p) ?? 'hold';
+        if (value.peak !== undefined) {
+          if (!Array.isArray(value.peak)) p.add(`${where}.peak must be an array`);
+          else {
+            settings.peak = [];
+            for (const entry of value.peak) {
+              if (!isObject(entry)) {p.add(`${where}.peak entries must be mappings`); continue;}
+              checkKeys(entry, ['days', 'from', 'to', 'tz'], `${where}.peak`, p);
+              if (!peakDays(entry.days)) p.add(`${where}.peak.days must use mon-sun names or ranges (mon-fri)`);
+              if (![entry.from, entry.to].every(v => typeof v === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(v)) || entry.from === entry.to) p.add(`${where}.peak from/to must be distinct HH:MM times`);
+              try {if (typeof entry.tz !== 'string') throw new Error(); new Intl.DateTimeFormat('en', {timeZone: entry.tz});} catch {p.add(`${where}.peak.tz must be an IANA time zone`);}
+              settings.peak.push(entry as unknown as PeakWindow);
+            }
+          }
+        }
+        providersConfig[agent] = settings;
       }
     }
   }

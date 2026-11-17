@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- FIELD0230-F7: timezone-aware peak schedules, default GLM Singapore 14–18 weekdays, hold/short_only admission. / Szczyt ze strefą czasu, domyślnie GLM 14–18 w Singapurze w dni robocze, polityki hold/short_only.
+
 - FIELD0230-F6: shared provider holds explicitly name global scope and source task in status/limits. / Globalne blokady providera pokazują zakres i zadanie źródłowe w status/limits.
 
 - FIELD0230-F5: retain quota text/reset in limited status and attention summaries, including wrapped provider errors. / Treść limitu i reset w statusie limited oraz podsumowaniu uwagi, także po zawinięciu wiersza.

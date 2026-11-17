@@ -1,3 +1,4 @@
+import { peakHold } from './peak.ts';
 import { diskStartHold, worktreeCostEstimates } from './disk.ts';
 import { expireProviderHolds, providerHolds } from './provider-hold.ts';
 import { readMcpRequests } from './mcp-requests.ts';
@@ -277,11 +278,11 @@ export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: Q
     const unmetNow = unmetAfter(spec.after, rows, spec.afterVerdicts);
     lines.push(
       `  start:    ${
-        diskHold ? diskHold : isPaused(config) ? 'queue paused; starts after queue_resume (agentctl queue resume)' : !config.queue.enabled ? 'queue.enabled is false; enable the queue first' : limit === 'off' ? `${spec.agent} is disabled (limits.${spec.agent}: off); no windows start` : heavyReason ? heavyReason : unmetNow.length > 0
+        diskHold ? diskHold : peakHold(config, spec, ctx.runner.now()) ?? (isPaused(config) ? 'queue paused; starts after queue_resume (agentctl queue resume)' : !config.queue.enabled ? 'queue.enabled is false; enable the queue first' : limit === 'off' ? `${spec.agent} is disabled (limits.${spec.agent}: off); no windows start` : heavyReason ? heavyReason : unmetNow.length > 0
           ? `when ${unmetNow.join(', ')} ${unmetNow.length === 1 ? 'has' : 'have'} a report${full ? ` and a ${spec.agent} window is free` : ''}`
           : full
           ? `waits for a free ${spec.agent} window (${load[spec.agent]} running${ahead[spec.agent] > 0 ? `, ${ahead[spec.agent]} queued ahead` : ''}, limit ${limit})`
-          : 'at the next watch tick (a window is free)'
+          : 'at the next watch tick (a window is free)')
       }`,
     );
     if (spec.review) lines.push(`  review:   auto -> ${spec.task}-REV after the confirmed author report; another provider, else another configured model; rerun=${Boolean(spec.review.rerun)}`);
@@ -765,6 +766,10 @@ export interface QueueView {
   since: string;
 }
 
+function entryPeakHold(config: GlobalConfig, entry: QueueEntry, now: number): string | undefined {
+  try { const header = splitSpecs(entry.spec)[0]!.header; return peakHold(config, {agent: entry.agent, ...(typeof header.class === 'string' ? {class: header.class} : {}), peakOk: header.peak_ok === true}, now); }
+  catch { return peakHold(config, {agent: entry.agent}, now); }
+}
 function setupSlots(config: GlobalConfig, entries: QueueEntry[]): number {
   return entries.filter(e => e.status === 'starting' && readSetupProgress(config, e.task)?.phase !== 'launching').length;
 }
@@ -795,6 +800,8 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
     if (entry.status === 'accepted') return { position: null, entry, condition: { kind: 'accepted', text: entry.direct ? `uruchamiane – czeka na najbliższy tick watch (${ACCEPTED_TEXT})` : ACCEPTED_TEXT }, since: entry.queuedAt };
     if (entry.status === 'starting') return { position: null, entry, condition: { kind: 'starting', text: entry.direct || readSetupProgress(config, entry.task, queueDiagnosticSources(entries)) ? startProgressText(readSetupProgress(config, entry.task, queueDiagnosticSources(entries)), nowMs) : 'starting' }, since: entry.startingAt ?? entry.queuedAt };
     position++;
+    const peak = entryPeakHold(config, entry, nowMs);
+    if (peak) return {position, entry, condition: {kind: 'hold', text: peak}, since: entry.queuedAt};
     const diskHold = diskStartHold(config, entryWorktrees(config, entry));
     if (diskHold) return {position, entry, condition: {kind: 'hold', text: diskHold}, since: entry.queuedAt};
     if (setups >= config.queue.maxParallelSetups) return {position, entry, condition: {kind: 'slot', text: `czeka na setup: ${setups}/${config.queue.maxParallelSetups}`}, since: entry.queuedAt};
@@ -1014,7 +1021,7 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
     if (author.waiting) continue;
     if (memory.inflight.size >= config.queue.parallelStarts) break;
     if (diskStartHold(config, entryWorktrees(config, entry)) || setupSlots(config, readQueue(config)) >= config.queue.maxParallelSetups) continue;
-    if (providerHolds(config, ctx.runner.now())[entry.agent]) continue;
+    if (providerHolds(config, ctx.runner.now())[entry.agent] || entryPeakHold(config, entry, ctx.runner.now())) continue;
     if (entry.direct) {
       const room = config.limits[entry.agent];
       if (overProviderLimit(room, used[entry.agent])) continue;
@@ -1105,7 +1112,7 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
   const { config } = ctx;
   let entry = initial;
   const claim = async (fresh: QueueEntry): Promise<boolean> => {
-    if (diskStartHold(config, entryWorktrees(config, fresh)) || setupSlots(config, readQueue(config)) >= config.queue.maxParallelSetups) return false;
+    if (entryPeakHold(config, fresh, ctx.runner.now()) || diskStartHold(config, entryWorktrees(config, fresh)) || setupSlots(config, readQueue(config)) >= config.queue.maxParallelSetups) return false;
     if (heavyWait(config, isHeavy(fresh), heavyBudget(config, readQueue(config), await liveWindows(ctx)).size)) return false;
     await writeEntry(ctx, { ...fresh, status: 'starting', startingPid: process.pid, startingAt: new Date(ctx.runner.now()).toISOString() });
     entry = fresh;

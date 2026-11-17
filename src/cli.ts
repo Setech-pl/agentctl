@@ -1,3 +1,4 @@
+import { peakLines } from './core/peak.ts';
 import { providerHoldLines } from './core/provider-hold.ts';
 import { pulledCohortTasks, checkPulledClose } from './core/pulled.ts';
 import { acceptConsult, planConsult } from './core/consult.ts';
@@ -819,7 +820,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         }
         if (opts.json) return line(JSON.stringify(rows, null, 2));
         for (const m of listCohorts(ctx.config).filter(m => m.note?.startsWith('CONSULT ') && (cohort === undefined || m.name === cohort))) line(`${m.name}: ${m.note}`);
-        for (const hold of providerHoldLines(ctx.config, ctx.runner.now())) line(hold);
+        for (const hold of [...providerHoldLines(ctx.config, ctx.runner.now()), ...peakLines(ctx.config, ctx.runner.now())]) line(hold);
         if (opts.detail) line(machineLine(collectMachine(ctx.config)));
         line(diskLine(await collectDisk(ctx)));
         if (rows.length === 0) {

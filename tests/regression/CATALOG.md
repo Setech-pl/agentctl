@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| FIELD0230-F7 | GLM starts ignored the provider peak admission schedule. | `tests/field0230-peak.test.ts` (`^F7: default`) | 0.22.8 | fails on v0.22.7 (1 failing of 1) |
 | FIELD0230-F6 | Shared provider holds omitted global scope and the detecting task. | `tests/field0230-providers.test.ts` (`^F6:`) | 0.22.8 | fails on v0.22.7 (1 failing of 1) |
 | FIELD0230-F5 | Quota panes lost their usage hint/reset and disappeared from attention summaries. | `tests/field0230-providers.test.ts` (`^F5:`) | 0.22.8 | fails on v0.22.7 (2 failing of 2) |
 | FIELD0230-F4 | Status/capacity reused stale filesystem free-space samples. | `tests/field0230-disk.test.ts` (`^F4:`) | 0.22.8 | fails on v0.22.7 (1 failing of 1) |

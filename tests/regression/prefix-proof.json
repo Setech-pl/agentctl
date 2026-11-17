@@ -275,6 +275,16 @@
       "F6: GLM holds are global across cohorts/chats and name the detecting task"
     ]
   },
+  "FIELD0230-F7": {
+    "rev": "v0.22.7",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "F7: default Singapore peak holds winter/summer starts, excludes weekends and never interrupts running tasks",
+      "F7: default Singapore peak holds winter/summer starts, excludes weekends and never interrupts running tasks"
+    ]
+  },
   "G1a": {
     "rev": "v0.22.3",
     "outcome": "FAILS",

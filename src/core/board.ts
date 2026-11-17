@@ -1,3 +1,5 @@
+import { formatLocalTime } from './util.ts';
+import { peakState } from './peak.ts';
 import { pulledOpen, pulledCohortTasks } from './pulled.ts';
 import { providerHoldText } from './provider-hold.ts';
 import type { RefreshClock } from '../board/refresh-scheduler.ts';
@@ -1105,11 +1107,13 @@ export interface PanelLine {
 }
 
 /** The two lines under the header: per provider the windows as a bar with the percentage and the reset, or n/d. */
-export function usagePanel(plans: ProviderValues<PlanState> | null, usage: UsageSettings, now: number, holds: Partial<Record<AgentName, import('./provider-hold.ts').ProviderHold>> = {}): PanelLine[] {
+export function usagePanel(plans: ProviderValues<PlanState> | null, usage: UsageSettings, now: number, holds: Partial<Record<AgentName, import('./provider-hold.ts').ProviderHold>> = {}, config?: GlobalConfig): PanelLine[] {
   if (plans === null) return [];
   return (Object.keys(plans) as AgentName[]).map((provider): PanelLine => {
     const plan = providerValue(plans, provider);
-    const name = provider.padEnd(6);
+    const peak = config ? peakState(config, provider, now) : null;
+    const peakText = peak ? ` ${provider}: szczyt do ${formatLocalTime(peak.until).slice(-5)} (${peak.policy})` : '';
+    const name = provider.padEnd(6) + peakText;
     // usage.queue_hold of the provider, when one is set (changed live by set_limits / limits set / a hand edit).
     const timedHold = holds[provider] ? `  ${providerHoldText(provider, holds[provider]!)}` : '';
     const hold = usage.queueHold[provider] === undefined ? '' : `  hold ${usage.queueHold[provider]}%`;
