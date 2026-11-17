@@ -42,9 +42,7 @@ Use `host: pc` to run a task on a configured SSH host: remote worktree/setup/age
 
 [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [MIT license](LICENSE). Use the repository gate and task-owned cache.
 
-GC checks `git status --porcelain --untracked-files=normal` in **every** task worktree, plus commits ahead of upstream (or the recorded base). Previews show dirty file and unpushed commit counts per repo, even with cached sizes. Dirty/unpushed worktrees stay unless the owner explicitly uses CLI `--force-dirty` or MCP `force_dirty: [TASK]`; apply checks again. Ignored files are excluded.
-
-Task cache now stays when removing worktrees. Deleting old cache entries requires explicit owner confirmation: CLI `gc --include-cache --apply` or MCP `gc {include_cache: true}`. Spec `keep_cache: true`, CLI `--keep-cache TASK...`, and MCP `keep_cache: [TASK]` preserve all cache for those tasks. Report references, including `persist: [paths]`, `artifacts: [path | {path: ...}]` and `refs: [path | {path: ...}]` in agentctl-outputs, protect referenced entries and their parent directories even with include_cache. Relative paths resolve from the report directory or task worktrees. Previews paginate every cache candidate with its path and size; protection is checked again at apply.
+GC checks every repository for dirty files and unpushed commits; cache stays by default. Owner-confirmed `include_cache` still respects pin/keep/keep_cache and report artifacts; remote GC never forces deletion. [GC safety and configuration](docs/en/configuration.md).
 
 `answer` tokens match the normalized question and option labels, independent of menu scrolling, selection marker, whitespace or unrelated screen redraws. Confirmation requires the chosen numbered option to remain visible with the same label and question; changed menus, expired/replayed tokens and changed task identity are refused.
 

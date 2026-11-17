@@ -40,11 +40,9 @@ Agentctl działa z twoimi uprawnieniami; worktree nie jest sandboxem OS. Trust f
 
 `host: pc` uruchamia zadanie na skonfigurowanym hoście SSH: worktree/setup/agent zdalnie, zwykłe operacje zadania i lokalna kopia raportu. [Konfiguracja i przykład na PC](docs/pl/hosts.md). Wersja 0.23.1 obejmuje limity konta/hosta, blokady dostawców, bezpieczny zdalny GC, zadania hosta na boardzie oraz restart/adopt/resume; kolejkę przenosi `move --host pc|local`. [Informacje o wydaniu](docs/release-notes/0.23.1.pl.md).
 
-[Współtworzenie](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [Licencja MIT](LICENSE). Używaj gate repo i cache własnego zadania. Wydanie łączy pełne instrukcje z poprawkami operacyjnymi 0.22.2, diagnostyką i pomocą boardu.
+[Współtworzenie](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [Licencja MIT](LICENSE). Używaj gate repo i cache własnego zadania.
 
-GC sprawdza `git status --porcelain --untracked-files=normal` w **każdym** worktree zadania oraz commity przed upstreamem (lub zapisaną bazą). Podgląd pokazuje liczbę zmienionych plików i niewysłanych commitów na repo, także przy rozmiarach z cache. Zmiany zostają bez jawnego CLI `--force-dirty` lub MCP `force_dirty: [TASK]`; wykonanie sprawdza stan ponownie. Pliki ignorowane są pomijane.
-
-Cache zadania zostaje przy usuwaniu worktree. Usunięcie starych wpisów wymaga jawnej zgody właściciela: CLI `gc --include-cache --apply` lub MCP `gc {include_cache: true}`. Spec `keep_cache: true`, CLI `--keep-cache TASK...` i MCP `keep_cache: [TASK]` zachowują cały cache tych zadań. Odnośniki w raporcie, w tym `persist: [ścieżki]`, `artifacts: [ścieżka | {path: ...}]` i `refs: [ścieżka | {path: ...}]` w agentctl-outputs, chronią dane i katalogi nadrzędne także z include_cache. Ścieżki względne odnoszą się do katalogu raportu lub worktree zadania. Podgląd stronicuje ścieżki i rozmiary, a wykonanie ponownie sprawdza ochronę.
+GC sprawdza zmiany i niewysłane commity w każdym repo; cache domyślnie zostaje. Jawne `include_cache` nadal chroni pin/keep/keep_cache i artefakty raportów; zdalny GC nigdy nie wymusza usunięcia. [Bezpieczeństwo GC i konfiguracja](docs/pl/configuration.md).
 
 Token `answer` wiąże znormalizowane pytanie i etykiety opcji, niezależnie od przewijania menu, zaznaczenia, odstępów i odświeżenia ekranu. Przy potwierdzeniu wybrana opcja musi być widoczna z tą samą etykietą i pytaniem; zmienione menu, wygasły lub zużyty token i inne zadanie są odrzucane.
 
