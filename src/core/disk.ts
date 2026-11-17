@@ -15,7 +15,7 @@ import { fileVersion } from './file-version.ts';
 import { withFileLock } from './file-lock.ts';
 
 export type DiskLevel = 'ok' | 'warn' | 'critical' | 'unknown';
-export interface DiskVolume { worktreeShareWarning?: {bytes: number; measuredAt: string; ageSeconds: number}; device: string | null; paths: string[]; availableBytes: number | null; totalBytes: number | null; level: DiskLevel; error?: string }
+export interface DiskVolume { samplePath?: string; worktreeShareWarning?: {bytes: number; measuredAt: string; ageSeconds: number}; device: string | null; paths: string[]; availableBytes: number | null; totalBytes: number | null; level: DiskLevel; error?: string }
 export interface DiskReport { freeMeasuredAt?: string; worktreeAgeSeconds?: number; gcPolicyNote?: string; reclaimableBytes?: number | null; gcHint?: boolean; measurementError?: string; /** The sizes below are the last ones measured (or none yet): a measurement is still running in the background. */ measuring?: boolean; worktreeCount?: number; largestWorktrees?: { path: string; bytes: number }[]; pathsTotal?: number; pathsOffset?: number; pathsNextOffset?: number | null; volumes: DiskVolume[]; worktreeBytes: number | null; measuredAt: string; level: DiskLevel }
 export const DISK_INTERVAL_MS = 5 * 60_000;
 const restored = new Map<string, string>();
@@ -64,7 +64,7 @@ export async function collectDisk(ctx: Context, statfs = fs.promises.statfs, opt
         availableBytes = Number(fields[3]) * 1024; totalBytes = Number(fields[1]) * 1024;
       } else error = e instanceof Error ? e.message : String(e);
     }
-    volumes.set(key, { device, paths: [target], availableBytes, totalBytes, level: diskLevel(availableBytes, ctx.config.disk.warnGb, ctx.config.disk.criticalGb), ...(error ? { error } : {}) });
+    volumes.set(key, { samplePath: ancestor, device, paths: [target], availableBytes, totalBytes, level: diskLevel(availableBytes, ctx.config.disk.warnGb, ctx.config.disk.criticalGb), ...(error ? { error } : {}) });
   }
   const worktrees = [...new Set(records.flatMap((r) => r.repos.map((r) => r.worktree)))].sort();
   restoreDiskMeasurements(ctx);
@@ -217,4 +217,20 @@ export function worktreeCostEstimates(ctx: Context, repos: {path: string}[]) {
     const last = samples[0];
     return {repo: path.basename(repo.path), bytes: last?.bytes ?? null, measuredAt: last ? new Date(last.at).toISOString() : null, ageSeconds: last ? Math.max(0, Math.floor((ctx.runner.now() - last.at) / 1000)) : null};
   });
+}
+
+/** Refresh snapshot counters without scanning tasks, queued specs or recursive sizes. */
+export async function refreshDiskFreeSpace(ctx: Context, previous: DiskReport): Promise<DiskReport> {
+  const now = ctx.runner.now(), ageSeconds = Math.max(0, Math.floor((now - Date.parse(previous.measuredAt)) / 1000));
+  const volumes = await Promise.all(previous.volumes.map(async volume => {
+    try {
+      const stats = await fs.promises.statfs(volume.samplePath ?? existingAncestor(ctx.config.cache));
+      const availableBytes = Number(stats.bavail) * Number(stats.bsize), totalBytes = Number(stats.blocks) * Number(stats.bsize);
+      let level = diskLevel(availableBytes, ctx.config.disk.warnGb, ctx.config.disk.criticalGb);
+      if (volume.worktreeShareWarning && totalBytes && volume.worktreeShareWarning.bytes / totalBytes * 100 > ctx.config.disk.worktreeSharePercent && level !== 'critical') level = 'warn';
+      return {...volume, error: undefined, availableBytes, totalBytes, level, ...(volume.worktreeShareWarning ? {worktreeShareWarning: {...volume.worktreeShareWarning, ageSeconds}} : {})};
+    } catch (e) {return {...volume, availableBytes: null, totalBytes: null, level: 'unknown' as const, error: e instanceof Error ? e.message : String(e)};}
+  }));
+  const level = (['critical', 'warn', 'unknown', 'ok'] as const).find(l => volumes.some(v => v.level === l)) ?? 'unknown';
+  return {...previous, volumes, level, freeMeasuredAt: new Date(now).toISOString(), worktreeAgeSeconds: ageSeconds};
 }

@@ -274,75 +274,75 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 
 | Tool | Kind | Arguments |
 |---|---|---|
-| `status` | read | `all?`, `cohort?`, `format?`, `detail?`, `offset?`, `limit?`, `capacity?` |
+| `status` | read | `as?`, `all?`, `cohort?`, `format?`, `detail?`, `offset?`, `limit?`, `capacity?` |
 | `events_since` | read | `as?`, `cursor?`, `limit?`, `client?`, `since?`, `cohort?`, `peek?`, `format?`, `detail?` |
-| `gc_preview` | read | `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `request_id?`, `detail?`, `offset?`, `limit?`, `older_than?`, `merged?`, `cohort?` |
-| `limits` | read | `format?`, `detail?` |
-| `set_limits` | write | `claude?`, `codex?`, `queue_hold?`, `hold?`, `confirm?`, `preview_token?` |
-| `reserve` | write | `claude?`, `codex?`, `note?`, `release?`, `confirm?`, `preview_token?` |
-| `version` | read |  |
-| `peek` | read | `task`, `lines?` |
-| `list_reports` | read | `all?` |
-| `get_report` | read | `task`, `mark_pulled?`, `detail?`, `mode?`, `section?`, `byte_offset?`, `offset?`, `limit?` |
-| `pull_ready` | read | `cohort?`, `all?`, `detail?`, `mode?`, `ack?`, `cursor?`, `offset?`, `limit?` |
-| `task_spec` | read | `task` |
-| `queue_list` | read | `cohort?`, `format?`, `detail?` |
-| `cohort_list` | read | `all?` |
-| `cohort_show` | read | `cohort`, `format?`, `detail?` |
-| `guide` | read | `project?`, `lang?` |
-| `capacity` | read | `format?`, `detail?`, `offset?`, `limit?` |
-| `usage` | read | `cohort?`, `since?` |
-| `log` | read | `cohort?`, `since?` |
-| `stats` | read | `cohort?`, `since?` |
-| `overlap` | read | `task?` |
-| `resume` | write | `tasks?`, `all?`, `confirm?`, `preview_token?` |
-| `answer` | write | `task?`, `option?`, `confirm?`, `token?`, `preview_token?` |
-| `send` | write | `task?`, `text?`, `enter_only?`, `confirm?`, `token?`, `withdraw?`, `preview_token?` |
-| `consult` | write | `spec?`, `confirm?`, `preview_token?` |
-| `new` | write | `spec?`, `agent?`, `reuse?`, `no_agent?`, `cohort?`, `wait_trust?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` |
-| `queue` | write | `spec?`, `cohort?`, `replace?`, `agent?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` |
-| `queue_rm` | write | `task?`, `confirm?`, `preview_token?` |
-| `cancel` | write | `task?`, `tasks?`, `cohort?`, `reason?`, `remove_worktree?`, `confirm?`, `preview_token?` |
-| `mark` | write | `task?`, `tasks?`, `cohort?`, `result?`, `note?`, `confirm?`, `preview_token?` |
-| `away` | write | `on?`, `confirm?`, `preview_token?` |
-| `interrupt` | write | `task?`, `confirm?`, `preview_token?` |
-| `close` | write | `pulled?`, `task?`, `tasks?`, `cohort?`, `remove_worktree?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` |
-| `move` | write | `task?`, `agent?`, `confirm?`, `preview_token?` |
-| `queue_show` | read | `task` |
-| `mcp_check` | read |  |
-| `spec_example` | read |  |
-| `doctor` | read | `project?` |
-| `equivalents` | read |  |
-| `config_show` | read |  |
-| `manager_status` | read |  |
-| `away_status` | read |  |
-| `report` | read | `task` |
-| `queue_retry` | write | `task?`, `confirm?`, `preview_token?` |
-| `queue_up` | write | `task?`, `confirm?`, `preview_token?` |
-| `queue_pause` | write | `confirm?`, `preview_token?` |
-| `queue_resume` | write | `confirm?`, `preview_token?` |
-| `unblock` | write | `task?`, `drop_after?`, `confirm?`, `preview_token?` |
-| `cohort_add` | write | `cohort?`, `tasks?`, `confirm?`, `preview_token?` |
-| `cohort_remove` | write | `tasks?`, `confirm?`, `preview_token?` |
-| `cohort_archive` | write | `cohorts?`, `older_than?`, `confirm?`, `preview_token?` |
-| `cohort_note` | write | `cohort?`, `text?`, `confirm?`, `preview_token?` |
-| `pin` | write | `tasks?`, `confirm?`, `preview_token?` |
-| `unpin` | write | `tasks?`, `confirm?`, `preview_token?` |
-| `hide` | write | `tasks?`, `confirm?`, `preview_token?` |
-| `unhide` | write | `tasks?`, `confirm?`, `preview_token?` |
-| `archive` | write | `older_than?`, `cohort?`, `confirm?`, `preview_token?` |
-| `adopt` | write | `task?`, `report?`, `window?`, `worktree?`, `agent?`, `model?`, `effort?`, `confirm?`, `preview_token?` |
-| `report_from` | write | `task?`, `from?`, `force?`, `confirm?`, `preview_token?` |
-| `limits_release` | write | `claude?`, `codex?`, `confirm?`, `preview_token?` |
-| `manager_start` | write | `project?`, `name?`, `model?`, `effort?`, `confirm?`, `preview_token?` |
-| `manager_stop` | write | `confirm?`, `preview_token?` |
-| `notify_test` | write | `phone?`, `confirm?`, `preview_token?` |
-| `gc` | write | `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `detail?`, `offset?`, `limit?`, `cohort?`, `older_than?`, `branches?`, `confirm?`, `preview_token?` |
+| `gc_preview` | read | `as?`, `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `request_id?`, `detail?`, `offset?`, `limit?`, `older_than?`, `merged?`, `cohort?` |
+| `limits` | read | `as?`, `format?`, `detail?` |
+| `set_limits` | write | `as?`, `claude?`, `codex?`, `queue_hold?`, `hold?`, `confirm?`, `preview_token?` |
+| `reserve` | write | `as?`, `claude?`, `codex?`, `note?`, `release?`, `confirm?`, `preview_token?` |
+| `version` | read | `as?` |
+| `peek` | read | `as?`, `task`, `lines?` |
+| `list_reports` | read | `as?`, `all?` |
+| `get_report` | read | `as?`, `task`, `mark_pulled?`, `detail?`, `mode?`, `section?`, `byte_offset?`, `offset?`, `limit?` |
+| `pull_ready` | read | `as?`, `cohort?`, `all?`, `detail?`, `mode?`, `ack?`, `cursor?`, `offset?`, `limit?` |
+| `task_spec` | read | `as?`, `task` |
+| `queue_list` | read | `as?`, `cohort?`, `format?`, `detail?` |
+| `cohort_list` | read | `as?`, `all?` |
+| `cohort_show` | read | `as?`, `cohort`, `format?`, `detail?` |
+| `guide` | read | `as?`, `project?`, `lang?` |
+| `capacity` | read | `as?`, `format?`, `detail?`, `offset?`, `limit?` |
+| `usage` | read | `as?`, `cohort?`, `since?` |
+| `log` | read | `as?`, `cohort?`, `since?` |
+| `stats` | read | `as?`, `cohort?`, `since?` |
+| `overlap` | read | `as?`, `task?` |
+| `resume` | write | `as?`, `tasks?`, `all?`, `confirm?`, `preview_token?` |
+| `answer` | write | `as?`, `task?`, `option?`, `confirm?`, `token?`, `preview_token?` |
+| `send` | write | `as?`, `task?`, `text?`, `enter_only?`, `confirm?`, `token?`, `withdraw?`, `preview_token?` |
+| `consult` | write | `as?`, `spec?`, `confirm?`, `preview_token?` |
+| `new` | write | `as?`, `spec?`, `agent?`, `reuse?`, `no_agent?`, `cohort?`, `wait_trust?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` |
+| `queue` | write | `as?`, `spec?`, `cohort?`, `replace?`, `agent?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` |
+| `queue_rm` | write | `as?`, `task?`, `confirm?`, `preview_token?` |
+| `cancel` | write | `as?`, `task?`, `tasks?`, `cohort?`, `reason?`, `remove_worktree?`, `confirm?`, `preview_token?` |
+| `mark` | write | `as?`, `task?`, `tasks?`, `cohort?`, `result?`, `note?`, `confirm?`, `preview_token?` |
+| `away` | write | `as?`, `on?`, `confirm?`, `preview_token?` |
+| `interrupt` | write | `as?`, `task?`, `confirm?`, `preview_token?` |
+| `close` | write | `as?`, `pulled?`, `task?`, `tasks?`, `cohort?`, `remove_worktree?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` |
+| `move` | write | `as?`, `task?`, `agent?`, `confirm?`, `preview_token?` |
+| `queue_show` | read | `as?`, `task` |
+| `mcp_check` | read | `as?` |
+| `spec_example` | read | `as?` |
+| `doctor` | read | `as?`, `project?` |
+| `equivalents` | read | `as?` |
+| `config_show` | read | `as?` |
+| `manager_status` | read | `as?` |
+| `away_status` | read | `as?` |
+| `report` | read | `as?`, `task` |
+| `queue_retry` | write | `as?`, `task?`, `confirm?`, `preview_token?` |
+| `queue_up` | write | `as?`, `task?`, `confirm?`, `preview_token?` |
+| `queue_pause` | write | `as?`, `confirm?`, `preview_token?` |
+| `queue_resume` | write | `as?`, `confirm?`, `preview_token?` |
+| `unblock` | write | `as?`, `task?`, `drop_after?`, `confirm?`, `preview_token?` |
+| `cohort_add` | write | `as?`, `cohort?`, `tasks?`, `confirm?`, `preview_token?` |
+| `cohort_remove` | write | `as?`, `tasks?`, `confirm?`, `preview_token?` |
+| `cohort_archive` | write | `as?`, `cohorts?`, `older_than?`, `confirm?`, `preview_token?` |
+| `cohort_note` | write | `as?`, `cohort?`, `text?`, `confirm?`, `preview_token?` |
+| `pin` | write | `as?`, `tasks?`, `confirm?`, `preview_token?` |
+| `unpin` | write | `as?`, `tasks?`, `confirm?`, `preview_token?` |
+| `hide` | write | `as?`, `tasks?`, `confirm?`, `preview_token?` |
+| `unhide` | write | `as?`, `tasks?`, `confirm?`, `preview_token?` |
+| `archive` | write | `as?`, `older_than?`, `cohort?`, `confirm?`, `preview_token?` |
+| `adopt` | write | `as?`, `task?`, `report?`, `window?`, `worktree?`, `agent?`, `model?`, `effort?`, `confirm?`, `preview_token?` |
+| `report_from` | write | `as?`, `task?`, `from?`, `force?`, `confirm?`, `preview_token?` |
+| `limits_release` | write | `as?`, `claude?`, `codex?`, `confirm?`, `preview_token?` |
+| `manager_start` | write | `as?`, `project?`, `name?`, `model?`, `effort?`, `confirm?`, `preview_token?` |
+| `manager_stop` | write | `as?`, `confirm?`, `preview_token?` |
+| `notify_test` | write | `as?`, `phone?`, `confirm?`, `preview_token?` |
+| `gc` | write | `as?`, `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `detail?`, `offset?`, `limit?`, `cohort?`, `older_than?`, `branches?`, `confirm?`, `preview_token?` |
 | `wall_read` | read | `as?`, `channel?`, `id?`, `since?`, `archive?`, `status?`, `kind?`, `limit?`, `before?` |
 | `wall_post` | write | `as?`, `channel?`, `kind?`, `subject?`, `body?`, `refs?`, `to?`, `confirm?`, `preview_token?` |
 | `wall_reply` | write | `as?`, `reply_to?`, `body?`, `subject?`, `kind?`, `refs?`, `to?`, `confirm?`, `preview_token?` |
 | `wall_set_status` | write | `as?`, `id?`, `status?`, `note?`, `owner_confirmed?`, `confirm?`, `preview_token?` |
-| `response_page` | read | `response_id`, `response_offset` |
+| `response_page` | read | `as?`, `response_id`, `response_offset` |
 
 - `guide`: `--project &lt;repo&gt;`, `--lang &lt;lang&gt;`, `--clip`, `--json`
 - `capacity`: `--json`, `--clip`

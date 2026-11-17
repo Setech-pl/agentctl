@@ -34,7 +34,7 @@ it('A3: an async queue failure becomes visible on the next snapshot with its err
   assert.match(after[0].retryHint, /queue_retry task=FAIL-1/);
   assert.equal(after[0].snapshot_age_s, 0);
 });
-it('A3: atomic watch snapshot serves every bounded read with stalled processes and supports cohort/capacity; stale falls back', async () => {
+it('A3: atomic watch snapshot serves bounded reads with stalled processes; only cheap statfs is refreshed', async () => {
   const config = makeConfig(scratch.sub('snapshot'), 'mcp: {allow: [set_limits]}\nwatch: {interval: 2}\n');
   seedTask(config, 'SNAP', {cohort: '62'});
   const tmux = new FakeTmux(); tmux.add('snap', 'Working (esc to interrupt)');
@@ -48,7 +48,7 @@ it('A3: atomic watch snapshot serves every bounded read with stalled processes a
   const readdir = fs.readdirSync, statfs = fs.promises.statfs;
   let fsProbes = 0;
   fs.readdirSync = (() => {fsProbes++; throw new Error('stalled filesystem inventory');}) as typeof fs.readdirSync;
-  fs.promises.statfs = (() => {fsProbes++; return new Promise(() => {});}) as typeof fs.promises.statfs;
+  fs.promises.statfs = (async () => {fsProbes++; return {bsize: 1024, bavail: 256 * 1024 ** 2, blocks: 1024 ** 3};}) as unknown as typeof fs.promises.statfs;
   try {
   for (const name of ['status', 'queue_list', 'capacity', 'limits', 'config_show', 'doctor']) {
     const result = await MCP_TOOLS.find(t => t.name === name)!.run(deps, name === 'status' ? {cohort: '62', capacity: true} : {});
@@ -56,7 +56,7 @@ it('A3: atomic watch snapshot serves every bounded read with stalled processes a
     assert.match(result.text, /snapshot(?: age|_age_s)/i, name);
     if (name === 'status') assert.match(result.text, /SNAP/);
   }
-  assert.equal(probes, before); assert.equal(fsProbes, 0);
+  assert.equal(probes, before); assert.equal(fsProbes, 2, 'one cheap filesystem sample per status/capacity; no inventory scans');
   } finally {fs.readdirSync = readdir; fs.promises.statfs = statfs;}
   const lock = tryFileLock(path.join(config.stateDir, 'start.lock'))!;
   try { const result = await MCP_TOOLS.find(t => t.name === 'set_limits')!.run(deps, {claude: 3, confirm: true}); assert.ok(!result.isError, result.text); } finally { lock(); }

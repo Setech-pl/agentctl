@@ -1,3 +1,4 @@
+import { refreshDiskFreeSpace } from './disk.ts';
 import { peakLines } from './peak.ts';
 import { pulledOpen, pulledSummary, pulledCohortTasks, checkPulledClose } from './pulled.ts';
 import { readProviderHoldState, providerHoldText, providerHoldLines } from './provider-hold.ts';
@@ -2071,7 +2072,7 @@ for (const tool of MCP_TOOLS) {
         pending.set(token, { key, arguments: arguments_, raw: input, scope: scopeIdentity, at: ctx.runner.now(), ttlS: ctx.config.preview.ttlS, ...(tool.name === 'new' || tool.name === 'queue' ? { planned: (scope as { specs: ResolvedSpec[] }).specs.map(plannedOrder) } : {}) });
         issuedPreviewTokens.set(token, { session, state: 'pending' });
         if (issuedPreviewTokens.size > 10000) issuedPreviewTokens.delete(issuedPreviewTokens.keys().next().value!);
-        result.text += `\npreview_ttl_s: ${ctx.config.preview.ttlS}; expires_at: ${new Date(ctx.runner.now() + ctx.config.preview.ttlS * 1000).toISOString()}\npreview_token: ${token}`;
+        result.text += `\npreview_ttl_s: ${ctx.config.preview.ttlS}; expires_at: ${new Date(ctx.runner.now() + ctx.config.preview.ttlS * 1000).toISOString()}; expires_at_local: ${formatLocalTime(new Date(ctx.runner.now() + ctx.config.preview.ttlS * 1000).toISOString())}\npreview_token: ${token}`;
       }
       return result;
     }
@@ -2303,7 +2304,7 @@ async function snapshotRead(ctx: Context, name: string, args: Record<string, unk
     if (name === 'status' && snap.version === 1 && age > 300000) return ok(`${ageLine(snap.at, ctx.runner.now())}\nSnapshot starszy niż 5 min; krótki fallback z kolejki i dziennika zamiast starej tabeli.\n${durableStatus(ctx)}`);
     if (snap.version !== 1 || age < 0 || age >= 2 * ctx.config.watch.interval * 1000 || JSON.stringify(snap.providerHolds ?? {}) !== JSON.stringify(readProviderHoldState(ctx.config).holds) || snap.configHash !== createHash('sha256').update(JSON.stringify(ctx.config)).digest('hex')) return undefined;
     const note = `${ageLine(snap.at, ctx.runner.now())}; Watch snapshot age: ${(age / 1000).toFixed(1)} s.`;
-    if (name === 'status' || name === 'capacity') snap.capacity.disk = await collectDisk(ctx);
+    if (name === 'status' || name === 'capacity') snap.capacity.disk = await refreshDiskFreeSpace(ctx, snap.capacity.disk);
     const json = args.format === 'json' || args.detail === true;
     let data: unknown, text = '';
     const fits = (r: { cohort?: string | null }) => args.cohort === undefined || cohortKey(r.cohort ?? '') === cohortKey(String(args.cohort));
@@ -2314,7 +2315,8 @@ async function snapshotRead(ctx: Context, name: string, args: Record<string, unk
       const offset = Number(args.offset ?? 0), limit = Number(args.limit ?? rows.length);
       const shown = rows.slice(offset, offset + limit);
       data = { tasks: [...shown.map(statusRowForChat), ...queue.filter((q: { task: string }) => !rows.some(r => r.task === q.task)).map((q: { task: string; status: string; startCondition: string }) => ({...q, state: q.status === 'queued' ? 'registered' : q.status}))], disk: snap.capacity.disk, ...(args.capacity || args.detail ? { capacity: capacitySnapshot(snap.capacity) } : {}) };
-      text = [statusLine(rows, allRows.length - rows.length), diskLine(snap.capacity.disk), ...providerHoldLines(ctx.config, ctx.runner.now()), ...peakLines(ctx.config, ctx.runner.now()), ...shown.filter(r => !pulledOpen(r)).map(compactStatus), ...pulledSummary(shown), ...shown.filter(pulledOpen).map(compactStatus), ...queue.map((q: {task: string; startCondition: string}) => `${q.task}: ${q.startCondition}`), ...(args.capacity ? snapshotLines(capacitySnapshot(snap.capacity)) : [])].join('\n');
+      const overlaps = shown.filter(r => r.collide.length > 0).length;
+      text = [statusLine(rows, allRows.length - rows.length), ...(overlaps ? [`⚠${overlaps} tasks overlap; overlap has details.`] : []), diskLine(snap.capacity.disk), ...providerHoldLines(ctx.config, ctx.runner.now()), ...peakLines(ctx.config, ctx.runner.now()), ...shown.filter(r => !pulledOpen(r)).map(compactStatus), ...pulledSummary(shown), ...shown.filter(pulledOpen).map(compactStatus), ...queue.map((q: {task: string; startCondition: string}) => `${q.task}: ${q.startCondition}`), ...(args.capacity ? snapshotLines(capacitySnapshot(snap.capacity)) : [])].join('\n');
     } else if (name === 'queue_list') {
       data = queue; text = queue.map((q: {task: string; agent: string; model: string; effort: string; startCondition: string}) => `${q.task} ${q.agent}/${q.model}/${q.effort}: ${q.startCondition}`).join('\n') || 'The queue is empty.';
     } else if (name === 'capacity') { data = snap.capacity; text = [diskLine(snap.capacity.disk), ...snapshotLines(capacitySnapshot(snap.capacity))].join('\n'); }
@@ -2412,6 +2414,14 @@ for (const tool of MCP_TOOLS) {
       return { text };
     }, deps.budgetClock);
   };
+}
+
+/** Identity is accepted uniformly, and only WALL/events consume it. Irrelevant identity never changes confirmation hashes. */
+for (const tool of MCP_TOOLS) {
+  tool.input = {as: z.string().max(81).optional().describe('Caller identity for WALL/events; accepted and ignored elsewhere.'), ...tool.input};
+  if (tool.name.startsWith('wall_') || tool.name === 'events_since') continue;
+  const run = tool.run;
+  tool.run = (deps, args) => {const {as: _as, ...input} = args; return run(deps, input);};
 }
 
 /** Names of the tools, read first. */

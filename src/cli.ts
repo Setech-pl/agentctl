@@ -818,11 +818,12 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
           line(`${copy.error}; here is the table:`);
           return deps.stdout(md);
         }
+        const disk = await collectDisk(ctx);
         if (opts.json) return line(JSON.stringify(rows, null, 2));
         for (const m of listCohorts(ctx.config).filter(m => m.note?.startsWith('CONSULT ') && (cohort === undefined || m.name === cohort))) line(`${m.name}: ${m.note}`);
         for (const hold of [...providerHoldLines(ctx.config, ctx.runner.now()), ...peakLines(ctx.config, ctx.runner.now())]) line(hold);
         if (opts.detail) line(machineLine(collectMachine(ctx.config)));
-        line(diskLine(await collectDisk(ctx)));
+        line(diskLine(disk));
         if (rows.length === 0) {
           line(hiddenCount > 0 ? `No visible tasks${cohort ? ` in cohort ${cohort}` : ''}; ${hiddenCount} hidden (see "agentctl status --all").` : cohort ? `No tasks in cohort ${cohort}.` : `No tasks yet in ${ctx.config.stateDir}. Start one with "agentctl new <spec>".`);
           for (const l of await queueStatusLines(ctx, cohort)) line(l);

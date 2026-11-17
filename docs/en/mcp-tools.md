@@ -40,75 +40,75 @@ Arguments marked ? are optional. Provider fields below include enabled optional 
 
 | Tool | Kind | Arguments | Purpose |
 |---|---|---|---|
-| `status` | read | `all?`, `cohort?`, `format?`, `detail?`, `offset?`, `limit?`, `capacity?` | Status of all agent tasks |
+| `status` | read | `as?`, `all?`, `cohort?`, `format?`, `detail?`, `offset?`, `limit?`, `capacity?` | Status of all agent tasks |
 | `events_since` | read | `as?`, `cursor?`, `limit?`, `client?`, `since?`, `cohort?`, `peek?`, `format?`, `detail?` | What changed since the last look |
-| `gc_preview` | read | `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `request_id?`, `detail?`, `offset?`, `limit?`, `older_than?`, `merged?`, `cohort?` | Preview of the clean-up |
-| `limits` | read | `format?`, `detail?` | Limits of simultaneous agents |
-| `set_limits` | write | `claude?`, `codex?`, `queue_hold?`, `hold?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Change the limits |
-| `reserve` | write | `claude?`, `codex?`, `note?`, `release?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Reserve places for agents started by hand |
-| `version` | read |  | Version of this server |
-| `peek` | read | `task`, `lines?` | Look into a task window |
-| `list_reports` | read | `all?` | List the reports |
-| `get_report` | read | `task`, `mark_pulled?`, `detail?`, `mode?`, `section?`, `byte_offset?`, `offset?`, `limit?` | Read one report |
-| `pull_ready` | read | `cohort?`, `all?`, `detail?`, `mode?`, `ack?`, `cursor?`, `offset?`, `limit?` | Take all new reports |
-| `task_spec` | read | `task` | Header and prompt of a task |
-| `queue_list` | read | `cohort?`, `format?`, `detail?` | The task queue |
-| `cohort_list` | read | `all?` | The cohorts |
-| `cohort_show` | read | `cohort`, `format?`, `detail?` | The tasks of a cohort |
-| `guide` | read | `project?`, `lang?` | Dispatcher guide |
-| `capacity` | read | `format?`, `detail?`, `offset?`, `limit?` | Current capacity |
-| `usage` | read | `cohort?`, `since?` | Token usage and plan limits |
-| `log` | read | `cohort?`, `since?` | History of the tasks |
-| `stats` | read | `cohort?`, `since?` | Statistics per model and effort |
-| `overlap` | read | `task?` | Tasks that change the same files |
-| `resume` | write | `tasks?`, `all?`, `confirm?`, `preview_token?` | Resume tasks after a restart |
-| `answer` | write | `task?`, `option?`, `confirm?`, `token?`, `preview_token?` | Answer a numbered menu of an agent |
-| `send` | write | `task?`, `text?`, `enter_only?`, `confirm?`, `token?`, `withdraw?`, `preview_token?` | Send a prompt to a running task |
-| `consult` | write | `spec?`, `confirm?`, `preview_token?` | Consult a multi-provider panel |
-| `new` | write | `spec?`, `agent?`, `reuse?`, `no_agent?`, `cohort?`, `wait_trust?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` | Start tasks from a spec |
-| `queue` | write | `spec?`, `cohort?`, `replace?`, `agent?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` | Put tasks in the queue |
-| `queue_rm` | write | `task?`, `confirm?`, `preview_token?` | Take a task out of the queue |
-| `cancel` | write | `task?`, `tasks?`, `cohort?`, `reason?`, `remove_worktree?`, `confirm?`, `preview_token?` | Cancel tasks |
-| `mark` | write | `task?`, `tasks?`, `cohort?`, `result?`, `note?`, `confirm?`, `preview_token?` | Mark how a task turned out |
-| `away` | write | `on?`, `confirm?`, `preview_token?` | Switch away mode (the phone) |
-| `interrupt` | write | `task?`, `confirm?`, `preview_token?` | Interrupt the current turn of a task |
-| `close` | write | `pulled?`, `task?`, `tasks?`, `cohort?`, `remove_worktree?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` | Close a task |
-| `move` | write | `task?`, `agent?`, `confirm?`, `preview_token?` | Move a task to the other provider |
-| `queue_show` | read | `task` | Read full queued spec, error and attempt history |
-| `mcp_check` | read |  | Inspect stale MCP server processes without stopping them |
-| `spec_example` | read |  | Read an example spec before writing a new order |
-| `doctor` | read | `project?` | Diagnose the installation, permissions and disk |
-| `equivalents` | read |  | Read the equivalents table for active providers, including Kimi when enabled |
-| `config_show` | read |  | Read effective configuration with secrets masked; queue_hold (first) is usage.queue_hold per active provider |
-| `manager_status` | read |  | Inspect the manager session |
-| `away_status` | read |  | Inspect away mode |
-| `report` | read | `task` | Inspect report location and candidates |
-| `queue_retry` | write | `task?`, `confirm?`, `preview_token?` | Retry a failed queue start after reading its error and checking residue |
-| `queue_up` | write | `task?`, `confirm?`, `preview_token?` | Move a waiting task to the front of its priority class |
-| `queue_pause` | write | `confirm?`, `preview_token?` | Pause automatic queue starts |
-| `queue_resume` | write | `confirm?`, `preview_token?` | Resume automatic queue starts |
-| `unblock` | write | `task?`, `drop_after?`, `confirm?`, `preview_token?` | Remove blocked dependencies, allowing a task to start |
-| `cohort_add` | write | `cohort?`, `tasks?`, `confirm?`, `preview_token?` | Put existing tasks in a cohort |
-| `cohort_remove` | write | `tasks?`, `confirm?`, `preview_token?` | Remove cohort membership |
-| `cohort_archive` | write | `cohorts?`, `older_than?`, `confirm?`, `preview_token?` | Hide finished cohorts from the board choice and the default cohort list; tasks, reports and history stay. Cohorts with active or queued work are never archived |
-| `cohort_note` | write | `cohort?`, `text?`, `confirm?`, `preview_token?` | Change the note of a cohort |
-| `pin` | write | `tasks?`, `confirm?`, `preview_token?` | Protect task worktrees and cache from GC; pin also prevents provider moves |
-| `unpin` | write | `tasks?`, `confirm?`, `preview_token?` | Protect task worktrees and cache from GC; pin also prevents provider moves |
-| `hide` | write | `tasks?`, `confirm?`, `preview_token?` | hide tasks on the board |
-| `unhide` | write | `tasks?`, `confirm?`, `preview_token?` | unhide tasks on the board |
-| `archive` | write | `older_than?`, `cohort?`, `confirm?`, `preview_token?` | Archive the state of closed tasks |
-| `adopt` | write | `task?`, `report?`, `window?`, `worktree?`, `agent?`, `model?`, `effort?`, `confirm?`, `preview_token?` | Restore missing task metadata from facts supplied by the user |
-| `report_from` | write | `task?`, `from?`, `force?`, `confirm?`, `preview_token?` | Copy a regular report from task worktrees or cache to its canonical location; force only overwrites, never permits outside or symlink sources |
-| `limits_release` | write | `claude?`, `codex?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Release reserved provider places |
-| `manager_start` | write | `project?`, `name?`, `model?`, `effort?`, `confirm?`, `preview_token?` | Start the supervising manager session |
-| `manager_stop` | write | `confirm?`, `preview_token?` | Stop the manager session |
-| `notify_test` | write | `phone?`, `confirm?`, `preview_token?` | Test desktop notifications; phone true explicitly sends to ntfy |
-| `gc` | write | `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `detail?`, `offset?`, `limit?`, `cohort?`, `older_than?`, `branches?`, `confirm?`, `preview_token?` | Reclaim disk space from finished tasks using the same protected plan as gc_preview |
+| `gc_preview` | read | `as?`, `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `request_id?`, `detail?`, `offset?`, `limit?`, `older_than?`, `merged?`, `cohort?` | Preview of the clean-up |
+| `limits` | read | `as?`, `format?`, `detail?` | Limits of simultaneous agents |
+| `set_limits` | write | `as?`, `claude?`, `codex?`, `queue_hold?`, `hold?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Change the limits |
+| `reserve` | write | `as?`, `claude?`, `codex?`, `note?`, `release?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Reserve places for agents started by hand |
+| `version` | read | `as?` | Version of this server |
+| `peek` | read | `as?`, `task`, `lines?` | Look into a task window |
+| `list_reports` | read | `as?`, `all?` | List the reports |
+| `get_report` | read | `as?`, `task`, `mark_pulled?`, `detail?`, `mode?`, `section?`, `byte_offset?`, `offset?`, `limit?` | Read one report |
+| `pull_ready` | read | `as?`, `cohort?`, `all?`, `detail?`, `mode?`, `ack?`, `cursor?`, `offset?`, `limit?` | Take all new reports |
+| `task_spec` | read | `as?`, `task` | Header and prompt of a task |
+| `queue_list` | read | `as?`, `cohort?`, `format?`, `detail?` | The task queue |
+| `cohort_list` | read | `as?`, `all?` | The cohorts |
+| `cohort_show` | read | `as?`, `cohort`, `format?`, `detail?` | The tasks of a cohort |
+| `guide` | read | `as?`, `project?`, `lang?` | Dispatcher guide |
+| `capacity` | read | `as?`, `format?`, `detail?`, `offset?`, `limit?` | Current capacity |
+| `usage` | read | `as?`, `cohort?`, `since?` | Token usage and plan limits |
+| `log` | read | `as?`, `cohort?`, `since?` | History of the tasks |
+| `stats` | read | `as?`, `cohort?`, `since?` | Statistics per model and effort |
+| `overlap` | read | `as?`, `task?` | Tasks that change the same files |
+| `resume` | write | `as?`, `tasks?`, `all?`, `confirm?`, `preview_token?` | Resume tasks after a restart |
+| `answer` | write | `as?`, `task?`, `option?`, `confirm?`, `token?`, `preview_token?` | Answer a numbered menu of an agent |
+| `send` | write | `as?`, `task?`, `text?`, `enter_only?`, `confirm?`, `token?`, `withdraw?`, `preview_token?` | Send a prompt to a running task |
+| `consult` | write | `as?`, `spec?`, `confirm?`, `preview_token?` | Consult a multi-provider panel |
+| `new` | write | `as?`, `spec?`, `agent?`, `reuse?`, `no_agent?`, `cohort?`, `wait_trust?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` | Start tasks from a spec |
+| `queue` | write | `as?`, `spec?`, `cohort?`, `replace?`, `agent?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` | Put tasks in the queue |
+| `queue_rm` | write | `as?`, `task?`, `confirm?`, `preview_token?` | Take a task out of the queue |
+| `cancel` | write | `as?`, `task?`, `tasks?`, `cohort?`, `reason?`, `remove_worktree?`, `confirm?`, `preview_token?` | Cancel tasks |
+| `mark` | write | `as?`, `task?`, `tasks?`, `cohort?`, `result?`, `note?`, `confirm?`, `preview_token?` | Mark how a task turned out |
+| `away` | write | `as?`, `on?`, `confirm?`, `preview_token?` | Switch away mode (the phone) |
+| `interrupt` | write | `as?`, `task?`, `confirm?`, `preview_token?` | Interrupt the current turn of a task |
+| `close` | write | `as?`, `pulled?`, `task?`, `tasks?`, `cohort?`, `remove_worktree?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` | Close a task |
+| `move` | write | `as?`, `task?`, `agent?`, `confirm?`, `preview_token?` | Move a task to the other provider |
+| `queue_show` | read | `as?`, `task` | Read full queued spec, error and attempt history |
+| `mcp_check` | read | `as?` | Inspect stale MCP server processes without stopping them |
+| `spec_example` | read | `as?` | Read an example spec before writing a new order |
+| `doctor` | read | `as?`, `project?` | Diagnose the installation, permissions and disk |
+| `equivalents` | read | `as?` | Read the equivalents table for active providers, including Kimi when enabled |
+| `config_show` | read | `as?` | Read effective configuration with secrets masked; queue_hold (first) is usage.queue_hold per active provider |
+| `manager_status` | read | `as?` | Inspect the manager session |
+| `away_status` | read | `as?` | Inspect away mode |
+| `report` | read | `as?`, `task` | Inspect report location and candidates |
+| `queue_retry` | write | `as?`, `task?`, `confirm?`, `preview_token?` | Retry a failed queue start after reading its error and checking residue |
+| `queue_up` | write | `as?`, `task?`, `confirm?`, `preview_token?` | Move a waiting task to the front of its priority class |
+| `queue_pause` | write | `as?`, `confirm?`, `preview_token?` | Pause automatic queue starts |
+| `queue_resume` | write | `as?`, `confirm?`, `preview_token?` | Resume automatic queue starts |
+| `unblock` | write | `as?`, `task?`, `drop_after?`, `confirm?`, `preview_token?` | Remove blocked dependencies, allowing a task to start |
+| `cohort_add` | write | `as?`, `cohort?`, `tasks?`, `confirm?`, `preview_token?` | Put existing tasks in a cohort |
+| `cohort_remove` | write | `as?`, `tasks?`, `confirm?`, `preview_token?` | Remove cohort membership |
+| `cohort_archive` | write | `as?`, `cohorts?`, `older_than?`, `confirm?`, `preview_token?` | Hide finished cohorts from the board choice and the default cohort list; tasks, reports and history stay. Cohorts with active or queued work are never archived |
+| `cohort_note` | write | `as?`, `cohort?`, `text?`, `confirm?`, `preview_token?` | Change the note of a cohort |
+| `pin` | write | `as?`, `tasks?`, `confirm?`, `preview_token?` | Protect task worktrees and cache from GC; pin also prevents provider moves |
+| `unpin` | write | `as?`, `tasks?`, `confirm?`, `preview_token?` | Protect task worktrees and cache from GC; pin also prevents provider moves |
+| `hide` | write | `as?`, `tasks?`, `confirm?`, `preview_token?` | hide tasks on the board |
+| `unhide` | write | `as?`, `tasks?`, `confirm?`, `preview_token?` | unhide tasks on the board |
+| `archive` | write | `as?`, `older_than?`, `cohort?`, `confirm?`, `preview_token?` | Archive the state of closed tasks |
+| `adopt` | write | `as?`, `task?`, `report?`, `window?`, `worktree?`, `agent?`, `model?`, `effort?`, `confirm?`, `preview_token?` | Restore missing task metadata from facts supplied by the user |
+| `report_from` | write | `as?`, `task?`, `from?`, `force?`, `confirm?`, `preview_token?` | Copy a regular report from task worktrees or cache to its canonical location; force only overwrites, never permits outside or symlink sources |
+| `limits_release` | write | `as?`, `claude?`, `codex?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Release reserved provider places |
+| `manager_start` | write | `as?`, `project?`, `name?`, `model?`, `effort?`, `confirm?`, `preview_token?` | Start the supervising manager session |
+| `manager_stop` | write | `as?`, `confirm?`, `preview_token?` | Stop the manager session |
+| `notify_test` | write | `as?`, `phone?`, `confirm?`, `preview_token?` | Test desktop notifications; phone true explicitly sends to ntfy |
+| `gc` | write | `as?`, `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `detail?`, `offset?`, `limit?`, `cohort?`, `older_than?`, `branches?`, `confirm?`, `preview_token?` | Reclaim disk space from finished tasks using the same protected plan as gc_preview |
 | `wall_read` | read | `as?`, `channel?`, `id?`, `since?`, `archive?`, `status?`, `kind?`, `limit?`, `before?` | Read the WALL |
 | `wall_post` | write | `as?`, `channel?`, `kind?`, `subject?`, `body?`, `refs?`, `to?`, `confirm?`, `preview_token?` | Post on the WALL |
 | `wall_reply` | write | `as?`, `reply_to?`, `body?`, `subject?`, `kind?`, `refs?`, `to?`, `confirm?`, `preview_token?` | Reply on the WALL |
 | `wall_set_status` | write | `as?`, `id?`, `status?`, `note?`, `owner_confirmed?`, `confirm?`, `preview_token?` | Set the status of a WALL message |
-| `response_page` | read | `response_id`, `response_offset` | Continue a bounded response |
+| `response_page` | read | `as?`, `response_id`, `response_offset` | Continue a bounded response |
 
 ### Permission groups
 

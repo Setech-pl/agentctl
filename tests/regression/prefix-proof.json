@@ -285,6 +285,16 @@
       "F7: default Singapore peak holds winter/summer starts, excludes weekends and never interrupts running tasks"
     ]
   },
+  "FIELD0230-F9": {
+    "rev": "v0.22.7",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 1,
+    "failing": [
+      "F9: every tool accepts as; irrelevant identity is ignored in preview/confirm; expiry includes local time",
+      "F9: every tool accepts as; irrelevant identity is ignored in preview/confirm; expiry includes local time"
+    ]
+  },
   "G1a": {
     "rev": "v0.22.3",
     "outcome": "FAILS",
