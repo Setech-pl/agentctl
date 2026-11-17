@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| UX0228-TEXT | New pulled hints exceeded 80 columns and the new status marker interrupted legacy field order. | `tests/board.test.ts` (`a line of the list is at most 80`)<br>`tests/economy.test.ts` (`economy: concise reads`) | 0.22.6 | not proven: Introduced during this unreleased feature; v0.22.5 already passes these width/format scenarios. |
 | UX0228-SCOPE | Pulled bulk close must select the queued task cohort and refuse manager-only selection. | `tests/ux0228-board.test.ts` (`^UX0228: queued selection`) | 0.22.6 | fails on v0.22.5 (1 failing of 1) |
 | UX0228 | Pulled report-ready tasks obscured reports still awaiting collection and vanished automatically without closure. | `tests/ux0228-board.test.ts` | 0.22.6 | fails on v0.22.5 (4 failing of 4) |
 | D6 | WALL token-only confirms carrying as hit required-field validation instead of restoring reviewed arguments. | `tests/fix0227-d6.test.ts` (`^D6:`) | 0.22.5 | fails on v0.22.4 (5 failing of 5) |

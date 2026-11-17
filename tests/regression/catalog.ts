@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'UX0228-TEXT', fixedIn: '0.22.6', symptom: 'New pulled hints exceeded 80 columns and the new status marker interrupted legacy field order.', scenarios: [s('board.test.ts', 'a line of the list is at most 80'), s('economy.test.ts', 'economy: concise reads')], noProof: 'Introduced during this unreleased feature; v0.22.5 already passes these width/format scenarios.' },
   { id: 'UX0228-SCOPE', fixedIn: '0.22.6', symptom: 'Pulled bulk close must select the queued task cohort and refuse manager-only selection.', scenarios: [s('ux0228-board.test.ts', '^UX0228: queued selection')] },
   { id: 'UX0228', fixedIn: '0.22.6', symptom: 'Pulled report-ready tasks obscured reports still awaiting collection and vanished automatically without closure.', scenarios: [s('ux0228-board.test.ts')] },
   { id: 'D6', fixedIn: '0.22.5', symptom: 'WALL token-only confirms carrying as hit required-field validation instead of restoring reviewed arguments.', scenarios: [s('fix0227-d6.test.ts', '^D6:')] },

@@ -11,6 +11,7 @@ it('UX0228: status text groups pulled tasks; events_since counts only reports aw
   const status = await tool('status').run(w.deps, {});
   assert.match(status.text, /odebrane, niezamknięte: READ/);
   assert.match(status.text, /READ.*pulled=true/);
+  assert.match(status.text, /NEW claude\/opus\/high report-ready .*cohort=wave report=yes/);
   assert.ok(status.text.indexOf('NEW claude') < status.text.indexOf('odebrane, niezamknięte'));
   const cli = await runCli(w.config, w.runner, ['status']);
   assert.match(cli.stdout, /odebrane, niezamknięte: READ/);
