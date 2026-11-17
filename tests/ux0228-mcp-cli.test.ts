@@ -41,3 +41,21 @@ it('UX0228: CLI pulled close previews, confirms and rejects worktree removal', a
   const refused = await runCli(w.config, w.runner, ['close', '--cohort', 'wave', '--pulled', '--rm-worktree', '--yes']);
   assert.equal(refused.code, 1);
 });
+it('UX0228: pulled cohort preview never reads unrelated report bodies', async () => {
+  const w = world('bounded-pulled'); w.add('READ', 3); w.add('NEW', null);
+  const other = w.add('OTHER', 3, 'other');
+  const read = fs.readFileSync;
+  let unrelatedReads = 0;
+  fs.readFileSync = ((file: fs.PathOrFileDescriptor, ...args: unknown[]) => {
+    if (String(file) === other.report) unrelatedReads++;
+    return (read as Function)(file, ...args);
+  }) as typeof read;
+  try {
+    const preview = await tool('close').run(w.deps, {cohort: 'wave', pulled: true});
+    assert.ok(!preview.isError, preview.text);
+    assert.match(preview.text, /preview_token:/);
+    assert.match(preview.text, /READ/);
+    assert.doesNotMatch(preview.text, /NEW|OTHER/);
+    assert.equal(unrelatedReads, 0, 'only selected-cohort reports may be inspected');
+  } finally { fs.readFileSync = read; }
+});

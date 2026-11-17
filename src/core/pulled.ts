@@ -1,5 +1,6 @@
 import type { Context } from './context.ts';
 import { collectStatus } from './status.ts';
+import { listTaskRecords } from './taskstore.ts';
 import type { StatusRow } from './status.ts';
 import { cohortKey, AgentctlError } from './util.ts';
 
@@ -14,7 +15,12 @@ export function pulledSummary(rows: StatusRow[]): string[] {
 }
 
 export async function pulledCohortTasks(ctx: Context, cohort: string): Promise<string[]> {
-  return (await collectStatus(ctx, { progress: false })).filter(r => pulledOpen(r) && cohortKey(r.cohort ?? '') === cohortKey(cohort)).map(r => r.task);
+  const key = cohortKey(cohort);
+  const current = listTaskRecords(ctx.config).filter(r => !r.closed && !r.cancelled && r.pulled && cohortKey(r.cohort ?? '') === key);
+  if (!current.length) return [];
+  // Validate current reports only inside the chosen cohort; unrelated reports and orphan windows are out of scope.
+  const rows = await collectStatus(ctx, { progress: false, cachedOnly: true, orphans: false, records: { current, archived: [] } });
+  return rows.filter(pulledOpen).map(r => r.task);
 }
 
 export function checkPulledClose(cohort: string | undefined, tasks: readonly string[] | undefined, remove: boolean | undefined): void {
