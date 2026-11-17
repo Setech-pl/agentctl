@@ -161,7 +161,7 @@ export interface GlobalConfig extends Layer {
   /** Token usage and plan limits: warning thresholds, the hold of the queue, the tmux status line, where the agents keep their logs. */
   usage: UsageSettings;
   guideLang: 'en' | 'pl';
-  disk: { worktreeSharePercent: number; warnGb: number; criticalGb: number; workers: number; measurementTimeoutS: number };
+  disk: { minFreeStartGb: number; worktreeSharePercent: number; warnGb: number; criticalGb: number; workers: number; measurementTimeoutS: number };
   git: { timeoutS: number };
   capacity: { loadThreshold?: number; snapshot: boolean; staleMinutes: number; sampleLimit: number; thresholds: number[]; codexRefresh: boolean; claudeUsageProbe: boolean; claudeUsageProbeIntervalMinutes: number; kimiUsageProbe?: boolean; kimiUsageProbeModel?: string };
   /** Set by a long-running process (watch, MCP) when the file on disk does not load and the previous settings stay in force. */
@@ -217,6 +217,7 @@ export interface QueueSettings {
   enabled: boolean;
   /** Most queued tasks that `watch` has in the middle of starting (worktree, setup, waiting for the agent) at the same time. */
   parallelStarts: number;
+  maxParallelSetups: number;
 }
 
 export interface CancelSettings {
@@ -371,7 +372,7 @@ export const AWAY_KEYS = ['auto_idle'];
 export const MANAGER_KEYS = ['project', 'name', 'model', 'effort', 'guide', 'autostart'];
 export const BOARD_KEYS = ['pulled_collapse_after', 'pulled_auto_close_after', 'auto_hide_pulled_dead', 'mouse', 'return_key', 'selected_color', 'model_versions', 'list_width', 'window_title', 'cohorts_recent'];
 export const MCP_KEYS = ['allow', 'allow_rm_worktree', 'client', 'max_response_kb'];
-export const QUEUE_KEYS = ['enabled', 'parallel_starts'];
+export const QUEUE_KEYS = ['enabled', 'parallel_starts', 'max_parallel_setups'];
 export const CANCEL_KEYS = ['grace'];
 export const USAGE_KEYS = ['warn', 'critical', 'queue_hold', 'status_line', 'claude_tap', ...PROVIDER_IDS.map(id => `${id}_dir`)];
 export const COLLISION_KEYS = ['enabled', 'interval', 'notify', 'ignore'];
@@ -880,7 +881,7 @@ function parseMcp(v: unknown): McpSettings {
 }
 
 function parseQueue(v: unknown, p: Problems): QueueSettings {
-  const queue: QueueSettings = { enabled: true, parallelStarts: 2 };
+  const queue: QueueSettings = { enabled: true, parallelStarts: 2, maxParallelSetups: 2 };
   if (v === undefined || v === null) return queue;
   if (!isObject(v)) {
     p.add('config.queue must be a mapping like {enabled: true, parallel_starts: 2}');
@@ -894,6 +895,10 @@ function parseQueue(v: unknown, p: Problems): QueueSettings {
   if (v.parallel_starts !== undefined) {
     if (typeof v.parallel_starts === 'number' && Number.isInteger(v.parallel_starts) && v.parallel_starts > 0) queue.parallelStarts = v.parallel_starts;
     else p.add('config.queue.parallel_starts must be a positive integer');
+  }
+  if (v.max_parallel_setups !== undefined) {
+    if (typeof v.max_parallel_setups === 'number' && Number.isInteger(v.max_parallel_setups) && v.max_parallel_setups > 0) queue.maxParallelSetups = v.max_parallel_setups;
+    else p.add('config.queue.max_parallel_setups must be a positive integer');
   }
   return queue;
 }
@@ -1210,10 +1215,10 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
     if (typeof raw.report.settle_s === 'number' && Number.isFinite(raw.report.settle_s) && raw.report.settle_s >= 0) reportSettleS = raw.report.settle_s;
     else p.add('config.report.settle_s must be a nonnegative number');
   }
-  const disk = { worktreeSharePercent: 20, warnGb: 50, criticalGb: 20, workers: 2, measurementTimeoutS: 600 };
+  const disk = { minFreeStartGb: 30, worktreeSharePercent: 20, warnGb: 50, criticalGb: 20, workers: 2, measurementTimeoutS: 600 };
   const git = { timeoutS: 600 };
   for (const [section, target, fields] of [
-    ['disk', disk, { worktree_share_percent: 'worktreeSharePercent', warn_gb: 'warnGb', critical_gb: 'criticalGb', workers: 'workers', measurement_timeout_s: 'measurementTimeoutS' }],
+    ['disk', disk, { min_free_start_gb: 'minFreeStartGb', worktree_share_percent: 'worktreeSharePercent', warn_gb: 'warnGb', critical_gb: 'criticalGb', workers: 'workers', measurement_timeout_s: 'measurementTimeoutS' }],
     ['git', git, { timeout_s: 'timeoutS' }],
   ] as const) {
     const value = raw[section];

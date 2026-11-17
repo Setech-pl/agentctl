@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- FIELD0230-F3: 30 GB disk admission floor, two concurrent setup phases by default, per-repo worktree cost estimates. / Próg startu 30 GB, domyślnie dwa równoległe setupy, szacunki rozmiaru worktree per repo.
+
 - F2: CLI/MCP pin/unpin and GC keep protect task worktrees/cache; pin markers in status/board. / Pin/unpin CLI/MCP i keep GC chronią worktree/cache; znaczniki na planszy i w statusie.
 
 - FIELD0230-F1: separate removable and skipped GC entries with sizes in CLI/MCP. / Osobne sekcje usuwanych i pomijanych pozycji GC z rozmiarami w CLI/MCP.

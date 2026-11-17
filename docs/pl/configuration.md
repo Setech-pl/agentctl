@@ -322,3 +322,5 @@ okna list oraz odczyt po ID/z archiwum działają również bez niego.
 Podgląd GC rozdziela **Would remove**, **Skipped (uncommitted changes)** i **Skipped (pinned)** z rozmiarami. JSON MCP zawiera ten sam opis w `text`; pominięte bajty nie zwiększają miejsca do odzyskania.
 
 `agentctl pin TASK` / `unpin TASK` (MCP `pin` / `unpin`, `tasks: [TASK]`, osobne uprawnienia mcp.allow) zapisują pin w stanie zadania, także zamkniętego/zarchiwizowanego. GC nie usuwa przypiętych worktree ani cache nawet z flagami force; pin blokuje też zmianę providera. `agentctl gc --keep TASK` / MCP `gc` lub `gc_preview` z `keep: [TASK]` chroni te zasoby w jednym przebiegu. Status i plansza pokazują 📌.
+
+Kolejka wymaga aktualnego wolnego miejsca ≥ `disk.min_free_start_gb` (domyślnie 30, GiB). Zbyt mało miejsca lub brak odczytu wstrzymuje starty z kolejki i MCP new; działające zadania trwają dalej. `queue.max_parallel_setups` (domyślnie 2) ogranicza fazy worktree/setup niezależnie od `parallel_starts` (obejmującego też oczekiwanie na gotowość agenta). Podgląd szacuje rozmiar worktree każdego repo na podstawie ostatniego pomiaru z jego wiekiem; brak pomiaru to n/d.

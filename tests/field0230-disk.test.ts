@@ -1,0 +1,61 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { it } from 'node:test';
+import { Context } from '../src/core/context.ts';
+import { commitQueueAdd, describeQueue, planQueueAdd, queueTick, QueueMemory, readQueue, saveEntry } from '../src/core/queue.ts';
+import { splitSpecs } from '../src/core/spec.ts';
+import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helpers.ts';
+import { writeSetupProgress } from '../src/core/setup-progress.ts';
+import { sizeOf } from '../src/core/fs-measure.ts';
+const scratch = useScratch();
+async function fixture(name: string, yaml = '') {
+  const config = makeConfig(scratch.sub(name), yaml);
+  const tmux = new FakeTmux();
+  const runner = new DiskRunner({dryRun: false, startTime: Date.parse('2026-11-17T12:00:00Z'), respond: tmux.respond});
+  const ctx = new Context(runner, config, () => {});
+  const repo = scratch.sub(`${name}/repo`);
+  const raws = splitSpecs(['A', 'B', 'C'].map(task => `---\ntask: ${task}\nagent: claude\nrepos: [{path: '${repo}', worktree: '${repo}-${task}'}]\n---\nFake.`).join('\n'));
+  const plan = await planQueueAdd(ctx, raws);
+  await commitQueueAdd(ctx, plan.items);
+  return {ctx, config, tmux, runner, repo, raws};
+}
+it('F3: fresh low disk holds queued and direct starts, including the watcher claim', async t => {
+  const f = await fixture('low');
+  let free = 18;
+  t.mock.method(fs, 'statfsSync', () => ({bavail: free, bsize: 1024 ** 3, blocks: 1000}));
+  const entries = readQueue(f.config);
+  await saveEntry(f.ctx, {...entries[0]!, direct: true});
+  let views = describeQueue(f.config, readQueue(f.config), [], [], f.runner.now());
+  assert.ok(views.every(v => v.condition.text === 'wstrzymane: dysk 18 GB < 30 GB'));
+  const memory = new QueueMemory();
+  assert.deepEqual(await queueTick(f.ctx, memory, {clickable: false, notify: async () => {}}), []);
+  assert.ok(!f.runner.commands.some(c => c.includes('worktree add')));
+  free = 31;
+  views = describeQueue(f.config, readQueue(f.config), [], [], f.runner.now());
+  assert.equal(views[0]!.condition.kind, 'ready');
+});
+it('F3: max_parallel_setups counts setup phases across providers and frees launching slots', async () => {
+  const f = await fixture('slots', 'limits: {claude: 4}\nqueue: {parallel_starts: 4, max_parallel_setups: 1}\ndisk: {min_free_start_gb: 1}');
+  assert.equal(f.config.queue.maxParallelSetups, 1);
+  const entries = readQueue(f.config);
+  await saveEntry(f.ctx, {...entries[0]!, status: 'starting', startingPid: process.pid});
+  const at = new Date(f.runner.now()).toISOString();
+  await writeSetupProgress(f.ctx, 'a', {task: 'A', phase: 'setup', startedAt: at, stepAt: at});
+  assert.equal(describeQueue(f.config, readQueue(f.config), [])[1]!.condition.text, 'czeka na setup: 1/1');
+  assert.deepEqual(await queueTick(f.ctx, new QueueMemory(), {clickable: false, notify: async () => {}}), []);
+  await saveEntry(f.ctx, {...entries[0]!, status: 'starting', startingPid: process.pid});
+  await writeSetupProgress(f.ctx, 'a', {task: 'A', phase: 'launching', startedAt: at, stepAt: at});
+  const views = describeQueue(f.config, readQueue(f.config), []);
+  assert.equal(views.find(v => v.entry.task === 'B')!.condition.kind, 'ready');
+  assert.equal(views.find(v => v.entry.task === 'C')!.condition.kind, 'slot');
+});
+it('F3: queue preview reports the last measured worktree cost and age per repo', async () => {
+  const f = await fixture('estimate');
+  const wt = scratch.sub('estimate/previous');
+  fs.writeFileSync(`${wt}/payload`, '12345');
+  seedTask(f.config, 'OLD', {closed: true, repos: [{path: f.repo, worktree: wt}]});
+  await sizeOf(wt, {fresh: true, now: () => f.runner.now() - 60_000});
+  const raw = splitSpecs(`---\ntask: NEXT\nagent: claude\nrepos: [{path: '${f.repo}', worktree: '${f.repo}-next'}]\n---\nFake.`);
+  const plan = await planQueueAdd(f.ctx, raw);
+  assert.match(plan.summary.join('\n'), /worktree estimate repo: .*last reading, 60 s old/);
+});

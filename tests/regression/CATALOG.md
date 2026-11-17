@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| FIELD0230-F3 | The queue admitted worktree setups below the free-disk start floor. | `tests/field0230-disk.test.ts` (`^F3:`) | 0.22.8 | fails on v0.22.7 (3 failing of 3) |
 | FIELD0230-F1 | GC preview listed skipped dirty worktrees under cleanup candidates. | `tests/field0230-gc.test.ts` (`^F1:`) | 0.22.8 | fails on v0.22.7 (1 failing of 1) |
 | WALL0229-HISTORY | Archive retry deduplication collapsed legitimate close/reopen/close records sharing a timestamp. | `tests/wall-lifecycle.test.ts` (`^WALL0229-HISTORY:`) | 0.22.7 | not proven: Unreleased lifecycle API is absent on v0.22.6 (import error); this scenario fails on pre-fix 83e0350 (1 failing test), measured separately from the release proof. |
 | WALL0229-INBOX | Adding WALL age interrupted the stable ID/subject prefix in the budget fallback inbox. | `tests/a2-wall-events.test.ts` (`^A2: known chat receives`) | 0.22.7 | not proven: Introduced during unreleased lifecycle work; v0.22.6 passes. Existing A2 scenario fails on dd6d977 before correction (1 failing test), measured separately from the release proof. |

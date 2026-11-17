@@ -322,3 +322,5 @@ list windows and ID/archive reads work independently of watch.
 GC previews separate **Would remove**, **Skipped (uncommitted changes)** and **Skipped (pinned)**, each with sizes. The MCP JSON includes the same presentation in `text`; skipped bytes never count as reclaimable.
 
 `agentctl pin TASK` / `unpin TASK` (MCP `pin` / `unpin`, `tasks: [TASK]`, respective mcp.allow permissions) persist `pin` in task state, including closed/archived tasks. Pinned worktrees and cache cannot be GC-removed even with force flags; pins also prevent provider moves. `agentctl gc --keep TASK` / MCP `gc` or `gc_preview` with `keep: [TASK]` protects these resources for one run. Status and board show 📌.
+
+Queue starts require fresh free space ≥ `disk.min_free_start_gb` (default 30, GiB). Low/unknown space holds all queued and MCP direct starts; running tasks continue. `queue.max_parallel_setups` (default 2) limits worktree/setup phases independently of `parallel_starts` (which includes waiting for agent readiness). Queue previews estimate each repository from its last measured worktree size and show its age; unknown sizes say n/d.

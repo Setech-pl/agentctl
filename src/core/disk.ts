@@ -187,3 +187,31 @@ export async function confirmDiskStart(ctx: Context, yes = false): Promise<boole
   if (!ctx.confirm) throw new Error('Disk critical: rerun with --yes after reviewing agentctl gc, or free disk space.');
   return ctx.confirm('Disk critical. Start anyway? [y/N] ');
 }
+
+/** Fresh cheap filesystem admission, independent of recursive worktree measurements. Unknown space fails closed. */
+export function diskStartHold(config: Context['config'], worktrees: string[] = [], statfs = fs.statfsSync): string | undefined {
+  const targets = new Set([config.cache, config.stateDir, ...(config.worktreeRoot ? [resolvePath(config.worktreeRoot)] : []), ...worktrees]);
+  const devices = new Set<number>();
+  for (const target of targets) {
+    const ancestor = existingAncestor(target);
+    try {
+      const device = fs.statSync(ancestor).dev;
+      if (devices.has(device)) continue;
+      devices.add(device);
+      const stat = statfs(ancestor);
+      const gb = Number(stat.bavail) * Number(stat.bsize) / 1024 ** 3;
+      if (gb < config.disk.minFreeStartGb) return `wstrzymane: dysk ${Math.floor(gb)} GB < ${config.disk.minFreeStartGb} GB`;
+    } catch { return 'wstrzymane: dysk – nie można odczytać wolnego miejsca'; }
+  }
+  return undefined;
+}
+
+export function worktreeCostEstimates(ctx: Context, repos: {path: string}[]) {
+  restoreDiskMeasurements(ctx);
+  const records = [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)];
+  return repos.map(repo => {
+    const samples = records.flatMap(r => r.repos.filter(r => path.resolve(r.path) === path.resolve(repo.path)).flatMap(r => { const m = lastMeasurement(r.worktree); return m ? [m] : []; })).sort((a, b) => b.at - a.at);
+    const last = samples[0];
+    return {repo: path.basename(repo.path), bytes: last?.bytes ?? null, measuredAt: last ? new Date(last.at).toISOString() : null, ageSeconds: last ? Math.max(0, Math.floor((ctx.runner.now() - last.at) / 1000)) : null};
+  });
+}

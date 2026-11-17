@@ -230,6 +230,19 @@
       "F1: CLI and MCP keep dirty worktrees out of Would remove and include skipped sizes"
     ]
   },
+  "FIELD0230-F3": {
+    "rev": "v0.22.7",
+    "outcome": "FAILS",
+    "failed": 3,
+    "passed": 0,
+    "failing": [
+      "F3: fresh low disk holds queued and direct starts, including the watcher claim",
+      "F3: max_parallel_setups counts setup phases across providers and frees launching slots",
+      "F3: queue preview reports the last measured worktree cost and age per repo",
+      "F3: fresh low disk holds queued and direct starts, including the watcher claim",
+      "F3: max_parallel_setups counts setup phases across providers and frees launching slots"
+    ]
+  },
   "G1a": {
     "rev": "v0.22.3",
     "outcome": "FAILS",
