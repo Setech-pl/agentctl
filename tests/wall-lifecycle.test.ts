@@ -105,7 +105,7 @@ describe('WALL lifecycle (fake clock, no inference/network)', () => {
     assert.equal(findMessage(w.config, contract.id).status, 'open');
     assert.equal(readJournal(w.config).filter(e => e.text.includes('czeka na')).length, 3);
     await assert.rejects(setStatus(w.ctx, w.nc, { id: decision.id, status: 'stale' }), /only the owner/);
-    const report = await collectEvents(w.ctx, { client: 'stale-test', keep: true, wallIdentity: w.nc.id, wallOpenChannels: new Set([q.channel]) });
+    const report = await collectEvents(w.ctx, { client: 'stale-test', keep: true, wallIdentity: 'chat:hems', wallOpenChannels: new Set([q.channel]) });
     assert.ok(!report.wallOpen?.some(m => m.id === q.id));
     assert.equal(report.wallOpen?.length, 2);
   });
