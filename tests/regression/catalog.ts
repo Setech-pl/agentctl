@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'UX0228-SCOPE', fixedIn: '0.22.6', symptom: 'Pulled bulk close must select the queued task cohort and refuse manager-only selection.', scenarios: [s('ux0228-board.test.ts', '^UX0228: queued selection')] },
   { id: 'UX0228', fixedIn: '0.22.6', symptom: 'Pulled report-ready tasks obscured reports still awaiting collection and vanished automatically without closure.', scenarios: [s('ux0228-board.test.ts')] },
   { id: 'D6', fixedIn: '0.22.5', symptom: 'WALL token-only confirms carrying as hit required-field validation instead of restoring reviewed arguments.', scenarios: [s('fix0227-d6.test.ts', '^D6:')] },
   { id: 'D5', fixedIn: '0.22.5', symptom: 'Every spec inherited stale links to closed tasks (including missing worktrees) and repeated the same project warning.', scenarios: [s('stale-links.test.ts', '^D5:')] },

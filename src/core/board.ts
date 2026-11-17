@@ -419,7 +419,9 @@ function listKey(state: BoardState, input: string, key: KeyPress): KeyResult {
     return stay({ ...state, pulledExpanded: expanded.includes(cohort) ? expanded.filter(k => k !== cohort) : [...expanded, cohort] });
   }
   if (input === 'B') {
-    const cohort = state.selected?.startsWith('@pulled:') ? state.selected.slice(8) : state.cohortFilter ?? groupOf(selectedRow(state)?.cohort);
+    const picked = selectedRow(state) ?? selectedQueueView(state)?.entry;
+    const cohort = state.selected?.startsWith('@pulled:') ? state.selected.slice(8) : state.cohortFilter ?? (picked ? groupOf(picked.cohort) : undefined);
+    if (cohort === undefined) return stay(withNotice(state, 'info', 'Wybierz zadanie lub kohortę do zamknięcia.'));
     const tasks = state.rows.filter(r => pulledOpen(r) && groupOf(r.cohort) === cohort).map(r => r.task);
     if (!tasks.length) return stay(withNotice(state, 'info', 'Brak odebranych raportów do zamknięcia.'));
     return stay({ ...state, mode: { kind: 'confirm', action: 'close-pulled', task: cohort, tasks } });

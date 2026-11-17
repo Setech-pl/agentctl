@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.22.6] - 2026-11-17
 
+- UX0228-SCOPE: bulk close follows the selected queue cohort; manager/no selection cannot imply an unrelated cohort. / Zamykanie zbiorcze respektuje kohortę wybranego zadania kolejki; manager i brak wyboru nie wskazują obcej kohorty.
+
 - Verify events_since counts only unpulled reports; align existing finished/hidden fixtures with report-ready visibility. / Test potwierdza liczenie wyłącznie nieodebranych raportów; scenariusze zakończonych/ukrytych zadań uwzględniają widoczność report-ready.
 
 - Status groups pulled open tasks; CLI `close --pulled --cohort` and MCP `close {pulled: true, cohort}` preview selective closure. / Status grupuje odebrane, niezamknięte zadania; CLI i MCP pokazują podgląd ich zbiorczego zamknięcia.

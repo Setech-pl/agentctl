@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { initialBoardState, listItems, navTasks, handleKey, promptText, rowCells, boardColumns } from '../src/core/board.ts';
-import type { BoardRow } from '../src/core/board.ts';
+import type { BoardRow, BoardState } from '../src/core/board.ts';
 import { collectStatus } from '../src/core/status.ts';
 import { Context } from '../src/core/context.ts';
 import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helpers.ts';
@@ -51,4 +51,15 @@ it('UX0228: pulled dead report stays visible and a rewritten report is unpulled'
   assert.equal(rows[0]!.hidden, false);
   fs.utimesSync(record.report, now / 1000, now / 1000);
   assert.equal((await collectStatus(ctx, { progress: false }))[0]!.pulled, null);
+});
+
+it('UX0228: queued selection closes its cohort and manager selection has no implicit cohort', () => {
+  const state = { ...initialBoardState(100, 30), now, selected: 'QUEUED', rows: [row('WAVE', { state: 'report-ready', pulled }), row('UNGROUPED', { cohort: null, state: 'report-ready', pulled })], queue: [{entry: {task: 'QUEUED', cohort: 'wave'}}] as BoardState['queue'] };
+  const preview = handleKey(state, 'B', {}).state;
+  assert.deepEqual(preview.mode, {kind: 'confirm', action: 'close-pulled', task: 'wave', tasks: ['WAVE']});
+  const manager = handleKey({...state, selected: '@manager'}, 'B', {});
+  assert.equal(manager.state.mode.kind, 'list');
+  assert.deepEqual(manager.effects, []);
+  const ungrouped = handleKey({...state, selected: 'UNGROUPED', pulledExpanded: ['']}, 'B', {}).state;
+  assert.deepEqual(ungrouped.mode, {kind: 'confirm', action: 'close-pulled', task: '', tasks: ['UNGROUPED']});
 });
