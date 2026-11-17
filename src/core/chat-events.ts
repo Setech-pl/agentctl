@@ -1,4 +1,4 @@
-import { channelMessages } from './wall.ts';
+import { channelMessages, wallAge } from './wall.ts';
 import { journalOutputs } from './outputs.ts';
 import { listTaskRecords } from './taskstore.ts';
 import { withFileLock } from './file-lock.ts';
@@ -102,7 +102,7 @@ export interface EventsSummary {
 export interface EventsReport {
   client: EventClient;
   wallIdentity?: string;
-  wallOpen?: { id: string; subject: string; from: string }[];
+  wallOpen?: { id: string; subject: string; from: string; age: string }[];
   /** ISO time the events start after. */
   since: string;
   sinceLabel: string;
@@ -159,7 +159,7 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
     report.wallIdentity = opts.wallIdentity;
     report.wallOpen = [...(opts.wallOpenChannels ?? opts.wallChannels ?? [])].flatMap(c => channelMessages(config, c))
       .filter(m => m.status === 'open' && (m.to === opts.wallIdentity || m.kind === 'question' || m.kind === 'decision-request'))
-      .sort((a, b) => b.ts.localeCompare(a.ts)).slice(0, 10).map(m => ({ id: m.id, subject: m.subject.slice(0, 100), from: m.from }));
+      .sort((a, b) => b.ts.localeCompare(a.ts)).slice(0, 10).map(m => ({ id: m.id, subject: m.subject.slice(0, 100), from: m.from, age: wallAge(m.ts, ctx.runner.now()) }));
   }
   const encode = () => `e2:${position.index}:${position.offset}`;
   const baseNeedYou = [...summary.needYou];
@@ -173,7 +173,8 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
     if (position.index < start.index) { position = {index: position.index + 1, offset: 0}; continue; }
     if (position.index === start.index) position.offset = Math.max(position.offset, start.offset);
     if (event.kind !== 'wall' && cohort !== null && (!event.cohort || cohortKey(event.cohort) !== cohortKey(cohort))) { position = { index: position.index + 1, offset: 0 }; continue; }
-    if (event.kind === 'wall' && opts.wallChannels && !opts.wallChannels.has(event.wall?.channel ?? '')) { position = { index: position.index + 1, offset: 0 }; continue; }
+    if (event.kind === 'wall' && opts.wallChannels && !opts.wallChannels.has(event.wall?.channel ?? '') && !(opts.wallIdentity && event.wall?.recipients?.includes(opts.wallIdentity))) { position = { index: position.index + 1, offset: 0 }; continue; }
+    if (event.kind === 'wall' && event.wall?.recipients && opts.wallIdentity && !event.wall.recipients.includes(opts.wallIdentity) && !event.wall.recipients.includes(event.wall.channel)) { position = { index: position.index + 1, offset: 0 }; continue; }
     const raw = JSON.stringify(event);
     const prefix = legacyGc[position.index]?.prefix;
     if (position.offset > 0 && ((prefix !== undefined && position.offset > prefix) || position.offset >= raw.length)) {
@@ -291,7 +292,7 @@ export function renderEvents(report: EventsReport): string[] {
   return [
     head,
     ...(report.note ? [report.note] : []),
-    ...(report.wallOpen ? ['WALL do Ciebie (open)', ...report.wallOpen.map(m => `${m.id}: ${m.subject}${m.from === report.wallIdentity ? ' (yours)' : ''}`), ...(!report.wallOpen.length ? ['brak'] : [])] : []),
+    ...(report.wallOpen ? ['WALL do Ciebie (open)', ...report.wallOpen.map(m => `${m.id} (${m.age}): ${m.subject}${m.from === report.wallIdentity ? ' (yours)' : ''}`), ...(!report.wallOpen.length ? ['brak'] : [])] : []),
     ...report.events.map((e) => `${hhmm(e.at)}  ${KIND_LABEL[e.kind]}${e.task ? `  ${e.task}` : ''}  ${e.verdict ? `${e.verdict}` : e.text}${e.kind === 'wall' && report.wallIdentity && e.wall?.from === report.wallIdentity ? ' (yours)' : ''}${e.phone ? PHONE_MARK : ''}`),
     summaryLine(report.summary),
     `has_more: ${report.has_more}; next_cursor: ${report.next_cursor}`,

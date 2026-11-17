@@ -84,7 +84,12 @@ describe('WALL lifecycle (fake clock, no inference/network)', () => {
     assert.equal(events.length, 1);
     assert.equal(events[0]?.text, `WALL czeka na odpowiedź: ${q.id}`);
     assert.deepEqual(events[0]?.wall?.recipients, ['chat:nc', 'chat:hems']);
-
+    for (const identity of ['chat:nc', 'chat:hems', 'chat:agentctl']) {
+      const report = await collectEvents(w.ctx, { client: `test-${identity}`, since: '2d', keep: true, wallIdentity: identity, wallChannels: new Set(), wallOpenChannels: new Set(['shared:sim']) });
+      assert.equal(report.events.some(e => e.text.includes('czeka na')), identity !== 'chat:agentctl');
+      assert.equal(report.wallOpen?.[0]?.age, '24h');
+      assert.match(renderEvents(report).join('\n'), /\(24h\)/);
+    }
   });
 
   it('stales unanswered questions with a note; owner-only decisions/contracts receive only reminders', async () => {

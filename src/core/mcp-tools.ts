@@ -92,7 +92,7 @@ import type { LimitAssignments } from './limits.ts';
 import { planLine } from './usage-report.ts';
 import { openReader, readPlans } from './usage.ts';
 import { AGENT_NAMES } from './config.ts';
-import { findMessage, MAX_BODY_BYTES, MAX_NOTE_CHARS, MAX_REF_CHARS, MAX_REFS, MAX_SUBJECT_CHARS, OWNER_KINDS, planPost, planStatus, postMessage, readThread, readWall, renderRead, renderThread, setStatus, subscribedChannels, readableChannels, WALL_KINDS, WALL_STATUSES, wallIdentity } from './wall.ts';
+import { wallAge, findMessage, MAX_BODY_BYTES, MAX_NOTE_CHARS, MAX_REF_CHARS, MAX_REFS, MAX_SUBJECT_CHARS, OWNER_KINDS, planPost, planStatus, postMessage, readThread, readWall, renderRead, renderThread, setStatus, subscribedChannels, readableChannels, WALL_KINDS, WALL_STATUSES, wallIdentity } from './wall.ts';
 import type { PostInput, WallIdentity, WallKind, WallMessage, WallStatus } from './wall.ts';
 import { AgentctlError, cohortKey, errorMessage, formatLocalTime, plural, resolvePath, windowName } from './util.ts';
 
@@ -2389,9 +2389,9 @@ for (const tool of MCP_TOOLS) {
         try {
           const who = wallIdentity(ctx.config, {as: typeof args.as === 'string' ? args.as : undefined, client: deps.clientId});
           if (who.kind === 'chat') {
-            const messages = readWall(ctx, who, {status: 'open', limit: 100}).messages
+            const messages = readWall(ctx, who, {status: 'open', archive: true, limit: 100}).messages
               .filter(m => m.to === who.id || m.kind === 'question' || m.kind === 'decision-request').slice(-10);
-            inbox = ['WALL do Ciebie (open)', ...messages.map(m => `${m.id}: ${m.subject.slice(0, 100)}${m.from === who.id ? ' (yours)' : ''}`), ...(!messages.length ? ['brak'] : [])].join('\n') + '\n';
+            inbox = ['WALL do Ciebie (open)', ...messages.map(m => `${m.id} (${wallAge(m.ts, ctx.runner.now())}): ${m.subject.slice(0, 100)}${m.from === who.id ? ' (yours)' : ''}`), ...(!messages.length ? ['brak'] : [])].join('\n') + '\n';
           } else if (who.kind === 'unknown') inbox = 'unknown chat – only channel agentctl visible; pass as: "chat:<name>"\n';
         } catch { /* retain the durable bounded response even when WALL storage is unavailable */ }
       }
