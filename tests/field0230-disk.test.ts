@@ -76,6 +76,7 @@ it('F4: status/capacity snapshots use fresh free space and label stale worktree 
     const disk = JSON.parse(r.text).disk;
     assert.equal(disk.volumes[0].availableBytes, 18 * 1024 ** 3);
     assert.equal(disk.worktreeAgeSeconds, 3600);
+    assert.equal(disk.gcHint, true);
     assert.match(disk.gcPolicyNote, /blocked.*pinned.*dirty/);
   }
 });

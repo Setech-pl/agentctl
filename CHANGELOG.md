@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.22.8] - 2026-11-17
 
+- FIELD0230-SOCKET: fit isolated tmux sockets under longer task cache roots; test sandboxes opt out of production disk/peak admission defaults. / Gniazda tmux mieszczą się w dłuższych katalogach zadania; sandboxy testowe mają własne progi dysku i wyłączony szczyt.
+
 - Keep MCP queue cost/disk/peak previews aligned with CLI; immediate starts honor global holds before setup. / Zgodność szacunków i blokad podglądu MCP z CLI; starty bezpośrednie respektują globalny hold przed setupem.
 
 - FIELD0230-PIN: recheck pins at GC mutation boundaries; pin previews show the concrete state change. / Ponowne sprawdzenie pin przed usunięciem GC; podgląd pin pokazuje zmianę stanu.

@@ -327,6 +327,16 @@
       "F9: every tool accepts as; irrelevant identity is ignored in preview/confirm; expiry includes local time"
     ]
   },
+  "FIELD0230-SOCKET": {
+    "rev": "v0.22.7",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "FIELD0230-SOCKET: a 66-byte task cache keeps isolated tmux within the socket limit",
+      "FIELD0230-SOCKET: a 66-byte task cache keeps isolated tmux within the socket limit"
+    ]
+  },
   "G1a": {
     "rev": "v0.22.3",
     "outcome": "FAILS",

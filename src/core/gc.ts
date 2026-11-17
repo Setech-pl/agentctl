@@ -429,6 +429,7 @@ export function renderGc(plan: GcPlan, opts: GcViewOptions & { applied?: GcResul
       if (section.next_offset !== null) lines.push(`${section.name}: next offset ${section.next_offset} of ${section.total}`);
     }
     for (const c of view.cohorts.items) lines.push(`cohort ${c.cohort}: ${c.count}, ${c.bytes} bytes; skipped ${c.skipped}, ${c.skippedBytes} bytes`);
+    if (!plan.items.length) lines.push('Nothing to clean up.');
     if (plan.foreignWorktrees) lines.push(`${plan.foreignWorktrees} foreign worktrees: not touched.`);
     if (plan.unknownCacheDirs) lines.push(`${plan.unknownCacheDirs} folder${plan.unknownCacheDirs === 1 ? '' : 's'} in the cache belong to no task of agentctl: not touched.`);
     lines.push('Preview only; --apply executes. Full list: --verbose --offset N --limit N.');

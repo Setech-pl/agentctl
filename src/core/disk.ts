@@ -235,5 +235,5 @@ export async function refreshDiskFreeSpace(ctx: Context, previous: DiskReport): 
     } catch (e) {return {...volume, availableBytes: null, totalBytes: null, level: 'unknown' as const, error: e instanceof Error ? e.message : String(e)};}
   }));
   const level = (['critical', 'warn', 'unknown', 'ok'] as const).find(l => volumes.some(v => v.level === l)) ?? 'unknown';
-  return {...previous, volumes, level, freeMeasuredAt: new Date(now).toISOString(), worktreeAgeSeconds: ageSeconds};
+  return {...previous, volumes, level, gcHint: volumes.some(v => v.level === 'warn' || v.level === 'critical'), freeMeasuredAt: new Date(now).toISOString(), worktreeAgeSeconds: ageSeconds};
 }

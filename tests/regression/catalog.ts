@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'FIELD0230-SOCKET', fixedIn: '0.22.8', symptom: 'A 66-byte task cache made isolated tmux socket paths exceed the harness limit.', scenarios: [s('harness.test.ts', '^FIELD0230-SOCKET:')] },
   { id: 'FIELD0230-PIN', fixedIn: '0.22.8', symptom: 'A pin added during a GC safety query could miss the final deletion boundary.', scenarios: [s('field0230-gc.test.ts', '^F2:')], noProof: 'Pin/unpin GC protection is introduced in this release; no previous release exposes this race.' },
   { id: 'FIELD0230-F12', fixedIn: '0.22.8', symptom: 'Integrate base and advisory external repository references invalidated outputs.', scenarios: [s('field0230-outputs.test.ts')] },
   { id: 'FIELD0230-F11', fixedIn: '0.22.8', symptom: 'Closed-task project links were silently dropped with a warning instead of blocking unsafe defaults.', scenarios: [s('field0230-links.test.ts')] },

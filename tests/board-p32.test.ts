@@ -216,16 +216,20 @@ describe('p32: one usage reader per board process', () => {
   });
 });
 
-describe('p32: disk report off the tick', () => {
-  it('the disk report is re-collected on its own cadence, not on every tick', async () => {
+describe('p32: fresh disk counters on each tick', () => {
+  it('cheap free-space counters are fresh while recursive worktree sizes stay cached', async t => {
     const config = makeConfig(scratch.sub('dk1'));
     seedTask(config, 'DK-1');
     const { ctx, runner } = makeContext(config, { respond: new FakeTmux().respond });
     const cache = new ProgressCache();
+    let available = 80;
+    t.mock.method(fs.promises, 'statfs', async () => ({bsize: 1024 ** 3, bavail: available, blocks: 1000}));
     const first = await loadBoard(ctx, null, cache);
     assert.ok(first.disk);
+    available = 18;
     const second = await loadBoard(ctx, null, cache);
-    assert.equal(second.disk, first.disk, 'within the cadence the last report is kept');
+    assert.equal(second.disk!.volumes[0]!.availableBytes, 18 * 1024 ** 3);
+    assert.equal(second.disk!.worktreeBytes, first.disk.worktreeBytes, 'recursive size samples remain cached');
     await runner.sleep(DISK_INTERVAL_MS + 1);
     const third = await loadBoard(ctx, null, cache);
     assert.ok(third.disk);
