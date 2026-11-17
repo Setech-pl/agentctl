@@ -126,4 +126,23 @@ describe('WALL lifecycle (fake clock, no inference/network)', () => {
     assert.equal(findMessage(w.config, q.id).archived, true);
   });
 
+  it('board A switches archived messages, stale has a distinct style, and unread excludes old closed items', async () => {
+    const w = world('board');
+    const archived = await w.post('info');
+    await w.runner.sleep(15 * day);
+    await maintainWall(w.ctx);
+    const stale = await w.post();
+    await setStatus(w.ctx, OWNER_IDENTITY, { id: stale.id, status: 'stale' });
+    let state = handleKey(initialBoardState(120, 30), 'W', {}).state;
+    state = { ...state, wall: loadWallBoard(w.config, w.runner.now()) };
+    assert.equal(state.wall!.channels.find(c => c.channel === stale.channel)!.unread, 1);
+    assert.equal(state.mode.kind, 'wall');
+    if (state.mode.kind !== 'wall') throw new Error('WALL mode');
+    state = { ...state, mode: { ...state.mode, level: 'messages', channel: state.wall!.channels.findIndex(c => c.channel === stale.channel) } };
+    assert.deepEqual(wallMessages(state, state.mode as never).map(m => m.id), [stale.id]);
+    assert.equal(wallView(state, state.mode as never).lines[0]?.dim, true);
+    state = handleKey(state, 'A', {}).state;
+    assert.deepEqual(wallMessages(state, state.mode as never).map(m => m.id), [archived.id]);
+    assert.match(wallView(state, state.mode as never).title, /ARCHIVE/);
+  });
 });

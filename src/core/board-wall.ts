@@ -22,7 +22,7 @@ const channelsOf = (state: BoardState): WallBoardData['channels'] => state.wall?
 export function wallMessages(state: BoardState, mode: WallMode): WallHeader[] {
   const channel = channelsOf(state)[mode.channel];
   if (!channel) return [];
-  return channel.headers.filter((m) => (mode.status === null || m.status === mode.status) && (mode.wallKind === null || m.kind === mode.wallKind)).slice().reverse();
+  return channel.headers.filter((m) => Boolean(m.archived) === Boolean(mode.archive) && (mode.status === null || m.status === mode.status) && (mode.wallKind === null || m.kind === mode.wallKind)).slice().reverse();
 }
 
 const cycle = <T>(values: readonly T[], current: T | null): T | null => {
@@ -32,6 +32,7 @@ const cycle = <T>(values: readonly T[], current: T | null): T | null => {
 
 export function wallKey(state: BoardState, mode: WallMode, input: string, key: KeyPress): KeyResult {
   const stay = (next: WallMode = mode, effects: BoardEffect[] = []): KeyResult => ({ state: { ...state, mode: next }, effects });
+  if (input === 'A') return stay({ ...mode, archive: !mode.archive, level: mode.level === 'message' ? 'messages' : mode.level, message: 0, offset: 0 });
   const back = key.escape || input === 'q' || (key.ctrl && input === 'c');
   const step = key.upArrow || input === 'k' ? -1 : key.downArrow || input === 'j' ? 1 : key.pageUp ? -10 : key.pageDown ? 10 : 0;
   if (mode.level === 'message') {
@@ -79,18 +80,18 @@ export function wallView(state: BoardState, mode: WallMode): { title: string; li
     const filters = `${mode.status ? ` status=${mode.status}` : ''}${mode.wallKind ? ` kind=${mode.wallKind}` : ''}`;
     const read = state.wall.read;
     return {
-      title: `WALL – ${channel?.channel ?? ''}${filters} (↑↓ ⏎ read, s status, t kind, r/R mark read, Esc back)`,
+      title: `WALL – ${channel?.channel ?? ''}${filters}${mode.archive ? ' [ARCHIVE]' : ''} (A archive, ↑↓ ⏎ read, s status, t kind, r/R mark read, Esc back)`,
       lines: messages.length === 0
         ? [{ text: filters ? 'No messages with this filter (s / t change it).' : 'No messages in this channel yet.', dim: true }]
         : messages.map((m, i) => {
           const unread = !isRead(read, m);
-          return { text: `${unread ? '●' : ' '} ${short(m.ts)}  ${pad(m.from, 14)} ${pad(m.kind, 16)} ${pad(m.status, 10)} ${m.replyTo ? '↳ ' : ''}${m.subject}`, selected: i === mode.message, bold: unread, ...(isOpen(m) ? { color: 'yellow' } : {}) };
+          return { text: `${unread ? '●' : ' '} ${short(m.ts)}  ${pad(m.from, 14)} ${pad(m.kind, 16)} ${pad(m.status, 10)} ${m.replyTo ? '↳ ' : ''}${m.subject}`, selected: i === mode.message, bold: unread, ...(m.status === 'stale' ? { color: 'gray', dim: true } : isOpen(m) ? { color: 'yellow' } : {}) };
         }),
       selected: mode.message,
     };
   }
   return {
-    title: 'WALL – channels (↑↓ ⏎ open, r mark channel read, Esc back) – the owner reads every channel',
+    title: `WALL – channels${mode.archive ? ' [ARCHIVE]' : ''} (A archive, ↑↓ ⏎ open, r mark channel read, Esc back) – the owner reads every channel`,
     lines: channels.length === 0
       ? [{ text: 'No channels (wall.channels in config.yaml).', dim: true }]
       : channels.map((c, i) => ({ text: `${pad(c.channel, 16)} ${String(c.unread ?? 0).padStart(3)} unread ${String(c.open).padStart(3)} open ${String(c.messages).padStart(4)} msg  ${c.last ? short(c.last) : '-          '}  ${c.description ?? ''}`, selected: i === mode.channel, bold: (c.unread ?? 0) > 0, ...(c.open > 0 ? { color: 'yellow' } : {}) })),

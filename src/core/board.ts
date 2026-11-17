@@ -159,7 +159,7 @@ export type BoardMode =
   /** `L` (limits), `G` (gc preview): a page of lines from the core, scrolled with the arrows. */
   | { kind: 'view'; what: ViewKind; lines: string[]; offset: number }
   /** `W`: the WALL (board-wall.ts): channels, the messages of one (status/kind filters), one message with its thread. */
-  | { kind: 'wall'; level: 'channels' | 'messages' | 'message'; channel: number; message: number; id: string | null; status: WallStatus | null; wallKind: WallKind | null; lines: string[]; offset: number };
+  | { kind: 'wall'; archive?: boolean; level: 'channels' | 'messages' | 'message'; channel: number; message: number; id: string | null; status: WallStatus | null; wallKind: WallKind | null; lines: string[]; offset: number };
 
 export type ViewKind = 'limits' | 'gc' | 'capacity';
 

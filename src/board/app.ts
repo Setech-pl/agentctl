@@ -228,7 +228,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
     setImmediate(() => {
       if (!mounted.current) return;
       try {
-        const data = loadWallBoard(ctx.config);
+        const data = loadWallBoard(ctx.config, ctx.runner.now());
         update((s) => ({ ...s, wall: data }));
       } catch (e) {
         if (!quiet) update((s) => showNotice(s, { level: 'error', text: `WALL: ${errorMessage(e).split('\n')[0]}` }));
