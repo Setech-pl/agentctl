@@ -35,3 +35,23 @@ it('F5: wrapped quota reset is retained and ordinary user mentions do not limit 
   f.tmux.windows[0]!.screen = '❯ Explain quota limits';
   assert.notEqual((await collectStatus(f.ctx))[0]!.state, 'limited');
 });
+
+it('F6: GLM holds are global across cohorts/chats and name the detecting task', async () => {
+  const {collectLimits, renderLimits} = await import('../src/core/limits.ts');
+  const {saveEntry, queueViews, queueTick, QueueMemory} = await import('../src/core/queue.ts');
+  const {providerHoldLines} = await import('../src/core/provider-hold.ts');
+  const f = fixture('shared');
+  await limitedTick(f.ctx, await collectStatus(f.ctx), {notify: async () => {}});
+  await saveEntry(f.ctx, {seq: 1, order: 1, task: 'NC-NEXT', cohort: 'NC', status: 'queued', priority: 'normal', queuedAt: new Date(now).toISOString(), agent: 'glm', model: 'default', effort: 'high', after: [], spec: '---\ntask: NC-NEXT\nagent: glm\n---\nFake.'});
+  const otherChat = new Context(f.runner, f.config, () => {});
+  assert.match((await queueViews(otherChat))[0]!.condition.text, /glm: wstrzymane do .*wykryte w HEMS-2-FDM-7.*globalnie/);
+  assert.deepEqual(await queueTick(otherChat, new QueueMemory(), {notify: async () => {}}), []);
+  const limits = collectLimits(f.config, [], now);
+  const hold = limits.providers.find(p => p.agent === 'glm')!.providerHold!;
+  assert.equal(hold.scope, 'global');
+  assert.equal(hold.detectedIn, 'HEMS-2-FDM-7');
+  assert.match(renderLimits(limits).join('\n'), /HEMS-2-FDM-7/);
+  assert.match(providerHoldLines(f.config, now).join('\n'), /wszystkie kohorty/);
+  const result = await MCP_TOOLS.find(t => t.name === 'status')!.run({context: () => otherChat, notify: async () => {}}, {cohort: 'HEMS'});
+  assert.match(result.text, /globalnie/);
+});

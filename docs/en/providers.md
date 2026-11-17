@@ -81,3 +81,5 @@ Agentctl never answers folder trust or provider onboarding. Open the task's tmux
 Official product/CLI links were checked with curl HEAD+redirects on 2026-11-15; the original openai.com/codex marketing URL returned 403 in this environment, so the product link above uses the accessible official ChatGPT page. External documentation can move independently of this release.
 
 Provider quota errors appear as `limited`; `usage_hint` retains the provider text and `usage_reset_at` gives its explicit reset (a timestamp without an offset uses local time). Events include limited tasks in the attention summary.
+
+Provider holds are global to the agentctl instance, across every cohort/chat. Status/limits name the detecting task and reset; a GLM quota exhausted in HEMS also blocks new GLM starts in NC. Running tasks are not interrupted.

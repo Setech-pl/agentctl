@@ -81,3 +81,5 @@ Agentctl nie odpowiada na trust ani onboarding. Otwórz okno zadania, odpowiedz 
 Oficjalne linki produktu/CLI sprawdzono curl HEAD z przekierowaniami 2026-11-15; openai.com/codex zwrócił tu 403, więc użyto dostępnej oficjalnej strony ChatGPT. Dokumentacja zewnętrzna zmienia się niezależnie od tego wydania.
 
 Błędy limitu providera mają stan `limited`; `usage_hint` zachowuje komunikat, a `usage_reset_at` podaje jawny reset (czas bez strefy jest lokalny). Zdarzenia pokazują zadania limited w podsumowaniu uwagi.
+
+Blokada providera jest globalna w instancji agentctl dla wszystkich kohort/czatów. Status/limits pokazują zadanie źródłowe i reset; limit GLM wykryty w HEMS wstrzymuje też nowe starty GLM w NC. Działające zadania nie są przerywane.

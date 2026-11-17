@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'FIELD0230-F6', fixedIn: '0.22.8', symptom: 'Shared provider holds omitted global scope and the detecting task.', scenarios: [s('field0230-providers.test.ts', '^F6:')] },
   { id: 'FIELD0230-F5', fixedIn: '0.22.8', symptom: 'Quota panes lost their usage hint/reset and disappeared from attention summaries.', scenarios: [s('field0230-providers.test.ts', '^F5:')] },
   { id: 'FIELD0230-F4', fixedIn: '0.22.8', symptom: 'Status/capacity reused stale filesystem free-space samples.', scenarios: [s('field0230-disk.test.ts', '^F4:')] },
   { id: 'FIELD0230-F3', fixedIn: '0.22.8', symptom: 'The queue admitted worktree setups below the free-disk start floor.', scenarios: [s('field0230-disk.test.ts', '^F3:')] },

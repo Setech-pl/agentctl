@@ -8,7 +8,7 @@ import { withFileLock } from './file-lock.ts';
 import { recordJournal } from './journal.ts';
 import { AgentctlError, formatLocalTime } from './util.ts';
 
-export interface ProviderHold { until: string; source: 'manual' | 'automatic'; reason?: string }
+export interface ProviderHold { until: string; source: 'manual' | 'automatic'; reason?: string; detectedIn?: string; scope?: 'global' }
 export interface HoldState { holds: Partial<Record<AgentName, ProviderHold>>; seen: Record<string, string> }
 export const providerHoldFile = (config: Pick<GlobalConfig, 'path'>) => path.join(path.dirname(config.path), 'provider-holds.json');
 export function readProviderHoldState(config: Pick<GlobalConfig, 'path'>): HoldState {
@@ -18,7 +18,8 @@ export function providerHolds(config: Pick<GlobalConfig, 'path'>, now: number): 
   return Object.fromEntries(Object.entries(readProviderHoldState(config).holds).filter(([, hold]) => hold && Date.parse(hold.until) > now));
 }
 export function providerHoldText(agent: string, hold: ProviderHold): string {
-  return `wstrzymane: ${agent} do ${formatLocalTime(hold.until).slice(-5)} (${hold.source === 'manual' ? 'ręcznie' : 'automatycznie'})`;
+  if (hold.source === 'manual') return `wstrzymane: ${agent} do ${formatLocalTime(hold.until).slice(-5)} (ręcznie); globalnie: wszystkie kohorty/czaty`;
+  return `${agent}: wstrzymane do ${formatLocalTime(hold.until)} (wyczerpany plan${hold.detectedIn ? `, wykryte w ${hold.detectedIn}` : ''}; globalnie: wszystkie kohorty/czaty)`;
 }
 /** Local HH:MM means the next occurrence; ISO must carry an explicit date. */
 export function holdUntil(value: string, now: number): string {
@@ -51,7 +52,7 @@ export async function setProviderHolds(ctx: Context, assignments: TimedHolds): P
     const state = readProviderHoldState(ctx.config);
     for (const [agent, until] of Object.entries(assignments) as [AgentName, string][]) {
       if (until === 'off') delete state.holds[agent];
-      else state.holds[agent] = {until, source: 'manual'};
+      else state.holds[agent] = {until, source: 'manual', scope: 'global'};
     }
     await ctx.runner.writeFile(file, JSON.stringify(state));
     for (const [agent, until] of Object.entries(assignments) as [AgentName, string][]) await recordJournal(ctx, {kind: 'limits-changed', text: until === 'off' ? `${agent}: hold off` : providerHoldText(agent, state.holds[agent]!)});
@@ -84,8 +85,12 @@ export async function automaticProviderHold(ctx: Context, agent: AgentName, key:
     while (Object.keys(state.seen).length > 2000) delete state.seen[Object.keys(state.seen)[0]!];
     const current = state.holds[agent];
     const until = new Date(reset && reset > ctx.runner.now() ? reset : ctx.runner.now() + 3600000).toISOString();
-    if (!current || Date.parse(current.until) <= ctx.runner.now() || (current.source === 'automatic' && Date.parse(current.until) < Date.parse(until))) state.holds[agent] = {until, source: 'automatic', reason: 'provider quota/rate-limit error'};
+    if (!current || Date.parse(current.until) <= ctx.runner.now() || (current.source === 'automatic' && Date.parse(current.until) < Date.parse(until))) state.holds[agent] = {until, source: 'automatic', reason: 'provider quota/rate-limit error', detectedIn: key.split(':')[0], scope: 'global'};
     await ctx.runner.writeFile(file, JSON.stringify(state));
     await recordJournal(ctx, {kind: 'limits-changed', task: key.split(':')[0], text: `${providerHoldText(agent, state.holds[agent]!)}; błąd quota/rate-limit dostawcy`});
   });
+}
+
+export function providerHoldLines(config: Pick<GlobalConfig, 'path'>, now: number): string[] {
+  return Object.entries(providerHolds(config, now)).map(([agent, hold]) => providerHoldText(agent, hold!));
 }

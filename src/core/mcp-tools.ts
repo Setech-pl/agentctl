@@ -1,5 +1,5 @@
 import { pulledOpen, pulledSummary, pulledCohortTasks, checkPulledClose } from './pulled.ts';
-import { readProviderHoldState, providerHoldText } from './provider-hold.ts';
+import { readProviderHoldState, providerHoldText, providerHoldLines } from './provider-hold.ts';
 import { withStartLock } from './start-lock.ts';
 import { commitQueueAdd } from './queue.ts';
 import { acceptConsult, planConsult } from './consult.ts';
@@ -352,6 +352,7 @@ async function runStatus(deps: McpDeps, args: { all?: boolean | undefined; cohor
   extra.push(...serverLines(deps, ctx));
   const colliding = shown.filter((r) => r.collide.length > 0);
   if (colliding.length > 0) extra.push(`⚠${colliding.length} tasks overlap; overlap has details.`);
+  extra.push(...providerHoldLines(ctx.config, ctx.runner.now()));
   extra.push(awayLine(ctx));
   const disk = await collectDisk(ctx);
   extra.push(diskLine(disk));
@@ -2311,7 +2312,7 @@ async function snapshotRead(ctx: Context, name: string, args: Record<string, unk
       const offset = Number(args.offset ?? 0), limit = Number(args.limit ?? rows.length);
       const shown = rows.slice(offset, offset + limit);
       data = { tasks: [...shown.map(statusRowForChat), ...queue.filter((q: { task: string }) => !rows.some(r => r.task === q.task)).map((q: { task: string; status: string; startCondition: string }) => ({...q, state: q.status === 'queued' ? 'registered' : q.status}))], disk: snap.capacity.disk, ...(args.capacity || args.detail ? { capacity: capacitySnapshot(snap.capacity) } : {}) };
-      text = [statusLine(rows, allRows.length - rows.length), diskLine(snap.capacity.disk), ...shown.filter(r => !pulledOpen(r)).map(compactStatus), ...pulledSummary(shown), ...shown.filter(pulledOpen).map(compactStatus), ...queue.map((q: {task: string; startCondition: string}) => `${q.task}: ${q.startCondition}`), ...(args.capacity ? snapshotLines(capacitySnapshot(snap.capacity)) : [])].join('\n');
+      text = [statusLine(rows, allRows.length - rows.length), diskLine(snap.capacity.disk), ...providerHoldLines(ctx.config, ctx.runner.now()), ...shown.filter(r => !pulledOpen(r)).map(compactStatus), ...pulledSummary(shown), ...shown.filter(pulledOpen).map(compactStatus), ...queue.map((q: {task: string; startCondition: string}) => `${q.task}: ${q.startCondition}`), ...(args.capacity ? snapshotLines(capacitySnapshot(snap.capacity)) : [])].join('\n');
     } else if (name === 'queue_list') {
       data = queue; text = queue.map((q: {task: string; agent: string; model: string; effort: string; startCondition: string}) => `${q.task} ${q.agent}/${q.model}/${q.effort}: ${q.startCondition}`).join('\n') || 'The queue is empty.';
     } else if (name === 'capacity') { data = snap.capacity; text = [diskLine(snap.capacity.disk), ...snapshotLines(capacitySnapshot(snap.capacity))].join('\n'); }

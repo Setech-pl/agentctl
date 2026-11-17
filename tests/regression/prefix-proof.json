@@ -265,6 +265,16 @@
       "F5: wrapped quota reset is retained and ordinary user mentions do not limit a task"
     ]
   },
+  "FIELD0230-F6": {
+    "rev": "v0.22.7",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "F6: GLM holds are global across cohorts/chats and name the detecting task",
+      "F6: GLM holds are global across cohorts/chats and name the detecting task"
+    ]
+  },
   "G1a": {
     "rev": "v0.22.3",
     "outcome": "FAILS",
