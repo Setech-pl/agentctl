@@ -145,7 +145,7 @@ The session started by `agentctl manager`: Claude Code with [Remote Control](htt
 
 ### `wall`
 
-The WALL (0.21.0, WALL-1) is a message board your chats (claude.ai Projects, Claude Code) and agents share through the agentctl MCP server; see the README section "WALL". Messages are kept append-only in `~/.agentctl/wall/<channel>.jsonl` (`index.json` is a rebuildable cache). Given `wall.channels` or `wall.chats` replaces the built-in list (the `agentctl` channel is always added).
+The WALL (0.21.0, WALL-1) is a message board your chats (claude.ai Projects, Claude Code) and agents share through the agentctl MCP server; see the README section "WALL". Messages retain their complete event history in `~/.agentctl/wall/<channel>.jsonl` and monthly files under `wall/archive/` (`index.json` is a rebuildable cache). Lists default to 7 days; explicit `since`, `archive: true` and ID reads reach older history. Board W uses A for archives. See [lifecycle details](en/configuration.md#wall-lifecycle-0227) ([Polski](pl/configuration.md#cykl-życia-wall-0227)). Given `wall.channels` or `wall.chats` replaces the built-in list (the `agentctl` channel is always added).
 
 ```yaml
 wall:
@@ -173,6 +173,9 @@ wall:
 | `wall.chats.<name>.clients` | list | `[]` | g | MCP client names (the client's initialize name) that are this chat without an explicit `as`. |
 | `wall.subscriptions` | mapping | own channel + `agentctl` + `shared:*` | g | Per chat (or MCP client) name: the channels whose `WALL` events `events_since` returns. Limited to what the chat reads. The owner (CLI, board) sees everything. |
 | `wall.ref_roots` | list | `[~/Projects/cache]` | g | A path in `refs` must be under one of these; nothing is read from it (refs only, no attachments). |
+| `wall.archive_after_days` | positive number | `14` | g | Watch archives closed messages after this many days since their latest status; full posts/status history and IDs remain readable. |
+| `wall.remind_after_hours` | positive number | `24` | g | One reminder to the author/addressee after this many hours without reply/status activity. |
+| `wall.stale_after_days` | positive number | `7` | g | Inactive open questions become `stale` with a note; owner-only decision requests/contracts are never auto-staled. |
 
 ### `queue`
 

@@ -36,7 +36,7 @@ npm run build
 
 Agentctl runs with your permissions; worktrees are not an OS sandbox. Folder trust is never automatically accepted. Local MCP uses desktop stdio; web/phone cannot connect directly. The owner reviews evidence and decides integration/publication; report actions are proposals. [Boundaries](docs/en/overview.md#boundaries).
 
-[Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [MIT license](LICENSE). Use the repository gate and task-owned cache. This release combines the complete manuals with the 0.22.2 operations fixes and small diagnostics/help fixes.
+[Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [MIT license](LICENSE). Use the repository gate and task-owned cache.
 
 GC checks `git status --porcelain --untracked-files=normal` in **every** task worktree, plus commits ahead of upstream (or the recorded base). Previews show dirty file and unpushed commit counts per repo, even with cached sizes. Dirty/unpushed worktrees stay unless the owner explicitly uses CLI `--force-dirty` or MCP `force_dirty: [TASK]`; apply checks again. Ignored files are excluded.
 
@@ -58,4 +58,4 @@ Pulled report-ready tasks fold into “odebrane, do zamknięcia (N)” per cohor
 
 CLI pulled closure refuses a changed task list or a report rewritten while awaiting confirmation; run the preview again to review the current scope.
 
-WALL lifecycle: watch archives closed messages after 14 days, reminds once after 24 hours and marks inactive questions stale after 7 days. Lists default to 7 days; `wall_read {archive: true}` and ID lookups reach history. Board W: A toggles archives. See [configuration](docs/en/configuration.md#wall-lifecycle-0227).
+[WALL lifecycle: archive, reminders and stale](docs/en/configuration.md#wall-lifecycle-0227).

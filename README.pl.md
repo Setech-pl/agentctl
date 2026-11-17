@@ -58,4 +58,4 @@ Odebrane raporty w stanie report-ready zwijają się w kohortach do „odebrane,
 
 Zamykanie odebranych zadań w CLI odrzuca zmianę listy lub raportu w trakcie potwierdzania. Uruchom podgląd ponownie, aby zatwierdzić aktualny zakres.
 
-Cykl życia WALL: watch archiwizuje zamknięte wiadomości po 14 dniach, przypomina raz po 24 godzinach i oznacza nieaktywne pytania jako stale po 7 dniach. Listy obejmują domyślnie 7 dni; `wall_read {archive: true}` i odczyt po ID sięgają do historii. Plansza W: A przełącza archiwum. Zobacz [konfigurację](docs/pl/configuration.md#cykl-życia-wall-0227).
+[Cykl życia WALL: archiwum i przypomnienia](docs/pl/configuration.md#cykl-życia-wall-0227).

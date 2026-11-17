@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.22.7] - 2026-11-17
 
+- Complete the lifecycle configuration reference, keep README links concise, and separate release proof from measured unreleased findings. / Pełna tabela konfiguracji cyklu życia, zwięzłe odnośniki README i oddzielenie dowodu wydania od pomiarów ustaleń przed wydaniem.
+
 - WALL0229-HISTORY / WALL0229-INBOX: retain repeated same-timestamp status transitions during archive retries and preserve the inbox ID/subject prefix; catalogued unreleased findings. / Zachowanie powtarzających się zmian statusu w tym samym czasie podczas ponownej archiwizacji oraz prefiksu ID/tematu skrzynki; skatalogowane ustalenia przed wydaniem.
 
 - Keep the existing inbox ID/subject prefix when showing age; cache archive headers and preserve torn logs during maintenance. / Wiek nie zmienia dotychczasowego prefiksu ID/tematu skrzynki; cache nagłówków archiwum i ochrona niepełnych logów podczas porządkowania.
