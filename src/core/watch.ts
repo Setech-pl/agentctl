@@ -1,3 +1,4 @@
+import { maintainWall } from './wall.ts';
 import { autoClosePulled } from './pulled-auto-close.ts';
 import { applyAcceptedWrites } from './queue.ts';
 import { consultTick } from './consult.ts';
@@ -211,6 +212,7 @@ export interface TickOptions {
  */
 export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Notifier, options: TickOptions = {}): Promise<WatchEvent[]> {
   await applyAcceptedWrites(ctx, notifier, options);
+  await maintainWall(ctx);
   const tickAt = ctx.runner.now();
   if (memory.lastTickAt === undefined) {
     try {

@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- WALL0229: archive closed messages after 14 days with complete history and stable ID/thread lookups; list reads default to 7 days, explicit since/archive reaches older data. / Archiwizacja zamkniętych wiadomości po 14 dniach z pełną historią i stałymi ID; listy domyślnie obejmują 7 dni, jawne since/archive sięga do starszych danych.
+
 ## [0.22.6] - 2026-11-17
 
 - UX0228-CLI-SCOPE: CLI revalidates the pulled cohort after confirmation and refuses changed scope. / CLI ponownie sprawdza zakres po potwierdzeniu i odmawia zamknięcia zmienionej listy odebranych zadań.

@@ -7,7 +7,7 @@ import type { Problems } from './util.ts';
  * parser live here (config.ts imports it); the board itself is wall.ts.
  */
 
-export const WALL_KEYS = ['channels', 'chats', 'subscriptions', 'ref_roots'];
+export const WALL_KEYS = ['channels', 'chats', 'subscriptions', 'ref_roots', 'archive_after_days', 'remind_after_hours', 'stale_after_days'];
 export const WALL_CHANNEL_KEYS = ['authors', 'description'];
 export const WALL_CHAT_KEYS = ['channels', 'clients'];
 
@@ -38,6 +38,9 @@ export interface WallSettings {
   subscriptions: Record<string, string[]>;
   /** Paths a ref may name (absolute after `~` expansion); nothing is read from them. */
   refRoots: string[];
+  archiveAfterDays: number;
+  remindAfterHours: number;
+  staleAfterDays: number;
 }
 
 export function defaultWallSettings(): WallSettings {
@@ -59,6 +62,7 @@ export function defaultWallSettings(): WallSettings {
     },
     subscriptions: {},
     refRoots: ['~/Projects/cache'],
+    archiveAfterDays: 14, remindAfterHours: 24, staleAfterDays: 7,
   };
 }
 
@@ -119,6 +123,11 @@ export function parseWall(v: unknown, p: Problems): WallSettings {
   if (v === undefined || v === null) return wall;
   if (!isObject(v)) { p.add('config.wall must be a mapping like {channels: {nc: {authors: [owner, chat:nc]}}, chats: {nc: {channels: [nc, agentctl]}}}'); return wall; }
   keys(v, WALL_KEYS, 'config.wall', p);
+  for (const [key, field] of [['archive_after_days', 'archiveAfterDays'], ['remind_after_hours', 'remindAfterHours'], ['stale_after_days', 'staleAfterDays']] as const) {
+    if (v[key] === undefined) continue;
+    if (typeof v[key] !== 'number' || !Number.isFinite(v[key]) || v[key] <= 0) p.add(`config.wall.${key} must be a positive number`);
+    else wall[field] = v[key];
+  }
   if (v.channels !== undefined && v.channels !== null) {
     if (!isObject(v.channels)) p.add('config.wall.channels must map channel names to {authors: [...], description: ...}');
     else {

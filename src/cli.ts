@@ -960,7 +960,8 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .description('Messages of one channel (or of all), newest last; --id shows one message with its body, refs, status history and replies.')
     .argument('[channel]', 'channel, e.g. nc or shared:sim; default: every channel you read')
     .option('--id <id>', 'one message with its thread, e.g. nc-12')
-    .option('--since <time>', 'an age (30m, 2h, 1d) or an ISO time')
+    .option('--since <time>', 'an age (30m, 2h, 1d) or an ISO time; default 7d')
+    .option('--archive', 'include older and archived messages')
     .addOption(new Option('--status <status>', 'only this status').choices([...WALL_STATUSES]))
     .addOption(new Option('--kind <kind>', 'only this kind').choices([...WALL_KINDS]))
     .option('--limit <n>', 'at most this many messages (default 20, max 100)', (v) => Number(v))
@@ -968,7 +969,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('--as <who>', 'read as chat:<name> or task:<ID> instead of the owner')
     .option('--json', 'machine-readable output')
     .action(
-      guarded(async (channel: string | undefined, opts: { id?: string; since?: string; status?: WallStatus; kind?: WallKind; limit?: number; before?: string; as?: string; json?: boolean }) => {
+      guarded(async (channel: string | undefined, opts: { id?: string; since?: string; archive?: boolean; status?: WallStatus; kind?: WallKind; limit?: number; before?: string; as?: string; json?: boolean }) => {
         const ctx = contextFor(false, { migrate: false });
         const who = wallWho(ctx, opts.as);
         if (opts.id !== undefined) {
@@ -977,7 +978,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
           for (const l of renderThread(thread)) line(l);
           return;
         }
-        const result = readWall(ctx, who, { channel, since: opts.since, status: opts.status, kind: opts.kind, limit: opts.limit, before: opts.before });
+        const result = readWall(ctx, who, { channel, since: opts.since, archive: opts.archive, status: opts.status, kind: opts.kind, limit: opts.limit, before: opts.before });
         if (opts.json) return line(JSON.stringify(result, null, 2));
         for (const l of renderRead(result, { channelList: channel === undefined, ...(who.kind === 'owner' ? { read: readOwnerState(ctx.config) } : {}) })) line(l);
       }),
