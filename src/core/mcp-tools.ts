@@ -445,7 +445,7 @@ async function runGcPreview(deps: McpDeps, args: { request_id?: string; include_
   if (!deps.applying && watchAlive(ctx.config, ctx.runner.now())) return recordDeferred(deps, 'gc_preview', args, null, `gc_preview:${JSON.stringify(args)}`, undefined);
   const plan = await planGc(ctx, { olderThan: args.older_than, branches: args.merged, cohort: args.cohort, forceDirty: args.force_dirty, includeCache: args.include_cache, keepCache: args.keep_cache, cachedSizes: true });
   if (deps.applying) { fs.mkdirSync(ctx.config.stateDir, {recursive: true}); atomicWriteFile(gcPlanPath(ctx, args), JSON.stringify({at: ctx.runner.now(), key: gcPlanKey(args), plan})); }
-  return ok(JSON.stringify({ ...gcView(plan, args), partial_result: 'Partial result: sizes are cached or measuring (unknown sizes count as 0); repeat for updated estimates.', preview: true, execution: ctx.config.mcp.allow.includes('gc') ? 'gc preview then confirm' : 'requires gc in mcp.allow or CLI --apply' }));
+  return ok(JSON.stringify({ ...gcView(plan, args), text: renderGc(plan, args).join('\n'), partial_result: 'Partial result: sizes are cached or measuring (unknown sizes count as 0); repeat for updated estimates.', preview: true, execution: ctx.config.mcp.allow.includes('gc') ? 'gc preview then confirm' : 'requires gc in mcp.allow or CLI --apply' }));
 }
 
 async function runResume(deps: McpDeps, args: { tasks?: string[] | undefined; all?: boolean | undefined; confirm?: boolean | undefined }): Promise<ToolResult> {

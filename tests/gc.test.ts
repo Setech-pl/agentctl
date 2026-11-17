@@ -246,7 +246,7 @@ describe('gc: CLI, board and MCP', () => {
     task(w, 'NC-1', { closed: true }, { 'old.log': 20 });
     const dry = await runCli(w.config, w.runner, ['gc']);
     assert.equal(dry.code, 0, dry.stderr);
-    assert.match(dry.stdout, /Would clean up \(a dry run/);
+    assert.match(dry.stdout, /Would remove:/);
     assert.ok(fs.existsSync(path.join(w.config.cache, 'nc-1', 'old.log')));
     assert.equal(JSON.parse((await runCli(w.config, w.runner, ['gc', '--json', '--verbose'])).stdout).details.items.length > 0, true);
     const noTty = await runCli(w.config, w.runner, ['gc', '--include-cache', '--apply']);
@@ -269,7 +269,7 @@ describe('gc: CLI, board and MCP', () => {
     const r = handleKey(initialBoardState(100, 30), 'G', {});
     assert.deepEqual(r.effects, [{ type: 'view', what: 'gc' }]);
     assert.equal(r.state.mode.kind, 'view');
-    assert.match((await loadViewLines(w.ctx, 'gc')).join('\n'), /Would clean up/);
+    assert.match((await loadViewLines(w.ctx, 'gc')).join('\n'), /Would remove:/);
     const deps: McpDeps = { context: (out) => new Context(w.runner, loadGlobalConfig(path.dirname(w.config.path)), out), notify: async () => undefined };
     const tool = MCP_TOOLS.find((t) => t.name === 'gc_preview')!;
     assert.equal(tool.kind, 'read');

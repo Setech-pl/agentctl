@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- FIELD0230-F1: separate removable and skipped GC entries with sizes in CLI/MCP. / Osobne sekcje usuwanych i pomijanych pozycji GC z rozmiarami w CLI/MCP.
+
 ## [0.22.7] - 2026-11-17
 
 - Complete the lifecycle configuration reference, keep README links concise, and separate release proof from measured unreleased findings. / Pełna tabela konfiguracji cyklu życia, zwięzłe odnośniki README i oddzielenie dowodu wydania od pomiarów ustaleń przed wydaniem.

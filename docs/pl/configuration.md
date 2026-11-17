@@ -318,3 +318,5 @@ wall:
 
 Progi muszą być dodatnimi, skończonymi liczbami. Porządkowanie wymaga watch;
 okna list oraz odczyt po ID/z archiwum działają również bez niego.
+
+Podgląd GC rozdziela **Would remove**, **Skipped (uncommitted changes)** i **Skipped (pinned)** z rozmiarami. JSON MCP zawiera ten sam opis w `text`; pominięte bajty nie zwiększają miejsca do odzyskania.

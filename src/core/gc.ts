@@ -185,7 +185,7 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
       }
       const detail = `${risk.dirtyFiles} dirty files, ${risk.unpushedCommits} unpushed commits vs ${risk.comparison}`;
       if ((risk.dirtyFiles || risk.unpushedCommits) && !permitsDirty(opts.forceDirty, record.task)) {
-        skipped.push({ task: record.task, kind: 'worktree', target: wt, repo: repo.path, ...risk, reason: `uncommitted changes / unpushed work (${detail}); requires force_dirty: [${record.task}] / --force-dirty` });
+        skipped.push({ task: record.task, kind: 'worktree', target: wt, repo: repo.path, ...risk, bytes: await size(wt), reason: `uncommitted changes / unpushed work (${detail}); requires force_dirty: [${record.task}] / --force-dirty` });
         continue;
       }
       const bytes = await size(wt);
@@ -379,7 +379,11 @@ export function gcView(plan: GcPlan, opts: GcViewOptions = {}) {
   const newer = new Map<string, { task: string; files: number; bytes: number; reason: string }>();
   for (const s of plan.skipped.filter(s => s.reason.startsWith('newer than '))) { const group = newer.get(s.task) ?? { task: s.task, files: 0, bytes: 0, reason: s.reason }; group.files++; group.bytes += s.bytes ?? 0; newer.set(s.task, group); }
   const page = <T>(items: T[]) => ({ total: items.length, offset, next_offset: offset + limit < items.length ? offset + limit : null, items: items.slice(offset, offset + limit) });
-  return { autoCacheFreedBytes: plan.autoCacheFreedBytes ?? 0, freeBytes: plan.freeBytes, summary: `można zwolnić ${(plan.freeBytes / 1e9).toFixed(3)} GB (${plan.freeBytes} bytes)`, categories,
+  const skippedGroup = (name: string, test: (s: GcSkip) => boolean) => { const entries = plan.skipped.filter(test); return { name, count: entries.length, bytes: entries.reduce((n, s) => n + (s.bytes ?? 0), 0), ...page(entries) }; };
+  const dirty = (s: GcSkip) => Boolean(s.dirtyFiles || s.unpushedCommits) && /uncommitted changes/.test(s.reason);
+  const pinned = (s: GcSkip) => /^(pinned|keep requested)/.test(s.reason);
+  const sections = { remove: { name: 'Would remove', count: plan.items.length, bytes: plan.freeBytes, ...page(plan.items) }, uncommitted: skippedGroup('Skipped (uncommitted changes)', dirty), pinned: skippedGroup('Skipped (pinned)', pinned), other: skippedGroup('Skipped (other)', s => !dirty(s) && !pinned(s)) };
+  return { sections, autoCacheFreedBytes: plan.autoCacheFreedBytes ?? 0, freeBytes: plan.freeBytes, summary: `można zwolnić ${(plan.freeBytes / 1e9).toFixed(3)} GB (${plan.freeBytes} bytes)`, categories,
     cache: page([...plan.items, ...plan.skipped].filter(i => i.kind === 'cache').map(i => ({ ...i, action: 'reason' in i ? 'keep' : 'delete' }))),
     worktrees: page([...plan.items, ...plan.skipped].filter(i => i.kind === 'worktree').map(i => ({ task: i.task, repo: i.repo, target: i.target, dirtyFiles: i.dirtyFiles ?? null, unpushedCommits: i.unpushedCommits ?? null, detail: 'reason' in i ? i.reason : i.detail }))),
     skipped: { count: plan.skipped.length, bytes: plan.skipped.reduce((n, s) => n + (s.bytes ?? 0), 0), reasons: page([...reasons.values()]) },
@@ -395,15 +399,15 @@ export function renderGc(plan: GcPlan, opts: GcViewOptions & { applied?: GcResul
   const lines = opts.applied ? ['History and reports (*.md) stay.'] : [`Could free ${formatBytes(plan.freeBytes)}; ${view.summary}. History and reports (*.md) stay.`, ...view.categories.map(c => `${c.category}: ${c.count}, ${c.bytes} bytes`), `Skipped: ${view.skipped.count}, ${view.skipped.bytes} bytes`];
   lines.push(`Automatic .cache cleanup: ${plan.autoCacheFreedBytes ?? 0} bytes freed previously.`);
   if (!opts.applied) {
-    lines.push('Would clean up (a dry run; --apply does it, after a y/N):');
-    if (!plan.items.length) lines.push('Nothing to clean up.');
-    for (const c of view.cache.items) lines.push(`  cache ${c.task} ${c.target}: ${c.action}, ${c.bytes ?? 0} bytes (${'reason' in c ? c.reason : c.detail})`);
-    for (const w of view.worktrees.items) lines.push(`  worktree ${w.task} ${w.target}: ${w.detail}`);
-    for (const reason of view.skipped.reasons.items) lines.push(`  ${reason.reason}: ${reason.count}, ${reason.bytes} bytes`);
+    for (const section of Object.values(view.sections)) {
+      lines.push(`${section.name}: ${section.count}, ${section.bytes} bytes`);
+      for (const item of section.items) {
+        const detail = 'reason' in item ? item.dirtyFiles ? `uncommitted changes (${item.dirtyFiles} files); ${item.reason}` : item.reason : item.detail;
+        lines.push(`  ${item.kind} ${item.task} ${item.target}: ${item.bytes ?? 0} bytes (${detail})`);
+      }
+      if (section.next_offset !== null) lines.push(`${section.name}: next offset ${section.next_offset} of ${section.total}`);
+    }
     for (const c of view.cohorts.items) lines.push(`cohort ${c.cohort}: ${c.count}, ${c.bytes} bytes; skipped ${c.skipped}, ${c.skippedBytes} bytes`);
-    for (const n of view.newer.items) lines.push(`  ${n.task}: ${n.reason}, ${n.files} files, ${n.bytes} bytes`);
-    for (const i of view.details?.items ?? []) lines.push(`  ${i.action} ${KIND_WORD[i.kind as GcKind] ?? i.kind} ${i.task} ${i.target} (${('reason' in i ? i.reason : i.detail)})`);
-    for (const [label, page] of [['cache', view.cache], ['worktrees', view.worktrees], ['cohorts', view.cohorts], ['newer', view.newer], ['reasons', view.skipped.reasons], ['details', view.details]] as const) if (page?.next_offset !== null && page?.next_offset !== undefined) lines.push(`${label}: next offset ${page.next_offset} of ${page.total}`);
     if (plan.foreignWorktrees) lines.push(`${plan.foreignWorktrees} foreign worktrees: not touched.`);
     if (plan.unknownCacheDirs) lines.push(`${plan.unknownCacheDirs} folder${plan.unknownCacheDirs === 1 ? '' : 's'} in the cache belong to no task of agentctl: not touched.`);
     lines.push('Preview only; --apply executes. Full list: --verbose --offset N --limit N.');

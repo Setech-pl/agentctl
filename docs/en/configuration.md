@@ -318,3 +318,5 @@ wall:
 
 All three thresholds must be positive finite numbers. Maintenance requires watch;
 list windows and ID/archive reads work independently of watch.
+
+GC previews separate **Would remove**, **Skipped (uncommitted changes)** and **Skipped (pinned)**, each with sizes. The MCP JSON includes the same presentation in `text`; skipped bytes never count as reclaimable.

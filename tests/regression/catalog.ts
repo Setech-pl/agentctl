@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'FIELD0230-F1', fixedIn: '0.22.8', symptom: 'GC preview listed skipped dirty worktrees under cleanup candidates.', scenarios: [s('field0230-gc.test.ts', '^F1:')] },
   { id: 'WALL0229-HISTORY', fixedIn: '0.22.7', symptom: 'Archive retry deduplication collapsed legitimate close/reopen/close records sharing a timestamp.', scenarios: [s('wall-lifecycle.test.ts', '^WALL0229-HISTORY:')], noProof: 'Unreleased lifecycle API is absent on v0.22.6 (import error); this scenario fails on pre-fix 83e0350 (1 failing test), measured separately from the release proof.' },
   { id: 'WALL0229-INBOX', fixedIn: '0.22.7', symptom: 'Adding WALL age interrupted the stable ID/subject prefix in the budget fallback inbox.', scenarios: [s('a2-wall-events.test.ts', '^A2: known chat receives')], noProof: 'Introduced during unreleased lifecycle work; v0.22.6 passes. Existing A2 scenario fails on dd6d977 before correction (1 failing test), measured separately from the release proof.' },
   { id: 'UX0228-CLI-SCOPE', fixedIn: '0.22.6', symptom: 'CLI could close a newly unread report after its pulled-only preview was confirmed.', scenarios: [s('ux0228-mcp-cli.test.ts', '^UX0228: CLI refuses')], noProof: 'The --pulled CLI selector is new in this unreleased feature; the deterministic confirmation callback reproduced the race before the fix.' },
