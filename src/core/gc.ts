@@ -88,7 +88,8 @@ export interface GcOptions {
 export const DEFAULT_OLDER_THAN = '7d';
 const PROTECTED = new Set(['main', 'master']);
 
-const same = (a: string, b: string): boolean => path.resolve(a) === path.resolve(b);
+const location = (p: string): string => {try {return fs.realpathSync(p);} catch {return path.resolve(p);}};
+const same = (a: string, b: string): boolean => location(a) === location(b);
 
 async function git(ctx: Context, args: string[]): Promise<{ code: number; out: string; err: string }> {
   const r = await ctx.runner.exec('git', args, { readOnly: true });
@@ -338,10 +339,13 @@ export async function applyGc(ctx: Context, plan: GcPlan): Promise<GcResult> {
   for (const kind of order) {
     for (const item of plan.items.filter((i) => i.kind === kind)) {
       try {
-        const records = [...listTaskRecords(config), ...listArchivedRecords(config)];
-        const protectedRecords = records.filter(r => r.pin || plan.keep?.some(t => t.toLowerCase() === r.task.toLowerCase()));
-        const overlaps = (a: string, b: string) => same(a, b) || path.resolve(a).startsWith(`${path.resolve(b)}${path.sep}`) || path.resolve(b).startsWith(`${path.resolve(a)}${path.sep}`);
-        if (protectedRecords.some(r => r.task.toLowerCase() === item.task.toLowerCase() || (kind === 'worktree' && r.repos.some(repo => same(repo.worktree, item.target))) || (kind === 'cache' && r.report && overlaps(path.dirname(r.report), item.target)))) throw new Error('pinned/kept task; left in place');
+        const assertUnpinned = () => {
+          const records = [...listTaskRecords(config), ...listArchivedRecords(config)];
+          const protectedRecords = records.filter(r => r.pin || plan.keep?.some(t => t.toLowerCase() === r.task.toLowerCase()));
+          const overlaps = (a: string, b: string) => same(a, b) || location(a).startsWith(`${location(b)}${path.sep}`) || location(b).startsWith(`${location(a)}${path.sep}`);
+          if (protectedRecords.some(r => r.task.toLowerCase() === item.task.toLowerCase() || (kind === 'worktree' && r.repos.some(repo => same(repo.worktree, item.target))) || (kind === 'cache' && r.report && overlaps(path.dirname(r.report), item.target)))) throw new Error('pinned/kept task; left in place');
+        };
+        assertUnpinned();
         // CLI measures removed bytes; MCP uses the watch estimate and never delays removal for accounting.
         const bytes = kind === 'worktree' || kind === 'cache' ? plan.cachedSizes && kind === 'worktree' ? lastMeasurement(item.target)?.bytes ?? 0 : await sizeOf(item.target, { fresh: true, now: () => runner.now() }) : 0;
         if (kind === 'worktree') {
@@ -350,6 +354,7 @@ export async function applyGc(ctx: Context, plan: GcPlan): Promise<GcResult> {
           const risk = await worktreeRisk(ctx, item.target, item.base);
           const forced = permitsDirty(plan.forceDirty, item.task);
           if ((risk.dirtyFiles || risk.unpushedCommits) && !forced) throw new Error(`worktree has ${risk.dirtyFiles} dirty files and ${risk.unpushedCommits} unpushed commits; kept`);
+          assertUnpinned();
           const r = await runner.exec('git', ['-C', item.repo as string, 'worktree', 'remove', ...(forced ? ['--force'] : []), item.target], { timeoutMs: config.git.timeoutS * 1000 });
           if (r.code !== 0) throw new Error(r.stderr.trim().split('\n')[0] || `git exit ${r.code}`);
         } else if (kind === 'cache') {
@@ -359,10 +364,13 @@ export async function applyGc(ctx: Context, plan: GcPlan): Promise<GcResult> {
           const protection = cacheProtection(record, item.target);
           if (protection || plan.keepCache?.some(t => t.toLowerCase() === item.task.toLowerCase())) throw new Error(protection ?? 'keep_cache requested for task');
           if (runner.now() - await newestMtime(item.target, { fresh: true, now: () => runner.now() }) < plan.olderThanMs) throw new Error('cache contents changed since the plan; kept because they are too recent');
+          assertUnpinned();
           await runner.remove(item.target);
         } else if (kind === 'archive') {
+          assertUnpinned();
           await runner.rename(item.target, path.join(archiveDir(config), path.basename(item.target)));
         } else {
+          assertUnpinned();
           const r = await runner.exec('git', ['-C', item.repo as string, 'branch', '-d', item.branch as string]);
           if (r.code !== 0) throw new Error(r.stderr.trim().split('\n')[0] || `git exit ${r.code}`);
         }

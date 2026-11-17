@@ -1926,7 +1926,7 @@ async function previewScope(ctx: Context, name: string, args: Record<string, unk
   if (name === 'consult') return (scope as Awaited<ReturnType<typeof planConsult>>).preview;
   if (name === 'mark') { const plan = scope as { tasks: TaskRecord[]; result: unknown; note: unknown }; return { ...plan, tasks: plan.tasks.map(r => ({ task: r.task, cohort: r.cohort ?? null, agent: r.agent, model: r.model, effort: r.effort, report: r.report })) }; }
   if (name === 'queue_up' || name === 'queue_rm') { const plan = scope as { queue: ReturnType<typeof readQueue> }; return { tasks: [], queue: plan.queue.map(e => ({ task: e.task, status: e.status, after: e.after, afterVerdicts: e.afterVerdicts })) }; }
-  if (['archive', 'interrupt', 'hide', 'unhide', 'cohort_add', 'cohort_remove', 'cohort_note', 'cohort_archive', 'adopt', 'notify_test', 'unblock', 'wall_post', 'wall_reply', 'wall_set_status'].includes(name)) return scope;
+  if (['pin', 'unpin', 'archive', 'interrupt', 'hide', 'unhide', 'cohort_add', 'cohort_remove', 'cohort_note', 'cohort_archive', 'adopt', 'notify_test', 'unblock', 'wall_post', 'wall_reply', 'wall_set_status'].includes(name)) return scope;
   if (name === 'close') return { tasks: (scope as { tasks: unknown[] }).tasks, omitted: 0 };
   if (name === 'report_from') {
     const plan = scope as { record: TaskRecord; source: string; sourceSignature: { size: number } | null; destinationSignature: unknown };

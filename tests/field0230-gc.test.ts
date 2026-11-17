@@ -11,7 +11,7 @@ function fixture(name: string) {
   seedTask(config, 'DIRTY', {closed: true, repos: [{path: scratch.sub(`${name}/repo`), worktree: wt, base: 'main'}]});
   const tmux = new FakeTmux();
   const runner = new DiskRunner({dryRun: false, respond: (cmd, args, opts) => cmd !== 'git' ? tmux.respond(cmd, args, opts) : args.includes('status') ? {stdout: '?? a\n?? b'} : args.includes('rev-list') ? {stdout: '0'} : args.includes('@{upstream}') ? {code: 1} : args.includes('--abbrev-ref') ? {stdout: 'agent/dirty'} : {}});
-  return {ctx: new Context(runner, config, () => {}), wt};
+  return {ctx: new Context(runner, config, () => {}), wt, runner};
 }
 it('F1: CLI and MCP keep dirty worktrees out of Would remove and include skipped sizes', async () => {
   const f = fixture('f1');
@@ -44,4 +44,20 @@ it('F2: persistent pin and per-run keep survive dirty overrides and are rechecke
   assert.equal(readTaskRecordById(f.ctx.config, 'DIRTY')!.pin, undefined);
   assert.equal((await planGc(f.ctx, {keep: ['DIRTY'], forceDirty: true, includeCache: true})).items.length, 0);
   for (const name of ['pin', 'unpin']) assert.ok(MCP_TOOLS.find(t => t.name === name));
+});
+
+it('F2: pin added during GC risk queries is rechecked at the deletion boundary', async () => {
+  const {setPinned} = await import('../src/core/hide.ts');
+  const f = fixture('pin-race');
+  const plan = await planGc(f.ctx, {forceDirty: true});
+  const original = f.runner.exec.bind(f.runner);
+  let pinned = false;
+  f.runner.exec = async (cmd, args, options) => {
+    const result = await original(cmd, args, options);
+    if (!pinned && cmd === 'git' && args.includes('status')) {pinned = true; await setPinned(f.ctx, ['DIRTY'], true);}
+    return result;
+  };
+  const result = await applyGc(f.ctx, plan);
+  assert.equal(result.done.length, 0);
+  assert.ok(result.failed.some(f => /pinned/.test(f.reason)));
 });

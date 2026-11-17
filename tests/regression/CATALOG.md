@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| FIELD0230-PIN | A pin added during a GC safety query could miss the final deletion boundary. | `tests/field0230-gc.test.ts` (`^F2:`) | 0.22.8 | not proven: Pin/unpin GC protection is introduced in this release; no previous release exposes this race. |
 | FIELD0230-F12 | Integrate base and advisory external repository references invalidated outputs. | `tests/field0230-outputs.test.ts` | 0.22.8 | fails on v0.22.7 (1 failing of 1) |
 | FIELD0230-F11 | Closed-task project links were silently dropped with a warning instead of blocking unsafe defaults. | `tests/field0230-links.test.ts` | 0.22.8 | fails on v0.22.7 (1 failing of 1) |
 | FIELD0230-F10 | Kimi effort medium was rejected instead of mapped to high with a warning. | `tests/field0230-effort.test.ts` | 0.22.8 | fails on v0.22.7 (1 failing of 1) |
