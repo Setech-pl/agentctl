@@ -49,3 +49,5 @@ Task class `gate` uses Claude Sonnet medium, Codex `gpt-6-luna/medium`, Kimi `k3
 Inherited project links to closed/archived tasks are skipped, with one persisted notice per project per UTC day. Legacy defaults pointing into a repository already provided by the spec are skipped too. Explicit spec links and project `{worktree:repo}` placeholders remain intentional choices.
 
 Every MCP write supports `{preview_token, confirm: true}` after a preview, including `away`. WALL writes also accept `{as, preview_token, confirm: true}` when `as` matches the preview; channel/kind/subject/body and other operation arguments are restored from that session. A changed author or tool, expired token or changed scope is refused; retries reuse the receipt.
+
+Pulled report-ready tasks fold into “odebrane, do zamknięcia (N)” per cohort after active/waiting tasks. Enter expands the selected row; `B` lists the pulled tasks of that cohort and asks for confirmation before closing their windows. Reports, branches and worktrees stay. Unpulled reports lead each cohort and are highlighted, including tasks without a window.

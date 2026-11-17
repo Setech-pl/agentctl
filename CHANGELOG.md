@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### 0.22.6
+
+- UX0228: fold pulled report-ready tasks per cohort; Enter expands, B previews bulk close without removing worktrees. Unpulled reports lead and stay highlighted. / Odebrane raporty zwijają się w kohortach; Enter rozwija, B pokazuje listę do zamknięcia bez usuwania worktree. Nieodebrane raporty są wyróżnione na górze.
+
 ## [0.22.5] - 2026-11-16
 
 - Release harness validation: assert summary receipts in task records; a consistent watch snapshot can predate the receipt. / Harness sprawdza potwierdzenia podsumowań w rekordach zadań; snapshot watch może być wcześniejszy.

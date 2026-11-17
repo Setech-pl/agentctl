@@ -257,6 +257,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     if (lossHint && hiddenBy === 'auto') hiddenBy = null;
     let state: TaskState = cancelled ? 'cancelled' : closed ? 'closed' : record.supersededBy ? 'superseded' : lossHint ? 'needs-attention' : writeFailure ? 'needs-attention' : deliveryReport ? 'report-ready' : startupDialog ? 'needs-input' : unconfirmed ? 'needs-attention' : taskState({ alive, screen: screenText, settings, reportReady, event: stored?.outcome });
     const quota = alive && !reportReady && !cancelled && !closed ? ((classifyScreen(screenText, settings) === 'limited' ? quotaError(screenText) : undefined) ?? (stored?.outcome === 'limited' ? stored.text : undefined) ?? (!opts.cachedOnly && !cachedRequest() ? transcriptQuotaError(ctx, record)?.text : undefined)) : undefined;
+    if (state === 'report-ready' && hiddenBy === 'auto') hiddenBy = null;
     if (quota && !['working', 'background', 'report-ready', 'closed', 'cancelled', 'superseded'].includes(state)) state = 'limited';
     // Passive wire failures fill an idle screen; legacy hook recovery keeps its existing precedence.
     if (state === 'waiting' && stored?.outcome === 'overloaded' && record.agent !== 'unknown' && provider(record.agent).events.payloadFrom === 'wire') state = 'overloaded';

@@ -202,6 +202,8 @@ export interface BoardSettings {
   listWidth?: number | string;
   /** A task without a window whose report was pulled hides by itself (a task without a report stays in "Finished"). */
   autoHidePulledDead: boolean;
+  pulledCollapseAfter: number;
+  pulledAutoCloseAfter: number | null;
   /** `mouse on` in the agentctl tmux session (this session only): click a window name in the status bar. Selecting text then takes the fn key in Terminal.app. */
   mouse: boolean;
   /** tmux key (no prefix) that goes back to the board from any window of the agentctl session; null: no key is bound. Default F12. */
@@ -367,7 +369,7 @@ export const NOTIFY_KEYS = ['backend', 'events', 'turn_end', 'terminal_app', 've
 export const NTFY_KEYS = ['server', 'topic', 'token', 'events', 'priority', 'include_verdict', 'include_question', 'click_url', 'always'];
 export const AWAY_KEYS = ['auto_idle'];
 export const MANAGER_KEYS = ['project', 'name', 'model', 'effort', 'guide', 'autostart'];
-export const BOARD_KEYS = ['auto_hide_pulled_dead', 'mouse', 'return_key', 'selected_color', 'model_versions', 'list_width', 'window_title', 'cohorts_recent'];
+export const BOARD_KEYS = ['pulled_collapse_after', 'pulled_auto_close_after', 'auto_hide_pulled_dead', 'mouse', 'return_key', 'selected_color', 'model_versions', 'list_width', 'window_title', 'cohorts_recent'];
 export const MCP_KEYS = ['allow', 'allow_rm_worktree', 'client', 'max_response_kb'];
 export const QUEUE_KEYS = ['enabled', 'parallel_starts'];
 export const CANCEL_KEYS = ['grace'];
@@ -793,7 +795,7 @@ function parseManager(v: unknown, p: Problems): ManagerSettings {
 }
 
 function parseBoard(v: unknown, p: Problems): BoardSettings {
-  const board: BoardSettings = { autoHidePulledDead: true, mouse: true, returnKey: 'F12', selectedColor: 'blue', modelVersions: {}, windowTitle: true, cohortsRecent: 10 };
+  const board: BoardSettings = { pulledCollapseAfter: 0, pulledAutoCloseAfter: null, autoHidePulledDead: true, mouse: true, returnKey: 'F12', selectedColor: 'blue', modelVersions: {}, windowTitle: true, cohortsRecent: 10 };
   if (v === undefined || v === null) return board;
   if (!isObject(v)) {
     p.add('config.board must be a mapping like {auto_hide_pulled_dead: true, mouse: true, return_key: F12}');
@@ -824,6 +826,13 @@ function parseBoard(v: unknown, p: Problems): BoardSettings {
     if (v.return_key === false || v.return_key === null) board.returnKey = null;
     else if (typeof v.return_key === 'string' && /^[A-Za-z0-9][A-Za-z0-9-]{0,19}$/.test(v.return_key)) board.returnKey = v.return_key;
     else p.add('config.board.return_key must be a tmux key name without a prefix like F12, M-b or C-Space, or false for none');
+  }
+  for (const [key, field] of [['pulled_collapse_after', 'pulledCollapseAfter'], ['pulled_auto_close_after', 'pulledAutoCloseAfter']] as const) {
+    const value = v[key];
+    if (value === undefined) continue;
+    if (key === 'pulled_auto_close_after' && (value === false || value === null)) board.pulledAutoCloseAfter = null;
+    else if (typeof value === 'number' && Number.isFinite(value) && value >= 0) board[field] = value;
+    else p.add(`config.board.${key} must be a non-negative number${key === 'pulled_auto_close_after' ? ' or false' : ''}`);
   }
   if (v.auto_hide_pulled_dead !== undefined) {
     if (typeof v.auto_hide_pulled_dead === 'boolean') board.autoHidePulledDead = v.auto_hide_pulled_dead;

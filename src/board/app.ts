@@ -88,7 +88,9 @@ function TaskList(props: { state: BoardState; width: number; capacity: number; i
     visible.items.length === 0
       ? [h(Text, { key: 'empty', dimColor: true }, state.refreshedAt === null ? 'Loading…' : state.rows.length === 0 ? 'No tasks. Start one with "agentctl new <spec>".' : state.cohortFilter !== null ? 'No tasks in this cohort. k picks another.' : 'No active tasks. z opens the finished ones.')]
       : visible.items.map((item) =>
-          item.kind === 'group'
+          item.kind === 'pulled'
+            ? h(Text, { key: `pulled-${item.key}`, bold: state.selected === `@pulled:${item.key}`, wrap: 'truncate-end' }, `${state.selected === `@pulled:${item.key}` ? '▸' : ' '} ${item.expanded ? '-' : '+'} ${item.key || 'bez kohorty'} · odebrane, do zamknięcia (${item.count}) · Enter / B`)
+            : item.kind === 'group'
             ? h(Text, { key: `group-${item.key}`, bold: true, wrap: 'truncate-end' }, groupTitle(item, props.icons))
             : item.kind === 'queue-title'
             ? h(Text, { key: 'queue-title', dimColor: true, wrap: 'truncate-end' }, `- ${queueTitle(item.count, item.paused)}`)

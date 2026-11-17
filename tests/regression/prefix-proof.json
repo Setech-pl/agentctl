@@ -725,6 +725,19 @@
       "R1: camelCase credentials and passwd are masked in fields, text and URLs"
     ]
   },
+  "UX0228": {
+    "rev": "v0.22.5",
+    "outcome": "FAILS",
+    "failed": 3,
+    "passed": 0,
+    "failing": [
+      "UX0228: pulled reports collapse per cohort after active rows; Enter expands and unpulled reports lead and highlight",
+      "UX0228: bulk close lists scope, cancels by default, confirms without worktree removal and refuses changed scope",
+      "UX0228: pulled dead report stays visible and a rewritten report is unpulled",
+      "UX0228: pulled reports collapse per cohort after active rows; Enter expands and unpulled reports lead and highlight",
+      "UX0228: bulk close lists scope, cancels by default, confirms without worktree removal and refuses changed scope"
+    ]
+  },
   "WALL-1-f1": {
     "rev": "v0.20.2",
     "outcome": "IMPORT-ERROR",
