@@ -15,6 +15,7 @@ import {
   finishedTitle,
   groupTitle,
   pulledTitle,
+  bulkCloseLines,
   boardRefreshMs,
   clearNotice,
   handleKey,
@@ -127,7 +128,7 @@ function Preview(props: { state: BoardState; width: number; height: number }): R
 
 function Footer(props: { state: BoardState; hint: string }): React.ReactElement {
   const { state } = props;
-  const prompt = promptText(state);
+  const prompt = state.mode.kind === 'confirm' && state.mode.action === 'close-pulled' ? 'Zamknąć te zadania? Worktree pozostają. [y/N]' : promptText(state);
   const status = state.busy ?? (state.loadError ? `refresh failed: ${state.loadError}` : null) ?? props.hint;
   return h(
     Box,
@@ -322,9 +323,12 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
     const start = view.selected < 0 ? 0 : Math.max(0, Math.min(view.selected - Math.floor(room / 2), view.lines.length - room));
     return h(Box, { flexDirection: 'column' }, h(Text, { bold: true, wrap: 'truncate-end' }, view.title), ...view.lines.slice(start, start + room).map((l, i) => h(Text, { key: i, wrap: 'truncate-end', ...(l.selected ? { inverse: true } : {}), ...(l.bold ? { bold: true } : {}), ...(l.dim ? { dimColor: true } : {}), ...(l.color && !l.selected ? { color: l.color } : {}) }, l.text === '' ? ' ' : l.text)));
   };
-  const fullScreen = state.mode.kind === 'help' || logMode !== null || viewMode !== null || wallMode !== null;
+  const bulkClose = state.mode.kind === 'confirm' && state.mode.action === 'close-pulled';
+  const fullScreen = bulkClose || state.mode.kind === 'help' || logMode !== null || viewMode !== null || wallMode !== null;
   const body =
-    wallMode
+    bulkClose
+      ? h(Box, { flexDirection: 'column' }, ...bulkCloseLines(state).map((line, i) => h(Text, { key: i, bold: i === 0, wrap: 'truncate-end' }, line)))
+      : wallMode
       ? wallBody()
       : viewMode
       ? h(Box, { flexDirection: 'column' }, h(Text, { bold: true }, `${VIEW_TITLES[viewMode.what]} (↑↓ scroll, Esc back)`), ...viewMode.lines.slice(viewMode.offset, viewMode.offset + Math.max(1, state.height - 4)).map((l, i) => h(Text, { key: i, wrap: 'truncate-end' }, l === '' ? ' ' : l)))

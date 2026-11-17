@@ -148,7 +148,7 @@ export type BoardMode =
   | { kind: 'input'; task: string; text: string }
   /** Enter on a finished task (no window): it cannot be switched to, so the choices are the ones that still make sense. */
   | { kind: 'finished'; task: string }
-  | { kind: 'confirm'; action: 'interrupt' | 'close' | 'close-worktree' | 'move' | 'queue-rm' | 'cancel' | 'resume' | 'away' | 'mark-cohort' | 'close-pulled'; task: string; reason?: string; tasks?: string[]; result?: Result }
+  | { kind: 'confirm'; action: 'interrupt' | 'close' | 'close-worktree' | 'move' | 'queue-rm' | 'cancel' | 'resume' | 'away' | 'mark-cohort' | 'close-pulled'; offset?: number; task: string; reason?: string; tasks?: string[]; result?: Result }
   /** `X`: the reason for the cancellation (optional: Enter on an empty line goes on without one). */
   | { kind: 'cancel-reason'; task: string; text: string }
   /** `k`: pick the cohort to show; `value` null is every task, '' the tasks without a cohort. */
@@ -625,6 +625,9 @@ function confirmKey(state: BoardState, mode: Extract<BoardMode, { kind: 'confirm
   const yes = input === 'y' || input === 'Y';
   const cancel = (): KeyResult => ({ state: withNotice(toList(state), 'info', 'Cancelled.'), effects: [] });
   if (mode.action === 'close-pulled') {
+    const room = Math.max(1, state.height - 5);
+    const step = key.pageDown ? room : key.pageUp ? -room : key.downArrow ? 1 : key.upArrow ? -1 : 0;
+    if (step) return { state: { ...state, mode: { ...mode, offset: Math.max(0, Math.min(Math.max(0, (mode.tasks?.length ?? 0) - room), (mode.offset ?? 0) + step)) } }, effects: [] };
     if (!yes) return cancel();
     const tasks = state.rows.filter(r => pulledOpen(r) && groupOf(r.cohort) === mode.task).map(r => r.task);
     if (JSON.stringify([...tasks].sort()) !== JSON.stringify([...(mode.tasks ?? [])].sort())) return { state: withNotice(toList(state), 'error', 'Zakres zmienił się; naciśnij B ponownie.'), effects: [] };
@@ -1292,6 +1295,16 @@ export const HELP_LINES: string[] = [
 ];
 
 /** The question or the prompt of the footer for the current mode, or null in the list. */
+/** Full-screen bulk confirmation: every task is reachable even in a small terminal. */
+export function bulkCloseLines(state: BoardState): string[] {
+  const mode = state.mode;
+  if (mode.kind !== 'confirm' || mode.action !== 'close-pulled') return [];
+  const tasks = mode.tasks ?? [];
+  const room = Math.max(1, state.height - 5);
+  const offset = Math.min(mode.offset ?? 0, Math.max(0, tasks.length - room));
+  return [`Odebrane, do zamknięcia (${tasks.length}) · ${offset + 1}–${Math.min(tasks.length, offset + room)} · ↑↓ PgUp/PgDn`, ...tasks.slice(offset, offset + room)];
+}
+
 export function promptText(state: BoardState): string | null {
   const mode = state.mode;
   if (mode.kind === 'input') return `Message to ${mode.task} (Enter sends, Esc cancels): ${mode.text}`;

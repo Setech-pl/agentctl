@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { it } from 'node:test';
-import { pulledTitle } from '../src/core/board.ts';
+import { pulledTitle, bulkCloseLines, initialBoardState, handleKey } from '../src/core/board.ts';
 import { collectStatus } from '../src/core/status.ts';
 import { autoClosePulled } from '../src/core/pulled-auto-close.ts';
 import { watchTick, WatchMemory } from '../src/core/watch.ts';
@@ -45,4 +45,15 @@ it('UX0228: watch applies opted-in auto-close before publishing its task state',
 it('UX0228: render collapsed and expanded cohort labels', () => {
   assert.equal(pulledTitle({kind: 'pulled', key: 'wave', count: 3, expanded: false}), '+ wave · odebrane, do zamknięcia (3) · Enter / B');
   assert.equal(pulledTitle({kind: 'pulled', key: '', count: 1, expanded: true}), '- bez kohorty · odebrane, do zamknięcia (1) · Enter / B');
+});
+
+it('UX0228: bulk confirmation pages the complete list in small terminals', () => {
+  const tasks = Array.from({length: 30}, (_, i) => `READ-${i + 1}`);
+  const state = { ...initialBoardState(80, 10), mode: {kind: 'confirm' as const, action: 'close-pulled' as const, task: 'wave', tasks} };
+  assert.deepEqual(bulkCloseLines(state).slice(1), tasks.slice(0, 5));
+  let paged = handleKey(state, '', {pageDown: true}).state;
+  assert.deepEqual(bulkCloseLines(paged).slice(1), tasks.slice(5, 10));
+  for (let i = 0; i < 10; i++) paged = handleKey(paged, '', {pageDown: true}).state;
+  assert.deepEqual(bulkCloseLines(paged).slice(1), tasks.slice(-5));
+  assert.deepEqual(handleKey(paged, '', {escape: true}).effects, []);
 });
