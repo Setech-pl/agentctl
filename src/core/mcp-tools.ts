@@ -351,7 +351,9 @@ async function runStatus(deps: McpDeps, args: { all?: boolean | undefined; cohor
   const colliding = shown.filter((r) => r.collide.length > 0);
   if (colliding.length > 0) extra.push(`⚠${colliding.length} tasks overlap; overlap has details.`);
   extra.push(awayLine(ctx));
-  return { text: [statusLine(shown, rows.length - shown.length), ...extra, ...shown.filter(r => !pulledOpen(r)).map(compactStatus), ...pulledSummary(shown), ...shown.filter(pulledOpen).map(compactStatus)].join('\n'), data: { ...(args.detail || args.capacity ? { disk: await collectDisk(ctx, undefined, args) } : {}), tasks: [...shown.map(row => { const entry = views.find(v => v.entry.task === row.task)?.entry; return { ...statusRowForChat(row), ...(entry ? { state: entry.status === 'queued' ? 'registered' : entry.status } : {}) }; }), ...views.filter(v => !shown.some(r => r.task === v.entry.task)).map(v => ({ task: v.entry.task, agent: v.entry.agent, state: v.entry.status === 'queued' ? 'registered' : v.entry.status, startCondition: v.condition.text }))] } };
+  const disk = await collectDisk(ctx);
+  extra.push(diskLine(disk));
+  return { text: [statusLine(shown, rows.length - shown.length), ...extra, ...shown.filter(r => !pulledOpen(r)).map(compactStatus), ...pulledSummary(shown), ...shown.filter(pulledOpen).map(compactStatus)].join('\n'), data: { disk, tasks: [...shown.map(row => { const entry = views.find(v => v.entry.task === row.task)?.entry; return { ...statusRowForChat(row), ...(entry ? { state: entry.status === 'queued' ? 'registered' : entry.status } : {}) }; }), ...views.filter(v => !shown.some(r => r.task === v.entry.task)).map(v => ({ task: v.entry.task, agent: v.entry.agent, state: v.entry.status === 'queued' ? 'registered' : v.entry.status, startCondition: v.condition.text }))] } };
 }
 
 /** "Away: on since …; the phone gets the notifications" - what the chat should know about the phone. */
@@ -2288,7 +2290,7 @@ export async function publishMcpSnapshot(ctx: Context, rows?: StatusRow[], at = 
   fs.mkdirSync(ctx.config.stateDir, { recursive: true });
   atomicWriteFile(stateSnapshotPath(ctx), JSON.stringify(snapshot));
 }
-function snapshotRead(ctx: Context, name: string, args: Record<string, unknown>): ToolResult | undefined {
+async function snapshotRead(ctx: Context, name: string, args: Record<string, unknown>): Promise<ToolResult | undefined> {
   try {
     if (args.project !== undefined) return undefined;
     const snap = JSON.parse(fs.readFileSync(stateSnapshotPath(ctx), 'utf8'));
@@ -2296,6 +2298,7 @@ function snapshotRead(ctx: Context, name: string, args: Record<string, unknown>)
     if (name === 'status' && snap.version === 1 && age > 300000) return ok(`${ageLine(snap.at, ctx.runner.now())}\nSnapshot starszy niż 5 min; krótki fallback z kolejki i dziennika zamiast starej tabeli.\n${durableStatus(ctx)}`);
     if (snap.version !== 1 || age < 0 || age >= 2 * ctx.config.watch.interval * 1000 || JSON.stringify(snap.providerHolds ?? {}) !== JSON.stringify(readProviderHoldState(ctx.config).holds) || snap.configHash !== createHash('sha256').update(JSON.stringify(ctx.config)).digest('hex')) return undefined;
     const note = `${ageLine(snap.at, ctx.runner.now())}; Watch snapshot age: ${(age / 1000).toFixed(1)} s.`;
+    if (name === 'status' || name === 'capacity') snap.capacity.disk = await collectDisk(ctx);
     const json = args.format === 'json' || args.detail === true;
     let data: unknown, text = '';
     const fits = (r: { cohort?: string | null }) => args.cohort === undefined || cohortKey(r.cohort ?? '') === cohortKey(String(args.cohort));
@@ -2305,8 +2308,8 @@ function snapshotRead(ctx: Context, name: string, args: Record<string, unknown>)
       const rows = shownRows(allRows, Boolean(args.all));
       const offset = Number(args.offset ?? 0), limit = Number(args.limit ?? rows.length);
       const shown = rows.slice(offset, offset + limit);
-      data = { tasks: [...shown.map(statusRowForChat), ...queue.filter((q: { task: string }) => !rows.some(r => r.task === q.task)).map((q: { task: string; status: string; startCondition: string }) => ({...q, state: q.status === 'queued' ? 'registered' : q.status}))], ...(args.capacity || args.detail ? { disk: snap.capacity.disk, capacity: capacitySnapshot(snap.capacity) } : {}) };
-      text = [statusLine(rows, allRows.length - rows.length), ...shown.filter(r => !pulledOpen(r)).map(compactStatus), ...pulledSummary(shown), ...shown.filter(pulledOpen).map(compactStatus), ...queue.map((q: {task: string; startCondition: string}) => `${q.task}: ${q.startCondition}`), ...(args.capacity ? snapshotLines(capacitySnapshot(snap.capacity)) : [])].join('\n');
+      data = { tasks: [...shown.map(statusRowForChat), ...queue.filter((q: { task: string }) => !rows.some(r => r.task === q.task)).map((q: { task: string; status: string; startCondition: string }) => ({...q, state: q.status === 'queued' ? 'registered' : q.status}))], disk: snap.capacity.disk, ...(args.capacity || args.detail ? { capacity: capacitySnapshot(snap.capacity) } : {}) };
+      text = [statusLine(rows, allRows.length - rows.length), diskLine(snap.capacity.disk), ...shown.filter(r => !pulledOpen(r)).map(compactStatus), ...pulledSummary(shown), ...shown.filter(pulledOpen).map(compactStatus), ...queue.map((q: {task: string; startCondition: string}) => `${q.task}: ${q.startCondition}`), ...(args.capacity ? snapshotLines(capacitySnapshot(snap.capacity)) : [])].join('\n');
     } else if (name === 'queue_list') {
       data = queue; text = queue.map((q: {task: string; agent: string; model: string; effort: string; startCondition: string}) => `${q.task} ${q.agent}/${q.model}/${q.effort}: ${q.startCondition}`).join('\n') || 'The queue is empty.';
     } else if (name === 'capacity') { data = snap.capacity; text = [diskLine(snap.capacity.disk), ...snapshotLines(capacitySnapshot(snap.capacity))].join('\n'); }
@@ -2320,7 +2323,7 @@ const snapshotTools = new Set(['status', 'queue_list', 'capacity', 'limits', 'co
 for (const tool of MCP_TOOLS.filter(t => snapshotTools.has(t.name))) {
   const run = tool.run;
   tool.run = async (deps, args) => {
-    const cached = snapshotRead(deps.context(() => {}), tool.name, args);
+    const cached = await snapshotRead(deps.context(() => {}), tool.name, args);
     if (cached) return cached;
     const result = await run(deps, args);
     const note = 'Watch snapshot unavailable/stale; bounded fallback path. / Snapshot watch niedostępny lub stary; odczyt ograniczony budżetem.';

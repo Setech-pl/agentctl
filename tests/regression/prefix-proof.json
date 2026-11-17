@@ -243,6 +243,16 @@
       "F3: max_parallel_setups counts setup phases across providers and frees launching slots"
     ]
   },
+  "FIELD0230-F4": {
+    "rev": "v0.22.7",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "F4: status/capacity snapshots use fresh free space and label stale worktree size/policy",
+      "F4: status/capacity snapshots use fresh free space and label stale worktree size/policy"
+    ]
+  },
   "G1a": {
     "rev": "v0.22.3",
     "outcome": "FAILS",

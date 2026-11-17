@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'FIELD0230-F4', fixedIn: '0.22.8', symptom: 'Status/capacity reused stale filesystem free-space samples.', scenarios: [s('field0230-disk.test.ts', '^F4:')] },
   { id: 'FIELD0230-F3', fixedIn: '0.22.8', symptom: 'The queue admitted worktree setups below the free-disk start floor.', scenarios: [s('field0230-disk.test.ts', '^F3:')] },
   { id: 'FIELD0230-F1', fixedIn: '0.22.8', symptom: 'GC preview listed skipped dirty worktrees under cleanup candidates.', scenarios: [s('field0230-gc.test.ts', '^F1:')] },
   { id: 'WALL0229-HISTORY', fixedIn: '0.22.7', symptom: 'Archive retry deduplication collapsed legitimate close/reopen/close records sharing a timestamp.', scenarios: [s('wall-lifecycle.test.ts', '^WALL0229-HISTORY:')], noProof: 'Unreleased lifecycle API is absent on v0.22.6 (import error); this scenario fails on pre-fix 83e0350 (1 failing test), measured separately from the release proof.' },

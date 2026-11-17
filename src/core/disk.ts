@@ -15,8 +15,8 @@ import { fileVersion } from './file-version.ts';
 import { withFileLock } from './file-lock.ts';
 
 export type DiskLevel = 'ok' | 'warn' | 'critical' | 'unknown';
-export interface DiskVolume { device: string | null; paths: string[]; availableBytes: number | null; totalBytes: number | null; level: DiskLevel; error?: string }
-export interface DiskReport { reclaimableBytes?: number | null; gcHint?: boolean; measurementError?: string; /** The sizes below are the last ones measured (or none yet): a measurement is still running in the background. */ measuring?: boolean; worktreeCount?: number; largestWorktrees?: { path: string; bytes: number }[]; pathsTotal?: number; pathsOffset?: number; pathsNextOffset?: number | null; volumes: DiskVolume[]; worktreeBytes: number | null; measuredAt: string; level: DiskLevel }
+export interface DiskVolume { worktreeShareWarning?: {bytes: number; measuredAt: string; ageSeconds: number}; device: string | null; paths: string[]; availableBytes: number | null; totalBytes: number | null; level: DiskLevel; error?: string }
+export interface DiskReport { freeMeasuredAt?: string; worktreeAgeSeconds?: number; gcPolicyNote?: string; reclaimableBytes?: number | null; gcHint?: boolean; measurementError?: string; /** The sizes below are the last ones measured (or none yet): a measurement is still running in the background. */ measuring?: boolean; worktreeCount?: number; largestWorktrees?: { path: string; bytes: number }[]; pathsTotal?: number; pathsOffset?: number; pathsNextOffset?: number | null; volumes: DiskVolume[]; worktreeBytes: number | null; measuredAt: string; level: DiskLevel }
 export const DISK_INTERVAL_MS = 5 * 60_000;
 const restored = new Map<string, string>();
 export function diskLevel(bytes: number | null, warnGb: number, criticalGb: number): DiskLevel {
@@ -84,7 +84,10 @@ export async function collectDisk(ctx: Context, statfs = fs.promises.statfs, opt
   }
   for (const volume of volumes.values()) {
     const bytes = byDevice.get(volume.device ?? '') ?? 0;
-    if (volume.totalBytes && bytes / volume.totalBytes * 100 > ctx.config.disk.worktreeSharePercent && volume.level !== 'critical') volume.level = 'warn';
+    if (volume.totalBytes && bytes / volume.totalBytes * 100 > ctx.config.disk.worktreeSharePercent) {
+      if (volume.level !== 'critical') volume.level = 'warn';
+      volume.worktreeShareWarning = {bytes, measuredAt: new Date(measuredAt).toISOString(), ageSeconds: Math.max(0, Math.floor((ctx.runner.now() - measuredAt) / 1000))};
+    }
   }
   const gcHint = [...volumes.values()].some(v => v.level === 'warn' || v.level === 'critical');
   // A disk read never computes a GC plan; that belongs to an explicit gc preview.
@@ -93,7 +96,7 @@ export async function collectDisk(ctx: Context, statfs = fs.promises.statfs, opt
   const level = (['critical', 'warn', 'unknown', 'ok'] as const).find((l) => all.some((v) => v.level === l)) ?? 'unknown';
   const offset = opts.offset ?? 0, limit = Math.min(opts.limit ?? 20, 100);
   const paths = all.flatMap(v => v.paths), page = new Set(opts.detail ? paths.slice(offset, offset + limit) : []);
-  return { gcHint, reclaimableBytes, worktreeCount: worktrees.length, largestWorktrees, pathsTotal: paths.length, pathsOffset: offset, pathsNextOffset: opts.detail && offset + limit < paths.length ? offset + limit : null, volumes: all.map(v => ({ ...v, pathCount: v.paths.length, paths: v.paths.filter(p => page.has(p)) })), worktreeBytes, measuredAt: new Date(measuredAt).toISOString(), level, ...(pending ? { measuring: true } : {}), ...(measurementError ? { measurementError } : {}) };
+  return { freeMeasuredAt: new Date(ctx.runner.now()).toISOString(), worktreeAgeSeconds: Math.max(0, Math.floor((ctx.runner.now() - measuredAt) / 1000)), gcPolicyNote: 'GC removal blocked for pinned, active, dirty/unpushed or linked worktrees; cache kept unless explicitly authorized. Preview safety policy first.', gcHint, reclaimableBytes, worktreeCount: worktrees.length, largestWorktrees, pathsTotal: paths.length, pathsOffset: offset, pathsNextOffset: opts.detail && offset + limit < paths.length ? offset + limit : null, volumes: all.map(v => ({ ...v, pathCount: v.paths.length, paths: v.paths.filter(p => page.has(p)) })), worktreeBytes, measuredAt: new Date(measuredAt).toISOString(), level, ...(pending ? { measuring: true } : {}), ...(measurementError ? { measurementError } : {}) };
 }
 /** Restore the watch's persisted samples; never schedule or validate a recursive measurement. */
 export function restoreDiskMeasurements(ctx: Context): void {
@@ -118,7 +121,7 @@ function readingAge(ageMs: number): string {
 export function diskLine(disk: DiskReport, now: number = Date.now()): string {
   const age = `, ${readingAge(Math.max(0, now - Date.parse(disk.measuredAt)))} old`;
   const note = disk.measuring ? ` (measuring, last reading${age})` : disk.measurementError ? ` (measurement failed, last reading${age})` : age ? ` (last reading${age})` : '';
-  return `Disk: ${disk.level}; free ${disk.volumes.map((v) => v.availableBytes === null ? 'n/d' : `${(v.availableBytes / 1024 ** 3).toFixed(1)} GiB`).join(' / ')}; agentctl worktrees ${disk.worktreeBytes === null ? 'n/d' : `${(disk.worktreeBytes / 1024 ** 3).toFixed(1)} GiB`}${note}${disk.level === 'critical' || disk.level === 'warn' ? `; run agentctl gc --preview (gc_preview); reclaimable ${disk.reclaimableBytes ?? 'n/d'} bytes` : ''}`;
+  return `Disk: ${disk.level}; free ${disk.volumes.map((v) => v.availableBytes === null ? 'n/d' : `${(v.availableBytes / 1024 ** 3).toFixed(1)} GiB`).join(' / ')}; agentctl worktrees ${disk.worktreeBytes === null ? 'n/d' : `${(disk.worktreeBytes / 1024 ** 3).toFixed(1)} GiB`}${note}${disk.level === 'critical' || disk.level === 'warn' ? `; run agentctl gc --preview (gc_preview); reclaimable ${disk.reclaimableBytes ?? 'n/d'} bytes; ${disk.gcPolicyNote ?? 'GC may be blocked by protection policy; preview first.'}` : ''}`;
 }
 
 /**

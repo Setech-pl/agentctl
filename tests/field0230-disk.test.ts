@@ -59,3 +59,23 @@ it('F3: queue preview reports the last measured worktree cost and age per repo',
   const plan = await planQueueAdd(f.ctx, raw);
   assert.match(plan.summary.join('\n'), /worktree estimate repo: .*last reading, 60 s old/);
 });
+
+it('F4: status/capacity snapshots use fresh free space and label stale worktree size/policy', async t => {
+  const {MCP_TOOLS, publishMcpSnapshot} = await import('../src/core/mcp-tools.ts');
+  const f = await fixture('fresh-read');
+  const wt = scratch.sub('fresh-read/old');
+  fs.writeFileSync(`${wt}/bytes`, '123');
+  seedTask(f.config, 'OLD', {repos: [{path: f.repo, worktree: wt}]});
+  await sizeOf(wt, {fresh: true, now: () => f.runner.now() - 3600000});
+  let free = 80;
+  t.mock.method(fs.promises, 'statfs', async () => ({bavail: free, bsize: 1024 ** 3, blocks: 1000}));
+  await publishMcpSnapshot(f.ctx);
+  free = 18;
+  for (const name of ['status', 'capacity']) {
+    const r = await MCP_TOOLS.find(t => t.name === name)!.run({context: () => f.ctx, notify: async () => {}}, {format: 'json'});
+    const disk = JSON.parse(r.text).disk;
+    assert.equal(disk.volumes[0].availableBytes, 18 * 1024 ** 3);
+    assert.equal(disk.worktreeAgeSeconds, 3600);
+    assert.match(disk.gcPolicyNote, /blocked.*pinned.*dirty/);
+  }
+});

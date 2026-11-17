@@ -6,7 +6,7 @@ import { provider as providerAdapter, PROVIDERS } from './providers/registry.ts'
 import { get as providerValue } from './providers/registry.ts';
 import type { ProviderValues } from './providers/registry.ts';
 import { markTasks } from './mark.ts';
-import { collectDisk, DISK_INTERVAL_MS } from './disk.ts';
+import { collectDisk } from './disk.ts';
 import type { DiskReport } from './disk.ts';
 import { collectCapacity, renderCapacity } from './capacity.ts';
 import { shortPath } from './report-detect.ts';
@@ -781,19 +781,9 @@ const clock = (ms: number): string => {
   return [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':');
 };
 
-/** The last disk report per agentctl home: collected on its own cadence, shown from the cache on the other ticks. */
-const diskReadings = new Map<string, { at: number; report: DiskReport }>();
-
-/** The disk reading of this tick: the last report while it is fresh (volumes and worktree sizes change slowly). */
+/** Cheap filesystem counters are fresh on every board refresh; recursive sizes stay cached and age-labelled. */
 async function boardDisk(ctx: Context, records: TaskRecord[]): Promise<DiskReport> {
-  const key = ctx.config.path;
-  const now = ctx.runner.now();
-  const hit = diskReadings.get(key);
-  if (hit && now - hit.at < DISK_INTERVAL_MS) return hit.report;
-  // A bounded budget: the sizes of the worktrees keep measuring in the background, the tick shows the last reading.
-  const report = await collectDisk(ctx, fs.promises.statfs, { budgetMs: 250, records });
-  diskReadings.set(key, { at: now, report });
-  return report;
+  return collectDisk(ctx, fs.promises.statfs, {records});
 }
 
 export interface LoadBoardOptions {
