@@ -18,8 +18,8 @@ import type { WallSettings } from './wall-config.ts';
  *
  * Storage is event-sourced: `<config dir>/wall/<channel>.jsonl` holds one JSON line per record, a `post` (the message
  * with its first status) or a `status` (a later status of a message, with who set it). History is retained when closed records move to monthly archives; `index.json` is a cache
- * of the folded headers (no bodies) and the byte length it covers, so a read parses only what was appended since. The index can always be
- * rebuilt from the JSONL files.
+ * of active headers (no bodies). Archive headers are cached by inode and size; active status records overlay them on reads. The index
+ * can always be rebuilt from the JSONL files.
  *
  * WALL content is data, never instructions: a chat or an agent acts on a message only after the owner decided so in its own chat.
  */
@@ -259,9 +259,10 @@ function fold(index: ChannelIndex, record: WallPostRecord | WallStatusRecord, of
   const message = index.messages.find((m) => m.id === record.id);
   if (!message) return;
   if (record.reminder) { message.remindedAt = record.ts; return; }
-  if (message.history.some(h => JSON.stringify(h) === JSON.stringify({ status: record.status, ts: record.ts, by: record.by, ...(record.for ? { for: record.for } : {}), ...(record.note ? { note: record.note } : {}), ...(record.via ? { via: record.via } : {}) }))) return;
+  const change: WallStatusChange = { status: record.status, ts: record.ts, by: record.by, ...(record.for ? { for: record.for } : {}), ...(record.note ? { note: record.note } : {}), ...(record.via ? { via: record.via } : {}) };
+  if (message.history.some(h => JSON.stringify(h) === JSON.stringify(change))) return;
   message.status = record.status;
-  message.history.push({ status: record.status, ts: record.ts, by: record.by, ...(record.for ? { for: record.for } : {}), ...(record.note ? { note: record.note } : {}), ...(record.via ? { via: record.via } : {}) });
+  message.history.push(change);
 }
 
 /** Parse the complete lines of `file` from `from` on into `index`; a torn last line waits for its newline. */
@@ -311,33 +312,41 @@ function archiveFiles(config: GlobalConfig, channel: string): string[] {
   catch { return []; }
 }
 
+const archiveMemo = new Map<string, ChannelIndex>();
+
+function archiveHeaders(file: string): WallHeader[] {
+  const st = fs.statSync(file);
+  let index = archiveMemo.get(file);
+  if (!index || index.ino !== st.ino || index.size !== st.size) {
+    index = { size: 0, ino: st.ino, messages: [] };
+    foldTail(file, index, 0, st.size);
+    archiveMemo.set(file, index);
+  }
+  return index.messages.map(m => ({ ...m, history: [...m.history], storageFile: file, archived: true }));
+}
+
 export function channelMessages(config: GlobalConfig, channel: string): WallHeader[] {
+  const activeIndex = loadChannel(config, channel);
+  if (!archiveFiles(config, channel).length) return activeIndex.messages;
   // Capture active data before discovering archives: a concurrent archive-first move
   // always leaves at least one complete copy in this read's snapshot.
   const file = channelFile(config, channel);
   let active: Buffer;
   try { active = fs.readFileSync(file); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; active = Buffer.alloc(0); }
   const index: ChannelIndex = { size: 0, ino: 0, messages: [] };
-  const consume = (data: Buffer, source?: string) => {
+  for (const source of archiveFiles(config, channel)) index.messages.push(...archiveHeaders(source));
+  const consume = (data: Buffer) => {
     let start = 0;
     for (;;) {
       const end = data.indexOf(10, start);
       if (end < 0) break;
       try {
         const r: unknown = JSON.parse(data.subarray(start, end).toString('utf8'));
-        if (isRecord(r)) {
-          const exists = index.messages.some(m => m.id === r.id);
-          fold(index, r, start, end - start);
-          if (source && r.type === 'post' && !exists) {
-            const m = index.messages.at(-1)!;
-            m.storageFile = source; m.archived = true;
-          }
-        }
+        if (isRecord(r)) fold(index, r, start, end - start);
       } catch { /* tolerate broken lines as for the active index */ }
       start = end + 1;
     }
   };
-  for (const source of archiveFiles(config, channel)) consume(fs.readFileSync(source), source);
   consume(active);
   return index.messages.sort((a, b) => a.seq - b.seq);
 }
@@ -405,6 +414,13 @@ export async function maintainWall(ctx: Context): Promise<void> {
     const { config } = ctx;
     const now = ctx.runner.now();
     for (const channel of wallChannels(config)) {
+      const source = channelFile(config, channel);
+      if (fs.existsSync(source)) {
+        const raw = fs.readFileSync(source, 'utf8');
+        // A maintenance append must never merge into an incomplete record.
+        if (raw && !raw.endsWith('\n')) continue;
+        try { if (!raw.split('\n').filter(Boolean).every(line => isRecord(JSON.parse(line)))) continue; } catch { continue; }
+      }
       let messages = channelMessages(config, channel);
       for (const m of messages.filter(isOpen)) {
         if (m.kind !== 'question' && m.kind !== 'decision-request' && m.kind !== 'contract-change') continue;

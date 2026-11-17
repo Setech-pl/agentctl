@@ -2391,7 +2391,7 @@ for (const tool of MCP_TOOLS) {
           if (who.kind === 'chat') {
             const messages = readWall(ctx, who, {status: 'open', archive: true, limit: 100}).messages
               .filter(m => m.to === who.id || m.kind === 'question' || m.kind === 'decision-request').slice(-10);
-            inbox = ['WALL do Ciebie (open)', ...messages.map(m => `${m.id} (${wallAge(m.ts, ctx.runner.now())}): ${m.subject.slice(0, 100)}${m.from === who.id ? ' (yours)' : ''}`), ...(!messages.length ? ['brak'] : [])].join('\n') + '\n';
+            inbox = ['WALL do Ciebie (open)', ...messages.map(m => `${m.id}: ${m.subject.slice(0, 100)} (${wallAge(m.ts, ctx.runner.now())})${m.from === who.id ? ' (yours)' : ''}`), ...(!messages.length ? ['brak'] : [])].join('\n') + '\n';
           } else if (who.kind === 'unknown') inbox = 'unknown chat – only channel agentctl visible; pass as: "chat:<name>"\n';
         } catch { /* retain the durable bounded response even when WALL storage is unavailable */ }
       }

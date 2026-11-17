@@ -150,4 +150,31 @@ describe('WALL lifecycle (fake clock, no inference/network)', () => {
     assert.deepEqual(wallMessages(state, state.mode as never).map(m => m.id), [archived.id]);
     assert.match(wallView(state, state.mode as never).title, /ARCHIVE/);
   });
+
+  it('keeps archive headers cached, and leaves a torn active log untouched', async () => {
+    const w = world('cached-archive');
+    const old = await w.post('info');
+    await w.runner.sleep(15 * day);
+    await maintainWall(w.ctx);
+    findMessage(w.config, old.id);
+    const read = fs.readFileSync;
+    let archiveReads = 0;
+    fs.readFileSync = ((file: fs.PathOrFileDescriptor, ...args: unknown[]) => {
+      if (String(file).includes(`${path.sep}archive${path.sep}`)) archiveReads++;
+      return (read as Function)(file, ...args);
+    }) as typeof fs.readFileSync;
+    try {
+      findMessage(w.config, old.id);
+      findMessage(w.config, old.id);
+      assert.equal(archiveReads, 0, 'unchanged archives are not reparsed on every read');
+    } finally { fs.readFileSync = read; }
+    const q = await w.post();
+    fs.appendFileSync(channelFile(w.config, q.channel), '{"v":1');
+    const before = fs.readFileSync(channelFile(w.config, q.channel), 'utf8');
+    await w.runner.sleep(8 * day);
+    await maintainWall(w.ctx);
+    assert.equal(fs.readFileSync(channelFile(w.config, q.channel), 'utf8'), before);
+    assert.equal(findMessage(w.config, q.id).status, 'open');
+  });
+
 });
