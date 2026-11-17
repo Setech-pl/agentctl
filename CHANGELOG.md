@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- F8: durable long-attention escalation after 15 min: desktop, configured phone and one owner WALL decision-request per task attempt. / Trwała eskalacja po 15 min: pulpit, skonfigurowany telefon i jedno pytanie WALL do właściciela na próbę zadania.
+
 - FIELD0230-F7: timezone-aware peak schedules, default GLM Singapore 14–18 weekdays, hold/short_only admission. / Szczyt ze strefą czasu, domyślnie GLM 14–18 w Singapurze w dni robocze, polityki hold/short_only.
 
 - FIELD0230-F6: shared provider holds explicitly name global scope and source task in status/limits. / Globalne blokady providera pokazują zakres i zadanie źródłowe w status/limits.

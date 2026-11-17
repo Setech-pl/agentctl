@@ -273,6 +273,7 @@ export interface McpSettings {
 }
 
 export interface NotifySettings {
+  attentionAfterMin: number;
   /** Which channel sends notifications; default `auto`. */
   backend: NotifyBackend;
   mcpWrites?: 'all' | 'summary' | 'off';
@@ -368,7 +369,7 @@ export const DEFAULTS_KEYS = ['agent', 'model', 'effort', 'remote_control'];
 export const LINK_KEYS = ['from', 'to'];
 export const AGENT_KEYS = ['env', 'accepts_busy_prompt', 'flags', 'effort_args', 'ready_pattern', 'ready_timeout', 'trust_timeout', 'trust_pattern', 'dialog_pattern', 'working_pattern', 'delivery_pattern', 'interrupt_key', 'footer_patterns', 'question_pattern', 'async_question_pattern', 'approval_pattern', 'limit_patterns', 'background_patterns', 'overload_patterns'];
 export const WATCH_KEYS = ['interval', 'waiting_after', 'window_icons', 'status_line', 'idle_confirm_ticks'];
-export const NOTIFY_KEYS = ['backend', 'events', 'turn_end', 'terminal_app', 'verdict_pattern', 'ntfy', 'mcp_writes', 'mcp_writes_interval_s'];
+export const NOTIFY_KEYS = ['attention_after_min', 'backend', 'events', 'turn_end', 'terminal_app', 'verdict_pattern', 'ntfy', 'mcp_writes', 'mcp_writes_interval_s'];
 export const NTFY_KEYS = ['server', 'topic', 'token', 'events', 'priority', 'include_verdict', 'include_question', 'click_url', 'always'];
 export const AWAY_KEYS = ['auto_idle'];
 export const MANAGER_KEYS = ['project', 'name', 'model', 'effort', 'guide', 'autostart'];
@@ -665,13 +666,17 @@ function parseWatch(v: unknown, p: Problems): GlobalConfig['watch'] {
 }
 
 function parseNotify(v: unknown, p: Problems): NotifySettings {
-  const notify: NotifySettings = { backend: 'auto', events: true, turnEnd: true, mcpWrites: 'summary', mcpWritesIntervalS: 60 };
+  const notify: NotifySettings = { attentionAfterMin: 15, backend: 'auto', events: true, turnEnd: true, mcpWrites: 'summary', mcpWritesIntervalS: 60 };
   if (v === undefined || v === null) return notify;
   if (!isObject(v)) {
     p.add('config.notify must be a mapping like {terminal_app: com.apple.Terminal, verdict_pattern: "^Verdict:"}');
     return notify;
   }
   checkKeys(v, NOTIFY_KEYS, 'config.notify', p);
+  if (v.attention_after_min !== undefined) {
+    if (typeof v.attention_after_min === 'number' && Number.isFinite(v.attention_after_min) && v.attention_after_min > 0) notify.attentionAfterMin = v.attention_after_min;
+    else p.add('config.notify.attention_after_min must be positive minutes');
+  }
   notify.mcpWrites = parseEnumValue(v.mcp_writes, ['all', 'summary', 'off'] as const, 'config.notify.mcp_writes', p) ?? 'summary';
   if (v.mcp_writes_interval_s !== undefined) {
     if (typeof v.mcp_writes_interval_s === 'number' && Number.isFinite(v.mcp_writes_interval_s) && v.mcp_writes_interval_s > 0) notify.mcpWritesIntervalS = v.mcp_writes_interval_s;

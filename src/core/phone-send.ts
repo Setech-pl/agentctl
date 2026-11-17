@@ -127,10 +127,10 @@ export async function phoneHint(ctx: Context, event: PhoneEvent, task: string | 
  * Send the event to the phone if the phone is on duty: a topic, away on (or `notify.ntfy.always`) and the event in `notify.ntfy.events`.
  * Returns `sent`, `queued` (the first request failed; the watcher retries), or undefined when nothing was sent.
  */
-export async function notifyPhone(ctx: Context, entry: Pick<JournalEntry, 'kind' | 'level' | 'task' | 'cohort' | 'verdict' | 'text'>): Promise<'sent' | 'queued' | undefined> {
+export async function notifyPhone(ctx: Context, entry: Pick<JournalEntry, 'kind' | 'level' | 'task' | 'cohort' | 'verdict' | 'text'>, opts: {forceActive?: boolean} = {}): Promise<'sent' | 'queued' | undefined> {
   const ntfy = ctx.config.notify.ntfy;
   const event = phoneEventOf(entry);
-  if (!ntfy || !event || !phoneActive(ctx.config) || !ntfy.events.includes(event)) return undefined;
+  if (!ntfy || !event || (!opts.forceActive && !phoneActive(ctx.config)) || !ntfy.events.includes(event)) return undefined;
   const input: PhoneInput = { task: entry.task, cohort: entry.cohort, verdict: entry.verdict, usage: entry.text, text: entry.text, hint: await phoneHint(ctx, event, entry.task) };
   if (event === 'needs-input' && entry.task) {
     const record = readTaskRecord(ctx.config, windowName(entry.task));

@@ -1,3 +1,4 @@
+import { attentionTick } from './attention.ts';
 import { maintainWall } from './wall.ts';
 import { autoClosePulled } from './pulled-auto-close.ts';
 import { applyAcceptedWrites } from './queue.ts';
@@ -276,6 +277,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   await usageTick(ctx, notifier, startLog).catch((e: unknown) => startLog(`usage: ${errorMessage(e)}`));
   // The phone: requests that failed before are tried again (a network error never stops the watcher).
   for (const l of await phoneTick(ctx).catch((e: unknown) => [`phone: ${errorMessage(e)}`])) await startLog(l);
+  await attentionTick(ctx, allRows, notifier).catch((e: unknown) => startLog(`attention: ${errorMessage(e)}`));
   const events = detectTransitions(memory, rows, now, ctx.config.watch.waitingAfter * 1000);
   const alerts = new Alerts(ctx, notifier, { self: options.self });
   for (const e of events) {
