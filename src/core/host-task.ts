@@ -1,3 +1,4 @@
+import { fillTaskLinkTargets, projectDefaultLinkPolicy } from './links.ts';
 import { parseKimiConfigText, kimiConfigProblem, configuredModel } from './providers/kimi-config.ts';
 import { matrixKimiModels } from './matrix.ts';
 import path from 'node:path';
@@ -45,6 +46,7 @@ export async function prepareRemoteTask(ctx: Context, spec: ResolvedSpec, reuse 
   const repos: ResolvedSpec['repos'] = [];
   let projectEnv: Record<string, string> = {};
   const links = [...spec.links];
+  const defaults: ResolvedSpec['links'] = [];
   for (const [index, raw] of spec.repos.entries()) {
     let repo = { ...raw, path: remotePath(raw.path, home), worktree: remotePath(raw.worktree, home, root) };
     if (repo.worktree === repo.path || repo.worktree === root || !repo.worktree.startsWith(`${root}/`)) throw new AgentctlError(`${spec.task}: remote worktree must be a separate directory inside hosts.${spec.host}.work_dir (${root})`);
@@ -72,13 +74,24 @@ export async function prepareRemoteTask(ctx: Context, spec: ResolvedSpec, reuse 
       if (!spec.readOnly && !repo.setupExplicit && project.setup) repo.setup = project.setup;
       if (index === 0) {
         projectEnv = project.env ?? {};
-        for (const link of (spec.readOnly ? [] : project.links) ?? []) if (!links.some(l => l.from === link.from)) links.push(link);
+        for (const link of (spec.readOnly || spec.inheritProjectLinks === false ? [] : project.links) ?? []) if (!links.some(l => l.from === link.from)) defaults.push(link);
       }
     }
     const fill = (s: string) => fillPlaceholders(s, { task: spec.task, cache: path.posix.join(root, 'reports') }).replaceAll('{worktree}', repo.worktree);
     repo.setup = repo.setup?.map(fill);
     repos.push(repo);
   }
+  const intentional = new Set<string>();
+  const filledDefaults = defaults.map(link => {
+    const target = fillTaskLinkTargets(link.to, ctx.config, {allowMissingClosed: true}).replace(/\{worktree:([^{}|]+)(?:\|([^{}]+))?\}/g, (_match, name: string, fallback: string | undefined) => {
+      intentional.add(link.from);
+      const matches = repos.filter(r => path.posix.basename(r.path) === name);
+      if (matches.length > 1 || !matches.length && !fallback) throw new AgentctlError(`${spec.task}: ambiguous or missing remote repository ${name}`);
+      return matches[0]?.worktree ?? fallback!;
+    });
+    return {...link, to: remotePath(fillPlaceholders(target, {task: spec.task, cache: path.posix.join(root, 'reports')}).replaceAll('{worktree}', repos[0]!.worktree), home, repos[0]!.worktree)};
+  });
+  links.push(...projectDefaultLinkPolicy(filledDefaults, ctx.config, repos, repos[0]!.path, runner.now(), intentional, spec.host).links);
   await runner.mkdir(dir);
   await runner.mkdir(path.posix.dirname(report));
   return { ...spec, repos, env: Object.fromEntries(Object.entries({ ...host.env, ...projectEnv, ...spec.env }).map(([k, v]) => [k, v === '~' || v.startsWith('~/') ? remotePath(v, home) : v])), links: links.map(l => ({ from: l.from, to: remotePath(l.to, home, repos[0]!.worktree) })), remoteReport: report, remoteDir: dir };

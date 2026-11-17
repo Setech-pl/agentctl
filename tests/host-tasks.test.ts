@@ -149,7 +149,7 @@ function world(agent = 'claude', extra = '') {
   }
   const runner = new FakeSSH({ dryRun: false });
   const out: string[] = [], ctx = new Context(runner, config, s => out.push(s));
-  const spec = (task = 'R-1') => resolveSpec(splitSpecs(`---\ntask: ${task}\nhost: pc\nagent: ${agent}\nmodel: ${agent === 'codex' ? 'gpt-6.1-sol' : agent === 'kimi' ? 'k3' : agent === 'glm' ? 'glm-5.3' : 'opus'}\neffort: high\nrepos: [{path: app, base: origin/main, branch: remote-feature}]\n---\nRun a deterministic remote task.`)[0]!, { config });
+  const spec = (task = 'R-1', extra = '') => resolveSpec(splitSpecs(`---\ntask: ${task}\n${extra}\nhost: pc\nagent: ${agent}\nmodel: ${agent === 'codex' ? 'gpt-6.1-sol' : agent === 'kimi' ? 'k3' : agent === 'glm' ? 'glm-5.3' : 'opus'}\neffort: high\nrepos: [{path: app, base: origin/main, branch: remote-feature}]\n---\nRun a deterministic remote task.`)[0]!, { config });
   return { ctx, config, runner, tmux, localTmux, commands, sshCalls, envs, keys, pastes, out, work, clone, remoteHome, spec, record: () => readTaskRecord(config, 'r-1')!, offline: (v: boolean) => { offline = v; }, missingBase: () => { baseMissing = true; }, writes: () => reportWrites };
 }
 
@@ -376,4 +376,24 @@ it('REL0243-REMOTE: peak and provider holds stop remote setup; scrolled answers 
   assert.equal(result.isError, undefined, result.text);
   assert.ok(result.text.includes('"host": "pc"'));
   assert.equal(w.sshCalls.length, calls, 'snapshot read starts no SSH');
+});
+
+it('REL0243-PREVIEW: MCP remote queue preview uses host disk, with no SSH or local remote-path stat', async () => {
+  const w = world(); w.config.disk.minFreeStartGb = 30; w.config.mcp.allow = ['queue'];
+  const tool = MCP_TOOLS.find(t => t.name === 'queue')!;
+  const result = await tool.run({context: () => w.ctx, notify: async () => {}}, {spec: `---\ntask: PREVIEW\nhost: pc\nagent: claude\nrepos: [{path: app}]\n---\nFake.`});
+  assert.equal(result.isError, undefined, result.text);
+  assert.match(result.text, /dysk \[pc\].*świeżego/);
+  assert.equal(w.sshCalls.length, 0);
+});
+it('REL0243-LINKS: remote project defaults reject closed tasks and honor links: []', async () => {
+  const w = world();
+  seedTask(w.config, 'OLD', {host: 'pc', closed: true, repos: [{path: '/remote/backend', worktree: '/remote/backend-old'}]});
+  fs.writeFileSync(path.join(w.clone, '.agentctl.yaml'), 'links: [{from: backend, to: /remote/backend-old}]\n');
+  await assert.rejects(newTasks(w.ctx, [w.spec()], {waitTrust: false}), /stale project link/);
+  const clean = world();
+  seedTask(clean.config, 'OLD', {host: 'pc', closed: true, repos: [{path: '/remote/backend', worktree: '/remote/backend-old'}]});
+  fs.writeFileSync(path.join(clean.clone, '.agentctl.yaml'), 'links: [{from: backend, to: /remote/backend-old}]\n');
+  await assert.rejects(newTasks(clean.ctx, [clean.spec('R-1', 'links: []')], {waitTrust: false}), /waits for folder trust/);
+  assert.ok(!clean.commands.some(c => c[0] === 'ln'));
 });

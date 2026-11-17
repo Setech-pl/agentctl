@@ -26,6 +26,8 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'REL0243-PREVIEW', fixedIn: '0.23.1', symptom: 'MCP remote queue preview used dispatcher disk instead of host work_dir.', scenarios: [s('host-tasks.test.ts', '^REL0243-PREVIEW:')], noProof: 'Introduced by integrating 0.22.8 disk previews with remote hosts; absent from either previous release.' },
+  { id: 'REL0243-LINKS', fixedIn: '0.23.1', symptom: 'Remote project defaults ignored links: [] and accepted closed-task backends.', scenarios: [s('host-tasks.test.ts', '^REL0243-LINKS:')] },
   { id: 'REL0243-GC', fixedIn: '0.23.1', symptom: 'Remote GC bypassed cache opt-in, pins and unpushed-commit protection.', scenarios: [s('host-gc.test.ts', '^REL0243-GC:')] },
   { id: 'REL0243-DISK', fixedIn: '0.23.1', symptom: 'Remote setup did not enforce free disk in its host work_dir.', scenarios: [s('host-tasks.test.ts', '^REL0243-DISK:')] },
   { id: 'HOST-RESUME-HOLD', fixedIn: '0.23.0', symptom: 'An explicit owner resume was silently skipped during a queued provider hold (introduced in unreleased HOST-0C).', noProof: 'Introduced in unreleased 3f0078c; v0.22.4 local resume was unaffected. Both scenarios fail on 6c574f7 (measured in HOST0C-prefix-resume.log).', scenarios: [s('resume.test.ts', '^HOST-RESUME-HOLD:'), s('host-tasks.test.ts', '^HOST-RESUME-HOLD:')] },

@@ -135,6 +135,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
   }
   const specs = admitted ? requested : await planBatch(ctx, requested, opts);
   for (const spec of specs.filter(s => !s.host)) checkLinkTargets(spec.links.filter(l => !spec.repos.some(r => l.to === r.worktree || l.to.startsWith(`${r.worktree}/`))), spec.task);
+  if (!runner.dryRun && opts.noAgent) for (const spec of specs) { const held = await freshTaskDiskStartHold(ctx, spec.host, spec.repos.map(r => r.worktree)); if (held) throw new AgentctlError(held); }
   const versions: Record<string, string> = {};
   if (!runner.dryRun && !opts.noAgent) {
     for (const agent of new Set(specs.filter(s => !s.host).map((s) => s.agent))) versions[agent] = await requireTool(ctx, providerCommand(config, agent), ['--version'], INSTALL_HINTS[agent]);

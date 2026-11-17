@@ -10,6 +10,8 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| REL0243-PREVIEW | MCP remote queue preview used dispatcher disk instead of host work_dir. | `tests/host-tasks.test.ts` (`^REL0243-PREVIEW:`) | 0.23.1 | not proven: Introduced by integrating 0.22.8 disk previews with remote hosts; absent from either previous release. |
+| REL0243-LINKS | Remote project defaults ignored links: [] and accepted closed-task backends. | `tests/host-tasks.test.ts` (`^REL0243-LINKS:`) | 0.23.1 | fails on v0.23.0 (1 failing of 1) |
 | REL0243-GC | Remote GC bypassed cache opt-in, pins and unpushed-commit protection. | `tests/host-gc.test.ts` (`^REL0243-GC:`) | 0.23.1 | fails on v0.23.0 (2 failing of 2) |
 | REL0243-DISK | Remote setup did not enforce free disk in its host work_dir. | `tests/host-tasks.test.ts` (`^REL0243-DISK:`) | 0.23.1 | fails on v0.23.0 (1 failing of 1) |
 | HOST-RESUME-HOLD | An explicit owner resume was silently skipped during a queued provider hold (introduced in unreleased HOST-0C). | `tests/resume.test.ts` (`^HOST-RESUME-HOLD:`)<br>`tests/host-tasks.test.ts` (`^HOST-RESUME-HOLD:`) | 0.23.0 | not proven: Introduced in unreleased 3f0078c; v0.22.4 local resume was unaffected. Both scenarios fail on 6c574f7 (measured in HOST0C-prefix-resume.log). |

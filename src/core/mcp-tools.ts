@@ -1,5 +1,5 @@
 import { planRemoteGc } from './host-gc.ts';
-import { refreshDiskFreeSpace, diskStartHold, worktreeCostEstimates } from './disk.ts';
+import { refreshDiskFreeSpace, taskDiskStartHold, worktreeCostEstimates } from './disk.ts';
 import { peakLines, peakHold } from './peak.ts';
 import { pulledOpen, pulledSummary, pulledCohortTasks, checkPulledClose } from './pulled.ts';
 import { readProviderHoldState, providerHoldText, providerHoldLines } from './provider-hold.ts';
@@ -1045,7 +1045,7 @@ function cheapSpecSummary(ctx: Context, specs: ResolvedSpec[], queued: boolean):
   }), ...specs.flatMap(spec => [
     ...(spec.after.length ? [`${spec.task} after: ${spec.after.join(', ')} (watch checks dependency state)`] : []),
     ...worktreeCostEstimates(ctx, spec.repos, {persistedOnly: true}).map(cost => `  worktree estimate ${cost.repo}: ${cost.bytes === null ? 'n/d (no measurement yet)' : `${(cost.bytes / 1024 ** 3).toFixed(2)} GB (last reading, ${cost.ageSeconds} s old)`}`),
-    `  start: ${diskStartHold(ctx.config, spec.repos.map(r => r.worktree)) ?? peakHold(ctx.config, spec, ctx.runner.now()) ?? (isPaused(ctx.config) ? 'queue paused; starts after queue_resume (agentctl queue resume)' : !ctx.config.queue.enabled ? 'queue.enabled is false; enable the queue first' : `waits for a free ${spec.agent} window; watch checks capacity at accept`)}`,
+    `  start: ${taskDiskStartHold(ctx.config, spec.host, spec.repos.map(r => r.worktree), ctx.runner.now()) ?? peakHold(ctx.config, spec, ctx.runner.now()) ?? (isPaused(ctx.config) ? 'queue paused; starts after queue_resume (agentctl queue resume)' : !ctx.config.queue.enabled ? 'queue.enabled is false; enable the queue first' : `waits for a free ${spec.agent} window; watch checks capacity at accept`)}`,
     ...(spec.reviewOf && !spec.after.includes(spec.reviewOf) ? [`  hint: if the author report is not ready, add "after: ${spec.reviewOf}" so the review waits for it`] : []),
   ])];
 }

@@ -186,15 +186,16 @@ export function staleProjectLinkWarnings(links: Link[], config: GlobalConfig): s
 }
 
 /** Inherited links to a supplied repository are redundant. Other closed-task defaults are errors, never silently skipped. */
-export function projectDefaultLinkPolicy(links: Link[], config: GlobalConfig, repos: ResolvedRepo[], _project: string, _now = Date.now(), intentionalWorktrees = new Set<string>()): { links: Link[]; notices: string[] } {
+export function projectDefaultLinkPolicy(links: Link[], config: GlobalConfig, repos: ResolvedRepo[], _project: string, _now = Date.now(), intentionalWorktrees = new Set<string>(), host?: string): { links: Link[]; notices: string[] } {
   if (!links.length) return {links, notices: []};
-  const current = listTaskRecords(config);
-  const records = [...current, ...listArchivedRecords(config).filter(r => !current.some(c => c.task === r.task)).map(r => ({...r, closed: true}))];
+  const loc = host ? path.posix.resolve : resolvedLocation;
+  const current = listTaskRecords(config).filter(r => r.host === host);
+  const records = [...current, ...listArchivedRecords(config).filter(r => r.host === host).filter(r => !current.some(c => c.task === r.task)).map(r => ({...r, closed: true}))];
   const inside = (child: string, parent: string) => child === parent || child.startsWith(`${parent}${path.sep}`);
   const kept = links.filter(link => {
-    const target = resolvedLocation(link.to.endsWith('/*') ? path.dirname(link.to) : link.to);
-    const owners = records.filter(r => r.repos.some(repo => inside(target, resolvedLocation(repo.worktree))));
-    const supplied = repos.some(repo => inside(target, resolvedLocation(repo.path)) || inside(target, resolvedLocation(repo.worktree)) || owners.some(owner => owner.repos.some(r => inside(target, resolvedLocation(r.worktree)) && resolvedLocation(r.path) === resolvedLocation(repo.path))));
+    const target = loc(link.to.endsWith('/*') ? path.dirname(link.to) : link.to);
+    const owners = records.filter(r => r.repos.some(repo => inside(target, loc(repo.worktree))));
+    const supplied = repos.some(repo => inside(target, loc(repo.path)) || inside(target, loc(repo.worktree)) || owners.some(owner => owner.repos.some(r => inside(target, loc(r.worktree)) && loc(r.path) === loc(repo.path))));
     if (supplied && !intentionalWorktrees.has(link.from)) return false;
     const stale = owners.filter(r => r.closed || r.cancelled);
     if (stale.length) throw new AgentctlError(`stale project link ${link.from} -> ${link.to}: target belongs to closed task ${stale.map(r => r.task).join(', ')}`, "Use the spec's own backend worktree ({worktree:backend}, adding backend to repos), or set links: [] to disable project defaults.");

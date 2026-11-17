@@ -964,6 +964,16 @@
       "REL0243-GC: remote unpushed commits and report artifact references stay"
     ]
   },
+  "REL0243-LINKS": {
+    "rev": "v0.23.0",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0243-LINKS: remote project defaults reject closed tasks and honor links: []",
+      "REL0243-LINKS: remote project defaults reject closed tasks and honor links: []"
+    ]
+  },
   "UX0228": {
     "rev": "v0.22.5",
     "outcome": "FAILS",

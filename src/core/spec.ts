@@ -68,6 +68,8 @@ export interface ResolvedSpec {
   effort: Effort;
   repos: ResolvedRepo[];
   links: Link[];
+  /** Remote project defaults can be explicitly disabled with links: []. */
+  inheritProjectLinks?: boolean;
   /** Preview diagnostics for inherited project links; not persisted as task links. */
   linkWarnings?: string[];
   /** Shell commands for the first worktree: after `git worktree add`, before the links. */
@@ -532,6 +534,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     effort,
     repos,
     links: [...linkByFrom.values()],
+    ...(host ? {inheritProjectLinks: !(Array.isArray(h.links) && h.links.length === 0)} : {}),
     ...(linkWarnings.length ? { linkWarnings } : {}),
     setup: repos[0]?.setup ?? [],
     env,
