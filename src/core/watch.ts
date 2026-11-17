@@ -1,3 +1,4 @@
+import { autoClosePulled } from './pulled-auto-close.ts';
 import { applyAcceptedWrites } from './queue.ts';
 import { consultTick } from './consult.ts';
 import { applyInstanceLabel } from './instance.ts';
@@ -227,6 +228,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   memory.lastTickAt = tickAt;
   // A closed or cancelled task is off the list: no transitions, no notifications (closing a task with no report is not a vanished window).
   let allRows = await collectStatus(ctx, { progress: false, archived: true });
+  if (await autoClosePulled(ctx, allRows)) allRows = await collectStatus(ctx, { progress: false, archived: true });
   for (const row of allRows) {
     const record = !row.closed && !row.cancelled ? readTaskRecord(ctx.config, row.windowName) : undefined;
     if (row.tmuxLost) continue;

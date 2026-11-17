@@ -269,6 +269,7 @@ const KIND_LABEL: Record<JournalEntry['kind'], string> = {
   usage: 'UŻYCIE',
   'limits-changed': 'LIMITY',
   'report-detected': 'RAPORT WYKRYTY',
+  'pulled-auto-close': 'ODEBRANE ZAMKNIĘTE',
   delivery: 'WIADOMOŚĆ',
   'delivery-queued': 'WIADOMOŚĆ W KOLEJCE',
   'mcp-applied': 'MCP WYKONANE',

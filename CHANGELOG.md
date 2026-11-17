@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### 0.22.6
 
+- Add configurable collapse delay and owner opt-in watch auto-close with a journal event; disabled by default. / Konfigurowalne opóźnienie zwijania i opcjonalne zamykanie przez watch ze zdarzeniem, domyślnie wyłączone.
+
 - UX0228: fold pulled report-ready tasks per cohort; Enter expands, B previews bulk close without removing worktrees. Unpulled reports lead and stay highlighted. / Odebrane raporty zwijają się w kohortach; Enter rozwija, B pokazuje listę do zamknięcia bez usuwania worktree. Nieodebrane raporty są wyróżnione na górze.
 
 ## [0.22.5] - 2026-11-16
