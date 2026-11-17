@@ -42,7 +42,7 @@ export interface JournalEntry {
   /** The event went to the phone: `sent`, or `queued` when the first request failed and the watcher retries. Absent: not sent (away off, event not chosen, no phone). */
   phone?: 'sent' | 'queued';
   /** `wall` only: the message that was posted (never its body). events_since returns it to the clients subscribed to the channel. */
-  wall?: { channel: string; kind: string; subject: string; id: string; from: string };
+  wall?: { recipients?: string[]; channel: string; kind: string; subject: string; id: string; from: string };
   /** `report-outputs` only: the report's `wall_posts` that were published (ids) and the ones that were not (why; never a body). */
   wallPosts?: { posted: string[]; findings: string[] };
 }

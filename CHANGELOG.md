@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- WALL0229: one reminder after 24 hours to author/addressee, inactive questions become stale after 7 days; owner-only decisions/contracts remain open. Configurable thresholds, watch maintenance. / Jedno przypomnienie po 24 godzinach do autora/adresata, nieaktywne pytania przechodzą w stale po 7 dniach; decyzje/kontrakty pozostają otwarte dla właściciela. Progi konfigurowalne, obsługa przez watch.
+
 - WALL0229: archive closed messages after 14 days with complete history and stable ID/thread lookups; list reads default to 7 days, explicit since/archive reaches older data. / Archiwizacja zamkniętych wiadomości po 14 dniach z pełną historią i stałymi ID; listy domyślnie obejmują 7 dni, jawne since/archive sięga do starszych danych.
 
 ## [0.22.6] - 2026-11-17

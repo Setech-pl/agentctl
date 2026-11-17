@@ -405,7 +405,19 @@ export async function maintainWall(ctx: Context): Promise<void> {
     const { config } = ctx;
     const now = ctx.runner.now();
     for (const channel of wallChannels(config)) {
-      const messages = channelMessages(config, channel);
+      let messages = channelMessages(config, channel);
+      for (const m of messages.filter(isOpen)) {
+        if (m.kind !== 'question' && m.kind !== 'decision-request' && m.kind !== 'contract-change') continue;
+        const last = Math.max(Date.parse(m.ts), ...m.history.map(h => Date.parse(h.ts)), ...messages.filter(r => r.replyTo === m.id).map(r => Date.parse(r.ts)));
+        if (!m.remindedAt && now - last >= config.wall.remindAfterHours * 3600000) {
+          appendRecord(config, channel, { v: 1, type: 'status', id: m.id, ts: new Date(now).toISOString(), status: m.status, by: 'watch', reminder: true });
+          await recordJournal(ctx, { kind: 'wall', text: `WALL czeka na odpowiedź: ${m.id}`, wall: { channel, kind: m.kind, subject: m.subject, id: m.id, from: 'watch', recipients: [...new Set([m.from, m.to])] } });
+        }
+        if (!OWNER_KINDS.has(m.kind) && now - last >= config.wall.staleAfterDays * 86400000) {
+          appendRecord(config, channel, { v: 1, type: 'status', id: m.id, ts: new Date(now).toISOString(), status: 'stale', by: 'watch', note: 'Brak odpowiedzi: automatycznie oznaczono jako stale.' });
+        }
+      }
+      messages = channelMessages(config, channel);
       const closed = new Map(messages.filter(m => m.status !== 'open' && now - Date.parse(m.history.at(-1)?.ts ?? m.ts) > config.wall.archiveAfterDays * 86400000).map(m => [m.id, m]));
       const file = channelFile(config, channel);
       if (!closed.size || !fs.existsSync(file)) continue;
