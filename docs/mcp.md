@@ -334,7 +334,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 | `manager_stop` | write | `confirm?`, `preview_token?` |
 | `notify_test` | write | `phone?`, `confirm?`, `preview_token?` |
 | `gc` | write | `include_cache?`, `keep_cache?`, `force_dirty?`, `detail?`, `offset?`, `limit?`, `cohort?`, `older_than?`, `branches?`, `confirm?`, `preview_token?` |
-| `wall_read` | read | `as?`, `channel?`, `id?`, `since?`, `status?`, `kind?`, `limit?`, `before?` |
+| `wall_read` | read | `as?`, `channel?`, `id?`, `since?`, `archive?`, `status?`, `kind?`, `limit?`, `before?` |
 | `wall_post` | write | `as?`, `channel?`, `kind?`, `subject?`, `body?`, `refs?`, `to?`, `confirm?`, `preview_token?` |
 | `wall_reply` | write | `as?`, `reply_to?`, `body?`, `subject?`, `kind?`, `refs?`, `to?`, `confirm?`, `preview_token?` |
 | `wall_set_status` | write | `as?`, `id?`, `status?`, `note?`, `owner_confirmed?`, `confirm?`, `preview_token?` |
@@ -359,7 +359,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 - `limits reserve`: `--note &lt;text&gt;`
 - `events`: `--since &lt;time&gt;`, `--cohort &lt;name&gt;`, `--keep`, `--json`, `--clip`
 - `wall channels`: `--as &lt;who&gt;`, `--json`
-- `wall read`: `--id &lt;id&gt;`, `--since &lt;time&gt;`, `--status &lt;status&gt;`, `--kind &lt;kind&gt;`, `--limit &lt;n&gt;`, `--before &lt;id&gt;`, `--as &lt;who&gt;`, `--json`
+- `wall read`: `--id &lt;id&gt;`, `--since &lt;time&gt;`, `--archive`, `--status &lt;status&gt;`, `--kind &lt;kind&gt;`, `--limit &lt;n&gt;`, `--before &lt;id&gt;`, `--as &lt;who&gt;`, `--json`
 - `wall post`: `--kind &lt;kind&gt;`, `--subject &lt;text&gt;`, `--body &lt;text&gt;`, `--body-file &lt;file&gt;`, `--ref &lt;ref&gt;`, `--to &lt;who&gt;`, `--as &lt;who&gt;`
 - `wall reply`: `--body &lt;text&gt;`, `--body-file &lt;file&gt;`, `--subject &lt;text&gt;`, `--kind &lt;kind&gt;`, `--ref &lt;ref&gt;`, `--to &lt;who&gt;`, `--as &lt;who&gt;`
 - `wall status`: `--note &lt;text&gt;`, `--as &lt;who&gt;`, `--owner-confirmed`

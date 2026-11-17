@@ -57,3 +57,5 @@ Odebrane raporty w stanie report-ready zwijają się w kohortach do „odebrane,
 `agentctl status` i status MCP grupują odebrane raporty jako „odebrane, niezamknięte”; JSON zachowuje znacznik odbioru. `agentctl close --cohort NAZWA --pulled` pokazuje listę i pyta o zgodę (`--yes` wykonuje); MCP `close` przyjmuje `{cohort: "NAZWA", pulled: true}`, potem potwierdzenie tokenem podglądu. Nie można łączyć tego wyboru z identyfikatorami zadań ani usuwaniem worktree.
 
 Zamykanie odebranych zadań w CLI odrzuca zmianę listy lub raportu w trakcie potwierdzania. Uruchom podgląd ponownie, aby zatwierdzić aktualny zakres.
+
+Cykl życia WALL: watch archiwizuje zamknięte wiadomości po 14 dniach, przypomina raz po 24 godzinach i oznacza nieaktywne pytania jako stale po 7 dniach. Listy obejmują domyślnie 7 dni; `wall_read {archive: true}` i odczyt po ID sięgają do historii. Plansza W: A przełącza archiwum. Zobacz [konfigurację](docs/pl/configuration.md#cykl-życia-wall-0227).

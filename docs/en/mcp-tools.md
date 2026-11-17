@@ -102,7 +102,7 @@ Arguments marked ? are optional. Provider fields below include enabled optional 
 | `manager_stop` | write | `confirm?`, `preview_token?` | Stop the manager session |
 | `notify_test` | write | `phone?`, `confirm?`, `preview_token?` | Test desktop notifications; phone true explicitly sends to ntfy |
 | `gc` | write | `include_cache?`, `keep_cache?`, `force_dirty?`, `detail?`, `offset?`, `limit?`, `cohort?`, `older_than?`, `branches?`, `confirm?`, `preview_token?` | Reclaim disk space from finished tasks using the same protected plan as gc_preview |
-| `wall_read` | read | `as?`, `channel?`, `id?`, `since?`, `status?`, `kind?`, `limit?`, `before?` | Read the WALL |
+| `wall_read` | read | `as?`, `channel?`, `id?`, `since?`, `archive?`, `status?`, `kind?`, `limit?`, `before?` | Read the WALL |
 | `wall_post` | write | `as?`, `channel?`, `kind?`, `subject?`, `body?`, `refs?`, `to?`, `confirm?`, `preview_token?` | Post on the WALL |
 | `wall_reply` | write | `as?`, `reply_to?`, `body?`, `subject?`, `kind?`, `refs?`, `to?`, `confirm?`, `preview_token?` | Reply on the WALL |
 | `wall_set_status` | write | `as?`, `id?`, `status?`, `note?`, `owner_confirmed?`, `confirm?`, `preview_token?` | Set the status of a WALL message |

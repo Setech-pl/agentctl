@@ -26,6 +26,8 @@ jeden blok agentctl-outputs v1 i report-end na końcu. Referencje mają istnieć
 Nie obchodź trust/zgód, nie scalaj, nie wykonuj push/publish/tag ani PR bez
 jawnego upoważnienia. Domyślnie no push. Watch ma działać; o trust/onboarding
 poproś właściciela w oknie zadania.
+Po obsłużeniu pytania: wall_reply lub wall_set_status.
+
 ~~~
 
 Zobacz [pełny przewodnik](agent-guide.md) i [MCP](mcp-tools.md).

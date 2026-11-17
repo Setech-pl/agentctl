@@ -277,3 +277,44 @@ Cached text begins with `stan z HH:MM, 2h 44m temu`; JSON snapshot records carry
 `integration: true` in the spec suppresses overlap warnings with an explicit note. Otherwise overlap uses the spec base through its merge-base and excludes files imported by the predecessor's own merges; uncommitted changes still count. Declare the branch being integrated as `repos[].base`. Integration is a declaration about warnings, not permission to merge.
 
 A pending `queue_rm` is named with its request ID in queue previews. MCP `queue` with `replace: true` removes a waiting entry and adds the new spec in one watch step; starting entries are refused. Never-started removals are hidden `cancelled` tasks, without vanished-window alerts. Report instructions put the attempt marker after the first verdict line; parsers tolerate leading comments. Report reads/events expose `outputs_errors`; duplicate blocks select the last valid block with a finding. `Verdict:` and `Werdykt:` and documented check aliases remain accepted.
+
+### WALL lifecycle (0.22.7)
+
+`watch` maintains WALL on each tick. Closed messages (`answered`, `accepted`,
+`rejected`, `superseded`, `stale`) whose latest status is older than
+`wall.archive_after_days` (default **14**) move to
+`~/.agentctl/wall/archive/<channel>-<YYYY-MM>.jsonl` (month of the original post).
+The complete post and status history remain available. Each file is replaced
+atomically under the WALL write lock; archive-first ordering and deduplication
+make an interrupted move safe to retry. IDs and reply threads remain resolvable,
+including after a restart, and new posts continue the channel's sequence.
+
+`wall_read` lists default to `since: 7d`. An explicit `since` searches that window
+across active and archived records; `archive: true` searches all history.
+ID lookups always include archives. CLI equivalents are `wall read --since 30d`,
+`wall read --archive`, and `wall read --id <id>`.
+
+An open question or request with no reply/status activity for
+`wall.remind_after_hours` (default **24**) produces one durable reminder:
+`WALL czeka na odpowiedź: <id>`. The author chat and addressee receive it through
+`events_since`; a channel addressee means its subscribed chats. After
+`wall.stale_after_days` (default **7**), an inactive question becomes `stale` with
+a status-history note. Decision requests and contract changes receive reminders
+but retain the owner-only closure rule and never become stale automatically.
+`stale` is closed for inbox/archive purposes; reopening still requires the owner
+(or an explicitly owner-confirmed chat).
+
+In board **W**, unread counts include only the last 7 days plus all open items.
+**A** switches between active and archived message lists; stale messages are dim
+gray. `events_since` shows the age of each open item and excludes stale items.
+After handling a question: `wall_reply` or `wall_set_status`.
+
+```yaml
+wall:
+  archive_after_days: 14
+  remind_after_hours: 24
+  stale_after_days: 7
+```
+
+All three thresholds must be positive finite numbers. Maintenance requires watch;
+list windows and ID/archive reads work independently of watch.

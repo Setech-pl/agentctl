@@ -796,8 +796,9 @@ agentctl wall read [options] [channel]
 | Option | Meaning | Notes |
 |---|---|---|
 | `--id <id>` | one message with its thread, e.g. nc-12 |  |
-| `--since <time>` | an age (30m, 2h, 1d) or an ISO time |  |
-| `--status <status>` | only this status | one of `open`, `answered`, `accepted`, `rejected`, `superseded` |
+| `--since <time>` | an age (30m, 2h, 1d) or an ISO time; default 7d |  |
+| `--archive` | include older and archived messages |  |
+| `--status <status>` | only this status | one of `open`, `answered`, `accepted`, `rejected`, `superseded`, `stale` |
 | `--kind <kind>` | only this kind | one of `info`, `question`, `decision-request`, `contract-change`, `answer` |
 | `--limit <n>` | at most this many messages (default 20, max 100) |  |
 | `--before <id>` | older than this message (paging back) |  |
@@ -880,7 +881,7 @@ agentctl wall status [options] <id> <status>
 | Argument | Meaning |
 |---|---|
 | `<id>` | the message, e.g. nc-12 |
-| `<status>` | one of open, answered, accepted, rejected, superseded |
+| `<status>` | one of open, answered, accepted, rejected, superseded, stale |
 
 | Option | Meaning | Notes |
 |---|---|---|

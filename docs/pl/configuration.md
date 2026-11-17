@@ -277,3 +277,44 @@ Tekst z cache zaczyna się od `stan z HH:MM, 2h 44m temu`; rekordy JSON mają `s
 `integration: true` w specyfikacji wycisza ostrzeżenia o kolizjach z adnotacją. W pozostałych przypadkach porównanie używa merge-base bazy specyfikacji i pomija pliki przejęte przez merge wykonany przez poprzednika; zmiany bez commita nadal się liczą. Gałąź integrowaną deklaruj jako `repos[].base`. Flaga steruje ostrzeżeniami, nie daje uprawnień do scalenia.
 
 Podgląd kolejki wskazuje oczekujące `queue_rm` i identyfikator requestu. MCP `queue` z `replace: true` usuwa oczekujący wpis i dodaje nową specyfikację w jednym ticku watch; rozpoczęte zadanie jest odrzucane. Usunięte zadania bez startu mają ukryty stan `cancelled`, bez alarmu utraty okna. Instrukcja raportu umieszcza marker próby po pierwszym wierszu werdyktu, a parser toleruje wcześniejsze komentarze. Odczyt raportu/zdarzenia pokazują `outputs_errors`; duplikaty bloków wybierają ostatni poprawny z uwagą. `Verdict:`, `Werdykt:` i udokumentowane aliasy checks nadal działają.
+
+### Cykl życia WALL (0.22.7)
+
+`watch` przy każdym ticku porządkuje WALL. Zamknięte wiadomości (`answered`,
+`accepted`, `rejected`, `superseded`, `stale`), których ostatni status jest starszy
+niż `wall.archive_after_days` (domyślnie **14**), przenosi do
+`~/.agentctl/wall/archive/<kanał>-<YYYY-MM>.jsonl` (miesiąc publikacji).
+Zostaje cała treść i historia statusów. Każdy plik jest podmieniany atomowo pod
+blokadą zapisu WALL; zapis archiwum przed podmianą aktywnego pliku i deduplikacja
+pozwalają bezpiecznie dokończyć przerwaną operację. ID i wątki nadal działają,
+także po restarcie, a numeracja nowych wiadomości nie zaczyna się od nowa.
+
+Lista `wall_read` domyślnie ma `since: 7d`. Jawne `since` przeszukuje podany okres
+w aktywnych plikach i archiwach, a `archive: true` całą historię. Odczyt po ID
+zawsze uwzględnia archiwum. W CLI: `wall read --since 30d`, `wall read --archive`
+lub `wall read --id <id>`.
+
+Otwarte pytanie lub prośba bez odpowiedzi/zmiany statusu przez
+`wall.remind_after_hours` (domyślnie **24**) dostaje jedno trwałe przypomnienie:
+`WALL czeka na odpowiedź: <id>`. Czat autora i adresat widzą je w `events_since`;
+adresat będący kanałem oznacza subskrybujące go czaty. Po
+`wall.stale_after_days` (domyślnie **7**) nieaktywne pytanie otrzymuje status
+`stale` z notatką w historii. Prośby o decyzję i zmiany kontraktu dostają
+przypomnienie, lecz nigdy automatyczny `stale`: nadal zamyka je wyłącznie właściciel
+lub czat z `owner_confirmed` po jego decyzji. `stale` jest statusem zamkniętym dla
+skrzynki i archiwum; ponowne otwarcie wymaga właściciela.
+
+W planszy **W** nieprzeczytane to ostatnie 7 dni oraz wszystkie otwarte pozycje.
+**A** przełącza aktywne i archiwalne listy wiadomości; `stale` jest przygaszony,
+szary. `events_since` pokazuje wiek otwartych pozycji i pomija `stale`.
+Po obsłużeniu pytania: `wall_reply` lub `wall_set_status`.
+
+```yaml
+wall:
+  archive_after_days: 14
+  remind_after_hours: 24
+  stale_after_days: 7
+```
+
+Progi muszą być dodatnimi, skończonymi liczbami. Porządkowanie wymaga watch;
+okna list oraz odczyt po ID/z archiwum działają również bez niego.

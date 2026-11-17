@@ -57,3 +57,5 @@ Pulled report-ready tasks fold into “odebrane, do zamknięcia (N)” per cohor
 `agentctl status` and MCP status group current pulled reports under “odebrane, niezamknięte”; JSON keeps the pulled marker. Use `agentctl close --cohort NAME --pulled` (preview and confirmation; `--yes` executes) or MCP `close` with `{cohort: "NAME", pulled: true}`, then confirm its preview token. Task IDs and worktree removal cannot be combined with this selection.
 
 CLI pulled closure refuses a changed task list or a report rewritten while awaiting confirmation; run the preview again to review the current scope.
+
+WALL lifecycle: watch archives closed messages after 14 days, reminds once after 24 hours and marks inactive questions stale after 7 days. Lists default to 7 days; `wall_read {archive: true}` and ID lookups reach history. Board W: A toggles archives. See [configuration](docs/en/configuration.md#wall-lifecycle-0227).
