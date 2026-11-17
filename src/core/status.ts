@@ -95,6 +95,7 @@ export interface StatusRow {
   pulled: string | null;
   lastLine: string;
   usage_hint?: string | null;
+  usage_reset_at?: string | null;
   draft_input?: string | null;
   reportCandidate?: string;
   /** Commits over the base and changed files per worktree ("2c 7f"); null when the task has no readable worktree. */
@@ -346,7 +347,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       ...((state === 'needs-input' || state === 'needs-trust') && alive ? { menuOptions: menuOptionLines(screenText) } : {}),
       pin: record.pin === true,
       integration: record.integration === true,
-      ...(quota ? {limitEvidence: {text: quota, reset: quotaReset(quota, runner.now())}} : {}),
+      ...(quota ? {usage_hint: quota, usage_reset_at: quotaReset(quota, runner.now()) ? new Date(quotaReset(quota, runner.now())!).toISOString() : null, limitEvidence: {text: quota, reset: quotaReset(quota, runner.now())}} : {}),
       finished: (!alive && !lossHint) || state === 'superseded',
       hidden: hiddenBy !== null,
       hiddenBy,

@@ -253,6 +253,18 @@
       "F4: status/capacity snapshots use fresh free space and label stale worktree size/policy"
     ]
   },
+  "FIELD0230-F5": {
+    "rev": "v0.22.7",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "F5: quota pane stays limited with reset, original usage_hint and events attention",
+      "F5: wrapped quota reset is retained and ordinary user mentions do not limit a task",
+      "F5: quota pane stays limited with reset, original usage_hint and events attention",
+      "F5: wrapped quota reset is retained and ordinary user mentions do not limit a task"
+    ]
+  },
   "G1a": {
     "rev": "v0.22.3",
     "outcome": "FAILS",

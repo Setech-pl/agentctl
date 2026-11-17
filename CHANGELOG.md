@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- FIELD0230-F5: retain quota text/reset in limited status and attention summaries, including wrapped provider errors. / Treść limitu i reset w statusie limited oraz podsumowaniu uwagi, także po zawinięciu wiersza.
+
 - FIELD0230-F4: fresh filesystem space in reads; worktree measurement age and GC policy in disk hints. / Świeże wolne miejsce, wiek pomiaru worktree i polityka ochrony GC w ostrzeżeniach.
 
 - FIELD0230-F3: 30 GB disk admission floor, two concurrent setup phases by default, per-repo worktree cost estimates. / Próg startu 30 GB, domyślnie dwa równoległe setupy, szacunki rozmiaru worktree per repo.

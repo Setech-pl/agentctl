@@ -79,3 +79,5 @@ Zmienne endpointu/tokenów są odrzucane w providers_config.glm.env, usuwane ze 
 Agentctl nie odpowiada na trust ani onboarding. Otwórz okno zadania, odpowiedz i wróć F12; watch raz dostarczy oczekujący pierwszy prompt po gotowości. Zmieniony układ CLI może zamknąć ścieżkę dostarczenia: nierozpoznane pole oznacza brak Enter. `start_failure.keep_window: true` zachowuje okno i zapis ekranu; sprawdź je przed queue_retry. Zobacz [Problemy](troubleshooting.md), [Konfigurację](configuration.md) i [Ekonomię](token-economics.md).
 
 Oficjalne linki produktu/CLI sprawdzono curl HEAD z przekierowaniami 2026-11-15; openai.com/codex zwrócił tu 403, więc użyto dostępnej oficjalnej strony ChatGPT. Dokumentacja zewnętrzna zmienia się niezależnie od tego wydania.
+
+Błędy limitu providera mają stan `limited`; `usage_hint` zachowuje komunikat, a `usage_reset_at` podaje jawny reset (czas bez strefy jest lokalny). Zdarzenia pokazują zadania limited w podsumowaniu uwagi.

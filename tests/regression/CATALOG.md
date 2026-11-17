@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| FIELD0230-F5 | Quota panes lost their usage hint/reset and disappeared from attention summaries. | `tests/field0230-providers.test.ts` (`^F5:`) | 0.22.8 | fails on v0.22.7 (2 failing of 2) |
 | FIELD0230-F4 | Status/capacity reused stale filesystem free-space samples. | `tests/field0230-disk.test.ts` (`^F4:`) | 0.22.8 | fails on v0.22.7 (1 failing of 1) |
 | FIELD0230-F3 | The queue admitted worktree setups below the free-disk start floor. | `tests/field0230-disk.test.ts` (`^F3:`) | 0.22.8 | fails on v0.22.7 (3 failing of 3) |
 | FIELD0230-F1 | GC preview listed skipped dirty worktrees under cleanup candidates. | `tests/field0230-gc.test.ts` (`^F1:`) | 0.22.8 | fails on v0.22.7 (1 failing of 1) |

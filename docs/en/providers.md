@@ -79,3 +79,5 @@ Endpoint/token variables are refused in providers_config.glm.env, stripped from 
 Agentctl never answers folder trust or provider onboarding. Open the task's tmux window, answer, return with F12; watch delivers the pending original prompt once ready. A CLI layout change can fail closed: input not structurally recognized means no Enter. `start_failure.keep_window: true` keeps failed-start windows and the saved screen; inspect before queue_retry. See [Troubleshooting](troubleshooting.md), [Configuration](configuration.md) and [Economics](token-economics.md).
 
 Official product/CLI links were checked with curl HEAD+redirects on 2026-11-15; the original openai.com/codex marketing URL returned 403 in this environment, so the product link above uses the accessible official ChatGPT page. External documentation can move independently of this release.
+
+Provider quota errors appear as `limited`; `usage_hint` retains the provider text and `usage_reset_at` gives its explicit reset (a timestamp without an offset uses local time). Events include limited tasks in the attention summary.
