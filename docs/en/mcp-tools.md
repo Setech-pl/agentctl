@@ -72,7 +72,7 @@ Arguments marked ? are optional. Provider fields below include enabled optional 
 | `mark` | write | `task?`, `tasks?`, `cohort?`, `result?`, `note?`, `confirm?`, `preview_token?` | Mark how a task turned out |
 | `away` | write | `on?`, `confirm?`, `preview_token?` | Switch away mode (the phone) |
 | `interrupt` | write | `task?`, `confirm?`, `preview_token?` | Interrupt the current turn of a task |
-| `close` | write | `task?`, `tasks?`, `cohort?`, `remove_worktree?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` | Close a task |
+| `close` | write | `pulled?`, `task?`, `tasks?`, `cohort?`, `remove_worktree?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` | Close a task |
 | `move` | write | `task?`, `agent?`, `confirm?`, `preview_token?` | Move a task to the other provider |
 | `queue_show` | read | `task` | Read full queued spec, error and attempt history |
 | `mcp_check` | read |  | Inspect stale MCP server processes without stopping them |

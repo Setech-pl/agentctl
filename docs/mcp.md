@@ -304,7 +304,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 | `mark` | write | `task?`, `tasks?`, `cohort?`, `result?`, `note?`, `confirm?`, `preview_token?` |
 | `away` | write | `on?`, `confirm?`, `preview_token?` |
 | `interrupt` | write | `task?`, `confirm?`, `preview_token?` |
-| `close` | write | `task?`, `tasks?`, `cohort?`, `remove_worktree?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` |
+| `close` | write | `pulled?`, `task?`, `tasks?`, `cohort?`, `remove_worktree?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` |
 | `move` | write | `task?`, `agent?`, `confirm?`, `preview_token?` |
 | `queue_show` | read | `task` |
 | `mcp_check` | read |  |
@@ -373,7 +373,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 - `gc`: `--preview`, `--dry-run`, `--verbose`, `--offset &lt;n&gt;`, `--limit &lt;n&gt;`, `--include-cache`, `--keep-cache &lt;tasks...&gt;`, `--force-dirty`, `--force-links`, `--apply`, `--older-than &lt;age&gt;`, `--branches`, `--cohort &lt;name&gt;`, `-y, --yes`, `--json`
 - `archive`: `--older-than &lt;age&gt;`, `--dry-run`
 - `pull`: `--ready`, `--all`, `--cohort &lt;name&gt;`
-- `close`: `--cohort &lt;name&gt;`, `--rm-worktree`, `-y, --yes`, `--dry-run`
+- `close`: `--pulled`, `--cohort &lt;name&gt;`, `--rm-worktree`, `-y, --yes`, `--dry-run`
 - `cancel`: `--cohort &lt;name&gt;`, `--reason &lt;text&gt;`, `--rm-worktree`, `-y, --yes`, `--dry-run`
 - `watch`: `--tmux`, `--restart`, `--no-status-line`
 - `board`: `--restart`, `--tmux`

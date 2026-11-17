@@ -1209,6 +1209,7 @@ agentctl close [options] [tasks...]
 
 | Option | Meaning | Notes |
 |---|---|---|
+| `--pulled` | with --cohort: close only pulled report-ready tasks; worktrees stay |  |
 | `--cohort <name>` | close the open tasks of this cohort (with task IDs: only those, which must belong to it) |  |
 | `--rm-worktree` | run "git worktree remove" for the task worktrees (never --force) |  |
 | `-y, --yes` | do not ask |  |

@@ -1,3 +1,4 @@
+import { pulledCohortTasks, checkPulledClose } from './core/pulled.ts';
 import { acceptConsult, planConsult } from './core/consult.ts';
 import { dryCloseTimingPreview, dryQueueTimingPreview, measureReadTimings, renderReadTimings } from './core/doctor-timings.ts';
 import { queueViews } from './core/queue.ts';
@@ -1293,6 +1294,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
 
   program
     .command('close')
+    .option('--pulled', 'with --cohort: close only pulled report-ready tasks; worktrees stay')
     .description('Kill the task windows; --rm-worktree also removes their git worktrees (branches are kept). Shows the list and asks y/N first.')
     .argument('[tasks...]', 'task IDs (or --cohort)')
     .option('--cohort <name>', 'close the open tasks of this cohort (with task IDs: only those, which must belong to it)')
@@ -1300,10 +1302,11 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('-y, --yes', 'do not ask')
     .option('--dry-run', 'print the commands that would run, execute nothing')
     .action(
-      guarded(async (typed: string[], opts: { rmWorktree?: boolean; yes?: boolean; dryRun?: boolean; cohort?: string }) => {
+      guarded(async (typed: string[], opts: { pulled?: boolean; rmWorktree?: boolean; yes?: boolean; dryRun?: boolean; cohort?: string }) => {
         const ctx = contextFor(Boolean(opts.dryRun));
         const closeOpts = { rmWorktree: Boolean(opts.rmWorktree) };
-        const tasks = await tasksOrCohort(ctx, typed, opts.cohort, false);
+        if (opts.pulled) checkPulledClose(opts.cohort, typed, opts.rmWorktree);
+        const tasks = opts.pulled ? await pulledCohortTasks(ctx, findCohort(ctx.config, opts.cohort!).name) : await tasksOrCohort(ctx, typed, opts.cohort, false);
         const plan = await planClose(ctx, tasks, closeOpts);
         const summary = [`Close ${plan.length} task${plan.length === 1 ? '' : 's'}${closeOpts.rmWorktree ? ' and remove their worktrees (branches stay)' : ''}:`, ...plan.map((i) => `  ${i.line}`)];
         if (!(await confirmAction(ctx, summary, 'Go ahead?', Boolean(opts.yes) || Boolean(opts.dryRun)))) return;

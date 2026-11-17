@@ -1,3 +1,4 @@
+import { pulledOpen, pulledSummary, pulledCohortTasks, checkPulledClose } from './pulled.ts';
 import { readProviderHoldState, providerHoldText } from './provider-hold.ts';
 import { withStartLock } from './start-lock.ts';
 import { commitQueueAdd } from './queue.ts';
@@ -215,7 +216,7 @@ export function reportSummary(text: string): string {
 }
 
 function compactStatus(r: StatusRow): string {
-  return `${r.task} ${r.agent}/${r.model}/${r.effort} ${r.state} ${r.duration} cohort=${r.cohort ?? 'n/d'} report=${r.report === 'yes' ? 'yes' : r.reportCandidate ? 'candidate' : 'no'} decisions=${r.outputs_pending ? 'oczekuje' : r.decisionsCount ?? 0} actions=${r.outputs_pending ? 'oczekuje' : r.actionsCount ?? 0}${r.reviewOf ? ` review_of=${r.reviewOf} (decyzje i akcje: przegląd ${r.reviewOf})` : ''}${r.promptQueue?.length ? ` messages=${r.promptQueue.length} (${r.promptDelivery ?? 'queued'})` : ''}${r.collide.length ? ` ⚠${r.collide.length}` : ''}${r.question ? ` ? ${r.question}` : ''}${r.state === 'needs-attention' ? `; ${r.hint}` : ''}${!r.reportConfirmed && r.reportSource && path.normalize(r.reportSource) !== path.normalize(r.reportPath) ? `; raport pochodzi z kopii ${r.reportSource} – sprawdź` : ''}`;
+  return `${r.task} ${r.agent}/${r.model}/${r.effort} ${r.state} ${r.duration} cohort=${r.cohort ?? 'n/d'} pulled=${Boolean(r.pulled)} report=${r.report === 'yes' ? 'yes' : r.reportCandidate ? 'candidate' : 'no'} decisions=${r.outputs_pending ? 'oczekuje' : r.decisionsCount ?? 0} actions=${r.outputs_pending ? 'oczekuje' : r.actionsCount ?? 0}${r.reviewOf ? ` review_of=${r.reviewOf} (decyzje i akcje: przegląd ${r.reviewOf})` : ''}${r.promptQueue?.length ? ` messages=${r.promptQueue.length} (${r.promptDelivery ?? 'queued'})` : ''}${r.collide.length ? ` ⚠${r.collide.length}` : ''}${r.question ? ` ? ${r.question}` : ''}${r.state === 'needs-attention' ? `; ${r.hint}` : ''}${!r.reportConfirmed && r.reportSource && path.normalize(r.reportSource) !== path.normalize(r.reportPath) ? `; raport pochodzi z kopii ${r.reportSource} – sprawdź` : ''}`;
 }
 
 /** Keep report facts once, without echoing checks or the outputs block. A review's verdict is the first line of its report (P70), with the outputs verdict alongside when they disagree. */
@@ -350,7 +351,7 @@ async function runStatus(deps: McpDeps, args: { all?: boolean | undefined; cohor
   const colliding = shown.filter((r) => r.collide.length > 0);
   if (colliding.length > 0) extra.push(`⚠${colliding.length} tasks overlap; overlap has details.`);
   extra.push(awayLine(ctx));
-  return { text: [statusLine(shown, rows.length - shown.length), ...extra, ...shown.map(compactStatus)].join('\n'), data: { ...(args.detail || args.capacity ? { disk: await collectDisk(ctx, undefined, args) } : {}), tasks: [...shown.map(row => { const entry = views.find(v => v.entry.task === row.task)?.entry; return { ...statusRowForChat(row), ...(entry ? { state: entry.status === 'queued' ? 'registered' : entry.status } : {}) }; }), ...views.filter(v => !shown.some(r => r.task === v.entry.task)).map(v => ({ task: v.entry.task, agent: v.entry.agent, state: v.entry.status === 'queued' ? 'registered' : v.entry.status, startCondition: v.condition.text }))] } };
+  return { text: [statusLine(shown, rows.length - shown.length), ...extra, ...shown.filter(r => !pulledOpen(r)).map(compactStatus), ...pulledSummary(shown), ...shown.filter(pulledOpen).map(compactStatus)].join('\n'), data: { ...(args.detail || args.capacity ? { disk: await collectDisk(ctx, undefined, args) } : {}), tasks: [...shown.map(row => { const entry = views.find(v => v.entry.task === row.task)?.entry; return { ...statusRowForChat(row), ...(entry ? { state: entry.status === 'queued' ? 'registered' : entry.status } : {}) }; }), ...views.filter(v => !shown.some(r => r.task === v.entry.task)).map(v => ({ task: v.entry.task, agent: v.entry.agent, state: v.entry.status === 'queued' ? 'registered' : v.entry.status, startCondition: v.condition.text }))] } };
 }
 
 /** "Away: on since …; the phone gets the notifications" - what the chat should know about the phone. */
@@ -969,8 +970,12 @@ async function runInterrupt(deps: McpDeps, args: { task: string }): Promise<Tool
   });
 }
 
-interface CloseMcpArgs { task?: string | undefined; tasks?: string[] | undefined; cohort?: string | undefined; remove_worktree?: boolean | undefined }
+interface CloseMcpArgs { pulled?: boolean; task?: string | undefined; tasks?: string[] | undefined; cohort?: string | undefined; remove_worktree?: boolean | undefined }
 async function closeInputs(ctx: Context, args: CloseMcpArgs): Promise<string[]> {
+  if (args.pulled) {
+    checkPulledClose(args.cohort, args.tasks ?? (args.task ? [args.task] : undefined), args.remove_worktree);
+    return pulledCohortTasks(ctx, findCohort(ctx.config, args.cohort!).name);
+  }
   if (!args.task && !args.tasks?.length && !args.cohort) throw new AgentctlError('give task, tasks or cohort');
   const inputs = args.tasks ?? (args.task ? [args.task] : await openCohortTasks(ctx, findCohort(ctx.config, args.cohort!).name, { queued: false }));
   const targets = await listTargets(ctx);
@@ -1551,7 +1556,7 @@ export const MCP_TOOLS: McpToolDef[] = [
     description:
       'WRITE, off unless the user put "close" in mcp.allow. Closes the tmux window of a task (the agent ends) and marks the task closed: it leaves status and the board; its report and state stay. The worktree and the branch are NOT removed; ' +
       'remove_worktree: true (git worktree remove, never forced) works only if the user also set mcp.allow_rm_worktree. Closing ends a running agent: ask the user first.',
-    input: { task: taskArg.optional(), tasks: z.array(taskArg).min(1).max(100).optional(), cohort: cohortArg.optional(), remove_worktree: z.boolean().optional().describe('Also remove the git worktree. Refused unless the user allowed it in the config.') },
+    input: { pulled: z.boolean().optional().describe('With cohort: only pulled report-ready tasks; preview lists them; worktrees stay.'), task: taskArg.optional(), tasks: z.array(taskArg).min(1).max(100).optional(), cohort: cohortArg.optional(), remove_worktree: z.boolean().optional().describe('Also remove the git worktree. Refused unless the user allowed it in the config.') },
     annotations: { title: 'Close a task', readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     run: (deps, args) => guarded(() => runClose(deps, args as CloseMcpArgs)),
   }),
@@ -2299,7 +2304,7 @@ function snapshotRead(ctx: Context, name: string, args: Record<string, unknown>)
       const offset = Number(args.offset ?? 0), limit = Number(args.limit ?? rows.length);
       const shown = rows.slice(offset, offset + limit);
       data = { tasks: [...shown.map(statusRowForChat), ...queue.filter((q: { task: string }) => !rows.some(r => r.task === q.task)).map((q: { task: string; status: string; startCondition: string }) => ({...q, state: q.status === 'queued' ? 'registered' : q.status}))], ...(args.capacity || args.detail ? { disk: snap.capacity.disk, capacity: capacitySnapshot(snap.capacity) } : {}) };
-      text = [statusLine(rows, allRows.length - rows.length), ...shown.map(compactStatus), ...queue.map((q: {task: string; startCondition: string}) => `${q.task}: ${q.startCondition}`), ...(args.capacity ? snapshotLines(capacitySnapshot(snap.capacity)) : [])].join('\n');
+      text = [statusLine(rows, allRows.length - rows.length), ...shown.filter(r => !pulledOpen(r)).map(compactStatus), ...pulledSummary(shown), ...shown.filter(pulledOpen).map(compactStatus), ...queue.map((q: {task: string; startCondition: string}) => `${q.task}: ${q.startCondition}`), ...(args.capacity ? snapshotLines(capacitySnapshot(snap.capacity)) : [])].join('\n');
     } else if (name === 'queue_list') {
       data = queue; text = queue.map((q: {task: string; agent: string; model: string; effort: string; startCondition: string}) => `${q.task} ${q.agent}/${q.model}/${q.effort}: ${q.startCondition}`).join('\n') || 'The queue is empty.';
     } else if (name === 'capacity') { data = snap.capacity; text = [diskLine(snap.capacity.disk), ...snapshotLines(capacitySnapshot(snap.capacity))].join('\n'); }

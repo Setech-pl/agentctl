@@ -70,7 +70,7 @@ Argumenty z ? są opcjonalne. Pola dostawców obejmują opcjonalnych; uruchomion
 | `mark` | zapis | `task?`, `tasks?`, `cohort?`, `result?`, `note?`, `confirm?`, `preview_token?` | Zapisz ocenę człowieka ok/partial/fail, osobną od werdyktu autora. |
 | `away` | zapis | `on?`, `confirm?`, `preview_token?` | Przełącz tryb powiadomień na telefon. |
 | `interrupt` | zapis | `task?`, `confirm?`, `preview_token?` | Przerwij bieżącą turę, pozostawiając okno. |
-| `close` | zapis | `task?`, `tasks?`, `cohort?`, `remove_worktree?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` | Zamknij okno; usuwanie worktree wymaga dodatkowo allow_rm_worktree i jawnej opcji. |
+| `close` | zapis | `pulled?`, `task?`, `tasks?`, `cohort?`, `remove_worktree?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` | Zamknij okno; usuwanie worktree wymaga dodatkowo allow_rm_worktree i jawnej opcji. |
 | `move` | zapis | `task?`, `agent?`, `confirm?`, `preview_token?` | Przenieś zadanie do innego aktywnego dostawcy przez equivalents w tym samym worktree; pin blokuje. |
 | `queue_show` | odczyt | `task` | Pełny spec kolejki, błąd i historia prób. |
 | `mcp_check` | odczyt |  | Znajdź stare procesy MCP bez ich zatrzymywania. |

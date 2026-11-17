@@ -1,0 +1,64 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { it } from 'node:test';
+import { Context } from '../src/core/context.ts';
+import { collectStatus } from '../src/core/status.ts';
+import { autoClosePulled } from '../src/core/pulled-auto-close.ts';
+import { readJournal } from '../src/core/journal.ts';
+import { readTaskRecord, setHeaderFields, taskFile } from '../src/core/taskstore.ts';
+import { MCP_TOOLS } from '../src/core/mcp-tools.ts';
+import { collectEvents } from '../src/core/chat-events.ts';
+import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch, runCli } from './helpers.ts';
+const scratch = useScratch();
+const now = Date.parse('2026-11-17T12:00:00Z');
+function world(name: string, extra = '') {
+  const config = makeConfig(scratch.sub(name), `mcp: {allow: [close]}\n${extra}`);
+  const tmux = new FakeTmux();
+  const runner = new DiskRunner({ dryRun: false, startTime: now, respond: tmux.respond });
+  const ctx = new Context(runner, config, () => {});
+  const add = (task: string, age: number | null, cohort = 'wave') => {
+    const record = seedTask(config, task, { cohort, turnEndedAt: new Date(now - 86400_000).toISOString(), ...(age !== null ? { pulled: new Date(now - age * 3600_000).toISOString() } : {}) });
+    fs.mkdirSync(path.dirname(record.report), { recursive: true });
+    fs.writeFileSync(record.report, 'Werdykt: PASS\n<!-- agentctl:report-end -->\n');
+    fs.utimesSync(record.report, (now - 86400_000) / 1000, (now - 86400_000) / 1000);
+    return record;
+  };
+  return { config, tmux, runner, ctx, add, deps: { context: () => ctx, notify: async () => {} } };
+}
+const tool = (name: string) => MCP_TOOLS.find(t => t.name === name)!;
+it('UX0228: MCP pulled cohort close previews only read reports, confirms exact scope and refuses removal', async () => {
+  const w = world('mcp'); w.add('READ', 3); w.add('NEW', null); w.add('OTHER', 3, 'other');
+  const close = tool('close');
+  const preview = await close.run(w.deps, { cohort: 'wave', pulled: true });
+  assert.ok(!preview.isError, preview.text);
+  assert.match(preview.text, /READ/); assert.doesNotMatch(preview.text, /NEW|OTHER/);
+  assert.equal(readTaskRecord(w.config, 'read')?.closed, undefined);
+  const token = /preview_token: (\S+)/.exec(preview.text)![1];
+  const done = await close.run(w.deps, { confirm: true, preview_token: token });
+  assert.ok(!done.isError, done.text);
+  assert.equal(readTaskRecord(w.config, 'read')?.closed, true);
+  assert.equal(readTaskRecord(w.config, 'new')?.closed, undefined);
+  const refused = await close.run(w.deps, { cohort: 'wave', pulled: true, remove_worktree: true });
+  assert.ok(refused.isError, refused.text);
+  assert.ok((await close.run(w.deps, { pulled: true })).isError);
+  w.add('NEXT', 3);
+  const next = await close.run(w.deps, { cohort: 'wave', pulled: true });
+  const nextToken = /preview_token: (\S+)/.exec(next.text)![1];
+  const record = readTaskRecord(w.config, 'next')!;
+  fs.utimesSync(record.report, now / 1000, now / 1000);
+  assert.ok((await close.run(w.deps, { confirm: true, preview_token: nextToken })).isError);
+  assert.equal(readTaskRecord(w.config, 'next')?.closed, undefined);
+});
+it('UX0228: CLI pulled close previews, confirms and rejects worktree removal', async () => {
+  const w = world('cli'); w.add('READ', 3); w.add('NEW', null);
+  const preview = await runCli(w.config, w.runner, ['close', '--cohort', 'wave', '--pulled'], { confirm: async () => false });
+  assert.equal(preview.code, 0, preview.stderr);
+  assert.match(preview.stdout, /READ/); assert.doesNotMatch(preview.stdout, /NEW/);
+  assert.equal(readTaskRecord(w.config, 'read')?.closed, undefined);
+  const done = await runCli(w.config, w.runner, ['close', '--cohort', 'wave', '--pulled', '--yes']);
+  assert.equal(done.code, 0, done.stderr);
+  assert.equal(readTaskRecord(w.config, 'read')?.closed, true);
+  const refused = await runCli(w.config, w.runner, ['close', '--cohort', 'wave', '--pulled', '--rm-worktree', '--yes']);
+  assert.equal(refused.code, 1);
+});
