@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.22.8] - 2026-11-17
 
+- Keep MCP queue cost/disk/peak previews aligned with CLI; immediate starts honor global holds before setup. / Zgodność szacunków i blokad podglądu MCP z CLI; starty bezpośrednie respektują globalny hold przed setupem.
+
 - FIELD0230-PIN: recheck pins at GC mutation boundaries; pin previews show the concrete state change. / Ponowne sprawdzenie pin przed usunięciem GC; podgląd pin pokazuje zmianę stanu.
 
 - FIELD0230-F12: accept integrate base; external output repositories are advisory warnings with hints. / Akceptacja base w integrate; repo spoza spec to ostrzeżenia z podpowiedzią.

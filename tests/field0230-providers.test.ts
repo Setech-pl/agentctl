@@ -55,3 +55,14 @@ it('F6: GLM holds are global across cohorts/chats and name the detecting task', 
   const result = await MCP_TOOLS.find(t => t.name === 'status')!.run({context: () => otherChat, notify: async () => {}}, {cohort: 'HEMS'});
   assert.match(result.text, /globalnie/);
 });
+
+it('F6: immediate CLI/core starts respect the same global provider hold before worktree setup', async () => {
+  const {newTasks} = await import('../src/core/new.ts');
+  const {resolveSpec, splitSpecs} = await import('../src/core/spec.ts');
+  const f = fixture('direct-hold');
+  await limitedTick(f.ctx, await collectStatus(f.ctx), {notify: async () => {}});
+  const repo = scratch.sub('direct-hold/repo');
+  const spec = resolveSpec(splitSpecs(`---\ntask: NC-CLI\nagent: glm\nrepos: [{path: '${repo}', worktree: '${repo}-wt'}]\n---\nFake.`)[0]!, {config: f.config});
+  await assert.rejects(newTasks(f.ctx, [spec]), /provider hold:.*HEMS-2-FDM-7/);
+  assert.ok(!f.runner.commands.some(c => c.includes('worktree add')));
+});

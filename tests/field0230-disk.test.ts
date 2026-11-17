@@ -79,3 +79,16 @@ it('F4: status/capacity snapshots use fresh free space and label stale worktree 
     assert.match(disk.gcPolicyNote, /blocked.*pinned.*dirty/);
   }
 });
+
+it('F3: MCP queue preview shows persisted repository cost and current disk admission without inventory scans', async t => {
+  const {MCP_TOOLS} = await import('../src/core/mcp-tools.ts');
+  const f = await fixture('mcp-cost', 'mcp: {allow: [queue]}');
+  const path = await import('node:path');
+  fs.writeFileSync(path.join(path.dirname(f.config.path), 'disk-sizes.json'), JSON.stringify({version: 2, entries: [{target: `${f.repo}-old`, repo: f.repo, bytes: 1024 ** 3, at: f.runner.now() - 90000}]}));
+  t.mock.method(fs, 'statfsSync', () => ({bsize: 1024 ** 3, bavail: 18, blocks: 1000}));
+  const raw = `---\ntask: MCP-NEXT\nagent: claude\nrepos: [{path: '${f.repo}', worktree: '${f.repo}-mcp'}]\n---\nFake.`;
+  const result = await MCP_TOOLS.find(t => t.name === 'queue')!.run({context: () => f.ctx, notify: async () => {}}, {spec: raw});
+  assert.equal(result.isError, undefined, result.text);
+  assert.match(result.text, /worktree estimate repo: 1.00 GB \(last reading, 90 s old\)/);
+  assert.match(result.text, /wstrzymane: dysk 18 GB < 30 GB/);
+});

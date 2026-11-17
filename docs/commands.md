@@ -1111,6 +1111,7 @@ agentctl gc [options]
 Examples:
 
 ```sh
+agentctl gc --keep TASK-42               # keep this task worktree and cache for this run
 agentctl gc                               # dry run: what would go, with sizes
 agentctl gc --apply                       # the list, y/N, then it does it
 agentctl gc --branches --older-than 3d --apply -y
@@ -1148,6 +1149,12 @@ agentctl pin [options] <tasks...>
 |---|---|
 | `<tasks...>` | task IDs |
 
+Examples:
+
+```sh
+agentctl pin TASK-42
+```
+
 ## agentctl unpin
 
 Remove the task pin; normal GC protections still apply.
@@ -1159,6 +1166,12 @@ agentctl unpin [options] <tasks...>
 | Argument | Meaning |
 |---|---|
 | `<tasks...>` | task IDs |
+
+Examples:
+
+```sh
+agentctl unpin TASK-42
+```
 
 ## agentctl hide
 

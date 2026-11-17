@@ -336,3 +336,14 @@ Każde narzędzie MCP przyjmuje opcjonalne `as`; wykorzystują je WALL/events. F
 Domyślne linki projektu do worktree zadań zamkniętych/anulowanych/zarchiwizowanych są błędem, także gdy cel już nie istnieje. Użyj własnego worktree backendu (`{worktree:backend}` z backendem w repos) albo `links: []`. Domyślny link do repo już zawartego w spec jest pomijany; celowe linki `{worktree:...}` pozostają. Jawne linki spec są świadomym wyborem i nadal przechodzą sprawdzenia celu.
 
 Wpisy integrate w `agentctl-outputs` przyjmują opcjonalne `base` obok repo/branch/sha/note. Repo spoza spec jest zachowane z `outputs_warnings` i wskazówką dodania do repos; jego referencje Git nie mogą być zweryfikowane i nie są sprawdzane. Ostrzeżenie nie unieważnia outputs; niejednoznaczne aliasy repo i błędne referencje nadal są błędami.
+
+### Ustawienia 0.22.8
+
+| Klucz | Domyślnie | Znaczenie |
+|---|---|---|
+| `disk.min_free_start_gb` | `30` | Minimalne wolne GiB przed startem z kolejki. |
+| `queue.max_parallel_setups` | `2` | Maksymalna liczba równoległych faz worktree/setup. |
+| `notify.attention_after_min` | `15` | Minuty do jednokrotnej eskalacji desktop/telefon/WALL. |
+| `providers_config.<p>.peak` | `glm: Singapore 14:00–18:00 mon-fri` | Okna {days, from, to, tz}; strefa IANA, peak: [] wyłącza. |
+| `providers_config.<p>.peak_policy` | `hold` | hold lub short_only; dotyczy nowych startów. |
+| `peak_ok` | `false` | Flaga spec dopuszczająca start przy short_only. |

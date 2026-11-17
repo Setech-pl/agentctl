@@ -336,3 +336,14 @@ Every MCP tool accepts optional `as`; only WALL/events use it. Status cohort fil
 Project default links to closed/cancelled/archived task worktrees are errors, including missing targets. Use the spec’s own backend worktree (`{worktree:backend}` with backend in repos), or `links: []`. A default link to a repository already supplied by the spec is skipped; intentional `{worktree:...}` links remain. Explicit spec links remain an opt-in and still undergo target checks.
 
 `agentctl-outputs` integrate entries accept optional `base` alongside repo/branch/sha/note. A repository outside the task spec is retained with `outputs_warnings` and a hint to add it to repos; its Git references cannot be verified and are not probed. This advisory does not invalidate outputs; ambiguous repository aliases and malformed references remain errors.
+
+### 0.22.8 settings
+
+| Key | Default | Meaning |
+|---|---|---|
+| `disk.min_free_start_gb` | `30` | Minimum fresh free GiB before a queued start. |
+| `queue.max_parallel_setups` | `2` | Maximum concurrent worktree/setup phases. |
+| `notify.attention_after_min` | `15` | Minutes before one desktop/phone/WALL escalation. |
+| `providers_config.<p>.peak` | `glm: Singapore 14:00–18:00 mon-fri` | Windows {days, from, to, tz}; IANA time zone; peak: [] disables. |
+| `providers_config.<p>.peak_policy` | `hold` | hold or short_only; applies to new starts. |
+| `peak_ok` | `false` | Spec flag permitting a short_only peak start. |

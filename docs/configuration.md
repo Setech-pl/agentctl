@@ -690,3 +690,14 @@ Usage accounting is separate (benchmark/statistics rows show `glm`). Z.ai docume
 | Key | Meaning |
 |---|---|
 | `read_only` | Task spec boolean: detached worktrees only; skip setup and links, install a task-scoped commit-refusing Git hook, retain a HEAD baseline for CONSULT report findings. This is a cooperative guard, not an OS sandbox. |
+
+### 0.22.8 settings
+
+| Key | Default | Meaning |
+|---|---|---|
+| `disk.min_free_start_gb` | `30` | Minimum fresh free GiB before a queued start. |
+| `queue.max_parallel_setups` | `2` | Maximum concurrent worktree/setup phases. |
+| `notify.attention_after_min` | `15` | Minutes before one desktop/phone/WALL escalation. |
+| `providers_config.<p>.peak` | `glm: Singapore 14:00–18:00 mon-fri` | Windows {days, from, to, tz}; IANA time zone; peak: [] disables. |
+| `providers_config.<p>.peak_policy` | `hold` | hold or short_only; applies to new starts. |
+| `peak_ok` | `false` | Spec flag permitting a short_only peak start. |

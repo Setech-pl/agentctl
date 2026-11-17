@@ -263,14 +263,14 @@
   "FIELD0230-F3": {
     "rev": "v0.22.7",
     "outcome": "FAILS",
-    "failed": 3,
+    "failed": 4,
     "passed": 0,
     "failing": [
       "F3: fresh low disk holds queued and direct starts, including the watcher claim",
       "F3: max_parallel_setups counts setup phases across providers and frees launching slots",
       "F3: queue preview reports the last measured worktree cost and age per repo",
-      "F3: fresh low disk holds queued and direct starts, including the watcher claim",
-      "F3: max_parallel_setups counts setup phases across providers and frees launching slots"
+      "F3: MCP queue preview shows persisted repository cost and current disk admission without inventory scans",
+      "F3: fresh low disk holds queued and direct starts, including the watcher claim"
     ]
   },
   "FIELD0230-F4": {
@@ -298,11 +298,13 @@
   "FIELD0230-F6": {
     "rev": "v0.22.7",
     "outcome": "FAILS",
-    "failed": 1,
+    "failed": 2,
     "passed": 0,
     "failing": [
       "F6: GLM holds are global across cohorts/chats and name the detecting task",
-      "F6: GLM holds are global across cohorts/chats and name the detecting task"
+      "F6: immediate CLI/core starts respect the same global provider hold before worktree setup",
+      "F6: GLM holds are global across cohorts/chats and name the detecting task",
+      "F6: immediate CLI/core starts respect the same global provider hold before worktree setup"
     ]
   },
   "FIELD0230-F7": {

@@ -137,8 +137,9 @@ export async function refreshDiskAfterGc(ctx: Context, freedBytes: number): Prom
   return text;
 }
 async function persistDiskMeasurements(ctx: Context): Promise<void> {
-  const worktrees = [...new Set([...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)].flatMap(r => r.repos.map(r => r.worktree)))];
-  const entries = worktrees.flatMap(wt => { const m = lastMeasurement(wt); return m ? [m] : []; });
+  const repos = [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)].flatMap(r => r.repos);
+  const worktrees = [...new Set(repos.map(r => r.worktree))];
+  const entries = worktrees.flatMap(wt => { const m = lastMeasurement(wt); return m ? [{...m, repo: repos.find(r => r.worktree === wt)?.path}] : []; });
   await ctx.runner.writeFile(path.join(path.dirname(ctx.config.path), 'disk-sizes.json'), JSON.stringify({ version: 2, entries }));
 }
 const refreshing = new Set<string>();
@@ -209,12 +210,14 @@ export function diskStartHold(config: Context['config'], worktrees: string[] = [
   return undefined;
 }
 
-export function worktreeCostEstimates(ctx: Context, repos: {path: string}[]) {
+export function worktreeCostEstimates(ctx: Context, repos: {path: string}[], opts: {persistedOnly?: boolean} = {}) {
   restoreDiskMeasurements(ctx);
-  const records = [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)];
+  const records = opts.persistedOnly ? [] : [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)];
+  let persisted: {repo: string; bytes: number; at: number}[] = [];
+  try { const saved = JSON.parse(fs.readFileSync(path.join(path.dirname(ctx.config.path), 'disk-sizes.json'), 'utf8')); if (saved.version === 2) persisted = saved.entries.filter((e: {repo?: unknown; bytes?: unknown; at?: unknown}) => typeof e.repo === 'string' && typeof e.bytes === 'number' && Number.isFinite(e.bytes) && typeof e.at === 'number' && Number.isFinite(e.at)); } catch { /* no reading yet */ }
   return repos.map(repo => {
     const samples = records.flatMap(r => r.repos.filter(r => path.resolve(r.path) === path.resolve(repo.path)).flatMap(r => { const m = lastMeasurement(r.worktree); return m ? [m] : []; })).sort((a, b) => b.at - a.at);
-    const last = samples[0];
+    const last = [...samples, ...persisted.filter(e => path.resolve(e.repo) === path.resolve(repo.path))].sort((a, b) => b.at - a.at)[0];
     return {repo: path.basename(repo.path), bytes: last?.bytes ?? null, measuredAt: last ? new Date(last.at).toISOString() : null, ageSeconds: last ? Math.max(0, Math.floor((ctx.runner.now() - last.at) / 1000)) : null};
   });
 }
