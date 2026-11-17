@@ -4,7 +4,11 @@ const ERROR_LINE = /^\s*(?:[●■⎿]\s*)?(?:API Error:|Error:|HTTP(?:\/\d(?:\.
 export const PROVIDER_QUOTA_PATTERN = `^(?=[^\\n]*(?:${QUOTA.source}))${ERROR_LINE.source.slice(1)}`;
 export function quotaError(text: string, structured = false): string | undefined {
   if (structured) return QUOTA.test(text) ? text : undefined;
-  return text.split('\n').find(line => ERROR_LINE.test(line) && QUOTA.test(line));
+  const lines = text.split('\n');
+  const at = lines.findIndex(line => ERROR_LINE.test(line) && QUOTA.test(line));
+  if (at < 0) return undefined;
+  const continuation = lines.slice(at + 1, at + 4).filter(line => /^\s*(?:Your limit will reset|resets?(?: at| in)|Weekly\/Monthly Limit Exhausted)/i.test(line));
+  return [lines[at], ...continuation].join('\n');
 }
 /** Explicit provider reset/Retry-After only; never infer a reset from the duration of a usage window. */
 export function quotaReset(text: string, now: number): number | undefined {

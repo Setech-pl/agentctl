@@ -41,3 +41,26 @@ Agentctl runs with your permissions; worktrees are not an OS sandbox. Folder tru
 Use `host: pc` to run a task on a configured SSH host: remote worktree/setup/agent, ordinary task operations and a local report mirror. [Remote task setup and PC example](docs/en/hosts.md). Account/host limits, provider holds, safe remote GC, per-host board tasks and restart/adopt/resume are included in 0.23.0; queued tasks can change location with `move --host pc|local`. [Release notes](docs/release-notes/0.23.0.en.md).
 
 [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [MIT license](LICENSE). Use the repository gate and task-owned cache. This release combines the complete manuals with the 0.22.2 operations fixes and small diagnostics/help fixes.
+[Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [MIT license](LICENSE). Use the repository gate and task-owned cache.
+
+GC checks `git status --porcelain --untracked-files=normal` in **every** task worktree, plus commits ahead of upstream (or the recorded base). Previews show dirty file and unpushed commit counts per repo, even with cached sizes. Dirty/unpushed worktrees stay unless the owner explicitly uses CLI `--force-dirty` or MCP `force_dirty: [TASK]`; apply checks again. Ignored files are excluded.
+
+Task cache now stays when removing worktrees. Deleting old cache entries requires explicit owner confirmation: CLI `gc --include-cache --apply` or MCP `gc {include_cache: true}`. Spec `keep_cache: true`, CLI `--keep-cache TASK...`, and MCP `keep_cache: [TASK]` preserve all cache for those tasks. Report references, including `persist: [paths]`, `artifacts: [path | {path: ...}]` and `refs: [path | {path: ...}]` in agentctl-outputs, protect referenced entries and their parent directories even with include_cache. Relative paths resolve from the report directory or task worktrees. Previews paginate every cache candidate with its path and size; protection is checked again at apply.
+
+`answer` tokens match the normalized question and option labels, independent of menu scrolling, selection marker, whitespace or unrelated screen redraws. Confirmation requires the chosen numbered option to remain visible with the same label and question; changed menus, expired/replayed tokens and changed task identity are refused.
+
+Task class `gate` uses Claude Sonnet medium, Codex `gpt-6-luna/medium`, Kimi `k3-256k/low`, and GLM `glm-5.3-flash/medium`. The default equivalents derive from the same model matrix.
+
+Inherited project links to closed/archived tasks are errors: use the spec's own backend worktree or links: []. Legacy defaults pointing into a repository already provided by the spec are skipped too. Explicit spec links and project `{worktree:repo}` placeholders remain intentional choices.
+
+Every MCP write supports `{preview_token, confirm: true}` after a preview, including `away`. WALL writes also accept `{as, preview_token, confirm: true}` when `as` matches the preview; channel/kind/subject/body and other operation arguments are restored from that session. A changed author or tool, expired token or changed scope is refused; retries reuse the receipt.
+
+Pulled report-ready tasks fold into “odebrane, do zamknięcia (N)” per cohort after active/waiting tasks. Enter expands the selected row; `B` lists the pulled tasks of that cohort and asks for confirmation before closing their windows. Reports, branches and worktrees stay. Unpulled reports form the highlighted top section across all cohorts, including tasks without a window.
+
+`board.pulled_collapse_after: 0` sets the delay in minutes (default: collapse immediately). `board.pulled_auto_close_after: false` disables automatic closure by default. Set a non-negative number of hours to opt in: watch closes only current pulled report-ready tasks after that age since pull, records `pulled-auto-close`, and keeps worktrees. Restart watch/board after changing these settings.
+
+`agentctl status` and MCP status group current pulled reports under “odebrane, niezamknięte”; JSON keeps the pulled marker. Use `agentctl close --cohort NAME --pulled` (preview and confirmation; `--yes` executes) or MCP `close` with `{cohort: "NAME", pulled: true}`, then confirm its preview token. Task IDs and worktree removal cannot be combined with this selection.
+
+CLI pulled closure refuses a changed task list or a report rewritten while awaiting confirmation; run the preview again to review the current scope.
+
+[WALL lifecycle: archive, reminders and stale](docs/en/configuration.md#wall-lifecycle-0227).

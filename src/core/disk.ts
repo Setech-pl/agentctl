@@ -18,8 +18,8 @@ import { fileVersion } from './file-version.ts';
 import { withFileLock } from './file-lock.ts';
 
 export type DiskLevel = 'ok' | 'warn' | 'critical' | 'unknown';
-export interface DiskVolume { host?: string; workDir?: string; device: string | null; paths: string[]; availableBytes: number | null; totalBytes: number | null; level: DiskLevel; error?: string }
-export interface DiskReport { reclaimableBytes?: number | null; gcHint?: boolean; measurementError?: string; /** The sizes below are the last ones measured (or none yet): a measurement is still running in the background. */ measuring?: boolean; worktreeCount?: number; largestWorktrees?: { path: string; bytes: number }[]; pathsTotal?: number; pathsOffset?: number; pathsNextOffset?: number | null; volumes: DiskVolume[]; worktreeBytes: number | null; measuredAt: string; level: DiskLevel }
+export interface DiskVolume { host?: string; workDir?: string; samplePath?: string; worktreeShareWarning?: {bytes: number; measuredAt: string; ageSeconds: number}; device: string | null; paths: string[]; availableBytes: number | null; totalBytes: number | null; level: DiskLevel; error?: string }
+export interface DiskReport { freeMeasuredAt?: string; worktreeAgeSeconds?: number; gcPolicyNote?: string; reclaimableBytes?: number | null; gcHint?: boolean; measurementError?: string; /** The sizes below are the last ones measured (or none yet): a measurement is still running in the background. */ measuring?: boolean; worktreeCount?: number; largestWorktrees?: { path: string; bytes: number }[]; pathsTotal?: number; pathsOffset?: number; pathsNextOffset?: number | null; volumes: DiskVolume[]; worktreeBytes: number | null; measuredAt: string; level: DiskLevel }
 export const DISK_INTERVAL_MS = 5 * 60_000;
 const restored = new Map<string, string>();
 export function diskLevel(bytes: number | null, warnGb: number, criticalGb: number): DiskLevel {
@@ -67,7 +67,7 @@ export async function collectDisk(ctx: Context, statfs = fs.promises.statfs, opt
         availableBytes = Number(fields[3]) * 1024; totalBytes = Number(fields[1]) * 1024;
       } else error = e instanceof Error ? e.message : String(e);
     }
-    volumes.set(key, { device, paths: [target], availableBytes, totalBytes, level: diskLevel(availableBytes, ctx.config.disk.warnGb, ctx.config.disk.criticalGb), ...(error ? { error } : {}) });
+    volumes.set(key, { samplePath: ancestor, device, paths: [target], availableBytes, totalBytes, level: diskLevel(availableBytes, ctx.config.disk.warnGb, ctx.config.disk.criticalGb), ...(error ? { error } : {}) });
   }
   const worktrees = [...new Set(records.flatMap((r) => r.repos.map((r) => r.worktree)))].sort();
   restoreDiskMeasurements(ctx);
@@ -87,7 +87,10 @@ export async function collectDisk(ctx: Context, statfs = fs.promises.statfs, opt
   }
   for (const volume of volumes.values()) {
     const bytes = byDevice.get(volume.device ?? '') ?? 0;
-    if (volume.totalBytes && bytes / volume.totalBytes * 100 > ctx.config.disk.worktreeSharePercent && volume.level !== 'critical') volume.level = 'warn';
+    if (volume.totalBytes && bytes / volume.totalBytes * 100 > ctx.config.disk.worktreeSharePercent) {
+      if (volume.level !== 'critical') volume.level = 'warn';
+      volume.worktreeShareWarning = {bytes, measuredAt: new Date(measuredAt).toISOString(), ageSeconds: Math.max(0, Math.floor((ctx.runner.now() - measuredAt) / 1000))};
+    }
   }
   const health = readHostsCache();
   for (const [host, h] of Object.entries(ctx.config.hosts)) {
@@ -103,7 +106,7 @@ export async function collectDisk(ctx: Context, statfs = fs.promises.statfs, opt
   const level = (['critical', 'warn', 'unknown', 'ok'] as const).find((l) => all.some((v) => v.level === l)) ?? 'unknown';
   const offset = opts.offset ?? 0, limit = Math.min(opts.limit ?? 20, 100);
   const paths = all.flatMap(v => v.paths), page = new Set(opts.detail ? paths.slice(offset, offset + limit) : []);
-  return { gcHint, reclaimableBytes, worktreeCount: worktrees.length, largestWorktrees, pathsTotal: paths.length, pathsOffset: offset, pathsNextOffset: opts.detail && offset + limit < paths.length ? offset + limit : null, volumes: all.map(v => ({ ...v, pathCount: v.paths.length, paths: v.paths.filter(p => page.has(p)) })), worktreeBytes, measuredAt: new Date(measuredAt).toISOString(), level, ...(pending ? { measuring: true } : {}), ...(measurementError ? { measurementError } : {}) };
+  return { freeMeasuredAt: new Date(ctx.runner.now()).toISOString(), worktreeAgeSeconds: Math.max(0, Math.floor((ctx.runner.now() - measuredAt) / 1000)), gcPolicyNote: 'GC removal blocked for pinned, active, dirty/unpushed or linked worktrees; cache kept unless explicitly authorized. Preview safety policy first.', gcHint, reclaimableBytes, worktreeCount: worktrees.length, largestWorktrees, pathsTotal: paths.length, pathsOffset: offset, pathsNextOffset: opts.detail && offset + limit < paths.length ? offset + limit : null, volumes: all.map(v => ({ ...v, pathCount: v.paths.length, paths: v.paths.filter(p => page.has(p)) })), worktreeBytes, measuredAt: new Date(measuredAt).toISOString(), level, ...(pending ? { measuring: true } : {}), ...(measurementError ? { measurementError } : {}) };
 }
 /** Restore the watch's persisted samples; never schedule or validate a recursive measurement. */
 export function restoreDiskMeasurements(ctx: Context): void {
@@ -128,7 +131,7 @@ function readingAge(ageMs: number): string {
 export function diskLine(disk: DiskReport, now: number = Date.now()): string {
   const age = `, ${readingAge(Math.max(0, now - Date.parse(disk.measuredAt)))} old`;
   const note = disk.measuring ? ` (measuring, last reading${age})` : disk.measurementError ? ` (measurement failed, last reading${age})` : age ? ` (last reading${age})` : '';
-  return `Disk: ${disk.level}; free ${disk.volumes.map((v) => `${v.host ? `[${v.host}] ${v.workDir ?? ''} ` : ''}${v.availableBytes === null ? 'n/d' : `${(v.availableBytes / 1024 ** 3).toFixed(1)} GiB`}`).join(' / ')}; agentctl worktrees ${disk.worktreeBytes === null ? 'n/d' : `${(disk.worktreeBytes / 1024 ** 3).toFixed(1)} GiB`}${note}${disk.level === 'critical' || disk.level === 'warn' ? `; run agentctl gc --preview (gc_preview); reclaimable ${disk.reclaimableBytes ?? 'n/d'} bytes` : ''}`;
+  return `Disk: ${disk.level}; free ${disk.volumes.map((v) => `${v.host ? `[${v.host}] ${v.workDir ?? ''} ` : ''}${v.availableBytes === null ? 'n/d' : `${(v.availableBytes / 1024 ** 3).toFixed(1)} GiB`}`).join(' / ')}; agentctl worktrees ${disk.worktreeBytes === null ? 'n/d' : `${(disk.worktreeBytes / 1024 ** 3).toFixed(1)} GiB`}${note}${disk.level === 'critical' || disk.level === 'warn' ? `; run agentctl gc --preview (gc_preview); reclaimable ${disk.reclaimableBytes ?? 'n/d'} bytes; ${disk.gcPolicyNote ?? 'GC may be blocked by protection policy; preview first.'}` : ''}`;
 }
 
 /**
@@ -144,8 +147,9 @@ export async function refreshDiskAfterGc(ctx: Context, freedBytes: number): Prom
   return text;
 }
 async function persistDiskMeasurements(ctx: Context): Promise<void> {
-  const worktrees = [...new Set([...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)].filter(r => !r.host).flatMap(r => r.repos.map(r => r.worktree)))];
-  const entries = worktrees.flatMap(wt => { const m = lastMeasurement(wt); return m ? [m] : []; });
+  const repos = [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)].filter(r => !r.host).flatMap(r => r.repos);
+  const worktrees = [...new Set(repos.map(r => r.worktree))];
+  const entries = worktrees.flatMap(wt => { const m = lastMeasurement(wt); return m ? [{...m, repo: repos.find(r => r.worktree === wt)?.path}] : []; });
   await ctx.runner.writeFile(path.join(path.dirname(ctx.config.path), 'disk-sizes.json'), JSON.stringify({ version: 2, entries }));
 }
 const refreshing = new Set<string>();
@@ -210,4 +214,78 @@ export async function refreshHostHealth(ctx: Context): Promise<void> {
     await planRemoteGc(ctx, {}, 7 * 86400_000);
   }
   finally { hostRefreshing.delete(ctx.config.path); }
+}
+/** Fresh cheap filesystem admission, independent of recursive worktree measurements. Unknown space fails closed. */
+export function diskStartHold(config: Context['config'], worktrees: string[] = [], statfs = fs.statfsSync): string | undefined {
+  const targets = new Set([config.cache, config.stateDir, ...(config.worktreeRoot ? [resolvePath(config.worktreeRoot)] : []), ...worktrees]);
+  const devices = new Set<number>();
+  for (const target of targets) {
+    const ancestor = existingAncestor(target);
+    try {
+      const device = fs.statSync(ancestor).dev;
+      if (devices.has(device)) continue;
+      devices.add(device);
+      const stat = statfs(ancestor);
+      const gb = Number(stat.bavail) * Number(stat.bsize) / 1024 ** 3;
+      if (gb < config.disk.minFreeStartGb) return `wstrzymane: dysk ${Math.floor(gb)} GB < ${config.disk.minFreeStartGb} GB`;
+    } catch { return 'wstrzymane: dysk – nie można odczytać wolnego miejsca'; }
+  }
+  return undefined;
+}
+
+export function worktreeCostEstimates(ctx: Context, repos: {path: string}[], opts: {persistedOnly?: boolean} = {}) {
+  restoreDiskMeasurements(ctx);
+  const records = opts.persistedOnly ? [] : [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)];
+  let persisted: {repo: string; bytes: number; at: number}[] = [];
+  try { const saved = JSON.parse(fs.readFileSync(path.join(path.dirname(ctx.config.path), 'disk-sizes.json'), 'utf8')); if (saved.version === 2) persisted = saved.entries.filter((e: {repo?: unknown; bytes?: unknown; at?: unknown}) => typeof e.repo === 'string' && typeof e.bytes === 'number' && Number.isFinite(e.bytes) && typeof e.at === 'number' && Number.isFinite(e.at)); } catch { /* no reading yet */ }
+  return repos.map(repo => {
+    const samples = records.flatMap(r => r.repos.filter(r => path.resolve(r.path) === path.resolve(repo.path)).flatMap(r => { const m = lastMeasurement(r.worktree); return m ? [m] : []; })).sort((a, b) => b.at - a.at);
+    const last = [...samples, ...persisted.filter(e => path.resolve(e.repo) === path.resolve(repo.path))].sort((a, b) => b.at - a.at)[0];
+    return {repo: path.basename(repo.path), bytes: last?.bytes ?? null, measuredAt: last ? new Date(last.at).toISOString() : null, ageSeconds: last ? Math.max(0, Math.floor((ctx.runner.now() - last.at) / 1000)) : null};
+  });
+}
+
+/** Refresh snapshot counters without scanning tasks, queued specs or recursive sizes. */
+export async function refreshDiskFreeSpace(ctx: Context, previous: DiskReport): Promise<DiskReport> {
+  const now = ctx.runner.now(), ageSeconds = Math.max(0, Math.floor((now - Date.parse(previous.measuredAt)) / 1000));
+  const volumes = await Promise.all(previous.volumes.map(async volume => {
+    if (volume.host) {
+      const health = readHostsCache(process.env, now, 60_000)?.hosts.find(h => h.name === volume.host);
+      if (!health || health.state !== 'reachable' || !health.disk || health.disk.workDir !== volume.workDir) return {...volume, availableBytes: null, totalBytes: null, level: 'unknown' as const};
+      const availableBytes = health.disk.freeKb * 1024, totalBytes = health.disk.totalKb * 1024;
+      return {...volume, availableBytes, totalBytes, level: diskLevel(availableBytes, ctx.config.disk.warnGb, ctx.config.disk.criticalGb)};
+    }
+    try {
+      const stats = await fs.promises.statfs(volume.samplePath ?? existingAncestor(ctx.config.cache));
+      const availableBytes = Number(stats.bavail) * Number(stats.bsize), totalBytes = Number(stats.blocks) * Number(stats.bsize);
+      let level = diskLevel(availableBytes, ctx.config.disk.warnGb, ctx.config.disk.criticalGb);
+      if (volume.worktreeShareWarning && totalBytes && volume.worktreeShareWarning.bytes / totalBytes * 100 > ctx.config.disk.worktreeSharePercent && level !== 'critical') level = 'warn';
+      return {...volume, error: undefined, availableBytes, totalBytes, level, ...(volume.worktreeShareWarning ? {worktreeShareWarning: {...volume.worktreeShareWarning, ageSeconds}} : {})};
+    } catch (e) {return {...volume, availableBytes: null, totalBytes: null, level: 'unknown' as const, error: e instanceof Error ? e.message : String(e)};}
+  }));
+  const level = (['critical', 'warn', 'unknown', 'ok'] as const).find(l => volumes.some(v => v.level === l)) ?? 'unknown';
+  return {...previous, volumes, level, gcHint: volumes.some(v => v.level === 'warn' || v.level === 'critical'), freeMeasuredAt: new Date(now).toISOString(), worktreeAgeSeconds: ageSeconds};
+}
+
+/** Cached host admission for synchronous queue previews; never stat a remote path locally. */
+export function taskDiskStartHold(config: Context['config'], host: string | undefined, worktrees: string[], now = Date.now()): string | undefined {
+  if (!host) return diskStartHold(config, worktrees);
+  if (config.disk.minFreeStartGb === 0) return undefined;
+  const health = readHostsCache(process.env, now, 60_000)?.hosts.find(h => h.name === host);
+  if (!health || health.state !== 'reachable' || health.disk?.workDir !== config.hosts[host]?.workDir) return `wstrzymane: dysk [${host}] – brak świeżego odczytu work_dir`;
+  const gb = health.disk.freeKb / 1024 ** 2;
+  return gb < config.disk.minFreeStartGb ? `wstrzymane: dysk [${host}] ${Math.floor(gb)} GB < ${config.disk.minFreeStartGb} GB` : undefined;
+}
+
+/** Fresh remote work_dir counters before any worktree/setup mutation. */
+export async function freshTaskDiskStartHold(ctx: Context, host: string | undefined, worktrees: string[]): Promise<string | undefined> {
+  if (!host) return diskStartHold(ctx.config, worktrees);
+  if (ctx.config.disk.minFreeStartGb === 0) return undefined;
+  try {
+    const script = "const fs=require('node:fs'),p=require('node:path'); let dir=process.argv[1].replace(/^~(?=\\/|$)/,process.env.HOME); while(!fs.existsSync(dir)&&p.dirname(dir)!==dir) dir=p.dirname(dir); const s=fs.statfsSync(dir); console.log(Number(s.bavail)*Number(s.bsize)/1024**3)";
+    const r = await ctx.hosts.forHost(host).checked('node', ['-e', script, ctx.config.hosts[host]!.workDir], {readOnly: true, timeoutMs: 5000});
+    const gb = Number(r.stdout.trim());
+    if (!r.stdout.trim() || !Number.isFinite(gb) || gb < 0) throw Error('invalid disk sample');
+    return gb < ctx.config.disk.minFreeStartGb ? `wstrzymane: dysk [${host}] ${Math.floor(gb)} GB < ${ctx.config.disk.minFreeStartGb} GB` : undefined;
+  } catch { return `wstrzymane: dysk [${host}] – nie można odczytać work_dir`; }
 }

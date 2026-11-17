@@ -1,7 +1,9 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import type { Context } from './context.ts';
 import { describeTargets, matchTask } from './resolve.ts';
 import type { TaskTarget } from './resolve.ts';
-import { listTaskRecords, setHeaderField, taskFile } from './taskstore.ts';
+import { archiveDir, listArchivedRecords, listTaskRecords, setHeaderField, taskFile } from './taskstore.ts';
 import { AgentctlError } from './util.ts';
 
 export interface HideResult {
@@ -38,4 +40,19 @@ export async function setHidden(ctx: Context, taskArgs: string[], hidden: boolea
     results.push({ task: record.task, windowAlive: live.has(record.window), unchanged });
   }
   return results;
+}
+
+/** Pins protect data and retain the existing provider-move protection. Resolve the whole batch before writing. */
+export async function setPinned(ctx: Context, inputs: string[], pin: boolean, preview = false) {
+  const current = listTaskRecords(ctx.config), records = [...current, ...listArchivedRecords(ctx.config).filter(r => !current.some(c => c.window === r.window))];
+  const chosen = inputs.map(input => {
+    const match = matchTask(input, records.map(r => ({task: r.task, window: r.window, alive: false})));
+    if (match.kind !== 'one') throw new AgentctlError(`pin: ${input}: ${match.kind === 'many' ? 'ambiguous task ID' : 'no task state'}`);
+    return records.find(r => r.window === match.target.window)!;
+  });
+  for (const r of new Set(chosen)) if (!preview) {
+    const file = taskFile(ctx.config, r.window);
+    await setHeaderField(ctx.runner, fs.existsSync(file) ? file : path.join(archiveDir(ctx.config), r.window, 'TASK.md'), 'pin', pin);
+  }
+  return chosen.map(r => ({task: r.task, pin, previous: r.pin === true}));
 }

@@ -27,8 +27,9 @@ function world(name: string) {
   const respond = (cmd: string, args: string[], opts?: Parameters<FakeTmux['respond']>[2]) => {
     if (cmd !== 'git') return tmux.respond(cmd, args, opts);
     const rest = args.slice(2).join(' ');
+    if (args.includes('rev-list')) return { stdout: '0' };
     if (rest === 'rev-parse --abbrev-ref HEAD') return { stdout: 'agent/nc-1\n' };
-    if (rest === 'status --porcelain') return { stdout: '' };
+    if (rest === 'status --porcelain --untracked-files=normal') return { stdout: '' };
     if (rest === 'worktree list --porcelain') return { stdout: `worktree ${repo}\nbranch refs/heads/main\n` };
     if (rest.startsWith('worktree remove ')) fs.rmSync(rest.slice('worktree remove '.length), { recursive: true, force: true });
     return {};

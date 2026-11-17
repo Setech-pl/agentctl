@@ -12,6 +12,16 @@ fs.promises.statfs = (async (...args: unknown[]) => {
   return { ...stats, blocks, bavail: available, bfree: available };
 }) as typeof fs.promises.statfs;
 
+// Queue admission uses the synchronous cheap counter; isolate it from host disk pressure too.
+const nativeStatfsSync = fs.statfsSync;
+fs.statfsSync = ((...args: unknown[]) => {
+  const stats = (nativeStatfsSync as Function)(...args);
+  const bigint = typeof stats.bsize === 'bigint';
+  const blocks = bigint ? (1024n ** 4n) / stats.bsize : Math.floor((1024 ** 4) / stats.bsize);
+  const available = bigint ? (256n * 1024n ** 3n) / stats.bsize : Math.floor((256 * 1024 ** 3) / stats.bsize);
+  return {...stats, blocks, bavail: available, bfree: available};
+}) as typeof fs.statfsSync;
+
 // Loaded before test modules, in each test process. Even a plain `npm test`
 // must never read user configuration or connect to the user's tmux server.
 const cache = process.env.AGENTCTL_TEST_TMP ?? process.env.AGENTCTL_TEST_CACHE ?? path.resolve(import.meta.dirname, '../.cache');

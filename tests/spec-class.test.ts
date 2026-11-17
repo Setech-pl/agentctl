@@ -46,11 +46,11 @@ describe('spec key class:', () => {
       () => resolve({ task: 'CL-7', agent: 'claude', class: 'whatever' }),
       (e: Error) => {
         assert.match(e.message, /unknown class "whatever"/);
-        assert.match(e.message, /report, simple, smoke, feature, bugfix, review, merge, hard, sim, visual, visual-compare, design, creative, escalate/);
+        assert.match(e.message, /report, simple, gate, smoke, feature, bugfix, review, merge, hard, sim, visual, visual-compare, design, creative, escalate/);
         return true;
       },
     );
-    assert.equal(classNames().length, 14, 'the list above is the whole matrix');
+    assert.equal(classNames().length, 15, 'the list above is the whole matrix');
   });
 
   it('a class with "none" for the agent is an error naming the providers that have one', () => {

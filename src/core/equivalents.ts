@@ -122,3 +122,8 @@ export function translate(order: Order, target: AgentName, table: Equivalent[]):
     hint: `Add a line under "equivalents:" in your config (~/.agentctl/config.yaml):\n  - ${line}`,
   };
 }
+
+/** Kimi exposes low/high/max. Medium orders are accepted as high and always diagnosed. */
+export function mapEffort(order: Order): {effort: Effort; warning?: string} {
+  return order.agent === 'kimi' && order.effort === 'medium' ? {effort: 'high', warning: 'Kimi effort medium mapped to high (supported: low, high, max)'} : {effort: order.effort};
+}

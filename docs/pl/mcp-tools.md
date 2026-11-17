@@ -10,7 +10,7 @@ Confirm `new`/`queue` wymaga watch. Zapisuje spec jako `accepted` pod krótką b
 
 Przy działającym watch potwierdzone narzędzia zapisują też trwałe żądania: consult, unblock, queue_up/rm/retry, close, cancel, send (w tym withdraw/potwierdzone enter_only), mark, hide/unhide, archive, cohort_add/remove/archive/note. Watch ponownie sprawdza zgodę/zakres, wykonuje i zapisuje `mcp-applied` („MCP WYKONANE”) albo `mcp-failed` („MCP BŁĄD”). Bez watch większość grupy wykonuje się na miejscu; CONSULT wymaga watch. `set_limits` i zapisy WALL są synchroniczne. `wall_post`, `wall_reply` i `wall_set_status` sprawdzają uprawnienia/refs/sekrety i dopisują wynik przed zwróceniem ID/statusu, także przy działającym watch; powiadomienia nie opóźniają confirm. Obserwuj events_since; po timeout nie twórz nowego zlecenia. Confirm ponawiaj tylko tym samym tokenem, potem czytaj stan trwały.
 
-`answer` ma dodatkowy `token` konkretnej opcji i ekranu; zmienione menu odmawia wysłania klawisza. `send enter_only` ma osobny token dokładnego pola i uprawnienie `send_enter`; wysyła tylko niezmieniony tekst pozostawiony przez wcześniejsze send. Żaden mechanizm nie daje automatycznej zgody trust.
+`answer` ma dodatkowy `token` znormalizowanego pytania i etykiet opcji, niezależny od przewijania; wybrana opcja musi być widoczna i niezmieniona. Zgoda na polecenie nadal wiąże jego treść. `send enter_only` ma osobny token dokładnego pola i uprawnienie `send_enter`; wysyła tylko niezmieniony tekst pozostawiony przez wcześniejsze send. Żaden mechanizm nie daje automatycznej zgody trust.
 
 Zapisy trafiają do `mcp-audit.log` i dziennika; brak możliwości audytu oznacza odmowę. Powiadomienia zależą od `notify.mcp_writes`. Jawne usunięcie worktree wymaga dodatkowo `mcp.allow_rm_worktree`. Żadne narzędzie nie scala, nie robi push/publish ani nie wykonuje dowolnych poleceń raportu. Uprawnienia configu nie są izolacją OS.
 
@@ -38,74 +38,76 @@ Argumenty z ? są opcjonalne. Pola dostawców obejmują opcjonalnych; uruchomion
 
 | Tool | Rodzaj | Argumenty | Zastosowanie |
 |---|---|---|---|
-| `status` | odczyt | `all?`, `cohort?`, `format?`, `detail?`, `offset?`, `limit?`, `capacity?` | Stan zadań i raportów; cache podaje wiek, po 5 min krótki fallback kolejki/dziennika. |
+| `status` | odczyt | `as?`, `all?`, `cohort?`, `format?`, `detail?`, `offset?`, `limit?`, `capacity?` | Stan zadań i raportów; cache podaje wiek, po 5 min krótki fallback kolejki/dziennika. |
 | `events_since` | odczyt | `as?`, `cursor?`, `limit?`, `client?`, `since?`, `cohort?`, `peek?`, `format?`, `detail?` | Przyrost według as czatu (client nadpisuje), otwarta skrzynka WALL; peek zachowuje kursor. |
-| `gc_preview` | odczyt | `request_id?`, `detail?`, `offset?`, `limit?`, `older_than?`, `merged?`, `cohort?` | Chroniony plan sprzątania z rozmiarami i powodami pominięcia; bez usuwania. |
-| `limits` | odczyt | `format?`, `detail?` | Limity slotów, zajętość, rezerwacje, kolejka i obowiązujący queue_hold. |
-| `set_limits` | zapis | `claude?`, `codex?`, `queue_hold?`, `hold?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Zmień limity, queue_hold i czasowe hold (HH:MM/ISO/3h/off); zapis synchroniczny. |
-| `reserve` | zapis | `claude?`, `codex?`, `note?`, `release?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Zarezerwuj sloty dla agentów uruchamianych ręcznie. |
-| `version` | odczyt |  | Wersja procesu MCP, skrypt, PID, czas startu i wersja stabilnej kopii na dysku. |
-| `peek` | odczyt | `task`, `lines?` | Ostatnie linie okna bez stopki, pytanie, stan kolejki promptów lub zapis błędu startu. |
-| `list_reports` | odczyt | `all?` | Lista raportów, rozmiar/czas, źródło i informacja o odebraniu. |
-| `get_report` | odczyt | `task`, `mark_pulled?`, `detail?`, `mode?`, `section?`, `byte_offset?`, `offset?`, `limit?` | Raport; podsumowanie/pierwsza pełna strona domyślnie pulled, mark_pulled steruje potwierdzeniem. |
-| `pull_ready` | odczyt | `cohort?`, `all?`, `detail?`, `mode?`, `ack?`, `cursor?`, `offset?`, `limit?` | Nowe raporty: domyślnie podsumowanie; full/ack oznacza pełne odebranie. |
-| `task_spec` | odczyt | `task` | Zapisany nagłówek i prompt zadania. |
-| `queue_list` | odczyt | `cohort?`, `format?`, `detail?` | Pozycja, stan i warunek startu zadań w kolejce. |
-| `cohort_list` | odczyt | `all?` | Kohorty i liczby zadań według stanu. |
-| `cohort_show` | odczyt | `cohort`, `format?`, `detail?` | Zadania, kolejka i zagregowane outputs kohorty z ostrzeżeniami o referencjach. |
-| `guide` | odczyt | `project?`, `lang?` | Wspólny przewodnik zlecającego i opcjonalny zaufany przewodnik projektu. |
-| `capacity` | odczyt | `format?`, `detail?`, `offset?`, `limit?` | Plan, źródło/wiek, tempo, estymacje, sloty, kolejka, dysk/load i statystyki. |
-| `usage` | odczyt | `cohort?`, `since?` | Zaobserwowane tokeny oraz okna planów aktywnych dostawców; braki to n/d. |
-| `log` | odczyt | `cohort?`, `since?` | Historia prób, raportów, ocen, anulowania i przeniesienia. |
-| `stats` | odczyt | `cohort?`, `since?` | Statystyki model/effort, mediany, oceny i liczebność próby. |
-| `overlap` | odczyt | `task?` | Aktywne zadania zmieniające te same pliki; to ostrzeżenia, nie blokady. |
-| `resume` | zapis | `tasks?`, `all?`, `confirm?`, `preview_token?` | Wznów znane sesje po utracie okien, bez ponownego pierwszego promptu. |
-| `answer` | zapis | `task?`, `option?`, `confirm?`, `token?`, `preview_token?` | Podgląd i wybór numerowanej opcji z tokenem dokładnego menu; trust zawsze ręcznie. |
-| `send` | zapis | `task?`, `text?`, `enter_only?`, `confirm?`, `token?`, `withdraw?`, `preview_token?` | Wyślij follow-up lub wycofaj ID; busy Codex czeka do końca tury. enter_only wymaga send_enter. |
-| `consult` | zapis | `spec?`, `confirm?`, `preview_token?` | Kosztowny panel wielu dostawców: podgląd liczby/usage, Accepted, rundy i synteza przez watch. |
-| `new` | zapis | `spec?`, `agent?`, `reuse?`, `no_agent?`, `cohort?`, `wait_trust?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` | Podgląd specyfikacji, potem trwała rejestracja Accepted do walidacji/startu przez watch. |
-| `queue` | zapis | `spec?`, `cohort?`, `replace?`, `agent?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` | Podgląd specyfikacji, potem Accepted do walidacji i kolejki przez watch. |
-| `queue_rm` | zapis | `task?`, `confirm?`, `preview_token?` | Usuń oczekujące zadanie z kolejki. |
-| `cancel` | zapis | `task?`, `tasks?`, `cohort?`, `reason?`, `remove_worktree?`, `confirm?`, `preview_token?` | Przerwij i porzuć zadania; zachowaj gałęzie/worktree, zapisz powód. |
-| `mark` | zapis | `task?`, `tasks?`, `cohort?`, `result?`, `note?`, `confirm?`, `preview_token?` | Zapisz ocenę człowieka ok/partial/fail, osobną od werdyktu autora. |
-| `away` | zapis | `on` | Przełącz tryb powiadomień na telefon. |
-| `interrupt` | zapis | `task?`, `confirm?`, `preview_token?` | Przerwij bieżącą turę, pozostawiając okno. |
-| `close` | zapis | `task?`, `tasks?`, `cohort?`, `remove_worktree?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` | Zamknij okno; usuwanie worktree wymaga dodatkowo allow_rm_worktree i jawnej opcji. |
-| `move` | zapis | `task?`, `agent?`, `host?`, `confirm?`, `preview_token?` | Przenieś zadanie do innego aktywnego dostawcy przez equivalents w tym samym worktree; pin blokuje. |
-| `queue_show` | odczyt | `task` | Pełny spec kolejki, błąd i historia prób. |
-| `mcp_check` | odczyt |  | Znajdź stare procesy MCP bez ich zatrzymywania. |
-| `spec_example` | odczyt |  | Wzorcowa specyfikacja przed napisaniem nowego zlecenia. |
-| `doctor` | odczyt | `project?` | Diagnoza instalacji, uprawnień i dysku; budżetowany odczyt z cache. |
-| `equivalents` | odczyt |  | Tabela mapowań model/effort aktywnych dostawców. |
-| `config_show` | odczyt |  | Efektywny config z maskowaniem sekretów; queue_hold jako pierwszy klucz. |
-| `hosts` | odczyt | `refresh?` | Zdrowie hostów SSH: połączenie, GPU, dysk, tmux, CLI i klony; host: w spec uruchamia zadanie zdalnie z lokalną kopią raportu. |
-| `manager_status` | odczyt |  | Stan lokalnej sesji manager. |
-| `away_status` | odczyt |  | Stan away i telefonu. |
-| `report` | odczyt | `task` | Kanoniczna ścieżka raportu i kandydaci. |
-| `queue_retry` | zapis | `task?`, `confirm?`, `preview_token?` | Ponów nieudany start po sprawdzeniu błędu; zamknij pozostawione okno diagnostyczne. |
-| `queue_up` | zapis | `task?`, `confirm?`, `preview_token?` | Przesuń oczekujące zadanie na początek jego klasy priorytetu; oceń zwalniane zależności. |
-| `queue_pause` | zapis | `confirm?`, `preview_token?` | Wstrzymaj automatyczne starty kolejki. |
-| `queue_resume` | zapis | `confirm?`, `preview_token?` | Wznów automatyczne starty kolejki. |
-| `unblock` | zapis | `task?`, `drop_after?`, `confirm?`, `preview_token?` | Zwolnij zablokowane zależności; drop_after wybiera zależność do usunięcia. |
-| `cohort_add` | zapis | `cohort?`, `tasks?`, `confirm?`, `preview_token?` | Przypisz istniejące zadania do kohorty. |
-| `cohort_remove` | zapis | `tasks?`, `confirm?`, `preview_token?` | Usuń przypisanie do kohorty. |
-| `cohort_archive` | zapis | `cohorts?`, `older_than?`, `confirm?`, `preview_token?` | Ukryj zakończone kohorty z wyboru; aktywne/kolejkowane są chronione, historia zostaje. |
-| `cohort_note` | zapis | `cohort?`, `text?`, `confirm?`, `preview_token?` | Zmień notatkę kohorty. |
-| `hide` | zapis | `tasks?`, `confirm?`, `preview_token?` | Ukryj zadania w domyślnym widoku, bez zamykania. |
-| `unhide` | zapis | `tasks?`, `confirm?`, `preview_token?` | Pokaż ukryte zadania. |
-| `archive` | zapis | `older_than?`, `cohort?`, `confirm?`, `preview_token?` | Przenieś stan zamkniętych zadań do archiwum. |
-| `adopt` | zapis | `task?`, `report?`, `host?`, `remoteReport?`, `window?`, `worktree?`, `agent?`, `model?`, `effort?`, `confirm?`, `preview_token?` | Odtwórz brakujące metadane z faktów dostarczonych przez właściciela. |
-| `report_from` | zapis | `task?`, `from?`, `force?`, `confirm?`, `preview_token?` | Skopiuj zwykły dozwolony raport do ścieżki kanonicznej; force nie omija granic/symlinków. |
-| `limits_release` | zapis | `claude?`, `codex?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Zwolnij zarezerwowane miejsca dostawców. |
-| `manager_start` | zapis | `project?`, `name?`, `model?`, `effort?`, `confirm?`, `preview_token?` | Uruchom sesję nadzorczą Claude z Remote Control. |
-| `manager_stop` | zapis | `confirm?`, `preview_token?` | Zatrzymaj sesję manager. |
-| `notify_test` | zapis | `phone?`, `confirm?`, `preview_token?` | Test powiadomienia lokalnego; phone jawnie wysyła do ntfy. |
-| `gc` | zapis | `detail?`, `offset?`, `limit?`, `cohort?`, `older_than?`, `branches?`, `confirm?`, `preview_token?` | Zastosuj chroniony plan sprzątania po podglądzie; opcjonalne scalone lokalne gałęzie. |
-| `wall_read` | odczyt | `as?`, `channel?`, `id?`, `since?`, `status?`, `kind?`, `limit?`, `before?` | Kanały, nagłówki z filtrami albo wiadomość z treścią, refs, historią i wątkiem. |
+| `gc_preview` | odczyt | `as?`, `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `request_id?`, `detail?`, `offset?`, `limit?`, `older_than?`, `merged?`, `cohort?` | Chroniony plan sprzątania z rozmiarami i powodami pominięcia; bez usuwania. |
+| `limits` | odczyt | `as?`, `format?`, `detail?` | Limity slotów, zajętość, rezerwacje, kolejka i obowiązujący queue_hold. |
+| `set_limits` | zapis | `as?`, `claude?`, `codex?`, `queue_hold?`, `hold?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Zmień limity, queue_hold i czasowe hold (HH:MM/ISO/3h/off); zapis synchroniczny. |
+| `reserve` | zapis | `as?`, `claude?`, `codex?`, `note?`, `release?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Zarezerwuj sloty dla agentów uruchamianych ręcznie. |
+| `version` | odczyt | `as?` | Wersja procesu MCP, skrypt, PID, czas startu i wersja stabilnej kopii na dysku. |
+| `peek` | odczyt | `as?`, `task`, `lines?` | Ostatnie linie okna bez stopki, pytanie, stan kolejki promptów lub zapis błędu startu. |
+| `list_reports` | odczyt | `as?`, `all?` | Lista raportów, rozmiar/czas, źródło i informacja o odebraniu. |
+| `get_report` | odczyt | `as?`, `task`, `mark_pulled?`, `detail?`, `mode?`, `section?`, `byte_offset?`, `offset?`, `limit?` | Raport; podsumowanie/pierwsza pełna strona domyślnie pulled, mark_pulled steruje potwierdzeniem. |
+| `pull_ready` | odczyt | `as?`, `cohort?`, `all?`, `detail?`, `mode?`, `ack?`, `cursor?`, `offset?`, `limit?` | Nowe raporty: domyślnie podsumowanie; full/ack oznacza pełne odebranie. |
+| `task_spec` | odczyt | `as?`, `task` | Zapisany nagłówek i prompt zadania. |
+| `queue_list` | odczyt | `as?`, `cohort?`, `format?`, `detail?` | Pozycja, stan i warunek startu zadań w kolejce. |
+| `cohort_list` | odczyt | `as?`, `all?` | Kohorty i liczby zadań według stanu. |
+| `cohort_show` | odczyt | `as?`, `cohort`, `format?`, `detail?` | Zadania, kolejka i zagregowane outputs kohorty z ostrzeżeniami o referencjach. |
+| `guide` | odczyt | `as?`, `project?`, `lang?` | Wspólny przewodnik zlecającego i opcjonalny zaufany przewodnik projektu. |
+| `capacity` | odczyt | `as?`, `format?`, `detail?`, `offset?`, `limit?` | Plan, źródło/wiek, tempo, estymacje, sloty, kolejka, dysk/load i statystyki. |
+| `usage` | odczyt | `as?`, `cohort?`, `since?` | Zaobserwowane tokeny oraz okna planów aktywnych dostawców; braki to n/d. |
+| `log` | odczyt | `as?`, `cohort?`, `since?` | Historia prób, raportów, ocen, anulowania i przeniesienia. |
+| `stats` | odczyt | `as?`, `cohort?`, `since?` | Statystyki model/effort, mediany, oceny i liczebność próby. |
+| `overlap` | odczyt | `as?`, `task?` | Aktywne zadania zmieniające te same pliki; to ostrzeżenia, nie blokady. |
+| `resume` | zapis | `as?`, `tasks?`, `all?`, `confirm?`, `preview_token?` | Wznów znane sesje po utracie okien, bez ponownego pierwszego promptu. |
+| `answer` | zapis | `as?`, `task?`, `option?`, `confirm?`, `token?`, `preview_token?` | Podgląd i wybór numerowanej opcji z tokenem dokładnego menu; trust zawsze ręcznie. |
+| `send` | zapis | `as?`, `task?`, `text?`, `enter_only?`, `confirm?`, `token?`, `withdraw?`, `preview_token?` | Wyślij follow-up lub wycofaj ID; busy Codex czeka do końca tury. enter_only wymaga send_enter. |
+| `consult` | zapis | `as?`, `spec?`, `confirm?`, `preview_token?` | Kosztowny panel wielu dostawców: podgląd liczby/usage, Accepted, rundy i synteza przez watch. |
+| `new` | zapis | `as?`, `spec?`, `agent?`, `reuse?`, `no_agent?`, `cohort?`, `wait_trust?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` | Podgląd specyfikacji, potem trwała rejestracja Accepted do walidacji/startu przez watch. |
+| `queue` | zapis | `as?`, `spec?`, `cohort?`, `replace?`, `agent?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` | Podgląd specyfikacji, potem Accepted do walidacji i kolejki przez watch. |
+| `queue_rm` | zapis | `as?`, `task?`, `confirm?`, `preview_token?` | Usuń oczekujące zadanie z kolejki. |
+| `cancel` | zapis | `as?`, `task?`, `tasks?`, `cohort?`, `reason?`, `remove_worktree?`, `confirm?`, `preview_token?` | Przerwij i porzuć zadania; zachowaj gałęzie/worktree, zapisz powód. |
+| `mark` | zapis | `as?`, `task?`, `tasks?`, `cohort?`, `result?`, `note?`, `confirm?`, `preview_token?` | Zapisz ocenę człowieka ok/partial/fail, osobną od werdyktu autora. |
+| `away` | zapis | `as?`, `on?`, `confirm?`, `preview_token?` | Przełącz tryb powiadomień na telefon. |
+| `interrupt` | zapis | `as?`, `task?`, `confirm?`, `preview_token?` | Przerwij bieżącą turę, pozostawiając okno. |
+| `close` | zapis | `as?`, `pulled?`, `task?`, `tasks?`, `cohort?`, `remove_worktree?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` | Zamknij okno; usuwanie worktree wymaga dodatkowo allow_rm_worktree i jawnej opcji. |
+| `move` | zapis | `as?`, `task?`, `agent?`, `host?`, `confirm?`, `preview_token?` | Przenieś zadanie do innego aktywnego dostawcy przez equivalents w tym samym worktree; pin blokuje. |
+| `queue_show` | odczyt | `as?`, `task` | Pełny spec kolejki, błąd i historia prób. |
+| `mcp_check` | odczyt | `as?` | Znajdź stare procesy MCP bez ich zatrzymywania. |
+| `spec_example` | odczyt | `as?` | Wzorcowa specyfikacja przed napisaniem nowego zlecenia. |
+| `doctor` | odczyt | `as?`, `project?` | Diagnoza instalacji, uprawnień i dysku; budżetowany odczyt z cache. |
+| `equivalents` | odczyt | `as?` | Tabela mapowań model/effort aktywnych dostawców. |
+| `config_show` | odczyt | `as?` | Efektywny config z maskowaniem sekretów; queue_hold jako pierwszy klucz. |
+| `hosts` | odczyt | `as?`, `refresh?` | Zdrowie hostów SSH: połączenie, GPU, dysk, tmux, CLI i klony; host: w spec uruchamia zadanie zdalnie z lokalną kopią raportu. |
+| `manager_status` | odczyt | `as?` | Stan lokalnej sesji manager. |
+| `away_status` | odczyt | `as?` | Stan away i telefonu. |
+| `report` | odczyt | `as?`, `task` | Kanoniczna ścieżka raportu i kandydaci. |
+| `queue_retry` | zapis | `as?`, `task?`, `confirm?`, `preview_token?` | Ponów nieudany start po sprawdzeniu błędu; zamknij pozostawione okno diagnostyczne. |
+| `queue_up` | zapis | `as?`, `task?`, `confirm?`, `preview_token?` | Przesuń oczekujące zadanie na początek jego klasy priorytetu; oceń zwalniane zależności. |
+| `queue_pause` | zapis | `as?`, `confirm?`, `preview_token?` | Wstrzymaj automatyczne starty kolejki. |
+| `queue_resume` | zapis | `as?`, `confirm?`, `preview_token?` | Wznów automatyczne starty kolejki. |
+| `unblock` | zapis | `as?`, `task?`, `drop_after?`, `confirm?`, `preview_token?` | Zwolnij zablokowane zależności; drop_after wybiera zależność do usunięcia. |
+| `cohort_add` | zapis | `as?`, `cohort?`, `tasks?`, `confirm?`, `preview_token?` | Przypisz istniejące zadania do kohorty. |
+| `cohort_remove` | zapis | `as?`, `tasks?`, `confirm?`, `preview_token?` | Usuń przypisanie do kohorty. |
+| `cohort_archive` | zapis | `as?`, `cohorts?`, `older_than?`, `confirm?`, `preview_token?` | Ukryj zakończone kohorty z wyboru; aktywne/kolejkowane są chronione, historia zostaje. |
+| `cohort_note` | zapis | `as?`, `cohort?`, `text?`, `confirm?`, `preview_token?` | Zmień notatkę kohorty. |
+| `pin` | zapis | `as?`, `tasks?`, `confirm?`, `preview_token?` | Przypnij zadania: ochrona worktree i cache przed GC oraz przed zmianą providera. |
+| `unpin` | zapis | `as?`, `tasks?`, `confirm?`, `preview_token?` | Usuń przypięcie zadania; pozostałe zabezpieczenia GC nadal obowiązują. |
+| `hide` | zapis | `as?`, `tasks?`, `confirm?`, `preview_token?` | Ukryj zadania w domyślnym widoku, bez zamykania. |
+| `unhide` | zapis | `as?`, `tasks?`, `confirm?`, `preview_token?` | Pokaż ukryte zadania. |
+| `archive` | zapis | `as?`, `older_than?`, `cohort?`, `confirm?`, `preview_token?` | Przenieś stan zamkniętych zadań do archiwum. |
+| `adopt` | zapis | `as?`, `task?`, `report?`, `host?`, `remoteReport?`, `window?`, `worktree?`, `agent?`, `model?`, `effort?`, `confirm?`, `preview_token?` | Odtwórz brakujące metadane z faktów dostarczonych przez właściciela. |
+| `report_from` | zapis | `as?`, `task?`, `from?`, `force?`, `confirm?`, `preview_token?` | Skopiuj zwykły dozwolony raport do ścieżki kanonicznej; force nie omija granic/symlinków. |
+| `limits_release` | zapis | `as?`, `claude?`, `codex?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Zwolnij zarezerwowane miejsca dostawców. |
+| `manager_start` | zapis | `as?`, `project?`, `name?`, `model?`, `effort?`, `confirm?`, `preview_token?` | Uruchom sesję nadzorczą Claude z Remote Control. |
+| `manager_stop` | zapis | `as?`, `confirm?`, `preview_token?` | Zatrzymaj sesję manager. |
+| `notify_test` | zapis | `as?`, `phone?`, `confirm?`, `preview_token?` | Test powiadomienia lokalnego; phone jawnie wysyła do ntfy. |
+| `gc` | zapis | `as?`, `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `detail?`, `offset?`, `limit?`, `cohort?`, `older_than?`, `branches?`, `confirm?`, `preview_token?` | Zastosuj chroniony plan sprzątania po podglądzie; opcjonalne scalone lokalne gałęzie. |
+| `wall_read` | odczyt | `as?`, `channel?`, `id?`, `since?`, `archive?`, `status?`, `kind?`, `limit?`, `before?` | Kanały, nagłówki z filtrami albo wiadomość z treścią, refs, historią i wątkiem. |
 | `wall_post` | zapis | `as?`, `channel?`, `kind?`, `subject?`, `body?`, `refs?`, `to?`, `confirm?`, `preview_token?` | Opublikuj dozwoloną wiadomość po kontroli autora, refs, rozmiaru i sekretów. |
 | `wall_reply` | zapis | `as?`, `reply_to?`, `body?`, `subject?`, `kind?`, `refs?`, `to?`, `confirm?`, `preview_token?` | Odpowiedz w kanale rodzica; answer oznacza otwarte pytanie jako answered. |
 | `wall_set_status` | zapis | `as?`, `id?`, `status?`, `note?`, `owner_confirmed?`, `confirm?`, `preview_token?` | Dopisz status; decyzje/kontrakty wymagają właściciela lub owner_confirmed po jego decyzji. |
-| `response_page` | odczyt | `response_id`, `response_offset` | Kontynuuj zapisaną odpowiedź, bez ponownego zapisu/odczytu zdarzeń. |
+| `response_page` | odczyt | `as?`, `response_id`, `response_offset` | Kontynuuj zapisaną odpowiedź, bez ponownego zapisu/odczytu zdarzeń. |
 
 ### Grupy uprawnień
 

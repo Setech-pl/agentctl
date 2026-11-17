@@ -149,7 +149,7 @@ export function missingLinkTargets(links: Link[], primary?: string): string[] {
 }
 
 /** Cross-task link targets use recorded worktrees, including retained closed/archived ones. */
-export function fillTaskLinkTargets(text: string, config: GlobalConfig): string {
+export function fillTaskLinkTargets(text: string, config: GlobalConfig, opts: { allowMissingClosed?: boolean } = {}): string {
   return text.replace(/\{task:([^,{}]+),repo:([^{}]+)\}/g, (_match, task: string, repo: string) => {
     const wanted = task.toLowerCase();
     const record = listTaskRecords(config).find(r => r.task.toLowerCase() === wanted)
@@ -161,7 +161,7 @@ export function fillTaskLinkTargets(text: string, config: GlobalConfig): string 
     if (matches.length > 1) throw new AgentctlError(`links: ${task}: ambiguous repository "${repo}"`);
     const match = matches[0];
     if (!match) throw new AgentctlError(`links: ${task}: no repository "${repo}" in recorded worktrees`);
-    if ((record.closed || record.cancelled) && !fs.existsSync(match.worktree)) {
+    if ((record.closed || record.cancelled) && !opts.allowMissingClosed && !fs.existsSync(match.worktree)) {
       throw new AgentctlError(`links: ${task}: ${state} worktree ${match.worktree} does not exist`);
     }
     return match.worktree;
@@ -183,6 +183,24 @@ export function staleProjectLinkWarnings(links: Link[], config: GlobalConfig): s
     const reasons = [...(!fs.existsSync(target) ? ['target does not exist'] : []), ...owners.map(r => `target belongs to closed task ${r.task}`)];
     return reasons.length ? [`stale project link ${from} -> ${to}: ${reasons.join('; ')}. Set links explicitly using {task:TASK-ID,repo:REPO-NAME}/sub/path or {worktree:repo|fallback}; check the target before starting.`] : [];
   });
+}
+
+/** Inherited links to a supplied repository are redundant. Other closed-task defaults are errors, never silently skipped. */
+export function projectDefaultLinkPolicy(links: Link[], config: GlobalConfig, repos: ResolvedRepo[], _project: string, _now = Date.now(), intentionalWorktrees = new Set<string>()): { links: Link[]; notices: string[] } {
+  if (!links.length) return {links, notices: []};
+  const current = listTaskRecords(config);
+  const records = [...current, ...listArchivedRecords(config).filter(r => !current.some(c => c.task === r.task)).map(r => ({...r, closed: true}))];
+  const inside = (child: string, parent: string) => child === parent || child.startsWith(`${parent}${path.sep}`);
+  const kept = links.filter(link => {
+    const target = resolvedLocation(link.to.endsWith('/*') ? path.dirname(link.to) : link.to);
+    const owners = records.filter(r => r.repos.some(repo => inside(target, resolvedLocation(repo.worktree))));
+    const supplied = repos.some(repo => inside(target, resolvedLocation(repo.path)) || inside(target, resolvedLocation(repo.worktree)) || owners.some(owner => owner.repos.some(r => inside(target, resolvedLocation(r.worktree)) && resolvedLocation(r.path) === resolvedLocation(repo.path))));
+    if (supplied && !intentionalWorktrees.has(link.from)) return false;
+    const stale = owners.filter(r => r.closed || r.cancelled);
+    if (stale.length) throw new AgentctlError(`stale project link ${link.from} -> ${link.to}: target belongs to closed task ${stale.map(r => r.task).join(', ')}`, "Use the spec's own backend worktree ({worktree:backend}, adding backend to repos), or set links: [] to disable project defaults.");
+    return true;
+  });
+  return {links: kept, notices: []};
 }
 
 /** Compare only repositories sharing Git's common directory; never compare unrelated SHAs. */

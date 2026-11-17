@@ -1,3 +1,6 @@
+import { attentionTick } from './attention.ts';
+import { maintainWall } from './wall.ts';
+import { autoClosePulled } from './pulled-auto-close.ts';
 import { applyAcceptedWrites } from './queue.ts';
 import { consultTick } from './consult.ts';
 import { applyInstanceLabel } from './instance.ts';
@@ -211,6 +214,7 @@ export interface TickOptions {
  */
 export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Notifier, options: TickOptions = {}): Promise<WatchEvent[]> {
   await applyAcceptedWrites(ctx, notifier, options);
+  await maintainWall(ctx);
   const tickAt = ctx.runner.now();
   if (memory.lastTickAt === undefined) {
     try {
@@ -228,6 +232,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   memory.lastTickAt = tickAt;
   // A closed or cancelled task is off the list: no transitions, no notifications (closing a task with no report is not a vanished window).
   let allRows = await collectStatus(ctx, { progress: false, archived: true });
+  if (await autoClosePulled(ctx, allRows)) allRows = await collectStatus(ctx, { progress: false, archived: true });
   for (const row of allRows) {
     const record = !row.closed && !row.cancelled ? readTaskRecord(ctx.config, row.windowName) : undefined;
     if (row.tmuxLost || row.state === 'host-unreachable') continue;
@@ -277,6 +282,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   await usageTick(ctx, notifier, startLog).catch((e: unknown) => startLog(`usage: ${errorMessage(e)}`));
   // The phone: requests that failed before are tried again (a network error never stops the watcher).
   for (const l of await phoneTick(ctx).catch((e: unknown) => [`phone: ${errorMessage(e)}`])) await startLog(l);
+  await attentionTick(ctx, allRows, notifier).catch((e: unknown) => startLog(`attention: ${errorMessage(e)}`));
   const events = detectTransitions(memory, rows, now, ctx.config.watch.waitingAfter * 1000);
   const alerts = new Alerts(ctx, notifier, { self: options.self });
   for (const e of events) {

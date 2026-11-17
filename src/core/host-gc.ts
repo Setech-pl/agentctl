@@ -45,7 +45,8 @@ export function remoteGcProgram(): void {
   const finished = (r: any) => (r.closed || r.cancelled || r.archived) && !live.some(w => w[2] === r.window || w[1] === r.window || w[1]?.endsWith(' ' + r.window));
   const records = input.records as any[];
   const mine = records.filter(r => finished(r) && r.selected);
-  const others = records.filter(r => !finished(r));
+  const kept = (r: any) => r.pin || input.keep?.some((t: string) => t.toLowerCase() === r.task.toLowerCase());
+  const others = records.filter(r => !finished(r) || kept(r));
   const items: GcItem[] = [], skipped: GcSkip[] = [];
   const seen = new Set<string>();
   const add = (r: any, kind: 'worktree' | 'cache', target: string, repo?: string) => {
@@ -55,6 +56,20 @@ export function remoteGcProgram(): void {
     try {
       if (!fs.existsSync(target)) return;
       inside(target);
+      if (kept(r)) throw Error(r.pin ? 'pinned task' : 'keep requested for task');
+      if (kind === 'cache') {
+        if (!input.includeCache) throw Error('cache deletion requires explicit include_cache: true');
+        if (r.keepCache || input.keepCache?.some((t: string) => t.toLowerCase() === r.task.toLowerCase())) throw Error('keep_cache requested for task');
+        // Conservative references: remote reports need no YAML runtime dependency.
+        for (const owner of records) {
+          let text = owner.reportText ?? '';
+          if (owner.remoteReport && fs.existsSync(owner.remoteReport)) text += '\n' + fs.readFileSync(owner.remoteReport, 'utf8');
+          const bases = [p.dirname(owner.remoteReport ?? root), ...owner.repos.map((x: any) => x.worktree)];
+          const overlap = (a: string, b: string) => a === b || a.startsWith(b + '/') || b.startsWith(a + '/');
+          const tokens = text.split(/[\s\x22\x27\x60<>()[\]{},;]+/).filter(Boolean);
+          if (tokens.some((v: string) => v === p.basename(target) || bases.some((b: string) => overlap(p.resolve(b, v.replace(/^file:\/\//, '').replace(/^~\//, process.env.HOME + '/')), target)))) throw Error('referenced by report; kept');
+        }
+      }
       const shared = others.find(o => o.repos.some((x: any) => x.worktree === target) || o.remoteDir && (target === o.remoteDir || target.startsWith(o.remoteDir + '/')) || o.remoteReport && target.startsWith(p.dirname(o.remoteReport) + '/'));
       if (shared) throw Error('also used by unfinished task ' + shared.task);
       if (records.some(o => o.links.some((l: any) => l.to === target || l.to.startsWith(target + '/')))) throw Error('links target in use');
@@ -64,7 +79,12 @@ export function remoteGcProgram(): void {
         const registered = git(repo!, ['worktree', 'list', '--porcelain']);
         if (!registered.split('\n').includes('worktree ' + target)) throw Error('not a registered worktree');
         if (['main', 'master'].includes(git(target, ['rev-parse', '--abbrev-ref', 'HEAD']))) throw Error('main/master are protected');
-        if (git(target, ['status', '--porcelain'])) throw Error('uncommitted changes');
+        const dirtyFiles = git(target, ['status', '--porcelain', '--untracked-files=normal']).split('\n').filter(Boolean).length;
+        const upstream = run('git', ['-C', target, 'rev-parse', '--verify', '--quiet', '@{upstream}']);
+        const comparison = upstream.status === 0 && upstream.stdout.trim() ? '@{upstream}' : r.repos.find((x: any) => x.worktree === target)?.base ?? 'main';
+        const count = git(target, ['rev-list', '--count', comparison + '..HEAD']);
+        if (!/^\d+$/.test(count)) throw Error('cannot verify unpushed commits');
+        if (dirtyFiles || Number(count)) { skipped.push({...base, dirtyFiles, unpushedCommits: Number(count), reason: 'uncommitted changes or unpushed commits; kept'}); return; }
       }
       const measured = measure(target, kind === 'cache');
       if (kind === 'cache' && Date.now() - measured.newest < input.olderThanMs) throw Error('newer than requested age');
@@ -97,17 +117,17 @@ const fingerprint = (ctx: Context, host: string) => { const h = ctx.config.hosts
 
 const script = () => `(${remoteGcProgram.toString()})()`;
 const cacheFile = (ctx: Context, host: string) => path.join(ctx.config.stateDir, 'hosts', host + '-gc.json');
-function payload(ctx: Context, host: string, olderThanMs: number, cohort?: string) {
+function payload(ctx: Context, host: string, olderThanMs: number, opts: GcOptions = {}) {
   const archived = listArchivedRecords(ctx.config);
   const current = listTaskRecords(ctx.config);
-  return { host, hostFingerprint: fingerprint(ctx, host), root: ctx.config.hosts[host]!.workDir, repos: ctx.config.hosts[host]!.repos, olderThanMs,
-    records: [...current, ...archived.filter(a => !current.some(r => r.window === a.window))].filter(r => r.host === host).map(r => ({ task: r.task, window: r.window, repos: r.repos, links: r.links, remoteDir: r.remoteDir, remoteReport: r.remoteReport, closed: r.closed, cancelled: r.cancelled, archived: archived.some(a => a.window === r.window), cohort: r.cohort, selected: cohort === undefined || !!r.cohort && cohortKey(r.cohort) === cohortKey(cohort) })) };
+  return { host, hostFingerprint: fingerprint(ctx, host), root: ctx.config.hosts[host]!.workDir, repos: ctx.config.hosts[host]!.repos, olderThanMs, includeCache: opts.includeCache === true, keepCache: opts.keepCache ?? [], keep: opts.keep ?? [],
+    records: [...current, ...archived.filter(a => !current.some(r => r.window === a.window))].filter(r => r.host === host).map(r => ({ task: r.task, window: r.window, repos: r.repos, links: r.links, remoteDir: r.remoteDir, remoteReport: r.remoteReport, pin: r.pin, keepCache: r.keepCache, reportText: (() => { try { return fs.readFileSync(r.report, 'utf8'); } catch { return ''; } })(), closed: r.closed, cancelled: r.cancelled, archived: archived.some(a => a.window === r.window), cohort: r.cohort, selected: opts.cohort === undefined || !!r.cohort && cohortKey(r.cohort) === cohortKey(opts.cohort) })) };
 }
 
 export async function planRemoteGc(ctx: Context, opts: GcOptions, olderThanMs: number): Promise<Pick<GcPlan, 'items' | 'skipped'>> {
   const plans = await Promise.all(Object.keys(ctx.config.hosts).map(async host => {
     try {
-      const data = payload(ctx, host, olderThanMs);
+      const data = payload(ctx, host, olderThanMs, opts);
       if (!data.records.length) return { items: [], skipped: [] };
       if (opts.cachedSizes) {
         const cached = JSON.parse(fs.readFileSync(cacheFile(ctx, host), 'utf8'));
@@ -125,9 +145,9 @@ export async function planRemoteGc(ctx: Context, opts: GcOptions, olderThanMs: n
   return { items: plans.flatMap(p => p.items).filter(selected), skipped: plans.flatMap(p => p.skipped).filter(selected) };
 }
 
-export async function applyRemoteGc(ctx: Context, item: GcItem, olderThanMs: number): Promise<GcItem> {
+export async function applyRemoteGc(ctx: Context, item: GcItem, olderThanMs: number, opts: GcOptions = {}): Promise<GcItem> {
   if (!item.host || !ctx.config.hosts[item.host]) throw Error('host removed from configuration');
   if (item.hostFingerprint !== fingerprint(ctx, item.host)) throw Error('Host target changed since preview; preview GC again');
-  const r = await ctx.hosts.forHost(item.host).checked('node', ['-e', script()], { input: JSON.stringify({ ...payload(ctx, item.host, olderThanMs), item }), timeoutMs: 10_000 });
+  const r = await ctx.hosts.forHost(item.host).checked('node', ['-e', script()], { input: JSON.stringify({ ...payload(ctx, item.host, olderThanMs, opts), item }), timeoutMs: 10_000 });
   return { ...JSON.parse(r.stdout), hostFingerprint: item.hostFingerprint };
 }

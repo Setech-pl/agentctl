@@ -154,3 +154,9 @@ Use WSL2 Ubuntu as user **krzet**, Windows LAN address **192.168.2.64**, SSH exp
 | Provider missing / logged out | Install and log in as krzet inside WSL, not Windows or root. Verify the noninteractive PATH; run the CLI manually to log in. Health login detection is best effort; a credential file does not prove token validity. |
 | GC skipped | Read the reason; finish/close the task, commit intended changes, resolve links or wait for the age limit. No force deletion. |
 | New task cannot start | Check both the account hold/limit and host limit in `limits`/`capacity`; provider holds affect the remote queue too. |
+
+## 0.23.1 safety and admission
+
+All 0.22.5–0.22.8 behavior also applies remotely: pin/unpin and GC `--keep TASK`, cache kept by default (`--include-cache` explicitly opts in), `keep_cache` and report artifact references, and unpushed-commit checks in every host worktree. Remote GC never forces dirty/unpushed removal even with a local force override. Pins and keep settings are rechecked when applying a plan. Remote cache references are checked conservatively from the host report and local mirror; ambiguous references keep data.
+
+Queue previews use a host health sample no older than 60 seconds for that host's `work_dir`; missing/stale/unknown samples hold starts. Before remote worktree/setup mutation, direct and queued starts query fresh host filesystem counters (the closest existing ancestor if work_dir is new). The dispatcher never stats a remote path locally. Provider peak schedules and global holds apply before remote setup; existing tasks and explicit owner resume retain their documented behavior. Scrolled permission menus retain answer tokens when question/selected option semantics stay the same. Snapshot status/capacity reads retain host labels and cached host disk samples, without SSH or inventory walks.

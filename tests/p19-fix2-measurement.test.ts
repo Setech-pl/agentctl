@@ -92,8 +92,10 @@ describe('P19 FIX2: measurement failure and lifecycle controls', () => {
     const old = new Date(Date.now() - 8 * 86400000); fs.utimesSync(file, old, old);
     await newestMtime(target);
     fs.writeFileSync(file, 'new content');
+    const { seedTask } = await import('./helpers.ts');
+    seedTask(config, 'AGE-1', { closed: true });
     const ctx = new Context(new RealRunner(), config, () => {});
-    const result = await applyGc(ctx, { items: [{ kind: 'cache', task: 'AGE-1', target, bytes: 3, detail: 'old' }], skipped: [], freeBytes: 3, olderThanMs: 7 * 86400000, unknownCacheDirs: 0 });
+    const result = await applyGc(ctx, { includeCache: true, items: [{ kind: 'cache', task: 'AGE-1', target, bytes: 3, detail: 'old' }], skipped: [], freeBytes: 3, olderThanMs: 7 * 86400000, unknownCacheDirs: 0 });
     assert.equal(result.done.length, 0); assert.match(result.failed[0]?.reason ?? '', /changed since the plan/); assert.ok(fs.existsSync(file));
   });
 });

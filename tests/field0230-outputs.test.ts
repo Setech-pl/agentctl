@@ -1,0 +1,28 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { it } from 'node:test';
+import { readOutputs, parseOutputs, aggregateOutputs } from '../src/core/outputs.ts';
+import { makeConfig, makeContext, seedTask, useScratch } from './helpers.ts';
+const scratch = useScratch();
+const report = (repo: string, extra = '') => `Werdykt: PASS\n\`\`\`agentctl-outputs\nversion: 1\nverdict: PASS\nintegrate: [{repo: '${repo}', branch: feature, sha: abcdef0, base: main${extra}}]\n\`\`\`\n<!-- agentctl:report-end -->\n`;
+it('F12: integrate base is accepted; external repos warn with a hint without invalidating outputs or probing Git', async () => {
+  const root = scratch.sub('outputs'), config = makeConfig(root);
+  const {ctx, runner} = makeContext(config, {respond: () => ({code: 0})});
+  const record = seedTask(config, 'OUTPUTS', {repos: [{path: path.join(root, 'app'), worktree: path.join(root, 'wt')}]});
+  fs.mkdirSync(path.dirname(record.report), {recursive: true});
+  fs.writeFileSync(record.report, report('external'));
+  assert.equal(parseOutputs(report('app')).outputs_valid, true);
+  const data = await readOutputs(ctx, record);
+  assert.equal(data.outputs_valid, true, data.outputs_errors.join('; '));
+  assert.deepEqual(data.outputs_errors, []);
+  assert.match(data.outputs_warnings!.join('; '), /outside the spec repos; add it to repos/);
+  assert.equal(data.outputs!.integrate[0]!.base, 'main');
+  assert.ok(!runner.queries.some(q => q.startsWith('git ')));
+  assert.equal(aggregateOutputs([{task: record.task, data}]).warnings.length, 1);
+  fs.writeFileSync(record.report, report('app'));
+  const own = await readOutputs(ctx, record);
+  assert.equal(own.outputs_valid, true); assert.equal(own.outputs_warnings, undefined);
+  assert.ok(runner.queries.some(q => q.includes('show-ref')));
+  assert.equal(parseOutputs(report('app', ', unknown: wrong')).outputs_valid, false, 'strict entry validation stays active');
+});

@@ -51,6 +51,7 @@ export interface StatusRow {
   outputs_partial?: boolean;
   outputs_pending?: boolean;
   outputs_errors?: string[];
+  outputs_warnings?: string[];
   verdict?: OutputVerdict;
   decisionsCount?: number;
   actionsCount?: number;
@@ -98,6 +99,7 @@ export interface StatusRow {
   pulled: string | null;
   lastLine: string;
   usage_hint?: string | null;
+  usage_reset_at?: string | null;
   draft_input?: string | null;
   reportCandidate?: string;
   /** Commits over the base and changed files per worktree ("2c 7f"); null when the task has no readable worktree. */
@@ -266,6 +268,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     if (lossHint && hiddenBy === 'auto') hiddenBy = null;
     let state: TaskState = unreachable ? 'host-unreachable' : cancelled ? 'cancelled' : closed ? 'closed' : record.supersededBy ? 'superseded' : lossHint ? 'needs-attention' : writeFailure ? 'needs-attention' : deliveryReport ? 'report-ready' : startupDialog ? 'needs-input' : unconfirmed ? 'needs-attention' : taskState({ alive, screen: screenText, settings, reportReady, event: stored?.outcome });
     const quota = alive && !unreachable && !reportReady && !cancelled && !closed ? ((classifyScreen(screenText, settings) === 'limited' ? quotaError(screenText) : undefined) ?? (stored?.outcome === 'limited' ? stored.text : undefined) ?? (!record.host && !opts.cachedOnly && !cachedRequest() ? transcriptQuotaError(ctx, record)?.text : undefined)) : undefined;
+    if (state === 'report-ready' && hiddenBy === 'auto') hiddenBy = null;
     if (quota && !['working', 'background', 'report-ready', 'closed', 'cancelled', 'superseded'].includes(state)) state = 'limited';
     // Passive wire failures fill an idle screen; legacy hook recovery keeps its existing precedence.
     if (state === 'waiting' && stored?.outcome === 'overloaded' && record.agent !== 'unknown' && provider(record.agent).events.payloadFrom === 'wire') state = 'overloaded';
@@ -355,7 +358,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       ...((state === 'needs-input' || state === 'needs-trust') && alive ? { menuOptions: menuOptionLines(screenText) } : {}),
       pin: record.pin === true,
       integration: record.integration === true,
-      ...(quota ? {limitEvidence: {text: quota, reset: quotaReset(quota, runner.now())}} : {}),
+      ...(quota ? {usage_hint: quota, usage_reset_at: quotaReset(quota, runner.now()) ? new Date(quotaReset(quota, runner.now())!).toISOString() : null, limitEvidence: {text: quota, reset: quotaReset(quota, runner.now())}} : {}),
       finished: (!alive && !lossHint) || state === 'superseded',
       hidden: hiddenBy !== null,
       hiddenBy,

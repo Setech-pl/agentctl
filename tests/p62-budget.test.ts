@@ -129,7 +129,8 @@ it('P62: GC returns unknown sizes immediately and reuses a completed background 
     const lease = requestMeasurement(target);
     try { await lease.promise; } finally { lease.release(); }
     const second = await f.call('gc_preview');
-    assert.equal(JSON.parse(second.text).freeBytes, 12345);
+    assert.equal(JSON.parse(second.text).freeBytes, 0, 'cache is retained without include_cache');
+    assert.equal(JSON.parse(second.text).skipped.bytes, 12345, 'retained cache still reuses its measured size');
   } finally { await shutdownMeasurements(); }
 });
 it('P62: cloned contexts apply the selected tmux socket exactly once', async () => {

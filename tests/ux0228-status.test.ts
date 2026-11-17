@@ -1,0 +1,24 @@
+import assert from 'node:assert/strict';
+import { it } from 'node:test';
+import { collectStatus } from '../src/core/status.ts';
+import { MCP_TOOLS, publishMcpSnapshot } from '../src/core/mcp-tools.ts';
+import { collectEvents } from '../src/core/chat-events.ts';
+import { runCli } from './helpers.ts';
+import { world } from './ux0228-fixture.ts';
+const tool = (name: string) => MCP_TOOLS.find(t => t.name === name)!;
+it('UX0228: status text groups pulled tasks; events_since counts only reports awaiting collection', async () => {
+  const w = world('status'); w.add('READ', 3); w.add('NEW', null);
+  const status = await tool('status').run(w.deps, {});
+  assert.match(status.text, /odebrane, niezamknięte: READ/);
+  assert.match(status.text, /READ.*pulled=true/);
+  assert.match(status.text, /NEW claude\/opus\/high report-ready .*cohort=wave report=yes/);
+  assert.ok(status.text.indexOf('NEW claude') < status.text.indexOf('odebrane, niezamknięte'));
+  const cli = await runCli(w.config, w.runner, ['status']);
+  assert.match(cli.stdout, /odebrane, niezamknięte: READ/);
+  await publishMcpSnapshot(w.ctx, await collectStatus(w.ctx, { progress: false }));
+  const cached = await tool('status').run(w.deps, {});
+  assert.match(cached.text, /Watch snapshot age/);
+  assert.match(cached.text, /odebrane, niezamknięte: READ/);
+  const events = await collectEvents(w.ctx, { client: 'cli', keep: true });
+  assert.deepEqual(events.summary.reportsToPull, ['NEW']);
+});

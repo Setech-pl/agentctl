@@ -118,24 +118,32 @@ describe('phone: MCP', () => {
     return { config, call, notified, runner };
   }
 
-  it('away is a write tool: off by default (denied and audited), then on/off without confirm, audited and announced', async () => {
+  it('away is a write tool: off by default (denied and audited), then preview/token-only on/off, audited and announced', async () => {
     const s = mcpSetup('m1');
     const denied = await s.call('away', { on: true });
     assert.equal(denied.isError, true);
     assert.match(denied.text, /not in mcp\.allow/);
     assert.equal(readAway(s.config).on, false);
     fs.appendFileSync(s.config.path, 'mcp:\n  allow: [away]\n');
-    const on = await s.call('away', { on: true });
+    const writeAway = async (on: boolean) => {
+      const before = readAway(s.config).on;
+      const preview = await s.call('away', {on});
+      assert.equal(preview.isError, undefined, preview.text);
+      assert.equal(readAway(s.config).on, before, 'preview must not toggle phone mode');
+      const preview_token = /preview_token: (\S+)/.exec(preview.text)![1];
+      return s.call('away', {confirm: true, preview_token});
+    };
+    const on = await writeAway(true);
     assert.equal(on.isError, undefined);
     assert.match(on.text, /Away is on/);
     assert.equal(readAway(s.config).on, true);
     assert.equal(readAway(s.config).by, 'mcp');
-    assert.match((await s.call('away', { on: true })).text, /already on/);
-    await s.call('away', { on: false });
+    assert.match((await writeAway(true)).text, /already on/);
+    await writeAway(false);
     assert.equal(readAway(s.config).on, false);
     assert.deepEqual(s.notified, ['czat zlecił: away on', 'czat zlecił: away off']);
     const audit = fs.readFileSync(auditPath(s.config), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
-    assert.deepEqual(audit.map((a: { tool: string; outcome: string }) => `${a.tool}:${a.outcome}`), ['away:denied', 'away:requested', 'away:done', 'away:requested', 'away:preview', 'away:requested', 'away:done']);
+    assert.deepEqual(audit.map((a: { tool: string; outcome: string }) => `${a.tool}:${a.outcome}`), ['away:denied', 'away:requested', 'away:preview', 'away:requested', 'away:done', 'away:requested', 'away:preview', 'away:requested', 'away:preview', 'away:requested', 'away:preview', 'away:requested', 'away:done']);
   });
 
   it('status says whether away is on; events_since carries the state and marks events that went to the phone', async () => {

@@ -38,7 +38,7 @@ Odczyty korzystają z atomowego snapshotu watch młodszego niż dwa ticki i poda
 | `log` | `cohort?`, `since?` | The history of the tasks, newest first: agent/model/effort, start, report, duration, tokens (null: n/d), commits and files, the verdict line, cancel reason, move, and the result the user marked. |
 | `stats` | `cohort?`, `since?` | The history grouped by agent/model/effort: tasks, median time and tokens, how many were marked ok, partial or fail, cancelled, and moved to the other provider after a limit. |
 | `events_since` | `since?`, `cohort?`, `peek?` | What changed since the previous call of this client (or since a time: an age like `2h`, `HH:MM`, an ISO time): reports ready with the verdict, starts from the queue, questions, folder trust, blocked, cancelled and limited tasks, finished cohorts, plan thresholds, changed limits - and one line with the state now. **A chat should call it at the start of every answer about the agents' work**: it gets no notifications. The marker is scoped by configured as identity; explicit client overrides it, otherwise initialized client identity is used (CLI has its own cursor); the first call looks back 24 hours; `peek: true` leaves the marker. Events are recorded while `agentctl watch` runs. |
-| `gc_preview` | `older_than?`, `merged?`, `cohort?` | What `agentctl gc` would free now, with sizes, and what it skips and why: worktrees of finished tasks without uncommitted changes, old files next to the reports, state folders to archive, merged branches. Read only; use the separately allowed, two-step `gc` tool to apply the same plan. |
+| `gc_preview` | `older_than?`, `merged?`, `cohort?`, `include_cache?`, `keep_cache?`, `force_dirty?` | What `agentctl gc` would free now, with sizes, and what it skips and why: worktrees of finished tasks without uncommitted changes, cache only with explicit owner-confirmed include_cache: true, state folders to archive, merged branches. Read only; use the separately allowed, two-step `gc` tool to apply the same plan. |
 | `limits` | none | The limit per provider, what uses it up (windows of agentctl, reserved places, external sessions when `limits.count_external` is on), the free places and the tasks waiting in the queue. |
 | `overlap` | `task?` | Pairs of active tasks of one repository that changed the same files, with the file lists (from git, now). `status` also carries a collision count per task, and short `Queue` and `Collisions` lines. |
 | `cohort_list` | none | The cohorts (named groups of tasks): per cohort the number of tasks by state (`active`, `queued`, `reports`, `closed`, `cancelled`), `total`, `created` and the note. |
@@ -62,7 +62,7 @@ mcp:
 | Tool | Arguments | What it does |
 |---|---|---|
 | `send` | `task`, `text` (up to 20,000 characters) | Pastes a prompt into the window of a running task and presses Enter. With `enter_only: true` (no text) it pastes nothing and presses Enter for the text that an earlier send left in the input field; that needs `send_enter` in `mcp.allow` (a permission of its own). The first call shows the exact text of the field, the screen state and a `token` for those bytes and presses nothing; Enter goes in only with `confirm: true` and that `token`, when the field is still byte for byte that text and what agentctl pasted. |
-| `answer` | `task`, `option`, `confirm?`, `token?` | Chooses a numbered option of the menu the agent shows in its current frame (Kimi "Run this command? 1. Approve once …", numbered dialogs of Codex and Claude); a permission of its own (`answer` in `mcp.allow`). The first call only previews: options, question, screen state and a `token` for exactly that menu and option; the digit goes in only with `confirm: true` and that `token`. Refuses (no key) when no menu waits, the option does not exist or the menu changed. `status` lists the options of a needs-input menu (`menuOptions`). |
+| `answer` | `task`, `option`, `confirm?`, `token?` | Chooses a numbered option of the menu the agent shows in its current frame (Kimi "Run this command? 1. Approve once …", numbered dialogs of Codex and Claude); a permission of its own (`answer` in `mcp.allow`). The first call only previews: options, question, screen state and a `token` for that normalized question and option labels, independent of scrolling (the chosen option must be visible); the digit goes in only with `confirm: true` and that `token`. Refuses (no key) when no menu waits, the option does not exist or the menu changed. `status` lists the options of a needs-input menu (`menuOptions`). |
 | `new` | `spec` (`spec?` when confirming with `preview_token` only), `confirm?` | Starts tasks from a spec text, validated like the CLI. The first call only returns the summary; tasks start only when it is called again with `confirm: true`. A spec with `setup` (shell commands) is refused, because a chat must not choose shell commands. Every start is registered and run by the watcher — `confirm` always returns at once and never waits for a checkout, a setup, a window's input prompt or a folder-trust dialog (see "A start with setup" below); without a running watcher the confirm is refused. It never switches provider. |
 | `interrupt` | `task` | Sends the agent its interrupt key; the window stays open. |
 | `close` | `task`, `remove_worktree?` | Closes the window and marks the task closed. The worktree and the branch stay, unless `remove_worktree: true` and `mcp.allow_rm_worktree` is set (`git worktree remove`, never forced). |
@@ -237,6 +237,8 @@ Both are always readable without mcp.allow. MCP new/queue responses omit capacit
 | `stats` | `stats` |  |
 | `gc` | `gc_preview`, `gc` |  |
 | `archive` | `archive` |  |
+| `pin` | `pin` |  |
+| `unpin` | `unpin` |  |
 | `hide` | `hide` |  |
 | `unhide` | `unhide` |  |
 | `pull` | `get_report`, `pull_ready` |  |
@@ -273,74 +275,76 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 
 | Tool | Kind | Arguments |
 |---|---|---|
-| `status` | read | `all?`, `cohort?`, `format?`, `detail?`, `offset?`, `limit?`, `capacity?` |
+| `status` | read | `as?`, `all?`, `cohort?`, `format?`, `detail?`, `offset?`, `limit?`, `capacity?` |
 | `events_since` | read | `as?`, `cursor?`, `limit?`, `client?`, `since?`, `cohort?`, `peek?`, `format?`, `detail?` |
-| `gc_preview` | read | `request_id?`, `detail?`, `offset?`, `limit?`, `older_than?`, `merged?`, `cohort?` |
-| `limits` | read | `format?`, `detail?` |
-| `set_limits` | write | `claude?`, `codex?`, `queue_hold?`, `hold?`, `confirm?`, `preview_token?` |
-| `reserve` | write | `claude?`, `codex?`, `note?`, `release?`, `confirm?`, `preview_token?` |
-| `version` | read |  |
-| `peek` | read | `task`, `lines?` |
-| `list_reports` | read | `all?` |
-| `get_report` | read | `task`, `mark_pulled?`, `detail?`, `mode?`, `section?`, `byte_offset?`, `offset?`, `limit?` |
-| `pull_ready` | read | `cohort?`, `all?`, `detail?`, `mode?`, `ack?`, `cursor?`, `offset?`, `limit?` |
-| `task_spec` | read | `task` |
-| `queue_list` | read | `cohort?`, `format?`, `detail?` |
-| `cohort_list` | read | `all?` |
-| `cohort_show` | read | `cohort`, `format?`, `detail?` |
-| `guide` | read | `project?`, `lang?` |
-| `capacity` | read | `format?`, `detail?`, `offset?`, `limit?` |
-| `usage` | read | `cohort?`, `since?` |
-| `log` | read | `cohort?`, `since?` |
-| `stats` | read | `cohort?`, `since?` |
-| `overlap` | read | `task?` |
-| `resume` | write | `tasks?`, `all?`, `confirm?`, `preview_token?` |
-| `answer` | write | `task?`, `option?`, `confirm?`, `token?`, `preview_token?` |
-| `send` | write | `task?`, `text?`, `enter_only?`, `confirm?`, `token?`, `withdraw?`, `preview_token?` |
-| `consult` | write | `spec?`, `confirm?`, `preview_token?` |
-| `new` | write | `spec?`, `agent?`, `reuse?`, `no_agent?`, `cohort?`, `wait_trust?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` |
-| `queue` | write | `spec?`, `cohort?`, `replace?`, `agent?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` |
-| `queue_rm` | write | `task?`, `confirm?`, `preview_token?` |
-| `cancel` | write | `task?`, `tasks?`, `cohort?`, `reason?`, `remove_worktree?`, `confirm?`, `preview_token?` |
-| `mark` | write | `task?`, `tasks?`, `cohort?`, `result?`, `note?`, `confirm?`, `preview_token?` |
-| `away` | write | `on` |
-| `interrupt` | write | `task?`, `confirm?`, `preview_token?` |
-| `close` | write | `task?`, `tasks?`, `cohort?`, `remove_worktree?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` |
-| `move` | write | `task?`, `agent?`, `host?`, `confirm?`, `preview_token?` |
-| `queue_show` | read | `task` |
-| `mcp_check` | read |  |
-| `spec_example` | read |  |
-| `doctor` | read | `project?` |
-| `equivalents` | read |  |
-| `config_show` | read |  |
-| `hosts` | read | `refresh?` |
-| `manager_status` | read |  |
-| `away_status` | read |  |
-| `report` | read | `task` |
-| `queue_retry` | write | `task?`, `confirm?`, `preview_token?` |
-| `queue_up` | write | `task?`, `confirm?`, `preview_token?` |
-| `queue_pause` | write | `confirm?`, `preview_token?` |
-| `queue_resume` | write | `confirm?`, `preview_token?` |
-| `unblock` | write | `task?`, `drop_after?`, `confirm?`, `preview_token?` |
-| `cohort_add` | write | `cohort?`, `tasks?`, `confirm?`, `preview_token?` |
-| `cohort_remove` | write | `tasks?`, `confirm?`, `preview_token?` |
-| `cohort_archive` | write | `cohorts?`, `older_than?`, `confirm?`, `preview_token?` |
-| `cohort_note` | write | `cohort?`, `text?`, `confirm?`, `preview_token?` |
-| `hide` | write | `tasks?`, `confirm?`, `preview_token?` |
-| `unhide` | write | `tasks?`, `confirm?`, `preview_token?` |
-| `archive` | write | `older_than?`, `cohort?`, `confirm?`, `preview_token?` |
-| `adopt` | write | `task?`, `report?`, `host?`, `remoteReport?`, `window?`, `worktree?`, `agent?`, `model?`, `effort?`, `confirm?`, `preview_token?` |
-| `report_from` | write | `task?`, `from?`, `force?`, `confirm?`, `preview_token?` |
-| `limits_release` | write | `claude?`, `codex?`, `confirm?`, `preview_token?` |
-| `manager_start` | write | `project?`, `name?`, `model?`, `effort?`, `confirm?`, `preview_token?` |
-| `manager_stop` | write | `confirm?`, `preview_token?` |
-| `notify_test` | write | `phone?`, `confirm?`, `preview_token?` |
-| `gc` | write | `detail?`, `offset?`, `limit?`, `cohort?`, `older_than?`, `branches?`, `confirm?`, `preview_token?` |
-| `wall_read` | read | `as?`, `channel?`, `id?`, `since?`, `status?`, `kind?`, `limit?`, `before?` |
+| `gc_preview` | read | `as?`, `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `request_id?`, `detail?`, `offset?`, `limit?`, `older_than?`, `merged?`, `cohort?` |
+| `limits` | read | `as?`, `format?`, `detail?` |
+| `set_limits` | write | `as?`, `claude?`, `codex?`, `queue_hold?`, `hold?`, `confirm?`, `preview_token?` |
+| `reserve` | write | `as?`, `claude?`, `codex?`, `note?`, `release?`, `confirm?`, `preview_token?` |
+| `version` | read | `as?` |
+| `peek` | read | `as?`, `task`, `lines?` |
+| `list_reports` | read | `as?`, `all?` |
+| `get_report` | read | `as?`, `task`, `mark_pulled?`, `detail?`, `mode?`, `section?`, `byte_offset?`, `offset?`, `limit?` |
+| `pull_ready` | read | `as?`, `cohort?`, `all?`, `detail?`, `mode?`, `ack?`, `cursor?`, `offset?`, `limit?` |
+| `task_spec` | read | `as?`, `task` |
+| `queue_list` | read | `as?`, `cohort?`, `format?`, `detail?` |
+| `cohort_list` | read | `as?`, `all?` |
+| `cohort_show` | read | `as?`, `cohort`, `format?`, `detail?` |
+| `guide` | read | `as?`, `project?`, `lang?` |
+| `capacity` | read | `as?`, `format?`, `detail?`, `offset?`, `limit?` |
+| `usage` | read | `as?`, `cohort?`, `since?` |
+| `log` | read | `as?`, `cohort?`, `since?` |
+| `stats` | read | `as?`, `cohort?`, `since?` |
+| `overlap` | read | `as?`, `task?` |
+| `resume` | write | `as?`, `tasks?`, `all?`, `confirm?`, `preview_token?` |
+| `answer` | write | `as?`, `task?`, `option?`, `confirm?`, `token?`, `preview_token?` |
+| `send` | write | `as?`, `task?`, `text?`, `enter_only?`, `confirm?`, `token?`, `withdraw?`, `preview_token?` |
+| `consult` | write | `as?`, `spec?`, `confirm?`, `preview_token?` |
+| `new` | write | `as?`, `spec?`, `agent?`, `reuse?`, `no_agent?`, `cohort?`, `wait_trust?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` |
+| `queue` | write | `as?`, `spec?`, `cohort?`, `replace?`, `agent?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` |
+| `queue_rm` | write | `as?`, `task?`, `confirm?`, `preview_token?` |
+| `cancel` | write | `as?`, `task?`, `tasks?`, `cohort?`, `reason?`, `remove_worktree?`, `confirm?`, `preview_token?` |
+| `mark` | write | `as?`, `task?`, `tasks?`, `cohort?`, `result?`, `note?`, `confirm?`, `preview_token?` |
+| `away` | write | `as?`, `on?`, `confirm?`, `preview_token?` |
+| `interrupt` | write | `as?`, `task?`, `confirm?`, `preview_token?` |
+| `close` | write | `as?`, `pulled?`, `task?`, `tasks?`, `cohort?`, `remove_worktree?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` |
+| `move` | write | `as?`, `task?`, `agent?`, `host?`, `confirm?`, `preview_token?` |
+| `queue_show` | read | `as?`, `task` |
+| `mcp_check` | read | `as?` |
+| `spec_example` | read | `as?` |
+| `doctor` | read | `as?`, `project?` |
+| `equivalents` | read | `as?` |
+| `config_show` | read | `as?` |
+| `hosts` | read | `as?`, `refresh?` |
+| `manager_status` | read | `as?` |
+| `away_status` | read | `as?` |
+| `report` | read | `as?`, `task` |
+| `queue_retry` | write | `as?`, `task?`, `confirm?`, `preview_token?` |
+| `queue_up` | write | `as?`, `task?`, `confirm?`, `preview_token?` |
+| `queue_pause` | write | `as?`, `confirm?`, `preview_token?` |
+| `queue_resume` | write | `as?`, `confirm?`, `preview_token?` |
+| `unblock` | write | `as?`, `task?`, `drop_after?`, `confirm?`, `preview_token?` |
+| `cohort_add` | write | `as?`, `cohort?`, `tasks?`, `confirm?`, `preview_token?` |
+| `cohort_remove` | write | `as?`, `tasks?`, `confirm?`, `preview_token?` |
+| `cohort_archive` | write | `as?`, `cohorts?`, `older_than?`, `confirm?`, `preview_token?` |
+| `cohort_note` | write | `as?`, `cohort?`, `text?`, `confirm?`, `preview_token?` |
+| `pin` | write | `as?`, `tasks?`, `confirm?`, `preview_token?` |
+| `unpin` | write | `as?`, `tasks?`, `confirm?`, `preview_token?` |
+| `hide` | write | `as?`, `tasks?`, `confirm?`, `preview_token?` |
+| `unhide` | write | `as?`, `tasks?`, `confirm?`, `preview_token?` |
+| `archive` | write | `as?`, `older_than?`, `cohort?`, `confirm?`, `preview_token?` |
+| `adopt` | write | `as?`, `task?`, `report?`, `host?`, `remoteReport?`, `window?`, `worktree?`, `agent?`, `model?`, `effort?`, `confirm?`, `preview_token?` |
+| `report_from` | write | `as?`, `task?`, `from?`, `force?`, `confirm?`, `preview_token?` |
+| `limits_release` | write | `as?`, `claude?`, `codex?`, `confirm?`, `preview_token?` |
+| `manager_start` | write | `as?`, `project?`, `name?`, `model?`, `effort?`, `confirm?`, `preview_token?` |
+| `manager_stop` | write | `as?`, `confirm?`, `preview_token?` |
+| `notify_test` | write | `as?`, `phone?`, `confirm?`, `preview_token?` |
+| `gc` | write | `as?`, `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `detail?`, `offset?`, `limit?`, `cohort?`, `older_than?`, `branches?`, `confirm?`, `preview_token?` |
+| `wall_read` | read | `as?`, `channel?`, `id?`, `since?`, `archive?`, `status?`, `kind?`, `limit?`, `before?` |
 | `wall_post` | write | `as?`, `channel?`, `kind?`, `subject?`, `body?`, `refs?`, `to?`, `confirm?`, `preview_token?` |
 | `wall_reply` | write | `as?`, `reply_to?`, `body?`, `subject?`, `kind?`, `refs?`, `to?`, `confirm?`, `preview_token?` |
 | `wall_set_status` | write | `as?`, `id?`, `status?`, `note?`, `owner_confirmed?`, `confirm?`, `preview_token?` |
-| `response_page` | read | `response_id`, `response_offset` |
+| `response_page` | read | `as?`, `response_id`, `response_offset` |
 
 - `guide`: `--project &lt;repo&gt;`, `--lang &lt;lang&gt;`, `--clip`, `--json`
 - `capacity`: `--json`, `--clip`
@@ -362,7 +366,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 - `limits reserve`: `--note &lt;text&gt;`
 - `events`: `--since &lt;time&gt;`, `--cohort &lt;name&gt;`, `--keep`, `--json`, `--clip`
 - `wall channels`: `--as &lt;who&gt;`, `--json`
-- `wall read`: `--id &lt;id&gt;`, `--since &lt;time&gt;`, `--status &lt;status&gt;`, `--kind &lt;kind&gt;`, `--limit &lt;n&gt;`, `--before &lt;id&gt;`, `--as &lt;who&gt;`, `--json`
+- `wall read`: `--id &lt;id&gt;`, `--since &lt;time&gt;`, `--archive`, `--status &lt;status&gt;`, `--kind &lt;kind&gt;`, `--limit &lt;n&gt;`, `--before &lt;id&gt;`, `--as &lt;who&gt;`, `--json`
 - `wall post`: `--kind &lt;kind&gt;`, `--subject &lt;text&gt;`, `--body &lt;text&gt;`, `--body-file &lt;file&gt;`, `--ref &lt;ref&gt;`, `--to &lt;who&gt;`, `--as &lt;who&gt;`
 - `wall reply`: `--body &lt;text&gt;`, `--body-file &lt;file&gt;`, `--subject &lt;text&gt;`, `--kind &lt;kind&gt;`, `--ref &lt;ref&gt;`, `--to &lt;who&gt;`, `--as &lt;who&gt;`
 - `wall status`: `--note &lt;text&gt;`, `--as &lt;who&gt;`, `--owner-confirmed`
@@ -373,10 +377,10 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 - `dataset export`: `--since &lt;time&gt;`, `--until &lt;time&gt;`, `--cohort &lt;name&gt;`, `--agent &lt;provider&gt;`, `--out &lt;file&gt;`, `--format &lt;format&gt;`, `--include-prompts`, `--include-reports`
 - `log`: `--since &lt;age&gt;`, `--cohort &lt;name&gt;`, `--json`, `--clip`
 - `stats`: `--since &lt;age&gt;`, `--cohort &lt;name&gt;`, `--json`, `--clip`
-- `gc`: `--preview`, `--dry-run`, `--verbose`, `--offset &lt;n&gt;`, `--limit &lt;n&gt;`, `--force-links`, `--apply`, `--older-than &lt;age&gt;`, `--branches`, `--cohort &lt;name&gt;`, `-y, --yes`, `--json`
+- `gc`: `--preview`, `--dry-run`, `--verbose`, `--offset &lt;n&gt;`, `--limit &lt;n&gt;`, `--include-cache`, `--keep &lt;tasks...&gt;`, `--keep-cache &lt;tasks...&gt;`, `--force-dirty`, `--force-links`, `--apply`, `--older-than &lt;age&gt;`, `--branches`, `--cohort &lt;name&gt;`, `-y, --yes`, `--json`
 - `archive`: `--older-than &lt;age&gt;`, `--dry-run`
 - `pull`: `--ready`, `--all`, `--cohort &lt;name&gt;`
-- `close`: `--cohort &lt;name&gt;`, `--rm-worktree`, `-y, --yes`, `--dry-run`
+- `close`: `--pulled`, `--cohort &lt;name&gt;`, `--rm-worktree`, `-y, --yes`, `--dry-run`
 - `cancel`: `--cohort &lt;name&gt;`, `--reason &lt;text&gt;`, `--rm-worktree`, `-y, --yes`, `--dry-run`
 - `watch`: `--tmux`, `--restart`, `--no-status-line`
 - `board`: `--restart`, `--tmux`
@@ -412,7 +416,7 @@ Existing entries `new`, `queue`, `send`, `close`, `cancel`, `set_limits`, `reser
 
 Every write request is recorded in `mcp-audit.log`; successful executions also write `mcp-write` to the journal and notify the desktop. Permission revocation takes effect on the next call. `pull_ready` and `events_since` retain their documented read-tool exception for report-read markers and per-client cursors; they never start or remove work.
 
-`queue_list` includes the complete failed reason and a `queue_retry` hint. Read that reason first. Retry validates remaining directories against Git worktree registrations; an unregistered partial directory is refused. `gc_preview` uses `merged` for its legacy branch option; `gc` uses `branches` (default false). Both call the CLI's `planGc`; confirmation executes that validated plan through `applyGc`. The tool never uses force, merges or pushes. Dirty worktrees, foreign work, protected/current branches and unmerged branches are skipped. A changed plan requires a new preview.
+`queue_list` includes the complete failed reason and a `queue_retry` hint. Read that reason first. Retry validates remaining directories against Git worktree registrations; an unregistered partial directory is refused. `gc_preview` uses `merged` for its legacy branch option; `gc` uses `branches` (default false). Both call the CLI's `planGc`; confirmation executes that validated plan through `applyGc`. The tool never merges or pushes. Dirty/unpushed worktrees stay unless the owner explicitly lists tasks in force_dirty. Foreign work, protected/current branches and unmerged branches are skipped. Cache stays unless include_cache: true; keep_cache tasks and report-referenced artifacts stay even then. Previews list cache paths/sizes and per-repo dirty counts. A changed plan requires a new preview.
 
 `status` returns a text summary followed by JSON `{disk, tasks}`. `capacity.disk` contains device-deduplicated filesystem readings and the cached size of recorded worktrees. `config_show` masks environment values and ntfy token, topic and credential-bearing URL parts. `report_from` accepts only a regular source inside task worktrees or config.cache; symlink components and outside paths are refused even with force. `force` only permits replacing the canonical report. new/queue enforce the same area for report paths during preview, and report reads recheck the path and opened file. `adopt` accepts explicit metadata paths. `notify_test` is local by default; `phone: true` explicitly sends a phone test.
 
@@ -603,3 +607,5 @@ Każde narzędzie MCP ma budżet odpowiedzi 8 sekund. Wiersz `Partial result:` o
 Other write confirms (0.19.6, P93b): with a running watcher, the confirm of `unblock`, `queue_up`, `queue_rm`, `queue_retry`, `close`, `cancel`, `mark`, `hide`/`unhide`, `archive`, `cohort_*` and every `send` records a request in `<config dir>/mcp-requests/` (short lock `<state_dir>/mcp-requests.lock`) and answers `Accepted: <tool> <target> (request <id>)`. The watcher applies it at its next tick after computing the preview's scope again: `mcp-applied` (MCP WYKONANE) when done, `mcp-failed` (MCP BŁĄD) with the reason and a notification when refused or failed. A repeated token answers `already accepted`. Without a watcher the confirm runs in place. / Pozostałe potwierdzenia zapisów (0.19.6, P93b): przy działającym watch potwierdzenie `unblock`, `queue_up`, `queue_rm`, `queue_retry`, `close`, `cancel`, `mark`, `hide`/`unhide`, `archive`, `cohort_*` i każdy `send` zapisuje zlecenie w `<katalog configu>/mcp-requests/` (krótka blokada `<state_dir>/mcp-requests.lock`) i odpowiada `Accepted: <narzędzie> <cel> (request <id>)`. Watch wykonuje je przy najbliższym ticku po ponownym wyliczeniu zakresu podglądu: `mcp-applied` (MCP WYKONANE) po wykonaniu, `mcp-failed` (MCP BŁĄD) z przyczyną i powiadomieniem przy odmowie lub błędzie. Powtórzony token odpowiada `already accepted`. Bez watch potwierdzenie wykonuje się na miejscu.
 
 Queue/new confirmation tokens are deduplicated under the process-shared queue accept lock (`<state_dir>/queue-accept.lock`, held only for the queue-directory write, never across git or a start) before registration; interrupted partial batches are reported without re-registering their completed tasks. / Tokeny queue/new są deduplikowane pod wspólną blokadą przyjęcia kolejki (`<state_dir>/queue-accept.lock`, trzymaną tylko na czas zapisu w katalogu kolejki, nigdy podczas git ani startu) przed rejestracją; przerwane partie zwracają wynik częściowy bez ponownej rejestracji gotowych zadań.
+
+All MCP writes, including away, accept token-only confirmation after preview. WALL may retain the same `as`: `{as: "chat:nc", preview_token: "...", confirm: true}` restores the reviewed content and refuses a different author. PL: Każdy zapis przyjmuje sam token po podglądzie; WALL może zachować to samo `as`, bez powtarzania treści.

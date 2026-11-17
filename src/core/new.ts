@@ -1,5 +1,8 @@
 import { prepareRemoteTask, installRemoteHooks } from './host-task.ts';
 import { remoteAttachHint } from './host-runtime.ts';
+import { providerHolds, providerHoldText } from './provider-hold.ts';
+import { freshTaskDiskStartHold } from './disk.ts';
+import { peakHold } from './peak.ts';
 import { protectReadOnly } from './read-only.ts';
 import { attachHint } from './tmux-socket.ts';
 import { writeLaunchScript } from './launch-script.ts';
@@ -113,6 +116,9 @@ export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: Ne
   const admission = await withStartLock(ctx, async () => {
     const specs = await planBatch(ctx, requested, opts);
     for (const spec of specs.filter(s => !s.host)) checkLinkTargets(spec.links.filter(l => !spec.repos.some(r => l.to === r.worktree || l.to.startsWith(`${r.worktree}/`))), spec.task);
+    for (const spec of specs) {const hold = providerHolds(ctx.config, ctx.runner.now())[spec.agent]; if (hold) throw new AgentctlError(`provider hold: ${providerHoldText(spec.agent, hold)}`, 'Queue the task or wait for the provider reset.');}
+    for (const spec of specs) { const held = peakHold(ctx.config, spec, ctx.runner.now()); if (held) throw new AgentctlError(held, 'Add this task to the queue; it will start after peak.'); }
+    for (const spec of specs) { const held = await freshTaskDiskStartHold(ctx, spec.host, spec.repos.map(r => r.worktree)); if (held) throw new AgentctlError(held, 'Free disk space before starting setup.'); }
     return { specs, ids: await reserveStarts(ctx, specs) };
   });
   try { return await startTasks(ctx, admission.specs, opts, true); }

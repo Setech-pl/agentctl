@@ -14,6 +14,8 @@ import {
   cohortLabel,
   finishedTitle,
   groupTitle,
+  pulledTitle,
+  bulkCloseLines,
   boardRefreshMs,
   clearNotice,
   handleKey,
@@ -88,8 +90,14 @@ function TaskList(props: { state: BoardState; width: number; capacity: number; i
     visible.items.length === 0
       ? [h(Text, { key: 'empty', dimColor: true }, state.refreshedAt === null ? 'Loading…' : state.rows.length === 0 ? 'No tasks. Start one with "agentctl new <spec>".' : state.cohortFilter !== null ? 'No tasks in this cohort. k picks another.' : 'No active tasks. z opens the finished ones.')]
       : visible.items.map((item) =>
-          item.kind === 'group'
-            ? h(Text, { key: `group-${item.key}`, bold: true, wrap: 'truncate-end' }, groupTitle(item, props.icons))
+          item.kind === 'ready-title'
+            ? h(Text, { key: 'ready-title', bold: true, color: 'green', wrap: 'truncate-end' }, `Raporty do pobrania (${item.count})`)
+            : item.kind === 'active-title'
+            ? h(Text, { key: 'active-title', bold: true, wrap: 'truncate-end' }, `Aktywne i czekające (${item.count})`)
+            : item.kind === 'pulled'
+            ? h(Text, { key: `pulled-${item.key}`, bold: state.selected === `@pulled:${item.key}`, wrap: 'truncate-end' }, `${state.selected === `@pulled:${item.key}` ? '▸' : ' '} ${pulledTitle(item)}`)
+            : item.kind === 'group'
+            ? h(Text, { key: `group-${item.section ?? 'active'}-${item.key}`, bold: true, wrap: 'truncate-end' }, groupTitle(item, props.icons))
             : item.kind === 'queue-title'
             ? h(Text, { key: 'queue-title', dimColor: true, wrap: 'truncate-end' }, `- ${queueTitle(item.count, item.paused)}`)
             : item.kind === 'resume-title'
@@ -124,7 +132,7 @@ function Preview(props: { state: BoardState; width: number; height: number }): R
 
 function Footer(props: { state: BoardState; hint: string }): React.ReactElement {
   const { state } = props;
-  const prompt = promptText(state);
+  const prompt = state.mode.kind === 'confirm' && state.mode.action === 'close-pulled' ? 'Zamknąć te zadania? Worktree pozostają. [y/N]' : promptText(state);
   const status = state.busy ?? (state.loadError ? `refresh failed: ${state.loadError}` : null) ?? props.hint;
   return h(
     Box,
@@ -220,7 +228,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
     setImmediate(() => {
       if (!mounted.current) return;
       try {
-        const data = loadWallBoard(ctx.config);
+        const data = loadWallBoard(ctx.config, ctx.runner.now());
         update((s) => ({ ...s, wall: data }));
       } catch (e) {
         if (!quiet) update((s) => showNotice(s, { level: 'error', text: `WALL: ${errorMessage(e).split('\n')[0]}` }));
@@ -295,7 +303,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
   const layout = boardLayout(state.width, ctx.config.board.listWidth);
   const active = state.rows.filter((r) => !r.closed && !r.finished && !r.hidden).length;
   const hiddenCount = state.showHidden ? 0 : state.rows.filter((r) => r.hidden).length;
-  const panel = usagePanel(state.plans, ctx.config.usage, Date.now(), providerHolds(ctx.config, Date.now()));
+  const panel = usagePanel(state.plans, ctx.config.usage, Date.now(), providerHolds(ctx.config, Date.now()), ctx.config);
   const mline = managerLine(state, ctx.config.manager.autostart || ctx.config.manager.project !== null);
   const rowsForBody = Math.max(3, state.height - 4 - panel.length - (mline ? 1 : 0));
   const away = awayLabel(state.away);
@@ -320,9 +328,12 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
     const start = view.selected < 0 ? 0 : Math.max(0, Math.min(view.selected - Math.floor(room / 2), view.lines.length - room));
     return h(Box, { flexDirection: 'column' }, h(Text, { bold: true, wrap: 'truncate-end' }, view.title), ...view.lines.slice(start, start + room).map((l, i) => h(Text, { key: i, wrap: 'truncate-end', ...(l.selected ? { inverse: true } : {}), ...(l.bold ? { bold: true } : {}), ...(l.dim ? { dimColor: true } : {}), ...(l.color && !l.selected ? { color: l.color } : {}) }, l.text === '' ? ' ' : l.text)));
   };
-  const fullScreen = state.mode.kind === 'help' || logMode !== null || viewMode !== null || wallMode !== null;
+  const bulkClose = state.mode.kind === 'confirm' && state.mode.action === 'close-pulled';
+  const fullScreen = bulkClose || state.mode.kind === 'help' || logMode !== null || viewMode !== null || wallMode !== null;
   const body =
-    wallMode
+    bulkClose
+      ? h(Box, { flexDirection: 'column' }, ...bulkCloseLines(state).map((line, i) => h(Text, { key: i, bold: i === 0, wrap: 'truncate-end' }, line)))
+      : wallMode
       ? wallBody()
       : viewMode
       ? h(Box, { flexDirection: 'column' }, h(Text, { bold: true }, `${VIEW_TITLES[viewMode.what]} (↑↓ scroll, Esc back)`), ...viewMode.lines.slice(viewMode.offset, viewMode.offset + Math.max(1, state.height - 4)).map((l, i) => h(Text, { key: i, wrap: 'truncate-end' }, l === '' ? ' ' : l)))

@@ -99,6 +99,7 @@ export interface TaskRecord {
   adopted?: string;
   /** `pin: true` in the spec: `agentctl move` never hands this task to the other provider. Absent in records from before it was kept. */
   pin?: boolean;
+  keepCache?: boolean;
   integration?: boolean;
   /** `remote_control: true` in the spec: the agent runs with `--remote-control <TASK>` (the session in the Claude app is named after the task). */
   remoteControl?: boolean;
@@ -160,6 +161,7 @@ export function recordFromSpec(spec: ResolvedSpec, config: GlobalConfig, started
   if (spec.reviewOf) record.reviewOf = spec.reviewOf;
   if (spec.review) record.review = spec.review;
   if (spec.autoReview) record.autoReview = spec.autoReview;
+  if (spec.keepCache) record.keepCache = true;
   if (spec.integration) record.integration = true;
   if (spec.pin) record.pin = true;
   if (spec.remoteControl) record.remoteControl = true;
@@ -211,6 +213,7 @@ export function renderTaskMd(record: TaskRecord, prompt: string): string {
   for (const [key, value] of Object.entries({ attempt: record.attempt, attempt_id: record.attemptId, outputs_protocol: record.outputsProtocol, attempt_started: record.attemptStarted, attempt_report_baseline: record.attemptReportBaseline, turn_ended_at: record.turnEndedAt, summary_delivered: record.summaryDelivered })) if (value !== undefined) header[key] = value;
   if (record.pulled) header.pulled = record.pulled;
   if (record.adopted) header.adopted = record.adopted;
+  if (record.keepCache) header.keep_cache = true;
   if (record.integration) header.integration = true;
   if (record.pin) header.pin = true;
   if (record.remoteControl) header.remote_control = true;
@@ -349,6 +352,7 @@ function parseTaskRecordUncached(text: string): TaskRecord | undefined {
   if (typeof data.report_source_mtime === 'string') record.reportSourceMtime = data.report_source_mtime;
   if (typeof data.pulled === 'string') record.pulled = data.pulled;
   if (typeof data.adopted === 'string') record.adopted = data.adopted;
+  if (data.keep_cache === true) record.keepCache = true;
   if (data.integration === true) record.integration = true;
   if (data.pin === true) record.pin = true;
   if (data.weight === 'heavy' || data.weight === 'normal') record.weight = data.weight;

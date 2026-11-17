@@ -62,7 +62,7 @@ describe('board: the Ink front renders the model', () => {
   function setup(name: string, columns: number, yaml = '') {
     const config = makeConfig(scratch.sub(name), yaml);
     seedTask(config, 'NC-1', { repos: [] });
-    const finished = seedTask(config, 'NC-2', { agent: 'codex', model: 'gpt-6.1-sol', effort: 'low' });
+    const finished = seedTask(config, 'NC-2', { agent: 'codex', model: 'gpt-6.1-sol', effort: 'low', supersededBy: 'NC-1' });
     fs.mkdirSync(path.dirname(finished.report), { recursive: true });
     fs.writeFileSync(finished.report, 'Werdykt: PASS\n');
     const tmux = new FakeTmux();
@@ -82,7 +82,7 @@ describe('board: the Ink front renders the model', () => {
     assert.match(screen, /claude\s+n\/d/, 'the usage panel: no reading of the plan, so n/d');
     assert.match(screen, /codex\s+n\/d/);
     assert.match(screen, /NC-1\s+cl O HI\s+⚙ working/);
-    assert.ok(!screen.includes('NC-2'), 'NC-2 has a finished report and no window: it waits under the closed "Finished" title');
+    assert.ok(!screen.includes('NC-2'), 'NC-2 is superseded and has no window: it waits under the closed "Finished" title');
     assert.match(screen, /\+ Finished \(1\) – z opens/);
     assert.match(screen, /Enter – open the agent · F12 – back to the list/);
     keys.write('z');

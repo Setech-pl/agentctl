@@ -26,6 +26,8 @@ marker, one agentctl-outputs v1 block and report-end last. Use existing refs.
 Never bypass trust/approval, merge, push, publish, tag or open a PR without
 explicit owner authorization. No push is the default. Keep watch running;
 ask the owner to answer folder trust/onboarding in the task window.
+After handling a question: wall_reply or wall_set_status.
+
 ~~~
 
 See the [full guide](agent-guide.md) and [MCP reference](mcp-tools.md).

@@ -154,3 +154,9 @@ Użyj Ubuntu WSL2 jako **krzet**, adresu Windows **192.168.2.64** i zewnętrzneg
 | Brak CLI / wylogowany dostawca | Zainstaluj i zaloguj jako krzet w WSL, nie w Windows ani jako root. Sprawdź nieinteraktywny PATH, uruchom CLI ręcznie. Plik danych logowania nie dowodzi ważności tokenu. |
 | GC pomija cel | Przeczytaj powód; zakończ/zamknij zadanie, commituj zamierzone zmiany, rozwiąż linki albo poczekaj na wymagany wiek. Bez force. |
 | Zadanie nie startuje | Sprawdź blokadę/limit konta i limit hosta w `limits`/`capacity`; hold dostawcy obejmuje także zdalną kolejkę. |
+
+## 0.23.1: bezpieczeństwo i dopuszczanie startów
+
+Zachowanie 0.22.5–0.22.8 obejmuje także hosty: pin/unpin i GC `--keep TASK`, zachowanie cache domyślnie (usuwanie wymaga `--include-cache`), `keep_cache`, referencje artefaktów raportu i kontrolę niewysłanych commitów w każdym zdalnym worktree. Zdalny GC nigdy nie wymusza usunięcia zmian/commitów, także przy lokalnym force. Pin i keep są ponownie sprawdzane przy wykonaniu planu. Referencje cache są sprawdzane zachowawczo w raporcie hosta i lokalnej kopii; niejednoznaczność chroni dane.
+
+Podgląd kolejki korzysta z pomiaru zdrowia hosta nie starszego niż 60 sekund dla jego `work_dir`; brak/stary/nieznany pomiar blokuje start. Przed zmianami worktree/setup start bezpośredni i z kolejki odczytuje świeże liczniki systemu plików hosta (najbliższego istniejącego rodzica, jeśli work_dir jest nowy). Dyspozytor nie sprawdza zdalnej ścieżki lokalnie. Harmonogram szczytu i globalne blokady działają przed zdalnym setupem; działające zadania i jawne wznowienie właściciela zachowują opisane reguły. Przewinięcie menu nie unieważnia tokena answer przy niezmienionym pytaniu i wybranej opcji. Snapshot status/capacity zachowuje host i zapisany pomiar jego dysku, bez SSH i skanowania zadań.

@@ -148,6 +148,68 @@
       "tests/consult.test.ts"
     ]
   },
+  "D1": {
+    "rev": "v0.22.4",
+    "outcome": "FAILS",
+    "failed": 4,
+    "passed": 0,
+    "failing": [
+      "D1: cached MCP preview checks every repo including untracked files in the second",
+      "D1: unpushed commits and dirt created after preview are refused at apply",
+      "D1: failed git risk checks fail closed even with a dirty override",
+      "D1: linked worktrees still expose fresh risk counts per repo",
+      "D1: cached MCP preview checks every repo including untracked files in the second"
+    ]
+  },
+  "D2": {
+    "rev": "v0.22.4",
+    "outcome": "FAILS",
+    "failed": 3,
+    "passed": 0,
+    "failing": [
+      "D2: cache defaults to keep; explicit inclusion lists sizes but protects report references",
+      "D2: keep_cache survives spec/record serialization and MCP/CLI overrides preserve cache",
+      "D2: newly referenced caches are protected again at apply, including prose and alias paths",
+      "D2: cache defaults to keep; explicit inclusion lists sizes but protects report references",
+      "D2: keep_cache survives spec/record serialization and MCP/CLI overrides preserve cache"
+    ]
+  },
+  "D3": {
+    "rev": "v0.22.4",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 1,
+    "failing": [
+      "D3: Claude token survives a scrolled menu and normalized whitespace when chosen option is visible",
+      "D3: Claude token survives a scrolled menu and normalized whitespace when chosen option is visible"
+    ]
+  },
+  "D5": {
+    "rev": "v0.22.4",
+    "outcome": "FAILS",
+    "failed": 3,
+    "passed": 0,
+    "failing": [
+      "D5: closed project defaults are skipped with one persisted project/day notice across specs",
+      "D5: inherited defaults to a repo supplied by the spec are skipped; explicit worktree placeholders remain",
+      "D5: inherited closed-task placeholders are skipped even after the worktree is gone",
+      "D5: closed project defaults are skipped with one persisted project/day notice across specs",
+      "D5: inherited defaults to a repo supplied by the spec are skipped; explicit worktree placeholders remain"
+    ]
+  },
+  "D6": {
+    "rev": "v0.22.4",
+    "outcome": "FAILS",
+    "failed": 5,
+    "passed": 0,
+    "failing": [
+      "D6: every write accepts token-only at the registered schema and returns a confirmation refusal for an unknown token",
+      "D6: wall_post restores arguments with matching as; guards identity/session/TTL and replays once",
+      "D6: wall_reply restores arguments with matching as; guards identity/session/TTL and replays once",
+      "D6: wall_set_status restores arguments with matching as; guards identity/session/TTL and replays once",
+      "D6: away also supports preview and token-only confirmation without a preview side effect"
+    ]
+  },
   "F1": {
     "rev": "v0.19.0",
     "outcome": "IMPORT-ERROR",
@@ -156,6 +218,123 @@
     "failing": [
       "tests/p73-cache-clean.test.ts",
       "tests/p73-cache-clean.test.ts"
+    ]
+  },
+  "FIELD0230-F1": {
+    "rev": "v0.22.7",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "F1: CLI and MCP keep dirty worktrees out of Would remove and include skipped sizes",
+      "F1: CLI and MCP keep dirty worktrees out of Would remove and include skipped sizes"
+    ]
+  },
+  "FIELD0230-F10": {
+    "rev": "v0.22.7",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "F10: Kimi medium maps to high with a warning in spec and translated planning, preserving requested effort",
+      "F10: Kimi medium maps to high with a warning in spec and translated planning, preserving requested effort"
+    ]
+  },
+  "FIELD0230-F11": {
+    "rev": "v0.22.7",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "F11: closed project defaults error with actionable hint unless disabled or the spec supplies that repo",
+      "F11: closed project defaults error with actionable hint unless disabled or the spec supplies that repo"
+    ]
+  },
+  "FIELD0230-F12": {
+    "rev": "v0.22.7",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "F12: integrate base is accepted; external repos warn with a hint without invalidating outputs or probing Git",
+      "F12: integrate base is accepted; external repos warn with a hint without invalidating outputs or probing Git"
+    ]
+  },
+  "FIELD0230-F3": {
+    "rev": "v0.22.7",
+    "outcome": "FAILS",
+    "failed": 4,
+    "passed": 0,
+    "failing": [
+      "F3: fresh low disk holds queued and direct starts, including the watcher claim",
+      "F3: max_parallel_setups counts setup phases across providers and frees launching slots",
+      "F3: queue preview reports the last measured worktree cost and age per repo",
+      "F3: MCP queue preview shows persisted repository cost and current disk admission without inventory scans",
+      "F3: fresh low disk holds queued and direct starts, including the watcher claim"
+    ]
+  },
+  "FIELD0230-F4": {
+    "rev": "v0.22.7",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "F4: status/capacity snapshots use fresh free space and label stale worktree size/policy",
+      "F4: status/capacity snapshots use fresh free space and label stale worktree size/policy"
+    ]
+  },
+  "FIELD0230-F5": {
+    "rev": "v0.22.7",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "F5: quota pane stays limited with reset, original usage_hint and events attention",
+      "F5: wrapped quota reset is retained and ordinary user mentions do not limit a task",
+      "F5: quota pane stays limited with reset, original usage_hint and events attention",
+      "F5: wrapped quota reset is retained and ordinary user mentions do not limit a task"
+    ]
+  },
+  "FIELD0230-F6": {
+    "rev": "v0.22.7",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "F6: GLM holds are global across cohorts/chats and name the detecting task",
+      "F6: immediate CLI/core starts respect the same global provider hold before worktree setup",
+      "F6: GLM holds are global across cohorts/chats and name the detecting task",
+      "F6: immediate CLI/core starts respect the same global provider hold before worktree setup"
+    ]
+  },
+  "FIELD0230-F7": {
+    "rev": "v0.22.7",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "F7: default Singapore peak holds winter/summer starts, excludes weekends and never interrupts running tasks",
+      "F7: default Singapore peak holds winter/summer starts, excludes weekends and never interrupts running tasks"
+    ]
+  },
+  "FIELD0230-F9": {
+    "rev": "v0.22.7",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 1,
+    "failing": [
+      "F9: every tool accepts as; irrelevant identity is ignored in preview/confirm; expiry includes local time",
+      "F9: every tool accepts as; irrelevant identity is ignored in preview/confirm; expiry includes local time"
+    ]
+  },
+  "FIELD0230-SOCKET": {
+    "rev": "v0.22.7",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "FIELD0230-SOCKET: a 66-byte task cache keeps isolated tmux within the socket limit",
+      "FIELD0230-SOCKET: a 66-byte task cache keeps isolated tmux within the socket limit"
     ]
   },
   "G1a": {
@@ -763,6 +942,61 @@
       "R1: camelCase credentials and passwd are masked in fields, text and URLs"
     ]
   },
+  "REL0243-DISK": {
+    "rev": "v0.23.0",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0243-DISK: remote admission probes host work_dir and fails closed before setup",
+      "REL0243-DISK: remote admission probes host work_dir and fails closed before setup"
+    ]
+  },
+  "REL0243-GC": {
+    "rev": "v0.23.0",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "REL0243-GC: remote cache is opt-in and pin/keep/keep_cache protect at preview and apply",
+      "REL0243-GC: remote unpushed commits and report artifact references stay",
+      "REL0243-GC: remote cache is opt-in and pin/keep/keep_cache protect at preview and apply",
+      "REL0243-GC: remote unpushed commits and report artifact references stay"
+    ]
+  },
+  "UX0228": {
+    "rev": "v0.22.5",
+    "outcome": "FAILS",
+    "failed": 5,
+    "passed": 0,
+    "failing": [
+      "UX0228: pulled reports collapse per cohort after active rows; Enter expands and unpulled reports lead and highlight",
+      "UX0228: bulk close lists scope, cancels by default, confirms without worktree removal and refuses changed scope",
+      "UX0228: pulled dead report stays visible and a rewritten report is unpulled",
+      "UX0228: queued selection closes its cohort and manager selection has no implicit cohort",
+      "UX0228: unpulled reports lead active tasks across cohorts"
+    ]
+  },
+  "UX0228-PRIORITY": {
+    "rev": "v0.22.5",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "UX0228: unpulled reports lead active tasks across cohorts",
+      "UX0228: unpulled reports lead active tasks across cohorts"
+    ]
+  },
+  "UX0228-SCOPE": {
+    "rev": "v0.22.5",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "UX0228: queued selection closes its cohort and manager selection has no implicit cohort",
+      "UX0228: queued selection closes its cohort and manager selection has no implicit cohort"
+    ]
+  },
   "WALL-1-f1": {
     "rev": "v0.20.2",
     "outcome": "IMPORT-ERROR",
@@ -781,6 +1015,15 @@
     "failing": [
       "tests/wall2-secrets.test.ts",
       "tests/wall2-secrets.test.ts"
+    ]
+  },
+  "WALL0229-HISTORY": {
+    "rev": "v0.22.6",
+    "outcome": "IMPORT-ERROR",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "tests/wall-lifecycle.test.ts"
     ]
   },
   "X1": {

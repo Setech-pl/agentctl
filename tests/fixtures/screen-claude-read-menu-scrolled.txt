@@ -1,0 +1,5 @@
+Allow this read outside the working directories?
+❯ 2. Yes, allow reads from /workspace/shared/ for this session
+  3. No
+  4. No, and tell Claude what to do differently
+Enter to select · Esc to cancel

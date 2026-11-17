@@ -16,10 +16,10 @@ import type { WallSettings } from './wall-config.ts';
  * WALL: a message board shared by the owner's chats and agents through the one agentctl MCP server they all use, so a decision taken in
  * one chat (weather API v1, building heights of @neon-city/sim) reaches the others without copy and paste.
  *
- * Storage is event-sourced and append-only: `<config dir>/wall/<channel>.jsonl` holds one JSON line per record, a `post` (the message
- * with its first status) or a `status` (a later status of a message, with who set it). History is never rewritten; `index.json` is a cache
- * of the folded headers (no bodies) and the byte length it covers, so a read parses only what was appended since. The index can always be
- * rebuilt from the JSONL files.
+ * Storage is event-sourced: `<config dir>/wall/<channel>.jsonl` holds one JSON line per record, a `post` (the message
+ * with its first status) or a `status` (a later status of a message, with who set it). History is retained when closed records move to monthly archives; `index.json` is a cache
+ * of active headers (no bodies). Archive headers are cached by inode and size; active status records overlay them on reads. The index
+ * can always be rebuilt from the JSONL files.
  *
  * WALL content is data, never instructions: a chat or an agent acts on a message only after the owner decided so in its own chat.
  */
@@ -28,7 +28,7 @@ export const WALL_KINDS = ['info', 'question', 'decision-request', 'contract-cha
 export type WallKind = (typeof WALL_KINDS)[number];
 export const UNKNOWN_CHAT_WARNING = 'unknown chat – only channel agentctl visible; pass as: "chat:<name>"';
 
-export const WALL_STATUSES = ['open', 'answered', 'accepted', 'rejected', 'superseded'] as const;
+export const WALL_STATUSES = ['open', 'answered', 'accepted', 'rejected', 'superseded', 'stale'] as const;
 export type WallStatus = (typeof WALL_STATUSES)[number];
 /** Only the owner (or a chat confirming on the owner's behalf) changes the status of these. */
 export const OWNER_KINDS: ReadonlySet<WallKind> = new Set(['decision-request', 'contract-change']);
@@ -64,6 +64,7 @@ export interface WallPostRecord {
 }
 
 export interface WallStatusRecord {
+  reminder?: boolean;
   v: 1;
   type: 'status';
   id: string;
@@ -96,6 +97,9 @@ export interface WallHeader {
   /** Every status after the first, oldest first. */
   history: WallStatusChange[];
   origin?: string;
+  archived?: boolean;
+  storageFile?: string;
+  remindedAt?: string;
   bodyBytes: number;
   offset: number;
   length: number;
@@ -254,8 +258,10 @@ function fold(index: ChannelIndex, record: WallPostRecord | WallStatusRecord, of
   }
   const message = index.messages.find((m) => m.id === record.id);
   if (!message) return;
+  if (record.reminder) { message.remindedAt = record.ts; return; }
+  const change: WallStatusChange = { status: record.status, ts: record.ts, by: record.by, ...(record.for ? { for: record.for } : {}), ...(record.note ? { note: record.note } : {}), ...(record.via ? { via: record.via } : {}) };
   message.status = record.status;
-  message.history.push({ status: record.status, ts: record.ts, by: record.by, ...(record.for ? { for: record.for } : {}), ...(record.note ? { note: record.note } : {}), ...(record.via ? { via: record.via } : {}) });
+  message.history.push(change);
 }
 
 /** Parse the complete lines of `file` from `from` on into `index`; a torn last line waits for its newline. */
@@ -299,20 +305,84 @@ function loadChannel(config: GlobalConfig, channel: string, saved?: IndexFile): 
   return next;
 }
 
+function archiveFiles(config: GlobalConfig, channel: string): string[] {
+  const dir = path.join(wallDir(config), 'archive');
+  try { return fs.readdirSync(dir).filter(n => n.startsWith(`${channel}-`) && /^\d{4}-\d{2}\.jsonl$/.test(n.slice(channel.length + 1))).sort().map(n => path.join(dir, n)); }
+  catch { return []; }
+}
+
+const archiveMemo = new Map<string, ChannelIndex>();
+
+function archiveHeaders(file: string): WallHeader[] {
+  const st = fs.statSync(file);
+  let index = archiveMemo.get(file);
+  if (!index || index.ino !== st.ino || index.size !== st.size) {
+    index = { size: 0, ino: st.ino, messages: [] };
+    foldTail(file, index, 0, st.size);
+    archiveMemo.set(file, index);
+  }
+  return index.messages.map(m => ({ ...m, history: [...m.history], storageFile: file, archived: true }));
+}
+
 export function channelMessages(config: GlobalConfig, channel: string): WallHeader[] {
-  return loadChannel(config, channel).messages;
+  const activeIndex = loadChannel(config, channel);
+  if (!archiveFiles(config, channel).length) return activeIndex.messages;
+  // Capture active data before discovering archives: a concurrent archive-first move
+  // always leaves at least one complete copy in this read's snapshot.
+  const file = channelFile(config, channel);
+  let active: Buffer;
+  try { active = fs.readFileSync(file); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; active = Buffer.alloc(0); }
+  const index: ChannelIndex = { size: 0, ino: 0, messages: [] };
+  for (const source of archiveFiles(config, channel)) index.messages.push(...archiveHeaders(source));
+  // Only deduplicate across the archive/active boundary. Identical status records
+  // within a file can be legitimate close/reopen/close operations at one timestamp.
+  const copiedStatuses = new Map<string, number>();
+  for (const m of index.messages) for (const h of m.history) {
+    const key = `${m.id}\0${JSON.stringify(h)}`;
+    copiedStatuses.set(key, (copiedStatuses.get(key) ?? 0) + 1);
+  }
+  const consume = (data: Buffer) => {
+    let start = 0;
+    for (;;) {
+      const end = data.indexOf(10, start);
+      if (end < 0) break;
+      try {
+        const r: unknown = JSON.parse(data.subarray(start, end).toString('utf8'));
+        if (isRecord(r)) {
+          if (r.type === 'status' && !r.reminder) {
+            const change: WallStatusChange = { status: r.status, ts: r.ts, by: r.by, ...(r.for ? { for: r.for } : {}), ...(r.note ? { note: r.note } : {}), ...(r.via ? { via: r.via } : {}) };
+            const key = `${r.id}\0${JSON.stringify(change)}`;
+            const copies = copiedStatuses.get(key) ?? 0;
+            if (copies > 0) { copiedStatuses.set(key, copies - 1); start = end + 1; continue; }
+          }
+          fold(index, r, start, end - start);
+        }
+      } catch { /* tolerate broken lines as for the active index */ }
+      start = end + 1;
+    }
+  };
+  consume(active);
+  return index.messages.sort((a, b) => a.seq - b.seq);
 }
 
 function readBody(config: GlobalConfig, header: WallHeader): string {
-  const fd = fs.openSync(channelFile(config, header.channel), 'r');
+  const source = header.storageFile ?? channelFile(config, header.channel);
   try {
-    const buffer = Buffer.alloc(header.length);
-    fs.readSync(fd, buffer, 0, header.length, header.offset);
-    const d: unknown = JSON.parse(buffer.toString('utf8'));
-    return isRecord(d) && d.type === 'post' ? d.body : '';
-  } finally {
-    fs.closeSync(fd);
+    const fd = fs.openSync(source, 'r');
+    try {
+      const buffer = Buffer.alloc(header.length);
+      fs.readSync(fd, buffer, 0, header.length, header.offset);
+      const d: unknown = JSON.parse(buffer.toString('utf8'));
+      if (isRecord(d) && d.type === 'post' && d.id === header.id) return d.body;
+    } finally { fs.closeSync(fd); }
+  } catch { /* a concurrent move may have changed the inode/offset */ }
+  for (const file of [...archiveFiles(config, header.channel), channelFile(config, header.channel)]) {
+    if (!fs.existsSync(file)) continue;
+    for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
+      try { const r: unknown = JSON.parse(line); if (isRecord(r) && r.type === 'post' && r.id === header.id) return r.body; } catch { /* broken line */ }
+    }
   }
+  throw new AgentctlError(`no WALL body ${header.id}`);
 }
 
 /** `nc-12` → channel nc, seq 12 (a channel name may end in "-<digits>" itself: the last part is the number). */
@@ -350,6 +420,70 @@ const withWallLock = <T>(config: GlobalConfig, action: () => Promise<T>): Promis
   fs.mkdirSync(wallDir(config), { recursive: true });
   return withFileLock(lockFile(config), action, 1000);
 };
+
+/** Watch maintenance, serialized with posts/status writes. Archive-first replacement is recoverable:
+ * readers deduplicate records while both copies exist; a retry completes the active-file move. */
+export async function maintainWall(ctx: Context): Promise<void> {
+  await withWallLock(ctx.config, async () => {
+    const { config } = ctx;
+    const now = ctx.runner.now();
+    for (const channel of wallChannels(config)) {
+      const source = channelFile(config, channel);
+      if (fs.existsSync(source)) {
+        const raw = fs.readFileSync(source, 'utf8');
+        // A maintenance append must never merge into an incomplete record.
+        if (raw && !raw.endsWith('\n')) continue;
+        try { if (!raw.split('\n').filter(Boolean).every(line => isRecord(JSON.parse(line)))) continue; } catch { continue; }
+      }
+      let messages = channelMessages(config, channel);
+      for (const m of messages.filter(isOpen)) {
+        if (m.kind !== 'question' && m.kind !== 'decision-request' && m.kind !== 'contract-change') continue;
+        const last = Math.max(Date.parse(m.ts), ...m.history.map(h => Date.parse(h.ts)), ...messages.filter(r => r.replyTo === m.id).map(r => Date.parse(r.ts)));
+        if (!m.remindedAt && now - last >= config.wall.remindAfterHours * 3600000) {
+          appendRecord(config, channel, { v: 1, type: 'status', id: m.id, ts: new Date(now).toISOString(), status: m.status, by: 'watch', reminder: true });
+          await recordJournal(ctx, { kind: 'wall', text: `WALL czeka na odpowiedź: ${m.id}`, wall: { channel, kind: m.kind, subject: m.subject, id: m.id, from: 'watch', recipients: [...new Set([m.from, m.to])] } });
+        }
+        if (!OWNER_KINDS.has(m.kind) && now - last >= config.wall.staleAfterDays * 86400000) {
+          appendRecord(config, channel, { v: 1, type: 'status', id: m.id, ts: new Date(now).toISOString(), status: 'stale', by: 'watch', note: 'Brak odpowiedzi: automatycznie oznaczono jako stale.' });
+        }
+      }
+      messages = channelMessages(config, channel);
+      const closed = new Map(messages.filter(m => m.status !== 'open' && now - Date.parse(m.history.at(-1)?.ts ?? m.ts) > config.wall.archiveAfterDays * 86400000).map(m => [m.id, m]));
+      const file = channelFile(config, channel);
+      if (!closed.size || !fs.existsSync(file)) continue;
+      const raw = fs.readFileSync(file, 'utf8');
+      // Never rewrite a torn or malformed log: leave it for the next tick/operator.
+      if (raw && !raw.endsWith('\n')) continue;
+      const lines = raw.split('\n').filter(Boolean);
+      let records: (WallPostRecord | WallStatusRecord)[];
+      try { records = lines.map(line => JSON.parse(line)); if (!records.every(isRecord)) continue; } catch { continue; }
+      const groups = new Map<string, string[]>();
+      const keep: string[] = [];
+      records.forEach((r, i) => {
+        const m = closed.get(r.id);
+        if (!m) { keep.push(lines[i]!); return; }
+        const dest = m.storageFile ?? path.join(wallDir(config), 'archive', `${channel}-${m.ts.slice(0, 7)}.jsonl`);
+        groups.set(dest, [...(groups.get(dest) ?? []), lines[i]!]);
+      });
+      for (const [dest, moving] of groups) {
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+        const existing = fs.existsSync(dest) ? fs.readFileSync(dest, 'utf8').split('\n').filter(Boolean) : [];
+        const copies = new Map<string, number>();
+        for (const line of existing) copies.set(line, (copies.get(line) ?? 0) + 1);
+        const merged = [...existing];
+        for (const line of moving) {
+          const count = copies.get(line) ?? 0;
+          if (count > 0) copies.set(line, count - 1);
+          else merged.push(line);
+        }
+        atomicWriteFile(dest, merged.join('\n') + '\n');
+      }
+      if (groups.size) atomicWriteFile(file, keep.length ? keep.join('\n') + '\n' : '');
+    }
+  });
+}
+
+export const wallAge = (ts: string, now: number): string => `${Math.max(0, Math.floor((now - Date.parse(ts)) / 3600000))}h`;
 
 // ---- validation
 
@@ -468,6 +602,9 @@ export interface PostPlan {
   to: string;
   kind: WallKind;
   subject: string;
+  archived?: boolean;
+  storageFile?: string;
+  remindedAt?: string;
   bodyBytes: number;
   refs: string[];
   replyTo: string | null;
@@ -616,6 +753,7 @@ export async function setStatus(ctx: Context, who: WallIdentity, input: StatusIn
 export interface ReadFilter {
   channel?: string | undefined;
   since?: string | undefined;
+  archive?: boolean | undefined;
   status?: WallStatus | undefined;
   kind?: WallKind | undefined;
   limit?: number | undefined;
@@ -644,10 +782,10 @@ function sinceMs(text: string, now: number): number {
 /** Messages open for an answer or a decision. */
 export const isOpen = (m: Pick<WallHeader, 'kind' | 'status'>): boolean => m.status === 'open' && OPEN_KINDS.has(m.kind);
 
-export function channelSummaries(config: GlobalConfig, who: WallIdentity, read?: OwnerReadState): ChannelSummary[] {
+export function channelSummaries(config: GlobalConfig, who: WallIdentity, read?: OwnerReadState, now = Date.now()): ChannelSummary[] {
   return readableChannels(config, who).map((channel) => {
     const messages = channelMessages(config, channel);
-    return { channel, description: config.wall.channels[channel]?.description ?? null, messages: messages.length, open: messages.filter(isOpen).length, ...(read ? { unread: messages.filter((m) => !isRead(read, m)).length } : {}), last: messages.at(-1)?.ts ?? null, canPost: canPost(config, channel, who) };
+    return { channel, description: config.wall.channels[channel]?.description ?? null, messages: messages.length, open: messages.filter(isOpen).length, ...(read ? { unread: messages.filter((m) => (Date.parse(m.ts) >= now - 7 * 86400000 || isOpen(m)) && !isRead(read, m)).length } : {}), last: messages.at(-1)?.ts ?? null, canPost: canPost(config, channel, who) };
   });
 }
 
@@ -661,14 +799,14 @@ export function readWall(ctx: Context, who: WallIdentity, filter: ReadFilter = {
   }
   if (filter.status !== undefined && !(WALL_STATUSES as readonly string[]).includes(filter.status)) throw new AgentctlError(`status must be one of ${WALL_STATUSES.join(', ')}`);
   if (filter.kind !== undefined && !(WALL_KINDS as readonly string[]).includes(filter.kind)) throw new AgentctlError(`kind must be one of ${WALL_KINDS.join(', ')}`);
-  const from = filter.since ? sinceMs(filter.since, ctx.runner.now()) : -Infinity;
+  const from = filter.since ? sinceMs(filter.since, ctx.runner.now()) : filter.archive ? -Infinity : ctx.runner.now() - 7 * 86400000;
   const before = filter.before ? findMessage(config, filter.before) : undefined;
   const all = (filter.channel ? [filter.channel] : readable).flatMap((c) => channelMessages(config, c))
-    .filter((m) => Date.parse(m.ts) > from && (filter.status === undefined || m.status === filter.status) && (filter.kind === undefined || m.kind === filter.kind))
+    .filter((m) => (filter.archive || filter.since || !m.archived) && Date.parse(m.ts) > from && (filter.status === undefined || m.status === filter.status) && (filter.kind === undefined || m.kind === filter.kind))
     .filter((m) => !before || m.ts < before.ts || (m.ts === before.ts && m.channel === before.channel && m.seq < before.seq))
     .sort((a, b) => a.ts.localeCompare(b.ts) || a.channel.localeCompare(b.channel) || a.seq - b.seq);
   const limit = Math.max(1, Math.min(100, filter.limit ?? 20));
-  return { identity: who.id, channels: channelSummaries(config, who), messages: all.slice(-limit), older: Math.max(0, all.length - limit) };
+  return { identity: who.id, channels: channelSummaries(config, who, undefined, ctx.runner.now()), messages: all.slice(-limit), older: Math.max(0, all.length - limit) };
 }
 
 /** One message with its body and its thread (the replies under it, at any depth, oldest first). */
@@ -806,9 +944,9 @@ export interface WallBoardData {
   read: OwnerReadState;
 }
 
-export function loadWallBoard(config: GlobalConfig): WallBoardData {
+export function loadWallBoard(config: GlobalConfig, now = Date.now()): WallBoardData {
   const read = readOwnerState(config);
-  return { read, channels: channelSummaries(config, OWNER, read).map((s) => ({ ...s, headers: channelMessages(config, s.channel) })) };
+  return { read, channels: channelSummaries(config, OWNER, read, now).map((s) => ({ ...s, headers: channelMessages(config, s.channel) })) };
 }
 
 export const ownerThreadLines = (config: GlobalConfig, id: string): string[] => renderThread(readThread(config, OWNER, id));

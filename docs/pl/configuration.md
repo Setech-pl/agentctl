@@ -71,6 +71,7 @@ Typy/domysły sprawdzono z [config.ts](../../src/core/config.ts), [spec.ts](../.
 | `repos[].base` | git ref · none · s | Ref Git lub task:<ID>, zamrażany do commitu przy starcie. |
 | `repos[].branch` | string · none · s | Gałąź; brak oznacza detached. |
 | `review_of` | task ID or list · none · s | ID/lista recenzowanych zadań; inny agent/model, wspólny provider ostrzega. |
+| `keep_cache` | boolean · `false` · s | Zachowaj cały cache zadania podczas gc. Usuwanie cache jest domyślnie wyłączone; include_cache: true / --include-cache wymaga jawnej zgody właściciela. Ścieżki persist/artifacts/refs w raporcie także chronią dane. |
 | `remote_control` | boolean · `false` · s | Tylko Claude; wymaga właściwego loginu i ręcznej zgody. |
 | `pin` | boolean · `false` · s | Zabroń translacji dostawcy i move. |
 | `after` | task ID or list · none · s | Kompletne raporty i akceptowany pierwszy werdykt; brak werdyktu może czekać, jawne odrzucenie blokuje. |
@@ -198,7 +199,9 @@ Typy/domysły sprawdzono z [config.ts](../../src/core/config.ts), [spec.ts](../.
 | `manager.effort` | `low` `medium` `high` `xhigh` `max` · `medium` · g | Effort managera. |
 | `manager.guide` | path · none · g | Dodatkowy przewodnik managera. |
 | `manager.autostart` | boolean · `false` · g | Czy up może uruchomić managera. |
-| `board.auto_hide_pulled_dead` | boolean · `true` · g | Ukryj odebrany raport bez żywego okna. |
+| `board.auto_hide_pulled_dead` | boolean · `true` · g | Ukryj odebrane zakończone zadania poza report-ready; report-ready pozostaje widoczne do zamknięcia. |
+| `board.pulled_collapse_after` | number · `0` · g | Minuty od odebrania raportu do zwinięcia w kohorcie; 0 natychmiast. |
+| `board.pulled_auto_close_after` | number/false · `false` · g | Jawna zgoda właściciela: watch zamyka odebrane report-ready po N godzinach od odbioru, ze zdarzeniem, bez usuwania worktree. |
 | `board.mouse` | boolean · `true` · g | Mysz tylko tej sesji tmux. |
 | `board.return_key` | tmux key name or `false` · `F12` · g | Klawisz powrotu; null bez wiązania. |
 | `board.model_versions` | alias → quoted version mapping · `{}` · g | Jawne fallbacki wersji aliasów, bez zgadywania. |
@@ -283,3 +286,73 @@ Tekst z cache zaczyna się od `stan z HH:MM, 2h 44m temu`; rekordy JSON mają `s
 `integration: true` w specyfikacji wycisza ostrzeżenia o kolizjach z adnotacją. W pozostałych przypadkach porównanie używa merge-base bazy specyfikacji i pomija pliki przejęte przez merge wykonany przez poprzednika; zmiany bez commita nadal się liczą. Gałąź integrowaną deklaruj jako `repos[].base`. Flaga steruje ostrzeżeniami, nie daje uprawnień do scalenia.
 
 Podgląd kolejki wskazuje oczekujące `queue_rm` i identyfikator requestu. MCP `queue` z `replace: true` usuwa oczekujący wpis i dodaje nową specyfikację w jednym ticku watch; rozpoczęte zadanie jest odrzucane. Usunięte zadania bez startu mają ukryty stan `cancelled`, bez alarmu utraty okna. Instrukcja raportu umieszcza marker próby po pierwszym wierszu werdyktu, a parser toleruje wcześniejsze komentarze. Odczyt raportu/zdarzenia pokazują `outputs_errors`; duplikaty bloków wybierają ostatni poprawny z uwagą. `Verdict:`, `Werdykt:` i udokumentowane aliasy checks nadal działają.
+
+### Cykl życia WALL (0.22.7)
+
+`watch` przy każdym ticku porządkuje WALL. Zamknięte wiadomości (`answered`,
+`accepted`, `rejected`, `superseded`, `stale`), których ostatni status jest starszy
+niż `wall.archive_after_days` (domyślnie **14**), przenosi do
+`~/.agentctl/wall/archive/<kanał>-<YYYY-MM>.jsonl` (miesiąc publikacji).
+Zostaje cała treść i historia statusów. Każdy plik jest podmieniany atomowo pod
+blokadą zapisu WALL; zapis archiwum przed podmianą aktywnego pliku i deduplikacja
+pozwalają bezpiecznie dokończyć przerwaną operację. ID i wątki nadal działają,
+także po restarcie, a numeracja nowych wiadomości nie zaczyna się od nowa.
+
+Lista `wall_read` domyślnie ma `since: 7d`. Jawne `since` przeszukuje podany okres
+w aktywnych plikach i archiwach, a `archive: true` całą historię. Odczyt po ID
+zawsze uwzględnia archiwum. W CLI: `wall read --since 30d`, `wall read --archive`
+lub `wall read --id <id>`.
+
+Otwarte pytanie lub prośba bez odpowiedzi/zmiany statusu przez
+`wall.remind_after_hours` (domyślnie **24**) dostaje jedno trwałe przypomnienie:
+`WALL czeka na odpowiedź: <id>`. Czat autora i adresat widzą je w `events_since`;
+adresat będący kanałem oznacza subskrybujące go czaty. Po
+`wall.stale_after_days` (domyślnie **7**) nieaktywne pytanie otrzymuje status
+`stale` z notatką w historii. Prośby o decyzję i zmiany kontraktu dostają
+przypomnienie, lecz nigdy automatyczny `stale`: nadal zamyka je wyłącznie właściciel
+lub czat z `owner_confirmed` po jego decyzji. `stale` jest statusem zamkniętym dla
+skrzynki i archiwum; ponowne otwarcie wymaga właściciela.
+
+W planszy **W** nieprzeczytane to ostatnie 7 dni oraz wszystkie otwarte pozycje.
+**A** przełącza aktywne i archiwalne listy wiadomości; `stale` jest przygaszony,
+szary. `events_since` pokazuje wiek otwartych pozycji i pomija `stale`.
+Po obsłużeniu pytania: `wall_reply` lub `wall_set_status`.
+
+```yaml
+wall:
+  archive_after_days: 14
+  remind_after_hours: 24
+  stale_after_days: 7
+```
+
+Progi muszą być dodatnimi, skończonymi liczbami. Porządkowanie wymaga watch;
+okna list oraz odczyt po ID/z archiwum działają również bez niego.
+
+Podgląd GC rozdziela **Would remove**, **Skipped (uncommitted changes)** i **Skipped (pinned)** z rozmiarami. JSON MCP zawiera ten sam opis w `text`; pominięte bajty nie zwiększają miejsca do odzyskania.
+
+`agentctl pin TASK` / `unpin TASK` (MCP `pin` / `unpin`, `tasks: [TASK]`, osobne uprawnienia mcp.allow) zapisują pin w stanie zadania, także zamkniętego/zarchiwizowanego. GC nie usuwa przypiętych worktree ani cache nawet z flagami force; pin blokuje też zmianę providera. `agentctl gc --keep TASK` / MCP `gc` lub `gc_preview` z `keep: [TASK]` chroni te zasoby w jednym przebiegu. Status i plansza pokazują 📌.
+
+Kolejka wymaga aktualnego wolnego miejsca ≥ `disk.min_free_start_gb` (domyślnie 30, GiB). Zbyt mało miejsca lub brak odczytu wstrzymuje starty z kolejki i MCP new; działające zadania trwają dalej. `queue.max_parallel_setups` (domyślnie 2) ogranicza fazy worktree/setup niezależnie od `parallel_starts` (obejmującego też oczekiwanie na gotowość agenta). Podgląd szacuje rozmiar worktree każdego repo na podstawie ostatniego pomiaru z jego wiekiem; brak pomiaru to n/d.
+
+Status/capacity i zdarzenia dyskowe odświeżają wolne miejsce przez statfs; sumy worktree zachowują czas i wiek ostatniego pomiaru. Ostrzeżenia o udziale worktree również podają ten wiek. Wskazówka GC wyjaśnia blokady: pin, aktywne zadania, niezapisane/niewysłane zmiany, linki i domyślna ochrona cache; nie obiecuje odzyskania tych bajtów.
+
+Harmonogram szczytu dotyczy nowych startów, także bezpośrednich; działające zadania trwają dalej. Domyślnie GLM: `providers_config.glm.peak: [{days: mon-fri, from: "14:00", to: "18:00", tz: Asia/Singapore}]`, `peak_policy: hold`. To 07:00–11:00 zimą i 08:00–12:00 latem w Warszawie. Forma singapurska podąża za Z.ai; `tz: Europe/Warsaw, from: "07:00", to: "11:00"` utrzymuje stałe godziny polskie. Te pola obsługują też inni providerzy. `peak: []` wyłącza harmonogram. `peak_policy: short_only` dopuszcza klasy report/simple/smoke/gate lub boolowskie `peak_ok: true` w spec. Obsługiwane są zakresy/listy dni i okna nocne; koniec jest wyłączny. Kolejka/plansza/status pokazują lokalną godzinę końca szczytu.
+
+Po `notify.attention_after_min` (domyślnie 15) ciągłego needs-trust/needs-input watch wysyła jedno powiadomienie pulpitu, skonfigurowanego telefonu i decision-request WALL na kanale `agentctl` do właściciela. Timer i zapis jednokrotnego wysłania na próbę zadania przetrwają restart. Eskalacja telefonu działa także bez away, respektuje `notify.ntfy.events`, prywatność i ponawianie wysyłki. Zwykłe powiadomienia o zmianach stanu działają niezależnie.
+
+Każde narzędzie MCP przyjmuje opcjonalne `as`; wykorzystują je WALL/events. Filtr kohorty statusu korzysta ze świeżego snapshotu watch, a overlap pojawia się tylko przy kolizjach. Podglądy potwierdzeń pokazują ISO `expires_at` i `expires_at_local`.
+
+Domyślne linki projektu do worktree zadań zamkniętych/anulowanych/zarchiwizowanych są błędem, także gdy cel już nie istnieje. Użyj własnego worktree backendu (`{worktree:backend}` z backendem w repos) albo `links: []`. Domyślny link do repo już zawartego w spec jest pomijany; celowe linki `{worktree:...}` pozostają. Jawne linki spec są świadomym wyborem i nadal przechodzą sprawdzenia celu.
+
+Wpisy integrate w `agentctl-outputs` przyjmują opcjonalne `base` obok repo/branch/sha/note. Repo spoza spec jest zachowane z `outputs_warnings` i wskazówką dodania do repos; jego referencje Git nie mogą być zweryfikowane i nie są sprawdzane. Ostrzeżenie nie unieważnia outputs; niejednoznaczne aliasy repo i błędne referencje nadal są błędami.
+
+### Ustawienia 0.22.8
+
+| Klucz | Domyślnie | Znaczenie |
+|---|---|---|
+| `disk.min_free_start_gb` | `30` | Minimalne wolne GiB przed startem z kolejki. |
+| `queue.max_parallel_setups` | `2` | Maksymalna liczba równoległych faz worktree/setup. |
+| `notify.attention_after_min` | `15` | Minuty do jednokrotnej eskalacji desktop/telefon/WALL. |
+| `providers_config.<p>.peak` | `glm: Singapore 14:00–18:00 mon-fri` | Okna {days, from, to, tz}; strefa IANA, peak: [] wyłącza. |
+| `providers_config.<p>.peak_policy` | `hold` | hold lub short_only; dotyczy nowych startów. |
+| `peak_ok` | `false` | Flaga spec dopuszczająca start przy short_only. |

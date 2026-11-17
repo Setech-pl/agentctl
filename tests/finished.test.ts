@@ -32,7 +32,7 @@ const press = (s: BoardState, input: string, key: KeyPress = {}) => handleKey(s,
 const types = (e: BoardEffect[]): string[] => e.map((x) => x.type);
 
 describe('board: active tasks and the closed "Finished" section', () => {
-  const rows = [row('A-1'), dead('A-2'), row('A-3', { state: 'waiting' }), dead('A-4', { state: 'report-ready', report: 'yes' }), row('A-5', { state: 'superseded', finished: true })];
+  const rows = [row('A-1'), dead('A-2'), row('A-3', { state: 'waiting' }), dead('A-4', { state: 'superseded', report: 'yes', supersededBy: 'A-1' }), row('A-5', { state: 'superseded', finished: true })];
 
   it('finished tasks (no window, or moved to the other provider) are not among the active ones; the section is closed by default', () => {
     const s = boardOf(rows);
@@ -221,7 +221,7 @@ describe('hide and unhide', () => {
 });
 
 describe('board.auto_hide_pulled_dead', () => {
-  it('a task without a window whose report was pulled hides itself; without a report it stays under Finished', async () => {
+  it('pulled report-ready tasks remain visible for cohort collapse; no report remains needs-attention', async () => {
     const { config, ctx } = setup('ah1');
     const pulled = seedTask(config, 'NC-1');
     const unpulled = seedTask(config, 'NC-2');
@@ -232,13 +232,13 @@ describe('board.auto_hide_pulled_dead', () => {
     await setHeaderField(ctx.runner, path.join(config.stateDir, 'nc-1', 'TASK.md'), 'pulled', new Date(ctx.runner.now() + 60_000).toISOString());
     const rows = await collectStatus(ctx, { progress: false });
     const by = (t: string) => rows.find((r) => r.task === t)!;
-    assert.deepEqual([by('NC-1').state, by('NC-1').hidden, by('NC-1').hiddenBy], ['report-ready', true, 'auto']);
+    assert.deepEqual([by('NC-1').state, by('NC-1').hidden, by('NC-1').hiddenBy], ['report-ready', false, null]);
     assert.deepEqual([by('NC-2').hidden, by('NC-2').finished], [false, true]);
     assert.deepEqual([by('NC-3').state, by('NC-3').hidden, by('NC-3').finished], ['needs-attention', false, false]);
-    assert.deepEqual(shownRows(rows, false).map((r) => r.task), ['NC-2', 'NC-3']);
+    assert.deepEqual(shownRows(rows, false).map((r) => r.task), ['NC-1', 'NC-2', 'NC-3']);
   });
 
-  it('copying the report from the board (c) counts as pulled, so a finished task goes away by itself', async () => {
+  it('copying the report from the board (c) counts as pulled and leaves it visible for collapse', async () => {
     const { config, runner, ctx } = setup('ah2');
     const record = seedTask(config, 'NC-1');
     writeReport(record.report);
@@ -247,7 +247,7 @@ describe('board.auto_hide_pulled_dead', () => {
     const notice = await runBoardEffect(runner, config, { type: 'pull', task: 'NC-1' }, { insideTmux: false });
     assert.match(notice.text, /Copied/);
     const [after] = await collectStatus(ctx, { progress: false });
-    assert.deepEqual([after?.hidden, after?.hiddenBy], [true, 'auto']);
+    assert.deepEqual([after?.hidden, after?.hiddenBy], [false, null]);
   });
 
   it('a task whose window is alive is never hidden by itself, and a new report makes a pulled task visible again', async () => {
@@ -255,7 +255,7 @@ describe('board.auto_hide_pulled_dead', () => {
     const record = seedTask(config, 'NC-1', { pulled: '2026-11-01T12:30:00.000Z' });
     writeReport(record.report);
     fs.utimesSync(record.report, new Date('2026-11-01T12:00:00Z'), new Date('2026-11-01T12:00:00Z'));
-    assert.equal((await collectStatus(ctx, { progress: false }))[0]?.hiddenBy, 'auto');
+    assert.equal((await collectStatus(ctx, { progress: false }))[0]?.hiddenBy, null);
     fs.utimesSync(record.report, new Date('2026-11-01T13:00:00Z'), new Date('2026-11-01T13:00:00Z'));
     assert.equal((await collectStatus(ctx, { progress: false }))[0]?.hidden, false, 'the report is newer than the pull');
     fs.utimesSync(record.report, new Date('2026-11-01T12:00:00Z'), new Date('2026-11-01T12:00:00Z'));
@@ -274,7 +274,7 @@ describe('board.auto_hide_pulled_dead', () => {
     const r2 = seedTask(on.config, 'NC-1', { pulled: '2026-11-01T12:30:00.000Z' });
     writeReport(r2.report);
     fs.utimesSync(r2.report, new Date('2026-11-01T12:00:00Z'), new Date('2026-11-01T12:00:00Z'));
-    assert.equal((await collectStatus(on.ctx, { progress: false }))[0]?.hiddenBy, 'auto');
+    assert.equal((await collectStatus(on.ctx, { progress: false }))[0]?.hiddenBy, null);
     await setHidden(on.ctx, ['NC-1'], false);
     const [after] = await collectStatus(on.ctx, { progress: false });
     assert.deepEqual([after?.hidden, after?.hiddenBy], [false, null]);

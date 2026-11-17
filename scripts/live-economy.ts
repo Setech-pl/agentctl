@@ -60,8 +60,10 @@ await withHarness({ name: 'economy', cacheRoot: cache, config: 'mcp: {max_respon
     check('two initialized MCP clients independently see same event', a.includes('fixture ready') && b.includes('fixture ready'));
     check('manager cursor consumes only its own event', !(await call(clients[0]!, 'events_since')).includes('fixture ready'));
     const summary = await call(clients[1]!, 'pull_ready', { all: true });
-    const receipts = JSON.parse(await call(clients[1]!, 'status', { all: true, format: 'json' })).tasks;
-    check('W4: summary receipt leaves all six reports unread', receipts.filter((r: { task: string }) => r.task.startsWith('NC-')).every((r: { reportPulled: boolean; summary_delivered: string }) => !r.reportPulled && r.summary_delivered));
+    // Status is an intentionally consistent watch snapshot and can predate this receipt.
+    // Assert the write in its authoritative task records, independently of snapshot freshness.
+    const receipts = Array.from({ length: 6 }, (_, i) => readTaskRecord(config, `nc-${i + 1}`));
+    check('W4: summary receipt leaves all six reports unread', receipts.every(r => r && !r.pulled && r.summaryDelivered));
     const full = await call(clients[0]!, 'pull_ready', { mode: 'full', all: true });
     check('six full reports exceed 120KB; summaries under 16KB', Buffer.byteLength(full) > 120000 && Buffer.byteLength(summary) < 16000);
     check('summary includes path bytes verdict SHA branch and six decisions', /bytes:/.test(summary) && /path:/.test(summary) && /Werdykt: PASS/.test(summary) && /abc1234/.test(summary) && summary.includes('Result 6'));

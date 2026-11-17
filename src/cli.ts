@@ -1,3 +1,6 @@
+import { peakLines } from './core/peak.ts';
+import { providerHoldLines } from './core/provider-hold.ts';
+import { pulledCohortTasks, checkPulledClose } from './core/pulled.ts';
 import { acceptConsult, planConsult } from './core/consult.ts';
 import { dryCloseTimingPreview, dryQueueTimingPreview, measureReadTimings, renderReadTimings } from './core/doctor-timings.ts';
 import { queueViews } from './core/queue.ts';
@@ -37,7 +40,7 @@ import { findResumable, planResume, resumeTasks } from './core/resume.ts';
 import { Alerts } from './core/alert.ts';
 import { archiveClosed, parseAge } from './core/archive.ts';
 import { appendStartLog, describeTerminal, loggedRun, startLogPath, waitForSize } from './core/boardstart.ts';
-import { setHidden } from './core/hide.ts';
+import { setHidden, setPinned } from './core/hide.ts';
 import { installClaudeCode, installDesktop, desktopConfigPath, mcpEntryFrom, pointsAtStable, stableScript, uninstallClaudeCode, uninstallDesktop } from './core/mcp-install.ts';
 import { findMcpProcesses, staleProcesses, staleWarning } from './core/mcp-processes.ts';
 import type { McpDeps } from './core/mcp-tools.ts';
@@ -841,10 +844,12 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
           line(`${copy.error}; here is the table:`);
           return deps.stdout(md);
         }
+        const disk = await collectDisk(ctx);
         if (opts.json) return line(JSON.stringify(rows, null, 2));
         for (const m of listCohorts(ctx.config).filter(m => m.note?.startsWith('CONSULT ') && (cohort === undefined || m.name === cohort))) line(`${m.name}: ${m.note}`);
+        for (const hold of [...providerHoldLines(ctx.config, ctx.runner.now()), ...peakLines(ctx.config, ctx.runner.now())]) line(hold);
         if (opts.detail) line(machineLine(collectMachine(ctx.config)));
-        line(diskLine(await collectDisk(ctx)));
+        line(diskLine(disk));
         if (rows.length === 0) {
           line(hiddenCount > 0 ? `No visible tasks${cohort ? ` in cohort ${cohort}` : ''}; ${hiddenCount} hidden (see "agentctl status --all").` : cohort ? `No tasks in cohort ${cohort}.` : `No tasks yet in ${ctx.config.stateDir}. Start one with "agentctl new <spec>".`);
           for (const l of await queueStatusLines(ctx, cohort)) line(l);
@@ -985,7 +990,8 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .description('Messages of one channel (or of all), newest last; --id shows one message with its body, refs, status history and replies.')
     .argument('[channel]', 'channel, e.g. nc or shared:sim; default: every channel you read')
     .option('--id <id>', 'one message with its thread, e.g. nc-12')
-    .option('--since <time>', 'an age (30m, 2h, 1d) or an ISO time')
+    .option('--since <time>', 'an age (30m, 2h, 1d) or an ISO time; default 7d')
+    .option('--archive', 'include older and archived messages')
     .addOption(new Option('--status <status>', 'only this status').choices([...WALL_STATUSES]))
     .addOption(new Option('--kind <kind>', 'only this kind').choices([...WALL_KINDS]))
     .option('--limit <n>', 'at most this many messages (default 20, max 100)', (v) => Number(v))
@@ -993,7 +999,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('--as <who>', 'read as chat:<name> or task:<ID> instead of the owner')
     .option('--json', 'machine-readable output')
     .action(
-      guarded(async (channel: string | undefined, opts: { id?: string; since?: string; status?: WallStatus; kind?: WallKind; limit?: number; before?: string; as?: string; json?: boolean }) => {
+      guarded(async (channel: string | undefined, opts: { id?: string; since?: string; archive?: boolean; status?: WallStatus; kind?: WallKind; limit?: number; before?: string; as?: string; json?: boolean }) => {
         const ctx = contextFor(false, { migrate: false });
         const who = wallWho(ctx, opts.as);
         if (opts.id !== undefined) {
@@ -1002,7 +1008,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
           for (const l of renderThread(thread)) line(l);
           return;
         }
-        const result = readWall(ctx, who, { channel, since: opts.since, status: opts.status, kind: opts.kind, limit: opts.limit, before: opts.before });
+        const result = readWall(ctx, who, { channel, since: opts.since, archive: opts.archive, status: opts.status, kind: opts.kind, limit: opts.limit, before: opts.before });
         if (opts.json) return line(JSON.stringify(result, null, 2));
         for (const l of renderRead(result, { channelList: channel === undefined, ...(who.kind === 'owner' ? { read: readOwnerState(ctx.config) } : {}) })) line(l);
       }),
@@ -1221,12 +1227,16 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
 
   program
     .command('gc')
-    .description('Bez flag = podgląd, --apply wykonuje. Take back disk space from finished tasks: the git worktrees of closed, cancelled and archived tasks without uncommitted changes, the files next to their reports that are older than --older-than (the *.md reports stay), their state folders (moved to the archive), and with --branches their branches merged into the base (git branch -d, never -D, never main/master or the current branch). A dry run with sizes unless --apply. History and reports stay; uncommitted work, foreign worktrees and unmerged branches are only listed as skipped.')
+    .description('Bez flag = podgląd, --apply wykonuje. Take back disk space from finished tasks: the git worktrees of closed, cancelled and archived tasks without uncommitted changes, with --include-cache, unreferenced cache entries older than --older-than (the *.md reports stay), their state folders (moved to the archive), and with --branches their branches merged into the base (git branch -d, never -D, never main/master or the current branch). A dry run with sizes unless --apply. History, reports and cache stay by default; uncommitted work, foreign worktrees and unmerged branches are only listed as skipped.')
     .option('--preview', 'alias of the default preview; changes nothing')
     .option('--dry-run', 'alias of the default preview; changes nothing')
     .option('--verbose', 'full details, paginated with --offset/--limit')
     .option('--offset <n>', 'page offset', '0')
     .option('--limit <n>', 'page size (1–100)', '10')
+    .option('--include-cache', 'owner-confirmed: also delete old, unreferenced task cache entries')
+    .option('--keep <tasks...>', 'keep worktrees and cache for these task IDs in this GC run')
+    .option('--keep-cache <tasks...>', 'keep all cache entries for these task IDs')
+    .option('--force-dirty', 'explicitly allow deleting dirty/unpushed worktrees in this selection')
     .option('--force-links', 'CLI only: allow removing a worktree referenced by links (other protections stay)')
     .option('--apply', 'do it (after showing the list and asking y/N); without it nothing is changed')
     .option('--older-than <age>', 'age of the files next to the reports before they go: 12h, 7d, 2w (default 7d)')
@@ -1235,12 +1245,12 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('-y, --yes', 'with --apply: do not ask')
     .option('--json', 'machine-readable output (the plan, or the result with --apply)')
     .action(
-      guarded(async (opts: { preview?: boolean; dryRun?: boolean; verbose?: boolean; offset: string; limit: string; forceLinks?: boolean; apply?: boolean; olderThan?: string; branches?: boolean; cohort?: string; yes?: boolean; json?: boolean }) => {
+      guarded(async (opts: { preview?: boolean; dryRun?: boolean; verbose?: boolean; offset: string; limit: string; forceLinks?: boolean; forceDirty?: boolean; includeCache?: boolean; keepCache?: string[]; keep?: string[]; apply?: boolean; olderThan?: string; branches?: boolean; cohort?: string; yes?: boolean; json?: boolean }) => {
         const ctx = contextFor(false, { migrate: false });
         if (opts.apply && (opts.preview || opts.dryRun)) throw new AgentctlError("--apply cannot be combined with --preview or --dry-run");
         const view = { detail: Boolean(opts.verbose), offset: Number(opts.offset), limit: Number(opts.limit) };
         if (!Number.isInteger(view.offset) || view.offset < 0 || !Number.isInteger(view.limit) || view.limit < 1 || view.limit > 100) throw new AgentctlError("offset must be >=0 and limit must be 1–100");
-        const plan = await planGc(ctx, { olderThan: opts.olderThan, branches: opts.branches, cohort: opts.cohort, forceLinks: opts.forceLinks });
+        const plan = await planGc(ctx, { olderThan: opts.olderThan, branches: opts.branches, cohort: opts.cohort, forceLinks: opts.forceLinks, forceDirty: opts.forceDirty, includeCache: opts.includeCache, keepCache: opts.keepCache, keep: opts.keep });
         if (!opts.apply) {
           if (opts.json) return line(JSON.stringify(gcView(plan, view), null, 2));
           for (const l of renderGc(plan, view)) line(l);
@@ -1272,6 +1282,12 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         if (result.moved.length === 0 && result.kept.length === 0) line('No closed tasks to archive.');
       }),
     );
+
+  for (const pin of [true, false]) {
+    program.command(pin ? 'pin' : 'unpin').description(pin ? 'Pin tasks: protect worktrees and cache from GC and prevent provider moves.' : 'Remove the task pin; normal GC protections still apply.').argument('<tasks...>', 'task IDs').action(guarded(async (tasks: string[]) => {
+      for (const r of await setPinned(contextFor(false, {migrate: false}), tasks, pin)) line(`${r.task}: ${pin ? 'pinned' : 'unpinned'}`);
+    }));
+  }
 
   for (const hide of [true, false]) {
     program
@@ -1316,6 +1332,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
 
   program
     .command('close')
+    .option('--pulled', 'with --cohort: close only pulled report-ready tasks; worktrees stay')
     .description('Kill the task windows; --rm-worktree also removes their git worktrees (branches are kept). Shows the list and asks y/N first.')
     .argument('[tasks...]', 'task IDs (or --cohort)')
     .option('--cohort <name>', 'close the open tasks of this cohort (with task IDs: only those, which must belong to it)')
@@ -1323,13 +1340,19 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('-y, --yes', 'do not ask')
     .option('--dry-run', 'print the commands that would run, execute nothing')
     .action(
-      guarded(async (typed: string[], opts: { rmWorktree?: boolean; yes?: boolean; dryRun?: boolean; cohort?: string }) => {
+      guarded(async (typed: string[], opts: { pulled?: boolean; rmWorktree?: boolean; yes?: boolean; dryRun?: boolean; cohort?: string }) => {
         const ctx = contextFor(Boolean(opts.dryRun));
         const closeOpts = { rmWorktree: Boolean(opts.rmWorktree) };
-        const tasks = await tasksOrCohort(ctx, typed, opts.cohort, false);
+        if (opts.pulled) checkPulledClose(opts.cohort, typed, opts.rmWorktree);
+        const pulledCohortName = opts.pulled ? findCohort(ctx.config, opts.cohort!).name : undefined;
+        const tasks = opts.pulled ? await pulledCohortTasks(ctx, pulledCohortName!) : await tasksOrCohort(ctx, typed, opts.cohort, false);
         const plan = await planClose(ctx, tasks, closeOpts);
         const summary = [`Close ${plan.length} task${plan.length === 1 ? '' : 's'}${closeOpts.rmWorktree ? ' and remove their worktrees (branches stay)' : ''}:`, ...plan.map((i) => `  ${i.line}`)];
         if (!(await confirmAction(ctx, summary, 'Go ahead?', Boolean(opts.yes) || Boolean(opts.dryRun)))) return;
+        if (opts.pulled && !opts.dryRun) {
+          const current = await pulledCohortTasks(ctx, pulledCohortName!);
+          if (JSON.stringify(current.sort()) !== JSON.stringify(plan.map(i => i.task).sort())) throw new AgentctlError('Pulled cohort scope changed; run close --pulled --cohort again to review it.');
+        }
         await closeTasks(ctx, plan.map((i) => i.task), closeOpts);
       }),
     );

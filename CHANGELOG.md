@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- REL0243: merge all 0.22.5–0.22.8 fixes into remote hosts; remote GC honors pin/keep, explicit include_cache, keep_cache, report references and unpushed commits; remote setup checks host work_dir disk; snapshots retain host disk identity. / Scalenie poprawek 0.22.5–0.22.8 z hostami; zdalny GC chroni pin/keep, cache, raporty i niewysłane commity; setup sprawdza dysk work_dir hosta, snapshot zachowuje host dysku.
+
 ## [0.23.0] - 2026-11-16
 
 - HOST-RESUME-HOLD: preserve explicit owner resume during queue holds, while enforcing account/host slots. / Zachowaj jawne wznowienie właściciela przy blokadzie kolejki, z kontrolą slotów konta/hosta.
@@ -16,6 +18,88 @@ All notable changes to this project are documented here. The format follows [Kee
 - Remote badges on every task row, cached H tasks/limits/attach view, explicit host-unreachable with backoff. Restart rediscovers task IDs; remote adopt/resume restore metadata or genuinely missing windows with host hooks/report paths. / Znaczki hosta w każdym wierszu, cache H z zadaniami/limitami/attach, jawny host-unreachable i backoff; restart odnajduje ID zadania, a adopt/resume odtwarzają metadane lub brakujące okna z hookami i raportami hosta.
 - Regression fixes: HOST-REDISCOVER, HOST-DISK-PROBE, HOST-HOLD-OFFLINE, HOST-GC-TARGET, HOST-TMUX-WRAP, HOST-MIRROR-ENV, HOST-LOCAL-IO and HOST-SSH-EXIT. / Poprawki z deterministycznymi scenariuszami regresji: tożsamość okien, dysk/HOME/PATH, pierwszeństwo awarii SSH nad quota, cel zgody GC, stabilne wrappery, prywatność env, lokalne I/O i rozróżnianie kodów wyjścia SSH.
 - Complete EN/PL host guides (WSL2, Windows portproxy/re-IP, first PC test, troubleshooting), remote-host C2 diagram and 0.23.0 release notes. / Pełne instrukcje EN/PL: WSL2, Windows portproxy/zmiana IP, pierwszy test PC, rozwiązywanie problemów; diagram C2 hosta i informacje o wydaniu 0.23.0.
+## [0.22.8] - 2026-11-17
+
+- FIELD0230-SOCKET: fit isolated tmux sockets under longer task cache roots; test sandboxes opt out of production disk/peak admission defaults. / Gniazda tmux mieszczą się w dłuższych katalogach zadania; sandboxy testowe mają własne progi dysku i wyłączony szczyt.
+
+- Keep MCP queue cost/disk/peak previews aligned with CLI; immediate starts honor global holds before setup. / Zgodność szacunków i blokad podglądu MCP z CLI; starty bezpośrednie respektują globalny hold przed setupem.
+
+- FIELD0230-PIN: recheck pins at GC mutation boundaries; pin previews show the concrete state change. / Ponowne sprawdzenie pin przed usunięciem GC; podgląd pin pokazuje zmianę stanu.
+
+- FIELD0230-F12: accept integrate base; external output repositories are advisory warnings with hints. / Akceptacja base w integrate; repo spoza spec to ostrzeżenia z podpowiedzią.
+
+- FIELD0230-F11: closed-task project link defaults now error with own-backend/links: [] hints; skip redundant links when the spec supplies that repo. / Błąd domyślnych linków do zamkniętych zadań z podpowiedzią własnego backendu/links: []; pominięcie zbędnych przy repo w spec.
+
+- FIELD0230-F10: Kimi medium maps to high with a warning; requested effort remains visible. / Kimi medium mapowane na high z ostrzeżeniem i zachowaniem zamówionego effort.
+
+- FIELD0230-F9: uniform MCP as, local preview expiry, cohort snapshot coverage and conditional overlap hints; fresh disk counters without inventory scans. / Jednolite as MCP, lokalne wygaśnięcie podglądu, test kohort snapshotu, overlap tylko przy kolizjach; świeży dysk bez skanowania.
+
+- F8: durable long-attention escalation after 15 min: desktop, configured phone and one owner WALL decision-request per task attempt. / Trwała eskalacja po 15 min: pulpit, skonfigurowany telefon i jedno pytanie WALL do właściciela na próbę zadania.
+
+- FIELD0230-F7: timezone-aware peak schedules, default GLM Singapore 14–18 weekdays, hold/short_only admission. / Szczyt ze strefą czasu, domyślnie GLM 14–18 w Singapurze w dni robocze, polityki hold/short_only.
+
+- FIELD0230-F6: shared provider holds explicitly name global scope and source task in status/limits. / Globalne blokady providera pokazują zakres i zadanie źródłowe w status/limits.
+
+- FIELD0230-F5: retain quota text/reset in limited status and attention summaries, including wrapped provider errors. / Treść limitu i reset w statusie limited oraz podsumowaniu uwagi, także po zawinięciu wiersza.
+
+- FIELD0230-F4: fresh filesystem space in reads; worktree measurement age and GC policy in disk hints. / Świeże wolne miejsce, wiek pomiaru worktree i polityka ochrony GC w ostrzeżeniach.
+
+- FIELD0230-F3: 30 GB disk admission floor, two concurrent setup phases by default, per-repo worktree cost estimates. / Próg startu 30 GB, domyślnie dwa równoległe setupy, szacunki rozmiaru worktree per repo.
+
+- F2: CLI/MCP pin/unpin and GC keep protect task worktrees/cache; pin markers in status/board. / Pin/unpin CLI/MCP i keep GC chronią worktree/cache; znaczniki na planszy i w statusie.
+
+- FIELD0230-F1: separate removable and skipped GC entries with sizes in CLI/MCP. / Osobne sekcje usuwanych i pomijanych pozycji GC z rozmiarami w CLI/MCP.
+
+## [0.22.7] - 2026-11-17
+
+- Complete the lifecycle configuration reference, keep README links concise, and separate release proof from measured unreleased findings. / Pełna tabela konfiguracji cyklu życia, zwięzłe odnośniki README i oddzielenie dowodu wydania od pomiarów ustaleń przed wydaniem.
+
+- WALL0229-HISTORY / WALL0229-INBOX: retain repeated same-timestamp status transitions during archive retries and preserve the inbox ID/subject prefix; catalogued unreleased findings. / Zachowanie powtarzających się zmian statusu w tym samym czasie podczas ponownej archiwizacji oraz prefiksu ID/tematu skrzynki; skatalogowane ustalenia przed wydaniem.
+
+- Keep the existing inbox ID/subject prefix when showing age; cache archive headers and preserve torn logs during maintenance. / Wiek nie zmienia dotychczasowego prefiksu ID/tematu skrzynki; cache nagłówków archiwum i ochrona niepełnych logów podczas porządkowania.
+
+- WALL0229: archive closed messages after 14 days with complete history and stable ID/thread lookups; list reads default to 7 days, explicit since/archive reaches older data. / Archiwizacja zamkniętych wiadomości po 14 dniach z pełną historią i stałymi ID; listy domyślnie obejmują 7 dni, jawne since/archive sięga do starszych danych.
+- WALL0229: one reminder after 24 hours to author/addressee, inactive questions become stale after 7 days; owner-only decisions/contracts remain open. Configurable thresholds, watch maintenance. / Jedno przypomnienie po 24 godzinach do autora/adresata, nieaktywne pytania przechodzą w stale po 7 dniach; decyzje/kontrakty pozostają otwarte dla właściciela. Progi konfigurowalne, obsługa przez watch.
+- WALL0229: board W unread covers 7 days plus open items, A toggles archives, stale is distinct; events_since open inbox shows age and excludes stale. / Plansza W liczy nieprzeczytane z 7 dni oraz otwarte, A przełącza archiwum, stale ma osobny wygląd; otwarta skrzynka events_since pokazuje wiek i pomija stale.
+- Document lifecycle and add agent-insert guidance to reply or set status after handling a question (EN/PL). / Dokumentacja cyklu życia i wskazówka agent-insert o odpowiedzi lub zmianie statusu po obsłużeniu pytania (EN/PL).
+
+## [0.22.6] - 2026-11-17
+
+- UX0228-CLI-SCOPE: CLI revalidates the pulled cohort after confirmation and refuses changed scope. / CLI ponownie sprawdza zakres po potwierdzeniu i odmawia zamknięcia zmienionej listy odebranych zadań.
+
+- UX0228-PRIORITY: unpulled reports occupy the highlighted top section across cohorts, before every active/waiting row. / Nieodebrane raporty są w wyróżnionej sekcji na górze całej planszy, przed aktywnymi i czekającymi zadaniami.
+
+- UX0228-READS: pulled cohort previews validate only that cohort’s candidate reports, without inspecting unrelated reports or orphan windows. / Podgląd odebranych zadań sprawdza raporty wybranej kohorty, bez odczytu obcych raportów i okien.
+
+- UX0228-TEXT: keep board hints within 80 columns and append the pulled status marker without splitting existing fields. / Podpowiedzi mieszczą się w 80 kolumnach; znacznik odbioru nie rozdziela dotychczasowych pól statusu.
+
+- UX0228-SCOPE: bulk close follows the selected queue cohort; manager/no selection cannot imply an unrelated cohort. / Zamykanie zbiorcze respektuje kohortę wybranego zadania kolejki; manager i brak wyboru nie wskazują obcej kohorty.
+
+- Verify events_since counts only unpulled reports; align existing finished/hidden fixtures with report-ready visibility. / Test potwierdza liczenie wyłącznie nieodebranych raportów; scenariusze zakończonych/ukrytych zadań uwzględniają widoczność report-ready.
+
+- Status groups pulled open tasks; CLI `close --pulled --cohort` and MCP `close {pulled: true, cohort}` preview selective closure. / Status grupuje odebrane, niezamknięte zadania; CLI i MCP pokazują podgląd ich zbiorczego zamknięcia.
+
+- Add configurable collapse delay and owner opt-in watch auto-close with a journal event; disabled by default. / Konfigurowalne opóźnienie zwijania i opcjonalne zamykanie przez watch ze zdarzeniem, domyślnie wyłączone.
+
+- UX0228: fold pulled report-ready tasks per cohort; Enter expands, B previews bulk close without removing worktrees. Unpulled reports lead and stay highlighted. / Odebrane raporty zwijają się w kohortach; Enter rozwija, B pokazuje listę do zamknięcia bez usuwania worktree. Nieodebrane raporty są wyróżnione na górze.
+
+## [0.22.5] - 2026-11-16
+
+- Release harness validation: assert summary receipts in task records; a consistent watch snapshot can predate the receipt. / Harness sprawdza potwierdzenia podsumowań w rekordach zadań; snapshot watch może być wcześniejszy.
+
+- D6: every MCP write supports token-only confirmation; WALL also accepts the same `as` without repeating content, and refuses a changed author even on replay. Away now previews before confirmation. / Każdy zapis MCP obsługuje potwierdzenie samym tokenem; WALL przyjmuje to samo `as`, a zmiana autora jest odrzucana. Away także wymaga podglądu.
+
+- Validation: expose risk counts even for link-protected worktrees, skip missing closed-task default placeholders, and retain cache size accounting without treating it as reclaimable. / Liczniki ryzyka także dla chronionych linków; pomijanie usuniętych celów; rozmiar zachowanego cache nie jest miejscem do odzyskania.
+
+- D5: skip inherited project links to closed tasks or repos already supplied by the spec; closed defaults emit one persisted notice per project/day. Explicit links/worktree placeholders remain intentional. / Domyślne linki do zamkniętych zadań lub repo ze specyfikacji są pomijane; komunikat raz dziennie na projekt.
+
+- D4: add task class `gate`: Sonnet medium / GPT-6-Luna medium / K3-256k low / GLM-5.3-Flash medium, derived into default equivalents. / Nowa klasa `gate` korzysta z szybkich modeli według macierzy.
+
+- D3: answer tokens bind normalized question/option labels and task identity, so scrolling a permission menu does not invalidate the token; changed/hidden selections still refuse. / Token answer działa po przewinięciu menu, ale odrzuca zmienione pytanie/opcję i wybór niewidocznej opcji.
+
+- D2: task caches stay by default; owner-confirmed `include_cache` opts into deletion, while `keep_cache` and report-referenced artifacts always stay. Previews list paths/sizes and apply rechecks protection. / Cache zostaje domyślnie; jawne `include_cache` włącza usuwanie, a `keep_cache` i artefakty wskazane w raporcie chronią dane.
+
+- D1: GC checks fresh tracked/untracked status and unpushed commits in every task repository, including cached MCP previews; explicit `force_dirty` / `--force-dirty` is required to discard them. / GC sprawdza zmiany i niewysłane commity w każdym repo, także w podglądzie MCP; usunięcie wymaga jawnego nadpisania.
 
 ## [0.22.4] - 2026-11-15
 

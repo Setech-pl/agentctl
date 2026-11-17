@@ -26,6 +26,8 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'REL0243-GC', fixedIn: '0.23.1', symptom: 'Remote GC bypassed cache opt-in, pins and unpushed-commit protection.', scenarios: [s('host-gc.test.ts', '^REL0243-GC:')] },
+  { id: 'REL0243-DISK', fixedIn: '0.23.1', symptom: 'Remote setup did not enforce free disk in its host work_dir.', scenarios: [s('host-tasks.test.ts', '^REL0243-DISK:')] },
   { id: 'HOST-RESUME-HOLD', fixedIn: '0.23.0', symptom: 'An explicit owner resume was silently skipped during a queued provider hold (introduced in unreleased HOST-0C).', noProof: 'Introduced in unreleased 3f0078c; v0.22.4 local resume was unaffected. Both scenarios fail on 6c574f7 (measured in HOST0C-prefix-resume.log).', scenarios: [s('resume.test.ts', '^HOST-RESUME-HOLD:'), s('host-tasks.test.ts', '^HOST-RESUME-HOLD:')] },
   { id: 'HOST-SSH-COLD', fixedIn: '0.23.0', symptom: 'The first host health probe failed because its ControlMaster socket directory did not exist.', scenarios: [s('host-ssh-exit.test.ts', '^HOST-SSH-COLD:')] },
   { id: 'HOST-DISK-PROBE', fixedIn: '0.23.0', symptom: 'Host disk health used wrong df fields and did not expand remote HOME or honor host PATH.', scenarios: [s('host-health-home.test.ts', '^HOST-DISK-PROBE:')] },
@@ -36,6 +38,31 @@ export const BUGS: BugEntry[] = [
   { id: 'HOST-MIRROR-ENV', fixedIn: '0.23.0', symptom: 'Remote report mirror commands included unrelated launch environment values in SSH argv (unreleased b9384f2; mirror absent from v0.22.3).', scenarios: [s('host-boundaries.test.ts', '^HOST-MIRROR-ENV:')] },
   { id: 'HOST-LOCAL-IO', fixedIn: '0.23.0', symptom: 'The remote host router scanned every local task header before board/status previews (unreleased b9384f2; host runtime absent from v0.22.3).', scenarios: [s('host-boundaries.test.ts', '^HOST-LOCAL-IO:')] },
   { id: 'HOST-SSH-EXIT', fixedIn: '0.23.0', symptom: 'A reachable host command exiting nonzero was misclassified as unreachable (unreleased HOST-0A 7fa25d6: 1/1 fails; absent from v0.22.3).', scenarios: [s('host-ssh-exit.test.ts')] },
+  { id: 'FIELD0230-SOCKET', fixedIn: '0.22.8', symptom: 'A 66-byte task cache made isolated tmux socket paths exceed the harness limit.', scenarios: [s('harness.test.ts', '^FIELD0230-SOCKET:')] },
+  { id: 'FIELD0230-PIN', fixedIn: '0.22.8', symptom: 'A pin added during a GC safety query could miss the final deletion boundary.', scenarios: [s('field0230-gc.test.ts', '^F2:')], noProof: 'Pin/unpin GC protection is introduced in this release; no previous release exposes this race.' },
+  { id: 'FIELD0230-F12', fixedIn: '0.22.8', symptom: 'Integrate base and advisory external repository references invalidated outputs.', scenarios: [s('field0230-outputs.test.ts')] },
+  { id: 'FIELD0230-F11', fixedIn: '0.22.8', symptom: 'Closed-task project links were silently dropped with a warning instead of blocking unsafe defaults.', scenarios: [s('field0230-links.test.ts')] },
+  { id: 'FIELD0230-F10', fixedIn: '0.22.8', symptom: 'Kimi effort medium was rejected instead of mapped to high with a warning.', scenarios: [s('field0230-effort.test.ts')] },
+  { id: 'FIELD0230-F9', fixedIn: '0.22.8', symptom: 'Tool identity and local preview expiration were inconsistent across reads/writes.', scenarios: [s('field0230-reads.test.ts', '^F9:')] },
+  { id: 'FIELD0230-F7', fixedIn: '0.22.8', symptom: 'GLM starts ignored the provider peak admission schedule.', scenarios: [s('field0230-peak.test.ts', '^F7: default')] },
+  { id: 'FIELD0230-F6', fixedIn: '0.22.8', symptom: 'Shared provider holds omitted global scope and the detecting task.', scenarios: [s('field0230-providers.test.ts', '^F6:')] },
+  { id: 'FIELD0230-F5', fixedIn: '0.22.8', symptom: 'Quota panes lost their usage hint/reset and disappeared from attention summaries.', scenarios: [s('field0230-providers.test.ts', '^F5:')] },
+  { id: 'FIELD0230-F4', fixedIn: '0.22.8', symptom: 'Status/capacity reused stale filesystem free-space samples.', scenarios: [s('field0230-disk.test.ts', '^F4:')] },
+  { id: 'FIELD0230-F3', fixedIn: '0.22.8', symptom: 'The queue admitted worktree setups below the free-disk start floor.', scenarios: [s('field0230-disk.test.ts', '^F3:')] },
+  { id: 'FIELD0230-F1', fixedIn: '0.22.8', symptom: 'GC preview listed skipped dirty worktrees under cleanup candidates.', scenarios: [s('field0230-gc.test.ts', '^F1:')] },
+  { id: 'WALL0229-HISTORY', fixedIn: '0.22.7', symptom: 'Archive retry deduplication collapsed legitimate close/reopen/close records sharing a timestamp.', scenarios: [s('wall-lifecycle.test.ts', '^WALL0229-HISTORY:')], noProof: 'Unreleased lifecycle API is absent on v0.22.6 (import error); this scenario fails on pre-fix 83e0350 (1 failing test), measured separately from the release proof.' },
+  { id: 'WALL0229-INBOX', fixedIn: '0.22.7', symptom: 'Adding WALL age interrupted the stable ID/subject prefix in the budget fallback inbox.', scenarios: [s('a2-wall-events.test.ts', '^A2: known chat receives')], noProof: 'Introduced during unreleased lifecycle work; v0.22.6 passes. Existing A2 scenario fails on dd6d977 before correction (1 failing test), measured separately from the release proof.' },
+  { id: 'UX0228-CLI-SCOPE', fixedIn: '0.22.6', symptom: 'CLI could close a newly unread report after its pulled-only preview was confirmed.', scenarios: [s('ux0228-mcp-cli.test.ts', '^UX0228: CLI refuses')], noProof: 'The --pulled CLI selector is new in this unreleased feature; the deterministic confirmation callback reproduced the race before the fix.' },
+  { id: 'UX0228-PRIORITY', fixedIn: '0.22.6', symptom: 'An alphabetically earlier active cohort appeared above unpulled reports in other cohorts.', scenarios: [s('ux0228-board.test.ts', '^UX0228: unpulled reports lead')] },
+  { id: 'UX0228-READS', fixedIn: '0.22.6', symptom: 'Pulled cohort previews inspected unrelated report bodies before filtering the cohort.', scenarios: [s('ux0228-mcp-cli.test.ts', '^UX0228: pulled cohort preview')], noProof: 'Introduced with the unreleased pulled selector; v0.22.5 has no pulled selector. The deterministic read-count test failed before this fix.' },
+  { id: 'UX0228-TEXT', fixedIn: '0.22.6', symptom: 'New pulled hints exceeded 80 columns and the new status marker interrupted legacy field order.', scenarios: [s('board.test.ts', 'a line of the list is at most 80'), s('economy.test.ts', 'economy: concise reads')], noProof: 'Introduced during this unreleased feature; v0.22.5 already passes these width/format scenarios.' },
+  { id: 'UX0228-SCOPE', fixedIn: '0.22.6', symptom: 'Pulled bulk close must select the queued task cohort and refuse manager-only selection.', scenarios: [s('ux0228-board.test.ts', '^UX0228: queued selection')] },
+  { id: 'UX0228', fixedIn: '0.22.6', symptom: 'Pulled report-ready tasks obscured reports still awaiting collection and vanished automatically without closure.', scenarios: [s('ux0228-board.test.ts')] },
+  { id: 'D6', fixedIn: '0.22.5', symptom: 'WALL token-only confirms carrying as hit required-field validation instead of restoring reviewed arguments.', scenarios: [s('fix0227-d6.test.ts', '^D6:')] },
+  { id: 'D5', fixedIn: '0.22.5', symptom: 'Every spec inherited stale links to closed tasks (including missing worktrees) and repeated the same project warning.', scenarios: [s('stale-links.test.ts', '^D5:')] },
+  { id: 'D3', fixedIn: '0.22.5', symptom: 'A valid answer token was refused after the permission menu scrolled to options 2–4.', scenarios: [s('p63-answer.test.ts', '^D3:')] },
+  { id: 'D2', fixedIn: '0.22.5', symptom: 'GC removed the only data copies in task caches without explicit cache authorization or report-reference protection.', scenarios: [s('fix0227-gc.test.ts', '^D2:')] },
+  { id: 'D1', fixedIn: '0.22.5', symptom: 'Cached GC previews declared dirty multi-repository tasks clean and missed unpushed commits, including linked worktrees.', scenarios: [s('fix0227-gc.test.ts', '^D1:')] },
   { id: 'G1b', fixedIn: '0.22.4', symptom: 'Provider quota errors left GLM capacity free when usage was unavailable.', scenarios: [s('fix0226-g1b.test.ts')] },
   { id: 'G1a', fixedIn: '0.22.4', symptom: 'Plan n/d left free provider slots with no timed hold override.', scenarios: [s('fix0226-g1a.test.ts')] },
   { id: 'H6', fixedIn: '0.22.4', symptom: 'Overlap warnings counted predecessor imports and ignored the integration base.', scenarios: [s('fix0226-h6.test.ts')] },
@@ -149,6 +176,7 @@ export const BUGS: BugEntry[] = [
 
 /** IDs that appear in the CHANGELOG but are not a fixed bug (or have no behaviour to reproduce), with the reason. */
 export const NOT_BUGS: Record<string, string> = {
+  'FIX0227-W4-harness': 'harness assertion aligned with the intentional A3 snapshot contract; production unchanged, covered by W4 in a3-snapshot.test.ts',
   P10: 'feature: optional tmux.socket and attach hints',
   P44: 'feature: dedicated dev tmux server documentation and doctor checks',
   P17: 'feature: stale project link warnings in previews',

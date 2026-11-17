@@ -14,7 +14,7 @@ import { isObject, windowName } from './util.ts';
  * the limits commands write it; `agentctl events` and the MCP tool `events_since` read it for a chat that gets no notifications.
  */
 
-export const JOURNAL_KINDS = ['host-unreachable', 'host-recovered','watch-resumed', 'consult', 'tmux-lost', 'machine-load-high', 'machine-load-recovered', 'report-outputs', 'review-added', 'review-repinned', 'gc_suggest', 'gc-freed', 'limited-resume', 'needs-attention', 'report-candidate', 'overloaded', 'overload-retry', 'queue-retry', 'mcp-write', 'disk-warn', 'disk-critical', 'disk-ok', 'report-ready', 'queue-start', 'queue-failed', 'setup-started', 'setup-finished', 'setup-failed', 'needs-input', 'needs-trust', 'blocked', 'cancelled', 'limited', 'dead', 'orphan', 'cohort-done', 'usage', 'limits-changed', 'report-detected', 'delivery', 'delivery-queued', 'mcp-applied', 'mcp-failed', 'unblocked', 'wall'] as const;
+export const JOURNAL_KINDS = ['pulled-auto-close', 'host-unreachable', 'host-recovered','watch-resumed', 'consult', 'tmux-lost', 'machine-load-high', 'machine-load-recovered', 'report-outputs', 'review-added', 'review-repinned', 'gc_suggest', 'gc-freed', 'limited-resume', 'needs-attention', 'report-candidate', 'overloaded', 'overload-retry', 'queue-retry', 'mcp-write', 'disk-warn', 'disk-critical', 'disk-ok', 'report-ready', 'queue-start', 'queue-failed', 'setup-started', 'setup-finished', 'setup-failed', 'needs-input', 'needs-trust', 'blocked', 'cancelled', 'limited', 'dead', 'orphan', 'cohort-done', 'usage', 'limits-changed', 'report-detected', 'delivery', 'delivery-queued', 'mcp-applied', 'mcp-failed', 'unblocked', 'wall'] as const;
 export type JournalKind = (typeof JOURNAL_KINDS)[number];
 
 export interface JournalEntry {
@@ -34,6 +34,7 @@ export interface JournalEntry {
   /** `report-outputs` of an automatic/manual review: the task it reviews, so its decisions are shown as the reviewer's. */
   reviewOf?: string;
   outputs_errors?: string[];
+  outputs_warnings?: string[];
   decisions?: string[];
   actions?: Array<{ title: string; shell: string }>;
   gc_preview?: unknown;
@@ -42,7 +43,7 @@ export interface JournalEntry {
   /** The event went to the phone: `sent`, or `queued` when the first request failed and the watcher retries. Absent: not sent (away off, event not chosen, no phone). */
   phone?: 'sent' | 'queued';
   /** `wall` only: the message that was posted (never its body). events_since returns it to the clients subscribed to the channel. */
-  wall?: { channel: string; kind: string; subject: string; id: string; from: string };
+  wall?: { recipients?: string[]; channel: string; kind: string; subject: string; id: string; from: string };
   /** `report-outputs` only: the report's `wall_posts` that were published (ids) and the ones that were not (why; never a body). */
   wallPosts?: { posted: string[]; findings: string[] };
 }

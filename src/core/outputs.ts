@@ -22,7 +22,7 @@ export const VERDICTS = ['PASS', 'PARTIAL', 'FAIL', 'BLOCKED'] as const;
 export type OutputVerdict = typeof VERDICTS[number];
 const refText = z.string().min(1).refine(v => !/\[[^\]]+\]|^<[^>]+>$|^(?:TODO|TBD)$/i.test(v), 'placeholder value is not a published reference');
 const ref = z.object({ repo: refText, branch: refText, sha: refText.regex(/^[a-f0-9]{7,40}$/i, 'expected a git SHA; quote the SHA if YAML cannot preserve it') }).strict();
-const integrateRef = ref.extend({ note: z.string().optional() });
+const integrateRef = ref.extend({ base: refText.optional(), note: z.string().optional() });
 const decision = z.string().min(1);
 const action = z.object({ title: z.string().min(1), shell: z.string().min(1) }).strict();
 export const CHECK_RESULTS = ['PASS', 'FAIL', 'WARN', 'SKIP'] as const;
@@ -39,16 +39,18 @@ export const outputsSchema = z.object({
   integrate: z.array(integrateRef).default([]),
   decisions: z.array(decision).default([]),
   actions: z.array(action).default([]),
+  persist: z.array(z.string()).optional(), artifacts: z.array(z.union([z.string(), z.object({path: z.string()}).passthrough()])).optional(), refs: z.array(z.union([z.string(), z.object({path: z.string()}).passthrough()])).optional(),
   checks: z.array(checkInput).default([]), preview: z.url().optional(), notes: z.array(z.string()).default([]),
 }).strict();
 export interface Outputs {
   version: 1; verdict: OutputVerdict;
   commits: z.infer<typeof ref>[]; integrate: z.infer<typeof integrateRef>[];
   decisions: string[]; actions: z.infer<typeof action>[]; checks: Check[];
+  persist?: string[]; artifacts?: (string | {path: string})[]; refs?: (string | {path: string})[];
   preview?: string; notes: string[];
 }
 /** `outputs_valid`: everything was accepted. `outputs_partial`: `outputs` holds the valid part of a block that had bad entries (listed in `outputs_errors`). */
-export interface OutputData { outputs: Outputs | null; outputs_valid: boolean; outputs_errors: string[]; outputs_partial?: boolean; /** The report is not finished yet (no report-end / not settled): the block is not judged. */ outputs_pending?: boolean }
+export interface OutputData { outputs_warnings?: string[]; outputs: Outputs | null; outputs_valid: boolean; outputs_errors: string[]; outputs_partial?: boolean; /** The report is not finished yet (no report-end / not settled): the block is not judged. */ outputs_pending?: boolean }
 
 const knownResult = (value: string): string => (CHECK_RESULTS as readonly string[]).includes(value.trim().toUpperCase()) ? value.trim().toUpperCase() : value.trim();
 /** A check in any accepted form: text ("unit: PASS"), a one-key map ({unit: PASS}) or {name, result, note}. PASS/FAIL/WARN/SKIP in any letter case. */
@@ -80,7 +82,7 @@ function takeList<T>(raw: unknown, section: string, item: z.ZodType<T>, errors: 
 }
 
 /** `wall_posts` is not part of Outputs: agentctl publishes it on the WALL once per attempt (journalOutputs), and its problems are findings of that event. */
-const OUTPUT_KEYS = ['version', 'verdict', 'commits', 'integrate', 'decisions', 'actions', 'checks', 'preview', 'notes', 'wall_posts'];
+const OUTPUT_KEYS = ['version', 'verdict', 'commits', 'integrate', 'decisions', 'actions', 'checks', 'preview', 'notes', 'wall_posts', 'persist', 'artifacts', 'refs'];
 
 /** The verdict words a review report may declare; they map onto the output verdicts (GO = PASS, GO-WITH-CHANGES = PARTIAL, NO-GO = FAIL). */
 const REVIEW_VERDICT_ALIAS: Record<string, OutputVerdict> = { GO: 'PASS', 'GO-WITH-CHANGES': 'PARTIAL', 'NO-GO': 'FAIL' };
@@ -200,7 +202,8 @@ export function parseOutputs(text: string, opts: { review?: boolean } = {}): Out
   let preview: string | undefined;
   if (d.preview !== undefined && d.preview !== null) { const u = z.url().safeParse(d.preview); if (u.success) preview = u.data; else errors.push('preview: expected a URL (ignored)'); }
   const notes = takeList(d.notes, 'notes', z.string(), errors);
-  const outputs: Outputs = { version: 1, verdict: verdict.data!, commits, integrate, decisions, actions, checks, ...(preview ? { preview } : {}), notes };
+  const preserved = Object.fromEntries(['persist', 'artifacts', 'refs'].filter(k => d[k] !== undefined).map(k => [k, takeList(d[k], k, k === 'persist' ? z.string() : z.union([z.string(), z.object({path: z.string()}).passthrough()]), errors)]));
+  const outputs: Outputs = { ...preserved, version: 1, verdict: verdict.data!, commits, integrate, decisions, actions, checks, ...(preview ? { preview } : {}), notes };
   return { outputs, outputs_valid: errors.length === 0, outputs_errors: errors, outputs_partial: errors.length > 0 };
 }
 
@@ -260,11 +263,16 @@ export async function readOutputs(ctx: Context, record: TaskRecord, options: { c
   }
 
   // One message per distinct problem, with the number of entries it covers.
+  const warnings = new Map<string, number>();
   const problems = new Map<string, number>();
   const note = (message: string): void => void problems.set(message, (problems.get(message) ?? 0) + 1);
   for (const ref of [...data.outputs.commits, ...data.outputs.integrate]) {
     const found = resolveRefRepo(ctx, record, ref.repo);
-    if (!found.repo) { note(`repo ${ref.repo}: ${found.problem === 'ambiguous' ? 'ambiguous' : 'not'} in the task repos; write one of: ${found.allowed.join(', ')}`); continue; }
+    if (!found.repo) {
+      if (found.problem === 'ambiguous') note(`repo ${ref.repo}: ambiguous in the task repos; write one of: ${found.allowed.join(', ')}`);
+      else {const message = `repo ${ref.repo}: outside the spec repos; add it to repos to validate its branch/SHA, or use one of: ${found.allowed.join(', ')}. External reference kept without Git validation.`; warnings.set(message, (warnings.get(message) ?? 0) + 1);}
+      continue;
+    }
     const repo = found.repo;
     ref.repo = repo.name ?? path.basename(repo.path);
     const git = async (args: string[]) => (record.host ? ctx.hosts.forHost(record.host) : ctx.runner).exec('git', ['-C', repo.path, ...args], { readOnly: true });
@@ -274,6 +282,7 @@ export async function readOutputs(ctx: Context, record: TaskRecord, options: { c
     } catch (error) { if (!(error instanceof HostUnreachable)) throw error; note(`host ${record.host}: output references await validation on the host`); }
   }
   for (const [message, count] of problems) data.outputs_errors.push(count > 1 ? `${message} (${count} entries)` : message);
+  if (warnings.size) data.outputs_warnings = [...warnings].map(([message, count]) => count > 1 ? `${message} (${count} entries)` : message);
   data.outputs_valid = data.outputs_errors.length === 0;
   if (!data.outputs_valid) data.outputs_partial = true;
   if (remoteCache && !ctx.runner.dryRun && !ctx.hosts.connection(record.host!).unreachable) await ctx.runner.writeFile(remoteCache, JSON.stringify({ signature, data }));
@@ -344,7 +353,7 @@ export async function journalOutputs(ctx: Context, record: TaskRecord, opts: { r
         wall = await publishTaskPosts(ctx, record.task, identity, outputWallPosts(readReportText(ctx.config, record, record.report)));
       } catch (e) { wall.findings.push(`wall_posts: ${e instanceof Error ? e.message : String(e)}`); }
       const wallText = wall.posted.length || wall.findings.length ? `; WALL: ${[...(wall.posted.length ? [`posted ${wall.posted.join(', ')}`] : []), ...(wall.findings.length ? [`${wall.findings.length} not posted: ${wall.findings.join('; ')}`] : [])].join('; ')}` : '';
-      await recordJournal(ctx, { kind: 'report-outputs', task: record.task, ...(record.reviewOf ? { reviewOf: record.reviewOf } : {}), reportHash: report.signature, reportAttempt: identity, ...(data.outputs_errors.length ? {outputs_errors: data.outputs_errors} : {}), decisions: data.outputs?.decisions ?? [], actions: data.outputs?.actions ?? [], ...(wall.posted.length || wall.findings.length ? { wallPosts: wall } : {}), text: `${data.outputs_valid ? `${record.task}: ${countText(data.outputs!.decisions.length, 'decyzja', 'decyzje', 'decyzji')}, ${countText(data.outputs!.actions.length, 'akcja', 'akcje', 'akcji')}` : `${record.task}: outputs warning: ${data.outputs_errors.join('; ')}`}${wallText}` });
+      await recordJournal(ctx, { kind: 'report-outputs', task: record.task, ...(record.reviewOf ? { reviewOf: record.reviewOf } : {}), reportHash: report.signature, reportAttempt: identity, ...(data.outputs_errors.length ? {outputs_errors: data.outputs_errors} : {}), ...(data.outputs_warnings?.length ? {outputs_warnings: data.outputs_warnings} : {}), decisions: data.outputs?.decisions ?? [], actions: data.outputs?.actions ?? [], ...(wall.posted.length || wall.findings.length ? { wallPosts: wall } : {}), text: `${data.outputs_valid ? `${record.task}: ${countText(data.outputs!.decisions.length, 'decyzja', 'decyzje', 'decyzji')}, ${countText(data.outputs!.actions.length, 'akcja', 'akcje', 'akcji')}` : `${record.task}: outputs warning: ${data.outputs_errors.join('; ')}`}${data.outputs_warnings?.length ? `; outputs warnings: ${data.outputs_warnings.join('; ')}` : ''}${wallText}` });
     }
     // A review's first line is its verdict; a block that disagrees (POP-E1: "Werdykt: NO-GO" with verdict: PASS) is flagged once per attempt.
     if (record.reviewOf) {
@@ -372,6 +381,6 @@ export function aggregateOutputs(items: Array<{ task: string; data: OutputData; 
     decisions: items.flatMap(({ task, data, reviewOf }) => (data.outputs?.decisions ?? []).map(text => ({ task, text, ...(reviewOf ? { source: source(task), review_of: reviewOf } : {}) }))),
     actions: items.flatMap(({ task, data, reviewOf }) => (data.outputs?.actions ?? []).map(a => ({ task, ...a, ...(reviewOf ? { source: source(task), review_of: reviewOf } : {}) }))),
     checks: items.flatMap(({ task, data }) => (data.outputs?.checks ?? []).map(c => ({ task, ...c, text: c.result ? `${c.name}: ${c.result}${c.note ? ` – ${c.note}` : ''}` : c.name }))),
-    warnings: items.filter(i => !i.data.outputs_valid && i.data.outputs_errors.length > 0).map(({ task, data }) => ({ task, errors: data.outputs_errors })),
+    warnings: items.filter(i => i.data.outputs_errors.length > 0 || i.data.outputs_warnings?.length).map(({task, data}) => ({task, errors: data.outputs_errors, ...(data.outputs_warnings?.length ? {warnings: data.outputs_warnings} : {})})),
   };
 }

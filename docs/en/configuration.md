@@ -61,7 +61,7 @@ Types/defaults below are cross-checked with [config.ts](../../src/core/config.ts
 | `wall` | mapping · see below · g | WALL: the message board of your chats and agents (channels, chats, subscriptions, ref roots). |
 | `task` | string · required · s | Task ID: uppercase letters, digits, `-`, `_`, starting with a letter, up to 40 characters (`NC-42`). The window is the lowercase ID. |
 | `agent` | active claude/codex/kimi/glm · `defaults.agent` · s | Agent that runs the task. Required unless a `defaults.agent` is set. |
-| `class` | one of the matrix classes · none · s | Task class from [data/model-matrix.yaml](../../data/model-matrix.yaml) (`report`, `simple`, `smoke`, `feature`, `bugfix`, `review`, `merge`, `hard`, `sim`, `visual`, `visual-compare`, `design`, `creative`, `escalate`): with `agent`, the model and effort come from the matrix, before configured defaults. An explicit `model`/`effort` wins, with a preview warning when it contradicts the matrix. An unknown class is an error listing the classes; a class whose cell is `none` refuses that agent. |
+| `class` | one of the matrix classes · none · s | Task class from [data/model-matrix.yaml](../../data/model-matrix.yaml) (`report`, `simple`, `gate`, `smoke`, `feature`, `bugfix`, `review`, `merge`, `hard`, `sim`, `visual`, `visual-compare`, `design`, `creative`, `escalate`): with `agent`, the model and effort come from the matrix, before configured defaults. An explicit `model`/`effort` wins, with a preview warning when it contradicts the matrix. An unknown class is an error listing the classes; a class whose cell is `none` refuses that agent. |
 | `model` | string · `defaults.model`, else `default` · s | Model name passed to the agent. `default`: no model flag. |
 | `effort` | `low` `medium` `high` `xhigh` `max` · `defaults.effort`, else `high` · s | Effort level. Codex has no `max`. |
 | `repos` | list · required · s | At least one repository. The agent starts in the worktree of the first one. |
@@ -71,6 +71,7 @@ Types/defaults below are cross-checked with [config.ts](../../src/core/config.ts
 | `repos[].base` | git ref · none · s | Start point of the worktree. |
 | `repos[].branch` | string · none · s | Branch to create (or reuse). Without it the worktree is detached. |
 | `review_of` | task ID or list · none · s | The task(s) under review. For every listed task the reviewer must use another agent or another model than its author; the preview warns when the reviewer shares the author's provider. The first ID is the primary reviewed task. |
+| `keep_cache` | boolean · `false` · s | Keep all task cache entries during gc. Default cache deletion is off; include_cache: true / --include-cache requires explicit owner confirmation. Report persist/artifacts/refs also protect entries. |
 | `remote_control` | boolean · `false` · s | `true` (Claude only): the agent starts with `claude --remote-control <TASK>`, so the task shows up as a session named after it in the Claude app (Code) and can be answered from the phone. It goes with `--settings` (the event hooks), `--model` and `--effort`: it is an interactive session, not the server mode `claude remote-control`. The first start asks in the window once to "Enable Remote Control" (agentctl does not answer it, like the folder trust). A `needs-input` notification to the phone then says where to answer. `remote_control: true` on a Codex task is an error. Needs a claude.ai login (Pro, Max, Team, Enterprise), not an API key. |
 | `pin` | boolean · `false` · s | `true`: never move the task to the other provider, by `--agent` or by a limit. |
 | `after` | task ID or list · none · s | Complete reports and accepted first-line verdicts. Missing verdict waits while author is live or report settling; rejection blocks. Corrected accepted reports auto-unblock next watch tick. Unknown tasks/cycles fail. |
@@ -198,7 +199,9 @@ Types/defaults below are cross-checked with [config.ts](../../src/core/config.ts
 | `manager.effort` | `low` `medium` `high` `xhigh` `max` · `medium` · g | `--effort` of the session. |
 | `manager.guide` | path · none · g | A local copy of the rules for writing specs (`claude/AGENTCTL-SPEC-GUIDE`): its text is appended to the role of the manager. Optional; a missing file is a warning, not an error. |
 | `manager.autostart` | boolean · `false` · g | `agentctl up` starts the manager too. |
-| `board.auto_hide_pulled_dead` | boolean · `true` · g | A task without a window whose report was pulled hides by itself. |
+| `board.auto_hide_pulled_dead` | boolean · `true` · g | Pulled tasks without a window hide automatically except report-ready, which remains visible until closed. |
+| `board.pulled_collapse_after` | number · `0` · g | Minutes since pull before cohort collapse; 0 is immediate. |
+| `board.pulled_auto_close_after` | number/false · `false` · g | Owner opt-in: watch closes pulled report-ready tasks N hours since pull, with an event, keeping worktrees. |
 | `board.mouse` | boolean · `true` · g | `mouse on` in the agentctl tmux session (this session only). |
 | `board.return_key` | tmux key name or `false` · `F12` · g | Key (no prefix) that goes back to the board from any window of the session. `false`: none. |
 | `board.model_versions` | alias → quoted version mapping · `{}` · g | Fallback versions for aliases after observed session model; never guessed. |
@@ -283,3 +286,73 @@ Cached text begins with `stan z HH:MM, 2h 44m temu`; JSON snapshot records carry
 `integration: true` in the spec suppresses overlap warnings with an explicit note. Otherwise overlap uses the spec base through its merge-base and excludes files imported by the predecessor's own merges; uncommitted changes still count. Declare the branch being integrated as `repos[].base`. Integration is a declaration about warnings, not permission to merge.
 
 A pending `queue_rm` is named with its request ID in queue previews. MCP `queue` with `replace: true` removes a waiting entry and adds the new spec in one watch step; starting entries are refused. Never-started removals are hidden `cancelled` tasks, without vanished-window alerts. Report instructions put the attempt marker after the first verdict line; parsers tolerate leading comments. Report reads/events expose `outputs_errors`; duplicate blocks select the last valid block with a finding. `Verdict:` and `Werdykt:` and documented check aliases remain accepted.
+
+### WALL lifecycle (0.22.7)
+
+`watch` maintains WALL on each tick. Closed messages (`answered`, `accepted`,
+`rejected`, `superseded`, `stale`) whose latest status is older than
+`wall.archive_after_days` (default **14**) move to
+`~/.agentctl/wall/archive/<channel>-<YYYY-MM>.jsonl` (month of the original post).
+The complete post and status history remain available. Each file is replaced
+atomically under the WALL write lock; archive-first ordering and deduplication
+make an interrupted move safe to retry. IDs and reply threads remain resolvable,
+including after a restart, and new posts continue the channel's sequence.
+
+`wall_read` lists default to `since: 7d`. An explicit `since` searches that window
+across active and archived records; `archive: true` searches all history.
+ID lookups always include archives. CLI equivalents are `wall read --since 30d`,
+`wall read --archive`, and `wall read --id <id>`.
+
+An open question or request with no reply/status activity for
+`wall.remind_after_hours` (default **24**) produces one durable reminder:
+`WALL czeka na odpowiedź: <id>`. The author chat and addressee receive it through
+`events_since`; a channel addressee means its subscribed chats. After
+`wall.stale_after_days` (default **7**), an inactive question becomes `stale` with
+a status-history note. Decision requests and contract changes receive reminders
+but retain the owner-only closure rule and never become stale automatically.
+`stale` is closed for inbox/archive purposes; reopening still requires the owner
+(or an explicitly owner-confirmed chat).
+
+In board **W**, unread counts include only the last 7 days plus all open items.
+**A** switches between active and archived message lists; stale messages are dim
+gray. `events_since` shows the age of each open item and excludes stale items.
+After handling a question: `wall_reply` or `wall_set_status`.
+
+```yaml
+wall:
+  archive_after_days: 14
+  remind_after_hours: 24
+  stale_after_days: 7
+```
+
+All three thresholds must be positive finite numbers. Maintenance requires watch;
+list windows and ID/archive reads work independently of watch.
+
+GC previews separate **Would remove**, **Skipped (uncommitted changes)** and **Skipped (pinned)**, each with sizes. The MCP JSON includes the same presentation in `text`; skipped bytes never count as reclaimable.
+
+`agentctl pin TASK` / `unpin TASK` (MCP `pin` / `unpin`, `tasks: [TASK]`, respective mcp.allow permissions) persist `pin` in task state, including closed/archived tasks. Pinned worktrees and cache cannot be GC-removed even with force flags; pins also prevent provider moves. `agentctl gc --keep TASK` / MCP `gc` or `gc_preview` with `keep: [TASK]` protects these resources for one run. Status and board show 📌.
+
+Queue starts require fresh free space ≥ `disk.min_free_start_gb` (default 30, GiB). Low/unknown space holds all queued and MCP direct starts; running tasks continue. `queue.max_parallel_setups` (default 2) limits worktree/setup phases independently of `parallel_starts` (which includes waiting for agent readiness). Queue previews estimate each repository from its last measured worktree size and show its age; unknown sizes say n/d.
+
+Status/capacity and disk events refresh filesystem free space with statfs; worktree totals retain their last measurement timestamp/age. Share-based warnings carry that age too. A GC hint explains that pins, active tasks, uncommitted/unpushed work, links and the default cache policy can block removal; it does not promise those bytes can be reclaimed.
+
+Provider peak schedules apply to new starts only, including direct starts; running tasks continue. Default GLM: `providers_config.glm.peak: [{days: mon-fri, from: "14:00", to: "18:00", tz: Asia/Singapore}]`, `peak_policy: hold`. This is 07:00–11:00 in Warsaw winter and 08:00–12:00 in summer. Prefer the Singapore form to follow Z.ai; use `tz: Europe/Warsaw, from: "07:00", to: "11:00"` for a fixed Polish clock window. Other providers support the same schedule fields. `peak: []` disables scheduling. `peak_policy: short_only` admits class report/simple/smoke/gate or a boolean `peak_ok: true` spec flag. Weekday ranges/lists and overnight windows are supported; end times are exclusive. Queue/board/status show the local peak end.
+
+After `notify.attention_after_min` (default 15) continuously in needs-trust/needs-input, watch sends one desktop alert, a configured phone alert and an `agentctl` WALL decision-request addressed to owner. The timer and one-per-attempt receipt survive restarts. Phone escalation works even when away mode is off, honors `notify.ntfy.events`, privacy settings and retry policy. Ordinary transition notifications remain independent.
+
+Every MCP tool accepts optional `as`; only WALL/events use it. Status cohort filters use the fresh watch snapshot and report overlap only when collisions exist. Confirmation previews show both ISO `expires_at` and `expires_at_local`.
+
+Project default links to closed/cancelled/archived task worktrees are errors, including missing targets. Use the spec’s own backend worktree (`{worktree:backend}` with backend in repos), or `links: []`. A default link to a repository already supplied by the spec is skipped; intentional `{worktree:...}` links remain. Explicit spec links remain an opt-in and still undergo target checks.
+
+`agentctl-outputs` integrate entries accept optional `base` alongside repo/branch/sha/note. A repository outside the task spec is retained with `outputs_warnings` and a hint to add it to repos; its Git references cannot be verified and are not probed. This advisory does not invalidate outputs; ambiguous repository aliases and malformed references remain errors.
+
+### 0.22.8 settings
+
+| Key | Default | Meaning |
+|---|---|---|
+| `disk.min_free_start_gb` | `30` | Minimum fresh free GiB before a queued start. |
+| `queue.max_parallel_setups` | `2` | Maximum concurrent worktree/setup phases. |
+| `notify.attention_after_min` | `15` | Minutes before one desktop/phone/WALL escalation. |
+| `providers_config.<p>.peak` | `glm: Singapore 14:00–18:00 mon-fri` | Windows {days, from, to, tz}; IANA time zone; peak: [] disables. |
+| `providers_config.<p>.peak_policy` | `hold` | hold or short_only; applies to new starts. |
+| `peak_ok` | `false` | Spec flag permitting a short_only peak start. |

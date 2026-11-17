@@ -193,7 +193,7 @@ export class Harness {
     const socketAt = (root: string) => path.join(root, 'tmx', `tmux-${process.getuid?.() ?? 0}`, 'default');
     const namedRoot = path.join(cacheRoot, `live-${options.name}`);
     // Keep long task-owned roots usable without escaping to a shared /tmp socket.
-    const hashLength = Math.max(8, Math.min(9, 100 - Buffer.byteLength(socketAt(path.join(cacheRoot, 'live-')))));
+    const hashLength = Math.max(7, Math.min(9, 100 - Buffer.byteLength(socketAt(path.join(cacheRoot, 'live-')))));
     this.root = Buffer.byteLength(socketAt(namedRoot)) <= 100 ? namedRoot
       : path.join(cacheRoot, `live-${createHash('sha256').update(options.name).digest('hex').slice(0, hashLength)}`);
     this.fakeBin = path.join(this.root, 'fakebin');
@@ -263,10 +263,11 @@ export class Harness {
       fs.symlinkSync(real, link);
     }
     // Keep unrelated notification scenarios independent of the shared host's 50 GiB warning threshold.
-    const diskFixture = /^disk:/m.test(this.options.config ?? '') ? '' : 'disk: {warn_gb: 1, critical_gb: 1}\n';
+    const peakFixture = /^providers_config:/m.test(this.options.config ?? '') ? '' : 'providers_config: {glm: {peak: []}}\n';
+    const diskFixture = /^disk:/m.test(this.options.config ?? '') ? '' : 'disk: {min_free_start_gb: 1, warn_gb: 1, critical_gb: 1}\n';
     fs.writeFileSync(
       path.join(this.agentctlHome, 'config.yaml'),
-      `${diskFixture}cache: ${path.join(this.root, 'cache')}\nstate_dir: ${path.join(this.root, 'state')}\nsession: ${this.session}\nusage:\n  claude_dir: ${path.join(this.root, 'claude-logs')}\n  codex_dir: ${this.codexHome}\n${this.options.config ?? ''}`,
+      `${peakFixture}${diskFixture}cache: ${path.join(this.root, 'cache')}\nstate_dir: ${path.join(this.root, 'state')}\nsession: ${this.session}\nusage:\n  claude_dir: ${path.join(this.root, 'claude-logs')}\n  codex_dir: ${this.codexHome}\n${this.options.config ?? ''}`,
     );
     fs.writeFileSync(
       this.tmuxConf,

@@ -1,3 +1,4 @@
+import { publishMcpSnapshot } from '../src/core/mcp-tools.ts';
 import { setProviderHolds } from '../src/core/provider-hold.ts';
 import { adoptTask } from '../src/core/adopt.ts';
 import { findResumable, planResume, resumeTasks } from '../src/core/resume.ts';
@@ -117,7 +118,7 @@ function world(agent = 'claude', extra = '') {
         if (argv[0] === 'paste-buffer') { pasted = true; pastes.push(buffer); if (win) win.screen = ready(agent, buffer); return result(); }
         if (argv[0] === 'send-keys') {
           const key = argv.at(-1)!; keys.push(key);
-          if (key === '1' && win) win.screen = ready(agent);
+          if (/^[123]$/.test(key) && win) win.screen = ready(agent);
           if ((key === 'Enter' || key === 'C-m') && pasted && win) {
             pasted = false; win.screen = ready(agent).replace(/^/, 'Working (esc to interrupt)\n');
             const record = remoteRecords().find(r => r.window === win.name || r.windowId === win.id)!;
@@ -333,4 +334,46 @@ it('HOST-RESUME-HOLD: an explicit remote resume keeps account/host slot checks d
   assert.equal((await planResume(w.ctx, ['R-1'])).items.length, 1);
   seedTask(w.config, 'SLOT', {host: 'pc', agent: 'claude'}); w.tmux.add('slot', ready());
   assert.ok((await planResume(w.ctx, ['R-1'])).skipped.some(s => /host pc limit/.test(s.reason)));
+});
+
+it('REL0243-DISK: remote admission probes host work_dir and fails closed before setup', async () => {
+  const w = world(); w.config.disk.minFreeStartGb = 1e12;
+  await assert.rejects(newTasks(w.ctx, [w.spec()], {waitTrust: false}), /wstrzymane: dysk/);
+  const {freshTaskDiskStartHold, taskDiskStartHold} = await import('../src/core/disk.ts');
+  const held = await freshTaskDiskStartHold(w.ctx, 'pc', ['/must/not/stat/locally']);
+  assert.match(held!, /dysk \[pc\]/);
+  assert.ok(w.commands.some(c => c[0] === 'node' && c.at(-1) === w.work));
+  assert.match(taskDiskStartHold(w.config, 'pc', [], w.runner.now())!, /świeżego/);
+  await assert.rejects(newTasks(w.ctx, [w.spec()], {waitTrust: false}), /wstrzymane: dysk/);
+  assert.ok(!w.commands.some(c => c[0] === 'git' && c.includes('add')), 'no worktree mutation');
+  w.offline(true);
+  assert.match((await freshTaskDiskStartHold(w.ctx, 'pc', []))!, /nie można/);
+});
+it('REL0243-REMOTE: peak and provider holds stop remote setup; scrolled answers and snapshots retain host identity', async () => {
+  const w = world();
+  await setProviderHolds(w.ctx, {claude: new Date(w.runner.now() + 60000).toISOString()});
+  await assert.rejects(newTasks(w.ctx, [w.spec()], {waitTrust: false}), /provider hold:/);
+  assert.equal(w.commands.length, 0);
+  await setProviderHolds(w.ctx, {claude: 'off'});
+  w.config.providersConfig ??= {}; w.config.providersConfig.claude = {peak: [{days: 'sun-sat', from: '00:00', to: '23:59', tz: 'UTC'}]};
+  await assert.rejects(newTasks(w.ctx, [w.spec()], {waitTrust: false}), /szczyt do/);
+  w.config.providersConfig ??= {}; w.config.providersConfig.claude = {peak: []};
+  await startAtTrust(w); await acceptTrust(w);
+  const win = w.tmux.windows.find(x => x.id === w.record().windowId)!;
+  win.screen = 'Choose approach?\n❯ 1. Alpha\n  2. Beta\n  3. Gamma\nEnter to select · Esc to cancel\n';
+  const preview = await answerMenu(w.ctx, 'r-1', 2);
+  assert.equal(preview.outcome, 'ready', preview.message);
+  win.screen = 'Choose approach?\n❯ 2. Beta\n  3. Gamma\nEnter to select · Esc to cancel\n';
+  const answer = await answerMenu(w.ctx, 'r-1', 2, {token: preview.token!});
+  assert.equal(answer.outcome, 'answered', answer.message);
+  win.screen = 'API Error: Request rejected (429) · Weekly/Monthly Limit Exhausted. Your limit will reset at 2026-11-21 03:12:28';
+  const rows = await collectStatus(w.ctx, {progress: false});
+  assert.equal(rows[0]!.state, 'limited'); assert.equal(rows[0]!.host, 'pc');
+  await publishMcpSnapshot(w.ctx, rows);
+  const calls = w.sshCalls.length;
+  const status = MCP_TOOLS.find(t => t.name === 'status')!;
+  const result = await status.run({context: () => w.ctx, notify: async () => {}}, {format: 'json'});
+  assert.equal(result.isError, undefined, result.text);
+  assert.ok(result.text.includes('"host": "pc"'));
+  assert.equal(w.sshCalls.length, calls, 'snapshot read starts no SSH');
 });

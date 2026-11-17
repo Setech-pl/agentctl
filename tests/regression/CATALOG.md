@@ -10,6 +10,8 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| REL0243-GC | Remote GC bypassed cache opt-in, pins and unpushed-commit protection. | `tests/host-gc.test.ts` (`^REL0243-GC:`) | 0.23.1 | fails on v0.23.0 (2 failing of 2) |
+| REL0243-DISK | Remote setup did not enforce free disk in its host work_dir. | `tests/host-tasks.test.ts` (`^REL0243-DISK:`) | 0.23.1 | fails on v0.23.0 (1 failing of 1) |
 | HOST-RESUME-HOLD | An explicit owner resume was silently skipped during a queued provider hold (introduced in unreleased HOST-0C). | `tests/resume.test.ts` (`^HOST-RESUME-HOLD:`)<br>`tests/host-tasks.test.ts` (`^HOST-RESUME-HOLD:`) | 0.23.0 | not proven: Introduced in unreleased 3f0078c; v0.22.4 local resume was unaffected. Both scenarios fail on 6c574f7 (measured in HOST0C-prefix-resume.log). |
 | HOST-SSH-COLD | The first host health probe failed because its ControlMaster socket directory did not exist. | `tests/host-ssh-exit.test.ts` (`^HOST-SSH-COLD:`) | 0.23.0 | cannot run on v0.22.4: the code under test did not exist there (import error) |
 | HOST-DISK-PROBE | Host disk health used wrong df fields and did not expand remote HOME or honor host PATH. | `tests/host-health-home.test.ts` (`^HOST-DISK-PROBE:`) | 0.23.0 | cannot run on v0.22.4: the code under test did not exist there (import error) |
@@ -20,6 +22,31 @@ Regenerate this file with `npm run regression -- --catalog`.
 | HOST-MIRROR-ENV | Remote report mirror commands included unrelated launch environment values in SSH argv (unreleased b9384f2; mirror absent from v0.22.3). | `tests/host-boundaries.test.ts` (`^HOST-MIRROR-ENV:`) | 0.23.0 | cannot run on v0.22.4: the code under test did not exist there (import error) |
 | HOST-LOCAL-IO | The remote host router scanned every local task header before board/status previews (unreleased b9384f2; host runtime absent from v0.22.3). | `tests/host-boundaries.test.ts` (`^HOST-LOCAL-IO:`) | 0.23.0 | cannot run on v0.22.4: the code under test did not exist there (import error) |
 | HOST-SSH-EXIT | A reachable host command exiting nonzero was misclassified as unreachable (unreleased HOST-0A 7fa25d6: 1/1 fails; absent from v0.22.3). | `tests/host-ssh-exit.test.ts` | 0.23.0 | cannot run on v0.22.4: the code under test did not exist there (import error) |
+| FIELD0230-SOCKET | A 66-byte task cache made isolated tmux socket paths exceed the harness limit. | `tests/harness.test.ts` (`^FIELD0230-SOCKET:`) | 0.22.8 | fails on v0.22.7 (1 failing of 1) |
+| FIELD0230-PIN | A pin added during a GC safety query could miss the final deletion boundary. | `tests/field0230-gc.test.ts` (`^F2:`) | 0.22.8 | not proven: Pin/unpin GC protection is introduced in this release; no previous release exposes this race. |
+| FIELD0230-F12 | Integrate base and advisory external repository references invalidated outputs. | `tests/field0230-outputs.test.ts` | 0.22.8 | fails on v0.22.7 (1 failing of 1) |
+| FIELD0230-F11 | Closed-task project links were silently dropped with a warning instead of blocking unsafe defaults. | `tests/field0230-links.test.ts` | 0.22.8 | fails on v0.22.7 (1 failing of 1) |
+| FIELD0230-F10 | Kimi effort medium was rejected instead of mapped to high with a warning. | `tests/field0230-effort.test.ts` | 0.22.8 | fails on v0.22.7 (1 failing of 1) |
+| FIELD0230-F9 | Tool identity and local preview expiration were inconsistent across reads/writes. | `tests/field0230-reads.test.ts` (`^F9:`) | 0.22.8 | fails on v0.22.7 (1 failing of 2) |
+| FIELD0230-F7 | GLM starts ignored the provider peak admission schedule. | `tests/field0230-peak.test.ts` (`^F7: default`) | 0.22.8 | fails on v0.22.7 (1 failing of 1) |
+| FIELD0230-F6 | Shared provider holds omitted global scope and the detecting task. | `tests/field0230-providers.test.ts` (`^F6:`) | 0.22.8 | fails on v0.22.7 (2 failing of 2) |
+| FIELD0230-F5 | Quota panes lost their usage hint/reset and disappeared from attention summaries. | `tests/field0230-providers.test.ts` (`^F5:`) | 0.22.8 | fails on v0.22.7 (2 failing of 2) |
+| FIELD0230-F4 | Status/capacity reused stale filesystem free-space samples. | `tests/field0230-disk.test.ts` (`^F4:`) | 0.22.8 | fails on v0.22.7 (1 failing of 1) |
+| FIELD0230-F3 | The queue admitted worktree setups below the free-disk start floor. | `tests/field0230-disk.test.ts` (`^F3:`) | 0.22.8 | fails on v0.22.7 (4 failing of 4) |
+| FIELD0230-F1 | GC preview listed skipped dirty worktrees under cleanup candidates. | `tests/field0230-gc.test.ts` (`^F1:`) | 0.22.8 | fails on v0.22.7 (1 failing of 1) |
+| WALL0229-HISTORY | Archive retry deduplication collapsed legitimate close/reopen/close records sharing a timestamp. | `tests/wall-lifecycle.test.ts` (`^WALL0229-HISTORY:`) | 0.22.7 | not proven: Unreleased lifecycle API is absent on v0.22.6 (import error); this scenario fails on pre-fix 83e0350 (1 failing test), measured separately from the release proof. |
+| WALL0229-INBOX | Adding WALL age interrupted the stable ID/subject prefix in the budget fallback inbox. | `tests/a2-wall-events.test.ts` (`^A2: known chat receives`) | 0.22.7 | not proven: Introduced during unreleased lifecycle work; v0.22.6 passes. Existing A2 scenario fails on dd6d977 before correction (1 failing test), measured separately from the release proof. |
+| UX0228-CLI-SCOPE | CLI could close a newly unread report after its pulled-only preview was confirmed. | `tests/ux0228-mcp-cli.test.ts` (`^UX0228: CLI refuses`) | 0.22.6 | not proven: The --pulled CLI selector is new in this unreleased feature; the deterministic confirmation callback reproduced the race before the fix. |
+| UX0228-PRIORITY | An alphabetically earlier active cohort appeared above unpulled reports in other cohorts. | `tests/ux0228-board.test.ts` (`^UX0228: unpulled reports lead`) | 0.22.6 | fails on v0.22.5 (1 failing of 1) |
+| UX0228-READS | Pulled cohort previews inspected unrelated report bodies before filtering the cohort. | `tests/ux0228-mcp-cli.test.ts` (`^UX0228: pulled cohort preview`) | 0.22.6 | not proven: Introduced with the unreleased pulled selector; v0.22.5 has no pulled selector. The deterministic read-count test failed before this fix. |
+| UX0228-TEXT | New pulled hints exceeded 80 columns and the new status marker interrupted legacy field order. | `tests/board.test.ts` (`a line of the list is at most 80`)<br>`tests/economy.test.ts` (`economy: concise reads`) | 0.22.6 | not proven: Introduced during this unreleased feature; v0.22.5 already passes these width/format scenarios. |
+| UX0228-SCOPE | Pulled bulk close must select the queued task cohort and refuse manager-only selection. | `tests/ux0228-board.test.ts` (`^UX0228: queued selection`) | 0.22.6 | fails on v0.22.5 (1 failing of 1) |
+| UX0228 | Pulled report-ready tasks obscured reports still awaiting collection and vanished automatically without closure. | `tests/ux0228-board.test.ts` | 0.22.6 | fails on v0.22.5 (5 failing of 5) |
+| D6 | WALL token-only confirms carrying as hit required-field validation instead of restoring reviewed arguments. | `tests/fix0227-d6.test.ts` (`^D6:`) | 0.22.5 | fails on v0.22.4 (5 failing of 5) |
+| D5 | Every spec inherited stale links to closed tasks (including missing worktrees) and repeated the same project warning. | `tests/stale-links.test.ts` (`^D5:`) | 0.22.5 | fails on v0.22.4 (3 failing of 3) |
+| D3 | A valid answer token was refused after the permission menu scrolled to options 2–4. | `tests/p63-answer.test.ts` (`^D3:`) | 0.22.5 | fails on v0.22.4 (1 failing of 2) |
+| D2 | GC removed the only data copies in task caches without explicit cache authorization or report-reference protection. | `tests/fix0227-gc.test.ts` (`^D2:`) | 0.22.5 | fails on v0.22.4 (3 failing of 3) |
+| D1 | Cached GC previews declared dirty multi-repository tasks clean and missed unpushed commits, including linked worktrees. | `tests/fix0227-gc.test.ts` (`^D1:`) | 0.22.5 | fails on v0.22.4 (4 failing of 4) |
 | G1b | Provider quota errors left GLM capacity free when usage was unavailable. | `tests/fix0226-g1b.test.ts` | 0.22.4 | fails on v0.22.3 (7 failing of 8) |
 | G1a | Plan n/d left free provider slots with no timed hold override. | `tests/fix0226-g1a.test.ts` | 0.22.4 | fails on v0.22.3 (1 failing of 1) |
 | H6 | Overlap warnings counted predecessor imports and ignored the integration base. | `tests/fix0226-h6.test.ts` | 0.22.4 | fails on v0.22.3 (2 failing of 2) |
@@ -124,6 +151,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 CHANGELOG identifiers that are features, improvements or studies rather than fixed bugs:
 
+- FIX0227-W4-harness: harness assertion aligned with the intentional A3 snapshot contract; production unchanged, covered by W4 in a3-snapshot.test.ts
 - P10: feature: optional tmux.socket and attach hints
 - P44: feature: dedicated dev tmux server documentation and doctor checks
 - P17: feature: stale project link warnings in previews

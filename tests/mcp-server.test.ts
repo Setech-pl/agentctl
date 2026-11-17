@@ -37,7 +37,7 @@ describe('mcp: the SDK front (in memory)', () => {
     assert.equal(peek.annotations?.readOnlyHint, true);
     assert.equal(peek.annotations?.title, 'Look into a task window');
     const props = (peek.inputSchema as { properties: Record<string, { maximum?: number }>; required?: string[] }).properties;
-    assert.deepEqual(Object.keys(props), ['task', 'lines']);
+    assert.deepEqual(Object.keys(props), ['as', 'task', 'lines']);
     assert.equal(props.lines?.maximum, 200);
     assert.deepEqual((peek.inputSchema as { required?: string[] }).required, ['task']);
     assert.equal(tools.find((x) => x.name === 'close')?.annotations?.destructiveHint, true);

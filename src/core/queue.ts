@@ -1,4 +1,6 @@
 import { checkHostLimit } from './host-limits.ts';
+import { peakHold } from './peak.ts';
+import { taskDiskStartHold, worktreeCostEstimates } from './disk.ts';
 import { expireProviderHolds, providerHolds } from './provider-hold.ts';
 import { readMcpRequests } from './mcp-requests.ts';
 import { heavyBudget, heavyPreviewUsed, heavyWait, isHeavy } from './heavy.ts';
@@ -262,6 +264,8 @@ export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: Q
   const lines: string[] = readyCount ? [`${readyCount} ${plural(readyCount, 'okno', 'okna', 'okien')} report-ready – close zwolni okna`] : [];
   let heavyUsed = heavyPreviewUsed(config, entries, live);
   for (const spec of specs) {
+    const diskHold = taskDiskStartHold(config, spec.host, spec.repos.map(r => r.worktree), ctx.runner.now());
+    for (const cost of worktreeCostEstimates(ctx, spec.repos)) lines.push(`  worktree estimate ${cost.repo}: ${cost.bytes === null ? 'n/d (no measurement yet)' : `${(cost.bytes / 1024 ** 3).toFixed(2)} GB (last reading, ${cost.ageSeconds} s old)`}`);
     const heavyReason = heavyWait(config, spec.weight === 'heavy', heavyUsed);
     if (spec.weight === 'heavy') heavyUsed++;
     const limit = config.limits[spec.agent];
@@ -276,11 +280,11 @@ export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: Q
     const unmetNow = unmetAfter(spec.after, rows, spec.afterVerdicts);
     lines.push(
       `  start:    ${
-        isPaused(config) ? 'queue paused; starts after queue_resume (agentctl queue resume)' : !config.queue.enabled ? 'queue.enabled is false; enable the queue first' : limit === 'off' ? `${spec.agent} is disabled (limits.${spec.agent}: off); no windows start` : heavyReason ? heavyReason : unmetNow.length > 0
+        diskHold ? diskHold : peakHold(config, spec, ctx.runner.now()) ?? (isPaused(config) ? 'queue paused; starts after queue_resume (agentctl queue resume)' : !config.queue.enabled ? 'queue.enabled is false; enable the queue first' : limit === 'off' ? `${spec.agent} is disabled (limits.${spec.agent}: off); no windows start` : heavyReason ? heavyReason : unmetNow.length > 0
           ? `when ${unmetNow.join(', ')} ${unmetNow.length === 1 ? 'has' : 'have'} a report${full ? ` and a ${spec.agent} window is free` : ''}`
           : full
           ? `waits for a free ${spec.agent} window (${load[spec.agent]} running${ahead[spec.agent] > 0 ? `, ${ahead[spec.agent]} queued ahead` : ''}, limit ${limit})`
-          : 'at the next watch tick (a window is free)'
+          : 'at the next watch tick (a window is free)')
       }`,
     );
     if (spec.review) lines.push(`  review:   auto -> ${spec.task}-REV after the confirmed author report; another provider, else another configured model; rerun=${Boolean(spec.review.rerun)}`);
@@ -766,6 +770,17 @@ export interface QueueView {
   since: string;
 }
 
+function entryPeakHold(config: GlobalConfig, entry: QueueEntry, now: number): string | undefined {
+  try { const header = splitSpecs(entry.spec)[0]!.header; return peakHold(config, {agent: entry.agent, ...(typeof header.class === 'string' ? {class: header.class} : {}), peakOk: header.peak_ok === true}, now); }
+  catch { return peakHold(config, {agent: entry.agent}, now); }
+}
+function setupSlots(config: GlobalConfig, entries: QueueEntry[]): number {
+  return entries.filter(e => e.status === 'starting' && readSetupProgress(config, e.task)?.phase !== 'launching').length;
+}
+function entryWorktrees(config: GlobalConfig, entry: QueueEntry): string[] {
+  try { return resolveSpec(splitSpecs(entry.spec)[0]!, {config}).repos.map(r => r.worktree); } catch { return []; }
+}
+
 /**
  * For every entry: what it waits for. Entries are walked in turn order, each one that will start in the next tick uses up a window of its
  * provider, so the answer matches what `watch` does. `inflight` are the tasks this very process is starting.
@@ -783,12 +798,18 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
   const holds = queueHolds(config, nowMs);
   const heavy = heavyBudget(config, entries, live);
   const hostSlots = [...live, ...entries.filter(e => e.status === 'starting' && !live.some(w => w.window === e.task.toLowerCase()))];
+  let setups = setupSlots(config, entries);
   let position = 0;
   return entries.map((entry): QueueView => {
     if (entry.status === 'failed') return { position: null, entry, condition: { kind: 'failed', text: `failed: ${(entry.error ?? '').split('\n')[0] ?? ''}` }, since: entry.failedAt ?? entry.queuedAt };
     if (entry.status === 'accepted') return { position: null, entry, condition: { kind: 'accepted', text: entry.direct ? `uruchamiane – czeka na najbliższy tick watch (${ACCEPTED_TEXT})` : ACCEPTED_TEXT }, since: entry.queuedAt };
     if (entry.status === 'starting') return { position: null, entry, condition: { kind: 'starting', text: entry.direct || readSetupProgress(config, entry.task, queueDiagnosticSources(entries)) ? startProgressText(readSetupProgress(config, entry.task, queueDiagnosticSources(entries)), nowMs) : 'starting' }, since: entry.startingAt ?? entry.queuedAt };
     position++;
+    const peak = entryPeakHold(config, entry, nowMs);
+    if (peak) return {position, entry, condition: {kind: 'hold', text: peak}, since: entry.queuedAt};
+    const diskHold = taskDiskStartHold(config, entry.host, entryWorktrees(config, entry), nowMs);
+    if (diskHold) return {position, entry, condition: {kind: 'hold', text: diskHold}, since: entry.queuedAt};
+    if (setups >= config.queue.maxParallelSetups) return {position, entry, condition: {kind: 'slot', text: `czeka na setup: ${setups}/${config.queue.maxParallelSetups}`}, since: entry.queuedAt};
     const heavyReason = heavyWait(config, isHeavy(entry), heavy.size);
     if (heavyReason) {
       // A waiting heavy also stands in line for a heavy slot: the next heavy must see it in the count.
@@ -803,6 +824,7 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
     if (entry.direct && !(entry.retryAt && Date.parse(entry.retryAt) > nowMs) && !overProviderLimit(config.limits[entry.agent], used[entry.agent])) {
       used[entry.agent]++;
       hostSlots.push(entry);
+      setups++;
       if (isHeavy(entry)) heavy.add(entry.task);
       return { position, entry, condition: { kind: 'ready', text: config.queue.enabled ? 'uruchamiane – czeka na najbliższy tick watch' : 'queue.enabled is false; the watcher does not start it' }, since: entry.queuedAt };
     }
@@ -827,6 +849,7 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
     }
     used[entry.agent]++;
     hostSlots.push(entry);
+    setups++;
     if (isHeavy(entry)) heavy.add(entry.task);
     return { position, entry, condition: { kind: 'ready', text: 'wolne miejsce – start przy najbliższym ticku watch' }, since: entry.queuedAt };
   }).map(view => ({ ...view, condition: { ...view.condition, text: redact(view.condition.text) } }));
@@ -1009,6 +1032,8 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
     if (memory.inflight.size >= config.queue.parallelStarts) break;
     if (checkHostLimit(config, entry, live)) continue;
     if (providerHolds(config, ctx.runner.now())[entry.agent]) continue;
+    if (taskDiskStartHold(config, entry.host, entryWorktrees(config, entry), ctx.runner.now()) || setupSlots(config, readQueue(config)) >= config.queue.maxParallelSetups) continue;
+    if (providerHolds(config, ctx.runner.now())[entry.agent] || entryPeakHold(config, entry, ctx.runner.now())) continue;
     if (entry.direct) {
       const room = config.limits[entry.agent];
       if (overProviderLimit(room, used[entry.agent])) continue;
@@ -1099,6 +1124,7 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
   const { config } = ctx;
   let entry = initial;
   const claim = async (fresh: QueueEntry): Promise<boolean> => {
+    if (entryPeakHold(config, fresh, ctx.runner.now()) || taskDiskStartHold(config, fresh.host, entryWorktrees(config, fresh), ctx.runner.now()) || setupSlots(config, readQueue(config)) >= config.queue.maxParallelSetups) return false;
     if (heavyWait(config, isHeavy(fresh), heavyBudget(config, readQueue(config), await liveWindows(ctx)).size)) return false;
     await writeEntry(ctx, { ...fresh, status: 'starting', startingPid: process.pid, startingAt: new Date(ctx.runner.now()).toISOString() });
     entry = fresh;
@@ -1169,7 +1195,7 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
       await notifyPlain(ctx, notifier, entry.task, done, opts.self);
       await recordJournal(ctx, { kind: 'queue-start', task: entry.task, text: `${done} (${entry.agent})`, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
     } catch (e) {
-      if (/window limit for .* reached|host .* limit reached/.test(errorMessage(e))) { await writeEntry(ctx, { ...entry, status: 'queued' }); return; }
+      if (/window limit for .* reached|host .* limit reached|provider hold:|szczyt do|wstrzymane: dysk/.test(errorMessage(e))) { await writeEntry(ctx, { ...entry, status: 'queued' }); return; }
       // A never-ready window is untrusted state nobody watches: close it so it cannot hold a slot (the record and its worktree stay).
       const closedLeftover = await closeNeverReadyWindow(ctx, entry.task, { force: Boolean(opts.signal?.aborted) }).catch(() => false);
       if (await liveStartedRecord(ctx, entry.task)) {

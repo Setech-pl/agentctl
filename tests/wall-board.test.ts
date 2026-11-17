@@ -29,11 +29,11 @@ const key = (state: BoardState, input: string, k: Parameters<typeof handleKey>[2
 
 describe('WALL view: the model', () => {
   it('W opens the channels, Enter the messages (newest first), Enter one message; filters and read marks are effects; Esc goes back', async () => {
-    const { config } = await seeded('model');
+    const { config, ctx } = await seeded('model');
     let r = key(initialBoardState(120, 30), 'W');
     assert.equal(r.state.mode.kind, 'wall');
     assert.deepEqual(r.effects, [{ type: 'wall-load' }]);
-    let state: BoardState = { ...r.state, wall: loadWallBoard(config) };
+    let state: BoardState = { ...r.state, wall: loadWallBoard(config, ctx.runner.now()) };
     const channels = wallView(state, state.mode as never);
     assert.match(channels.title, /the owner reads every channel/);
     assert.deepEqual(channels.lines.map((l) => l.text.split(/\s+/)[0]), ['agentctl', 'hems', 'nc', 'shared:maps', 'shared:sim', 'shared:weather']);
@@ -52,7 +52,7 @@ describe('WALL view: the model', () => {
     assert.deepEqual(wallMessages(r.state, r.state.mode as never).map((m) => m.id), ['shared:sim-1'], 'status=open');
     r = key(r.state, 's');
     assert.deepEqual(wallMessages(r.state, r.state.mode as never).map((m) => m.id), ['shared:sim-3', 'shared:sim-2'], 'status=answered');
-    for (let i = 0; i < 4; i++) r = key(r.state, 's');
+    for (let i = 0; i < 5; i++) r = key(r.state, 's');
     r = key(r.state, 't');
     assert.deepEqual(wallMessages(r.state, r.state.mode as never).map((m) => m.id), ['shared:sim-3'], 'status cycled back to all; kind=info');
     // Enter on the decision: its lines are loaded and it is marked read.

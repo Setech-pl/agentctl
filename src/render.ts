@@ -1,3 +1,4 @@
+import { pulledOpen, pulledSummary } from './core/pulled.ts';
 import type { Check } from './core/doctor.ts';
 import { collideText } from './core/collisions.ts';
 import type { StatusRow } from './core/status.ts';
@@ -12,7 +13,7 @@ export function renderStatusTable(rows: StatusRow[], maxLast = 60, opts: { cohor
   const tokens = rows.some((r) => Boolean(r.tokens));
   const header = ['TASK', ...(cohort ? ['COHORT'] : []), 'AGENT/MODEL/EFFORT', 'STATE', 'WINDOW', 'STARTED', 'DURATION', ...(tokens ? ['TOKENS'] : []), 'PROGRESS', ...(collide ? ['COLLIDE'] : []), 'REPORT', 'DECISIONS', 'ACTIONS', 'MESSAGES', 'LAST LINE'];
   const body = rows.map((r) => [
-    r.archived ? `${r.task} (archived)` : r.cancelled ? `${r.task} (cancelled)` : r.closed ? `${r.task} (closed)` : r.hidden ? `${r.task} (hidden)` : r.task,
+    (r.pin ? '📌 ' : '') + (r.archived ? `${r.task} (archived)` : r.cancelled ? `${r.task} (cancelled)` : r.closed ? `${r.task} (closed)` : r.hidden ? `${r.task} (hidden)` : r.task),
     ...(cohort ? [r.cohort ?? '-'] : []),
     r.switchedBy ? `${r.agent}/${r.model}/${r.effort} (ordered ${r.requested})` : `${r.agent}/${r.model}/${r.effort}`,
     r.state,
@@ -22,7 +23,7 @@ export function renderStatusTable(rows: StatusRow[], maxLast = 60, opts: { cohor
     ...(tokens ? [r.tokens ? formatTokens(r.tokens.fresh) : 'n/d'] : []),
     r.progress?.text ?? '-',
     ...(collide ? [collideText(r.collide) || '-'] : []),
-    r.report === 'yes' ? 'yes' : r.reportCandidate ? 'candidate' : 'no',
+    r.report === 'yes' ? (r.pulled ? 'pulled' : 'yes') : r.reportCandidate ? 'candidate' : 'no',
     String(r.decisionsCount ?? 0),
     String(r.actionsCount ?? 0),
     String(r.promptQueue?.length ?? 0),
@@ -30,7 +31,7 @@ export function renderStatusTable(rows: StatusRow[], maxLast = 60, opts: { cohor
   ]);
   const widths = header.map((h, i) => Math.max(h.length, ...body.map((row) => (row[i] as string).length)));
   const fmt = (cells: string[]): string => cells.map((c, i) => (i === cells.length - 1 ? c : c.padEnd(widths[i] as number))).join('  ').trimEnd();
-  return [fmt(header), ...body.map(fmt)];
+  return [fmt(header), ...body.filter((_, i) => !pulledOpen(rows[i]!)).map(fmt), ...pulledSummary(rows), ...body.filter((_, i) => pulledOpen(rows[i]!)).map(fmt)];
 }
 
 /** Lines under the status table: what to do about rows that need an action (orphans). */

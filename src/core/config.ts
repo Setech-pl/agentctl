@@ -1,3 +1,5 @@
+import { peakDays } from './peak.ts';
+import type { ProviderSettings, PeakWindow } from './peak.ts';
 import { get as providerValue } from './providers/registry.ts';
 import type { ProviderValues } from './providers/registry.ts';
 import { activeProviders, perProvider } from './providers/registry.ts';
@@ -110,7 +112,7 @@ export interface AgentSettings {
 export interface GlobalConfig extends Layer {
   providers: ProviderId[];
   /** Per-provider launch overrides: `glm.command` (default `claude-glm`) and `glm.env` (task environment of glm tasks; default CLAUDE_CODE_AUTO_MODE_SERVER=0). */
-  providersConfig?: { glm?: { command?: string; env?: Record<string, string> } };
+  providersConfig?: Partial<Record<AgentName, ProviderSettings>>;
   /** What a start that did not reach the agent's input leaves behind (`start_failure.keep_window`, default true: the window stays for diagnosis). */
   startFailure?: { keepWindow: boolean };
   warnings?: string[];
@@ -163,7 +165,7 @@ export interface GlobalConfig extends Layer {
   /** Token usage and plan limits: warning thresholds, the hold of the queue, the tmux status line, where the agents keep their logs. */
   usage: UsageSettings;
   guideLang: 'en' | 'pl';
-  disk: { worktreeSharePercent: number; warnGb: number; criticalGb: number; workers: number; measurementTimeoutS: number };
+  disk: { minFreeStartGb: number; worktreeSharePercent: number; warnGb: number; criticalGb: number; workers: number; measurementTimeoutS: number };
   git: { timeoutS: number };
   capacity: { loadThreshold?: number; snapshot: boolean; staleMinutes: number; sampleLimit: number; thresholds: number[]; codexRefresh: boolean; claudeUsageProbe: boolean; claudeUsageProbeIntervalMinutes: number; kimiUsageProbe?: boolean; kimiUsageProbeModel?: string };
   /** Set by a long-running process (watch, MCP) when the file on disk does not load and the previous settings stay in force. */
@@ -182,7 +184,7 @@ export const NOTIFY_BACKENDS = ['auto', 'terminal-notifier', 'osascript'] as con
 export type NotifyBackend = (typeof NOTIFY_BACKENDS)[number];
 
 /** Write tools of the MCP server; each one must be listed in `mcp.allow` to work. */
-export const MCP_WRITE_TOOLS = ['send', 'answer', 'new', 'interrupt', 'close', 'move', 'queue', 'queue_rm', 'cancel', 'mark', 'set_limits', 'reserve', 'resume', 'away', 'queue_retry', 'queue_up', 'queue_pause', 'queue_resume', 'unblock', 'cohort_add', 'cohort_remove', 'cohort_note', 'cohort_archive', 'hide', 'unhide', 'archive', 'adopt', 'report_from', 'limits_release', 'manager_start', 'manager_stop', 'notify_test', 'gc', 'wall_post', 'wall_reply', 'wall_set_status', 'consult'] as const;
+export const MCP_WRITE_TOOLS = ['send', 'answer', 'new', 'interrupt', 'close', 'move', 'queue', 'queue_rm', 'cancel', 'mark', 'set_limits', 'reserve', 'resume', 'away', 'queue_retry', 'queue_up', 'queue_pause', 'queue_resume', 'unblock', 'cohort_add', 'cohort_remove', 'cohort_note', 'cohort_archive', 'hide', 'unhide', 'archive', 'adopt', 'report_from', 'limits_release', 'manager_start', 'manager_stop', 'notify_test', 'gc', 'wall_post', 'wall_reply', 'wall_set_status', 'consult', 'pin', 'unpin'] as const;
 export type McpWriteTool = (typeof MCP_WRITE_TOOLS)[number];
 /** Permissions of `mcp.allow` that are not a tool of their own: `send_enter` lets `send` with `enter_only` press Enter for the text that a send left in an input field (it does not allow pasting). */
 export const MCP_EXTRA_PERMISSIONS = ['send_enter'] as const;
@@ -204,8 +206,10 @@ export interface BoardSettings {
   /** How many of the most recently active cohorts the board's `k` choice lists; older quiet ones fold into "starsze…". */
   cohortsRecent: number;
   listWidth?: number | string;
-  /** A task without a window whose report was pulled hides by itself (a task without a report stays in "Finished"). */
+  /** Pulled tasks without a window hide automatically except report-ready tasks, which remain visible for closure. */
   autoHidePulledDead: boolean;
+  pulledCollapseAfter: number;
+  pulledAutoCloseAfter: number | null;
   /** `mouse on` in the agentctl tmux session (this session only): click a window name in the status bar. Selecting text then takes the fn key in Terminal.app. */
   mouse: boolean;
   /** tmux key (no prefix) that goes back to the board from any window of the agentctl session; null: no key is bound. Default F12. */
@@ -219,6 +223,7 @@ export interface QueueSettings {
   enabled: boolean;
   /** Most queued tasks that `watch` has in the middle of starting (worktree, setup, waiting for the agent) at the same time. */
   parallelStarts: number;
+  maxParallelSetups: number;
 }
 
 export interface CancelSettings {
@@ -272,6 +277,7 @@ export interface McpSettings {
 }
 
 export interface NotifySettings {
+  attentionAfterMin: number;
   /** Which channel sends notifications; default `auto`. */
   backend: NotifyBackend;
   mcpWrites?: 'all' | 'summary' | 'off';
@@ -368,13 +374,13 @@ export const DEFAULTS_KEYS = ['agent', 'model', 'effort', 'remote_control'];
 export const LINK_KEYS = ['from', 'to'];
 export const AGENT_KEYS = ['env', 'accepts_busy_prompt', 'flags', 'effort_args', 'ready_pattern', 'ready_timeout', 'trust_timeout', 'trust_pattern', 'dialog_pattern', 'working_pattern', 'delivery_pattern', 'interrupt_key', 'footer_patterns', 'question_pattern', 'async_question_pattern', 'approval_pattern', 'limit_patterns', 'background_patterns', 'overload_patterns'];
 export const WATCH_KEYS = ['interval', 'waiting_after', 'window_icons', 'status_line', 'idle_confirm_ticks'];
-export const NOTIFY_KEYS = ['backend', 'events', 'turn_end', 'terminal_app', 'verdict_pattern', 'ntfy', 'mcp_writes', 'mcp_writes_interval_s'];
+export const NOTIFY_KEYS = ['attention_after_min', 'backend', 'events', 'turn_end', 'terminal_app', 'verdict_pattern', 'ntfy', 'mcp_writes', 'mcp_writes_interval_s'];
 export const NTFY_KEYS = ['server', 'topic', 'token', 'events', 'priority', 'include_verdict', 'include_question', 'click_url', 'always'];
 export const AWAY_KEYS = ['auto_idle'];
 export const MANAGER_KEYS = ['project', 'name', 'model', 'effort', 'guide', 'autostart'];
-export const BOARD_KEYS = ['auto_hide_pulled_dead', 'mouse', 'return_key', 'selected_color', 'model_versions', 'list_width', 'window_title', 'cohorts_recent'];
+export const BOARD_KEYS = ['pulled_collapse_after', 'pulled_auto_close_after', 'auto_hide_pulled_dead', 'mouse', 'return_key', 'selected_color', 'model_versions', 'list_width', 'window_title', 'cohorts_recent'];
 export const MCP_KEYS = ['allow', 'allow_rm_worktree', 'client', 'max_response_kb'];
-export const QUEUE_KEYS = ['enabled', 'parallel_starts'];
+export const QUEUE_KEYS = ['enabled', 'parallel_starts', 'max_parallel_setups'];
 export const CANCEL_KEYS = ['grace'];
 export const USAGE_KEYS = ['warn', 'critical', 'queue_hold', 'status_line', 'claude_tap', ...PROVIDER_IDS.map(id => `${id}_dir`)];
 export const COLLISION_KEYS = ['enabled', 'interval', 'notify', 'ignore'];
@@ -665,13 +671,17 @@ function parseWatch(v: unknown, p: Problems): GlobalConfig['watch'] {
 }
 
 function parseNotify(v: unknown, p: Problems): NotifySettings {
-  const notify: NotifySettings = { backend: 'auto', events: true, turnEnd: true, mcpWrites: 'summary', mcpWritesIntervalS: 60 };
+  const notify: NotifySettings = { attentionAfterMin: 15, backend: 'auto', events: true, turnEnd: true, mcpWrites: 'summary', mcpWritesIntervalS: 60 };
   if (v === undefined || v === null) return notify;
   if (!isObject(v)) {
     p.add('config.notify must be a mapping like {terminal_app: com.apple.Terminal, verdict_pattern: "^Verdict:"}');
     return notify;
   }
   checkKeys(v, NOTIFY_KEYS, 'config.notify', p);
+  if (v.attention_after_min !== undefined) {
+    if (typeof v.attention_after_min === 'number' && Number.isFinite(v.attention_after_min) && v.attention_after_min > 0) notify.attentionAfterMin = v.attention_after_min;
+    else p.add('config.notify.attention_after_min must be positive minutes');
+  }
   notify.mcpWrites = parseEnumValue(v.mcp_writes, ['all', 'summary', 'off'] as const, 'config.notify.mcp_writes', p) ?? 'summary';
   if (v.mcp_writes_interval_s !== undefined) {
     if (typeof v.mcp_writes_interval_s === 'number' && Number.isFinite(v.mcp_writes_interval_s) && v.mcp_writes_interval_s > 0) notify.mcpWritesIntervalS = v.mcp_writes_interval_s;
@@ -798,7 +808,7 @@ function parseManager(v: unknown, p: Problems): ManagerSettings {
 }
 
 function parseBoard(v: unknown, p: Problems): BoardSettings {
-  const board: BoardSettings = { autoHidePulledDead: true, mouse: true, returnKey: 'F12', selectedColor: 'blue', modelVersions: {}, windowTitle: true, cohortsRecent: 10 };
+  const board: BoardSettings = { pulledCollapseAfter: 0, pulledAutoCloseAfter: null, autoHidePulledDead: true, mouse: true, returnKey: 'F12', selectedColor: 'blue', modelVersions: {}, windowTitle: true, cohortsRecent: 10 };
   if (v === undefined || v === null) return board;
   if (!isObject(v)) {
     p.add('config.board must be a mapping like {auto_hide_pulled_dead: true, mouse: true, return_key: F12}');
@@ -829,6 +839,13 @@ function parseBoard(v: unknown, p: Problems): BoardSettings {
     if (v.return_key === false || v.return_key === null) board.returnKey = null;
     else if (typeof v.return_key === 'string' && /^[A-Za-z0-9][A-Za-z0-9-]{0,19}$/.test(v.return_key)) board.returnKey = v.return_key;
     else p.add('config.board.return_key must be a tmux key name without a prefix like F12, M-b or C-Space, or false for none');
+  }
+  for (const [key, field] of [['pulled_collapse_after', 'pulledCollapseAfter'], ['pulled_auto_close_after', 'pulledAutoCloseAfter']] as const) {
+    const value = v[key];
+    if (value === undefined) continue;
+    if (key === 'pulled_auto_close_after' && (value === false || value === null)) board.pulledAutoCloseAfter = null;
+    else if (typeof value === 'number' && Number.isFinite(value) && value >= 0) board[field] = value;
+    else p.add(`config.board.${key} must be a non-negative number${key === 'pulled_auto_close_after' ? ' or false' : ''}`);
   }
   if (v.auto_hide_pulled_dead !== undefined) {
     if (typeof v.auto_hide_pulled_dead === 'boolean') board.autoHidePulledDead = v.auto_hide_pulled_dead;
@@ -876,7 +893,7 @@ function parseMcp(v: unknown): McpSettings {
 }
 
 function parseQueue(v: unknown, p: Problems): QueueSettings {
-  const queue: QueueSettings = { enabled: true, parallelStarts: 2 };
+  const queue: QueueSettings = { enabled: true, parallelStarts: 2, maxParallelSetups: 2 };
   if (v === undefined || v === null) return queue;
   if (!isObject(v)) {
     p.add('config.queue must be a mapping like {enabled: true, parallel_starts: 2}');
@@ -890,6 +907,10 @@ function parseQueue(v: unknown, p: Problems): QueueSettings {
   if (v.parallel_starts !== undefined) {
     if (typeof v.parallel_starts === 'number' && Number.isInteger(v.parallel_starts) && v.parallel_starts > 0) queue.parallelStarts = v.parallel_starts;
     else p.add('config.queue.parallel_starts must be a positive integer');
+  }
+  if (v.max_parallel_setups !== undefined) {
+    if (typeof v.max_parallel_setups === 'number' && Number.isInteger(v.max_parallel_setups) && v.max_parallel_setups > 0) queue.maxParallelSetups = v.max_parallel_setups;
+    else p.add('config.queue.max_parallel_setups must be a positive integer');
   }
   return queue;
 }
@@ -1005,26 +1026,43 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
 
   let providersConfig: GlobalConfig['providersConfig'];
   if (raw.providers_config !== undefined && raw.providers_config !== null) {
-    if (!isObject(raw.providers_config)) p.add('config.providers_config must be a mapping like {glm: {command: claude-glm}}');
+    if (!isObject(raw.providers_config)) p.add('config.providers_config must be a mapping');
     else {
-      checkKeys(raw.providers_config, ['glm'], 'config.providers_config', p);
-      const glmConfig = raw.providers_config.glm;
-      if (glmConfig !== undefined && glmConfig !== null) {
-        if (!isObject(glmConfig)) p.add('config.providers_config.glm must be a mapping like {command: claude-glm, env: {CLAUDE_CODE_AUTO_MODE_SERVER: "0"}}');
-        else {
-          checkKeys(glmConfig, ['command', 'env'], 'config.providers_config.glm', p);
-          const command = parseString(glmConfig.command, 'config.providers_config.glm.command', p);
-          const glm: { command?: string; env?: Record<string, string> } = {};
+      checkKeys(raw.providers_config, [...PROVIDER_IDS], 'config.providers_config', p);
+      providersConfig = {};
+      for (const agent of PROVIDER_IDS) {
+        const value = raw.providers_config[agent], where = `config.providers_config.${agent}`;
+        if (value === undefined) continue;
+        if (!isObject(value)) {p.add(`${where} must be a mapping`); continue;}
+        checkKeys(value, agent === 'glm' ? ['command', 'env', 'peak', 'peak_policy'] : ['peak', 'peak_policy'], where, p);
+        const settings: ProviderSettings = {};
+        if (agent === 'glm') {
+          const command = parseString(value.command, `${where}.command`, p);
           if (command) {
-            if (/\s/.test(command.trim())) p.add('config.providers_config.glm.command must be one executable name or path, without arguments');
-            else glm.command = command;
+            if (/\s/.test(command.trim())) p.add(`${where}.command must be one executable name or path, without arguments`);
+            else settings.command = command;
           }
-          if (glmConfig.env !== undefined) {
-            glm.env = parseEnv(glmConfig.env, 'config.providers_config.glm.env', p);
-            for (const name of ANTHROPIC_SECRET_ENV) if (name in glm.env) p.add(`config.providers_config.glm.env.${name}: the Z.ai endpoint and token come only from the claude-glm wrapper; agentctl never sets ${name}`);
+          if (value.env !== undefined) {
+            settings.env = parseEnv(value.env, `${where}.env`, p);
+            for (const name of ANTHROPIC_SECRET_ENV) if (name in settings.env) p.add(`${where}.env.${name}: the Z.ai endpoint and token come only from the claude-glm wrapper; agentctl never sets ${name}`);
           }
-          if (glm.command !== undefined || glm.env !== undefined) providersConfig = { glm };
         }
+        settings.peakPolicy = parseEnumValue(value.peak_policy, ['hold', 'short_only'] as const, `${where}.peak_policy`, p) ?? 'hold';
+        if (value.peak !== undefined) {
+          if (!Array.isArray(value.peak)) p.add(`${where}.peak must be an array`);
+          else {
+            settings.peak = [];
+            for (const entry of value.peak) {
+              if (!isObject(entry)) {p.add(`${where}.peak entries must be mappings`); continue;}
+              checkKeys(entry, ['days', 'from', 'to', 'tz'], `${where}.peak`, p);
+              if (!peakDays(entry.days)) p.add(`${where}.peak.days must use mon-sun names or ranges (mon-fri)`);
+              if (![entry.from, entry.to].every(v => typeof v === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(v)) || entry.from === entry.to) p.add(`${where}.peak from/to must be distinct HH:MM times`);
+              try {if (typeof entry.tz !== 'string') throw new Error(); new Intl.DateTimeFormat('en', {timeZone: entry.tz});} catch {p.add(`${where}.peak.tz must be an IANA time zone`);}
+              settings.peak.push(entry as unknown as PeakWindow);
+            }
+          }
+        }
+        providersConfig[agent] = settings;
       }
     }
   }
@@ -1206,10 +1244,10 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
     if (typeof raw.report.settle_s === 'number' && Number.isFinite(raw.report.settle_s) && raw.report.settle_s >= 0) reportSettleS = raw.report.settle_s;
     else p.add('config.report.settle_s must be a nonnegative number');
   }
-  const disk = { worktreeSharePercent: 20, warnGb: 50, criticalGb: 20, workers: 2, measurementTimeoutS: 600 };
+  const disk = { minFreeStartGb: 30, worktreeSharePercent: 20, warnGb: 50, criticalGb: 20, workers: 2, measurementTimeoutS: 600 };
   const git = { timeoutS: 600 };
   for (const [section, target, fields] of [
-    ['disk', disk, { worktree_share_percent: 'worktreeSharePercent', warn_gb: 'warnGb', critical_gb: 'criticalGb', workers: 'workers', measurement_timeout_s: 'measurementTimeoutS' }],
+    ['disk', disk, { min_free_start_gb: 'minFreeStartGb', worktree_share_percent: 'worktreeSharePercent', warn_gb: 'warnGb', critical_gb: 'criticalGb', workers: 'workers', measurement_timeout_s: 'measurementTimeoutS' }],
     ['git', git, { timeout_s: 'timeoutS' }],
   ] as const) {
     const value = raw[section];

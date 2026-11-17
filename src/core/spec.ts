@@ -1,4 +1,5 @@
-import { linkBaseWarnings, validateLink, missingLinkTargets, fillTaskLinkTargets, staleProjectLinkWarnings } from './links.ts';
+import { mapEffort } from './equivalents.ts';
+import { linkBaseWarnings, validateLink, missingLinkTargets, fillTaskLinkTargets, staleProjectLinkWarnings, projectDefaultLinkPolicy } from './links.ts';
 import { validateLaunch, ANTHROPIC_SECRET_ENV } from './safety.ts';
 import { provider, isActive, activeProviders } from './providers/registry.ts';
 import { PROVIDER_IDS } from './providers/types.ts';
@@ -54,6 +55,7 @@ export interface AutoReviewSource {
 }
 
 export interface ResolvedSpec {
+  keepCache?: boolean;
   readOnly?: boolean;
   integration?: boolean;
   /** Internal queue provenance, never accepted from spec YAML. */
@@ -105,6 +107,7 @@ export interface ResolvedSpec {
   switchedBy?: 'flag' | 'limit';
   /** The task class (data/model-matrix.yaml) the model/effort came from. */
   class?: string;
+  peakOk?: boolean;
   /** Non-fatal diagnostics shown in the preview (a class overridden by an explicit model/effort, a same-provider reviewer, …). */
   warnings?: string[];
 }
@@ -186,13 +189,14 @@ export interface ResolveContext {
   config: GlobalConfig;
   /** Project layer lookup; defaults to reading `<repo>/.agentctl.yaml`. */
   loadProject?: (repoPath: string) => Layer | undefined;
+  now?: number;
 }
 
 /** Keys of a spec header, and of one entry of its `repos`; docs/configuration.md describes each one. */
 /** Task IDs whose window name is one agentctl uses for itself (`watch`, `board`, `manager`). */
 export const RESERVED_TASK_IDS = ['WATCH', 'BOARD', 'MANAGER'];
 
-export const SPEC_KEYS = ['task', 'agent', 'class', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'review', 'report', 'pin', 'remote_control', 'weight', 'priority', 'after', 'after_verdict', 'touches', 'cohort', 'wall', 'read_only', 'host', 'integration'];
+export const SPEC_KEYS = ['task', 'agent', 'class', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'review', 'report', 'pin', 'remote_control', 'weight', 'priority', 'after', 'after_verdict', 'touches', 'cohort', 'wall', 'read_only', 'host', 'integration', 'keep_cache', 'peak_ok'];
 export const REPO_KEYS = ['path', 'worktree', 'base', 'branch', 'setup'];
 
 function label(raw: RawSpec): string {
@@ -239,6 +243,8 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
 
   checkKeys(h, SPEC_KEYS, where, p);
   const task = checkTask(raw, p);
+  if (h.peak_ok !== undefined && typeof h.peak_ok !== 'boolean') p.add('peak_ok must be boolean');
+  if (h.keep_cache !== undefined && typeof h.keep_cache !== 'boolean') p.add('keep_cache must be boolean');
   if (h.integration !== undefined && typeof h.integration !== 'boolean') p.add('integration must be boolean');
   if (h.read_only !== undefined && typeof h.read_only !== 'boolean') p.add('read_only must be boolean');
   const specAgent = (typeof h.agent === 'string' && (AGENT_NAMES as readonly string[]).includes(h.agent) ? h.agent as AgentName : parseEnumValue(h.agent, activeProviders(config), 'agent', p));
@@ -382,7 +388,10 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     if (specEffort && specEffort !== classCell.effort) classWarnings.push(`class ${matrixEntry.name} gives ${agent} ${classCell.model}/${classCell.effort}, but the spec sets effort: ${specEffort} — the explicit value wins`);
   }
   const model = specModel ?? classCell?.model ?? project?.defaults.model ?? config.defaults.model ?? 'default';
-  const effort = specEffort ?? classCell?.effort ?? project?.defaults.effort ?? config.defaults.effort ?? 'high';
+  const orderedEffort = specEffort ?? classCell?.effort ?? project?.defaults.effort ?? config.defaults.effort ?? 'high';
+  const effortMapping = agent ? mapEffort({agent, model, effort: orderedEffort}) : {effort: orderedEffort};
+  const effort = effortMapping.effort;
+  if (effortMapping.warning) classWarnings.push(effortMapping.warning);
   // Restricted models (k3.1-pro*, gpt-6-astra): an explicit `model:` or an explicit-only class, never a default.
   if (agent && specModel === undefined && explicitOnlyModel(agent, model)) {
     const fromExplicitClass = matrixEntry?.explicit === true && classCell?.model === model;
@@ -416,7 +425,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
 
   const taskId = task as string;
   const vars = { task: taskId, cache: config.cache };
-  let fill = (s: string): string => fillPlaceholders(s, vars);
+  let fill: (s: string, allowMissingClosed?: boolean) => string = (s) => fillPlaceholders(s, vars);
   const pathOf = (s: string): string => resolvePath(fill(s));
 
   const repos: ResolvedRepo[] = [];
@@ -460,31 +469,37 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   p.throwIfAny(`${label(raw)} is invalid:`, 'Run "agentctl spec example" to see the format.');
 
   const basicFill = fill;
-  fill = (text: string): string => basicFill(text.replace(/\{worktree:([^{}|]+)(?:\|((?:[^{}]|\{task:[^{}]+\})+))?\}/g, (_match, name: string, fallback: string | undefined) => {
+  fill = (text: string, allowMissingClosed = false): string => basicFill(text.replace(/\{worktree:([^{}|]+)(?:\|((?:[^{}]|\{task:[^{}]+\})+))?\}/g, (_match, name: string, fallback: string | undefined) => {
     const matches = repos.filter(r => path.basename(r.path) === name);
     if (matches.length > 1) throw new AgentctlError(`${taskId}: ambiguous worktree repository "${name}"`);
     if (matches[0]) return matches[0].worktree;
-    if (fallback) return resolvePath(basicFill(fillTaskLinkTargets(fallback, config)));
+    if (fallback) return resolvePath(basicFill(fillTaskLinkTargets(fallback, config, {allowMissingClosed})));
     throw new AgentctlError(`${taskId}: no repository "${name}" for {worktree:${name}}; add it to repos or provide {worktree:${name}|~/fallback}`);
   }));
-  for (const r of repos) if (r.setup && !host) r.setup = r.setup.map(fill);
+  for (const r of repos) if (r.setup && !host) r.setup = r.setup.map(s => fill(s));
   // Links: later layers win for the same `from`.
   const linkByFrom = new Map<string, Link>();
   const projectLinkByFrom = new Map<string, Link>();
-  for (const link of [...(host ? [] : config.links), ...(project?.links ?? []), ...specLinks]) {
-    const target = host ? fill(link.to) : pathOf(fillTaskLinkTargets(fill(link.to), config));
+  const intentionalWorktrees = new Set<string>();
+  for (const link of [...(Array.isArray(h.links) && h.links.length === 0 ? [] : [...(host ? [] : config.links), ...(project?.links ?? [])]), ...specLinks]) {
+    const inherited = project?.links?.includes(link) === true;
+    const target = host ? fill(link.to) : pathOf(fillTaskLinkTargets(fill(link.to, inherited), config, {allowMissingClosed: inherited}));
     const expanded = fill(link.from);
     const from = path.isAbsolute(expanded) ? path.relative(repos[0]!.worktree, expanded) : expanded;
     if (!from || from === '.' || from.startsWith('../')) throw new AgentctlError(`${taskId}: link from must stay inside the primary worktree: ${expanded}`, missingLinkTargets([{ from: expanded, to: target }]).join('; ') || undefined);
-    validateLink(from, target, repos[0]!.worktree);
     const resolvedLink = { from, to: target };
     linkByFrom.set(from, resolvedLink);
-    if (project?.links?.includes(link)) projectLinkByFrom.set(from, resolvedLink);
+    if (project?.links?.includes(link)) {
+      projectLinkByFrom.set(from, resolvedLink);
+      if (/\{worktree:/.test(link.to)) intentionalWorktrees.add(from);
+    }
     else projectLinkByFrom.delete(from);
   }
 
-  // projectLinkByFrom holds exactly the inherited project links no spec link overrode; each stale one warns, whatever else the spec links.
-  const linkWarnings = [...staleProjectLinkWarnings([...projectLinkByFrom.values()], config), ...linkBaseWarnings([...linkByFrom.values()], repos)];
+  const projectDefaults = projectDefaultLinkPolicy([...projectLinkByFrom.values()], config, repos, repos[0]!.path, ctx.now, intentionalWorktrees);
+  for (const [from, link] of projectLinkByFrom) if (!projectDefaults.links.includes(link)) linkByFrom.delete(from);
+  for (const {from, to} of linkByFrom.values()) validateLink(from, to, repos[0]!.worktree);
+  const linkWarnings = [...projectDefaults.notices, ...staleProjectLinkWarnings(projectDefaults.links, config), ...linkBaseWarnings([...linkByFrom.values()], repos)];
 
   // Env: spec > project > global.
   const env: Record<string, string> = {};
@@ -528,8 +543,10 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     after,
     ...(Object.keys(afterVerdicts).length ? { afterVerdicts } : {}),
     touches,
+    ...(h.peak_ok === true ? {peakOk: true} : {}),
+    ...(h.keep_cache === true ? {keepCache: true} : {}),
     ...(h.integration === true ? {integration: true} : {}),
-    requested: { agent: agent as AgentName, model, effort },
+    requested: { agent: agent as AgentName, model, effort: orderedEffort },
   };
   if (specClass) spec.class = specClass;
   if (classWarnings.length > 0) spec.warnings = classWarnings;
