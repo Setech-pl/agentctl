@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.22.6] - 2026-11-17
 
+- UX0228-CLI-SCOPE: CLI revalidates the pulled cohort after confirmation and refuses changed scope. / CLI ponownie sprawdza zakres po potwierdzeniu i odmawia zamknięcia zmienionej listy odebranych zadań.
+
 - UX0228-PRIORITY: unpulled reports occupy the highlighted top section across cohorts, before every active/waiting row. / Nieodebrane raporty są w wyróżnionej sekcji na górze całej planszy, przed aktywnymi i czekającymi zadaniami.
 
 - UX0228-READS: pulled cohort previews validate only that cohort’s candidate reports, without inspecting unrelated reports or orphan windows. / Podgląd odebranych zadań sprawdza raporty wybranej kohorty, bez odczytu obcych raportów i okien.

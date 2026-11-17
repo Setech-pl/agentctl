@@ -55,3 +55,5 @@ Pulled report-ready tasks fold into “odebrane, do zamknięcia (N)” per cohor
 `board.pulled_collapse_after: 0` sets the delay in minutes (default: collapse immediately). `board.pulled_auto_close_after: false` disables automatic closure by default. Set a non-negative number of hours to opt in: watch closes only current pulled report-ready tasks after that age since pull, records `pulled-auto-close`, and keeps worktrees. Restart watch/board after changing these settings.
 
 `agentctl status` and MCP status group current pulled reports under “odebrane, niezamknięte”; JSON keeps the pulled marker. Use `agentctl close --cohort NAME --pulled` (preview and confirmation; `--yes` executes) or MCP `close` with `{cohort: "NAME", pulled: true}`, then confirm its preview token. Task IDs and worktree removal cannot be combined with this selection.
+
+CLI pulled closure refuses a changed task list or a report rewritten while awaiting confirmation; run the preview again to review the current scope.

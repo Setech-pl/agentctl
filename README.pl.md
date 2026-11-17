@@ -55,3 +55,5 @@ Odebrane raporty w stanie report-ready zwijają się w kohortach do „odebrane,
 `board.pulled_collapse_after: 0` określa opóźnienie w minutach (domyślnie natychmiast). `board.pulled_auto_close_after: false` domyślnie wyłącza automatyczne zamykanie. Liczba nieujemna włącza zamykanie przez watch po tylu godzinach od odebrania bieżącego raportu report-ready; zdarzenie `pulled-auto-close` trafia do dziennika, worktree pozostają. Po zmianie uruchom watch/board ponownie.
 
 `agentctl status` i status MCP grupują odebrane raporty jako „odebrane, niezamknięte”; JSON zachowuje znacznik odbioru. `agentctl close --cohort NAZWA --pulled` pokazuje listę i pyta o zgodę (`--yes` wykonuje); MCP `close` przyjmuje `{cohort: "NAZWA", pulled: true}`, potem potwierdzenie tokenem podglądu. Nie można łączyć tego wyboru z identyfikatorami zadań ani usuwaniem worktree.
+
+Zamykanie odebranych zadań w CLI odrzuca zmianę listy lub raportu w trakcie potwierdzania. Uruchom podgląd ponownie, aby zatwierdzić aktualny zakres.

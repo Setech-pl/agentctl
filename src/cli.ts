@@ -1306,10 +1306,15 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         const ctx = contextFor(Boolean(opts.dryRun));
         const closeOpts = { rmWorktree: Boolean(opts.rmWorktree) };
         if (opts.pulled) checkPulledClose(opts.cohort, typed, opts.rmWorktree);
-        const tasks = opts.pulled ? await pulledCohortTasks(ctx, findCohort(ctx.config, opts.cohort!).name) : await tasksOrCohort(ctx, typed, opts.cohort, false);
+        const pulledCohortName = opts.pulled ? findCohort(ctx.config, opts.cohort!).name : undefined;
+        const tasks = opts.pulled ? await pulledCohortTasks(ctx, pulledCohortName!) : await tasksOrCohort(ctx, typed, opts.cohort, false);
         const plan = await planClose(ctx, tasks, closeOpts);
         const summary = [`Close ${plan.length} task${plan.length === 1 ? '' : 's'}${closeOpts.rmWorktree ? ' and remove their worktrees (branches stay)' : ''}:`, ...plan.map((i) => `  ${i.line}`)];
         if (!(await confirmAction(ctx, summary, 'Go ahead?', Boolean(opts.yes) || Boolean(opts.dryRun)))) return;
+        if (opts.pulled && !opts.dryRun) {
+          const current = await pulledCohortTasks(ctx, pulledCohortName!);
+          if (JSON.stringify(current.sort()) !== JSON.stringify(plan.map(i => i.task).sort())) throw new AgentctlError('Pulled cohort scope changed; run close --pulled --cohort again to review it.');
+        }
         await closeTasks(ctx, plan.map((i) => i.task), closeOpts);
       }),
     );

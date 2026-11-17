@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'UX0228-CLI-SCOPE', fixedIn: '0.22.6', symptom: 'CLI could close a newly unread report after its pulled-only preview was confirmed.', scenarios: [s('ux0228-mcp-cli.test.ts', '^UX0228: CLI refuses')], noProof: 'The --pulled CLI selector is new in this unreleased feature; the deterministic confirmation callback reproduced the race before the fix.' },
   { id: 'UX0228-PRIORITY', fixedIn: '0.22.6', symptom: 'An alphabetically earlier active cohort appeared above unpulled reports in other cohorts.', scenarios: [s('ux0228-board.test.ts', '^UX0228: unpulled reports lead')] },
   { id: 'UX0228-READS', fixedIn: '0.22.6', symptom: 'Pulled cohort previews inspected unrelated report bodies before filtering the cohort.', scenarios: [s('ux0228-mcp-cli.test.ts', '^UX0228: pulled cohort preview')], noProof: 'Introduced with the unreleased pulled selector; v0.22.5 has no pulled selector. The deterministic read-count test failed before this fix.' },
   { id: 'UX0228-TEXT', fixedIn: '0.22.6', symptom: 'New pulled hints exceeded 80 columns and the new status marker interrupted legacy field order.', scenarios: [s('board.test.ts', 'a line of the list is at most 80'), s('economy.test.ts', 'economy: concise reads')], noProof: 'Introduced during this unreleased feature; v0.22.5 already passes these width/format scenarios.' },

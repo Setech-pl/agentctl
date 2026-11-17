@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| UX0228-CLI-SCOPE | CLI could close a newly unread report after its pulled-only preview was confirmed. | `tests/ux0228-mcp-cli.test.ts` (`^UX0228: CLI refuses`) | 0.22.6 | not proven: The --pulled CLI selector is new in this unreleased feature; the deterministic confirmation callback reproduced the race before the fix. |
 | UX0228-PRIORITY | An alphabetically earlier active cohort appeared above unpulled reports in other cohorts. | `tests/ux0228-board.test.ts` (`^UX0228: unpulled reports lead`) | 0.22.6 | fails on v0.22.5 (1 failing of 1) |
 | UX0228-READS | Pulled cohort previews inspected unrelated report bodies before filtering the cohort. | `tests/ux0228-mcp-cli.test.ts` (`^UX0228: pulled cohort preview`) | 0.22.6 | not proven: Introduced with the unreleased pulled selector; v0.22.5 has no pulled selector. The deterministic read-count test failed before this fix. |
 | UX0228-TEXT | New pulled hints exceeded 80 columns and the new status marker interrupted legacy field order. | `tests/board.test.ts` (`a line of the list is at most 80`)<br>`tests/economy.test.ts` (`economy: concise reads`) | 0.22.6 | not proven: Introduced during this unreleased feature; v0.22.5 already passes these width/format scenarios. |

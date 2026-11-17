@@ -59,3 +59,13 @@ it('UX0228: pulled cohort preview never reads unrelated report bodies', async ()
     assert.equal(unrelatedReads, 0, 'only selected-cohort reports may be inspected');
   } finally { fs.readFileSync = read; }
 });
+it('UX0228: CLI refuses a changed pulled scope after confirmation', async () => {
+  const w = world('cli-scope'); const read = w.add('READ', 3); w.add('NEW', null);
+  const result = await runCli(w.config, w.runner, ['close', '--cohort', 'wave', '--pulled'], {
+    confirm: async () => { fs.utimesSync(read.report, now / 1000, now / 1000); return true; },
+  });
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /scope changed/);
+  assert.equal(readTaskRecord(w.config, 'read')?.closed, undefined);
+  assert.equal(readTaskRecord(w.config, 'new')?.closed, undefined);
+});
