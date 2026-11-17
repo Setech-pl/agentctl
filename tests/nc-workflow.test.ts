@@ -95,7 +95,7 @@ describe('0.17.4 outputs are facts, independent of report readiness', () => {
   it('rejects nonexistent branches/SHAs and ambiguous repo names without altering the report', async () => {
     const f = fixture('invalid-refs', '', (cmd, args) => cmd === 'git' ? { code: 1 } : undefined);
     const r = seedTask(f.config, 'T1', { repos: [{ path: f.repo, worktree: f.repo }] }); report(r, { commits: [{ repo: 'repo', branch: 'missing', sha: A }, { repo: 'other', branch: 'x', sha: A }] });
-    const data = await readOutputs(f.ctx, r); assert.equal(data.outputs_errors.length, 3); assert.equal(data.outputs?.commits.length, 2); assert.equal((await status(f.ctx))[0]?.report, 'yes');
+    const data = await readOutputs(f.ctx, r); assert.equal(data.outputs_errors.length, 2); assert.equal(data.outputs_warnings?.length, 1); assert.equal(data.outputs?.commits.length, 2); assert.equal((await status(f.ctx))[0]?.report, 'yes');
   });
   it('flags duplicate integrate entries and conflicting tips of the same branch with source task IDs', () => {
     const data = (sha: string) => parseOutputs('```agentctl-outputs\n' + YAML.stringify({ version: 1, verdict: 'PASS', integrate: [{ repo: 'app', branch: 'feature', sha }] }) + '```');

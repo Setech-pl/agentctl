@@ -239,7 +239,7 @@ function conciseReport(text: string, data: OutputData, review = false): string {
   // Legacy reports can end inside a checks section; do not return that list as a summary.
   const lastHeading = markdownHeadings(summary).at(-1);
   const safeSummary = lastHeading && /check|test|gate|walidac/i.test(lastHeading.title) ? '' : summary;
-  return `${data.outputs_errors.length ? `outputs_errors: ${JSON.stringify(data.outputs_errors)}\n` : ''}${data.outputs_pending ? '"outputs_pending": true\n' : ''}verdict: ${verdict}\ndecisions: ${decisions}\nactions: ${actions}\n${safeSummary.slice(-3000)}`.trim();
+  return `${data.outputs_warnings?.length ? `outputs_warnings: ${JSON.stringify(data.outputs_warnings)}\n` : ''}${data.outputs_errors.length ? `outputs_errors: ${JSON.stringify(data.outputs_errors)}\n` : ''}${data.outputs_pending ? '"outputs_pending": true\n' : ''}verdict: ${verdict}\ndecisions: ${decisions}\nactions: ${actions}\n${safeSummary.slice(-3000)}`.trim();
 }
 
 async function pullSummaries(ctx: Context, rows: StatusRow[], ack = false): Promise<ToolResult> {
@@ -303,6 +303,7 @@ function statusRowForChat(r: StatusRow): Record<string, unknown> {
     review_of: r.reviewOf ?? null,
     outputs_partial: r.outputs_partial ?? false,
     outputs_errors: r.outputs_errors ?? [],
+    outputs_warnings: r.outputs_warnings ?? [],
     reportCandidate: r.reportCandidate ?? null,
     reportSource: r.reportSource ?? null,
     reportConfirmed: r.reportConfirmed ?? null,
@@ -607,7 +608,7 @@ async function runCohortShow(deps: McpDeps, args: { cohort: string }): Promise<T
   const rows = cohortRows(await collectStatus(ctx, { archived: true }), meta.name);
   const views = (await queueViews(ctx)).filter((v) => cohortEntries([v.entry], meta.name).length > 0);
   const queued = views.map((v) => ({ task: v.entry.task, position: v.position, startCondition: v.condition.text, blocked: v.condition.kind === 'blocked' }));
-  const outputs = aggregateOutputs(rows.filter(r => r.report === 'yes').map(r => ({ task: r.task, reviewOf: r.reviewOf, data: { outputs: r.outputs ?? null, outputs_valid: r.outputs_valid ?? false, outputs_partial: r.outputs_partial ?? false, outputs_errors: r.outputs_errors ?? [], ...(r.outputs_pending ? { outputs_pending: true } : {}) } })));
+  const outputs = aggregateOutputs(rows.filter(r => r.report === 'yes').map(r => ({ task: r.task, reviewOf: r.reviewOf, data: { outputs: r.outputs ?? null, outputs_valid: r.outputs_valid ?? false, outputs_partial: r.outputs_partial ?? false, outputs_errors: r.outputs_errors ?? [], outputs_warnings: r.outputs_warnings ?? [], ...(r.outputs_pending ? { outputs_pending: true } : {}) } })));
   const head = { cohort: meta.name, created: meta.created || null, note: meta.note ?? null, tasks: rows.length, queued: queued.length };
   return ok(`${JSON.stringify(head)}\n\n${JSON.stringify({ ...head, tasks: rows.map(statusRowForChat), queued, ...outputs }, null, 2)}`);
 }
@@ -701,7 +702,7 @@ async function runGetReport(deps: McpDeps, args: { task: string; section?: strin
     return { text: `=== ${record.task} (${record.agent} ${record.model}/${record.effort}) ===\n${conciseReport(full, await readOutputs(ctx, record), record.reviewOf != null)}${warning ? `\n${JSON.stringify({ warning })}` : ''}`, ...(args.mark_pulled !== false ? { onDelivered: () => markRead(createHash('sha256').update(full).digest('hex')) } : {}) };
   }
   const validated = await readOutputs(ctx, record);
-  const outputs = (args.detail || args.mode === 'full') && !(args.offset ?? 0) && !(args.byte_offset ?? 0) ? validated : validated.outputs_errors.length ? {outputs_errors: validated.outputs_errors} : {};
+  const outputs = (args.detail || args.mode === 'full') && !(args.offset ?? 0) && !(args.byte_offset ?? 0) ? validated : validated.outputs_errors.length || validated.outputs_warnings?.length ? {outputs_errors: validated.outputs_errors, outputs_warnings: validated.outputs_warnings ?? []} : {};
   const render = (r: ReportPage, pulled: boolean): ToolResult => {
     const { text, signature: _signature, ...page } = r;
     return ok(`=== ${record.task} (${record.agent} ${record.model}/${record.effort}) ===\n${text}\n--- page ---\n${JSON.stringify({ ...page, pulled, ...outputs, ...(warning ? { warning } : {}) })}`);

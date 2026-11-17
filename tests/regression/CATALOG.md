@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| FIELD0230-F12 | Integrate base and advisory external repository references invalidated outputs. | `tests/field0230-outputs.test.ts` | 0.22.8 | fails on v0.22.7 (1 failing of 1) |
 | FIELD0230-F11 | Closed-task project links were silently dropped with a warning instead of blocking unsafe defaults. | `tests/field0230-links.test.ts` | 0.22.8 | fails on v0.22.7 (1 failing of 1) |
 | FIELD0230-F10 | Kimi effort medium was rejected instead of mapped to high with a warning. | `tests/field0230-effort.test.ts` | 0.22.8 | fails on v0.22.7 (1 failing of 1) |
 | FIELD0230-F9 | Tool identity and local preview expiration were inconsistent across reads/writes. | `tests/field0230-reads.test.ts` (`^F9:`) | 0.22.8 | fails on v0.22.7 (1 failing of 2) |

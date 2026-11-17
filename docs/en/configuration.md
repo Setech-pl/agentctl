@@ -334,3 +334,5 @@ After `notify.attention_after_min` (default 15) continuously in needs-trust/need
 Every MCP tool accepts optional `as`; only WALL/events use it. Status cohort filters use the fresh watch snapshot and report overlap only when collisions exist. Confirmation previews show both ISO `expires_at` and `expires_at_local`.
 
 Project default links to closed/cancelled/archived task worktrees are errors, including missing targets. Use the spec’s own backend worktree (`{worktree:backend}` with backend in repos), or `links: []`. A default link to a repository already supplied by the spec is skipped; intentional `{worktree:...}` links remain. Explicit spec links remain an opt-in and still undergo target checks.
+
+`agentctl-outputs` integrate entries accept optional `base` alongside repo/branch/sha/note. A repository outside the task spec is retained with `outputs_warnings` and a hint to add it to repos; its Git references cannot be verified and are not probed. This advisory does not invalidate outputs; ambiguous repository aliases and malformed references remain errors.

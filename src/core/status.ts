@@ -48,6 +48,7 @@ export interface StatusRow {
   outputs_partial?: boolean;
   outputs_pending?: boolean;
   outputs_errors?: string[];
+  outputs_warnings?: string[];
   verdict?: OutputVerdict;
   decisionsCount?: number;
   actionsCount?: number;

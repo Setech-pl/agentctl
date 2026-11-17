@@ -1719,8 +1719,8 @@
     {
       "name": "equivalents",
       "kind": "read",
-      "title": "Read the equivalents table for active providers, including Kimi when enabled",
-      "description": "Read the equivalents table for active providers, including Kimi when enabled. CLI: agentctl capacity. Use when you need these facts; no mcp.allow required. Every response is bounded by mcp.max_response_kb (default 8 KiB). A truncated JSON envelope gives response_id and next_response_offset; call response_page with only those continuation fields to retrieve the next fragment without executing again. Concatenate fragment values to recover the original text/JSON.",
+      "title": "Read the equivalents table for active providers. Kimi effort medium is mapped to high with a warning (low/high/max supported)",
+      "description": "Read the equivalents table for active providers. Kimi effort medium is mapped to high with a warning (low/high/max supported). CLI: agentctl capacity. Use when you need these facts; no mcp.allow required. Every response is bounded by mcp.max_response_kb (default 8 KiB). A truncated JSON envelope gives response_id and next_response_offset; call response_page with only those continuation fields to retrieve the next fragment without executing again. Concatenate fragment values to recover the original text/JSON.",
       "input": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",

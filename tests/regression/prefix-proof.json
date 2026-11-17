@@ -250,6 +250,16 @@
       "F11: closed project defaults error with actionable hint unless disabled or the spec supplies that repo"
     ]
   },
+  "FIELD0230-F12": {
+    "rev": "v0.22.7",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "F12: integrate base is accepted; external repos warn with a hint without invalidating outputs or probing Git",
+      "F12: integrate base is accepted; external repos warn with a hint without invalidating outputs or probing Git"
+    ]
+  },
   "FIELD0230-F3": {
     "rev": "v0.22.7",
     "outcome": "FAILS",

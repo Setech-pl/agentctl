@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'FIELD0230-F12', fixedIn: '0.22.8', symptom: 'Integrate base and advisory external repository references invalidated outputs.', scenarios: [s('field0230-outputs.test.ts')] },
   { id: 'FIELD0230-F11', fixedIn: '0.22.8', symptom: 'Closed-task project links were silently dropped with a warning instead of blocking unsafe defaults.', scenarios: [s('field0230-links.test.ts')] },
   { id: 'FIELD0230-F10', fixedIn: '0.22.8', symptom: 'Kimi effort medium was rejected instead of mapped to high with a warning.', scenarios: [s('field0230-effort.test.ts')] },
   { id: 'FIELD0230-F9', fixedIn: '0.22.8', symptom: 'Tool identity and local preview expiration were inconsistent across reads/writes.', scenarios: [s('field0230-reads.test.ts', '^F9:')] },

@@ -334,3 +334,5 @@ Po `notify.attention_after_min` (domyślnie 15) ciągłego needs-trust/needs-inp
 Każde narzędzie MCP przyjmuje opcjonalne `as`; wykorzystują je WALL/events. Filtr kohorty statusu korzysta ze świeżego snapshotu watch, a overlap pojawia się tylko przy kolizjach. Podglądy potwierdzeń pokazują ISO `expires_at` i `expires_at_local`.
 
 Domyślne linki projektu do worktree zadań zamkniętych/anulowanych/zarchiwizowanych są błędem, także gdy cel już nie istnieje. Użyj własnego worktree backendu (`{worktree:backend}` z backendem w repos) albo `links: []`. Domyślny link do repo już zawartego w spec jest pomijany; celowe linki `{worktree:...}` pozostają. Jawne linki spec są świadomym wyborem i nadal przechodzą sprawdzenia celu.
+
+Wpisy integrate w `agentctl-outputs` przyjmują opcjonalne `base` obok repo/branch/sha/note. Repo spoza spec jest zachowane z `outputs_warnings` i wskazówką dodania do repos; jego referencje Git nie mogą być zweryfikowane i nie są sprawdzane. Ostrzeżenie nie unieważnia outputs; niejednoznaczne aliasy repo i błędne referencje nadal są błędami.

@@ -262,12 +262,12 @@ describe('FIX2 B: outputs repo, verdict label, pending block', () => {
       const data = await readOutputs(f.ctx, rev); assert.deepEqual(data.outputs_errors, [], name);
     }
   });
-  it('B1/N1: an unknown or ambiguous repo is an error that lists the accepted values, once with a count', async () => {
+  it('B1/N1: an unknown repo warns and an ambiguous repo errors, listing accepted values once with a count', async () => {
     const f = fixture('b1-repo-bad'); const other = path.join(f.root, 'x', 'repo'); fs.mkdirSync(other, { recursive: true });
     const r = seedTask(f.config, 'T', { repos: [{ path: f.repo, worktree: `${f.repo}-t`, base: A }, { path: other, worktree: `${other}-t`, base: A }] });
     write(r, block(`  - {repo: nowhere, branch: t, sha: ${sha}}\n  - {repo: nowhere, branch: t, sha: ${sha}}\n  - {repo: nowhere, branch: t, sha: ${sha}}\n  - {repo: repo, branch: t, sha: ${sha}}\n`));
     const data = await readOutputs(f.ctx, r);
-    const missing = data.outputs_errors.filter(e => e.startsWith('repo nowhere')); assert.equal(missing.length, 1); assert.match(missing[0]!, /\(3 entries\)/); assert.ok(missing[0]!.includes(f.repo) && missing[0]!.includes(`${f.repo}-t`));
+    const missing = (data.outputs_warnings ?? []).filter(e => e.startsWith('repo nowhere')); assert.equal(missing.length, 1); assert.match(missing[0]!, /\(3 entries\)/); assert.ok(missing[0]!.includes(f.repo) && missing[0]!.includes(`${f.repo}-t`));
     assert.ok(data.outputs_errors.some(e => /^repo repo: ambiguous/.test(e)), data.outputs_errors.join('|'));
   });
   it('B2: the protocol injected into agents says that one-key maps and lower-case results are accepted, and what repo means', () => {

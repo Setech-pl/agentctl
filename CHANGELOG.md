@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.22.8] - 2026-11-17
+
+- FIELD0230-F12: accept integrate base; external output repositories are advisory warnings with hints. / Akceptacja base w integrate; repo spoza spec to ostrzeżenia z podpowiedzią.
+
 - FIELD0230-F11: closed-task project link defaults now error with own-backend/links: [] hints; skip redundant links when the spec supplies that repo. / Błąd domyślnych linków do zamkniętych zadań z podpowiedzią własnego backendu/links: []; pominięcie zbędnych przy repo w spec.
 
 - FIELD0230-F10: Kimi medium maps to high with a warning; requested effort remains visible. / Kimi medium mapowane na high z ostrzeżeniem i zachowaniem zamówionego effort.

@@ -62,6 +62,10 @@
             "minLength": 1,
             "pattern": "^[a-f0-9]{7,40}$"
           },
+          "base": {
+            "type": "string",
+            "minLength": 1
+          },
           "note": {
             "type": "string"
           }

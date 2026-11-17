@@ -78,7 +78,7 @@ Arguments marked ? are optional. Provider fields below include enabled optional 
 | `mcp_check` | read | `as?` | Inspect stale MCP server processes without stopping them |
 | `spec_example` | read | `as?` | Read an example spec before writing a new order |
 | `doctor` | read | `as?`, `project?` | Diagnose the installation, permissions and disk |
-| `equivalents` | read | `as?` | Read the equivalents table for active providers, including Kimi when enabled |
+| `equivalents` | read | `as?` | Read the equivalents table for active providers. Kimi effort medium is mapped to high with a warning (low/high/max supported) |
 | `config_show` | read | `as?` | Read effective configuration with secrets masked; queue_hold (first) is usage.queue_hold per active provider |
 | `manager_status` | read | `as?` | Inspect the manager session |
 | `away_status` | read | `as?` | Inspect away mode |
