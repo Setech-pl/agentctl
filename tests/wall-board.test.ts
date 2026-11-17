@@ -115,7 +115,7 @@ describe('WALL view: the Ink front', () => {
     keys.write('W');
     await until(() => term.seen('WALL – channels'));
     await until(() => term.seen('shared:sim'));
-    for (let i = 0; i < 5; i++) { keys.write('j'); await wait(30); }
+    for (let i = 0; i < 4; i++) { keys.write('j'); await wait(30); }
     keys.write('\r');
     await until(() => term.seen('Building heights v2?'));
     keys.write('j'); await wait(30); keys.write('j'); await wait(30);
