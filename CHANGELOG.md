@@ -4,9 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
-- REL0243-PREVIEW/LINKS: remote MCP disk previews use host health; remote project links honor links: [] and reject closed-task defaults. / Zdalny podgląd dysku MCP używa hosta; linki projektu respektują links: [] i odrzucają domyślne cele zamkniętych zadań.
 
 ## [0.23.1] - 2026-11-17
+
+- REL0243-PREVIEW/LINKS: remote MCP disk previews use host health; remote project links honor links: [] and reject closed-task defaults. / Zdalny podgląd dysku MCP używa hosta; linki projektu respektują links: [] i odrzucają domyślne cele zamkniętych zadań.
 
 - Cumulative EN/PL release notes cover 0.22.0–0.23.1 and replace the 0.22.3 upgrade notes. / Zbiorcze informacje EN/PL obejmują 0.22.0–0.23.1 i zastępują instrukcję wydania 0.22.3.
 - REL0243: merge all 0.22.5–0.22.8 fixes into remote hosts; remote GC honors pin/keep, explicit include_cache, keep_cache, report references and unpushed commits; remote setup checks host work_dir disk; snapshots retain host disk identity. / Scalenie poprawek 0.22.5–0.22.8 z hostami; zdalny GC chroni pin/keep, cache, raporty i niewysłane commity; setup sprawdza dysk work_dir hosta, snapshot zachowuje host dysku.

@@ -1,3 +1,4 @@
+import { writeHostsCache } from '../src/core/hosts.ts';
 import { publishMcpSnapshot } from '../src/core/mcp-tools.ts';
 import { setProviderHolds } from '../src/core/provider-hold.ts';
 import { adoptTask } from '../src/core/adopt.ts';
@@ -259,6 +260,7 @@ it('remote limits enforce both provider account and host cap, including a batch 
   const raws = splitSpecs('---\ntask: R-2\nhost: pc\nagent: claude\nrepos: [{path: app, base: origin/main, branch: remote-two}]\n---\nSecond task.');
   const added = await commitQueueAdd(w.ctx, (await planQueueAdd(w.ctx, raws)).items);
   assert.equal(added[0]!.host, 'pc');
+  await writeHostsCache(w.runner, [{name: 'pc', state: 'reachable', probedAt: new Date(w.runner.now()).toISOString(), disk: {workDir: w.work, freeKb: 256 * 1024 ** 2, totalKb: 1024 ** 3}}]);
   assert.equal(describeQueue(w.config, added, live)[0]!.condition.kind, 'slot');
   const memory = new QueueMemory(); assert.deepEqual(await queueTick(w.ctx, memory, { notify: async () => {} }), []);
   w.config.hosts.pc!.limits!.claude = 3;
@@ -348,6 +350,10 @@ it('REL0243-DISK: remote admission probes host work_dir and fails closed before 
   assert.ok(!w.commands.some(c => c[0] === 'git' && c.includes('add')), 'no worktree mutation');
   w.offline(true);
   assert.match((await freshTaskDiskStartHold(w.ctx, 'pc', []))!, /nie można/);
+  const {refreshDiskFreeSpace} = await import('../src/core/disk.ts');
+  const disk = await refreshDiskFreeSpace(w.ctx, {volumes: [{host: 'pc', workDir: w.work, device: 'host:pc', paths: [w.work], availableBytes: 99, totalBytes: 100, level: 'ok'}], worktreeBytes: null, measuredAt: new Date(w.runner.now()).toISOString(), level: 'ok'});
+  assert.equal(disk.volumes[0]!.availableBytes, null, 'missing host health never becomes local disk free');
+  assert.equal(disk.volumes[0]!.host, 'pc');
 });
 it('REL0243-REMOTE: peak and provider holds stop remote setup; scrolled answers and snapshots retain host identity', async () => {
   const w = world();

@@ -40,7 +40,6 @@ Agentctl runs with your permissions; worktrees are not an OS sandbox. Folder tru
 
 Use `host: pc` to run a task on a configured SSH host: remote worktree/setup/agent, ordinary task operations and a local report mirror. [Remote task setup and PC example](docs/en/hosts.md). Account/host limits, provider holds, safe remote GC, per-host board tasks and restart/adopt/resume are included in 0.23.1; queued tasks can change location with `move --host pc|local`. [Release notes](docs/release-notes/0.23.1.en.md).
 
-[Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [MIT license](LICENSE). Use the repository gate and task-owned cache. This release combines the complete manuals with the 0.22.2 operations fixes and small diagnostics/help fixes.
 [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [MIT license](LICENSE). Use the repository gate and task-owned cache.
 
 GC checks `git status --porcelain --untracked-files=normal` in **every** task worktree, plus commits ahead of upstream (or the recorded base). Previews show dirty file and unpushed commit counts per repo, even with cached sizes. Dirty/unpushed worktrees stay unless the owner explicitly uses CLI `--force-dirty` or MCP `force_dirty: [TASK]`; apply checks again. Ignored files are excluded.
