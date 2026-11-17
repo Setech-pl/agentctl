@@ -45,6 +45,6 @@ it('A2: known chat receives the open inbox even when task reads exhaust the resp
   const pending = MCP_TOOLS.find(t => t.name === 'events_since')!.run(deps, {as: 'chat:nc'});
   for (let i = 0; i < 50; i++) await new Promise(yes => setImmediate(yes));
   time = 8000; expire!();
-  try { const result = await pending; assert.match(result.text, /WALL do Ciebie \(open\)/); assert.ok(result.text.includes(`${m.id}: Read me under load`), result.text); }
+  try { const result = await pending; assert.match(result.text, /WALL do Ciebie \(open\)/); assert.ok(result.text.includes(`${m.id}: Read me under load (0h)`), result.text); }
   finally {release();}
 });

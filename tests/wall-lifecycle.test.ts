@@ -177,4 +177,25 @@ describe('WALL lifecycle (fake clock, no inference/network)', () => {
     assert.equal(findMessage(w.config, q.id).status, 'open');
   });
 
+
+  it('WALL0229-HISTORY: retains repeated status records at one timestamp through archive and retry', async () => {
+    const w = world('same-time-history');
+    const q = await w.post();
+    await setStatus(w.ctx, OWNER_IDENTITY, { id: q.id, status: 'accepted', note: 'close' });
+    await setStatus(w.ctx, OWNER_IDENTITY, { id: q.id, status: 'open' });
+    await setStatus(w.ctx, OWNER_IDENTITY, { id: q.id, status: 'accepted', note: 'close' });
+    assert.equal(findMessage(w.config, q.id).status, 'accepted');
+    assert.deepEqual(findMessage(w.config, q.id).history.map(h => h.status), ['accepted', 'open', 'accepted']);
+    const raw = fs.readFileSync(channelFile(w.config, q.channel), 'utf8');
+    await w.runner.sleep(15 * day);
+    await maintainWall(w.ctx);
+    const archive = path.join(wallDir(w.config), 'archive', 'shared:sim-2026-11.jsonl');
+    assert.equal(fs.readFileSync(archive, 'utf8'), raw);
+    fs.writeFileSync(channelFile(w.config, q.channel), raw);
+    assert.deepEqual(findMessage(w.config, q.id).history.map(h => h.status), ['accepted', 'open', 'accepted']);
+    await maintainWall(w.ctx);
+    assert.equal(fs.readFileSync(archive, 'utf8'), raw);
+    assert.equal(findMessage(w.config, q.id).history.length, 3);
+  });
+
 });

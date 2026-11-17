@@ -260,7 +260,6 @@ function fold(index: ChannelIndex, record: WallPostRecord | WallStatusRecord, of
   if (!message) return;
   if (record.reminder) { message.remindedAt = record.ts; return; }
   const change: WallStatusChange = { status: record.status, ts: record.ts, by: record.by, ...(record.for ? { for: record.for } : {}), ...(record.note ? { note: record.note } : {}), ...(record.via ? { via: record.via } : {}) };
-  if (message.history.some(h => JSON.stringify(h) === JSON.stringify(change))) return;
   message.status = record.status;
   message.history.push(change);
 }
@@ -335,6 +334,13 @@ export function channelMessages(config: GlobalConfig, channel: string): WallHead
   try { active = fs.readFileSync(file); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; active = Buffer.alloc(0); }
   const index: ChannelIndex = { size: 0, ino: 0, messages: [] };
   for (const source of archiveFiles(config, channel)) index.messages.push(...archiveHeaders(source));
+  // Only deduplicate across the archive/active boundary. Identical status records
+  // within a file can be legitimate close/reopen/close operations at one timestamp.
+  const copiedStatuses = new Map<string, number>();
+  for (const m of index.messages) for (const h of m.history) {
+    const key = `${m.id}\0${JSON.stringify(h)}`;
+    copiedStatuses.set(key, (copiedStatuses.get(key) ?? 0) + 1);
+  }
   const consume = (data: Buffer) => {
     let start = 0;
     for (;;) {
@@ -342,7 +348,15 @@ export function channelMessages(config: GlobalConfig, channel: string): WallHead
       if (end < 0) break;
       try {
         const r: unknown = JSON.parse(data.subarray(start, end).toString('utf8'));
-        if (isRecord(r)) fold(index, r, start, end - start);
+        if (isRecord(r)) {
+          if (r.type === 'status' && !r.reminder) {
+            const change: WallStatusChange = { status: r.status, ts: r.ts, by: r.by, ...(r.for ? { for: r.for } : {}), ...(r.note ? { note: r.note } : {}), ...(r.via ? { via: r.via } : {}) };
+            const key = `${r.id}\0${JSON.stringify(change)}`;
+            const copies = copiedStatuses.get(key) ?? 0;
+            if (copies > 0) { copiedStatuses.set(key, copies - 1); start = end + 1; continue; }
+          }
+          fold(index, r, start, end - start);
+        }
       } catch { /* tolerate broken lines as for the active index */ }
       start = end + 1;
     }
@@ -454,7 +468,15 @@ export async function maintainWall(ctx: Context): Promise<void> {
       for (const [dest, moving] of groups) {
         fs.mkdirSync(path.dirname(dest), { recursive: true });
         const existing = fs.existsSync(dest) ? fs.readFileSync(dest, 'utf8').split('\n').filter(Boolean) : [];
-        atomicWriteFile(dest, [...new Set([...existing, ...moving])].join('\n') + '\n');
+        const copies = new Map<string, number>();
+        for (const line of existing) copies.set(line, (copies.get(line) ?? 0) + 1);
+        const merged = [...existing];
+        for (const line of moving) {
+          const count = copies.get(line) ?? 0;
+          if (count > 0) copies.set(line, count - 1);
+          else merged.push(line);
+        }
+        atomicWriteFile(dest, merged.join('\n') + '\n');
       }
       if (groups.size) atomicWriteFile(file, keep.length ? keep.join('\n') + '\n' : '');
     }

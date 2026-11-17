@@ -778,6 +778,27 @@
       "tests/wall2-secrets.test.ts"
     ]
   },
+  "WALL0229-HISTORY": {
+    "rev": "83e0350",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "WALL0229-HISTORY: retains repeated status records at one timestamp through archive and retry",
+      "WALL lifecycle (fake clock, no inference/network)",
+      "WALL0229-HISTORY: retains repeated status records at one timestamp through archive and retry"
+    ]
+  },
+  "WALL0229-INBOX": {
+    "rev": "dd6d977",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "A2: known chat receives the open inbox even when task reads exhaust the response budget",
+      "A2: known chat receives the open inbox even when task reads exhaust the response budget"
+    ]
+  },
   "X1": {
     "rev": "v0.18.2",
     "outcome": "IMPORT-ERROR",

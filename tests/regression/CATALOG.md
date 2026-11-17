@@ -10,6 +10,8 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| WALL0229-HISTORY | Archive retry deduplication collapsed legitimate close/reopen/close records sharing a timestamp. | `tests/wall-lifecycle.test.ts` (`^WALL0229-HISTORY:`) | 0.22.7 | not proven: Unreleased lifecycle API is absent on v0.22.6 (import error); this scenario fails on pre-fix 83e0350 (1 failing test), recorded in prefix-proof.json. |
+| WALL0229-INBOX | Adding WALL age interrupted the stable ID/subject prefix in the budget fallback inbox. | `tests/a2-wall-events.test.ts` (`^A2: known chat receives`) | 0.22.7 | not proven: Introduced during unreleased lifecycle work; v0.22.6 passes. Existing A2 scenario fails on dd6d977 before correction (1 failing test), recorded in prefix-proof.json. |
 | UX0228-CLI-SCOPE | CLI could close a newly unread report after its pulled-only preview was confirmed. | `tests/ux0228-mcp-cli.test.ts` (`^UX0228: CLI refuses`) | 0.22.6 | not proven: The --pulled CLI selector is new in this unreleased feature; the deterministic confirmation callback reproduced the race before the fix. |
 | UX0228-PRIORITY | An alphabetically earlier active cohort appeared above unpulled reports in other cohorts. | `tests/ux0228-board.test.ts` (`^UX0228: unpulled reports lead`) | 0.22.6 | fails on v0.22.5 (1 failing of 1) |
 | UX0228-READS | Pulled cohort previews inspected unrelated report bodies before filtering the cohort. | `tests/ux0228-mcp-cli.test.ts` (`^UX0228: pulled cohort preview`) | 0.22.6 | not proven: Introduced with the unreleased pulled selector; v0.22.5 has no pulled selector. The deterministic read-count test failed before this fix. |
