@@ -1,31 +1,10 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import path from 'node:path';
 import { it } from 'node:test';
-import { Context } from '../src/core/context.ts';
-import { collectStatus } from '../src/core/status.ts';
-import { autoClosePulled } from '../src/core/pulled-auto-close.ts';
-import { readJournal } from '../src/core/journal.ts';
-import { readTaskRecord, setHeaderFields, taskFile } from '../src/core/taskstore.ts';
 import { MCP_TOOLS } from '../src/core/mcp-tools.ts';
-import { collectEvents } from '../src/core/chat-events.ts';
-import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch, runCli } from './helpers.ts';
-const scratch = useScratch();
-const now = Date.parse('2026-11-17T12:00:00Z');
-function world(name: string, extra = '') {
-  const config = makeConfig(scratch.sub(name), `mcp: {allow: [close]}\n${extra}`);
-  const tmux = new FakeTmux();
-  const runner = new DiskRunner({ dryRun: false, startTime: now, respond: tmux.respond });
-  const ctx = new Context(runner, config, () => {});
-  const add = (task: string, age: number | null, cohort = 'wave') => {
-    const record = seedTask(config, task, { cohort, turnEndedAt: new Date(now - 86400_000).toISOString(), ...(age !== null ? { pulled: new Date(now - age * 3600_000).toISOString() } : {}) });
-    fs.mkdirSync(path.dirname(record.report), { recursive: true });
-    fs.writeFileSync(record.report, 'Werdykt: PASS\n<!-- agentctl:report-end -->\n');
-    fs.utimesSync(record.report, (now - 86400_000) / 1000, (now - 86400_000) / 1000);
-    return record;
-  };
-  return { config, tmux, runner, ctx, add, deps: { context: () => ctx, notify: async () => {} } };
-}
+import { readTaskRecord } from '../src/core/taskstore.ts';
+import { runCli } from './helpers.ts';
+import { world, now } from './ux0228-fixture.ts';
 const tool = (name: string) => MCP_TOOLS.find(t => t.name === name)!;
 it('UX0228: MCP pulled cohort close previews only read reports, confirms exact scope and refuses removal', async () => {
   const w = world('mcp'); w.add('READ', 3); w.add('NEW', null); w.add('OTHER', 3, 'other');

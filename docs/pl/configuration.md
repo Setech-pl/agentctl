@@ -190,7 +190,9 @@ Typy/domysły sprawdzono z [config.ts](../../src/core/config.ts), [spec.ts](../.
 | `manager.effort` | `low` `medium` `high` `xhigh` `max` · `medium` · g | Effort managera. |
 | `manager.guide` | path · none · g | Dodatkowy przewodnik managera. |
 | `manager.autostart` | boolean · `false` · g | Czy up może uruchomić managera. |
-| `board.auto_hide_pulled_dead` | boolean · `true` · g | Ukryj odebrany raport bez żywego okna. |
+| `board.auto_hide_pulled_dead` | boolean · `true` · g | Ukryj odebrane zakończone zadania poza report-ready; report-ready pozostaje widoczne do zamknięcia. |
+| `board.pulled_collapse_after` | number · `0` · g | Minuty od odebrania raportu do zwinięcia w kohorcie; 0 natychmiast. |
+| `board.pulled_auto_close_after` | number/false · `false` · g | Jawna zgoda właściciela: watch zamyka odebrane report-ready po N godzinach od odbioru, ze zdarzeniem, bez usuwania worktree. |
 | `board.mouse` | boolean · `true` · g | Mysz tylko tej sesji tmux. |
 | `board.return_key` | tmux key name or `false` · `F12` · g | Klawisz powrotu; null bez wiązania. |
 | `board.model_versions` | alias → quoted version mapping · `{}` · g | Jawne fallbacki wersji aliasów, bez zgadywania. |

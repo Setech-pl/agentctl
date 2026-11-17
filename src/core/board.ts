@@ -825,6 +825,11 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
   const cohortMetas = listCohorts(config);
   const cohortNotes = Object.fromEntries(cohortMetas.filter(m => m.note?.startsWith('CONSULT ')).map(m => [cohortKey(m.name), m.note!]));
   const archivedCohorts = cohortMetas.filter((m) => m.archived).map((m) => cohortKey(m.name));
+  if (selected?.startsWith('@pulled:')) {
+    const cohort = selected.slice(8);
+    const tasks = rows.filter(r => pulledOpen(r) && groupOf(r.cohort) === cohort).map(r => r.task);
+    return { rows, queue, queuePaused, disk, plans, resumable, away: awayView(config), manager, archivedCohorts, cohortNotes, cohortsRecent: config.board.cohortsRecent, pulledCollapseAfter: config.board.pulledCollapseAfter, now, preview: { task: selected, lines: ['Odebrane, do zamknięcia:', ...tasks, 'Enter rozwija · B zamyka po potwierdzeniu; worktree pozostają.'] }, refreshedAt: clock(now) };
+  }
   const queued = queue.find((v) => v.entry.task === selected);
   if (selected === MANAGER_SELECT && manager.state !== 'missing') {
     let lines: string[];
@@ -1136,6 +1141,10 @@ export function cohortLabel(state: BoardState): string {
   if (state.cohortFilter === null) return 'wszystkie';
   if (state.cohortFilter === '') return 'bez kohorty';
   return cohortOptions(state).find((o) => o.value === state.cohortFilter)?.label ?? state.cohortFilter;
+}
+
+export function pulledTitle(item: Extract<ListItem, { kind: 'pulled' }>): string {
+  return `${item.expanded ? '-' : '+'} ${item.key || 'bez kohorty'} · odebrane, do zamknięcia (${item.count}) · Enter / B`;
 }
 
 /** Header of a cohort group: `- sprint-1 (4) 2⚙ 1✓ 1⧗`; `+` while it is folded. The last group is "bez kohorty". */

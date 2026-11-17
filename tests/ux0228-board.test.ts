@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
-import { initialBoardState, listItems, navTasks, handleKey, promptText, rowCells, boardColumns, runBoardEffect } from '../src/core/board.ts';
+import { initialBoardState, listItems, navTasks, handleKey, promptText, rowCells, boardColumns } from '../src/core/board.ts';
 import type { BoardRow } from '../src/core/board.ts';
 import { collectStatus } from '../src/core/status.ts';
 import { Context } from '../src/core/context.ts';

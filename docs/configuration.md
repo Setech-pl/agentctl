@@ -125,7 +125,9 @@ The session started by `agentctl manager`: Claude Code with [Remote Control](htt
 
 | Key | Type | Default | Layers | Meaning |
 |---|---|---|---|---|
-| `board.auto_hide_pulled_dead` | boolean | `true` | g | A task without a window whose report was pulled hides by itself. |
+| `board.auto_hide_pulled_dead` | boolean | `true` | g | Pulled tasks without a window hide automatically except report-ready, which remains visible until closed. |
+| `board.pulled_collapse_after` | number · `0` · g | Minutes since pull before cohort collapse; 0 is immediate. |
+| `board.pulled_auto_close_after` | number/false · `false` · g | Owner opt-in: watch closes pulled report-ready tasks N hours since pull, with an event, keeping worktrees. |
 | `board.mouse` | boolean | `true` | g | `mouse on` in the agentctl tmux session (this session only). |
 | `board.return_key` | tmux key name or `false` | `F12` | g | Key (no prefix) that goes back to the board from any window of the session. `false`: none. |
 | `board.model_versions` | alias → quoted version mapping | `{}` | g | Fallback versions for aliases after observed session model; never guessed. |

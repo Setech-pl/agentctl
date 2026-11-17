@@ -65,10 +65,10 @@ describe('board: grouping by cohort', () => {
   it('cohorts by name, each under a header with the counts of its states, "bez kohorty" last', () => {
     const s = boardOf(rows);
     const items = listItems(s);
-    assert.deepEqual(items.map((i) => (i.kind === 'group' ? `#${i.name}` : i.kind === 'row' ? i.row.task : i.kind)), ['#alpha', 'A-1', 'A-2', '#Wave', 'B-1', 'B-2', '#null', 'C-1']);
+    assert.deepEqual(items.map((i) => (i.kind === 'group' ? `#${i.name}` : i.kind === 'row' ? i.row.task : i.kind)), ['#alpha', 'A-2', 'A-1', '#Wave', 'B-1', 'B-2', '#null', 'C-1']);
     const titles = items.flatMap((i) => (i.kind === 'group' ? [groupTitle(i)] : []));
     assert.deepEqual(titles, ['- alpha (2) 1⚙ 1✓', '- Wave (2) 1⚙ 1⏸', '- bez kohorty (1) 1⚙']);
-    assert.deepEqual(navTasks(s), ['A-1', 'A-2', 'B-1', 'B-2', 'C-1']);
+    assert.deepEqual(navTasks(s), ['A-2', 'A-1', 'B-1', 'B-2', 'C-1']);
   });
 
   it('queued tasks of a cohort are counted in its header (⧗)', async () => {
@@ -102,7 +102,7 @@ describe('board: grouping by cohort', () => {
     assert.deepEqual(navTasks(s), ['C-1']);
     r = press(s, 'E');
     assert.deepEqual(r.state.folded, []);
-    assert.deepEqual(navTasks(r.state), ['A-1', 'A-2', 'B-1', 'B-2', 'C-1']);
+    assert.deepEqual(navTasks(r.state), ['A-2', 'A-1', 'B-1', 'B-2', 'C-1']);
     assert.equal(press(boardOf([row('X-1')]), 'g').state.notice?.text, 'No cohorts: nothing to fold.');
   });
 });

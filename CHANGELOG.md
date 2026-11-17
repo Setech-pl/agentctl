@@ -4,7 +4,9 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
-### 0.22.6
+## [0.22.6] - 2026-11-17
+
+- Verify events_since counts only unpulled reports; align existing finished/hidden fixtures with report-ready visibility. / Test potwierdza liczenie wyłącznie nieodebranych raportów; scenariusze zakończonych/ukrytych zadań uwzględniają widoczność report-ready.
 
 - Status groups pulled open tasks; CLI `close --pulled --cohort` and MCP `close {pulled: true, cohort}` preview selective closure. / Status grupuje odebrane, niezamknięte zadania; CLI i MCP pokazują podgląd ich zbiorczego zamknięcia.
 

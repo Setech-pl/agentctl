@@ -14,6 +14,7 @@ import {
   cohortLabel,
   finishedTitle,
   groupTitle,
+  pulledTitle,
   boardRefreshMs,
   clearNotice,
   handleKey,
@@ -89,7 +90,7 @@ function TaskList(props: { state: BoardState; width: number; capacity: number; i
       ? [h(Text, { key: 'empty', dimColor: true }, state.refreshedAt === null ? 'Loading…' : state.rows.length === 0 ? 'No tasks. Start one with "agentctl new <spec>".' : state.cohortFilter !== null ? 'No tasks in this cohort. k picks another.' : 'No active tasks. z opens the finished ones.')]
       : visible.items.map((item) =>
           item.kind === 'pulled'
-            ? h(Text, { key: `pulled-${item.key}`, bold: state.selected === `@pulled:${item.key}`, wrap: 'truncate-end' }, `${state.selected === `@pulled:${item.key}` ? '▸' : ' '} ${item.expanded ? '-' : '+'} ${item.key || 'bez kohorty'} · odebrane, do zamknięcia (${item.count}) · Enter / B`)
+            ? h(Text, { key: `pulled-${item.key}`, bold: state.selected === `@pulled:${item.key}`, wrap: 'truncate-end' }, `${state.selected === `@pulled:${item.key}` ? '▸' : ' '} ${pulledTitle(item)}`)
             : item.kind === 'group'
             ? h(Text, { key: `group-${item.key}`, bold: true, wrap: 'truncate-end' }, groupTitle(item, props.icons))
             : item.kind === 'queue-title'

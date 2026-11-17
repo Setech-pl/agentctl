@@ -200,7 +200,7 @@ export interface BoardSettings {
   /** How many of the most recently active cohorts the board's `k` choice lists; older quiet ones fold into "starsze…". */
   cohortsRecent: number;
   listWidth?: number | string;
-  /** A task without a window whose report was pulled hides by itself (a task without a report stays in "Finished"). */
+  /** Pulled tasks without a window hide automatically except report-ready tasks, which remain visible for closure. */
   autoHidePulledDead: boolean;
   pulledCollapseAfter: number;
   pulledAutoCloseAfter: number | null;
