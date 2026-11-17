@@ -1075,7 +1075,7 @@ export function rowCells(row: StatusRow, selected: boolean, cols: BoardColumns, 
   const quiet = !ready && (row.finished || row.hidden);
   const cells: BoardCell[] = [
     { key: 'marker', text: selected ? '▸' : row.collide.length > 0 ? '⚠' : row.hidden ? '·' : '', width: cols.marker, bold: true, ...(!selected && row.collide.length > 0 ? { color: 'yellow' } : {}) },
-    { key: 'task', text: row.task, width: cols.task, bold: selected || ready, ...(ready ? { color: 'green' } : {}) },
+    { key: 'task', text: `${row.pin ? '📌 ' : ''}${row.task}`, width: cols.task, bold: selected || ready, ...(ready ? { color: 'green' } : {}) },
     { key: 'who', text: `${providerLabel(row.agent)} ${(PROVIDERS[row.agent as keyof typeof PROVIDERS]?.models.label ?? modelLabel)(row.model, row.effort, row.tokens?.observed?.model, versions)}`, width: cols.who },
     { key: 'state', text: `${icon} ${row.state}${row.question?.includes("zwinięte") ? " (zw.)" : ""}`, width: cols.state, color: STATE_COLOR[row.state] },
     { key: 'time', text: row.duration, width: cols.time },

@@ -65,6 +65,7 @@ export interface GcPlan {
   forceLinks?: boolean;
   includeCache?: boolean;
   keepCache?: string[];
+  keep?: string[];
   forceDirty?: string[];
 }
 
@@ -78,6 +79,7 @@ export interface GcOptions {
   /** Explicit owner override: true for CLI selection, or named tasks for MCP. */
   includeCache?: boolean;
   keepCache?: string[];
+  keep?: string[];
   forceDirty?: boolean | string[];
   /** CLI-only override for link references, never dirty/active/protected worktrees. */
   forceLinks?: boolean;
@@ -142,8 +144,15 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
   const finished = (r: TaskRecord): boolean => (r.closed === true || r.cancelled === true || archived.has(r.window)) && !live.has(r.window);
   const items: GcItem[] = [];
   const skipped: GcSkip[] = [];
-  const mine = all.filter((r) => finished(r) && (cohort === undefined || (r.cohort !== undefined && cohortKey(r.cohort) === cohortKey(cohort))));
-  const others = all.filter((r) => !finished(r));
+  const kept = (r: TaskRecord) => r.pin === true || opts.keep?.some(t => t.toLowerCase() === r.task.toLowerCase()) === true;
+  const mine = all.filter((r) => finished(r) && !kept(r) && (cohort === undefined || (r.cohort !== undefined && cohortKey(r.cohort) === cohortKey(cohort))));
+  const others = all.filter((r) => !finished(r) || kept(r));
+  for (const r of all.filter(r => finished(r) && kept(r) && (cohort === undefined || cohortKey(r.cohort ?? '') === cohortKey(cohort)))) {
+    const reason = r.pin ? 'pinned task' : 'keep requested for task';
+    for (const repo of r.repos) if (!same(repo.path, repo.worktree) && fs.existsSync(repo.worktree)) skipped.push({task: r.task, kind: 'worktree', target: repo.worktree, bytes: await size(repo.worktree), reason});
+    const dir = r.report ? path.dirname(path.resolve(r.report)) : path.join(path.resolve(config.cache), r.window);
+    if (dir.startsWith(`${path.resolve(config.cache)}${path.sep}`) && fs.existsSync(dir)) skipped.push({task: r.task, kind: 'cache', target: dir, bytes: await size(dir), reason});
+  }
   const references = knownLinkReferences(config);
   const removing = new Set<string>();
   const seenWorktrees = new Set<string>();
@@ -164,7 +173,7 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
       seenWorktrees.add(key);
       const user = others.find((o) => o.repos.some((x) => same(x.worktree, wt)));
       if (user) {
-        skipped.push({ task: record.task, kind: 'worktree', target: wt, reason: `also used by ${user.task}, which is not finished` });
+        skipped.push({ task: record.task, kind: 'worktree', target: wt, reason: kept(user) ? `pinned/kept task ${user.task} also uses this worktree` : `also used by ${user.task}, which is not finished` });
         continue;
       }
       let risk;
@@ -214,7 +223,7 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
     seenCache.add(dir);
     const shared = others.find((o) => o.report && path.dirname(path.resolve(o.report)) === dir);
     if (shared) {
-      skipped.push({ task: record.task, kind: 'cache', target: dir, reason: `also the folder of ${shared.task}, which is not finished` });
+      skipped.push({ task: record.task, kind: 'cache', target: dir, reason: kept(shared) ? `pinned/kept task ${shared.task} also uses this cache` : `also the folder of ${shared.task}, which is not finished` });
       continue;
     }
     let names: string[];
@@ -312,7 +321,7 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
   }
   const freeBytes = items.reduce((n, i) => n + i.bytes, 0);
   const foreignWorktrees = skipped.filter(s => s.kind === 'worktree-foreign').length;
-  return { includeCache: opts.includeCache === true, keepCache: opts.keepCache ?? [], forceDirty: mine.filter(r => permitsDirty(opts.forceDirty, r.task)).map(r => r.task), ...(opts.cachedSizes ? { cachedSizes: true } : {}), autoCacheFreedBytes: all.filter(r => cohort === undefined || (r.cohort && cohortKey(r.cohort) === cohortKey(cohort))).reduce((sum, r) => sum + worktreeCacheFreed(ctx, r), 0), ...(opts.forceLinks ? { forceLinks: true } : {}), items, skipped: cohort === undefined ? skipped : skipped.filter(s => s.kind !== 'worktree-foreign'), freeBytes, olderThanMs, unknownCacheDirs, ...(cohort !== undefined ? { foreignWorktrees } : {}) };
+  return { keep: opts.keep ?? [], includeCache: opts.includeCache === true, keepCache: opts.keepCache ?? [], forceDirty: mine.filter(r => permitsDirty(opts.forceDirty, r.task)).map(r => r.task), ...(opts.cachedSizes ? { cachedSizes: true } : {}), autoCacheFreedBytes: all.filter(r => cohort === undefined || (r.cohort && cohortKey(r.cohort) === cohortKey(cohort))).reduce((sum, r) => sum + worktreeCacheFreed(ctx, r), 0), ...(opts.forceLinks ? { forceLinks: true } : {}), items, skipped: cohort === undefined ? skipped : skipped.filter(s => s.kind !== 'worktree-foreign'), freeBytes, olderThanMs, unknownCacheDirs, ...(cohort !== undefined ? { foreignWorktrees } : {}) };
 }
 
 export interface GcResult {
@@ -329,6 +338,10 @@ export async function applyGc(ctx: Context, plan: GcPlan): Promise<GcResult> {
   for (const kind of order) {
     for (const item of plan.items.filter((i) => i.kind === kind)) {
       try {
+        const records = [...listTaskRecords(config), ...listArchivedRecords(config)];
+        const protectedRecords = records.filter(r => r.pin || plan.keep?.some(t => t.toLowerCase() === r.task.toLowerCase()));
+        const overlaps = (a: string, b: string) => same(a, b) || path.resolve(a).startsWith(`${path.resolve(b)}${path.sep}`) || path.resolve(b).startsWith(`${path.resolve(a)}${path.sep}`);
+        if (protectedRecords.some(r => r.task.toLowerCase() === item.task.toLowerCase() || (kind === 'worktree' && r.repos.some(repo => same(repo.worktree, item.target))) || (kind === 'cache' && r.report && overlaps(path.dirname(r.report), item.target)))) throw new Error('pinned/kept task; left in place');
         // CLI measures removed bytes; MCP uses the watch estimate and never delays removal for accounting.
         const bytes = kind === 'worktree' || kind === 'cache' ? plan.cachedSizes && kind === 'worktree' ? lastMeasurement(item.target)?.bytes ?? 0 : await sizeOf(item.target, { fresh: true, now: () => runner.now() }) : 0;
         if (kind === 'worktree') {

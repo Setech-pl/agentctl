@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Context } from './context.ts';
-import { listTaskRecords, type TaskRecord } from './taskstore.ts';
+import { listTaskRecords, listArchivedRecords, readTaskRecordById, type TaskRecord } from './taskstore.ts';
 import { inspectReport } from './report-state.ts';
 import { withFileLock } from './file-lock.ts';
 
@@ -28,7 +28,7 @@ function safeSize(target: string, root: string): number {
 
 /** Provider-independent cleanup; legacy settled reports without an explicit report-end never authorize deletion. */
 export async function cleanWorktreeCache(ctx: Context, record: TaskRecord): Promise<void> {
-  if (ctx.runner.dryRun || !ctx.config.cleanWorktreeCache) return;
+  if (ctx.runner.dryRun || !ctx.config.cleanWorktreeCache || readTaskRecordById(ctx.config, record.task)?.pin) return;
   const report = inspectReport(ctx.config, record, ctx.runner.now(), false);
   if (!report.ready || !report.sentinel || !report.signature || (ctx.config.reportSettleS > 0 && report.mtime !== undefined && ctx.runner.now() - report.mtime < ctx.config.reportSettleS * 1000)) return;
   // A sentinel completes the report, not the agent's turn. Even settle_s=0 must not
@@ -45,7 +45,7 @@ export async function cleanWorktreeCache(ctx: Context, record: TaskRecord): Prom
       if (saved.cleaned.includes(identity)) continue;
       // Another open task may still be testing in the same checkout. Treat aliases
       // as shared too, and retain the cache if a referenced path cannot be checked.
-      const shared = listTaskRecords(ctx.config).some(other => other.window !== record.window && !other.closed && !other.cancelled && other.repos.some(repo => {
+      const shared = [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)].some(other => other.window !== record.window && (other.pin || (!other.closed && !other.cancelled)) && other.repos.some(repo => {
         try { return fs.realpathSync(repo.worktree) === root; } catch { return path.resolve(repo.worktree) === root; }
       }));
       if (shared) continue;

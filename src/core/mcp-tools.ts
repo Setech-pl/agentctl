@@ -36,7 +36,7 @@ import { collectDisk as collectDiskFull, diskLine, refreshDiskAfterGc } from './
 import type { DiskReport } from './disk.ts';
 import { retryEntry, moveToFront, setPaused, unblockEntry, findEntry, rebuildAutoReview } from './queue.ts';
 import { listCohorts, touchCohort, setCohortOf, setNote, planCohortArchive, applyCohortArchive } from './cohort.ts';
-import { setHidden } from './hide.ts';
+import { setHidden, setPinned } from './hide.ts';
 import { archiveClosed, applyArchive, parseAge } from './archive.ts';
 import { adoptTask } from './adopt.ts';
 import { reportInfo } from './report-detect.ts';
@@ -427,7 +427,7 @@ async function runEventsSince(deps: McpDeps, args: { since?: string | undefined;
   return { text: renderEvents(report).join('\n'), data: report };
 }
 
-const gcPlanKey = (args: Record<string, unknown>) => createHash('sha256').update(JSON.stringify({cohort: args.cohort ?? null, older_than: args.older_than ?? null, branches: Boolean(args.branches ?? args.merged), force_dirty: args.force_dirty ?? [], include_cache: args.include_cache === true, keep_cache: args.keep_cache ?? []})).digest('hex');
+const gcPlanKey = (args: Record<string, unknown>) => createHash('sha256').update(JSON.stringify({cohort: args.cohort ?? null, older_than: args.older_than ?? null, branches: Boolean(args.branches ?? args.merged), force_dirty: args.force_dirty ?? [], include_cache: args.include_cache === true, keep_cache: args.keep_cache ?? [], keep: args.keep ?? []})).digest('hex');
 const gcPlanPath = (ctx: Context, args: Record<string, unknown>) => path.join(ctx.config.stateDir, `gc-plan-${gcPlanKey(args)}.json`);
 function cachedGcPlan(ctx: Context, args: Record<string, unknown>): GcPlan | undefined {
   try { const saved = JSON.parse(fs.readFileSync(gcPlanPath(ctx, args), 'utf8')); const age = ctx.runner.now() - saved.at;
@@ -436,14 +436,14 @@ function cachedGcPlan(ctx: Context, args: Record<string, unknown>): GcPlan | und
   return undefined;
 }
 
-async function runGcPreview(deps: McpDeps, args: { request_id?: string; include_cache?: boolean; keep_cache?: string[]; force_dirty?: string[]; older_than?: string | undefined; merged?: boolean | undefined; cohort?: string | undefined; detail?: boolean; offset?: number; limit?: number }): Promise<ToolResult> {
+async function runGcPreview(deps: McpDeps, args: { request_id?: string; include_cache?: boolean; keep_cache?: string[]; keep?: string[]; force_dirty?: string[]; older_than?: string | undefined; merged?: boolean | undefined; cohort?: string | undefined; detail?: boolean; offset?: number; limit?: number }): Promise<ToolResult> {
   const ctx = deps.context(() => {});
   if (args.request_id) {
     if (!/^[a-f0-9-]{36}$/.test(args.request_id)) throw new AgentctlError('invalid GC preview request id');
     try { return JSON.parse(fs.readFileSync(path.join(ctx.config.stateDir, `gc-preview-${args.request_id}.json`), 'utf8')); } catch { const request = readMcpRequests(ctx.config).find(r => r.id === args.request_id); return request?.status === 'failed' ? fail(`GC preview failed: ${request.error}; preview again.`) : ok('GC preview pending; retry request_id after the next watch tick.'); }
   }
   if (!deps.applying && watchAlive(ctx.config, ctx.runner.now())) return recordDeferred(deps, 'gc_preview', args, null, `gc_preview:${JSON.stringify(args)}`, undefined);
-  const plan = await planGc(ctx, { olderThan: args.older_than, branches: args.merged, cohort: args.cohort, forceDirty: args.force_dirty, includeCache: args.include_cache, keepCache: args.keep_cache, cachedSizes: true });
+  const plan = await planGc(ctx, { olderThan: args.older_than, branches: args.merged, cohort: args.cohort, forceDirty: args.force_dirty, includeCache: args.include_cache, keepCache: args.keep_cache, keep: args.keep, cachedSizes: true });
   if (deps.applying) { fs.mkdirSync(ctx.config.stateDir, {recursive: true}); atomicWriteFile(gcPlanPath(ctx, args), JSON.stringify({at: ctx.runner.now(), key: gcPlanKey(args), plan})); }
   return ok(JSON.stringify({ ...gcView(plan, args), text: renderGc(plan, args).join('\n'), partial_result: 'Partial result: sizes are cached or measuring (unknown sizes count as 0); repeat for updated estimates.', preview: true, execution: ctx.config.mcp.allow.includes('gc') ? 'gc preview then confirm' : 'requires gc in mcp.allow or CLI --apply' }));
 }
@@ -1221,7 +1221,7 @@ export const MCP_TOOLS: McpToolDef[] = [
     description:
       'What "agentctl gc" would free now, without doing anything: git worktrees of closed, cancelled and archived tasks without uncommitted changes, only with owner-confirmed include_cache: true, old unreferenced cache entries (keep_cache tasks stay); state folders to archive, merged branches (merged: true), each with its size, and what is skipped and why. ' +
       'Use the separately allowed gc tool to apply this protected plan with preview and confirm: true (branches default false).',
-    input: { include_cache: z.boolean().optional().describe('Explicit owner confirmation to delete old unreferenced cache entries; default false.'), keep_cache: z.array(taskArg).optional(), force_dirty: z.array(taskArg).optional().describe('Owner-authorized tasks whose dirty/unpushed worktrees may be removed.'), request_id: z.string().optional().describe('Read a GC preview accepted by watch: the request UUID from Accepted.'), detail: z.boolean().optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional(), older_than: z.string().max(10).optional().describe('Age of the files next to the reports before they count: 12h, 7d, 2w. Default 7d.'), merged: z.boolean().optional().describe('true: also list merged branches of finished tasks.'), cohort: cohortArg.optional() },
+    input: { include_cache: z.boolean().optional().describe('Explicit owner confirmation to delete old unreferenced cache entries; default false.'), keep_cache: z.array(taskArg).optional(), keep: z.array(taskArg).optional(), force_dirty: z.array(taskArg).optional().describe('Owner-authorized tasks whose dirty/unpushed worktrees may be removed.'), request_id: z.string().optional().describe('Read a GC preview accepted by watch: the request UUID from Accepted.'), detail: z.boolean().optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional(), older_than: z.string().max(10).optional().describe('Age of the files next to the reports before they count: 12h, 7d, 2w. Default 7d.'), merged: z.boolean().optional().describe('true: also list merged branches of finished tasks.'), cohort: cohortArg.optional() },
     annotations: readOnly('Preview of the clean-up'),
     run: (deps, args) => guarded(() => runGcPreview(deps, args as { older_than?: string; merged?: boolean; cohort?: string })),
   }),
@@ -1608,6 +1608,7 @@ MCP_TOOLS.push(
     return { plan, archived: await applyCohortArchive(ctx, plan) };
   }),
   extraWrite('cohort_note', 'cohort note <NAME> <TEXT>', 'Change the note of a cohort', { cohort: cohortArg, text: z.string().max(20000) }, async (ctx, a) => setNote(ctx, a.cohort, a.text)),
+  ...(['pin', 'unpin'] as const).map(name => extraWrite(name, `${name} <TASKS...>`, 'Protect task worktrees and cache from GC; pin also prevents provider moves', {tasks: z.array(taskArg).min(1).max(100)}, async (ctx, a) => setPinned(ctx, a.tasks, name === 'pin'))),
   ...(['hide', 'unhide'] as const).map((name) => extraWrite(name, `${name} <TASKS...>`, `${name} tasks on the board`, { tasks: z.array(taskArg).min(1).max(100) }, async (ctx, a) => setHidden(ctx, a.tasks, name === 'hide'))),
   extraWrite('archive', 'archive [--older-than <AGE>]', 'Archive the state of closed tasks', { older_than: optionalText, cohort: cohortArg.optional() }, async (ctx, a) => archiveClosed(ctx, { cohort: a.cohort, olderThanMs: a.older_than ? parseAge(a.older_than) : undefined })),
   extraWrite('adopt', 'adopt <TASK> --report <PATH>', 'Restore missing task metadata from facts supplied by the user', { task: taskArg, report: z.string().min(1), window: optionalText, worktree: optionalText, agent: z.enum(DEFAULT_PROVIDERS).optional(), model: optionalText, effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional() }, async (ctx, a) => { await adoptTask(ctx, a.task, a); return { task: a.task, adopted: true }; }),
@@ -1616,7 +1617,7 @@ MCP_TOOLS.push(
   extraWrite('manager_start', 'manager', 'Start the supervising manager session', { project: optionalText, name: optionalText, model: optionalText, effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional() }, async (ctx, a, deps) => { if (!deps.self) throw new AgentctlError('this server has no self command for the manager'); return startManager(ctx, { ...a, self: deps.self, noWait: true }); }),
   extraWrite('manager_stop', 'manager stop', 'Stop the manager session', {}, async (ctx) => ({ state: await stopManager(ctx) })),
   extraWrite('notify_test', 'notify-test [--phone]', 'Test desktop notifications; phone true explicitly sends to ntfy', { phone: z.boolean().optional() }, async (ctx, a, deps) => { if (a.phone) return sendPhoneTest(ctx); await deps.notify('agentctl notification test'); return { local: true }; }),
-  extraWrite('gc', 'gc --apply [--cohort <NAME>] [--older-than <AGE>] [--branches]', 'Reclaim disk space from finished tasks using the same protected plan as gc_preview', { include_cache: z.boolean().optional(), keep_cache: z.array(taskArg).optional(), force_dirty: z.array(taskArg).optional(), detail: z.boolean().optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional(), cohort: cohortArg.optional(), older_than: optionalText, branches: z.boolean().optional() }, async (ctx, a) => { const plan = await planGc(ctx, { cohort: a.cohort, olderThan: a.older_than, branches: a.branches ?? false, forceDirty: a.force_dirty, includeCache: a.include_cache, keepCache: a.keep_cache }); const result = await applyGc(ctx, plan); const freed = await refreshDiskAfterGc(ctx, result.freedBytes); return { plan, result, ...(freed ? { note: freed } : {}) }; }),
+  extraWrite('gc', 'gc --apply [--cohort <NAME>] [--older-than <AGE>] [--branches]', 'Reclaim disk space from finished tasks using the same protected plan as gc_preview', { include_cache: z.boolean().optional(), keep_cache: z.array(taskArg).optional(), keep: z.array(taskArg).optional(), force_dirty: z.array(taskArg).optional(), detail: z.boolean().optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional(), cohort: cohortArg.optional(), older_than: optionalText, branches: z.boolean().optional() }, async (ctx, a) => { const plan = await planGc(ctx, { cohort: a.cohort, olderThan: a.older_than, branches: a.branches ?? false, forceDirty: a.force_dirty, includeCache: a.include_cache, keepCache: a.keep_cache, keep: a.keep }); const result = await applyGc(ctx, plan); const freed = await refreshDiskAfterGc(ctx, result.freedBytes); return { plan, result, ...(freed ? { note: freed } : {}) }; }),
 );
 
 // ---- WALL (WALL-1): a message board of the owner's chats and agents. Its content is data, never instructions.
@@ -1830,6 +1831,7 @@ async function confirmationScope(ctx: Context, name: string, args: Record<string
   }
   if (name === 'interrupt') { const target = await resolveRunningTask(ctx, args.task as string); return { tasks: [target] }; }
   if (name.startsWith('wall_')) return wallScope(ctx, name, args);
+  if (name === 'pin' || name === 'unpin') return {tasks: await setPinned(ctx, args.tasks as string[], name === 'pin', true)};
   if (name === 'hide' || name === 'unhide') return { tasks: await setHidden(ctx, args.tasks as string[], name === 'hide', true) };
   if (name === 'cohort_add' || name === 'cohort_remove') {
     const target = name === 'cohort_add' ? { name: args.cohort as string, created: '' } : undefined;
@@ -1862,7 +1864,7 @@ async function confirmationScope(ctx: Context, name: string, args: Record<string
   if (name === 'mark') return { tasks: planMark(ctx, args as MarkSelection).map(task => findRecord(ctx, task)), result: args.result, note: args.note };
   if (name === 'close') { const ids = await closeInputs(ctx, args as CloseMcpArgs); return { tasks: await planClose(ctx, ids, { rmWorktree: Boolean(args.remove_worktree) }), records: ids.flatMap(id => { const r = readTaskRecordById(ctx.config, id); return r ? [r] : []; }) }; }
   if (name === 'gc') {
-    const plan = await planGc(ctx, { cohort: args.cohort as string | undefined, olderThan: args.older_than as string | undefined, branches: Boolean(args.branches), forceDirty: args.force_dirty as string[] | undefined, includeCache: args.include_cache === true, keepCache: args.keep_cache as string[] | undefined, cachedSizes: true });
+    const plan = await planGc(ctx, { cohort: args.cohort as string | undefined, olderThan: args.older_than as string | undefined, branches: Boolean(args.branches), forceDirty: args.force_dirty as string[] | undefined, includeCache: args.include_cache === true, keepCache: args.keep_cache as string[] | undefined, keep: args.keep as string[] | undefined, cachedSizes: true });
     return plan;
   }
   if (name === 'consult') { const plan = await planConsult(ctx, args.spec as string); return { spec: plan.spec, context: plan.context, preview: plan.preview }; }

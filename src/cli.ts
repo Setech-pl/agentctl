@@ -36,7 +36,7 @@ import { findResumable, planResume, resumeTasks } from './core/resume.ts';
 import { Alerts } from './core/alert.ts';
 import { archiveClosed, parseAge } from './core/archive.ts';
 import { appendStartLog, describeTerminal, loggedRun, startLogPath, waitForSize } from './core/boardstart.ts';
-import { setHidden } from './core/hide.ts';
+import { setHidden, setPinned } from './core/hide.ts';
 import { installClaudeCode, installDesktop, desktopConfigPath, mcpEntryFrom, pointsAtStable, stableScript, uninstallClaudeCode, uninstallDesktop } from './core/mcp-install.ts';
 import { findMcpProcesses, staleProcesses, staleWarning } from './core/mcp-processes.ts';
 import type { McpDeps } from './core/mcp-tools.ts';
@@ -1204,6 +1204,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('--offset <n>', 'page offset', '0')
     .option('--limit <n>', 'page size (1–100)', '10')
     .option('--include-cache', 'owner-confirmed: also delete old, unreferenced task cache entries')
+    .option('--keep <tasks...>', 'keep worktrees and cache for these task IDs in this GC run')
     .option('--keep-cache <tasks...>', 'keep all cache entries for these task IDs')
     .option('--force-dirty', 'explicitly allow deleting dirty/unpushed worktrees in this selection')
     .option('--force-links', 'CLI only: allow removing a worktree referenced by links (other protections stay)')
@@ -1214,12 +1215,12 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('-y, --yes', 'with --apply: do not ask')
     .option('--json', 'machine-readable output (the plan, or the result with --apply)')
     .action(
-      guarded(async (opts: { preview?: boolean; dryRun?: boolean; verbose?: boolean; offset: string; limit: string; forceLinks?: boolean; forceDirty?: boolean; includeCache?: boolean; keepCache?: string[]; apply?: boolean; olderThan?: string; branches?: boolean; cohort?: string; yes?: boolean; json?: boolean }) => {
+      guarded(async (opts: { preview?: boolean; dryRun?: boolean; verbose?: boolean; offset: string; limit: string; forceLinks?: boolean; forceDirty?: boolean; includeCache?: boolean; keepCache?: string[]; keep?: string[]; apply?: boolean; olderThan?: string; branches?: boolean; cohort?: string; yes?: boolean; json?: boolean }) => {
         const ctx = contextFor(false, { migrate: false });
         if (opts.apply && (opts.preview || opts.dryRun)) throw new AgentctlError("--apply cannot be combined with --preview or --dry-run");
         const view = { detail: Boolean(opts.verbose), offset: Number(opts.offset), limit: Number(opts.limit) };
         if (!Number.isInteger(view.offset) || view.offset < 0 || !Number.isInteger(view.limit) || view.limit < 1 || view.limit > 100) throw new AgentctlError("offset must be >=0 and limit must be 1–100");
-        const plan = await planGc(ctx, { olderThan: opts.olderThan, branches: opts.branches, cohort: opts.cohort, forceLinks: opts.forceLinks, forceDirty: opts.forceDirty, includeCache: opts.includeCache, keepCache: opts.keepCache });
+        const plan = await planGc(ctx, { olderThan: opts.olderThan, branches: opts.branches, cohort: opts.cohort, forceLinks: opts.forceLinks, forceDirty: opts.forceDirty, includeCache: opts.includeCache, keepCache: opts.keepCache, keep: opts.keep });
         if (!opts.apply) {
           if (opts.json) return line(JSON.stringify(gcView(plan, view), null, 2));
           for (const l of renderGc(plan, view)) line(l);
@@ -1251,6 +1252,12 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         if (result.moved.length === 0 && result.kept.length === 0) line('No closed tasks to archive.');
       }),
     );
+
+  for (const pin of [true, false]) {
+    program.command(pin ? 'pin' : 'unpin').description(pin ? 'Pin tasks: protect worktrees and cache from GC and prevent provider moves.' : 'Remove the task pin; normal GC protections still apply.').argument('<tasks...>', 'task IDs').action(guarded(async (tasks: string[]) => {
+      for (const r of await setPinned(contextFor(false, {migrate: false}), tasks, pin)) line(`${r.task}: ${pin ? 'pinned' : 'unpinned'}`);
+    }));
+  }
 
   for (const hide of [true, false]) {
     program

@@ -61,6 +61,8 @@ const pl: Record<string, string> = {
  cohort_remove: 'Usuń przypisanie do kohorty.',
  cohort_archive: 'Ukryj zakończone kohorty z wyboru; aktywne/kolejkowane są chronione, historia zostaje.',
  cohort_note: 'Zmień notatkę kohorty.',
+ pin: 'Przypnij zadania: ochrona worktree i cache przed GC oraz przed zmianą providera.',
+ unpin: 'Usuń przypięcie zadania; pozostałe zabezpieczenia GC nadal obowiązują.',
  hide: 'Ukryj zadania w domyślnym widoku, bez zamykania.',
  unhide: 'Pokaż ukryte zadania.',
  archive: 'Przenieś stan zamkniętych zadań do archiwum.',

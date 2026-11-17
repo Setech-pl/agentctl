@@ -56,6 +56,8 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`stats`](#agentctl-stats) | Which model and effort work: the tasks of the history grouped by agent/model/effort - how many, median time and tokens, the share of ok, partial and fail (agentctl mark), cancelled ones and tasks moved to the other provider after a limit. |
 | [`gc`](#agentctl-gc) | Bez flag = podgląd, --apply wykonuje. Take back disk space from finished tasks: the git worktrees of closed, cancelled and archived tasks without uncommitted changes, with --include-cache, unreferenced cache entries older than --older-than (the *.md reports stay), their state folders (moved to the archive), and with --branches their branches merged into the base (git branch -d, never -D, never main/master or the current branch). A dry run with sizes unless --apply. History, reports and cache stay by default; uncommitted work, foreign worktrees and unmerged branches are only listed as skipped. |
 | [`archive`](#agentctl-archive) | Move the state of closed tasks (agentctl close) to the archive folder next to the state folder. Reports and worktrees are not touched. |
+| [`pin`](#agentctl-pin) | Pin tasks: protect worktrees and cache from GC and prevent provider moves. |
+| [`unpin`](#agentctl-unpin) | Remove the task pin; normal GC protections still apply. |
 | [`hide`](#agentctl-hide) | Take tasks off the board and "status" (they stay in "status --all" and on the board under "a"). Does not close the task or touch its worktree. |
 | [`unhide`](#agentctl-unhide) | Show hidden tasks again on the board and in "status". A task shown on purpose is not hidden again by board.auto_hide_pulled_dead. |
 | [`pull`](#agentctl-pull) | Copy the task report to the clipboard and print its path (without a report: last 40 lines of the window). --ready: all new reports at once. |
@@ -1095,6 +1097,7 @@ agentctl gc [options]
 | `--offset <n>` | page offset | default `0` |
 | `--limit <n>` | page size (1–100) | default `10` |
 | `--include-cache` | owner-confirmed: also delete old, unreferenced task cache entries |  |
+| `--keep <tasks...>` | keep worktrees and cache for these task IDs in this GC run |  |
 | `--keep-cache <tasks...>` | keep all cache entries for these task IDs |  |
 | `--force-dirty` | explicitly allow deleting dirty/unpushed worktrees in this selection |  |
 | `--force-links` | CLI only: allow removing a worktree referenced by links (other protections stay) |  |
@@ -1132,6 +1135,30 @@ Examples:
 ```sh
 agentctl archive --older-than 7d --dry-run
 ```
+
+## agentctl pin
+
+Pin tasks: protect worktrees and cache from GC and prevent provider moves.
+
+```
+agentctl pin [options] <tasks...>
+```
+
+| Argument | Meaning |
+|---|---|
+| `<tasks...>` | task IDs |
+
+## agentctl unpin
+
+Remove the task pin; normal GC protections still apply.
+
+```
+agentctl unpin [options] <tasks...>
+```
+
+| Argument | Meaning |
+|---|---|
+| `<tasks...>` | task IDs |
 
 ## agentctl hide
 

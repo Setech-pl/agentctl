@@ -13,7 +13,7 @@ export function renderStatusTable(rows: StatusRow[], maxLast = 60, opts: { cohor
   const tokens = rows.some((r) => Boolean(r.tokens));
   const header = ['TASK', ...(cohort ? ['COHORT'] : []), 'AGENT/MODEL/EFFORT', 'STATE', 'WINDOW', 'STARTED', 'DURATION', ...(tokens ? ['TOKENS'] : []), 'PROGRESS', ...(collide ? ['COLLIDE'] : []), 'REPORT', 'DECISIONS', 'ACTIONS', 'MESSAGES', 'LAST LINE'];
   const body = rows.map((r) => [
-    r.archived ? `${r.task} (archived)` : r.cancelled ? `${r.task} (cancelled)` : r.closed ? `${r.task} (closed)` : r.hidden ? `${r.task} (hidden)` : r.task,
+    (r.pin ? '📌 ' : '') + (r.archived ? `${r.task} (archived)` : r.cancelled ? `${r.task} (cancelled)` : r.closed ? `${r.task} (closed)` : r.hidden ? `${r.task} (hidden)` : r.task),
     ...(cohort ? [r.cohort ?? '-'] : []),
     r.switchedBy ? `${r.agent}/${r.model}/${r.effort} (ordered ${r.requested})` : `${r.agent}/${r.model}/${r.effort}`,
     r.state,

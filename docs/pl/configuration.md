@@ -320,3 +320,5 @@ Progi muszą być dodatnimi, skończonymi liczbami. Porządkowanie wymaga watch;
 okna list oraz odczyt po ID/z archiwum działają również bez niego.
 
 Podgląd GC rozdziela **Would remove**, **Skipped (uncommitted changes)** i **Skipped (pinned)** z rozmiarami. JSON MCP zawiera ten sam opis w `text`; pominięte bajty nie zwiększają miejsca do odzyskania.
+
+`agentctl pin TASK` / `unpin TASK` (MCP `pin` / `unpin`, `tasks: [TASK]`, osobne uprawnienia mcp.allow) zapisują pin w stanie zadania, także zamkniętego/zarchiwizowanego. GC nie usuwa przypiętych worktree ani cache nawet z flagami force; pin blokuje też zmianę providera. `agentctl gc --keep TASK` / MCP `gc` lub `gc_preview` z `keep: [TASK]` chroni te zasoby w jednym przebiegu. Status i plansza pokazują 📌.

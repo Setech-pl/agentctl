@@ -40,7 +40,7 @@ Argumenty z ? są opcjonalne. Pola dostawców obejmują opcjonalnych; uruchomion
 |---|---|---|---|
 | `status` | odczyt | `all?`, `cohort?`, `format?`, `detail?`, `offset?`, `limit?`, `capacity?` | Stan zadań i raportów; cache podaje wiek, po 5 min krótki fallback kolejki/dziennika. |
 | `events_since` | odczyt | `as?`, `cursor?`, `limit?`, `client?`, `since?`, `cohort?`, `peek?`, `format?`, `detail?` | Przyrost według as czatu (client nadpisuje), otwarta skrzynka WALL; peek zachowuje kursor. |
-| `gc_preview` | odczyt | `include_cache?`, `keep_cache?`, `force_dirty?`, `request_id?`, `detail?`, `offset?`, `limit?`, `older_than?`, `merged?`, `cohort?` | Chroniony plan sprzątania z rozmiarami i powodami pominięcia; bez usuwania. |
+| `gc_preview` | odczyt | `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `request_id?`, `detail?`, `offset?`, `limit?`, `older_than?`, `merged?`, `cohort?` | Chroniony plan sprzątania z rozmiarami i powodami pominięcia; bez usuwania. |
 | `limits` | odczyt | `format?`, `detail?` | Limity slotów, zajętość, rezerwacje, kolejka i obowiązujący queue_hold. |
 | `set_limits` | zapis | `claude?`, `codex?`, `queue_hold?`, `hold?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Zmień limity, queue_hold i czasowe hold (HH:MM/ISO/3h/off); zapis synchroniczny. |
 | `reserve` | zapis | `claude?`, `codex?`, `note?`, `release?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Zarezerwuj sloty dla agentów uruchamianych ręcznie. |
@@ -90,6 +90,8 @@ Argumenty z ? są opcjonalne. Pola dostawców obejmują opcjonalnych; uruchomion
 | `cohort_remove` | zapis | `tasks?`, `confirm?`, `preview_token?` | Usuń przypisanie do kohorty. |
 | `cohort_archive` | zapis | `cohorts?`, `older_than?`, `confirm?`, `preview_token?` | Ukryj zakończone kohorty z wyboru; aktywne/kolejkowane są chronione, historia zostaje. |
 | `cohort_note` | zapis | `cohort?`, `text?`, `confirm?`, `preview_token?` | Zmień notatkę kohorty. |
+| `pin` | zapis | `tasks?`, `confirm?`, `preview_token?` | Przypnij zadania: ochrona worktree i cache przed GC oraz przed zmianą providera. |
+| `unpin` | zapis | `tasks?`, `confirm?`, `preview_token?` | Usuń przypięcie zadania; pozostałe zabezpieczenia GC nadal obowiązują. |
 | `hide` | zapis | `tasks?`, `confirm?`, `preview_token?` | Ukryj zadania w domyślnym widoku, bez zamykania. |
 | `unhide` | zapis | `tasks?`, `confirm?`, `preview_token?` | Pokaż ukryte zadania. |
 | `archive` | zapis | `older_than?`, `cohort?`, `confirm?`, `preview_token?` | Przenieś stan zamkniętych zadań do archiwum. |
@@ -99,7 +101,7 @@ Argumenty z ? są opcjonalne. Pola dostawców obejmują opcjonalnych; uruchomion
 | `manager_start` | zapis | `project?`, `name?`, `model?`, `effort?`, `confirm?`, `preview_token?` | Uruchom sesję nadzorczą Claude z Remote Control. |
 | `manager_stop` | zapis | `confirm?`, `preview_token?` | Zatrzymaj sesję manager. |
 | `notify_test` | zapis | `phone?`, `confirm?`, `preview_token?` | Test powiadomienia lokalnego; phone jawnie wysyła do ntfy. |
-| `gc` | zapis | `include_cache?`, `keep_cache?`, `force_dirty?`, `detail?`, `offset?`, `limit?`, `cohort?`, `older_than?`, `branches?`, `confirm?`, `preview_token?` | Zastosuj chroniony plan sprzątania po podglądzie; opcjonalne scalone lokalne gałęzie. |
+| `gc` | zapis | `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `detail?`, `offset?`, `limit?`, `cohort?`, `older_than?`, `branches?`, `confirm?`, `preview_token?` | Zastosuj chroniony plan sprzątania po podglądzie; opcjonalne scalone lokalne gałęzie. |
 | `wall_read` | odczyt | `as?`, `channel?`, `id?`, `since?`, `archive?`, `status?`, `kind?`, `limit?`, `before?` | Kanały, nagłówki z filtrami albo wiadomość z treścią, refs, historią i wątkiem. |
 | `wall_post` | zapis | `as?`, `channel?`, `kind?`, `subject?`, `body?`, `refs?`, `to?`, `confirm?`, `preview_token?` | Opublikuj dozwoloną wiadomość po kontroli autora, refs, rozmiaru i sekretów. |
 | `wall_reply` | zapis | `as?`, `reply_to?`, `body?`, `subject?`, `kind?`, `refs?`, `to?`, `confirm?`, `preview_token?` | Odpowiedz w kanale rodzica; answer oznacza otwarte pytanie jako answered. |

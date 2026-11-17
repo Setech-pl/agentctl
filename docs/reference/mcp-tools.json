@@ -180,6 +180,15 @@
               "description": "Task ID such as NC-42; case does not matter and a unique prefix is enough."
             }
           },
+          "keep": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 60,
+              "description": "Task ID such as NC-42; case does not matter and a unique prefix is enough."
+            }
+          },
           "force_dirty": {
             "description": "Owner-authorized tasks whose dirty/unpushed worktrees may be removed.",
             "type": "array",
@@ -1855,6 +1864,70 @@
       }
     },
     {
+      "name": "pin",
+      "kind": "write",
+      "title": "Protect task worktrees and cache from GC; pin also prevents provider moves",
+      "description": "WRITE, off unless the user put \"pin\" in mcp.allow. Protect task worktrees and cache from GC; pin also prevents provider moves. CLI: agentctl pin <TASKS...>. Use only for work the user requested. Requires pin in mcp.allow; preview then confirm: true with identical arguments. Every execution is audited and journaled; desktop notices follow notify.mcp_writes. Two steps are mandatory: preview, then confirm: true with identical arguments — or with preview_token only (plus the same optional as identity), which executes the stored arguments (for new/queue the spec need not be resent). A changed scope requires a new preview. Every response is bounded by mcp.max_response_kb (default 8 KiB). A truncated JSON envelope gives response_id and next_response_offset; call response_page with only those continuation fields to retrieve the next fragment without executing again. Concatenate fragment values to recover the original text/JSON.",
+      "input": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "tasks": {
+            "minItems": 1,
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 60,
+              "description": "Task ID such as NC-42; case does not matter and a unique prefix is enough."
+            }
+          },
+          "confirm": {
+            "description": "First call previews. true executes only the unchanged preview in this server session.",
+            "type": "boolean"
+          },
+          "preview_token": {
+            "description": "Token returned by this preview. Independent previews can be confirmed in any order if their scope is unchanged. A confirm may carry only this token: the stored arguments then execute.",
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "unpin",
+      "kind": "write",
+      "title": "Protect task worktrees and cache from GC; pin also prevents provider moves",
+      "description": "WRITE, off unless the user put \"unpin\" in mcp.allow. Protect task worktrees and cache from GC; pin also prevents provider moves. CLI: agentctl unpin <TASKS...>. Use only for work the user requested. Requires unpin in mcp.allow; preview then confirm: true with identical arguments. Every execution is audited and journaled; desktop notices follow notify.mcp_writes. Two steps are mandatory: preview, then confirm: true with identical arguments — or with preview_token only (plus the same optional as identity), which executes the stored arguments (for new/queue the spec need not be resent). A changed scope requires a new preview. Every response is bounded by mcp.max_response_kb (default 8 KiB). A truncated JSON envelope gives response_id and next_response_offset; call response_page with only those continuation fields to retrieve the next fragment without executing again. Concatenate fragment values to recover the original text/JSON.",
+      "input": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "tasks": {
+            "minItems": 1,
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 60,
+              "description": "Task ID such as NC-42; case does not matter and a unique prefix is enough."
+            }
+          },
+          "confirm": {
+            "description": "First call previews. true executes only the unchanged preview in this server session.",
+            "type": "boolean"
+          },
+          "preview_token": {
+            "description": "Token returned by this preview. Independent previews can be confirmed in any order if their scope is unchanged. A confirm may carry only this token: the stored arguments then execute.",
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
       "name": "hide",
       "kind": "write",
       "title": "hide tasks on the board",
@@ -2196,6 +2269,15 @@
             "type": "boolean"
           },
           "keep_cache": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 60,
+              "description": "Task ID such as NC-42; case does not matter and a unique prefix is enough."
+            }
+          },
+          "keep": {
             "type": "array",
             "items": {
               "type": "string",

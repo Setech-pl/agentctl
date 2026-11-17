@@ -320,3 +320,5 @@ All three thresholds must be positive finite numbers. Maintenance requires watch
 list windows and ID/archive reads work independently of watch.
 
 GC previews separate **Would remove**, **Skipped (uncommitted changes)** and **Skipped (pinned)**, each with sizes. The MCP JSON includes the same presentation in `text`; skipped bytes never count as reclaimable.
+
+`agentctl pin TASK` / `unpin TASK` (MCP `pin` / `unpin`, `tasks: [TASK]`, respective mcp.allow permissions) persist `pin` in task state, including closed/archived tasks. Pinned worktrees and cache cannot be GC-removed even with force flags; pins also prevent provider moves. `agentctl gc --keep TASK` / MCP `gc` or `gc_preview` with `keep: [TASK]` protects these resources for one run. Status and board show 📌.
