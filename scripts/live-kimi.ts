@@ -2,21 +2,33 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { withHarness, defaultCacheRoot, installPromptAgent } from './live-harness.ts';
+import { withHarness, defaultCacheRoot, installPromptAgent, type Harness } from './live-harness.ts';
 const cache = defaultCacheRoot('agentctl-018');
 const checks: string[] = [];
 const check = (name: string, ok: unknown, detail = '') => { assert.ok(ok, `${name}: ${detail}`); checks.push(name); console.log(`PASS ${name}`); };
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-await withHarness({ name: 'ki', cacheRoot: cache, config: 'providers: [claude, codex, kimi]\nwatch: {idle_confirm_ticks: 1, interval: 1}\ncapacity: {snapshot: false, codex_refresh: false, kimi_usage_probe: true}\nagents:\n  kimi: {ready_timeout: 3, trust_timeout: 1}\n' }, async h => {
-  const log = path.join(h.root, 'kimi.jsonl'); installPromptAgent(h, 'kimi', 'idle', log);
+const config = 'providers: [claude, codex, kimi]\nwatch: {idle_confirm_ticks: 1, interval: 1}\ncapacity: {snapshot: false, codex_refresh: false, kimi_usage_probe: true}\nagents:\n  kimi: {ready_timeout: 3, trust_timeout: 1}\n';
+
+function prepareCases(h: Harness) {
+  const log = path.join(h.root, 'kimi.jsonl');
   fs.writeFileSync(path.join(h.env.KIMI_CODE_HOME!, 'config.toml'), `default_permission_mode='manual'\n[models.'kimi-code/k3']\ndisplay_name='K3'\nsupport_efforts=['low','high','max']\n`);
   const repo = path.join(h.root, 'repo'); fs.mkdirSync(repo);
   for (const args of [['init', '-q', repo], ['-C', repo, 'commit', '--allow-empty', '-qm', 'init']]) {
-    const { spawnSync } = await import('node:child_process'); const r = spawnSync('git', args, { env: h.env, encoding: 'utf8' }); assert.equal(r.status, 0, r.stderr);
+    const r = spawnSync('git', args, { env: h.env, encoding: 'utf8' }); assert.equal(r.status, 0, r.stderr);
   }
   const spec = (task: string, agent = 'kimi', extra = '') => `---\ntask: ${task}\nagent: ${agent}\nmodel: ${agent === 'kimi' ? 'k3' : 'sonnet'}\neffort: high\nrepos: [{path: ${repo}, worktree: ${repo}-${task.toLowerCase()}, branch: ${task.toLowerCase()}}]\n${extra}---\nWork safely on ${task}.\n`;
-  const newTask = (task: string, agent = 'kimi', extra = '') => { const result = h.agentctl(['new', '-', '--no-switch', '--no-wait-trust'], { input: spec(task, agent, extra) }); return result; };
+  const newTask = (task: string, agent = 'kimi', extra = '') => {
+    const result = h.agentctl(['new', '-', '--no-switch', '--no-wait-trust'], { input: spec(task, agent, extra) });
+    if (result.code !== 0) console.error(`${task}: admission exited ${result.code}\n${result.stderr.trimEnd()}`);
+    return result;
+  };
   const events = () => { try { return fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map(s => JSON.parse(s)); } catch { return []; } };
+  return { repo, log, newTask, events };
+}
+
+await withHarness({ name: 'ki', cacheRoot: cache, config }, async h => {
+  const { repo, log, newTask, events } = prepareCases(h);
+  installPromptAgent(h, 'kimi', 'idle', log);
   const rows = () => { const r = h.agentctl(['status', '--json']); assert.equal(r.code, 0, r.stderr); return JSON.parse(r.stdout); };
   const state = () => rows().find((r: { task: string }) => r.task === 'KI-1')?.state;
   const mode = async (value: string) => { fs.writeFileSync(log + '.mode', value); await sleep(250); };
@@ -94,8 +106,12 @@ await withHarness({ name: 'ki', cacheRoot: cache, config: 'providers: [claude, c
   fs.writeFileSync(path.join(h.env.KIMI_CODE_HOME!, 'config.toml'), `default_permission_mode='auto'\n`);
   const denied = newTask('KI-AUTO'); check('auto config refuses start before any window', denied.code !== 0 && /default_permission_mode=auto/.test(denied.stderr) && !h.tmux(['list-windows', '-t', `=${h.session}`, '-F', '#{window_name}']).stdout.includes('ki-auto'));
   const doctor = h.agentctl(['doctor']); check('doctor reports forbidden permission mode', /default_permission_mode=auto/.test(doctor.stdout + doctor.stderr));
-  fs.writeFileSync(path.join(h.env.KIMI_CODE_HOME!, 'config.toml'), `default_permission_mode='manual'\n`);
-  fs.rmSync(log + '.mode', { force: true }); installPromptAgent(h, 'kimi', 'trust', log);
+});
+
+// The wire-quota scenario persists a provider hold. Trust must reach its own fake agent in a fresh home.
+await withHarness({ name: 'ki-trust', cacheRoot: cache, config }, h => {
+  const { log, newTask, events } = prepareCases(h);
+  installPromptAgent(h, 'kimi', 'trust', log);
   const trust = newTask('KI-TRUST'); check('trust is never answered automatically', trust.code !== 0 && /trust/.test(trust.stderr) && !events().some(e => e.trustKey));
   const bypass = newTask('KI-ENV', 'kimi', 'env: {KIMI_CODE_TRUST_WORKSPACE: "1"}\n'); check('spec trust env refused', bypass.code !== 0 && /forbidden/.test(bypass.stderr));
 });

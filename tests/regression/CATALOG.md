@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| REL0244-KIMI-HOLD | The release gate refused the Kimi trust task at admission because a previous case left a quota hold. | `tests/live-kimi.test.ts` (`^REL0244-KIMI-HOLD:`) | 0.23.1 | fails on v0.23.0 (1 failing of 1) |
 | REL0243-PREVIEW | MCP remote queue preview used dispatcher disk instead of host work_dir. | `tests/host-tasks.test.ts` (`^REL0243-PREVIEW:`) | 0.23.1 | not proven: Introduced by integrating 0.22.8 disk previews with remote hosts; absent from either previous release. |
 | REL0243-LINKS | Remote project defaults ignored links: [] and accepted closed-task backends. | `tests/host-tasks.test.ts` (`^REL0243-LINKS:`) | 0.23.1 | fails on v0.23.0 (1 failing of 1) |
 | REL0243-GC | Remote GC bypassed cache opt-in, pins and unpushed-commit protection. | `tests/host-gc.test.ts` (`^REL0243-GC:`) | 0.23.1 | fails on v0.23.0 (2 failing of 2) |

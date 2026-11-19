@@ -4,6 +4,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- REL0244-KIMI-HOLD: isolate the release gate's Kimi trust case from quota holds and log refusal stderr. / Przypadek zaufania Kimi w bramce wydania ma osobny katalog stanu; odmowy trafiają do logu.
 
 ## [0.23.1] - 2026-11-17
 

@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'REL0244-KIMI-HOLD', fixedIn: '0.23.1', symptom: 'The release gate refused the Kimi trust task at admission because a previous case left a quota hold.', scenarios: [s('live-kimi.test.ts', '^REL0244-KIMI-HOLD:')] },
   { id: 'REL0243-PREVIEW', fixedIn: '0.23.1', symptom: 'MCP remote queue preview used dispatcher disk instead of host work_dir.', scenarios: [s('host-tasks.test.ts', '^REL0243-PREVIEW:')], noProof: 'Introduced by integrating 0.22.8 disk previews with remote hosts; absent from either previous release.' },
   { id: 'REL0243-LINKS', fixedIn: '0.23.1', symptom: 'Remote project defaults ignored links: [] and accepted closed-task backends.', scenarios: [s('host-tasks.test.ts', '^REL0243-LINKS:')] },
   { id: 'REL0243-GC', fixedIn: '0.23.1', symptom: 'Remote GC bypassed cache opt-in, pins and unpushed-commit protection.', scenarios: [s('host-gc.test.ts', '^REL0243-GC:')] },
