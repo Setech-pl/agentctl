@@ -77,9 +77,13 @@ import { interruptTask } from './interrupt.ts';
 import { peekTask } from './peek.ts';
 import { joinReports, markPulled, noReadyMessage, selectReady } from './pull.ts';
 import { describeTargets, listTargets, matchTask, resolveRunningTask } from './resolve.ts';
+import { classifyScreen } from './state.ts';
+import { inspectField } from './input-field.ts';
+import { applyWithLiveHosts, observeHostWindows } from './host-runtime.ts';
 import { sendPrompts, submitDrafts } from './send.ts';
+import type { AnswerPreview } from './answer.ts';
 import { answerMenu } from './answer.ts';
-import { withdrawPrompt } from './prompt-queue.ts';
+import { promptQueueView, withdrawPrompt } from './prompt-queue.ts';
 import { resolveSpec, splitSpecs } from './spec.ts';
 import type { RawSpec, ResolvedSpec } from './spec.ts';
 import { collectStatus as collectStatusFull, shownRows } from './status.ts';
@@ -99,7 +103,7 @@ import { openReader, readPlans } from './usage.ts';
 import { AGENT_NAMES } from './config.ts';
 import { wallAge, findMessage, MAX_BODY_BYTES, MAX_NOTE_CHARS, MAX_REF_CHARS, MAX_REFS, MAX_SUBJECT_CHARS, OWNER_KINDS, planPost, planStatus, postMessage, readThread, readWall, renderRead, renderThread, setStatus, subscribedChannels, readableChannels, WALL_KINDS, WALL_STATUSES, wallIdentity } from './wall.ts';
 import type { PostInput, WallIdentity, WallKind, WallMessage, WallStatus } from './wall.ts';
-import { AgentctlError, cohortKey, errorMessage, formatLocalTime, plural, resolvePath, windowName } from './util.ts';
+import { AgentctlError, cohortKey, errorMessage, formatLocalTime, plural, resolvePath } from './util.ts';
 
 /*
  * The tools of `agentctl mcp`. This file is data and functions only: the MCP SDK front (src/mcp/server.ts) registers them.
@@ -375,11 +379,11 @@ function awayLine(ctx: Context): string {
 }
 
 /** "Plans: claude 5h 62% ↻ 14:30 | codex n/d (…)": the limits of both providers; what is not known says n/d. usage has the detail. */
-function planSummary(ctx: Context): string {
+function planSummary(ctx: Context, save = true): string {
   const reader = openReader(ctx.config);
   const now = ctx.runner.now();
   const plans = readPlans(ctx.config, reader, now);
-  reader.save();
+  if (save) reader.save();
   return `Plans: ${activeProviders(ctx.config).map((p) => `${p} ${planLine(providerValue(plans, p), now)}`).join(' | ')}. usage has the tokens.`;
 }
 
@@ -867,11 +871,15 @@ async function writeTool(
   }
 }
 
+const answerPreviews = new WeakMap<McpDeps, Map<string, AnswerPreview>>();
+
 async function runAnswer(deps: McpDeps, args: { task: string; option: number; confirm?: boolean; token?: string }): Promise<ToolResult> {
   return writeTool(deps, 'answer', { task: args.task, detail: `option ${args.option} confirm=${Boolean(args.confirm)}` }, async (ctx) => {
     if (args.confirm && !args.token) return { text: 'answer with confirm needs the token from the preview: call answer without confirm first, show the user the options, then call again with confirm: true and that token. Nothing was pressed.', executed: false, error: true, announce: '', detail: 'refused: no token' };
     const target = await resolveRunningTask(ctx, args.task);
-    const done = await answerMenu(ctx, target.window, args.option, args.confirm ? { token: args.token! } : {});
+    const previews = answerPreviews.get(deps) ?? new Map<string, AnswerPreview>();
+    answerPreviews.set(deps, previews);
+    const done = await answerMenu(ctx, target.window, args.option, { previews, ...(args.confirm ? { token: args.token! } : {}) });
     if (done.outcome === 'refused') return { text: `${target.task}: odmowa, żaden klawisz nie poszedł – ${done.message}`, executed: false, error: true, announce: '', detail: `refused: ${done.message.split('\n')[0]}` };
     if (done.outcome === 'failed') return { text: `${target.task}: klawisz nie poszedł (błąd tmux send-keys) – ${done.message}. Nic nie zatwierdzono.`, executed: false, error: true, failed: true, announce: '', detail: `failed: ${done.message}` };
     if (done.outcome === 'ready') return {
@@ -889,37 +897,58 @@ async function runAnswer(deps: McpDeps, args: { task: string; option: number; co
   });
 }
 
-/**
- * The task of a send that the watcher will deliver (P93b): the state folders are listed (no record is read, no tmux): an exact ID or a unique
- * prefix. The watcher resolves the running window when it applies the request.
- */
-function sendTarget(ctx: Context, input: string): string {
-  const wanted = windowName(input.trim());
-  let names: string[] = [];
-  try { names = fs.readdirSync(ctx.config.stateDir).filter((n) => fs.existsSync(path.join(ctx.config.stateDir, n, 'TASK.md'))); } catch { /* no tasks */ }
-  const hits = names.includes(wanted) ? [wanted] : names.filter((n) => wanted !== '' && n.startsWith(wanted));
-  if (hits.length === 1) return hits[0]!.toUpperCase();
-  if (hits.length > 1) throw new AgentctlError(`"${input}" fits more than one task: ${hits.map((h) => h.toUpperCase()).join(', ')}`, 'Type more of the task ID.');
-  throw new AgentctlError(`no task "${input}"`, 'See "agentctl status".');
-}
-
-/** A send that a running watcher delivers (P93b): checked here without any lock, recorded, and answered at once. */
-async function deferSend(deps: McpDeps, permission: McpPermission, args: Record<string, unknown>, detail: string): Promise<ToolResult | undefined> {
+/** A confirmed Enter is deferred with its exact-field token, which the watcher checks again. */
+async function deferEnter(deps: McpDeps, args: SendMcpArgs): Promise<ToolResult | undefined> {
   const ctx = deps.context(() => {});
-  if (args._apply || !deferMcpWrites(ctx)) return undefined;
-  if (!ctx.config.mcp.allow.includes(permission)) return undefined; // writeTool refuses it with the remedy
-  const task = sendTarget(ctx, String(args.task));
-  const { _apply: _a, ...stored } = args;
-  const { request, existing } = await recordMcpRequest(ctx, { tool: 'send', args: { ...stored, task }, scope: null, key: `send:${createHash('sha256').update(JSON.stringify(canonical(stored))).digest('hex')}`, ...(typeof args.token === 'string' ? { token: `send:${args.token}` } : {}), label: task, task });
-  audit(ctx, { tool: permission, task, outcome: 'requested', detail: `${detail}; ${existing ? 'already accepted' : 'accepted for the watcher'}: request ${request.id}` });
-  return { text: `${acceptedText(ctx.config, request, existing)}\nThe delivery outcome (delivered, queued in the agent, or left in the input field) is in that event.`, data: { request: request.id, state: request.status, tool: 'send', target: task } };
+  if (args._apply || !deferMcpWrites(ctx) || !ctx.config.mcp.allow.includes('send_enter')) return undefined;
+  return recordDeferred(deps, 'send', { ...args }, null, `send_enter:${args.task}:${args.token}`, `send:${args.token}`);
 }
 
-async function runSend(deps: McpDeps, args: { task: string; text?: string; enter_only?: boolean; confirm?: boolean; token?: string; withdraw?: string; _apply?: boolean }): Promise<ToolResult> {
+interface SendMcpArgs { task: string; text?: string; enter_only?: boolean; confirm?: boolean; token?: string; withdraw?: string; _apply?: boolean }
+
+async function sendScope(ctx: Context, args: SendMcpArgs) {
   if (args.withdraw !== undefined) {
-    if (args.text !== undefined && args.text !== '') return fail('withdraw takes no text');
-    const deferred = await deferSend(deps, 'send', args, `withdraw ${args.withdraw}`);
-    if (deferred) return deferred;
+    if (args.text !== undefined && args.text !== '') throw new AgentctlError('withdraw takes no text');
+  } else {
+    if (args.text === undefined) throw new AgentctlError('text is required (or enter_only: true to press Enter for the text a send left in the input field)');
+    if (args.text.trim() === '') throw new AgentctlError('the text is empty');
+    if (args.text.length > MAX_SEND_CHARS) throw new AgentctlError(`the text is ${args.text.length} characters; the limit is ${MAX_SEND_CHARS}`);
+  }
+  const windows = await ctx.tmux.windows();
+  const target = await resolveRunningTask(ctx, args.task, windows.map(w => w.plain));
+  const record = readTaskRecordById(ctx.config, target.task);
+  const host = record?.host;
+  const endpoint = host ? ctx.config.hosts[host] : undefined;
+  const pane = ctx.tmux.resolve(target.window, windows.filter(w => w.host === host), record?.windowId);
+  if (!pane || (host && !endpoint)) throw new AgentctlError(`${target.task}: no window on ${host ?? 'local'}`);
+  const identity = {
+    ...target, windowId: pane.id, session: host ? `agentctl-${host}` : ctx.config.session,
+    host, endpoint: endpoint ? { ssh: endpoint.ssh, port: endpoint.port, identityFile: endpoint.identityFile, workDir: endpoint.workDir } : undefined,
+    attempt: record?.attemptId, started: record?.started, agent: record?.agent,
+  };
+  if (args.withdraw === undefined) return { identity, pane };
+  const matches = promptQueueView(ctx, target.window, record).filter(item => item.id.startsWith(args.withdraw!));
+  if (matches.length !== 1) throw new AgentctlError(`${target.task}: ${matches.length ? 'ambiguous waiting message' : 'no waiting message'} ${args.withdraw}`);
+  return { identity, pane, message: matches[0] };
+}
+
+async function previewSend(ctx: Context, args: SendMcpArgs, plan: Awaited<ReturnType<typeof sendScope>>) {
+  const { identity: { task, host, window, agent }, pane, message } = plan;
+  const target = `${task} (${host ?? 'local'})`;
+  if (message) return `${target}: withdraw message ${message.id} (${message.state}).\nExact text:\n${message.text}`;
+  const screen = await ctx.tmux.capture(window, undefined, [pane], pane.id, true);
+  if (screen.code !== 0) throw new AgentctlError(`${target}: could not read the pane; preview again`);
+  const screenState = agent && agent !== 'unknown' ? classifyScreen(screen.stdout, ctx.config.agents[agent]) : 'unknown';
+  const field = inspectField(screen.stdout, agent ?? 'unknown');
+  const delivery = ['working', 'background'].includes(screenState)
+    ? 'The message will be queued until the turn ends if the agent is still busy when applied.'
+    : 'Delivery will check the pane again when applied.';
+  return `${target}\nScreen state: ${screenState}\n${delivery}\n${field.readable ? `Current input field:\n${field.area.join('\n')}` : 'Current input field: unavailable'}\nExact text to send:\n${args.text}`;
+}
+
+async function runSend(deps: McpDeps, args: SendMcpArgs): Promise<ToolResult> {
+  if ((!args.enter_only || args.withdraw !== undefined) && args.confirm !== true) return fail('Preview the send, then confirm it.');
+  if (args.withdraw !== undefined) {
     return writeTool(deps, 'send', { task: args.task, detail: `withdraw ${args.withdraw}` }, async (ctx) => {
       const target = await resolveRunningTask(ctx, args.task);
       const done = await withdrawPrompt(ctx, target.window, args.withdraw!);
@@ -931,7 +960,7 @@ async function runSend(deps: McpDeps, args: { task: string; text?: string; enter
     // Its own permission (send_enter): pressing Enter for a text that stands in a field is not pasting, and needs a preview and a confirm.
     // The preview reads the screen at once; the confirm (with its token) is pressed by a running watcher, which checks the field again.
     if (args.confirm && args.token) {
-      const deferred = await deferSend(deps, 'send_enter', args, 'enter_only confirm');
+      const deferred = await deferEnter(deps, args);
       if (deferred) return deferred;
     }
     return writeTool(deps, 'send_enter', { task: args.task, detail: `enter_only confirm=${Boolean(args.confirm)}` }, async (ctx) => {
@@ -960,10 +989,6 @@ async function runSend(deps: McpDeps, args: { task: string; text?: string; enter
   }
   if (args.text === undefined) return fail('text is required (or enter_only: true to press Enter for the text a send left in the input field)');
   const text = args.text;
-  if (text.trim() !== '' && text.length <= MAX_SEND_CHARS) {
-    const deferred = await deferSend(deps, 'send', args, clipText(text));
-    if (deferred) return deferred;
-  }
   return writeTool(deps, 'send', { task: args.task, detail: clipText(text) }, async (ctx, lines) => {
     if (text.trim() === '') throw new AgentctlError('the text is empty');
     if (text.length > MAX_SEND_CHARS) throw new AgentctlError(`the text is ${text.length} characters; the limit is ${MAX_SEND_CHARS}`);
@@ -1456,11 +1481,11 @@ export const MCP_TOOLS: McpToolDef[] = [
       'To a working agent the message goes into the agent\'s own queue. "Delivered" is said only on exact proof (the hook of the agent or its session transcript holds exactly this message); the answer is otherwise "w kolejce agenta – niepotwierdzone" (the screen shows it queued, nothing confirms it) or "nie dostarczono – tekst w polu wpisywania" (the paste stands in the input field). agentctl presses Enter only in the call that pastes, never later by itself. ' +
       'In the last case enter_only: true (no text) presses Enter for that text. It needs its own permission, send_enter, in mcp.allow. The first call (no confirm) only previews: it returns the exact text of the field, the screen state and a token for those bytes; show the text to the user, then call again with confirm: true and that token. It refuses (an error, no key) when the field is not byte for byte what agentctl pasted and what the preview showed, or a dialog is open. The answer keeps "Enter sent" apart from "delivery confirmed". An agent with an open question gets nothing pasted. ' +
       'withdraw: "<id>" (no text; peek lists prompt_queue with ids) takes back a waiting message: a queued one is removed, one whose delivery already began is marked stale instead (the agent may already work on it). ' +
-      'With "agentctl watch" running, a send (also withdraw, and enter_only with confirm) is checked here without any lock, recorded and answered at once ("Accepted: send …"); the watcher delivers it at its next tick and events_since says the outcome (MCP WYKONANE with the delivery result, or MCP BŁĄD with the reason). ' +
+      'First preview the exact proposed text and current screen state. With "agentctl watch" running, a confirmed send (including withdraw and enter_only) is recorded and answers at once ("Accepted: send …"); the watcher delivers it at its next tick and events_since says the outcome (MCP WYKONANE with the delivery result, or MCP BŁĄD with the reason). ' +
       'Use it only when the user asked you to instruct an agent; say what you will send first. The user gets a desktop notification.',
-    input: { task: taskArg, text: z.string().min(1).max(MAX_SEND_CHARS).optional().describe('The prompt for the agent. Required unless enter_only is true or withdraw is set.'), enter_only: z.boolean().optional().describe('true: paste nothing, press Enter for the text that an earlier send left in the input field (only that text, only while the whole field is exactly our paste). Needs send_enter in mcp.allow; without confirm it only previews.'), confirm: z.boolean().optional().describe('With enter_only: true presses Enter after a preview (needs token); without it nothing is pressed.'), token: z.string().min(1).max(64).optional().describe('With enter_only and confirm: the token that the preview returned for the exact text of the field.'), withdraw: z.string().min(1).max(64).optional().describe('Take back a waiting message: its id (a unique prefix is enough). A queued one is removed; one whose delivery began is marked stale. No text then.') },
+    input: { task: taskArg, text: z.string().min(1).max(MAX_SEND_CHARS).optional().describe('The prompt for the agent. Required unless enter_only is true or withdraw is set.'), enter_only: z.boolean().optional().describe('true: paste nothing, press Enter for the text that an earlier send left in the input field (only that text, only while the whole field is exactly our paste). Needs send_enter in mcp.allow; without confirm it only previews.'), confirm: z.boolean().optional().describe('true executes a reviewed preview. Omit it to preview.'), token: z.string().min(1).max(64).optional().describe('Legacy enter_only confirmation: the token that the preview returned for the exact text of the field.'), withdraw: z.string().min(1).max(64).optional().describe('Take back a waiting message: its id (a unique prefix is enough). A queued one is removed; one whose delivery began is marked stale. No text then.') },
     annotations: { title: 'Send a prompt to a running task', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-    run: (deps, args) => guarded(() => runSend(deps, args as { task: string; text?: string; enter_only?: boolean; confirm?: boolean; token?: string })),
+    run: (deps, args) => guarded(() => runSend(deps, args as SendMcpArgs)),
   }),
   def({
     name: 'consult', title: 'Consult a multi-provider panel', kind: 'write',
@@ -1538,7 +1563,7 @@ export const MCP_TOOLS: McpToolDef[] = [
     kind: 'write',
     description:
       'WRITE, off unless the user put "mark" in mcp.allow. Records the result of a task the USER judged: ok, partial or fail, with an optional note; it goes to the history that log and stats read (the last mark of a task wins). ' +
-      'A single task needs no confirmation; multiple tasks require preview and confirmation. Record only what the user said about the result - do not judge a task yourself.',
+      'Preview and confirmation are required for any task selection. Record only what the user said about the result - do not judge a task yourself.',
     input: { task: taskArg.optional(), tasks: z.array(taskArg).min(1).max(100).optional(), cohort: cohortArg.optional(), result: z.enum(RESULTS).describe('ok, partial or fail.'), note: z.string().max(500).optional().describe('Why (optional).') },
     annotations: { title: 'Mark how a task turned out', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     run: (deps, args) => guarded(() => runMark(deps, args as { task: string; result: string; note?: string })),
@@ -1776,7 +1801,9 @@ async function recordDeferred(deps: McpDeps, tool: string, args: Record<string, 
   const target = requestTarget(tool, args);
   const { request, existing } = await recordMcpRequest(ctx, { tool, args, scope, key, ...(token ? { token } : {}), ...target });
   audit(ctx, { tool, task: target.label, outcome: 'requested', detail: `${existing ? 'already accepted' : 'accepted for the watcher'}: request ${request.id}` });
-  return { text: `${acceptedText(ctx.config, request, existing)}\nrequest_id: ${request.id}${tool === 'gc_preview' ? '\nRead gc_preview with request_id after watch prepares the plan; then preview gc to get its confirmation token.' : ''}`, data: { request: request.id, state: request.status, tool, target: target.label } };
+  const followUp = tool === 'gc_preview' ? '\nRead gc_preview with request_id after watch prepares the plan; then preview gc to get its confirmation token.'
+    : tool === 'send' ? '\nThe delivery outcome is in that event.' : '';
+  return { text: `${acceptedText(ctx.config, request, existing)}\nrequest_id: ${request.id}${followUp}`, data: { request: request.id, state: request.status, tool, target: target.label } };
 }
 
 /**
@@ -1788,6 +1815,9 @@ export async function applyMcpRequest(deps: McpDeps, request: McpRequest): Promi
   if (!run || !DEFERRED_TOOLS.has(request.tool)) throw new AgentctlError(`${request.tool} is not a tool the watcher applies`);
   const applying: McpDeps = { ...deps, applying: true };
   const ctx = applying.context(() => {});
+  if (request.scope === null && (request.tool === 'mark' || request.tool === 'send' && !(request.args.enter_only && request.args.confirm === true && request.args.token))) {
+    throw new AgentctlError('This request has no confirmed preview. Preview and confirm it again.');
+  }
   const permission = (request.tool === 'send' && request.args.enter_only ? 'send_enter' : request.tool) as McpPermission;
   if (request.tool !== 'gc_preview' && !ctx.config.mcp.allow.includes(permission)) throw new AgentctlError(`"${permission}" is no longer in mcp.allow; nothing was done`);
   let scope: unknown;
@@ -1811,7 +1841,6 @@ export async function applyMcpRequest(deps: McpDeps, request: McpRequest): Promi
   return { text: result.text };
 }
 
-const confirmedTools = new Set(['mark', 'new', 'queue', 'cancel', 'resume', 'move', 'interrupt', 'close', 'queue_rm', ...MCP_TOOLS.filter((t) => t.kind === 'write' && !['send', 'answer', 'mark'].includes(t.name)).map((t) => t.name)]);
 const previews = new WeakMap<McpDeps, Map<string, { key: string; arguments: Record<string, unknown>; /** The arguments as they came in (the spec text, not its canonical form): a token-only confirm executes these. */ raw: Record<string, unknown>; scope: string; at: number; ttlS: number; /** new/queue: what the preview planned; the confirm records it without planning again (P93). */ planned?: AcceptedOrder[] }>>();
 const lastPreviewMutation = new WeakMap<McpDeps, string>();
 const previewSessions = new WeakMap<McpDeps, string>();
@@ -1830,6 +1859,10 @@ function previewArguments(input: Record<string, unknown>, tool?: string): Record
 function confirmationTargets(name: string, scope: unknown): unknown {
   if (name === 'consult') { const plan = scope as Awaited<ReturnType<typeof planConsult>>; return { spec: plan.spec, context: plan.context }; }
   if (name === 'new' || name === 'queue') return null;
+  if (name === 'send') {
+    const plan = scope as Awaited<ReturnType<typeof sendScope>>;
+    return { target: plan.identity, message: plan.message?.id };
+  }
   if (name === 'gc') return (scope as GcPlan).items.map(({ kind, task, target, repo, branch, host, hostFingerprint }) => ({ kind, task, target, repo, branch, host, hostFingerprint }));
   const project = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(project);
@@ -1852,6 +1885,7 @@ async function confirmationScope(ctx: Context, name: string, args: Record<string
     if (name === 'queue_up' && entry.status !== 'queued') throw new AgentctlError(`${entry.task} is ${entry.status}, not waiting`);
     return { tasks: [], queue: [entry] };
   }
+  if (name === 'send') return sendScope(ctx, args as unknown as SendMcpArgs);
   if (name === 'interrupt') { const target = await resolveRunningTask(ctx, args.task as string); return { tasks: [target] }; }
   if (name.startsWith('wall_')) return wallScope(ctx, name, args);
   if (name === 'pin' || name === 'unpin') return {tasks: await setPinned(ctx, args.tasks as string[], name === 'pin', true)};
@@ -1890,7 +1924,7 @@ async function confirmationScope(ctx: Context, name: string, args: Record<string
     const plan = await planGc(ctx, { cohort: args.cohort as string | undefined, olderThan: args.older_than as string | undefined, branches: Boolean(args.branches), forceDirty: args.force_dirty as string[] | undefined, includeCache: args.include_cache === true, keepCache: args.keep_cache as string[] | undefined, keep: args.keep as string[] | undefined, cachedSizes: true });
     return plan;
   }
-  if (name === 'consult') { const plan = await planConsult(ctx, args.spec as string); return { spec: plan.spec, context: plan.context, preview: plan.preview }; }
+  if (name === 'consult') { const plan = await planConsult(ctx, args.spec as string, { saveUsage: false }); return { spec: plan.spec, context: plan.context, preview: plan.preview }; }
   if (name === 'new' || name === 'queue') {
     const rawSpecs = splitSpecs(args.spec as string, 'MCP preview');
     if (args.cohort) for (const raw of rawSpecs) raw.header.cohort = args.cohort;
@@ -1957,7 +1991,7 @@ for (const tool of MCP_TOOLS) {
   if (!tool.description.includes('CLI:')) tool.description += ` Use when the user needs this operation. CLI: agentctl ${cli}.`;
   originalRuns.set(tool.name, tool.run);
   if (DEFERRED_TOOLS.has(tool.name) && tool.name !== 'send') tool.description += ` With "agentctl watch" running, confirm records the request and returns at once; the watcher checks the preview's scope again and applies it at its next tick (events_since: MCP WYKONANE, or MCP BŁĄD with the reason and a notification).`;
-  if (!confirmedTools.has(tool.name)) continue;
+  if (tool.kind !== 'write' || tool.name === 'answer') continue;
   const previewInput = tool.input;
   tool.input = { ...Object.fromEntries(Object.entries(tool.input).map(([name, schema]) => [name, z.optional(schema)])), confirm: confirmArg, preview_token: z.string().optional().describe('Token returned by this preview. Independent previews can be confirmed in any order if their scope is unchanged. A confirm may carry only this token: the stored arguments then execute.') };
   tool.description += ' Two steps are mandatory: preview, then confirm: true with identical arguments — or with preview_token only (plus the same optional as identity), which executes the stored arguments (for new/queue the spec need not be resent). A changed scope requires a new preview.';
@@ -1967,13 +2001,6 @@ for (const tool of MCP_TOOLS) {
     // Keep the established explicit-argument limit API; token-only confirms restore a reviewed preview.
     if (['set_limits', 'reserve'].includes(tool.name) && args.confirm && !args.preview_token) return original(deps, args);
     if (!ctx.config.mcp.allow.includes(tool.name as McpWriteTool)) return writeTool(deps, tool.name as McpWriteTool, {}, async () => { throw new Error('unreachable'); });
-    if (tool.name === 'mark' && !(args.confirm && args.preview_token) && typeof args.task === 'string' && args.tasks === undefined && args.cohort === undefined && deferMcpWrites(ctx)) {
-      // P93b: a single mark needs no preview; with a watcher it is recorded and applied there (the mark resolves the task over every record).
-      const { confirm: _c, preview_token: _t, ...input } = args;
-      z.object(previewInput).parse(input);
-      return recordDeferred(deps, tool.name, input, null, `${tool.name}:${createHash('sha256').update(JSON.stringify(previewArguments(input))).digest('hex')}`, undefined);
-    }
-    if (tool.name === 'mark' && !(args.confirm && args.preview_token) && planMark(ctx, args as MarkSelection).length === 1) return original(deps, args);
     if (tool.name === 'new' && !(args.confirm && args.preview_token)) {
       // A task that was handed to the watcher is being started (or failed to): a second preview or confirm, with or without a token, reports that state and starts nothing.
       let known: ReturnType<typeof findDirectStart>[] = [];
@@ -2040,7 +2067,7 @@ for (const tool of MCP_TOOLS) {
     if (confirm && token && DEFERRED_TOOLS.has(tool.name)) {
       // A recorded request answers a repeated confirm of its token, also after a restart of this server; nothing is recorded twice.
       const known = readMcpRequests(ctx.config).find((r) => r.token === token);
-      if (known && known.tool !== tool.name) return deny('different tool for an accepted token');
+      if (known && (known.tool !== tool.name || !tokenOnly && known.key !== key)) return deny('different tool or arguments for an accepted token');
       if (known) return ok(`${acceptedText(ctx.config, known, true)}\nState: ${known.status}${known.error ? ` – ${known.error.split('\n')[0]}` : ''}`);
     }
     if (confirm) {
@@ -2067,18 +2094,21 @@ for (const tool of MCP_TOOLS) {
     let scope: unknown;
     if (!confirm && tool.name === 'gc' && deferMcpWrites(ctx)) {
       scope = cachedGcPlan(ctx, effective);
-      if (!scope) return recordDeferred(deps, 'gc_preview', {...effective, merged: effective.branches}, null, `gc_preview:${gcPlanKey(effective)}`, undefined);
     }
-    try { scope ??= accepting ? null : await confirmationScope(ctx, tool.name, effective); }
+    try { scope ??= accepting ? null : await (confirm ? confirmationScope(ctx, tool.name, effective) : observeHostWindows(() => confirmationScope(ctx, tool.name, effective))); }
     catch (e) { audit(ctx, { tool: tool.name, outcome: 'error', detail: errorMessage(e) }); throw e; }
     // Argument identity is independent of mutable runtime facts. Destructive scopes are checked separately.
     const scopeIdentity = JSON.stringify(canonical(confirmationTargets(tool.name, scope)));
     if (!confirm) {
       let result: ToolResult;
       if (tool.name === 'new' || tool.name === 'queue') result = await writeTool(deps, tool.name, {task: (scope as {specs: ResolvedSpec[]}).specs.map(s => s.task).join(', ')}, async () => ({ text: `${cheapSpecSummary(ctx, (scope as { specs: ResolvedSpec[] }).specs, tool.name === 'queue').join('\n')}\n${tool.name === 'queue' ? readMcpRequests(ctx.config).filter(r => r.tool === 'queue_rm' && ['pending', 'applying'].includes(r.status) && (scope as {specs: ResolvedSpec[]}).specs.some(s => s.task === r.task)).map(r => `${r.task}: oczekuje queue_rm (request ${r.id}); use replace: true`).join('\n') : ''}\n${effective.replace ? 'replace: true – remove and re-add in one watch step.' : ''}\nBase/overlap, worktrees, capacity and disk checked by watch at accept; errors appear as events.\nBaza/nakładanie, worktree, limity i dysk: watch sprawdzi po przyjęciu; błędy w events_since.\n${tool.name === 'new' ? (watchAlive(ctx.config, ctx.runner.now()) ? 'Start: asynchronous – confirm registers the start; watch validates and opens the window.' : 'WARNING: the watcher is not running (or the queue is disabled); confirm will be refused. Start agentctl watch --tmux.') : ''}\nNot ${tool.name === 'new' ? 'started' : 'queued'} yet. Show this to the user and ask; if they agree, call ${tool.name} again with the same spec and confirm: true.`, executed: false, announce: '' }));
-      else if (['cancel', 'resume', 'move', 'set_limits', 'reserve'].includes(tool.name)) result = await original(deps, args);
+      else if (['cancel', 'resume', 'move', 'set_limits', 'reserve'].includes(tool.name)) result = await observeHostWindows(() => original(deps, args));
+      else if (tool.name === 'send') result = await observeHostWindows(() => writeTool(deps, 'send', { task: String(input.task) }, async () => ({
+        text: await previewSend(ctx, input as unknown as SendMcpArgs, scope as Awaited<ReturnType<typeof sendScope>>),
+        executed: false, announce: '',
+      })));
       else result = await writeTool(deps, tool.name as McpWriteTool, {}, async () => {
-        const detail = tool.name === 'gc' ? renderGc(scope as GcPlan, { detail: Boolean(input.detail), offset: input.offset as number | undefined, limit: input.limit as number | undefined }).join('\n') : JSON.stringify({ operation: tool.name, arguments: input, scope: await previewScope(ctx, tool.name, input, scope) }, null, 2);
+        const detail = tool.name === 'gc' ? renderGc(scope as GcPlan, { detail: Boolean(input.detail), offset: input.offset as number | undefined, limit: input.limit as number | undefined }).join('\n') : JSON.stringify({ operation: tool.name, arguments: input, scope: await observeHostWindows(() => previewScope(ctx, tool.name, input, scope)) }, null, 2);
         return { text: `${detail}\nNot executed. Review, then call with identical arguments and confirm: true.`, executed: false, announce: '' };
       });
       if (!result.isError) {
@@ -2087,7 +2117,8 @@ for (const tool of MCP_TOOLS) {
         pending.set(token, { key, arguments: arguments_, raw: input, scope: scopeIdentity, at: ctx.runner.now(), ttlS: ctx.config.preview.ttlS, ...(tool.name === 'new' || tool.name === 'queue' ? { planned: (scope as { specs: ResolvedSpec[] }).specs.map(plannedOrder) } : {}) });
         issuedPreviewTokens.set(token, { session, state: 'pending' });
         if (issuedPreviewTokens.size > 10000) issuedPreviewTokens.delete(issuedPreviewTokens.keys().next().value!);
-        result.text += `\npreview_ttl_s: ${ctx.config.preview.ttlS}; expires_at: ${new Date(ctx.runner.now() + ctx.config.preview.ttlS * 1000).toISOString()}; expires_at_local: ${formatLocalTime(new Date(ctx.runner.now() + ctx.config.preview.ttlS * 1000).toISOString())}\npreview_token: ${token}`;
+        if (tool.name === 'send') result = { ...result, text: `preview_token: ${token}\n${result.text}`, data: { preview_token: token } };
+        result.text += `\npreview_ttl_s: ${ctx.config.preview.ttlS}; expires_at: ${new Date(ctx.runner.now() + ctx.config.preview.ttlS * 1000).toISOString()}; expires_at_local: ${formatLocalTime(new Date(ctx.runner.now() + ctx.config.preview.ttlS * 1000).toISOString())}${tool.name === 'send' ? '' : `\npreview_token: ${token}`}`;
       }
       return result;
     }
@@ -2133,31 +2164,37 @@ for (const tool of MCP_TOOLS) {
   });
 }
 
-/** Menu answers and enter_only keep their exact frame/delivery tokens; the generic token restores their arguments too. */
+/** Menu answers and enter_only retain their exact frame/delivery tokens. */
 for (const tool of MCP_TOOLS.filter(t => ['answer', 'send'].includes(t.name))) {
-  const run = tool.run, inputSchema = z.object(tool.input);
+  const run = tool.run;
+  const exact = originalRuns.get(tool.name)!;
   const pending = new WeakMap<McpDeps, Map<string, {args: Record<string, unknown>; token: string; at: number; result?: Promise<ToolResult>}>>();
-  tool.input = {...Object.fromEntries(Object.entries(tool.input).map(([key, schema]) => [key, z.optional(schema)])), preview_token: z.string().optional()};
-  tool.description += ' A preview also returns preview_token; confirm may carry only preview_token and confirm: true, restoring the menu/delivery arguments.';
+  if (tool.name === 'answer') {
+    tool.input = {...Object.fromEntries(Object.entries(tool.input).map(([key, schema]) => [key, z.optional(schema)])), preview_token: z.string().optional()};
+    tool.description += ' A preview also returns preview_token; confirm may carry only preview_token and confirm: true.';
+  }
   tool.run = (deps, args) => guarded(async () => {
     const {preview_token, confirm, ...input} = args;
-    let entries = pending.get(deps); if (!entries) {entries = new Map(); pending.set(deps, entries);}
+    const entries = pending.get(deps) ?? new Map();
+    const preview = typeof preview_token === 'string' ? entries.get(preview_token) : undefined;
+    if (tool.name === 'send' && !args.enter_only && !(confirm && preview)) return run(deps, args);
+    if (tool.name === 'send' && args.withdraw !== undefined) return fail('enter_only and withdraw are separate operations');
     if (confirm && typeof preview_token === 'string') {
-      const preview = entries.get(preview_token);
       if (!preview) return fail('Confirmation refused: missing preview in this session. Preview again.');
       const ctx = deps.context(() => {});
       if (ctx.runner.now() - preview.at > ctx.config.preview.ttlS * 1000) return fail('Confirmation refused: TTL expired; preview again.');
       if (Object.keys(input).length && JSON.stringify(canonical(input)) !== JSON.stringify(canonical(preview.args))) return fail('Confirmation refused: different arguments; preview again.');
-      preview.result ??= run(deps, {...preview.args, token: preview.token, confirm: true});
+      preview.result ??= exact(deps, {...preview.args, token: preview.token, confirm: true});
       return preview.result;
     }
-    const validated = inputSchema.parse(args);
-    const result = await run(deps, validated);
+    z.object(tool.name === 'answer' ? { task: taskArg, option: z.number().int().min(1).max(99) } : { task: taskArg }).parse(input);
+    const result = await (confirm ? exact(deps, args) : observeHostWindows(() => exact(deps, args)));
     const token = (result.data as {token?: string} | undefined)?.token;
-    if (!confirm && !result.isError && token && (tool.name === 'answer' || args.enter_only)) {
+    if (!confirm && !result.isError && token) {
       const id = crypto.randomUUID();
       if (entries.size >= 100) entries.delete(entries.keys().next().value!);
       entries.set(id, {args: input, token, at: deps.context(() => {}).runner.now()});
+      pending.set(deps, entries);
       return {...result, text: `${result.text}\npreview_token: ${id}`, data: {...(result.data as object), preview_token: id}};
     }
     return result;
@@ -2212,9 +2249,10 @@ function sessionWarnings(deps: McpDeps, ctx: Context): string[] {
 
 const capacitySessions = new WeakMap<McpDeps, Record<string, string>>();
 /** Read threshold bands, not changing percentages/timestamps, so unchanged calls stay quiet. */
-async function capacityFooter(deps: McpDeps, ctx: Context, explicit: boolean): Promise<string[]> {
+async function capacityFooter(deps: McpDeps, ctx: Context, explicit: boolean, save = true): Promise<string[]> {
   const reader = openReader(ctx.config);
-  const plans = readPlans(ctx.config, reader, ctx.runner.now()); reader.save();
+  const plans = readPlans(ctx.config, reader, ctx.runner.now());
+  if (save) reader.save();
   const disk = await collectDisk(ctx);
   const limits = collectLimits(ctx.config, await liveWindows(ctx), ctx.runner.now());
   const bands: Record<string, string> = {};
@@ -2227,7 +2265,7 @@ async function capacityFooter(deps: McpDeps, ctx: Context, explicit: boolean): P
   for (const v of disk.volumes) bands[`disk/${v.device ?? v.paths.join(',')}`] = v.level;
   const previous = capacitySessions.get(deps);
   capacitySessions.set(deps, bands);
-  if (explicit) return [planSummary(ctx), diskLine(disk), ...snapshotLines(capacitySnapshot(await collectCapacity(ctx)))];
+  if (explicit) return [planSummary(ctx, save), diskLine(disk), ...snapshotLines(capacitySnapshot(await collectCapacityFull(ctx, { diskBudgetMs: DISK_BUDGET_MS, cachedOnly: true, save })))];
   const changes = previous ? [...new Set([...Object.keys(previous), ...Object.keys(bands)])]
     .filter(k => previous[k] !== bands[k] && bands[k] !== undefined && (previous[k] !== undefined || !['0', 'ok', 'available'].includes(bands[k]!)))
     .map(k => `${k}: ${previous[k] ?? 'n/d'} -> ${bands[k] ?? 'n/d'}`) : [];
@@ -2247,7 +2285,10 @@ for (const tool of MCP_TOOLS.filter(t => capacityCarriers.has(t.name))) {
     const warnings = sessionWarnings(deps, ctx).map(w => `Config warning: ${w}`);
     // An accepted confirm (P93/P93b) answers without the footer: it reads tmux and the disk, which a loaded host may not run in time.
     const accepted = args.confirm && (['new', 'queue'].includes(tool.name) || typeof (result.data as { request?: unknown } | undefined)?.request === 'string');
-    const footer = accepted || ['new', 'queue'].includes(tool.name) ? [] : await capacityFooter(deps, ctx, args.detail === true || args.capacity === true);
+    const explicit = args.detail === true || args.capacity === true;
+    const footer = accepted || ['new', 'queue'].includes(tool.name) ? []
+      : tool.name === 'close' && !args.confirm ? await observeHostWindows(() => capacityFooter(deps, ctx, explicit, false))
+      : await capacityFooter(deps, ctx, explicit);
     // Core new/queue helpers also serve the CLI. Remove only their display footer here.
     const text = result.text.split('\n').filter(l => !/^(?:Plans:|plan:\s|capacity:|(?:WARNING: )?Disk:)/.test(l)).join('\n');
     if ((args.format === 'json' || args.detail === true && tool.name === 'status') && /^[{[]/.test(text)) {
@@ -2402,7 +2443,7 @@ for (const tool of MCP_TOOLS) {
     const key = `${tool.name}:${JSON.stringify(args)}`;
     const saved = lastReads.get(deps) ?? new Map<string, {at: number; result: ToolResult}>(); lastReads.set(deps, saved);
     return withResponseBudget(async () => {
-      const result = await run(deps, args);
+      const result = await (tool.kind === 'write' && args.confirm === true ? applyWithLiveHosts(() => run(deps, args)) : run(deps, args));
       if (tool.kind === 'read' && !result.isError) { if (saved.size >= 100) saved.delete(saved.keys().next().value!); saved.set(key, {at: deps.context(() => {}).runner.now(), result}); }
       return result;
     }, () => {

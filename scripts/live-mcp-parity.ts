@@ -117,33 +117,30 @@ exec ${shellQuote(realGit)} "$@"
     while (!/working/.test(status.text) && Date.now() < observedEnd) { await new Promise(r => setTimeout(r, 100)); status = await call('status', {format: 'json'}); }
     evidence.working = status;
     assert.match(status.text, /working/, 'the next watch snapshot observes the working indicator');
+    const applied = async (text: string) => {
+      const id = /request_id: ([a-f0-9-]{36})/.exec(text)?.[1];
+      assert.ok(id, text);
+      const deadline = Date.now() + 60_000;
+      let request: { status?: string; error?: string } = {};
+      while (Date.now() < deadline) {
+        try { request = JSON.parse(fs.readFileSync(path.join(h.agentctlHome, 'mcp-requests', `${id}.json`), 'utf8')); } catch { /* not published yet */ }
+        if (request.status === 'done' || request.status === 'failed') break;
+        await new Promise(r => setTimeout(r, 100));
+      }
+      assert.equal(request.status, 'done', request.error);
+      return request;
+    };
     await call('close', { task: 'PARITY-1' });
-    assert.ok(!(await call('close', { task: 'PARITY-1', confirm: true })).isError);
-    // A3: watch prepares GC before the client can review its token; Accepted exposes a full request_id.
-    let gcPreview = await call('gc', {older_than: '1m'});
-    const planEnd = Date.now() + 60_000;
-    while (!gcPreview.text.includes('preview_token:') && Date.now() < planEnd) {
-      assert.ok(!gcPreview.isError, gcPreview.text);
-      const requestId = /request_id: ([a-f0-9-]{36})/.exec(gcPreview.text)?.[1];
-      assert.ok(requestId, gcPreview.text);
-      let plan = await call('gc_preview', {request_id: requestId});
-      while (/GC preview pending/.test(plan.text) && Date.now() < planEnd) { await new Promise(r => setTimeout(r, 100)); plan = await call('gc_preview', {request_id: requestId}); }
-      assert.ok(!plan.isError, plan.text); evidence.gcPlan = plan;
-      gcPreview = await call('gc', {older_than: '1m'});
-    }
+    const closed = await call('close', { task: 'PARITY-1', confirm: true });
+    assert.ok(!closed.isError, closed.text);
+    await applied(closed.text);
+    const gcPreview = await call('gc', {older_than: '1m'});
+    assert.ok(!gcPreview.isError, gcPreview.text);
     const gcToken = /preview_token: (\S+)/.exec(gcPreview.text)?.[1]; assert.ok(gcToken, gcPreview.text);
     evidence.gcPreview = gcPreview;
     const gcConfirmed = await call('gc', {preview_token: gcToken, confirm: true});
     evidence.gcConfirmed = gcConfirmed; assert.ok(!gcConfirmed.isError, gcConfirmed.text);
-    const executionId = /request_id: ([a-f0-9-]{36})/.exec(gcConfirmed.text)?.[1]; assert.ok(executionId, gcConfirmed.text);
-    let execution: {status?: string; error?: string} = {};
-    const executionEnd = Date.now() + 60_000;
-    while (Date.now() < executionEnd) {
-      try { execution = JSON.parse(fs.readFileSync(path.join(h.agentctlHome, 'mcp-requests', `${executionId}.json`), 'utf8')); } catch { /* not published yet */ }
-      if (execution.status === 'done' || execution.status === 'failed') break;
-      await new Promise(r => setTimeout(r, 100));
-    }
-    evidence.gcExecution = execution; assert.equal(execution.status, 'done', execution.error);
+    evidence.gcExecution = await applied(gcConfirmed.text);
     evidence.audit = fs.readFileSync(path.join(h.agentctlHome, 'mcp-audit.log'), 'utf8');
     evidence.journal = fs.readFileSync(path.join(h.agentctlHome, 'journal.jsonl'), 'utf8');
     evidence.ok = true;

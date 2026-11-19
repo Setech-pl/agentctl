@@ -10,6 +10,8 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| WALL-23 | An unconfirmed MCP follow-up was accepted and delivered to a working agent. | `tests/mcp-write-contract.test.ts` (`^WALL-23:`)<br>`tests/host-tasks.test.ts` (`^WALL-23:`) | 0.23.2 | fails on v0.23.1 (3 failing of 3) |
+| MCP-WRITE-PREVIEW | Single-task mark and an uncached GC write preview could register requests without confirmation. | `tests/mcp-write-contract.test.ts` (`^MCP-WRITE-PREVIEW:`) | 0.23.2 | fails on v0.23.1 (1 failing of 1) |
 | REL0244-CASE-ISOLATION | An independent live case inherited provider admission or usage state from the preceding case. | `tests/harness.test.ts` (`^REL0244-CASE-ISOLATION:`) | 0.23.1 | fails on v0.23.0 (1 failing of 1) |
 | REL0244-LIVE-EVIDENCE | The release gate stopped recording live evidence after the first failed regression or live check. | `tests/gate.test.ts` (`^REL0244-LIVE-EVIDENCE:`) | 0.23.1 | fails on v0.23.0 (1 failing of 1) |
 | REL0244-REMOTE-FIXTURE | The fake remote admission probe used the gate machine’s free disk space and blocked unrelated regressions. | `tests/host-tasks.test.ts` (`^REL0244-REMOTE-FIXTURE:`) | 0.23.1 | not proven: Fixture bug introduced by the unreleased 0.23.1 admission merge. The gate on 571a4ca reproduced it. |

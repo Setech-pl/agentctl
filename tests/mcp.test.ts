@@ -315,14 +315,17 @@ describe('mcp: the write tools', () => {
     const t = setup('s1', 'mcp: {allow: [send]}\n');
     seedTask(t.config, 'NC-1');
     t.tmux.add('nc-1', IDLE);
-    const r = await t.call('send', { task: 'nc-1', text: 'dopisz test' });
+    const args = { task: 'nc-1', text: 'dopisz test' };
+    const preview = await t.call('send', args);
+    assert.match(preview.text, /preview_token:/);
+    const r = await t.call('send', { ...args, confirm: true });
     assert.match(r.text, /^NC-1: wklejono; dostarczenie niepotwierdzone – sprawdzam \(watch\) \(11 characters\)/);
     assert.equal(readTaskRecord(t.config, 'nc-1')?.pendingPrompt, 'dopisz test');
     assert.ok(t.runner.commands.some((c) => c.startsWith('tmux paste-buffer')));
     assert.ok(t.runner.commands.some((c) => c.includes('send-keys') && c.includes('Enter')));
     assert.match(fs.readFileSync(taskFile(t.config, 'nc-1'), 'utf8'), /## Follow-up queued .*\n\ndopisz test[\s\S]*## Follow-up pasted, unconfirmed /);
-    assert.deepEqual(t.audit().map((a) => [a.tool, a.task, a.outcome]), [['send', 'nc-1', 'requested'], ['send', 'nc-1', 'done']]);
-    assert.equal(t.audit()[0]?.detail, 'dopisz test');
+    assert.deepEqual(t.audit().map((a) => [a.tool, a.task, a.outcome]), [['send', 'nc-1', 'requested'], ['send', 'nc-1', 'preview'], ['send', 'nc-1', 'requested'], ['send', 'nc-1', 'done']]);
+    assert.equal(t.audit()[2]?.detail, 'dopisz test');
     assert.deepEqual(t.notified, ['czat zlecił: send NC-1']);
   });
 
@@ -337,7 +340,8 @@ describe('mcp: the write tools', () => {
     assert.deepEqual(t.notified, []);
     assert.deepEqual(t.audit().filter((a) => a.outcome === 'error').length, 2);
     t.failNotify();
-    assert.equal((await t.call('send', { task: 'NC-1', text: 'hi' })).isError, undefined, 'a notifier that fails does not fail the tool');
+    await t.call('send', { task: 'NC-1', text: 'hi' });
+    assert.equal((await t.call('send', { task: 'NC-1', text: 'hi', confirm: true })).isError, undefined, 'a notifier that fails does not fail the tool');
   });
 
   it('interrupt: sends the agent key once and the window stays', async () => {
@@ -447,7 +451,8 @@ describe('mcp: the write tools', () => {
     seedTask(t.config, 'NC-1', { repos: [{ path: repo, worktree: `${repo}-wt` }] });
     fs.mkdirSync(`${repo}-wt`, { recursive: true }); // the worktree exists, so close really removes it
     t.tmux.add('nc-1', IDLE);
-    await t.call('send', { task: 'NC-1', text: 'git push --force origin main; rm -rf /' });
+    const preview = await t.call('send', { task: 'NC-1', text: 'git push --force origin main; rm -rf /' });
+    await t.call('send', { confirm: true, preview_token: /preview_token: (\S+)/.exec(preview.text)?.[1] });
     await t.call('interrupt', { task: 'NC-1' });
     await t.call('interrupt', { task: 'NC-1' , confirm: true });
     await t.call('new', { spec: `---\ntask: NC-2\nagent: claude\nrepos:\n  - path: ${repo}\n    worktree: ${repo}-wt2\n---\ngit merge main\n` });

@@ -56,7 +56,11 @@ describe('mcp: the SDK front (in memory)', () => {
     const refused = await t.client.callTool({ name: 'interrupt', arguments: { task: 'NC-1' } });
     assert.equal(refused.isError, true);
     assert.match((refused.content as { text: string }[])[0]?.text ?? '', /Writing is off for "interrupt"/);
-    const sent = await t.client.callTool({ name: 'send', arguments: { task: 'NC-1', text: 'hello' } });
+    const preview = await t.client.callTool({ name: 'send', arguments: { task: 'NC-1', text: 'hello' } });
+    const token = /preview_token: (\S+)/.exec((preview.content as { text: string }[])[0]?.text ?? '')?.[1];
+    assert.ok(token);
+    assert.deepEqual(t.sent, []);
+    const sent = await t.client.callTool({ name: 'send', arguments: { confirm: true, preview_token: token } });
     assert.ok(!sent.isError);
     assert.deepEqual(t.sent, ['czat zlecił: send NC-1']);
     await t.close();

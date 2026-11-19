@@ -93,9 +93,12 @@ describe('mcp: mark', () => {
     assert.match(audit, /"tool":"mark".*"outcome":"denied"/);
   });
 
-  it('with mark in mcp.allow it records the result at once (no confirm step), audits it and tells the desktop', async () => {
+  it('with mark in mcp.allow it records the confirmed result, audits it and tells the desktop', async () => {
     const t = setup('mark-on', 'mcp: {allow: [mark]}\n');
-    const r = await t.call('mark', { task: 'nc-1', result: 'partial', note: 'edge case missed' });
+    const args = { task: 'nc-1', result: 'partial', note: 'edge case missed' };
+    assert.match((await t.call('mark', args)).text, /preview_token:/);
+    assert.deepEqual(readHistory(t.config), []);
+    const r = await t.call('mark', { ...args, confirm: true });
     assert.equal(r.isError, undefined, r.text);
     assert.match(r.text, /^NC-1: marked partial\./);
     const [h] = readHistory(t.config);
@@ -104,8 +107,9 @@ describe('mcp: mark', () => {
     assert.equal(h?.note, 'edge case missed');
     assert.deepEqual(t.notified, ['czat zlecił: mark NC-1 partial']);
     const entries = fs.readFileSync(auditPath(t.config), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as { tool: string; outcome: string });
-    assert.deepEqual(entries.map((e) => [e.tool, e.outcome]), [['mark', 'requested'], ['mark', 'done']]);
-    const again = await t.call('mark', { task: 'NC-1', result: 'ok' });
+    assert.deepEqual(entries.map((e) => [e.tool, e.outcome]), [['mark', 'requested'], ['mark', 'preview'], ['mark', 'requested'], ['mark', 'done']]);
+    await t.call('mark', { task: 'NC-1', result: 'ok' });
+    const again = await t.call('mark', { task: 'NC-1', result: 'ok', confirm: true });
     assert.match(again.text, /marked ok \(was partial\)/);
     const stats = json(await t.call('stats')) as { agent: string; ok: number; partial: number }[];
     assert.equal(stats[0]?.ok, 1);
@@ -122,9 +126,9 @@ describe('mcp: mark', () => {
     assert.equal(readHistory(t.config).length, 0);
   });
 
-  it('the tool descriptions: mark says it needs no confirmation but only the user\'s verdict; usage tells when to call it', () => {
+  it('the tool descriptions: mark asks for confirmation of the user\'s verdict; usage tells when to call it', () => {
     assert.match(tool('mark').description, /^WRITE, off unless the user put "mark" in mcp\.allow/);
-    assert.match(tool('mark').description, /needs no confirmation/);
+    assert.match(tool('mark').description, /confirmation are required/);
     assert.match(tool('usage').description, /BEFORE the user orders more tasks/);
     assert.equal(tool('usage').kind, 'read');
     assert.equal(tool('log').kind, 'read');

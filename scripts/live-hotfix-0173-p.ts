@@ -40,7 +40,10 @@ for (const [agent, mode] of [['claude','claude-spinner'],['claude','hook'],['cod
     if(mode==='hook') {
      const until=Date.now()+25000;while((!sent()||!entries().some(e=>e.hook===0))&&Date.now()<until)await pause(150);
      check(`P ${agent}: actual generated hook/notify confirms in watch`,sent()&&entries().some(e=>e.hook===0));
-     const follow=await call('send',{task:'T1',text:'Follow-up prompt'});
+     const sendPreview=await call('send',{task:'T1',text:'Follow-up prompt'});
+     const sendToken=/preview_token: (\S+)/.exec(sendPreview.text)?.[1];
+     assert.ok(sendToken,sendPreview.text);
+     const follow=await call('send',{confirm:true,preview_token:sendToken});
      check(`P ${agent}: send succeeds while acknowledgement pending`,!follow.error);
      const end=Date.now()+25000;while((!sent()||entries().filter(e=>e.hook===0).length<2)&&Date.now()<end)await pause(150);
      check(`P ${agent}: send acknowledged once by current hook/notify`,sent()&&entries().filter(e=>e.paste).length===2 && entries().filter(e=>e.hook===0).length===2);

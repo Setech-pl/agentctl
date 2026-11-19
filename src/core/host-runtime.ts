@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { checkReportPath } from './report-path.ts';
 import { remoteMirrorScript } from './host-mirror.ts';
 import { codexMessages } from './transcript.ts';
@@ -18,6 +19,18 @@ import { Tmux } from './tmux.ts';
 import type { WindowInfo, Capture } from './tmux.ts';
 import { firstConnectCommand } from './hosts.ts';
 import { shellQuote } from './util.ts';
+
+const liveHostRequest = new AsyncLocalStorage<'preview' | 'confirm'>();
+const observing = () => liveHostRequest.getStore() === 'preview';
+/** MCP previews may observe remote panes without updating task records or report mirrors. */
+export function observeHostWindows<T>(read: () => Promise<T>): Promise<T> {
+  return liveHostRequest.run('preview', read);
+}
+
+/** MCP confirmations that run inline must verify the actual pane and delivery. */
+export function applyWithLiveHosts<T>(write: () => Promise<T>): Promise<T> {
+  return liveHostRequest.run('confirm', write);
+}
 
 interface Connection { unreachable: boolean; failures: number; retryAt: number; detail: string; windows: WindowInfo[]; screens?: Record<string, Capture> }
 
@@ -40,7 +53,7 @@ export class HostRuntime {
     if (!this.config.hosts[name]) { c.unreachable = true; c.detail = 'host removed from config; restore its hosts: entry'; }
     return c;
   }
-  private async persist(name: string): Promise<void> { if (!this.runner.dryRun) await this.runner.writeFile(this.file(name), JSON.stringify(this.connection(name))); }
+  private async persist(name: string): Promise<void> { if (!this.runner.dryRun && !observing()) await this.runner.writeFile(this.file(name), JSON.stringify(this.connection(name))); }
   forHost(name: string): HostRunner {
     const host = this.config.hosts[name];
     if (!host) throw new HostUnreachable(name, 'host removed from config; restore its hosts: entry');
@@ -71,7 +84,7 @@ export class HostRuntime {
     const names = [...new Set(records.map(r => r.host!))];
     return (await Promise.all(names.map(async name => {
       const c = this.connection(name);
-      if (cachedOnly || cachedRequest() || c.unreachable && this.runner.now() < c.retryAt) return c.windows;
+      if (cachedOnly || cachedRequest() && !liveHostRequest.getStore() || c.unreachable && this.runner.now() < c.retryAt) return c.windows;
       try {
         const discovered = await this.tmux(name).windows();
         c.windows = [];
@@ -80,7 +93,7 @@ export class HostRuntime {
           if (matches.length !== 1) continue; // ambiguous identity is never adopted
           const found = matches[0]!;
           c.windows.push({ ...found, plain: record.window, host: name });
-          if (found.id && found.id !== record.windowId) await setHeaderField(this.runner, taskFile(this.config, record.window), 'window_id', found.id);
+          if (!observing() && found.id && found.id !== record.windowId) await setHeaderField(this.runner, taskFile(this.config, record.window), 'window_id', found.id);
         }
       }
       catch (error) {
@@ -108,13 +121,13 @@ export function taskTmux(local: Tmux, hosts: HostRuntime, config: GlobalConfig):
         return (...args: unknown[]) => {
           const window = String(args[0]);
           const host = readTaskRecord(config, window)?.host;
-          if (host && key === 'capture' && cachedRequest()) return Promise.resolve(hosts.cachedCapture(host, window));
+          if (host && key === 'capture' && cachedRequest() && !liveHostRequest.getStore()) return Promise.resolve(hosts.cachedCapture(host, window));
           const client = host ? hosts.tmux(host) : target;
           // A caller may pass the aggregate listing; remote capture/lookup must see only this host's windows.
           if (host && key === 'capture' && Array.isArray(args[2])) args[2] = (args[2] as WindowInfo[]).filter(w => w.host === host);
           if (host && key === 'targetFor' && Array.isArray(args[1])) args[1] = (args[1] as WindowInfo[]).filter(w => w.host === host);
           const result = (host ? client[key as keyof Tmux] as Function : localMethod).apply(client, args);
-          if (host && key === 'capture') return Promise.resolve(result).then(async screen => {
+          if (host && key === 'capture' && !observing()) return Promise.resolve(result).then(async screen => {
             await hosts.rememberCapture(host, window, screen);
             const record = readTaskRecord(config, window);
             if (record) await syncRemoteFiles({ runner: hosts.runner, config, hosts } as Context, record);

@@ -81,7 +81,7 @@ export interface AnswerResult {
 }
 
 /** Fresh, single-use previews bind the task identity, normalized question and option labels. */
-interface AnswerPreview { token: string; identity: string; menu: FrameMenu; option: number; at: number }
+export interface AnswerPreview { token: string; identity: string; menu: FrameMenu; option: number; at: number }
 const taskIdentity = (identity: unknown): string => createHash('sha256').update(JSON.stringify(identity)).digest('hex');
 const normalized = (text: string | undefined): string => (text ?? '').normalize('NFKC').replace(/\s+/g, ' ').trim();
 
@@ -92,7 +92,9 @@ const sameMenu = (a: FrameMenu, b: FrameMenu): boolean => {
   return overlap.length > 0 && overlap.every(o => normalized(o.label) === normalized(b.options.find(p => p.n === o.n)!.label));
 };
 
-export async function answerMenu(ctx: Context, window: string, option: number, options: { token?: string } = {}): Promise<AnswerResult> {
+interface AnswerOptions { token?: string; previews?: Map<string, AnswerPreview> }
+
+export async function answerMenu(ctx: Context, window: string, option: number, options: AnswerOptions = {}): Promise<AnswerResult> {
   if (ctx.runner.dryRun) return { outcome: options.token ? 'answered' : 'ready', message: 'dry run: no key is sent', ...(options.token ? { keySent: false } : {}) };
   const done = await answerOnce(ctx, window, option, options);
   if (done.keySent) {
@@ -102,8 +104,8 @@ export async function answerMenu(ctx: Context, window: string, option: number, o
   return done;
 }
 
-async function answerOnce(ctx: Context, window: string, option: number, options: { token?: string }): Promise<AnswerResult> {
-  return withFileLock(path.join(ctx.config.stateDir, window, 'prompt-delivery.lock'), async () => {
+async function answerOnce(ctx: Context, window: string, option: number, options: AnswerOptions): Promise<AnswerResult> {
+  const lookup = async (): Promise<AnswerResult> => {
     const refused = (message: string, menu?: FrameMenu): AnswerResult => ({ outcome: 'refused', message, ...(menu ? { menu: menu.options.map((o) => `${o.n}. ${o.label}`) } : {}) });
     const record = readTaskRecord(ctx.config, window);
     if (!record || record.agent === 'unknown') return refused('nie ma stanu zadania tego okna – nic nie zatwierdzam');
@@ -117,20 +119,27 @@ async function answerOnce(ctx: Context, window: string, option: number, options:
     const chosen = menu.options.find((o) => o.n === option);
     if (!chosen) return refused(`${record.task}: opcja ${option} nie istnieje – menu ma opcje ${menu.options.map((o) => o.n).join(', ')}`, menu);
     const previewFile = path.join(ctx.config.stateDir, window, 'answer-preview.json');
-    const identity = taskIdentity([window, record.windowId, record.started, record.attemptId, record.agent]);
+    const host = record.host ? ctx.config.hosts[record.host] : undefined;
+    const identity = taskIdentity([window, record.windowId, record.started, record.attemptId, record.agent, record.host, host?.ssh, host?.port, host?.identityFile]);
     const shown = menu.options.map((o) => `${o.n}. ${o.label}`);
     if (!options.token) {
       const token = randomUUID();
-      atomicWriteFile(previewFile, JSON.stringify({ token, identity, menu, option, at: ctx.runner.now() } satisfies AnswerPreview));
+      const preview = { token, identity, menu, option, at: ctx.runner.now() };
+      if (options.previews) {
+        if (options.previews.size >= 100) options.previews.delete(options.previews.keys().next().value!);
+        options.previews.set(window, preview);
+      } else atomicWriteFile(previewFile, JSON.stringify(preview));
       const what = menu.question ? `Menu: ${menu.question}\n` : '';
       return { outcome: 'ready', message: `${record.task}: ${what}${shown.map((l) => `  ${l}`).join('\n')}\nnic nie poszło; wybór ${option}. ${chosen.label} zostanie wysłany dopiero z tokenem ${token}`, menu: shown, question: menu.question, screenState: state, token };
     }
     let preview: AnswerPreview | undefined;
-    try { preview = JSON.parse(fs.readFileSync(previewFile, 'utf8')); } catch { /* no current preview */ }
+    if (options.previews) preview = options.previews.get(window);
+    else try { preview = JSON.parse(fs.readFileSync(previewFile, 'utf8')); } catch { /* no current preview */ }
     const token = options.token;
     if (!preview || preview.token !== token || preview.identity !== identity || !preview.menu || !sameMenu(preview.menu, menu) || normalized(preview.menu.options.find(o => o.n === option)?.label) !== normalized(chosen.label) || preview.option !== option || ctx.runner.now() - preview.at > ctx.config.preview.ttlS * 1000) return refused(`${record.task}: token nie pasuje do bieżącego menu (podgląd był dla innego menu albo innej opcji) – zrób podgląd jeszcze raz`, menu);
     // Consume before the side effect: uncertain delivery requires a new preview, never an automatic retry.
-    fs.unlinkSync(previewFile);
+    if (options.previews) options.previews.delete(window);
+    else fs.unlinkSync(previewFile);
     const pressed = await ctx.tmux.sendKey(window, String(option), record.windowId);
     if (pressed.code !== 0) return { outcome: 'failed', message: `klawisz ${option} nie poszedł: ${pressed.stderr.trim() || `tmux exit ${pressed.code}`}`, keySent: false };
     for (let poll = 0; poll < 6; poll++) {
@@ -141,5 +150,7 @@ async function answerOnce(ctx: Context, window: string, option: number, options:
       if (!now || !sameMenu(now, menu)) return { outcome: 'answered', message: `wybrano ${option}. ${chosen.label} – menu zniknęło z ekranu`, keySent: true, token };
     }
     return { outcome: 'pending', message: `wysłano klawisz ${option} (${chosen.label}), ale menu nadal jest na ekranie – sprawdź peek/attach`, keySent: true, token };
-  });
+  };
+  if (options.previews && !options.token) return lookup();
+  return withFileLock(path.join(ctx.config.stateDir, window, 'prompt-delivery.lock'), lookup);
 }

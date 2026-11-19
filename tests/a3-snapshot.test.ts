@@ -88,8 +88,10 @@ it('A3: GC preview is Accepted without slow checks and read back after watch', a
   const token = /preview_token: (\S+)/.exec(preview.text)![1];
   const confirm = await gc.run(deps, {confirm: true, preview_token: token});
   assert.match(confirm.text, /^Accepted/);
+  const before = readMcpRequests(config);
   const different = await gc.run(deps, {branches: true});
-  assert.match(different.text, /^Accepted/, 'different filters require watch to prepare a new plan');
+  assert.match(different.text, /preview_token:/, 'uncached filters still preview in place');
+  assert.deepEqual(readMcpRequests(config), before);
 });
 
 it('W4: summary receipts are durable while status still serves the previous watch snapshot', async () => {

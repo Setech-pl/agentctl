@@ -12,6 +12,8 @@ Przy działającym watch potwierdzone narzędzia zapisują też trwałe żądani
 
 `answer` ma dodatkowy `token` znormalizowanego pytania i etykiet opcji, niezależny od przewijania; wybrana opcja musi być widoczna i niezmieniona. Zgoda na polecenie nadal wiąże jego treść. `send enter_only` ma osobny token dokładnego pola i uprawnienie `send_enter`; wysyła tylko niezmieniony tekst pozostawiony przez wcześniejsze send. Żaden mechanizm nie daje automatycznej zgody trust.
 
+Podgląd wiadomości pokazuje dokładny proponowany tekst, stan okna i bieżącą zawartość pola wpisywania, jeśli jest czytelna. Przy zajętym agencie podgląd opisuje dostarczenie z kolejki. Dopiero potwierdzenie rejestruje dostarczenie lub wysyła klawisze. Dotyczy to okien lokalnych i hostów SSH. Potwierdzenia wymagają też pojedyncza ocena i wycofanie wiadomości. Gdy watch ma przygotować plan zdalnego GC, użyj narzędzia odczytu `gc_preview`.
+
 Zapisy trafiają do `mcp-audit.log` i dziennika; brak możliwości audytu oznacza odmowę. Powiadomienia zależą od `notify.mcp_writes`. Jawne usunięcie worktree wymaga dodatkowo `mcp.allow_rm_worktree`. Żadne narzędzie nie scala, nie robi push/publish ani nie wykonuje dowolnych poleceń raportu. Uprawnienia configu nie są izolacją OS.
 
 ## Zdarzenia i tożsamość
@@ -61,7 +63,7 @@ Argumenty z ? są opcjonalne. Pola dostawców obejmują opcjonalnych; uruchomion
 | `overlap` | odczyt | `as?`, `task?` | Aktywne zadania zmieniające te same pliki; to ostrzeżenia, nie blokady. |
 | `resume` | zapis | `as?`, `tasks?`, `all?`, `confirm?`, `preview_token?` | Wznów znane sesje po utracie okien, bez ponownego pierwszego promptu. |
 | `answer` | zapis | `as?`, `task?`, `option?`, `confirm?`, `token?`, `preview_token?` | Podgląd i wybór numerowanej opcji z tokenem dokładnego menu; trust zawsze ręcznie. |
-| `send` | zapis | `as?`, `task?`, `text?`, `enter_only?`, `confirm?`, `token?`, `withdraw?`, `preview_token?` | Wyślij follow-up lub wycofaj ID; busy Codex czeka do końca tury. enter_only wymaga send_enter. |
+| `send` | zapis | `as?`, `task?`, `text?`, `enter_only?`, `confirm?`, `token?`, `withdraw?`, `preview_token?` | Pokaż dokładny tekst i stan okna przed wysłaniem lub wycofaniem. Zajęty agent odbierze wiadomość z kolejki. enter_only wymaga send_enter. |
 | `consult` | zapis | `as?`, `spec?`, `confirm?`, `preview_token?` | Kosztowny panel wielu dostawców: podgląd liczby/usage, Accepted, rundy i synteza przez watch. |
 | `new` | zapis | `as?`, `spec?`, `agent?`, `reuse?`, `no_agent?`, `cohort?`, `wait_trust?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` | Podgląd specyfikacji, potem trwała rejestracja Accepted do walidacji/startu przez watch. |
 | `queue` | zapis | `as?`, `spec?`, `cohort?`, `replace?`, `agent?`, `confirm?`, `preview_token?`, `detail?`, `capacity?` | Podgląd specyfikacji, potem Accepted do walidacji i kolejki przez watch. |

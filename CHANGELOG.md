@@ -4,6 +4,9 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- WALL-23: MCP send previews the exact message and pane state on local and SSH hosts before confirmation. Busy-agent previews describe queued delivery. / MCP send pokazuje dokładną wiadomość i stan okna lokalnie i na hoście SSH przed potwierdzeniem. Podgląd przy zajętym agencie opisuje dostarczenie z kolejki.
+- MCP-WRITE-PREVIEW: single-task marks, send withdrawals and uncached GC plans require confirmation before registering a write. / Pojedyncze oceny, wycofanie wiadomości i plany GC bez cache wymagają potwierdzenia przed rejestracją zapisu.
+
 - REL0244-CASE-ISOLATION: independent live cases use fresh harness homes for all providers, and GLM onboarding fixtures use a fixed off-peak clock. / Niezależne scenariusze live mają osobne katalogi stanu dla wszystkich dostawców, a testy startu GLM używają stałego czasu poza szczytem.
 - REL0244-LIVE-EVIDENCE: stabilize the fake remote GC clock, show plan reasons in assertions, and collect every live check result after regression or live failures. / Test GC używa zegara testowego, pokazuje powody z planu i zapisuje wyniki wszystkich sprawdzeń live po błędzie.
 - REL0244-REMOTE-FIXTURE: fake remote admission reports independent disk capacity in gate tests. / Testowy host zdalny ma własny odczyt pojemności dysku.

@@ -551,6 +551,16 @@
       "tests/gate.test.ts"
     ]
   },
+  "MCP-WRITE-PREVIEW": {
+    "rev": "v0.23.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "MCP-WRITE-PREVIEW: every registered write previews without changing state or sending keys",
+      "MCP-WRITE-PREVIEW: every registered write previews without changing state or sending keys"
+    ]
+  },
   "P16-f1": {
     "rev": "v0.20.1",
     "outcome": "FAILS",
@@ -1055,6 +1065,19 @@
     "failing": [
       "tests/wall2-secrets.test.ts",
       "tests/wall2-secrets.test.ts"
+    ]
+  },
+  "WALL-23": {
+    "rev": "v0.23.1",
+    "outcome": "FAILS",
+    "failed": 3,
+    "passed": 0,
+    "failing": [
+      "WALL-23: a working Claude send previews before registering a watcher request",
+      "WALL-23: legacy unconfirmed send requests are refused by the watcher",
+      "WALL-23: a working Claude send previews before registering a watcher request",
+      "WALL-23: legacy unconfirmed send requests are refused by the watcher",
+      "WALL-23: remote MCP send, send_enter, answer and interrupt preview without dispatching either pane"
     ]
   },
   "WALL0229-HISTORY": {

@@ -86,21 +86,21 @@ const requests = (config: { path: string }) => {
   try { return fs.readdirSync(dir).map((n) => JSON.parse(fs.readFileSync(path.join(dir, n), 'utf8')) as { tool: string; status: string; error?: string; label: string }); } catch { return []; }
 };
 
-/** Each write as the chat calls it: the preview arguments, then the confirm (a single mark and a send have no preview). */
-const WRITES: { tool: string; args: Record<string, unknown>; preview: boolean }[] = [
-  { tool: 'archive', args: { older_than: '7d' }, preview: true }, // first: the closes below change the set of closed tasks it previewed
-  { tool: 'unblock', args: { task: 'DEP' }, preview: true },
-  { tool: 'queue_up', args: { task: 'UP-2' }, preview: true },
-  { tool: 'queue_rm', args: { task: 'RM-1' }, preview: true },
-  { tool: 'queue_retry', args: { task: 'RETRY-1' }, preview: true },
-  { tool: 'close', args: { task: 'CLOSE-1' }, preview: true },
-  { tool: 'cancel', args: { task: 'CANCEL-1', reason: 'not needed' }, preview: true },
-  { tool: 'hide', args: { tasks: ['HIDE-1'] }, preview: true },
-  { tool: 'unhide', args: { tasks: ['UNHIDE-1'] }, preview: true },
-  { tool: 'cohort_add', args: { cohort: 'batch', tasks: ['COHORT-1'] }, preview: true },
-  { tool: 'cohort_note', args: { cohort: 'notes', text: 'night batch' }, preview: true },
-  { tool: 'mark', args: { task: 'MARK-1', result: 'ok' }, preview: false },
-  { tool: 'send', args: { task: 'SEND-1', text: 'Continue with the tests.' }, preview: false },
+/** Each write as the chat calls it: the preview arguments, then the confirm. */
+const WRITES: { tool: string; args: Record<string, unknown> }[] = [
+  { tool: 'archive', args: { older_than: '7d' } }, // first: the closes below change the set of closed tasks it previewed
+  { tool: 'unblock', args: { task: 'DEP' } },
+  { tool: 'queue_up', args: { task: 'UP-2' } },
+  { tool: 'queue_rm', args: { task: 'RM-1' } },
+  { tool: 'queue_retry', args: { task: 'RETRY-1' } },
+  { tool: 'close', args: { task: 'CLOSE-1' } },
+  { tool: 'cancel', args: { task: 'CANCEL-1', reason: 'not needed' } },
+  { tool: 'hide', args: { tasks: ['HIDE-1'] } },
+  { tool: 'unhide', args: { tasks: ['UNHIDE-1'] } },
+  { tool: 'cohort_add', args: { cohort: 'batch', tasks: ['COHORT-1'] } },
+  { tool: 'cohort_note', args: { cohort: 'notes', text: 'night batch' } },
+  { tool: 'mark', args: { task: 'MARK-1', result: 'ok' } },
+  { tool: 'send', args: { task: 'SEND-1', text: 'Continue with the tests.' } },
 ];
 
 it('P93b: every write confirm on a host that runs nothing and a held start.lock returns at once, the watcher applies it with an event', async () => {
@@ -108,7 +108,6 @@ it('P93b: every write confirm on a host that runs nothing and a held start.lock 
   await e.tick(); // the watcher's heartbeat
   const confirms: { tool: string; args: Record<string, unknown> }[] = [];
   for (const w of WRITES) {
-    if (!w.preview) { confirms.push({ tool: w.tool, args: w.args }); continue; }
     const preview = await e.call(w.tool, w.args);
     assert.ok(!preview.isError, `${w.tool}: ${preview.text}`);
     confirms.push({ tool: w.tool, args: { confirm: true, preview_token: token(preview) } });

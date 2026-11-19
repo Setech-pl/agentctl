@@ -27,8 +27,8 @@ export function matchTask(input: string, targets: TaskTarget[]): TaskMatch {
 }
 
 /** Tasks with a state file plus the windows of the session that have none (orphans); windows "watch", "board" and "manager" are not tasks. */
-export async function listTargets(ctx: Context): Promise<TaskTarget[]> {
-  const live = new Set(await ctx.tmux.listWindows());
+export async function listTargets(ctx: Context, windows?: string[]): Promise<TaskTarget[]> {
+  const live = new Set(windows ?? await ctx.tmux.listWindows());
   const targets: TaskTarget[] = [];
   const known = new Set<string>();
   for (const record of listTaskRecords(ctx.config)) {
@@ -52,8 +52,8 @@ export function describeTargets(targets: TaskTarget[]): string[] {
  * Resolve what the user typed to one task with a live window. Case does not matter and a unique prefix is enough.
  * An ambiguous prefix is an error that lists the candidates; so is a task whose window is gone.
  */
-export async function resolveRunningTask(ctx: Context, input: string): Promise<TaskTarget> {
-  const targets = await listTargets(ctx);
+export async function resolveRunningTask(ctx: Context, input: string, windows?: string[]): Promise<TaskTarget> {
+  const targets = await listTargets(ctx, windows);
   const running = matchTask(input, targets.filter((t) => t.alive));
   if (running.kind === 'one') return running.target;
   if (running.kind === 'many') {

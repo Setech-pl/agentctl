@@ -1,3 +1,5 @@
+import { areaKey, inspectField } from '../src/core/input-field.ts';
+import { readMcpRequests } from '../src/core/mcp-requests.ts';
 import { writeHostsCache } from '../src/core/hosts.ts';
 import { publishMcpSnapshot } from '../src/core/mcp-tools.ts';
 import { setProviderHolds } from '../src/core/provider-hold.ts';
@@ -8,7 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { it } from 'node:test';
-import { MCP_TOOLS } from '../src/core/mcp-tools.ts';
+import { MCP_TOOLS, applyMcpRequest } from '../src/core/mcp-tools.ts';
 import { readJournal } from '../src/core/journal.ts';
 import { Context } from '../src/core/context.ts';
 import { newTasks } from '../src/core/new.ts';
@@ -22,14 +24,14 @@ import { collectStatus } from '../src/core/status.ts';
 import { liveWindows, planBatch } from '../src/core/plan.ts';
 import { queuePrompt, deliverPendingPrompt } from '../src/core/prompt-delivery.ts';
 import { drainPromptQueue, readPromptQueue } from '../src/core/prompt-queue.ts';
-import { readTaskRecord, taskFile } from '../src/core/taskstore.ts';
+import { readTaskRecord, setHeaderFields, taskFile } from '../src/core/taskstore.ts';
 import { resolveSpec, splitSpecs } from '../src/core/spec.ts';
 import { describeQueue, planQueueAdd, commitQueueAdd, queueTick, QueueMemory, readQueue } from '../src/core/queue.ts';
 import { syncRemoteFiles, remoteAttachHint } from '../src/core/host-runtime.ts';
 import { remoteHookScript } from '../src/core/host-task.ts';
 import { watchTick, WatchMemory } from '../src/core/watch.ts';
 import { loadBoard, ProgressCache, runBoardEffect } from '../src/core/board.ts';
-import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helpers.ts';
+import { DiskRunner, FakeTmux, fakeWatcher, makeConfig, seedTask, useScratch } from './helpers.ts';
 import { composerFixture, CODEX_COMPOSER_BOTTOM } from './composer-fixture.ts';
 import type { ExecOptions, ExecResult } from '../src/core/runner.ts';
 
@@ -242,6 +244,63 @@ it('remote send verifies exact follow-up and answer/interrupt/cancel affect only
   await interruptTask(w.ctx, 'R-1'); assert.equal(w.keys.at(-1), 'Escape');
   const plan = await planCancel(w.ctx, ['R-1']); await cancelTasks(w.ctx, plan);
   assert.equal(w.record().cancelled, true); assert.equal(w.tmux.windows.length, 0);
+});
+
+it('WALL-23: remote MCP send, send_enter, answer and interrupt preview without dispatching either pane', async () => {
+  const w = world('claude', 'mcp: {allow: [send, answer, interrupt, send_enter]}\n');
+  await startAtTrust(w);
+  await acceptTrust(w);
+  fakeWatcher(w.config);
+  const deps = {
+    context: () => w.ctx, notify: async () => {},
+    budgetClock: { now: () => w.runner.now(), schedule: () => () => {} },
+  };
+  const call = (name: string, args: Record<string, unknown>) => MCP_TOOLS.find(tool => tool.name === name)!.run(deps, args);
+  const task = w.record();
+  const keyCount = w.keys.length, pasteCount = w.pastes.length;
+  const taskBefore = fs.readFileSync(taskFile(w.config, task.window), 'utf8');
+  const screen = w.tmux.windows[0]!;
+  const text = ' Remote follow-up\nwith spaces. ';
+  screen.screen = 'Working (esc to interrupt)\n' + ready();
+  const send = await call('send', { task: task.task, text });
+  assert.deepEqual(readMcpRequests(w.config), [], send.text);
+  assert.match(send.text, /R-1 \(pc\)[\s\S]*working[\s\S]*queued until the turn ends/);
+  assert.ok(send.text.includes(text));
+  screen.screen = QUESTION;
+  const answer = await call('answer', { task: task.task, option: 1 });
+  assert.match(answer.text, /preview_token:/, answer.text);
+  assert.match((await call('interrupt', { task: task.task })).text, /preview_token:/);
+  assert.equal(w.keys.length, keyCount);
+  assert.equal(w.pastes.length, pasteCount);
+  assert.deepEqual(readMcpRequests(w.config), []);
+  assert.deepEqual(readPromptQueue(w.ctx, task.window), []);
+  assert.equal(fs.readFileSync(taskFile(w.config, task.window), 'utf8'), taskBefore);
+  assert.doesNotMatch(w.localTmux.seen.join('\n'), /send-keys|paste-buffer/);
+  const token = /preview_token: (\S+)/.exec(send.text)?.[1];
+  assert.ok(token);
+  const confirm = { confirm: true, preview_token: token };
+  assert.match((await call('send', confirm)).text, /^Accepted: send/);
+  assert.match((await call('send', confirm)).text, /^already accepted: send/);
+  const [request, ...duplicates] = readMcpRequests(w.config);
+  assert.ok(request);
+  assert.deepEqual(duplicates, []);
+  assert.equal(request.args.text, text);
+  assert.equal(w.pastes.length, pasteCount);
+  screen.screen = ready();
+  await applyMcpRequest(deps, request);
+  assert.equal(w.pastes.at(-1), text.trimEnd());
+  const draft = 'Existing remote draft';
+  screen.screen = ready('claude', draft);
+  await setHeaderFields(w.runner, taskFile(w.config, task.window), {
+    delivery_id: 'remote-draft', delivery_field: areaKey(inspectField(screen.screen, 'claude').area),
+    delivery_result: 'not-delivered-in-field', pending_prompt: draft, prompt_delivery: 'needs-attention',
+  });
+  const afterSend = [w.keys.length, w.pastes.length, readMcpRequests(w.config).length];
+  const enter = await call('send', { task: task.task, enter_only: true });
+  assert.match(enter.text, /preview_token:/, enter.text);
+  assert.ok(enter.text.includes(draft));
+  assert.deepEqual([w.keys.length, w.pastes.length, readMcpRequests(w.config).length], afterSend);
+  assert.doesNotMatch(w.localTmux.seen.join('\n'), /send-keys|paste-buffer/);
 });
 
 it('remote Codex send stays in FIFO until turn end and verifies from its own rollout', async () => {

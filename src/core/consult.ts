@@ -113,14 +113,15 @@ async function contextSnapshot(ctx: Context, spec: ConsultSpec): Promise<string>
   if (Buffer.byteLength(text) > 128 * 1024) throw new AgentctlError('consult: context snapshot exceeds 128 KiB');
   return text;
 }
-export async function planConsult(ctx: Context, text: string) {
+export async function planConsult(ctx: Context, text: string, options: { saveUsage?: boolean } = {}) {
   const spec = await freeze(ctx, parseConsult(ctx, text));
   if (readConsult(ctx, spec.id)) throw new AgentctlError(`consult ${spec.id} already exists`);
   if (fs.existsSync(spec.report)) throw new AgentctlError(`consult: owner report already exists: ${spec.report}`);
   const ids = [...Array.from({ length: spec.rounds }, (_, i) => taskIds(spec, i + 1)).flat(), `CONSULT-${spec.id}-SYN`];
   if (ids.some(id => readQueue(ctx.config).some(e => e.task === id) || readTaskRecordById(ctx.config, id))) throw new AgentctlError('consult: generated task ID already exists');
   const context = await contextSnapshot(ctx, spec);
-  const reader = openReader(ctx.config), plans = readPlans(ctx.config, reader, ctx.runner.now()); reader.save();
+  const reader = openReader(ctx.config), plans = readPlans(ctx.config, reader, ctx.runner.now());
+  if (options.saveUsage !== false) reader.save();
   const usage = [...new Set([...spec.panel.map(p => p.agent), spec.synthesis.agent])].map(agent => ({ agent, usage: get(plans, agent), limit: ctx.config.limits[agent], queue_hold: ctx.config.usage.queueHold[agent] ?? null }));
   const preview = { id: spec.id, cohort: spec.cohort, rounds: spec.rounds, panel_tasks: spec.panel.length * spec.rounds, synthesis_tasks: 1, total_tasks: spec.panel.length * spec.rounds + 1, report: spec.report, usage };
   const sample: ConsultState = { version: 1, spec, seed: '', labels: spec.panel.map((_, i) => String.fromCharCode(65 + i)), context, phase: 'round', round: 1, rounds: [{ tasks: taskIds(spec, 1) }], findings: [], synthesisTask: `CONSULT-${spec.id}-SYN` };

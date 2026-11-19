@@ -33,7 +33,7 @@ const pl: Record<string, string> = {
  overlap: 'Aktywne zadania zmieniające te same pliki; to ostrzeżenia, nie blokady.',
  resume: 'Wznów znane sesje po utracie okien, bez ponownego pierwszego promptu.',
  answer: 'Podgląd i wybór numerowanej opcji z tokenem dokładnego menu; trust zawsze ręcznie.',
- send: 'Wyślij follow-up lub wycofaj ID; busy Codex czeka do końca tury. enter_only wymaga send_enter.',
+ send: 'Pokaż dokładny tekst i stan okna przed wysłaniem lub wycofaniem. Zajęty agent odbierze wiadomość z kolejki. enter_only wymaga send_enter.',
  consult: 'Kosztowny panel wielu dostawców: podgląd liczby/usage, Accepted, rundy i synteza przez watch.',
  new: 'Podgląd specyfikacji, potem trwała rejestracja Accepted do walidacji/startu przez watch.',
  queue: 'Podgląd specyfikacji, potem Accepted do walidacji i kolejki przez watch.',
