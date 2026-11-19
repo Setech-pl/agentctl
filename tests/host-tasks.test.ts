@@ -141,6 +141,10 @@ function world(agent = 'claude', extra = '') {
         return { ...result(), ...tmux.respond(command, argv, opts) };
       }
       if (['claude', 'codex', 'kimi', 'claude-glm'].includes(command)) return result(0, 'fake-agent 1.0\n');
+      if (command === 'node' && argv[0] === '-e' && argv[1]?.includes('statfsSync')) {
+        assert.equal(argv[2], work);
+        return result(0, '256\n');
+      }
       try {
         const out = execFileSync(command === 'node' ? process.execPath : command, argv, { cwd, env: remoteEnv, input: opts.input, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
         return result(0, out);
@@ -354,6 +358,11 @@ it('REL0243-DISK: remote admission probes host work_dir and fails closed before 
   const disk = await refreshDiskFreeSpace(w.ctx, {volumes: [{host: 'pc', workDir: w.work, device: 'host:pc', paths: [w.work], availableBytes: 99, totalBytes: 100, level: 'ok'}], worktreeBytes: null, measuredAt: new Date(w.runner.now()).toISOString(), level: 'ok'});
   assert.equal(disk.volumes[0]!.availableBytes, null, 'missing host health never becomes local disk free');
   assert.equal(disk.volumes[0]!.host, 'pc');
+});
+it('REL0244-REMOTE-FIXTURE: remote admission uses fixture disk space independent of the test host', async () => {
+  const w = world();
+  w.config.disk.minFreeStartGb = 512;
+  await assert.rejects(newTasks(w.ctx, [w.spec()], {waitTrust: false}), /dysk \[pc\] 256 GB < 512 GB/);
 });
 it('REL0243-REMOTE: peak and provider holds stop remote setup; scrolled answers and snapshots retain host identity', async () => {
   const w = world();

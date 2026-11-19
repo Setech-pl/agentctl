@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| REL0244-REMOTE-FIXTURE | The fake remote admission probe used the gate machine’s free disk space and blocked unrelated regressions. | `tests/host-tasks.test.ts` (`^REL0244-REMOTE-FIXTURE:`) | 0.23.1 | not proven: Fixture bug introduced by the unreleased 0.23.1 admission merge. The gate on 571a4ca reproduced it. |
 | REL0244-KIMI-HOLD | The release gate refused the Kimi trust task at admission because a previous case left a quota hold. | `tests/live-kimi.test.ts` (`^REL0244-KIMI-HOLD:`) | 0.23.1 | fails on v0.23.0 (1 failing of 1) |
 | REL0244-DEV-REF | The dev updater draft preferred a stale local branch in a separate dev clone. | `tests/dev-update.test.ts` (`^dev updater resolves a branch`) | 0.23.1 | not proven: The dev updater first ships in 0.23.1; the scenario fails on the owner-approved draft. |
 | REL0244-DEV-ROLLBACK | Rebuilding the same commit overwrote the dev updater draft’s rollback target. | `tests/dev-update.test.ts` (`^dev updater rebuilds a tagged worktree`) | 0.23.1 | not proven: The dev updater first ships in 0.23.1; the scenario fails on the owner-approved draft. |

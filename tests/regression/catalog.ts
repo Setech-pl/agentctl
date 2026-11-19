@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'REL0244-REMOTE-FIXTURE', fixedIn: '0.23.1', symptom: 'The fake remote admission probe used the gate machine’s free disk space and blocked unrelated regressions.', scenarios: [s('host-tasks.test.ts', '^REL0244-REMOTE-FIXTURE:')], noProof: 'Fixture bug introduced by the unreleased 0.23.1 admission merge. The gate on 571a4ca reproduced it.' },
   { id: 'REL0244-KIMI-HOLD', fixedIn: '0.23.1', symptom: 'The release gate refused the Kimi trust task at admission because a previous case left a quota hold.', scenarios: [s('live-kimi.test.ts', '^REL0244-KIMI-HOLD:')] },
   { id: 'REL0244-DEV-REF', fixedIn: '0.23.1', symptom: 'The dev updater draft preferred a stale local branch in a separate dev clone.', scenarios: [s('dev-update.test.ts', '^dev updater resolves a branch')], noProof: 'The dev updater first ships in 0.23.1; the scenario fails on the owner-approved draft.' },
   { id: 'REL0244-DEV-ROLLBACK', fixedIn: '0.23.1', symptom: 'Rebuilding the same commit overwrote the dev updater draft’s rollback target.', scenarios: [s('dev-update.test.ts', '^dev updater rebuilds a tagged worktree')], noProof: 'The dev updater first ships in 0.23.1; the scenario fails on the owner-approved draft.' },
