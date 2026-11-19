@@ -61,6 +61,8 @@ The harness builds a sandbox under `$AGENTCTL_LIVE_CACHE/live-<name>/` and gives
 
 Before anything is started the harness checks `command -v` of each faked command and the `#{socket_path}` of the tmux server, and refuses (`HarnessRefusal`) when one points at a real binary, at the default tmux server, or outside the sandbox. `tests/harness.test.ts` tests those refusals. Cleanup (the tmux server, background processes) runs in `finally`.
 
+Start each independent live case with `withHarness` or `await h.runCase(name, fn)` inside a suite. A nested case inherits the suite's fixture options and gets its own home, state, usage cache and tmux server. Keep successive steps of a single workflow in the same case when they need to observe its state.
+
 ```ts
 import { withHarness } from './scripts/live-harness.ts';
 await withHarness({ name: 'my-try' }, (h) => {

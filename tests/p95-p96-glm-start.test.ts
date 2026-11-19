@@ -86,7 +86,8 @@ function setup(name: string, extraYaml = ''): Setup {
   const repo = scratch.sub(`${name}/app`);
   const config = makeConfig(root, `${YAML}${extraYaml}`);
   const tmux = new FakeTmux();
-  const runner = new DiskRunner({ dryRun: false, startTime: Date.now(), respond: (cmd, args, opts) => tmux.respond(cmd, args, opts) });
+  // Onboarding and failed-start fixtures must be admitted regardless of the gate's local time.
+  const runner = new DiskRunner({ dryRun: false, startTime: Date.UTC(2026, 10, 14, 12), respond: (cmd, args, opts) => tmux.respond(cmd, args, opts) });
   const ctx = new Context(runner, config, () => {});
   const notified: string[] = [];
   const notifier: Notifier = { clickable: false, notify: async (_t, m) => void notified.push(m) };

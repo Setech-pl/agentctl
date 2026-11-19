@@ -42,12 +42,20 @@ class SandboxRunner extends RealRunner {
 }
 const plan = (now: number, used = 100, reset: number | null = now + 60000) => Object.fromEntries(['claude', 'codex'].map(provider => [provider, { provider, available: true, readAt: now, planType: null, windows: [{ kind: 'session', label: '5h', minutes: 300, usedPercent: used, resetsAt: reset }], maxPercent: used, note: '', stale: false }])) as Record<'claude' | 'codex', PlanState>;
 
-await withHarness({ name: 'nc-workflow', cacheRoot: cache, config: 'watch: {interval: 1}\nreport: {settle_s: 0}\nqueue: {enabled: false}\ncohort: {done_grace_s: 0}\ncapacity: {snapshot: false, codex_refresh: false}\noverload: {retry_after: 1, max_retries: 2, give_up_after: 30}\ndelivery_confirm_s: 1\nmcp: {max_response_kb: 8, allow: [new, queue, queue_rm, send, mark, close, hide, unhide, cohort_add, cohort_remove, cohort_note, unblock, notify_test, adopt, archive, gc]}\n' }, async h => {
-  const config = loadGlobalConfig(h.agentctlHome), runner = new SandboxRunner(h), ctx = new Context(runner, config, () => {}), notices: string[] = [];
-  const notifier = { notify: async (_title: string, text: string) => { notices.push(text); } };
+function makeRepo(h: Harness) {
   const repo = path.join(h.root, 'repo'); fs.mkdirSync(repo);
   const git = (cwd: string, args: string[]) => { const r = spawnSync('git', args, { cwd, env: h.env, encoding: 'utf8' }); assert.equal(r.status, 0, r.stderr); return r.stdout.trim(); };
-  git(repo, ['init', '-qb', 'main']); git(repo, ['commit', '--allow-empty', '-qm', 'baseline']); const base = git(repo, ['rev-parse', 'HEAD']);
+  git(repo, ['init', '-qb', 'main']); git(repo, ['commit', '--allow-empty', '-qm', 'baseline']);
+  return { repo, git, base: git(repo, ['rev-parse', 'HEAD']) };
+}
+
+const specFor = (h: Harness, repo: string, task: string, header: Record<string, unknown> = {}) => `---\n${YAML.stringify({ task, agent: 'claude', model: 'claude-sonnet-5-5', effort: 'medium', cohort: 'NC', repos: [{ path: repo, worktree: path.join(h.root, 'wt', task.toLowerCase()), branch: task.toLowerCase(), base: 'main' }], ...header })}---\nFake work ${task}.\n`;
+
+await withHarness({ name: 'nc-workflow', cacheRoot: cache, config: 'watch: {interval: 1}\nreport: {settle_s: 0}\nqueue: {enabled: false}\ncohort: {done_grace_s: 0}\ncapacity: {snapshot: false, codex_refresh: false}\noverload: {retry_after: 1, max_retries: 2, give_up_after: 30}\ndelivery_confirm_s: 1\nmcp: {max_response_kb: 8, allow: [new, queue, queue_rm, send, mark, close, hide, unhide, cohort_add, cohort_remove, cohort_note, unblock, notify_test, adopt, archive, gc]}\n' }, async h => {
+  const config = loadGlobalConfig(h.agentctlHome), runner = new SandboxRunner(h), ctx = new Context(runner, config, () => {});
+  const notifier = { notify: async () => {} };
+  const { repo, git, base } = makeRepo(h);
+  const journal: ReturnType<typeof readJournal> = [];
   const transport = new StdioClientTransport({ command: process.execPath, args: ['--experimental-strip-types', '--no-warnings', path.resolve(import.meta.dirname, '../bin/agentctl.ts'), 'mcp'], env: h.env as Record<string, string>, stderr: 'pipe' });
   const client = new Client({ name: 'nc-workflow', version: '1' }); await client.connect(transport);
   const call = async (name: string, args: Record<string, unknown> = {}) => {
@@ -60,13 +68,12 @@ await withHarness({ name: 'nc-workflow', cacheRoot: cache, config: 'watch: {inte
     }
     return { text, error: response.isError };
   };
-  const spec = (task: string, header: Record<string, unknown> = {}) => `---\n${YAML.stringify({ task, agent: 'claude', model: 'claude-sonnet-5-5', effort: 'medium', cohort: 'NC', repos: [{ path: repo, worktree: path.join(h.root, 'wt', task.toLowerCase()), branch: task.toLowerCase(), base: 'main' }], ...header })}---\nFake work ${task}.\n`;
+  const spec = (task: string, header: Record<string, unknown> = {}) => specFor(h, repo, task, header);
   const record = (task: string) => readTaskRecord(config, task.toLowerCase())!;
   const writeReport = (task: string, sha: string, changes: Record<string, unknown> = {}) => {
     const r = record(task); fs.mkdirSync(path.dirname(r.report), { recursive: true });
     fs.writeFileSync(r.report, 'Werdykt: ' + String(changes.verdict ?? 'PASS') + '\n```agentctl-outputs\n' + YAML.stringify({ version: 1, verdict: 'PASS', commits: [{ repo: 'repo', branch: 'author', sha }], integrate: [{ repo: 'repo', branch: 'author', sha, note: 'proposed' }], decisions: ['Choose deployment time'], actions: [{ title: 'Deploy', shell: 'echo never executed' }], checks: ['fixture: PASS'], ...changes }) + '```\n<!-- agentctl:report-end -->\n');
   };
-  const attached: ReturnType<typeof spawn>[] = [];
   try {
     // P34: MCP confirm only registers with the watcher and this sandbox drives ticks in process with the queue off; starts use the in-place CLI new.
     const order = spec('AUTHOR', { review: { rerun: true } }); await call('new', { spec: order }); const started = h.agentctl(['new', '-', '--json'], { input: order }); check('author with auto review starts on fake agent', started.code === 0 && JSON.parse(started.stdout).results.some((r: { task: string; agentStarted: boolean }) => r.task === 'AUTHOR' && r.agentStarted));
@@ -110,45 +117,65 @@ await withHarness({ name: 'nc-workflow', cacheRoot: cache, config: 'watch: {inte
     const foreign = path.join(h.root, 'foreign-checkout'); git(repo, ['worktree', 'add', '--detach', foreign, 'main']); const scoped = await call('gc_preview', { cohort: 'NC' }); check('scoped GC reports foreign worktrees by count only', scoped.text.includes('foreignWorktrees') && !scoped.text.includes(foreign));
     await call('gc', { cohort: 'NC' }); const cleaned = await call('gc', { cohort: 'NC', confirm: true }); check('confirmed GC returns results without repeating plan', !cleaned.error && !cleaned.text.includes('"plan"') && cleaned.text.includes('"done"'));
 
-    // Two real sessions on the same isolated server share the root dispatcher binding.
-    h.tmux(['new-session', '-d', '-s', 'second-dev', '-n', 'board']); h.tmux(['new-window', '-t', 'second-dev', '-n', 'task']);
-    if (h.tmux(['has-session', '-t', h.session]).code !== 0) h.tmux(['new-session', '-d', '-s', h.session, '-n', 'board']);
-    else if (!h.tmux(['list-windows', '-t', h.session, '-F', '#{window_name}']).stdout.includes('board')) h.tmux(['new-window', '-t', h.session, '-n', 'board']);
-    h.tmux(['bind-key', '-n', 'F12', 'if-shell', '-F', `#{==:#{session_name},${h.session}}`, `select-window -t '=${h.session}:board'`, 'send-keys F12']);
-    const devConfig = { ...config, session: 'second-dev' }; await applyNavigation(new Context(runner, devConfig, () => {}));
-    const binding = h.tmux(['list-keys', '-T', 'root', 'F12']).stdout;
-    check('F12 shared binding dispatches on per-session option without production collision', binding.includes('@agentctl-return-key') && !h.tmux(['show-option', '-qv', '-t', h.session, '@agentctl-return-key']).stdout.trim() && h.tmux(['show-option', '-v', '-t', 'second-dev', '@agentctl-return-key']).stdout.trim() === 'F12');
-    h.tmux(['new-window', '-t', h.session, '-n', 'navigation-task']);
-    for (const session of [h.session, 'second-dev']) {
-      h.tmux(['select-window', '-t', `=${session}:${session === h.session ? 'navigation-task' : 'task'}`]);
-      const terminal = spawn('/usr/bin/python3', ['-c', "import os,pty,select,sys,fcntl,termios,struct,signal\npid,fd=pty.fork()\nif pid==0: os.execv(sys.argv[1],[sys.argv[1],'attach-session','-t',sys.argv[2]])\nfcntl.ioctl(fd,termios.TIOCSWINSZ,struct.pack('HHHH',32,160,0,0))\ntry:\n while True:\n  for source in select.select([0,fd],[],[])[0]:\n   data=os.read(source,65536)\n   if not data: raise EOFError()\n   if source==0: os.write(fd,data)\nexcept (EOFError,OSError): pass\nfinally:\n os.close(fd)\n try: os.kill(pid,signal.SIGTERM)\n except ProcessLookupError: pass\n os.waitpid(pid,0)\n", path.join(h.fakeBin, 'tmux'), `=${session}`], { env: h.env, stdio: ['pipe', 'ignore', 'ignore'] });
-      attached.push(terminal);
-      check(`PTY client attached to ${session}`, await until(() => h.tmux(['list-clients', '-t', `=${session}`, '-F', '#{client_name}']).stdout.trim() !== ''));
-    }
-    const windowOf = (session: string) => h.tmux(['display-message', '-p', '-t', `=${session}:`, '#{window_name}']).stdout.trim();
-    attached[0]!.stdin!.write('\x1b[24~'); await until(() => windowOf(h.session) === 'board');
-    check('actual F12 in first client selects only its board', h.tmux(['display-message', '-p', '-t', `=${h.session}:`, '#{window_name}']).stdout.trim() === 'board' && h.tmux(['display-message', '-p', '-t', '=second-dev:', '#{window_name}']).stdout.trim() === 'task');
-    attached[1]!.stdin!.write('\x1b[24~'); await until(() => windowOf('second-dev') === 'board');
-    check('actual F12 in second client selects second board', h.tmux(['display-message', '-p', '-t', '=second-dev:', '#{window_name}']).stdout.trim() === 'board');
-    const mode = path.join(h.root, 'pane-mode'), inputLog = path.join(h.root, 'pane-input.log'), fake = path.join(h.root, 'pane.mjs'); fs.writeFileSync(mode, 'limited');
-    const composerBorder = fs.readFileSync(path.resolve(import.meta.dirname, '../tests/fixtures/screen-claude-busy-paste.txt'), 'utf8').split('\n').find(line => /^─+$/.test(line))!;
-    fs.writeFileSync(fake, `import fs from 'node:fs';let mode='',draft='',stream='',queued='',working=false;const file=${JSON.stringify(mode)},log=${JSON.stringify(inputLog)};const draw=()=>{const m=fs.readFileSync(file,'utf8');mode=m;process.stdout.write('\\x1b[2J\\x1b[H'+(m==='limited'?"You've hit your session limit\\n":m==='busy'?'Working (esc to interrupt)\\n':'')+(queued?'Queued follow-up inputs\\n'+queued+'\\n':'')+${JSON.stringify(composerBorder)}+'\\n❯ '+(m==='draft'?'unsent draft':draft)+'\\n'+${JSON.stringify(composerBorder)}+'\\n');};process.stdout.write('\\x1b[?2004h');process.stdin.setRawMode(true);process.stdin.resume();process.stdin.on('data',b=>{stream+=b.toString();for(;;){if(stream.startsWith('\\x1b[200~')){const end=stream.indexOf('\\x1b[201~');if(end<0)return;draft=stream.slice(6,end);stream=stream.slice(end+6);fs.appendFileSync(log,JSON.stringify({paste:draft})+'\\n');draw();continue;}if(!stream.length)return;if(stream.startsWith('\\x1b')&&stream.length<6)return;const c=stream[0];stream=stream.slice(1);if(c==='\\r'||c==='\\n'){fs.appendFileSync(log,JSON.stringify({enter:true})+'\\n');if(mode!=='stuck'){queued=draft;draft='';}draw();}}});setInterval(()=>{const m=fs.readFileSync(file,'utf8');if(m!==mode){draft='';queued='';draw();}},80);draw();`);
-    h.tmux(['new-window', '-t', h.session, '-n', 'limited-live', `${process.execPath} ${fake}`]); await pause(300);
-    const pane = (await ctx.tmux.windows()).find(w => w.plain === 'limited-live')!;
-    const seed: TaskRecord = { task: 'LIMITED-LIVE', window: 'limited-live', windowId: pane.id, session: h.session, agent: 'claude', model: 'sonnet', effort: 'medium', repos: [], links: [], env: {}, report: path.join(config.cache, 'LIMITED-LIVE.md'), started: new Date(Date.now() - 60000).toISOString(), requested: { agent: 'claude', model: 'sonnet', effort: 'medium' } };
-    fs.mkdirSync(path.dirname(taskFile(config, seed.window)), { recursive: true }); fs.writeFileSync(taskFile(config, seed.window), renderTaskMd(seed, 'Fake original'));
-    let reading = plan(Date.now()); await limitedTick(ctx, await collectStatus(ctx), notifier, reading); await limitedTick(ctx, await collectStatus(ctx), notifier, reading); check('limit notice once per real-window episode', notices.filter(n => n.startsWith('claude: limit wyczerpany')).length === 1);
-    fs.writeFileSync(mode, 'draft'); await pause(200); await limitedTick(ctx, await collectStatus(ctx), notifier, plan(Date.now(), 90)); check('limit resume protects human draft', !fs.existsSync(inputLog));
-    fs.writeFileSync(mode, 'limited'); await pause(200); await limitedTick(ctx, await collectStatus(ctx), notifier, plan(Date.now(), 90)); check('limit recovery pastes continue into same provider/model', fs.readFileSync(inputLog, 'utf8').includes('kontynuuj') && readTaskRecord(config, seed.window)?.model === 'sonnet');
-    fs.writeFileSync(mode, 'busy'); await pause(200); const sent = await sendPrompts(ctx, [{ task: seed.task, window: seed.window, prompt: 'Followup while working' }]); check('busy followup is pasted immediately; real queue echo leaves it unconfirmed', Boolean(sent[0]?.warning) && Boolean(sent[0]?.message.includes('wklejono')) && readTaskRecord(config, seed.window)?.pendingPrompt === 'Followup while working');
-    await handleEvent(ctx, new Alerts(ctx, notifier), { task: seed.task, agent: 'claude', kind: 'user-prompt-submit', payload: { prompt: 'Followup while working' } });
-    check('busy followup is confirmed by the current matching hook', await deliverPendingPrompt(ctx, seed.window) === 'sent');
-    const before = fs.readFileSync(inputLog, 'utf8').split('\n').filter(l => l.includes('paste')).length; await sendPrompts(ctx, [{ task: seed.task, window: seed.window, prompt: 'Second busy followup' }]); check('second busy followup accepted without rejection/duplicate paste', fs.readFileSync(inputLog, 'utf8').split('\n').filter(l => l.includes('paste')).length === before + 1);
-    fs.writeFileSync(mode, 'stuck'); await pause(200); await queuePrompt(ctx, readTaskRecord(config, seed.window)!, 'Stuck message'); await deliverPendingPrompt(ctx, seed.window); await handleEvent(ctx, new Alerts(ctx, notifier), { task: seed.task, agent: 'claude', kind: 'notification', payload: { notification_type: 'idle_prompt' } }); await pause(1100); check('idle_prompt never confirms stuck real composer', await deliverPendingPrompt(ctx, seed.window) === 'needs-attention');
-    config.notify.mcpWritesIntervalS = 1; const notifications: string[] = [], notice = async (text: string) => { notifications.push(text); }; await mcpWriteNotice(ctx, notice, 'one'); await mcpWriteNotice(ctx, notice, 'two'); await mcpWriteNotice(ctx, notice, 'three'); await pause(1100); await mcpWriteNotice(ctx, notice); check('MCP notifications aggregate while preserving writes', notifications.length === 2 && notifications[1]?.includes('two; three'));
-    const stalePlans = plan(Date.now() - 3600000); await recordStaleCapacity(ctx, stalePlans); await recordStaleCapacity(ctx, stalePlans); check('stale plan event once per reading with live task', readJournal(config).filter(e => e.text.includes('claude: plan reading stale')).length === 1);
+    await h.runCase('navigation', async h => {
+      const config = loadGlobalConfig(h.agentctlHome), runner = new SandboxRunner(h);
+      const attached: ReturnType<typeof spawn>[] = [];
+      try {
+        // Two real sessions on the same isolated server share the root dispatcher binding.
+        h.tmux(['new-session', '-d', '-s', 'second-dev', '-n', 'board']); h.tmux(['new-window', '-t', 'second-dev', '-n', 'task']);
+        if (h.tmux(['has-session', '-t', h.session]).code !== 0) h.tmux(['new-session', '-d', '-s', h.session, '-n', 'board']);
+        else if (!h.tmux(['list-windows', '-t', h.session, '-F', '#{window_name}']).stdout.includes('board')) h.tmux(['new-window', '-t', h.session, '-n', 'board']);
+        h.tmux(['bind-key', '-n', 'F12', 'if-shell', '-F', `#{==:#{session_name},${h.session}}`, `select-window -t '=${h.session}:board'`, 'send-keys F12']);
+        const devConfig = { ...config, session: 'second-dev' }; await applyNavigation(new Context(runner, devConfig, () => {}));
+        const binding = h.tmux(['list-keys', '-T', 'root', 'F12']).stdout;
+        check('F12 shared binding dispatches on per-session option without production collision', binding.includes('@agentctl-return-key') && !h.tmux(['show-option', '-qv', '-t', h.session, '@agentctl-return-key']).stdout.trim() && h.tmux(['show-option', '-v', '-t', 'second-dev', '@agentctl-return-key']).stdout.trim() === 'F12');
+        h.tmux(['new-window', '-t', h.session, '-n', 'navigation-task']);
+        for (const session of [h.session, 'second-dev']) {
+          h.tmux(['select-window', '-t', `=${session}:${session === h.session ? 'navigation-task' : 'task'}`]);
+          const terminal = spawn('/usr/bin/python3', ['-c', "import os,pty,select,sys,fcntl,termios,struct,signal\npid,fd=pty.fork()\nif pid==0: os.execv(sys.argv[1],[sys.argv[1],'attach-session','-t',sys.argv[2]])\nfcntl.ioctl(fd,termios.TIOCSWINSZ,struct.pack('HHHH',32,160,0,0))\ntry:\n while True:\n  for source in select.select([0,fd],[],[])[0]:\n   data=os.read(source,65536)\n   if not data: raise EOFError()\n   if source==0: os.write(fd,data)\nexcept (EOFError,OSError): pass\nfinally:\n os.close(fd)\n try: os.kill(pid,signal.SIGTERM)\n except ProcessLookupError: pass\n os.waitpid(pid,0)\n", path.join(h.fakeBin, 'tmux'), `=${session}`], { env: h.env, stdio: ['pipe', 'ignore', 'ignore'] });
+          attached.push(terminal);
+          check(`PTY client attached to ${session}`, await until(() => h.tmux(['list-clients', '-t', `=${session}`, '-F', '#{client_name}']).stdout.trim() !== ''));
+        }
+        const windowOf = (session: string) => h.tmux(['display-message', '-p', '-t', `=${session}:`, '#{window_name}']).stdout.trim();
+        attached[0]!.stdin!.write('\x1b[24~'); await until(() => windowOf(h.session) === 'board');
+        check('actual F12 in first client selects only its board', h.tmux(['display-message', '-p', '-t', `=${h.session}:`, '#{window_name}']).stdout.trim() === 'board' && h.tmux(['display-message', '-p', '-t', '=second-dev:', '#{window_name}']).stdout.trim() === 'task');
+        attached[1]!.stdin!.write('\x1b[24~'); await until(() => windowOf('second-dev') === 'board');
+        check('actual F12 in second client selects second board', h.tmux(['display-message', '-p', '-t', '=second-dev:', '#{window_name}']).stdout.trim() === 'board');
+      } finally {
+        for (const terminal of attached) { terminal.stdin?.write('\x02d'); terminal.stdin?.end(); }
+      }
+    });
+    await h.runCase('limited', async h => {
+      const config = loadGlobalConfig(h.agentctlHome), ctx = new Context(new SandboxRunner(h), config, () => {});
+      const notices: string[] = [];
+      const notifier = { notify: async (_title: string, text: string) => { notices.push(text); } };
+      const session = h.tmux(['new-session', '-d', '-s', h.session, '-n', 'fixture']); assert.equal(session.code, 0, session.stderr);
+      const mode = path.join(h.root, 'pane-mode'), inputLog = path.join(h.root, 'pane-input.log'), fake = path.join(h.root, 'pane.mjs'); fs.writeFileSync(mode, 'limited');
+      const composerBorder = fs.readFileSync(path.resolve(import.meta.dirname, '../tests/fixtures/screen-claude-busy-paste.txt'), 'utf8').split('\n').find(line => /^─+$/.test(line))!;
+      fs.writeFileSync(fake, `import fs from 'node:fs';let mode='',draft='',stream='',queued='',working=false;const file=${JSON.stringify(mode)},log=${JSON.stringify(inputLog)};const draw=()=>{const m=fs.readFileSync(file,'utf8');mode=m;process.stdout.write('\\x1b[2J\\x1b[H'+(m==='limited'?"You've hit your session limit\\n":m==='busy'?'Working (esc to interrupt)\\n':'')+(queued?'Queued follow-up inputs\\n'+queued+'\\n':'')+${JSON.stringify(composerBorder)}+'\\n❯ '+(m==='draft'?'unsent draft':draft)+'\\n'+${JSON.stringify(composerBorder)}+'\\n');};process.stdout.write('\\x1b[?2004h');process.stdin.setRawMode(true);process.stdin.resume();process.stdin.on('data',b=>{stream+=b.toString();for(;;){if(stream.startsWith('\\x1b[200~')){const end=stream.indexOf('\\x1b[201~');if(end<0)return;draft=stream.slice(6,end);stream=stream.slice(end+6);fs.appendFileSync(log,JSON.stringify({paste:draft})+'\\n');draw();continue;}if(!stream.length)return;if(stream.startsWith('\\x1b')&&stream.length<6)return;const c=stream[0];stream=stream.slice(1);if(c==='\\r'||c==='\\n'){fs.appendFileSync(log,JSON.stringify({enter:true})+'\\n');if(mode!=='stuck'){queued=draft;draft='';}draw();}}});setInterval(()=>{const m=fs.readFileSync(file,'utf8');if(m!==mode){draft='';queued='';draw();}},80);draw();`);
+      h.tmux(['new-window', '-t', h.session, '-n', 'limited-live', `${process.execPath} ${fake}`]); await pause(300);
+      const pane = (await ctx.tmux.windows()).find(w => w.plain === 'limited-live')!;
+      const seed: TaskRecord = { task: 'LIMITED-LIVE', window: 'limited-live', windowId: pane.id, session: h.session, agent: 'claude', model: 'sonnet', effort: 'medium', repos: [], links: [], env: {}, report: path.join(config.cache, 'LIMITED-LIVE.md'), started: new Date(Date.now() - 60000).toISOString(), requested: { agent: 'claude', model: 'sonnet', effort: 'medium' } };
+      fs.mkdirSync(path.dirname(taskFile(config, seed.window)), { recursive: true }); fs.writeFileSync(taskFile(config, seed.window), renderTaskMd(seed, 'Fake original'));
+      let reading = plan(Date.now()); await limitedTick(ctx, await collectStatus(ctx), notifier, reading); await limitedTick(ctx, await collectStatus(ctx), notifier, reading); check('limit notice once per real-window episode', notices.filter(n => n.startsWith('claude: limit wyczerpany')).length === 1);
+      fs.writeFileSync(mode, 'draft'); await pause(200); await limitedTick(ctx, await collectStatus(ctx), notifier, plan(Date.now(), 90)); check('limit resume protects human draft', !fs.existsSync(inputLog));
+      fs.writeFileSync(mode, 'limited'); await pause(200); await limitedTick(ctx, await collectStatus(ctx), notifier, plan(Date.now(), 90)); check('limit recovery pastes continue into same provider/model', fs.readFileSync(inputLog, 'utf8').includes('kontynuuj') && readTaskRecord(config, seed.window)?.model === 'sonnet');
+      fs.writeFileSync(mode, 'busy'); await pause(200); const sent = await sendPrompts(ctx, [{ task: seed.task, window: seed.window, prompt: 'Followup while working' }]); check('busy followup is pasted immediately; real queue echo leaves it unconfirmed', Boolean(sent[0]?.warning) && Boolean(sent[0]?.message.includes('wklejono')) && readTaskRecord(config, seed.window)?.pendingPrompt === 'Followup while working');
+      await handleEvent(ctx, new Alerts(ctx, notifier), { task: seed.task, agent: 'claude', kind: 'user-prompt-submit', payload: { prompt: 'Followup while working' } });
+      check('busy followup is confirmed by the current matching hook', await deliverPendingPrompt(ctx, seed.window) === 'sent');
+      const before = fs.readFileSync(inputLog, 'utf8').split('\n').filter(l => l.includes('paste')).length; await sendPrompts(ctx, [{ task: seed.task, window: seed.window, prompt: 'Second busy followup' }]); check('second busy followup accepted without rejection/duplicate paste', fs.readFileSync(inputLog, 'utf8').split('\n').filter(l => l.includes('paste')).length === before + 1);
+      fs.writeFileSync(mode, 'stuck'); await pause(200); await queuePrompt(ctx, readTaskRecord(config, seed.window)!, 'Stuck message'); await deliverPendingPrompt(ctx, seed.window); await handleEvent(ctx, new Alerts(ctx, notifier), { task: seed.task, agent: 'claude', kind: 'notification', payload: { notification_type: 'idle_prompt' } }); await pause(1100); check('idle_prompt never confirms stuck real composer', await deliverPendingPrompt(ctx, seed.window) === 'needs-attention');
+      const stalePlans = plan(Date.now() - 3600000); await recordStaleCapacity(ctx, stalePlans); await recordStaleCapacity(ctx, stalePlans); check('stale plan event once per reading with live task', readJournal(config).filter(e => e.text.includes('claude: plan reading stale')).length === 1);
+      journal.push(...readJournal(config));
+    });
+    await h.runCase('notifications', async h => {
+      const config = loadGlobalConfig(h.agentctlHome), ctx = new Context(new SandboxRunner(h), config, () => {});
+      config.notify.mcpWritesIntervalS = 1; const notifications: string[] = [], notice = async (text: string) => { notifications.push(text); }; await mcpWriteNotice(ctx, notice, 'one'); await mcpWriteNotice(ctx, notice, 'two'); await mcpWriteNotice(ctx, notice, 'three'); await pause(1100); await mcpWriteNotice(ctx, notice); check('MCP notifications aggregate while preserving writes', notifications.length === 2 && notifications[1]?.includes('two; three'));
+      journal.push(...readJournal(config));
+    });
     // N1 (live, real tmux): a review record is resumed only through the one door - refused while it shares the author's checkout/report, in its own checkout otherwise.
-    {
+    await h.runCase('review', async h => {
+      const config = loadGlobalConfig(h.agentctlHome), { repo, git, base } = makeRepo(h);
       const authorWt = path.join(h.root, 'wt', 'iso-author'), ownWt = path.join(h.root, 'wt', 'iso-author-rev'); git(repo, ['worktree', 'add', '-q', '-b', 'iso-author', authorWt]); git(repo, ['worktree', 'add', '-q', '--detach', ownWt]);
       const stamp = new Date(Date.now() - 60000).toISOString(), reportOf = (t: string) => path.join(config.cache, t.toLowerCase(), `${t}.md`);
       const mk = (over: Partial<TaskRecord> & { task: string; window: string }): TaskRecord => ({ session: h.session, agent: 'claude', model: 'sonnet', effort: 'medium', repos: [{ path: repo, worktree: authorWt, branch: 'iso-author', base }], links: [], env: {}, report: reportOf(over.task), started: stamp, requested: { agent: 'claude', model: 'sonnet', effort: 'medium' }, ...over });
@@ -163,9 +190,12 @@ await withHarness({ name: 'nc-workflow', cacheRoot: cache, config: 'watch: {inte
       const resumed = h.agentctl(['resume', 'ISO-AUTHOR-REV', '--yes']);
       const cwd = h.tmux(['display-message', '-p', '-t', `=${h.session}:iso-author-rev`, '#{pane_current_path}']).stdout.trim();
       check('review record with its own checkout resumes there (pane cwd is not the author worktree)', resumed.code === 0 && fs.realpathSync(cwd) === fs.realpathSync(ownWt) && fs.realpathSync(cwd) !== fs.realpathSync(authorWt));
-    }
+      journal.push(...readJournal(config));
+    });
     // E1 (live, real tmux): Claude Code's dim suggestion in the empty field is not a draft; text somebody typed is. The screens are recorded from Claude Code 2.1.311, replayed with their colours.
-    {
+    await h.runCase('draft', async h => {
+      const config = loadGlobalConfig(h.agentctlHome), ctx = new Context(new SandboxRunner(h), config, () => {});
+      const session = h.tmux(['new-session', '-d', '-s', h.session, '-n', 'fixture']); assert.equal(session.code, 0, session.stderr);
       const fixtures = path.resolve(import.meta.dirname, '../tests/fixtures'), stamp = new Date(Date.now() - 60000).toISOString();
       for (const [task, file] of [['SUGGEST', 'screen-claude-suggestion-ansi.txt'], ['TYPED', 'screen-claude-draft-ansi.txt']] as const) {
         const window = task.toLowerCase();
@@ -178,12 +208,19 @@ await withHarness({ name: 'nc-workflow', cacheRoot: cache, config: 'watch: {inte
       const rows = await collectStatus(ctx, { progress: false });
       check('real tmux: dim suggestion in the field is not a draft', rows.find(r => r.task === 'SUGGEST')?.draft_input === null);
       check('real tmux: text typed into the field is a draft', rows.find(r => r.task === 'TYPED')?.draft_input === 'my real draft');
-    }
-    const timed = path.join(h.root, 'timed.md'); fs.writeFileSync(timed, spec('TIMED', { cohort: 'Timing', setup: ['sleep 2'] }));
-    const timedResult = h.agentctl(['new', timed, '-y']); const timedRecord = record('TIMED');
-    check('real setup time is included before the agent starts', timedResult.code === 0 && Date.now() - Date.parse(timedRecord.started) >= 2000);
-    fs.writeFileSync(path.join(cache, 'nc-live-journal.json'), JSON.stringify(readJournal(config), null, 2));
-  } finally { for (const terminal of attached) { terminal.stdin?.write('\x02d'); terminal.stdin?.end(); } await client.close(); }
+      journal.push(...readJournal(config));
+    });
+    await h.runCase('timed', h => {
+      const { repo } = makeRepo(h), config = loadGlobalConfig(h.agentctlHome);
+      const timed = path.join(h.root, 'timed.md'); fs.writeFileSync(timed, specFor(h, repo, 'TIMED', { cohort: 'Timing', setup: ['sleep 2'] }));
+      const timedResult = h.agentctl(['new', timed, '-y']); const timedRecord = readTaskRecord(config, 'timed');
+      if (timedResult.code !== 0) console.error(timedResult.stderr);
+      check('real setup time is included before the agent starts', timedResult.code === 0 && timedRecord && Date.now() - Date.parse(timedRecord.started) >= 2000);
+      journal.push(...readJournal(config));
+    });
+    journal.push(...readJournal(config));
+    fs.writeFileSync(path.join(cache, 'nc-live-journal.json'), JSON.stringify(journal.sort((a, b) => a.at.localeCompare(b.at)), null, 2));
+  } finally { await client.close(); }
 });
 fs.writeFileSync(path.join(cache, 'nc-live-results.json'), JSON.stringify({ passed: results.filter(r => r.ok).length, failed: results.filter(r => !r.ok).length, results }, null, 2));
 console.log(`${results.length}/${results.length} NC workflow live checks passed`);

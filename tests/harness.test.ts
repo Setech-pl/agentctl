@@ -5,7 +5,11 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 import { checkHarnessSafety, commandV, Harness, HarnessRefusal } from '../scripts/live-harness.ts';
 import { liveCacheRoot, historicalCacheRoots } from '../scripts/live-cache.ts';
 import type { SafetyInput } from '../scripts/live-harness.ts';
-import { REPO_ROOT, useScratch } from './helpers.ts';
+import { loadGlobalConfig } from '../src/core/config.ts';
+import { Context } from '../src/core/context.ts';
+import { automaticProviderHold, providerHolds, readProviderHoldState, setProviderHolds } from '../src/core/provider-hold.ts';
+import { readReservations, reservePlaces } from '../src/core/limits.ts';
+import { DiskRunner, REPO_ROOT, useScratch } from './helpers.ts';
 
 const scratch = useScratch();
 let liveCache: string | undefined;
@@ -13,6 +17,63 @@ beforeEach(() => { liveCache = process.env.AGENTCTL_LIVE_CACHE; process.env.AGEN
 afterEach(() => {
   if (liveCache === undefined) delete process.env.AGENTCTL_LIVE_CACHE;
   else process.env.AGENTCTL_LIVE_CACHE = liveCache;
+});
+
+it('REL0244-CASE-ISOLATION: a successor sees no provider state from the prior case', async t => {
+  const providers = ['claude', 'codex', 'kimi', 'glm'] as const;
+  const baseline = 'providers: [claude, codex, kimi, glm]\n';
+  const mutated = `${baseline}limits: {claude: 31, codex: 32, kimi: 33, glm: 34}\nusage: {queue_hold: {claude: 81, codex: 82, kimi: 83, glm: 84}}\n`;
+  // Exercise real case allocation with a filesystem-only start and the product's hold and reservation stores.
+  t.mock.method(Harness.prototype, 'start', function (this: Harness) {
+    fs.mkdirSync(this.agentctlHome, { recursive: true });
+    fs.writeFileSync(path.join(this.agentctlHome, 'config.yaml'), baseline, { flag: 'wx' });
+    return this;
+  });
+  const suite = new Harness({ name: 'provider-state' }, REPO_ROOT);
+  const runner = new DiskRunner({ dryRun: false });
+  const reset = new Date(runner.now() + 3600_000).toISOString();
+  const prior = await suite.runCase('first', async h => {
+    const first = loadGlobalConfig(h.agentctlHome);
+    fs.writeFileSync(first.path, mutated);
+    const dirty = loadGlobalConfig(h.agentctlHome), ctx = new Context(runner, dirty, () => {});
+    await reservePlaces(ctx, Object.fromEntries(providers.map(agent => [agent, 1])));
+    await setProviderHolds(ctx, Object.fromEntries(providers.map(agent => [agent, reset])));
+    for (const [i, agent] of providers.entries()) {
+      assert.equal(providerHolds(dirty, runner.now())[agent]?.source, 'manual', agent);
+      assert.equal(dirty.limits[agent], 31 + i);
+      assert.equal(dirty.usage.queueHold[agent], 81 + i);
+      assert.equal(readReservations(dirty)[agent]?.count, 1);
+      await runner.writeFile(path.join(h.agentctlHome, 'usage', `${agent}-plan.json`), '{}');
+    }
+    return { home: h.agentctlHome, defaults: first.limits, dirty };
+  });
+  const checkClean = (h: Harness, previousHome: string) => {
+    assert.notEqual(h.agentctlHome, previousHome);
+    assert.equal(h.env.AGENTCTL_HOME, h.agentctlHome);
+    const next = loadGlobalConfig(h.agentctlHome);
+    assert.deepEqual(next.limits, prior.defaults);
+    assert.deepEqual(next.usage.queueHold, {});
+    assert.deepEqual(readReservations(next), {});
+    assert.deepEqual(readProviderHoldState(next), { holds: {}, seen: {} });
+    for (const agent of providers) {
+      assert.equal(providerHolds(next, runner.now())[agent], undefined, agent);
+      assert.ok(!fs.existsSync(path.join(h.agentctlHome, 'usage', `${agent}-plan.json`)), agent);
+    }
+    return next;
+  };
+  const automatic = await suite.runCase('second', async h => {
+    const next = checkClean(h, prior.home), ctx = new Context(runner, next, () => {});
+    for (const agent of providers) {
+      assert.equal(providerHolds(prior.dirty, runner.now())[agent]?.source, 'manual', agent);
+      await automaticProviderHold(ctx, agent, `SECOND-${agent}:quota`, 'fixture quota');
+      assert.equal(providerHolds(next, runner.now())[agent]?.source, 'automatic', agent);
+    }
+    return { home: h.agentctlHome, config: next };
+  });
+  await suite.runCase('third', h => {
+    checkClean(h, automatic.home);
+    for (const agent of providers) assert.equal(providerHolds(automatic.config, runner.now())[agent]?.source, 'automatic', agent);
+  });
 });
 
 it('CONSULT-f1: compacts the digest to fit a task-owned socket at the 100-byte boundary', () => {

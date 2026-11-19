@@ -181,6 +181,7 @@ export class Harness {
   socketPath = '';
   private children: ChildProcess[] = [];
   private serverUp = false;
+  private readonly cases = new Set<string>();
 
   private readonly options: HarnessOptions;
   private readonly repoRoot: string;
@@ -334,6 +335,13 @@ export class Harness {
     for (const child of this.children) if (child.exitCode === null) child.kill('SIGTERM');
     this.children = [];
     this.killServer();
+  }
+
+  /** Independent cases inherit fixture options, with fresh homes, state, caches and tmux servers. */
+  async runCase<T>(name: string, fn: (h: Harness) => Promise<T> | T): Promise<T> {
+    if (!/^[a-z0-9-]+$/.test(name) || this.cases.has(name)) throw new HarnessRefusal(`invalid or reused case name: ${name}`);
+    this.cases.add(name);
+    return withHarness({ ...this.options, name: `${this.options.name}-${name}` }, fn, this.repoRoot);
   }
 
   /** The agent starts the fakes logged: "claude --continue …". */

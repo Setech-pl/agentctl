@@ -4,6 +4,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- REL0244-CASE-ISOLATION: independent live cases use fresh harness homes for all providers, and GLM onboarding fixtures use a fixed off-peak clock. / Niezależne scenariusze live mają osobne katalogi stanu dla wszystkich dostawców, a testy startu GLM używają stałego czasu poza szczytem.
 - REL0244-LIVE-EVIDENCE: stabilize the fake remote GC clock, show plan reasons in assertions, and collect every live check result after regression or live failures. / Test GC używa zegara testowego, pokazuje powody z planu i zapisuje wyniki wszystkich sprawdzeń live po błędzie.
 - REL0244-REMOTE-FIXTURE: fake remote admission reports independent disk capacity in gate tests. / Testowy host zdalny ma własny odczyt pojemności dysku.
 - REL0244-KIMI-HOLD: isolate the release gate's Kimi trust case from quota holds and log refusal stderr. / Przypadek zaufania Kimi w bramce wydania ma osobny katalog stanu; odmowy trafiają do logu.

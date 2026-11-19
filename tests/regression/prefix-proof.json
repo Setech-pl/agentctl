@@ -974,6 +974,16 @@
       "REL0243-LINKS: remote project defaults reject closed tasks and honor links: []"
     ]
   },
+  "REL0244-CASE-ISOLATION": {
+    "rev": "v0.23.0",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0244-CASE-ISOLATION: a successor sees no provider state from the prior case",
+      "REL0244-CASE-ISOLATION: a successor sees no provider state from the prior case"
+    ]
+  },
   "REL0244-KIMI-HOLD": {
     "rev": "v0.23.0",
     "outcome": "FAILS",
