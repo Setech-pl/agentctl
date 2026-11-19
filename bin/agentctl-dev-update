@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# agentctl-dev-update — przebudowa instancji dev agentctl na wskazany tag/gałąź/SHA.
+#
+#   agentctl-dev-update v0.23.1          przebuduj dev na tag v0.23.1
+#   agentctl-dev-update rel-0.23.1       ... na gałąź (jej bieżący commit)
+#   agentctl-dev-update --rollback       wróć na commit sprzed ostatniej przebudowy
+#   agentctl-dev-update --status         pokaż, na czym stoi dev
+#   opcje: --no-restart (bez restartu watch/board), --skip-ci (bez npm ci)
+#
+# Zmienne: AGENTCTL_REPO (~/Projects/agentctl), AGENTCTL_DEV_DIR
+# (~/Projects/agentctl-wt/devtest), AGENTCTL_DEV_HOME (~/.agentctl-dev).
+# Nie dotyka prod (~/.agentctl, ~/Projects/agentctl-stable).
+set -euo pipefail
+
+REPO="${AGENTCTL_REPO:-$HOME/Projects/agentctl}"
+DEV="${AGENTCTL_DEV_DIR:-$HOME/Projects/agentctl-wt/devtest}"
+DEV_HOME="${AGENTCTL_DEV_HOME:-$HOME/.agentctl-dev}"
+STATE="$DEV_HOME/dev-update.state"
+
+REF=""; RESTART=1; CI=1; MODE=update
+for a in "$@"; do
+  case "$a" in
+    --rollback) MODE=rollback ;;
+    --status) MODE=status ;;
+    --no-restart) RESTART=0 ;;
+    --skip-ci) CI=0 ;;
+    -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
+    -*) echo "BŁĄD: nieznana opcja $a" >&2; exit 2 ;;
+    *) REF="$a" ;;
+  esac
+done
+
+cd "$HOME"
+[ -d "$DEV/.git" ] || [ -f "$DEV/.git" ] || { echo "BŁĄD: brak katalogu dev $DEV" >&2; exit 1; }
+[ -d "$REPO/.git" ] || { echo "BŁĄD: brak repo $REPO" >&2; exit 1; }
+
+cur_sha=$(git -C "$DEV" rev-parse HEAD)
+cur_ver=$(node -p 'require(process.argv[1]).version' "$DEV/package.json" 2>/dev/null || echo '?')
+
+if [ "$MODE" = status ]; then
+  echo "dev: $DEV @ ${cur_sha:0:9} (package $cur_ver)"
+  [ -f "$STATE" ] && echo "poprzedni: $(cat "$STATE")"
+  AGENTCTL_HOME="$DEV_HOME" node "$DEV/dist/bin/agentctl.js" version 2>/dev/null | head -5 || true
+  exit 0
+fi
+
+if [ "$MODE" = rollback ]; then
+  [ -f "$STATE" ] || { echo "BŁĄD: brak zapisanego poprzedniego commitu ($STATE)" >&2; exit 1; }
+  REF=$(cut -d' ' -f1 "$STATE")
+  echo "Rollback dev na $REF"
+fi
+[ -n "$REF" ] || { echo "Użycie: agentctl-dev-update <tag|gałąź|sha> | --rollback | --status" >&2; exit 2; }
+
+# devtest może być worktree repo (wspólne refy) albo osobnym klonem (wtedy fetch z repo)
+dev_common=$(cd "$DEV" && cd "$(git rev-parse --git-common-dir)" && pwd)
+repo_common=$(cd "$REPO" && cd "$(git rev-parse --git-common-dir)" && pwd)
+if [ "$MODE" = rollback ]; then
+  SHA=$(git -C "$DEV" rev-parse --verify -q "$REF^{commit}" || true)
+else
+  SHA=$(git -C "$REPO" rev-parse --verify -q "$REF^{commit}" || true)
+  if [ -n "$SHA" ] && [ "$dev_common" != "$repo_common" ]; then
+    git -C "$DEV" fetch -q "$REPO" "$SHA"
+  fi
+fi
+[ -n "$SHA" ] || { echo "BŁĄD: nie znam refa $REF w $REPO" >&2; exit 1; }
+
+if [ -n "$(git -C "$DEV" status --porcelain --untracked-files=no)" ]; then
+  echo "BŁĄD: $DEV ma niezacommitowane zmiany – przerywam (nic nie zmieniono)" >&2
+  git -C "$DEV" status --short --untracked-files=no >&2
+  exit 1
+fi
+
+echo "dev: ${cur_sha:0:9} ($cur_ver) -> ${SHA:0:9} ($REF)"
+mkdir -p "$DEV_HOME"
+if [ "$MODE" != rollback ] && [ "$cur_sha" != "$SHA" ]; then
+  echo "$cur_sha $cur_ver $(date '+%Y-%m-%d %H:%M')" > "$STATE"
+fi
+
+git -C "$DEV" checkout -q --detach "$SHA"
+[ "$(git -C "$DEV" rev-parse HEAD)" = "$SHA" ] || { echo "BŁĄD: HEAD != $SHA po checkout" >&2; exit 1; }
+
+cd "$DEV"
+if [ "$CI" = 1 ]; then npm ci --no-audit --no-fund; fi
+npm run build
+cd "$HOME"
+
+A=(env AGENTCTL_HOME="$DEV_HOME" node "$DEV/dist/bin/agentctl.js")
+"${A[@]}" doctor 2>&1 | tail -15 || true
+
+if [ "$RESTART" = 1 ]; then
+  "${A[@]}" watch --tmux --restart
+  "${A[@]}" board --tmux --restart
+fi
+
+# podpowiedź: narzędzia zapisu MCP, których brakuje w mcp.allow dev
+CFG="$DEV_HOME/config.yaml"
+if [ -f "$CFG" ]; then
+  missing=""
+  for t in answer wall consult move; do grep -Eq "^[[:space:]]*-[[:space:]]*${t}[[:space:]]*$" "$CFG" || missing="$missing $t"; done
+  [ -z "$missing" ] || echo "UWAGA: w $CFG pod mcp.allow brakuje:$missing"
+fi
+
+new_ver=$(node -p 'require(process.argv[1]).version' "$DEV/package.json")
+echo "GOTOWE: dev @ ${SHA:0:9} = $new_ver. Teraz ⌘Q w aplikacji Claude (restart MCP agentctl-dev)."
+echo "Powrót: agentctl-dev-update --rollback"

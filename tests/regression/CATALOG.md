@@ -11,6 +11,9 @@ Regenerate this file with `npm run regression -- --catalog`.
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
 | REL0244-KIMI-HOLD | The release gate refused the Kimi trust task at admission because a previous case left a quota hold. | `tests/live-kimi.test.ts` (`^REL0244-KIMI-HOLD:`) | 0.23.1 | fails on v0.23.0 (1 failing of 1) |
+| REL0244-DEV-REF | The dev updater draft preferred a stale local branch in a separate dev clone. | `tests/dev-update.test.ts` (`^dev updater resolves a branch`) | 0.23.1 | not proven: The dev updater first ships in 0.23.1; the scenario fails on the owner-approved draft. |
+| REL0244-DEV-ROLLBACK | Rebuilding the same commit overwrote the dev updater draft’s rollback target. | `tests/dev-update.test.ts` (`^dev updater rebuilds a tagged worktree`) | 0.23.1 | not proven: The dev updater first ships in 0.23.1; the scenario fails on the owner-approved draft. |
+| REL0244-DEV-PATH | The dev updater draft could not read the package version from a path containing an apostrophe. | `tests/dev-update.test.ts` (`^dev updater reads the package version`) | 0.23.1 | not proven: The dev updater first ships in 0.23.1; the scenario fails on the owner-approved draft. |
 | REL0243-PREVIEW | MCP remote queue preview used dispatcher disk instead of host work_dir. | `tests/host-tasks.test.ts` (`^REL0243-PREVIEW:`) | 0.23.1 | not proven: Introduced by integrating 0.22.8 disk previews with remote hosts; absent from either previous release. |
 | REL0243-LINKS | Remote project defaults ignored links: [] and accepted closed-task backends. | `tests/host-tasks.test.ts` (`^REL0243-LINKS:`) | 0.23.1 | fails on v0.23.0 (1 failing of 1) |
 | REL0243-GC | Remote GC bypassed cache opt-in, pins and unpushed-commit protection. | `tests/host-gc.test.ts` (`^REL0243-GC:`) | 0.23.1 | fails on v0.23.0 (2 failing of 2) |
