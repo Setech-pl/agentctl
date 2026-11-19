@@ -984,6 +984,16 @@
       "REL0244-KIMI-HOLD: the trust admission uses a fresh fixture home after quota"
     ]
   },
+  "REL0244-LIVE-EVIDENCE": {
+    "rev": "v0.23.0",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0244-LIVE-EVIDENCE: release collects every live result after earlier failures",
+      "REL0244-LIVE-EVIDENCE: release collects every live result after earlier failures"
+    ]
+  },
   "UX0228": {
     "rev": "v0.22.5",
     "outcome": "FAILS",

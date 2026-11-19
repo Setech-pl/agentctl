@@ -7,6 +7,17 @@ import { parseArgs, planTier, affectedTests, assertClean, acquireLock, heavyComm
 import { checkRuntime, verifyArchive, node22Path, ensureNode22 } from '../scripts/runtime.ts';
 import { useScratch } from './helpers.ts';
 const scratch = useScratch();
+it('REL0244-LIVE-EVIDENCE: release collects every live result after earlier failures', async () => {
+  const { runReleaseChecks } = await import('../scripts/gate.ts');
+  const checks = ['regression', 'scripts/live-a.ts', 'scripts/live-b.ts'];
+  const seen: string[] = [];
+  const failures = await runReleaseChecks(checks.slice(1), async name => {
+    seen.push(name);
+    return name === checks[2] ? 0 : 1;
+  });
+  assert.deepEqual(seen, checks);
+  assert.deepEqual(failures, ['regression (1)', 'scripts/live-a.ts (1)']);
+});
 it('plans tiers in order, keeping both runtimes sequential and live last', () => {
   assert.deepEqual(planTier('quick', ['tests/a.test.ts'], []), ['typecheck', 'build', 'git diff --check', 'regression scenarios (tests/regression/CATALOG.md)', 'tests current: tests/a.test.ts']);
   assert.deepEqual(planTier('full', [], []), ['tests Node 22.14.0 (full)', 'tests Node 26 (full)', 'regression scenarios (tests/regression/CATALOG.md)']);

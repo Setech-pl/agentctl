@@ -18,6 +18,14 @@ function world() {
   const wt = path.join(work, 'app-gc-1'); git('-C', clone, 'worktree', 'add', '-b', 'gc-task', wt);
   const liveFile = path.join(root, 'windows'); fs.writeFileSync(liveFile, '');
   fs.writeFileSync(path.join(bin, 'tmux'), `#!/bin/sh\nif [ -s '${liveFile}' ]; then cat '${liveFile}'; else echo 'no sessions' >&2; exit 1; fi\n`, { mode: 0o700 });
+  const now = Date.now(), timing = path.join(root, 'gc-timing.cjs');
+  // Isolate the remote program's clock and child deadlines from load on the test machine.
+  fs.writeFileSync(timing, `
+    Date.now = () => ${now};
+    const child = require('node:child_process');
+    const spawn = child.spawnSync;
+    child.spawnSync = (command, args, options) => spawn(command, args, { ...options, timeout: 0 });
+  `);
   const config = makeConfig(root, `hosts:\n  pc:\n    ssh: fake@host\n    work_dir: ${work}\n    repos: {app: ${clone}}\n    providers: [claude]\n    env: {PATH: '${bin}:${process.env.PATH}'}\n`);
   let calls = 0, offline = false;
   class SSH extends DiskRunner {
@@ -25,14 +33,14 @@ function world() {
       if (cmd !== 'ssh') return { code: 0, stdout: '', stderr: '' };
       calls++;
       if (offline) return { code: 255, stdout: '', stderr: 'Connection refused' };
-      try { return { code: 0, stdout: execFileSync('sh', ['-c', args.at(-1)!], { input: opts.input, encoding: 'utf8', env: { ...process.env, HOME: root }, stdio: ['pipe', 'pipe', 'pipe'] }), stderr: '' }; }
+      try { return { code: 0, stdout: execFileSync('sh', ['-c', args.at(-1)!], { input: opts.input, encoding: 'utf8', env: { ...process.env, HOME: root, NODE_OPTIONS: `--require=${JSON.stringify(timing)}` }, stdio: ['pipe', 'pipe', 'pipe'] }), stderr: '' }; }
       catch (error) { const e = error as { status: number; stderr: string }; return { code: e.status, stdout: '', stderr: String(e.stderr) }; }
     }
   }
   const runner = new SSH({ dryRun: false }), ctx = new Context(runner, config, () => {});
   const remoteDir = path.join(work, '.agentctl/gc-1'), reports = path.join(work, 'reports/gc-1');
   fs.mkdirSync(remoteDir, { recursive: true }); fs.mkdirSync(reports, { recursive: true });
-  const old = new Date(Date.now() - 9 * 86400_000);
+  const old = new Date(now - 9 * 86400_000);
   for (const [dir, name] of [[remoteDir, 'launch.sh'], [reports, 'log.txt']]) { fs.writeFileSync(path.join(dir!, name!), 'evidence'); fs.utimesSync(path.join(dir!, name!), old, old); }
   fs.writeFileSync(path.join(reports, 'GC-1.md'), 'Werdykt: PASS');
   const record = seedTask(config, 'GC-1', { host: 'pc', closed: true, repos: [{ path: clone, worktree: wt, branch: 'gc-task', base: 'main' }], remoteDir, remoteReport: path.join(reports, 'GC-1.md') });
@@ -110,7 +118,10 @@ it('REL0243-GC: remote unpushed commits and report artifact references stay', as
   w.git('-C', w.wt, '-c', 'user.name=Fake', '-c', 'user.email=fake@example.test', 'commit', '--allow-empty', '-m', 'not pushed');
   fs.writeFileSync(path.join(w.reports, 'GC-1.md'), '```agentctl-outputs\nversion: 1\nartifacts: [log.txt]\n```');
   const plan = await planGc(w.ctx, {includeCache: true});
-  assert.ok(plan.skipped.some(i => i.kind === 'worktree' && i.unpushedCommits === 1));
-  assert.ok(plan.skipped.some(i => i.target.endsWith('/log.txt') && /referenced/.test(i.reason)));
-  assert.ok(!plan.items.some(i => i.target === w.wt || i.target.endsWith('/log.txt')));
+  const details = renderGc(plan).join('\n');
+  const worktree = plan.skipped.find(i => i.kind === 'worktree' && i.target === w.wt);
+  assert.equal(worktree?.unpushedCommits, 1, details);
+  assert.match(worktree.reason, /unpushed commits/, details);
+  assert.ok(plan.skipped.some(i => i.target.endsWith('/log.txt') && /referenced/.test(i.reason)), details);
+  assert.ok(!plan.items.some(i => i.target === w.wt || i.target.endsWith('/log.txt')), details);
 });

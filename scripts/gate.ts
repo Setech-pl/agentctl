@@ -74,6 +74,15 @@ export function affectedTests(changed: string[], sources: Record<string, string>
 export function heavyCommand(command: string, args: string[], platform = process.platform): [string, string[]] {
   return ['nice', ['-n', '10', ...(platform === 'darwin' ? ['taskpolicy', '-b'] : []), command, ...args]];
 }
+/** Keep collecting release evidence after check failures, then fail the gate with all of them recorded. */
+export async function runReleaseChecks(live: string[], runCheck: (name: string) => Promise<number>): Promise<string[]> {
+  const failures: string[] = [];
+  for (const name of ['regression', ...live]) {
+    const code = await runCheck(name);
+    if (code !== 0) failures.push(`${name} (${code})`);
+  }
+  return failures;
+}
 const git = (...args: string[]) => execFileSync('git', args, { encoding: 'utf8' }).trim();
 function filesUnder(dir: string): string[] {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap(e => e.isDirectory() ? filesUnder(`${dir}/${e.name}`) : [`${dir}/${e.name}`]);
@@ -202,9 +211,14 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
           await run(`doctor-${label}`, node!, ['--experimental-strip-types', '--no-warnings', 'scripts/doctor-matrix.ts'], runtimeEnv);
           result.counts.pass += 10;
         }
-        await run('regression', node26, ['--experimental-strip-types', '--no-warnings', 'scripts/regression.ts']);
         if (opts.skipLive) result.counts.skip += live.length;
-        else for (const file of live) await run(file, node26, ['--experimental-strip-types', '--no-warnings', file]);
+        const failures = await runReleaseChecks(opts.skipLive ? [] : live, async name => {
+          const file = name === 'regression' ? 'scripts/regression.ts' : name;
+          const step = await run(name, node26, ['--experimental-strip-types', '--no-warnings', file], {}, false);
+          return step.code;
+        });
+        result.counts.fail += failures.length;
+        if (failures.length) throw new Error(`Release checks failed: ${failures.join(', ')}; see step logs in ${path.dirname(output)}`);
       }
     }
     result.status = 'PASS';

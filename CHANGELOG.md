@@ -4,6 +4,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- REL0244-LIVE-EVIDENCE: stabilize the fake remote GC clock, show plan reasons in assertions, and collect every live check result after regression or live failures. / Test GC używa zegara testowego, pokazuje powody z planu i zapisuje wyniki wszystkich sprawdzeń live po błędzie.
 - REL0244-REMOTE-FIXTURE: fake remote admission reports independent disk capacity in gate tests. / Testowy host zdalny ma własny odczyt pojemności dysku.
 - REL0244-KIMI-HOLD: isolate the release gate's Kimi trust case from quota holds and log refusal stderr. / Przypadek zaufania Kimi w bramce wydania ma osobny katalog stanu; odmowy trafiają do logu.
 - `bin/agentctl-dev-update` rebuilds dev at a tag, branch, or SHA and supports status and rollback. / `bin/agentctl-dev-update` przebudowuje dev według tagu, gałęzi lub SHA oraz pokazuje stan i umożliwia powrót.
