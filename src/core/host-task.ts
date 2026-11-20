@@ -78,6 +78,7 @@ export async function prepareRemoteTask(ctx: Context, spec: ResolvedSpec, reuse 
         if (project.nodeModules === 'clone') repo.nodeModules = 'clone';
         else delete repo.nodeModules;
       }
+      if (project.closeCleanup) repo.remoteCloseCleanup = project.closeCleanup.length > 0;
       if (project.worktreeRoot) ctx.info(`${spec.task}: worktrees.root under .agentctl.yaml is unsupported on SSH host ${spec.host}; using hosts.${spec.host}.work_dir`);
       if (index === 0) {
         projectEnv = project.env ?? {};

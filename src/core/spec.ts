@@ -40,6 +40,7 @@ export interface ResolvedRepo {
   worktree: string;
   worktreeMount?: string;
   nodeModules?: 'clone';
+  remoteCloseCleanup?: boolean;
   base?: string;
   baseTask?: string;
   branch?: string;

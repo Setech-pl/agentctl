@@ -27,6 +27,7 @@ const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name 
 
 export const BUGS: BugEntry[] = [
   { id: 'DISK0248-NM', fixedIn: '0.24.0', symptom: 'Parallel worktrees with the same npm lockfile each ran an independent install and consumed a full dependency tree.', scenarios: [s('disk0248.test.ts', '^DISK0248-NM:')] },
+  { id: 'DISK0248-CLOSE', fixedIn: '0.24.0', symptom: 'Closing finished worktrees left their ignored build and browser files in place.', scenarios: [s('disk0248.test.ts', '^DISK0248-CLOSE:')] },
   { id: 'DISK0248-VOLUME', fixedIn: '0.24.0', symptom: 'The queue started worktrees on a mount directory that had fallen back to the internal disk.', scenarios: [s('disk0248.test.ts', '^DISK0248-VOLUME:')] },
   { id: 'DISK0248-LOCK', fixedIn: '0.24.0', symptom: 'A checkout interrupted by a disappearing disk could leave Git initializing and index locks behind.', scenarios: [s('disk0248.test.ts', '^DISK0248-LOCK:')] },
   { id: 'SNAP0247', fixedIn: '0.23.3', symptom: 'A blocked watch step stopped snapshot publication, and stale MCP status dropped disk and capacity.', scenarios: [s('watch-snapshot.test.ts', '^SNAP0247:'), s('board-render.test.ts', 'SNAP0247:')] },

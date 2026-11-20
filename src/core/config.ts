@@ -57,6 +57,7 @@ export interface Layer {
   worktreeRoot?: string;
   worktreeMount?: string;
   nodeModules?: 'clone' | 'off';
+  closeCleanup?: string[];
   links: Link[];
   env: Record<string, string>;
   report?: string;
@@ -369,7 +370,7 @@ export const DEFAULT_MANAGER_NAME = 'agentctl manager';
 export const DEFAULT_AGENT_SETTINGS = Object.fromEntries(DEFAULT_PROVIDERS.map(id => [id, defaultSettings(id)])) as Record<ProviderId, AgentSettings>;
 
 /** The keys accepted in every layer: the global config, `.agentctl.yaml` and (with a few of its own) a spec. docs/configuration.md describes each one. */
-export const LAYER_KEYS = ['worktree_root', 'worktrees', 'links', 'env', 'report', 'setup', 'defaults', 'guide', 'review'];
+export const LAYER_KEYS = ['worktree_root', 'worktrees', 'links', 'env', 'report', 'setup', 'close', 'defaults', 'guide', 'review'];
 export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'limited', 'cache', 'state_dir', 'session', 'ui', 'tmux', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git', 'cohort', 'delivery_confirm_s', 'preview', 'providers', 'providers_config', 'start_failure', 'wall', 'hosts'];
 export const LIMITS_KEYS = [...AGENT_NAMES, 'count_external', 'count_report_ready', 'heavy'];
 export const DEFAULTS_KEYS = ['agent', 'model', 'effort', 'remote_control'];
@@ -558,6 +559,19 @@ function parseLayer(obj: Record<string, unknown>, where: string, p: Problems): L
     if (obj.setup.commands !== undefined) layer.setup = parseSetup(obj.setup.commands, `${where}.setup.commands`, p);
     layer.nodeModules = parseEnumValue(obj.setup.node_modules, ['clone', 'off'] as const, `${where}.setup.node_modules`, p);
   } else if (obj.setup !== undefined && obj.setup !== null) layer.setup = parseSetup(obj.setup, `${where}.setup`, p);
+  if (obj.close !== undefined) {
+    if (!isObject(obj.close)) p.add(`${where}.close must be a mapping`);
+    else {
+      checkKeys(obj.close, ['cleanup'], `${where}.close`, p);
+      if (obj.close.cleanup !== undefined) {
+        const patterns = parseStringList(obj.close.cleanup, `${where}.close.cleanup`, p);
+        for (const pattern of patterns) if (!pattern.trim() || /[\\\x00]/.test(pattern) || pattern.split('/').some(part => !part || part === '.' || part === '..' || part === '**' || part.toLowerCase() === '.git')) {
+          p.add(`${where}.close.cleanup requires relative paths or single-component globs inside the worktree: ${JSON.stringify(pattern)}`);
+        }
+        layer.closeCleanup = patterns;
+      }
+    }
+  }
   if (obj.review !== undefined) layer.review = parseReview(obj.review, `${where}.review`, p);
   return layer;
 }

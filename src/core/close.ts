@@ -13,6 +13,7 @@ import { recordEvent } from './history.ts';
 import { readTaskRecord, setHeaderFields, taskFile } from './taskstore.ts';
 import type { TaskRecord } from './taskstore.ts';
 import { AgentctlError, Problems, windowName } from './util.ts';
+import { cleanupClosedWorktrees } from './close-cleanup.ts';
 
 export interface CloseOptions {
   rmWorktree?: boolean;
@@ -61,7 +62,10 @@ export async function closeTask(ctx: Context, taskArg: string, opts: CloseOption
     await setHeaderFields(runner, taskFile(config, window), { delivery_report_baseline: null, pending_prompt: null, prompt_delivery: null, report_message_warning: warning ?? null, closed: true, closed_at: new Date(runner.now()).toISOString() });
     // Before the worktree goes: the progress is read from it.
     const closed = readTaskRecord(config, window);
-    if (closed) await recordEvent(ctx, closed, 'closed');
+    if (closed) {
+      await recordEvent(ctx, closed, 'closed');
+      await cleanupClosedWorktrees(ctx, closed);
+    }
   }
 
   if (record && !record.host) {

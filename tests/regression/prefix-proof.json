@@ -210,6 +210,16 @@
       "D6: away also supports preview and token-only confirmation without a preview side effect"
     ]
   },
+  "DISK0248-CLOSE": {
+    "rev": "v0.23.3",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "DISK0248-CLOSE: close sends ignored outputs to Trash, leaving tracked, untracked, linked and report paths",
+      "DISK0248-CLOSE: close sends ignored outputs to Trash, leaving tracked, untracked, linked and report paths"
+    ]
+  },
   "DISK0248-LOCK": {
     "rev": "v0.23.3",
     "outcome": "FAILS",

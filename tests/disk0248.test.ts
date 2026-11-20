@@ -134,6 +134,35 @@ it('node_modules and worktree settings support project overrides and invalid pat
   assert.equal(settings.nodeModules, undefined);
 });
 
+it('close cleanup config rejects paths outside the worktree', () => {
+  const w = world('unsafe-close');
+  fs.appendFileSync(w.config.path, 'close: {cleanup: [../escape]}\n');
+  assert.throws(() => loadGlobalConfig(path.dirname(w.config.path)), /invalid|cleanup/i);
+});
+
+it('DISK0248-CLOSE: close sends ignored outputs to Trash, leaving tracked, untracked, linked and report paths', async () => {
+  const w = world('close');
+  Object.assign(w.config, { closeCleanup: ['.cache', 'dist*', 'profile/*', '*-dirty'] });
+  const spec = w.spec('TRASH').spec;
+  await newTasks(w.ctx, [spec], { noAgent: true });
+  const wt = spec.repos[0]!.worktree;
+  for (const name of ['.cache', 'dist-ok', 'plain-dirty', 'profile/run', 'profile/report']) {
+    const dir = path.join(wt, name);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'item'), 'fixture');
+  }
+  fs.symlinkSync(w.repo, path.join(wt, 'dist-link'));
+  seedTask(w.config, spec.task, { repos: spec.repos, report: path.join(wt, 'profile/report/item') });
+  await closeTask(w.ctx, spec.task);
+  const expected = ['.cache', 'dist-ok', 'profile/run'].map(name => path.join(wt, name));
+  assert.deepEqual([...w.moves].sort(), [...expected].sort());
+  for (const name of ['dist-tracked/tracked.txt', 'plain-dirty/item', 'dist-link', 'profile/report/item']) assert.ok(fs.existsSync(path.join(wt, name)), name);
+  const cleanup = readJournal(w.config).find(event => event.cleanup)?.cleanup;
+  assert.deepEqual(cleanup?.moved.map(item => item.path).sort(), [...expected].sort());
+  assert.equal(cleanup?.bytes, cleanup?.moved.reduce((total, item) => total + item.bytes, 0));
+  assert.ok(cleanup!.bytes > 0);
+});
+
 function fakeMount(t: TestContext, mount: string) {
   let mounted = true;
   const stat = ((target: fs.PathLike, ...options: unknown[]) => {
