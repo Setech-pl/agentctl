@@ -100,14 +100,14 @@ async function runSetup(ctx: Context, spec: ResolvedSpec, track?: (step: Omit<Se
       ctx.info(`${spec.task}: setup ${name} ${i + 1}/${commands.length}: ${label}`);
       await track?.({ phase: 'setup', repo: name, repoIndex: repoIndex + 1, repoCount: todo.length, command: label, commandIndex: i + 1, commandCount: commands.length, log: logFile });
       const setup = { repo: name, repoIndex: repoIndex + 1, repoCount: todo.length, command: label, commandIndex: i + 1, commandCount: commands.length, log: logFile };
-      if (track) await recordJournal(ctx, { kind: 'setup-started', task: spec.task, setup, text: `${spec.task}: setup rozpoczęty w ${name} (repo ${repoIndex + 1}/${todo.length}, command ${i + 1}/${commands.length}): ${label}; log: ${logFile}` });
+      if (track) await recordJournal(ctx, { kind: 'setup-started', task: spec.task, ...(spec.owner ? {owner: spec.owner} : {}), setup, text: `${spec.task}: setup rozpoczęty w ${name} (repo ${repoIndex + 1}/${todo.length}, command ${i + 1}/${commands.length}): ${label}; log: ${logFile}` });
       const install = async () => {
         const r = await (spec.host ? ctx.hosts.forHost(spec.host) : runner).exec('sh', label === command ? ['-c', command] : ['-s'], { cwd: repo.worktree, ...(label === command ? {} : { input: command }), timeoutMs: ctx.config.git.timeoutS * 1000, async: true });
         if (runner.dryRun) return;
         const output = redact(`${r.stdout}${r.stderr}`);
         await runner.appendFile(logFile, `[${name}] $ ${label}\n${output}${output.endsWith('\n') || output === '' ? '' : '\n'}[exit ${r.code}]\n\n`);
         if (r.code !== 0) {
-          if (track) await recordJournal(ctx, { kind: 'setup-failed', task: spec.task, setup: { ...setup, exitCode: r.code }, text: `${spec.task}: setup nie powiódł się w ${name} (exit ${r.code}): ${label}; log: ${logFile}; worktree zostaje` });
+          if (track) await recordJournal(ctx, { kind: 'setup-failed', task: spec.task, ...(spec.owner ? {owner: spec.owner} : {}), setup: { ...setup, exitCode: r.code }, text: `${spec.task}: setup nie powiódł się w ${name} (exit ${r.code}): ${label}; log: ${logFile}; worktree zostaje` });
           const tail = output.trimEnd().split('\n').slice(-SETUP_TAIL_LINES).join('\n');
           throw new AgentctlError(
             `${spec.task}: setup command failed in ${name}${/ETIMEDOUT/i.test(r.stderr) ? ` after ${config.git.timeoutS}s (git.timeout_s; check disk/I/O or increase the timeout)` : ''} (exit ${r.code}): ${label}\n${tail}`,
@@ -117,7 +117,7 @@ async function runSetup(ctx: Context, spec: ResolvedSpec, track?: (step: Omit<Se
       };
       const hit = spec.host ? await install() : await setupNodeModules(ctx, spec.task, repo, command, install);
       if (hit) await runner.appendFile(logFile, `[${name}] $ ${label}\n[node_modules clone from store]\n\n`);
-      if (track) await recordJournal(ctx, { kind: 'setup-finished', task: spec.task, setup: { ...setup, exitCode: 0 }, text: `${spec.task}: setup zakończony w ${name} (${hit ? 'node_modules clone' : 'exit 0'}): ${label}; log: ${logFile}` });
+      if (track) await recordJournal(ctx, { kind: 'setup-finished', task: spec.task, ...(spec.owner ? {owner: spec.owner} : {}), setup: { ...setup, exitCode: 0 }, text: `${spec.task}: setup zakończony w ${name} (${hit ? 'node_modules clone' : 'exit 0'}): ${label}; log: ${logFile}` });
     }
   }
   ctx.info(`${spec.task}: setup done (${todo.map(({ repo }) => path.basename(repo.path)).join(', ')}), output in ${logFile}`);
@@ -137,7 +137,7 @@ export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: Ne
       if (held?.startsWith('volume missing: ')) throw new WorktreeVolumeError(held.slice(16), spec.task, true);
       if (held) throw new AgentctlError(held, 'Free disk space before starting setup.');
     }
-    return { specs, ids: await reserveStarts(ctx, specs) };
+    return { specs, ids: opts.queueReservation ? [] : await reserveStarts(ctx, specs) };
   });
   try { return await startTasks(ctx, admission.specs, opts, true); }
   finally { await releaseStarts(ctx, admission.ids); }
@@ -281,6 +281,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
     await openAgentWindow(ctx, { ...guardRequest(spec), cwd: primary, env: {}, origin: opts.origin ?? (spec.autoReview ? 'start' : 'new'), sessionUp: spec.host ? await taskTmux.hasSession() : sessionUp });
     if (!spec.host) sessionUp = true;
 
+    if (spec.owner && !opts.trackStart) await recordJournal(ctx, {kind: 'task-start', task: spec.task, owner: spec.owner, text: `${spec.task}: uruchomiono (${spec.agent})`});
     if (wiring) ctx.info(`${spec.task}: ${wiring.note}`);
     const remote = spec.remoteControl === true;
     // Remote Control asks once to be switched on; like the folder trust that is a dialog for the human.

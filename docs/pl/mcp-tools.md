@@ -44,7 +44,7 @@ Argumenty z ? są opcjonalne. Pola dostawców obejmują opcjonalnych; uruchomion
 | `events_since` | odczyt | `as?`, `cursor?`, `limit?`, `client?`, `since?`, `cohort?`, `peek?`, `format?`, `detail?` | Przyrost według as czatu (client nadpisuje), otwarta skrzynka WALL; peek zachowuje kursor. |
 | `gc_preview` | odczyt | `as?`, `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `request_id?`, `detail?`, `offset?`, `limit?`, `older_than?`, `merged?`, `cohort?` | Chroniony plan sprzątania z rozmiarami i powodami pominięcia; bez usuwania. |
 | `limits` | odczyt | `as?`, `format?`, `detail?` | Limity slotów, zajętość, rezerwacje, kolejka i obowiązujący queue_hold. |
-| `set_limits` | zapis | `as?`, `claude?`, `codex?`, `queue_hold?`, `hold?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Zmień limity, queue_hold i czasowe hold (HH:MM/ISO/3h/off); zapis synchroniczny. |
+| `set_limits` | zapis | `as?`, `quota?`, `overprovision?`, `claude?`, `codex?`, `queue_hold?`, `hold?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Zmień limity, queue_hold i czasowe hold (HH:MM/ISO/3h/off); zapis synchroniczny. |
 | `reserve` | zapis | `as?`, `claude?`, `codex?`, `note?`, `release?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Zarezerwuj sloty dla agentów uruchamianych ręcznie. |
 | `version` | odczyt | `as?` | Wersja procesu MCP, skrypt, PID, czas startu i wersja stabilnej kopii na dysku. |
 | `peek` | odczyt | `as?`, `task`, `lines?` | Ostatnie linie okna bez stopki, pytanie, stan kolejki promptów lub zapis błędu startu. |

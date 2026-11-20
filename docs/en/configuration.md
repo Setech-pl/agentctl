@@ -170,6 +170,25 @@ Types/defaults below are cross-checked with [config.ts](../../src/core/config.ts
 | `capacity.claude_usage_probe` | boolean · false · g | Neutral slash-command-only /usage; no inference prompt. |
 | `capacity.claude_usage_probe_interval_minutes` | integer 15–10080 · 15 · g | Minimum interval between attempts, including failures. |
 
+## Chat quotas
+
+| Global key | Default | Effect |
+| --- | --- | --- |
+| `quotas` | absent | Enables chat-aware admission. Existing configurations keep the provider-only scheduler without this section. |
+| `quotas.chats.<name>.<provider>` | inherit `quotas.default.<provider>` | Maximum simultaneous tasks for one chat. Use a nonnegative integer. A share of `0` blocks starts for that chat and provider. |
+| `quotas.default.<provider>` | unbounded within the global limit | Shared ceiling for owners without a configured chat and for older tasks without an owner. Named chats also inherit it for missing provider keys. |
+| `quotas.floor.<provider>` | `1` for a named chat with a finite positive share, `0` otherwise | Priority for eligible queued work while the chat runs fewer than this many tasks. Applies up to each share. If the floors exceed the global limit, agentctl caps them in chat-name order with the default bucket last. |
+| `quotas.overprovision` | `1.5` | Budget multiplier, at least `1`. `doctor` and MCP `config_show` warn when finite shares exceed the budget or requested floors exceed the global limit. The owner can save an over-budget allocation. |
+| `quotas.cohorts.<cohort>` | absent | Fallback owner for a cohort, matched without regard to case. The value is a chat name or `chat:<name>`. |
+| `quotas.per_host` | `false` | With `true`, each host and the local dispatcher have separate share counts. The provider cap and the floor count stay global. |
+| `quotas.self_service` | `off` | `within_overprovision` lets a WALL chat change its own shares while the affected totals fit the budget. |
+
+The owner is fixed at registration. Agentctl uses the first available value from MCP `as: "chat:<name>"`, `wall.chats.<name>.clients`, spec `owner:`, `quotas.cohorts`, and the default bucket. The spec accepts a chat name, `chat:<name>` or `default`. Existing ownerless tasks start in the default bucket when you enable quotas.
+
+A provider slot and a chat slot must both be free. The queue first serves eligible chats below their floor, then the lowest used/share ratio, then its existing priority and order. Floors apply only while work is queued and never preempt running tasks. Manual reservations and counted external sessions consume global places. `limits.count_report_ready` controls whether report-ready windows consume places in both counts.
+
+The owner can edit `agentctl limits set quota.nc.claude=4 overprovision=1.5` or preview and confirm MCP `set_limits` with `as: "chat:agentctl"`, `quota: {chat: nc, claude: 4}` and/or `overprovision`. With quotas enabled, other chats can only use self-service when configured. Bind the owner MCP client in `wall.chats.agentctl.clients` and bind the other clients to their chats to check declarations against the connection's client name. WALL identities and client names are intended for trusted clients sharing this instance. Applied quota and global limit changes produce a `limits-changed` event and an `info` post on WALL channel `agentctl`.
+
 ## Watch, board and notifications
 
 | Key | Type / default / layers | Meaning |

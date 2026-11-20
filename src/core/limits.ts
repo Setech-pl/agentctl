@@ -1,3 +1,5 @@
+import { chatLoads, chatOwner, DEFAULT_OWNER, parseChatQuotas, quotaBudget, quotaWarnings, renderChatLoad } from './chat-quotas.ts';
+import type { ChatLoad, ChatQuotas } from './chat-quotas.ts';
 import { providerHolds, providerHoldText, parseTimedHolds, setProviderHolds } from './provider-hold.ts';
 import type { ProviderHold, TimedHolds } from './provider-hold.ts';
 import { provider as adapter, activeProviders, PROVIDER_IDS } from './providers/registry.ts';
@@ -10,8 +12,11 @@ import type { LiveWindow } from './checks.ts';
 import type { Context } from './context.ts';
 import { editConfigText, writeConfigText } from './config-edit.ts';
 import { recordJournal, recordJournalOnce } from './journal.ts';
+import { withFileLock } from './file-lock.ts';
 import { readQueue, waiting } from './queue.ts';
-import { AgentctlError, errorMessage } from './util.ts';
+import { AgentctlError, errorMessage, isObject, Problems } from './util.ts';
+import { OWNER_IDENTITY, postMessage } from './wall.ts';
+import { WALL_TOOL_CHANNEL } from './wall-config.ts';
 import path from 'node:path';
 
 /*
@@ -205,6 +210,7 @@ export interface ProviderLoad {
   /** `usage.queue_hold` of this provider: the plan percentage above which the queue starts none of its tasks; null: off. */
   queueHold: number | null;
   providerHold?: ProviderHold;
+  chats?: ChatLoad[];
 }
 
 export interface LimitsReport {
@@ -237,7 +243,10 @@ export function collectLimits(config: GlobalConfig, live: readonly LiveWindow[],
       const external = mine.filter((w) => w.kind === 'external').map((w) => ({ pid: w.pid ?? 0, cwd: w.cwd ?? null }));
       const limit = config.limits[agent] ?? null;
       const used = mine.filter(w => w.kind === undefined && w.counted !== false).length + starting + reserved + external.length;
-      return { agent, limit, windows, starting, working, reportReady, reserved, reservedNote: reservations[agent]?.note ?? null, external, used, ...(holds[agent] ? {providerHold: holds[agent]} : {}), free: holds[agent] || limit === 'off' ? 0 : limit === null ? null : Math.max(0, limit - used), queued: queue.filter((e) => e.agent === agent).length, queueHold: config.usage.queueHold[agent] ?? null };
+      const chats = config.quotas?.per_host
+        ? [undefined, ...Object.keys(config.hosts)].filter(host => !host || config.hosts[host]?.providers.includes(agent)).flatMap(host => chatLoads(config, agent, live, host))
+        : chatLoads(config, agent, live);
+      return { agent, limit, windows, starting, working, reportReady, reserved, reservedNote: reservations[agent]?.note ?? null, external, used, ...(chats.length ? { chats } : {}), ...(holds[agent] ? {providerHold: holds[agent]} : {}), free: holds[agent] || limit === 'off' ? 0 : limit === null ? null : Math.max(0, limit - used), queued: queue.filter((e) => e.agent === agent).length, queueHold: config.usage.queueHold[agent] ?? null };
     }),
   };
 }
@@ -253,6 +262,7 @@ export function renderLimits(report: LimitsReport): string[] {
     if (p.windows.length > 0) parts.push(`agentctl: ${p.windows.join(', ')}`);
     if (p.reserved > 0) parts.push(`reserved: ${p.reserved}${p.reservedNote ? ` (${p.reservedNote})` : ''}`);
     for (const e of p.external) parts.push(`external: pid ${e.pid}${e.cwd ? ` in ${e.cwd}` : ''}`);
+    for (const chat of p.chats ?? []) lines.push(`  ${p.agent} ${renderChatLoad(chat)}`);
     if (parts.length > 0) lines.push(`  ${p.agent}: ${parts.join(' · ')}`);
   }
   for (const h of report.hosts ?? []) lines.push(`host ${h.host}: ${h.providers.map(p => `${p.agent} ${p.used}/${p.limit ?? 'unbounded'}, free ${p.free ?? 'unbounded'}, queued ${p.queued}`).join(' · ')} (account limits/holds also apply)`);
@@ -260,6 +270,14 @@ export function renderLimits(report: LimitsReport): string[] {
   lines.push('HOLD = usage.queue_hold: above that plan percentage (any window) the queue starts no task of the provider; off = never held.');
   lines.push('Change: agentctl limits set claude=3 codex=5 queue_hold.codex=90   (takes effect at once, also in a running watch)');
   return lines;
+}
+
+/** The provider and chat counts for concise MCP responses. */
+export function compactLimits(report: LimitsReport): string {
+  return report.providers.flatMap(p => [
+    `${p.agent}: used=${p.used} limit=${p.limit ?? 'n/d'} free=${p.free ?? 'n/d'} reserved=${p.reserved} queued=${p.queued} queue_hold=${holdText(p.queueHold)}${p.providerHold ? `; ${providerHoldText(p.agent, p.providerHold)}` : ''}`,
+    ...(p.chats ?? []).map(chat => `  ${renderChatLoad(chat)}`),
+  ]).join('\n');
 }
 
 /** "90%" or "off". */
@@ -349,6 +367,8 @@ export interface LimitsChange {
 
 export interface LimitsPlan {
   file: string;
+  baseText: string;
+  baseQuotaScope: string;
   changes: LimitsChange[];
   /** `usage.queue_hold` per active provider, when the plan changes it. */
   holdChanges: HoldChange[];
@@ -356,15 +376,106 @@ export interface LimitsPlan {
   /** The new text of the config file: comments and order of everything else kept. */
   text: string;
   summary: string[];
+  quotaChange?: boolean;
+}
+
+export interface QuotaEdit {
+  quota?: unknown;
+  overprovision?: unknown;
+  /** Undefined for the owner; otherwise the only chat that may be edited. */
+  self?: string;
+}
+
+const quotaScope = (config: GlobalConfig): string => JSON.stringify([config.limits, config.quotas, config.wall.chats]);
+
+function editQuotas(config: GlobalConfig, edit: QuotaEdit): { quotas: ChatQuotas; chat?: string; shares?: Partial<Record<AgentName, number>> } {
+  const p = new Problems();
+  const before = config.quotas ?? parseChatQuotas({}, p)!;
+  const raw = edit.quota;
+  const chat = isObject(raw) ? chatOwner(raw.chat) : undefined;
+  if (raw !== undefined && !chat) throw new AgentctlError('quota must include a valid chat and at least one provider share');
+  const shares = isObject(raw) ? Object.fromEntries(Object.entries(raw).filter(([key]) => key !== 'chat')) : undefined;
+  if (shares && !Object.keys(shares).length) throw new AgentctlError('quota must include at least one provider share');
+  for (const id of Object.keys(shares ?? {})) if (!(activeProviders(config) as readonly string[]).includes(id)) throw new AgentctlError(`quota.${id}: provider is not active`);
+  const name = chat?.slice(5) ?? '';
+  const next = parseChatQuotas({
+    ...before,
+    ...(edit.overprovision !== undefined ? { overprovision: edit.overprovision } : {}),
+    ...(shares ? chat === DEFAULT_OWNER ? { default: { ...before.default, ...shares } }
+      : { chats: { ...before.chats, [name]: { ...before.chats[name], ...shares } } } : {}),
+  }, p)!;
+  p.throwIfAny('Invalid quota edit:');
+  if (edit.self) {
+    const nextConfig = { ...config, quotas: next };
+    for (const id of activeProviders(config)) {
+      const budget = quotaBudget(nextConfig, id);
+      if ((Object.hasOwn(shares ?? {}, id) || quotaBudget({ ...config, quotas: before }, id).shares !== budget.shares) && budget.shares > budget.budget) {
+        throw new AgentctlError(`${chat}: ${id} shares would total ${budget.shares}, above the overprovision budget ${budget.budget}`, QUOTA_DECISION_HINT);
+      }
+    }
+  }
+  return { quotas: next, chat, shares: shares as Partial<Record<AgentName, number>> | undefined };
+}
+
+export const QUOTA_DECISION_HINT = 'Post a decision-request on the WALL channel agentctl for the owner.';
+
+export function quotaDiffText(from?: ChatQuotas, to?: ChatQuotas): string | undefined {
+  const differences: string[] = [];
+  if (!from || !to) {
+    if (from !== to) differences.push(to ? 'włączono' : 'wyłączono');
+  }
+  const compare = (name: string, a: unknown, b: unknown) => {
+    if (a !== b) differences.push(`${name} ${a ?? '-'} → ${b ?? '-'}`);
+  };
+  compare('overprovision', from?.overprovision, to?.overprovision);
+  compare('per_host', from?.per_host, to?.per_host);
+  compare('self_service', from?.self_service, to?.self_service);
+  const chats = [...new Set([...Object.keys(from?.chats ?? {}), ...Object.keys(to?.chats ?? {})])].sort();
+  for (const name of chats) {
+    if (Object.hasOwn(from?.chats ?? {}, name) !== Object.hasOwn(to?.chats ?? {}, name)) differences.push(`chat:${name} ${Object.hasOwn(to?.chats ?? {}, name) ? 'dodano' : 'usunięto'}`);
+  }
+  for (const id of PROVIDER_IDS) {
+    compare(`default ${id}`, from?.default[id], to?.default[id]);
+    compare(`floor ${id}`, from?.floor[id], to?.floor[id]);
+    for (const name of chats) {
+      compare(`chat:${name} ${id}`, from?.chats[name]?.[id], to?.chats[name]?.[id]);
+    }
+  }
+  for (const cohort of [...new Set([...Object.keys(from?.cohorts ?? {}), ...Object.keys(to?.cohorts ?? {})])].sort()) {
+    compare(cohort, from?.cohorts[cohort], to?.cohorts[cohort]);
+  }
+  return differences.length ? `kwoty: ${differences.join(', ')}` : undefined;
+}
+
+/** A command and the watcher can see the same atomic config revision. Announce it once. */
+export async function announceLimitConfigChange(ctx: Context, before: GlobalConfig, after: GlobalConfig): Promise<void> {
+  const text = [limitsDiffText(before.limits, after.limits, activeProviders(after)), quotaDiffText(before.quotas, after.quotas)].filter(Boolean).join('\n');
+  if (!text || ctx.runner.dryRun) return;
+  const stamp = fs.statSync(after.path, {bigint: true, throwIfNoEntry: false});
+  const changeId = stamp ? `limits/${stamp.ino}/${stamp.mtimeNs}` : undefined;
+  await withFileLock(`${after.path}.limits-events.lock`, async () => {
+    await recordJournalOnce(ctx, {kind: 'limits-changed', text, changeId});
+    await postMessage(ctx, OWNER_IDENTITY, {channel: WALL_TOOL_CHANNEL, kind: 'info', subject: 'Zmiana limitów lub kwot', body: text.slice(0, 4000), origin: changeId});
+  });
 }
 
 /** The edit as text; nothing is written. */
-export function planSetLimits(config: GlobalConfig, assignments: LimitAssignments, hold?: HoldAssignment, timedInput?: unknown, now = Date.now()): LimitsPlan {
+export function planSetLimits(config: GlobalConfig, assignments: LimitAssignments, hold?: HoldAssignment, timedInput?: unknown, now = Date.now(), quotaEdit?: QuotaEdit): LimitsPlan {
   const timedHolds = timedInput === undefined ? undefined : parseTimedHolds(config, timedInput, now);
   const file = config.path;
+  const baseText = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
   const changes: LimitsChange[] = [];
   const holdChanges: HoldChange[] = [];
+  const quota = quotaEdit ? editQuotas(config, quotaEdit) : undefined;
+  const quotaText = quota ? quotaDiffText(config.quotas, quota.quotas) : undefined;
   const text = editConfigText(config, (doc) => {
+    if (quota && quotaEdit) {
+      if (quotaEdit.overprovision !== undefined) doc.setIn(['quotas', 'overprovision'], quota.quotas.overprovision);
+      if (quota.chat && quota.shares) {
+        const key = quota.chat === DEFAULT_OWNER ? ['quotas', 'default'] : ['quotas', 'chats', quota.chat.slice(5)];
+        for (const [agent, value] of Object.entries(quota.shares)) doc.setIn([...key, agent], value);
+      }
+    }
     if (hold !== undefined) {
       const ids = activeProviders(config);
       const current = config.usage.queueHold;
@@ -386,33 +497,52 @@ export function planSetLimits(config: GlobalConfig, assignments: LimitAssignment
       const to = assignments[agent];
       if (to === undefined) continue;
       const from = config.limits[agent] ?? null;
-      if (to === null) doc.deleteIn(['limits', agent]);
+      // Omitting GLM's limit restores its built-in cap. Write an explicit zero to remove it.
+      if (to === null && agent === 'glm') doc.setIn(['limits', agent], 0);
+      else if (to === null) doc.deleteIn(['limits', agent]);
       else doc.setIn(['limits', agent], to);
       changes.push({ agent, from, to });
     }
   });
   const show = (n: number | 'off' | null): string => (n === null ? 'no limit' : n === 'off' ? 'off (disabled)' : String(n));
+  const nextLimits = { ...config.limits };
+  for (const change of changes) {
+    if (change.to === null) delete nextLimits[change.agent];
+    else nextLimits[change.agent] = change.to;
+  }
   return {
     file,
+    baseText,
+    baseQuotaScope: quotaScope(config),
     changes,
     holdChanges,
+    ...(quota ? {quotaChange: Boolean(quotaText)} : {}),
     ...(timedHolds ? {timedHolds} : {}),
     text,
-    summary: [`${file}`, ...Object.entries(timedHolds ?? {}).map(([agent, until]) => `  hold.${agent}: ${until}`), ...changes.map((c) => `  limits.${c.agent}: ${show(c.from)} -> ${show(c.to)}${c.from === c.to ? ' (unchanged)' : ''}`), ...holdChanges.map((c) => `  usage.queue_hold.${c.agent}: ${holdText(c.from)} -> ${holdText(c.to)}${c.from === c.to ? ' (unchanged)' : ''}`), '  (a copy of the file is kept as config.yaml.bak; comments and the order of the keys stay)'],
+    summary: [file, ...Object.entries(timedHolds ?? {}).map(([agent, until]) => `  hold.${agent}: ${until}`), ...changes.map((c) => `  limits.${c.agent}: ${show(c.from)} -> ${show(c.to)}${c.from === c.to ? ' (unchanged)' : ''}`), ...holdChanges.map((c) => `  usage.queue_hold.${c.agent}: ${holdText(c.from)} -> ${holdText(c.to)}${c.from === c.to ? ' (unchanged)' : ''}`),
+      ...(quota ? [`  ${quotaText ?? 'quotas unchanged'}`] : []),
+      ...quotaWarnings({...config, limits: nextLimits, quotas: quota?.quotas ?? config.quotas}).map(warning => `  WARNING: ${warning}`),
+      '  (a copy of the file is kept as config.yaml.bak; comments and the order of the keys stay)'],
   };
 }
 
 /** Write the plan: a `.bak` copy first, the new text, and a check that the result loads (else the old text comes back). */
 export async function applySetLimits(ctx: Context, plan: LimitsPlan): Promise<void> {
-  if (plan.changes.length || plan.holdChanges.length) await writeConfigText(ctx, plan.file, plan.text);
-  if (plan.timedHolds) await setProviderHolds(ctx, plan.timedHolds);
-  const after: GlobalConfig['limits'] = { ...ctx.config.limits };
-  for (const c of plan.changes) {
-    if (c.to === null) delete after[c.agent];
-    else after[c.agent] = c.to;
+  const writesConfig = plan.changes.length || plan.holdChanges.length || plan.quotaChange;
+  if (ctx.runner.dryRun) {
+    if (writesConfig) await writeConfigText(ctx, plan.file, plan.text);
+    return;
   }
-  const text = limitsDiffText(ctx.config.limits, after, activeProviders(ctx.config));
-  if (text) await recordJournalOnce(ctx, { kind: 'limits-changed', text });
-  const hold = holdDiffText(ctx.config.usage.queueHold, Object.fromEntries(plan.holdChanges.length ? plan.holdChanges.filter((c) => c.to !== null).map((c) => [c.agent, c.to]) : Object.entries(ctx.config.usage.queueHold)));
-  if (hold) await recordJournalOnce(ctx, { kind: 'limits-changed', text: hold });
+  await withFileLock(`${plan.file}.limits-edit.lock`, async () => {
+    const current = fs.existsSync(plan.file) ? fs.readFileSync(plan.file, 'utf8') : '';
+    if (current !== plan.baseText) throw new AgentctlError('Limits config changed; preview the edit again.');
+    const before = loadGlobalConfig(path.dirname(plan.file));
+    if ((plan.quotaChange || before.quotas || ctx.config.quotas) && quotaScope(before) !== plan.baseQuotaScope) throw new AgentctlError('Limits or WALL identity changed; preview the edit again.');
+    if (writesConfig) await writeConfigText(ctx, plan.file, plan.text);
+    if (plan.timedHolds) await setProviderHolds(ctx, plan.timedHolds);
+    const after = writesConfig ? loadGlobalConfig(path.dirname(plan.file)) : before;
+    await announceLimitConfigChange(ctx, before, after);
+    const hold = holdDiffText(before.usage.queueHold, after.usage.queueHold);
+    if (hold) await recordJournalOnce(ctx, { kind: 'limits-changed', text: hold });
+  });
 }

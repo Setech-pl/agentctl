@@ -256,6 +256,8 @@ const KIND_LABEL: Record<JournalEntry['kind'], string> = {
   'disk-critical': 'DYSK KRYTYCZNY',
   'disk-ok': 'DYSK OK',
   'report-ready': 'RAPORT',
+  'task-start': 'START',
+  'task-ordered': 'ZLECENIE',
   'queue-start': 'START',
   'queue-failed': 'BŁĄD STARTU',
   'setup-started': 'SETUP',

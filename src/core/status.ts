@@ -44,6 +44,7 @@ import { openReader } from './usage.ts';
 import { formatTokens } from './usage-parse.ts';
 
 export interface StatusRow {
+  owner?: string;
   host?: string;
   task: string;
   outputs?: OutputData['outputs'];
@@ -369,6 +370,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       cancelledAt: cancelled ? (record.cancelledAt ?? null) : null,
       cancelReason: cancelled ? (record.cancelReason ?? null) : null,
       cohort: record.cohort ?? null,
+      ...(record.owner || ctx.config.quotas ? {owner: record.owner ?? 'default'} : {}),
       supersededBy: record.supersededBy ?? null,
       continues: record.continues ?? null,
       reviewOf: record.reviewOf ?? null,
@@ -450,11 +452,12 @@ export function statusMarkdown(rows: StatusRow[]): string {
   const cell = (s: string): string => s.replace(/\|/g, '\\|');
   const pulled = (r: StatusRow): string => (r.report === 'missing' ? '-' : r.pulled ? `yes (${formatLocalTime(r.pulled)})` : 'no');
   const cohort = rows.some((r) => r.cohort !== null);
+  const owner = rows.some(r => r.owner);
   const tokens = rows.some((r) => Boolean(r.tokens));
   const lines = [
-    `| task | ${cohort ? 'cohort | ' : ''}agent/model/effort | state | time | ${tokens ? 'tokens | ' : ''}progress | report | pulled? |`,
-    `|---|${cohort ? '---|' : ''}---|---|---|${tokens ? '---|' : ''}---|---|---|`,
-    ...rows.map((r) => `| ${cell(r.task)} | ${cohort ? `${cell(r.cohort ?? '-')} | ` : ''}${cell(`${r.agent}/${r.model}/${r.effort}`)} | ${r.state} | ${r.duration} | ${tokens ? `${r.tokens ? formatTokens(r.tokens.fresh) : 'n/d'} | ` : ''}${r.progress?.text ?? '-'} | ${r.report}${r.reportSource ? ` (z ${cell(shortPath(r.reportSource))})` : ''} | ${pulled(r)} |`),
+    `| task | ${owner ? 'owner | ' : ''}${cohort ? 'cohort | ' : ''}agent/model/effort | state | time | ${tokens ? 'tokens | ' : ''}progress | report | pulled? |`,
+    `|---|${owner ? '---|' : ''}${cohort ? '---|' : ''}---|---|---|${tokens ? '---|' : ''}---|---|---|`,
+    ...rows.map((r) => `| ${cell(r.task)} | ${owner ? `${cell(r.owner ?? '-')} | ` : ''}${cohort ? `${cell(r.cohort ?? '-')} | ` : ''}${cell(`${r.agent}/${r.model}/${r.effort}`)} | ${r.state} | ${r.duration} | ${tokens ? `${r.tokens ? formatTokens(r.tokens.fresh) : 'n/d'} | ` : ''}${r.progress?.text ?? '-'} | ${r.report}${r.reportSource ? ` (z ${cell(shortPath(r.reportSource))})` : ''} | ${pulled(r)} |`),
   ];
   return `${lines.join('\n')}\n`;
 }

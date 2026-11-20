@@ -46,7 +46,7 @@ Arguments marked ? are optional. Provider fields below include enabled optional 
 | `events_since` | read | `as?`, `cursor?`, `limit?`, `client?`, `since?`, `cohort?`, `peek?`, `format?`, `detail?` | What changed since the last look |
 | `gc_preview` | read | `as?`, `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `request_id?`, `detail?`, `offset?`, `limit?`, `older_than?`, `merged?`, `cohort?` | Preview of the clean-up |
 | `limits` | read | `as?`, `format?`, `detail?` | Limits of simultaneous agents |
-| `set_limits` | write | `as?`, `claude?`, `codex?`, `queue_hold?`, `hold?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Change the limits |
+| `set_limits` | write | `as?`, `quota?`, `overprovision?`, `claude?`, `codex?`, `queue_hold?`, `hold?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Change the limits |
 | `reserve` | write | `as?`, `claude?`, `codex?`, `note?`, `release?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Reserve places for agents started by hand |
 | `version` | read | `as?` | Version of this server |
 | `peek` | read | `as?`, `task`, `lines?` | Look into a task window |

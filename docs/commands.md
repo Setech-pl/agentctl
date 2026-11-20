@@ -689,7 +689,7 @@ agentctl limits set [options] <limits...>
 
 | Argument | Meaning |
 |---|---|
-| `<limits...>` | claude=3 codex=5; off disables a provider (codex=off: no windows of it start), 0 or none removes a limit (codex=0); queue_hold=90 \| queue_hold=off \| queue_hold.codex=85 sets usage.queue_hold; hold.glm=21:50 \| hold.glm=3h \| hold.glm=off sets a timed provider hold |
+| `<limits...>` | claude=3 codex=5; off disables a provider (codex=off: no windows of it start), 0 or none removes a limit (codex=0); queue_hold=90 \| queue_hold=off \| queue_hold.codex=85 sets usage.queue_hold; hold.glm=21:50 \| hold.glm=3h \| hold.glm=off sets a timed provider hold; quota.nc.claude=4 sets a chat share; overprovision=1.5 sets the share budget multiplier |
 
 | Option | Meaning | Notes |
 |---|---|---|

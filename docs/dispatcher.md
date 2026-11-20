@@ -52,6 +52,8 @@ Implement the bounded API change. Test the acceptance criteria. Write the report
 - `remote_control`: enable Claude Remote Control for this task when supported and authorized; it does not grant permission to bypass prompts.
 - Optional inherited fields: `links` (`from`/`to` symlinks), `env`, `worktree_root`, `defaults` and `setup` commands. Keep setup in trusted project configuration; MCP rejects setup supplied in a spec. `guide:` in `.agentctl.yaml` names a project overlay relative to the repo or starting with `~`; a missing overlay warns and does not stop the order.
 
+When ordering agents through MCP, always include `as: "chat:<name>"` on `new` and `queue`. Keep the same identity on confirmation. Check `limits` or `capacity` for global and chat slots and `queue_list` for a waiting order. A share change outside self-service goes to the owner as a WALL `decision-request` on `agentctl`.
+
 ## Run and follow work
 
 Use `new` for immediate work, `queue` for work waiting on slots or reports. Group related orders with `cohort`; inspect `cohort list/show`, queue position and start conditions. `queue pause/resume/up/retry/rm` manage waiting work. A cancelled dependency makes its descendants `blocked`: explicitly `unblock` (optionally `--drop-after TASK`) or cancel them after deciding what the missing result means. MCP `resume` restores resumable tasks; `unblock` removes a queued dependency and `queue_retry` retries a failed start.

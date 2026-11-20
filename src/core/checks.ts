@@ -31,6 +31,7 @@ export function findAuthor(task: string, batch: ResolvedSpec[], config: GlobalCo
 }
 
 export interface LiveWindow {
+  owner?: string;
   host?: string;
   window: string;
   /** Unknown when the window was not created through agentctl. */

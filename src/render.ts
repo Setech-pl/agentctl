@@ -10,10 +10,12 @@ export function renderStatusTable(rows: StatusRow[], maxLast = 60, opts: { cohor
   const collide = rows.some((r) => r.collide.length > 0);
   const cohort = opts.cohort !== false && rows.some((r) => r.cohort !== null);
   // TOKENS is there when some task has a session log to count (a task without one says n/d).
+  const owner = rows.some(r => r.owner);
   const tokens = rows.some((r) => Boolean(r.tokens));
-  const header = ['TASK', ...(cohort ? ['COHORT'] : []), 'AGENT/MODEL/EFFORT', 'STATE', 'WINDOW', 'STARTED', 'DURATION', ...(tokens ? ['TOKENS'] : []), 'PROGRESS', ...(collide ? ['COLLIDE'] : []), 'REPORT', 'DECISIONS', 'ACTIONS', 'MESSAGES', 'LAST LINE'];
+  const header = ['TASK', ...(owner ? ['OWNER'] : []), ...(cohort ? ['COHORT'] : []), 'AGENT/MODEL/EFFORT', 'STATE', 'WINDOW', 'STARTED', 'DURATION', ...(tokens ? ['TOKENS'] : []), 'PROGRESS', ...(collide ? ['COLLIDE'] : []), 'REPORT', 'DECISIONS', 'ACTIONS', 'MESSAGES', 'LAST LINE'];
   const body = rows.map((r) => [
     (r.pin ? '📌 ' : '') + (r.archived ? `${r.task} (archived)` : r.cancelled ? `${r.task} (cancelled)` : r.closed ? `${r.task} (closed)` : r.hidden ? `${r.task} (hidden)` : r.task),
+    ...(owner ? [r.owner ?? '-'] : []),
     ...(cohort ? [r.cohort ?? '-'] : []),
     r.switchedBy ? `${r.agent}/${r.model}/${r.effort} (ordered ${r.requested})` : `${r.agent}/${r.model}/${r.effort}`,
     r.state,

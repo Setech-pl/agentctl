@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- QUOTA0250 adds central per-chat ceilings, floor-first queue admission and owner-scoped limit edits with WALL announcements. / QUOTA0250 dodaje centralne kwoty czatów, pierwszeństwo kolejki do minimum oraz zmianę limitów z kontrolą tożsamości i ogłoszeniem na WALL.
+
 - SNAP0247 was prepared for 0.23.3. / Poprawka SNAP0247 została przygotowana do wydania 0.23.3.
 - DISK0248 was prepared for 0.24.0. / Zmiany DISK0248 zostały przygotowane do wydania 0.24.0.
 

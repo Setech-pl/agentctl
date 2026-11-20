@@ -14,6 +14,8 @@ Specs are YAML front matter plus prompt. Use explicit paths and existing base re
 
 For cross-review use review_of plus after and another eligible provider/model; auto review requires a named author branch and creates its own detached checkout at the author's recorded commits; it never shares the author's worktree/index/report. State what delta and SHA must be reviewed. A reviewer should not fix the author branch while claiming independent read-only review. Detached CONSULT tasks have stronger cooperative commit guards but still share OS permissions.
 
+Always pass `as: "chat:<name>"` with MCP `new` and `queue` so the dispatcher charges the right chat quota. Keep the identity on confirmation.
+
 ## Dispatch and observe
 
 Preview new/queue, show it, obtain missing owner authorization, then confirm using the preview_token in the same session. A token-only confirm uses the stored order. Watch must run. Accepted means durable registration: follow events_since, queue_list/show and status until validation, setup, trust and delivery succeed. Keep the same token for uncertain retries. Do not generate another task just because a tool timed out.

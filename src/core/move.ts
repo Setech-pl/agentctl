@@ -174,6 +174,7 @@ export async function moveTask(ctx: Context, taskArg: string, opts: MoveOptions 
     links: [],
     setup: [],
     env: from.env,
+    owner: from.owner,
     ...(from.reviewOf ? { reviewOf: from.reviewOf } : {}),
     ...(from.autoReview ? { autoReview: from.autoReview } : {}),
     report: from.report,

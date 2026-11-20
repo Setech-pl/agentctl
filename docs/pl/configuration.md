@@ -170,6 +170,25 @@ Typy/domysły sprawdzono z [config.ts](../../src/core/config.ts), [spec.ts](../.
 | `capacity.claude_usage_probe` | boolean · false · g | Neutralne /usage bez inference; trust ręcznie. |
 | `capacity.claude_usage_probe_interval_minutes` | integer 15–10080 · 15 · g | Odstęp prób 15–10080 min, także po błędach. |
 
+## Kwoty czatów
+
+| Klucz globalny | Wartość domyślna | Działanie |
+| --- | --- | --- |
+| `quotas` | brak | Włącza kwoty czatów. Bez tej sekcji kolejka stosuje dotychczasowe limity dostawców. |
+| `quotas.chats.<nazwa>.<dostawca>` | dziedziczy `quotas.default.<dostawca>` | Maksymalna liczba równoległych zadań czatu. Nieujemna liczba całkowita. `0` blokuje starty dla danego czatu i dostawcy. |
+| `quotas.default.<dostawca>` | bez dodatkowego ograniczenia w ramach limitu globalnego | Wspólna kwota dla właścicieli bez skonfigurowanego czatu i starszych zadań bez właściciela. Nazwane czaty dziedziczą brakujące wartości dostawców. |
+| `quotas.floor.<dostawca>` | `1` dla nazwanego czatu z dodatnią, skończoną kwotą, w pozostałych wypadkach `0` | Pierwszeństwo dla gotowych zadań czatu działającego poniżej minimum. Minimum nie przekracza kwoty. Gdy suma minimów przekracza limit dostawcy, agentctl ogranicza je według nazw czatów, z pulą domyślną na końcu. |
+| `quotas.overprovision` | `1.5` | Mnożnik budżetu, co najmniej `1`. `doctor` i MCP `config_show` ostrzegają przy przekroczeniu budżetu kwot lub limitu przez sumę minimów. Właściciel może zapisać kwoty przekraczające budżet. |
+| `quotas.cohorts.<kohorta>` | brak | Zapasowy właściciel kohorty. Wielkość liter w nazwie kohorty jest pomijana. Wartość to nazwa czatu lub `chat:<nazwa>`. |
+| `quotas.per_host` | `false` | `true` liczy kwotę osobno dla hostów SSH i lokalnej maszyny. Limit dostawcy i wykorzystanie minimum pozostają globalne. |
+| `quotas.self_service` | `off` | `within_overprovision` pozwala czatowi WALL zmienić własne kwoty, jeśli zmienione sumy mieszczą się w budżecie. |
+
+Właściciel jest zapisywany przy rejestracji w kolejności MCP `as: "chat:<nazwa>"`, mapowanie `wall.chats.<nazwa>.clients`, `owner:` w specu, `quotas.cohorts`, następnie pula domyślna. Spec przyjmuje nazwę czatu, `chat:<nazwa>` lub `default`. Starsze zadania bez właściciela trafiają do puli domyślnej.
+
+Start wymaga wolnego miejsca u dostawcy oraz w kwocie czatu. Kolejka obsługuje najpierw czaty poniżej minimum, potem najniższy stosunek użycia do kwoty, a przy remisie stosuje priorytet i kolejność wpisów. Minimum działa dla gotowych zadań w kolejce i nie przerywa pracy. Ręczne rezerwacje i wliczane sesje zewnętrzne zajmują miejsca globalne. `limits.count_report_ready` decyduje, czy gotowe raporty zajmują miejsca w obu licznikach.
+
+Właściciel zmienia ustawienia przez `agentctl limits set quota.nc.claude=4 overprovision=1.5` lub MCP `set_limits` ze swoim `as: "chat:agentctl"`, `quota: {chat: nc, claude: 4}` albo `overprovision`. Ustaw `wall.chats.agentctl.clients` i przypisz pozostałe klienty do ich czatów, by porównywać deklaracje z nazwą klienta MCP. Tożsamości i nazwy klientów WALL są przeznaczone dla zaufanych klientów wspólnej instancji. Każda zastosowana zmiana kwoty lub limitu globalnego daje zdarzenie `limits-changed` i wpis `info` na kanale WALL `agentctl`.
+
 ## Watch, board i powiadomienia
 
 | Key | Typ / domyślne / warstwy | Znaczenie |

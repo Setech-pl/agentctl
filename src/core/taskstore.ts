@@ -1,3 +1,4 @@
+import { chatOwner } from './chat-quotas.ts';
 import { fileVersion } from './file-version.ts';
 import { withFileLock, withFileLockSync, taskLock } from './file-lock.ts';
 import { noteStateWriteFailure, atomicWriteFile } from './atomic-file.ts';
@@ -18,6 +19,7 @@ export type RecordEffort = Effort | 'unknown';
 
 /** What agentctl remembers about a task: the YAML header of `<state_dir>/<task>/TASK.md`. */
 export interface TaskRecord {
+  owner?: string;
   host?: string;
   remoteReport?: string;
   remoteDir?: string;
@@ -165,6 +167,7 @@ export function recordFromSpec(spec: ResolvedSpec, config: GlobalConfig, started
   if (spec.integration) record.integration = true;
   if (spec.pin) record.pin = true;
   if (spec.remoteControl) record.remoteControl = true;
+  if (spec.owner) record.owner = spec.owner;
   if (spec.cohort) record.cohort = spec.cohort;
   if (spec.reportAlt) record.reportAlt = spec.reportAlt;
   return record;
@@ -196,6 +199,7 @@ export function renderTaskMd(record: TaskRecord, prompt: string): string {
   if (record.review) header.review = record.review;
   if (record.autoReview) header.auto_review = record.autoReview;
   if (record.switchedBy) header.switched_by = record.switchedBy;
+  if (record.owner) header.owner = record.owner;
   if (record.cohort) header.cohort = record.cohort;
   for (const [key, value] of Object.entries({ delivery_output_baseline: record.deliveryOutputBaseline, delivery_id: record.deliveryId, delivery_started_at: record.deliveryStartedAt, delivery_report_baseline: record.deliveryReportBaseline, report_message_warning: record.reportMessageWarning, report_confirmed: record.reportConfirmed, pending_prompt: record.pendingPrompt, prompt_delivery: record.promptDelivery, prompt_sent_at: record.promptSentAt, prompt_error: record.promptError, delivery_result: record.deliveryResult, delivery_field: record.deliveryField, delivery_source: record.deliverySource, delivery_enters: record.deliveryEnters, delivery_enter_at: record.deliveryEnterAt, delivery_echo_baseline: record.deliveryEchoBaseline })) if (value !== undefined) header[key] = value;
   if (record.promptKind) header.prompt_kind = record.promptKind;
@@ -342,6 +346,8 @@ function parseTaskRecordUncached(text: string): TaskRecord | undefined {
   if (typeof data.review_of === 'string') record.reviewOf = data.review_of;
   if (isObject(data.review)) record.review = data.review as ReviewSettings;
   if (isObject(data.auto_review)) record.autoReview = data.auto_review as unknown as AutoReviewSource;
+  const owner = chatOwner(data.owner);
+  if (owner) record.owner = owner;
   if (typeof data.cohort === 'string' && data.cohort !== '') record.cohort = data.cohort;
   if (Array.isArray(data.report_alt) && data.report_alt.every((x: unknown) => typeof x === 'string')) record.reportAlt = data.report_alt as string[];
   if (typeof data.agent_cli_version === 'string') record.agentCliVersion = data.agent_cli_version;

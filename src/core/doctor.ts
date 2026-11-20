@@ -1,3 +1,4 @@
+import { quotaWarnings } from './chat-quotas.ts';
 import { watchSnapshotTime, watchSnapshotWarning } from './watch-snapshot.ts';
 import { performance } from 'node:perf_hooks';
 import { cachedRequest } from './response-budget.ts';
@@ -155,6 +156,7 @@ export async function runDoctor(
     for (const check of adapter.doctor(detection, env, config)) add(check.name, check.level, check.text);
   }
 
+  if (config) for (const warning of quotaWarnings(config)) add('quotas', 'warn', warning);
   for (const warning of config?.warnings ?? []) add('providers', 'warn', warning);
 
   const gh = await runner.exec('gh', ['--version'], { readOnly: true });

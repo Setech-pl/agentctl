@@ -19,6 +19,8 @@ claude.ai chats share one MCP client name: `as: "chat:<name>"` is mandatory on `
 
 Czaty claude.ai mają wspólną nazwę klienta MCP: w `events_since` i WALL trzeba podawać `as: "chat:<name>"`. Nieznany czat widzi tylko `agentctl` z ostrzeżeniem. Własne wpisy mają `(yours)`, a znane czaty zawsze widzą otwartą skrzynkę niezależnie od kursora i kohorty.
 
+For every `new` or `queue` preview and confirm, pass `as: "chat:<name>"` so the order uses the correct chat quota. `limits` and `capacity` expose provider and chat counts. With quotas enabled, `set_limits` accepts `quota: {chat: nc, claude: 4}` and `overprovision: 1.5`. Owner changes use `as: "chat:agentctl"`. Self-service is configurable per instance. See the [quota configuration](en/configuration.md#chat-quotas).
+
 ## Read tools
 
 These always work. `status` (also capacity/cohort), `queue_list`, `capacity`, `limits`, `config_show` and non-deep `doctor` use an atomic watch snapshot younger than two ticks, with its age; an unavailable/stale snapshot uses the bounded fallback and says so. `new`/`queue` previews run cheap checks only: base, overlap, worktrees, capacity and disk are checked by watch at accept, with errors in events. `gc`/`gc_preview` can return Accepted while watch prepares the protected plan; read `gc_preview` with the returned `request_id`, then preview `gc` again to obtain its confirmation token. Snapshot doctor observes config, permissions, disk and task state; provider/version probes stay with CLI doctor. WALL confirms append directly and return their id without waiting for watch.
@@ -279,7 +281,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 | `events_since` | read | `as?`, `cursor?`, `limit?`, `client?`, `since?`, `cohort?`, `peek?`, `format?`, `detail?` |
 | `gc_preview` | read | `as?`, `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `request_id?`, `detail?`, `offset?`, `limit?`, `older_than?`, `merged?`, `cohort?` |
 | `limits` | read | `as?`, `format?`, `detail?` |
-| `set_limits` | write | `as?`, `claude?`, `codex?`, `queue_hold?`, `hold?`, `confirm?`, `preview_token?` |
+| `set_limits` | write | `as?`, `quota?`, `overprovision?`, `claude?`, `codex?`, `queue_hold?`, `hold?`, `confirm?`, `preview_token?` |
 | `reserve` | write | `as?`, `claude?`, `codex?`, `note?`, `release?`, `confirm?`, `preview_token?` |
 | `version` | read | `as?` |
 | `peek` | read | `as?`, `task`, `lines?` |

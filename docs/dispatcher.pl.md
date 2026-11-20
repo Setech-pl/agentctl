@@ -52,6 +52,8 @@ Wprowadź zmianę API, sprawdź kryteria odbioru i zapisz raport.
 - `remote_control`: Claude Remote Control, gdy wspierany i upoważniony; nie omija pytań o uprawnienia.
 - Pola dziedziczone: `links` (symlinki from/to), `env`, `worktree_root`, `defaults`, `setup`. Polecenia setup trzymaj w zaufanej konfiguracji projektu; MCP odrzuca setup przysłany w specu. `guide:` w `.agentctl.yaml` wskazuje nakładkę względną do repo albo zaczynającą się od `~`. Brak pliku daje ostrzeżenie, nie blokuje zlecenia.
 
+Przy zlecaniu przez MCP zawsze podawaj `as: "chat:<nazwa>"` w `new` i `queue`. Potwierdzaj z tą samą tożsamością. Miejsca globalne i kwoty czatów sprawdzaj w `limits` lub `capacity`, a powód oczekiwania w `queue_list`. Zmianę wykraczającą poza samoobsługę zgłoś właścicielowi jako wpis WALL `decision-request` na kanale `agentctl`.
+
 ## Cykl pracy
 
 `new` uruchamia od razu, `queue` czeka na sloty lub raporty. Grupuj zadania w kohorty i sprawdzaj `cohort list/show`, pozycję oraz warunki startu. Kolejką zarządzają `queue pause/resume/up/retry/rm`. Anulowana zależność daje `blocked`: świadomie wykonaj `unblock` (ewentualnie `--drop-after TASK`) lub anuluj potomków. MCP `resume` wznawia zadania; `unblock` usuwa zależność w kolejce, a `queue_retry` ponawia nieudany start.

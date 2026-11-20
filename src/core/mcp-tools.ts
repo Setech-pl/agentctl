@@ -1,3 +1,4 @@
+import { chatOwner, quotaWarnings } from './chat-quotas.ts';
 import { planRemoteGc } from './host-gc.ts';
 import { refreshDiskFreeSpace, taskDiskStartHold, worktreeCostEstimates } from './disk.ts';
 import { watchSnapshotPath, watchSnapshotTime, watchSnapshotWarning } from './watch-snapshot.ts';
@@ -98,14 +99,14 @@ import { collectUsage } from './usage-report.ts';
 import { planResume, resumeTasks } from './resume.ts';
 import { planGc, renderGc, gcView } from './gc.ts';
 import { collectEvents, renderEvents } from './chat-events.ts';
-import { applySetLimits, collectLimits, holdText, parseHoldInput, planSetLimits, readReservations, releasePlaces, reservePlaces } from './limits.ts';
+import { QUOTA_DECISION_HINT, applySetLimits, collectLimits, compactLimits, holdText, parseHoldInput, planSetLimits, readReservations, releasePlaces, reservePlaces } from './limits.ts';
 import type { LimitAssignments } from './limits.ts';
 import { planLine } from './usage-report.ts';
 import { openReader, readPlans } from './usage.ts';
 import { AGENT_NAMES } from './config.ts';
 import { wallAge, findMessage, MAX_BODY_BYTES, MAX_NOTE_CHARS, MAX_REF_CHARS, MAX_REFS, MAX_SUBJECT_CHARS, OWNER_KINDS, planPost, planStatus, postMessage, readThread, readWall, renderRead, renderThread, setStatus, subscribedChannels, readableChannels, WALL_KINDS, WALL_STATUSES, wallIdentity } from './wall.ts';
 import type { PostInput, WallIdentity, WallKind, WallMessage, WallStatus } from './wall.ts';
-import { AgentctlError, cohortKey, errorMessage, formatLocalTime, plural, resolvePath } from './util.ts';
+import { AgentctlError, cohortKey, errorMessage, formatLocalTime, isObject, plural, resolvePath } from './util.ts';
 
 /*
  * The tools of `agentctl mcp`. This file is data and functions only: the MCP SDK front (src/mcp/server.ts) registers them.
@@ -227,7 +228,7 @@ export function reportSummary(text: string): string {
 }
 
 function compactStatus(r: StatusRow): string {
-  return `${r.task} ${r.agent}/${r.model}/${r.effort} ${r.state} ${r.duration} cohort=${r.cohort ?? 'n/d'} report=${r.report === 'yes' ? 'yes' : r.reportCandidate ? 'candidate' : 'no'} decisions=${r.outputs_pending ? 'oczekuje' : r.decisionsCount ?? 0} actions=${r.outputs_pending ? 'oczekuje' : r.actionsCount ?? 0}${r.reviewOf ? ` review_of=${r.reviewOf} (decyzje i akcje: przegląd ${r.reviewOf})` : ''}${r.promptQueue?.length ? ` messages=${r.promptQueue.length} (${r.promptDelivery ?? 'queued'})` : ''}${r.collide.length ? ` ⚠${r.collide.length}` : ''}${r.question ? ` ? ${r.question}` : ''}${r.state === 'needs-attention' ? `; ${r.hint}` : ''}${!r.reportConfirmed && r.reportSource && path.normalize(r.reportSource) !== path.normalize(r.reportPath) ? `; raport pochodzi z kopii ${r.reportSource} – sprawdź` : ''} pulled=${Boolean(r.pulled)}${r.pin ? ' 📌' : ''}${r.state === 'limited' && r.usage_hint ? `; ${r.usage_hint}${r.usage_reset_at ? `; reset ${formatLocalTime(r.usage_reset_at)}` : ''}` : ''}`;
+  return `${r.task}${r.owner ? ` (${r.owner})` : ''} ${r.agent}/${r.model}/${r.effort} ${r.state} ${r.duration} cohort=${r.cohort ?? 'n/d'} report=${r.report === 'yes' ? 'yes' : r.reportCandidate ? 'candidate' : 'no'} decisions=${r.outputs_pending ? 'oczekuje' : r.decisionsCount ?? 0} actions=${r.outputs_pending ? 'oczekuje' : r.actionsCount ?? 0}${r.reviewOf ? ` review_of=${r.reviewOf} (decyzje i akcje: przegląd ${r.reviewOf})` : ''}${r.promptQueue?.length ? ` messages=${r.promptQueue.length} (${r.promptDelivery ?? 'queued'})` : ''}${r.collide.length ? ` ⚠${r.collide.length}` : ''}${r.question ? ` ? ${r.question}` : ''}${r.state === 'needs-attention' ? `; ${r.hint}` : ''}${!r.reportConfirmed && r.reportSource && path.normalize(r.reportSource) !== path.normalize(r.reportPath) ? `; raport pochodzi z kopii ${r.reportSource} – sprawdź` : ''} pulled=${Boolean(r.pulled)}${r.pin ? ' 📌' : ''}${r.state === 'limited' && r.usage_hint ? `; ${r.usage_hint}${r.usage_reset_at ? `; reset ${formatLocalTime(r.usage_reset_at)}` : ''}` : ''}`;
 }
 
 /** Keep report facts once, without echoing checks or the outputs block. A review's verdict is the first line of its report (P70), with the outputs verdict alongside when they disagree. */
@@ -322,6 +323,7 @@ function statusRowForChat(r: StatusRow): Record<string, unknown> {
     question: r.question,
     hint: r.hint,
     cohort: r.cohort,
+    ...(r.owner ? {owner: r.owner} : {}),
     collisions: r.collide.length,
     collidesWith: r.collide,
     usage_hint: r.usage_hint ?? null,
@@ -359,7 +361,7 @@ async function runStatus(deps: McpDeps, args: { all?: boolean | undefined; cohor
   if (cohort !== undefined) extra.push(`Cohort ${cohort}: only its tasks are listed.`);
   const views = (await queueViews(ctx)).filter((v) => cohort === undefined || cohortEntries([v.entry], cohort).length > 0);
   if (views.length > 0) {
-    extra.push(`Queue (${views.length}): ${views.map((v) => `${v.entry.task} – ${v.condition.text}`).join('; ')}. queue_list has the detail.`);
+    extra.push(`Queue (${views.length}): ${views.map((v) => `${v.entry.task}${v.entry.owner ? ` (${v.entry.owner})` : ''} – ${v.condition.text}`).join('; ')}. queue_list has the detail.`);
   }
   extra.push(...serverLines(deps, ctx));
   const colliding = shown.filter((r) => r.collide.length > 0);
@@ -370,7 +372,7 @@ async function runStatus(deps: McpDeps, args: { all?: boolean | undefined; cohor
   const disk = await collectDisk(ctx);
   extra.push(diskLine(disk));
   const state = (view: typeof views[number]) => view.condition.kind === 'blocked' && !view.condition.blockers ? 'blocked' : view.entry.status === 'queued' ? 'registered' : view.entry.status;
-  return { text: [statusLine(shown, rows.length - shown.length), ...extra, ...shown.filter(r => !pulledOpen(r)).map(compactStatus), ...pulledSummary(shown), ...shown.filter(pulledOpen).map(compactStatus)].join('\n'), data: { disk, tasks: [...shown.map(row => { const view = views.find(v => v.entry.task === row.task); return { ...statusRowForChat(row), ...(view ? { state: state(view) } : {}) }; }), ...views.filter(v => !shown.some(r => r.task === v.entry.task)).map(v => ({ task: v.entry.task, agent: v.entry.agent, state: state(v), startCondition: v.condition.text }))] } };
+  return { text: [statusLine(shown, rows.length - shown.length), ...extra, ...shown.filter(r => !pulledOpen(r)).map(compactStatus), ...pulledSummary(shown), ...shown.filter(pulledOpen).map(compactStatus)].join('\n'), data: { disk, tasks: [...shown.map(row => { const view = views.find(v => v.entry.task === row.task); return { ...statusRowForChat(row), ...(view ? { state: state(view) } : {}) }; }), ...views.filter(v => !shown.some(r => r.task === v.entry.task)).map(v => ({ task: v.entry.task, ...(v.entry.owner ? {owner: v.entry.owner} : {}), agent: v.entry.agent, state: state(v), startCondition: v.condition.text }))] } };
 }
 
 /** "Away: on since …; the phone gets the notifications" - what the chat should know about the phone. */
@@ -495,7 +497,16 @@ const holdValueArg = z.union([z.number().int().min(1).max(100), z.string().regex
 const queueHoldArg = z.union([holdValueArg, z.object(Object.fromEntries(PROVIDER_IDS.map((id) => [id, holdValueArg.optional()]))).strict()]).optional()
   .describe('usage.queue_hold: 90 (every active provider), "off" (no hold), or per provider {claude: 90, codex: "off"}. A whole percentage 1-100 of the plan, any window. Omit to leave it.');
 
-async function runSetLimits(deps: McpDeps, args: Partial<Record<AgentName, number | string>> & { queue_hold?: unknown; hold?: unknown; confirm?: boolean | undefined }): Promise<ToolResult> {
+interface SetLimitsArgs extends Partial<Record<AgentName, number | string>> {
+  as?: string;
+  queue_hold?: unknown;
+  hold?: unknown;
+  quota?: unknown;
+  overprovision?: number;
+  confirm?: boolean;
+}
+
+async function runSetLimits(deps: McpDeps, args: SetLimitsArgs): Promise<ToolResult> {
   return writeTool(deps, 'set_limits', { detail: `${PROVIDER_IDS.map(id => `${id}=${args[id] ?? '-'}`).join(' ')}${args.queue_hold !== undefined ? ` queue_hold=${JSON.stringify(args.queue_hold)}` : ''} confirm=${Boolean(args.confirm)}` }, async (ctx) => {
     const assignments: LimitAssignments = {};
     for (const agent of activeProviders(ctx.config)) if (args[agent] !== undefined) {
@@ -503,12 +514,32 @@ async function runSetLimits(deps: McpDeps, args: Partial<Record<AgentName, numbe
       assignments[agent] = value === 0 ? null : value;
     }
     const hold = args.queue_hold === undefined ? undefined : parseHoldInput(args.queue_hold, activeProviders(ctx.config));
-    if (Object.keys(assignments).length === 0 && hold === undefined && args.hold === undefined) throw new AgentctlError(`give ${activeProviders(ctx.config).join(' and/or ')}, or queue_hold`,  '0 removes a limit, "off" disables the provider; queue_hold: 90, "off" or {codex: 90}.');
-    const plan = planSetLimits(ctx.config, assignments, hold, args.hold, ctx.runner.now());
+    const quotaEdit = args.quota !== undefined || args.overprovision !== undefined;
+    if (Object.keys(assignments).length === 0 && hold === undefined && args.hold === undefined && !quotaEdit) throw new AgentctlError(`give ${activeProviders(ctx.config).join(' and/or ')}, or queue_hold`,  '0 removes a limit, "off" disables the provider; queue_hold: 90, "off" or {codex: 90}.');
+    const declared = wallIdentity(ctx.config, {as: args.as, client: deps.clientId});
+    const mapped = wallIdentity(ctx.config, {client: deps.clientId});
+    const bindings = declared.kind === 'chat' && Object.hasOwn(ctx.config.wall.chats, declared.id.slice(5))
+      ? ctx.config.wall.chats[declared.id.slice(5)]?.clients ?? [] : [];
+    if (declared.id !== mapped.id && (mapped.kind === 'chat' || bindings.length > 0)) {
+      throw new AgentctlError('Caller does not match its configured WALL identity', QUOTA_DECISION_HINT);
+    }
+    const owner = declared.id === 'chat:agentctl';
+    const legacy = !ctx.config.quotas && !quotaEdit && declared.kind === 'unknown' && !args.as && !ctx.config.wall.chats.agentctl?.clients.length;
+    let self: string | undefined;
+    if (!owner && !legacy) {
+      const global = Object.keys(assignments).length || hold !== undefined || args.hold !== undefined || args.overprovision !== undefined;
+      const ownQuota = isObject(args.quota) && chatOwner(args.quota.chat) === declared.id;
+      if (global || declared.kind !== 'chat' || !ownQuota || ctx.config.quotas?.self_service !== 'within_overprovision') {
+        throw new AgentctlError('This limits change requires chat:agentctl or the owner CLI', QUOTA_DECISION_HINT);
+      }
+      self = declared.id;
+    }
+    const plan = planSetLimits(ctx.config, assignments, hold, args.hold, ctx.runner.now(), quotaEdit ? {quota: args.quota, overprovision: args.overprovision, self} : undefined);
     if (!args.confirm) return { text: `${plan.summary.join('\n')}\n\nNot changed yet. Show this to the user and ask; if they agree, call set_limits again with the same arguments and confirm: true.`, executed: false, announce: '' };
     await applySetLimits(ctx, plan);
     const changed = [...plan.changes.map((c) => `${c.agent} ${c.from ?? '-'} -> ${c.to ?? '-'}`), ...plan.holdChanges.filter((c) => c.from !== c.to).map((c) => `queue_hold ${c.agent} ${holdText(c.from)} -> ${holdText(c.to)}`)];
     const announce = [...(plan.changes.length ? [`limity ${activeProviders(ctx.config).map(id => `${id}=${plan.changes.some(c => c.agent === id) ? plan.changes.find(c => c.agent === id)!.to ?? 'brak' : ctx.config.limits[id] ?? 'brak'}`).join(' ')}`] : []), ...(hold !== undefined ? [`queue_hold ${plan.holdChanges.map((c) => `${c.agent}=${holdText(c.to)}`).join(' ')}`] : [])].join('; ');
+    if (quotaEdit) return { text: `${plan.summary.join('\n')}\nLimits and quotas take effect on the next watch tick.`, executed: true, announce: plan.quotaChange ? 'zmieniono kwoty' : announce };
     return { text: `${plan.timedHolds ? plan.summary.join('\n') + '\n' : ''}${plan.changes.length ? 'Limits changed' : 'Queue hold changed'} (${changed.join(', ') || 'nothing new'}). They are in force now: a running watch picks the file up and starts waiting tasks at its next tick${hold !== undefined ? '; the queue hold counts from that tick, without a restart' : ''}.`, executed: true, announce };
   });
 }
@@ -592,6 +623,7 @@ async function runQueueList(deps: McpDeps, args: { cohort?: string | undefined }
     queuedLocal: formatLocalTime(v.entry.queuedAt),
     error: v.entry.error ?? null,
     cohort: v.entry.cohort ?? null,
+    ...(v.entry.owner ? {owner: v.entry.owner} : {}),
     direct: v.entry.direct ?? false,
     setup: v.entry.status === 'starting' ? readSetupProgress(ctx.config, v.entry.task, queueDiagnosticSources(readQueue(ctx.config))) ?? null : null,
     retryHint: v.entry.status === 'failed' ? `Read error, inspect residue, then queue_retry task=${v.entry.task}` : null,
@@ -1055,12 +1087,12 @@ async function runMove(deps: McpDeps, args: { task: string; agent?: AgentName | 
 const chatSetup = (header: Record<string, unknown>): boolean => 'setup' in header || (Array.isArray(header.repos) && header.repos.some((r) => typeof r === 'object' && r !== null && 'setup' in r));
 
 /** What a preview planned, as the accepted entries record it (P93); without the preview's plan the spec as written. */
-function acceptedOrders(ctx: Context, raws: RawSpec[], planned: AcceptedOrder[] | undefined): AcceptedOrder[] {
+function acceptedOrders(ctx: Context, raws: RawSpec[], planned: AcceptedOrder[] | undefined, owner?: string): AcceptedOrder[] {
   if (planned && planned.length === raws.length && planned.every((o, i) => o.task === String(raws[i]!.header.task ?? ''))) return planned;
-  return raws.map((raw) => plannedOrder(resolveSpec(raw, { config: ctx.config })));
+  return raws.map((raw) => plannedOrder({ ...resolveSpec(raw, { config: ctx.config }), ...(owner ? {owner} : {}) }));
 }
 export function plannedOrder(s: ResolvedSpec): AcceptedOrder {
-  return { task: s.task, agent: s.agent, model: s.model, effort: s.effort, priority: s.priority, after: s.after, ...(s.afterVerdicts ? { afterVerdicts: s.afterVerdicts } : {}), ...(s.reviewOf ? { reviewOf: s.reviewOf } : {}), ...(s.cohort ? { cohort: s.cohort } : {}) };
+  return { task: s.task, ...(s.owner ? {owner: s.owner} : {}), agent: s.agent, model: s.model, effort: s.effort, priority: s.priority, after: s.after, ...(s.afterVerdicts ? { afterVerdicts: s.afterVerdicts } : {}), ...(s.reviewOf ? { reviewOf: s.reviewOf } : {}), ...(s.cohort ? { cohort: s.cohort } : {}) };
 }
 
 /** Preview metadata that is already in the spec/config, with no runtime census. */
@@ -1078,7 +1110,19 @@ function cheapSpecSummary(ctx: Context, specs: ResolvedSpec[], queued: boolean):
   ])];
 }
 
-interface NewMcpArgs { _confirmation?: QueueConfirmation; /** The preview's plan (wrapper): the preview plans once; the confirm records it. */ _specs?: ResolvedSpec[]; _planned?: AcceptedOrder[]; spec?: string | undefined; confirm?: boolean | undefined; agent?: AgentName | undefined; reuse?: boolean | undefined; no_agent?: boolean | undefined; cohort?: string | undefined; wait_trust?: boolean | undefined }
+function orderOwner(config: GlobalConfig, as?: string, client?: string): string | undefined {
+  const name = as?.trim();
+  if (name?.startsWith('chat:')) {
+    const owner = chatOwner(name);
+    const chat = owner?.slice(5) ?? '';
+    if (owner && (Object.hasOwn(config.wall.chats, chat) || Object.hasOwn(config.quotas?.chats ?? {}, chat))) return owner;
+    if (config.quotas) throw new AgentctlError(`Unknown chat identity "${name}"`, 'Use an identity from wall.chats or quotas.chats.');
+  }
+  const mapped = wallIdentity(config, {client});
+  return mapped.kind === 'chat' ? mapped.id : undefined;
+}
+
+interface NewMcpArgs { as?: string; _confirmation?: QueueConfirmation; /** The preview's plan (wrapper): the preview plans once; the confirm records it. */ _specs?: ResolvedSpec[]; _planned?: AcceptedOrder[]; spec?: string | undefined; confirm?: boolean | undefined; agent?: AgentName | undefined; reuse?: boolean | undefined; no_agent?: boolean | undefined; cohort?: string | undefined; wait_trust?: boolean | undefined }
 async function runNew(deps: McpDeps, args: NewMcpArgs): Promise<ToolResult> {
   const probe = (): { tasks: string } => {
     // Only for the audit line: the task IDs named in the spec, without resolving anything.
@@ -1107,7 +1151,7 @@ async function runNew(deps: McpDeps, args: NewMcpArgs): Promise<ToolResult> {
           'Nothing was started. Start the watcher ("agentctl watch --tmux" in a terminal, or from the board), then call new again with a fresh preview. A start from the terminal ("agentctl new") runs in place.',
         );
       }
-      const { added, existing } = await acceptSpecs(ctx, raws, acceptedOrders(ctx, raws, args._planned), { direct: { noAgent: Boolean(args.no_agent) }, reuse: Boolean(args.reuse), ...(args._confirmation ? { confirmation: args._confirmation } : {}), ...(args.agent ? { agent: args.agent } : {}) });
+      const { added, existing } = await acceptSpecs(ctx, raws, acceptedOrders(ctx, raws, args._planned, orderOwner(ctx.config, args.as, deps.clientId)), { direct: { noAgent: Boolean(args.no_agent) }, reuse: Boolean(args.reuse), ...(args._confirmation ? { confirmation: args._confirmation } : {}), ...(args.agent ? { agent: args.agent } : {}) });
       if (existing.length > 0) return { text: existing.map((e) => directStartText(ctx.config, e, ctx.runner.now())).join('\n'), executed: false, announce: '' };
       return {
         text: `Registered: ${added.map((e) => `${e.task} (${e.agent} ${e.model}/${e.effort})`).join('; ')} – starting. The ${args.no_agent ? 'worktrees are prepared' : 'task starts'} in the watcher, not in this call: at its next tick (about ${ctx.config.watch.interval} s) it validates the spec, then the checkout, any setup${args.no_agent ? '' : ' and the window'} run there and survive a restart of this server or of the app. ` +
@@ -1136,7 +1180,7 @@ async function runNew(deps: McpDeps, args: NewMcpArgs): Promise<ToolResult> {
   });
 }
 
-async function runQueue(deps: McpDeps, args: { replace?: boolean; _confirmation?: QueueConfirmation; _specs?: ResolvedSpec[]; _planned?: AcceptedOrder[]; spec?: string | undefined; agent?: AgentName | undefined; cohort?: string | undefined; confirm?: boolean | undefined }): Promise<ToolResult> {
+async function runQueue(deps: McpDeps, args: { as?: string; replace?: boolean; _confirmation?: QueueConfirmation; _specs?: ResolvedSpec[]; _planned?: AcceptedOrder[]; spec?: string | undefined; agent?: AgentName | undefined; cohort?: string | undefined; confirm?: boolean | undefined }): Promise<ToolResult> {
   let tasks = '?';
   try {
     tasks = splitSpecs(args.spec ?? '', 'mcp').map((s) => String(s.header.task ?? '?')).join(', ');
@@ -1152,7 +1196,8 @@ async function runQueue(deps: McpDeps, args: { replace?: boolean; _confirmation?
         throw new AgentctlError(`${String(raw.header.task ?? 'a task')}: "setup" runs shell commands and is not accepted from the chat`, 'Put setup commands in the .agentctl.yaml of the repository, or queue the task from the terminal.');
       }
     }
-    const opts = { ...(args.agent ? { agent: args.agent } : {}), replace: args.replace };
+    const owner = orderOwner(ctx.config, args.as, deps.clientId);
+    const opts = { owner, ...(args.agent ? { agent: args.agent } : {}), replace: args.replace };
     if (args.confirm && args.replace) {
       if (!deps.applying) throw new AgentctlError('replace: true requires a running watcher');
       return withStartLock(ctx, async () => {
@@ -1169,7 +1214,7 @@ async function runQueue(deps: McpDeps, args: { replace?: boolean; _confirmation?
     if (args.confirm) {
       // P93: durable registration is the response boundary. The confirm records the accepted specs and answers; the watcher validates them at its
       // next tick (git, tmux and the task records are its work), then they wait in the line; a refused spec fails with its reason and an event.
-      const { added } = await acceptSpecs(ctx, raws, acceptedOrders(ctx, raws, args._planned), { ...opts, ...(args._confirmation ? { confirmation: args._confirmation } : {}) });
+      const { added } = await acceptSpecs(ctx, raws, acceptedOrders(ctx, raws, args._planned, owner), { ...opts, ...(args._confirmation ? { confirmation: args._confirmation } : {}) });
       return {
         text: `Queued: ${added.map((e) => e.task).join(', ')} (accepted). The watcher validates the spec${added.length > 1 ? 's' : ''} at its next tick (about ${ctx.config.watch.interval} s) and then they start by themselves while "agentctl watch" runs, when a window of their provider is free. queue_list shows "${ACCEPTED_TEXT}" until then; a spec it refuses shows as failed there with its reason and an event.`,
         executed: true,
@@ -1286,10 +1331,10 @@ export const MCP_TOOLS: McpToolDef[] = [
       'WRITE, off unless the user put "set_limits" in mcp.allow. Sets the most simultaneous agents per provider in config.yaml (0 removes a limit, "off" disables the provider: no windows of it start), and the queue hold usage.queue_hold; comments in the file stay, a copy is kept as config.yaml.bak. It takes effect at once, without restarting watch (watch reloads config.yaml when it changes, also after a hand edit). ' +
       'Timed provider hold: hold: {glm: "21:50"}, ISO timestamp, duration "3h", or "off"; every active provider is supported. Holds block starts even with plan n/d, appear in limits/capacity/board/queue_list and expire with an event. ' +
       `queue_hold format, exactly: a whole percentage 1-100 for every active provider (queue_hold: 90), "off" for no hold at all (queue_hold: "off"), or per provider {claude: 90, codex: "off"} (only the named providers change; "off" removes that provider's hold). Above that percentage of its plan, in any window, the queue starts no task of the provider; queue_list shows "wstrzymane: … > usage.queue_hold N%"; limits, capacity and config_show show the current hold. ` +
-      'The FIRST call (confirm omitted) only describes the change; show it to the user, then call again with confirm: true.',
-    input: { ...perProvider(DEFAULT_PROVIDERS, id => setLimitArg.describe(`New limit for ${provider(id).displayName}; 0 = no limit, "off" = disabled. Omit to leave it.`)), queue_hold: queueHoldArg, hold: z.record(z.string(), z.string()).optional().describe('Timed provider hold: {glm: "21:50"}, ISO timestamp, "3h", or "off". Applies to every active provider.'), confirm: z.boolean().optional().describe('true only after the user agreed to the described change.') },
+      'Use as: "chat:agentctl" for owner changes. quota: {chat: "nc", claude: 4} sets ceilings; overprovision sets the share budget multiplier. A chat may edit its own share with quotas.self_service enabled. The FIRST call (confirm omitted) only describes the change; show it to the user, then call again with confirm: true.',
+    input: { as: wallAsArg, quota: z.object({chat: z.string().min(1).max(60), ...perProvider(PROVIDER_IDS, () => z.number().int().min(0).optional())}).strict().optional(), overprovision: z.number().min(1).optional(), ...perProvider(DEFAULT_PROVIDERS, id => setLimitArg.describe(`New limit for ${provider(id).displayName}; 0 = no limit, "off" = disabled. Omit to leave it.`)), queue_hold: queueHoldArg, hold: z.record(z.string(), z.string()).optional().describe('Timed provider hold: {glm: "21:50"}, ISO timestamp, "3h", or "off". Applies to every active provider.'), confirm: z.boolean().optional().describe('true only after the user agreed to the described change.') },
     annotations: { title: 'Change the limits', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    run: (deps, args) => guarded(() => runSetLimits(deps, args as { claude?: number; codex?: number; queue_hold?: unknown; confirm?: boolean })),
+    run: (deps, args) => guarded(() => runSetLimits(deps, args as SetLimitsArgs)),
   }),
   def({
     name: 'reserve',
@@ -1507,10 +1552,10 @@ export const MCP_TOOLS: McpToolDef[] = [
     title: 'Start tasks from a spec',
     kind: 'write',
     description:
-      'WRITE, off unless the user put "new" in mcp.allow. Starts agent tasks from a spec: a YAML header between --- lines (task, agent, model, effort, repos …) followed by the prompt, the same format as the agentctl CLI. ' +
+      'Always pass as: "chat:<name>" to attribute the order to your chat. WRITE, off unless the user put "new" in mcp.allow. Starts agent tasks from a spec: a YAML header between --- lines (task, agent, model, effort, repos …) followed by the prompt, the same format as the agentctl CLI. ' +
       'The FIRST call (confirm omitted) validates the spec and returns a summary of what would start; show it to the user. Only when they agree, call again with the same spec and confirm: true. ' +
       '"setup" commands (shell) are not accepted from the chat. Every start is asynchronous: confirm registers it and returns at once, and the watcher (it must be running, else the confirm is refused) does the checkout, the setup, the window and the wait for the agent; follow it with events_since (SETUP, START, BŁĄD STARTU) and status or queue_list. new again for a task that is being started returns its state and starts nothing twice; a failed start leaves the task failed with its reason and the worktrees, and queue_retry tries again.',
-    input: { spec: z.string().min(1).max(100_000).optional().describe('The spec text: ---, YAML header, ---, prompt. Several specs may follow each other. Optional only when confirming with preview_token: the stored spec then executes.'), agent: z.enum(DEFAULT_PROVIDERS).optional(), reuse: z.boolean().optional(), no_agent: z.boolean().optional(), cohort: cohortArg.optional(), wait_trust: z.boolean().optional().describe('Ignored: every start is asynchronous and the watcher always waits for a human to answer the trust dialog.'), confirm: z.boolean().optional().describe('true only after the user agreed to the summary.') },
+    input: { as: wallAsArg, spec: z.string().min(1).max(100_000).optional().describe('The spec text: ---, YAML header, ---, prompt. Several specs may follow each other. Optional only when confirming with preview_token: the stored spec then executes.'), agent: z.enum(DEFAULT_PROVIDERS).optional(), reuse: z.boolean().optional(), no_agent: z.boolean().optional(), cohort: cohortArg.optional(), wait_trust: z.boolean().optional().describe('Ignored: every start is asynchronous and the watcher always waits for a human to answer the trust dialog.'), confirm: z.boolean().optional().describe('true only after the user agreed to the summary.') },
     annotations: { title: 'Start tasks from a spec', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     run: (deps, args) => guarded(() => runNew(deps, args as NewMcpArgs)),
   }),
@@ -1519,9 +1564,10 @@ export const MCP_TOOLS: McpToolDef[] = [
     title: 'Put tasks in the queue',
     kind: 'write',
     description:
-      'WRITE, off unless the user put "queue" in mcp.allow. Puts the tasks of a spec in the queue (same spec format as new, plus priority: high|normal, after: <TASK or list>, touches: [globs]): each starts when a provider window is free and its `after` reports have an accepted first-line verdict (PASS, PASS with findings, PARTIAL, GO); after_verdict overrides the list. ' +
+      'Always pass as: "chat:<name>" to attribute the order to your chat. WRITE, off unless the user put "queue" in mcp.allow. Puts the tasks of a spec in the queue (same spec format as new, plus priority: high|normal, after: <TASK or list>, touches: [globs]): each starts when a provider window is free and its `after` reports have an accepted first-line verdict (PASS, PASS with findings, PARTIAL, GO); after_verdict overrides the list. ' +
       'The FIRST call (confirm omitted) validates the spec and returns a summary (where each task will stand, hints, touches warnings); show it to the user. Only when they agree, call again with the same spec and confirm: true. "setup" is not accepted from the chat. replace: true replaces a waiting entry in one watch step; previews identify pending queue_rm requests.',
     input: {
+      as: wallAsArg,
       spec: z.string().min(1).max(100_000).optional().describe('The spec text: ---, YAML header, ---, prompt. Several specs may follow each other. Optional only when confirming with preview_token: the stored spec then executes.'),
       cohort: cohortArg.optional(),
       replace: z.boolean().optional().describe('Remove a waiting entry and re-add this spec atomically in one watch step; also works while queue_rm is pending.'),
@@ -1635,7 +1681,7 @@ MCP_TOOLS.push(
   extraRead('spec_example', 'spec example', 'Read an example spec before writing a new order', {}, async () => EXAMPLE_SPEC),
   extraRead('doctor', 'doctor', 'Diagnose the installation, permissions and disk', { project: optionalText }, async (ctx, a) => runDoctor(ctx.runner, () => ctx.config, a.project as string ?? null, undefined, undefined, undefined, undefined, { cachedOnly: true })),
   extraRead('equivalents', 'capacity', 'Read the equivalents table for active providers. Kimi effort medium is mapped to high with a warning (low/high/max supported)', {}, async (ctx) => ctx.config.equivalents),
-  extraRead('config_show', 'doctor', 'Read effective configuration with secrets masked; queue_hold (first) is usage.queue_hold per active provider', {}, async (ctx) => ({ queue_hold: Object.fromEntries(activeProviders(ctx.config).map((id) => [id, holdText(ctx.config.usage.queueHold[id])])), ...(redactConfig(ctx.config) as object) })),
+  extraRead('config_show', 'doctor', 'Read effective configuration with secrets masked; queue_hold (first) is usage.queue_hold per active provider', {}, async (ctx) => ({ queue_hold: Object.fromEntries(activeProviders(ctx.config).map((id) => [id, holdText(ctx.config.usage.queueHold[id])])), ...(ctx.config.quotas ? {quota_warnings: quotaWarnings(ctx.config)} : {}), ...(redactConfig(ctx.config) as object) })),
   extraRead('hosts', 'hosts', 'Read remote host health over SSH: per host the state (reachable / unreachable / auth-failed / host-key-*), latency, GPU (nvidia-smi, null when absent), free disk in work_dir, tmux, each provider CLI (present, version, best-effort logged in/out) and repo clones (HEAD, origin). Cached ~60s by "agentctl hosts"; refresh: true probes now. A spec with "host: <name>" starts the task remotely, with a local report mirror', { refresh: z.boolean().optional() }, async (ctx, a) => {
     if (Object.keys(ctx.config.hosts).length === 0) return { hosts: [], note: 'no hosts: section in the config' };
     const fresh = a.refresh ? undefined : readHostsCache(process.env, ctx.runner.now(), 60_000);
@@ -1881,7 +1927,7 @@ function confirmationTargets(name: string, scope: unknown): unknown {
 /** Exact arguments and observed task/queue/window identities bind confirmation to this session. No scope can silently grow. */
 async function confirmationScope(ctx: Context, name: string, args: Record<string, unknown>): Promise<unknown> {
   if (name === 'away') return {away: awayReport(ctx.config).on, on: args.on};
-  if (name === 'set_limits') return { limits: ctx.config.limits, queueHold: ctx.config.usage.queueHold, providerHolds: readProviderHoldState(ctx.config).holds };
+  if (name === 'set_limits') return { quotas: ctx.config.quotas, limits: ctx.config.limits, queueHold: ctx.config.usage.queueHold, providerHolds: readProviderHoldState(ctx.config).holds };
   if (name === 'reserve') return { reservations: readReservations(ctx.config) };
   if (name === 'queue_up' || name === 'queue_rm') {
     const entry = findEntry(ctx.config, args.task as string);
@@ -1933,7 +1979,8 @@ async function confirmationScope(ctx: Context, name: string, args: Record<string
     if (args.cohort) for (const raw of rawSpecs) raw.header.cohort = args.cohort;
     for (const raw of rawSpecs) if (chatSetup(raw.header)) throw new AgentctlError(`${String(raw.header.task ?? 'a task')}: \"setup\" runs shell commands and is not accepted from the chat`);
     const knownAuthors = new Map(readQueue(ctx.config).map(e => [e.task, {agent: e.agent, model: e.model}]));
-    const resolved = rawSpecs.map(raw => resolveSpec(raw, {config: ctx.config}));
+    const owner = orderOwner(ctx.config, typeof args.as === 'string' ? args.as : undefined);
+    const resolved = rawSpecs.map(raw => ({...resolveSpec(raw, {config: ctx.config}), ...(owner ? {owner} : {})}));
     for (const id of new Set(resolved.flatMap(s => s.reviewOfAll ?? (s.reviewOf ? [s.reviewOf] : [])))) {
       if (knownAuthors.has(id)) continue;
       const author = readTaskRecordById(ctx.config, id);
@@ -2208,7 +2255,7 @@ for (const tool of MCP_TOOLS.filter(t => ['answer', 'send'].includes(t.name))) {
  * A WALL caller without `as` whose MCP client name is a chat of wall.chats gets that identity as an explicit argument, so the preview, its
  * confirm and a watcher applying the request later all see the same author. A token-only confirm carries the stored arguments.
  */
-for (const tool of MCP_TOOLS.filter(t => t.name.startsWith('wall_'))) {
+for (const tool of MCP_TOOLS.filter(t => t.name.startsWith('wall_') || ['new', 'queue', 'set_limits'].includes(t.name))) {
   const run = tool.run;
   tool.run = (deps, args) => {
     const tokenOnly = Object.keys(args).every(k => k === 'confirm' || k === 'preview_token' || k === 'response_id' || k === 'response_offset');
@@ -2234,8 +2281,8 @@ for (const tool of MCP_TOOLS.filter(t => ['status', 'events_since', 'queue_list'
       const data = JSON.parse(raw);
       if (tool.name === 'cohort_show') return ok([data.cohort, ...data.tasks.map((r: Record<string, unknown>) => `${r.task} ${r.agent}/${r.model}/${r.effort} ${r.state} ${r.duration} cohort=${r.cohort ?? 'n/d'} report=${r.report} decisions=${r.decisions ?? 0} actions=${r.actions ?? 0}`), `outputs: ${JSON.stringify({ integrate: data.integrate, decisions: data.decisions, actions: data.actions, checks: data.checks, warnings: data.warnings })}`, ...data.queued.map((r: Record<string, unknown>) => `${r.task}: ${r.startCondition}`)].join('\n'));
       if (tool.name === 'capacity') return ok([diskLine(data.disk), ...snapshotLines(capacitySnapshot(data))].join('\n'));
-      if (tool.name === 'limits') return ok(data.providers.map((p: Record<string, unknown>) => `${p.agent}: used=${p.used} limit=${p.limit ?? 'n/d'} free=${p.free ?? 'n/d'} reserved=${p.reserved} queued=${p.queued} queue_hold=${holdText(p.queueHold as number | null)}${p.providerHold ? `; ${providerHoldText(String(p.agent), p.providerHold as import('./provider-hold.ts').ProviderHold)}` : ''}`).join('\n'));
-      if (Array.isArray(data)) return ok(data.map(r => `${r.task} ${r.agent}/${r.model}/${r.effort}: ${r.startCondition}`).join('\n') || 'The queue is empty.');
+      if (tool.name === 'limits') return ok(compactLimits(data));
+      if (Array.isArray(data)) return ok(data.map(r => `${r.task}${r.owner ? ` (${r.owner})` : ''} ${r.agent}/${r.model}/${r.effort}: ${r.startCondition}`).join('\n') || 'The queue is empty.');
       return ok(compactFacts(data));
     } catch { return ok(at >= 0 ? result.text.slice(0, at) : result.text); }
   };
@@ -2317,11 +2364,11 @@ const ageLine = (at: number, now: number): string => {
 function durableStatus(ctx: Context): string {
   const entries = readQueue(ctx.config);
   const latest = new Map<string, ReturnType<typeof readJournal>[number]>();
-  const states = new Set(['queue-start', 'needs-input', 'needs-trust', 'needs-attention', 'limited', 'overloaded', 'report-ready', 'dead', 'cancelled', 'queue-failed']);
+  const states = new Set(['task-start', 'queue-start', 'needs-input', 'needs-trust', 'needs-attention', 'limited', 'overloaded', 'report-ready', 'dead', 'cancelled', 'queue-failed']);
   for (const event of readJournal(ctx.config)) if (event.task && states.has(event.kind)) latest.set(event.task, event);
-  return [`Durable queue (${entries.length}; first 20):`, ...entries.slice(0, 20).map(e => `${e.task}: ${e.status === 'queued' ? 'registered' : e.status}`),
+  return [`Durable queue (${entries.length}; first 20):`, ...entries.slice(0, 20).map(e => `${e.task}${e.owner ? ` (${e.owner})` : ''}: ${e.status === 'queued' ? 'registered' : e.status}`),
     'Active tasks from journal/events (last known; no live window probe):',
-    ...[...latest.values()].filter(e => !['dead', 'cancelled', 'queue-failed'].includes(e.kind)).slice(-20).map(e => `${e.task}: ${e.kind} (${formatLocalTime(e.at)})`)].join('\n');
+    ...[...latest.values()].filter(e => !['dead', 'cancelled', 'queue-failed'].includes(e.kind)).slice(-20).map(e => `${e.task}${e.owner ? ` (${e.owner})` : ''}: ${e.kind} (${formatLocalTime(e.at)})`)].join('\n');
 }
 export async function publishMcpSnapshot(ctx: Context, rows?: StatusRow[], at?: number, signal?: AbortSignal): Promise<void> {
   if (ctx.runner.dryRun) return;
@@ -2340,7 +2387,7 @@ export async function publishMcpSnapshot(ctx: Context, rows?: StatusRow[], at?: 
     {name: 'MCP permissions', status: 'ok', detail: ctx.config.mcp.allow.join(', ') || 'writes off'},
     {name: 'task inventory', status: 'ok', detail: `${observed.length} records; per-task report/link checks skipped in snapshot mode`},
     {name: 'tools/providers', status: 'warn', detail: 'Version, registration and provider probes deferred; run CLI doctor for installation diagnostics. Watch never starts provider CLIs for this snapshot.'},
-    ...[...new Set([...(ctx.config.warnings ?? []), ...ctx.config.mcp.warnings])].map(detail => ({name: 'config warning', status: 'warn', detail})),
+    ...[...new Set([...(ctx.config.warnings ?? []), ...quotaWarnings(ctx.config), ...ctx.config.mcp.warnings])].map(detail => ({name: 'config warning', status: 'warn', detail})),
   ];
   for (const [name, dir] of [['cache', ctx.config.cache], ['state', ctx.config.stateDir]]) {
     try { fs.accessSync(dir!, fs.constants.W_OK); doctor.push({name: name!, status: 'ok', detail: dir!}); }
@@ -2410,11 +2457,11 @@ async function snapshotRead(ctx: Context, name: string, args: Record<string, unk
       const shown = rows.slice(offset, offset + limit);
       data = { tasks: [...shown.map(statusRowForChat), ...queue.filter((q: { task: string }) => !rows.some(r => r.task === q.task)).map((q: { task: string; status: string; startCondition: string }) => ({...q, state: q.status === 'queued' ? 'registered' : q.status}))], disk: snap.capacity.disk, ...(args.capacity || args.detail ? { capacity: capacitySnapshot(snap.capacity) } : {}) };
       const overlaps = shown.filter(r => r.collide.length > 0).length;
-      text = [statusLine(rows, allRows.length - rows.length), ...(overlaps ? [`⚠${overlaps} tasks overlap; overlap has details.`] : []), diskLine(snap.capacity.disk), ...providerHoldLines(ctx.config, ctx.runner.now()), ...peakLines(ctx.config, ctx.runner.now()), ...shown.filter(r => !pulledOpen(r)).map(compactStatus), ...pulledSummary(shown), ...shown.filter(pulledOpen).map(compactStatus), ...queue.map((q: {task: string; startCondition: string}) => `${q.task}: ${q.startCondition}`), ...(args.capacity ? snapshotLines(capacitySnapshot(snap.capacity)) : [])].join('\n');
+      text = [statusLine(rows, allRows.length - rows.length), ...(overlaps ? [`⚠${overlaps} tasks overlap; overlap has details.`] : []), diskLine(snap.capacity.disk), ...providerHoldLines(ctx.config, ctx.runner.now()), ...peakLines(ctx.config, ctx.runner.now()), ...shown.filter(r => !pulledOpen(r)).map(compactStatus), ...pulledSummary(shown), ...shown.filter(pulledOpen).map(compactStatus), ...queue.map((q: {task: string; owner?: string; startCondition: string}) => `${q.task}${q.owner ? ` (${q.owner})` : ''}: ${q.startCondition}`), ...(args.capacity ? snapshotLines(capacitySnapshot(snap.capacity)) : [])].join('\n');
     } else if (name === 'queue_list') {
-      data = queue; text = queue.map((q: {task: string; agent: string; model: string; effort: string; startCondition: string}) => `${q.task} ${q.agent}/${q.model}/${q.effort}: ${q.startCondition}`).join('\n') || 'The queue is empty.';
+      data = queue; text = queue.map((q: {task: string; agent: string; model: string; effort: string; owner?: string; startCondition: string}) => `${q.task}${q.owner ? ` (${q.owner})` : ''} ${q.agent}/${q.model}/${q.effort}: ${q.startCondition}`).join('\n') || 'The queue is empty.';
     } else if (name === 'capacity') { data = snap.capacity; text = [diskLine(snap.capacity.disk), ...snapshotLines(capacitySnapshot(snap.capacity))].join('\n'); }
-    else if (name === 'limits') { data = snap.limits; text = snap.limits.providers.map((p: {agent: string; used: number; limit: number; free: number; reserved: number; queued: number; queueHold: number | null; providerHold?: import('./provider-hold.ts').ProviderHold}) => `${p.agent}: used=${p.used} limit=${p.limit ?? 'n/d'} free=${p.free ?? 'n/d'} reserved=${p.reserved} queued=${p.queued} queue_hold=${holdText(p.queueHold)}${p.providerHold ? `; ${providerHoldText(p.agent, p.providerHold)}` : ''}`).join('\n'); }
+    else if (name === 'limits') { data = snap.limits; text = compactLimits(snap.limits); }
     else { data = snap[name === 'config_show' ? 'config' : 'doctor']; text = JSON.stringify(data, null, 2); }
     if (json || ['config_show', 'doctor'].includes(name)) return ok(JSON.stringify(Array.isArray(data) ? data.map(item => ({...item, snapshot_age_s: age / 1000})) : { snapshot_age_s: age / 1000, snapshot_age: ageLine(snap.at, ctx.runner.now()), ...(data as object) }, null, 2));
     return ok(`${note}\n${text}`);
@@ -2491,7 +2538,7 @@ for (const tool of MCP_TOOLS) {
     }, () => {
       const ctx = deps.context(() => {});
       const entries = readQueue(ctx.config);
-      const queue = `Durable queue (${entries.length}; first 20):\n` + entries.slice(0, 20).map(e => `${e.task}: ${e.status === 'queued' ? 'registered' : e.status}`).join('\n');
+      const queue = `Durable queue (${entries.length}; first 20):\n` + entries.slice(0, 20).map(e => `${e.task}${e.owner ? ` (${e.owner})` : ''}: ${e.status === 'queued' ? 'registered' : e.status}`).join('\n');
       const cached = saved.get(key);
       const stale = cached && ctx.runner.now() - cached.at > 300000;
       let inbox = '';
@@ -2516,10 +2563,10 @@ for (const tool of MCP_TOOLS) {
   };
 }
 
-/** Identity is accepted uniformly, and only WALL/events consume it. Irrelevant identity never changes confirmation hashes. */
+/** Identity is accepted uniformly. Tools that do not consume it keep it out of confirmation hashes. */
 for (const tool of MCP_TOOLS) {
   tool.input = {as: z.string().max(81).optional().describe('Caller identity for WALL/events; accepted and ignored elsewhere.'), ...tool.input};
-  if (tool.name.startsWith('wall_') || tool.name === 'events_since') continue;
+  if (tool.name.startsWith('wall_') || ['events_since', 'new', 'queue', 'set_limits'].includes(tool.name)) continue;
   const run = tool.run;
   tool.run = (deps, args) => {const {as: _as, ...input} = args; return run(deps, input);};
 }

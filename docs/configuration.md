@@ -15,6 +15,8 @@ Placeholders `{task}` (lowercase ID), `{TASK}` (uppercase ID) and `{cache}` work
 
 Column "Layers": **g** global config, **p** project config, **s** spec.
 
+Per-chat ceilings and floor-first admission are configured in `quotas:`. See the [English reference](en/configuration.md#chat-quotas) or the [Polish reference](pl/configuration.md#kwoty-czatów).
+
 ## Keys of every layer
 
 | Key | Type | Default | Layers | Meaning |

@@ -26,6 +26,11 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'QUOTA0250-CONTENTION', fixedIn: '0.25.0', symptom: 'A single chat could take the next shared provider slots before another chat had a chance to reach its floor.', scenarios: [s('chat-quotas.test.ts', '^QUOTA0250-CONTENTION:')] },
+  { id: 'QUOTA0250-CEILINGS', fixedIn: '0.25.0', symptom: 'The queue had no chat ceiling across hosts or utilization tie-break and could not explain a wait for chat capacity.', scenarios: [s('chat-quotas.test.ts', '^QUOTA0250-CEILINGS:')] },
+  { id: 'QUOTA0250-IDENTITY', fixedIn: '0.25.0', symptom: 'Agent orders on the shared instance lost the ordering chat when confirmed and picked up by watch.', scenarios: [s('chat-quotas.test.ts', '^QUOTA0250-IDENTITY:')] },
+  { id: 'QUOTA0250-MANAGEMENT', fixedIn: '0.25.0', symptom: 'Any caller with set_limits permission could change shared limits and the WALL did not show those changes.', scenarios: [s('chat-quotas.test.ts', '^QUOTA0250-MANAGEMENT:')] },
+  { id: 'QUOTA0250-GLM', fixedIn: '0.25.0', symptom: 'Removing the GLM global cap silently restored its built-in limit of two.', scenarios: [s('chat-quotas.test.ts', '^QUOTA0250-GLM:')] },
   { id: 'DISK0248-NM', fixedIn: '0.24.0', symptom: 'Parallel worktrees with the same npm lockfile each ran an independent install and consumed a full dependency tree.', scenarios: [s('disk0248.test.ts', '^DISK0248-NM:')] },
   { id: 'DISK0248-CLOSE', fixedIn: '0.24.0', symptom: 'Closing finished worktrees left their ignored build and browser files in place.', scenarios: [s('disk0248.test.ts', '^DISK0248-CLOSE:')] },
   { id: 'DISK0248-VOLUME', fixedIn: '0.24.0', symptom: 'The queue started worktrees on a mount directory that had fallen back to the internal disk.', scenarios: [s('disk0248.test.ts', '^DISK0248-VOLUME:')] },
@@ -194,6 +199,7 @@ export const BUGS: BugEntry[] = [
 
 /** IDs that appear in the CHANGELOG but are not a fixed bug (or have no behaviour to reproduce), with the reason. */
 export const NOT_BUGS: Record<string, string> = {
+  QUOTA0250: 'feature: central quotas for chats sharing one instance; admission, owner and edit contracts are tracked above',
   'FIX0227-W4-harness': 'harness assertion aligned with the intentional A3 snapshot contract; production unchanged, covered by W4 in a3-snapshot.test.ts',
   P10: 'feature: optional tmux.socket and attach hints',
   P44: 'feature: dedicated dev tmux server documentation and doctor checks',

@@ -1,3 +1,4 @@
+import { chatQuotaWait } from './chat-quotas.ts';
 import { checkHostLimit } from './host-limits.ts';
 import { mapEffort } from './equivalents.ts';
 import { missingBaseFailure } from './git.ts';
@@ -28,6 +29,8 @@ export interface PlanOptions {
   agent?: AgentName;
   /** `--no-switch`: never offer to move a task to the other provider when its limit is full. */
   noSwitch?: boolean;
+  /** The watcher already holds this task's durable place in the admission lock. */
+  queueReservation?: string;
   reuse?: boolean;
   /** Queue validation: the provider limit is not an error (the task waits for a free window), and nothing is ever switched. */
   ignoreLimits?: boolean;
@@ -52,7 +55,7 @@ export interface PlanOptions {
 const label = (o: Order): string => `${o.agent} ${formatModelEffort(o)}`;
 
 /** Windows currently in the session, each tagged with the agent that agentctl started in it, then the places held by reservations and external sessions. */
-export async function liveWindows(ctx: Context, knownRows?: StatusRow[]): Promise<LiveWindow[]> {
+export async function liveWindows(ctx: Context, knownRows?: StatusRow[], ignoreReservation?: string): Promise<LiveWindow[]> {
   const names = knownRows ? [...new Set(knownRows.filter(r => r.window === 'alive').map(r => r.windowName))] : await ctx.tmux.listWindows();
   for (const record of ctx.hosts.hasTrackedHosts() ? listTaskRecords(ctx.config) : []) if (record.host && !record.closed && !record.cancelled && (knownRows ? knownRows.some(r => r.windowName === record.window && r.state === 'host-unreachable') : ctx.hosts.connection(record.host).unreachable) && !names.includes(record.window)) names.push(record.window);
   const records = names.flatMap(window => { const record = readTaskRecord(ctx.config, window); return record ? [record] : []; });
@@ -65,11 +68,12 @@ export async function liveWindows(ctx: Context, knownRows?: StatusRow[]): Promis
   const rows = knownRows ?? (records.some(r => inspectReport(ctx.config, r, ctx.runner.now(), !r.attemptId).ready) ? await collectStatus(ctx, { progress: false, cachedOnly: true, records: { current: records, archived: [] }, orphans: false }) : []);
   const windows = names.map((window): LiveWindow => {
     const agent = agentByWindow.get(window);
+    const record = recordByWindow.get(window);
     const reportReady = rows.some(r => r.windowName === window && r.state === 'report-ready');
-    return agent ? { window, agent, host: recordByWindow.get(window)?.host, ...(neverReady(window) ? { counted: false } : reportReady ? { reportReady: true, counted: configCountsReady(ctx) } : {}) } : { window };
+    return agent ? { window, agent, host: record?.host, ...(record?.owner ? {owner: record.owner} : {}), ...(neverReady(window) ? { counted: false } : reportReady ? { reportReady: true, counted: configCountsReady(ctx) } : {}) } : { window };
   });
   // Places held by the user (`limits reserve`) and sessions outside agentctl count against the limit like its own windows.
-  return [...windows, ...pendingStarts(ctx.config).filter(r => !names.includes(r.window)).map(r => ({ window: r.window, agent: r.agent, host: r.host, kind: 'starting' as const })), ...(await slotHolders(ctx))];
+  return [...windows, ...pendingStarts(ctx.config).filter(r => r.id !== ignoreReservation && !names.includes(r.window)).map(r => ({ window: r.window, agent: r.agent, host: r.host, ...(r.owner ? {owner: r.owner} : {}), kind: 'starting' as const })), ...(await slotHolders(ctx))];
 }
 
 function configCountsReady(ctx: Context): boolean { return ctx.config.countReportReady; }
@@ -88,7 +92,7 @@ function switchTo(spec: ResolvedSpec, to: Order, by: 'flag' | 'limit'): Resolved
 export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanOptions = {}): Promise<ResolvedSpec[]> {
   const { config } = ctx;
   const p = new Problems();
-  const live = ctx.runner.dryRun || opts.previewOnly ? [] : await liveWindows(ctx);
+  const live = ctx.runner.dryRun || opts.previewOnly ? [] : await liveWindows(ctx, undefined, opts.queueReservation);
   // `after` belongs to the queue: `new` starts a task now, so what it waits for must be done already.
   if (!opts.previewOnly && !opts.skipAfter && !ctx.runner.dryRun && specs.some((s) => s.after.length > 0)) {
     const rows = await collectStatus(ctx, { progress: false, cachedOnly: true, archived: true });
@@ -147,7 +151,8 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
 
     // 3. provider limit, with an offer to switch
     const occupied = (): LiveWindow[] => [...live, ...planned];
-    let limitProblem = opts.ignoreLimits || opts.previewOnly ? undefined : checkWindowLimit(spec.agent, config.limits[spec.agent], occupied(), config.session);
+    const providerProblem = (agent: AgentName): string | undefined => checkWindowLimit(agent, config.limits[agent], occupied(), config.session) ?? chatQuotaWait(config, { ...spec, agent }, occupied());
+    let limitProblem = opts.ignoreLimits || opts.previewOnly ? undefined : providerProblem(spec.agent);
     if (limitProblem) {
       const others = alternatives(config, spec.agent).filter(a => !spec.host || config.hosts[spec.host]?.providers.includes(a));
       const current: Order = { agent: spec.agent, model: spec.model, effort: spec.effort };
@@ -155,7 +160,7 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
       if (spec.pin) {
         limitProblem += ' The task is pinned (pin: true), so it will not be moved to the other provider.';
       } else for (const other of others) {
-      if (checkWindowLimit(other, config.limits[other], occupied(), config.session)) {
+      if (providerProblem(other)) {
         limitProblem += ` ${other} is full too.`;
       } else {
         const t = translate(current, other, config.equivalents);
@@ -200,7 +205,7 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
       const hostProblem = checkHostLimit(config, spec, occupied());
       if (hostProblem) p.add(`${at} ${hostProblem}`);
     }
-    planned.push({ window: spec.window, agent: spec.agent, host: spec.host });
+    planned.push({ window: spec.window, agent: spec.agent, host: spec.host, owner: spec.owner });
 
     // 4. worktrees
     for (const repo of opts.previewOnly || spec.host ? [] : spec.repos) {

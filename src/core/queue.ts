@@ -6,7 +6,7 @@ import { readMcpRequests } from './mcp-requests.ts';
 import { heavyBudget, heavyPreviewUsed, heavyWait, isHeavy } from './heavy.ts';
 import { secretRedactor } from './secret-redaction.ts';
 import { activeProviders, perProvider, isActive } from './providers/registry.ts';
-import { withStartLock } from './start-lock.ts';
+import { releaseStarts, reserveStarts, withStartLock } from './start-lock.ts';
 import { authorCheckoutBusy, authorTerminal, authorWaitReason, effectiveAfter, findAuthorRecord, repinReview, syncReviewLedger } from './review-gate.ts';
 import { queueFile as promptQueueFile } from './prompt-queue.ts';
 import { closeFailedStartWindow, keepFailedWindow, saveStartFailureScreen, startFailureScreenFile } from './start-failure.ts';
@@ -22,6 +22,7 @@ import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import YAML from 'yaml';
+import { chatOwner, chatQuotaWait, DEFAULT_OWNER, globalQuotaWait, nextQuotaTask } from './chat-quotas.ts';
 import { overProviderLimit } from './checks.ts';
 import type { AgentModel } from './checks.ts';
 import { Alerts } from './alert.ts';
@@ -59,6 +60,7 @@ export type QueueStatus = 'accepted' | 'queued' | 'starting' | 'failed';
 
 export interface QueueConfirmation { token: string; key: string; tool: string; tasks: string[] }
 export interface QueueEntry {
+  owner?: string;
   host?: string;
   /** Durable idempotency identity installed with the queue entry. */
   confirmation?: QueueConfirmation;
@@ -139,8 +141,11 @@ function parseEntry(text: string): QueueEntry | undefined {
   const d = data as Partial<QueueEntry> | null;
   if (!d || typeof d !== 'object' || typeof d.seq !== 'number' || typeof d.task !== 'string' || typeof d.spec !== 'string') return undefined;
   if (!(AGENT_NAMES as readonly unknown[]).includes(d.agent)) return undefined;
+  const {owner: rawOwner, ...entry} = d as QueueEntry;
+  const owner = chatOwner(rawOwner);
   return {
-    ...(d as QueueEntry),
+    ...entry,
+    ...(owner ? {owner} : {}),
     order: typeof d.order === 'number' ? d.order : d.seq,
     priority: d.priority === 'high' ? 'high' : 'normal',
     status: d.status === 'starting' || d.status === 'failed' || d.status === 'accepted' ? d.status : 'queued',
@@ -223,7 +228,7 @@ export interface QueueAddPlan {
  * Validate specs for the queue the way `new` does (review_of, pin, `--agent` mapping, codex efforts, duplicates, repositories), except that a
  * full provider is not an error: that is what the queue is for. Throws one error listing every problem; nothing is written.
  */
-export async function planQueueAdd(ctx: Context, raws: RawSpec[], opts: { agent?: AgentName; diskBudgetMs?: number; specs?: ResolvedSpec[]; replace?: boolean } = {}): Promise<QueueAddPlan> {
+export async function planQueueAdd(ctx: Context, raws: RawSpec[], opts: { agent?: AgentName; diskBudgetMs?: number; owner?: string; specs?: ResolvedSpec[]; replace?: boolean } = {}): Promise<QueueAddPlan> {
   const { config } = ctx;
   const entries = readQueue(config);
   const items = await validateQueueAdd(ctx, raws, opts.replace ? entries.filter(e => !raws.some(raw => raw.header.task === e.task)) : entries, opts);
@@ -240,7 +245,7 @@ function inQueueError(spec: { task: string }, entry: QueueEntry): AgentctlError 
 }
 
 /** The checks of a queue add against the other entries: not in the queue yet, the batch plan (`specs`: already planned by the preview), `after`. */
-async function validateQueueAdd(ctx: Context, raws: RawSpec[], entries: QueueEntry[], opts: { agent?: AgentName; specs?: ResolvedSpec[] }): Promise<QueueAddItem[]> {
+async function validateQueueAdd(ctx: Context, raws: RawSpec[], entries: QueueEntry[], opts: { agent?: AgentName; owner?: string; specs?: ResolvedSpec[] }): Promise<QueueAddItem[]> {
   const resolved = raws.map((raw) => resolveSpec(raw, { config: ctx.config }));
   for (const spec of resolved) {
     const inQueue = entries.find((e) => e.task === spec.task);
@@ -253,11 +258,11 @@ async function validateQueueAdd(ctx: Context, raws: RawSpec[], entries: QueueEnt
   const knownAuthors = new Map<string, AgentModel>(entries.map((e) => [e.task, { agent: e.agent, model: e.model }]));
   const specs = opts.specs ?? await planBatch(ctx, resolved, { ...(opts.agent ? { agent: opts.agent } : {}), ignoreLimits: true, skipAfter: true, deferBases: true, knownAuthors });
   checkAfter(ctx, specs, entries);
-  return specs.map((spec, i) => ({ raw: raws[i] as RawSpec, spec }));
+  return specs.map((spec, i) => ({ raw: raws[i] as RawSpec, spec: opts.owner ? {...spec, owner: opts.owner} : spec }));
 }
 
 /** Per spec: the order and where it will stand ("starts at once" or "waits: claude 2/2, 1 ahead"). */
-export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: QueueEntry[], live: { window?: string; agent?: AgentName; counted?: boolean; reportReady?: boolean }[], rows: StatusRow[] = []): string[] {
+export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: QueueEntry[], live: { window?: string; agent?: AgentName; host?: string; owner?: string; counted?: boolean; reportReady?: boolean }[], rows: StatusRow[] = []): string[] {
   const { config } = ctx;
   const load: Record<AgentName, number> = perProvider(activeProviders(config), () => 0);
   for (const w of live) if (w.agent && w.counted !== false) load[w.agent]++;
@@ -275,19 +280,21 @@ export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: Q
     const used = load[spec.agent] + ahead[spec.agent];
     const full = overProviderLimit(limit, used);
     lines.push(`${spec.task}  ${spec.agent}/${spec.model}/${spec.effort}  priority ${spec.priority}${spec.switchedBy ? ` (ordered ${spec.requested.agent} ${spec.requested.model}/${spec.requested.effort})` : ''}`);
+    if (spec.owner) lines.push(`  owner:    ${spec.owner}`);
     lines.push(`  repos:    ${spec.repos.map((r) => r.path).join(', ')}`);
     if (spec.after.length > 0) {
       const unmet = unmetAfter(spec.after, rows, spec.afterVerdicts);
       lines.push(`  after:    ${spec.after.join(', ')}${unmet.length === 0 ? ' (all have a report already)' : ` – ${waitingText(unmet)}`}`);
     }
     const unmetNow = unmetAfter(spec.after, rows, spec.afterVerdicts);
+    const availability = chatQuotaWait(config, spec, live) ?? (full
+      ? `waits for a free ${spec.agent} window (${load[spec.agent]} running${ahead[spec.agent] > 0 ? `, ${ahead[spec.agent]} queued ahead` : ''}, limit ${limit})`
+      : 'at the next watch tick (a window is free)');
     lines.push(
       `  start:    ${
         diskHold ? diskHold : peakHold(config, spec, ctx.runner.now()) ?? (isPaused(config) ? 'queue paused; starts after queue_resume (agentctl queue resume)' : !config.queue.enabled ? 'queue.enabled is false; enable the queue first' : limit === 'off' ? `${spec.agent} is disabled (limits.${spec.agent}: off); no windows start` : heavyReason ? heavyReason : unmetNow.length > 0
           ? `when ${unmetNow.join(', ')} ${unmetNow.length === 1 ? 'has' : 'have'} a report${full ? ` and a ${spec.agent} window is free` : ''}`
-          : full
-          ? `waits for a free ${spec.agent} window (${load[spec.agent]} running${ahead[spec.agent] > 0 ? `, ${ahead[spec.agent]} queued ahead` : ''}, limit ${limit})`
-          : 'at the next watch tick (a window is free)')
+          : availability)
       }`,
     );
     if (spec.review) lines.push(`  review:   auto -> ${spec.task}-REV after the confirmed author report; another provider, else another configured model; rerun=${Boolean(spec.review.rerun)}`);
@@ -322,12 +329,14 @@ async function commitQueueAddLocked(ctx: Context, items: QueueAddItem[], opts: P
   for (const [index, { raw, spec }] of items.entries()) {
     const kept = opts.accepted?.[index];
     if (!kept) seq++;
+    const owner = kept?.owner ?? spec.owner;
     const confirmation = kept?.confirmation ?? opts.confirmation;
     const author = spec.reviewOf ? items.find(i => i.spec.task === spec.reviewOf)?.spec ?? existing.find(e => e.direct && e.task === spec.reviewOf) : undefined;
     const entry: QueueEntry = {
       seq: kept?.seq ?? seq,
       ...(confirmation ? { confirmation } : {}),
       task: spec.task,
+      ...(owner ? { owner } : {}),
       ...(opts.reuse ? { reuse: true } : {}),
       ...(opts.autoReview ? { autoReview: opts.autoReview } : {}),
       ...(opts.direct ? { direct: true, ...(opts.direct.noAgent ? { noAgent: true } : {}) } : {}),
@@ -354,13 +363,14 @@ async function commitQueueAddLocked(ctx: Context, items: QueueAddItem[], opts: P
       const history = path.join(config.stateDir, '.history');
       await runner.mkdir(history);
       await runner.rename(taskDir(config, spec.window), path.join(history, `${spec.window}-${randomUUID()}`));
-      const fresh = recordFromSpec(spec, config, runner.now());
+      const fresh = recordFromSpec({ ...spec, owner }, config, runner.now());
       fresh.started = '';
       fresh.promptDelivery = 'launching';
       await runner.mkdir(taskDir(config, spec.window));
       await runner.writeFile(taskFile(config, spec.window), renderTaskMd(fresh, spec.prompt));
     }
     await writeEntry(ctx, entry);
+    if (!kept) await journalOrder(ctx, entry);
     added.push(entry);
   }
   return added;
@@ -440,7 +450,7 @@ export async function registerDirectStart(ctx: Context, items: QueueAddItem[], o
 }
 
 /** What the preview planned for one spec of an accepted confirm: enough for queue_list until the watcher validates the spec. */
-export interface AcceptedOrder { task: string; agent: AgentName; model: string; effort: string; priority: 'high' | 'normal'; after: string[]; afterVerdicts?: Record<string, OutputVerdict[]>; reviewOf?: string; cohort?: string }
+export interface AcceptedOrder { owner?: string; task: string; agent: AgentName; model: string; effort: string; priority: 'high' | 'normal'; after: string[]; afterVerdicts?: Record<string, OutputVerdict[]>; reviewOf?: string; cohort?: string }
 
 /**
  * P93: the confirm of MCP `queue` / `new` records the accepted specs durably (status `accepted`) and returns. It reads the queue directory and writes
@@ -472,6 +482,7 @@ export async function acceptSpecs(ctx: Context, raws: RawSpec[], orders: Accepte
         queuedAt: new Date(ctx.runner.now()).toISOString(), host: typeof raws[i]?.header.host === 'string' ? raws[i]!.header.host as string : undefined, agent: order.agent, model: order.model, effort: order.effort, after: order.after,
         ...(order.afterVerdicts ? { afterVerdicts: order.afterVerdicts } : {}),
         ...(order.reviewOf ? { reviewOf: order.reviewOf } : {}),
+        ...(order.owner ? { owner: order.owner } : {}),
         // The cohort exists from the confirm on (cohort_show, cancel by cohort), spelled as its first task named it.
         ...(order.cohort ? { cohort: (await touchCohort(ctx, order.cohort)).name } : {}),
         ...(opts.confirmation ? { confirmation: opts.confirmation } : {}),
@@ -481,10 +492,15 @@ export async function acceptSpecs(ctx: Context, raws: RawSpec[], orders: Accepte
         spec: renderRawSpec(raws[i] as RawSpec),
       };
       await writeEntry(ctx, entry);
+      await journalOrder(ctx, entry);
       added.push(entry);
     }
     return { added, existing: [] };
   });
+}
+
+async function journalOrder(ctx: Context, entry: QueueEntry): Promise<void> {
+  if (entry.owner) await recordJournal(ctx, { kind: 'task-ordered', task: entry.task, owner: entry.owner, cohort: entry.cohort, text: `${entry.task}: złożono zlecenie (${entry.agent})` });
 }
 
 /**
@@ -543,7 +559,7 @@ async function rejectAccepted(ctx: Context, entry: QueueEntry, error: string, no
   const reason = safeError.split('\n').map((line) => line.trim().replace(/^- /, '')).filter(Boolean).slice(0, 2).join(' ');
   const text = `${entry.task}: przyjęta spec odrzucona przy sprawdzeniu w watch – ${reason}`;
   await opts.log?.(`queue: ${text}`);
-  await recordJournal(ctx, { kind: 'queue-failed', task: entry.task, text, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
+  await recordJournal(ctx, { kind: 'queue-failed', task: entry.task, owner: entry.owner, text, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
   await notifyPlain(ctx, notifier, entry.task, `${text} (agentctl queue retry ${entry.task})`, opts.self);
 }
 
@@ -588,6 +604,7 @@ export async function writeCancelledRecord(ctx: Context, entry: QueueEntry, opts
     record = { task: entry.task, window: windowName(entry.task), session: config.session, agent: entry.agent, model: entry.model, effort: entry.effort as TaskRecord['effort'], repos: [], links: [], env: {}, report: '', started: '', requested: { agent: entry.agent, model: entry.model, effort: entry.effort as Effort } };
     prompt = entry.spec;
   }
+  record.owner = entry.owner ?? (config.quotas ? DEFAULT_OWNER : record.owner);
   record.started = '';
   Object.assign(record, { cancelled: true, cancelledAt: opts.at ?? new Date(runner.now()).toISOString(), ...(opts.reason ? { cancelReason: opts.reason } : {}), cancelSource: opts.source ?? 'cli' });
   await runner.mkdir(taskDir(config, record.window));
@@ -691,7 +708,7 @@ export async function announceReleased(ctx: Context, notifier: Notifier, rows: r
       const text = `${entry.task} odblokowane – ${task}: werdykt ${rows.find((r) => r.task === task)!.verdict}`;
       await opts.log?.(`queue: ${text}`);
       await notifyPlain(ctx, notifier, entry.task, text, opts.self);
-      await recordJournal(ctx, { kind: 'unblocked', task: entry.task, text, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
+      await recordJournal(ctx, { kind: 'unblocked', task: entry.task, owner: entry.owner, text, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
       said.push(text);
     }
   }
@@ -716,7 +733,7 @@ export async function announceBlocked(ctx: Context, notifier: Notifier, rows: re
       const text = `${entry.task} zablokowane – ${reason.text}`;
       await opts.log?.(`queue: ${text}`);
       await notifyPlain(ctx, notifier, entry.task, text, opts.self);
-      await recordJournal(ctx, { kind: 'blocked', task: entry.task, text, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
+      await recordJournal(ctx, { kind: 'blocked', task: entry.task, owner: entry.owner, text, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
       said.push(text);
     }
   }
@@ -829,7 +846,7 @@ export async function blockEntryVolume(ctx: Context, entry: QueueEntry, mount: s
  * For every entry: what it waits for. Entries are walked in turn order, each one that will start in the next tick uses up a window of its
  * provider, so the answer matches what `watch` does. `inflight` are the tasks this very process is starting.
  */
-export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live: { window?: string; host?: string; agent?: AgentName; counted?: boolean }[], rows: StatusRow[] = [], nowMs: number = Date.now()): QueueView[] {
+export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live: { window?: string; owner?: string; host?: string; agent?: AgentName; counted?: boolean }[], rows: StatusRow[] = [], nowMs: number = Date.now()): QueueView[] {
   const redact = secretRedactor([config, process.env, ...queueDiagnosticSources(entries)]);
   const failed = new Set(entries.filter((e) => e.status === 'failed').map((e) => e.task));
   const used: Record<AgentName, number> = perProvider(activeProviders(config), () => 0);
@@ -844,7 +861,7 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
   const hostSlots = [...live, ...entries.filter(e => e.status === 'starting' && !live.some(w => w.window === e.task.toLowerCase()))];
   let setups = setupSlots(config, entries);
   let position = 0;
-  return entries.map((entry): QueueView => {
+  const views = entries.map((entry): QueueView => {
     if (entry.status === 'failed') return { position: null, entry, condition: { kind: 'failed', text: `failed: ${(entry.error ?? '').split('\n')[0] ?? ''}` }, since: entry.failedAt ?? entry.queuedAt };
     if (entry.status === 'accepted') return { position: null, entry, condition: { kind: 'accepted', text: entry.direct ? `uruchamiane – czeka na najbliższy tick watch (${ACCEPTED_TEXT})` : ACCEPTED_TEXT }, since: entry.queuedAt };
     if (entry.status === 'starting') return { position: null, entry, condition: { kind: 'starting', text: entry.direct || readSetupProgress(config, entry.task, queueDiagnosticSources(entries)) ? startProgressText(readSetupProgress(config, entry.task, queueDiagnosticSources(entries)), nowMs) : 'starting' }, since: entry.startingAt ?? entry.queuedAt };
@@ -868,11 +885,13 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
     const hostProblem = checkHostLimit(config, entry, hostSlots);
     if (hostProblem) return { position, entry, condition: { kind: 'slot', text: hostProblem }, since: entry.queuedAt };
     if (holds[entry.agent]) return { position, entry, condition: {kind: 'hold', text: holds[entry.agent]!}, since: entry.queuedAt };
-    if (entry.direct && !(entry.retryAt && Date.parse(entry.retryAt) > nowMs) && !overProviderLimit(config.limits[entry.agent], used[entry.agent])) {
-      used[entry.agent]++;
-      hostSlots.push(entry);
-      setups++;
-      if (isHeavy(entry)) heavy.add(entry.task);
+    if (entry.direct && !(entry.retryAt && Date.parse(entry.retryAt) > nowMs) && (config.quotas || !overProviderLimit(config.limits[entry.agent], used[entry.agent]))) {
+      if (!config.quotas) {
+        used[entry.agent]++;
+        hostSlots.push(entry);
+        setups++;
+        if (isHeavy(entry)) heavy.add(entry.task);
+      }
       return { position, entry, condition: { kind: 'ready', text: config.queue.enabled ? 'uruchamiane – czeka na najbliższy tick watch' : 'queue.enabled is false; the watcher does not start it' }, since: entry.queuedAt };
     }
     const stuck = blocked.get(entry.task);
@@ -889,17 +908,39 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
     if (waitsFor) return { position, entry, condition: { kind: 'after', text: waitsFor }, since: entry.queuedAt };
     const held = holds[entry.agent];
     if (held) return { position, entry, condition: { kind: 'hold', text: held }, since: entry.queuedAt };
-    const limit = config.limits[entry.agent];
-    if (overProviderLimit(limit, used[entry.agent])) {
-      const text = limit === 'off' ? `${entry.agent} jest wyłączony (limits.${entry.agent}: off)` : `czeka na miejsce: ${entry.agent} ${used[entry.agent]}/${limit}`;
-      return { position, entry, condition: { kind: 'slot', text }, since: entry.queuedAt };
+    if (!config.quotas) {
+      const text = globalQuotaWait(config, entry.agent, used[entry.agent]);
+      if (text) return { position, entry, condition: { kind: 'slot', text }, since: entry.queuedAt };
+      used[entry.agent]++;
+      hostSlots.push(entry);
+      setups++;
+      if (isHeavy(entry)) heavy.add(entry.task);
     }
-    used[entry.agent]++;
-    hostSlots.push(entry);
-    setups++;
-    if (isHeavy(entry)) heavy.add(entry.task);
     return { position, entry, condition: { kind: 'ready', text: 'wolne miejsce – start przy najbliższym ticku watch' }, since: entry.queuedAt };
-  }).map(view => ({ ...view, condition: { ...view.condition, text: redact(view.condition.text) } }));
+  });
+  if (config.quotas) {
+    const ready = new Map(views.filter(view => view.condition.kind === 'ready').map(view => [view.entry, view]));
+    while (ready.size) {
+      for (const [entry, view] of ready) {
+        const reason = globalQuotaWait(config, entry.agent, used[entry.agent]) ?? chatQuotaWait(config, entry, hostSlots)
+          ?? checkHostLimit(config, entry, hostSlots)
+          ?? (setups >= config.queue.maxParallelSetups ? `czeka na setup: ${setups}/${config.queue.maxParallelSetups}` : undefined)
+          ?? heavyWait(config, isHeavy(entry), heavy.size);
+        if (reason) {
+          view.condition = {kind: 'slot', text: reason};
+          ready.delete(entry);
+        }
+      }
+      const next = nextQuotaTask(config, [...ready.keys()], hostSlots);
+      if (!next) break;
+      ready.delete(next);
+      used[next.agent]++;
+      hostSlots.push(next);
+      setups++;
+      if (isHeavy(next)) heavy.add(next.task);
+    }
+  }
+  return views.map(view => ({ ...view, ...(config.quotas && !view.entry.owner ? {entry: {...view.entry, owner: DEFAULT_OWNER}} : {}), condition: { ...view.condition, text: redact(view.condition.text) } }));
 }
 
 /** The clock of the verdict rules (P94): now and `report.settle_s`. */
@@ -940,7 +981,7 @@ export async function queueStatusLines(ctx: Context, cohort?: string): Promise<s
   const open = views.filter((v) => v.entry.status !== 'failed');
   return [
     `Queue (${open.length}${views.length > open.length ? `, ${views.length - open.length} failed` : ''}): agentctl queue list`,
-    ...views.map((v) => `  ${v.position ?? '-'}. ${v.entry.task}  ${v.condition.text}`),
+    ...views.map((v) => `  ${v.position ?? '-'}. ${v.entry.task}${v.entry.owner ? ` (${v.entry.owner})` : ''}  ${v.condition.text}`),
   ];
 }
 
@@ -953,10 +994,12 @@ export function renderQueueList(views: QueueView[], nowMs: number): string[] {
     const m = Math.max(0, Math.floor(ms / 60000));
     return m < 60 ? `${m}m` : m < 1440 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m` : `${Math.floor(m / 1440)}d`;
   };
-  const header = ['#', 'TASK', 'AGENT/MODEL/EFFORT', 'PRIORITY', 'START CONDITION', 'WAITING', 'QUEUED'];
+  const owners = views.some(v => v.entry.owner);
+  const header = ['#', 'TASK', ...(owners ? ['OWNER'] : []), 'AGENT/MODEL/EFFORT', 'PRIORITY', 'START CONDITION', 'WAITING', 'QUEUED'];
   const body = views.map((v) => [
     v.position === null ? '-' : String(v.position),
     v.entry.task,
+    ...(owners ? [v.entry.owner ?? '-'] : []),
     `${v.entry.agent}/${v.entry.model}/${v.entry.effort}`,
     v.entry.priority,
     v.condition.text,
@@ -973,7 +1016,7 @@ export function renderQueueList(views: QueueView[], nowMs: number): string[] {
 /** What `watch` remembers about the starts it has begun. */
 export class QueueMemory {
   /** Tasks being started by this process: their agent counts against the provider limit before the window exists. */
-  readonly inflight = new Map<string, { agent: AgentName; host?: string; promise: Promise<void> }>();
+  readonly inflight = new Map<string, { agent: AgentName; host?: string; owner?: string; promise: Promise<void> }>();
   /** Tasks the plan holds back (`usage.queue_hold`) and the reason last said, so that the log says it once. */
   readonly held = new Map<string, string>();
 
@@ -1076,7 +1119,7 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   const used: Record<AgentName, number> = perProvider(activeProviders(config), () => 0);
   for (const w of live) if (w.agent && w.counted !== false) used[w.agent]++;
   // A start in progress whose window is not up yet already holds its place.
-  for (const [task, i] of memory.inflight) if (!live.some((w) => w.window === task.toLowerCase())) { used[i.agent]++; live.push({ window: task.toLowerCase(), agent: i.agent, host: i.host }); }
+  for (const [task, i] of memory.inflight) if (!live.some((w) => w.window === task.toLowerCase())) { used[i.agent]++; live.push({ window: task.toLowerCase(), agent: i.agent, host: i.host, owner: i.owner }); }
 
   // A block that the author's corrected report lifted is said before the released task starts (P94).
   await announceReleased(ctx, notifier, rows, opts).catch((e: unknown) => opts.log?.(`queue: ${errorMessage(e)}`));
@@ -1084,7 +1127,21 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   const began: string[] = [];
   const holds = queueHolds(config, ctx.runner.now());
   const stillHeld = new Set<string>();
-  for (let entry of waiting(entries)) {
+  const candidates: QueueEntry[] = [];
+  const hasPlace = (entry: QueueEntry): boolean => !overProviderLimit(config.limits[entry.agent], used[entry.agent])
+    && !chatQuotaWait(config, entry, live) && !checkHostLimit(config, entry, live);
+  const start = async (entry: QueueEntry): Promise<void> => {
+    if (!await beginStart(ctx, memory, notifier, entry, opts)) return;
+    used[entry.agent]++;
+    live.push({ window: windowName(entry.task), agent: entry.agent, host: entry.host, owner: entry.owner });
+    began.push(entry.task);
+  };
+  const consider = async (entry: QueueEntry): Promise<void> => {
+    if (!hasPlace(entry)) return;
+    if (config.quotas) candidates.push(entry);
+    else await start(entry);
+  };
+  for (const entry of waiting(entries)) {
     if (entry.volumeBlock) continue;
     if (paused && !entry.direct) continue;
     if (entry.retryAt && Date.parse(entry.retryAt) > ctx.runner.now()) continue;
@@ -1097,11 +1154,7 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
     if (taskDiskStartHold(config, entry.host, entryWorktrees(config, entry), ctx.runner.now()) || setupSlots(config, readQueue(config)) >= config.queue.maxParallelSetups) continue;
     if (providerHolds(config, ctx.runner.now())[entry.agent] || entryPeakHold(config, entry, ctx.runner.now())) continue;
     if (entry.direct) {
-      const room = config.limits[entry.agent];
-      if (overProviderLimit(room, used[entry.agent])) continue;
-      // A claim that did not begin consumes no provider slot: a heavy-blocked or raced entry must not starve its provider for this tick.
-      // Starts run in the background, so a broken setup can fail several entries of one tick — bounded by queue.parallel_starts, each failed once.
-      if (await beginStart(ctx, memory, notifier, entry, opts)) { used[entry.agent]++; live.push({ window: entry.task.toLowerCase(), agent: entry.agent, host: entry.host }); began.push(entry.task); }
+      await consider(entry);
       continue;
     }
     if (entry.autoReview) {
@@ -1129,9 +1182,14 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
       }
       continue;
     }
-    const limit = config.limits[entry.agent];
-    if (overProviderLimit(limit, used[entry.agent])) continue;
-    if (await beginStart(ctx, memory, notifier, entry, opts)) { used[entry.agent]++; live.push({ window: entry.task.toLowerCase(), agent: entry.agent, host: entry.host }); began.push(entry.task); }
+    await consider(entry);
+  }
+  while (memory.inflight.size < config.queue.parallelStarts) {
+    const next = nextQuotaTask(config, candidates.filter(hasPlace), live);
+    if (!next) break;
+    candidates.splice(candidates.indexOf(next), 1);
+    // Every successful claim changes the ranking for the next place.
+    await start(next);
   }
   for (const task of [...memory.held.keys()]) if (!stillHeld.has(task)) memory.held.delete(task);
   return began;
@@ -1185,10 +1243,24 @@ export async function rebuildAutoReview(ctx: Context, entry: QueueEntry, opts: {
 async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier, initial: QueueEntry, opts: QueueTickOptions): Promise<boolean> {
   const { config } = ctx;
   let entry = initial;
+  let reservation: string | undefined;
   const claim = async (fresh: QueueEntry): Promise<boolean> => {
     if (fresh.volumeBlock || entryPeakHold(config, fresh, ctx.runner.now()) || taskDiskStartHold(config, fresh.host, entryWorktrees(config, fresh), ctx.runner.now()) || setupSlots(config, readQueue(config)) >= config.queue.maxParallelSetups) return false;
-    if (heavyWait(config, isHeavy(fresh), heavyBudget(config, readQueue(config), await liveWindows(ctx)).size)) return false;
+    const slots = await liveWindows(ctx);
+    if (heavyWait(config, isHeavy(fresh), heavyBudget(config, readQueue(config), slots).size)) return false;
+    if (config.quotas) {
+      const used = slots.filter(slot => slot.agent === fresh.agent && slot.counted !== false).length;
+      if (globalQuotaWait(config, fresh.agent, used) || chatQuotaWait(config, fresh, slots) || checkHostLimit(config, fresh, slots)) return false;
+    }
     await writeEntry(ctx, { ...fresh, status: 'starting', startingPid: process.pid, startingAt: new Date(ctx.runner.now()).toISOString() });
+    if (config.quotas && !fresh.noAgent) {
+      try {
+        [reservation] = await reserveStarts(ctx, [{ task: fresh.task, window: windowName(fresh.task), agent: fresh.agent, host: fresh.host, owner: fresh.owner }]);
+      } catch (error) {
+        await writeEntry(ctx, fresh);
+        throw error;
+      }
+    }
     entry = fresh;
     return true;
   };
@@ -1227,6 +1299,7 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
       await opts.log?.(`queue: starting ${entry.task} (${entry.agent})`);
       const raws = splitSpecs(entry.spec, `queue entry ${entry.task}`);
       const spec = resolveSpec(raws[0] as RawSpec, { config });
+      if (entry.owner || config.quotas) spec.owner = entry.owner ?? DEFAULT_OWNER;
       // The review invariant (own report, own checkout) is checked by the door every agent window goes through (window-guard).
       if (entry.autoReview) spec.autoReview = entry.autoReview;
       if (entry.reuse) {
@@ -1236,6 +1309,7 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
       await newTasks(startCtx, [spec], {
         ...(entry.agentOverride ? { agent: entry.agentOverride } : {}),
         noSwitch: true,
+        queueReservation: reservation,
         skipAfter: true,
         reuse: Boolean(entry.reuse),
         ...(entry.noAgent ? { noAgent: true, knownAuthors: entry.directAuthor && entry.directAuthorOrder ? new Map([[entry.directAuthor, entry.directAuthorOrder]]) : new Map<string, AgentModel>() } : {}),
@@ -1255,10 +1329,10 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
       await opts.log?.(`queue: ${entry.task} started`);
       const done = entry.noAgent ? `Przygotowano ${entry.task} (worktree, setup i linki, bez agenta)` : entry.direct ? `Uruchomiono ${entry.task} (MCP new, setup zakończony)` : `Uruchomiono ${entry.task} z kolejki`;
       await notifyPlain(ctx, notifier, entry.task, done, opts.self);
-      await recordJournal(ctx, { kind: 'queue-start', task: entry.task, text: `${done} (${entry.agent})`, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
+      await recordJournal(ctx, { kind: 'queue-start', task: entry.task, owner: entry.owner, text: `${done} (${entry.agent})`, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
     } catch (e) {
       if (e instanceof WorktreeVolumeError) { await blockEntryVolume(ctx, entry, e.mount, notifier, opts.self); return; }
-      if (/window limit for .* reached|host .* limit reached|provider hold:|szczyt do|wstrzymane: dysk/.test(errorMessage(e))) { await writeEntry(ctx, { ...entry, status: 'queued' }); return; }
+      if (/window limit for .* reached|czeka na kwotę|host .* limit reached|provider hold:|szczyt do|wstrzymane: dysk/.test(errorMessage(e))) { await writeEntry(ctx, { ...entry, status: 'queued' }); return; }
       // A never-ready window is untrusted state nobody watches: close it so it cannot hold a slot (the record and its worktree stay).
       const closedLeftover = await closeNeverReadyWindow(ctx, entry.task, { force: Boolean(opts.signal?.aborted) }).catch(() => false);
       if (await liveStartedRecord(ctx, entry.task)) {
@@ -1266,7 +1340,7 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
         await dropEntry(ctx, starting);
         const text = `${entry.task}: okno zadania działa; watch obsługuje oczekujący prompt po potwierdzeniu dialogu i gotowości agenta`;
         await opts.log?.(`queue: ${text}`);
-        await recordJournal(ctx, { kind: 'queue-start', task: entry.task, text, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
+        await recordJournal(ctx, { kind: 'queue-start', task: entry.task, owner: entry.owner, text, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
         return;
       }
       if (opts.signal?.aborted && readTaskRecord(config, windowName(entry.task))) {
@@ -1280,11 +1354,14 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
       }
       await failEntry(ctx, starting, `${e instanceof AgentctlError && e.hint ? `${e.message}\nHint: ${e.hint}` : errorMessage(e)}${closedLeftover ? '\nThe window that never became ready was closed; the worktree stays. queue_retry starts a fresh window over it.' : keptWindowNote(ctx, entry.task)}`, notifier, opts, !opts.signal?.aborted, log).catch(() => undefined);
     } finally {
-      clearSetupProgress(config, entry.task);
-      memory.inflight.delete(entry.task);
+      try { if (reservation) await releaseStarts(ctx, [reservation]); }
+      finally {
+        clearSetupProgress(config, entry.task);
+        memory.inflight.delete(entry.task);
+      }
     }
   };
-  memory.inflight.set(entry.task, { agent: entry.agent, host: entry.host, promise: run() });
+  memory.inflight.set(entry.task, { agent: entry.agent, host: entry.host, owner: entry.owner, promise: run() });
   return true;
 }
 
@@ -1311,7 +1388,7 @@ async function failEntry(ctx: Context, entry: QueueEntry, error: string, notifie
   const safeError = (redactQueue({ ...entry, error }, config) as QueueEntry).error ?? 'n/d';
   const text = retry ? `${entry.task}: start z kolejki – ${firstLine(safeError)}; ponowienie ${attempts.length}/3 o ${failed.retryAt}` : `${entry.task}: start z kolejki nie powiódł się – ${firstLine(safeError)}`;
   await opts.log?.(`queue: ${text}`);
-  await recordJournal(ctx, { kind: retry ? 'queue-retry' : 'queue-failed', task: entry.task, text, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
+  await recordJournal(ctx, { kind: retry ? 'queue-retry' : 'queue-failed', task: entry.task, owner: entry.owner, text, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
   if (notify) await notifyPlain(ctx, notifier, entry.task, retry ? text : `${text} (agentctl queue retry ${entry.task})`, opts.self);
 }
 

@@ -64,7 +64,7 @@ import { writeConfigText } from './core/config-edit.ts';
 import { sendPhoneTest } from './core/phone.ts';
 import type { FetchLike } from './core/phone.ts';
 import { awayReport, phoneActive, renderAway, setAway } from './core/away.ts';
-import { channelSummaries, cliWallIdentity, findMessage, postMessage, readOwnerState, readThread, readWall, renderRead, renderThread, setStatus, WALL_KINDS, WALL_STATUSES } from './core/wall.ts';
+import { channelSummaries, cliWallIdentity, findMessage, postMessage, readOwnerState, readThread, readWall, renderRead, renderThread, setStatus, taskShell, WALL_KINDS, WALL_STATUSES } from './core/wall.ts';
 import type { WallIdentity, WallKind, WallStatus } from './core/wall.ts';
 import { applySetLimits, collectLimits, parseAssignments, parseCounts, parseHoldArgs, planSetLimits, releasePlaces, renderLimits, reservePlaces } from './core/limits.ts';
 import { collectOverlaps, renderOverlaps, touchWarnings } from './core/collisions.ts';
@@ -598,7 +598,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         const cohort = wanted === undefined ? undefined : findCohort(ctx.config, wanted).name;
         const all = await queueViews(ctx);
         const views = cohort === undefined ? all : all.filter((v) => v.entry.cohort !== undefined && cohortKey(v.entry.cohort) === cohortKey(cohort));
-        if (opts.json || (command.optsWithGlobals() as { json?: boolean }).json) return line(JSON.stringify(views.map((v) => ({ position: v.position, task: v.entry.task, cohort: v.entry.cohort ?? null, status: v.entry.status, agent: v.entry.agent, model: v.entry.model, effort: v.entry.effort, priority: v.entry.priority, condition: v.condition.text, blocked: v.condition.kind === 'blocked', after: v.entry.after, queued: v.entry.queuedAt, error: v.entry.error ?? null })), null, 2));
+        if (opts.json || (command.optsWithGlobals() as { json?: boolean }).json) return line(JSON.stringify(views.map((v) => ({ position: v.position, task: v.entry.task, ...(v.entry.owner ? {owner: v.entry.owner} : {}), cohort: v.entry.cohort ?? null, status: v.entry.status, agent: v.entry.agent, model: v.entry.model, effort: v.entry.effort, priority: v.entry.priority, condition: v.condition.text, blocked: v.condition.kind === 'blocked', after: v.entry.after, queued: v.entry.queuedAt, error: v.entry.error ?? null })), null, 2));
         for (const l of renderQueueList(views, ctx.runner.now())) line(l);
         for (const v of views.filter((x) => x.condition.kind === 'blocked')) line(`hint: ${v.entry.task} is blocked: agentctl unblock ${v.entry.task} [--drop-after <task>], or agentctl cancel ${v.entry.task}`);
         if (isPaused(ctx.config)) line('The queue is paused: "agentctl queue resume" lets it run again.');
@@ -898,7 +898,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
   limits
     .command('set')
     .description('Change the limits in config.yaml (comments and the order of the keys stay; the old file is kept as config.yaml.bak). A running watch and the MCP server pick it up at once; waiting tasks of the queue start at the next tick.')
-    .argument('<limits...>', 'claude=3 codex=5; off disables a provider (codex=off: no windows of it start), 0 or none removes a limit (codex=0); queue_hold=90 | queue_hold=off | queue_hold.codex=85 sets usage.queue_hold; hold.glm=21:50 | hold.glm=3h | hold.glm=off sets a timed provider hold')
+    .argument('<limits...>', 'claude=3 codex=5; off disables a provider (codex=off: no windows of it start), 0 or none removes a limit (codex=0); queue_hold=90 | queue_hold=off | queue_hold.codex=85 sets usage.queue_hold; hold.glm=21:50 | hold.glm=3h | hold.glm=off sets a timed provider hold; quota.nc.claude=4 sets a chat share; overprovision=1.5 sets the share budget multiplier')
     .option('-y, --yes', 'do not ask')
     .option('--dry-run', 'print what would be written, change nothing')
     .action(
@@ -907,8 +907,25 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         const ids = activeProviders(ctx.config);
         const timed: Record<string, string> = {};
         const remaining = assignments.filter(a => { const m = /^hold\.([a-z]+)=(.+)$/.exec(a); if (!m) return true; timed[m[1]!] = m[2]!; return false; });
-        const { hold, rest } = parseHoldArgs(remaining, ids);
-        const plan = planSetLimits(ctx.config, rest.length > 0 || (hold === undefined && !Object.keys(timed).length) ? parseAssignments(rest, ids) : {}, hold, Object.keys(timed).length ? timed : undefined, ctx.runner.now());
+        let overprovision: number | undefined;
+        let quota: Record<string, string | number> | undefined;
+        const providerArgs = remaining.filter(arg => {
+          if (arg.startsWith('overprovision=')) {
+            overprovision = Number(arg.slice('overprovision='.length));
+            return false;
+          }
+          const match = /^quota\.([a-z0-9_:-]+)\.([a-z]+)=(\d+)$/.exec(arg);
+          if (!match) return true;
+          const [, chat, provider, share] = match;
+          if (quota && chat !== quota.chat) throw new AgentctlError('Specify one chat per limits set command');
+          quota ??= {chat: chat!};
+          quota[provider!] = Number(share);
+          return false;
+        });
+        const quotaEdit = quota || overprovision !== undefined ? {quota, overprovision} : undefined;
+        if ((ctx.config.quotas || quotaEdit) && taskShell(ctx.config, process.env, process.cwd())) throw new AgentctlError('Quota and limit changes require the owner CLI');
+        const { hold, rest } = parseHoldArgs(providerArgs, ids);
+        const plan = planSetLimits(ctx.config, rest.length > 0 || (hold === undefined && !Object.keys(timed).length && !quotaEdit) ? parseAssignments(rest, ids) : {}, hold, Object.keys(timed).length ? timed : undefined, ctx.runner.now(), quotaEdit);
         if (!(await confirmAction(ctx, plan.summary, 'Write it?', Boolean(opts.yes) || Boolean(opts.dryRun)))) return;
         await applySetLimits(ctx, plan);
         if (!opts.dryRun) line('Done. The limits are in force now.');

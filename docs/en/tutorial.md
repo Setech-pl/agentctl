@@ -152,6 +152,30 @@ agentctl wall read --id agentctl-1
 
 Board `W` shows channels → messages → thread; `s/t` filters, `r/R` marks read. MCP uses `as: "chat:nc"` and `wall_post` preview/confirm, then another chat calls `events_since(as: "chat:hems")` and `wall_read`. Both subscribe to `agentctl`/`shared:*` by default. WALL is data, never authorization.
 
+## Several chats on one instance
+
+Merge these settings into the dispatcher's `config.yaml`. Keep each chat's existing WALL channels and client mappings.
+
+```yaml
+providers: [claude, codex, kimi, glm]
+limits: {claude: 6, codex: 8, kimi: 2, glm: 3}
+quotas:
+  overprovision: 1.5
+  chats:
+    nc: {claude: 4, codex: 5, kimi: 2, glm: 2}
+    hems: {claude: 3, codex: 4, kimi: 1, glm: 2}
+    vs65: {claude: 2, codex: 3, kimi: 0, glm: 1}
+wall:
+  chats:
+    vs65: {channels: [agentctl]}
+```
+
+Claude has six places globally and nine across the three chat ceilings. A chat can use its ceiling while the others are idle. When their ready work competes for the next place, the queue gives priority to a chat below its floor, then to the smallest used/share ratio. Lowering a share affects future starts and leaves running tasks alone. This example produces a GLM budget warning because five shares exceed `1.5 × 3`; three remains the global GLM limit.
+
+In every chat, pass `as: "chat:<name>"` on `new` and `queue`. For example, NC previews with `as: "chat:nc"` and confirms with the same identity and the preview token. Use `queue_list` or the board to see whether an order is waiting for its share or for the provider. Use `limits` and `capacity` to see both counts. For a different allocation, post a WALL `decision-request` on `agentctl` unless self-service is enabled.
+
+For existing installations, leaving out `quotas:` keeps the previous scheduling behavior. See the [configuration reference](configuration.md#chat-quotas) for owner precedence and remote-host scope.
+
 ## 7. First CONSULT
 
 CONSULT is several paid tasks. Approve the count and usage first. Save `consult-demo.yaml`:

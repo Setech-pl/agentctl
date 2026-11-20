@@ -1,3 +1,4 @@
+import { chatOwner, taskOwner } from './chat-quotas.ts';
 import { mapEffort } from './equivalents.ts';
 import { linkBaseWarnings, validateLink, missingLinkTargets, fillTaskLinkTargets, staleProjectLinkWarnings, projectDefaultLinkPolicy } from './links.ts';
 import { validateLaunch, ANTHROPIC_SECRET_ENV } from './safety.ts';
@@ -59,6 +60,7 @@ export interface AutoReviewSource {
 }
 
 export interface ResolvedSpec {
+  owner?: string;
   keepCache?: boolean;
   readOnly?: boolean;
   integration?: boolean;
@@ -202,7 +204,7 @@ export interface ResolveContext {
 /** Task IDs whose window name is one agentctl uses for itself (`watch`, `board`, `manager`). */
 export const RESERVED_TASK_IDS = ['WATCH', 'BOARD', 'MANAGER'];
 
-export const SPEC_KEYS = ['task', 'agent', 'class', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'review', 'report', 'pin', 'remote_control', 'weight', 'priority', 'after', 'after_verdict', 'touches', 'cohort', 'wall', 'read_only', 'host', 'integration', 'keep_cache', 'peak_ok'];
+export const SPEC_KEYS = ['task', 'agent', 'class', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'review', 'report', 'pin', 'remote_control', 'weight', 'priority', 'after', 'after_verdict', 'touches', 'cohort', 'owner', 'wall', 'read_only', 'host', 'integration', 'keep_cache', 'peak_ok'];
 export const REPO_KEYS = ['path', 'worktree', 'base', 'branch', 'setup'];
 
 function label(raw: RawSpec): string {
@@ -357,6 +359,8 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     if (problem) p.add(problem);
     else cohort = (h.cohort as string).normalize('NFC');
   }
+  const owner = h.owner === undefined ? taskOwner(config, cohort) : chatOwner(h.owner);
+  if (h.owner !== undefined && !owner) p.add('owner must be chat:<name>, a chat name or default');
   const wall = resolveSpecWall(config.wall, task, h.wall, p);
   const weight = parseEnumValue(h.weight, ['normal', 'heavy'] as const, 'weight', p) ?? 'normal';
   const priority = parseEnumValue(h.priority, PRIORITIES, 'priority', p) ?? 'normal';
@@ -569,6 +573,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   if (review) spec.review = review;
   if (agent && remote && (specRemote ?? remoteDefault)) spec.remoteControl = true;
   if (cohort) spec.cohort = cohort;
+  if (owner) spec.owner = owner;
   if (host) spec.host = host;
   if (wall?.length) spec.wall = wall;
   if (h.read_only === true) {

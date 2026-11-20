@@ -865,7 +865,7 @@ export async function loadBoard(ctx: Context, selected: string | null, cache: Pr
         lines = [`(cannot read the window: ${errorMessage(e)})`];
       }
     }
-    const notes = [...(target.collide.length > 0 ? [collideText(target.collide)] : []), ...(target.reportSource ? [`report from ${shortPath(target.reportSource)}`] : []), ...(target.reportCandidate && target.report !== 'yes' ? [`report-candidate ${shortPath(target.reportCandidate)}; użyj report_from ze ścieżką ${shortPath(target.reportCandidate)}`] : []), ...(target.usage_hint ? [`usage_hint: ${target.usage_hint}`] : []), ...(target.draft_input ? [`draft_input: ${target.draft_input}`] : [])];
+    const notes = [...(target.owner ? [`owner: ${target.owner}`] : []), ...(target.collide.length > 0 ? [collideText(target.collide)] : []), ...(target.reportSource ? [`report from ${shortPath(target.reportSource)}`] : []), ...(target.reportCandidate && target.report !== 'yes' ? [`report-candidate ${shortPath(target.reportCandidate)}; użyj report_from ze ścieżką ${shortPath(target.reportCandidate)}`] : []), ...(target.usage_hint ? [`usage_hint: ${target.usage_hint}`] : []), ...(target.draft_input ? [`draft_input: ${target.draft_input}`] : [])];
     if (target.report === 'yes') notes.push(`decisions ${target.decisionsCount ?? 0}, actions ${target.actionsCount ?? 0}`);
     if (target.promptQueue?.length) notes.push(`${target.promptQueue.length} messages (${target.promptDelivery ?? 'queued'})`);
     preview = { task: target.task, model: `${target.agent} · model: ${target.model} · effort: ${target.effort}`, lines, ...(notes.length > 0 ? { note: notes.join(' · ') } : {}) };
@@ -878,7 +878,7 @@ function queuePreview(v: QueueView): string[] {
   const e = v.entry;
   const body = e.spec.replace(/\r\n/g, '\n').split(/\n---\n/).slice(1).join('\n---\n').split('\n');
   return [
-    `${e.task} · ${e.status}${v.position ? ` · position ${v.position}` : ''}`,
+    `${e.task} · ${e.status}${e.owner ? ` · ${e.owner}` : ''}${v.position ? ` · position ${v.position}` : ''}`,
     `${e.agent} ${e.model}/${e.effort} · priority ${e.priority}`,
     ...(e.after.length > 0 ? [`after: ${e.after.join(', ')}`] : []),
     `start: ${v.condition.text}`,
@@ -1081,7 +1081,7 @@ export function rowCells(row: StatusRow, selected: boolean, cols: BoardColumns, 
   const quiet = !ready && (row.finished || row.hidden);
   const cells: BoardCell[] = [
     { key: 'marker', text: selected ? '▸' : row.collide.length > 0 ? '⚠' : row.hidden ? '·' : '', width: cols.marker, bold: true, ...(!selected && row.collide.length > 0 ? { color: 'yellow' } : {}) },
-    { key: 'task', text: `${row.host ? `[${row.host}] ` : ''}${row.pin ? '📌 ' : ''}${row.task}`, width: cols.task, bold: selected || ready, ...(ready ? { color: 'green' } : {}) },
+    { key: 'task', text: `${row.host ? `[${row.host}] ` : ''}${row.pin ? '📌 ' : ''}${row.task}${row.owner ? ` · ${row.owner}` : ''}`, width: cols.task, bold: selected || ready, ...(ready ? { color: 'green' } : {}) },
     { key: 'who', text: `${providerLabel(row.agent)} ${(PROVIDERS[row.agent as keyof typeof PROVIDERS]?.models.label ?? modelLabel)(row.model, row.effort, row.tokens?.observed?.model, versions)}`, width: cols.who },
     { key: 'state', text: `${icon} ${row.state}${row.question?.includes("zwinięte") ? " (zw.)" : ""}`, width: cols.state, color: STATE_COLOR[row.state] },
     { key: 'time', text: row.duration, width: cols.time },
@@ -1195,7 +1195,7 @@ export function queueCells(view: QueueView, selected: boolean, cols: BoardColumn
   const text = `${view.position === null ? (e.status === 'failed' ? '✗' : '…') : `${view.position}.`} ${view.condition.text}${e.priority === 'high' ? ' · high' : ''}`;
   const cells: BoardCell[] = [
     { key: 'marker', text: selected ? '▸' : '', width: cols.marker, bold: true },
-    { key: 'task', text: `${e.host ? `[${e.host}] ` : ''}${e.task}`, width: cols.task, bold: selected },
+    { key: 'task', text: `${e.host ? `[${e.host}] ` : ''}${e.task}${e.owner ? ` · ${e.owner}` : ''}`, width: cols.task, bold: selected },
     { key: 'who', text: `${providerLabel(e.agent)} ${providerAdapter(e.agent).models.label(e.model, e.effort, undefined, versions)}`, width: cols.who },
     { key: 'report', text, width: wide, ...(e.status === 'failed' ? { color: 'red' } : view.condition.kind === 'blocked' ? { color: 'yellow' } : { dim: true }) },
   ];

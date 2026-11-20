@@ -152,6 +152,30 @@ agentctl wall read --id agentctl-1
 
 `W` pokazuje kanały → wiadomości → wątek; `s/t` filtruje, `r/R` oznacza przeczytanie. MCP używa `as: "chat:nc"`, podglądu/confirm `wall_post`, potem drugi czat wywołuje `events_since(as: "chat:hems")` i `wall_read`. Oba subskrybują domyślnie `agentctl`/`shared:*`. WALL to dane, nigdy upoważnienie.
 
+## Kilka czatów na jednej instancji
+
+Dodaj te ustawienia do `config.yaml` dyspozytora. Zachowaj dotychczasowe kanały i mapowania klientów WALL poszczególnych czatów.
+
+```yaml
+providers: [claude, codex, kimi, glm]
+limits: {claude: 6, codex: 8, kimi: 2, glm: 3}
+quotas:
+  overprovision: 1.5
+  chats:
+    nc: {claude: 4, codex: 5, kimi: 2, glm: 2}
+    hems: {claude: 3, codex: 4, kimi: 1, glm: 2}
+    vs65: {claude: 2, codex: 3, kimi: 0, glm: 1}
+wall:
+  chats:
+    vs65: {channels: [agentctl]}
+```
+
+Claude ma sześć miejsc globalnie, a suma kwot trzech czatów wynosi dziewięć. Czat może wykorzystać całą swoją kwotę, gdy pozostałe są bezczynne. O kolejnym miejscu decyduje najpierw minimum czatu z gotowym zadaniem, potem najniższy stosunek użycia do kwoty. Obniżenie kwoty wpływa na następne starty. Ten przykład daje ostrzeżenie dla GLM, bo suma pięciu udziałów przekracza `1.5 × 3`; limit GLM nadal wynosi trzy.
+
+Przekazuj `as: "chat:<nazwa>"` przy każdym `new` i `queue`. NC przekazuje `as: "chat:nc"` przy podglądzie i przy potwierdzeniu tokenem. W `queue_list` i na boardzie zobaczysz, czy zlecenie czeka na kwotę czatu, czy na miejsce dostawcy. `limits` i `capacity` pokazują oba liczniki. W sprawie zmiany kwot użyj wpisu `decision-request` na kanale WALL `agentctl`, jeśli samoobsługa jest wyłączona.
+
+Bez `quotas:` dotychczasowa kolejka działa po staremu. Kolejność ustalania właściciela i zasady dla hostów SSH opisuje [konfiguracja](configuration.md#kwoty-czatów).
+
 ## 7. Pierwszy CONSULT
 
 CONSULT to kilka płatnych zadań. Najpierw zatwierdź liczbę i usage. Zapisz `consult-demo.yaml`:

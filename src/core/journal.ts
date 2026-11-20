@@ -14,7 +14,7 @@ import { isObject, windowName } from './util.ts';
  * the limits commands write it; `agentctl events` and the MCP tool `events_since` read it for a chat that gets no notifications.
  */
 
-export const JOURNAL_KINDS = ['pulled-auto-close', 'host-unreachable', 'host-recovered','watch-resumed', 'consult', 'tmux-lost', 'machine-load-high', 'machine-load-recovered', 'report-outputs', 'review-added', 'review-repinned', 'gc_suggest', 'gc-freed', 'limited-resume', 'needs-attention', 'report-candidate', 'overloaded', 'overload-retry', 'queue-retry', 'mcp-write', 'disk-warn', 'disk-critical', 'disk-ok', 'report-ready', 'queue-start', 'queue-failed', 'setup-started', 'setup-finished', 'setup-failed', 'node-modules', 'close-cleanup', 'needs-input', 'needs-trust', 'blocked', 'cancelled', 'limited', 'dead', 'orphan', 'cohort-done', 'usage', 'limits-changed', 'report-detected', 'delivery', 'delivery-queued', 'mcp-applied', 'mcp-failed', 'unblocked', 'wall'] as const;
+export const JOURNAL_KINDS = ['pulled-auto-close', 'host-unreachable', 'host-recovered','watch-resumed', 'consult', 'tmux-lost', 'machine-load-high', 'machine-load-recovered', 'report-outputs', 'review-added', 'review-repinned', 'gc_suggest', 'gc-freed', 'limited-resume', 'needs-attention', 'report-candidate', 'overloaded', 'overload-retry', 'queue-retry', 'mcp-write', 'disk-warn', 'disk-critical', 'disk-ok', 'report-ready', 'task-start', 'task-ordered', 'queue-start', 'queue-failed', 'setup-started', 'setup-finished', 'setup-failed', 'node-modules', 'close-cleanup', 'needs-input', 'needs-trust', 'blocked', 'cancelled', 'limited', 'dead', 'orphan', 'cohort-done', 'usage', 'limits-changed', 'report-detected', 'delivery', 'delivery-queued', 'mcp-applied', 'mcp-failed', 'unblocked', 'wall'] as const;
 export type JournalKind = (typeof JOURNAL_KINDS)[number];
 
 export interface JournalEntry {
@@ -23,6 +23,9 @@ export interface JournalEntry {
   kind: JournalKind;
   task?: string;
   cohort?: string;
+  owner?: string;
+  /** Config revision shared by the limits command and watcher. */
+  changeId?: string;
   /** What the notification said, or a short statement of the event. */
   text: string;
   /** One repository command, with a result code only after it exits. */
@@ -69,8 +72,10 @@ export async function recordJournal(ctx: Context, entry: Omit<JournalEntry, 'at'
   return appendJournal(ctx, entry);
 }
 async function appendJournal(ctx: Context, entry: Omit<JournalEntry, 'at'>): Promise<void> {
-  const cohort = entry.cohort ?? (entry.task ? readTaskRecord(ctx.config, windowName(entry.task))?.cohort : undefined);
-  const full: JournalEntry = secretRedactor([ctx.config, process.env, entry], new Set(listTaskRecords(ctx.config).map(r => r.task)))({ at: new Date(ctx.runner.now()).toISOString(), ...entry, ...(cohort ? { cohort } : {}) });
+  const record = entry.task ? readTaskRecord(ctx.config, windowName(entry.task)) : undefined;
+  const cohort = entry.cohort ?? record?.cohort;
+  const owner = entry.owner ?? record?.owner ?? (entry.task && ctx.config.quotas ? 'default' : undefined);
+  const full: JournalEntry = secretRedactor([ctx.config, process.env, entry], new Set(listTaskRecords(ctx.config).map(r => r.task)))({ at: new Date(ctx.runner.now()).toISOString(), ...entry, ...(cohort ? { cohort } : {}), ...(owner ? { owner } : {}) });
   // Belt and braces: a bulky payload once flooded events_since with JSON fragments for days (a gc_suggest carrying a whole
   // GC plan). Known bulky fields are replaced by a pointer past a bound; the text always stays.
   if (full.gc_preview !== undefined && Buffer.byteLength(JSON.stringify(full)) > 4000) full.gc_preview = { dropped: 'oversized payload; details via gc_preview / agentctl gc' };
@@ -111,6 +116,6 @@ export function readJournal(config: Pick<GlobalConfig, 'path'>, sinceMs: number 
 /** Record unless the last entry of this kind said the same within `withinMs` (two writers of one fact: a command and the watcher that noticed it). */
 export async function recordJournalOnce(ctx: Context, entry: Omit<JournalEntry, 'at'>, withinMs = 5 * 60_000): Promise<void> {
   const now = ctx.runner.now();
-  const last = readJournal(ctx.config, now - withinMs).filter((e) => e.kind === entry.kind && e.text === entry.text && (e.task ?? '') === (entry.task ?? ''));
-  if (last.length === 0) await recordJournal(ctx, entry);
+  const seen = readJournal(ctx.config, entry.changeId ? -1 : now - withinMs).some(e => e.kind === entry.kind && (entry.changeId ? e.changeId === entry.changeId : e.text === entry.text && (e.task ?? '') === (entry.task ?? '')));
+  if (!seen) await recordJournal(ctx, entry);
 }

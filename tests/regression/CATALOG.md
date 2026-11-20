@@ -10,6 +10,11 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| QUOTA0250-CONTENTION | A single chat could take the next shared provider slots before another chat had a chance to reach its floor. | `tests/chat-quotas.test.ts` (`^QUOTA0250-CONTENTION:`) | 0.25.0 | fails on v0.24.0 (1 failing of 1) |
+| QUOTA0250-CEILINGS | The queue had no chat ceiling across hosts or utilization tie-break and could not explain a wait for chat capacity. | `tests/chat-quotas.test.ts` (`^QUOTA0250-CEILINGS:`) | 0.25.0 | fails on v0.24.0 (1 failing of 1) |
+| QUOTA0250-IDENTITY | Agent orders on the shared instance lost the ordering chat when confirmed and picked up by watch. | `tests/chat-quotas.test.ts` (`^QUOTA0250-IDENTITY:`) | 0.25.0 | fails on v0.24.0 (1 failing of 1) |
+| QUOTA0250-MANAGEMENT | Any caller with set_limits permission could change shared limits and the WALL did not show those changes. | `tests/chat-quotas.test.ts` (`^QUOTA0250-MANAGEMENT:`) | 0.25.0 | fails on v0.24.0 (1 failing of 1) |
+| QUOTA0250-GLM | Removing the GLM global cap silently restored its built-in limit of two. | `tests/chat-quotas.test.ts` (`^QUOTA0250-GLM:`) | 0.25.0 | fails on v0.24.0 (1 failing of 1) |
 | DISK0248-NM | Parallel worktrees with the same npm lockfile each ran an independent install and consumed a full dependency tree. | `tests/disk0248.test.ts` (`^DISK0248-NM:`) | 0.24.0 | fails on v0.23.3 (1 failing of 1) |
 | DISK0248-CLOSE | Closing finished worktrees left their ignored build and browser files in place. | `tests/disk0248.test.ts` (`^DISK0248-CLOSE:`) | 0.24.0 | fails on v0.23.3 (1 failing of 1) |
 | DISK0248-VOLUME | The queue started worktrees on a mount directory that had fallen back to the internal disk. | `tests/disk0248.test.ts` (`^DISK0248-VOLUME:`) | 0.24.0 | fails on v0.23.3 (1 failing of 1) |
@@ -169,6 +174,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 CHANGELOG identifiers that are features, improvements or studies rather than fixed bugs:
 
+- QUOTA0250: feature: central quotas for chats sharing one instance; admission, owner and edit contracts are tracked above
 - FIX0227-W4-harness: harness assertion aligned with the intentional A3 snapshot contract; production unchanged, covered by W4 in a3-snapshot.test.ts
 - P10: feature: optional tmux.socket and attach hints
 - P44: feature: dedicated dev tmux server documentation and doctor checks

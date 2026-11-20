@@ -1,3 +1,4 @@
+import { chatQuotaWait } from './chat-quotas.ts';
 import { checkHostLimit } from './host-limits.ts';
 import { withStartLock } from './start-lock.ts';
 import { liveWindows } from './plan.ts';
@@ -52,7 +53,7 @@ async function sendPromptsUnlocked(ctx: Context, items: SendItem[]): Promise<Sen
     if (record && record.agent !== 'unknown' && !runner.dryRun) {
       const live = await liveWindows(ctx);
       if (live.some(w => w.window === item.window && w.counted === false)) {
-        const full = checkWindowLimit(record.agent, config.limits[record.agent], live, config.session) ?? checkHostLimit(config, { ...record, agent: record.agent }, live);
+        const full = checkWindowLimit(record.agent, config.limits[record.agent], live, config.session) ?? checkHostLimit(config, { ...record, agent: record.agent }, live) ?? chatQuotaWait(config, { ...record, agent: record.agent }, live);
         if (full) {
           warning = `${full} report-ready follow-up not sent; close a working window or raise the limit first.`;
           results.push({ task: item.task, message: warning, warning }); ctx.info(warning); continue;

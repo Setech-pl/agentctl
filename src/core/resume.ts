@@ -1,3 +1,4 @@
+import { chatQuotaWait } from './chat-quotas.ts';
 import { checkHostLimit } from './host-limits.ts';
 import { installRemoteHooks } from './host-task.ts';
 import { writeLaunchScript } from './launch-script.ts';
@@ -32,6 +33,7 @@ import { AgentctlError, plural } from './util.ts';
  */
 
 export interface ResumeCandidate {
+  owner?: string;
   host?: string;
   task: string;
   window: string;
@@ -63,7 +65,7 @@ export async function findResumable(ctx: Context, opts: { all?: boolean; rows?: 
     if (hasReport && !opts.all) continue;
     const sessions = readTaskSessions(ctx.config, record.window);
     const sessionId = (sessions[record.agent] ?? []).at(-1)?.id;
-    out.push({ host: record.host, task: row.task, window: record.window, agent: record.agent, model: record.model, effort: record.effort, worktree, ...(sessionId ? { sessionId } : {}), hasReport });
+    out.push({ owner: record.owner, host: record.host, task: row.task, window: record.window, agent: record.agent, model: record.model, effort: record.effort, worktree, ...(sessionId ? { sessionId } : {}), hasReport });
   }
   return out;
 }
@@ -94,12 +96,12 @@ export async function planResume(ctx: Context, typed: string[], opts: { all?: bo
   for (const c of chosen) {
     if (!isActive(config, c.agent)) { skipped.push({ task: c.task, reason: `provider ${c.agent} is not enabled` }); continue; }
     if (occupied.some(w => w.window === c.window)) { skipped.push({ task: c.task, reason: 'task is already starting or running' }); continue; }
-    const problem = checkHostLimit(config, c, occupied) ?? checkWindowLimit(c.agent, config.limits[c.agent], occupied, config.session);
+    const problem = checkHostLimit(config, c, occupied) ?? checkWindowLimit(c.agent, config.limits[c.agent], occupied, config.session) ?? chatQuotaWait(config, c, occupied);
     if (problem) {
       skipped.push({ task: c.task, reason: problem });
       continue;
     }
-    occupied.push({ window: c.window, agent: c.agent, host: c.host });
+    occupied.push({ window: c.window, agent: c.agent, host: c.host, owner: c.owner });
     items.push(c);
   }
   const summary = [

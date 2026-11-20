@@ -982,6 +982,56 @@
       "ready timeout: the window stays, start-failure-screen.txt is saved, the failure line, queue_list and peek name it; queue_retry closes the window and starts again"
     ]
   },
+  "QUOTA0250-CEILINGS": {
+    "rev": "v0.24.0",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "QUOTA0250-CEILINGS: chat use spans hosts, per_host changes shares only, and equal ratios retain queue priority",
+      "QUOTA0250-CEILINGS: chat use spans hosts, per_host changes shares only, and equal ratios retain queue priority"
+    ]
+  },
+  "QUOTA0250-CONTENTION": {
+    "rev": "v0.24.0",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "QUOTA0250-CONTENTION: below-floor chat takes the first place, lowest ratio takes the second, existing work stays",
+      "QUOTA0250-CONTENTION: below-floor chat takes the first place, lowest ratio takes the second, existing work stays"
+    ]
+  },
+  "QUOTA0250-GLM": {
+    "rev": "v0.24.0",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "QUOTA0250-GLM: removing the global GLM cap does not restore the default cap",
+      "QUOTA0250-GLM: removing the global GLM cap does not restore the default cap"
+    ]
+  },
+  "QUOTA0250-IDENTITY": {
+    "rev": "v0.24.0",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "QUOTA0250-IDENTITY: MCP confirmation records caller ownership and watcher validation preserves it",
+      "QUOTA0250-IDENTITY: MCP confirmation records caller ownership and watcher validation preserves it"
+    ]
+  },
+  "QUOTA0250-MANAGEMENT": {
+    "rev": "v0.24.0",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "QUOTA0250-MANAGEMENT: scoped edits respect overprovision and announce each revision once",
+      "QUOTA0250-MANAGEMENT: scoped edits respect overprovision and announce each revision once"
+    ]
+  },
   "R1-redact": {
     "rev": "v0.18.2",
     "outcome": "FAILS",

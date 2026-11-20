@@ -68,7 +68,7 @@ export async function reviewTick(ctx: Context): Promise<string[]> {
           if (!base) throw new AgentctlError(`${author.task}: review base for ${repo.path} is n/d`);
           bases[repo.path] = await git(base);
         }
-        const { raw, delta } = buildReviewRaw(ctx, author, task, { task, ...order, review_of: author.task, review: false, after: [author.task], ...(author.cohort ? { cohort: author.cohort } : {}) }, heads, bases);
+        const { raw, delta } = buildReviewRaw(ctx, author, task, { task, ...order, review_of: author.task, review: false, after: [author.task], ...(author.cohort ? { cohort: author.cohort } : {}), ...(author.owner ? { owner: author.owner } : {}) }, heads, bases);
         const known = [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config), ...readQueue(ctx.config)].find(r => r.task === task);
         if (known && (known.autoReview?.author !== author.task || known.autoReview.hash !== report.signature)) throw new AgentctlError(`${task} already exists and is not this automatic review; choose another task ID for the existing task`);
         if (!known) {

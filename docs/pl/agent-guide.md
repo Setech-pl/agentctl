@@ -1,5 +1,7 @@
 # Przewodnik agenta zlecającego
 
+W MCP zawsze przekazuj `as: "chat:<nazwa>"` w `new` i `queue`, aby zlecenie zajęło miejsce we właściwej kwocie. Potwierdzaj z tą samą tożsamością.
+
 ## Ustal bieżące fakty
 
 Każdą odpowiedź o pracy zaczynaj od events_since z tożsamością czatu WALL. Na początku sesji czytaj guide (project + lang) i capacity. Guide może zawierać zaufaną nakładkę repo z .agentctl.yaml; czat nie wymyśla jej ścieżki. Version/mcp_check diagnozuje stary proces. Status pobieraj dla brakujących szczegółów, peek dla pytania, pull_ready dla podsumowań nowych raportów, get_report dla dowodów.
