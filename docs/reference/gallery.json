@@ -6,83 +6,83 @@
   "captures": [
     {
       "name": "board-main",
-      "bytes": 154051
+      "bytes": 163331
     },
     {
       "name": "board-peek",
-      "bytes": 171203
+      "bytes": 182974
     },
     {
       "name": "board-message",
-      "bytes": 174995
+      "bytes": 186608
     },
     {
       "name": "board-confirm",
-      "bytes": 173670
+      "bytes": 185349
     },
     {
       "name": "board-cancel-reason",
-      "bytes": 173400
+      "bytes": 185070
     },
     {
       "name": "board-help",
-      "bytes": 214492
+      "bytes": 210710
     },
     {
       "name": "board-cohorts",
-      "bytes": 175899
+      "bytes": 187491
     },
     {
       "name": "board-limits",
-      "bytes": 86579
+      "bytes": 81955
     },
     {
       "name": "board-capacity",
-      "bytes": 151720
+      "bytes": 147081
     },
     {
       "name": "board-gc",
-      "bytes": 70240
+      "bytes": 73113
     },
     {
       "name": "board-log",
-      "bytes": 51855
+      "bytes": 47155
     },
     {
       "name": "board-queue",
-      "bytes": 164177
+      "bytes": 173599
     },
     {
       "name": "wall-channels",
-      "bytes": 70624
+      "bytes": 67042
     },
     {
       "name": "wall-messages",
-      "bytes": 60042
+      "bytes": 56972
     },
     {
       "name": "wall-filter-status",
-      "bytes": 46155
+      "bytes": 42848
     },
     {
       "name": "wall-filter-kind",
-      "bytes": 47573
+      "bytes": 44394
     },
     {
       "name": "wall-thread",
-      "bytes": 81784
+      "bytes": 77751
     },
     {
       "name": "board-report-fail",
-      "bytes": 153470
+      "bytes": 162646
     },
     {
       "name": "board-finished-menu",
-      "bytes": 161281
+      "bytes": 168046
     },
     {
       "name": "board-all",
-      "bytes": 157951
+      "bytes": 164606
     }
   ],
   "taskStates": [

@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- ROWSEL0252 was prepared for 0.25.2. / Poprawkę ROWSEL0252 przygotowano do wydania 0.25.2.
+
 - NOTIFY0251 was prepared for 0.25.1. / Poprawkę NOTIFY0251 przygotowano do wydania 0.25.1.
 - NOTIFY0251-SOCKET: Isolated tmux gates fit 67-byte task cache paths. / Izolowane bramki tmux działają ze ścieżką cache zadania o długości 67 bajtów.
 
@@ -11,6 +13,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - SNAP0247 was prepared for 0.23.3. / Poprawka SNAP0247 została przygotowana do wydania 0.23.3.
 - DISK0248 was prepared for 0.24.0. / Zmiany DISK0248 zostały przygotowane do wydania 0.24.0.
+
+## [0.25.2] - 2026-11-20
+
+- ROWSEL0252: Selected task, queue, pulled-cohort and WALL rows use a full-width high-contrast bar. The task bar dims while the preview has focus, and `board.selection` controls the style. / Zaznaczenie zadania, wiersza kolejki, nagłówka odebranej kohorty i wiersza WALL ma kontrastowe tło na całej szerokości. Tło listy przygasa po przejściu do podglądu, a styl można ustawić przez `board.selection`.
 
 ## [0.25.1] - 2026-11-20
 

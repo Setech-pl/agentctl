@@ -4,7 +4,12 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { describe, it } from 'node:test';
+import { stripVTControlCharacters } from 'node:util';
 import { runBoardApp } from '../src/board/app.ts';
+import { parseAnsi, THEME } from '../scripts/render-ansi.ts';
+import type { GlobalConfig } from '../src/core/config.ts';
+import { commitQueueAdd, planQueueAdd } from '../src/core/queue.ts';
+import { splitSpecs } from '../src/core/spec.ts';
 import { FakeTmux, makeConfig, makeContext, seedTask, useScratch } from './helpers.ts';
 
 const scratch = useScratch();
@@ -22,6 +27,7 @@ class FakeTerminal extends EventEmitter {
   }
   write(chunk: string, ...rest: unknown[]): boolean {
     this.frames.push(String(chunk));
+    this.emit('frame', String(chunk));
     // Like a real stream: tell the writer it is done (Ink waits for this when it exits).
     const done = rest.find((r) => typeof r === 'function') as (() => void) | undefined;
     done?.();
@@ -33,6 +39,47 @@ class FakeTerminal extends EventEmitter {
     // eslint-disable-next-line no-control-regex
     return (last ?? '').replace(/\u001b\[[0-9;?]*[A-Za-z]/g, '');
   }
+  async frameMatching(match: (frame: string) => boolean, after = 0): Promise<string> {
+    const previous = this.frames.slice(after).findLast(match);
+    if (previous !== undefined) return previous;
+    return new Promise((resolve, reject) => {
+      const listener = (frame: string) => {
+        if (!match(frame)) return;
+        clearTimeout(timer);
+        this.off('frame', listener);
+        resolve(frame);
+      };
+      const timer = setTimeout(() => {
+        this.off('frame', listener);
+        reject(new Error(`expected terminal frame was never emitted:\n${stripVTControlCharacters(this.frames.at(-1) ?? '')}`));
+      }, 10_000);
+      this.on('frame', listener);
+    });
+  }
+}
+
+function terminalEnv(values: NodeJS.ProcessEnv): () => void {
+  const names = ['TERM', 'COLORTERM', 'NO_COLOR', 'FORCE_COLOR'];
+  const original = Object.fromEntries(names.map(name => [name, process.env[name]]));
+  const apply = (env: NodeJS.ProcessEnv) => {
+    for (const name of names) {
+      const value = env[name];
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  };
+  apply(values);
+  return () => apply(original);
+}
+
+function rowStyle(frame: string, width: number, row: string, expected: { bg: string; fg: string; bold: boolean }) {
+  const line = frame.split('\n').find(l => stripVTControlCharacters(l).trimStart().startsWith(row));
+  assert.ok(line, `missing row ${row} in:\n${stripVTControlCharacters(frame)}`);
+  const cells = parseAnsi(line, width)[0]!;
+  for (const [column, { bg, fg, bold, dim }] of cells.slice(0, width).entries()) {
+    assert.deepEqual({ bg, fg, bold, dim }, { ...expected, dim: false }, `${row} column ${column + 1}`);
+  }
+  return cells;
 }
 
 class FakeKeyboard extends PassThrough {
@@ -59,14 +106,7 @@ async function until(check: () => boolean, ms = 4000): Promise<void> {
 }
 
 describe('board: the Ink front renders the model', () => {
-  function setup(name: string, columns: number, yaml = '', snapshotAgeMs?: number) {
-    const config = makeConfig(scratch.sub(name), yaml);
-    seedTask(config, 'NC-1', { repos: [] });
-    const finished = seedTask(config, 'NC-2', { agent: 'codex', model: 'gpt-6.1-sol', effort: 'low', supersededBy: 'NC-1' });
-    fs.mkdirSync(path.dirname(finished.report), { recursive: true });
-    fs.writeFileSync(finished.report, 'Werdykt: PASS\n');
-    const tmux = new FakeTmux();
-    tmux.add('nc-1', '● Reading src/menu.ts\n  ⏵⏵ auto (shift+tab to cycle) · esc to interrupt\n');
+  function launch(config: GlobalConfig, columns: number, tmux: FakeTmux, snapshotAgeMs?: number) {
     const made = makeContext(config, { respond: tmux.respond });
     if (snapshotAgeMs !== undefined) fs.writeFileSync(path.join(config.stateDir, 'mcp-state-snapshot.json'), JSON.stringify({version: 1, at: made.runner.now() - snapshotAgeMs}));
     const term = new FakeTerminal(columns, 24);
@@ -74,6 +114,112 @@ describe('board: the Ink front renders the model', () => {
     const done = runBoardApp(made.ctx, true, { stdout: term as unknown as NodeJS.WriteStream, stdin: keys as unknown as NodeJS.ReadStream });
     return { ...made, tmux, term, keys, done };
   }
+
+  function setup(name: string, columns: number, yaml = '', snapshotAgeMs?: number, reportReady = false) {
+    const config = makeConfig(scratch.sub(name), yaml);
+    const active = seedTask(config, 'NC-1', { repos: [] });
+    if (reportReady) {
+      fs.mkdirSync(path.dirname(active.report), { recursive: true });
+      fs.writeFileSync(active.report, 'Werdykt: PASS\n\n<!-- agentctl:report-end -->\n');
+    }
+    const finished = seedTask(config, 'NC-2', { agent: 'codex', model: 'gpt-6.1-sol', effort: 'low', supersededBy: 'NC-1' });
+    fs.mkdirSync(path.dirname(finished.report), { recursive: true });
+    fs.writeFileSync(finished.report, 'Werdykt: PASS\n');
+    const tmux = new FakeTmux();
+    if (!reportReady) tmux.add('nc-1', '● Reading src/menu.ts\n  ⏵⏵ auto (shift+tab to cycle) · esc to interrupt\n');
+    return launch(config, columns, tmux, snapshotAgeMs);
+  }
+
+  it('ROWSEL0252: a report-ready warning row, including its clipped cells and padding, is one 256-color bar', async () => {
+    const restore = terminalEnv({ TERM: 'screen-256color' });
+    const { term, keys, done } = setup('selection-256', 55, 'watch: {window_icons: {report-ready: "⚠"}}\n', undefined, true);
+    try {
+      const frame = await term.frameMatching(f => /NC-1\s+.*⚠ report-ready/.test(stripVTControlCharacters(f)));
+      const cells = rowStyle(frame, 55, '▸ NC-1', { bg: 'rgb(0,95,135)', fg: THEME.ansi[15]!, bold: true });
+      assert.equal(cells.length, 55);
+      assert.match(cells.map(cell => cell.ch).join(''), /⚠ report-ready/);
+    } finally { keys.write('q'); await done; restore(); }
+  });
+
+  for (const [name, env, yaml, style] of [
+    ['16-color', { TERM: 'xterm' }, '', { bg: THEME.foreground, fg: THEME.background, bold: true }],
+    ['NO_COLOR', { TERM: 'xterm-256color', COLORTERM: 'truecolor', NO_COLOR: '1' }, '', { bg: THEME.foreground, fg: THEME.background, bold: false }],
+    ['monochrome', { TERM: 'dumb' }, '', { bg: THEME.foreground, fg: THEME.background, bold: false }],
+    ['custom palette', { TERM: 'xterm-256color' }, 'board: {selection: {bg: "#005f87", fg: 231, bold: false}}\n', { bg: 'rgb(0,95,135)', fg: 'rgb(255,255,255)', bold: false }],
+    ['custom reverse', { TERM: 'xterm-256color' }, 'board: {selection: {style: reverse, bold: false}}\n', { bg: THEME.foreground, fg: THEME.background, bold: false }],
+  ] as const) {
+    it(`renders the entire selection in ${name}`, async () => {
+      const restore = terminalEnv(env);
+      const { term, keys, done } = setup(`selection-${name}`, 80, yaml);
+      try {
+        const frame = await term.frameMatching(f => f.includes('Finished (1)'));
+        rowStyle(frame, 80, '▸ NC-1', style);
+      } finally { keys.write('q'); await done; restore(); }
+    });
+  }
+
+  it('changes only the selected row when focus changes, with no data refresh', async () => {
+    const restore = terminalEnv({ TERM: 'xterm-256color', COLORTERM: 'truecolor' });
+    const { term, keys, done, runner } = setup('selection-focus', 160, 'board: {list_width: 100}\n');
+    try {
+      const left = await term.frameMatching(f => stripVTControlCharacters(f).includes('NC-1 · last'));
+      const count = runner.queries.length;
+      const fg = THEME.ansi[15]!;
+      const leftCells = rowStyle(left, 100, '▸ NC-1', { bg: 'rgb(47,79,127)', fg, bold: true });
+      assert.equal(leftCells[99]?.ch, ' ');
+      assert.equal(leftCells[100]?.ch, '│');
+      assert.equal(leftCells[100]?.bg, null);
+      keys.write('\u001b[C');
+      const right = await term.frameMatching(f => f.includes('51;58;69'));
+      rowStyle(right, 100, '▸ NC-1', { bg: 'rgb(51,58,69)', fg, bold: true });
+      const lines = left.split('\n');
+      const changed = right.split('\n').filter((line, i) => line !== lines[i]);
+      assert.equal(changed.length, 1);
+      assert.match(stripVTControlCharacters(changed[0]!), /▸ NC-1/);
+      const countBeforeReturn = term.frames.length;
+      keys.write('\t');
+      assert.equal(await term.frameMatching(f => f === left, countBeforeReturn), left);
+      assert.equal(runner.queries.length, count);
+    } finally { keys.write('q'); await done; restore(); }
+  });
+
+  it('uses the same full-width style in the queue, pulled cohort and WALL lists', async () => {
+    const config = makeConfig(scratch.sub('selection-lists'));
+    const tmux = new FakeTmux();
+    const read = seedTask(config, 'READ-1', { cohort: 'wave', turnEndedAt: '2026-10-31T11:30:00.000Z', pulled: '2026-10-31T11:50:00.000Z' });
+    fs.mkdirSync(path.dirname(read.report), { recursive: true });
+    fs.writeFileSync(read.report, 'Werdykt: PASS\n\n<!-- agentctl:report-end -->\n');
+    const reportedAt = new Date('2026-10-31T11:45:00Z');
+    fs.utimesSync(read.report, reportedAt, reportedAt);
+    const { ctx } = makeContext(config, { respond: tmux.respond });
+    const repo = scratch.sub('selection-lists/repo');
+    const queue = await planQueueAdd(ctx, splitSpecs(`---\ntask: Q-1\nagent: claude\nrepos: [{path: ${repo}, worktree: ${repo}-q1}]\n---\nTest task.\n`, 'board-test'));
+    await commitQueueAdd(ctx, queue.items);
+    const restore = terminalEnv({ TERM: 'screen-256color' });
+    const { term, keys, done } = launch(config, 100, tmux);
+    const style = { bg: 'rgb(0,95,135)', fg: THEME.ansi[15]!, bold: true };
+    let wallOpen = false;
+    try {
+      const queued = await term.frameMatching(f => stripVTControlCharacters(f).includes('Q-1') && f.includes('odebrane'));
+      rowStyle(queued, 100, '▸ Q-1', style);
+      keys.write('j');
+      const cohort = await term.frameMatching(f => /▸.*odebrane/.test(stripVTControlCharacters(f)));
+      rowStyle(cohort, 100, '▸', style);
+      keys.write('W');
+      wallOpen = true;
+      const wall = await term.frameMatching(f => f.includes('WALL – channels') && f.includes('agentctl        '));
+      rowStyle(wall, 100, 'agentctl        ', style);
+    } finally {
+      if (wallOpen) {
+        const after = term.frames.length;
+        keys.write('W');
+        await term.frameMatching(f => f.includes('TASK') && f.includes('Q-1'), after);
+      }
+      keys.write('q');
+      await done;
+      restore();
+    }
+  });
 
   it('at 80 columns it shows the list without the preview, each line within 80 columns, and q leaves', async () => {
     const { term, keys, done } = setup('rd1', 80);

@@ -1158,6 +1158,17 @@
       "REL0244-LIVE-EVIDENCE: release collects every live result after earlier failures"
     ]
   },
+  "ROWSEL0252": {
+    "rev": "v0.25.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "ROWSEL0252: a report-ready warning row, including its clipped cells and padding, is one 256-color bar",
+      "board: the Ink front renders the model",
+      "ROWSEL0252: a report-ready warning row, including its clipped cells and padding, is one 256-color bar"
+    ]
+  },
   "SNAP0247": {
     "rev": "v0.23.2",
     "outcome": "FAILS",

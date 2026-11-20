@@ -472,12 +472,14 @@ export async function captureBoard(cacheRoot: string): Promise<{ ansi: string; p
       throw new Error(`board never showed ${what}:\n${plain()}`);
     };
     await until('every task and the usage panel', (s) => TASKS.every((t) => s.includes(t.id)) && /codex .*83%/.test(s) && /↻/.test(s));
-    for (let i = 0; i < 25 && !/▸\s*UI-CART-2/.test(plain()); i++) {
+    // The selected collision keeps its warning marker. The preview heading identifies the selection.
+    const selected = (screen: string) => /│\s+UI-CART-2 · ⚠/.test(screen);
+    for (let i = 0; i < 25 && !selected(plain()); i++) {
       h.tmux(['send-keys', '-t', target, 'Down']);
       await sleep(250);
     }
     await sleep(2500); // a refresh (the git progress and the preview of the selected window arrive with it)
-    const ready = await until('the selected task and its preview', (s) => /▸\s*UI-CART-2/.test(s) && s.includes('Press enter to confirm') && /⚠/.test(s));
+    const ready = await until('the selected task and its preview', (s) => selected(s) && s.includes('Press enter to confirm'));
     const ansi = h.tmux(['capture-pane', '-e', '-p', '-t', target]).stdout;
     return { ansi, plain: ready };
   });

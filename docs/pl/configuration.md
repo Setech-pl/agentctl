@@ -235,9 +235,12 @@ Właściciel zmienia ustawienia przez `agentctl limits set quota.nc.claude=4 ove
 | `board.list_width` | integer >=64 or percentage string · automatic · g | Kolumny >=64 lub procent; z peek maksymalnie szerokość minus 32. |
 | `board.cohorts_recent` | integer >= 1 · `10` · g | Ostatnie kohorty w wyborze, starsze pod osobną pozycją. |
 | `board.window_title` | boolean · `true` · g | Tytuły terminala usług i tej sesji. |
-| `board.selected_color` | Ink color name · `blue` · g | Kolor zaznaczenia poza komórką stanu. |
+| `board.selection` | mapa · `{}` · g | Pola to `bg` i `fg` (cytowane `"#RRGGBB"` lub liczba całkowita 0–255), `bold` (logiczna, domyślnie `true`) oraz `style` (`bar` lub `reverse`, domyślnie `bar`). |
+| `board.selected_color` | starsza nazwa koloru Ink · g | Akceptowana dla zgodności. Do ustawiania kolorów zaznaczenia służy `board.selection`. |
 | `notify.mcp_writes` | `summary` · global | all/summary/off; domyślnie summary. |
 | `notify.mcp_writes_interval_s` | `60` · global | Odstęp podsumowań zapisów. |
+
+Zaznaczenie pokrywa całą szerokość panelu listy, łącznie z przerwami między kolumnami. Terminale z 256 kolorami lub truecolor domyślnie pokazują pogrubiony biały tekst na ciemnoniebieskim tle. Gdy podgląd jest widoczny, Tab oraz strzałki w lewo i w prawo przełączają aktywny panel. Strzałki w górę i w dół oraz Page Up i Page Down przewijają aktywny podgląd, a zaznaczenie na liście pozostaje widoczne na szaroniebieskim tle. W terminalach z 256 kolorami zapis szesnastkowy jest dopasowywany do najbliższego koloru z rozszerzonej palety. Terminal z 16 kolorami stosuje odwrócenie kolorów z pogrubieniem, gdy lista jest aktywna. Terminal monochromatyczny lub niepuste `NO_COLOR` włącza odwrócenie kolorów. `agentctl doctor` zgłasza błędne ustawienia zaznaczenia.
 
 ## Kolejka, MCP, WALL i utrzymanie
 

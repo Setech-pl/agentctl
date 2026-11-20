@@ -183,6 +183,8 @@ export interface BoardState {
   now?: number;
   /** The selected task; kept across refreshes while the task exists. */
   selected: string | null;
+  /** Offset from the end of the preview while the right pane has keyboard focus. */
+  previewFocus?: number | undefined;
   mode: BoardMode;
   notice: Notice | null;
   preview: Preview | null;
@@ -271,6 +273,8 @@ export type BoardEffect =
 export interface KeyPress {
   upArrow?: boolean;
   downArrow?: boolean;
+  leftArrow?: boolean;
+  rightArrow?: boolean;
   pageUp?: boolean;
   pageDown?: boolean;
   return?: boolean;
@@ -407,9 +411,22 @@ const toList = (state: BoardState): BoardState => ({ ...state, mode: { kind: 'li
 /** Pasted text arrives as one string, possibly with line breaks; the field is a single line. */
 const printable = (input: string): string => input.replace(/\r?\n|\r/g, ' ').replace(/[\u0000-\u001f\u007f]/g, '');
 
-function listKey(state: BoardState, input: string, key: KeyPress): KeyResult {
+function listKey(state: BoardState, input: string, key: KeyPress, previewRoom: number): KeyResult {
   const stay = (s: BoardState = state, effects: BoardEffect[] = []): KeyResult => ({ state: s, effects });
   if ((input === 'q' && !key.ctrl && !key.meta) || (key.ctrl && input === 'c')) return stay({ ...state, quit: true }, [{ type: 'quit' }]);
+
+  if (boardLayout(state.width).showPreview) {
+    if (key.tab || key.leftArrow || key.rightArrow || (key.escape && state.previewFocus !== undefined)) {
+      const right = key.rightArrow || (key.tab && state.previewFocus === undefined);
+      return stay({ ...state, previewFocus: right ? state.previewFocus ?? 0 : undefined });
+    }
+    if (state.previewFocus !== undefined) {
+      const step = key.pageUp ? previewRoom : key.pageDown ? -previewRoom : key.upArrow ? 1 : key.downArrow ? -1 : 0;
+      if (!step) return stay();
+      const max = Math.max(0, (state.preview?.lines.length ?? 0) - previewRoom);
+      return stay({ ...state, previewFocus: Math.max(0, Math.min(max, Math.min(max, state.previewFocus) + step)) });
+    }
+  }
 
   // k is the cohort filter now; the arrow up moves up (j still moves down).
   const move = key.upArrow ? -1 : key.downArrow || input === 'j' ? 1 : 0;
@@ -680,10 +697,10 @@ function confirmKey(state: BoardState, mode: Extract<BoardMode, { kind: 'confirm
 }
 
 /** What a key press does: the new state and the effects for the front to run. Pure. */
-export function handleKey(state: BoardState, input: string, key: KeyPress): KeyResult {
+export function handleKey(state: BoardState, input: string, key: KeyPress, previewRoom = 1): KeyResult {
   switch (state.mode.kind) {
     case 'list':
-      return listKey(state, input, key);
+      return listKey(state, input, key, previewRoom);
     case 'input':
       return inputKey(state, state.mode, input, key);
     case 'finished':
@@ -760,7 +777,9 @@ export function applySnapshot(state: BoardState, snap: BoardSnapshot): BoardStat
 }
 
 export const withLoadError = (state: BoardState, message: string): BoardState => ({ ...state, loadError: message });
-export const withSize = (state: BoardState, width: number, height: number): BoardState => ({ ...state, width, height });
+export const withSize = (state: BoardState, width: number, height: number): BoardState => ({
+  ...state, width, height, previewFocus: boardLayout(width).showPreview ? state.previewFocus : undefined,
+});
 export const withBusy = (state: BoardState, busy: string | null): BoardState => ({ ...state, busy });
 export const clearNotice = (state: BoardState): BoardState => (state.notice ? { ...state, notice: null } : state);
 export const showNotice = (state: BoardState, notice: Notice): BoardState => ({ ...state, notice });
@@ -1074,14 +1093,14 @@ export function reportLabel(row: StatusRow): string {
   return row.pulled ? 'pulled' : 'ready';
 }
 
-export function rowCells(row: StatusRow, selected: boolean, cols: BoardColumns, icons: Record<TaskState, string> | null = null, selectedColor = 'blue', versions: Readonly<Record<string, string>> = {}): BoardCell[] {
+export function rowCells(row: StatusRow, selected: boolean, cols: BoardColumns, icons: Record<TaskState, string> | null = null, versions: Readonly<Record<string, string>> = {}): BoardCell[] {
   const icon = (icons ?? DEFAULT_WINDOW_ICONS)[row.state];
   // Finished and hidden tasks are dimmed: they are history, not work in progress.
   const ready = needsPull(row);
   const quiet = !ready && (row.finished || row.hidden);
   const cells: BoardCell[] = [
-    { key: 'marker', text: selected ? '▸' : row.collide.length > 0 ? '⚠' : row.hidden ? '·' : '', width: cols.marker, bold: true, ...(!selected && row.collide.length > 0 ? { color: 'yellow' } : {}) },
-    { key: 'task', text: `${row.host ? `[${row.host}] ` : ''}${row.pin ? '📌 ' : ''}${row.task}${row.owner ? ` · ${row.owner}` : ''}`, width: cols.task, bold: selected || ready, ...(ready ? { color: 'green' } : {}) },
+    { key: 'marker', text: row.collide.length > 0 ? '⚠' : selected ? '▸' : row.hidden ? '·' : '', width: cols.marker, bold: true, ...(row.collide.length > 0 ? { color: 'yellow' } : {}) },
+    { key: 'task', text: `${row.host ? `[${row.host}] ` : ''}${row.pin ? '📌 ' : ''}${row.task}${row.owner ? ` · ${row.owner}` : ''}`, width: cols.task, bold: ready, ...(ready ? { color: 'green' } : {}) },
     { key: 'who', text: `${providerLabel(row.agent)} ${(PROVIDERS[row.agent as keyof typeof PROVIDERS]?.models.label ?? modelLabel)(row.model, row.effort, row.tokens?.observed?.model, versions)}`, width: cols.who },
     { key: 'state', text: `${icon} ${row.state}${row.question?.includes("zwinięte") ? " (zw.)" : ""}`, width: cols.state, color: STATE_COLOR[row.state] },
     { key: 'time', text: row.duration, width: cols.time },
@@ -1089,8 +1108,7 @@ export function rowCells(row: StatusRow, selected: boolean, cols: BoardColumns, 
     { key: 'progress', text: row.progress?.text ?? '-', width: cols.progress },
     { key: 'report', text: reportLabel(row), width: cols.report, ...(row.report === 'missing' ? { dim: true } : row.pulled ? {} : { color: 'green' }) },
   ];
-  const subdued = quiet ? cells.map((c) => (c.key === 'marker' ? c : { ...c, dim: true, ...(c.color ? { color: 'gray' } : {}) })) : cells;
-  return selected ? subdued.map((c) => ({ ...c, bold: true, ...(!process.env.NO_COLOR && !c.color ? { color: selectedColor } : {}) })) : subdued;
+  return quiet && !selected ? cells.map((c) => (c.key === 'marker' ? c : { ...c, dim: true, ...(c.color ? { color: 'gray' } : {}) })) : cells;
 }
 
 // ---- the usage panel
@@ -1189,17 +1207,17 @@ export function queueTitle(count: number, paused: boolean): string {
 }
 
 /** A queued task as cells: the task, what it runs, and one wide cell for the place in line and what it waits for. */
-export function queueCells(view: QueueView, selected: boolean, cols: BoardColumns, selectedColor = 'blue', versions: Readonly<Record<string, string>> = {}): BoardCell[] {
+export function queueCells(view: QueueView, selected: boolean, cols: BoardColumns, versions: Readonly<Record<string, string>> = {}): BoardCell[] {
   const e = view.entry;
   const wide = cols.state + cols.time + (cols.tokens ?? 0) + cols.progress + cols.report + (cols.tokens ? 4 : 3);
   const text = `${view.position === null ? (e.status === 'failed' ? '✗' : '…') : `${view.position}.`} ${view.condition.text}${e.priority === 'high' ? ' · high' : ''}`;
   const cells: BoardCell[] = [
     { key: 'marker', text: selected ? '▸' : '', width: cols.marker, bold: true },
-    { key: 'task', text: `${e.host ? `[${e.host}] ` : ''}${e.task}${e.owner ? ` · ${e.owner}` : ''}`, width: cols.task, bold: selected },
+    { key: 'task', text: `${e.host ? `[${e.host}] ` : ''}${e.task}${e.owner ? ` · ${e.owner}` : ''}`, width: cols.task },
     { key: 'who', text: `${providerLabel(e.agent)} ${providerAdapter(e.agent).models.label(e.model, e.effort, undefined, versions)}`, width: cols.who },
     { key: 'report', text, width: wide, ...(e.status === 'failed' ? { color: 'red' } : view.condition.kind === 'blocked' ? { color: 'yellow' } : { dim: true }) },
   ];
-  return selected ? cells.map((c) => ({ ...c, bold: true, ...(!process.env.NO_COLOR && !c.color ? { color: selectedColor } : {}) })) : cells;
+  return cells;
 }
 
 /** `Finished (3)` title that stands between the active and the finished rows (or under the active ones while the section is closed). */
@@ -1286,6 +1304,7 @@ export const HELP_LINES: string[] = [
   '          – = unknown; full selected model and effort appear above',
   '',
   '  ↑ ↓ (j)     select a task (↑ up, ↓ or j down)',
+  '  Tab / ← →   focus the list or preview; ↑ ↓ and PgUp/PgDn scroll the preview',
   '  Enter       go to the task window (tmux switch-client); back: F12 or Ctrl-b l',
   '              on a finished task (no window): a menu (c copy, x close, h hide)',
   '              🧭 line = the manager (the session you open from the phone):',

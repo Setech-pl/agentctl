@@ -58,6 +58,7 @@ import { applyInstanceLabel, instanceName } from '../core/instance.ts';
 import { packageVersion } from '../core/version.ts';
 import { wallBadgeDue, wallUnread, wallView } from '../core/board-wall.ts';
 import { loadWallBoard, markRead, ownerThreadLines } from '../core/wall.ts';
+import { selectionColorDepth, selectionStyle, selectionText } from './selection.ts';
 
 /*
  * The Ink front of `agentctl board`: draws a BoardState and forwards keys to handleKey. No JSX: the project runs on Node's
@@ -69,7 +70,7 @@ const h = React.createElement;
 /** A notice stays on the footer this long. */
 const NOTICE_MS = 6000;
 
-function Cells(props: { cells: BoardCell[]; inverse?: boolean }): React.ReactElement {
+function Cells(props: { cells: BoardCell[] }): React.ReactElement {
   return h(
     Box,
     { flexDirection: 'row' },
@@ -77,16 +78,23 @@ function Cells(props: { cells: BoardCell[]; inverse?: boolean }): React.ReactEle
       h(
         Box,
         { key: c.key, width: c.width, marginRight: c.key === 'report' ? 0 : 1 },
-        h(Text, { wrap: 'truncate-end', ...(c.color ? { color: c.color } : {}), ...(c.dim ? { dimColor: true } : {}), ...(c.bold ? { bold: true } : {}), ...(props.inverse ? { inverse: true } : {}) }, c.text),
+        h(Text, { wrap: 'truncate-end', ...(c.color ? { color: c.color } : {}), ...(c.dim ? { dimColor: true } : {}), ...(c.bold ? { bold: true } : {}) }, c.text),
       ),
     ),
   );
 }
 
-function TaskList(props: { state: BoardState; width: number; capacity: number; icons: Parameters<typeof rowCells>[3]; selectedColor: string; versions: Record<string, string> }): React.ReactElement {
+function Selection(props: { content: string | BoardCell[]; width: number; style: string }): React.ReactElement {
+  return h(Text, { wrap: 'truncate-end' }, selectionText(props.content, props.width, props.style));
+}
+
+function TaskList(props: { state: BoardState; width: number; capacity: number; icons: Parameters<typeof rowCells>[3]; selection: string; versions: Record<string, string> }): React.ReactElement {
   const { state } = props;
   const cols = boardColumns(props.width);
   const visible = visibleItems(state, props.capacity);
+  const cells = (task: string, key: string, content: BoardCell[]) => state.selected === task
+    ? h(Selection, { key, content, width: props.width, style: props.selection })
+    : h(Cells, { key, cells: content });
   const body =
     visible.items.length === 0
       ? [h(Text, { key: 'empty', dimColor: true }, state.refreshedAt === null ? 'Loading…' : state.rows.length === 0 ? 'No tasks. Start one with "agentctl new <spec>".' : state.cohortFilter !== null ? 'No tasks in this cohort. k picks another.' : 'No active tasks. z opens the finished ones.')]
@@ -96,7 +104,9 @@ function TaskList(props: { state: BoardState; width: number; capacity: number; i
             : item.kind === 'active-title'
             ? h(Text, { key: 'active-title', bold: true, wrap: 'truncate-end' }, `Aktywne i czekające (${item.count})`)
             : item.kind === 'pulled'
-            ? h(Text, { key: `pulled-${item.key}`, bold: state.selected === `@pulled:${item.key}`, wrap: 'truncate-end' }, `${state.selected === `@pulled:${item.key}` ? '▸' : ' '} ${pulledTitle(item)}`)
+            ? state.selected === `@pulled:${item.key}`
+              ? h(Selection, { key: `pulled-${item.key}`, content: `▸ ${pulledTitle(item)}`, width: props.width, style: props.selection })
+              : h(Text, { key: `pulled-${item.key}`, wrap: 'truncate-end' }, `  ${pulledTitle(item)}`)
             : item.kind === 'group'
             ? h(Text, { key: `group-${item.section ?? 'active'}-${item.key}`, bold: true, wrap: 'truncate-end' }, groupTitle(item, props.icons))
             : item.kind === 'queue-title'
@@ -106,22 +116,24 @@ function TaskList(props: { state: BoardState; width: number; capacity: number; i
             : item.kind === 'resume'
             ? h(Text, { key: `r-${item.task}`, dimColor: true, wrap: 'truncate-end' }, `    ${item.task}`)
             : item.kind === 'queue'
-              ? h(Cells, { key: `q-${item.view.entry.task}`, cells: queueCells(item.view, item.view.entry.task === state.selected, cols, props.selectedColor, props.versions) })
+              ? cells(item.view.entry.task, `q-${item.view.entry.task}`, queueCells(item.view, item.view.entry.task === state.selected, cols, props.versions))
               : item.kind === 'finished'
             ? h(Text, { key: 'finished', dimColor: true, wrap: 'truncate-end' }, `${item.expanded ? '-' : '+'} ${finishedTitle(item.count, item.expanded)}`)
             : item.kind === 'closed'
               ? h(Text, { key: 'closed', dimColor: true, wrap: 'truncate-end' }, `- ${closedTitle(item.count)}`)
               : item.kind === 'cancelled'
                 ? h(Text, { key: 'cancelled', dimColor: true, wrap: 'truncate-end' }, `- ${cancelledTitle(item.count)}`)
-                : h(Cells, { key: item.row.task, cells: rowCells(item.row, item.row.task === state.selected, cols, props.icons, props.selectedColor, props.versions) }),
+                : cells(item.row.task, item.row.task, rowCells(item.row, item.row.task === state.selected, cols, props.icons, props.versions)),
         );
   return h(Box, { flexDirection: 'column', width: props.width }, h(Cells, { cells: headerCells(cols) }), ...body);
 }
 
-function Preview(props: { state: BoardState; width: number; height: number }): React.ReactElement {
+function Preview(props: { state: BoardState; width: number; room: number }): React.ReactElement {
   const { state } = props;
   const preview = state.preview;
-  const lines = preview ? preview.lines.slice(-Math.max(1, props.height - (preview?.model ? 3 : 1))) : [];
+  const length = preview?.lines.length ?? 0;
+  const end = length - Math.min(state.previewFocus ?? 0, Math.max(0, length - props.room));
+  const lines = preview?.lines.slice(Math.max(0, end - props.room), end) ?? [];
   return h(
     Box,
     { flexDirection: 'column', width: props.width, borderStyle: 'single', borderTop: false, borderRight: false, borderBottom: false, paddingLeft: 1 },
@@ -160,6 +172,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
   props.runtime?.rendered?.();
   const { exit } = useApp();
   const [instance] = useState(() => instanceName(ctx.config));
+  const [colorDepth] = useState(() => selectionColorDepth(process.env));
   const size = useWindowSize();
   const [state, setState] = useState<BoardState>(() => initialBoardState(size.columns, size.rows));
   const current = useRef(state);
@@ -323,19 +336,21 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
     }).finally(() => { actionRunning.current = false; });
   };
 
-  useInput((input, key) => {
-    const result = handleKey(current.current, input, key);
-    if (actionRunning.current && result.effects.some(e => !['quit', 'refresh', 'view', 'log', 'wall-load', 'wall-message', 'wall-read'].includes(e.type))) return;
-    update(() => result.state);
-    for (const effect of result.effects) runEffect(effect);
-  });
-
   const layout = boardLayout(state.width, ctx.config.board.listWidth);
   const active = state.rows.filter((r) => !r.closed && !r.finished && !r.hidden).length;
   const hiddenCount = state.showHidden ? 0 : state.rows.filter((r) => r.hidden).length;
   const panel = usagePanel(state.plans, ctx.config.usage, Date.now(), providerHolds(ctx.config, Date.now()), ctx.config);
   const mline = managerLine(state, ctx.config.manager.autostart || ctx.config.manager.project !== null);
   const rowsForBody = Math.max(3, state.height - 4 - panel.length - (mline ? 1 : 0) - (state.disk ? 1 : 0) - (watchAge ? 1 : 0));
+  const previewRoom = Math.max(1, rowsForBody - (state.preview?.model ? 3 : 1));
+  useInput((input, key) => {
+    const result = handleKey(current.current, input, key, previewRoom);
+    if (actionRunning.current && result.effects.some(e => !['quit', 'refresh', 'view', 'log', 'wall-load', 'wall-message', 'wall-read'].includes(e.type))) return;
+    update(() => result.state);
+    for (const effect of result.effects) runEffect(effect);
+  });
+  const focusedStyle = selectionStyle(ctx.config.board.selection, colorDepth);
+  const listStyle = state.previewFocus === undefined ? focusedStyle : selectionStyle(ctx.config.board.selection, colorDepth, false);
   const away = awayLabel(state.away);
   const header = h(
     Box,
@@ -347,7 +362,9 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
   );
   const diskBox = state.disk ? h(Text, { color: state.disk.level === 'critical' ? 'red' : state.disk.level === 'warn' ? 'yellow' : 'green', wrap: 'truncate-end' }, diskLine(state.disk)) : null;
   const watchBox = watchAge ? h(Text, { ...(watchAge.stale ? {color: 'yellow'} : {dimColor: true}), wrap: 'truncate-end' }, watchAge.text) : null;
-  const managerBox = mline ? h(Text, { wrap: 'truncate-end', ...(mline.selected ? { bold: true, ...(process.env.NO_COLOR ? { inverse: true } : { color: ctx.config.board.selectedColor }) } : mline.dim ? { dimColor: true } : { color: 'cyan' }) }, mline.text) : null;
+  const managerBox = mline ? (mline.selected
+    ? h(Selection, { content: mline.text, width: layout.listWidth, style: listStyle })
+    : h(Text, { wrap: 'truncate-end', ...(mline.dim ? { dimColor: true } : { color: 'cyan' }) }, mline.text)) : null;
   const panelBox = panel.length === 0 ? null : h(Box, { flexDirection: 'column', width: state.width }, ...panel.map((l) => h(Text, { key: l.provider, wrap: 'truncate-end', ...(l.color ? { color: l.color } : { dimColor: true }) }, l.text)));
   const logMode = state.mode.kind === 'log' ? state.mode : null;
   const viewMode = state.mode.kind === 'view' ? state.mode : null;
@@ -357,7 +374,9 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
     const room = Math.max(1, state.height - 4);
     // Keep the selection on the screen: the window starts so that the selected line is inside it.
     const start = view.selected < 0 ? 0 : Math.max(0, Math.min(view.selected - Math.floor(room / 2), view.lines.length - room));
-    return h(Box, { flexDirection: 'column' }, h(Text, { bold: true, wrap: 'truncate-end' }, view.title), ...view.lines.slice(start, start + room).map((l, i) => h(Text, { key: i, wrap: 'truncate-end', ...(l.selected ? { inverse: true } : {}), ...(l.bold ? { bold: true } : {}), ...(l.dim ? { dimColor: true } : {}), ...(l.color && !l.selected ? { color: l.color } : {}) }, l.text === '' ? ' ' : l.text)));
+    return h(Box, { flexDirection: 'column' }, h(Text, { bold: true, wrap: 'truncate-end' }, view.title), ...view.lines.slice(start, start + room).map((l, i) => l.selected
+      ? h(Selection, { key: i, content: l.text, width: state.width, style: focusedStyle })
+      : h(Text, { key: i, wrap: 'truncate-end', bold: l.bold, dimColor: l.dim, color: l.color }, l.text === '' ? ' ' : l.text)));
   };
   const bulkClose = state.mode.kind === 'confirm' && state.mode.action === 'close-pulled';
   const fullScreen = bulkClose || state.mode.kind === 'help' || logMode !== null || viewMode !== null || wallMode !== null;
@@ -375,8 +394,8 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
       : h(
           Box,
           { flexDirection: 'row', height: rowsForBody },
-          h(TaskList, { state, width: layout.listWidth, capacity: rowsForBody - 1, icons: ctx.config.watch.windowIcons, selectedColor: ctx.config.board.selectedColor, versions: ctx.config.board.modelVersions }),
-          layout.showPreview ? h(Preview, { state, width: layout.previewWidth, height: rowsForBody }) : null,
+          h(TaskList, { state, width: layout.listWidth, capacity: rowsForBody - 1, icons: ctx.config.watch.windowIcons, selection: listStyle, versions: ctx.config.board.modelVersions }),
+          layout.showPreview ? h(Preview, { state, width: layout.previewWidth, room: previewRoom }) : null,
         );
   return h(Box, { flexDirection: 'column', width: state.width, height: state.height }, header, fullScreen ? null : diskBox, fullScreen ? null : watchBox, fullScreen ? null : managerBox, fullScreen ? null : panelBox, h(Box, { flexGrow: 1, flexDirection: 'column' }, body), h(Footer, { state, hint: navigationHint(ctx.config.board.returnKey) }));
 }

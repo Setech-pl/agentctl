@@ -220,8 +220,14 @@ export interface BoardSettings {
   mouse: boolean;
   /** tmux key (no prefix) that goes back to the board from any window of the agentctl session; null: no key is bound. Default F12. */
   returnKey: string | null;
-  /** Color used on non-status cells of the selected board row. */
-  selectedColor: string;
+  selection: BoardSelection;
+}
+
+export interface BoardSelection {
+  bg?: string | number;
+  fg?: string | number;
+  bold?: boolean;
+  style?: 'bar' | 'reverse';
 }
 
 export interface QueueSettings {
@@ -384,7 +390,7 @@ export const NOTIFY_KEYS = ['attention_after_min', 'backend', 'events', 'turn_en
 export const NTFY_KEYS = ['server', 'topic', 'token', 'events', 'priority', 'include_verdict', 'include_question', 'click_url', 'always'];
 export const AWAY_KEYS = ['auto_idle'];
 export const MANAGER_KEYS = ['project', 'name', 'model', 'effort', 'guide', 'autostart'];
-export const BOARD_KEYS = ['pulled_collapse_after', 'pulled_auto_close_after', 'auto_hide_pulled_dead', 'mouse', 'return_key', 'selected_color', 'model_versions', 'list_width', 'window_title', 'cohorts_recent'];
+export const BOARD_KEYS = ['pulled_collapse_after', 'pulled_auto_close_after', 'auto_hide_pulled_dead', 'mouse', 'return_key', 'selected_color', 'selection', 'model_versions', 'list_width', 'window_title', 'cohorts_recent'];
 export const MCP_KEYS = ['allow', 'allow_rm_worktree', 'client', 'max_response_kb'];
 export const QUEUE_KEYS = ['enabled', 'parallel_starts', 'max_parallel_setups'];
 export const CANCEL_KEYS = ['grace'];
@@ -843,7 +849,7 @@ function parseManager(v: unknown, p: Problems): ManagerSettings {
 }
 
 function parseBoard(v: unknown, p: Problems): BoardSettings {
-  const board: BoardSettings = { pulledCollapseAfter: 0, pulledAutoCloseAfter: null, autoHidePulledDead: true, mouse: true, returnKey: 'F12', selectedColor: 'blue', modelVersions: {}, windowTitle: true, cohortsRecent: 10 };
+  const board: BoardSettings = { pulledCollapseAfter: 0, pulledAutoCloseAfter: null, autoHidePulledDead: true, mouse: true, returnKey: 'F12', selection: {}, modelVersions: {}, windowTitle: true, cohortsRecent: 10 };
   if (v === undefined || v === null) return board;
   if (!isObject(v)) {
     p.add('config.board must be a mapping like {auto_hide_pulled_dead: true, mouse: true, return_key: F12}');
@@ -888,8 +894,29 @@ function parseBoard(v: unknown, p: Problems): BoardSettings {
   }
   if (v.selected_color !== undefined) {
     const colors = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white', 'gray', 'grey', 'blackBright', 'redBright', 'greenBright', 'yellowBright', 'blueBright', 'magentaBright', 'cyanBright', 'whiteBright'];
-    if (typeof v.selected_color === 'string' && colors.includes(v.selected_color)) board.selectedColor = v.selected_color;
-    else p.add(`config.board.selected_color must be an Ink color name (${colors.join(', ')})`);
+    if (typeof v.selected_color !== 'string' || !colors.includes(v.selected_color)) p.add(`config.board.selected_color must be an Ink color name (${colors.join(', ')})`);
+  }
+  if (v.selection !== undefined) {
+    const selection = v.selection;
+    if (!isObject(selection)) p.add('config.board.selection must be a mapping');
+    else {
+      checkKeys(selection, ['bg', 'fg', 'bold', 'style'], 'config.board.selection', p);
+      for (const key of ['bg', 'fg'] as const) {
+        const value = selection[key];
+        if (value === undefined) continue;
+        if ((typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 255) ||
+            (typeof value === 'string' && /^#[\da-f]{6}$/i.test(value))) board.selection[key] = value;
+        else p.add(`config.board.selection.${key} must be a quoted #RRGGBB color or an integer from 0 to 255`);
+      }
+      if (selection.bold !== undefined) {
+        if (typeof selection.bold === 'boolean') board.selection.bold = selection.bold;
+        else p.add('config.board.selection.bold must be true or false');
+      }
+      if (selection.style !== undefined) {
+        if (selection.style === 'bar' || selection.style === 'reverse') board.selection.style = selection.style;
+        else p.add('config.board.selection.style must be bar or reverse');
+      }
+    }
   }
   return board;
 }

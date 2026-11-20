@@ -6,6 +6,7 @@ import { withHarness } from './live-harness.ts';
 import { TASKS, FIXED_MS, CLAUDE_PROMPT, CODEX_PROMPT, buildDemo, writeScreens, writeReports, writePlans, queueReviews, specText } from './demo-board.ts';
 import { parseAnsi, renderSvg, FONT_STACK } from './render-ansi.ts';
 import { shellQuote } from '../src/core/util.ts';
+import { packageVersion } from '../src/core/version.ts';
 const repoRoot = path.resolve(import.meta.dirname, '..');
 const require = createRequire(import.meta.url);
 const { Resvg } = require('@resvg/resvg-js');
@@ -75,7 +76,7 @@ await withHarness({ name: 'docs-gallery', session: 'agentctl-demo', config: 'lim
     await pause(600);
     const ansi = h.tmux(['capture-pane', '-e', '-p', '-t', target]).stdout;
     if (/\/Users\/|marcin|cache-dev|agentctl-wt|\/private\/tmp/i.test(ansi)) throw new Error(`non-generic path in ${name}:\n${plain()}`);
-    const svg = renderSvg(parseAnsi(ansi, 160), { title: `agentctl 0.22.3 · ${name}` });
+    const svg = renderSvg(parseAnsi(ansi, 160), { title: `agentctl ${packageVersion()} · ${name}` });
     const png = new Resvg(svg.replaceAll(FONT_STACK, "'DejaVu Sans Mono'"), { font: { fontFiles, loadSystemFonts: false, defaultFontFamily: 'DejaVu Sans Mono' } }).render().asPng();
     fs.writeFileSync(path.join(repoRoot, 'docs/img', `${name}.png`), png);
     fs.writeFileSync(path.join(h.root, `${name}.ansi`), ansi);
@@ -84,7 +85,11 @@ await withHarness({ name: 'docs-gallery', session: 'agentctl-demo', config: 'lim
   const key = async (...keys: string[]) => { h.tmux(['send-keys', '-t', target, ...keys]); await pause(400); };
   const select = async (id: string) => {
     h.tmux(['send-keys', '-N', '40', '-t', target, 'Up']); await pause(300);
-    for (let i = 0; i < 40; i++) { if (new RegExp(`▸\\s*${id}`).test(plain())) return; await key('Down'); }
+    for (let i = 0; i < 40; i++) {
+      // A collision warning keeps its marker when selected, so read the matching preview heading.
+      if (new RegExp(`▸\\s*${id}|│\\s+${id} · ⚠`).test(plain())) return;
+      await key('Down');
+    }
     throw new Error(`cannot select ${id}`);
   };
   if (helpOnly) {
@@ -95,6 +100,7 @@ await withHarness({ name: 'docs-gallery', session: 'agentctl-demo', config: 'lim
     return;
   }
   await until('main', s => s.includes('TRUST-DEMO') && s.includes('Queue') && s.includes('83%'));
+  await select('TRUST-DEMO');
   await until('waiting and preview', s => /WAIT-DEMO[^\n]*waiting/.test(s) && s.includes('Quick safety check')); await capture('board-main');
   await select('UI-CART-2'); await pause(2300); await capture('board-peek');
   await key('m'); await key('Please add the synthetic edge case.'); await capture('board-message'); await key('Escape');

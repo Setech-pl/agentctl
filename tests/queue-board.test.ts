@@ -155,11 +155,11 @@ describe('board: the Queue section', () => {
 });
 
 describe('board: collision marker', () => {
-  it('a colliding task gets ⚠ in the first column (the selection marker wins), and its preview says with whom', async () => {
+  it('a colliding task keeps ⚠ in the first column when selected', async () => {
     const cols = boardColumns(71);
     const colliding = row('A-1', { collide: [{ task: 'A-2', files: 3 }] });
     assert.equal(rowCells(colliding, false, cols)[0]!.text, '⚠');
-    assert.equal(rowCells(colliding, true, cols)[0]!.text, '▸');
+    assert.equal(rowCells(colliding, true, cols)[0]!.text, '⚠');
     assert.equal(rowCells(row('A-3'), false, cols)[0]!.text, '');
   });
 

@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'ROWSEL0252', fixedIn: '0.25.2', symptom: 'Selected board rows retained mixed colors and had no background across the list pane.', scenarios: [s('board-render.test.ts', 'ROWSEL0252:')] },
   { id: 'NOTIFY0251-WINDOW', fixedIn: '0.25.1', symptom: 'Watch repeated the same plan alert after reset estimates changed or the plan briefly disappeared.', scenarios: [s('usage-limits.test.ts', '^NOTIFY0251-WINDOW:')] },
   { id: 'NOTIFY0251-RACE', fixedIn: '0.25.1', symptom: 'Overlapping watch reads sent the same plan alert to desktop and phone before the ledger was written.', scenarios: [s('usage-limits.test.ts', '^NOTIFY0251-RACE:')] },
   { id: 'NOTIFY0251-LIMIT', fixedIn: '0.25.1', symptom: 'Provider-limit hooks could send owner alerts and run retries outside watch.', scenarios: [s('alerts.test.ts', '^NOTIFY0251-LIMIT:')] },

@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import path from 'node:path';
 import { describe, it } from 'node:test';
+import { loadGlobalConfig } from '../src/core/config.ts';
 import { Context } from '../src/core/context.ts';
 import { runDoctor } from '../src/core/doctor.ts';
 import { blockingEnv, managerFiles, readManagerMcp } from '../src/core/manager.ts';
@@ -69,6 +71,16 @@ describe('doctor: Remote Control and the manager', () => {
   const run = async (w: ReturnType<typeof world>, env: NodeJS.ProcessEnv = {}) =>
     runDoctor(w.runner, () => w.config, scratch.dir, '22.12.0', 'linux', scratch.dir, env);
   const pick = (checks: Awaited<ReturnType<typeof run>>, name: string) => checks.find((c) => c.name === name);
+
+  it('doctor points out invalid board.selection fields', async () => {
+    const w = world('d-selection');
+    fs.appendFileSync(w.config.path, 'board: {selection: {bg: 256, fg: "#abc", bold: yes, style: violet, extra: true}}\n');
+    const checks = await runDoctor(w.runner, () => loadGlobalConfig(path.dirname(w.config.path)), scratch.dir, '26.0.0', 'linux', scratch.dir, {});
+    const selection = pick(checks, 'config');
+    assert.equal(selection?.status, 'fail');
+    for (const field of ['bg', 'fg', 'bold', 'style']) assert.ok(selection?.detail.includes(`config.board.selection.${field}`), selection?.detail);
+    assert.match(selection?.detail ?? '', /extra/);
+  });
 
   it('claude with --remote-control and the role flag: ok; without: a warning that says what to do', async () => {
     const ok = await run(world('d-1'));

@@ -235,9 +235,12 @@ The owner can edit `agentctl limits set quota.nc.claude=4 overprovision=1.5` or 
 | `board.list_width` | integer >=64 or percentage string · automatic · g | List width with preview; 92+ at 140+ terminal columns by default, at least 32 columns left for preview. |
 | `board.cohorts_recent` | integer >= 1 · `10` · g | How many of the most recently active cohorts the board's `k` choice lists (cohorts with active or queued work always show). Older quiet cohorts fold into `starsze… (n)`; ↑↓ PgUp/PgDn scroll the choice. `agentctl cohort archive` removes finished cohorts from it altogether. |
 | `board.window_title` | boolean · `true` · g | The board names its terminal window `<instance> <version> · board` (OSC 2 with xterm title-stack restoration) and temporarily sets this session’s `set-titles` / `set-titles-string` (`<instance> <version> · #W`). Previous title settings are restored on exit. `false` disables board title changes; the instance label in status-left remains. |
-| `board.selected_color` | Ink color name · `blue` · g | Color for the selected board row, manager line and queue entry. State and result cells keep their own colors. `NO_COLOR` disables color; the selection stays bold (manager line uses inverse video). |
+| `board.selection` | mapping · `{}` · g | Fields are `bg` and `fg` (quoted `"#RRGGBB"` or an integer 0–255), `bold` (boolean, default `true`) and `style` (`bar` or `reverse`, default `bar`). |
+| `board.selected_color` | legacy Ink color name · g | Accepted for compatibility. Use `board.selection` to set the selection colors. |
 | `notify.mcp_writes` | `summary` · global | `all`, `summary`, `off`. Audit and journal still record every write. Summary emits at most once per interval; watch flushes pending summaries. |
 | `notify.mcp_writes_interval_s` | `60` · global | Positive seconds between write summaries, persisted over restarts. |
+
+The selection covers the full width of the list pane, including the gaps between columns. In 256-color and truecolor terminals, the default is bold bright white on dark blue. Tab or the Left and Right arrows switch focus when the preview is visible. Up, Down, Page Up and Page Down scroll the focused preview, and the selection stays visible in slate. Hex colors are mapped to the nearest extended palette color in 256-color terminals. A 16-color terminal uses reverse video with bold while the list is focused. A monochrome terminal or nonempty `NO_COLOR` uses reverse video. `agentctl doctor` reports invalid selection settings.
 
 ## Queue, MCP, WALL and maintenance
 
