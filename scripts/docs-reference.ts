@@ -57,7 +57,7 @@ const pl: Record<string, string> = {
  queue_up: 'Przesuń oczekujące zadanie na początek jego klasy priorytetu; oceń zwalniane zależności.',
  queue_pause: 'Wstrzymaj automatyczne starty kolejki.',
  queue_resume: 'Wznów automatyczne starty kolejki.',
- unblock: 'Zwolnij zablokowane zależności; drop_after wybiera zależność do usunięcia.',
+ unblock: 'Wznów start po zamontowaniu woluminu albo usuń zablokowaną zależność z after.',
  cohort_add: 'Przypisz istniejące zadania do kohorty.',
  cohort_remove: 'Usuń przypisanie do kohorty.',
  cohort_archive: 'Ukryj zakończone kohorty z wyboru; aktywne/kolejkowane są chronione, historia zostaje.',

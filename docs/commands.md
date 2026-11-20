@@ -23,7 +23,7 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`queue retry`](#agentctl-queue-retry) | Put a failed task back at the end of the line; it is tried once more (over the worktree the failed start left; a window the failed start kept open is closed first, its saved screen stays). |
 | [`queue pause`](#agentctl-queue-pause) | Stop starting queued tasks (running tasks are not touched; adding and listing still work). |
 | [`queue resume`](#agentctl-queue-resume) | Let the queue start tasks again. |
-| [`unblock`](#agentctl-unblock) | Let a blocked queued task go on: a task whose "after" names a cancelled task is blocked (⛓) and never starts. This drops the dependency (all the cancelled ones, or only --drop-after); the task is back in the queue and waits for the rest, or starts. The other way out is "agentctl cancel". |
+| [`unblock`](#agentctl-unblock) | Let a blocked queued task go on after remounting its volume, or drop the blocked dependencies from its "after". |
 | [`cohort`](#agentctl-cohort) | Cohorts: tasks grouped under a name you chose ("cohort: \<name>" in a spec, or --cohort). A task without a name belongs to no cohort. Without a subcommand: list. |
 | [`cohort list`](#agentctl-cohort-list) | The cohorts: how many tasks each has by state (active, queued, reports, closed, cancelled) and since when. |
 | [`cohort show`](#agentctl-cohort-show) | The tasks of one cohort as in "status" (closed and cancelled ones too) and its queued tasks. |
@@ -381,7 +381,7 @@ agentctl queue resume
 
 ## agentctl unblock
 
-Let a blocked queued task go on: a task whose "after" names a cancelled task is blocked (⛓) and never starts. This drops the dependency (all the cancelled ones, or only --drop-after); the task is back in the queue and waits for the rest, or starts. The other way out is "agentctl cancel".
+Let a blocked queued task go on after remounting its volume, or drop the blocked dependencies from its "after".
 
 ```
 agentctl unblock [options] <task>

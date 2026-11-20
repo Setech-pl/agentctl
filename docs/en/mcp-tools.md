@@ -90,7 +90,7 @@ Arguments marked ? are optional. Provider fields below include enabled optional 
 | `queue_up` | write | `as?`, `task?`, `confirm?`, `preview_token?` | Move a waiting task to the front of its priority class |
 | `queue_pause` | write | `as?`, `confirm?`, `preview_token?` | Pause automatic queue starts |
 | `queue_resume` | write | `as?`, `confirm?`, `preview_token?` | Resume automatic queue starts |
-| `unblock` | write | `as?`, `task?`, `drop_after?`, `confirm?`, `preview_token?` | Remove blocked dependencies, allowing a task to start |
+| `unblock` | write | `as?`, `task?`, `drop_after?`, `confirm?`, `preview_token?` | Resume after remounting the volume, or remove blocked dependencies |
 | `cohort_add` | write | `as?`, `cohort?`, `tasks?`, `confirm?`, `preview_token?` | Put existing tasks in a cohort |
 | `cohort_remove` | write | `as?`, `tasks?`, `confirm?`, `preview_token?` | Remove cohort membership |
 | `cohort_archive` | write | `as?`, `cohorts?`, `older_than?`, `confirm?`, `preview_token?` | Hide finished cohorts from the board choice and the default cohort list; tasks, reports and history stay. Cohorts with active or queued work are never archived |

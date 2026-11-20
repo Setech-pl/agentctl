@@ -88,7 +88,7 @@ Argumenty z ? są opcjonalne. Pola dostawców obejmują opcjonalnych; uruchomion
 | `queue_up` | zapis | `as?`, `task?`, `confirm?`, `preview_token?` | Przesuń oczekujące zadanie na początek jego klasy priorytetu; oceń zwalniane zależności. |
 | `queue_pause` | zapis | `as?`, `confirm?`, `preview_token?` | Wstrzymaj automatyczne starty kolejki. |
 | `queue_resume` | zapis | `as?`, `confirm?`, `preview_token?` | Wznów automatyczne starty kolejki. |
-| `unblock` | zapis | `as?`, `task?`, `drop_after?`, `confirm?`, `preview_token?` | Zwolnij zablokowane zależności; drop_after wybiera zależność do usunięcia. |
+| `unblock` | zapis | `as?`, `task?`, `drop_after?`, `confirm?`, `preview_token?` | Wznów start po zamontowaniu woluminu albo usuń zablokowaną zależność z after. |
 | `cohort_add` | zapis | `as?`, `cohort?`, `tasks?`, `confirm?`, `preview_token?` | Przypisz istniejące zadania do kohorty. |
 | `cohort_remove` | zapis | `as?`, `tasks?`, `confirm?`, `preview_token?` | Usuń przypisanie do kohorty. |
 | `cohort_archive` | zapis | `as?`, `cohorts?`, `older_than?`, `confirm?`, `preview_token?` | Ukryj zakończone kohorty z wyboru; aktywne/kolejkowane są chronione, historia zostaje. |

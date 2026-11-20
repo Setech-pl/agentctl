@@ -20,12 +20,19 @@ Column "Layers": **g** global config, **p** project config, **s** spec.
 | Key | Type | Default | Layers | Meaning |
 |---|---|---|---|---|
 | `worktree_root` | path | none | g p | Directory for new worktrees: `<worktree_root>/<repo-name>-<task>`. Without it every `repos[]` entry needs its own `worktree`. |
+| `worktrees` | mapping | none | g p | Set a worktree root and, optionally, its mount point. |
+| `worktrees.root` | path | none | g p | Mapping form of `worktree_root`. Use one form per config file. |
+| `worktrees.mount` | path | inferred for `/Volumes/<name>` or `/mnt/<name>` | g p | Mount point containing the root. Set it for other external mount locations. A missing mount blocks starts until you remount it and run `agentctl unblock TASK`. |
 | `links` | list | `[]` | g p s | Symlinks created in the first worktree. |
 | `links[].from` | path | required | g p s | Where the link goes, relative to the first worktree. A glob links every match. |
 | `links[].to` | path | required | g p s | What it points at. Must exist. `from` and `to` ending in `/*` make one link per entry of the directory. |
 | `env` | mapping | `{}` | g p s | Environment variables of the tmux window (strings, numbers or booleans). |
 | `report` | path or list | `{cache}/{task}/{TASK}.md` | g p s | Where the agent writes its report. Used by `status`, `pull` and the notifications. A list: the first entry is the canonical path, the others are places to look (paths and globs `*`, `?`, `**`; absolute, `~/` or relative to the worktree; `{task}` and `{TASK}` work), e.g. `[~/Projects/cache/{task}/{TASK}.md, docs/reports/*{task}*.md, docs/reports/*{TASK}*.md]`. Fresh alternatives bearing the task ID become candidate flags (see [Report detection](details.md#report-detection)); copying requires explicit `report --from` / `report_from`. |
 | `setup` | list of strings | `[]` | g p s | Shell commands run after `git worktree add` and before the links; a failing command stops `new`. Every repository runs its own setup in its own worktree: `repos[].setup` in the spec, else the `setup` of that repository's `.agentctl.yaml`. The top-level spec `setup` and the global one belong to the first repository only (compatible with single-repo specs). The preview lists them per repository (`backend 1/1, client 1/1`). The chat (MCP) cannot send `setup`, top-level or per repo; project config setup still runs. |
+| `setup.commands` | list of strings | inherited | g p | Mapping form of the setup list. Set `[]` to disable commands, including an implicit `npm ci`. |
+| `setup.node_modules` | `clone` or `off` | `off` | g p | Reuse compatible npm installs from `<AGENTCTL_HOME>/nm-store` on the same filesystem. |
+| `close` | mapping | `{}` | g p | Optional Trash cleanup after a task closes. |
+| `close.cleanup` | list of relative paths or globs | `[]` | g p | Move matching Git-ignored worktree paths to the OS Trash. The project list overrides the global list. |
 | `defaults` | mapping | `{}` | g p | Values for a spec that leaves them out: `agent`, `model`, `effort`. |
 | `defaults.agent` | active `claude`, `codex` or `kimi` | none | g p | Agent when the spec has no `agent`. |
 | `defaults.model` | string | `default` | g p | Model when the spec has none. `default` passes no model flag. |

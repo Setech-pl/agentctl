@@ -20,6 +20,7 @@ Types/defaults below are cross-checked with [config.ts](../../src/core/config.ts
 | Key | Type / default / layers | Meaning |
 |---|---|---|
 | `worktree_root` | path · none · g p | Directory for new worktrees: `<worktree_root>/<repo-name>-<task>`. Without it every `repos[]` entry needs its own `worktree`. |
+| `worktrees` | mapping · none · g p | Worktree root and optional external mount point. |
 | `worktrees.root` | path · none · g p | Mapping form of `worktree_root`. Use one form per config file. |
 | `worktrees.mount` | path · inferred for `/Volumes/<name>` and `/mnt/<name>` · g p | Mount point that contains the root. Set it for other external mount locations. A missing mount blocks the start and `status` reports the volume as unavailable. |
 | `links` | list · `[]` · g p s | Symlinks created in the first worktree. |
@@ -30,6 +31,7 @@ Types/defaults below are cross-checked with [config.ts](../../src/core/config.ts
 | `setup` | list of strings · `[]` · g p s | Shell commands run after `git worktree add` and before the links; a failing command stops `new`. Every repository runs its own setup in its own worktree: `repos[].setup` in the spec, else the `setup` of that repository's `.agentctl.yaml`. The top-level spec `setup` and the global one belong to the first repository only (compatible with single-repo specs). The preview lists them per repository (`backend 1/1, client 1/1`). The chat (MCP) cannot send `setup`, top-level or per repo; project config setup still runs. |
 | `setup.commands` | list of strings · inherited · g p | Mapping form of the setup list. `[]` disables commands, including an implicit `npm ci`. |
 | `setup.node_modules` | `clone` or `off` · `off` · g p | Reuse compatible npm installs from `<AGENTCTL_HOME>/nm-store` on the same filesystem. The repository can override the global mode. |
+| `close` | mapping · `{}` · g p | Settings applied after closing a task. |
 | `close.cleanup` | list of relative paths or globs · `[]` · g p | Move matching ignored output to the OS Trash after closing the task. Globs match within one path component. A project list replaces the global one. |
 | `defaults` | mapping · `{}` · g p | Values for a spec that leaves them out: `agent`, `model`, `effort`. |
 | `defaults.agent` | active provider · none · g p | Agent when the spec has no `agent`. |
