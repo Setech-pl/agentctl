@@ -59,7 +59,7 @@ async function until(check: () => boolean, ms = 4000): Promise<void> {
 }
 
 describe('board: the Ink front renders the model', () => {
-  function setup(name: string, columns: number, yaml = '') {
+  function setup(name: string, columns: number, yaml = '', snapshotAgeMs?: number) {
     const config = makeConfig(scratch.sub(name), yaml);
     seedTask(config, 'NC-1', { repos: [] });
     const finished = seedTask(config, 'NC-2', { agent: 'codex', model: 'gpt-6.1-sol', effort: 'low', supersededBy: 'NC-1' });
@@ -68,6 +68,7 @@ describe('board: the Ink front renders the model', () => {
     const tmux = new FakeTmux();
     tmux.add('nc-1', '● Reading src/menu.ts\n  ⏵⏵ auto (shift+tab to cycle) · esc to interrupt\n');
     const made = makeContext(config, { respond: tmux.respond });
+    if (snapshotAgeMs !== undefined) fs.writeFileSync(path.join(config.stateDir, 'mcp-state-snapshot.json'), JSON.stringify({version: 1, at: made.runner.now() - snapshotAgeMs}));
     const term = new FakeTerminal(columns, 24);
     const keys = new FakeKeyboard();
     const done = runBoardApp(made.ctx, true, { stdout: term as unknown as NodeJS.WriteStream, stdin: keys as unknown as NodeJS.ReadStream });
@@ -94,6 +95,15 @@ describe('board: the Ink front renders the model', () => {
     for (const l of screen.split('\n')) assert.ok([...l].length <= 80, `too wide (${[...l].length}): ${l}`);
     keys.write('q');
     await done;
+  });
+
+  it('SNAP0247: a narrow board shows disk and the stale watch restart guidance', async () => {
+    const { term, keys, done } = setup('watch-warning', 80, '', 121_000);
+    try {
+      await until(() => term.screen().includes('NC-1'));
+      assert.match(term.screen(), /Disk: .*free /);
+      assert.match(term.screen(), /watch nie odpowiada od 2 min – agentctl watch --tmux --restart/);
+    } finally { keys.write('q'); await done; }
   });
 
   it('at 120 columns the preview of the selected window is next to the list', async () => {

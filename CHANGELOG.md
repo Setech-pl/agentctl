@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- SNAP0247: Watch records its current step and skips stalled work so it can publish a snapshot. Board, MCP and doctor show snapshot age and restart guidance after two minutes. Free-space readings have a bounded fallback and stay independent of worktree measurements. / Watch zapisuje bieżący etap i pomija zablokowane etapy, aby publikować stan. Board, MCP i doctor pokazują wiek stanu oraz komendę restartu po dwóch minutach. Odczyt wolnego miejsca ma ograniczony czas i działa niezależnie od pomiaru worktree.
+
 ## [0.23.2] - 2026-11-20
 
 - WALL-34: Kimi waits for its composer to settle on the welcome screen. An explicit follow-up can replace a stalled start once the composer is ready and empty, locally and over SSH. / Kimi czeka na ustabilizowanie pola wpisywania na ekranie powitalnym. Jawna wiadomość może zastąpić zablokowany start, gdy pole jest gotowe i puste, lokalnie oraz przez SSH.

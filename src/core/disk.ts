@@ -30,6 +30,45 @@ function existingAncestor(target: string): string {
   while (!fs.existsSync(current) && path.dirname(current) !== current) current = path.dirname(current);
   return current;
 }
+const FREE_SPACE_BUDGET_MS = 1000;
+type Statfs = typeof fs.promises.statfs;
+const pendingStats = new WeakMap<Statfs, Map<string, ReturnType<Statfs>>>();
+
+async function bounded<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    const expired = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error(`free-space probe timed out after ${ms} ms`)), ms);
+    });
+    return await Promise.race([work, expired]);
+  } finally { clearTimeout(timer); }
+}
+
+async function freeSpace(ctx: Context, ancestor: string, statfs: Statfs, budgetMs: number) {
+  const timeoutMs = Math.max(1, Math.floor(budgetMs / 2));
+  let pending = pendingStats.get(statfs);
+  if (!pending) { pending = new Map(); pendingStats.set(statfs, pending); }
+  let sample = pending.get(ancestor);
+  if (!sample) {
+    const requests = pending;
+    sample = Promise.resolve().then(() => statfs(ancestor)).finally(() => requests.delete(ancestor));
+    requests.set(ancestor, sample);
+  }
+  try {
+    const st = await bounded(sample, timeoutMs);
+    return { availableBytes: Number(st.bavail) * Number(st.bsize), totalBytes: Number(st.blocks) * Number(st.bsize) };
+  } catch (statError) {
+    try {
+      const r = await bounded(ctx.runner.exec('df', ['-kP', ancestor], { readOnly: true, timeoutMs }), timeoutMs);
+      const fields = r.stdout.trim().split('\n').at(-1)?.trim().split(/\s+/);
+      if (r.code === 0 && fields && fields.length >= 6 && /^\d+$/.test(fields[1]!) && /^\d+$/.test(fields[3]!)) {
+        return { availableBytes: Number(fields[3]) * 1024, totalBytes: Number(fields[1]) * 1024 };
+      }
+    } catch { /* return the failed sample below */ }
+    return { availableBytes: null, totalBytes: null, error: statError instanceof Error ? statError.message : String(statError) };
+  }
+}
+
 /** Read cached sizes only. Watch owns measurement jobs; no read starts a walk or writes the size cache. */
 export async function collectDisk(ctx: Context, statfs = fs.promises.statfs, opts: { detail?: boolean; offset?: number; limit?: number; budgetMs?: number; records?: TaskRecord[] } = {}): Promise<DiskReport> {
   const records = (opts.records ?? [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)]).filter(r => !r.host);
@@ -50,25 +89,15 @@ export async function collectDisk(ctx: Context, statfs = fs.promises.statfs, opt
   for (const target of targets) {
     const ancestor = existingAncestor(target);
     let device: string | null = null;
-    let availableBytes: number | null = null;
-    let totalBytes: number | null = null;
-    let error: string | undefined;
     try { device = String(fs.statSync(ancestor).dev); } catch { /* n/d */ }
     const key = device ?? target;
     if (volumes.has(key)) { volumes.get(key)!.paths.push(target); continue; }
-    try {
-      const st = await statfs(ancestor);
-      availableBytes = Number(st.bavail) * Number(st.bsize);
-      totalBytes = Number(st.blocks) * Number(st.bsize);
-    } catch (e) {
-      const r = await ctx.runner.exec('df', ['-kP', ancestor], { readOnly: true });
-      const fields = r.stdout.trim().split('\n').at(-1)?.trim().split(/\s+/);
-      if (r.code === 0 && fields && fields.length >= 6 && /^\d+$/.test(fields[3]!)) {
-        availableBytes = Number(fields[3]) * 1024; totalBytes = Number(fields[1]) * 1024;
-      } else error = e instanceof Error ? e.message : String(e);
-    }
-    volumes.set(key, { samplePath: ancestor, device, paths: [target], availableBytes, totalBytes, level: diskLevel(availableBytes, ctx.config.disk.warnGb, ctx.config.disk.criticalGb), ...(error ? { error } : {}) });
+    volumes.set(key, { samplePath: ancestor, device, paths: [target], availableBytes: null, totalBytes: null, level: 'unknown' });
   }
+  await Promise.all([...volumes.values()].map(async volume => {
+    Object.assign(volume, await freeSpace(ctx, volume.samplePath!, statfs, opts.budgetMs ?? FREE_SPACE_BUDGET_MS));
+    volume.level = diskLevel(volume.availableBytes, ctx.config.disk.warnGb, ctx.config.disk.criticalGb);
+  }));
   const worktrees = [...new Set(records.flatMap((r) => r.repos.map((r) => r.worktree)))].sort();
   restoreDiskMeasurements(ctx);
   const values = worktrees.flatMap(wt => { const m = lastMeasurement(wt); return m ? [m] : []; });
@@ -159,20 +188,25 @@ export async function refreshDiskMeasurements(ctx: Context): Promise<void> {
   const key = ctx.config.path, now = ctx.runner.now();
   if (ctx.runner.dryRun || refreshing.has(key) || now - (refreshed.get(key) ?? -Infinity) < 5000) return;
   refreshed.set(key, now);
-  await collectDisk(ctx); // restore persisted readings without scheduling any work
+  restoreDiskMeasurements(ctx);
   const targets = [...new Set([...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)].filter(r => !r.host).flatMap(r => r.repos.map(r => r.worktree)))];
   const target = targets.sort((a, b) => (lastMeasurement(a)?.at ?? 0) - (lastMeasurement(b)?.at ?? 0)).find(wt => !cachedMeasurement(wt) || now - lastMeasurement(wt)!.at >= DISK_INTERVAL_MS);
   if (!target) return;
   configureMeasurements(ctx.config.disk);
   refreshing.add(key);
-  const lease = requestMeasurement(target, { background: true, now: () => ctx.runner.now() });
-  try { await lease.promise; await persistDiskMeasurements(ctx); }
-  finally { lease.release(); refreshing.delete(key); }
+  try {
+    const lease = requestMeasurement(target, { background: true, now: () => ctx.runner.now() });
+    try { await lease.promise; await persistDiskMeasurements(ctx); }
+    finally { lease.release(); }
+  } finally { refreshing.delete(key); }
 }
 const sampled = new Map<string, number>();
-export async function diskTick(ctx: Context, notifier: Notifier): Promise<void> {
-  void refreshHostHealth(ctx).catch(() => undefined);
-  void refreshDiskMeasurements(ctx).catch(() => undefined);
+export async function diskTick(ctx: Context, notifier: Notifier, log?: (line: string) => Promise<void>): Promise<void> {
+  const background = (label: string, work: Promise<void>) => {
+    void work.catch(error => log?.(`${label}: ${error instanceof Error ? error.message : String(error)}`)).catch(() => undefined);
+  };
+  background('host health', refreshHostHealth(ctx));
+  background('worktree measurement', refreshDiskMeasurements(ctx));
   const file = path.join(path.dirname(ctx.config.path), 'disk-state.json');
   if (ctx.runner.dryRun || ctx.runner.now() - (sampled.get(file) ?? -Infinity) < DISK_INTERVAL_MS) return;
   sampled.set(file, ctx.runner.now());
@@ -255,13 +289,10 @@ export async function refreshDiskFreeSpace(ctx: Context, previous: DiskReport): 
       const availableBytes = health.disk.freeKb * 1024, totalBytes = health.disk.totalKb * 1024;
       return {...volume, availableBytes, totalBytes, level: diskLevel(availableBytes, ctx.config.disk.warnGb, ctx.config.disk.criticalGb)};
     }
-    try {
-      const stats = await fs.promises.statfs(volume.samplePath ?? existingAncestor(ctx.config.cache));
-      const availableBytes = Number(stats.bavail) * Number(stats.bsize), totalBytes = Number(stats.blocks) * Number(stats.bsize);
-      let level = diskLevel(availableBytes, ctx.config.disk.warnGb, ctx.config.disk.criticalGb);
-      if (volume.worktreeShareWarning && totalBytes && volume.worktreeShareWarning.bytes / totalBytes * 100 > ctx.config.disk.worktreeSharePercent && level !== 'critical') level = 'warn';
-      return {...volume, error: undefined, availableBytes, totalBytes, level, ...(volume.worktreeShareWarning ? {worktreeShareWarning: {...volume.worktreeShareWarning, ageSeconds}} : {})};
-    } catch (e) {return {...volume, availableBytes: null, totalBytes: null, level: 'unknown' as const, error: e instanceof Error ? e.message : String(e)};}
+    const sampled = await freeSpace(ctx, existingAncestor(volume.samplePath ?? ctx.config.cache), fs.promises.statfs, FREE_SPACE_BUDGET_MS);
+    let level = diskLevel(sampled.availableBytes, ctx.config.disk.warnGb, ctx.config.disk.criticalGb);
+    if (volume.worktreeShareWarning && sampled.totalBytes && volume.worktreeShareWarning.bytes / sampled.totalBytes * 100 > ctx.config.disk.worktreeSharePercent && level !== 'critical') level = 'warn';
+    return {...volume, error: undefined, ...sampled, level, ...(volume.worktreeShareWarning ? {worktreeShareWarning: {...volume.worktreeShareWarning, ageSeconds}} : {})};
   }));
   const level = (['critical', 'warn', 'unknown', 'ok'] as const).find(l => volumes.some(v => v.level === l)) ?? 'unknown';
   return {...previous, volumes, level, gcHint: volumes.some(v => v.level === 'warn' || v.level === 'critical'), freeMeasuredAt: new Date(now).toISOString(), worktreeAgeSeconds: ageSeconds};

@@ -1,7 +1,8 @@
 import { providerHolds } from '../core/provider-hold.ts';
 import type { RefreshClock } from './refresh-scheduler.ts';
 import { RefreshScheduler } from './refresh-scheduler.ts';
-import { diskLine } from '../core/disk.ts';
+import { collectDisk, diskLine, refreshDiskFreeSpace } from '../core/disk.ts';
+import { watchSnapshotTime, watchSnapshotWarning } from '../core/watch-snapshot.ts';
 import fs from 'node:fs';
 import React, { useEffect, useRef, useState } from 'react';
 import { Box, Text, render, useApp, useInput, useWindowSize } from 'ink';
@@ -162,6 +163,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
   const size = useWindowSize();
   const [state, setState] = useState<BoardState>(() => initialBoardState(size.columns, size.rows));
   const current = useRef(state);
+  const [watchAge, setWatchAge] = useState<{text: string; stale: boolean} | null>(null);
   const update = (fn: (s: BoardState) => BoardState): void => {
     current.current = fn(current.current);
     setState(current.current);
@@ -187,10 +189,36 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
 
   useEffect(() => {
     let stopped = false;
+    let diagnosticTimer: unknown;
+    let diagnostics = '';
+    let lastBoardRefresh: number | undefined;
+    // The diagnostic line remains live while a regular board refresh is waiting on tmux or Git.
+    const updateDiagnostics = () => {
+      if (diagnosticTimer !== undefined) timers.clear(diagnosticTimer);
+      diagnosticTimer = undefined;
+      const now = ctx.runner.now(), at = watchSnapshotTime(ctx.config);
+      const warning = at === undefined ? undefined : watchSnapshotWarning(at, now);
+      const label = at === undefined ? '' : warning ?? `Stan watch sprzed ${Math.max(0, Math.floor((now - at) / 1000))} s`;
+      if (label !== diagnostics) {
+        diagnostics = label;
+        setWatchAge(label ? {text: label, stale: Boolean(warning)} : null);
+      }
+      if (at !== undefined && (lastBoardRefresh === undefined || now - lastBoardRefresh > 45_000)) {
+        const disk = current.current.disk, refreshAt = lastBoardRefresh;
+        const sample = disk ? refreshDiskFreeSpace(ctx, disk) : collectDisk(ctx, undefined, {records: []})
+          .then(report => ({...report, worktreeBytes: null, measuring: true}));
+        void sample.then(value => {
+          if (!stopped && refreshAt === lastBoardRefresh) update(s => ({...s, disk: value}));
+        }).catch(() => undefined);
+      }
+      if (at !== undefined) diagnosticTimer = timers.set(updateDiagnostics, 15_000);
+    };
+    updateDiagnostics();
     const scheduler = new RefreshScheduler(async () => {
       const started = props.runtime ? performance.now() : 0;
       // Closed/cancelled rows are detailed only while their section is listed (the `a` key).
       const snap = await loadBoard(ctx, current.current.selected, cache.current, PREVIEW_LINES, { deepClosed: current.current.showHidden });
+      lastBoardRefresh = ctx.runner.now();
       if (!stopped) { update((s) => applySnapshot(s, snap)); props.runtime?.refreshed?.(cache.current.size, performance.now() - started); }
       // New WALL messages show while the view is open; the header's unread count is read in the background from the start, at most every
       // WALL_BADGE_REFRESH_MS (the index is incremental: a stat per channel, the new tail only). A background read never shows an error.
@@ -208,6 +236,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
     let watcher: fs.FSWatcher | undefined;
     try {
       watcher = fs.watch(ctx.config.stateDir, { recursive: true }, (_type, name) => {
+        if (name === 'mcp-state-snapshot.json' && diagnosticTimer === undefined) updateDiagnostics();
         if (name && /event\.json$/.test(name)) gate.ping(props.runtime?.now() ?? Date.now());
       });
       watcher.on('error', () => watcher?.close());
@@ -217,6 +246,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
     return () => {
       stopped = true;
       scheduler.stop();
+      if (diagnosticTimer !== undefined) timers.clear(diagnosticTimer);
       refreshNow.current = () => {};
       gate.stop();
       watcher?.close();
@@ -305,17 +335,18 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
   const hiddenCount = state.showHidden ? 0 : state.rows.filter((r) => r.hidden).length;
   const panel = usagePanel(state.plans, ctx.config.usage, Date.now(), providerHolds(ctx.config, Date.now()), ctx.config);
   const mline = managerLine(state, ctx.config.manager.autostart || ctx.config.manager.project !== null);
-  const rowsForBody = Math.max(3, state.height - 4 - panel.length - (mline ? 1 : 0));
+  const rowsForBody = Math.max(3, state.height - 4 - panel.length - (mline ? 1 : 0) - (state.disk ? 1 : 0) - (watchAge ? 1 : 0));
   const away = awayLabel(state.away);
   const header = h(
     Box,
     { width: state.width },
     h(Text, { bold: true, wrap: 'truncate-end' }, `${instance} ${packageVersion()} board`),
     h(Box, { flexShrink: 0, maxWidth: Math.max(0, state.width - 25) }, h(Text, { dimColor: true, wrap: 'truncate-end' }, ` · ${ctx.config.session} · ${active} task${active === 1 ? '' : 's'}${queueViews(state).length > 0 ? ` · ${queueViews(state).length} queued` : ''}${state.cohortFilter !== null ? ` · cohort: ${cohortLabel(state)}` : ''}${hiddenCount > 0 ? ` · ${hiddenCount} hidden (a)` : ''}${wallUnread(state.wall) > 0 ? ` · WALL ${wallUnread(state.wall)} unread (W)` : ''}${state.refreshedAt ? ` · ${state.refreshedAt}` : ''}`)),
-    state.disk ? h(Text, { color: state.disk.level === 'critical' ? 'red' : state.disk.level === 'warn' ? 'yellow' : 'green', wrap: 'truncate-end' }, ` · ${diskLine(state.disk)}`) : null,
     state.hosts && state.hosts.length > 0 ? h(Text, { wrap: 'truncate-end', ...(state.hosts.some((host) => host.state !== 'reachable') ? { color: 'yellow' } : { dimColor: true }) }, ` · hosts: ${state.hosts.map((host) => `${host.name} ${host.state}${host.gpu ? ` (${host.gpu})` : ''}${host.diskFreeGb !== undefined ? ` free ${host.diskFreeGb}G` : ''}`).join(' · ')} (H)`) : null,
     away ? h(Text, { wrap: 'truncate-end', ...(away.dim ? { dimColor: true } : { color: 'cyan', bold: true }) }, ` · ${away.text}`) : null,
   );
+  const diskBox = state.disk ? h(Text, { color: state.disk.level === 'critical' ? 'red' : state.disk.level === 'warn' ? 'yellow' : 'green', wrap: 'truncate-end' }, diskLine(state.disk)) : null;
+  const watchBox = watchAge ? h(Text, { ...(watchAge.stale ? {color: 'yellow'} : {dimColor: true}), wrap: 'truncate-end' }, watchAge.text) : null;
   const managerBox = mline ? h(Text, { wrap: 'truncate-end', ...(mline.selected ? { bold: true, ...(process.env.NO_COLOR ? { inverse: true } : { color: ctx.config.board.selectedColor }) } : mline.dim ? { dimColor: true } : { color: 'cyan' }) }, mline.text) : null;
   const panelBox = panel.length === 0 ? null : h(Box, { flexDirection: 'column', width: state.width }, ...panel.map((l) => h(Text, { key: l.provider, wrap: 'truncate-end', ...(l.color ? { color: l.color } : { dimColor: true }) }, l.text)));
   const logMode = state.mode.kind === 'log' ? state.mode : null;
@@ -347,7 +378,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
           h(TaskList, { state, width: layout.listWidth, capacity: rowsForBody - 1, icons: ctx.config.watch.windowIcons, selectedColor: ctx.config.board.selectedColor, versions: ctx.config.board.modelVersions }),
           layout.showPreview ? h(Preview, { state, width: layout.previewWidth, height: rowsForBody }) : null,
         );
-  return h(Box, { flexDirection: 'column', width: state.width, height: state.height }, header, fullScreen ? null : managerBox, fullScreen ? null : panelBox, h(Box, { flexGrow: 1, flexDirection: 'column' }, body), h(Footer, { state, hint: navigationHint(ctx.config.board.returnKey) }));
+  return h(Box, { flexDirection: 'column', width: state.width, height: state.height }, header, fullScreen ? null : diskBox, fullScreen ? null : watchBox, fullScreen ? null : managerBox, fullScreen ? null : panelBox, h(Box, { flexGrow: 1, flexDirection: 'column' }, body), h(Footer, { state, hint: navigationHint(ctx.config.board.returnKey) }));
 }
 
 /** Show the board until the user quits; resolves when it is gone. Needs a terminal. */

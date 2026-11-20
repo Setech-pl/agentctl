@@ -1,5 +1,6 @@
 import { planRemoteGc } from './host-gc.ts';
 import { refreshDiskFreeSpace, taskDiskStartHold, worktreeCostEstimates } from './disk.ts';
+import { watchSnapshotPath, watchSnapshotTime, watchSnapshotWarning } from './watch-snapshot.ts';
 import { peakLines, peakHold } from './peak.ts';
 import { pulledOpen, pulledSummary, pulledCohortTasks, checkPulledClose } from './pulled.ts';
 import { readProviderHoldState, providerHoldText, providerHoldLines } from './provider-hold.ts';
@@ -52,6 +53,7 @@ import { recordJournal, readJournal } from './journal.ts';
 import type { GcPlan } from './gc.ts';
 import { applyGc } from './gc.ts';
 import { collectCapacity as collectCapacityFull, capacitySnapshot, snapshotLines } from './capacity.ts';
+import type { Capacity } from './capacity.ts';
 import { collectGuide } from './guide.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -2320,14 +2322,13 @@ function durableStatus(ctx: Context): string {
     'Active tasks from journal/events (last known; no live window probe):',
     ...[...latest.values()].filter(e => !['dead', 'cancelled', 'queue-failed'].includes(e.kind)).slice(-20).map(e => `${e.task}: ${e.kind} (${formatLocalTime(e.at)})`)].join('\n');
 }
-const stateSnapshotPath = (ctx: Context) => path.join(ctx.config.stateDir, 'mcp-state-snapshot.json');
-export async function publishMcpSnapshot(ctx: Context, rows?: StatusRow[], at = ctx.runner.now()): Promise<void> {
+export async function publishMcpSnapshot(ctx: Context, rows?: StatusRow[], at?: number, signal?: AbortSignal): Promise<void> {
   if (ctx.runner.dryRun) return;
   const deps: McpDeps = { context: () => ctx, notify: async () => {} };
   const observed = rows ?? await collectStatus(ctx, {archived: true});
   const live = await liveWindows(ctx, observed);
   const queue = await runQueueList(deps, {}, {rows: observed, live});
-  const capacity = await collectCapacityFull(ctx, {diskBudgetMs: DISK_BUDGET_MS, cachedOnly: true, rows: observed, live});
+  const capacity = await collectCapacityFull(ctx, {diskBudgetMs: DISK_BUDGET_MS, cachedOnly: true, save: false, rows: observed, live});
   const limits = collectLimits(ctx.config, live, ctx.runner.now());
   const config = await originalRuns.get('config_show')!(deps, {});
   // Snapshot diagnostics observe state only: spawning provider CLIs each tick both blocks watch and can start a session.
@@ -2344,21 +2345,57 @@ export async function publishMcpSnapshot(ctx: Context, rows?: StatusRow[], at = 
     try { fs.accessSync(dir!, fs.constants.W_OK); doctor.push({name: name!, status: 'ok', detail: dir!}); }
     catch { doctor.push({name: name!, status: fs.existsSync(dir!) ? 'fail' : 'warn', detail: `${dir}: missing or not writable`}); }
   }
-  const snapshot = { version: 1, at, interval: ctx.config.watch.interval,
+  const snapshot = { version: 1, at: at ?? ctx.runner.now(), interval: ctx.config.watch.interval,
     configHash: createHash('sha256').update(JSON.stringify(ctx.config)).digest('hex'),
     providerHolds: readProviderHoldState(ctx.config).holds,
     rows: observed, queue: JSON.parse(queue.text.slice(queue.text.indexOf('\n\n') + 2)), capacity, limits,
     config: JSON.parse(config.text), doctor };
-  fs.mkdirSync(ctx.config.stateDir, { recursive: true });
-  atomicWriteFile(stateSnapshotPath(ctx), JSON.stringify(snapshot));
+  if (signal?.aborted) return;
+  writeWatchSnapshot(ctx, snapshot);
 }
+
+function writeWatchSnapshot(ctx: Context, snapshot: object): void {
+  fs.mkdirSync(ctx.config.stateDir, { recursive: true });
+  atomicWriteFile(watchSnapshotPath(ctx.config), JSON.stringify(snapshot));
+}
+
+export function publishDegradedMcpSnapshot(ctx: Context, disk: DiskReport, step: string): void {
+  let capacity: Capacity | undefined;
+  try {
+    const previous = JSON.parse(fs.readFileSync(watchSnapshotPath(ctx.config), 'utf8'));
+    capacity = previous.capacity;
+  } catch { /* no previous capacity */ }
+  writeWatchSnapshot(ctx, { version: 1, at: ctx.runner.now(), degraded: step, disk,
+    ...(capacity ? {capacity: {...capacity, disk}} : {}) });
+}
+
 async function snapshotRead(ctx: Context, name: string, args: Record<string, unknown>): Promise<ToolResult | undefined> {
   try {
     if (args.project !== undefined) return undefined;
-    const snap = JSON.parse(fs.readFileSync(stateSnapshotPath(ctx), 'utf8'));
-    const age = ctx.runner.now() - snap.at;
-    if (name === 'status' && snap.version === 1 && age > 300000) return ok(`${ageLine(snap.at, ctx.runner.now())}\nSnapshot starszy niż 5 min; krótki fallback z kolejki i dziennika zamiast starej tabeli.\n${durableStatus(ctx)}`);
-    if (snap.version !== 1 || age < 0 || age >= 2 * ctx.config.watch.interval * 1000 || JSON.stringify(snap.providerHolds ?? {}) !== JSON.stringify(readProviderHoldState(ctx.config).holds) || snap.configHash !== createHash('sha256').update(JSON.stringify(ctx.config)).digest('hex')) return undefined;
+    const snap = JSON.parse(fs.readFileSync(watchSnapshotPath(ctx.config), 'utf8'));
+    const now = ctx.runner.now();
+    const age = now - snap.at;
+    if (!Number.isFinite(age) || snap.version !== 1 || age < 0) return undefined;
+    const warning = watchSnapshotWarning(snap.at, now);
+    const explicit = args.capacity === true || args.detail === true;
+    const disk = snap.disk ?? snap.capacity?.disk;
+    if ((warning || snap.degraded) && ['status', 'capacity', 'doctor'].includes(name)) {
+      const note = [`Watch snapshot age: ${(age / 1000).toFixed(1)} s.`, warning, snap.degraded && `Watch: pominięty etap – ${snap.degraded}.`].filter(Boolean).join(' ');
+      if (name === 'doctor') return ok(JSON.stringify([...snap.doctor ?? [], {name: 'watch snapshot', status: 'warn', detail: note, snapshot_age_s: age / 1000}], null, 2));
+      const freshDisk = disk ? await refreshDiskFreeSpace(ctx, disk) : await collectDisk(ctx);
+      const capacity = snap.capacity && capacitySnapshot(snap.capacity);
+      const fallback = name === 'status' ? durableStatus(ctx) : '';
+      const capacityAt = snap.capacity?.at;
+      if (args.format === 'json' || args.detail) return ok(JSON.stringify({
+        snapshot_age_s: age / 1000, snapshot_note: note, ...(fallback ? { fallback } : {}), disk: freshDisk,
+        ...((explicit || name === 'capacity') && capacity ? {capacity, capacity_at: capacityAt} : {}),
+      }, null, 2));
+      return ok([note, diskLine(freshDisk), ...((explicit || name === 'capacity') && capacity
+        ? [`Capacity from snapshot (${capacityAt}):`, ...snapshotLines(capacity)] : []), fallback].filter(Boolean).join('\n'));
+    }
+    if (snap.degraded || (age >= 2 * ctx.config.watch.interval * 1000 && !(name === 'capacity' || name === 'status' && explicit))
+      || JSON.stringify(snap.providerHolds ?? {}) !== JSON.stringify(readProviderHoldState(ctx.config).holds)
+      || snap.configHash !== createHash('sha256').update(JSON.stringify(ctx.config)).digest('hex')) return undefined;
     const note = `${ageLine(snap.at, ctx.runner.now())}; Watch snapshot age: ${(age / 1000).toFixed(1)} s.`;
     if (name === 'status' || name === 'capacity') snap.capacity.disk = await refreshDiskFreeSpace(ctx, snap.capacity.disk);
     const json = args.format === 'json' || args.detail === true;
@@ -2386,10 +2423,14 @@ const snapshotTools = new Set(['status', 'queue_list', 'capacity', 'limits', 'co
 for (const tool of MCP_TOOLS.filter(t => snapshotTools.has(t.name))) {
   const run = tool.run;
   tool.run = async (deps, args) => {
-    const cached = await snapshotRead(deps.context(() => {}), tool.name, args);
+    const ctx = deps.context(() => {});
+    const cached = await snapshotRead(ctx, tool.name, args);
     if (cached) return cached;
     const result = await run(deps, args);
-    const note = 'Watch snapshot unavailable/stale; bounded fallback path. / Snapshot watch niedostępny lub stary; odczyt ograniczony budżetem.';
+    const at = watchSnapshotTime(ctx.config);
+    const note = ['Watch snapshot unavailable/stale; bounded fallback path. / Snapshot watch niedostępny lub stary; odczyt ograniczony budżetem.',
+      at === undefined ? '' : `Watch snapshot age: ${Math.max(0, (ctx.runner.now() - at) / 1000).toFixed(1)} s.`,
+      at === undefined ? '' : watchSnapshotWarning(at, ctx.runner.now())].filter(Boolean).join(' ');
     try { const data = JSON.parse(result.text); return { ...result, text: JSON.stringify(Array.isArray(data) ? data.map((item, index) => index === 0 ? {...item, snapshot_note: note} : item) : { ...data, snapshot_note: note }, null, 2) }; } catch { return { ...result, text: `${result.text}\n${note}` }; }
   };
 }
@@ -2463,7 +2504,9 @@ for (const tool of MCP_TOOLS) {
           } else if (who.kind === 'unknown') inbox = 'unknown chat – only channel agentctl visible; pass as: "chat:<name>"\n';
         } catch { /* retain the durable bounded response even when WALL storage is unavailable */ }
       }
-      const prefix = `${cached ? ageLine(cached.at, ctx.runner.now()) + '\n' : ''}${inbox}Partial result: 8 s response budget exhausted; ${stale ? 'cache older than 5 min; short queue/journal fallback replaces stale full table' : cached ? 'last cached response follows' : 'durable queue snapshot follows'}. Retry reads; retry a confirm only with the same preview_token.\n`;
+      const watchAt = snapshotTools.has(tool.name) ? watchSnapshotTime(ctx.config) : undefined;
+      const watchAge = watchAt === undefined ? '' : [`Watch snapshot age: ${Math.max(0, (ctx.runner.now() - watchAt) / 1000).toFixed(1)} s.`, watchSnapshotWarning(watchAt, ctx.runner.now())].filter(Boolean).join(' ') + '\n';
+      const prefix = `${watchAge}${cached ? ageLine(cached.at, ctx.runner.now()) + '\n' : ''}${inbox}Partial result: 8 s response budget exhausted; ${stale ? 'cache older than 5 min; short queue/journal fallback replaces stale full table' : cached ? 'last cached response follows' : 'durable queue snapshot follows'}. Retry reads; retry a confirm only with the same preview_token.\n`;
       const wireBudget = ctx.config.mcp.maxResponseKb * 1024;
       let text = prefix + (stale || !cached ? durableStatus(ctx) : [queue, cached.result.text].join('\n'));
       while (responseWireBytes(ok(text)) > wireBudget && text.length > 1) text = text.slice(0, Math.max(1, Math.floor(text.length * 0.8)));

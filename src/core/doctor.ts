@@ -1,3 +1,4 @@
+import { watchSnapshotTime, watchSnapshotWarning } from './watch-snapshot.ts';
 import { performance } from 'node:perf_hooks';
 import { cachedRequest } from './response-budget.ts';
 import { socketRunner } from './tmux-socket.ts';
@@ -240,6 +241,12 @@ export async function runDoctor(
 
   section('MCP registrations/processes');
   if (config) {
+    const now = runner.now();
+    const at = watchSnapshotTime(config);
+    if (at !== undefined) {
+      const warning = watchSnapshotWarning(at, now);
+      add('watch snapshot', warning ? 'warn' : 'ok', warning ?? `Watch snapshot age: ${Math.max(0, Math.floor((now - at) / 1000))} s`);
+    }
     if (tmuxVersion.code === 0) {
       const tmux = new Tmux(runner, config.session);
       const window = (await tmux.windows()).find((w) => w.role === 'watch' || w.plain === 'watch');

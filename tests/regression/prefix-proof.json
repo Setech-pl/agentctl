@@ -1014,6 +1014,19 @@
       "REL0244-LIVE-EVIDENCE: release collects every live result after earlier failures"
     ]
   },
+  "SNAP0247": {
+    "rev": "v0.23.2",
+    "outcome": "FAILS",
+    "failed": 4,
+    "passed": 0,
+    "failing": [
+      "SNAP0247: a hung disk notification times out while watch publishes and continues ticking",
+      "SNAP0247: stale MCP status uses durable state and fresh disk with dated capacity, and doctor warns",
+      "SNAP0247: a stuck statfs falls back to df and keeps worktree sizes independent",
+      "SNAP0247: a hung disk notification times out while watch publishes and continues ticking",
+      "SNAP0247: stale MCP status uses durable state and fresh disk with dated capacity, and doctor warns"
+    ]
+  },
   "UX0228": {
     "rev": "v0.22.5",
     "outcome": "FAILS",

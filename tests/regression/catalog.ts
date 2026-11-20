@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'SNAP0247', fixedIn: '0.23.3', symptom: 'A blocked watch step stopped snapshot publication, and stale MCP status dropped disk and capacity.', scenarios: [s('watch-snapshot.test.ts', '^SNAP0247:'), s('board-render.test.ts', 'SNAP0247:')] },
   { id: 'WALL-34-READY', fixedIn: '0.23.2', symptom: 'Kimi startup accepted a transient composer on the welcome screen before it had settled.', scenarios: [s('host-tasks.test.ts', '^WALL-34-READY:')] },
   { id: 'WALL-34-FIFO', fixedIn: '0.23.2', symptom: 'An unconfirmed Kimi start in needs-attention kept later sends queued behind it.', scenarios: [s('host-tasks.test.ts', '^WALL-34-FIFO:')] },
   { id: 'WALL-23', fixedIn: '0.23.2', symptom: 'An unconfirmed MCP follow-up was accepted and delivered to a working agent.', scenarios: [s('mcp-write-contract.test.ts', '^WALL-23:'), s('host-tasks.test.ts', '^WALL-23:')] },
