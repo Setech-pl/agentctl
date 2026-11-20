@@ -1552,7 +1552,7 @@ export const MCP_TOOLS: McpToolDef[] = [
     title: 'Start tasks from a spec',
     kind: 'write',
     description:
-      'Always pass as: "chat:<name>" to attribute the order to your chat. WRITE, off unless the user put "new" in mcp.allow. Starts agent tasks from a spec: a YAML header between --- lines (task, agent, model, effort, repos …) followed by the prompt, the same format as the agentctl CLI. ' +
+      'WRITE, off unless the user put "new" in mcp.allow. Always pass as: "chat:<name>" to attribute the order to your chat. Starts agent tasks from a spec: a YAML header between --- lines (task, agent, model, effort, repos …) followed by the prompt, the same format as the agentctl CLI. ' +
       'The FIRST call (confirm omitted) validates the spec and returns a summary of what would start; show it to the user. Only when they agree, call again with the same spec and confirm: true. ' +
       '"setup" commands (shell) are not accepted from the chat. Every start is asynchronous: confirm registers it and returns at once, and the watcher (it must be running, else the confirm is refused) does the checkout, the setup, the window and the wait for the agent; follow it with events_since (SETUP, START, BŁĄD STARTU) and status or queue_list. new again for a task that is being started returns its state and starts nothing twice; a failed start leaves the task failed with its reason and the worktrees, and queue_retry tries again.',
     input: { as: wallAsArg, spec: z.string().min(1).max(100_000).optional().describe('The spec text: ---, YAML header, ---, prompt. Several specs may follow each other. Optional only when confirming with preview_token: the stored spec then executes.'), agent: z.enum(DEFAULT_PROVIDERS).optional(), reuse: z.boolean().optional(), no_agent: z.boolean().optional(), cohort: cohortArg.optional(), wait_trust: z.boolean().optional().describe('Ignored: every start is asynchronous and the watcher always waits for a human to answer the trust dialog.'), confirm: z.boolean().optional().describe('true only after the user agreed to the summary.') },
@@ -1564,7 +1564,7 @@ export const MCP_TOOLS: McpToolDef[] = [
     title: 'Put tasks in the queue',
     kind: 'write',
     description:
-      'Always pass as: "chat:<name>" to attribute the order to your chat. WRITE, off unless the user put "queue" in mcp.allow. Puts the tasks of a spec in the queue (same spec format as new, plus priority: high|normal, after: <TASK or list>, touches: [globs]): each starts when a provider window is free and its `after` reports have an accepted first-line verdict (PASS, PASS with findings, PARTIAL, GO); after_verdict overrides the list. ' +
+      'WRITE, off unless the user put "queue" in mcp.allow. Always pass as: "chat:<name>" to attribute the order to your chat. Puts the tasks of a spec in the queue (same spec format as new, plus priority: high|normal, after: <TASK or list>, touches: [globs]): each starts when a provider window is free and its `after` reports have an accepted first-line verdict (PASS, PASS with findings, PARTIAL, GO); after_verdict overrides the list. ' +
       'The FIRST call (confirm omitted) validates the spec and returns a summary (where each task will stand, hints, touches warnings); show it to the user. Only when they agree, call again with the same spec and confirm: true. "setup" is not accepted from the chat. replace: true replaces a waiting entry in one watch step; previews identify pending queue_rm requests.',
     input: {
       as: wallAsArg,
