@@ -10,6 +10,8 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| WALL-34-READY | Kimi startup accepted a transient composer on the welcome screen before it had settled. | `tests/host-tasks.test.ts` (`^WALL-34-READY:`) | 0.23.2 | fails on v0.23.1 (2 failing of 2) |
+| WALL-34-FIFO | An unconfirmed Kimi start in needs-attention kept later sends queued behind it. | `tests/host-tasks.test.ts` (`^WALL-34-FIFO:`) | 0.23.2 | fails on v0.23.1 (2 failing of 2) |
 | WALL-23 | An unconfirmed MCP follow-up was accepted and delivered to a working agent. | `tests/mcp-write-contract.test.ts` (`^WALL-23:`)<br>`tests/host-tasks.test.ts` (`^WALL-23:`) | 0.23.2 | fails on v0.23.1 (3 failing of 3) |
 | MCP-WRITE-PREVIEW | Single-task mark and an uncached GC write preview could register requests without confirmation. | `tests/mcp-write-contract.test.ts` (`^MCP-WRITE-PREVIEW:`) | 0.23.2 | fails on v0.23.1 (1 failing of 1) |
 | REL0244-CASE-ISOLATION | An independent live case inherited provider admission or usage state from the preceding case. | `tests/harness.test.ts` (`^REL0244-CASE-ISOLATION:`) | 0.23.1 | fails on v0.23.0 (1 failing of 1) |

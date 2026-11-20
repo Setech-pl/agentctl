@@ -1080,6 +1080,30 @@
       "WALL-23: remote MCP send, send_enter, answer and interrupt preview without dispatching either pane"
     ]
   },
+  "WALL-34-FIFO": {
+    "rev": "v0.23.1",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "WALL-34-FIFO: local sends past a stalled Kimi start when the composer is ready and empty",
+      "WALL-34-FIFO: pc sends past a stalled Kimi start when the composer is ready and empty",
+      "WALL-34-FIFO: local sends past a stalled Kimi start when the composer is ready and empty",
+      "WALL-34-FIFO: pc sends past a stalled Kimi start when the composer is ready and empty"
+    ]
+  },
+  "WALL-34-READY": {
+    "rev": "v0.23.1",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "WALL-34-READY: local waits through the Kimi welcome redraw with a bounded deadline",
+      "WALL-34-READY: pc waits through the Kimi welcome redraw with a bounded deadline",
+      "WALL-34-READY: local waits through the Kimi welcome redraw with a bounded deadline",
+      "WALL-34-READY: pc waits through the Kimi welcome redraw with a bounded deadline"
+    ]
+  },
   "WALL0229-HISTORY": {
     "rev": "v0.22.6",
     "outcome": "IMPORT-ERROR",

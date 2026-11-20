@@ -19,6 +19,7 @@ import { closeTask } from '../src/core/close.ts';
 import { planCancel, cancelTasks } from '../src/core/cancel.ts';
 import { interruptTask } from '../src/core/interrupt.ts';
 import { peekTask } from '../src/core/peek.ts';
+import { waitForReady } from '../src/core/ready.ts';
 import { sendPrompts } from '../src/core/send.ts';
 import { collectStatus } from '../src/core/status.ts';
 import { liveWindows, planBatch } from '../src/core/plan.ts';
@@ -302,6 +303,66 @@ it('WALL-23: remote MCP send, send_enter, answer and interrupt preview without d
   assert.deepEqual([w.keys.length, w.pastes.length, readMcpRequests(w.config).length], afterSend);
   assert.doesNotMatch(w.localTmux.seen.join('\n'), /send-keys|paste-buffer/);
 });
+
+for (const host of ['local', 'pc']) {
+  it(`WALL-34-READY: ${host} waits through the Kimi welcome redraw with a bounded deadline`, async () => {
+    const w = world('kimi');
+    const record = seedTask(w.config, 'K-READY', { agent: 'kimi', ...(host === 'pc' ? { host } : {}) });
+    const screen = (host === 'pc' ? w.tmux : w.localTmux).add(record.window, ready('kimi'));
+    const settled = ready('kimi').replace(/^.*No session yet.*$/m, '   Session ready.');
+    const started = w.runner.now();
+    const sleep = w.runner.sleep.bind(w.runner);
+    let finishRedraw = true;
+    w.runner.sleep = async (ms) => {
+      await sleep(ms);
+      screen.screen = finishRedraw && w.runner.now() - started >= 1000 ? settled : 'Welcome to Kimi Code!\nNo session yet\n│ >';
+    };
+    const options = { pattern: w.config.agents.kimi.readyPattern, structuralComposer: true, agent: 'kimi' as const, emptyInput: true, timeoutMs: 2000 };
+    const result = await waitForReady(w.runner, w.ctx.tmux, record.window, options);
+    assert.equal(result.ready, true);
+    assert.equal(result.screen, settled);
+    finishRedraw = false;
+    screen.screen = 'Welcome to Kimi Code!\nNo session yet\n│ >';
+    const beforeTimeout = w.runner.now();
+    assert.equal((await waitForReady(w.runner, w.ctx.tmux, record.window, options)).ready, false);
+    assert.equal(w.runner.now() - beforeTimeout, options.timeoutMs);
+    assert.equal(w.pastes.length, 0);
+    assert.doesNotMatch(w.localTmux.seen.join('\n'), /paste-buffer|send-keys/);
+  });
+
+  it(`WALL-34-FIFO: ${host} sends past a stalled Kimi start when the composer is ready and empty`, async () => {
+    const w = world('kimi');
+    const initial = 'Start instructions that remain in TASK.md';
+    const followup = 'Read TASK.md and continue.';
+    const task = seedTask(w.config, 'K-STALLED', {
+      agent: 'kimi', model: 'k3', ...(host === 'pc' ? { host } : {}),
+      promptKind: 'initial', promptDelivery: 'needs-attention', pendingPrompt: initial, deliveryId: 'failed-start',
+      deliveryStartedAt: new Date(w.runner.now() - 120_000).toISOString(), deliveryEnters: 1,
+    });
+    const screen = (host === 'pc' ? w.tmux : w.localTmux).add(task.window, ready('kimi', 'The human owns this draft'));
+    await w.runner.appendFile(taskFile(w.config, task.window), `\n${initial}\n`);
+    await sendPrompts(w.ctx, [{ task: task.task, window: task.window, prompt: followup }]);
+    assert.equal(readPromptQueue(w.ctx, task.window)[0]?.text, followup);
+    assert.equal(w.pastes.length, 0);
+    assert.doesNotMatch(w.localTmux.seen.join('\n'), /paste-buffer|send-keys/);
+    screen.screen = ready('kimi');
+    await drainPromptQueue(w.ctx, task.window);
+    assert.deepEqual(readPromptQueue(w.ctx, task.window), []);
+    const updated = readTaskRecord(w.config, task.window)!;
+    assert.equal(updated.promptKind, 'followup');
+    assert.equal(updated.pendingPrompt, followup);
+    assert.ok(fs.readFileSync(taskFile(w.config, task.window), 'utf8').includes(initial));
+    if (host === 'pc') {
+      assert.deepEqual(w.pastes, [followup]);
+      assert.doesNotMatch(w.localTmux.seen.join('\n'), /paste-buffer|send-keys/);
+    } else {
+      assert.equal(w.localTmux.seen.filter(cmd => cmd.startsWith('paste-buffer')).length, 1);
+      assert.deepEqual(w.sshCalls, []);
+    }
+    await drainPromptQueue(w.ctx, task.window);
+    assert.equal(host === 'pc' ? w.pastes.length : w.localTmux.seen.filter(cmd => cmd.startsWith('paste-buffer')).length, 1);
+  });
+}
 
 it('remote Codex send stays in FIFO until turn end and verifies from its own rollout', async () => {
   const w = world('codex'); await startAtTrust(w); await acceptTrust(w);

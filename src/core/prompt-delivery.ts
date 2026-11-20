@@ -9,6 +9,7 @@ import { PATTERN_FLAGS } from './config.ts';
 import type { AgentName, AgentSettings } from './config.ts';
 import type { Context } from './context.ts';
 import { withFileLock } from './file-lock.ts';
+import { kimiSettledView, kimiWelcomeShown } from './ready.ts';
 import { classifyScreen, inputVisible, startupDialogShown } from './state.ts';
 import { codexQueueKey, areaKey, fieldArea, fieldText, inspectField, pasteImage, readsAs } from './input-field.ts';
 import { eol } from './paste-wrapper.ts';
@@ -50,17 +51,6 @@ const PASTE_ENTERS = 3;
  */
 const SETTLE_LOOKS = 8;
 const SETTLE_MS = 250;
-
-/**
- * The part of a Kimi screen that has to hold still: the composer and everything above it. Below the composer Kimi redraws its footer on its own
- * clock (a rotating tip, the context gauge), so a whole-screen comparison never settles for long (P92, dev 12.11: "Kimi screen is not stable before
- * Enter" on the start screen left the first prompt in the field for the owner). Undefined while the composer box is not whole.
- */
-export function kimiSettledView(screen: string): string | undefined {
-  const field = inspectField(screen, 'kimi');
-  if (!field.readable || field.bottom === undefined) return undefined;
-  return screen.split('\n').slice(0, field.bottom + 1).map(line => line.trimEnd()).join('\n');
-}
 
 export type DeliveryProof = 'delivered';
 
@@ -451,10 +441,14 @@ async function deliverOnce(ctx: Context, window: string): Promise<'sent' | 'pend
     if (profile.stablePaste) {
       // P92: Kimi shows its composer before it has finished starting. Paste only into a whole, empty composer that read the same twice;
       // otherwise nothing is pasted and the watcher tries again on its next pass.
-      await ctx.runner.sleep(SETTLE_MS);
-      const again = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
       const view = kimiSettledView(before.stdout);
-      if (again.code !== 0 || view === undefined || kimiSettledView(again.stdout) !== view || classifyScreen(again.stdout, settings) !== beforeState) return 'pending';
+      if (view === undefined) return 'pending';
+      const samples = kimiWelcomeShown(before.stdout) ? 2 : 1;
+      for (let i = 0; i < samples; i++) {
+        await ctx.runner.sleep(SETTLE_MS);
+        const again = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
+        if (again.code !== 0 || kimiSettledView(again.stdout) !== view || classifyScreen(again.stdout, settings) !== beforeState) return 'pending';
+      }
     }
     if (record.promptKind === 'initial' && !inspectField(before.stdout, record.agent).readable) {
       await setHeaderFields(ctx.runner, file, { prompt_delivery: 'needs-attention', prompt_error: 'Composer is not structurally ready; initial prompt was not pasted and remains in TASK.md' });

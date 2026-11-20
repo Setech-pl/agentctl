@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.23.2] - 2026-11-20
 
+- WALL-34: Kimi waits for its composer to settle on the welcome screen. An explicit follow-up can replace a stalled start once the composer is ready and empty, locally and over SSH. / Kimi czeka na ustabilizowanie pola wpisywania na ekranie powitalnym. Jawna wiadomość może zastąpić zablokowany start, gdy pole jest gotowe i puste, lokalnie oraz przez SSH.
 - WALL-23: MCP send previews the exact message and pane state on local and SSH hosts before confirmation. Busy-agent previews describe queued delivery. / MCP send pokazuje dokładną wiadomość i stan okna lokalnie i na hoście SSH przed potwierdzeniem. Podgląd przy zajętym agencie opisuje dostarczenie z kolejki.
 - MCP-WRITE-PREVIEW: single-task marks, send withdrawals and uncached GC plans require confirmation before registering a write. / Pojedyncze oceny, wycofanie wiadomości i plany GC bez cache wymagają potwierdzenia przed rejestracją zapisu.
 

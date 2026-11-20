@@ -26,6 +26,8 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'WALL-34-READY', fixedIn: '0.23.2', symptom: 'Kimi startup accepted a transient composer on the welcome screen before it had settled.', scenarios: [s('host-tasks.test.ts', '^WALL-34-READY:')] },
+  { id: 'WALL-34-FIFO', fixedIn: '0.23.2', symptom: 'An unconfirmed Kimi start in needs-attention kept later sends queued behind it.', scenarios: [s('host-tasks.test.ts', '^WALL-34-FIFO:')] },
   { id: 'WALL-23', fixedIn: '0.23.2', symptom: 'An unconfirmed MCP follow-up was accepted and delivered to a working agent.', scenarios: [s('mcp-write-contract.test.ts', '^WALL-23:'), s('host-tasks.test.ts', '^WALL-23:')] },
   { id: 'MCP-WRITE-PREVIEW', fixedIn: '0.23.2', symptom: 'Single-task mark and an uncached GC write preview could register requests without confirmation.', scenarios: [s('mcp-write-contract.test.ts', '^MCP-WRITE-PREVIEW:')] },
   { id: 'REL0244-CASE-ISOLATION', fixedIn: '0.23.1', symptom: 'An independent live case inherited provider admission or usage state from the preceding case.', scenarios: [s('harness.test.ts', '^REL0244-CASE-ISOLATION:')] },

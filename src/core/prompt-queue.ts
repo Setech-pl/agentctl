@@ -1,6 +1,7 @@
 import { checkHostLimit } from './host-limits.ts';
 import { collectStatus } from './status.ts';
-import { classifyScreen } from './state.ts';
+import { inspectField } from './input-field.ts';
+import { classifyScreen, inputVisible, startupDialogShown } from './state.ts';
 import type { TaskState } from './state.ts';
 import { stateWriteFailure } from './atomic-file.ts';
 import { withStartLock } from './start-lock.ts';
@@ -10,7 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { Context } from './context.ts';
-import { withFileLock } from './file-lock.ts';
+import { taskLock, withFileLock } from './file-lock.ts';
 import { readTaskRecord, setHeaderFields, taskFile } from './taskstore.ts';
 import { queuePrompt, deliverPendingPrompt } from './prompt-delivery.ts';
 import { recordJournal } from './journal.ts';
@@ -31,16 +32,39 @@ export async function enqueuePrompt(ctx: Context, window: string, text: string, 
   });
 }
 
-/** Durable FIFO. An uncertain active delivery keeps later messages queued, never discarded or repasted. */
+/** An explicit follow-up may take over from a stalled Kimi start once its pane can accept input. */
+async function replaceStalledKimiStart(ctx: Context, window: string, next: QueuedPrompt): Promise<boolean> {
+  const file = taskFile(ctx.config, window);
+  return withFileLock(taskLock(file), async () => {
+    const record = readTaskRecord(ctx.config, window);
+    if (!record || record.closed || record.cancelled || record.agent !== 'kimi' || record.promptKind === 'followup'
+      || record.promptDelivery !== 'needs-attention' || !record.pendingPrompt || !record.deliveryStartedAt
+      || record.deliveryResult === 'queued-in-agent' || record.deliveryResult === 'queued-in-agent-confirmed' || stateWriteFailure(file)) return false;
+    const pane = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
+    const settings = ctx.config.agents.kimi, field = inspectField(pane.stdout, 'kimi');
+    if (pane.code !== 0 || classifyScreen(pane.stdout, settings) !== 'idle' || startupDialogShown(pane.stdout, settings)
+      || !inputVisible(pane.stdout, settings) || !field.readable || field.area.length !== 0) return false;
+    // Reuse the queued ID. If interrupted before dequeue, the ordinary FIFO transfer recognizes the same active delivery.
+    await queuePrompt(ctx, record, next.text, 'pending', { kind: 'followup', id: next.id });
+    await recordJournal(ctx, { kind: 'delivery', task: record.task, text: `${record.task}: follow-up ${next.id} replaced the unconfirmed start ${record.deliveryId ?? 'legacy'}; original instructions remain in TASK.md` });
+    return true;
+  });
+}
+
+/** Durable FIFO. Only a stalled Kimi start can yield to a follow-up in a verified empty pane. */
 export async function drainPromptQueue(ctx: Context, window: string, turnState?: TaskState): Promise<void> {
   if (ctx.runner.dryRun) return;
   await withStartLock(ctx, () => withFileLock(`${queueFile(ctx, window)}.lock`, async () => {
     let record = readTaskRecord(ctx.config, window);
     if (!record || record.closed || record.cancelled || stateWriteFailure(taskFile(ctx.config, window))) return;
-    if (record.pendingPrompt && record.promptDelivery !== 'sent') {
-      if (record.promptDelivery === 'launching' || await deliverPendingPrompt(ctx, window) !== 'sent') return;
-    }
     let queue = readPromptQueue(ctx, window);
+    let stalledStart = false;
+    if (record.pendingPrompt && record.promptDelivery !== 'sent') {
+      if (record.promptDelivery === 'launching') return;
+      const outcome = await deliverPendingPrompt(ctx, window);
+      stalledStart = outcome === 'needs-attention' && record.agent === 'kimi' && record.promptKind !== 'followup';
+      if (outcome !== 'sent' && !stalledStart) return;
+    }
     while (queue.length) {
       record = readTaskRecord(ctx.config, window)!;
       if (record.agent !== 'unknown') {
@@ -74,7 +98,8 @@ export async function drainPromptQueue(ctx: Context, window: string, turnState?:
         }
       }
       const item = queue[0]!;
-      if (record.deliveryId !== item.id) await queuePrompt(ctx, record, item.text, 'pending', { kind: 'followup', id: item.id });
+      if (stalledStart && !await replaceStalledKimiStart(ctx, window, item)) return;
+      if (!stalledStart && record.deliveryId !== item.id) await queuePrompt(ctx, record, item.text, 'pending', { kind: 'followup', id: item.id });
       // Transfer persisted before the item leaves the FIFO. Recovery sees the same delivery ID.
       queue = queue.slice(1);
       await ctx.runner.writeFile(queueFile(ctx, window), JSON.stringify(queue));
@@ -82,6 +107,7 @@ export async function drainPromptQueue(ctx: Context, window: string, turnState?:
       const fresh = readTaskRecord(ctx.config, window)!;
       if (fresh.deliveryStartedAt) await ctx.runner.appendFile(taskFile(ctx.config, window), `\n\n## Follow-up ${result === 'sent' ? 'sent' : 'pasted, unconfirmed'} ${fresh.deliveryStartedAt} (${item.id})\n`);
       if (result !== 'sent') return;
+      stalledStart = false;
       turnState = 'working'; // one queued turn per confirmed idle observation
     }
   }));

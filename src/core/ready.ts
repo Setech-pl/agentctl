@@ -7,6 +7,18 @@ import type { Runner } from './runner.ts';
 import type { Tmux } from './tmux.ts';
 import { shellLine } from './util.ts';
 
+/** A fresh Kimi session is created by the first message. The welcome text can outlive startup. */
+export function kimiWelcomeShown(screen: string): boolean {
+  return /^\s*No session yet(?:\s|$)/m.test(screen) || /^.*Welcome to Kimi Code!/m.test(screen);
+}
+
+/** Compare the whole composer and the content above it, excluding Kimi's rotating footer. */
+export function kimiSettledView(screen: string): string | undefined {
+  const field = inspectField(screen, 'kimi');
+  if (!field.readable || field.bottom === undefined) return undefined;
+  return screen.split('\n').slice(0, field.bottom + 1).map(line => line.trimEnd()).join('\n');
+}
+
 export interface TrustWait {
   /** How long to wait for a human to answer the dialog. */
   timeoutMs: number;
@@ -65,9 +77,13 @@ export async function waitForReady(runner: Runner, tmux: Tmux, window: string, o
   let deadline = runner.now() + opts.timeoutMs;
   let inTrust = false;
   let screen = '';
+  let welcome = false;
+  let previousKimiView: string | undefined;
   for (;;) {
     if (opts.signal?.aborted) return { ready: false, trust: inTrust, aborted: true, screen };
     const r = await tmux.capture(window);
+    const previous = previousKimiView;
+    previousKimiView = undefined;
     if (r.code === 0) {
       screen = r.stdout;
       if (trust?.test(screen)) {
@@ -85,7 +101,12 @@ export async function waitForReady(runner: Runner, tmux: Tmux, window: string, o
         if (startupDialogShown(screen, { dialogPattern: opts.dialogPattern, readyPattern: opts.pattern })) return { ready: false, trust: false, dialog: true, screen };
         const composer = opts.structuralComposer ? inspectField(screen, opts.agent) : undefined;
         const draft = opts.agent === 'kimi' && composer ? composer.area.length > 0 : Boolean(screenMetadata(screen).draft_input);
-        if ((!composer || composer.readable) && regex.test(screen) && (!opts.emptyInput || !draft)) return { ready: true, trust: false, screen };
+        if (opts.agent === 'kimi') welcome ||= kimiWelcomeShown(screen);
+        if ((!composer || composer.readable) && regex.test(screen) && (!opts.emptyInput || !draft)) {
+          if (!welcome) return { ready: true, trust: false, screen };
+          previousKimiView = kimiSettledView(screen);
+          if (previousKimiView !== undefined && previousKimiView === previous) return { ready: true, trust: false, screen };
+        }
       }
     }
     if (runner.now() >= deadline) return { ready: false, trust: inTrust, screen };
