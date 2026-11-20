@@ -56,6 +56,7 @@ export interface Layer {
   guide?: string;
   worktreeRoot?: string;
   worktreeMount?: string;
+  nodeModules?: 'clone' | 'off';
   links: Link[];
   env: Record<string, string>;
   report?: string;
@@ -552,7 +553,11 @@ function parseLayer(obj: Record<string, unknown>, where: string, p: Problems): L
   if (worktreeRoot) layer.worktreeRoot = worktreeRoot;
   if (report) layer.report = report;
   if (reports.length > 1) layer.reportAlt = reports.slice(1);
-  if (obj.setup !== undefined && obj.setup !== null) layer.setup = parseSetup(obj.setup, `${where}.setup`, p);
+  if (isObject(obj.setup)) {
+    checkKeys(obj.setup, ['commands', 'node_modules'], `${where}.setup`, p);
+    if (obj.setup.commands !== undefined) layer.setup = parseSetup(obj.setup.commands, `${where}.setup.commands`, p);
+    layer.nodeModules = parseEnumValue(obj.setup.node_modules, ['clone', 'off'] as const, `${where}.setup.node_modules`, p);
+  } else if (obj.setup !== undefined && obj.setup !== null) layer.setup = parseSetup(obj.setup, `${where}.setup`, p);
   if (obj.review !== undefined) layer.review = parseReview(obj.review, `${where}.review`, p);
   return layer;
 }

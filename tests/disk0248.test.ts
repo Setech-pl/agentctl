@@ -81,6 +81,59 @@ function world(name: string, yaml: (root: string) => string = () => '') {
   return { root, repo, config, ctx, runner, spec, notifier, installs, copies, moves, notifications, failCopy: () => { failClone = true; }, interceptGit: (f: typeof interceptGit) => { interceptGit = f; } };
 }
 
+it('DISK0248-NM: same lockfile installs once, creates independent copies and exposes store bytes and counters', async () => {
+  const w = world('store', () => 'setup: [npm ci]\n');
+  // Set the parsed option directly so the v0.23.3 proof reaches setup and fails on repeated installs.
+  Object.assign(w.config, { nodeModules: 'clone' });
+  const a = w.spec('NMA').spec, b = w.spec('NMB').spec;
+  await Promise.all([newTasks(w.ctx, [a], { noAgent: true }), newTasks(w.ctx, [b], { noAgent: true })]);
+  assert.equal(w.installs.length, 1);
+  assert.equal(w.copies.length, 2);
+  assert.ok(w.copies.every(args => args.includes(process.platform === 'darwin' ? '-c' : '--reflink=auto')));
+  const file = (spec: typeof a) => path.join(spec.repos[0]!.worktree, 'node_modules/dependency');
+  fs.writeFileSync(file(a), 'changed');
+  assert.equal(fs.readFileSync(file(b), 'utf8'), 'original');
+  assert.equal(fs.readlinkSync(path.join(b.repos[0]!.worktree, 'node_modules/.bin/tool')), '../dependency');
+  const disk = await collectDisk(w.ctx);
+  assert.deepEqual([disk.nodeModulesStore?.hits, disk.nodeModulesStore?.misses, disk.nodeModulesStore?.entries], [1, 1, 1]);
+  assert.ok(disk.nodeModulesStore!.bytes > 0);
+  assert.deepEqual(readJournal(w.config).filter(event => event.nodeModules).map(event => event.nodeModules!.result), ['miss', 'hit']);
+
+  fs.appendFileSync(path.join(w.repo, 'package-lock.json'), '\n');
+  git(w.repo, 'commit', '-am', 'new lockfile');
+  await newTasks(w.ctx, [w.spec('NMC').spec], { noAgent: true });
+  assert.equal(w.installs.length, 2);
+  assert.equal((await collectDisk(w.ctx)).nodeModulesStore?.entries, 2);
+  w.failCopy();
+  const d = w.spec('NMD').spec;
+  await newTasks(w.ctx, [d], { noAgent: true });
+  assert.equal(w.installs.length, 3);
+  assert.equal(fs.readFileSync(file(d), 'utf8'), 'original');
+  assert.ok(!fs.readdirSync(d.repos[0]!.worktree).some(name => name.startsWith('.agentctl-nm-')));
+
+  await w.runner.sleep(60_000);
+  const preview = await planGc(w.ctx, { olderThan: '1m' });
+  const entries = preview.items.filter(item => item.kind === 'node-modules');
+  assert.equal(entries.length, 2);
+  assert.equal(w.moves.length, 0);
+  const applied = await applyGc(w.ctx, preview);
+  assert.equal(applied.failed.length, 0);
+  assert.equal(w.moves.length, 2);
+  assert.equal(applied.freedBytes, 0, 'Trash retains allocated bytes');
+  assert.equal(fs.readFileSync(file(b), 'utf8'), 'original');
+});
+
+it('node_modules and worktree settings support project overrides and invalid paths are rejected', () => {
+  const w = world('settings', root => `worktrees: {root: ${root}/a}\nsetup: {node_modules: clone, commands: [npm ci]}\n`);
+  assert.equal(w.spec('SETTINGS', false).spec.repos[0]!.worktree, `${w.root}/a/repo-settings`);
+  assert.equal(w.spec('SETTINGS', false).spec.repos[0]!.nodeModules, 'clone');
+  fs.writeFileSync(path.join(w.repo, '.agentctl.yaml'), `worktrees: {root: ${w.root}/b, mount: ${w.root}}\nsetup: {node_modules: off}\n`);
+  const settings = w.spec('SETTINGS', false).spec.repos[0]!;
+  assert.equal(settings.worktree, `${w.root}/b/repo-settings`);
+  assert.equal(settings.worktreeMount, w.root);
+  assert.equal(settings.nodeModules, undefined);
+});
+
 function fakeMount(t: TestContext, mount: string) {
   let mounted = true;
   const stat = ((target: fs.PathLike, ...options: unknown[]) => {

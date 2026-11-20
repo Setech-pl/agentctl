@@ -21,7 +21,9 @@ import { AgentctlError, cohortKey, errorMessage } from './util.ts';
  * of agentctl names; the history, the reports (*.md) and anything it does not recognise stay. Branches go only with `git branch -d`.
  */
 
-export type GcKind = 'worktree' | 'cache' | 'archive' | 'branch';
+import { staleNodeModules, trashStaleNodeModules } from './node-modules-store.ts';
+
+export type GcKind = 'worktree' | 'cache' | 'archive' | 'branch' | 'node-modules';
 
 export interface GcItem {
   host?: string;
@@ -326,7 +328,8 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
   }
   const remote = await planRemoteGc(ctx, opts, olderThanMs);
   items.push(...remote.items); skipped.push(...remote.skipped);
-  const freeBytes = items.reduce((n, i) => n + i.bytes, 0);
+  if (cohort === undefined) items.push(...staleNodeModules(config, olderThanMs, runner.now()).map(entry => ({ ...entry, kind: 'node-modules' as const, task: 'nm-store', detail: `unused for ${opts.olderThan ?? DEFAULT_OLDER_THAN}; move to Trash` })));
+  const freeBytes = items.reduce((n, i) => n + (i.kind === 'node-modules' ? 0 : i.bytes), 0);
   const foreignWorktrees = skipped.filter(s => s.kind === 'worktree-foreign').length;
   return { keep: opts.keep ?? [], includeCache: opts.includeCache === true, keepCache: opts.keepCache ?? [], forceDirty: mine.filter(r => permitsDirty(opts.forceDirty, r.task)).map(r => r.task), ...(opts.cachedSizes ? { cachedSizes: true } : {}), autoCacheFreedBytes: all.filter(r => cohort === undefined || (r.cohort && cohortKey(r.cohort) === cohortKey(cohort))).reduce((sum, r) => sum + worktreeCacheFreed(ctx, r), 0), ...(opts.forceLinks ? { forceLinks: true } : {}), items, skipped: cohort === undefined ? skipped : skipped.filter(s => s.kind !== 'worktree-foreign'), freeBytes, olderThanMs, unknownCacheDirs, ...(cohort !== undefined ? { foreignWorktrees } : {}) };
 }
@@ -341,10 +344,15 @@ export interface GcResult {
 export async function applyGc(ctx: Context, plan: GcPlan): Promise<GcResult> {
   const { runner, config } = ctx;
   const result: GcResult = { done: [], failed: [], freedBytes: 0 };
-  const order: GcKind[] = ['worktree', 'cache', 'archive', 'branch'];
+  const order: GcKind[] = ['worktree', 'cache', 'archive', 'branch', 'node-modules'];
   for (const kind of order) {
     for (const item of plan.items.filter((i) => i.kind === kind)) {
       try {
+        if (kind === 'node-modules') {
+          const bytes = await trashStaleNodeModules(ctx, item.target, plan.olderThanMs);
+          result.done.push({ ...item, bytes });
+          continue;
+        }
         const assertUnpinned = () => {
           const records = [...listTaskRecords(config), ...listArchivedRecords(config)];
           const protectedRecords = records.filter(r => r.host === item.host).filter(r => r.pin || plan.keep?.some(t => t.toLowerCase() === r.task.toLowerCase()));
@@ -395,13 +403,15 @@ export async function applyGc(ctx: Context, plan: GcPlan): Promise<GcResult> {
   return result;
 }
 
-const KIND_WORD: Record<GcKind, string> = { worktree: 'worktree', cache: 'cache', archive: 'archive', branch: 'branch' };
+const KIND_WORD: Record<GcKind, string> = { worktree: 'worktree', cache: 'cache', archive: 'archive', branch: 'branch', 'node-modules': 'node_modules store entry' };
 
 export interface GcViewOptions { detail?: boolean; offset?: number; limit?: number }
 /** Bounded summaries with paginated safety facts and cache paths; combined details are opt-in. */
 export function gcView(plan: GcPlan, opts: GcViewOptions = {}) {
   const offset = opts.offset ?? 0, limit = Math.min(100, opts.limit ?? 10);
-  const categories = (['worktree', 'archive', 'cache', 'branch'] as const).map(kind => ({ category: kind === 'branch' ? 'merged branches' : kind, count: plan.items.filter(i => i.kind === kind).length, bytes: plan.items.filter(i => i.kind === kind).reduce((n, i) => n + i.bytes, 0) }));
+  const kinds: GcKind[] = ['worktree', 'archive', 'cache', 'branch'];
+  if (plan.items.some(item => item.kind === 'node-modules')) kinds.push('node-modules');
+  const categories = kinds.map(kind => ({ category: kind === 'branch' ? 'merged branches' : kind === 'node-modules' ? 'node_modules store (Trash)' : kind, count: plan.items.filter(i => i.kind === kind).length, bytes: plan.items.filter(i => i.kind === kind).reduce((n, i) => n + i.bytes, 0) }));
   const reasons = new Map<string, { reason: string; count: number; bytes: number }>();
   for (const s of plan.skipped) { const key = s.reason.startsWith('newer than ') ? s.reason : s.reason.startsWith('links target ') ? 'links target in use (see detail)' : s.reason.replace(/also used by .*/, 'also used by unfinished task'); const group = reasons.get(key) ?? { reason: key, count: 0, bytes: 0 }; group.count++; group.bytes += s.bytes ?? 0; reasons.set(key, group); }
   const cohorts = new Map<string, { cohort: string; count: number; bytes: number; skipped: number; skippedBytes: number }>();
@@ -428,7 +438,7 @@ export function gcView(plan: GcPlan, opts: GcViewOptions = {}) {
     more: 'Full list: detail: true / --verbose; offset/limit paginate details and grouped summaries.' };
 }
 
-const DONE_WORD: Record<GcKind, string> = { worktree: 'removed worktrees', cache: 'removed cache entries', archive: 'archived state folders', branch: 'deleted merged branches' };
+const DONE_WORD: Record<GcKind, string> = { worktree: 'removed worktrees', cache: 'removed cache entries', archive: 'archived state folders', branch: 'deleted merged branches', 'node-modules': 'moved node_modules store entries to Trash' };
 
 export function renderGc(plan: GcPlan, opts: GcViewOptions & { applied?: GcResult | undefined } = {}): string[] {
   const view = gcView(plan, opts);
@@ -458,7 +468,7 @@ export function renderGc(plan: GcPlan, opts: GcViewOptions & { applied?: GcResul
   const applied = opts.applied;
   lines.push('Cleaned up:');
   if (!applied.done.length) lines.push('Nothing was cleaned up.');
-  for (const kind of ['worktree', 'cache', 'archive', 'branch'] as const) {
+  for (const kind of ['worktree', 'cache', 'archive', 'branch', 'node-modules'] as const) {
     const done = applied.done.filter(i => i.kind === kind);
     if (done.length) lines.push(`  ${DONE_WORD[kind]}: ${done.length}, ${done.reduce((n, i) => n + i.bytes, 0)} bytes`);
   }

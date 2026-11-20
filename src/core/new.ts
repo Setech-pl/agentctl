@@ -2,6 +2,7 @@ import { prepareRemoteTask, installRemoteHooks } from './host-task.ts';
 import { remoteAttachHint } from './host-runtime.ts';
 import { providerHolds, providerHoldText } from './provider-hold.ts';
 import { freshTaskDiskStartHold } from './disk.ts';
+import { hasNpmLockfile, nodeModulesEvent, setupNodeModules } from './node-modules-store.ts';
 import { assertWorktreeVolumes, missingWorktreeVolume, WorktreeVolumeError } from './worktree-volume.ts';
 import { peakHold } from './peak.ts';
 import { protectReadOnly } from './read-only.ts';
@@ -81,12 +82,18 @@ const SETUP_TAIL_LINES = 15;
 async function runSetup(ctx: Context, spec: ResolvedSpec, track?: (step: Omit<SetupProgress, 'task' | 'startedAt' | 'stepAt'>) => Promise<void>): Promise<void> {
   const { runner, config } = ctx;
   const logFile = path.join(taskDir(config, spec.window), 'setup.log');
-  const todo = spec.repos.filter((r) => (r.setup?.length ?? 0) > 0);
+  const todo = [];
+  for (const repo of spec.repos) {
+    let commands = repo.setup ?? [];
+    if (repo.nodeModules === 'clone' && spec.host && !runner.dryRun) await nodeModulesEvent(ctx, spec.task, repo, 'unsupported', 0, `SSH host ${spec.host}`);
+    if (!repo.setup && repo.nodeModules === 'clone' && !spec.host && hasNpmLockfile(repo.worktree)) commands = ['npm ci'];
+    if (commands.length) todo.push({ repo, commands });
+  }
   if (todo.length === 0) return;
-  const redact = secretRedactor([config, spec.env, process.env, todo.map(repo => repo.setup)]);
+  const redact = secretRedactor([config, spec.env, process.env, todo.map(item => item.commands)]);
   if (!runner.dryRun) await runner.writeFile(logFile, '');
-  for (const [repoIndex, repo] of todo.entries()) {
-    const name = path.basename(repo.path), commands = repo.setup!;
+  for (const [repoIndex, { repo, commands }] of todo.entries()) {
+    const name = path.basename(repo.path);
     for (const [i, command] of commands.entries()) {
       if (!spec.host && !runner.dryRun) assertWorktreeVolumes([repo], spec.task);
       const label = redact(command);
@@ -94,22 +101,26 @@ async function runSetup(ctx: Context, spec: ResolvedSpec, track?: (step: Omit<Se
       await track?.({ phase: 'setup', repo: name, repoIndex: repoIndex + 1, repoCount: todo.length, command: label, commandIndex: i + 1, commandCount: commands.length, log: logFile });
       const setup = { repo: name, repoIndex: repoIndex + 1, repoCount: todo.length, command: label, commandIndex: i + 1, commandCount: commands.length, log: logFile };
       if (track) await recordJournal(ctx, { kind: 'setup-started', task: spec.task, setup, text: `${spec.task}: setup rozpoczęty w ${name} (repo ${repoIndex + 1}/${todo.length}, command ${i + 1}/${commands.length}): ${label}; log: ${logFile}` });
-      const r = await (spec.host ? ctx.hosts.forHost(spec.host) : runner).exec('sh', label === command ? ['-c', command] : ['-s'], { cwd: repo.worktree, ...(label === command ? {} : { input: command }), timeoutMs: ctx.config.git.timeoutS * 1000, async: true });
-      if (runner.dryRun) continue;
-      const output = redact(`${r.stdout}${r.stderr}`);
-      await runner.appendFile(logFile, `[${name}] $ ${label}\n${output}${output.endsWith('\n') || output === '' ? '' : '\n'}[exit ${r.code}]\n\n`);
-      if (r.code !== 0) {
-        if (track) await recordJournal(ctx, { kind: 'setup-failed', task: spec.task, setup: { ...setup, exitCode: r.code }, text: `${spec.task}: setup nie powiódł się w ${name} (exit ${r.code}): ${label}; log: ${logFile}; worktree zostaje` });
-        const tail = output.trimEnd().split('\n').slice(-SETUP_TAIL_LINES).join('\n');
-        throw new AgentctlError(
-          `${spec.task}: setup command failed in ${name}${/ETIMEDOUT/i.test(r.stderr) ? ` after ${config.git.timeoutS}s (git.timeout_s; check disk/I/O or increase the timeout)` : ''} (exit ${r.code}): ${label}\n${tail}`,
-          `Full output: ${logFile}. The worktree ${repo.worktree} was kept and no window was started; fix the cause and run "agentctl new --reuse" again.`,
-        );
-      }
-      if (track) await recordJournal(ctx, { kind: 'setup-finished', task: spec.task, setup: { ...setup, exitCode: r.code }, text: `${spec.task}: setup zakończony w ${name} (exit ${r.code}): ${label}; log: ${logFile}` });
+      const install = async () => {
+        const r = await (spec.host ? ctx.hosts.forHost(spec.host) : runner).exec('sh', label === command ? ['-c', command] : ['-s'], { cwd: repo.worktree, ...(label === command ? {} : { input: command }), timeoutMs: ctx.config.git.timeoutS * 1000, async: true });
+        if (runner.dryRun) return;
+        const output = redact(`${r.stdout}${r.stderr}`);
+        await runner.appendFile(logFile, `[${name}] $ ${label}\n${output}${output.endsWith('\n') || output === '' ? '' : '\n'}[exit ${r.code}]\n\n`);
+        if (r.code !== 0) {
+          if (track) await recordJournal(ctx, { kind: 'setup-failed', task: spec.task, setup: { ...setup, exitCode: r.code }, text: `${spec.task}: setup nie powiódł się w ${name} (exit ${r.code}): ${label}; log: ${logFile}; worktree zostaje` });
+          const tail = output.trimEnd().split('\n').slice(-SETUP_TAIL_LINES).join('\n');
+          throw new AgentctlError(
+            `${spec.task}: setup command failed in ${name}${/ETIMEDOUT/i.test(r.stderr) ? ` after ${config.git.timeoutS}s (git.timeout_s; check disk/I/O or increase the timeout)` : ''} (exit ${r.code}): ${label}\n${tail}`,
+            `Full output: ${logFile}. The worktree ${repo.worktree} was kept and no window was started; fix the cause and run "agentctl new --reuse" again.`,
+          );
+        }
+      };
+      const hit = spec.host ? await install() : await setupNodeModules(ctx, spec.task, repo, command, install);
+      if (hit) await runner.appendFile(logFile, `[${name}] $ ${label}\n[node_modules clone from store]\n\n`);
+      if (track) await recordJournal(ctx, { kind: 'setup-finished', task: spec.task, setup: { ...setup, exitCode: 0 }, text: `${spec.task}: setup zakończony w ${name} (${hit ? 'node_modules clone' : 'exit 0'}): ${label}; log: ${logFile}` });
     }
   }
-  ctx.info(`${spec.task}: setup done (${todo.map((r) => path.basename(r.path)).join(', ')}), output in ${logFile}`);
+  ctx.info(`${spec.task}: setup done (${todo.map(({ repo }) => path.basename(repo.path)).join(', ')}), output in ${logFile}`);
 }
 
 /** Start every spec: worktree, links, TASK.md, tmux window, agent, prompt. Plans and validates everything first. */

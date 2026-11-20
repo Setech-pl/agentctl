@@ -39,6 +39,7 @@ export interface ResolvedRepo {
   path: string;
   worktree: string;
   worktreeMount?: string;
+  nodeModules?: 'clone';
   base?: string;
   baseTask?: string;
   branch?: string;
@@ -464,11 +465,12 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     if (mount && !repo.worktree && !remoteHost && !insidePath(mount, worktree)) p.add(`worktrees.mount ${mount} must contain worktree root ${path.dirname(worktree)}`);
     const worktreeMount = mount && (!repo.worktree || insidePath(mount, worktree)) ? mount : inferredWorktreeMount(worktree);
     if (worktreeMount && !remoteHost) resolved.worktreeMount = worktreeMount;
+    if ((projectOfRepo?.nodeModules ?? config.nodeModules) === 'clone') resolved.nodeModules = 'clone';
     if (repo.base) resolved.base = repo.base;
     if (repo.branch) resolved.branch = repo.branch;
     // Own setup of this repository: its spec entry, then (first repository) the spec's top-level setup, then the repository's own project config.
     const own = repo.setup ?? (repo === firstRepo ? specSetup : undefined) ?? projectOfRepo?.setup ?? (repo === firstRepo ? config.setup : undefined);
-    if (own && (own.length > 0 || remoteHost)) resolved.setup = own.map(c => c);
+    if (own && (own.length > 0 || remoteHost || resolved.nodeModules)) resolved.setup = own.map(c => c);
     repos.push(resolved);
   }
   for (let i = 0; i < repos.length; i++) {
@@ -572,7 +574,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     spec.readOnly = true;
     spec.setup = [];
     spec.links = [];
-    spec.repos = spec.repos.map(r => ({ ...r, setup: [] }));
+    spec.repos = spec.repos.map(({ nodeModules: _nodeModules, ...r }) => ({ ...r, setup: [] }));
     if (spec.repos.some(r => r.branch)) p.add('read_only requires detached worktrees (no branch)');
     p.throwIfAny('Invalid read-only task:');
   }

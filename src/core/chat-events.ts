@@ -261,6 +261,7 @@ const KIND_LABEL: Record<JournalEntry['kind'], string> = {
   'setup-started': 'SETUP',
   'setup-finished': 'SETUP OK',
   'setup-failed': 'BŁĄD SETUPU',
+  'node-modules': 'NODE_MODULES',
   'needs-input': 'PYTANIE',
   'needs-trust': 'ZAUFANIE',
   blocked: 'ZABLOKOWANE',
