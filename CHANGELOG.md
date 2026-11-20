@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows [Kee
 ## [Unreleased]
 
 - SNAP0247 was prepared for 0.23.3. / Poprawka SNAP0247 została przygotowana do wydania 0.23.3.
+- DISK0248-NM and DISK0248-CLOSE add opt-in npm dependency clones and post-close Trash cleanup. / DISK0248-NM i DISK0248-CLOSE dodają opcjonalne klony zależności npm i przenoszenie plików do kosza po zamknięciu.
+- DISK0248-VOLUME and DISK0248-LOCK check external volumes before worktree setup, show disk space per volume, and let blocked tasks recover their own interrupted Git checkout through `unblock`. / DISK0248-VOLUME i DISK0248-LOCK sprawdzają montowanie oraz wolne miejsce na woluminach i pozwalają wznowić zadanie z przerwanym checkoutem Git przez `unblock`.
 
 ## [0.23.3] - 2026-11-20
 

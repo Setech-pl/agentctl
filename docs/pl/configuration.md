@@ -20,12 +20,17 @@ Typy/domysły sprawdzono z [config.ts](../../src/core/config.ts), [spec.ts](../.
 | Key | Typ / domyślne / warstwy | Znaczenie |
 |---|---|---|
 | `worktree_root` | path · none · g p | Katalog nowych worktree; bez niego każde repos podaje worktree. |
+| `worktrees.root` | ścieżka · brak · g p | Odpowiednik `worktree_root` w formie mapowania. W jednym pliku używaj jednej formy. |
+| `worktrees.mount` | ścieżka · wykrywana pod `/Volumes/<nazwa>` i `/mnt/<nazwa>` · g p | Punkt montowania zawierający katalog worktree. Ustaw dla innych lokalizacji dysku zewnętrznego. Brak woluminu blokuje start i jest widoczny w `status`. |
 | `links` | list · `[]` · g p s | Linki w pierwszym worktree; późniejsze from wygrywa. |
 | `links[].from` | path · required · g p s | Ścieżka linku względem worktree, także glob. |
 | `links[].to` | path · required · g p s | Istniejący cel; para końcówek /* linkuje każdy element. |
 | `env` | mapping · `{}` · g p s | Środowisko scalane po kluczach; wartości zamieniane na tekst. |
 | `report` | path or list · `{cache}/{task}/{TASK}.md` · g p s | Ścieżka kanoniczna lub lista: pierwsza kanoniczna, reszta kandydatami; także mapping path/paths. |
 | `setup` | list of strings · `[]` · g p s | Polecenia po worktree, przed linkami; lista zastępuje odziedziczoną, [] wyłącza. MCP spec odrzucony. |
+| `setup.commands` | lista poleceń · dziedziczona · g p | Lista poleceń setup w formie mapowania. `[]` wyłącza także domyślne `npm ci`. |
+| `setup.node_modules` | `clone` lub `off` · `off` · g p | Klonuje zgodne instalacje npm z `<AGENTCTL_HOME>/nm-store` w obrębie tego samego systemu plików. Repozytorium może zmienić ustawienie globalne. |
+| `close.cleanup` | lista ścieżek względnych lub globów · `[]` · g p | Po zamknięciu zadania przenosi pasujące pliki ignorowane przez Git do kosza. Glob dopasowuje jeden segment ścieżki. Lista projektu zastępuje globalną. |
 | `defaults` | mapping · `{}` · g p | Domyślne pola pominiętego zamówienia. |
 | `defaults.agent` | active provider · none · g p | Domyślny aktywny dostawca. |
 | `defaults.model` | string · `default` · g p | Domyślny model; default bez flagi. |

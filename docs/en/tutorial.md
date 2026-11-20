@@ -2,6 +2,22 @@
 
 Examples target macOS with Homebrew. On Linux, install Node ≥22.14.0, Git and tmux through the appropriate package manager; agentctl needs a POSIX shell, tmux and a UTF-8 terminal. Provider calls here use your real account and can consume its allowance; the committed screenshot demo uses fakes.
 
+## Saving disk space
+
+Add these optional settings to a repository's `.agentctl.yaml` or to `~/.agentctl/config.yaml`. Include only paths your project can regenerate, such as browser profiles created by the task.
+
+```yaml
+setup: {node_modules: clone, commands: [npm ci]}
+close: {cleanup: [".cache", "dist*", ".chrome-profile*"]}
+worktrees: {root: /Volumes/AgentWork/worktrees, mount: /Volumes/AgentWork}
+```
+
+On the first compatible checkout agentctl runs `npm ci` and saves a copy keyed by repository and lockfile. Later checkouts on the same filesystem get an independent APFS clone on macOS or a GNU `cp --reflink=auto` copy on Linux. Keep `AGENTCTL_HOME` on that filesystem if you want clones there. If the copy fails, the lockfile changes, or the filesystems differ, agentctl runs the normal install. The cache applies to standalone `npm ci` with optional `--no-audit` and `--no-fund`. Project lifecycle scripts, npm workspaces, and local dependencies run their normal setup. With clone mode on and no commands configured, a checkout with an npm lockfile defaults to `npm ci`.
+
+`agentctl status`, `agentctl capacity` and `agentctl events` show store usage or setup outcomes. Run `agentctl gc --preview` to see unused store entries and `agentctl gc --apply` to send them to Trash. After `agentctl close TASK`, eligible ignored paths go to Trash along with a journal entry listing paths and bytes. Git-tracked files, unignored untracked files, reports, and worktrees shared by an open task are kept. The OS Trash retains its contents until emptied. On Linux, Trash support uses `gio`.
+
+If the disk is unplugged, the task becomes `blocked` with reason `volume missing`. Remount it and run `agentctl unblock TASK` while `watch` is running. An interrupted checkout keeps its files for inspection. Use `worktrees.mount` for external mount points outside `/Volumes/<name>` or `/mnt/<name>`. SSH uses the host's `work_dir` and reports unsupported store cloning, close cleanup, project root overrides, and interrupted Git lock recovery. The mount check for SSH `work_dir` recognizes the same two mount-point layouts.
+
 ## 1. Prerequisites and provider CLIs
 
 ~~~sh

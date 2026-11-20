@@ -2,6 +2,22 @@
 
 Przykłady dotyczą macOS z Homebrew. Na Linux zainstaluj Node ≥22.14.0, Git i tmux odpowiednim menedżerem pakietów; agentctl wymaga powłoki POSIX, tmux i terminala UTF-8. Wywołania dostawców korzystają tu z prawdziwego konta i mogą zużywać jego limit; zatwierdzone zrzuty używają atrap.
 
+## Oszczędzanie miejsca na dysku
+
+Dodaj wybrane opcje do `.agentctl.yaml` repozytorium albo do `~/.agentctl/config.yaml`. W `cleanup` podaj ścieżki, które projekt może odtworzyć, na przykład profile przeglądarki utworzone na potrzeby zadania.
+
+```yaml
+setup: {node_modules: clone, commands: [npm ci]}
+close: {cleanup: [".cache", "dist*", ".chrome-profile*"]}
+worktrees: {root: /Volumes/AgentWork/worktrees, mount: /Volumes/AgentWork}
+```
+
+Przy pierwszym zgodnym checkout agentctl uruchamia `npm ci` i zapisuje kopię dla repozytorium i lockfile. Kolejne worktree na tym samym systemie plików otrzymują niezależny klon APFS na macOS lub kopię GNU `cp --reflink=auto` na Linuksie. Aby klonować na dysku zewnętrznym, umieść `AGENTCTL_HOME` na tym samym systemie plików. Przy błędzie kopiowania, zmianie lockfile lub rozdzieleniu woluminów agentctl wykonuje zwykłą instalację. Magazyn obsługuje osobne `npm ci` z opcjonalnymi `--no-audit` i `--no-fund`. Własne skrypty instalacyjne, npm workspaces i zależności lokalne korzystają ze zwykłego setup. Brak skonfigurowanych poleceń w trybie `clone` oznacza domyślne `npm ci`, gdy istnieje lockfile npm.
+
+`agentctl status`, `agentctl capacity` i `agentctl events` pokazują zajętość magazynu lub wynik setup. `agentctl gc --preview` wyświetla nieużywane wpisy, a `agentctl gc --apply` przenosi je do kosza. Po `agentctl close TASK` pasujące ignorowane ścieżki trafiają do kosza, a dziennik podaje ich nazwy i rozmiar. Śledzone pliki, nieignorowane pliki nieśledzone, raporty i katalogi używane przez inne otwarte zadanie zostają. Miejsce zwalnia opróżnienie kosza. Na Linuksie obsługuje go `gio`.
+
+Po odłączeniu dysku zadanie ma stan `blocked` i przyczynę `volume missing`. Zamontuj dysk i przy działającym `watch` uruchom `agentctl unblock TASK`. Pliki przerwanego checkout zostają do sprawdzenia. Dla punktów montowania poza `/Volumes/<nazwa>` lub `/mnt/<nazwa>` podaj `worktrees.mount`. SSH korzysta z `work_dir` hosta i zgłasza brak obsługi klonowania, sprzątania przy zamknięciu, projektowego katalogu worktree i odzyskiwania blokad Git. SSH sprawdza montowanie `work_dir` w dwóch powyższych układach ścieżek.
+
 ## 1. Wymagania i CLI dostawców
 
 ~~~sh
