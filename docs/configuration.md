@@ -154,7 +154,8 @@ The session started by `agentctl manager`: Claude Code with [Remote Control](htt
 | `board.list_width` | integer >=64 or percentage string | automatic | g | List width with preview; 92+ at 140+ terminal columns by default, at least 32 columns left for preview. |
 | `board.cohorts_recent` | integer >= 1 | `10` | g | How many of the most recently active cohorts the board's `k` choice lists (cohorts with active or queued work always show). Older quiet cohorts fold into `starsze… (n)`; ↑↓ PgUp/PgDn scroll the choice. `agentctl cohort archive` removes finished cohorts from it altogether. |
 | `board.window_title` | boolean | `true` | g | The board names its terminal window `<instance> <version> · board` (OSC 2 with xterm title-stack restoration) and temporarily sets this session’s `set-titles` / `set-titles-string` (`<instance> <version> · #W`). Previous title settings are restored on exit. `false` disables board title changes; the instance label in status-left remains. |
-| `board.selected_color` | Ink color name | `blue` | g | Color for the selected board row, manager line and queue entry. State and result cells keep their own colors. `NO_COLOR` disables color; the selection stays bold (manager line uses inverse video). |
+| `board.selection` | mapping | `{}` | g | `bg` and `fg` accept quoted `"#RRGGBB"` or an integer 0–255. `bold` defaults to `true` and `style` accepts `bar` (default) or `reverse`. |
+| `board.selected_color` | legacy Ink color name | none | g | Accepted for compatibility. Use `board.selection` to set the selection colors. |
 
 ### `mcp`
 
@@ -536,7 +537,9 @@ board:
 
 `board.list_width` accepts an integer >=64 columns or a percentage string from `"1%"` to `"100%"`. With a preview it is clamped to at least 64 columns and at most terminal width minus 32. Below 110 columns the preview stays hidden and the list uses the whole terminal; the override has no effect there. Without an override, 110–139 columns retains the 71-column list; at >=140 columns use max(92, floor(45% of terminal width)), preserving at least 32 columns for preview. Large model/version strings may still truncate in constrained lists; full names remain in preview/help. Queue rows use the same abbreviations and fallback mapping. The manager line shows connection state rather than a model, so it retains its existing form.
 
-PL: `ui.instance_name` nadpisuje automatyczną etykietę `agentctl` / `agentctl-dev` w nagłówku, status-left i tytułach board/watch; po zmianie uruchom te widoki ponownie. `board.window_title` (domyślnie `true`) ustawia tytuł okna i sesji boarda; `false` wyłącza zmiany tytułu, ale zachowuje etykietę status-left. `model_versions` to opcjonalna mapa wersji aliasów, bez domyślnych zgadywanych wartości. `list_width` przyjmuje kolumny lub procent; ograniczenia chronią miejsce na listę i podgląd. Zaznaczenie nadal bold/niebieskie, kolory stanów oraz NO_COLOR zachowują poprzednie zachowanie.
+The selection fills the list width and uses bold bright white on dark blue by default. Tab or the Left and Right arrows switch focus in split view. The bar dims while the preview has focus. Terminals with 16 colors use reverse video with bold in the focused list. A monochrome terminal or nonempty `NO_COLOR` uses reverse video. `agentctl doctor` reports invalid `board.selection` settings.
+
+PL: `ui.instance_name` nadpisuje automatyczną etykietę `agentctl` / `agentctl-dev` w nagłówku, status-left i tytułach board/watch; po zmianie uruchom te widoki ponownie. `board.window_title` (domyślnie `true`) ustawia tytuł okna i sesji boarda; `false` wyłącza zmiany tytułu, ale zachowuje etykietę status-left. `model_versions` to opcjonalna mapa wersji aliasów, bez domyślnych zgadywanych wartości. `list_width` przyjmuje kolumny lub procent; ograniczenia chronią miejsce na listę i podgląd. `board.selection` ustawia wygląd zaznaczenia na całej szerokości wiersza.
 
 | Key | Default | Meaning |
 |---|---|---|
