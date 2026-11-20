@@ -2,6 +2,7 @@ import { prepareRemoteTask, installRemoteHooks } from './host-task.ts';
 import { remoteAttachHint } from './host-runtime.ts';
 import { providerHolds, providerHoldText } from './provider-hold.ts';
 import { freshTaskDiskStartHold } from './disk.ts';
+import { assertWorktreeVolumes, missingWorktreeVolume, WorktreeVolumeError } from './worktree-volume.ts';
 import { peakHold } from './peak.ts';
 import { protectReadOnly } from './read-only.ts';
 import { attachHint } from './tmux-socket.ts';
@@ -87,6 +88,7 @@ async function runSetup(ctx: Context, spec: ResolvedSpec, track?: (step: Omit<Se
   for (const [repoIndex, repo] of todo.entries()) {
     const name = path.basename(repo.path), commands = repo.setup!;
     for (const [i, command] of commands.entries()) {
+      if (!spec.host && !runner.dryRun) assertWorktreeVolumes([repo], spec.task);
       const label = redact(command);
       ctx.info(`${spec.task}: setup ${name} ${i + 1}/${commands.length}: ${label}`);
       await track?.({ phase: 'setup', repo: name, repoIndex: repoIndex + 1, repoCount: todo.length, command: label, commandIndex: i + 1, commandCount: commands.length, log: logFile });
@@ -118,7 +120,12 @@ export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: Ne
     for (const spec of specs.filter(s => !s.host)) checkLinkTargets(spec.links.filter(l => !spec.repos.some(r => l.to === r.worktree || l.to.startsWith(`${r.worktree}/`))), spec.task);
     for (const spec of specs) {const hold = providerHolds(ctx.config, ctx.runner.now())[spec.agent]; if (hold) throw new AgentctlError(`provider hold: ${providerHoldText(spec.agent, hold)}`, 'Queue the task or wait for the provider reset.');}
     for (const spec of specs) { const held = peakHold(ctx.config, spec, ctx.runner.now()); if (held) throw new AgentctlError(held, 'Add this task to the queue; it will start after peak.'); }
-    for (const spec of specs) { const held = await freshTaskDiskStartHold(ctx, spec.host, spec.repos.map(r => r.worktree)); if (held) throw new AgentctlError(held, 'Free disk space before starting setup.'); }
+    for (const spec of specs) {
+      if (!spec.host) assertWorktreeVolumes(spec.repos, spec.task, true);
+      const held = await freshTaskDiskStartHold(ctx, spec.host, spec.repos);
+      if (held?.startsWith('volume missing: ')) throw new WorktreeVolumeError(held.slice(16), spec.task, true);
+      if (held) throw new AgentctlError(held, 'Free disk space before starting setup.');
+    }
     return { specs, ids: await reserveStarts(ctx, specs) };
   });
   try { return await startTasks(ctx, admission.specs, opts, true); }
@@ -135,7 +142,12 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
   }
   const specs = admitted ? requested : await planBatch(ctx, requested, opts);
   for (const spec of specs.filter(s => !s.host)) checkLinkTargets(spec.links.filter(l => !spec.repos.some(r => l.to === r.worktree || l.to.startsWith(`${r.worktree}/`))), spec.task);
-  if (!runner.dryRun && opts.noAgent) for (const spec of specs) { const held = await freshTaskDiskStartHold(ctx, spec.host, spec.repos.map(r => r.worktree)); if (held) throw new AgentctlError(held); }
+  if (!runner.dryRun && opts.noAgent) for (const spec of specs) {
+    if (!spec.host) assertWorktreeVolumes(spec.repos, spec.task, true);
+    const held = await freshTaskDiskStartHold(ctx, spec.host, spec.repos);
+    if (held?.startsWith('volume missing: ')) throw new WorktreeVolumeError(held.slice(16), spec.task, true);
+    if (held) throw new AgentctlError(held);
+  }
   const versions: Record<string, string> = {};
   if (!runner.dryRun && !opts.noAgent) {
     for (const agent of new Set(specs.filter(s => !s.host).map((s) => s.agent))) versions[agent] = await requireTool(ctx, providerCommand(config, agent), ['--version'], INSTALL_HINTS[agent]);
@@ -166,18 +178,24 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
 
     // 1. worktrees
     await track?.({ phase: 'worktree' });
-    for (const repo of spec.host ? [] : spec.repos) {
-      if (opts.reuse && fs.existsSync(repo.worktree)) ctx.info(`${spec.task}: reusing worktree ${repo.worktree}`);
-      else {
-        await addWorktree(runner, repo, config.git.timeoutS);
-        ctx.info(`${spec.task}: worktree ${repo.worktree}`);
+    try {
+      for (const repo of spec.host ? [] : spec.repos) {
+        if (!runner.dryRun) assertWorktreeVolumes([repo], spec.task);
+        if (opts.reuse && fs.existsSync(repo.worktree)) ctx.info(`${spec.task}: reusing worktree ${repo.worktree}`);
+        else {
+          await addWorktree(runner, repo, config.git.timeoutS);
+          ctx.info(`${spec.task}: worktree ${repo.worktree}`);
+        }
       }
+      if (spec.readOnly) await protectReadOnly(ctx, spec);
+      // 2. setup commands, before links because an install may wipe node_modules.
+      await runSetup(ctx, spec, track);
+    } catch (error) {
+      const missing = error instanceof WorktreeVolumeError ? error.mount : spec.host ? undefined : missingWorktreeVolume(spec.repos);
+      if (missing) throw new WorktreeVolumeError(missing, spec.task);
+      throw error;
     }
-
-    if (spec.readOnly) await protectReadOnly(ctx, spec);
-
-    // 2. setup commands (per repository, in its own worktree; an install may wipe node_modules, so this comes before the links)
-    await runSetup(ctx, spec, track);
+    if (!spec.host && !runner.dryRun) assertWorktreeVolumes(spec.repos, spec.task);
     await track?.({ phase: 'launching' });
 
     // 3. symlinks (in the primary worktree)

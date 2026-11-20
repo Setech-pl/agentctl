@@ -20,6 +20,7 @@ import {
   parseReview,
 } from './config.ts';
 import { parseReportPaths } from './config.ts';
+import { inferredWorktreeMount, insidePath } from './worktree-volume.ts';
 import type { AgentName, Effort, GlobalConfig, Layer, Link, ReviewSettings } from './config.ts';
 import type { Order } from './equivalents.ts';
 import { AgentctlError, Problems, TASK_ID, cohortNameProblem, errorMessage, fillPlaceholders, isObject, resolvePath, windowName } from './util.ts';
@@ -37,6 +38,7 @@ export interface ResolvedRepo {
   setupExplicit?: boolean;
   path: string;
   worktree: string;
+  worktreeMount?: string;
   base?: string;
   baseTask?: string;
   branch?: string;
@@ -457,6 +459,11 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
       continue;
     }
     const resolved: ResolvedRepo = { path: repoPath, worktree, ...(remoteHost ? { name: repoName, setupExplicit: repo.setup !== undefined || repo === firstRepo && specSetup !== undefined } : {}) };
+    const settings = projectOfRepo?.worktreeRoot ? projectOfRepo : config;
+    const mount = settings.worktreeMount && (remoteHost ? fill(settings.worktreeMount) : pathOf(settings.worktreeMount));
+    if (mount && !repo.worktree && !remoteHost && !insidePath(mount, worktree)) p.add(`worktrees.mount ${mount} must contain worktree root ${path.dirname(worktree)}`);
+    const worktreeMount = mount && (!repo.worktree || insidePath(mount, worktree)) ? mount : inferredWorktreeMount(worktree);
+    if (worktreeMount && !remoteHost) resolved.worktreeMount = worktreeMount;
     if (repo.base) resolved.base = repo.base;
     if (repo.branch) resolved.branch = repo.branch;
     // Own setup of this repository: its spec entry, then (first repository) the spec's top-level setup, then the repository's own project config.

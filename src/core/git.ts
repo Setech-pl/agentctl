@@ -1,4 +1,7 @@
 import fs from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { atomicWriteFile } from './atomic-file.ts';
+import { assertWorktreeVolumes, volumeMounted, WorktreeVolumeError } from './worktree-volume.ts';
 import { cachedRequest } from './response-budget.ts';
 import { matchesProviderCommand } from './providers/registry.ts';
 import path from 'node:path';
@@ -25,6 +28,75 @@ async function commonDir(runner: Runner, repo: ResolvedRepo): Promise<string> {
   if (r.code !== 0) throw gitFailure(`cannot locate git directory of ${repo.path}`, r.stderr);
   const dir = path.resolve(repo.path, r.stdout.trim() || '.git');
   try { return fs.realpathSync(dir); } catch { return dir; }
+}
+
+const startLock = (dir: string) => path.join(dir, 'agentctl-start.lock');
+const checkoutReceipt = (dir: string, worktree: string) => path.join(dir, `agentctl-checkout-${createHash('sha256').update(worktree).digest('hex')}.json`);
+const statEntry = (file: string) => fs.lstatSync(file, { throwIfNoEntry: false });
+
+function registrations(dir: string, worktree: string): string[] {
+  const root = path.join(dir, 'worktrees');
+  if (!statEntry(root)?.isDirectory()) return [];
+  return fs.readdirSync(root, { withFileTypes: true }).filter(item => item.isDirectory()).flatMap(item => {
+    const registration = path.join(root, item.name), link = path.join(registration, 'gitdir');
+    try {
+      if (statEntry(link)?.isFile() && path.resolve(registration, fs.readFileSync(link, 'utf8').trimEnd()) === path.join(worktree, '.git')) return [registration];
+    } catch { /* unrelated or incomplete Git metadata */ }
+    return [];
+  });
+}
+
+/** Only a newly created registration named by our receipt may lose Git's initializing locks. */
+async function recoverCheckout(runner: Runner, dir: string, repo: ResolvedRepo, mounted: boolean): Promise<void> {
+  const worktree = path.resolve(repo.worktree), receipt = checkoutReceipt(dir, worktree);
+  if (!statEntry(receipt)?.isFile()) return;
+  const evidence = JSON.parse(fs.readFileSync(receipt, 'utf8'));
+  if (evidence.worktree !== worktree || evidence.mount !== repo.worktreeMount) throw new AgentctlError(`invalid interrupted checkout receipt for ${worktree}`);
+  const matches = registrations(dir, worktree);
+  if (matches.length > 1) throw new AgentctlError(`multiple Git registrations for ${worktree}; inspect them before retrying`);
+  const registration = matches[0];
+  if (registration) {
+    const locked = path.join(registration, 'locked'), indexLock = path.join(registration, 'index.lock');
+    const initializing = statEntry(locked)?.isFile() && fs.readFileSync(locked, 'utf8').trim() === 'initializing';
+    const index = statEntry(indexLock);
+    if (index && (initializing || !mounted)) {
+      if (!index.isFile()) throw new AgentctlError(`unexpected index.lock for ${worktree}; inspect it before retrying`);
+      const open = await runner.exec(process.platform === 'darwin' ? '/usr/sbin/lsof' : 'lsof', ['-t', '--', indexLock], { readOnly: true });
+      if (open.code !== 1 || open.stdout.trim() || open.stderr.trim()) throw new AgentctlError(`cannot verify that index.lock is unused for ${worktree}`);
+      if (statEntry(indexLock)?.ino === index.ino) fs.unlinkSync(indexLock);
+    }
+    if (initializing && fs.readFileSync(locked, 'utf8').trim() === 'initializing') fs.unlinkSync(locked);
+    if (mounted && !statEntry(worktree) && !statEntry(locked) && !statEntry(indexLock)) {
+      // Preserve the exact vanished registration for inspection. No repository-wide prune.
+      const saved = path.join(dir, 'agentctl-interrupted-worktrees');
+      if (!statEntry(saved)) fs.mkdirSync(saved, { mode: 0o700 });
+      if (!statEntry(saved)?.isDirectory()) throw new AgentctlError(`unsafe interrupted-checkout directory: ${saved}`);
+      assertWorktreeVolumes([repo]);
+      if (statEntry(worktree)) throw new AgentctlError(`worktree reappeared during recovery: ${worktree}`);
+      fs.renameSync(registration, path.join(saved, `${path.basename(registration)}-${randomUUID()}`));
+    }
+  }
+  if (mounted) fs.unlinkSync(receipt);
+}
+
+export async function interruptedWorktreeVolume(runner: Runner, repos: ResolvedRepo[]): Promise<string | undefined> {
+  for (const repo of repos) {
+    if (repo.worktreeMount && statEntry(checkoutReceipt(await commonDir(runner, repo), path.resolve(repo.worktree)))?.isFile()) return repo.worktreeMount;
+  }
+  return undefined;
+}
+
+export async function recoverInterruptedWorktrees(runner: Runner, repos: ResolvedRepo[], opts: { missingOnly?: boolean } = {}): Promise<void> {
+  for (const repo of repos) {
+    if (!repo.worktreeMount) continue;
+    const dir = await commonDir(runner, repo);
+    await withFileLock(startLock(dir), async () => {
+      const mounted = volumeMounted(repo.worktreeMount!);
+      if (opts.missingOnly && mounted) return;
+      if (!opts.missingOnly && !mounted) assertWorktreeVolumes([repo]);
+      await recoverCheckout(runner, dir, repo, mounted);
+    });
+  }
 }
 
 /** Never reuse an arbitrary directory after a failed start. A retry may reuse only a registered worktree. */
@@ -92,7 +164,9 @@ export async function addWorktree(runner: Runner, repo: ResolvedRepo, timeoutS =
       args.push('--detach', repo.worktree);
       if (repo.base) args.push(repo.base);
     }
+    assertWorktreeVolumes([repo]);
     const r = await runner.exec('git', args, { timeoutMs: timeoutS * 1000, async: true });
+    assertWorktreeVolumes([repo]);
     if (r.code === 0) return;
     if (!repo.branch && repo.base) {
       const base = await runner.exec('git', ['-C', repo.path, 'rev-parse', '--verify', '--end-of-options', `${repo.base}^{commit}`], { readOnly: true });
@@ -121,7 +195,27 @@ export async function addWorktree(runner: Runner, repo: ResolvedRepo, timeoutS =
   };
   if (runner.dryRun) return run();
   const dir = await commonDir(runner, repo);
-  return withFileLock(path.join(dir, 'agentctl-start.lock'), run, timeoutS * 1000 + 60_000);
+  return withFileLock(startLock(dir), async () => {
+    const mount = repo.worktreeMount;
+    if (!mount) return run();
+    assertWorktreeVolumes([repo]);
+    const worktree = path.resolve(repo.worktree), receipt = checkoutReceipt(dir, worktree);
+    if (statEntry(receipt)) throw new WorktreeVolumeError(mount);
+    // A registration which predates this operation, or an existing directory, is never ours to repair.
+    if (statEntry(worktree) || registrations(dir, worktree).length) return run();
+    atomicWriteFile(receipt, JSON.stringify({ worktree, mount }));
+    let added = false;
+    try {
+      await run();
+      added = true;
+    } finally {
+      if (!volumeMounted(mount)) {
+        await recoverCheckout(runner, dir, repo, false).catch(() => undefined);
+        throw new WorktreeVolumeError(mount);
+      }
+      if (added || !registrations(dir, worktree).some(registration => statEntry(path.join(registration, 'locked')) || statEntry(path.join(registration, 'index.lock')))) fs.unlinkSync(receipt);
+    }
+  }, timeoutS * 1000 + 60_000);
 }
 
 export function gitFailure(message: string, stderr: string, hint?: string): AgentctlError {

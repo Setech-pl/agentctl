@@ -369,7 +369,8 @@ async function runStatus(deps: McpDeps, args: { all?: boolean | undefined; cohor
   extra.push(awayLine(ctx));
   const disk = await collectDisk(ctx);
   extra.push(diskLine(disk));
-  return { text: [statusLine(shown, rows.length - shown.length), ...extra, ...shown.filter(r => !pulledOpen(r)).map(compactStatus), ...pulledSummary(shown), ...shown.filter(pulledOpen).map(compactStatus)].join('\n'), data: { disk, tasks: [...shown.map(row => { const entry = views.find(v => v.entry.task === row.task)?.entry; return { ...statusRowForChat(row), ...(entry ? { state: entry.status === 'queued' ? 'registered' : entry.status } : {}) }; }), ...views.filter(v => !shown.some(r => r.task === v.entry.task)).map(v => ({ task: v.entry.task, agent: v.entry.agent, state: v.entry.status === 'queued' ? 'registered' : v.entry.status, startCondition: v.condition.text }))] } };
+  const state = (view: typeof views[number]) => view.condition.kind === 'blocked' ? 'blocked' : view.entry.status === 'queued' ? 'registered' : view.entry.status;
+  return { text: [statusLine(shown, rows.length - shown.length), ...extra, ...shown.filter(r => !pulledOpen(r)).map(compactStatus), ...pulledSummary(shown), ...shown.filter(pulledOpen).map(compactStatus)].join('\n'), data: { disk, tasks: [...shown.map(row => { const view = views.find(v => v.entry.task === row.task); return { ...statusRowForChat(row), ...(view ? { state: state(view) } : {}) }; }), ...views.filter(v => !shown.some(r => r.task === v.entry.task)).map(v => ({ task: v.entry.task, agent: v.entry.agent, state: state(v), startCondition: v.condition.text }))] } };
 }
 
 /** "Away: on since …; the phone gets the notifications" - what the chat should know about the phone. */
@@ -577,7 +578,7 @@ async function runQueueList(deps: McpDeps, args: { cohort?: string | undefined }
   const list = views.map((v) => ({
     position: v.position,
     task: v.entry.task,
-    status: v.entry.status,
+    status: v.condition.kind === 'blocked' ? 'blocked' : v.entry.status,
     retryAt: v.entry.retryAt ?? null,
     attempts: v.entry.attempts ?? [],
     agent: v.entry.agent,
@@ -1072,7 +1073,7 @@ function cheapSpecSummary(ctx: Context, specs: ResolvedSpec[], queued: boolean):
   }), ...specs.flatMap(spec => [
     ...(spec.after.length ? [`${spec.task} after: ${spec.after.join(', ')} (watch checks dependency state)`] : []),
     ...worktreeCostEstimates(ctx, spec.repos, {persistedOnly: true}).map(cost => `  worktree estimate ${cost.repo}: ${cost.bytes === null ? 'n/d (no measurement yet)' : `${(cost.bytes / 1024 ** 3).toFixed(2)} GB (last reading, ${cost.ageSeconds} s old)`}`),
-    `  start: ${taskDiskStartHold(ctx.config, spec.host, spec.repos.map(r => r.worktree), ctx.runner.now()) ?? peakHold(ctx.config, spec, ctx.runner.now()) ?? (isPaused(ctx.config) ? 'queue paused; starts after queue_resume (agentctl queue resume)' : !ctx.config.queue.enabled ? 'queue.enabled is false; enable the queue first' : `waits for a free ${spec.agent} window; watch checks capacity at accept`)}`,
+    `  start: ${taskDiskStartHold(ctx.config, spec.host, spec.repos, ctx.runner.now()) ?? peakHold(ctx.config, spec, ctx.runner.now()) ?? (isPaused(ctx.config) ? 'queue paused; starts after queue_resume (agentctl queue resume)' : !ctx.config.queue.enabled ? 'queue.enabled is false; enable the queue first' : `waits for a free ${spec.agent} window; watch checks capacity at accept`)}`,
     ...(spec.reviewOf && !spec.after.includes(spec.reviewOf) ? [`  hint: if the author report is not ready, add "after: ${spec.reviewOf}" so the review waits for it`] : []),
   ])];
 }
@@ -1650,7 +1651,7 @@ MCP_TOOLS.push(
   extraWrite('queue_up', 'queue up <TASK>', 'Move a waiting task to the front of its priority class', { task: taskArg }, async (ctx, a) => moveToFront(ctx, a.task)),
   extraWrite('queue_pause', 'queue pause', 'Pause automatic queue starts', {}, async (ctx) => ({ changed: await setPaused(ctx, true) })),
   extraWrite('queue_resume', 'queue resume', 'Resume automatic queue starts', {}, async (ctx) => ({ changed: await setPaused(ctx, false) })),
-  extraWrite('unblock', 'unblock <TASK> [--drop-after <TASK>]', 'Remove blocked dependencies, allowing a task to start', { task: taskArg, drop_after: optionalText }, async (ctx, a) => unblockEntry(ctx, a.task, { dropAfter: a.drop_after })),
+  extraWrite('unblock', 'unblock <TASK> [--drop-after <TASK>]', 'Resume after remounting the volume, or remove blocked dependencies', { task: taskArg, drop_after: optionalText }, async (ctx, a) => unblockEntry(ctx, a.task, { dropAfter: a.drop_after })),
   extraWrite('cohort_add', 'cohort add <NAME> <TASKS...>', 'Put existing tasks in a cohort', { cohort: cohortArg, tasks: z.array(taskArg).min(1).max(100) }, async (ctx, a) => setCohortOf(ctx, a.tasks, await touchCohort(ctx, a.cohort))),
   extraWrite('cohort_remove', 'cohort remove <TASKS...>', 'Remove cohort membership', { tasks: z.array(taskArg).min(1).max(100) }, async (ctx, a) => setCohortOf(ctx, a.tasks, undefined)),
   extraWrite('cohort_archive', 'cohort archive <NAMES...> | --older-than <AGE>', 'Hide finished cohorts from the board choice and the default cohort list; tasks, reports and history stay. Cohorts with active or queued work are never archived', { cohorts: z.array(cohortArg).max(50).optional(), older_than: optionalText }, async (ctx, a) => {
@@ -1909,7 +1910,7 @@ async function confirmationScope(ctx: Context, name: string, args: Record<string
     const entries = readQueue(ctx.config);
     const rows = await queueDependencyRows(ctx, entries);
     const blockers = findBlocked(entries, rows, { nowMs: ctx.runner.now(), settleS: ctx.config.reportSettleS }).get(before.task);
-    return { tasks: [{ task: before.task, state: blockers ? 'blocked' : before.status, blockers, after: before.after }], change: await unblockEntry(ctx, before.task, { dropAfter: args.drop_after as string | undefined, preview: true, rows }) };
+    return { tasks: [{ task: before.task, state: blockers || before.volumeBlock ? 'blocked' : before.status, blockers, volumeBlock: before.volumeBlock, after: before.after }], change: await unblockEntry(ctx, before.task, { dropAfter: args.drop_after as string | undefined, preview: true, rows }) };
   }
   if (name === 'cancel') {
     if ([args.task !== undefined, args.tasks !== undefined, args.cohort !== undefined].filter(Boolean).length !== 1) throw new AgentctlError('give either task or cohort', 'cancel takes one task (task) or all open tasks of a cohort (cohort), not both and not neither.');

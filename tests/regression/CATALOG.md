@@ -10,6 +10,8 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| DISK0248-VOLUME | The queue started worktrees on a mount directory that had fallen back to the internal disk. | `tests/disk0248.test.ts` (`^DISK0248-VOLUME:`) | 0.24.0 | fails on v0.23.3 (1 failing of 1) |
+| DISK0248-LOCK | A checkout interrupted by a disappearing disk could leave Git initializing and index locks behind. | `tests/disk0248.test.ts` (`^DISK0248-LOCK:`) | 0.24.0 | fails on v0.23.3 (1 failing of 1) |
 | SNAP0247 | A blocked watch step stopped snapshot publication, and stale MCP status dropped disk and capacity. | `tests/watch-snapshot.test.ts` (`^SNAP0247:`)<br>`tests/board-render.test.ts` (`SNAP0247:`) | 0.23.3 | fails on v0.23.2 (4 failing of 4) |
 | WALL-34-READY | Kimi startup accepted a transient composer on the welcome screen before it had settled. | `tests/host-tasks.test.ts` (`^WALL-34-READY:`) | 0.23.2 | fails on v0.23.1 (2 failing of 2) |
 | WALL-34-FIFO | An unconfirmed Kimi start in needs-attention kept later sends queued behind it. | `tests/host-tasks.test.ts` (`^WALL-34-FIFO:`) | 0.23.2 | fails on v0.23.1 (2 failing of 2) |

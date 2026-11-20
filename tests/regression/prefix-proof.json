@@ -210,6 +210,26 @@
       "D6: away also supports preview and token-only confirmation without a preview side effect"
     ]
   },
+  "DISK0248-LOCK": {
+    "rev": "v0.23.3",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "DISK0248-LOCK: interrupted checkout clears only its initializing locks and preserves detached metadata on unblock",
+      "DISK0248-LOCK: interrupted checkout clears only its initializing locks and preserves detached metadata on unblock"
+    ]
+  },
+  "DISK0248-VOLUME": {
+    "rev": "v0.23.3",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "DISK0248-VOLUME: unmounted worktree stays blocked once, then unblock checks that volume and resumes",
+      "DISK0248-VOLUME: unmounted worktree stays blocked once, then unblock checks that volume and resumes"
+    ]
+  },
   "F1": {
     "rev": "v0.19.0",
     "outcome": "IMPORT-ERROR",

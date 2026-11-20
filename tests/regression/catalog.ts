@@ -26,6 +26,8 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'DISK0248-VOLUME', fixedIn: '0.24.0', symptom: 'The queue started worktrees on a mount directory that had fallen back to the internal disk.', scenarios: [s('disk0248.test.ts', '^DISK0248-VOLUME:')] },
+  { id: 'DISK0248-LOCK', fixedIn: '0.24.0', symptom: 'A checkout interrupted by a disappearing disk could leave Git initializing and index locks behind.', scenarios: [s('disk0248.test.ts', '^DISK0248-LOCK:')] },
   { id: 'SNAP0247', fixedIn: '0.23.3', symptom: 'A blocked watch step stopped snapshot publication, and stale MCP status dropped disk and capacity.', scenarios: [s('watch-snapshot.test.ts', '^SNAP0247:'), s('board-render.test.ts', 'SNAP0247:')] },
   { id: 'WALL-34-READY', fixedIn: '0.23.2', symptom: 'Kimi startup accepted a transient composer on the welcome screen before it had settled.', scenarios: [s('host-tasks.test.ts', '^WALL-34-READY:')] },
   { id: 'WALL-34-FIFO', fixedIn: '0.23.2', symptom: 'An unconfirmed Kimi start in needs-attention kept later sends queued behind it.', scenarios: [s('host-tasks.test.ts', '^WALL-34-FIFO:')] },

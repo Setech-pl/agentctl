@@ -55,6 +55,7 @@ export interface Layer {
   /** Project guide overlay, relative to the repository or starting with ~. */
   guide?: string;
   worktreeRoot?: string;
+  worktreeMount?: string;
   links: Link[];
   env: Record<string, string>;
   report?: string;
@@ -367,7 +368,7 @@ export const DEFAULT_MANAGER_NAME = 'agentctl manager';
 export const DEFAULT_AGENT_SETTINGS = Object.fromEntries(DEFAULT_PROVIDERS.map(id => [id, defaultSettings(id)])) as Record<ProviderId, AgentSettings>;
 
 /** The keys accepted in every layer: the global config, `.agentctl.yaml` and (with a few of its own) a spec. docs/configuration.md describes each one. */
-export const LAYER_KEYS = ['worktree_root', 'links', 'env', 'report', 'setup', 'defaults', 'guide', 'review'];
+export const LAYER_KEYS = ['worktree_root', 'worktrees', 'links', 'env', 'report', 'setup', 'defaults', 'guide', 'review'];
 export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'limited', 'cache', 'state_dir', 'session', 'ui', 'tmux', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git', 'cohort', 'delivery_confirm_s', 'preview', 'providers', 'providers_config', 'start_failure', 'wall', 'hosts'];
 export const LIMITS_KEYS = [...AGENT_NAMES, 'count_external', 'count_report_ready', 'heavy'];
 export const DEFAULTS_KEYS = ['agent', 'model', 'effort', 'remote_control'];
@@ -533,7 +534,19 @@ function parseLayer(obj: Record<string, unknown>, where: string, p: Problems): L
   };
   if (typeof obj.guide === 'string') layer.guide = obj.guide;
   else if (obj.guide !== undefined && where !== 'config') p.add(`${where}.guide must be a path`);
-  const worktreeRoot = parseString(obj.worktree_root, `${where}.worktree_root`, p);
+  let worktreeRoot = parseString(obj.worktree_root, `${where}.worktree_root`, p);
+  if (obj.worktrees !== undefined) {
+    if (!isObject(obj.worktrees)) p.add(`${where}.worktrees must be a mapping`);
+    else {
+      checkKeys(obj.worktrees, ['root', 'mount'], `${where}.worktrees`, p);
+      const root = parseString(obj.worktrees.root, `${where}.worktrees.root`, p);
+      if (root && worktreeRoot) p.add(`${where}: use either worktree_root or worktrees.root`);
+      worktreeRoot = root ?? worktreeRoot;
+      const mount = parseString(obj.worktrees.mount, `${where}.worktrees.mount`, p);
+      if (mount && !worktreeRoot) p.add(`${where}.worktrees.mount requires a worktree root in the same config`);
+      if (mount) layer.worktreeMount = mount;
+    }
+  }
   const reports = parseReportPaths(obj.report, `${where}.report`, p);
   const report = reports[0];
   if (worktreeRoot) layer.worktreeRoot = worktreeRoot;

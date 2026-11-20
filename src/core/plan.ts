@@ -7,6 +7,7 @@ import { pendingStarts } from './start-lock.ts';
 import { inspectReport } from './report-state.ts';
 import { resolveTaskBases } from './base-ref.ts';
 import fs from 'node:fs';
+import { missingWorktreeVolume } from './worktree-volume.ts';
 import { checkReviewer, checkWindowLimit, findAuthor } from './checks.ts';
 import type { AgentModel, LiveWindow } from './checks.ts';
 import type { AgentName } from './config.ts';
@@ -205,7 +206,7 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
     for (const repo of opts.previewOnly || spec.host ? [] : spec.repos) {
       // A dry run may be rehearsed on a machine without the repositories, so only real runs require them.
       if (!ctx.runner.dryRun && !fs.existsSync(repo.path)) p.add(`${at} repository ${repo.path} does not exist`);
-      if (fs.existsSync(repo.worktree) && !opts.reuse) {
+      if (!missingWorktreeVolume([repo]) && fs.existsSync(repo.worktree) && !opts.reuse) {
         p.add(`${at} worktree ${repo.worktree} already exists (pass --reuse to use it as is)`);
       }
     }

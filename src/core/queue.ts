@@ -1,6 +1,6 @@
 import { checkHostLimit } from './host-limits.ts';
 import { peakHold } from './peak.ts';
-import { taskDiskStartHold, worktreeCostEstimates } from './disk.ts';
+import { freshTaskDiskStartHold, taskDiskStartHold, worktreeCostEstimates } from './disk.ts';
 import { expireProviderHolds, providerHolds } from './provider-hold.ts';
 import { readMcpRequests } from './mcp-requests.ts';
 import { heavyBudget, heavyPreviewUsed, heavyWait, isHeavy } from './heavy.ts';
@@ -15,7 +15,8 @@ import { reportPathWarnings } from './report-path.ts';
 import { missingLinkTargets, checkLinkTargets } from './links.ts';
 import type { OutputVerdict } from './outputs.ts';
 import { redactQueue } from './mcp-redact.ts';
-import { checkRetryWorktrees } from './git.ts';
+import { checkRetryWorktrees, interruptedWorktreeVolume, recoverInterruptedWorktrees } from './git.ts';
+import { missingWorktreeVolume, WorktreeVolumeError } from './worktree-volume.ts';
 import { collectCapacity, capacitySnapshot, snapshotLines } from './capacity.ts';
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -103,6 +104,8 @@ export interface QueueEntry {
   startingPid?: number;
   /** The cancelled authors of `after` that the watcher has announced as "blocked" already (once per author). */
   blockedNotified?: string[];
+  /** Mount point that blocked this start. Remounting alone does not restart an interrupted checkout. */
+  volumeBlock?: string;
   /** The spec was accepted by an MCP confirm and is not validated yet (status accepted), or its validation failed (status failed): retry validates it again. */
   unvalidated?: boolean;
   /** `status: failed`: when and why. */
@@ -264,7 +267,7 @@ export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: Q
   const lines: string[] = readyCount ? [`${readyCount} ${plural(readyCount, 'okno', 'okna', 'okien')} report-ready – close zwolni okna`] : [];
   let heavyUsed = heavyPreviewUsed(config, entries, live);
   for (const spec of specs) {
-    const diskHold = taskDiskStartHold(config, spec.host, spec.repos.map(r => r.worktree), ctx.runner.now());
+    const diskHold = taskDiskStartHold(config, spec.host, spec.repos, ctx.runner.now());
     for (const cost of worktreeCostEstimates(ctx, spec.repos)) lines.push(`  worktree estimate ${cost.repo}: ${cost.bytes === null ? 'n/d (no measurement yet)' : `${(cost.bytes / 1024 ** 3).toFixed(2)} GB (last reading, ${cost.ageSeconds} s old)`}`);
     const heavyReason = heavyWait(config, spec.weight === 'heavy', heavyUsed);
     if (spec.weight === 'heavy') heavyUsed++;
@@ -412,6 +415,7 @@ export function queueDiagnosticSources(entries: QueueEntry[]): string[] {
 export function directStartText(config: Pick<GlobalConfig, 'path' | 'stateDir'>, entry: QueueEntry, nowMs: number): string {
   const entries = readQueue(config);
   const redact = secretRedactor([config, process.env, ...queueDiagnosticSources([...entries, entry])]);
+  if (entry.volumeBlock) return `${entry.task}: ${volumeBlockText(entry.volumeBlock, entry.task)}`;
   if (entry.status === 'failed') {
     return `${entry.task}: the start failed – ${firstLine(redact(entry.error ?? 'n/d'))}. The worktrees were kept. Read queue_list, fix the cause, then queue_retry ${entry.task} (new is refused for a task that is in the queue). Nothing was started again.`;
   }
@@ -614,6 +618,30 @@ export async function removeFromQueue(ctx: Context, input: string, opts: { reaso
 /** `agentctl unblock`: the entry's `after` loses the cancelled (or blocked) tasks, or just `dropAfter`; it waits for the rest, or starts. */
 export async function unblockEntry(ctx: Context, input: string, opts: { dropAfter?: string | undefined; preview?: boolean; /** The dependency rows the caller read already. */ rows?: StatusRow[] } = {}): Promise<{ entry: QueueEntry; dropped: string[] }> {
   const entry = findEntry(ctx.config, input);
+  if (entry.volumeBlock && opts.dropAfter === undefined) {
+    const release = async () => {
+      const fresh = findEntry(ctx.config, entry.task);
+      if (!fresh.volumeBlock) throw new AgentctlError(`${fresh.task} is not volume-blocked`);
+      const spec = resolveSpec(splitSpecs(fresh.spec)[0]!, { config: ctx.config });
+      const missing = spec.host ? undefined : missingWorktreeVolume(spec.repos);
+      if (missing) throw new WorktreeVolumeError(missing, fresh.task);
+      const { volumeBlock: _volume, startingPid: _pid, startingAt: _start, ...rest } = fresh;
+      const updated: QueueEntry = { ...rest, status: 'queued', reuse: true };
+      if (!opts.preview) {
+        if (spec.host) {
+          const hold = await freshTaskDiskStartHold(ctx, spec.host, spec.repos);
+          if (hold) throw new AgentctlError(hold);
+        } else {
+          await recoverInterruptedWorktrees(ctx.runner, spec.repos);
+          await checkRetryWorktrees(ctx.runner, spec.repos);
+        }
+        await writeEntry(ctx, updated);
+        await recordJournal(ctx, { kind: 'unblocked', task: fresh.task, text: `${fresh.task}: wznowiono kolejkę po zamontowaniu woluminu ${fresh.volumeBlock}` });
+      }
+      return { entry: updated, dropped: [] };
+    };
+    return opts.preview ? release() : withStartLock(ctx, release);
+  }
   const entries = readQueue(ctx.config);
   // Only the tasks the queue's `after` names (P93b): no scan of every task, no git; their verdicts are read, closed ones too.
   const rows = opts.rows ?? await queueDependencyRows(ctx, entries);
@@ -750,7 +778,7 @@ export async function setPaused(ctx: Context, paused: boolean): Promise<boolean>
 export type Condition =
   | { kind: 'ready'; text: string }
   | { kind: 'after'; text: string }
-  | { kind: 'blocked'; text: string; blockers: Blockers }
+  | { kind: 'blocked'; text: string; blockers?: Blockers }
   | { kind: 'slot'; text: string }
   | { kind: 'hold'; text: string }
   | { kind: 'paused'; text: string }
@@ -777,8 +805,24 @@ function entryPeakHold(config: GlobalConfig, entry: QueueEntry, now: number): st
 function setupSlots(config: GlobalConfig, entries: QueueEntry[]): number {
   return entries.filter(e => e.status === 'starting' && readSetupProgress(config, e.task)?.phase !== 'launching').length;
 }
-function entryWorktrees(config: GlobalConfig, entry: QueueEntry): string[] {
-  try { return resolveSpec(splitSpecs(entry.spec)[0]!, {config}).repos.map(r => r.worktree); } catch { return []; }
+function entryWorktrees(config: GlobalConfig, entry: QueueEntry): ResolvedSpec['repos'] {
+  try { return resolveSpec(splitSpecs(entry.spec)[0]!, {config}).repos; } catch { return []; }
+}
+
+const volumeBlockText = (mount: string, task: string) => `volume missing: ${mount} (po zamontowaniu: agentctl unblock ${task})`;
+
+export async function blockEntryVolume(ctx: Context, entry: QueueEntry, mount: string, notifier: Notifier, self?: SelfArgv): Promise<void> {
+  const changed = await withStartLock(ctx, async () => {
+    const current = readQueue(ctx.config).find(candidate => candidate.task === entry.task && candidate.seq === entry.seq);
+    if (!current || current.volumeBlock) return false;
+    const { startingPid: _pid, startingAt: _start, ...rest } = current;
+    await writeEntry(ctx, { ...rest, status: 'queued', volumeBlock: mount });
+    return true;
+  });
+  if (!changed) return;
+  const text = `${entry.task}: ${volumeBlockText(mount, entry.task)}`;
+  await recordJournal(ctx, { kind: 'blocked', task: entry.task, text });
+  await notifyPlain(ctx, notifier, entry.task, text, self);
 }
 
 /**
@@ -805,9 +849,12 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
     if (entry.status === 'accepted') return { position: null, entry, condition: { kind: 'accepted', text: entry.direct ? `uruchamiane – czeka na najbliższy tick watch (${ACCEPTED_TEXT})` : ACCEPTED_TEXT }, since: entry.queuedAt };
     if (entry.status === 'starting') return { position: null, entry, condition: { kind: 'starting', text: entry.direct || readSetupProgress(config, entry.task, queueDiagnosticSources(entries)) ? startProgressText(readSetupProgress(config, entry.task, queueDiagnosticSources(entries)), nowMs) : 'starting' }, since: entry.startingAt ?? entry.queuedAt };
     position++;
+    const repos = entryWorktrees(config, entry);
+    const mount = entry.volumeBlock ?? (entry.host ? undefined : missingWorktreeVolume(repos));
+    if (mount) return { position, entry, condition: { kind: 'blocked', text: volumeBlockText(mount, entry.task) }, since: entry.queuedAt };
     const peak = entryPeakHold(config, entry, nowMs);
     if (peak) return {position, entry, condition: {kind: 'hold', text: peak}, since: entry.queuedAt};
-    const diskHold = taskDiskStartHold(config, entry.host, entryWorktrees(config, entry), nowMs);
+    const diskHold = taskDiskStartHold(config, entry.host, repos, nowMs);
     if (diskHold) return {position, entry, condition: {kind: 'hold', text: diskHold}, since: entry.queuedAt};
     if (setups >= config.queue.maxParallelSetups) return {position, entry, condition: {kind: 'slot', text: `czeka na setup: ${setups}/${config.queue.maxParallelSetups}`}, since: entry.queuedAt};
     const heavyReason = heavyWait(config, isHeavy(entry), heavy.size);
@@ -981,6 +1028,11 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   // Accepted MCP confirms are validated even while the queue is paused or disabled: the answer (queued, or failed with the reason) is due either way.
   await validateAccepted(ctx, notifier, opts);
   await applyAcceptedWrites(ctx, notifier, opts);
+  for (const entry of waiting(readQueue(config))) {
+    if (entry.host || entry.volumeBlock) continue;
+    const mount = missingWorktreeVolume(entryWorktrees(config, entry));
+    if (mount) await blockEntryVolume(ctx, entry, mount, notifier, opts.self);
+  }
   if (!config.queue.enabled) return [];
   // A paused queue starts nothing that waits in line; an explicit start (`direct`) is not in the line.
   const paused = isPaused(config);
@@ -999,6 +1051,15 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   for (const entry of entries) {
     if (entry.status !== 'starting' || memory.inflight.has(entry.task)) continue;
     if (entry.startingPid) { try { process.kill(entry.startingPid, 0); continue; } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') continue; } }
+    if (!entry.host && !records.has(entry.task)) {
+      const repos = entryWorktrees(config, entry);
+      const mount = missingWorktreeVolume(repos) ?? await interruptedWorktreeVolume(ctx.runner, repos).catch(() => undefined);
+      if (mount) {
+        await recoverInterruptedWorktrees(ctx.runner, repos, { missingOnly: true }).catch(() => undefined);
+        await blockEntryVolume(ctx, entry, mount, notifier, opts.self);
+        continue;
+      }
+    }
     if (records.has(entry.task)) {
       // The record and the queue must not disagree: the entry goes away with the record in place, a leftover never-ready
       // window is closed, and the task (worktree kept) lands in "to resume" like its siblings.
@@ -1024,6 +1085,7 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   const holds = queueHolds(config, ctx.runner.now());
   const stillHeld = new Set<string>();
   for (let entry of waiting(entries)) {
+    if (entry.volumeBlock) continue;
     if (paused && !entry.direct) continue;
     if (entry.retryAt && Date.parse(entry.retryAt) > ctx.runner.now()) continue;
     const author = directAuthorState(config, entry, readQueue(config));
@@ -1124,7 +1186,7 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
   const { config } = ctx;
   let entry = initial;
   const claim = async (fresh: QueueEntry): Promise<boolean> => {
-    if (entryPeakHold(config, fresh, ctx.runner.now()) || taskDiskStartHold(config, fresh.host, entryWorktrees(config, fresh), ctx.runner.now()) || setupSlots(config, readQueue(config)) >= config.queue.maxParallelSetups) return false;
+    if (fresh.volumeBlock || entryPeakHold(config, fresh, ctx.runner.now()) || taskDiskStartHold(config, fresh.host, entryWorktrees(config, fresh), ctx.runner.now()) || setupSlots(config, readQueue(config)) >= config.queue.maxParallelSetups) return false;
     if (heavyWait(config, isHeavy(fresh), heavyBudget(config, readQueue(config), await liveWindows(ctx)).size)) return false;
     await writeEntry(ctx, { ...fresh, status: 'starting', startingPid: process.pid, startingAt: new Date(ctx.runner.now()).toISOString() });
     entry = fresh;
@@ -1195,6 +1257,7 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
       await notifyPlain(ctx, notifier, entry.task, done, opts.self);
       await recordJournal(ctx, { kind: 'queue-start', task: entry.task, text: `${done} (${entry.agent})`, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
     } catch (e) {
+      if (e instanceof WorktreeVolumeError) { await blockEntryVolume(ctx, entry, e.mount, notifier, opts.self); return; }
       if (/window limit for .* reached|host .* limit reached|provider hold:|szczyt do|wstrzymane: dysk/.test(errorMessage(e))) { await writeEntry(ctx, { ...entry, status: 'queued' }); return; }
       // A never-ready window is untrusted state nobody watches: close it so it cannot hold a slot (the record and its worktree stay).
       const closedLeftover = await closeNeverReadyWindow(ctx, entry.task, { force: Boolean(opts.signal?.aborted) }).catch(() => false);

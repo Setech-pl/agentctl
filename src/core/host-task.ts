@@ -11,6 +11,7 @@ import { buildClaudeSettings } from './providers/claude-events.ts';
 import { parseTomlNotify, tomlArray } from './providers/codex-events.ts';
 import type { TaskRecord } from './taskstore.ts';
 import { AgentctlError, fillPlaceholders } from './util.ts';
+import { inferredWorktreeMount } from './worktree-volume.ts';
 
 /** Resolve remote HOME on the host; never expand it with the dispatcher's home directory. */
 export function remotePath(value: string, home: string, root = home): string {
@@ -41,6 +42,7 @@ export async function prepareRemoteTask(ctx: Context, spec: ResolvedSpec, reuse 
     spec = { ...spec, env: { ...spec.env, KIMI_CODE_HOME: kimiHome, ...(model?.efforts.includes(spec.effort) ? { KIMI_MODEL_THINKING_EFFORT: spec.effort } : {}) } };
   }
   const root = remotePath(host.workDir, home);
+  if (inferredWorktreeMount(root)) ctx.info(`${spec.task}: interrupted worktree lock recovery unsupported on SSH host ${spec.host}; inspect its Git metadata before retrying an interrupted checkout`);
   const dir = path.posix.join(root, '.agentctl', spec.window);
   const report = path.posix.join(root, 'reports', spec.window, `${spec.task}.md`);
   const repos: ResolvedSpec['repos'] = [];
@@ -72,6 +74,7 @@ export async function prepareRemoteTask(ctx: Context, spec: ResolvedSpec, reuse 
     if (configFile.stdout.trim()) {
       const project = parseProjectConfigText(configFile.stdout, file);
       if (!spec.readOnly && !repo.setupExplicit && project.setup) repo.setup = project.setup;
+      if (project.worktreeRoot) ctx.info(`${spec.task}: worktrees.root under .agentctl.yaml is unsupported on SSH host ${spec.host}; using hosts.${spec.host}.work_dir`);
       if (index === 0) {
         projectEnv = project.env ?? {};
         for (const link of (spec.readOnly || spec.inheritProjectLinks === false ? [] : project.links) ?? []) if (!links.some(l => l.from === link.from)) defaults.push(link);

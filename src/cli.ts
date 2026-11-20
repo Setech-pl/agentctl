@@ -54,7 +54,8 @@ import { listTargets, matchTask } from './core/resolve.ts';
 import type { TaskTarget } from './core/resolve.ts';
 import { migrateLegacyState } from './core/taskstore.ts';
 import { newTasks } from './core/new.ts';
-import { commitQueueAdd, describeQueue, isPaused, moveToFront, planQueueAdd, readQueue, queueStatusLines, removeFromQueue, renderQueueList, retryEntry, setPaused, unblockEntry, waiting } from './core/queue.ts';
+import { blockEntryVolume, commitQueueAdd, describeQueue, isPaused, moveToFront, planQueueAdd, readQueue, queueStatusLines, registerDirectStart, removeFromQueue, renderQueueList, retryEntry, setPaused, unblockEntry, waiting } from './core/queue.ts';
+import { missingWorktreeVolume, WorktreeVolumeError } from './core/worktree-volume.ts';
 import { liveWindows } from './core/plan.ts';
 import { applyGc, planGc, renderGc, gcView } from './core/gc.ts';
 import { collectEvents, eventsMarkdown, renderEvents } from './core/chat-events.ts';
@@ -523,8 +524,22 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         const overflow: { queued: typeof specs } = { queued: [] };
         if (!opts.dryRun && !options.noAgent) options.overflow = overflow;
         let results: NewResult[] = [];
+        const deferred: string[] = [];
         try {
           results = await newTasks(ctx, specs, options);
+        } catch (error) {
+          if (!(error instanceof WorktreeVolumeError)) throw error;
+          const affected = specs.filter(spec => error.beforeStart || spec.task === error.task);
+          if (!affected.length) throw error;
+          const { added, existing } = await registerDirectStart(ctx, affected.map(spec => ({ raw: raws[spec.index - 1]!, spec })), { agent: options.agent, noAgent: options.noAgent, reuse: options.reuse || !error.beforeStart });
+          const notifier = await makeNotifier(ctx);
+          for (const entry of [...added, ...existing]) {
+            const spec = affected.find(candidate => candidate.task === entry.task)!;
+            const mount = entry.task === error.task ? error.mount : spec.host ? undefined : missingWorktreeVolume(spec.repos);
+            if (mount) await blockEntryVolume(ctx, entry, mount, notifier, self);
+            deferred.push(entry.task);
+            if (!opts.json) line(mount ? `${entry.task}: volume missing: ${mount}. Mount it, then run agentctl unblock ${entry.task}.` : `${entry.task}: registered for agentctl watch.`);
+          }
         } finally {
           interrupt?.dispose();
         }
@@ -533,12 +548,12 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
           if (!opts.json) for (const e of added) line(`${e.task}: queued (position ${waiting(readQueue(ctx.config)).findIndex((x) => x.task === e.task) + 1}); it starts when a ${e.agent} window is free${await watchRunning(ctx) ? '' : ' – nothing starts it unless "agentctl watch" runs: agentctl watch --tmux'}`);
         }
         // The session exists now (it may have been created by this very command): mouse and the key back to the board.
-        if (!opts.dryRun && !options.noAgent) {
+        if (!opts.dryRun && !options.noAgent && !deferred.length) {
           const nav = describeNavigation(await applyNavigation(ctx), ctx.config.session, true);
           if (!opts.json) for (const l of nav) line(l);
         }
         const capacity = !opts.dryRun && ctx.config.capacity.snapshot && !options.noAgent ? capacitySnapshot(await collectCapacity(ctx), [...results.map((r) => r.effective.agent), ...overflow.queued.map((s) => s.agent)]) : undefined;
-        if (opts.json) line(JSON.stringify({ results, queued: overflow.queued.map((s) => s.task), ...(capacity ? { capacity } : {}) }, null, 2));
+        if (opts.json) line(JSON.stringify({ results, queued: [...deferred, ...overflow.queued.map((s) => s.task)], ...(capacity ? { capacity } : {}) }, null, 2));
         else if (capacity) for (const l of snapshotLines(capacity)) line(l);
       }),
     );
@@ -619,13 +634,14 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
 
   program
     .command('unblock')
-    .description('Let a blocked queued task go on: a task whose "after" names a cancelled task is blocked (⛓) and never starts. This drops the dependency (all the cancelled ones, or only --drop-after); the task is back in the queue and waits for the rest, or starts. The other way out is "agentctl cancel".')
+    .description('Let a blocked queued task go on after remounting its volume, or drop the blocked dependencies from its "after".')
     .argument('<task>', 'task ID; a unique prefix is enough')
     .option('--drop-after <task>', 'drop only this task from the "after" of the queued task')
     .action(
       guarded(async (task: string, opts: { dropAfter?: string }) => {
         const { entry, dropped } = await unblockEntry(contextFor(false, { migrate: false }), task, { dropAfter: opts.dropAfter });
-        line(`${entry.task}: no longer waits for ${dropped.join(', ')}; back in the queue${entry.after.length > 0 ? `, still waiting for ${entry.after.join(', ')}` : ''}`);
+        const reason = dropped.length ? `no longer waits for ${dropped.join(', ')}` : 'volume available';
+        line(`${entry.task}: ${reason}; back in the queue${entry.after.length > 0 ? `, still waiting for ${entry.after.join(', ')}` : ''}`);
       }),
     );
 

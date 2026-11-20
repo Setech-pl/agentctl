@@ -16,9 +16,10 @@ import { recordJournal } from './journal.ts';
 import type { Notifier } from './notify.ts';
 import { fileVersion } from './file-version.ts';
 import { withFileLock } from './file-lock.ts';
+import { inferredWorktreeMount, missingWorktreeVolume, volumeMounted, type WorktreeVolume } from './worktree-volume.ts';
 
 export type DiskLevel = 'ok' | 'warn' | 'critical' | 'unknown';
-export interface DiskVolume { host?: string; workDir?: string; samplePath?: string; worktreeShareWarning?: {bytes: number; measuredAt: string; ageSeconds: number}; device: string | null; paths: string[]; availableBytes: number | null; totalBytes: number | null; level: DiskLevel; error?: string }
+export interface DiskVolume { host?: string; workDir?: string; samplePath?: string; mount?: string; worktreeShareWarning?: {bytes: number; measuredAt: string; ageSeconds: number}; device: string | null; paths: string[]; availableBytes: number | null; totalBytes: number | null; level: DiskLevel; error?: string }
 export interface DiskReport { freeMeasuredAt?: string; worktreeAgeSeconds?: number; gcPolicyNote?: string; reclaimableBytes?: number | null; gcHint?: boolean; measurementError?: string; /** The sizes below are the last ones measured (or none yet): a measurement is still running in the background. */ measuring?: boolean; worktreeCount?: number; largestWorktrees?: { path: string; bytes: number }[]; pathsTotal?: number; pathsOffset?: number; pathsNextOffset?: number | null; volumes: DiskVolume[]; worktreeBytes: number | null; measuredAt: string; level: DiskLevel }
 export const DISK_INTERVAL_MS = 5 * 60_000;
 const restored = new Map<string, string>();
@@ -72,30 +73,48 @@ async function freeSpace(ctx: Context, ancestor: string, statfs: Statfs, budgetM
 /** Read cached sizes only. Watch owns measurement jobs; no read starts a walk or writes the size cache. */
 export async function collectDisk(ctx: Context, statfs = fs.promises.statfs, opts: { detail?: boolean; offset?: number; limit?: number; budgetMs?: number; records?: TaskRecord[] } = {}): Promise<DiskReport> {
   const records = (opts.records ?? [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)]).filter(r => !r.host);
-  const targets = new Set([ctx.config.cache, ctx.config.stateDir]);
-  if (ctx.config.worktreeRoot) targets.add(resolvePath(ctx.config.worktreeRoot));
+  const targets = new Map<string, string | undefined>([[ctx.config.cache, undefined], [ctx.config.stateDir, undefined]]);
+  if (ctx.config.worktreeRoot) {
+    const root = resolvePath(ctx.config.worktreeRoot);
+    targets.set(root, ctx.config.worktreeMount ? resolvePath(ctx.config.worktreeMount) : inferredWorktreeMount(root));
+  }
   const queuedRepos = readQueue(ctx.config).flatMap((entry) => {
     try { const spec = resolveSpec(splitSpecs(entry.spec, 'disk queue inventory')[0]!, { config: ctx.config }); return spec.host ? [] : spec.repos; }
     catch { return []; }
   });
   for (const repo of [...records.flatMap((r) => r.repos), ...queuedRepos]) {
-    targets.add(repo.worktree);
+    targets.set(repo.worktree, repo.worktreeMount ?? inferredWorktreeMount(repo.worktree));
     try {
-      const root = loadProjectConfig(repo.path)?.worktreeRoot;
-      if (root) targets.add(resolvePath(root, repo.path));
+      const project = loadProjectConfig(repo.path);
+      if (project?.worktreeRoot) {
+        const root = resolvePath(project.worktreeRoot);
+        targets.set(root, project.worktreeMount ? resolvePath(project.worktreeMount) : inferredWorktreeMount(root));
+      }
     } catch { /* invalid project config does not hide other volumes */ }
   }
   const volumes = new Map<string, DiskVolume>();
-  for (const target of targets) {
+  for (const [target, mount] of targets) {
+    if (mount && !volumeMounted(mount)) {
+      const key = `missing:${mount}`;
+      if (volumes.has(key)) volumes.get(key)!.paths.push(target);
+      else volumes.set(key, { mount, samplePath: target, paths: [target], device: null, availableBytes: null, totalBytes: null, level: 'unknown', error: 'volume missing' });
+      continue;
+    }
     const ancestor = existingAncestor(target);
     let device: string | null = null;
     try { device = String(fs.statSync(ancestor).dev); } catch { /* n/d */ }
     const key = device ?? target;
-    if (volumes.has(key)) { volumes.get(key)!.paths.push(target); continue; }
-    volumes.set(key, { samplePath: ancestor, device, paths: [target], availableBytes: null, totalBytes: null, level: 'unknown' });
+    if (volumes.has(key)) { const volume = volumes.get(key)!; volume.paths.push(target); if (mount) volume.mount ??= mount; continue; }
+    volumes.set(key, { samplePath: ancestor, ...(mount ? { mount } : {}), device, paths: [target], availableBytes: null, totalBytes: null, level: 'unknown' });
   }
   await Promise.all([...volumes.values()].map(async volume => {
-    Object.assign(volume, await freeSpace(ctx, volume.samplePath!, statfs, opts.budgetMs ?? FREE_SPACE_BUDGET_MS));
+    if (volume.error === 'volume missing') return;
+    const sampled = await freeSpace(ctx, volume.samplePath!, statfs, opts.budgetMs ?? FREE_SPACE_BUDGET_MS);
+    if (volume.mount && !volumeMounted(volume.mount)) {
+      Object.assign(volume, { device: null, error: 'volume missing' });
+      return;
+    }
+    Object.assign(volume, sampled);
     volume.level = diskLevel(volume.availableBytes, ctx.config.disk.warnGb, ctx.config.disk.criticalGb);
   }));
   const worktrees = [...new Set(records.flatMap((r) => r.repos.map((r) => r.worktree)))].sort();
@@ -160,7 +179,8 @@ function readingAge(ageMs: number): string {
 export function diskLine(disk: DiskReport, now: number = Date.now()): string {
   const age = `, ${readingAge(Math.max(0, now - Date.parse(disk.measuredAt)))} old`;
   const note = disk.measuring ? ` (measuring, last reading${age})` : disk.measurementError ? ` (measurement failed, last reading${age})` : age ? ` (last reading${age})` : '';
-  return `Disk: ${disk.level}; free ${disk.volumes.map((v) => `${v.host ? `[${v.host}] ${v.workDir ?? ''} ` : ''}${v.availableBytes === null ? 'n/d' : `${(v.availableBytes / 1024 ** 3).toFixed(1)} GiB`}`).join(' / ')}; agentctl worktrees ${disk.worktreeBytes === null ? 'n/d' : `${(disk.worktreeBytes / 1024 ** 3).toFixed(1)} GiB`}${note}${disk.level === 'critical' || disk.level === 'warn' ? `; run agentctl gc --preview (gc_preview); reclaimable ${disk.reclaimableBytes ?? 'n/d'} bytes; ${disk.gcPolicyNote ?? 'GC may be blocked by protection policy; preview first.'}` : ''}`;
+  const free = disk.volumes.map(v => `${v.host ? `[${v.host}] ${v.workDir ?? ''} ` : v.mount ? `[${v.mount}] ` : ''}${v.availableBytes === null ? v.error === 'volume missing' ? v.error : 'n/d' : `${(v.availableBytes / 1024 ** 3).toFixed(1)} GiB`}`).join(' / ');
+  return `Disk: ${disk.level}; free ${free}; agentctl worktrees ${disk.worktreeBytes === null ? 'n/d' : `${(disk.worktreeBytes / 1024 ** 3).toFixed(1)} GiB`}${note}${disk.level === 'critical' || disk.level === 'warn' ? `; run agentctl gc --preview (gc_preview); reclaimable ${disk.reclaimableBytes ?? 'n/d'} bytes; ${disk.gcPolicyNote ?? 'GC may be blocked by protection policy; preview first.'}` : ''}`;
 }
 
 /**
@@ -250,8 +270,12 @@ export async function refreshHostHealth(ctx: Context): Promise<void> {
   finally { hostRefreshing.delete(ctx.config.path); }
 }
 /** Fresh cheap filesystem admission, independent of recursive worktree measurements. Unknown space fails closed. */
-export function diskStartHold(config: Context['config'], worktrees: string[] = [], statfs = fs.statfsSync): string | undefined {
-  const targets = new Set([config.cache, config.stateDir, ...(config.worktreeRoot ? [resolvePath(config.worktreeRoot)] : []), ...worktrees]);
+export function diskStartHold(config: Context['config'], worktrees: (string | WorktreeVolume)[] = [], statfs = fs.statfsSync): string | undefined {
+  const repos = worktrees.map(worktree => typeof worktree === 'string' ? { worktree } : worktree);
+  if (!repos.length && config.worktreeRoot) repos.push({ worktree: resolvePath(config.worktreeRoot), ...(config.worktreeMount ? { worktreeMount: resolvePath(config.worktreeMount) } : {}) });
+  const missing = missingWorktreeVolume(repos);
+  if (missing) return `volume missing: ${missing}`;
+  const targets = new Set([config.cache, config.stateDir, ...repos.map(repo => repo.worktree)]);
   const devices = new Set<number>();
   for (const target of targets) {
     const ancestor = existingAncestor(target);
@@ -261,7 +285,7 @@ export function diskStartHold(config: Context['config'], worktrees: string[] = [
       devices.add(device);
       const stat = statfs(ancestor);
       const gb = Number(stat.bavail) * Number(stat.bsize) / 1024 ** 3;
-      if (gb < config.disk.minFreeStartGb) return `wstrzymane: dysk ${Math.floor(gb)} GB < ${config.disk.minFreeStartGb} GB`;
+      if (gb < config.disk.minFreeStartGb) return `wstrzymane: dysk ${Math.floor(gb)} GB < ${config.disk.minFreeStartGb} GB (${ancestor})`;
     } catch { return 'wstrzymane: dysk – nie można odczytać wolnego miejsca'; }
   }
   return undefined;
@@ -289,17 +313,21 @@ export async function refreshDiskFreeSpace(ctx: Context, previous: DiskReport): 
       const availableBytes = health.disk.freeKb * 1024, totalBytes = health.disk.totalKb * 1024;
       return {...volume, availableBytes, totalBytes, level: diskLevel(availableBytes, ctx.config.disk.warnGb, ctx.config.disk.criticalGb)};
     }
-    const sampled = await freeSpace(ctx, existingAncestor(volume.samplePath ?? ctx.config.cache), fs.promises.statfs, FREE_SPACE_BUDGET_MS);
+    if (volume.mount && !volumeMounted(volume.mount)) return { ...volume, device: null, availableBytes: null, totalBytes: null, level: 'unknown' as const, error: 'volume missing' };
+    const ancestor = existingAncestor(volume.samplePath ?? ctx.config.cache);
+    const sampled = await freeSpace(ctx, ancestor, fs.promises.statfs, FREE_SPACE_BUDGET_MS);
+    if (volume.mount && !volumeMounted(volume.mount)) return { ...volume, device: null, availableBytes: null, totalBytes: null, level: 'unknown' as const, error: 'volume missing' };
     let level = diskLevel(sampled.availableBytes, ctx.config.disk.warnGb, ctx.config.disk.criticalGb);
     if (volume.worktreeShareWarning && sampled.totalBytes && volume.worktreeShareWarning.bytes / sampled.totalBytes * 100 > ctx.config.disk.worktreeSharePercent && level !== 'critical') level = 'warn';
-    return {...volume, error: undefined, ...sampled, level, ...(volume.worktreeShareWarning ? {worktreeShareWarning: {...volume.worktreeShareWarning, ageSeconds}} : {})};
+    const device = volume.mount ? String(fs.statSync(ancestor, { throwIfNoEntry: false })?.dev ?? '') || null : volume.device;
+    return {...volume, device, error: undefined, ...sampled, level, ...(volume.worktreeShareWarning ? {worktreeShareWarning: {...volume.worktreeShareWarning, ageSeconds}} : {})};
   }));
   const level = (['critical', 'warn', 'unknown', 'ok'] as const).find(l => volumes.some(v => v.level === l)) ?? 'unknown';
   return {...previous, volumes, level, gcHint: volumes.some(v => v.level === 'warn' || v.level === 'critical'), freeMeasuredAt: new Date(now).toISOString(), worktreeAgeSeconds: ageSeconds};
 }
 
 /** Cached host admission for synchronous queue previews; never stat a remote path locally. */
-export function taskDiskStartHold(config: Context['config'], host: string | undefined, worktrees: string[], now = Date.now()): string | undefined {
+export function taskDiskStartHold(config: Context['config'], host: string | undefined, worktrees: (string | WorktreeVolume)[], now = Date.now()): string | undefined {
   if (!host) return diskStartHold(config, worktrees);
   if (config.disk.minFreeStartGb === 0) return undefined;
   const health = readHostsCache(process.env, now, 60_000)?.hosts.find(h => h.name === host);
@@ -309,12 +337,15 @@ export function taskDiskStartHold(config: Context['config'], host: string | unde
 }
 
 /** Fresh remote work_dir counters before any worktree/setup mutation. */
-export async function freshTaskDiskStartHold(ctx: Context, host: string | undefined, worktrees: string[]): Promise<string | undefined> {
+export async function freshTaskDiskStartHold(ctx: Context, host: string | undefined, worktrees: (string | WorktreeVolume)[]): Promise<string | undefined> {
   if (!host) return diskStartHold(ctx.config, worktrees);
-  if (ctx.config.disk.minFreeStartGb === 0) return undefined;
+  const workDir = ctx.config.hosts[host]!.workDir;
+  const mount = inferredWorktreeMount(workDir);
+  if (ctx.config.disk.minFreeStartGb === 0 && !mount) return undefined;
   try {
-    const script = "const fs=require('node:fs'),p=require('node:path'); let dir=process.argv[1].replace(/^~(?=\\/|$)/,process.env.HOME); while(!fs.existsSync(dir)&&p.dirname(dir)!==dir) dir=p.dirname(dir); const s=fs.statfsSync(dir); console.log(Number(s.bavail)*Number(s.bsize)/1024**3)";
-    const r = await ctx.hosts.forHost(host).checked('node', ['-e', script, ctx.config.hosts[host]!.workDir], {readOnly: true, timeoutMs: 5000});
+    const script = "const fs=require('node:fs'),p=require('node:path'); let dir=process.argv[1].replace(/^~(?=\\/|$)/,process.env.HOME); const mount=process.argv[2]; if(mount){ const st=fs.statSync(mount,{throwIfNoEntry:false}); if(!st?.isDirectory() || st.dev===fs.statSync(p.dirname(mount),{throwIfNoEntry:false})?.dev){ console.log('volume missing: '+mount); process.exit(0); } } while(!fs.existsSync(dir)&&p.dirname(dir)!==dir) dir=p.dirname(dir); const s=fs.statfsSync(dir); console.log(Number(s.bavail)*Number(s.bsize)/1024**3)";
+    const r = await ctx.hosts.forHost(host).checked('node', ['-e', script, workDir, ...(mount ? [mount] : [])], {readOnly: true, timeoutMs: 5000});
+    if (mount && r.stdout.trim() === `volume missing: ${mount}`) return r.stdout.trim();
     const gb = Number(r.stdout.trim());
     if (!r.stdout.trim() || !Number.isFinite(gb) || gb < 0) throw Error('invalid disk sample');
     return gb < ctx.config.disk.minFreeStartGb ? `wstrzymane: dysk [${host}] ${Math.floor(gb)} GB < ${ctx.config.disk.minFreeStartGb} GB` : undefined;
