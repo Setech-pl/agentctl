@@ -169,9 +169,15 @@ describe('P48: withdrawing a waiting message', () => {
     const deps: McpDeps = { context: (out) => new Context(w.runner, loadGlobalConfig(path.dirname(w.config.path)), out), notify: async () => undefined };
     const tool = MCP_TOOLS.find((t) => t.name === 'send') as McpToolDef;
     const call = (args: Record<string, unknown>) => tool.run(deps, z.object(tool.input).parse(args) as never) as Promise<{ text: string; isError?: boolean }>;
-    const denied = await call({ task: 'W-5', withdraw: item.id.slice(0, 8) });
-    assert.equal(denied.isError, undefined, denied.text);
-    assert.match(denied.text, /wycofano/);
+    const preview = await call({ task: 'W-5', withdraw: item.id.slice(0, 8) });
+    assert.equal(preview.isError, undefined, preview.text);
+    assert.match(preview.text, /queued via MCP/);
+    assert.deepEqual(readPromptQueue(w.ctx, 'w-5').map(p => p.id), [item.id]);
+    const token = /preview_token: (\S+)/.exec(preview.text)?.[1];
+    assert.ok(token, preview.text);
+    const withdrawn = await call({ confirm: true, preview_token: token });
+    assert.equal(withdrawn.isError, undefined, withdrawn.text);
+    assert.match(withdrawn.text, /wycofano/);
     assert.equal(readPromptQueue(w.ctx, 'w-5').length, 0);
     assert.ok(readJournal(w.config).some((e) => e.kind === 'mcp-write' && /withdraw/.test(e.text)));
     // without the send permission nothing happens

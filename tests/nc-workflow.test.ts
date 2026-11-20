@@ -555,7 +555,15 @@ describe('0.17.4 fix 1: UAT polish (U-a … U-f)', () => {
   it('U-f: the send answer says "wklejono" once', async () => {
     const f = fixture('u-send'); f.config.mcp.allow.push('send'); seedTask(f.config, 'SENDER', { repos: [] }); f.tmux.add('sender', composerFixture('❯ \n'));
     const tool = MCP_TOOLS.find(t => t.name === 'send')!, deps = { ...f.deps, context: (log: (line: string) => void) => new Context(f.runner, f.config, log) };
-    const r = await tool.run(deps as never, z.object(tool.input).parse({ task: 'SENDER', text: 'hello there' })); assert.ok(!r.isError, r.text);
+    const preview = await tool.run(deps, z.object(tool.input).parse({ task: 'SENDER', text: 'hello there' }));
+    assert.ok(!preview.isError, preview.text);
+    assert.match(preview.text, /hello there/);
+    assert.doesNotMatch(f.tmux.seen.join('\n'), /paste-buffer|send-keys/);
+    const token = /preview_token: (\S+)/.exec(preview.text)?.[1];
+    assert.ok(token, preview.text);
+    const r = await tool.run(deps, { confirm: true, preview_token: token });
+    assert.ok(!r.isError, r.text);
+    assert.match(f.tmux.seen.join('\n'), /paste-buffer/);
     assert.equal((r.text.match(/wklejono|w kolejce/g) ?? []).length, 1, r.text);
   });
 });
