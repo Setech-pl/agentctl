@@ -94,6 +94,16 @@ it('FIELD0230-SOCKET: a 66-byte task cache keeps isolated tmux within the socket
   assert.ok(Buffer.byteLength(path.join(h.tmuxDir, `tmux-${process.getuid?.() ?? 0}`, 'default')) <= 100);
 });
 
+it('NOTIFY0251-SOCKET: a 67-byte task cache keeps isolated tmux within the socket limit', () => {
+  const root = '/' + 'x'.repeat(66);
+  process.env.AGENTCTL_LIVE_CACHE = root;
+  const h = new Harness({name: 'p19-stdio', cacheRoot: root}, REPO_ROOT);
+  const other = new Harness({name: 'p19-setup', cacheRoot: root}, REPO_ROOT);
+  assert.equal(path.dirname(h.root), root);
+  assert.notEqual(h.root, other.root);
+  assert.ok(Buffer.byteLength(path.join(h.tmuxDir, `tmux-${process.getuid?.() ?? 0}/default`)) <= 100);
+});
+
 it('shortens long sandbox names inside the requested root and refuses an oversized root before reset', () => {
   const cacheRoot = '/Users/marcinkrzetowski/Projects/cache-dev/agentctl-0181/e2/x';
   process.env.AGENTCTL_LIVE_CACHE = cacheRoot;

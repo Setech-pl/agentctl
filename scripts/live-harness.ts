@@ -194,7 +194,7 @@ export class Harness {
     const socketAt = (root: string) => path.join(root, 'tmx', `tmux-${process.getuid?.() ?? 0}`, 'default');
     const namedRoot = path.join(cacheRoot, `live-${options.name}`);
     // Keep long task-owned roots usable without escaping to a shared /tmp socket.
-    const hashLength = Math.max(7, Math.min(9, 100 - Buffer.byteLength(socketAt(path.join(cacheRoot, 'live-')))));
+    const hashLength = Math.max(6, Math.min(9, 100 - Buffer.byteLength(socketAt(path.join(cacheRoot, 'live-')))));
     this.root = Buffer.byteLength(socketAt(namedRoot)) <= 100 ? namedRoot
       : path.join(cacheRoot, `live-${createHash('sha256').update(options.name).digest('hex').slice(0, hashLength)}`);
     this.fakeBin = path.join(this.root, 'fakebin');

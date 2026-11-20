@@ -5,6 +5,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ## [Unreleased]
 
 - NOTIFY0251 was prepared for 0.25.1. / Poprawkę NOTIFY0251 przygotowano do wydania 0.25.1.
+- NOTIFY0251-SOCKET: Isolated tmux gates fit 67-byte task cache paths. / Izolowane bramki tmux działają ze ścieżką cache zadania o długości 67 bajtów.
 
 - QUOTA0250 was prepared for 0.25.0. / Kwoty QUOTA0250 przygotowano do wydania 0.25.0.
 

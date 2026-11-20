@@ -635,6 +635,16 @@
       "NOTIFY0251-RACE: a second watch sees the claim before desktop and phone delivery finish"
     ]
   },
+  "NOTIFY0251-SOCKET": {
+    "rev": "v0.25.0",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "NOTIFY0251-SOCKET: a 67-byte task cache keeps isolated tmux within the socket limit",
+      "NOTIFY0251-SOCKET: a 67-byte task cache keeps isolated tmux within the socket limit"
+    ]
+  },
   "NOTIFY0251-WINDOW": {
     "rev": "v0.25.0",
     "outcome": "FAILS",
