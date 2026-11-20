@@ -2380,11 +2380,11 @@ async function snapshotRead(ctx: Context, name: string, args: Record<string, unk
     const explicit = args.capacity === true || args.detail === true;
     const disk = snap.disk ?? snap.capacity?.disk;
     if ((warning || snap.degraded) && ['status', 'capacity', 'doctor'].includes(name)) {
-      const note = [`Watch snapshot age: ${(age / 1000).toFixed(1)} s.`, warning, snap.degraded && `Watch: pominięty etap – ${snap.degraded}.`].filter(Boolean).join(' ');
+      const note = [`${ageLine(snap.at, now)}; Watch snapshot age: ${(age / 1000).toFixed(1)} s.`, warning, snap.degraded && `Watch: pominięty etap – ${snap.degraded}.`].filter(Boolean).join(' ');
       if (name === 'doctor') return ok(JSON.stringify([...snap.doctor ?? [], {name: 'watch snapshot', status: 'warn', detail: note, snapshot_age_s: age / 1000}], null, 2));
       const freshDisk = disk ? await refreshDiskFreeSpace(ctx, disk) : await collectDisk(ctx);
       const capacity = snap.capacity && capacitySnapshot(snap.capacity);
-      const fallback = name === 'status' ? durableStatus(ctx) : '';
+      const fallback = name === 'status' ? `Krótki fallback z kolejki i dziennika.\n${durableStatus(ctx)}` : '';
       const capacityAt = snap.capacity?.at;
       if (args.format === 'json' || args.detail) return ok(JSON.stringify({
         snapshot_age_s: age / 1000, snapshot_note: note, ...(fallback ? { fallback } : {}), disk: freshDisk,
