@@ -10,6 +10,10 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| NOTIFY0251-WINDOW | Watch repeated the same plan alert after reset estimates changed or the plan briefly disappeared. | `tests/usage-limits.test.ts` (`^NOTIFY0251-WINDOW:`) | 0.25.1 | fails on v0.25.0 (1 failing of 1) |
+| NOTIFY0251-RACE | Overlapping watch reads sent the same plan alert to desktop and phone before the ledger was written. | `tests/usage-limits.test.ts` (`^NOTIFY0251-RACE:`) | 0.25.1 | fails on v0.25.0 (1 failing of 1) |
+| NOTIFY0251-LIMIT | Provider-limit hooks could send owner alerts and run retries outside watch. | `tests/alerts.test.ts` (`^NOTIFY0251-LIMIT:`) | 0.25.1 | fails on v0.25.0 (1 failing of 1) |
+| NOTIFY0251-DURABLE | Interrupted trust, disk and load announcements could repeat after watch restarted. | `tests/disk.test.ts` (`^NOTIFY0251-DURABLE:`)<br>`tests/machine.test.ts` (`NOTIFY0251-DURABLE`)<br>`tests/trust-notify.test.ts` (`^NOTIFY0251-DURABLE:`) | 0.25.1 | fails on v0.25.0 (3 failing of 3) |
 | QUOTA0250-CONTENTION | A single chat could take the next shared provider slots before another chat had a chance to reach its floor. | `tests/chat-quotas.test.ts` (`^QUOTA0250-CONTENTION:`) | 0.25.0 | fails on v0.24.0 (1 failing of 1) |
 | QUOTA0250-CEILINGS | The queue had no chat ceiling across hosts or utilization tie-break and could not explain a wait for chat capacity. | `tests/chat-quotas.test.ts` (`^QUOTA0250-CEILINGS:`) | 0.25.0 | fails on v0.24.0 (1 failing of 1) |
 | QUOTA0250-IDENTITY | Agent orders on the shared instance lost the ordering chat when confirmed and picked up by watch. | `tests/chat-quotas.test.ts` (`^QUOTA0250-IDENTITY:`) | 0.25.0 | fails on v0.24.0 (1 failing of 1) |

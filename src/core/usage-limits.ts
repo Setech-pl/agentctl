@@ -15,6 +15,8 @@ import type { PlanState, PlanWindowView } from './usage.ts';
 import { planLine } from './usage-report.ts';
 import { homeDir } from './usage-sources.ts';
 import { isObject } from './util.ts';
+import { withFileLock } from './file-lock.ts';
+import { RESET_TOLERANCE_MS } from './usage-samples.ts';
 
 /*
  * What the plan percentages are used for: a notification when a window crosses `usage.warn` or `usage.critical`, a hint when a task is
@@ -59,19 +61,33 @@ export interface UsageAlert {
   key: string;
 }
 
-const windowKey = (provider: AgentName, w: PlanWindowView): string => `${provider}|${w.kind}${w.kind === 'other' ? w.minutes ?? '' : ''}|${w.resetsAt ?? 'open'}`;
+const windowPrefix = (provider: AgentName, w: PlanWindowView): string => `${provider}|${w.kind}${w.kind === 'other' ? w.minutes ?? '' : ''}|`;
+const resetOf = (key: string): number => Number(key.slice(key.lastIndexOf('|') + 1));
+
+function windowKey(provider: AgentName, window: PlanWindowView, ledger: Record<string, Level>): string {
+  const prefix = windowPrefix(provider, window);
+  const reset = window.resetsAt;
+  const exact = `${prefix}${reset ?? 'open'}`;
+  if (reset === null || ledger[exact]) return exact;
+  // Providers can estimate reset times from rounded countdowns. Keep the first
+  // claimed reset as the key, without merging distinct periods of short windows.
+  const tolerance = Math.min(RESET_TOLERANCE_MS, (window.minutes ?? 60) * 30_000);
+  return Object.keys(ledger).find(key => key.startsWith(prefix) && Math.abs(resetOf(key) - reset) < tolerance) ?? exact;
+}
 
 /** The windows that crossed a threshold they were not announced for yet: one alert per threshold and window instance (a window is a new one after its reset). */
 export function pendingAlerts(config: Pick<GlobalConfig, 'usage'>, plans: ProviderValues<PlanState>, ledger: Record<string, Level>): UsageAlert[] {
   const out: UsageAlert[] = [];
+  const claimed = { ...ledger };
   for (const provider of planIds(plans)) {
     for (const window of providerValue(plans, provider).windows) {
       const level = levelOf(config, provider, window.usedPercent);
       if (!level) continue;
-      const key = windowKey(provider, window);
-      const done = ledger[key];
+      const key = windowKey(provider, window, claimed);
+      const done = claimed[key];
       if (done !== undefined && RANK[done] >= RANK[level]) continue;
       out.push({ provider, window, level, percent: window.usedPercent, key });
+      claimed[key] = level;
     }
   }
   return out;
@@ -104,33 +120,38 @@ export function alertText(config: Pick<GlobalConfig, 'usage'>, plans: ProviderVa
  */
 export async function usageTick(ctx: Context, notifier: Notifier, log?: (line: string) => Promise<void> | void): Promise<string[]> {
   const { config, runner } = ctx;
-  const now = runner.now();
-  const reader = openReader(config);
-  const plans = readPlans(config, reader, now);
-  reader.save();
-  await recordStaleCapacity(ctx, plans);
-  const ledger = readAlertLedger(config);
-  const alerts = pendingAlerts(config, plans, ledger);
-  // Windows that are over are forgotten, so the ledger does not grow for ever.
-  const live = new Set(planIds(plans).flatMap((p) => providerValue(plans, p).windows.map((w) => windowKey(p, w))));
-  let changed = false;
-  for (const key of Object.keys(ledger)) {
-    if (!live.has(key) && !alerts.some((a) => a.key === key)) {
-      delete ledger[key];
-      changed = true;
+  if (runner.dryRun) return [];
+  const file = alertsFile(config);
+  const { now, plans, alerts } = await withFileLock(`${file}.lock`, async () => {
+    const now = runner.now();
+    const reader = openReader(config);
+    const plans = readPlans(config, reader, now);
+    reader.save();
+    const ledger = readAlertLedger(config);
+    let changed = false;
+    // Keep live claims across a missing reading. Expired windows can be
+    // discarded once even a corrected deadline would be in the past.
+    for (const key of Object.keys(ledger)) {
+      if (resetOf(key) + RESET_TOLERANCE_MS <= now) {
+        delete ledger[key];
+        changed = true;
+      }
     }
-  }
+    const alerts = pendingAlerts(config, plans, ledger);
+    for (const alert of alerts) ledger[alert.key] = alert.level;
+    // Persist the claim before either delivery. The notifier runs outside the lock.
+    if (changed || alerts.length) await runner.writeFile(file, `${JSON.stringify(ledger, null, 2)}\n`);
+    return { now, plans, alerts };
+  });
   const sent: string[] = [];
   for (const alert of alerts) {
     const text = alertText(config, plans, alert, now);
-    ledger[alert.key] = alert.level;
-    changed = true;
     await notifier.notify('agentctl', text).catch(() => undefined);
     await notifyPhone(ctx, { kind: 'usage', text, level: alert.level });
     await log?.(`usage: ${text}`);
     sent.push(text);
   }
-  if (changed) await runner.writeFile(alertsFile(config), `${JSON.stringify(ledger, null, 2)}\n`);
+  await recordStaleCapacity(ctx, plans);
   return sent;
 }
 

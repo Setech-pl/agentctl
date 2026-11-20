@@ -26,6 +26,10 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'NOTIFY0251-WINDOW', fixedIn: '0.25.1', symptom: 'Watch repeated the same plan alert after reset estimates changed or the plan briefly disappeared.', scenarios: [s('usage-limits.test.ts', '^NOTIFY0251-WINDOW:')] },
+  { id: 'NOTIFY0251-RACE', fixedIn: '0.25.1', symptom: 'Overlapping watch reads sent the same plan alert to desktop and phone before the ledger was written.', scenarios: [s('usage-limits.test.ts', '^NOTIFY0251-RACE:')] },
+  { id: 'NOTIFY0251-LIMIT', fixedIn: '0.25.1', symptom: 'Provider-limit hooks could send owner alerts and run retries outside watch.', scenarios: [s('alerts.test.ts', '^NOTIFY0251-LIMIT:')] },
+  { id: 'NOTIFY0251-DURABLE', fixedIn: '0.25.1', symptom: 'Interrupted trust, disk and load announcements could repeat after watch restarted.', scenarios: [s('disk.test.ts', '^NOTIFY0251-DURABLE:'), s('machine.test.ts', 'NOTIFY0251-DURABLE'), s('trust-notify.test.ts', '^NOTIFY0251-DURABLE:')] },
   { id: 'QUOTA0250-CONTENTION', fixedIn: '0.25.0', symptom: 'A single chat could take the next shared provider slots before another chat had a chance to reach its floor.', scenarios: [s('chat-quotas.test.ts', '^QUOTA0250-CONTENTION:')] },
   { id: 'QUOTA0250-CEILINGS', fixedIn: '0.25.0', symptom: 'The queue had no chat ceiling across hosts or utilization tie-break and could not explain a wait for chat capacity.', scenarios: [s('chat-quotas.test.ts', '^QUOTA0250-CEILINGS:')] },
   { id: 'QUOTA0250-IDENTITY', fixedIn: '0.25.0', symptom: 'Agent orders on the shared instance lost the ordering chat when confirmed and picked up by watch.', scenarios: [s('chat-quotas.test.ts', '^QUOTA0250-IDENTITY:')] },

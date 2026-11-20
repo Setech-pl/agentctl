@@ -22,6 +22,12 @@ const plansNow = (ctx: Context) => { const reader = openReader(ctx.config); cons
 export function limitedRecovered(ctx: Context, plan: PlanState, episode: Pick<Episode, 'since' | 'reset'>): boolean {
   return (episode.reset !== null && ctx.runner.now() >= episode.reset) || (plan.available && !plan.stale && plan.readAt !== null && plan.readAt >= episode.since && plan.maxPercent !== null && 100 - plan.maxPercent > ctx.config.limited.resumeAbovePercent);
 }
+/** Hooks may hold admission immediately. Watch alone announces and retries the episode. */
+export async function holdLimitedTask(ctx: Context, provider: AgentName, row: StatusRow): Promise<void> {
+  const key = `${row.task}:${row.attemptId ?? row.started}`;
+  await automaticProviderHold(ctx, provider, key, row.limitEvidence?.text ?? `limited:${key}`, row.limitEvidence?.reset);
+}
+
 /** Once per provider episode, with durable per-task retry counts. Never changes the model/provider. */
 export async function limitedTick(ctx: Context, rows: StatusRow[], notifier: Notifier, supplied?: ProviderValues<PlanState>): Promise<void> {
   if (ctx.runner.dryRun) return;
@@ -33,7 +39,7 @@ export async function limitedTick(ctx: Context, rows: StatusRow[], notifier: Not
     for (const provider of activeProviders(ctx.config)) {
       const mine = rows.filter(r => r.agent === provider && !r.closed && !r.cancelled && r.window === 'alive' && r.report !== 'yes' && !r.finished);
       const limited = mine.filter(r => r.state === 'limited');
-      for (const row of limited) await automaticProviderHold(ctx, provider, `${row.task}:${row.attemptId ?? row.started}`, row.limitEvidence?.text ?? `limited:${row.task}:${row.attemptId ?? row.started}`, row.limitEvidence?.reset);
+      for (const row of limited) await holdLimitedTask(ctx, provider, row);
       const exhausted = providerValue(plans, provider).windows.filter(w => w.usedPercent >= 100);
       if (!state[provider] && !limited.length) continue;
       const reset = exhausted.length && exhausted.every(w => w.resetsAt !== null) ? Math.max(...exhausted.map(w => w.resetsAt!)) : null;
@@ -75,7 +81,7 @@ export async function limitedTick(ctx: Context, rows: StatusRow[], notifier: Not
           if (!await ctx.tmux.submitPrompt(row.windowName, settings.message, guard)) throw new Error('screen/report changed before submit; inspect pasted input');
         } catch (e) { await recordJournal(ctx, { kind: 'limited-resume', task: row.task, text: `${row.task}: resume failed: ${errorMessage(e)}` }); }
       }
-      if (!limited.length && !Object.keys(episode.tasks).length && !exhausted.length) delete state[provider];
+      if (!limited.length && !Object.keys(episode.tasks).length && !exhausted.length && (episode.reset === null || episode.reset <= now)) delete state[provider];
     }
     await persist();
   });

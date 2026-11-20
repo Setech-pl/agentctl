@@ -4,10 +4,16 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- NOTIFY0251 was prepared for 0.25.1. / Poprawkę NOTIFY0251 przygotowano do wydania 0.25.1.
+
 - QUOTA0250 was prepared for 0.25.0. / Kwoty QUOTA0250 przygotowano do wydania 0.25.0.
 
 - SNAP0247 was prepared for 0.23.3. / Poprawka SNAP0247 została przygotowana do wydania 0.23.3.
 - DISK0248 was prepared for 0.24.0. / Zmiany DISK0248 zostały przygotowane do wydania 0.24.0.
+
+## [0.25.1] - 2026-11-20
+
+- NOTIFY0251: Watch claims plan alerts before desktop and phone delivery, tolerates missing reads and minor reset-time corrections, and owns provider-limit alerts. Trust, disk and load state is saved before announcement. MCP keeps one-line capacity changes in the session response. / Watch zapisuje alerty planu przed wysyłką, uwzględnia brak odczytu i drobne korekty resetu oraz wysyła alerty o wyczerpaniu limitu. Zapisuje stan zaufania, dysku i obciążenia przed ogłoszeniem zmiany. MCP pokazuje zmianę pojemności w jednym wierszu odpowiedzi sesji.
 
 ## [0.25.0] - 2026-11-20
 

@@ -31,7 +31,7 @@ export function readSamples(config: GlobalConfig): UsageSample[] {
 
 const RESET_DROP_POINTS = 20;
 const RESET_GRACE_MS = 5 * 60_000;
-const RESET_TOLERANCE_MS = 15 * 60_000;
+export const RESET_TOLERANCE_MS = 15 * 60_000;
 export function isWindowReset(old: PlanWindowView, cur: PlanWindowView, now: number): boolean {
   const forward = old.resetsAt !== null && cur.resetsAt !== null ? cur.resetsAt - old.resetsAt : 0;
   const windowMs = Math.max(1, cur.minutes || old.minutes || 60) * 60_000;

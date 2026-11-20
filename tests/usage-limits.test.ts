@@ -4,6 +4,7 @@ import path from 'node:path';
 import { describe, it } from 'node:test';
 import { Context } from '../src/core/context.ts';
 import type { Notifier } from '../src/core/notify.ts';
+import { MCP_TOOLS } from '../src/core/mcp-tools.ts';
 import { commitQueueAdd, describeQueue, planQueueAdd, QueueMemory, queueTick, readQueue } from '../src/core/queue.ts';
 import { splitSpecs } from '../src/core/spec.ts';
 import { summarizeSpecs } from '../src/core/summary.ts';
@@ -39,6 +40,58 @@ function setup(name: string, usageYaml = '', plan: { claude?: { session: number;
 }
 
 const plansOf = (s: ReturnType<typeof setup>) => readPlans(s.config, openReader(s.config), NOW);
+
+it('NOTIFY0251-WINDOW: one watch and three MCP sessions see a 94% crossing and two revised reads', async () => {
+  const s = setup('three-sessions', 'capacity: {thresholds: [80, 90]}\n', { claude: { session: 60, week: 10 } });
+  const status = MCP_TOOLS.find(tool => tool.name === 'status')!;
+  const sessionNotices: string[] = [];
+  const sessions = ['chat:agentctl', 'chat:nc', 'chat:hems/vs65'].map(clientId => ({
+    clientId, context: () => new Context(s.runner, s.config, () => {}),
+    notify: async (message: string) => { sessionNotices.push(message); },
+  }));
+  const reads = () => Promise.all(sessions.map(session => status.run(session, {})));
+  const watch = new WatchMemory();
+  const tick = () => watchTick(s.ctx, watch, s.notifier);
+  await tick();
+  await reads();
+  setClaudePlan(s.config.path, NOW, { session: 94, week: 10 }, 0);
+  await tick();
+  const crossing = await reads();
+  const steady = await reads();
+  // A fresh estimate shifts the reset by a minute. A missing read follows,
+  // then an identical reading of the same revised window comes back.
+  await s.runner.sleep(60_000);
+  setClaudePlan(s.config.path, s.runner.now(), { session: 94, week: 10 }, 0);
+  await tick();
+  fs.unlinkSync(path.join(path.dirname(s.config.path), 'usage', 'claude-plan.json'));
+  await tick();
+  setClaudePlan(s.config.path, s.runner.now(), { session: 94, week: 10 }, 0);
+  await tick();
+  await watchTick(s.ctx, new WatchMemory(), s.notifier);
+  assert.equal(s.notified.filter(m => /Claude: 94% limitu 5h/.test(m)).length, 1, 'one external alert for the same window');
+  assert.deepEqual(sessionNotices, [], 'MCP emits no desktop notification');
+  for (const reply of crossing) assert.match(reply.text, /^Capacity changed: claude\/session\/300: 0 -> 90$/m);
+  for (const reply of steady) assert.doesNotMatch(reply.text, /Capacity changed:/);
+});
+
+it('NOTIFY0251-RACE: a second watch sees the claim before desktop and phone delivery finish', async () => {
+  const s = setup('racing-watch', 'notify: {ntfy: {topic: fake-notifications, always: true, events: [usage-critical]}}\n', { claude: { session: 96, week: 10 } });
+  const other = new Context(s.runner, s.config, () => {});
+  const phone: string[] = [];
+  s.ctx.fetch = other.fetch = async (_url, init) => {
+    phone.push(String(init?.body));
+    return new Response('', { status: 200 });
+  };
+  const desktop: string[] = [];
+  const second: Notifier = { notify: async (_title, text) => { desktop.push(text); } };
+  const first: Notifier = { notify: async (_title, text) => {
+    desktop.push(text);
+    await usageTick(other, second);
+  } };
+  await usageTick(s.ctx, first);
+  assert.equal(desktop.length, 1, 'a concurrent watch cannot repeat the desktop alert');
+  assert.equal(phone.length, 1, 'a concurrent watch cannot repeat the phone alert');
+});
 
 describe('thresholds', () => {
   const config = makeConfig(scratch.sub('levels'), 'usage:\n  warn: {claude: 60}\n  critical: 90\n');

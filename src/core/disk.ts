@@ -240,16 +240,20 @@ export async function diskTick(ctx: Context, notifier: Notifier, log?: (line: st
     const report = await collectDisk(ctx);
     let previous: Record<string, DiskLevel> = {};
     try { previous = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* first reading */ }
-    const next: Record<string, DiskLevel> = {};
+    const next = { ...previous };
+    const changed: Array<{ kind: 'disk-warn' | 'disk-critical' | 'disk-ok'; text: string }> = [];
     for (const volume of report.volumes) {
-      const id = volume.device ?? 'unknown';
+      if (volume.level === 'unknown') continue;
+      const id = volume.device ?? volume.paths.slice().sort().join('\n');
       next[id] = volume.level;
-      if (volume.level === 'unknown' || previous[id] === volume.level || (!previous[id] && volume.level === 'ok')) continue;
-      const text = diskLine({ ...report, volumes: [volume], level: volume.level });
-      await notifier.notify('agentctl', text).catch(() => undefined);
-      await recordJournal(ctx, { kind: `disk-${volume.level}`, text });
+      if (previous[id] === volume.level || (!previous[id] && volume.level === 'ok')) continue;
+      changed.push({ kind: `disk-${volume.level}`, text: diskLine({ ...report, volumes: [volume], level: volume.level }) });
     }
-    await ctx.runner.writeFile(file, JSON.stringify(next));
+    if (Object.keys(next).some(id => next[id] !== previous[id])) await ctx.runner.writeFile(file, JSON.stringify(next));
+    for (const { kind, text } of changed) {
+      await notifier.notify('agentctl', text).catch(() => undefined);
+      await recordJournal(ctx, { kind, text });
+    }
   });
 }
 

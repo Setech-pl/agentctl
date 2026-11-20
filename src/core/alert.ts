@@ -117,13 +117,14 @@ export class Alerts {
     // P55: trust is announced once per task, ever (the board row stays on top until the human answers).
     if (state === 'needs-trust' && fs.existsSync(trustNotifiedPath(this.ctx, target.window))) return 'duplicate';
     const { click, text: message } = await this.clickFor(target, text);
+    const hasTask = fs.existsSync(taskFile(this.ctx.config, target.window));
+    if (state === 'needs-trust' && hasTask) await this.ctx.runner.writeFile(trustNotifiedPath(this.ctx, target.window), `${JSON.stringify({ at: this.ctx.runner.now() })}\n`);
     const result = await this.notifier.notify(ALERT_TITLE, message, click);
     if (result && !result.ok) this.ctx.out(`warning: local notification failed (${result.error ?? result.channel}); phone delivery follows independently`);
     // An orphan window has no state folder, and one is not made for it.
-    if (fs.existsSync(taskFile(this.ctx.config, target.window))) {
+    if (hasTask) {
       const ledger: Ledger = { state, source, at: this.ctx.runner.now() };
       await this.ctx.runner.writeFile(ledgerPath(this.ctx, target.window), `${JSON.stringify(ledger)}\n`);
-      if (state === 'needs-trust') await this.ctx.runner.writeFile(trustNotifiedPath(this.ctx, target.window), `${JSON.stringify({ at: this.ctx.runner.now() })}\n`);
     }
     if (identity) await this.ctx.runner.writeFile(reportLedger, JSON.stringify({ attempt: identity }));
     return 'sent';

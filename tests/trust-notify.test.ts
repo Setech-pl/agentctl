@@ -29,11 +29,15 @@ describe('P55: a task waiting for folder trust is announced on the desktop once 
     const ctx = new Context(runner, config, () => {});
     seedTask(config, 'NC-1');
     const sent: string[] = [];
-    const notifier: Notifier = { notify: async (_t, m) => void sent.push(m) };
-    return { ctx, config, sent, alerts: new Alerts(ctx, notifier, { env: {} }) };
+    const claimed: boolean[] = [];
+    const notifier: Notifier = { notify: async (_t, m) => {
+      sent.push(m);
+      claimed.push(fs.existsSync(trustNotifiedPath(ctx, 'nc-1')));
+    } };
+    return { ctx, config, sent, claimed, alerts: new Alerts(ctx, notifier, { env: {} }) };
   };
 
-  it('a second needs-trust announcement (re-entry, watch restart) is a duplicate; other states are unaffected', async () => {
+  it('NOTIFY0251-DURABLE: claims needs-trust before delivery and ignores repeats', async () => {
     const t = setup('once');
     const target = { task: 'NC-1', window: 'nc-1' };
     assert.equal(await t.alerts.send(target, 'needs-trust', 'NC-1 czeka na zaufanie folderu (trust)', 'watch'), 'sent');
@@ -42,6 +46,7 @@ describe('P55: a task waiting for folder trust is announced on the desktop once 
     const again = new Alerts(t.ctx, { notify: async (_ti, m) => void t.sent.push(m) } as Notifier, { env: {} });
     assert.equal(await again.send(target, 'needs-trust', 'NC-1 czeka na zaufanie folderu (trust)', 'watch'), 'duplicate');
     assert.equal(t.sent.length, 1);
+    assert.deepEqual(t.claimed, [true]);
     assert.ok(fs.existsSync(trustNotifiedPath(t.ctx, 'nc-1')));
     // Another state of the same task still notifies.
     assert.equal(await t.alerts.send(target, 'needs-input', 'NC-1 zadaje pytanie', 'watch'), 'sent');

@@ -188,10 +188,15 @@ describe('agentctl event: the end of a turn', () => {
 });
 
 describe('agentctl event: limits, bad input, the notify of the user', () => {
-  it('a limit event: state limited, provider episode notification', async () => {
+  it('NOTIFY0251-LIMIT: a limit hook holds admission and only watch announces the provider episode', async () => {
     const t = setup('ev-l1');
     await t.send({ kind: 'stop-failure', payload: json('claude-stop-failure-rate-limit.synthetic.json') });
-    assert.deepEqual(t.notifier.messages, [limitNotice(t)]);
+    const notice = limitNotice(t);
+    assert.deepEqual(t.notifier.messages, [], 'the hook has no desktop delivery');
+    const memory = new WatchMemory();
+    await watchTick(t.ctx, memory, t.notifier);
+    await watchTick(t.ctx, new WatchMemory(), t.notifier);
+    assert.deepEqual(t.notifier.messages, [notice]);
     assert.equal((await collectStatus(t.ctx, { progress: false }))[0]?.state, 'limited');
     t.screen(WORKING);
     assert.equal((await collectStatus(t.ctx, { progress: false }))[0]?.state, 'working', 'a retry after the reset clears it');
@@ -200,6 +205,7 @@ describe('agentctl event: limits, bad input, the notify of the user', () => {
   it('a pinned task: recovery notice preserves its provider', async () => {
     const t = setup('ev-l2', '', 'NC-1', { pin: true });
     await t.send({ kind: 'stop-failure', payload: { error: 'billing_error' } });
+    await watchTick(t.ctx, new WatchMemory(), t.notifier);
     assert.equal(t.notifier.messages[0], limitNotice(t));
   });
 

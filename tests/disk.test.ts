@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import path from 'node:path';
 import { describe, it } from 'node:test';
 import { collectDisk as readDisk, diskLevel, diskTick, DISK_INTERVAL_MS } from '../src/core/disk.ts';
 import { commitQueueAdd, planQueueAdd } from '../src/core/queue.ts';
@@ -70,12 +71,17 @@ describe('disk facts', () => {
     assert.equal(diskLevel(20 * 1024 ** 3, 50, 20), 'warn');
     assert.equal(diskLevel(50 * 1024 ** 3, 50, 20), 'ok');
   });
-  it('notifies and journals once per threshold transition across watcher restarts', async () => {
+  it('NOTIFY0251-DURABLE: claims disk transitions before delivery and sends each once', async () => {
     const config = makeConfig(scratch.sub('transition'), 'disk: {warn_gb: 99999999, critical_gb: 99999998}\n');
     const runner = new DiskRunner({ dryRun: false });
     const ctx = new Context(runner, config, () => {});
     const notices: string[] = [];
-    const notifier = { notify: async (_title: string, message: string) => { notices.push(message); } };
+    const stateFile = path.join(path.dirname(config.path), 'disk-state.json');
+    const levelsAtDelivery: unknown[] = [];
+    const notifier = { notify: async (_title: string, message: string) => {
+      notices.push(message);
+      levelsAtDelivery.push(fs.existsSync(stateFile) ? Object.values(JSON.parse(fs.readFileSync(stateFile, 'utf8')))[0] : undefined);
+    } };
     await diskTick(ctx, notifier);
     await runner.sleep(DISK_INTERVAL_MS);
     await diskTick(ctx, notifier);
@@ -88,6 +94,7 @@ describe('disk facts', () => {
     await diskTick(ctx, notifier);
     assert.deepEqual(readJournal(config).map((e) => e.kind), ['disk-critical', 'disk-warn', 'disk-ok']);
     assert.equal(notices.length, 3);
+    assert.deepEqual(levelsAtDelivery, ['critical', 'warn', 'ok']);
   });
 });
 

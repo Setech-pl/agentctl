@@ -2298,28 +2298,39 @@ function sessionWarnings(deps: McpDeps, ctx: Context): string[] {
 }
 
 const capacitySessions = new WeakMap<McpDeps, Record<string, string>>();
-/** Read threshold bands, not changing percentages/timestamps, so unchanged calls stay quiet. */
+/** Threshold changes are response text scoped to one MCP session. */
+function capacityChangeLine(deps: McpDeps, ctx: Context, providers: Array<{
+  provider: AgentName;
+  windows: Array<Pick<Capacity['providers'][number]['windows'][number], 'kind' | 'minutes' | 'usedPercent'>>;
+  free: number | null;
+}>, disk: Capacity['disk']): string[] {
+  const bands: Record<string, string> = {};
+  for (const { provider, windows, free } of providers) {
+    for (const w of windows) {
+      bands[`${provider}/${w.kind}/${w.minutes}`] = String(Math.max(0, ...ctx.config.capacity.thresholds.filter(t => w.usedPercent >= t)));
+    }
+    bands[`${provider}/slots`] = free === 0 ? 'full' : 'available';
+  }
+  for (const v of disk.volumes) bands[`disk/${v.device ?? v.paths.join(',')}`] = v.level;
+  const previous = capacitySessions.get(deps);
+  capacitySessions.set(deps, bands);
+  const changes = previous ? [...new Set([...Object.keys(previous), ...Object.keys(bands)])]
+    .filter(k => previous[k] !== bands[k] && bands[k] !== undefined && (previous[k] !== undefined || !['0', 'ok', 'available'].includes(bands[k]!)))
+    .map(k => `${k}: ${previous[k] ?? 'n/d'} -> ${bands[k] ?? 'n/d'}`) : [];
+  return changes.length ? [`Capacity changed: ${changes.join('; ')}`] : [];
+}
+
 async function capacityFooter(deps: McpDeps, ctx: Context, explicit: boolean, save = true): Promise<string[]> {
   const reader = openReader(ctx.config);
   const plans = readPlans(ctx.config, reader, ctx.runner.now());
   if (save) reader.save();
   const disk = await collectDisk(ctx);
   const limits = collectLimits(ctx.config, await liveWindows(ctx), ctx.runner.now());
-  const bands: Record<string, string> = {};
-  for (const p of activeProviders(ctx.config)) {
-    for (const w of providerValue(plans, p).windows) {
-      bands[`${p}/${w.kind}/${w.minutes}`] = String(Math.max(0, ...ctx.config.capacity.thresholds.filter(t => w.usedPercent >= t)));
-    }
-  }
-  for (const p of limits.providers) bands[`${p.agent}/slots`] = p.free === 0 ? 'full' : 'available';
-  for (const v of disk.volumes) bands[`disk/${v.device ?? v.paths.join(',')}`] = v.level;
-  const previous = capacitySessions.get(deps);
-  capacitySessions.set(deps, bands);
+  const changes = capacityChangeLine(deps, ctx, limits.providers.map(p => ({
+    provider: p.agent, windows: providerValue(plans, p.agent).windows, free: p.free,
+  })), disk);
   if (explicit) return [planSummary(ctx, save), diskLine(disk), ...snapshotLines(capacitySnapshot(await collectCapacityFull(ctx, { diskBudgetMs: DISK_BUDGET_MS, cachedOnly: true, save })))];
-  const changes = previous ? [...new Set([...Object.keys(previous), ...Object.keys(bands)])]
-    .filter(k => previous[k] !== bands[k] && bands[k] !== undefined && (previous[k] !== undefined || !['0', 'ok', 'available'].includes(bands[k]!)))
-    .map(k => `${k}: ${previous[k] ?? 'n/d'} -> ${bands[k] ?? 'n/d'}`) : [];
-  return changes.length ? [`Capacity changed: ${changes.join('; ')}`] : [];
+  return changes;
 }
 
 // Formatting only: keep shared CLI bodies and confirmation/start semantics intact.
@@ -2417,7 +2428,7 @@ export function publishDegradedMcpSnapshot(ctx: Context, disk: DiskReport, step:
     ...(capacity ? {capacity: {...capacity, disk}} : {}) });
 }
 
-async function snapshotRead(ctx: Context, name: string, args: Record<string, unknown>): Promise<ToolResult | undefined> {
+async function snapshotRead(deps: McpDeps, ctx: Context, name: string, args: Record<string, unknown>): Promise<ToolResult | undefined> {
   try {
     if (args.project !== undefined) return undefined;
     const snap = JSON.parse(fs.readFileSync(watchSnapshotPath(ctx.config), 'utf8'));
@@ -2455,9 +2466,16 @@ async function snapshotRead(ctx: Context, name: string, args: Record<string, unk
       const rows = shownRows(allRows, Boolean(args.all));
       const offset = Number(args.offset ?? 0), limit = Number(args.limit ?? rows.length);
       const shown = rows.slice(offset, offset + limit);
-      data = { tasks: [...shown.map(statusRowForChat), ...queue.filter((q: { task: string }) => !rows.some(r => r.task === q.task)).map((q: { task: string; status: string; startCondition: string }) => ({...q, state: q.status === 'queued' ? 'registered' : q.status}))], disk: snap.capacity.disk, ...(args.capacity || args.detail ? { capacity: capacitySnapshot(snap.capacity) } : {}) };
+      const statusData = { tasks: [...shown.map(statusRowForChat), ...queue.filter((q: { task: string }) => !rows.some(r => r.task === q.task)).map((q: { task: string; status: string; startCondition: string }) => ({...q, state: q.status === 'queued' ? 'registered' : q.status}))], disk: snap.capacity.disk, ...(args.capacity || args.detail ? { capacity: capacitySnapshot(snap.capacity) } : {}) };
       const overlaps = shown.filter(r => r.collide.length > 0).length;
       text = [statusLine(rows, allRows.length - rows.length), ...(overlaps ? [`⚠${overlaps} tasks overlap; overlap has details.`] : []), diskLine(snap.capacity.disk), ...providerHoldLines(ctx.config, ctx.runner.now()), ...peakLines(ctx.config, ctx.runner.now()), ...shown.filter(r => !pulledOpen(r)).map(compactStatus), ...pulledSummary(shown), ...shown.filter(pulledOpen).map(compactStatus), ...queue.map((q: {task: string; owner?: string; startCondition: string}) => `${q.task}${q.owner ? ` (${q.owner})` : ''}: ${q.startCondition}`), ...(args.capacity ? snapshotLines(capacitySnapshot(snap.capacity)) : [])].join('\n');
+      const capacity: Capacity = snap.capacity;
+      const [change] = capacityChangeLine(deps, ctx, capacity.providers.map(p => ({
+        provider: p.provider, windows: p.windows, free: p.slots.free,
+      })), capacity.disk);
+      const notice = explicit ? undefined : change;
+      data = notice ? { ...statusData, capacity_notice: notice } : statusData;
+      if (notice) text += `\n${notice}`;
     } else if (name === 'queue_list') {
       data = queue; text = queue.map((q: {task: string; agent: string; model: string; effort: string; owner?: string; startCondition: string}) => `${q.task}${q.owner ? ` (${q.owner})` : ''} ${q.agent}/${q.model}/${q.effort}: ${q.startCondition}`).join('\n') || 'The queue is empty.';
     } else if (name === 'capacity') { data = snap.capacity; text = [diskLine(snap.capacity.disk), ...snapshotLines(capacitySnapshot(snap.capacity))].join('\n'); }
@@ -2472,7 +2490,7 @@ for (const tool of MCP_TOOLS.filter(t => snapshotTools.has(t.name))) {
   const run = tool.run;
   tool.run = async (deps, args) => {
     const ctx = deps.context(() => {});
-    const cached = await snapshotRead(ctx, tool.name, args);
+    const cached = await snapshotRead(deps, ctx, tool.name, args);
     if (cached) return cached;
     const result = await run(deps, args);
     const at = watchSnapshotTime(ctx.config);

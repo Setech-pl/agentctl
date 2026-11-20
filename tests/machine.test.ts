@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { it } from 'node:test';
 import { collectMachine, recordMachineLoad, machineLine } from '../src/core/machine.ts';
 import { Context } from '../src/core/context.ts';
@@ -26,13 +28,21 @@ it('machine metrics and threshold transitions persist and deduplicate across rea
   assert.throws(() => makeConfig(scratch.sub('bad'), 'capacity: {load_threshold: -1}\n'), /load_threshold/);
 });
 
-it('R4: an unchanged machine-load state is not rewritten on every tick; a crossing writes once', async () => {
+it('R4: an unchanged machine-load state is not rewritten on every tick; a crossing writes once (NOTIFY0251-DURABLE)', async () => {
   const config = makeConfig(scratch.sub('machine-r4'), 'capacity: {load_threshold: 6}\n');
   const runner = new class extends DiskRunner {
     writes = 0;
+    journalStates: boolean[] = [];
     override async writeFile(file: string, content: string): Promise<void> {
       if (file.endsWith('machine-load.json')) this.writes++;
       await super.writeFile(file, content);
+    }
+    override async appendFile(file: string, content: string): Promise<void> {
+      if (file.endsWith('journal.jsonl')) {
+        const state = JSON.parse(fs.readFileSync(path.join(path.dirname(config.path), 'machine-load.json'), 'utf8'));
+        this.journalStates.push(state.overloaded);
+      }
+      await super.appendFile(file, content);
     }
   }({ dryRun: false });
   const ctx = new Context(runner, config, () => {});
@@ -47,4 +57,5 @@ it('R4: an unchanged machine-load state is not rewritten on every tick; a crossi
   assert.equal(runner.writes, 2, 'a crossing writes once');
   await recordMachineLoad(ctx, calm);
   assert.equal(runner.writes, 3, 'the return below the threshold writes once');
+  assert.deepEqual(runner.journalStates, [true, false], 'the durable claim precedes the journal append');
 });

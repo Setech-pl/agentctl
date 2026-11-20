@@ -601,6 +601,50 @@
       "MCP-WRITE-PREVIEW: every registered write previews without changing state or sending keys"
     ]
   },
+  "NOTIFY0251-DURABLE": {
+    "rev": "v0.25.0",
+    "outcome": "FAILS",
+    "failed": 3,
+    "passed": 0,
+    "failing": [
+      "NOTIFY0251-DURABLE: claims disk transitions before delivery and sends each once",
+      "disk facts",
+      "NOTIFY0251-DURABLE: claims disk transitions before delivery and sends each once",
+      "R4: an unchanged machine-load state is not rewritten on every tick; a crossing writes once (NOTIFY0251-DURABLE)",
+      "R4: an unchanged machine-load state is not rewritten on every tick; a crossing writes once (NOTIFY0251-DURABLE)"
+    ]
+  },
+  "NOTIFY0251-LIMIT": {
+    "rev": "v0.25.0",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "NOTIFY0251-LIMIT: a limit hook holds admission and only watch announces the provider episode",
+      "agentctl event: limits, bad input, the notify of the user",
+      "NOTIFY0251-LIMIT: a limit hook holds admission and only watch announces the provider episode"
+    ]
+  },
+  "NOTIFY0251-RACE": {
+    "rev": "v0.25.0",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "NOTIFY0251-RACE: a second watch sees the claim before desktop and phone delivery finish",
+      "NOTIFY0251-RACE: a second watch sees the claim before desktop and phone delivery finish"
+    ]
+  },
+  "NOTIFY0251-WINDOW": {
+    "rev": "v0.25.0",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "NOTIFY0251-WINDOW: one watch and three MCP sessions see a 94% crossing and two revised reads",
+      "NOTIFY0251-WINDOW: one watch and three MCP sessions see a 94% crossing and two revised reads"
+    ]
+  },
   "P16-f1": {
     "rev": "v0.20.1",
     "outcome": "FAILS",

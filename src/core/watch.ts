@@ -95,7 +95,7 @@ const NOTIFY_ON: Partial<Record<TaskState, (row: StatusRow) => string>> = {
   'needs-trust': NOTIFY_ON_TRUST,
   'needs-input': (r) => (r.question ? `${r.task}: ${r.question}` : `${r.task} zadaje pytanie i czeka na odpowiedź`),
   overloaded: r => `${r.task}: dostawca przeciążony (overloaded)`,
-  // Limited notifications use a durable provider episode, shared with hooks.
+  // Limited notifications use a durable provider episode. Hooks only record evidence and hold admission.
   dead: (r) => `${r.task}: okno zniknęło bez raportu`,
   orphan: (r) => `${r.task}: okno bez pliku stanu (orphan) – agentctl adopt ${r.task} --report <ścieżka>`,
 };

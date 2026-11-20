@@ -1,7 +1,7 @@
 import { readTaskSessions, sessionsFile } from './usage.ts';
 import { DEFAULT_PROVIDERS } from './providers/types.ts';
 import { provider, alternatives, PROVIDER_IDS } from './providers/registry.ts';
-import { limitedTick } from './limited.ts';
+import { holdLimitedTask } from './limited.ts';
 import { collectStatus } from './status.ts';
 import { journalOutputs } from './outputs.ts';
 import { reviewTick } from './review.ts';
@@ -209,16 +209,14 @@ export async function handleEvent(ctx: Context, alerts: Alerts, input: EventInpu
       state = 'overloaded';
       text = `${record.task}: dostawca przeciążony (overloaded)`;
     } else if (event.outcome === 'limited') {
-      await limitedTick(ctx, await collectStatus(ctx, { progress: false }), { notify: async (_title, message) => {
-        const result = await alerts.send(target, 'limited', message, 'event');
-        announced = { state: 'limited', text: message, result };
-      } });
+      const row = (await collectStatus(ctx, { progress: false })).find(row => row.task === record.task && row.state === 'limited');
+      if (row && record.agent !== 'unknown' && !row.closed && !row.cancelled && row.window === 'alive' && row.report !== 'yes' && !row.finished) await holdLimitedTask(ctx, record.agent, row);
     }
     if (state && text) {
       const result = await alerts.send(target, state, text, 'event');
       announced = { state, text, result };
       if (result === 'sent') {
-        const kind = state === 'report-ready' ? 'report-ready' : state === 'needs-input' ? 'needs-input' : state === 'limited' ? 'limited' : state === 'overloaded' ? 'overloaded' : undefined;
+        const kind = state === 'report-ready' ? 'report-ready' : state === 'needs-input' ? 'needs-input' : state === 'overloaded' ? 'overloaded' : undefined;
         const verdict = state === 'report-ready' ? readVerdict(record.report, ctx.config.notify.verdictPattern, record.reviewOf != null) : undefined;
         if (kind) await recordJournal(ctx, { kind, task: record.task, text, ...(verdict ? { verdict } : {}) });
       }
