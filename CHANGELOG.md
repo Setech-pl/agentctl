@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- SNAP0247 was prepared for 0.23.3. / Poprawka SNAP0247 została przygotowana do wydania 0.23.3.
+
+## [0.23.3] - 2026-11-20
+
 - SNAP0247: Watch records its current step and skips stalled work so it can publish a snapshot. Board, MCP and doctor show snapshot age and restart guidance after two minutes. Free-space readings have a bounded fallback and stay independent of worktree measurements. / Watch zapisuje bieżący etap i pomija zablokowane etapy, aby publikować stan. Board, MCP i doctor pokazują wiek stanu oraz komendę restartu po dwóch minutach. Odczyt wolnego miejsca ma ograniczony czas i działa niezależnie od pomiaru worktree.
 
 ## [0.23.2] - 2026-11-20
