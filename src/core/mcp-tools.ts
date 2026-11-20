@@ -369,7 +369,7 @@ async function runStatus(deps: McpDeps, args: { all?: boolean | undefined; cohor
   extra.push(awayLine(ctx));
   const disk = await collectDisk(ctx);
   extra.push(diskLine(disk));
-  const state = (view: typeof views[number]) => view.condition.kind === 'blocked' ? 'blocked' : view.entry.status === 'queued' ? 'registered' : view.entry.status;
+  const state = (view: typeof views[number]) => view.condition.kind === 'blocked' && !view.condition.blockers ? 'blocked' : view.entry.status === 'queued' ? 'registered' : view.entry.status;
   return { text: [statusLine(shown, rows.length - shown.length), ...extra, ...shown.filter(r => !pulledOpen(r)).map(compactStatus), ...pulledSummary(shown), ...shown.filter(pulledOpen).map(compactStatus)].join('\n'), data: { disk, tasks: [...shown.map(row => { const view = views.find(v => v.entry.task === row.task); return { ...statusRowForChat(row), ...(view ? { state: state(view) } : {}) }; }), ...views.filter(v => !shown.some(r => r.task === v.entry.task)).map(v => ({ task: v.entry.task, agent: v.entry.agent, state: state(v), startCondition: v.condition.text }))] } };
 }
 
@@ -578,7 +578,7 @@ async function runQueueList(deps: McpDeps, args: { cohort?: string | undefined }
   const list = views.map((v) => ({
     position: v.position,
     task: v.entry.task,
-    status: v.condition.kind === 'blocked' ? 'blocked' : v.entry.status,
+    status: v.condition.kind === 'blocked' && !v.condition.blockers ? 'blocked' : v.entry.status,
     retryAt: v.entry.retryAt ?? null,
     attempts: v.entry.attempts ?? [],
     agent: v.entry.agent,

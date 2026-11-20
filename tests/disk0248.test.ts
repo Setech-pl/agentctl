@@ -194,7 +194,7 @@ it('DISK0248-VOLUME: unmounted worktree stays blocked once, then unblock checks 
   assert.equal(disk.volumes.find(volume => volume.mount === mount)?.error, 'volume missing');
   setMounted(true);
   const statfs = ((target: string) => ({ bavail: target.startsWith(mount) ? 1 : 256, bsize: 1024 ** 3 })) as unknown as typeof fs.statfsSync;
-  assert.match(diskStartHold(w.config, item.spec.repos, statfs)!, /dysk 1 GB < 2 GB/);
+  assert.equal(diskStartHold(w.config, item.spec.repos, statfs), `wstrzymane: dysk 1 GB < 2 GB (${mount})`);
   const df = await collectDisk(w.ctx, (async () => { throw Error('fixture statfs unavailable'); }) as typeof fs.promises.statfs);
   assert.equal(df.volumes.find(volume => volume.mount === mount)?.availableBytes, 1024 ** 3);
   assert.deepEqual(await queueTick(w.ctx, memory, w.notifier), [], 'mounting alone leaves the start blocked');

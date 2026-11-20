@@ -292,7 +292,11 @@ export function diskStartHold(config: Context['config'], worktrees: (string | Di
       devices.add(device);
       const stat = statfs(ancestor);
       const gb = Number(stat.bavail) * Number(stat.bsize) / 1024 ** 3;
-      if (gb < config.disk.minFreeStartGb) return `wstrzymane: dysk ${Math.floor(gb)} GB < ${config.disk.minFreeStartGb} GB (${ancestor})`;
+      if (gb < config.disk.minFreeStartGb) {
+        const external = repos.find(repo => repo.worktree === target);
+        const mount = external && (external.worktreeMount ?? inferredWorktreeMount(external.worktree));
+        return `wstrzymane: dysk ${Math.floor(gb)} GB < ${config.disk.minFreeStartGb} GB${mount ? ` (${mount})` : ''}`;
+      }
     } catch { return 'wstrzymane: dysk – nie można odczytać wolnego miejsca'; }
   }
   return undefined;
