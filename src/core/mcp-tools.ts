@@ -1,4 +1,5 @@
 import { chatOwner, quotaWarnings } from './chat-quotas.ts';
+import { planRemoteGc } from './host-gc.ts';
 import { refreshDiskFreeSpace, taskDiskStartHold, worktreeCostEstimates } from './disk.ts';
 import { watchSnapshotPath, watchSnapshotTime, watchSnapshotWarning } from './watch-snapshot.ts';
 import { peakLines, peakHold } from './peak.ts';
@@ -461,9 +462,11 @@ interface GcPreviewArgs {
   limit?: number;
 }
 
-function planMcpGc(ctx: Context, args: GcPreviewArgs): Promise<GcPlan> {
-  return planGc(ctx, { olderThan: args.older_than, branches: args.branches, cohort: args.cohort,
-    forceDirty: args.force_dirty, includeCache: args.include_cache, keepCache: args.keep_cache, keep: args.keep, cachedSizes: true });
+async function planMcpGc(ctx: Context, args: GcPreviewArgs, refreshHosts = false): Promise<GcPlan> {
+  const options = { olderThan: args.older_than, branches: args.branches, cohort: args.cohort,
+    forceDirty: args.force_dirty, includeCache: args.include_cache, keepCache: args.keep_cache, keep: args.keep };
+  if (refreshHosts) await planRemoteGc(ctx, options, parseAge(args.older_than ?? '7d'));
+  return planGc(ctx, { ...options, cachedSizes: true });
 }
 
 function gcPreviewResult(ctx: Context, plan: GcPlan, args: GcPreviewArgs): ToolResult {
@@ -1902,13 +1905,13 @@ export async function applyMcpRequest(deps: McpDeps, request: McpRequest): Promi
   if (request.tool !== 'gc_preview' && !ctx.config.mcp.allow.includes(permission)) throw new AgentctlError(`"${permission}" is no longer in mcp.allow; nothing was done`);
   if (request.tool === 'gc_preview') {
     const { merged, ...args } = request.args as GcPreviewArgs & { merged?: boolean };
-    const plan = await planMcpGc(ctx, { ...args, branches: args.branches ?? merged });
+    const plan = await planMcpGc(ctx, { ...args, branches: args.branches ?? merged }, true);
     atomicWriteFile(gcPreviewPlanFile(ctx.config, request.id), JSON.stringify({ at: ctx.runner.now(), plan }));
     return { text: `GC preview ready: ${plan.items.length} items; call gc or gc_preview with request_id: ${request.id}` };
   }
   let scope: unknown;
   if (request.scope !== null) {
-    scope = await confirmationScope(ctx, request.tool, request.args);
+    scope = request.tool === 'gc' ? await planMcpGc(ctx, request.args, true) : await confirmationScope(ctx, request.tool, request.args);
     if (JSON.stringify(canonical(confirmationTargets(request.tool, scope))) !== request.scope) {
       throw new AgentctlError(`changed preview: the ${request.tool} target scope changed since the preview; nothing was done`, 'Call the tool again without confirm, show the new scope to the user and confirm that.');
     }

@@ -104,7 +104,7 @@ Argumenty z ? są opcjonalne. Pola dostawców obejmują opcjonalnych; uruchomion
 | `manager_start` | zapis | `as?`, `project?`, `name?`, `model?`, `effort?`, `confirm?`, `preview_token?` | Uruchom sesję nadzorczą Claude z Remote Control. |
 | `manager_stop` | zapis | `as?`, `confirm?`, `preview_token?` | Zatrzymaj sesję manager. |
 | `notify_test` | zapis | `as?`, `phone?`, `confirm?`, `preview_token?` | Test powiadomienia lokalnego; phone jawnie wysyła do ntfy. |
-| `gc` | zapis | `as?`, `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `detail?`, `offset?`, `limit?`, `cohort?`, `older_than?`, `branches?`, `confirm?`, `preview_token?` | Zastosuj chroniony plan sprzątania po podglądzie; opcjonalne scalone lokalne gałęzie. |
+| `gc` | zapis | `as?`, `request_id?`, `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `detail?`, `offset?`, `limit?`, `cohort?`, `older_than?`, `branches?`, `confirm?`, `preview_token?` | Zastosuj chroniony plan sprzątania po podglądzie; opcjonalne scalone lokalne gałęzie. |
 | `wall_read` | odczyt | `as?`, `channel?`, `id?`, `since?`, `archive?`, `status?`, `kind?`, `limit?`, `before?` | Kanały, nagłówki z filtrami albo wiadomość z treścią, refs, historią i wątkiem. |
 | `wall_post` | zapis | `as?`, `channel?`, `kind?`, `subject?`, `body?`, `refs?`, `to?`, `confirm?`, `preview_token?` | Opublikuj dozwoloną wiadomość po kontroli autora, refs, rozmiaru i sekretów. |
 | `wall_reply` | zapis | `as?`, `reply_to?`, `body?`, `subject?`, `kind?`, `refs?`, `to?`, `confirm?`, `preview_token?` | Odpowiedz w kanale rodzica; answer oznacza otwarte pytanie jako answered. |

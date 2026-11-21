@@ -106,7 +106,7 @@ Arguments marked ? are optional. Provider fields below include enabled optional 
 | `manager_start` | write | `as?`, `project?`, `name?`, `model?`, `effort?`, `confirm?`, `preview_token?` | Start the supervising manager session |
 | `manager_stop` | write | `as?`, `confirm?`, `preview_token?` | Stop the manager session |
 | `notify_test` | write | `as?`, `phone?`, `confirm?`, `preview_token?` | Test desktop notifications; phone true explicitly sends to ntfy |
-| `gc` | write | `as?`, `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `detail?`, `offset?`, `limit?`, `cohort?`, `older_than?`, `branches?`, `confirm?`, `preview_token?` | Reclaim disk space from finished tasks using the same protected plan as gc_preview |
+| `gc` | write | `as?`, `request_id?`, `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `detail?`, `offset?`, `limit?`, `cohort?`, `older_than?`, `branches?`, `confirm?`, `preview_token?` | Reclaim disk space from finished tasks using the same protected plan as gc_preview. When watch accepts a plan request, poll gc with request_id to obtain the confirmation token |
 | `wall_read` | read | `as?`, `channel?`, `id?`, `since?`, `archive?`, `status?`, `kind?`, `limit?`, `before?` | Read the WALL |
 | `wall_post` | write | `as?`, `channel?`, `kind?`, `subject?`, `body?`, `refs?`, `to?`, `confirm?`, `preview_token?` | Post on the WALL |
 | `wall_reply` | write | `as?`, `reply_to?`, `body?`, `subject?`, `kind?`, `refs?`, `to?`, `confirm?`, `preview_token?` | Reply on the WALL |

@@ -1121,7 +1121,8 @@ agentctl gc [options]
 | `--include-cache` | owner-confirmed: also delete old, unreferenced task cache entries |  |
 | `--keep <tasks...>` | keep worktrees and cache for these task IDs in this GC run |  |
 | `--keep-cache <tasks...>` | keep all cache entries for these task IDs |  |
-| `--force-dirty` | explicitly allow deleting dirty/unpushed worktrees in this selection |  |
+| `--force-dirty <tasks...>` | allow deleting dirty/unpushed worktrees for these task IDs |  |
+| `--force-dirty-all` | allow deleting dirty/unpushed worktrees in the selection; --apply always asks y/N |  |
 | `--force-links` | CLI only: allow removing a worktree referenced by links (other protections stay) |  |
 | `--apply` | do it (after showing the list and asking y/N); without it nothing is changed |  |
 | `--older-than <age>` | age of the files next to the reports before they go: 12h, 7d, 2w (default 7d) |  |

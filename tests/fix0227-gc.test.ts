@@ -55,7 +55,7 @@ it('D1: unpushed commits and dirt created after preview are refused at apply', a
   assert.ok(!f.runner.commands.some(c => c.includes('worktree remove')));
   const after = await planGc(f.ctx, {});
   assert.match(after.skipped.find(i => i.target === f.repos[0]!.worktree)!.reason, /3 unpushed commits vs main/);
-  const cli = await runCli(f.config, f.runner, ['gc', '--force-dirty', '--json']);
+  const cli = await runCli(f.config, f.runner, ['gc', '--force-dirty', 'TWO', '--json']);
   assert.equal(cli.code, 0, cli.stderr);
   assert.equal(JSON.parse(cli.stdout).categories.find((c: { category: string }) => c.category === 'worktree').count, 2);
 });

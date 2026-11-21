@@ -201,7 +201,7 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
       }
       const detail = `${risk.dirtyFiles} dirty files, ${risk.unpushedCommits} unpushed commits vs ${risk.comparison}`;
       if ((risk.dirtyFiles || risk.unpushedCommits) && !permitsDirty(opts.forceDirty, record.task)) {
-        skipped.push({ task: record.task, kind: 'worktree', target: wt, repo: repo.path, ...risk, bytes: await size(wt), reason: `uncommitted changes / unpushed work (${detail}); requires force_dirty: [${record.task}] / --force-dirty` });
+        skipped.push({ task: record.task, kind: 'worktree', target: wt, repo: repo.path, ...risk, bytes: await size(wt), reason: `uncommitted changes / unpushed work (${detail}); requires force_dirty: [${record.task}] / --force-dirty ${record.task}` });
         continue;
       }
       const bytes = await size(wt);
@@ -372,6 +372,7 @@ export async function applyGc(ctx: Context, plan: GcPlan): Promise<GcResult> {
           const risk = await worktreeRisk(ctx, item.target, item.base);
           const forced = permitsDirty(plan.forceDirty, item.task);
           if ((risk.dirtyFiles || risk.unpushedCommits) && !forced) throw new Error(`worktree has ${risk.dirtyFiles} dirty files and ${risk.unpushedCommits} unpushed commits; kept`);
+          if (forced && (risk.dirtyFiles !== item.dirtyFiles || risk.unpushedCommits !== item.unpushedCommits)) throw new Error('worktree risk counts changed since preview; kept');
           assertUnpinned();
           const r = await runner.exec('git', ['-C', item.repo as string, 'worktree', 'remove', ...(forced ? ['--force'] : []), item.target], { timeoutMs: config.git.timeoutS * 1000 });
           if (r.code !== 0) throw new Error(r.stderr.trim().split('\n')[0] || `git exit ${r.code}`);

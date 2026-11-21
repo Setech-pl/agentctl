@@ -379,7 +379,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 - `dataset export`: `--since &lt;time&gt;`, `--until &lt;time&gt;`, `--cohort &lt;name&gt;`, `--agent &lt;provider&gt;`, `--out &lt;file&gt;`, `--format &lt;format&gt;`, `--include-prompts`, `--include-reports`
 - `log`: `--since &lt;age&gt;`, `--cohort &lt;name&gt;`, `--json`, `--clip`
 - `stats`: `--since &lt;age&gt;`, `--cohort &lt;name&gt;`, `--json`, `--clip`
-- `gc`: `--preview`, `--dry-run`, `--verbose`, `--offset &lt;n&gt;`, `--limit &lt;n&gt;`, `--include-cache`, `--keep &lt;tasks...&gt;`, `--keep-cache &lt;tasks...&gt;`, `--force-dirty`, `--force-links`, `--apply`, `--older-than &lt;age&gt;`, `--branches`, `--cohort &lt;name&gt;`, `-y, --yes`, `--json`
+- `gc`: `--preview`, `--dry-run`, `--verbose`, `--offset &lt;n&gt;`, `--limit &lt;n&gt;`, `--include-cache`, `--keep &lt;tasks...&gt;`, `--keep-cache &lt;tasks...&gt;`, `--force-dirty &lt;tasks...&gt;`, `--force-dirty-all`, `--force-links`, `--apply`, `--older-than &lt;age&gt;`, `--branches`, `--cohort &lt;name&gt;`, `-y, --yes`, `--json`
 - `archive`: `--older-than &lt;age&gt;`, `--dry-run`
 - `pull`: `--ready`, `--all`, `--cohort &lt;name&gt;`
 - `close`: `--pulled`, `--cohort &lt;name&gt;`, `--rm-worktree`, `-y, --yes`, `--dry-run`

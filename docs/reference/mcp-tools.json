@@ -2655,8 +2655,8 @@
     {
       "name": "gc",
       "kind": "write",
-      "title": "Reclaim disk space from finished tasks using the same protected plan as gc_preview",
-      "description": "WRITE, off unless the user put \"gc\" in mcp.allow. Reclaim disk space from finished tasks using the same protected plan as gc_preview. CLI: agentctl gc --apply [--cohort <NAME>] [--older-than <AGE>] [--branches]. Use only for work the user requested. Requires gc in mcp.allow; preview then confirm: true with identical arguments. Every execution is audited and journaled; desktop notices follow notify.mcp_writes. With \"agentctl watch\" running, confirm records the request and returns at once; the watcher checks the preview's scope again and applies it at its next tick (events_since: MCP WYKONANE, or MCP BŁĄD with the reason and a notification). Two steps are mandatory: preview, then confirm: true with identical arguments — or with preview_token only (plus the same optional as identity), which executes the stored arguments (for new/queue the spec need not be resent). A changed scope requires a new preview. Every response is bounded by mcp.max_response_kb (default 8 KiB). A truncated JSON envelope gives response_id and next_response_offset; call response_page with only those continuation fields to retrieve the next fragment without executing again. Concatenate fragment values to recover the original text/JSON.",
+      "title": "Reclaim disk space from finished tasks using the same protected plan as gc_preview. When watch accepts a plan request, poll gc with request_id to obtain the confirmation token",
+      "description": "WRITE, off unless the user put \"gc\" in mcp.allow. Reclaim disk space from finished tasks using the same protected plan as gc_preview. When watch accepts a plan request, poll gc with request_id to obtain the confirmation token. CLI: agentctl gc --apply [--cohort <NAME>] [--older-than <AGE>] [--branches]. Use only for work the user requested. Requires gc in mcp.allow; preview then confirm: true with identical arguments. Every execution is audited and journaled; desktop notices follow notify.mcp_writes. With \"agentctl watch\" running, confirm records the request and returns at once; the watcher checks the preview's scope again and applies it at its next tick (events_since: MCP WYKONANE, or MCP BŁĄD with the reason and a notification). Two steps are mandatory: preview, then confirm: true with identical arguments — or with preview_token only (plus the same optional as identity), which executes the stored arguments (for new/queue the spec need not be resent). A changed scope requires a new preview. Every response is bounded by mcp.max_response_kb (default 8 KiB). A truncated JSON envelope gives response_id and next_response_offset; call response_page with only those continuation fields to retrieve the next fragment without executing again. Concatenate fragment values to recover the original text/JSON.",
       "input": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -2665,6 +2665,9 @@
             "description": "Caller identity for WALL/events; accepted and ignored elsewhere.",
             "type": "string",
             "maxLength": 81
+          },
+          "request_id": {
+            "type": "string"
           },
           "include_cache": {
             "type": "boolean"
