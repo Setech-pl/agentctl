@@ -360,7 +360,12 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
     state.hosts && state.hosts.length > 0 ? h(Text, { wrap: 'truncate-end', ...(state.hosts.some((host) => host.state !== 'reachable') ? { color: 'yellow' } : { dimColor: true }) }, ` · hosts: ${state.hosts.map((host) => `${host.name} ${host.state}${host.gpu ? ` (${host.gpu})` : ''}${host.diskFreeGb !== undefined ? ` free ${host.diskFreeGb}G` : ''}`).join(' · ')} (H)`) : null,
     away ? h(Text, { wrap: 'truncate-end', ...(away.dim ? { dimColor: true } : { color: 'cyan', bold: true }) }, ` · ${away.text}`) : null,
   );
-  const diskBox = state.disk ? h(Text, { color: state.disk.level === 'critical' ? 'red' : state.disk.level === 'warn' ? 'yellow' : 'green', wrap: 'truncate-end' }, diskLine(state.disk)) : null;
+  const diskBox = state.disk ? (() => {
+    const { level } = state.disk;
+    const label = `Disk: ${level}`;
+    const color = level === 'critical' ? 'red' : level === 'warn' ? 'yellow' : level === 'ok' ? 'green' : undefined;
+    return h(Text, { wrap: 'truncate-end' }, h(Text, { color }, label), diskLine(state.disk).slice(label.length));
+  })() : null;
   const watchBox = watchAge ? h(Text, { ...(watchAge.stale ? {color: 'yellow'} : {dimColor: true}), wrap: 'truncate-end' }, watchAge.text) : null;
   const managerBox = mline ? (mline.selected
     ? h(Selection, { content: mline.text, width: layout.listWidth, style: listStyle })

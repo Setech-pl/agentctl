@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| FIELD0253-DISK | A stale worktree-size sample made the board show disk warn despite healthy free space. | `tests/field0253-disk.test.ts` (`^FIELD0253-DISK:`) | 0.25.3 | fails on v0.25.2 (1 failing of 1) |
 | FIELD0253-CLI | The CLI could only force removal of dirty worktrees for the whole GC selection. | `tests/field0253-cli.test.ts` (`^FIELD0253-CLI:`) | 0.25.3 | fails on v0.25.2 (1 failing of 1) |
 | FIELD0253-GC | A large MCP GC plan could exhaust the deadline before returning its confirmation token. | `tests/field0253-gc.test.ts` (`^FIELD0253-GC:`) | 0.25.3 | fails on v0.25.2 (1 failing of 1) |
 | FIELD0253-BUDGET | The MCP deadline was recorded as a task state write failure. | `tests/field0253-budget.test.ts` (`^FIELD0253-BUDGET:`) | 0.25.3 | fails on v0.25.2 (1 failing of 1) |

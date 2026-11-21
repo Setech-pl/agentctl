@@ -268,7 +268,7 @@ Zaznaczenie pokrywa całą szerokość panelu listy, łącznie z przerwami międ
 | `collisions.notify` | boolean · `true` · g | Powiadomienia nowych kolizji. |
 | `collisions.ignore` | list of globs · `[]` · g | Ignorowane globy. |
 | `disk` | mapping | Progi i pomiary w GiB. |
-| `disk.worktree_share_percent` | `20` | Ostrzegaj o udziale worktree w ich filesystemie. |
+| `disk.worktree_share_percent` | `20` | Odnotuj przekroczenie tego udziału worktree w danych szczegółowych dysku. Poziom i kolor dysku na board zależą od świeżego odczytu wolnego miejsca. Rozmiar worktree i wiek pomiaru są informacyjne. |
 | `disk.warn_gb` | `50` | Ostrzegaj poniżej wolnego miejsca GiB. |
 | `disk.critical_gb` | `20` | Próg krytyczny <= warn; ostrzega przed potwierdzeniem. |
 | `disk.workers` | `2` | Wspólny limit workerów pomiarowych 1–8. |

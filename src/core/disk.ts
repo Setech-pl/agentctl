@@ -141,7 +141,6 @@ export async function collectDisk(ctx: Context, statfs = fs.promises.statfs, opt
   for (const volume of volumes.values()) {
     const bytes = byDevice.get(volume.device ?? '') ?? 0;
     if (volume.totalBytes && bytes / volume.totalBytes * 100 > ctx.config.disk.worktreeSharePercent) {
-      if (volume.level !== 'critical') volume.level = 'warn';
       volume.worktreeShareWarning = {bytes, measuredAt: new Date(measuredAt).toISOString(), ageSeconds: Math.max(0, Math.floor((ctx.runner.now() - measuredAt) / 1000))};
     }
   }
@@ -332,8 +331,7 @@ export async function refreshDiskFreeSpace(ctx: Context, previous: DiskReport): 
     const ancestor = existingAncestor(volume.samplePath ?? ctx.config.cache);
     const sampled = await freeSpace(ctx, ancestor, fs.promises.statfs, FREE_SPACE_BUDGET_MS);
     if (volume.mount && !volumeMounted(volume.mount)) return { ...volume, device: null, availableBytes: null, totalBytes: null, level: 'unknown' as const, error: 'volume missing' };
-    let level = diskLevel(sampled.availableBytes, ctx.config.disk.warnGb, ctx.config.disk.criticalGb);
-    if (volume.worktreeShareWarning && sampled.totalBytes && volume.worktreeShareWarning.bytes / sampled.totalBytes * 100 > ctx.config.disk.worktreeSharePercent && level !== 'critical') level = 'warn';
+    const level = diskLevel(sampled.availableBytes, ctx.config.disk.warnGb, ctx.config.disk.criticalGb);
     const device = volume.mount ? String(fs.statSync(ancestor, { throwIfNoEntry: false })?.dev ?? '') || null : volume.device;
     return {...volume, device, error: undefined, ...sampled, level, ...(volume.worktreeShareWarning ? {worktreeShareWarning: {...volume.worktreeShareWarning, ageSeconds}} : {})};
   }));

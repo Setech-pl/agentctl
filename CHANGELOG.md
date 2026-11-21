@@ -4,6 +4,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- FIELD0253-DISK: Disk severity follows fresh free space and worktree measurement age is informational. / Poziom dysku zależy od świeżego odczytu wolnego miejsca, a wiek pomiaru worktree jest informacyjny.
 - FIELD0253-CLI: GC accepts named dirty tasks and requires a terminal confirmation for the full selection. / GC przyjmuje listę zadań z lokalnymi zmianami, a cała selekcja wymaga potwierdzenia na terminalu.
 - FIELD0253-GC: Watch prepares MCP GC plans and confirmation is bound to the returned plan. / Watch przygotowuje plan GC dla MCP, a potwierdzenie jest powiązane z tym planem.
 - FIELD0253-BUDGET: An MCP response deadline cannot interrupt a state commit or create a false state error. / Limit czasu odpowiedzi MCP nie przerywa zapisu stanu ani nie tworzy fałszywego błędu zapisu.

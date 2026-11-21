@@ -98,7 +98,7 @@ describe('disk facts', () => {
   });
 });
 
-it('P24 warns on per-volume worktree share, gives safe reclaim size and close size', async () => {
+it('P24 reports per-volume worktree share separately from disk severity and gives close size', async () => {
   const { diskLine } = await import('../src/core/disk.ts');
   const { closeTask } = await import('../src/core/close.ts');
   const config = makeConfig(scratch.sub('p24'), 'disk: {worktree_share_percent: 10, warn_gb: 0.000000001, critical_gb: 0.000000001}\n');
@@ -110,13 +110,14 @@ it('P24 warns on per-volume worktree share, gives safe reclaim size and close si
   const ctx = new Context(runner, config, l => out.push(l));
   const fake = (async () => ({bsize: 1, bavail: 90, blocks: 100})) as unknown as typeof fs.promises.statfs;
   const report = await collectDisk(ctx, fake);
-  assert.equal(report.level, 'warn'); assert.equal(report.reclaimableBytes, null);
-  assert.match(diskLine(report), /gc --preview.*n\/d bytes/);
+  assert.equal(report.level, 'ok'); assert.equal(report.reclaimableBytes, null);
+  assert.equal(report.volumes[0]?.worktreeShareWarning?.bytes, 20);
+  assert.match(diskLine(report), /^Disk: ok/);
   assert.equal(fs.readFileSync(`${wt}/data`, 'utf8').length, 20);
   await closeTask(ctx, 'P24-1');
   assert.match(out.join('\n'), /worktree size: 20 bytes.*watch reading, [0-9]+ s old/);
   config.disk.worktreeSharePercent = 30;
-  assert.equal((await collectDisk(ctx, fake)).level, 'ok');
+  assert.equal((await collectDisk(ctx, fake)).volumes[0]?.worktreeShareWarning, undefined);
   assert.throws(() => makeConfig(scratch.sub('p24-bad'), 'disk: {worktree_share_percent: 101}\n'), /worktree_share_percent/);
   assert.throws(() => makeConfig(scratch.sub('p24-neg'), 'disk: {worktree_share_percent: -5}\n'), /worktree_share_percent/, 'R8: a negative share is rejected, not a permanent warn');
 });

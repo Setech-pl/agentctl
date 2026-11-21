@@ -397,6 +397,16 @@
       "FIELD0253-CLI: dirty GC is scoped by task and the all switch requires confirmation"
     ]
   },
+  "FIELD0253-DISK": {
+    "rev": "v0.25.2",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "FIELD0253-DISK: a stale partial worktree reading cannot colour healthy free space yellow",
+      "FIELD0253-DISK: a stale partial worktree reading cannot colour healthy free space yellow"
+    ]
+  },
   "FIELD0253-ENOSPC": {
     "rev": "v0.25.2",
     "outcome": "FAILS",

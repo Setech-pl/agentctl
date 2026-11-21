@@ -397,7 +397,7 @@ The guide ships in npm `docs/dispatcher*.md`, with no dependency on a developmen
 | Key | Default | Meaning |
 |---|---|---|
 | `disk` | mapping | Disk thresholds, in GiB (1024³ bytes). |
-| `disk.worktree_share_percent` | `20` | Warn when known worktrees exceed this percentage of their own filesystem; positive and at most 100. Status/doctor/disk events suggest agentctl gc --preview with safe reclaimable bytes. Budgeted reads show n/d; close reports task worktree bytes. |
+| `disk.worktree_share_percent` | `20` | Report worktree share above this percentage in detailed disk data. The disk level and board colour use fresh free space. The size and age of a cached worktree reading are informational. The threshold must be positive and at most 100. |
 | `disk.warn_gb` | `50` | Warn below this available space on any known filesystem. |
 | `disk.critical_gb` | `20` | Critical below this space; must not exceed warn_gb. |
 | `disk.workers` | `2` | Process-wide tree-measurement worker cap shared by disk facts, capacity, previews and GC; integer 1–8. A lower reloaded cap admits no new work until existing workers drain below it. |
