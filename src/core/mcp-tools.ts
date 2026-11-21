@@ -570,7 +570,7 @@ async function runSetLimits(deps: McpDeps, args: SetLimitsArgs): Promise<ToolRes
     }
     const plan = planSetLimits(ctx.config, assignments, hold, args.hold, ctx.runner.now(), quotaEdit ? {quota: args.quota, overprovision: args.overprovision, self} : undefined);
     if (!args.confirm) return { text: `${plan.summary.join('\n')}\n\nNot changed yet. Show this to the user and ask; if they agree, call set_limits again with the same arguments and confirm: true.`, executed: false, announce: '' };
-    await applySetLimits(ctx, plan);
+    await applySetLimits(ctx, plan, declared.id);
     const changed = [...plan.changes.map((c) => `${c.agent} ${c.from ?? '-'} -> ${c.to ?? '-'}`), ...plan.holdChanges.filter((c) => c.from !== c.to).map((c) => `queue_hold ${c.agent} ${holdText(c.from)} -> ${holdText(c.to)}`)];
     const announce = [...(plan.changes.length ? [`limity ${activeProviders(ctx.config).map(id => `${id}=${plan.changes.some(c => c.agent === id) ? plan.changes.find(c => c.agent === id)!.to ?? 'brak' : ctx.config.limits[id] ?? 'brak'}`).join(' ')}`] : []), ...(hold !== undefined ? [`queue_hold ${plan.holdChanges.map((c) => `${c.agent}=${holdText(c.to)}`).join(' ')}`] : [])].join('; ');
     if (quotaEdit) return { text: `${plan.summary.join('\n')}\nLimits and quotas take effect on the next watch tick.`, executed: true, announce: plan.quotaChange ? 'zmieniono kwoty' : announce };

@@ -188,7 +188,7 @@ Właściciel jest zapisywany przy rejestracji w kolejności MCP `as: "chat:<nazw
 
 Start wymaga wolnego miejsca u dostawcy oraz w kwocie czatu. Kolejka obsługuje najpierw czaty poniżej minimum, potem najniższy stosunek użycia do kwoty, a przy remisie stosuje priorytet i kolejność wpisów. Minimum działa dla gotowych zadań w kolejce i nie przerywa pracy. Ręczne rezerwacje i wliczane sesje zewnętrzne zajmują miejsca globalne. `limits.count_report_ready` decyduje, czy gotowe raporty zajmują miejsca w obu licznikach.
 
-Właściciel zmienia ustawienia przez `agentctl limits set quota.nc.claude=4 overprovision=1.5` lub MCP `set_limits` ze swoim `as: "chat:agentctl"`, `quota: {chat: nc, claude: 4}` albo `overprovision`. Ustaw `wall.chats.agentctl.clients` i przypisz pozostałe klienty do ich czatów, by porównywać deklaracje z nazwą klienta MCP. Tożsamości i nazwy klientów WALL są przeznaczone dla zaufanych klientów wspólnej instancji. Każda zastosowana zmiana kwoty lub limitu globalnego daje zdarzenie `limits-changed` i wpis `info` na kanale WALL `agentctl`.
+Właściciel zmienia ustawienia przez `agentctl limits set quota.nc.claude=4 overprovision=1.5` lub MCP `set_limits` ze swoim `as: "chat:agentctl"`, `quota: {chat: nc, claude: 4}` albo `overprovision`. Ustaw `wall.chats.agentctl.clients` i przypisz pozostałe klienty do ich czatów, by porównywać deklaracje z nazwą klienta MCP. Tożsamości i nazwy klientów WALL są przeznaczone dla zaufanych klientów wspólnej instancji. Watch zapisuje zdarzenie `limits-changed` i jeden wpis `info` na kanale WALL `agentctl` dla każdej zmiany kwoty lub limitu globalnego. Wpis zawiera stare i nowe wartości oraz źródło, czyli tożsamość czatu MCP albo `config edit`.
 
 ## Watch, board i powiadomienia
 

@@ -26,7 +26,7 @@ import path from 'node:path';
 import { ConfigStore, configStatePath, noteConfigState } from './config-store.ts';
 import type { ConfigRefresh } from './config-store.ts';
 import { loadGlobalConfig } from './config.ts';
-import { announceLimitConfigChange, holdDiffText } from './limits.ts';
+import { announceLimitConfigChange, holdDiffText, limitEditLock } from './limits.ts';
 import { findResumable, resumeText } from './resume.ts';
 import { recordJournal, recordJournalOnce } from './journal.ts';
 import type { JournalKind } from './journal.ts';
@@ -391,16 +391,20 @@ export interface WatchOptions {
  */
 export async function reloadConfig(ctx: Context, store: ConfigStore, by = 'watch'): Promise<ConfigRefresh> {
   const before = ctx.config;
-  const r = store.refresh();
-  if (r.config !== before) ctx.setConfig(r.config);
   const log = async (text: string): Promise<void> => {
     await ctx.runner.appendFile(watchLogPath(ctx), `${new Date(ctx.runner.now()).toISOString()}  ${text}\n`);
     ctx.out(text);
   };
+  const refresh = async () => {
+    const outcome = store.refresh();
+    if (outcome.config !== before) ctx.setConfig(outcome.config);
+    await announceLimitConfigChange(ctx, before, outcome.config).catch(error => log(`config: ${errorMessage(error)}`));
+    return outcome;
+  };
+  const r = ctx.runner.dryRun ? await refresh() : await withFileLock(limitEditLock(before.path), refresh);
   if (r.error) await log(`config: ${r.error}`);
   else if (r.changed) {
     await log(`config: reloaded (${r.keys.join(', ')})`);
-    await announceLimitConfigChange(ctx, before, r.config).catch(error => log(`config: ${errorMessage(error)}`));
     // QH: a changed usage.queue_hold (set_limits, limits set or a hand edit) is in force from this tick and said once.
     const hold = holdDiffText(before.usage.queueHold, r.config.usage.queueHold);
     if (hold) await recordJournalOnce(ctx, { kind: 'limits-changed', text: hold });

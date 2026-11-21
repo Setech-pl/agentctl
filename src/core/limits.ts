@@ -5,6 +5,7 @@ import type { ProviderHold, TimedHolds } from './provider-hold.ts';
 import { provider as adapter, activeProviders, PROVIDER_IDS } from './providers/registry.ts';
 import { DEFAULT_PROVIDERS } from './providers/types.ts';
 import fs from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import YAML from 'yaml';
 import { AGENT_NAMES, loadGlobalConfig } from './config.ts';
 import type { AgentName, GlobalConfig } from './config.ts';
@@ -12,8 +13,9 @@ import type { LiveWindow } from './checks.ts';
 import type { Context } from './context.ts';
 import { editConfigText, writeConfigText } from './config-edit.ts';
 import { recordJournal, recordJournalOnce } from './journal.ts';
-import { withFileLock } from './file-lock.ts';
-import { readQueue, waiting } from './queue.ts';
+import { withFileLock, withStateWriteLock } from './file-lock.ts';
+import { atomicWriteFile } from './atomic-file.ts';
+import { readQueue, waiting, watchAlive } from './queue.ts';
 import { AgentctlError, errorMessage, isObject, Problems } from './util.ts';
 import { OWNER_IDENTITY, postMessage } from './wall.ts';
 import { WALL_TOOL_CHANNEL } from './wall-config.ts';
@@ -447,16 +449,44 @@ export function quotaDiffText(from?: ChatQuotas, to?: ChatQuotas): string | unde
   return differences.length ? `kwoty: ${differences.join(', ')}` : undefined;
 }
 
-/** A command and the watcher can see the same atomic config revision. Announce it once. */
-export async function announceLimitConfigChange(ctx: Context, before: GlobalConfig, after: GlobalConfig): Promise<void> {
-  const text = [limitsDiffText(before.limits, after.limits, activeProviders(after)), quotaDiffText(before.quotas, after.quotas)].filter(Boolean).join('\n');
-  if (!text || ctx.runner.dryRun) return;
-  const stamp = fs.statSync(after.path, {bigint: true, throwIfNoEntry: false});
-  const changeId = stamp ? `limits/${stamp.ino}/${stamp.mtimeNs}` : undefined;
-  await withFileLock(`${after.path}.limits-events.lock`, async () => {
+type EffectiveLimits = Pick<GlobalConfig, 'limits' | 'quotas'>;
+interface LimitNotice { changeId: string; text: string }
+interface LimitNotices { observed: EffectiveLimits; pending: LimitNotice[] }
+const limitNoticesPath = (file: string) => `${file}.limit-notices.json`;
+export const limitEditLock = (file: string) => `${file}.limits-edit.lock`;
+
+function observeLimitConfig(before: GlobalConfig, after: GlobalConfig, source: string): LimitNotices {
+  const file = limitNoticesPath(after.path);
+  let notices: LimitNotices;
+  let initial = false;
+  try { notices = JSON.parse(fs.readFileSync(file, 'utf8')); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    notices = { observed: { limits: before.limits, quotas: before.quotas }, pending: [] };
+    initial = true;
+  }
+  const { limits, quotas } = notices.observed;
+  const text = [limitsDiffText(limits, after.limits), quotaDiffText(quotas, after.quotas)].filter(Boolean).join('\n');
+  if (text) notices.pending.push({changeId: `limits/${randomUUID()}`, text: `Źródło: ${source}\n${text}`});
+  if (initial || text) {
+    notices.observed = { limits: after.limits, quotas: after.quotas };
+    atomicWriteFile(file, JSON.stringify(notices));
+  }
+  return notices;
+}
+
+/** The shared edit lock orders observations and keeps a retry from publishing the same revision twice. */
+async function publishLimitNotices(ctx: Context, notices: LimitNotices): Promise<void> {
+  for (const {changeId, text} of notices.pending) {
     await recordJournalOnce(ctx, {kind: 'limits-changed', text, changeId});
     await postMessage(ctx, OWNER_IDENTITY, {channel: WALL_TOOL_CHANNEL, kind: 'info', subject: 'Zmiana limitów lub kwot', body: text.slice(0, 4000), origin: changeId});
-  });
+  }
+  if (notices.pending.length) atomicWriteFile(limitNoticesPath(ctx.config.path), JSON.stringify({...notices, pending: []}));
+}
+
+/** Called by watch while holding the same lock that guards config edits. */
+export async function announceLimitConfigChange(ctx: Context, before: GlobalConfig, after: GlobalConfig): Promise<void> {
+  if (!ctx.runner.dryRun) await publishLimitNotices(ctx, observeLimitConfig(before, after, 'config edit'));
 }
 
 /** The edit as text; nothing is written. */
@@ -527,21 +557,29 @@ export function planSetLimits(config: GlobalConfig, assignments: LimitAssignment
 }
 
 /** Write the plan: a `.bak` copy first, the new text, and a check that the result loads (else the old text comes back). */
-export async function applySetLimits(ctx: Context, plan: LimitsPlan): Promise<void> {
+export async function applySetLimits(ctx: Context, plan: LimitsPlan, source = 'config edit'): Promise<void> {
   const writesConfig = plan.changes.length || plan.holdChanges.length || plan.quotaChange;
   if (ctx.runner.dryRun) {
     if (writesConfig) await writeConfigText(ctx, plan.file, plan.text);
     return;
   }
-  await withFileLock(`${plan.file}.limits-edit.lock`, async () => {
+  await withStateWriteLock(limitEditLock(plan.file), async () => {
     const current = fs.existsSync(plan.file) ? fs.readFileSync(plan.file, 'utf8') : '';
     if (current !== plan.baseText) throw new AgentctlError('Limits config changed; preview the edit again.');
     const before = loadGlobalConfig(path.dirname(plan.file));
     if ((plan.quotaChange || before.quotas || ctx.config.quotas) && quotaScope(before) !== plan.baseQuotaScope) throw new AgentctlError('Limits or WALL identity changed; preview the edit again.');
-    if (writesConfig) await writeConfigText(ctx, plan.file, plan.text);
+    if (writesConfig) {
+      // A manual edit may have happened since watch last saw the configuration.
+      observeLimitConfig(before, before, 'config edit');
+      await writeConfigText(ctx, plan.file, plan.text);
+    }
     if (plan.timedHolds) await setProviderHolds(ctx, plan.timedHolds);
     const after = writesConfig ? loadGlobalConfig(path.dirname(plan.file)) : before;
-    await announceLimitConfigChange(ctx, before, after);
+    if (writesConfig) {
+      const notices = observeLimitConfig(before, after, source);
+      // Retain command-line delivery for installations that run without watch.
+      if (!watchAlive(ctx.config, ctx.runner.now())) await publishLimitNotices(ctx, notices);
+    }
     const hold = holdDiffText(before.usage.queueHold, after.usage.queueHold);
     if (hold) await recordJournalOnce(ctx, { kind: 'limits-changed', text: hold });
   });

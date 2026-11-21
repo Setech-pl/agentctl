@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'FIELD0253-LIMITS', fixedIn: '0.25.3', symptom: 'Limits and quota WALL messages omitted their source and could miss intermediate revisions.', scenarios: [s('field0253-limits.test.ts', '^FIELD0253-LIMITS:')] },
   { id: 'FIELD0253-DISK', fixedIn: '0.25.3', symptom: 'A stale worktree-size sample made the board show disk warn despite healthy free space.', scenarios: [s('field0253-disk.test.ts', '^FIELD0253-DISK:')] },
   { id: 'FIELD0253-CLI', fixedIn: '0.25.3', symptom: 'The CLI could only force removal of dirty worktrees for the whole GC selection.', scenarios: [s('field0253-cli.test.ts', '^FIELD0253-CLI:')] },
   { id: 'FIELD0253-GC', fixedIn: '0.25.3', symptom: 'A large MCP GC plan could exhaust the deadline before returning its confirmation token.', scenarios: [s('field0253-gc.test.ts', '^FIELD0253-GC:')] },

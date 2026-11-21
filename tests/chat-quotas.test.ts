@@ -172,8 +172,9 @@ wall:
   assert.equal(ctx.config.limits.claude, 4);
   assert.equal(ctx.config.quotas?.overprovision, 2);
   const journal = readJournal(initial);
-  assert.equal(journal.filter(e => e.kind === 'limits-changed').length, 3);
-  assert.equal(journal.filter(e => e.kind === 'wall' && e.wall?.kind === 'info' && e.wall.channel === 'agentctl').length, 3);
+  assert.equal(journal.filter(e => e.kind === 'limits-changed').length, 4);
+  assert.equal(journal.filter(e => e.kind === 'wall' && e.wall?.kind === 'info' && e.wall.channel === 'agentctl').length, 4);
+  assert.ok(journal.some(e => e.kind === 'limits-changed' && e.text.includes('config edit') && e.text.includes('floor claude')));
 });
 
 test('QUOTA0250-GLM: removing the global GLM cap does not restore the default cap', async () => {
