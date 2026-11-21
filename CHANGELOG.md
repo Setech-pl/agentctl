@@ -4,6 +4,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- FIELD0253-ATTENTION: Watch resolves its long-wait WALL requests when the corresponding task state ends. / Watch zamyka swoje prośby WALL po zakończeniu odpowiadającego im oczekiwania.
 - FIELD0253-LIMITS: Watch publishes each observed limit or quota revision on WALL with its source. / Watch publikuje na WALL każdą wykrytą zmianę limitów lub kwot wraz ze źródłem.
 - FIELD0253-DISK: Disk severity follows fresh free space and worktree measurement age is informational. / Poziom dysku zależy od świeżego odczytu wolnego miejsca, a wiek pomiaru worktree jest informacyjny.
 - FIELD0253-CLI: GC accepts named dirty tasks and requires a terminal confirmation for the full selection. / GC przyjmuje listę zadań z lokalnymi zmianami, a cała selekcja wymaga potwierdzenia na terminalu.

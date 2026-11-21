@@ -738,9 +738,13 @@ export function planStatus(config: GlobalConfig, who: WallIdentity, input: Statu
 }
 
 /** A new status record (the history stays); checked again under the lock. */
-export async function setStatus(ctx: Context, who: WallIdentity, input: StatusInput): Promise<WallHeader> {
+export async function setStatus(ctx: Context, who: WallIdentity, input: StatusInput, expected?: WallStatus): Promise<WallHeader> {
   const { config } = ctx;
   return withWallLock(config, async () => {
+    if (expected) {
+      const current = findMessage(config, input.id);
+      if (current.status !== expected) return current;
+    }
     const plan = planStatus(config, who, input);
     appendRecord(config, plan.channel, { v: 1, type: 'status', id: plan.id, ts: new Date(ctx.runner.now()).toISOString(), status: plan.to, by: plan.by, ...(plan.for ? { for: plan.for } : {}), ...(input.note ? { note: input.note } : {}) });
     saveIndex(config, [plan.channel]);
