@@ -4,6 +4,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- FIELD0253-ENOSPC: Watch retries state and snapshot writes after ENOSPC and records recovery. / Watch ponawia zapis stanu po ENOSPC i odnotowuje wznowienie.
 - ROWSEL0252 was prepared for 0.25.2. / Poprawkę ROWSEL0252 przygotowano do wydania 0.25.2.
 
 - NOTIFY0251 was prepared for 0.25.1. / Poprawkę NOTIFY0251 przygotowano do wydania 0.25.1.

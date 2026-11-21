@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| FIELD0253-ENOSPC | A transient ENOSPC left TASK.md in needs-attention after space returned. | `tests/field0253-enospc.test.ts` (`^FIELD0253-ENOSPC:`) | 0.25.3 | fails on v0.25.2 (1 failing of 1) |
 | ROWSEL0252 | Selected board rows retained mixed colors and had no background across the list pane. | `tests/board-render.test.ts` (`ROWSEL0252:`) | 0.25.2 | fails on v0.25.1 (1 failing of 1) |
 | NOTIFY0251-WINDOW | Watch repeated the same plan alert after reset estimates changed or the plan briefly disappeared. | `tests/usage-limits.test.ts` (`^NOTIFY0251-WINDOW:`) | 0.25.1 | fails on v0.25.0 (1 failing of 1) |
 | NOTIFY0251-RACE | Overlapping watch reads sent the same plan alert to desktop and phone before the ledger was written. | `tests/usage-limits.test.ts` (`^NOTIFY0251-RACE:`) | 0.25.1 | fails on v0.25.0 (1 failing of 1) |

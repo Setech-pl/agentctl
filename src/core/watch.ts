@@ -17,6 +17,8 @@ import { overloadTick } from './overload.ts';
 import { collectDisk, diskTick } from './disk.ts';
 import { WatchSteps } from './watch-steps.ts';
 import { watchSnapshotPath } from './watch-snapshot.ts';
+import { atomicWriteFile, stateWriteFailure } from './atomic-file.ts';
+import { taskLock, withFileLock } from './file-lock.ts';
 import type { BudgetClock } from './response-budget.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -83,6 +85,24 @@ export class WatchMemory {
   readonly queue = new QueueMemory();
   /** The pairs of colliding tasks already announced, and when git was last asked. */
   readonly collisions = new CollisionMemory();
+  readonly recoveredWrites = new Set<string>();
+}
+
+/** Revalidate the last complete task state under its normal lock. Watch then derives fresh updates from the current task. */
+async function recoverTaskWrites(ctx: Context, memory: WatchMemory, signal: AbortSignal): Promise<void> {
+  if (ctx.runner.dryRun) return;
+  for (const record of listTaskRecords(ctx.config)) {
+    if (signal.aborted) return;
+    const file = taskFile(ctx.config, record.window);
+    if (!stateWriteFailure(file)?.reason.startsWith('ENOSPC:')) continue;
+    await withFileLock(taskLock(file), async () => {
+      if (!stateWriteFailure(file)?.reason.startsWith('ENOSPC:')) return;
+      atomicWriteFile(file, fs.readFileSync(file));
+      memory.recoveredWrites.add(record.task);
+    }, 100).catch(error => {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOSPC') ctx.out(`state recovery ${record.task}: ${errorMessage(error)}`);
+    });
+  }
 }
 
 /** P55: the one desktop notification of a trust wait points at the board, where the row is on top and Enter opens the dialog. */
@@ -227,6 +247,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   };
   await step('accepted MCP writes', () => applyAcceptedWrites(ctx, notifier, { ...options, log: startLog }));
   await step('WALL maintenance', () => maintainWall(ctx));
+  await step('state write recovery', signal => recoverTaskWrites(ctx, memory, signal));
   const tickAt = ctx.runner.now();
   if (memory.lastTickAt === undefined) {
     try {
@@ -327,13 +348,20 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   });
   if (!ctx.runner.dryRun) {
     const { publishMcpSnapshot, publishDegradedMcpSnapshot } = await import('./mcp-tools.ts');
+    const snapshot = watchSnapshotPath(ctx.config);
+    const snapshotFailed = stateWriteFailure(snapshot)?.reason.startsWith('ENOSPC:');
     const published = allRows && await step('snapshot preparation', async signal => {
       await publishMcpSnapshot(ctx, allRows, undefined, signal);
       return true;
     });
-    if (!published) await step('degraded snapshot', async signal => {
+    if (!published && !stateWriteFailure(snapshot)) await step('degraded snapshot', async signal => {
       const disk = await collectDisk(ctx);
       if (!signal.aborted) publishDegradedMcpSnapshot(ctx, disk, allRows ? 'snapshot preparation' : 'status collection');
+    });
+    if (published && snapshotFailed) memory.recoveredWrites.add('snapshot watch');
+    if (published && memory.recoveredWrites.size) await step('state write recovery event', async () => {
+      await recordJournal(ctx, { kind: 'state-write-recovered', text: `zapis stanu wznowiony: ${[...memory.recoveredWrites].join(', ')}` });
+      memory.recoveredWrites.clear();
     });
   }
   return events;

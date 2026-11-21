@@ -377,6 +377,16 @@
       "FIELD0230-SOCKET: a 66-byte task cache keeps isolated tmux within the socket limit"
     ]
   },
+  "FIELD0253-ENOSPC": {
+    "rev": "v0.25.2",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "FIELD0253-ENOSPC: watch recovers task state and snapshot once space returns",
+      "FIELD0253-ENOSPC: watch recovers task state and snapshot once space returns"
+    ]
+  },
   "G1a": {
     "rev": "v0.22.3",
     "outcome": "FAILS",
