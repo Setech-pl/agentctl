@@ -47,6 +47,16 @@ export interface McpRequest {
 /** `<config dir>/mcp-requests/<id>.json`. */
 export const mcpRequestDir = (config: Pick<GlobalConfig, 'path'>): string => path.join(path.dirname(config.path), 'mcp-requests');
 const requestFile = (config: Pick<GlobalConfig, 'path'>, id: string): string => path.join(mcpRequestDir(config), `${id}.json`);
+export const gcPreviewPlanFile = (config: Pick<GlobalConfig, 'path'>, id: string): string => path.join(mcpRequestDir(config), `${id}.gc-plan`);
+
+export function readMcpRequest(config: Pick<GlobalConfig, 'path'>, id: string): McpRequest | undefined {
+  if (!/^[a-f0-9-]{36}$/.test(id)) return undefined;
+  try {
+    const request = JSON.parse(fs.readFileSync(requestFile(config, id), 'utf8')) as McpRequest;
+    if (request.id === id) return request;
+  } catch { /* unavailable or expired */ }
+  return undefined;
+}
 
 /** How long applied and failed requests stay readable (queue of events_since covers the rest). */
 const KEEP_MS = 7 * 24 * 3600_000;
@@ -135,7 +145,10 @@ export async function applyMcpRequests(ctx: Context, notifier: Notifier, apply: 
     finished.push(await finish(ctx, notifier, next, opts));
   }
   for (const old of readMcpRequests(ctx.config)) {
-    if ((old.status === 'done' || old.status === 'failed') && ctx.runner.now() - Date.parse(old.appliedAt ?? old.requestedAt) > KEEP_MS) fs.rmSync(requestFile(ctx.config, old.id), { force: true });
+    if ((old.status === 'done' || old.status === 'failed') && ctx.runner.now() - Date.parse(old.appliedAt ?? old.requestedAt) > KEEP_MS) {
+      if (old.tool === 'gc_preview') fs.rmSync(gcPreviewPlanFile(ctx.config, old.id), { force: true });
+      fs.rmSync(requestFile(ctx.config, old.id), { force: true });
+    }
   }
   return finished;
 }

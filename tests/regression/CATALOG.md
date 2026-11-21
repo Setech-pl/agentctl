@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| FIELD0253-GC | A large MCP GC plan could exhaust the deadline before returning its confirmation token. | `tests/field0253-gc.test.ts` (`^FIELD0253-GC:`) | 0.25.3 | fails on v0.25.2 (1 failing of 1) |
 | FIELD0253-BUDGET | The MCP deadline was recorded as a task state write failure. | `tests/field0253-budget.test.ts` (`^FIELD0253-BUDGET:`) | 0.25.3 | fails on v0.25.2 (1 failing of 1) |
 | FIELD0253-ENOSPC | A transient ENOSPC left TASK.md in needs-attention after space returned. | `tests/field0253-enospc.test.ts` (`^FIELD0253-ENOSPC:`) | 0.25.3 | fails on v0.25.2 (1 failing of 1) |
 | ROWSEL0252 | Selected board rows retained mixed colors and had no background across the list pane. | `tests/board-render.test.ts` (`ROWSEL0252:`) | 0.25.2 | fails on v0.25.1 (1 failing of 1) |

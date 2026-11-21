@@ -23,9 +23,9 @@ For every `new` or `queue` preview and confirm, pass `as: "chat:<name>"` so the 
 
 ## Read tools
 
-These always work. `status` (also capacity/cohort), `queue_list`, `capacity`, `limits`, `config_show` and non-deep `doctor` use an atomic watch snapshot younger than two ticks, with its age; an unavailable/stale snapshot uses the bounded fallback and says so. `new`/`queue` previews run cheap checks only: base, overlap, worktrees, capacity and disk are checked by watch at accept, with errors in events. `gc`/`gc_preview` can return Accepted while watch prepares the protected plan; read `gc_preview` with the returned `request_id`, then preview `gc` again to obtain its confirmation token. Snapshot doctor observes config, permissions, disk and task state; provider/version probes stay with CLI doctor. WALL confirms append directly and return their id without waiting for watch.
+These always work. `status` (also capacity/cohort), `queue_list`, `capacity`, `limits`, `config_show` and non-deep `doctor` use an atomic watch snapshot younger than two ticks, with its age; an unavailable/stale snapshot uses the bounded fallback and says so. `new`/`queue` previews run cheap checks only: base, overlap, worktrees, capacity and disk are checked by watch at accept, with errors in events. `gc`/`gc_preview` can return Accepted while watch prepares the protected plan; poll `gc` with the returned `request_id` to review the plan and obtain its confirmation token. Confirm with `confirm: true` and that `preview_token`. Use `gc_preview` with the same `request_id` for a read-only view. Snapshot doctor observes config, permissions, disk and task state; provider/version probes stay with CLI doctor. WALL confirms append directly and return their id without waiting for watch.
 
-Odczyty korzystają z atomowego snapshotu watch młodszego niż dwa ticki i podają jego wiek; starszy snapshot uruchamia oznaczony odczyt z budżetem. Podglądy `new`/`queue` robią tanie kontrole, a watch sprawdza bazę, konflikty, worktree, limity i dysk po przyjęciu. GC może zwrócić Accepted: wynik odczytaj przez `gc_preview` z `request_id`, potem ponów podgląd `gc` po token. Diagnostyka snapshotu obejmuje stan, konfigurację, uprawnienia i dysk; sprawdzanie binariów wykonuje CLI doctor. WALL zapisuje potwierdzenie od razu, bez czekania na watch.
+Odczyty korzystają z atomowego snapshotu watch młodszego niż dwa ticki i podają jego wiek; starszy snapshot uruchamia oznaczony odczyt z budżetem. Podglądy `new`/`queue` robią tanie kontrole, a watch sprawdza bazę, konflikty, worktree, limity i dysk po przyjęciu. GC może zwrócić Accepted: wywołaj `gc` z otrzymanym `request_id`, aby zobaczyć plan i uzyskać token. Potwierdź przez `confirm: true` i ten `preview_token`. Sam odczyt planu umożliwia `gc_preview` z tym samym `request_id`. Diagnostyka snapshotu obejmuje stan, konfigurację, uprawnienia i dysk; sprawdzanie binariów wykonuje CLI doctor. WALL zapisuje potwierdzenie od razu, bez czekania na watch.
 
 | Tool | Arguments | What it returns |
 |---|---|---|
@@ -341,7 +341,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 | `manager_start` | write | `as?`, `project?`, `name?`, `model?`, `effort?`, `confirm?`, `preview_token?` |
 | `manager_stop` | write | `as?`, `confirm?`, `preview_token?` |
 | `notify_test` | write | `as?`, `phone?`, `confirm?`, `preview_token?` |
-| `gc` | write | `as?`, `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `detail?`, `offset?`, `limit?`, `cohort?`, `older_than?`, `branches?`, `confirm?`, `preview_token?` |
+| `gc` | write | `as?`, `request_id?`, `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `detail?`, `offset?`, `limit?`, `cohort?`, `older_than?`, `branches?`, `confirm?`, `preview_token?` |
 | `wall_read` | read | `as?`, `channel?`, `id?`, `since?`, `archive?`, `status?`, `kind?`, `limit?`, `before?` |
 | `wall_post` | write | `as?`, `channel?`, `kind?`, `subject?`, `body?`, `refs?`, `to?`, `confirm?`, `preview_token?` |
 | `wall_reply` | write | `as?`, `reply_to?`, `body?`, `subject?`, `kind?`, `refs?`, `to?`, `confirm?`, `preview_token?` |

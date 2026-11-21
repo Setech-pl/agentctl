@@ -1,5 +1,4 @@
 import { chatOwner, quotaWarnings } from './chat-quotas.ts';
-import { planRemoteGc } from './host-gc.ts';
 import { refreshDiskFreeSpace, taskDiskStartHold, worktreeCostEstimates } from './disk.ts';
 import { watchSnapshotPath, watchSnapshotTime, watchSnapshotWarning } from './watch-snapshot.ts';
 import { peakLines, peakHold } from './peak.ts';
@@ -66,7 +65,7 @@ import { closeTask, closeTasks, planClose } from './close.ts';
 import { cohortEntries, cohortRows, findCohort, openCohortTasks, summarizeCohorts } from './cohort.ts';
 import { collectOverlaps, collideText } from './collisions.ts';
 import { ACCEPTED_TEXT, acceptSpecs, isPaused, describeQueue, directStartText, findDirectStart, planQueueAdd, queueDependencyRows, readQueue, removeFromQueue, waiting, watchAlive, withAcceptLock } from './queue.ts';
-import { acceptedText, deferMcpWrites, readMcpRequests, recordMcpRequest } from './mcp-requests.ts';
+import { acceptedText, deferMcpWrites, gcPreviewPlanFile, readMcpRequest, readMcpRequests, recordMcpRequest } from './mcp-requests.ts';
 import type { McpRequest } from './mcp-requests.ts';
 import { readSetupProgress } from './setup-progress.ts';
 import { liveWindows, planBatch } from './plan.ts';
@@ -448,26 +447,58 @@ async function runEventsSince(deps: McpDeps, args: { since?: string | undefined;
   return { text: renderEvents(report).join('\n'), data: report };
 }
 
-const gcPlanKey = (args: Record<string, unknown>) => createHash('sha256').update(JSON.stringify({cohort: args.cohort ?? null, older_than: args.older_than ?? null, branches: Boolean(args.branches ?? args.merged), force_dirty: args.force_dirty ?? [], include_cache: args.include_cache === true, keep_cache: args.keep_cache ?? [], keep: args.keep ?? []})).digest('hex');
-const gcPlanPath = (ctx: Context, args: Record<string, unknown>) => path.join(ctx.config.stateDir, `gc-plan-${gcPlanKey(args)}.json`);
-function cachedGcPlan(ctx: Context, args: Record<string, unknown>): GcPlan | undefined {
-  try { const saved = JSON.parse(fs.readFileSync(gcPlanPath(ctx, args), 'utf8')); const age = ctx.runner.now() - saved.at;
-    if (saved.key === gcPlanKey(args) && age >= 0 && age < 2 * ctx.config.watch.interval * 1000) return saved.plan;
-  } catch { /* watch prepares it */ }
-  return undefined;
+interface GcPreviewArgs {
+  request_id?: string;
+  include_cache?: boolean;
+  keep_cache?: string[];
+  keep?: string[];
+  force_dirty?: string[];
+  older_than?: string;
+  branches?: boolean;
+  cohort?: string;
+  detail?: boolean;
+  offset?: number;
+  limit?: number;
 }
 
-async function runGcPreview(deps: McpDeps, args: { request_id?: string; include_cache?: boolean; keep_cache?: string[]; keep?: string[]; force_dirty?: string[]; older_than?: string | undefined; merged?: boolean | undefined; cohort?: string | undefined; detail?: boolean; offset?: number; limit?: number }): Promise<ToolResult> {
+function planMcpGc(ctx: Context, args: GcPreviewArgs): Promise<GcPlan> {
+  return planGc(ctx, { olderThan: args.older_than, branches: args.branches, cohort: args.cohort,
+    forceDirty: args.force_dirty, includeCache: args.include_cache, keepCache: args.keep_cache, keep: args.keep, cachedSizes: true });
+}
+
+function gcPreviewResult(ctx: Context, plan: GcPlan, args: GcPreviewArgs): ToolResult {
+  return ok(JSON.stringify({ ...gcView(plan, args), text: renderGc(plan, args).join('\n'), partial_result: 'Partial result: sizes are cached or measuring (unknown sizes count as 0); repeat for updated estimates.', preview: true, execution: ctx.config.mcp.allow.includes('gc') ? 'gc with request_id (when available), then confirm' : 'requires gc in mcp.allow or CLI --apply' }));
+}
+
+function readGcPreview(ctx: Context, id: string): { plan: GcPlan; at: number; args: GcPreviewArgs } | ToolResult {
+  if (!/^[a-f0-9-]{36}$/.test(id)) return fail('Invalid GC preview request ID.');
+  const request = readMcpRequest(ctx.config, id);
+  if (request?.tool !== 'gc_preview') return fail('Unknown or expired GC preview request ID; preview again.');
+  if (request.status === 'failed') return fail(`GC preview failed: ${request.error}; preview again.`);
+  try {
+    const { plan, at } = JSON.parse(fs.readFileSync(gcPreviewPlanFile(ctx.config, id), 'utf8')) as { plan: GcPlan; at: number };
+    const { merged, ...args } = request.args as GcPreviewArgs & { merged?: boolean };
+    return { plan, at, args: { ...args, branches: args.branches ?? merged } };
+  } catch {
+    return request.status === 'done' ? fail('GC preview plan is unavailable; preview again.')
+      : ok(`GC preview pending; retry after the next watch tick.\nrequest_id: ${id}`);
+  }
+}
+
+async function requestGcPreview(deps: McpDeps, args: GcPreviewArgs): Promise<ToolResult> {
+  const { detail: _detail, offset: _offset, limit: _limit, ...selection } = args;
+  return recordDeferred(deps, 'gc_preview', args, null, `gc_preview:${JSON.stringify(canonical(selection))}`, undefined);
+}
+
+async function runGcPreview(deps: McpDeps, { merged, ...args }: GcPreviewArgs & { merged?: boolean }): Promise<ToolResult> {
   const ctx = deps.context(() => {});
   if (args.request_id) {
-    if (!/^[a-f0-9-]{36}$/.test(args.request_id)) throw new AgentctlError('invalid GC preview request id');
-    try { return JSON.parse(fs.readFileSync(path.join(ctx.config.stateDir, `gc-preview-${args.request_id}.json`), 'utf8')); } catch { const request = readMcpRequests(ctx.config).find(r => r.id === args.request_id); return request?.status === 'failed' ? fail(`GC preview failed: ${request.error}; preview again.`) : ok('GC preview pending; retry request_id after the next watch tick.'); }
+    const saved = readGcPreview(ctx, args.request_id);
+    return 'plan' in saved ? gcPreviewResult(ctx, saved.plan, { ...saved.args, ...args }) : saved;
   }
-  if (!deps.applying && watchAlive(ctx.config, ctx.runner.now())) return recordDeferred(deps, 'gc_preview', args, null, `gc_preview:${JSON.stringify(args)}`, undefined);
-  if (deps.applying) await planRemoteGc(ctx, {olderThan: args.older_than, includeCache: args.include_cache, keepCache: args.keep_cache, keep: args.keep}, parseAge(args.older_than ?? '7d'));
-  const plan = await planGc(ctx, { olderThan: args.older_than, branches: args.merged, cohort: args.cohort, forceDirty: args.force_dirty, includeCache: args.include_cache, keepCache: args.keep_cache, keep: args.keep, cachedSizes: true });
-  if (deps.applying) { fs.mkdirSync(ctx.config.stateDir, {recursive: true}); atomicWriteFile(gcPlanPath(ctx, args), JSON.stringify({at: ctx.runner.now(), key: gcPlanKey(args), plan})); }
-  return ok(JSON.stringify({ ...gcView(plan, args), text: renderGc(plan, args).join('\n'), partial_result: 'Partial result: sizes are cached or measuring (unknown sizes count as 0); repeat for updated estimates.', preview: true, execution: ctx.config.mcp.allow.includes('gc') ? 'gc preview then confirm' : 'requires gc in mcp.allow or CLI --apply' }));
+  const options = { ...args, branches: merged };
+  if (deferMcpWrites(ctx)) return requestGcPreview(deps, options);
+  return gcPreviewResult(ctx, await planMcpGc(ctx, options), options);
 }
 
 async function runResume(deps: McpDeps, args: { tasks?: string[] | undefined; all?: boolean | undefined; confirm?: boolean | undefined }): Promise<ToolResult> {
@@ -1714,7 +1745,7 @@ MCP_TOOLS.push(
   extraWrite('manager_start', 'manager', 'Start the supervising manager session', { project: optionalText, name: optionalText, model: optionalText, effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional() }, async (ctx, a, deps) => { if (!deps.self) throw new AgentctlError('this server has no self command for the manager'); return startManager(ctx, { ...a, self: deps.self, noWait: true }); }),
   extraWrite('manager_stop', 'manager stop', 'Stop the manager session', {}, async (ctx) => ({ state: await stopManager(ctx) })),
   extraWrite('notify_test', 'notify-test [--phone]', 'Test desktop notifications; phone true explicitly sends to ntfy', { phone: z.boolean().optional() }, async (ctx, a, deps) => { if (a.phone) return sendPhoneTest(ctx); await deps.notify('agentctl notification test'); return { local: true }; }),
-  extraWrite('gc', 'gc --apply [--cohort <NAME>] [--older-than <AGE>] [--branches]', 'Reclaim disk space from finished tasks using the same protected plan as gc_preview', { include_cache: z.boolean().optional(), keep_cache: z.array(taskArg).optional(), keep: z.array(taskArg).optional(), force_dirty: z.array(taskArg).optional(), detail: z.boolean().optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional(), cohort: cohortArg.optional(), older_than: optionalText, branches: z.boolean().optional() }, async (ctx, a) => { const plan = await planGc(ctx, { cohort: a.cohort, olderThan: a.older_than, branches: a.branches ?? false, forceDirty: a.force_dirty, includeCache: a.include_cache, keepCache: a.keep_cache, keep: a.keep }); const result = await applyGc(ctx, plan); const freed = await refreshDiskAfterGc(ctx, result.freedBytes); return { plan, result, ...(freed ? { note: freed } : {}) }; }),
+  extraWrite('gc', 'gc --apply [--cohort <NAME>] [--older-than <AGE>] [--branches]', 'Reclaim disk space from finished tasks using the same protected plan as gc_preview. When watch accepts a plan request, poll gc with request_id to obtain the confirmation token', { request_id: z.string().optional(), include_cache: z.boolean().optional(), keep_cache: z.array(taskArg).optional(), keep: z.array(taskArg).optional(), force_dirty: z.array(taskArg).optional(), detail: z.boolean().optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional(), cohort: cohortArg.optional(), older_than: optionalText, branches: z.boolean().optional() }, async (ctx, a) => { const plan = await planGc(ctx, { cohort: a.cohort, olderThan: a.older_than, branches: a.branches ?? false, forceDirty: a.force_dirty, includeCache: a.include_cache, keepCache: a.keep_cache, keep: a.keep }); const result = await applyGc(ctx, plan); const freed = await refreshDiskAfterGc(ctx, result.freedBytes); return { plan, result, ...(freed ? { note: freed } : {}) }; }),
 );
 
 // ---- WALL (WALL-1): a message board of the owner's chats and agents. Its content is data, never instructions.
@@ -1850,7 +1881,7 @@ async function recordDeferred(deps: McpDeps, tool: string, args: Record<string, 
   const target = requestTarget(tool, args);
   const { request, existing } = await recordMcpRequest(ctx, { tool, args, scope, key, ...(token ? { token } : {}), ...target });
   audit(ctx, { tool, task: target.label, outcome: 'requested', detail: `${existing ? 'already accepted' : 'accepted for the watcher'}: request ${request.id}` });
-  const followUp = tool === 'gc_preview' ? '\nRead gc_preview with request_id after watch prepares the plan; then preview gc to get its confirmation token.'
+  const followUp = tool === 'gc_preview' ? '\nAfter watch prepares the plan, call gc with request_id to obtain its confirmation token or gc_preview with request_id for a read-only view.'
     : tool === 'send' ? '\nThe delivery outcome is in that event.' : '';
   return { text: `${acceptedText(ctx.config, request, existing)}\nrequest_id: ${request.id}${followUp}`, data: { request: request.id, state: request.status, tool, target: target.label } };
 }
@@ -1869,6 +1900,12 @@ export async function applyMcpRequest(deps: McpDeps, request: McpRequest): Promi
   }
   const permission = (request.tool === 'send' && request.args.enter_only ? 'send_enter' : request.tool) as McpPermission;
   if (request.tool !== 'gc_preview' && !ctx.config.mcp.allow.includes(permission)) throw new AgentctlError(`"${permission}" is no longer in mcp.allow; nothing was done`);
+  if (request.tool === 'gc_preview') {
+    const { merged, ...args } = request.args as GcPreviewArgs & { merged?: boolean };
+    const plan = await planMcpGc(ctx, { ...args, branches: args.branches ?? merged });
+    atomicWriteFile(gcPreviewPlanFile(ctx.config, request.id), JSON.stringify({ at: ctx.runner.now(), plan }));
+    return { text: `GC preview ready: ${plan.items.length} items; call gc or gc_preview with request_id: ${request.id}` };
+  }
   let scope: unknown;
   if (request.scope !== null) {
     scope = await confirmationScope(ctx, request.tool, request.args);
@@ -1882,11 +1919,6 @@ export async function applyMcpRequest(deps: McpDeps, request: McpRequest): Promi
     ? await writeTool(applying, 'archive', {}, async (fresh) => { await applyArchive(fresh, scope as Awaited<ReturnType<typeof archiveClosed>>); return { text: JSON.stringify(scope, null, 2), executed: true, announce: 'archive closed task state' }; })
     : await guarded(() => run(applying, { ...request.args, confirm: true, _apply: true } as never));
   if (result.isError) throw new AgentctlError(result.text);
-  if (request.tool === 'gc_preview') {
-    const destination = path.join(ctx.config.stateDir, `gc-preview-${request.id}.json`);
-    atomicWriteFile(destination, JSON.stringify({ text: result.text }));
-    return { text: `GC preview ready: ${destination}; run gc preview then confirm to apply.` };
-  }
   return { text: result.text };
 }
 
@@ -1912,7 +1944,7 @@ function confirmationTargets(name: string, scope: unknown): unknown {
     const plan = scope as Awaited<ReturnType<typeof sendScope>>;
     return { target: plan.identity, message: plan.message?.id };
   }
-  if (name === 'gc') return (scope as GcPlan).items.map(({ kind, task, target, repo, branch, host, hostFingerprint }) => ({ kind, task, target, repo, branch, host, hostFingerprint }));
+  if (name === 'gc') return (scope as GcPlan).items.map(({ kind, task, target, repo, branch, host, hostFingerprint, dirtyFiles, unpushedCommits }) => ({ kind, task, target, repo, branch, host, hostFingerprint, dirtyFiles, unpushedCommits }));
   const project = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(project);
     if (!value || typeof value !== 'object') return value;
@@ -1969,10 +2001,7 @@ async function confirmationScope(ctx: Context, name: string, args: Record<string
   }
   if (name === 'mark') return { tasks: planMark(ctx, args as MarkSelection).map(task => findRecord(ctx, task)), result: args.result, note: args.note };
   if (name === 'close') { const ids = await closeInputs(ctx, args as CloseMcpArgs); return { tasks: await planClose(ctx, ids, { rmWorktree: Boolean(args.remove_worktree) }), records: ids.flatMap(id => { const r = readTaskRecordById(ctx.config, id); return r ? [r] : []; }) }; }
-  if (name === 'gc') {
-    const plan = await planGc(ctx, { cohort: args.cohort as string | undefined, olderThan: args.older_than as string | undefined, branches: Boolean(args.branches), forceDirty: args.force_dirty as string[] | undefined, includeCache: args.include_cache === true, keepCache: args.keep_cache as string[] | undefined, keep: args.keep as string[] | undefined, cachedSizes: true });
-    return plan;
-  }
+  if (name === 'gc') return planMcpGc(ctx, args);
   if (name === 'consult') { const plan = await planConsult(ctx, args.spec as string, { saveUsage: false }); return { spec: plan.spec, context: plan.context, preview: plan.preview }; }
   if (name === 'new' || name === 'queue') {
     const rawSpecs = splitSpecs(args.spec as string, 'MCP preview');
@@ -2063,7 +2092,20 @@ for (const tool of MCP_TOOLS) {
       if (known.length > 0 && known.length !== requested) return writeTool(deps, 'new', {}, async () => { throw new AgentctlError(`Mixed new batch: already registered tasks: ${known.map(e => e!.task).join(', ')}`, 'Nothing was added. Preview only the new tasks separately.'); });
       if (known.length > 0) return writeTool(deps, 'new', { task: known.map((e) => e!.task).join(', '), detail: 'repeated new for a start in progress' }, async () => ({ text: known.map((e) => directStartText(ctx.config, e!, ctx.runner.now())).join('\n'), executed: false, announce: '' }));
     }
-    const { confirm, preview_token, ...input } = args;
+    const { confirm, preview_token, ...provided } = args;
+    let input = provided;
+    let prepared: GcPlan | undefined;
+    if (tool.name === 'gc' && provided.request_id !== undefined) {
+      const { request_id, detail, offset, limit, ...selection } = provided;
+      if (confirm || preview_token || Object.keys(selection).length || typeof request_id !== 'string') {
+        return fail('GC request_id retrieves a plan. Pass only request_id and optional detail, offset or limit; then confirm with preview_token.');
+      }
+      const saved = readGcPreview(ctx, request_id);
+      if (!('plan' in saved)) return saved;
+      if (ctx.runner.now() - saved.at >= ctx.config.preview.ttlS * 1000) return fail('GC preview plan expired; request a fresh plan.');
+      input = { ...saved.args, ...(detail !== undefined ? { detail } : {}), ...(offset !== undefined ? { offset } : {}), ...(limit !== undefined ? { limit } : {}) };
+      prepared = saved.plan;
+    }
     // Required preview fields remain required for a preview or explicit-argument confirm.
     // A token-only confirm restores the validated arguments from its session preview.
     const tokenOnly = Boolean(confirm && typeof preview_token === 'string' && Object.keys(input).every(k => k === 'as' && 'as' in previewInput));
@@ -2141,10 +2183,8 @@ for (const tool of MCP_TOOLS) {
     if (confirm && DEFERRED_TOOLS.has(tool.name) && (tool.name !== 'queue' || effective.replace) && deferMcpWrites(ctx)) {
       return recordDeferred(deps, tool.name, effective, preview!.scope, preview!.key, token);
     }
-    let scope: unknown;
-    if (!confirm && tool.name === 'gc' && deferMcpWrites(ctx)) {
-      scope = cachedGcPlan(ctx, effective);
-    }
+    if (!confirm && tool.name === 'gc' && !prepared && deferMcpWrites(ctx)) return requestGcPreview(deps, effective);
+    let scope: unknown = prepared;
     try { scope ??= accepting ? null : await (confirm ? confirmationScope(ctx, tool.name, effective) : observeHostWindows(() => confirmationScope(ctx, tool.name, effective))); }
     catch (e) { audit(ctx, { tool: tool.name, outcome: 'error', detail: errorMessage(e) }); throw e; }
     // Argument identity is independent of mutable runtime facts. Destructive scopes are checked separately.
@@ -2167,8 +2207,8 @@ for (const tool of MCP_TOOLS) {
         pending.set(token, { key, arguments: arguments_, raw: input, scope: scopeIdentity, at: ctx.runner.now(), ttlS: ctx.config.preview.ttlS, ...(tool.name === 'new' || tool.name === 'queue' ? { planned: (scope as { specs: ResolvedSpec[] }).specs.map(plannedOrder) } : {}) });
         issuedPreviewTokens.set(token, { session, state: 'pending' });
         if (issuedPreviewTokens.size > 10000) issuedPreviewTokens.delete(issuedPreviewTokens.keys().next().value!);
-        if (tool.name === 'send') result = { ...result, text: `preview_token: ${token}\n${result.text}`, data: { preview_token: token } };
-        result.text += `\npreview_ttl_s: ${ctx.config.preview.ttlS}; expires_at: ${new Date(ctx.runner.now() + ctx.config.preview.ttlS * 1000).toISOString()}; expires_at_local: ${formatLocalTime(new Date(ctx.runner.now() + ctx.config.preview.ttlS * 1000).toISOString())}${tool.name === 'send' ? '' : `\npreview_token: ${token}`}`;
+        if (tool.name === 'send' || tool.name === 'gc') result = { ...result, text: `preview_token: ${token}\n${result.text}`, data: { preview_token: token } };
+        result.text += `\npreview_ttl_s: ${ctx.config.preview.ttlS}; expires_at: ${new Date(ctx.runner.now() + ctx.config.preview.ttlS * 1000).toISOString()}; expires_at_local: ${formatLocalTime(new Date(ctx.runner.now() + ctx.config.preview.ttlS * 1000).toISOString())}${['send', 'gc'].includes(tool.name) ? '' : `\npreview_token: ${token}`}`;
       }
       return result;
     }

@@ -397,6 +397,16 @@
       "FIELD0253-ENOSPC: watch recovers task state and snapshot once space returns"
     ]
   },
+  "FIELD0253-GC": {
+    "rev": "v0.25.2",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "FIELD0253-GC: the watcher plans 301 worktrees before issuing a bound GC token",
+      "FIELD0253-GC: the watcher plans 301 worktrees before issuing a bound GC token"
+    ]
+  },
   "G1a": {
     "rev": "v0.22.3",
     "outcome": "FAILS",
