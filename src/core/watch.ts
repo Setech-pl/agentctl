@@ -20,6 +20,7 @@ import { watchSnapshotPath } from './watch-snapshot.ts';
 import { atomicWriteFile, stateWriteFailure } from './atomic-file.ts';
 import { taskLock, withFileLock } from './file-lock.ts';
 import type { BudgetClock } from './response-budget.ts';
+import { withoutResponseBudget } from './response-budget.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { ConfigStore, configStatePath, noteConfigState } from './config-store.ts';
@@ -91,12 +92,13 @@ export class WatchMemory {
 /** Revalidate the last complete task state under its normal lock. Watch then derives fresh updates from the current task. */
 async function recoverTaskWrites(ctx: Context, memory: WatchMemory, signal: AbortSignal): Promise<void> {
   if (ctx.runner.dryRun) return;
+  const retryable = (file: string) => /^(ENOSPC:|write error: Partial result: response budget exhausted)/.test(stateWriteFailure(file)?.reason ?? '');
   for (const record of listTaskRecords(ctx.config)) {
     if (signal.aborted) return;
     const file = taskFile(ctx.config, record.window);
-    if (!stateWriteFailure(file)?.reason.startsWith('ENOSPC:')) continue;
+    if (!retryable(file)) continue;
     await withFileLock(taskLock(file), async () => {
-      if (!stateWriteFailure(file)?.reason.startsWith('ENOSPC:')) return;
+      if (!retryable(file)) return;
       atomicWriteFile(file, fs.readFileSync(file));
       memory.recoveredWrites.add(record.task);
     }, 100).catch(error => {
@@ -240,7 +242,7 @@ export interface TickOptions {
 export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Notifier, options: TickOptions = {}): Promise<WatchEvent[]> {
   const step = <T>(name: string, body: (signal: AbortSignal) => Promise<T>) => options.signal?.aborted
     ? Promise.resolve(undefined)
-    : memory.steps.run(ctx, watchLogPath(ctx), name, body, options.stepClock);
+    : withoutResponseBudget(() => memory.steps.run(ctx, watchLogPath(ctx), name, body, options.stepClock));
   const startLog = async (text: string): Promise<void> => {
     await ctx.runner.appendFile(watchLogPath(ctx), `${new Date(ctx.runner.now()).toISOString()}  ${text}\n`);
     ctx.out(text);

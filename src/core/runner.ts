@@ -1,5 +1,5 @@
 import { atomicWriteFile, atomicAppendFile, noteStateWriteFailure } from './atomic-file.ts';
-import { withFileLock, taskLock } from './file-lock.ts';
+import { withStateWriteLock, taskLock } from './file-lock.ts';
 import { readRateLimits } from './readonly-rpc.ts';
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -120,7 +120,7 @@ export class RealRunner implements Runner {
 
   private async writeLocked(file: string, operation: () => void): Promise<void> {
     let entered = false;
-    try { await withFileLock(path.basename(file) === 'TASK.md' ? taskLock(file) : `${file}.write.lock`, async () => {
+    try { await withStateWriteLock(path.basename(file) === 'TASK.md' ? taskLock(file) : `${file}.write.lock`, async () => {
       entered = true;
       try { operation(); } catch (error) { noteStateWriteFailure(file, error); throw error; }
     }); } catch (error) { if (!entered) noteStateWriteFailure(file, error); throw error; }

@@ -377,6 +377,16 @@
       "FIELD0230-SOCKET: a 66-byte task cache keeps isolated tmux within the socket limit"
     ]
   },
+  "FIELD0253-BUDGET": {
+    "rev": "v0.25.2",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "FIELD0253-BUDGET: an expired response cannot interrupt a task state commit",
+      "FIELD0253-BUDGET: an expired response cannot interrupt a task state commit"
+    ]
+  },
   "FIELD0253-ENOSPC": {
     "rev": "v0.25.2",
     "outcome": "FAILS",

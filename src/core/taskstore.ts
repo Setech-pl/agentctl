@@ -1,6 +1,6 @@
 import { chatOwner } from './chat-quotas.ts';
 import { fileVersion } from './file-version.ts';
-import { withFileLock, withFileLockSync, taskLock } from './file-lock.ts';
+import { withFileLockSync, withStateWriteLock, taskLock } from './file-lock.ts';
 import { noteStateWriteFailure, atomicWriteFile } from './atomic-file.ts';
 import { attemptFields } from './report-state.ts';
 import fs from 'node:fs';
@@ -535,7 +535,7 @@ export async function setHeaderFields(runner: Runner, file: string, fields: Reco
   catch (error) { noteStateWriteFailure(file, error); throw error; }
   return true;
   };
-  try { return runner.dryRun ? await change() : await withFileLock(taskLock(file), change); } catch (error) { if (!entered) noteStateWriteFailure(file, error); throw error; }
+  try { return runner.dryRun ? await change() : await withStateWriteLock(taskLock(file), change); } catch (error) { if (!entered) noteStateWriteFailure(file, error); throw error; }
 }
 
 /** Names of the files that are agentctl state, not agent output: moved out of the cache by the migration. */

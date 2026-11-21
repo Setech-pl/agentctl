@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { ResponseBudgetError } from './response-budget.ts';
 
 export interface StateWriteFailure { file: string; reason: string; at: string }
 const failures = new Map<string, StateWriteFailure>();
@@ -51,6 +52,7 @@ export function stateWriteFailure(file: string): StateWriteFailure | undefined {
 }
 
 export function noteStateWriteFailure(file: string, error: unknown): void {
+  if (error instanceof ResponseBudgetError) return;
   const reason = `${(error as NodeJS.ErrnoException)?.code ?? 'write error'}: ${error instanceof Error ? error.message : String(error)}`;
   const task = path.join(path.dirname(file), 'TASK.md');
   const affected = [file, ...(path.resolve(file) !== path.resolve(task) && fs.existsSync(task) ? [task] : [])];

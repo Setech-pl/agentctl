@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'FIELD0253-BUDGET', fixedIn: '0.25.3', symptom: 'The MCP deadline was recorded as a task state write failure.', scenarios: [s('field0253-budget.test.ts', '^FIELD0253-BUDGET:')] },
   { id: 'FIELD0253-ENOSPC', fixedIn: '0.25.3', symptom: 'A transient ENOSPC left TASK.md in needs-attention after space returned.', scenarios: [s('field0253-enospc.test.ts', '^FIELD0253-ENOSPC:')] },
   { id: 'ROWSEL0252', fixedIn: '0.25.2', symptom: 'Selected board rows retained mixed colors and had no background across the list pane.', scenarios: [s('board-render.test.ts', 'ROWSEL0252:')] },
   { id: 'NOTIFY0251-WINDOW', fixedIn: '0.25.1', symptom: 'Watch repeated the same plan alert after reset estimates changed or the plan briefly disappeared.', scenarios: [s('usage-limits.test.ts', '^NOTIFY0251-WINDOW:')] },

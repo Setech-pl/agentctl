@@ -1,4 +1,4 @@
-import { checkResponseBudget } from './response-budget.ts';
+import { checkResponseBudget, withoutResponseBudget } from './response-budget.ts';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -36,8 +36,9 @@ const ownership = new AsyncLocalStorage<Map<string, { active: boolean }>>();
 export const taskLock = (file: string): string => path.join(path.dirname(path.resolve(file)), 'prompt-delivery.lock');
 
 /** Short, process-shared critical section. A dead owner's lock can be recovered; a live owner is never evicted. */
-export async function withFileLock<T>(file: string, action: () => Promise<T>, timeoutMs = 60_000): Promise<T> {
+export async function withFileLock<T>(file: string, action: () => Promise<T>, timeoutMs = 60_000, stateWrite = false): Promise<T> {
   file = path.resolve(file);
+  if (stateWrite) checkResponseBudget();
   if (ownership.getStore()?.get(file)?.active) return action();
   const deadline = Date.now() + timeoutMs;
   let release: (() => void) | undefined;
@@ -45,11 +46,20 @@ export async function withFileLock<T>(file: string, action: () => Promise<T>, ti
     checkResponseBudget();
     if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${file}`);
     await new Promise((resolve) => setTimeout(resolve, 10));
+    if (stateWrite) checkResponseBudget();
   }
   const lease = { active: true };
   const owned = new Map(ownership.getStore()); owned.set(file, lease);
-  try { checkResponseBudget(); return await ownership.run(owned, action); } finally { lease.active = false; release(); }
+  try {
+    // After acquiring a state writer lock, commit independently of the caller's response deadline.
+    if (stateWrite) return await withoutResponseBudget(() => ownership.run(owned, action));
+    checkResponseBudget();
+    return await ownership.run(owned, action);
+  } finally { lease.active = false; release(); }
 }
+
+export const withStateWriteLock = <T>(file: string, action: () => Promise<T>): Promise<T> =>
+  withFileLock(file, action, 60_000, true);
 
 /** Synchronous state migration uses the same per-task lock as asynchronous writers. */
 export function withFileLockSync<T>(file: string, action: () => T, timeoutMs = 2000): T {
