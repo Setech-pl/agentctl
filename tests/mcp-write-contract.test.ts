@@ -53,7 +53,7 @@ function snapshot(root: string, audit: string): Record<string, string> {
     .map(file => [path.relative(root, file), fs.readFileSync(file, 'utf8')]));
 }
 
-it('MCP-WRITE-PREVIEW: every registered write previews without changing state or sending keys', async () => {
+it('MCP-WRITE-PREVIEW: previews only record a plan request for watched GC and never send keys', async () => {
   const writes = MCP_TOOLS.filter(t => t.kind === 'write');
   const root = scratch.sub('registry');
   const repo = scratch.sub('registry/repo');
@@ -143,6 +143,7 @@ capacity: {snapshot: false, codex_refresh: false}
     { tool: send, args: { task: 'DRAFT', enter_only: true }, label: 'send_enter' },
     { tool: send, args: { ...task, withdraw: queuedMessage.id.slice(0, 8) }, label: 'send withdraw' },
   ];
+  let gcRequest: string | undefined;
   for (const watching of [true, false]) {
     if (watching) fakeWatcher(config);
     else fs.unlinkSync(path.join(config.stateDir, 'queue-worker.json'));
@@ -152,15 +153,26 @@ capacity: {snapshot: false, codex_refresh: false}
       const beforeCase = snapshot(root, auditPath(config));
       const commandCount = mutatingCommands.length;
       const preview = await tool.run(deps, z.object(tool.input).parse(args));
-      if (preview.isError || !/^preview_token: [a-f0-9-]+$/m.test(preview.text)) errors.push(`${label}: ${preview.text}`);
       if (mutatingCommands.length !== commandCount) errors.push(`${label}: ran ${mutatingCommands.slice(commandCount).join(', ')}`);
       const afterCase = snapshot(root, auditPath(config));
       const changed = [...new Set([...Object.keys(beforeCase), ...Object.keys(afterCase)])].filter(file => beforeCase[file] !== afterCase[file]);
+      if (watching && tool.name === 'gc') {
+        assert.ifError(preview.isError);
+        gcRequest = /^request_id: ([a-f0-9-]+)$/m.exec(preview.text)?.[1];
+        assert.ok(gcRequest, preview.text);
+        assert.doesNotMatch(preview.text, /^preview_token:/m);
+        const requestFile = path.join('home', 'mcp-requests', `${gcRequest}.json`);
+        assert.deepEqual(changed, [requestFile]);
+        before[requestFile] = afterCase[requestFile]!;
+        continue;
+      }
+      if (preview.isError || !/^preview_token: [a-f0-9-]+$/m.test(preview.text)) errors.push(`${label}: ${preview.text}`);
       if (changed.length) errors.push(`${label}: changed persisted state (${changed.join(', ')})`);
     }
     assert.deepEqual(errors, [], watching ? 'watcher running' : 'inline mode');
     assert.deepEqual(snapshot(root, auditPath(config)), before);
-    assert.deepEqual(readMcpRequests(config), []);
+    assert.deepEqual(readMcpRequests(config).map(({id, tool, status, scope}) => ({id, tool, status, scope})),
+      [{id: gcRequest, tool: 'gc_preview', status: 'pending', scope: null}]);
     assert.deepEqual(notices, []);
   }
 });
