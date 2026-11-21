@@ -237,6 +237,7 @@ const KIND_LABEL: Record<JournalEntry['kind'], string> = {
   'host-unreachable': 'HOST NIEDOSTĘPNY',
   'host-recovered': 'HOST OSIĄGALNY',
   'watch-resumed': 'WATCH',
+  'state-write-recovered': 'ZAPIS STANU',
   'tmux-lost': 'TMUX UTRACONY',
   'machine-load-high': 'OBCIĄŻENIE',
   'machine-load-recovered': 'OBCIĄŻENIE OK',

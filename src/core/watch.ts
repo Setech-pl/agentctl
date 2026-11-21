@@ -247,9 +247,9 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
     await ctx.runner.appendFile(watchLogPath(ctx), `${new Date(ctx.runner.now()).toISOString()}  ${text}\n`);
     ctx.out(text);
   };
+  await step('state write recovery', signal => recoverTaskWrites(ctx, memory, signal));
   await step('accepted MCP writes', () => applyAcceptedWrites(ctx, notifier, { ...options, log: startLog }));
   await step('WALL maintenance', () => maintainWall(ctx));
-  await step('state write recovery', signal => recoverTaskWrites(ctx, memory, signal));
   const tickAt = ctx.runner.now();
   if (memory.lastTickAt === undefined) {
     try {

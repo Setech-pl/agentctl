@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { atomicWriteFile } from './atomic-file.ts';
 import type { GlobalConfig } from './config.ts';
 import type { Context } from './context.ts';
-import { withFileLock } from './file-lock.ts';
+import { tryFileLock, withFileLock } from './file-lock.ts';
 import { recordJournal } from './journal.ts';
 import type { Notifier } from './notify.ts';
 import { watchAlive } from './queue.ts';
@@ -121,36 +121,43 @@ export interface ApplyOptions {
  */
 export async function applyMcpRequests(ctx: Context, notifier: Notifier, apply: (request: McpRequest) => Promise<{ text: string; announce?: string }>, opts: ApplyOptions = {}): Promise<McpRequest[]> {
   if (ctx.runner.dryRun) return [];
-  const now = () => new Date(ctx.runner.now()).toISOString();
-  const finished: McpRequest[] = [];
-  for (const stale of readMcpRequests(ctx.config).filter((r) => r.status === 'applying')) {
-    finished.push(await finish(ctx, notifier, { ...stale, status: 'failed', appliedAt: now(), error: 'interrupted: the watcher stopped while applying it; check status and preview again' }, opts));
-  }
-  for (const pending of readMcpRequests(ctx.config).filter((r) => r.status === 'pending')) {
-    const claimed = await withRequestLock(ctx, async () => {
-      const fresh = readMcpRequests(ctx.config).find((r) => r.id === pending.id);
-      if (fresh?.status !== 'pending') return undefined;
-      const applying: McpRequest = { ...fresh, status: 'applying' };
-      writeRequest(ctx.config, applying);
-      return applying;
-    });
-    if (!claimed) continue;
-    let next: McpRequest;
-    try {
-      const done = await apply(claimed);
-      next = { ...claimed, status: 'done', appliedAt: now(), result: firstLines(done.announce ?? done.text) };
-    } catch (e) {
-      next = { ...claimed, status: 'failed', appliedAt: now(), error: errorMessage(e) };
+  // Both watch and its queue step can reach this path while a long plan is still running.
+  const release = tryFileLock(path.join(ctx.config.stateDir, 'mcp-apply.lock'));
+  if (!release) return [];
+  try {
+    const now = () => new Date(ctx.runner.now()).toISOString();
+    const finished: McpRequest[] = [];
+    for (const stale of readMcpRequests(ctx.config).filter((r) => r.status === 'applying')) {
+      finished.push(await finish(ctx, notifier, { ...stale, status: 'failed', appliedAt: now(), error: 'interrupted: the watcher stopped while applying it; check status and preview again' }, opts));
     }
-    finished.push(await finish(ctx, notifier, next, opts));
-  }
-  for (const old of readMcpRequests(ctx.config)) {
-    if ((old.status === 'done' || old.status === 'failed') && ctx.runner.now() - Date.parse(old.appliedAt ?? old.requestedAt) > KEEP_MS) {
-      if (old.tool === 'gc_preview') fs.rmSync(gcPreviewPlanFile(ctx.config, old.id), { force: true });
-      fs.rmSync(requestFile(ctx.config, old.id), { force: true });
+    for (const pending of readMcpRequests(ctx.config).filter((r) => r.status === 'pending')) {
+      const claimed = await withRequestLock(ctx, async () => {
+        const fresh = readMcpRequest(ctx.config, pending.id);
+        if (fresh?.status !== 'pending') return undefined;
+        const applying: McpRequest = { ...fresh, status: 'applying' };
+        writeRequest(ctx.config, applying);
+        return applying;
+      });
+      if (!claimed) continue;
+      let next: McpRequest;
+      try {
+        const done = await apply(claimed);
+        next = { ...claimed, status: 'done', appliedAt: now(), result: firstLines(done.announce ?? done.text) };
+      } catch (e) {
+        next = { ...claimed, status: 'failed', appliedAt: now(), error: errorMessage(e) };
+      }
+      finished.push(await finish(ctx, notifier, next, opts));
     }
+    for (const old of readMcpRequests(ctx.config)) {
+      if ((old.status === 'done' || old.status === 'failed') && ctx.runner.now() - Date.parse(old.appliedAt ?? old.requestedAt) > KEEP_MS) {
+        if (old.tool === 'gc_preview') fs.rmSync(gcPreviewPlanFile(ctx.config, old.id), { force: true });
+        fs.rmSync(requestFile(ctx.config, old.id), { force: true });
+      }
+    }
+    return finished;
+  } finally {
+    release();
   }
-  return finished;
 }
 
 async function finish(ctx: Context, notifier: Notifier, request: McpRequest, opts: ApplyOptions): Promise<McpRequest> {

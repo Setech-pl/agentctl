@@ -4,13 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
-- FIELD0253-ATTENTION: Watch resolves its long-wait WALL requests when the corresponding task state ends. / Watch zamyka swoje prośby WALL po zakończeniu odpowiadającego im oczekiwania.
-- FIELD0253-LIMITS: Watch publishes each observed limit or quota revision on WALL with its source. / Watch publikuje na WALL każdą wykrytą zmianę limitów lub kwot wraz ze źródłem.
-- FIELD0253-DISK: Disk severity follows fresh free space and worktree measurement age is informational. / Poziom dysku zależy od świeżego odczytu wolnego miejsca, a wiek pomiaru worktree jest informacyjny.
-- FIELD0253-CLI: GC accepts named dirty tasks and requires a terminal confirmation for the full selection. / GC przyjmuje listę zadań z lokalnymi zmianami, a cała selekcja wymaga potwierdzenia na terminalu.
-- FIELD0253-GC: Watch prepares MCP GC plans and confirmation is bound to the returned plan. / Watch przygotowuje plan GC dla MCP, a potwierdzenie jest powiązane z tym planem.
-- FIELD0253-BUDGET: An MCP response deadline cannot interrupt a state commit or create a false state error. / Limit czasu odpowiedzi MCP nie przerywa zapisu stanu ani nie tworzy fałszywego błędu zapisu.
-- FIELD0253-ENOSPC: Watch retries state and snapshot writes after ENOSPC and records recovery. / Watch ponawia zapis stanu po ENOSPC i odnotowuje wznowienie.
+- FIELD0253 was prepared for 0.25.3. / Poprawki FIELD0253 przygotowano do wydania 0.25.3.
+
 - ROWSEL0252 was prepared for 0.25.2. / Poprawkę ROWSEL0252 przygotowano do wydania 0.25.2.
 
 - NOTIFY0251 was prepared for 0.25.1. / Poprawkę NOTIFY0251 przygotowano do wydania 0.25.1.
@@ -20,6 +15,16 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - SNAP0247 was prepared for 0.23.3. / Poprawka SNAP0247 została przygotowana do wydania 0.23.3.
 - DISK0248 was prepared for 0.24.0. / Zmiany DISK0248 zostały przygotowane do wydania 0.24.0.
+
+## [0.25.3] - 2026-11-21
+
+- FIELD0253-ENOSPC: Watch retries state and snapshot writes after ENOSPC and records recovery. / Watch ponawia zapis stanu po ENOSPC i odnotowuje wznowienie.
+- FIELD0253-BUDGET: An MCP response deadline cannot interrupt a state commit or create a false state error. / Limit czasu odpowiedzi MCP nie przerywa zapisu stanu ani nie tworzy fałszywego błędu zapisu.
+- FIELD0253-GC: Watch prepares MCP GC plans and confirmation is bound to the returned plan. / Watch przygotowuje plan GC dla MCP, a potwierdzenie jest powiązane z tym planem.
+- FIELD0253-CLI: GC accepts named dirty tasks and requires a terminal confirmation for the full selection. / GC przyjmuje listę zadań z lokalnymi zmianami, a cała selekcja wymaga potwierdzenia na terminalu.
+- FIELD0253-DISK: Disk severity follows fresh free space and worktree measurement age is informational. / Poziom dysku zależy od świeżego odczytu wolnego miejsca, a wiek pomiaru worktree jest informacyjny.
+- FIELD0253-LIMITS: Watch publishes each observed limit or quota revision on WALL with its source. / Watch publikuje na WALL każdą wykrytą zmianę limitów lub kwot wraz ze źródłem.
+- FIELD0253-ATTENTION: Watch resolves its long-wait WALL requests when the corresponding task state ends. / Watch zamyka swoje prośby WALL po zakończeniu odpowiadającego im oczekiwania.
 
 ## [0.25.2] - 2026-11-20
 

@@ -490,7 +490,7 @@ function readGcPreview(ctx: Context, id: string): { plan: GcPlan; at: number; ar
 
 async function requestGcPreview(deps: McpDeps, args: GcPreviewArgs): Promise<ToolResult> {
   const { detail: _detail, offset: _offset, limit: _limit, ...selection } = args;
-  return recordDeferred(deps, 'gc_preview', args, null, `gc_preview:${JSON.stringify(canonical(selection))}`, undefined);
+  return recordDeferred(deps, 'gc_preview', { ...args }, null, `gc_preview:${JSON.stringify(canonical(selection))}`, undefined);
 }
 
 async function runGcPreview(deps: McpDeps, { merged, ...args }: GcPreviewArgs & { merged?: boolean }): Promise<ToolResult> {
