@@ -10,11 +10,12 @@ import path from 'node:path';
 import type { Context } from './context.ts';
 import { gitFailure } from './git.ts';
 import { recordEvent } from './history.ts';
-import { listTaskRecords, readTaskRecord, readTaskRecordById, setHeaderFields, taskFile } from './taskstore.ts';
+import { readTaskRecord, readTaskRecordById, setHeaderFields, taskFile } from './taskstore.ts';
 import type { TaskRecord } from './taskstore.ts';
 import { AgentctlError, Problems, windowName } from './util.ts';
 import { cleanupClosedWorktrees } from './close-cleanup.ts';
 import { listTargets, matchTask } from './resolve.ts';
+import { assertCheckoutNotBorrowed } from './readonly-review.ts';
 
 export interface CloseOptions {
   rmWorktree?: boolean;
@@ -94,14 +95,7 @@ export async function removeWorktrees(ctx: Context, taskArg: string, repos: Task
     ctx.info(`${taskArg}: author's worktree retained`);
     return;
   }
-  if (record && !record.host && !ctx.runner.dryRun) {
-    const reviews = listTaskRecords(ctx.config).filter(other => other.reviewMode && other.reviewOf === record.task);
-    if (reviews.length) {
-      const live = await ctx.localTmux.listWindows();
-      const review = reviews.find(other => live.includes(other.window));
-      if (review) throw new AgentctlError(`${taskArg}: readonly review ${review.task} is using the worktree`);
-    }
-  }
+  if (record && !record.host) await assertCheckoutNotBorrowed(ctx, record.task);
   const runner = record?.host ? ctx.hosts.forHost(record.host) : ctx.runner;
   for (const repo of repos) {
     if (path.resolve(repo.worktree) === path.resolve(repo.path)) {

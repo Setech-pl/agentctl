@@ -278,6 +278,7 @@ The selection covers the full width of the list pane, including the gaps between
 | `disk.measurement_timeout_s` | `600` | Maximum execution time of a tree measurement. A timed-out worker is terminated and frees its slot; reads retain the last known value and report a measurement error. |
 | `git` | mapping | Worktree checkout and setup limits. |
 | `git.timeout_s` | `600` | Positive timeout in seconds for worktree add (including checkout) and each setup command. |
+| `gc` | mapping | Integration cleanup settings. |
 | `gc.after_integration` | `propose` | `propose` prepares a request-ID GC plan on local `main`/`master` advances and routes a WALL message to each owning chat. `off` disables proposals. |
 | `mcp.client` | — | Optional stable suffix to clientInfo.name that intentionally shares a cursor between sessions. Tool parameter client overrides it. By default each session consumes independently from its initialization checkpoint; new sessions inherit the client high-water mark. |
 | `mcp.max_response_kb` | `8` | Limit of each serialized MCP tool result in KiB (1–1024). Larger results return fragments through `response_page`; continuation never repeats the operation. |

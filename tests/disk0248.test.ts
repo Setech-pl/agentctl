@@ -109,6 +109,7 @@ it('FLOW-READONLY: a stopped author lends its worktree with agent-scoped commit 
   const [started] = await newTasks(w.ctx, [review]);
   assert.deepEqual(started?.worktrees, [worktree]);
   assert.equal(readTaskRecord(w.config, review.window)?.reviewMode, 'readonly-on-author');
+  await assert.rejects(newTasks(w.ctx, [a], { reuse: true }), /readonly review REVIEW is using the author worktree/);
   assert.equal(git(worktree, 'config', 'core.hooksPath'), original);
   const launcher = fs.readFileSync(path.join(taskDir(w.config, review.window), 'start.sh'), 'utf8');
   assert.match(launcher, /GIT_CONFIG_KEY_0=core\.hooksPath/);

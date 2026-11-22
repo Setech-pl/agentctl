@@ -6,7 +6,7 @@ import { cloneTaskNodeModules, hasNpmLockfile, nodeModulesEvent, setupNodeModule
 import { assertWorktreeVolumes, missingWorktreeVolume, WorktreeVolumeError } from './worktree-volume.ts';
 import { peakHold } from './peak.ts';
 import { protectReadOnly } from './read-only.ts';
-import { readonlyReviewEnvironment, readonlyReviewEvidence, readonlyReviewRepos } from './readonly-review.ts';
+import { assertCheckoutNotBorrowed, readonlyReviewEnvironment, readonlyReviewEvidence, readonlyReviewRepos } from './readonly-review.ts';
 import { assertCandidateCheckout, assertReviewBase } from './review-freshness.ts';
 import { attachHint } from './tmux-socket.ts';
 import { writeLaunchScript } from './launch-script.ts';
@@ -191,7 +191,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
       const repos = await readonlyReviewRepos(ctx, spec);
       const evidence = readonlyReviewEvidence(ctx, spec.window);
       spec = { ...spec, repos, prompt: `Review in the author's checkout. Leave its files and Git state untouched. Write evidence under ${evidence}.\n\n${spec.prompt}` };
-    }
+    } else if (!spec.host) await assertCheckoutNotBorrowed(ctx, spec.task);
     const execution = spec.host ? ctx.hosts.forHost(spec.host) : runner;
     const taskTmux = spec.host ? ctx.hosts.tmux(spec.host) : tmux;
     const hint = spec.host ? remoteAttachHint(config, spec)! : attachHint(config);

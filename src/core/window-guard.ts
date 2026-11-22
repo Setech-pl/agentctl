@@ -3,9 +3,8 @@ import { assertReviewIsolated, findAuthorRecord, LEGACY_RECORD_HINT, LEGACY_REVI
 import type { AutoReviewSource } from './spec.ts';
 import type { ExecResult } from './runner.ts';
 import { AgentctlError } from './util.ts';
-import { assertAuthorStopped, assertReadonlyReview } from './readonly-review.ts';
+import { assertAuthorStopped, assertCheckoutNotBorrowed, assertReadonlyReview } from './readonly-review.ts';
 import { withStartLock } from './start-lock.ts';
-import { listTaskRecords } from './taskstore.ts';
 
 /*
  * The one door to an agent's tmux window. Every path that makes a window for a task (start from the queue, `new`, `resume`, `move`, `queue retry`, the
@@ -64,16 +63,10 @@ export async function openAgentWindow(ctx: Context, req: AgentWindowRequest): Pr
   const open = () => req.sessionUp ? tmux.newWindow(req.window, req.cwd, req.env, req.command) : tmux.newSession(req.window, req.cwd, req.env, req.command);
   assertAgentSpawnAllowed(ctx, req);
   if (req.host || ctx.runner.dryRun) return open();
-  return withStartLock(ctx, async () => {
-    if (req.reviewMode) assertAuthorStopped(ctx, assertReadonlyReview(ctx, req), await ctx.localTmux.listWindows());
-    else {
-      const reviews = listTaskRecords(ctx.config).filter(record => record.reviewMode && record.reviewOf === req.task);
-      if (reviews.length) {
-        const live = await ctx.localTmux.listWindows();
-        const review = reviews.find(record => live.includes(record.window));
-        if (review) throw new AgentctlError(`${req.task}: readonly review ${review.task} is using the author worktree`, `Close ${review.task} before starting the author task.`);
-      }
-    }
-    return open();
+  if (req.reviewMode) await withStartLock(ctx, async () => {
+    assertAuthorStopped(ctx, assertReadonlyReview(ctx, req), await ctx.localTmux.listWindows());
   });
+  else await assertCheckoutNotBorrowed(ctx, req.task);
+  // Admission reservations cover the launch. Holding start.lock across tmux would block independent admissions.
+  return open();
 }

@@ -508,7 +508,7 @@
     "rev": "v0.25.3",
     "outcome": "FAILS",
     "failed": 1,
-    "passed": 0,
+    "passed": 1,
     "failing": [
       "FLOW-READONLY: a stopped author lends its worktree with agent-scoped commit and push hooks",
       "FLOW-READONLY: a stopped author lends its worktree with agent-scoped commit and push hooks"

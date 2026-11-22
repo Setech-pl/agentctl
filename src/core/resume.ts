@@ -3,7 +3,7 @@ import { checkHostLimit } from './host-limits.ts';
 import { installRemoteHooks } from './host-task.ts';
 import { writeLaunchScript } from './launch-script.ts';
 import { validateLaunch, launchEnvironment } from './safety.ts';
-import { readonlyReviewEnvironment } from './readonly-review.ts';
+import { assertCheckoutNotBorrowed, readonlyReviewEnvironment } from './readonly-review.ts';
 import { provider, isActive, providerCommand } from './providers/registry.ts';
 import { withStartLock, reserveStarts, releaseStarts } from './start-lock.ts';
 import { queuePrompt, deliverPendingPrompt } from './prompt-delivery.ts';
@@ -141,6 +141,7 @@ async function startResumed(ctx: Context, plan: ResumePlan, opts: { self?: SelfA
     // Before the attempt is written into the record: a refused resume leaves it as it was.
     const request = { task: c.task, report: record.report, reportAlt: record.reportAlt, host: c.host, repos: record.repos, reviewOf: record.reviewOf, reviewMode: record.reviewMode, autoReview: record.autoReview, origin: 'resume' as const };
     assertAgentSpawnAllowed(ctx, request);
+    if (!c.host && !record.reviewMode) await assertCheckoutNotBorrowed(ctx, c.task);
     const order = { agent: c.agent, model: c.model, effort: c.effort as import('./config.ts').Effort, task: c.task };
     validateLaunch(config, order, record.env);
     const attempt = attemptFields(record, runner.now());

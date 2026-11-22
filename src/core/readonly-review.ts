@@ -5,7 +5,7 @@ import { checkReportPath } from './report-path.ts';
 import { findAuthorRecord } from './review-gate.ts';
 import type { ResolvedRepo, ResolvedSpec } from './spec.ts';
 import { pendingStarts } from './start-lock.ts';
-import type { TaskRecord } from './taskstore.ts';
+import { listTaskRecords, type TaskRecord } from './taskstore.ts';
 import { AgentctlError, shellQuote } from './util.ts';
 import { insidePath } from './worktree-volume.ts';
 
@@ -36,6 +36,17 @@ export function assertAuthorStopped(ctx: Context, author: TaskRecord, live: stri
   if (live.includes(author.window) || pendingStarts(ctx.config).some(start => start.task === author.task)) {
     throw new AgentctlError(`${author.task}: author task is still running or starting`, `Close ${author.task} before starting the readonly review.`);
   }
+}
+
+/** Author starts already reserve their task ID. Check both a review's reservation and its live window. */
+export async function assertCheckoutNotBorrowed(ctx: Context, task: string): Promise<void> {
+  if (ctx.runner.dryRun) return;
+  const reviews = listTaskRecords(ctx.config).filter(record => record.reviewMode && record.reviewOf === task);
+  if (!reviews.length) return;
+  const pending = new Set(pendingStarts(ctx.config).map(start => start.window));
+  const live = await ctx.localTmux.listWindows();
+  const borrower = reviews.find(review => pending.has(review.window) || live.includes(review.window));
+  if (borrower) throw new AgentctlError(`${task}: readonly review ${borrower.task} is using the author worktree`, `Close ${borrower.task} before using the worktree.`);
 }
 
 export async function readonlyReviewRepos(ctx: Context, spec: ResolvedSpec): Promise<ResolvedRepo[]> {
