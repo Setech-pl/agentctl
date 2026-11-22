@@ -406,7 +406,8 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
 }
 
 /** Show the board until the user quits; resolves when it is gone. Needs a terminal. */
-export async function runBoardApp(ctx: Context, insideTmux: boolean, streams: { stdout?: NodeJS.WriteStream; stdin?: NodeJS.ReadStream } = {}, self?: SelfArgv, runtime?: BoardRuntime): Promise<void> {
+export async function runBoardApp(ctx: Context, insideTmux: boolean, { signal, ...streams }: { stdout?: NodeJS.WriteStream; stdin?: NodeJS.ReadStream; signal?: AbortSignal } = {}, self?: SelfArgv, runtime?: BoardRuntime): Promise<void> {
+  if (signal?.aborted) return;
   const out = streams.stdout ?? process.stdout;
   const titled = ctx.config.board.windowTitle;
   const version = packageVersion();
@@ -414,8 +415,12 @@ export async function runBoardApp(ctx: Context, insideTmux: boolean, streams: { 
   const restoreTitle = titled ? await beginTitle(ctx, out, version, 'board', insideTmux) : undefined;
   try {
     // interactive: true - Ink draws nothing in a "CI" environment (a CI or BUILD_* variable in the tmux server's environment), but the board only runs in a terminal.
+    if (signal?.aborted) return;
     const app = render(h(Board, { ctx, insideTmux, self, runtime }), { alternateScreen: true, exitOnCtrlC: false, interactive: true, ...streams });
-    await app.waitUntilExit();
+    const cancel = () => app.unmount();
+    if (signal?.aborted) cancel();
+    else signal?.addEventListener('abort', cancel, { once: true });
+    try { await app.waitUntilExit(); } finally { signal?.removeEventListener('abort', cancel); }
   } finally {
     await restoreTitle?.();
   }
