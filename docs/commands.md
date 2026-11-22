@@ -38,6 +38,10 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`limits`](#agentctl-limits) | The limits of simultaneous agents per provider and what uses them up: agentctl windows, places reserved for agents you started by hand, and (limits.count_external) claude/codex sessions found in other terminals. Without a subcommand: show. |
 | [`limits show`](#agentctl-limits-show) | Per provider: limit, places used, free places, the windows of agentctl, the reserved and the external ones, and the tasks waiting in the queue. |
 | [`limits set`](#agentctl-limits-set) | Change the limits in config.yaml (comments and the order of the keys stay; the old file is kept as config.yaml.bak). A running watch and the MCP server pick it up at once; waiting tasks of the queue start at the next tick. |
+| [`limits profile`](#agentctl-limits-profile) | List limits profiles or activate one as the owner. A scheduled switch ends a manual selection. |
+| [`limits requests`](#agentctl-limits-requests) | List pending limit requests. |
+| [`limits approve`](#agentctl-limits-approve) | Approve a pending limit request as the owner. |
+| [`limits reject`](#agentctl-limits-reject) | Reject a pending limit request as the owner. |
 | [`limits reserve`](#agentctl-limits-reserve) | Hold places for agents you start by hand (they count against the limit, so the queue leaves room for them). Several reservations add up; "limits release" gives them back. |
 | [`limits release`](#agentctl-limits-release) | Give reserved places back: claude=1 releases one, a bare provider name releases all of its places. |
 | [`events`](#agentctl-events) | What changed since the last time: reports that became ready (with the verdict), starts from the queue, questions, folder trust, blocked, cancelled and limited tasks, finished cohorts, plan thresholds, changed limits - then a line with the state now. Needs "agentctl watch" for what it sees (the journal is written by watch and by the commands). Each client (cli, mcp) has its own "last" marker. |
@@ -648,7 +652,7 @@ agentctl status --cohort sprint-1      # only the tasks of one cohort (also with
 
 The limits of simultaneous agents per provider and what uses them up: agentctl windows, places reserved for agents you started by hand, and (limits.count_external) claude/codex sessions found in other terminals. Without a subcommand: show.
 
-Subcommands: `limits show`, `limits set`, `limits reserve`, `limits release`. Without a subcommand: `show`.
+Subcommands: `limits show`, `limits set`, `limits profile`, `limits requests`, `limits approve`, `limits reject`, `limits reserve`, `limits release`. Without a subcommand: `show`.
 
 ```
 agentctl limits [options] [command]
@@ -689,10 +693,11 @@ agentctl limits set [options] <limits...>
 
 | Argument | Meaning |
 |---|---|
-| `<limits...>` | claude=3 codex=5; off disables a provider (codex=off: no windows of it start), 0 or none removes a limit (codex=0); queue_hold=90 \| queue_hold=off \| queue_hold.codex=85 sets usage.queue_hold; hold.glm=21:50 \| hold.glm=3h \| hold.glm=off sets a timed provider hold; quota.nc.claude=4 sets a chat share; overprovision=1.5 sets the share budget multiplier |
+| `<limits...>` | claude=3 codex=5; off disables a provider, 0 removes its limit; queue_hold.codex=85 sets a queue hold; hold.glm=3h sets a timed provider pause; quota.nc.share=40 sets a percent, quota.nc.claude=4 an absolute override |
 
 | Option | Meaning | Notes |
 |---|---|---|
+| `--until <time>` | temporarily override the named provider limits until local HH:MM, ISO timestamp, or duration (3h) |  |
 | `-y, --yes` | do not ask |  |
 | `--dry-run` | print what would be written, change nothing |  |
 
@@ -703,6 +708,50 @@ agentctl limits set claude=3 codex=5     # summary, y/N, takes effect at once
 agentctl limits set codex=off -y         # Codex is disabled, no question
 agentctl limits set codex=0 -y           # no limit for Codex again
 ```
+
+## agentctl limits profile
+
+List limits profiles or activate one as the owner. A scheduled switch ends a manual selection.
+
+```
+agentctl limits profile [options] [name]
+```
+
+| Argument | Meaning |
+|---|---|
+| `[name]` | profile defined in limits.profiles |
+
+## agentctl limits requests
+
+List pending limit requests.
+
+```
+agentctl limits requests [options]
+```
+
+## agentctl limits approve
+
+Approve a pending limit request as the owner.
+
+```
+agentctl limits approve [options] <id>
+```
+
+| Argument | Meaning |
+|---|---|
+| `<id>` | request ID or WALL decision-request ID |
+
+## agentctl limits reject
+
+Reject a pending limit request as the owner.
+
+```
+agentctl limits reject [options] <id>
+```
+
+| Argument | Meaning |
+|---|---|
+| `<id>` | request ID or WALL decision-request ID |
 
 ## agentctl limits reserve
 

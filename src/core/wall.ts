@@ -29,6 +29,7 @@ export type WallKind = (typeof WALL_KINDS)[number];
 export const UNKNOWN_CHAT_WARNING = 'unknown chat – only channel agentctl visible; pass as: "chat:<name>"';
 
 export const WALL_STATUSES = ['open', 'answered', 'accepted', 'rejected', 'superseded', 'stale'] as const;
+export const LIMIT_REQUEST_ORIGIN = 'limit-request/';
 export type WallStatus = (typeof WALL_STATUSES)[number];
 /** Only the owner (or a chat confirming on the owner's behalf) changes the status of these. */
 export const OWNER_KINDS: ReadonlySet<WallKind> = new Set(['decision-request', 'contract-change']);
@@ -719,9 +720,10 @@ export interface StatusInput {
 
 export interface StatusPlan { id: string; channel: string; kind: WallKind; from: WallStatus; to: WallStatus; by: string; for?: 'owner' }
 
-export function planStatus(config: GlobalConfig, who: WallIdentity, input: StatusInput): StatusPlan {
+export function planStatus(config: GlobalConfig, who: WallIdentity, input: StatusInput, managedLimitRequest = false): StatusPlan {
   if (!(WALL_STATUSES as readonly string[]).includes(input.status)) throw new AgentctlError(`status must be one of ${WALL_STATUSES.join(', ')}`);
   const header = findMessage(config, input.id);
+  if (header.origin?.startsWith(LIMIT_REQUEST_ORIGIN) && !managedLimitRequest) throw new AgentctlError('Use the limits panel or agentctl limits approve/reject to decide this request.');
   if (who.kind === 'unknown') throw new AgentctlError(`WALL is read-only for this caller (${who.note ?? 'unknown chat'})`);
   if (header.status === input.status) throw new AgentctlError(`${header.id} is ${header.status} already`);
   const owners = OWNER_KINDS.has(header.kind) || input.status === 'open';
@@ -738,14 +740,14 @@ export function planStatus(config: GlobalConfig, who: WallIdentity, input: Statu
 }
 
 /** A new status record (the history stays); checked again under the lock. */
-export async function setStatus(ctx: Context, who: WallIdentity, input: StatusInput, expected?: WallStatus): Promise<WallHeader> {
+export async function setStatus(ctx: Context, who: WallIdentity, input: StatusInput, expected?: WallStatus, managedLimitRequest = false): Promise<WallHeader> {
   const { config } = ctx;
   return withWallLock(config, async () => {
     if (expected) {
       const current = findMessage(config, input.id);
       if (current.status !== expected) return current;
     }
-    const plan = planStatus(config, who, input);
+    const plan = planStatus(config, who, input, managedLimitRequest);
     appendRecord(config, plan.channel, { v: 1, type: 'status', id: plan.id, ts: new Date(ctx.runner.now()).toISOString(), status: plan.to, by: plan.by, ...(plan.for ? { for: plan.for } : {}), ...(input.note ? { note: input.note } : {}) });
     saveIndex(config, [plan.channel]);
     return findMessage(config, plan.id);

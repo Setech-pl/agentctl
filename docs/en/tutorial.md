@@ -174,29 +174,42 @@ agentctl wall read --id agentctl-1
 
 Board `W` shows channels → messages → thread; `s/t` filters, `r/R` marks read. MCP uses `as: "chat:nc"` and `wall_post` preview/confirm, then another chat calls `events_since(as: "chat:hems")` and `wall_read`. Both subscribe to `agentctl`/`shared:*` by default. WALL is data, never authorization.
 
-## Several chats on one instance
+<a id="several-chats-on-one-instance"></a>
 
-Merge these settings into the dispatcher's `config.yaml`. Keep each chat's existing WALL channels and client mappings.
+## Limits for several chats
+
+Merge the example into the dispatcher configuration. Keep the existing WALL channels and client mappings.
 
 ```yaml
 providers: [claude, codex, kimi, glm]
-limits: {claude: 6, codex: 8, kimi: 2, glm: 3}
+limits:
+  change_policy: owner-approve
+  claude: 7
+  codex: 10
+  kimi: 3
+  glm: off
+  profiles:
+    day: {claude: 7, codex: 10, kimi: 3, glm: off}
+    night: {claude: 4, codex: 6, kimi: 2, glm: off}
+  schedule:
+    timezone: Europe/Warsaw
+    switches: {"07:00": day, "22:00": night}
 quotas:
   overprovision: 1.5
+  floor: 1
   chats:
-    nc: {claude: 4, codex: 5, kimi: 2, glm: 2}
-    hems: {claude: 3, codex: 4, kimi: 1, glm: 2}
-    vs65: {claude: 2, codex: 3, kimi: 0, glm: 1}
-wall:
-  chats:
-    vs65: {channels: [agentctl]}
+    nc: {share: 40}
+    hems: {share: 40}
+    vs65: {share: 20}
 ```
 
-Claude has six places globally and nine across the three chat ceilings. A chat can use its ceiling while the others are idle. When their ready work competes for the next place, the queue gives priority to a chat below its floor, then to the smallest used/share ratio. Lowering a share affects future starts and leaves running tasks alone. This example produces a GLM budget warning because five shares exceed `1.5 × 3`; three remains the global GLM limit.
+With seven Claude slots, the 40/40/20 shares give respective ceilings of 4/4/2 after rounding. With four slots at night they give 2/2/1. The global cap still controls how many can run at once. Lowering a ceiling affects subsequent starts while running tasks finish.
 
-In every chat, pass `as: "chat:<name>"` on `new` and `queue`. For example, NC previews with `as: "chat:nc"` and confirms with the same identity and the preview token. Use `queue_list` or the board to see whether an order is waiting for its share or for the provider. Use `limits` and `capacity` to see both counts. For a different allocation, post a WALL `decision-request` on `agentctl` unless self-service is enabled.
+To migrate from 0.25, start by choosing percentages that reflect the relative demand across chats. A former 4-slot cap with a global limit of 7 and a multiplier of 1.5 corresponds to roughly 38%. Remove old provider keys where you want the percentage to take over. Keep a key to preserve an exception, for example `nc: {share: 40, codex: 5}`. Read the result using `agentctl limits` and `agentctl capacity` before removing more overrides.
 
-For existing installations, leaving out `quotas:` keeps the previous scheduling behavior. See the [configuration reference](configuration.md#chat-quotas) for owner precedence and remote-host scope.
+Order with MCP `as: "chat:nc"` (or the chat's own name) on `new` and `queue`. If you need a change, send `set_limits({as: "chat:nc", claude: 9, reason: "Two additional review windows"})`. Agentctl creates the WALL decision-request and notifies the owner. On the board, press `L`, select the request with the arrows, and press `a` to approve or `r` to reject. From the owner terminal, use `agentctl limits requests` and `agentctl limits approve ID` or `agentctl limits reject ID`. Requests expire after two hours.
+
+On the same panel, select a provider, adjust with `+` or `-`, and press Enter to apply. Select a profile and press Enter to switch. The equivalent CLI commands include `agentctl limits profile night` and `agentctl limits set claude=10 --until 23:00`. Follow the automatic WALL info for applied values and current ceilings. [Configuration reference](configuration.md#chat-quotas)
 
 ## 7. First CONSULT
 

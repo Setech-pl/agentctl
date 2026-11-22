@@ -29,6 +29,7 @@ import type { ConfigRefresh } from './config-store.ts';
 import { loadGlobalConfig } from './config.ts';
 import type { GlobalConfig } from './config.ts';
 import { announceLimitConfigChange, holdDiffText, limitEditLock } from './limits.ts';
+import { maintainLimitRequests } from './limit-requests.ts';
 import { findResumable, resumeText } from './resume.ts';
 import { recordJournal, recordJournalOnce } from './journal.ts';
 import type { JournalKind } from './journal.ts';
@@ -255,6 +256,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   // Admission observes slots and named dependencies. Full status and report processing are optional for it.
   await step('queue', () => queueTick(ctx, memory.queue, notifier, { self: options.self, signal: options.signal, log: startLog }));
   await step('WALL maintenance', () => maintainWall(ctx));
+  await step('limit requests', () => maintainLimitRequests(ctx));
   const tickAt = ctx.runner.now();
   if (memory.lastTickAt === undefined) {
     try {
@@ -411,7 +413,7 @@ export async function reloadConfig(ctx: Context, store: ConfigStore, by = 'watch
     ctx.out(text);
   };
   const refresh = async () => {
-    const outcome = store.refresh();
+    const outcome = store.refresh(ctx.runner.now());
     if (outcome.config !== before) ctx.setConfig(outcome.config);
     await announceLimitConfigChange(ctx, before, outcome.config).catch(error => log(`config: ${errorMessage(error)}`));
     return outcome;

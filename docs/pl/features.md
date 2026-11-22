@@ -52,7 +52,7 @@ CONSULT prowadzi 2–26 panelistów z co najmniej dwóch aktywnych dostawców, 1
 
 ## Ekonomia, utrzymanie i regresje
 
-`limits` kontroluje liczbę równoległych okien; `capacity` łączy odczytane okna planu, sloty, kolejkę, dysk/load i oznaczone estymacje. `usage` czyta tokeny i plan, w tym osobne dane GLM. `set_limits` / `limits set` zmienia `queue_hold` na żywo. [Ekonomia](token-economics.md) wyjaśnia braki danych i koszt benchmarku.
+`limits` kontroluje liczbę równoległych okien; `capacity` łączy odczytane okna planu, sloty, kolejkę, dysk/load i oznaczone estymacje. `usage` czyta tokeny i plan, w tym osobne dane GLM. MCP `set_limits` składa wniosek o zmianę `queue_hold`, a właściciel może ją zastosować z tablicy lub CLI. [Ekonomia](token-economics.md) wyjaśnia braki danych i koszt benchmarku.
 
 `log` i `stats` podsumowują próby i ludzkie oceny; `dataset export` eksportuje lokalny benchmark JSONL/CSV z pochodzeniem danych i jawnym włączeniem treści. `gc` najpierw pokazuje chroniony plan; brudna/aktywna/niescalona praca jest chroniona, gałęzie usuwa `git branch -d`. `history` to zapis prób dostępny przez log/stats/export, a nie polecenie CLI o nazwie history. `archive` archiwizuje stan zamkniętych zadań; `mirror_dir` kopiuje raporty/status dla lokalnego czytelnika. `doctor` diagnozuje połączenia, bezpieczeństwo, dostawców, stary MCP, dysk i config; `--timings` mierzy budżety odczytów.
 

@@ -4,7 +4,7 @@ import path from 'node:path';
 import { after } from 'node:test';
 import { main } from '../src/cli.ts';
 import type { CliDeps } from '../src/cli.ts';
-import { loadGlobalConfig } from '../src/core/config.ts';
+import { LIMITS_KEYS, loadGlobalConfig } from '../src/core/config.ts';
 import type { GlobalConfig } from '../src/core/config.ts';
 import { Context } from '../src/core/context.ts';
 import { RecordingRunner } from '../src/core/runner.ts';
@@ -13,6 +13,8 @@ import { recordFromSpec, renderTaskMd, taskDir, taskFile } from '../src/core/tas
 import type { TaskRecord } from '../src/core/taskstore.ts';
 
 export const REPO_ROOT = path.resolve(import.meta.dirname, '..');
+/** Older releases in regression proofs predate the direct-policy switch. */
+export const directLimitPolicy = LIMITS_KEYS.includes('change_policy') ? 'change_policy: direct' : '';
 const SCRATCH = process.env.AGENTCTL_TEST_TMP ?? process.env.AGENTCTL_TEST_CACHE ?? path.join(REPO_ROOT, '.cache');
 
 /** Per-file scratch directory under the repo's own .cache/ (git-ignored); removed after the file's tests. */

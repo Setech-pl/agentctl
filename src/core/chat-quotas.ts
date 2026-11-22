@@ -7,17 +7,23 @@ import type { Problems } from './util.ts';
 import { WALL_CHAT_NAME } from './wall-config.ts';
 
 type Shares = Partial<Record<AgentName, number>>;
+type ChatQuota = Shares & { share?: number };
 export interface ChatQuotas {
   overprovision: number;
-  chats: Record<string, Shares>;
+  chats: Record<string, ChatQuota>;
   default: Shares;
   floor: Shares;
+  shareFloor?: number;
   cohorts: Record<string, string>;
   per_host: boolean;
   self_service: 'off' | 'within_overprovision';
 }
 
 export const DEFAULT_OWNER = 'default';
+
+export function validShare(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100;
+}
 
 export function chatOwner(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
@@ -43,8 +49,12 @@ export function parseChatQuotas(raw: unknown, p: Problems): ChatQuotas | undefin
   const chats: ChatQuotas['chats'] = Object.create(null);
   const cohorts: ChatQuotas['cohorts'] = Object.create(null);
   const quotas: ChatQuotas = { overprovision: 1.5, chats, cohorts, default: shares(raw.default, 'config.quotas.default'),
-    floor: shares(raw.floor, 'config.quotas.floor'), per_host: false, self_service: 'off' };
+    floor: typeof raw.floor === 'number' ? {} : shares(raw.floor, 'config.quotas.floor'), per_host: false, self_service: 'off' };
   for (const key of Object.keys(raw)) if (!Object.hasOwn(quotas, key)) p.add(`unknown config.quotas key "${key}"`);
+  if (typeof raw.floor === 'number') {
+    if (Number.isSafeInteger(raw.floor) && raw.floor >= 0) quotas.shareFloor = raw.floor;
+    else p.add('config.quotas.floor must be a nonnegative integer or provider mapping');
+  }
   if (raw.overprovision !== undefined) {
     if (typeof raw.overprovision === 'number' && Number.isFinite(raw.overprovision) && raw.overprovision >= 1) quotas.overprovision = raw.overprovision;
     else p.add('config.quotas.overprovision must be a finite number >= 1');
@@ -60,7 +70,13 @@ export function parseChatQuotas(raw: unknown, p: Problems): ChatQuotas | undefin
   if (isObject(raw.chats)) {
     for (const [name, value] of Object.entries(raw.chats)) {
       if (!WALL_CHAT_NAME.test(name)) p.add(`config.quotas.chats.${name} is not a valid WALL chat name`);
-      else chats[name] = shares(value, `config.quotas.chats.${name}`);
+      else if (isObject(value)) {
+        const { share, ...overrides } = value;
+        const where = `config.quotas.chats.${name}`;
+        chats[name] = shares(overrides, where);
+        if (validShare(share)) chats[name]!.share = share;
+        else if (share !== undefined) p.add(`${where}.share must be a percentage from 0 to 100`);
+      } else shares(value, `config.quotas.chats.${name}`);
     }
   } else if (raw.chats !== undefined) p.add('config.quotas.chats must be a mapping');
   if (isObject(raw.cohorts)) {
@@ -80,7 +96,7 @@ export function taskOwner(config: GlobalConfig, cohort?: string): string | undef
 
 interface QuotaTask { agent: AgentName; owner?: string; host?: string }
 interface Slot { agent?: AgentName; owner?: string; host?: string; counted?: boolean; kind?: LiveWindow['kind'] }
-export interface ChatLoad { chat: string; host?: string; used: number; share: number | null; floor: number; floorUsed?: number }
+export interface ChatLoad { chat: string; host?: string; used: number; share: number | null; floor: number; floorUsed?: number; percent?: number }
 
 const buckets = (q: ChatQuotas): string[] => [...Object.keys(q.chats).sort().map(name => `chat:${name}`), DEFAULT_OWNER];
 function bucket(q: ChatQuotas, owner = DEFAULT_OWNER): string {
@@ -91,7 +107,16 @@ function sharesFor(config: GlobalConfig, agent: AgentName) {
   const q = config.quotas!;
   return buckets(q).map(chat => {
     const named = chat !== DEFAULT_OWNER;
-    const configured = (named ? q.chats[chat.slice(5)]?.[agent] : undefined) ?? q.default[agent];
+    const entry = named ? q.chats[chat.slice(5)] : undefined;
+    const percent = entry?.share;
+    if (percent !== undefined && entry?.[agent] === undefined) {
+      const limit = config.limits[agent];
+      const floor = percent > 0 ? q.floor[agent] ?? q.shareFloor ?? 1 : 0;
+      const ceiling = percent === 0 || limit === 'off' ? 0
+        : limit === undefined ? null : Math.max(floor, Math.round(limit * q.overprovision * percent / 100));
+      return { chat, share: ceiling, floor: limit === 'off' ? 0 : floor, percent };
+    }
+    const configured = entry?.[agent] ?? q.default[agent];
     const share = configured ?? null;
     const floor = Math.min(share ?? Infinity, q.floor[agent] ?? (named && share !== null && share > 0 ? 1 : 0));
     return { chat, share, floor };
@@ -103,7 +128,8 @@ export function quotaBudget(config: GlobalConfig, agent: AgentName) {
   const cap = limit === 'off' ? 0 : limit ?? Infinity;
   const shares = sharesFor(config, agent);
   return {
-    shares: shares.reduce((sum, chat) => sum + (chat.share ?? 0), 0),
+    shares: shares.reduce((sum, chat) => sum + (chat.percent === undefined ? chat.share ?? 0
+      : Number.isFinite(cap) ? cap * config.quotas!.overprovision * chat.percent / 100 : 0), 0),
     floors: shares.reduce((sum, chat) => sum + chat.floor, 0),
     cap,
     budget: cap * config.quotas!.overprovision,
@@ -183,3 +209,8 @@ export function nextQuotaTask<T extends QuotaTask>(config: GlobalConfig, candida
 
 export const renderChatLoad = (load: ChatLoad): string =>
   `${load.host ? `${load.host} ` : ''}${load.chat} ${load.used}/${load.share ?? '∞'} (floor ${load.floorUsed === undefined ? load.floor : `${load.floorUsed}/${load.floor} global`})`;
+
+export function effectiveChatCeilings(config: GlobalConfig) {
+  if (!config.quotas) return {};
+  return Object.fromEntries(activeProviders(config).map(agent => [agent, Object.fromEntries(chatLoads(config, agent, []).map(load => [load.chat, { ceiling: load.share, floor: load.floor }]))]));
+}

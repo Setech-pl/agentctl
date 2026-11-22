@@ -2,6 +2,7 @@ import { atomicWriteFile } from './atomic-file.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { GlobalConfig } from './config.ts';
+import { effectiveLimitConfig } from './limit-profiles.ts';
 import { errorMessage, isObject } from './util.ts';
 
 /*
@@ -19,13 +20,17 @@ export interface ConfigRefresh {
   error?: string;
 }
 
-const IGNORED = new Set(['path', 'loaded', 'reloadWarning']);
+const IGNORED = new Set(['path', 'loaded', 'reloadWarning', 'limitSettings', 'limitRuntime']);
 
 /** Which sections differ: by key of the parsed configuration. */
 export function changedKeys(a: GlobalConfig, b: GlobalConfig): string[] {
   const x = a as unknown as Record<string, unknown>;
   const y = b as unknown as Record<string, unknown>;
-  return [...new Set([...Object.keys(x), ...Object.keys(y)])].filter((k) => !IGNORED.has(k) && JSON.stringify(x[k]) !== JSON.stringify(y[k]));
+  const keys = [...new Set([...Object.keys(x), ...Object.keys(y)])].filter((k) => !IGNORED.has(k) && JSON.stringify(x[k]) !== JSON.stringify(y[k]));
+  const { baseQuotas: _before, ...before } = a.limitSettings;
+  const { baseQuotas: _after, ...after } = b.limitSettings;
+  if (!keys.includes('limits') && (JSON.stringify(before) !== JSON.stringify(after) || a.limitRuntime.profile !== b.limitRuntime.profile)) keys.push('limits');
+  return keys;
 }
 
 export class ConfigStore {
@@ -76,14 +81,24 @@ export class ConfigStore {
   }
 
   /** Look at the file. The first call (nothing loaded yet) loads it and throws when it cannot. */
-  refresh(): ConfigRefresh {
+  refresh(now = Date.now()): ConfigRefresh {
+    const unchanged = (): ConfigRefresh => {
+      const previous = this.good!;
+      if ((previous.limitRuntime.nextEvaluation ?? Infinity) > now) return { config: this.current, changed: false, keys: [] };
+      this.good = effectiveLimitConfig(previous, now);
+      this.view = undefined;
+      const keys = changedKeys(previous, this.good);
+      return { config: this.current, changed: keys.length > 0, keys };
+    };
     const stamp = this.stamp();
-    if (this.good && stamp !== undefined && stamp === this.seen) return { config: this.current, changed: false, keys: [] };
+    if (this.good && stamp !== undefined && stamp === this.seen) return unchanged();
     this.seen = stamp;
     const text = this.read();
-    if (this.good && text !== undefined && text === (this.failedText ?? this.goodText)) return { config: this.current, changed: false, keys: [] };
+    if (this.good && text !== undefined && text === (this.failedText ?? this.goodText)) return unchanged();
     try {
-      const next = this.load();
+      const loaded = this.load();
+      const next = loaded.limitRuntime.nextEvaluation !== undefined || loaded.limitSettings.manual || Object.keys(loaded.limitSettings.overrides).length
+        ? effectiveLimitConfig(loaded, now) : loaded;
       const keys = this.good ? changedKeys(this.good, next) : [];
       this.file = next.path;
       this.good = next;
@@ -97,7 +112,7 @@ export class ConfigStore {
       this.failedText = text;
       this.view = undefined;
       this.warning = `config.yaml does not load, the previous settings stay in force: ${errorMessage(e).split('\n').filter(Boolean).slice(0, 3).join(' ')}`;
-      return { config: this.current, changed: false, keys: [], error: this.warning };
+      return { ...unchanged(), error: this.warning };
     }
   }
 }

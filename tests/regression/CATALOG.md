@@ -10,6 +10,9 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| LIMITS0255-OWNER | A chat confirmation could change shared limits without an owner decision in the CLI or board. | `tests/owner-limits.test.ts` (`^LIMITS0255-OWNER:`) | 0.27.0 | fails on v0.26.0 (1 failing of 1) |
+| LIMITS0255-SHARES | Per-chat absolute ceilings stayed fixed after global changes and needed manual recalculation. | `tests/owner-limits.test.ts` (`^LIMITS0255-SHARES:`) | 0.27.0 | fails on v0.26.0 (1 failing of 1) |
+| LIMITS0255-SCHEDULE | The dispatcher could not switch between limit profiles at local times across midnight and DST. | `tests/owner-limits.test.ts` (`^LIMITS0255-SCHEDULE:`) | 0.27.0 | fails on v0.26.0 (1 failing of 1) |
 | FLOW-GC | Integration left closed worktrees for chats to find and scope manually before GC. | `tests/disk0248.test.ts` (`^FLOW-GC:`) | 0.26.0 | fails on v0.25.3 (2 failing of 2) |
 | FLOW-FRESHNESS | Reviews could start against outdated integration bases without a warning or candidate. | `tests/disk0248.test.ts` (`^FLOW-FRESHNESS:`) | 0.26.0 | fails on v0.25.3 (2 failing of 2) |
 | FLOW-READONLY | A review could not use the stopped author checkout with isolated evidence and Git hooks. | `tests/disk0248.test.ts` (`^FLOW-READONLY:`)<br>`tests/audit-0174.test.ts` (`^W4 a stale resume plan`) | 0.26.0 | fails on v0.25.3 (1 failing of 2) |

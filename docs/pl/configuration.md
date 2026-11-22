@@ -122,7 +122,7 @@ Typy/domysły sprawdzono z [config.ts](../../src/core/config.ts), [spec.ts](../.
 | `usage` | mapping · see below · g | Tokeny i progi planu. |
 | `usage.warn` | percentage or mapping · `80` · g | Próg procentowy wspólny lub na dostawcę. |
 | `usage.critical` | percentage or mapping · `95` · g | Próg krytyczny, >= warn. |
-| `usage.queue_hold` | percentage, mapping or `false` · `false` · g · The queue does not start a task of a provider whose plan is above this percentage (in any window); `queue list` says so. `false`: the plan never holds the queue. Set live with MCP `set_limits` `queue_hold` or `agentctl limits set queue_hold=90 · off | Próg znanego okna blokujący start kolejki; procent/mapping/false, CLI/MCP off wyłącza. |
+| `usage.queue_hold` | percentage, mapping or `false` · `false` · g · The queue does not start a task of a provider whose plan is above this percentage (in any window); `queue list` says so. `false`: the plan never holds the queue. Request through MCP `set_limits` `queue_hold` or apply from the owner CLI `agentctl limits set queue_hold=90 · off | Próg znanego okna blokujący start kolejki; procent/mapping/false, CLI/MCP off wyłącza. |
 | `usage.status_line` | boolean · `true` · g | Procenty planu w status barze. |
 | `usage.claude_tap` | boolean · `true` · g | Task-scoped statusLine zbiera plan i przekazuje istniejącą komendę. |
 | `usage.claude_dir` | path · `$CLAUDE_CONFIG_DIR`, else `~/.claude` · g | Korzeń transkryptów Claude. |
@@ -176,22 +176,27 @@ Typy/domysły sprawdzono z [config.ts](../../src/core/config.ts), [spec.ts](../.
 
 ## Kwoty czatów
 
-| Klucz globalny | Wartość domyślna | Działanie |
+| Klucz globalny | Domyślnie | Działanie |
 | --- | --- | --- |
-| `quotas` | brak | Włącza kwoty czatów. Bez tej sekcji kolejka stosuje dotychczasowe limity dostawców. |
-| `quotas.chats.<nazwa>.<dostawca>` | dziedziczy `quotas.default.<dostawca>` | Maksymalna liczba równoległych zadań czatu. Nieujemna liczba całkowita. `0` blokuje starty dla danego czatu i dostawcy. |
-| `quotas.default.<dostawca>` | bez dodatkowego ograniczenia w ramach limitu globalnego | Wspólna kwota dla właścicieli bez skonfigurowanego czatu i starszych zadań bez właściciela. Nazwane czaty dziedziczą brakujące wartości dostawców. |
-| `quotas.floor.<dostawca>` | `1` dla nazwanego czatu z dodatnią, skończoną kwotą, w pozostałych wypadkach `0` | Pierwszeństwo dla gotowych zadań czatu działającego poniżej minimum. Minimum nie przekracza kwoty. Gdy suma minimów przekracza limit dostawcy, agentctl ogranicza je według nazw czatów, z pulą domyślną na końcu. |
-| `quotas.overprovision` | `1.5` | Mnożnik budżetu, co najmniej `1`. `doctor` i MCP `config_show` ostrzegają przy przekroczeniu budżetu kwot lub limitu przez sumę minimów. Właściciel może zapisać kwoty przekraczające budżet. |
-| `quotas.cohorts.<kohorta>` | brak | Zapasowy właściciel kohorty. Wielkość liter w nazwie kohorty jest pomijana. Wartość to nazwa czatu lub `chat:<nazwa>`. |
-| `quotas.per_host` | `false` | `true` liczy kwotę osobno dla hostów SSH i lokalnej maszyny. Limit dostawcy i wykorzystanie minimum pozostają globalne. |
-| `quotas.self_service` | `off` | `within_overprovision` pozwala czatowi WALL zmienić własne kwoty, jeśli zmienione sumy mieszczą się w budżecie. |
+| `limits.change_policy` | `owner-approve` | MCP `set_limits` składa wniosek. Właściciel ma dwie godziny na decyzję przez `L` na tablicy lub `agentctl limits approve ID` / `reject ID`. `direct` przywraca wcześniejsze uprawnienia MCP oraz podgląd i potwierdzenie. |
+| `limits.profiles.<nazwa>` | brak | Limity dostawców (`0` oznacza brak pułapu, `off` wyłącza dostawcę). Opcjonalne `shares: {nc: 40}` zmienia udziały w aktywnym profilu. Pominięte klucze dziedziczą ustawienia bazowe. |
+| `limits.schedule` | brak | Codzienne przełączenia profilu. `timezone` wskazuje strefę IANA, a `switches` przypisuje nazwy profili do lokalnych godzin `HH:MM` w cudzysłowie. Wiosną brakującą godzinę przesuwa różnica czasu, jesienią obowiązuje pierwsze wystąpienie godziny. |
+| `limits.active_profile`, `limits.timed_overrides` | brak | Agentctl zapisuje tu ręczny wybór profilu i limity czasowe. Ustawiaj je z tablicy lub CLI. |
+| `quotas` | brak | Włącza przydział miejsc według czatu. |
+| `quotas.chats.<nazwa>.share` | brak | Udział od 0 do 100%. Dodatni udział daje pułap `max(podłoga, round(limit globalny × overprovision × udział / 100))`. Udział 0 lub dostawca `off` daje zero miejsc. Dodatni udział dostawcy bez limitu jest bez pułapu. |
+| `quotas.chats.<nazwa>.<dostawca>` | dziedziczenie | Liczba całkowita od zera zastępuje obliczany pułap tego dostawcy. |
+| `quotas.default.<dostawca>` | bez pułapu w granicach limitu globalnego | Wspólny pułap dla czatów bez osobnej konfiguracji i starszych zadań bez właściciela. Nazwane czaty sięgają po niego, jeśli brak udziału i nadpisania dostawcy. |
+| `quotas.floor` | `1` dla nazwanego czatu z dodatnim pułapem | Liczba całkowita od zera ustala podłogę kwot procentowych. Dotychczasowe mapowanie per dostawca pozostaje obsługiwane. Kolejka rozdziela priorytet podłogi w kolejności nazw czatów do wysokości globalnego limitu, z domyślnym koszykiem na końcu. |
+| `quotas.overprovision` | `1.5` | Mnożnik co najmniej 1. Doctor i MCP `config_show` ostrzegają o przekroczeniu budżetu i podłóg. Starty nadal ogranicza pułap globalny. |
+| `quotas.cohorts.<kohorta>` | brak | Zastępczy właściciel kohorty, bez rozróżniania wielkości liter. Wartość to nazwa czatu, `chat:<nazwa>` lub `default`. |
+| `quotas.per_host` | `false` | Przy `true` użycie pułapu jest liczone osobno na każdym hoście. Limit i użycie podłogi pozostają globalne. |
+| `quotas.self_service` | `off` | W trybie `direct` wartość `within_overprovision` pozwala czatowi zmienić własną kwotę w ramach budżetu. |
 
-Właściciel jest zapisywany przy rejestracji w kolejności MCP `as: "chat:<nazwa>"`, mapowanie `wall.chats.<nazwa>.clients`, `owner:` w specu, `quotas.cohorts`, następnie pula domyślna. Spec przyjmuje nazwę czatu, `chat:<nazwa>` lub `default`. Starsze zadania bez właściciela trafiają do puli domyślnej.
+Dyspozytor ustala właściciela przy rejestracji według `as: "chat:<nazwa>"` z MCP, mapy `wall.chats.<nazwa>.clients`, `owner:` ze specyfikacji, `quotas.cohorts` oraz domyślnego koszyka. Kolejka najpierw obsługuje uprawnione czaty poniżej podłogi, potem według najniższego stosunku użycia do pułapu, a następnie priorytetu i kolejności. Rezerwacje i liczone sesje zewnętrzne zajmują miejsca globalne. `limits.count_report_ready` steruje liczeniem okien z gotowym raportem w obu limitach.
 
-Start wymaga wolnego miejsca u dostawcy oraz w kwocie czatu. Kolejka obsługuje najpierw czaty poniżej minimum, potem najniższy stosunek użycia do kwoty, a przy remisie stosuje priorytet i kolejność wpisów. Minimum działa dla gotowych zadań w kolejce i nie przerywa pracy. Ręczne rezerwacje i wliczane sesje zewnętrzne zajmują miejsca globalne. `limits.count_report_ready` decyduje, czy gotowe raporty zajmują miejsca w obu licznikach.
+`agentctl limits set quota.nc.share=40` ustawia udział, a `quota.nc.claude=4` sztywny pułap. Zmiana stała zapisuje się w aktywnym profilu, jeśli profil ma dane ustawienie, a w pozostałych przypadkach w bazie. `agentctl limits profile night` przełącza profil do następnej zmiany z harmonogramu, a bez harmonogramu do ręcznej zmiany. `agentctl limits set claude=10 --until 23:00` czasowo nadpisuje pułap bazowy i profilowy. Po wygaśnięciu zaczyna obowiązywać aktualny profil. `HH:MM` oznacza lokalny czas dyspozytora. Polecenie przyjmuje też czas ISO lub okres, np. `3h`.
 
-Właściciel zmienia ustawienia przez `agentctl limits set quota.nc.claude=4 overprovision=1.5` lub MCP `set_limits` ze swoim `as: "chat:agentctl"`, `quota: {chat: nc, claude: 4}` albo `overprovision`. Ustaw `wall.chats.agentctl.clients` i przypisz pozostałe klienty do ich czatów, by porównywać deklaracje z nazwą klienta MCP. Tożsamości i nazwy klientów WALL są przeznaczone dla zaufanych klientów wspólnej instancji. Watch zapisuje zdarzenie `limits-changed` i jeden wpis `info` na kanale WALL `agentctl` dla każdej zmiany kwoty lub limitu globalnego. Wpis zawiera stare i nowe wartości oraz źródło, czyli tożsamość czatu MCP albo `config edit`.
+Tablica, CLI i MCP `limits` oraz `capacity` pokazują obliczone pułapy. MCP `config_show` podaje je w `effective_chat_ceilings`. Po każdej zastosowanej zmianie ustawień na kanale `agentctl` pojawia się jedno WALL info ze źródłem, porównaniem wartości oraz efektywnymi kwotami. Oryginalny wniosek zmienia status po zatwierdzeniu, odrzuceniu lub wygaśnięciu. Czasowe wstrzymanie dostawcy (`hold`) i blokada szczytu GLM działają bez decyzji właściciela. Działający watch stosuje zmiany czasowe w kolejce i zapisuje zdarzenia. Migrację opisuje poradnik [Limity dla kilku czatów](tutorial.md#limity-dla-kilku-czatów).
 
 ## Watch, board i powiadomienia
 

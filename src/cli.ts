@@ -68,6 +68,7 @@ import { awayReport, phoneActive, renderAway, setAway } from './core/away.ts';
 import { channelSummaries, cliWallIdentity, findMessage, postMessage, readOwnerState, readThread, readWall, renderRead, renderThread, setStatus, taskShell, WALL_KINDS, WALL_STATUSES } from './core/wall.ts';
 import type { WallIdentity, WallKind, WallStatus } from './core/wall.ts';
 import { applySetLimits, collectLimits, parseAssignments, parseCounts, parseHoldArgs, planSetLimits, releasePlaces, renderLimits, reservePlaces } from './core/limits.ts';
+import { decideLimitRequest, pendingLimitRequests } from './core/limit-requests.ts';
 import { collectOverlaps, renderOverlaps, touchWarnings } from './core/collisions.ts';
 import type { NewOptions, NewResult } from './core/new.ts';
 import { pullReady, pullTask } from './core/pull.ts';
@@ -902,7 +903,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .action(
       guarded(async (opts: { json?: boolean }) => {
         const ctx = contextFor(false, { migrate: false });
-        const report = collectLimits(ctx.config, await liveWindows(ctx));
+        const report = collectLimits(ctx.config, await liveWindows(ctx), ctx.runner.now());
         if (opts.json) return line(JSON.stringify(report, null, 2));
         for (const l of renderLimits(report)) line(l);
       }),
@@ -911,12 +912,14 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
   limits
     .command('set')
     .description('Change the limits in config.yaml (comments and the order of the keys stay; the old file is kept as config.yaml.bak). A running watch and the MCP server pick it up at once; waiting tasks of the queue start at the next tick.')
-    .argument('<limits...>', 'claude=3 codex=5; off disables a provider (codex=off: no windows of it start), 0 or none removes a limit (codex=0); queue_hold=90 | queue_hold=off | queue_hold.codex=85 sets usage.queue_hold; hold.glm=21:50 | hold.glm=3h | hold.glm=off sets a timed provider hold; quota.nc.claude=4 sets a chat share; overprovision=1.5 sets the share budget multiplier')
+    .argument('<limits...>', 'claude=3 codex=5; off disables a provider, 0 removes its limit; queue_hold.codex=85 sets a queue hold; hold.glm=3h sets a timed provider pause; quota.nc.share=40 sets a percent, quota.nc.claude=4 an absolute override')
+    .option('--until <time>', 'temporarily override the named provider limits until local HH:MM, ISO timestamp, or duration (3h)')
     .option('-y, --yes', 'do not ask')
     .option('--dry-run', 'print what would be written, change nothing')
     .action(
-      guarded(async (assignments: string[], opts: { yes?: boolean; dryRun?: boolean }) => {
+      guarded(async (assignments: string[], opts: { yes?: boolean; dryRun?: boolean; until?: string }) => {
         const ctx = contextFor(Boolean(opts.dryRun), { migrate: false });
+        ctx.setConfig(loadGlobalConfig(path.dirname(ctx.config.path), ctx.runner.now()));
         const ids = activeProviders(ctx.config);
         const timed: Record<string, string> = {};
         const remaining = assignments.filter(a => { const m = /^hold\.([a-z]+)=(.+)$/.exec(a); if (!m) return true; timed[m[1]!] = m[2]!; return false; });
@@ -927,7 +930,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
             overprovision = Number(arg.slice('overprovision='.length));
             return false;
           }
-          const match = /^quota\.([a-z0-9_:-]+)\.([a-z]+)=(\d+)$/.exec(arg);
+          const match = /^quota\.([a-z0-9_:-]+)\.([a-z]+)=(\d+(?:\.\d+)?)$/.exec(arg);
           if (!match) return true;
           const [, chat, provider, share] = match;
           if (quota && chat !== quota.chat) throw new AgentctlError('Specify one chat per limits set command');
@@ -936,14 +939,51 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
           return false;
         });
         const quotaEdit = quota || overprovision !== undefined ? {quota, overprovision} : undefined;
-        if ((ctx.config.quotas || quotaEdit) && taskShell(ctx.config, process.env, process.cwd())) throw new AgentctlError('Quota and limit changes require the owner CLI');
         const { hold, rest } = parseHoldArgs(providerArgs, ids);
-        const plan = planSetLimits(ctx.config, rest.length > 0 || (hold === undefined && !Object.keys(timed).length && !quotaEdit) ? parseAssignments(rest, ids) : {}, hold, Object.keys(timed).length ? timed : undefined, ctx.runner.now(), quotaEdit);
+        if ((rest.length || hold !== undefined || quotaEdit || opts.until) && taskShell(ctx.config, process.env, process.cwd())) throw new AgentctlError('Quota and limit changes require the owner CLI');
+        const plan = planSetLimits(ctx.config, rest.length > 0 || (hold === undefined && !Object.keys(timed).length && !quotaEdit) ? parseAssignments(rest, ids) : {}, hold, Object.keys(timed).length ? timed : undefined, ctx.runner.now(), quotaEdit, { until: opts.until });
         if (!(await confirmAction(ctx, plan.summary, 'Write it?', Boolean(opts.yes) || Boolean(opts.dryRun)))) return;
-        await applySetLimits(ctx, plan);
+        await applySetLimits(ctx, plan, 'CLI właściciela');
         if (!opts.dryRun) line('Done. The limits are in force now.');
       }),
     );
+
+  limits
+    .command('profile')
+    .description('List limits profiles or activate one as the owner. A scheduled switch ends a manual selection.')
+    .argument('[name]', 'profile defined in limits.profiles')
+    .action(guarded(async (name?: string) => {
+      const ctx = contextFor(false, { migrate: false });
+      ctx.setConfig(loadGlobalConfig(path.dirname(ctx.config.path), ctx.runner.now()));
+      if (!name) {
+        const { profile, nextSwitch } = ctx.config.limitRuntime;
+        line(`Active profile: ${profile ?? 'base'}`);
+        if (nextSwitch) line(`Next switch: ${nextSwitch.profile} at ${new Date(nextSwitch.at).toISOString()}`);
+        for (const name of Object.keys(ctx.config.limitSettings.profiles)) line(`  ${name}`);
+        return;
+      }
+      if (taskShell(ctx.config, process.env, process.cwd())) throw new AgentctlError('Changing limits profiles requires the owner CLI');
+      await applySetLimits(ctx, planSetLimits(ctx.config, {}, undefined, undefined, ctx.runner.now(), undefined, { profile: name }), 'CLI właściciela');
+      line(`Limits profile: ${name}`);
+    }));
+
+  limits.command('requests').description('List pending limit requests.').action(guarded(async () => {
+    const ctx = contextFor(false, { migrate: false });
+    const requests = pendingLimitRequests(ctx.config, ctx.runner.now());
+    if (!requests.length) line('No pending limit requests.');
+    for (const request of requests) line(`${request.id} · ${request.by} · ${request.reason}\n${request.difference}\nExpires: ${new Date(request.expires).toISOString()}`);
+  }));
+
+  for (const [verb, decision] of [['approve', 'approved'], ['reject', 'rejected']] as const) limits.command(verb)
+    .description(`${verb === 'approve' ? 'Approve' : 'Reject'} a pending limit request as the owner.`)
+    .argument('<id>', 'request ID or WALL decision-request ID')
+    .action(guarded(async (id: string) => {
+      const ctx = contextFor(false, { migrate: false });
+      if (taskShell(ctx.config, process.env, process.cwd())) throw new AgentctlError('Limit decisions require the owner CLI');
+      const request = await decideLimitRequest(ctx, id, decision, 'CLI właściciela');
+      if (request.status !== decision) throw new AgentctlError(`${request.id}: ${request.status}`);
+      line(`${request.id}: ${request.status}`);
+    }));
 
   limits
     .command('reserve')

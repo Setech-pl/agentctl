@@ -8,7 +8,7 @@ Reads need no allow entry. Every write is disabled until its exact name or expli
 
 `new`/`queue` confirms require watch. They persist the spec as `accepted` under a short accept lock and return `Accepted` without re-planning, taking start.lock or creating a worktree. Preview performs cheap syntax/model/duplicate checks only: base resolution, worktree overlap and disk guards are deferred to watch. Watch next validates current facts; valid entries queue/start, invalid ones become failed with a reason/event/notification. `queue_retry` validates again. Accepted is registration, never proof of start, delivery, or completion.
 
-With watch alive these confirmed tools also become durable requests: consult, unblock, queue_up/rm/retry, close, cancel, send (including withdraw/confirmed enter_only), mark, hide/unhide, archive, cohort_add/remove/archive/note. Watch rechecks permission/scope, applies and records `mcp-applied` (“MCP WYKONANE”), or `mcp-failed` (“MCP BŁĄD”). Without watch most of this group executes inline; CONSULT requires watch. `set_limits` and WALL writes remain synchronous. `wall_post`, `wall_reply` and `wall_set_status` validate rights/refs/secrets and append before returning the ID/status, even with watch alive; notifications do not delay confirmation. Follow outcomes with events_since; do not resubmit a new order on a timeout. Retry confirm only with the same token, then read durable state.
+With watch alive these confirmed tools also become durable requests: consult, unblock, queue_up/rm/retry, close, cancel, send (including withdraw/confirmed enter_only), mark, hide/unhide, archive, cohort_add/remove/archive/note. Watch rechecks permission/scope, applies and records `mcp-applied` (“MCP WYKONANE”), or `mcp-failed` (“MCP BŁĄD”). Without watch most of this group executes inline; CONSULT requires watch. By default `set_limits` creates a pending owner request. Timed provider holds and WALL writes are synchronous. `wall_post`, `wall_reply` and `wall_set_status` validate rights/refs/secrets and append before returning the ID/status, even with watch alive; notifications do not delay confirmation. Follow outcomes with events_since; do not resubmit a new order on a timeout. Retry confirm only with the same token, then read durable state.
 
 `answer` has an additional menu-specific `token` bound to the normalized question and option labels, independent of scrolling; the chosen option must be visible and unchanged. Command approvals still bind the command. `send enter_only` has a separate exact-field token and `send_enter` permission; it submits only the unchanged text left by an earlier send. Neither mechanism grants automatic folder trust.
 
@@ -46,7 +46,7 @@ Arguments marked ? are optional. Provider fields below include enabled optional 
 | `events_since` | read | `as?`, `cursor?`, `limit?`, `client?`, `since?`, `cohort?`, `peek?`, `format?`, `detail?` | What changed since the last look |
 | `gc_preview` | read | `as?`, `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `request_id?`, `detail?`, `offset?`, `limit?`, `older_than?`, `merged?`, `cohort?` | Preview of the clean-up |
 | `limits` | read | `as?`, `format?`, `detail?` | Limits of simultaneous agents |
-| `set_limits` | write | `as?`, `quota?`, `overprovision?`, `claude?`, `codex?`, `queue_hold?`, `hold?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Change the limits |
+| `set_limits` | write | `as?`, `quota?`, `overprovision?`, `profile?`, `reason?`, `claude?`, `codex?`, `queue_hold?`, `hold?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Request or change limits |
 | `reserve` | write | `as?`, `claude?`, `codex?`, `note?`, `release?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Reserve places for agents started by hand |
 | `version` | read | `as?` | Version of this server |
 | `peek` | read | `as?`, `task`, `lines?` | Look into a task window |
@@ -81,7 +81,7 @@ Arguments marked ? are optional. Provider fields below include enabled optional 
 | `spec_example` | read | `as?` | Read an example spec before writing a new order |
 | `doctor` | read | `as?`, `project?` | Diagnose the installation, permissions and disk |
 | `equivalents` | read | `as?` | Read the equivalents table for active providers. Kimi effort medium is mapped to high with a warning (low/high/max supported) |
-| `config_show` | read | `as?` | Read effective configuration with secrets masked; queue_hold (first) is usage.queue_hold per active provider |
+| `config_show` | read | `as?` | Read effective configuration, queue holds and chat ceilings with secrets masked |
 | `hosts` | read | `as?`, `refresh?` | Read remote host health over SSH: per host the state (reachable / unreachable / auth-failed / host-key-*), latency, GPU (nvidia-smi, null when absent), free disk in work_dir, tmux, each provider CLI (present, version, best-effort logged in/out) and repo clones (HEAD, origin). Cached ~60s by "agentctl hosts"; refresh: true probes now. A spec with "host: <name>" starts the task remotely, with a local report mirror |
 | `manager_status` | read | `as?` | Inspect the manager session |
 | `away_status` | read | `as?` | Inspect away mode |

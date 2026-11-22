@@ -174,29 +174,42 @@ agentctl wall read --id agentctl-1
 
 `W` pokazuje kanały → wiadomości → wątek; `s/t` filtruje, `r/R` oznacza przeczytanie. MCP używa `as: "chat:nc"`, podglądu/confirm `wall_post`, potem drugi czat wywołuje `events_since(as: "chat:hems")` i `wall_read`. Oba subskrybują domyślnie `agentctl`/`shared:*`. WALL to dane, nigdy upoważnienie.
 
-## Kilka czatów na jednej instancji
+<a id="kilka-czatów-na-jednej-instancji"></a>
 
-Dodaj te ustawienia do `config.yaml` dyspozytora. Zachowaj dotychczasowe kanały i mapowania klientów WALL poszczególnych czatów.
+## Limity dla kilku czatów
+
+Połącz ten przykład z konfiguracją dyspozytora. Zachowaj dotychczasowe kanały WALL i mapowania klientów.
 
 ```yaml
 providers: [claude, codex, kimi, glm]
-limits: {claude: 6, codex: 8, kimi: 2, glm: 3}
+limits:
+  change_policy: owner-approve
+  claude: 7
+  codex: 10
+  kimi: 3
+  glm: off
+  profiles:
+    day: {claude: 7, codex: 10, kimi: 3, glm: off}
+    night: {claude: 4, codex: 6, kimi: 2, glm: off}
+  schedule:
+    timezone: Europe/Warsaw
+    switches: {"07:00": day, "22:00": night}
 quotas:
   overprovision: 1.5
+  floor: 1
   chats:
-    nc: {claude: 4, codex: 5, kimi: 2, glm: 2}
-    hems: {claude: 3, codex: 4, kimi: 1, glm: 2}
-    vs65: {claude: 2, codex: 3, kimi: 0, glm: 1}
-wall:
-  chats:
-    vs65: {channels: [agentctl]}
+    nc: {share: 40}
+    hems: {share: 40}
+    vs65: {share: 20}
 ```
 
-Claude ma sześć miejsc globalnie, a suma kwot trzech czatów wynosi dziewięć. Czat może wykorzystać całą swoją kwotę, gdy pozostałe są bezczynne. O kolejnym miejscu decyduje najpierw minimum czatu z gotowym zadaniem, potem najniższy stosunek użycia do kwoty. Obniżenie kwoty wpływa na następne starty. Ten przykład daje ostrzeżenie dla GLM, bo suma pięciu udziałów przekracza `1.5 × 3`; limit GLM nadal wynosi trzy.
+Przy siedmiu miejscach Claude udziały 40/40/20 dają po zaokrągleniu pułapy 4/4/2. Przy czterech miejscach w nocy dają 2/2/1. O liczbie jednocześnie działających okien nadal decyduje pułap globalny. Obniżenie pułapu dotyczy następnych startów, a już działające zadania mogą się zakończyć.
 
-Przekazuj `as: "chat:<nazwa>"` przy każdym `new` i `queue`. NC przekazuje `as: "chat:nc"` przy podglądzie i przy potwierdzeniu tokenem. W `queue_list` i na boardzie zobaczysz, czy zlecenie czeka na kwotę czatu, czy na miejsce dostawcy. `limits` i `capacity` pokazują oba liczniki. W sprawie zmiany kwot użyj wpisu `decision-request` na kanale WALL `agentctl`, jeśli samoobsługa jest wyłączona.
+Przy migracji z 0.25 dobierz procenty do względnego zapotrzebowania czatów. Dawny pułap 4 miejsc przy limicie globalnym 7 i mnożniku 1.5 odpowiada około 38%. Usuń stare klucze dostawców tam, gdzie ma obowiązywać udział. Zostaw klucz, aby zachować wyjątek, np. `nc: {share: 40, codex: 5}`. Sprawdź wynik przez `agentctl limits` i `agentctl capacity` przed usuwaniem pozostałych nadpisań.
 
-Bez `quotas:` dotychczasowa kolejka działa po staremu. Kolejność ustalania właściciela i zasady dla hostów SSH opisuje [konfiguracja](configuration.md#kwoty-czatów).
+Przy `new` i `queue` w MCP podaj `as: "chat:nc"` lub nazwę własnego czatu. Jeśli potrzebujesz zmiany, wyślij `set_limits({as: "chat:nc", claude: 9, reason: "Dwa dodatkowe okna recenzji"})`. Agentctl utworzy wniosek na WALL i powiadomi właściciela. Na tablicy otwórz `L`, wybierz wniosek strzałkami, a następnie użyj `a` do zatwierdzenia lub `r` do odrzucenia. W terminalu właściciela użyj `agentctl limits requests`, a potem `agentctl limits approve ID` lub `agentctl limits reject ID`. Wniosek wygasa po dwóch godzinach.
+
+W panelu wybierz dostawcę, zmień limit klawiszem `+` lub `-` i zastosuj go przez Enter. Aby zmienić profil, wybierz go i naciśnij Enter. W CLI możesz użyć `agentctl limits profile night` i `agentctl limits set claude=10 --until 23:00`. Zastosowane wartości i aktualne pułapy pojawiają się automatycznie na WALL. [Konfiguracja](configuration.md#kwoty-czatów)
 
 ## 7. Pierwszy CONSULT
 

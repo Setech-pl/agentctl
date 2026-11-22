@@ -14,7 +14,7 @@ const pl: Record<string, string> = {
  events_since: 'Przyrost według as czatu (client nadpisuje), otwarta skrzynka WALL; peek zachowuje kursor.',
  gc_preview: 'Chroniony plan sprzątania z rozmiarami i powodami pominięcia; bez usuwania.',
  limits: 'Limity slotów, zajętość, rezerwacje, kolejka i obowiązujący queue_hold.',
- set_limits: 'Zmień limity, queue_hold i czasowe hold (HH:MM/ISO/3h/off); zapis synchroniczny.',
+ set_limits: 'Złóż właścicielowi wniosek o zmianę limitów, progu kolejki, kwot lub profilu. Czasowy hold działa bezpośrednio po potwierdzeniu.',
  reserve: 'Zarezerwuj sloty dla agentów uruchamianych ręcznie.',
  version: 'Wersja procesu MCP, skrypt, PID, czas startu i wersja stabilnej kopii na dysku.',
  peek: 'Ostatnie linie okna bez stopki, pytanie, stan kolejki promptów lub zapis błędu startu.',

@@ -8,7 +8,7 @@ import { readTaskRecord } from '../src/core/taskstore.ts';
 import { tryFileLock } from '../src/core/file-lock.ts';
 import { readMcpRequests } from '../src/core/mcp-requests.ts';
 import { saveEntry } from '../src/core/queue.ts';
-import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch, fakeWatcher } from './helpers.ts';
+import { directLimitPolicy, DiskRunner, FakeTmux, makeConfig, seedTask, useScratch, fakeWatcher } from './helpers.ts';
 const scratch = useScratch();
 it('A3: an async queue failure becomes visible on the next snapshot with its error and retry hint', async () => {
   const config = makeConfig(scratch.sub('snapshot-failure'), 'watch: {interval: 2}\n');
@@ -35,7 +35,7 @@ it('A3: an async queue failure becomes visible on the next snapshot with its err
   assert.equal(after[0].snapshot_age_s, 0);
 });
 it('A3: atomic watch snapshot serves bounded reads with stalled processes; only cheap statfs is refreshed', async () => {
-  const config = makeConfig(scratch.sub('snapshot'), 'mcp: {allow: [set_limits]}\nwatch: {interval: 2}\n');
+  const config = makeConfig(scratch.sub('snapshot'), `mcp: {allow: [set_limits]}\nlimits: {${directLimitPolicy}}\nwatch: {interval: 2}\n`);
   seedTask(config, 'SNAP', {cohort: '62'});
   const tmux = new FakeTmux(); tmux.add('snap', 'Working (esc to interrupt)');
   let stalled = false, probes = 0; const commands: string[] = [];

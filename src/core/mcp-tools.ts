@@ -1,4 +1,4 @@
-import { chatOwner, quotaWarnings } from './chat-quotas.ts';
+import { chatOwner, effectiveChatCeilings, quotaWarnings } from './chat-quotas.ts';
 import { planRemoteGc } from './host-gc.ts';
 import { refreshDiskFreeSpace, taskDiskStartHold, worktreeCostEstimates } from './disk.ts';
 import { watchSnapshotPath, watchSnapshotTime, watchSnapshotWarning, watchStepWarning } from './watch-snapshot.ts';
@@ -102,6 +102,7 @@ import { planGc, renderGc, gcView } from './gc.ts';
 import { collectEvents, renderEvents } from './chat-events.ts';
 import { QUOTA_DECISION_HINT, applySetLimits, collectLimits, compactLimits, holdText, parseHoldInput, planSetLimits, readReservations, releasePlaces, reservePlaces } from './limits.ts';
 import type { LimitAssignments } from './limits.ts';
+import { requestLimitChange } from './limit-requests.ts';
 import { planLine } from './usage-report.ts';
 import { openReader, readPlans } from './usage.ts';
 import { AGENT_NAMES } from './config.ts';
@@ -543,6 +544,8 @@ interface SetLimitsArgs extends Partial<Record<AgentName, number | string>> {
   hold?: unknown;
   quota?: unknown;
   overprovision?: number;
+  profile?: string;
+  reason?: string;
   confirm?: boolean;
 }
 
@@ -555,7 +558,8 @@ async function runSetLimits(deps: McpDeps, args: SetLimitsArgs): Promise<ToolRes
     }
     const hold = args.queue_hold === undefined ? undefined : parseHoldInput(args.queue_hold, activeProviders(ctx.config));
     const quotaEdit = args.quota !== undefined || args.overprovision !== undefined;
-    if (Object.keys(assignments).length === 0 && hold === undefined && args.hold === undefined && !quotaEdit) throw new AgentctlError(`give ${activeProviders(ctx.config).join(' and/or ')}, or queue_hold`,  '0 removes a limit, "off" disables the provider; queue_hold: 90, "off" or {codex: 90}.');
+    const governed = Object.keys(assignments).length > 0 || hold !== undefined || quotaEdit || args.profile !== undefined;
+    if (!governed && args.hold === undefined) throw new AgentctlError(`give ${activeProviders(ctx.config).join(' and/or ')}, queue_hold, quota, profile or hold`, '0 removes a limit and "off" disables the provider.');
     const declared = wallIdentity(ctx.config, {as: args.as, client: deps.clientId});
     const mapped = wallIdentity(ctx.config, {client: deps.clientId});
     const bindings = declared.kind === 'chat' && Object.hasOwn(ctx.config.wall.chats, declared.id.slice(5))
@@ -563,23 +567,34 @@ async function runSetLimits(deps: McpDeps, args: SetLimitsArgs): Promise<ToolRes
     if (declared.id !== mapped.id && (mapped.kind === 'chat' || bindings.length > 0)) {
       throw new AgentctlError('Caller does not match its configured WALL identity', QUOTA_DECISION_HINT);
     }
+    const requester = declared.kind === 'unknown' && deps.clientId ? `MCP:${deps.clientId.replace(/[^a-zA-Z0-9_.-]/g, '_').slice(0, 80)}` : declared.id;
+    const now = ctx.runner.now();
+    const timedPlan = args.hold === undefined ? undefined : planSetLimits(ctx.config, {}, undefined, args.hold, now);
+    if (governed && ctx.config.limitSettings.changePolicy === 'owner-approve') {
+      const request = await requestLimitChange(ctx, { assignments, hold, profile: args.profile,
+        ...(quotaEdit ? { quota: { quota: args.quota, overprovision: args.overprovision } } : {}) }, requester, args.reason, deps.notify.bind(deps));
+      if (timedPlan && args.confirm) await applySetLimits(ctx, timedPlan, requester);
+      const result = request ? `Pending owner approval: ${request.id} (WALL ${request.wallId}).\n${request.difference}\nExpires: ${new Date(request.expires).toISOString()}. The owner can decide in board L or with agentctl limits approve|reject ${request.id}.` : 'The requested limits are already in effect.';
+      const timed = timedPlan ? `\nTimed provider hold: ${args.confirm ? 'applied.' : 'send hold with confirm: true to apply it directly.'}` : '';
+      return { text: result + timed, executed: Boolean(request || (timedPlan && args.confirm)), announce: '', detail: request ? `pending ${request.id}` : undefined };
+    }
     const owner = declared.id === 'chat:agentctl';
     const legacy = !ctx.config.quotas && !quotaEdit && declared.kind === 'unknown' && !args.as && !ctx.config.wall.chats.agentctl?.clients.length;
     let self: string | undefined;
-    if (!owner && !legacy) {
-      const global = Object.keys(assignments).length || hold !== undefined || args.hold !== undefined || args.overprovision !== undefined;
+    if (governed && !owner && !legacy) {
+      const global = Object.keys(assignments).length || hold !== undefined || args.overprovision !== undefined || args.profile !== undefined;
       const ownQuota = isObject(args.quota) && chatOwner(args.quota.chat) === declared.id;
       if (global || declared.kind !== 'chat' || !ownQuota || ctx.config.quotas?.self_service !== 'within_overprovision') {
         throw new AgentctlError('This limits change requires chat:agentctl or the owner CLI', QUOTA_DECISION_HINT);
       }
       self = declared.id;
     }
-    const plan = planSetLimits(ctx.config, assignments, hold, args.hold, ctx.runner.now(), quotaEdit ? {quota: args.quota, overprovision: args.overprovision, self} : undefined);
+    const plan = planSetLimits(ctx.config, assignments, hold, args.hold, now, quotaEdit ? {quota: args.quota, overprovision: args.overprovision, self} : undefined, { profile: args.profile });
     if (!args.confirm) return { text: `${plan.summary.join('\n')}\n\nNot changed yet. Show this to the user and ask; if they agree, call set_limits again with the same arguments and confirm: true.`, executed: false, announce: '' };
-    await applySetLimits(ctx, plan, declared.id);
+    await applySetLimits(ctx, plan, requester, governed);
     const changed = [...plan.changes.map((c) => `${c.agent} ${c.from ?? '-'} -> ${c.to ?? '-'}`), ...plan.holdChanges.filter((c) => c.from !== c.to).map((c) => `queue_hold ${c.agent} ${holdText(c.from)} -> ${holdText(c.to)}`)];
     const announce = [...(plan.changes.length ? [`limity ${activeProviders(ctx.config).map(id => `${id}=${plan.changes.some(c => c.agent === id) ? plan.changes.find(c => c.agent === id)!.to ?? 'brak' : ctx.config.limits[id] ?? 'brak'}`).join(' ')}`] : []), ...(hold !== undefined ? [`queue_hold ${plan.holdChanges.map((c) => `${c.agent}=${holdText(c.to)}`).join(' ')}`] : [])].join('; ');
-    if (quotaEdit) return { text: `${plan.summary.join('\n')}\nLimits and quotas take effect on the next watch tick.`, executed: true, announce: plan.quotaChange ? 'zmieniono kwoty' : announce };
+    if (quotaEdit || args.profile) return { text: `${plan.summary.join('\n')}\nLimits, quotas and profiles take effect on the next watch tick.`, executed: true, announce: args.profile ? `profil ${args.profile}` : plan.quotaChange ? 'zmieniono kwoty' : announce };
     return { text: `${plan.timedHolds ? plan.summary.join('\n') + '\n' : ''}${plan.changes.length ? 'Limits changed' : 'Queue hold changed'} (${changed.join(', ') || 'nothing new'}). They are in force now: a running watch picks the file up and starts waiting tasks at its next tick${hold !== undefined ? '; the queue hold counts from that tick, without a restart' : ''}.`, executed: true, announce };
   });
 }
@@ -1364,15 +1379,15 @@ export const MCP_TOOLS: McpToolDef[] = [
   }),
   def({
     name: 'set_limits',
-    title: 'Change the limits',
+    title: 'Request or change limits',
     kind: 'write',
     description:
-      'WRITE, off unless the user put "set_limits" in mcp.allow. Sets the most simultaneous agents per provider in config.yaml (0 removes a limit, "off" disables the provider: no windows of it start), and the queue hold usage.queue_hold; comments in the file stay, a copy is kept as config.yaml.bak. It takes effect at once, without restarting watch (watch reloads config.yaml when it changes, also after a hand edit). ' +
+      'WRITE, off unless the user put "set_limits" in mcp.allow. With the default owner-approve policy, request a change and include a reason. The owner decides within two hours from the board or owner CLI. A chat confirmation cannot apply the change. Use 0 for no provider ceiling and "off" to disable a provider. ' +
       'Timed provider hold: hold: {glm: "21:50"}, ISO timestamp, duration "3h", or "off"; every active provider is supported. Holds block starts even with plan n/d, appear in limits/capacity/board/queue_list and expire with an event. ' +
       `queue_hold format, exactly: a whole percentage 1-100 for every active provider (queue_hold: 90), "off" for no hold at all (queue_hold: "off"), or per provider {claude: 90, codex: "off"} (only the named providers change; "off" removes that provider's hold). Above that percentage of its plan, in any window, the queue starts no task of the provider; queue_list shows "wstrzymane: … > usage.queue_hold N%"; limits, capacity and config_show show the current hold. ` +
-      'Use as: "chat:agentctl" for owner changes. quota: {chat: "nc", claude: 4} sets ceilings; overprovision sets the share budget multiplier. A chat may edit its own share with quotas.self_service enabled. The FIRST call (confirm omitted) only describes the change; show it to the user, then call again with confirm: true.',
-    input: { as: wallAsArg, quota: z.object({chat: z.string().min(1).max(60), ...perProvider(PROVIDER_IDS, () => z.number().int().min(0).optional())}).strict().optional(), overprovision: z.number().min(1).optional(), ...perProvider(DEFAULT_PROVIDERS, id => setLimitArg.describe(`New limit for ${provider(id).displayName}; 0 = no limit, "off" = disabled. Omit to leave it.`)), queue_hold: queueHoldArg, hold: z.record(z.string(), z.string()).optional().describe('Timed provider hold: {glm: "21:50"}, ISO timestamp, "3h", or "off". Applies to every active provider.'), confirm: z.boolean().optional().describe('true only after the user agreed to the described change.') },
-    annotations: { title: 'Change the limits', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      'Use quota: {chat: "nc", share: 40} for a percentage or quota: {chat: "nc", claude: 4} for an absolute provider override. profile names a configured profile. Under direct policy the previous permissions and preview/confirm flow apply. A timed provider hold always uses direct preview/confirm.',
+    input: { as: wallAsArg, quota: z.object({chat: z.string().min(1).max(60), share: z.number().min(0).max(100).optional(), ...perProvider(PROVIDER_IDS, () => z.number().int().min(0).optional())}).strict().optional(), overprovision: z.number().min(1).optional(), profile: z.string().min(1).max(60).optional(), reason: z.string().max(500).optional(), ...perProvider(DEFAULT_PROVIDERS, id => setLimitArg.describe(`New limit for ${provider(id).displayName}; 0 = no limit, "off" = disabled. Omit to leave it.`)), queue_hold: queueHoldArg, hold: z.record(z.string(), z.string()).optional().describe('Timed provider hold: {glm: "21:50"}, ISO timestamp, "3h", or "off". Applies to every active provider.'), confirm: z.boolean().optional().describe('Confirms a direct edit or provider hold. Only the owner can approve a limit request.') },
+    annotations: { title: 'Request or change limits', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     run: (deps, args) => guarded(() => runSetLimits(deps, args as SetLimitsArgs)),
   }),
   def({
@@ -1720,7 +1735,7 @@ MCP_TOOLS.push(
   extraRead('spec_example', 'spec example', 'Read an example spec before writing a new order', {}, async () => EXAMPLE_SPEC),
   extraRead('doctor', 'doctor', 'Diagnose the installation, permissions and disk', { project: optionalText }, async (ctx, a) => runDoctor(ctx.runner, () => ctx.config, a.project as string ?? null, undefined, undefined, undefined, undefined, { cachedOnly: true })),
   extraRead('equivalents', 'capacity', 'Read the equivalents table for active providers. Kimi effort medium is mapped to high with a warning (low/high/max supported)', {}, async (ctx) => ctx.config.equivalents),
-  extraRead('config_show', 'doctor', 'Read effective configuration with secrets masked; queue_hold (first) is usage.queue_hold per active provider', {}, async (ctx) => ({ queue_hold: Object.fromEntries(activeProviders(ctx.config).map((id) => [id, holdText(ctx.config.usage.queueHold[id])])), ...(ctx.config.quotas ? {quota_warnings: quotaWarnings(ctx.config)} : {}), ...(redactConfig(ctx.config) as object) })),
+  extraRead('config_show', 'doctor', 'Read effective configuration, queue holds and chat ceilings with secrets masked', {}, async (ctx) => ({ queue_hold: Object.fromEntries(activeProviders(ctx.config).map((id) => [id, holdText(ctx.config.usage.queueHold[id])])), ...(ctx.config.quotas ? {quota_warnings: quotaWarnings(ctx.config), effective_chat_ceilings: effectiveChatCeilings(ctx.config)} : {}), ...(redactConfig(ctx.config) as object) })),
   extraRead('hosts', 'hosts', 'Read remote host health over SSH: per host the state (reachable / unreachable / auth-failed / host-key-*), latency, GPU (nvidia-smi, null when absent), free disk in work_dir, tmux, each provider CLI (present, version, best-effort logged in/out) and repo clones (HEAD, origin). Cached ~60s by "agentctl hosts"; refresh: true probes now. A spec with "host: <name>" starts the task remotely, with a local report mirror', { refresh: z.boolean().optional() }, async (ctx, a) => {
     if (Object.keys(ctx.config.hosts).length === 0) return { hosts: [], note: 'no hosts: section in the config' };
     const fresh = a.refresh ? undefined : readHostsCache(process.env, ctx.runner.now(), 60_000);
@@ -1867,7 +1882,7 @@ function redactConfig(config: GlobalConfig): unknown {
 
 /**
  * P93b: the writes whose confirm can wait on start.lock, git, tmux or a scan of every task. With a watcher running, the confirm records the
- * request (mcp-requests.ts) and returns; the watcher applies it. `set_limits` stays synchronous: it writes config.yaml under no shared lock.
+ * request (mcp-requests.ts) and returns; the watcher applies it. `set_limits` has its own owner-approval workflow.
  */
 export const DEFERRED_TOOLS = new Set(['queue', 'gc', 'gc_preview', 'consult', 'unblock', 'queue_up', 'queue_rm', 'queue_retry', 'close', 'cancel', 'send', 'mark', 'hide', 'unhide', 'archive', 'cohort_add', 'cohort_remove', 'cohort_archive', 'cohort_note']);
 /** The run of every tool before the confirm, format, budget and paging wrappers: what the watcher calls to apply a request. */
@@ -1967,7 +1982,7 @@ function confirmationTargets(name: string, scope: unknown): unknown {
 /** Exact arguments and observed task/queue/window identities bind confirmation to this session. No scope can silently grow. */
 async function confirmationScope(ctx: Context, name: string, args: Record<string, unknown>): Promise<unknown> {
   if (name === 'away') return {away: awayReport(ctx.config).on, on: args.on};
-  if (name === 'set_limits') return { quotas: ctx.config.quotas, limits: ctx.config.limits, queueHold: ctx.config.usage.queueHold, providerHolds: readProviderHoldState(ctx.config).holds };
+  if (name === 'set_limits') return { quotas: ctx.config.quotas, limits: ctx.config.limits, limitSettings: ctx.config.limitSettings, profile: ctx.config.limitRuntime.profile, queueHold: ctx.config.usage.queueHold, providerHolds: readProviderHoldState(ctx.config).holds };
   if (name === 'reserve') return { reservations: readReservations(ctx.config) };
   if (name === 'queue_up' || name === 'queue_rm') {
     const entry = findEntry(ctx.config, args.task as string);
@@ -2081,10 +2096,12 @@ for (const tool of MCP_TOOLS) {
   if (tool.kind !== 'write' || tool.name === 'answer') continue;
   const previewInput = tool.input;
   tool.input = { ...Object.fromEntries(Object.entries(tool.input).map(([name, schema]) => [name, z.optional(schema)])), confirm: confirmArg, preview_token: z.string().optional().describe('Token returned by this preview. Independent previews can be confirmed in any order if their scope is unchanged. A confirm may carry only this token: the stored arguments then execute.') };
-  tool.description += ' Two steps are mandatory: preview, then confirm: true with identical arguments — or with preview_token only (plus the same optional as identity), which executes the stored arguments (for new/queue the spec need not be resent). A changed scope requires a new preview.';
+  tool.description += (tool.name === 'set_limits' ? ' For direct edits and timed provider holds, preview first. Then call confirm: true with the same arguments or the preview_token.' : ' Two steps are mandatory: preview, then confirm: true with identical arguments — or with preview_token only (plus the same optional as identity), which executes the stored arguments (for new/queue the spec need not be resent). A changed scope requires a new preview.');
   const original = tool.run;
   tool.run = (deps, args) => guarded(async () => {
     const ctx = deps.context(() => {});
+    if (tool.name === 'set_limits' && ctx.config.limitSettings.changePolicy === 'owner-approve' && !args.preview_token &&
+        [...PROVIDER_IDS, 'queue_hold', 'quota', 'overprovision', 'profile'].some(key => args[key] !== undefined)) return original(deps, args);
     // Keep the established explicit-argument limit API; token-only confirms restore a reviewed preview.
     if (['set_limits', 'reserve'].includes(tool.name) && args.confirm && !args.preview_token) return original(deps, args);
     if (!ctx.config.mcp.allow.includes(tool.name as McpWriteTool)) return writeTool(deps, tool.name as McpWriteTool, {}, async () => { throw new Error('unreachable'); });

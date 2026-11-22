@@ -16,6 +16,8 @@ For cross-review use review_of plus after and another eligible provider/model; a
 
 Always pass `as: "chat:<name>"` with MCP `new` and `queue` so the dispatcher charges the right chat quota. Keep the identity on confirmation.
 
+Request changes to limits, queue thresholds, chat quotas and profiles with MCP `set_limits` and a short `reason`. Give the owner the request ID and wait for the decision in board `L` or the owner CLI. Use `limits` or `capacity` to read the resulting ceilings. Agentctl publishes them on WALL `agentctl` after applying the change.
+
 ## Dispatch and observe
 
 Preview new/queue, show it, obtain missing owner authorization, then confirm using the preview_token in the same session. A token-only confirm uses the stored order. Watch must run. Accepted means durable registration: follow events_since, queue_list/show and status until validation, setup, trust and delivery succeed. Keep the same token for uncertain retries. Do not generate another task just because a tool timed out.

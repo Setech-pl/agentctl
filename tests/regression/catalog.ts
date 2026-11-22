@@ -26,6 +26,9 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'LIMITS0255-OWNER', fixedIn: '0.27.0', symptom: 'A chat confirmation could change shared limits without an owner decision in the CLI or board.', scenarios: [s('owner-limits.test.ts', '^LIMITS0255-OWNER:')] },
+  { id: 'LIMITS0255-SHARES', fixedIn: '0.27.0', symptom: 'Per-chat absolute ceilings stayed fixed after global changes and needed manual recalculation.', scenarios: [s('owner-limits.test.ts', '^LIMITS0255-SHARES:')] },
+  { id: 'LIMITS0255-SCHEDULE', fixedIn: '0.27.0', symptom: 'The dispatcher could not switch between limit profiles at local times across midnight and DST.', scenarios: [s('owner-limits.test.ts', '^LIMITS0255-SCHEDULE:')] },
   { id: 'FLOW-GC', fixedIn: '0.26.0', symptom: 'Integration left closed worktrees for chats to find and scope manually before GC.', scenarios: [s('disk0248.test.ts', '^FLOW-GC:')] },
   { id: 'FLOW-FRESHNESS', fixedIn: '0.26.0', symptom: 'Reviews could start against outdated integration bases without a warning or candidate.', scenarios: [s('disk0248.test.ts', '^FLOW-FRESHNESS:')] },
   { id: 'FLOW-READONLY', fixedIn: '0.26.0', symptom: 'A review could not use the stopped author checkout with isolated evidence and Git hooks.', scenarios: [s('disk0248.test.ts', '^FLOW-READONLY:'), s('audit-0174.test.ts', '^W4 a stale resume plan')] },

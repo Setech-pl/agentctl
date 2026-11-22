@@ -52,7 +52,7 @@ CONSULT orchestrates 2â€“26 panel members from at least two active providers, 1â
 
 ## Economics, maintenance and regression
 
-`limits` controls concurrent windows; `capacity` combines observed plan windows, slots, queue, disk/load and labeled estimates. `usage` reads tokens and plan observations, including separate GLM bookkeeping. `set_limits` / `limits set` can change `queue_hold` live. [Economics](token-economics.md) explains unknowns and benchmark cost.
+`limits` controls concurrent windows; `capacity` combines observed plan windows, slots, queue, disk/load and labeled estimates. `usage` reads tokens and plan observations, including separate GLM bookkeeping. MCP `set_limits` requests a `queue_hold` change, and the owner can apply it from the board or CLI. [Economics](token-economics.md) explains unknowns and benchmark cost.
 
 `log` and `stats` summarize attempts and human marks; `dataset export` exports local benchmark JSONL/CSV with provenance and explicit content opt-in. `gc` previews protected cleanup before apply; dirty/live/unmerged work is protected, branch deletion uses `git branch -d`. `history` is the underlying persisted attempt record, exposed through log/stats/export rather than a CLI command named history. `archive` moves closed task state; `mirror_dir` copies reports/status for another local reader. `doctor` diagnoses wiring, safety, providers, stale MCP, disk and config; `--timings` adds read-budget diagnostics.
 

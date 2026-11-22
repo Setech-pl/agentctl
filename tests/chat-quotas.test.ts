@@ -16,7 +16,7 @@ import { splitSpecs } from '../src/core/spec.ts';
 import { collectStatus } from '../src/core/status.ts';
 import { readTaskRecord } from '../src/core/taskstore.ts';
 import { reloadConfig } from '../src/core/watch.ts';
-import { FakeTmux, fakeWatcher, makeConfig, makeContext, runCli, seedTask, specText, useScratch } from './helpers.ts';
+import { directLimitPolicy, FakeTmux, fakeWatcher, makeConfig, makeContext, runCli, seedTask, specText, useScratch } from './helpers.ts';
 
 const scratch = useScratch();
 const notifier = { clickable: false, notify: async () => {} };
@@ -24,7 +24,7 @@ const fixedTime = Date.UTC(2026, 10, 20, 10);
 const shares = { nc: {claude: 4}, hems: {claude: 3}, vs65: {claude: 2} };
 
 function configFor(name: string, yaml = ''): GlobalConfig {
-  return makeConfig(scratch.sub(name), `limits: {claude: 6}\ncapacity: {snapshot: false, codex_refresh: false}\n${yaml}`);
+  return makeConfig(scratch.sub(name), `limits: {claude: 6${directLimitPolicy ? `, ${directLimitPolicy}` : ''}}\ncapacity: {snapshot: false, codex_refresh: false}\n${yaml}`);
 }
 
 function queued(task: string, owner: string, seq: number, host?: string): QueueEntry {

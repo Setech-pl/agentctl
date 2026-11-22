@@ -19,7 +19,7 @@ claude.ai chats share one MCP client name: `as: "chat:<name>"` is mandatory on `
 
 Czaty claude.ai mają wspólną nazwę klienta MCP: w `events_since` i WALL trzeba podawać `as: "chat:<name>"`. Nieznany czat widzi tylko `agentctl` z ostrzeżeniem. Własne wpisy mają `(yours)`, a znane czaty zawsze widzą otwartą skrzynkę niezależnie od kursora i kohorty.
 
-For every `new` or `queue` preview and confirm, pass `as: "chat:<name>"` so the order uses the correct chat quota. `limits` and `capacity` expose provider and chat counts. With quotas enabled, `set_limits` accepts `quota: {chat: nc, claude: 4}` and `overprovision: 1.5`. Owner changes use `as: "chat:agentctl"`. Self-service is configurable per instance. See the [quota configuration](en/configuration.md#chat-quotas).
+For every `new` or `queue` preview and confirm, pass `as: "chat:<name>"` so the order uses the correct chat quota. `limits` and `capacity` expose provider and chat counts. Request changes through `set_limits` with your chat identity and a reason. By default, the owner decides in board `L` or the owner CLI. See the [quota configuration](en/configuration.md#chat-quotas).
 
 ## Read tools
 
@@ -73,7 +73,7 @@ mcp:
 | `cancel` | `task` or `cohort`, `reason?`, `remove_worktree?`, `confirm?` | Abandons a task, or all open tasks of a cohort: a task at work is interrupted and its window closed after `cancel.grace` seconds, a queued task leaves the queue. The task becomes cancelled; the worktree, the branch and a written report stay. A move is cancelled with its other half. The first call only describes what would be cancelled; `confirm: true` does it. `remove_worktree` needs `mcp.allow_rm_worktree`, as in `close`. The desktop notice names the reason. |
 | `mark` | `task?`, `tasks?`, `cohort?`, `result` (`ok`, `partial` or `fail`), `note?` | Records the result the user judged for a task in the history (`log`, `stats`); the last mark wins. All selections require preview and confirmation; a chat should record only what the user said. |
 | `away` | `on` | Turns away mode on or off: while it is on, agentctl sends its notifications to the user's phone (ntfy) as well; the Mac is not affected. It requires preview and confirmation and is recorded in the audit log. `status` and `events_since` say whether away is on. |
-| `set_limits` | `claude?`, `codex?` (0 removes a limit, `"off"` disables the provider), `queue_hold?`, `confirm?` | Sets the most simultaneous agents per provider in `config.yaml` (comments stay, a `.bak` copy is kept), and since 0.19.6 the queue hold `usage.queue_hold`: `queue_hold: 90` (a whole percentage 1–100 for every active provider), `"off"` (no hold), or per provider `{claude: 90, codex: "off"}` (only the named providers change). Takes effect at once, also in a running `watch` (it reloads `config.yaml` when the file changes, a hand edit included). `limits`, `capacity` and `config_show` show the hold in force, `queue_list` the held tasks. The first call only describes the change; `confirm: true` writes it. One tool rather than a new `set_queue_hold`: the hold and the limits are both admission settings of the queue in the same file, written by the same comment-preserving editor with one preview, and an installation that allowed `set_limits` needs no new `mcp.allow` entry. |
+| `set_limits` | `as?`, provider caps, `queue_hold?`, `quota?`, `overprovision?`, `profile?`, `reason?`, `hold?`, `confirm?` | Requests owner approval by default. Use a cap of `0` for unlimited or `"off"` to disable a provider. For a timed provider pause, preview `hold: {glm: "3h"}`, then confirm to apply directly. |
 | `reserve` | `claude?`, `codex?`, `note?`, `release?`, `confirm?` | Holds places of a provider for agents you start by hand (they count against the limit), or gives them back with `release: true`. The first call only describes it; `confirm: true` does it. |
 | `resume` | `tasks?`, `all?`, `confirm?` | After a restart of the Mac or of tmux: gives the window back to active tasks that have a worktree and no window and starts the agent in resume mode (Claude `--resume <session>` or `--continue`, Codex `resume <session>` or `resume --last`), same model and effort, no prompt pasted again. Tasks with a ready report are left alone unless `all: true`. The first call only lists the tasks; `confirm: true` does it. |
 | `move` | `task`, `agent?`, `confirm?` | Hands a task that hit its usage limit to the other provider. The first call only describes the move; `confirm: true` does it. |
@@ -110,7 +110,7 @@ CLI: `agentctl wall [channels] | read | post | reply | status` (the CLI is the o
 - Every write is refused unless `mcp.allow` lists it. Refused calls are recorded too.
 - **Audit log:** `~/.agentctl/mcp-audit.log` (next to the config), one JSON line per step: time, tool, task, outcome `requested`, then `done`, `error`, `denied` or `preview`. The `requested` line is written before the action, and a write that cannot be recorded is not done.
 - **Notification:** `notify.mcp_writes` selects all, summary (default, at most once per 60 seconds), or off; each done write remains in the audit and journal.
-- **Two-step tools:** `new`, `queue`, `move`, `set_limits`, `reserve` and `resume` change nothing on the first call; the chat has to show the summary and call again with `confirm: true`.
+- **Two-step tools:** `new`, `queue`, `move`, `reserve` and `resume` change nothing on the first call; the chat has to show the summary and call again with `confirm: true`. For `set_limits`, only `direct` policy changes and timed provider holds use this flow. Other calls submit owner requests.
 - The server runs as you and sees what you see. This is a trust decision about the chat, not a sandbox. Start with `allow: []`.
 
 ## Install
@@ -220,6 +220,10 @@ Both are always readable without mcp.allow. MCP new/queue responses omit capacit
 | `limits` | `limits` |  |
 | `limits show` | `limits` |  |
 | `limits set` | `set_limits` |  |
+| `limits profile` | — | Activates a profile from the owner terminal. MCP set_limits requests approval by default. |
+| `limits requests` | — | Owner limit requests are also visible on WALL. |
+| `limits approve` | — | Owner-only approval from the terminal or board. |
+| `limits reject` | — | Owner-only rejection from the terminal or board. |
 | `limits reserve` | `reserve` |  |
 | `limits release` | `limits_release` |  |
 | `events` | `events_since` |  |
@@ -281,7 +285,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 | `events_since` | read | `as?`, `cursor?`, `limit?`, `client?`, `since?`, `cohort?`, `peek?`, `format?`, `detail?` |
 | `gc_preview` | read | `as?`, `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `request_id?`, `detail?`, `offset?`, `limit?`, `older_than?`, `merged?`, `cohort?` |
 | `limits` | read | `as?`, `format?`, `detail?` |
-| `set_limits` | write | `as?`, `quota?`, `overprovision?`, `claude?`, `codex?`, `queue_hold?`, `hold?`, `confirm?`, `preview_token?` |
+| `set_limits` | write | `as?`, `quota?`, `overprovision?`, `profile?`, `reason?`, `claude?`, `codex?`, `queue_hold?`, `hold?`, `confirm?`, `preview_token?` |
 | `reserve` | write | `as?`, `claude?`, `codex?`, `note?`, `release?`, `confirm?`, `preview_token?` |
 | `version` | read | `as?` |
 | `peek` | read | `as?`, `task`, `lines?` |
@@ -364,7 +368,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 - `answer`: `--confirm &lt;token&gt;`, `--dry-run`
 - `status`: `--detail`, `--json`, `--clip`, `--tmux-line`, `--all`, `--cohort &lt;name&gt;`
 - `limits show`: `--json`
-- `limits set`: `-y, --yes`, `--dry-run`
+- `limits set`: `--until &lt;time&gt;`, `-y, --yes`, `--dry-run`
 - `limits reserve`: `--note &lt;text&gt;`
 - `events`: `--since &lt;time&gt;`, `--cohort &lt;name&gt;`, `--keep`, `--json`, `--clip`
 - `wall channels`: `--as &lt;who&gt;`, `--json`

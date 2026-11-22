@@ -21,7 +21,7 @@ agentctl limits set queue_hold.codex=85
 agentctl limits set queue_hold=off
 ~~~
 
-MCP `set_limits({queue_hold: {claude: 90, codex: "off"}})` wymaga podglądu/confirm i zachowuje komentarze oraz backup. Watch wczytuje zmianę przy następnym ticku. Hold zatrzymuje start kolejki, gdy znane okno osiąga/przekracza próg; nie przerywa agentów i nie wybiera sam innego dostawcy. Brak odczytu nie dowodzi wolnej kwoty. `usage.warn`/`critical` powiadamia niezależnie od hold. Reset/wyczerpanie planu i dostępność lokalnego slotu to różne warunki.
+MCP `set_limits({queue_hold: {claude: 90, codex: "off"}})` domyślnie składa wniosek do właściciela. Zatwierdzenie zachowuje komentarze oraz kopię zapasową. Watch wczytuje zmianę najpóźniej przy następnym ticku. Hold zatrzymuje start kolejki, gdy znane okno osiąga/przekracza próg; nie przerywa agentów i nie wybiera sam innego dostawcy. Brak odczytu nie dowodzi wolnej kwoty. `usage.warn`/`critical` powiadamia niezależnie od hold. Reset/wyczerpanie planu i dostępność lokalnego slotu to różne warunki.
 
 `limited` wynika z odczytu limitu, a nie małej liczby slotów. Można czekać na reset, kontynuować żywe okno po odzyskaniu limitu albo jawnie użyć move/equivalents; resume odtwarza utracone okno. `limited.auto_resume` domyślnie true: gdy znany plan ma więcej niż `limited.resume_above_percent` pozostałego limitu (domyślnie 5), watch może wysłać kontynuację. Ustaw false, jeśli tę decyzję ma podejmować właściciel. Nie ma automatycznego move między dostawcami. Retry overload ma osobne limity odstępu/liczby/czasu.
 

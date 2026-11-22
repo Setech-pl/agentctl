@@ -1,5 +1,7 @@
 import { parseChatQuotas } from './chat-quotas.ts';
 import type { ChatQuotas } from './chat-quotas.ts';
+import { effectiveLimitConfig, parseLimitSettings } from './limit-profiles.ts';
+import type { LimitRuntime, LimitSettings } from './limit-profiles.ts';
 import { peakDays } from './peak.ts';
 import type { ProviderSettings, PeakWindow } from './peak.ts';
 import { get as providerValue } from './providers/registry.ts';
@@ -132,6 +134,8 @@ export interface GlobalConfig extends Layer {
   deliveryConfirmS: number;
   /** Max simultaneous windows per provider (agent). Missing or 0 = unlimited; `off` = the provider is disabled. */
   limits: Partial<Record<AgentName, number | 'off'>> & { heavy?: number };
+  limitSettings: LimitSettings;
+  limitRuntime: LimitRuntime;
   /** `limits.count_external`: claude/codex terminal sessions outside agentctl's windows count against the limit (detected with ps). */
   quotas?: ChatQuotas;
   countExternal: boolean;
@@ -382,7 +386,7 @@ export const DEFAULT_AGENT_SETTINGS = Object.fromEntries(DEFAULT_PROVIDERS.map(i
 /** The keys accepted in every layer: the global config, `.agentctl.yaml` and (with a few of its own) a spec. docs/configuration.md describes each one. */
 export const LAYER_KEYS = ['worktree_root', 'worktrees', 'links', 'env', 'report', 'setup', 'close', 'defaults', 'guide', 'review'];
 export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'limited', 'cache', 'state_dir', 'session', 'ui', 'tmux', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git', 'gc', 'cohort', 'delivery_confirm_s', 'preview', 'providers', 'providers_config', 'start_failure', 'wall', 'hosts', 'quotas'];
-export const LIMITS_KEYS = [...AGENT_NAMES, 'count_external', 'count_report_ready', 'heavy'];
+export const LIMITS_KEYS = [...AGENT_NAMES, 'count_external', 'count_report_ready', 'heavy', 'change_policy', 'profiles', 'schedule', 'active_profile', 'timed_overrides'];
 export const DEFAULTS_KEYS = ['agent', 'model', 'effort', 'remote_control'];
 export const LINK_KEYS = ['from', 'to'];
 export const AGENT_KEYS = ['env', 'accepts_busy_prompt', 'flags', 'effort_args', 'ready_pattern', 'ready_timeout', 'trust_timeout', 'trust_pattern', 'dialog_pattern', 'working_pattern', 'delivery_pattern', 'interrupt_key', 'footer_patterns', 'question_pattern', 'async_question_pattern', 'approval_pattern', 'limit_patterns', 'background_patterns', 'overload_patterns'];
@@ -1077,10 +1081,10 @@ export function configDir(env: NodeJS.ProcessEnv = process.env): string {
   return env.AGENTCTL_HOME ? resolvePath(env.AGENTCTL_HOME) : path.join(os.homedir(), '.agentctl');
 }
 
-export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
+export function loadGlobalConfig(dir: string = configDir(), now = Date.now(), text?: string): GlobalConfig {
   const file = path.join(dir, 'config.yaml');
-  const exists = fs.existsSync(file);
-  const raw = exists ? readYamlFile(file) : {};
+  const exists = text !== undefined || fs.existsSync(file);
+  const raw = text !== undefined ? YAML.parse(text) ?? {} : exists ? readYamlFile(file) : {};
   const p = new Problems();
   if (!isObject(raw)) throw new AgentctlError(`${file}: the top level must be a mapping`);
   checkKeys(raw, GLOBAL_KEYS, 'config', p);
@@ -1341,6 +1345,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   if (typeof deliveryConfirmS !== 'number' || !Number.isFinite(deliveryConfirmS) || deliveryConfirmS <= 0) p.add('config.delivery_confirm_s must be a positive number');
   const hosts = parseHosts(raw.hosts, p);
   const quotas = parseChatQuotas(raw.quotas, p);
+  const limitSettings = parseLimitSettings(raw.limits, providers, limits, quotas, p);
   const gc: GlobalConfig['gc'] = { afterIntegration: 'propose' };
   if (raw.gc !== undefined) {
     if (!isObject(raw.gc)) p.add('config.gc must be a mapping');
@@ -1356,10 +1361,10 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
     const configuredUsage = usageMap[`${id}_dir`] !== undefined || ['warn', 'critical', 'queue_hold'].some(k => { const values = usageMap[k]; return isObject(values) && values[id] !== undefined; });
     if (agentMap[id] !== undefined || (isObject(raw.limits) && raw.limits[id] !== undefined) || configuredUsage) warnings.push(`${id} is not in providers; its agent/limit/usage settings are inactive`);
   }
-  const config: GlobalConfig = { ...layer, providers, ...(providersConfig ? { providersConfig } : {}), ...(startFailure ? { startFailure } : {}), cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, ...(ui ? { ui } : {}), ...(tmux ? { tmux } : {}), deliveryConfirmS: deliveryConfirmS as number, limits, ...(quotas ? { quotas } : {}), countExternal, countReportReady, preview, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, cleanWorktreeCache, cohort, overload, limited, collisions, cancel, usage, guideLang, capacity, disk, git, gc, wall, hosts, path: file, loaded: exists };
+  const config: GlobalConfig = { ...layer, providers, ...(providersConfig ? { providersConfig } : {}), ...(startFailure ? { startFailure } : {}), cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, ...(ui ? { ui } : {}), ...(tmux ? { tmux } : {}), deliveryConfirmS: deliveryConfirmS as number, limits, limitSettings, limitRuntime: { timed: {} }, ...(quotas ? { quotas } : {}), countExternal, countReportReady, preview, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, cleanWorktreeCache, cohort, overload, limited, collisions, cancel, usage, guideLang, capacity, disk, git, gc, wall, hosts, path: file, loaded: exists };
   if (mirror) config.mirrorDir = resolvePath(mirror);
   if (warnings.length) config.warnings = warnings;
-  return config;
+  return effectiveLimitConfig(config, now);
 }
 
 export const PROJECT_CONFIG_NAME = '.agentctl.yaml';

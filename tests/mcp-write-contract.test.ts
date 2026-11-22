@@ -11,7 +11,7 @@ import { OWNER_IDENTITY, postMessage } from '../src/core/wall.ts';
 import { Context } from '../src/core/context.ts';
 import { MCP_TOOLS, applyMcpRequest, auditPath } from '../src/core/mcp-tools.ts';
 import { readMcpRequests } from '../src/core/mcp-requests.ts';
-import { DiskRunner, FakeTmux, fakeWatcher, makeConfig, seedTask, useScratch } from './helpers.ts';
+import { directLimitPolicy, DiskRunner, FakeTmux, fakeWatcher, makeConfig, seedTask, useScratch } from './helpers.ts';
 
 const scratch = useScratch();
 
@@ -58,6 +58,7 @@ it('MCP-WRITE-PREVIEW: previews only record a plan request for watched GC and ne
   const root = scratch.sub('registry');
   const repo = scratch.sub('registry/repo');
   const config = makeConfig(root, `providers: [claude, codex, kimi]
+limits: {${directLimitPolicy}}
 mcp: {allow: [${writes.map(t => t.name).join(', ')}, send_enter], max_response_kb: 256}
 capacity: {snapshot: false, codex_refresh: false}
 `);

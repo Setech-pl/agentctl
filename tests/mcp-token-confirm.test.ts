@@ -6,7 +6,7 @@ import { MCP_TOOLS, providerToolInput } from '../src/core/mcp-tools.ts';
 import { composerFixture } from './composer-fixture.ts';
 import { areaKey, inspectField } from '../src/core/input-field.ts';
 import { Context } from '../src/core/context.ts';
-import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helpers.ts';
+import { directLimitPolicy, DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helpers.ts';
 import { readQueue, saveEntry } from '../src/core/queue.ts';
 const scratch = useScratch();
 const tool = (name: string) => MCP_TOOLS.find(t => t.name === name)!;
@@ -55,7 +55,7 @@ it('A5: table of write tools exposes token-only confirm schemas, including limit
     assert.ok(t.input.preview_token, t.name);
     assert.ok(z.object(t.input).safeParse({confirm: true, preview_token: 'preview'}).success, t.name);
   }
-  const config = makeConfig(scratch.sub('a5'), 'mcp: {allow: [set_limits, reserve, wall]}\n');
+  const config = makeConfig(scratch.sub('a5'), `mcp: {allow: [set_limits, reserve, wall]}\nlimits: {${directLimitPolicy}}\n`);
   const deps = {context: () => new Context(new DiskRunner({dryRun: false}), config, () => {}), notify: async () => {}};
   for (const [name, args] of [['set_limits', {claude: 3}], ['reserve', {codex: 1}], ['wall_post', {as: 'chat:nc', channel: 'nc', kind: 'info', subject: 'A5', body: 'hello'}]] as const) {
     const preview = await tool(name).run(deps, args);

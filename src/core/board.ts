@@ -21,13 +21,16 @@ import { cancelTasks, planCancel } from './cancel.ts';
 import { countsLine, lastActivity, listCohorts } from './cohort.ts';
 import { closeTask } from './close.ts';
 import { Context } from './context.ts';
-import type { GlobalConfig } from './config.ts';
+import { loadGlobalConfig, type GlobalConfig } from './config.ts';
 import { DEFAULT_WINDOW_ICONS } from './icons.ts';
 import type { SelfArgv } from './events.ts';
 import { interruptTask } from './interrupt.ts';
 import { moveTask } from './move.ts';
 import { liveWindows } from './plan.ts';
-import { collectLimits, renderLimits } from './limits.ts';
+import { applySetLimits, collectLimits, planSetLimits, renderLimits } from './limits.ts';
+import { decideLimitRequest, pendingLimitRequests } from './limit-requests.ts';
+import { renderChatLoad } from './chat-quotas.ts';
+import { taskShell } from './wall.ts';
 import { planGc, renderGc } from './gc.ts';
 import { hostsViewLines } from './host-health.ts';
 import { readHostsCache, summarizeHosts } from './hosts.ts';
@@ -163,13 +166,22 @@ export type BoardMode =
   /** `l`: the history of the tasks (`agentctl log`), scrolled with the arrows. */
   | { kind: 'log'; lines: string[]; offset: number }
   /** `L` (limits), `G` (gc preview), `H` (hosts): a page of lines from the core, scrolled with the arrows. */
-  | { kind: 'view'; what: ViewKind; lines: string[]; offset: number }
+  | { kind: 'view'; what: ViewKind; lines: string[]; offset: number; limits?: LimitsPanel }
   /** `W`: the WALL (board-wall.ts): channels, the messages of one (status/kind filters), one message with its thread. */
   | { kind: 'wall'; archive?: boolean; level: 'channels' | 'messages' | 'message'; channel: number; message: number; id: string | null; status: WallStatus | null; wallKind: WallKind | null; lines: string[]; offset: number };
 
 export type ViewKind = 'limits' | 'gc' | 'capacity' | 'hosts';
 
 export const VIEW_TITLES: Record<ViewKind, string> = { capacity: 'Capacity', limits: 'Limits', gc: 'Clean-up preview (agentctl gc)', hosts: 'Hosts (remote machines over SSH)' };
+
+type LimitValue = number | 'off' | null;
+type LimitChoice = { kind: 'provider'; agent: AgentName; limit: LimitValue } | { kind: 'profile'; name: string } | { kind: 'request'; id: string };
+interface LimitsPanel {
+  profile?: string;
+  choices: { line: number; action: LimitChoice }[];
+  selected: number;
+  draft?: number | 'off';
+}
 
 export interface CohortOption {
   label: string;
@@ -178,6 +190,7 @@ export interface CohortOption {
 
 export interface BoardState {
   rows: BoardRow[];
+  limitPending?: number;
   pulledExpanded?: string[];
   pulledCollapseAfter?: number;
   now?: number;
@@ -261,6 +274,9 @@ export type BoardEffect =
   | { type: 'log' }
   /** `L`, `G`, `H`: load the lines of a view. */
   | { type: 'view'; what: ViewKind }
+  | { type: 'limit-set'; agent: AgentName; before: LimitValue; limit: number | 'off'; profile?: string }
+  | { type: 'limit-profile'; name: string }
+  | { type: 'limit-decision'; id: string; decision: 'approved' | 'rejected' }
   /** `W`: (re)load the WALL data; Enter on a message: its lines; the owner's read marks (local). */
   | { type: 'wall-load' }
   | { type: 'wall-message'; id: string }
@@ -732,6 +748,31 @@ function viewKey(state: BoardState, mode: Extract<BoardMode, { kind: 'view' }>, 
   const opener = mode.what === 'limits' ? 'L' : 'G';
   if (key.escape || input === 'q' || input === opener || (key.ctrl && input === 'c')) return { state: toList(state), effects: [] };
   const step = key.upArrow || input === 'k' ? -1 : key.downArrow || input === 'j' ? 1 : 0;
+  const panel = mode.limits;
+  const choice = panel?.choices[panel.selected]?.action;
+  if (panel && choice) {
+    if (step || key.pageDown || key.pageUp) {
+      const jump = key.pageDown ? 1 : key.pageUp ? -1 : step;
+      const selected = Math.max(0, Math.min(panel.choices.length - 1, panel.selected + jump));
+      return { state: { ...state, mode: { ...mode, offset: 0, limits: { ...panel, selected, draft: undefined } } }, effects: [] };
+    }
+    if (choice.kind === 'provider' && (input === '+' || input === '=' || input === '-')) {
+      const current = panel.draft ?? choice.limit;
+      const value = typeof current === 'number' ? current : 0;
+      const next = input === '-' ? Math.max(0, value - 1) : Math.min(Number.MAX_SAFE_INTEGER, value + 1);
+      return { state: { ...state, mode: { ...mode, limits: { ...panel, draft: next || 'off' } } }, effects: [] };
+    }
+    if (choice.kind === 'provider' && key.return && panel.draft !== undefined) {
+      return { state: { ...state, mode: { ...mode, limits: { ...panel, draft: undefined } } }, effects: [{ type: 'limit-set', agent: choice.agent, before: choice.limit, limit: panel.draft, profile: panel.profile }] };
+    }
+    if (choice.kind === 'profile' && key.return) return { state, effects: [{ type: 'limit-profile', name: choice.name }] };
+    if (choice.kind === 'request' && (input === 'a' || input === 'r')) return { state, effects: [{ type: 'limit-decision', id: choice.id, decision: input === 'a' ? 'approved' : 'rejected' }] };
+    if (key.rightArrow || key.leftArrow) {
+      const offset = Math.max(0, Math.min(mode.lines.length - 1, mode.offset + (key.rightArrow ? 1 : -1)));
+      return { state: { ...state, mode: { ...mode, offset } }, effects: [] };
+    }
+    return { state, effects: [] };
+  }
   if (step === 0) return { state, effects: [] };
   return { state: { ...state, mode: { ...mode, offset: Math.max(0, Math.min(Math.max(0, mode.lines.length - 1), mode.offset + step)) } }, effects: [] };
 }
@@ -922,6 +963,25 @@ export async function runBoardEffect(runner: Runner, config: GlobalConfig, effec
   const ctx = new Context(runner, config, (l) => lines.push(l));
   try {
     switch (effect.type) {
+      case 'limit-set':
+      case 'limit-profile':
+      case 'limit-decision': {
+        const fresh = loadGlobalConfig(path.dirname(config.path), runner.now());
+        if (taskShell(fresh, process.env, process.cwd())) return { level: 'error', text: 'Zmiana limitów wymaga tablicy właściciela.' };
+        ctx.setConfig(fresh);
+        if (effect.type === 'limit-decision') {
+          const request = await decideLimitRequest(ctx, effect.id, effect.decision, 'tablica właściciela');
+          const label = { approved: 'zatwierdzono', rejected: 'odrzucono', expired: 'wniosek wygasł', superseded: 'konfiguracja się zmieniła', pending: 'oczekuje' };
+          return { level: request.status === effect.decision ? 'info' : 'error', text: `${request.id}: ${label[request.status]}` };
+        }
+        if (effect.type === 'limit-set' && ((fresh.limits[effect.agent] ?? null) !== effect.before || fresh.limitRuntime.profile !== effect.profile)) {
+          return { level: 'error', text: 'Limit się zmienił. Ustaw go ponownie.' };
+        }
+        const plan = planSetLimits(fresh, effect.type === 'limit-set' ? { [effect.agent]: effect.limit } : {}, undefined, undefined, runner.now(), undefined,
+          effect.type === 'limit-profile' ? { profile: effect.name } : {});
+        await applySetLimits(ctx, plan, 'tablica właściciela');
+        return { level: 'info', text: effect.type === 'limit-profile' ? `Aktywny profil: ${effect.name}` : `${effect.agent}: ${effect.limit}` };
+      }
       case 'switch':
         const remote = readTaskRecord(config, effect.window);
         if (remote?.host) return { level: 'info', text: remoteAttachHint(config, remote)! };
@@ -1115,6 +1175,41 @@ export function rowCells(row: StatusRow, selected: boolean, cols: BoardColumns, 
 
 /** The lines of the log view: the history of the tasks, newest first. */
 export const loadLogLines = (ctx: Context): string[] => logLines(ctx);
+
+export async function loadLimitsPanel(ctx: Context): Promise<{ lines: string[]; limits: LimitsPanel }> {
+  const config = ctx.config;
+  const now = ctx.runner.now();
+  const { profile, nextSwitch, timed } = config.limitRuntime;
+  const requests = pendingLimitRequests(config, now);
+  const timezone = config.limitSettings.schedule?.timezone;
+  const nextTime = nextSwitch ? new Intl.DateTimeFormat('pl-PL', { timeZone: timezone, dateStyle: 'short', timeStyle: 'short' }).format(nextSwitch.at) : '';
+  const lines = [`Profil: ${profile ?? 'bazowy'}${nextSwitch ? ` · następny: ${nextSwitch.profile} · ${nextTime} (${timezone})` : ''}`];
+  const choices: LimitsPanel['choices'] = [];
+  for (const request of requests) {
+    choices.push({ line: lines.length, action: { kind: 'request', id: request.id } });
+    lines.push(`${request.id} · ${request.by} · do ${formatLocalTime(new Date(request.expires).toISOString())}`, `  Powód: ${request.reason}`, ...request.difference.split('\n').map(line => `  ${line}`));
+  }
+  const report = collectLimits(config, await liveWindows(ctx), now);
+  for (const provider of report.providers) {
+    choices.push({ line: lines.length, action: { kind: 'provider', agent: provider.agent, limit: provider.limit } });
+    const until = timed[provider.agent]?.until;
+    lines.push(`${provider.agent} · ${provider.used}/${provider.limit ?? '∞'}${until ? ` · limit do ${formatLocalTime(until)}` : ''}${provider.providerHold ? ` · ${providerHoldText(provider.agent, provider.providerHold)}` : ''}`);
+    for (const chat of provider.chats ?? []) lines.push(`  ${renderChatLoad(chat)}`);
+  }
+  for (const name of Object.keys(config.limitSettings.profiles)) {
+    choices.push({ line: lines.length, action: { kind: 'profile', name } });
+    lines.push(`Profil ${name}${name === profile ? ' (aktywny)' : ''}`);
+  }
+  return { lines, limits: { profile, choices, selected: 0 } };
+}
+
+export function updateLimitsPanel(mode: Extract<BoardMode, { kind: 'view' }>, data: Awaited<ReturnType<typeof loadLimitsPanel>>): typeof mode {
+  const previous = mode.limits;
+  const action = previous?.choices[previous.selected]?.action;
+  const selected = data.limits.choices.findIndex(choice => JSON.stringify(choice.action) === JSON.stringify(action));
+  return { ...mode, ...data, offset: selected < 0 ? 0 : mode.offset,
+    limits: { ...data.limits, selected: Math.max(0, selected), draft: selected >= 0 && data.limits.profile === previous?.profile ? previous?.draft : undefined } };
+}
 
 /** The lines of a view: the same text the command prints. */
 export async function loadViewLines(ctx: Context, what: ViewKind): Promise<string[]> {
@@ -1326,7 +1421,7 @@ export const HELP_LINES: string[] = [
   '              newest first; "starsze…" opens the rest',
   '              "bez kohorty" = the tasks that are in no cohort',
   '  g / E       fold the cohort group of the selected task / open all groups',
-  '  L           the limits per provider and what uses them (agentctl limits)',
+  '  L           limity, profile i decyzje o zmianach (+/−, Enter, a/r)',
   '  C           current capacity (plans, pace, slots, stats, estimates)',
   '  G           preview of the clean-up (agentctl gc): what would be freed',
   '  R           resume the tasks under "Do wznowienia" (asks first)',

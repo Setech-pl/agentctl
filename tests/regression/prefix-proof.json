@@ -738,6 +738,36 @@
       "tests/gate.test.ts"
     ]
   },
+  "LIMITS0255-OWNER": {
+    "rev": "v0.26.0",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "LIMITS0255-OWNER: an MCP confirm queues one request; only an owner decision applies it",
+      "LIMITS0255-OWNER: an MCP confirm queues one request; only an owner decision applies it"
+    ]
+  },
+  "LIMITS0255-SCHEDULE": {
+    "rev": "v0.26.0",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "LIMITS0255-SCHEDULE: local midnight and both Warsaw DST transitions use one chronological switch",
+      "LIMITS0255-SCHEDULE: local midnight and both Warsaw DST transitions use one chronological switch"
+    ]
+  },
+  "LIMITS0255-SHARES": {
+    "rev": "v0.26.0",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "LIMITS0255-SHARES: global changes recompute configured percentages and keep absolute overrides",
+      "LIMITS0255-SHARES: global changes recompute configured percentages and keep absolute overrides"
+    ]
+  },
   "MCP-WRITE-PREVIEW": {
     "rev": "v0.23.1",
     "outcome": "FAILS",

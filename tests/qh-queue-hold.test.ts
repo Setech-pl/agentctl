@@ -14,7 +14,7 @@ import { commitQueueAdd, planQueueAdd, queueTick, QueueMemory } from '../src/cor
 import { splitSpecs } from '../src/core/spec.ts';
 import { queueHolds } from '../src/core/usage-limits.ts';
 import { reloadConfig } from '../src/core/watch.ts';
-import { DiskRunner, FakeTmux, runCli, useScratch } from './helpers.ts';
+import { directLimitPolicy, DiskRunner, FakeTmux, runCli, useScratch } from './helpers.ts';
 import { makeWorld, setClaudePlan } from './usage-world.ts';
 
 /*
@@ -28,7 +28,7 @@ const tool = (name: string): McpToolDef => MCP_TOOLS.find((t) => t.name === name
 
 function setup(name: string) {
   const w = makeWorld(scratch, name, '  # the hold is tuned by the owner\n');
-  fs.appendFileSync(w.config.path, '# limits of the night\nlimits: {claude: 4, codex: 4}\nmcp: {allow: [set_limits]}\ncapacity: {snapshot: false, codex_refresh: false}\n');
+  fs.appendFileSync(w.config.path, `# limits of the night\nlimits: {claude: 4, codex: 4${directLimitPolicy ? `, ${directLimitPolicy}` : ''}}\nmcp: {allow: [set_limits]}\ncapacity: {snapshot: false, codex_refresh: false}\n`);
   const dir = path.dirname(w.config.path);
   const tmux = new FakeTmux();
   const runner = new DiskRunner({ dryRun: false, startTime: NOW, respond: tmux.respond });

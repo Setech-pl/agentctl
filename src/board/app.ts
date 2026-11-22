@@ -4,6 +4,7 @@ import { RefreshScheduler } from './refresh-scheduler.ts';
 import { collectDisk, diskLine, refreshDiskFreeSpace } from '../core/disk.ts';
 import { watchSnapshotTime, watchSnapshotWarning, watchStepWarning } from '../core/watch-snapshot.ts';
 import fs from 'node:fs';
+import path from 'node:path';
 import React, { useEffect, useRef, useState } from 'react';
 import { Box, Text, render, useApp, useInput, useWindowSize } from 'ink';
 import {
@@ -40,6 +41,8 @@ import {
   TickGate,
   usagePanel,
   loadViewLines,
+  loadLimitsPanel,
+  updateLimitsPanel,
   VIEW_TITLES,
   showNotice,
   visibleItems,
@@ -50,6 +53,9 @@ import {
 } from '../core/board.ts';
 import type { BoardCell, BoardEffect, BoardState } from '../core/board.ts';
 import type { Context } from '../core/context.ts';
+import { loadGlobalConfig } from '../core/config.ts';
+import { ConfigStore } from '../core/config-store.ts';
+import { pendingLimitRequests } from '../core/limit-requests.ts';
 import type { SelfArgv } from '../core/events.ts';
 import { navigationHint } from '../core/navigation.ts';
 import { errorMessage } from '../core/util.ts';
@@ -227,12 +233,20 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
       if (at !== undefined || warning) diagnosticTimer = timers.set(updateDiagnostics, 15_000);
     };
     updateDiagnostics();
+    const configStore = new ConfigStore(() => loadGlobalConfig(path.dirname(ctx.config.path), ctx.runner.now()), ctx.config);
     const scheduler = new RefreshScheduler(async () => {
       const started = props.runtime ? performance.now() : 0;
+      const config = configStore.refresh(ctx.runner.now()).config;
+      if (ctx.config !== config) ctx.setConfig(config);
       // Closed/cancelled rows are detailed only while their section is listed (the `a` key).
       const snap = await loadBoard(ctx, current.current.selected, cache.current, PREVIEW_LINES, { deepClosed: current.current.showHidden });
       lastBoardRefresh = ctx.runner.now();
-      if (!stopped) { update((s) => applySnapshot(s, snap)); props.runtime?.refreshed?.(cache.current.size, performance.now() - started); }
+      if (!stopped) {
+        const limitPending = pendingLimitRequests(ctx.config, ctx.runner.now()).length;
+        update((s) => ({ ...applySnapshot(s, snap), limitPending }));
+        if (current.current.mode.kind === 'view' && current.current.mode.what === 'limits') runEffect({ type: 'view', what: 'limits' });
+        props.runtime?.refreshed?.(cache.current.size, performance.now() - started);
+      }
       // New WALL messages show while the view is open; the header's unread count is read in the background from the start, at most every
       // WALL_BADGE_REFRESH_MS (the index is incremental: a stat per channel, the new tail only). A background read never shows an error.
       const now = props.runtime?.now() ?? Date.now();
@@ -314,6 +328,15 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
         while (pendingView.current && mounted.current) {
           const request = pendingView.current;
           pendingView.current = null;
+          if (request.what === 'limits') {
+            try {
+              const data = await loadLimitsPanel(ctx);
+              if (mounted.current && !pendingView.current) update((s) => (s.mode.kind === 'view' && s.mode.what === 'limits' ? { ...s, mode: updateLimitsPanel(s.mode, data) } : s));
+              continue;
+            } catch (e) {
+              if (mounted.current) update((s) => showNotice(s, { level: 'error', text: errorMessage(e) }));
+            }
+          }
           const lines = await loadViewLines(ctx, request.what).catch((e: unknown) => [`cannot load: ${errorMessage(e)}`]);
           if (mounted.current && !pendingView.current) update((s) => (s.mode.kind === 'view' && s.mode.what === request.what ? { ...s, mode: { kind: 'view', what: request.what, lines, offset: 0 } } : s));
         }
@@ -341,7 +364,8 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
   const hiddenCount = state.showHidden ? 0 : state.rows.filter((r) => r.hidden).length;
   const panel = usagePanel(state.plans, ctx.config.usage, Date.now(), providerHolds(ctx.config, Date.now()), ctx.config);
   const mline = managerLine(state, ctx.config.manager.autostart || ctx.config.manager.project !== null);
-  const rowsForBody = Math.max(3, state.height - 4 - panel.length - (mline ? 1 : 0) - (state.disk ? 1 : 0) - (watchAge ? 1 : 0));
+  const limitBanner = state.limitPending ? h(Text, { color: 'yellow', bold: true, wrap: 'truncate-end' }, `Zmiany limitów do decyzji: ${state.limitPending} (L)`) : null;
+  const rowsForBody = Math.max(3, state.height - 4 - panel.length - (mline ? 1 : 0) - (state.disk ? 1 : 0) - (watchAge ? 1 : 0) - (limitBanner ? 1 : 0));
   const previewRoom = Math.max(1, rowsForBody - (state.preview?.model ? 3 : 1));
   useInput((input, key) => {
     const result = handleKey(current.current, input, key, previewRoom);
@@ -373,6 +397,17 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
   const panelBox = panel.length === 0 ? null : h(Box, { flexDirection: 'column', width: state.width }, ...panel.map((l) => h(Text, { key: l.provider, wrap: 'truncate-end', ...(l.color ? { color: l.color } : { dimColor: true }) }, l.text)));
   const logMode = state.mode.kind === 'log' ? state.mode : null;
   const viewMode = state.mode.kind === 'view' ? state.mode : null;
+  const limitsBody = (): React.ReactElement => {
+    const mode = viewMode!;
+    const panel = mode.limits!;
+    const selected = panel.choices[panel.selected]?.line ?? 0;
+    const room = Math.max(1, state.height - 4 - (limitBanner ? 1 : 0));
+    const top = Math.min(Math.max(0, mode.lines.length - room), Math.max(0, selected ? selected - 1 + mode.offset : mode.offset));
+    const hint = 'Limity · ↑↓ wybór · ←→ przewijanie · +/− i Enter · a zatwierdź · r odrzuć · Esc';
+    return h(Box, { flexDirection: 'column' }, h(Text, { bold: true, wrap: 'truncate-end' }, hint), ...mode.lines.slice(top, top + room).map((text, i) => selected === top + i
+      ? h(Selection, { key: i, content: `${text}${panel.draft === undefined ? '' : ` → ${panel.draft}`}`, width: state.width, style: focusedStyle })
+      : h(Text, { key: i, wrap: 'truncate-end' }, text)));
+  };
   const wallMode = state.mode.kind === 'wall' ? state.mode : null;
   const wallBody = (): React.ReactElement => {
     const view = wallView(state, wallMode!);
@@ -391,7 +426,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
       : wallMode
       ? wallBody()
       : viewMode
-      ? h(Box, { flexDirection: 'column' }, h(Text, { bold: true }, `${VIEW_TITLES[viewMode.what]} (↑↓ scroll, Esc back)`), ...viewMode.lines.slice(viewMode.offset, viewMode.offset + Math.max(1, state.height - 4)).map((l, i) => h(Text, { key: i, wrap: 'truncate-end' }, l === '' ? ' ' : l)))
+      ? viewMode.limits ? limitsBody() : h(Box, { flexDirection: 'column' }, h(Text, { bold: true }, `${VIEW_TITLES[viewMode.what]} (↑↓ scroll, Esc back)`), ...viewMode.lines.slice(viewMode.offset, viewMode.offset + Math.max(1, state.height - 4 - (limitBanner ? 1 : 0))).map((l, i) => h(Text, { key: i, wrap: 'truncate-end' }, l === '' ? ' ' : l)))
       : logMode
       ? h(Box, { flexDirection: 'column' }, h(Text, { bold: true }, `Log – ${logMode.lines.length > 1 ? logMode.lines.length - 1 : 0} task${logMode.lines.length === 2 ? '' : 's'} (↑↓ scroll, Esc back)`), ...logMode.lines.slice(logMode.offset, logMode.offset + Math.max(1, state.height - 4)).map((l, i) => h(Text, { key: i, wrap: 'truncate-end', ...(i === 0 && logMode.offset === 0 ? { dimColor: true } : {}) }, l === '' ? ' ' : l)))
       : state.mode.kind === 'help'
@@ -402,7 +437,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
           h(TaskList, { state, width: layout.listWidth, capacity: rowsForBody - 1, icons: ctx.config.watch.windowIcons, selection: listStyle, versions: ctx.config.board.modelVersions }),
           layout.showPreview ? h(Preview, { state, width: layout.previewWidth, room: previewRoom }) : null,
         );
-  return h(Box, { flexDirection: 'column', width: state.width, height: state.height }, header, fullScreen ? null : diskBox, fullScreen ? null : watchBox, fullScreen ? null : managerBox, fullScreen ? null : panelBox, h(Box, { flexGrow: 1, flexDirection: 'column' }, body), h(Footer, { state, hint: navigationHint(ctx.config.board.returnKey) }));
+  return h(Box, { flexDirection: 'column', width: state.width, height: state.height }, header, limitBanner, fullScreen ? null : diskBox, fullScreen ? null : watchBox, fullScreen ? null : managerBox, fullScreen ? null : panelBox, h(Box, { flexGrow: 1, flexDirection: 'column' }, body), h(Footer, { state, hint: navigationHint(ctx.config.board.returnKey) }));
 }
 
 /** Show the board until the user quits; resolves when it is gone. Needs a terminal. */

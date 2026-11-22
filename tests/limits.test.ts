@@ -7,7 +7,7 @@ import { applySetLimits, collectLimits, detectExternal, parseAssignments, parseC
 import { liveWindows } from '../src/core/plan.ts';
 import { describeQueue, readQueue } from '../src/core/queue.ts';
 import { readJournal } from '../src/core/journal.ts';
-import { DiskRunner, FakeTmux, makeConfig, makeContext, runCli, seedTask, useScratch } from './helpers.ts';
+import { directLimitPolicy, DiskRunner, FakeTmux, makeConfig, makeContext, runCli, seedTask, useScratch } from './helpers.ts';
 import { Context } from '../src/core/context.ts';
 import { z } from 'zod';
 import { handleKey, initialBoardState, loadViewLines } from '../src/core/board.ts';
@@ -264,7 +264,7 @@ describe('limits: MCP and board', () => {
   });
 
   it('set_limits: off by default; two steps (summary, then confirm: true); audited; announced', async () => {
-    const s = mcpSetup('mcp-set', 'limits:\n  claude: 3\n');
+    const s = mcpSetup('mcp-set', `limits:\n  claude: 3\n${directLimitPolicy ? `  ${directLimitPolicy}\n` : ''}`);
     const denied = await s.call('set_limits', { claude: 2 });
     assert.equal(denied.isError, true);
     assert.match(denied.text, /not in mcp\.allow/);
@@ -283,7 +283,7 @@ describe('limits: MCP and board', () => {
   });
 
   it('set_limits accepts "off": the provider is disabled until the limit returns', async () => {
-    const s = mcpSetup('mcp-off', 'mcp:\n  allow: [set_limits]\nlimits:\n  claude: 3\n');
+    const s = mcpSetup('mcp-off', `mcp:\n  allow: [set_limits]\nlimits:\n  claude: 3\n${directLimitPolicy ? `  ${directLimitPolicy}\n` : ''}`);
     const preview = await s.call('set_limits', { claude: 'off' });
     assert.match(preview.text, /limits\.claude: 3 -> off \(disabled\)/);
     const done = await s.call('set_limits', { claude: 'off', confirm: true });

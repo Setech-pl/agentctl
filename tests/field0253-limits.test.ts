@@ -8,14 +8,14 @@ import { ConfigStore } from '../src/core/config-store.ts';
 import { Context } from '../src/core/context.ts';
 import { messageWithBody, readWall } from '../src/core/wall.ts';
 import { reloadConfig } from '../src/core/watch.ts';
-import { DiskRunner, fakeWatcher, makeConfig, useScratch } from './helpers.ts';
+import { directLimitPolicy, DiskRunner, fakeWatcher, makeConfig, useScratch } from './helpers.ts';
 
 const scratch = useScratch();
 const reader = { id: 'owner', kind: 'owner' } as const;
 const tool = (name: string) => MCP_TOOLS.find(t => t.name === name)!;
 
 test('FIELD0253-LIMITS: watch reports manual and chat changes exactly once with their sources', async () => {
-  const config = makeConfig(scratch.sub('limits'), 'limits: {claude: 12, codex: 5}\nmcp: {allow: [set_limits]}\n');
+  const config = makeConfig(scratch.sub('limits'), `limits: {claude: 12, codex: 5${directLimitPolicy ? `, ${directLimitPolicy}` : ''}}\nmcp: {allow: [set_limits]}\n`);
   const runner = new DiskRunner({dryRun: false, startTime: Date.now()});
   const ctx = new Context(runner, config, () => {});
   const load = () => loadGlobalConfig(path.dirname(config.path));

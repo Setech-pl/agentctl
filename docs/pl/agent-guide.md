@@ -2,6 +2,8 @@
 
 W MCP zawsze przekazuj `as: "chat:<nazwa>"` w `new` i `queue`, aby zlecenie zajęło miejsce we właściwej kwocie. Potwierdzaj z tą samą tożsamością.
 
+Wnioskuj o zmianę limitów, progów kolejki, kwot lub profilu przez MCP `set_limits` z krótkim `reason`. Podaj właścicielowi ID wniosku i poczekaj na decyzję w panelu `L` lub CLI właściciela. Wynikowe pułapy odczytasz przez `limits` i `capacity`. Agentctl publikuje je na WALL `agentctl` po zastosowaniu zmiany.
+
 ## Ustal bieżące fakty
 
 Każdą odpowiedź o pracy zaczynaj od events_since z tożsamością czatu WALL. Na początku sesji czytaj guide (project + lang) i capacity. Guide może zawierać zaufaną nakładkę repo z .agentctl.yaml; czat nie wymyśla jej ścieżki. Version/mcp_check diagnozuje stary proces. Status pobieraj dla brakujących szczegółów, peek dla pytania, pull_ready dla podsumowań nowych raportów, get_report dla dowodów.

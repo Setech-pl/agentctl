@@ -21,7 +21,7 @@ agentctl limits set queue_hold.codex=85
 agentctl limits set queue_hold=off
 ~~~
 
-MCP `set_limits({queue_hold: {claude: 90, codex: "off"}})` follows preview/confirm and keeps config comments plus a backup. A running watch reloads it next tick. Hold prevents queued starts when a known provider window is at/above the configured threshold; it does not interrupt running agents or silently choose another provider. Missing readings do not prove spare quota. `usage.warn`/`critical` emit deduplicated notifications independently of hold. Plan reset/exhaustion and local slot availability are separate conditions.
+MCP `set_limits({queue_hold: {claude: 90, codex: "off"}})` submits an owner request by default. Approval preserves config comments plus a backup. A running watch reloads it by the next tick. Hold prevents queued starts when a known provider window is at/above the configured threshold; it does not interrupt running agents or silently choose another provider. Missing readings do not prove spare quota. `usage.warn`/`critical` emit deduplicated notifications independently of hold. Plan reset/exhaustion and local slot availability are separate conditions.
 
 A provider's `limited` state comes from a limit observation, not a low slot count. Recovery can wait for reset, continue the live window after recovery or explicitly move through equivalents; resume recreates a lost window. `limited.auto_resume` defaults true: when the known plan has more than `limited.resume_above_percent` remaining (default 5), watch can send the configured continuation. Set false when the owner should control that step. No automatic cross-provider move occurs. Overload retries have separate retry/count/time limits.
 
