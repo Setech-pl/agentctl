@@ -128,19 +128,25 @@ exec ${shellQuote(realGit)} "$@"
         await new Promise(r => setTimeout(r, 100));
       }
       assert.equal(request.status, 'done', request.error);
-      return request;
+      return { ...request, id };
     };
     await call('close', { task: 'PARITY-1' });
     const closed = await call('close', { task: 'PARITY-1', confirm: true });
     assert.ok(!closed.isError, closed.text);
     await applied(closed.text);
-    const gcPreview = await call('gc', {older_than: '1m'});
+    const gcAccepted = await call('gc', {older_than: '1m'});
+    assert.ok(!gcAccepted.isError, gcAccepted.text);
+    evidence.gcAccepted = gcAccepted;
+    const { id: planId } = await applied(gcAccepted.text);
+    assert.ok(fs.existsSync(wt), 'preparing the plan does not remove the worktree');
+    const gcPreview = await call('gc', {request_id: planId});
     assert.ok(!gcPreview.isError, gcPreview.text);
     const gcToken = /preview_token: (\S+)/.exec(gcPreview.text)?.[1]; assert.ok(gcToken, gcPreview.text);
     evidence.gcPreview = gcPreview;
     const gcConfirmed = await call('gc', {preview_token: gcToken, confirm: true});
     evidence.gcConfirmed = gcConfirmed; assert.ok(!gcConfirmed.isError, gcConfirmed.text);
     evidence.gcExecution = await applied(gcConfirmed.text);
+    assert.ok(!fs.existsSync(wt), 'watch removed the confirmed worktree');
     evidence.audit = fs.readFileSync(path.join(h.agentctlHome, 'mcp-audit.log'), 'utf8');
     evidence.journal = fs.readFileSync(path.join(h.agentctlHome, 'journal.jsonl'), 'utf8');
     evidence.ok = true;
