@@ -52,6 +52,7 @@ import { readHostsCache, writeHostsCache } from './hosts.ts';
 import { sendPhoneTest } from './phone.ts';
 import { recordJournal, readJournal } from './journal.ts';
 import type { GcPlan } from './gc.ts';
+import { recheckIntegrationGc } from './integration-gc.ts';
 import { applyGc } from './gc.ts';
 import { collectCapacity as collectCapacityFull, capacitySnapshot, snapshotLines } from './capacity.ts';
 import type { Capacity } from './capacity.ts';
@@ -463,6 +464,11 @@ interface GcPreviewArgs {
 }
 
 async function planMcpGc(ctx: Context, args: GcPreviewArgs, refreshHosts = false): Promise<GcPlan> {
+  if (args.request_id) {
+    const saved = readGcPreview(ctx, args.request_id);
+    if (!('plan' in saved) || !saved.plan.integration) throw new AgentctlError('Integration GC preview unavailable; preview again.');
+    return recheckIntegrationGc(ctx, saved.plan);
+  }
   const options = { olderThan: args.older_than, branches: args.branches, cohort: args.cohort,
     forceDirty: args.force_dirty, includeCache: args.include_cache, keepCache: args.keep_cache, keep: args.keep };
   if (refreshHosts) await planRemoteGc(ctx, options, parseAge(args.older_than ?? '7d'));
@@ -470,7 +476,7 @@ async function planMcpGc(ctx: Context, args: GcPreviewArgs, refreshHosts = false
 }
 
 function gcPreviewResult(ctx: Context, plan: GcPlan, args: GcPreviewArgs): ToolResult {
-  return ok(JSON.stringify({ ...gcView(plan, args), text: renderGc(plan, args).join('\n'), partial_result: 'Partial result: sizes are cached or measuring (unknown sizes count as 0); repeat for updated estimates.', preview: true, execution: ctx.config.mcp.allow.includes('gc') ? 'gc with request_id (when available), then confirm' : 'requires gc in mcp.allow or CLI --apply' }));
+  return ok(JSON.stringify({ ...gcView(plan, args), text: renderGc(plan, args).join('\n'), ...(plan.integration ? {} : { partial_result: 'Partial result: sizes are cached or measuring (unknown sizes count as 0); repeat for updated estimates.' }), preview: true, execution: ctx.config.mcp.allow.includes('gc') ? 'gc with request_id (when available), then confirm' : 'requires gc in mcp.allow or CLI --apply' }));
 }
 
 function readGcPreview(ctx: Context, id: string): { plan: GcPlan; at: number; args: GcPreviewArgs } | ToolResult {
@@ -481,7 +487,7 @@ function readGcPreview(ctx: Context, id: string): { plan: GcPlan; at: number; ar
   try {
     const { plan, at } = JSON.parse(fs.readFileSync(gcPreviewPlanFile(ctx.config, id), 'utf8')) as { plan: GcPlan; at: number };
     const { merged, ...args } = request.args as GcPreviewArgs & { merged?: boolean };
-    return { plan, at, args: { ...args, branches: args.branches ?? merged } };
+    return { plan, at, args: plan.integration ? { request_id: id } : { ...args, branches: args.branches ?? merged } };
   } catch {
     return request.status === 'done' ? fail('GC preview plan is unavailable; preview again.')
       : ok(`GC preview pending; retry after the next watch tick.\nrequest_id: ${id}`);
@@ -1112,8 +1118,12 @@ async function runMove(deps: McpDeps, args: { task: string; agent?: AgentName | 
   });
 }
 
-/** `setup` runs shell commands: neither the top-level key nor `repos[].setup` is accepted from the chat (a repository's .agentctl.yaml setup still runs). */
-const chatSetup = (header: Record<string, unknown>): boolean => 'setup' in header || (Array.isArray(header.repos) && header.repos.some((r) => typeof r === 'object' && r !== null && 'setup' in r));
+/** A chat can name a clone source. Setup commands still come from trusted repository or global settings. */
+function chatSetup(header: Record<string, unknown>): boolean {
+  const setup = header.setup;
+  const sourceOnly = isObject(setup) && Object.keys(setup).length === 1 && (typeof setup.from_task === 'string' || typeof setup['link-from'] === 'string');
+  return 'setup' in header && !sourceOnly || (Array.isArray(header.repos) && header.repos.some(r => isObject(r) && 'setup' in r));
+}
 
 /** What a preview planned, as the accepted entries record it (P93); without the preview's plan the spec as written. */
 function acceptedOrders(ctx: Context, raws: RawSpec[], planned: AcceptedOrder[] | undefined, owner?: string): AcceptedOrder[] {
@@ -1594,7 +1604,7 @@ export const MCP_TOOLS: McpToolDef[] = [
     kind: 'write',
     description:
       'WRITE, off unless the user put "queue" in mcp.allow. Always pass as: "chat:<name>" to attribute the order to your chat. Puts the tasks of a spec in the queue (same spec format as new, plus priority: high|normal, after: <TASK or list>, touches: [globs]): each starts when a provider window is free and its `after` reports have an accepted first-line verdict (PASS, PASS with findings, PARTIAL, GO); after_verdict overrides the list. ' +
-      'The FIRST call (confirm omitted) validates the spec and returns a summary (where each task will stand, hints, touches warnings); show it to the user. Only when they agree, call again with the same spec and confirm: true. "setup" is not accepted from the chat. replace: true replaces a waiting entry in one watch step; previews identify pending queue_rm requests.',
+      'The FIRST call (confirm omitted) validates the spec and returns a summary (where each task will stand, hints, touches warnings); show it to the user. Only when they agree, call again with the same spec and confirm: true. Shell setup commands are not accepted from the chat. replace: true replaces a waiting entry in one watch step; previews identify pending queue_rm requests.',
     input: {
       as: wallAsArg,
       spec: z.string().min(1).max(100_000).optional().describe('The spec text: ---, YAML header, ---, prompt. Several specs may follow each other. Optional only when confirming with preview_token: the stored spec then executes.'),
@@ -1942,7 +1952,7 @@ function confirmationTargets(name: string, scope: unknown): unknown {
     const plan = scope as Awaited<ReturnType<typeof sendScope>>;
     return { target: plan.identity, message: plan.message?.id };
   }
-  if (name === 'gc') return (scope as GcPlan).items.map(({ kind, task, target, repo, branch, host, hostFingerprint, dirtyFiles, unpushedCommits }) => ({ kind, task, target, repo, branch, host, hostFingerprint, dirtyFiles, unpushedCommits }));
+  if (name === 'gc') return (scope as GcPlan).items.map(({ kind, task, target, repo, branch, host, hostFingerprint, dirtyFiles, unpushedCommits, head }) => ({ kind, task, target, repo, branch, host, hostFingerprint, dirtyFiles, unpushedCommits, head }));
   const project = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(project);
     if (!value || typeof value !== 'object') return value;

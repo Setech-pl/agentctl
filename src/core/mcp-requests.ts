@@ -9,6 +9,7 @@ import { recordJournal } from './journal.ts';
 import type { Notifier } from './notify.ts';
 import { watchAlive } from './queue.ts';
 import { errorMessage } from './util.ts';
+import type { GcPlan } from './gc.ts';
 
 /*
  * P93b: the confirm of an MCP write that can wait on start.lock, git, tmux or a scan of every task (unblock, queue_up, queue_rm, queue_retry,
@@ -99,6 +100,22 @@ export async function recordMcpRequest(ctx: Context, input: Omit<McpRequest, 'id
     const request: McpRequest = { ...input, id: randomUUID(), seq, requestedAt: new Date(ctx.runner.now()).toISOString(), status: 'pending' };
     writeRequest(ctx.config, request);
     return { request, existing: false };
+  });
+}
+
+/** A watcher-generated proposal uses the same durable request and plan files as an on-demand preview. */
+export async function saveGcProposal(ctx: Context, key: string, label: string, plan: GcPlan): Promise<McpRequest> {
+  return withRequestLock(ctx, async () => {
+    const all = readMcpRequests(ctx.config);
+    const known = all.find(r => r.tool === 'gc_preview' && r.key === key && r.status === 'done');
+    if (known) return known;
+    const at = ctx.runner.now();
+    const iso = new Date(at).toISOString();
+    const request: McpRequest = { id: randomUUID(), seq: (all.at(-1)?.seq ?? 0) + 1, tool: 'gc_preview', args: {}, scope: null, key, label, requestedAt: iso, appliedAt: iso, status: 'done' };
+    fs.mkdirSync(mcpRequestDir(ctx.config), { recursive: true });
+    atomicWriteFile(gcPreviewPlanFile(ctx.config, request.id), JSON.stringify({ at, plan }));
+    writeRequest(ctx.config, request);
+    return request;
   });
 }
 

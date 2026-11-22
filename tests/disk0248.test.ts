@@ -11,11 +11,15 @@ import { applyGc, planGc } from '../src/core/gc.ts';
 import { readJournal } from '../src/core/journal.ts';
 import { readTaskRecord, taskDir } from '../src/core/taskstore.ts';
 import { newTasks } from '../src/core/new.ts';
-import { describeQueue, QueueMemory, queueTick, readQueue, registerDirectStart, retryEntry, unblockEntry } from '../src/core/queue.ts';
+import { applyAcceptedWrites, describeQueue, QueueMemory, queueTick, readQueue, registerDirectStart, retryEntry, unblockEntry } from '../src/core/queue.ts';
 import { RealRunner, type ExecOptions } from '../src/core/runner.ts';
 import { resolveSpec, splitSpecs } from '../src/core/spec.ts';
-import { DiskRunner, FakeTmux, makeConfig, runCli, seedTask, useScratch } from './helpers.ts';
+import { DiskRunner, FakeTmux, fakeWatcher, makeConfig, runCli, seedTask, useScratch } from './helpers.ts';
 import { collectStatus } from '../src/core/status.ts';
+import { WatchMemory, watchTick } from '../src/core/watch.ts';
+import { MCP_TOOLS } from '../src/core/mcp-tools.ts';
+import { readMcpRequests } from '../src/core/mcp-requests.ts';
+import { readThread, readWall } from '../src/core/wall.ts';
 
 const scratch = useScratch();
 const sameFs = fs.statSync;
@@ -190,6 +194,83 @@ it('FLOW-FRESHNESS: conflicting candidates name paths and can retry without chan
   assert.deepEqual(await queueTick(w.ctx, queue, w.notifier), ['CONFLICT']);
   await queue.idle();
   assert.equal(git(candidate.spec.repos[0]!.worktree, 'branch', '--show-current'), 'review/CONFLICT');
+});
+
+it('FLOW-GC: watch proposes one owner-scoped plan for a fast-forward and confirm rechecks it', async () => {
+  const w = world('integration-gc', () => 'mcp: {allow: [gc]}\n');
+  const task = (id: string, extra: Parameters<typeof seedTask>[2] = {}) => {
+    const worktree = path.join(w.root, id.toLowerCase()), branch = `agent/${id}`;
+    git(w.repo, 'worktree', 'add', '-b', branch, worktree);
+    seedTask(w.config, id, { closed: true, owner: 'chat:nc', repos: [{ path: w.repo, worktree, branch, base: 'main' }], ...extra });
+    return worktree;
+  };
+  const good = task('MERGED');
+  const cancelled = task('CANCELLED', { closed: false, cancelled: true, owner: 'chat:hems' });
+  const dirty = task('DIRTY'), untracked = task('UNTRACKED'), linked = task('LINKED'), pinned = task('PINNED', { pin: true });
+  const unmerged = task('UNMERGED'), live = task('LIVE', { closed: false });
+  w.tmux.add('live', 'working');
+  fs.appendFileSync(path.join(dirty, 'package.json'), '\n');
+  fs.writeFileSync(path.join(untracked, 'local.txt'), 'local');
+  fs.mkdirSync(path.join(pinned, 'node_modules'));
+  fs.symlinkSync(linked, path.join(pinned, 'node_modules/kept-link'));
+  fs.mkdirSync(path.join(good, 'node_modules'));
+  fs.writeFileSync(path.join(good, 'node_modules/ignored'), 'fixture dependency');
+  git(unmerged, 'commit', '--allow-empty', '-m', 'not integrated');
+  git(good, 'commit', '--allow-empty', '-m', 'integrated');
+
+  const messages = (name: string) => readWall(w.ctx, { id: `chat:${name}`, kind: 'chat' }, { channel: name, kind: 'info' }).messages;
+  await watchTick(w.ctx, new WatchMemory(), w.notifier);
+  assert.deepEqual(messages('nc'), []);
+  git(w.repo, 'merge', '--ff-only', 'agent/MERGED');
+  await watchTick(w.ctx, new WatchMemory(), w.notifier);
+  await watchTick(w.ctx, new WatchMemory(), w.notifier);
+  const [message] = messages('nc');
+  assert.equal(messages('nc').length, 1);
+  assert.equal(messages('hems').length, 1);
+  assert.equal(message?.to, 'chat:nc');
+  assert.ok(message);
+  const body = readThread(w.config, { id: 'chat:nc', kind: 'chat' }, message.id).message.body;
+  const id = /request_id: ([a-f0-9-]{36})/.exec(body)?.[1];
+  assert.ok(id);
+  assert.match(body, /Worktree do odzyskania: 1, około [1-9][0-9]* B\./);
+  const gc = MCP_TOOLS.find(tool => tool.name === 'gc')!;
+  const deps = { context: () => w.ctx, notify: async () => {} };
+  fakeWatcher(w.config);
+  const preview = await gc.run(deps, { request_id: id, detail: true });
+  assert.match(preview.text, /MERGED/);
+  assert.doesNotMatch(preview.text, /CANCELLED|DIRTY|UNTRACKED|UNMERGED|PINNED|LINKED|LIVE/);
+  assert.ok(fs.existsSync(good));
+  const token = /preview_token: (\S+)/.exec(preview.text)?.[1];
+  assert.ok(token, preview.text);
+  fs.writeFileSync(path.join(good, 'new.txt'), 'new since preview');
+  assert.match((await gc.run(deps, { preview_token: token, confirm: true })).text, /^Accepted/);
+  await applyAcceptedWrites(w.ctx, w.notifier, {});
+  assert.match(readMcpRequests(w.config).find(request => request.token === token)?.error ?? '', /changed preview/);
+  assert.ok(fs.existsSync(good));
+  fs.unlinkSync(path.join(good, 'new.txt'));
+  const again = await gc.run(deps, { request_id: id });
+  const newToken = /preview_token: (\S+)/.exec(again.text)?.[1];
+  assert.ok(newToken);
+  assert.match((await gc.run(deps, { preview_token: newToken, confirm: true })).text, /^Accepted/);
+  await applyAcceptedWrites(w.ctx, w.notifier, {});
+  assert.equal(readMcpRequests(w.config).find(request => request.token === newToken)?.status, 'done');
+  assert.equal(fs.existsSync(good), false);
+  for (const kept of [cancelled, dirty, untracked, linked, pinned, unmerged, live]) assert.ok(fs.existsSync(kept), kept);
+});
+
+it('FLOW-GC: the off policy leaves forward movements alone', async () => {
+  const w = world('integration-gc-off', () => 'gc: {after_integration: off}\n');
+  git(w.repo, 'branch', '-m', 'master');
+  const worktree = path.join(w.root, 'author');
+  git(w.repo, 'worktree', 'add', '-b', 'feature', worktree);
+  seedTask(w.config, 'AUTHOR', { closed: true, owner: 'chat:nc', repos: [{ path: w.repo, worktree, branch: 'feature' }] });
+  await watchTick(w.ctx, new WatchMemory(), w.notifier);
+  git(worktree, 'commit', '--allow-empty', '-m', 'feature');
+  git(w.repo, 'commit', '--allow-empty', '-m', 'master');
+  git(w.repo, 'merge', '--no-ff', 'feature');
+  await watchTick(w.ctx, new WatchMemory(), w.notifier);
+  assert.deepEqual(readMcpRequests(w.config), []);
+  assert.ok(fs.existsSync(worktree));
 });
 
 it('FLOW-SETUP: task clones skip only compatible npm ci installs and keep source writes isolated', async () => {

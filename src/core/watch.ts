@@ -1,5 +1,6 @@
 import { attentionTick } from './attention.ts';
 import { maintainWall } from './wall.ts';
+import { watchIntegrationGc } from './integration-gc.ts';
 import { autoClosePulled } from './pulled-auto-close.ts';
 import { applyAcceptedWrites } from './queue.ts';
 import { consultTick } from './consult.ts';
@@ -379,6 +380,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
       memory.recoveredWrites.clear();
     });
   }
+  await step('integration GC proposals', () => watchIntegrationGc(ctx, options.signal));
   return events;
 }
 

@@ -14,6 +14,8 @@ import { formatBytes } from './pull.ts';
 import { archiveDir, listArchivedRecords, listTaskRecords, taskDir } from './taskstore.ts';
 import type { TaskRecord } from './taskstore.ts';
 import { AgentctlError, cohortKey, errorMessage } from './util.ts';
+import { applyIntegrationGc } from './integration-gc.ts';
+import type { IntegrationGcScope } from './integration-gc.ts';
 
 /*
  * `agentctl gc`: take back the disk space that finished tasks leave behind - their worktrees, the files next to their reports, the state
@@ -42,6 +44,7 @@ export interface GcItem {
   base?: string;
   dirtyFiles?: number;
   unpushedCommits?: number;
+  head?: string;
 }
 
 export interface GcSkip {
@@ -58,6 +61,7 @@ export interface GcSkip {
 }
 
 export interface GcPlan {
+  integration?: IntegrationGcScope;
   /** An MCP plan may estimate sizes; safety checks are always fresh. */
   cachedSizes?: boolean;
   autoCacheFreedBytes?: number;
@@ -282,6 +286,7 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
   // 4. merged branches
   if (opts.branches) {
     for (const record of mine) {
+      if (record.reviewMode) continue;
       for (const repo of record.repos) {
         const branch = repo.branch;
         if (!branch) continue;
@@ -343,6 +348,7 @@ export interface GcResult {
 
 /** Do the plan: worktrees (`git worktree remove`, forced only for explicitly named tasks), cache entries, archive moves, then branches (`git branch -d`, never -D). */
 export async function applyGc(ctx: Context, plan: GcPlan): Promise<GcResult> {
+  if (plan.integration) return applyIntegrationGc(ctx, plan);
   const { runner, config } = ctx;
   const result: GcResult = { done: [], failed: [], freedBytes: 0 };
   const order: GcKind[] = ['worktree', 'cache', 'archive', 'branch', 'node-modules'];
@@ -368,6 +374,8 @@ export async function applyGc(ctx: Context, plan: GcPlan): Promise<GcResult> {
         // CLI measures removed bytes; MCP uses the watch estimate and never delays removal for accounting.
         const bytes = kind === 'worktree' || kind === 'cache' ? plan.cachedSizes && kind === 'worktree' ? lastMeasurement(item.target)?.bytes ?? 0 : await sizeOf(item.target, { fresh: true, now: () => runner.now() }) : 0;
         if (kind === 'worktree') {
+          const borrowers = listTaskRecords(config).filter(r => r.reviewMode && !r.closed && !r.cancelled && r.repos.some(repo => same(repo.worktree, item.target)));
+          if (borrowers.length) throw new Error(`worktree is used by readonly review ${borrowers[0]!.task}`);
           const users = linkUsers(item.target, knownLinkReferences(config));
           if (users.length && !plan.forceLinks) throw new Error(`links target used by ${users.join(', ')}`);
           const risk = await worktreeRisk(ctx, item.target, item.base);
