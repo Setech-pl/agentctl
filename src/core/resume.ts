@@ -3,6 +3,7 @@ import { checkHostLimit } from './host-limits.ts';
 import { installRemoteHooks } from './host-task.ts';
 import { writeLaunchScript } from './launch-script.ts';
 import { validateLaunch, launchEnvironment } from './safety.ts';
+import { readonlyReviewEnvironment } from './readonly-review.ts';
 import { provider, isActive, providerCommand } from './providers/registry.ts';
 import { withStartLock, reserveStarts, releaseStarts } from './start-lock.ts';
 import { queuePrompt, deliverPendingPrompt } from './prompt-delivery.ts';
@@ -138,7 +139,8 @@ async function startResumed(ctx: Context, plan: ResumePlan, opts: { self?: SelfA
     const tmux = c.host ? ctx.hosts.tmux(c.host) : ctx.localTmux;
     const execution = c.host ? ctx.hosts.forHost(c.host) : runner;
     // Before the attempt is written into the record: a refused resume leaves it as it was.
-    assertAgentSpawnAllowed(ctx, { task: c.task, report: record.report, host: c.host, repos: record.repos, reviewOf: record.reviewOf, autoReview: record.autoReview, origin: 'resume' });
+    const request = { task: c.task, report: record.report, reportAlt: record.reportAlt, host: c.host, repos: record.repos, reviewOf: record.reviewOf, reviewMode: record.reviewMode, autoReview: record.autoReview, origin: 'resume' as const };
+    assertAgentSpawnAllowed(ctx, request);
     const order = { agent: c.agent, model: c.model, effort: c.effort as import('./config.ts').Effort, task: c.task };
     validateLaunch(config, order, record.env);
     const attempt = attemptFields(record, runner.now());
@@ -153,8 +155,10 @@ async function startResumed(ctx: Context, plan: ResumePlan, opts: { self?: SelfA
       }
     }
     const remoteArgs = c.host ? await installRemoteHooks(ctx, { host: c.host, remoteDir: record.remoteDir, agent: c.agent, task: c.task }, record) : undefined;
-    const command = await writeLaunchScript(execution, record.remoteDir ?? taskDir(config, c.window), buildResumeArgv({ agent: c.agent, model: c.model, effort: c.effort as never, task: c.task, remoteControl: record.remoteControl, command: providerCommand(config, c.agent) }, config.agents[c.agent], remoteArgs ?? wiring?.args, c.sessionId), launchEnvironment(config, order, record.env), !c.host);
-    const started = await openAgentWindow(ctx, { task: c.task, window: c.window, cwd: c.worktree, env: {}, report: record.report, host: c.host, repos: record.repos, reviewOf: record.reviewOf, autoReview: record.autoReview, origin: 'resume', sessionUp: c.host ? await tmux.hasSession() : sessionUp });
+    let launchEnv = launchEnvironment(config, order, record.env);
+    if (record.reviewMode) launchEnv = await readonlyReviewEnvironment(ctx, record, launchEnv);
+    const command = await writeLaunchScript(execution, record.remoteDir ?? taskDir(config, c.window), buildResumeArgv({ agent: c.agent, model: c.model, effort: c.effort as never, task: c.task, remoteControl: record.remoteControl, command: providerCommand(config, c.agent) }, config.agents[c.agent], remoteArgs ?? wiring?.args, c.sessionId), launchEnv, !c.host);
+    const started = await openAgentWindow(ctx, { ...request, window: c.window, cwd: c.worktree, env: {}, sessionUp: c.host ? await tmux.hasSession() : sessionUp });
     if (started.code !== 0) throw new AgentctlError(`${c.task}: tmux could not make the window: ${started.stderr.trim() || `exit ${started.code}`}`, results.length > 0 ? `Resumed before it: ${results.map((r) => r.task).join(', ')}.` : undefined);
     if (!c.host) sessionUp = true;
     const windowId = (await tmux.windows()).find((w) => w.plain === c.window)?.id;

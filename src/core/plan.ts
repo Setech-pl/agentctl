@@ -110,7 +110,7 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
   const result: ResolvedSpec[] = [];
 
   for (let spec of specs) {
-    if (!spec.host && !opts.previewOnly && !opts.deferBases) spec = await resolveTaskBases(ctx, spec);
+    if (!spec.reviewMode && !spec.host && !opts.previewOnly && !opts.deferBases) spec = await resolveTaskBases(ctx, spec);
     if (spec.review && !spec.host && !opts.previewOnly) {
       const repos = [];
       for (const repo of spec.repos) {
@@ -210,7 +210,7 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
     planned.push({ window: spec.window, agent: spec.agent, host: spec.host, owner: spec.owner });
 
     // 4. worktrees
-    for (const repo of opts.previewOnly || spec.host ? [] : spec.repos) {
+    for (const repo of opts.previewOnly || spec.host || spec.reviewMode ? [] : spec.repos) {
       // A dry run may be rehearsed on a machine without the repositories, so only real runs require them.
       if (!ctx.runner.dryRun && !fs.existsSync(repo.path)) p.add(`${at} repository ${repo.path} does not exist`);
       if (!missingWorktreeVolume([repo]) && fs.existsSync(repo.worktree) && !opts.reuse) {

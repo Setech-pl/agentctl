@@ -9,6 +9,7 @@ import { Context } from '../src/core/context.ts';
 import { collectDisk, diskStartHold } from '../src/core/disk.ts';
 import { applyGc, planGc } from '../src/core/gc.ts';
 import { readJournal } from '../src/core/journal.ts';
+import { readTaskRecord, taskDir } from '../src/core/taskstore.ts';
 import { newTasks } from '../src/core/new.ts';
 import { describeQueue, QueueMemory, queueTick, readQueue, registerDirectStart, unblockEntry } from '../src/core/queue.ts';
 import { RealRunner, type ExecOptions } from '../src/core/runner.ts';
@@ -41,6 +42,7 @@ function world(name: string, yaml: (root: string) => string = () => '') {
   class FixtureRunner extends DiskRunner {
     override async exec(cmd: string, args: string[], opts: ExecOptions = {}) {
       if (cmd === 'git') return interceptGit?.(args) ?? real.exec(cmd, args, opts);
+      if (cmd === 'chmod') return real.exec(cmd, args, opts);
       if (cmd === 'sh' && args.at(-1)?.startsWith('npm ci')) {
         const worktree = opts.cwd!;
         installs.push(worktree);
@@ -78,8 +80,44 @@ function world(name: string, yaml: (root: string) => string = () => '') {
     return { raw, spec: resolveSpec(raw, { config }) };
   };
   const notifier = { clickable: false, notify: async (_title: string, message: string) => { notifications.push(message); } };
-  return { root, repo, config, ctx, runner, spec, notifier, installs, copies, moves, notifications, failCopy: () => { failClone = true; }, interceptGit: (f: typeof interceptGit) => { interceptGit = f; } };
+  return { root, repo, config, ctx, runner, tmux, spec, notifier, installs, copies, moves, notifications, failCopy: () => { failClone = true; }, interceptGit: (f: typeof interceptGit) => { interceptGit = f; } };
 }
+
+it('FLOW-READONLY: a stopped author lends its worktree with agent-scoped commit and push hooks', async () => {
+  const w = world('readonly');
+  const a = w.spec('AUTHOR').spec;
+  await newTasks(w.ctx, [a], { noAgent: true });
+  const worktree = a.repos[0]!.worktree;
+  seedTask(w.config, a.task, { repos: a.repos, model: 'other-model' });
+  const original = path.join(w.root, 'original-hooks');
+  fs.mkdirSync(original);
+  const originalLog = path.join(w.root, 'original.log');
+  fs.writeFileSync(path.join(original, 'pre-commit'), `#!/bin/sh\necho called >> '${originalLog}'\n`, { mode: 0o700 });
+  git(worktree, 'config', 'core.hooksPath', original);
+  const review = w.spec('REVIEW', false, 'review_of: AUTHOR\nreview: {mode: readonly-on-author}\n').spec;
+  w.tmux.add('author', 'working');
+  await assert.rejects(newTasks(w.ctx, [review]), /author task is still running/);
+  await closeTask(w.ctx, 'AUTHOR');
+  const [started] = await newTasks(w.ctx, [review]);
+  assert.deepEqual(started?.worktrees, [worktree]);
+  assert.equal(readTaskRecord(w.config, review.window)?.reviewMode, 'readonly-on-author');
+  assert.equal(git(worktree, 'config', 'core.hooksPath'), original);
+  const launcher = fs.readFileSync(path.join(taskDir(w.config, review.window), 'start.sh'), 'utf8');
+  assert.match(launcher, /GIT_CONFIG_KEY_0=core\.hooksPath/);
+  const evidence = path.join(w.config.cache, review.window, 'evidence');
+  const env = { ...process.env, GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.hooksPath', GIT_CONFIG_VALUE_0: path.join(evidence, 'hooks') };
+  const run = (...args: string[]) => execFileSync('git', ['-C', worktree, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', ...args], { env, stdio: 'pipe' });
+  assert.throws(() => run('commit', '--allow-empty', '-m', 'refused'), /Git write refused/);
+  assert.throws(() => run('commit', '--no-verify', '--allow-empty', '-m', 'also refused'), /Git write refused/);
+  const bare = scratch.sub('readonly/local-remote');
+  git(bare, 'init', '--bare');
+  assert.throws(() => run('push', bare, 'HEAD:refs/heads/blocked'), /Git write refused/);
+  assert.equal(fs.readFileSync(path.join(evidence, 'git-refused.log'), 'utf8'), 'pre-commit\nprepare-commit-msg\npre-push\n');
+  await closeTask(w.ctx, 'REVIEW', { rmWorktree: true });
+  git(worktree, 'commit', '--allow-empty', '-m', 'author can commit');
+  assert.equal(fs.readFileSync(originalLog, 'utf8'), 'called\n');
+  assert.equal(git(w.repo, 'worktree', 'list', '--porcelain').split('worktree ').length, 3);
+});
 
 it('FLOW-SETUP: task clones skip only compatible npm ci installs and keep source writes isolated', async () => {
   const w = world('from-task');

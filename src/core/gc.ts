@@ -171,6 +171,7 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
 
   // 1. worktrees
   for (const record of mine) {
+    if (record.reviewMode) continue; // Borrowed worktrees are owned by the author record.
     for (const repo of record.repos) {
       const wt = repo.worktree;
       if (same(wt, repo.path)) continue; // the main checkout is never a candidate

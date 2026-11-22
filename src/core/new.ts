@@ -6,6 +6,7 @@ import { cloneTaskNodeModules, hasNpmLockfile, nodeModulesEvent, setupNodeModule
 import { assertWorktreeVolumes, missingWorktreeVolume, WorktreeVolumeError } from './worktree-volume.ts';
 import { peakHold } from './peak.ts';
 import { protectReadOnly } from './read-only.ts';
+import { readonlyReviewEnvironment, readonlyReviewEvidence, readonlyReviewRepos } from './readonly-review.ts';
 import { attachHint } from './tmux-socket.ts';
 import { writeLaunchScript } from './launch-script.ts';
 import { launchEnvironment } from './safety.ts';
@@ -37,7 +38,7 @@ import { secretRedactor } from './secret-redaction.ts';
 import { writeSetupProgress } from './setup-progress.ts';
 import type { SetupProgress } from './setup-progress.ts';
 
-const guardRequest = (spec: ResolvedSpec) => ({ host: spec.host, task: spec.task, window: spec.window, report: spec.report, reportAlt: spec.reportAlt, repos: spec.repos, reviewOf: spec.reviewOf, reviewOfAll: spec.reviewOfAll, autoReview: spec.autoReview });
+const guardRequest = (spec: ResolvedSpec) => ({ host: spec.host, task: spec.task, window: spec.window, report: spec.report, reportAlt: spec.reportAlt, repos: spec.repos, reviewOf: spec.reviewOf, reviewOfAll: spec.reviewOfAll, reviewMode: spec.reviewMode, autoReview: spec.autoReview });
 
 export interface NewOptions extends PlanOptions {
   /** Wait for a human to answer the folder-trust dialog (default). `false` (--no-wait-trust): stop at the dialog. */
@@ -174,7 +175,12 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
   const prepared = new Map<string, ResolvedSpec['repos']>();
   let sessionUp = await tmux.hasSession();
   for (const [index, original] of specs.entries()) {
-    const spec = original.host ? await prepareRemoteTask(ctx, original, opts.reuse) : original;
+    let spec = original.host ? await prepareRemoteTask(ctx, original, opts.reuse) : original;
+    if (spec.reviewMode) {
+      const repos = await readonlyReviewRepos(ctx, spec);
+      const evidence = readonlyReviewEvidence(ctx, spec.window);
+      spec = { ...spec, repos, prompt: `Review in the author's checkout. Leave its files and Git state untouched. Write evidence under ${evidence}.\n\n${spec.prompt}` };
+    }
     const execution = spec.host ? ctx.hosts.forHost(spec.host) : runner;
     const taskTmux = spec.host ? ctx.hosts.tmux(spec.host) : tmux;
     const hint = spec.host ? remoteAttachHint(config, spec)! : attachHint(config);
@@ -197,7 +203,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
     // 1. worktrees
     await track?.({ phase: 'worktree' });
     try {
-      for (const repo of spec.host ? [] : spec.repos) {
+      for (const repo of spec.host || spec.reviewMode ? [] : spec.repos) {
         if (!runner.dryRun) assertWorktreeVolumes([repo], spec.task);
         if (opts.reuse && fs.existsSync(repo.worktree)) ctx.info(`${spec.task}: reusing worktree ${repo.worktree}`);
         else {
@@ -207,7 +213,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
       }
       if (spec.readOnly) await protectReadOnly(ctx, spec);
       // 2. setup commands, before links because an install may wipe node_modules.
-      await runSetup(ctx, spec, prepared, track);
+      if (!spec.reviewMode) await runSetup(ctx, spec, prepared, track);
     } catch (error) {
       const missing = error instanceof WorktreeVolumeError ? error.mount : spec.host ? undefined : missingWorktreeVolume(spec.repos);
       if (missing) throw new WorktreeVolumeError(missing, spec.task);
@@ -280,13 +286,15 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
       }
     }
 
-    const launchEnv = launchEnvironment(config, spec, spec.env);
+    let launchEnv = launchEnvironment(config, spec, spec.env);
+    if (spec.reviewMode) launchEnv = await readonlyReviewEnvironment(ctx, spec, launchEnv);
     const remoteArgs = spec.host ? await installRemoteHooks(ctx, spec, record) : undefined;
 
     const settings = config.agents[spec.agent];
     const commandLine = await writeLaunchScript(execution, spec.remoteDir ?? taskDir(config, spec.window), buildAgentArgv({ ...spec, command: providerCommand(config, spec.agent) }, settings, remoteArgs ?? wiring?.args), launchEnv, !spec.host);
     // 5. window + agent
-    await openAgentWindow(ctx, { ...guardRequest(spec), cwd: primary, env: {}, origin: opts.origin ?? (spec.autoReview ? 'start' : 'new'), sessionUp: spec.host ? await taskTmux.hasSession() : sessionUp });
+    const opened = await openAgentWindow(ctx, { ...guardRequest(spec), cwd: primary, env: {}, origin: opts.origin ?? (spec.autoReview ? 'start' : 'new'), sessionUp: spec.host ? await taskTmux.hasSession() : sessionUp });
+    if (opened.code !== 0) throw new AgentctlError(`${spec.task}: tmux could not make the window: ${opened.stderr.trim() || `exit ${opened.code}`}`);
     if (!spec.host) sessionUp = true;
 
     if (spec.owner && !opts.trackStart) await recordJournal(ctx, {kind: 'task-start', task: spec.task, owner: spec.owner, text: `${spec.task}: uruchomiono (${spec.agent})`});

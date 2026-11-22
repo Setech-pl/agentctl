@@ -86,6 +86,7 @@ export interface ResolvedSpec {
   /** Every reviewed task (review_of may be a list); reviewOf is the first of them. */
   reviewOfAll?: string[];
   review?: ReviewSettings;
+  reviewMode?: 'readonly-on-author';
   report: string;
   /** Other places the report may be (paths and globs, placeholders filled; a relative one is relative to the worktree). */
   reportAlt?: string[];
@@ -392,8 +393,15 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   }
 
   const inheritedReview = { ...config.review, ...project?.review };
-  const explicitReview = h.review !== undefined ? parseReview(h.review, 'spec.review', p) : undefined;
-  const reviewEnabled = h.review === false ? false : h.review !== undefined || inheritedReview.default === 'auto';
+  const reviewMode = isObject(h.review) ? parseEnumValue(h.review.mode, ['readonly-on-author'] as const, 'spec.review.mode', p) : undefined;
+  if (reviewMode) {
+    checkKeys(h.review as Record<string, unknown>, ['mode'], 'spec.review', p);
+    if (reviewOfList.length !== 1 || reviewOf === task) p.add('review.mode readonly-on-author requires review_of naming one other task');
+    if (h.host) p.add('review.mode readonly-on-author requires a local task');
+    if (h.read_only === true || setupFromTask) p.add('review.mode readonly-on-author cannot be combined with read_only or setup.from_task');
+  }
+  const explicitReview = h.review !== undefined && !reviewMode ? parseReview(h.review, 'spec.review', p) : undefined;
+  const reviewEnabled = !reviewMode && h.review !== false && (h.review !== undefined || inheritedReview.default === 'auto');
   const review = reviewEnabled ? { ...inheritedReview, ...explicitReview, default: 'auto' as const } : undefined;
   const agent = specAgent ?? project?.defaults.agent ?? config.defaults.agent;
   if (!agent && h.agent === undefined) {
@@ -471,6 +479,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     if (remoteHost) worktree = repo.worktree ?? path.posix.join(remoteHost.workDir, `${repoName}-${windowName(taskId)}`);
     else if (repo.worktree) worktree = pathOf(repo.worktree);
     else if (root) worktree = path.join(pathOf(root), `${path.basename(repoPath)}-${windowName(taskId)}`);
+    else if (reviewMode) worktree = repoPath; // Resolved from the author's record at start.
     else {
       p.add(
         `repos: no worktree for ${repo.path}: set "worktree" in the spec or "worktree_root" in ${repoPath}/.agentctl.yaml or ${config.path}`,
@@ -493,7 +502,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   }
   for (let i = 0; i < repos.length; i++) {
     const r = repos[i] as ResolvedRepo;
-    if (r.worktree === r.path) p.add(`repos[${i}]: the worktree must differ from the repository itself (${r.path})`);
+    if (!reviewMode && r.worktree === r.path) p.add(`repos[${i}]: the worktree must differ from the repository itself (${r.path})`);
   }
   p.throwIfAny(`${label(raw)} is invalid:`, 'Run "agentctl spec example" to see the format.');
 
@@ -585,6 +594,12 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   if (reviewOf) spec.reviewOf = reviewOf;
   if (reviewOfList.length > 0) spec.reviewOfAll = reviewOfList;
   if (review) spec.review = review;
+  if (reviewMode) {
+    spec.reviewMode = reviewMode;
+    spec.setup = [];
+    spec.links = [];
+    spec.repos = spec.repos.map(({ path, worktree }) => ({ path, worktree }));
+  }
   if (agent && remote && (specRemote ?? remoteDefault)) spec.remoteControl = true;
   if (cohort) spec.cohort = cohort;
   if (owner) spec.owner = owner;

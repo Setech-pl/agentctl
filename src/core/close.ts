@@ -10,7 +10,7 @@ import path from 'node:path';
 import type { Context } from './context.ts';
 import { gitFailure } from './git.ts';
 import { recordEvent } from './history.ts';
-import { readTaskRecord, readTaskRecordById, setHeaderFields, taskFile } from './taskstore.ts';
+import { listTaskRecords, readTaskRecord, readTaskRecordById, setHeaderFields, taskFile } from './taskstore.ts';
 import type { TaskRecord } from './taskstore.ts';
 import { AgentctlError, Problems, windowName } from './util.ts';
 import { cleanupClosedWorktrees } from './close-cleanup.ts';
@@ -90,6 +90,18 @@ export async function closeTask(ctx: Context, taskArg: string, opts: CloseOption
 /** `git worktree remove` (never --force) for each worktree of a task. The main checkout, main/master and missing worktrees are left alone; branches are never deleted. */
 export async function removeWorktrees(ctx: Context, taskArg: string, repos: TaskRecord['repos']): Promise<void> {
   const record = readTaskRecord(ctx.config, windowName(taskArg));
+  if (record?.reviewMode) {
+    ctx.info(`${taskArg}: author's worktree retained`);
+    return;
+  }
+  if (record && !record.host && !ctx.runner.dryRun) {
+    const reviews = listTaskRecords(ctx.config).filter(other => other.reviewMode && other.reviewOf === record.task);
+    if (reviews.length) {
+      const live = await ctx.localTmux.listWindows();
+      const review = reviews.find(other => live.includes(other.window));
+      if (review) throw new AgentctlError(`${taskArg}: readonly review ${review.task} is using the worktree`);
+    }
+  }
   const runner = record?.host ? ctx.hosts.forHost(record.host) : ctx.runner;
   for (const repo of repos) {
     if (path.resolve(repo.worktree) === path.resolve(repo.path)) {

@@ -28,7 +28,7 @@ function safeSize(target: string, root: string): number {
 
 /** Provider-independent cleanup; legacy settled reports without an explicit report-end never authorize deletion. */
 export async function cleanWorktreeCache(ctx: Context, record: TaskRecord): Promise<void> {
-  if (record.host || ctx.runner.dryRun || !ctx.config.cleanWorktreeCache || readTaskRecordById(ctx.config, record.task)?.pin) return;
+  if (record.host || record.reviewMode || ctx.runner.dryRun || !ctx.config.cleanWorktreeCache || readTaskRecordById(ctx.config, record.task)?.pin) return;
   const report = inspectReport(ctx.config, record, ctx.runner.now(), false);
   if (!report.ready || !report.sentinel || !report.signature || (ctx.config.reportSettleS > 0 && report.mtime !== undefined && ctx.runner.now() - report.mtime < ctx.config.reportSettleS * 1000)) return;
   // A sentinel completes the report, not the agent's turn. Even settle_s=0 must not

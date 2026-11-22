@@ -1305,7 +1305,7 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
       if (entry.autoReview) spec.autoReview = entry.autoReview;
       if (entry.reuse) {
         if ((await ctx.tmux.windows()).some(w => w.plain === spec.window)) throw new AgentctlError(`${entry.task}: task window already exists; inspect it instead of retrying`);
-        if (!spec.host) await checkRetryWorktrees(ctx.runner, spec.repos);
+        if (!spec.host && !spec.reviewMode) await checkRetryWorktrees(ctx.runner, spec.repos);
       }
       await newTasks(startCtx, [spec], {
         ...(entry.agentOverride ? { agent: entry.agentOverride } : {}),

@@ -3,6 +3,9 @@ import { assertReviewIsolated, findAuthorRecord, LEGACY_RECORD_HINT, LEGACY_REVI
 import type { AutoReviewSource } from './spec.ts';
 import type { ExecResult } from './runner.ts';
 import { AgentctlError } from './util.ts';
+import { assertAuthorStopped, assertReadonlyReview } from './readonly-review.ts';
+import { withStartLock } from './start-lock.ts';
+import { listTaskRecords } from './taskstore.ts';
 
 /*
  * The one door to an agent's tmux window. Every path that makes a window for a task (start from the queue, `new`, `resume`, `move`, `queue retry`, the
@@ -22,6 +25,7 @@ export interface AgentWindowRequest {
   reportAlt?: string[] | undefined;
   repos: { worktree: string }[];
   reviewOf?: string | undefined;
+  reviewMode?: 'readonly-on-author';
   /** review_of may be a list: the isolation invariant holds for every listed author, not only the first. */
   reviewOfAll?: string[] | undefined;
   autoReview?: AutoReviewSource | undefined;
@@ -34,6 +38,10 @@ export interface AgentWindowRequest {
 
 /** Throws when a review would run in its author's checkout or write the author's report. A task that reviews nothing passes. */
 export function assertAgentSpawnAllowed(ctx: Context, req: Omit<AgentWindowRequest, 'sessionUp' | 'cwd' | 'env' | 'window'>): void {
+  if (req.reviewMode) {
+    assertReadonlyReview(ctx, req);
+    return;
+  }
   const authorTasks = req.autoReview ? [req.autoReview.author] : (req.reviewOfAll ?? (req.reviewOf ? [req.reviewOf] : []));
   for (const authorTask of authorTasks) {
     const hint = req.origin === 'resume' || req.origin === 'move' ? LEGACY_RECORD_HINT : LEGACY_REVIEW_HINT;
@@ -52,7 +60,20 @@ export function assertAgentSpawnAllowed(ctx: Context, req: Omit<AgentWindowReque
 
 /** Make the window of an agent (and the session, when it is not up). The only caller of tmux new-window/new-session for a task. */
 export async function openAgentWindow(ctx: Context, req: AgentWindowRequest): Promise<ExecResult> {
-  assertAgentSpawnAllowed(ctx, req);
   const tmux = req.host ? ctx.hosts.tmux(req.host) : ctx.tmux;
-  return req.sessionUp ? tmux.newWindow(req.window, req.cwd, req.env, req.command) : tmux.newSession(req.window, req.cwd, req.env, req.command);
+  const open = () => req.sessionUp ? tmux.newWindow(req.window, req.cwd, req.env, req.command) : tmux.newSession(req.window, req.cwd, req.env, req.command);
+  assertAgentSpawnAllowed(ctx, req);
+  if (req.host || ctx.runner.dryRun) return open();
+  return withStartLock(ctx, async () => {
+    if (req.reviewMode) assertAuthorStopped(ctx, assertReadonlyReview(ctx, req), await ctx.localTmux.listWindows());
+    else {
+      const reviews = listTaskRecords(ctx.config).filter(record => record.reviewMode && record.reviewOf === req.task);
+      if (reviews.length) {
+        const live = await ctx.localTmux.listWindows();
+        const review = reviews.find(record => live.includes(record.window));
+        if (review) throw new AgentctlError(`${req.task}: readonly review ${review.task} is using the author worktree`, `Close ${review.task} before starting the author task.`);
+      }
+    }
+    return open();
+  });
 }
