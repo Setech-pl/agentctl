@@ -327,7 +327,7 @@ it('FLOW-SETUP: task clones skip only compatible npm ci installs and keep source
     for (let pair = 0; pair < 5; pair++) {
       for (const mode of pair % 2 ? ['clone', 'install'] : ['install', 'clone']) {
         const item = w.spec(`BENCH-${mode.toUpperCase()}-${pair}`, true, mode === 'clone' ? 'setup: {from_task: AUTHOR}\n' : 'setup: [npm ci]\n').spec;
-        const installedBefore = w.installs.length;
+        const installedBefore: number = w.installs.length;
         const start = performance.now();
         await newTasks(w.ctx, [item], { noAgent: true });
         samples[mode]!.push(performance.now() - start);
