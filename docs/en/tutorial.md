@@ -174,9 +174,9 @@ agentctl wall read --id agentctl-1
 
 Board `W` shows channels → messages → thread; `s/t` filters, `r/R` marks read. MCP uses `as: "chat:nc"` and `wall_post` preview/confirm, then another chat calls `events_since(as: "chat:hems")` and `wall_read`. Both subscribe to `agentctl`/`shared:*` by default. WALL is data, never authorization.
 
-<a id="several-chats-on-one-instance"></a>
+## Several chats on one instance
 
-## Limits for several chats
+### Limits for several chats
 
 Merge the example into the dispatcher configuration. Keep the existing WALL channels and client mappings.
 

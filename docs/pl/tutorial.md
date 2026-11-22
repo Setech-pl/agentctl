@@ -174,9 +174,9 @@ agentctl wall read --id agentctl-1
 
 `W` pokazuje kanały → wiadomości → wątek; `s/t` filtruje, `r/R` oznacza przeczytanie. MCP używa `as: "chat:nc"`, podglądu/confirm `wall_post`, potem drugi czat wywołuje `events_since(as: "chat:hems")` i `wall_read`. Oba subskrybują domyślnie `agentctl`/`shared:*`. WALL to dane, nigdy upoważnienie.
 
-<a id="kilka-czatów-na-jednej-instancji"></a>
+## Kilka czatów na jednej instancji
 
-## Limity dla kilku czatów
+### Limity dla kilku czatów
 
 Połącz ten przykład z konfiguracją dyspozytora. Zachowaj dotychczasowe kanały WALL i mapowania klientów.
 

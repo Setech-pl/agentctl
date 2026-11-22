@@ -721,12 +721,25 @@ agentctl limits profile [options] [name]
 |---|---|
 | `[name]` | profile defined in limits.profiles |
 
+Examples:
+
+```sh
+agentctl limits profile
+agentctl limits profile night
+```
+
 ## agentctl limits requests
 
 List pending limit requests.
 
 ```
 agentctl limits requests [options]
+```
+
+Examples:
+
+```sh
+agentctl limits requests
 ```
 
 ## agentctl limits approve
@@ -741,6 +754,12 @@ agentctl limits approve [options] <id>
 |---|---|
 | `<id>` | request ID or WALL decision-request ID |
 
+Examples:
+
+```sh
+agentctl limits approve limit-a1b2c3d4-e5f
+```
+
 ## agentctl limits reject
 
 Reject a pending limit request as the owner.
@@ -752,6 +771,12 @@ agentctl limits reject [options] <id>
 | Argument | Meaning |
 |---|---|
 | `<id>` | request ID or WALL decision-request ID |
+
+Examples:
+
+```sh
+agentctl limits reject limit-a1b2c3d4-e5f
+```
 
 ## agentctl limits reserve
 
