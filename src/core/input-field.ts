@@ -15,6 +15,7 @@ const BORDER = /^[─━═╌╍┄┅┈┉]{3,}$/u;
 const CODEX_MODEL = /^  [\w.-]+ (?:low|medium|high|xhigh|minimal|none) · .+$/;
 const CODEX_STATUS = /^ *(?:⚠ \d+ warnings? · f2 to view)?$/;
 const CODEX_HINT = /^  (?:← for agents · )?(?:\? for shortcuts(?:\s+.*)?|tab to queue message)$/;
+const CODEX_BACKGROUND = /^\s*(?:[⏵•·]\s*)?\d+ background terminals? running(?:\s*·.*)?$/i;
 /** A paste the TUI folded into one placeholder: "[Pasted text #2 +7 lines]" (Claude Code), "[Pasted Content 1004 chars]" (Codex). */
 const PLACEHOLDER = /^\[Pasted (?:text|content)\b[^\]\n]*\]$/i;
 /** What an agent shows in an empty field (a suggestion, the placeholder) and the options of a dialog: not a draft (see screenMetadata). */
@@ -59,7 +60,11 @@ export function inspectField(screen: string, agent?: DeliveryAgent): FieldCaptur
   // Codex 0.166/0.167 has no box: its two-row model/hints footer is a separate bottom region (recorded fixtures).
   // Pick the LAST complete footer at the bottom, so identical user text higher up stays inside the field.
   for (let model = lines.length - 2; model >= 0; model--) {
-    if (!CODEX_MODEL.test(lines[model]!) || !(CODEX_HINT.test(lines[model + 1]!) || CODEX_STATUS.test(lines[model + 1]!)) || lines.slice(model + 2).some(line => line !== '')) continue;
+    if (!CODEX_MODEL.test(lines[model]!)) continue;
+    const hint = lines[model + 1]!;
+    const extra = lines.slice(model + 2).filter(Boolean);
+    if (!(CODEX_HINT.test(hint) || CODEX_STATUS.test(hint) || CODEX_BACKGROUND.test(hint))
+        || (extra.length > 0 && (extra.length !== 1 || !CODEX_BACKGROUND.test(extra[0]!)))) continue;
     const start = lastMarker < model && /^›(?:\s|$)/.test(lines[lastMarker] ?? '') ? lastMarker : -1;
     if (start >= 0 && lines.slice(start + 1, model).every(line => line === '' || line.startsWith('  '))) return areaOf(start, model);
   }

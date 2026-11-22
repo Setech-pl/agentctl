@@ -13,7 +13,7 @@ import { randomUUID } from 'node:crypto';
 import type { Context } from './context.ts';
 import { taskLock, withFileLock } from './file-lock.ts';
 import { readTaskRecord, setHeaderFields, taskFile } from './taskstore.ts';
-import { queuePrompt, deliverPendingPrompt } from './prompt-delivery.ts';
+import { codexBackgroundComposer, queuePrompt, deliverPendingPrompt } from './prompt-delivery.ts';
 import { recordJournal } from './journal.ts';
 import { AgentctlError } from './util.ts';
 
@@ -80,14 +80,17 @@ export async function drainPromptQueue(ctx: Context, window: string, turnState?:
           await ctx.runner.writeFile(queueFile(ctx, window), JSON.stringify(queue));
         };
         const screen = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
-        if (screen.code !== 0 || classifyScreen(screen.stdout, ctx.config.agents.codex) !== 'idle') { await resetIdle(); return; }
-        if (item.waitForTurnEnd) {
-          const state = turnState ?? (await collectStatus(ctx, { progress: false, cachedOnly: true, records: { current: [record], archived: [] }, orphans: false }))[0]?.state;
-          if (state !== 'waiting' && state !== 'report-ready') { await resetIdle(); return; }
-          // report-ready bypasses status's waiting-state idle counter. An old report is
-          // not a turn-end signal for this message: confirm consecutive idle frames too.
+        if (screen.code !== 0) { await resetIdle(); return; }
+        const settings = ctx.config.agents.codex;
+        const screenState = classifyScreen(screen.stdout, settings);
+        const background = screenState === 'background' && codexBackgroundComposer(screen.stdout, settings)?.area.length === 0;
+        if (screenState !== 'idle' && !background) { await resetIdle(); return; }
+        if (item.waitForTurnEnd || background) {
+          const state = background ? 'background' : turnState ?? (await collectStatus(ctx, { progress: false, cachedOnly: true, records: { current: [record], archived: [] }, orphans: false }))[0]?.state;
+          if (state !== 'waiting' && state !== 'report-ready' && !background) { await resetIdle(); return; }
+          // Report-ready and the background badge bypass status's idle counter. Confirm their empty idle frames here.
           const ended = Date.parse(record.turnEndedAt ?? '') > Date.parse(item.queuedAt);
-          if (state === 'report-ready' && !ended) {
+          if (background || (state === 'report-ready' && !ended)) {
             const idleTicks = (Number.isSafeInteger(item.idleTicks) ? Math.max(0, item.idleTicks!) : 0) + 1;
             if (idleTicks < ctx.config.watch.idleConfirmTicks) {
               queue[0] = { ...item, idleTicks };
@@ -107,8 +110,8 @@ export async function drainPromptQueue(ctx: Context, window: string, turnState?:
       const fresh = readTaskRecord(ctx.config, window)!;
       if (fresh.deliveryStartedAt) await ctx.runner.appendFile(taskFile(ctx.config, window), `\n\n## Follow-up ${result === 'sent' ? 'sent' : 'pasted, unconfirmed'} ${fresh.deliveryStartedAt} (${item.id})\n`);
       if (result !== 'sent') return;
+      if (record.agent === 'codex') return; // One queued turn per idle observation.
       stalledStart = false;
-      turnState = 'working'; // one queued turn per confirmed idle observation
     }
   }));
 }

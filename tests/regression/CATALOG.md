@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| FIELD0253-BACKGROUND | An idle Codex composer with background terminals held queued follow-ups indefinitely. | `tests/field0253-codex-background.test.ts` (`^FIELD0253-BACKGROUND:`) | 0.25.3 | fails on v0.25.2 (2 failing of 2) |
 | FIELD0253-ADMISSION | Queue validation and admission stopped when the full status sweep exceeded the watchdog deadline. | `tests/field0253-watch-queue.test.ts` (`^FIELD0253-ADMISSION:`) | 0.25.3 | fails on v0.25.2 (1 failing of 1) |
 | FIELD0253-ATTENTION | Long-wait WALL decision requests stayed open after the task left the waiting state. | `tests/field0253-attention.test.ts` (`^FIELD0253-ATTENTION:`) | 0.25.3 | fails on v0.25.2 (1 failing of 1) |
 | FIELD0253-LIMITS | Limits and quota WALL messages omitted their source and could miss intermediate revisions. | `tests/field0253-limits.test.ts` (`^FIELD0253-LIMITS:`) | 0.25.3 | fails on v0.25.2 (1 failing of 1) |

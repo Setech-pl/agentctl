@@ -196,6 +196,20 @@ async function keepConfirmedQueue(ctx: Context, record: TaskRecord): Promise<boo
 const mayPressEnter = (state: ScreenState, record: Pick<TaskRecord, 'promptKind'>, settings: Pick<AgentSettings, 'acceptsBusyPrompt'>) =>
   state === 'idle' || (['working', 'background'].includes(state) && record.promptKind === 'followup' && settings.acceptsBusyPrompt !== false);
 
+/** A background badge can coexist with a structurally visible Codex prompt and no foreground turn. */
+export function codexBackgroundComposer(screen: string, settings: AgentSettings) {
+  if (settings.acceptsBusyPrompt === false || startupDialogShown(screen, settings) || !inputVisible(screen, settings)) return undefined;
+  const field = inspectField(screen, 'codex');
+  return field.readable ? field : undefined;
+}
+
+function deliveryScreenState(screen: string, record: Pick<TaskRecord, 'agent' | 'promptKind'>, settings: AgentSettings, requireEmpty = false): ScreenState {
+  const state = classifyScreen(screen, settings);
+  if (state !== 'background' || record.agent !== 'codex' || record.promptKind !== 'followup') return state;
+  const field = codexBackgroundComposer(screen, settings);
+  return field && (!requireEmpty || field.area.length === 0) ? 'idle' : 'needs-input';
+}
+
 const SOURCES: Record<string, string> = { hook: 'hook UserPromptSubmit', transcript: 'transkrypt sesji', 'transcript-queue': 'transkrypt sesji: agent zapisał wiadomość w swojej kolejce', screen: 'agent bezczynny zaczął turę', report: 'zmieniony raport' };
 
 /** What `send` says when the delivery is not simply done. */
@@ -297,7 +311,7 @@ async function deliverOnce(ctx: Context, window: string): Promise<'sent' | 'pend
       for (let attempt = 0; attempt < PASTE_ENTERS; attempt++) {
         if (attempt > 0) await ctx.runner.sleep(400);
         let ready = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
-        const currentState = classifyScreen(ready.stdout, settings), field = inspectField(ready.stdout, record.agent), area = field.area;
+        const currentState = deliveryScreenState(ready.stdout, record, settings), field = inspectField(ready.stdout, record.agent), area = field.area;
         const source = proofOf(ready.stdout !== before.stdout ? ready.stdout : '');
         if (source) return sent(source);
         if (await keepConfirmedQueue(ctx, record)) return 'confirming';
@@ -354,7 +368,7 @@ async function deliverOnce(ctx: Context, window: string): Promise<'sent' | 'pend
           await ctx.runner.sleep(150);
           const pane = await ctx.tmux.capture(window, undefined, undefined, record.windowId, true);
           if (pane.code !== 0) return uncertain('the pane cannot be read');
-          const state = classifyScreen(pane.stdout, settings), shown = fieldArea(pane.stdout, settings.footerPatterns, record.agent);
+          const state = deliveryScreenState(pane.stdout, record, settings), shown = fieldArea(pane.stdout, settings.footerPatterns, record.agent);
           // A quick completed turn can finish between polls; require new assistant output as its acknowledgement.
           const seen = pane.stdout !== before.stdout;
           const again = proofOf(seen ? pane.stdout : '');
@@ -432,7 +446,7 @@ async function deliverOnce(ctx: Context, window: string): Promise<'sent' | 'pend
       if (startupDialogShown(before.stdout, settings)) return 'pending';
       if (record.promptDelivery === 'needs-input') await setHeaderFields(ctx.runner, file, { prompt_delivery: 'pending', prompt_error: null });
     }
-    const beforeState = classifyScreen(before.stdout, settings);
+    const beforeState = deliveryScreenState(before.stdout, record, settings, true);
     const busyFollowup = record.agent !== 'codex' && record.promptKind === 'followup' && settings.acceptsBusyPrompt !== false && ['working', 'background'].includes(beforeState);
     if (before.code !== 0 || !inputVisible(before.stdout, settings) || (!busyFollowup && beforeState !== 'idle')) return 'pending';
 
