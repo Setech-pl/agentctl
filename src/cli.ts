@@ -54,7 +54,8 @@ import { listTargets, matchTask } from './core/resolve.ts';
 import type { TaskTarget } from './core/resolve.ts';
 import { migrateLegacyState } from './core/taskstore.ts';
 import { newTasks } from './core/new.ts';
-import { blockEntryVolume, commitQueueAdd, describeQueue, isPaused, moveToFront, planQueueAdd, readQueue, queueStatusLines, registerDirectStart, removeFromQueue, renderQueueList, retryEntry, setPaused, unblockEntry, waiting } from './core/queue.ts';
+import { blockEntryReview, blockEntryVolume, commitQueueAdd, describeQueue, isPaused, moveToFront, planQueueAdd, readQueue, queueStatusLines, registerDirectStart, removeFromQueue, renderQueueList, retryEntry, setPaused, unblockEntry, waiting } from './core/queue.ts';
+import { ReviewBlocked } from './core/review-freshness.ts';
 import { missingWorktreeVolume, WorktreeVolumeError } from './core/worktree-volume.ts';
 import { liveWindows } from './core/plan.ts';
 import { applyGc, planGc, renderGc, gcView } from './core/gc.ts';
@@ -528,17 +529,26 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         try {
           results = await newTasks(ctx, specs, options);
         } catch (error) {
-          if (!(error instanceof WorktreeVolumeError)) throw error;
-          const affected = specs.filter(spec => error.beforeStart || spec.task === error.task);
-          if (!affected.length) throw error;
-          const { added, existing } = await registerDirectStart(ctx, affected.map(spec => ({ raw: raws[spec.index - 1]!, spec })), { agent: options.agent, noAgent: options.noAgent, reuse: options.reuse || !error.beforeStart });
-          const notifier = await makeNotifier(ctx);
-          for (const entry of [...added, ...existing]) {
-            const spec = affected.find(candidate => candidate.task === entry.task)!;
-            const mount = entry.task === error.task ? error.mount : spec.host ? undefined : missingWorktreeVolume(spec.repos);
-            if (mount) await blockEntryVolume(ctx, entry, mount, notifier, self);
-            deferred.push(entry.task);
-            if (!opts.json) line(mount ? `${entry.task}: volume missing: ${mount}. Mount it, then run agentctl unblock ${entry.task}.` : `${entry.task}: registered for agentctl watch.`);
+          if (error instanceof ReviewBlocked) {
+            const spec = specs.find(candidate => candidate.task === error.task);
+            if (!spec) throw error;
+            const { added, existing } = await registerDirectStart(ctx, [{ raw: raws[spec.index - 1]!, spec }], { agent: options.agent, noAgent: options.noAgent, reuse: options.reuse });
+            for (const entry of [...added, ...existing]) await blockEntryReview(ctx, entry, error);
+            deferred.push(spec.task);
+            if (!opts.json) line(`${error.message}. ${error.retryOnUpdate ? 'Watch will recheck the base.' : `After resolving it, run agentctl queue retry ${spec.task}.`}`);
+          } else {
+            if (!(error instanceof WorktreeVolumeError)) throw error;
+            const affected = specs.filter(spec => error.beforeStart || spec.task === error.task);
+            if (!affected.length) throw error;
+            const { added, existing } = await registerDirectStart(ctx, affected.map(spec => ({ raw: raws[spec.index - 1]!, spec })), { agent: options.agent, noAgent: options.noAgent, reuse: options.reuse || !error.beforeStart });
+            const notifier = await makeNotifier(ctx);
+            for (const entry of [...added, ...existing]) {
+              const spec = affected.find(candidate => candidate.task === entry.task)!;
+              const mount = entry.task === error.task ? error.mount : spec.host ? undefined : missingWorktreeVolume(spec.repos);
+              if (mount) await blockEntryVolume(ctx, entry, mount, notifier, self);
+              deferred.push(entry.task);
+              if (!opts.json) line(mount ? `${entry.task}: volume missing: ${mount}. Mount it, then run agentctl unblock ${entry.task}.` : `${entry.task}: registered for agentctl watch.`);
+            }
           }
         } finally {
           interrupt?.dispose();
@@ -600,7 +610,10 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         const views = cohort === undefined ? all : all.filter((v) => v.entry.cohort !== undefined && cohortKey(v.entry.cohort) === cohortKey(cohort));
         if (opts.json || (command.optsWithGlobals() as { json?: boolean }).json) return line(JSON.stringify(views.map((v) => ({ position: v.position, task: v.entry.task, ...(v.entry.owner ? {owner: v.entry.owner} : {}), cohort: v.entry.cohort ?? null, status: v.entry.status, agent: v.entry.agent, model: v.entry.model, effort: v.entry.effort, priority: v.entry.priority, condition: v.condition.text, blocked: v.condition.kind === 'blocked', after: v.entry.after, queued: v.entry.queuedAt, error: v.entry.error ?? null })), null, 2));
         for (const l of renderQueueList(views, ctx.runner.now())) line(l);
-        for (const v of views.filter((x) => x.condition.kind === 'blocked')) line(`hint: ${v.entry.task} is blocked: agentctl unblock ${v.entry.task} [--drop-after <task>], or agentctl cancel ${v.entry.task}`);
+        for (const v of views.filter((x) => x.condition.kind === 'blocked')) {
+          const action = v.entry.reviewBlock ? v.entry.reviewBlock.retryOnUpdate ? 'update the reviewed branch' : `resolve the conflict and run agentctl queue retry ${v.entry.task}` : `agentctl unblock ${v.entry.task} [--drop-after <task>]`;
+          line(`hint: ${v.entry.task} is blocked: ${action}, or agentctl cancel ${v.entry.task}`);
+        }
         if (isPaused(ctx.config)) line('The queue is paused: "agentctl queue resume" lets it run again.');
       }),
     );

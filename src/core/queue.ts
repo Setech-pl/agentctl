@@ -43,6 +43,7 @@ import { liveWindows, planBatch } from './plan.ts';
 import { collectStatus } from './status.ts';
 import type { StatusRow } from './status.ts';
 import { resolveSpec, splitSpecs } from './spec.ts';
+import { assertReviewBase, ReviewBlocked } from './review-freshness.ts';
 import type { RawSpec, ResolvedSpec, AutoReviewSource } from './spec.ts';
 import { archiveDir, parseTaskRecord, readTaskRecordById, findRecordAnywhere, listArchivedRecords, listTaskRecords, readTaskRecord, recordFromSpec, renderTaskMd, taskDir, taskFile } from './taskstore.ts';
 import type { CancelSource, TaskRecord } from './taskstore.ts';
@@ -108,6 +109,7 @@ export interface QueueEntry {
   blockedNotified?: string[];
   /** Mount point that blocked this start. Remounting alone does not restart an interrupted checkout. */
   volumeBlock?: string;
+  reviewBlock?: { text: string; retryOnUpdate: boolean };
   /** The spec was accepted by an MCP confirm and is not validated yet (status accepted), or its validation failed (status failed): retry validates it again. */
   unvalidated?: boolean;
   /** `status: failed`: when and why. */
@@ -414,7 +416,10 @@ export function queueDiagnosticSources(entries: QueueEntry[]): string[] {
           for (const [key, value] of Object.entries(header.env)) if (typeof value === 'string') sources.push(`${key}=${JSON.stringify(value)}`);
         }
         const commands = [header.setup, ...(Array.isArray(header.repos) ? header.repos.map(repo => repo && typeof repo === 'object' ? repo.setup : undefined) : [])];
-        for (const setup of commands) if (Array.isArray(setup)) for (const command of setup) if (typeof command === 'string') sources.push(command);
+        for (const setup of commands) {
+          const list: unknown = setup && typeof setup === 'object' && !Array.isArray(setup) && 'commands' in setup ? setup.commands : setup;
+          if (Array.isArray(list)) for (const command of list) if (typeof command === 'string') sources.push(command);
+        }
       }
     } catch { /* Malformed legacy specs cannot supply structured setup commands; error text still can. */ }
     return sources;
@@ -426,6 +431,7 @@ export function directStartText(config: Pick<GlobalConfig, 'path' | 'stateDir'>,
   const entries = readQueue(config);
   const redact = secretRedactor([config, process.env, ...queueDiagnosticSources([...entries, entry])]);
   if (entry.volumeBlock) return `${entry.task}: ${volumeBlockText(entry.volumeBlock, entry.task)}`;
+  if (entry.reviewBlock) return entry.reviewBlock.text;
   if (entry.status === 'failed') {
     return `${entry.task}: the start failed – ${firstLine(redact(entry.error ?? 'n/d'))}. The worktrees were kept. Read queue_list, fix the cause, then queue_retry ${entry.task} (new is refused for a task that is in the queue). Nothing was started again.`;
   }
@@ -772,11 +778,11 @@ async function retryEntryLocked(ctx: Context, input: string): Promise<QueueEntry
   }
   if (entry.autoReview) entry = await rebuildAutoReview(ctx, entry, { write: false });
   const spec = resolveSpec(splitSpecs(entry.spec, `queue entry ${entry.task}`)[0] as RawSpec, { config: ctx.config });
-  if (!spec.host) await checkRetryWorktrees(ctx.runner, spec.repos);
+  if (!spec.host && !spec.reviewMode && spec.mergeBaseCheck !== 'candidate') await checkRetryWorktrees(ctx.runner, spec.repos);
   // P96: a failed start keeps its window (start_failure.keep_window); the fresh start needs the name, so the old window goes, its capture stays.
   await closeFailedStartWindow(ctx, entry.task);
   const highest = readQueue(ctx.config).reduce((n, e) => Math.max(n, e.order, e.seq), 0);
-  const { failedAt: _f, error: _e, startingAt: _s, ...rest } = entry;
+  const { failedAt: _f, error: _e, startingAt: _s, reviewBlock: _b, ...rest } = entry;
   const again: QueueEntry = { ...rest, status: 'queued', order: highest + 1, ...(entry !== original && !entry.reuse ? {} : { reuse: true }) };
   if (entry !== original && entry.autoReview) await syncReviewLedger(ctx, entry.autoReview.author, entry.task, entry.autoReview.heads);
   await writeEntry(ctx, again);
@@ -843,6 +849,19 @@ export async function blockEntryVolume(ctx: Context, entry: QueueEntry, mount: s
   await notifyPlain(ctx, notifier, entry.task, text, self);
 }
 
+export async function blockEntryReview(ctx: Context, entry: QueueEntry, error: ReviewBlocked): Promise<void> {
+  const changed = await withStartLock(ctx, async () => {
+    const current = readQueue(ctx.config).find(candidate => candidate.task === entry.task && candidate.seq === entry.seq);
+    if (!current || current.status === 'accepted' || current.status === 'failed' || current.reviewBlock?.text === error.message && current.status !== 'starting') return false;
+    const { startingPid: _pid, startingAt: _start, ...rest } = current;
+    const reviewBlock = { text: error.message, retryOnUpdate: error.retryOnUpdate };
+    await writeEntry(ctx, error.retryOnUpdate ? { ...rest, status: 'queued', reviewBlock }
+      : { ...rest, status: 'failed', reviewBlock, error: error.message, failedAt: new Date(ctx.runner.now()).toISOString() });
+    return current.reviewBlock?.text !== error.message;
+  });
+  if (changed) await recordJournal(ctx, { kind: 'blocked', task: entry.task, owner: entry.owner, text: error.message });
+}
+
 /**
  * For every entry: what it waits for. Entries are walked in turn order, each one that will start in the next tick uses up a window of its
  * provider, so the answer matches what `watch` does. `inflight` are the tasks this very process is starting.
@@ -863,6 +882,7 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
   let setups = setupSlots(config, entries);
   let position = 0;
   const views = entries.map((entry): QueueView => {
+    if (entry.reviewBlock && entry.status !== 'starting') return { position: entry.status === 'queued' ? ++position : null, entry, condition: { kind: 'blocked', text: entry.reviewBlock.text }, since: entry.failedAt ?? entry.queuedAt };
     if (entry.status === 'failed') return { position: null, entry, condition: { kind: 'failed', text: `failed: ${(entry.error ?? '').split('\n')[0] ?? ''}` }, since: entry.failedAt ?? entry.queuedAt };
     if (entry.status === 'accepted') return { position: null, entry, condition: { kind: 'accepted', text: entry.direct ? `uruchamiane – czeka na najbliższy tick watch (${ACCEPTED_TEXT})` : ACCEPTED_TEXT }, since: entry.queuedAt };
     if (entry.status === 'starting') return { position: null, entry, condition: { kind: 'starting', text: entry.direct || readSetupProgress(config, entry.task, queueDiagnosticSources(entries)) ? startProgressText(readSetupProgress(config, entry.task, queueDiagnosticSources(entries)), nowMs) : 'starting' }, since: entry.startingAt ?? entry.queuedAt };
@@ -1154,6 +1174,15 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
     if (providerHolds(config, ctx.runner.now())[entry.agent]) continue;
     if (taskDiskStartHold(config, entry.host, entryWorktrees(config, entry), ctx.runner.now()) || setupSlots(config, readQueue(config)) >= config.queue.maxParallelSetups) continue;
     if (providerHolds(config, ctx.runner.now())[entry.agent] || entryPeakHold(config, entry, ctx.runner.now())) continue;
+    if (entry.reviewBlock?.retryOnUpdate) {
+      try {
+        const spec = resolveSpec(splitSpecs(entry.spec, `queue entry ${entry.task}`)[0]!, { config });
+        await assertReviewBase(ctx, spec);
+      } catch (error) {
+        if (error instanceof ReviewBlocked) { await blockEntryReview(ctx, entry, error); continue; }
+        // Let the ordinary start path record missing refs or invalid configuration.
+      }
+    }
     if (entry.direct) {
       await consider(entry);
       continue;
@@ -1305,7 +1334,7 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
       if (entry.autoReview) spec.autoReview = entry.autoReview;
       if (entry.reuse) {
         if ((await ctx.tmux.windows()).some(w => w.plain === spec.window)) throw new AgentctlError(`${entry.task}: task window already exists; inspect it instead of retrying`);
-        if (!spec.host && !spec.reviewMode) await checkRetryWorktrees(ctx.runner, spec.repos);
+        if (!spec.host && !spec.reviewMode && spec.mergeBaseCheck !== 'candidate') await checkRetryWorktrees(ctx.runner, spec.repos);
       }
       await newTasks(startCtx, [spec], {
         ...(entry.agentOverride ? { agent: entry.agentOverride } : {}),
@@ -1333,6 +1362,7 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
       await recordJournal(ctx, { kind: 'queue-start', task: entry.task, owner: entry.owner, text: `${done} (${entry.agent})`, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
     } catch (e) {
       if (e instanceof WorktreeVolumeError) { await blockEntryVolume(ctx, entry, e.mount, notifier, opts.self); return; }
+      if (e instanceof ReviewBlocked) { await blockEntryReview(ctx, entry, e); return; }
       if (/window limit for .* reached|czeka na kwotę|host .* limit reached|provider hold:|szczyt do|wstrzymane: dysk/.test(errorMessage(e))) { await writeEntry(ctx, { ...entry, status: 'queued' }); return; }
       // A never-ready window is untrusted state nobody watches: close it so it cannot hold a slot (the record and its worktree stay).
       const closedLeftover = await closeNeverReadyWindow(ctx, entry.task, { force: Boolean(opts.signal?.aborted) }).catch(() => false);
@@ -1378,7 +1408,7 @@ function keptWindowNote(ctx: Context, task: string): string {
 async function failEntry(ctx: Context, entry: QueueEntry, error: string, notifier: Notifier, opts: QueueTickOptions, notify: boolean, log: string[] = []): Promise<void> {
   const { config } = ctx;
   const highest = readQueue(config).reduce((n, e) => Math.max(n, e.order, e.seq), 0);
-  const { startingAt: _s, retryAt: _r, ...rest } = entry;
+  const { startingAt: _s, retryAt: _r, reviewBlock: _b, ...rest } = entry;
   const attempts = [...(entry.attempts ?? []), { at: new Date(ctx.runner.now()).toISOString(), error, transient: transientStartError(error) || (Boolean(entry.autoReview) && /unsafe start residue/.test(error)) }];
   // A review never owns the author's checkout, so a "residue" refusal there is a passing state of the author, not a broken start.
   const passing = Boolean(entry.autoReview) && /unsafe start residue/.test(error);

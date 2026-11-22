@@ -42,6 +42,7 @@ export interface TaskRecord {
   reviewOf?: string;
   review?: ReviewSettings;
   reviewMode?: 'readonly-on-author';
+  reviewFreshness?: string;
   /** The cohort of the task (display name, as the cohort was first written). Absent: no cohort. */
   cohort?: string;
   report: string;
@@ -164,6 +165,7 @@ export function recordFromSpec(spec: ResolvedSpec, config: GlobalConfig, started
   if (spec.reviewOf) record.reviewOf = spec.reviewOf;
   if (spec.review) record.review = spec.review;
   if (spec.reviewMode) record.reviewMode = spec.reviewMode;
+  if (spec.reviewFreshness) record.reviewFreshness = spec.reviewFreshness;
   if (spec.autoReview) record.autoReview = spec.autoReview;
   if (spec.keepCache) record.keepCache = true;
   if (spec.integration) record.integration = true;
@@ -199,6 +201,7 @@ export function renderTaskMd(record: TaskRecord, prompt: string): string {
   if (record.weight) header.weight = record.weight;
   if (record.reviewOf) header.review_of = record.reviewOf;
   if (record.reviewMode) header.review_mode = record.reviewMode;
+  if (record.reviewFreshness) header.review_freshness = record.reviewFreshness;
   if (record.review) header.review = record.review;
   if (record.autoReview) header.auto_review = record.autoReview;
   if (record.switchedBy) header.switched_by = record.switchedBy;
@@ -348,6 +351,7 @@ function parseTaskRecordUncached(text: string): TaskRecord | undefined {
   if (data.switched_by === 'flag' || data.switched_by === 'limit') record.switchedBy = data.switched_by;
   if (typeof data.review_of === 'string') record.reviewOf = data.review_of;
   if (data.review_mode === 'readonly-on-author') record.reviewMode = data.review_mode;
+  if (typeof data.review_freshness === 'string') record.reviewFreshness = data.review_freshness;
   if (isObject(data.review)) record.review = data.review as ReviewSettings;
   if (isObject(data.auto_review)) record.autoReview = data.auto_review as unknown as AutoReviewSource;
   const owner = chatOwner(data.owner);

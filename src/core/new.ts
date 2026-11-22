@@ -7,6 +7,7 @@ import { assertWorktreeVolumes, missingWorktreeVolume, WorktreeVolumeError } fro
 import { peakHold } from './peak.ts';
 import { protectReadOnly } from './read-only.ts';
 import { readonlyReviewEnvironment, readonlyReviewEvidence, readonlyReviewRepos } from './readonly-review.ts';
+import { assertCandidateCheckout, assertReviewBase } from './review-freshness.ts';
 import { attachHint } from './tmux-socket.ts';
 import { writeLaunchScript } from './launch-script.ts';
 import { launchEnvironment } from './safety.ts';
@@ -192,6 +193,8 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
     }
     // The same check as in the door itself, before the first worktree or file exists.
     assertAgentSpawnAllowed(ctx, { ...guardRequest(spec), origin: opts.origin ?? (spec.autoReview ? 'start' : 'new') });
+    spec = await assertReviewBase(ctx, spec);
+    if (spec.reviewFreshness) ctx.info(`${spec.task}: ${spec.reviewFreshness}`);
     const taskStartedMs = runner.now();
     const primary = spec.repos[0]!.worktree;
 
@@ -210,6 +213,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
           await addWorktree(runner, repo, config.git.timeoutS);
           ctx.info(`${spec.task}: worktree ${repo.worktree}`);
         }
+        if (spec.mergeBaseCheck === 'candidate') await assertCandidateCheckout(ctx, spec.task, repo);
       }
       if (spec.readOnly) await protectReadOnly(ctx, spec);
       // 2. setup commands, before links because an install may wipe node_modules.

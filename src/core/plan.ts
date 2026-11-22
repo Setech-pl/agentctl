@@ -110,8 +110,8 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
   const result: ResolvedSpec[] = [];
 
   for (let spec of specs) {
-    if (!spec.reviewMode && !spec.host && !opts.previewOnly && !opts.deferBases) spec = await resolveTaskBases(ctx, spec);
-    if (spec.review && !spec.host && !opts.previewOnly) {
+    if (!spec.reviewMode && spec.mergeBaseCheck !== 'candidate' && !spec.host && !opts.previewOnly && !opts.deferBases) spec = await resolveTaskBases(ctx, spec);
+    if (spec.review && !spec.reviewOf && !spec.host && !opts.previewOnly) {
       const repos = [];
       for (const repo of spec.repos) {
         if (!repo.branch) throw new AgentctlError(`${spec.task}: review: auto requires an explicit author repos[].branch`);

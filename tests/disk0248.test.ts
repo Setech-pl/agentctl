@@ -11,10 +11,11 @@ import { applyGc, planGc } from '../src/core/gc.ts';
 import { readJournal } from '../src/core/journal.ts';
 import { readTaskRecord, taskDir } from '../src/core/taskstore.ts';
 import { newTasks } from '../src/core/new.ts';
-import { describeQueue, QueueMemory, queueTick, readQueue, registerDirectStart, unblockEntry } from '../src/core/queue.ts';
+import { describeQueue, QueueMemory, queueTick, readQueue, registerDirectStart, retryEntry, unblockEntry } from '../src/core/queue.ts';
 import { RealRunner, type ExecOptions } from '../src/core/runner.ts';
 import { resolveSpec, splitSpecs } from '../src/core/spec.ts';
-import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helpers.ts';
+import { DiskRunner, FakeTmux, makeConfig, runCli, seedTask, useScratch } from './helpers.ts';
+import { collectStatus } from '../src/core/status.ts';
 
 const scratch = useScratch();
 const sameFs = fs.statSync;
@@ -117,6 +118,78 @@ it('FLOW-READONLY: a stopped author lends its worktree with agent-scoped commit 
   git(worktree, 'commit', '--allow-empty', '-m', 'author can commit');
   assert.equal(fs.readFileSync(originalLog, 'utf8'), 'called\n');
   assert.equal(git(w.repo, 'worktree', 'list', '--porcelain').split('worktree ').length, 3);
+});
+
+it('FLOW-FRESHNESS: warns, waits for a base update, and reviews a local merge candidate', async () => {
+  const w = world('freshness');
+  const wt = path.join(w.root, 'author');
+  git(w.repo, 'worktree', 'add', '-b', 'feature', wt);
+  fs.writeFileSync(path.join(wt, 'author.txt'), 'author');
+  git(wt, 'add', '.');
+  git(wt, 'commit', '-m', 'feature');
+  const author = git(wt, 'rev-parse', 'HEAD');
+  seedTask(w.config, 'AUTHOR', { repos: [{ path: w.repo, worktree: wt, branch: 'feature' }], model: 'other-model', closed: true });
+  fs.writeFileSync(path.join(w.repo, 'main.txt'), 'base');
+  git(w.repo, 'add', '.');
+  git(w.repo, 'commit', '-m', 'new base');
+  const main = git(w.repo, 'rev-parse', 'HEAD');
+
+  const warning = w.spec('WARN', true, 'review_of: AUTHOR\nmerge_base_check: warn\n').spec;
+  await newTasks(w.ctx, [warning]);
+  assert.equal(git(warning.repos[0]!.worktree, 'rev-parse', 'HEAD'), author);
+  assert.match(readTaskRecord(w.config, warning.window)?.reviewFreshness ?? '', /AUTHOR .* lacks local main/);
+  assert.match((await collectStatus(w.ctx)).find(row => row.task === 'WARN')?.hint ?? '', /Review freshness warning/);
+
+  const candidate = w.spec('CANDIDATE', true, 'review_of: AUTHOR\nmerge_base_check: candidate\n').spec;
+  await newTasks(w.ctx, [candidate], { noAgent: true });
+  const checkout = candidate.repos[0]!.worktree;
+  assert.equal(git(checkout, 'branch', '--show-current'), 'review/CANDIDATE');
+  assert.equal(git(checkout, 'show', '-s', '--format=%P', 'HEAD'), `${author} ${main}`);
+  assert.equal(fs.readFileSync(path.join(checkout, 'main.txt'), 'utf8'), 'base');
+  assert.equal(git(wt, 'rev-parse', 'HEAD'), author);
+  assert.equal(git(w.repo, 'rev-parse', 'HEAD'), main);
+
+  const blocked = w.spec('WAIT', true, 'review_of: AUTHOR\nmerge_base_check: block\n');
+  const file = path.join(w.root, 'wait.md');
+  fs.writeFileSync(file, `---\n${JSON.stringify(blocked.raw.header)}\n---\nReview.\n`);
+  const result = await runCli(w.config, w.runner, ['new', file, '--no-agent']);
+  assert.match(result.stdout, /WAIT: BLOCKED.*lacks local main/);
+  assert.equal(describeQueue(w.config, readQueue(w.config), [])[0]?.condition.kind, 'blocked');
+  const queue = new QueueMemory();
+  assert.deepEqual(await queueTick(w.ctx, queue, w.notifier), []);
+  git(wt, 'merge', '--no-edit', 'main');
+  assert.deepEqual(await queueTick(w.ctx, queue, w.notifier), ['WAIT']);
+  await queue.idle();
+  assert.equal(readQueue(w.config).length, 0);
+});
+
+it('FLOW-FRESHNESS: conflicting candidates name paths and can retry without changing the author', async () => {
+  const w = world('candidate-conflict');
+  const wt = path.join(w.root, 'author');
+  git(w.repo, 'worktree', 'add', '-b', 'feature', wt);
+  for (const [root, value] of [[wt, 'author'], [w.repo, 'main']] as const) {
+    fs.writeFileSync(path.join(root, 'shared file'), value);
+    git(root, 'add', '.');
+    git(root, 'commit', '-m', value);
+  }
+  const author = git(wt, 'rev-parse', 'HEAD');
+  seedTask(w.config, 'AUTHOR', { repos: [{ path: w.repo, worktree: wt, branch: 'feature' }], model: 'other-model', closed: true });
+  const candidate = w.spec('CONFLICT', true, 'review_of: AUTHOR\nmerge_base_check: candidate\n');
+  await registerDirectStart(w.ctx, [candidate], { noAgent: true });
+  const queue = new QueueMemory();
+  assert.deepEqual(await queueTick(w.ctx, queue, w.notifier), ['CONFLICT']);
+  await queue.idle();
+  const [row] = describeQueue(w.config, readQueue(w.config), []);
+  assert.equal(row?.condition.kind, 'blocked');
+  assert.match(row?.condition.text ?? '', /merge conflicts .*"shared file"/);
+  assert.equal(git(w.repo, 'branch', '--list', 'review/CONFLICT'), '');
+  assert.equal(git(wt, 'rev-parse', 'HEAD'), author);
+  assert.equal(git(wt, 'status', '--porcelain'), '');
+  git(wt, 'merge', '-s', 'ours', '--no-edit', 'main');
+  await retryEntry(w.ctx, 'CONFLICT');
+  assert.deepEqual(await queueTick(w.ctx, queue, w.notifier), ['CONFLICT']);
+  await queue.idle();
+  assert.equal(git(candidate.spec.repos[0]!.worktree, 'branch', '--show-current'), 'review/CONFLICT');
 });
 
 it('FLOW-SETUP: task clones skip only compatible npm ci installs and keep source writes isolated', async () => {

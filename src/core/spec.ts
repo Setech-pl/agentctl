@@ -87,6 +87,8 @@ export interface ResolvedSpec {
   reviewOfAll?: string[];
   review?: ReviewSettings;
   reviewMode?: 'readonly-on-author';
+  mergeBaseCheck?: 'warn' | 'block' | 'candidate';
+  reviewFreshness?: string;
   report: string;
   /** Other places the report may be (paths and globs, placeholders filled; a relative one is relative to the worktree). */
   reportAlt?: string[];
@@ -206,7 +208,7 @@ export interface ResolveContext {
 /** Task IDs whose window name is one agentctl uses for itself (`watch`, `board`, `manager`). */
 export const RESERVED_TASK_IDS = ['WATCH', 'BOARD', 'MANAGER'];
 
-export const SPEC_KEYS = ['task', 'agent', 'class', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'review', 'report', 'pin', 'remote_control', 'weight', 'priority', 'after', 'after_verdict', 'touches', 'cohort', 'owner', 'wall', 'read_only', 'host', 'integration', 'keep_cache', 'peak_ok'];
+export const SPEC_KEYS = ['task', 'agent', 'class', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'review', 'merge_base_check', 'report', 'pin', 'remote_control', 'weight', 'priority', 'after', 'after_verdict', 'touches', 'cohort', 'owner', 'wall', 'read_only', 'host', 'integration', 'keep_cache', 'peak_ok'];
 export const REPO_KEYS = ['path', 'worktree', 'base', 'branch', 'setup'];
 
 function label(raw: RawSpec): string {
@@ -394,6 +396,9 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
 
   const inheritedReview = { ...config.review, ...project?.review };
   const reviewMode = isObject(h.review) ? parseEnumValue(h.review.mode, ['readonly-on-author'] as const, 'spec.review.mode', p) : undefined;
+  const mergeBaseCheck = parseEnumValue(h.merge_base_check, ['warn', 'block', 'candidate'] as const, 'spec.merge_base_check', p);
+  if (mergeBaseCheck && (!reviewOf || h.host)) p.add('merge_base_check requires a local task with review_of');
+  if (mergeBaseCheck === 'candidate' && (reviewMode || reviewOfList.length !== 1 || h.read_only === true)) p.add('merge_base_check candidate requires one reviewed task and a separate worktree');
   if (reviewMode) {
     checkKeys(h.review as Record<string, unknown>, ['mode'], 'spec.review', p);
     if (reviewOfList.length !== 1 || reviewOf === task) p.add('review.mode readonly-on-author requires review_of naming one other task');
@@ -594,6 +599,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   if (reviewOf) spec.reviewOf = reviewOf;
   if (reviewOfList.length > 0) spec.reviewOfAll = reviewOfList;
   if (review) spec.review = review;
+  if (mergeBaseCheck) spec.mergeBaseCheck = mergeBaseCheck;
   if (reviewMode) {
     spec.reviewMode = reviewMode;
     spec.setup = [];
