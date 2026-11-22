@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- FLOW-CLOSE: Close records a task whose tmux window disappeared and accepts the exact ID of an already closed task. / Polecenie close zamyka zadanie po zniknięciu okna tmux i rozpoznaje dokładny identyfikator zamkniętego zadania.
+
 - FIELD0253-BACKGROUND: Codex accepts queued follow-ups at a confirmed empty prompt while background terminals run. / Codex przyjmuje wiadomości z kolejki, gdy ma potwierdzone puste pole tekstowe, także przy działających terminalach w tle.
 
 - FIELD0253-ADMISSION: Watch admits queued tasks during slow status sweeps and recovers the completed snapshot. / Watch uruchamia zadania z kolejki podczas wolnego odczytu stanu i wykorzystuje ukończony snapshot.

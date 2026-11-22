@@ -10,10 +10,11 @@ import path from 'node:path';
 import type { Context } from './context.ts';
 import { gitFailure } from './git.ts';
 import { recordEvent } from './history.ts';
-import { readTaskRecord, setHeaderFields, taskFile } from './taskstore.ts';
+import { readTaskRecord, readTaskRecordById, setHeaderFields, taskFile } from './taskstore.ts';
 import type { TaskRecord } from './taskstore.ts';
 import { AgentctlError, Problems, windowName } from './util.ts';
 import { cleanupClosedWorktrees } from './close-cleanup.ts';
+import { listTargets, matchTask } from './resolve.ts';
 
 export interface CloseOptions {
   rmWorktree?: boolean;
@@ -44,15 +45,18 @@ export async function closeTask(ctx: Context, taskArg: string, opts: CloseOption
   const windows = runner.dryRun ? [window] : await tmux.listWindows();
   if (windows.includes(window)) {
     const killed = await tmux.killWindow(window);
-    if (killed.code !== 0) throw new AgentctlError(`cannot close ${taskArg}: ${killed.stderr}`);
-    if (record?.host) await syncRemoteFiles(ctx, record);
-    ctx.info(`${taskArg}: window ${config.session}:${window} closed`);
+    if (killed.code !== 0 && (await tmux.listWindows()).includes(window)) throw new AgentctlError(`cannot close ${taskArg}: ${killed.stderr}`);
+    if (killed.code === 0 && record?.host) await syncRemoteFiles(ctx, record);
+    if (killed.code === 0) ctx.info(`${taskArg}: window ${config.session}:${window} closed`);
+    else ctx.info(`${taskArg}: window disappeared while closing; marking the task closed`);
+  } else if (record?.closed || !record && readTaskRecordById(config, taskArg)) {
+    ctx.info(`${taskArg}: task is already closed`);
   } else {
-    ctx.info(`${taskArg}: no window "${window}" in session "${config.session}" (already closed)`);
+    ctx.info(`${taskArg}: no tmux window in session "${config.session}"${record ? '; marking the task closed' : ''}`);
   }
 
   // The window is gone: the task is closed, whether or not the worktree can be removed below. The state and the report stay.
-  if (record) {
+  if (record && !record.closed) {
     const warning = reportMessageWarning(ctx, window, record);
     // Close discards every message not yet delivered; each one leaves a trace (an interrupted transfer shows the same id in both places).
     const dropped = new Map(readPromptQueue(ctx, window).map(p => [p.id, p.queuedAt] as const));
@@ -147,6 +151,19 @@ export async function planClose(ctx: Context, tasks: string[], opts: CloseOption
   });
   p.throwIfAny('Cannot close:', 'Remove those tasks from the list, or remove their worktrees yourself with "git worktree remove <path>".');
   return items;
+}
+
+/** Closed tasks remain addressable by exact ID without making open-task prefixes ambiguous. */
+export async function resolveCloseTasks(ctx: Context, inputs: string[]): Promise<string[]> {
+  const targets = await listTargets(ctx);
+  return inputs.map(input => {
+    const exact = readTaskRecordById(ctx.config, input.trim());
+    if (exact) return exact.task;
+    const match = matchTask(input, targets);
+    if (match.kind === 'one') return match.target.task;
+    if (match.kind === 'many') throw new AgentctlError(`"${input}" fits more than one task: ${match.matches.map(m => m.task).join(', ')}`);
+    throw new AgentctlError(`no task "${input}"`, 'See "agentctl status --all".');
+  });
 }
 
 /** Close several tasks one after another; a failure does not stop the others, it is reported at the end. */

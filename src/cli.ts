@@ -30,7 +30,7 @@ import { cancelTasks, planCancel } from './core/cancel.ts';
 import { touchCohort } from './core/cohort.ts';
 import { applyCohortArchive, planCohortArchive } from './core/cohort.ts';
 import { cohortEntries, cohortRows, findCohort, listCohorts, openCohortTasks, renderCohortList, setCohortOf, setNote, summarizeCohorts } from './core/cohort.ts';
-import { closeTasks, planClose } from './core/close.ts';
+import { closeTasks, planClose, resolveCloseTasks } from './core/close.ts';
 import { confirmAction, readClipboard, specFromClipboard, writeClipboard } from './core/clipboard.ts';
 import { runDoctor } from './core/doctor.ts';
 import { renderChecks, renderStatusHints, renderStatusTable } from './render.ts';
@@ -1387,7 +1387,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         const closeOpts = { rmWorktree: Boolean(opts.rmWorktree) };
         if (opts.pulled) checkPulledClose(opts.cohort, typed, opts.rmWorktree);
         const pulledCohortName = opts.pulled ? findCohort(ctx.config, opts.cohort!).name : undefined;
-        const tasks = opts.pulled ? await pulledCohortTasks(ctx, pulledCohortName!) : await tasksOrCohort(ctx, typed, opts.cohort, false);
+        const tasks = opts.pulled ? await pulledCohortTasks(ctx, pulledCohortName!) : await resolveCloseTasks(ctx, await tasksOrCohort(ctx, typed, opts.cohort, false));
         const plan = await planClose(ctx, tasks, closeOpts);
         const summary = [`Close ${plan.length} task${plan.length === 1 ? '' : 's'}${closeOpts.rmWorktree ? ' and remove their worktrees (branches stay)' : ''}:`, ...plan.map((i) => `  ${i.line}`)];
         if (!(await confirmAction(ctx, summary, 'Go ahead?', Boolean(opts.yes) || Boolean(opts.dryRun)))) return;

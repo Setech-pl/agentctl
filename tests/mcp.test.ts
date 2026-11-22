@@ -367,6 +367,20 @@ describe('mcp: the write tools', () => {
     assert.deepEqual(t.notified, ['czat zlecił: close NC-1']);
   });
 
+  it('FLOW-CLOSE: closes a task with a vanished window and accepts its exact ID again', async () => {
+    const t = setup('close-vanished', 'mcp: {allow: [close]}\n');
+    seedTask(t.config, 'NC-42');
+    await t.call('close', { task: 'NC-42' });
+    const first = await t.call('close', { task: 'NC-42', confirm: true });
+    const closed = readTaskRecord(t.config, 'nc-42');
+    assert.equal(closed?.closed, true);
+    assert.match(first.text, /no tmux window.*marking the task closed/);
+    await t.call('close', { task: 'nc-42' });
+    const again = await t.call('close', { task: 'nc-42', confirm: true });
+    assert.match(again.text, /task is already closed/);
+    assert.equal(readTaskRecord(t.config, 'nc-42')?.closedAt, closed?.closedAt);
+  });
+
   it('close: removing the worktree needs mcp.allow_rm_worktree as well, and is never forced', async () => {
     const t = setup('c2', 'mcp: {allow: [close]}\n');
     const wt = scratch.sub('c2/app-wt');

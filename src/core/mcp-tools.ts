@@ -62,7 +62,7 @@ import { z } from 'zod';
 import { cancelTasks, planCancel } from './cancel.ts';
 import { staleWarning, versionOf } from './mcp-processes.ts';
 import { stableScript } from './mcp-install.ts';
-import { closeTask, closeTasks, planClose } from './close.ts';
+import { closeTasks, planClose, resolveCloseTasks } from './close.ts';
 import { cohortEntries, cohortRows, findCohort, openCohortTasks, summarizeCohorts } from './cohort.ts';
 import { collectOverlaps, collideText } from './collisions.ts';
 import { ACCEPTED_TEXT, acceptSpecs, isPaused, describeQueue, directStartText, findDirectStart, planQueueAdd, queueDependencyRows, readQueue, removeFromQueue, waiting, watchAlive, withAcceptLock } from './queue.ts';
@@ -79,7 +79,7 @@ import { describeMove, moveTask, planMove } from './move.ts';
 import { interruptTask } from './interrupt.ts';
 import { peekTask } from './peek.ts';
 import { joinReports, markPulled, noReadyMessage, selectReady } from './pull.ts';
-import { describeTargets, listTargets, matchTask, resolveRunningTask } from './resolve.ts';
+import { describeTargets, matchTask, resolveRunningTask } from './resolve.ts';
 import { classifyScreen } from './state.ts';
 import { inspectField } from './input-field.ts';
 import { applyWithLiveHosts, observeHostWindows } from './host-runtime.ts';
@@ -1085,12 +1085,7 @@ async function closeInputs(ctx: Context, args: CloseMcpArgs): Promise<string[]> 
   }
   if (!args.task && !args.tasks?.length && !args.cohort) throw new AgentctlError('give task, tasks or cohort');
   const inputs = args.tasks ?? (args.task ? [args.task] : await openCohortTasks(ctx, findCohort(ctx.config, args.cohort!).name, { queued: false }));
-  const targets = await listTargets(ctx);
-  const selected = inputs.map((input) => {
-    const match = matchTask(input, targets);
-    if (match.kind !== 'one') throw new AgentctlError(`no task "${input}" or ambiguous task`);
-    return match.target.task;
-  });
+  const selected = await resolveCloseTasks(ctx, inputs);
   if (args.cohort) {
     const cohort = findCohort(ctx.config, args.cohort).name;
     for (const task of selected) if (cohortKey(readTaskRecordById(ctx.config, task)?.cohort ?? '') !== cohortKey(cohort)) throw new AgentctlError(`${task} does not belong to ${cohort}`);

@@ -469,6 +469,17 @@
       "FIELD0253-LIMITS: watch reports manual and chat changes exactly once with their sources"
     ]
   },
+  "FLOW-CLOSE": {
+    "rev": "v0.25.3",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "FLOW-CLOSE: closes a task with a vanished window and accepts its exact ID again",
+      "mcp: the write tools",
+      "FLOW-CLOSE: closes a task with a vanished window and accepts its exact ID again"
+    ]
+  },
   "G1a": {
     "rev": "v0.22.3",
     "outcome": "FAILS",
