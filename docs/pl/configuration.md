@@ -2,7 +2,7 @@
 
 Kolejność: config globalny → .agentctl.yaml pierwszego repo → spec. Katalog to AGENTCTL_HOME, inaczej ~/.agentctl. Nieznane klucze są błędem; config MCP ostrzega i pomija błędne uprawnienia. Watch/MCP wczytuje poprawne edycje; błędne zachowują poprzedni config. Po zmianie providers restartuj MCP.
 
-env scala się po kluczach, links po from, setup zastępuje całą listę ([] wyłącza). Repo używa repos[].setup lub własnego projektowego setup; globalny/top-level dotyczy pierwszego repo. Późniejsze report/root/default wygrywa. Ścieżki rozwijają ~ i {task}/{TASK}/{cache}. MCP odrzuca setup w przesłanym spec; sprawdzony setup projektu nadal działa.
+`env` scala się po kluczach, a `links` po `from`. Lista `setup` zastępuje odziedziczone polecenia, a `[]` je wyłącza. Repo używa `repos[].setup` albo własnej konfiguracji projektu. Polecenia globalne i z głównego poziomu specyfikacji dotyczą pierwszego repo. Ścieżki rozwijają `~` i `{task}/{TASK}/{cache}`. MCP przyjmuje mapowanie `setup` wskazujące źródło klonu i odrzuca polecenia powłoki przesłane w specyfikacji.
 
 Typy/domysły sprawdzono z [config.ts](../../src/core/config.ts), [spec.ts](../../src/core/spec.ts) i adapterami. g/p/s = globalny/projekt/spec. Część zwięzłych starszych wierszy podaje domyślne/typ w opisie. Dokładne regexy: [wspólne adaptery](../../src/core/providers/settings.ts), [Kimi](../../src/core/providers/kimi-settings.ts), [referencja szczegółowa](../configuration.md). Mapping raportu używa path ALBO paths oraz settle_s/clean_worktree_cache; gotowość nadal wymaga bieżącej próby. To nie pojemności konta właściciela.
 
@@ -28,8 +28,9 @@ Typy/domysły sprawdzono z [config.ts](../../src/core/config.ts), [spec.ts](../.
 | `links[].to` | path · required · g p s | Istniejący cel; para końcówek /* linkuje każdy element. |
 | `env` | mapping · `{}` · g p s | Środowisko scalane po kluczach; wartości zamieniane na tekst. |
 | `report` | path or list · `{cache}/{task}/{TASK}.md` · g p s | Ścieżka kanoniczna lub lista: pierwsza kanoniczna, reszta kandydatami; także mapping path/paths. |
-| `setup` | list of strings · `[]` · g p s | Polecenia po worktree, przed linkami; lista zastępuje odziedziczoną, [] wyłącza. MCP spec odrzucony. |
-| `setup.commands` | lista poleceń · dziedziczona · g p | Lista poleceń setup w formie mapowania. `[]` wyłącza także domyślne `npm ci`. |
+| `setup` | list of strings · `[]` · g p s | Polecenia po worktree, przed linkami; lista zastępuje odziedziczoną, [] wyłącza. W specyfikacji MCP można podać tylko źródło klonu. |
+| `setup.commands` | lista poleceń · dziedziczona · g p s | Polecenia w formie mapowania można podać z CLI, w konfiguracji globalnej i projektowej. `[]` wyłącza także domyślne `npm ci`. |
+| `setup.from_task` | ID zadania · brak · s | Alias `link-from`. Próbuje sklonować `node_modules` metodą copy-on-write z odpowiadającego repozytorium lokalnego zadania. |
 | `setup.node_modules` | `clone` lub `off` · `off` · g p | Klonuje zgodne instalacje npm z `<AGENTCTL_HOME>/nm-store` w obrębie tego samego systemu plików. Repozytorium może zmienić ustawienie globalne. |
 | `close` | mapowanie · `{}` · g p | Ustawienia stosowane po zamknięciu zadania. |
 | `close.cleanup` | lista ścieżek względnych lub globów · `[]` · g p | Po zamknięciu zadania przenosi pasujące pliki ignorowane przez Git do kosza. Glob dopasowuje jeden segment ścieżki. Lista projektu zastępuje globalną. |
@@ -78,6 +79,8 @@ Typy/domysły sprawdzono z [config.ts](../../src/core/config.ts), [spec.ts](../.
 | `repos[].base` | git ref · none · s | Ref Git lub task:<ID>, zamrażany do commitu przy starcie. |
 | `repos[].branch` | string · none · s | Gałąź; brak oznacza detached. |
 | `review_of` | task ID or list · none · s | ID/lista recenzowanych zadań; inny agent/model, wspólny provider ostrzega. |
+| `review.mode` | `readonly-on-author` · własne worktree · s | Korzysta z worktree zatrzymanego lokalnego autora. Osobny raport i dowody są pod `cache`. Wymaga jednego `review_of`. |
+| `merge_base_check` | `warn`, `block`, `candidate` · brak · s | Przed startem sprawdza lokalne `main`/`master`. `warn` zapisuje ostrzeżenie. `block` czeka na aktualizację. `candidate` używa osobnej gałęzi `review/<TASK>` i blokuje start przy konflikcie. |
 | `keep_cache` | boolean · `false` · s | Zachowaj cały cache zadania podczas gc. Usuwanie cache jest domyślnie wyłączone; include_cache: true / --include-cache wymaga jawnej zgody właściciela. Ścieżki persist/artifacts/refs w raporcie także chronią dane. |
 | `remote_control` | boolean · `false` · s | Tylko Claude; wymaga właściwego loginu i ręcznej zgody. |
 | `pin` | boolean · `false` · s | Zabroń translacji dostawcy i move. |
@@ -275,6 +278,7 @@ Zaznaczenie pokrywa całą szerokość panelu listy, łącznie z przerwami międ
 | `disk.measurement_timeout_s` | `600` | Deadline pomiaru; błąd zachowuje poprzednią wartość. |
 | `git` | mapping | Limity czasu startu. |
 | `git.timeout_s` | `600` | Timeout worktree add i każdego setup. |
+| `gc.after_integration` | `propose` | `propose` tworzy plan GC z identyfikatorem żądania po przesunięciu lokalnego `main`/`master` i przekazuje wiadomość WALL każdemu czatowi będącemu właścicielem zadań. `off` wyłącza propozycje. |
 | `mcp.client` | — | Opcjonalny wspólny sufiks kursora; domyślnie sesje niezależne. |
 | `mcp.max_response_kb` | `8` | Budżet KiB; kontynuacje przez response_page. |
 

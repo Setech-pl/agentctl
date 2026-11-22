@@ -9,13 +9,16 @@ export function summarizeSpecs(specs: ResolvedSpec[], extra: string[] = []): str
     const primary = spec.repos[0];
     lines.push(`${spec.task}  ${spec.agent}/${spec.model}/${spec.effort}${spec.switchedBy ? ` (ordered ${spec.requested.agent} ${spec.requested.model}/${spec.requested.effort})` : ''}`);
     if (spec.owner) lines.push(`  owner:    ${spec.owner}`);
-    for (const repo of spec.repos) {
+    if (spec.reviewMode) lines.push(`  worktree: borrow from ${spec.reviewOf} (readonly-on-author)`);
+    for (const repo of spec.reviewMode ? [] : spec.repos) {
       lines.push(`  worktree: ${repo.worktree}${repo === primary ? '' : '  (extra repo)'}`);
       lines.push(`  branch:   ${repo.branch ?? '(none, detached HEAD)'}${repo.base ? `  from ${repo.base}${repo.baseTask ? ` (${repo.baseTask})` : ''}` : ''}`);
     }
     if (spec.review) lines.push(`  review:   auto -> ${spec.task}-REV after the confirmed author report; another provider, else another configured model; rerun=${Boolean(spec.review.rerun)}`);
+    if (spec.mergeBaseCheck) lines.push(`  base check: ${spec.mergeBaseCheck} against local main/master`);
     const withSetup = spec.repos.filter((r) => (r.setup?.length ?? 0) > 0);
     lines.push(`  setup:    ${withSetup.length === 0 ? '-' : withSetup.length === 1 && spec.repos.length === 1 ? withSetup[0]!.setup!.join(' && ') : withSetup.map((r) => `${path.basename(r.path)} ${r.setup!.length}/${r.setup!.length} (${r.setup!.join(' && ')})`).join(', ')}`);
+    if (spec.setupFromTask) lines.push(`  dependencies: try a copy-on-write clone from ${spec.setupFromTask}`);
     lines.push(`  links:    ${spec.links.length ? spec.links.map((l) => `${spec.repos[0] ? path.join(spec.repos[0].worktree, l.from) : l.from} -> ${l.to}`).join(', ') : '-'}`);
     lines.push(...(spec.linkWarnings ?? []).map(w => `  WARNING: ${w}`));
     lines.push(...(spec.warnings ?? []).map(w => `  WARNING: ${w}`));

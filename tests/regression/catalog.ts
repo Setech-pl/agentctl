@@ -26,6 +26,10 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'FLOW-GC', fixedIn: '0.26.0', symptom: 'Integration left closed worktrees for chats to find and scope manually before GC.', scenarios: [s('disk0248.test.ts', '^FLOW-GC:')] },
+  { id: 'FLOW-FRESHNESS', fixedIn: '0.26.0', symptom: 'Reviews could start against outdated integration bases without a warning or candidate.', scenarios: [s('disk0248.test.ts', '^FLOW-FRESHNESS:')] },
+  { id: 'FLOW-READONLY', fixedIn: '0.26.0', symptom: 'A review could not use the stopped author checkout with isolated evidence and Git hooks.', scenarios: [s('disk0248.test.ts', '^FLOW-READONLY:')] },
+  { id: 'FLOW-SETUP', fixedIn: '0.26.0', symptom: 'A review had to reinstall dependencies even when its task already had a compatible installation.', scenarios: [s('disk0248.test.ts', '^FLOW-SETUP:')] },
   { id: 'FLOW-CLOSE', fixedIn: '0.26.0', symptom: 'Closing a task whose tmux window had disappeared gave an ambiguous or misleading result.', scenarios: [s('mcp.test.ts', '^FLOW-CLOSE:')] },
   { id: 'FIELD0253-BACKGROUND', fixedIn: '0.25.3', symptom: 'An idle Codex composer with background terminals held queued follow-ups indefinitely.', scenarios: [s('field0253-codex-background.test.ts', '^FIELD0253-BACKGROUND:')] },
   { id: 'FIELD0253-ADMISSION', fixedIn: '0.25.3', symptom: 'Queue validation and admission stopped when the full status sweep exceeded the watchdog deadline.', scenarios: [s('field0253-watch-queue.test.ts', '^FIELD0253-ADMISSION:')] },

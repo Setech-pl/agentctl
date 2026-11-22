@@ -102,8 +102,9 @@ export async function nodeModulesEvent(ctx: Context, task: string, repo: Resolve
   await recordJournal(ctx, { kind: 'node-modules', task, text, nodeModules: { repo: name, result, bytes } });
 }
 
-async function copy(ctx: Context, from: string, to: string): Promise<boolean> {
-  const args = process.platform === 'darwin' ? ['-c', '-R', '-P'] : ['--reflink=auto', '-R', '-P'];
+async function copy(ctx: Context, from: string, to: string, strict = false): Promise<boolean> {
+  const args = process.platform === 'darwin' ? ['-c', '-R', '-P'] : [strict ? '--reflink=always' : '--reflink=auto', '-R', '-P'];
+  if (strict) args.push('-x');
   const result = await ctx.runner.exec('cp', [...args, from, to], { async: true, timeoutMs: ctx.config.git.timeoutS * 1000 });
   return result.code === 0 && dir(to);
 }
@@ -130,9 +131,35 @@ function npmLockfile(worktree: string): [string, string] | undefined {
   return undefined;
 }
 
+/** macOS cp -c may fall back to a byte copy on filesystems without clones. Only use it on APFS. */
+async function apfsDevice(ctx: Context, device: number): Promise<boolean> {
+  const result = await ctx.runner.exec('/sbin/mount', [], { readOnly: true });
+  return result.code === 0 && result.stdout.split('\n').some(line => {
+    const mount = /^.+ on (.+) \(apfs(?:,|\))/.exec(line)?.[1];
+    return mount && fs.statSync(mount, { throwIfNoEntry: false })?.dev === device;
+  });
+}
+
+async function safeDependencyTree(root: string): Promise<boolean> {
+  const pending = [root];
+  while (pending.length) {
+    const dir = pending.pop()!;
+    for (const entry of await fs.promises.readdir(dir, { withFileTypes: true })) {
+      const file = path.join(dir, entry.name);
+      if (entry.isDirectory()) pending.push(file);
+      else if (entry.isSymbolicLink()) {
+        const link = await fs.promises.readlink(file);
+        if (path.isAbsolute(link) || !insidePath(root, path.resolve(dir, link)) || !insidePath(root, await fs.promises.realpath(file))) return false;
+      } else if (!entry.isFile()) return false;
+    }
+  }
+  return true;
+}
+
 /** Clone only file extents. A filesystem without reflinks or a link outside the dependency tree falls back to setup. */
 export async function cloneTaskNodeModules(ctx: Context, task: string, repo: ResolvedRepo, command: string, fromTask: string, prepared?: ResolvedRepo[]): Promise<boolean> {
   if (ctx.runner.dryRun || !npmCi.test(command)) return false;
+  if (process.platform !== 'darwin' && process.platform !== 'linux') return false;
   try {
     const author = findRecordAnywhere(ctx.config, fromTask);
     if (author?.host) return false;
@@ -140,26 +167,18 @@ export async function cloneTaskNodeModules(ctx: Context, task: string, repo: Res
     const source = (prepared ?? author?.repos)?.find(r => fs.existsSync(r.path) && fs.realpathSync(r.path) === origin);
     if (!source || !dir(source.worktree)) return false;
     const modules = path.join(fs.realpathSync(source.worktree), 'node_modules');
-    if (!dir(modules) || fs.statSync(modules).dev !== fs.statSync(repo.worktree).dev) return false;
+    if (!dir(modules)) return false;
+    const device = fs.statSync(modules).dev;
+    if (device !== fs.statSync(repo.worktree).dev) return false;
     const lock = npmLockfile(repo.worktree);
     const matches = () => {
       const current = npmLockfile(source.worktree);
       return current?.[0] === lock?.[0] && current?.[1] === lock?.[1];
     };
     if (!lock || !matches()) return false;
+    if (process.platform === 'darwin' && !await apfsDevice(ctx, device)) return false;
     return await installClone(ctx, task, repo, async staged => {
-      await fs.promises.cp(modules, staged, {
-        recursive: true, verbatimSymlinks: true, mode: fs.constants.COPYFILE_FICLONE_FORCE,
-        async filter(entry) {
-          const stat = await fs.promises.lstat(entry);
-          if (stat.isSymbolicLink()) {
-            const link = await fs.promises.readlink(entry);
-            if (path.isAbsolute(link) || !insidePath(modules, path.resolve(path.dirname(entry), link)) || !insidePath(modules, await fs.promises.realpath(entry))) throw new Error('dependency link leaves node_modules');
-          } else if (!stat.isDirectory() && !stat.isFile()) throw new Error('unsupported dependency file');
-          return true;
-        },
-      });
-      return matches();
+      return await copy(ctx, modules, staged, true) && await safeDependencyTree(fs.realpathSync(staged)) && matches();
     });
   } catch (error) {
     if (error instanceof WorktreeVolumeError) throw error;

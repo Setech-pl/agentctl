@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { it, type TestContext } from 'node:test';
@@ -28,7 +29,7 @@ function git(root: string, ...args: string[]): string {
   return execFileSync('git', ['-C', root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
 
-function world(name: string, yaml: (root: string) => string = () => '') {
+function world(name: string, yaml: (root: string) => string = () => '', payload?: Buffer) {
   const root = scratch.sub(name), repo = scratch.sub(`${name}/repo`), trash = scratch.sub(`${name}/fixture-trash`);
   git(repo, 'init', '-b', 'main');
   fs.writeFileSync(path.join(repo, '.gitignore'), 'node_modules/\n.cache/\ndist*/\nprofile/\n');
@@ -48,12 +49,14 @@ function world(name: string, yaml: (root: string) => string = () => '') {
     override async exec(cmd: string, args: string[], opts: ExecOptions = {}) {
       if (cmd === 'git') return interceptGit?.(args) ?? real.exec(cmd, args, opts);
       if (cmd === 'chmod') return real.exec(cmd, args, opts);
+      if (cmd === '/sbin/mount' || cmd === 'cp' && args.includes('-x')) return real.exec(cmd, args, opts);
       if (cmd === 'sh' && args.at(-1)?.startsWith('npm ci')) {
         const worktree = opts.cwd!;
         installs.push(worktree);
         const nm = path.join(worktree, 'node_modules');
         fs.mkdirSync(path.join(nm, '.bin'), { recursive: true });
         fs.writeFileSync(path.join(nm, 'dependency'), 'original');
+        if (payload) fs.writeFileSync(path.join(nm, 'payload'), payload);
         if (!fs.existsSync(path.join(nm, '.bin/tool'))) fs.symlinkSync('../dependency', path.join(nm, '.bin/tool'));
         return { code: 0, stdout: 'fixture install\n', stderr: '' };
       }
@@ -258,7 +261,7 @@ it('FLOW-GC: watch proposes one owner-scoped plan for a fast-forward and confirm
   for (const kept of [cancelled, dirty, untracked, linked, pinned, unmerged, live]) assert.ok(fs.existsSync(kept), kept);
 });
 
-it('FLOW-GC: the off policy leaves forward movements alone', async () => {
+it('FLOW-GC: off skips movements and propose detects a merge commit on master', async () => {
   const w = world('integration-gc-off', () => 'gc: {after_integration: off}\n');
   git(w.repo, 'branch', '-m', 'master');
   const worktree = path.join(w.root, 'author');
@@ -271,20 +274,44 @@ it('FLOW-GC: the off policy leaves forward movements alone', async () => {
   await watchTick(w.ctx, new WatchMemory(), w.notifier);
   assert.deepEqual(readMcpRequests(w.config), []);
   assert.ok(fs.existsSync(worktree));
+  w.ctx.setConfig({ ...w.config, gc: { afterIntegration: 'propose' } });
+  await watchTick(w.ctx, new WatchMemory(), w.notifier);
+  assert.deepEqual(readMcpRequests(w.config), [], 're-enabling establishes a new baseline');
+  git(worktree, 'commit', '--allow-empty', '-m', 'next feature');
+  git(w.repo, 'commit', '--allow-empty', '-m', 'next master');
+  git(w.repo, 'merge', '--no-ff', 'feature');
+  await watchTick(w.ctx, new WatchMemory(), w.notifier);
+  assert.deepEqual(readMcpRequests(w.config).map(request => request.label), ['repo master']);
+  assert.ok(fs.existsSync(worktree));
 });
 
-it('FLOW-SETUP: task clones skip only compatible npm ci installs and keep source writes isolated', async () => {
-  const w = world('from-task');
+it('FLOW-SETUP: task clones skip only compatible npm ci installs and keep source writes isolated', async t => {
+  const payloadBytes = Number(process.env.AGENTCTL_FLOW_BENCHMARK_BYTES ?? 0);
+  const w = world('from-task', () => 'mcp: {allow: [new]}\nsetup: [npm ci]\n', payloadBytes ? randomBytes(payloadBytes) : undefined);
   const a = w.spec('AUTHOR', true, 'setup: [npm ci]\n').spec;
   await newTasks(w.ctx, [a], { noAgent: true });
   seedTask(w.config, a.task, { repos: a.repos, closed: true });
   const b = w.spec('REVIEW', true, 'setup: {link-from: AUTHOR, commands: [npm ci --no-audit, echo post-setup]}\n').spec;
   assert.equal(b.setupFromTask, 'AUTHOR');
+  const newTool = MCP_TOOLS.find(tool => tool.name === 'new')!;
+  const deps = { context: () => w.ctx, notify: async () => {} };
+  const submitted = (setup: string) => `---\ntask: MCP-REVIEW\nagent: claude\nsetup: ${setup}\nrepos: [{path: ${w.repo}, worktree: ${w.root}/mcp-review}]\n---\nReview.`;
+  assert.match((await newTool.run(deps, { spec: submitted('{from_task: AUTHOR}') })).text, /copy-on-write clone from AUTHOR/);
+  assert.match((await newTool.run(deps, { spec: submitted('{from_task: AUTHOR, commands: [npm ci]}') })).text, /setup.*not accepted from the chat/);
   const dependency = (spec: typeof a) => path.join(spec.repos[0]!.worktree, 'node_modules/dependency');
   const probe = path.join(w.root, 'reflink-probe');
   let reflink = true;
-  try { fs.copyFileSync(dependency(a), probe, fs.constants.COPYFILE_FICLONE_FORCE); }
-  catch { reflink = false; }
+  if (process.platform === 'darwin') {
+    const device = fs.statSync(w.root).dev;
+    const mounts = execFileSync('/sbin/mount', { encoding: 'utf8' }).split('\n');
+    reflink = mounts.some(line => {
+      const mount = /^.+ on (.+) \(apfs(?:,|\))/.exec(line)?.[1];
+      return mount && fs.statSync(mount, { throwIfNoEntry: false })?.dev === device;
+    });
+  } else {
+    try { execFileSync('cp', ['--reflink=always', dependency(a), probe], { stdio: 'pipe' }); }
+    catch { reflink = false; }
+  }
   await newTasks(w.ctx, [b], { noAgent: true });
   assert.equal(w.installs.length, reflink ? 1 : 2);
   const log = fs.readFileSync(path.join(w.config.stateDir, b.window, 'setup.log'), 'utf8');
@@ -293,6 +320,23 @@ it('FLOW-SETUP: task clones skip only compatible npm ci installs and keep source
   assert.equal(fs.readlinkSync(path.join(b.repos[0]!.worktree, 'node_modules/.bin/tool')), '../dependency');
   fs.writeFileSync(dependency(b), 'review edit');
   assert.equal(fs.readFileSync(dependency(a), 'utf8'), 'original');
+
+  if (payloadBytes && reflink) {
+    const samples: Record<string, number[]> = { install: [], clone: [] };
+    let allocatedBytes = 0;
+    for (let pair = 0; pair < 5; pair++) {
+      for (const mode of pair % 2 ? ['clone', 'install'] : ['install', 'clone']) {
+        const item = w.spec(`BENCH-${mode.toUpperCase()}-${pair}`, true, mode === 'clone' ? 'setup: {from_task: AUTHOR}\n' : 'setup: [npm ci]\n').spec;
+        const installedBefore = w.installs.length;
+        const start = performance.now();
+        await newTasks(w.ctx, [item], { noAgent: true });
+        samples[mode]!.push(performance.now() - start);
+        assert.equal(w.installs.length, installedBefore + Number(mode === 'install'));
+        if (mode === 'install') allocatedBytes = fs.statSync(path.join(item.repos[0]!.worktree, 'node_modules/payload')).blocks * 512;
+      }
+    }
+    t.diagnostic(`FLOW_BENCHMARK ${JSON.stringify({ payloadBytes, allocatedBytes, samples })}`);
+  }
 
   const prior = w.installs.length;
   fs.symlinkSync(path.join(w.root, 'reflink-probe'), path.join(a.repos[0]!.worktree, 'node_modules/escape'));
@@ -306,6 +350,10 @@ it('FLOW-SETUP: task clones skip only compatible npm ci installs and keep source
   const d = w.spec('STALE-LOCK', true, 'setup: {from_task: AUTHOR}\n').spec;
   await newTasks(w.ctx, [d], { noAgent: true });
   assert.equal(w.installs.length, prior + 2);
+  const cloneOnly = w.spec('CLONE-ONLY', true, 'setup: {from_task: AUTHOR}\n').spec;
+  delete cloneOnly.repos[0]!.setup;
+  await newTasks(w.ctx, [cloneOnly], { noAgent: true });
+  assert.equal(w.installs.length, prior + 2, 'a clone request alone does not introduce npm lifecycle scripts');
 });
 
 it('DISK0248-NM: same lockfile installs once, creates independent copies and exposes store bytes and counters', async () => {

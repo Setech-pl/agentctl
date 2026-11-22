@@ -18,6 +18,28 @@ Przy pierwszym zgodnym checkout agentctl uruchamia `npm ci` i zapisuje kopię dl
 
 Po odłączeniu dysku zadanie ma stan `blocked` i przyczynę `volume missing`. Zamontuj dysk i przy działającym `watch` uruchom `agentctl unblock TASK`. Pliki przerwanego checkout zostają do sprawdzenia. Dla punktów montowania poza `/Volumes/<nazwa>` lub `/mnt/<nazwa>` podaj `worktrees.mount`. SSH korzysta z `work_dir` hosta i zgłasza brak obsługi klonowania, sprzątania przy zamknięciu, projektowego katalogu worktree i odzyskiwania blokad Git. SSH sprawdza montowanie `work_dir` w dwóch powyższych układach ścieżek.
 
+## Przeglądy i integracje bez zapełniania dysku
+
+Utrzymuj osobne worktree dla każdego zadania. Każdą próbę `FIX` zacznij od poprzedniej gałęzi, a przeglądowi Codexa nadaj osobne ID. Gdy projekt ma ustawione `worktree_root`, nagłówek specyfikacji przeglądu Neon City może wyglądać tak:
+
+```yaml
+task: NC-42-REVIEW-CX
+agent: codex
+review_of: NC-42
+after: [NC-42]
+setup: {from_task: NC-42}
+merge_base_check: block
+repos: [{path: ~/Projects/neon-city}]
+```
+
+Przy zlecaniu zadań przez MCP podaj `as: "chat:nc"`, żeby przypisać je do czatu. Jeśli klient i backend są w osobnych repozytoriach, wymień je w `repos`. `setup.from_task` (alias `link-from`) dopasowuje je osobno. Zgodny lockfile npm i system plików obsługujący copy-on-write pozwalają sklonować `node_modules` autora i pominąć osobne `npm ci` (także z `--no-audit` i `--no-fund`). Pozostałe kroki setup działają w tej samej kolejności. Przy braku źródła, różnym lockfile, niedostępnym klonie lub symlinku wychodzącym poza `node_modules` działa skonfigurowany setup. Jeśli nie ustawiono polecenia instalacji, opcja próbuje sklonować zależności, a po nieudanej próbie pozostawia instalację zadaniu. `setup.commands: []` wyłącza ten krok. MCP przyjmuje mapowanie zawierające samo źródło.
+
+`merge_base_check: warn` zapisuje ostrzeżenie w `TASK.md` i statusie. `block` czeka w kolejce, aż gałąź autora będzie zawierać lokalne `main` albo `master`. `candidate` używa osobnej lokalnej gałęzi `review/NC-42-REVIEW-CX` i wymaga Git 2.38 lub nowszego. Przy konflikcie kolejka pokazuje listę ścieżek. Rozwiąż konflikt na gałęzi autora, a potem uruchom `agentctl queue retry NC-42-REVIEW-CX`. Po przeglądzie kandydata `agentctl close NC-42-REVIEW-CX --rm-worktree` usuwa jego checkout i zachowuje gałąź oraz raport.
+
+Aby użyć najmniej miejsca, zatrzymaj autora poleceniem `agentctl close NC-42` i wstaw `review: {mode: readonly-on-author}` zamiast `setup.from_task`. Przegląd otwiera się w worktree autora, a dowody trafiają do `$AGENTCTL_REVIEW_EVIDENCE` pod `cache`. Agentctl pomija setup i linki oraz odmawia startu, gdy okno autora nadal istnieje. Hooki Git blokują zwykłe commity i push w procesie recenzenta. Hooki autora pozostają na miejscu, a nadpisanie wygasa wraz z procesem recenzenta. Proces zachowuje swoje uprawnienia do systemu plików, więc może zmienić pliki lub użyć niskopoziomowych poleceń Git. Tryb `candidate` wymaga osobnego worktree.
+
+Gdy `MERGE-TRAIN` jest gotowy, przesuń lokalne `main` albo `master` przez fast-forward. Przy pierwszej obserwacji watch zapamiętuje pozycję gałęzi, a po kolejnych przesunięciach proponuje sprzątanie. Przy domyślnym `gc: {after_integration: propose}` każdy czat będący właścicielem zadań objętych planem dostaje jedną wiadomość WALL. Plan obejmuje czyste, zintegrowane worktree zadań zamkniętych lub anulowanych. Otwarte zadanie, pin lub symlink z innego worktree chronią katalog. Wiadomość podaje szacowane bajty i `request_id`. Wywołaj MCP `gc` z tym ID, sprawdź zakres i po zgodzie właściciela przekaż `confirm: true` z otrzymanym `preview_token`. Watch ponownie sprawdza katalogi przed usunięciem. `gc: {after_integration: off}` wyłącza propozycje.
+
 ## 1. Wymagania i CLI dostawców
 
 ~~~sh

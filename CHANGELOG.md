@@ -26,6 +26,10 @@ All notable changes to this project are documented here. The format follows [Kee
 - SNAP0247 was prepared for 0.23.3. / Poprawka SNAP0247 została przygotowana do wydania 0.23.3.
 - DISK0248 was prepared for 0.24.0. / Zmiany DISK0248 zostały przygotowane do wydania 0.24.0.
 
+## [0.26.0] - 2026-11-22
+
+Review and integration workflow / Przeglądy i integracja. [Release notes (EN)](docs/release-notes/0.26.0.en.md) · [Informacje o wydaniu (PL)](docs/release-notes/0.26.0.pl.md).
+
 ## [0.25.3] - 2026-11-21
 
 - FIELD0253-ENOSPC: Watch retries state and snapshot writes after ENOSPC and records recovery. / Watch ponawia zapis stanu po ENOSPC i odnotowuje wznowienie.

@@ -480,6 +480,50 @@
       "FLOW-CLOSE: closes a task with a vanished window and accepts its exact ID again"
     ]
   },
+  "FLOW-FRESHNESS": {
+    "rev": "v0.25.3",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "FLOW-FRESHNESS: warns, waits for a base update, and reviews a local merge candidate",
+      "FLOW-FRESHNESS: conflicting candidates name paths and can retry without changing the author",
+      "FLOW-FRESHNESS: warns, waits for a base update, and reviews a local merge candidate",
+      "FLOW-FRESHNESS: conflicting candidates name paths and can retry without changing the author"
+    ]
+  },
+  "FLOW-GC": {
+    "rev": "v0.25.3",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "FLOW-GC: watch proposes one owner-scoped plan for a fast-forward and confirm rechecks it",
+      "FLOW-GC: off skips movements and propose detects a merge commit on master",
+      "FLOW-GC: watch proposes one owner-scoped plan for a fast-forward and confirm rechecks it",
+      "FLOW-GC: off skips movements and propose detects a merge commit on master"
+    ]
+  },
+  "FLOW-READONLY": {
+    "rev": "v0.25.3",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "FLOW-READONLY: a stopped author lends its worktree with agent-scoped commit and push hooks",
+      "FLOW-READONLY: a stopped author lends its worktree with agent-scoped commit and push hooks"
+    ]
+  },
+  "FLOW-SETUP": {
+    "rev": "v0.25.3",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "FLOW-SETUP: task clones skip only compatible npm ci installs and keep source writes isolated",
+      "FLOW-SETUP: task clones skip only compatible npm ci installs and keep source writes isolated"
+    ]
+  },
   "G1a": {
     "rev": "v0.22.3",
     "outcome": "FAILS",

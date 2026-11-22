@@ -10,6 +10,10 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| FLOW-GC | Integration left closed worktrees for chats to find and scope manually before GC. | `tests/disk0248.test.ts` (`^FLOW-GC:`) | 0.26.0 | fails on v0.25.3 (2 failing of 2) |
+| FLOW-FRESHNESS | Reviews could start against outdated integration bases without a warning or candidate. | `tests/disk0248.test.ts` (`^FLOW-FRESHNESS:`) | 0.26.0 | fails on v0.25.3 (2 failing of 2) |
+| FLOW-READONLY | A review could not use the stopped author checkout with isolated evidence and Git hooks. | `tests/disk0248.test.ts` (`^FLOW-READONLY:`) | 0.26.0 | fails on v0.25.3 (1 failing of 1) |
+| FLOW-SETUP | A review had to reinstall dependencies even when its task already had a compatible installation. | `tests/disk0248.test.ts` (`^FLOW-SETUP:`) | 0.26.0 | fails on v0.25.3 (1 failing of 1) |
 | FLOW-CLOSE | Closing a task whose tmux window had disappeared gave an ambiguous or misleading result. | `tests/mcp.test.ts` (`^FLOW-CLOSE:`) | 0.26.0 | fails on v0.25.3 (1 failing of 1) |
 | FIELD0253-BACKGROUND | An idle Codex composer with background terminals held queued follow-ups indefinitely. | `tests/field0253-codex-background.test.ts` (`^FIELD0253-BACKGROUND:`) | 0.25.3 | fails on v0.25.2 (2 failing of 2) |
 | FIELD0253-ADMISSION | Queue validation and admission stopped when the full status sweep exceeded the watchdog deadline. | `tests/field0253-watch-queue.test.ts` (`^FIELD0253-ADMISSION:`) | 0.25.3 | fails on v0.25.2 (1 failing of 1) |

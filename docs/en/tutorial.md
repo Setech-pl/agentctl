@@ -18,6 +18,28 @@ On the first compatible checkout agentctl runs `npm ci` and saves a copy keyed b
 
 If the disk is unplugged, the task becomes `blocked` with reason `volume missing`. Remount it and run `agentctl unblock TASK` while `watch` is running. An interrupted checkout keeps its files for inspection. Use `worktrees.mount` for external mount points outside `/Volumes/<name>` or `/mnt/<name>`. SSH uses the host's `work_dir` and reports unsupported store cloning, close cleanup, project root overrides, and interrupted Git lock recovery. The mount check for SSH `work_dir` recognizes the same two mount-point layouts.
 
+## Reviews and integrations without filling the disk
+
+Keep one worktree per implementation task. Branch each `FIX` attempt from its predecessor and give the Codex review a separate task ID. With the project's `worktree_root` configured, a Neon City review spec can use this header:
+
+```yaml
+task: NC-42-REVIEW-CX
+agent: codex
+review_of: NC-42
+after: [NC-42]
+setup: {from_task: NC-42}
+merge_base_check: block
+repos: [{path: ~/Projects/neon-city}]
+```
+
+Name the owner with MCP `as: "chat:nc"` when submitting the tasks. Add each repository to `repos` if the client and backend are separate checkouts. `setup.from_task` (alias `link-from`) matches them individually. A matching npm lockfile and filesystem with copy-on-write support let agentctl clone the author's `node_modules` without rerunning standalone `npm ci` (`--no-audit` and `--no-fund` are supported). Other setup steps still run in order. A missing source, different lockfile, unsupported clone, or dependency symlink outside `node_modules` uses the configured setup. With no install command configured, the source-only mapping attempts the clone and leaves installation to the task if cloning fails. `setup.commands: []` disables that step. MCP accepts the source-only mapping.
+
+Use `merge_base_check: warn` to record a stale-base warning in `TASK.md` and status. With `block`, the queue waits for the author branch to contain local `main` or `master`. `candidate` uses a separate local `review/NC-42-REVIEW-CX` branch and requires Git 2.38 or newer. If Git reports conflicts, the queue lists the paths. Resolve them on the author branch, then run `agentctl queue retry NC-42-REVIEW-CX`. After a candidate review, `agentctl close NC-42-REVIEW-CX --rm-worktree` frees its checkout while keeping the branch and report.
+
+For the smallest footprint, stop the author with `agentctl close NC-42` and use `review: {mode: readonly-on-author}` in place of `setup.from_task`. The review opens in the author's checkout and writes evidence to `$AGENTCTL_REVIEW_EVIDENCE` under `cache`. Agentctl skips setup and links and refuses the start while the author window exists. Git hooks block ordinary commits and pushes in the reviewer process. The author's Git hooks stay in place and the override ends with the reviewer. Filesystem permissions remain those of the agent process, so direct Git plumbing and file edits remain possible. Use the separate checkout for `candidate`.
+
+After `MERGE-TRAIN` is ready, fast-forward the local `main` or `master`. Watch establishes a baseline on its first observation and proposes cleanup on later forward moves. With `gc: {after_integration: propose}` (the default), each affected owning chat gets one WALL info message. The plan covers clean, integrated worktrees of closed or cancelled tasks. An active task, pin or cross-worktree link protects a checkout. The message includes the byte estimate and `request_id`. Call MCP `gc` with that ID, review its scope, then pass `confirm: true` with the returned `preview_token` after the owner approves. Watch revalidates the targets before removing anything. `gc: {after_integration: off}` disables the proposals.
+
 ## 1. Prerequisites and provider CLIs
 
 ~~~sh

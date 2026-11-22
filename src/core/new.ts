@@ -87,18 +87,22 @@ async function runSetup(ctx: Context, spec: ResolvedSpec, prepared: Map<string, 
   const todo = [];
   for (const repo of spec.repos) {
     let commands = repo.setup ?? [];
+    let cloneOnly = false;
     if (repo.nodeModules === 'clone' && spec.host && !runner.dryRun) await nodeModulesEvent(ctx, spec.task, repo, 'unsupported', 0, `SSH host ${spec.host}`);
-    if (!repo.setup && (repo.nodeModules === 'clone' || spec.setupFromTask) && !spec.host && hasNpmLockfile(repo.worktree)) commands = ['npm ci'];
-    if (commands.length) todo.push({ repo, commands });
+    if (!repo.setup && (repo.nodeModules === 'clone' || spec.setupFromTask) && !spec.host && hasNpmLockfile(repo.worktree)) {
+      commands = ['npm ci'];
+      cloneOnly = repo.nodeModules !== 'clone';
+    }
+    if (commands.length) todo.push({ repo, commands, cloneOnly });
   }
   if (todo.length === 0) return;
   const redact = secretRedactor([config, spec.env, process.env, todo.map(item => item.commands)]);
   if (!runner.dryRun) await runner.writeFile(logFile, '');
-  for (const [repoIndex, { repo, commands }] of todo.entries()) {
+  for (const [repoIndex, { repo, commands, cloneOnly }] of todo.entries()) {
     const name = path.basename(repo.path);
     for (const [i, command] of commands.entries()) {
       if (!spec.host && !runner.dryRun) assertWorktreeVolumes([repo], spec.task);
-      const label = redact(command);
+      const label = cloneOnly ? `clone node_modules from task ${spec.setupFromTask}` : redact(command);
       ctx.info(`${spec.task}: setup ${name} ${i + 1}/${commands.length}: ${label}`);
       await track?.({ phase: 'setup', repo: name, repoIndex: repoIndex + 1, repoCount: todo.length, command: label, commandIndex: i + 1, commandCount: commands.length, log: logFile });
       const setup = { repo: name, repoIndex: repoIndex + 1, repoCount: todo.length, command: label, commandIndex: i + 1, commandCount: commands.length, log: logFile };
@@ -119,13 +123,19 @@ async function runSetup(ctx: Context, spec: ResolvedSpec, prepared: Map<string, 
       };
       const from = spec.setupFromTask;
       const fromTask = from && !spec.host && await cloneTaskNodeModules(ctx, spec.task, repo, command, from, prepared.get(from));
-      const hit = fromTask || (spec.host ? await install() : await setupNodeModules(ctx, spec.task, repo, command, install));
+      const hit = fromTask || (!cloneOnly && (spec.host ? await install() : await setupNodeModules(ctx, spec.task, repo, command, install)));
       if (hit) {
         const source = fromTask ? `task ${from}` : 'store';
         ctx.info(`${spec.task}: ${name}: node_modules clone from ${source}`);
         await runner.appendFile(logFile, `[${name}] $ ${label}\n[node_modules clone from ${source}]\n\n`);
+      } else if (cloneOnly && !runner.dryRun) {
+        ctx.info(`${spec.task}: ${name}: dependency clone unavailable; no install command configured`);
+        await runner.appendFile(logFile, `[${name}] ${label}\n[node_modules clone unavailable; no install command configured]\n\n`);
       }
-      if (track) await recordJournal(ctx, { kind: 'setup-finished', task: spec.task, ...(spec.owner ? {owner: spec.owner} : {}), setup: { ...setup, exitCode: 0 }, text: `${spec.task}: setup zakończony w ${name} (${hit ? 'node_modules clone' : 'exit 0'}): ${label}; log: ${logFile}` });
+      if (track) {
+        const outcome = hit ? 'node_modules clone' : cloneOnly ? 'clone unavailable' : 'exit 0';
+        await recordJournal(ctx, { kind: 'setup-finished', task: spec.task, ...(spec.owner ? {owner: spec.owner} : {}), setup: { ...setup, exitCode: 0 }, text: `${spec.task}: setup zakończony w ${name} (${outcome}): ${label}; log: ${logFile}` });
+      }
     }
   }
   ctx.info(`${spec.task}: setup done (${todo.map(({ repo }) => path.basename(repo.path)).join(', ')}), output in ${logFile}`);
