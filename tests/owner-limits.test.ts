@@ -44,6 +44,7 @@ mcp: {allow: [set_limits, wall]}
   const retry = await tool('set_limits').run(f.deps, { ...args, confirm: false });
   assert.match(retry.text, new RegExp(request));
   assert.equal(f.notifications.length, 1);
+  assert.match(f.notifications[0]!, /chat:agentctl[\s\S]*claude 7 → 13[\s\S]*More windows for the release/);
   assert.equal(f.post('decision-request').length, 1);
   const wall = f.post('decision-request')[0]!;
   assert.equal(wall.to, OWNER_IDENTITY.id);

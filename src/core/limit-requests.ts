@@ -117,7 +117,10 @@ export async function requestLimitChange(ctx: Context, change: RequestedLimits, 
     await syncRequest(fresh, requests, request);
     return { request, created };
   });
-  if (created && request) void notify(`Zmiana limitów: ${request.by} prosi o decyzję (${request.id}). Otwórz L na tablicy.`).catch(() => undefined);
+  if (created && request) {
+    const change = request.difference.replaceAll('\n', ' · ');
+    void notify(`Zmiana limitów (${request.id}) · ${request.by}\n${change}\nPowód: ${request.reason}\nDecyzja: L na tablicy.`).catch(() => undefined);
+  }
   return request;
 }
 
