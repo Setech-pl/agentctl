@@ -377,6 +377,16 @@
       "FIELD0230-SOCKET: a 66-byte task cache keeps isolated tmux within the socket limit"
     ]
   },
+  "FIELD0253-ADMISSION": {
+    "rev": "v0.25.2",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "FIELD0253-ADMISSION: a late 1200-task status sweep cannot stop accepted or waiting starts",
+      "FIELD0253-ADMISSION: a late 1200-task status sweep cannot stop accepted or waiting starts"
+    ]
+  },
   "FIELD0253-ATTENTION": {
     "rev": "v0.25.2",
     "outcome": "FAILS",

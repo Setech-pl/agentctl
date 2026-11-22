@@ -26,6 +26,7 @@ import path from 'node:path';
 import { ConfigStore, configStatePath, noteConfigState } from './config-store.ts';
 import type { ConfigRefresh } from './config-store.ts';
 import { loadGlobalConfig } from './config.ts';
+import type { GlobalConfig } from './config.ts';
 import { announceLimitConfigChange, holdDiffText, limitEditLock } from './limits.ts';
 import { findResumable, resumeText } from './resume.ts';
 import { recordJournal, recordJournalOnce } from './journal.ts';
@@ -79,6 +80,7 @@ export class WatchMemory {
   readonly tasks = new Map<string, Seen>();
   started = false;
   readonly steps = new WatchSteps();
+  statusSweep?: { config: GlobalConfig; rows: StatusRow[] } | undefined;
   lastTickAt?: number;
   /** Windows that got a state icon from this watcher (plain name -> tmux window ID, if known): they get their plain names back. */
   readonly decorated = new Map<string, string>();
@@ -249,6 +251,8 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   };
   await step('state write recovery', signal => recoverTaskWrites(ctx, memory, signal));
   await step('accepted MCP writes', () => applyAcceptedWrites(ctx, notifier, { ...options, log: startLog }));
+  // Admission observes slots and named dependencies. Full status and report processing are optional for it.
+  await step('queue', () => queueTick(ctx, memory.queue, notifier, { self: options.self, signal: options.signal, log: startLog }));
   await step('WALL maintenance', () => maintainWall(ctx));
   const tickAt = ctx.runner.now();
   if (memory.lastTickAt === undefined) {
@@ -266,7 +270,17 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   const gap = memory.lastTickAt === undefined ? 0 : tickAt - memory.lastTickAt;
   memory.lastTickAt = tickAt;
   // A closed or cancelled task is off the list: no transitions, no notifications (closing a task with no report is not a vanished window).
-  const observed = await step('status collection', () => collectStatus(ctx, { progress: false, archived: true }));
+  const observed = await step('status collection', async () => {
+    const config = ctx.config;
+    if (memory.statusSweep?.config === config) return memory.statusSweep.rows;
+    // A slow sweep may finish between ticks. Keep its result for the next tick instead of
+    // discarding it and repeatedly starting the same work. WatchSteps keeps one sweep in flight.
+    const rows = await collectStatus(ctx, { progress: false, archived: true });
+    if (ctx.config !== config || options.signal?.aborted) throw new Error('watch configuration or run changed during status collection');
+    memory.statusSweep = { config, rows };
+    return rows;
+  });
+  if (observed) memory.statusSweep = undefined;
   const processed = observed && await step('task delivery and reports', async (signal) => {
     let allRows = observed;
     if (await autoClosePulled(ctx, allRows)) allRows = await collectStatus(ctx, { progress: false, archived: true });
@@ -312,7 +326,6 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   await step('reviews', () => reviewTick(ctx));
   await step('consultations', () => consultTick(ctx));
   if (allRows && processed) {
-    await step('queue', () => queueTick(ctx, memory.queue, notifier, { self: options.self, signal: options.signal, rows: allRows, log: startLog }));
     await step('blocked queue', () => announceBlocked(ctx, notifier, allRows, { self: options.self, log: startLog }));
     await step('cohorts', () => cohortTick(ctx, notifier, allRows, startLog));
   }

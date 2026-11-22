@@ -2,7 +2,7 @@ import { providerHolds } from '../core/provider-hold.ts';
 import type { RefreshClock } from './refresh-scheduler.ts';
 import { RefreshScheduler } from './refresh-scheduler.ts';
 import { collectDisk, diskLine, refreshDiskFreeSpace } from '../core/disk.ts';
-import { watchSnapshotTime, watchSnapshotWarning } from '../core/watch-snapshot.ts';
+import { watchSnapshotTime, watchSnapshotWarning, watchStepWarning } from '../core/watch-snapshot.ts';
 import fs from 'node:fs';
 import React, { useEffect, useRef, useState } from 'react';
 import { Box, Text, render, useApp, useInput, useWindowSize } from 'ink';
@@ -210,8 +210,8 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
       if (diagnosticTimer !== undefined) timers.clear(diagnosticTimer);
       diagnosticTimer = undefined;
       const now = ctx.runner.now(), at = watchSnapshotTime(ctx.config);
-      const warning = at === undefined ? undefined : watchSnapshotWarning(at, now);
-      const label = at === undefined ? '' : warning ?? `Stan watch sprzed ${Math.max(0, Math.floor((now - at) / 1000))} s`;
+      const warning = watchStepWarning(ctx.config) ?? (at === undefined ? undefined : watchSnapshotWarning(at, now));
+      const label = warning ?? (at === undefined ? '' : `Stan watch sprzed ${Math.max(0, Math.floor((now - at) / 1000))} s`);
       if (label !== diagnostics) {
         diagnostics = label;
         setWatchAge(label ? {text: label, stale: Boolean(warning)} : null);
@@ -224,7 +224,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
           if (!stopped && refreshAt === lastBoardRefresh) update(s => ({...s, disk: value}));
         }).catch(() => undefined);
       }
-      if (at !== undefined) diagnosticTimer = timers.set(updateDiagnostics, 15_000);
+      if (at !== undefined || warning) diagnosticTimer = timers.set(updateDiagnostics, 15_000);
     };
     updateDiagnostics();
     const scheduler = new RefreshScheduler(async () => {
@@ -249,7 +249,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
     let watcher: fs.FSWatcher | undefined;
     try {
       watcher = fs.watch(ctx.config.stateDir, { recursive: true }, (_type, name) => {
-        if (name === 'mcp-state-snapshot.json' && diagnosticTimer === undefined) updateDiagnostics();
+        if (diagnosticTimer === undefined && (name === 'mcp-state-snapshot.json' || name === 'watch-heartbeat.json')) updateDiagnostics();
         if (name && /event\.json$/.test(name)) gate.ping(props.runtime?.now() ?? Date.now());
       });
       watcher.on('error', () => watcher?.close());

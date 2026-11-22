@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'FIELD0253-ADMISSION', fixedIn: '0.25.3', symptom: 'Queue validation and admission stopped when the full status sweep exceeded the watchdog deadline.', scenarios: [s('field0253-watch-queue.test.ts', '^FIELD0253-ADMISSION:')] },
   { id: 'FIELD0253-ATTENTION', fixedIn: '0.25.3', symptom: 'Long-wait WALL decision requests stayed open after the task left the waiting state.', scenarios: [s('field0253-attention.test.ts', '^FIELD0253-ATTENTION:')] },
   { id: 'FIELD0253-LIMITS', fixedIn: '0.25.3', symptom: 'Limits and quota WALL messages omitted their source and could miss intermediate revisions.', scenarios: [s('field0253-limits.test.ts', '^FIELD0253-LIMITS:')] },
   { id: 'FIELD0253-DISK', fixedIn: '0.25.3', symptom: 'A stale worktree-size sample made the board show disk warn despite healthy free space.', scenarios: [s('field0253-disk.test.ts', '^FIELD0253-DISK:')] },

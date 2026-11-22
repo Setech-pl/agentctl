@@ -36,6 +36,8 @@ export interface PlanOptions {
   ignoreLimits?: boolean;
   /** The queue starts a task whose `after` it has checked itself. */
   skipAfter?: boolean;
+  /** Fresh rows for the dependencies of this batch, when the caller has already read them. */
+  afterRows?: StatusRow[];
   /** Authors of reviewed tasks that are not started yet (waiting in the queue): task -> agent and model. */
   knownAuthors?: ReadonlyMap<string, AgentModel>;
   /**
@@ -95,7 +97,7 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
   const live = ctx.runner.dryRun || opts.previewOnly ? [] : await liveWindows(ctx, undefined, opts.queueReservation);
   // `after` belongs to the queue: `new` starts a task now, so what it waits for must be done already.
   if (!opts.previewOnly && !opts.skipAfter && !ctx.runner.dryRun && specs.some((s) => s.after.length > 0)) {
-    const rows = await collectStatus(ctx, { progress: false, cachedOnly: true, archived: true });
+    const rows = opts.afterRows ?? await collectStatus(ctx, { progress: false, cachedOnly: true, archived: true });
     for (const spec of specs) {
       const unmet = unmetAfter(spec.after, rows, spec.afterVerdicts);
       const gone = cancelledTasks(rows);

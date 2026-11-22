@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- FIELD0253-ADMISSION: Watch admits queued tasks during slow status sweeps and recovers the completed snapshot. / Watch uruchamia zadania z kolejki podczas wolnego odczytu stanu i wykorzystuje ukończony snapshot.
+
 - FIELD0253 was prepared for 0.25.3. / Poprawki FIELD0253 przygotowano do wydania 0.25.3.
 
 - ROWSEL0252 was prepared for 0.25.2. / Poprawkę ROWSEL0252 przygotowano do wydania 0.25.2.

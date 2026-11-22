@@ -531,7 +531,8 @@ export async function validateAccepted(ctx: Context, notifier: Notifier, opts: Q
         if (first.direct) {
           const knownAuthors = new Map(others.filter((e) => e.direct).map((e) => [e.task, { agent: e.agent, model: e.model }]));
           // A confirmed start waits for a free window of its provider like every direct start; a full provider is not a reason to fail it.
-          const specs = await planBatch(ctx, raws.map((raw) => resolveSpec(raw, { config: ctx.config })), { ...agent, noSwitch: true, reuse: Boolean(first.reuse), knownAuthors, ignoreLimits: true });
+          const resolved = raws.map((raw) => resolveSpec(raw, { config: ctx.config }));
+          const specs = await planBatch(ctx, resolved, { ...agent, noSwitch: true, reuse: Boolean(first.reuse), knownAuthors, ignoreLimits: true, afterRows: await queueDependencyRows(ctx, resolved) });
           for (const spec of specs) { const warnings = reportPathWarnings(ctx.config, spec); if (warnings.length) throw new AgentctlError(`${spec.task}: ${warnings.join('; ')}`); }
           items = specs.map((spec, i) => ({ raw: raws[i] as RawSpec, spec }));
         } else {
@@ -1115,7 +1116,7 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   entries = readQueue(config);
   if (paused && !entries.some(e => e.direct)) return [];
   const live = await liveWindows(ctx);
-  const rows = opts.rows ?? (await collectStatus(ctx, { progress: false, archived: true }));
+  const rows = opts.rows ?? await queueDependencyRows(ctx, entries);
   const used: Record<AgentName, number> = perProvider(activeProviders(config), () => 0);
   for (const w of live) if (w.agent && w.counted !== false) used[w.agent]++;
   // A start in progress whose window is not up yet already holds its place.
@@ -1277,7 +1278,7 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
       try {
         // The last read before the claim is the status: whatever the checks below took time for, the decision is on the state as it is now.
         const busy = await authorCheckoutBusy(ctx, fresh.autoReview!.author);
-        const rows = await collectStatus(ctx, { progress: false, archived: true });
+        const rows = await queueDependencyRows(ctx, [fresh]);
         const terminal = authorTerminal(config, fresh.autoReview, rows, ctx.runner.now());
         if (terminal) { await failEntry(ctx, fresh, terminal.text, notifier, opts, true); return false; }
         if (unmetAfter(effectiveAfter(config, fresh, rows, ctx.runner.now()), rows, fresh.afterVerdicts).length > 0) return false;

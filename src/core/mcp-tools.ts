@@ -1,7 +1,7 @@
 import { chatOwner, quotaWarnings } from './chat-quotas.ts';
 import { planRemoteGc } from './host-gc.ts';
 import { refreshDiskFreeSpace, taskDiskStartHold, worktreeCostEstimates } from './disk.ts';
-import { watchSnapshotPath, watchSnapshotTime, watchSnapshotWarning } from './watch-snapshot.ts';
+import { watchSnapshotPath, watchSnapshotTime, watchSnapshotWarning, watchStepWarning } from './watch-snapshot.ts';
 import { peakLines, peakHold } from './peak.ts';
 import { pulledOpen, pulledSummary, pulledCohortTasks, checkPulledClose } from './pulled.ts';
 import { readProviderHoldState, providerHoldText, providerHoldLines } from './provider-hold.ts';
@@ -2482,7 +2482,8 @@ async function snapshotRead(deps: McpDeps, ctx: Context, name: string, args: Rec
     const explicit = args.capacity === true || args.detail === true;
     const disk = snap.disk ?? snap.capacity?.disk;
     if ((warning || snap.degraded) && ['status', 'capacity', 'doctor'].includes(name)) {
-      const note = [`${ageLine(snap.at, now)}; Watch snapshot age: ${(age / 1000).toFixed(1)} s.`, warning, snap.degraded && `Watch: pominięty etap – ${snap.degraded}.`].filter(Boolean).join(' ');
+      const stepWarning = watchStepWarning(ctx.config) ?? (snap.degraded && `Watch: pominięty etap – ${snap.degraded}.`);
+      const note = [`${ageLine(snap.at, now)}; Watch snapshot age: ${(age / 1000).toFixed(1)} s.`, warning, stepWarning].filter(Boolean).join(' ');
       if (name === 'doctor') return ok(JSON.stringify([...snap.doctor ?? [], {name: 'watch snapshot', status: 'warn', detail: note, snapshot_age_s: age / 1000}], null, 2));
       const freshDisk = disk ? await refreshDiskFreeSpace(ctx, disk) : await collectDisk(ctx);
       const capacity = snap.capacity && capacitySnapshot(snap.capacity);
@@ -2523,7 +2524,12 @@ async function snapshotRead(deps: McpDeps, ctx: Context, name: string, args: Rec
       data = queue; text = queue.map((q: {task: string; agent: string; model: string; effort: string; owner?: string; startCondition: string}) => `${q.task}${q.owner ? ` (${q.owner})` : ''} ${q.agent}/${q.model}/${q.effort}: ${q.startCondition}`).join('\n') || 'The queue is empty.';
     } else if (name === 'capacity') { data = snap.capacity; text = [diskLine(snap.capacity.disk), ...snapshotLines(capacitySnapshot(snap.capacity))].join('\n'); }
     else if (name === 'limits') { data = snap.limits; text = compactLimits(snap.limits); }
-    else { data = snap[name === 'config_show' ? 'config' : 'doctor']; text = JSON.stringify(data, null, 2); }
+    else {
+      data = snap[name === 'config_show' ? 'config' : 'doctor'];
+      const steps = name === 'doctor' && watchStepWarning(ctx.config);
+      if (steps) data = [...snap.doctor, {name: 'watch steps', status: 'warn', detail: steps}];
+      text = JSON.stringify(data, null, 2);
+    }
     if (json || ['config_show', 'doctor'].includes(name)) return ok(JSON.stringify(Array.isArray(data) ? data.map(item => ({...item, snapshot_age_s: age / 1000})) : { snapshot_age_s: age / 1000, snapshot_age: ageLine(snap.at, ctx.runner.now()), ...(data as object) }, null, 2));
     return ok(`${note}\n${text}`);
   } catch { return undefined; }

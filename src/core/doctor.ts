@@ -1,5 +1,5 @@
 import { quotaWarnings } from './chat-quotas.ts';
-import { watchSnapshotTime, watchSnapshotWarning } from './watch-snapshot.ts';
+import { watchSnapshotTime, watchSnapshotWarning, watchStepWarning } from './watch-snapshot.ts';
 import { performance } from 'node:perf_hooks';
 import { cachedRequest } from './response-budget.ts';
 import { socketRunner } from './tmux-socket.ts';
@@ -245,9 +245,11 @@ export async function runDoctor(
   if (config) {
     const now = runner.now();
     const at = watchSnapshotTime(config);
-    if (at !== undefined) {
-      const warning = watchSnapshotWarning(at, now);
-      add('watch snapshot', warning ? 'warn' : 'ok', warning ?? `Watch snapshot age: ${Math.max(0, Math.floor((now - at) / 1000))} s`);
+    const steps = watchStepWarning(config);
+    if (at !== undefined || steps) {
+      const warning = at === undefined ? undefined : watchSnapshotWarning(at, now);
+      const age = at === undefined ? '' : warning ?? `Watch snapshot age: ${Math.max(0, Math.floor((now - at) / 1000))} s`;
+      add('watch snapshot', warning || steps ? 'warn' : 'ok', [steps, age].filter(Boolean).join(' '));
     }
     if (tmuxVersion.code === 0) {
       const tmux = new Tmux(runner, config.session);

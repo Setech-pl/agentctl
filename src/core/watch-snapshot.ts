@@ -5,6 +5,16 @@ import { fileVersion } from './file-version.ts';
 
 export const WATCH_STALE_MS = 120_000;
 export const watchSnapshotPath = (config: GlobalConfig): string => path.join(config.stateDir, 'mcp-state-snapshot.json');
+export const watchHeartbeatPath = (config: GlobalConfig): string => path.join(config.stateDir, 'watch-heartbeat.json');
+
+export function watchStepWarning(config: GlobalConfig): string | undefined {
+  try {
+    const heartbeat = JSON.parse(fs.readFileSync(watchHeartbeatPath(config), 'utf8'));
+    const skipped = Object.entries(heartbeat.skipped ?? {}).flatMap(([step, since]) =>
+      typeof since === 'number' && Number.isFinite(since) ? [`${step} od ${new Date(since).toISOString()}`] : []);
+    if (skipped.length) return `Watch: pominięty etap – ${skipped.join(', ')}.`;
+  } catch { /* missing, legacy or in the middle of a heartbeat write */ }
+}
 
 export function watchSnapshotWarning(at: number, now: number): string | undefined {
   if (now - at > WATCH_STALE_MS) return `watch nie odpowiada od ${Math.floor((now - at) / 60_000)} min – agentctl watch --tmux --restart`;
