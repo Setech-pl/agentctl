@@ -6,7 +6,8 @@ import { withFileLock } from './file-lock.ts';
 import { sizeOf } from './fs-measure.ts';
 import { moveToTrash } from './trash.ts';
 import { recordJournal } from './journal.ts';
-import { assertWorktreeVolumes, WorktreeVolumeError } from './worktree-volume.ts';
+import { assertWorktreeVolumes, insidePath, WorktreeVolumeError } from './worktree-volume.ts';
+import { findRecordAnywhere } from './taskstore.ts';
 import type { Context } from './context.ts';
 import type { GlobalConfig } from './config.ts';
 import type { ResolvedRepo } from './spec.ts';
@@ -107,6 +108,65 @@ async function copy(ctx: Context, from: string, to: string): Promise<boolean> {
   return result.code === 0 && dir(to);
 }
 
+async function installClone(ctx: Context, task: string, repo: ResolvedRepo, clone: (target: string) => Promise<boolean>): Promise<boolean> {
+  const target = path.join(repo.worktree, 'node_modules');
+  if (present(target)) return false;
+  const staging = fs.mkdtempSync(path.join(repo.worktree, '.agentctl-nm-'));
+  const staged = path.join(staging, 'node_modules');
+  try {
+    if (!await clone(staged) || present(target)) return false;
+    assertWorktreeVolumes([repo], task);
+    fs.renameSync(staged, target);
+    return true;
+  } finally { await ctx.runner.remove(staging).catch(() => undefined); }
+}
+
+function npmLockfile(worktree: string): [string, string] | undefined {
+  for (const name of lockfiles) {
+    const file = path.join(worktree, name);
+    const stat = fs.lstatSync(file, { throwIfNoEntry: false });
+    if (stat) return stat.isFile() ? [name, hash(fs.readFileSync(file))] : undefined;
+  }
+  return undefined;
+}
+
+/** Clone only file extents. A filesystem without reflinks or a link outside the dependency tree falls back to setup. */
+export async function cloneTaskNodeModules(ctx: Context, task: string, repo: ResolvedRepo, command: string, fromTask: string, prepared?: ResolvedRepo[]): Promise<boolean> {
+  if (ctx.runner.dryRun || !npmCi.test(command)) return false;
+  try {
+    const author = findRecordAnywhere(ctx.config, fromTask);
+    if (author?.host) return false;
+    const origin = fs.realpathSync(repo.path);
+    const source = (prepared ?? author?.repos)?.find(r => fs.existsSync(r.path) && fs.realpathSync(r.path) === origin);
+    if (!source || !dir(source.worktree)) return false;
+    const modules = path.join(fs.realpathSync(source.worktree), 'node_modules');
+    if (!dir(modules) || fs.statSync(modules).dev !== fs.statSync(repo.worktree).dev) return false;
+    const lock = npmLockfile(repo.worktree);
+    const matches = () => {
+      const current = npmLockfile(source.worktree);
+      return current?.[0] === lock?.[0] && current?.[1] === lock?.[1];
+    };
+    if (!lock || !matches()) return false;
+    return await installClone(ctx, task, repo, async staged => {
+      await fs.promises.cp(modules, staged, {
+        recursive: true, verbatimSymlinks: true, mode: fs.constants.COPYFILE_FICLONE_FORCE,
+        async filter(entry) {
+          const stat = await fs.promises.lstat(entry);
+          if (stat.isSymbolicLink()) {
+            const link = await fs.promises.readlink(entry);
+            if (path.isAbsolute(link) || !insidePath(modules, path.resolve(path.dirname(entry), link)) || !insidePath(modules, await fs.promises.realpath(entry))) throw new Error('dependency link leaves node_modules');
+          } else if (!stat.isDirectory() && !stat.isFile()) throw new Error('unsupported dependency file');
+          return true;
+        },
+      });
+      return matches();
+    });
+  } catch (error) {
+    if (error instanceof WorktreeVolumeError) throw error;
+    return false;
+  }
+}
+
 /** Wrap the install command only. Other setup commands still run in their original order. */
 export async function setupNodeModules(ctx: Context, task: string, repo: ResolvedRepo, command: string, install: () => Promise<void>): Promise<'hit' | void> {
   if (repo.nodeModules !== 'clone' || ctx.runner.dryRun || !npmCi.test(command)) return install();
@@ -141,16 +201,7 @@ export async function setupNodeModules(ctx: Context, task: string, repo: Resolve
       assertWorktreeVolumes([repo], task);
       const saved = readEntry(cacheEntry);
       if (saved && !present(target)) {
-        const staging = fs.mkdtempSync(path.join(repo.worktree, '.agentctl-nm-'));
-        const clone = path.join(staging, 'node_modules');
-        let hit = false;
-        try {
-          if (await copy(ctx, path.join(cacheEntry, 'node_modules'), clone) && !present(target)) {
-            assertWorktreeVolumes([repo], task);
-            fs.renameSync(clone, target);
-            hit = true;
-          }
-        } finally { await ctx.runner.remove(staging).catch(() => undefined); }
+        const hit = await installClone(ctx, task, repo, clone => copy(ctx, path.join(cacheEntry, 'node_modules'), clone));
         if (hit) {
           try { atomicWriteFile(path.join(cacheEntry, 'entry.json'), JSON.stringify({ ...saved, usedAt: ctx.runner.now() })); } catch { /* the clone is ready */ }
           await nodeModulesEvent(ctx, task, repo, 'hit', saved.bytes);

@@ -2,7 +2,7 @@ import { prepareRemoteTask, installRemoteHooks } from './host-task.ts';
 import { remoteAttachHint } from './host-runtime.ts';
 import { providerHolds, providerHoldText } from './provider-hold.ts';
 import { freshTaskDiskStartHold } from './disk.ts';
-import { hasNpmLockfile, nodeModulesEvent, setupNodeModules } from './node-modules-store.ts';
+import { cloneTaskNodeModules, hasNpmLockfile, nodeModulesEvent, setupNodeModules } from './node-modules-store.ts';
 import { assertWorktreeVolumes, missingWorktreeVolume, WorktreeVolumeError } from './worktree-volume.ts';
 import { peakHold } from './peak.ts';
 import { protectReadOnly } from './read-only.ts';
@@ -79,14 +79,14 @@ const SETUP_TAIL_LINES = 15;
  * Run the `setup` commands of every repository in its own worktree (the spec's `repos[].setup`, else the repository's .agentctl.yaml; the first
  * repository also takes the spec's/global `setup`), logging to `<state_dir>/<task>/setup.log`. A failure stops `new`.
  */
-async function runSetup(ctx: Context, spec: ResolvedSpec, track?: (step: Omit<SetupProgress, 'task' | 'startedAt' | 'stepAt'>) => Promise<void>): Promise<void> {
+async function runSetup(ctx: Context, spec: ResolvedSpec, prepared: Map<string, ResolvedSpec['repos']>, track?: (step: Omit<SetupProgress, 'task' | 'startedAt' | 'stepAt'>) => Promise<void>): Promise<void> {
   const { runner, config } = ctx;
   const logFile = path.join(taskDir(config, spec.window), 'setup.log');
   const todo = [];
   for (const repo of spec.repos) {
     let commands = repo.setup ?? [];
     if (repo.nodeModules === 'clone' && spec.host && !runner.dryRun) await nodeModulesEvent(ctx, spec.task, repo, 'unsupported', 0, `SSH host ${spec.host}`);
-    if (!repo.setup && repo.nodeModules === 'clone' && !spec.host && hasNpmLockfile(repo.worktree)) commands = ['npm ci'];
+    if (!repo.setup && (repo.nodeModules === 'clone' || spec.setupFromTask) && !spec.host && hasNpmLockfile(repo.worktree)) commands = ['npm ci'];
     if (commands.length) todo.push({ repo, commands });
   }
   if (todo.length === 0) return;
@@ -115,8 +115,14 @@ async function runSetup(ctx: Context, spec: ResolvedSpec, track?: (step: Omit<Se
           );
         }
       };
-      const hit = spec.host ? await install() : await setupNodeModules(ctx, spec.task, repo, command, install);
-      if (hit) await runner.appendFile(logFile, `[${name}] $ ${label}\n[node_modules clone from store]\n\n`);
+      const from = spec.setupFromTask;
+      const fromTask = from && !spec.host && await cloneTaskNodeModules(ctx, spec.task, repo, command, from, prepared.get(from));
+      const hit = fromTask || (spec.host ? await install() : await setupNodeModules(ctx, spec.task, repo, command, install));
+      if (hit) {
+        const source = fromTask ? `task ${from}` : 'store';
+        ctx.info(`${spec.task}: ${name}: node_modules clone from ${source}`);
+        await runner.appendFile(logFile, `[${name}] $ ${label}\n[node_modules clone from ${source}]\n\n`);
+      }
       if (track) await recordJournal(ctx, { kind: 'setup-finished', task: spec.task, ...(spec.owner ? {owner: spec.owner} : {}), setup: { ...setup, exitCode: 0 }, text: `${spec.task}: setup zakończony w ${name} (${hit ? 'node_modules clone' : 'exit 0'}): ${label}; log: ${logFile}` });
     }
   }
@@ -165,6 +171,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
   }
 
   const results: NewResult[] = [];
+  const prepared = new Map<string, ResolvedSpec['repos']>();
   let sessionUp = await tmux.hasSession();
   for (const [index, original] of specs.entries()) {
     const spec = original.host ? await prepareRemoteTask(ctx, original, opts.reuse) : original;
@@ -200,7 +207,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
       }
       if (spec.readOnly) await protectReadOnly(ctx, spec);
       // 2. setup commands, before links because an install may wipe node_modules.
-      await runSetup(ctx, spec, track);
+      await runSetup(ctx, spec, prepared, track);
     } catch (error) {
       const missing = error instanceof WorktreeVolumeError ? error.mount : spec.host ? undefined : missingWorktreeVolume(spec.repos);
       if (missing) throw new WorktreeVolumeError(missing, spec.task);
@@ -224,6 +231,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
     }
     for (const w of warnings) ctx.info(`${spec.task}: warning: ${w}`);
     await applyLinks(runner, ops);
+    if (!spec.host) prepared.set(spec.task, spec.repos);
 
     if (opts.noAgent) {
       ctx.info(`${spec.task}: --no-agent: worktree ${primary} is ready (setup and links done), no window started`);

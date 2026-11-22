@@ -80,6 +80,7 @@ export interface ResolvedSpec {
   linkWarnings?: string[];
   /** Shell commands for the first worktree: after `git worktree add`, before the links. */
   setup: string[];
+  setupFromTask?: string;
   env: Record<string, string>;
   reviewOf?: string;
   /** Every reviewed task (review_of may be a list); reviewOf is the first of them. */
@@ -295,8 +296,20 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   const specLinks = parseLinks(h.links, 'links', p);
   const specEnv = parseEnv(h.env, 'env', p);
   let specSetup: string[] | undefined;
-  if (h.setup !== undefined && h.setup !== null) {
-    if (Array.isArray(h.setup) && h.setup.every((c: unknown) => typeof c === 'string' && c.trim() !== '')) specSetup = h.setup as string[];
+  let setupFromTask: string | undefined;
+  let setupCommands = h.setup;
+  if (isObject(h.setup)) {
+    checkKeys(h.setup, ['from_task', 'link-from', 'commands'], 'spec.setup', p);
+    const source = h.setup.from_task ?? h.setup['link-from'];
+    if (h.setup.from_task !== undefined && h.setup['link-from'] !== undefined) p.add('setup: use either from_task or link-from');
+    if (source !== undefined) {
+      if (typeof source !== 'string' || !TASK_ID.test(source) || source === task) p.add('setup.from_task must name another task by ID');
+      else setupFromTask = source;
+    }
+    setupCommands = h.setup.commands;
+  }
+  if (setupCommands !== undefined && setupCommands !== null) {
+    if (Array.isArray(setupCommands) && setupCommands.every((c: unknown) => typeof c === 'string' && c.trim() !== '')) specSetup = setupCommands as string[];
     else p.add('setup must be a list of non-empty shell commands');
   }
   const reviewOfList: string[] = [];
@@ -475,7 +488,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     if (repo.branch) resolved.branch = repo.branch;
     // Own setup of this repository: its spec entry, then (first repository) the spec's top-level setup, then the repository's own project config.
     const own = repo.setup ?? (repo === firstRepo ? specSetup : undefined) ?? projectOfRepo?.setup ?? (repo === firstRepo ? config.setup : undefined);
-    if (own && (own.length > 0 || remoteHost || resolved.nodeModules)) resolved.setup = own.map(c => c);
+    if (own && (own.length > 0 || remoteHost || resolved.nodeModules || setupFromTask)) resolved.setup = own.map(c => c);
     repos.push(resolved);
   }
   for (let i = 0; i < repos.length; i++) {
@@ -551,6 +564,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     ...(host ? {inheritProjectLinks: !(Array.isArray(h.links) && h.links.length === 0)} : {}),
     ...(linkWarnings.length ? { linkWarnings } : {}),
     setup: repos[0]?.setup ?? [],
+    ...(setupFromTask && h.read_only !== true ? { setupFromTask } : {}),
     env,
     report: pathOf(reportTemplate),
     prompt: raw.prompt,

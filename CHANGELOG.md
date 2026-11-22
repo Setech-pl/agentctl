@@ -4,6 +4,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- `setup.from_task` (`link-from`) can clone matching dependencies from a task worktree and skip `npm ci`. / `setup.from_task` (`link-from`) klonuje zgodne zależności z worktree zadania i pomija `npm ci`.
 - FLOW-CLOSE: Close records a task whose tmux window disappeared and accepts the exact ID of an already closed task. / Polecenie close zamyka zadanie po zniknięciu okna tmux i rozpoznaje dokładny identyfikator zamkniętego zadania.
 
 - FIELD0253-BACKGROUND: Codex accepts queued follow-ups at a confirmed empty prompt while background terminals run. / Codex przyjmuje wiadomości z kolejki, gdy ma potwierdzone puste pole tekstowe, także przy działających terminalach w tle.

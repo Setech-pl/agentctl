@@ -73,13 +73,48 @@ function world(name: string, yaml: (root: string) => string = () => '') {
   }
   const runner = new FixtureRunner({ dryRun: false, respond: tmux.respond.bind(tmux), startTime: Date.now() });
   const ctx = new Context(runner, config, () => {});
-  const spec = (task: string, explicit = true) => {
-    const raw = splitSpecs(`---\ntask: ${task}\nagent: claude\nrepos: [{path: ${repo}${explicit ? `, worktree: ${root}/${task.toLowerCase()}` : ''}}]\n---\nFixture prompt.`)[0]!;
+  const spec = (task: string, explicit = true, extra = '') => {
+    const raw = splitSpecs(`---\ntask: ${task}\nagent: claude\n${extra}repos: [{path: ${repo}${explicit ? `, worktree: ${root}/${task.toLowerCase()}` : ''}}]\n---\nFixture prompt.`)[0]!;
     return { raw, spec: resolveSpec(raw, { config }) };
   };
   const notifier = { clickable: false, notify: async (_title: string, message: string) => { notifications.push(message); } };
   return { root, repo, config, ctx, runner, spec, notifier, installs, copies, moves, notifications, failCopy: () => { failClone = true; }, interceptGit: (f: typeof interceptGit) => { interceptGit = f; } };
 }
+
+it('FLOW-SETUP: task clones skip only compatible npm ci installs and keep source writes isolated', async () => {
+  const w = world('from-task');
+  const a = w.spec('AUTHOR', true, 'setup: [npm ci]\n').spec;
+  await newTasks(w.ctx, [a], { noAgent: true });
+  seedTask(w.config, a.task, { repos: a.repos, closed: true });
+  const b = w.spec('REVIEW', true, 'setup: {link-from: AUTHOR, commands: [npm ci --no-audit, echo post-setup]}\n').spec;
+  assert.equal(b.setupFromTask, 'AUTHOR');
+  const dependency = (spec: typeof a) => path.join(spec.repos[0]!.worktree, 'node_modules/dependency');
+  const probe = path.join(w.root, 'reflink-probe');
+  let reflink = true;
+  try { fs.copyFileSync(dependency(a), probe, fs.constants.COPYFILE_FICLONE_FORCE); }
+  catch { reflink = false; }
+  await newTasks(w.ctx, [b], { noAgent: true });
+  assert.equal(w.installs.length, reflink ? 1 : 2);
+  const log = fs.readFileSync(path.join(w.config.stateDir, b.window, 'setup.log'), 'utf8');
+  assert.match(log, /echo post-setup/);
+  assert.equal(log.includes('node_modules clone from task AUTHOR'), reflink);
+  assert.equal(fs.readlinkSync(path.join(b.repos[0]!.worktree, 'node_modules/.bin/tool')), '../dependency');
+  fs.writeFileSync(dependency(b), 'review edit');
+  assert.equal(fs.readFileSync(dependency(a), 'utf8'), 'original');
+
+  const prior = w.installs.length;
+  fs.symlinkSync(path.join(w.root, 'reflink-probe'), path.join(a.repos[0]!.worktree, 'node_modules/escape'));
+  const c = w.spec('UNSAFE', true, 'setup: {from_task: AUTHOR}\n').spec;
+  await newTasks(w.ctx, [c], { noAgent: true });
+  assert.equal(w.installs.length, prior + 1);
+  assert.ok(!fs.existsSync(path.join(c.repos[0]!.worktree, 'node_modules/escape')));
+  fs.unlinkSync(path.join(a.repos[0]!.worktree, 'node_modules/escape'));
+  fs.appendFileSync(path.join(w.repo, 'package-lock.json'), '\n');
+  git(w.repo, 'commit', '-am', 'new lockfile');
+  const d = w.spec('STALE-LOCK', true, 'setup: {from_task: AUTHOR}\n').spec;
+  await newTasks(w.ctx, [d], { noAgent: true });
+  assert.equal(w.installs.length, prior + 2);
+});
 
 it('DISK0248-NM: same lockfile installs once, creates independent copies and exposes store bytes and counters', async () => {
   const w = world('store', () => 'setup: [npm ci]\n');
